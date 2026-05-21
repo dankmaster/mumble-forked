@@ -1097,6 +1097,8 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 	}
 	appendUserStateTrace(QStringLiteral("post-server-mute"));
 
+	const bool textureChanged = msg.has_texture_hash() || msg.has_texture();
+
 	if (msg.has_texture_hash()) {
 		pDst->qbaTextureHash = blob(msg.texture_hash());
 		pDst->qbaTexture     = QByteArray();
@@ -1152,6 +1154,9 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 			if (!rebuildConversationList) {
 				queueModernShellSnapshotSync();
 			}
+		}
+		if (textureChanged) {
+			queueModernShellSnapshotSync();
 		}
 	}
 	appendUserStateTrace(QStringLiteral("exit"));
