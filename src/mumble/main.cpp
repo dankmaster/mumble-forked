@@ -57,8 +57,10 @@
 
 #include <QLocale>
 #include <QScreen>
+#include <QtCore/QByteArray>
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
+#include <QtCore/QList>
 #include <QtCore/QProcess>
 #include <QtGui/QDesktopServices>
 #include <QtWidgets/QMessageBox>
@@ -117,6 +119,76 @@ void configureBundledQtWebEnginePaths(const QString &applicationFilePath) {
 		qputenv("QTWEBENGINEPROCESS_PATH", QDir::toNativeSeparators(processPath).toUtf8());
 	}
 }
+
+#	if defined(MUMBLE_HAS_MODERN_LAYOUT)
+bool environmentBoolean(const char *name, const bool defaultValue) {
+	if (!qEnvironmentVariableIsSet(name)) {
+		return defaultValue;
+	}
+
+	const QByteArray rawValue = qgetenv(name).trimmed().toLower();
+	if (rawValue.isEmpty()) {
+		return defaultValue;
+	}
+
+	if (rawValue == QByteArrayLiteral("1") || rawValue == QByteArrayLiteral("true")
+		|| rawValue == QByteArrayLiteral("yes") || rawValue == QByteArrayLiteral("on")) {
+		return true;
+	}
+
+	if (rawValue == QByteArrayLiteral("0") || rawValue == QByteArrayLiteral("false")
+		|| rawValue == QByteArrayLiteral("no") || rawValue == QByteArrayLiteral("off")) {
+		return false;
+	}
+
+	bool parsed = false;
+	const int intValue = rawValue.toInt(&parsed);
+	return parsed ? intValue != 0 : defaultValue;
+}
+
+bool chromiumFlagsContain(const QByteArray &flags, const QByteArray &flag) {
+	QByteArray flagWithValuePrefix = flag;
+	flagWithValuePrefix.append('=');
+	const QList< QByteArray > tokens = flags.simplified().split(' ');
+	for (const QByteArray &token : tokens) {
+		if (token == flag || token.startsWith(flagWithValuePrefix)) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void appendChromiumFlag(QByteArray &flags, const QByteArray &flag) {
+	if (chromiumFlagsContain(flags, flag)) {
+		return;
+	}
+
+	if (!flags.isEmpty()) {
+		flags.append(' ');
+	}
+	flags.append(flag);
+}
+
+void configureQtWebEngineGraphicsWorkarounds() {
+	QByteArray chromiumFlags = qgetenv("QTWEBENGINE_CHROMIUM_FLAGS").trimmed();
+
+	// Keep hardware acceleration enabled by default, but avoid Chromium's
+	// zero-copy path that can leave stale tiles in the WebEngine-backed shell.
+	if (environmentBoolean("MUMBLE_WEBENGINE_DISABLE_ZERO_COPY", true)) {
+		appendChromiumFlag(chromiumFlags, QByteArrayLiteral("--disable-zero-copy"));
+	}
+
+	if (environmentBoolean("MUMBLE_WEBENGINE_DISABLE_GPU", false)) {
+		appendChromiumFlag(chromiumFlags, QByteArrayLiteral("--disable-gpu"));
+		appendChromiumFlag(chromiumFlags, QByteArrayLiteral("--disable-gpu-compositing"));
+	}
+
+	if (!chromiumFlags.isEmpty()) {
+		qputenv("QTWEBENGINE_CHROMIUM_FLAGS", chromiumFlags);
+	}
+}
+#	endif
 #endif
 } // namespace
 
@@ -412,6 +484,9 @@ int main(int argc, char **argv) {
 #if defined(Q_OS_WIN)
 	SetDllDirectory(L"");
 	configureBundledQtWebEnginePaths(QString::fromLocal8Bit(argv[0]));
+#	if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	configureQtWebEngineGraphicsWorkarounds();
+#	endif
 #else
 #	ifndef Q_OS_MAC
 	EnvUtils::setenv(QLatin1String("AVAHI_COMPAT_NOWARN"), QLatin1String("1"));
