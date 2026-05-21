@@ -935,12 +935,13 @@ void ServerDatabaseTest::groupTable_general() {
 	QCOMPARE(table.countGroups(existingServerID, otherChannel.channelID), static_cast< std::size_t >(0));
 	QCOMPARE(table.countGroups(existingServerID, rootChannel.channelID), static_cast< std::size_t >(0));
 
-	QCOMPARE(table.findGroupID(existingServerID, group.name), std::optional< unsigned int >());
+	QCOMPARE(table.findGroupID(existingServerID, group.channelID, group.name), std::optional< unsigned int >());
 
 	table.addGroup(group);
 
-	QCOMPARE(table.findGroupID(existingServerID, group.name), std::optional< unsigned int >(group.groupID));
-	QCOMPARE(table.findGroupID(nonExistingServerID, group.name), std::optional< unsigned int >());
+	QCOMPARE(table.findGroupID(existingServerID, group.channelID, group.name),
+			 std::optional< unsigned int >(group.groupID));
+	QCOMPARE(table.findGroupID(nonExistingServerID, group.channelID, group.name), std::optional< unsigned int >());
 
 	QVERIFY(table.groupExists(group));
 	QCOMPARE(table.getFreeGroupID(existingServerID), static_cast< unsigned int >(1));
