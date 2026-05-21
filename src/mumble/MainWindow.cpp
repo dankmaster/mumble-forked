@@ -5562,6 +5562,8 @@ void MainWindow::queueModernShellSnapshotSyncInternal(bool immediate) {
 
 	appendModernShellConnectTrace(QStringLiteral("queueModernShellSnapshotSync queued delay=%1").arg(delayMs));
 	m_modernShellSyncTimer->start(delayMs);
+#else
+	Q_UNUSED(immediate);
 #endif
 }
 
@@ -8531,6 +8533,32 @@ bool MainWindow::handleModernShellAppAction(const QString &actionId) {
 		publishModernShellRoomStatePatch();
 	}
 	return handled;
+}
+#endif
+
+#if !defined(MUMBLE_HAS_MODERN_LAYOUT)
+QVariantList MainWindow::buildModernShellMessageStates(const PersistentChatTarget &target, std::size_t beginIndex) {
+	Q_UNUSED(target);
+	Q_UNUSED(beginIndex);
+	return QVariantList();
+}
+
+void MainWindow::publishModernShellMessagesPatch(const QString &kind, const QVariantList &messages,
+												 bool scrollToBottom) {
+	Q_UNUSED(kind);
+	Q_UNUSED(messages);
+	Q_UNUSED(scrollToBottom);
+}
+
+void MainWindow::publishModernShellMessageUpdatePatch(const MumbleProto::ChatMessage &message) {
+	Q_UNUSED(message);
+}
+
+void MainWindow::publishModernShellActiveScopePatch(const QString &kind) {
+	Q_UNUSED(kind);
+}
+
+void MainWindow::publishModernShellRoomStatePatch() {
 }
 #endif
 

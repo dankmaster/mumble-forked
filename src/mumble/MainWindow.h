@@ -432,6 +432,12 @@ public:
 	bool triggerModernShellSerializedAction(const ModernShellMenuSerializer::ActionRegistry &registry,
 											const QString &actionId, ClientUser *contextUser = nullptr,
 											Channel *contextChannel = nullptr);
+#else
+	QVariantList buildModernShellMessageStates(const PersistentChatTarget &target, std::size_t beginIndex = 0);
+	void publishModernShellMessagesPatch(const QString &kind, const QVariantList &messages, bool scrollToBottom);
+	void publishModernShellMessageUpdatePatch(const MumbleProto::ChatMessage &message);
+	void publishModernShellActiveScopePatch(const QString &kind);
+	void publishModernShellRoomStatePatch();
 #endif
 	void triggerContextAction(const QString &actionData, ClientUser *user, Channel *channel);
 	bool sendChatbarTextToCurrentTarget(QString msg, bool plainText, bool clearNativeComposer);
@@ -604,6 +610,8 @@ protected:
 	QHash< QString, QVariantMap > m_modernShellCoalescedPresencePatches;
 	QStringList m_modernShellCoalescedPresenceOrder;
 	bool m_modernShellSnapshotPendingAfterNativeMoveResize = false;
+#else
+	quint64 m_modernShellMessagePatchGeneration = 0;
 #endif
 	bool m_shellLayoutInitialized              = false;
 	Settings::WindowLayout m_activeShellLayout = Settings::LayoutModern;
