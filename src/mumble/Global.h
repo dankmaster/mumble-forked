@@ -102,6 +102,8 @@ public:
 	bool prioritySpeakerActiveOverride;
 	bool bAllowHTML;
 	bool bPersistentGlobalChatEnabled;
+	QList< int > qlSupportedChatFeatures;
+	unsigned int uiPersistentChatProtocolVersion;
 	bool bScreenShareEnabled;
 	bool bScreenShareRecordingEnabled;
 	bool bScreenShareHelperRequired;

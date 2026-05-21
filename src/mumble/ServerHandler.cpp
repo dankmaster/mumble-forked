@@ -15,6 +15,7 @@
 #include "AudioInput.h"
 #include "AudioOutput.h"
 #include "Cert.h"
+#include "ChatFeature.h"
 #include "Connection.h"
 #include "Database.h"
 #include "HostAddress.h"
@@ -71,6 +72,10 @@ int ServerHandler::nextConnectionID = -1;
 QMutex ServerHandler::nextConnectionIDMutex;
 
 namespace {
+bool serverAllowsAdvertisedChatFeature(const MumbleProto::ChatFeature feature) {
+	return Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures, feature);
+}
+
 bool connectTraceEnabled() {
 	static const bool enabled = qEnvironmentVariableIntValue("MUMBLE_CONNECT_TRACE") != 0;
 	return enabled;
@@ -903,6 +908,7 @@ void ServerHandler::serverConnectionConnected() {
 	mpv.set_release(u8(advertisedRelease));
 	MumbleProto::setVersion(mpv, Version::get());
 	mpv.set_supports_persistent_chat(true);
+	Mumble::ChatFeatures::addSupportedFeatures(mpv);
 	ScreenShareHelperClient::applyAdvertisedCapabilities(mpv);
 
 	const QString advertisedOS        = Global::get().s.qsAdvertisedOSOverride.trimmed();
@@ -1167,6 +1173,14 @@ void ServerHandler::sendChannelTextMessage(unsigned int channel, const QString &
 void ServerHandler::sendChatMessage(MumbleProto::ChatScope scope, unsigned int scopeID, const QString &message_,
 									MumbleProto::ChatBodyFormat bodyFormat,
 									std::optional< unsigned int > replyToMessageID) {
+	if (!serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeaturePersistentHistory)) {
+		return;
+	}
+	if (scope == MumbleProto::TextChannel
+		&& !serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureTextChannels)) {
+		return;
+	}
+
 	MumbleProto::ChatSend message;
 	message.set_scope(scope);
 	message.set_scope_id(scopeID);
@@ -1182,6 +1196,9 @@ void ServerHandler::sendChatMessage(MumbleProto::ChatScope scope, unsigned int s
 void ServerHandler::sendChatReactionToggle(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int threadID,
 										   unsigned int messageID, const QString &emoji, bool active) {
 	if (messageID == 0 || emoji.trimmed().isEmpty()) {
+		return;
+	}
+	if (!serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureReactions)) {
 		return;
 	}
 
@@ -1202,6 +1219,9 @@ void ServerHandler::sendChatMessageDelete(MumbleProto::ChatScope scope, unsigned
 	if (messageID == 0) {
 		return;
 	}
+	if (!serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureMessageDelete)) {
+		return;
+	}
 
 	MumbleProto::ChatMessageDelete messageDelete;
 	messageDelete.set_scope(scope);
@@ -1213,8 +1233,36 @@ void ServerHandler::sendChatMessageDelete(MumbleProto::ChatScope scope, unsigned
 	sendMessage(messageDelete);
 }
 
+void ServerHandler::sendChatHistoryGrant(unsigned int userID, MumbleProto::ChatScope scope, unsigned int scopeID,
+										 quint64 visibleAfter, bool revoke) {
+	if (userID == 0) {
+		return;
+	}
+	if (!serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureHistoryGrants)) {
+		return;
+	}
+
+	MumbleProto::ChatHistoryGrantSync sync;
+	sync.set_action(revoke ? MumbleProto::ChatHistoryGrantSync_Action_Revoke
+						   : MumbleProto::ChatHistoryGrantSync_Action_Grant);
+
+	MumbleProto::ChatHistoryGrantInfo *grant = sync.add_grants();
+	grant->set_user_id(userID);
+	grant->set_scope(scope);
+	grant->set_scope_id(scopeID);
+	if (!revoke) {
+		grant->set_visible_after(visibleAfter);
+	}
+
+	sendMessage(sync);
+}
+
 void ServerHandler::upsertTextChannel(unsigned int textChannelID, const QString &name, const QString &description,
 									  unsigned int aclChannelID, unsigned int position, bool create) {
+	if (!serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureTextChannels)) {
+		return;
+	}
+
 	MumbleProto::TextChannelSync sync;
 	sync.set_action(create ? MumbleProto::TextChannelSync_Action_Create : MumbleProto::TextChannelSync_Action_Update);
 	sync.set_target_text_channel_id(textChannelID);
@@ -1230,6 +1278,10 @@ void ServerHandler::upsertTextChannel(unsigned int textChannelID, const QString 
 }
 
 void ServerHandler::removeTextChannel(unsigned int textChannelID) {
+	if (!serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureTextChannels)) {
+		return;
+	}
+
 	MumbleProto::TextChannelSync sync;
 	sync.set_action(MumbleProto::TextChannelSync_Action_Delete);
 	sync.set_target_text_channel_id(textChannelID);
@@ -1237,6 +1289,10 @@ void ServerHandler::removeTextChannel(unsigned int textChannelID) {
 }
 
 void ServerHandler::setDefaultTextChannel(unsigned int textChannelID) {
+	if (!serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureTextChannels)) {
+		return;
+	}
+
 	MumbleProto::TextChannelSync sync;
 	sync.set_action(MumbleProto::TextChannelSync_Action_SetDefault);
 	sync.set_target_text_channel_id(textChannelID);
@@ -1245,6 +1301,18 @@ void ServerHandler::setDefaultTextChannel(unsigned int textChannelID) {
 
 void ServerHandler::requestChatHistory(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int startOffset,
 									   unsigned int limit, std::optional< unsigned int > beforeMessageID) {
+	if (!serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeaturePersistentHistory)) {
+		return;
+	}
+	if (scope == MumbleProto::TextChannel
+		&& !serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureTextChannels)) {
+		return;
+	}
+	if ((startOffset > 0 || beforeMessageID)
+		&& !serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureHistoryPagination)) {
+		return;
+	}
+
 	MumbleProto::ChatHistoryRequest request;
 	request.set_scope(scope);
 	request.set_scope_id(scopeID);
@@ -1258,6 +1326,14 @@ void ServerHandler::requestChatHistory(MumbleProto::ChatScope scope, unsigned in
 
 void ServerHandler::updateChatReadState(MumbleProto::ChatScope scope, unsigned int scopeID,
 										unsigned int lastReadMessageID) {
+	if (!serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureReadState)) {
+		return;
+	}
+	if (scope == MumbleProto::TextChannel
+		&& !serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureTextChannels)) {
+		return;
+	}
+
 	MumbleProto::ChatReadStateUpdate update;
 	update.set_scope(scope);
 	update.set_scope_id(scopeID);

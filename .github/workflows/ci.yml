@@ -262,6 +262,7 @@ jobs:
             -BuildRoot .\build `
             -RequireClientInstaller `
             -RequireServerInstaller `
+            -RequireEnglishOnlyInstallers `
             -ArtifactListPath .\build\windows-installer-artifacts.txt
 
       - name: Publish Windows Client/Server Artifacts

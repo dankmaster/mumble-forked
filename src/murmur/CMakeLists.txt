@@ -290,7 +290,7 @@ install(TARGETS mumble-server RUNTIME DESTINATION "${MUMBLE_INSTALL_EXECUTABLEDI
 
 if(packaging AND NOT modern-layout-webengine)
 	if(WIN32)
-		if(translations)
+		if(translations AND windows-installer-all-languages)
 			list(APPEND installer_vars "--all-languages")
 		endif()
 

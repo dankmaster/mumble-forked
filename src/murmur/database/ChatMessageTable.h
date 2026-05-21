@@ -61,9 +61,11 @@ namespace server {
 			std::vector< DBChatMessage >
 				getMessages(unsigned int serverID, unsigned int threadID,
 							unsigned int maxEntries  = static_cast< unsigned int >(std::numeric_limits< int >::max()),
-							unsigned int startOffset = 0);
+							unsigned int startOffset = 0,
+							std::optional< std::chrono::system_clock::time_point > visibleAfter = std::nullopt);
 			std::vector< DBChatMessage > getMessagesBefore(unsigned int serverID, unsigned int threadID,
-														 unsigned int beforeMessageID, unsigned int maxEntries);
+														 unsigned int beforeMessageID, unsigned int maxEntries,
+														 std::optional< std::chrono::system_clock::time_point > visibleAfter = std::nullopt);
 
 			unsigned int getFreeMessageID(unsigned int serverID);
 

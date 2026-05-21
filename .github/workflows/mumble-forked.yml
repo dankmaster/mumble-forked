@@ -115,6 +115,7 @@ jobs:
             -RequireScreenHelper `
             -RequireSpeechCleanup `
             -RequireClientInstaller `
+            -RequireEnglishOnlyInstallers `
             -ArtifactListPath .\build-shared-webengine\mumble-forked-artifacts.txt
 
       - name: Prepare release assets

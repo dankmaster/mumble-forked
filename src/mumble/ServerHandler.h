@@ -196,6 +196,8 @@ public:
 								unsigned int messageID, const QString &emoji, bool active);
 	void sendChatMessageDelete(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int threadID,
 							   unsigned int messageID);
+	void sendChatHistoryGrant(unsigned int userID, MumbleProto::ChatScope scope, unsigned int scopeID,
+							  quint64 visibleAfter, bool revoke);
 	void upsertTextChannel(unsigned int textChannelID, const QString &name, const QString &description,
 						   unsigned int aclChannelID, unsigned int position, bool create);
 	void removeTextChannel(unsigned int textChannelID);

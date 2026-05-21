@@ -29,6 +29,7 @@
 #endif
 #include "../SignalCurry.h"
 #include "ChannelListenerManager.h"
+#include "ChatFeature.h"
 #include "ChatPerfTrace.h"
 #include "FailedConnectionDialog.h"
 #include "ListenerVolumeSlider.h"
@@ -105,6 +106,7 @@
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
 #include <QtCore/QUrlQuery>
+#include <QtCore/QVector>
 #include <QtGui/QClipboard>
 #include <QtGui/QDesktopServices>
 #include <QtGui/QImageReader>
@@ -3537,6 +3539,11 @@ MainWindow::MainWindow(QWidget *p)
 	qaUserRemoteSpeechCleanup->setWhatsThis(
 		tr("Enable or disable receive-side speech cleanup for this user on this client only."));
 	connect(qaUserRemoteSpeechCleanup, &QAction::triggered, this, &MainWindow::triggerUserRemoteSpeechCleanup);
+	qaUserGrantChatHistory = new QAction(tr("Grant Chat History..."), this);
+	qaUserGrantChatHistory->setToolTip(tr("Grant or revoke this registered user's persistent chat history window"));
+	qaUserGrantChatHistory->setWhatsThis(
+		tr("Administrators can grant a registered user access to persistent chat history from a chosen point in time."));
+	connect(qaUserGrantChatHistory, &QAction::triggered, this, &MainWindow::on_qaUserGrantChatHistory_triggered);
 	qaChannelScreenShareStart        = new QAction(tr("Start Screen Share"), this);
 	qaChannelScreenShareStop         = new QAction(tr("Stop Screen Share"), this);
 	qaChannelScreenShareWatch        = new QAction(tr("Watch Screen Share"), this);
@@ -16357,6 +16364,11 @@ void MainWindow::qmUser_aboutToShow() {
 	if (Global::get().sh && Global::get().sh->m_version >= Version::fromComponents(1, 2, 2))
 		qmUser->addAction(qaUserInformation);
 
+	if (p && p->iId >= 0 && (Global::get().pPermissions & ChanACL::Write)) {
+		qmUser->addSeparator();
+		qmUser->addAction(qaUserGrantChatHistory);
+	}
+
 	const bool canOfferSelfRegister = isSelf && p && (p->iId < 0);
 	const bool canOfferUserRegister = !isSelf && p && (p->iId < 0) && !p->qsHash.isEmpty()
 									  && (Global::get().pPermissions & (ChanACL::Register | ChanACL::Write));
@@ -16410,6 +16422,7 @@ void MainWindow::qmUser_aboutToShow() {
 		qaUserLocalNickname->setEnabled(false);
 		qaUserLocalMute->setEnabled(false);
 		qaUserRemoteSpeechCleanup->setEnabled(false);
+		qaUserGrantChatHistory->setEnabled(false);
 		qaUserRemoteSpeechCleanup->setChecked(false);
 		qaUserLocalIgnore->setEnabled(false);
 		qaUserLocalIgnoreTTS->setEnabled(false);
@@ -16423,6 +16436,10 @@ void MainWindow::qmUser_aboutToShow() {
 		qaUserLocalNickname->setEnabled(!isSelf);
 		qaUserLocalMute->setEnabled(!isSelf);
 		qaUserRemoteSpeechCleanup->setEnabled(!isSelf);
+		qaUserGrantChatHistory->setEnabled(
+			p->iId >= 0 && (Global::get().pPermissions & ChanACL::Write)
+			&& Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures,
+															   MumbleProto::ChatFeatureHistoryGrants));
 		qaUserRemoteSpeechCleanup->setChecked(!isSelf && p->isRemoteSpeechCleanupEnabled());
 		qaUserLocalIgnore->setEnabled(!isSelf);
 		qaUserLocalIgnoreTTS->setEnabled(!isSelf);
@@ -16594,6 +16611,126 @@ void MainWindow::triggerUserRemoteSpeechCleanup() {
 	} else if (override.has_value()) {
 		logChangeNotPermanent(QObject::tr("Remote Speech Cleanup"), p);
 	}
+}
+
+void MainWindow::on_qaUserGrantChatHistory_triggered() {
+	ClientUser *p = getContextMenuUser();
+	if (!p || p->iId < 0 || !Global::get().sh || !(Global::get().pPermissions & ChanACL::Write)) {
+		return;
+	}
+	if (!Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures,
+														 MumbleProto::ChatFeatureHistoryGrants)) {
+		return;
+	}
+
+	struct ScopeOption {
+		QString label;
+		MumbleProto::ChatScope scope = MumbleProto::Channel;
+		unsigned int scopeID         = 0;
+	};
+
+	QVector< ScopeOption > scopes;
+	auto addScope = [&scopes](const ScopeOption &option) {
+		const auto duplicate = std::find_if(scopes.cbegin(), scopes.cend(), [&option](const ScopeOption &existing) {
+			return existing.scope == option.scope && existing.scopeID == option.scopeID;
+		});
+		if (duplicate == scopes.cend()) {
+			scopes.push_back(option);
+		}
+	};
+
+	if (p->cChannel) {
+		addScope({ tr("Current voice room: %1").arg(p->cChannel->qsName), MumbleProto::Channel, p->cChannel->iId });
+	}
+
+	const PersistentChatTarget currentTarget = currentPersistentChatTarget();
+	if (currentTarget.valid && !currentTarget.directMessage && !currentTarget.serverLog
+		&& currentTarget.scope != MumbleProto::Aggregate) {
+		addScope({ tr("Current chat view: %1").arg(currentTarget.label), currentTarget.scope, currentTarget.scopeID });
+	}
+
+	addScope({ tr("Server-wide chat"), MumbleProto::ServerGlobal, 0 });
+
+	if (scopes.isEmpty()) {
+		return;
+	}
+
+	QDialog dialog(this);
+	dialog.setWindowTitle(tr("Grant chat history"));
+	QVBoxLayout *layout = new QVBoxLayout(&dialog);
+	QFormLayout *form   = new QFormLayout();
+	layout->addLayout(form);
+
+	QComboBox *scopeCombo = new QComboBox(&dialog);
+	for (const ScopeOption &scope : scopes) {
+		scopeCombo->addItem(scope.label);
+	}
+	form->addRow(tr("Scope"), scopeCombo);
+
+	QComboBox *windowCombo = new QComboBox(&dialog);
+	windowCombo->addItem(tr("From now"));
+	windowCombo->addItem(tr("5 days back"));
+	windowCombo->addItem(tr("10 days back"));
+	windowCombo->addItem(tr("15 days back"));
+	windowCombo->addItem(tr("30 days back"));
+	windowCombo->addItem(tr("Custom days back"));
+	windowCombo->addItem(tr("All history"));
+	windowCombo->addItem(tr("Revoke access"));
+	form->addRow(tr("Window"), windowCombo);
+
+	QSpinBox *customDays = new QSpinBox(&dialog);
+	customDays->setRange(1, 3650);
+	customDays->setValue(30);
+	customDays->setEnabled(false);
+	form->addRow(tr("Custom days"), customDays);
+	connect(windowCombo, qOverload< int >(&QComboBox::currentIndexChanged), &dialog,
+			[customDays](int index) { customDays->setEnabled(index == 5); });
+
+	QDialogButtonBox *buttons =
+		new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, Qt::Horizontal, &dialog);
+	layout->addWidget(buttons);
+	connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+	connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+
+	const ScopeOption scope = scopes.value(scopeCombo->currentIndex());
+	const int windowIndex  = windowCombo->currentIndex();
+	const bool revoke      = windowIndex == 7;
+
+	quint64 visibleAfter = 0;
+	if (!revoke && windowIndex != 6) {
+		int days = 0;
+		switch (windowIndex) {
+			case 1:
+				days = 5;
+				break;
+			case 2:
+				days = 10;
+				break;
+			case 3:
+				days = 15;
+				break;
+			case 4:
+				days = 30;
+				break;
+			case 5:
+				days = customDays->value();
+				break;
+			case 0:
+			default:
+				days = 0;
+				break;
+		}
+
+		const qint64 nowSeconds = QDateTime::currentSecsSinceEpoch();
+		visibleAfter = static_cast< quint64 >(std::max< qint64 >(0, nowSeconds - static_cast< qint64 >(days) * 86400));
+	}
+
+	Global::get().sh->sendChatHistoryGrant(static_cast< unsigned int >(p->iId), scope.scope, scope.scopeID,
+										   visibleAfter, revoke);
 }
 
 void MainWindow::on_qaUserLocalIgnore_triggered() {
@@ -18394,15 +18531,17 @@ void MainWindow::serverConnected() {
 		qtvUsers->setRowHidden(0, QModelIndex(), false);
 	}
 
-	Global::get().bAllowHTML                   = true;
-	Global::get().bPersistentGlobalChatEnabled = false;
-	Global::get().uiMessageLength              = 5000;
-	Global::get().uiImageLength                = 131072;
-	Global::get().uiMaxUsers                   = 0;
-	m_modernLayoutCompatibleServer             = false;
-	m_modernShellRuntimeDisabled               = false;
-	m_hasPersistentChatSupport                 = false;
-	m_defaultPersistentTextChannelID           = 0;
+	Global::get().bAllowHTML                       = true;
+	Global::get().bPersistentGlobalChatEnabled     = false;
+	Global::get().qlSupportedChatFeatures.clear();
+	Global::get().uiPersistentChatProtocolVersion = 0;
+	Global::get().uiMessageLength                  = 5000;
+	Global::get().uiImageLength                    = 131072;
+	Global::get().uiMaxUsers                       = 0;
+	m_modernLayoutCompatibleServer                 = false;
+	m_modernShellRuntimeDisabled                   = false;
+	m_hasPersistentChatSupport                     = false;
+	m_defaultPersistentTextChannelID               = 0;
 	m_persistentTextChannels.clear();
 	m_userIdleSeconds.clear();
 	m_pendingUserInformationSessions.clear();
@@ -18458,13 +18597,15 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	m_previousChannels = {};
 	m_movedBackFromChannel.reset();
 
-	Global::get().uiSession                    = 0;
-	Global::get().pPermissions                 = ChanACL::None;
-	Global::get().bAttenuateOthers             = false;
-	Global::get().bPersistentGlobalChatEnabled = false;
-	m_modernLayoutCompatibleServer             = false;
-	m_modernShellRuntimeDisabled               = false;
-	m_hasPersistentChatSupport                 = false;
+	Global::get().uiSession                        = 0;
+	Global::get().pPermissions                     = ChanACL::None;
+	Global::get().bAttenuateOthers                 = false;
+	Global::get().bPersistentGlobalChatEnabled     = false;
+	Global::get().qlSupportedChatFeatures.clear();
+	Global::get().uiPersistentChatProtocolVersion = 0;
+	m_modernLayoutCompatibleServer                 = false;
+	m_modernShellRuntimeDisabled                   = false;
+	m_hasPersistentChatSupport                     = false;
 	qaServerDisconnect->setEnabled(false);
 	qaServerAddToFavorites->setEnabled(false);
 	qaServerInformation->setEnabled(false);
@@ -18586,6 +18727,8 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	// We can't record without a server anyway, so we disable the functionality here
 	enableRecording(false);
 	Global::get().bPersistentGlobalChatEnabled = false;
+	Global::get().qlSupportedChatFeatures.clear();
+	Global::get().uiPersistentChatProtocolVersion = 0;
 
 	if (!Global::get().sh->qlErrors.isEmpty()) {
 		for (const QSslError &e : Global::get().sh->qlErrors) {

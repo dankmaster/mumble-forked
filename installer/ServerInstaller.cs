@@ -124,9 +124,12 @@ class BuildInstaller
 			if (!skipMSIRebuild) {
 				var srvInstaller = new ServerInstaller(version, arch);
 				srvInstaller.Version = new Version(version);
-				msiPath = isAllLangs
-							? srvInstaller.BuildMultilanguageMsi()
-							: srvInstaller.BuildMsi();
+				if (isAllLangs) {
+					srvInstaller.UseAllInstallerLanguages();
+					msiPath = srvInstaller.BuildMultilanguageMsi();
+				} else {
+					msiPath = srvInstaller.BuildMsi();
+				}
 			} else {
 				Console.WriteLine("INFO - Skipping MSI rebuild.");
 				msiPath = ServerInstaller.GetMSIPath(version, arch);

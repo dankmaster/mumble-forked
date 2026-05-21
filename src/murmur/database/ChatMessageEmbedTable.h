@@ -53,6 +53,7 @@ namespace server {
 			void setEmbeds(unsigned int serverID, unsigned int messageID,
 						  const std::vector< DBChatMessageEmbed > &embeds);
 			std::vector< DBChatMessageEmbed > getEmbeds(unsigned int serverID, unsigned int messageID);
+			std::vector< unsigned int > getMessageIDsForPreviewAsset(unsigned int serverID, unsigned int assetID);
 			std::vector< unsigned int > getThreadIDsForPreviewAsset(unsigned int serverID, unsigned int assetID);
 
 			void migrate(unsigned int fromSchemaVersion, unsigned int toSchemaVersion) override;

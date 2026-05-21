@@ -1,0 +1,16 @@
+{
+	"v6": {},
+	"v18": {
+		"table_name": "chat_history_grants",
+		"column_names": [
+			"server_id",
+			"user_id",
+			"scope",
+			"scope_id",
+			"visible_after",
+			"granted_at",
+			"granted_by_user_id"
+		],
+		"rows": []
+	}
+}

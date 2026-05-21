@@ -116,15 +116,17 @@ Global::Global(const QString &qsConfigPath) {
 	bAttenuateOthers              = false;
 	prioritySpeakerActiveOverride = false;
 
-	bAllowHTML                  = true;
-	bPersistentGlobalChatEnabled = false;
-	bScreenShareEnabled         = false;
-	bScreenShareRecordingEnabled = false;
-	bScreenShareHelperRequired  = true;
+	bAllowHTML                       = true;
+	bPersistentGlobalChatEnabled     = false;
+	qlSupportedChatFeatures.clear();
+	uiPersistentChatProtocolVersion  = 0;
+	bScreenShareEnabled              = false;
+	bScreenShareRecordingEnabled     = false;
+	bScreenShareHelperRequired       = true;
 	qlPreferredScreenShareCodecs.clear();
-	uiScreenShareMaxWidth       = 0;
-	uiScreenShareMaxHeight      = 0;
-	uiScreenShareMaxFps         = 0;
+	uiScreenShareMaxWidth            = 0;
+	uiScreenShareMaxHeight           = 0;
+	uiScreenShareMaxFps              = 0;
 	qsScreenShareRelayUrl.clear();
 	uiMessageLength             = 5000;
 	uiImageLength               = 131072;

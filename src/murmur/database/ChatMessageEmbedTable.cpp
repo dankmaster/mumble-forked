@@ -172,6 +172,32 @@ namespace server {
 			}
 		}
 
+		std::vector< unsigned int > ChatMessageEmbedTable::getMessageIDsForPreviewAsset(unsigned int serverID,
+																						 unsigned int assetID) {
+			try {
+				std::vector< unsigned int > messageIDs;
+				soci::row row;
+				::mdb::TransactionHolder transaction = ensureTransaction();
+				soci::statement stmt =
+					(m_sql.prepare << "SELECT DISTINCT \"" << column::message_id << "\" FROM \"" << NAME
+								   << "\" WHERE \"" << column::server_id << "\" = :serverID AND \""
+								   << column::preview_asset_id << "\" = :assetID",
+					 soci::use(serverID), soci::use(assetID), soci::into(row));
+
+				stmt.execute(false);
+				while (stmt.fetch()) {
+					messageIDs.push_back(static_cast< unsigned int >(row.get< int >(0)));
+				}
+
+				transaction.commit();
+				return messageIDs;
+			} catch (const soci::soci_error &) {
+				std::throw_with_nested(::mdb::AccessException(
+					"Failed at getting message IDs for chat embed preview asset with ID " + std::to_string(assetID)
+					+ " on server with ID " + std::to_string(serverID)));
+			}
+		}
+
 		std::vector< unsigned int > ChatMessageEmbedTable::getThreadIDsForPreviewAsset(unsigned int serverID,
 																					   unsigned int assetID) {
 			try {

@@ -144,6 +144,36 @@ namespace server {
 			}
 		}
 
+		std::vector< unsigned int > ChatMessageAttachmentTable::getMessageIDsForAsset(unsigned int serverID,
+																					   unsigned int assetID) {
+			try {
+				std::vector< unsigned int > messageIDs;
+				soci::row row;
+				::mdb::TransactionHolder transaction = ensureTransaction();
+				soci::statement stmt =
+					(m_sql.prepare
+						 << "SELECT DISTINCT cma.\"" << column::message_id << "\" FROM \"" << NAME << "\" cma "
+						 << "JOIN \"" << ChatAssetTable::NAME << "\" ca ON ca.\"" << ChatAssetTable::column::server_id
+						 << "\" = cma.\"" << column::server_id << "\" AND ca.\"" << ChatAssetTable::column::asset_id
+						 << "\" = cma.\"" << column::asset_id << "\" WHERE cma.\"" << column::server_id
+						 << "\" = :serverID AND (cma.\"" << column::asset_id << "\" = :assetID OR ca.\""
+						 << ChatAssetTable::column::preview_asset_id << "\" = :assetID)",
+						soci::use(serverID), soci::use(assetID), soci::into(row));
+
+				stmt.execute(false);
+				while (stmt.fetch()) {
+					messageIDs.push_back(static_cast< unsigned int >(row.get< int >(0)));
+				}
+
+				transaction.commit();
+				return messageIDs;
+			} catch (const soci::soci_error &) {
+				std::throw_with_nested(::mdb::AccessException("Failed at getting message IDs for chat asset with ID "
+															  + std::to_string(assetID) + " on server with ID "
+															  + std::to_string(serverID)));
+			}
+		}
+
 		std::vector< unsigned int > ChatMessageAttachmentTable::getThreadIDsForAsset(unsigned int serverID,
 																						 unsigned int assetID) {
 			try {

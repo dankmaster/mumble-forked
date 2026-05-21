@@ -444,6 +444,18 @@ public:
 	QString chatAssetAbsolutePath(const QString &storageKey) const;
 	QString chatAssetStorageKey(unsigned int assetID, const QString &sha256) const;
 	quint64 chatAssetStoredBytes() const;
+	struct ChatHistoryAccess {
+		bool allowed = false;
+		std::chrono::system_clock::time_point visibleAfter = {};
+	};
+	ChatHistoryAccess resolveChatHistoryAccess(ServerUser *user, MumbleProto::ChatScope scope, unsigned int scopeID,
+											   Channel *permissionChannel, ChanACL::ACLCache *cache = nullptr);
+	ChatHistoryAccess resolveChatHistoryAccess(ServerUser *user,
+											   const ::mumble::server::db::DBChatThread &thread,
+											   Channel *permissionChannel, ChanACL::ACLCache *cache = nullptr);
+	bool canAccessChatMessage(ServerUser *user, const ::mumble::server::db::DBChatMessage &message,
+							  const ::mumble::server::db::DBChatThread &thread, Channel *permissionChannel,
+							  ChanACL::ACLCache *cache = nullptr);
 	bool canAccessChatAsset(ServerUser *user, unsigned int assetID);
 	void runChatAssetRetentionSweep();
 	void scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageID, MumbleProto::ChatScope scope,
