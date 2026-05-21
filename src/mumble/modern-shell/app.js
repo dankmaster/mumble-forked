@@ -60,6 +60,8 @@
 	const scopeLoadingFallbackMs = 2800;
 	const messageRenderChunkGroupCount = 28;
 	const messageRenderChunkBudgetMs = 7;
+	const contextMenuViewportMargin = 8;
+	const contextMenuAnchorGap = 4;
 
 	const refs = {
 		appShell: document.querySelector(".app-shell"),
@@ -2090,8 +2092,12 @@
 					event.preventDefault();
 					const bounds = actionsButton.getBoundingClientRect();
 					showContextMenu(participantContextMenuItems(person, row.dataset.scopeToken),
-						Math.max(8, bounds.right - 4),
-						Math.max(8, bounds.bottom + 4));
+						bounds.left,
+						bounds.bottom + contextMenuAnchorGap,
+						{
+							anchorBounds: bounds,
+							horizontal: "left-of-anchor"
+						});
 				});
 				entry.appendChild(actionsButton);
 			}
@@ -2295,7 +2301,10 @@
 					return !!item;
 				});
 				const bounds = roomActionButton.getBoundingClientRect();
-				showContextMenu(items, bounds.right, bounds.bottom + 4);
+				showContextMenu(items, bounds.left, bounds.bottom + contextMenuAnchorGap, {
+					anchorBounds: bounds,
+					horizontal: "left-of-anchor"
+				});
 			});
 			meta.appendChild(roomActionButton);
 		}
@@ -5396,7 +5405,26 @@
 		];
 	}
 
-	function showContextMenu(items, clientX, clientY) {
+	function clampedViewportPosition(position, size, viewportSize) {
+		const maxPosition = Math.max(contextMenuViewportMargin, viewportSize - size - contextMenuViewportMargin);
+		return Math.max(contextMenuViewportMargin, Math.min(position, maxPosition));
+	}
+
+	function contextMenuLeftForPlacement(bounds, clientX, options) {
+		const anchorBounds = options && options.anchorBounds;
+		if (options && options.horizontal === "left-of-anchor" && anchorBounds) {
+			const leftOfAnchor = anchorBounds.left - bounds.width - contextMenuAnchorGap;
+			const rightOfAnchor = anchorBounds.right + contextMenuAnchorGap;
+			const hasLeftSpace = leftOfAnchor >= contextMenuViewportMargin;
+			const hasRightSpace = rightOfAnchor + bounds.width <= window.innerWidth - contextMenuViewportMargin;
+			const preferredLeft = hasLeftSpace || !hasRightSpace ? leftOfAnchor : rightOfAnchor;
+			return clampedViewportPosition(preferredLeft, bounds.width, window.innerWidth);
+		}
+
+		return clampedViewportPosition(clientX, bounds.width, window.innerWidth);
+	}
+
+	function showContextMenu(items, clientX, clientY, options) {
 		hideAppMenu();
 		hideSelfMenu();
 		const filteredItems = [];
@@ -5427,8 +5455,8 @@
 		refs.contextMenu.classList.remove("hidden");
 		refs.contextMenu.setAttribute("aria-hidden", "false");
 		const bounds = refs.contextMenu.getBoundingClientRect();
-		const left = Math.max(8, Math.min(clientX, window.innerWidth - bounds.width - 8));
-		const top = Math.max(8, Math.min(clientY, window.innerHeight - bounds.height - 8));
+		const left = contextMenuLeftForPlacement(bounds, clientX, options || {});
+		const top = clampedViewportPosition(clientY, bounds.height, window.innerHeight);
 		refs.contextMenu.style.left = left + "px";
 		refs.contextMenu.style.top = top + "px";
 		contextMenuState = { left: left, top: top };
@@ -5564,7 +5592,16 @@
 				return;
 			}
 			event.preventDefault();
-			showContextMenu(items, event.clientX, event.clientY);
+			const actionButton = event.target.closest(".room-action-button, .presence-action-button");
+			if (actionButton) {
+				const bounds = actionButton.getBoundingClientRect();
+				showContextMenu(items, bounds.left, bounds.bottom + contextMenuAnchorGap, {
+					anchorBounds: bounds,
+					horizontal: "left-of-anchor"
+				});
+			} else {
+				showContextMenu(items, event.clientX, event.clientY);
+			}
 		});
 		window.addEventListener("keydown", function(event) {
 			if (event.key === "Escape" && refs.imageViewerLayer && !refs.imageViewerLayer.classList.contains("hidden")) {
