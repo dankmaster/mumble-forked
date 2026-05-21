@@ -82,6 +82,7 @@ option(plugins "Build plugins." ON)
 
 if (WIN32)
 	option(skip-msi-rebuild "Prevent rebuilding installer MSI files from source. Used to be able to include signed MSI files in the bundle." OFF)
+	option(windows-installer-all-languages "Build Windows installers with all translated MSI transforms instead of the default English-only MSI." OFF)
 endif()
 
 option(debug-dependency-search "Prints extended information during the search for the needed dependencies" OFF)

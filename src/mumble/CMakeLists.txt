@@ -1418,7 +1418,7 @@ if(packaging AND WIN32 AND NOT modern-layout-webengine)
 	set(overlay ON)
 	set(plugins ON)
 
-	if(translations)
+	if(translations AND windows-installer-all-languages)
 		list(APPEND installer_vars "--all-languages")
 	endif()
 

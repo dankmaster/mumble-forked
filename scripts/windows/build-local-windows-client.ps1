@@ -16,7 +16,8 @@ param(
 	[switch]$VerifyHelperRuntime,
 	[switch]$SkipConfigure,
 	[switch]$SkipBuild,
-	[switch]$AllowPendingReboot
+	[switch]$AllowPendingReboot,
+	[switch]$AllInstallerLanguages
 )
 
 $ErrorActionPreference = "Stop"
@@ -441,7 +442,9 @@ function Invoke-SharedWindowsPackaging {
 		[Parameter(Mandatory = $true)]
 		[string]$BuildType,
 
-		[switch]$SkipInstaller
+		[switch]$SkipInstaller,
+
+		[switch]$AllInstallerLanguages
 	)
 
 	$stageRoot = Join-Path $BuildRoot "shared-webengine-stage"
@@ -555,7 +558,7 @@ function Invoke-SharedWindowsPackaging {
 		"--payload-root", $stageRoot
 	)
 
-	if (Get-CMakeCacheBoolean -CachePath $cachePath -Name "translations") {
+	if ($AllInstallerLanguages -and (Get-CMakeCacheBoolean -CachePath $cachePath -Name "translations")) {
 		$installerArgs += "--all-languages"
 	}
 
@@ -598,7 +601,13 @@ function Invoke-SharedWindowsPackaging {
 	$cscs = Get-WixSharpExecutable
 
 	Get-ChildItem -LiteralPath $installerWorkDir -File -ErrorAction SilentlyContinue |
-		Where-Object { $_.Name -like "*.msi" -or $_.Name -like "*_client-*.exe" } |
+		Where-Object {
+			$_.Name -like "*.msi" `
+				-or $_.Name -like "*.mst" `
+				-or $_.Name -like "*.wixobj" `
+				-or $_.Name -like "*.wxs" `
+				-or $_.Name -like "*_client-*.exe"
+		} |
 		Remove-Item -Force -ErrorAction SilentlyContinue
 
 	Push-Location $installerWorkDir
@@ -1162,6 +1171,9 @@ try {
 	} else {
 		$env:MUMBLE_ENABLE_WINDOWS_PACKAGING = "OFF"
 	}
+	if ($AllInstallerLanguages) {
+		$env:CMAKE_OPTIONS = "$($env:CMAKE_OPTIONS) -Dwindows-installer-all-languages=ON"
+	}
 	$env:MUMBLE_ENABLE_WINDOWS_OVERLAY_XCOMPILE = "ON"
 	$env:MUMBLE_SKIP_DATABASE_SETUP = "ON"
 	$env:MUMBLE_BUILD_NUMBER = $BuildNumber
@@ -1277,7 +1289,8 @@ try {
 
 	if ($SharedWebEngine -and $EnablePackaging) {
 		Invoke-SharedWindowsPackaging -RepoRoot $repoRoot -BuildRoot $buildRoot -BuildType $BuildType `
-			-SkipInstaller:$SkipSharedInstaller
+			-SkipInstaller:$SkipSharedInstaller `
+			-AllInstallerLanguages:$AllInstallerLanguages
 	}
 
 	if ($VerifyHelperRuntime) {

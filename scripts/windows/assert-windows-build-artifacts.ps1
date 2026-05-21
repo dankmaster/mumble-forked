@@ -9,6 +9,7 @@ param(
 	[switch]$RequireScreenHelper,
 	[switch]$RequireClientInstaller,
 	[switch]$RequireServerInstaller,
+	[switch]$RequireEnglishOnlyInstallers,
 	[switch]$RequireSpeechCleanup
 )
 
@@ -189,6 +190,29 @@ function Assert-InstallerPattern {
 	return $matches.FullName
 }
 
+function Assert-EnglishOnlyInstallers {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$Label,
+
+		[Parameter(Mandatory = $true)]
+		[string]$Root
+	)
+
+	$localizedArtifacts = @(Get-ChildItem -Path $Root -Recurse -File -Include "*.msi", "*.mst" -ErrorAction SilentlyContinue |
+		Where-Object {
+			$_.Extension -ieq ".mst" -or $_.BaseName -match '^[a-z]{2}-[A-Z]{2}$'
+		} |
+		Sort-Object -Property FullName)
+
+	if ($localizedArtifacts.Count -gt 0) {
+		$paths = $localizedArtifacts | ForEach-Object { $_.FullName }
+		throw "$Label contains localized Windows installer byproducts, but English-only installers are required: $($paths -join ', ')."
+	}
+
+	Write-Host "$Label English-only installer output verified."
+}
+
 $buildRootPath = Resolve-ExistingPath -Path $BuildRoot
 $allArtifacts = New-Object System.Collections.Generic.List[string]
 $requiredBinaryNames = Get-RequiredBinaryNames
@@ -221,6 +245,10 @@ if ($RequireServerInstaller) {
 	foreach ($artifactPath in Assert-InstallerPattern -Label "Build root '$buildRootPath'" -Root $buildRootPath -Pattern "*server*.msi" -Description "server installer MSI") {
 		$allArtifacts.Add($artifactPath)
 	}
+}
+
+if ($RequireEnglishOnlyInstallers) {
+	Assert-EnglishOnlyInstallers -Label "Build root '$buildRootPath'" -Root $buildRootPath
 }
 
 if ($RequireStage) {

@@ -153,6 +153,17 @@ jobs:
             -VerifyHelperRuntime `
             -AllowPendingReboot
 
+      - name: Validate shared Windows client installer
+        if: ${{ github.event_name != 'pull_request' }}
+        shell: powershell
+        run: |
+          .\scripts\windows\assert-windows-build-artifacts.ps1 `
+            -BuildRoot .\build-shared-webengine `
+            -RequireClient `
+            -RequireClientInstaller `
+            -RequireEnglishOnlyInstallers `
+            -ArtifactListPath .\build-shared-webengine\windows-installer-artifacts.txt
+
       - name: Publish Shared Client Artifacts
         uses: actions/upload-artifact@v6
         with:
@@ -164,6 +175,7 @@ jobs:
             build-shared-webengine/windows-screen-share-helper.log
             build-shared-webengine/windows-screen-share-self-test.json
             build-shared-webengine/windows-binary-artifacts.txt
+            build-shared-webengine/windows-installer-artifacts.txt
             build-shared-webengine/windows-client-artifacts.txt
             build-shared-webengine/**/mumble*.msi
             build-shared-webengine/**/mumble*.exe

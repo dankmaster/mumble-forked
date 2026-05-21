@@ -329,9 +329,12 @@ class BuildInstaller
 
 			if (!skipMSIRebuild) {
 				var clInstaller = new ClientInstaller(version, installerVersion, arch, features, payloadRoot);
-				msiPath = isAllLangs
-							? clInstaller.BuildMultilanguageMsi()
-							: clInstaller.BuildMsi();
+				if (isAllLangs) {
+					clInstaller.UseAllInstallerLanguages();
+					msiPath = clInstaller.BuildMultilanguageMsi();
+				} else {
+					msiPath = clInstaller.BuildMsi();
+				}
 			} else {
 				Console.WriteLine("INFO - Skipping MSI rebuild.");
 				msiPath = ClientInstaller.GetMSIPath(version, arch);

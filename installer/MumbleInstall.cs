@@ -14,10 +14,12 @@ using WixSharp.CommonTasks;
 
 // base class with info across installers
 public class MumbleInstall : Project {
+	private const string EnglishInstallerLanguage = "en-US";
+	private const string AllInstallerLanguages = "en-US,cs-CZ,da-DK,de-DE,el-GR,es-ES,fi-FI,fr-FR,it-IT,ja-JP,nb-NO,nl-NL,pl-PL,pt-PT,ru-RU,sv-SE,tr-TR,zh-CN,zh-TW";
 
 	public MumbleInstall() {
 		var allUsersProp = new Property("ALLUSERS", "1");
-		this.Language = "en-US,cs-CZ,da-DK,de-DE,el-GR,es-ES,fi-FI,fr-FR,it-IT,ja-JP,nb-NO,nl-NL,pl-PL,pt-PT,ru-RU,sv-SE,tr-TR,zh-CN,zh-TW";
+		this.Language = EnglishInstallerLanguage;
 		// This fork intentionally allows replace-in-place installs from both stock
 		// Mumble and other fork builds, even when the compatibility installer
 		// version trails upstream. We keep the shared UpgradeCode so stock Mumble
@@ -36,6 +38,10 @@ public class MumbleInstall : Project {
 		this.ControlPanelInfo.ProductIcon = @"..\icons\mumble.ico";
 		this.ControlPanelInfo.UrlInfoAbout = "https://mumble.info";
 		this.Properties = new Property[] { allUsersProp };
+	}
+
+	public void UseAllInstallerLanguages() {
+		this.Language = AllInstallerLanguages;
 	}
 
 	public static Bundle BundleMsi(string name, Guid upgradeCode, string msiPath, string vcRedistRequired) {
