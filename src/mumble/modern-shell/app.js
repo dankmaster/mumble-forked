@@ -4594,6 +4594,23 @@
 		renderMenus(resolvedAppMenus((getSnapshot().app || {})));
 	}
 
+	function positionTopMenuPanel(group, panel) {
+		if (!group || !panel || !group.classList.contains("is-open")) {
+			return;
+		}
+
+		panel.style.left = "0px";
+		const groupBounds = group.getBoundingClientRect();
+		const panelBounds = panel.getBoundingClientRect();
+		const leftAlignedPosition = groupBounds.left;
+		const rightAlignedPosition = groupBounds.right - panelBounds.width;
+		const hasUsefulLeftSpan = groupBounds.right >= panelBounds.width * 0.75;
+		const preferredPosition =
+			hasUsefulLeftSpan ? rightAlignedPosition : leftAlignedPosition;
+		const globalLeft = clampedViewportPosition(preferredPosition, panelBounds.width, window.innerWidth);
+		panel.style.left = Math.round(globalLeft - groupBounds.left) + "px";
+	}
+
 	function cancelMenuDismissTimer() {
 		if (!menuDismissTimer) {
 			return;
@@ -4693,6 +4710,7 @@
 			const menuItems = menu.items || [];
 			const group = document.createElement("div");
 			group.className = "menu-group" + (openMenuId === menu.id ? " is-open" : "");
+			let panel = null;
 
 			const trigger = document.createElement("button");
 			trigger.type = "button";
@@ -4750,7 +4768,7 @@
 			group.appendChild(trigger);
 
 			if (menuItems.length) {
-				const panel = document.createElement("div");
+				panel = document.createElement("div");
 				panel.className = "menu-panel";
 				panel.setAttribute("role", "menu");
 
@@ -4766,6 +4784,9 @@
 			}
 
 			refs.menuBar.appendChild(group);
+			if (openMenuId === menu.id && panel) {
+				positionTopMenuPanel(group, panel);
+			}
 		});
 
 		syncMenuBandChrome();
