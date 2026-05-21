@@ -230,7 +230,7 @@ QFlags< ChanACL::Perm > ChanACL::effectivePermissions(ServerUser *p, Channel *ch
 
 	if (granted & Write) {
 		granted |= Traverse | Enter | MuteDeafen | Move | MakeChannel | LinkChannel | TextMessage | MakeTempChannel
-				   | Listen | DeleteTextMessage | ViewTextMessageHistory;
+				   | Listen | DeleteTextMessage;
 		if (chan->iId == 0)
 			granted |= Kick | Ban | ResetUserContent | Register | SelfRegister;
 	}
