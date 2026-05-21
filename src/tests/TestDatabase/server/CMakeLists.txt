@@ -56,6 +56,7 @@ add_table_pair("channel_listener_table_input.json" "channel_listener_table_migra
 add_table_pair("chat_asset_table_input.json" "chat_asset_table_migrated.json")
 add_table_pair("chat_message_attachment_table_input.json" "chat_message_attachment_table_migrated.json")
 add_table_pair("chat_message_embed_table_input.json" "chat_message_embed_table_migrated.json")
+add_table_pair("chat_history_grant_table_input.json" "chat_history_grant_table_migrated.json")
 add_table_pair("chat_message_table_input.json" "chat_message_table_migrated.json")
 add_table_pair("chat_message_reaction_table_input.json" "chat_message_reaction_table_migrated.json")
 add_table_pair("chat_read_state_table_input.json" "chat_read_state_table_migrated.json")

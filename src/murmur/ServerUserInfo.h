@@ -29,7 +29,9 @@ public:
 	bool bSupportsScreenShareSignaling = false;
 	bool bSupportsScreenShareCapture = false;
 	bool bSupportsScreenShareView = false;
+	QList< int > qlSupportedChatFeatures;
 	QList< int > qlSupportedScreenShareCodecs;
+	unsigned int uiPersistentChatProtocolVersion = 0;
 	unsigned int uiMaxScreenShareWidth = 0;
 	unsigned int uiMaxScreenShareHeight = 0;
 	unsigned int uiMaxScreenShareFps = 0;

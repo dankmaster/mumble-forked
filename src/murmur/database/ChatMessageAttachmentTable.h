@@ -47,6 +47,7 @@ namespace server {
 			void addAttachments(unsigned int serverID, unsigned int messageID,
 							   const std::vector< DBChatMessageAttachment > &attachments);
 			std::vector< DBChatMessageAttachment > getAttachments(unsigned int serverID, unsigned int messageID);
+			std::vector< unsigned int > getMessageIDsForAsset(unsigned int serverID, unsigned int assetID);
 			std::vector< unsigned int > getThreadIDsForAsset(unsigned int serverID, unsigned int assetID);
 
 			void migrate(unsigned int fromSchemaVersion, unsigned int toSchemaVersion) override;

@@ -481,6 +481,7 @@ protected:
 	QAction *qaTransmitMode;
 	QAction *qaTransmitModeSeparator;
 	QAction *qaUserRemoteSpeechCleanup        = nullptr;
+	QAction *qaUserGrantChatHistory           = nullptr;
 	QAction *qaChannelScreenShareStart        = nullptr;
 	QAction *qaChannelScreenShareStop         = nullptr;
 	QAction *qaChannelScreenShareWatch        = nullptr;
@@ -678,6 +679,7 @@ public slots:
 	void on_qaUserLocalIgnoreTTS_triggered();
 	void on_qaUserLocalMute_triggered();
 	void triggerUserRemoteSpeechCleanup();
+	void on_qaUserGrantChatHistory_triggered();
 	void on_qaUserLocalNickname_triggered();
 	void on_qaUserTextMessage_triggered();
 	void on_qaUserRegister_triggered();

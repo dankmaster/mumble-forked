@@ -6,6 +6,7 @@
 #include "Server.h"
 
 #include "ACL.h"
+#include "ChatFeature.h"
 #include "Channel.h"
 #include "ClientType.h"
 #include "Connection.h"
@@ -66,6 +67,8 @@
 #include <optional>
 #include <span>
 #include <vector>
+
+namespace msdb = ::mumble::server::db;
 
 #ifdef Q_OS_WIN
 #	include <qos2.h>
@@ -654,6 +657,97 @@ quint64 Server::chatAssetStoredBytes() const {
 	return totalBytes;
 }
 
+Server::ChatHistoryAccess Server::resolveChatHistoryAccess(ServerUser *user, MumbleProto::ChatScope scope,
+															unsigned int scopeID, Channel *permissionChannel,
+															ChanACL::ACLCache *cache) {
+	ChatHistoryAccess result;
+	if (!user || !permissionChannel) {
+		return result;
+	}
+
+	msdb::ChatThreadScope dbScope = msdb::ChatThreadScope::Channel;
+	switch (scope) {
+		case MumbleProto::Channel:
+			dbScope = msdb::ChatThreadScope::Channel;
+			break;
+		case MumbleProto::ServerGlobal:
+			scopeID = 0;
+			dbScope = msdb::ChatThreadScope::ServerGlobal;
+			break;
+		case MumbleProto::TextChannel:
+			dbScope = msdb::ChatThreadScope::TextChannel;
+			break;
+		case MumbleProto::Aggregate:
+		default:
+			return result;
+	}
+
+	if (user->iId == 0) {
+		result.allowed = true;
+		return result;
+	}
+
+	if (user->iId < 0 || !m_dbWrapper.registeredUserExists(iServerNum, static_cast< unsigned int >(user->iId))) {
+		return result;
+	}
+
+	ChanACL::ACLCache *effectiveCache = cache ? cache : &acCache;
+	if (!ChanACL::hasPermission(user, permissionChannel, ChanACL::ViewTextMessageHistory, effectiveCache)) {
+		return result;
+	}
+
+	const std::optional< msdb::DBChatHistoryGrant > grant =
+		m_dbWrapper.getChatHistoryGrant(iServerNum, static_cast< unsigned int >(user->iId), dbScope, scopeID);
+	if (!grant) {
+		return result;
+	}
+
+	result.allowed      = true;
+	result.visibleAfter = grant->visibleAfter;
+	return result;
+}
+
+Server::ChatHistoryAccess Server::resolveChatHistoryAccess(ServerUser *user, const msdb::DBChatThread &thread,
+															Channel *permissionChannel, ChanACL::ACLCache *cache) {
+	switch (thread.scope) {
+		case msdb::ChatThreadScope::Channel: {
+			const QString scopeKey = QString::fromStdString(thread.scopeKey);
+			bool ok               = false;
+			const unsigned int channelID = scopeKey.startsWith(QStringLiteral("channel:")) ? scopeKey.mid(8).toUInt(&ok) : 0;
+			return ok ? resolveChatHistoryAccess(user, MumbleProto::Channel, channelID, permissionChannel, cache)
+					  : ChatHistoryAccess();
+		}
+		case msdb::ChatThreadScope::ServerGlobal:
+			return resolveChatHistoryAccess(user, MumbleProto::ServerGlobal, 0, permissionChannel, cache);
+		case msdb::ChatThreadScope::TextChannel: {
+			const QString scopeKey = QString::fromStdString(thread.scopeKey);
+			bool ok               = false;
+			const unsigned int textChannelID = scopeKey.startsWith(QStringLiteral("text:")) ? scopeKey.mid(5).toUInt(&ok) : 0;
+			return ok ? resolveChatHistoryAccess(user, MumbleProto::TextChannel, textChannelID, permissionChannel, cache)
+					  : ChatHistoryAccess();
+		}
+		case msdb::ChatThreadScope::Private:
+			return ChatHistoryAccess();
+	}
+
+	return ChatHistoryAccess();
+}
+
+bool Server::canAccessChatMessage(ServerUser *user, const msdb::DBChatMessage &message,
+								  const msdb::DBChatThread &thread, Channel *permissionChannel,
+								  ChanACL::ACLCache *cache) {
+	if (message.threadID != thread.threadID) {
+		return false;
+	}
+
+	const ChatHistoryAccess access = resolveChatHistoryAccess(user, thread, permissionChannel, cache);
+	if (!access.allowed) {
+		return false;
+	}
+
+	return access.visibleAfter == std::chrono::system_clock::time_point() || message.createdAt >= access.visibleAfter;
+}
+
 bool Server::canAccessChatAsset(ServerUser *user, unsigned int assetID) {
 	if (!user) {
 		return false;
@@ -664,8 +758,14 @@ bool Server::canAccessChatAsset(ServerUser *user, unsigned int assetID) {
 		textChannels.insert(textChannel.textChannelID, textChannel);
 	}
 
-	for (unsigned int threadID : m_dbWrapper.getChatAssetThreadIDs(iServerNum, assetID)) {
-		const ::mumble::server::db::DBChatThread thread = m_dbWrapper.getChatThread(iServerNum, threadID);
+	for (unsigned int messageID : m_dbWrapper.getChatAssetMessageIDs(iServerNum, assetID)) {
+		const std::optional<::mumble::server::db::DBChatMessage > message =
+			m_dbWrapper.getChatMessage(iServerNum, messageID);
+		if (!message) {
+			continue;
+		}
+
+		const ::mumble::server::db::DBChatThread thread = m_dbWrapper.getChatThread(iServerNum, message->threadID);
 		Channel *permissionChannel                      = nullptr;
 		const QString scopeKey                          = QString::fromStdString(thread.scopeKey);
 		switch (thread.scope) {
@@ -697,7 +797,7 @@ bool Server::canAccessChatAsset(ServerUser *user, unsigned int assetID) {
 			continue;
 		}
 
-		if (ChanACL::hasPermission(user, permissionChannel, ChanACL::ViewTextMessageHistory, &acCache)) {
+		if (canAccessChatMessage(user, *message, thread, permissionChannel, &acCache)) {
 			return true;
 		}
 	}
@@ -2210,6 +2310,7 @@ void Server::encrypted() {
 
 	MumbleProto::Version mpv;
 	MumbleProto::setVersion(mpv, Version::get());
+	Mumble::ChatFeatures::addSupportedFeatures(mpv);
 	if (Meta::mp->bSendVersion) {
 		mpv.set_release(u8(Version::getRelease()));
 		mpv.set_os(u8(meta->qsOS));

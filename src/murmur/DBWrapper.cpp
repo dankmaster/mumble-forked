@@ -33,6 +33,7 @@
 #include "murmur/database/ChannelPropertyTable.h"
 #include "murmur/database/ChatMessageTable.h"
 #include "murmur/database/ChatAssetTable.h"
+#include "murmur/database/ChatHistoryGrantTable.h"
 #include "murmur/database/ChatMessageAttachmentTable.h"
 #include "murmur/database/ChatMessageEmbedTable.h"
 #include "murmur/database/ChatMessageReactionTable.h"
@@ -47,6 +48,7 @@
 #include "murmur/database/DBChannel.h"
 #include "murmur/database/DBChatMessage.h"
 #include "murmur/database/DBChatAsset.h"
+#include "murmur/database/DBChatHistoryGrant.h"
 #include "murmur/database/DBChatMessageAttachment.h"
 #include "murmur/database/DBChatMessageReaction.h"
 #include "murmur/database/DBChatReadState.h"
@@ -1160,8 +1162,9 @@ void DBWrapper::removeTextChannel(unsigned int serverID, unsigned int textChanne
 	WRAPPER_END
 }
 
-std::vector< ::msdb::DBChatMessage > DBWrapper::getChatMessages(unsigned int serverID, unsigned int threadID,
-																 unsigned int startOffset, int amount) {
+std::vector< ::msdb::DBChatMessage > DBWrapper::getChatMessages(
+	unsigned int serverID, unsigned int threadID, unsigned int startOffset, int amount,
+	std::optional< std::chrono::system_clock::time_point > visibleAfter) {
 	WRAPPER_BEGIN
 
 	assertValidID(serverID);
@@ -1170,11 +1173,13 @@ std::vector< ::msdb::DBChatMessage > DBWrapper::getChatMessages(unsigned int ser
 	std::vector< ::msdb::DBChatMessage > messages;
 	if (amount < 0) {
 		messages = m_serverDB.getChatMessageTable().getMessages(serverID, threadID,
-																std::numeric_limits< unsigned int >::max(), startOffset);
+																std::numeric_limits< unsigned int >::max(), startOffset,
+																visibleAfter);
 	} else {
 		assert(amount >= 0);
 		messages = m_serverDB.getChatMessageTable().getMessages(serverID, threadID,
-																static_cast< unsigned int >(amount), startOffset);
+																static_cast< unsigned int >(amount), startOffset,
+																visibleAfter);
 	}
 
 	for (::msdb::DBChatMessage &message : messages) {
@@ -1189,8 +1194,9 @@ std::vector< ::msdb::DBChatMessage > DBWrapper::getChatMessages(unsigned int ser
 	WRAPPER_END
 }
 
-std::vector< ::msdb::DBChatMessage > DBWrapper::getChatMessagesBefore(unsigned int serverID, unsigned int threadID,
-																	  unsigned int beforeMessageID, unsigned int amount) {
+std::vector< ::msdb::DBChatMessage > DBWrapper::getChatMessagesBefore(
+	unsigned int serverID, unsigned int threadID, unsigned int beforeMessageID, unsigned int amount,
+	std::optional< std::chrono::system_clock::time_point > visibleAfter) {
 	WRAPPER_BEGIN
 
 	assertValidID(serverID);
@@ -1198,7 +1204,7 @@ std::vector< ::msdb::DBChatMessage > DBWrapper::getChatMessagesBefore(unsigned i
 	assertValidID(beforeMessageID);
 
 	std::vector< ::msdb::DBChatMessage > messages =
-		m_serverDB.getChatMessageTable().getMessagesBefore(serverID, threadID, beforeMessageID, amount);
+		m_serverDB.getChatMessageTable().getMessagesBefore(serverID, threadID, beforeMessageID, amount, visibleAfter);
 
 	for (::msdb::DBChatMessage &message : messages) {
 		message.attachments =
@@ -1267,6 +1273,55 @@ std::optional< ::msdb::DBChatMessage > DBWrapper::deleteChatMessage(unsigned int
 	WRAPPER_END
 }
 
+void DBWrapper::setChatHistoryGrant(const ::msdb::DBChatHistoryGrant &grant) {
+	WRAPPER_BEGIN
+
+	assertValidID(grant.serverID);
+	assertRegisteredUserExists(grant.serverID, grant.userID);
+	if (grant.grantedByUserID) {
+		assertRegisteredUserExists(grant.serverID, grant.grantedByUserID.value());
+	}
+
+	m_serverDB.getChatHistoryGrantTable().setGrant(grant);
+
+	WRAPPER_END
+}
+
+void DBWrapper::removeChatHistoryGrant(unsigned int serverID, unsigned int userID, ::msdb::ChatThreadScope scope,
+									   unsigned int scopeID) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertRegisteredUserExists(serverID, userID);
+
+	m_serverDB.getChatHistoryGrantTable().removeGrant(serverID, userID, scope, scopeID);
+
+	WRAPPER_END
+}
+
+std::optional< ::msdb::DBChatHistoryGrant >
+	DBWrapper::getChatHistoryGrant(unsigned int serverID, unsigned int userID, ::msdb::ChatThreadScope scope,
+								   unsigned int scopeID) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertRegisteredUserExists(serverID, userID);
+
+	return m_serverDB.getChatHistoryGrantTable().getGrant(serverID, userID, scope, scopeID);
+
+	WRAPPER_END
+}
+
+std::vector< ::msdb::DBChatHistoryGrant > DBWrapper::getChatHistoryGrants(unsigned int serverID) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+
+	return m_serverDB.getChatHistoryGrantTable().getGrants(serverID);
+
+	WRAPPER_END
+}
+
 ::msdb::DBChatAsset DBWrapper::addChatAsset(const ::msdb::DBChatAsset &asset) {
 	WRAPPER_BEGIN
 
@@ -1326,6 +1381,26 @@ std::vector< unsigned int > DBWrapper::getChatAssetThreadIDs(unsigned int server
 	}
 
 	return threadIDs;
+
+	WRAPPER_END
+}
+
+std::vector< unsigned int > DBWrapper::getChatAssetMessageIDs(unsigned int serverID, unsigned int assetID) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertValidID(assetID);
+
+	std::vector< unsigned int > messageIDs =
+		m_serverDB.getChatMessageAttachmentTable().getMessageIDsForAsset(serverID, assetID);
+	for (unsigned int messageID :
+		 m_serverDB.getChatMessageEmbedTable().getMessageIDsForPreviewAsset(serverID, assetID)) {
+		if (std::find(messageIDs.begin(), messageIDs.end(), messageID) == messageIDs.end()) {
+			messageIDs.push_back(messageID);
+		}
+	}
+
+	return messageIDs;
 
 	WRAPPER_END
 }

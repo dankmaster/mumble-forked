@@ -14,6 +14,7 @@
 #include "AudioWizard.h"
 #include "BanEditor.h"
 #include "Channel.h"
+#include "ChatFeature.h"
 #include "ChatPerfTrace.h"
 #include "ConnectDialog.h"
 #include "Connection.h"
@@ -352,6 +353,18 @@ void MainWindow::msgServerConfig(const MumbleProto::ServerConfig &msg) {
 		const bool enabled = msg.persistent_global_chat_enabled();
 		persistentGlobalChanged = Global::get().bPersistentGlobalChatEnabled != enabled;
 		Global::get().bPersistentGlobalChatEnabled = enabled;
+		modernLayoutCompatibleAdvertised = true;
+	}
+	if (msg.has_persistent_chat_protocol_version()) {
+		Global::get().uiPersistentChatProtocolVersion = msg.persistent_chat_protocol_version();
+		modernLayoutCompatibleAdvertised              = true;
+	}
+	if (msg.supported_chat_features_size() > 0) {
+		Global::get().qlSupportedChatFeatures = Mumble::ChatFeatures::featuresFromServerConfig(msg);
+		if (Mumble::ChatFeatures::contains(Global::get().qlSupportedChatFeatures,
+										   MumbleProto::ChatFeaturePersistentHistory)) {
+			markPersistentChatAvailable(false);
+		}
 		modernLayoutCompatibleAdvertised = true;
 	}
 	if (msg.has_screen_share_enabled()) {
@@ -1580,6 +1593,16 @@ void MainWindow::removeContextAction(const MumbleProto::ContextActionModify &msg
 /// @param msg The message object with the respective information
 void MainWindow::msgVersion(const MumbleProto::Version &msg) {
 	Global::get().sh->setProtocolVersion(MumbleProto::getVersion(msg));
+	if (msg.supported_chat_features_size() > 0
+		|| (msg.has_supports_persistent_chat() && msg.supports_persistent_chat())) {
+		Global::get().qlSupportedChatFeatures = Mumble::ChatFeatures::featuresFromVersion(msg);
+		if (Mumble::ChatFeatures::contains(Global::get().qlSupportedChatFeatures,
+										   MumbleProto::ChatFeaturePersistentHistory)) {
+			Global::get().uiPersistentChatProtocolVersion = Mumble::ChatFeatures::CURRENT_PROTOCOL_VERSION;
+			markPersistentChatAvailable(false);
+			m_modernLayoutCompatibleServer = true;
+		}
+	}
 
 	if (msg.has_release())
 		Global::get().sh->qsRelease = u8(msg.release());
@@ -1880,6 +1903,9 @@ void MainWindow::msgChatReactionToggle(const MumbleProto::ChatReactionToggle &) 
 
 void MainWindow::msgChatReactionState(const MumbleProto::ChatReactionState &msg) {
 	handlePersistentChatReactionState(msg);
+}
+
+void MainWindow::msgChatHistoryGrantSync(const MumbleProto::ChatHistoryGrantSync &) {
 }
 
 void MainWindow::msgScreenShareCreate(const MumbleProto::ScreenShareCreate &) {

@@ -9,6 +9,7 @@
 #include "NonCopyable.h"
 #include "murmur/database/DBChannel.h"
 #include "murmur/database/DBChatAsset.h"
+#include "murmur/database/DBChatHistoryGrant.h"
 #include "murmur/database/DBChatMessage.h"
 #include "murmur/database/DBChatMessageReaction.h"
 #include "murmur/database/DBChatReadState.h"
@@ -123,15 +124,25 @@ public:
 					   std::optional< unsigned int > authorSession = std::nullopt,
 					   std::optional< std::string > authorName = std::nullopt);
 	std::vector< ::mumble::server::db::DBChatMessage > getChatMessages(unsigned int serverID, unsigned int threadID,
-																	   unsigned int startOffset = 0, int amount = -1);
+																	   unsigned int startOffset = 0, int amount = -1,
+																	   std::optional< std::chrono::system_clock::time_point > visibleAfter = std::nullopt);
 	std::vector< ::mumble::server::db::DBChatMessage > getChatMessagesBefore(unsigned int serverID, unsigned int threadID,
-																		  unsigned int beforeMessageID, unsigned int amount);
+																		  unsigned int beforeMessageID, unsigned int amount,
+																		  std::optional< std::chrono::system_clock::time_point > visibleAfter = std::nullopt);
 	std::optional< ::mumble::server::db::DBChatMessage > getChatMessage(unsigned int serverID, unsigned int messageID);
 	std::optional< ::mumble::server::db::DBChatMessage > deleteChatMessage(unsigned int serverID, unsigned int messageID);
+	void setChatHistoryGrant(const ::mumble::server::db::DBChatHistoryGrant &grant);
+	void removeChatHistoryGrant(unsigned int serverID, unsigned int userID, ::mumble::server::db::ChatThreadScope scope,
+								unsigned int scopeID);
+	std::optional< ::mumble::server::db::DBChatHistoryGrant >
+		getChatHistoryGrant(unsigned int serverID, unsigned int userID, ::mumble::server::db::ChatThreadScope scope,
+							unsigned int scopeID);
+	std::vector< ::mumble::server::db::DBChatHistoryGrant > getChatHistoryGrants(unsigned int serverID);
 	::mumble::server::db::DBChatAsset addChatAsset(const ::mumble::server::db::DBChatAsset &asset);
 	::mumble::server::db::DBChatAsset getChatAsset(unsigned int serverID, unsigned int assetID);
 	bool chatAssetExists(unsigned int serverID, unsigned int assetID);
 	std::vector< unsigned int > getChatAssetThreadIDs(unsigned int serverID, unsigned int assetID);
+	std::vector< unsigned int > getChatAssetMessageIDs(unsigned int serverID, unsigned int assetID);
 	void updateChatAssetPreviewAssetID(unsigned int serverID, unsigned int assetID,
 									   std::optional< unsigned int > previewAssetID);
 	void touchChatAsset(unsigned int serverID, unsigned int assetID);

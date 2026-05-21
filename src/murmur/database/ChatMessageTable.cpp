@@ -104,6 +104,10 @@ namespace server {
 			::mdb::Index threadMessageIndex(std::string(NAME) + "_thread_messages",
 											{ column::server_id, column::thread_id, column::message_id });
 			addIndex(threadMessageIndex, false);
+			::mdb::Index threadCreatedIndex(std::string(NAME) + "_thread_created",
+											{ column::server_id, column::thread_id, column::created_at,
+											  column::message_id });
+			addIndex(threadCreatedIndex, false);
 			::mdb::Index replyLookupIndex(std::string(NAME) + "_reply_lookup",
 										  { column::server_id, column::reply_to_message_id });
 			addIndex(replyLookupIndex, false);
@@ -254,14 +258,16 @@ namespace server {
 			}
 		}
 
-		std::vector< DBChatMessage > ChatMessageTable::getMessages(unsigned int serverID, unsigned int threadID,
-																  unsigned int maxEntries, unsigned int startOffset) {
+		std::vector< DBChatMessage > ChatMessageTable::getMessages(
+			unsigned int serverID, unsigned int threadID, unsigned int maxEntries, unsigned int startOffset,
+			std::optional< std::chrono::system_clock::time_point > visibleAfter) {
 			assert(maxEntries <= std::numeric_limits< int >::max());
 			assert(startOffset <= std::numeric_limits< int >::max());
 
 			try {
 				std::vector< DBChatMessage > messages;
 				soci::row row;
+				const std::size_t visibleAfterEpoch = visibleAfter ? toEpochSeconds(*visibleAfter) : 0;
 
 				::mdb::TransactionHolder transaction = ensureTransaction();
 
@@ -270,10 +276,11 @@ namespace server {
 								   << "\", \"" << column::reply_to_message_id << "\", \"" << column::author_session << "\", \"" << column::author_name << "\", \""
 								   << column::body_text << "\", \"" << column::body_format << "\", \"" << column::created_at
 								   << "\", \"" << column::edited_at << "\", \"" << column::deleted_at << "\" FROM \"" << NAME << "\" WHERE \"" << column::server_id
-								   << "\" = :serverID AND \"" << column::thread_id << "\" = :threadID ORDER BY \""
+								   << "\" = :serverID AND \"" << column::thread_id << "\" = :threadID AND \""
+								   << column::created_at << "\" >= :visibleAfter ORDER BY \""
 								   << column::message_id << "\" DESC "
 								   << ::mdb::utils::limitOffset(m_backend, ":limit", ":offset"),
-					 soci::use(serverID), soci::use(threadID), soci::use(maxEntries), soci::use(startOffset),
+					 soci::use(serverID), soci::use(threadID), soci::use(visibleAfterEpoch), soci::use(maxEntries), soci::use(startOffset),
 					 soci::into(row));
 
 				stmt.execute(false);
@@ -325,13 +332,15 @@ namespace server {
 			}
 		}
 
-		std::vector< DBChatMessage > ChatMessageTable::getMessagesBefore(unsigned int serverID, unsigned int threadID,
-																		 unsigned int beforeMessageID, unsigned int maxEntries) {
+		std::vector< DBChatMessage > ChatMessageTable::getMessagesBefore(
+			unsigned int serverID, unsigned int threadID, unsigned int beforeMessageID, unsigned int maxEntries,
+			std::optional< std::chrono::system_clock::time_point > visibleAfter) {
 			assert(maxEntries <= std::numeric_limits< int >::max());
 
 			try {
 				std::vector< DBChatMessage > messages;
 				soci::row row;
+				const std::size_t visibleAfterEpoch = visibleAfter ? toEpochSeconds(*visibleAfter) : 0;
 
 				::mdb::TransactionHolder transaction = ensureTransaction();
 
@@ -342,10 +351,12 @@ namespace server {
 								   << column::body_format << "\", \"" << column::created_at << "\", \"" << column::edited_at
 								   << "\", \"" << column::deleted_at << "\" FROM \"" << NAME << "\" WHERE \""
 								   << column::server_id << "\" = :serverID AND \"" << column::thread_id
-								   << "\" = :threadID AND \"" << column::message_id << "\" < :beforeMessageID ORDER BY \""
+								   << "\" = :threadID AND \"" << column::message_id << "\" < :beforeMessageID AND \""
+								   << column::created_at << "\" >= :visibleAfter ORDER BY \""
 								   << column::message_id << "\" DESC "
 								   << ::mdb::utils::limitOffset(m_backend, ":limit", "0"),
-					 soci::use(serverID), soci::use(threadID), soci::use(beforeMessageID), soci::use(maxEntries),
+					 soci::use(serverID), soci::use(threadID), soci::use(beforeMessageID),
+					 soci::use(visibleAfterEpoch), soci::use(maxEntries),
 					 soci::into(row));
 
 				stmt.execute(false);

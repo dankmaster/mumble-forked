@@ -9,6 +9,18 @@ package MumbleProto;
 
 option optimize_for = SPEED;
 
+enum ChatFeature {
+	ChatFeaturePersistentHistory = 0;
+	ChatFeatureHistoryPagination = 1;
+	ChatFeatureReadState = 2;
+	ChatFeatureReactions = 3;
+	ChatFeatureMessageDelete = 4;
+	ChatFeatureAttachments = 5;
+	ChatFeatureEmbeds = 6;
+	ChatFeatureHistoryGrants = 7;
+	ChatFeatureTextChannels = 8;
+}
+
 message Version {
 	// Legacy version number format.
 	optional uint32 version_v1 = 1;
@@ -38,6 +50,8 @@ message Version {
 	optional uint32 max_screen_share_height = 12;
 	// Maximum screen-share frames per second this client can publish or render reliably.
 	optional uint32 max_screen_share_fps = 13;
+	// Fine-grained chat protocol features this endpoint supports.
+	repeated ChatFeature supported_chat_features = 14 [packed = true];
 }
 
 // Not used. Not even for tunneling UDP through TCP.
@@ -670,6 +684,10 @@ message ServerConfig {
 	optional uint32 screen_share_max_fps = 15;
 	// Relay/SFU endpoint that clients should use for screen-sharing sessions.
 	optional string screen_share_relay_url = 16;
+	// Persistent chat protocol revision supported by this server.
+	optional uint32 persistent_chat_protocol_version = 17 [default = 1];
+	// Fine-grained persistent chat features enabled by this server build.
+	repeated ChatFeature supported_chat_features = 18 [packed = true];
 }
 
 // Sent by the server to inform the clients of suggested client configuration
@@ -837,6 +855,26 @@ message ChatReadStateUpdate {
 	optional uint32 user_id = 4;
 	optional uint32 last_read_message_id = 5;
 	optional uint64 updated_at = 6;
+}
+
+message ChatHistoryGrantInfo {
+	optional ChatScope scope = 1 [default = Channel];
+	optional uint32 scope_id = 2 [default = 0];
+	required uint32 user_id = 3;
+	optional uint64 visible_after = 4 [default = 0];
+	optional uint64 granted_at = 5 [default = 0];
+	optional uint32 granted_by_user_id = 6;
+}
+
+message ChatHistoryGrantSync {
+	enum Action {
+		Sync = 0;
+		Grant = 1;
+		Revoke = 2;
+	}
+
+	optional Action action = 1 [default = Sync];
+	repeated ChatHistoryGrantInfo grants = 2;
 }
 
 message ChatAssetUploadInit {
