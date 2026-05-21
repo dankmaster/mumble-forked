@@ -45,6 +45,8 @@
 	let messageRenderGeneration = 0;
 	let activeMessageChunkRender = null;
 	let pendingMessageUpdatePatches = [];
+	let pendingScopeLoading = null;
+	let pendingScopeLoadingTimer = 0;
 
 	const imageViewerStorageKey = "mumble-modern-image-viewer";
 	const imageViewerMinWidth = 280;
@@ -55,6 +57,7 @@
 	const railActionSuppressMs = 850;
 	const railJoinPriorityMs = 900;
 	const voiceJoinInputDedupeMs = 180;
+	const scopeLoadingFallbackMs = 2800;
 	const messageRenderChunkGroupCount = 28;
 	const messageRenderChunkBudgetMs = 7;
 
@@ -594,14 +597,16 @@
 
 	function notifyBridge(method) {
 		if (!modernBridge || typeof modernBridge[method] !== "function") {
-			return;
+			return false;
 		}
 
 		const args = Array.prototype.slice.call(arguments, 1);
 		try {
 			modernBridge[method].apply(modernBridge, args);
+			return true;
 		} catch (error) {
 			console.warn("Modern bridge call failed:", method, error);
+			return false;
 		}
 	}
 
@@ -686,6 +691,125 @@
 		element.innerHTML = "";
 		if (fragment) {
 			element.appendChild(fragment);
+		}
+	}
+
+	function createChatLoadingIndicator() {
+		const indicator = document.createElement("div");
+		indicator.className = "chat-loading-indicator";
+		indicator.setAttribute("role", "status");
+		indicator.setAttribute("aria-label", "Loading");
+
+		const spinner = document.createElement("span");
+		spinner.className = "chat-loading-spinner";
+		spinner.setAttribute("aria-hidden", "true");
+		indicator.appendChild(spinner);
+		return indicator;
+	}
+
+	function showChatLoadingIndicator() {
+		if (!refs.messageList) {
+			return;
+		}
+		if (refs.messageList.classList.contains("is-chat-loading")
+				&& refs.messageList.querySelector(".chat-loading-spinner")) {
+			return;
+		}
+
+		cancelActiveMessageChunkRender("scope-loading");
+		pendingMessageUpdatePatches = [];
+		const fragment = document.createDocumentFragment();
+		fragment.appendChild(createChatLoadingIndicator());
+		refs.messageList.classList.add("is-chat-loading");
+		replaceChildrenWith(refs.messageList, fragment);
+	}
+
+	function clearPendingScopeLoadingTimer() {
+		if (!pendingScopeLoadingTimer) {
+			return;
+		}
+
+		clearTimeout(pendingScopeLoadingTimer);
+		pendingScopeLoadingTimer = 0;
+	}
+
+	function clearChatLoadingIndicator() {
+		clearPendingScopeLoadingTimer();
+		pendingScopeLoading = null;
+		if (refs.messageList) {
+			refs.messageList.classList.remove("is-chat-loading");
+		}
+	}
+
+	function resolveScopeLoadingFallback() {
+		pendingScopeLoadingTimer = 0;
+		if (!pendingScopeLoading || !pendingScopeLoading.scopeToken) {
+			return;
+		}
+
+		const token = pendingScopeLoading.scopeToken;
+		const snapshot = getSnapshot();
+		const activeToken = String((snapshot.activeScope || {}).scopeToken || "");
+		clearChatLoadingIndicator();
+		if (activeToken && activeToken === token && String(lastScopeToken || "") !== token) {
+			snapshot.messages = [];
+			cachedServerLogElement = null;
+			cachedServerLogRevision = "";
+			renderMessages(snapshot, { forceSync: true, resolvePendingScopeLoading: true });
+			return;
+		}
+
+		scheduleSnapshotRender();
+	}
+
+	function scheduleScopeLoadingFallback() {
+		clearPendingScopeLoadingTimer();
+		pendingScopeLoadingTimer = setTimeout(resolveScopeLoadingFallback, scopeLoadingFallbackMs);
+	}
+
+	function beginScopeLoading(scopeToken) {
+		const token = String(scopeToken || "");
+		if (!token) {
+			return false;
+		}
+
+		const activeToken = String((getSnapshot().activeScope || {}).scopeToken || "");
+		if (token === activeToken && (!pendingScopeLoading || pendingScopeLoading.scopeToken !== token)) {
+			return false;
+		}
+
+		pendingScopeLoading = { scopeToken: token };
+		showChatLoadingIndicator();
+		scheduleScopeLoadingFallback();
+		return true;
+	}
+
+	function pendingScopeLoadingBlocksRender(scopeToken, renderOptions) {
+		if (!pendingScopeLoading || !pendingScopeLoading.scopeToken) {
+			return false;
+		}
+
+		const token = String(scopeToken || "");
+		if (token === pendingScopeLoading.scopeToken && renderOptions && renderOptions.resolvePendingScopeLoading) {
+			clearChatLoadingIndicator();
+			return false;
+		}
+
+		showChatLoadingIndicator();
+		return true;
+	}
+
+	function selectRoomScope(scopeToken) {
+		const token = String(scopeToken || "");
+		if (!token) {
+			return;
+		}
+
+		const canSelectScope = modernBridge && typeof modernBridge.selectScope === "function";
+		const showingLoading = canSelectScope ? beginScopeLoading(token) : false;
+		if (!notifyBridge("selectScope", token) && showingLoading) {
+			clearChatLoadingIndicator();
+			scheduleSnapshotRender();
 		}
 	}
 
@@ -2019,6 +2143,7 @@
 		const unreadCount = Number(room.unreadCount || 0);
 		const memberCount = Number(room.memberCount || 0);
 		const screenShare = room.screenShare || {};
+		const isRootRoom = !!room.isRoot;
 		const roomKind = String(room.kindLabel || "").trim().toLowerCase();
 		const hasRoomActions = (room.actions || []).some(function(item) {
 			return !!item && String(item.kind || "action") !== "separator";
@@ -2039,7 +2164,8 @@
 		button.tabIndex = 0;
 		button.className = "rail-row"
 			+ (room.selected ? " is-selected" : "")
-			+ (room.joined ? " is-joined" : "");
+			+ (room.joined ? " is-joined" : "")
+			+ (isRootRoom ? " is-root-room" : "");
 		button.classList.toggle("has-subtitle", !!subtitleText);
 		button.classList.toggle("has-unread", unreadCount > 0);
 		button.classList.toggle("is-populated", joinable && memberCount > 0);
@@ -2048,7 +2174,7 @@
 		button.dataset.roomLabel = room.label || "";
 		button.dataset.depth = String(depth);
 		button.dataset.roomType = joinable ? "voice" : "text";
-		button.draggable = !!joinable;
+		button.draggable = !!joinable && !isRootRoom;
 		if (room.participantSession) {
 			button.dataset.participantSession = String(room.participantSession);
 		}
@@ -2200,7 +2326,7 @@
 				stopRoomActionEvent(event);
 				return;
 			}
-			notifyBridge("selectScope", room.token);
+			selectRoomScope(room.token);
 			dismissCompactRailAfterAction();
 		});
 		button.addEventListener("keydown", function(event) {
@@ -2208,7 +2334,7 @@
 				return;
 			}
 			event.preventDefault();
-			notifyBridge("selectScope", room.token);
+			selectRoomScope(room.token);
 			dismissCompactRailAfterAction();
 		});
 		button.addEventListener("dblclick", function(event) {
@@ -2226,7 +2352,7 @@
 			dismissCompactRailAfterAction();
 		});
 		button.addEventListener("dragstart", function(event) {
-			if (!joinable || !room.token) {
+			if (!joinable || isRootRoom || !room.token) {
 				event.preventDefault();
 				return;
 			}
@@ -2406,7 +2532,7 @@
 		renderRoomList(refs.textRoomList, textRooms, {
 			joinable: false,
 			voicePresence: null,
-			hideWhenEmpty: true
+			hideWhenEmpty: !(app.canManageTextChannels || app.canCreateTextRoom)
 		});
 		const renderedActiveRailToken = activeRailToken();
 		if (!renderedActiveRailToken) {
@@ -2480,7 +2606,7 @@
 		syncAmbientState(snapshot);
 		syncComposerHeight();
 		if (scope.serverLogRevision || Object.prototype.hasOwnProperty.call(scope, "serverLogHtml")) {
-			renderMessages(snapshot);
+			renderMessages(snapshot, { resolvePendingScopeLoading: true });
 		}
 		if (scope.autoMarkRead) {
 			notifyBridge("markRead");
@@ -3267,6 +3393,7 @@
 
 	function renderTimeline(messages, emptyCopy, freshTailCount) {
 		cancelActiveMessageChunkRender("sync");
+		refs.messageList.classList.remove("is-chat-loading");
 		const indexedMessages = (messages || []).map(function(message, index) {
 			return Object.assign({ renderIndex: index }, message);
 		});
@@ -3318,6 +3445,7 @@
 
 	function renderTimelineChunked(messages, emptyCopy, freshTailCount, renderState) {
 		cancelActiveMessageChunkRender("restart");
+		refs.messageList.classList.remove("is-chat-loading");
 		const startedAt = monotonicNow();
 		const generation = messageRenderGeneration + 1;
 		messageRenderGeneration = generation;
@@ -3415,6 +3543,11 @@
 			return false;
 		}
 
+		refs.messageList.classList.remove("is-chat-loading");
+		const loadingState = refs.messageList.querySelector(".chat-loading-indicator");
+		if (loadingState && refs.messageList.children.length === 1) {
+			refs.messageList.innerHTML = "";
+		}
 		const emptyState = refs.messageList.querySelector(".empty-state");
 		if (emptyState && refs.messageList.children.length === 1) {
 			refs.messageList.innerHTML = "";
@@ -3804,6 +3937,10 @@
 
 		const scope = snapshot.activeScope || {};
 		const scopeToken = String(scope.scopeToken || lastScopeToken || "");
+		if (pendingScopeLoadingBlocksRender(scopeToken, { resolvePendingScopeLoading: true })) {
+			return true;
+		}
+		refs.messageList.classList.remove("is-chat-loading");
 		const metricsBefore = messageListMetrics();
 		const detachedBeforeRender = !metricsBefore.nearBottom;
 		const distanceFromBottom = metricsBefore.distanceFromBottom;
@@ -3868,7 +4005,7 @@
 		if (html) {
 			scope.serverLogHtml = html;
 		}
-		renderMessages(snapshot, { forceSync: true });
+		renderMessages(snapshot, { forceSync: true, resolvePendingScopeLoading: true });
 		traceModernUi("serverLog.reset", startedAt);
 		return true;
 	}
@@ -3890,6 +4027,10 @@
 			String(scope.label || ""),
 			String(scope.description || "")
 		].join("|");
+		if (pendingScopeLoadingBlocksRender(scopeToken, renderOptions)) {
+			return;
+		}
+		refs.messageList.classList.remove("is-chat-loading");
 		const scopeChanged = scopeToken !== lastScopeToken;
 		const metricsBefore = messageListMetrics();
 		const detachedBeforeRender = !scopeChanged && !metricsBefore.nearBottom;
@@ -3926,12 +4067,11 @@
 
 			const fragment = document.createDocumentFragment();
 			if (cachedServerLogElement && (!serverLogRevision || cachedServerLogRevision === serverLogRevision)) {
+				refs.messageList.classList.remove("is-chat-loading");
 				fragment.appendChild(cachedServerLogElement);
 			} else {
-				const empty = document.createElement("div");
-				empty.className = "empty-state";
-				empty.innerHTML = "<h2>Activity is loading</h2><p>The latest activity will appear shortly.</p>";
-				fragment.appendChild(empty);
+				refs.messageList.classList.add("is-chat-loading");
+				fragment.appendChild(createChatLoadingIndicator());
 			}
 			replaceChildrenWith(refs.messageList, fragment);
 			requestAnimationFrame(function() {
@@ -4661,7 +4801,7 @@
 		renderRoomList(refs.textRoomList, textRooms, {
 			joinable: false,
 			voicePresence: null,
-			hideWhenEmpty: true
+			hideWhenEmpty: !(app.canManageTextChannels || app.canCreateTextRoom)
 		});
 		const renderedActiveRailToken = activeRailToken();
 		if (!renderedActiveRailToken) {
@@ -4676,7 +4816,7 @@
 		renderScreenShareHeader(scope, scope.screenShare || null);
 		renderScreenShareCard(scope, scope.screenShare || null);
 		renderNote(app, scope);
-		renderMessages(snapshot);
+		renderMessages(snapshot, { resolvePendingScopeLoading: true });
 		renderSelfCard(app);
 		syncAmbientState(snapshot);
 		if (appMenuOpen) {
@@ -4779,14 +4919,19 @@
 		const willTrimHead = nextMessages.length > 200;
 		snapshot.messages = willTrimHead ? nextMessages.slice(nextMessages.length - 200) : nextMessages;
 		if (activeMessageChunkRender) {
-			renderMessages(snapshot, { forceSync: true });
+			renderMessages(snapshot, { forceSync: true, resolvePendingScopeLoading: true });
 			return true;
 		}
 		if (willTrimHead || String((snapshot.activeScope || {}).scopeToken || "") !== lastScopeToken) {
-			renderMessages(snapshot);
+			renderMessages(snapshot, { resolvePendingScopeLoading: true });
 			return true;
 		}
 
+		const activeScopeToken = String((snapshot.activeScope || {}).scopeToken || "");
+		if (pendingScopeLoadingBlocksRender(activeScopeToken, { resolvePendingScopeLoading: true })) {
+			return true;
+		}
+		refs.messageList.classList.remove("is-chat-loading");
 		const metricsBefore = messageListMetrics();
 		const detachedBeforeRender = !metricsBefore.nearBottom;
 		const distanceFromBottom = metricsBefore.distanceFromBottom;
@@ -4797,7 +4942,7 @@
 			unreadDetachedMessages += freshTailCount;
 		}
 		if (!appendTimelineMessages(appended, previousMessages)) {
-			renderMessages(snapshot);
+			renderMessages(snapshot, { resolvePendingScopeLoading: true });
 			return true;
 		}
 
@@ -4848,7 +4993,7 @@
 		}
 
 		if (!replaceRenderedMessage(Object.assign({ renderIndex: existingIndex }, updated))) {
-			renderMessages(snapshot);
+			renderMessages(snapshot, { resolvePendingScopeLoading: true });
 		}
 		lastRenderedTailKey = latestTailMessageKey(snapshot.messages);
 		return true;
@@ -4860,7 +5005,7 @@
 		}
 		replaceActiveScopeFromPatch(snapshot, patch);
 		snapshot.messages = Array.isArray(patch.messages) ? patch.messages : [];
-		renderMessages(snapshot);
+		renderMessages(snapshot, { resolvePendingScopeLoading: true });
 		renderActiveScopePatch(snapshot);
 		return true;
 	}
@@ -4938,7 +5083,7 @@
 			if (kind === "activeScope.update" || kind === "serverLog.update") {
 				renderActiveScopePatch(snapshot);
 				if (kind === "serverLog.update") {
-					renderMessages(snapshot);
+					renderMessages(snapshot, { resolvePendingScopeLoading: true });
 				}
 				return;
 			}
@@ -5014,7 +5159,7 @@
 				label: "Open room",
 				enabled: !!roomToken,
 				action: function() {
-					notifyBridge("selectScope", roomToken);
+					selectRoomScope(roomToken);
 				}
 			}
 		];

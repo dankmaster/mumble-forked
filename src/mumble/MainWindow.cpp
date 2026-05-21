@@ -6591,8 +6591,10 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() const {
 														: (Global::get().s.bMute ? QStringLiteral("warning")
 																				 : QStringLiteral("success"))));
 	appState.insert(QStringLiteral("selfVoiceLabel"), selfVoiceChannel ? selfVoiceChannel->qsName : QString());
+	appState.insert(QStringLiteral("canManageTextChannels"), canManagePersistentTextChannels());
+	appState.insert(QStringLiteral("canCreateTextRoom"), canCreateTextRoom());
 	if (const Channel *rootVoiceChannel = Channel::get(Mumble::ROOT_CHANNEL_ID)) {
-		appState.insert(QStringLiteral("voiceRootLabel"), rootVoiceChannel->qsName);
+		appState.insert(QStringLiteral("voiceRootLabel"), QString());
 		appState.insert(QStringLiteral("voiceRootScopeToken"),
 						modernShellScopeToken(static_cast< int >(MumbleProto::Channel), rootVoiceChannel->iId));
 	}
@@ -6677,39 +6679,38 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() const {
 		}
 	}
 
-	std::function< void(const Channel *, int) > appendVoiceRooms = [&](const Channel *parent, const int depth) {
-		if (!parent) {
+	std::function< void(const Channel *, int) > appendVoiceRoomTree = [&](const Channel *channel, const int depth) {
+		if (!channel) {
 			return;
 		}
 
-		for (const Channel *channel : parent->qlChannels) {
-			if (!channel) {
-				continue;
-			}
+		const bool selected   = target.valid && target.scope == MumbleProto::Channel && target.scopeID == channel->iId;
+		const bool joined     = joinedVoiceChannel && joinedVoiceChannel->iId == channel->iId;
+		const bool isRootRoom = channel->iId == Mumble::ROOT_CHANNEL_ID;
+		QVariantMap room;
+		room.insert(QStringLiteral("token"),
+					modernShellScopeToken(static_cast< int >(MumbleProto::Channel), channel->iId));
+		room.insert(QStringLiteral("label"), channel->qsName);
+		room.insert(QStringLiteral("description"),
+					tr("%1 people in %2").arg(channel->qlUsers.count()).arg(persistentTextAclChannelLabel(channel)));
+		room.insert(QStringLiteral("pathLabel"), persistentTextAclChannelLabel(channel));
+		room.insert(QStringLiteral("depth"), depth);
+		room.insert(QStringLiteral("isRoot"), isRootRoom);
+		room.insert(QStringLiteral("memberCount"), channel->qlUsers.count());
+		room.insert(QStringLiteral("participants"), buildModernShellChannelParticipantPatchStates(channel, 32, false));
+		room.insert(QStringLiteral("selected"), selected);
+		room.insert(QStringLiteral("joined"), joined);
+		room.insert(QStringLiteral("unreadCount"),
+					static_cast< qulonglong >(cachedPersistentChatUnreadCount(MumbleProto::Channel, channel->iId)));
+		room.insert(QStringLiteral("kindLabel"), tr("Voice room"));
+		room.insert(QStringLiteral("screenShare"), buildModernShellVoiceRoomScreenShareState(channel));
+		voiceRooms.push_back(room);
 
-			const bool selected = target.valid && target.scope == MumbleProto::Channel && target.scopeID == channel->iId;
-			const bool joined   = joinedVoiceChannel && joinedVoiceChannel->iId == channel->iId;
-			QVariantMap room;
-			room.insert(QStringLiteral("token"),
-						modernShellScopeToken(static_cast< int >(MumbleProto::Channel), channel->iId));
-			room.insert(QStringLiteral("label"), channel->qsName);
-			room.insert(QStringLiteral("description"),
-						tr("%1 people in %2").arg(channel->qlUsers.count()).arg(persistentTextAclChannelLabel(channel)));
-			room.insert(QStringLiteral("pathLabel"), persistentTextAclChannelLabel(channel));
-			room.insert(QStringLiteral("depth"), depth);
-			room.insert(QStringLiteral("memberCount"), channel->qlUsers.count());
-			room.insert(QStringLiteral("participants"), buildModernShellChannelParticipantPatchStates(channel, 32, false));
-			room.insert(QStringLiteral("selected"), selected);
-			room.insert(QStringLiteral("joined"), joined);
-			room.insert(QStringLiteral("unreadCount"),
-						static_cast< qulonglong >(cachedPersistentChatUnreadCount(MumbleProto::Channel, channel->iId)));
-			room.insert(QStringLiteral("kindLabel"), tr("Voice room"));
-			room.insert(QStringLiteral("screenShare"), buildModernShellVoiceRoomScreenShareState(channel));
-			voiceRooms.push_back(room);
-			appendVoiceRooms(channel, depth + 1);
+		for (const Channel *child : channel->qlChannels) {
+			appendVoiceRoomTree(child, depth + 1);
 		}
 	};
-	appendVoiceRooms(Channel::get(Mumble::ROOT_CHANNEL_ID), 0);
+	appendVoiceRoomTree(Channel::get(Mumble::ROOT_CHANNEL_ID), 0);
 
 	QVariantList participants;
 	if (target.directMessage && target.user) {
@@ -7060,8 +7061,10 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 																				 : QStringLiteral("success"))));
 	appState.insert(QStringLiteral("selfVoiceLabel"), selfVoiceChannel ? selfVoiceChannel->qsName : QString());
 	appState.insert(QStringLiteral("selfAvatarUrl"), modernShellAvatarDataUrl(selfUser, 56));
+	appState.insert(QStringLiteral("canManageTextChannels"), canManagePersistentTextChannels());
+	appState.insert(QStringLiteral("canCreateTextRoom"), canCreateTextRoom());
 	if (const Channel *rootVoiceChannel = Channel::get(Mumble::ROOT_CHANNEL_ID)) {
-		appState.insert(QStringLiteral("voiceRootLabel"), rootVoiceChannel->qsName);
+		appState.insert(QStringLiteral("voiceRootLabel"), QString());
 		appState.insert(QStringLiteral("voiceRootScopeToken"),
 						modernShellScopeToken(static_cast< int >(MumbleProto::Channel), rootVoiceChannel->iId));
 	}
@@ -7656,45 +7659,42 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 		}
 	}
 
-	std::function< void(const Channel *, int) > appendVoiceRooms = [&](const Channel *parent, int depth) {
-		if (!parent) {
+	std::function< void(const Channel *, int) > appendVoiceRoomTree = [&](const Channel *channel, int depth) {
+		if (!channel) {
 			return;
 		}
 
-		for (const Channel *channel : parent->qlChannels) {
-			if (!channel) {
-				continue;
-			}
+		QVariantMap room;
+		room.insert(QStringLiteral("token"),
+					modernShellScopeToken(static_cast< int >(MumbleProto::Channel), channel->iId));
+		room.insert(QStringLiteral("label"), channel->qsName);
+		room.insert(QStringLiteral("description"),
+					tr("%1 people in %2").arg(channel->qlUsers.count()).arg(persistentTextAclChannelLabel(channel)));
+		room.insert(QStringLiteral("pathLabel"), persistentTextAclChannelLabel(channel));
+		room.insert(QStringLiteral("depth"), depth);
+		const bool isRootRoom = channel->iId == Mumble::ROOT_CHANNEL_ID;
+		room.insert(QStringLiteral("isRoot"), isRootRoom);
+		room.insert(QStringLiteral("memberCount"), channel->qlUsers.count());
+		const bool selectedVoiceRoom =
+			target.valid && target.scope == MumbleProto::Channel && target.scopeID == channel->iId;
+		const bool joinedVoiceRoom = joinedVoiceChannel && joinedVoiceChannel->iId == channel->iId;
+		room.insert(QStringLiteral("participants"), buildChannelParticipants(channel, 32, false, false));
+		room.insert(QStringLiteral("selected"), selectedVoiceRoom);
+		room.insert(QStringLiteral("joined"), joinedVoiceRoom);
+		room.insert(QStringLiteral("unreadCount"),
+					static_cast< qulonglong >(cachedPersistentChatUnreadCount(MumbleProto::Channel, channel->iId)));
+		room.insert(QStringLiteral("kindLabel"), tr("Voice room"));
+		if (selectedVoiceRoom || joinedVoiceRoom || isRootRoom) {
+			room.insert(QStringLiteral("actions"), buildChannelActions(const_cast< Channel * >(channel), true));
+		}
+		room.insert(QStringLiteral("screenShare"), buildVoiceRoomScreenShareState(channel));
+		voiceRooms.push_back(room);
 
-			QVariantMap room;
-			room.insert(QStringLiteral("token"),
-						modernShellScopeToken(static_cast< int >(MumbleProto::Channel), channel->iId));
-			room.insert(QStringLiteral("label"), channel->qsName);
-			room.insert(
-				QStringLiteral("description"),
-				tr("%1 people in %2").arg(channel->qlUsers.count()).arg(persistentTextAclChannelLabel(channel)));
-			room.insert(QStringLiteral("pathLabel"), persistentTextAclChannelLabel(channel));
-			room.insert(QStringLiteral("depth"), depth);
-			room.insert(QStringLiteral("memberCount"), channel->qlUsers.count());
-			const bool selectedVoiceRoom =
-				target.valid && target.scope == MumbleProto::Channel && target.scopeID == channel->iId;
-			const bool joinedVoiceRoom = joinedVoiceChannel && joinedVoiceChannel->iId == channel->iId;
-			room.insert(QStringLiteral("participants"), buildChannelParticipants(channel, 32, false, false));
-			room.insert(QStringLiteral("selected"), selectedVoiceRoom);
-			room.insert(QStringLiteral("joined"), joinedVoiceRoom);
-			room.insert(QStringLiteral("unreadCount"),
-						static_cast< qulonglong >(cachedPersistentChatUnreadCount(MumbleProto::Channel, channel->iId)));
-			room.insert(QStringLiteral("kindLabel"), tr("Voice room"));
-			if (selectedVoiceRoom || joinedVoiceRoom) {
-				room.insert(QStringLiteral("actions"), buildChannelActions(const_cast< Channel * >(channel), true));
-			}
-			room.insert(QStringLiteral("screenShare"), buildVoiceRoomScreenShareState(channel));
-			voiceRooms.push_back(room);
-
-			appendVoiceRooms(channel, depth + 1);
+		for (const Channel *child : channel->qlChannels) {
+			appendVoiceRoomTree(child, depth + 1);
 		}
 	};
-	appendVoiceRooms(Channel::get(Mumble::ROOT_CHANNEL_ID), 0);
+	appendVoiceRoomTree(Channel::get(Mumble::ROOT_CHANNEL_ID), 0);
 
 	QString kindLabel = tr("Conversation");
 	if (target.serverLog) {
