@@ -666,6 +666,7 @@ Server::ChatHistoryAccess Server::resolveChatHistoryAccess(ServerUser *user, Mum
 															unsigned int scopeID, Channel *permissionChannel,
 															ChanACL::ACLCache *cache) {
 	ChatHistoryAccess result;
+	Q_UNUSED(scopeID);
 	if (!user || !permissionChannel) {
 		return result;
 	}
@@ -674,7 +675,6 @@ Server::ChatHistoryAccess Server::resolveChatHistoryAccess(ServerUser *user, Mum
 		case MumbleProto::Channel:
 			break;
 		case MumbleProto::ServerGlobal:
-			scopeID = 0;
 			break;
 		case MumbleProto::TextChannel:
 			break;
