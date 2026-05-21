@@ -90,6 +90,11 @@ QString randomServerRelayCredential() {
 QByteArray base64UrlEncode(const QByteArray &input) {
 	return input.toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals);
 }
+
+std::chrono::system_clock::time_point serverCurrentConnectionVisibleAfter(const ServerUser *user) {
+	const int onlineSeconds = user ? std::max(0, user->bwr.onlineSeconds()) : 0;
+	return std::chrono::system_clock::now() - std::chrono::seconds(onlineSeconds + 1);
+}
 } // namespace
 
 ExecEvent::ExecEvent(std::function< void() > f) : QEvent(static_cast< QEvent::Type >(EXEC_QEVENT)) {
@@ -665,17 +670,13 @@ Server::ChatHistoryAccess Server::resolveChatHistoryAccess(ServerUser *user, Mum
 		return result;
 	}
 
-	msdb::ChatThreadScope dbScope = msdb::ChatThreadScope::Channel;
 	switch (scope) {
 		case MumbleProto::Channel:
-			dbScope = msdb::ChatThreadScope::Channel;
 			break;
 		case MumbleProto::ServerGlobal:
 			scopeID = 0;
-			dbScope = msdb::ChatThreadScope::ServerGlobal;
 			break;
 		case MumbleProto::TextChannel:
-			dbScope = msdb::ChatThreadScope::TextChannel;
 			break;
 		case MumbleProto::Aggregate:
 		default:
@@ -696,14 +697,7 @@ Server::ChatHistoryAccess Server::resolveChatHistoryAccess(ServerUser *user, Mum
 		return result;
 	}
 
-	const std::optional< msdb::DBChatHistoryGrant > grant =
-		m_dbWrapper.getChatHistoryGrant(iServerNum, static_cast< unsigned int >(user->iId), dbScope, scopeID);
-	if (!grant) {
-		return result;
-	}
-
-	result.allowed      = true;
-	result.visibleAfter = grant->visibleAfter;
+	result.allowed = true;
 	return result;
 }
 
@@ -741,11 +735,27 @@ bool Server::canAccessChatMessage(ServerUser *user, const msdb::DBChatMessage &m
 	}
 
 	const ChatHistoryAccess access = resolveChatHistoryAccess(user, thread, permissionChannel, cache);
-	if (!access.allowed) {
+	if (access.allowed) {
+		return access.visibleAfter == std::chrono::system_clock::time_point() || message.createdAt >= access.visibleAfter;
+	}
+
+	if (message.createdAt < serverCurrentConnectionVisibleAfter(user)) {
 		return false;
 	}
 
-	return access.visibleAfter == std::chrono::system_clock::time_point() || message.createdAt >= access.visibleAfter;
+	ChanACL::ACLCache *effectiveCache = cache ? cache : &acCache;
+	switch (thread.scope) {
+		case msdb::ChatThreadScope::Channel:
+			return user->cChannel == permissionChannel
+				   || m_channelListenerManager.isListening(user->uiSession, permissionChannel->iId);
+		case msdb::ChatThreadScope::ServerGlobal:
+		case msdb::ChatThreadScope::TextChannel:
+			return ChanACL::hasPermission(user, permissionChannel, ChanACL::TextMessage, effectiveCache);
+		case msdb::ChatThreadScope::Private:
+			return false;
+	}
+
+	return false;
 }
 
 bool Server::canAccessChatAsset(ServerUser *user, unsigned int assetID) {
