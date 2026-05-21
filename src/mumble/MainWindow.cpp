@@ -6697,7 +6697,7 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() const {
 		room.insert(QStringLiteral("depth"), depth);
 		room.insert(QStringLiteral("isRoot"), isRootRoom);
 		room.insert(QStringLiteral("memberCount"), channel->qlUsers.count());
-		room.insert(QStringLiteral("participants"), buildModernShellChannelParticipantPatchStates(channel, 32, false));
+		room.insert(QStringLiteral("participants"), buildModernShellChannelParticipantPatchStates(channel, 32, true));
 		room.insert(QStringLiteral("selected"), selected);
 		room.insert(QStringLiteral("joined"), joined);
 		room.insert(QStringLiteral("unreadCount"),
@@ -7678,7 +7678,7 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 		const bool selectedVoiceRoom =
 			target.valid && target.scope == MumbleProto::Channel && target.scopeID == channel->iId;
 		const bool joinedVoiceRoom = joinedVoiceChannel && joinedVoiceChannel->iId == channel->iId;
-		room.insert(QStringLiteral("participants"), buildChannelParticipants(channel, 32, false, false));
+		room.insert(QStringLiteral("participants"), buildChannelParticipants(channel, 32, false, true));
 		room.insert(QStringLiteral("selected"), selectedVoiceRoom);
 		room.insert(QStringLiteral("joined"), joinedVoiceRoom);
 		room.insert(QStringLiteral("unreadCount"),
