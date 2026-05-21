@@ -188,8 +188,7 @@ ACLEditor::ACLEditor(unsigned int channelid, const MumbleProto::ACL &mea, QWidge
 	def->iUserId    = -1;
 	def->qsGroup    = QLatin1String("all");
 	def->pAllow =
-		ChanACL::Traverse | ChanACL::Enter | ChanACL::Speak | ChanACL::Whisper | ChanACL::TextMessage | ChanACL::Listen
-		| ChanACL::ViewTextMessageHistory;
+		ChanACL::Traverse | ChanACL::Enter | ChanACL::Speak | ChanACL::Whisper | ChanACL::TextMessage | ChanACL::Listen;
 	def->pDeny = (~def->pAllow) & ChanACL::All;
 
 	qlACLs << def;
@@ -631,10 +630,11 @@ void ACLEditor::ACLEnableCheck() {
 	qcbACLUser->setEnabled(enabled);
 
 	for (int idx = 0; idx < qlACLAllow.count(); idx++) {
-		// Only enable other checkboxes if writeacl isn't set
+		// Only enable permissions not implied by Write if Write ACL is not set.
 		bool enablethis = enabled
 						  && (qlPerms[idx] == ChanACL::Write || !(as && (as->pAllow & ChanACL::Write))
-							  || qlPerms[idx] == ChanACL::Speak);
+							  || qlPerms[idx] == ChanACL::Speak
+							  || qlPerms[idx] == ChanACL::ViewTextMessageHistory);
 		qlACLAllow[idx]->setEnabled(enablethis);
 		qlACLDeny[idx]->setEnabled(enablethis);
 	}
@@ -754,7 +754,7 @@ void ACLEditor::updatePasswordACL() {
 			pcaPassword->bInherited = false;
 			pcaPassword->pAllow     = ChanACL::None;
 			pcaPassword->pDeny      = ChanACL::Enter | ChanACL::Speak | ChanACL::Whisper | ChanACL::TextMessage
-								 | ChanACL::LinkChannel | ChanACL::Traverse | ChanACL::ViewTextMessageHistory;
+								 | ChanACL::LinkChannel | ChanACL::Traverse;
 			pcaPassword->qsGroup = QLatin1String("all");
 			qlACLs << pcaPassword;
 
@@ -763,7 +763,7 @@ void ACLEditor::updatePasswordACL() {
 			pcaPassword->bApplySubs = false;
 			pcaPassword->bInherited = false;
 			pcaPassword->pAllow     = ChanACL::Enter | ChanACL::Speak | ChanACL::Whisper | ChanACL::TextMessage
-								  | ChanACL::LinkChannel | ChanACL::Traverse | ChanACL::ViewTextMessageHistory;
+								  | ChanACL::LinkChannel | ChanACL::Traverse;
 			pcaPassword->pDeny   = ChanACL::None;
 			pcaPassword->qsGroup = QString(QLatin1String("#%1")).arg(qleChannelPassword->text());
 			qlACLs << pcaPassword;
@@ -990,8 +990,8 @@ void ACLEditor::ACLPermissions_clicked() {
 			}
 		}
 
-		qlACLAllow[idx]->setEnabled(enabled || p == ChanACL::Speak);
-		qlACLDeny[idx]->setEnabled(enabled || p == ChanACL::Speak);
+		qlACLAllow[idx]->setEnabled(enabled || p == ChanACL::Speak || p == ChanACL::ViewTextMessageHistory);
+		qlACLDeny[idx]->setEnabled(enabled || p == ChanACL::Speak || p == ChanACL::ViewTextMessageHistory);
 
 		if (p == ChanACL::Write && qlACLAllow[idx]->isChecked())
 			enabled = false;

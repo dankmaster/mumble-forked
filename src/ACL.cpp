@@ -14,23 +14,6 @@
 #	include <QtCore/QStack>
 #endif
 
-#ifdef MURMUR
-namespace {
-void applyLegacyTextMessageHistoryCompat(ChanACL::Permissions &allow, ChanACL::Permissions &deny) {
-	if ((allow | deny) & ChanACL::ViewTextMessageHistory) {
-		return;
-	}
-
-	if (allow & ChanACL::TextMessage) {
-		allow |= ChanACL::ViewTextMessageHistory;
-	}
-	if (deny & ChanACL::TextMessage) {
-		deny |= ChanACL::ViewTextMessageHistory;
-	}
-}
-} // namespace
-#endif
-
 ChanACL::ChanACL(Channel *chan) : QObject(chan) {
 	bApplyHere = true;
 	bApplySubs = true;
@@ -144,7 +127,7 @@ QFlags< ChanACL::Perm > ChanACL::effectivePermissions(ServerUser *p, Channel *ch
 	}
 
 	// Default permissions
-	Permissions def = Traverse | Enter | Speak | Whisper | TextMessage | Listen | ViewTextMessageHistory;
+	Permissions def = Traverse | Enter | Speak | Whisper | TextMessage | Listen;
 
 	granted = def;
 
@@ -187,7 +170,6 @@ QFlags< ChanACL::Perm > ChanACL::effectivePermissions(ServerUser *p, Channel *ch
 			if (matchUser || matchGroup) {
 				Permissions allow = acl->pAllow;
 				Permissions deny  = acl->pDeny;
-				applyLegacyTextMessageHistoryCompat(allow, deny);
 
 				// The "traverse" and "write" booleans do not grant or deny anything here.
 				// We merely check, if we are missing traverse AND write in this
@@ -248,7 +230,7 @@ QFlags< ChanACL::Perm > ChanACL::effectivePermissions(ServerUser *p, Channel *ch
 
 	if (granted & Write) {
 		granted |= Traverse | Enter | MuteDeafen | Move | MakeChannel | LinkChannel | TextMessage | MakeTempChannel
-				   | Listen | DeleteTextMessage | ViewTextMessageHistory;
+				   | Listen | DeleteTextMessage;
 		if (chan->iId == 0)
 			granted |= Kick | Ban | ResetUserContent | Register | SelfRegister;
 	}
@@ -407,8 +389,8 @@ QString ChanACL::permName(Perm p) {
 bool ChanACL::isPassword() const {
 	// A password is an ACL that applies to a group of the form '#<something>'
 	// AND grants 'Enter'
-	// AND grants 'Speak', 'Whisper', 'TextMessage', 'LinkChannel', potentially 'ViewTextMessageHistory' and
-	// potentially Traverse but NOTHING else
+	// AND grants 'Speak', 'Whisper', 'TextMessage', 'LinkChannel', potentially 'ViewTextMessageHistory' for
+	// compatibility with ACLs saved by earlier fork builds and potentially Traverse but NOTHING else
 	// AND does not deny anything.
 	// Furthermore the ACL must apply directly to the channel and may not be inherited.
 	const Permissions legacyPasswordPermissions = ChanACL::Enter | ChanACL::Speak | ChanACL::Whisper

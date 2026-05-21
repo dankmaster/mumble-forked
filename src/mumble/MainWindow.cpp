@@ -14113,7 +14113,7 @@ bool MainWindow::canViewPersistentChatHistory(const PersistentChatTarget &target
 
 	if (target.scope == MumbleProto::ServerGlobal) {
 		return Global::get().bPersistentGlobalChatEnabled
-			   && (Global::get().pPermissions & (ChanACL::Write | ChanACL::ViewTextMessageHistory));
+			   && (Global::get().pPermissions & ChanACL::ViewTextMessageHistory);
 	}
 
 	if (target.scope != MumbleProto::TextChannel && target.scope != MumbleProto::Channel) {
@@ -14132,7 +14132,7 @@ bool MainWindow::canViewPersistentChatHistory(const PersistentChatTarget &target
 		permissionChannel->uiPermissions = textPermissions;
 	}
 
-	return textPermissions & (ChanACL::Write | ChanACL::ViewTextMessageHistory);
+	return textPermissions & ChanACL::ViewTextMessageHistory;
 }
 
 bool MainWindow::canSendToPersistentChatTarget(const PersistentChatTarget &target, bool requestPermissions) const {
