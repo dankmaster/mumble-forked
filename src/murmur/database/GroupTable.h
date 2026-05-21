@@ -61,7 +61,8 @@ namespace server {
 
 			void clearGroups(unsigned int serverID, unsigned int channelID);
 
-			std::optional< unsigned int > findGroupID(unsigned int serverID, const std::string &name);
+			std::optional< unsigned int > findGroupID(unsigned int serverID, unsigned int channelID,
+													  const std::string &name);
 
 
 			std::size_t countGroups(unsigned int serverID, unsigned int channelID);

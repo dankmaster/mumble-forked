@@ -247,15 +247,17 @@ namespace server {
 			}
 		}
 
-		std::optional< unsigned int > GroupTable::findGroupID(unsigned int serverID, const std::string &name) {
+		std::optional< unsigned int > GroupTable::findGroupID(unsigned int serverID, unsigned int channelID,
+															  const std::string &name) {
 			try {
 				::mdb::TransactionHolder transaction = ensureTransaction();
 
 				unsigned int groupID;
 
 				m_sql << "SELECT \"" << column::group_id << "\" FROM \"" << NAME << "\" WHERE \"" << column::server_id
-					  << "\" = :serverID AND \"" << column::group_name << "\" = :groupName",
-					soci::use(serverID), soci::use(name), soci::into(groupID);
+					  << "\" = :serverID AND \"" << column::channel_id << "\" = :channelID AND \""
+					  << column::group_name << "\" = :groupName",
+					soci::use(serverID), soci::use(channelID), soci::use(name), soci::into(groupID);
 
 				transaction.commit();
 
@@ -263,7 +265,8 @@ namespace server {
 
 			} catch (const soci::soci_error &) {
 				std::throw_with_nested(::mdb::AccessException("Failed at searching for group with name \"" + name
-															  + "\" on server with ID " + std::to_string(serverID)));
+															  + "\" in channel with ID " + std::to_string(channelID)
+															  + " on server with ID " + std::to_string(serverID)));
 			}
 		}
 

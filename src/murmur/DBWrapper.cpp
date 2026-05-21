@@ -710,10 +710,19 @@ void DBWrapper::updateChannelData(unsigned int serverID, const Channel &channel)
 			}
 
 			if (!metaGroup && !accessToken) {
-				associatedGroupID = m_serverDB.getGroupTable().findGroupID(serverID, data.name);
+				associatedGroupID = m_serverDB.getGroupTable().findGroupID(serverID, channel.iId, data.name);
 
 				if (!associatedGroupID) {
-					throw ::mdb::NoDataException("Required ID of non-existing group \"" + data.name + "\"");
+					// Legacy ACLs may name groups that don't have a stored local definition yet.
+					::msdb::DBGroup placeholderGroup;
+					placeholderGroup.serverID       = serverID;
+					placeholderGroup.channelID      = channel.iId;
+					placeholderGroup.groupID        = m_serverDB.getGroupTable().getFreeGroupID(serverID);
+					placeholderGroup.name           = data.name;
+					placeholderGroup.inherit        = true;
+					placeholderGroup.is_inheritable = true;
+					m_serverDB.getGroupTable().addGroup(placeholderGroup);
+					associatedGroupID = placeholderGroup.groupID;
 				}
 			}
 		}
