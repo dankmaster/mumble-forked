@@ -1022,6 +1022,31 @@ textarea:focus-visible {
 	transition: box-shadow 180ms ease;
 }
 
+.message-list.is-chat-loading {
+	align-items: center;
+	justify-content: center;
+}
+
+.chat-loading-indicator {
+	display: flex;
+	flex: 1 1 auto;
+	align-items: center;
+	justify-content: center;
+	width: 100%;
+	min-height: 160px;
+	contain: layout paint;
+}
+
+.chat-loading-spinner {
+	width: 28px;
+	height: 28px;
+	border: 3px solid rgba(255, 255, 255, 0.12);
+	border-top-color: var(--accent);
+	border-radius: 50%;
+	box-shadow: 0 0 0 1px rgba(78, 184, 159, 0.08) inset;
+	animation: chat-loading-spin 760ms linear infinite;
+}
+
 .message-list::-webkit-scrollbar,
 .note-body::-webkit-scrollbar,
 .rail-list::-webkit-scrollbar,
@@ -2024,6 +2049,10 @@ textarea:focus-visible {
 	border-left-color: var(--accent);
 }
 
+.rail-row.is-root-room .rail-row-title {
+	font-weight: 700;
+}
+
 .kind-chip {
 	display: inline-flex;
 	align-items: center;
@@ -2641,6 +2670,12 @@ textarea:focus-visible {
 	to {
 		opacity: 1;
 		transform: translateY(0);
+	}
+}
+
+@keyframes chat-loading-spin {
+	to {
+		transform: rotate(360deg);
 	}
 }
 
