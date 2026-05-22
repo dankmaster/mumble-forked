@@ -18,6 +18,7 @@
 #include "ChatFeature.h"
 #include "Connection.h"
 #include "Database.h"
+#include "ForkFeature.h"
 #include "HostAddress.h"
 #include "MainWindow.h"
 #include "Net.h"
@@ -74,6 +75,10 @@ QMutex ServerHandler::nextConnectionIDMutex;
 namespace {
 bool serverAllowsAdvertisedChatFeature(const MumbleProto::ChatFeature feature) {
 	return Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures, feature);
+}
+
+bool serverAllowsAdvertisedForkFeature(const MumbleProto::ForkFeature feature) {
+	return Mumble::ForkFeatures::serverAllowsClientFeature(Global::get().qlSupportedForkFeatures, feature);
 }
 
 bool connectTraceEnabled() {
@@ -909,6 +914,7 @@ void ServerHandler::serverConnectionConnected() {
 	MumbleProto::setVersion(mpv, Version::get());
 	mpv.set_supports_persistent_chat(true);
 	Mumble::ChatFeatures::addSupportedFeatures(mpv);
+	Mumble::ForkFeatures::addSupportedFeatures(mpv);
 	ScreenShareHelperClient::applyAdvertisedCapabilities(mpv);
 
 	const QString advertisedOS        = Global::get().s.qsAdvertisedOSOverride.trimmed();
@@ -1339,6 +1345,14 @@ void ServerHandler::updateChatReadState(MumbleProto::ChatScope scope, unsigned i
 	update.set_scope_id(scopeID);
 	update.set_last_read_message_id(lastReadMessageID);
 	sendMessage(update);
+}
+
+void ServerHandler::sendWatchTogetherSync(const MumbleProto::WatchTogetherSync &sync) {
+	if (!serverAllowsAdvertisedForkFeature(MumbleProto::ForkFeatureWatchTogetherRooms)) {
+		return;
+	}
+
+	sendMessage(sync);
 }
 
 void ServerHandler::setUserComment(unsigned int uiSession, const QString &comment) {

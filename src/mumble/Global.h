@@ -103,7 +103,9 @@ public:
 	bool bAllowHTML;
 	bool bPersistentGlobalChatEnabled;
 	QList< int > qlSupportedChatFeatures;
+	QList< int > qlSupportedForkFeatures;
 	unsigned int uiPersistentChatProtocolVersion;
+	unsigned int uiForkExtensionProtocolVersion;
 	bool bScreenShareEnabled;
 	bool bScreenShareRecordingEnabled;
 	bool bScreenShareHelperRequired;

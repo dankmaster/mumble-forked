@@ -19,6 +19,7 @@
 #include "ConnectDialog.h"
 #include "Connection.h"
 #include "Database.h"
+#include "ForkFeature.h"
 #include "Log.h"
 #include "MainWindow.h"
 #include "MumbleConstants.h"
@@ -71,6 +72,38 @@
 	}
 
 namespace {
+	QString normalizedChatAssetMime(const QString &mime) {
+		return mime.section(QLatin1Char(';'), 0, 0).trimmed().toLower();
+	}
+
+	bool isPersistentChatPlayableMediaMime(const QString &mime) {
+		const QString normalized = normalizedChatAssetMime(mime);
+		return normalized == QLatin1String("image/gif") || normalized == QLatin1String("video/webm");
+	}
+
+	QString persistentChatPlayableMediaKind(const QString &mime, MumbleProto::ChatAssetKind kind) {
+		const QString normalized = normalizedChatAssetMime(mime);
+		if (kind == MumbleProto::ChatAssetKindVideo || normalized.startsWith(QLatin1String("video/"))) {
+			return QStringLiteral("video");
+		}
+		if (normalized == QLatin1String("image/gif")) {
+			return QStringLiteral("gif");
+		}
+		if (kind == MumbleProto::ChatAssetKindImage || normalized.startsWith(QLatin1String("image/"))) {
+			return QStringLiteral("image");
+		}
+		return QStringLiteral("media");
+	}
+
+	QString persistentChatPlayableMediaDataUrl(const QString &mime, const QByteArray &bytes) {
+		const QString normalized = normalizedChatAssetMime(mime);
+		if (!isPersistentChatPlayableMediaMime(normalized) || bytes.isEmpty()) {
+			return QString();
+		}
+
+		return QString::fromLatin1("data:%1;base64,%2").arg(normalized, QString::fromLatin1(bytes.toBase64()));
+	}
+
 	QList< int > preferredScreenShareCodecsFromConfig(const MumbleProto::ServerConfig &msg) {
 		QList< int > codecs;
 		codecs.reserve(msg.preferred_screen_share_codecs_size());
@@ -372,6 +405,12 @@ void MainWindow::msgServerConfig(const MumbleProto::ServerConfig &msg) {
 										   MumbleProto::ChatFeaturePersistentHistory)) {
 			markPersistentChatAvailable(false);
 		}
+		modernLayoutCompatibleAdvertised = true;
+	}
+	if (msg.supported_fork_features_size() > 0 || msg.has_fork_extension_protocol_version()) {
+		Global::get().qlSupportedForkFeatures      = Mumble::ForkFeatures::featuresFromServerConfig(msg);
+		Global::get().uiForkExtensionProtocolVersion =
+			msg.has_fork_extension_protocol_version() ? msg.fork_extension_protocol_version() : 0;
 		modernLayoutCompatibleAdvertised = true;
 	}
 	if (msg.has_screen_share_enabled()) {
@@ -1622,6 +1661,12 @@ void MainWindow::msgVersion(const MumbleProto::Version &msg) {
 			m_modernLayoutCompatibleServer = true;
 		}
 	}
+	if (msg.supported_fork_features_size() > 0 || msg.has_fork_extension_protocol_version()) {
+		Global::get().qlSupportedForkFeatures      = Mumble::ForkFeatures::featuresFromVersion(msg);
+		Global::get().uiForkExtensionProtocolVersion =
+			msg.has_fork_extension_protocol_version() ? msg.fork_extension_protocol_version() : 0;
+		m_modernLayoutCompatibleServer = true;
+	}
 
 	if (msg.has_release())
 		Global::get().sh->qsRelease = u8(msg.release());
@@ -1882,6 +1927,12 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 	if (msg.has_total_size()) {
 		it->totalSize = msg.total_size();
 	}
+	if (msg.has_mime()) {
+		it->mime = normalizedChatAssetMime(u8(msg.mime()));
+	}
+	if (msg.has_kind()) {
+		it->kind = msg.kind();
+	}
 	if (msg.has_data() && !msg.data().empty()) {
 		it->bytes.append(msg.data().data(), static_cast< int >(msg.data().size()));
 	}
@@ -1907,6 +1958,9 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 		mumble::chatperf::ScopedDuration decodeTrace("chat.asset_chunk.decode");
 		image.loadFromData(it->bytes);
 	}
+	const bool playableMedia = isPersistentChatPlayableMediaMime(it->mime);
+	const QString mediaDataUrl =
+		playableMedia ? persistentChatPlayableMediaDataUrl(it->mime, it->bytes) : QString();
 	for (const QString &previewKey : it->previewKeys) {
 		auto previewIt = m_persistentChatPreviews.find(previewKey);
 		if (previewIt == m_persistentChatPreviews.end()) {
@@ -1914,7 +1968,16 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 		}
 
 		previewIt->thumbnailFinished = true;
-		if (!image.isNull()) {
+		if (!mediaDataUrl.isEmpty()) {
+			previewIt->mediaDataUrl = mediaDataUrl;
+			previewIt->mediaMime    = it->mime;
+			previewIt->mediaKind    = persistentChatPlayableMediaKind(it->mime, it->kind);
+			previewIt->autoplay     = false;
+			previewIt->failed       = false;
+			if (!image.isNull()) {
+				previewIt->thumbnailImage = image;
+			}
+		} else if (!image.isNull()) {
 			previewIt->thumbnailImage = image;
 			previewIt->failed         = false;
 		} else {
@@ -1939,6 +2002,9 @@ void MainWindow::msgChatReactionState(const MumbleProto::ChatReactionState &msg)
 }
 
 void MainWindow::msgChatHistoryGrantSync(const MumbleProto::ChatHistoryGrantSync &) {
+}
+
+void MainWindow::msgWatchTogetherSync(const MumbleProto::WatchTogetherSync &) {
 }
 
 void MainWindow::msgScreenShareCreate(const MumbleProto::ScreenShareCreate &) {

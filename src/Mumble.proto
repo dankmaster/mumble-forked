@@ -21,6 +21,23 @@ enum ChatFeature {
 	ChatFeatureTextChannels = 8;
 }
 
+enum ForkFeature {
+	// Server fetches, sanitizes, downscales, caches, and serves link previews
+	// through ChatEmbedRef/ChatAssetRef instead of asking clients to load
+	// third-party preview media directly.
+	ForkFeatureServerLinkPreviewProxy = 0;
+	// Ephemeral room-scoped shared playback sessions for direct media and
+	// provider-backed sources such as YouTube.
+	ForkFeatureWatchTogetherRooms = 1;
+	// Richer screen-share presence/state for late joiners, diagnostics, viewer
+	// counts, and preview thumbnails.
+	ForkFeatureScreenShareSessionPresence = 2;
+	// Client-side presentation contract for virtualized chat timelines and
+	// media cards. This is advertised so servers and clients can reason about
+	// payload shapes without guessing from release strings.
+	ForkFeatureVirtualizedChatPresentation = 3;
+}
+
 message Version {
 	// Legacy version number format.
 	optional uint32 version_v1 = 1;
@@ -52,6 +69,10 @@ message Version {
 	optional uint32 max_screen_share_fps = 13;
 	// Fine-grained chat protocol features this endpoint supports.
 	repeated ChatFeature supported_chat_features = 14 [packed = true];
+	// Protocol revision for fork-specific extension features.
+	optional uint32 fork_extension_protocol_version = 15 [default = 1];
+	// Fork-specific extension features this endpoint supports.
+	repeated ForkFeature supported_fork_features = 16 [packed = true];
 }
 
 // Not used. Not even for tunneling UDP through TCP.
@@ -688,6 +709,10 @@ message ServerConfig {
 	optional uint32 persistent_chat_protocol_version = 17 [default = 1];
 	// Fine-grained persistent chat features enabled by this server build.
 	repeated ChatFeature supported_chat_features = 18 [packed = true];
+	// Protocol revision for fork-specific extension features.
+	optional uint32 fork_extension_protocol_version = 19 [default = 1];
+	// Fork-specific extension features enabled by this server build.
+	repeated ForkFeature supported_fork_features = 20 [packed = true];
 }
 
 // Sent by the server to inform the clients of suggested client configuration
@@ -1021,6 +1046,41 @@ message ScreenShareStop {
 	optional uint32 actor_session = 3;
 	optional ScreenShareLifecycleState state = 4 [default = ScreenShareLifecycleStateStopped];
 	optional string reason = 5;
+}
+
+enum WatchTogetherSourceKind {
+	WatchTogetherSourceDirectMedia = 0;
+	WatchTogetherSourceYouTube = 1;
+}
+
+enum WatchTogetherEvent {
+	WatchTogetherEventStart = 0;
+	WatchTogetherEventState = 1;
+	WatchTogetherEventJoin = 2;
+	WatchTogetherEventLeave = 3;
+	WatchTogetherEventStateRequest = 4;
+	WatchTogetherEventEnd = 5;
+	WatchTogetherEventHostTransfer = 6;
+}
+
+// Ephemeral room session control for synchronized media playback. The server
+// stamps actor_session, validates room permissions, and keeps the latest state
+// for late joiners. This is intentionally independent of screen sharing.
+message WatchTogetherSync {
+	optional string session_id = 1;
+	optional ChatScope scope = 2 [default = Channel];
+	optional uint32 scope_id = 3 [default = 0];
+	optional uint32 actor_session = 4;
+	optional uint32 host_session = 5;
+	optional WatchTogetherSourceKind source_kind = 6 [default = WatchTogetherSourceDirectMedia];
+	optional string source_url = 7;
+	optional string title = 8;
+	optional WatchTogetherEvent event = 9 [default = WatchTogetherEventState];
+	optional double position_seconds = 10 [default = 0];
+	optional bool paused = 11 [default = true];
+	optional double playback_rate = 12 [default = 1];
+	optional uint64 updated_at = 13;
+	repeated uint32 participant_sessions = 14 [packed = true];
 }
 
 message TextChannelInfo {
