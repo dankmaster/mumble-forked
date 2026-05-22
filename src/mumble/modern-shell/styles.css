@@ -3880,6 +3880,10 @@ body.dialog-host {
 	font-size: 11px;
 }
 
+.modern-dialog-voice-meter-coach.has-actions {
+	grid-template-columns: minmax(90px, 0.22fr) minmax(0, 1fr) auto;
+}
+
 .modern-dialog-voice-meter-coach-track {
 	position: relative;
 	display: block;
@@ -3906,6 +3910,20 @@ body.dialog-host {
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.modern-dialog-voice-meter-coach-actions {
+	align-items: center;
+	gap: 6px;
+	justify-content: flex-end;
+	min-width: max-content;
+}
+
+.modern-dialog-voice-meter-coach-actions .chip-button {
+	min-height: 22px;
+	padding-inline: 9px;
+	font-size: 10px;
 	white-space: nowrap;
 }
 
@@ -3954,6 +3972,16 @@ body.dialog-host {
 	.modern-dialog-field-error,
 	.modern-dialog-field-hint {
 		grid-column: 1;
+	}
+
+	.modern-dialog-voice-meter-coach,
+	.modern-dialog-voice-meter-coach.has-actions {
+		grid-template-columns: 1fr;
+	}
+
+	.modern-dialog-voice-meter-coach-actions {
+		justify-content: flex-start;
+		min-width: 0;
 	}
 
 	.modern-dialog-connect-shell,

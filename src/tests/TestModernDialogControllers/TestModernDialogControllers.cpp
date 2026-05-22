@@ -185,7 +185,11 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 				foundInputMeterInVoiceActivation =
 					field.value(QStringLiteral("type")).toString() == QLatin1String("voiceMeter")
 					&& field.value(QStringLiteral("calibrationActionId")).toString()
-						   == QLatin1String("autoSetVoiceActivation");
+						   == QLatin1String("finishAudioSetupWizard")
+					&& field.value(QStringLiteral("calibrationLabel")).toString() == QLatin1String("Audio wizard")
+					&& field.contains(QStringLiteral("maxAmplification"))
+					&& field.contains(QStringLiteral("noiseCancelMode"))
+					&& field.contains(QStringLiteral("neuralCleanupAvailable"));
 			}
 		}
 	}
@@ -193,16 +197,22 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QVERIFY(foundInputMeterInVoiceActivation);
 
 	ModernSettingsController::ActionResult autoSetResult =
-		controller.invokeAction(QStringLiteral("autoSetVoiceActivation"),
+		controller.invokeAction(QStringLiteral("finishAudioSetupWizard"),
 								QVariantMap { { QStringLiteral("silenceThreshold"), 22 },
 											  { QStringLiteral("speechThreshold"), 48 },
 											  { QStringLiteral("vadSource"), Settings::SignalToNoise },
-											  { QStringLiteral("voiceHold"), 35 } });
+											  { QStringLiteral("voiceHold"), 35 },
+											  { QStringLiteral("maxAmplification"), 9000 },
+											  { QStringLiteral("noiseCancelMode"), Settings::NoiseCancelSpeex },
+											  { QStringLiteral("speexNoiseStrength"), 34 } });
 	QCOMPARE(autoSetResult.closeDialog, false);
 	QVERIFY(autoSetResult.settingsToApply.has_value());
 	QCOMPARE(controller.draft().atTransmit, Settings::VAD);
 	QCOMPARE(controller.draft().vsVAD, Settings::SignalToNoise);
 	QCOMPARE(controller.draft().iVoiceHold, 35);
+	QCOMPARE(controller.draft().iMinLoudness, 11000);
+	QCOMPARE(controller.draft().noiseCancelMode, Settings::NoiseCancelSpeex);
+	QCOMPARE(controller.draft().iSpeexNoiseCancelStrength, -34);
 	QVERIFY(qFuzzyCompare(controller.draft().fVADmin, 0.22f));
 	QVERIFY(qFuzzyCompare(controller.draft().fVADmax, 0.48f));
 

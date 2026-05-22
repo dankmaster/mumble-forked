@@ -7,6 +7,7 @@
 	let modernDialogRenderedOpen = false;
 	let audioInputMeterTimer = 0;
 	let voiceCalibrationState = null;
+	let voiceCalibrationSummary = null;
 	let voiceReplayStopTimer = 0;
 	let modernDialogFavoriteMenu = null;
 	let modernDialogFavoriteClickTimer = 0;
@@ -292,6 +293,19 @@
 		return Math.max(0, Math.min(100, Math.round(numeric)));
 	}
 
+	function clampNumber(value, min, max, fallback) {
+		const numeric = Number(value);
+		if (!Number.isFinite(numeric)) {
+			return fallback == null ? min : fallback;
+		}
+		return Math.max(min, Math.min(max, numeric));
+	}
+
+	function roundedStep(value, step) {
+		const size = Math.max(1, Number(step) || 1);
+		return Math.round(value / size) * size;
+	}
+
 	function setRangeProgress(input) {
 		const min = Number(input.min || 0);
 		const max = Number(input.max || 100);
@@ -321,18 +335,20 @@
 	function audioMeterLevelsFromPayload(meter) {
 		const amplitude = Number(meter && meter.amplitude);
 		const signalToNoise = Number(meter && meter.signalToNoise);
+		const peakCleanMicDb = Number(meter && meter.peakCleanMicDb);
 		return {
 			amplitude: Number.isFinite(amplitude) ? clampPercent(amplitude) : null,
-			signalToNoise: Number.isFinite(signalToNoise) ? clampPercent(signalToNoise) : null
+			signalToNoise: Number.isFinite(signalToNoise) ? clampPercent(signalToNoise) : null,
+			peakCleanMicDb: Number.isFinite(peakCleanMicDb) ? peakCleanMicDb : null
 		};
 	}
 
-	function setVoiceCalibrationMessage(element, message) {
+	function setVoiceCalibrationMessage(element, message, durationMs) {
 		if (!element) {
 			return;
 		}
 		element.dataset.calibrationMessage = message || "";
-		element.dataset.calibrationMessageUntil = message ? String(Date.now() + 1800) : "0";
+		element.dataset.calibrationMessageUntil = message ? String(Date.now() + (durationMs || 2600)) : "0";
 	}
 
 	function activeVoiceCalibrationFor(element) {
@@ -343,14 +359,37 @@
 		if (!voiceCalibrationState) {
 			return "";
 		}
-		const elapsed = Date.now() - voiceCalibrationState.startedAt;
-		if (elapsed < voiceCalibrationState.quietMs) {
+		const phase = voiceCalibrationPhase(voiceCalibrationState);
+		if (phase === "prompt") {
+			return "Ready to start";
+		}
+		if (phase === "leadIn") {
+			return "Get ready";
+		}
+		if (phase === "quiet") {
 			return "Measuring room noise";
 		}
-		if (elapsed < voiceCalibrationState.totalMs) {
+		if (phase === "speech") {
 			return "Speak normally";
 		}
 		return "Calibrating";
+	}
+
+	function voiceCalibrationPhase(calibration) {
+		if (!calibration || calibration.prompting) {
+			return "prompt";
+		}
+		const elapsed = Date.now() - calibration.startedAt;
+		if (elapsed < calibration.leadInMs) {
+			return "leadIn";
+		}
+		if (elapsed < calibration.leadInMs + calibration.quietMs) {
+			return "quiet";
+		}
+		if (elapsed < calibration.totalMs) {
+			return "speech";
+		}
+		return "finish";
 	}
 
 	function syncVoiceCalibrationChrome(element) {
@@ -359,10 +398,12 @@
 		}
 		const button = element.querySelector(".modern-dialog-voice-meter-auto");
 		const active = activeVoiceCalibrationFor(element);
+		const prompting = active && voiceCalibrationState && voiceCalibrationState.prompting;
 		element.classList.toggle("is-calibrating", !!active);
+		element.classList.toggle("is-prompting", !!prompting);
 		if (button) {
 			button.disabled = !!active;
-			button.textContent = active ? "Listening..." : (button.dataset.defaultLabel || "Auto set");
+			button.textContent = prompting ? "Setup open" : (active ? "Listening..." : (button.dataset.defaultLabel || "Audio wizard"));
 		}
 	}
 
@@ -371,6 +412,7 @@
 		voiceCalibrationState = null;
 		if (element) {
 			element.classList.remove("is-calibrating");
+			element.classList.remove("is-prompting");
 			syncVoiceCalibrationChrome(element);
 		}
 	}
@@ -433,16 +475,95 @@
 			selected = current;
 		}
 
-		const voiceHold = selected.gap < 14 ? 45 : (selected.jitter > 8 ? 35 : 25);
+		const voiceHold = selected.gap < 14 ? 55 : (selected.jitter > 8 ? 40 : 30);
+		const amplification = recommendedMaxAmplification(calibration, selected);
+		const processing = recommendedNoiseProcessing(calibration, selected);
 		return {
 			vadSource: selected.vadSource,
 			sourceLabel: selected.name,
 			silenceThreshold: selected.silenceThreshold,
 			speechThreshold: selected.speechThreshold,
 			voiceHold: voiceHold,
+			maxAmplification: amplification,
+			noiseCancelMode: processing.noiseCancelMode,
+			speexNoiseStrength: processing.speexNoiseStrength,
+			processingLabel: processing.label,
 			noise: Math.round(selected.noise),
 			voice: Math.round(selected.voice),
 			gap: Math.round(selected.gap)
+		};
+	}
+
+	function recommendedMaxAmplification(calibration) {
+		const current = clampNumber(calibration.element.dataset.maxAmplification, 0, 20000, 0);
+		const speechDb = percentile(calibration.speechPeakDb, 0.72);
+		const quietDb = percentile(calibration.quietPeakDb, 0.85);
+		const speechAmplitude = percentile(calibration.speechAmplitude, 0.82);
+		let amplification = current;
+
+		if (speechDb !== null) {
+			if (speechDb < -52) {
+				amplification = 17000;
+			} else if (speechDb < -44) {
+				amplification = 14000;
+			} else if (speechDb < -36) {
+				amplification = 11000;
+			} else if (speechDb < -26) {
+				amplification = 8000;
+			} else if (speechDb < -16) {
+				amplification = 5000;
+			} else {
+				amplification = 2500;
+			}
+		} else if (speechAmplitude !== null) {
+			if (speechAmplitude < 36) {
+				amplification = 14000;
+			} else if (speechAmplitude < 52) {
+				amplification = 9500;
+			} else if (speechAmplitude > 82) {
+				amplification = 3500;
+			} else {
+				amplification = 7000;
+			}
+		}
+
+		if (quietDb !== null && quietDb > -34) {
+			amplification = Math.min(amplification, 8000);
+		} else if (quietDb !== null && quietDb > -42) {
+			amplification = Math.min(amplification, 12000);
+		}
+		if (Math.abs(amplification - current) < 1500) {
+			amplification = current;
+		}
+		return clampNumber(roundedStep(amplification, 500), 0, 20000, current);
+	}
+
+	function recommendedNoiseProcessing(calibration, selected) {
+		const currentMode = clampNumber(calibration.element.dataset.noiseCancelMode, 0, 3, 0);
+		const currentStrength = clampNumber(calibration.element.dataset.speexNoiseStrength, 0, 100, 14);
+		const neuralAvailable = calibration.element.dataset.neuralCleanupAvailable === "true";
+		const quietAmpCeiling = percentile(calibration.quietAmplitude, 0.85) || 0;
+		const quietAmpFloor = percentile(calibration.quietAmplitude, 0.15) || 0;
+		const quietSpeechProb = percentile(calibration.quietSignalToNoise, 0.85) || 0;
+		const roomJitter = Math.max(selected.jitter || 0, quietAmpCeiling - quietAmpFloor);
+		let noiseCancelMode = currentMode;
+		let speexNoiseStrength = currentStrength;
+		let label = "cleanup kept";
+
+		if (quietAmpCeiling >= 28 || quietSpeechProb >= 18 || roomJitter >= 16) {
+			noiseCancelMode = neuralAvailable ? 3 : 1;
+			speexNoiseStrength = Math.max(currentStrength, quietAmpCeiling >= 38 ? 42 : 34);
+			label = neuralAvailable ? "neural cleanup + Speex" : "Speex cleanup";
+		} else if (quietAmpCeiling >= 18 || quietSpeechProb >= 10 || roomJitter >= 9) {
+			noiseCancelMode = currentMode === 0 ? 1 : currentMode;
+			speexNoiseStrength = Math.max(currentStrength, 24);
+			label = noiseCancelMode === 0 ? "cleanup kept" : "light cleanup";
+		}
+
+		return {
+			noiseCancelMode: Math.round(clampNumber(noiseCancelMode, 0, 3, currentMode)),
+			speexNoiseStrength: clampPercent(speexNoiseStrength),
+			label: label
 		};
 	}
 
@@ -456,14 +577,21 @@
 		const thresholds = calculatedVoiceThresholds(calibration);
 		clearVoiceCalibration();
 		if (!thresholds) {
-			setVoiceCalibrationMessage(element, "No usable voice signal");
+		setVoiceCalibrationMessage(element, "Wizard needs a stronger speech sample");
 			updateVoiceMeterElement(element, calibration.lastMeter || {});
 			return;
 		}
 
 		const detail = thresholds.sourceLabel + " " + thresholds.silenceThreshold + "%/" + thresholds.speechThreshold
-			+ "%, hold " + thresholds.voiceHold + " frames";
-		setVoiceCalibrationMessage(element, "Auto set applied: " + detail);
+			+ "%, hold " + thresholds.voiceHold + " frames, amp " + thresholds.maxAmplification
+			+ ", " + thresholds.processingLabel;
+		const message = "Audio wizard applied: " + detail;
+		voiceCalibrationSummary = {
+			message: message,
+			status: "Audio wizard applied",
+			until: Date.now() + 5200
+		};
+		setVoiceCalibrationMessage(element, message, 5200);
 		invokeModernDialogAction(calibration.actionId, thresholds);
 	}
 
@@ -473,28 +601,37 @@
 		}
 
 		const calibration = voiceCalibrationState;
+		if (calibration.prompting) {
+			return;
+		}
 		calibration.lastMeter = meter || {};
-		const elapsed = Date.now() - calibration.startedAt;
+		const phase = voiceCalibrationPhase(calibration);
 		const levels = audioMeterLevelsFromPayload(meter || {});
 		if (available) {
-			if (elapsed < calibration.quietMs) {
+			if (phase === "quiet") {
 				if (levels.amplitude !== null) {
 					calibration.quietAmplitude.push(levels.amplitude);
 				}
 				if (levels.signalToNoise !== null) {
 					calibration.quietSignalToNoise.push(levels.signalToNoise);
 				}
-			} else if (elapsed < calibration.totalMs) {
+				if (levels.peakCleanMicDb !== null) {
+					calibration.quietPeakDb.push(levels.peakCleanMicDb);
+				}
+			} else if (phase === "speech") {
 				if (levels.amplitude !== null) {
 					calibration.speechAmplitude.push(levels.amplitude);
 				}
 				if (levels.signalToNoise !== null) {
 					calibration.speechSignalToNoise.push(levels.signalToNoise);
 				}
+				if (levels.peakCleanMicDb !== null) {
+					calibration.speechPeakDb.push(levels.peakCleanMicDb);
+				}
 			}
 		}
 
-		if (elapsed >= calibration.totalMs) {
+		if (phase === "finish") {
 			finishVoiceActivationCalibration();
 		}
 	}
@@ -509,15 +646,35 @@
 		voiceCalibrationState = {
 			element: element,
 			actionId: actionId,
-			startedAt: Date.now(),
-			quietMs: 1300,
-			totalMs: 5200,
+			prompting: true,
+			startedAt: 0,
+			leadInMs: 1200,
+			quietMs: 3000,
+			speechMs: 7400,
+			totalMs: 11600,
 			quietAmplitude: [],
 			quietSignalToNoise: [],
+			quietPeakDb: [],
 			speechAmplitude: [],
 			speechSignalToNoise: [],
+			speechPeakDb: [],
 			lastMeter: null
 		};
+		setVoiceCalibrationMessage(element, "");
+		syncVoiceCalibrationChrome(element);
+		updateVoiceMeterElement(element, {
+			connected: element.dataset.serverConnected === "true",
+			loopbackMode: Number(element.dataset.loopbackMode || 0)
+		});
+		refreshAudioInputMeters();
+	}
+
+	function beginVoiceActivationCalibration(element) {
+		if (!activeVoiceCalibrationFor(element) || !voiceCalibrationState.prompting) {
+			return;
+		}
+		voiceCalibrationState.prompting = false;
+		voiceCalibrationState.startedAt = Date.now();
 		setVoiceCalibrationMessage(element, "");
 		syncVoiceCalibrationChrome(element);
 		refreshAudioInputMeters();
@@ -568,16 +725,29 @@
 		}
 		const fill = coach.querySelector(".modern-dialog-voice-meter-coach-fill");
 		const text = coach.querySelector(".modern-dialog-voice-meter-coach-text");
+		const actions = coach.querySelector(".modern-dialog-voice-meter-coach-actions");
 		const loopbackMode = Number(element.dataset.loopbackMode || 0);
 		let progress = 0;
 		let message = "";
+		let showActions = false;
 
-		if (activeVoiceCalibrationFor(element)) {
+		if (activeVoiceCalibrationFor(element) && voiceCalibrationState && voiceCalibrationState.prompting) {
+			message = "Audio setup takes about 12 seconds: stay quiet first, then speak normally.";
+			showActions = true;
+		} else if (activeVoiceCalibrationFor(element)) {
 			const elapsed = Date.now() - voiceCalibrationState.startedAt;
+			const phase = voiceCalibrationPhase(voiceCalibrationState);
 			progress = Math.max(0, Math.min(100, Math.round((elapsed / voiceCalibrationState.totalMs) * 100)));
-			message = elapsed < voiceCalibrationState.quietMs
-				? "Keep the room quiet"
-				: "Speak a normal test sentence";
+			if (phase === "leadIn") {
+				message = "Get ready, then keep the room quiet";
+			} else if (phase === "quiet") {
+				message = "Keep the room quiet";
+			} else {
+				message = "Speak a normal test sentence";
+			}
+		} else if (voiceCalibrationSummary && voiceCalibrationSummary.until > Date.now()) {
+			progress = 100;
+			message = voiceCalibrationSummary.message || "";
 		} else if (Number(element.dataset.calibrationMessageUntil || 0) > Date.now()) {
 			progress = 100;
 			message = element.dataset.calibrationMessage || "";
@@ -593,6 +763,10 @@
 		}
 
 		coach.classList.toggle("is-active", activeVoiceCalibrationFor(element) || loopbackMode !== 0);
+		coach.classList.toggle("has-actions", showActions);
+		if (actions) {
+			actions.style.display = showActions ? "flex" : "none";
+		}
 		if (fill) {
 			fill.style.width = String(progress) + "%";
 		}
@@ -626,6 +800,7 @@
 		const levelText = element.querySelector(".modern-dialog-voice-meter-value");
 		const statusText = element.querySelector(".modern-dialog-voice-meter-status");
 		const messageUntil = Number(element.dataset.calibrationMessageUntil || 0);
+		const summaryActive = voiceCalibrationSummary && voiceCalibrationSummary.until > Date.now();
 		const loopbackMode = Number(meter.loopbackMode == null ? element.dataset.loopbackMode || 0 : meter.loopbackMode);
 
 		element.dataset.loopbackMode = String(loopbackMode);
@@ -644,6 +819,8 @@
 		if (statusText) {
 			if (activeVoiceCalibrationFor(element)) {
 				statusText.textContent = voiceCalibrationStatus();
+			} else if (summaryActive) {
+				statusText.textContent = voiceCalibrationSummary.status || voiceCalibrationSummary.message || "";
 			} else if (messageUntil > Date.now()) {
 				statusText.textContent = element.dataset.calibrationMessage || "";
 			} else if (loopbackMode === 2) {
@@ -805,6 +982,10 @@
 			meter.dataset.serverConnected = "false";
 			meter.dataset.replayStartActionId = String(field.replayStartActionId || "");
 			meter.dataset.replayStopActionId = String(field.replayStopActionId || "");
+			meter.dataset.maxAmplification = String(field.maxAmplification || 0);
+			meter.dataset.noiseCancelMode = String(field.noiseCancelMode || 0);
+			meter.dataset.speexNoiseStrength = String(field.speexNoiseStrength || 14);
+			meter.dataset.neuralCleanupAvailable = field.neuralCleanupAvailable ? "true" : "false";
 			if (fieldTooltip) {
 				meter.title = fieldTooltip;
 			}
@@ -822,7 +1003,7 @@
 				const autoButton = document.createElement("button");
 				autoButton.type = "button";
 				autoButton.className = "chip-button modern-dialog-voice-meter-auto";
-				autoButton.textContent = field.calibrationLabel || "Auto set";
+				autoButton.textContent = field.calibrationLabel || "Audio wizard";
 				autoButton.dataset.defaultLabel = autoButton.textContent;
 				if (field.calibrationTooltip) {
 					autoButton.title = String(field.calibrationTooltip);
@@ -885,6 +1066,29 @@
 			coachText.className = "modern-dialog-voice-meter-coach-text";
 			coach.appendChild(coachTrack);
 			coach.appendChild(coachText);
+			const coachActions = document.createElement("span");
+			coachActions.className = "modern-dialog-voice-meter-coach-actions";
+			coachActions.style.display = "none";
+			const startButton = document.createElement("button");
+			startButton.type = "button";
+			startButton.className = "chip-button modern-dialog-voice-meter-coach-start";
+			startButton.textContent = "Start";
+			startButton.addEventListener("click", function(event) {
+				event.preventDefault();
+				beginVoiceActivationCalibration(meter);
+			});
+			const cancelButton = document.createElement("button");
+			cancelButton.type = "button";
+			cancelButton.className = "chip-button modern-dialog-voice-meter-coach-cancel";
+			cancelButton.textContent = "Cancel";
+			cancelButton.addEventListener("click", function(event) {
+				event.preventDefault();
+				clearVoiceCalibration();
+				refreshAudioInputMeters();
+			});
+			coachActions.appendChild(startButton);
+			coachActions.appendChild(cancelButton);
+			coach.appendChild(coachActions);
 
 			meter.appendChild(header);
 			meter.appendChild(track);

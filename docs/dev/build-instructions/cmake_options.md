@@ -216,8 +216,8 @@ Build Mumble with debug output for plugin developers.
 
 ### plugins
 
-Build plugins.
-(Default: ON)
+Build bundled plugins.
+(Default: OFF)
 
 ### portaudio
 

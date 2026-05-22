@@ -470,7 +470,6 @@ function Invoke-SharedWindowsPackaging {
 	}
 
 	Copy-DirectoryContents -Source (Join-Path $BuildRoot "licenses") -Destination (Join-Path $stageRoot "licenses")
-	Copy-DirectoryContents -Source (Join-Path $BuildRoot "plugins") -Destination (Join-Path $stageRoot "plugins")
 	Copy-DirectoryContents -Source (Join-Path $BuildRoot "dtln") -Destination (Join-Path $stageRoot "dtln")
 	Copy-DirectoryContents -Source (Join-Path $BuildRoot "deepfilternet") -Destination (Join-Path $stageRoot "deepfilternet")
 	Copy-DirectoryContents -Source (Join-Path $BuildRoot "rnnoise") -Destination (Join-Path $stageRoot "rnnoise")
@@ -1157,7 +1156,7 @@ try {
 	$env:RUNNER_TEMP = To-BashPath $runnerTemp
 	$env:MUMBLE_BUILD_DIR_OVERRIDE = To-BashPath $buildRoot
 	$env:BUILD_TYPE = $BuildType
-	$env:CMAKE_OPTIONS = "-Dtests=OFF -Dsymbols=ON -Ddisplay-install-paths=ON -Dtest-lto=OFF"
+	$env:CMAKE_OPTIONS = "-Dtests=OFF -Dsymbols=ON -Ddisplay-install-paths=ON -Dtest-lto=OFF -Dplugins=OFF"
 	if ($SharedWebEngine) {
 		# The current shared zeroc-ice-mumble install is incomplete for consumers, so
 		# keep the shared client bring-up path from configuring murmur's optional Ice RPC.

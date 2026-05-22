@@ -78,7 +78,7 @@ option(client "Build the client (Mumble)" ON)
 option(server "Build the server (Murmur)" ON)
 option(packaging "Build package." OFF)
 option(tests "Build tests." ${packaging})
-option(plugins "Build plugins." ON)
+option(plugins "Build bundled plugins." OFF)
 
 if (WIN32)
 	option(skip-msi-rebuild "Prevent rebuilding installer MSI files from source. Used to be able to include signed MSI files in the bundle." OFF)

@@ -77,15 +77,19 @@ bool ModernDialogHost::showDialogState(const QVariantMap &state, QString *errorM
 		return false;
 	}
 
-	m_open            = true;
-	m_currentDialogID = state.value(QStringLiteral("id")).toString();
+	const QString nextDialogID = state.value(QStringLiteral("id")).toString();
+	const bool shouldPresent   = !m_open || !isVisible() || m_currentDialogID != nextDialogID;
+	m_open                    = true;
+	m_currentDialogID         = nextDialogID;
 	const QString title = state.value(QStringLiteral("title")).toString().trimmed();
 	setWindowTitle(title.isEmpty() ? tr("Mumble") : title);
 	applyDialogGeometry(state);
 
-	show();
-	raise();
-	activateWindow();
+	if (shouldPresent) {
+		show();
+		raise();
+		activateWindow();
+	}
 	return true;
 }
 

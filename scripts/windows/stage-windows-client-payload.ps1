@@ -108,7 +108,6 @@ if ($LASTEXITCODE -ne 0) {
 # produced next to the binaries in the build root and are safer to mirror here so
 # the artifact becomes self-contained for local bring-up.
 Copy-DirectoryContents -Source (Join-Path $buildRootPath "licenses") -Destination (Join-Path $stageRootPath "licenses")
-Copy-DirectoryContents -Source (Join-Path $buildRootPath "plugins") -Destination (Join-Path $stageRootPath "plugins")
 Copy-DirectoryContents -Source (Join-Path $buildRootPath "dtln") -Destination (Join-Path $stageRootPath "dtln")
 Copy-DirectoryContents -Source (Join-Path $buildRootPath "rnnoise") -Destination (Join-Path $stageRootPath "rnnoise")
 Copy-DirectoryContents -Source (Join-Path $buildRootPath "deepfilternet") -Destination (Join-Path $stageRootPath "deepfilternet")

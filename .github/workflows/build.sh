@@ -56,7 +56,7 @@ fi
 
 echo "::notice title=CI component selection::client=${build_client:-default}, server=${build_server:-default}"
 
-OS_SPECIFIC_CMAKE_OPTIONS=""
+OS_SPECIFIC_CMAKE_OPTIONS="-Dplugins=OFF"
 
 case "$os" in
 	"ubuntu")
@@ -120,7 +120,7 @@ case "$os" in
 		OS_SPECIFIC_CMAKE_OPTIONS="$OS_SPECIFIC_CMAKE_OPTIONS -Ddatabase-sqlite-tests=ON"
 		OS_SPECIFIC_CMAKE_OPTIONS="$OS_SPECIFIC_CMAKE_OPTIONS -Ddatabase-mysql-tests=OFF"
 		OS_SPECIFIC_CMAKE_OPTIONS="$OS_SPECIFIC_CMAKE_OPTIONS -Ddatabase-postgresql-tests=ON"
-		OS_SPECIFIC_CMAKE_OPTIONS="-DCMAKE_OSX_ARCHITECTURES=$arch"
+		OS_SPECIFIC_CMAKE_OPTIONS="$OS_SPECIFIC_CMAKE_OPTIONS -DCMAKE_OSX_ARCHITECTURES=$arch"
 		;;
 	*)
 		echo "OS $os is not supported"

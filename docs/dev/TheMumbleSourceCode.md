@@ -71,7 +71,7 @@ The `overlay*` directories contain the implementation for the Mumble overlay for
 they aren't really part of the main Mumble source (I mean they are, but yet they aren't).
 
 If you are into plugin development or you want to mess with existing plugins, the `plugins` directory is where you want to look. It contains the
-implementation of all plugins shipped with Mumble by default and also the plugin headers needed to create new ones. For further documentation on that,
+available bundled plugin sources and the plugin headers needed to create new ones. For further documentation on that,
 you are referred to the dedicated plugin documentation within the `docs/dev` directory.
 
 `samples` and `screenshots` are self-describing and generally of very little interest when dealing with the Mumble source code as such. `scripts` is

@@ -146,8 +146,6 @@ runs:
           build\**\*client*.msi
           build\**\*server*.exe
           build\**\*server*.msi
-          build\**\plugins\*.dll
-          build\**\plugins\*.pdb
           build\**\link_tester.*
           build\**\mumble.exe
           build\**\mumble.pdb

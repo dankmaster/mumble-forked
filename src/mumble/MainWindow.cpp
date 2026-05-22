@@ -17816,8 +17816,18 @@ void MainWindow::setupView(bool toggle_minimize) {
 		f |= Qt::WindowStaysOnTopHint;
 	}
 
-	if (!graphicsProxyWidget())
+	const Qt::WindowFlags currentWindowFlags = windowFlags();
+	const bool windowFlagsNeedUpdate =
+		!graphicsProxyWidget()
+		&& ((currentWindowFlags & Qt::WindowType_Mask) != Qt::Window
+			|| currentWindowFlags.testFlag(Qt::FramelessWindowHint) != f.testFlag(Qt::FramelessWindowHint)
+			|| currentWindowFlags.testFlag(Qt::WindowStaysOnTopHint) != f.testFlag(Qt::WindowStaysOnTopHint));
+	const bool restoreWindowVisibilityAfterFlagUpdate = windowFlagsNeedUpdate && isVisible();
+	const Qt::WindowStates windowStateBeforeFlagUpdate = windowState();
+
+	if (windowFlagsNeedUpdate) {
 		setWindowFlags(f);
+	}
 
 	if (Global::get().s.bShowContextMenuInMenuBar) {
 		bool found = false;
@@ -17909,6 +17919,18 @@ void MainWindow::setupView(bool toggle_minimize) {
 		if (qwPTTButtonWidget) {
 			qwPTTButtonWidget->deleteLater();
 			qwPTTButtonWidget = nullptr;
+		}
+	}
+
+	if (restoreWindowVisibilityAfterFlagUpdate) {
+		if (windowStateBeforeFlagUpdate & Qt::WindowMinimized) {
+			showMinimized();
+		} else if (windowStateBeforeFlagUpdate & Qt::WindowFullScreen) {
+			showFullScreen();
+		} else if (windowStateBeforeFlagUpdate & Qt::WindowMaximized) {
+			showMaximized();
+		} else {
+			show();
 		}
 	}
 }

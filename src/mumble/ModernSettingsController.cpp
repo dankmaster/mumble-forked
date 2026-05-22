@@ -564,16 +564,19 @@ namespace {
 		return static_cast< float >(qBound(0, value.toInt(), 100)) / 100.0f;
 	}
 
+	int amplificationFromMinLoudness(const int minLoudness);
+	bool hasAvailableSpeechCleanupBackend();
+
 	QVariantMap voiceMeterField(const Settings &settings) {
 		QVariantMap field = fieldItem(QStringLiteral("audio.inputMeter"), QObject::tr("Current voice input"),
 									  QStringLiteral("voiceMeter"), 0);
 		field.insert(QStringLiteral("vadSource"), static_cast< int >(settings.vsVAD));
 		field.insert(QStringLiteral("transmitMode"), static_cast< int >(settings.atTransmit));
 		field.insert(QStringLiteral("active"), settings.atTransmit == Settings::VAD);
-		field.insert(QStringLiteral("calibrationActionId"), QStringLiteral("autoSetVoiceActivation"));
-		field.insert(QStringLiteral("calibrationLabel"), QObject::tr("Auto set"));
+		field.insert(QStringLiteral("calibrationActionId"), QStringLiteral("finishAudioSetupWizard"));
+		field.insert(QStringLiteral("calibrationLabel"), QObject::tr("Audio wizard"));
 		field.insert(QStringLiteral("calibrationTooltip"),
-					 QObject::tr("Measure room noise and normal speech, then set voice-activation thresholds."));
+					 QObject::tr("Open guided audio setup for microphone level, voice activation, replay, and cleanup tuning."));
 		field.insert(QStringLiteral("replayStartActionId"), QStringLiteral("startVoiceReplay"));
 		field.insert(QStringLiteral("replayStopActionId"), QStringLiteral("stopVoiceReplay"));
 		field.insert(QStringLiteral("replayLabel"), QObject::tr("Replay"));
@@ -585,6 +588,11 @@ namespace {
 		field.insert(QStringLiteral("silenceThreshold"), vadThresholdFromFloat(settings.fVADmin));
 		field.insert(QStringLiteral("speechThreshold"), vadThresholdFromFloat(settings.fVADmax));
 		field.insert(QStringLiteral("loopbackMode"), static_cast< int >(settings.lmLoopMode));
+		field.insert(QStringLiteral("maxAmplification"), amplificationFromMinLoudness(settings.iMinLoudness));
+		field.insert(QStringLiteral("noiseCancelMode"), static_cast< int >(settings.noiseCancelMode));
+		field.insert(QStringLiteral("speexNoiseStrength"),
+					 settings.iSpeexNoiseCancelStrength == 0 ? 14 : -settings.iSpeexNoiseCancelStrength);
+		field.insert(QStringLiteral("neuralCleanupAvailable"), hasAvailableSpeechCleanupBackend());
 		return field;
 	}
 
@@ -901,7 +909,7 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 		return result;
 	}
 
-	if (action == QLatin1String("autoSetVoiceActivation")) {
+	if (action == QLatin1String("finishAudioSetupWizard") || action == QLatin1String("autoSetVoiceActivation")) {
 		int silenceThreshold = qBound(0, payload.value(QStringLiteral("silenceThreshold")).toInt(), 100);
 		int speechThreshold  = qBound(0, payload.value(QStringLiteral("speechThreshold")).toInt(), 100);
 		const Settings::VADSource vadSource =
@@ -925,6 +933,25 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 		m_draft.fVADmin    = vadThresholdFromPercent(silenceThreshold);
 		m_draft.fVADmax    = vadThresholdFromPercent(speechThreshold);
 		m_draft.iVoiceHold = voiceHold;
+		if (payload.contains(QStringLiteral("maxAmplification"))) {
+			m_draft.iMinLoudness = minLoudnessFromAmplification(payload.value(QStringLiteral("maxAmplification")));
+		}
+		if (payload.contains(QStringLiteral("noiseCancelMode"))) {
+			Settings::NoiseCancel requestedNoiseCancel =
+				static_cast< Settings::NoiseCancel >(payload.value(QStringLiteral("noiseCancelMode")).toInt());
+			if (requestedNoiseCancel < Settings::NoiseCancelOff || requestedNoiseCancel > Settings::NoiseCancelBoth) {
+				requestedNoiseCancel = m_draft.noiseCancelMode;
+			}
+			if ((requestedNoiseCancel == Settings::NoiseCancelRNN || requestedNoiseCancel == Settings::NoiseCancelBoth)
+				&& !hasAvailableSpeechCleanupBackend()) {
+				requestedNoiseCancel = Settings::NoiseCancelSpeex;
+			}
+			m_draft.noiseCancelMode = requestedNoiseCancel;
+		}
+		if (payload.contains(QStringLiteral("speexNoiseStrength"))) {
+			const int strength = qBound(0, payload.value(QStringLiteral("speexNoiseStrength")).toInt(), 100);
+			m_draft.iSpeexNoiseCancelStrength = strength == 14 ? 0 : -strength;
+		}
 		forceModernLayout();
 		result.settingsToApply = m_draft;
 		return result;
