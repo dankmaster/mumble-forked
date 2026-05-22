@@ -9,6 +9,7 @@
 
 #include "AudioInput.h"
 #include "Global.h"
+#include "ServerHandler.h"
 
 #include <QtCore/QDateTime>
 #include <QtCore/QFile>
@@ -129,6 +130,9 @@ void ModernShellBridge::publishModernDialogState(const QVariantMap &state) {
 QVariantMap ModernShellBridge::currentAudioInputMeter() const {
 	QVariantMap meter;
 	meter.insert(QStringLiteral("available"), false);
+	const bool connected = Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isConnected();
+	meter.insert(QStringLiteral("connected"), connected);
+	meter.insert(QStringLiteral("loopbackMode"), static_cast< int >(Global::get().s.lmLoopMode));
 
 	const auto audioInput = Global::get().ai;
 	if (!audioInput) {

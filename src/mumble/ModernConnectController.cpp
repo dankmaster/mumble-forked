@@ -135,6 +135,9 @@ namespace {
 		item.insert(QStringLiteral("port"), server.usPort);
 		item.insert(QStringLiteral("username"), server.qsUsername);
 		item.insert(QStringLiteral("selected"), selected);
+		item.insert(QStringLiteral("usersLabel"), QObject::tr("Users: -"));
+		item.insert(QStringLiteral("pingLabel"), QObject::tr("Ping: -"));
+		item.insert(QStringLiteral("tooltip"), QObject::tr("%1:%2").arg(server.qsHostname).arg(server.usPort));
 		item.insert(QStringLiteral("subtitle"),
 					QObject::tr("%1:%2 as %3")
 						.arg(server.qsHostname)
@@ -152,7 +155,8 @@ void ModernConnectController::open(const QList< FavoriteServer > &favorites, con
 	m_host.clear();
 	m_username = settings.qsUsername;
 	m_password.clear();
-	m_port = DEFAULT_MUMBLE_PORT;
+	m_port       = DEFAULT_MUMBLE_PORT;
+	m_editorOpen = false;
 
 	if (!m_favorites.isEmpty()) {
 		selectFavorite(0);
@@ -166,7 +170,7 @@ QVariantMap ModernConnectController::state() const {
 	dialog.insert(QStringLiteral("kind"), QStringLiteral("connect"));
 	dialog.insert(QStringLiteral("title"), QObject::tr("Connect to a server"));
 	dialog.insert(QStringLiteral("subtitle"),
-				  QObject::tr("Use a saved server or enter connection details directly."));
+				  QObject::tr("Choose a saved server, or add one when you need new connection details."));
 	dialog.insert(QStringLiteral("primaryActionId"), QStringLiteral("connect"));
 
 	QVariantList favorites;
@@ -175,10 +179,14 @@ QVariantMap ModernConnectController::state() const {
 	}
 	dialog.insert(QStringLiteral("favorites"), favorites);
 	dialog.insert(QStringLiteral("selectedFavoriteIndex"), m_selectedFavoriteIndex);
+	dialog.insert(QStringLiteral("editorOpen"), m_editorOpen);
+	dialog.insert(QStringLiteral("editorTitle"),
+				  m_selectedFavoriteIndex >= 0 ? QObject::tr("Edit server") : QObject::tr("Add server"));
 
 	QVariantList fields;
-	fields.push_back(fieldItem(QStringLiteral("name"), QObject::tr("Favorite name"), QStringLiteral("text"), m_name));
-	fields.push_back(fieldItem(QStringLiteral("host"), QObject::tr("Server"), QStringLiteral("text"), m_host, true));
+	fields.push_back(fieldItem(QStringLiteral("name"), QObject::tr("Server title"), QStringLiteral("text"), m_name));
+	fields.push_back(fieldItem(QStringLiteral("host"), QObject::tr("Server address"), QStringLiteral("text"), m_host,
+							   true));
 	QVariantMap portField =
 		fieldItem(QStringLiteral("port"), QObject::tr("Port"), QStringLiteral("number"), static_cast< int >(m_port),
 				  true);
@@ -193,14 +201,18 @@ QVariantMap ModernConnectController::state() const {
 	QVariantMap section;
 	section.insert(QStringLiteral("title"), QObject::tr("Connection details"));
 	section.insert(QStringLiteral("fields"), fields);
-	dialog.insert(QStringLiteral("sections"), QVariantList { section });
+	dialog.insert(QStringLiteral("sections"), m_editorOpen ? QVariantList { section } : QVariantList {});
 
 	const bool hasSelection = m_selectedFavoriteIndex >= 0 && m_selectedFavoriteIndex < m_favorites.size();
 	QVariantList actions;
 	actions.push_back(actionItem(QStringLiteral("cancel"), QObject::tr("Cancel"), true));
-	actions.push_back(actionItem(QStringLiteral("removeFavorite"), QObject::tr("Remove saved"), hasSelection,
-								 QStringLiteral("danger")));
-	actions.push_back(actionItem(QStringLiteral("saveFavorite"), QObject::tr("Save server"), canSubmit()));
+	if (!m_editorOpen) {
+		actions.push_back(actionItem(QStringLiteral("editFavorite"), QObject::tr("Edit server"), hasSelection));
+	} else {
+		actions.push_back(actionItem(QStringLiteral("removeFavorite"), QObject::tr("Remove saved"), hasSelection,
+									 QStringLiteral("danger")));
+		actions.push_back(actionItem(QStringLiteral("saveFavorite"), QObject::tr("Save server"), canSubmit()));
+	}
 	actions.push_back(actionItem(QStringLiteral("connect"), QObject::tr("Connect"), canSubmit(),
 								 QStringLiteral("accent")));
 	dialog.insert(QStringLiteral("actions"), actions);
@@ -240,10 +252,6 @@ void ModernConnectController::updateField(const QString &fieldID, const QVariant
 	} else if (normalizedField == QLatin1String("password")) {
 		m_password = value.toString();
 	}
-
-	if (normalizedField != QLatin1String("password")) {
-		m_selectedFavoriteIndex = -1;
-	}
 }
 
 ModernConnectController::ActionResult ModernConnectController::invokeAction(const QString &actionID,
@@ -257,6 +265,18 @@ ModernConnectController::ActionResult ModernConnectController::invokeAction(cons
 
 	if (normalizedAction == QLatin1String("selectFavorite")) {
 		selectFavorite(payload.value(QStringLiteral("index")).toInt());
+		m_editorOpen = payload.value(QStringLiteral("edit")).toBool();
+		return result;
+	}
+
+	if (normalizedAction == QLatin1String("editFavorite")) {
+		const int requestedIndex = payload.contains(QStringLiteral("index"))
+									   ? payload.value(QStringLiteral("index")).toInt()
+									   : m_selectedFavoriteIndex;
+		if (requestedIndex >= 0 && requestedIndex < m_favorites.size()) {
+			selectFavorite(requestedIndex);
+			m_editorOpen = true;
+		}
 		return result;
 	}
 
@@ -267,22 +287,29 @@ ModernConnectController::ActionResult ModernConnectController::invokeAction(cons
 		m_username = m_defaultUsername;
 		m_password.clear();
 		m_port = DEFAULT_MUMBLE_PORT;
+		m_editorOpen = true;
 		return result;
 	}
 
 	if (normalizedAction == QLatin1String("removeFavorite")) {
-		const int requestedIndex =
-			payload.contains(QStringLiteral("index")) ? payload.value(QStringLiteral("index")).toInt() : m_selectedFavoriteIndex;
+		const int requestedIndex = payload.contains(QStringLiteral("index"))
+									   ? payload.value(QStringLiteral("index")).toInt()
+									   : m_selectedFavoriteIndex;
 		if (requestedIndex >= 0 && requestedIndex < m_favorites.size()) {
 			m_selectedFavoriteIndex = requestedIndex;
 			m_favorites.removeAt(m_selectedFavoriteIndex);
 			result.favoritesToSave = m_favorites;
-			m_selectedFavoriteIndex = -1;
-			m_name.clear();
-			m_host.clear();
-			m_username = m_defaultUsername;
-			m_password.clear();
-			m_port = DEFAULT_MUMBLE_PORT;
+			m_editorOpen = false;
+			if (m_favorites.isEmpty()) {
+				m_selectedFavoriteIndex = -1;
+				m_name.clear();
+				m_host.clear();
+				m_username = m_defaultUsername;
+				m_password.clear();
+				m_port = DEFAULT_MUMBLE_PORT;
+			} else {
+				selectFavorite(qMin(requestedIndex, m_favorites.size() - 1));
+			}
 		}
 		return result;
 	}
@@ -300,6 +327,8 @@ ModernConnectController::ActionResult ModernConnectController::invokeAction(cons
 			m_selectedFavoriteIndex = m_favorites.size() - 1;
 		}
 		result.favoritesToSave = m_favorites;
+		selectFavorite(m_selectedFavoriteIndex);
+		m_editorOpen = false;
 		return result;
 	}
 

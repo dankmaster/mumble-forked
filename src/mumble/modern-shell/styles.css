@@ -3242,7 +3242,7 @@ textarea:focus-visible {
 }
 
 .modern-dialog.is-connect {
-	width: min(740px, calc(100vw - 36px));
+	width: min(820px, calc(100vw - 36px));
 }
 
 body.dialog-host {
@@ -3281,11 +3281,15 @@ body.dialog-host {
 	padding: 12px 14px;
 }
 
-.modern-dialog-connect-grid {
+.modern-dialog-connect-shell {
 	display: grid;
-	grid-template-columns: minmax(220px, 0.38fr) minmax(320px, 1fr);
+	grid-template-columns: 1fr;
 	gap: 12px;
 	min-height: 0;
+}
+
+.modern-dialog-connect-shell.has-editor {
+	grid-template-columns: minmax(280px, 0.46fr) minmax(360px, 1fr);
 }
 
 .modern-dialog-connect-details {
@@ -3296,8 +3300,16 @@ body.dialog-host {
 	overflow: auto;
 }
 
+.modern-dialog-connect-details-title {
+	margin: 0;
+	color: var(--text-strong);
+	font-size: 15px;
+	font-weight: 700;
+}
+
 .dialog-host .modern-dialog.is-connect .modern-dialog-body {
 	overflow: hidden;
+	align-content: stretch;
 }
 
 .dialog-host .modern-dialog.is-connect .modern-dialog-favorites {
@@ -3311,13 +3323,13 @@ body.dialog-host {
 	align-content: start;
 	min-height: 0;
 	overflow: auto;
-	padding-right: 2px;
+	padding-right: 3px;
 }
 
 .dialog-host .modern-dialog.is-connect .modern-dialog-favorite {
 	max-width: none;
 	min-width: 0;
-	padding: 8px 9px;
+	padding: 10px 11px;
 	border-radius: 7px;
 }
 
@@ -3371,6 +3383,10 @@ body.dialog-host {
 	height: 32px;
 }
 
+.dialog-host .modern-dialog-close-button {
+	display: none;
+}
+
 .modern-dialog-body {
 	display: grid;
 	align-content: start;
@@ -3422,6 +3438,12 @@ body.dialog-host {
 	background: rgba(255, 255, 255, 0.018);
 }
 
+.modern-dialog-favorites {
+	padding: 0;
+	border: 0;
+	background: transparent;
+}
+
 .modern-dialog-section-title {
 	margin: 0;
 	color: var(--text-strong);
@@ -3441,17 +3463,20 @@ body.dialog-host {
 	display: grid;
 	align-items: stretch;
 	grid-template-columns: 1fr;
-	gap: 4px;
+	gap: 6px;
 	min-width: 0;
 }
 
 .modern-dialog-favorite {
 	display: grid;
-	gap: 2px;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 8px;
 	width: 100%;
 	min-width: 0;
 	max-width: none;
-	padding: 8px 9px;
+	min-height: 48px;
+	padding: 10px 11px;
 	border-radius: 6px;
 	text-align: left;
 }
@@ -3461,8 +3486,9 @@ body.dialog-host {
 	background: rgba(255, 255, 255, 0.055);
 }
 
-.modern-dialog-favorite-label,
-.modern-dialog-favorite-subtitle {
+.modern-dialog-favorite-copy,
+.modern-dialog-favorite-label {
+	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -3474,9 +3500,28 @@ body.dialog-host {
 	font-weight: 650;
 }
 
-.modern-dialog-favorite-subtitle {
+.modern-dialog-favorite-stats {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 6px;
+	min-width: 132px;
+	color: var(--text-muted);
+}
+
+.modern-dialog-favorite-stat {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 58px;
+	min-height: 24px;
+	padding: 0 7px;
+	border: 1px solid rgba(255, 255, 255, 0.075);
+	border-radius: var(--radius-pill);
+	background: rgba(255, 255, 255, 0.032);
 	color: var(--text-muted);
 	font-size: 11px;
+	white-space: nowrap;
 }
 
 .modern-dialog-favorites-add {
@@ -3488,12 +3533,20 @@ body.dialog-host {
 
 .modern-dialog-favorite-empty {
 	display: grid;
+	align-content: center;
 	place-items: center;
+	gap: 8px;
 	min-height: 132px;
 	padding: 12px;
 	border: 1px dashed var(--shell-divider);
 	border-radius: 7px;
 	background: rgba(255, 255, 255, 0.018);
+}
+
+.modern-dialog-favorite-empty-title {
+	margin: 0;
+	color: var(--text-muted);
+	font-size: 12px;
 }
 
 .modern-dialog-favorite-empty-button {
@@ -3559,6 +3612,10 @@ body.dialog-host {
 
 .modern-dialog-field-label {
 	color: var(--text-muted);
+}
+
+.modern-dialog-field-label[title] {
+	cursor: help;
 }
 
 .modern-dialog-field input,
@@ -3667,7 +3724,16 @@ body.dialog-host {
 	min-width: 0;
 }
 
-.modern-dialog-voice-meter-header,
+.modern-dialog-voice-meter-header {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto auto auto;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	color: var(--text-muted);
+	font-size: 11px;
+}
+
 .modern-dialog-voice-meter-footer {
 	display: grid;
 	grid-template-columns: 1fr auto 1fr;
@@ -3687,6 +3753,24 @@ body.dialog-host {
 
 .modern-dialog-voice-meter-header .modern-dialog-voice-meter-value {
 	text-align: right;
+}
+
+.modern-dialog-voice-meter-source {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.modern-dialog-voice-meter-auto,
+.modern-dialog-voice-meter-replay {
+	min-height: 24px;
+	padding-inline: 9px;
+	font-size: 10px;
+	white-space: nowrap;
+}
+
+.modern-dialog-voice-meter-replay {
+	min-width: 86px;
 }
 
 .modern-dialog-voice-meter-track {
@@ -3713,6 +3797,11 @@ body.dialog-host {
 
 .modern-dialog-voice-meter.is-transmitting .modern-dialog-voice-meter-fill {
 	background: rgba(78, 184, 159, 0.72);
+}
+
+.modern-dialog-voice-meter.is-calibrating .modern-dialog-voice-meter-track {
+	border-color: rgba(78, 184, 159, 0.46);
+	box-shadow: 0 0 0 2px rgba(78, 184, 159, 0.08);
 }
 
 .modern-dialog-voice-meter.is-unavailable .modern-dialog-voice-meter-fill {
@@ -3743,6 +3832,45 @@ body.dialog-host {
 
 .modern-dialog-voice-meter-footer span:last-child {
 	text-align: right;
+}
+
+.modern-dialog-voice-meter-coach {
+	display: grid;
+	grid-template-columns: minmax(90px, 0.22fr) minmax(0, 1fr);
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+	color: var(--text-muted);
+	font-size: 11px;
+}
+
+.modern-dialog-voice-meter-coach-track {
+	position: relative;
+	display: block;
+	height: 5px;
+	overflow: hidden;
+	border-radius: var(--radius-pill);
+	background: rgba(255, 255, 255, 0.10);
+}
+
+.modern-dialog-voice-meter-coach-fill {
+	position: absolute;
+	inset: 0 auto 0 0;
+	width: 0;
+	border-radius: inherit;
+	background: rgba(78, 184, 159, 0.75);
+	transition: width 120ms linear;
+}
+
+.modern-dialog-voice-meter-coach.is-active .modern-dialog-voice-meter-coach-fill {
+	background: var(--accent);
+}
+
+.modern-dialog-voice-meter-coach-text {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .modern-dialog-field-error {
@@ -3792,8 +3920,19 @@ body.dialog-host {
 		grid-column: 1;
 	}
 
-	.modern-dialog-connect-grid {
+	.modern-dialog-connect-shell,
+	.modern-dialog-connect-shell.has-editor {
 		grid-template-columns: 1fr;
+	}
+
+	.modern-dialog-favorite {
+		grid-template-columns: 1fr;
+		align-items: start;
+	}
+
+	.modern-dialog-favorite-stats {
+		justify-content: flex-start;
+		min-width: 0;
 	}
 
 	.dialog-host .modern-dialog.is-connect .modern-dialog-body {

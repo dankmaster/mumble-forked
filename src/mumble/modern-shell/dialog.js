@@ -6,6 +6,8 @@
 	let modernDialogState = null;
 	let modernDialogRenderedOpen = false;
 	let audioInputMeterTimer = 0;
+	let voiceCalibrationState = null;
+	let voiceReplayStopTimer = 0;
 	let modernDialogFavoriteMenu = null;
 	let modernDialogFavoriteClickTimer = 0;
 	let pendingModernDialogFieldFocus = "";
@@ -267,7 +269,7 @@
 		menu.className = "modern-dialog-favorite-menu";
 		menu.setAttribute("role", "menu");
 		addFavoriteMenuButton(menu, "Connect", "connectFavorite", favorite);
-		addFavoriteMenuButton(menu, "Edit", "selectFavorite", favorite, { focusField: "name" });
+		addFavoriteMenuButton(menu, "Edit", "editFavorite", favorite, { focusField: "name" });
 		addFavoriteMenuButton(menu, "Remove", "removeFavorite", favorite, { danger: true });
 		menu.addEventListener("click", function(menuEvent) {
 			menuEvent.stopPropagation();
@@ -298,30 +300,357 @@
 		input.style.setProperty("--range-progress", String(Math.max(0, Math.min(100, progress))) + "%");
 	}
 
+	function percentile(values, ratio) {
+		if (!values.length) {
+			return null;
+		}
+		const sorted = values.slice().sort(function(left, right) {
+			return left - right;
+		});
+		const index = Math.max(0, Math.min(sorted.length - 1, Math.round((sorted.length - 1) * ratio)));
+		return sorted[index];
+	}
+
+	function voiceMeterLevelFromPayload(element, meter) {
+		const source = Number(element.dataset.vadSource || 0);
+		const levels = audioMeterLevelsFromPayload(meter);
+		const rawLevel = source === 1 ? levels.signalToNoise : levels.amplitude;
+		return Number.isFinite(Number(rawLevel)) ? clampPercent(rawLevel) : null;
+	}
+
+	function audioMeterLevelsFromPayload(meter) {
+		const amplitude = Number(meter && meter.amplitude);
+		const signalToNoise = Number(meter && meter.signalToNoise);
+		return {
+			amplitude: Number.isFinite(amplitude) ? clampPercent(amplitude) : null,
+			signalToNoise: Number.isFinite(signalToNoise) ? clampPercent(signalToNoise) : null
+		};
+	}
+
+	function setVoiceCalibrationMessage(element, message) {
+		if (!element) {
+			return;
+		}
+		element.dataset.calibrationMessage = message || "";
+		element.dataset.calibrationMessageUntil = message ? String(Date.now() + 1800) : "0";
+	}
+
+	function activeVoiceCalibrationFor(element) {
+		return voiceCalibrationState && voiceCalibrationState.element === element;
+	}
+
+	function voiceCalibrationStatus() {
+		if (!voiceCalibrationState) {
+			return "";
+		}
+		const elapsed = Date.now() - voiceCalibrationState.startedAt;
+		if (elapsed < voiceCalibrationState.quietMs) {
+			return "Measuring room noise";
+		}
+		if (elapsed < voiceCalibrationState.totalMs) {
+			return "Speak normally";
+		}
+		return "Calibrating";
+	}
+
+	function syncVoiceCalibrationChrome(element) {
+		if (!element) {
+			return;
+		}
+		const button = element.querySelector(".modern-dialog-voice-meter-auto");
+		const active = activeVoiceCalibrationFor(element);
+		element.classList.toggle("is-calibrating", !!active);
+		if (button) {
+			button.disabled = !!active;
+			button.textContent = active ? "Listening..." : (button.dataset.defaultLabel || "Auto set");
+		}
+	}
+
+	function clearVoiceCalibration() {
+		const element = voiceCalibrationState ? voiceCalibrationState.element : null;
+		voiceCalibrationState = null;
+		if (element) {
+			element.classList.remove("is-calibrating");
+			syncVoiceCalibrationChrome(element);
+		}
+	}
+
+	function voiceThresholdCandidate(name, vadSource, quietSamples, speechSamples) {
+		const quietCeiling = percentile(quietSamples, 0.85);
+		const quietFloor = percentile(quietSamples, 0.15);
+		const speechLevel = percentile(speechSamples, 0.72);
+		const speechPeak = percentile(speechSamples, 0.92);
+		if (speechLevel === null && speechPeak === null) {
+			return null;
+		}
+
+		const noise = quietCeiling === null ? 0 : quietCeiling;
+		const voice = Math.max(speechLevel === null ? 0 : speechLevel, speechPeak === null ? 0 : speechPeak);
+		const adjustedVoice = voice < noise + 8 ? Math.min(100, noise + 18) : voice;
+		const span = Math.max(8, adjustedVoice - noise);
+		let silenceThreshold = clampPercent(Math.round(noise + span * 0.34));
+		let speechThreshold = clampPercent(Math.round(noise + span * 0.64));
+		const jitter = quietFloor === null ? 0 : Math.max(0, quietCeiling - quietFloor);
+		const gap = Math.max(0, adjustedVoice - noise);
+
+		if (speechThreshold <= silenceThreshold + 2) {
+			speechThreshold = Math.min(100, silenceThreshold + 3);
+			silenceThreshold = Math.max(0, speechThreshold - 3);
+		}
+		return {
+			name: name,
+			vadSource: vadSource,
+			silenceThreshold: silenceThreshold,
+			speechThreshold: speechThreshold,
+			noise: noise,
+			voice: adjustedVoice,
+			gap: gap,
+			jitter: jitter,
+			score: gap - jitter * 0.7 - noise * 0.08
+		};
+	}
+
+	function calculatedVoiceThresholds(calibration) {
+		const candidates = [
+			voiceThresholdCandidate("Amplitude", 0, calibration.quietAmplitude, calibration.speechAmplitude),
+			voiceThresholdCandidate("Signal-to-noise", 1, calibration.quietSignalToNoise, calibration.speechSignalToNoise)
+		].filter(function(candidate) {
+			return !!candidate;
+		});
+		if (!candidates.length) {
+			return null;
+		}
+
+		const currentSource = Number(calibration.element.dataset.vadSource || 0);
+		candidates.sort(function(left, right) {
+			return right.score - left.score;
+		});
+		let selected = candidates[0];
+		const current = candidates.find(function(candidate) {
+			return candidate.vadSource === currentSource;
+		});
+		if (current && current.score >= selected.score * 0.82 && current.gap >= 10) {
+			selected = current;
+		}
+
+		const voiceHold = selected.gap < 14 ? 45 : (selected.jitter > 8 ? 35 : 25);
+		return {
+			vadSource: selected.vadSource,
+			sourceLabel: selected.name,
+			silenceThreshold: selected.silenceThreshold,
+			speechThreshold: selected.speechThreshold,
+			voiceHold: voiceHold,
+			noise: Math.round(selected.noise),
+			voice: Math.round(selected.voice),
+			gap: Math.round(selected.gap)
+		};
+	}
+
+	function finishVoiceActivationCalibration() {
+		const calibration = voiceCalibrationState;
+		if (!calibration) {
+			return;
+		}
+
+		const element = calibration.element;
+		const thresholds = calculatedVoiceThresholds(calibration);
+		clearVoiceCalibration();
+		if (!thresholds) {
+			setVoiceCalibrationMessage(element, "No usable voice signal");
+			updateVoiceMeterElement(element, calibration.lastMeter || {});
+			return;
+		}
+
+		const detail = thresholds.sourceLabel + " " + thresholds.silenceThreshold + "%/" + thresholds.speechThreshold
+			+ "%, hold " + thresholds.voiceHold + " frames";
+		setVoiceCalibrationMessage(element, "Auto set applied: " + detail);
+		invokeModernDialogAction(calibration.actionId, thresholds);
+	}
+
+	function captureVoiceCalibrationSample(element, meter, level, available) {
+		if (!activeVoiceCalibrationFor(element)) {
+			return;
+		}
+
+		const calibration = voiceCalibrationState;
+		calibration.lastMeter = meter || {};
+		const elapsed = Date.now() - calibration.startedAt;
+		const levels = audioMeterLevelsFromPayload(meter || {});
+		if (available) {
+			if (elapsed < calibration.quietMs) {
+				if (levels.amplitude !== null) {
+					calibration.quietAmplitude.push(levels.amplitude);
+				}
+				if (levels.signalToNoise !== null) {
+					calibration.quietSignalToNoise.push(levels.signalToNoise);
+				}
+			} else if (elapsed < calibration.totalMs) {
+				if (levels.amplitude !== null) {
+					calibration.speechAmplitude.push(levels.amplitude);
+				}
+				if (levels.signalToNoise !== null) {
+					calibration.speechSignalToNoise.push(levels.signalToNoise);
+				}
+			}
+		}
+
+		if (elapsed >= calibration.totalMs) {
+			finishVoiceActivationCalibration();
+		}
+	}
+
+	function startVoiceActivationCalibration(element, field) {
+		const actionId = String(field && field.calibrationActionId || "");
+		if (!actionId || !element) {
+			return;
+		}
+
+		clearVoiceCalibration();
+		voiceCalibrationState = {
+			element: element,
+			actionId: actionId,
+			startedAt: Date.now(),
+			quietMs: 1300,
+			totalMs: 5200,
+			quietAmplitude: [],
+			quietSignalToNoise: [],
+			speechAmplitude: [],
+			speechSignalToNoise: [],
+			lastMeter: null
+		};
+		setVoiceCalibrationMessage(element, "");
+		syncVoiceCalibrationChrome(element);
+		refreshAudioInputMeters();
+	}
+
+	function clearVoiceReplayStopTimer() {
+		if (voiceReplayStopTimer) {
+			window.clearTimeout(voiceReplayStopTimer);
+			voiceReplayStopTimer = 0;
+		}
+	}
+
+	function stopVoiceReplay(element) {
+		const actionId = String(element && element.dataset.replayStopActionId || "");
+		if (!actionId) {
+			return;
+		}
+		clearVoiceReplayStopTimer();
+		invokeModernDialogAction(actionId, {});
+	}
+
+	function toggleVoiceReplay(element) {
+		if (!element) {
+			return;
+		}
+		const loopbackMode = Number(element.dataset.loopbackMode || 0);
+		if (loopbackMode !== 0) {
+			stopVoiceReplay(element);
+			return;
+		}
+
+		const actionId = String(element.dataset.replayStartActionId || "");
+		if (!actionId) {
+			return;
+		}
+		const mode = element.dataset.serverConnected === "true" ? "server" : "local";
+		invokeModernDialogAction(actionId, { mode: mode });
+		clearVoiceReplayStopTimer();
+		voiceReplayStopTimer = window.setTimeout(function() {
+			stopVoiceReplay(element);
+		}, 30000);
+	}
+
+	function updateVoiceMeterCoach(element, meter, level, available) {
+		const coach = element.querySelector(".modern-dialog-voice-meter-coach");
+		if (!coach) {
+			return;
+		}
+		const fill = coach.querySelector(".modern-dialog-voice-meter-coach-fill");
+		const text = coach.querySelector(".modern-dialog-voice-meter-coach-text");
+		const loopbackMode = Number(element.dataset.loopbackMode || 0);
+		let progress = 0;
+		let message = "";
+
+		if (activeVoiceCalibrationFor(element)) {
+			const elapsed = Date.now() - voiceCalibrationState.startedAt;
+			progress = Math.max(0, Math.min(100, Math.round((elapsed / voiceCalibrationState.totalMs) * 100)));
+			message = elapsed < voiceCalibrationState.quietMs
+				? "Keep the room quiet"
+				: "Speak a normal test sentence";
+		} else if (Number(element.dataset.calibrationMessageUntil || 0) > Date.now()) {
+			progress = 100;
+			message = element.dataset.calibrationMessage || "";
+		} else if (loopbackMode === 2) {
+			progress = available ? level : 0;
+			message = "Server replay is active";
+		} else if (loopbackMode === 1) {
+			progress = available ? level : 0;
+			message = "Local replay is active";
+		} else {
+			progress = available ? level : 0;
+			message = available ? "Ready to tune" : "Waiting for microphone input";
+		}
+
+		coach.classList.toggle("is-active", activeVoiceCalibrationFor(element) || loopbackMode !== 0);
+		if (fill) {
+			fill.style.width = String(progress) + "%";
+		}
+		if (text) {
+			text.textContent = message;
+		}
+	}
+
+	function syncVoiceReplayChrome(element) {
+		if (!element) {
+			return;
+		}
+		const button = element.querySelector(".modern-dialog-voice-meter-replay");
+		if (!button) {
+			return;
+		}
+		const loopbackMode = Number(element.dataset.loopbackMode || 0);
+		button.textContent = loopbackMode !== 0
+			? "Stop replay"
+			: (element.dataset.serverConnected === "true" ? "Server replay" : "Local replay");
+	}
+
 	function updateVoiceMeterElement(element, payload) {
 		const meter = payload || {};
-		const source = Number(element.dataset.vadSource || 0);
 		const silenceThreshold = clampPercent(element.dataset.silenceThreshold);
 		const speechThreshold = clampPercent(element.dataset.speechThreshold);
 		const active = element.dataset.active === "true";
-		const rawLevel = source === 1 ? meter.signalToNoise : meter.amplitude;
-		const available = !!meter.available && Number.isFinite(Number(rawLevel));
-		const level = available ? clampPercent(rawLevel) : 0;
+		const rawLevel = voiceMeterLevelFromPayload(element, meter);
+		const available = !!meter.available && rawLevel !== null;
+		const level = available ? rawLevel : 0;
 		const levelText = element.querySelector(".modern-dialog-voice-meter-value");
 		const statusText = element.querySelector(".modern-dialog-voice-meter-status");
+		const messageUntil = Number(element.dataset.calibrationMessageUntil || 0);
+		const loopbackMode = Number(meter.loopbackMode == null ? element.dataset.loopbackMode || 0 : meter.loopbackMode);
+
+		element.dataset.loopbackMode = String(loopbackMode);
+		element.dataset.serverConnected = meter.connected ? "true" : "false";
 
 		element.style.setProperty("--voice-level", String(level) + "%");
 		element.style.setProperty("--silence-threshold", String(silenceThreshold) + "%");
 		element.style.setProperty("--speech-threshold", String(speechThreshold) + "%");
 		element.classList.toggle("is-unavailable", !available);
-		element.classList.toggle("is-inactive", !active);
+		element.classList.toggle("is-inactive", !active && !activeVoiceCalibrationFor(element));
 		element.classList.toggle("is-transmitting", !!meter.transmitting);
 
 		if (levelText) {
 			levelText.textContent = available ? String(level) + "%" : "No signal";
 		}
 		if (statusText) {
-			if (!active) {
+			if (activeVoiceCalibrationFor(element)) {
+				statusText.textContent = voiceCalibrationStatus();
+			} else if (messageUntil > Date.now()) {
+				statusText.textContent = element.dataset.calibrationMessage || "";
+			} else if (loopbackMode === 2) {
+				statusText.textContent = "Server replay";
+			} else if (loopbackMode === 1) {
+				statusText.textContent = "Local replay";
+			} else if (!active) {
 				statusText.textContent = "Voice Activity is not selected";
 			} else if (!available) {
 				statusText.textContent = "Input inactive";
@@ -329,6 +658,10 @@
 				statusText.textContent = meter.transmitting ? "Transmitting" : "Listening";
 			}
 		}
+		captureVoiceCalibrationSample(element, meter, available ? level : null, available);
+		syncVoiceCalibrationChrome(element);
+		syncVoiceReplayChrome(element);
+		updateVoiceMeterCoach(element, meter, level, available);
 	}
 
 	function updateVoiceMeterThreshold(fieldId, value) {
@@ -382,6 +715,8 @@
 		} else if (!shouldRun && audioInputMeterTimer) {
 			window.clearInterval(audioInputMeterTimer);
 			audioInputMeterTimer = 0;
+			clearVoiceCalibration();
+			clearVoiceReplayStopTimer();
 		}
 	}
 
@@ -400,9 +735,16 @@
 
 		const row = document.createElement("label");
 		row.className = "modern-dialog-field is-" + type;
+		const fieldTooltip = String(field.tooltip || field.hint || "");
+		if (fieldTooltip) {
+			row.title = fieldTooltip;
+		}
 		const label = document.createElement("span");
 		label.className = "modern-dialog-field-label";
 		label.textContent = field.label || field.id || "Field";
+		if (fieldTooltip) {
+			label.title = fieldTooltip;
+		}
 		row.appendChild(label);
 
 		let input = null;
@@ -459,6 +801,13 @@
 			meter.dataset.silenceThreshold = String(field.silenceThreshold || 0);
 			meter.dataset.speechThreshold = String(field.speechThreshold || 0);
 			meter.dataset.active = field.active === false ? "false" : "true";
+			meter.dataset.loopbackMode = String(field.loopbackMode || 0);
+			meter.dataset.serverConnected = "false";
+			meter.dataset.replayStartActionId = String(field.replayStartActionId || "");
+			meter.dataset.replayStopActionId = String(field.replayStopActionId || "");
+			if (fieldTooltip) {
+				meter.title = fieldTooltip;
+			}
 
 			const header = document.createElement("div");
 			header.className = "modern-dialog-voice-meter-header";
@@ -469,6 +818,35 @@
 			currentValue.className = "modern-dialog-voice-meter-value";
 			header.appendChild(source);
 			header.appendChild(currentValue);
+			if (field.calibrationActionId) {
+				const autoButton = document.createElement("button");
+				autoButton.type = "button";
+				autoButton.className = "chip-button modern-dialog-voice-meter-auto";
+				autoButton.textContent = field.calibrationLabel || "Auto set";
+				autoButton.dataset.defaultLabel = autoButton.textContent;
+				if (field.calibrationTooltip) {
+					autoButton.title = String(field.calibrationTooltip);
+				}
+				autoButton.addEventListener("click", function(event) {
+					event.preventDefault();
+					startVoiceActivationCalibration(meter, field);
+				});
+				header.appendChild(autoButton);
+			}
+			if (field.replayStartActionId && field.replayStopActionId) {
+				const replayButton = document.createElement("button");
+				replayButton.type = "button";
+				replayButton.className = "chip-button modern-dialog-voice-meter-replay";
+				replayButton.textContent = field.replayLabel || "Replay";
+				if (field.replayTooltip) {
+					replayButton.title = String(field.replayTooltip);
+				}
+				replayButton.addEventListener("click", function(event) {
+					event.preventDefault();
+					toggleVoiceReplay(meter);
+				});
+				header.appendChild(replayButton);
+			}
 
 			const track = document.createElement("div");
 			track.className = "modern-dialog-voice-meter-track";
@@ -496,9 +874,22 @@
 			footer.appendChild(status);
 			footer.appendChild(speech);
 
+			const coach = document.createElement("div");
+			coach.className = "modern-dialog-voice-meter-coach";
+			const coachTrack = document.createElement("span");
+			coachTrack.className = "modern-dialog-voice-meter-coach-track";
+			const coachFill = document.createElement("span");
+			coachFill.className = "modern-dialog-voice-meter-coach-fill";
+			coachTrack.appendChild(coachFill);
+			const coachText = document.createElement("span");
+			coachText.className = "modern-dialog-voice-meter-coach-text";
+			coach.appendChild(coachTrack);
+			coach.appendChild(coachText);
+
 			meter.appendChild(header);
 			meter.appendChild(track);
 			meter.appendChild(footer);
+			meter.appendChild(coach);
 			updateVoiceMeterElement(meter, null);
 			row.appendChild(meter);
 		} else if (type === "textarea") {
@@ -528,8 +919,8 @@
 		if (input) {
 			input.dataset.modernDialogFieldId = String(field.id || "");
 			input.disabled = field.enabled === false;
-			if (field.hint) {
-				input.title = String(field.hint);
+			if (fieldTooltip) {
+				input.title = fieldTooltip;
 			}
 			input.addEventListener(type === "checkbox" || type === "select" || type === "range" ? "change" : "input", function() {
 				updateModernDialogField(field, input);
@@ -564,17 +955,15 @@
 		title.className = "modern-dialog-section-title";
 		title.textContent = "Saved servers";
 		header.appendChild(title);
-		if (favorites.length) {
-			const addButton = document.createElement("button");
-			addButton.type = "button";
-			addButton.className = "chip-button modern-dialog-favorites-add";
-			addButton.textContent = "Add server";
-			addButton.addEventListener("click", function() {
-				requestModernDialogFieldFocus("host");
-				invokeModernDialogAction("newFavorite", {});
-			});
-			header.appendChild(addButton);
-		}
+		const addButton = document.createElement("button");
+		addButton.type = "button";
+		addButton.className = "chip-button modern-dialog-favorites-add";
+		addButton.textContent = "Add server";
+		addButton.addEventListener("click", function() {
+			requestModernDialogFieldFocus("host");
+			invokeModernDialogAction("newFavorite", {});
+		});
+		header.appendChild(addButton);
 		section.appendChild(header);
 
 		const list = document.createElement("div");
@@ -583,10 +972,29 @@
 			const button = document.createElement("button");
 			button.type = "button";
 			button.className = "modern-dialog-favorite" + (favorite.selected ? " is-selected" : "");
-			button.innerHTML = "<span class=\"modern-dialog-favorite-label\"></span><span class=\"modern-dialog-favorite-subtitle\"></span>";
-			button.querySelector(".modern-dialog-favorite-label").textContent = favorite.label || favorite.host || "Server";
-			button.querySelector(".modern-dialog-favorite-subtitle").textContent = favorite.subtitle || "";
-			button.title = "Double-click to connect. Right-click for actions.";
+			button.setAttribute("aria-pressed", favorite.selected ? "true" : "false");
+			button.title = favorite.tooltip || favorite.label || favorite.host || "Server";
+
+			const copy = document.createElement("span");
+			copy.className = "modern-dialog-favorite-copy";
+			const label = document.createElement("span");
+			label.className = "modern-dialog-favorite-label";
+			label.textContent = favorite.label || favorite.host || "Server";
+			copy.appendChild(label);
+
+			const stats = document.createElement("span");
+			stats.className = "modern-dialog-favorite-stats";
+			const users = document.createElement("span");
+			users.className = "modern-dialog-favorite-stat";
+			users.textContent = favorite.usersLabel || "Users: -";
+			const ping = document.createElement("span");
+			ping.className = "modern-dialog-favorite-stat";
+			ping.textContent = favorite.pingLabel || "Ping: -";
+			stats.appendChild(users);
+			stats.appendChild(ping);
+
+			button.appendChild(copy);
+			button.appendChild(stats);
 			button.addEventListener("click", function() {
 				clearModernDialogFavoriteClickTimer();
 				modernDialogFavoriteClickTimer = window.setTimeout(function() {
@@ -608,14 +1016,18 @@
 		if (!list.children.length) {
 			const empty = document.createElement("div");
 			empty.className = "modern-dialog-favorite-empty";
+			const emptyTitle = document.createElement("p");
+			emptyTitle.className = "modern-dialog-favorite-empty-title";
+			emptyTitle.textContent = "No saved servers";
 			const emptyButton = document.createElement("button");
 			emptyButton.type = "button";
 			emptyButton.className = "chip-button modern-dialog-favorite-empty-button";
-			emptyButton.textContent = "Click here to add your first server!";
+			emptyButton.textContent = "Add server";
 			emptyButton.addEventListener("click", function() {
 				requestModernDialogFieldFocus("host");
 				invokeModernDialogAction("newFavorite", {});
 			});
+			empty.appendChild(emptyTitle);
 			empty.appendChild(emptyButton);
 			list.appendChild(empty);
 		}
@@ -663,14 +1075,20 @@
 
 	function renderConnectDialog(dialog) {
 		const grid = document.createElement("div");
-		grid.className = "modern-dialog-connect-grid";
+		grid.className = "modern-dialog-connect-shell" + (dialog.editorOpen ? " has-editor" : "");
 
 		grid.appendChild(createModernDialogFavorites(dialog));
 
-		const details = document.createElement("div");
-		details.className = "modern-dialog-connect-details";
-		appendModernDialogSections(details, dialog.sections || [], dialog.errors || {});
-		grid.appendChild(details);
+		if (dialog.editorOpen) {
+			const details = document.createElement("div");
+			details.className = "modern-dialog-connect-details";
+			const detailsTitle = document.createElement("h2");
+			detailsTitle.className = "modern-dialog-connect-details-title";
+			detailsTitle.textContent = dialog.editorTitle || "Server";
+			details.appendChild(detailsTitle);
+			appendModernDialogSections(details, dialog.sections || [], dialog.errors || {});
+			grid.appendChild(details);
+		}
 
 		refs.body.appendChild(grid);
 	}

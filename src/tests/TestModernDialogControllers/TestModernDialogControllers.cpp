@@ -39,6 +39,11 @@ void TestModernDialogControllers::connectControllerSelectsAndSavesFavorites() {
 	QCOMPARE(state.value(QStringLiteral("open")).toBool(), true);
 	QCOMPARE(state.value(QStringLiteral("favorites")).toList().size(), 1);
 	QCOMPARE(state.value(QStringLiteral("selectedFavoriteIndex")).toInt(), 0);
+	QCOMPARE(state.value(QStringLiteral("editorOpen")).toBool(), false);
+	QCOMPARE(state.value(QStringLiteral("sections")).toList().size(), 0);
+	const QVariantMap savedFavorite = state.value(QStringLiteral("favorites")).toList().at(0).toMap();
+	QCOMPARE(savedFavorite.value(QStringLiteral("usersLabel")).toString(), QStringLiteral("Users: -"));
+	QCOMPARE(savedFavorite.value(QStringLiteral("pingLabel")).toString(), QStringLiteral("Ping: -"));
 
 	ModernConnectController::ActionResult favoriteConnectResult =
 		controller.invokeAction(QStringLiteral("connectFavorite"), QVariantMap { { QStringLiteral("index"), 0 } });
@@ -53,6 +58,7 @@ void TestModernDialogControllers::connectControllerSelectsAndSavesFavorites() {
 		controller.invokeAction(QStringLiteral("newFavorite"), QVariantMap());
 	QCOMPARE(clearResult.closeDialog, false);
 	QCOMPARE(controller.state().value(QStringLiteral("selectedFavoriteIndex")).toInt(), -1);
+	QCOMPARE(controller.state().value(QStringLiteral("editorOpen")).toBool(), true);
 
 	controller.updateField(QStringLiteral("host"), QStringLiteral("mumble://dev.example.test/lobby"));
 	controller.updateField(QStringLiteral("name"), QStringLiteral("Dev"));
@@ -66,6 +72,18 @@ void TestModernDialogControllers::connectControllerSelectsAndSavesFavorites() {
 	QCOMPARE(saveResult.favoritesToSave->at(1).qsHostname, QStringLiteral("dev.example.test"));
 	QCOMPARE(saveResult.favoritesToSave->at(1).usPort, 65000);
 	QCOMPARE(saveResult.favoritesToSave->at(1).qsUsername, QStringLiteral("modern-user"));
+	QCOMPARE(controller.state().value(QStringLiteral("editorOpen")).toBool(), false);
+
+	ModernConnectController::ActionResult editResult =
+		controller.invokeAction(QStringLiteral("editFavorite"), QVariantMap { { QStringLiteral("index"), 1 } });
+	QCOMPARE(editResult.closeDialog, false);
+	QCOMPARE(controller.state().value(QStringLiteral("editorOpen")).toBool(), true);
+	controller.updateField(QStringLiteral("name"), QStringLiteral("Dev Renamed"));
+	ModernConnectController::ActionResult editSaveResult =
+		controller.invokeAction(QStringLiteral("saveFavorite"), QVariantMap());
+	QVERIFY(editSaveResult.favoritesToSave.has_value());
+	QCOMPARE(editSaveResult.favoritesToSave->size(), 2);
+	QCOMPARE(editSaveResult.favoritesToSave->at(1).qsName, QStringLiteral("Dev Renamed"));
 
 	ModernConnectController::ActionResult connectResult =
 		controller.invokeAction(QStringLiteral("connect"), QVariantMap());
@@ -91,6 +109,7 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	settings.modernLayoutPolicy = Settings::ModernLayoutFollowLegacy;
 	settings.wlWindowLayout     = Settings::LayoutClassic;
 	settings.bReconnect         = false;
+	settings.iQuality           = 72000;
 
 	ModernSettingsController controller;
 	controller.open(settings, QStringLiteral("NetworkConfig"));
@@ -102,6 +121,29 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QVariantMap state = controller.state();
 	QCOMPARE(state.value(QStringLiteral("id")).toString(), QStringLiteral("settings"));
 	QCOMPARE(state.value(QStringLiteral("activePage")).toString(), QStringLiteral("network"));
+
+	auto verifySettingsTooltips = [](const Settings &sourceSettings) {
+		ModernSettingsController tooltipController;
+		const QStringList pages { QStringLiteral("look"), QStringLiteral("network"), QStringLiteral("screenShare"),
+								  QStringLiteral("audioInput"), QStringLiteral("audioOutput") };
+		for (const QString &page : pages) {
+			tooltipController.open(sourceSettings, page);
+			const QVariantList sections = tooltipController.state().value(QStringLiteral("sections")).toList();
+			for (const QVariant &sectionValue : sections) {
+				const QVariantMap section = sectionValue.toMap();
+				for (const QVariant &fieldValue : section.value(QStringLiteral("fields")).toList()) {
+					const QVariantMap field = fieldValue.toMap();
+					const QString id        = field.value(QStringLiteral("id")).toString();
+					if (id.isEmpty()) {
+						continue;
+					}
+					QVERIFY2(!field.value(QStringLiteral("tooltip")).toString().trimmed().isEmpty(),
+							 qPrintable(QStringLiteral("Missing tooltip for %1 on %2").arg(id, page)));
+				}
+			}
+		}
+	};
+	verifySettingsTooltips(settings);
 
 	controller.updateField(QStringLiteral("network.autoReconnect"), true);
 	ModernSettingsController::ActionResult result = controller.invokeAction(QStringLiteral("ok"), QVariantMap());
@@ -129,19 +171,68 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	controller.open(settings, QStringLiteral("AudioInput"));
 	QCOMPARE(controller.activePage(), QStringLiteral("audioInput"));
 	const QVariantList audioInputSections = controller.state().value(QStringLiteral("sections")).toList();
-	bool foundInputMeter                  = false;
+	bool foundInputSignalSection          = false;
+	bool foundInputMeterInVoiceActivation = false;
+	for (const QVariant &sectionValue : audioInputSections) {
+		const QVariantMap section = sectionValue.toMap();
+		if (section.value(QStringLiteral("title")).toString() == QLatin1String("Input signal")) {
+			foundInputSignalSection = true;
+		}
+		for (const QVariant &fieldValue : section.value(QStringLiteral("fields")).toList()) {
+			const QVariantMap field = fieldValue.toMap();
+			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Voice activation")
+				&& field.value(QStringLiteral("id")).toString() == QLatin1String("audio.inputMeter")) {
+				foundInputMeterInVoiceActivation =
+					field.value(QStringLiteral("type")).toString() == QLatin1String("voiceMeter")
+					&& field.value(QStringLiteral("calibrationActionId")).toString()
+						   == QLatin1String("autoSetVoiceActivation");
+			}
+		}
+	}
+	QVERIFY(!foundInputSignalSection);
+	QVERIFY(foundInputMeterInVoiceActivation);
+
+	ModernSettingsController::ActionResult autoSetResult =
+		controller.invokeAction(QStringLiteral("autoSetVoiceActivation"),
+								QVariantMap { { QStringLiteral("silenceThreshold"), 22 },
+											  { QStringLiteral("speechThreshold"), 48 },
+											  { QStringLiteral("vadSource"), Settings::SignalToNoise },
+											  { QStringLiteral("voiceHold"), 35 } });
+	QCOMPARE(autoSetResult.closeDialog, false);
+	QVERIFY(autoSetResult.settingsToApply.has_value());
+	QCOMPARE(controller.draft().atTransmit, Settings::VAD);
+	QCOMPARE(controller.draft().vsVAD, Settings::SignalToNoise);
+	QCOMPARE(controller.draft().iVoiceHold, 35);
+	QVERIFY(qFuzzyCompare(controller.draft().fVADmin, 0.22f));
+	QVERIFY(qFuzzyCompare(controller.draft().fVADmax, 0.48f));
+
+	ModernSettingsController::ActionResult replayResult =
+		controller.invokeAction(QStringLiteral("startVoiceReplay"),
+								QVariantMap { { QStringLiteral("mode"), QStringLiteral("server") } });
+	QVERIFY(replayResult.settingsToApply.has_value());
+	QCOMPARE(controller.draft().lmLoopMode, Settings::Server);
+	QCOMPARE(controller.draft().dMaxPacketDelay, 0.0f);
+	QCOMPARE(controller.draft().dPacketLoss, 0.0f);
+
+	ModernSettingsController::ActionResult stopReplayResult =
+		controller.invokeAction(QStringLiteral("stopVoiceReplay"), QVariantMap());
+	QVERIFY(stopReplayResult.settingsToApply.has_value());
+	QCOMPARE(controller.draft().lmLoopMode, Settings::None);
+
+	bool foundKbitBitrate = false;
 	for (const QVariant &sectionValue : audioInputSections) {
 		const QVariantMap section = sectionValue.toMap();
 		for (const QVariant &fieldValue : section.value(QStringLiteral("fields")).toList()) {
 			const QVariantMap field = fieldValue.toMap();
-			if (field.value(QStringLiteral("id")).toString() == QLatin1String("audio.inputMeter")) {
-				foundInputMeter = field.value(QStringLiteral("type")).toString() == QLatin1String("voiceMeter");
+			if (field.value(QStringLiteral("id")).toString() == QLatin1String("audio.quality")) {
+				foundKbitBitrate = field.value(QStringLiteral("value")).toInt() == 72
+								   && field.value(QStringLiteral("suffix")).toString() == QLatin1String(" kbit/s");
 			}
 		}
 	}
-	QVERIFY(foundInputMeter);
+	QVERIFY(foundKbitBitrate);
 
-	controller.updateField(QStringLiteral("audio.quality"), 72000);
+	controller.updateField(QStringLiteral("audio.quality"), 72);
 	controller.updateField(QStringLiteral("audio.vadMin"), 35);
 	controller.updateField(QStringLiteral("audio.vadMax"), 70);
 	ModernSettingsController::ActionResult audioInputResult =

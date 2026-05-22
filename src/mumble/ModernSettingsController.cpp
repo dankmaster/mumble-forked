@@ -11,8 +11,10 @@
 #include "ModernShellMenuSerializer.h"
 #include "SpeechCleanup.h"
 
+#include <QtCore/QHash>
 #include <QtCore/QObject>
 
+#include <algorithm>
 #include <cmath>
 
 namespace {
@@ -49,6 +51,13 @@ namespace {
 	QVariantMap hintedField(QVariantMap field, const QString &hint) {
 		if (!hint.isEmpty()) {
 			field.insert(QStringLiteral("hint"), hint);
+		}
+		return field;
+	}
+
+	QVariantMap tooltippedField(QVariantMap field, const QString &tooltip) {
+		if (!tooltip.isEmpty()) {
+			field.insert(QStringLiteral("tooltip"), tooltip);
 		}
 		return field;
 	}
@@ -91,10 +100,196 @@ namespace {
 		return field;
 	}
 
+	QString fieldTooltip(const QString &id) {
+		const QHash< QString, QString > tooltips {
+			{ QStringLiteral("look.quitBehavior"),
+			  QObject::tr("Choose whether closing the main window asks, minimizes to tray, or quits the client.") },
+			{ QStringLiteral("look.alwaysOnTop"),
+			  QObject::tr("Keep the Mumble window above other windows in the selected layout modes.") },
+			{ QStringLiteral("look.hideInTray"),
+			  QObject::tr("Hide the taskbar window when Mumble is minimized to the system tray.") },
+			{ QStringLiteral("look.stateInTray"),
+			  QObject::tr("Reflect your talking, muted, and deafened state in the tray icon.") },
+			{ QStringLiteral("look.showUserCount"),
+			  QObject::tr("Show participant counts next to rooms in the room list.") },
+			{ QStringLiteral("look.showVolumeAdjustments"),
+			  QObject::tr("Show when users have local volume adjustments applied.") },
+			{ QStringLiteral("look.showNicknamesOnly"),
+			  QObject::tr("Prefer nicknames over full usernames where both are available.") },
+			{ QStringLiteral("look.showContextMenuInMenuBar"),
+			  QObject::tr("Expose context-menu actions through the app menu for keyboard and accessibility workflows.") },
+			{ QStringLiteral("look.showTransmitModeComboBox"),
+			  QObject::tr("Show the transmit-mode selector in the main window controls.") },
+			{ QStringLiteral("look.filterHidesEmptyChannels"),
+			  QObject::tr("Hide empty rooms when a room-list filter is active.") },
+			{ QStringLiteral("look.presenceIdleTimeout"),
+			  QObject::tr("Set how long you can be inactive before Mumble marks you idle.") },
+			{ QStringLiteral("network.autoReconnect"),
+			  QObject::tr("Reconnect automatically if the current server connection drops.") },
+			{ QStringLiteral("network.autoConnect"),
+			  QObject::tr("Connect to your last server automatically when Mumble starts.") },
+			{ QStringLiteral("network.tcpMode"),
+			  QObject::tr("Use TCP instead of UDP for voice traffic when networks block or degrade UDP.") },
+			{ QStringLiteral("network.qos"),
+			  QObject::tr("Ask the operating system and network to prioritize Mumble voice packets.") },
+			{ QStringLiteral("network.suppressIdentity"),
+			  QObject::tr("Avoid sending your certificate identity to servers unless it is required.") },
+			{ QStringLiteral("network.linkPreviews"),
+			  QObject::tr("Fetch and show previews for links posted in chat.") },
+			{ QStringLiteral("network.hideOS"),
+			  QObject::tr("Do not advertise your operating system details to connected servers.") },
+			{ QStringLiteral("network.proxyType"),
+			  QObject::tr("Choose whether Mumble connects directly or through an HTTP/SOCKS proxy.") },
+			{ QStringLiteral("network.proxyHost"), QObject::tr("Hostname or IP address of the proxy server.") },
+			{ QStringLiteral("network.proxyPort"), QObject::tr("Network port used by the configured proxy server.") },
+			{ QStringLiteral("network.proxyUsername"), QObject::tr("Username sent to the proxy when authentication is needed.") },
+			{ QStringLiteral("network.proxyPassword"), QObject::tr("Password sent to the proxy when authentication is needed.") },
+			{ QStringLiteral("network.updateCheck"),
+			  QObject::tr("Check whether a newer Mumble client build is available.") },
+			{ QStringLiteral("network.pluginCheck"), QObject::tr("Check installed plugins for available updates.") },
+			{ QStringLiteral("network.pluginAutoUpdate"),
+			  QObject::tr("Install plugin updates automatically when they are available.") },
+			{ QStringLiteral("network.advertisedRelease"),
+			  QObject::tr("Override the release string Mumble reports to servers for compatibility testing.") },
+			{ QStringLiteral("network.advertisedOS"),
+			  QObject::tr("Override the operating-system name Mumble reports to servers for compatibility testing.") },
+			{ QStringLiteral("network.advertisedOSVersion"),
+			  QObject::tr("Override the operating-system version Mumble reports to servers for compatibility testing.") },
+			{ QStringLiteral("screenShare.autoOpenCurrentRoom"),
+			  QObject::tr("Open screen shares automatically when they are posted in your current voice room.") },
+			{ QStringLiteral("screenShare.preferInAppRelay"),
+			  QObject::tr("Prefer Mumble's built-in relay window instead of an external browser for shared screens.") },
+			{ QStringLiteral("screenShare.diagnostics"),
+			  QObject::tr("Write extra screen-sharing diagnostics to the profile log folder.") },
+			{ QStringLiteral("audio.inputMeter"),
+			  QObject::tr("Shows the live signal used by voice activation and the current stop/start thresholds.") },
+			{ QStringLiteral("audio.inputSystem"), QObject::tr("Select the audio backend used for microphone capture.") },
+			{ QStringLiteral("audio.inputDevice"), QObject::tr("Select which microphone or capture source Mumble uses.") },
+			{ QStringLiteral("audio.exclusiveInput"),
+			  QObject::tr("Let Mumble take exclusive control of the input device when the backend supports it.") },
+			{ QStringLiteral("audio.transmitMode"),
+			  QObject::tr("Choose whether to transmit continuously, by voice activity, or only while push-to-talk is held.") },
+			{ QStringLiteral("audio.vadSource"),
+			  QObject::tr("Choose the signal type used to decide when voice activity opens the microphone.") },
+			{ QStringLiteral("audio.vadMin"),
+			  QObject::tr("Signal level below which voice activation closes the microphone.") },
+			{ QStringLiteral("audio.vadMax"),
+			  QObject::tr("Signal level above which voice activation opens the microphone.") },
+			{ QStringLiteral("audio.voiceHold"),
+			  QObject::tr("How long voice activation stays open after the signal drops below the stop threshold.") },
+			{ QStringLiteral("audio.doublePush"),
+			  QObject::tr("How quickly a second push-to-talk press toggles lock mode.") },
+			{ QStringLiteral("audio.pttHold"),
+			  QObject::tr("How long transmission continues after releasing push-to-talk.") },
+			{ QStringLiteral("audio.showPttWindow"),
+			  QObject::tr("Show a small on-screen push-to-talk button window.") },
+			{ QStringLiteral("audio.framesPerPacket"),
+			  QObject::tr("Amount of captured audio bundled into each outgoing voice packet.") },
+			{ QStringLiteral("audio.quality"), QObject::tr("Target voice bitrate in kilobits per second.") },
+			{ QStringLiteral("audio.experimentalHighBitrate"),
+			  QObject::tr("Allow voice bitrate values above the normal compatibility range.") },
+			{ QStringLiteral("audio.allowLowDelay"),
+			  QObject::tr("Allow Opus to use lower-latency encoding when the server and settings permit it.") },
+			{ QStringLiteral("audio.maxAmplification"),
+			  QObject::tr("Maximum automatic microphone gain Mumble may apply to quiet input.") },
+			{ QStringLiteral("audio.echoMode"),
+			  QObject::tr("Reduce echo from speakers or shared output paths when supported by the audio backend.") },
+			{ QStringLiteral("audio.noiseCancelMode"),
+			  QObject::tr("Choose whether local microphone noise suppression is disabled, classic, neural, or combined.") },
+			{ QStringLiteral("audio.noiseCancelBackend"),
+			  QObject::tr("Select the neural noise-suppression engine used for local microphone cleanup.") },
+			{ QStringLiteral("audio.noiseCancelModel"),
+			  QObject::tr("Select the model file or preset used by the local neural cleanup backend.") },
+			{ QStringLiteral("audio.noiseCancelCustomModelPath"),
+			  QObject::tr("Path to a custom local neural cleanup model file.") },
+			{ QStringLiteral("audio.speexNoiseStrength"),
+			  QObject::tr("Adjust the strength of classic Speex noise suppression.") },
+			{ QStringLiteral("audio.cuePtt"),
+			  QObject::tr("Play a cue sound when push-to-talk transmission starts or stops.") },
+			{ QStringLiteral("audio.cueVad"),
+			  QObject::tr("Play a cue sound when voice activation starts or stops transmitting.") },
+			{ QStringLiteral("audio.cueOnPath"), QObject::tr("Sound file played when transmission starts.") },
+			{ QStringLiteral("audio.cueOffPath"), QObject::tr("Sound file played when transmission stops.") },
+			{ QStringLiteral("audio.muteCue"), QObject::tr("Play a cue sound when your microphone mute state changes.") },
+			{ QStringLiteral("audio.muteCuePath"), QObject::tr("Sound file played for microphone mute cues.") },
+			{ QStringLiteral("audio.idleMinutes"),
+			  QObject::tr("Minutes of inactivity before Mumble performs the selected idle action.") },
+			{ QStringLiteral("audio.idleAction"),
+			  QObject::tr("Action Mumble performs when you have been idle for the configured time.") },
+			{ QStringLiteral("audio.undoIdleAction"),
+			  QObject::tr("Undo an automatic idle mute or deafen when activity resumes.") },
+			{ QStringLiteral("audio.outputSystem"), QObject::tr("Select the audio backend used for playback.") },
+			{ QStringLiteral("audio.outputDevice"), QObject::tr("Select which speakers or headset Mumble uses.") },
+			{ QStringLiteral("audio.exclusiveOutput"),
+			  QObject::tr("Let Mumble take exclusive control of the output device when the backend supports it.") },
+			{ QStringLiteral("audio.outputVolume"), QObject::tr("Adjust playback volume for incoming speech.") },
+			{ QStringLiteral("audio.outputDelay"),
+			  QObject::tr("Delay audio playback to compensate for device or routing latency.") },
+			{ QStringLiteral("audio.jitterBuffer"),
+			  QObject::tr("Buffer more or less incoming audio to smooth network jitter.") },
+			{ QStringLiteral("audio.loopMode"), QObject::tr("Play your own transmitted audio locally or through the server.") },
+			{ QStringLiteral("audio.loopPacketDelay"),
+			  QObject::tr("Simulate packet delay for loopback testing.") },
+			{ QStringLiteral("audio.loopPacketLoss"),
+			  QObject::tr("Simulate packet loss for loopback testing.") },
+			{ QStringLiteral("audio.attenuateOthers"),
+			  QObject::tr("Lower other applications while other users are talking.") },
+			{ QStringLiteral("audio.attenuateOnTalk"),
+			  QObject::tr("Lower other applications while you are talking.") },
+			{ QStringLiteral("audio.externalApplicationsVolume"),
+			  QObject::tr("Volume kept for other applications while attenuation is active.") },
+			{ QStringLiteral("audio.attenuatePrioritySpeaker"),
+			  QObject::tr("Lower regular users when a priority speaker talks.") },
+			{ QStringLiteral("audio.alwaysAttenuateListeners"),
+			  QObject::tr("Apply listener attenuation even outside normal priority-speaker situations.") },
+			{ QStringLiteral("audio.listenerAttenuation"),
+			  QObject::tr("Volume kept for listeners when listener attenuation is active.") },
+			{ QStringLiteral("audio.attenuateSameOutputOnly"),
+			  QObject::tr("Only attenuate applications using the same output device as Mumble.") },
+			{ QStringLiteral("audio.attenuateLoopbacks"),
+			  QObject::tr("Also attenuate loopback audio when same-device attenuation is enabled.") },
+			{ QStringLiteral("audio.positional"), QObject::tr("Enable positional audio from supported games and plugins.") },
+			{ QStringLiteral("audio.positionalHeadphone"),
+			  QObject::tr("Optimize positional audio rendering for headphones.") },
+			{ QStringLiteral("audio.transmitPosition"),
+			  QObject::tr("Send your positional audio coordinates to the server when available.") },
+			{ QStringLiteral("audio.minDistance"),
+			  QObject::tr("Distance at which positional audio starts to become quieter.") },
+			{ QStringLiteral("audio.maxDistance"),
+			  QObject::tr("Distance at which positional audio reaches its minimum volume.") },
+			{ QStringLiteral("audio.minPositionalVolume"),
+			  QObject::tr("Lowest volume positional audio may fade to at maximum distance.") },
+			{ QStringLiteral("audio.bloom"),
+			  QObject::tr("Widen the perceived spread of positional audio sources.") },
+			{ QStringLiteral("audio.remoteCleanupEnabled"),
+			  QObject::tr("Clean up incoming speech from other users before playback.") },
+			{ QStringLiteral("audio.remoteCleanupBackend"),
+			  QObject::tr("Select the neural cleanup engine used for incoming speech.") },
+			{ QStringLiteral("audio.remoteCleanupModel"),
+			  QObject::tr("Select the model file or preset used for incoming speech cleanup.") },
+			{ QStringLiteral("audio.remoteCleanupCustomModelPath"),
+			  QObject::tr("Path to a custom neural cleanup model for incoming speech.") },
+			{ QStringLiteral("audio.remoteCleanupPreset"),
+			  QObject::tr("Balance cleanup strength against speech naturalness for incoming audio.") }
+		};
+		return tooltips.value(id);
+	}
+
 	QVariantMap sectionItem(const QString &title, const QVariantList &fields) {
+		QVariantList resolvedFields;
+		resolvedFields.reserve(fields.size());
+		for (const QVariant &fieldValue : fields) {
+			QVariantMap field = fieldValue.toMap();
+			const QString id  = field.value(QStringLiteral("id")).toString();
+			if (!id.isEmpty() && field.value(QStringLiteral("tooltip")).toString().isEmpty()) {
+				field = tooltippedField(field, fieldTooltip(id));
+			}
+			resolvedFields.push_back(field);
+		}
+
 		QVariantMap section;
 		section.insert(QStringLiteral("title"), title);
-		section.insert(QStringLiteral("fields"), fields);
+		section.insert(QStringLiteral("fields"), resolvedFields);
 		return section;
 	}
 
@@ -104,6 +299,14 @@ namespace {
 
 	float floatFromPercent(const QVariant &value) {
 		return static_cast< float >(qBound(0, value.toInt(), 200)) / 100.0f;
+	}
+
+	int bitrateKbitFromBits(const int value) {
+		return qBound(8, static_cast< int >(std::lround(static_cast< double >(value) / 1000.0)), 512);
+	}
+
+	int bitrateBitsFromKbit(const QVariant &value) {
+		return qBound(8, value.toInt(), 512) * 1000;
 	}
 
 	QVariantList transmitModeOptions() {
@@ -367,11 +570,21 @@ namespace {
 		field.insert(QStringLiteral("vadSource"), static_cast< int >(settings.vsVAD));
 		field.insert(QStringLiteral("transmitMode"), static_cast< int >(settings.atTransmit));
 		field.insert(QStringLiteral("active"), settings.atTransmit == Settings::VAD);
+		field.insert(QStringLiteral("calibrationActionId"), QStringLiteral("autoSetVoiceActivation"));
+		field.insert(QStringLiteral("calibrationLabel"), QObject::tr("Auto set"));
+		field.insert(QStringLiteral("calibrationTooltip"),
+					 QObject::tr("Measure room noise and normal speech, then set voice-activation thresholds."));
+		field.insert(QStringLiteral("replayStartActionId"), QStringLiteral("startVoiceReplay"));
+		field.insert(QStringLiteral("replayStopActionId"), QStringLiteral("stopVoiceReplay"));
+		field.insert(QStringLiteral("replayLabel"), QObject::tr("Replay"));
+		field.insert(QStringLiteral("replayTooltip"),
+					 QObject::tr("Listen to your microphone through server loopback when connected, or local loopback when offline."));
 		field.insert(QStringLiteral("sourceLabel"),
 					 settings.vsVAD == Settings::SignalToNoise ? QObject::tr("Signal-to-noise")
 															   : QObject::tr("Amplitude"));
 		field.insert(QStringLiteral("silenceThreshold"), vadThresholdFromFloat(settings.fVADmin));
 		field.insert(QStringLiteral("speechThreshold"), vadThresholdFromFloat(settings.fVADmax));
+		field.insert(QStringLiteral("loopbackMode"), static_cast< int >(settings.lmLoopMode));
 		return field;
 	}
 
@@ -546,7 +759,7 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 	} else if (id == QLatin1String("audio.showPttWindow")) {
 		m_draft.bShowPTTButtonWindow = value.toBool();
 	} else if (id == QLatin1String("audio.quality")) {
-		m_draft.iQuality = qBound(8000, value.toInt(), 512000);
+		m_draft.iQuality = qBound(8000, bitrateBitsFromKbit(value), 512000);
 	} else if (id == QLatin1String("audio.experimentalHighBitrate")) {
 		m_draft.experimentalHighBitrateEnabled = value.toBool();
 	} else if (id == QLatin1String("audio.allowLowDelay")) {
@@ -685,6 +898,53 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 	if (action == QLatin1String("reset")) {
 		m_draft = m_original;
 		forceModernLayout();
+		return result;
+	}
+
+	if (action == QLatin1String("autoSetVoiceActivation")) {
+		int silenceThreshold = qBound(0, payload.value(QStringLiteral("silenceThreshold")).toInt(), 100);
+		int speechThreshold  = qBound(0, payload.value(QStringLiteral("speechThreshold")).toInt(), 100);
+		const Settings::VADSource vadSource =
+			static_cast< Settings::VADSource >(payload.value(QStringLiteral("vadSource"),
+															 static_cast< int >(m_draft.vsVAD))
+												   .toInt());
+		const int voiceHold = qBound(5, payload.value(QStringLiteral("voiceHold"), m_draft.iVoiceHold).toInt(), 80);
+
+		if (speechThreshold < silenceThreshold) {
+			std::swap(silenceThreshold, speechThreshold);
+		}
+		if (speechThreshold <= silenceThreshold) {
+			speechThreshold  = qMin(100, silenceThreshold + 1);
+			silenceThreshold = qMax(0, speechThreshold - 1);
+		}
+
+		m_draft.atTransmit = Settings::VAD;
+		if (vadSource == Settings::SignalToNoise || vadSource == Settings::Amplitude) {
+			m_draft.vsVAD = vadSource;
+		}
+		m_draft.fVADmin    = vadThresholdFromPercent(silenceThreshold);
+		m_draft.fVADmax    = vadThresholdFromPercent(speechThreshold);
+		m_draft.iVoiceHold = voiceHold;
+		forceModernLayout();
+		result.settingsToApply = m_draft;
+		return result;
+	}
+
+	if (action == QLatin1String("startVoiceReplay")) {
+		const QString mode = payload.value(QStringLiteral("mode")).toString();
+		m_draft.lmLoopMode = mode == QLatin1String("server") ? Settings::Server : Settings::Local;
+		m_draft.dPacketLoss = 0.0f;
+		m_draft.dMaxPacketDelay = 0.0f;
+		m_draft.atTransmit = Settings::VAD;
+		forceModernLayout();
+		result.settingsToApply = m_draft;
+		return result;
+	}
+
+	if (action == QLatin1String("stopVoiceReplay")) {
+		m_draft.lmLoopMode = Settings::None;
+		forceModernLayout();
+		result.settingsToApply = m_draft;
 		return result;
 	}
 
@@ -828,7 +1088,6 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 		const bool pushToTalkTransmit    = m_draft.atTransmit == Settings::PushToTalk;
 
 		return QVariantList {
-			sectionItem(QObject::tr("Input signal"), QVariantList { voiceMeterField(m_draft) }),
 			sectionItem(QObject::tr("Input device"), QVariantList {
 											   selectField(QStringLiteral("audio.inputSystem"),
 														   QObject::tr("Input system"), inputSystem,
@@ -851,6 +1110,7 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 																		 static_cast< int >(m_draft.vsVAD),
 																		 vadSourceOptions()),
 															 voiceActivityTransmit),
+												voiceMeterField(m_draft),
 												hintedField(enabledField(rangeField(QStringLiteral("audio.vadMin"),
 																					QObject::tr("Stop transmitting below"),
 																					vadThresholdFromFloat(m_draft.fVADmin),
@@ -890,9 +1150,9 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 															   QObject::tr(" frames")),
 												   rangeField(QStringLiteral("audio.quality"),
 															  QObject::tr("Voice bitrate"),
-															  m_draft.iQuality, 8000,
-															  m_draft.experimentalHighBitrateEnabled ? 512000 : 192000,
-															  1000, QObject::tr(" bit/s")),
+															  bitrateKbitFromBits(m_draft.iQuality), 8,
+															  m_draft.experimentalHighBitrateEnabled ? 512 : 192, 1,
+															  QObject::tr(" kbit/s")),
 												   boolField(QStringLiteral("audio.experimentalHighBitrate"),
 															 QObject::tr("Enable experimental high bitrate voice"),
 															 m_draft.experimentalHighBitrateEnabled),

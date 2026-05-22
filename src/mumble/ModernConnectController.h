@@ -47,6 +47,7 @@ private:
 	QString m_username;
 	QString m_password;
 	unsigned short m_port = 0;
+	bool m_editorOpen     = false;
 
 	void selectFavorite(int index);
 	FavoriteServer currentFavorite() const;
