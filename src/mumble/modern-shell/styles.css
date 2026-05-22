@@ -1271,6 +1271,12 @@ textarea:focus-visible {
 	padding: 0;
 }
 
+.preview-card.has-media {
+	grid-template-columns: 1fr;
+	gap: 0;
+	padding: 0;
+}
+
 .message-bubble.is-own .preview-card,
 .message-cluster.is-own .preview-card {
 	border-color: rgba(216, 240, 236, 0.12);
@@ -1320,6 +1326,19 @@ textarea:focus-visible {
 	border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+.preview-card.has-media .preview-card-media {
+	height: clamp(156px, 22vw, 240px);
+	min-height: 156px;
+	border-radius: 0;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.preview-card-playback {
+	background:
+		linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.18)),
+		rgba(0, 0, 0, 0.38);
+}
+
 .preview-card-media-placeholder {
 	flex-direction: column;
 	gap: 8px;
@@ -1356,6 +1375,19 @@ textarea:focus-visible {
 	display: block;
 }
 
+.preview-card-media-image {
+	object-fit: contain;
+	background: rgba(0, 0, 0, 0.22);
+}
+
+.preview-card-video {
+	width: 100%;
+	height: 100%;
+	display: block;
+	object-fit: contain;
+	background: #050608;
+}
+
 .preview-card-copy {
 	min-width: 0;
 	display: flex;
@@ -1364,6 +1396,10 @@ textarea:focus-visible {
 }
 
 .preview-card.has-thumbnail .preview-card-copy {
+	padding: 11px 12px 12px;
+}
+
+.preview-card.has-media .preview-card-copy {
 	padding: 11px 12px 12px;
 }
 

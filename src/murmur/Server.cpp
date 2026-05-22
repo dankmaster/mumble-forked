@@ -12,6 +12,7 @@
 #include "Connection.h"
 #include "DBState.h"
 #include "EnvUtils.h"
+#include "ForkFeature.h"
 #include "Group.h"
 #include "HTMLFilter.h"
 #include "HostAddress.h"
@@ -1402,6 +1403,26 @@ void Server::syncScreenShareStateForUser(ServerUser *user, Channel *previousChan
 		MumbleProto::ScreenShareState msg;
 		populateScreenShareStateMessage(msg, stream, user);
 		sendMessage(user, msg);
+	}
+}
+
+void Server::syncWatchTogetherStateForUser(ServerUser *user) {
+	if (!user || !user->cChannel || user->sState != ServerUser::Authenticated
+		|| !Mumble::ForkFeatures::contains(user->qlSupportedForkFeatures,
+										   MumbleProto::ForkFeatureWatchTogetherRooms)) {
+		return;
+	}
+
+	for (const MumbleProto::WatchTogetherSync &session : qhWatchTogetherSessions) {
+		const MumbleProto::ChatScope scope = session.has_scope() ? session.scope() : MumbleProto::Channel;
+		const unsigned int scopeID         = session.has_scope_id() ? session.scope_id() : 0;
+		if (scope != MumbleProto::Channel || scopeID != static_cast< unsigned int >(user->cChannel->iId)) {
+			continue;
+		}
+
+		MumbleProto::WatchTogetherSync state = session;
+		state.set_event(MumbleProto::WatchTogetherEventState);
+		sendMessage(user, state);
 	}
 }
 
@@ -2908,6 +2929,7 @@ void Server::userEnterChannel(User *p, Channel *c, MumbleProto::UserState &mpus)
 		sendClientPermission(serverUser, c->cParent);
 
 	syncScreenShareStateForUser(serverUser, old);
+	syncWatchTogetherStateForUser(serverUser);
 }
 
 bool Server::hasPermission(ServerUser *p, Channel *c, QFlags< ChanACL::Perm > perm) {

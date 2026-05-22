@@ -105,6 +105,10 @@ chat-assets/
 Accepted upload MIME classes are intentionally narrow:
 
 - Raster images: `image/png`, `image/jpeg`, `image/webp`, `image/gif`, `image/bmp`
+- Inline playable link previews: direct `.gif` and `.webm` HTTPS links are
+  cached as preview-cache chat assets when preview fetching is enabled. Modern
+  UI renders GIFs inline and WebM with video controls; WebM does not autoplay by
+  default.
 - Videos: `video/mp4`, `video/webm`, `video/quicktime`
 - Documents: `application/pdf`, `text/plain`, `text/markdown`
 - Binary downloads: `application/octet-stream`, `application/zip`

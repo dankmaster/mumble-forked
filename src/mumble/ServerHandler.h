@@ -206,6 +206,7 @@ public:
 							unsigned int limit = 50,
 							std::optional< unsigned int > beforeMessageID = std::nullopt);
 	void updateChatReadState(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int lastReadMessageID);
+	void sendWatchTogetherSync(const MumbleProto::WatchTogetherSync &sync);
 	void setUserComment(unsigned int uiSession, const QString &comment);
 	void setUserTexture(unsigned int uiSession, const QByteArray &qba);
 	void setTokens(const QStringList &tokens);

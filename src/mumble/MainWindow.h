@@ -237,8 +237,12 @@ public:
 		QString subtitle;
 		QString description;
 		QImage thumbnailImage;
+		QString mediaDataUrl;
+		QString mediaMime;
+		QString mediaKind;
 		QString openLabel;
 		unsigned int previewAssetID = 0;
+		bool autoplay               = false;
 		bool metadataFinished       = false;
 		bool thumbnailFinished      = false;
 		bool failed                 = false;
@@ -250,6 +254,8 @@ public:
 		unsigned int assetID = 0;
 		quint64 nextOffset   = 0;
 		quint64 totalSize    = 0;
+		QString mime;
+		MumbleProto::ChatAssetKind kind = MumbleProto::ChatAssetKindUnknown;
 		QByteArray bytes;
 		QSet< QString > previewKeys;
 	};

@@ -119,7 +119,9 @@ Global::Global(const QString &qsConfigPath) {
 	bAllowHTML                       = true;
 	bPersistentGlobalChatEnabled     = false;
 	qlSupportedChatFeatures.clear();
+	qlSupportedForkFeatures.clear();
 	uiPersistentChatProtocolVersion  = 0;
+	uiForkExtensionProtocolVersion   = 0;
 	bScreenShareEnabled              = false;
 	bScreenShareRecordingEnabled     = false;
 	bScreenShareHelperRequired       = true;

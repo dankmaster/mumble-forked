@@ -2980,33 +2980,86 @@
 
 	function renderPreviewCard(message) {
 		const preview = message && message.preview;
-		if (!preview || (!preview.url && !preview.title && !preview.description && !preview.thumbnailUrl)) {
+		if (!preview || (!preview.url && !preview.title && !preview.description && !preview.thumbnailUrl && !preview.mediaUrl)) {
 			return null;
 		}
+		const mediaUrl = String(preview.mediaUrl || "").trim();
+		const mediaMime = String(preview.mediaMime || "").trim().toLowerCase();
+		const hasPlayableMedia = !!mediaUrl;
+		const isVideoMedia = hasPlayableMedia && (preview.kind === "video" || /^video\//i.test(mediaMime));
+		const isGifMedia = hasPlayableMedia && (preview.kind === "gif" || mediaMime === "image/gif");
 		const hasThumbnail = !!preview.thumbnailUrl;
 		const hostLabel = previewHostLabel(preview.url);
 		const sourceLabel = previewSourceLabel(preview, hostLabel);
 		const badgeText = previewBadgeText(preview, sourceLabel, hostLabel);
 		const descriptionText = previewDescriptionText(preview);
 
-		const card = document.createElement("button");
-		card.type = "button";
+		const card = document.createElement(hasPlayableMedia ? "div" : "button");
+		if (!hasPlayableMedia) {
+			card.type = "button";
+		} else {
+			card.tabIndex = 0;
+			card.setAttribute("role", "button");
+		}
 		card.className = "preview-card"
 			+ (hasThumbnail ? " has-thumbnail" : "")
+			+ (hasPlayableMedia ? " has-media" : "")
+			+ (isVideoMedia ? " is-video" : "")
+			+ (isGifMedia ? " is-gif" : "")
 			+ (preview.loading ? " is-loading" : "")
 			+ (preview.failed ? " is-failed" : "")
 			+ (preview.kind === "image" ? " is-image" : "");
 		card.title = preview.openLabel || "Open link";
 		card.setAttribute("aria-label", preview.openLabel || "Open link");
-		card.addEventListener("click", function(event) {
+		const activateCard = function(event) {
 			event.preventDefault();
 			event.stopPropagation();
 			if (preview.url) {
 				notifyBridge("activateLink", preview.url);
 			}
-		});
+		};
+		card.addEventListener("click", activateCard);
+		if (hasPlayableMedia) {
+			card.addEventListener("keydown", function(event) {
+				if (event.key === "Enter" || event.key === " ") {
+					activateCard(event);
+				}
+			});
+		}
 
-		if (preview.thumbnailUrl) {
+		if (hasPlayableMedia) {
+			const media = document.createElement("div");
+			media.className = "preview-card-media preview-card-playback";
+			if (isVideoMedia) {
+				media.addEventListener("click", function(event) {
+					event.stopPropagation();
+				});
+				const video = document.createElement("video");
+				video.className = "preview-card-video";
+				video.src = mediaUrl;
+				video.controls = true;
+				video.muted = true;
+				video.loop = true;
+				video.playsInline = true;
+				video.preload = preview.autoplay ? "auto" : "metadata";
+				if (preview.autoplay) {
+					video.autoplay = true;
+				}
+				if (preview.thumbnailUrl) {
+					video.poster = preview.thumbnailUrl;
+				}
+				video.setAttribute("aria-label", preview.title || preview.subtitle || "Media preview");
+				media.appendChild(video);
+			} else {
+				const image = document.createElement("img");
+				image.className = "preview-card-image preview-card-media-image";
+				image.loading = "lazy";
+				image.src = mediaUrl;
+				image.alt = preview.title || preview.subtitle || "Media preview";
+				media.appendChild(image);
+			}
+			card.appendChild(media);
+		} else if (preview.thumbnailUrl) {
 			const media = document.createElement("div");
 			media.className = "preview-card-media";
 			const image = document.createElement("img");

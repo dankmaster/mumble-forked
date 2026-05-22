@@ -364,6 +364,7 @@ public:
 	QHash< QString, ScreenShareStream > qhScreenShareStreams;
 	QHash< unsigned int, QString > qhScreenShareStreamByOwnerSession;
 	QHash< unsigned int, QString > qhScreenShareStreamByChannel;
+	QHash< QString, MumbleProto::WatchTogetherSync > qhWatchTogetherSessions;
 
 	struct PendingChatAssetUpload {
 		quint64 uploadID = 0;
@@ -491,6 +492,7 @@ public:
 									   MumbleProto::ScreenShareLifecycleState state, const QString &reason,
 									   ServerUser *except = nullptr);
 	void syncScreenShareStateForUser(ServerUser *user, Channel *previousChannel = nullptr);
+	void syncWatchTogetherStateForUser(ServerUser *user);
 	bool stopScreenShare(const QString &streamID, unsigned int actorSession,
 						 MumbleProto::ScreenShareLifecycleState state, const QString &reason);
 

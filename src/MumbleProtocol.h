@@ -71,7 +71,8 @@
 	PROCESS_MUMBLE_TCP_MESSAGE(ChatReactionToggle, 46)  \
 	PROCESS_MUMBLE_TCP_MESSAGE(ChatReactionState, 47)   \
 	PROCESS_MUMBLE_TCP_MESSAGE(ChatMessageDelete, 48)   \
-	PROCESS_MUMBLE_TCP_MESSAGE(ChatHistoryGrantSync, 49)
+	PROCESS_MUMBLE_TCP_MESSAGE(ChatHistoryGrantSync, 49) \
+	PROCESS_MUMBLE_TCP_MESSAGE(WatchTogetherSync, 50)
 
 /**
  * "X-macro" for all Mumble Protobuf UDP messages types.

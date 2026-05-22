@@ -6035,9 +6035,12 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 				it != m_persistentChatPreviews.cend()) {
 				const PersistentChatPreview &preview = it.value();
 				QVariantMap previewState;
-				previewState.insert(QStringLiteral("kind"), previewKey->startsWith(QLatin1String("image:"))
-																 ? QStringLiteral("image")
-																 : QStringLiteral("link"));
+				QString previewKind = previewKey->startsWith(QLatin1String("image:")) ? QStringLiteral("image")
+																				 : QStringLiteral("link");
+				if (!preview.mediaKind.isEmpty()) {
+					previewKind = preview.mediaKind;
+				}
+				previewState.insert(QStringLiteral("kind"), previewKind);
 				previewState.insert(QStringLiteral("url"), preview.canonicalUrl);
 				previewState.insert(QStringLiteral("title"), preview.title);
 				previewState.insert(QStringLiteral("subtitle"), preview.subtitle);
@@ -6047,6 +6050,12 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 				previewState.insert(QStringLiteral("failed"), preview.failed);
 				previewState.insert(QStringLiteral("thumbnailUrl"),
 									persistentChatInlineDataImageThumbnailSource(preview.thumbnailImage));
+				if (!preview.mediaDataUrl.isEmpty()) {
+					previewState.insert(QStringLiteral("mediaUrl"), preview.mediaDataUrl);
+					previewState.insert(QStringLiteral("mediaMime"), preview.mediaMime);
+					previewState.insert(QStringLiteral("mediaKind"), preview.mediaKind);
+					previewState.insert(QStringLiteral("autoplay"), preview.autoplay);
+				}
 				messageState.insert(QStringLiteral("preview"), previewState);
 			}
 		}
@@ -18562,7 +18571,9 @@ void MainWindow::serverConnected() {
 	Global::get().bAllowHTML                       = true;
 	Global::get().bPersistentGlobalChatEnabled     = false;
 	Global::get().qlSupportedChatFeatures.clear();
+	Global::get().qlSupportedForkFeatures.clear();
 	Global::get().uiPersistentChatProtocolVersion = 0;
+	Global::get().uiForkExtensionProtocolVersion  = 0;
 	Global::get().uiMessageLength                  = 5000;
 	Global::get().uiImageLength                    = 131072;
 	Global::get().uiMaxUsers                       = 0;
@@ -18630,7 +18641,9 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	Global::get().bAttenuateOthers                 = false;
 	Global::get().bPersistentGlobalChatEnabled     = false;
 	Global::get().qlSupportedChatFeatures.clear();
+	Global::get().qlSupportedForkFeatures.clear();
 	Global::get().uiPersistentChatProtocolVersion = 0;
+	Global::get().uiForkExtensionProtocolVersion  = 0;
 	m_modernLayoutCompatibleServer                 = false;
 	m_modernShellRuntimeDisabled                   = false;
 	m_hasPersistentChatSupport                     = false;
@@ -18756,7 +18769,9 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	enableRecording(false);
 	Global::get().bPersistentGlobalChatEnabled = false;
 	Global::get().qlSupportedChatFeatures.clear();
+	Global::get().qlSupportedForkFeatures.clear();
 	Global::get().uiPersistentChatProtocolVersion = 0;
+	Global::get().uiForkExtensionProtocolVersion = 0;
 
 	if (!Global::get().sh->qlErrors.isEmpty()) {
 		for (const QSslError &e : Global::get().sh->qlErrors) {
