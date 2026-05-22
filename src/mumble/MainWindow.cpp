@@ -5685,6 +5685,33 @@ namespace {
 		}
 		return value;
 	}
+
+	std::optional< QPair< MumbleProto::ChatScope, unsigned int > > modernChatHistoryScopeFromToken(
+		const QString &token) {
+		const QStringList parts = token.split(QLatin1Char(':'));
+		if (parts.size() != 2) {
+			return std::nullopt;
+		}
+
+		bool scopeOK  = false;
+		bool scopeIDOK = false;
+		const int scopeValue = parts.at(0).toInt(&scopeOK);
+		const unsigned int scopeID = parts.at(1).toUInt(&scopeIDOK);
+		if (!scopeOK || !scopeIDOK) {
+			return std::nullopt;
+		}
+
+		const MumbleProto::ChatScope scope = static_cast< MumbleProto::ChatScope >(scopeValue);
+		switch (scope) {
+			case MumbleProto::Channel:
+			case MumbleProto::ServerGlobal:
+			case MumbleProto::TextChannel:
+				return qMakePair(scope, scope == MumbleProto::ServerGlobal ? 0u : scopeID);
+			case MumbleProto::Aggregate:
+			default:
+				return std::nullopt;
+		}
+	}
 } // namespace
 
 void MainWindow::publishModernDialogState(const QVariantMap &state) {
@@ -6561,6 +6588,43 @@ void MainWindow::openModernSelfRegisterDialog() {
 		QStringLiteral("confirmSelfRegister"), QSize(620, 430)));
 }
 
+void MainWindow::openModernUserRegisterDialog(ClientUser *user) {
+	if (!user) {
+		return;
+	}
+	if (user->uiSession == Global::get().uiSession) {
+		openModernSelfRegisterDialog();
+		return;
+	}
+	if (user->iId >= 0) {
+		Global::get().l->log(Log::PermissionDenied, tr("This user is already registered on this server."));
+		return;
+	}
+	if (user->qsHash.isEmpty()) {
+		Global::get().l->log(Log::PermissionDenied, tr("This user needs a certificate before they can be registered."));
+		return;
+	}
+	if (!(Global::get().pPermissions & (ChanACL::Register | ChanACL::Write))) {
+		Global::get().l->log(Log::PermissionDenied, tr("You do not have permission to register users on this server."));
+		return;
+	}
+
+	openModernGenericDialog(modernDialogDto(
+		QStringLiteral("registerUser:%1").arg(user->uiSession), QStringLiteral("confirm"),
+		tr("Register user %1").arg(user->qsName),
+		tr("This permanently binds the current certificate for this user to their server account."),
+		QVariantList { modernDialogSection(
+			tr("Confirmation"),
+			QVariantList {
+				modernHiddenField(QStringLiteral("session"), user->uiSession),
+				modernReadonlyField(tr("Username"), user->qsName),
+				modernNoteField(tr("The username cannot be changed after registration from this dialog.")) }) },
+		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
+					   modernDialogAction(QStringLiteral("confirmRegisterUser"), tr("Register"), true,
+										  QStringLiteral("accent"), true) },
+		QStringLiteral("confirmRegisterUser"), QSize(640, 440)));
+}
+
 void MainWindow::openModernSelfCommentDialog() {
 	ClientUser *user = ClientUser::get(Global::get().uiSession);
 	if (!user) {
@@ -6641,6 +6705,87 @@ void MainWindow::openModernBanUserDialog(ClientUser *user) {
 					   modernDialogAction(QStringLiteral("confirmBan"), tr("Ban"), true, QStringLiteral("danger"),
 										  true) },
 		QStringLiteral("confirmBan"), QSize(640, 480)));
+}
+
+void MainWindow::openModernChatHistoryGrantDialog(ClientUser *user) {
+	if (!user) {
+		return;
+	}
+	if (user->iId < 0 || !Global::get().sh || !(Global::get().pPermissions & ChanACL::Write)) {
+		return;
+	}
+	if (!Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures,
+														 MumbleProto::ChatFeatureHistoryGrants)) {
+		return;
+	}
+
+	struct ScopeOption {
+		QString label;
+		MumbleProto::ChatScope scope = MumbleProto::Channel;
+		unsigned int scopeID         = 0;
+	};
+
+	QVector< ScopeOption > scopes;
+	auto addScope = [&scopes](const ScopeOption &option) {
+		const auto duplicate = std::find_if(scopes.cbegin(), scopes.cend(), [&option](const ScopeOption &existing) {
+			return existing.scope == option.scope && existing.scopeID == option.scopeID;
+		});
+		if (duplicate == scopes.cend()) {
+			scopes.push_back(option);
+		}
+	};
+
+	if (user->cChannel) {
+		addScope({ tr("Current voice room: %1").arg(user->cChannel->qsName), MumbleProto::Channel, user->cChannel->iId });
+	}
+
+	const PersistentChatTarget currentTarget = currentPersistentChatTarget();
+	if (currentTarget.valid && !currentTarget.directMessage && !currentTarget.serverLog
+		&& currentTarget.scope != MumbleProto::Aggregate) {
+		addScope({ tr("Current chat view: %1").arg(currentTarget.label), currentTarget.scope, currentTarget.scopeID });
+	}
+
+	addScope({ tr("Server-wide chat"), MumbleProto::ServerGlobal, 0 });
+
+	if (scopes.isEmpty()) {
+		return;
+	}
+
+	QVariantList scopeOptions;
+	for (const ScopeOption &scope : scopes) {
+		scopeOptions.push_back(modernSelectOption(
+			scope.label,
+			QStringLiteral("%1:%2").arg(static_cast< int >(scope.scope)).arg(scope.scopeID)));
+	}
+
+	QVariantList windowOptions {
+		modernSelectOption(tr("From now"), 0),
+		modernSelectOption(tr("5 days back"), 5),
+		modernSelectOption(tr("10 days back"), 10),
+		modernSelectOption(tr("15 days back"), 15),
+		modernSelectOption(tr("30 days back"), 30),
+		modernSelectOption(tr("Custom days back"), -1),
+		modernSelectOption(tr("All history"), -2),
+		modernSelectOption(tr("Revoke access"), -3)
+	};
+
+	openModernGenericDialog(modernDialogDto(
+		QStringLiteral("chatHistoryGrant:%1").arg(user->uiSession), QStringLiteral("form"),
+		tr("Grant chat history"), tr("Grant or revoke persistent chat history access for %1.").arg(user->qsName),
+		QVariantList { modernDialogSection(
+			tr("Access"),
+			QVariantList { modernHiddenField(QStringLiteral("session"), user->uiSession),
+						   modernReadonlyField(tr("User"), user->qsName),
+						   modernSelectField(QStringLiteral("history.scope"), tr("Scope"),
+											 scopeOptions.constFirst().toMap().value(QStringLiteral("value")),
+											 scopeOptions, QStringLiteral("string")),
+						   modernSelectField(QStringLiteral("history.window"), tr("Window"), 0, windowOptions),
+						   modernDialogField(QStringLiteral("history.customDays"), tr("Custom days"),
+											 QStringLiteral("number"), 30) }) },
+		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
+					   modernDialogAction(QStringLiteral("saveChatHistoryGrant"), tr("Apply"), true,
+										  QStringLiteral("accent"), true) },
+		QStringLiteral("saveChatHistoryGrant"), QSize(700, 560)));
 }
 
 void MainWindow::openModernLocalNicknameDialog(const ClientUser *user) {
@@ -6894,6 +7039,15 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 		return true;
 	}
 
+	if (const std::optional< unsigned int > session =
+			modernDialogIDValue(dialogID, QStringLiteral("registerUser:"));
+		session && actionID == QLatin1String("confirmRegisterUser")) {
+		if (ClientUser *user = ClientUser::get(*session)) {
+			Global::get().sh->registerUser(user->uiSession);
+		}
+		return true;
+	}
+
 	if (dialogID == QLatin1String("selfComment") && actionID == QLatin1String("saveSelfComment")) {
 		const unsigned int session = fieldValues.value(QStringLiteral("session")).toUInt();
 		if (ClientUser::get(session)) {
@@ -6957,6 +7111,31 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 		if (ClientUser::get(*session)) {
 			Global::get().sh->setUserTexture(*session, QByteArray());
 		}
+		return true;
+	}
+
+	if (const std::optional< unsigned int > session =
+			modernDialogIDValue(dialogID, QStringLiteral("chatHistoryGrant:"));
+		session && actionID == QLatin1String("saveChatHistoryGrant")) {
+		ClientUser *user = ClientUser::get(*session);
+		const auto scope = modernChatHistoryScopeFromToken(fieldValues.value(QStringLiteral("history.scope")).toString());
+		if (!user || user->iId < 0 || !scope || !Global::get().sh) {
+			return true;
+		}
+
+		const int window = fieldValues.value(QStringLiteral("history.window")).toInt();
+		const bool revoke = window == -3;
+		quint64 visibleAfter = 0;
+		if (!revoke && window != -2) {
+			const int days = window == -1 ? qBound(1, fieldValues.value(QStringLiteral("history.customDays")).toInt(), 3650)
+										  : std::max(0, window);
+			const qint64 nowSeconds = QDateTime::currentSecsSinceEpoch();
+			visibleAfter =
+				static_cast< quint64 >(std::max< qint64 >(0, nowSeconds - static_cast< qint64 >(days) * 86400));
+		}
+
+		Global::get().sh->sendChatHistoryGrant(static_cast< unsigned int >(user->iId), scope->first, scope->second,
+											   visibleAfter, revoke);
 		return true;
 	}
 
@@ -7059,8 +7238,7 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 					  tr("Search is queued for the Modern shell. The legacy search window is intentionally not opened from Modern layout."));
 	}
 	if (action == QLatin1String("acl")) {
-		openModernAclRequestDialog(contextChannel);
-		return true;
+		return false;
 	}
 	if (action == QLatin1String("self.recording") || action == QLatin1String("recording")) {
 		return notice(QStringLiteral("recordingMigration"), tr("Voice recorder"),
@@ -7070,8 +7248,16 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 		openModernSelfCommentDialog();
 		return true;
 	}
-	if (action == QLatin1String("self.register") || action == QLatin1String("register")) {
+	if (action == QLatin1String("self.register")) {
 		openModernSelfRegisterDialog();
+		return true;
+	}
+	if (action == QLatin1String("register")) {
+		if (contextUser && contextUser->uiSession != Global::get().uiSession) {
+			openModernUserRegisterDialog(contextUser);
+		} else {
+			openModernSelfRegisterDialog();
+		}
 		return true;
 	}
 	if (action == QLatin1String("self.audioStats") || action == QLatin1String("audioStats")) {
@@ -7123,8 +7309,8 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 		return true;
 	}
 	if (action == QLatin1String("grantChatHistory")) {
-		return notice(QStringLiteral("chatHistoryGrantMigration"), tr("Grant chat history"),
-					  tr("Chat history grant management is queued for the Modern shell. The legacy grant dialog is intentionally not opened from Modern layout."));
+		openModernChatHistoryGrantDialog(contextUser);
+		return true;
 	}
 	if (action == QLatin1String("remove")) {
 		openModernRemoveChannelDialog(contextChannel);
@@ -10098,11 +10284,6 @@ bool MainWindow::handleModernShellScopeAction(const QString &scopeToken, const Q
 	if (scopeValue != static_cast< int >(MumbleProto::Channel)
 		&& (normalizedActionID == QLatin1String("join") || normalizedActionID == QLatin1String("listen"))) {
 		return false;
-	}
-	if (normalizedActionID == QLatin1String("acl")) {
-		openModernAclRequestDialog(channel);
-		publishModernShellRoomStatePatch();
-		return true;
 	}
 	if (handleModernShellLegacyDialogAction(normalizedActionID, nullptr, channel)) {
 		publishModernShellRoomStatePatch();
@@ -19739,6 +19920,12 @@ void MainWindow::on_qaChannelACL_triggered() {
 	if (!c)
 		c = Channel::get(Mumble::ROOT_CHANNEL_ID);
 	unsigned int id = c->iId;
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell()) {
+		m_pendingClassicAclDialog = true;
+	}
+#endif
 
 	if (!c->qbaDescHash.isEmpty() && c->qsDesc.isEmpty()) {
 		c->qsDesc = QString::fromUtf8(Global::get().db->blob(c->qbaDescHash));

@@ -655,6 +655,7 @@ protected:
 	QHash< QString, QVariantMap > m_modernShellCoalescedPresencePatches;
 	QStringList m_modernShellCoalescedPresenceOrder;
 	bool m_modernShellSnapshotPendingAfterNativeMoveResize = false;
+	bool m_pendingClassicAclDialog                         = false;
 #else
 	quint64 m_modernShellMessagePatchGeneration = 0;
 #endif
@@ -693,9 +694,11 @@ protected:
 	void openModernVersionCheckDialog();
 	void openModernHelpDialog();
 	void openModernSelfRegisterDialog();
+	void openModernUserRegisterDialog(ClientUser *user);
 	void openModernSelfCommentDialog();
 	void openModernKickUserDialog(ClientUser *user);
 	void openModernBanUserDialog(ClientUser *user);
+	void openModernChatHistoryGrantDialog(ClientUser *user);
 	void openModernLocalNicknameDialog(const ClientUser *user);
 	void openModernUserCommentDialog(ClientUser *user);
 	void openModernUserCommentResetDialog(ClientUser *user);

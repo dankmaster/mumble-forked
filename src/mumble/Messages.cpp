@@ -1535,8 +1535,11 @@ void MainWindow::msgTextMessage(const MumbleProto::TextMessage &msg) {
 void MainWindow::msgACL(const MumbleProto::ACL &msg) {
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	if (usesModernShell()) {
-		openModernAclDialog(msg);
-		return;
+		if (!m_pendingClassicAclDialog) {
+			openModernAclDialog(msg);
+			return;
+		}
+		m_pendingClassicAclDialog = false;
 	}
 #endif
 
