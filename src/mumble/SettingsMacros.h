@@ -179,6 +179,7 @@
 	PROCESS(ui, MODERN_MINIMAL_VIEW_GEOMETRY_KEY, qbaModernMinimalViewGeometry)           \
 	PROCESS(ui, MODERN_WINDOW_STATE_KEY, qbaModernMainWindowState)                        \
 	PROCESS(ui, MODERN_MINIMAL_VIEW_STATE_KEY, qbaModernMinimalViewState)                 \
+	PROCESS(ui, MODERN_SHELL_MOTD_EXPANDED_KEY, bModernShellMotdExpanded)                 \
 	PROCESS(ui, CONFIG_GEOMETRY_KEY, qbaConfigGeometry)                                   \
 	PROCESS(ui, IMAGE_PREVIEW_GEOMETRY_KEY, qbaImagePreviewGeometry)                      \
 	PROCESS(ui, WINDOW_LAYOUT_KEY, wlWindowLayout)                                        \

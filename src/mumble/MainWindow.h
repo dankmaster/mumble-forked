@@ -56,6 +56,8 @@ class PersistentChatController;
 class PersistentChatHistoryModel;
 class PersistentChatHistoryDelegate;
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
+class ModernDialogController;
+class ModernDialogHost;
 class ModernShellHost;
 #endif
 class QAction;
@@ -81,6 +83,8 @@ class PersistentChatListWidget;
 class UserLocalVolumeSlider;
 
 struct ShortcutTarget;
+struct ConnectDetails;
+enum class ConnectionFailType;
 
 struct ContextMenuTarget {
 	ClientUser *user = nullptr;
@@ -374,12 +378,12 @@ public:
 	QVariantMap buildModernShellServerLogActiveScopeState(const PersistentChatTarget &target, bool includeHtml);
 	QVariantMap buildModernShellParticipantPatchState(const ClientUser *user, const Channel *contextChannel,
 													  const ClientUser *directMessagePeer, int avatarSize,
-													  bool includeAvatar) const;
+													  bool includeAvatar);
 	QVariantMap buildModernShellListenerPatchState(const ClientUser *user, const Channel *channel, int avatarSize,
-												   bool includeAvatar) const;
+												   bool includeAvatar);
 	QVariantList buildModernShellChannelParticipantPatchStates(const Channel *channel, int avatarSize,
-															   bool includeAvatar) const;
-	QVariantMap buildModernShellRoomStatePatch() const;
+															   bool includeAvatar);
+	QVariantMap buildModernShellRoomStatePatch();
 	void publishModernShellPatch(const QString &kind, QVariantMap patch);
 	void publishModernShellPatchNow(const QString &kind, QVariantMap patch);
 	void queueModernShellCoalescedPatch(const QString &kind, QVariantMap patch);
@@ -427,6 +431,7 @@ public:
 	};
 	QVariantList serializeModernShellMenu(QMenu *menu, ModernShellMenuContext context,
 										  ModernShellMenuSerializer::ActionRegistry *registry = nullptr) const;
+	QVariantList buildModernShellConfigureMenuItems() const;
 	ModernShellMenuSerializer::ActionDefinition modernShellActionDefinition(ModernShellMenuContext context,
 																			QAction *action) const;
 	bool triggerModernShellSerializedAction(const ModernShellMenuSerializer::ActionRegistry &registry,
@@ -599,6 +604,8 @@ protected:
 	quint64 m_modernShellServerLogHtmlRevision    = 0;
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	ModernShellHost *m_modernShellHost                     = nullptr;
+	std::unique_ptr< ModernDialogController > m_modernDialogController;
+	std::unique_ptr< ModernDialogHost > m_modernDialogHost;
 	QObject *m_persistentChatPreviewSnapshotRenderer       = nullptr;
 	quint64 m_modernShellPatchRevision                     = 0;
 	quint64 m_modernShellMessagePatchGeneration            = 0;
@@ -626,6 +633,51 @@ protected:
 
 	void createActions();
 	void handleModernShellBootFailure(const QString &reason);
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	void publishModernDialogState(const QVariantMap &state);
+	void openModernConnectDialog();
+	void openModernSettingsDialog(const QString &pageName = QString());
+	bool openModernFailedConnectionDialog(const ConnectDetails &details, ConnectionFailType type);
+	void openModernGenericDialog(const QVariantMap &dialog);
+	void openModernMigrationNotice(const QString &dialogID, const QString &title, const QString &subtitle);
+	void openModernServerInformationDialog();
+	void openModernServerTokensDialog(const QStringList &tokens = QStringList(), bool useProvidedTokens = false);
+	void openModernServerUserListLoadingDialog();
+	void openModernServerUserListDialog(const MumbleProto::UserList &msg);
+	void openModernServerBanListLoadingDialog();
+	void openModernServerBanListDialog(const MumbleProto::BanList &msg);
+	void openModernAclRequestDialog(Channel *channel);
+	void openModernAclDialog(const MumbleProto::ACL &msg);
+	void openModernCreateRoomDialog(RoomCreateType preferredType, Channel *preferredVoiceParent = nullptr);
+	void openModernAudioStatsDialog();
+	void openModernAboutDialog();
+	void openModernAboutQtDialog();
+	void openModernVersionCheckDialog();
+	void openModernHelpDialog();
+	void openModernSelfRegisterDialog();
+	void openModernSelfCommentDialog();
+	void openModernKickUserDialog(ClientUser *user);
+	void openModernBanUserDialog(ClientUser *user);
+	void openModernLocalNicknameDialog(const ClientUser *user);
+	void openModernUserCommentDialog(ClientUser *user);
+	void openModernUserCommentResetDialog(ClientUser *user);
+	void openModernUserTextureResetDialog(ClientUser *user);
+	void openModernUserInformationRequestDialog(ClientUser *user);
+	void openModernUserInformationDialog(const MumbleProto::UserStats &msg);
+	void openModernRemoveChannelDialog(Channel *channel);
+	bool handleModernGenericDialogAction(const QString &dialogID, const QString &actionID,
+										 const QVariantMap &fieldValues, const QVariantMap &payload);
+	bool tryModernAutoConnectLastServer();
+	bool handleModernShellLegacyDialogAction(const QString &actionID, ClientUser *contextUser = nullptr,
+											 Channel *contextChannel = nullptr);
+	void handleModernDialogOpen(const QString &dialogID, const QVariantMap &context);
+	void handleModernDialogClose(const QString &dialogID);
+	void handleModernDialogFieldUpdate(const QString &dialogID, const QString &fieldID, const QVariant &value);
+	void handleModernDialogAction(const QString &dialogID, const QString &actionID, const QVariantMap &payload);
+	void connectFromModernDialog(const QString &host, unsigned short port, const QString &username,
+								 const QString &password);
+	void applyModernSettings(const Settings &settings, bool accepted);
+#endif
 	void setupGui();
 	void updateWindowTitle();
 	/// updateToolbar updates the state of the toolbar depending on the current

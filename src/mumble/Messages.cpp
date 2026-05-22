@@ -156,6 +156,13 @@ void MainWindow::msgAuthenticate(const MumbleProto::Authenticate &) {
 ///
 /// @param msg The message object containing information about the ban list
 void MainWindow::msgBanList(const MumbleProto::BanList &msg) {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell()) {
+		openModernServerBanListDialog(msg);
+		return;
+	}
+#endif
+
 	if (banEdit) {
 		banEdit->reject();
 		delete banEdit;
@@ -1487,6 +1494,13 @@ void MainWindow::msgTextMessage(const MumbleProto::TextMessage &msg) {
 ///
 /// @param msg The message object holding the ACL and further details
 void MainWindow::msgACL(const MumbleProto::ACL &msg) {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell()) {
+		openModernAclDialog(msg);
+		return;
+	}
+#endif
+
 	if (aclEdit) {
 		aclEdit->reject();
 		delete aclEdit;
@@ -1622,6 +1636,13 @@ void MainWindow::msgVersion(const MumbleProto::Version &msg) {
 ///
 /// @param msg The message object containing the user list
 void MainWindow::msgUserList(const MumbleProto::UserList &msg) {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell()) {
+		openModernServerUserListDialog(msg);
+		return;
+	}
+#endif
+
 	if (userEdit) {
 		userEdit->reject();
 		delete userEdit;
@@ -1732,6 +1753,13 @@ void MainWindow::msgUserStats(const MumbleProto::UserStats &msg) {
 	if (!m_pendingUserInformationSessions.remove(msg.session())) {
 		return;
 	}
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell()) {
+		openModernUserInformationDialog(msg);
+		return;
+	}
+#endif
 
 	ui = new UserInformation(msg, this);
 	ui->setAttribute(Qt::WA_DeleteOnClose, true);

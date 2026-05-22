@@ -202,6 +202,7 @@ const SettingsKey MODERN_WINDOW_GEOMETRY_KEY              = { "window_geometry_m
 const SettingsKey MODERN_MINIMAL_VIEW_GEOMETRY_KEY        = { "minimal_view_window_geometry_modern" };
 const SettingsKey MODERN_WINDOW_STATE_KEY                 = { "window_state_modern" };
 const SettingsKey MODERN_MINIMAL_VIEW_STATE_KEY           = { "minimal_view_window_state_modern" };
+const SettingsKey MODERN_SHELL_MOTD_EXPANDED_KEY          = { "modern_shell_motd_expanded" };
 const SettingsKey CONFIG_GEOMETRY_KEY                     = { "config_geometry" };
 const SettingsKey IMAGE_PREVIEW_GEOMETRY_KEY              = { "image_preview_geometry" };
 const SettingsKey WINDOW_LAYOUT_KEY                       = { "window_layout" };

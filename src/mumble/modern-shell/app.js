@@ -26,7 +26,6 @@
 	let menuDismissTimer = 0;
 	let appMenuOpen = false;
 	let noteExpanded = false;
-	let noteUserOverride = false;
 	let railNoteAutoCollapsed = false;
 	let lastActiveRailToken = "";
 	let lastMotdSignature = "";
@@ -42,11 +41,16 @@
 	let railActionIntent = null;
 	let railJoinPriorityUntil = 0;
 	let lastVoiceJoinRequest = { token: "", time: 0 };
+	let pendingVoiceJoin = null;
+	let pendingVoiceJoinTimer = 0;
 	let messageRenderGeneration = 0;
 	let activeMessageChunkRender = null;
 	let pendingMessageUpdatePatches = [];
 	let pendingScopeLoading = null;
 	let pendingScopeLoadingTimer = 0;
+	let modernDialogState = null;
+	let modernDialogRenderedOpen = false;
+	let modernDialogReturnFocus = null;
 
 	const imageViewerStorageKey = "mumble-modern-image-viewer";
 	const imageViewerMinWidth = 280;
@@ -57,11 +61,15 @@
 	const railActionSuppressMs = 850;
 	const railJoinPriorityMs = 900;
 	const voiceJoinInputDedupeMs = 180;
+	const voiceJoinFeedbackMs = 3200;
 	const scopeLoadingFallbackMs = 2800;
 	const messageRenderChunkGroupCount = 28;
 	const messageRenderChunkBudgetMs = 7;
+	const messageRenderLoadingThreshold = 36;
 	const contextMenuViewportMargin = 8;
 	const contextMenuAnchorGap = 4;
+	const renderContainedModernDialogs = document.body
+		&& document.body.dataset.modernDialogHost === "contained";
 
 	const refs = {
 		appShell: document.querySelector(".app-shell"),
@@ -128,6 +136,15 @@
 		appMenu: document.getElementById("app-menu-popover"),
 		selfMenu: document.getElementById("self-menu-popover"),
 		contextMenu: document.getElementById("context-menu"),
+		modernDialogLayer: document.getElementById("modern-dialog-layer"),
+		modernDialogBackdrop: document.getElementById("modern-dialog-backdrop"),
+		modernDialog: document.getElementById("modern-dialog"),
+		modernDialogEyebrow: document.getElementById("modern-dialog-eyebrow"),
+		modernDialogTitle: document.getElementById("modern-dialog-title"),
+		modernDialogSubtitle: document.getElementById("modern-dialog-subtitle"),
+		modernDialogCloseButton: document.getElementById("modern-dialog-close-button"),
+		modernDialogBody: document.getElementById("modern-dialog-body"),
+		modernDialogActions: document.getElementById("modern-dialog-actions"),
 		imageViewerLayer: document.getElementById("image-viewer-layer"),
 		imageViewerBackdrop: document.getElementById("image-viewer-backdrop"),
 		imageViewerWindow: document.getElementById("image-viewer-window"),
@@ -339,14 +356,7 @@
 		refs.noteCard.style.maxHeight = Math.round(clampedNoteMaxHeight) + "px";
 		refs.serverSubtitle.style.maxHeight = Math.round(noteBodyMaxHeight) + "px";
 
-		const roomCount = Number(refs.voiceRoomCount.textContent || 0) + Number(refs.textRoomCount.textContent || 0);
-		const overflow = syncRailOverflowState();
-		if (overflow > 12 && roomCount > 0 && noteExpanded && !noteUserOverride) {
-			railNoteAutoCollapsed = true;
-			noteExpanded = false;
-			renderNote(getSnapshot().app || {}, getSnapshot().activeScope || {});
-			return;
-		}
+		syncRailOverflowState();
 
 		if (pendingActiveRailReveal) {
 			pendingActiveRailReveal = false;
@@ -479,6 +489,101 @@
 		return true;
 	}
 
+	function clearPendingVoiceJoinTimer() {
+		if (!pendingVoiceJoinTimer) {
+			return;
+		}
+
+		clearTimeout(pendingVoiceJoinTimer);
+		pendingVoiceJoinTimer = 0;
+	}
+
+	function pendingVoiceJoinToken() {
+		if (!pendingVoiceJoin || !pendingVoiceJoin.scopeToken) {
+			return "";
+		}
+
+		if (monotonicNow() > pendingVoiceJoin.expiresAt) {
+			pendingVoiceJoin = null;
+			clearPendingVoiceJoinTimer();
+			return "";
+		}
+
+		return pendingVoiceJoin.scopeToken;
+	}
+
+	function syncPendingVoiceJoinRows() {
+		if (!refs.voiceRoomList) {
+			return;
+		}
+
+		const token = pendingVoiceJoinToken();
+		refs.voiceRoomList.querySelectorAll(".rail-row").forEach(function(row) {
+			const joining = !!token && String(row.dataset.scopeToken || "") === token;
+			row.classList.toggle("is-joining", joining);
+			if (joining) {
+				row.dataset.canJoin = "false";
+			}
+			const joinButton = row.querySelector(".room-join-action");
+			if (!joinButton) {
+				return;
+			}
+			const wasLoading = joinButton.classList.contains("is-loading");
+			joinButton.classList.toggle("is-loading", joining);
+			if (joining) {
+				joinButton.textContent = "Joining";
+				joinButton.disabled = true;
+			} else if (wasLoading) {
+				const joined = row.classList.contains("is-joined");
+				joinButton.textContent = joined ? "Live" : "Join";
+				joinButton.disabled = joined;
+				row.dataset.canJoin = joined ? "false" : "true";
+			}
+		});
+	}
+
+	function clearPendingVoiceJoinFeedback() {
+		pendingVoiceJoin = null;
+		clearPendingVoiceJoinTimer();
+		syncPendingVoiceJoinRows();
+	}
+
+	function reconcilePendingVoiceJoin(snapshot) {
+		const token = pendingVoiceJoinToken();
+		if (!token) {
+			syncPendingVoiceJoinRows();
+			return;
+		}
+
+		const joined = (snapshot && snapshot.voiceRooms || []).some(function(room) {
+			return room && room.joined && String(room.token || "") === token;
+		});
+		if (joined) {
+			clearPendingVoiceJoinFeedback();
+			return;
+		}
+
+		syncPendingVoiceJoinRows();
+	}
+
+	function beginVoiceJoinFeedback(scopeToken) {
+		const token = String(scopeToken || "");
+		if (!token) {
+			return;
+		}
+
+		pendingVoiceJoin = {
+			scopeToken: token,
+			expiresAt: monotonicNow() + voiceJoinFeedbackMs
+		};
+		clearPendingVoiceJoinTimer();
+		pendingVoiceJoinTimer = setTimeout(function() {
+			clearPendingVoiceJoinFeedback();
+		}, voiceJoinFeedbackMs);
+		beginScopeLoading(token, { force: true });
+		syncPendingVoiceJoinRows();
+	}
+
 	function isRoomEmbeddedActionTarget(target, row) {
 		if (!target || !row || typeof target.closest !== "function") {
 			return false;
@@ -549,7 +654,13 @@
 		}
 
 		lastVoiceJoinRequest = { token, time: now };
-		notifyBridge("joinVoiceChannel", token);
+		beginVoiceJoinFeedback(token);
+		if (!notifyBridge("joinVoiceChannel", token)) {
+			clearPendingVoiceJoinFeedback();
+			clearChatLoadingIndicator();
+			scheduleSnapshotRender();
+			return false;
+		}
 		return true;
 	}
 
@@ -638,6 +749,11 @@
 									&& typeof modernBridge.participantTalkStateChanged.connect === "function") {
 								modernBridge.participantTalkStateChanged.connect(syncParticipantTalkState);
 							}
+							if (modernBridge.modernDialogStateChanged
+									&& typeof modernBridge.modernDialogStateChanged.connect === "function") {
+								modernBridge.modernDialogStateChanged.connect(syncModernDialogState);
+							}
+							syncModernDialogState(modernBridge.modernDialogState || { open: false });
 							notifyBridge("ready");
 							syncSnapshot();
 						}
@@ -769,20 +885,26 @@
 		pendingScopeLoadingTimer = setTimeout(resolveScopeLoadingFallback, scopeLoadingFallbackMs);
 	}
 
-	function beginScopeLoading(scopeToken) {
+	function beginScopeLoading(scopeToken, options) {
 		const token = String(scopeToken || "");
 		if (!token) {
 			return false;
 		}
 
+		const force = !!(options && options.force);
+		const useFallback = !(options && options.fallback === false);
 		const activeToken = String((getSnapshot().activeScope || {}).scopeToken || "");
-		if (token === activeToken && (!pendingScopeLoading || pendingScopeLoading.scopeToken !== token)) {
+		if (!force && token === activeToken && (!pendingScopeLoading || pendingScopeLoading.scopeToken !== token)) {
 			return false;
 		}
 
 		pendingScopeLoading = { scopeToken: token };
 		showChatLoadingIndicator();
-		scheduleScopeLoadingFallback();
+		if (useFallback) {
+			scheduleScopeLoadingFallback();
+		} else {
+			clearPendingScopeLoadingTimer();
+		}
 		return true;
 	}
 
@@ -799,6 +921,22 @@
 
 		showChatLoadingIndicator();
 		return true;
+	}
+
+	function scopeHistoryLoading(scope) {
+		if (!scope || typeof scope !== "object") {
+			return false;
+		}
+
+		const loadingState = String(scope.loadingState || "").toLowerCase();
+		return !!scope.loading || loadingState === "initial" || loadingState === "refreshing" || loadingState === "older";
+	}
+
+	function shouldShowScopeLoading(scope, messages) {
+		if (!scopeHistoryLoading(scope) || (messages || []).length > 0) {
+			return false;
+		}
+		return !scope.serverLogRevision && !Object.prototype.hasOwnProperty.call(scope, "serverLogHtml");
 	}
 
 	function selectRoomScope(scopeToken) {
@@ -1636,6 +1774,7 @@
 
 			return {
 				kind: "action",
+				id: item.id || "",
 				label: item.label || "Action",
 				enabled: item.enabled !== false,
 				checked: !!item.checked,
@@ -1647,6 +1786,17 @@
 					}
 				}
 			};
+		});
+	}
+
+	function actionStatesContainId(actionStates, actionId) {
+		const targetId = String(actionId || "");
+		if (!targetId) {
+			return false;
+		}
+
+		return (actionStates || []).some(function(item) {
+			return item && String(item.id || "") === targetId;
 		});
 	}
 
@@ -1662,6 +1812,235 @@
 			return "separator";
 		}
 		return "action";
+	}
+
+	function normalizedActionPanelItems(items, options) {
+		const normalized = [];
+		const hideDisabled = !!(options && options.hideDisabled);
+
+		(items || []).forEach(function(item) {
+			const kind = actionPanelItemKind(item);
+			if (!kind) {
+				return;
+			}
+
+			if (kind === "submenu") {
+				const childItems = normalizedActionPanelItems(item.items || [], options);
+				if (!childItems.length) {
+					return;
+				}
+
+				const submenu = Object.assign({}, item);
+				submenu.items = childItems;
+				normalized.push(submenu);
+				return;
+			}
+
+			if (hideDisabled && (kind === "action" || kind === "slider") && item.enabled === false && !item.checked) {
+				return;
+			}
+
+			if (kind === "separator") {
+				if (!normalized.length || actionPanelItemKind(normalized[normalized.length - 1]) === "separator") {
+					return;
+				}
+
+				normalized.push(item);
+				return;
+			}
+
+			normalized.push(item);
+		});
+
+		while (normalized.length && actionPanelItemKind(normalized[normalized.length - 1]) === "separator") {
+			normalized.pop();
+		}
+
+		return normalized.filter(function(item, index) {
+			if (actionPanelItemKind(item) !== "label") {
+				return true;
+			}
+
+			const nextKind = actionPanelItemKind(normalized[index + 1]);
+			return !!nextKind && nextKind !== "separator" && nextKind !== "label";
+		});
+	}
+
+	function compactContextSubmenu(label, items, hint) {
+		const normalized = normalizedActionPanelItems(items, { hideDisabled: true });
+		if (!normalized.length) {
+			return null;
+		}
+
+		return {
+			kind: "submenu",
+			label: label || "More",
+			enabled: true,
+			hint: hint || "",
+			items: normalized
+		};
+	}
+
+	function contextActionMatches(item, ids) {
+		if (!item || !item.id) {
+			return false;
+		}
+
+		return ids.indexOf(String(item.id)) !== -1;
+	}
+
+	function groupedContextMenuItems(items, primaryIds, groupDefinitions, fallbackLabel) {
+		const primary = [];
+		const fallback = [];
+		const groupBuckets = (groupDefinitions || []).map(function(group) {
+			return {
+				label: group.label,
+				hint: group.hint || "",
+				ids: group.ids || [],
+				items: []
+			};
+		});
+		let pendingLabels = [];
+
+		(items || []).forEach(function(item) {
+			const kind = actionPanelItemKind(item);
+			if (!kind || kind === "separator") {
+				pendingLabels = [];
+				return;
+			}
+
+			if (kind === "label") {
+				pendingLabels = [item];
+				return;
+			}
+
+			let target = fallback;
+			if (contextActionMatches(item, primaryIds || [])) {
+				target = primary;
+			} else {
+				const group = groupBuckets.find(function(candidate) {
+					return contextActionMatches(item, candidate.ids);
+				});
+				if (group) {
+					target = group.items;
+				}
+			}
+
+			if (pendingLabels.length && kind === "slider") {
+				target.push.apply(target, pendingLabels);
+			}
+			pendingLabels = [];
+			target.push(item);
+		});
+
+		const grouped = normalizedActionPanelItems(primary, { hideDisabled: true });
+		groupBuckets.forEach(function(group) {
+			const submenu = compactContextSubmenu(group.label, group.items, group.hint);
+			if (!submenu) {
+				return;
+			}
+			if (grouped.length) {
+				grouped.push({ separator: true });
+			}
+			grouped.push(submenu);
+		});
+
+		const fallbackSubmenu = compactContextSubmenu(fallbackLabel || "More", fallback);
+		if (fallbackSubmenu) {
+			if (grouped.length) {
+				grouped.push({ separator: true });
+			}
+			grouped.push(fallbackSubmenu);
+		}
+
+		return normalizedActionPanelItems(grouped, { hideDisabled: true });
+	}
+
+	function participantContextGroups(items) {
+		return groupedContextMenuItems(
+			items,
+			["openMessage", "joinRoom", "join", "textMessage", "userInfo"],
+			[
+				{
+					label: "Voice",
+					ids: [
+						"localVolume",
+						"mute",
+						"deaf",
+						"prioritySpeaker",
+						"localMute",
+						"remoteSpeechCleanup",
+						"self.toggleMute",
+						"self.toggleDeaf"
+					]
+				},
+				{
+					label: "Screen Share",
+					ids: [
+						"screenShareStart",
+						"screenShareStop",
+						"screenShareWatch",
+						"screenShareStopWatching",
+						"screenShareOpenWindow"
+					]
+				},
+				{
+					label: "Messages",
+					ids: ["ignoreMessages", "ignoreTts", "grantChatHistory"]
+				},
+				{
+					label: "Profile",
+					ids: [
+						"localNickname",
+						"selfComment",
+						"commentView",
+						"commentReset",
+						"textureReset",
+						"register",
+						"friendAdd",
+						"friendUpdate",
+						"friendRemove",
+						"avatarChange",
+						"avatarRemove",
+						"audioStats",
+						"recording"
+					]
+				},
+				{
+					label: "Moderation",
+					ids: ["move", "kick", "ban"]
+				}
+			],
+			"More"
+		);
+	}
+
+	function roomContextGroups(items) {
+		return groupedContextMenuItems(
+			items,
+			["openRoom", "joinVoice", "join", "listen", "markRead"],
+			[
+				{
+					label: "Screen Share",
+					ids: [
+						"screenShareStart",
+						"screenShareStop",
+						"screenShareWatch",
+						"screenShareStopWatching",
+						"screenShareOpenWindow"
+					]
+				},
+				{
+					label: "Room",
+					ids: ["sendMessage", "copyUrl", "hide", "pin"]
+				},
+				{
+					label: "Manage",
+					ids: ["add", "acl", "remove", "link", "unlink", "unlinkAll"]
+				}
+			],
+			"More"
+		);
 	}
 
 	function sliderValueLabel(item, value) {
@@ -1751,6 +2130,61 @@
 			});
 
 			container.appendChild(slider);
+			return;
+		}
+
+		if (kind === "submenu") {
+			const submenu = document.createElement("div");
+			submenu.className = prefix + "-submenu";
+			if (item.hint) {
+				submenu.title = item.hint;
+			}
+
+			const trigger = document.createElement("button");
+			trigger.type = "button";
+			const labelClass = variant === "menu" ? "menu-item-label" : "context-menu-label";
+			const stateClass = variant === "menu" ? "menu-item-state" : "context-menu-state";
+			trigger.className = prefix + "-item " + prefix + "-submenu-trigger";
+			trigger.setAttribute("aria-haspopup", "menu");
+			trigger.setAttribute("aria-expanded", "false");
+			trigger.innerHTML = "<span class=\"" + labelClass + "\"></span><span class=\"" + stateClass
+				+ "\" aria-hidden=\"true\">&gt;</span>";
+			trigger.querySelector("." + labelClass).textContent = item.label || "More";
+
+			const panel = document.createElement("div");
+			panel.className = prefix + "-submenu-panel";
+			panel.setAttribute("role", "menu");
+			normalizedActionPanelItems(item.items || [], { hideDisabled: true }).forEach(function(childItem) {
+				appendActionPanelItem(panel, childItem, variant, hideOnAction);
+			});
+
+			const setOpen = function(open) {
+				submenu.classList.toggle("is-open", open);
+				trigger.setAttribute("aria-expanded", open ? "true" : "false");
+			};
+
+			submenu.addEventListener("pointerenter", function() {
+				setOpen(true);
+			});
+			submenu.addEventListener("pointerleave", function() {
+				setOpen(false);
+			});
+			submenu.addEventListener("focusin", function() {
+				setOpen(true);
+			});
+			submenu.addEventListener("focusout", function(event) {
+				if (!submenu.contains(event.relatedTarget)) {
+					setOpen(false);
+				}
+			});
+			trigger.addEventListener("click", function(event) {
+				event.stopPropagation();
+				setOpen(!submenu.classList.contains("is-open"));
+			});
+
+			submenu.appendChild(trigger);
+			submenu.appendChild(panel);
+			container.appendChild(submenu);
 			return;
 		}
 
@@ -1984,8 +2418,10 @@
 			return items;
 		}
 
-		if (participant.entryKind !== "listener" && participant.canMessage) {
+		if (participant.entryKind !== "listener" && participant.canMessage
+			&& !actionStatesContainId(participant.actions, "textMessage")) {
 			items.push({
+				id: "openMessage",
 				label: "Open message",
 				enabled: true,
 				action: function() {
@@ -1993,8 +2429,10 @@
 				}
 			});
 		}
-		if (participant.entryKind !== "listener" && participant.canJoin) {
+		if (participant.entryKind !== "listener" && participant.canJoin
+			&& !actionStatesContainId(participant.actions, "join")) {
 			items.push({
+				id: "joinRoom",
 				label: "Join room",
 				enabled: true,
 				action: function() {
@@ -2027,7 +2465,7 @@
 		if (items.length && participantActionItems.length) {
 			items.push({ separator: true });
 		}
-		return items.concat(participantActionItems);
+		return participantContextGroups(items.concat(participantActionItems));
 	}
 
 	function renderPresenceList(container, room, people) {
@@ -2150,6 +2588,7 @@
 		const memberCount = Number(room.memberCount || 0);
 		const screenShare = room.screenShare || {};
 		const isRootRoom = !!room.isRoot;
+		const joining = joinable && String(room.token || "") === pendingVoiceJoinToken();
 		const roomKind = String(room.kindLabel || "").trim().toLowerCase();
 		const hasRoomActions = (room.actions || []).some(function(item) {
 			return !!item && String(item.kind || "action") !== "separator";
@@ -2161,6 +2600,9 @@
 				: "");
 		const wrapper = document.createElement("div");
 		wrapper.className = "rail-row-wrapper" + (joinable ? " is-voice-room" : "");
+		wrapper.setAttribute("role", "option");
+		wrapper.setAttribute("aria-label", room.label || "Room");
+		wrapper.setAttribute("aria-selected", room.selected ? "true" : "false");
 		wrapper.style.setProperty("--room-depth", String(depth));
 		wrapper.dataset.scopeToken = room.token || "";
 		wrapper.dataset.roomType = joinable ? "voice" : "text";
@@ -2171,16 +2613,18 @@
 		button.className = "rail-row"
 			+ (room.selected ? " is-selected" : "")
 			+ (room.joined ? " is-joined" : "")
+			+ (joining ? " is-joining" : "")
 			+ (isRootRoom ? " is-root-room" : "");
 		button.classList.toggle("has-subtitle", !!subtitleText);
 		button.classList.toggle("has-unread", unreadCount > 0);
 		button.classList.toggle("is-populated", joinable && memberCount > 0);
 		button.dataset.scopeToken = room.token || "";
-		button.dataset.canJoin = joinable && !room.joined ? "true" : "false";
+		button.dataset.canJoin = joinable && !room.joined && !joining ? "true" : "false";
 		button.dataset.roomLabel = room.label || "";
 		button.dataset.depth = String(depth);
 		button.dataset.roomType = joinable ? "voice" : "text";
 		button.draggable = !!joinable && !isRootRoom;
+		button.setAttribute("aria-label", room.label || "Room");
 		if (room.participantSession) {
 			button.dataset.participantSession = String(room.participantSession);
 		}
@@ -2236,9 +2680,9 @@
 		if (joinable) {
 			const joinButton = document.createElement("button");
 			joinButton.type = "button";
-			joinButton.className = "mini-action room-join-action";
-			joinButton.textContent = room.joined ? "Live" : "Join";
-			joinButton.disabled = !!room.joined;
+			joinButton.className = "mini-action room-join-action" + (joining ? " is-loading" : "");
+			joinButton.textContent = room.joined ? "Live" : (joining ? "Joining" : "Join");
+			joinButton.disabled = !!room.joined || joining;
 			joinButton.addEventListener("pointerdown", function(event) {
 				if (event.button !== undefined && event.button !== 0) {
 					return;
@@ -2530,6 +2974,20 @@
 		const voiceRooms = snapshot.voiceRooms || [];
 		const voicePresence = snapshot.voicePresence || [];
 
+		refs.connectButton.disabled = !app.canConnect;
+		refs.disconnectButton.disabled = !app.canDisconnect;
+		refs.muteButton.classList.toggle("is-active", !!app.selfMuted);
+		refs.deafButton.classList.toggle("is-active", !!app.selfDeafened);
+		renderMenus(resolvedAppMenus(app));
+		renderSelfCard(app);
+		if (appMenuOpen) {
+			renderAppMenu(snapshot);
+		}
+		if (selfMenuOpen) {
+			renderSelfMenu(snapshot);
+		}
+
+		reconcilePendingVoiceJoin(snapshot);
 		refs.textRoomCount.textContent = String(textRooms.length);
 		refs.voiceRoomCount.textContent = String(voiceRooms.length);
 		renderRoomList(refs.voiceRoomList, voiceRooms, {
@@ -2557,6 +3015,7 @@
 		const voicePresence = snapshot.voicePresence || [];
 		const headerPresence = voicePresence.length ? voicePresence : (snapshot.participants || []);
 		renderVoicePresenceStack(headerPresence);
+		reconcilePendingVoiceJoin(snapshot);
 		renderRoomList(refs.voiceRoomList, snapshot.voiceRooms || [], {
 			joinable: true,
 			voicePresence: voicePresence,
@@ -2614,6 +3073,9 @@
 		renderComposerReplyState(scope);
 		syncAmbientState(snapshot);
 		syncComposerHeight();
+		if (shouldShowScopeLoading(scope, snapshot.messages || [])) {
+			beginScopeLoading(scope.scopeToken, { force: true, fallback: false });
+		}
 		if (scope.serverLogRevision || Object.prototype.hasOwnProperty.call(scope, "serverLogHtml")) {
 			renderMessages(snapshot, { resolvePendingScopeLoading: true });
 		}
@@ -3454,80 +3916,116 @@
 
 	function renderTimelineChunked(messages, emptyCopy, freshTailCount, renderState) {
 		cancelActiveMessageChunkRender("restart");
-		refs.messageList.classList.remove("is-chat-loading");
 		const startedAt = monotonicNow();
 		const generation = messageRenderGeneration + 1;
 		messageRenderGeneration = generation;
-
-		const indexedMessages = (messages || []).map(function(message, index) {
-			return Object.assign({ renderIndex: index }, message);
-		});
-		const groups = renderMessageGroups(indexedMessages);
-		const emptyFragment = document.createDocumentFragment();
-		replaceChildrenWith(refs.messageList, emptyFragment);
-
-		if (!groups.length) {
-			const fragment = document.createDocumentFragment();
-			const empty = document.createElement("div");
-			empty.className = "empty-state";
-			empty.innerHTML = "<h2>No history yet</h2><p></p>";
-			empty.querySelector("p").textContent =
-				emptyCopy || "Messages will appear here once the selected room has activity.";
-			fragment.appendChild(empty);
-			replaceChildrenWith(refs.messageList, fragment);
-			activeMessageChunkRender = null;
-			applyTimelineRenderScrollState(renderState, true);
-			if (renderState && typeof renderState.onComplete === "function") {
-				renderState.onComplete();
-			}
-			traceModernUi("messages chunk empty", startedAt);
-			return;
-		}
-
-		const freshStartIndex = Math.max(0, indexedMessages.length - Math.max(0, freshTailCount || 0));
 		activeMessageChunkRender = {
 			generation: generation,
-			startedAt: startedAt
+			startedAt: startedAt,
+			preparing: true
 		};
 
-		const appendChunk = function() {
+		const sourceMessages = messages || [];
+		const shouldYieldBeforeRender = refs.messageList.classList.contains("is-chat-loading")
+			|| sourceMessages.length >= messageRenderLoadingThreshold;
+		if (shouldYieldBeforeRender && !refs.messageList.querySelector(".chat-loading-spinner")) {
+			const loadingFragment = document.createDocumentFragment();
+			loadingFragment.appendChild(createChatLoadingIndicator());
+			refs.messageList.classList.add("is-chat-loading");
+			replaceChildrenWith(refs.messageList, loadingFragment);
+		} else if (!shouldYieldBeforeRender) {
+			refs.messageList.classList.remove("is-chat-loading");
+		}
+
+		const beginChunkRender = function() {
 			if (!activeMessageChunkRender || activeMessageChunkRender.generation !== generation
 					|| messageRenderGeneration !== generation) {
 				return;
 			}
 
-			const chunkStartedAt = monotonicNow();
-			const fragment = document.createDocumentFragment();
-			let renderedGroupCount = 0;
-			while (renderState.nextGroupIndex < groups.length
-					&& renderedGroupCount < messageRenderChunkGroupCount
-					&& (renderedGroupCount === 0 || monotonicNow() - chunkStartedAt < messageRenderChunkBudgetMs)) {
-				appendRenderedMessageGroup(fragment, groups[renderState.nextGroupIndex], freshStartIndex);
-				renderState.nextGroupIndex += 1;
-				renderedGroupCount += 1;
+			const indexedMessages = sourceMessages.map(function(message, index) {
+				return Object.assign({ renderIndex: index }, message);
+			});
+			const groups = renderMessageGroups(indexedMessages);
+			const emptyFragment = document.createDocumentFragment();
+			refs.messageList.classList.remove("is-chat-loading");
+			replaceChildrenWith(refs.messageList, emptyFragment);
+
+			if (!groups.length) {
+				const fragment = document.createDocumentFragment();
+				const empty = document.createElement("div");
+				empty.className = "empty-state";
+				empty.innerHTML = "<h2>No history yet</h2><p></p>";
+				empty.querySelector("p").textContent =
+					emptyCopy || "Messages will appear here once the selected room has activity.";
+				fragment.appendChild(empty);
+				replaceChildrenWith(refs.messageList, fragment);
+				activeMessageChunkRender = null;
+				applyTimelineRenderScrollState(renderState, true);
+				if (renderState && typeof renderState.onComplete === "function") {
+					renderState.onComplete();
+				}
+				traceModernUi("messages chunk empty", startedAt);
+				return;
 			}
 
-			refs.messageList.appendChild(fragment);
-			applyPendingMessageUpdatePatches(true);
-			applyTimelineRenderScrollState(renderState, false);
-			traceModernUi("messages chunk " + String(renderState.nextGroupIndex) + "/" + String(groups.length), chunkStartedAt);
+			const freshStartIndex = Math.max(0, indexedMessages.length - Math.max(0, freshTailCount || 0));
+			activeMessageChunkRender = {
+				generation: generation,
+				startedAt: startedAt
+			};
 
-			if (renderState.nextGroupIndex < groups.length) {
+			const appendChunk = function() {
+				if (!activeMessageChunkRender || activeMessageChunkRender.generation !== generation
+						|| messageRenderGeneration !== generation) {
+					return;
+				}
+
+				const chunkStartedAt = monotonicNow();
+				const fragment = document.createDocumentFragment();
+				let renderedGroupCount = 0;
+				while (renderState.nextGroupIndex < groups.length
+						&& renderedGroupCount < messageRenderChunkGroupCount
+						&& (renderedGroupCount === 0 || monotonicNow() - chunkStartedAt < messageRenderChunkBudgetMs)) {
+					appendRenderedMessageGroup(fragment, groups[renderState.nextGroupIndex], freshStartIndex);
+					renderState.nextGroupIndex += 1;
+					renderedGroupCount += 1;
+				}
+
+				refs.messageList.appendChild(fragment);
+				applyPendingMessageUpdatePatches(true);
+				applyTimelineRenderScrollState(renderState, false);
+				traceModernUi("messages chunk " + String(renderState.nextGroupIndex) + "/" + String(groups.length), chunkStartedAt);
+
+				if (renderState.nextGroupIndex < groups.length) {
+					requestAnimationFrame(appendChunk);
+					return;
+				}
+
+				activeMessageChunkRender = null;
+				applyPendingMessageUpdatePatches(false);
+				applyTimelineRenderScrollState(renderState, true);
+				if (typeof renderState.onComplete === "function") {
+					renderState.onComplete();
+				}
+				traceModernUi("messages chunk complete", startedAt);
+			};
+
+			renderState.nextGroupIndex = 0;
+			if (shouldYieldBeforeRender) {
 				requestAnimationFrame(appendChunk);
 				return;
 			}
 
-			activeMessageChunkRender = null;
-			applyPendingMessageUpdatePatches(false);
-			applyTimelineRenderScrollState(renderState, true);
-			if (typeof renderState.onComplete === "function") {
-				renderState.onComplete();
-			}
-			traceModernUi("messages chunk complete", startedAt);
+			appendChunk();
 		};
 
-		renderState.nextGroupIndex = 0;
-		appendChunk();
+		if (shouldYieldBeforeRender) {
+			requestAnimationFrame(beginChunkRender);
+			return;
+		}
+
+		beginChunkRender();
 	}
 
 	function lastTimelineCluster() {
@@ -4036,6 +4534,14 @@
 			String(scope.label || ""),
 			String(scope.description || "")
 		].join("|");
+		if (shouldShowScopeLoading(scope, messages)) {
+			pendingScopeLoading = { scopeToken: String(scopeToken || "") };
+			clearPendingScopeLoadingTimer();
+			showChatLoadingIndicator();
+			lastRenderedMessageCount = 0;
+			lastRenderedTailKey = "";
+			return;
+		}
 		if (pendingScopeLoadingBlocksRender(scopeToken, renderOptions)) {
 			return;
 		}
@@ -4145,7 +4651,6 @@
 		refs.noteCard.classList.toggle("hidden", !hasMotd);
 		if (!hasMotd) {
 			noteExpanded = true;
-			noteUserOverride = false;
 			railNoteAutoCollapsed = false;
 			lastMotdSignature = "";
 			refs.noteCard.style.maxHeight = "";
@@ -4156,12 +4661,12 @@
 			return;
 		}
 
+		const preferredExpanded = app.motdExpanded !== false;
 		if (lastMotdSignature !== motdHtml) {
 			lastMotdSignature = motdHtml;
-			noteExpanded = true;
-			noteUserOverride = false;
 			railNoteAutoCollapsed = false;
 		}
+		noteExpanded = preferredExpanded;
 
 		const fullText = plainTextFromHtml(motdHtml);
 		const hasSummary = !!motdSummary && motdSummary !== fullText;
@@ -4214,6 +4719,8 @@
 				items: [
 					{ id: "server.connect", label: "Connect", enabled: !!app.canConnect },
 					{ id: "server.disconnect", label: "Disconnect", enabled: !!app.canDisconnect, tone: "danger" },
+					{ id: "server.createRoom", label: "Create text room", enabled: !!app.canDisconnect },
+					{ id: "server.settings", label: "Server settings", enabled: !!app.canDisconnect },
 					{ id: "server.information", label: "Server info", enabled: !!app.canDisconnect },
 					{ id: "server.favorite", label: "Add favorite", enabled: !!app.canDisconnect }
 				]
@@ -4259,6 +4766,438 @@
 		}
 
 		return fallbackMenus(app || {});
+	}
+
+	function appMenuContextItems(snapshot, menuIds, blockedActionIds) {
+		const app = (snapshot && snapshot.app) || {};
+		const allowedMenuIds = Array.isArray(menuIds) && menuIds.length
+			? menuIds.reduce(function(ids, id) {
+				ids[String(id || "")] = true;
+				return ids;
+			}, {})
+			: null;
+		const items = [];
+
+		resolvedAppMenus(app).forEach(function(menu) {
+			if (!menu || !Array.isArray(menu.items) || !menu.items.length) {
+				return;
+			}
+
+			const menuId = String(menu.id || "");
+			if (allowedMenuIds && !allowedMenuIds[menuId]) {
+				return;
+			}
+
+			const menuItems = actionItemsFromActionStates(menu.items, {
+				invokeAction: function(actionId) {
+					notifyBridge("invokeAppAction", actionId);
+				}
+			}).filter(function(item) {
+				if (!actionPanelItemKind(item)) {
+					return false;
+				}
+				return !(blockedActionIds && item.id && blockedActionIds[item.id]);
+			});
+			if (!menuItems.length) {
+				return;
+			}
+
+			items.push({
+				kind: "submenu",
+				label: menu.label || "Menu",
+				items: menuItems
+			});
+		});
+
+		return items;
+	}
+
+	function contextActionIdSet(items) {
+		return (items || []).reduce(function(ids, item) {
+			if (item && item.id) {
+				ids[item.id] = true;
+			}
+			return ids;
+		}, {});
+	}
+
+	function withAppMenuContextItems(items, snapshot, menuIds) {
+		const mergedItems = (items || []).slice();
+		const appItems = appMenuContextItems(snapshot, menuIds, contextActionIdSet(mergedItems));
+		if (appItems.length) {
+			if (mergedItems.length) {
+				mergedItems.push({ separator: true });
+			}
+			mergedItems.push.apply(mergedItems, appItems);
+		}
+		return mergedItems;
+	}
+
+	function syncModernDialogState(state) {
+		if (!renderContainedModernDialogs) {
+			modernDialogState = null;
+			renderModernDialog();
+			return;
+		}
+
+		modernDialogState = state || null;
+		renderModernDialog();
+	}
+
+	function modernDialogFocusableElements() {
+		if (!refs.modernDialog) {
+			return [];
+		}
+
+		return Array.prototype.slice.call(refs.modernDialog.querySelectorAll(
+			"button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"
+		)).filter(function(element) {
+			return !!(element.offsetWidth || element.offsetHeight || element.getClientRects().length);
+		});
+	}
+
+	function restoreModernDialogFocus(focusState) {
+		if (!focusState || !focusState.fieldId || !refs.modernDialog) {
+			return false;
+		}
+
+		const candidates = Array.prototype.slice.call(
+			refs.modernDialog.querySelectorAll("[data-modern-dialog-field-id]")
+		);
+		const target = candidates.find(function(element) {
+			return element.dataset.modernDialogFieldId === focusState.fieldId;
+		});
+		if (!target) {
+			return false;
+		}
+
+		target.focus({ preventScroll: true });
+		if (focusState.hasSelection && typeof target.setSelectionRange === "function") {
+			try {
+				target.setSelectionRange(focusState.selectionStart, focusState.selectionEnd);
+			} catch (error) {
+				// Some input types expose selection APIs but reject range restoration.
+			}
+		}
+		return true;
+	}
+
+	function focusFirstModernDialogControl() {
+		const focusable = modernDialogFocusableElements();
+		const firstField = focusable.find(function(element) {
+			return !!element.dataset.modernDialogFieldId;
+		});
+		const target = firstField || focusable[0] || refs.modernDialog;
+		if (target && typeof target.focus === "function") {
+			target.focus({ preventScroll: true });
+		}
+	}
+
+	function restoreModernDialogReturnFocus() {
+		const target = modernDialogReturnFocus;
+		modernDialogReturnFocus = null;
+		if (target && typeof target.focus === "function" && document.contains(target)) {
+			target.focus({ preventScroll: true });
+		}
+	}
+
+	function trapModernDialogTab(event) {
+		const focusable = modernDialogFocusableElements();
+		if (!focusable.length) {
+			event.preventDefault();
+			if (refs.modernDialog && typeof refs.modernDialog.focus === "function") {
+				refs.modernDialog.focus({ preventScroll: true });
+			}
+			return true;
+		}
+
+		const first = focusable[0];
+		const last = focusable[focusable.length - 1];
+		if (event.shiftKey && document.activeElement === first) {
+			event.preventDefault();
+			last.focus({ preventScroll: true });
+			return true;
+		}
+		if (!event.shiftKey && document.activeElement === last) {
+			event.preventDefault();
+			first.focus({ preventScroll: true });
+			return true;
+		}
+		return false;
+	}
+
+	function invokeModernDialogAction(actionId, payload) {
+		const dialogId = String(modernDialogState && modernDialogState.id || "");
+		if (!dialogId || !actionId) {
+			return;
+		}
+		notifyBridge("invokeModernDialogAction", dialogId, String(actionId), payload || {});
+	}
+
+	function closeModernDialog() {
+		const dialogId = String(modernDialogState && modernDialogState.id || "");
+		if (dialogId) {
+			notifyBridge("closeModernDialog", dialogId);
+		}
+		modernDialogState = null;
+		renderModernDialog();
+	}
+
+	function modernDialogFieldValue(field, input) {
+		const type = String(field && field.type || "text");
+		if (type === "checkbox") {
+			return !!input.checked;
+		}
+		if (type === "select" && String(field && field.valueType || "number") === "string") {
+			return input.value;
+		}
+		if (type === "number" || type === "range" || type === "select") {
+			const numeric = Number(input.value);
+			return Number.isFinite(numeric) ? numeric : 0;
+		}
+		return input.value;
+	}
+
+	function updateModernDialogField(field, input) {
+		const dialogId = String(modernDialogState && modernDialogState.id || "");
+		const fieldId = String(field && field.id || "");
+		if (!dialogId || !fieldId) {
+			return;
+		}
+		notifyBridge("updateModernDialogField", dialogId, fieldId, modernDialogFieldValue(field, input));
+	}
+
+	function appendModernDialogField(container, field, errors) {
+		const type = String(field && field.type || "text");
+		if (type === "note") {
+			const note = document.createElement("p");
+			note.className = "modern-dialog-note";
+			note.textContent = field.text || "";
+			container.appendChild(note);
+			return;
+		}
+
+		const row = document.createElement("label");
+		row.className = "modern-dialog-field is-" + type;
+		const label = document.createElement("span");
+		label.className = "modern-dialog-field-label";
+		label.textContent = field.label || field.id || "Field";
+		row.appendChild(label);
+
+		let input = null;
+		if (type === "checkbox") {
+			input = document.createElement("input");
+			input.type = "checkbox";
+			input.checked = !!field.value;
+		} else if (type === "select") {
+			input = document.createElement("select");
+			(field.options || []).forEach(function(option) {
+				const item = document.createElement("option");
+				item.value = String(option.value);
+				item.textContent = option.label || String(option.value);
+				item.disabled = option.enabled === false;
+				if (option.hint) {
+					item.title = String(option.hint);
+				}
+				input.appendChild(item);
+			});
+			input.value = String(field.value);
+		} else if (type === "range") {
+			const rangeWrap = document.createElement("div");
+			rangeWrap.className = "modern-dialog-range";
+			input = document.createElement("input");
+			input.type = "range";
+			input.min = String(field.min || 0);
+			input.max = String(field.max || 100);
+			input.step = String(field.step || 1);
+			input.value = String(field.value || 0);
+			const value = document.createElement("span");
+			value.className = "modern-dialog-range-value";
+			const syncValue = function() {
+				value.textContent = String(input.value) + String(field.suffix || "");
+			};
+			input.addEventListener("input", syncValue);
+			syncValue();
+			rangeWrap.appendChild(input);
+			rangeWrap.appendChild(value);
+			row.appendChild(rangeWrap);
+		} else {
+			input = document.createElement("input");
+			input.type = type === "password" ? "password" : (type === "number" ? "number" : "text");
+			input.value = field.value == null ? "" : String(field.value);
+			if (type === "number") {
+				if (field.min != null) {
+					input.min = String(field.min);
+				}
+				if (field.max != null) {
+					input.max = String(field.max);
+				}
+				if (field.step != null) {
+					input.step = String(field.step);
+				}
+			}
+		}
+
+		if (input && type !== "range") {
+			row.appendChild(input);
+		}
+		if (input) {
+			input.dataset.modernDialogFieldId = String(field.id || "");
+			input.disabled = field.enabled === false;
+			if (field.hint) {
+				input.title = String(field.hint);
+			}
+			input.addEventListener(type === "checkbox" || type === "select" ? "change" : "input", function() {
+				updateModernDialogField(field, input);
+			});
+		}
+
+		if (field.hint) {
+			const hint = document.createElement("span");
+			hint.className = "modern-dialog-field-hint";
+			hint.textContent = String(field.hint);
+			row.appendChild(hint);
+		}
+
+		const errorText = errors && field && field.id ? errors[field.id] : "";
+		if (errorText) {
+			const error = document.createElement("span");
+			error.className = "modern-dialog-field-error";
+			error.textContent = errorText;
+			row.appendChild(error);
+		}
+		container.appendChild(row);
+	}
+
+	function appendModernDialogFavorites(container, dialog) {
+		if (!dialog || !Array.isArray(dialog.favorites) || !dialog.favorites.length) {
+			return;
+		}
+
+		const section = document.createElement("section");
+		section.className = "modern-dialog-section modern-dialog-favorites";
+		const title = document.createElement("h3");
+		title.className = "modern-dialog-section-title";
+		title.textContent = "Saved servers";
+		section.appendChild(title);
+
+		const list = document.createElement("div");
+		list.className = "modern-dialog-favorite-list";
+		dialog.favorites.forEach(function(favorite) {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "modern-dialog-favorite" + (favorite.selected ? " is-selected" : "");
+			button.innerHTML = "<span class=\"modern-dialog-favorite-label\"></span><span class=\"modern-dialog-favorite-subtitle\"></span>";
+			button.querySelector(".modern-dialog-favorite-label").textContent = favorite.label || favorite.host || "Server";
+			button.querySelector(".modern-dialog-favorite-subtitle").textContent = favorite.subtitle || "";
+			button.addEventListener("click", function() {
+				invokeModernDialogAction("selectFavorite", { index: Number(favorite.index) || 0 });
+			});
+			list.appendChild(button);
+		});
+		section.appendChild(list);
+		container.appendChild(section);
+	}
+
+	function renderModernDialog() {
+		const dialog = modernDialogState || {};
+		const open = !!dialog.open;
+		if (!refs.modernDialogLayer) {
+			return;
+		}
+
+		const activeElement = document.activeElement;
+		const activeInDialog = !!(activeElement && refs.modernDialog && refs.modernDialog.contains(activeElement));
+		const focusState = activeInDialog && activeElement.dataset
+			? {
+				fieldId: activeElement.dataset.modernDialogFieldId || "",
+				hasSelection: typeof activeElement.selectionStart === "number"
+					&& typeof activeElement.selectionEnd === "number",
+				selectionStart: activeElement.selectionStart,
+				selectionEnd: activeElement.selectionEnd
+			}
+			: null;
+		const opening = open && !modernDialogRenderedOpen;
+		const closing = !open && modernDialogRenderedOpen;
+		if (opening && activeElement && !activeInDialog) {
+			modernDialogReturnFocus = activeElement;
+		}
+
+		refs.modernDialogLayer.classList.toggle("hidden", !open);
+		refs.modernDialogLayer.setAttribute("aria-hidden", open ? "false" : "true");
+		if (!open) {
+			refs.modernDialogBody.innerHTML = "";
+			refs.modernDialogActions.innerHTML = "";
+			modernDialogRenderedOpen = false;
+			if (closing) {
+				restoreModernDialogReturnFocus();
+			}
+			return;
+		}
+
+		refs.modernDialog.className = "modern-dialog" + (dialog.tone ? " is-" + dialog.tone : "")
+			+ (dialog.kind ? " is-" + dialog.kind : "");
+		refs.modernDialogEyebrow.textContent = dialog.kind === "settings" ? "Settings" : "Mumble";
+		refs.modernDialogTitle.textContent = dialog.title || "Dialog";
+		refs.modernDialogSubtitle.textContent = dialog.subtitle || "";
+		refs.modernDialogBody.innerHTML = "";
+		refs.modernDialogActions.innerHTML = "";
+
+		if (Array.isArray(dialog.pages) && dialog.pages.length) {
+			const tabs = document.createElement("div");
+			tabs.className = "modern-dialog-tabs";
+			dialog.pages.forEach(function(page) {
+				const tab = document.createElement("button");
+				tab.type = "button";
+				tab.className = "modern-dialog-tab" + (page.selected ? " is-selected" : "");
+				tab.textContent = page.label || page.id || "Page";
+				tab.addEventListener("click", function() {
+					invokeModernDialogAction("selectPage", { pageId: page.id || "" });
+				});
+				tabs.appendChild(tab);
+			});
+			refs.modernDialogBody.appendChild(tabs);
+		}
+
+		appendModernDialogFavorites(refs.modernDialogBody, dialog);
+
+		const errors = dialog.errors || {};
+		(dialog.sections || []).forEach(function(section) {
+			const sectionElement = document.createElement("section");
+			sectionElement.className = "modern-dialog-section";
+			if (section.title) {
+				const title = document.createElement("h3");
+				title.className = "modern-dialog-section-title";
+				title.textContent = section.title;
+				sectionElement.appendChild(title);
+			}
+			(section.fields || []).forEach(function(field) {
+				appendModernDialogField(sectionElement, field, errors);
+			});
+			refs.modernDialogBody.appendChild(sectionElement);
+		});
+
+		(dialog.actions || []).forEach(function(action) {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "chip-button modern-dialog-action"
+				+ (action.tone ? " is-" + action.tone : "")
+				+ (dialog.primaryActionId === action.id ? " is-primary" : "");
+			button.disabled = action.enabled === false;
+			button.textContent = action.label || action.id || "Action";
+			button.dataset.modernDialogActionId = String(action.id || "");
+			button.addEventListener("click", function() {
+				invokeModernDialogAction(action.id || "", {});
+			});
+			refs.modernDialogActions.appendChild(button);
+		});
+		modernDialogRenderedOpen = true;
+		if (focusState && restoreModernDialogFocus(focusState)) {
+			return;
+		}
+		if (opening || !activeInDialog) {
+			focusFirstModernDialogControl();
+		}
 	}
 
 	function hideAppMenu() {
@@ -4810,6 +5749,7 @@
 		applyStatePill(refs.connectionPill, app.connectionLabel || "Disconnected", app.connectionTone || "");
 		applyStatePill(refs.compatPill, app.compatibilityLabel || "Standard server", app.compatibilityTone || "");
 		refs.layoutSwitchButton.disabled = app.canToggleLayout === false;
+		refs.layoutSwitchButton.classList.toggle("hidden", app.canToggleLayout === false);
 		refs.layoutSwitchButton.title = app.layoutSwitchLabel || "Switch layout";
 		refs.layoutSwitchButton.setAttribute("aria-label", app.layoutSwitchLabel || "Switch layout");
 
@@ -4820,6 +5760,7 @@
 		renderMenus(resolvedAppMenus(app));
 		refs.settingsButton.setAttribute("aria-expanded", appMenuOpen ? "true" : "false");
 
+		reconcilePendingVoiceJoin(snapshot);
 		refs.textRoomCount.textContent = String(textRooms.length);
 		refs.voiceRoomCount.textContent = String(voiceRooms.length);
 		renderRoomList(refs.voiceRoomList, voiceRooms, {
@@ -4833,6 +5774,7 @@
 			voicePresence: null,
 			hideWhenEmpty: !(app.canManageTextChannels || app.canCreateTextRoom)
 		});
+		renderNote(app, snapshot.activeScope || {});
 		const renderedActiveRailToken = activeRailToken();
 		if (!renderedActiveRailToken) {
 			lastActiveRailToken = "";
@@ -5186,6 +6128,7 @@
 		const isVoiceRoom = roomRow && roomRow.dataset.roomType === "voice";
 		const items = [
 			{
+				id: "openRoom",
 				label: "Open room",
 				enabled: !!roomToken,
 				action: function() {
@@ -5194,8 +6137,9 @@
 			}
 		];
 
-		if (isVoiceRoom) {
+		if (isVoiceRoom && !(room && actionStatesContainId(room.actions, "join"))) {
 			items.push({
+				id: "joinVoice",
 				label: "Join voice",
 				enabled: roomRow && roomRow.dataset.canJoin === "true",
 				action: function() {
@@ -5215,7 +6159,7 @@
 			});
 			if (participantItems.length) {
 				items.push({ separator: true });
-				return items.concat(participantItems);
+				return participantContextGroups(items.concat(participantItems));
 			}
 		}
 
@@ -5234,9 +6178,10 @@
 			items.push.apply(items, roomActionItems);
 		}
 
-		if (scope.canMarkRead) {
+		if (room && room.selected && scope.canMarkRead) {
 			items.push({ separator: true });
 			items.push({
+				id: "markRead",
 				label: "Mark read",
 				enabled: true,
 				action: function() {
@@ -5245,7 +6190,7 @@
 			});
 		}
 
-		return items;
+		return roomContextGroups(items);
 	}
 
 	function buildContextMenuItems(event) {
@@ -5394,14 +6339,25 @@
 					}
 				}
 			);
-			return items;
+			return normalizedActionPanelItems(items, { hideDisabled: true });
 		}
 
 		if (selfCard) {
-			return [];
+			const selfMenu = (snapshot.app && snapshot.app.selfMenu) || {};
+			const handlers = {
+				invokeAction: function(actionId) {
+					notifyBridge("invokeAppAction", actionId);
+				}
+			};
+			const presenceItems = actionItemsFromActionStates(selfMenu.presence, handlers);
+			const actionItems = actionItemsFromActionStates(selfMenu.actions, handlers);
+			if (presenceItems.length && actionItems.length) {
+				presenceItems.push({ separator: true });
+			}
+			return normalizedActionPanelItems(presenceItems.concat(actionItems), { hideDisabled: true });
 		}
 
-		return [
+		const defaultItems = [
 			{
 				label: "Load older",
 				enabled: !!scope.canLoadOlder,
@@ -5424,6 +6380,7 @@
 				}
 			}
 		];
+		return withAppMenuContextItems(defaultItems, snapshot);
 	}
 
 	function clampedViewportPosition(position, size, viewportSize) {
@@ -5448,21 +6405,7 @@
 	function showContextMenu(items, clientX, clientY, options) {
 		hideAppMenu();
 		hideSelfMenu();
-		const filteredItems = [];
-		(items || []).forEach(function(item) {
-			const kind = actionPanelItemKind(item);
-			if (!kind) {
-				return;
-			}
-			if (kind === "separator"
-				&& (!filteredItems.length || actionPanelItemKind(filteredItems[filteredItems.length - 1]) === "separator")) {
-				return;
-			}
-			filteredItems.push(item);
-		});
-		if (filteredItems.length && actionPanelItemKind(filteredItems[filteredItems.length - 1]) === "separator") {
-			filteredItems.pop();
-		}
+		const filteredItems = normalizedActionPanelItems(items, { hideDisabled: true });
 		if (!filteredItems.length) {
 			hideContextMenu();
 			return;
@@ -5493,7 +6436,7 @@
 				clearMenuPeekState();
 			}
 		});
-		refs.connectButton.addEventListener("click", function() { notifyBridge("openConnectDialog"); });
+		refs.connectButton.addEventListener("click", function() { notifyBridge("openModernDialog", "connect", {}); });
 		refs.disconnectButton.addEventListener("click", function() { notifyBridge("disconnectServer"); });
 		refs.layoutSwitchButton.addEventListener("click", function() { notifyBridge("toggleLayout"); });
 		refs.settingsButton.addEventListener("click", function(event) {
@@ -5531,13 +6474,19 @@
 		});
 		refs.selfCardSettingsButton.addEventListener("click", function(event) {
 			event.stopPropagation();
-			notifyBridge("openSettings");
+			notifyBridge("openModernDialog", "settings", {});
 		});
+		refs.modernDialogCloseButton.addEventListener("click", closeModernDialog);
+		refs.modernDialogBackdrop.addEventListener("click", closeModernDialog);
 		refs.noteToggleButton.addEventListener("click", function() {
-			noteUserOverride = true;
+			const snapshot = getSnapshot();
+			const app = snapshot.app || {};
+			const nextExpanded = !noteExpanded;
+			app.motdExpanded = nextExpanded;
+			snapshot.app = app;
 			railNoteAutoCollapsed = false;
-			noteExpanded = !noteExpanded;
-			renderNote(getSnapshot().app || {}, getSnapshot().activeScope || {});
+			notifyBridge("invokeAppAction", nextExpanded ? "motd.show" : "motd.hide");
+			renderNote(app, snapshot.activeScope || {});
 		});
 		refs.jumpLatestButton.addEventListener("click", function() {
 			keepMessageListPinnedToBottom = true;
@@ -5572,22 +6521,26 @@
 			target.addEventListener("drop", handleComposerImageDrop);
 		});
 		document.addEventListener("click", function(event) {
-			if (!event.target.closest(".context-menu")) {
+			const target = eventElementTarget(event);
+			if (!target || typeof target.closest !== "function") {
+				return;
+			}
+			if (!target.closest(".context-menu")) {
 				hideContextMenu();
 			}
-			if (!event.target.closest(".app-menu-popover") && !event.target.closest("#settings-button")) {
+			if (!target.closest(".app-menu-popover") && !target.closest("#settings-button")) {
 				hideAppMenu();
 			}
-			if (!event.target.closest(".self-menu-popover") && !event.target.closest("#self-card")) {
+			if (!target.closest(".self-menu-popover") && !target.closest("#self-card")) {
 				hideSelfMenu();
 			}
-			if (!event.target.closest(".reaction-picker") && !event.target.closest(".reaction-picker-toggle")) {
+			if (!target.closest(".reaction-picker") && !target.closest(".reaction-picker-toggle")) {
 				if (openReactionPickerMessageId !== null) {
 					openReactionPickerMessageId = null;
 					syncSnapshot();
 				}
 			}
-			if (!event.target.closest(".menu-group") && openMenuId !== null) {
+			if (!target.closest(".menu-group") && openMenuId !== null) {
 				closeTopMenu();
 			}
 		});
@@ -5597,12 +6550,7 @@
 				event.preventDefault();
 				return;
 			}
-			if (event.target.closest(".context-menu")) {
-				return;
-			}
-			if (event.target.closest("#self-card")) {
-				event.preventDefault();
-				toggleSelfMenu(true);
+			if (contextTarget && contextTarget.closest(".context-menu")) {
 				return;
 			}
 			const items = buildContextMenuItems(event).filter(function(item) {
@@ -5613,7 +6561,7 @@
 				return;
 			}
 			event.preventDefault();
-			const actionButton = event.target.closest(".room-action-button, .presence-action-button");
+			const actionButton = contextTarget ? contextTarget.closest(".room-action-button, .presence-action-button") : null;
 			if (actionButton) {
 				const bounds = actionButton.getBoundingClientRect();
 				showContextMenu(items, bounds.left, bounds.bottom + contextMenuAnchorGap, {
@@ -5625,6 +6573,17 @@
 			}
 		});
 		window.addEventListener("keydown", function(event) {
+			if (modernDialogState && modernDialogState.open) {
+				if (event.key === "Escape") {
+					event.preventDefault();
+					closeModernDialog();
+					return;
+				}
+				if (event.key === "Tab") {
+					trapModernDialogTab(event);
+					return;
+				}
+			}
 			if (event.key === "Escape" && refs.imageViewerLayer && !refs.imageViewerLayer.classList.contains("hidden")) {
 				closeImageViewer();
 				return;

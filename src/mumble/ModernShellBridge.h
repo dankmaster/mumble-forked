@@ -17,14 +17,17 @@ private:
 	Q_OBJECT
 	Q_DISABLE_COPY(ModernShellBridge)
 	Q_PROPERTY(QVariantMap snapshot READ snapshot NOTIFY snapshotChanged)
+	Q_PROPERTY(QVariantMap modernDialogState READ modernDialogState NOTIFY modernDialogStateChanged)
 
 public:
 	explicit ModernShellBridge(QObject *parent = nullptr);
 
 	QVariantMap snapshot() const;
+	QVariantMap modernDialogState() const;
 	void setSnapshot(const QVariantMap &snapshot);
 	void publishModernShellPatch(const QVariantMap &patch);
 	void publishParticipantTalkState(const QVariantMap &state);
+	void publishModernDialogState(const QVariantMap &state);
 
 	Q_INVOKABLE void ready();
 	Q_INVOKABLE void selectScope(const QString &scopeToken);
@@ -50,6 +53,12 @@ public:
 	Q_INVOKABLE void openConnectDialog();
 	Q_INVOKABLE void disconnectServer();
 	Q_INVOKABLE void openSettings();
+	Q_INVOKABLE void openModernDialog(const QString &dialogId, const QVariantMap &context);
+	Q_INVOKABLE void closeModernDialog(const QString &dialogId);
+	Q_INVOKABLE void updateModernDialogField(const QString &dialogId, const QString &fieldId, const QVariant &value);
+	Q_INVOKABLE void invokeModernDialogAction(const QString &dialogId, const QString &actionId,
+											  const QVariantMap &payload);
+	Q_INVOKABLE QVariantMap currentAudioInputMeter() const;
 	Q_INVOKABLE bool clipboardHasImage() const;
 	Q_INVOKABLE QString clipboardText() const;
 	Q_INVOKABLE void setClipboardText(const QString &text);
@@ -65,6 +74,7 @@ signals:
 	void snapshotChanged();
 	void modernPatchChanged(const QVariantMap &patch);
 	void participantTalkStateChanged(const QVariantMap &state);
+	void modernDialogStateChanged(const QVariantMap &state);
 	void scopeSelectionRequested(const QString &scopeToken);
 	void voiceJoinRequested(const QString &scopeToken);
 	void scopeActionRequested(const QString &scopeToken, const QString &actionId);
@@ -88,6 +98,10 @@ signals:
 	void connectDialogRequested();
 	void disconnectRequested();
 	void settingsRequested();
+	void modernDialogOpenRequested(const QString &dialogId, const QVariantMap &context);
+	void modernDialogCloseRequested(const QString &dialogId);
+	void modernDialogFieldUpdateRequested(const QString &dialogId, const QString &fieldId, const QVariant &value);
+	void modernDialogActionRequested(const QString &dialogId, const QString &actionId, const QVariantMap &payload);
 	void clipboardImageAttachmentRequested();
 	void imagePickerRequested();
 	void imageDataAttachmentRequested(const QString &dataUrl);
@@ -97,6 +111,7 @@ signals:
 
 private:
 	QVariantMap m_snapshot;
+	QVariantMap m_modernDialogState;
 };
 
 #endif // defined(MUMBLE_HAS_MODERN_LAYOUT)
