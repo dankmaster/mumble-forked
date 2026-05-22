@@ -117,8 +117,9 @@ namespace {
 	}
 } // namespace
 
-QVariantMap ModernDialogController::openConnect(const QList< FavoriteServer > &favorites, const Settings &settings) {
-	m_connect.open(favorites, settings);
+QVariantMap ModernDialogController::openConnect(const QList< FavoriteServer > &favorites, const Settings &settings,
+												const QMap< UnresolvedServerAddress, unsigned int > &pingCache) {
+	m_connect.open(favorites, settings, pingCache);
 	m_activeDialogID = QStringLiteral("connect");
 	return state();
 }
@@ -252,6 +253,16 @@ QVariantMap ModernDialogController::state() const {
 
 QString ModernDialogController::activeDialogID() const {
 	return m_activeDialogID;
+}
+
+bool ModernDialogController::setConnectFavoritePing(const QString &host, const unsigned short port,
+													const quint32 ping, const std::optional< quint32 > users,
+													const std::optional< quint32 > maxUsers) {
+	if (m_activeDialogID != QLatin1String("connect")) {
+		return false;
+	}
+
+	return m_connect.setFavoritePing(host, port, ping, users, maxUsers);
 }
 
 QVariantMap ModernDialogController::failedConnectionState() const {

@@ -307,7 +307,8 @@ void PersistentChatController::setUnreadFromMessages(PersistentChatStore::ScopeS
 }
 
 void PersistentChatController::startInitialLoad(PersistentChatStore::ScopeState &state, bool forceReload) {
-	if (!m_gateway || !m_gateway->isReady() || state.initialRequestInFlight || state.olderRequestInFlight) {
+	if (!m_gateway || !m_gateway->isReady() || state.olderRequestInFlight
+		|| (!forceReload && state.initialRequestInFlight)) {
 		return;
 	}
 

@@ -244,10 +244,13 @@ void AudioInputDialog::load(const Settings &r) {
 	loadSlider(qsDoublePush, static_cast< int >(static_cast< float >(r.uiDoublePush) / 1000.f + 0.5f));
 	loadSlider(qsPTTHold, static_cast< int >(r.pttHold));
 
-	if (r.vsVAD == Settings::Amplitude)
+	if (r.vsVAD == Settings::Amplitude) {
 		qrbAmplitude->setChecked(true);
-	else
+	} else if (r.vsVAD == Settings::Hybrid) {
+		qrbHybrid->setChecked(true);
+	} else {
 		qrbSNR->setChecked(true);
+	}
 
 	loadCheckBox(qcbPushWindow, r.bShowPTTButtonWindow);
 	loadCheckBox(qcbEnableCuePTT, r.audioCueEnabledPTT);
@@ -366,7 +369,13 @@ void AudioInputDialog::save() const {
 	s.iVoiceHold       = qsTransmitHold->value();
 	s.fVADmin          = static_cast< float >(qsTransmitMin->value()) / 32767.0f;
 	s.fVADmax          = static_cast< float >(qsTransmitMax->value()) / 32767.0f;
-	s.vsVAD            = qrbSNR->isChecked() ? Settings::SignalToNoise : Settings::Amplitude;
+	if (qrbSNR->isChecked()) {
+		s.vsVAD = Settings::SignalToNoise;
+	} else if (qrbHybrid->isChecked()) {
+		s.vsVAD = Settings::Hybrid;
+	} else {
+		s.vsVAD = Settings::Amplitude;
+	}
 	s.iFramesPerPacket = ::AudioInput::clampFramesPerPacket(qsFrames->value());
 	s.uiDoublePush     = static_cast< unsigned int >(qsDoublePush->value() * 1000);
 	s.pttHold          = static_cast< quint64 >(qsPTTHold->value());
@@ -785,11 +794,15 @@ void AudioInputDialog::on_Tick_timeout() {
 	abSpeech->iBelow = qsTransmitMin->value();
 	abSpeech->iAbove = qsTransmitMax->value();
 
-	if (qrbAmplitude->isChecked()) {
-		abSpeech->iValue = static_cast< int >((32767.f / 96.0f) * (96.0f + ai->dPeakCleanMic) + 0.5f);
-	} else {
-		abSpeech->iValue = static_cast< int >(ai->fSpeechProb * 32767.0f + 0.5f);
+	Settings::VADSource vadSource = Settings::Amplitude;
+	if (qrbSNR->isChecked()) {
+		vadSource = Settings::SignalToNoise;
+	} else if (qrbHybrid->isChecked()) {
+		vadSource = Settings::Hybrid;
 	}
+	abSpeech->iValue = static_cast< int >(
+		::AudioInput::voiceActivityLevelFor(vadSource, ai->amplitudeVoiceActivityLevel(), ai->fSpeechProb) * 32767.0f
+		+ 0.5f);
 	abSpeech->update();
 }
 

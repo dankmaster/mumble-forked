@@ -10,9 +10,10 @@
 	PROCESS(Settings::AudioTransmit, VAD, "VAD")               \
 	PROCESS(Settings::AudioTransmit, PushToTalk, "PTT")
 
-#define VAD_SOURCE_VALUES                                \
-	PROCESS(Settings::VADSource, Amplitude, "Amplitude") \
-	PROCESS(Settings::VADSource, SignalToNoise, "SignalToNoise")
+#define VAD_SOURCE_VALUES                                       \
+	PROCESS(Settings::VADSource, Amplitude, "Amplitude")        \
+	PROCESS(Settings::VADSource, SignalToNoise, "SignalToNoise") \
+	PROCESS(Settings::VADSource, Hybrid, "Hybrid")
 
 #define LOOP_MODE_VALUES                        \
 	PROCESS(Settings::LoopMode, None, "None")   \

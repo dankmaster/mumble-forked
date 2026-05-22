@@ -33,7 +33,8 @@ public:
 		std::optional< GenericAction > genericAction;
 	};
 
-	QVariantMap openConnect(const QList< FavoriteServer > &favorites, const Settings &settings);
+	QVariantMap openConnect(const QList< FavoriteServer > &favorites, const Settings &settings,
+							const QMap< UnresolvedServerAddress, unsigned int > &pingCache = {});
 	QVariantMap openSettings(const Settings &settings, const QString &pageName = QString());
 	QVariantMap openFailedConnection(const QVariantMap &context);
 	QVariantMap openGenericDialog(const QVariantMap &dialog);
@@ -43,6 +44,9 @@ public:
 	QVariantMap updateField(const QString &dialogID, const QString &fieldID, const QVariant &value);
 	ActionResult invokeAction(const QString &dialogID, const QString &actionID, const QVariantMap &payload);
 	QVariantMap state() const;
+	bool setConnectFavoritePing(const QString &host, unsigned short port, quint32 ping,
+								std::optional< quint32 > users = std::nullopt,
+								std::optional< quint32 > maxUsers = std::nullopt);
 
 	QString activeDialogID() const;
 

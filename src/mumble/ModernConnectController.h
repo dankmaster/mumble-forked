@@ -9,7 +9,9 @@
 #include "Database.h"
 #include "Settings.h"
 
+#include <QtCore/QHash>
 #include <QtCore/QList>
+#include <QtCore/QMap>
 #include <QtCore/QString>
 #include <QtCore/QVariant>
 
@@ -31,15 +33,28 @@ public:
 		std::optional< QList< FavoriteServer > > favoritesToSave;
 	};
 
-	void open(const QList< FavoriteServer > &favorites, const Settings &settings);
+	void open(const QList< FavoriteServer > &favorites, const Settings &settings,
+			  const QMap< UnresolvedServerAddress, unsigned int > &pingCache = {});
 	QVariantMap state() const;
 	void updateField(const QString &fieldID, const QVariant &value);
 	ActionResult invokeAction(const QString &actionID, const QVariantMap &payload);
+	bool setFavoritePing(const QString &host, unsigned short port, quint32 ping,
+						 std::optional< quint32 > users = std::nullopt,
+						 std::optional< quint32 > maxUsers = std::nullopt);
 
 	const QList< FavoriteServer > &favorites() const;
 
 private:
+	struct FavoriteTelemetry {
+		bool hasPing       = false;
+		bool hasUsers      = false;
+		quint32 ping       = 0;
+		quint32 users      = 0;
+		quint32 maxUsers   = 0;
+	};
+
 	QList< FavoriteServer > m_favorites;
+	QHash< QString, FavoriteTelemetry > m_favoriteTelemetry;
 	int m_selectedFavoriteIndex = -1;
 	QString m_defaultUsername;
 	QString m_name;
@@ -49,10 +64,12 @@ private:
 	unsigned short m_port = 0;
 	bool m_editorOpen     = false;
 
+	QVariantMap favoriteItem(const FavoriteServer &server, int index, bool selected) const;
 	void selectFavorite(int index);
 	FavoriteServer currentFavorite() const;
 	QVariantMap validationErrors() const;
 	bool canSubmit() const;
+	static QString favoriteTelemetryKey(const QString &host, unsigned short port);
 };
 
 #endif // MUMBLE_MUMBLE_MODERNCONNECTCONTROLLER_H_

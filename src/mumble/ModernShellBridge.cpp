@@ -147,11 +147,13 @@ QVariantMap ModernShellBridge::currentAudioInputMeter() const {
 		return meter;
 	}
 
-	const float amplitudeLevel    = 1.0f + (audioInput->dPeakCleanMic / 96.0f);
+	const float amplitudeLevel    = audioInput->amplitudeVoiceActivityLevel();
 	const float signalToNoiseProb = audioInput->fSpeechProb;
 	meter.insert(QStringLiteral("available"), true);
 	meter.insert(QStringLiteral("amplitude"), audioMeterPercent(amplitudeLevel));
 	meter.insert(QStringLiteral("signalToNoise"), audioMeterPercent(signalToNoiseProb));
+	meter.insert(QStringLiteral("hybrid"), audioMeterPercent(AudioInput::voiceActivityLevelFor(
+												 Settings::Hybrid, amplitudeLevel, signalToNoiseProb)));
 	meter.insert(QStringLiteral("transmitting"), transmitting);
 	meter.insert(QStringLiteral("peakCleanMicDb"), static_cast< double >(audioInput->dPeakCleanMic));
 	return meter;

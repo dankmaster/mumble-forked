@@ -366,11 +366,7 @@ void AudioStats::on_Tick_timeout() {
 	abSpeech->iBelow = static_cast< int >(Global::get().s.fVADmin * 32767.0f + 0.5f);
 	abSpeech->iAbove = static_cast< int >(Global::get().s.fVADmax * 32767.0f + 0.5f);
 
-	if (Global::get().s.vsVAD == Settings::Amplitude) {
-		abSpeech->iValue = static_cast< int >((32767.f / 96.0f) * (96.0f + ai->dPeakCleanMic) + 0.5f);
-	} else {
-		abSpeech->iValue = static_cast< int >(ai->fSpeechProb * 32767.0f + 0.5f);
-	}
+	abSpeech->iValue = static_cast< int >(ai->voiceActivityLevel() * 32767.0f + 0.5f);
 
 	abSpeech->update();
 

@@ -4201,7 +4201,8 @@ body.dialog-host {
 		justify-self: start;
 	}
 
-	.modern-dialog-field-error {
+	.modern-dialog-field-error,
+	.modern-dialog-field-hint {
 		grid-column: 1;
 	}
 

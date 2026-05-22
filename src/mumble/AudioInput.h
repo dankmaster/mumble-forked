@@ -297,6 +297,11 @@ public:
 	float dPeakSpeaker, dPeakSignal, dMaxMic, dPeakMic, dPeakCleanMic;
 	float fSpeechProb;
 
+	float amplitudeVoiceActivityLevel() const;
+	float voiceActivityLevel() const;
+	static float voiceActivityLevelFor(Settings::VADSource source, float amplitudeLevel, float speechProbability);
+	static bool voiceActivityTriggers(float level, float silenceThreshold, float speechThreshold, bool wasTransmitting);
+
 	static int clampFramesPerPacket(int frames);
 	static int packetDurationMsForFrames(int frames);
 	static int opusMaxAudioBitrateForFrames(int frames);

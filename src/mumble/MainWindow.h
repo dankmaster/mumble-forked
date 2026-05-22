@@ -7,6 +7,7 @@
 #define MUMBLE_MUMBLE_MAINWINDOW_H_
 
 #include <QtCore/QHash>
+#include <QtCore/QMap>
 #include <QtCore/QPointer>
 #include <QtCore/QSet>
 #include <QtCore/QStringList>
@@ -23,6 +24,7 @@
 #include "Mumble.pb.h"
 #include "MumbleProtocol.h"
 #include "QtUtils.h"
+#include "UnresolvedServerAddress.h"
 #include "Usage.h"
 #include "UserLocalNicknameDialog.h"
 
@@ -59,6 +61,7 @@ class PersistentChatHistoryDelegate;
 class ModernDialogController;
 class ModernDialogHost;
 class ModernShellHost;
+struct ModernConnectPingState;
 #endif
 class QAction;
 class QObject;
@@ -67,7 +70,9 @@ class QLabel;
 class QListWidget;
 class QListWidgetItem;
 class QMenu;
+class QModelIndex;
 class QTimer;
+class QHostAddress;
 class QPushButton;
 class QToolButton;
 class QWidget;
@@ -84,6 +89,8 @@ class UserLocalVolumeSlider;
 
 struct ShortcutTarget;
 struct ConnectDetails;
+struct FavoriteServer;
+struct UnresolvedServerAddress;
 enum class ConnectionFailType;
 
 struct ContextMenuTarget {
@@ -311,7 +318,7 @@ public:
 	void setCachedPersistentChatUnreadCount(MumbleProto::ChatScope scope, unsigned int scopeID,
 											unsigned int lastReadMessageID, std::size_t unreadCount);
 	std::size_t totalCachedPersistentChatUnreadCount() const;
-	bool navigateToPersistentChatScope(MumbleProto::ChatScope scope, unsigned int scopeID);
+	bool navigateToPersistentChatScope(MumbleProto::ChatScope scope, unsigned int scopeID, bool forceReload = false);
 	bool canCreateVoiceRoom(Channel *channel) const;
 	bool canCreateAnyVoiceRoom() const;
 	bool voiceRoomCreationForcesTemporary(Channel *channel) const;
@@ -425,6 +432,19 @@ public:
 	bool handleModernShellAppAction(const QString &actionId);
 	bool sendModernShellMessage(const QString &message);
 	void publishModernShellTalkState(const ClientUser *user);
+	void publishModernShellTalkStateForIndex(const QModelIndex &index);
+	void startModernConnectServerPing(const QList< FavoriteServer > &favorites,
+									  const QMap< UnresolvedServerAddress, unsigned int > &pingCache);
+	void stopModernConnectServerPing();
+	void sendNextModernConnectServerPing();
+	void handleModernConnectServerPingReply();
+	void publishModernConnectServerPingState();
+	void sendModernConnectServerPing(const FavoriteServer &favorite);
+	void sendModernConnectServerPing(const UnresolvedServerAddress &target, const QHostAddress &host,
+									 unsigned short port, Version::full_t protocolVersion);
+	bool writeModernConnectServerPing(const QHostAddress &host, unsigned short port,
+									  Version::full_t protocolVersion,
+									  const Mumble::Protocol::PingData &pingData);
 	void togglePreferredModernShellLayout();
 	enum class ModernShellMenuContext : unsigned char {
 		AppServer,
@@ -575,6 +595,7 @@ protected:
 	std::optional< int > m_persistentChatSelectedScopeValue;
 	unsigned int m_persistentChatSelectedScopeID  = 0;
 	unsigned int m_defaultPersistentTextChannelID = 0;
+	std::optional< unsigned int > m_pendingModernShellVoiceJoinScopeID;
 	QHash< unsigned int, PersistentTextChannel > m_persistentTextChannels;
 	QHash< unsigned int, unsigned int > m_userIdleSeconds;
 	std::vector< MumbleProto::ChatMessage > m_persistentChatMessages;
@@ -612,6 +633,7 @@ protected:
 	ModernShellHost *m_modernShellHost                     = nullptr;
 	std::unique_ptr< ModernDialogController > m_modernDialogController;
 	std::unique_ptr< ModernDialogHost > m_modernDialogHost;
+	std::unique_ptr< ModernConnectPingState > m_modernConnectPingState;
 	QObject *m_persistentChatPreviewSnapshotRenderer       = nullptr;
 	quint64 m_modernShellPatchRevision                     = 0;
 	quint64 m_modernShellMessagePatchGeneration            = 0;

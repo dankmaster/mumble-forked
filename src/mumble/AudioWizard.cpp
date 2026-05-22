@@ -135,6 +135,8 @@ AudioWizard::AudioWizard(QWidget *p) : QWizard(p) {
 		qrPTT->setChecked(true);
 	else if (Global::get().s.vsVAD == Settings::Amplitude)
 		qrAmplitude->setChecked(true);
+	else if (Global::get().s.vsVAD == Settings::Hybrid)
+		qrHybrid->setChecked(true);
 	else
 		qrSNR->setChecked(true);
 
@@ -487,11 +489,7 @@ void AudioWizard::on_Ticker_timeout() {
 	abVAD->iBelow = static_cast< int >(Global::get().s.fVADmin * 32767.0f + 0.5f);
 	abVAD->iAbove = static_cast< int >(Global::get().s.fVADmax * 32767.0f + 0.5f);
 
-	if (Global::get().s.vsVAD == Settings::Amplitude) {
-		abVAD->iValue = static_cast< int >((32767.f / 96.0f) * (96.0f + ai->dPeakCleanMic) + 0.5f);
-	} else {
-		abVAD->iValue = static_cast< int >(ai->fSpeechProb * 32767.0f + 0.5f);
-	}
+	abVAD->iValue = static_cast< int >(ai->voiceActivityLevel() * 32767.0f + 0.5f);
 	abVAD->update();
 
 	bool active = ai->isTransmitting();
@@ -615,6 +613,15 @@ void AudioWizard::on_qrSNR_clicked(bool on) {
 void AudioWizard::on_qrAmplitude_clicked(bool on) {
 	if (on) {
 		Global::get().s.vsVAD      = Settings::Amplitude;
+		Global::get().s.atTransmit = Settings::VAD;
+		updateTriggerWidgets(false);
+		bTransmitChanged = true;
+	}
+}
+
+void AudioWizard::on_qrHybrid_clicked(bool on) {
+	if (on) {
+		Global::get().s.vsVAD      = Settings::Hybrid;
 		Global::get().s.atTransmit = Settings::VAD;
 		updateTriggerWidgets(false);
 		bTransmitChanged = true;

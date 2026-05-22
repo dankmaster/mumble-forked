@@ -66,6 +66,7 @@ public slots:
 	void on_Ticker_timeout();
 	void on_qsVAD_valueChanged(int);
 	void on_qrAmplitude_clicked(bool);
+	void on_qrHybrid_clicked(bool);
 	void on_qrSNR_clicked(bool);
 	void on_qrPTT_clicked(bool);
 	void on_qpbPTT_clicked();

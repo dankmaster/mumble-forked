@@ -664,7 +664,7 @@ Speak loudly, as when you are annoyed or excited. Decrease the volume in the sou
          </sizepolicy>
         </property>
         <property name="text">
-         <string>Raw amplitude from input</string>
+         <string>Volume level</string>
         </property>
        </widget>
       </item>
@@ -677,7 +677,20 @@ Speak loudly, as when you are annoyed or excited. Decrease the volume in the sou
          </sizepolicy>
         </property>
         <property name="text">
-         <string>Signal-To-Noise ratio</string>
+         <string>Speech probability</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QRadioButton" name="qrHybrid">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Maximum" vsizetype="Fixed">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="text">
+         <string>Speech + volume</string>
         </property>
        </widget>
       </item>
@@ -1008,6 +1021,7 @@ Mumble is under continuous development, and the development team wants to focus 
   <tabstop>qpbPTT</tabstop>
   <tabstop>qrAmplitude</tabstop>
   <tabstop>qrSNR</tabstop>
+  <tabstop>qrHybrid</tabstop>
   <tabstop>qsVAD</tabstop>
   <tabstop>qrbQualityLow</tabstop>
   <tabstop>qrbQualityBalanced</tabstop>

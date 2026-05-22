@@ -126,37 +126,27 @@ namespace {
 		return field;
 	}
 
-	QVariantMap favoriteItem(const FavoriteServer &server, const int index, const bool selected) {
-		QVariantMap item;
-		const QString label = server.qsName.trimmed().isEmpty() ? server.qsHostname : server.qsName;
-		item.insert(QStringLiteral("index"), index);
-		item.insert(QStringLiteral("label"), label.trimmed().isEmpty() ? QObject::tr("Saved server") : label);
-		item.insert(QStringLiteral("host"), server.qsHostname);
-		item.insert(QStringLiteral("port"), server.usPort);
-		item.insert(QStringLiteral("username"), server.qsUsername);
-		item.insert(QStringLiteral("selected"), selected);
-		item.insert(QStringLiteral("usersLabel"), QObject::tr("Users: -"));
-		item.insert(QStringLiteral("pingLabel"), QObject::tr("Ping: -"));
-		item.insert(QStringLiteral("tooltip"), QObject::tr("%1:%2").arg(server.qsHostname).arg(server.usPort));
-		item.insert(QStringLiteral("subtitle"),
-					QObject::tr("%1:%2 as %3")
-						.arg(server.qsHostname)
-						.arg(server.usPort)
-						.arg(server.qsUsername.trimmed().isEmpty() ? QObject::tr("username") : server.qsUsername));
-		return item;
-	}
 } // namespace
 
-void ModernConnectController::open(const QList< FavoriteServer > &favorites, const Settings &settings) {
+void ModernConnectController::open(const QList< FavoriteServer > &favorites, const Settings &settings,
+								   const QMap< UnresolvedServerAddress, unsigned int > &pingCache) {
 	m_favorites             = favorites;
 	m_defaultUsername       = settings.qsUsername;
 	m_selectedFavoriteIndex = -1;
+	m_favoriteTelemetry.clear();
 	m_name.clear();
 	m_host.clear();
 	m_username = settings.qsUsername;
 	m_password.clear();
 	m_port       = DEFAULT_MUMBLE_PORT;
 	m_editorOpen = false;
+
+	for (auto it = pingCache.cbegin(); it != pingCache.cend(); ++it) {
+		FavoriteTelemetry telemetry;
+		telemetry.hasPing = true;
+		telemetry.ping    = it.value();
+		m_favoriteTelemetry.insert(favoriteTelemetryKey(it.key().hostname, it.key().port), telemetry);
+	}
 
 	if (!m_favorites.isEmpty()) {
 		selectFavorite(0);
@@ -382,6 +372,57 @@ const QList< FavoriteServer > &ModernConnectController::favorites() const {
 	return m_favorites;
 }
 
+bool ModernConnectController::setFavoritePing(const QString &host, const unsigned short port, const quint32 ping,
+											  const std::optional< quint32 > users,
+											  const std::optional< quint32 > maxUsers) {
+	const QString key = favoriteTelemetryKey(host, port);
+	FavoriteTelemetry telemetry = m_favoriteTelemetry.value(key);
+	FavoriteTelemetry next      = telemetry;
+	next.hasPing                = true;
+	next.ping                   = ping;
+	if (users) {
+		next.hasUsers = true;
+		next.users    = *users;
+		next.maxUsers = maxUsers.value_or(0);
+	}
+
+	if (telemetry.hasPing == next.hasPing && telemetry.hasUsers == next.hasUsers && telemetry.ping == next.ping
+		&& telemetry.users == next.users && telemetry.maxUsers == next.maxUsers) {
+		return false;
+	}
+
+	m_favoriteTelemetry.insert(key, next);
+	return true;
+}
+
+QVariantMap ModernConnectController::favoriteItem(const FavoriteServer &server, const int index,
+												  const bool selected) const {
+	QVariantMap item;
+	const QString label = server.qsName.trimmed().isEmpty() ? server.qsHostname : server.qsName;
+	const FavoriteTelemetry telemetry =
+		m_favoriteTelemetry.value(favoriteTelemetryKey(server.qsHostname, server.usPort));
+	item.insert(QStringLiteral("index"), index);
+	item.insert(QStringLiteral("label"), label.trimmed().isEmpty() ? QObject::tr("Saved server") : label);
+	item.insert(QStringLiteral("host"), server.qsHostname);
+	item.insert(QStringLiteral("port"), server.usPort);
+	item.insert(QStringLiteral("username"), server.qsUsername);
+	item.insert(QStringLiteral("selected"), selected);
+	item.insert(QStringLiteral("usersLabel"),
+				telemetry.hasUsers
+					? (telemetry.maxUsers > 0 ? QObject::tr("Users: %1/%2").arg(telemetry.users).arg(telemetry.maxUsers)
+											  : QObject::tr("Users: %1").arg(telemetry.users))
+					: QObject::tr("Users: -"));
+	item.insert(QStringLiteral("pingLabel"),
+				telemetry.hasPing ? QObject::tr("Ping: %1 ms").arg(telemetry.ping) : QObject::tr("Ping: -"));
+	item.insert(QStringLiteral("tooltip"), QObject::tr("%1:%2").arg(server.qsHostname).arg(server.usPort));
+	item.insert(QStringLiteral("subtitle"),
+				QObject::tr("%1:%2 as %3")
+					.arg(server.qsHostname)
+					.arg(server.usPort)
+					.arg(server.qsUsername.trimmed().isEmpty() ? QObject::tr("username") : server.qsUsername));
+	return item;
+}
+
 void ModernConnectController::selectFavorite(const int index) {
 	if (index < 0 || index >= m_favorites.size()) {
 		return;
@@ -424,4 +465,8 @@ QVariantMap ModernConnectController::validationErrors() const {
 
 bool ModernConnectController::canSubmit() const {
 	return validationErrors().isEmpty();
+}
+
+QString ModernConnectController::favoriteTelemetryKey(const QString &host, const unsigned short port) {
+	return QStringLiteral("%1:%2").arg(host.trimmed().toLower()).arg(port);
 }

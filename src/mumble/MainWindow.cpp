@@ -64,6 +64,7 @@
 #include "ScreenShareManager.h"
 #include "SearchDialog.h"
 #include "ServerHandler.h"
+#include "ServerResolver.h"
 #include "ServerInformation.h"
 #include "Settings.h"
 #include "SSL.h"
@@ -123,6 +124,7 @@
 #include <QtGui/QPainter>
 #include <QtGui/QPainterPath>
 #include <QtGui/QPixmap>
+#include <QtCore/QRandomGenerator>
 #include <QtGui/QScreen>
 #include <QtGui/QTextCursor>
 #include <QtGui/QTextDocument>
@@ -134,6 +136,7 @@
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
+#include <QtNetwork/QUdpSocket>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
@@ -178,10 +181,31 @@
 #include <functional>
 #include <limits>
 #include <optional>
+#include <span>
+#include <utility>
 
 #include "widgets/EventFilters.h"
 
 static void recreateServerHandler();
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+struct ModernConnectPingState {
+	QList< FavoriteServer > favorites;
+	QMap< UnresolvedServerAddress, unsigned int > pingCache;
+	QTimer *timer       = nullptr;
+	QUdpSocket *socket4 = nullptr;
+	QUdpSocket *socket6 = nullptr;
+	Timer clock;
+	int nextFavoriteIndex = 0;
+	bool hasIPv4          = false;
+	bool hasIPv6          = false;
+	QHash< ServerAddress, quint64 > randomByAddress;
+	QHash< ServerAddress, QSet< UnresolvedServerAddress > > targetsByAddress;
+	QHash< UnresolvedServerAddress, QPointer< ServerResolver > > activeResolvers;
+	Mumble::Protocol::UDPPingEncoder< Mumble::Protocol::Role::Client > encoder;
+	Mumble::Protocol::UDPDecoder< Mumble::Protocol::Role::Client > decoder;
+};
+#endif
 
 namespace {
 constexpr int PersistentChatScopeRole               = Qt::UserRole;
@@ -196,6 +220,7 @@ constexpr int PersistentChatBottomInsetHeight       = 18;
 constexpr int ModernShellSnapshotActiveCoalesceMs   = 100;
 constexpr int ModernShellSnapshotInactiveCoalesceMs = 350;
 constexpr int ModernShellPatchCoalesceMs            = 16;
+constexpr int ModernConnectServerPingIntervalMs     = 75;
 constexpr int NativeWindowMoveResizeWatchdogMs      = 4000;
 
 bool modernShellMinimalSnapshotEnabled() {
@@ -295,12 +320,20 @@ QString modernShellParticipantSubtitle(const ClientUser *user, const Channel *co
 	return QObject::tr("In %1").arg(user->cChannel->qsName);
 }
 
-QString modernShellTalkStateKey(const ClientUser *user) {
+Settings::TalkState modernShellEffectiveTalkState(const ClientUser *user) {
 	if (!user) {
-		return QStringLiteral("passive");
+		return Settings::Passive;
 	}
 
-	switch (user->tsState) {
+	if (user->uiSession == Global::get().uiSession && user->bSelfMute) {
+		return Settings::Passive;
+	}
+
+	return user->tsState;
+}
+
+QString modernShellTalkStateKey(const ClientUser *user) {
+	switch (modernShellEffectiveTalkState(user)) {
 		case Settings::Talking:
 			return QStringLiteral("talking");
 		case Settings::Whispering:
@@ -320,7 +353,7 @@ QString modernShellTalkStateLabel(const ClientUser *user) {
 		return QString();
 	}
 
-	switch (user->tsState) {
+	switch (modernShellEffectiveTalkState(user)) {
 		case Settings::Talking:
 			return QObject::tr("Talking");
 		case Settings::Whispering:
@@ -340,7 +373,7 @@ QString modernShellTalkStateTone(const ClientUser *user) {
 		return QString();
 	}
 
-	switch (user->tsState) {
+	switch (modernShellEffectiveTalkState(user)) {
 		case Settings::Whispering:
 			return QStringLiteral("whisper");
 		case Settings::Shouting:
@@ -4093,15 +4126,20 @@ void MainWindow::setupGui() {
 					 &PluginManager::on_channelRenamed);
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	QObject::connect(pmModel, &QAbstractItemModel::dataChanged, this,
-					 [this](const QModelIndex &, const QModelIndex &, const QVector< int > &roles) {
+					 [this](const QModelIndex &topLeft, const QModelIndex &bottomRight,
+							const QVector< int > &roles) {
 						 const bool talkStateOnly =
 							 !roles.isEmpty()
 							 && std::all_of(roles.cbegin(), roles.cend(), [](const int role) {
 									return role == Qt::DecorationRole || role == UserModel::NavigatorTalkStateRole;
 						  });
-						 if (!talkStateOnly) {
-							 publishModernShellRoomStatePatch();
+						 if (talkStateOnly) {
+							 for (int row = topLeft.row(); row <= bottomRight.row(); ++row) {
+								 publishModernShellTalkStateForIndex(topLeft.sibling(row, 0));
+							 }
+							 return;
 						 }
+						 publishModernShellRoomStatePatch();
 					 });
 	QObject::connect(pmModel, &QAbstractItemModel::rowsInserted, this,
 					 [this]() { publishModernShellRoomStatePatch(); });
@@ -5667,7 +5705,266 @@ void MainWindow::openModernConnectDialog() {
 		m_modernDialogController = std::make_unique< ModernDialogController >();
 	}
 
-	publishModernDialogState(m_modernDialogController->openConnect(Global::get().db->getFavorites(), Global::get().s));
+	const QList< FavoriteServer > favorites = Global::get().db->getFavorites();
+	const QMap< UnresolvedServerAddress, unsigned int > pingCache = Global::get().db->getPingCache();
+	publishModernDialogState(m_modernDialogController->openConnect(favorites, Global::get().s, pingCache));
+	startModernConnectServerPing(favorites, pingCache);
+}
+
+void MainWindow::startModernConnectServerPing(const QList< FavoriteServer > &favorites,
+											  const QMap< UnresolvedServerAddress, unsigned int > &pingCache) {
+	stopModernConnectServerPing();
+	if (favorites.isEmpty()) {
+		return;
+	}
+
+	m_modernConnectPingState             = std::make_unique< ModernConnectPingState >();
+	m_modernConnectPingState->favorites = favorites;
+	m_modernConnectPingState->pingCache = pingCache;
+
+	m_modernConnectPingState->socket4 = new QUdpSocket(this);
+	m_modernConnectPingState->socket6 = new QUdpSocket(this);
+	m_modernConnectPingState->hasIPv4 =
+		m_modernConnectPingState->socket4->bind(QHostAddress::AnyIPv4, 0, QAbstractSocket::ShareAddress);
+	m_modernConnectPingState->hasIPv6 =
+		m_modernConnectPingState->socket6->bind(QHostAddress::AnyIPv6, 0, QAbstractSocket::ShareAddress);
+	connect(m_modernConnectPingState->socket4, &QUdpSocket::readyRead, this,
+			&MainWindow::handleModernConnectServerPingReply);
+	connect(m_modernConnectPingState->socket6, &QUdpSocket::readyRead, this,
+			&MainWindow::handleModernConnectServerPingReply);
+
+	m_modernConnectPingState->timer = new QTimer(this);
+	m_modernConnectPingState->timer->setInterval(ModernConnectServerPingIntervalMs);
+	connect(m_modernConnectPingState->timer, &QTimer::timeout, this, &MainWindow::sendNextModernConnectServerPing);
+	m_modernConnectPingState->timer->start();
+	QTimer::singleShot(0, this, &MainWindow::sendNextModernConnectServerPing);
+}
+
+void MainWindow::stopModernConnectServerPing() {
+	if (!m_modernConnectPingState) {
+		return;
+	}
+
+	if (Global::get().db) {
+		Global::get().db->setPingCache(m_modernConnectPingState->pingCache);
+	}
+	if (m_modernConnectPingState->timer) {
+		m_modernConnectPingState->timer->stop();
+		m_modernConnectPingState->timer->deleteLater();
+	}
+	if (m_modernConnectPingState->socket4) {
+		m_modernConnectPingState->socket4->deleteLater();
+	}
+	if (m_modernConnectPingState->socket6) {
+		m_modernConnectPingState->socket6->deleteLater();
+	}
+	for (const QPointer< ServerResolver > &resolver : std::as_const(m_modernConnectPingState->activeResolvers)) {
+		if (resolver) {
+			resolver->deleteLater();
+		}
+	}
+	m_modernConnectPingState.reset();
+}
+
+void MainWindow::sendNextModernConnectServerPing() {
+	if (!m_modernConnectPingState) {
+		return;
+	}
+
+	if (!m_modernConnectPingState->hasIPv4 && !m_modernConnectPingState->hasIPv6) {
+		m_modernConnectPingState->timer->stop();
+		return;
+	}
+
+	if (m_modernConnectPingState->nextFavoriteIndex >= m_modernConnectPingState->favorites.size()) {
+		m_modernConnectPingState->timer->stop();
+		return;
+	}
+
+	const FavoriteServer favorite =
+		m_modernConnectPingState->favorites.at(m_modernConnectPingState->nextFavoriteIndex++);
+	sendModernConnectServerPing(favorite);
+
+	if (m_modernConnectPingState
+		&& m_modernConnectPingState->nextFavoriteIndex >= m_modernConnectPingState->favorites.size()) {
+		m_modernConnectPingState->timer->stop();
+	}
+}
+
+void MainWindow::sendModernConnectServerPing(const FavoriteServer &favorite) {
+	if (!m_modernConnectPingState) {
+		return;
+	}
+
+	const QString host = favorite.qsHostname.trimmed();
+	const unsigned short port = favorite.usPort == 0 ? DEFAULT_MUMBLE_PORT : favorite.usPort;
+	if (host.isEmpty() || host.startsWith(QLatin1Char('@')) || port == 0) {
+		return;
+	}
+
+	const UnresolvedServerAddress target(host, port);
+	QHostAddress literalAddress;
+	if (literalAddress.setAddress(host)) {
+		sendModernConnectServerPing(target, literalAddress, port, Version::UNKNOWN);
+		return;
+	}
+
+	if (m_modernConnectPingState->activeResolvers.contains(target)) {
+		return;
+	}
+
+	ServerResolver *resolver = new ServerResolver(this);
+	m_modernConnectPingState->activeResolvers.insert(target, resolver);
+	connect(resolver, &ServerResolver::resolved, this, [this, resolver, target]() {
+		if (!m_modernConnectPingState) {
+			resolver->deleteLater();
+			return;
+		}
+
+		if (m_modernConnectPingState->activeResolvers.value(target) == resolver) {
+			m_modernConnectPingState->activeResolvers.remove(target);
+		}
+
+		const QList< ServerResolverRecord > records = resolver->records();
+		resolver->deleteLater();
+		for (ServerResolverRecord record : records) {
+			for (const HostAddress &address : record.addresses()) {
+				sendModernConnectServerPing(target, address.toAddress(), record.port(), Version::UNKNOWN);
+			}
+		}
+	});
+	resolver->resolve(host, port);
+}
+
+void MainWindow::sendModernConnectServerPing(const UnresolvedServerAddress &target, const QHostAddress &host,
+											 const unsigned short port, const Version::full_t protocolVersion) {
+	if (!m_modernConnectPingState || !target.isValid() || host.isNull() || port == 0) {
+		return;
+	}
+
+	const ServerAddress address(HostAddress(host), port);
+	if (!address.isValid()) {
+		return;
+	}
+
+	m_modernConnectPingState->targetsByAddress[address].insert(target);
+	if (!m_modernConnectPingState->randomByAddress.contains(address)) {
+		m_modernConnectPingState->randomByAddress.insert(address, QRandomGenerator::global()->generate64());
+	}
+
+	Mumble::Protocol::PingData pingData;
+	pingData.timestamp = static_cast< quint64 >(m_modernConnectPingState->clock.elapsed().count())
+						 ^ m_modernConnectPingState->randomByAddress.value(address);
+	pingData.requestAdditionalInformation = true;
+
+	if (!writeModernConnectServerPing(host, port, protocolVersion, pingData)) {
+		return;
+	}
+	if (protocolVersion == Version::UNKNOWN) {
+		writeModernConnectServerPing(host, port, Mumble::Protocol::PROTOBUF_INTRODUCTION_VERSION, pingData);
+	}
+}
+
+bool MainWindow::writeModernConnectServerPing(const QHostAddress &host, const unsigned short port,
+											  const Version::full_t protocolVersion,
+											  const Mumble::Protocol::PingData &pingData) {
+	if (!m_modernConnectPingState) {
+		return false;
+	}
+
+	m_modernConnectPingState->encoder.setProtocolVersion(protocolVersion);
+	const std::span< const Mumble::Protocol::byte > encodedPacket =
+		m_modernConnectPingState->encoder.encodePingPacket(pingData);
+
+	if (m_modernConnectPingState->hasIPv4 && host.protocol() == QAbstractSocket::IPv4Protocol) {
+		m_modernConnectPingState->socket4->writeDatagram(reinterpret_cast< const char * >(encodedPacket.data()),
+														 static_cast< qint64 >(encodedPacket.size()), host, port);
+		return true;
+	}
+	if (m_modernConnectPingState->hasIPv6 && host.protocol() == QAbstractSocket::IPv6Protocol) {
+		m_modernConnectPingState->socket6->writeDatagram(reinterpret_cast< const char * >(encodedPacket.data()),
+														 static_cast< qint64 >(encodedPacket.size()), host, port);
+		return true;
+	}
+
+	return false;
+}
+
+void MainWindow::handleModernConnectServerPingReply() {
+	if (!m_modernConnectPingState || !m_modernDialogController) {
+		return;
+	}
+
+	QUdpSocket *socket = qobject_cast< QUdpSocket * >(sender());
+	if (!socket) {
+		return;
+	}
+
+	bool changed = false;
+	while (socket->hasPendingDatagrams()) {
+		QHostAddress host;
+		unsigned short port = 0;
+		std::span< Mumble::Protocol::byte > buffer = m_modernConnectPingState->decoder.getBuffer();
+		const qint64 length =
+			socket->readDatagram(reinterpret_cast< char * >(buffer.data()), static_cast< qint64 >(buffer.size()),
+								 &host, &port);
+		if (length <= 0) {
+			continue;
+		}
+
+		m_modernConnectPingState->decoder.setProtocolVersion(Version::UNKNOWN);
+		if (!m_modernConnectPingState->decoder.decodePing(
+				buffer.subspan(0, static_cast< std::size_t >(length)))
+			|| m_modernConnectPingState->decoder.getMessageType() != Mumble::Protocol::UDPMessageType::Ping) {
+			continue;
+		}
+
+		if (host.scopeId() == QLatin1String("0")) {
+			host.setScopeId(QLatin1String(""));
+		}
+
+		const ServerAddress address(HostAddress(host), port);
+		const auto targetsIt = m_modernConnectPingState->targetsByAddress.constFind(address);
+		const auto randomIt  = m_modernConnectPingState->randomByAddress.constFind(address);
+		if (targetsIt == m_modernConnectPingState->targetsByAddress.cend()
+			|| randomIt == m_modernConnectPingState->randomByAddress.cend()) {
+			continue;
+		}
+
+		const Mumble::Protocol::PingData pingData = m_modernConnectPingState->decoder.getPingData();
+		const quint64 sentAt = pingData.timestamp ^ randomIt.value();
+		const quint64 now    = static_cast< quint64 >(m_modernConnectPingState->clock.elapsed().count());
+		if (sentAt > now) {
+			continue;
+		}
+
+		const quint32 pingMs = static_cast< quint32 >(std::lround(static_cast< double >(now - sentAt) / 1000.0));
+		std::optional< quint32 > users;
+		std::optional< quint32 > maxUsers;
+		if (pingData.containsAdditionalInformation || pingData.userCount > 0 || pingData.maxUserCount > 0) {
+			users    = pingData.userCount;
+			maxUsers = pingData.maxUserCount;
+		}
+
+		for (const UnresolvedServerAddress &target : targetsIt.value()) {
+			m_modernConnectPingState->pingCache.insert(target, pingMs);
+			changed = m_modernDialogController->setConnectFavoritePing(target.hostname, target.port, pingMs, users,
+																		maxUsers)
+					  || changed;
+		}
+	}
+
+	if (changed) {
+		publishModernConnectServerPingState();
+	}
+}
+
+void MainWindow::publishModernConnectServerPingState() {
+	if (!m_modernDialogController || m_modernDialogController->activeDialogID() != QLatin1String("connect")) {
+		return;
+	}
+
+	publishModernDialogState(m_modernDialogController->state());
 }
 
 void MainWindow::openModernSettingsDialog(const QString &pageName) {
@@ -6085,7 +6382,15 @@ void MainWindow::openModernAudioStatsDialog() {
 		return tr("Unknown");
 	};
 	const auto vadSource = [&settings, this]() {
-		return settings.vsVAD == Settings::SignalToNoise ? tr("Signal-to-noise") : tr("Amplitude");
+		switch (settings.vsVAD) {
+			case Settings::SignalToNoise:
+				return tr("Speech probability");
+			case Settings::Hybrid:
+				return tr("Speech + volume");
+			case Settings::Amplitude:
+				return tr("Volume level");
+		}
+		return tr("Unknown");
 	};
 	const auto noiseMode = [&settings, this]() {
 		switch (settings.noiseCancelMode) {
@@ -6876,6 +7181,10 @@ void MainWindow::handleModernDialogOpen(const QString &dialogID, const QVariantM
 }
 
 void MainWindow::handleModernDialogClose(const QString &dialogID) {
+	if (dialogID.isEmpty() || dialogID == QLatin1String("connect")) {
+		stopModernConnectServerPing();
+	}
+
 	if (!m_modernDialogController) {
 		publishModernDialogState(QVariantMap { { QStringLiteral("open"), false } });
 		return;
@@ -6908,6 +7217,11 @@ void MainWindow::handleModernDialogAction(const QString &dialogID, const QString
 	if (result.favoritesToSave) {
 		Global::get().db->setFavorites(*result.favoritesToSave);
 		updateFavoriteButton();
+		if (dialogID == QLatin1String("connect") && !result.closeDialog) {
+			const QMap< UnresolvedServerAddress, unsigned int > pingCache =
+				m_modernConnectPingState ? m_modernConnectPingState->pingCache : Global::get().db->getPingCache();
+			startModernConnectServerPing(*result.favoritesToSave, pingCache);
+		}
 	}
 	if (result.settingsToApply) {
 		applyModernSettings(*result.settingsToApply, result.settingsAccepted);
@@ -6923,6 +7237,9 @@ void MainWindow::handleModernDialogAction(const QString &dialogID, const QString
 	if (result.openCertificateWizard) {
 		openCertWizardDialog();
 	}
+	if (dialogID == QLatin1String("connect") && result.closeDialog) {
+		stopModernConnectServerPing();
+	}
 	if (result.stateChanged) {
 		publishModernDialogState(m_modernDialogController->state());
 	}
@@ -6934,6 +7251,7 @@ void MainWindow::connectFromModernDialog(const QString &host, const unsigned sho
 		return;
 	}
 
+	stopModernConnectServerPing();
 	recreateServerHandler();
 	qsDesiredChannel = QString();
 	rtLast           = MumbleProto::Reject_RejectType_None;
@@ -7171,13 +7489,23 @@ void MainWindow::publishModernShellTalkState(const ClientUser *user) {
 	state.insert(QStringLiteral("talkState"), modernShellTalkStateKey(user));
 	state.insert(QStringLiteral("talkLabel"), modernShellTalkStateLabel(user));
 	state.insert(QStringLiteral("talkTone"), modernShellTalkStateTone(user));
-	state.insert(QStringLiteral("talking"), user->tsState != Settings::Passive);
+	state.insert(QStringLiteral("talking"), modernShellEffectiveTalkState(user) != Settings::Passive);
 	state.insert(QStringLiteral("badges"),
 				 modernShellParticipantBadges(user, ClientUser::get(Global::get().uiSession)));
 	state.insert(QStringLiteral("statuses"), modernShellParticipantStatuses(user));
 	QVariantMap patch;
 	patch.insert(QStringLiteral("state"), state);
 	publishModernShellPatch(QStringLiteral("presence.update"), patch);
+}
+
+void MainWindow::publishModernShellTalkStateForIndex(const QModelIndex &index) {
+	if (!pmModel || !index.isValid()) {
+		return;
+	}
+
+	if (ClientUser *user = pmModel->getUser(index)) {
+		publishModernShellTalkState(user);
+	}
 }
 #endif
 
@@ -9661,12 +9989,19 @@ bool MainWindow::handleModernShellVoiceJoin(const QString &scopeToken) {
 		return false;
 	}
 
-	navigateToPersistentChatScope(MumbleProto::Channel, channel->iId);
 	if (Global::get().sh && Global::get().uiSession != 0) {
+		if (const Channel *currentChannel = currentVoiceChannel(); currentChannel && currentChannel->iId == channel->iId) {
+			m_pendingModernShellVoiceJoinScopeID.reset();
+			return navigateToPersistentChatScope(MumbleProto::Channel, channel->iId);
+		}
+
+		m_pendingModernShellVoiceJoinScopeID = channel->iId;
 		Global::get().sh->joinChannel(Global::get().uiSession, channel->iId);
+		publishModernShellRoomStatePatch();
+		return true;
 	}
 
-	return true;
+	return navigateToPersistentChatScope(MumbleProto::Channel, channel->iId);
 }
 
 bool MainWindow::handleModernShellScopeAction(const QString &scopeToken, const QString &actionId) {
@@ -9849,7 +10184,7 @@ bool MainWindow::handleModernShellParticipantJoin(const qulonglong session) {
 		return false;
 	}
 
-	navigateToPersistentChatScope(MumbleProto::Channel, participant->cChannel->iId);
+	m_pendingModernShellVoiceJoinScopeID = participant->cChannel->iId;
 	Global::get().sh->joinChannel(Global::get().uiSession, participant->cChannel->iId);
 	return true;
 }
@@ -9892,7 +10227,7 @@ bool MainWindow::handleModernShellParticipantMove(const qulonglong session, cons
 	}
 
 	if (participant == self && Global::get().uiSession != 0) {
-		navigateToPersistentChatScope(MumbleProto::Channel, targetChannel->iId);
+		m_pendingModernShellVoiceJoinScopeID = targetChannel->iId;
 		serverHandler->joinChannel(Global::get().uiSession, targetChannel->iId);
 		return true;
 	}
@@ -13686,7 +14021,7 @@ std::size_t MainWindow::totalCachedPersistentChatUnreadCount() const {
 	return m_persistentChatController ? static_cast< std::size_t >(m_persistentChatController->totalUnreadCount()) : 0;
 }
 
-bool MainWindow::navigateToPersistentChatScope(MumbleProto::ChatScope scope, unsigned int scopeID) {
+bool MainWindow::navigateToPersistentChatScope(MumbleProto::ChatScope scope, unsigned int scopeID, bool forceReload) {
 	if (!usesModernShell()) {
 		return false;
 	}
@@ -13701,9 +14036,10 @@ bool MainWindow::navigateToPersistentChatScope(MumbleProto::ChatScope scope, uns
 		return false;
 	}
 
-	appendModernShellConnectTrace(QStringLiteral("navigateToPersistentChatScope direct scope=%1 id=%2")
+	appendModernShellConnectTrace(QStringLiteral("navigateToPersistentChatScope direct scope=%1 id=%2 force=%3")
 									  .arg(static_cast< int >(scope))
-									  .arg(scopeID));
+									  .arg(scopeID)
+									  .arg(forceReload ? 1 : 0));
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	++m_modernShellMessagePatchGeneration;
 #endif
@@ -13719,7 +14055,7 @@ bool MainWindow::navigateToPersistentChatScope(MumbleProto::ChatScope scope, uns
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	publishModernShellRoomStatePatch();
 #endif
-	updateChatBar(false, false);
+	updateChatBar(forceReload, false);
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	publishModernShellRoomStatePatch();
 #endif
@@ -16657,6 +16993,9 @@ void MainWindow::setShowDockTitleBars(bool doShow) {
 }
 
 MainWindow::~MainWindow() {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	stopModernConnectServerPing();
+#endif
 	delete qwPTTButtonWidget;
 	delete qdwLog->titleBarWidget();
 	delete pmModel;
@@ -17439,19 +17778,31 @@ void MainWindow::handleUserMoved(unsigned int sessionID, const std::optional< un
 		QPointer< MainWindow > guardedThis(this);
 		QMetaObject::invokeMethod(
 			this,
-			[guardedThis]() {
+			[guardedThis, newChannelID]() {
 				if (!guardedThis) {
 					return;
 				}
 
 				guardedThis->rebuildPersistentChatChannelList();
-				guardedThis->updateChatBar();
+				const bool completesPendingVoiceJoin =
+					guardedThis->m_pendingModernShellVoiceJoinScopeID
+					&& *guardedThis->m_pendingModernShellVoiceJoinScopeID == newChannelID;
+				if (guardedThis->m_pendingModernShellVoiceJoinScopeID && !completesPendingVoiceJoin) {
+					guardedThis->m_pendingModernShellVoiceJoinScopeID.reset();
+				}
+
+				if (completesPendingVoiceJoin) {
+					guardedThis->m_pendingModernShellVoiceJoinScopeID.reset();
+					if (!guardedThis->navigateToPersistentChatScope(MumbleProto::Channel, newChannelID, true)) {
+						guardedThis->updateChatBar(true);
+					}
+				} else {
+					guardedThis->updateChatBar();
+				}
 				guardedThis->updateServerNavigatorChrome();
 			},
 			Qt::QueuedConnection);
 	}
-
-	(void) newChannelID;
 }
 
 void MainWindow::on_qaMoveBack_triggered() {

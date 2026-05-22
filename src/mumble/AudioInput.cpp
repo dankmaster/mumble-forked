@@ -44,6 +44,41 @@ static Mumble::SpeechCleanup::Selection currentInputSpeechCleanupSelection() {
 	});
 }
 
+float AudioInput::amplitudeVoiceActivityLevel() const {
+	return std::clamp(1.0f + dPeakCleanMic / 96.0f, 0.0f, 1.0f);
+}
+
+float AudioInput::voiceActivityLevel() const {
+	return voiceActivityLevelFor(Global::get().s.vsVAD, amplitudeVoiceActivityLevel(), fSpeechProb);
+}
+
+float AudioInput::voiceActivityLevelFor(Settings::VADSource source, float amplitudeLevel, float speechProbability) {
+	amplitudeLevel    = std::clamp(amplitudeLevel, 0.0f, 1.0f);
+	speechProbability = std::clamp(speechProbability, 0.0f, 1.0f);
+
+	switch (source) {
+		case Settings::SignalToNoise:
+			return speechProbability;
+		case Settings::Hybrid:
+			return std::min(amplitudeLevel, speechProbability);
+		case Settings::Amplitude:
+			return amplitudeLevel;
+	}
+
+	return amplitudeLevel;
+}
+
+bool AudioInput::voiceActivityTriggers(float level, float silenceThreshold, float speechThreshold, bool wasTransmitting) {
+	level            = std::clamp(level, 0.0f, 1.0f);
+	silenceThreshold = std::clamp(silenceThreshold, 0.0f, 1.0f);
+	speechThreshold  = std::clamp(speechThreshold, 0.0f, 1.0f);
+	if (speechThreshold < silenceThreshold) {
+		std::swap(speechThreshold, silenceThreshold);
+	}
+
+	return level > speechThreshold || (level > silenceThreshold && wasTransmitting);
+}
+
 void Resynchronizer::addMic(short *mic) {
 	bool drop = false;
 	{
@@ -997,17 +1032,11 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 
 	// clean microphone level: peak of filtered signal attenuated by AGC gain
 	dPeakCleanMic = qMax(dPeakSignal - static_cast< float >(gainValue), -96.0f);
-	float level   = (Global::get().s.vsVAD == Settings::SignalToNoise) ? fSpeechProb : (1.0f + dPeakCleanMic / 96.0f);
+	float level   = voiceActivityLevel();
 
 	bool bIsSpeech = false;
 
-	if (level > Global::get().s.fVADmax) {
-		// Voice-activation threshold has been reached
-		bIsSpeech = true;
-	} else if (level > Global::get().s.fVADmin && bPreviousVoice) {
-		// Voice-deactivation threshold has not yet been reached
-		bIsSpeech = true;
-	}
+	bIsSpeech = voiceActivityTriggers(level, Global::get().s.fVADmin, Global::get().s.fVADmax, bPreviousVoice);
 
 	if (!bIsSpeech) {
 		iHoldFrames++;

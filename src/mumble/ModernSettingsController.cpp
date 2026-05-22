@@ -34,6 +34,10 @@ namespace {
 		return optionItem(QVariant(value), label);
 	}
 
+	QVariantMap optionItem(const int value, const QString &label, const QString &hint) {
+		return optionItem(QVariant(value), label, true, hint);
+	}
+
 	QVariantMap fieldItem(const QString &id, const QString &label, const QString &type, const QVariant &value) {
 		QVariantMap field;
 		field.insert(QStringLiteral("id"), id);
@@ -45,6 +49,13 @@ namespace {
 
 	QVariantMap enabledField(QVariantMap field, const bool enabled) {
 		field.insert(QStringLiteral("enabled"), enabled);
+		return field;
+	}
+
+	QVariantMap hiddenField(QVariantMap field, const bool hidden = true) {
+		if (hidden) {
+			field.insert(QStringLiteral("type"), QStringLiteral("hidden"));
+		}
 		return field;
 	}
 
@@ -170,7 +181,7 @@ namespace {
 			{ QStringLiteral("audio.transmitMode"),
 			  QObject::tr("Choose whether to transmit continuously, by voice activity, or only while push-to-talk is held.") },
 			{ QStringLiteral("audio.vadSource"),
-			  QObject::tr("Choose the signal type used to decide when voice activity opens the microphone.") },
+			  QObject::tr("Choose how voice activation decides whether the microphone should open.") },
 			{ QStringLiteral("audio.vadMin"),
 			  QObject::tr("Signal level below which voice activation closes the microphone.") },
 			{ QStringLiteral("audio.vadMax"),
@@ -310,72 +321,144 @@ namespace {
 	}
 
 	QVariantList transmitModeOptions() {
-		return QVariantList { optionItem(Settings::Continuous, QObject::tr("Continuous")),
-							  optionItem(Settings::VAD, QObject::tr("Voice Activity")),
-							  optionItem(Settings::PushToTalk, QObject::tr("Push To Talk")) };
+		return QVariantList {
+			optionItem(Settings::Continuous, QObject::tr("Continuous"),
+					   QObject::tr("Transmit microphone audio continuously while connected.")),
+			optionItem(Settings::VAD, QObject::tr("Voice Activity"),
+					   QObject::tr("Open the microphone automatically when speech is detected.")),
+			optionItem(Settings::PushToTalk, QObject::tr("Push To Talk"),
+					   QObject::tr("Transmit only while your push-to-talk shortcut is held."))
+		};
 	}
 
 	QVariantList vadSourceOptions() {
-		return QVariantList { optionItem(Settings::Amplitude, QObject::tr("Amplitude")),
-							  optionItem(Settings::SignalToNoise, QObject::tr("Signal-to-noise")) };
+		return QVariantList {
+			optionItem(static_cast< int >(Settings::SignalToNoise), QObject::tr("Speech probability"), true,
+					   QObject::tr("Recommended for most microphones; separates speech from steady background noise.")),
+			optionItem(static_cast< int >(Settings::Hybrid), QObject::tr("Speech + volume"), true,
+					   QObject::tr("Requires speech probability and volume level to agree before opening the microphone.")),
+			optionItem(static_cast< int >(Settings::Amplitude), QObject::tr("Volume level"), true,
+					   QObject::tr("Fallback for manual tuning; reacts to microphone loudness after cleanup.")) };
+	}
+
+	QString vadSourceLabel(const Settings::VADSource source) {
+		switch (source) {
+			case Settings::SignalToNoise:
+				return QObject::tr("Speech probability");
+			case Settings::Hybrid:
+				return QObject::tr("Speech + volume");
+			case Settings::Amplitude:
+				return QObject::tr("Volume level");
+		}
+
+		return QObject::tr("Volume level");
 	}
 
 	QVariantList proxyOptions() {
-		return QVariantList { optionItem(Settings::NoProxy, QObject::tr("No proxy")),
-							  optionItem(Settings::HttpProxy, QObject::tr("HTTP proxy")),
-							  optionItem(Settings::Socks5Proxy, QObject::tr("SOCKS5 proxy")) };
+		return QVariantList { optionItem(Settings::NoProxy, QObject::tr("No proxy"),
+										 QObject::tr("Connect directly to servers.")),
+							  optionItem(Settings::HttpProxy, QObject::tr("HTTP proxy"),
+										 QObject::tr("Route server connections through an HTTP proxy.")),
+							  optionItem(Settings::Socks5Proxy, QObject::tr("SOCKS5 proxy"),
+										 QObject::tr("Route server connections through a SOCKS5 proxy.")) };
 	}
 
 	QVariantList alwaysOnTopOptions() {
-		return QVariantList { optionItem(Settings::OnTopNever, QObject::tr("Never")),
-							  optionItem(Settings::OnTopAlways, QObject::tr("Always")),
-							  optionItem(Settings::OnTopInMinimal, QObject::tr("In minimal view")),
-							  optionItem(Settings::OnTopInNormal, QObject::tr("In normal view")) };
+		return QVariantList { optionItem(Settings::OnTopNever, QObject::tr("Never"),
+										 QObject::tr("Use the normal operating-system window stacking order.")),
+							  optionItem(Settings::OnTopAlways, QObject::tr("Always"),
+										 QObject::tr("Keep Mumble above other windows in every layout.")),
+							  optionItem(Settings::OnTopInMinimal, QObject::tr("In minimal view"),
+										 QObject::tr("Keep Mumble on top only while the minimal layout is active.")),
+							  optionItem(Settings::OnTopInNormal, QObject::tr("In normal view"),
+										 QObject::tr("Keep Mumble on top only outside the minimal layout.")) };
 	}
 
 	QVariantList quitBehaviorOptions() {
-		return QVariantList { optionItem(static_cast< int >(QuitBehavior::ALWAYS_ASK), QObject::tr("Always ask")),
+		return QVariantList { optionItem(static_cast< int >(QuitBehavior::ALWAYS_ASK), QObject::tr("Always ask"), true,
+										 QObject::tr("Ask what to do every time the main window is closed.")),
 							  optionItem(static_cast< int >(QuitBehavior::ASK_WHEN_CONNECTED),
-										 QObject::tr("Ask when connected")),
+										 QObject::tr("Ask when connected"), true,
+										 QObject::tr("Ask only when closing Mumble would disconnect from a server.")),
 							  optionItem(static_cast< int >(QuitBehavior::ALWAYS_MINIMIZE),
-										 QObject::tr("Always minimize")),
+										 QObject::tr("Always minimize"), true,
+										 QObject::tr("Send Mumble to the system tray instead of quitting.")),
 							  optionItem(static_cast< int >(QuitBehavior::MINIMIZE_WHEN_CONNECTED),
-										 QObject::tr("Minimize when connected")),
-							  optionItem(static_cast< int >(QuitBehavior::ALWAYS_QUIT), QObject::tr("Always quit")) };
+										 QObject::tr("Minimize when connected"), true,
+										 QObject::tr("Minimize while connected, and quit normally when offline.")),
+							  optionItem(static_cast< int >(QuitBehavior::ALWAYS_QUIT), QObject::tr("Always quit"), true,
+										 QObject::tr("Close the client immediately when the main window is closed.")) };
 	}
 
 	QVariantList presenceTimeoutOptions() {
-		return QVariantList { optionItem(1, QObject::tr("1 minute")),
-							  optionItem(5, QObject::tr("5 minutes")),
-							  optionItem(10, QObject::tr("10 minutes")),
-							  optionItem(15, QObject::tr("15 minutes")),
-							  optionItem(30, QObject::tr("30 minutes")),
-							  optionItem(60, QObject::tr("60 minutes")) };
+		return QVariantList {
+			optionItem(1, QObject::tr("1 minute"), QObject::tr("Mark you idle after 1 minute of inactivity.")),
+			optionItem(5, QObject::tr("5 minutes"), QObject::tr("Mark you idle after 5 minutes of inactivity.")),
+			optionItem(10, QObject::tr("10 minutes"), QObject::tr("Mark you idle after 10 minutes of inactivity.")),
+			optionItem(15, QObject::tr("15 minutes"), QObject::tr("Mark you idle after 15 minutes of inactivity.")),
+			optionItem(30, QObject::tr("30 minutes"), QObject::tr("Mark you idle after 30 minutes of inactivity.")),
+			optionItem(60, QObject::tr("60 minutes"), QObject::tr("Mark you idle after 60 minutes of inactivity."))
+		};
 	}
 
 	QVariantList idleActionOptions() {
-		return QVariantList { optionItem(Settings::Nothing, QObject::tr("Do nothing")),
-							  optionItem(Settings::Deafen, QObject::tr("Deafen")),
-							  optionItem(Settings::Mute, QObject::tr("Mute")) };
+		return QVariantList { optionItem(Settings::Nothing, QObject::tr("Do nothing"),
+										 QObject::tr("Leave your audio state unchanged when you become idle.")),
+							  optionItem(Settings::Deafen, QObject::tr("Deafen"),
+										 QObject::tr("Deafen yourself after the idle timer expires.")),
+							  optionItem(Settings::Mute, QObject::tr("Mute"),
+										 QObject::tr("Mute your microphone after the idle timer expires.")) };
 	}
 
 	QVariantList loopModeOptions() {
-		return QVariantList { optionItem(Settings::None, QObject::tr("None")),
-							  optionItem(Settings::Local, QObject::tr("Local")),
-							  optionItem(Settings::Server, QObject::tr("Server")) };
+		return QVariantList { optionItem(Settings::None, QObject::tr("None"),
+										 QObject::tr("Do not replay your own transmitted voice.")),
+							  optionItem(Settings::Local, QObject::tr("Local"),
+										 QObject::tr("Replay processed microphone audio locally without a server round trip.")),
+							  optionItem(Settings::Server, QObject::tr("Server"),
+										 QObject::tr("Replay your voice after it travels through the connected server.")) };
 	}
 
 	QVariantList noiseCancelModeOptions() {
-		return QVariantList { optionItem(Settings::NoiseCancelOff, QObject::tr("Disabled")),
-							  optionItem(Settings::NoiseCancelSpeex, QObject::tr("Speex")),
-							  optionItem(Settings::NoiseCancelRNN, QObject::tr("Neural")),
-							  optionItem(Settings::NoiseCancelBoth, QObject::tr("Speex + neural")) };
+		return QVariantList {
+			optionItem(Settings::NoiseCancelOff, QObject::tr("Off"),
+					   QObject::tr("Leave microphone noise cleanup off.")),
+			optionItem(Settings::NoiseCancelSpeex, QObject::tr("Light cleanup"),
+					   QObject::tr("Use lightweight classic suppression for steady hiss, hum, and fan noise.")),
+			optionItem(Settings::NoiseCancelRNN, QObject::tr("Neural cleanup"),
+					   QObject::tr("Use the selected neural model for stronger speech cleanup.")),
+			optionItem(Settings::NoiseCancelBoth, QObject::tr("Maximum cleanup"),
+					   QObject::tr("Run classic suppression before neural cleanup for difficult background noise."))
+		};
 	}
 
 	QVariantList remoteSpeechCleanupPresetOptions() {
-		return QVariantList { optionItem(Settings::Light, QObject::tr("Light")),
-							  optionItem(Settings::Normal, QObject::tr("Normal")),
-							  optionItem(Settings::Aggressive, QObject::tr("Aggressive")) };
+		return QVariantList {
+			optionItem(Settings::Light, QObject::tr("Light"),
+					   QObject::tr("Subtle cleanup that keeps incoming speech sounding most natural.")),
+			optionItem(Settings::Normal, QObject::tr("Normal"),
+					   QObject::tr("Balanced cleanup for everyday voice chat.")),
+			optionItem(Settings::Aggressive, QObject::tr("Aggressive"),
+					   QObject::tr("Stronger cleanup for noisy incoming audio, with a higher chance of artifacts."))
+		};
+	}
+
+	QString speechCleanupBackendHint(const Settings::SpeechCleanupBackend backend) {
+		const QString unavailableReason = Mumble::SpeechCleanup::unavailableReason(backend);
+		if (!unavailableReason.isEmpty()) {
+			return unavailableReason;
+		}
+
+		switch (backend) {
+			case Settings::RNNoiseBackend:
+				return QObject::tr("Lightweight neural noise suppression that is a good default for live voice.");
+			case Settings::DTLNBackend:
+				return QObject::tr("Deep-learning denoising with bundled model variants for different training sets.");
+			case Settings::DeepFilterNetBackend:
+				return QObject::tr("DeepFilterNet speech enhancement for stronger cleanup when the backend is available.");
+		}
+
+		return QString();
 	}
 
 	QVariantList speechCleanupBackendOptions() {
@@ -384,15 +467,43 @@ namespace {
 			options.push_back(optionItem(static_cast< int >(backend),
 										 QString::fromLatin1(Mumble::SpeechCleanup::backendDisplayName(backend)),
 										 Mumble::SpeechCleanup::isBackendAvailable(backend),
-										 Mumble::SpeechCleanup::unavailableReason(backend)));
+										 speechCleanupBackendHint(backend)));
 		}
 		return options;
+	}
+
+	QString speechCleanupModelHint(const Settings::SpeechCleanupBackend backend, const QString &modelID) {
+		const QString normalizedModelID = Mumble::SpeechCleanup::normalizedModelId(backend, modelID);
+
+		switch (backend) {
+			case Settings::RNNoiseBackend:
+				if (normalizedModelID == QLatin1String("rnnoise:little")) {
+					return QObject::tr("Smaller local RNNoise model with lower resource use.");
+				}
+				if (normalizedModelID == QLatin1String("rnnoise:custom")) {
+					return QObject::tr("Load a custom RNNoise model file from the path below.");
+				}
+				return QObject::tr("Built-in RNNoise model bundled with Mumble.");
+			case Settings::DTLNBackend:
+				if (normalizedModelID == QLatin1String("dtln:norm500h")) {
+					return QObject::tr("DTLN model normalized from a larger training set; useful for heavier cleanup.");
+				}
+				if (normalizedModelID == QLatin1String("dtln:norm40h")) {
+					return QObject::tr("DTLN model normalized from a smaller training set; useful for lighter cleanup.");
+				}
+				return QObject::tr("Baseline DTLN model bundled with Mumble.");
+			case Settings::DeepFilterNetBackend:
+				return QObject::tr("Default DeepFilterNet model bundled with the selected backend.");
+		}
+
+		return QString();
 	}
 
 	QVariantList speechCleanupModelOptions(const Settings::SpeechCleanupBackend backend) {
 		QVariantList options;
 		for (const QString &modelID : Mumble::SpeechCleanup::supportedModelIds(backend)) {
-			options.push_back(optionItem(modelID, Mumble::SpeechCleanup::modelDisplayName(backend, modelID)));
+			options.push_back(optionItem(modelID, Mumble::SpeechCleanup::modelDisplayName(backend, modelID), true,
+										 speechCleanupModelHint(backend, modelID)));
 		}
 		return options;
 	}
@@ -567,32 +678,45 @@ namespace {
 	int amplificationFromMinLoudness(const int minLoudness);
 	bool hasAvailableSpeechCleanupBackend();
 
+	Settings::NoiseCancel recommendedNoiseCancelMode(const Settings &settings) {
+		if (settings.noiseCancelMode != Settings::NoiseCancelOff) {
+			return settings.noiseCancelMode;
+		}
+		return hasAvailableSpeechCleanupBackend() ? Settings::NoiseCancelBoth : Settings::NoiseCancelSpeex;
+	}
+
 	QVariantMap voiceMeterField(const Settings &settings) {
 		QVariantMap field = fieldItem(QStringLiteral("audio.inputMeter"), QObject::tr("Current voice input"),
 									  QStringLiteral("voiceMeter"), 0);
+		const int currentAmplification                 = amplificationFromMinLoudness(settings.iMinLoudness);
+		const Settings::NoiseCancel recommendedCleanup = recommendedNoiseCancelMode(settings);
 		field.insert(QStringLiteral("vadSource"), static_cast< int >(settings.vsVAD));
 		field.insert(QStringLiteral("transmitMode"), static_cast< int >(settings.atTransmit));
 		field.insert(QStringLiteral("active"), settings.atTransmit == Settings::VAD);
+		field.insert(QStringLiteral("calibrationState"), QStringLiteral("idle"));
 		field.insert(QStringLiteral("calibrationActionId"), QStringLiteral("finishAudioSetupWizard"));
-		field.insert(QStringLiteral("calibrationLabel"), QObject::tr("Audio wizard"));
+		field.insert(QStringLiteral("calibrationLabel"), QObject::tr("Audio setup"));
 		field.insert(QStringLiteral("calibrationTooltip"),
 					 QObject::tr("Open guided audio setup for microphone level, voice activation, replay, and cleanup tuning."));
+		field.insert(QStringLiteral("calibrationStatusText"),
+					 QObject::tr("Ready to tune voice activation, gain, cleanup, and replay."));
 		field.insert(QStringLiteral("replayStartActionId"), QStringLiteral("startVoiceReplay"));
 		field.insert(QStringLiteral("replayStopActionId"), QStringLiteral("stopVoiceReplay"));
 		field.insert(QStringLiteral("replayLabel"), QObject::tr("Replay"));
 		field.insert(QStringLiteral("replayTooltip"),
 					 QObject::tr("Listen to your microphone through server loopback when connected, or local loopback when offline."));
-		field.insert(QStringLiteral("sourceLabel"),
-					 settings.vsVAD == Settings::SignalToNoise ? QObject::tr("Signal-to-noise")
-															   : QObject::tr("Amplitude"));
+		field.insert(QStringLiteral("sourceLabel"), vadSourceLabel(settings.vsVAD));
 		field.insert(QStringLiteral("silenceThreshold"), vadThresholdFromFloat(settings.fVADmin));
 		field.insert(QStringLiteral("speechThreshold"), vadThresholdFromFloat(settings.fVADmax));
 		field.insert(QStringLiteral("loopbackMode"), static_cast< int >(settings.lmLoopMode));
-		field.insert(QStringLiteral("maxAmplification"), amplificationFromMinLoudness(settings.iMinLoudness));
+		field.insert(QStringLiteral("maxAmplification"), currentAmplification);
 		field.insert(QStringLiteral("noiseCancelMode"), static_cast< int >(settings.noiseCancelMode));
 		field.insert(QStringLiteral("speexNoiseStrength"),
 					 settings.iSpeexNoiseCancelStrength == 0 ? 14 : -settings.iSpeexNoiseCancelStrength);
 		field.insert(QStringLiteral("neuralCleanupAvailable"), hasAvailableSpeechCleanupBackend());
+		field.insert(QStringLiteral("recommendedVadSource"), static_cast< int >(Settings::SignalToNoise));
+		field.insert(QStringLiteral("recommendedNoiseCancelMode"), static_cast< int >(recommendedCleanup));
+		field.insert(QStringLiteral("recommendedMaxAmplification"), currentAmplification);
 		return field;
 	}
 
@@ -753,7 +877,10 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 	} else if (id == QLatin1String("audio.transmitMode")) {
 		m_draft.atTransmit = static_cast< Settings::AudioTransmit >(value.toInt());
 	} else if (id == QLatin1String("audio.vadSource")) {
-		m_draft.vsVAD = static_cast< Settings::VADSource >(value.toInt());
+		const auto vadSource = static_cast< Settings::VADSource >(value.toInt());
+		if (vadSource == Settings::SignalToNoise || vadSource == Settings::Hybrid || vadSource == Settings::Amplitude) {
+			m_draft.vsVAD = vadSource;
+		}
 	} else if (id == QLatin1String("audio.vadMin")) {
 		m_draft.fVADmin = qMin(vadThresholdFromPercent(value), m_draft.fVADmax);
 	} else if (id == QLatin1String("audio.vadMax")) {
@@ -927,7 +1054,7 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 		}
 
 		m_draft.atTransmit = Settings::VAD;
-		if (vadSource == Settings::SignalToNoise || vadSource == Settings::Amplitude) {
+		if (vadSource == Settings::SignalToNoise || vadSource == Settings::Hybrid || vadSource == Settings::Amplitude) {
 			m_draft.vsVAD = vadSource;
 		}
 		m_draft.fVADmin    = vadThresholdFromPercent(silenceThreshold);
@@ -1111,6 +1238,10 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 			normalizedSpeechCleanupModelID(inputCleanupBackend, m_draft.noiseCancelModelId);
 		const bool inputCustomModel =
 			Mumble::SpeechCleanup::usesCustomModelPath(inputCleanupBackend, inputCleanupModel);
+		const bool inputNeuralCleanupActive =
+			m_draft.noiseCancelMode == Settings::NoiseCancelRNN || m_draft.noiseCancelMode == Settings::NoiseCancelBoth;
+		const bool inputSpeexCleanupActive =
+			m_draft.noiseCancelMode == Settings::NoiseCancelSpeex || m_draft.noiseCancelMode == Settings::NoiseCancelBoth;
 		const bool voiceActivityTransmit = m_draft.atTransmit == Settings::VAD;
 		const bool pushToTalkTransmit    = m_draft.atTransmit == Settings::PushToTalk;
 
@@ -1132,11 +1263,12 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 															QObject::tr("Transmit mode"),
 															static_cast< int >(m_draft.atTransmit),
 															transmitModeOptions()),
-												enabledField(selectField(QStringLiteral("audio.vadSource"),
-																		 QObject::tr("Voice activity source"),
-																		 static_cast< int >(m_draft.vsVAD),
-																		 vadSourceOptions()),
-															 voiceActivityTransmit),
+												hintedField(enabledField(selectField(QStringLiteral("audio.vadSource"),
+																					 QObject::tr("Detection method"),
+																					 static_cast< int >(m_draft.vsVAD),
+																					 vadSourceOptions()),
+																		 voiceActivityTransmit),
+															QObject::tr("Use Speech + volume when speech probability opens too easily on non-voice sounds.")),
 												voiceMeterField(m_draft),
 												hintedField(enabledField(rangeField(QStringLiteral("audio.vadMin"),
 																					QObject::tr("Stop transmitting below"),
@@ -1199,26 +1331,29 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 																   QObject::tr("Noise suppression"),
 																   static_cast< int >(m_draft.noiseCancelMode),
 																   noiseCancelModeOptions()),
-													   selectField(QStringLiteral("audio.noiseCancelBackend"),
-																   QObject::tr("Neural backend"),
-																   static_cast< int >(inputCleanupBackend),
-																   speechCleanupBackendOptions()),
-													   selectField(QStringLiteral("audio.noiseCancelModel"),
-																   QObject::tr("Neural model"),
-																   inputCleanupModel,
-																   speechCleanupModelOptions(inputCleanupBackend),
-																   QStringLiteral("string")),
-													   enabledField(fieldItem(QStringLiteral("audio.noiseCancelCustomModelPath"),
+													   hiddenField(selectField(QStringLiteral("audio.noiseCancelBackend"),
+																			   QObject::tr("Neural backend"),
+																			   static_cast< int >(inputCleanupBackend),
+																			   speechCleanupBackendOptions()),
+																   !inputNeuralCleanupActive),
+													   hiddenField(selectField(QStringLiteral("audio.noiseCancelModel"),
+																			   QObject::tr("Neural model"),
+																			   inputCleanupModel,
+																			   speechCleanupModelOptions(inputCleanupBackend),
+																			   QStringLiteral("string")),
+																   !inputNeuralCleanupActive),
+													   hiddenField(fieldItem(QStringLiteral("audio.noiseCancelCustomModelPath"),
 																			  QObject::tr("Custom model file"),
 																			  QStringLiteral("text"),
 																			  m_draft.noiseCancelCustomModelPath),
-																	inputCustomModel),
-													   rangeField(QStringLiteral("audio.speexNoiseStrength"),
-																  QObject::tr("Speex suppression strength"),
-																  m_draft.iSpeexNoiseCancelStrength == 0
-																	  ? 14
-																	  : -m_draft.iSpeexNoiseCancelStrength,
-																  0, 100, 1, QString()) }),
+																   !(inputNeuralCleanupActive && inputCustomModel)),
+													   hiddenField(rangeField(QStringLiteral("audio.speexNoiseStrength"),
+																			  QObject::tr("Speex suppression strength"),
+																			  m_draft.iSpeexNoiseCancelStrength == 0
+																				  ? 14
+																				  : -m_draft.iSpeexNoiseCancelStrength,
+																			  0, 100, 1, QString()),
+																   !inputSpeexCleanupActive) }),
 			sectionItem(QObject::tr("Cues and idle behavior"), QVariantList {
 															boolField(QStringLiteral("audio.cuePtt"),
 																	  QObject::tr("Play transmit cue for push-to-talk"),

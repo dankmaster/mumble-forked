@@ -5,6 +5,7 @@
 
 #include <QtTest>
 
+#include "AudioInput.h"
 #include "ModernConnectController.h"
 #include "ModernDialogController.h"
 #include "ModernSettingsController.h"
@@ -15,6 +16,8 @@ class TestModernDialogControllers : public QObject {
 private slots:
 	void connectControllerSelectsAndSavesFavorites();
 	void settingsControllerForcesModernAndAppliesDraft();
+	void settingsControllerClampsAudioSetupPayload();
+	void audioInputVoiceActivityLevelUsesExpectedSignals();
 	void dialogControllerBuildsFailedConnectionReconnect();
 	void dialogControllerDispatchesGenericDialogAction();
 	void dialogControllerBuildsMigrationNotice();
@@ -44,6 +47,11 @@ void TestModernDialogControllers::connectControllerSelectsAndSavesFavorites() {
 	const QVariantMap savedFavorite = state.value(QStringLiteral("favorites")).toList().at(0).toMap();
 	QCOMPARE(savedFavorite.value(QStringLiteral("usersLabel")).toString(), QStringLiteral("Users: -"));
 	QCOMPARE(savedFavorite.value(QStringLiteral("pingLabel")).toString(), QStringLiteral("Ping: -"));
+	QVERIFY(controller.setFavoritePing(QStringLiteral("voice.example.test"), 64738, 42, 7, 128));
+	state = controller.state();
+	const QVariantMap pingedFavorite = state.value(QStringLiteral("favorites")).toList().at(0).toMap();
+	QCOMPARE(pingedFavorite.value(QStringLiteral("usersLabel")).toString(), QStringLiteral("Users: 7/128"));
+	QCOMPARE(pingedFavorite.value(QStringLiteral("pingLabel")).toString(), QStringLiteral("Ping: 42 ms"));
 
 	ModernConnectController::ActionResult favoriteConnectResult =
 		controller.invokeAction(QStringLiteral("connectFavorite"), QVariantMap { { QStringLiteral("index"), 0 } });
@@ -168,11 +176,18 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QCOMPARE(audioOutputResult.accepted, false);
 	QCOMPARE(audioOutputResult.closeDialog, false);
 
-	controller.open(settings, QStringLiteral("AudioInput"));
+	Settings audioInputSettings = settings;
+	audioInputSettings.atTransmit      = Settings::Continuous;
+	audioInputSettings.vsVAD           = Settings::SignalToNoise;
+	audioInputSettings.noiseCancelMode = Settings::NoiseCancelOff;
+	controller.open(audioInputSettings, QStringLiteral("AudioInput"));
 	QCOMPARE(controller.activePage(), QStringLiteral("audioInput"));
 	const QVariantList audioInputSections = controller.state().value(QStringLiteral("sections")).toList();
 	bool foundInputSignalSection          = false;
 	bool foundInputMeterInVoiceActivation = false;
+	bool foundDetectionMethodField        = false;
+	bool foundHiddenNeuralCleanupFields   = false;
+	bool foundNoiseCancelOptionHints      = false;
 	for (const QVariant &sectionValue : audioInputSections) {
 		const QVariantMap section = sectionValue.toMap();
 		if (section.value(QStringLiteral("title")).toString() == QLatin1String("Input signal")) {
@@ -186,15 +201,66 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 					field.value(QStringLiteral("type")).toString() == QLatin1String("voiceMeter")
 					&& field.value(QStringLiteral("calibrationActionId")).toString()
 						   == QLatin1String("finishAudioSetupWizard")
-					&& field.value(QStringLiteral("calibrationLabel")).toString() == QLatin1String("Audio wizard")
+					&& field.value(QStringLiteral("calibrationLabel")).toString() == QLatin1String("Audio setup")
+					&& field.value(QStringLiteral("calibrationState")).toString() == QLatin1String("idle")
 					&& field.contains(QStringLiteral("maxAmplification"))
 					&& field.contains(QStringLiteral("noiseCancelMode"))
-					&& field.contains(QStringLiteral("neuralCleanupAvailable"));
+					&& field.contains(QStringLiteral("neuralCleanupAvailable"))
+					&& field.value(QStringLiteral("recommendedVadSource")).toInt() == Settings::SignalToNoise
+					&& field.contains(QStringLiteral("recommendedNoiseCancelMode"))
+					&& field.contains(QStringLiteral("recommendedMaxAmplification"))
+					&& !field.value(QStringLiteral("calibrationStatusText")).toString().trimmed().isEmpty();
+			}
+			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Voice activation")
+				&& field.value(QStringLiteral("id")).toString() == QLatin1String("audio.vadSource")) {
+				const QVariantList options = field.value(QStringLiteral("options")).toList();
+				bool optionsHaveHints       = options.size() == 3;
+				for (const QVariant &optionValue : options) {
+					const QVariantMap option = optionValue.toMap();
+					optionsHaveHints =
+						optionsHaveHints && !option.value(QStringLiteral("hint")).toString().trimmed().isEmpty();
+				}
+				foundDetectionMethodField =
+					field.value(QStringLiteral("label")).toString() == QLatin1String("Detection method")
+					&& !field.value(QStringLiteral("enabled")).toBool()
+					&& field.value(QStringLiteral("value")).toInt() == Settings::SignalToNoise
+					&& options.size() == 3
+					&& options.at(0).toMap().value(QStringLiteral("label")).toString()
+						   == QLatin1String("Speech probability")
+					&& options.at(1).toMap().value(QStringLiteral("label")).toString() == QLatin1String("Speech + volume")
+					&& options.at(2).toMap().value(QStringLiteral("label")).toString() == QLatin1String("Volume level")
+					&& optionsHaveHints
+					&& field.value(QStringLiteral("hint")).toString().contains(QLatin1String("Speech + volume"));
+			}
+			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Audio processing")
+				&& field.value(QStringLiteral("id")).toString() == QLatin1String("audio.noiseCancelMode")) {
+				const QVariantList options = field.value(QStringLiteral("options")).toList();
+				bool optionsHaveHints       = options.size() == 4;
+				for (const QVariant &optionValue : options) {
+					const QVariantMap option = optionValue.toMap();
+					optionsHaveHints =
+						optionsHaveHints && !option.value(QStringLiteral("hint")).toString().trimmed().isEmpty();
+				}
+				foundNoiseCancelOptionHints = optionsHaveHints;
+			}
+			if (section.value(QStringLiteral("title")).toString() == QLatin1String("Audio processing")
+				&& field.value(QStringLiteral("id")).toString() == QLatin1String("audio.noiseCancelBackend")) {
+				foundHiddenNeuralCleanupFields = field.value(QStringLiteral("type")).toString() == QLatin1String("hidden");
 			}
 		}
 	}
 	QVERIFY(!foundInputSignalSection);
 	QVERIFY(foundInputMeterInVoiceActivation);
+	QVERIFY(foundDetectionMethodField);
+	QVERIFY(foundHiddenNeuralCleanupFields);
+	QVERIFY(foundNoiseCancelOptionHints);
+
+	controller.updateField(QStringLiteral("audio.transmitMode"), Settings::VAD);
+	QCOMPARE(controller.draft().atTransmit, Settings::VAD);
+	QCOMPARE(controller.draft().vsVAD, Settings::SignalToNoise);
+
+	controller.updateField(QStringLiteral("audio.vadSource"), Settings::Hybrid);
+	QCOMPARE(controller.draft().vsVAD, Settings::Hybrid);
 
 	ModernSettingsController::ActionResult autoSetResult =
 		controller.invokeAction(QStringLiteral("finishAudioSetupWizard"),
@@ -254,6 +320,69 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QVERIFY(qFuzzyCompare(audioInputResult.settingsToApply->fVADmax, 0.70f));
 	QCOMPARE(audioInputResult.accepted, true);
 	QCOMPARE(audioInputResult.closeDialog, true);
+}
+
+void TestModernDialogControllers::settingsControllerClampsAudioSetupPayload() {
+	Settings settings;
+	settings.vsVAD           = Settings::Amplitude;
+	settings.noiseCancelMode = Settings::NoiseCancelOff;
+
+	ModernSettingsController controller;
+	controller.open(settings, QStringLiteral("AudioInput"));
+	ModernSettingsController::ActionResult clampedResult =
+		controller.invokeAction(QStringLiteral("finishAudioSetupWizard"),
+								QVariantMap { { QStringLiteral("silenceThreshold"), 95 },
+											  { QStringLiteral("speechThreshold"), 10 },
+											  { QStringLiteral("vadSource"), 999 },
+											  { QStringLiteral("voiceHold"), 999 },
+											  { QStringLiteral("maxAmplification"), -42 },
+											  { QStringLiteral("noiseCancelMode"), 999 },
+											  { QStringLiteral("speexNoiseStrength"), 999 } });
+	QVERIFY(clampedResult.settingsToApply.has_value());
+	QCOMPARE(controller.draft().vsVAD, Settings::Amplitude);
+	QCOMPARE(controller.draft().iVoiceHold, 80);
+	QCOMPARE(controller.draft().iMinLoudness, 20000);
+	QCOMPARE(controller.draft().noiseCancelMode, Settings::NoiseCancelOff);
+	QCOMPARE(controller.draft().iSpeexNoiseCancelStrength, -100);
+	QVERIFY(qFuzzyCompare(controller.draft().fVADmin, 0.10f));
+	QVERIFY(qFuzzyCompare(controller.draft().fVADmax, 0.95f));
+
+	ModernSettingsController fallbackController;
+	fallbackController.open(settings, QStringLiteral("AudioInput"));
+	bool neuralCleanupAvailable = false;
+	const QVariantList fallbackSections = fallbackController.state().value(QStringLiteral("sections")).toList();
+	for (const QVariant &sectionValue : fallbackSections) {
+		const QVariantMap section = sectionValue.toMap();
+		for (const QVariant &fieldValue : section.value(QStringLiteral("fields")).toList()) {
+			const QVariantMap field = fieldValue.toMap();
+			if (field.value(QStringLiteral("id")).toString() == QLatin1String("audio.inputMeter")) {
+				neuralCleanupAvailable = field.value(QStringLiteral("neuralCleanupAvailable")).toBool();
+			}
+		}
+	}
+	ModernSettingsController::ActionResult neuralResult =
+		fallbackController.invokeAction(QStringLiteral("finishAudioSetupWizard"),
+										QVariantMap { { QStringLiteral("silenceThreshold"), 20 },
+													  { QStringLiteral("speechThreshold"), 55 },
+													  { QStringLiteral("noiseCancelMode"), Settings::NoiseCancelRNN } });
+	QVERIFY(neuralResult.settingsToApply.has_value());
+	QCOMPARE(fallbackController.draft().noiseCancelMode,
+			 neuralCleanupAvailable ? Settings::NoiseCancelRNN : Settings::NoiseCancelSpeex);
+}
+
+void TestModernDialogControllers::audioInputVoiceActivityLevelUsesExpectedSignals() {
+	QCOMPARE(AudioInput::voiceActivityLevelFor(Settings::Amplitude, -1.0f, 0.90f), 0.0f);
+	QCOMPARE(AudioInput::voiceActivityLevelFor(Settings::Amplitude, 1.25f, 0.20f), 1.0f);
+	QCOMPARE(AudioInput::voiceActivityLevelFor(Settings::SignalToNoise, 0.20f, 0.90f), 0.90f);
+	QCOMPARE(AudioInput::voiceActivityLevelFor(Settings::Hybrid, 0.20f, 0.90f), 0.20f);
+
+	const float quietSpeechLevel = AudioInput::voiceActivityLevelFor(Settings::SignalToNoise, 0.05f, 0.60f);
+	QVERIFY(AudioInput::voiceActivityTriggers(quietSpeechLevel, 0.22f, 0.48f, false));
+	QVERIFY(!AudioInput::voiceActivityTriggers(
+		AudioInput::voiceActivityLevelFor(Settings::Hybrid, 0.05f, 0.60f), 0.22f, 0.48f, false));
+	QVERIFY(AudioInput::voiceActivityTriggers(0.30f, 0.22f, 0.48f, true));
+	QVERIFY(!AudioInput::voiceActivityTriggers(0.30f, 0.22f, 0.48f, false));
+	QVERIFY(AudioInput::voiceActivityTriggers(0.90f, 0.80f, 0.20f, false));
 }
 
 void TestModernDialogControllers::dialogControllerBuildsFailedConnectionReconnect() {

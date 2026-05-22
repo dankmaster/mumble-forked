@@ -388,26 +388,39 @@
             <item>
              <widget class="QRadioButton" name="qrbAmplitude">
               <property name="toolTip">
-               <string>Use Amplitude based speech detection</string>
+               <string>Use volume-level based speech detection</string>
               </property>
               <property name="whatsThis">
-               <string>&lt;b&gt;This sets speech detection to use Amplitude.&lt;/b&gt;&lt;br /&gt;In this mode, the raw strength of the input signal is used to detect speech.</string>
+               <string>&lt;b&gt;This sets speech detection to use volume level.&lt;/b&gt;&lt;br /&gt;In this mode, microphone loudness after cleanup is used to detect speech.</string>
               </property>
               <property name="text">
-               <string>Amplitude</string>
+               <string>Volume level</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QRadioButton" name="qrbHybrid">
+              <property name="toolTip">
+               <string>Use speech and volume based speech detection</string>
+              </property>
+              <property name="whatsThis">
+               <string>&lt;b&gt;This sets speech detection to require both speech probability and volume level.&lt;/b&gt;&lt;br /&gt;In this mode, Mumble opens the microphone only when the cleaned input is loud enough and also looks like speech.</string>
+              </property>
+              <property name="text">
+               <string>Speech + volume</string>
               </property>
              </widget>
             </item>
             <item>
              <widget class="QRadioButton" name="qrbSNR">
               <property name="toolTip">
-               <string>Use SNR based speech detection</string>
+               <string>Use speech-probability based speech detection</string>
               </property>
               <property name="whatsThis">
-               <string>&lt;b&gt;This sets speech detection to use Signal to Noise ratio.&lt;/b&gt;&lt;br /&gt;In this mode, the input is analyzed for something resembling a clear signal, and the clarity of that signal is used to trigger speech detection.</string>
+               <string>&lt;b&gt;This sets speech detection to use speech probability.&lt;/b&gt;&lt;br /&gt;In this mode, Mumble's speech detector estimates whether the input is voice rather than background noise.</string>
               </property>
               <property name="text">
-               <string>Signal to Noise</string>
+               <string>Speech probability</string>
               </property>
              </widget>
             </item>
@@ -1285,6 +1298,7 @@
   <tabstop>qcbExclusive</tabstop>
   <tabstop>qcbTransmit</tabstop>
   <tabstop>qrbAmplitude</tabstop>
+  <tabstop>qrbHybrid</tabstop>
   <tabstop>qrbSNR</tabstop>
   <tabstop>qsTransmitHold</tabstop>
   <tabstop>qsTransmitMin</tabstop>

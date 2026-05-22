@@ -229,6 +229,27 @@
 		notifyBridge("updateModernDialogField", dialogId, fieldId, modernDialogFieldValue(field, input));
 	}
 
+	function modernDialogOptionHint(option) {
+		return String(option && (option.tooltip || option.hint) || "");
+	}
+
+	function syncModernDialogSelectHint(input, fieldTooltip) {
+		const selectedOption = input && input.options ? input.options[input.selectedIndex] : null;
+		const optionHint = selectedOption ? String(selectedOption.dataset.optionHint || selectedOption.title || "") : "";
+		const titleParts = [];
+		if (fieldTooltip) {
+			titleParts.push(fieldTooltip);
+		}
+		if (optionHint) {
+			titleParts.push(optionHint);
+		}
+		if (titleParts.length) {
+			input.title = titleParts.join("\n\n");
+		} else {
+			input.removeAttribute("title");
+		}
+	}
+
 	function closeModernDialogFavoriteMenu() {
 		if (modernDialogFavoriteMenu && modernDialogFavoriteMenu.parentNode) {
 			modernDialogFavoriteMenu.parentNode.removeChild(modernDialogFavoriteMenu);
@@ -325,20 +346,34 @@
 		return sorted[index];
 	}
 
+	function usableCalibrationSample(levels, phase) {
+		const strongest = Math.max(
+			levels.amplitude === null ? 0 : levels.amplitude,
+			levels.signalToNoise === null ? 0 : levels.signalToNoise,
+			levels.hybrid === null ? 0 : levels.hybrid
+		);
+		if (phase === "speech") {
+			return strongest >= 2 || (levels.peakCleanMicDb !== null && levels.peakCleanMicDb > -55);
+		}
+		return strongest > 0 || levels.peakCleanMicDb === null || levels.peakCleanMicDb > -80;
+	}
+
 	function voiceMeterLevelFromPayload(element, meter) {
 		const source = Number(element.dataset.vadSource || 0);
 		const levels = audioMeterLevelsFromPayload(meter);
-		const rawLevel = source === 1 ? levels.signalToNoise : levels.amplitude;
+		const rawLevel = source === 1 ? levels.signalToNoise : (source === 2 ? levels.hybrid : levels.amplitude);
 		return Number.isFinite(Number(rawLevel)) ? clampPercent(rawLevel) : null;
 	}
 
 	function audioMeterLevelsFromPayload(meter) {
 		const amplitude = Number(meter && meter.amplitude);
 		const signalToNoise = Number(meter && meter.signalToNoise);
+		const hybrid = Number(meter && meter.hybrid);
 		const peakCleanMicDb = Number(meter && meter.peakCleanMicDb);
 		return {
 			amplitude: Number.isFinite(amplitude) ? clampPercent(amplitude) : null,
 			signalToNoise: Number.isFinite(signalToNoise) ? clampPercent(signalToNoise) : null,
+			hybrid: Number.isFinite(hybrid) ? clampPercent(hybrid) : null,
 			peakCleanMicDb: Number.isFinite(peakCleanMicDb) ? peakCleanMicDb : null
 		};
 	}
@@ -403,7 +438,7 @@
 		element.classList.toggle("is-prompting", !!prompting);
 		if (button) {
 			button.disabled = !!active;
-			button.textContent = prompting ? "Setup open" : (active ? "Listening..." : (button.dataset.defaultLabel || "Audio wizard"));
+			button.textContent = prompting ? "Setup open" : (active ? "Listening..." : (button.dataset.defaultLabel || "Audio setup"));
 		}
 	}
 
@@ -418,6 +453,11 @@
 	}
 
 	function voiceThresholdCandidate(name, vadSource, quietSamples, speechSamples) {
+		quietSamples = quietSamples || [];
+		speechSamples = speechSamples || [];
+		if (speechSamples.length < 8) {
+			return null;
+		}
 		const quietCeiling = percentile(quietSamples, 0.85);
 		const quietFloor = percentile(quietSamples, 0.15);
 		const speechLevel = percentile(speechSamples, 0.72);
@@ -454,8 +494,9 @@
 
 	function calculatedVoiceThresholds(calibration) {
 		const candidates = [
-			voiceThresholdCandidate("Amplitude", 0, calibration.quietAmplitude, calibration.speechAmplitude),
-			voiceThresholdCandidate("Signal-to-noise", 1, calibration.quietSignalToNoise, calibration.speechSignalToNoise)
+			voiceThresholdCandidate("Speech probability", 1, calibration.quietSignalToNoise, calibration.speechSignalToNoise),
+			voiceThresholdCandidate("Speech + volume", 2, calibration.quietHybrid, calibration.speechHybrid),
+			voiceThresholdCandidate("Volume level", 0, calibration.quietAmplitude, calibration.speechAmplitude)
 		].filter(function(candidate) {
 			return !!candidate;
 		});
@@ -577,7 +618,7 @@
 		const thresholds = calculatedVoiceThresholds(calibration);
 		clearVoiceCalibration();
 		if (!thresholds) {
-		setVoiceCalibrationMessage(element, "Wizard needs a stronger speech sample");
+			setVoiceCalibrationMessage(element, "Audio setup needs a stronger speech sample");
 			updateVoiceMeterElement(element, calibration.lastMeter || {});
 			return;
 		}
@@ -585,10 +626,10 @@
 		const detail = thresholds.sourceLabel + " " + thresholds.silenceThreshold + "%/" + thresholds.speechThreshold
 			+ "%, hold " + thresholds.voiceHold + " frames, amp " + thresholds.maxAmplification
 			+ ", " + thresholds.processingLabel;
-		const message = "Audio wizard applied: " + detail;
+		const message = "Audio setup applied: " + detail;
 		voiceCalibrationSummary = {
 			message: message,
-			status: "Audio wizard applied",
+			status: "Audio setup applied",
 			until: Date.now() + 5200
 		};
 		setVoiceCalibrationMessage(element, message, 5200);
@@ -607,13 +648,16 @@
 		calibration.lastMeter = meter || {};
 		const phase = voiceCalibrationPhase(calibration);
 		const levels = audioMeterLevelsFromPayload(meter || {});
-		if (available) {
+		if (available && usableCalibrationSample(levels, phase)) {
 			if (phase === "quiet") {
 				if (levels.amplitude !== null) {
 					calibration.quietAmplitude.push(levels.amplitude);
 				}
 				if (levels.signalToNoise !== null) {
 					calibration.quietSignalToNoise.push(levels.signalToNoise);
+				}
+				if (levels.hybrid !== null) {
+					calibration.quietHybrid.push(levels.hybrid);
 				}
 				if (levels.peakCleanMicDb !== null) {
 					calibration.quietPeakDb.push(levels.peakCleanMicDb);
@@ -624,6 +668,9 @@
 				}
 				if (levels.signalToNoise !== null) {
 					calibration.speechSignalToNoise.push(levels.signalToNoise);
+				}
+				if (levels.hybrid !== null) {
+					calibration.speechHybrid.push(levels.hybrid);
 				}
 				if (levels.peakCleanMicDb !== null) {
 					calibration.speechPeakDb.push(levels.peakCleanMicDb);
@@ -654,9 +701,11 @@
 			totalMs: 11600,
 			quietAmplitude: [],
 			quietSignalToNoise: [],
+			quietHybrid: [],
 			quietPeakDb: [],
 			speechAmplitude: [],
 			speechSignalToNoise: [],
+			speechHybrid: [],
 			speechPeakDb: [],
 			lastMeter: null
 		};
@@ -759,7 +808,7 @@
 			message = "Local replay is active";
 		} else {
 			progress = available ? level : 0;
-			message = available ? "Ready to tune" : "Waiting for microphone input";
+			message = available ? (element.dataset.calibrationStatusText || "Ready to tune") : "Waiting for microphone input";
 		}
 
 		coach.classList.toggle("is-active", activeVoiceCalibrationFor(element) || loopbackMode !== 0);
@@ -828,7 +877,7 @@
 			} else if (loopbackMode === 1) {
 				statusText.textContent = "Local replay";
 			} else if (!active) {
-				statusText.textContent = "Voice Activity is not selected";
+				statusText.textContent = "Voice activation is off";
 			} else if (!available) {
 				statusText.textContent = "Input inactive";
 			} else {
@@ -925,6 +974,7 @@
 		row.appendChild(label);
 
 		let input = null;
+		let syncSelectHint = null;
 		if (type === "readonly") {
 			const value = document.createElement("span");
 			value.className = "modern-dialog-readonly-value";
@@ -939,17 +989,39 @@
 			input.checked = !!field.value;
 		} else if (type === "select") {
 			input = document.createElement("select");
+			const selectedValue = field.value == null ? "" : String(field.value);
+			let hasSelectedValue = false;
+			let hasOptionHint = false;
 			(field.options || []).forEach(function(option) {
 				const item = document.createElement("option");
 				item.value = String(option.value);
 				item.textContent = option.label || String(option.value);
 				item.disabled = option.enabled === false;
-				if (option.hint) {
-					item.title = String(option.hint);
+				if (item.value === selectedValue) {
+					hasSelectedValue = true;
+				}
+				const optionHint = modernDialogOptionHint(option);
+				if (optionHint) {
+					item.title = optionHint;
+					item.dataset.optionHint = optionHint;
+					hasOptionHint = true;
 				}
 				input.appendChild(item);
 			});
-			input.value = String(field.value);
+			if (field.value != null && !hasSelectedValue) {
+				const fallback = document.createElement("option");
+				fallback.value = selectedValue;
+				fallback.textContent = field.valueLabel || selectedValue;
+				fallback.hidden = true;
+				input.appendChild(fallback);
+			}
+			input.value = selectedValue;
+			if (hasOptionHint) {
+				syncSelectHint = function() {
+					syncModernDialogSelectHint(input, fieldTooltip);
+				};
+				input.addEventListener("change", syncSelectHint);
+			}
 		} else if (type === "range") {
 			const rangeWrap = document.createElement("div");
 			rangeWrap.className = "modern-dialog-range";
@@ -978,6 +1050,8 @@
 			meter.dataset.silenceThreshold = String(field.silenceThreshold || 0);
 			meter.dataset.speechThreshold = String(field.speechThreshold || 0);
 			meter.dataset.active = field.active === false ? "false" : "true";
+			meter.dataset.calibrationState = String(field.calibrationState || "idle");
+			meter.dataset.calibrationStatusText = String(field.calibrationStatusText || "");
 			meter.dataset.loopbackMode = String(field.loopbackMode || 0);
 			meter.dataset.serverConnected = "false";
 			meter.dataset.replayStartActionId = String(field.replayStartActionId || "");
@@ -986,6 +1060,13 @@
 			meter.dataset.noiseCancelMode = String(field.noiseCancelMode || 0);
 			meter.dataset.speexNoiseStrength = String(field.speexNoiseStrength || 14);
 			meter.dataset.neuralCleanupAvailable = field.neuralCleanupAvailable ? "true" : "false";
+			meter.dataset.recommendedVadSource = String(field.recommendedVadSource == null ? 1 : field.recommendedVadSource);
+			meter.dataset.recommendedNoiseCancelMode = String(field.recommendedNoiseCancelMode == null
+				? field.noiseCancelMode || 0
+				: field.recommendedNoiseCancelMode);
+			meter.dataset.recommendedMaxAmplification = String(field.recommendedMaxAmplification == null
+				? field.maxAmplification || 0
+				: field.recommendedMaxAmplification);
 			if (fieldTooltip) {
 				meter.title = fieldTooltip;
 			}
@@ -1003,7 +1084,7 @@
 				const autoButton = document.createElement("button");
 				autoButton.type = "button";
 				autoButton.className = "chip-button modern-dialog-voice-meter-auto";
-				autoButton.textContent = field.calibrationLabel || "Audio wizard";
+				autoButton.textContent = field.calibrationLabel || "Audio setup";
 				autoButton.dataset.defaultLabel = autoButton.textContent;
 				if (field.calibrationTooltip) {
 					autoButton.title = String(field.calibrationTooltip);
@@ -1129,6 +1210,9 @@
 			input.addEventListener(type === "checkbox" || type === "select" || type === "range" ? "change" : "input", function() {
 				updateModernDialogField(field, input);
 			});
+			if (syncSelectHint) {
+				syncSelectHint();
+			}
 		}
 
 		if (field.hint) {
