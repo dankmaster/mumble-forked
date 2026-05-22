@@ -638,6 +638,7 @@ void OverlaySettings::load(const QString &filename) {
 BOOST_TYPEOF_REGISTER_TYPE(Qt::Alignment)
 BOOST_TYPEOF_REGISTER_TYPE(Settings::AudioTransmit)
 BOOST_TYPEOF_REGISTER_TYPE(Settings::VADSource)
+BOOST_TYPEOF_REGISTER_TYPE(Settings::InputGateMode)
 BOOST_TYPEOF_REGISTER_TYPE(Settings::LoopMode)
 BOOST_TYPEOF_REGISTER_TYPE(Settings::OverlayShow)
 BOOST_TYPEOF_REGISTER_TYPE(Settings::ProxyType)
@@ -797,6 +798,7 @@ void Settings::legacyLoad(const QString &path) {
 	LOADENUM(vsVAD, "audio/vadsource");
 	LOAD(fVADmin, "audio/vadmin");
 	LOAD(fVADmax, "audio/vadmax");
+	LOADENUM(inputGateMode, "audio/inputGateMode");
 
 	int oldNoiseSuppress = 0;
 	LOAD(oldNoiseSuppress, "audio/noisesupress");

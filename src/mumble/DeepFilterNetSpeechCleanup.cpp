@@ -25,6 +25,33 @@ namespace {
 	using DfSetPostFilterBetaFn = void (*)(DFState *state, float beta);
 	using DfFreeFn              = void (*)(DFState *state);
 
+	struct DeepFilterNetProfile {
+		QString modelId;
+		float attenuationLimitDb = 48.0f;
+		float postFilterBeta     = 0.0f;
+		bool usesLowLatencyModel = false;
+	};
+
+	DeepFilterNetProfile profileForSelection(const Mumble::SpeechCleanup::Selection &selection) {
+		const QString normalizedModelId =
+			Mumble::SpeechCleanup::normalizedModelId(selection.backend, selection.modelId);
+
+		if (normalizedModelId == QLatin1String("deepfilternet:gentle")) {
+			return { normalizedModelId, 24.0f, 0.0f, false };
+		}
+		if (normalizedModelId == QLatin1String("deepfilternet:low-latency")) {
+			return { normalizedModelId, 48.0f, 0.0f, true };
+		}
+		if (normalizedModelId == QLatin1String("deepfilternet:maximum")) {
+			return { normalizedModelId, 100.0f, 0.0f, false };
+		}
+		if (normalizedModelId == QLatin1String("deepfilternet:maximum-postfilter")) {
+			return { normalizedModelId, 100.0f, 0.05f, false };
+		}
+
+		return { normalizedModelId, 48.0f, 0.0f, false };
+	}
+
 	QStringList candidateLibraryPaths() {
 		const QString appDir = QCoreApplication::applicationDirPath();
 		return {
@@ -35,17 +62,31 @@ namespace {
 		};
 	}
 
-	QString resolveModelPath() {
+	QString resolveModelPath(const DeepFilterNetProfile &profile, QString &activeModelId, bool &usedFallback) {
 		const QString baseDir = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("deepfilternet"));
-		const QStringList candidates = {
-			QDir(baseDir).filePath(QStringLiteral("DeepFilterNet3_ll_onnx.tar.gz")),
-			QDir(baseDir).filePath(QStringLiteral("DeepFilterNet3_onnx.tar.gz")),
-		};
+		const QString standardModelPath = QDir(baseDir).filePath(QStringLiteral("DeepFilterNet3_onnx.tar.gz"));
+		const QString lowLatencyModelPath = QDir(baseDir).filePath(QStringLiteral("DeepFilterNet3_ll_onnx.tar.gz"));
 
-		for (const QString &candidate : candidates) {
-			if (QFileInfo::exists(candidate)) {
-				return candidate;
+		activeModelId.clear();
+		usedFallback = false;
+
+		if (profile.usesLowLatencyModel) {
+			if (QFileInfo::exists(lowLatencyModelPath)) {
+				activeModelId = profile.modelId;
+				return lowLatencyModelPath;
 			}
+			if (QFileInfo::exists(standardModelPath)) {
+				activeModelId = QStringLiteral("deepfilternet:default");
+				usedFallback = true;
+				return standardModelPath;
+			}
+
+			return {};
+		}
+
+		if (QFileInfo::exists(standardModelPath)) {
+			activeModelId = profile.modelId;
+			return standardModelPath;
 		}
 
 		return {};
@@ -54,10 +95,12 @@ namespace {
 
 class DeepFilterNetSpeechCleanup::Implementation {
 public:
-	Implementation() {
+	explicit Implementation(const Mumble::SpeechCleanup::Selection &selection)
+		: m_profile(profileForSelection(selection)) {
 #ifdef USE_DEEPFILTERNET
-		m_modelPath = resolveModelPath();
+		m_modelPath = resolveModelPath(m_profile, m_activeModelId, m_usedFallback);
 		if (m_modelPath.isEmpty()) {
+			qWarning("DeepFilterNetSpeechCleanup: no DeepFilterNet model archive found");
 			return;
 		}
 
@@ -69,6 +112,7 @@ public:
 		}
 
 		if (!m_library.isLoaded()) {
+			qWarning("DeepFilterNetSpeechCleanup: failed to load deepfilter runtime library");
 			return;
 		}
 
@@ -80,6 +124,7 @@ public:
 		m_free              = reinterpret_cast< DfFreeFn >(m_library.resolve("df_free"));
 
 		if (!m_create || !m_getFrameLength || !m_processFrame || !m_setAttenLim || !m_setPostFilterBeta || !m_free) {
+			qWarning("DeepFilterNetSpeechCleanup: deepfilter runtime library is missing required C API symbols");
 			m_library.unload();
 			return;
 		}
@@ -87,6 +132,14 @@ public:
 		if (!initializeState()) {
 			return;
 		}
+
+		m_ready = true;
+		qInfo("DeepFilterNetSpeechCleanup: Initialized backend=DeepFilterNet requestedModelId=%s activeModelId=%s "
+			  "modelPath=\"%s\" attenuationLimitDb=%.1f postFilterBeta=%.2f usedFallback=%s",
+			  qUtf8Printable(m_profile.modelId), qUtf8Printable(m_activeModelId), qUtf8Printable(m_modelPath),
+			  m_profile.attenuationLimitDb, m_profile.postFilterBeta, m_usedFallback ? "true" : "false");
+#else
+		(void) selection;
 #endif
 	}
 
@@ -163,6 +216,18 @@ public:
 #endif
 	}
 
+	QString activeModelId() const {
+		return m_ready ? m_activeModelId : QString();
+	}
+
+	QString activeModelPath() const {
+		return m_ready ? m_modelPath : QString();
+	}
+
+	bool usedFallback() const {
+		return m_ready && m_usedFallback;
+	}
+
 private:
 	bool initializeState() {
 		if (!m_create || !m_getFrameLength || !m_processFrame || !m_setAttenLim || !m_setPostFilterBeta || !m_free
@@ -171,7 +236,7 @@ private:
 		}
 
 		const QByteArray modelPathBytes = QDir::toNativeSeparators(m_modelPath).toUtf8();
-		m_state = m_create(modelPathBytes.constData(), 100.0f, nullptr);
+		m_state = m_create(modelPathBytes.constData(), m_profile.attenuationLimitDb, nullptr);
 		if (!m_state) {
 			return false;
 		}
@@ -182,8 +247,8 @@ private:
 			return false;
 		}
 
-		m_setAttenLim(m_state, 100.0f);
-		m_setPostFilterBeta(m_state, 0.0f);
+		m_setAttenLim(m_state, m_profile.attenuationLimitDb);
+		m_setPostFilterBeta(m_state, m_profile.postFilterBeta);
 		m_inputFrame.assign(m_frameLength, 0.0f);
 		m_outputFrame.assign(m_frameLength, 0.0f);
 		return true;
@@ -198,7 +263,9 @@ private:
 	}
 
 	QLibrary m_library;
+	DeepFilterNetProfile m_profile;
 	QString m_modelPath;
+	QString m_activeModelId;
 	DFState *m_state = nullptr;
 	DfCreateFn m_create = nullptr;
 	DfGetFrameLengthFn m_getFrameLength = nullptr;
@@ -211,12 +278,12 @@ private:
 	std::vector< float > m_outputFrame;
 	std::vector< float > m_pendingInput;
 	std::deque< float > m_outputQueue;
+	bool m_usedFallback = false;
 	bool m_ready = false;
 };
 
 DeepFilterNetSpeechCleanup::DeepFilterNetSpeechCleanup(const Mumble::SpeechCleanup::Selection &selection)
-	: m_impl(std::make_unique< Implementation >()) {
-	(void) selection;
+	: m_impl(std::make_unique< Implementation >(selection)) {
 }
 
 DeepFilterNetSpeechCleanup::~DeepFilterNetSpeechCleanup() = default;
@@ -235,4 +302,16 @@ void DeepFilterNetSpeechCleanup::processInPlace(float *samples, unsigned int sam
 	if (m_impl) {
 		m_impl->processInPlace(samples, sampleCount, mixFactor);
 	}
+}
+
+QString DeepFilterNetSpeechCleanup::activeModelId() const {
+	return m_impl ? m_impl->activeModelId() : QString();
+}
+
+QString DeepFilterNetSpeechCleanup::activeModelPath() const {
+	return m_impl ? m_impl->activeModelPath() : QString();
+}
+
+bool DeepFilterNetSpeechCleanup::usedFallback() const {
+	return m_impl ? m_impl->usedFallback() : false;
 }

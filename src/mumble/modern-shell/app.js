@@ -4400,7 +4400,7 @@
 		const source = body || template.content;
 		const nodes = [];
 		while (source.firstChild) {
-			nodes.push(source.firstChild);
+			nodes.push(source.removeChild(source.firstChild));
 		}
 		return nodes.filter(function(node) {
 			return node.nodeType !== Node.TEXT_NODE || String(node.textContent || "").trim();
@@ -5247,10 +5247,17 @@
 		}
 
 		const currentSource = Number(calibration.element.dataset.vadSource || 0);
+		const recommendedSource = Number(calibration.element.dataset.recommendedVadSource || 2);
 		candidates.sort(function(left, right) {
 			return right.score - left.score;
 		});
 		let selected = candidates[0];
+		const recommended = candidates.find(function(candidate) {
+			return candidate.vadSource === recommendedSource;
+		});
+		if (recommended && recommended.gap >= 10 && recommended.score >= selected.score - 6) {
+			selected = recommended;
+		}
 		const current = candidates.find(function(candidate) {
 			return candidate.vadSource === currentSource;
 		});
@@ -5269,6 +5276,7 @@
 			voiceHold: voiceHold,
 			maxAmplification: amplification,
 			noiseCancelMode: processing.noiseCancelMode,
+			inputGateMode: processing.inputGateMode,
 			speexNoiseStrength: processing.speexNoiseStrength,
 			processingLabel: processing.label,
 			noise: Math.round(selected.noise),
@@ -5323,6 +5331,8 @@
 
 	function recommendedNoiseProcessing(calibration, selected) {
 		const currentMode = clampNumber(calibration.element.dataset.noiseCancelMode, 0, 3, 0);
+		const currentGateMode = clampNumber(calibration.element.dataset.inputGateMode, 0, 2, 0);
+		const recommendedGateMode = clampNumber(calibration.element.dataset.recommendedInputGateMode, 0, 2, 1);
 		const currentStrength = clampNumber(calibration.element.dataset.speexNoiseStrength, 0, 100, 14);
 		const neuralAvailable = calibration.element.dataset.neuralCleanupAvailable === "true";
 		const quietAmpCeiling = percentile(calibration.quietAmplitude, 0.85) || 0;
@@ -5330,6 +5340,7 @@
 		const quietSpeechProb = percentile(calibration.quietSignalToNoise, 0.85) || 0;
 		const roomJitter = Math.max(selected.jitter || 0, quietAmpCeiling - quietAmpFloor);
 		let noiseCancelMode = currentMode;
+		let inputGateMode = currentGateMode;
 		let speexNoiseStrength = currentStrength;
 		let label = "cleanup kept";
 
@@ -5343,8 +5354,21 @@
 			label = noiseCancelMode === 0 ? "cleanup kept" : "light cleanup";
 		}
 
+		if (currentGateMode === 0 && (quietSpeechProb >= 12 || roomJitter >= 12 || selected.vadSource === 1)) {
+			inputGateMode = Math.max(inputGateMode, recommendedGateMode || 1);
+		}
+		if (inputGateMode <= 1 && (quietSpeechProb >= 35 || roomJitter >= 24)) {
+			inputGateMode = 2;
+		}
+		if (inputGateMode === 2) {
+			label += " + strict gate";
+		} else if (inputGateMode === 1) {
+			label += " + gate";
+		}
+
 		return {
 			noiseCancelMode: Math.round(clampNumber(noiseCancelMode, 0, 3, currentMode)),
+			inputGateMode: Math.round(clampNumber(inputGateMode, 0, 2, currentGateMode)),
 			speexNoiseStrength: clampPercent(speexNoiseStrength),
 			label: label
 		};
@@ -5791,9 +5815,13 @@
 			meter.dataset.replayStopActionId = String(field.replayStopActionId || "");
 			meter.dataset.maxAmplification = String(field.maxAmplification || 0);
 			meter.dataset.noiseCancelMode = String(field.noiseCancelMode || 0);
+			meter.dataset.inputGateMode = String(field.inputGateMode || 0);
 			meter.dataset.speexNoiseStrength = String(field.speexNoiseStrength || 14);
 			meter.dataset.neuralCleanupAvailable = field.neuralCleanupAvailable ? "true" : "false";
-			meter.dataset.recommendedVadSource = String(field.recommendedVadSource == null ? 1 : field.recommendedVadSource);
+			meter.dataset.recommendedVadSource = String(field.recommendedVadSource == null ? 2 : field.recommendedVadSource);
+			meter.dataset.recommendedInputGateMode = String(field.recommendedInputGateMode == null
+				? 1
+				: field.recommendedInputGateMode);
 			meter.dataset.recommendedNoiseCancelMode = String(field.recommendedNoiseCancelMode == null
 				? field.noiseCancelMode || 0
 				: field.recommendedNoiseCancelMode);

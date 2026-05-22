@@ -16,6 +16,7 @@
 
 const char *enumToString(Settings::AudioTransmit e);
 const char *enumToString(Settings::VADSource e);
+const char *enumToString(Settings::InputGateMode e);
 const char *enumToString(Settings::LoopMode e);
 const char *enumToString(Settings::ChannelExpand e);
 const char *enumToString(Settings::ChannelDrag e);
@@ -45,6 +46,7 @@ namespace details {
 
 void stringToEnum(const std::string &str, Settings::AudioTransmit &e);
 void stringToEnum(const std::string &str, Settings::VADSource &e);
+void stringToEnum(const std::string &str, Settings::InputGateMode &e);
 void stringToEnum(const std::string &str, Settings::LoopMode &e);
 void stringToEnum(const std::string &str, Settings::ChannelExpand &e);
 void stringToEnum(const std::string &str, Settings::ChannelDrag &e);

@@ -76,7 +76,14 @@ inline QStringList supportedModelIds(Settings::SpeechCleanupBackend backend) {
 				QStringLiteral("dtln:norm40h"),
 			};
 		case Settings::DeepFilterNetBackend:
-			return { QStringLiteral("deepfilternet:default") };
+			return {
+				QStringLiteral("deepfilternet:default"),
+				QStringLiteral("deepfilternet:gentle"),
+				QStringLiteral("deepfilternet:balanced"),
+				QStringLiteral("deepfilternet:low-latency"),
+				QStringLiteral("deepfilternet:maximum"),
+				QStringLiteral("deepfilternet:maximum-postfilter"),
+			};
 	}
 
 	return { QString::fromLatin1(defaultModelId(backend)) };
@@ -119,7 +126,22 @@ inline QString modelDisplayName(Settings::SpeechCleanupBackend backend, const QS
 			}
 			return QObject::tr("Baseline");
 		case Settings::DeepFilterNetBackend:
-			return QObject::tr("Default model");
+			if (normalized == QLatin1String("deepfilternet:gentle")) {
+				return QObject::tr("Gentle");
+			}
+			if (normalized == QLatin1String("deepfilternet:balanced")) {
+				return QObject::tr("Balanced");
+			}
+			if (normalized == QLatin1String("deepfilternet:low-latency")) {
+				return QObject::tr("Low latency");
+			}
+			if (normalized == QLatin1String("deepfilternet:maximum")) {
+				return QObject::tr("Maximum");
+			}
+			if (normalized == QLatin1String("deepfilternet:maximum-postfilter")) {
+				return QObject::tr("Maximum + post-filter");
+			}
+			return QObject::tr("Default");
 	}
 
 	return QObject::tr("Default model");

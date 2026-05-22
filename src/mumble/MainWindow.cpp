@@ -2125,6 +2125,14 @@ QImage persistentChatInlineDataImagePreviewImage(const QString &source, const Pe
 
 	QImageReader reader(&buffer);
 	reader.setAutoTransform(true);
+	const QSize sourceSize = reader.size();
+	if (sourceSize.isValid()) {
+		const QSize boundedSize = persistentChatInlineImageDisplaySize(sourceSize);
+		if (boundedSize.isValid() && sourceSize != boundedSize) {
+			reader.setScaledSize(boundedSize);
+		}
+	}
+
 	QImage image = reader.read();
 	if (image.isNull()) {
 		return QImage();
@@ -5120,9 +5128,18 @@ void MainWindow::setupPersistentChatDock() {
 
 						const std::size_t messageCount = guardedThis->m_persistentChatMessages.size();
 						const std::size_t beginIndex   = messageCount > 200 ? messageCount - 200 : 0;
+						const bool fastFirstPaint = messageCount > beginIndex;
 						guardedThis->publishModernShellMessagesPatch(
 							QStringLiteral("messages.reset"),
-							guardedThis->buildModernShellMessageStates(target, beginIndex), scrollToBottom);
+							guardedThis->buildModernShellMessageStates(
+								target, beginIndex,
+								fastFirstPaint ? ModernShellMessageBuildMode::FastFirstPaint
+											   : ModernShellMessageBuildMode::Full),
+							scrollToBottom);
+						if (fastFirstPaint) {
+							guardedThis->scheduleModernShellMessageHydration(queuedScopeToken, generation, beginIndex,
+																			 scrollToBottom);
+						}
 					},
 					Qt::QueuedConnection);
 			} else
@@ -7833,7 +7850,9 @@ bool MainWindow::triggerModernShellSerializedAction(const ModernShellMenuSeriali
 
 QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMessage &message,
 													 const PersistentChatTarget &target, const bool canReply,
-													 const bool canReact, const bool canDeleteMessages) {
+													 const bool canReact, const bool canDeleteMessages,
+													 const ModernShellMessageBuildMode buildMode) {
+	const bool fastFirstPaint = buildMode == ModernShellMessageBuildMode::FastFirstPaint;
 	const ClientUser *self                  = ClientUser::get(Global::get().uiSession);
 	const std::optional< QString > systemText = persistentChatSystemMessageText(message);
 	const bool systemMessage               = systemText.has_value();
@@ -7853,9 +7872,14 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 		bodyHtml = QString::fromLatin1("<em>%1</em>").arg(tr("[message deleted]").toHtmlEscaped());
 	} else {
 		const auto buildModernInlineDataImageReplacement =
-			[this](const QString &source, const QString &altText, const PersistentChatInlineDataImageInfo &info) {
+			[this, fastFirstPaint](const QString &source, const QString &altText,
+								   const PersistentChatInlineDataImageInfo &info) {
 				const QString token    = registerPersistentChatInlineDataImageSource(source);
 				const QString openHref = persistentChatInlineDataImageOpenUrl(token).toString(QUrl::FullyEncoded);
+				if (fastFirstPaint) {
+					return persistentChatInlineDataImagePlaceholderHtml(info, altText, openHref);
+				}
+
 				const QImage previewImage = persistentChatInlineDataImagePreviewImage(source, info);
 				if (previewImage.isNull()) {
 					mumble::chatperf::recordValue("chat.inline_data_image.modern_preview_failed", 1);
@@ -7931,7 +7955,9 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 
 	if (!deletedMessage) {
 		if (const std::optional< QString > previewKey = persistentChatPreviewKey(message); previewKey) {
-			ensurePersistentChatPreview(*previewKey);
+			if (!fastFirstPaint) {
+				ensurePersistentChatPreview(*previewKey);
+			}
 			if (const auto it = m_persistentChatPreviews.constFind(*previewKey);
 				it != m_persistentChatPreviews.cend()) {
 				const PersistentChatPreview &preview = it.value();
@@ -8004,10 +8030,15 @@ QString MainWindow::modernShellMessageDtoCacheKey(const MumbleProto::ChatMessage
 
 QVariantMap MainWindow::buildModernShellCachedMessageState(const MumbleProto::ChatMessage &message,
 														   const PersistentChatTarget &target, const bool canReply,
-														   const bool canReact, const bool canDeleteMessages) {
+														   const bool canReact, const bool canDeleteMessages,
+														   const ModernShellMessageBuildMode buildMode) {
+	if (buildMode == ModernShellMessageBuildMode::FastFirstPaint) {
+		return buildModernShellMessageState(message, target, canReply, canReact, canDeleteMessages, buildMode);
+	}
+
 	const QString cacheKey = modernShellMessageDtoCacheKey(message, target, canReply, canReact, canDeleteMessages);
 	if (cacheKey.isEmpty()) {
-		return buildModernShellMessageState(message, target, canReply, canReact, canDeleteMessages);
+		return buildModernShellMessageState(message, target, canReply, canReact, canDeleteMessages, buildMode);
 	}
 
 	if (const auto it = m_modernShellMessageDtoCache.constFind(cacheKey);
@@ -8019,14 +8050,16 @@ QVariantMap MainWindow::buildModernShellCachedMessageState(const MumbleProto::Ch
 		return it.value();
 	}
 
-	QVariantMap messageState = buildModernShellMessageState(message, target, canReply, canReact, canDeleteMessages);
+	QVariantMap messageState =
+		buildModernShellMessageState(message, target, canReply, canReact, canDeleteMessages, buildMode);
 	m_modernShellMessageDtoCache.insert(cacheKey, messageState);
 	mumble::chatperf::recordValue("modern.message_dto_cache.miss", 1);
 	mumble::chatperf::recordValue("modern.message_dto_cache.size", m_modernShellMessageDtoCache.size());
 	return messageState;
 }
 
-QVariantList MainWindow::buildModernShellMessageStates(const PersistentChatTarget &target, std::size_t beginIndex) {
+QVariantList MainWindow::buildModernShellMessageStates(const PersistentChatTarget &target, std::size_t beginIndex,
+													   const ModernShellMessageBuildMode buildMode) {
 	QElapsedTimer timer;
 	timer.start();
 	QVariantList messages;
@@ -8045,15 +8078,47 @@ QVariantList MainWindow::buildModernShellMessageStates(const PersistentChatTarge
 	beginIndex = std::min(beginIndex, messageCount);
 	for (std::size_t i = beginIndex; i < messageCount; ++i) {
 		messages.push_back(buildModernShellCachedMessageState(m_persistentChatMessages[i], target, canReply, canReact,
-															  canDeleteMessages));
+															  canDeleteMessages, buildMode));
 	}
-	appendModernShellConnectTrace(QStringLiteral("buildModernShellMessageStates scope=%1 id=%2 count=%3 begin=%4 ms=%5")
+	appendModernShellConnectTrace(QStringLiteral("buildModernShellMessageStates scope=%1 id=%2 count=%3 begin=%4 mode=%5 ms=%6")
 									  .arg(static_cast< int >(target.scope))
 									  .arg(target.scopeID)
 									  .arg(messages.size())
 									  .arg(static_cast< qulonglong >(beginIndex))
+									  .arg(buildMode == ModernShellMessageBuildMode::FastFirstPaint
+											   ? QStringLiteral("fast")
+											   : QStringLiteral("full"))
 									  .arg(timer.elapsed()));
 	return messages;
+}
+
+void MainWindow::scheduleModernShellMessageHydration(const QString &scopeToken, const quint64 generation,
+													 const std::size_t beginIndex, const bool scrollToBottom) {
+	if (scopeToken.isEmpty() || !usesModernShell()) {
+		return;
+	}
+
+	QPointer< MainWindow > guardedThis(this);
+	QTimer::singleShot(240, this, [guardedThis, scopeToken, generation, beginIndex, scrollToBottom]() {
+		if (!guardedThis || generation != guardedThis->m_modernShellMessagePatchGeneration
+			|| !guardedThis->usesModernShell()) {
+			return;
+		}
+
+		const PersistentChatTarget target = guardedThis->currentPersistentChatTarget();
+		const QString currentScopeToken   = modernShellScopeToken(
+			target.serverLog ? LocalServerLogScope
+							 : (target.directMessage ? LocalDirectMessageScope : static_cast< int >(target.scope)),
+			target.directMessage && target.user ? target.user->uiSession : target.scopeID);
+		if (currentScopeToken != scopeToken || target.serverLog || target.directMessage) {
+			return;
+		}
+
+		guardedThis->publishModernShellMessagesPatch(
+			QStringLiteral("messages.reset"),
+			guardedThis->buildModernShellMessageStates(target, beginIndex, ModernShellMessageBuildMode::Full),
+			scrollToBottom);
+	});
 }
 
 QVariantMap MainWindow::buildModernShellPatchBase(const QString &kind, const PersistentChatTarget &target) {
@@ -9996,6 +10061,7 @@ bool MainWindow::handleModernShellVoiceJoin(const QString &scopeToken) {
 		}
 
 		m_pendingModernShellVoiceJoinScopeID = channel->iId;
+		navigateToPersistentChatScope(MumbleProto::Channel, channel->iId);
 		Global::get().sh->joinChannel(Global::get().uiSession, channel->iId);
 		publishModernShellRoomStatePatch();
 		return true;
@@ -17793,7 +17859,11 @@ void MainWindow::handleUserMoved(unsigned int sessionID, const std::optional< un
 
 				if (completesPendingVoiceJoin) {
 					guardedThis->m_pendingModernShellVoiceJoinScopeID.reset();
-					if (!guardedThis->navigateToPersistentChatScope(MumbleProto::Channel, newChannelID, true)) {
+					if (guardedThis->m_persistentChatController
+						&& guardedThis->m_persistentChatController->activeScopeMatches(MumbleProto::Channel,
+																					  newChannelID)) {
+						guardedThis->updateChatBar(false);
+					} else if (!guardedThis->navigateToPersistentChatScope(MumbleProto::Channel, newChannelID, true)) {
 						guardedThis->updateChatBar(true);
 					}
 				} else {

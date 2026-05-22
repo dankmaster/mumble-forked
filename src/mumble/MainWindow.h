@@ -277,6 +277,10 @@ public:
 		bool preserveScrollPosition = false;
 	};
 
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	enum class ModernShellMessageBuildMode : unsigned char { Full, FastFirstPaint };
+#endif
+
 	void loadState(bool minimalView);
 	void storeState(bool minimalView);
 
@@ -383,8 +387,11 @@ public:
 	QVariantMap buildModernShellSnapshot();
 	QVariantMap buildModernShellMessageState(const MumbleProto::ChatMessage &message,
 											 const PersistentChatTarget &target, bool canReply, bool canReact,
-											 bool canDeleteMessages);
-	QVariantList buildModernShellMessageStates(const PersistentChatTarget &target, std::size_t beginIndex = 0);
+											 bool canDeleteMessages,
+											 ModernShellMessageBuildMode buildMode = ModernShellMessageBuildMode::Full);
+	QVariantList buildModernShellMessageStates(
+		const PersistentChatTarget &target, std::size_t beginIndex = 0,
+		ModernShellMessageBuildMode buildMode = ModernShellMessageBuildMode::Full);
 	QVariantMap buildModernShellPatchBase(const QString &kind, const PersistentChatTarget &target);
 	QVariantMap buildModernShellVoiceRoomScreenShareState(const Channel *channel) const;
 	QVariantMap buildModernShellActiveScopeState(const PersistentChatTarget &target);
@@ -411,7 +418,10 @@ public:
 										  bool canReply, bool canReact, bool canDeleteMessages) const;
 	QVariantMap buildModernShellCachedMessageState(const MumbleProto::ChatMessage &message,
 												   const PersistentChatTarget &target, bool canReply, bool canReact,
-												   bool canDeleteMessages);
+												   bool canDeleteMessages,
+												   ModernShellMessageBuildMode buildMode = ModernShellMessageBuildMode::Full);
+	void scheduleModernShellMessageHydration(const QString &scopeToken, quint64 generation, std::size_t beginIndex,
+											 bool scrollToBottom);
 	bool handleModernShellScopeSelection(const QString &scopeToken);
 	bool handleModernShellVoiceJoin(const QString &scopeToken);
 	bool handleModernShellScopeAction(const QString &scopeToken, const QString &actionId);

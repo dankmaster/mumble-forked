@@ -251,6 +251,7 @@ protected:
 	void encodeAudioFrame(AudioChunk chunk);
 	void addMic(const void *data, unsigned int nsamp);
 	void addEcho(const void *data, unsigned int nsamp);
+	bool inputGateAllowsSpeech(bool candidateSpeech, float amplitudeLevel, float speechProbability);
 
 	volatile bool bRunning;
 	volatile bool bPreviousVoice;
@@ -259,6 +260,9 @@ protected:
 	int iFrameCounter;
 	int iSilentFrames;
 	int iHoldFrames;
+	bool m_inputGateOpen;
+	int m_inputGateAttackFrames;
+	int m_inputGateReleaseFrames;
 	int iBufferedFrames;
 
 	QList< QByteArray > qlFrames;
@@ -301,6 +305,9 @@ public:
 	float voiceActivityLevel() const;
 	static float voiceActivityLevelFor(Settings::VADSource source, float amplitudeLevel, float speechProbability);
 	static bool voiceActivityTriggers(float level, float silenceThreshold, float speechThreshold, bool wasTransmitting);
+	static bool inputGateAllowsSpeechFor(Settings::InputGateMode mode, bool candidateSpeech, float amplitudeLevel,
+										 float speechProbability, bool &gateOpen, int &attackFrames,
+										 int &releaseFrames);
 
 	static int clampFramesPerPacket(int frames);
 	static int packetDurationMsForFrames(int frames);

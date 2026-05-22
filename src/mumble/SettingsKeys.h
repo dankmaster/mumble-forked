@@ -63,6 +63,7 @@ const SettingsKey ATTENUATE_LOOPBACK_KEY                      = { "attenuate_loo
 const SettingsKey VAD_MODE_KEY                                = { "vad_mode" };
 const SettingsKey VAD_MIN_KEY                                 = { "vad_min" };
 const SettingsKey VAD_MAX_KEY                                 = { "vad_max" };
+const SettingsKey INPUT_GATE_MODE_KEY                         = { "input_gate_mode" };
 const SettingsKey NOISE_CANCEL_MODE_KEY                       = { "noise_cancel_mode" };
 const SettingsKey NOISE_CANCEL_BACKEND_KEY                    = { "noise_cancel_backend" };
 const SettingsKey NOISE_CANCEL_MODEL_ID_KEY                   = { "noise_cancel_model_id" };

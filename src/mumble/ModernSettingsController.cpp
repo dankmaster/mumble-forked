@@ -182,6 +182,8 @@ namespace {
 			  QObject::tr("Choose whether to transmit continuously, by voice activity, or only while push-to-talk is held.") },
 			{ QStringLiteral("audio.vadSource"),
 			  QObject::tr("Choose how voice activation decides whether the microphone should open.") },
+			{ QStringLiteral("audio.inputGateMode"),
+			  QObject::tr("Add an optional post-cleanup gate that rejects low-level or low-confidence voice activation.") },
 			{ QStringLiteral("audio.vadMin"),
 			  QObject::tr("Signal level below which voice activation closes the microphone.") },
 			{ QStringLiteral("audio.vadMax"),
@@ -354,6 +356,17 @@ namespace {
 		return QObject::tr("Volume level");
 	}
 
+	QVariantList inputGateModeOptions() {
+		return QVariantList {
+			optionItem(static_cast< int >(Settings::InputGateOff), QObject::tr("Off"), true,
+					   QObject::tr("Preserve the classic voice-activity behavior.")),
+			optionItem(static_cast< int >(Settings::InputGateBalanced), QObject::tr("Balanced"), true,
+					   QObject::tr("Require voice activity, speech probability, and a small level floor before opening.")),
+			optionItem(static_cast< int >(Settings::InputGateStrict), QObject::tr("Strict"), true,
+					   QObject::tr("Reject more non-voice audio, with a higher chance of clipping very soft speech."))
+		};
+	}
+
 	QVariantList proxyOptions() {
 		return QVariantList { optionItem(Settings::NoProxy, QObject::tr("No proxy"),
 										 QObject::tr("Connect directly to servers.")),
@@ -493,7 +506,22 @@ namespace {
 				}
 				return QObject::tr("Baseline DTLN model bundled with Mumble.");
 			case Settings::DeepFilterNetBackend:
-				return QObject::tr("Default DeepFilterNet model bundled with the selected backend.");
+				if (normalizedModelID == QLatin1String("deepfilternet:gentle")) {
+					return QObject::tr("Lower DeepFilterNet attenuation for fewer voice artifacts.");
+				}
+				if (normalizedModelID == QLatin1String("deepfilternet:balanced")) {
+					return QObject::tr("Moderate DeepFilterNet attenuation for everyday cleanup.");
+				}
+				if (normalizedModelID == QLatin1String("deepfilternet:low-latency")) {
+					return QObject::tr("DeepFilterNet3 low-latency model with less look-ahead than the default model.");
+				}
+				if (normalizedModelID == QLatin1String("deepfilternet:maximum")) {
+					return QObject::tr("Full DeepFilterNet attenuation without the extra post-filter.");
+				}
+				if (normalizedModelID == QLatin1String("deepfilternet:maximum-postfilter")) {
+					return QObject::tr("Full DeepFilterNet attenuation with extra suppression in very noisy sections.");
+				}
+				return QObject::tr("Default DeepFilterNet cleanup profile.");
 		}
 
 		return QString();
@@ -711,10 +739,12 @@ namespace {
 		field.insert(QStringLiteral("loopbackMode"), static_cast< int >(settings.lmLoopMode));
 		field.insert(QStringLiteral("maxAmplification"), currentAmplification);
 		field.insert(QStringLiteral("noiseCancelMode"), static_cast< int >(settings.noiseCancelMode));
+		field.insert(QStringLiteral("inputGateMode"), static_cast< int >(settings.inputGateMode));
 		field.insert(QStringLiteral("speexNoiseStrength"),
 					 settings.iSpeexNoiseCancelStrength == 0 ? 14 : -settings.iSpeexNoiseCancelStrength);
 		field.insert(QStringLiteral("neuralCleanupAvailable"), hasAvailableSpeechCleanupBackend());
-		field.insert(QStringLiteral("recommendedVadSource"), static_cast< int >(Settings::SignalToNoise));
+		field.insert(QStringLiteral("recommendedVadSource"), static_cast< int >(Settings::Hybrid));
+		field.insert(QStringLiteral("recommendedInputGateMode"), static_cast< int >(Settings::InputGateBalanced));
 		field.insert(QStringLiteral("recommendedNoiseCancelMode"), static_cast< int >(recommendedCleanup));
 		field.insert(QStringLiteral("recommendedMaxAmplification"), currentAmplification);
 		return field;
@@ -885,6 +915,9 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		m_draft.fVADmin = qMin(vadThresholdFromPercent(value), m_draft.fVADmax);
 	} else if (id == QLatin1String("audio.vadMax")) {
 		m_draft.fVADmax = qMax(vadThresholdFromPercent(value), m_draft.fVADmin);
+	} else if (id == QLatin1String("audio.inputGateMode")) {
+		m_draft.inputGateMode = static_cast< Settings::InputGateMode >(
+			qBound(0, value.toInt(), static_cast< int >(Settings::InputGateStrict)));
 	} else if (id == QLatin1String("audio.voiceHold")) {
 		m_draft.iVoiceHold = qBound(0, value.toInt(), 250);
 	} else if (id == QLatin1String("audio.doublePush")) {
@@ -1079,6 +1112,11 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 			const int strength = qBound(0, payload.value(QStringLiteral("speexNoiseStrength")).toInt(), 100);
 			m_draft.iSpeexNoiseCancelStrength = strength == 14 ? 0 : -strength;
 		}
+		if (payload.contains(QStringLiteral("inputGateMode"))) {
+			m_draft.inputGateMode = static_cast< Settings::InputGateMode >(
+				qBound(0, payload.value(QStringLiteral("inputGateMode")).toInt(),
+					   static_cast< int >(Settings::InputGateStrict)));
+		}
 		forceModernLayout();
 		result.settingsToApply = m_draft;
 		return result;
@@ -1269,6 +1307,12 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 																					 vadSourceOptions()),
 																		 voiceActivityTransmit),
 															QObject::tr("Use Speech + volume when speech probability opens too easily on non-voice sounds.")),
+												hintedField(enabledField(selectField(QStringLiteral("audio.inputGateMode"),
+																					 QObject::tr("Input gate"),
+																					 static_cast< int >(m_draft.inputGateMode),
+																					 inputGateModeOptions()),
+																		 voiceActivityTransmit),
+															QObject::tr("Optional extra guard after cleanup; Off keeps the original behavior.")),
 												voiceMeterField(m_draft),
 												hintedField(enabledField(rangeField(QStringLiteral("audio.vadMin"),
 																					QObject::tr("Stop transmitting below"),

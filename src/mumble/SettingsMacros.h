@@ -47,6 +47,7 @@
 	PROCESS(audio, VAD_MODE_KEY, vsVAD)                                                             \
 	PROCESS(audio, VAD_MIN_KEY, fVADmin)                                                            \
 	PROCESS(audio, VAD_MAX_KEY, fVADmax)                                                            \
+	PROCESS(audio, INPUT_GATE_MODE_KEY, inputGateMode)                                              \
 	PROCESS(audio, NOISE_CANCEL_MODE_KEY, noiseCancelMode)                                          \
 	PROCESS(audio, NOISE_CANCEL_BACKEND_KEY, noiseCancelBackend)                                    \
 	PROCESS(audio, NOISE_CANCEL_MODEL_ID_KEY, noiseCancelModelId)                                   \

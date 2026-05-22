@@ -15,6 +15,11 @@
 	PROCESS(Settings::VADSource, SignalToNoise, "SignalToNoise") \
 	PROCESS(Settings::VADSource, Hybrid, "Hybrid")
 
+#define INPUT_GATE_MODE_VALUES                                      \
+	PROCESS(Settings::InputGateMode, InputGateOff, "Off")           \
+	PROCESS(Settings::InputGateMode, InputGateBalanced, "Balanced") \
+	PROCESS(Settings::InputGateMode, InputGateStrict, "Strict")
+
 #define LOOP_MODE_VALUES                        \
 	PROCESS(Settings::LoopMode, None, "None")   \
 	PROCESS(Settings::LoopMode, Local, "Local") \
@@ -179,6 +184,9 @@
 	BEFORE_CODE(Settings::VADSource)                   \
 	VAD_SOURCE_VALUES                                  \
 	AFTER_CODE                                         \
+	BEFORE_CODE(Settings::InputGateMode)               \
+	INPUT_GATE_MODE_VALUES                             \
+	AFTER_CODE                                         \
 	BEFORE_CODE(Settings::LoopMode)                    \
 	LOOP_MODE_VALUES                                   \
 	AFTER_CODE                                         \
@@ -312,5 +320,6 @@ PROCESS_ALL_ENUMS
 #undef CHANNEL_DRAG_VALUES
 #undef CHANNEL_EXPAND_VALUES
 #undef LOOP_MODE_VALUES
+#undef INPUT_GATE_MODE_VALUES
 #undef VAD_SOURCE_VALUES
 #undef AUDIO_TRANSMIT_VALUES

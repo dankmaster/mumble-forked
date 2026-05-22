@@ -191,6 +191,7 @@ struct OverlaySettings {
 struct Settings {
 	enum AudioTransmit { Continuous, VAD, PushToTalk };
 	enum VADSource { Amplitude, SignalToNoise, Hybrid };
+	enum InputGateMode { InputGateOff, InputGateBalanced, InputGateStrict };
 	enum LoopMode { None, Local, Server };
 	enum ChannelExpand { NoChannels, ChannelsWithUsers, AllChannels };
 	enum ChannelDrag { Ask, DoNothing, Move };
@@ -292,6 +293,7 @@ struct Settings {
 	VADSource vsVAD                     = Amplitude;
 	float fVADmin                       = 0.80f;
 	float fVADmax                       = 0.98f;
+	InputGateMode inputGateMode         = InputGateOff;
 	int iFramesPerPacket                = 2;
 	QString qsAudioInput                = {};
 	QString qsAudioOutput               = {};

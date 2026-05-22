@@ -21,6 +21,9 @@ public:
 	bool isReady() const override;
 	void reset() override;
 	void processInPlace(float *samples, unsigned int sampleCount, float mixFactor = 1.0f) override;
+	QString activeModelId() const override;
+	QString activeModelPath() const override;
+	bool usedFallback() const override;
 
 private:
 	class Implementation;

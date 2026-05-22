@@ -44,6 +44,28 @@ static Mumble::SpeechCleanup::Selection currentInputSpeechCleanupSelection() {
 	});
 }
 
+struct InputGateParameters {
+	float openAmplitude       = 0.0f;
+	float closeAmplitude      = 0.0f;
+	float openSpeechProb      = 0.0f;
+	float closeSpeechProb     = 0.0f;
+	int requiredAttackFrames  = 1;
+	int releaseHoldFrames     = 0;
+};
+
+static InputGateParameters inputGateParametersFor(Settings::InputGateMode mode) {
+	switch (mode) {
+		case Settings::InputGateBalanced:
+			return { 0.18f, 0.10f, 0.35f, 0.20f, 1, 12 };
+		case Settings::InputGateStrict:
+			return { 0.28f, 0.16f, 0.55f, 0.35f, 2, 8 };
+		case Settings::InputGateOff:
+			break;
+	}
+
+	return {};
+}
+
 float AudioInput::amplitudeVoiceActivityLevel() const {
 	return std::clamp(1.0f + dPeakCleanMic / 96.0f, 0.0f, 1.0f);
 }
@@ -77,6 +99,62 @@ bool AudioInput::voiceActivityTriggers(float level, float silenceThreshold, floa
 	}
 
 	return level > speechThreshold || (level > silenceThreshold && wasTransmitting);
+}
+
+bool AudioInput::inputGateAllowsSpeechFor(Settings::InputGateMode mode, bool candidateSpeech, float amplitudeLevel,
+										  float speechProbability, bool &gateOpen, int &attackFrames,
+										  int &releaseFrames) {
+	if (mode == Settings::InputGateOff) {
+		gateOpen      = false;
+		attackFrames  = 0;
+		releaseFrames = 0;
+		return candidateSpeech;
+	}
+
+	const InputGateParameters parameters = inputGateParametersFor(mode);
+	amplitudeLevel                      = std::clamp(amplitudeLevel, 0.0f, 1.0f);
+	speechProbability                   = std::clamp(speechProbability, 0.0f, 1.0f);
+	const bool openCandidate =
+		candidateSpeech && amplitudeLevel >= parameters.openAmplitude && speechProbability >= parameters.openSpeechProb;
+	const bool keepCandidate =
+		candidateSpeech && amplitudeLevel >= parameters.closeAmplitude && speechProbability >= parameters.closeSpeechProb;
+
+	if (gateOpen) {
+		if (keepCandidate) {
+			attackFrames  = parameters.requiredAttackFrames;
+			releaseFrames = 0;
+			return true;
+		}
+
+		++releaseFrames;
+		if (releaseFrames <= parameters.releaseHoldFrames) {
+			return true;
+		}
+
+		gateOpen      = false;
+		attackFrames  = 0;
+		releaseFrames = 0;
+		return false;
+	}
+
+	if (openCandidate) {
+		attackFrames  = std::min(attackFrames + 1, parameters.requiredAttackFrames);
+		releaseFrames = 0;
+		if (attackFrames >= parameters.requiredAttackFrames) {
+			gateOpen = true;
+			return true;
+		}
+	} else {
+		attackFrames  = 0;
+		releaseFrames = 0;
+	}
+
+	return false;
+}
+
+bool AudioInput::inputGateAllowsSpeech(bool candidateSpeech, float amplitudeLevel, float speechProbability) {
+	return inputGateAllowsSpeechFor(Global::get().s.inputGateMode, candidateSpeech, amplitudeLevel, speechProbability,
+									m_inputGateOpen, m_inputGateAttackFrames, m_inputGateReleaseFrames);
 }
 
 void Resynchronizer::addMic(short *mic) {
@@ -296,6 +374,9 @@ AudioInput::AudioInput()
 	iFrameCounter   = 0;
 	iSilentFrames   = 0;
 	iHoldFrames     = 0;
+	m_inputGateOpen          = false;
+	m_inputGateAttackFrames  = 0;
+	m_inputGateReleaseFrames = 0;
 	iBufferedFrames = 0;
 
 	bUserIsMuted = false;
@@ -809,6 +890,9 @@ void AudioInput::resetAudioProcessor() {
 
 	m_preprocessor.init(iSampleRate, iFrameSize);
 	resync.reset();
+	m_inputGateOpen          = false;
+	m_inputGateAttackFrames  = 0;
+	m_inputGateReleaseFrames = 0;
 	selectNoiseCancel();
 
 	m_preprocessor.setVAD(true);
@@ -1032,11 +1116,16 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 
 	// clean microphone level: peak of filtered signal attenuated by AGC gain
 	dPeakCleanMic = qMax(dPeakSignal - static_cast< float >(gainValue), -96.0f);
-	float level   = voiceActivityLevel();
+	const float amplitudeLevel = amplitudeVoiceActivityLevel();
+	float level                = voiceActivityLevelFor(Global::get().s.vsVAD, amplitudeLevel, fSpeechProb);
 
 	bool bIsSpeech = false;
 
 	bIsSpeech = voiceActivityTriggers(level, Global::get().s.fVADmin, Global::get().s.fVADmax, bPreviousVoice);
+	bIsSpeech = inputGateAllowsSpeech(bIsSpeech, amplitudeLevel, fSpeechProb);
+	if (!bIsSpeech && Global::get().s.inputGateMode != Settings::InputGateOff) {
+		iHoldFrames = Global::get().s.iVoiceHold;
+	}
 
 	if (!bIsSpeech) {
 		iHoldFrames++;

@@ -51,14 +51,22 @@ namespace {
 		double cpuMs            = 0.0;
 		double audioMs          = 0.0;
 		double realTimeFactor   = 0.0;
+		float mixFactor         = 1.0f;
 		std::size_t clippingCount = 0;
 		float peak              = 0.0f;
 		float rms               = 0.0f;
 		QString activeModelId;
 		QString activeModelPath;
 		bool usedFallback       = false;
+		int alignmentLagSamples = 0;
 		std::optional< double > siSdr;
 		std::optional< double > segmentalSnr;
+	};
+
+	struct AlignedAudio {
+		std::vector< float > reference;
+		std::vector< float > estimate;
+		int lagSamples = 0;
 	};
 
 	InputFormat parseInputFormat(const QString &value) {
@@ -296,7 +304,84 @@ namespace {
 		return segmentCount > 0 ? accumulatedSnr / static_cast< double >(segmentCount) : 0.0;
 	}
 
-	BenchmarkMetrics processSamples(const Mumble::SpeechCleanup::Selection &selection, std::vector< float > &samples) {
+	std::vector< double > computeFrameEnergy(const std::vector< float > &samples) {
+		std::vector< double > energies;
+		energies.reserve((samples.size() + kFrameSize - 1) / kFrameSize);
+
+		for (std::size_t offset = 0; offset < samples.size(); offset += kFrameSize) {
+			const std::size_t frameLength = std::min<std::size_t>(kFrameSize, samples.size() - offset);
+			double energy                 = 0.0;
+			for (std::size_t index = 0; index < frameLength; ++index) {
+				const double sample = samples[offset + index];
+				energy += sample * sample;
+			}
+			energies.push_back(energy / static_cast< double >(frameLength));
+		}
+
+		return energies;
+	}
+
+	double normalizedCorrelation(const std::vector< double > &reference, const std::vector< double > &estimate,
+								 int lagFrames) {
+		const std::size_t referenceStart = lagFrames < 0 ? static_cast< std::size_t >(-lagFrames) : 0;
+		const std::size_t estimateStart  = lagFrames > 0 ? static_cast< std::size_t >(lagFrames) : 0;
+		const std::size_t count =
+			std::min(reference.size() - std::min(referenceStart, reference.size()),
+					 estimate.size() - std::min(estimateStart, estimate.size()));
+		if (count == 0) {
+			return 0.0;
+		}
+
+		double dotProduct      = 0.0;
+		double referenceEnergy = 0.0;
+		double estimateEnergy  = 0.0;
+		for (std::size_t index = 0; index < count; ++index) {
+			const double referenceSample = reference[referenceStart + index];
+			const double estimateSample  = estimate[estimateStart + index];
+			dotProduct += referenceSample * estimateSample;
+			referenceEnergy += referenceSample * referenceSample;
+			estimateEnergy += estimateSample * estimateSample;
+		}
+
+		return dotProduct / std::sqrt(std::max(referenceEnergy * estimateEnergy, static_cast< double >(kEpsilon)));
+	}
+
+	AlignedAudio alignForReferenceMetrics(const std::vector< float > &reference, const std::vector< float > &estimate) {
+		constexpr int maxAlignmentLagMs = 250;
+		const int maxLagFrames          = static_cast< int >((SAMPLE_RATE * maxAlignmentLagMs) / (1000 * kFrameSize));
+		const std::vector< double > referenceEnergy = computeFrameEnergy(reference);
+		const std::vector< double > estimateEnergy  = computeFrameEnergy(estimate);
+
+		int bestLagFrames = 0;
+		double bestScore  = -std::numeric_limits< double >::infinity();
+		for (int lagFrames = -maxLagFrames; lagFrames <= maxLagFrames; ++lagFrames) {
+			const double score = normalizedCorrelation(referenceEnergy, estimateEnergy, lagFrames);
+			if (score > bestScore) {
+				bestScore     = score;
+				bestLagFrames = lagFrames;
+			}
+		}
+
+		const int lagSamples = bestLagFrames * static_cast< int >(kFrameSize);
+		const std::size_t referenceStart = lagSamples < 0 ? static_cast< std::size_t >(-lagSamples) : 0;
+		const std::size_t estimateStart  = lagSamples > 0 ? static_cast< std::size_t >(lagSamples) : 0;
+		const std::size_t clampedReferenceStart = std::min(referenceStart, reference.size());
+		const std::size_t clampedEstimateStart  = std::min(estimateStart, estimate.size());
+		const std::size_t sampleCount =
+			std::min(reference.size() - clampedReferenceStart, estimate.size() - clampedEstimateStart);
+
+		AlignedAudio aligned;
+		aligned.lagSamples = lagSamples;
+		aligned.reference.assign(
+			reference.begin() + static_cast< std::ptrdiff_t >(clampedReferenceStart),
+			reference.begin() + static_cast< std::ptrdiff_t >(clampedReferenceStart + sampleCount));
+		aligned.estimate.assign(estimate.begin() + static_cast< std::ptrdiff_t >(clampedEstimateStart),
+								estimate.begin() + static_cast< std::ptrdiff_t >(clampedEstimateStart + sampleCount));
+		return aligned;
+	}
+
+	BenchmarkMetrics processSamples(const Mumble::SpeechCleanup::Selection &selection, std::vector< float > &samples,
+									float mixFactor) {
 		if (!Mumble::SpeechCleanup::isBackendAvailable(selection.backend)) {
 			throw std::runtime_error(
 				QStringLiteral("Requested backend is unavailable: %1")
@@ -315,6 +400,7 @@ namespace {
 		metrics.activeModelId   = processor->activeModelId();
 		metrics.activeModelPath = processor->activeModelPath();
 		metrics.usedFallback    = processor->usedFallback();
+		metrics.mixFactor       = std::clamp(mixFactor, 0.0f, 1.0f);
 		const auto startTime = std::chrono::steady_clock::now();
 
 		std::vector< float > frameBuffer(kFrameSize, 0.0f);
@@ -322,7 +408,8 @@ namespace {
 			const std::size_t frameLength = std::min<std::size_t>(kFrameSize, samples.size() - offset);
 			std::fill(frameBuffer.begin(), frameBuffer.end(), 0.0f);
 			std::copy_n(samples.data() + offset, frameLength, frameBuffer.data());
-			processor->processInPlace(frameBuffer.data(), static_cast< unsigned int >(frameBuffer.size()));
+			processor->processInPlace(frameBuffer.data(), static_cast< unsigned int >(frameBuffer.size()),
+									  metrics.mixFactor);
 			std::copy_n(frameBuffer.data(), frameLength, samples.data() + offset);
 		}
 
@@ -361,6 +448,9 @@ int main(int argc, char **argv) {
 	const QCommandLineOption customModelPathOption(QStringList() << QStringLiteral("custom-model-path"),
 												   QStringLiteral("Optional custom model path"),
 												   QStringLiteral("path"));
+	const QCommandLineOption mixFactorOption(QStringList() << QStringLiteral("mix-factor"),
+											 QStringLiteral("Dry/wet cleanup mix factor from 0.0 to 1.0"),
+											 QStringLiteral("factor"), QStringLiteral("1.0"));
 	const QCommandLineOption inputOption(QStringList() << QStringLiteral("input"),
 										 QStringLiteral("Input WAV or raw file"), QStringLiteral("path"));
 	const QCommandLineOption inputFormatOption(QStringList() << QStringLiteral("input-format"),
@@ -392,6 +482,7 @@ int main(int argc, char **argv) {
 	parser.addOption(backendOption);
 	parser.addOption(modelIdOption);
 	parser.addOption(customModelPathOption);
+	parser.addOption(mixFactorOption);
 	parser.addOption(inputOption);
 	parser.addOption(inputFormatOption);
 	parser.addOption(inputSampleRateOption);
@@ -418,6 +509,7 @@ int main(int argc, char **argv) {
 			parser.value(modelIdOption),
 			parser.value(customModelPathOption),
 		});
+		const float mixFactor = std::clamp(parser.value(mixFactorOption).toFloat(), 0.0f, 1.0f);
 
 		const LoadedAudio input = loadAudio(parser.value(inputOption), parseInputFormat(parser.value(inputFormatOption)),
 											parser.value(inputSampleRateOption).toInt(),
@@ -430,7 +522,7 @@ int main(int argc, char **argv) {
 		}
 
 		std::vector< float > processed = input.samples;
-		BenchmarkMetrics metrics       = processSamples(selection, processed);
+		BenchmarkMetrics metrics       = processSamples(selection, processed, mixFactor);
 
 		std::optional< LoadedAudio > cleanReference;
 		if (parser.isSet(cleanReferenceOption)) {
@@ -444,8 +536,10 @@ int main(int argc, char **argv) {
 											 .toStdString());
 			}
 
-			metrics.siSdr = computeSiSdr(cleanReference->samples, processed);
-			metrics.segmentalSnr = computeSegmentalSnr(cleanReference->samples, processed);
+			const AlignedAudio aligned = alignForReferenceMetrics(cleanReference->samples, processed);
+			metrics.alignmentLagSamples = aligned.lagSamples;
+			metrics.siSdr               = computeSiSdr(aligned.reference, aligned.estimate);
+			metrics.segmentalSnr        = computeSegmentalSnr(aligned.reference, aligned.estimate);
 		}
 
 		writeOutputWav(parser.value(outputOption), processed, input.sampleRate);
@@ -457,6 +551,7 @@ int main(int argc, char **argv) {
 			{ "active_model_id", metrics.activeModelId.toStdString() },
 			{ "active_model_path", metrics.activeModelPath.toStdString() },
 			{ "used_fallback", metrics.usedFallback },
+			{ "mix_factor", metrics.mixFactor },
 			{ "input_path", parser.value(inputOption).toStdString() },
 			{ "input_format", input.resolvedFormat.toStdString() },
 			{ "output_path", parser.value(outputOption).toStdString() },
@@ -475,6 +570,8 @@ int main(int argc, char **argv) {
 			report["clean_reference_path"] = parser.value(cleanReferenceOption).toStdString();
 			report["clean_reference_format"] = cleanReference->resolvedFormat.toStdString();
 			report["clean_reference_sample_count"] = cleanReference->samples.size();
+			report["alignment_lag_samples"] = metrics.alignmentLagSamples;
+			report["alignment_lag_ms"] = static_cast< double >(metrics.alignmentLagSamples) * 1000.0 / SAMPLE_RATE;
 			report["si_sdr"] = *metrics.siSdr;
 			report["segmental_snr"] = *metrics.segmentalSnr;
 		}

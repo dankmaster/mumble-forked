@@ -130,6 +130,8 @@ def getDefaultValueForType(dataType):
         return "Settings::PushToTalk"
     elif dataType in ["VADSource"]:
         return "Settings::SignalToNoise"
+    elif dataType in ["InputGateMode"]:
+        return "Settings::InputGateStrict"
     elif dataType in ["LoopMode"]:
         return "Settings::Server"
     elif dataType in ["ChannelExpand"]:
