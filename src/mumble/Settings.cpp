@@ -958,6 +958,7 @@ void Settings::legacyLoad(const QString &path) {
 	LOAD(qbaMinimalViewState, "ui/minimalviewstate");
 	LOAD(qbaConfigGeometry, "ui/ConfigGeometry");
 	LOADENUM(wlWindowLayout, "ui/WindowLayout");
+	LOAD(bModernShellMotdExpanded, "ui/modernShellMotdExpanded");
 	LOAD(qsUsername, "ui/username");
 	LOAD(qsLastServer, "ui/server");
 	LOADENUM(ssFilter, "ui/serverfilter");

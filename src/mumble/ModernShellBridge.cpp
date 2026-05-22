@@ -7,6 +7,7 @@
 
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 
+#include "AudioInput.h"
 #include "Global.h"
 
 #include <QtCore/QDateTime>
@@ -18,7 +19,13 @@
 #include <QtGui/QPixmap>
 #include <QtWidgets/QApplication>
 
+#include <cmath>
+
 namespace {
+	int audioMeterPercent(const float normalizedLevel) {
+		return qBound(0, static_cast< int >(std::lround(normalizedLevel * 100.0f)), 100);
+	}
+
 	void appendModernShellConnectTrace(const QString &message) {
 		if (qEnvironmentVariableIntValue("MUMBLE_CONNECT_TRACE") == 0) {
 			return;
@@ -81,6 +88,10 @@ QVariantMap ModernShellBridge::snapshot() const {
 	return m_snapshot;
 }
 
+QVariantMap ModernShellBridge::modernDialogState() const {
+	return m_modernDialogState;
+}
+
 void ModernShellBridge::setSnapshot(const QVariantMap &snapshot) {
 	appendModernShellConnectTrace(
 		QStringLiteral("ModernShellBridge::setSnapshot enter keys=%1").arg(snapshot.keys().size()));
@@ -108,6 +119,38 @@ void ModernShellBridge::publishParticipantTalkState(const QVariantMap &state) {
 	}
 
 	emit participantTalkStateChanged(state);
+}
+
+void ModernShellBridge::publishModernDialogState(const QVariantMap &state) {
+	m_modernDialogState = state;
+	emit modernDialogStateChanged(state);
+}
+
+QVariantMap ModernShellBridge::currentAudioInputMeter() const {
+	QVariantMap meter;
+	meter.insert(QStringLiteral("available"), false);
+
+	const auto audioInput = Global::get().ai;
+	if (!audioInput) {
+		return meter;
+	}
+
+	const bool transmitting = audioInput->isTransmitting();
+	const bool hasProcessedInput =
+		audioInput->dPeakCleanMic < 0.0f || audioInput->dPeakSignal < 0.0f || audioInput->fSpeechProb > 0.0f
+		|| transmitting;
+	if (!hasProcessedInput) {
+		return meter;
+	}
+
+	const float amplitudeLevel    = 1.0f + (audioInput->dPeakCleanMic / 96.0f);
+	const float signalToNoiseProb = audioInput->fSpeechProb;
+	meter.insert(QStringLiteral("available"), true);
+	meter.insert(QStringLiteral("amplitude"), audioMeterPercent(amplitudeLevel));
+	meter.insert(QStringLiteral("signalToNoise"), audioMeterPercent(signalToNoiseProb));
+	meter.insert(QStringLiteral("transmitting"), transmitting);
+	meter.insert(QStringLiteral("peakCleanMicDb"), static_cast< double >(audioInput->dPeakCleanMic));
+	return meter;
 }
 
 void ModernShellBridge::ready() {
@@ -204,7 +247,7 @@ void ModernShellBridge::toggleSelfDeaf() {
 }
 
 void ModernShellBridge::openConnectDialog() {
-	emit connectDialogRequested();
+	emit modernDialogOpenRequested(QStringLiteral("connect"), QVariantMap());
 }
 
 void ModernShellBridge::disconnectServer() {
@@ -212,7 +255,24 @@ void ModernShellBridge::disconnectServer() {
 }
 
 void ModernShellBridge::openSettings() {
-	emit settingsRequested();
+	emit modernDialogOpenRequested(QStringLiteral("settings"), QVariantMap());
+}
+
+void ModernShellBridge::openModernDialog(const QString &dialogId, const QVariantMap &context) {
+	emit modernDialogOpenRequested(dialogId.trimmed(), context);
+}
+
+void ModernShellBridge::closeModernDialog(const QString &dialogId) {
+	emit modernDialogCloseRequested(dialogId.trimmed());
+}
+
+void ModernShellBridge::updateModernDialogField(const QString &dialogId, const QString &fieldId, const QVariant &value) {
+	emit modernDialogFieldUpdateRequested(dialogId.trimmed(), fieldId.trimmed(), value);
+}
+
+void ModernShellBridge::invokeModernDialogAction(const QString &dialogId, const QString &actionId,
+												 const QVariantMap &payload) {
+	emit modernDialogActionRequested(dialogId.trimmed(), actionId.trimmed(), payload);
 }
 
 bool ModernShellBridge::clipboardHasImage() const {

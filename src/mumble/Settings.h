@@ -435,6 +435,7 @@ struct Settings {
 	QByteArray qbaModernMainWindowState       = {};
 	QByteArray qbaModernMinimalViewGeometry   = {};
 	QByteArray qbaModernMinimalViewState      = {};
+	bool bModernShellMotdExpanded             = true;
 	QByteArray qbaConfigGeometry              = {};
 	QByteArray qbaImagePreviewGeometry        = {};
 	WindowLayout wlWindowLayout               = LayoutHybrid;

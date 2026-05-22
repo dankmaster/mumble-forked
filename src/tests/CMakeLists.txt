@@ -45,6 +45,7 @@ if (static)
 endif()
 
 if(client)
+	add_subdirectory("TestModernDialogControllers")
 	add_subdirectory("TestModernShellMenuSerializer")
 	add_subdirectory("TestXMLTools")
 	if(NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "FreeBSD")
