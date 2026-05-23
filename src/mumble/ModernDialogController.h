@@ -38,8 +38,6 @@ public:
 	QVariantMap openSettings(const Settings &settings, const QString &pageName = QString());
 	QVariantMap openFailedConnection(const QVariantMap &context);
 	QVariantMap openGenericDialog(const QVariantMap &dialog);
-	QVariantMap openMigrationNotice(const QString &dialogID, const QString &title, const QString &subtitle,
-									const QVariantList &fields = QVariantList());
 	QVariantMap close(const QString &dialogID = QString());
 	QVariantMap updateField(const QString &dialogID, const QString &fieldID, const QVariant &value);
 	ActionResult invokeAction(const QString &dialogID, const QString &actionID, const QVariantMap &payload);
@@ -56,11 +54,9 @@ private:
 	QString m_activeDialogID;
 	QVariantMap m_failedConnection;
 	QVariantMap m_genericDialog;
-	QVariantMap m_migrationNotice;
 
 	QVariantMap failedConnectionState() const;
 	QVariantMap genericDialogState() const;
-	QVariantMap migrationNoticeState() const;
 	ActionResult invokeFailedConnectionAction(const QString &actionID);
 	ActionResult invokeGenericDialogAction(const QString &actionID, const QVariantMap &payload) const;
 };

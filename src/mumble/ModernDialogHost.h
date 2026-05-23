@@ -14,6 +14,7 @@
 
 class ModernShellBridge;
 class ModernShellPage;
+class QTimer;
 class QVBoxLayout;
 class QWebChannel;
 class QWebEngineView;
@@ -39,18 +40,23 @@ protected:
 private slots:
 	void handleLoadFinished(bool ok);
 	void handleRenderProcessTerminated(QWebEnginePage::RenderProcessTerminationStatus status, int exitCode);
+	void republishDialogState();
 
 private:
 	bool start(QString *errorMessage = nullptr);
 	void applyDialogGeometry(const QVariantMap &state);
+	void queueDialogStateRepublish();
 
 	QVBoxLayout *m_layout = nullptr;
 	QWebEngineView *m_view = nullptr;
 	ModernShellPage *m_page = nullptr;
 	QWebChannel *m_channel = nullptr;
+	QTimer *m_stateRepublishTimer = nullptr;
 	ModernShellBridge *m_bridge = nullptr;
+	QVariantMap m_lastDialogState;
 	bool m_started = false;
 	bool m_open = false;
+	int m_stateRepublishRemaining = 0;
 	QString m_currentDialogID;
 };
 

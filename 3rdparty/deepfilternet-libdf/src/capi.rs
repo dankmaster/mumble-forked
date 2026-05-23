@@ -15,12 +15,24 @@ pub struct DFState {
 }
 
 impl DFState {
-    fn new(model_path: &str, channels: usize, atten_lim: f32, log_level: Option<&str>) -> Self {
+    fn new(
+        model_path: &str,
+        channels: usize,
+        atten_lim: f32,
+        log_level: Option<&str>,
+    ) -> Result<Self, String> {
         let logger = if let Some(level) = log_level {
-            let (logger, log_receiver) =
-                DfLogger::build(log::Level::from_str(level).expect("Could not parse log level"));
-            init_logger(logger);
-            Some(log_receiver)
+            match log::Level::from_str(level) {
+                Ok(level) => {
+                    let (logger, log_receiver) = DfLogger::build(level);
+                    init_logger(logger);
+                    Some(log_receiver)
+                }
+                Err(e) => {
+                    eprintln!("Could not parse log_level {}: {}", level, e);
+                    None
+                }
+            }
         } else {
             None
         };
@@ -32,11 +44,11 @@ impl DFState {
         );
         r_params = r_params.with_post_filter(0.0f32);  //post_filter_beta
         r_params = r_params.with_mask_reduce(ReduceMask::MAX);  //reduce_mask
-        let df_params =
-            DfParams::new(PathBuf::from(model_path)).expect("Could not load model from path");
-        let m =
-            DfTract::new(df_params, &r_params).expect("Could not initialize DeepFilter runtime.");
-        DFState { m, logger }
+        let df_params = DfParams::new(PathBuf::from(model_path))
+            .map_err(|e| format!("Could not load model from path '{}': {}", model_path, e))?;
+        let m = DfTract::new(df_params, &r_params)
+            .map_err(|e| format!("Could not initialize DeepFilter runtime: {}", e))?;
+        Ok(DFState { m, logger })
     }
     /// Returns the next log message as String
     fn get_next_log_message(&mut self) -> Option<String> {
@@ -86,8 +98,19 @@ pub unsafe extern "C" fn df_create(
     atten_lim: f32,
     log_level: *const c_char,
 ) -> *mut DFState {
+    if path.is_null() {
+        eprintln!("DeepFilterNet initialization failed: model path is null");
+        return std::ptr::null_mut();
+    }
+
     let c_str = CStr::from_ptr(path);
-    let path = c_str.to_str().unwrap();
+    let path = match c_str.to_str() {
+        Ok(path) => path,
+        Err(e) => {
+            eprintln!("Could not parse DeepFilterNet model path: {}", e);
+            return std::ptr::null_mut();
+        }
+    };
     let log_level = if log_level.is_null() {
         None
     } else {
@@ -99,8 +122,13 @@ pub unsafe extern "C" fn df_create(
             }
         }
     };
-    let df = DFState::new(path, 1, atten_lim, log_level);
-    Box::into_raw(df.boxed())
+    match DFState::new(path, 1, atten_lim, log_level) {
+        Ok(df) => Box::into_raw(df.boxed()),
+        Err(e) => {
+            eprintln!("DeepFilterNet initialization failed: {}", e);
+            std::ptr::null_mut()
+        }
+    }
 }
 
 /// Get DeepFilterNet frame size in samples.

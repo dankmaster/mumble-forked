@@ -32,13 +32,6 @@ namespace {
 		return section;
 	}
 
-	QVariantMap noteField(const QString &text) {
-		QVariantMap field;
-		field.insert(QStringLiteral("type"), QStringLiteral("note"));
-		field.insert(QStringLiteral("text"), text);
-		return field;
-	}
-
 	void collectFieldValues(const QVariantList &sections, QVariantMap &values) {
 		for (const QVariant &sectionValue : sections) {
 			const QVariantMap section = sectionValue.toMap();
@@ -151,17 +144,6 @@ QVariantMap ModernDialogController::openGenericDialog(const QVariantMap &dialog)
 	return state();
 }
 
-QVariantMap ModernDialogController::openMigrationNotice(const QString &dialogID, const QString &title,
-														const QString &subtitle, const QVariantList &fields) {
-	m_migrationNotice.clear();
-	m_migrationNotice.insert(QStringLiteral("id"), dialogID.trimmed().isEmpty() ? QStringLiteral("modernMigration") : dialogID.trimmed());
-	m_migrationNotice.insert(QStringLiteral("title"), title);
-	m_migrationNotice.insert(QStringLiteral("subtitle"), subtitle);
-	m_migrationNotice.insert(QStringLiteral("fields"), fields);
-	m_activeDialogID = m_migrationNotice.value(QStringLiteral("id")).toString();
-	return state();
-}
-
 QVariantMap ModernDialogController::close(const QString &dialogID) {
 	if (dialogID.trimmed().isEmpty() || dialogID == m_activeDialogID) {
 		m_activeDialogID.clear();
@@ -215,12 +197,6 @@ ModernDialogController::ActionResult ModernDialogController::invokeAction(const 
 		result = invokeFailedConnectionAction(actionID);
 	} else if (dialogID == m_genericDialog.value(QStringLiteral("id")).toString()) {
 		result = invokeGenericDialogAction(actionID, payload);
-	} else if (dialogID == m_migrationNotice.value(QStringLiteral("id")).toString()) {
-		if (actionID == QLatin1String("close")) {
-			result.closeDialog = true;
-		} else {
-			result.stateChanged = false;
-		}
 	} else {
 		result.stateChanged = false;
 	}
@@ -244,9 +220,6 @@ QVariantMap ModernDialogController::state() const {
 	}
 	if (!m_activeDialogID.isEmpty() && m_activeDialogID == m_genericDialog.value(QStringLiteral("id")).toString()) {
 		return genericDialogState();
-	}
-	if (!m_activeDialogID.isEmpty() && m_activeDialogID == m_migrationNotice.value(QStringLiteral("id")).toString()) {
-		return migrationNoticeState();
 	}
 	return closedState();
 }
@@ -298,29 +271,6 @@ QVariantMap ModernDialogController::failedConnectionState() const {
 QVariantMap ModernDialogController::genericDialogState() const {
 	QVariantMap dialog = m_genericDialog;
 	dialog.insert(QStringLiteral("open"), true);
-	return dialog;
-}
-
-QVariantMap ModernDialogController::migrationNoticeState() const {
-	QVariantMap dialog;
-	dialog.insert(QStringLiteral("open"), true);
-	dialog.insert(QStringLiteral("id"), m_migrationNotice.value(QStringLiteral("id")).toString());
-	dialog.insert(QStringLiteral("kind"), QStringLiteral("migrationNotice"));
-	dialog.insert(QStringLiteral("title"), m_migrationNotice.value(QStringLiteral("title")).toString());
-	dialog.insert(QStringLiteral("subtitle"), m_migrationNotice.value(QStringLiteral("subtitle")).toString());
-
-	const QVariantList fields = m_migrationNotice.value(QStringLiteral("fields")).toList();
-	dialog.insert(QStringLiteral("sections"),
-				  QVariantList { sectionItem(QObject::tr("Modern migration status"),
-											 fields.isEmpty()
-												 ? QVariantList { noteField(QObject::tr("This workflow still needs a Modern implementation in this branch. The legacy window is intentionally blocked from Modern layout.")) }
-												 : fields) });
-
-	QVariantList actions;
-	actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("close"), QObject::tr("Close"), true, false,
-															QStringLiteral("accent")));
-	dialog.insert(QStringLiteral("actions"), actions);
-	dialog.insert(QStringLiteral("primaryActionId"), QStringLiteral("close"));
 	return dialog;
 }
 

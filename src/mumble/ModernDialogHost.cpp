@@ -10,6 +10,7 @@
 #include "ModernShellBridge.h"
 #include "ModernShellPage.h"
 
+#include <QtCore/QTimer>
 #include <QtCore/QUrl>
 #include <QtGui/QCloseEvent>
 #include <QtWidgets/QVBoxLayout>
@@ -52,9 +53,14 @@ ModernDialogHost::ModernDialogHost(ModernShellBridge *bridge, QWidget *parent)
 	m_view->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessFileUrls, false);
 	m_view->settings()->setAttribute(QWebEngineSettings::PlaybackRequiresUserGesture, false);
 
+	m_stateRepublishTimer = new QTimer(this);
+	m_stateRepublishTimer->setSingleShot(true);
+	m_stateRepublishTimer->setInterval(75);
+
 	connect(m_view, &QWebEngineView::loadFinished, this, &ModernDialogHost::handleLoadFinished);
 	connect(m_page, &QWebEnginePage::renderProcessTerminated, this,
 			&ModernDialogHost::handleRenderProcessTerminated);
+	connect(m_stateRepublishTimer, &QTimer::timeout, this, &ModernDialogHost::republishDialogState);
 	connect(m_page, &ModernShellPage::externalNavigationRequested, this, [](const QUrl &url) {
 		Q_UNUSED(url);
 	});
@@ -79,6 +85,7 @@ bool ModernDialogHost::showDialogState(const QVariantMap &state, QString *errorM
 
 	const QString nextDialogID = state.value(QStringLiteral("id")).toString();
 	const bool shouldPresent   = !m_open || !isVisible() || m_currentDialogID != nextDialogID;
+	m_lastDialogState          = state;
 	m_open                    = true;
 	m_currentDialogID         = nextDialogID;
 	const QString title = state.value(QStringLiteral("title")).toString().trimmed();
@@ -90,12 +97,20 @@ bool ModernDialogHost::showDialogState(const QVariantMap &state, QString *errorM
 		raise();
 		activateWindow();
 	}
+	if (shouldPresent) {
+		queueDialogStateRepublish();
+	}
 	return true;
 }
 
 void ModernDialogHost::hideDialog() {
 	m_open = false;
+	m_stateRepublishRemaining = 0;
+	if (m_stateRepublishTimer) {
+		m_stateRepublishTimer->stop();
+	}
 	m_currentDialogID.clear();
+	m_lastDialogState.clear();
 	hide();
 }
 
@@ -144,7 +159,7 @@ void ModernDialogHost::applyDialogGeometry(const QVariantMap &state) {
 		desiredSize = QSize(880, 620);
 	} else if (kind == QLatin1String("settings")) {
 		desiredSize = QSize(980, 700);
-	} else if (kind == QLatin1String("failedConnection") || kind == QLatin1String("migrationNotice")) {
+	} else if (kind == QLatin1String("failedConnection")) {
 		desiredSize = QSize(600, 420);
 	}
 
@@ -161,6 +176,7 @@ void ModernDialogHost::applyDialogGeometry(const QVariantMap &state) {
 
 void ModernDialogHost::handleLoadFinished(const bool ok) {
 	if (ok) {
+		queueDialogStateRepublish();
 		return;
 	}
 
@@ -173,6 +189,31 @@ void ModernDialogHost::handleRenderProcessTerminated(const QWebEnginePage::Rende
 	Q_UNUSED(status);
 	m_started = false;
 	emit hostFailed(tr("The modern dialog renderer stopped unexpectedly with exit code %1.").arg(exitCode));
+}
+
+void ModernDialogHost::queueDialogStateRepublish() {
+	if (!m_open || !m_bridge || !m_stateRepublishTimer || m_lastDialogState.isEmpty()) {
+		return;
+	}
+
+	m_stateRepublishRemaining = 4;
+	if (!m_stateRepublishTimer->isActive()) {
+		m_stateRepublishTimer->start();
+	}
+}
+
+void ModernDialogHost::republishDialogState() {
+	if (!m_open || !m_bridge || m_lastDialogState.isEmpty()
+		|| m_lastDialogState.value(QStringLiteral("id")).toString() != m_currentDialogID) {
+		m_stateRepublishRemaining = 0;
+		return;
+	}
+
+	m_bridge->publishModernDialogState(m_lastDialogState);
+	--m_stateRepublishRemaining;
+	if (m_stateRepublishRemaining > 0 && m_stateRepublishTimer) {
+		m_stateRepublishTimer->start(125);
+	}
 }
 
 #endif // defined(MUMBLE_HAS_MODERN_LAYOUT)

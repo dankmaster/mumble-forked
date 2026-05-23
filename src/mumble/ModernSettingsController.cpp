@@ -1584,7 +1584,7 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 
 	return QVariantList {
 		sectionItem(QObject::tr("Modern layout"), QVariantList {
-												 noteField(QObject::tr("This fork now uses the Modern layout as the visible client shell. Classic layout switching is disabled for this migration branch.")) }),
+												 noteField(QObject::tr("This fork now uses the Modern layout as the visible client shell. Classic layout switching is disabled.")) }),
 		sectionItem(QObject::tr("Window behavior"), QVariantList {
 												   selectField(QStringLiteral("look.quitBehavior"),
 															   QObject::tr("Quit behavior"),

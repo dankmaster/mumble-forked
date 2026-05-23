@@ -17,6 +17,7 @@
 #include <QtNetwork/QAbstractSocket>
 #include <QtWidgets/QMainWindow>
 
+#include "ACL.h"
 #include "CustomElements.h"
 #include "Log.h"
 #include "MUComboBox.h"
@@ -323,20 +324,27 @@ public:
 											unsigned int lastReadMessageID, std::size_t unreadCount);
 	std::size_t totalCachedPersistentChatUnreadCount() const;
 	bool navigateToPersistentChatScope(MumbleProto::ChatScope scope, unsigned int scopeID, bool forceReload = false);
+	ChanACL::Permissions channelPermissions(Channel *channel, bool requestPermissions = true) const;
+	bool canEditChannelACL(Channel *channel) const;
 	bool canCreateVoiceRoom(Channel *channel) const;
 	bool canCreateAnyVoiceRoom() const;
 	bool voiceRoomCreationForcesTemporary(Channel *channel) const;
 	bool canCreateTextRoom() const;
 	void createRoom(RoomCreateType preferredType, Channel *preferredVoiceParent = nullptr);
 	bool canManagePersistentTextChannels() const;
+	bool canEditPersistentTextChannelACL(const PersistentTextChannel &textChannel) const;
 	std::optional< PersistentTextChannel > selectedPersistentTextChannel() const;
 	bool promptForPersistentTextChannel(PersistentTextChannel &textChannel, bool isNew);
 	void openServerSettingsDialog();
 	void createPersistentTextChannel();
 	void editPersistentTextChannel();
+	void editPersistentTextChannel(unsigned int textChannelID);
 	void removePersistentTextChannel();
+	void removePersistentTextChannel(unsigned int textChannelID);
 	void editPersistentTextChannelACL();
+	void editPersistentTextChannelACL(unsigned int textChannelID);
 	void setDefaultPersistentTextChannel();
+	void setDefaultPersistentTextChannel(unsigned int textChannelID);
 	void showPersistentTextChannelContextMenu(const QPoint &position);
 	void updatePersistentTextChannelControls();
 	void showLogContextMenu(LogTextBrowser *browser, const QPoint &position);
@@ -656,6 +664,8 @@ protected:
 	QStringList m_modernShellCoalescedPresenceOrder;
 	bool m_modernShellSnapshotPendingAfterNativeMoveResize = false;
 	bool m_pendingClassicAclDialog                         = false;
+	QHash< int, QString > m_modernAclRegisteredUserNames;
+	bool m_modernAclUserListRequestPending = false;
 #else
 	quint64 m_modernShellMessagePatchGeneration = 0;
 #endif
@@ -678,7 +688,6 @@ protected:
 	void openModernSettingsDialog(const QString &pageName = QString());
 	bool openModernFailedConnectionDialog(const ConnectDetails &details, ConnectionFailType type);
 	void openModernGenericDialog(const QVariantMap &dialog);
-	void openModernMigrationNotice(const QString &dialogID, const QString &title, const QString &subtitle);
 	void openModernServerInformationDialog();
 	void openModernServerTokensDialog(const QStringList &tokens = QStringList(), bool useProvidedTokens = false);
 	void openModernServerUserListLoadingDialog();
@@ -687,6 +696,16 @@ protected:
 	void openModernServerBanListDialog(const MumbleProto::BanList &msg);
 	void openModernAclRequestDialog(Channel *channel);
 	void openModernAclDialog(const MumbleProto::ACL &msg);
+	bool handleModernAclQueryUsers(const MumbleProto::QueryUsers &msg);
+	bool handleModernAclUserList(const MumbleProto::UserList &msg);
+	void openModernCertificateDialog(const QVariantMap &fieldValues = QVariantMap(),
+									 const QVariantMap &errors = QVariantMap(),
+									 const QString &statusMessage = QString());
+	void openModernSearchDialog(const QVariantMap &fieldValues = QVariantMap(),
+								const QVariantMap &errors = QVariantMap());
+	void openModernVoiceRecorderDialog(const QVariantMap &fieldValues = QVariantMap(),
+									   const QVariantMap &errors = QVariantMap(),
+									   const QString &statusMessage = QString());
 	void openModernCreateRoomDialog(RoomCreateType preferredType, Channel *preferredVoiceParent = nullptr);
 	void openModernAudioStatsDialog();
 	void openModernAboutDialog();

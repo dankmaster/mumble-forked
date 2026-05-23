@@ -122,6 +122,14 @@ namespace msdb = ::mumble::server::db;
 		sendMessage(uSource, mppd);                                               \
 	}
 
+static void broadcastTextChannelSync(Server *server, const QHash< unsigned int, ServerUser * > &users) {
+	for (ServerUser *currentUser : users) {
+		if (currentUser && currentUser->sState == ServerUser::Authenticated) {
+			server->sendTextChannelSync(currentUser);
+		}
+	}
+}
+
 /// A helper class for managing temporary access tokens.
 /// It will add the tokens in the comstructor and remove them again in the destructor effectively
 /// turning the tokens into a scope-based property.
@@ -4978,13 +4986,6 @@ void Server::msgTextChannelSync(ServerUser *uSource, MumbleProto::TextChannelSyn
 		return;
 	}
 
-	auto broadcastTextChannelSync = [this]() {
-		for (ServerUser *currentUser : qhUsers) {
-			if (currentUser && currentUser->sState == ServerUser::Authenticated) {
-				sendTextChannelSync(currentUser);
-			}
-		}
-	};
 	auto refreshStoredDefaultTextChannel = [this]() {
 		std::vector<::msdb::DBTextChannel > textChannels = m_dbWrapper.getTextChannels(iServerNum);
 		std::sort(textChannels.begin(), textChannels.end(), sortTextChannelsForPresentation);
@@ -5009,7 +5010,7 @@ void Server::msgTextChannelSync(ServerUser *uSource, MumbleProto::TextChannelSyn
 
 		m_dbWrapper.removeTextChannel(iServerNum, textChannelID);
 		refreshStoredDefaultTextChannel();
-		broadcastTextChannelSync();
+		broadcastTextChannelSync(this, qhUsers);
 		return;
 	}
 
@@ -5024,7 +5025,7 @@ void Server::msgTextChannelSync(ServerUser *uSource, MumbleProto::TextChannelSyn
 		}
 
 		storeDefaultTextChannelID(m_dbWrapper, iServerNum, textChannelID);
-		broadcastTextChannelSync();
+		broadcastTextChannelSync(this, qhUsers);
 		return;
 	}
 
@@ -5061,7 +5062,7 @@ void Server::msgTextChannelSync(ServerUser *uSource, MumbleProto::TextChannelSyn
 		if (!configuredDefaultTextChannel || !containsTextChannelID(textChannels, *configuredDefaultTextChannel)) {
 			storeDefaultTextChannelID(m_dbWrapper, iServerNum, createdTextChannel.textChannelID);
 		}
-		broadcastTextChannelSync();
+		broadcastTextChannelSync(this, qhUsers);
 		return;
 	}
 
@@ -5080,7 +5081,7 @@ void Server::msgTextChannelSync(ServerUser *uSource, MumbleProto::TextChannelSyn
 	existing->aclChannelID = aclChannelID;
 	existing->position     = position;
 	m_dbWrapper.updateTextChannel(*existing);
-	broadcastTextChannelSync();
+	broadcastTextChannelSync(this, qhUsers);
 }
 
 /// Helper function to log the groups of the given channel.
@@ -5359,6 +5360,8 @@ void Server::msgACL(ServerUser *uSource, MumbleProto::ACL &msg) {
 
 			sendMessage(user, mpcs);
 		}
+
+		broadcastTextChannelSync(this, qhUsers);
 	}
 }
 

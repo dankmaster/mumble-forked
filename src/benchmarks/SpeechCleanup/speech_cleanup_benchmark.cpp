@@ -11,6 +11,7 @@
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QFileInfo>
+#include <QTextStream>
 
 #include <sndfile.h>
 
@@ -68,6 +69,19 @@ namespace {
 		std::vector< float > estimate;
 		int lagSamples = 0;
 	};
+
+	bool hasHelpArgument(int argc, char **argv) {
+		for (int i = 1; i < argc; ++i) {
+			const QString argument = QString::fromLocal8Bit(argv[i]);
+			if (argument == QLatin1String("--help") || argument == QLatin1String("-h")
+				|| argument == QLatin1String("-?") || argument == QLatin1String("/?")
+				|| argument == QLatin1String("--help-all")) {
+				return true;
+			}
+		}
+
+		return false;
+	}
 
 	InputFormat parseInputFormat(const QString &value) {
 		const QString normalized = value.trimmed().toLower();
@@ -493,6 +507,11 @@ int main(int argc, char **argv) {
 	parser.addOption(cleanChannelsOption);
 	parser.addOption(outputOption);
 	parser.addOption(reportOption);
+
+	if (hasHelpArgument(argc, argv)) {
+		QTextStream(stdout) << parser.helpText();
+		return 0;
+	}
 
 	parser.process(app);
 

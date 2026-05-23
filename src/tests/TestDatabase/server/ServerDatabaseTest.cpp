@@ -983,6 +983,17 @@ void ServerDatabaseTest::groupTable_general() {
 
 	table.addGroup(group);
 
+	::msdb::DBGroup sameNameRootGroup = group;
+	sameNameRootGroup.groupID         = table.getFreeGroupID(group.serverID);
+	sameNameRootGroup.channelID       = rootChannel.channelID;
+
+	table.addGroup(sameNameRootGroup);
+
+	QCOMPARE(table.findGroupID(existingServerID, group.channelID, group.name),
+			 std::optional< unsigned int >(group.groupID));
+	QCOMPARE(table.findGroupID(existingServerID, sameNameRootGroup.channelID, sameNameRootGroup.name),
+			 std::optional< unsigned int >(sameNameRootGroup.groupID));
+
 	::msdb::DBGroup otherGroup = group;
 	otherGroup.groupID         = table.getFreeGroupID(group.serverID);
 	otherGroup.channelID       = nonExistingChannelID;
@@ -1000,8 +1011,9 @@ void ServerDatabaseTest::groupTable_general() {
 	table.addGroup(otherGroup);
 
 	std::vector<::msdb::DBGroup > expectedGroups = { group, otherGroup };
+	std::vector<::msdb::DBGroup > expectedRootGroups = { sameNameRootGroup };
 
-	QVERIFY(table.getAllGroups(existingServerID, rootChannel.channelID).empty());
+	QCOMPARE(table.getAllGroups(existingServerID, rootChannel.channelID), expectedRootGroups);
 	std::vector<::msdb::DBGroup > fetchedGroups = table.getAllGroups(group.serverID, group.channelID);
 	QCOMPARE(fetchedGroups.size(), static_cast< std::size_t >(table.countGroups(group.serverID, group.channelID)));
 	QVERIFY(fetchedGroups.size() == expectedGroups.size()

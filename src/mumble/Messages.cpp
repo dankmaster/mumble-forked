@@ -1559,6 +1559,11 @@ void MainWindow::msgACL(const MumbleProto::ACL &msg) {
 ///
 /// @param msg The message object with the respective information
 void MainWindow::msgQueryUsers(const MumbleProto::QueryUsers &msg) {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (handleModernAclQueryUsers(msg)) {
+		return;
+	}
+#endif
 	if (aclEdit)
 		aclEdit->returnQuery(msg);
 }
@@ -1685,6 +1690,9 @@ void MainWindow::msgVersion(const MumbleProto::Version &msg) {
 /// @param msg The message object containing the user list
 void MainWindow::msgUserList(const MumbleProto::UserList &msg) {
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (handleModernAclUserList(msg)) {
+		return;
+	}
 	if (usesModernShell()) {
 		openModernServerUserListDialog(msg);
 		return;

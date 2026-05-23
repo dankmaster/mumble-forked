@@ -12,6 +12,11 @@
 	let modernDialogFavoriteMenu = null;
 	let modernDialogFavoriteClickTimer = 0;
 	let pendingModernDialogFieldFocus = "";
+	let modernDialogSelectState = null;
+	const bridgeRetryDelayMs = 50;
+	const bridgeRetryLimit = 160;
+	let bridgeRetryTimer = 0;
+	let bridgeRetryCount = 0;
 
 	const refs = {
 		layer: document.getElementById("modern-dialog-layer"),
@@ -40,8 +45,20 @@
 		}
 	}
 
+	function scheduleBridgeRetry() {
+		if (modernBridge || bridgeRetryTimer || bridgeRetryCount >= bridgeRetryLimit) {
+			return;
+		}
+
+		bridgeRetryCount += 1;
+		bridgeRetryTimer = window.setTimeout(function() {
+			bridgeRetryTimer = 0;
+			ensureBridge();
+		}, bridgeRetryDelayMs);
+	}
+
 	async function ensureBridge() {
-		if (!window.qt || !window.qt.webChannelTransport || modernBridge) {
+		if (modernBridge) {
 			return;
 		}
 
@@ -51,19 +68,28 @@
 					new QWebChannel(qt.webChannelTransport, function(channel) {
 						modernBridge = channel.objects.modernBridge || null;
 						if (modernBridge) {
+							bridgeRetryCount = 0;
 							if (modernBridge.modernDialogStateChanged
 									&& typeof modernBridge.modernDialogStateChanged.connect === "function") {
 								modernBridge.modernDialogStateChanged.connect(syncModernDialogState);
 							}
 							syncModernDialogState(modernBridge.modernDialogState || { open: false });
+						} else {
+							scheduleBridgeRetry();
 						}
 						resolve();
 					});
 				} catch (error) {
 					console.warn("Modern dialog bridge initialization failed:", error);
+					scheduleBridgeRetry();
 					resolve();
 				}
 			});
+		}
+
+		if (!window.qt || !window.qt.webChannelTransport) {
+			scheduleBridgeRetry();
+			return;
 		}
 
 		if (window.QWebChannel) {
@@ -81,6 +107,8 @@
 				};
 				script.onerror = function() {
 					console.warn("Unable to load qwebchannel.js for the modern dialog.");
+					bridgeLoadPromise = null;
+					scheduleBridgeRetry();
 					resolve();
 				};
 				document.head.appendChild(script);
@@ -229,6 +257,28 @@
 		notifyBridge("updateModernDialogField", dialogId, fieldId, modernDialogFieldValue(field, input));
 	}
 
+	function updateModernDialogFieldValue(fieldId, value) {
+		const dialogId = String(modernDialogState && modernDialogState.id || "");
+		fieldId = String(fieldId || "");
+		if (!dialogId || !fieldId) {
+			return;
+		}
+		notifyBridge("updateModernDialogField", dialogId, fieldId, value);
+	}
+
+	function rememberModernDialogFieldValue(fieldId, value) {
+		if (!modernDialogState || !Array.isArray(modernDialogState.sections)) {
+			return;
+		}
+		modernDialogState.sections.forEach(function(section) {
+			(section.fields || []).forEach(function(field) {
+				if (String(field.id || "") === String(fieldId || "")) {
+					field.value = value;
+				}
+			});
+		});
+	}
+
 	function modernDialogOptionHint(option) {
 		return String(option && (option.tooltip || option.hint) || "");
 	}
@@ -248,6 +298,227 @@
 		} else {
 			input.removeAttribute("title");
 		}
+	}
+
+	function selectedModernDialogSelectOption(select) {
+		if (!select || !select.options || select.selectedIndex < 0) {
+			return null;
+		}
+		return select.options[select.selectedIndex] || null;
+	}
+
+	function syncModernDialogSelectShell(shell) {
+		if (!shell) {
+			return;
+		}
+		const select = shell.querySelector("select");
+		const button = shell.querySelector(".modern-select-button");
+		const label = shell.querySelector(".modern-select-label");
+		if (!select || !button || !label) {
+			return;
+		}
+		const selectedOption = selectedModernDialogSelectOption(select);
+		label.textContent = selectedOption ? selectedOption.textContent : "";
+		button.disabled = select.disabled;
+		shell.classList.toggle("is-disabled", select.disabled);
+		const title = select.title || (selectedOption ? selectedOption.title : "");
+		if (title) {
+			button.title = title;
+		} else {
+			button.removeAttribute("title");
+		}
+	}
+
+	function closeModernDialogSelect() {
+		const state = modernDialogSelectState;
+		if (!state) {
+			return;
+		}
+		state.shell.classList.remove("is-open");
+		state.button.setAttribute("aria-expanded", "false");
+		if (state.menu.parentNode) {
+			state.menu.parentNode.removeChild(state.menu);
+		}
+		modernDialogSelectState = null;
+	}
+
+	function positionModernDialogSelectMenu() {
+		const state = modernDialogSelectState;
+		if (!state || !document.body.contains(state.shell)) {
+			closeModernDialogSelect();
+			return;
+		}
+		const bounds = state.button.getBoundingClientRect();
+		const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+		const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+		const width = Math.max(140, bounds.width);
+		const left = Math.max(8, Math.min(bounds.left, viewportWidth - width - 8));
+		const spaceBelow = viewportHeight - bounds.bottom - 8;
+		const spaceAbove = bounds.top - 8;
+		const openAbove = spaceBelow < 150 && spaceAbove > spaceBelow;
+		const available = Math.max(76, openAbove ? spaceAbove : spaceBelow);
+		const maxHeight = Math.min(260, available - 4);
+		state.menu.style.left = left + "px";
+		state.menu.style.width = width + "px";
+		state.menu.style.maxHeight = Math.max(72, maxHeight) + "px";
+		state.menu.style.top = (openAbove ? Math.max(8, bounds.top - Math.max(72, maxHeight) - 4) : bounds.bottom + 4) + "px";
+	}
+
+	function focusModernDialogSelectItem(menu, delta) {
+		const items = Array.prototype.slice.call(menu.querySelectorAll(".modern-select-option:not(:disabled)"));
+		if (!items.length) {
+			return;
+		}
+		let index = items.indexOf(document.activeElement);
+		if (index < 0) {
+			index = items.findIndex(function(item) {
+				return item.classList.contains("is-selected");
+			});
+		}
+		index = Math.max(0, Math.min(items.length - 1, index + delta));
+		items[index].focus({ preventScroll: true });
+	}
+
+	function openModernDialogSelect(shell) {
+		const select = shell.querySelector("select");
+		const button = shell.querySelector(".modern-select-button");
+		if (!select || !button || select.disabled) {
+			return;
+		}
+		if (modernDialogSelectState && modernDialogSelectState.shell === shell) {
+			closeModernDialogSelect();
+			return;
+		}
+		closeModernDialogSelect();
+
+		const menu = document.createElement("div");
+		menu.className = "modern-select-menu";
+		menu.setAttribute("role", "listbox");
+		Array.prototype.slice.call(select.options).forEach(function(option, index) {
+			if (option.hidden) {
+				return;
+			}
+			const item = document.createElement("button");
+			item.type = "button";
+			item.className = "modern-select-option" + (index === select.selectedIndex ? " is-selected" : "");
+			item.setAttribute("role", "option");
+			item.setAttribute("aria-selected", index === select.selectedIndex ? "true" : "false");
+			item.disabled = option.disabled;
+			item.textContent = option.textContent;
+			if (option.title) {
+				item.title = option.title;
+			}
+			item.addEventListener("click", function(event) {
+				event.preventDefault();
+				event.stopPropagation();
+				if (option.disabled) {
+					return;
+				}
+				select.selectedIndex = index;
+				syncModernDialogSelectShell(shell);
+				button.focus({ preventScroll: true });
+				select.dispatchEvent(new Event("change", { bubbles: true }));
+				closeModernDialogSelect();
+			});
+			menu.appendChild(item);
+		});
+		menu.addEventListener("click", function(event) {
+			event.stopPropagation();
+		});
+		menu.addEventListener("keydown", function(event) {
+			if (event.key === "Escape") {
+				event.preventDefault();
+				event.stopPropagation();
+				closeModernDialogSelect();
+				button.focus({ preventScroll: true });
+				return;
+			}
+			if (event.key === "ArrowDown") {
+				event.preventDefault();
+				event.stopPropagation();
+				focusModernDialogSelectItem(menu, 1);
+				return;
+			}
+			if (event.key === "ArrowUp") {
+				event.preventDefault();
+				event.stopPropagation();
+				focusModernDialogSelectItem(menu, -1);
+				return;
+			}
+			if (event.key === "Home" || event.key === "End") {
+				event.preventDefault();
+				event.stopPropagation();
+				focusModernDialogSelectItem(menu, event.key === "Home" ? -100000 : 100000);
+				return;
+			}
+			if (event.key === "Tab") {
+				closeModernDialogSelect();
+			}
+		});
+
+		document.body.appendChild(menu);
+		modernDialogSelectState = { shell: shell, select: select, button: button, menu: menu };
+		shell.classList.add("is-open");
+		button.setAttribute("aria-expanded", "true");
+		positionModernDialogSelectMenu();
+		const selectedItem = menu.querySelector(".modern-select-option.is-selected:not(:disabled)")
+			|| menu.querySelector(".modern-select-option:not(:disabled)");
+		if (selectedItem) {
+			selectedItem.focus({ preventScroll: true });
+		}
+	}
+
+	function enhanceModernDialogSelects(root) {
+		if (!root) {
+			return;
+		}
+		Array.prototype.slice.call(root.querySelectorAll("select")).forEach(function(select) {
+			if (select.classList.contains("modern-select-native")) {
+				return;
+			}
+			const shell = document.createElement("span");
+			shell.className = "modern-select";
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "modern-select-button";
+			button.setAttribute("aria-haspopup", "listbox");
+			button.setAttribute("aria-expanded", "false");
+			const fieldId = select.dataset.modernDialogFieldId || "";
+			if (fieldId) {
+				button.dataset.modernDialogFieldId = fieldId;
+				select.removeAttribute("data-modern-dialog-field-id");
+			}
+
+			const label = document.createElement("span");
+			label.className = "modern-select-label";
+			const arrow = document.createElement("span");
+			arrow.className = "modern-select-arrow";
+			button.appendChild(label);
+			button.appendChild(arrow);
+
+			select.classList.add("modern-select-native");
+			select.tabIndex = -1;
+			select.setAttribute("aria-hidden", "true");
+			select.parentNode.insertBefore(shell, select);
+			shell.appendChild(select);
+			shell.appendChild(button);
+			syncModernDialogSelectShell(shell);
+
+			button.addEventListener("click", function(event) {
+				event.preventDefault();
+				event.stopPropagation();
+				openModernDialogSelect(shell);
+			});
+			button.addEventListener("keydown", function(event) {
+				if (event.key === "Enter" || event.key === " " || event.key === "ArrowDown" || event.key === "ArrowUp") {
+					event.preventDefault();
+					openModernDialogSelect(shell);
+				}
+			});
+			select.addEventListener("change", function() {
+				syncModernDialogSelectShell(shell);
+			});
+		});
 	}
 
 	function closeModernDialogFavoriteMenu() {
@@ -970,6 +1241,1756 @@
 		}
 	}
 
+	function aclCloneModel(model) {
+		try {
+			return JSON.parse(JSON.stringify(model || {}));
+		} catch (error) {
+			return {};
+		}
+	}
+
+	function aclCurrentModel(field, fallback) {
+		return aclCloneModel((field && field.value) || fallback || {});
+	}
+
+	function aclNumberListFromText(text) {
+		const seen = {};
+		return String(text || "")
+			.split(/[,\s]+/)
+			.map(function(part) {
+				const cleaned = part.replace(/^#/, "");
+				const value = Number(cleaned);
+				return Number.isInteger(value) && value >= 0 ? value : null;
+			})
+			.filter(function(value) {
+				if (value === null || seen[value]) {
+					return false;
+				}
+				seen[value] = true;
+				return true;
+			});
+	}
+
+	function aclNumberListToText(values) {
+		return (values || []).map(function(value) {
+			return String(value);
+		}).join(", ");
+	}
+
+	function aclUpdateModel(field, model, rerender) {
+		field.value = model;
+		rememberModernDialogFieldValue(field.id, model);
+		updateModernDialogFieldValue(field.id, model);
+		if (rerender) {
+			renderModernDialog();
+		}
+	}
+
+	function aclTogglePermission(values, bit, checked) {
+		values = (values || []).slice();
+		const index = values.indexOf(bit);
+		if (checked && index < 0) {
+			values.push(bit);
+		} else if (!checked && index >= 0) {
+			values.splice(index, 1);
+		}
+		values.sort(function(left, right) {
+			return left - right;
+		});
+		return values;
+	}
+
+	function appendAclGroupEditor(container, field, model) {
+		const groupHeader = document.createElement("div");
+		groupHeader.className = "modern-dialog-acl-subheader";
+		const title = document.createElement("span");
+		title.textContent = "Groups";
+		const addButton = document.createElement("button");
+		addButton.type = "button";
+		addButton.className = "chip-button";
+		addButton.textContent = "Add group";
+		addButton.addEventListener("click", function(event) {
+			event.preventDefault();
+			const next = aclCurrentModel(field, model);
+			next.groups = next.groups || [];
+			next.groups.push({
+				name: "newgroup",
+				inherit: true,
+				inheritable: true,
+				inherited: false,
+				add: [],
+				remove: [],
+				addText: "",
+				removeText: "",
+				inheritedMembers: []
+			});
+			aclUpdateModel(field, next, true);
+		});
+		groupHeader.appendChild(title);
+		groupHeader.appendChild(addButton);
+		container.appendChild(groupHeader);
+
+		const groups = model.groups || [];
+		if (!groups.length) {
+			const empty = document.createElement("p");
+			empty.className = "modern-dialog-note";
+			empty.textContent = "No custom groups.";
+			container.appendChild(empty);
+		}
+		groups.forEach(function(group, groupIndex) {
+			const card = document.createElement("div");
+			card.className = "modern-dialog-acl-card" + (group.inherited ? " is-inherited" : "");
+			const name = document.createElement("input");
+			name.type = "text";
+			name.value = group.name || "";
+			name.disabled = !!group.inherited;
+			name.setAttribute("aria-label", "Group name");
+			name.addEventListener("input", function() {
+				const next = aclCurrentModel(field, model);
+				next.groups[groupIndex].name = name.value;
+				aclUpdateModel(field, next, false);
+			});
+			card.appendChild(name);
+
+			[
+				["inherit", "Inherit members"],
+				["inheritable", "Inheritable"]
+			].forEach(function(pair) {
+				const label = document.createElement("label");
+				label.className = "modern-dialog-acl-inline";
+				const checkbox = document.createElement("input");
+				checkbox.type = "checkbox";
+				checkbox.checked = !!group[pair[0]];
+				checkbox.disabled = !!group.inherited;
+				checkbox.addEventListener("change", function() {
+					const next = aclCurrentModel(field, model);
+					next.groups[groupIndex][pair[0]] = checkbox.checked;
+					aclUpdateModel(field, next, false);
+				});
+				label.appendChild(checkbox);
+				label.appendChild(document.createTextNode(pair[1]));
+				card.appendChild(label);
+			});
+
+			const addMembers = document.createElement("input");
+			addMembers.type = "text";
+			addMembers.value = group.addText != null ? String(group.addText) : aclNumberListToText(group.add);
+			addMembers.placeholder = "Add users or IDs";
+			addMembers.disabled = !!group.inherited;
+			addMembers.addEventListener("input", function() {
+				const next = aclCurrentModel(field, model);
+				next.groups[groupIndex].addText = addMembers.value;
+				next.groups[groupIndex].add = aclNumberListFromText(addMembers.value);
+				aclUpdateModel(field, next, false);
+			});
+			card.appendChild(addMembers);
+
+			const removeMembers = document.createElement("input");
+			removeMembers.type = "text";
+			removeMembers.value = group.removeText != null ? String(group.removeText) : aclNumberListToText(group.remove);
+			removeMembers.placeholder = "Remove users or IDs";
+			removeMembers.disabled = !!group.inherited;
+			removeMembers.addEventListener("input", function() {
+				const next = aclCurrentModel(field, model);
+				next.groups[groupIndex].removeText = removeMembers.value;
+				next.groups[groupIndex].remove = aclNumberListFromText(removeMembers.value);
+				aclUpdateModel(field, next, false);
+			});
+			card.appendChild(removeMembers);
+
+			const removeButton = document.createElement("button");
+			removeButton.type = "button";
+			removeButton.className = "chip-button is-danger";
+			removeButton.textContent = "Delete";
+			removeButton.disabled = !!group.inherited;
+			removeButton.addEventListener("click", function(event) {
+				event.preventDefault();
+				const next = aclCurrentModel(field, model);
+				next.groups.splice(groupIndex, 1);
+				aclUpdateModel(field, next, true);
+			});
+			card.appendChild(removeButton);
+
+			if (group.inheritedMembers && group.inheritedMembers.length) {
+				const inherited = document.createElement("span");
+				inherited.className = "modern-dialog-acl-muted";
+				inherited.textContent = "Inherited members: " + aclNumberListToText(group.inheritedMembers);
+				card.appendChild(inherited);
+			}
+			container.appendChild(card);
+		});
+	}
+
+	function appendAclRuleEditor(container, field, model) {
+		const ruleHeader = document.createElement("div");
+		ruleHeader.className = "modern-dialog-acl-subheader";
+		const title = document.createElement("span");
+		title.textContent = "Access rules";
+		const addButton = document.createElement("button");
+		addButton.type = "button";
+		addButton.className = "chip-button";
+		addButton.textContent = "Add rule";
+		addButton.addEventListener("click", function(event) {
+			event.preventDefault();
+			const next = aclCurrentModel(field, model);
+			next.acls = next.acls || [];
+			next.acls.push({
+				targetType: "group",
+				target: "all",
+				userId: -1,
+				applyHere: true,
+				applySubs: true,
+				inherited: false,
+				allow: [],
+				deny: []
+			});
+			aclUpdateModel(field, next, true);
+		});
+		ruleHeader.appendChild(title);
+		ruleHeader.appendChild(addButton);
+		container.appendChild(ruleHeader);
+
+		(model.acls || []).forEach(function(rule, ruleIndex) {
+			const card = document.createElement("div");
+			card.className = "modern-dialog-acl-rule" + (rule.inherited ? " is-inherited" : "");
+			const header = document.createElement("div");
+			header.className = "modern-dialog-acl-rule-header";
+			const targetType = document.createElement("select");
+			["group", "user"].forEach(function(type) {
+				const option = document.createElement("option");
+				option.value = type;
+				option.textContent = type === "group" ? "Group" : "User";
+				targetType.appendChild(option);
+			});
+			targetType.value = rule.targetType || "group";
+			targetType.disabled = !!rule.inherited;
+			targetType.addEventListener("change", function() {
+				const next = aclCurrentModel(field, model);
+				next.acls[ruleIndex].targetType = targetType.value;
+				next.acls[ruleIndex].target = targetType.value === "group" ? "all" : "";
+				next.acls[ruleIndex].userId = -1;
+				aclUpdateModel(field, next, true);
+			});
+			header.appendChild(targetType);
+
+			const target = document.createElement("input");
+			target.type = "text";
+			target.value = rule.target || "";
+			target.placeholder = targetType.value === "group" ? "all, auth, in, sub..." : "username or #id";
+			target.disabled = !!rule.inherited;
+			target.addEventListener("input", function() {
+				const next = aclCurrentModel(field, model);
+				next.acls[ruleIndex].target = target.value;
+				aclUpdateModel(field, next, false);
+			});
+			header.appendChild(target);
+
+			[
+				["applyHere", "Here"],
+				["applySubs", "Sub rooms"]
+			].forEach(function(pair) {
+				const label = document.createElement("label");
+				label.className = "modern-dialog-acl-inline";
+				const checkbox = document.createElement("input");
+				checkbox.type = "checkbox";
+				checkbox.checked = rule[pair[0]] !== false;
+				checkbox.disabled = !!rule.inherited;
+				checkbox.addEventListener("change", function() {
+					const next = aclCurrentModel(field, model);
+					next.acls[ruleIndex][pair[0]] = checkbox.checked;
+					aclUpdateModel(field, next, false);
+				});
+				label.appendChild(checkbox);
+				label.appendChild(document.createTextNode(pair[1]));
+				header.appendChild(label);
+			});
+
+			const moveUp = document.createElement("button");
+			moveUp.type = "button";
+			moveUp.className = "chip-button";
+			moveUp.textContent = "Up";
+			moveUp.disabled = !!rule.inherited || ruleIndex === 0;
+			moveUp.addEventListener("click", function(event) {
+				event.preventDefault();
+				const next = aclCurrentModel(field, model);
+				const item = next.acls.splice(ruleIndex, 1)[0];
+				next.acls.splice(ruleIndex - 1, 0, item);
+				aclUpdateModel(field, next, true);
+			});
+			header.appendChild(moveUp);
+
+			const moveDown = document.createElement("button");
+			moveDown.type = "button";
+			moveDown.className = "chip-button";
+			moveDown.textContent = "Down";
+			moveDown.disabled = !!rule.inherited || ruleIndex >= (model.acls || []).length - 1;
+			moveDown.addEventListener("click", function(event) {
+				event.preventDefault();
+				const next = aclCurrentModel(field, model);
+				const item = next.acls.splice(ruleIndex, 1)[0];
+				next.acls.splice(ruleIndex + 1, 0, item);
+				aclUpdateModel(field, next, true);
+			});
+			header.appendChild(moveDown);
+
+			const remove = document.createElement("button");
+			remove.type = "button";
+			remove.className = "chip-button is-danger";
+			remove.textContent = "Delete";
+			remove.disabled = !!rule.inherited;
+			remove.addEventListener("click", function(event) {
+				event.preventDefault();
+				const next = aclCurrentModel(field, model);
+				next.acls.splice(ruleIndex, 1);
+				aclUpdateModel(field, next, true);
+			});
+			header.appendChild(remove);
+			card.appendChild(header);
+
+			const permissions = document.createElement("div");
+			permissions.className = "modern-dialog-acl-permissions";
+			(model.permissions || []).forEach(function(permission) {
+				const permissionRow = document.createElement("div");
+				permissionRow.className = "modern-dialog-acl-permission";
+				const name = document.createElement("span");
+				name.textContent = permission.label || String(permission.id);
+				if (permission.hint) {
+					name.title = String(permission.hint);
+				}
+				permissionRow.appendChild(name);
+				[
+					["deny", "Deny"],
+					["allow", "Allow"]
+				].forEach(function(pair) {
+					const label = document.createElement("label");
+					label.className = "modern-dialog-acl-inline";
+					const checkbox = document.createElement("input");
+					const bit = Number(permission.id) || 0;
+					checkbox.type = "checkbox";
+					checkbox.checked = (rule[pair[0]] || []).indexOf(bit) >= 0;
+					checkbox.disabled = !!rule.inherited;
+					checkbox.addEventListener("change", function() {
+						const next = aclCurrentModel(field, model);
+						const edited = next.acls[ruleIndex];
+						edited[pair[0]] = aclTogglePermission(edited[pair[0]], bit, checkbox.checked);
+						const other = pair[0] === "allow" ? "deny" : "allow";
+						if (checkbox.checked) {
+							edited[other] = aclTogglePermission(edited[other], bit, false);
+						}
+						aclUpdateModel(field, next, false);
+					});
+					label.appendChild(checkbox);
+					label.appendChild(document.createTextNode(pair[1]));
+					permissionRow.appendChild(label);
+				});
+				permissions.appendChild(permissionRow);
+			});
+			card.appendChild(permissions);
+			container.appendChild(card);
+		});
+	}
+
+	function appendModernAclEditor(container, field, errors) {
+		const model = aclCloneModel(field.value || {});
+		model.acls = model.acls || [];
+		model.groups = model.groups || [];
+		const wrap = document.createElement("div");
+		wrap.className = "modern-dialog-acl-editor";
+		const inherit = document.createElement("label");
+		inherit.className = "modern-dialog-acl-inline modern-dialog-acl-inherit";
+		const inheritBox = document.createElement("input");
+		inheritBox.type = "checkbox";
+		inheritBox.checked = model.inheritAcls !== false;
+		inheritBox.addEventListener("change", function() {
+			const next = aclCurrentModel(field, model);
+			next.inheritAcls = inheritBox.checked;
+			aclUpdateModel(field, next, false);
+		});
+		inherit.appendChild(inheritBox);
+		inherit.appendChild(document.createTextNode("Inherit parent ACLs"));
+		wrap.appendChild(inherit);
+
+		const passwordRow = document.createElement("label");
+		passwordRow.className = "modern-dialog-field is-text";
+		const passwordLabel = document.createElement("span");
+		passwordLabel.className = "modern-dialog-field-label";
+		passwordLabel.textContent = "Room password";
+		const passwordInput = document.createElement("input");
+		passwordInput.type = "text";
+		passwordInput.value = model.password || "";
+		passwordInput.addEventListener("input", function() {
+			const next = aclCurrentModel(field, model);
+			next.password = passwordInput.value;
+			aclUpdateModel(field, next, false);
+		});
+		passwordRow.appendChild(passwordLabel);
+		passwordRow.appendChild(passwordInput);
+		wrap.appendChild(passwordRow);
+
+		appendAclGroupEditor(wrap, field, model);
+		appendAclRuleEditor(wrap, field, model);
+
+		const errorText = errors && field && field.id ? errors[field.id] : "";
+		if (errorText) {
+			const error = document.createElement("span");
+			error.className = "modern-dialog-field-error";
+			error.textContent = errorText;
+			wrap.appendChild(error);
+		}
+		container.appendChild(wrap);
+	}
+
+	function appendModernResultList(container, field) {
+		const list = document.createElement("div");
+		list.className = "modern-dialog-result-list";
+		const items = field.items || field.value || [];
+		if (!items.length) {
+			const empty = document.createElement("p");
+			empty.className = "modern-dialog-note";
+			empty.textContent = field.emptyText || "No results.";
+			list.appendChild(empty);
+		}
+		items.forEach(function(item) {
+			const row = document.createElement("div");
+			row.className = "modern-dialog-result";
+			const copy = document.createElement("div");
+			copy.className = "modern-dialog-result-copy";
+			const title = document.createElement("span");
+			title.className = "modern-dialog-result-title";
+			title.textContent = item.title || "";
+			const subtitle = document.createElement("span");
+			subtitle.className = "modern-dialog-result-subtitle";
+			subtitle.textContent = (item.type === "user" ? "User" : "Room") + (item.subtitle ? " - " + item.subtitle : "");
+			copy.appendChild(title);
+			copy.appendChild(subtitle);
+			row.appendChild(copy);
+			const actions = document.createElement("span");
+			actions.className = "modern-dialog-result-actions";
+			[
+				["selectSearchResult", item.primaryAction || "Select"],
+				["joinSearchResult", item.secondaryAction || "Join"]
+			].forEach(function(pair) {
+				const button = document.createElement("button");
+				button.type = "button";
+				button.className = "chip-button";
+				button.textContent = pair[1];
+				button.addEventListener("click", function(event) {
+					event.preventDefault();
+					invokeModernDialogAction(pair[0], {
+						type: item.type || "",
+						id: Number(item.id) || 0,
+						index: Number(item.index) || 0
+					});
+				});
+				actions.appendChild(button);
+			});
+			row.appendChild(actions);
+			list.appendChild(row);
+		});
+		container.appendChild(list);
+	}
+
+	function aclPermissionName(model, bit) {
+		const permissions = model.permissions || [];
+		for (let i = 0; i < permissions.length; ++i) {
+			if (Number(permissions[i].id) === Number(bit)) {
+				return permissions[i].label || String(bit);
+			}
+		}
+		return String(bit);
+	}
+
+	function aclPermissionSummary(model, values, emptyText) {
+		const names = (values || []).map(function(bit) {
+			return aclPermissionName(model, bit);
+		});
+		if (!names.length) {
+			return emptyText || "None";
+		}
+		if (names.length > 3) {
+			return names.slice(0, 3).join(", ") + " +" + String(names.length - 3);
+		}
+		return names.join(", ");
+	}
+
+	function aclRuleTargetLabel(rule) {
+		const type = rule.targetType === "user" ? "User" : "Group";
+		const target = String(rule.target || "").trim() || (type === "Group" ? "all" : "user");
+		return type + ": " + target;
+	}
+
+	function aclRuleScopeLabel(rule) {
+		const here = rule.applyHere !== false;
+		const subs = rule.applySubs !== false;
+		if (here && subs) {
+			return "This room and sub rooms";
+		}
+		if (here) {
+			return "This room only";
+		}
+		if (subs) {
+			return "Sub rooms only";
+		}
+		return "No scope selected";
+	}
+
+	function aclPermissionState(rule, bit) {
+		if ((rule.deny || []).indexOf(bit) >= 0) {
+			return "deny";
+		}
+		if ((rule.allow || []).indexOf(bit) >= 0) {
+			return "allow";
+		}
+		return "unset";
+	}
+
+	function aclSetPermissionState(rule, bit, state) {
+		rule.allow = aclTogglePermission(rule.allow, bit, false);
+		rule.deny = aclTogglePermission(rule.deny, bit, false);
+		if (state === "allow") {
+			rule.allow = aclTogglePermission(rule.allow, bit, true);
+		} else if (state === "deny") {
+			rule.deny = aclTogglePermission(rule.deny, bit, true);
+		}
+	}
+
+	function aclSetExpandedRule(field, model, ruleIndex, expanded) {
+		const next = aclCurrentModel(field, model);
+		next.acls = next.acls || [];
+		next.acls.forEach(function(rule, index) {
+			rule.expanded = expanded && index === ruleIndex;
+		});
+		aclUpdateModel(field, next, true);
+	}
+
+	function aclMoveRule(field, model, ruleIndex, delta) {
+		const next = aclCurrentModel(field, model);
+		const targetIndex = ruleIndex + delta;
+		if (!next.acls || targetIndex < 0 || targetIndex >= next.acls.length) {
+			return;
+		}
+		const item = next.acls.splice(ruleIndex, 1)[0];
+		next.acls.splice(targetIndex, 0, item);
+		next.acls.forEach(function(rule, index) {
+			rule.expanded = index === targetIndex;
+		});
+		next.activeTab = "rules";
+		next.selectedRuleIndex = targetIndex;
+		aclUpdateModel(field, next, true);
+	}
+
+	function appendAclButton(container, label, className, disabled, callback) {
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "chip-button" + (className ? " " + className : "");
+		button.textContent = label;
+		button.disabled = !!disabled;
+		button.addEventListener("click", function(event) {
+			event.preventDefault();
+			callback();
+		});
+		container.appendChild(button);
+		return button;
+	}
+
+	function appendAclGroupEditor(container, field, model) {
+		const panel = document.createElement("section");
+		panel.className = "modern-dialog-acl-panel";
+		const header = document.createElement("div");
+		header.className = "modern-dialog-acl-panel-header";
+		const copy = document.createElement("div");
+		const title = document.createElement("h3");
+		title.className = "modern-dialog-acl-panel-title";
+		title.textContent = "Groups";
+		const subtitle = document.createElement("p");
+		subtitle.className = "modern-dialog-acl-panel-subtitle";
+		subtitle.textContent = "Create named member sets and decide whether they inherit parent membership.";
+		copy.appendChild(title);
+		copy.appendChild(subtitle);
+		header.appendChild(copy);
+		appendAclButton(header, "Add group", "", false, function() {
+			const next = aclCurrentModel(field, model);
+			next.groups = next.groups || [];
+			next.groups.push({
+				name: "newgroup",
+				inherit: true,
+				inheritable: true,
+				inherited: false,
+				add: [],
+				remove: [],
+				addText: "",
+				removeText: "",
+				inheritedMembers: []
+			});
+			aclUpdateModel(field, next, true);
+		});
+		panel.appendChild(header);
+
+		const groups = model.groups || [];
+		const list = document.createElement("div");
+		list.className = "modern-dialog-acl-group-list";
+		if (!groups.length) {
+			const empty = document.createElement("p");
+			empty.className = "modern-dialog-note";
+			empty.textContent = "No custom groups.";
+			list.appendChild(empty);
+		}
+		groups.forEach(function(group, groupIndex) {
+			const card = document.createElement("div");
+			card.className = "modern-dialog-acl-group" + (group.inherited ? " is-inherited" : "");
+
+			const grid = document.createElement("div");
+			grid.className = "modern-dialog-acl-group-grid";
+			[
+				["name", "Group name", group.name || ""],
+				["addText", "Add members", group.addText != null ? String(group.addText) : aclNumberListToText(group.add)],
+				["removeText", "Remove members", group.removeText != null ? String(group.removeText) : aclNumberListToText(group.remove)]
+			].forEach(function(item) {
+				const label = document.createElement("label");
+				label.className = "modern-dialog-acl-control is-" + item[0];
+				const caption = document.createElement("span");
+				caption.textContent = item[1];
+				const input = document.createElement("input");
+				input.type = "text";
+				input.value = item[2];
+				input.disabled = !!group.inherited;
+				input.placeholder = item[1];
+				input.addEventListener("input", function() {
+					const next = aclCurrentModel(field, model);
+					if (item[0] === "name") {
+						next.groups[groupIndex].name = input.value;
+					} else if (item[0] === "addText") {
+						next.groups[groupIndex].addText = input.value;
+						next.groups[groupIndex].add = aclNumberListFromText(input.value);
+					} else {
+						next.groups[groupIndex].removeText = input.value;
+						next.groups[groupIndex].remove = aclNumberListFromText(input.value);
+					}
+					aclUpdateModel(field, next, false);
+				});
+				label.appendChild(caption);
+				label.appendChild(input);
+				grid.appendChild(label);
+			});
+
+			const flags = document.createElement("div");
+			flags.className = "modern-dialog-acl-group-flags";
+			[
+				["inherit", "Inherit members"],
+				["inheritable", "Inheritable"]
+			].forEach(function(pair) {
+				const label = document.createElement("label");
+				label.className = "modern-dialog-acl-check";
+				const checkbox = document.createElement("input");
+				checkbox.type = "checkbox";
+				checkbox.checked = !!group[pair[0]];
+				checkbox.disabled = !!group.inherited;
+				checkbox.addEventListener("change", function() {
+					const next = aclCurrentModel(field, model);
+					next.groups[groupIndex][pair[0]] = checkbox.checked;
+					aclUpdateModel(field, next, false);
+				});
+				label.appendChild(checkbox);
+				label.appendChild(document.createTextNode(pair[1]));
+				flags.appendChild(label);
+			});
+			grid.appendChild(flags);
+
+			const actions = document.createElement("div");
+			actions.className = "modern-dialog-acl-card-actions";
+			appendAclButton(actions, "Delete", "is-danger", !!group.inherited, function() {
+				const next = aclCurrentModel(field, model);
+				next.groups.splice(groupIndex, 1);
+				aclUpdateModel(field, next, true);
+			});
+			grid.appendChild(actions);
+			card.appendChild(grid);
+
+			if (group.inheritedMembers && group.inheritedMembers.length) {
+				const inherited = document.createElement("span");
+				inherited.className = "modern-dialog-acl-muted";
+				inherited.textContent = "Inherited members: " + aclNumberListToText(group.inheritedMembers);
+				card.appendChild(inherited);
+			}
+			list.appendChild(card);
+		});
+		panel.appendChild(list);
+		container.appendChild(panel);
+	}
+
+	function appendAclRuleEditor(container, field, model) {
+		const panel = document.createElement("section");
+		panel.className = "modern-dialog-acl-panel";
+		const header = document.createElement("div");
+		header.className = "modern-dialog-acl-panel-header";
+		const copy = document.createElement("div");
+		const title = document.createElement("h3");
+		title.className = "modern-dialog-acl-panel-title";
+		title.textContent = "Access rules";
+		const subtitle = document.createElement("p");
+		subtitle.className = "modern-dialog-acl-panel-subtitle";
+		subtitle.textContent = "Scan compact rules, then expand one rule to edit its permissions.";
+		copy.appendChild(title);
+		copy.appendChild(subtitle);
+		header.appendChild(copy);
+		appendAclButton(header, "Add rule", "", false, function() {
+			const next = aclCurrentModel(field, model);
+			next.acls = next.acls || [];
+			next.acls.forEach(function(rule) {
+				rule.expanded = false;
+			});
+			next.acls.push({
+				targetType: "group",
+				target: "all",
+				userId: -1,
+				applyHere: true,
+				applySubs: true,
+				inherited: false,
+				expanded: true,
+				allow: [],
+				deny: []
+			});
+			aclUpdateModel(field, next, true);
+		});
+		panel.appendChild(header);
+
+		const rules = model.acls || [];
+		const firstEditableIndex = rules.findIndex(function(rule) {
+			return !rule.inherited;
+		});
+		const hasExpansionPreference = rules.some(function(rule) {
+			return Object.prototype.hasOwnProperty.call(rule, "expanded");
+		});
+		const list = document.createElement("div");
+		list.className = "modern-dialog-acl-rule-list";
+		if (!rules.length) {
+			const empty = document.createElement("p");
+			empty.className = "modern-dialog-note";
+			empty.textContent = "No ACL rules.";
+			list.appendChild(empty);
+		}
+
+		rules.forEach(function(rule, ruleIndex) {
+			const expanded = rule.expanded === true || (!hasExpansionPreference && ruleIndex === firstEditableIndex);
+			const inherited = !!rule.inherited;
+			const card = document.createElement("article");
+			card.className = "modern-dialog-acl-rule" + (inherited ? " is-inherited" : "") + (expanded ? " is-expanded" : "");
+
+			const summary = document.createElement("div");
+			summary.className = "modern-dialog-acl-rule-summary";
+			const main = document.createElement("div");
+			main.className = "modern-dialog-acl-rule-main";
+			const target = document.createElement("strong");
+			target.textContent = aclRuleTargetLabel(rule);
+			const meta = document.createElement("span");
+			meta.className = "modern-dialog-acl-muted";
+			meta.textContent = aclRuleScopeLabel(rule) + (inherited ? " - inherited" : "");
+			main.appendChild(target);
+			main.appendChild(meta);
+			summary.appendChild(main);
+
+			const badges = document.createElement("div");
+			badges.className = "modern-dialog-acl-badges";
+			[
+				["allow", "Allow", aclPermissionSummary(model, rule.allow, "No allows")],
+				["deny", "Deny", aclPermissionSummary(model, rule.deny, "No denies")]
+			].forEach(function(item) {
+				const badge = document.createElement("span");
+				badge.className = "modern-dialog-acl-badge is-" + item[0];
+				badge.textContent = item[1] + ": " + item[2];
+				badges.appendChild(badge);
+			});
+			summary.appendChild(badges);
+
+			const actions = document.createElement("div");
+			actions.className = "modern-dialog-acl-rule-actions";
+			appendAclButton(actions, expanded ? "Collapse" : (inherited ? "View" : "Edit"), "", false, function() {
+				aclSetExpandedRule(field, model, ruleIndex, !expanded);
+			});
+			appendAclButton(actions, "Up", "", inherited || ruleIndex === 0, function() {
+				aclMoveRule(field, model, ruleIndex, -1);
+			});
+			appendAclButton(actions, "Down", "", inherited || ruleIndex >= rules.length - 1, function() {
+				aclMoveRule(field, model, ruleIndex, 1);
+			});
+			appendAclButton(actions, "Delete", "is-danger", inherited, function() {
+				const next = aclCurrentModel(field, model);
+				next.acls.splice(ruleIndex, 1);
+				aclUpdateModel(field, next, true);
+			});
+			summary.appendChild(actions);
+			card.appendChild(summary);
+
+			if (expanded) {
+				const editor = document.createElement("div");
+				editor.className = "modern-dialog-acl-rule-editor";
+				const targetRow = document.createElement("div");
+				targetRow.className = "modern-dialog-acl-rule-target";
+				const targetType = document.createElement("select");
+				["group", "user"].forEach(function(type) {
+					const option = document.createElement("option");
+					option.value = type;
+					option.textContent = type === "group" ? "Group" : "User";
+					targetType.appendChild(option);
+				});
+				targetType.value = rule.targetType || "group";
+				targetType.disabled = inherited;
+				targetType.addEventListener("change", function() {
+					const next = aclCurrentModel(field, model);
+					next.acls[ruleIndex].targetType = targetType.value;
+					next.acls[ruleIndex].target = targetType.value === "group" ? "all" : "";
+					next.acls[ruleIndex].userId = -1;
+					next.acls[ruleIndex].expanded = true;
+					aclUpdateModel(field, next, true);
+				});
+				targetRow.appendChild(targetType);
+
+				const targetInput = document.createElement("input");
+				targetInput.type = "text";
+				targetInput.value = rule.target || "";
+				targetInput.placeholder = targetType.value === "group" ? "all, auth, in, sub..." : "username or #id";
+				targetInput.disabled = inherited;
+				targetInput.addEventListener("input", function() {
+					const next = aclCurrentModel(field, model);
+					next.acls[ruleIndex].target = targetInput.value;
+					next.acls[ruleIndex].expanded = true;
+					aclUpdateModel(field, next, false);
+				});
+				targetRow.appendChild(targetInput);
+
+				const scopes = document.createElement("div");
+				scopes.className = "modern-dialog-acl-scope";
+				[
+					["applyHere", "This room"],
+					["applySubs", "Sub rooms"]
+				].forEach(function(pair) {
+					const label = document.createElement("label");
+					label.className = "modern-dialog-acl-check";
+					const checkbox = document.createElement("input");
+					checkbox.type = "checkbox";
+					checkbox.checked = rule[pair[0]] !== false;
+					checkbox.disabled = inherited;
+					checkbox.addEventListener("change", function() {
+						const next = aclCurrentModel(field, model);
+						next.acls[ruleIndex][pair[0]] = checkbox.checked;
+						next.acls[ruleIndex].expanded = true;
+						aclUpdateModel(field, next, false);
+					});
+					label.appendChild(checkbox);
+					label.appendChild(document.createTextNode(pair[1]));
+					scopes.appendChild(label);
+				});
+				targetRow.appendChild(scopes);
+				editor.appendChild(targetRow);
+
+				const matrix = document.createElement("div");
+				matrix.className = "modern-dialog-acl-permission-matrix";
+				(model.permissions || []).forEach(function(permission) {
+					const bit = Number(permission.id) || 0;
+					const state = aclPermissionState(rule, bit);
+					const row = document.createElement("div");
+					row.className = "modern-dialog-acl-permission-row is-" + state;
+					const name = document.createElement("span");
+					name.className = "modern-dialog-acl-permission-name";
+					name.textContent = permission.label || String(permission.id);
+					if (permission.hint) {
+						name.title = String(permission.hint);
+					}
+					row.appendChild(name);
+
+					const choices = document.createElement("div");
+					choices.className = "modern-dialog-acl-state";
+					[
+						["unset", "Not set"],
+						["deny", "Deny"],
+						["allow", "Allow"]
+					].forEach(function(choice) {
+						const button = document.createElement("button");
+						button.type = "button";
+						button.className = "modern-dialog-acl-state-button is-" + choice[0]
+							+ (state === choice[0] ? " is-selected" : "");
+						button.textContent = choice[1];
+						button.disabled = inherited;
+						button.addEventListener("click", function(event) {
+							event.preventDefault();
+							const next = aclCurrentModel(field, model);
+							aclSetPermissionState(next.acls[ruleIndex], bit, choice[0]);
+							next.acls[ruleIndex].expanded = true;
+							aclUpdateModel(field, next, false);
+							renderModernDialog();
+						});
+						choices.appendChild(button);
+					});
+					row.appendChild(choices);
+					matrix.appendChild(row);
+				});
+				editor.appendChild(matrix);
+				card.appendChild(editor);
+			}
+			list.appendChild(card);
+		});
+		panel.appendChild(list);
+		container.appendChild(panel);
+	}
+
+	function appendModernAclEditor(container, field, errors) {
+		const model = aclCloneModel(field.value || {});
+		model.acls = model.acls || [];
+		model.groups = model.groups || [];
+		const wrap = document.createElement("div");
+		wrap.className = "modern-dialog-acl-editor";
+
+		const policy = document.createElement("section");
+		policy.className = "modern-dialog-acl-policy";
+		const policyCopy = document.createElement("div");
+		const policyTitle = document.createElement("h3");
+		policyTitle.className = "modern-dialog-acl-panel-title";
+		policyTitle.textContent = "Room policy";
+		const policySummary = document.createElement("p");
+		policySummary.className = "modern-dialog-acl-panel-subtitle";
+		policySummary.textContent = String(model.groups.length) + " groups, " + String(model.acls.length) + " access rules";
+		policyCopy.appendChild(policyTitle);
+		policyCopy.appendChild(policySummary);
+		policy.appendChild(policyCopy);
+
+		const policyControls = document.createElement("div");
+		policyControls.className = "modern-dialog-acl-policy-controls";
+		const inherit = document.createElement("label");
+		inherit.className = "modern-dialog-acl-check";
+		const inheritBox = document.createElement("input");
+		inheritBox.type = "checkbox";
+		inheritBox.checked = model.inheritAcls !== false;
+		inheritBox.addEventListener("change", function() {
+			const next = aclCurrentModel(field, model);
+			next.inheritAcls = inheritBox.checked;
+			aclUpdateModel(field, next, false);
+		});
+		inherit.appendChild(inheritBox);
+		inherit.appendChild(document.createTextNode("Inherit parent ACLs"));
+		policyControls.appendChild(inherit);
+
+		const passwordLabel = document.createElement("label");
+		passwordLabel.className = "modern-dialog-acl-control";
+		const passwordCaption = document.createElement("span");
+		passwordCaption.textContent = "Room password";
+		const passwordInput = document.createElement("input");
+		passwordInput.type = "text";
+		passwordInput.value = model.password || "";
+		passwordInput.placeholder = "Optional join password";
+		passwordInput.addEventListener("input", function() {
+			const next = aclCurrentModel(field, model);
+			next.password = passwordInput.value;
+			aclUpdateModel(field, next, false);
+		});
+		passwordLabel.appendChild(passwordCaption);
+		passwordLabel.appendChild(passwordInput);
+		policyControls.appendChild(passwordLabel);
+		policy.appendChild(policyControls);
+		wrap.appendChild(policy);
+
+		appendAclGroupEditor(wrap, field, model);
+		appendAclRuleEditor(wrap, field, model);
+
+		const errorText = errors && field && field.id ? errors[field.id] : "";
+		if (errorText) {
+			const error = document.createElement("span");
+			error.className = "modern-dialog-field-error";
+			error.textContent = errorText;
+			wrap.appendChild(error);
+		}
+		container.appendChild(wrap);
+	}
+
+	function aclOptionId(option) {
+		const value = Number(option && (option.id != null ? option.id : option.value));
+		return Number.isFinite(value) ? value : -1;
+	}
+
+	function aclUserOptions(model) {
+		return (model.userOptions || []).filter(function(option) {
+			return aclOptionId(option) >= 0;
+		});
+	}
+
+	function aclUserLabel(model, userId) {
+		userId = Number(userId);
+		const options = aclUserOptions(model);
+		for (let i = 0; i < options.length; ++i) {
+			if (aclOptionId(options[i]) === userId) {
+				return options[i].label || String(userId);
+			}
+		}
+		return "User " + String(userId);
+	}
+
+	function aclGroupLabel(value) {
+		const target = String(value || "").trim() || "all";
+		const options = aclSpecialGroups();
+		for (let i = 0; i < options.length; ++i) {
+			if (options[i].value === target) {
+				return options[i].label;
+			}
+		}
+		return "Group: " + target;
+	}
+
+	function aclRuleTitle(model, rule) {
+		if (rule.targetType === "user") {
+			return "User: " + aclUserLabel(model, Number(rule.userId));
+		}
+		return aclGroupLabel(rule.target);
+	}
+
+	function aclList(values) {
+		return Array.isArray(values) ? values.slice() : [];
+	}
+
+	function aclSelectedIndex(model, key, length) {
+		const selected = Number(model[key]);
+		if (Number.isInteger(selected) && selected >= 0 && selected < length) {
+			return selected;
+		}
+		return length > 0 ? 0 : -1;
+	}
+
+	function aclSetActiveTab(field, model, tab) {
+		const next = aclCurrentModel(field, model);
+		next.activeTab = tab;
+		aclUpdateModel(field, next, true);
+	}
+
+	function aclSetSelectedGroup(field, model, index) {
+		const next = aclCurrentModel(field, model);
+		next.activeTab = "groups";
+		next.selectedGroupIndex = index;
+		aclUpdateModel(field, next, true);
+	}
+
+	function aclSetSelectedRule(field, model, index) {
+		const next = aclCurrentModel(field, model);
+		next.activeTab = "rules";
+		next.selectedRuleIndex = index;
+		aclUpdateModel(field, next, true);
+	}
+
+	function aclSpecialGroups() {
+		return [
+			{ value: "all", label: "Everyone (all)" },
+			{ value: "auth", label: "Authenticated users (auth)" },
+			{ value: "in", label: "Users in this room (in)" },
+			{ value: "sub", label: "Users in sub rooms (sub)" },
+			{ value: "out", label: "Users outside this room tree (out)" },
+			{ value: "~in", label: "Users not in this room (~in)" },
+			{ value: "~sub", label: "Users not in sub rooms (~sub)" },
+			{ value: "~out", label: "Users inside this room tree (~out)" }
+		];
+	}
+
+	function aclGroupTargetOptions(model, currentValue) {
+		const seen = {};
+		const values = [];
+		function add(value, label) {
+			value = String(value || "").trim();
+			if (!value || seen[value]) {
+				return;
+			}
+			seen[value] = true;
+			values.push({ value: value, label: label || ("Group: " + value) });
+		}
+		aclSpecialGroups().forEach(function(option) {
+			add(option.value, option.label);
+		});
+		(model.groups || []).forEach(function(group) {
+			add(group.name, "Group: " + group.name);
+		});
+		add(currentValue, aclGroupLabel(currentValue));
+		return values;
+	}
+
+	function aclRenderUserSelect(select, model, selectedId) {
+		select.innerHTML = "";
+		const options = aclUserOptions(model);
+		const selected = Number(selectedId);
+		let hasSelected = false;
+		options.forEach(function(option) {
+			const id = aclOptionId(option);
+			const item = document.createElement("option");
+			item.value = String(id);
+			const label = option.label || String(id);
+			item.textContent = option.subtitle ? label + " - " + option.subtitle : label;
+			if (option.subtitle) {
+				item.title = option.subtitle;
+			}
+			if (id === selected) {
+				hasSelected = true;
+			}
+			select.appendChild(item);
+		});
+		if (selected >= 0 && !hasSelected) {
+			const fallback = document.createElement("option");
+			fallback.value = String(selected);
+			fallback.textContent = aclUserLabel(model, selected);
+			select.appendChild(fallback);
+		}
+		select.disabled = !select.options.length;
+		if (select.options.length) {
+			select.value = selected >= 0 ? String(selected) : select.options[0].value;
+		}
+	}
+
+	function aclAddMember(field, model, groupIndex, key, userId) {
+		const next = aclCurrentModel(field, model);
+		const group = next.groups[groupIndex];
+		const id = Number(userId);
+		if (!group || !Number.isInteger(id) || id < 0) {
+			return;
+		}
+		const otherKey = key === "add" ? "remove" : "add";
+		group[key] = aclList(group[key]).filter(function(value) { return Number(value) !== id; });
+		group[otherKey] = aclList(group[otherKey]).filter(function(value) { return Number(value) !== id; });
+		group[key].push(id);
+		group[key].sort(function(left, right) {
+			return aclUserLabel(next, left).localeCompare(aclUserLabel(next, right));
+		});
+		delete group.addText;
+		delete group.removeText;
+		next.activeTab = "groups";
+		next.selectedGroupIndex = groupIndex;
+		aclUpdateModel(field, next, true);
+	}
+
+	function aclRemoveMember(field, model, groupIndex, key, userId) {
+		const next = aclCurrentModel(field, model);
+		const group = next.groups[groupIndex];
+		const id = Number(userId);
+		if (!group) {
+			return;
+		}
+		group[key] = aclList(group[key]).filter(function(value) {
+			return Number(value) !== id;
+		});
+		delete group.addText;
+		delete group.removeText;
+		next.activeTab = "groups";
+		next.selectedGroupIndex = groupIndex;
+		aclUpdateModel(field, next, true);
+	}
+
+	function appendAclMemberSection(container, field, model, groupIndex, key, title, editable) {
+		const section = document.createElement("div");
+		section.className = "modern-dialog-acl-member-section";
+		const heading = document.createElement("span");
+		heading.className = "modern-dialog-acl-member-heading";
+		heading.textContent = title;
+		section.appendChild(heading);
+
+		const chips = document.createElement("div");
+		chips.className = "modern-dialog-acl-chip-list";
+		const group = model.groups[groupIndex] || {};
+		const members = aclList(group[key]);
+		if (!members.length) {
+			const empty = document.createElement("span");
+			empty.className = "modern-dialog-acl-empty-inline";
+			empty.textContent = "None";
+			chips.appendChild(empty);
+		}
+		members.forEach(function(userId) {
+			const chip = document.createElement("span");
+			chip.className = "modern-dialog-acl-chip";
+			chip.textContent = aclUserLabel(model, userId);
+			if (editable) {
+				const remove = document.createElement("button");
+				remove.type = "button";
+				remove.textContent = "Remove";
+				remove.addEventListener("click", function(event) {
+					event.preventDefault();
+					aclRemoveMember(field, model, groupIndex, key, userId);
+				});
+				chip.appendChild(remove);
+			}
+			chips.appendChild(chip);
+		});
+		section.appendChild(chips);
+
+		if (editable) {
+			const controls = document.createElement("div");
+			controls.className = "modern-dialog-acl-add-member";
+			const select = document.createElement("select");
+			aclRenderUserSelect(select, model, -1);
+			const add = document.createElement("button");
+			add.type = "button";
+			add.className = "chip-button";
+			add.textContent = "Add";
+			add.disabled = select.disabled;
+			add.addEventListener("click", function(event) {
+				event.preventDefault();
+				aclAddMember(field, model, groupIndex, key, Number(select.value));
+			});
+			controls.appendChild(select);
+			controls.appendChild(add);
+			section.appendChild(controls);
+		}
+		container.appendChild(section);
+	}
+
+	function appendAclGroupEditor(container, field, model) {
+		const panel = document.createElement("section");
+		panel.className = "modern-dialog-acl-panel is-groups";
+		const header = document.createElement("div");
+		header.className = "modern-dialog-acl-panel-header";
+		const copy = document.createElement("div");
+		const title = document.createElement("h3");
+		title.className = "modern-dialog-acl-panel-title";
+		title.textContent = "Groups";
+		const subtitle = document.createElement("p");
+		subtitle.className = "modern-dialog-acl-panel-subtitle";
+		subtitle.textContent = "Pick a group, then manage its member overrides.";
+		copy.appendChild(title);
+		copy.appendChild(subtitle);
+		header.appendChild(copy);
+		appendAclButton(header, "Add group", "", false, function() {
+			const next = aclCurrentModel(field, model);
+			next.groups = next.groups || [];
+			next.groups.push({
+				name: "newgroup",
+				inherit: true,
+				inheritable: true,
+				inherited: false,
+				add: [],
+				remove: [],
+				inheritedMembers: []
+			});
+			next.activeTab = "groups";
+			next.selectedGroupIndex = next.groups.length - 1;
+			aclUpdateModel(field, next, true);
+		});
+		panel.appendChild(header);
+
+		const groups = model.groups || [];
+		const selectedIndex = aclSelectedIndex(model, "selectedGroupIndex", groups.length);
+		const workspace = document.createElement("div");
+		workspace.className = "modern-dialog-acl-workspace";
+		const nav = document.createElement("div");
+		nav.className = "modern-dialog-acl-sidebar";
+		if (!groups.length) {
+			const empty = document.createElement("p");
+			empty.className = "modern-dialog-note";
+			empty.textContent = "No custom groups.";
+			nav.appendChild(empty);
+		}
+		groups.forEach(function(group, groupIndex) {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "modern-dialog-acl-nav-item" + (groupIndex === selectedIndex ? " is-selected" : "")
+				+ (group.inherited ? " is-inherited" : "");
+			const name = document.createElement("strong");
+			name.textContent = group.name || "unnamed";
+			const meta = document.createElement("span");
+			meta.textContent = String(aclList(group.add).length) + " added, "
+				+ String(aclList(group.remove).length) + " removed"
+				+ (group.inherited ? " - inherited" : "");
+			button.appendChild(name);
+			button.appendChild(meta);
+			button.addEventListener("click", function(event) {
+				event.preventDefault();
+				aclSetSelectedGroup(field, model, groupIndex);
+			});
+			nav.appendChild(button);
+		});
+		workspace.appendChild(nav);
+
+		const detail = document.createElement("div");
+		detail.className = "modern-dialog-acl-detail";
+		if (selectedIndex >= 0) {
+			const group = groups[selectedIndex];
+			const editable = !group.inherited;
+			const form = document.createElement("div");
+			form.className = "modern-dialog-acl-detail-grid";
+			const nameLabel = document.createElement("label");
+			nameLabel.className = "modern-dialog-acl-control";
+			const nameCaption = document.createElement("span");
+			nameCaption.textContent = "Group";
+			const nameInput = document.createElement("input");
+			nameInput.type = "text";
+			nameInput.value = group.name || "";
+			nameInput.disabled = !editable;
+			nameInput.addEventListener("input", function() {
+				const next = aclCurrentModel(field, model);
+				next.groups[selectedIndex].name = nameInput.value;
+				next.activeTab = "groups";
+				next.selectedGroupIndex = selectedIndex;
+				aclUpdateModel(field, next, false);
+			});
+			nameLabel.appendChild(nameCaption);
+			nameLabel.appendChild(nameInput);
+			form.appendChild(nameLabel);
+
+			const flags = document.createElement("div");
+			flags.className = "modern-dialog-acl-group-flags";
+			[
+				["inherit", "Inherit members"],
+				["inheritable", "Inheritable"]
+			].forEach(function(pair) {
+				const label = document.createElement("label");
+				label.className = "modern-dialog-acl-check";
+				const checkbox = document.createElement("input");
+				checkbox.type = "checkbox";
+				checkbox.checked = !!group[pair[0]];
+				checkbox.disabled = !editable;
+				checkbox.addEventListener("change", function() {
+					const next = aclCurrentModel(field, model);
+					next.groups[selectedIndex][pair[0]] = checkbox.checked;
+					next.activeTab = "groups";
+					next.selectedGroupIndex = selectedIndex;
+					aclUpdateModel(field, next, false);
+				});
+				label.appendChild(checkbox);
+				label.appendChild(document.createTextNode(pair[1]));
+				flags.appendChild(label);
+			});
+			form.appendChild(flags);
+			const actions = document.createElement("div");
+			actions.className = "modern-dialog-acl-card-actions";
+			appendAclButton(actions, "Delete group", "is-danger", !editable, function() {
+				const next = aclCurrentModel(field, model);
+				next.groups.splice(selectedIndex, 1);
+				next.selectedGroupIndex = Math.max(0, selectedIndex - 1);
+				next.activeTab = "groups";
+				aclUpdateModel(field, next, true);
+			});
+			form.appendChild(actions);
+			detail.appendChild(form);
+
+			appendAclMemberSection(detail, field, model, selectedIndex, "inheritedMembers", "Inherited members", false);
+			appendAclMemberSection(detail, field, model, selectedIndex, "add", "Add members", editable);
+			appendAclMemberSection(detail, field, model, selectedIndex, "remove", "Remove members", editable && group.inherit !== false);
+		}
+		workspace.appendChild(detail);
+		panel.appendChild(workspace);
+		container.appendChild(panel);
+	}
+
+	function appendAclPermissionControls(container, field, model, rule, ruleIndex, inherited) {
+		const configured = [];
+		(model.permissions || []).forEach(function(permission) {
+			const bit = Number(permission.id) || 0;
+			const state = aclPermissionState(rule, bit);
+			if (state !== "unset") {
+				configured.push({ bit: bit, state: state, label: permission.label || String(bit) });
+			}
+		});
+
+		const configuredWrap = document.createElement("div");
+		configuredWrap.className = "modern-dialog-acl-configured-permissions";
+		const heading = document.createElement("span");
+		heading.className = "modern-dialog-acl-member-heading";
+		heading.textContent = "Configured permissions";
+		configuredWrap.appendChild(heading);
+		const chips = document.createElement("div");
+		chips.className = "modern-dialog-acl-chip-list";
+		if (!configured.length) {
+			const empty = document.createElement("span");
+			empty.className = "modern-dialog-acl-empty-inline";
+			empty.textContent = "No permissions set.";
+			chips.appendChild(empty);
+		}
+		configured.forEach(function(item) {
+			const chip = document.createElement("span");
+			chip.className = "modern-dialog-acl-chip is-" + item.state;
+			chip.textContent = (item.state === "allow" ? "Allow " : "Deny ") + item.label;
+			if (!inherited) {
+				const clear = document.createElement("button");
+				clear.type = "button";
+				clear.textContent = "Clear";
+				clear.addEventListener("click", function(event) {
+					event.preventDefault();
+					const next = aclCurrentModel(field, model);
+					aclSetPermissionState(next.acls[ruleIndex], item.bit, "unset");
+					next.activeTab = "rules";
+					next.selectedRuleIndex = ruleIndex;
+					aclUpdateModel(field, next, true);
+				});
+				chip.appendChild(clear);
+			}
+			chips.appendChild(chip);
+		});
+		configuredWrap.appendChild(chips);
+		container.appendChild(configuredWrap);
+
+		const unsetPermissions = (model.permissions || []).filter(function(permission) {
+			return aclPermissionState(rule, Number(permission.id) || 0) === "unset";
+		});
+		const addRow = document.createElement("div");
+		addRow.className = "modern-dialog-acl-add-permission";
+		const select = document.createElement("select");
+		unsetPermissions.forEach(function(permission) {
+			const option = document.createElement("option");
+			option.value = String(Number(permission.id) || 0);
+			option.textContent = permission.label || String(permission.id);
+			select.appendChild(option);
+		});
+		select.disabled = inherited || !unsetPermissions.length;
+		addRow.appendChild(select);
+		[
+			["allow", "Allow"],
+			["deny", "Deny"]
+		].forEach(function(pair) {
+			appendAclButton(addRow, pair[1], pair[0] === "deny" ? "is-danger" : "", inherited || select.disabled, function() {
+				const next = aclCurrentModel(field, model);
+				aclSetPermissionState(next.acls[ruleIndex], Number(select.value), pair[0]);
+				next.activeTab = "rules";
+				next.selectedRuleIndex = ruleIndex;
+				aclUpdateModel(field, next, true);
+			});
+		});
+		appendAclButton(addRow, rule.showAllPermissions ? "Hide all" : "Show all", "", false, function() {
+			const next = aclCurrentModel(field, model);
+			next.acls[ruleIndex].showAllPermissions = !rule.showAllPermissions;
+			next.activeTab = "rules";
+			next.selectedRuleIndex = ruleIndex;
+			aclUpdateModel(field, next, true);
+		});
+		container.appendChild(addRow);
+
+		if (!rule.showAllPermissions) {
+			return;
+		}
+		const matrix = document.createElement("div");
+		matrix.className = "modern-dialog-acl-permission-matrix";
+		(model.permissions || []).forEach(function(permission) {
+			const bit = Number(permission.id) || 0;
+			const state = aclPermissionState(rule, bit);
+			const row = document.createElement("div");
+			row.className = "modern-dialog-acl-permission-row is-" + state;
+			const name = document.createElement("span");
+			name.className = "modern-dialog-acl-permission-name";
+			name.textContent = permission.label || String(permission.id);
+			if (permission.hint) {
+				name.title = String(permission.hint);
+			}
+			row.appendChild(name);
+			const choices = document.createElement("div");
+			choices.className = "modern-dialog-acl-state";
+			[
+				["unset", "Not set"],
+				["deny", "Deny"],
+				["allow", "Allow"]
+			].forEach(function(choice) {
+				const button = document.createElement("button");
+				button.type = "button";
+				button.className = "modern-dialog-acl-state-button is-" + choice[0]
+					+ (state === choice[0] ? " is-selected" : "");
+				button.textContent = choice[1];
+				button.disabled = inherited;
+				button.addEventListener("click", function(event) {
+					event.preventDefault();
+					const next = aclCurrentModel(field, model);
+					aclSetPermissionState(next.acls[ruleIndex], bit, choice[0]);
+					next.activeTab = "rules";
+					next.selectedRuleIndex = ruleIndex;
+					next.acls[ruleIndex].showAllPermissions = true;
+					aclUpdateModel(field, next, true);
+				});
+				choices.appendChild(button);
+			});
+			row.appendChild(choices);
+			matrix.appendChild(row);
+		});
+		container.appendChild(matrix);
+	}
+
+	function appendAclRuleEditor(container, field, model) {
+		const panel = document.createElement("section");
+		panel.className = "modern-dialog-acl-panel is-rules";
+		const header = document.createElement("div");
+		header.className = "modern-dialog-acl-panel-header";
+		const copy = document.createElement("div");
+		const title = document.createElement("h3");
+		title.className = "modern-dialog-acl-panel-title";
+		title.textContent = "Access rules";
+		const subtitle = document.createElement("p");
+		subtitle.className = "modern-dialog-acl-panel-subtitle";
+		subtitle.textContent = "Choose a rule on the left, then edit target, scope, and configured permissions.";
+		copy.appendChild(title);
+		copy.appendChild(subtitle);
+		header.appendChild(copy);
+		appendAclButton(header, "Add rule", "", false, function() {
+			const next = aclCurrentModel(field, model);
+			next.acls = next.acls || [];
+			next.acls.push({
+				targetType: "group",
+				target: "all",
+				userId: -1,
+				applyHere: true,
+				applySubs: true,
+				inherited: false,
+				allow: [],
+				deny: []
+			});
+			next.activeTab = "rules";
+			next.selectedRuleIndex = next.acls.length - 1;
+			aclUpdateModel(field, next, true);
+		});
+		panel.appendChild(header);
+
+		const rules = model.acls || [];
+		const selectedIndex = aclSelectedIndex(model, "selectedRuleIndex", rules.length);
+		const workspace = document.createElement("div");
+		workspace.className = "modern-dialog-acl-workspace";
+		const nav = document.createElement("div");
+		nav.className = "modern-dialog-acl-sidebar";
+		if (!rules.length) {
+			const empty = document.createElement("p");
+			empty.className = "modern-dialog-note";
+			empty.textContent = "No ACL rules.";
+			nav.appendChild(empty);
+		}
+		rules.forEach(function(rule, ruleIndex) {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "modern-dialog-acl-nav-item" + (ruleIndex === selectedIndex ? " is-selected" : "")
+				+ (rule.inherited ? " is-inherited" : "");
+			const name = document.createElement("strong");
+			name.textContent = aclRuleTitle(model, rule);
+			const meta = document.createElement("span");
+			meta.textContent = aclRuleScopeLabel(rule) + (rule.inherited ? " - inherited" : "");
+			const badges = document.createElement("span");
+			badges.className = "modern-dialog-acl-nav-badges";
+			badges.textContent = aclPermissionSummary(model, rule.allow, "No allows") + " / "
+				+ aclPermissionSummary(model, rule.deny, "No denies");
+			button.appendChild(name);
+			button.appendChild(meta);
+			button.appendChild(badges);
+			button.addEventListener("click", function(event) {
+				event.preventDefault();
+				aclSetSelectedRule(field, model, ruleIndex);
+			});
+			nav.appendChild(button);
+		});
+		workspace.appendChild(nav);
+
+		const detail = document.createElement("div");
+		detail.className = "modern-dialog-acl-detail";
+		if (selectedIndex >= 0) {
+			const rule = rules[selectedIndex];
+			const inherited = !!rule.inherited;
+			const titleRow = document.createElement("div");
+			titleRow.className = "modern-dialog-acl-detail-title";
+			const titleText = document.createElement("div");
+			const target = document.createElement("strong");
+			target.textContent = aclRuleTitle(model, rule);
+			const meta = document.createElement("span");
+			meta.className = "modern-dialog-acl-muted";
+			meta.textContent = aclRuleScopeLabel(rule) + (inherited ? " - inherited" : "");
+			titleText.appendChild(target);
+			titleText.appendChild(meta);
+			titleRow.appendChild(titleText);
+			const actions = document.createElement("div");
+			actions.className = "modern-dialog-acl-rule-actions";
+			appendAclButton(actions, "Up", "", inherited || selectedIndex === 0, function() {
+				aclMoveRule(field, model, selectedIndex, -1);
+			});
+			appendAclButton(actions, "Down", "", inherited || selectedIndex >= rules.length - 1, function() {
+				aclMoveRule(field, model, selectedIndex, 1);
+			});
+			appendAclButton(actions, "Delete", "is-danger", inherited, function() {
+				const next = aclCurrentModel(field, model);
+				next.acls.splice(selectedIndex, 1);
+				next.selectedRuleIndex = Math.max(0, selectedIndex - 1);
+				next.activeTab = "rules";
+				aclUpdateModel(field, next, true);
+			});
+			titleRow.appendChild(actions);
+			detail.appendChild(titleRow);
+
+			const targetRow = document.createElement("div");
+			targetRow.className = "modern-dialog-acl-rule-target";
+			const targetType = document.createElement("select");
+			["group", "user"].forEach(function(type) {
+				const option = document.createElement("option");
+				option.value = type;
+				option.textContent = type === "group" ? "Group" : "User";
+				targetType.appendChild(option);
+			});
+			targetType.value = rule.targetType || "group";
+			targetType.disabled = inherited;
+			targetType.addEventListener("change", function() {
+				const next = aclCurrentModel(field, model);
+				next.acls[selectedIndex].targetType = targetType.value;
+				if (targetType.value === "group") {
+					next.acls[selectedIndex].target = "all";
+					next.acls[selectedIndex].userId = -1;
+				} else {
+					const users = aclUserOptions(next);
+					const firstUser = users.length ? aclOptionId(users[0]) : -1;
+					next.acls[selectedIndex].userId = firstUser;
+					next.acls[selectedIndex].target = firstUser >= 0 ? aclUserLabel(next, firstUser) : "";
+				}
+				next.activeTab = "rules";
+				next.selectedRuleIndex = selectedIndex;
+				aclUpdateModel(field, next, true);
+			});
+			targetRow.appendChild(targetType);
+
+			if ((rule.targetType || "group") === "user") {
+				const userSelect = document.createElement("select");
+				aclRenderUserSelect(userSelect, model, rule.userId);
+				userSelect.disabled = inherited || userSelect.disabled;
+				userSelect.addEventListener("change", function() {
+					const id = Number(userSelect.value);
+					const next = aclCurrentModel(field, model);
+					next.acls[selectedIndex].userId = id;
+					next.acls[selectedIndex].target = aclUserLabel(next, id);
+					next.activeTab = "rules";
+					next.selectedRuleIndex = selectedIndex;
+					aclUpdateModel(field, next, true);
+				});
+				targetRow.appendChild(userSelect);
+			} else {
+				const groupSelect = document.createElement("select");
+				aclGroupTargetOptions(model, rule.target).forEach(function(item) {
+					const option = document.createElement("option");
+					option.value = item.value;
+					option.textContent = item.label;
+					groupSelect.appendChild(option);
+				});
+				groupSelect.value = String(rule.target || "all");
+				groupSelect.disabled = inherited;
+				groupSelect.addEventListener("change", function() {
+					const next = aclCurrentModel(field, model);
+					next.acls[selectedIndex].target = groupSelect.value;
+					next.acls[selectedIndex].userId = -1;
+					next.activeTab = "rules";
+					next.selectedRuleIndex = selectedIndex;
+					aclUpdateModel(field, next, true);
+				});
+				targetRow.appendChild(groupSelect);
+			}
+
+			const scopes = document.createElement("div");
+			scopes.className = "modern-dialog-acl-scope";
+			[
+				["applyHere", "This room"],
+				["applySubs", "Sub rooms"]
+			].forEach(function(pair) {
+				const label = document.createElement("label");
+				label.className = "modern-dialog-acl-check";
+				const checkbox = document.createElement("input");
+				checkbox.type = "checkbox";
+				checkbox.checked = rule[pair[0]] !== false;
+				checkbox.disabled = inherited;
+				checkbox.addEventListener("change", function() {
+					const next = aclCurrentModel(field, model);
+					next.acls[selectedIndex][pair[0]] = checkbox.checked;
+					next.activeTab = "rules";
+					next.selectedRuleIndex = selectedIndex;
+					aclUpdateModel(field, next, false);
+				});
+				label.appendChild(checkbox);
+				label.appendChild(document.createTextNode(pair[1]));
+				scopes.appendChild(label);
+			});
+			targetRow.appendChild(scopes);
+			detail.appendChild(targetRow);
+			appendAclPermissionControls(detail, field, model, rule, selectedIndex, inherited);
+		}
+		workspace.appendChild(detail);
+		panel.appendChild(workspace);
+		container.appendChild(panel);
+	}
+
+	function appendModernAclEditor(container, field, errors) {
+		const model = aclCloneModel(field.value || {});
+		model.acls = model.acls || [];
+		model.groups = model.groups || [];
+		if (!model.activeTab) {
+			model.activeTab = "rules";
+		}
+		const wrap = document.createElement("div");
+		wrap.className = "modern-dialog-acl-editor";
+
+		const policy = document.createElement("section");
+		policy.className = "modern-dialog-acl-policy";
+		const policyCopy = document.createElement("div");
+		const policyTitle = document.createElement("h3");
+		policyTitle.className = "modern-dialog-acl-panel-title";
+		policyTitle.textContent = "Room policy";
+		const policySummary = document.createElement("p");
+		policySummary.className = "modern-dialog-acl-panel-subtitle";
+		policySummary.textContent = String(model.groups.length) + " groups, " + String(model.acls.length) + " access rules";
+		policyCopy.appendChild(policyTitle);
+		policyCopy.appendChild(policySummary);
+		policy.appendChild(policyCopy);
+
+		const policyControls = document.createElement("div");
+		policyControls.className = "modern-dialog-acl-policy-controls";
+		const inherit = document.createElement("label");
+		inherit.className = "modern-dialog-acl-check";
+		const inheritBox = document.createElement("input");
+		inheritBox.type = "checkbox";
+		inheritBox.checked = model.inheritAcls !== false;
+		inheritBox.addEventListener("change", function() {
+			const next = aclCurrentModel(field, model);
+			next.inheritAcls = inheritBox.checked;
+			aclUpdateModel(field, next, false);
+		});
+		inherit.appendChild(inheritBox);
+		inherit.appendChild(document.createTextNode("Inherit parent ACLs"));
+		policyControls.appendChild(inherit);
+
+		const passwordLabel = document.createElement("label");
+		passwordLabel.className = "modern-dialog-acl-control";
+		const passwordCaption = document.createElement("span");
+		passwordCaption.textContent = "Room password";
+		const passwordInput = document.createElement("input");
+		passwordInput.type = "text";
+		passwordInput.value = model.password || "";
+		passwordInput.placeholder = "Optional join password";
+		passwordInput.addEventListener("input", function() {
+			const next = aclCurrentModel(field, model);
+			next.password = passwordInput.value;
+			aclUpdateModel(field, next, false);
+		});
+		passwordLabel.appendChild(passwordCaption);
+		passwordLabel.appendChild(passwordInput);
+		policyControls.appendChild(passwordLabel);
+		policy.appendChild(policyControls);
+		wrap.appendChild(policy);
+
+		const tabs = document.createElement("div");
+		tabs.className = "modern-dialog-acl-tabs";
+		[
+			["rules", "Access rules", String(model.acls.length)],
+			["groups", "Groups", String(model.groups.length)]
+		].forEach(function(tab) {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "modern-dialog-acl-tab" + (model.activeTab === tab[0] ? " is-selected" : "");
+			button.textContent = tab[1] + " (" + tab[2] + ")";
+			button.addEventListener("click", function(event) {
+				event.preventDefault();
+				aclSetActiveTab(field, model, tab[0]);
+			});
+			tabs.appendChild(button);
+		});
+		wrap.appendChild(tabs);
+
+		if (model.activeTab === "groups") {
+			appendAclGroupEditor(wrap, field, model);
+		} else {
+			appendAclRuleEditor(wrap, field, model);
+		}
+
+		const errorText = errors && field && field.id ? errors[field.id] : "";
+		if (errorText) {
+			const error = document.createElement("span");
+			error.className = "modern-dialog-field-error";
+			error.textContent = errorText;
+			wrap.appendChild(error);
+		}
+		container.appendChild(wrap);
+	}
+
 	function appendModernDialogField(container, field, errors) {
 		const type = String(field && field.type || "text");
 		if (type === "hidden") {
@@ -980,6 +3001,14 @@
 			note.className = "modern-dialog-note";
 			note.textContent = field.text || "";
 			container.appendChild(note);
+			return;
+		}
+		if (type === "resultList") {
+			appendModernResultList(container, field);
+			return;
+		}
+		if (type === "aclEditor") {
+			appendModernAclEditor(container, field, errors);
 			return;
 		}
 
@@ -1208,7 +3237,25 @@
 		} else if (type === "textarea") {
 			input = document.createElement("textarea");
 			input.value = field.value == null ? "" : String(field.value);
-			input.rows = Number(field.rows) || 4;
+			input.rows = Math.max(2, Number(field.rows) || 4);
+		} else if (type === "pathPicker") {
+			const picker = document.createElement("div");
+			picker.className = "modern-dialog-path-picker";
+			input = document.createElement("input");
+			input.type = "text";
+			input.value = field.value == null ? "" : String(field.value);
+			const browse = document.createElement("button");
+			browse.type = "button";
+			browse.className = "chip-button";
+			browse.textContent = field.browseLabel || "Browse";
+			browse.disabled = field.enabled === false;
+			browse.addEventListener("click", function(event) {
+				event.preventDefault();
+				invokeModernDialogAction(field.browseActionId || "", { fieldId: field.id || "" });
+			});
+			picker.appendChild(input);
+			picker.appendChild(browse);
+			row.appendChild(picker);
 		} else {
 			input = document.createElement("input");
 			input.type = type === "password" ? "password" : (type === "number" ? "number" : "text");
@@ -1226,7 +3273,7 @@
 			}
 		}
 
-		if (input && type !== "range") {
+		if (input && type !== "range" && type !== "pathPicker") {
 			row.appendChild(input);
 		}
 		if (input) {
@@ -1438,6 +3485,7 @@
 		}
 		clearModernDialogFavoriteClickTimer();
 		closeModernDialogFavoriteMenu();
+		closeModernDialogSelect();
 
 		const activeElement = document.activeElement;
 		const activeInDialog = !!(activeElement && refs.dialog && refs.dialog.contains(activeElement));
@@ -1475,6 +3523,7 @@
 			renderGenericDialog(dialog);
 		}
 		renderModernDialogActions(dialog);
+		enhanceModernDialogSelects(refs.body);
 		syncAudioInputMeterTimer();
 
 		modernDialogRenderedOpen = true;
@@ -1504,14 +3553,28 @@
 			if (modernDialogFavoriteMenu && !modernDialogFavoriteMenu.contains(event.target)) {
 				closeModernDialogFavoriteMenu();
 			}
+			if (modernDialogSelectState
+					&& !modernDialogSelectState.shell.contains(event.target)
+					&& !modernDialogSelectState.menu.contains(event.target)) {
+				closeModernDialogSelect();
+			}
 		});
-		window.addEventListener("blur", closeModernDialogFavoriteMenu);
+		window.addEventListener("resize", positionModernDialogSelectMenu);
+		window.addEventListener("scroll", positionModernDialogSelectMenu, true);
+		window.addEventListener("blur", function() {
+			closeModernDialogFavoriteMenu();
+			closeModernDialogSelect();
+		});
 		window.addEventListener("keydown", function(event) {
 			if (!modernDialogState || !modernDialogState.open) {
 				return;
 			}
 			if (event.key === "Escape") {
 				event.preventDefault();
+				if (modernDialogSelectState) {
+					closeModernDialogSelect();
+					return;
+				}
 				if (modernDialogFavoriteMenu) {
 					closeModernDialogFavoriteMenu();
 					return;

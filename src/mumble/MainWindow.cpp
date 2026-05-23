@@ -9,6 +9,7 @@
 #include "ACLEditor.h"
 #include "About.h"
 #include "AudioInput.h"
+#include "AudioOutput.h"
 #include "AudioStats.h"
 #include "AudioWizard.h"
 #include "BanEditor.h"
@@ -84,6 +85,7 @@
 #include "VersionCheck.h"
 #include "ViewCert.h"
 #include "VoiceRecorderDialog.h"
+#include "VoiceRecorder.h"
 #include "VolumeAdjustmentController.h"
 #include "Global.h"
 
@@ -115,6 +117,7 @@
 #include <QtCore/QStandardPaths>
 #include <QtCore/QSysInfo>
 #include <QtCore/QTimer>
+#include <QtCore/QTime>
 #include <QtCore/QUrlQuery>
 #include <QtCore/QVector>
 #include <QtGui/QClipboard>
@@ -3137,6 +3140,18 @@ QImage persistentChatThumbnailImage(const QImage &image) {
 						Qt::KeepAspectRatio, Qt::SmoothTransformation);
 }
 
+QImage persistentChatOpaquePreviewSnapshot(const QImage &image) {
+	if (image.isNull()) {
+		return QImage();
+	}
+
+	QImage opaqueImage(image.size(), QImage::Format_RGB32);
+	opaqueImage.fill(Qt::white);
+	QPainter painter(&opaqueImage);
+	painter.drawImage(QPoint(0, 0), image);
+	return opaqueImage;
+}
+
 QImage decodePersistentChatThumbnailImage(const QByteArray &data) {
 	if (data.isEmpty()) {
 		return QImage();
@@ -5589,6 +5604,35 @@ namespace {
 		return field;
 	}
 
+	QVariantMap modernTextareaField(const QString &id, const QString &label, const QString &value,
+									const int rows = 4, const bool enabled = true) {
+		QVariantMap field = modernDialogField(id, label, QStringLiteral("textarea"), value, enabled);
+		field.insert(QStringLiteral("rows"), rows);
+		return field;
+	}
+
+	QVariantMap modernPathPickerField(const QString &id, const QString &label, const QString &value,
+									  const QString &browseActionID, const QString &browseLabel,
+									  const bool enabled = true) {
+		QVariantMap field = modernDialogField(id, label, QStringLiteral("pathPicker"), value, enabled);
+		field.insert(QStringLiteral("browseActionId"), browseActionID);
+		field.insert(QStringLiteral("browseLabel"), browseLabel);
+		return field;
+	}
+
+	QVariantMap modernResultListField(const QString &id, const QString &label, const QVariantList &items,
+									  const QString &emptyText) {
+		QVariantMap field = modernDialogField(id, label, QStringLiteral("resultList"), items, false);
+		field.insert(QStringLiteral("items"), items);
+		field.insert(QStringLiteral("emptyText"), emptyText);
+		return field;
+	}
+
+	QVariantMap modernAclEditorField(const QString &id, const QString &label, const QVariantMap &model) {
+		QVariantMap field = modernDialogField(id, label, QStringLiteral("aclEditor"), model);
+		return field;
+	}
+
 	QVariantMap modernDialogDto(const QString &id, const QString &kind, const QString &title, const QString &subtitle,
 								const QVariantList &sections, const QVariantList &actions,
 								const QString &primaryActionID, const QSize &size = QSize()) {
@@ -5605,6 +5649,21 @@ namespace {
 			dialog.insert(QStringLiteral("height"), size.height());
 		}
 		return dialog;
+	}
+
+	QVariantMap modernDialogFieldValuesFromState(const QVariantMap &state) {
+		QVariantMap values;
+		for (const QVariant &sectionValue : state.value(QStringLiteral("sections")).toList()) {
+			const QVariantMap section = sectionValue.toMap();
+			for (const QVariant &fieldValue : section.value(QStringLiteral("fields")).toList()) {
+				const QVariantMap field = fieldValue.toMap();
+				const QString id        = field.value(QStringLiteral("id")).toString();
+				if (!id.isEmpty()) {
+					values.insert(id, field.value(QStringLiteral("value")));
+				}
+			}
+		}
+		return values;
 	}
 
 	QString valueOrUnknown(const QString &value) {
@@ -5629,6 +5688,560 @@ namespace {
 			}
 		}
 		return names.isEmpty() ? QObject::tr("None") : names.join(QStringLiteral(", "));
+	}
+
+	QVariantList permissionsToList(const unsigned int permissions) {
+		QVariantList values;
+		for (int i = 0; i < 31; ++i) {
+			const unsigned int bit = 1u << i;
+			if (permissions & bit) {
+				values.push_back(static_cast< int >(bit));
+			}
+		}
+		return values;
+	}
+
+	unsigned int permissionsFromList(const QVariant &value) {
+		unsigned int permissions = 0;
+		for (const QVariant &item : value.toList()) {
+			bool ok = false;
+			const unsigned int bit = item.toUInt(&ok);
+			if (ok) {
+				permissions |= bit;
+			}
+		}
+		return permissions;
+	}
+
+	template< typename RepeatedField >
+	QVariantList unsignedIDsToVariantList(const RepeatedField &ids) {
+		QVariantList values;
+		for (int i = 0; i < ids.size(); ++i) {
+			values.push_back(static_cast< int >(ids.Get(i)));
+		}
+		return values;
+	}
+
+	QVariantList aclMemberListFromVariant(const QVariant &value) {
+		QVariantList members;
+		QSet< int > seen;
+		for (const QVariant &item : value.toList()) {
+			bool ok = false;
+			const int id = item.toInt(&ok);
+			if (ok && id >= 0 && !seen.contains(id)) {
+				seen.insert(id);
+				members.push_back(id);
+			}
+		}
+		return members;
+	}
+
+	QString certificateSubjectValue(const QSslCertificate &cert, const QSslCertificate::SubjectInfo subject) {
+		const QStringList values = cert.subjectInfo(subject);
+		return values.isEmpty() ? QString() : values.join(QStringLiteral(", "));
+	}
+
+	QString certificateIssuerValue(const QSslCertificate &cert, const QSslCertificate::SubjectInfo subject) {
+		const QStringList values = cert.issuerInfo(subject);
+		return values.isEmpty() ? QString() : values.join(QStringLiteral(", "));
+	}
+
+	QVariantList modernCertificateFields(const Settings::KeyPair &keyPair) {
+		QVariantList fields;
+		const bool valid = CertWizard::validateCert(keyPair);
+		fields.push_back(modernReadonlyField(QObject::tr("Status"),
+											 valid ? QObject::tr("A valid certificate is installed")
+												   : QObject::tr("No valid certificate is installed")));
+		if (!valid) {
+			return fields;
+		}
+
+		const QSslCertificate cert = keyPair.first.constFirst();
+		fields.push_back(modernReadonlyField(QObject::tr("Name"),
+											 valueOrUnknown(certificateSubjectValue(cert, QSslCertificate::CommonName))));
+		const QStringList emails = cert.subjectAlternativeNames().values(QSsl::EmailEntry);
+		fields.push_back(modernReadonlyField(QObject::tr("Email"),
+											 emails.isEmpty() ? QObject::tr("None") : emails.join(QStringLiteral(", "))));
+		fields.push_back(modernReadonlyField(QObject::tr("Issuer"),
+											 valueOrUnknown(certificateIssuerValue(cert, QSslCertificate::CommonName))));
+		fields.push_back(modernReadonlyField(QObject::tr("Expires"),
+											 cert.expiryDate().toLocalTime().toString(Qt::ISODate)));
+		fields.push_back(modernReadonlyField(QObject::tr("SHA-1 fingerprint"),
+											 QString::fromLatin1(cert.digest(QCryptographicHash::Sha1).toHex(':'))));
+		return fields;
+	}
+
+	Search::SearchResult regularModernSearch(const QString &source, const QString &searchTerm,
+											 const Search::SearchType type, const bool caseSensitive) {
+		const qsizetype startIndex =
+			source.indexOf(searchTerm, 0, caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive);
+		if (startIndex < 0) {
+			return {};
+		}
+		return { startIndex, searchTerm.size(), type, source, QString() };
+	}
+
+	Search::SearchResult regexModernSearch(const QString &source, const QRegularExpression &regex,
+										   const Search::SearchType type) {
+		const QRegularExpressionMatch match = regex.match(source);
+		if (!match.hasMatch()) {
+			return {};
+		}
+		const qsizetype startIndex = match.capturedStart();
+		return { startIndex, match.capturedEnd() - startIndex, type, source, QString() };
+	}
+
+	QString modernSearchChannelHierarchy(const Channel &channel, const bool includeSource) {
+		QStringList names;
+		const Channel *current = includeSource ? &channel : channel.cParent;
+		while (current) {
+			names.prepend(current->qsName);
+			current = current->cParent;
+		}
+		return names.join(Global::get().s.qsHierarchyChannelSeparator);
+	}
+
+	QVariantList modernSearchResults(const QString &searchTerm, const bool searchUsers, const bool searchChannels,
+									 const bool caseSensitive, const bool useRegex, QString *errorMessage = nullptr) {
+		QVariantList items;
+		if (searchTerm.trimmed().isEmpty() || Global::get().uiSession == 0 || (!searchUsers && !searchChannels)) {
+			return items;
+		}
+
+		QRegularExpression regex;
+		if (useRegex) {
+			regex.setPattern(searchTerm);
+			QRegularExpression::PatternOptions options = QRegularExpression::UseUnicodePropertiesOption;
+			if (!caseSensitive) {
+				options |= QRegularExpression::CaseInsensitiveOption;
+			}
+			regex.setPatternOptions(options);
+			if (!regex.isValid()) {
+				if (errorMessage) {
+					*errorMessage = regex.errorString();
+				}
+				return items;
+			}
+		}
+
+		Search::SearchResultMap matches;
+		if (searchUsers) {
+			QReadLocker userLock(&ClientUser::c_qrwlUsers);
+			for (ClientUser *user : ClientUser::c_qmUsers) {
+				if (!user) {
+					continue;
+				}
+				Search::SearchResult result = useRegex
+												  ? regexModernSearch(user->qsName, regex, Search::SearchType::User)
+												  : regularModernSearch(user->qsName, searchTerm, Search::SearchType::User,
+																		caseSensitive);
+				if (result.begin >= 0 && result.length > 0 && user->cChannel) {
+					result.channelHierarchy = modernSearchChannelHierarchy(*user->cChannel, true);
+					matches.insert({ result, user->uiSession });
+				}
+			}
+		}
+		if (searchChannels) {
+			QReadLocker channelLock(&Channel::c_qrwlChannels);
+			for (Channel *channel : Channel::c_qhChannels) {
+				if (!channel) {
+					continue;
+				}
+				Search::SearchResult result =
+					useRegex ? regexModernSearch(channel->qsName, regex, Search::SearchType::Channel)
+							 : regularModernSearch(channel->qsName, searchTerm, Search::SearchType::Channel,
+												   caseSensitive);
+				if (result.begin >= 0 && result.length > 0) {
+					result.channelHierarchy = modernSearchChannelHierarchy(*channel, false);
+					matches.insert({ result, static_cast< unsigned int >(channel->iId) });
+				}
+			}
+		}
+
+		int index = 0;
+		for (auto it = matches.cbegin(); it != matches.cend() && index < 100; ++it, ++index) {
+			const Search::SearchResult &result = it->first;
+			QVariantMap item;
+			item.insert(QStringLiteral("index"), index);
+			item.insert(QStringLiteral("id"), static_cast< int >(it->second));
+			item.insert(QStringLiteral("type"),
+						result.type == Search::SearchType::User ? QStringLiteral("user") : QStringLiteral("channel"));
+			item.insert(QStringLiteral("title"), result.fullText);
+			item.insert(QStringLiteral("subtitle"), result.channelHierarchy);
+			item.insert(QStringLiteral("matchStart"), static_cast< int >(result.begin));
+			item.insert(QStringLiteral("matchLength"), static_cast< int >(result.length));
+			item.insert(QStringLiteral("primaryAction"), QObject::tr("Select"));
+			item.insert(QStringLiteral("secondaryAction"), QObject::tr("Join"));
+			items.push_back(item);
+		}
+		return items;
+	}
+
+	QVariantList modernAclPermissions(const unsigned int channelID) {
+		QVariantList permissions;
+		const bool root = channelID == Mumble::ROOT_CHANNEL_ID;
+		for (int i = 0; i < (root ? 30 : 16); ++i) {
+			const unsigned int bit = 1u << i;
+			const ChanACL::Perm permission = static_cast< ChanACL::Perm >(bit);
+			const QString name = ChanACL::permName(permission);
+			if (name.isEmpty()) {
+				continue;
+			}
+			if (Global::get().sh && Global::get().sh->m_version < Version::fromComponents(1, 4, 0)
+				&& (permission == ChanACL::ResetUserContent || permission == ChanACL::Listen)) {
+				continue;
+			}
+			QVariantMap item;
+			item.insert(QStringLiteral("id"), static_cast< int >(bit));
+			item.insert(QStringLiteral("label"), name);
+#ifndef MURMUR
+			item.insert(QStringLiteral("hint"), ChanACL::whatsThis(permission));
+#endif
+			permissions.push_back(item);
+		}
+		return permissions;
+	}
+
+	void modernAclCacheOnlineUsers(QHash< int, QString > &cache) {
+		QReadLocker locker(&ClientUser::c_qrwlUsers);
+		for (const ClientUser *user : ClientUser::c_qmUsers) {
+			if (user && user->iId >= 0 && !user->qsName.trimmed().isEmpty()) {
+				cache.insert(user->iId, user->qsName);
+			}
+		}
+	}
+
+	QString modernUserNameForID(const int userID, const QHash< int, QString > &userNameCache) {
+		if (userNameCache.contains(userID)) {
+			return userNameCache.value(userID);
+		}
+		QReadLocker locker(&ClientUser::c_qrwlUsers);
+		for (const ClientUser *user : ClientUser::c_qmUsers) {
+			if (user && user->iId == userID) {
+				return user->qsName;
+			}
+		}
+		return QObject::tr("User %1").arg(userID);
+	}
+
+	QVariantList modernAclUserOptions(const QHash< int, QString > &userNameCache) {
+		QHash< int, QString > users = userNameCache;
+		modernAclCacheOnlineUsers(users);
+
+		QList< int > ids = users.keys();
+		std::sort(ids.begin(), ids.end(), [&users](const int left, const int right) {
+			const int byName = QString::localeAwareCompare(users.value(left), users.value(right));
+			return byName == 0 ? left < right : byName < 0;
+		});
+
+		QVariantList options;
+		for (const int id : ids) {
+			QVariantMap option;
+			option.insert(QStringLiteral("id"), id);
+			option.insert(QStringLiteral("value"), id);
+			option.insert(QStringLiteral("label"), users.value(id));
+			option.insert(QStringLiteral("subtitle"), QObject::tr("ID %1").arg(id));
+			options.push_back(option);
+		}
+		return options;
+	}
+
+	QSet< int > modernAclUserIDsFromModel(const QVariantMap &model) {
+		QSet< int > ids;
+		for (const QVariant &rowValue : model.value(QStringLiteral("acls")).toList()) {
+			const QVariantMap row = rowValue.toMap();
+			const int userID      = row.value(QStringLiteral("userId"), -1).toInt();
+			if (row.value(QStringLiteral("targetType")).toString() == QLatin1String("user") && userID >= 0) {
+				ids.insert(userID);
+			}
+		}
+		for (const QVariant &rowValue : model.value(QStringLiteral("groups")).toList()) {
+			const QVariantMap row = rowValue.toMap();
+			const QStringList memberKeys { QStringLiteral("add"), QStringLiteral("remove"),
+											QStringLiteral("inheritedMembers") };
+			for (const QString &key : memberKeys) {
+				for (const QVariant &memberValue : row.value(key).toList()) {
+					bool ok = false;
+					const int userID = memberValue.toInt(&ok);
+					if (ok && userID >= 0) {
+						ids.insert(userID);
+					}
+				}
+			}
+		}
+		return ids;
+	}
+
+	QVariantMap modernAclModelWithResolvedUsers(QVariantMap model, const QHash< int, QString > &userNameCache) {
+		QHash< int, QString > users = userNameCache;
+		modernAclCacheOnlineUsers(users);
+
+		QVariantList acls;
+		for (const QVariant &rowValue : model.value(QStringLiteral("acls")).toList()) {
+			QVariantMap row = rowValue.toMap();
+			const int userID = row.value(QStringLiteral("userId"), -1).toInt();
+			if (row.value(QStringLiteral("targetType")).toString() == QLatin1String("user") && userID >= 0) {
+				row.insert(QStringLiteral("target"), modernUserNameForID(userID, users));
+			}
+			acls.push_back(row);
+		}
+		model.insert(QStringLiteral("acls"), acls);
+		model.insert(QStringLiteral("userOptions"), modernAclUserOptions(users));
+		return model;
+	}
+
+	bool aclProtoIsPasswordAllow(const MumbleProto::ACL_ChanACL &acl) {
+		if (acl.inherited() || !acl.apply_here() || acl.apply_subs() || acl.has_user_id()) {
+			return false;
+		}
+		const QString group = u8(acl.group());
+		if (!group.startsWith(QLatin1Char('#')) || acl.deny() != ChanACL::None) {
+			return false;
+		}
+		const unsigned int legacyPasswordPermissions =
+			ChanACL::Enter | ChanACL::Speak | ChanACL::Whisper | ChanACL::TextMessage | ChanACL::LinkChannel;
+		const unsigned int passwordPermissions = legacyPasswordPermissions | ChanACL::ViewTextMessageHistory;
+		const unsigned int allow = acl.grant();
+		return (allow & ChanACL::Enter)
+			   && (allow == legacyPasswordPermissions || allow == (legacyPasswordPermissions | ChanACL::Traverse)
+				   || allow == passwordPermissions || allow == (passwordPermissions | ChanACL::Traverse));
+	}
+
+	bool aclProtoIsPasswordDenyAll(const MumbleProto::ACL_ChanACL &acl) {
+		if (acl.inherited() || !acl.apply_here() || acl.apply_subs() || acl.has_user_id()
+			|| u8(acl.group()) != QLatin1String("all") || acl.grant() != ChanACL::None) {
+			return false;
+		}
+		const unsigned int legacyPasswordPermissions =
+			ChanACL::Enter | ChanACL::Speak | ChanACL::Whisper | ChanACL::TextMessage | ChanACL::LinkChannel;
+		const unsigned int passwordPermissions = legacyPasswordPermissions | ChanACL::ViewTextMessageHistory;
+		const unsigned int deny = acl.deny();
+		return deny == legacyPasswordPermissions || deny == passwordPermissions
+			   || deny == (legacyPasswordPermissions | ChanACL::Traverse)
+			   || deny == (passwordPermissions | ChanACL::Traverse);
+	}
+
+	std::optional< int > modernUserIDFromText(const QString &text, const QVariantMap &row) {
+		const int storedID = row.value(QStringLiteral("userId"), -1).toInt();
+		const QString trimmed = text.trimmed();
+		if (trimmed.isEmpty() && storedID >= 0) {
+			return storedID;
+		}
+		QString numericText = trimmed;
+		if (numericText.startsWith(QLatin1Char('#'))) {
+			numericText.remove(0, 1);
+		}
+		bool ok = false;
+		const int numericID = numericText.toInt(&ok);
+		if (ok && numericID >= 0) {
+			return numericID;
+		}
+		QReadLocker locker(&ClientUser::c_qrwlUsers);
+		for (const ClientUser *user : ClientUser::c_qmUsers) {
+			if (user && user->iId >= 0 && user->qsName.compare(trimmed, Qt::CaseInsensitive) == 0) {
+				return user->iId;
+			}
+		}
+		if (storedID >= 0) {
+			return storedID;
+		}
+		return std::nullopt;
+	}
+
+	std::optional< QVariantList > aclMemberListFromTextOrVariant(const QVariantMap &row, const QString &listKey,
+																 const QString &textKey, QString *errorMessage) {
+		const QString text = row.value(textKey).toString().trimmed();
+		if (text.isEmpty() || !row.contains(textKey)) {
+			return aclMemberListFromVariant(row.value(listKey));
+		}
+
+		QVariantList members;
+		QSet< int > seen;
+		const QStringList tokens = text.split(QRegularExpression(QStringLiteral("[,\\s]+")), Qt::SkipEmptyParts);
+		for (const QString &token : tokens) {
+			const std::optional< int > userID = modernUserIDFromText(token, {});
+			if (!userID || *userID < 0) {
+				if (errorMessage) {
+					*errorMessage = QObject::tr("Group members must be online usernames or numeric user IDs.");
+				}
+				return std::nullopt;
+			}
+			if (!seen.contains(*userID)) {
+				seen.insert(*userID);
+				members.push_back(*userID);
+			}
+		}
+		return members;
+	}
+
+	QVariantMap modernAclModelFromProto(const MumbleProto::ACL &msg, const QHash< int, QString > &userNameCache) {
+		QVariantMap model;
+		model.insert(QStringLiteral("channelId"), static_cast< int >(msg.channel_id()));
+		model.insert(QStringLiteral("inheritAcls"), msg.inherit_acls());
+		model.insert(QStringLiteral("permissions"), modernAclPermissions(msg.channel_id()));
+
+		QString password;
+		QVariantList acls;
+		for (int i = 0; i < msg.acls_size(); ++i) {
+			const MumbleProto::ACL_ChanACL &acl = msg.acls(i);
+			if (aclProtoIsPasswordAllow(acl)) {
+				password = u8(acl.group()).mid(1);
+				continue;
+			}
+			if (aclProtoIsPasswordDenyAll(acl)) {
+				continue;
+			}
+
+			QVariantMap row;
+			row.insert(QStringLiteral("applyHere"), acl.apply_here());
+			row.insert(QStringLiteral("applySubs"), acl.apply_subs());
+			row.insert(QStringLiteral("inherited"), acl.inherited());
+			row.insert(QStringLiteral("allow"), permissionsToList(acl.grant()));
+			row.insert(QStringLiteral("deny"), permissionsToList(acl.deny()));
+			if (acl.has_user_id()) {
+				const int userID = static_cast< int >(acl.user_id());
+				row.insert(QStringLiteral("targetType"), QStringLiteral("user"));
+				row.insert(QStringLiteral("target"), modernUserNameForID(userID, userNameCache));
+				row.insert(QStringLiteral("userId"), userID);
+			} else {
+				row.insert(QStringLiteral("targetType"), QStringLiteral("group"));
+				row.insert(QStringLiteral("target"), u8(acl.group()));
+				row.insert(QStringLiteral("userId"), -1);
+			}
+			acls.push_back(row);
+		}
+		model.insert(QStringLiteral("acls"), acls);
+		model.insert(QStringLiteral("password"), password);
+
+		QVariantList groups;
+		for (int i = 0; i < msg.groups_size(); ++i) {
+			const MumbleProto::ACL_ChanGroup &group = msg.groups(i);
+			QVariantMap row;
+			row.insert(QStringLiteral("name"), u8(group.name()));
+			row.insert(QStringLiteral("inherit"), group.inherit());
+			row.insert(QStringLiteral("inheritable"), group.inheritable());
+			row.insert(QStringLiteral("inherited"), group.inherited());
+			row.insert(QStringLiteral("add"), unsignedIDsToVariantList(group.add()));
+			row.insert(QStringLiteral("remove"), unsignedIDsToVariantList(group.remove()));
+			row.insert(QStringLiteral("inheritedMembers"), unsignedIDsToVariantList(group.inherited_members()));
+			groups.push_back(row);
+		}
+		model.insert(QStringLiteral("groups"), groups);
+		return modernAclModelWithResolvedUsers(model, userNameCache);
+	}
+
+	bool modernAclMessageFromModel(const QVariantMap &model, MumbleProto::ACL &msg, QString *errorMessage) {
+		bool channelOK = false;
+		const unsigned int channelID = model.value(QStringLiteral("channelId")).toUInt(&channelOK);
+		if (!channelOK || !Channel::get(channelID)) {
+			if (errorMessage) {
+				*errorMessage = QObject::tr("The room no longer exists.");
+			}
+			return false;
+		}
+
+		msg.Clear();
+		msg.set_channel_id(channelID);
+		msg.set_inherit_acls(model.value(QStringLiteral("inheritAcls")).toBool());
+
+		const auto addAcl = [&msg](const bool applyHere, const bool applySubs, const QString &group, const int userID,
+								   const unsigned int allow, const unsigned int deny) {
+			MumbleProto::ACL_ChanACL *acl = msg.add_acls();
+			acl->set_apply_here(applyHere);
+			acl->set_apply_subs(applySubs);
+			if (userID >= 0) {
+				acl->set_user_id(static_cast< unsigned int >(userID));
+			} else {
+				acl->set_group(u8(group));
+			}
+			acl->set_grant(allow);
+			acl->set_deny(deny);
+		};
+
+		for (const QVariant &rowValue : model.value(QStringLiteral("acls")).toList()) {
+			const QVariantMap row = rowValue.toMap();
+			if (row.value(QStringLiteral("inherited")).toBool()) {
+				continue;
+			}
+			const bool applyHere = row.value(QStringLiteral("applyHere"), true).toBool();
+			const bool applySubs = row.value(QStringLiteral("applySubs"), true).toBool();
+			const unsigned int allow = permissionsFromList(row.value(QStringLiteral("allow")));
+			const unsigned int deny  = permissionsFromList(row.value(QStringLiteral("deny")));
+			if (!applyHere && !applySubs) {
+				if (errorMessage) {
+					*errorMessage = QObject::tr("Each ACL rule must apply here, to sub rooms, or both.");
+				}
+				return false;
+			}
+
+			const QString targetType = row.value(QStringLiteral("targetType")).toString();
+			const QString target = row.value(QStringLiteral("target")).toString().trimmed();
+			if (targetType == QLatin1String("user")) {
+				const std::optional< int > userID = modernUserIDFromText(target, row);
+				if (!userID || *userID < 0) {
+					if (errorMessage) {
+						*errorMessage = QObject::tr("User ACL targets must be an online username or a numeric user ID.");
+					}
+					return false;
+				}
+				addAcl(applyHere, applySubs, QString(), *userID, allow, deny);
+			} else {
+				QString group = target;
+				if (group.startsWith(QLatin1Char('@'))) {
+					group.remove(0, 1);
+				}
+				if (group.isEmpty()) {
+					group = QLatin1String("all");
+				}
+				addAcl(applyHere, applySubs, group, -1, allow, deny);
+			}
+		}
+
+		for (const QVariant &rowValue : model.value(QStringLiteral("groups")).toList()) {
+			const QVariantMap row = rowValue.toMap();
+			QString name = row.value(QStringLiteral("name")).toString().trimmed().toLower();
+			if (name.startsWith(QLatin1Char('@'))) {
+				name.remove(0, 1);
+			}
+			if (name.isEmpty()) {
+				continue;
+			}
+			const std::optional< QVariantList > addMembers =
+				aclMemberListFromTextOrVariant(row, QStringLiteral("add"), QStringLiteral("addText"), errorMessage);
+			const std::optional< QVariantList > removeMembers =
+				aclMemberListFromTextOrVariant(row, QStringLiteral("remove"), QStringLiteral("removeText"),
+											   errorMessage);
+			if (!addMembers || !removeMembers) {
+				return false;
+			}
+			const bool inherit = row.value(QStringLiteral("inherit"), true).toBool();
+			const bool inheritable = row.value(QStringLiteral("inheritable"), true).toBool();
+			if (row.value(QStringLiteral("inherited")).toBool() && inherit && inheritable && addMembers->isEmpty()
+				&& removeMembers->isEmpty()) {
+				continue;
+			}
+			MumbleProto::ACL_ChanGroup *group = msg.add_groups();
+			group->set_name(u8(name));
+			group->set_inherit(inherit);
+			group->set_inheritable(inheritable);
+			for (const QVariant &member : *addMembers) {
+				group->add_add(member.toUInt());
+			}
+			for (const QVariant &member : *removeMembers) {
+				group->add_remove(member.toUInt());
+			}
+		}
+
+		const QString password = model.value(QStringLiteral("password")).toString().trimmed();
+		if (!password.isEmpty()) {
+			const unsigned int passwordPermissions =
+				ChanACL::Enter | ChanACL::Speak | ChanACL::Whisper | ChanACL::TextMessage | ChanACL::LinkChannel
+				| ChanACL::Traverse;
+			addAcl(true, false, QLatin1String("all"), -1, ChanACL::None, passwordPermissions);
+			addAcl(true, false, QStringLiteral("#%1").arg(password), -1, passwordPermissions, ChanACL::None);
+		}
+
+		return true;
 	}
 
 	QString secondsToShortString(unsigned int secs) {
@@ -6027,14 +6640,6 @@ void MainWindow::openModernGenericDialog(const QVariantMap &dialog) {
 	publishModernDialogState(m_modernDialogController->openGenericDialog(dialog));
 }
 
-void MainWindow::openModernMigrationNotice(const QString &dialogID, const QString &title, const QString &subtitle) {
-	if (!m_modernDialogController) {
-		m_modernDialogController = std::make_unique< ModernDialogController >();
-	}
-
-	publishModernDialogState(m_modernDialogController->openMigrationNotice(dialogID, title, subtitle));
-}
-
 void MainWindow::openModernServerInformationDialog() {
 	QString host, userName, password;
 	unsigned short port = 0;
@@ -6264,58 +6869,273 @@ void MainWindow::openModernAclRequestDialog(Channel *channel) {
 void MainWindow::openModernAclDialog(const MumbleProto::ACL &msg) {
 	Channel *channel = Channel::get(msg.channel_id());
 	const QString channelName = channel ? channel->qsName : tr("Room %1").arg(msg.channel_id());
+	modernAclCacheOnlineUsers(m_modernAclRegisteredUserNames);
+	QVariantMap aclModel = modernAclModelFromProto(msg, m_modernAclRegisteredUserNames);
 
-	QVariantList roomFields {
-		modernReadonlyField(tr("Room"), channelName),
-		modernReadonlyField(tr("Room ID"), msg.channel_id()),
-		modernReadonlyField(tr("Inherits parent ACLs"), yesNoText(msg.inherit_acls()))
-	};
-	if (channel && !channel->qsDesc.trimmed().isEmpty()) {
-		roomFields.push_back(modernReadonlyField(tr("Topic"), QTextDocumentFragment::fromHtml(channel->qsDesc).toPlainText()));
-	}
-
-	QVariantList groupFields;
-	for (int i = 0; i < msg.groups_size(); ++i) {
-		const MumbleProto::ACL_ChanGroup &group = msg.groups(i);
-		QStringList details;
-		details << tr("inherited %1").arg(yesNoText(group.inherited()));
-		details << tr("inherit members %1").arg(yesNoText(group.inherit()));
-		details << tr("inheritable %1").arg(yesNoText(group.inheritable()));
-		details << tr("add %1").arg(group.add_size());
-		details << tr("remove %1").arg(group.remove_size());
-		details << tr("inherited members %1").arg(group.inherited_members_size());
-		groupFields.push_back(modernReadonlyField(QStringLiteral("@%1").arg(u8(group.name())),
-												  details.join(QStringLiteral(" · "))));
-	}
-	if (groupFields.isEmpty()) {
-		groupFields.push_back(modernNoteField(tr("No channel groups were returned.")));
-	}
-
-	QVariantList aclFields;
-	for (int i = 0; i < msg.acls_size(); ++i) {
-		const MumbleProto::ACL_ChanACL &acl = msg.acls(i);
-		const QString target = acl.has_user_id() ? tr("User ID %1").arg(acl.user_id())
-												 : QStringLiteral("@%1").arg(u8(acl.group()));
-		QStringList details;
-		details << tr("inherited %1").arg(yesNoText(acl.inherited()));
-		details << tr("here %1").arg(yesNoText(acl.apply_here()));
-		details << tr("sub rooms %1").arg(yesNoText(acl.apply_subs()));
-		details << tr("allow: %1").arg(permissionList(acl.grant()));
-		details << tr("deny: %1").arg(permissionList(acl.deny()));
-		aclFields.push_back(modernReadonlyField(target, details.join(QStringLiteral("\n"))));
-	}
-	if (aclFields.isEmpty()) {
-		aclFields.push_back(modernNoteField(tr("No ACL entries were returned.")));
+	if (Global::get().sh) {
+		const QSet< int > userIDs = modernAclUserIDsFromModel(aclModel);
+		MumbleProto::QueryUsers queryUsers;
+		for (const int userID : userIDs) {
+			if (!m_modernAclRegisteredUserNames.contains(userID)) {
+				queryUsers.add_ids(static_cast< unsigned int >(userID));
+			}
+		}
+		if (queryUsers.ids_size() > 0) {
+			Global::get().sh->sendMessage(queryUsers);
+		}
+		m_modernAclUserListRequestPending = true;
+		Global::get().sh->requestUserList();
 	}
 
 	openModernGenericDialog(modernDialogDto(
-		QStringLiteral("acl"), QStringLiteral("info"), tr("Room ACL"),
-		tr("Read-only Modern ACL view for %1. Editing controls are the next migration slice.").arg(channelName),
-		QVariantList { modernDialogSection(tr("Room"), roomFields),
-					   modernDialogSection(tr("Groups"), groupFields),
-					   modernDialogSection(tr("Access rules"), aclFields) },
-		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QStringLiteral("accent"), true) },
-		QStringLiteral("close"), QSize(860, 700)));
+		QStringLiteral("acl"), QStringLiteral("form"), tr("Room ACL"),
+		tr("Edit access rules and groups for %1. Room ID %2.").arg(channelName).arg(msg.channel_id()),
+		QVariantList { modernDialogSection(tr("Permissions"),
+										   QVariantList { modernAclEditorField(QStringLiteral("acl.model"),
+																			   tr("Rules and groups"),
+																			   aclModel) }) },
+		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
+					   modernDialogAction(QStringLiteral("saveAcl"), tr("Save ACL"), true,
+										  QStringLiteral("accent")) },
+		QStringLiteral("saveAcl"), QSize(1040, 780)));
+}
+
+bool MainWindow::handleModernAclQueryUsers(const MumbleProto::QueryUsers &msg) {
+	if (!usesModernShell() || !m_modernDialogController
+		|| m_modernDialogController->activeDialogID() != QLatin1String("acl")) {
+		return false;
+	}
+	if (msg.names_size() != msg.ids_size()) {
+		return true;
+	}
+
+	bool changed = false;
+	for (int i = 0; i < msg.names_size(); ++i) {
+		const int userID = static_cast< int >(msg.ids(i));
+		const QString name = u8(msg.names(i));
+		if (userID >= 0 && !name.trimmed().isEmpty()) {
+			m_modernAclRegisteredUserNames.insert(userID, name);
+			changed = true;
+		}
+	}
+	if (!changed) {
+		return true;
+	}
+
+	QVariantMap state = m_modernDialogController->state();
+	QVariantMap values = modernDialogFieldValuesFromState(state);
+	QVariantMap model = values.value(QStringLiteral("acl.model")).toMap();
+	model = modernAclModelWithResolvedUsers(model, m_modernAclRegisteredUserNames);
+	publishModernDialogState(m_modernDialogController->updateField(
+		QStringLiteral("acl"), QStringLiteral("acl.model"), model));
+	return true;
+}
+
+bool MainWindow::handleModernAclUserList(const MumbleProto::UserList &msg) {
+	if (!usesModernShell() || !m_modernAclUserListRequestPending) {
+		return false;
+	}
+
+	m_modernAclUserListRequestPending = false;
+	if (!m_modernDialogController || m_modernDialogController->activeDialogID() != QLatin1String("acl")) {
+		return true;
+	}
+
+	bool changed = false;
+	for (int i = 0; i < msg.users_size(); ++i) {
+		const MumbleProto::UserList_User &user = msg.users(i);
+		if (user.has_name()) {
+			const QString name = u8(user.name()).trimmed();
+			if (!name.isEmpty()) {
+				m_modernAclRegisteredUserNames.insert(static_cast< int >(user.user_id()), name);
+				changed = true;
+			}
+		}
+	}
+	if (!changed) {
+		return true;
+	}
+
+	QVariantMap state = m_modernDialogController->state();
+	QVariantMap values = modernDialogFieldValuesFromState(state);
+	QVariantMap model = values.value(QStringLiteral("acl.model")).toMap();
+	model = modernAclModelWithResolvedUsers(model, m_modernAclRegisteredUserNames);
+	publishModernDialogState(m_modernDialogController->updateField(
+		QStringLiteral("acl"), QStringLiteral("acl.model"), model));
+	return true;
+}
+
+void MainWindow::openModernCertificateDialog(const QVariantMap &fieldValues, const QVariantMap &errors,
+											 const QString &statusMessage) {
+	const bool hasCertificate = CertWizard::validateCert(Global::get().s.kpCertificate);
+	QString selectedMode = fieldValues.value(QStringLiteral("cert.mode")).toString();
+	if (selectedMode.isEmpty()) {
+		selectedMode = hasCertificate ? QStringLiteral("export") : QStringLiteral("quick");
+	}
+
+	QVariantList modeOptions {
+		modernSelectOption(tr("Quick create"), QStringLiteral("quick")),
+		modernSelectOption(tr("Create with name and email"), QStringLiteral("create")),
+		modernSelectOption(tr("Import PKCS#12"), QStringLiteral("import")),
+		modernSelectOption(tr("Export current certificate"), QStringLiteral("export"), hasCertificate)
+	};
+
+	QVariantList workflowFields {
+		modernSelectField(QStringLiteral("cert.mode"), tr("Action"), selectedMode, modeOptions, QStringLiteral("string")),
+		modernDialogField(QStringLiteral("cert.name"), tr("Name"), QStringLiteral("text"),
+						  fieldValues.value(QStringLiteral("cert.name")).toString()),
+		modernDialogField(QStringLiteral("cert.email"), tr("Email"), QStringLiteral("text"),
+						  fieldValues.value(QStringLiteral("cert.email")).toString()),
+		modernPathPickerField(QStringLiteral("cert.importPath"), tr("Import file"),
+							  fieldValues.value(QStringLiteral("cert.importPath")).toString(),
+							  QStringLiteral("browseCertificateImport"), tr("Browse")),
+		modernDialogField(QStringLiteral("cert.password"), tr("Import password"), QStringLiteral("password"),
+						  fieldValues.value(QStringLiteral("cert.password")).toString()),
+		modernPathPickerField(QStringLiteral("cert.exportPath"), tr("Export file"),
+							  fieldValues.value(QStringLiteral("cert.exportPath")).toString(),
+							  QStringLiteral("browseCertificateExport"), tr("Browse"))
+	};
+	if (!statusMessage.trimmed().isEmpty()) {
+		workflowFields.push_back(modernNoteField(statusMessage));
+	}
+
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("certificate"), QStringLiteral("form"), tr("Certificate"),
+		tr("Manage the client certificate used for account identity and server authentication."),
+		QVariantList { modernDialogSection(tr("Current certificate"), modernCertificateFields(Global::get().s.kpCertificate)),
+					   modernDialogSection(tr("Certificate action"), workflowFields) },
+		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Close"), true, QString(), true),
+					   modernDialogAction(QStringLiteral("runCertificateAction"), tr("Apply"), true,
+										  QStringLiteral("accent")) },
+		QStringLiteral("runCertificateAction"), QSize(820, 680));
+	dialog.insert(QStringLiteral("errors"), errors);
+	openModernGenericDialog(dialog);
+}
+
+void MainWindow::openModernSearchDialog(const QVariantMap &fieldValues, const QVariantMap &providedErrors) {
+	const QString query = fieldValues.value(QStringLiteral("search.query")).toString();
+	const bool searchUsers =
+		fieldValues.contains(QStringLiteral("search.users")) ? fieldValues.value(QStringLiteral("search.users")).toBool()
+															 : Global::get().s.searchForUsers;
+	const bool searchChannels = fieldValues.contains(QStringLiteral("search.channels"))
+									? fieldValues.value(QStringLiteral("search.channels")).toBool()
+									: Global::get().s.searchForChannels;
+	const bool caseSensitive = fieldValues.contains(QStringLiteral("search.caseSensitive"))
+								   ? fieldValues.value(QStringLiteral("search.caseSensitive")).toBool()
+								   : Global::get().s.searchCaseSensitive;
+	const bool useRegex =
+		fieldValues.contains(QStringLiteral("search.regex")) ? fieldValues.value(QStringLiteral("search.regex")).toBool()
+															 : Global::get().s.searchAsRegex;
+
+	Global::get().s.searchForUsers = searchUsers;
+	Global::get().s.searchForChannels = searchChannels;
+	Global::get().s.searchCaseSensitive = caseSensitive;
+	Global::get().s.searchAsRegex = useRegex;
+
+	QString regexError;
+	QVariantList results = modernSearchResults(query, searchUsers, searchChannels, caseSensitive, useRegex, &regexError);
+	QVariantMap errors = providedErrors;
+	if (!regexError.isEmpty()) {
+		errors.insert(QStringLiteral("search.query"), regexError);
+	}
+
+	QVariantList fields {
+		modernDialogField(QStringLiteral("search.query"), tr("Search"), QStringLiteral("text"), query),
+		modernDialogField(QStringLiteral("search.users"), tr("Users"), QStringLiteral("checkbox"), searchUsers),
+		modernDialogField(QStringLiteral("search.channels"), tr("Rooms"), QStringLiteral("checkbox"), searchChannels),
+		modernDialogField(QStringLiteral("search.caseSensitive"), tr("Case sensitive"), QStringLiteral("checkbox"),
+						  caseSensitive),
+		modernDialogField(QStringLiteral("search.regex"), tr("Regular expression"), QStringLiteral("checkbox"),
+						  useRegex),
+		modernResultListField(QStringLiteral("search.results"), tr("Results"), results,
+							  query.trimmed().isEmpty() ? tr("Start typing to search users and rooms.")
+														: tr("No matching users or rooms."))
+	};
+
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("serverSearch"), QStringLiteral("form"), tr("Search"),
+		tr("Find users and rooms on the current server."),
+		QVariantList { modernDialogSection(tr("Search"), fields) },
+		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true) },
+		QStringLiteral("close"), QSize(820, 680));
+	dialog.insert(QStringLiteral("errors"), errors);
+	openModernGenericDialog(dialog);
+}
+
+void MainWindow::openModernVoiceRecorderDialog(const QVariantMap &fieldValues, const QVariantMap &errors,
+											   const QString &statusMessage) {
+	const VoiceRecorderPtr recorder = Global::get().sh ? Global::get().sh->recorder : VoiceRecorderPtr();
+	const bool recording = recorder && recorder->isRunning();
+	const QString elapsed = recorder ? QTime(0, 0).addMSecs(static_cast< int >(recorder->getElapsedTime() / 1000)).toString()
+									 : QLatin1String("00:00:00");
+	const bool transportSupported = Global::get().ao && Global::get().ao->supportsTransportRecording();
+
+	QVariantList formatOptions;
+	for (int fm = 0; fm < VoiceRecorderFormat::kEnd; ++fm) {
+		formatOptions.push_back(modernSelectOption(
+			VoiceRecorderFormat::getFormatDescription(static_cast< VoiceRecorderFormat::Format >(fm)), fm));
+	}
+
+	QVariantList modeOptions {
+		modernSelectOption(tr("Mixdown"), static_cast< int >(Settings::RecordingMixdown)),
+		modernSelectOption(tr("Multichannel"), static_cast< int >(Settings::RecordingMultichannel)),
+		modernSelectOption(tr("Multichannel + transport"),
+						   static_cast< int >(Settings::RecordingMultichannelAndTransport), transportSupported),
+		modernSelectOption(tr("Transport only"), static_cast< int >(Settings::RecordingTransportStandalone),
+						   transportSupported)
+	};
+
+	int selectedMode = fieldValues.contains(QStringLiteral("recording.mode"))
+						   ? fieldValues.value(QStringLiteral("recording.mode")).toInt()
+						   : static_cast< int >(Global::get().s.rmRecordingMode);
+	if (!transportSupported
+		&& (selectedMode == Settings::RecordingMultichannelAndTransport
+			|| selectedMode == Settings::RecordingTransportStandalone)) {
+		selectedMode = Settings::RecordingMixdown;
+	}
+	int selectedFormat = fieldValues.contains(QStringLiteral("recording.format"))
+							 ? fieldValues.value(QStringLiteral("recording.format")).toInt()
+							 : Global::get().s.iRecordingFormat;
+	if (selectedFormat < 0 || selectedFormat >= VoiceRecorderFormat::kEnd) {
+		selectedFormat = 0;
+	}
+
+	QVariantList statusFields {
+		modernReadonlyField(tr("Status"), recording ? tr("Recording") : tr("Idle")),
+		modernReadonlyField(tr("Elapsed"), elapsed)
+	};
+	if (!statusMessage.trimmed().isEmpty()) {
+		statusFields.push_back(modernNoteField(statusMessage));
+	}
+
+	QVariantList setupFields {
+		modernPathPickerField(QStringLiteral("recording.path"), tr("Target directory"),
+							  fieldValues.value(QStringLiteral("recording.path"), Global::get().s.qsRecordingPath)
+								  .toString(),
+							  QStringLiteral("browseRecordingDirectory"), tr("Browse"), !recording),
+		modernDialogField(QStringLiteral("recording.file"), tr("Filename"),
+						  QStringLiteral("text"),
+						  fieldValues.value(QStringLiteral("recording.file"), Global::get().s.qsRecordingFile)
+							  .toString(),
+						  !recording),
+		modernSelectField(QStringLiteral("recording.format"), tr("Format"), selectedFormat, formatOptions),
+		modernSelectField(QStringLiteral("recording.mode"), tr("Mode"), selectedMode, modeOptions)
+	};
+
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("voiceRecorder"), QStringLiteral("form"), tr("Voice recorder"),
+		tr("Record the current session from the Modern shell."),
+		QVariantList { modernDialogSection(tr("Recorder"), statusFields),
+					   modernDialogSection(tr("Output"), setupFields) },
+		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true),
+					   modernDialogAction(QStringLiteral("refreshRecorder"), tr("Refresh"), true),
+					   modernDialogAction(QStringLiteral("stopRecording"), tr("Stop"), recording,
+										  QStringLiteral("danger")),
+					   modernDialogAction(QStringLiteral("startRecording"), tr("Start"), !recording,
+										  QStringLiteral("accent")) },
+		recording ? QStringLiteral("stopRecording") : QStringLiteral("startRecording"), QSize(760, 620));
+	dialog.insert(QStringLiteral("errors"), errors);
+	openModernGenericDialog(dialog);
 }
 
 void MainWindow::openModernCreateRoomDialog(const RoomCreateType preferredType, Channel *preferredVoiceParent) {
@@ -6463,10 +7283,18 @@ void MainWindow::openModernAudioStatsDialog() {
 												? tr(">1000 ms")
 												: tr("%1 ms").arg(Global::get().uiDoublePush / 1000))
 	};
+	QVariantMap liveMeter = modernDialogField(QStringLiteral("audio.liveInput"), tr("Live input"),
+											  QStringLiteral("voiceMeter"));
+	liveMeter.insert(QStringLiteral("sourceLabel"), tr("Current microphone"));
+	liveMeter.insert(QStringLiteral("vadSource"), static_cast< int >(settings.vsVAD));
+	liveMeter.insert(QStringLiteral("silenceThreshold"), qRound(settings.fVADmin * 100.0f));
+	liveMeter.insert(QStringLiteral("speechThreshold"), qRound(settings.fVADmax * 100.0f));
+	liveMeter.insert(QStringLiteral("active"), true);
+	fields.push_back(liveMeter);
 
 	openModernGenericDialog(modernDialogDto(
 		QStringLiteral("audioStats"), QStringLiteral("info"), tr("Audio statistics"),
-		tr("Modern audio snapshot. Live graphs remain in the migration inventory."),
+		tr("Live microphone activity and current audio settings."),
 		QVariantList { modernDialogSection(tr("Current audio setup"), fields) },
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true),
 					   modernDialogAction(QStringLiteral("openAudioSettings"), tr("Open audio settings"), true,
@@ -6550,7 +7378,7 @@ void MainWindow::openModernHelpDialog() {
 		tr("Modern layout keeps contextual help inside the client shell."),
 		QVariantList { modernDialogSection(
 			tr("Help"),
-			QVariantList { modernNoteField(tr("Use the Server, Room, User, Audio, Settings, and Help menus from the Modern header. Context-specific help overlays are still in the migration inventory.")) }) },
+			QVariantList { modernNoteField(tr("Use the Server, Room, User, Audio, Settings, and Help menus from the Modern header for the actions available in the current view.")) }) },
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QStringLiteral("accent"), true) },
 		QStringLiteral("close"), QSize(620, 420)));
 }
@@ -6954,7 +7782,305 @@ void MainWindow::openModernRemoveChannelDialog(Channel *channel) {
 
 bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const QString &actionID,
 												 const QVariantMap &fieldValues, const QVariantMap &payload) {
-	Q_UNUSED(payload);
+	if (dialogID == QLatin1String("certificate")) {
+		QVariantMap values = fieldValues;
+		if (actionID == QLatin1String("browseCertificateImport")) {
+			const QString path = QFileDialog::getOpenFileName(
+				this, tr("Select file to import certificate from"),
+				values.value(QStringLiteral("cert.importPath")).toString(),
+				QLatin1String("PKCS12 (*.p12 *.pfx *.pkcs12);;All (*)"));
+			if (!path.isNull()) {
+				values.insert(QStringLiteral("cert.importPath"), QDir::toNativeSeparators(path));
+			}
+			openModernCertificateDialog(values);
+			return true;
+		}
+		if (actionID == QLatin1String("browseCertificateExport")) {
+			QString initial = values.value(QStringLiteral("cert.exportPath")).toString();
+			if (initial.trimmed().isEmpty()) {
+				initial = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+						  + QLatin1String("/mumble-certificate.p12");
+			}
+			QString path = QFileDialog::getSaveFileName(
+				this, tr("Select file to export certificate to"), initial,
+				QLatin1String("PKCS12 (*.p12 *.pfx *.pkcs12);;All (*)"));
+			if (!path.isNull()) {
+				QFileInfo info(path);
+				if (info.suffix().isEmpty()) {
+					path += QLatin1String(".p12");
+				}
+				values.insert(QStringLiteral("cert.exportPath"), QDir::toNativeSeparators(path));
+			}
+			openModernCertificateDialog(values);
+			return true;
+		}
+		if (actionID == QLatin1String("runCertificateAction")) {
+			QVariantMap errors;
+			const QString mode = values.value(QStringLiteral("cert.mode")).toString();
+			if (mode == QLatin1String("quick") || mode == QLatin1String("create")) {
+				const QString email = values.value(QStringLiteral("cert.email")).toString().trimmed();
+				if (mode == QLatin1String("create") && !email.isEmpty()) {
+					const QRegularExpression emailPattern(
+						QRegularExpression::anchoredPattern(QLatin1String("(.+)@(.+)")),
+						QRegularExpression::CaseInsensitiveOption);
+					if (!emailPattern.match(email).hasMatch()) {
+						errors.insert(QStringLiteral("cert.email"), tr("Enter a valid email address or leave it blank."));
+						openModernCertificateDialog(values, errors);
+						return true;
+					}
+				}
+				Settings::KeyPair keyPair =
+					CertWizard::generateNewCert(mode == QLatin1String("create")
+													? values.value(QStringLiteral("cert.name")).toString()
+													: QString(),
+												email);
+				if (!CertWizard::validateCert(keyPair)) {
+					errors.insert(QStringLiteral("cert.mode"), tr("Certificate generation failed."));
+					openModernCertificateDialog(values, errors);
+					return true;
+				}
+				Global::get().s.kpCertificate = keyPair;
+				Global::get().s.save();
+				openModernCertificateDialog(values, {}, tr("Certificate created and installed."));
+				return true;
+			}
+			if (mode == QLatin1String("import")) {
+				const QString path = QDir::fromNativeSeparators(values.value(QStringLiteral("cert.importPath")).toString());
+				QFile file(path);
+				if (path.trimmed().isEmpty() || !file.open(QIODevice::ReadOnly | QIODevice::Unbuffered)) {
+					errors.insert(QStringLiteral("cert.importPath"), tr("Choose a readable PKCS#12 file."));
+					openModernCertificateDialog(values, errors);
+					return true;
+				}
+				const QByteArray certData = file.readAll();
+				Settings::KeyPair imported =
+					CertWizard::importCert(certData, values.value(QStringLiteral("cert.password")).toString());
+				if (certData.isEmpty() || !CertWizard::validateCert(imported)) {
+					errors.insert(QStringLiteral("cert.importPath"),
+								  tr("The file did not contain a valid certificate and key."));
+					openModernCertificateDialog(values, errors);
+					return true;
+				}
+				Global::get().s.kpCertificate = imported;
+				Global::get().s.save();
+				openModernCertificateDialog(values, {}, tr("Certificate imported and installed."));
+				return true;
+			}
+			if (mode == QLatin1String("export")) {
+				const QString path = QDir::fromNativeSeparators(values.value(QStringLiteral("cert.exportPath")).toString());
+				if (!CertWizard::validateCert(Global::get().s.kpCertificate)) {
+					errors.insert(QStringLiteral("cert.mode"), tr("There is no valid certificate to export."));
+					openModernCertificateDialog(values, errors);
+					return true;
+				}
+				QByteArray certData = CertWizard::exportCert(Global::get().s.kpCertificate);
+				QFile file(path);
+				if (path.trimmed().isEmpty() || certData.isEmpty()
+					|| !file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Unbuffered)) {
+					errors.insert(QStringLiteral("cert.exportPath"), tr("Choose a writable export path."));
+					openModernCertificateDialog(values, errors);
+					return true;
+				}
+				if (!file.setPermissions(QFile::ReadOwner | QFile::WriteOwner)
+					|| file.write(certData) != certData.size()) {
+					errors.insert(QStringLiteral("cert.exportPath"), tr("The certificate could not be written."));
+					openModernCertificateDialog(values, errors);
+					return true;
+				}
+				openModernCertificateDialog(values, {}, tr("Certificate exported."));
+				return true;
+			}
+			errors.insert(QStringLiteral("cert.mode"), tr("Choose a certificate action."));
+			openModernCertificateDialog(values, errors);
+			return true;
+		}
+	}
+
+	if (dialogID == QLatin1String("serverSearch")) {
+		if (actionID == QLatin1String("selectSearchResult") || actionID == QLatin1String("joinSearchResult")) {
+			const QString type = payload.value(QStringLiteral("type")).toString();
+			const unsigned int id = payload.value(QStringLiteral("id")).toUInt();
+			const bool join = actionID == QLatin1String("joinSearchResult");
+			if (type == QLatin1String("user")) {
+				if (ClientUser *user = ClientUser::get(id)) {
+					pmModel->setSelectedUser(user->uiSession);
+					if (join) {
+						cuContextUser = user;
+						on_qaUserJoin_triggered();
+						cuContextUser = nullptr;
+					}
+				}
+			} else if (type == QLatin1String("channel")) {
+				if (Channel *channel = Channel::get(id)) {
+					pmModel->setSelectedChannel(channel->iId);
+					if (join) {
+						cContextChannel = channel;
+						on_qaChannelJoin_triggered();
+						cContextChannel = nullptr;
+					}
+				}
+			}
+			if (join && m_modernDialogController) {
+				publishModernDialogState(m_modernDialogController->close(dialogID));
+			}
+			return true;
+		}
+	}
+
+	if (dialogID == QLatin1String("voiceRecorder")) {
+		QVariantMap values = fieldValues;
+		if (actionID == QLatin1String("browseRecordingDirectory")) {
+			const QString path = QFileDialog::getExistingDirectory(
+				this, tr("Select target directory"),
+				values.value(QStringLiteral("recording.path"), Global::get().s.qsRecordingPath).toString(),
+				QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+			if (!path.isEmpty()) {
+				values.insert(QStringLiteral("recording.path"), QDir::toNativeSeparators(path));
+			}
+			openModernVoiceRecorderDialog(values);
+			return true;
+		}
+		if (actionID == QLatin1String("refreshRecorder")) {
+			openModernVoiceRecorderDialog(values);
+			return true;
+		}
+		if (actionID == QLatin1String("stopRecording")) {
+			if (Global::get().sh && Global::get().sh->recorder) {
+				VoiceRecorderPtr recorder(Global::get().sh->recorder);
+				recorder->stop();
+				Global::get().sh->announceRecordingState(false);
+				Global::get().sh->recorder.reset();
+			}
+			openModernVoiceRecorderDialog(values, {}, tr("Recording stopped."));
+			return true;
+		}
+		if (actionID == QLatin1String("startRecording")) {
+			QVariantMap errors;
+			if (!Global::get().uiSession || !Global::get().sh) {
+				openModernVoiceRecorderDialog(values, {}, tr("Unable to start recording. Not connected to a server."));
+				return true;
+			}
+			if (Global::get().sh->m_version < Version::fromComponents(1, 2, 3)) {
+				openModernVoiceRecorderDialog(values, {}, tr("This server is too old to allow recording safely."));
+				return true;
+			}
+			if (Global::get().sh->recorder) {
+				openModernVoiceRecorderDialog(values, {}, tr("There is already a recorder active for this server."));
+				return true;
+			}
+			const int formatIndex = values.value(QStringLiteral("recording.format")).toInt();
+			if (formatIndex < 0 || formatIndex >= VoiceRecorderFormat::kEnd) {
+				errors.insert(QStringLiteral("recording.format"), tr("Select a recording format."));
+				openModernVoiceRecorderDialog(values, errors);
+				return true;
+			}
+			const QString directoryPath =
+				QDir::fromNativeSeparators(values.value(QStringLiteral("recording.path")).toString()).trimmed();
+			if (directoryPath.isEmpty()) {
+				errors.insert(QStringLiteral("recording.path"), tr("Choose a target directory."));
+				openModernVoiceRecorderDialog(values, errors);
+				return true;
+			}
+			QDir directory(directoryPath);
+			QFileInfo filenameInfo(values.value(QStringLiteral("recording.file")).toString());
+			QString baseName = filenameInfo.baseName();
+			QString suffix = filenameInfo.completeSuffix();
+			if (suffix.isEmpty()) {
+				suffix = VoiceRecorderFormat::getFormatDefaultExtension(
+					static_cast< VoiceRecorderFormat::Format >(formatIndex));
+			}
+			if (baseName.isEmpty()) {
+				baseName = QLatin1String("%user");
+			}
+			values.insert(QStringLiteral("recording.file"), baseName);
+
+			AudioOutputPtr audioOutput(Global::get().ao);
+			if (!audioOutput) {
+				openModernVoiceRecorderDialog(values, {}, tr("Audio output is not available."));
+				return true;
+			}
+			VoiceRecorder::Config config;
+			config.sampleRate = static_cast< int >(audioOutput->getMixerFreq());
+			if (config.sampleRate == 0) {
+				openModernVoiceRecorderDialog(values, {}, tr("Unable to start recording: audio output has a 0 Hz sample rate."));
+				return true;
+			}
+			const Settings::RecordingMode mode =
+				static_cast< Settings::RecordingMode >(values.value(QStringLiteral("recording.mode")).toInt());
+			config.fileName = directory.absoluteFilePath(baseName + QLatin1Char('.') + suffix);
+			config.mixDownMode = mode == Settings::RecordingMixdown || mode == Settings::RecordingTransportStandalone;
+			config.transportEnable = mode == Settings::RecordingMultichannelAndTransport
+									 || mode == Settings::RecordingTransportStandalone;
+			config.recordingFormat = static_cast< VoiceRecorderFormat::Format >(formatIndex);
+
+			Global::get().s.qsRecordingPath = directoryPath;
+			Global::get().s.qsRecordingFile = baseName;
+			Global::get().s.iRecordingFormat = formatIndex;
+			Global::get().s.rmRecordingMode = mode;
+			Global::get().s.save();
+
+			Global::get().sh->announceRecordingState(true);
+			Global::get().sh->recorder.reset(new VoiceRecorder(this, config));
+			VoiceRecorderPtr recorder(Global::get().sh->recorder);
+			VoiceRecorder *recorderRaw = recorder.get();
+			connect(recorderRaw, &VoiceRecorder::recording_stopped, this, [this, recorderRaw]() {
+				if (!Global::get().sh) {
+					return;
+				}
+				VoiceRecorderPtr keepAlive(Global::get().sh->recorder);
+				if (keepAlive.get() == recorderRaw) {
+					Global::get().sh->recorder.reset();
+					Global::get().sh->announceRecordingState(false);
+				}
+				if (m_modernDialogController
+					&& m_modernDialogController->activeDialogID() == QLatin1String("voiceRecorder")) {
+					openModernVoiceRecorderDialog({}, {}, tr("Recording stopped."));
+				}
+			});
+			connect(recorderRaw, &VoiceRecorder::error, this, [this, recorderRaw](int, const QString &message) {
+				if (Global::get().sh) {
+					VoiceRecorderPtr keepAlive(Global::get().sh->recorder);
+					if (keepAlive.get() == recorderRaw) {
+						Global::get().sh->recorder.reset();
+						Global::get().sh->announceRecordingState(false);
+					}
+				}
+				openModernVoiceRecorderDialog({}, {}, message);
+			});
+			recorder->start();
+			openModernVoiceRecorderDialog(values, {}, tr("Recording started."));
+			return true;
+		}
+	}
+
+	if (dialogID == QLatin1String("acl") && actionID == QLatin1String("saveAcl")) {
+		MumbleProto::ACL msg;
+		QString errorMessage;
+		if (!modernAclMessageFromModel(fieldValues.value(QStringLiteral("acl.model")).toMap(), msg, &errorMessage)) {
+			QVariantMap dialogErrors;
+			dialogErrors.insert(QStringLiteral("acl.model"), errorMessage);
+			QVariantMap dialog = modernDialogDto(
+				QStringLiteral("acl"), QStringLiteral("form"), tr("Room ACL"), tr("Review the highlighted ACL issue."),
+				QVariantList { modernDialogSection(tr("Permissions"),
+												   QVariantList { modernAclEditorField(QStringLiteral("acl.model"),
+																					   tr("Rules and groups"),
+																					   fieldValues.value(QStringLiteral("acl.model")).toMap()) }) },
+				QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
+							   modernDialogAction(QStringLiteral("saveAcl"), tr("Save ACL"), true,
+												  QStringLiteral("accent")) },
+				QStringLiteral("saveAcl"), QSize(1040, 780));
+			dialog.insert(QStringLiteral("errors"), dialogErrors);
+			openModernGenericDialog(dialog);
+			return true;
+		}
+		if (Global::get().sh) {
+			Global::get().sh->sendMessage(msg);
+		}
+		if (m_modernDialogController) {
+			publishModernDialogState(m_modernDialogController->close(dialogID));
+		}
+		return true;
+	}
 
 	if (dialogID == QLatin1String("serverTokens")) {
 		if (actionID == QLatin1String("addToken")) {
@@ -7189,23 +8315,17 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 		return false;
 	}
 
-	const auto notice = [this](const QString &dialogID, const QString &title, const QString &subtitle) {
-		openModernMigrationNotice(dialogID, title, subtitle);
-		return true;
-	};
-
 	if (action == QLatin1String("configure.audioWizard")) {
 		openModernSettingsDialog(QStringLiteral("AudioInput"));
 		publishModernShellRoomStatePatch();
 		return true;
 	}
 	if (action == QLatin1String("configure.certificate")) {
-		return notice(QStringLiteral("certificateMigration"), tr("Certificate wizard"),
-					  tr("Certificate and account security workflows are queued for the Modern shell. The legacy certificate wizard is intentionally not opened from Modern layout."));
+		openModernCertificateDialog();
+		return true;
 	}
 	if (action == QLatin1String("server.settings")) {
-		return notice(QStringLiteral("serverSettingsMigration"), tr("Server settings"),
-					  tr("This admin workflow is queued for the Modern shell. The legacy dialog is intentionally not opened from Modern layout."));
+		return false;
 	}
 	if (action == QLatin1String("server.information")) {
 		openModernServerInformationDialog();
@@ -7234,15 +8354,26 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 		return true;
 	}
 	if (action == QLatin1String("server.search")) {
-		return notice(QStringLiteral("searchMigration"), tr("Search"),
-					  tr("Search is queued for the Modern shell. The legacy search window is intentionally not opened from Modern layout."));
+		openModernSearchDialog();
+		return true;
 	}
 	if (action == QLatin1String("acl")) {
-		return false;
+		Channel *channel = contextChannel;
+		if (!channel) {
+			channel = getContextMenuChannel();
+		}
+		if (!channel) {
+			channel = selectedVoiceTreeChannel();
+		}
+		if (!channel) {
+			channel = Channel::get(Mumble::ROOT_CHANNEL_ID);
+		}
+		openModernAclRequestDialog(channel);
+		return true;
 	}
 	if (action == QLatin1String("self.recording") || action == QLatin1String("recording")) {
-		return notice(QStringLiteral("recordingMigration"), tr("Voice recorder"),
-					  tr("Voice recording is queued for the Modern shell. The legacy recorder window is intentionally not opened from Modern layout."));
+		openModernVoiceRecorderDialog();
+		return true;
 	}
 	if (action == QLatin1String("self.comment") || action == QLatin1String("selfComment")) {
 		openModernSelfCommentDialog();
@@ -7321,17 +8452,18 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 			&& handleModernShellParticipantMessage(contextUser->uiSession)) {
 			return true;
 		}
-		return notice(QStringLiteral("directMessageMigration"), tr("Direct message"),
-					  tr("Direct messages now use the Modern chat composer. The legacy text-message dialog is intentionally not opened from Modern layout."));
+		Global::get().l->log(Log::Information, tr("Choose a user in the Modern user list to send a direct message."));
+		return true;
 	}
 	if (action == QLatin1String("sendMessage")) {
-		if (contextChannel) {
-			navigateToPersistentChatScope(MumbleProto::Channel, contextChannel->iId);
+		Channel *channel = contextChannel ? contextChannel : selectedVoiceTreeChannel();
+		if (channel) {
+			navigateToPersistentChatScope(MumbleProto::Channel, channel->iId);
 			publishModernShellRoomStatePatch();
 			return true;
 		}
-		return notice(QStringLiteral("roomMessageMigration"), tr("Room message"),
-					  tr("Room messages now use the Modern chat composer. The legacy text-message dialog is intentionally not opened from Modern layout."));
+		Global::get().l->log(Log::Information, tr("Choose a room in the Modern room list to send a room message."));
+		return true;
 	}
 
 	return false;
@@ -7402,7 +8534,15 @@ void MainWindow::handleModernDialogFieldUpdate(const QString &dialogID, const QS
 		return;
 	}
 
-	publishModernDialogState(m_modernDialogController->updateField(dialogID, fieldID, value));
+	const QVariantMap state = m_modernDialogController->updateField(dialogID, fieldID, value);
+	if (dialogID == QLatin1String("acl") && fieldID == QLatin1String("acl.model")) {
+		return;
+	}
+	if (dialogID == QLatin1String("serverSearch") && fieldID.startsWith(QLatin1String("search."))) {
+		openModernSearchDialog(modernDialogFieldValuesFromState(state));
+		return;
+	}
+	publishModernDialogState(state);
 }
 
 void MainWindow::handleModernDialogAction(const QString &dialogID, const QString &actionID,
@@ -8944,6 +10084,35 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 		syncPersistentChatInputState(restoredTarget.valid && !restoredTarget.readOnly && !restoredTarget.serverLog);
 		return actions;
 	};
+	const auto buildPersistentTextRoomActions = [this](const PersistentTextChannel &textChannel) {
+		QVariantList actions;
+		const bool canManage = canManagePersistentTextChannels();
+		if (canManage) {
+			actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("textRoom.edit"),
+																	tr("Edit text room..."), true, false));
+			actions.push_back(ModernShellMenuSerializer::actionItem(
+				QStringLiteral("textRoom.setDefault"), tr("Set as default"),
+				textChannel.textChannelID != m_defaultPersistentTextChannelID, false));
+		}
+		if (canEditPersistentTextChannelACL(textChannel)) {
+			actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("textRoom.acl"),
+																	tr("Edit visibility rules..."), true, false));
+		}
+		if (Channel::get(textChannel.aclChannelID)) {
+			actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("textRoom.visibilitySource"),
+																	tr("Go to visibility source"), true, false));
+		}
+		if (canManage) {
+			if (!actions.isEmpty()) {
+				actions.push_back(ModernShellMenuSerializer::separatorItem());
+			}
+			actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("textRoom.delete"),
+																	tr("Delete text room..."), true, false,
+																	QStringLiteral("danger")));
+		}
+
+		return ModernShellMenuSerializer::normalize(actions);
+	};
 	const auto appendTextRoom = [&](const int scopeValue, const unsigned int scopeID, const QString &roomLabel,
 									const QString &description, const QString &kindLabel,
 									const MumbleProto::ChatScope unreadScope = MumbleProto::Channel,
@@ -8968,11 +10137,12 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 			const auto textChannelIt = m_persistentTextChannels.constFind(scopeID);
 			if (textChannelIt != m_persistentTextChannels.cend()) {
 				roomChannel = Channel::get(textChannelIt->aclChannelID);
+				room.insert(QStringLiteral("actions"), buildPersistentTextRoomActions(*textChannelIt));
 			}
 		} else if (scopeValue == static_cast< int >(MumbleProto::Channel)) {
 			roomChannel = Channel::get(scopeID);
 		}
-		if (roomChannel) {
+		if (roomChannel && scopeValue != static_cast< int >(MumbleProto::TextChannel)) {
 			room.insert(QStringLiteral("actions"), buildChannelActions(roomChannel, false));
 		}
 		if (scopeValue == LocalDirectMessageScope) {
@@ -9600,15 +10770,52 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 		restoreModernShellInputState();
 		return actions;
 	};
+	const auto buildPersistentTextRoomActions = [this](const PersistentTextChannel &textChannel) {
+		QVariantList actions;
+		const bool canManage = canManagePersistentTextChannels();
+		if (canManage) {
+			actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("textRoom.edit"),
+																	tr("Edit text room..."), true, false));
+			actions.push_back(ModernShellMenuSerializer::actionItem(
+				QStringLiteral("textRoom.setDefault"), tr("Set as default"),
+				textChannel.textChannelID != m_defaultPersistentTextChannelID, false));
+		}
+		if (canEditPersistentTextChannelACL(textChannel)) {
+			actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("textRoom.acl"),
+																	tr("Edit visibility rules..."), true, false));
+		}
+		if (Channel::get(textChannel.aclChannelID)) {
+			actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("textRoom.visibilitySource"),
+																	tr("Go to visibility source"), true, false));
+		}
+		if (canManage) {
+			if (!actions.isEmpty()) {
+				actions.push_back(ModernShellMenuSerializer::separatorItem());
+			}
+			actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("textRoom.delete"),
+																	tr("Delete text room..."), true, false,
+																	QStringLiteral("danger")));
+		}
+
+		return ModernShellMenuSerializer::normalize(actions);
+	};
 	const bool exposeChannelMenuInAppChrome =
 		target.channel && (target.scope == MumbleProto::TextChannel || target.scope == MumbleProto::Channel);
 	if (exposeChannelMenuInAppChrome) {
+		QVariantList channelMenuItems;
+		if (target.scope == MumbleProto::TextChannel) {
+			const auto textChannelIt = m_persistentTextChannels.constFind(target.scopeID);
+			if (textChannelIt != m_persistentTextChannels.cend()) {
+				channelMenuItems = buildPersistentTextRoomActions(*textChannelIt);
+			}
+		} else {
+			channelMenuItems = buildChannelActions(target.channel, true);
+		}
 		QVariantMap channelMenu;
 		channelMenu.insert(QStringLiteral("id"), QStringLiteral("channel"));
 		channelMenu.insert(QStringLiteral("label"),
 						   ModernShellMenuSerializer::normalizedActionLabel(qmChannel->title()));
-		channelMenu.insert(QStringLiteral("items"),
-						   buildChannelActions(target.channel, target.scope == MumbleProto::Channel));
+		channelMenu.insert(QStringLiteral("items"), channelMenuItems);
 		appMenus.insert(1, channelMenu);
 		appState.insert(QStringLiteral("menus"), appMenus);
 		snapshot.insert(QStringLiteral("app"), appState);
@@ -9957,11 +11164,12 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 					const auto textChannelIt = m_persistentTextChannels.constFind(scopeID);
 					if (textChannelIt != m_persistentTextChannels.cend()) {
 						roomChannel = Channel::get(textChannelIt->aclChannelID);
+						room.insert(QStringLiteral("actions"), buildPersistentTextRoomActions(*textChannelIt));
 					}
 				} else if (voiceRoomChat) {
 					roomChannel = Channel::get(scopeID);
 				}
-				if (roomChannel) {
+				if (roomChannel && scopeValue != static_cast< int >(MumbleProto::TextChannel)) {
 					room.insert(QStringLiteral("actions"), buildChannelActions(roomChannel, false));
 				}
 				if (scopeValue == LocalDirectMessageScope) {
@@ -10263,6 +11471,11 @@ bool MainWindow::handleModernShellScopeAction(const QString &scopeToken, const Q
 		return false;
 	}
 
+	const QString normalizedActionID = actionId.trimmed();
+	if (normalizedActionID.isEmpty()) {
+		return false;
+	}
+
 	Channel *channel = nullptr;
 	if (scopeValue == static_cast< int >(MumbleProto::Channel)) {
 		channel = Channel::get(scopeID);
@@ -10273,14 +11486,48 @@ bool MainWindow::handleModernShellScopeAction(const QString &scopeToken, const Q
 		}
 	}
 
+	if (scopeValue == static_cast< int >(MumbleProto::TextChannel)) {
+		const auto textChannelIt = m_persistentTextChannels.constFind(scopeID);
+		if (textChannelIt == m_persistentTextChannels.cend()) {
+			return false;
+		}
+
+		if (normalizedActionID == QLatin1String("textRoom.edit")) {
+			editPersistentTextChannel(scopeID);
+			publishModernShellRoomStatePatch();
+			return true;
+		}
+		if (normalizedActionID == QLatin1String("textRoom.setDefault")) {
+			setDefaultPersistentTextChannel(scopeID);
+			publishModernShellRoomStatePatch();
+			return true;
+		}
+		if (normalizedActionID == QLatin1String("textRoom.acl")) {
+			editPersistentTextChannelACL(scopeID);
+			publishModernShellRoomStatePatch();
+			return true;
+		}
+		if (normalizedActionID == QLatin1String("textRoom.visibilitySource")) {
+			if (!channel) {
+				return false;
+			}
+			const bool handled = navigateToPersistentChatScope(MumbleProto::Channel, channel->iId);
+			if (handled) {
+				publishModernShellRoomStatePatch();
+			}
+			return handled;
+		}
+		if (normalizedActionID == QLatin1String("textRoom.delete")) {
+			removePersistentTextChannel(scopeID);
+			publishModernShellRoomStatePatch();
+			return true;
+		}
+	}
+
 	if (!channel) {
 		return false;
 	}
 
-	const QString normalizedActionID = actionId.trimmed();
-	if (normalizedActionID.isEmpty()) {
-		return false;
-	}
 	if (scopeValue != static_cast< int >(MumbleProto::Channel)
 		&& (normalizedActionID == QLatin1String("join") || normalizedActionID == QLatin1String("listen"))) {
 		return false;
@@ -13495,18 +14742,32 @@ void MainWindow::updatePersistentChatScopeSelectorLabels() {
 	}
 }
 
-bool MainWindow::canCreateVoiceRoom(Channel *channel) const {
+ChanACL::Permissions MainWindow::channelPermissions(Channel *channel, const bool requestPermissions) const {
 	if (!channel || !Global::get().sh || !Global::get().sh->isRunning() || Global::get().uiSession == 0) {
-		return false;
+		return ChanACL::None;
 	}
 
 	ChanACL::Permissions permissions = static_cast< ChanACL::Permissions >(channel->uiPermissions);
-	if (!permissions) {
+	if (!permissions && requestPermissions) {
 		Global::get().sh->requestChannelPermissions(channel->iId);
 		permissions            = channel->iId == Mumble::ROOT_CHANNEL_ID ? Global::get().pPermissions : ChanACL::All;
 		channel->uiPermissions = permissions;
 	}
 
+	return permissions;
+}
+
+bool MainWindow::canEditChannelACL(Channel *channel) const {
+	if (!channel || !Global::get().sh || !Global::get().sh->isRunning() || Global::get().uiSession == 0) {
+		return false;
+	}
+
+	const ChanACL::Permissions permissions = channelPermissions(channel);
+	return (permissions & ChanACL::Write) || (Global::get().pPermissions & ChanACL::Write);
+}
+
+bool MainWindow::canCreateVoiceRoom(Channel *channel) const {
+	const ChanACL::Permissions permissions = channelPermissions(channel);
 	return permissions & (ChanACL::Write | ChanACL::MakeChannel | ChanACL::MakeTempChannel);
 }
 
@@ -13539,11 +14800,7 @@ bool MainWindow::voiceRoomCreationForcesTemporary(Channel *channel) const {
 		return false;
 	}
 
-	ChanACL::Permissions permissions = static_cast< ChanACL::Permissions >(channel->uiPermissions);
-	if (!permissions) {
-		canCreateVoiceRoom(channel);
-		permissions = static_cast< ChanACL::Permissions >(channel->uiPermissions);
-	}
+	const ChanACL::Permissions permissions = channelPermissions(channel);
 
 	return (permissions & ChanACL::Cached) && !(permissions & (ChanACL::Write | ChanACL::MakeChannel));
 }
@@ -13554,6 +14811,10 @@ bool MainWindow::canCreateTextRoom() const {
 
 bool MainWindow::canManagePersistentTextChannels() const {
 	return Global::get().sh && Global::get().sh->isRunning() && (Global::get().pPermissions & ChanACL::Write);
+}
+
+bool MainWindow::canEditPersistentTextChannelACL(const PersistentTextChannel &textChannel) const {
+	return canEditChannelACL(Channel::get(textChannel.aclChannelID));
 }
 
 std::optional< MainWindow::PersistentTextChannel > MainWindow::selectedPersistentTextChannel() const {
@@ -14045,16 +15306,25 @@ void MainWindow::createPersistentTextChannel() {
 }
 
 void MainWindow::editPersistentTextChannel() {
-	if (!canManagePersistentTextChannels()) {
-		return;
-	}
-
 	std::optional< PersistentTextChannel > textChannel = selectedPersistentTextChannel();
 	if (!textChannel || textChannel->textChannelID == 0) {
 		return;
 	}
 
-	PersistentTextChannel updated = *textChannel;
+	editPersistentTextChannel(textChannel->textChannelID);
+}
+
+void MainWindow::editPersistentTextChannel(const unsigned int textChannelID) {
+	if (!canManagePersistentTextChannels()) {
+		return;
+	}
+
+	const auto textChannelIt = m_persistentTextChannels.constFind(textChannelID);
+	if (textChannelIt == m_persistentTextChannels.cend()) {
+		return;
+	}
+
+	PersistentTextChannel updated = *textChannelIt;
 	if (!promptForPersistentTextChannel(updated, false)) {
 		return;
 	}
@@ -14064,25 +15334,34 @@ void MainWindow::editPersistentTextChannel() {
 }
 
 void MainWindow::removePersistentTextChannel() {
+	std::optional< PersistentTextChannel > textChannel = selectedPersistentTextChannel();
+	if (!textChannel || textChannel->textChannelID == 0) {
+		return;
+	}
+
+	removePersistentTextChannel(textChannel->textChannelID);
+}
+
+void MainWindow::removePersistentTextChannel(const unsigned int textChannelID) {
 	if (!canManagePersistentTextChannels()) {
 		return;
 	}
 
-	std::optional< PersistentTextChannel > textChannel = selectedPersistentTextChannel();
-	if (!textChannel || textChannel->textChannelID == 0) {
+	const auto textChannelIt = m_persistentTextChannels.constFind(textChannelID);
+	if (textChannelIt == m_persistentTextChannels.cend()) {
 		return;
 	}
 
 	const int result =
 		QMessageBox::question(this, tr("Delete text room"),
 							  tr("Delete text room #%1? Existing history will no longer be visible in this room.")
-								  .arg(textChannel->name.toHtmlEscaped()),
+								  .arg(textChannelIt->name.toHtmlEscaped()),
 							  QMessageBox::Yes, QMessageBox::No);
 	if (result != QMessageBox::Yes) {
 		return;
 	}
 
-	Global::get().sh->removeTextChannel(textChannel->textChannelID);
+	Global::get().sh->removeTextChannel(textChannelID);
 }
 
 void MainWindow::editPersistentTextChannelACL() {
@@ -14091,8 +15370,17 @@ void MainWindow::editPersistentTextChannelACL() {
 		return;
 	}
 
-	Channel *channel = Channel::get(textChannel->aclChannelID);
-	if (!channel) {
+	editPersistentTextChannelACL(textChannel->textChannelID);
+}
+
+void MainWindow::editPersistentTextChannelACL(const unsigned int textChannelID) {
+	const auto textChannelIt = m_persistentTextChannels.constFind(textChannelID);
+	if (textChannelIt == m_persistentTextChannels.cend()) {
+		return;
+	}
+
+	Channel *channel = Channel::get(textChannelIt->aclChannelID);
+	if (!canEditChannelACL(channel)) {
 		return;
 	}
 
@@ -14102,17 +15390,26 @@ void MainWindow::editPersistentTextChannelACL() {
 }
 
 void MainWindow::setDefaultPersistentTextChannel() {
-	if (!canManagePersistentTextChannels() || !Global::get().sh || !Global::get().sh->isRunning()) {
-		return;
-	}
-
 	std::optional< PersistentTextChannel > textChannel = selectedPersistentTextChannel();
 	if (!textChannel || textChannel->textChannelID == 0
 		|| textChannel->textChannelID == m_defaultPersistentTextChannelID) {
 		return;
 	}
 
-	Global::get().sh->setDefaultTextChannel(textChannel->textChannelID);
+	setDefaultPersistentTextChannel(textChannel->textChannelID);
+}
+
+void MainWindow::setDefaultPersistentTextChannel(const unsigned int textChannelID) {
+	if (!canManagePersistentTextChannels() || !Global::get().sh || !Global::get().sh->isRunning()) {
+		return;
+	}
+
+	if (textChannelID == 0 || textChannelID == m_defaultPersistentTextChannelID
+		|| !m_persistentTextChannels.contains(textChannelID)) {
+		return;
+	}
+
+	Global::get().sh->setDefaultTextChannel(textChannelID);
 }
 
 void MainWindow::showPersistentTextChannelContextMenu(const QPoint &position) {
@@ -14173,6 +15470,7 @@ void MainWindow::showPersistentTextChannelContextMenu(const QPoint &position) {
 		}
 
 		Channel *linkedChannel    = Channel::get(textChannelIt->aclChannelID);
+		const bool canEditAcl     = canEditPersistentTextChannelACL(*textChannelIt);
 		QAction *openAction       = menu.addAction(tr("Open"));
 		QAction *createAction     = nullptr;
 		QAction *setDefaultAction = nullptr;
@@ -14187,9 +15485,13 @@ void MainWindow::showPersistentTextChannelContextMenu(const QPoint &position) {
 		QAction *editAclAction = nullptr;
 		QAction *deleteAction  = nullptr;
 		if (canManage) {
-			editAction    = menu.addAction(tr("Edit text room"));
+			editAction = menu.addAction(tr("Edit text room"));
+		}
+		if (canEditAcl) {
 			editAclAction = menu.addAction(tr("Edit visibility rules"));
-			deleteAction  = menu.addAction(tr("Delete text room"));
+		}
+		if (canManage) {
+			deleteAction = menu.addAction(tr("Delete text room"));
 		}
 
 		QAction *chosenAction = menu.exec(globalPosition);
@@ -14239,8 +15541,8 @@ void MainWindow::updatePersistentTextChannelControls() {
 		m_serverNavigatorServerSettingsButton->setEnabled(canManage);
 	}
 	if (m_serverNavigatorCreateTextChannelButton) {
-		m_serverNavigatorCreateTextChannelButton->setVisible(canManage);
-		m_serverNavigatorCreateTextChannelButton->setEnabled(canManage);
+		m_serverNavigatorCreateTextChannelButton->setVisible(canCreateTextRoom());
+		m_serverNavigatorCreateTextChannelButton->setEnabled(canCreateTextRoom());
 	}
 
 	m_persistentChatChannelList->viewport()->update();
@@ -15181,7 +16483,7 @@ void MainWindow::handlePersistentChatPreviewSiteSnapshotResult(const QString &pr
 	it->siteSnapshotRequested = false;
 	it->siteSnapshotFinished  = true;
 	if (success && !image.isNull()) {
-		it->thumbnailImage    = persistentChatThumbnailImage(image);
+		it->thumbnailImage    = persistentChatThumbnailImage(persistentChatOpaquePreviewSnapshot(image));
 		it->thumbnailFinished = true;
 		it->failed            = false;
 	} else if (!it->thumbnailFinished) {

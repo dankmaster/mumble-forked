@@ -810,9 +810,9 @@ void Settings::legacyLoad(const QString &path) {
 
 	LOADENUM(noiseCancelMode, "audio/noiseCancelMode");
 
-#ifndef USE_RNNOISE
+#if !defined(USE_RNNOISE) && !defined(USE_DTLN) && !defined(USE_DEEPFILTERNET)
 	if (noiseCancelMode == NoiseCancelRNN || noiseCancelMode == NoiseCancelBoth) {
-		// Use Speex instead as this Mumble build was built without support for RNNoise
+		// Use Speex instead as this Mumble build was built without support for neural speech cleanup.
 		noiseCancelMode = NoiseCancelSpeex;
 	}
 #endif

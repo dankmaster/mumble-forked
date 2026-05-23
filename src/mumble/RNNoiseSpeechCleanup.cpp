@@ -18,6 +18,8 @@ extern "C" {
 #include <algorithm>
 
 namespace {
+	constexpr float RNNOISE_PCM_SCALE = 32768.0f;
+
 	QString resolvePackagedLittleModelPath() {
 		return QDir(QCoreApplication::applicationDirPath())
 			.filePath(QStringLiteral("rnnoise/rnnoise_little.weights_blob.bin"));
@@ -166,14 +168,15 @@ void RNNoiseSpeechCleanup::processInPlace(float *samples, unsigned int sampleCou
 
 		m_inputBuffer.fill(0.0f);
 		for (unsigned int i = 0; i < chunkSize; ++i) {
-			m_inputBuffer[i] = samples[offset + i];
+			m_inputBuffer[i] = std::clamp(samples[offset + i], -1.0f, 1.0f) * RNNOISE_PCM_SCALE;
 		}
 
 		rnnoise_process_frame(m_state, m_outputBuffer.data(), m_inputBuffer.data());
 
 		for (unsigned int i = 0; i < chunkSize; ++i) {
-			samples[offset + i] =
-				std::clamp(m_outputBuffer[i] * mixFactor + m_inputBuffer[i] * dryFactor, -1.0f, 1.0f);
+			const float drySample     = m_inputBuffer[i] / RNNOISE_PCM_SCALE;
+			const float cleanedSample = m_outputBuffer[i] / RNNOISE_PCM_SCALE;
+			samples[offset + i]       = std::clamp(cleanedSample * mixFactor + drySample * dryFactor, -1.0f, 1.0f);
 		}
 	}
 #else

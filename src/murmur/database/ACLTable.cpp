@@ -457,9 +457,11 @@ namespace server {
 									// This is a proper group -> look up its ID
 									m_sql << "SELECT \"" << GroupTable::column::group_id << "\" FROM \""
 										  << GroupTable::NAME << "\" WHERE \"" << GroupTable::column::server_id
-										  << "\" = :serverID AND \"" << GroupTable::column::group_name
+										  << "\" = :serverID AND \"" << GroupTable::column::channel_id
+										  << "\" = :channelID AND \"" << GroupTable::column::group_name
 										  << "\" = :groupName",
-										soci::use(serverID), soci::use(data.name), soci::into(groupID);
+										soci::use(serverID), soci::use(channelID), soci::use(data.name),
+										soci::into(groupID);
 
 									if (!m_sql.got_data()) {
 										throw ::mdb::MigrationException("Existing ACL references non-existing group '"
