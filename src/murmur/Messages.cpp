@@ -62,6 +62,29 @@
 
 namespace msdb = ::mumble::server::db;
 
+namespace {
+constexpr std::size_t MAX_CHAT_HISTORY_LEGACY_MIRROR_BYTES = 64 * 1024;
+constexpr std::size_t MAX_CHAT_HISTORY_RESPONSE_BYTES      = 2 * 1024 * 1024;
+
+std::size_t serializedChatHistoryResponseBytes(const MumbleProto::ChatHistoryResponse &response) {
+#if GOOGLE_PROTOBUF_VERSION >= 3004000
+	return response.ByteSizeLong();
+#else
+	return response.ByteSize();
+#endif
+}
+
+void constrainChatHistoryResponseSize(MumbleProto::ChatHistoryResponse &response) {
+	while (response.messages_size() > 1
+		   && serializedChatHistoryResponseBytes(response) > MAX_CHAT_HISTORY_RESPONSE_BYTES) {
+		response.mutable_messages()->DeleteSubrange(0, 1);
+		response.set_has_more(true);
+		response.set_has_older(true);
+		response.set_oldest_message_id(response.messages(0).message_id());
+	}
+}
+} // namespace
+
 #define RATELIMIT(user)                   \
 	if (user->leakyBucket.ratelimit(1)) { \
 		return;                           \
@@ -1310,7 +1333,12 @@ MumbleProto::ChatMessage protoChatMessageFromDB(const ::msdb::DBChatMessage &mes
 	} else {
 		protoMessage.set_body_text(message.bodyText);
 		protoMessage.set_body_format(protoBodyFormatFromDB(message.bodyFormat));
-		protoMessage.set_message(u8(structuredChatLegacyHtml(u8(message.bodyText), message.bodyFormat)));
+		const std::string legacyMessage = u8(structuredChatLegacyHtml(u8(message.bodyText), message.bodyFormat));
+		if (legacyMessage.size() <= MAX_CHAT_HISTORY_LEGACY_MIRROR_BYTES) {
+			protoMessage.set_message(legacyMessage);
+		} else {
+			protoMessage.set_message(std::string());
+		}
 		if (Mumble::ChatFeatures::contains(supportedChatFeatures, MumbleProto::ChatFeatureAttachments)) {
 			for (const msdb::DBChatMessageAttachment &attachment : message.attachments) {
 				*protoMessage.add_attachments() = protoAssetRefFromDB(attachment);
@@ -4136,6 +4164,7 @@ void Server::msgChatHistoryRequest(ServerUser *uSource, MumbleProto::ChatHistory
 			}
 		}
 
+		constrainChatHistoryResponseSize(response);
 		sendMessage(uSource, response);
 		return;
 	}
@@ -4210,6 +4239,7 @@ void Server::msgChatHistoryRequest(ServerUser *uSource, MumbleProto::ChatHistory
 		}
 	}
 
+	constrainChatHistoryResponseSize(response);
 	sendMessage(uSource, response);
 }
 

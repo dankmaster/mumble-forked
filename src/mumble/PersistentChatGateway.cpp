@@ -7,6 +7,11 @@
 
 #include "ServerHandler.h"
 
+namespace {
+constexpr unsigned int INITIAL_HISTORY_PAGE_SIZE = 20;
+constexpr unsigned int OLDER_HISTORY_PAGE_SIZE   = 20;
+}
+
 PersistentChatGateway::PersistentChatGateway(QObject *parent) : QObject(parent) {
 }
 
@@ -27,7 +32,7 @@ void PersistentChatGateway::requestInitialPage(MumbleProto::ChatScope scope, uns
 		return;
 	}
 
-	m_serverHandler->requestChatHistory(scope, scopeID, 0, 50, std::nullopt);
+	m_serverHandler->requestChatHistory(scope, scopeID, 0, INITIAL_HISTORY_PAGE_SIZE, std::nullopt);
 }
 
 void PersistentChatGateway::requestOlder(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int beforeMessageID) {
@@ -35,7 +40,7 @@ void PersistentChatGateway::requestOlder(MumbleProto::ChatScope scope, unsigned 
 		return;
 	}
 
-	m_serverHandler->requestChatHistory(scope, scopeID, 0, 50, beforeMessageID);
+	m_serverHandler->requestChatHistory(scope, scopeID, 0, OLDER_HISTORY_PAGE_SIZE, beforeMessageID);
 }
 
 void PersistentChatGateway::send(MumbleProto::ChatScope scope, unsigned int scopeID, const QString &body,
