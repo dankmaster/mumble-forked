@@ -18,6 +18,7 @@ class ModernShellPage;
 class QTimer;
 class QVBoxLayout;
 class QWebChannel;
+class QWebEngineUrlRequestInterceptor;
 class QWebEngineView;
 
 class ModernShellHost : public QWidget {
@@ -50,6 +51,7 @@ private:
 	ModernShellPage *m_page = nullptr;
 	QWebChannel *m_channel = nullptr;
 	ModernShellBridge *m_bridge = nullptr;
+	QWebEngineUrlRequestInterceptor *m_requestInterceptor = nullptr;
 	QTimer *m_bootTimeoutTimer = nullptr;
 	bool m_started = false;
 	bool m_bootReady = false;

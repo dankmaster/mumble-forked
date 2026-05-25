@@ -86,8 +86,6 @@ private:
 protected:
 	OverlayPrivate *d;
 
-	QSet< unsigned int > qsQueried;
-	QSet< unsigned int > qsQuery;
 	/// A flag indicating if the platformInit has been called already
 	std::atomic< bool > m_initialized;
 

@@ -325,6 +325,19 @@
        </widget>
       </item>
       <item>
+       <widget class="QPushButton" name="qpbClearPersistentChatMediaCache">
+        <property name="toolTip">
+         <string>Remove cached chat preview images and media from this client profile</string>
+        </property>
+        <property name="whatsThis">
+         <string>&lt;b&gt;Clear local chat media cache&lt;/b&gt;.&lt;br/&gt;This removes cached thumbnails and media previews stored on this device. Server-side chat history and messages are not changed.</string>
+        </property>
+        <property name="text">
+         <string>Clear local chat media cache</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <widget class="QCheckBox" name="qcbHideOS">
         <property name="toolTip">
          <string>Prevent OS information being sent to Mumble servers and web servers</string>

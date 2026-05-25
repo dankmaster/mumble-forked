@@ -277,7 +277,8 @@ namespace server {
 								   << column::body_text << "\", \"" << column::body_format << "\", \"" << column::created_at
 								   << "\", \"" << column::edited_at << "\", \"" << column::deleted_at << "\" FROM \"" << NAME << "\" WHERE \"" << column::server_id
 								   << "\" = :serverID AND \"" << column::thread_id << "\" = :threadID AND \""
-								   << column::created_at << "\" >= :visibleAfter ORDER BY \""
+								   << column::deleted_at << "\" = 0 AND \"" << column::created_at
+								   << "\" >= :visibleAfter ORDER BY \""
 								   << column::message_id << "\" DESC "
 								   << ::mdb::utils::limitOffset(m_backend, ":limit", ":offset"),
 					 soci::use(serverID), soci::use(threadID), soci::use(visibleAfterEpoch), soci::use(maxEntries), soci::use(startOffset),
@@ -352,7 +353,8 @@ namespace server {
 								   << "\", \"" << column::deleted_at << "\" FROM \"" << NAME << "\" WHERE \""
 								   << column::server_id << "\" = :serverID AND \"" << column::thread_id
 								   << "\" = :threadID AND \"" << column::message_id << "\" < :beforeMessageID AND \""
-								   << column::created_at << "\" >= :visibleAfter ORDER BY \""
+								   << column::deleted_at << "\" = 0 AND \"" << column::created_at
+								   << "\" >= :visibleAfter ORDER BY \""
 								   << column::message_id << "\" DESC "
 								   << ::mdb::utils::limitOffset(m_backend, ":limit", "0"),
 					 soci::use(serverID), soci::use(threadID), soci::use(beforeMessageID),

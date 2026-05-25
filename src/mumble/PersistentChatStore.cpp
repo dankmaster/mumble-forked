@@ -20,6 +20,10 @@ namespace {
 
 		return lhs.message_id() < rhs.message_id();
 	}
+
+	bool chatMessageDeleted(const MumbleProto::ChatMessage &message) {
+		return message.has_deleted_at() && message.deleted_at() > 0;
+	}
 }
 
 void PersistentChatStore::clear() {
@@ -97,9 +101,18 @@ bool PersistentChatStore::mergeMessage(QVector< MumbleProto::ChatMessage > &mess
 	for (int i = 0; i < messages.size(); ++i) {
 		const MumbleProto::ChatMessage &current = messages.at(i);
 		if (current.thread_id() == message.thread_id() && current.message_id() == message.message_id()) {
+			if (chatMessageDeleted(message)) {
+				messages.removeAt(i);
+				return false;
+			}
+
 			messages[i] = message;
 			return false;
 		}
+	}
+
+	if (chatMessageDeleted(message)) {
+		return false;
 	}
 
 	messages.push_back(message);

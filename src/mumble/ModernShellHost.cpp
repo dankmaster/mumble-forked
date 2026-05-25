@@ -24,13 +24,142 @@
 #include <QtWidgets/QVBoxLayout>
 #include <QtWebChannel/QWebChannel>
 #include <QtWebEngineCore/QWebEnginePage>
+#include <QtWebEngineCore/QWebEngineProfile>
 #include <QtWebEngineCore/QWebEngineSettings>
+#include <QtWebEngineCore/QWebEngineUrlRequestInfo>
+#include <QtWebEngineCore/QWebEngineUrlRequestInterceptor>
 #include <QtWebEngineWidgets/QWebEngineView>
 
 namespace {
+	const QByteArray PREVIEW_MEDIA_USER_AGENT =
+		QByteArrayLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+						  "(KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36");
+	const QByteArray PREVIEW_MEDIA_ACCEPT_LANGUAGE = QByteArrayLiteral("en-US,en;q=0.9");
+	const QByteArray PREVIEW_MEDIA_ACCEPT =
+		QByteArrayLiteral("video/webm,video/mp4,video/*;q=0.9,audio/*;q=0.8,image/avif,image/webp,image/*,*/*;q=0.5");
+	const QByteArray YOUTUBE_EMBED_REFERER = QByteArrayLiteral("https://www.mumble.info/");
+
 	QUrl modernShellUrl() {
 		return QUrl(QStringLiteral("qrc:/modern-shell/index.html"));
 	}
+
+	bool hostEqualsOrEndsWith(const QString &host, const QString &domain) {
+		const QString normalizedHost = host.trimmed().toLower();
+		const QString normalizedDomain = domain.trimmed().toLower();
+		return normalizedHost == normalizedDomain || normalizedHost.endsWith(QStringLiteral(".") + normalizedDomain);
+	}
+
+	bool isPreviewMediaCdnHost(const QString &host) {
+		return hostEqualsOrEndsWith(host, QStringLiteral("cdninstagram.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("fbcdn.net"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("fbsbx.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("twimg.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("tenor.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("giphy.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("redd.it"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("redditmedia.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("imgur.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("4cdn.org"));
+	}
+
+	bool isYouTubeEmbedDocumentHost(const QString &host) {
+		return hostEqualsOrEndsWith(host, QStringLiteral("youtube.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("youtube-nocookie.com"));
+	}
+
+	bool isPreviewEmbedPlayerHost(const QString &host) {
+		return hostEqualsOrEndsWith(host, QStringLiteral("tiktok.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("vimeo.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("dailymotion.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("spotify.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("spotifycdn.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("soundcloud.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("streamable.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("facebook.com"));
+	}
+
+	QByteArray previewMediaRefererForHost(const QString &host) {
+		if (hostEqualsOrEndsWith(host, QStringLiteral("cdninstagram.com"))) {
+			return QByteArrayLiteral("https://www.instagram.com/");
+		}
+		if (hostEqualsOrEndsWith(host, QStringLiteral("fbcdn.net"))
+			|| hostEqualsOrEndsWith(host, QStringLiteral("fbsbx.com"))) {
+			return QByteArrayLiteral("https://www.facebook.com/");
+		}
+		if (hostEqualsOrEndsWith(host, QStringLiteral("twimg.com"))) {
+			return QByteArrayLiteral("https://x.com/");
+		}
+		if (hostEqualsOrEndsWith(host, QStringLiteral("tenor.com"))) {
+			return QByteArrayLiteral("https://tenor.com/");
+		}
+		if (hostEqualsOrEndsWith(host, QStringLiteral("giphy.com"))) {
+			return QByteArrayLiteral("https://giphy.com/");
+		}
+		if (hostEqualsOrEndsWith(host, QStringLiteral("redd.it"))
+			|| hostEqualsOrEndsWith(host, QStringLiteral("redditmedia.com"))) {
+			return QByteArrayLiteral("https://www.reddit.com/");
+		}
+		if (hostEqualsOrEndsWith(host, QStringLiteral("imgur.com"))) {
+			return QByteArrayLiteral("https://imgur.com/");
+		}
+		if (hostEqualsOrEndsWith(host, QStringLiteral("4cdn.org"))) {
+			return QByteArrayLiteral("https://boards.4chan.org/");
+		}
+		return QByteArray();
+	}
+
+	class PreviewMediaUrlInterceptor final : public QWebEngineUrlRequestInterceptor {
+	public:
+		explicit PreviewMediaUrlInterceptor(QObject *parent = nullptr) : QWebEngineUrlRequestInterceptor(parent) {}
+
+		void interceptRequest(QWebEngineUrlRequestInfo &info) override {
+			const QUrl url = info.requestUrl();
+			if (url.scheme().toLower() != QLatin1String("https")) {
+				return;
+			}
+
+			const QWebEngineUrlRequestInfo::ResourceType resourceType = info.resourceType();
+			if (isYouTubeEmbedDocumentHost(url.host())) {
+				if (resourceType == QWebEngineUrlRequestInfo::ResourceTypeSubFrame
+					|| resourceType == QWebEngineUrlRequestInfo::ResourceTypeMainFrame) {
+					info.setHttpHeader(QByteArrayLiteral("Referer"), YOUTUBE_EMBED_REFERER);
+					return;
+				}
+				return;
+			}
+
+			if (isPreviewEmbedPlayerHost(url.host())) {
+				info.setHttpHeader(QByteArrayLiteral("User-Agent"), PREVIEW_MEDIA_USER_AGENT);
+				info.setHttpHeader(QByteArrayLiteral("Accept-Language"), PREVIEW_MEDIA_ACCEPT_LANGUAGE);
+				return;
+			}
+
+			if (!isPreviewMediaCdnHost(url.host())) {
+				return;
+			}
+
+			const bool mediaLike = resourceType == QWebEngineUrlRequestInfo::ResourceTypeMedia
+								   || resourceType == QWebEngineUrlRequestInfo::ResourceTypeImage
+								   || resourceType == QWebEngineUrlRequestInfo::ResourceTypeUnknown;
+			if (!mediaLike) {
+				return;
+			}
+
+			info.setHttpHeader(QByteArrayLiteral("User-Agent"), PREVIEW_MEDIA_USER_AGENT);
+			info.setHttpHeader(QByteArrayLiteral("Accept"), PREVIEW_MEDIA_ACCEPT);
+			info.setHttpHeader(QByteArrayLiteral("Accept-Language"), PREVIEW_MEDIA_ACCEPT_LANGUAGE);
+			const QByteArray referer = previewMediaRefererForHost(url.host());
+			if (!referer.isEmpty()) {
+				info.setHttpHeader(QByteArrayLiteral("Referer"), referer);
+				info.setHttpHeader(QByteArrayLiteral("Origin"), referer.left(referer.size() - 1));
+			}
+			info.setHttpHeader(QByteArrayLiteral("Sec-Fetch-Dest"),
+							   resourceType == QWebEngineUrlRequestInfo::ResourceTypeImage ? QByteArrayLiteral("image")
+																							: QByteArrayLiteral("video"));
+			info.setHttpHeader(QByteArrayLiteral("Sec-Fetch-Mode"), QByteArrayLiteral("no-cors"));
+			info.setHttpHeader(QByteArrayLiteral("Sec-Fetch-Site"), QByteArrayLiteral("cross-site"));
+		}
+	};
 
 	void appendModernShellConnectTrace(const QString &message) {
 		if (qEnvironmentVariableIntValue("MUMBLE_CONNECT_TRACE") == 0) {
@@ -64,6 +193,10 @@ ModernShellHost::ModernShellHost(QWidget *parent) : QWidget(parent) {
 
 	m_page = new ModernShellPage(m_view);
 	m_view->setPage(m_page);
+	m_requestInterceptor = new PreviewMediaUrlInterceptor(this);
+	if (m_page->profile()) {
+		m_page->profile()->setUrlRequestInterceptor(m_requestInterceptor);
+	}
 
 	m_channel = new QWebChannel(this);
 	m_bridge  = new ModernShellBridge(this);

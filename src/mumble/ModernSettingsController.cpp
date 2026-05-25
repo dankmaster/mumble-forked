@@ -9,6 +9,7 @@
 #include "AudioOutput.h"
 #include "EchoCancelOption.h"
 #include "ModernShellMenuSerializer.h"
+#include "PersistentChatMediaCache.h"
 #include "SpeechCleanup.h"
 
 #include <QtCore/QHash>
@@ -96,6 +97,17 @@ namespace {
 		return fieldItem(id, label, QStringLiteral("checkbox"), value);
 	}
 
+	QVariantMap actionField(const QString &id, const QString &label, const QString &buttonLabel,
+							const QString &actionID, const QString &tone = QString()) {
+		QVariantMap field = fieldItem(id, label, QStringLiteral("button"), buttonLabel);
+		field.insert(QStringLiteral("buttonLabel"), buttonLabel);
+		field.insert(QStringLiteral("actionId"), actionID);
+		if (!tone.isEmpty()) {
+			field.insert(QStringLiteral("tone"), tone);
+		}
+		return field;
+	}
+
 	QVariantMap selectField(const QString &id, const QString &label, const QVariant &value, const QVariantList &options,
 							const QString &valueType = QStringLiteral("number")) {
 		QVariantMap field = fieldItem(id, label, QStringLiteral("select"), value);
@@ -147,6 +159,8 @@ namespace {
 			  QObject::tr("Avoid sending your certificate identity to servers unless it is required.") },
 			{ QStringLiteral("network.linkPreviews"),
 			  QObject::tr("Fetch and show previews for links posted in chat.") },
+			{ QStringLiteral("network.clearPreviewCache"),
+			  QObject::tr("Remove locally cached chat preview images and media for this client profile.") },
 			{ QStringLiteral("network.hideOS"),
 			  QObject::tr("Do not advertise your operating system details to connected servers.") },
 			{ QStringLiteral("network.proxyType"),
@@ -1194,6 +1208,18 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 													 boolField(QStringLiteral("network.linkPreviews"),
 															   QObject::tr("Enable link previews"),
 															   m_draft.bEnableLinkPreviews) }),
+			sectionItem(QObject::tr("Chat media cache"), QVariantList {
+														   hintedField(
+															   tooltippedField(
+																   actionField(QStringLiteral("network.clearPreviewCache"),
+																			   QObject::tr("Local media cache"),
+																			   QObject::tr("Clear cache"),
+																			   QStringLiteral("network.clearPreviewCache"),
+																			   QStringLiteral("danger")),
+																   fieldTooltip(QStringLiteral("network.clearPreviewCache"))),
+															   QObject::tr("Current cache: %1. Stored only on this device.")
+																   .arg(PersistentChatMediaCache::formattedSize(
+																	   PersistentChatMediaCache::sizeBytes()))) }),
 			sectionItem(QObject::tr("Proxy and privacy"), QVariantList {
 														   selectField(QStringLiteral("network.proxyType"),
 																	   QObject::tr("Proxy type"),

@@ -919,6 +919,11 @@
 		}
 
 		const token = String(scopeToken || "");
+		if (token !== pendingScopeLoading.scopeToken) {
+			clearChatLoadingIndicator();
+			return false;
+		}
+
 		if (token === pendingScopeLoading.scopeToken && renderOptions && renderOptions.resolvePendingScopeLoading) {
 			clearChatLoadingIndicator();
 			return false;
@@ -3082,7 +3087,7 @@
 		syncAmbientState(snapshot);
 		syncComposerHeight();
 		if (shouldShowScopeLoading(scope, snapshot.messages || [])) {
-			beginScopeLoading(scope.scopeToken, { force: true, fallback: false });
+			beginScopeLoading(scope.scopeToken, { force: true });
 		}
 		if (scope.serverLogRevision || Object.prototype.hasOwnProperty.call(scope, "serverLogHtml")) {
 			renderMessages(snapshot, { resolvePendingScopeLoading: true });
@@ -3377,6 +3382,43 @@
 		return null;
 	}
 
+	function reactionActorNames(reaction) {
+		const rawNames = Array.isArray(reaction && reaction.actorNames) ? reaction.actorNames : [];
+		const seenNames = new Set();
+		const names = [];
+		rawNames.forEach(function(rawName) {
+			const name = String(rawName || "").trim();
+			if (!name || seenNames.has(name)) {
+				return;
+			}
+			seenNames.add(name);
+			names.push(name);
+		});
+		return names;
+	}
+
+	function reactionTooltipText(reaction) {
+		const names = reactionActorNames(reaction);
+		const count = Math.max(0, Number(reaction && reaction.count) || 0);
+		if (!names.length && reaction && reaction.selfReacted) {
+			const app = (getSnapshot() && getSnapshot().app) || {};
+			const selfName = String(app.selfName || "").trim();
+			if (selfName) {
+				names.push(selfName);
+			}
+		}
+
+		const unnamedCount = Math.max(0, count - names.length);
+		if (names.length && unnamedCount > 0) {
+			names.push(unnamedCount === 1 ? "1 other reaction" : String(unnamedCount) + " other reactions");
+		}
+		if (names.length) {
+			return names.join("\n");
+		}
+
+		return count === 1 ? "1 reaction" : String(count) + " reactions";
+	}
+
 	function previewHostLabel(url) {
 		const rawUrl = String(url || "").trim();
 		if (!rawUrl) {
@@ -3451,6 +3493,11 @@
 			if (mime === "video/mp4") {
 				return !!video.canPlayType('video/mp4; codecs="avc1.42E01E, mp4a.40.2"');
 			}
+			if (mime === "application/vnd.apple.mpegurl" || mime === "application/x-mpegurl"
+				|| mime === "application/mpegurl" || mime === "audio/mpegurl") {
+				return !!video.canPlayType("application/vnd.apple.mpegurl")
+					|| !!video.canPlayType("application/x-mpegurl");
+			}
 			return false;
 		}
 
@@ -3464,8 +3511,15 @@
 		}
 		if (path.endsWith(".webm")) {
 			return !!video.canPlayType('video/webm; codecs="vp8, vorbis"')
+				|| !!video.canPlayType('video/webm; codecs="vp8, opus"')
 				|| !!video.canPlayType('video/webm; codecs="vp9, opus"')
+				|| !!video.canPlayType('video/webm; codecs="vp9, vorbis"')
+				|| !!video.canPlayType('video/webm; codecs="av1, opus"')
 				|| !!video.canPlayType("video/webm");
+		}
+		if (path.endsWith(".m3u8")) {
+			return !!video.canPlayType("application/vnd.apple.mpegurl")
+				|| !!video.canPlayType("application/x-mpegurl");
 		}
 		return false;
 	}
@@ -3589,48 +3643,89 @@
 		return String(minutes) + ":" + String(seconds).padStart(2, "0");
 	}
 
-	function syncPreviewMediaControls(video, controls) {
-		if (!video || !controls) {
+	function normalizedPreviewMediaVolume(value) {
+		const volume = Number(value);
+		return Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 1;
+	}
+
+	function previewVideoControlState(video) {
+		const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+		const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+		return {
+			currentTime: currentTime,
+			duration: duration,
+			mediaLabel: "media",
+			muted: !!video.muted || video.volume <= 0,
+			paused: !!video.paused,
+			playEnabled: true,
+			seekEnabled: !!duration,
+			volume: normalizedPreviewMediaVolume(video.volume),
+			volumeEnabled: true
+		};
+	}
+
+	function syncPreviewMediaControlState(controls, state) {
+		if (!controls) {
 			return;
 		}
-
+		state = state || {};
 		const playButton = controls.querySelector(".preview-card-media-play");
 		const muteButton = controls.querySelector(".preview-card-media-mute");
 		const seek = controls.querySelector(".preview-card-media-seek");
 		const volume = controls.querySelector(".preview-card-media-volume");
 		const time = controls.querySelector(".preview-card-media-time");
-		const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+		const duration = Number.isFinite(state.duration) && state.duration > 0 ? state.duration : 0;
+		const currentTime = Number.isFinite(state.currentTime) ? Math.max(0, state.currentTime) : 0;
+		const mediaLabel = String(state.mediaLabel || "media");
+		const isMuted = !!state.muted || normalizedPreviewMediaVolume(state.volume) <= 0;
+		const playEnabled = state.playEnabled !== false;
+		const seekEnabled = state.seekEnabled !== false && !!duration;
+		const volumeEnabled = state.volumeEnabled !== false;
 		if (playButton) {
-			playButton.textContent = video.paused ? "Play" : "Pause";
-			playButton.setAttribute("aria-label", video.paused ? "Play media" : "Pause media");
+			playButton.textContent = state.paused === false ? "Pause" : "Play";
+			playButton.disabled = !playEnabled;
+			playButton.setAttribute("aria-label", (state.paused === false ? "Pause " : "Play ") + mediaLabel);
 		}
 		if (muteButton) {
-			muteButton.textContent = video.muted || video.volume <= 0 ? "Muted" : "Sound";
-			muteButton.setAttribute("aria-label", video.muted || video.volume <= 0 ? "Unmute media" : "Mute media");
+			muteButton.textContent = isMuted ? "Muted" : "Sound";
+			muteButton.disabled = !volumeEnabled;
+			muteButton.setAttribute("aria-label", (isMuted ? "Unmute " : "Mute ") + mediaLabel);
 		}
 		if (seek && duration && !seek.matches(":active")) {
-			seek.value = String(Math.round((video.currentTime / duration) * 1000));
+			seek.value = String(Math.round((currentTime / duration) * 1000));
 		}
 		if (seek) {
-			seek.disabled = !duration;
+			seek.disabled = !seekEnabled;
 		}
 		if (volume && !volume.matches(":active")) {
-			volume.value = String(Math.round((video.muted ? 0 : video.volume) * 100));
+			volume.value = String(Math.round((isMuted ? 0 : normalizedPreviewMediaVolume(state.volume)) * 100));
+		}
+		if (volume) {
+			volume.disabled = !volumeEnabled;
 		}
 		if (time) {
 			time.textContent = duration
-				? formatPreviewMediaTime(video.currentTime) + " / " + formatPreviewMediaTime(duration)
-				: formatPreviewMediaTime(video.currentTime);
+				? formatPreviewMediaTime(currentTime) + " / " + formatPreviewMediaTime(duration)
+				: formatPreviewMediaTime(currentTime);
 		}
+		controls.classList.toggle("has-disabled-playback", !playEnabled);
 	}
 
-	function appendPreviewMediaControls(card, media, video) {
-		if (!card || !media || !video) {
+	function syncPreviewMediaControls(video, controls) {
+		if (!video || !controls) {
 			return;
 		}
+		syncPreviewMediaControlState(controls, previewVideoControlState(video));
+	}
+
+	function appendPreviewMediaControlSurface(card, media, options) {
+		if (!card || !media) {
+			return null;
+		}
+		options = options || {};
 
 		const controls = document.createElement("div");
-		controls.className = "preview-card-media-controls";
+		controls.className = "preview-card-media-controls" + (options.className ? " " + options.className : "");
 		controls.addEventListener("click", function(event) {
 			event.stopPropagation();
 		});
@@ -3638,97 +3733,589 @@
 			event.stopPropagation();
 		});
 
-		const playButton = document.createElement("button");
-		playButton.type = "button";
-		playButton.className = "preview-card-media-button preview-card-media-play";
-		playButton.addEventListener("click", function(event) {
-			event.preventDefault();
-			event.stopPropagation();
-			if (video.paused) {
-				const playPromise = video.play();
-				if (playPromise && typeof playPromise.catch === "function") {
-					playPromise.catch(function(error) {
-						console.warn("Preview video playback failed", error && error.name ? error.name : error);
-					});
+		if (options.play !== false) {
+			const playButton = document.createElement("button");
+			playButton.type = "button";
+			playButton.className = "preview-card-media-button preview-card-media-play";
+			playButton.addEventListener("click", function(event) {
+				event.preventDefault();
+				event.stopPropagation();
+				if (typeof options.onPlay === "function") {
+					options.onPlay(controls);
 				}
-			} else {
-				video.pause();
-			}
-			syncPreviewMediaControls(video, controls);
+			});
+			controls.appendChild(playButton);
+		}
+
+		if (options.time !== false) {
+			const time = document.createElement("span");
+			time.className = "preview-card-media-time";
+			time.textContent = "0:00";
+			controls.appendChild(time);
+		}
+
+		if (options.seek !== false) {
+			const seek = document.createElement("input");
+			seek.type = "range";
+			seek.className = "preview-card-media-seek";
+			seek.min = "0";
+			seek.max = "1000";
+			seek.step = "1";
+			seek.value = "0";
+			seek.setAttribute("aria-label", "Seek media");
+			seek.addEventListener("input", function(event) {
+				event.stopPropagation();
+				if (typeof options.onSeek === "function") {
+					options.onSeek((Number(seek.value) || 0) / 1000, controls);
+				}
+			});
+			controls.appendChild(seek);
+		}
+
+		if (options.mute !== false) {
+			const muteButton = document.createElement("button");
+			muteButton.type = "button";
+			muteButton.className = "preview-card-media-button preview-card-media-mute";
+			muteButton.addEventListener("click", function(event) {
+				event.preventDefault();
+				event.stopPropagation();
+				if (typeof options.onMute === "function") {
+					options.onMute(controls);
+				}
+			});
+			controls.appendChild(muteButton);
+		}
+
+		if (options.volume !== false) {
+			const volume = document.createElement("input");
+			volume.type = "range";
+			volume.className = "preview-card-media-volume";
+			volume.min = "0";
+			volume.max = "100";
+			volume.step = "1";
+			volume.value = "100";
+			volume.setAttribute("aria-label", "Media volume");
+			volume.addEventListener("input", function(event) {
+				event.stopPropagation();
+				if (typeof options.onVolume === "function") {
+					options.onVolume((Number(volume.value) || 0) / 100, controls);
+				}
+			});
+			controls.appendChild(volume);
+		}
+
+		if (options.size !== false) {
+			appendPreviewCardSizeButton(card, controls);
+		}
+
+		media.appendChild(controls);
+		return controls;
+	}
+
+	function playPreviewVideo(video) {
+		if (!video) {
+			return;
+		}
+
+		const playPromise = video.play();
+		if (playPromise && typeof playPromise.catch === "function") {
+			playPromise.catch(function(error) {
+				console.warn("Preview video playback failed", error && error.name ? error.name : error);
+			});
+		}
+	}
+
+	function togglePreviewVideoPlayback(video, controls) {
+		if (!video) {
+			return;
+		}
+
+		if (video.paused) {
+			playPreviewVideo(video);
+		} else {
+			video.pause();
+		}
+		syncPreviewMediaControls(video, controls);
+	}
+
+	function togglePreviewGifPlayback(media, image) {
+		if (!media || !image) {
+			return false;
+		}
+
+		const frozenFrame = media.querySelector(".preview-card-gif-freeze");
+		if (frozenFrame) {
+			frozenFrame.remove();
+			image.hidden = false;
+			media.classList.remove("is-gif-paused");
+			return true;
+		}
+
+		if (!image.complete || !image.naturalWidth || !image.naturalHeight) {
+			return false;
+		}
+
+		const canvas = document.createElement("canvas");
+		canvas.className = image.className + " preview-card-gif-freeze";
+		canvas.width = image.naturalWidth;
+		canvas.height = image.naturalHeight;
+		const context = canvas.getContext("2d");
+		if (!context) {
+			return false;
+		}
+		try {
+			context.drawImage(image, 0, 0, canvas.width, canvas.height);
+		} catch (error) {
+			console.warn("Preview gif pause failed", error && error.name ? error.name : error);
+			return false;
+		}
+
+		image.hidden = true;
+		media.insertBefore(canvas, image);
+		media.classList.add("is-gif-paused");
+		return true;
+	}
+
+	const previewCardSizeOrder = ["default", "large", "compact"];
+	const previewCardSizeLabels = {
+		"default": "Default",
+		"large": "Large",
+		"compact": "Compact"
+	};
+	const previewCardSizeNextLabels = {
+		"default": "Large",
+		"large": "Compact",
+		"compact": "Default"
+	};
+	const previewCardBubbleWidthVars = {
+		"default": "var(--preview-card-width-default)",
+		"large": "var(--preview-card-width-large)",
+		"compact": "var(--preview-card-width-compact)"
+	};
+	let previewEmbedFrameSizeSyncFrame = 0;
+	let youtubeIframeApiPromise = null;
+	let youtubeIframeIdCounter = 0;
+	const youtubeIframePlayers = new WeakMap();
+
+	function previewCardSizeKey(card) {
+		const size = String(card && card.dataset && card.dataset.previewSize || "").trim().toLowerCase();
+		return previewCardSizeOrder.indexOf(size) >= 0 ? size : "default";
+	}
+
+	function previewCardNextSizeKey(card) {
+		const current = previewCardSizeKey(card);
+		const index = previewCardSizeOrder.indexOf(current);
+		return previewCardSizeOrder[(index + 1) % previewCardSizeOrder.length];
+	}
+
+	function syncPreviewStackMediaSizeStateForStack(stack) {
+		if (!stack) {
+			return;
+		}
+
+		const cards = Array.prototype.slice.call(stack.querySelectorAll(".preview-card.has-media"));
+		if (!cards.length) {
+			stack.classList.remove("has-large-media-preview", "has-compact-media-preview");
+			stack.style.removeProperty("--preview-card-stack-width");
+			return;
+		}
+		const hasLarge = cards.some(function(currentCard) {
+			return previewCardSizeKey(currentCard) === "large";
 		});
-
-		const time = document.createElement("span");
-		time.className = "preview-card-media-time";
-		time.textContent = "0:00";
-
-		const seek = document.createElement("input");
-		seek.type = "range";
-		seek.className = "preview-card-media-seek";
-		seek.min = "0";
-		seek.max = "1000";
-		seek.step = "1";
-		seek.value = "0";
-		seek.setAttribute("aria-label", "Seek media");
-		seek.addEventListener("input", function(event) {
-			event.stopPropagation();
-			const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
-			if (!duration) {
-				return;
-			}
-			video.currentTime = (Number(seek.value) / 1000) * duration;
-			syncPreviewMediaControls(video, controls);
+		const hasCompact = cards.length > 0 && cards.every(function(currentCard) {
+			return previewCardSizeKey(currentCard) === "compact";
 		});
+		const stackSize = hasLarge ? "large" : (hasCompact ? "compact" : "default");
+		stack.classList.toggle("has-large-media-preview", hasLarge);
+		stack.classList.toggle("has-compact-media-preview", !hasLarge && hasCompact);
+		stack.style.setProperty("--preview-card-stack-width",
+			previewCardBubbleWidthVars[stackSize] || previewCardBubbleWidthVars.default);
+	}
 
-		const muteButton = document.createElement("button");
-		muteButton.type = "button";
-		muteButton.className = "preview-card-media-button preview-card-media-mute";
-		muteButton.addEventListener("click", function(event) {
-			event.preventDefault();
-			event.stopPropagation();
-			video.muted = !(video.muted || video.volume <= 0);
-			if (!video.muted && video.volume <= 0) {
-				video.volume = 0.75;
-			}
-			syncPreviewMediaControls(video, controls);
+	function syncPreviewStackMediaSizeState(card) {
+		const stack = card && card.closest ? card.closest(".message-stack.has-media-preview") : null;
+		syncPreviewStackMediaSizeStateForStack(stack);
+	}
+
+	function syncPreviewCardSizeButtons(card) {
+		if (!card) {
+			return;
+		}
+		card.querySelectorAll(".preview-card-media-size").forEach(function(button) {
+			syncPreviewCardSizeButton(card, button);
 		});
+	}
 
-		const volume = document.createElement("input");
-		volume.type = "range";
-		volume.className = "preview-card-media-volume";
-		volume.min = "0";
-		volume.max = "100";
-		volume.step = "1";
-		volume.value = String(Math.round((video.volume || 1) * 100));
-		volume.setAttribute("aria-label", "Media volume");
-		volume.addEventListener("input", function(event) {
-			event.stopPropagation();
-			const nextVolume = Math.max(0, Math.min(100, Number(volume.value) || 0)) / 100;
-			video.volume = nextVolume;
-			video.muted = nextVolume <= 0;
-			syncPreviewMediaControls(video, controls);
-		});
+	function syncPreviewCardSizeButton(card, button) {
+		if (!card || !button) {
+			return;
+		}
+		const current = previewCardSizeKey(card);
+		const next = previewCardNextSizeKey(card);
+		const currentLabel = previewCardSizeLabels[current] || previewCardSizeLabels.default;
+		const nextLabel = previewCardSizeLabels[next] || previewCardSizeLabels.default;
+		const buttonLabel = previewCardSizeNextLabels[current] || nextLabel;
+		const label = button.querySelector(".preview-card-media-size-label");
+		if (label) {
+			label.textContent = buttonLabel;
+		} else {
+			button.textContent = buttonLabel;
+		}
+		button.dataset.sizeLabel = buttonLabel;
+		button.title = "Preview size: " + currentLabel + ". Switch to " + nextLabel + ".";
+		button.setAttribute("aria-label", button.title);
+	}
 
+	function setPreviewCardSize(card, size) {
+		if (!card) {
+			return;
+		}
+		const nextSize = previewCardSizeOrder.indexOf(size) >= 0 ? size : "default";
+		const widthVar = previewCardBubbleWidthVars[nextSize] || previewCardBubbleWidthVars.default;
+		card.dataset.previewSize = nextSize;
+		card.classList.toggle("is-expanded", nextSize === "large");
+		card.classList.toggle("is-compact", nextSize === "compact");
+		card.style.setProperty("--preview-card-target-width", widthVar);
+		const bubble = card.closest(".message-bubble.has-media-preview");
+		if (bubble) {
+			bubble.style.setProperty("--preview-card-bubble-width", widthVar);
+		}
+		syncPreviewStackMediaSizeState(card);
+		syncPreviewCardSizeButtons(card);
+		schedulePreviewEmbedFrameSizeSync();
+		requestAnimationFrame(syncScrollState);
+	}
+
+	function advancePreviewCardSize(card) {
+		setPreviewCardSize(card, previewCardNextSizeKey(card));
+	}
+
+	function appendPreviewCardSizeButton(card, controls) {
+		if (!card || !controls) {
+			return null;
+		}
 		const sizeButton = document.createElement("button");
 		sizeButton.type = "button";
 		sizeButton.className = "preview-card-media-button preview-card-media-size";
-		sizeButton.textContent = "Large";
-		sizeButton.setAttribute("aria-label", "Toggle larger media preview");
+		sizeButton.dataset.sizeLabel = previewCardSizeNextLabels.default;
+		const sizeLabel = document.createElement("span");
+		sizeLabel.className = "preview-card-media-size-label";
+		sizeLabel.textContent = previewCardSizeNextLabels.default;
+		sizeButton.appendChild(sizeLabel);
 		sizeButton.addEventListener("click", function(event) {
 			event.preventDefault();
 			event.stopPropagation();
-			const expanded = !card.classList.contains("is-expanded");
-			card.classList.toggle("is-expanded", expanded);
-			sizeButton.textContent = expanded ? "Small" : "Large";
-			requestAnimationFrame(syncScrollState);
+			advancePreviewCardSize(card);
+		});
+		controls.appendChild(sizeButton);
+		syncPreviewCardSizeButton(card, sizeButton);
+		requestAnimationFrame(function() {
+			syncPreviewCardSizeButton(card, sizeButton);
+		});
+		return sizeButton;
+	}
+
+	function previewEmbedIframeSize(iframe) {
+		const frameWrap = iframe && iframe.closest ? iframe.closest(".preview-card-embed-frame-wrap") : null;
+		if (!frameWrap) {
+			return null;
+		}
+		const rect = frameWrap.getBoundingClientRect();
+		const width = Math.round(rect.width);
+		const height = Math.round(rect.height);
+		if (width <= 0 || height <= 0) {
+			return null;
+		}
+		return { width: width, height: height };
+	}
+
+	function previewIsYouTubeIframe(iframe) {
+		if (!iframe) {
+			return false;
+		}
+		try {
+			const url = new URL(iframe.src || "", window.location.href);
+			const host = url.hostname.toLowerCase();
+			return host === "youtube.com" || host.endsWith(".youtube.com")
+				|| host === "youtube-nocookie.com" || host.endsWith(".youtube-nocookie.com");
+		} catch (error) {
+			return false;
+		}
+	}
+
+	function youtubeIframeTargetOrigin(iframe) {
+		try {
+			const url = new URL(iframe.src || "", window.location.href);
+			const host = url.hostname.toLowerCase();
+			if (host === "youtube-nocookie.com" || host.endsWith(".youtube-nocookie.com")) {
+				return "https://www.youtube-nocookie.com";
+			}
+		} catch (error) {
+			// Fall back to the normal player origin below.
+		}
+		return "https://www.youtube.com";
+	}
+
+	function normalizeYouTubeEmbedUrlForApi(embedUrl) {
+		try {
+			const url = new URL(embedUrl || "", window.location.href);
+			const host = url.hostname.toLowerCase();
+			if (host !== "youtube.com" && !host.endsWith(".youtube.com")
+				&& host !== "youtube-nocookie.com" && !host.endsWith(".youtube-nocookie.com")) {
+				return embedUrl;
+			}
+			url.searchParams.set("enablejsapi", "1");
+			url.searchParams.set("playsinline", "1");
+			url.searchParams.delete("origin");
+			if (window.location && /^https?:$/i.test(window.location.protocol || "")) {
+				url.searchParams.set("origin", window.location.origin);
+			}
+			return url.toString();
+		} catch (error) {
+			return embedUrl;
+		}
+	}
+
+	function ensureYouTubeIframeApi() {
+		if (window.YT && typeof window.YT.Player === "function") {
+			return Promise.resolve(window.YT);
+		}
+		if (youtubeIframeApiPromise) {
+			return youtubeIframeApiPromise;
+		}
+
+		youtubeIframeApiPromise = new Promise(function(resolve, reject) {
+			const previousReady = window.onYouTubeIframeAPIReady;
+			let resolved = false;
+			const finish = function() {
+				if (resolved) {
+					return;
+				}
+				if (window.YT && typeof window.YT.Player === "function") {
+					resolved = true;
+					resolve(window.YT);
+				}
+			};
+
+			window.onYouTubeIframeAPIReady = function() {
+				if (typeof previousReady === "function") {
+					try {
+						previousReady();
+					} catch (error) {
+						console.warn("Previous YouTube iframe API callback failed", error && error.name ? error.name : error);
+					}
+				}
+				finish();
+			};
+
+			const existingScript = document.querySelector("script[data-preview-youtube-api]");
+			if (!existingScript) {
+				const script = document.createElement("script");
+				script.src = "https://www.youtube.com/iframe_api";
+				script.async = true;
+				script.dataset.previewYoutubeApi = "true";
+				script.addEventListener("error", function() {
+					if (!resolved) {
+						reject(new Error("YouTube iframe API failed to load"));
+					}
+				}, { once: true });
+				document.head.appendChild(script);
+			}
+
+			const startedAt = Date.now();
+			const poll = function() {
+				finish();
+				if (resolved) {
+					return;
+				}
+				if (Date.now() - startedAt > 8000) {
+					reject(new Error("YouTube iframe API timed out"));
+					return;
+				}
+				window.setTimeout(poll, 100);
+			};
+			poll();
+		}).catch(function(error) {
+			youtubeIframeApiPromise = null;
+			throw error;
 		});
 
-		controls.appendChild(playButton);
-		controls.appendChild(time);
-		controls.appendChild(seek);
-		controls.appendChild(muteButton);
-		controls.appendChild(volume);
-		controls.appendChild(sizeButton);
-		media.appendChild(controls);
+		return youtubeIframeApiPromise;
+	}
+
+	function ensureYouTubeIframeId(iframe) {
+		if (!iframe.id) {
+			youtubeIframeIdCounter += 1;
+			iframe.id = "preview-youtube-player-" + String(Date.now()) + "-" + String(youtubeIframeIdCounter);
+		}
+		return iframe.id;
+	}
+
+	function ensureYouTubeIframePlayer(iframe) {
+		if (!previewIsYouTubeIframe(iframe)) {
+			return Promise.reject(new Error("Not a YouTube iframe"));
+		}
+		const existing = youtubeIframePlayers.get(iframe);
+		if (existing && existing.promise) {
+			return existing.promise;
+		}
+
+		const state = {
+			lastPlayerState: null,
+			player: null,
+			promise: null,
+			ready: false,
+			stateChangeCallbacks: []
+		};
+		youtubeIframePlayers.set(iframe, state);
+		state.promise = ensureYouTubeIframeApi().then(function(YT) {
+			return new Promise(function(resolve, reject) {
+				const playerId = ensureYouTubeIframeId(iframe);
+				try {
+					state.player = new YT.Player(playerId, {
+						events: {
+							onReady: function(event) {
+								state.player = event && event.target ? event.target : state.player;
+								state.ready = true;
+								resolve(state);
+							},
+							onError: function(event) {
+								console.warn("YouTube embed player error", event && event.data);
+							},
+							onStateChange: function(event) {
+								state.player = event && event.target ? event.target : state.player;
+								state.lastPlayerState = event ? event.data : null;
+								state.stateChangeCallbacks.forEach(function(callback) {
+									try {
+										callback(event);
+									} catch (error) {
+										console.warn("YouTube embed state callback failed",
+											error && error.name ? error.name : error);
+									}
+								});
+							}
+						}
+					});
+				} catch (error) {
+					reject(error);
+				}
+			});
+		}).catch(function(error) {
+			youtubeIframePlayers.delete(iframe);
+			throw error;
+		});
+		return state.promise;
+	}
+
+	function invokeYouTubeIframePlayer(iframe, methodName, args) {
+		if (!previewIsYouTubeIframe(iframe) || !methodName) {
+			return false;
+		}
+		const apply = function(state) {
+			const player = state && state.player;
+			if (player && typeof player[methodName] === "function") {
+				try {
+					player[methodName].apply(player, Array.isArray(args) ? args : []);
+					return true;
+				} catch (error) {
+					console.warn("YouTube embed API command failed", methodName,
+						error && error.name ? error.name : error);
+				}
+			}
+			return postYouTubeIframeCommand(iframe, methodName, args);
+		};
+
+		const state = youtubeIframePlayers.get(iframe);
+		if (state && state.ready) {
+			return apply(state);
+		}
+
+		ensureYouTubeIframePlayer(iframe).then(apply).catch(function(error) {
+			console.warn("YouTube embed API unavailable", error && error.message ? error.message : error);
+			postYouTubeIframeCommand(iframe, methodName, args);
+		});
+		return true;
+	}
+
+	function postYouTubeIframeCommand(iframe, func, args) {
+		if (!previewIsYouTubeIframe(iframe) || !iframe.contentWindow || !func) {
+			return false;
+		}
+		try {
+			iframe.contentWindow.postMessage(JSON.stringify({
+				event: "command",
+				func: func,
+				args: Array.isArray(args) ? args : []
+			}), youtubeIframeTargetOrigin(iframe));
+			return true;
+		} catch (error) {
+			console.warn("YouTube embed command failed", func, error && error.name ? error.name : error);
+			return false;
+		}
+	}
+
+	function syncPreviewEmbedFrameSize(iframe) {
+		const size = previewEmbedIframeSize(iframe);
+		if (!size) {
+			return;
+		}
+		const sizeKey = String(size.width) + "x" + String(size.height);
+		if (iframe.dataset.previewEmbedSize === sizeKey) {
+			return;
+		}
+		iframe.dataset.previewEmbedSize = sizeKey;
+		iframe.width = String(size.width);
+		iframe.height = String(size.height);
+		iframe.setAttribute("width", String(size.width));
+		iframe.setAttribute("height", String(size.height));
+		if (previewIsYouTubeIframe(iframe)) {
+			invokeYouTubeIframePlayer(iframe, "setSize", [size.width, size.height]);
+		}
+	}
+
+	function syncPreviewEmbedFrameSizes() {
+		previewEmbedFrameSizeSyncFrame = 0;
+		document.querySelectorAll(".preview-card-embed-frame").forEach(syncPreviewEmbedFrameSize);
+	}
+
+	function schedulePreviewEmbedFrameSizeSync() {
+		if (previewEmbedFrameSizeSyncFrame) {
+			return;
+		}
+		previewEmbedFrameSizeSyncFrame = requestAnimationFrame(syncPreviewEmbedFrameSizes);
+	}
+
+	function appendPreviewMediaControls(card, media, video) {
+		if (!card || !media || !video) {
+			return;
+		}
+
+		const controls = appendPreviewMediaControlSurface(card, media, {
+			onPlay: function() {
+				togglePreviewVideoPlayback(video, controls);
+			},
+			onSeek: function(fraction) {
+				const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+				if (!duration) {
+					return;
+				}
+				video.currentTime = Math.max(0, Math.min(1, Number(fraction) || 0)) * duration;
+				syncPreviewMediaControls(video, controls);
+			},
+			onMute: function() {
+				video.muted = !(video.muted || video.volume <= 0);
+				if (!video.muted && video.volume <= 0) {
+					video.volume = 0.75;
+				}
+				syncPreviewMediaControls(video, controls);
+			},
+			onVolume: function(volumeFraction) {
+				const nextVolume = normalizedPreviewMediaVolume(volumeFraction);
+				video.volume = nextVolume;
+				video.muted = nextVolume <= 0;
+				syncPreviewMediaControls(video, controls);
+			}
+		});
 
 		["play", "pause", "loadedmetadata", "durationchange", "timeupdate", "volumechange", "ended"].forEach(function(name) {
 			video.addEventListener(name, function() {
@@ -3736,6 +4323,18 @@
 			});
 		});
 		syncPreviewMediaControls(video, controls);
+	}
+
+	function createPreviewCartIcon(className) {
+		const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+		svg.classList.add(className);
+		svg.setAttribute("viewBox", "0 0 24 24");
+		svg.setAttribute("aria-hidden", "true");
+		svg.setAttribute("focusable", "false");
+		const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+		path.setAttribute("d", "M6.2 6.5h14l-1.7 7.2H8L6.2 6.5ZM4 4h2l2.5 12h9.8M9.5 20a1.2 1.2 0 1 0 0-2.4 1.2 1.2 0 0 0 0 2.4Zm8 0a1.2 1.2 0 1 0 0-2.4 1.2 1.2 0 0 0 0 2.4Z");
+		svg.appendChild(path);
+		return svg;
 	}
 
 	function appendPreviewPlaybackFallback(media, preview, fallbackText) {
@@ -3759,6 +4358,350 @@
 		media.appendChild(overlay);
 	}
 
+	function youtubePlayerStateIsPlaying(playerState) {
+		return playerState === 1 || playerState === 3;
+	}
+
+	function youtubeMediaControlStateFromPlayer(player, fallbackState) {
+		const fallback = fallbackState || {};
+		const getNumber = function(methodName, fallbackValue) {
+			if (player && typeof player[methodName] === "function") {
+				const value = Number(player[methodName]());
+				if (Number.isFinite(value)) {
+					return value;
+				}
+			}
+			return fallbackValue;
+		};
+		const duration = Math.max(0, getNumber("getDuration", Number(fallback.duration) || 0));
+		const currentTime = Math.max(0, getNumber("getCurrentTime", Number(fallback.currentTime) || 0));
+		const playerVolume = Math.max(0, Math.min(100, getNumber("getVolume", normalizedPreviewMediaVolume(fallback.volume) * 100)));
+		const playerState = player && typeof player.getPlayerState === "function" ? player.getPlayerState() : null;
+		const muted = player && typeof player.isMuted === "function" ? !!player.isMuted() : !!fallback.muted;
+		return {
+			currentTime: currentTime,
+			duration: duration,
+			mediaLabel: "YouTube",
+			muted: muted || playerVolume <= 0,
+			paused: !youtubePlayerStateIsPlaying(playerState),
+			playEnabled: true,
+			seekEnabled: duration > 0,
+			volume: playerVolume / 100,
+			volumeEnabled: true
+		};
+	}
+
+	function appendYouTubeEmbedMediaControls(card, media, iframe) {
+		let controlState = {
+			currentTime: 0,
+			duration: 0,
+			mediaLabel: "YouTube",
+			muted: false,
+			paused: true,
+			playEnabled: true,
+			seekEnabled: false,
+			volume: 1,
+			volumeEnabled: true
+		};
+		let progressTimer = 0;
+
+		const syncControlState = function() {
+			syncPreviewMediaControlState(controls, controlState);
+		};
+		const scheduleProgressPoll = function() {
+			if (progressTimer || controlState.paused !== false) {
+				return;
+			}
+			progressTimer = window.setTimeout(function() {
+				progressTimer = 0;
+				withYouTubePlayer(function(player) {
+					updateFromPlayer(player);
+				});
+			}, 500);
+		};
+		const updateFromPlayer = function(player) {
+			controlState = youtubeMediaControlStateFromPlayer(player, controlState);
+			syncControlState();
+			scheduleProgressPoll();
+		};
+		const applyOptimisticState = function(nextState) {
+			controlState = Object.assign({}, controlState, nextState || {});
+			syncControlState();
+			scheduleProgressPoll();
+		};
+		const registerPlayerStateCallback = function(state) {
+			if (!state || state.previewMediaControlsAttached || !Array.isArray(state.stateChangeCallbacks)) {
+				return;
+			}
+			state.previewMediaControlsAttached = true;
+			state.stateChangeCallbacks.push(function(event) {
+				updateFromPlayer(event && event.target ? event.target : state.player);
+			});
+		};
+		const withYouTubePlayer = function(callback, fallback) {
+			ensureYouTubeIframePlayer(iframe).then(function(state) {
+				registerPlayerStateCallback(state);
+				if (state && state.player) {
+					callback(state.player, state);
+				}
+			}).catch(function(error) {
+				console.warn("YouTube embed API unavailable", error && error.message ? error.message : error);
+				if (typeof fallback === "function") {
+					fallback();
+				}
+			});
+		};
+
+		const controls = appendPreviewMediaControlSurface(card, media, {
+			className: "preview-card-youtube-controls",
+			onPlay: function() {
+				withYouTubePlayer(function(player) {
+					const playerState = typeof player.getPlayerState === "function" ? player.getPlayerState() : null;
+					if (youtubePlayerStateIsPlaying(playerState)) {
+						if (typeof player.pauseVideo === "function") {
+							player.pauseVideo();
+						}
+						applyOptimisticState({ paused: true });
+					} else {
+						if (typeof player.playVideo === "function") {
+							player.playVideo();
+						}
+						applyOptimisticState({ paused: false });
+					}
+					window.setTimeout(function() {
+						updateFromPlayer(player);
+					}, 150);
+				}, function() {
+					const shouldPlay = controlState.paused !== false;
+					postYouTubeIframeCommand(iframe, shouldPlay ? "playVideo" : "pauseVideo", []);
+					applyOptimisticState({ paused: !shouldPlay });
+				});
+			},
+			onSeek: function(fraction) {
+				const nextTime = Math.max(0, Math.min(1, Number(fraction) || 0)) * (controlState.duration || 0);
+				if (!controlState.duration) {
+					return;
+				}
+				applyOptimisticState({ currentTime: nextTime });
+				withYouTubePlayer(function(player) {
+					if (typeof player.seekTo === "function") {
+						player.seekTo(nextTime, true);
+					}
+					window.setTimeout(function() {
+						updateFromPlayer(player);
+					}, 150);
+				}, function() {
+					postYouTubeIframeCommand(iframe, "seekTo", [nextTime, true]);
+				});
+			},
+			onMute: function() {
+				const nextMuted = !controlState.muted;
+				const nextVolume = !nextMuted && controlState.volume <= 0 ? 0.75 : controlState.volume;
+				applyOptimisticState({ muted: nextMuted, volume: nextVolume });
+				withYouTubePlayer(function(player) {
+					if (nextMuted) {
+						if (typeof player.mute === "function") {
+							player.mute();
+						}
+					} else {
+						if (typeof player.setVolume === "function") {
+							player.setVolume(Math.round(nextVolume * 100));
+						}
+						if (typeof player.unMute === "function") {
+							player.unMute();
+						}
+					}
+					updateFromPlayer(player);
+				}, function() {
+					postYouTubeIframeCommand(iframe, nextMuted ? "mute" : "unMute", []);
+					if (!nextMuted) {
+						postYouTubeIframeCommand(iframe, "setVolume", [Math.round(nextVolume * 100)]);
+					}
+				});
+			},
+			onVolume: function(volumeFraction) {
+				const nextVolume = normalizedPreviewMediaVolume(volumeFraction);
+				const nextMuted = nextVolume <= 0;
+				applyOptimisticState({ muted: nextMuted, volume: nextVolume });
+				withYouTubePlayer(function(player) {
+					if (typeof player.setVolume === "function") {
+						player.setVolume(Math.round(nextVolume * 100));
+					}
+					if (nextMuted && typeof player.mute === "function") {
+						player.mute();
+					} else if (!nextMuted && typeof player.unMute === "function") {
+						player.unMute();
+					}
+					updateFromPlayer(player);
+				}, function() {
+					postYouTubeIframeCommand(iframe, "setVolume", [Math.round(nextVolume * 100)]);
+					postYouTubeIframeCommand(iframe, nextMuted ? "mute" : "unMute", []);
+				});
+			}
+		});
+
+		syncControlState();
+		ensureYouTubeIframePlayer(iframe).then(function(state) {
+			registerPlayerStateCallback(state);
+			if (state && state.player) {
+				updateFromPlayer(state.player);
+			}
+		}).catch(function(error) {
+			console.warn("YouTube embed controls could not attach",
+				error && error.message ? error.message : error);
+		});
+		iframe.addEventListener("load", function() {
+			schedulePreviewEmbedFrameSizeSync();
+			withYouTubePlayer(function(player) {
+				updateFromPlayer(player);
+			});
+		});
+		return controls;
+	}
+
+	function appendPreviewEmbedControls(card, media, iframe, embedKind) {
+		const isYouTube = embedKind === "youtube" && previewIsYouTubeIframe(iframe);
+		if (isYouTube) {
+			appendYouTubeEmbedMediaControls(card, media, iframe);
+			return;
+		}
+		const controls = appendPreviewMediaControlSurface(card, media, {
+			className: "preview-card-embed-controls is-size-only",
+			mute: false,
+			play: false,
+			seek: false,
+			time: false,
+			volume: false
+		});
+		if (controls) {
+			syncPreviewMediaControlState(controls, { playEnabled: false, seekEnabled: false, volumeEnabled: false });
+		}
+	}
+
+	function previewClassToken(value) {
+		return String(value || "")
+			.trim()
+			.toLowerCase()
+			.replace(/[^a-z0-9_-]+/g, "-")
+			.replace(/^-+|-+$/g, "");
+	}
+
+	function appendEmbedPreview(card, preview, embedUrl, embedAspect, embedKind) {
+		const kindToken = previewClassToken(embedKind) || "generic";
+		const media = document.createElement("div");
+		media.className = "preview-card-media preview-card-playback preview-card-embed-media preview-card-"
+			+ kindToken + "-embed-media";
+		media.addEventListener("click", function(event) {
+			event.stopPropagation();
+		});
+
+		const frameWrap = document.createElement("div");
+		frameWrap.className = "preview-card-embed-frame-wrap preview-card-" + kindToken + "-frame-wrap";
+		const iframe = document.createElement("iframe");
+		iframe.className = "preview-card-embed-frame preview-card-" + kindToken + "-frame";
+		iframe.src = embedKind === "youtube" ? normalizeYouTubeEmbedUrlForApi(embedUrl) : embedUrl;
+		iframe.title = preview.title || preview.subtitle || "Embedded preview";
+		iframe.loading = embedKind === "youtube" ? "eager" : "lazy";
+		if (embedKind === "youtube") {
+			iframe.setAttribute("enablejsapi", "true");
+		}
+		iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; gyroscope; picture-in-picture";
+		iframe.referrerPolicy = "strict-origin-when-cross-origin";
+		iframe.allowFullscreen = true;
+		frameWrap.appendChild(iframe);
+		media.appendChild(frameWrap);
+		appendPreviewEmbedControls(card, media, iframe, embedKind);
+		card.appendChild(media);
+		schedulePreviewEmbedFrameSizeSync();
+		return media;
+	}
+
+	function createPreviewPlayableMedia(card, preview, mediaUrl, mediaMime, mediaAudioUrl, mediaAudioMime, isVideoMedia, isGifMedia, videoInlineSupported, extraClass) {
+		const media = document.createElement("div");
+		media.className = "preview-card-media preview-card-playback" + (extraClass ? " " + extraClass : "");
+		if (isVideoMedia && videoInlineSupported) {
+			const video = document.createElement("video");
+			video.className = "preview-card-video";
+			video.src = mediaUrl;
+			video.controls = false;
+			const startMuted = !!(preview.autoplay || preview.startMuted);
+			video.muted = startMuted;
+			video.defaultMuted = startMuted;
+			video.loop = true;
+			video.playsInline = true;
+			video.preload = preview.autoplay ? "auto" : "metadata";
+			if (preview.autoplay) {
+				video.autoplay = true;
+			}
+			if (preview.thumbnailUrl) {
+				video.poster = preview.thumbnailUrl;
+			}
+			video.setAttribute("aria-label", preview.title || preview.subtitle || "Media preview");
+			media.addEventListener("click", function(event) {
+				event.stopPropagation();
+				if (event.defaultPrevented || event.detail > 1
+					|| event.target.closest(".preview-card-media-controls")) {
+					return;
+				}
+				event.preventDefault();
+				togglePreviewVideoPlayback(video, media.querySelector(".preview-card-media-controls"));
+			});
+			const showPlaybackFallback = function(fallbackText) {
+				if (media.querySelector(".preview-card-playback-note")) {
+					return;
+				}
+				const controls = media.querySelector(".preview-card-media-controls");
+				if (controls) {
+					controls.remove();
+				}
+				video.remove();
+				appendPreviewPlaybackFallback(media, preview, fallbackText || "Open in browser");
+				requestAnimationFrame(syncScrollState);
+			};
+			video.addEventListener("loadedmetadata", function() {
+				if (video.videoWidth <= 0 && video.videoHeight <= 0) {
+					console.warn("Preview video has no visual track", mediaMime, mediaUrl);
+					showPlaybackFallback("Open in browser");
+				}
+			}, { once: true });
+			video.addEventListener("error", function() {
+				const code = video.error ? video.error.code : 0;
+				console.warn("Preview video playback failed", mediaMime, mediaUrl, code);
+				showPlaybackFallback("Open in browser");
+			}, { once: true });
+			media.appendChild(video);
+			if (mediaAudioUrl) {
+				attachPreviewAudioTrack(media, video, mediaAudioUrl, mediaAudioMime);
+			}
+			appendPreviewMediaControls(card, media, video);
+			media.addEventListener("dblclick", function(event) {
+				event.preventDefault();
+				event.stopPropagation();
+				setPreviewCardSize(card, previewCardSizeKey(card) === "large" ? "default" : "large");
+			});
+		} else if (isVideoMedia) {
+			appendPreviewPlaybackFallback(media, preview, "Open in browser");
+		} else {
+			const image = document.createElement("img");
+			image.className = "preview-card-image preview-card-media-image";
+			image.loading = "lazy";
+			image.src = mediaUrl;
+			image.alt = preview.title || preview.subtitle || "Media preview";
+			if (isGifMedia) {
+				media.addEventListener("click", function(event) {
+					event.stopPropagation();
+					if (event.defaultPrevented || event.detail > 1) {
+						return;
+					}
+					event.preventDefault();
+					togglePreviewGifPlayback(media, image);
+				});
+			}
+			media.appendChild(image);
+		}
+		return media;
+	}
+
 	function previewPlaceholderMark(preview, hostLabel) {
 		const fallbackSource = hostLabel
 			|| String((preview && preview.subtitle) || "").trim()
@@ -3779,27 +4722,3518 @@
 		return (tokens[0][0] + tokens[1][0]).toUpperCase();
 	}
 
+	function previewUrlObject(url) {
+		const rawUrl = String(url || "").trim();
+		if (!rawUrl) {
+			return null;
+		}
+		try {
+			return new URL(rawUrl);
+		} catch (error) {
+			return null;
+		}
+	}
+
+	function normalizedPreviewHost(host) {
+		return String(host || "")
+			.trim()
+			.toLowerCase()
+			.replace(/^www\./, "")
+			.replace(/^old\./, "")
+			.replace(/^new\./, "")
+			.replace(/^m\./, "")
+			.replace(/^mobile\./, "");
+	}
+
+	function previewIsTwitch(preview, hostLabel) {
+		const metadata = (preview && preview.metadata) || {};
+		const provider = String(metadata.provider || metadata.previewProvider || "").trim().toLowerCase();
+		if (provider === "twitch") {
+			return true;
+		}
+		const url = previewUrlObject(preview && preview.url);
+		const host = normalizedPreviewHost(url ? url.hostname : hostLabel);
+		return host === "twitch.tv" || host === "clips.twitch.tv";
+	}
+
+	function previewIsXPost(preview, hostLabel) {
+		const url = previewUrlObject(preview && preview.url);
+		const host = normalizedPreviewHost(url ? url.hostname : hostLabel);
+		if (host !== "x.com" && host !== "twitter.com") {
+			return false;
+		}
+		if (!url) {
+			return false;
+		}
+		return /\/status(?:es)?\/[0-9]+/i.test(url.pathname);
+	}
+
+	function previewIsGoogleSearch(preview, hostLabel) {
+		const url = previewUrlObject(preview && preview.url);
+		const host = normalizedPreviewHost(url ? url.hostname : hostLabel);
+		if (!url || !/^google\./i.test(host)) {
+			return false;
+		}
+		const path = String(url.pathname || "").replace(/\/+$/, "");
+		return (!path || path === "/search")
+			&& (!!url.searchParams.get("q") || !!url.searchParams.get("as_q"));
+	}
+
+	function previewGoogleSearchInfo(preview) {
+		const url = previewUrlObject(preview && preview.url);
+		const params = url ? url.searchParams : new URLSearchParams();
+		const query = String(params.get("q") || params.get("as_q") || (preview && preview.description) || "").trim();
+		const tbm = String(params.get("tbm") || "").toLowerCase();
+		const udm = String(params.get("udm") || "").toLowerCase();
+		let mode = "All";
+		let title = "Google Search";
+		if (tbm === "isch" || udm === "2") {
+			mode = "Images";
+			title = "Google Images";
+		} else if (tbm === "vid" || udm === "7") {
+			mode = "Videos";
+			title = "Google Videos";
+		} else if (tbm === "nws") {
+			mode = "News";
+			title = "Google News";
+		} else if (tbm === "shop" || udm === "28") {
+			mode = "Shopping";
+			title = "Google Shopping";
+		} else if (tbm === "bks") {
+			mode = "Books";
+			title = "Google Books";
+		}
+		return { query: query || "Search", mode: mode, title: title };
+	}
+
+	function appendGoogleSearchPreview(card, preview) {
+		const info = previewGoogleSearchInfo(preview);
+		const shell = document.createElement("div");
+		shell.className = "preview-card-google-shell";
+
+		const top = document.createElement("div");
+		top.className = "preview-card-google-top";
+		const logo = document.createElement("div");
+		logo.className = "preview-card-google-logo";
+		["G", "o", "o", "g", "l", "e"].forEach(function(letter, index) {
+			const span = document.createElement("span");
+			span.className = "preview-card-google-logo-letter is-" + index;
+			span.textContent = letter;
+			logo.appendChild(span);
+		});
+		top.appendChild(logo);
+		const badge = document.createElement("span");
+		badge.className = "preview-card-google-badge";
+		badge.textContent = info.mode;
+		top.appendChild(badge);
+		shell.appendChild(top);
+
+		const search = document.createElement("div");
+		search.className = "preview-card-google-search";
+		const query = document.createElement("div");
+		query.className = "preview-card-google-query";
+		query.textContent = info.query;
+		search.appendChild(query);
+		const icon = document.createElement("span");
+		icon.className = "preview-card-google-icon";
+		icon.textContent = "Search";
+		search.appendChild(icon);
+		shell.appendChild(search);
+
+		const tabs = document.createElement("div");
+		tabs.className = "preview-card-google-tabs";
+		["All", "Images", "News", "Videos", "Shopping"].forEach(function(tabName) {
+			const tab = document.createElement("span");
+			tab.className = "preview-card-google-tab" + (tabName === info.mode ? " is-active" : "");
+			tab.textContent = tabName;
+			tabs.appendChild(tab);
+		});
+		shell.appendChild(tabs);
+
+		const footer = document.createElement("div");
+		footer.className = "preview-card-google-footer";
+		const title = document.createElement("span");
+		title.className = "preview-card-google-title";
+		title.textContent = info.title;
+		footer.appendChild(title);
+		const action = document.createElement("span");
+		action.className = "preview-card-google-action";
+		action.textContent = (preview && preview.openLabel) || "Open on Google";
+		footer.appendChild(action);
+		shell.appendChild(footer);
+
+		card.appendChild(shell);
+	}
+
+	function previewIsSteam(preview, hostLabel) {
+		const metadata = (preview && preview.metadata) || {};
+		if (metadata.provider === "steam") {
+			return true;
+		}
+		const url = previewUrlObject(preview && preview.url);
+		const host = normalizedPreviewHost(url ? url.hostname : hostLabel);
+		return host === "store.steampowered.com" || host === "steamcommunity.com";
+	}
+
+	function previewSteamInfo(preview, descriptionText) {
+		const metadata = (preview && preview.metadata) || {};
+		const discount = Number(metadata.steamDiscountPercent || 0);
+		return {
+			appName: String(metadata.steamAppName || "").trim(),
+			price: String(metadata.steamPrice || "").trim(),
+			originalPrice: String(metadata.steamOriginalPrice || "").trim(),
+			discount: Number.isFinite(discount) && discount > 0 ? discount : 0,
+			developer: String(metadata.steamDeveloper || "").trim(),
+			releaseDate: String(metadata.steamReleaseDate || "").trim(),
+			platforms: String(metadata.steamPlatforms || "").trim(),
+			genres: String(metadata.steamGenres || "").trim(),
+			description: String(descriptionText || "").trim()
+		};
+	}
+
+	function previewSteamMediaItems(preview) {
+		const metadata = (preview && preview.metadata) || {};
+		const rawItems = Array.isArray(metadata.steamMediaItems) ? metadata.steamMediaItems : [];
+		const seen = {};
+		const items = [];
+		rawItems.forEach(function(rawItem) {
+			const item = rawItem || {};
+			const url = String(item.url || "").trim();
+			const kind = String(item.kind || "").trim().toLowerCase();
+			if (!url || seen[url] || (kind !== "image" && kind !== "video")) {
+				return;
+			}
+			seen[url] = true;
+			let mime = String(item.mime || "").trim().toLowerCase();
+			if (!mime) {
+				const path = url.split("?")[0].toLowerCase();
+				if (path.endsWith(".m3u8")) {
+					mime = "application/vnd.apple.mpegurl";
+				} else if (path.endsWith(".webm")) {
+					mime = "video/webm";
+				} else if (path.endsWith(".mp4") || path.endsWith(".m4v")) {
+					mime = "video/mp4";
+				} else if (kind === "image") {
+					mime = "image/jpeg";
+				}
+			}
+			items.push({
+				kind: kind,
+				url: url,
+				mime: mime,
+				title: String(item.title || "").trim(),
+				thumbnail: String(item.thumbnail || item.poster || "").trim(),
+				poster: String(item.poster || item.thumbnail || "").trim(),
+				streamKind: String(item.streamKind || "").trim().toLowerCase()
+			});
+		});
+		return items;
+	}
+
+	function steamHlsParseAttributes(value) {
+		const attrs = {};
+		String(value || "").replace(/([A-Z0-9-]+)=("[^"]*"|[^,]*)/ig, function(match, key, rawValue) {
+			let text = String(rawValue || "").trim();
+			if (text.charAt(0) === "\"" && text.charAt(text.length - 1) === "\"") {
+				text = text.slice(1, -1);
+			}
+			attrs[String(key || "").toUpperCase()] = text;
+			return match;
+		});
+		return attrs;
+	}
+
+	function steamHlsResolveUrl(baseUrl, path) {
+		return new URL(String(path || "").trim(), baseUrl).toString();
+	}
+
+	function steamHlsFetchText(url) {
+		return fetch(url, { mode: "cors", credentials: "omit" }).then(function(response) {
+			if (!response.ok) {
+				throw new Error("HTTP " + String(response.status));
+			}
+			return response.text();
+		});
+	}
+
+	function steamHlsVideoCodec(codecs) {
+		const parts = String(codecs || "").split(",").map(function(part) {
+			return part.trim();
+		});
+		return parts.find(function(part) {
+			return /^avc1\./i.test(part) || /^hvc1\./i.test(part) || /^hev1\./i.test(part);
+		}) || "avc1.640029";
+	}
+
+	function steamHlsAudioCodec(codecs) {
+		const parts = String(codecs || "").split(",").map(function(part) {
+			return part.trim();
+		});
+		return parts.find(function(part) {
+			return /^mp4a\./i.test(part);
+		}) || "mp4a.40.2";
+	}
+
+	function steamHlsParseMaster(text, masterUrl) {
+		const lines = String(text || "").split(/\r?\n/).map(function(line) {
+			return line.trim();
+		}).filter(Boolean);
+		const result = {
+			audioUrl: "",
+			variants: []
+		};
+		for (let index = 0; index < lines.length; index += 1) {
+			const line = lines[index];
+			if (line.indexOf("#EXT-X-MEDIA:") === 0) {
+				const attrs = steamHlsParseAttributes(line.slice("#EXT-X-MEDIA:".length));
+				if (String(attrs.TYPE || "").toUpperCase() === "AUDIO" && attrs.URI && !result.audioUrl) {
+					result.audioUrl = steamHlsResolveUrl(masterUrl, attrs.URI);
+				}
+			} else if (line.indexOf("#EXT-X-STREAM-INF:") === 0) {
+				const attrs = steamHlsParseAttributes(line.slice("#EXT-X-STREAM-INF:".length));
+				let nextLine = "";
+				for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
+					if (lines[nextIndex].charAt(0) !== "#") {
+						nextLine = lines[nextIndex];
+						index = nextIndex;
+						break;
+					}
+				}
+				if (nextLine) {
+					const resolution = String(attrs.RESOLUTION || "").toLowerCase().split("x");
+					result.variants.push({
+						url: steamHlsResolveUrl(masterUrl, nextLine),
+						bandwidth: Number(attrs.BANDWIDTH || 0) || 0,
+						width: Number(resolution[0] || 0) || 0,
+						height: Number(resolution[1] || 0) || 0,
+						codecs: String(attrs.CODECS || "")
+					});
+				}
+			}
+		}
+		return result;
+	}
+
+	function steamHlsChooseVariant(variants) {
+		const sorted = (variants || []).slice().sort(function(left, right) {
+			return (left.width || 0) - (right.width || 0)
+				|| (left.bandwidth || 0) - (right.bandwidth || 0);
+		});
+		const preferred = sorted.filter(function(item) {
+			return (item.width || 0) <= 1280;
+		}).pop();
+		return preferred || sorted[sorted.length - 1] || null;
+	}
+
+	function steamHlsParseMediaPlaylist(text, playlistUrl) {
+		const lines = String(text || "").split(/\r?\n/).map(function(line) {
+			return line.trim();
+		}).filter(Boolean);
+		const parsed = {
+			initUrl: "",
+			segments: [],
+			duration: 0
+		};
+		let pendingDuration = 0;
+		lines.forEach(function(line) {
+			if (line.indexOf("#EXT-X-MAP:") === 0) {
+				const attrs = steamHlsParseAttributes(line.slice("#EXT-X-MAP:".length));
+				if (attrs.URI) {
+					parsed.initUrl = steamHlsResolveUrl(playlistUrl, attrs.URI);
+				}
+			} else if (line.indexOf("#EXTINF:") === 0) {
+				pendingDuration = Number(line.slice("#EXTINF:".length).split(",")[0]) || 0;
+			} else if (line.charAt(0) !== "#") {
+				parsed.segments.push(steamHlsResolveUrl(playlistUrl, line));
+				parsed.duration += pendingDuration;
+				pendingDuration = 0;
+			}
+		});
+		return parsed;
+	}
+
+	function steamHlsAppendBuffer(sourceBuffer, buffer) {
+		return new Promise(function(resolve, reject) {
+			const cleanup = function() {
+				sourceBuffer.removeEventListener("updateend", onUpdateEnd);
+				sourceBuffer.removeEventListener("error", onError);
+			};
+			const onUpdateEnd = function() {
+				cleanup();
+				resolve();
+			};
+			const onError = function() {
+				cleanup();
+				reject(new Error("SourceBuffer append failed"));
+			};
+			sourceBuffer.addEventListener("updateend", onUpdateEnd);
+			sourceBuffer.addEventListener("error", onError);
+			sourceBuffer.appendBuffer(buffer);
+		});
+	}
+
+	function steamHlsAppendSegments(sourceBuffer, playlist) {
+		const urls = (playlist.initUrl ? [playlist.initUrl] : []).concat(playlist.segments || []);
+		return urls.reduce(function(chain, url) {
+			return chain.then(function() {
+				return fetch(url, { mode: "cors", credentials: "omit" });
+			}).then(function(response) {
+				if (!response.ok) {
+					throw new Error("HTTP " + String(response.status));
+				}
+				return response.arrayBuffer();
+			}).then(function(buffer) {
+				return steamHlsAppendBuffer(sourceBuffer, buffer);
+			});
+		}, Promise.resolve());
+	}
+
+	function createSteamHlsPlayableMedia(card, preview, item, extraClass) {
+		const media = document.createElement("div");
+		media.className = "preview-card-media preview-card-playback" + (extraClass ? " " + extraClass : "");
+		const mediaSourceCtor = window.MediaSource || window.ManagedMediaSource;
+		if (!mediaSourceCtor || !item.url) {
+			appendPreviewPlaybackFallback(media, preview, "Open in browser");
+			return media;
+		}
+
+		const video = document.createElement("video");
+		video.className = "preview-card-video";
+		video.controls = false;
+		video.loop = false;
+		const startMuted = !!(preview && preview.startMuted);
+		video.muted = startMuted;
+		video.defaultMuted = startMuted;
+		if (startMuted) {
+			video.volume = 0.75;
+		}
+		video.playsInline = true;
+		video.preload = "metadata";
+		if (preview.thumbnailUrl) {
+			video.poster = preview.thumbnailUrl;
+		}
+		video.setAttribute("aria-label", preview.title || preview.subtitle || "Steam trailer");
+		media.appendChild(video);
+
+		const mediaSource = new mediaSourceCtor();
+		let objectUrl = "";
+		let failed = false;
+		const showFallback = function() {
+			if (failed || media.querySelector(".preview-card-playback-note")) {
+				return;
+			}
+			failed = true;
+			const controls = media.querySelector(".preview-card-media-controls");
+			if (controls) {
+				controls.remove();
+			}
+			video.remove();
+			appendPreviewPlaybackFallback(media, preview, "Open in browser");
+			requestAnimationFrame(syncScrollState);
+		};
+
+		try {
+			objectUrl = URL.createObjectURL(mediaSource);
+			video.src = objectUrl;
+		} catch (error) {
+			showFallback();
+			return media;
+		}
+
+		mediaSource.addEventListener("sourceopen", function() {
+			steamHlsFetchText(item.url).then(function(masterText) {
+				const master = steamHlsParseMaster(masterText, item.url);
+				const variant = steamHlsChooseVariant(master.variants);
+				const videoPlaylistUrl = variant ? variant.url : item.url;
+				return Promise.all([
+					steamHlsFetchText(videoPlaylistUrl),
+					master.audioUrl ? steamHlsFetchText(master.audioUrl) : Promise.resolve("")
+				]).then(function(playlists) {
+					const videoPlaylist = steamHlsParseMediaPlaylist(playlists[0], videoPlaylistUrl);
+					const audioPlaylist = playlists[1] ? steamHlsParseMediaPlaylist(playlists[1], master.audioUrl) : null;
+					const videoType = "video/mp4; codecs=\"" + steamHlsVideoCodec(variant && variant.codecs) + "\"";
+					const audioType = "audio/mp4; codecs=\"" + steamHlsAudioCodec(variant && variant.codecs) + "\"";
+					if (!mediaSourceCtor.isTypeSupported(videoType) || !videoPlaylist.segments.length) {
+						throw new Error("Unsupported Steam HLS video stream");
+					}
+					const videoBuffer = mediaSource.addSourceBuffer(videoType);
+					const appenders = [steamHlsAppendSegments(videoBuffer, videoPlaylist)];
+					if (audioPlaylist && audioPlaylist.segments.length && mediaSourceCtor.isTypeSupported(audioType)) {
+						const audioBuffer = mediaSource.addSourceBuffer(audioType);
+						appenders.push(steamHlsAppendSegments(audioBuffer, audioPlaylist));
+					}
+					mediaSource.duration = Math.max(videoPlaylist.duration || 0,
+						audioPlaylist ? audioPlaylist.duration || 0 : 0);
+					return Promise.all(appenders);
+				});
+			}).then(function() {
+				if (mediaSource.readyState === "open") {
+					mediaSource.endOfStream();
+				}
+			}).catch(function(error) {
+				console.warn("Steam trailer HLS playback failed", error && error.message ? error.message : error);
+				showFallback();
+			});
+		}, { once: true });
+
+		video.addEventListener("error", function() {
+			if (!failed) {
+				console.warn("Steam trailer video element failed", item.mime, item.url);
+				showFallback();
+			}
+		}, { once: true });
+		video.addEventListener("emptied", function() {
+			if (objectUrl) {
+				URL.revokeObjectURL(objectUrl);
+				objectUrl = "";
+			}
+		}, { once: true });
+		media.addEventListener("click", function(event) {
+			event.stopPropagation();
+			if (event.defaultPrevented || event.detail > 1
+				|| event.target.closest(".preview-card-media-controls")) {
+				return;
+			}
+			event.preventDefault();
+			togglePreviewVideoPlayback(video, media.querySelector(".preview-card-media-controls"));
+		});
+		appendPreviewMediaControls(card, media, video);
+		media.addEventListener("dblclick", function(event) {
+			event.preventDefault();
+			event.stopPropagation();
+			setPreviewCardSize(card, previewCardSizeKey(card) === "large" ? "default" : "large");
+		});
+		return media;
+	}
+
+	function appendSteamMediaGallery(card, shell, preview, mediaItems) {
+		const gallery = document.createElement("div");
+		gallery.className = "preview-card-steam-gallery";
+		gallery.tabIndex = 0;
+		gallery.addEventListener("click", function(event) {
+			event.stopPropagation();
+		});
+
+		const stage = document.createElement("div");
+		stage.className = "preview-card-steam-stage";
+		gallery.appendChild(stage);
+
+		const previousButton = document.createElement("button");
+		previousButton.type = "button";
+		previousButton.className = "preview-card-carousel-button preview-card-carousel-previous preview-card-steam-gallery-previous";
+		previousButton.textContent = "<";
+		previousButton.setAttribute("aria-label", "Previous Steam media");
+		stage.appendChild(previousButton);
+
+		const nextButton = document.createElement("button");
+		nextButton.type = "button";
+		nextButton.className = "preview-card-carousel-button preview-card-carousel-next preview-card-steam-gallery-next";
+		nextButton.textContent = ">";
+		nextButton.setAttribute("aria-label", "Next Steam media");
+		stage.appendChild(nextButton);
+
+		const rail = document.createElement("div");
+		rail.className = "preview-card-steam-thumbnails";
+		const thumbButtons = mediaItems.map(function(item, itemIndex) {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "preview-card-steam-thumbnail";
+			button.setAttribute("aria-label", (item.kind === "video" ? "Show trailer " : "Show screenshot ")
+				+ String(itemIndex + 1));
+			const imageUrl = item.thumbnail || item.poster || (item.kind === "image" ? item.url : "");
+			if (imageUrl) {
+				const image = document.createElement("img");
+				image.className = "preview-card-steam-thumbnail-image";
+				image.loading = "lazy";
+				image.src = imageUrl;
+				image.alt = item.title || (item.kind === "video" ? "Steam trailer" : "Steam screenshot");
+				button.appendChild(image);
+			} else {
+				const placeholder = document.createElement("span");
+				placeholder.className = "preview-card-steam-thumbnail-placeholder";
+				placeholder.textContent = item.kind === "video" ? "VID" : "IMG";
+				button.appendChild(placeholder);
+			}
+			if (item.kind === "video") {
+				const playMark = document.createElement("span");
+				playMark.className = "preview-card-steam-thumbnail-play";
+				playMark.textContent = "Play";
+				button.appendChild(playMark);
+			}
+			button.addEventListener("click", function(event) {
+				event.preventDefault();
+				event.stopPropagation();
+				setIndex(itemIndex);
+			});
+			rail.appendChild(button);
+			return button;
+		});
+		gallery.appendChild(rail);
+
+		let index = 0;
+		const renderItem = function() {
+			const activeVideo = stage.querySelector("video");
+			if (activeVideo) {
+				activeVideo.pause();
+			}
+			Array.prototype.slice.call(stage.children).forEach(function(child) {
+				if (child !== previousButton && child !== nextButton) {
+					stage.removeChild(child);
+				}
+			});
+
+			const item = mediaItems[index];
+			stage.classList.toggle("is-video", item.kind === "video");
+			stage.classList.toggle("is-image", item.kind !== "video");
+			if (item.kind === "video") {
+				const mediaPreview = Object.assign({}, preview || {}, {
+					title: item.title || (preview && preview.title) || "Steam trailer",
+					thumbnailUrl: item.poster || item.thumbnail || (preview && preview.thumbnailUrl) || "",
+					autoplay: false,
+					startMuted: true
+				});
+				const playable = item.streamKind === "hls"
+					? createSteamHlsPlayableMedia(card, mediaPreview, item, "preview-card-steam-stage-player")
+					: createPreviewPlayableMedia(card, mediaPreview, item.url, item.mime, "", "", true, false,
+						previewVideoCanPlayInline(item.mime, item.url), "preview-card-steam-stage-player");
+				stage.insertBefore(playable, previousButton);
+			} else {
+				const image = document.createElement("img");
+				image.className = "preview-card-steam-stage-image";
+				image.loading = "lazy";
+				image.src = item.url;
+				image.alt = item.title || (preview && preview.title) || "Steam screenshot";
+				image.addEventListener("load", function() {
+					requestAnimationFrame(syncScrollState);
+				}, { once: true });
+				stage.insertBefore(image, previousButton);
+			}
+
+			thumbButtons.forEach(function(button, buttonIndex) {
+				const active = buttonIndex === index;
+				button.classList.toggle("is-active", active);
+				button.setAttribute("aria-current", active ? "true" : "false");
+				if (active && typeof button.scrollIntoView === "function") {
+					button.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+				}
+			});
+			requestAnimationFrame(syncScrollState);
+		};
+		const setIndex = function(nextIndex) {
+			index = (nextIndex + mediaItems.length) % mediaItems.length;
+			renderItem();
+		};
+		const step = function(delta, event) {
+			if (event) {
+				event.preventDefault();
+				event.stopPropagation();
+			}
+			setIndex(index + delta);
+		};
+
+		previousButton.addEventListener("click", function(event) {
+			step(-1, event);
+		});
+		nextButton.addEventListener("click", function(event) {
+			step(1, event);
+		});
+		gallery.addEventListener("keydown", function(event) {
+			if (event.key === "ArrowLeft") {
+				step(-1, event);
+			} else if (event.key === "ArrowRight") {
+				step(1, event);
+			}
+		});
+
+		renderItem();
+		shell.appendChild(gallery);
+		return gallery;
+	}
+
+	function appendSteamPreview(card, preview, hostLabel, sourceLabel, descriptionText, mediaItems) {
+		const info = previewSteamInfo(preview, descriptionText);
+		const shell = document.createElement("div");
+		shell.className = "preview-card-steam-shell";
+
+		const galleryItems = Array.isArray(mediaItems) ? mediaItems : previewSteamMediaItems(preview);
+		const imageUrl = String(preview.thumbnailUrl
+			|| ((preview.metadata && (preview.metadata.steamHeaderImage || preview.metadata.steamCapsuleImage)) || ""))
+			.trim();
+		if (galleryItems.length) {
+			appendSteamMediaGallery(card, shell, preview, galleryItems);
+		} else if (imageUrl) {
+			const media = document.createElement("div");
+			media.className = "preview-card-steam-media";
+			const image = document.createElement("img");
+			image.className = "preview-card-steam-image";
+			image.loading = "lazy";
+			image.src = imageUrl;
+			image.alt = preview.title || info.appName || "Steam preview";
+			media.appendChild(image);
+			shell.appendChild(media);
+		}
+
+		const body = document.createElement("div");
+		body.className = "preview-card-steam-body";
+
+		const meta = document.createElement("div");
+		meta.className = "preview-card-steam-meta";
+		const source = document.createElement("span");
+		source.className = "preview-card-steam-source";
+		source.textContent = sourceLabel || "Steam";
+		meta.appendChild(source);
+
+		const metaActions = document.createElement("div");
+		metaActions.className = "preview-card-steam-meta-actions";
+		appendPreviewCardSizeButton(card, metaActions);
+		const host = document.createElement("span");
+		host.className = "preview-card-steam-host";
+		host.textContent = hostLabel || "store.steampowered.com";
+		metaActions.appendChild(host);
+		meta.appendChild(metaActions);
+		body.appendChild(meta);
+
+		const title = document.createElement("div");
+		title.className = "preview-card-steam-title";
+		title.textContent = preview.title || info.appName || "Steam";
+		body.appendChild(title);
+
+		if (info.description) {
+			const description = document.createElement("div");
+			description.className = "preview-card-steam-description";
+			description.textContent = info.description;
+			body.appendChild(description);
+		}
+
+		if (info.appName || info.price || info.developer || info.releaseDate || info.platforms) {
+			const product = document.createElement("div");
+			product.className = "preview-card-steam-product";
+
+			const productText = document.createElement("div");
+			productText.className = "preview-card-steam-product-text";
+			const productName = document.createElement("div");
+			productName.className = "preview-card-steam-product-name";
+			productName.textContent = info.appName || "Steam app";
+			productText.appendChild(productName);
+			const detailParts = [info.developer, info.releaseDate, info.platforms || info.genres].filter(Boolean);
+			if (detailParts.length) {
+				const productDetail = document.createElement("div");
+				productDetail.className = "preview-card-steam-product-detail";
+				productDetail.textContent = detailParts.join(" / ");
+				productText.appendChild(productDetail);
+			}
+			product.appendChild(productText);
+
+			const purchase = document.createElement("div");
+			purchase.className = "preview-card-steam-purchase";
+			if (info.price || info.discount) {
+				const price = document.createElement("div");
+				price.className = "preview-card-steam-price";
+				if (info.discount) {
+					const discount = document.createElement("span");
+					discount.className = "preview-card-steam-discount";
+					discount.textContent = "-" + String(info.discount) + "%";
+					price.appendChild(discount);
+				}
+				const priceStack = document.createElement("span");
+				priceStack.className = "preview-card-steam-price-stack";
+				if (info.originalPrice && info.originalPrice !== info.price) {
+					const original = document.createElement("span");
+					original.className = "preview-card-steam-price-original";
+					original.textContent = info.originalPrice;
+					priceStack.appendChild(original);
+				}
+				const finalPrice = document.createElement("span");
+				finalPrice.className = "preview-card-steam-price-final";
+				finalPrice.textContent = info.price || "On Steam";
+				priceStack.appendChild(finalPrice);
+				price.appendChild(priceStack);
+				purchase.appendChild(price);
+			}
+			const cart = document.createElement("span");
+			cart.className = "preview-card-steam-cart";
+			cart.setAttribute("aria-hidden", "true");
+			cart.appendChild(createPreviewCartIcon("preview-card-steam-cart-icon"));
+			const cartLabel = document.createElement("span");
+			cartLabel.className = "preview-card-steam-cart-label";
+			cartLabel.textContent = info.price ? "Cart" : "Open";
+			cart.appendChild(cartLabel);
+			purchase.appendChild(cart);
+			product.appendChild(purchase);
+
+			body.appendChild(product);
+		}
+
+		const footer = document.createElement("div");
+		footer.className = "preview-card-steam-footer";
+		const action = document.createElement("span");
+		action.className = "preview-card-steam-action";
+		action.textContent = (preview && preview.openLabel) || "Open on Steam";
+		footer.appendChild(action);
+		body.appendChild(footer);
+
+		shell.appendChild(body);
+		card.appendChild(shell);
+	}
+
+	const previewGameStoreLabels = {
+		g2a: "G2A",
+		kinguin: "Kinguin",
+		epic: "Epic Games Store",
+		gog: "GOG",
+		ubisoft: "Ubisoft Store",
+		ea: "EA",
+		humble: "Humble Store",
+		fanatical: "Fanatical",
+		greenmangaming: "Green Man Gaming",
+		itch: "itch.io",
+		battlenet: "Battle.net",
+		xbox: "Xbox Store"
+	};
+
+	const richPreviewProviderSpecs = [
+		{ provider: "tradera", kind: "marketplaceListing", label: "Tradera", mark: "T", hostSuffixes: ["tradera.com"] },
+		{ provider: "blocket", kind: "marketplaceListing", label: "Blocket", mark: "B", hostSuffixes: ["blocket.se"] },
+		{ provider: "flashback", kind: "forum", label: "Flashback", mark: "FB", hostSuffixes: ["flashback.org"] },
+		{ provider: "sweclockers", kind: "article", label: "SweClockers", mark: "SC", hostSuffixes: ["sweclockers.com"] },
+		{ provider: "existenz", kind: "linkDigest", label: "Existenz", mark: "E", hostSuffixes: ["existenz.se"] },
+		{ provider: "hemnet", kind: "realEstate", label: "Hemnet", mark: "H", hostSuffixes: ["hemnet.se"] },
+		{ provider: "booli", kind: "realEstate", label: "Booli", mark: "B", hostSuffixes: ["booli.se"] },
+		{ provider: "prisjakt", kind: "product", label: "Prisjakt", mark: "PJ", hostSuffixes: ["prisjakt.nu", "prisjakt.se"] },
+		{ provider: "pricerunner", kind: "product", label: "PriceRunner", mark: "PR", hostSuffixes: ["pricerunner.se", "pricerunner.com"] },
+		{ provider: "gp", kind: "article", label: "GP", mark: "GP", hostSuffixes: ["gp.se"] },
+		{ provider: "svt", kind: "article", label: "SVT", mark: "SVT", hostSuffixes: ["svt.se"] },
+		{ provider: "omni", kind: "article", label: "Omni", mark: "O", hostSuffixes: ["omni.se"] },
+		{ provider: "aftonbladet", kind: "article", label: "Aftonbladet", mark: "AB", hostSuffixes: ["aftonbladet.se"] },
+		{ provider: "expressen", kind: "article", label: "Expressen", mark: "EX", hostSuffixes: ["expressen.se"] },
+		{ provider: "dn", kind: "article", label: "DN", mark: "DN", hostSuffixes: ["dn.se"] },
+		{ provider: "sverigesradio", kind: "audio", label: "Sveriges Radio", mark: "SR", hostSuffixes: ["sverigesradio.se", "sr.se"] },
+		{ provider: "inet", kind: "product", label: "Inet", mark: "I", hostSuffixes: ["inet.se"] },
+		{ provider: "webhallen", kind: "product", label: "Webhallen", mark: "W", hostSuffixes: ["webhallen.com"] },
+		{ provider: "elgiganten", kind: "product", label: "Elgiganten", mark: "E", hostSuffixes: ["elgiganten.se"] },
+		{ provider: "komplett", kind: "product", label: "Komplett", mark: "K", hostSuffixes: ["komplett.se"] },
+		{ provider: "systembolaget", kind: "systembolagetProduct", label: "Systembolaget", mark: "SB", hostSuffixes: ["systembolaget.se"] },
+		{ provider: "smhi", kind: "weather", label: "SMHI", mark: "SMHI", hostSuffixes: ["smhi.se"] },
+		{ provider: "klart", kind: "weather", label: "Klart", mark: "K", hostSuffixes: ["klart.se"] },
+		{ provider: "yr", kind: "weather", label: "Yr", mark: "YR", hostSuffixes: ["yr.no"] },
+		{ provider: "hitta", kind: "place", label: "Hitta", mark: "H", hostSuffixes: ["hitta.se"] },
+		{ provider: "eniro", kind: "place", label: "Eniro", mark: "E", hostSuffixes: ["eniro.se"] },
+		{ provider: "googlemaps", kind: "place", label: "Google Maps", mark: "G", hostSuffixes: ["maps.google.com", "maps.app.goo.gl"] },
+		{ provider: "sj", kind: "traffic", label: "SJ", mark: "SJ", hostSuffixes: ["sj.se"] },
+		{ provider: "sl", kind: "traffic", label: "SL", mark: "SL", hostSuffixes: ["sl.se"] },
+		{ provider: "vasttrafik", kind: "traffic", label: "V\u00e4sttrafik", mark: "V", hostSuffixes: ["vasttrafik.se"] },
+		{ provider: "amazon", kind: "product", label: "Amazon", mark: "A", hostSuffixes: [
+			"amazon.se", "amazon.com", "amazon.de", "amazon.co.uk", "amazon.fr", "amazon.it", "amazon.es",
+			"amazon.nl", "amazon.pl"
+		] }
+	];
+
+	function previewHostMatchesSuffix(host, suffix) {
+		return host === suffix || host.endsWith("." + suffix);
+	}
+
+	function previewProviderSpec(preview, hostLabel) {
+		const metadata = (preview && preview.metadata) || {};
+		const metadataProvider = String(metadata.previewProvider || metadata.provider || metadata.marketplaceProvider || "")
+			.trim()
+			.toLowerCase();
+		const metadataKind = String(metadata.previewKind || metadata.swedishPreviewKind || "").trim();
+		const url = previewUrlObject(preview && preview.url);
+		const host = normalizedPreviewHost(url ? url.hostname : hostLabel);
+		const path = String((url && url.pathname) || "").toLowerCase();
+
+		let spec = richPreviewProviderSpecs.find(function(item) {
+			return item.provider === metadataProvider;
+		}) || null;
+		if (!spec) {
+			spec = richPreviewProviderSpecs.find(function(item) {
+				if (item.provider === "googlemaps") {
+					return (host.indexOf("google.") === 0 && path.indexOf("/maps") === 0)
+						|| host.indexOf("maps.google.") === 0
+						|| previewHostMatchesSuffix(host, "maps.app.goo.gl");
+				}
+				return item.hostSuffixes.some(function(suffix) {
+					return previewHostMatchesSuffix(host, suffix);
+				});
+			}) || null;
+		}
+		if (!spec) {
+			return null;
+		}
+
+		const resolved = Object.assign({}, spec);
+		if (metadataKind) {
+			resolved.kind = metadataKind;
+		}
+		if (resolved.provider === "sweclockers" && /\/forum(?:\/|$)/i.test(path)) {
+			resolved.kind = "forum";
+		}
+		return resolved;
+	}
+
+	function previewGameStoreKind(preview, hostLabel) {
+		const metadata = (preview && preview.metadata) || {};
+		const provider = String(metadata.provider || "").trim().toLowerCase();
+		const metadataKind = previewClassToken(metadata.gameStoreProvider || metadata.gameStoreName);
+		if (provider === "game-store" && metadataKind) {
+			return metadataKind;
+		}
+
+		const url = previewUrlObject(preview && preview.url);
+		const host = normalizedPreviewHost(url ? url.hostname : hostLabel);
+		const path = String(url && url.pathname || "").toLowerCase();
+		if (host === "store.steampowered.com" || host === "steamcommunity.com") {
+			return "";
+		}
+		if (host === "g2a.com" || host.endsWith(".g2a.com")) {
+			return "g2a";
+		}
+		if (host === "kinguin.net" || host.endsWith(".kinguin.net")
+			|| host === "kinguin.com" || host.endsWith(".kinguin.com")) {
+			return "kinguin";
+		}
+		if (host === "store.epicgames.com" || host === "store.epic.com") {
+			return "epic";
+		}
+		if (host === "gog.com" || host.endsWith(".gog.com")) {
+			return "gog";
+		}
+		if (host === "store.ubisoft.com" || host === "store.ubi.com"
+			|| ((host === "ubisoft.com" || host.endsWith(".ubisoft.com")) && path.indexOf("/game") === 0)) {
+			return "ubisoft";
+		}
+		if ((host === "ea.com" || host.endsWith(".ea.com")) && path.indexOf("/games") === 0) {
+			return "ea";
+		}
+		if ((host === "humblebundle.com" || host.endsWith(".humblebundle.com")) && path.indexOf("/store") === 0) {
+			return "humble";
+		}
+		if (host === "fanatical.com" || host.endsWith(".fanatical.com")) {
+			return "fanatical";
+		}
+		if (host === "greenmangaming.com" || host.endsWith(".greenmangaming.com")) {
+			return "greenmangaming";
+		}
+		if (host === "itch.io" || host.endsWith(".itch.io")) {
+			return "itch";
+		}
+		if (host === "shop.battle.net" || host === "battle.net" || host.endsWith(".battle.net")) {
+			return "battlenet";
+		}
+		if ((host === "xbox.com" || host.endsWith(".xbox.com")) && path.indexOf("/store") >= 0) {
+			return "xbox";
+		}
+		return "";
+	}
+
+	function previewGameStoreInfo(preview, kind, hostLabel, sourceLabel, descriptionText) {
+		const metadata = (preview && preview.metadata) || {};
+		const label = String(metadata.gameStoreName || previewGameStoreLabels[kind] || sourceLabel || hostLabel || "Store")
+			.trim();
+		const title = previewMetadataString(metadata, ["gameStoreProductTitle"])
+			|| String((preview && preview.title) || "").trim()
+			|| label;
+		const description = previewMetadataString(metadata, ["gameStoreDescription"])
+			|| String(descriptionText || "").trim();
+		const platform = previewMetadataString(metadata, ["gameStorePlatform"]);
+		const availability = previewMetadataString(metadata, ["gameStoreAvailability"]);
+		const rating = previewMetadataString(metadata, ["gameStoreRating"]);
+		const reviewCount = previewMetadataString(metadata, ["gameStoreReviewCount"]);
+		const brand = previewMetadataString(metadata, ["gameStoreBrand"]);
+		const sku = previewMetadataString(metadata, ["gameStoreSku"]);
+		const detail = [platform, availability].filter(Boolean).join(" / ") || brand || label;
+		const chips = [];
+		[platform, availability, rating, reviewCount ? reviewCount + " reviews" : "", brand, sku ? "SKU " + sku : ""]
+			.forEach(function(value) {
+				const text = String(value || "").trim();
+				if (text && chips.indexOf(text) < 0) {
+					chips.push(text);
+				}
+			});
+		return {
+			kind: kind,
+			label: label,
+			host: hostLabel || label,
+			title: title,
+			description: description,
+			detail: detail,
+			chips: chips.slice(0, 5),
+			price: previewMetadataString(metadata, ["gameStorePrice", "listingPrice"]),
+			originalPrice: previewMetadataString(metadata, ["gameStoreOriginalPrice", "listingOriginalPrice"]),
+			discount: previewMetadataString(metadata, ["gameStoreDiscount", "listingDiscount"])
+		};
+	}
+
+	function appendGameStoreChip(parent, value) {
+		const text = String(value || "").trim();
+		if (!text) {
+			return;
+		}
+		const chip = document.createElement("span");
+		chip.className = "preview-card-store-chip";
+		chip.textContent = text;
+		parent.appendChild(chip);
+	}
+
+	function appendGameStorePreview(card, preview, kind, hostLabel, sourceLabel, descriptionText) {
+		const info = previewGameStoreInfo(preview, kind, hostLabel, sourceLabel, descriptionText);
+		const metadata = (preview && preview.metadata) || {};
+		const shell = document.createElement("div");
+		shell.className = "preview-card-store-shell";
+
+		const imageUrl = String(preview.thumbnailUrl || metadata.gameStoreImage || "").trim();
+		if (imageUrl) {
+			const media = document.createElement("div");
+			media.className = "preview-card-store-media";
+			const image = document.createElement("img");
+			image.className = "preview-card-store-image";
+			image.loading = "lazy";
+			image.src = imageUrl;
+			image.alt = info.title || info.label;
+			media.appendChild(image);
+			shell.appendChild(media);
+		}
+
+		const body = document.createElement("div");
+		body.className = "preview-card-store-body";
+
+		const meta = document.createElement("div");
+		meta.className = "preview-card-store-meta";
+		const source = document.createElement("span");
+		source.className = "preview-card-store-source";
+		source.textContent = info.label;
+		meta.appendChild(source);
+		const host = document.createElement("span");
+		host.className = "preview-card-store-host";
+		host.textContent = info.host;
+		meta.appendChild(host);
+		body.appendChild(meta);
+
+		const title = document.createElement("div");
+		title.className = "preview-card-store-title";
+		title.textContent = info.title;
+		body.appendChild(title);
+
+		if (info.description) {
+			const description = document.createElement("div");
+			description.className = "preview-card-store-description";
+			description.textContent = info.description;
+			body.appendChild(description);
+		}
+
+		if (info.chips.length) {
+			const chips = document.createElement("div");
+			chips.className = "preview-card-store-chips";
+			info.chips.forEach(function(chip) {
+				appendGameStoreChip(chips, chip);
+			});
+			body.appendChild(chips);
+		}
+
+		const product = document.createElement("div");
+		product.className = "preview-card-store-product";
+		const productText = document.createElement("div");
+		productText.className = "preview-card-store-product-text";
+		const productName = document.createElement("div");
+		productName.className = "preview-card-store-product-name";
+		productName.textContent = info.title;
+		productText.appendChild(productName);
+		const productDetail = document.createElement("div");
+		productDetail.className = "preview-card-store-product-detail";
+		productDetail.textContent = info.detail;
+		productText.appendChild(productDetail);
+		product.appendChild(productText);
+
+		const purchase = document.createElement("div");
+		purchase.className = "preview-card-store-purchase";
+		if (info.price || info.discount) {
+			const price = document.createElement("div");
+			price.className = "preview-card-store-price";
+			if (info.discount) {
+				const discount = document.createElement("span");
+				discount.className = "preview-card-store-discount";
+				discount.textContent = info.discount.charAt(0) === "-" ? info.discount : "-" + info.discount;
+				price.appendChild(discount);
+			}
+			const priceStack = document.createElement("span");
+			priceStack.className = "preview-card-store-price-stack";
+			if (info.originalPrice && info.originalPrice !== info.price) {
+				const original = document.createElement("span");
+				original.className = "preview-card-store-price-original";
+				original.textContent = info.originalPrice;
+				priceStack.appendChild(original);
+			}
+			const finalPrice = document.createElement("span");
+			finalPrice.className = "preview-card-store-price-final";
+			finalPrice.textContent = info.price || "On store";
+			priceStack.appendChild(finalPrice);
+			price.appendChild(priceStack);
+			purchase.appendChild(price);
+		}
+		const cart = document.createElement("span");
+		cart.className = "preview-card-store-cart";
+		cart.setAttribute("aria-hidden", "true");
+		cart.appendChild(createPreviewCartIcon("preview-card-store-cart-icon"));
+		const cartLabel = document.createElement("span");
+		cartLabel.className = "preview-card-store-cart-label";
+		cartLabel.textContent = /^free$/i.test(info.price) ? "Get" : (info.price ? "Cart" : "Open");
+		cart.appendChild(cartLabel);
+		purchase.appendChild(cart);
+		product.appendChild(purchase);
+		body.appendChild(product);
+
+		const footer = document.createElement("div");
+		footer.className = "preview-card-store-footer";
+		const action = document.createElement("span");
+		action.className = "preview-card-store-action";
+		action.textContent = (preview && preview.openLabel) || ("Open on " + info.label);
+		footer.appendChild(action);
+		body.appendChild(footer);
+
+		shell.appendChild(body);
+		card.appendChild(shell);
+	}
+
+	function previewSwedishSiteKind(preview, hostLabel) {
+		const spec = previewProviderSpec(preview, hostLabel);
+		return spec && (spec.provider === "tradera" || spec.provider === "blocket" || spec.provider === "flashback")
+			? spec.provider
+			: "";
+	}
+
+	function previewEscapeRegExp(value) {
+		return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	}
+
+	function previewMetadataString(metadata, keys) {
+		for (let index = 0; index < keys.length; index += 1) {
+			const value = String((metadata && metadata[keys[index]]) || "").trim();
+			if (value) {
+				return value;
+			}
+		}
+		return "";
+	}
+
+	function previewLabelValue(text, labels) {
+		const normalized = String(text || "").replace(/\s+/g, " ").trim();
+		if (!normalized) {
+			return "";
+		}
+		for (let index = 0; index < labels.length; index += 1) {
+			const pattern = new RegExp("(?:^|[.;]\\s*)" + previewEscapeRegExp(labels[index])
+				+ "\\s*:\\s*([^.;]+)", "i");
+			const match = pattern.exec(normalized);
+			if (match && match[1]) {
+				return match[1].trim();
+			}
+		}
+		return "";
+	}
+
+	function previewCleanMarketplaceTitle(rawTitle, kind) {
+		let title = String(rawTitle || "").replace(/\s+/g, " ").trim();
+		title = title.replace(/\s*[|-]\s*(?:Blocket(?:\.se)?|Tradera)\s*$/i, "").trim();
+		if (kind === "tradera") {
+			title = title
+				.replace(/^Se produkter som liknar\s+/i, "")
+				.replace(/\s+p\u00e5\s+Tradera(?:\s+\([^)]+\))?$/i, "")
+				.trim();
+		}
+		return title;
+	}
+
+	function previewCleanMarketplaceDescription(descriptionText, kind, title) {
+		let description = String(descriptionText || "").replace(/\s+/g, " ").trim();
+		if (!description) {
+			return "";
+		}
+
+		const labels = kind === "tradera"
+			? ["Utropspris", "K\u00f6p nu", "Pris", "Typ", "Slutar", "Skick"]
+			: ["Pris"];
+		labels.forEach(function(label) {
+			const pattern = new RegExp("(^|[.;]\\s*)" + previewEscapeRegExp(label)
+				+ "\\s*:\\s*[^.;]+[.;]?", "ig");
+			description = description.replace(pattern, "$1");
+		});
+		description = description.replace(/\s*\.\s*/g, ". ").replace(/^\.\s*/, "").trim();
+		if (description === "." || description.toLowerCase() === String(title || "").toLowerCase()) {
+			return "";
+		}
+		return description;
+	}
+
+	function previewLastNumericPathSegment(preview, minDigits, maxDigits) {
+		const url = previewUrlObject(preview && preview.url);
+		if (!url) {
+			return "";
+		}
+		const pattern = new RegExp("/([0-9]{" + String(minDigits) + "," + String(maxDigits) + "})(?=/|$)", "g");
+		let match = null;
+		let value = "";
+		while ((match = pattern.exec(url.pathname)) !== null) {
+			value = match[1];
+		}
+		return value;
+	}
+
+	function previewFlashbackThreadId(preview) {
+		const metadata = (preview && preview.metadata) || {};
+		const metadataId = String(metadata.threadId || "").trim();
+		if (metadataId) {
+			return metadataId;
+		}
+		const url = previewUrlObject(preview && preview.url);
+		if (!url) {
+			return "";
+		}
+		const match = /\/t([0-9]{3,14})(?:p[0-9]+)?(?:\/|$)/i.exec(url.pathname);
+		return match ? match[1] : "";
+	}
+
+	function previewFlashbackPostId(preview) {
+		const metadata = (preview && preview.metadata) || {};
+		const metadataId = previewMetadataString(metadata, ["forumPostId", "forumLinkedPostId", "postId"]);
+		if (metadataId) {
+			return metadataId;
+		}
+		const url = previewUrlObject(preview && preview.url);
+		if (!url) {
+			return "";
+		}
+		const pathMatch = /\/s?p([0-9]{3,14})(?:\/|$)/i.exec(url.pathname);
+		if (pathMatch) {
+			return pathMatch[1];
+		}
+		const queryPost = String(url.searchParams.get("p") || "").trim();
+		if (/^[0-9]{3,14}$/.test(queryPost)) {
+			return queryPost;
+		}
+		const fragmentMatch = /^p?([0-9]{3,14})$/i.exec(String(url.hash || "").replace(/^#/, ""));
+		return fragmentMatch ? fragmentMatch[1] : "";
+	}
+
+	function previewCleanFlashbackTitle(rawTitle) {
+		let title = String(rawTitle || "").replace(/\s+/g, " ").trim();
+		title = title
+			.replace(/^Flashback Forum\s*-\s*Visa ett inl\u00e4gg\s*-\s*/i, "")
+			.replace(/\s*-\s*Flashback Forum\s*$/i, "")
+			.replace(/^\u00c4mne:\s*/i, "")
+			.trim();
+		return title;
+	}
+
+	function previewFlashbackDescriptionFallback(descriptionText, title, forumName, category) {
+		let description = String(descriptionText || "").replace(/\s+/g, " ").trim();
+		if (!description) {
+			return "";
+		}
+		const lowerTitle = String(title || "").trim().toLowerCase();
+		const lowerForum = String(forumName || "").trim().toLowerCase();
+		const lowerCategory = String(category || "").trim().toLowerCase();
+		const lowerDescription = description.toLowerCase();
+		if (lowerDescription === lowerTitle || lowerDescription === lowerForum || lowerDescription === lowerCategory) {
+			return "";
+		}
+		if (lowerTitle && lowerDescription.indexOf(lowerTitle) === 0) {
+			description = description.slice(title.length).replace(/^[-:\s]+/, "").trim();
+		}
+		const lowerRemainder = description.toLowerCase();
+		if (!description || lowerRemainder === lowerForum || lowerRemainder === lowerCategory) {
+			return "";
+		}
+		return description;
+	}
+
+	function previewFlashbackInfo(preview, hostLabel, sourceLabel, descriptionText) {
+		const metadata = (preview && preview.metadata) || {};
+		const threadId = previewFlashbackThreadId(preview);
+		const postId = previewFlashbackPostId(preview);
+		const linkKind = previewMetadataString(metadata, ["forumLinkKind"]);
+		const isPostLink = linkKind === "post" || !!postId;
+		const title = previewCleanFlashbackTitle(
+			previewMetadataString(metadata, ["forumThreadTitle"]) || (preview && preview.title) || "")
+			|| previewCleanMarketplaceTitle((preview && preview.title) || "", "flashback")
+			|| "Flashback thread";
+		const category = previewMetadataString(metadata, ["forumCategory"]);
+		const forumName = previewMetadataString(metadata, ["forumName"])
+			|| previewFlashbackDescriptionFallback(descriptionText, title, "", category);
+		const page = previewMetadataString(metadata, ["forumPage"]) || "1";
+		const pageCount = previewMetadataString(metadata, ["forumPageCount"]);
+		const postCount = previewMetadataString(metadata, ["forumPostCount"]);
+		const author = previewMetadataString(metadata, ["forumPostAuthor", "forumFirstPostAuthor"]);
+		const authorTitle = previewMetadataString(metadata, ["forumPostAuthorTitle", "forumFirstPostAuthorTitle"]);
+		const authorRegistered = previewMetadataString(metadata,
+			["forumPostAuthorRegistered", "forumFirstPostAuthorRegistered"]);
+		const authorPosts = previewMetadataString(metadata, ["forumPostAuthorPosts", "forumFirstPostAuthorPosts"]);
+		const postTime = previewMetadataString(metadata, ["forumPostTime", "forumFirstPostTime"]);
+		const postNumber = previewMetadataString(metadata, ["forumPostNumber", "forumFirstPostNumber"])
+			|| (isPostLink ? "" : "1");
+		const excerpt = previewMetadataString(metadata, ["forumPostExcerpt", "forumFirstPostExcerpt"])
+			|| previewFlashbackDescriptionFallback(descriptionText, title, forumName, category);
+		const quoteAuthor = previewMetadataString(metadata, ["forumQuoteAuthor"]);
+		const quoteExcerpt = previewMetadataString(metadata, ["forumQuoteExcerpt"]);
+		return {
+			threadId: threadId,
+			postId: postId,
+			isPostLink: isPostLink,
+			title: title,
+			category: category,
+			forumName: forumName,
+			pageLabel: pageCount ? ("Sidan " + page + " av " + pageCount) : (page ? "Sidan " + page : ""),
+			postCountLabel: postCount ? (postCount + " inl\u00e4gg") : "",
+			postLinkLabel: isPostLink && postNumber ? ("Svar #" + postNumber) : "",
+			author: author,
+			authorTitle: authorTitle,
+			authorRegistered: authorRegistered,
+			authorPosts: authorPosts,
+			postTime: postTime,
+			postNumber: postNumber,
+			quoteAuthor: quoteAuthor,
+			quoteExcerpt: quoteExcerpt,
+			excerpt: excerpt,
+			host: hostLabel || "flashback.org",
+			source: sourceLabel || "Flashback"
+		};
+	}
+
+	function previewSwedishMarketplaceInfo(preview, kind, descriptionText) {
+		const metadata = (preview && preview.metadata) || {};
+		const rawTitle = previewMetadataString(metadata, ["listingTitle"]) || (preview && preview.title) || "";
+		const title = previewCleanMarketplaceTitle(rawTitle, kind)
+			|| (kind === "tradera" ? "Tradera listing" : "Blocket listing");
+		const price = previewMetadataString(metadata, ["listingPrice"])
+			|| previewLabelValue(descriptionText, ["Utropspris", "K\u00f6p nu", "Pris"]);
+		const saleType = previewMetadataString(metadata, ["listingSaleType"])
+			|| previewLabelValue(descriptionText, ["Typ"]);
+		const endsAt = previewMetadataString(metadata, ["listingEndsAt"])
+			|| previewLabelValue(descriptionText, ["Slutar"]);
+		const condition = previewMetadataString(metadata, ["listingCondition"])
+			|| previewLabelValue(descriptionText, ["Skick"]);
+		const listingId = previewMetadataString(metadata, ["listingId"])
+			|| previewLastNumericPathSegment(preview, kind === "tradera" ? 6 : 5, 14);
+		return {
+			brand: kind === "tradera" ? "Tradera" : "Blocket",
+			mark: kind === "tradera" ? "T" : "B",
+			badge: saleType || (kind === "tradera" ? "Auktion" : "Annons"),
+			price: price,
+			saleType: saleType,
+			endsAt: endsAt,
+			condition: condition,
+			listingId: listingId,
+			title: title,
+			description: previewCleanMarketplaceDescription(descriptionText, kind, title)
+		};
+	}
+
+	function appendSwedishPreviewChip(parent, value, extraClass) {
+		const text = String(value || "").trim();
+		if (!text) {
+			return;
+		}
+		const chip = document.createElement("span");
+		chip.className = "preview-card-sv-chip" + (extraClass ? " " + extraClass : "");
+		chip.textContent = text;
+		parent.appendChild(chip);
+	}
+
+	function appendSwedishMarketplacePreview(card, preview, kind, hostLabel, sourceLabel, descriptionText) {
+		const info = previewSwedishMarketplaceInfo(preview, kind, descriptionText);
+		const shell = document.createElement("div");
+		shell.className = "preview-card-sv-market-shell";
+
+		const media = document.createElement("div");
+		media.className = "preview-card-sv-market-media";
+		if (preview && preview.thumbnailUrl) {
+			const image = document.createElement("img");
+			image.className = "preview-card-sv-market-image";
+			image.loading = "lazy";
+			image.src = preview.thumbnailUrl;
+			image.alt = info.title || sourceLabel || info.brand;
+			media.appendChild(image);
+		} else {
+			const placeholder = document.createElement("div");
+			placeholder.className = "preview-card-sv-market-placeholder";
+			placeholder.textContent = info.mark;
+			media.appendChild(placeholder);
+		}
+		const mediaBadge = document.createElement("span");
+		mediaBadge.className = "preview-card-sv-market-media-badge";
+		mediaBadge.textContent = info.brand;
+		media.appendChild(mediaBadge);
+		shell.appendChild(media);
+
+		const body = document.createElement("div");
+		body.className = "preview-card-sv-market-body";
+		const top = document.createElement("div");
+		top.className = "preview-card-sv-top";
+		const identity = document.createElement("div");
+		identity.className = "preview-card-sv-identity";
+		const mark = document.createElement("span");
+		mark.className = "preview-card-sv-mark";
+		mark.textContent = info.mark;
+		identity.appendChild(mark);
+		const source = document.createElement("span");
+		source.className = "preview-card-sv-source";
+		source.textContent = info.brand;
+		identity.appendChild(source);
+		top.appendChild(identity);
+		const badge = document.createElement("span");
+		badge.className = "preview-card-sv-badge";
+		badge.textContent = info.badge;
+		top.appendChild(badge);
+		body.appendChild(top);
+
+		const title = document.createElement("div");
+		title.className = "preview-card-sv-market-title";
+		title.textContent = info.title;
+		body.appendChild(title);
+
+		if (info.price) {
+			const price = document.createElement("div");
+			price.className = "preview-card-sv-market-price";
+			price.textContent = info.price;
+			body.appendChild(price);
+		}
+
+		const chips = document.createElement("div");
+		chips.className = "preview-card-sv-chips";
+		appendSwedishPreviewChip(chips, info.endsAt ? "Slutar " + info.endsAt : "");
+		appendSwedishPreviewChip(chips, info.condition);
+		appendSwedishPreviewChip(chips, info.listingId ? "#" + info.listingId : "", "is-id");
+		if (chips.childNodes.length) {
+			body.appendChild(chips);
+		}
+
+		if (info.description) {
+			const description = document.createElement("div");
+			description.className = "preview-card-sv-description";
+			description.textContent = info.description;
+			body.appendChild(description);
+		}
+
+		const footer = document.createElement("div");
+		footer.className = "preview-card-sv-footer";
+		const host = document.createElement("span");
+		host.className = "preview-card-sv-host";
+		host.textContent = hostLabel || (kind === "tradera" ? "tradera.com" : "blocket.se");
+		footer.appendChild(host);
+		const action = document.createElement("span");
+		action.className = "preview-card-sv-action";
+		action.textContent = (preview && preview.openLabel) || (kind === "tradera" ? "Open on Tradera" : "Open on Blocket");
+		footer.appendChild(action);
+		body.appendChild(footer);
+
+		shell.appendChild(body);
+		card.appendChild(shell);
+	}
+
+	function appendFlashbackPreview(card, preview, hostLabel, sourceLabel, descriptionText) {
+		const info = previewFlashbackInfo(preview, hostLabel, sourceLabel, descriptionText);
+		const shell = document.createElement("div");
+		shell.className = "preview-card-flashback-shell";
+
+		const masthead = document.createElement("div");
+		masthead.className = "preview-card-flashback-masthead";
+		const logo = document.createElement("span");
+		logo.className = "preview-card-flashback-logo";
+		logo.textContent = "flashback";
+		masthead.appendChild(logo);
+		const nav = document.createElement("div");
+		nav.className = "preview-card-flashback-nav";
+		["AVDELNINGAR", "NYA INL\u00c4GG", "S\u00d6K"].forEach(function(label) {
+			const item = document.createElement("span");
+			item.className = "preview-card-flashback-nav-item";
+			item.textContent = label;
+			nav.appendChild(item);
+		});
+		masthead.appendChild(nav);
+		shell.appendChild(masthead);
+
+		const breadcrumb = document.createElement("div");
+		breadcrumb.className = "preview-card-flashback-breadcrumb";
+		const dot = document.createElement("span");
+		dot.className = "preview-card-flashback-breadcrumb-dot";
+		breadcrumb.appendChild(dot);
+		[info.category, info.forumName].filter(Boolean).forEach(function(part, index) {
+			if (index > 0) {
+				const slash = document.createElement("span");
+				slash.className = "preview-card-flashback-breadcrumb-separator";
+				slash.textContent = "/";
+				breadcrumb.appendChild(slash);
+			}
+			const crumb = document.createElement("span");
+			crumb.className = "preview-card-flashback-breadcrumb-part";
+			crumb.textContent = part;
+			breadcrumb.appendChild(crumb);
+		});
+		if (breadcrumb.childNodes.length > 1) {
+			shell.appendChild(breadcrumb);
+		}
+
+		const header = document.createElement("div");
+		header.className = "preview-card-flashback-header";
+		const mark = document.createElement("span");
+		mark.className = "preview-card-flashback-mark";
+		mark.textContent = "FB";
+		header.appendChild(mark);
+		const heading = document.createElement("div");
+		heading.className = "preview-card-flashback-heading";
+		const source = document.createElement("span");
+		source.className = "preview-card-flashback-source";
+		source.textContent = info.source;
+		heading.appendChild(source);
+		const host = document.createElement("span");
+		host.className = "preview-card-flashback-host";
+		host.textContent = info.host;
+		heading.appendChild(host);
+		header.appendChild(heading);
+		const badge = document.createElement("span");
+		badge.className = "preview-card-flashback-badge";
+		badge.textContent = "Forum";
+		header.appendChild(badge);
+		shell.appendChild(header);
+
+		const body = document.createElement("div");
+		body.className = "preview-card-flashback-body";
+		const titleNode = document.createElement("div");
+		titleNode.className = "preview-card-flashback-title";
+		titleNode.textContent = info.title;
+		body.appendChild(titleNode);
+
+		const stats = document.createElement("div");
+		stats.className = "preview-card-flashback-stats";
+		[info.postLinkLabel, info.pageLabel, info.postCountLabel, info.threadId ? "t" + info.threadId : ""]
+			.filter(Boolean).forEach(function(value) {
+			const chip = document.createElement("span");
+			chip.className = "preview-card-flashback-stat";
+			chip.textContent = value;
+			stats.appendChild(chip);
+		});
+		if (stats.childNodes.length) {
+			body.appendChild(stats);
+		}
+
+		const post = document.createElement("div");
+		post.className = "preview-card-flashback-post";
+		const postHead = document.createElement("div");
+		postHead.className = "preview-card-flashback-post-head";
+		const time = document.createElement("span");
+		time.className = "preview-card-flashback-post-time";
+		time.textContent = info.postTime || (info.isPostLink ? "L\u00e4nkat svar" : "F\u00f6rsta inl\u00e4gget");
+		postHead.appendChild(time);
+		const number = document.createElement("span");
+		number.className = "preview-card-flashback-post-number";
+		number.textContent = info.postNumber ? ("#" + info.postNumber) : (info.postId ? ("p" + info.postId) : "#1");
+		postHead.appendChild(number);
+		post.appendChild(postHead);
+
+		const postBody = document.createElement("div");
+		postBody.className = "preview-card-flashback-post-body";
+		const user = document.createElement("div");
+		user.className = "preview-card-flashback-user";
+		const avatar = document.createElement("span");
+		avatar.className = "preview-card-flashback-avatar";
+		avatar.textContent = (info.author || "FB").trim().slice(0, 2).toUpperCase();
+		user.appendChild(avatar);
+		if (info.author) {
+			const author = document.createElement("span");
+			author.className = "preview-card-flashback-author";
+			author.textContent = info.author;
+			user.appendChild(author);
+		}
+		if (info.authorTitle) {
+			const role = document.createElement("span");
+			role.className = "preview-card-flashback-user-role";
+			role.textContent = info.authorTitle;
+			user.appendChild(role);
+		}
+		[info.authorRegistered ? "Reg: " + info.authorRegistered : "", info.authorPosts ? "Inl\u00e4gg: " + info.authorPosts : ""]
+			.filter(Boolean).forEach(function(value) {
+				const detail = document.createElement("span");
+				detail.className = "preview-card-flashback-user-detail";
+				detail.textContent = value;
+				user.appendChild(detail);
+			});
+		postBody.appendChild(user);
+
+		const message = document.createElement("div");
+		message.className = "preview-card-flashback-message";
+		if (info.quoteExcerpt) {
+			message.classList.add("has-quote");
+			const quote = document.createElement("div");
+			quote.className = "preview-card-flashback-quote";
+			const quoteHead = document.createElement("div");
+			quoteHead.className = "preview-card-flashback-quote-head";
+			quoteHead.textContent = info.quoteAuthor ? ("Citat: " + info.quoteAuthor) : "Citat";
+			quote.appendChild(quoteHead);
+			const quoteText = document.createElement("div");
+			quoteText.className = "preview-card-flashback-quote-text";
+			quoteText.textContent = info.quoteExcerpt;
+			quote.appendChild(quoteText);
+			message.appendChild(quote);
+		}
+		const reply = document.createElement("div");
+		reply.className = "preview-card-flashback-reply";
+		if (info.excerpt) {
+			reply.textContent = info.excerpt;
+		} else {
+			reply.textContent = info.forumName || info.category || "Flashback forumtr\u00e5d";
+		}
+		message.appendChild(reply);
+		postBody.appendChild(message);
+		post.appendChild(postBody);
+		body.appendChild(post);
+		shell.appendChild(body);
+
+		const footer = document.createElement("div");
+		footer.className = "preview-card-flashback-footer";
+		const meta = document.createElement("span");
+		meta.className = "preview-card-flashback-meta";
+		if (info.isPostLink && info.postId) {
+			meta.textContent = info.threadId ? ("Svar p" + info.postId + " i tr\u00e5d t" + info.threadId)
+				: ("Svar p" + info.postId);
+		} else {
+			meta.textContent = info.threadId ? "Thread t" + info.threadId : "Discussion thread";
+		}
+		footer.appendChild(meta);
+		const action = document.createElement("span");
+		action.className = "preview-card-flashback-action";
+		action.textContent = info.isPostLink && (!preview || !preview.openLabel
+			|| preview.openLabel === "Open on Flashback") ? "Open in thread"
+			: ((preview && preview.openLabel) || "Open on Flashback");
+		footer.appendChild(action);
+		shell.appendChild(footer);
+
+		card.appendChild(shell);
+	}
+
+	function previewMetadataList(metadata, key) {
+		const value = metadata && metadata[key];
+		return Array.isArray(value) ? value : [];
+	}
+
+	function previewSpecItems(preview, metadataKey) {
+		const metadata = (preview && preview.metadata) || {};
+		const seen = Object.create(null);
+		const specs = [];
+		previewMetadataList(metadata, metadataKey).forEach(function(item) {
+			const label = String((item && item.label) || "").trim();
+			const value = String((item && item.value) || "").trim();
+			const key = label.toLowerCase();
+			if (!label || !value || seen[key]) {
+				return;
+			}
+			seen[key] = true;
+			specs.push({ label: label, value: value });
+		});
+		return specs;
+	}
+
+	function previewListingSpecs(preview) {
+		return previewSpecItems(preview, "listingSpecs");
+	}
+
+	function previewProductSpecs(preview) {
+		return previewSpecItems(preview, "productSpecs");
+	}
+
+	function appendSwedishSpecGrid(parent, specs, className) {
+		if (!Array.isArray(specs) || !specs.length) {
+			return;
+		}
+		const grid = document.createElement("div");
+		grid.className = className || "preview-card-sv-spec-grid";
+		specs.slice(0, 10).forEach(function(spec) {
+			const item = document.createElement("div");
+			item.className = "preview-card-sv-spec";
+			const label = document.createElement("span");
+			label.className = "preview-card-sv-spec-label";
+			label.textContent = spec.label;
+			item.appendChild(label);
+			const value = document.createElement("strong");
+			value.className = "preview-card-sv-spec-value";
+			value.textContent = spec.value;
+			item.appendChild(value);
+			grid.appendChild(item);
+		});
+		parent.appendChild(grid);
+	}
+
+	function appendBlocketListingPreview(card, preview, spec, hostLabel, descriptionText) {
+		const metadata = (preview && preview.metadata) || {};
+		const title = previewMetadataString(metadata, ["listingTitle"])
+			|| previewCleanMarketplaceTitle((preview && preview.title) || "", "blocket")
+			|| "Blocket listing";
+		const price = previewMetadataString(metadata, ["listingPrice", "productPrice"]);
+		const description = previewMetadataString(metadata, ["listingDescription"])
+			|| previewCleanMarketplaceDescription(descriptionText, "blocket", title);
+		const location = previewMetadataString(metadata, ["listingLocation"]);
+		const listingId = previewMetadataString(metadata, ["listingId"]) || previewLastNumericPathSegment(preview, 5, 14);
+		const specs = previewListingSpecs(preview);
+		const imageItems = previewImageMediaItems(preview, "", "");
+
+		const shell = document.createElement("div");
+		shell.className = "preview-card-blocket-shell";
+
+		if (imageItems.length > 1) {
+			appendPreviewImageCarousel(shell, preview, imageItems, "preview-card-blocket-gallery");
+		} else if (imageItems.length === 1) {
+			const media = document.createElement("div");
+			media.className = "preview-card-blocket-media";
+			const image = document.createElement("img");
+			image.className = "preview-card-blocket-image";
+			image.loading = "lazy";
+			image.src = imageItems[0].url;
+			image.alt = title;
+			media.appendChild(image);
+			shell.appendChild(media);
+		}
+
+		const body = document.createElement("div");
+		body.className = "preview-card-blocket-body";
+		const top = document.createElement("div");
+		top.className = "preview-card-blocket-top";
+		const identity = document.createElement("div");
+		identity.className = "preview-card-sv-identity";
+		const mark = document.createElement("span");
+		mark.className = "preview-card-sv-mark";
+		mark.textContent = "B";
+		identity.appendChild(mark);
+		const source = document.createElement("span");
+		source.className = "preview-card-sv-source";
+		source.textContent = "Blocket";
+		identity.appendChild(source);
+		top.appendChild(identity);
+		const badge = document.createElement("span");
+		badge.className = "preview-card-sv-badge";
+		badge.textContent = "Annons";
+		top.appendChild(badge);
+		body.appendChild(top);
+
+		const titleNode = document.createElement("div");
+		titleNode.className = "preview-card-blocket-title";
+		titleNode.textContent = title;
+		body.appendChild(titleNode);
+
+		if (price) {
+			const priceNode = document.createElement("div");
+			priceNode.className = "preview-card-blocket-price";
+			priceNode.textContent = price;
+			body.appendChild(priceNode);
+		}
+
+		if (description) {
+			const descriptionNode = document.createElement("div");
+			descriptionNode.className = "preview-card-blocket-description";
+			descriptionNode.textContent = description;
+			body.appendChild(descriptionNode);
+		}
+
+		appendSwedishSpecGrid(body, specs, "preview-card-blocket-spec-grid");
+
+		const chips = document.createElement("div");
+		chips.className = "preview-card-sv-chips";
+		appendSwedishPreviewChip(chips, location);
+		appendSwedishPreviewChip(chips, listingId ? "#" + listingId : "", "is-id");
+		if (chips.childNodes.length) {
+			body.appendChild(chips);
+		}
+
+		const footer = document.createElement("div");
+		footer.className = "preview-card-sv-footer";
+		const host = document.createElement("span");
+		host.className = "preview-card-sv-host";
+		host.textContent = hostLabel || "blocket.se";
+		footer.appendChild(host);
+		const action = document.createElement("span");
+		action.className = "preview-card-sv-action";
+		action.textContent = (preview && preview.openLabel) || "Open on Blocket";
+		footer.appendChild(action);
+		body.appendChild(footer);
+
+		shell.appendChild(body);
+		card.appendChild(shell);
+	}
+
+	function previewProviderTitle(preview, spec) {
+		const metadata = (preview && preview.metadata) || {};
+		return previewMetadataString(metadata, ["listingTitle", "productTitle", "articleTitle", "audioTitle"])
+			|| String((preview && preview.title) || "").trim()
+			|| (spec && spec.label)
+			|| "Link preview";
+	}
+
+	function previewProviderDescription(preview, descriptionText) {
+		const metadata = (preview && preview.metadata) || {};
+		return previewMetadataString(metadata, ["listingDescription", "productDescription", "articleDescription", "audioDescription"])
+			|| String(descriptionText || "").trim();
+	}
+
+	function previewProviderPrice(metadata) {
+		return previewMetadataString(metadata, ["listingPrice", "productPrice", "realEstatePrice"]);
+	}
+
+	function previewProviderChips(preview, spec, descriptionText) {
+		const metadata = (preview && preview.metadata) || {};
+		const chips = [];
+		const add = function(value) {
+			const text = String(value || "").trim();
+			if (text && chips.indexOf(text) < 0) {
+				chips.push(text);
+			}
+		};
+		if (spec.kind === "article") {
+			add(previewMetadataString(metadata, ["articleSection"]));
+			add(previewMetadataString(metadata, ["articlePublishedAt"]));
+		} else if (spec.kind === "forum") {
+			add(previewMetadataString(metadata, ["forumProvider"]));
+			const threadId = previewMetadataString(metadata, ["forumThreadId", "threadId"]);
+			add(threadId ? "Thread " + threadId : "");
+		} else if (spec.kind === "realEstate") {
+			add(previewProviderPrice(metadata));
+			add(previewMetadataString(metadata, ["realEstateArea"]));
+			add(previewMetadataString(metadata, ["realEstateRooms"]));
+			add(previewMetadataString(metadata, ["realEstateFee"]));
+		} else if (spec.kind === "product" || spec.kind === "systembolagetProduct") {
+			add(previewProviderPrice(metadata));
+			add(previewMetadataString(metadata, ["productAvailability"]));
+			add(previewProductRatingLabel(previewMetadataString(metadata, ["productRating"])));
+			add(previewProductReviewCountLabel(previewMetadataString(metadata, ["productReviewCount"])));
+			add(previewMetadataString(metadata, ["productBrand"]));
+			add(previewMetadataString(metadata, ["productSku"]));
+			if (spec.kind === "systembolagetProduct") {
+				add(previewMetadataString(metadata, ["productAlcohol"]));
+				add(previewMetadataString(metadata, ["productVolume"]));
+			}
+		} else if (spec.kind === "audio") {
+			add(previewMetadataString(metadata, ["audioProgram"]));
+			add(previewMetadataString(metadata, ["articlePublishedAt"]));
+		} else {
+			add(previewMetadataString(metadata, ["locationLabel"]));
+			add(previewMetadataString(metadata, ["statusLabel"]) || descriptionText);
+		}
+		return chips.slice(0, 5);
+	}
+
+	function previewNeedsThumbnailBlur(preview) {
+		const metadata = (preview && preview.metadata) || {};
+		if (metadata.thumbnailBlur || metadata.contentWarning) {
+			return true;
+		}
+		const text = [
+			preview && preview.url,
+			preview && preview.title,
+			preview && preview.description
+		].join(" ").toLowerCase();
+		return /\b(nsfw|18\+|adult|vuxet|naken|nude|sex|gore)\b/i.test(text);
+	}
+
+	function appendExistenzPreview(card, preview, spec, hostLabel, descriptionText) {
+		const metadata = (preview && preview.metadata) || {};
+		const shell = document.createElement("div");
+		shell.className = "preview-card-existenz-shell";
+		const imageUrl = String((preview && preview.thumbnailUrl) || "").trim();
+		if (imageUrl) {
+			const media = document.createElement("div");
+			media.className = "preview-card-existenz-media" + (previewNeedsThumbnailBlur(preview) ? " is-blurred" : "");
+			const image = document.createElement("img");
+			image.className = "preview-card-existenz-image";
+			image.loading = "lazy";
+			image.src = imageUrl;
+			image.alt = previewProviderTitle(preview, spec);
+			media.appendChild(image);
+			if (previewNeedsThumbnailBlur(preview)) {
+				const warning = document.createElement("span");
+				warning.className = "preview-card-existenz-warning";
+				warning.textContent = String(metadata.contentWarning || "18+").trim();
+				media.appendChild(warning);
+			}
+			shell.appendChild(media);
+		}
+		appendSwedishInfoBody(shell, preview, spec, hostLabel, descriptionText, "Dagens l\u00e4nk");
+		card.appendChild(shell);
+	}
+
+	function appendSwedishInfoBody(parent, preview, spec, hostLabel, descriptionText, badgeText) {
+		const metadata = (preview && preview.metadata) || {};
+		const body = document.createElement("div");
+		body.className = "preview-card-sv-info-body";
+		const top = document.createElement("div");
+		top.className = "preview-card-sv-top";
+		const identity = document.createElement("div");
+		identity.className = "preview-card-sv-identity";
+		const mark = document.createElement("span");
+		mark.className = "preview-card-sv-mark";
+		mark.textContent = spec.mark || String(spec.label || "S").slice(0, 2);
+		identity.appendChild(mark);
+		const source = document.createElement("span");
+		source.className = "preview-card-sv-source";
+		source.textContent = previewMetadataString(metadata, ["providerName"]) || spec.label;
+		identity.appendChild(source);
+		top.appendChild(identity);
+		const badge = document.createElement("span");
+		badge.className = "preview-card-sv-badge";
+		badge.textContent = badgeText || spec.kind;
+		top.appendChild(badge);
+		body.appendChild(top);
+
+		const title = document.createElement("div");
+		title.className = "preview-card-sv-info-title";
+		title.textContent = previewProviderTitle(preview, spec);
+		body.appendChild(title);
+
+		const price = previewProviderPrice(metadata);
+		if (price && (spec.kind === "product" || spec.kind === "systembolagetProduct" || spec.kind === "realEstate")) {
+			const priceNode = document.createElement("div");
+			priceNode.className = "preview-card-sv-info-price";
+			priceNode.textContent = price;
+			body.appendChild(priceNode);
+		}
+
+		const chips = document.createElement("div");
+		chips.className = "preview-card-sv-chips";
+		previewProviderChips(preview, spec, descriptionText).forEach(function(chip) {
+			appendSwedishPreviewChip(chips, chip);
+		});
+		if (chips.childNodes.length) {
+			body.appendChild(chips);
+		}
+
+		const description = String(descriptionText || "").trim();
+		if (description) {
+			const descriptionNode = document.createElement("div");
+			descriptionNode.className = "preview-card-sv-description";
+			descriptionNode.textContent = description;
+			body.appendChild(descriptionNode);
+		}
+
+		if (spec.kind === "product" || spec.kind === "systembolagetProduct") {
+			appendSwedishSpecGrid(body, previewProductSpecs(preview), "preview-card-sv-spec-grid");
+		}
+
+		const footer = document.createElement("div");
+		footer.className = "preview-card-sv-footer";
+		const host = document.createElement("span");
+		host.className = "preview-card-sv-host";
+		host.textContent = hostLabel || spec.label;
+		footer.appendChild(host);
+		const action = document.createElement("span");
+		action.className = "preview-card-sv-action";
+		action.textContent = (preview && preview.openLabel) || ("Open on " + spec.label);
+		footer.appendChild(action);
+		body.appendChild(footer);
+
+		parent.appendChild(body);
+	}
+
+	function appendSwedishInfoPreview(card, preview, spec, hostLabel, descriptionText) {
+		const shell = document.createElement("div");
+		shell.className = "preview-card-sv-info-shell";
+		const imageItems = previewImageMediaItems(preview, "", "");
+		const imageUrl = imageItems.length
+			? String(imageItems[0].url || "").trim()
+			: String((preview && preview.thumbnailUrl) || "").trim();
+		if (imageUrl) {
+			const media = document.createElement("div");
+			media.className = "preview-card-sv-info-media";
+			const image = document.createElement("img");
+			image.className = "preview-card-sv-info-image";
+			image.loading = "lazy";
+			image.src = imageUrl;
+			image.alt = previewProviderTitle(preview, spec);
+			media.appendChild(image);
+			shell.appendChild(media);
+		}
+		const badgeMap = {
+			article: "Nyhet",
+			forum: "Forum",
+			realEstate: "Bostad",
+			product: "Produkt",
+			systembolagetProduct: "Produkt",
+			audio: "Audio",
+			weather: "V\u00e4der",
+			place: "Plats",
+			traffic: "Trafik"
+		};
+		appendSwedishInfoBody(
+			shell,
+			preview,
+			spec,
+			hostLabel,
+			previewProviderDescription(preview, descriptionText),
+			badgeMap[spec.kind] || "Link"
+		);
+		card.appendChild(shell);
+	}
+
+	function previewArticleDateLabel(value) {
+		const text = String(value || "").replace(/\s+/g, " ").trim();
+		if (!text) {
+			return "";
+		}
+		const date = new Date(text);
+		if (Number.isNaN(date.getTime())) {
+			return text.replace(/\.\d+/, "").replace(/T/, " ").replace(/Z$/, "").slice(0, 16);
+		}
+
+		const now = new Date();
+		const dayMs = 24 * 60 * 60 * 1000;
+		const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+		const articleDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+		const diffDays = Math.round((today.getTime() - articleDay.getTime()) / dayMs);
+		const time = new Intl.DateTimeFormat("sv-SE", {
+			hour: "2-digit",
+			minute: "2-digit"
+		}).format(date);
+		if (diffDays === 0) {
+			return "Idag " + time;
+		}
+		if (diffDays === 1) {
+			return "Ig\u00e5r " + time;
+		}
+		const options = date.getFullYear() === now.getFullYear()
+			? { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }
+			: { day: "numeric", month: "short", year: "numeric" };
+		return new Intl.DateTimeFormat("sv-SE", options).format(date).replace(".", "");
+	}
+
+	function appendArticleMetaPill(parent, value, extraClass) {
+		const text = String(value || "").trim();
+		if (!text) {
+			return;
+		}
+		const pill = document.createElement("span");
+		pill.className = "preview-card-article-pill" + (extraClass ? " " + extraClass : "");
+		pill.textContent = text;
+		parent.appendChild(pill);
+	}
+
+	function appendArticlePreview(card, preview, spec, hostLabel, descriptionText) {
+		const metadata = (preview && preview.metadata) || {};
+		const title = previewProviderTitle(preview, spec);
+		const description = previewProviderDescription(preview, descriptionText);
+		const section = previewMetadataString(metadata, ["articleSection"]);
+		const author = previewMetadataString(metadata, ["articleAuthor"]);
+		const publishedAt = previewArticleDateLabel(previewMetadataString(metadata, ["articlePublishedAt"]));
+		const access = previewMetadataString(metadata, ["articleAccess"])
+			|| (metadata.articlePremium ? "Premium" : "");
+		const imageItems = previewImageMediaItems(preview, "", "");
+		const imageUrl = imageItems.length
+			? String(imageItems[0].url || "").trim()
+			: String((preview && preview.thumbnailUrl) || "").trim();
+
+		const shell = document.createElement("div");
+		shell.className = "preview-card-article-shell" + (imageUrl ? " has-media" : "");
+
+		if (imageUrl) {
+			const media = document.createElement("div");
+			media.className = "preview-card-article-media";
+			const image = document.createElement("img");
+			image.className = "preview-card-article-image";
+			image.loading = "lazy";
+			image.src = imageUrl;
+			image.alt = title;
+			media.appendChild(image);
+			shell.appendChild(media);
+		}
+
+		const body = document.createElement("div");
+		body.className = "preview-card-article-body";
+
+		const top = document.createElement("div");
+		top.className = "preview-card-sv-top";
+		const identity = document.createElement("div");
+		identity.className = "preview-card-sv-identity";
+		const mark = document.createElement("span");
+		mark.className = "preview-card-sv-mark";
+		mark.textContent = spec.mark || String(spec.label || "N").slice(0, 2);
+		identity.appendChild(mark);
+		const source = document.createElement("span");
+		source.className = "preview-card-sv-source";
+		source.textContent = previewMetadataString(metadata, ["providerName", "articlePublisher"]) || spec.label;
+		identity.appendChild(source);
+		top.appendChild(identity);
+		const badge = document.createElement("span");
+		badge.className = "preview-card-sv-badge";
+		badge.textContent = section || (spec.provider === "sweclockers" ? "Artikel" : "Nyhet");
+		top.appendChild(badge);
+		body.appendChild(top);
+
+		const titleNode = document.createElement("div");
+		titleNode.className = "preview-card-article-title";
+		titleNode.textContent = title;
+		body.appendChild(titleNode);
+
+		if (description) {
+			const descriptionNode = document.createElement("div");
+			descriptionNode.className = "preview-card-article-description";
+			descriptionNode.textContent = description;
+			body.appendChild(descriptionNode);
+		}
+
+		const meta = document.createElement("div");
+		meta.className = "preview-card-article-meta";
+		appendArticleMetaPill(meta, publishedAt, "is-time");
+		appendArticleMetaPill(meta, author, "is-author");
+		appendArticleMetaPill(meta, access, "is-access");
+		if (meta.childNodes.length) {
+			body.appendChild(meta);
+		}
+
+		const footer = document.createElement("div");
+		footer.className = "preview-card-sv-footer";
+		const host = document.createElement("span");
+		host.className = "preview-card-sv-host";
+		host.textContent = hostLabel || spec.label;
+		footer.appendChild(host);
+		const action = document.createElement("span");
+		action.className = "preview-card-sv-action";
+		action.textContent = (preview && preview.openLabel) || ("Open on " + spec.label);
+		footer.appendChild(action);
+		body.appendChild(footer);
+
+		shell.appendChild(body);
+		card.appendChild(shell);
+	}
+
+	function previewProductReviewCountLabel(value) {
+		const text = String(value || "").replace(/\s+/g, " ").trim();
+		if (!text) {
+			return "";
+		}
+		if (/[A-Za-z\u00c0-\u024f]/.test(text)) {
+			return text;
+		}
+		return text + " betyg";
+	}
+
+	function previewProductRatingLabel(value) {
+		const text = String(value || "").replace(/\s+/g, " ").trim();
+		if (!text) {
+			return "";
+		}
+		const match = /^([0-9]+(?:[,.][0-9]+)?)(?:\s*\/\s*5)?$/i.exec(text);
+		return match ? match[1].replace(".", ",") + "/5" : text;
+	}
+
+	function previewProductMediaItems(preview) {
+		const metadata = (preview && preview.metadata) || {};
+		const rawItems = Array.isArray(metadata.productMedia)
+			? metadata.productMedia
+			: (Array.isArray(metadata.productMediaItems) ? metadata.productMediaItems : []);
+		const seen = Object.create(null);
+		const items = [];
+		const addItem = function(rawItem, fallbackKind) {
+			const item = rawItem || {};
+			const url = String(item.url || "").trim();
+			if (!url || seen[url]) {
+				return;
+			}
+			let mime = String(item.mime || "").trim().toLowerCase();
+			let kind = String(item.kind || fallbackKind || "").trim().toLowerCase();
+			const path = url.split("?")[0].toLowerCase();
+			if (!mime) {
+				if (path.endsWith(".m3u8")) {
+					mime = "application/vnd.apple.mpegurl";
+				} else if (path.endsWith(".webm")) {
+					mime = "video/webm";
+				} else if (path.endsWith(".mp4") || path.endsWith(".m4v")) {
+					mime = "video/mp4";
+				} else if (path.endsWith(".png")) {
+					mime = "image/png";
+				} else if (path.endsWith(".webp")) {
+					mime = "image/webp";
+				} else if (path.endsWith(".gif")) {
+					mime = "image/gif";
+				} else {
+					mime = kind === "video" ? "video/mp4" : "image/jpeg";
+				}
+			}
+			if (!kind) {
+				kind = /^video\//i.test(mime) || /mpegurl|dash\+xml/i.test(mime) ? "video" : "image";
+			}
+			if (kind !== "image" && kind !== "video") {
+				return;
+			}
+			seen[url] = true;
+			items.push({
+				kind: kind,
+				url: url,
+				mime: mime,
+				title: String(item.title || "").trim(),
+				thumbnail: String(item.thumbnail || item.poster || "").trim(),
+				poster: String(item.poster || item.thumbnail || "").trim(),
+				streamKind: String(item.streamKind || (/mpegurl/i.test(mime) ? "hls" : "")).trim().toLowerCase()
+			});
+		};
+
+		rawItems.forEach(function(item) {
+			addItem(item);
+		});
+		if (Array.isArray(preview && preview.mediaItems)) {
+			preview.mediaItems.forEach(function(item) {
+				addItem(item);
+			});
+		}
+		if (Array.isArray(metadata.productImages)) {
+			metadata.productImages.forEach(function(item) {
+				addItem(item, "image");
+			});
+		}
+		if (!items.length && metadata.productImage) {
+			addItem({ url: metadata.productImage, mime: "image/jpeg", kind: "image" });
+		}
+		if (!items.length && preview && preview.thumbnailUrl) {
+			addItem({ url: preview.thumbnailUrl, mime: "image/jpeg", kind: "image" });
+		}
+		return items.slice(0, 12);
+	}
+
+	function appendProductMediaGallery(card, shell, preview, mediaItems) {
+		const gallery = document.createElement("div");
+		gallery.className = "preview-card-product-gallery";
+		gallery.tabIndex = 0;
+		gallery.addEventListener("click", function(event) {
+			event.stopPropagation();
+		});
+
+		const stage = document.createElement("div");
+		stage.className = "preview-card-product-stage";
+		gallery.appendChild(stage);
+
+		const previousButton = document.createElement("button");
+		previousButton.type = "button";
+		previousButton.className = "preview-card-carousel-button preview-card-carousel-previous preview-card-product-gallery-previous";
+		previousButton.textContent = "<";
+		previousButton.setAttribute("aria-label", "Previous product media");
+		stage.appendChild(previousButton);
+
+		const nextButton = document.createElement("button");
+		nextButton.type = "button";
+		nextButton.className = "preview-card-carousel-button preview-card-carousel-next preview-card-product-gallery-next";
+		nextButton.textContent = ">";
+		nextButton.setAttribute("aria-label", "Next product media");
+		stage.appendChild(nextButton);
+
+		const rail = document.createElement("div");
+		rail.className = "preview-card-product-thumbnails";
+		const thumbButtons = mediaItems.map(function(item, itemIndex) {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "preview-card-product-thumbnail";
+			button.setAttribute("aria-label", (item.kind === "video" ? "Show video " : "Show image ")
+				+ String(itemIndex + 1));
+			const imageUrl = item.thumbnail || item.poster || (item.kind === "image" ? item.url : "");
+			if (imageUrl) {
+				const image = document.createElement("img");
+				image.className = "preview-card-product-thumbnail-image";
+				image.loading = "lazy";
+				image.src = imageUrl;
+				image.alt = item.title || (item.kind === "video" ? "Product video" : "Product image");
+				button.appendChild(image);
+			} else {
+				const placeholder = document.createElement("span");
+				placeholder.className = "preview-card-product-thumbnail-placeholder";
+				placeholder.textContent = item.kind === "video" ? "VID" : "IMG";
+				button.appendChild(placeholder);
+			}
+			if (item.kind === "video") {
+				const playMark = document.createElement("span");
+				playMark.className = "preview-card-product-thumbnail-play";
+				playMark.textContent = "Play";
+				button.appendChild(playMark);
+			}
+			button.addEventListener("click", function(event) {
+				event.preventDefault();
+				event.stopPropagation();
+				setIndex(itemIndex);
+			});
+			rail.appendChild(button);
+			return button;
+		});
+		gallery.appendChild(rail);
+
+		if (mediaItems.length <= 1) {
+			previousButton.hidden = true;
+			nextButton.hidden = true;
+			rail.hidden = true;
+		}
+
+		let index = 0;
+		const renderItem = function() {
+			const activeVideo = stage.querySelector("video");
+			if (activeVideo) {
+				activeVideo.pause();
+			}
+			Array.prototype.slice.call(stage.children).forEach(function(child) {
+				if (child !== previousButton && child !== nextButton) {
+					stage.removeChild(child);
+				}
+			});
+
+			const item = mediaItems[index];
+			stage.classList.toggle("is-video", item.kind === "video");
+			stage.classList.toggle("is-image", item.kind !== "video");
+			if (item.kind === "video") {
+				const mediaPreview = Object.assign({}, preview || {}, {
+					title: item.title || (preview && preview.title) || "Product video",
+					thumbnailUrl: item.poster || item.thumbnail || (preview && preview.thumbnailUrl) || "",
+					autoplay: false,
+					startMuted: true
+				});
+				const playable = item.streamKind === "hls"
+					? createSteamHlsPlayableMedia(card, mediaPreview, item, "preview-card-product-stage-player")
+					: createPreviewPlayableMedia(card, mediaPreview, item.url, item.mime, "", "", true, false,
+						previewVideoCanPlayInline(item.mime, item.url), "preview-card-product-stage-player");
+				stage.insertBefore(playable, previousButton);
+			} else {
+				const image = document.createElement("img");
+				image.className = "preview-card-product-stage-image";
+				image.loading = "lazy";
+				image.src = item.url;
+				image.alt = item.title || (preview && preview.title) || "Product image";
+				image.addEventListener("load", function() {
+					requestAnimationFrame(syncScrollState);
+				}, { once: true });
+				stage.insertBefore(image, previousButton);
+			}
+
+			thumbButtons.forEach(function(button, buttonIndex) {
+				const active = buttonIndex === index;
+				button.classList.toggle("is-active", active);
+				button.setAttribute("aria-current", active ? "true" : "false");
+				if (active && typeof button.scrollIntoView === "function") {
+					button.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+				}
+			});
+			requestAnimationFrame(syncScrollState);
+		};
+		const setIndex = function(nextIndex) {
+			index = (nextIndex + mediaItems.length) % mediaItems.length;
+			renderItem();
+		};
+		const step = function(delta, event) {
+			if (event) {
+				event.preventDefault();
+				event.stopPropagation();
+			}
+			setIndex(index + delta);
+		};
+
+		previousButton.addEventListener("click", function(event) {
+			step(-1, event);
+		});
+		nextButton.addEventListener("click", function(event) {
+			step(1, event);
+		});
+		gallery.addEventListener("keydown", function(event) {
+			if (event.key === "ArrowLeft") {
+				step(-1, event);
+			} else if (event.key === "ArrowRight") {
+				step(1, event);
+			}
+		});
+
+		renderItem();
+		shell.appendChild(gallery);
+		return gallery;
+	}
+
+	function appendSwedishProductPreview(card, preview, spec, hostLabel, descriptionText) {
+		const metadata = (preview && preview.metadata) || {};
+		const provider = previewMetadataString(metadata, ["providerName", "productProvider"]) || spec.label;
+		const title = previewMetadataString(metadata, ["productTitle"])
+			|| previewProviderTitle(preview, spec);
+		const description = previewProviderDescription(preview, descriptionText);
+		const price = previewMetadataString(metadata, ["productPrice"]);
+		const originalPrice = previewMetadataString(metadata, ["productOriginalPrice", "listingOriginalPrice"]);
+		const discount = previewMetadataString(metadata, ["productDiscount", "listingDiscount"]);
+		const availability = previewMetadataString(metadata, ["productAvailability"]);
+		const delivery = previewMetadataString(metadata, ["productDelivery"]);
+		const rating = previewProductRatingLabel(previewMetadataString(metadata, ["productRating"]));
+		const reviewCount = previewProductReviewCountLabel(previewMetadataString(metadata, ["productReviewCount"]));
+		const brand = previewMetadataString(metadata, ["productBrand"]);
+		const sku = previewMetadataString(metadata, ["productSku", "productId"]);
+		const detail = [availability, delivery, brand, sku ? "SKU " + sku : ""].filter(Boolean).join(" / ") || provider;
+		const mediaItems = previewProductMediaItems(preview);
+		const specs = previewProductSpecs(preview);
+
+		const shell = document.createElement("div");
+		shell.className = "preview-card-product-shell";
+		if (mediaItems.length) {
+			appendProductMediaGallery(card, shell, preview, mediaItems);
+		}
+
+		const body = document.createElement("div");
+		body.className = "preview-card-product-body";
+
+		const top = document.createElement("div");
+		top.className = "preview-card-sv-top";
+		const identity = document.createElement("div");
+		identity.className = "preview-card-sv-identity";
+		const mark = document.createElement("span");
+		mark.className = "preview-card-sv-mark";
+		mark.textContent = spec.mark || String(provider || "P").slice(0, 2);
+		identity.appendChild(mark);
+		const source = document.createElement("span");
+		source.className = "preview-card-sv-source";
+		source.textContent = provider;
+		identity.appendChild(source);
+		top.appendChild(identity);
+		const badge = document.createElement("span");
+		badge.className = "preview-card-sv-badge";
+		badge.textContent = spec.kind === "systembolagetProduct" ? "Systembolaget" : "Produkt";
+		top.appendChild(badge);
+		body.appendChild(top);
+
+		const titleNode = document.createElement("div");
+		titleNode.className = "preview-card-product-title";
+		titleNode.textContent = title || provider;
+		body.appendChild(titleNode);
+
+		if (description) {
+			const descriptionNode = document.createElement("div");
+			descriptionNode.className = "preview-card-product-description";
+			descriptionNode.textContent = description;
+			body.appendChild(descriptionNode);
+		}
+
+		const chips = document.createElement("div");
+		chips.className = "preview-card-product-chips";
+		[rating, reviewCount, availability, delivery, brand].forEach(function(chip) {
+			appendGameStoreChip(chips, chip);
+		});
+		if (chips.childNodes.length) {
+			body.appendChild(chips);
+		}
+
+		const product = document.createElement("div");
+		product.className = "preview-card-product-commerce";
+		const productText = document.createElement("div");
+		productText.className = "preview-card-product-commerce-text";
+		const productName = document.createElement("div");
+		productName.className = "preview-card-product-commerce-name";
+		productName.textContent = title || provider;
+		productText.appendChild(productName);
+		const productDetail = document.createElement("div");
+		productDetail.className = "preview-card-product-commerce-detail";
+		productDetail.textContent = detail;
+		productText.appendChild(productDetail);
+		product.appendChild(productText);
+
+		const purchase = document.createElement("div");
+		purchase.className = "preview-card-product-purchase";
+		if (price || discount || availability) {
+			const priceNode = document.createElement("div");
+			priceNode.className = "preview-card-product-price";
+			if (discount) {
+				const discountNode = document.createElement("span");
+				discountNode.className = "preview-card-product-discount";
+				discountNode.textContent = discount.charAt(0) === "-" ? discount : "-" + discount;
+				priceNode.appendChild(discountNode);
+			}
+			const priceStack = document.createElement("span");
+			priceStack.className = "preview-card-product-price-stack";
+			if (originalPrice && originalPrice !== price) {
+				const original = document.createElement("span");
+				original.className = "preview-card-product-price-original";
+				original.textContent = originalPrice;
+				priceStack.appendChild(original);
+			}
+			const finalPrice = document.createElement("span");
+			finalPrice.className = "preview-card-product-price-final";
+			finalPrice.textContent = price || availability || "Open";
+			priceStack.appendChild(finalPrice);
+			priceNode.appendChild(priceStack);
+			purchase.appendChild(priceNode);
+		}
+		const cart = document.createElement("span");
+		cart.className = "preview-card-product-cart";
+		cart.setAttribute("aria-hidden", "true");
+		cart.appendChild(createPreviewCartIcon("preview-card-product-cart-icon"));
+		const cartLabel = document.createElement("span");
+		cartLabel.className = "preview-card-product-cart-label";
+		cartLabel.textContent = price ? "Cart" : "Open";
+		cart.appendChild(cartLabel);
+		purchase.appendChild(cart);
+		product.appendChild(purchase);
+		body.appendChild(product);
+
+		appendSwedishSpecGrid(body, specs, "preview-card-product-spec-grid");
+
+		const footer = document.createElement("div");
+		footer.className = "preview-card-sv-footer";
+		const host = document.createElement("span");
+		host.className = "preview-card-sv-host";
+		host.textContent = hostLabel || provider;
+		footer.appendChild(host);
+		const action = document.createElement("span");
+		action.className = "preview-card-sv-action";
+		action.textContent = (preview && preview.openLabel) || ("Open on " + provider);
+		footer.appendChild(action);
+		body.appendChild(footer);
+
+		shell.appendChild(body);
+		card.appendChild(shell);
+	}
+
+	function appendAmazonProductPreview(card, preview, spec, hostLabel) {
+		const metadata = (preview && preview.metadata) || {};
+		const title = previewMetadataString(metadata, ["productTitle"])
+			|| previewProviderTitle(preview, spec);
+		const price = previewMetadataString(metadata, ["productPrice"]);
+		const delivery = previewMetadataString(metadata, ["productDelivery"]);
+		const rating = previewProductRatingLabel(previewMetadataString(metadata, ["productRating"]));
+		const reviewCount = previewProductReviewCountLabel(previewMetadataString(metadata, ["productReviewCount"]));
+		const availability = previewMetadataString(metadata, ["productAvailability"]);
+		const brand = previewMetadataString(metadata, ["productBrand"]);
+		const imageItems = previewImageMediaItems(preview, "", "");
+		const imageUrl = imageItems.length ? String(imageItems[0].url || "").trim()
+			: String((preview && preview.thumbnailUrl) || "").trim();
+
+		const shell = document.createElement("div");
+		shell.className = "preview-card-amazon-shell";
+
+		const media = document.createElement("div");
+		media.className = "preview-card-amazon-media";
+		if (imageUrl) {
+			const image = document.createElement("img");
+			image.className = "preview-card-amazon-image";
+			image.loading = "lazy";
+			image.src = imageUrl;
+			image.alt = title || "Amazon product";
+			media.appendChild(image);
+		} else {
+			const placeholder = document.createElement("div");
+			placeholder.className = "preview-card-amazon-placeholder";
+			placeholder.textContent = "A";
+			media.appendChild(placeholder);
+		}
+		shell.appendChild(media);
+
+		const body = document.createElement("div");
+		body.className = "preview-card-amazon-body";
+
+		const top = document.createElement("div");
+		top.className = "preview-card-sv-top";
+		const identity = document.createElement("div");
+		identity.className = "preview-card-sv-identity";
+		const mark = document.createElement("span");
+		mark.className = "preview-card-sv-mark";
+		mark.textContent = "A";
+		identity.appendChild(mark);
+		const source = document.createElement("span");
+		source.className = "preview-card-sv-source";
+		source.textContent = previewMetadataString(metadata, ["providerName"]) || "Amazon";
+		identity.appendChild(source);
+		top.appendChild(identity);
+		const badge = document.createElement("span");
+		badge.className = "preview-card-sv-badge";
+		badge.textContent = "Produkt";
+		top.appendChild(badge);
+		body.appendChild(top);
+
+		const titleNode = document.createElement("div");
+		titleNode.className = "preview-card-amazon-title";
+		titleNode.textContent = title || "Amazon product";
+		body.appendChild(titleNode);
+
+		if (price || delivery) {
+			const commerce = document.createElement("div");
+			commerce.className = "preview-card-amazon-commerce";
+			if (price) {
+				const priceNode = document.createElement("div");
+				priceNode.className = "preview-card-amazon-price";
+				priceNode.textContent = price;
+				commerce.appendChild(priceNode);
+			}
+			if (delivery) {
+				const deliveryNode = document.createElement("div");
+				deliveryNode.className = "preview-card-amazon-delivery";
+				deliveryNode.textContent = delivery;
+				commerce.appendChild(deliveryNode);
+			}
+			body.appendChild(commerce);
+		}
+
+		if (rating || reviewCount) {
+			const stats = document.createElement("div");
+			stats.className = "preview-card-amazon-stats";
+			if (rating) {
+				const ratingNode = document.createElement("span");
+				ratingNode.className = "preview-card-amazon-rating";
+				ratingNode.textContent = rating;
+				stats.appendChild(ratingNode);
+			}
+			if (reviewCount) {
+				const reviewsNode = document.createElement("span");
+				reviewsNode.className = "preview-card-amazon-reviews";
+				reviewsNode.textContent = reviewCount;
+				stats.appendChild(reviewsNode);
+			}
+			body.appendChild(stats);
+		}
+
+		const chips = document.createElement("div");
+		chips.className = "preview-card-sv-chips";
+		appendSwedishPreviewChip(chips, availability);
+		appendSwedishPreviewChip(chips, brand);
+		if (chips.childNodes.length) {
+			body.appendChild(chips);
+		}
+
+		const footer = document.createElement("div");
+		footer.className = "preview-card-sv-footer";
+		const host = document.createElement("span");
+		host.className = "preview-card-sv-host";
+		host.textContent = hostLabel || "amazon.se";
+		footer.appendChild(host);
+		const action = document.createElement("span");
+		action.className = "preview-card-sv-action";
+		action.textContent = (preview && preview.openLabel) || "Open on Amazon";
+		footer.appendChild(action);
+		body.appendChild(footer);
+
+		shell.appendChild(body);
+		card.appendChild(shell);
+	}
+
+	function appendRichProviderPreview(card, preview, spec, hostLabel, sourceLabel, descriptionText) {
+		if (!spec) {
+			return false;
+		}
+		if (spec.kind === "article") {
+			appendArticlePreview(card, preview, spec, hostLabel, descriptionText);
+			return true;
+		}
+		if (spec.kind === "product" || spec.kind === "systembolagetProduct") {
+			appendSwedishProductPreview(card, preview, spec, hostLabel, descriptionText);
+			return true;
+		}
+		if (spec.provider === "amazon") {
+			appendAmazonProductPreview(card, preview, spec, hostLabel);
+			return true;
+		}
+		if (spec.provider === "blocket") {
+			appendBlocketListingPreview(card, preview, spec, hostLabel, descriptionText);
+			return true;
+		}
+		if (spec.provider === "flashback") {
+			appendFlashbackPreview(card, preview, hostLabel, sourceLabel, descriptionText);
+			return true;
+		}
+		if (spec.provider === "existenz") {
+			appendExistenzPreview(card, preview, spec, hostLabel, descriptionText);
+			return true;
+		}
+		if (spec.kind === "marketplaceListing") {
+			appendSwedishMarketplacePreview(card, preview, spec.provider, hostLabel, sourceLabel, descriptionText);
+			return true;
+		}
+		appendSwedishInfoPreview(card, preview, spec, hostLabel, descriptionText);
+		return true;
+	}
+
+	function previewIsGitHub(preview, hostLabel) {
+		const metadata = (preview && preview.metadata) || {};
+		if (String(metadata.provider || "").trim().toLowerCase() === "github") {
+			return true;
+		}
+		const url = previewUrlObject(preview && preview.url);
+		const host = normalizedPreviewHost(url ? url.hostname : hostLabel);
+		if (host !== "github.com" || !url) {
+			return false;
+		}
+		const segments = url.pathname.split("/").filter(Boolean);
+		return segments.length >= 2;
+	}
+
+	function previewCompactCount(value) {
+		const count = Number(value);
+		if (!Number.isFinite(count) || count <= 0) {
+			return "";
+		}
+		if (count >= 1000000) {
+			return (count / 1000000).toFixed(count >= 10000000 ? 0 : 1).replace(/\.0$/, "") + "M";
+		}
+		if (count >= 1000) {
+			return (count / 1000).toFixed(count >= 10000 ? 0 : 1).replace(/\.0$/, "") + "K";
+		}
+		return String(Math.round(count));
+	}
+
+	function previewDateLabel(value) {
+		const raw = String(value || "").trim();
+		if (!raw) {
+			return "";
+		}
+		const date = new Date(raw);
+		if (!Number.isFinite(date.getTime())) {
+			return "";
+		}
+		return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(date);
+	}
+
+	function appendGitHubMetaPill(parent, label, value, extraClass) {
+		const text = String(value || "").trim();
+		if (!text) {
+			return;
+		}
+		const pill = document.createElement("span");
+		pill.className = "preview-card-github-pill" + (extraClass ? " " + extraClass : "");
+		pill.textContent = label ? label + " " + text : text;
+		parent.appendChild(pill);
+	}
+
+	function appendGitHubLink(parent, label, url, primary) {
+		const targetUrl = String(url || "").trim();
+		if (!targetUrl) {
+			return;
+		}
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "preview-card-github-link" + (primary ? " is-primary" : "");
+		button.textContent = label;
+		button.addEventListener("click", function(event) {
+			event.preventDefault();
+			event.stopPropagation();
+			notifyBridge("activateLink", targetUrl);
+		});
+		parent.appendChild(button);
+	}
+
+	function appendGitHubPreview(card, preview, hostLabel, descriptionText) {
+		const metadata = (preview && preview.metadata) || {};
+		const fullName = String(metadata.githubFullName || preview.title || "").trim();
+		const owner = String(metadata.githubOwner || "").trim();
+		const repo = String(metadata.githubRepo || "").trim();
+		const repoName = repo || (fullName.indexOf("/") >= 0 ? fullName.split("/").pop() : fullName) || "Repository";
+		const ownerName = owner || (fullName.indexOf("/") >= 0 ? fullName.split("/")[0] : "GitHub");
+		const description = String(metadata.githubDescription || descriptionText || "").trim();
+
+		const shell = document.createElement("div");
+		shell.className = "preview-card-github-shell";
+
+		const header = document.createElement("div");
+		header.className = "preview-card-github-header";
+		const mark = document.createElement("div");
+		mark.className = "preview-card-github-mark";
+		const avatarUrl = String(metadata.githubOwnerAvatarUrl || "").trim();
+		if (avatarUrl) {
+			const avatar = document.createElement("img");
+			avatar.className = "preview-card-github-avatar";
+			avatar.loading = "lazy";
+			avatar.src = avatarUrl;
+			avatar.alt = ownerName;
+			mark.appendChild(avatar);
+		} else {
+			mark.textContent = "GH";
+		}
+		header.appendChild(mark);
+
+		const heading = document.createElement("div");
+		heading.className = "preview-card-github-heading";
+		const source = document.createElement("div");
+		source.className = "preview-card-github-source";
+		source.textContent = "GitHub";
+		heading.appendChild(source);
+		const path = document.createElement("div");
+		path.className = "preview-card-github-path";
+		const ownerNode = document.createElement("span");
+		ownerNode.className = "preview-card-github-owner";
+		ownerNode.textContent = ownerName;
+		path.appendChild(ownerNode);
+		const slash = document.createElement("span");
+		slash.className = "preview-card-github-slash";
+		slash.textContent = "/";
+		path.appendChild(slash);
+		const repoNode = document.createElement("span");
+		repoNode.className = "preview-card-github-repo";
+		repoNode.textContent = repoName;
+		path.appendChild(repoNode);
+		heading.appendChild(path);
+		header.appendChild(heading);
+
+		const badges = document.createElement("div");
+		badges.className = "preview-card-github-badges";
+		if (metadata.githubPrivate) {
+			appendGitHubMetaPill(badges, "", "Private", "is-state");
+		}
+		if (metadata.githubArchived) {
+			appendGitHubMetaPill(badges, "", "Archived", "is-state");
+		}
+		if (metadata.githubFork) {
+			appendGitHubMetaPill(badges, "", "Fork", "is-state");
+		}
+		if (!badges.childNodes.length) {
+			appendGitHubMetaPill(badges, "", "Repository", "is-state");
+		}
+		header.appendChild(badges);
+		shell.appendChild(header);
+
+		if (description) {
+			const copy = document.createElement("div");
+			copy.className = "preview-card-github-description";
+			copy.textContent = description;
+			shell.appendChild(copy);
+		}
+
+		const stats = document.createElement("div");
+		stats.className = "preview-card-github-stats";
+		appendGitHubMetaPill(stats, "", metadata.githubLanguage);
+		appendGitHubMetaPill(stats, "Stars", previewCompactCount(metadata.githubStars));
+		appendGitHubMetaPill(stats, "Forks", previewCompactCount(metadata.githubForks));
+		appendGitHubMetaPill(stats, "Issues", previewCompactCount(metadata.githubOpenIssues));
+		appendGitHubMetaPill(stats, "", metadata.githubLicense);
+		if (Array.isArray(metadata.githubTopics)) {
+			metadata.githubTopics.slice(0, 3).forEach(function(topic) {
+				appendGitHubMetaPill(stats, "#", topic, "is-topic");
+			});
+		}
+		if (stats.childNodes.length) {
+			shell.appendChild(stats);
+		}
+
+		const release = document.createElement("div");
+		release.className = "preview-card-github-release";
+		const releaseTop = document.createElement("div");
+		releaseTop.className = "preview-card-github-release-top";
+		const releaseLabel = document.createElement("span");
+		releaseLabel.className = "preview-card-github-release-label";
+		releaseLabel.textContent = "Latest release";
+		releaseTop.appendChild(releaseLabel);
+		const releaseDate = previewDateLabel(metadata.githubLatestReleasePublishedAt);
+		if (releaseDate) {
+			const date = document.createElement("span");
+			date.className = "preview-card-github-release-date";
+			date.textContent = releaseDate;
+			releaseTop.appendChild(date);
+		}
+		release.appendChild(releaseTop);
+
+		if (metadata.githubLatestReleaseLoading) {
+			const loading = document.createElement("div");
+			loading.className = "preview-card-github-release-title";
+			loading.textContent = "Checking latest release...";
+			release.appendChild(loading);
+		} else if (metadata.githubLatestReleaseTag || metadata.githubLatestReleaseName) {
+			const title = document.createElement("div");
+			title.className = "preview-card-github-release-title";
+			title.textContent = String(metadata.githubLatestReleaseName || metadata.githubLatestReleaseTag || "").trim();
+			release.appendChild(title);
+			if (metadata.githubLatestReleaseTag && metadata.githubLatestReleaseName
+				&& metadata.githubLatestReleaseTag !== metadata.githubLatestReleaseName) {
+				const tag = document.createElement("div");
+				tag.className = "preview-card-github-release-tag";
+				tag.textContent = String(metadata.githubLatestReleaseTag);
+				release.appendChild(tag);
+			}
+			if (metadata.githubLatestReleaseNotes) {
+				const notes = document.createElement("div");
+				notes.className = "preview-card-github-release-notes";
+				notes.textContent = String(metadata.githubLatestReleaseNotes);
+				release.appendChild(notes);
+			}
+			const releaseStats = document.createElement("div");
+			releaseStats.className = "preview-card-github-release-stats";
+			appendGitHubMetaPill(releaseStats, "Assets", previewCompactCount(metadata.githubLatestReleaseAssetCount));
+			appendGitHubMetaPill(releaseStats, "Downloads", previewCompactCount(metadata.githubLatestReleaseDownloadCount));
+			if (releaseStats.childNodes.length) {
+				release.appendChild(releaseStats);
+			}
+			const releaseLinks = document.createElement("div");
+			releaseLinks.className = "preview-card-github-links";
+			appendGitHubLink(releaseLinks, "Open release", metadata.githubLatestReleaseUrl, true);
+			appendGitHubLink(releaseLinks, "Download " + String(metadata.githubLatestReleaseAssetName || "asset"),
+				metadata.githubLatestReleaseAssetUrl, false);
+			if (releaseLinks.childNodes.length) {
+				release.appendChild(releaseLinks);
+			}
+		} else {
+			const missing = document.createElement("div");
+			missing.className = "preview-card-github-release-title";
+			missing.textContent = "No public release found";
+			release.appendChild(missing);
+		}
+		shell.appendChild(release);
+
+		const footer = document.createElement("div");
+		footer.className = "preview-card-github-footer";
+		const host = document.createElement("span");
+		host.className = "preview-card-github-host";
+		host.textContent = hostLabel || "github.com";
+		footer.appendChild(host);
+		const action = document.createElement("span");
+		action.className = "preview-card-github-action";
+		action.textContent = (preview && preview.openLabel) || "Open on GitHub";
+		footer.appendChild(action);
+		shell.appendChild(footer);
+
+		card.appendChild(shell);
+	}
+
+	function previewIsSocialPost(preview, hostLabel) {
+		const url = previewUrlObject(preview && preview.url);
+		const host = normalizedPreviewHost(url ? url.hostname : hostLabel);
+		if (!url) {
+			return false;
+		}
+		const segments = url.pathname.split("/").filter(Boolean).map(function(segment) {
+			try {
+				return decodeURIComponent(segment);
+			} catch (error) {
+				return segment;
+			}
+		});
+		if (host === "bsky.app") {
+			return segments.length >= 4 && segments[0] === "profile" && segments[2] === "post";
+		}
+		if (host === "threads.net") {
+			return segments.length >= 3 && /^@/.test(segments[0]) && segments[1] === "post";
+		}
+		if (host && segments.length >= 2 && /^@/.test(segments[0]) && /^[0-9]{5,32}$/.test(segments[1])) {
+			return true;
+		}
+		return false;
+	}
+
+	function previewSocialPostInfo(preview, hostLabel, sourceLabel) {
+		const url = previewUrlObject(preview && preview.url);
+		const host = normalizedPreviewHost(url ? url.hostname : hostLabel);
+		const source = String(sourceLabel || "").trim();
+		const segments = url ? url.pathname.split("/").filter(Boolean).map(function(segment) {
+			try {
+				return decodeURIComponent(segment);
+			} catch (error) {
+				return segment;
+			}
+		}) : [];
+		if (host === "bsky.app") {
+			return {
+				mark: "B",
+				badge: "bsky.app",
+				source: source && !/^bsky\.app$/i.test(source) ? source : "Bluesky",
+				handle: segments.length >= 2 ? "@" + String(segments[1] || "").replace(/^@+/, "") : host
+			};
+		}
+		if (host === "threads.net") {
+			return {
+				mark: "T",
+				badge: "threads.net",
+				source: source && !/^threads\.net$/i.test(source) ? source : "Threads",
+				handle: segments.length ? String(segments[0] || "") : host
+			};
+		}
+		return {
+			mark: "M",
+			badge: host || "mastodon",
+			source: source && source !== host ? source : "Mastodon",
+			handle: segments.length ? String(segments[0] || "") : host
+		};
+	}
+
+	function previewXPostHandle(preview) {
+		const metadata = (preview && preview.metadata) || {};
+		const metadataHandle = String(metadata.xHandle || "").trim();
+		if (metadataHandle) {
+			return metadataHandle.charAt(0) === "@" ? metadataHandle : "@" + metadataHandle;
+		}
+		const url = previewUrlObject(preview && preview.url);
+		if (!url) {
+			return "";
+		}
+		const segments = url.pathname.split("/").filter(Boolean).map(function(segment) {
+			try {
+				return decodeURIComponent(segment);
+			} catch (error) {
+				return segment;
+			}
+		});
+		const statusIndex = segments.findIndex(function(segment) {
+			return /^status(?:es)?$/i.test(segment);
+		});
+		if (statusIndex <= 0) {
+			return "";
+		}
+		const handle = String(segments[statusIndex - 1] || "").trim();
+		if (!handle || /^i$/i.test(handle)) {
+			return "";
+		}
+		return "@" + handle.replace(/^@+/, "");
+	}
+
+	function previewXPostMetadata(preview) {
+		return (preview && preview.metadata) || {};
+	}
+
+	function previewXCompactCount(value) {
+		const count = Number(value);
+		if (!Number.isFinite(count) || count <= 0) {
+			return "";
+		}
+		if (count >= 1000000) {
+			return (count / 1000000).toFixed(count >= 10000000 ? 0 : 1).replace(/\.0$/, "") + "M";
+		}
+		if (count >= 1000) {
+			return (count / 1000).toFixed(count >= 10000 ? 0 : 1).replace(/\.0$/, "") + "K";
+		}
+		return String(Math.round(count));
+	}
+
+	function previewXTimestamp(value) {
+		const raw = String(value || "").trim();
+		if (!raw) {
+			return "";
+		}
+		const date = new Date(raw);
+		if (!Number.isFinite(date.getTime())) {
+			return "";
+		}
+		const now = Date.now();
+		const ageMs = Math.max(0, now - date.getTime());
+		const minuteMs = 60 * 1000;
+		const hourMs = 60 * minuteMs;
+		const dayMs = 24 * hourMs;
+		if (ageMs < hourMs) {
+			return Math.max(1, Math.floor(ageMs / minuteMs)) + "m";
+		}
+		if (ageMs < dayMs) {
+			return Math.floor(ageMs / hourMs) + "h";
+		}
+		return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date);
+	}
+
+	function previewXPostTitle(preview, handle) {
+		const rawTitle = String((preview && preview.title) || "").trim();
+		const normalizedTitle = rawTitle.toLowerCase();
+		if (rawTitle
+			&& normalizedTitle !== "post on x"
+			&& normalizedTitle !== "x"
+			&& normalizedTitle !== "fetching post metadata") {
+			return rawTitle;
+		}
+		if (handle) {
+			return "Post by " + handle;
+		}
+		return rawTitle || "Post on X";
+	}
+
+	function previewXPostDisplayName(preview, handle, sourceLabel) {
+		const metadataName = String(previewXPostMetadata(preview).xDisplayName || "").trim();
+		if (metadataName) {
+			return metadataName;
+		}
+		const subtitle = String((preview && preview.subtitle) || "").trim();
+		if (subtitle
+			&& !/^x$/i.test(subtitle)
+			&& !/^twitter\/x$/i.test(subtitle)
+			&& subtitle.toLowerCase() !== String(handle || "").toLowerCase()) {
+			return subtitle;
+		}
+		const source = String(sourceLabel || "").trim();
+		if (source
+			&& !/^x\.com$/i.test(source)
+			&& !/^twitter\/x$/i.test(source)
+			&& source.toLowerCase() !== String(handle || "").toLowerCase()) {
+			return source;
+		}
+		return "";
+	}
+
+	function previewXSummaryHandle(item) {
+		const rawHandle = String((item && item.handle) || "").trim();
+		if (!rawHandle) {
+			return "";
+		}
+		return rawHandle.charAt(0) === "@" ? rawHandle : "@" + rawHandle.replace(/^@+/, "");
+	}
+
+	function appendXSummaryPost(parent, item, className) {
+		if (!item || typeof item !== "object") {
+			return false;
+		}
+		const handle = previewXSummaryHandle(item);
+		const displayName = String(item.displayName || "").trim();
+		const text = String(item.text || "").trim();
+		if (!displayName && !handle && !text) {
+			return false;
+		}
+
+		const row = document.createElement("div");
+		row.className = className || "preview-card-x-context-post";
+
+		const avatar = document.createElement("span");
+		avatar.className = "preview-card-x-context-avatar";
+		styleAvatar(avatar, displayName || handle || "X", false, String(item.avatarUrl || "").trim());
+		row.appendChild(avatar);
+
+		const body = document.createElement("div");
+		body.className = "preview-card-x-context-body";
+
+		const sourceRow = document.createElement("div");
+		sourceRow.className = "preview-card-x-context-source-row";
+		const source = document.createElement("span");
+		source.className = "preview-card-x-context-source";
+		source.textContent = displayName || handle || "X post";
+		sourceRow.appendChild(source);
+		if (item.verified) {
+			const verified = document.createElement("span");
+			verified.className = "preview-card-x-verified preview-card-x-context-verified";
+			verified.textContent = "✓";
+			verified.setAttribute("aria-label", "Verified");
+			sourceRow.appendChild(verified);
+		}
+		const timestamp = previewXTimestamp(item.createdAt);
+		const handleNode = document.createElement("span");
+		handleNode.className = "preview-card-x-context-handle";
+		handleNode.textContent = (handle || "x.com") + (timestamp ? " · " + timestamp : "");
+		sourceRow.appendChild(handleNode);
+		body.appendChild(sourceRow);
+
+		if (text) {
+			const textNode = document.createElement("div");
+			textNode.className = "preview-card-x-context-text";
+			textNode.textContent = text;
+			body.appendChild(textNode);
+		}
+
+		row.appendChild(body);
+		parent.appendChild(row);
+		return true;
+	}
+
+	function appendXReplyContext(shell, preview) {
+		const context = previewXPostMetadata(preview).xReplyContext;
+		if (!Array.isArray(context) || !context.length) {
+			return;
+		}
+		const wrapper = document.createElement("div");
+		wrapper.className = "preview-card-x-context";
+		context.slice(-3).forEach(function(item) {
+			appendXSummaryPost(wrapper, item, "preview-card-x-context-post");
+		});
+		if (wrapper.childNodes.length) {
+			shell.appendChild(wrapper);
+		}
+	}
+
+	function appendXQuotedPost(shell, preview) {
+		const quoted = previewXPostMetadata(preview).xQuotedPost;
+		if (!quoted || typeof quoted !== "object") {
+			return;
+		}
+		const wrapper = document.createElement("div");
+		wrapper.className = "preview-card-x-quoted";
+		appendXSummaryPost(wrapper, quoted, "preview-card-x-quoted-post");
+		if (wrapper.childNodes.length) {
+			shell.appendChild(wrapper);
+		}
+	}
+
+	function appendSocialPostPreview(card, preview, hostLabel, sourceLabel, descriptionText) {
+		const info = previewSocialPostInfo(preview, hostLabel, sourceLabel);
+		const shell = document.createElement("div");
+		shell.className = "preview-card-x-shell preview-card-social-shell";
+
+		const header = document.createElement("div");
+		header.className = "preview-card-x-header";
+
+		const mark = document.createElement("span");
+		mark.className = "preview-card-x-mark preview-card-social-mark";
+		mark.textContent = info.mark;
+		header.appendChild(mark);
+
+		const heading = document.createElement("div");
+		heading.className = "preview-card-x-heading";
+
+		const source = document.createElement("div");
+		source.className = "preview-card-x-source";
+		source.textContent = info.source || info.handle || "Post";
+		heading.appendChild(source);
+
+		const subline = document.createElement("div");
+		subline.className = "preview-card-x-handle";
+		subline.textContent = info.handle || info.badge || hostLabel || "";
+		heading.appendChild(subline);
+		header.appendChild(heading);
+
+		const badge = document.createElement("div");
+		badge.className = "preview-card-x-badge";
+		badge.textContent = info.badge || hostLabel || "";
+		header.appendChild(badge);
+		shell.appendChild(header);
+
+		const copy = document.createElement("div");
+		copy.className = "preview-card-x-copy";
+
+		const title = document.createElement("div");
+		title.className = "preview-card-x-title";
+		title.textContent = previewXPostTitle(preview, info.handle);
+		copy.appendChild(title);
+
+		const lowerDescription = String(descriptionText || "").trim().toLowerCase();
+		const hasUsefulDescription = lowerDescription
+			&& lowerDescription !== String(info.handle || "").toLowerCase()
+			&& lowerDescription !== String(info.source || "").toLowerCase()
+			&& lowerDescription !== "fetching page metadata";
+		if (hasUsefulDescription) {
+			const description = document.createElement("div");
+			description.className = "preview-card-x-description";
+			description.textContent = descriptionText;
+			copy.appendChild(description);
+		}
+		shell.appendChild(copy);
+
+		if (preview.thumbnailUrl) {
+			const media = document.createElement("div");
+			media.className = "preview-card-media preview-card-image-preview-media preview-card-x-media preview-card-x-gallery";
+			const image = document.createElement("img");
+			image.className = "preview-card-image preview-card-inline-image preview-card-x-image";
+			image.loading = "lazy";
+			image.src = preview.thumbnailUrl;
+			image.alt = preview.title || info.source || "Post preview";
+			media.appendChild(image);
+			shell.appendChild(media);
+		}
+
+		const footer = document.createElement("div");
+		footer.className = "preview-card-x-footer";
+		const action = document.createElement("span");
+		action.className = "preview-card-x-action";
+		action.textContent = (preview && preview.openLabel) || "Open post";
+		footer.appendChild(action);
+		shell.appendChild(footer);
+		card.appendChild(shell);
+	}
+
+	function appendXPostPreview(card, preview, hostLabel, sourceLabel, descriptionText, mediaState) {
+		mediaState = mediaState || {};
+		const metadata = previewXPostMetadata(preview);
+		const handle = previewXPostHandle(preview);
+		const displayName = previewXPostDisplayName(preview, handle, sourceLabel);
+		const shell = document.createElement("div");
+		shell.className = "preview-card-x-shell";
+		appendXReplyContext(shell, preview);
+
+		const header = document.createElement("div");
+		header.className = "preview-card-x-header";
+
+		const mark = document.createElement("span");
+		mark.className = "preview-card-x-avatar";
+		styleAvatar(mark, displayName || handle || "X", false, String(metadata.xAvatarUrl || "").trim());
+		header.appendChild(mark);
+
+		const heading = document.createElement("div");
+		heading.className = "preview-card-x-heading";
+
+		const sourceRow = document.createElement("div");
+		sourceRow.className = "preview-card-x-source-row";
+
+		const source = document.createElement("span");
+		source.className = "preview-card-x-source";
+		source.textContent = displayName || handle || "X post";
+		sourceRow.appendChild(source);
+		if (metadata.xVerified) {
+			const verified = document.createElement("span");
+			verified.className = "preview-card-x-verified";
+			verified.textContent = "✓";
+			verified.setAttribute("aria-label", "Verified");
+			sourceRow.appendChild(verified);
+		}
+		heading.appendChild(sourceRow);
+
+		const subline = document.createElement("div");
+		subline.className = "preview-card-x-handle";
+		const timestamp = previewXTimestamp(metadata.xCreatedAt);
+		subline.textContent = (handle || (hostLabel || "x.com")) + (timestamp ? " · " + timestamp : "");
+		heading.appendChild(subline);
+		header.appendChild(heading);
+
+		const menu = document.createElement("span");
+		menu.className = "preview-card-x-menu";
+		menu.textContent = "...";
+		header.appendChild(menu);
+		shell.appendChild(header);
+
+		const copy = document.createElement("div");
+		copy.className = "preview-card-x-copy";
+
+		const title = document.createElement("div");
+		title.className = "preview-card-x-title";
+		title.textContent = previewXPostTitle(preview, handle);
+		copy.appendChild(title);
+
+		const lowerDescription = String(descriptionText || "").trim().toLowerCase();
+		const hasUsefulDescription = lowerDescription
+			&& lowerDescription !== String(handle || "").toLowerCase()
+			&& lowerDescription !== "video preview"
+			&& lowerDescription !== "image preview"
+			&& lowerDescription !== "fetching page metadata";
+		if (hasUsefulDescription) {
+			const description = document.createElement("div");
+			description.className = "preview-card-x-description";
+			description.textContent = descriptionText;
+			copy.appendChild(description);
+		}
+		shell.appendChild(copy);
+		appendXQuotedPost(shell, preview);
+
+		if (mediaState.hasPlayableMedia && (mediaState.isVideoMedia || mediaState.isGifMedia)) {
+			shell.appendChild(createPreviewPlayableMedia(card, preview, mediaState.mediaUrl, mediaState.mediaMime,
+				mediaState.mediaAudioUrl, mediaState.mediaAudioMime, mediaState.isVideoMedia, mediaState.isGifMedia,
+				mediaState.videoInlineSupported, "preview-card-x-media preview-card-x-player"));
+		} else if (mediaState.imageMediaItems && mediaState.imageMediaItems.length > 1) {
+			appendPreviewImageCarousel(shell, preview, mediaState.imageMediaItems,
+				"preview-card-x-media preview-card-x-gallery");
+		} else {
+			const imageItem = mediaState.imageMediaItems && mediaState.imageMediaItems.length
+				? mediaState.imageMediaItems[0]
+				: null;
+			const imageUrl = imageItem ? imageItem.url : String(preview.thumbnailUrl || "").trim();
+			if (imageUrl) {
+				const media = document.createElement("div");
+				media.className = "preview-card-media preview-card-image-preview-media preview-card-x-media preview-card-x-gallery";
+				const image = document.createElement("img");
+				image.className = "preview-card-image preview-card-inline-image preview-card-x-image";
+				image.loading = "lazy";
+				image.src = imageUrl;
+				image.alt = preview.title || handle || "X post preview";
+				media.appendChild(image);
+				shell.appendChild(media);
+			}
+		}
+
+		const footer = document.createElement("div");
+		footer.className = "preview-card-x-footer";
+		const metrics = document.createElement("div");
+		metrics.className = "preview-card-x-metrics";
+		const repostCount = Number(metadata.xRepostCount || 0) + Number(metadata.xQuoteCount || 0);
+		[
+			{ token: "reply", label: "Reply", mark: "○", count: metadata.xReplyCount },
+			{ token: "repost", label: "Repost", mark: "↻", count: repostCount },
+			{ token: "like", label: "Like", mark: "♡", count: metadata.xLikeCount },
+			{ token: "views", label: "Views", mark: "▥", count: metadata.xViewCount },
+			{ token: "bookmark", label: "Bookmark", mark: "□", count: metadata.xBookmarkCount },
+			{ token: "share", label: "Share", mark: "↗" }
+		].forEach(function(item) {
+			const metric = document.createElement("span");
+			metric.className = "preview-card-x-metric preview-card-x-metric-" + item.token;
+			metric.setAttribute("aria-label", item.label);
+			const mark = document.createElement("span");
+			mark.className = "preview-card-x-metric-mark";
+			mark.textContent = item.mark;
+			metric.appendChild(mark);
+			const count = previewXCompactCount(item.count);
+			if (count) {
+				const countNode = document.createElement("span");
+				countNode.className = "preview-card-x-metric-count";
+				countNode.textContent = count;
+				metric.appendChild(countNode);
+			}
+			metrics.appendChild(metric);
+		});
+		footer.appendChild(metrics);
+		const action = document.createElement("span");
+		action.className = "preview-card-x-action";
+		action.textContent = (preview && preview.openLabel) || "Open on X";
+		footer.appendChild(action);
+		shell.appendChild(footer);
+		card.appendChild(shell);
+	}
+
+	function previewImageMediaItems(preview, fallbackMediaUrl, fallbackMediaMime) {
+		const items = [];
+		const seen = Object.create(null);
+		const addItem = function(rawUrl, rawMime, rawKind) {
+			const url = String(rawUrl || "").trim();
+			if (!url) {
+				return;
+			}
+			const mime = String(rawMime || "").trim().toLowerCase();
+			const kind = String(rawKind || "").trim().toLowerCase();
+			if (kind && kind !== "image") {
+				return;
+			}
+			if (mime && (!/^image\//i.test(mime) || mime === "image/gif")) {
+				return;
+			}
+			if (seen[url]) {
+				return;
+			}
+			seen[url] = true;
+			items.push({ url: url, mime: mime, kind: "image" });
+		};
+
+		if (Array.isArray(preview && preview.mediaItems)) {
+			preview.mediaItems.forEach(function(item) {
+				addItem(item && item.url, item && item.mime, item && item.kind);
+			});
+		}
+		const metadataImages = (preview && preview.metadata && Array.isArray(preview.metadata.listingImages))
+			? preview.metadata.listingImages
+			: [];
+		metadataImages.forEach(function(item) {
+			addItem(item && item.url, item && item.mime, item && item.kind);
+		});
+		const productImages = (preview && preview.metadata && Array.isArray(preview.metadata.productImages))
+			? preview.metadata.productImages
+			: [];
+		productImages.forEach(function(item) {
+			addItem(item && item.url, item && item.mime, item && item.kind);
+		});
+		if (!productImages.length && preview && preview.metadata) {
+			addItem(preview.metadata.productImage, "image/jpeg", "image");
+		}
+		const articleImages = (preview && preview.metadata && Array.isArray(preview.metadata.articleImages))
+			? preview.metadata.articleImages
+			: [];
+		articleImages.forEach(function(item) {
+			addItem(item && item.url, item && item.mime, item && item.kind);
+		});
+		if (!articleImages.length && preview && preview.metadata) {
+			addItem(preview.metadata.articleImage, "image/jpeg", "image");
+		}
+		if (!items.length) {
+			addItem(fallbackMediaUrl || (preview && preview.thumbnailUrl), fallbackMediaMime, "image");
+		}
+		return items;
+	}
+
+	function appendPreviewImageCarousel(parent, preview, mediaItems, extraClass) {
+		const media = document.createElement("div");
+		media.className = "preview-card-media preview-card-image-preview-media preview-card-carousel"
+			+ (extraClass ? " " + extraClass : "");
+		media.tabIndex = 0;
+
+		const image = document.createElement("img");
+		image.className = "preview-card-image preview-card-inline-image preview-card-carousel-image";
+		image.loading = "lazy";
+		media.appendChild(image);
+
+		const previousButton = document.createElement("button");
+		previousButton.type = "button";
+		previousButton.className = "preview-card-carousel-button preview-card-carousel-previous";
+		previousButton.textContent = "<";
+		previousButton.setAttribute("aria-label", "Previous image");
+		media.appendChild(previousButton);
+
+		const nextButton = document.createElement("button");
+		nextButton.type = "button";
+		nextButton.className = "preview-card-carousel-button preview-card-carousel-next";
+		nextButton.textContent = ">";
+		nextButton.setAttribute("aria-label", "Next image");
+		media.appendChild(nextButton);
+
+		const dots = document.createElement("div");
+		dots.className = "preview-card-carousel-dots";
+		const dotButtons = mediaItems.map(function(item, itemIndex) {
+			const dot = document.createElement("button");
+			dot.type = "button";
+			dot.className = "preview-card-carousel-dot";
+			dot.setAttribute("aria-label", "Show image " + String(itemIndex + 1));
+			dot.addEventListener("click", function(event) {
+				event.preventDefault();
+				event.stopPropagation();
+				setIndex(itemIndex);
+			});
+			dots.appendChild(dot);
+			return dot;
+		});
+		media.appendChild(dots);
+
+		let index = 0;
+		const setIndex = function(nextIndex) {
+			index = (nextIndex + mediaItems.length) % mediaItems.length;
+			const item = mediaItems[index];
+			image.src = item.url;
+			image.alt = (preview && (preview.title || preview.subtitle)) || "Image preview";
+			dotButtons.forEach(function(dot, dotIndex) {
+				dot.classList.toggle("is-active", dotIndex === index);
+				dot.setAttribute("aria-current", dotIndex === index ? "true" : "false");
+			});
+		};
+		const step = function(delta, event) {
+			if (event) {
+				event.preventDefault();
+				event.stopPropagation();
+			}
+			setIndex(index + delta);
+		};
+
+		previousButton.addEventListener("click", function(event) {
+			step(-1, event);
+		});
+		nextButton.addEventListener("click", function(event) {
+			step(1, event);
+		});
+		media.addEventListener("keydown", function(event) {
+			if (event.key === "ArrowLeft") {
+				step(-1, event);
+			} else if (event.key === "ArrowRight") {
+				step(1, event);
+			}
+		});
+		image.addEventListener("load", function() {
+			requestAnimationFrame(syncScrollState);
+		});
+
+		setIndex(0);
+		parent.appendChild(media);
+		return media;
+	}
+
 	function renderPreviewCard(message) {
 		const preview = message && message.preview;
-		if (!preview || (!preview.url && !preview.title && !preview.description && !preview.thumbnailUrl && !preview.mediaUrl)) {
+		if (!preview || (!preview.url && !preview.title && !preview.description && !preview.thumbnailUrl && !preview.mediaUrl && !preview.embedUrl)) {
 			return null;
 		}
 		const mediaUrl = String(preview.mediaUrl || "").trim();
 		const mediaMime = String(preview.mediaMime || "").trim().toLowerCase();
 		const mediaAudioUrl = String(preview.mediaAudioUrl || "").trim();
 		const mediaAudioMime = String(preview.mediaAudioMime || "").trim().toLowerCase();
+		const embedUrl = String(preview.embedUrl || "").trim();
+		const embedKind = String(preview.embedKind || "").trim().toLowerCase();
+		const embedAspect = String(preview.embedAspect || "").trim().toLowerCase();
 		const hasPlayableMedia = !!mediaUrl;
+		const hasEmbedMedia = !!embedUrl;
 		const isVideoMedia = hasPlayableMedia && (preview.kind === "video" || /^video\//i.test(mediaMime));
 		const isGifMedia = hasPlayableMedia && (preview.kind === "gif" || mediaMime === "image/gif");
-		const videoInlineSupported = isVideoMedia && previewVideoCanPlayInline(mediaMime, mediaUrl);
-		const hasThumbnail = !!preview.thumbnailUrl;
+		const imageMediaItems = previewImageMediaItems(preview, mediaUrl, mediaMime);
 		const hostLabel = previewHostLabel(preview.url);
 		const sourceLabel = previewSourceLabel(preview, hostLabel);
 		const badgeText = previewBadgeText(preview, sourceLabel, hostLabel);
 		const descriptionText = previewDescriptionText(preview);
+		const isGoogleSearch = previewIsGoogleSearch(preview, hostLabel);
+		const isSteam = previewIsSteam(preview, hostLabel);
+		const steamMediaItems = isSteam ? previewSteamMediaItems(preview) : [];
+		const hasSteamGallery = steamMediaItems.length > 0;
+		const gameStoreKind = isSteam ? "" : previewGameStoreKind(preview, hostLabel);
+		const isGameStore = !!gameStoreKind;
+		const richProviderSpec = (!isSteam && !isGameStore) ? previewProviderSpec(preview, hostLabel) : null;
+		const swedishSiteKind = previewSwedishSiteKind(preview, hostLabel);
+		const isSwedishMarketplace = swedishSiteKind === "tradera" || swedishSiteKind === "blocket";
+		const isFlashbackThread = swedishSiteKind === "flashback";
+		const isGitHub = previewIsGitHub(preview, hostLabel);
+		const isXPost = previewIsXPost(preview, hostLabel);
+		const isTwitch = previewIsTwitch(preview, hostLabel);
+		const isSocialPost = !isXPost && previewIsSocialPost(preview, hostLabel);
+		const hasImageCarousel = imageMediaItems.length > 1 && !isVideoMedia && !isGifMedia;
+		const hasInteractiveMedia = hasPlayableMedia || hasEmbedMedia || hasImageCarousel || hasSteamGallery;
+		const cardUsesDiv = hasInteractiveMedia || isGitHub || isGameStore || !!richProviderSpec;
+		const isImagePreview = !isVideoMedia && !isGifMedia
+			&& (preview.kind === "image" || /^image\//i.test(mediaMime))
+			&& (!!mediaUrl || !!preview.thumbnailUrl || hasImageCarousel);
+		const videoInlineSupported = isVideoMedia && previewVideoCanPlayInline(mediaMime, mediaUrl);
+		const hasThumbnail = !!preview.thumbnailUrl;
+		const isYouTubeEmbed = hasEmbedMedia && embedKind === "youtube";
+		const embedKindToken = previewClassToken(embedKind);
+		const isShortEmbed = hasEmbedMedia && embedAspect === "short";
+		const isAudioEmbed = hasEmbedMedia && (embedAspect === "audio" || embedAspect === "compact-audio");
 
-		const card = document.createElement(hasPlayableMedia ? "div" : "button");
-		if (!hasPlayableMedia) {
+		const card = document.createElement(cardUsesDiv ? "div" : "button");
+		if (!cardUsesDiv) {
 			card.type = "button";
 		} else {
 			card.tabIndex = 0;
@@ -3807,12 +8241,33 @@
 		}
 		card.className = "preview-card"
 			+ (hasThumbnail ? " has-thumbnail" : "")
-			+ (hasPlayableMedia ? " has-media" : "")
-			+ (isVideoMedia ? " is-video" : "")
+			+ (hasInteractiveMedia ? " has-media" : "")
+			+ ((isVideoMedia || hasEmbedMedia) ? " is-video" : "")
 			+ (isGifMedia ? " is-gif" : "")
 			+ (preview.loading ? " is-loading" : "")
 			+ (preview.failed ? " is-failed" : "")
-			+ (preview.kind === "image" ? " is-image" : "");
+			+ (preview.kind === "image" ? " is-image" : "")
+			+ (isImagePreview ? " is-image-preview" : "")
+			+ (hasImageCarousel ? " is-carousel" : "")
+			+ (isGoogleSearch ? " is-google-search" : "")
+			+ (isSteam ? " is-steam" : "")
+			+ (isGameStore ? " is-game-store is-game-store-" + previewClassToken(gameStoreKind) : "")
+			+ (richProviderSpec ? " is-sv-provider is-provider-" + previewClassToken(richProviderSpec.provider)
+				+ " is-kind-" + previewClassToken(richProviderSpec.kind) : "")
+			+ (swedishSiteKind ? " is-swedish-site is-" + previewClassToken(swedishSiteKind) : "")
+			+ (isSwedishMarketplace ? " is-swedish-marketplace" : "")
+			+ (isFlashbackThread ? " is-flashback-thread" : "")
+			+ (isGitHub ? " is-github" : "")
+			+ (isXPost ? " is-x-post" : "")
+			+ (isTwitch ? " is-twitch" : "")
+			+ (isSocialPost ? " is-social-post is-x-post" : "")
+			+ (hasEmbedMedia ? " is-embed" : "")
+			+ (embedKindToken ? " is-" + embedKindToken + "-embed" : "")
+			+ (isShortEmbed ? " is-embed-short" : "")
+			+ (isAudioEmbed ? " is-embed-audio" : "")
+			+ (embedAspect === "compact-audio" ? " is-embed-compact-audio" : "")
+			+ (isYouTubeEmbed ? " is-youtube-embed" : "")
+			+ (isYouTubeEmbed && embedAspect === "short" ? " is-youtube-short" : "");
 		card.title = preview.openLabel || "Open link";
 		card.setAttribute("aria-label", preview.openLabel || "Open link");
 		const activateCard = function(event) {
@@ -3823,7 +8278,7 @@
 			}
 		};
 		card.addEventListener("click", activateCard);
-		if (hasPlayableMedia) {
+		if (cardUsesDiv) {
 			card.addEventListener("keydown", function(event) {
 				if (event.key === "Enter" || event.key === " ") {
 					activateCard(event);
@@ -3831,65 +8286,77 @@
 			});
 		}
 
-		if (hasPlayableMedia) {
-			const media = document.createElement("div");
-			media.className = "preview-card-media preview-card-playback";
-			if (isVideoMedia && videoInlineSupported) {
-				media.addEventListener("click", function(event) {
-					event.stopPropagation();
-				});
-				const video = document.createElement("video");
-				video.className = "preview-card-video";
-				video.src = mediaUrl;
-				video.controls = false;
-				video.muted = !!preview.autoplay;
-				video.defaultMuted = !!preview.autoplay;
-				video.loop = true;
-				video.playsInline = true;
-				video.preload = preview.autoplay ? "auto" : "metadata";
-				if (preview.autoplay) {
-					video.autoplay = true;
-				}
-				if (preview.thumbnailUrl) {
-					video.poster = preview.thumbnailUrl;
-				}
-				video.setAttribute("aria-label", preview.title || preview.subtitle || "Media preview");
-				video.addEventListener("error", function() {
-					const code = video.error ? video.error.code : 0;
-					console.warn("Preview video playback failed", mediaMime || mediaUrl, code);
-					if (!media.querySelector(".preview-card-playback-note")) {
-						video.remove();
-						appendPreviewPlaybackFallback(media, preview, "Open in browser");
-					}
-				}, { once: true });
-				media.appendChild(video);
-				if (mediaAudioUrl) {
-					attachPreviewAudioTrack(media, video, mediaAudioUrl, mediaAudioMime);
-				}
-				appendPreviewMediaControls(card, media, video);
-				media.addEventListener("dblclick", function(event) {
-					event.preventDefault();
-					event.stopPropagation();
-					const expanded = !card.classList.contains("is-expanded");
-					card.classList.toggle("is-expanded", expanded);
-					const sizeButton = media.querySelector(".preview-card-media-size");
-					if (sizeButton) {
-						sizeButton.textContent = expanded ? "Small" : "Large";
-					}
-					requestAnimationFrame(syncScrollState);
-				});
-			} else if (isVideoMedia) {
-				appendPreviewPlaybackFallback(media, preview, "Open in browser");
+		if (isGoogleSearch) {
+			appendGoogleSearchPreview(card, preview);
+			return card;
+		}
+		if (isSteam) {
+			appendSteamPreview(card, preview, hostLabel, sourceLabel, descriptionText, steamMediaItems);
+			return card;
+		}
+		if (isGameStore) {
+			appendGameStorePreview(card, preview, gameStoreKind, hostLabel, sourceLabel, descriptionText);
+			return card;
+		}
+		if (richProviderSpec) {
+			appendRichProviderPreview(card, preview, richProviderSpec, hostLabel, sourceLabel, descriptionText);
+			return card;
+		}
+		if (isSwedishMarketplace) {
+			appendSwedishMarketplacePreview(card, preview, swedishSiteKind, hostLabel, sourceLabel, descriptionText);
+			return card;
+		}
+		if (isFlashbackThread) {
+			appendFlashbackPreview(card, preview, hostLabel, sourceLabel, descriptionText);
+			return card;
+		}
+		if (isGitHub) {
+			appendGitHubPreview(card, preview, hostLabel, descriptionText);
+			return card;
+		}
+		if (isXPost) {
+			appendXPostPreview(card, preview, hostLabel, sourceLabel, descriptionText, {
+				mediaUrl: mediaUrl,
+				mediaMime: mediaMime,
+				mediaAudioUrl: mediaAudioUrl,
+				mediaAudioMime: mediaAudioMime,
+				hasPlayableMedia: hasPlayableMedia,
+				isVideoMedia: isVideoMedia,
+				isGifMedia: isGifMedia,
+				videoInlineSupported: videoInlineSupported,
+				imageMediaItems: imageMediaItems
+			});
+			return card;
+		}
+		if (isSocialPost) {
+			appendSocialPostPreview(card, preview, hostLabel, sourceLabel, descriptionText);
+			return card;
+		}
+
+		if (hasEmbedMedia) {
+			appendEmbedPreview(card, preview, embedUrl, embedAspect, embedKind);
+		} else if (isImagePreview) {
+			if (hasImageCarousel) {
+				appendPreviewImageCarousel(card, preview, imageMediaItems);
 			} else {
+				const media = document.createElement("div");
+				media.className = "preview-card-media preview-card-image-preview-media";
 				const image = document.createElement("img");
-				image.className = "preview-card-image preview-card-media-image";
+				image.className = "preview-card-image preview-card-inline-image";
 				image.loading = "lazy";
-				image.src = mediaUrl;
-				image.alt = preview.title || preview.subtitle || "Media preview";
+				image.src = mediaUrl || preview.thumbnailUrl;
+				image.alt = preview.title || preview.subtitle || "Image preview";
 				media.appendChild(image);
+				card.appendChild(media);
 			}
+			return card;
+		}
+
+		if (hasPlayableMedia) {
+			const media = createPreviewPlayableMedia(card, preview, mediaUrl, mediaMime, mediaAudioUrl, mediaAudioMime,
+				isVideoMedia, isGifMedia, videoInlineSupported);
 			card.appendChild(media);
-		} else if (preview.thumbnailUrl) {
+		} else if (!hasEmbedMedia && preview.thumbnailUrl) {
 			const media = document.createElement("div");
 			media.className = "preview-card-media";
 			const image = document.createElement("img");
@@ -3899,7 +8366,7 @@
 			image.alt = preview.title || preview.subtitle || "Preview";
 			media.appendChild(image);
 			card.appendChild(media);
-		} else {
+		} else if (!hasEmbedMedia) {
 			const placeholder = document.createElement("div");
 			placeholder.className = "preview-card-media preview-card-media-placeholder";
 			const placeholderMark = document.createElement("span");
@@ -3951,10 +8418,10 @@
 
 		const footer = document.createElement("div");
 		footer.className = "preview-card-footer";
-		const action = document.createElement(hasPlayableMedia ? "button" : "span");
-		action.className = "preview-card-action" + (hasPlayableMedia ? " preview-card-open-button" : "");
-		action.textContent = hasPlayableMedia ? (preview.openLabel || "Open in browser") : (preview.openLabel || "Open link");
-		if (hasPlayableMedia) {
+		const action = document.createElement(hasInteractiveMedia ? "button" : "span");
+		action.className = "preview-card-action" + (hasInteractiveMedia ? " preview-card-open-button" : "");
+		action.textContent = hasInteractiveMedia ? (preview.openLabel || "Open in browser") : (preview.openLabel || "Open link");
+		if (hasInteractiveMedia) {
 			action.type = "button";
 			action.addEventListener("click", activateCard);
 		}
@@ -3972,6 +8439,12 @@
 		button.innerHTML = "<span class=\"reaction-chip-emoji\"></span><span class=\"reaction-chip-count\"></span>";
 		button.querySelector(".reaction-chip-emoji").textContent = reaction.emoji || "";
 		button.querySelector(".reaction-chip-count").textContent = String(reaction.count || 0);
+		const tooltip = reactionTooltipText(reaction);
+		if (tooltip) {
+			button.title = tooltip;
+			button.setAttribute("aria-label", String(reaction.emoji || "Reaction") + ": "
+				+ tooltip.replace(/\n/g, ", "));
+		}
 		button.addEventListener("click", function(event) {
 			event.preventDefault();
 			event.stopPropagation();
@@ -4103,7 +8576,14 @@
 	}
 
 	function messageHasMediaPreview(message) {
-		return !!String(message && message.preview && message.preview.mediaUrl || "").trim();
+		const preview = message && message.preview;
+		return !!String(preview && preview.url || "").trim()
+			|| !!String(preview && preview.title || "").trim()
+			|| !!String(preview && preview.description || "").trim()
+			|| !!String(preview && preview.mediaUrl || "").trim()
+			|| !!String(preview && preview.embedUrl || "").trim()
+			|| !!String(preview && preview.thumbnailUrl || "").trim()
+			|| (preview && Array.isArray(preview.mediaItems) && preview.mediaItems.length > 0);
 	}
 
 	function renderMessageBubble(message) {
@@ -4264,6 +8744,9 @@
 		group.messages.forEach(function(message) {
 			stack.appendChild(renderMessageBubble(message));
 		});
+		if (groupHasMediaPreview) {
+			syncPreviewStackMediaSizeStateForStack(stack);
+		}
 
 		cluster.appendChild(stack);
 		return cluster;
@@ -4966,10 +9449,8 @@
 			String(scope.label || ""),
 			String(scope.description || "")
 		].join("|");
-		if (shouldShowScopeLoading(scope, messages)) {
-			pendingScopeLoading = { scopeToken: String(scopeToken || "") };
-			clearPendingScopeLoadingTimer();
-			showChatLoadingIndicator();
+		if (shouldShowScopeLoading(scope, messages) && !renderOptions.resolvePendingScopeLoading) {
+			beginScopeLoading(scopeToken, { force: true });
 			lastRenderedMessageCount = 0;
 			lastRenderedTailKey = "";
 			return;
@@ -8350,6 +12831,21 @@
 			picker.appendChild(input);
 			picker.appendChild(browse);
 			row.appendChild(picker);
+		} else if (type === "button") {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "chip-button modern-dialog-field-button"
+				+ (field.tone ? " is-" + field.tone : "");
+			button.textContent = field.buttonLabel || field.value || field.label || "Action";
+			button.disabled = field.enabled === false;
+			if (fieldTooltip) {
+				button.title = fieldTooltip;
+			}
+			button.addEventListener("click", function(event) {
+				event.preventDefault();
+				invokeModernDialogAction(field.actionId || field.id || "", { fieldId: field.id || "" });
+			});
+			row.appendChild(button);
 		} else {
 			input = document.createElement("input");
 			input.type = type === "password" ? "password" : (type === "number" ? "number" : "text");
@@ -10002,6 +14498,7 @@
 			}
 			positionModernDialogSelectMenu();
 			refreshMessageListPinning(2);
+			schedulePreviewEmbedFrameSizeSync();
 			scheduleFooterAlignmentSync();
 			scheduleRailLayoutSync();
 		});

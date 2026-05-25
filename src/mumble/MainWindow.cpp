@@ -26,6 +26,7 @@
 #include "GlobalShortcut.h"
 #include "GlobalShortcutTypes.h"
 #ifdef USE_OVERLAY
+#	include "Overlay.h"
 #	include "OverlayClient.h"
 #endif
 #include "../SignalCurry.h"
@@ -56,6 +57,7 @@
 #include "PersistentChatGateway.h"
 #include "PersistentChatHistoryDelegate.h"
 #include "PersistentChatHistoryModel.h"
+#include "PersistentChatMediaCache.h"
 #include "PersistentChatRender.h"
 #include "PluginManager.h"
 #include "PositionalAudioViewer.h"
@@ -116,17 +118,20 @@
 #include <QtCore/QPointer>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QSet>
+#include <QtCore/QSettings>
 #include <QtCore/QSignalBlocker>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QSysInfo>
 #include <QtCore/QTimer>
 #include <QtCore/QTime>
+#include <QtCore/QtEndian>
 #include <QtCore/QUrlQuery>
 #include <QtCore/QVector>
 #include <QtCore/QXmlStreamReader>
 #include <QtGui/QClipboard>
 #include <QtGui/QDesktopServices>
 #include <QtGui/QImageReader>
+#include <QtGui/QImageWriter>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPainter>
 #include <QtGui/QPainterPath>
@@ -229,6 +234,13 @@ constexpr int ModernShellSnapshotInactiveCoalesceMs = 350;
 constexpr int ModernShellPatchCoalesceMs            = 16;
 constexpr int ModernConnectServerPingIntervalMs     = 75;
 constexpr int NativeWindowMoveResizeWatchdogMs      = 4000;
+constexpr int UserTextureRequestCoalesceMs          = 75;
+constexpr int UserTextureRequestMaxBatchSize        = 64;
+constexpr qint64 UserTextureFailedCooldownMs        = 60 * 1000;
+constexpr int UserTextureLegacyWidth                = 600;
+constexpr int UserTextureLegacyHeight               = 60;
+constexpr int UserTextureLegacyRgbaSize             = UserTextureLegacyWidth * UserTextureLegacyHeight * 4;
+constexpr int UserTextureMaxImageDimension          = 1024;
 #if defined(MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS) && MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS
 constexpr bool ModernShellInlineMp4PlaybackSupported = true;
 #else
@@ -1290,17 +1302,18 @@ QImage persistentChatAvatarTexture(const ClientUser *user, int avatarSize) {
 		return QImage();
 	}
 
-	if (user->qbaTexture.isEmpty() && !user->qbaTextureHash.isEmpty() && Global::get().db) {
-		const_cast< ClientUser * >(user)->qbaTexture = Global::get().db->blob(user->qbaTextureHash);
+	ClientUser *mutableUser = const_cast< ClientUser * >(user);
+	if (Global::get().mw) {
+		Global::get().mw->ensureUserTextureAvailable(mutableUser, MainWindow::UserTextureRequestReason::ModernShell);
 	}
 
-	if (user->qbaTexture.isEmpty()) {
+	if (mutableUser->qbaTexture.isEmpty()) {
 		return QImage();
 	}
 
-	QBuffer buffer(const_cast< QByteArray * >(&user->qbaTexture));
+	QBuffer buffer(&mutableUser->qbaTexture);
 	buffer.open(QIODevice::ReadOnly);
-	QImageReader reader(&buffer, user->qbaTextureFormat);
+	QImageReader reader(&buffer, mutableUser->qbaTextureFormat);
 	QSize scaledSize = reader.size();
 	scaledSize.scale(avatarSize, avatarSize, Qt::KeepAspectRatio);
 	reader.setScaledSize(scaledSize);
@@ -2569,50 +2582,7 @@ void setDockSplitterHandleWidth(QWidget *root, int width) {
 	}
 }
 
-std::optional< QString > extractYouTubeVideoId(const QUrl &url) {
-	if (!url.isValid()) {
-		return std::nullopt;
-	}
-
-	QString host = url.host().toLower();
-	if (host.startsWith(QLatin1String("www."))) {
-		host.remove(0, 4);
-	}
-	if (host.startsWith(QLatin1String("m."))) {
-		host.remove(0, 2);
-	}
-
-	QString videoId;
-	const QStringList pathSegments = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
-	if (host == QLatin1String("youtu.be")) {
-		if (!pathSegments.isEmpty()) {
-			videoId = pathSegments.front();
-		}
-	} else if (host == QLatin1String("youtube.com") || host == QLatin1String("youtube-nocookie.com")) {
-		const QString path = url.path();
-		QUrlQuery query(url);
-		if (path == QLatin1String("/watch")) {
-			videoId = query.queryItemValue(QLatin1String("v"));
-		} else if (!pathSegments.isEmpty()) {
-			if (pathSegments.front() == QLatin1String("shorts") || pathSegments.front() == QLatin1String("embed")
-				|| pathSegments.front() == QLatin1String("live")) {
-				if (pathSegments.size() > 1) {
-					videoId = pathSegments.at(1);
-				}
-			}
-		}
-	}
-
-	static const QRegularExpression s_videoIdPattern(
-		QRegularExpression::anchoredPattern(QLatin1String("[A-Za-z0-9_-]{11}")));
-	if (!s_videoIdPattern.match(videoId).hasMatch()) {
-		return std::nullopt;
-	}
-
-	return videoId;
-}
-
-bool isYouTubeHost(QString host) {
+QString normalizedYouTubeHost(QString host) {
 	host = host.toLower();
 	if (host.startsWith(QLatin1String("www."))) {
 		host.remove(0, 4);
@@ -2623,9 +2593,1043 @@ bool isYouTubeHost(QString host) {
 	if (host.startsWith(QLatin1String("mobile."))) {
 		host.remove(0, 7);
 	}
+	return host;
+}
+
+bool isValidYouTubeVideoId(const QString &videoId) {
+	static const QRegularExpression s_videoIdPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[A-Za-z0-9_-]{11}")));
+	return s_videoIdPattern.match(videoId).hasMatch();
+}
+
+std::optional< QString > extractYouTubeVideoId(const QUrl &url) {
+	if (!url.isValid()) {
+		return std::nullopt;
+	}
+
+	const QString host = normalizedYouTubeHost(url.host());
+
+	QString videoId;
+	const QStringList pathSegments = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+	if (host == QLatin1String("youtu.be")) {
+		if (!pathSegments.isEmpty()) {
+			videoId = pathSegments.front();
+		}
+	} else if (host == QLatin1String("youtube.com") || host == QLatin1String("youtube-nocookie.com")) {
+		const QString path = url.path();
+		QUrlQuery query(url);
+		if (path.compare(QLatin1String("/watch"), Qt::CaseInsensitive) == 0) {
+			videoId = query.queryItemValue(QLatin1String("v"));
+		} else if (!pathSegments.isEmpty()) {
+			const QString firstSegment = pathSegments.front();
+			if (firstSegment.compare(QLatin1String("shorts"), Qt::CaseInsensitive) == 0
+				|| firstSegment.compare(QLatin1String("embed"), Qt::CaseInsensitive) == 0
+				|| firstSegment.compare(QLatin1String("live"), Qt::CaseInsensitive) == 0) {
+				if (pathSegments.size() > 1) {
+					videoId = pathSegments.at(1);
+				}
+			}
+		}
+	}
+
+	if (!isValidYouTubeVideoId(videoId)) {
+		return std::nullopt;
+	}
+
+	return videoId;
+}
+
+bool isYouTubeHost(QString host) {
+	host = normalizedYouTubeHost(host);
 
 	return host == QLatin1String("youtube.com") || host == QLatin1String("youtube-nocookie.com")
 		   || host == QLatin1String("youtu.be");
+}
+
+struct YouTubePreviewTarget {
+	QString videoId;
+	QUrl canonicalUrl;
+	bool shorts = false;
+};
+
+bool isYouTubeShortsUrl(const QUrl &url) {
+	const QString host = normalizedYouTubeHost(url.host());
+	if (host != QLatin1String("youtube.com")) {
+		return false;
+	}
+
+	const QStringList pathSegments = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+	return !pathSegments.isEmpty() && pathSegments.front().compare(QLatin1String("shorts"), Qt::CaseInsensitive) == 0;
+}
+
+QUrl canonicalYouTubeUrl(const QUrl &sourceUrl, const QString &videoId) {
+	const bool shortsUrl = isYouTubeShortsUrl(sourceUrl);
+	QUrl canonicalUrl(QStringLiteral("https://www.youtube.com/watch"));
+	QUrlQuery canonicalQuery;
+	if (shortsUrl) {
+		canonicalUrl.setPath(QStringLiteral("/shorts/%1").arg(videoId));
+	} else {
+		canonicalQuery.addQueryItem(QStringLiteral("v"), videoId);
+	}
+
+	const QUrlQuery sourceQuery(sourceUrl);
+	const QList< QPair< QString, QString > > sourceItems = sourceQuery.queryItems(QUrl::FullyDecoded);
+	for (const QPair< QString, QString > &item : sourceItems) {
+		if (item.first.compare(QLatin1String("v"), Qt::CaseInsensitive) == 0) {
+			continue;
+		}
+		if (item.first.trimmed().isEmpty()) {
+			continue;
+		}
+		canonicalQuery.addQueryItem(item.first, item.second);
+	}
+
+	canonicalUrl.setQuery(canonicalQuery);
+	if (!sourceUrl.fragment().isEmpty()) {
+		canonicalUrl.setFragment(sourceUrl.fragment());
+	}
+	return canonicalUrl;
+}
+
+std::optional< YouTubePreviewTarget > youtubePreviewTargetFromUrl(const QUrl &url) {
+	const std::optional< QString > videoId = extractYouTubeVideoId(url);
+	if (!videoId) {
+		return std::nullopt;
+	}
+
+	return YouTubePreviewTarget{ *videoId, canonicalYouTubeUrl(url, *videoId), isYouTubeShortsUrl(url) };
+}
+
+std::optional< YouTubePreviewTarget > youtubePreviewTargetFromKeyPayload(const QString &payload) {
+	if (isValidYouTubeVideoId(payload)) {
+		const QUrl url(QString::fromLatin1("https://www.youtube.com/watch?v=%1").arg(payload));
+		return YouTubePreviewTarget{ payload, url, false };
+	}
+
+	const QString decodedUrl = QUrl::fromPercentEncoding(payload.toUtf8());
+	const QUrl url(decodedUrl);
+	if (!url.isValid() || !isYouTubeHost(url.host())) {
+		return std::nullopt;
+	}
+	return youtubePreviewTargetFromUrl(url);
+}
+
+int youtubeTimestampSecondsFromText(QString value) {
+	value = value.trimmed().toLower();
+	if (value.startsWith(QLatin1String("t="))) {
+		value.remove(0, 2);
+	}
+	if (value.startsWith(QLatin1String("start="))) {
+		value.remove(0, 6);
+	}
+	if (value.endsWith(QLatin1Char('s')) && !value.contains(QLatin1Char('m')) && !value.contains(QLatin1Char('h'))) {
+		value.chop(1);
+	}
+
+	if (value.contains(QLatin1Char(':'))) {
+		int multiplier = 1;
+		int total      = 0;
+		const QStringList parts = value.split(QLatin1Char(':'), Qt::SkipEmptyParts);
+		for (auto it = parts.crbegin(); it != parts.crend(); ++it) {
+			bool ok        = false;
+			const int part = it->toInt(&ok);
+			if (!ok) {
+				return 0;
+			}
+			total += part * multiplier;
+			multiplier *= 60;
+		}
+		return std::max(0, total);
+	}
+
+	static const QRegularExpression s_partPattern(QLatin1String("([0-9]+)\\s*([hms])"));
+	QRegularExpressionMatchIterator partIt = s_partPattern.globalMatch(value);
+	int total                              = 0;
+	bool hasPart                           = false;
+	while (partIt.hasNext()) {
+		const QRegularExpressionMatch match = partIt.next();
+		const int amount                    = match.captured(1).toInt();
+		const QString unit                  = match.captured(2);
+		if (unit == QLatin1String("h")) {
+			total += amount * 3600;
+		} else if (unit == QLatin1String("m")) {
+			total += amount * 60;
+		} else {
+			total += amount;
+		}
+		hasPart = true;
+	}
+	if (hasPart) {
+		return total;
+	}
+
+	bool ok            = false;
+	const int seconds  = value.toInt(&ok);
+	return ok ? std::max(0, seconds) : 0;
+}
+
+int youtubeStartSecondsFromUrl(const QUrl &url) {
+	const QUrlQuery query(url);
+	for (const QString &key : { QStringLiteral("start"), QStringLiteral("t"), QStringLiteral("time_continue") }) {
+		const QString value = query.queryItemValue(key).trimmed();
+		if (!value.isEmpty()) {
+			const int seconds = youtubeTimestampSecondsFromText(value);
+			if (seconds > 0) {
+				return seconds;
+			}
+		}
+	}
+
+	const QString fragment = url.fragment(QUrl::FullyDecoded).trimmed();
+	if (!fragment.isEmpty()) {
+		const QUrlQuery fragmentQuery(fragment);
+		for (const QString &key : { QStringLiteral("start"), QStringLiteral("t") }) {
+			const QString value = fragmentQuery.queryItemValue(key).trimmed();
+			if (!value.isEmpty()) {
+				const int seconds = youtubeTimestampSecondsFromText(value);
+				if (seconds > 0) {
+					return seconds;
+				}
+			}
+		}
+		return youtubeTimestampSecondsFromText(fragment);
+	}
+
+	return 0;
+}
+
+QUrl youtubeEmbedUrl(const YouTubePreviewTarget &target) {
+	QUrl url(QString::fromLatin1("https://www.youtube.com/embed/%1").arg(target.videoId));
+	QUrlQuery query;
+	query.addQueryItem(QStringLiteral("rel"), QStringLiteral("0"));
+	query.addQueryItem(QStringLiteral("modestbranding"), QStringLiteral("1"));
+	query.addQueryItem(QStringLiteral("playsinline"), QStringLiteral("1"));
+	query.addQueryItem(QStringLiteral("controls"), QStringLiteral("1"));
+	query.addQueryItem(QStringLiteral("enablejsapi"), QStringLiteral("1"));
+	query.addQueryItem(QStringLiteral("widget_referrer"), QStringLiteral("https://www.mumble.info/"));
+
+	const int startSeconds = youtubeStartSecondsFromUrl(target.canonicalUrl);
+	if (startSeconds > 0) {
+		query.addQueryItem(QStringLiteral("start"), QString::number(startSeconds));
+	}
+
+	url.setQuery(query);
+	return url;
+}
+
+QString youtubePreviewKeyForUrl(const QUrl &url) {
+	const std::optional< YouTubePreviewTarget > target = youtubePreviewTargetFromUrl(url);
+	if (!target) {
+		return QString();
+	}
+
+	return QString::fromLatin1("youtube:%1")
+		.arg(QString::fromUtf8(QUrl::toPercentEncoding(target->canonicalUrl.toString(QUrl::FullyEncoded))));
+}
+
+QString normalizedPreviewHost(QString host);
+bool hostEqualsOrEndsWith(const QString &host, const QString &suffix);
+QStringList decodedUrlPathSegments(const QUrl &url);
+bool isBlueskyPostUrl(const QUrl &url);
+bool isLikelyMastodonPostUrl(const QUrl &url);
+
+struct TwitchPreviewTarget {
+	QString kind;
+	QString channel;
+	QString id;
+	QUrl canonicalUrl;
+};
+
+bool isValidTwitchChannelName(const QString &channel) {
+	static const QRegularExpression s_channelPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[A-Za-z0-9_]{3,25}")));
+	return s_channelPattern.match(channel).hasMatch();
+}
+
+bool isValidTwitchVideoId(const QString &videoId) {
+	static const QRegularExpression s_videoIdPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[0-9]{1,20}")));
+	return s_videoIdPattern.match(videoId).hasMatch();
+}
+
+bool isValidTwitchClipSlug(const QString &slug) {
+	static const QRegularExpression s_clipPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[A-Za-z0-9_-]{4,128}")));
+	return s_clipPattern.match(slug).hasMatch();
+}
+
+bool isTwitchHost(QString host) {
+	host = normalizedPreviewHost(host);
+	return host == QLatin1String("twitch.tv") || host == QLatin1String("clips.twitch.tv");
+}
+
+bool isReservedTwitchPathSegment(QString segment) {
+	segment = segment.trimmed().toLower();
+	static const QSet< QString > s_reservedSegments = {
+		QStringLiteral("about"),       QStringLiteral("bits"),       QStringLiteral("broadcast"),
+		QStringLiteral("creatorcamp"), QStringLiteral("dashboard"),  QStringLiteral("directory"),
+		QStringLiteral("downloads"),   QStringLiteral("drops"),      QStringLiteral("friends"),
+		QStringLiteral("inventory"),   QStringLiteral("jobs"),       QStringLiteral("login"),
+		QStringLiteral("messages"),    QStringLiteral("moderator"),  QStringLiteral("p"),
+		QStringLiteral("popout"),      QStringLiteral("prime"),      QStringLiteral("privacy"),
+		QStringLiteral("search"),      QStringLiteral("settings"),   QStringLiteral("signup"),
+		QStringLiteral("store"),       QStringLiteral("subscriptions"), QStringLiteral("team"),
+		QStringLiteral("teams"),       QStringLiteral("terms"),      QStringLiteral("turbo"),
+		QStringLiteral("videos"),      QStringLiteral("wallet")
+	};
+	return s_reservedSegments.contains(segment);
+}
+
+QUrl canonicalTwitchUrl(const QUrl &sourceUrl, const TwitchPreviewTarget &target) {
+	QUrl canonicalUrl;
+	if (target.kind == QLatin1String("clip") && target.channel.isEmpty()) {
+		canonicalUrl = QUrl(QStringLiteral("https://clips.twitch.tv/%1").arg(target.id));
+	} else if (target.kind == QLatin1String("clip")) {
+		canonicalUrl = QUrl(QStringLiteral("https://www.twitch.tv/%1/clip/%2").arg(target.channel, target.id));
+	} else if (target.kind == QLatin1String("video")) {
+		canonicalUrl = QUrl(QStringLiteral("https://www.twitch.tv/videos/%1").arg(target.id));
+	} else {
+		canonicalUrl = QUrl(QStringLiteral("https://www.twitch.tv/%1").arg(target.channel));
+	}
+
+	const QUrlQuery sourceQuery(sourceUrl);
+	QUrlQuery canonicalQuery;
+	for (const QString &key : { QStringLiteral("t"), QStringLiteral("time") }) {
+		const QString value = sourceQuery.queryItemValue(key).trimmed();
+		if (!value.isEmpty()) {
+			canonicalQuery.addQueryItem(key, value);
+		}
+	}
+	canonicalUrl.setQuery(canonicalQuery);
+	if (!sourceUrl.fragment().isEmpty()) {
+		canonicalUrl.setFragment(sourceUrl.fragment());
+	}
+	return canonicalUrl;
+}
+
+std::optional< TwitchPreviewTarget > twitchPreviewTargetFromUrl(const QUrl &url) {
+	if (!url.isValid()) {
+		return std::nullopt;
+	}
+
+	const QString host         = normalizedPreviewHost(url.host());
+	const QStringList segments = decodedUrlPathSegments(url);
+	if (host == QLatin1String("clips.twitch.tv")) {
+		if (segments.isEmpty() || !isValidTwitchClipSlug(segments.front())) {
+			return std::nullopt;
+		}
+		TwitchPreviewTarget target;
+		target.kind         = QStringLiteral("clip");
+		target.id           = segments.front();
+		target.canonicalUrl = canonicalTwitchUrl(url, target);
+		return target;
+	}
+
+	if (host != QLatin1String("twitch.tv") || segments.isEmpty()) {
+		return std::nullopt;
+	}
+
+	const QString firstSegment = segments.front();
+	if (firstSegment.compare(QLatin1String("videos"), Qt::CaseInsensitive) == 0) {
+		if (segments.size() < 2 || !isValidTwitchVideoId(segments.at(1))) {
+			return std::nullopt;
+		}
+		TwitchPreviewTarget target;
+		target.kind         = QStringLiteral("video");
+		target.id           = segments.at(1);
+		target.canonicalUrl = canonicalTwitchUrl(url, target);
+		return target;
+	}
+
+	if (!isValidTwitchChannelName(firstSegment) || isReservedTwitchPathSegment(firstSegment)) {
+		return std::nullopt;
+	}
+
+	if (segments.size() >= 3 && segments.at(1).compare(QLatin1String("clip"), Qt::CaseInsensitive) == 0
+		&& isValidTwitchClipSlug(segments.at(2))) {
+		TwitchPreviewTarget target;
+		target.kind         = QStringLiteral("clip");
+		target.channel      = firstSegment;
+		target.id           = segments.at(2);
+		target.canonicalUrl = canonicalTwitchUrl(url, target);
+		return target;
+	}
+
+	if (segments.size() >= 3 && segments.at(1).compare(QLatin1String("v"), Qt::CaseInsensitive) == 0
+		&& isValidTwitchVideoId(segments.at(2))) {
+		TwitchPreviewTarget target;
+		target.kind         = QStringLiteral("video");
+		target.channel      = firstSegment;
+		target.id           = segments.at(2);
+		target.canonicalUrl = canonicalTwitchUrl(url, target);
+		return target;
+	}
+
+	if (segments.size() == 1) {
+		TwitchPreviewTarget target;
+		target.kind         = QStringLiteral("channel");
+		target.channel      = firstSegment;
+		target.canonicalUrl = canonicalTwitchUrl(url, target);
+		return target;
+	}
+
+	return std::nullopt;
+}
+
+std::optional< TwitchPreviewTarget > twitchPreviewTargetFromKeyPayload(const QString &payload) {
+	const QString decodedUrl = QUrl::fromPercentEncoding(payload.toUtf8());
+	const QUrl url(decodedUrl);
+	if (!url.isValid() || !isTwitchHost(url.host())) {
+		return std::nullopt;
+	}
+	return twitchPreviewTargetFromUrl(url);
+}
+
+QString twitchPreviewKeyForUrl(const QUrl &url) {
+	const std::optional< TwitchPreviewTarget > target = twitchPreviewTargetFromUrl(url);
+	if (!target) {
+		return QString();
+	}
+
+	return QString::fromLatin1("twitch:%1")
+		.arg(QString::fromUtf8(QUrl::toPercentEncoding(target->canonicalUrl.toString(QUrl::FullyEncoded))));
+}
+
+QString twitchFallbackTitle(const TwitchPreviewTarget &target) {
+	if (target.kind == QLatin1String("clip")) {
+		return QObject::tr("Twitch clip");
+	}
+	if (target.kind == QLatin1String("video")) {
+		return QObject::tr("Twitch video");
+	}
+	return target.channel.isEmpty() ? QObject::tr("Twitch channel")
+									: QObject::tr("%1 on Twitch").arg(target.channel);
+}
+
+QString twitchFallbackSubtitle(const TwitchPreviewTarget &target) {
+	if (!target.channel.isEmpty() && target.kind != QLatin1String("channel")) {
+		return QObject::tr("Twitch by %1").arg(target.channel);
+	}
+	return QObject::tr("Twitch");
+}
+
+struct PersistentChatPreviewEmbedTarget {
+	QString kind;
+	QUrl url;
+	QString aspect;
+};
+
+struct PersistentChatPreviewOEmbedTarget {
+	QUrl url;
+	QString siteLabel;
+	QString fallbackTitle;
+	QString openLabel;
+	bool socialPost = false;
+};
+
+struct PersistentChatPreviewPlayableMediaMeta {
+	QString url;
+	QString mime;
+};
+
+struct SpotifyPreviewTarget {
+	QString type;
+	QString id;
+};
+
+std::optional< QString > streamableShortcodeFromUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	if (host != QLatin1String("streamable.com")) {
+		return std::nullopt;
+	}
+	const QStringList segments = decodedUrlPathSegments(url);
+	if (segments.isEmpty()) {
+		return std::nullopt;
+	}
+	QString shortcode = segments.at(0);
+	if (shortcode == QLatin1String("e") && segments.size() > 1) {
+		shortcode = segments.at(1);
+	}
+	static const QRegularExpression s_shortcodePattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[A-Za-z0-9]{3,16}")));
+	return s_shortcodePattern.match(shortcode).hasMatch() ? std::optional< QString >(shortcode) : std::nullopt;
+}
+
+std::optional< QString > tiktokVideoIdFromUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	if (!hostEqualsOrEndsWith(host, QStringLiteral("tiktok.com"))) {
+		return std::nullopt;
+	}
+	const QStringList segments = decodedUrlPathSegments(url);
+	for (int i = 0; i + 1 < segments.size(); ++i) {
+		if (segments.at(i) == QLatin1String("video")) {
+			const QString videoId = segments.at(i + 1);
+			static const QRegularExpression s_videoIdPattern(
+				QRegularExpression::anchoredPattern(QLatin1String("[0-9]{8,32}")));
+			if (s_videoIdPattern.match(videoId).hasMatch()) {
+				return videoId;
+			}
+		}
+	}
+	return std::nullopt;
+}
+
+std::optional< QString > vimeoVideoIdFromUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	if (host != QLatin1String("vimeo.com") && host != QLatin1String("player.vimeo.com")) {
+		return std::nullopt;
+	}
+	const QStringList segments = decodedUrlPathSegments(url);
+	for (int i = 0; i < segments.size(); ++i) {
+		if (segments.at(i) == QLatin1String("video") && i + 1 < segments.size()) {
+			return segments.at(i + 1);
+		}
+		if (segments.at(i).contains(QRegularExpression(QRegularExpression::anchoredPattern(QLatin1String("[0-9]{5,16}"))))) {
+			return segments.at(i);
+		}
+	}
+	return std::nullopt;
+}
+
+std::optional< QString > dailymotionVideoIdFromUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	const QStringList segments = decodedUrlPathSegments(url);
+	QString videoId;
+	if (host == QLatin1String("dai.ly")) {
+		if (!segments.isEmpty()) {
+			videoId = segments.at(0);
+		}
+	} else if (hostEqualsOrEndsWith(host, QStringLiteral("dailymotion.com"))) {
+		for (int i = 0; i + 1 < segments.size(); ++i) {
+			if (segments.at(i) == QLatin1String("video")) {
+				videoId = segments.at(i + 1).section(QLatin1Char('_'), 0, 0);
+				break;
+			}
+		}
+	}
+	static const QRegularExpression s_videoIdPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[A-Za-z0-9]{4,24}")));
+	return s_videoIdPattern.match(videoId).hasMatch() ? std::optional< QString >(videoId) : std::nullopt;
+}
+
+std::optional< SpotifyPreviewTarget > spotifyPreviewTargetFromUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	if (host != QLatin1String("open.spotify.com")) {
+		return std::nullopt;
+	}
+
+	const QStringList segments = decodedUrlPathSegments(url);
+	if (segments.size() < 2) {
+		return std::nullopt;
+	}
+
+	const QString type = segments.at(0).toLower();
+	if (type != QLatin1String("track") && type != QLatin1String("album") && type != QLatin1String("playlist")
+		&& type != QLatin1String("episode") && type != QLatin1String("show") && type != QLatin1String("artist")) {
+		return std::nullopt;
+	}
+
+	const QString id = segments.at(1);
+	static const QRegularExpression s_idPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[A-Za-z0-9]{8,64}")));
+	if (!s_idPattern.match(id).hasMatch()) {
+		return std::nullopt;
+	}
+
+	return SpotifyPreviewTarget { type, id };
+}
+
+std::optional< PersistentChatPreviewEmbedTarget > spotifyEmbedTargetFromUrl(const QUrl &url) {
+	const std::optional< SpotifyPreviewTarget > target = spotifyPreviewTargetFromUrl(url);
+	if (!target) {
+		return std::nullopt;
+	}
+
+	QUrl embedUrl(QStringLiteral("https://open.spotify.com/embed/%1/%2").arg(target->type, target->id));
+	QUrlQuery query;
+	query.addQueryItem(QStringLiteral("utm_source"), QStringLiteral("generator"));
+	embedUrl.setQuery(query);
+	return PersistentChatPreviewEmbedTarget { QStringLiteral("spotify"), embedUrl,
+											  target->type == QLatin1String("track") || target->type == QLatin1String("episode")
+												  ? QStringLiteral("compact-audio")
+												  : QStringLiteral("audio") };
+}
+
+std::optional< QUrl > spotifyDesktopUrlFromOpenUrl(const QUrl &url) {
+	const std::optional< SpotifyPreviewTarget > target = spotifyPreviewTargetFromUrl(url);
+	if (!target) {
+		return std::nullopt;
+	}
+
+	return QUrl(QStringLiteral("spotify:%1:%2").arg(target->type, target->id));
+}
+
+bool spotifyDesktopProtocolAvailable() {
+#if defined(Q_OS_WIN)
+	static const bool available = []() {
+		QSettings settings(QLatin1String("HKEY_CLASSES_ROOT"), QSettings::NativeFormat);
+		return settings.contains(QLatin1String("spotify/URL Protocol"))
+			   && !settings.value(QLatin1String("spotify/shell/open/command/.")).toString().trimmed().isEmpty();
+	}();
+	return available;
+#else
+	return true;
+#endif
+}
+
+QUrl preferredExternalUrlForActivatedLink(const QUrl &url, QUrl *fallbackUrl = nullptr) {
+	if (fallbackUrl) {
+		*fallbackUrl = QUrl();
+	}
+
+	const std::optional< QUrl > spotifyDesktopUrl = spotifyDesktopUrlFromOpenUrl(url);
+	if (spotifyDesktopUrl && spotifyDesktopProtocolAvailable()) {
+		if (fallbackUrl) {
+			*fallbackUrl = url;
+		}
+		return *spotifyDesktopUrl;
+	}
+
+	return url;
+}
+
+std::optional< PersistentChatPreviewEmbedTarget > facebookEmbedTargetFromUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	if (host != QLatin1String("facebook.com") && host != QLatin1String("fb.com")
+		&& host != QLatin1String("fb.watch")) {
+		return std::nullopt;
+	}
+
+	const QStringList segments = decodedUrlPathSegments(url);
+	const QString firstSegment = segments.isEmpty() ? QString() : segments.front().toLower();
+	const bool videoPath = host == QLatin1String("fb.watch") || firstSegment == QLatin1String("reel")
+						   || firstSegment == QLatin1String("reels") || firstSegment == QLatin1String("watch")
+						   || firstSegment == QLatin1String("videos");
+	if (!videoPath && QUrlQuery(url).queryItemValue(QStringLiteral("v")).trimmed().isEmpty()) {
+		return std::nullopt;
+	}
+
+	QUrl embedUrl(QStringLiteral("https://www.facebook.com/plugins/video.php"));
+	QUrlQuery query;
+	query.addQueryItem(QStringLiteral("href"), url.toString(QUrl::FullyEncoded));
+	query.addQueryItem(QStringLiteral("show_text"), QStringLiteral("false"));
+	query.addQueryItem(QStringLiteral("width"), QStringLiteral("560"));
+	embedUrl.setQuery(query);
+	return PersistentChatPreviewEmbedTarget {
+		QStringLiteral("facebook"),
+		embedUrl,
+		(firstSegment == QLatin1String("reel") || firstSegment == QLatin1String("reels"))
+			? QStringLiteral("short")
+			: QStringLiteral("wide")
+	};
+}
+
+std::optional< PersistentChatPreviewEmbedTarget > previewEmbedTargetForUrl(const QUrl &url) {
+	if (!url.isValid()) {
+		return std::nullopt;
+	}
+
+	if (const std::optional< YouTubePreviewTarget > youtubeTarget = youtubePreviewTargetFromUrl(url); youtubeTarget) {
+		return PersistentChatPreviewEmbedTarget { QStringLiteral("youtube"), youtubeEmbedUrl(*youtubeTarget),
+												  youtubeTarget->shorts ? QStringLiteral("short")
+																		: QStringLiteral("wide") };
+	}
+
+	if (const std::optional< QString > shortcode = streamableShortcodeFromUrl(url); shortcode) {
+		return PersistentChatPreviewEmbedTarget {
+			QStringLiteral("streamable"),
+			QUrl(QStringLiteral("https://streamable.com/e/%1").arg(*shortcode)),
+			QStringLiteral("wide")
+		};
+	}
+
+	if (const std::optional< QString > videoId = tiktokVideoIdFromUrl(url); videoId) {
+		QUrl embedUrl(QStringLiteral("https://www.tiktok.com/player/v1/%1").arg(*videoId));
+		QUrlQuery query;
+		query.addQueryItem(QStringLiteral("controls"), QStringLiteral("1"));
+		query.addQueryItem(QStringLiteral("volume_control"), QStringLiteral("1"));
+		query.addQueryItem(QStringLiteral("fullscreen_button"), QStringLiteral("1"));
+		embedUrl.setQuery(query);
+		return PersistentChatPreviewEmbedTarget { QStringLiteral("tiktok"), embedUrl, QStringLiteral("short") };
+	}
+
+	if (const std::optional< QString > videoId = vimeoVideoIdFromUrl(url); videoId) {
+		QUrl embedUrl(QStringLiteral("https://player.vimeo.com/video/%1").arg(*videoId));
+		QUrlQuery query;
+		query.addQueryItem(QStringLiteral("title"), QStringLiteral("0"));
+		query.addQueryItem(QStringLiteral("byline"), QStringLiteral("0"));
+		query.addQueryItem(QStringLiteral("portrait"), QStringLiteral("0"));
+		embedUrl.setQuery(query);
+		return PersistentChatPreviewEmbedTarget { QStringLiteral("vimeo"), embedUrl, QStringLiteral("wide") };
+	}
+
+	if (const std::optional< QString > videoId = dailymotionVideoIdFromUrl(url); videoId) {
+		QUrl embedUrl(QStringLiteral("https://geo.dailymotion.com/player.html"));
+		QUrlQuery query;
+		query.addQueryItem(QStringLiteral("video"), *videoId);
+		embedUrl.setQuery(query);
+		return PersistentChatPreviewEmbedTarget { QStringLiteral("dailymotion"), embedUrl, QStringLiteral("wide") };
+	}
+
+	if (const std::optional< PersistentChatPreviewEmbedTarget > spotify = spotifyEmbedTargetFromUrl(url); spotify) {
+		return spotify;
+	}
+
+	if (const std::optional< PersistentChatPreviewEmbedTarget > facebook = facebookEmbedTargetFromUrl(url); facebook) {
+		return facebook;
+	}
+
+	const QString host = normalizedPreviewHost(url.host());
+	if (host == QLatin1String("soundcloud.com") || host == QLatin1String("on.soundcloud.com")) {
+		QUrl embedUrl(QStringLiteral("https://w.soundcloud.com/player/"));
+		QUrlQuery query;
+		query.addQueryItem(QStringLiteral("url"), url.toString(QUrl::FullyEncoded));
+		query.addQueryItem(QStringLiteral("auto_play"), QStringLiteral("false"));
+		query.addQueryItem(QStringLiteral("hide_related"), QStringLiteral("false"));
+		query.addQueryItem(QStringLiteral("show_comments"), QStringLiteral("false"));
+		query.addQueryItem(QStringLiteral("show_user"), QStringLiteral("true"));
+		query.addQueryItem(QStringLiteral("show_reposts"), QStringLiteral("false"));
+		query.addQueryItem(QStringLiteral("visual"), QStringLiteral("false"));
+		embedUrl.setQuery(query);
+		return PersistentChatPreviewEmbedTarget { QStringLiteral("soundcloud"), embedUrl, QStringLiteral("compact-audio") };
+	}
+
+	return std::nullopt;
+}
+
+std::optional< QString > giphyIdFromUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	if (!hostEqualsOrEndsWith(host, QStringLiteral("giphy.com"))) {
+		return std::nullopt;
+	}
+	const QStringList segments = decodedUrlPathSegments(url);
+	for (int i = 0; i < segments.size(); ++i) {
+		if ((segments.at(i) == QLatin1String("media") || segments.at(i) == QLatin1String("embed"))
+			&& i + 1 < segments.size()) {
+			return segments.at(i + 1);
+		}
+		if ((segments.at(i) == QLatin1String("gifs") || segments.at(i) == QLatin1String("stickers"))
+			&& i + 1 < segments.size()) {
+			const QString slug = segments.at(i + 1);
+			const QString id   = slug.section(QLatin1Char('-'), -1);
+			static const QRegularExpression s_idPattern(
+				QRegularExpression::anchoredPattern(QLatin1String("[A-Za-z0-9]{5,64}")));
+			if (s_idPattern.match(id).hasMatch()) {
+				return id;
+			}
+		}
+	}
+	return std::nullopt;
+}
+
+std::optional< PersistentChatPreviewPlayableMediaMeta > giphyPlayableMediaFromUrl(const QUrl &url) {
+	const std::optional< QString > id = giphyIdFromUrl(url);
+	if (!id) {
+		return std::nullopt;
+	}
+	return PersistentChatPreviewPlayableMediaMeta {
+		QStringLiteral("https://media.giphy.com/media/%1/giphy.mp4").arg(*id),
+		QStringLiteral("video/mp4")
+	};
+}
+
+bool isSteamStoreHost(const QString &host) {
+	const QString normalizedHost = normalizedPreviewHost(host);
+	return normalizedHost == QLatin1String("store.steampowered.com")
+		   || normalizedHost == QLatin1String("steamcommunity.com");
+}
+
+std::optional< QString > steamAppIdFromUrl(const QUrl &url) {
+	if (!url.isValid() || !isSteamStoreHost(url.host())) {
+		return std::nullopt;
+	}
+
+	const QStringList segments = decodedUrlPathSegments(url);
+	if (normalizedPreviewHost(url.host()) == QLatin1String("steamcommunity.com") && segments.size() >= 2
+		&& (segments.at(0) == QLatin1String("games") || segments.at(0) == QLatin1String("ogg"))) {
+		const QString appId = segments.at(1);
+		static const QRegularExpression s_appIdPattern(
+			QRegularExpression::anchoredPattern(QLatin1String("[0-9]{1,12}")));
+		if (s_appIdPattern.match(appId).hasMatch()) {
+			return appId;
+		}
+	}
+	for (int i = 0; i + 1 < segments.size(); ++i) {
+		if (segments.at(i) == QLatin1String("app") || segments.at(i) == QLatin1String("apps")) {
+			const QString appId = segments.at(i + 1);
+			static const QRegularExpression s_appIdPattern(
+				QRegularExpression::anchoredPattern(QLatin1String("[0-9]{1,12}")));
+			if (s_appIdPattern.match(appId).hasMatch()) {
+				return appId;
+			}
+		}
+	}
+	return std::nullopt;
+}
+
+QUrl steamAppDetailsUrl(const QString &appId) {
+	QUrl url(QStringLiteral("https://store.steampowered.com/api/appdetails"));
+	QUrlQuery query;
+	query.addQueryItem(QStringLiteral("appids"), appId);
+	query.addQueryItem(QStringLiteral("filters"),
+					   QStringLiteral(
+						   "basic,price_overview,release_date,platforms,developers,publishers,categories,genres,header_image,capsule_image,screenshots,movies"));
+	const QString localeName = QLocale::system().name();
+	if (localeName.size() >= 5 && localeName.at(2) == QLatin1Char('_')) {
+		query.addQueryItem(QStringLiteral("cc"), localeName.mid(3, 2).toLower());
+	}
+	url.setQuery(query);
+	return url;
+}
+
+QString steamStoreAppUrl(const QString &appId) {
+	return QStringLiteral("https://store.steampowered.com/app/%1/").arg(appId);
+}
+
+QString steamJsonArrayStrings(const QJsonArray &array, const QString &key, int maxItems = 3) {
+	QStringList values;
+	for (const QJsonValue &value : array) {
+		QString text;
+		if (value.isObject()) {
+			text = value.toObject().value(key).toString().trimmed();
+		} else {
+			text = value.toString().trimmed();
+		}
+		if (!text.isEmpty() && !values.contains(text)) {
+			values.push_back(text);
+		}
+		if (values.size() >= maxItems) {
+			break;
+		}
+	}
+	return values.join(QLatin1String(", "));
+}
+
+QString steamPlatformText(const QJsonObject &platforms) {
+	QStringList values;
+	if (platforms.value(QStringLiteral("windows")).toBool(false)) {
+		values.push_back(QObject::tr("Windows"));
+	}
+	if (platforms.value(QStringLiteral("mac")).toBool(false)) {
+		values.push_back(QObject::tr("Mac"));
+	}
+	if (platforms.value(QStringLiteral("linux")).toBool(false)) {
+		values.push_back(QObject::tr("Linux"));
+	}
+	return values.join(QLatin1String(" / "));
+}
+
+bool isSafePreviewTarget(const QUrl &url);
+
+QString steamMovieMediaUrl(const QJsonObject &movie, QString *mime, QString *streamKind) {
+	const auto setKind = [mime, streamKind](const QString &mimeValue, const QString &kindValue) {
+		if (mime) {
+			*mime = mimeValue;
+		}
+		if (streamKind) {
+			*streamKind = kindValue;
+		}
+	};
+
+	const QJsonObject mp4 = movie.value(QStringLiteral("mp4")).toObject();
+	QString url          = mp4.value(QStringLiteral("max")).toString().trimmed();
+	if (url.isEmpty()) {
+		url = mp4.value(QStringLiteral("480")).toString().trimmed();
+	}
+	if (!url.isEmpty()) {
+		setKind(QStringLiteral("video/mp4"), QStringLiteral("direct"));
+		return url;
+	}
+
+	const QJsonObject webm = movie.value(QStringLiteral("webm")).toObject();
+	url                    = webm.value(QStringLiteral("max")).toString().trimmed();
+	if (url.isEmpty()) {
+		url = webm.value(QStringLiteral("480")).toString().trimmed();
+	}
+	if (!url.isEmpty()) {
+		setKind(QStringLiteral("video/webm"), QStringLiteral("direct"));
+		return url;
+	}
+
+	url = movie.value(QStringLiteral("hls_h264")).toString().trimmed();
+	if (!url.isEmpty()) {
+		setKind(QStringLiteral("application/vnd.apple.mpegurl"), QStringLiteral("hls"));
+		return url;
+	}
+
+	url = movie.value(QStringLiteral("dash_h264")).toString().trimmed();
+	if (!url.isEmpty()) {
+		setKind(QStringLiteral("application/dash+xml"), QStringLiteral("dash"));
+		return url;
+	}
+
+	return QString();
+}
+
+QVariantList steamMediaItemsFromAppDetails(const QJsonObject &object, int maxMovies = 4, int maxScreenshots = 20) {
+	QVariantList items;
+	QSet< QString > seen;
+	const auto safeString = [](const QJsonObject &source, const QString &key) {
+		return source.value(key).toString().trimmed();
+	};
+	const auto addItem = [&items, &seen](QVariantMap item) {
+		const QString url = item.value(QStringLiteral("url")).toString().trimmed();
+		if (url.isEmpty() || seen.contains(url) || !isSafePreviewTarget(QUrl(url))) {
+			return;
+		}
+		seen.insert(url);
+		items.push_back(item);
+	};
+
+	const QString headerImage = safeString(object, QStringLiteral("header_image"));
+	if (!headerImage.isEmpty()) {
+		QVariantMap item;
+		item.insert(QStringLiteral("kind"), QStringLiteral("image"));
+		item.insert(QStringLiteral("url"), headerImage);
+		item.insert(QStringLiteral("mime"), QStringLiteral("image/jpeg"));
+		item.insert(QStringLiteral("title"), QObject::tr("Steam header image"));
+		item.insert(QStringLiteral("thumbnail"), headerImage);
+		addItem(item);
+	}
+
+	int movieCount = 0;
+	for (const QJsonValue &value : object.value(QStringLiteral("movies")).toArray()) {
+		if (!value.isObject() || movieCount >= maxMovies) {
+			continue;
+		}
+		const QJsonObject movie = value.toObject();
+		QString mime;
+		QString streamKind;
+		const QString mediaUrl = steamMovieMediaUrl(movie, &mime, &streamKind);
+		if (mediaUrl.isEmpty()) {
+			continue;
+		}
+
+		const QString poster = safeString(movie, QStringLiteral("thumbnail"));
+		QVariantMap item;
+		item.insert(QStringLiteral("kind"), QStringLiteral("video"));
+		item.insert(QStringLiteral("url"), mediaUrl);
+		item.insert(QStringLiteral("mime"), mime);
+		item.insert(QStringLiteral("streamKind"), streamKind);
+		const QString title = safeString(movie, QStringLiteral("name"));
+		if (!title.isEmpty()) {
+			item.insert(QStringLiteral("title"), title);
+		}
+		if (!poster.isEmpty() && isSafePreviewTarget(QUrl(poster))) {
+			item.insert(QStringLiteral("poster"), poster);
+			item.insert(QStringLiteral("thumbnail"), poster);
+		}
+		addItem(item);
+		++movieCount;
+	}
+
+	int screenshotCount = 0;
+	for (const QJsonValue &value : object.value(QStringLiteral("screenshots")).toArray()) {
+		if (!value.isObject() || screenshotCount >= maxScreenshots) {
+			continue;
+		}
+		const QJsonObject screenshot = value.toObject();
+		QString imageUrl            = safeString(screenshot, QStringLiteral("path_full"));
+		if (imageUrl.isEmpty()) {
+			imageUrl = safeString(screenshot, QStringLiteral("path_thumbnail"));
+		}
+		if (imageUrl.isEmpty()) {
+			continue;
+		}
+		const QString thumbnail = safeString(screenshot, QStringLiteral("path_thumbnail"));
+		QVariantMap item;
+		item.insert(QStringLiteral("kind"), QStringLiteral("image"));
+		item.insert(QStringLiteral("url"), imageUrl);
+		item.insert(QStringLiteral("mime"), QStringLiteral("image/jpeg"));
+		item.insert(QStringLiteral("title"), QObject::tr("Screenshot %1").arg(screenshotCount + 1));
+		if (!thumbnail.isEmpty() && isSafePreviewTarget(QUrl(thumbnail))) {
+			item.insert(QStringLiteral("thumbnail"), thumbnail);
+		}
+		addItem(item);
+		++screenshotCount;
+	}
+
+	return items;
+}
+
+std::optional< PersistentChatPreviewOEmbedTarget > previewOEmbedTargetForUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	QUrl endpoint;
+	QString siteLabel;
+	QString fallbackTitle;
+	QString openLabel;
+	bool socialPost = false;
+
+	const auto setUrlEndpoint = [&endpoint, &url](const QString &baseUrl) {
+		endpoint = QUrl(baseUrl);
+		QUrlQuery query;
+		query.addQueryItem(QStringLiteral("url"), url.toString(QUrl::FullyEncoded));
+		endpoint.setQuery(query);
+	};
+
+	if (hostEqualsOrEndsWith(host, QStringLiteral("tiktok.com"))) {
+		setUrlEndpoint(QStringLiteral("https://www.tiktok.com/oembed"));
+		siteLabel     = QObject::tr("TikTok");
+		fallbackTitle = QObject::tr("TikTok video");
+		openLabel     = QObject::tr("Open on TikTok");
+	} else if (host == QLatin1String("vimeo.com") || host == QLatin1String("player.vimeo.com")) {
+		setUrlEndpoint(QStringLiteral("https://vimeo.com/api/oembed.json"));
+		siteLabel     = QObject::tr("Vimeo");
+		fallbackTitle = QObject::tr("Vimeo video");
+		openLabel     = QObject::tr("Open on Vimeo");
+	} else if (hostEqualsOrEndsWith(host, QStringLiteral("dailymotion.com")) || host == QLatin1String("dai.ly")) {
+		endpoint = QUrl(QStringLiteral("https://www.dailymotion.com/services/oembed"));
+		QUrlQuery query;
+		query.addQueryItem(QStringLiteral("format"), QStringLiteral("json"));
+		query.addQueryItem(QStringLiteral("url"), url.toString(QUrl::FullyEncoded));
+		endpoint.setQuery(query);
+		siteLabel     = QObject::tr("Dailymotion");
+		fallbackTitle = QObject::tr("Dailymotion video");
+		openLabel     = QObject::tr("Open on Dailymotion");
+	} else if (host == QLatin1String("open.spotify.com") || host == QLatin1String("spotify.link")) {
+		setUrlEndpoint(QStringLiteral("https://open.spotify.com/oembed"));
+		siteLabel     = QObject::tr("Spotify");
+		fallbackTitle = QObject::tr("Spotify link");
+		openLabel     = QObject::tr("Open on Spotify");
+	} else if (host == QLatin1String("soundcloud.com") || host == QLatin1String("on.soundcloud.com")) {
+		endpoint = QUrl(QStringLiteral("https://soundcloud.com/oembed"));
+		QUrlQuery query;
+		query.addQueryItem(QStringLiteral("format"), QStringLiteral("json"));
+		query.addQueryItem(QStringLiteral("url"), url.toString(QUrl::FullyEncoded));
+		endpoint.setQuery(query);
+		siteLabel     = QObject::tr("SoundCloud");
+		fallbackTitle = QObject::tr("SoundCloud track");
+		openLabel     = QObject::tr("Open on SoundCloud");
+	} else if (host == QLatin1String("streamable.com")) {
+		setUrlEndpoint(QStringLiteral("https://api.streamable.com/oembed.json"));
+		siteLabel     = QObject::tr("Streamable");
+		fallbackTitle = QObject::tr("Streamable video");
+		openLabel     = QObject::tr("Open on Streamable");
+	} else if (hostEqualsOrEndsWith(host, QStringLiteral("giphy.com"))) {
+		setUrlEndpoint(QStringLiteral("https://giphy.com/services/oembed"));
+		siteLabel     = QObject::tr("GIPHY");
+		fallbackTitle = QObject::tr("GIPHY GIF");
+		openLabel     = QObject::tr("Open on GIPHY");
+	} else if (isBlueskyPostUrl(url)) {
+		setUrlEndpoint(QStringLiteral("https://embed.bsky.app/oembed"));
+		siteLabel     = QObject::tr("Bluesky");
+		fallbackTitle = QObject::tr("Bluesky post");
+		openLabel     = QObject::tr("Open on Bluesky");
+		socialPost    = true;
+	} else if (isLikelyMastodonPostUrl(url)) {
+		endpoint = QUrl(QStringLiteral("https://%1/api/oembed").arg(url.host()));
+		QUrlQuery query;
+		query.addQueryItem(QStringLiteral("url"), url.toString(QUrl::FullyEncoded));
+		endpoint.setQuery(query);
+		siteLabel     = QObject::tr("Mastodon");
+		fallbackTitle = QObject::tr("Mastodon post");
+		openLabel     = QObject::tr("Open post");
+		socialPost    = true;
+	} else {
+		return std::nullopt;
+	}
+
+	return PersistentChatPreviewOEmbedTarget { endpoint, siteLabel, fallbackTitle, openLabel, socialPost };
 }
 
 struct PersistentChatPreviewProviderInfo {
@@ -2633,6 +3637,24 @@ struct PersistentChatPreviewProviderInfo {
 	QString openLabel;
 	QString fallbackTitle;
 };
+
+struct GameStorePreviewInfo {
+	QString key;
+	QString siteLabel;
+	QString openLabel;
+	QString fallbackTitle;
+};
+
+struct RichPreviewProviderInfo {
+	QString key;
+	QString kind;
+	QString siteLabel;
+	QString openLabel;
+	QString fallbackTitle;
+	QStringList hostSuffixes;
+};
+
+constexpr int RICH_PREVIEW_METADATA_VERSION = 5;
 
 bool isDirectImageUrl(const QUrl &url) {
 	if (!url.isValid()) {
@@ -2663,7 +3685,9 @@ QString normalizedPlayableMediaMime(const QString &mime) {
 bool isRemotePlayableMediaMime(const QString &mime) {
 	const QString normalized = normalizedPlayableMediaMime(mime);
 	return normalized == QLatin1String("image/gif") || normalized == QLatin1String("video/mp4")
-		   || normalized == QLatin1String("video/webm");
+		   || normalized == QLatin1String("video/webm") || normalized == QLatin1String("image/jpeg")
+		   || normalized == QLatin1String("image/jpg") || normalized == QLatin1String("image/png")
+		   || normalized == QLatin1String("image/webp");
 }
 
 bool isRemotePlayableAudioMime(const QString &mime) {
@@ -2675,10 +3699,22 @@ bool isRemotePlayableAudioMime(const QString &mime) {
 QString playableMediaMimeForUrl(const QUrl &url, const QString &suggestedMime = QString()) {
 	const QString normalizedSuggestedMime = normalizedPlayableMediaMime(suggestedMime);
 	if (isRemotePlayableMediaMime(normalizedSuggestedMime)) {
+		if (normalizedSuggestedMime == QLatin1String("image/jpg")) {
+			return QStringLiteral("image/jpeg");
+		}
 		return normalizedSuggestedMime;
 	}
 
 	const QString path = url.path().toLower();
+	if (path.endsWith(QLatin1String(".jpg")) || path.endsWith(QLatin1String(".jpeg"))) {
+		return QStringLiteral("image/jpeg");
+	}
+	if (path.endsWith(QLatin1String(".png"))) {
+		return QStringLiteral("image/png");
+	}
+	if (path.endsWith(QLatin1String(".webp"))) {
+		return QStringLiteral("image/webp");
+	}
 	if (path.endsWith(QLatin1String(".gif"))) {
 		return QStringLiteral("image/gif");
 	}
@@ -2710,6 +3746,10 @@ QString playableAudioMimeForUrl(const QUrl &url, const QString &suggestedMime = 
 }
 
 QUrl normalizedRemotePlayableMediaUrl(QUrl url) {
+	if (url.scheme().toLower() == QLatin1String("http") && isDirectPlayableMediaUrl(url)) {
+		url.setScheme(QStringLiteral("https"));
+	}
+
 	QString path = url.path();
 	if (path.toLower().endsWith(QLatin1String(".gifv"))) {
 		path.chop(5);
@@ -2723,6 +3763,14 @@ bool hostEqualsOrEndsWith(const QString &host, const QString &suffix) {
 	return host == suffix || host.endsWith(QStringLiteral(".") + suffix);
 }
 
+QStringList decodedUrlPathSegments(const QUrl &url) {
+	QStringList segments;
+	for (const QString &segment : url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts)) {
+		segments.push_back(QUrl::fromPercentEncoding(segment.toUtf8()).trimmed());
+	}
+	return segments;
+}
+
 bool isKnownRemotePlayableMediaHost(QString host) {
 	host = host.trimmed().toLower();
 	if (host.startsWith(QLatin1String("www."))) {
@@ -2732,6 +3780,12 @@ bool isKnownRemotePlayableMediaHost(QString host) {
 	return hostEqualsOrEndsWith(host, QStringLiteral("redd.it"))
 		   || hostEqualsOrEndsWith(host, QStringLiteral("redditmedia.com"))
 		   || hostEqualsOrEndsWith(host, QStringLiteral("imgur.com"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("4cdn.org"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("4chan.org"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("4channel.org"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("twimg.com"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("tenor.com"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("giphy.com"))
 		   || hostEqualsOrEndsWith(host, QStringLiteral("cdninstagram.com"))
 		   || hostEqualsOrEndsWith(host, QStringLiteral("fbcdn.net"))
 		   || hostEqualsOrEndsWith(host, QStringLiteral("fbsbx.com"));
@@ -2763,7 +3817,12 @@ bool isSocialPreviewMediaProbeUrl(const QUrl &url) {
 	return host == QLatin1String("reddit.com") || host == QLatin1String("redd.it")
 		   || host == QLatin1String("v.redd.it") || host == QLatin1String("facebook.com")
 		   || host == QLatin1String("fb.watch") || host == QLatin1String("instagram.com")
-		   || host == QLatin1String("instagr.am");
+		   || host == QLatin1String("instagr.am") || hostEqualsOrEndsWith(host, QStringLiteral("imgur.com"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("4chan.org"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("4channel.org"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("tenor.com"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("giphy.com")) || host == QLatin1String("x.com")
+		   || host == QLatin1String("twitter.com");
 }
 
 bool shouldProbeSocialPreviewForPlayableMedia(const QUrl &url, const QString &mediaKind) {
@@ -2773,6 +3832,3268 @@ bool shouldProbeSocialPreviewForPlayableMedia(const QUrl &url, const QString &me
 QString firstPathSegment(const QUrl &url) {
 	const QStringList segments = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
 	return segments.isEmpty() ? QString() : segments.front();
+}
+
+bool isInstagramPreviewUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	return host == QLatin1String("instagram.com") || host == QLatin1String("instagr.am");
+}
+
+bool isFacebookPreviewUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	return host == QLatin1String("facebook.com") || host == QLatin1String("fb.com")
+		   || host == QLatin1String("fb.watch");
+}
+
+bool isInstagramReelPreviewUrl(const QUrl &url) {
+	if (!isInstagramPreviewUrl(url)) {
+		return false;
+	}
+	const QString segment = firstPathSegment(url).toLower();
+	return segment == QLatin1String("reel") || segment == QLatin1String("reels");
+}
+
+bool isFacebookReelPreviewUrl(const QUrl &url) {
+	if (!isFacebookPreviewUrl(url)) {
+		return false;
+	}
+	const QString segment = firstPathSegment(url).toLower();
+	return segment == QLatin1String("reel") || segment == QLatin1String("reels") || segment == QLatin1String("watch");
+}
+
+bool isGoogleSearchUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	if (!host.startsWith(QLatin1String("google."))) {
+		return false;
+	}
+
+	const QString path = url.path().trimmed().toLower();
+	const QUrlQuery query(url);
+	return (path.isEmpty() || path == QLatin1String("/") || path == QLatin1String("/search"))
+		   && (!query.queryItemValue(QLatin1String("q")).trimmed().isEmpty()
+			   || !query.queryItemValue(QLatin1String("as_q")).trimmed().isEmpty());
+}
+
+QString googleSearchQuery(const QUrl &url) {
+	const QUrlQuery query(url);
+	QString value = query.queryItemValue(QLatin1String("q")).trimmed();
+	if (value.isEmpty()) {
+		value = query.queryItemValue(QLatin1String("as_q")).trimmed();
+	}
+	return value;
+}
+
+QString googleSearchModeKey(const QUrl &url) {
+	const QUrlQuery query(url);
+	const QString tbm = query.queryItemValue(QLatin1String("tbm")).trimmed().toLower();
+	const QString udm = query.queryItemValue(QLatin1String("udm")).trimmed().toLower();
+	if (tbm == QLatin1String("isch") || udm == QLatin1String("2")) {
+		return QStringLiteral("images");
+	}
+	if (tbm == QLatin1String("vid") || udm == QLatin1String("7")) {
+		return QStringLiteral("videos");
+	}
+	if (tbm == QLatin1String("nws")) {
+		return QStringLiteral("news");
+	}
+	if (tbm == QLatin1String("shop") || udm == QLatin1String("28")) {
+		return QStringLiteral("shopping");
+	}
+	if (tbm == QLatin1String("bks")) {
+		return QStringLiteral("books");
+	}
+	return QStringLiteral("search");
+}
+
+QString googleSearchModeLabel(const QUrl &url) {
+	const QString mode = googleSearchModeKey(url);
+	if (mode == QLatin1String("images")) {
+		return QObject::tr("Google Images");
+	}
+	if (mode == QLatin1String("videos")) {
+		return QObject::tr("Google Videos");
+	}
+	if (mode == QLatin1String("news")) {
+		return QObject::tr("Google News");
+	}
+	if (mode == QLatin1String("shopping")) {
+		return QObject::tr("Google Shopping");
+	}
+	if (mode == QLatin1String("books")) {
+		return QObject::tr("Google Books");
+	}
+	return QObject::tr("Google Search");
+}
+
+QString googleSearchOpenLabel(const QUrl &url) {
+	const QString mode = googleSearchModeKey(url);
+	if (mode == QLatin1String("images")) {
+		return QObject::tr("Open Google Images");
+	}
+	if (mode == QLatin1String("videos")) {
+		return QObject::tr("Open Google Videos");
+	}
+	if (mode == QLatin1String("news")) {
+		return QObject::tr("Open Google News");
+	}
+	if (mode == QLatin1String("shopping")) {
+		return QObject::tr("Open Google Shopping");
+	}
+	if (mode == QLatin1String("books")) {
+		return QObject::tr("Open Google Books");
+	}
+	return QObject::tr("Open Google Search");
+}
+
+QString normalizedGoogleSearchPreviewUrl(const QUrl &url) {
+	QUrl normalized(QStringLiteral("https://www.google.com/search"));
+	QUrlQuery sourceQuery(url);
+	QUrlQuery normalizedQuery;
+	for (const QString &key : { QStringLiteral("q"), QStringLiteral("as_q"), QStringLiteral("tbm"),
+								QStringLiteral("udm"), QStringLiteral("tbs"), QStringLiteral("hl"),
+								QStringLiteral("gl"), QStringLiteral("safe") }) {
+		const QString value = sourceQuery.queryItemValue(key).trimmed();
+		if (!value.isEmpty()) {
+			normalizedQuery.addQueryItem(key, value);
+		}
+	}
+	normalized.setQuery(normalizedQuery);
+	return normalized.toString(QUrl::FullyEncoded);
+}
+
+std::vector< RichPreviewProviderInfo > richPreviewProviderInfos() {
+	return {
+		{ QStringLiteral("tradera"), QStringLiteral("marketplaceListing"), QObject::tr("Tradera"),
+		  QObject::tr("Open on Tradera"), QObject::tr("Tradera listing"), { QStringLiteral("tradera.com") } },
+		{ QStringLiteral("blocket"), QStringLiteral("marketplaceListing"), QObject::tr("Blocket"),
+		  QObject::tr("Open on Blocket"), QObject::tr("Blocket listing"), { QStringLiteral("blocket.se") } },
+		{ QStringLiteral("flashback"), QStringLiteral("forum"), QObject::tr("Flashback"),
+		  QObject::tr("Open on Flashback"), QObject::tr("Flashback thread"), { QStringLiteral("flashback.org") } },
+		{ QStringLiteral("sweclockers"), QStringLiteral("article"), QObject::tr("SweClockers"),
+		  QObject::tr("Open on SweClockers"), QObject::tr("SweClockers link"),
+		  { QStringLiteral("sweclockers.com") } },
+		{ QStringLiteral("existenz"), QStringLiteral("linkDigest"), QObject::tr("Existenz"),
+		  QObject::tr("Open on Existenz"), QObject::tr("Existenz link"), { QStringLiteral("existenz.se") } },
+		{ QStringLiteral("hemnet"), QStringLiteral("realEstate"), QObject::tr("Hemnet"),
+		  QObject::tr("Open on Hemnet"), QObject::tr("Hemnet listing"), { QStringLiteral("hemnet.se") } },
+		{ QStringLiteral("booli"), QStringLiteral("realEstate"), QObject::tr("Booli"),
+		  QObject::tr("Open on Booli"), QObject::tr("Booli listing"), { QStringLiteral("booli.se") } },
+		{ QStringLiteral("prisjakt"), QStringLiteral("product"), QObject::tr("Prisjakt"),
+		  QObject::tr("Open on Prisjakt"), QObject::tr("Prisjakt product"),
+		  { QStringLiteral("prisjakt.nu"), QStringLiteral("prisjakt.se") } },
+		{ QStringLiteral("pricerunner"), QStringLiteral("product"), QObject::tr("PriceRunner"),
+		  QObject::tr("Open on PriceRunner"), QObject::tr("PriceRunner product"),
+		  { QStringLiteral("pricerunner.se"), QStringLiteral("pricerunner.com") } },
+		{ QStringLiteral("gp"), QStringLiteral("article"), QObject::tr("GP"), QObject::tr("Open on GP"),
+		  QObject::tr("GP article"), { QStringLiteral("gp.se") } },
+		{ QStringLiteral("svt"), QStringLiteral("article"), QObject::tr("SVT"),
+		  QObject::tr("Open on SVT"), QObject::tr("SVT article"), { QStringLiteral("svt.se") } },
+		{ QStringLiteral("omni"), QStringLiteral("article"), QObject::tr("Omni"),
+		  QObject::tr("Open on Omni"), QObject::tr("Omni article"), { QStringLiteral("omni.se") } },
+		{ QStringLiteral("aftonbladet"), QStringLiteral("article"), QObject::tr("Aftonbladet"),
+		  QObject::tr("Open on Aftonbladet"), QObject::tr("Aftonbladet article"),
+		  { QStringLiteral("aftonbladet.se") } },
+		{ QStringLiteral("expressen"), QStringLiteral("article"), QObject::tr("Expressen"),
+		  QObject::tr("Open on Expressen"), QObject::tr("Expressen article"), { QStringLiteral("expressen.se") } },
+		{ QStringLiteral("dn"), QStringLiteral("article"), QObject::tr("DN"), QObject::tr("Open on DN"),
+		  QObject::tr("DN article"), { QStringLiteral("dn.se") } },
+		{ QStringLiteral("sverigesradio"), QStringLiteral("audio"), QObject::tr("Sveriges Radio"),
+		  QObject::tr("Open on Sveriges Radio"), QObject::tr("Sveriges Radio episode"),
+		  { QStringLiteral("sverigesradio.se"), QStringLiteral("sr.se") } },
+		{ QStringLiteral("inet"), QStringLiteral("product"), QObject::tr("Inet"), QObject::tr("Open on Inet"),
+		  QObject::tr("Inet product"), { QStringLiteral("inet.se") } },
+		{ QStringLiteral("webhallen"), QStringLiteral("product"), QObject::tr("Webhallen"),
+		  QObject::tr("Open on Webhallen"), QObject::tr("Webhallen product"), { QStringLiteral("webhallen.com") } },
+		{ QStringLiteral("elgiganten"), QStringLiteral("product"), QObject::tr("Elgiganten"),
+		  QObject::tr("Open on Elgiganten"), QObject::tr("Elgiganten product"),
+		  { QStringLiteral("elgiganten.se") } },
+		{ QStringLiteral("komplett"), QStringLiteral("product"), QObject::tr("Komplett"),
+		  QObject::tr("Open on Komplett"), QObject::tr("Komplett product"), { QStringLiteral("komplett.se") } },
+		{ QStringLiteral("systembolaget"), QStringLiteral("systembolagetProduct"), QObject::tr("Systembolaget"),
+		  QObject::tr("Open on Systembolaget"), QObject::tr("Systembolaget product"),
+		  { QStringLiteral("systembolaget.se") } },
+		{ QStringLiteral("smhi"), QStringLiteral("weather"), QObject::tr("SMHI"), QObject::tr("Open on SMHI"),
+		  QObject::tr("SMHI forecast"), { QStringLiteral("smhi.se") } },
+		{ QStringLiteral("klart"), QStringLiteral("weather"), QObject::tr("Klart"),
+		  QObject::tr("Open on Klart"), QObject::tr("Klart forecast"), { QStringLiteral("klart.se") } },
+		{ QStringLiteral("yr"), QStringLiteral("weather"), QObject::tr("Yr"), QObject::tr("Open on Yr"),
+		  QObject::tr("Yr forecast"), { QStringLiteral("yr.no") } },
+		{ QStringLiteral("hitta"), QStringLiteral("place"), QObject::tr("Hitta"),
+		  QObject::tr("Open on Hitta"), QObject::tr("Hitta place"), { QStringLiteral("hitta.se") } },
+		{ QStringLiteral("eniro"), QStringLiteral("place"), QObject::tr("Eniro"),
+		  QObject::tr("Open on Eniro"), QObject::tr("Eniro place"), { QStringLiteral("eniro.se") } },
+		{ QStringLiteral("googlemaps"), QStringLiteral("place"), QObject::tr("Google Maps"),
+		  QObject::tr("Open in Google Maps"), QObject::tr("Google Maps place"),
+		  { QStringLiteral("maps.google.com"), QStringLiteral("maps.app.goo.gl") } },
+		{ QStringLiteral("sj"), QStringLiteral("traffic"), QObject::tr("SJ"), QObject::tr("Open on SJ"),
+		  QObject::tr("SJ travel link"), { QStringLiteral("sj.se") } },
+		{ QStringLiteral("sl"), QStringLiteral("traffic"), QObject::tr("SL"), QObject::tr("Open on SL"),
+		  QObject::tr("SL traffic link"), { QStringLiteral("sl.se") } },
+		{ QStringLiteral("vasttrafik"), QStringLiteral("traffic"), QString::fromUtf8("V\xc3\xa4sttrafik"),
+		  QString::fromUtf8("Open on V\xc3\xa4sttrafik"), QString::fromUtf8("V\xc3\xa4sttrafik traffic link"),
+		  { QStringLiteral("vasttrafik.se") } },
+		{ QStringLiteral("amazon"), QStringLiteral("product"), QObject::tr("Amazon"),
+		  QObject::tr("Open on Amazon"), QObject::tr("Amazon product"),
+		  { QStringLiteral("amazon.se"), QStringLiteral("amazon.com"), QStringLiteral("amazon.de"),
+			QStringLiteral("amazon.co.uk"), QStringLiteral("amazon.fr"), QStringLiteral("amazon.it"),
+			QStringLiteral("amazon.es"), QStringLiteral("amazon.nl"), QStringLiteral("amazon.pl") } }
+	};
+}
+
+std::optional< RichPreviewProviderInfo > richPreviewProviderForUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	if (host.isEmpty()) {
+		return std::nullopt;
+	}
+
+	const QString path = url.path().toLower();
+	for (RichPreviewProviderInfo provider : richPreviewProviderInfos()) {
+		if (provider.key == QLatin1String("googlemaps")) {
+			if (host.startsWith(QLatin1String("google.")) && path.startsWith(QLatin1String("/maps"))) {
+				return provider;
+			}
+			if (host.startsWith(QLatin1String("maps.google."))) {
+				return provider;
+			}
+		}
+
+		for (const QString &suffix : provider.hostSuffixes) {
+			if (hostEqualsOrEndsWith(host, suffix)) {
+				if (provider.key == QLatin1String("sweclockers")
+					&& decodedUrlPathSegments(url).contains(QStringLiteral("forum"))) {
+					provider.kind          = QStringLiteral("forum");
+					provider.fallbackTitle = QObject::tr("SweClockers forum thread");
+				}
+				return provider;
+			}
+		}
+	}
+
+	return std::nullopt;
+}
+
+bool isTraderaPreviewUrl(const QUrl &url) {
+	const std::optional< RichPreviewProviderInfo > provider = richPreviewProviderForUrl(url);
+	return provider && provider->key == QLatin1String("tradera");
+}
+
+bool isBlocketPreviewUrl(const QUrl &url) {
+	const std::optional< RichPreviewProviderInfo > provider = richPreviewProviderForUrl(url);
+	return provider && provider->key == QLatin1String("blocket");
+}
+
+bool isFlashbackPreviewUrl(const QUrl &url) {
+	const std::optional< RichPreviewProviderInfo > provider = richPreviewProviderForUrl(url);
+	return provider && provider->key == QLatin1String("flashback");
+}
+
+bool isAmazonPreviewUrl(const QUrl &url) {
+	const std::optional< RichPreviewProviderInfo > provider = richPreviewProviderForUrl(url);
+	return provider && provider->key == QLatin1String("amazon");
+}
+
+std::optional< QString > webhallenProductIdFromUrl(const QUrl &url) {
+	const std::optional< RichPreviewProviderInfo > provider = richPreviewProviderForUrl(url);
+	if (!provider || provider->key != QLatin1String("webhallen")) {
+		return std::nullopt;
+	}
+
+	static const QRegularExpression s_productIdPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("([0-9]{3,12})(?:[-_].*)?")));
+	const QStringList segments = decodedUrlPathSegments(url);
+	for (int i = 0; i < segments.size(); ++i) {
+		const QString segment = segments.at(i).trimmed();
+		if ((segment == QLatin1String("product") || segment == QLatin1String("p")) && i + 1 < segments.size()) {
+			const QRegularExpressionMatch nextMatch = s_productIdPattern.match(segments.at(i + 1).trimmed());
+			if (nextMatch.hasMatch()) {
+				return nextMatch.captured(1);
+			}
+		}
+
+		const QRegularExpressionMatch match = s_productIdPattern.match(segment);
+		if (match.hasMatch()) {
+			return match.captured(1);
+		}
+	}
+
+	return std::nullopt;
+}
+
+std::optional< QString > inetProductIdFromUrl(const QUrl &url) {
+	const std::optional< RichPreviewProviderInfo > provider = richPreviewProviderForUrl(url);
+	if (!provider || provider->key != QLatin1String("inet")) {
+		return std::nullopt;
+	}
+
+	static const QRegularExpression s_productIdPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("([0-9]{3,12})(?:[-_].*)?")));
+	const QStringList segments = decodedUrlPathSegments(url);
+	for (int i = 0; i < segments.size(); ++i) {
+		const QString segment = segments.at(i).trimmed();
+		if ((segment == QLatin1String("produkt") || segment == QLatin1String("product")) && i + 1 < segments.size()) {
+			const QRegularExpressionMatch nextMatch = s_productIdPattern.match(segments.at(i + 1).trimmed());
+			if (nextMatch.hasMatch()) {
+				return nextMatch.captured(1);
+			}
+		}
+
+		const QRegularExpressionMatch match = s_productIdPattern.match(segment);
+		if (match.hasMatch()) {
+			return match.captured(1);
+		}
+	}
+
+	return std::nullopt;
+}
+
+QUrl webhallenProductApiUrl(const QString &productId) {
+	QUrl url(QStringLiteral("https://www.webhallen.com/api/product/%1").arg(productId));
+	QUrlQuery query;
+	query.addQueryItem(QStringLiteral("touchpoint"), QStringLiteral("DESKTOP"));
+	url.setQuery(query);
+	return url;
+}
+
+std::optional< GameStorePreviewInfo > gameStorePreviewInfoForUrl(const QUrl &url) {
+	if (!url.isValid()) {
+		return std::nullopt;
+	}
+
+	const QString host = normalizedPreviewHost(url.host());
+	const QStringList segments = decodedUrlPathSegments(url);
+	const QString firstSegment = segments.isEmpty() ? QString() : segments.front().toLower();
+	const auto info = [](const QString &key, const QString &siteLabel, const QString &openLabel,
+						 const QString &fallbackTitle) {
+		return GameStorePreviewInfo { key, siteLabel, openLabel, fallbackTitle };
+	};
+
+	if (hostEqualsOrEndsWith(host, QStringLiteral("g2a.com"))) {
+		return info(QStringLiteral("g2a"), QObject::tr("G2A"), QObject::tr("Open on G2A"),
+					QObject::tr("G2A listing"));
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("kinguin.net"))
+		|| hostEqualsOrEndsWith(host, QStringLiteral("kinguin.com"))) {
+		return info(QStringLiteral("kinguin"), QObject::tr("Kinguin"), QObject::tr("Open on Kinguin"),
+					QObject::tr("Kinguin listing"));
+	}
+	if (host == QLatin1String("store.epicgames.com") || host == QLatin1String("store.epic.com")) {
+		return info(QStringLiteral("epic"), QObject::tr("Epic Games Store"),
+					QObject::tr("Open on Epic Games Store"), QObject::tr("Epic Games Store link"));
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("gog.com"))) {
+		return info(QStringLiteral("gog"), QObject::tr("GOG"), QObject::tr("Open on GOG"),
+					QObject::tr("GOG game"));
+	}
+	if (host == QLatin1String("store.ubisoft.com") || host == QLatin1String("store.ubi.com")
+		|| (hostEqualsOrEndsWith(host, QStringLiteral("ubisoft.com")) && firstSegment == QLatin1String("game"))) {
+		return info(QStringLiteral("ubisoft"), QObject::tr("Ubisoft Store"),
+					QObject::tr("Open on Ubisoft Store"), QObject::tr("Ubisoft Store link"));
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("ea.com")) && firstSegment == QLatin1String("games")) {
+		return info(QStringLiteral("ea"), QObject::tr("EA"), QObject::tr("Open on EA"),
+					QObject::tr("EA game"));
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("humblebundle.com")) && firstSegment == QLatin1String("store")) {
+		return info(QStringLiteral("humble"), QObject::tr("Humble Store"), QObject::tr("Open on Humble"),
+					QObject::tr("Humble Store game"));
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("fanatical.com"))) {
+		return info(QStringLiteral("fanatical"), QObject::tr("Fanatical"), QObject::tr("Open on Fanatical"),
+					QObject::tr("Fanatical game"));
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("greenmangaming.com"))) {
+		return info(QStringLiteral("greenmangaming"), QObject::tr("Green Man Gaming"),
+					QObject::tr("Open on Green Man Gaming"), QObject::tr("Green Man Gaming game"));
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("itch.io"))) {
+		return info(QStringLiteral("itch"), QObject::tr("itch.io"), QObject::tr("Open on itch.io"),
+					QObject::tr("itch.io game"));
+	}
+	if (host == QLatin1String("shop.battle.net") || hostEqualsOrEndsWith(host, QStringLiteral("battle.net"))) {
+		return info(QStringLiteral("battlenet"), QObject::tr("Battle.net"), QObject::tr("Open on Battle.net"),
+					QObject::tr("Battle.net game"));
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("xbox.com")) && segments.contains(QStringLiteral("store"))) {
+		return info(QStringLiteral("xbox"), QObject::tr("Xbox Store"), QObject::tr("Open on Xbox Store"),
+					QObject::tr("Xbox Store game"));
+	}
+
+	return std::nullopt;
+}
+
+bool isGameStorePreviewUrl(const QUrl &url) {
+	return gameStorePreviewInfoForUrl(url).has_value();
+}
+
+QString lastNumericPreviewPathSegment(const QUrl &url, int minDigits, int maxDigits) {
+	const QStringList segments = decodedUrlPathSegments(url);
+	QString match;
+	const QRegularExpression numericPattern(
+		QRegularExpression::anchoredPattern(QStringLiteral("[0-9]{%1,%2}").arg(minDigits).arg(maxDigits)));
+	for (const QString &segment : segments) {
+		if (numericPattern.match(segment).hasMatch()) {
+			match = segment;
+		}
+	}
+	return match;
+}
+
+QString traderaListingIdFromUrl(const QUrl &url) {
+	return isTraderaPreviewUrl(url) ? lastNumericPreviewPathSegment(url, 6, 14) : QString();
+}
+
+QString blocketListingIdFromUrl(const QUrl &url) {
+	return isBlocketPreviewUrl(url) ? lastNumericPreviewPathSegment(url, 5, 14) : QString();
+}
+
+QString flashbackThreadIdFromUrl(const QUrl &url) {
+	if (!isFlashbackPreviewUrl(url)) {
+		return QString();
+	}
+
+	static const QRegularExpression s_threadPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("t([0-9]{3,14})(?:p[0-9]+)?")),
+		QRegularExpression::CaseInsensitiveOption);
+	for (const QString &segment : decodedUrlPathSegments(url)) {
+		const QRegularExpressionMatch match = s_threadPattern.match(segment);
+		if (match.hasMatch()) {
+			return match.captured(1);
+		}
+	}
+	return QString();
+}
+
+QString flashbackPostIdFromUrl(const QUrl &url) {
+	if (!isFlashbackPreviewUrl(url)) {
+		return QString();
+	}
+
+	static const QRegularExpression s_postSegmentPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("s?p([0-9]{3,14})")),
+		QRegularExpression::CaseInsensitiveOption);
+	for (const QString &segment : decodedUrlPathSegments(url)) {
+		const QRegularExpressionMatch match = s_postSegmentPattern.match(segment.trimmed());
+		if (match.hasMatch()) {
+			return match.captured(1);
+		}
+	}
+
+	static const QRegularExpression s_postIdPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("p?([0-9]{3,14})")),
+		QRegularExpression::CaseInsensitiveOption);
+	const QString queryPostId = QUrlQuery(url).queryItemValue(QStringLiteral("p")).trimmed();
+	QRegularExpressionMatch queryMatch = s_postIdPattern.match(queryPostId);
+	if (queryMatch.hasMatch()) {
+		return queryMatch.captured(1);
+	}
+
+	const QString fragment = url.fragment(QUrl::FullyDecoded).trimmed();
+	QRegularExpressionMatch fragmentMatch = s_postIdPattern.match(fragment);
+	return fragmentMatch.hasMatch() ? fragmentMatch.captured(1) : QString();
+}
+
+QUrl flashbackThreadPostUrl(const QUrl &url, const QString &postId) {
+	if (!isFlashbackPreviewUrl(url) || postId.trimmed().isEmpty()) {
+		return QUrl();
+	}
+
+	QUrl canonical = url;
+	canonical.setPath(QStringLiteral("/p%1").arg(postId.trimmed()));
+	canonical.setQuery(QString());
+	canonical.setFragment(QStringLiteral("p%1").arg(postId.trimmed()));
+	return canonical;
+}
+
+QUrl flashbackPreviewPageUrl(const QUrl &url) {
+	const QString postId = flashbackPostIdFromUrl(url);
+	if (postId.isEmpty()) {
+		return url;
+	}
+
+	QUrl pageUrl = flashbackThreadPostUrl(url, postId);
+	pageUrl.setFragment(QString());
+	return pageUrl.isValid() ? pageUrl : url;
+}
+
+QString labelledPreviewDescriptionValue(const QString &description, const QStringList &labels) {
+	const QString normalized = description.simplified();
+	if (normalized.isEmpty()) {
+		return QString();
+	}
+
+	for (const QString &label : labels) {
+		const QRegularExpression pattern(
+			QStringLiteral("(?:^|[\\.\\n;]\\s*)%1\\s*:\\s*([^\\.\\n;]+)")
+				.arg(QRegularExpression::escape(label)),
+			QRegularExpression::CaseInsensitiveOption);
+		const QRegularExpressionMatch match = pattern.match(normalized);
+		if (match.hasMatch()) {
+			return match.captured(1).trimmed();
+		}
+	}
+	return QString();
+}
+
+QString blocketPreviewTitle(const QString &title) {
+	QString cleaned = title.trimmed();
+	static const QRegularExpression s_suffixPattern(QLatin1String("\\s*\\|\\s*Blocket(?:\\.se)?\\s*$"),
+													 QRegularExpression::CaseInsensitiveOption);
+	cleaned.remove(s_suffixPattern);
+	return cleaned.trimmed();
+}
+
+void insertPreviewMetadataValue(QVariantMap &metadata, const QString &key, const QString &value) {
+	const QString trimmed = value.trimmed();
+	if (!trimmed.isEmpty()) {
+		metadata.insert(key, trimmed);
+	}
+}
+
+QString decodedPreviewText(const QString &text);
+QString decodedPreviewHtml(const QByteArray &bytes, const QString &contentType);
+QString extractHtmlTitle(const QString &html);
+QString trimmedPreviewText(QString text, int maxLength);
+
+QVariantMap previewSpecItem(const QString &label, const QString &value) {
+	QVariantMap item;
+	item.insert(QStringLiteral("label"), label.trimmed());
+	item.insert(QStringLiteral("value"), value.trimmed());
+	return item;
+}
+
+void appendPreviewSpecItem(QVariantList &items, QSet< QString > &seenLabels, const QString &label,
+						   const QString &value) {
+	const QString cleanLabel = decodedPreviewText(label).trimmed();
+	const QString cleanValue = decodedPreviewText(value).trimmed();
+	if (cleanLabel.isEmpty() || cleanValue.isEmpty()) {
+		return;
+	}
+
+	const QString key = cleanLabel.toLower();
+	if (seenLabels.contains(key)) {
+		return;
+	}
+	seenLabels.insert(key);
+	items.push_back(previewSpecItem(cleanLabel, cleanValue));
+}
+
+QString firstHtmlMatchText(const QString &html, const QString &pattern,
+						   QRegularExpression::PatternOptions options = QRegularExpression::CaseInsensitiveOption
+																		 | QRegularExpression::DotMatchesEverythingOption) {
+	const QRegularExpression regex(pattern, options);
+	const QRegularExpressionMatch match = regex.match(html);
+	return match.hasMatch() ? decodedPreviewText(match.captured(1)) : QString();
+}
+
+QString blocketEmbeddedValueFromHtml(const QString &html, const QString &key) {
+	const QRegularExpression pattern(
+		QStringLiteral("\"key\"\\s*:\\s*\"%1\"\\s*,\\s*\"value\"\\s*:\\s*\\[\\s*\"([^\"]*)\"")
+			.arg(QRegularExpression::escape(key)),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = pattern.match(html);
+	return match.hasMatch() ? decodedPreviewText(match.captured(1)) : QString();
+}
+
+QString formattedSwedishKronor(const QString &rawValue) {
+	QString digits = rawValue;
+	digits.remove(QRegularExpression(QLatin1String("[^0-9]")));
+	if (digits.isEmpty()) {
+		return QString();
+	}
+
+	bool ok          = false;
+	const qlonglong value = digits.toLongLong(&ok);
+	if (!ok || value <= 0) {
+		return QString();
+	}
+	return QStringLiteral("%1 kr").arg(QLocale(QLocale::Swedish, QLocale::Sweden).toString(value));
+}
+
+QString previewPriceTextFromText(const QString &title, const QString &description) {
+	const QString text = QString(title + QLatin1Char(' ') + description).simplified();
+	if (text.isEmpty()) {
+		return QString();
+	}
+
+	static const QRegularExpression s_currencyPattern(
+		QLatin1String("(?<![A-Za-z0-9])(?:[$€£]\\s*)?[0-9][0-9\\s\\x{00a0}.,]*\\s*(?:kr|SEK|NOK|DKK|zł|€|£|USD|EUR|GBP)(?![A-Za-z0-9])"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_currencyPattern.match(text);
+	return match.hasMatch() ? match.captured(0).simplified() : QString();
+}
+
+QString blocketTitleFromHtml(const QString &html, const QString &fallbackTitle) {
+	QString title = blocketEmbeddedValueFromHtml(html, QStringLiteral("ad_title"));
+	if (title.isEmpty()) {
+		title = firstHtmlMatchText(html, QLatin1String("<h1[^>]*>(.*?)</h1>"));
+	}
+	if (title.isEmpty()) {
+		title = blocketPreviewTitle(fallbackTitle);
+	}
+	return title.trimmed();
+}
+
+QString blocketPriceFromHtml(const QString &html, const QString &title, const QString &description) {
+	QString price = formattedSwedishKronor(blocketEmbeddedValueFromHtml(html, QStringLiteral("price")));
+	if (price.isEmpty()) {
+		price = firstHtmlMatchText(html, QLatin1String("<h2[^>]*>\\s*([0-9][^<]*?kr)\\s*</h2>"));
+	}
+	if (price.isEmpty()) {
+		price = labelledPreviewDescriptionValue(description, QStringList { QStringLiteral("Pris") });
+	}
+	if (price.isEmpty()) {
+		price = previewPriceTextFromText(title, description);
+	}
+	return price.trimmed();
+}
+
+QString blocketLocationFromHtml(const QString &html) {
+	QString location = firstHtmlMatchText(html, QLatin1String("<h2[^>]*>\\s*Plats\\s*</h2>[\\s\\S]*?<a[^>]*>(.*?)</a>"));
+	if (location.isEmpty()) {
+		location = firstHtmlMatchText(
+			html,
+			QLatin1String("<h2[^>]*>\\s*Plats\\s*</h2>[\\s\\S]{0,800}?([0-9]{3}\\s?[0-9]{2}\\s+[^<\"{}]{2,80})"));
+	}
+	if (location.isEmpty()) {
+		location = blocketEmbeddedValueFromHtml(html, QStringLiteral("location"));
+	}
+	if (location.isEmpty()) {
+		const QString city = blocketEmbeddedValueFromHtml(html, QStringLiteral("city"));
+		const QString zipcode = blocketEmbeddedValueFromHtml(html, QStringLiteral("zipcode"));
+		if (!zipcode.isEmpty() && !city.isEmpty()) {
+			location = QStringLiteral("%1 %2").arg(zipcode, city);
+		} else if (!zipcode.isEmpty()) {
+			location = zipcode;
+		}
+	}
+	return location.trimmed();
+}
+
+QVariantList blocketSpecItemsFromHtml(const QString &html) {
+	QVariantList items;
+	QSet< QString > seenLabels;
+
+	static const QRegularExpression s_summarySpecPattern(
+		QLatin1String("<span[^>]*s-text-subtle[^>]*>(.*?)</span>\\s*<p[^>]*font-bold[^>]*>(.*?)</p>"),
+		QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+	QRegularExpressionMatchIterator summaryIt = s_summarySpecPattern.globalMatch(html);
+	while (summaryIt.hasNext() && items.size() < 12) {
+		const QRegularExpressionMatch match = summaryIt.next();
+		appendPreviewSpecItem(items, seenLabels, match.captured(1), match.captured(2));
+	}
+
+	static const QRegularExpression s_definitionPattern(
+		QLatin1String("<dt[^>]*>(.*?)</dt>\\s*<dd[^>]*>(.*?)</dd>"),
+		QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+	QRegularExpressionMatchIterator definitionIt = s_definitionPattern.globalMatch(html);
+	while (definitionIt.hasNext() && items.size() < 12) {
+		const QRegularExpressionMatch match = definitionIt.next();
+		appendPreviewSpecItem(items, seenLabels, match.captured(1), match.captured(2));
+	}
+
+	return items;
+}
+
+QVariantList blocketImageItemsFromHtml(const QString &html) {
+	QVariantList items;
+	QSet< QString > seenUrls;
+	static const QRegularExpression s_imagePattern(
+		QLatin1String("https://images\\.blocketcdn\\.se/[^\"'<>\\\\\\s]+"),
+		QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator it = s_imagePattern.globalMatch(html);
+	while (it.hasNext() && items.size() < 10) {
+		QString url = it.next().captured(0).trimmed();
+		url.replace(QLatin1String("\\/"), QLatin1String("/"));
+		if (url.isEmpty() || seenUrls.contains(url)) {
+			continue;
+		}
+		seenUrls.insert(url);
+		QVariantMap item;
+		item.insert(QStringLiteral("url"), url);
+		item.insert(QStringLiteral("mime"), QStringLiteral("image/jpeg"));
+		item.insert(QStringLiteral("kind"), QStringLiteral("image"));
+		items.push_back(item);
+	}
+	return items;
+}
+
+QString clippedPreviewPlainText(QString text, int maxLength) {
+	text = decodedPreviewText(text);
+	text.remove(QRegularExpression(QLatin1String("https?://\\S+"), QRegularExpression::CaseInsensitiveOption));
+	text = text.simplified();
+	if (text.size() <= maxLength) {
+		return text;
+	}
+	return text.left(std::max(0, maxLength - 1)).trimmed() + QChar(0x2026);
+}
+
+QStringList flashbackBreadcrumbPartsFromHtml(const QString &html) {
+	QStringList parts;
+	static const QRegularExpression s_breadcrumbPattern(
+		QLatin1String("<ol\\b[^>]*class\\s*=\\s*['\"][^'\"]*breadcrumb[^'\"]*['\"][^>]*>([\\s\\S]*?)</ol>"),
+		QRegularExpression::CaseInsensitiveOption);
+	static const QRegularExpression s_itemPattern(QLatin1String("<li\\b[^>]*>([\\s\\S]*?)</li>"),
+												  QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch breadcrumbMatch = s_breadcrumbPattern.match(html);
+	if (!breadcrumbMatch.hasMatch()) {
+		return parts;
+	}
+
+	QRegularExpressionMatchIterator items = s_itemPattern.globalMatch(breadcrumbMatch.captured(1));
+	while (items.hasNext() && parts.size() < 4) {
+		const QString value = decodedPreviewText(items.next().captured(1)).trimmed();
+		if (!value.isEmpty() && !parts.contains(value, Qt::CaseInsensitive)) {
+			parts.push_back(value);
+		}
+	}
+	return parts;
+}
+
+QString flashbackFirstHtmlMatch(const QString &html, const QString &pattern) {
+	const QRegularExpression regex(pattern, QRegularExpression::CaseInsensitiveOption
+												| QRegularExpression::DotMatchesEverythingOption);
+	const QRegularExpressionMatch match = regex.match(html);
+	return match.hasMatch() ? decodedPreviewText(match.captured(1)).trimmed() : QString();
+}
+
+QString flashbackPostBlockFromHtml(const QString &html, const QString &preferredPostId) {
+	const QString postId = preferredPostId.trimmed();
+	if (!postId.isEmpty()) {
+		const QString escapedPostId = QRegularExpression::escape(postId);
+		const QRegularExpression exactPostPattern(
+			QStringLiteral("<!--\\s*post\\s+#%1\\s*-->\\s*(<div\\b[^>]*\\bid\\s*=\\s*['\"]post%1['\"][\\s\\S]*?<!--\\s*/\\s*post\\s+#%1\\s*-->)")
+				.arg(escapedPostId),
+			QRegularExpression::CaseInsensitiveOption);
+		const QRegularExpressionMatch exactMatch = exactPostPattern.match(html);
+		if (exactMatch.hasMatch()) {
+			return exactMatch.captured(1);
+		}
+
+		const QRegularExpression fallbackPostPattern(
+			QStringLiteral("(<div\\b(?=[^>]*\\bdata-postid\\s*=\\s*['\"]%1['\"])(?=[^>]*\\bclass\\s*=\\s*['\"][^'\"]*\\bpost\\b[^'\"]*['\"])[^>]*>[\\s\\S]{0,9000})")
+				.arg(escapedPostId),
+			QRegularExpression::CaseInsensitiveOption);
+		const QRegularExpressionMatch fallbackMatch = fallbackPostPattern.match(html);
+		if (fallbackMatch.hasMatch()) {
+			return fallbackMatch.captured(1);
+		}
+	}
+
+	static const QRegularExpression s_postPattern(
+		QLatin1String("<!--\\s*post\\s+#[0-9]+\\s*-->\\s*(<div\\b[^>]*\\bclass\\s*=\\s*['\"][^'\"]*\\bpost\\b[^'\"]*['\"][\\s\\S]*?<!--\\s*/\\s*post\\s+#[0-9]+\\s*-->)"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_postPattern.match(html);
+	if (match.hasMatch()) {
+		return match.captured(1);
+	}
+
+	static const QRegularExpression s_fallbackPostPattern(
+		QLatin1String("(<div\\b[^>]*\\bdata-postid\\s*=\\s*['\"][0-9]+['\"][^>]*\\bclass\\s*=\\s*['\"][^'\"]*\\bpost\\b[^'\"]*['\"][\\s\\S]{0,9000})"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch fallbackMatch = s_fallbackPostPattern.match(html);
+	return fallbackMatch.hasMatch() ? fallbackMatch.captured(1) : QString();
+}
+
+int htmlDivBlockEndIndex(const QString &html, int startTagEnd) {
+	int depth = 1;
+	static const QRegularExpression s_divTag(QLatin1String("</?div\\b[^>]*>"),
+											 QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator tags = s_divTag.globalMatch(html, startTagEnd);
+	while (tags.hasNext()) {
+		const QRegularExpressionMatch tagMatch = tags.next();
+		const QString tag                      = tagMatch.captured(0).trimmed();
+		if (tag.startsWith(QLatin1String("</"), Qt::CaseInsensitive)) {
+			--depth;
+		} else if (!tag.endsWith(QLatin1String("/>"))) {
+			++depth;
+		}
+		if (depth == 0) {
+			return tagMatch.capturedEnd();
+		}
+	}
+	return -1;
+}
+
+QRegularExpression htmlDivClassStartPattern(const QString &className) {
+	return QRegularExpression(
+		QStringLiteral("<div\\b(?=[^>]*\\bclass\\s*=\\s*['\"][^'\"]*\\b%1\\b[^'\"]*['\"])[^>]*>")
+			.arg(QRegularExpression::escape(className)),
+		QRegularExpression::CaseInsensitiveOption);
+}
+
+QString htmlDivBlockWithClass(const QString &html, const QString &className, int from = 0) {
+	const QRegularExpression startPattern = htmlDivClassStartPattern(className);
+	const QRegularExpressionMatch startMatch = startPattern.match(html, from);
+	if (!startMatch.hasMatch()) {
+		return QString();
+	}
+
+	const int endIndex = htmlDivBlockEndIndex(html, startMatch.capturedEnd());
+	if (endIndex <= startMatch.capturedStart()) {
+		return QString();
+	}
+	return html.mid(startMatch.capturedStart(), endIndex - startMatch.capturedStart());
+}
+
+QString htmlDivContentWithClass(const QString &html, const QString &className) {
+	const QRegularExpression startPattern = htmlDivClassStartPattern(className);
+	const QRegularExpressionMatch startMatch = startPattern.match(html);
+	if (!startMatch.hasMatch()) {
+		return QString();
+	}
+
+	const int endIndex = htmlDivBlockEndIndex(html, startMatch.capturedEnd());
+	if (endIndex <= startMatch.capturedEnd()) {
+		return QString();
+	}
+
+	const int closingTagStart = html.lastIndexOf(QLatin1String("</div>"), endIndex, Qt::CaseInsensitive);
+	if (closingTagStart < startMatch.capturedEnd()) {
+		return QString();
+	}
+	return html.mid(startMatch.capturedEnd(), closingTagStart - startMatch.capturedEnd());
+}
+
+QString removeHtmlDivBlocksByClass(QString html, const QString &className) {
+	const QRegularExpression startPattern = htmlDivClassStartPattern(className);
+	int searchFrom                         = 0;
+	while (searchFrom < html.size()) {
+		const QRegularExpressionMatch startMatch = startPattern.match(html, searchFrom);
+		if (!startMatch.hasMatch()) {
+			break;
+		}
+
+		const int endIndex = htmlDivBlockEndIndex(html, startMatch.capturedEnd());
+		if (endIndex <= startMatch.capturedStart()) {
+			break;
+		}
+		html.remove(startMatch.capturedStart(), endIndex - startMatch.capturedStart());
+		searchFrom = startMatch.capturedStart();
+	}
+	return html;
+}
+
+QString flashbackPostMessageWithoutQuotes(QString messageHtml) {
+	messageHtml = removeHtmlDivBlocksByClass(messageHtml, QStringLiteral("post-bbcode-quote-wrapper"));
+	messageHtml = removeHtmlDivBlocksByClass(messageHtml, QStringLiteral("post-bbcode-quote"));
+	messageHtml.remove(QRegularExpression(QLatin1String("<small>\\s*Citat\\s*:?\\s*</small>"),
+										   QRegularExpression::CaseInsensitiveOption));
+	return messageHtml.trimmed();
+}
+
+QString flashbackPostCountFromHtml(const QString &html) {
+	static const QRegularExpression s_resultPattern(
+		QLatin1String("title\\s*=\\s*['\"]Visar(?:\\s+resultat)?\\s+[0-9]+\\s+till\\s+[0-9]+\\s+av\\s+([0-9][0-9\\s&;a-zA-Z]*?)['\"]"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_resultPattern.match(html);
+	if (!match.hasMatch()) {
+		return QString();
+	}
+	QString count = decodedPreviewText(match.captured(1));
+	count.remove(QRegularExpression(QLatin1String("\\s")));
+	return count.trimmed();
+}
+
+QString flashbackThreadIdFromHtml(const QString &html, const QHash< QString, QString > &metaTags) {
+	const QString ogUrl = metaTags.value(QLatin1String("og:url")).trimmed();
+	if (!ogUrl.isEmpty()) {
+		const QString threadId = flashbackThreadIdFromUrl(QUrl(ogUrl));
+		if (!threadId.isEmpty()) {
+			return threadId;
+		}
+	}
+
+	const QString dataUrlThreadId =
+		flashbackFirstHtmlMatch(html, QLatin1String("data-url\\s*=\\s*['\"]/t([0-9]{3,14})['\"]"));
+	if (!dataUrlThreadId.isEmpty()) {
+		return dataUrlThreadId;
+	}
+
+	return flashbackFirstHtmlMatch(html, QLatin1String("href\\s*=\\s*['\"]/t([0-9]{3,14})(?:p[0-9]+)?['\"]"));
+}
+
+QString flashbackThreadTitleFromPreviewTitle(QString title) {
+	title = title.simplified();
+	static const QRegularExpression s_singlePostPrefix(
+		QString::fromUtf8("^Flashback Forum\\s*-\\s*Visa ett inl\xc3\xa4gg\\s*-\\s*"),
+		QRegularExpression::CaseInsensitiveOption);
+	static const QRegularExpression s_forumSuffix(QLatin1String("\\s*-\\s*Flashback Forum\\s*$"),
+												  QRegularExpression::CaseInsensitiveOption);
+	title.remove(s_singlePostPrefix);
+	title.remove(s_forumSuffix);
+	return title.trimmed();
+}
+
+void appendFlashbackPostValue(QVariantMap &metadata, const QString &suffix, const QString &value,
+							  bool mirrorAsFirstPost) {
+	insertPreviewMetadataValue(metadata, QStringLiteral("forumPost%1").arg(suffix), value);
+	if (mirrorAsFirstPost) {
+		insertPreviewMetadataValue(metadata, QStringLiteral("forumFirstPost%1").arg(suffix), value);
+	}
+}
+
+void appendFlashbackPostMetadata(QVariantMap &metadata, const QString &html, const QString &preferredPostId) {
+	const QString postBlock = flashbackPostBlockFromHtml(html, preferredPostId);
+	if (postBlock.isEmpty()) {
+		return;
+	}
+
+	const bool mirrorAsFirstPost = preferredPostId.trimmed().isEmpty();
+	appendFlashbackPostValue(metadata, QStringLiteral("Id"),
+							 flashbackFirstHtmlMatch(postBlock, QLatin1String("data-postid\\s*=\\s*['\"]([0-9]+)['\"]")),
+							 mirrorAsFirstPost);
+	appendFlashbackPostValue(metadata, QStringLiteral("Time"),
+							 flashbackFirstHtmlMatch(postBlock, QLatin1String("<i\\b[^>]*\\bfa-file[^>]*></i>\\s*([^<]+)")),
+							 mirrorAsFirstPost);
+	appendFlashbackPostValue(
+		metadata, QStringLiteral("Number"),
+		flashbackFirstHtmlMatch(
+			postBlock, QLatin1String("id\\s*=\\s*['\"]postcount[0-9]+['\"][^>]*\\bname\\s*=\\s*['\"]([0-9]+)['\"]")),
+		mirrorAsFirstPost);
+	appendFlashbackPostValue(
+		metadata, QStringLiteral("Author"),
+		flashbackFirstHtmlMatch(postBlock, QLatin1String("<a\\b[^>]*\\bpost-user-username\\b[^>]*>([\\s\\S]*?)</a>")),
+		mirrorAsFirstPost);
+	appendFlashbackPostValue(metadata, QStringLiteral("AuthorTitle"),
+							 flashbackFirstHtmlMatch(postBlock,
+													 QLatin1String("<div\\b[^>]*\\bpost-user-title\\b[^>]*>([\\s\\S]*?)</div>")),
+							 mirrorAsFirstPost);
+	appendFlashbackPostValue(metadata, QStringLiteral("AuthorRegistered"),
+							 flashbackFirstHtmlMatch(postBlock, QLatin1String("<div>\\s*Reg:\\s*([\\s\\S]*?)</div>")),
+							 mirrorAsFirstPost);
+	appendFlashbackPostValue(
+		metadata, QStringLiteral("AuthorPosts"),
+		flashbackFirstHtmlMatch(postBlock, QLatin1String("<div>\\s*Inl(?:&auml;|\\x{00e4})gg:\\s*([\\s\\S]*?)</div>")),
+		mirrorAsFirstPost);
+
+	const QString postMessage = htmlDivContentWithClass(postBlock, QStringLiteral("post_message"));
+	const QString quoteBlock  = htmlDivBlockWithClass(postMessage, QStringLiteral("post-bbcode-quote-wrapper"));
+	if (!quoteBlock.isEmpty()) {
+		insertPreviewMetadataValue(
+			metadata, QStringLiteral("forumQuoteAuthor"),
+			flashbackFirstHtmlMatch(quoteBlock, QLatin1String("Ursprungligen\\s+postat\\s+av\\s*<strong\\b[^>]*>([\\s\\S]*?)</strong>")));
+		insertPreviewMetadataValue(
+			metadata, QStringLiteral("forumQuoteExcerpt"),
+			clippedPreviewPlainText(
+				flashbackFirstHtmlMatch(quoteBlock,
+										QLatin1String("<div\\b[^>]*\\bpost-clamped-text\\b[^>]*>([\\s\\S]*?)</div>")),
+				220));
+		insertPreviewMetadataValue(metadata, QStringLiteral("forumQuotePostUrl"),
+								   flashbackFirstHtmlMatch(quoteBlock, QLatin1String("<a\\b[^>]*\\bhref\\s*=\\s*['\"]([^'\"]+)['\"]")));
+	}
+
+	QString postExcerpt = clippedPreviewPlainText(flashbackPostMessageWithoutQuotes(postMessage), 260);
+	if (postExcerpt.isEmpty()) {
+		postExcerpt = clippedPreviewPlainText(postMessage, 260);
+	}
+	appendFlashbackPostValue(metadata, QStringLiteral("Excerpt"), postExcerpt, mirrorAsFirstPost);
+}
+
+QString realEstateMetricFromText(const QString &title, const QString &description, const QString &pattern) {
+	const QRegularExpression regex(pattern, QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = regex.match(QString(title + QLatin1Char(' ') + description).simplified());
+	return match.hasMatch() ? match.captured(0).simplified() : QString();
+}
+
+QString previewMetaValue(const QHash< QString, QString > &metaTags, const QStringList &keys) {
+	for (const QString &key : keys) {
+		const QString value = metaTags.value(key).trimmed();
+		if (!value.isEmpty()) {
+			return value;
+		}
+	}
+	return QString();
+}
+
+QString jsonLdScalarText(const QJsonValue &value) {
+	if (value.isString()) {
+		return decodedPreviewText(value.toString()).trimmed();
+	}
+	if (value.isDouble()) {
+		QString text = QString::number(value.toDouble(), 'f', 2);
+		if (text.contains(QLatin1Char('.'))) {
+			while (text.endsWith(QLatin1Char('0'))) {
+				text.chop(1);
+			}
+			if (text.endsWith(QLatin1Char('.'))) {
+				text.chop(1);
+			}
+		}
+		return text;
+	}
+	if (value.isBool()) {
+		return value.toBool() ? QStringLiteral("true") : QStringLiteral("false");
+	}
+	return QString();
+}
+
+QString jsonLdNamedText(const QJsonValue &value) {
+	if (value.isString() || value.isDouble() || value.isBool()) {
+		return jsonLdScalarText(value);
+	}
+	if (value.isObject()) {
+		const QJsonObject object = value.toObject();
+		const QString name      = jsonLdScalarText(object.value(QStringLiteral("name")));
+		if (!name.isEmpty()) {
+			return name;
+		}
+		const QString url = jsonLdScalarText(object.value(QStringLiteral("url")));
+		if (!url.isEmpty()) {
+			return url;
+		}
+		const QString contentUrl = jsonLdScalarText(object.value(QStringLiteral("contentUrl")));
+		if (!contentUrl.isEmpty()) {
+			return contentUrl;
+		}
+		return jsonLdScalarText(object.value(QStringLiteral("@id")));
+	}
+	if (value.isArray()) {
+		for (const QJsonValue &item : value.toArray()) {
+			const QString text = jsonLdNamedText(item);
+			if (!text.isEmpty()) {
+				return text;
+			}
+		}
+	}
+	return QString();
+}
+
+QString jsonLdObjectText(const QJsonObject &object, const QStringList &keys) {
+	for (const QString &key : keys) {
+		const QString text = jsonLdNamedText(object.value(key));
+		if (!text.isEmpty()) {
+			return text;
+		}
+	}
+	return QString();
+}
+
+QStringList jsonLdStringList(const QJsonValue &value) {
+	QStringList values;
+	const auto appendValue = [&values](const QString &text) {
+		const QString clean = text.trimmed();
+		if (!clean.isEmpty() && !values.contains(clean, Qt::CaseInsensitive)) {
+			values.push_back(clean);
+		}
+	};
+
+	if (value.isArray()) {
+		for (const QJsonValue &item : value.toArray()) {
+			for (const QString &text : jsonLdStringList(item)) {
+				appendValue(text);
+			}
+		}
+	} else if (value.isObject()) {
+		appendValue(jsonLdNamedText(value));
+	} else {
+		appendValue(jsonLdScalarText(value));
+	}
+
+	return values;
+}
+
+QList< QJsonValue > extractJsonLdValues(const QString &html) {
+	QList< QJsonValue > values;
+	static const QRegularExpression s_jsonLdScriptPattern(
+		QLatin1String("<script\\b(?=[^>]*application/ld\\+json)[^>]*>([\\s\\S]*?)</script>"),
+		QRegularExpression::CaseInsensitiveOption);
+
+	QRegularExpressionMatchIterator it = s_jsonLdScriptPattern.globalMatch(html);
+	while (it.hasNext() && values.size() < 24) {
+		QString json = it.next().captured(1).trimmed();
+		if (json.isEmpty()) {
+			continue;
+		}
+
+		json.remove(QRegularExpression(QLatin1String("^\\s*<!--")));
+		json.remove(QRegularExpression(QLatin1String("-->\\s*$")));
+
+		QJsonParseError error;
+		QJsonDocument document = QJsonDocument::fromJson(json.toUtf8(), &error);
+		if (error.error != QJsonParseError::NoError) {
+			document = QJsonDocument::fromJson(decodedPreviewText(json).toUtf8(), &error);
+		}
+		if (error.error != QJsonParseError::NoError || document.isNull()) {
+			continue;
+		}
+
+		if (document.isObject()) {
+			values.push_back(document.object());
+		} else if (document.isArray()) {
+			values.push_back(document.array());
+		}
+	}
+
+	return values;
+}
+
+void collectJsonLdObjects(const QJsonValue &value, QList< QJsonObject > &objects, int depth = 0) {
+	if (depth > 8 || objects.size() >= 128) {
+		return;
+	}
+
+	if (value.isObject()) {
+		const QJsonObject object = value.toObject();
+		objects.push_back(object);
+		for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
+			collectJsonLdObjects(it.value(), objects, depth + 1);
+		}
+		return;
+	}
+
+	if (value.isArray()) {
+		for (const QJsonValue &item : value.toArray()) {
+			collectJsonLdObjects(item, objects, depth + 1);
+		}
+	}
+}
+
+bool jsonLdTypeContains(const QJsonObject &object, const QStringList &types) {
+	const QStringList objectTypes = jsonLdStringList(object.value(QStringLiteral("@type")));
+	for (const QString &objectType : objectTypes) {
+		for (const QString &type : types) {
+			if (objectType.compare(type, Qt::CaseInsensitive) == 0) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+QStringList preferredGameStoreCountryCodes(const QUrl &url) {
+	QStringList countries;
+	const auto appendCountry = [&countries](QString value) {
+		value = value.trimmed().toUpper();
+		if (value.size() == 2 && !countries.contains(value)) {
+			countries.push_back(value);
+		}
+	};
+
+	const QUrlQuery query(url);
+	appendCountry(query.queryItemValue(QStringLiteral("countryCode")));
+	appendCountry(QLocale::system().name().section(QLatin1Char('_'), 1, 1));
+	appendCountry(QStringLiteral("US"));
+	appendCountry(QStringLiteral("GB"));
+	appendCountry(QStringLiteral("SE"));
+	return countries;
+}
+
+QString normalizeGameStorePriceAmount(QString amount) {
+	amount = decodedPreviewText(amount).simplified();
+	if (amount.contains(QLatin1Char('.')) || amount.contains(QLatin1Char(','))) {
+		const QChar separator = amount.lastIndexOf(QLatin1Char(',')) > amount.lastIndexOf(QLatin1Char('.'))
+									? QLatin1Char(',')
+									: QLatin1Char('.');
+		while (amount.endsWith(QLatin1Char('0')) && amount.contains(separator)) {
+			amount.chop(1);
+		}
+		if (amount.endsWith(separator)) {
+			amount.chop(1);
+		}
+	}
+	return amount;
+}
+
+QString formatGameStorePrice(const QString &amount, QString currency) {
+	const QString cleanAmount = normalizeGameStorePriceAmount(amount);
+	if (cleanAmount.isEmpty()) {
+		return QString();
+	}
+
+	static const QRegularExpression s_hasCurrency(
+		QStringLiteral("[$\\x{20ac}\\x{00a3}]|\\b(?:USD|EUR|GBP|SEK|NOK|DKK|PLN|CAD|AUD|kr)\\b"),
+		QRegularExpression::CaseInsensitiveOption);
+	if (s_hasCurrency.match(cleanAmount).hasMatch()) {
+		return cleanAmount;
+	}
+
+	currency = currency.trimmed().toUpper();
+	if (currency == QLatin1String("USD")) {
+		return QStringLiteral("$%1").arg(cleanAmount);
+	}
+	if (currency == QLatin1String("EUR") || currency == QLatin1String("SEK") || currency == QLatin1String("NOK")
+		|| currency == QLatin1String("DKK") || currency == QLatin1String("PLN")) {
+		return QStringLiteral("%1 %2").arg(cleanAmount, currency);
+	}
+	if (!currency.isEmpty()) {
+		return QStringLiteral("%1 %2").arg(currency, cleanAmount);
+	}
+	return cleanAmount;
+}
+
+QString formatSwedishProductPrice(QString amount, QString currency) {
+	amount   = normalizeGameStorePriceAmount(amount);
+	currency = currency.trimmed().toUpper();
+	if (amount.isEmpty()) {
+		return QString();
+	}
+	static const QRegularExpression s_hasCurrency(
+		QStringLiteral("[$\\x{20ac}\\x{00a3}]|\\b(?:USD|EUR|GBP|SEK|NOK|DKK|PLN|CAD|AUD|kr)\\b"),
+		QRegularExpression::CaseInsensitiveOption);
+	if (s_hasCurrency.match(amount).hasMatch()) {
+		return amount;
+	}
+	if (currency != QLatin1String("SEK")) {
+		return formatGameStorePrice(amount, currency);
+	}
+
+	bool ok = false;
+	const double value = QString(amount).replace(QLatin1Char(','), QLatin1Char('.')).toDouble(&ok);
+	if (!ok || value <= 0) {
+		return QStringLiteral("%1 kr").arg(amount);
+	}
+
+	const qlonglong rounded = static_cast< qlonglong >(value + 0.5);
+	if (qAbs(value - static_cast< double >(rounded)) < 0.005) {
+		return QStringLiteral("%1 kr").arg(QLocale(QLocale::Swedish, QLocale::Sweden).toString(rounded));
+	}
+	return QStringLiteral("%1 kr").arg(QLocale(QLocale::Swedish, QLocale::Sweden).toString(value, 'f', 2));
+}
+
+QString plainTextFromHtml(QString html) {
+	html.remove(QRegularExpression(QLatin1String("<script\\b[\\s\\S]*?</script>"),
+								   QRegularExpression::CaseInsensitiveOption));
+	html.remove(QRegularExpression(QLatin1String("<style\\b[\\s\\S]*?</style>"),
+								   QRegularExpression::CaseInsensitiveOption));
+	html.replace(QRegularExpression(QLatin1String("<br\\s*/?>")), QStringLiteral("\n"));
+	html.remove(QRegularExpression(QLatin1String("<[^>]+>")));
+	return decodedPreviewText(html).simplified();
+}
+
+QString htmlElementTextById(const QString &html, const QString &id, int maxChars = 6000) {
+	if (html.isEmpty() || id.isEmpty()) {
+		return QString();
+	}
+
+	const QRegularExpression pattern(
+		QStringLiteral("<([A-Za-z0-9]+)\\b(?=[^>]*\\bid\\s*=\\s*['\"]%1['\"])[^>]*>([\\s\\S]{0,%2}?)</\\1>")
+			.arg(QRegularExpression::escape(id))
+			.arg(maxChars),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = pattern.match(html);
+	return match.hasMatch() ? plainTextFromHtml(match.captured(2)) : QString();
+}
+
+QString firstHtmlAttributeValue(const QString &html, const QString &attributeName) {
+	if (html.isEmpty() || attributeName.isEmpty()) {
+		return QString();
+	}
+
+	const QRegularExpression pattern(
+		QStringLiteral("\\b%1\\s*=\\s*(['\"])(.*?)\\1").arg(QRegularExpression::escape(attributeName)),
+		QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+	const QRegularExpressionMatch match = pattern.match(html);
+	return match.hasMatch() ? decodedPreviewText(match.captured(2)).trimmed() : QString();
+}
+
+QString firstHtmlClassText(const QString &html, const QString &className, int maxChars = 3000) {
+	if (html.isEmpty() || className.isEmpty()) {
+		return QString();
+	}
+
+	const QRegularExpression pattern(
+		QStringLiteral("<([A-Za-z0-9]+)\\b(?=[^>]*\\bclass\\s*=\\s*['\"][^'\"]*\\b%1\\b[^'\"]*['\"])[^>]*>([\\s\\S]{0,%2}?)</\\1>")
+			.arg(QRegularExpression::escape(className))
+			.arg(maxChars),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = pattern.match(html);
+	return match.hasMatch() ? plainTextFromHtml(match.captured(2)) : QString();
+}
+
+QVariantList previewImageItemsFromUrl(const QUrl &baseUrl, const QString &rawUrl, const QString &mime = QStringLiteral("image/jpeg")) {
+	QVariantList items;
+	const QString trimmed = rawUrl.trimmed();
+	if (trimmed.isEmpty()) {
+		return items;
+	}
+
+	const QUrl imageUrl = baseUrl.resolved(QUrl(trimmed));
+	if (!isSafePreviewTarget(imageUrl)) {
+		return items;
+	}
+
+	QVariantMap item;
+	item.insert(QStringLiteral("url"), imageUrl.toString(QUrl::FullyEncoded));
+	item.insert(QStringLiteral("mime"), mime.trimmed().isEmpty() ? QStringLiteral("image/jpeg") : mime.trimmed());
+	item.insert(QStringLiteral("kind"), QStringLiteral("image"));
+	items.push_back(item);
+	return items;
+}
+
+QString webhallenProductPriceText(const QJsonObject &product) {
+	const QJsonObject priceObject = product.value(QStringLiteral("price")).toObject();
+	return formatSwedishProductPrice(jsonLdScalarText(priceObject.value(QStringLiteral("price"))),
+									 jsonLdScalarText(priceObject.value(QStringLiteral("currency"))));
+}
+
+QString webhallenProductAvailabilityText(const QJsonObject &product) {
+	const QJsonObject stock = product.value(QStringLiteral("stock")).toObject();
+	if (stock.value(QStringLiteral("web")).toInt(0) > 0 || stock.value(QStringLiteral("isTrue")).toBool(false)) {
+		return QObject::tr("In stock");
+	}
+	if (product.value(QStringLiteral("discontinued")).toInt(0) > 0) {
+		return QObject::tr("Discontinued");
+	}
+	return QObject::tr("Out of stock");
+}
+
+QVariantList webhallenProductImageItems(const QJsonObject &product) {
+	QVariantList items;
+	QSet< QString > seen;
+	const auto addImage = [&items, &seen](const QString &url, const QString &thumbnail = QString()) {
+		const QUrl imageUrl(url.trimmed());
+		if (!isSafePreviewTarget(imageUrl)) {
+			return;
+		}
+		const QString imageUrlString = imageUrl.toString(QUrl::FullyEncoded);
+		if (imageUrlString.isEmpty() || seen.contains(imageUrlString)) {
+			return;
+		}
+		seen.insert(imageUrlString);
+
+		QVariantMap item;
+		item.insert(QStringLiteral("url"), imageUrlString);
+		item.insert(QStringLiteral("mime"), QStringLiteral("image/jpeg"));
+		item.insert(QStringLiteral("kind"), QStringLiteral("image"));
+		const QUrl thumbnailUrl(thumbnail.trimmed());
+		if (isSafePreviewTarget(thumbnailUrl)) {
+			item.insert(QStringLiteral("thumbnail"), thumbnailUrl.toString(QUrl::FullyEncoded));
+		}
+		items.push_back(item);
+	};
+
+	for (const QJsonValue &value : product.value(QStringLiteral("images")).toArray()) {
+		const QJsonObject image = value.toObject();
+		addImage(jsonLdScalarText(image.value(QStringLiteral("large"))),
+				 jsonLdScalarText(image.value(QStringLiteral("thumb"))));
+		if (items.size() >= 8) {
+			break;
+		}
+	}
+
+	return items;
+}
+
+QVariantMap webhallenProductMetadata(const QUrl &url, const QJsonObject &product) {
+	QVariantMap metadata;
+	metadata.insert(QStringLiteral("provider"), QStringLiteral("webhallen"));
+	metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("webhallen"));
+	metadata.insert(QStringLiteral("previewKind"), QStringLiteral("product"));
+	metadata.insert(QStringLiteral("swedishPreviewKind"), QStringLiteral("product"));
+	metadata.insert(QStringLiteral("providerName"), QObject::tr("Webhallen"));
+	metadata.insert(QStringLiteral("productProvider"), QObject::tr("Webhallen"));
+	metadata.insert(QStringLiteral("richPreviewMetadataVersion"), RICH_PREVIEW_METADATA_VERSION);
+
+	insertPreviewMetadataValue(metadata, QStringLiteral("productId"),
+							   jsonLdScalarText(product.value(QStringLiteral("id"))));
+	insertPreviewMetadataValue(metadata, QStringLiteral("productTitle"),
+							   jsonLdScalarText(product.value(QStringLiteral("name"))));
+	insertPreviewMetadataValue(metadata, QStringLiteral("productPrice"), webhallenProductPriceText(product));
+	insertPreviewMetadataValue(metadata, QStringLiteral("productAvailability"),
+							   webhallenProductAvailabilityText(product));
+	insertPreviewMetadataValue(metadata, QStringLiteral("productBrand"),
+							   jsonLdObjectText(product.value(QStringLiteral("manufacturer")).toObject(),
+											   QStringList { QStringLiteral("name") }));
+	const QStringList partNumbers = jsonLdStringList(product.value(QStringLiteral("partNumbers")));
+	if (!partNumbers.isEmpty()) {
+		metadata.insert(QStringLiteral("productSku"), partNumbers.first());
+	}
+	const QString description =
+		!jsonLdScalarText(product.value(QStringLiteral("metaDescription"))).isEmpty()
+			? jsonLdScalarText(product.value(QStringLiteral("metaDescription")))
+			: plainTextFromHtml(jsonLdScalarText(product.value(QStringLiteral("description"))));
+	insertPreviewMetadataValue(metadata, QStringLiteral("productDescription"), description);
+	const QVariantList images = webhallenProductImageItems(product);
+	if (!images.isEmpty()) {
+		metadata.insert(QStringLiteral("productImages"), images);
+		metadata.insert(QStringLiteral("productMedia"), images);
+	}
+	insertPreviewMetadataValue(metadata, QStringLiteral("productUrl"), url.toString(QUrl::FullyEncoded));
+	return metadata;
+}
+
+QString normalizedGameStoreAvailability(QString availability) {
+	availability = decodedPreviewText(availability).trimmed();
+	const int slash = availability.lastIndexOf(QLatin1Char('/'));
+	if (slash >= 0) {
+		availability = availability.mid(slash + 1);
+	}
+	if (availability.compare(QLatin1String("InStock"), Qt::CaseInsensitive) == 0) {
+		return QObject::tr("In stock");
+	}
+	if (availability.compare(QLatin1String("OutOfStock"), Qt::CaseInsensitive) == 0) {
+		return QObject::tr("Out of stock");
+	}
+	if (availability.compare(QLatin1String("PreOrder"), Qt::CaseInsensitive) == 0) {
+		return QObject::tr("Pre-order");
+	}
+	if (availability.compare(QLatin1String("Discontinued"), Qt::CaseInsensitive) == 0) {
+		return QObject::tr("Discontinued");
+	}
+	return availability;
+}
+
+QList< QJsonObject > jsonLdOfferObjects(const QJsonObject &product) {
+	QList< QJsonObject > offers;
+	const QJsonValue value = product.value(QStringLiteral("offers"));
+	if (value.isObject()) {
+		offers.push_back(value.toObject());
+	} else if (value.isArray()) {
+		for (const QJsonValue &item : value.toArray()) {
+			if (item.isObject()) {
+				offers.push_back(item.toObject());
+			}
+		}
+	}
+	return offers;
+}
+
+QString jsonLdOfferPriceText(const QJsonObject &offer) {
+	const QString price = jsonLdObjectText(
+		offer, QStringList { QStringLiteral("price"), QStringLiteral("lowPrice"), QStringLiteral("highPrice") });
+	const QString currency = jsonLdObjectText(
+		offer, QStringList { QStringLiteral("priceCurrency"), QStringLiteral("currency") });
+	return formatSwedishProductPrice(price, currency);
+}
+
+QJsonObject bestJsonLdOfferForUrl(const QList< QJsonObject > &offers, const QUrl &url) {
+	QJsonObject bestOffer;
+	int bestScore = -1;
+	const QStringList preferredCountries = preferredGameStoreCountryCodes(url);
+	const QString preferredCurrency = QUrlQuery(url).queryItemValue(QStringLiteral("currencyCode")).trimmed().toUpper();
+
+	for (const QJsonObject &offer : offers) {
+		if (jsonLdOfferPriceText(offer).isEmpty()) {
+			continue;
+		}
+
+		int score = 10;
+		const QStringList areas = jsonLdStringList(offer.value(QStringLiteral("areaServed")));
+		for (const QString &area : areas) {
+			const QString country = area.trimmed().toUpper();
+			const int index       = preferredCountries.indexOf(country);
+			if (index >= 0) {
+				score += 100 - index;
+			}
+		}
+		const QString currency = jsonLdObjectText(
+			offer, QStringList { QStringLiteral("priceCurrency"), QStringLiteral("currency") }).trimmed().toUpper();
+		if (!preferredCurrency.isEmpty() && currency == preferredCurrency) {
+			score += 50;
+		}
+		if (areas.isEmpty()) {
+			score += 5;
+		}
+
+		if (score > bestScore) {
+			bestScore = score;
+			bestOffer = offer;
+		}
+	}
+
+	return bestOffer;
+}
+
+struct GameStoreProductData {
+	QString title;
+	QString description;
+	QString price;
+	QString originalPrice;
+	QString discount;
+	QString availability;
+	QString brand;
+	QString sku;
+	QString rating;
+	QString reviewCount;
+	QString platform;
+	QString image;
+};
+
+GameStoreProductData gameStoreJsonLdProductData(const QUrl &url, const QString &html) {
+	GameStoreProductData data;
+	QList< QJsonObject > objects;
+	for (const QJsonValue &value : extractJsonLdValues(html)) {
+		collectJsonLdObjects(value, objects);
+	}
+
+	for (const QJsonObject &object : objects) {
+		if (!jsonLdTypeContains(object,
+								QStringList { QStringLiteral("Product"), QStringLiteral("VideoGame"),
+											  QStringLiteral("SoftwareApplication"), QStringLiteral("Game") })) {
+			continue;
+		}
+
+		data.title = jsonLdObjectText(object, QStringList { QStringLiteral("name"), QStringLiteral("headline") });
+		data.description = jsonLdObjectText(
+			object, QStringList { QStringLiteral("description"), QStringLiteral("abstract") });
+		data.sku = jsonLdObjectText(object, QStringList { QStringLiteral("sku"), QStringLiteral("productID") });
+		data.brand = jsonLdNamedText(object.value(QStringLiteral("brand")));
+		data.image = jsonLdNamedText(object.value(QStringLiteral("image")));
+
+		const QJsonObject aggregateRating = object.value(QStringLiteral("aggregateRating")).toObject();
+		const QString rating              = jsonLdObjectText(
+			aggregateRating, QStringList { QStringLiteral("ratingValue"), QStringLiteral("rating") });
+		if (!rating.isEmpty()) {
+			data.rating = QStringLiteral("%1/5").arg(rating);
+		}
+		data.reviewCount = jsonLdObjectText(
+			aggregateRating,
+			QStringList { QStringLiteral("reviewCount"), QStringLiteral("ratingCount"), QStringLiteral("count") });
+
+		const QJsonObject offer = bestJsonLdOfferForUrl(jsonLdOfferObjects(object), url);
+		if (!offer.isEmpty()) {
+			data.price = jsonLdOfferPriceText(offer);
+			data.availability = normalizedGameStoreAvailability(jsonLdObjectText(
+				offer, QStringList { QStringLiteral("availability"), QStringLiteral("availabilityStarts") }));
+		}
+
+		if (!data.title.isEmpty() || !data.price.isEmpty()) {
+			break;
+		}
+	}
+
+	return data;
+}
+
+struct ArticlePreviewData {
+	QString title;
+	QString description;
+	QString section;
+	QString author;
+	QString publishedAt;
+	QString modifiedAt;
+	QString image;
+	bool hasAccessFlag       = false;
+	bool accessibleForFree   = true;
+};
+
+std::optional< bool > jsonLdBoolValue(const QJsonValue &value) {
+	if (value.isBool()) {
+		return value.toBool();
+	}
+	if (value.isString()) {
+		const QString text = value.toString().trimmed().toLower();
+		if (text == QLatin1String("true") || text == QLatin1String("1")
+			|| text == QLatin1String("yes")) {
+			return true;
+		}
+		if (text == QLatin1String("false") || text == QLatin1String("0")
+			|| text == QLatin1String("no")) {
+			return false;
+		}
+	}
+	return std::nullopt;
+}
+
+QString normalizedArticleSectionText(QString section) {
+	section = decodedPreviewText(section).simplified();
+	if (section.isEmpty()) {
+		return QString();
+	}
+
+	section.replace(QLatin1Char('\\'), QLatin1Char('/'));
+	const QStringList parts = section.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+	if (parts.size() > 1) {
+		section = parts.last();
+	}
+	section.replace(QLatin1Char('-'), QLatin1Char(' '));
+	section = section.simplified();
+	if (!section.isEmpty()) {
+		section[0] = section.at(0).toUpper();
+	}
+	return section;
+}
+
+QString cleanedArticleAuthorText(QString author, const QString &providerName) {
+	author = decodedPreviewText(author).simplified();
+	if (author.isEmpty()) {
+		return QString();
+	}
+
+	if (author.startsWith(QLatin1String("http://"), Qt::CaseInsensitive)
+		|| author.startsWith(QLatin1String("https://"), Qt::CaseInsensitive)) {
+		const QUrl authorUrl(author);
+		QStringList segments = decodedUrlPathSegments(authorUrl);
+		while (!segments.isEmpty() && segments.last().trimmed().isEmpty()) {
+			segments.removeLast();
+		}
+		if (!segments.isEmpty()) {
+			author = segments.last();
+			author.replace(QLatin1Char('-'), QLatin1Char(' '));
+		}
+	}
+
+	static const QRegularExpression s_prefix(QLatin1String("^(?:av|by)\\s+"),
+											 QRegularExpression::CaseInsensitiveOption);
+	author.remove(s_prefix);
+	author = author.simplified();
+	if (author.contains(QLatin1Char('@'))) {
+		return QString();
+	}
+	if (!providerName.isEmpty() && author.compare(providerName, Qt::CaseInsensitive) == 0) {
+		return QString();
+	}
+	if (author.compare(QLatin1String("SVT Nyheter"), Qt::CaseInsensitive) == 0
+		|| author.compare(QLatin1String("Aftonbladet"), Qt::CaseInsensitive) == 0
+		|| author.compare(QLatin1String("Expressen"), Qt::CaseInsensitive) == 0) {
+		return QString();
+	}
+	return trimmedPreviewText(author, 96);
+}
+
+QString articleAuthorFromHtml(const QString &html, const QString &providerName) {
+	QString author = firstHtmlMatchText(
+		html,
+		QLatin1String("<[^>]+\\bitemProp\\s*=\\s*['\"]author['\"][^>]*>(.*?)</[^>]+>"));
+	if (author.isEmpty()) {
+		author = firstHtmlMatchText(
+			html,
+			QLatin1String("<[^>]+\\bitemprop\\s*=\\s*['\"]author['\"][^>]*>(.*?)</[^>]+>"));
+	}
+	if (author.isEmpty()) {
+		static const QRegularExpression s_embeddedAuthorName(
+			QLatin1String("\"authors\"\\s*:\\s*\\[\\s*\\{[^\\]]{0,800}?\"name\"\\s*:\\s*\"([^\"]+)\""),
+			QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+		const QRegularExpressionMatch match = s_embeddedAuthorName.match(html);
+		if (match.hasMatch()) {
+			author = decodedPreviewText(match.captured(1));
+		}
+	}
+	return cleanedArticleAuthorText(author, providerName);
+}
+
+QString articleTitleFromHtml(const QString &html) {
+	return plainTextFromHtml(firstHtmlMatchText(html, QLatin1String("<h1\\b[^>]*>(.*?)</h1>")));
+}
+
+ArticlePreviewData articleJsonLdData(const QString &html) {
+	ArticlePreviewData data;
+	QList< QJsonObject > objects;
+	for (const QJsonValue &value : extractJsonLdValues(html)) {
+		collectJsonLdObjects(value, objects);
+	}
+
+	for (const QJsonObject &object : objects) {
+		if (!jsonLdTypeContains(object,
+								QStringList { QStringLiteral("NewsArticle"), QStringLiteral("Article"),
+											  QStringLiteral("ReportageNewsArticle"),
+											  QStringLiteral("AnalysisNewsArticle"),
+											  QStringLiteral("OpinionNewsArticle"),
+											  QStringLiteral("BlogPosting") })) {
+			continue;
+		}
+
+		data.title = jsonLdObjectText(object, QStringList { QStringLiteral("headline"), QStringLiteral("name") });
+		data.description = jsonLdObjectText(
+			object, QStringList { QStringLiteral("description"), QStringLiteral("abstract") });
+		data.section = normalizedArticleSectionText(
+			jsonLdObjectText(object, QStringList { QStringLiteral("articleSection"), QStringLiteral("section") }));
+		const QStringList authors = jsonLdStringList(object.value(QStringLiteral("author")));
+		if (!authors.isEmpty()) {
+			data.author = authors.mid(0, 2).join(QStringLiteral(", "));
+		}
+		if (data.author.isEmpty()) {
+			const QStringList creators = jsonLdStringList(object.value(QStringLiteral("creator")));
+			if (!creators.isEmpty()) {
+				data.author = creators.mid(0, 2).join(QStringLiteral(", "));
+			}
+		}
+		data.publishedAt = jsonLdObjectText(
+			object, QStringList { QStringLiteral("datePublished"), QStringLiteral("dateCreated") });
+		data.modifiedAt = jsonLdObjectText(object, QStringList { QStringLiteral("dateModified") });
+		data.image      = jsonLdNamedText(object.value(QStringLiteral("image")));
+		if (const std::optional< bool > access = jsonLdBoolValue(object.value(QStringLiteral("isAccessibleForFree")));
+			access) {
+			data.hasAccessFlag     = true;
+			data.accessibleForFree = *access;
+		}
+
+		if (!data.title.isEmpty() || !data.description.isEmpty() || !data.publishedAt.isEmpty()) {
+			break;
+		}
+	}
+
+	return data;
+}
+
+QString productMetaPriceText(const QHash< QString, QString > &metaTags) {
+	const QString amount = previewMetaValue(metaTags,
+											QStringList { QStringLiteral("product:price:amount"),
+														  QStringLiteral("og:price:amount"),
+														  QStringLiteral("twitter:data1") });
+	const QString currency = previewMetaValue(metaTags,
+											  QStringList { QStringLiteral("product:price:currency"),
+															QStringLiteral("og:price:currency"),
+															QStringLiteral("price:currency") });
+	return amount.isEmpty() ? QString() : formatSwedishProductPrice(amount, currency);
+}
+
+QString normalizedProductRatingText(QString rating) {
+	rating = decodedPreviewText(rating).simplified();
+	if (rating.isEmpty()) {
+		return QString();
+	}
+
+	static const QRegularExpression s_ratingPattern(
+		QLatin1String("([0-9]+(?:[\\.,][0-9]+)?)\\s*(?:/|av|out\\s+of)\\s*5"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_ratingPattern.match(rating);
+	if (match.hasMatch()) {
+		return QStringLiteral("%1/5").arg(match.captured(1).replace(QLatin1Char('.'), QLatin1Char(',')));
+	}
+
+	static const QRegularExpression s_plainRatingPattern(
+		QLatin1String("^\\s*([0-9]+(?:[\\.,][0-9]+)?)\\s*$"), QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch plainMatch = s_plainRatingPattern.match(rating);
+	return plainMatch.hasMatch()
+			   ? QStringLiteral("%1/5").arg(plainMatch.captured(1).replace(QLatin1Char('.'), QLatin1Char(',')))
+			   : rating;
+}
+
+QString normalizedProductReviewCountText(QString reviewCount) {
+	reviewCount = decodedPreviewText(reviewCount).simplified();
+	if (reviewCount.isEmpty()) {
+		return QString();
+	}
+
+	static const QRegularExpression s_digitsPattern(QLatin1String("([0-9][0-9\\s\\x{00a0},.]*)"));
+	const QRegularExpressionMatch match = s_digitsPattern.match(reviewCount);
+	if (!match.hasMatch()) {
+		return reviewCount;
+	}
+
+	QString digits = match.captured(1);
+	digits.remove(QRegularExpression(QLatin1String("[^0-9]")));
+	if (digits.isEmpty()) {
+		return reviewCount;
+	}
+
+	bool ok = false;
+	const qlonglong value = digits.toLongLong(&ok);
+	return ok ? QLocale(QLocale::Swedish, QLocale::Sweden).toString(value) : reviewCount;
+}
+
+QString productMediaMimeForUrl(const QUrl &url, QString mime, const QString &kind) {
+	mime = mime.section(QLatin1Char(';'), 0, 0).trimmed().toLower();
+	if (!mime.isEmpty()) {
+		return mime;
+	}
+
+	const QString path = url.path().toLower();
+	if (path.endsWith(QLatin1String(".m3u8"))) {
+		return QStringLiteral("application/vnd.apple.mpegurl");
+	}
+	if (path.endsWith(QLatin1String(".mp4")) || path.endsWith(QLatin1String(".m4v"))) {
+		return QStringLiteral("video/mp4");
+	}
+	if (path.endsWith(QLatin1String(".webm"))) {
+		return QStringLiteral("video/webm");
+	}
+	if (path.endsWith(QLatin1String(".mov"))) {
+		return QStringLiteral("video/quicktime");
+	}
+	if (path.endsWith(QLatin1String(".png"))) {
+		return QStringLiteral("image/png");
+	}
+	if (path.endsWith(QLatin1String(".webp"))) {
+		return QStringLiteral("image/webp");
+	}
+	if (path.endsWith(QLatin1String(".gif"))) {
+		return kind == QLatin1String("video") ? QStringLiteral("video/mp4") : QStringLiteral("image/gif");
+	}
+	return kind == QLatin1String("video") ? QStringLiteral("video/mp4") : QStringLiteral("image/jpeg");
+}
+
+QVariantList productMediaItemsFromHtml(const QUrl &baseUrl, const QString &html,
+									   const QHash< QString, QString > &metaTags,
+									   const QVariantList &imageItems) {
+	QVariantList items;
+	QSet< QString > seenUrls;
+	const auto addItem = [&items, &seenUrls, &baseUrl](QString rawUrl, QString mime, QString kind,
+													   const QString &title = QString(),
+													   QString thumbnail = QString(),
+													   QString poster = QString(),
+													   const QString &streamKind = QString()) {
+		rawUrl = decodedPreviewText(rawUrl).trimmed();
+		rawUrl.replace(QLatin1String("\\/"), QLatin1String("/"));
+		if (rawUrl.startsWith(QLatin1String("//"))) {
+			rawUrl.prepend(QStringLiteral("https:"));
+		}
+		if (rawUrl.isEmpty()) {
+			return;
+		}
+
+		QUrl mediaUrl = baseUrl.resolved(QUrl(rawUrl));
+		if (!isSafePreviewTarget(mediaUrl)) {
+			return;
+		}
+
+		const QString mediaUrlString = mediaUrl.toString(QUrl::FullyEncoded);
+		if (mediaUrlString.isEmpty() || seenUrls.contains(mediaUrlString)) {
+			return;
+		}
+
+		kind = kind.trimmed().toLower();
+		mime = productMediaMimeForUrl(mediaUrl, mime, kind);
+		if (kind.isEmpty()) {
+			kind = mime.startsWith(QLatin1String("video/"))
+					   || mime == QLatin1String("application/vnd.apple.mpegurl")
+					   || mime == QLatin1String("application/x-mpegurl")
+					   || mime == QLatin1String("application/dash+xml")
+					   ? QStringLiteral("video")
+					   : QStringLiteral("image");
+		}
+		if (kind != QLatin1String("image") && kind != QLatin1String("video")) {
+			return;
+		}
+
+		seenUrls.insert(mediaUrlString);
+		QVariantMap item;
+		item.insert(QStringLiteral("kind"), kind);
+		item.insert(QStringLiteral("url"), mediaUrlString);
+		item.insert(QStringLiteral("mime"), mime);
+		insertPreviewMetadataValue(item, QStringLiteral("title"), title);
+
+		thumbnail = decodedPreviewText(thumbnail).trimmed();
+		poster    = decodedPreviewText(poster).trimmed();
+		const QUrl thumbnailUrl = baseUrl.resolved(QUrl(thumbnail));
+		if (isSafePreviewTarget(thumbnailUrl)) {
+			item.insert(QStringLiteral("thumbnail"), thumbnailUrl.toString(QUrl::FullyEncoded));
+		}
+		const QUrl posterUrl = baseUrl.resolved(QUrl(poster));
+		if (isSafePreviewTarget(posterUrl)) {
+			item.insert(QStringLiteral("poster"), posterUrl.toString(QUrl::FullyEncoded));
+		}
+		if (!streamKind.trimmed().isEmpty()) {
+			item.insert(QStringLiteral("streamKind"), streamKind.trimmed().toLower());
+		} else if (mime == QLatin1String("application/vnd.apple.mpegurl") || mime == QLatin1String("application/x-mpegurl")) {
+			item.insert(QStringLiteral("streamKind"), QStringLiteral("hls"));
+		}
+		items.push_back(item);
+	};
+
+	for (const QVariant &value : imageItems) {
+		const QVariantMap image = value.toMap();
+		addItem(image.value(QStringLiteral("url")).toString(),
+				image.value(QStringLiteral("mime")).toString(), QStringLiteral("image"),
+				image.value(QStringLiteral("title")).toString(),
+				image.value(QStringLiteral("thumbnail")).toString(),
+				image.value(QStringLiteral("poster")).toString());
+	}
+
+	const QString metaVideo = previewMetaValue(metaTags, QStringList { QStringLiteral("og:video:secure_url"),
+																	   QStringLiteral("og:video:url"),
+																	   QStringLiteral("og:video"),
+																	   QStringLiteral("twitter:player:stream") });
+	const QString metaVideoMime = previewMetaValue(metaTags, QStringList { QStringLiteral("og:video:type"),
+																		   QStringLiteral("twitter:player:stream:content_type") });
+	const QString metaVideoPoster = previewMetaValue(metaTags, QStringList { QStringLiteral("og:image"),
+																			 QStringLiteral("twitter:image"),
+																			 QStringLiteral("twitter:image:src") });
+	addItem(metaVideo, metaVideoMime, QStringLiteral("video"), QString(), metaVideoPoster, metaVideoPoster);
+
+	QList< QJsonObject > objects;
+	for (const QJsonValue &value : extractJsonLdValues(html)) {
+		collectJsonLdObjects(value, objects);
+	}
+	for (const QJsonObject &object : objects) {
+		if (!jsonLdTypeContains(object, QStringList { QStringLiteral("VideoObject") })) {
+			continue;
+		}
+		const QString mediaUrl = jsonLdObjectText(object, QStringList { QStringLiteral("contentUrl"),
+																		QStringLiteral("embedUrl"),
+																		QStringLiteral("url") });
+		const QString name = jsonLdObjectText(object, QStringList { QStringLiteral("name"),
+																	QStringLiteral("headline") });
+		const QString thumbnail = jsonLdNamedText(object.value(QStringLiteral("thumbnailUrl")));
+		addItem(mediaUrl, QString(), QStringLiteral("video"), name, thumbnail, thumbnail);
+		if (items.size() >= 12) {
+			break;
+		}
+	}
+
+	static const QRegularExpression s_videoPattern(
+		QLatin1String("<video\\b([^>]*)>([\\s\\S]{0,8000}?)</video>"),
+		QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+	static const QRegularExpression s_sourcePattern(
+		QLatin1String("<source\\b([^>]*)>"), QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator videoIt = s_videoPattern.globalMatch(html);
+	while (videoIt.hasNext() && items.size() < 12) {
+		const QRegularExpressionMatch videoMatch = videoIt.next();
+		const QString videoAttrs = videoMatch.captured(1);
+		const QString poster = firstHtmlAttributeValue(videoAttrs, QStringLiteral("poster"));
+		QString source = firstHtmlAttributeValue(videoAttrs, QStringLiteral("src"));
+		QString mime = firstHtmlAttributeValue(videoAttrs, QStringLiteral("type"));
+		if (source.isEmpty()) {
+			QRegularExpressionMatchIterator sourceIt = s_sourcePattern.globalMatch(videoMatch.captured(2));
+			while (sourceIt.hasNext()) {
+				const QString sourceAttrs = sourceIt.next().captured(1);
+				source = firstHtmlAttributeValue(sourceAttrs, QStringLiteral("src"));
+				mime = firstHtmlAttributeValue(sourceAttrs, QStringLiteral("type"));
+				if (!source.isEmpty()) {
+					break;
+				}
+			}
+		}
+		addItem(source, mime, QStringLiteral("video"), QString(), poster, poster);
+	}
+
+	return items;
+}
+
+QString inetCleanProductTitle(QString title) {
+	title = decodedPreviewText(title).simplified();
+	static const QRegularExpression s_suffixPattern(QLatin1String("\\s*[-|]\\s*Inet(?:\\.se)?\\s*$"),
+													QRegularExpression::CaseInsensitiveOption);
+	title.remove(s_suffixPattern);
+	return title.trimmed();
+}
+
+QString inetProductTitleFromHtml(const QString &html, const QString &fallbackTitle) {
+	QString title = firstHtmlMatchText(html, QLatin1String("<h1[^>]*>(.*?)</h1>"));
+	if (title.isEmpty()) {
+		title = fallbackTitle;
+	}
+	return inetCleanProductTitle(title);
+}
+
+QString inetTextSection(const QString &text, const QString &startMarker, const QStringList &endMarkers) {
+	const QString normalized = text.simplified();
+	const int startIndex     = normalized.indexOf(startMarker, 0, Qt::CaseInsensitive);
+	if (startIndex < 0) {
+		return QString();
+	}
+
+	const int contentStart = startIndex + startMarker.size();
+	int endIndex           = normalized.size();
+	for (const QString &endMarker : endMarkers) {
+		const int markerIndex = normalized.indexOf(endMarker, contentStart, Qt::CaseInsensitive);
+		if (markerIndex >= 0 && markerIndex < endIndex) {
+			endIndex = markerIndex;
+		}
+	}
+
+	return normalized.mid(contentStart, endIndex - contentStart).simplified();
+}
+
+struct InetArticleNumbers {
+	QString articleId;
+	QString manufacturerId;
+};
+
+InetArticleNumbers inetArticleNumbersFromText(const QString &text) {
+	static const QRegularExpression s_articlePattern(
+		QLatin1String("Art\\.?\\s*nr\\s*:\\s*([0-9]{3,12})(?:\\s*\\|\\s*([^\\s]+))?"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_articlePattern.match(text);
+	if (!match.hasMatch()) {
+		return {};
+	}
+
+	return { match.captured(1).trimmed(), match.captured(2).trimmed() };
+}
+
+QString inetProductDescriptionFromText(const QString &text, const QString &productTitle,
+									   const QString &fallbackDescription) {
+	QString description = fallbackDescription.simplified();
+	const int titleIndex = productTitle.isEmpty() ? -1 : text.indexOf(productTitle, 0, Qt::CaseInsensitive);
+	const int factsIndex = titleIndex >= 0 ? text.indexOf(QStringLiteral("Snabbfakta"), titleIndex, Qt::CaseInsensitive) : -1;
+	if (titleIndex >= 0 && factsIndex > titleIndex) {
+		QString candidate = text.mid(titleIndex + productTitle.size(), factsIndex - titleIndex - productTitle.size());
+		candidate.remove(QRegularExpression(QLatin1String("Art\\.?\\s*nr\\s*:\\s*[0-9]{3,12}(?:\\s*\\|\\s*\\S+)?"),
+											 QRegularExpression::CaseInsensitiveOption));
+		candidate.remove(QRegularExpression(QLatin1String("[0-5](?:[\\.,][0-9])?\\s+av\\s+5\\s+stj\\S+\\.?"),
+											 QRegularExpression::CaseInsensitiveOption));
+		candidate.remove(QRegularExpression(QLatin1String("[0-9][0-9\\s\\x{00a0}]*\\s+recension\\s*er?"),
+											 QRegularExpression::CaseInsensitiveOption));
+		candidate.remove(QRegularExpression(QLatin1String("[0-9]+\\s+st\\s+bilder\\s+och\\s+[0-9]+\\s+st\\s+videor\\.?"),
+											 QRegularExpression::CaseInsensitiveOption));
+		candidate = candidate.simplified();
+		if (candidate.size() >= 24) {
+			description = candidate.left(360).trimmed();
+		}
+	}
+
+	return description;
+}
+
+QString inetProductPriceFromText(const QString &text) {
+	const QString purchase = inetTextSection(text, QStringLiteral("Köpinformation"),
+											 QStringList { QStringLiteral("Betala senare"),
+														   QStringLiteral("Tillbehör"),
+														   QStringLiteral("Recensioner"),
+														   QStringLiteral("Flikar") });
+	static const QRegularExpression s_pricePattern(
+		QLatin1String("(?:^|\\s)([0-9][0-9\\s\\x{00a0}.]*(?:,[0-9]{2})?\\s*kr)(?![A-Za-z0-9])"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_pricePattern.match(purchase);
+	return match.hasMatch() ? decodedPreviewText(match.captured(1)).simplified() : QString();
+}
+
+QString inetNormalizeStockValue(QString value) {
+	value = decodedPreviewText(value).simplified();
+	if (value.compare(QStringLiteral("Utgått!"), Qt::CaseInsensitive) == 0) {
+		return QStringLiteral("Utgått");
+	}
+	return value;
+}
+
+QString inetStockValueFromText(const QString &text, const QString &label) {
+	const QString statusPattern =
+		QStringLiteral("(Utgått!?|Slutsåld|I\\s+lager(?:\\s+[0-9][0-9\\s\\x{00a0}]*\\+?\\s*st)?|[0-9][0-9\\s\\x{00a0}]*\\+?\\s*st|Beställningsvara|Obekräftat|Förväntas\\s+[0-9]{4}-[0-9]{2}-[0-9]{2}|Release\\s+[0-9]{4}-[0-9]{2}-[0-9]{2}|Försenad)");
+	const QRegularExpression pattern(QStringLiteral("%1\\s+%2").arg(QRegularExpression::escape(label), statusPattern),
+									 QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = pattern.match(text);
+	return match.hasMatch() ? inetNormalizeStockValue(match.captured(1)) : QString();
+}
+
+QString inetProductAvailabilityFromText(const QString &text) {
+	const QString purchase = inetTextSection(text, QStringLiteral("Köpinformation"),
+											 QStringList { QStringLiteral("Betala senare"),
+														   QStringLiteral("Tillbehör"),
+														   QStringLiteral("Recensioner"),
+														   QStringLiteral("Flikar") });
+	if (purchase.contains(QStringLiteral("Denna produkt har utgått"), Qt::CaseInsensitive)
+		|| text.contains(QStringLiteral("Denna produkt har utgått"), Qt::CaseInsensitive)) {
+		return QStringLiteral("Utgått");
+	}
+	if (purchase.contains(QStringLiteral("Slutsåld"), Qt::CaseInsensitive)) {
+		return QStringLiteral("Slutsåld");
+	}
+
+	const QString webStock = inetStockValueFromText(text, QStringLiteral("Webblager"));
+	if (webStock.startsWith(QStringLiteral("I lager"), Qt::CaseInsensitive)) {
+		return QStringLiteral("I lager");
+	}
+	return webStock;
+}
+
+QString inetProductRatingFromText(const QString &text) {
+	static const QRegularExpression s_ratingPattern(
+		QLatin1String("([0-5](?:[\\.,][0-9])?)\\s+av\\s+5\\s+stj\\S+"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_ratingPattern.match(text);
+	return match.hasMatch() ? normalizedProductRatingText(match.captured(1)) : QString();
+}
+
+QString inetProductReviewCountFromText(const QString &text) {
+	static const QRegularExpression s_reviewPattern(
+		QLatin1String("([0-9][0-9\\s\\x{00a0}]*)\\s+recension\\s*er?"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_reviewPattern.match(text);
+	return match.hasMatch() ? normalizedProductReviewCountText(match.captured(1)) : QString();
+}
+
+QString inetLabeledValueFromText(const QString &text, const QString &label, const QStringList &terminators) {
+	QStringList escapedTerminators;
+	for (const QString &terminator : terminators) {
+		if (terminator.compare(label, Qt::CaseInsensitive) != 0) {
+			escapedTerminators.push_back(QRegularExpression::escape(terminator));
+		}
+	}
+	if (escapedTerminators.isEmpty()) {
+		return QString();
+	}
+
+	const QRegularExpression pattern(
+		QStringLiteral("%1\\s+(.{1,120}?)(?=\\s+(?:%2)(?:\\s|$))")
+			.arg(QRegularExpression::escape(label), escapedTerminators.join(QLatin1Char('|'))),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = pattern.match(text);
+	return match.hasMatch() ? decodedPreviewText(match.captured(1)).simplified() : QString();
+}
+
+QVariantList inetProductSpecsFromText(const QString &text) {
+	QVariantList items;
+	QSet< QString > seenLabels;
+
+	const auto appendStock = [&items, &seenLabels, &text](const QString &label, const QString &sourceLabel) {
+		appendPreviewSpecItem(items, seenLabels, label, inetStockValueFromText(text, sourceLabel));
+	};
+	appendStock(QStringLiteral("Webblager"), QStringLiteral("Webblager"));
+	appendStock(QStringLiteral("Göteborg Ringön"), QStringLiteral("Göteborg, Ringön"));
+	appendStock(QStringLiteral("Göteborg Sisjön"), QStringLiteral("Göteborg, Sisjön"));
+	appendStock(QStringLiteral("Stockholm Sveavägen"), QStringLiteral("Stockholm, Sveavägen"));
+	appendStock(QStringLiteral("Stockholm Medborgarplatsen"), QStringLiteral("Stockholm, Medborgarplatsen"));
+	appendStock(QStringLiteral("Malmö Lilla Nygatan"), QStringLiteral("Malmö, Lilla Nygatan"));
+
+	const QStringList labels { QStringLiteral("Rörelseläsare"),
+							   QStringLiteral("Antal knappar"),
+							   QStringLiteral("Trådlös"),
+							   QStringLiteral("Justerbar vikt"),
+							   QStringLiteral("Anslutning"),
+							   QStringLiteral("Kabellängd"),
+							   QStringLiteral("Färg"),
+							   QStringLiteral("Tillverkarens garanti"),
+							   QStringLiteral("Lagerinformation"),
+							   QStringLiteral("Webblager"),
+							   QStringLiteral("Butikslager"),
+							   QStringLiteral("Köpinformation"),
+							   QStringLiteral("Recensioner"),
+							   QStringLiteral("Flikar"),
+							   QStringLiteral("Mer info"),
+							   QStringLiteral("Specifikationer"),
+							   QStringLiteral("Jämför"),
+							   QStringLiteral("Frågor och svar") };
+	for (const QString &label : labels.mid(0, 8)) {
+		if (items.size() >= 10) {
+			break;
+		}
+		appendPreviewSpecItem(items, seenLabels, label, inetLabeledValueFromText(text, label, labels));
+	}
+
+	return items;
+}
+
+QVariantList inetProductImageItemsFromHtml(const QUrl &url, const QString &html) {
+	QVariantList items;
+	QSet< QString > seenUrls;
+	const std::optional< QString > productId = inetProductIdFromUrl(url);
+	static const QRegularExpression s_imagePattern(
+		QLatin1String("(?:(?:https?:)?//cdn\\.inet\\.se/product/[^\"'<>\\\\\\s]+\\.(?:png|jpe?g|webp))"),
+		QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator it = s_imagePattern.globalMatch(html);
+	while (it.hasNext() && items.size() < 8) {
+		QString rawUrl = decodedPreviewText(it.next().captured(0)).trimmed();
+		rawUrl.replace(QLatin1String("\\/"), QLatin1String("/"));
+		if (rawUrl.startsWith(QLatin1String("//"))) {
+			rawUrl.prepend(QStringLiteral("https:"));
+		}
+		rawUrl.replace(QRegularExpression(QLatin1String("/[0-9]{2,4}x[0-9]{2,4}/")), QStringLiteral("/688x386/"));
+		if (productId && !rawUrl.contains(QStringLiteral("/%1").arg(*productId))) {
+			continue;
+		}
+
+		const QUrl imageUrl = url.resolved(QUrl(rawUrl));
+		if (!isSafePreviewTarget(imageUrl)) {
+			continue;
+		}
+		const QString imageUrlString = imageUrl.toString(QUrl::FullyEncoded);
+		const QString dedupeKey      = imageUrlString.section(QLatin1Char('?'), 0, 0).toLower();
+		if (seenUrls.contains(dedupeKey)) {
+			continue;
+		}
+		seenUrls.insert(dedupeKey);
+
+		QVariantMap item;
+		item.insert(QStringLiteral("url"), imageUrlString);
+		item.insert(QStringLiteral("mime"), QStringLiteral("image/png"));
+		item.insert(QStringLiteral("kind"), QStringLiteral("image"));
+		items.push_back(item);
+	}
+
+	return items;
+}
+
+QVariantMap inetProductMetadata(const QUrl &url, const QString &title, const QString &description,
+								const QString &html, const QHash< QString, QString > &metaTags) {
+	QVariantMap metadata;
+	const QString text                       = plainTextFromHtml(html);
+	const QString productTitle               = inetProductTitleFromHtml(html, title);
+	const InetArticleNumbers articleNumbers  = inetArticleNumbersFromText(text);
+	const QString productId                  = inetProductIdFromUrl(url).value_or(articleNumbers.articleId);
+	const QString productPrice               = inetProductPriceFromText(text);
+	const QString metaImage                  = previewMetaValue(metaTags, QStringList { QStringLiteral("og:image"),
+																	   QStringLiteral("twitter:image"),
+																	   QStringLiteral("twitter:image:src"),
+																	   QStringLiteral("image") });
+
+	insertPreviewMetadataValue(metadata, QStringLiteral("productProvider"), QStringLiteral("Inet"));
+	insertPreviewMetadataValue(metadata, QStringLiteral("productId"), productId);
+	insertPreviewMetadataValue(metadata, QStringLiteral("productTitle"), productTitle);
+	insertPreviewMetadataValue(metadata, QStringLiteral("productDescription"),
+							   inetProductDescriptionFromText(text, productTitle, description));
+	insertPreviewMetadataValue(metadata, QStringLiteral("productPrice"),
+							   !productPrice.isEmpty() ? productPrice : productMetaPriceText(metaTags));
+	insertPreviewMetadataValue(metadata, QStringLiteral("productAvailability"), inetProductAvailabilityFromText(text));
+	insertPreviewMetadataValue(metadata, QStringLiteral("productSku"),
+							   !articleNumbers.manufacturerId.isEmpty() ? articleNumbers.manufacturerId
+																		 : articleNumbers.articleId);
+	insertPreviewMetadataValue(metadata, QStringLiteral("productRating"), inetProductRatingFromText(text));
+	insertPreviewMetadataValue(metadata, QStringLiteral("productReviewCount"), inetProductReviewCountFromText(text));
+	insertPreviewMetadataValue(metadata, QStringLiteral("productImage"), metaImage);
+
+	const QVariantList specs = inetProductSpecsFromText(text);
+	if (!specs.isEmpty()) {
+		metadata.insert(QStringLiteral("productSpecs"), specs);
+	}
+
+	QVariantList images = inetProductImageItemsFromHtml(url, html);
+	if (images.isEmpty() && !metaImage.isEmpty()) {
+		images = previewImageItemsFromUrl(url, metaImage);
+	}
+	if (!images.isEmpty()) {
+		metadata.insert(QStringLiteral("productImages"), images);
+	}
+	const QVariantList media = productMediaItemsFromHtml(url, html, metaTags, images);
+	if (!media.isEmpty()) {
+		metadata.insert(QStringLiteral("productMedia"), media);
+	}
+	return metadata;
+}
+
+QString amazonProductTitleFromHtml(const QString &html, const QString &fallbackTitle) {
+	QString title = htmlElementTextById(html, QStringLiteral("productTitle"));
+	if (title.isEmpty()) {
+		title = fallbackTitle;
+	}
+
+	title = decodedPreviewText(title).simplified();
+	title.remove(QRegularExpression(QLatin1String("\\s*:\\s*Amazon\\.[^:]+\\s*:.*$"),
+									QRegularExpression::CaseInsensitiveOption));
+	title.remove(QRegularExpression(QLatin1String("\\s*[\\|\\-]\\s*Amazon\\.[A-Za-z.]+\\s*$"),
+									QRegularExpression::CaseInsensitiveOption));
+	return title.trimmed();
+}
+
+QString amazonProductDeliveryFromHtml(const QString &html) {
+	const QString deliveryPrice = firstHtmlAttributeValue(html, QStringLiteral("data-csa-c-delivery-price"));
+	const QString deliveryTime  = firstHtmlAttributeValue(html, QStringLiteral("data-csa-c-delivery-time"));
+	if (!deliveryPrice.isEmpty() || !deliveryTime.isEmpty()) {
+		if (!deliveryPrice.isEmpty() && !deliveryTime.isEmpty()
+			&& !deliveryTime.contains(QRegularExpression(QLatin1String("\\b(delivery|leverans)\\b"),
+														 QRegularExpression::CaseInsensitiveOption))) {
+			const bool freeDelivery = deliveryPrice.contains(QRegularExpression(QLatin1String("\\b(free|gratis)\\b"),
+																				QRegularExpression::CaseInsensitiveOption));
+			const bool swedishFreeDelivery = deliveryPrice.contains(
+				QRegularExpression(QLatin1String("\\bgratis\\b"), QRegularExpression::CaseInsensitiveOption));
+			return freeDelivery ? QStringLiteral("%1 %2 %3")
+									  .arg(deliveryPrice, swedishFreeDelivery ? QStringLiteral("leverans")
+																			 : QStringLiteral("delivery"), deliveryTime)
+									  .simplified()
+								: QStringLiteral("%1 %2").arg(deliveryPrice, deliveryTime).simplified();
+		}
+		return QStringLiteral("%1 %2").arg(deliveryPrice, deliveryTime).simplified();
+	}
+
+	for (const QString &id : { QStringLiteral("mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE"),
+							   QStringLiteral("mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE"),
+							   QStringLiteral("deliveryBlockMessage"),
+							   QStringLiteral("deliveryBlockContainer") }) {
+		QString text = htmlElementTextById(html, id, 10000);
+		text.remove(QRegularExpression(QLatin1String("\\b(Detaljer|Details)\\b.*$"),
+										QRegularExpression::CaseInsensitiveOption));
+		text = text.simplified();
+		if (!text.isEmpty()) {
+			return text.left(120).trimmed();
+		}
+	}
+
+	static const QRegularExpression s_deliveryPattern(
+		QLatin1String("\\b((?:GRATIS|FREE)?\\s*(?:leverans|delivery)[^<\\n]{0,110})"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_deliveryPattern.match(plainTextFromHtml(html.left(260000)));
+	return match.hasMatch() ? match.captured(1).simplified() : QString();
+}
+
+QString amazonProductRatingFromHtml(const QString &html) {
+	QString rating = firstHtmlClassText(html, QStringLiteral("a-icon-alt"));
+	if (rating.isEmpty()) {
+		rating = htmlElementTextById(html, QStringLiteral("acrPopover"));
+	}
+	return normalizedProductRatingText(rating);
+}
+
+QString amazonProductReviewCountFromHtml(const QString &html) {
+	QString reviewCount = htmlElementTextById(html, QStringLiteral("acrCustomerReviewText"));
+	if (reviewCount.isEmpty()) {
+		reviewCount = firstHtmlClassText(html, QStringLiteral("acrCustomerReviewText"));
+	}
+	return normalizedProductReviewCountText(reviewCount);
+}
+
+QString amazonProductImageFromHtml(const QString &html) {
+	QString image = firstHtmlAttributeValue(html, QStringLiteral("data-old-hires"));
+	if (!image.isEmpty()) {
+		return image;
+	}
+
+	static const QRegularExpression s_landingImagePattern(
+		QLatin1String("<img\\b(?=[^>]*\\bid\\s*=\\s*['\"]landingImage['\"])[^>]*\\bsrc\\s*=\\s*(['\"])(.*?)\\1"),
+		QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+	const QRegularExpressionMatch match = s_landingImagePattern.match(html);
+	return match.hasMatch() ? decodedPreviewText(match.captured(2)).trimmed() : QString();
+}
+
+QString gameStoreMetaPriceText(const QHash< QString, QString > &metaTags) {
+	const QString amount = previewMetaValue(metaTags,
+											QStringList { QStringLiteral("product:price:amount"),
+														  QStringLiteral("og:price:amount") });
+	const QString currency = previewMetaValue(metaTags,
+											  QStringList { QStringLiteral("product:price:currency"),
+															QStringLiteral("og:price:currency"),
+															QStringLiteral("price:currency") });
+	if (!amount.isEmpty()) {
+		return formatGameStorePrice(amount, currency);
+	}
+	return previewMetaValue(metaTags, QStringList { QStringLiteral("twitter:data1"), QStringLiteral("price") });
+}
+
+QString gameStorePreviewPlatformText(const QString &storeKey, const QString &title, const QString &description) {
+	const QString text = QString(title + QLatin1Char(' ') + description).simplified();
+	if (text.contains(QRegularExpression(QLatin1String("\\bSteam\\b"), QRegularExpression::CaseInsensitiveOption))) {
+		return text.contains(QRegularExpression(QLatin1String("\\bkey\\b|\\bcd\\s*key\\b"),
+												QRegularExpression::CaseInsensitiveOption))
+				   ? QObject::tr("Steam key")
+				   : QObject::tr("Steam");
+	}
+	if (text.contains(QRegularExpression(QLatin1String("\\bEpic\\s+Games\\b"),
+										 QRegularExpression::CaseInsensitiveOption))
+		|| storeKey == QLatin1String("epic")) {
+		return QObject::tr("Epic Games");
+	}
+	if (text.contains(QRegularExpression(QLatin1String("\\bGOG\\b"), QRegularExpression::CaseInsensitiveOption))
+		|| storeKey == QLatin1String("gog")) {
+		return QObject::tr("GOG");
+	}
+	if (text.contains(QRegularExpression(QLatin1String("\\bUplay\\b|\\bUbisoft\\s+Connect\\b|\\bUbisoft\\b"),
+										 QRegularExpression::CaseInsensitiveOption))
+		|| storeKey == QLatin1String("ubisoft")) {
+		return QObject::tr("Ubisoft Connect");
+	}
+	if (text.contains(QRegularExpression(QLatin1String("\\bEA\\s+app\\b|\\bOrigin\\b"),
+										 QRegularExpression::CaseInsensitiveOption))
+		|| storeKey == QLatin1String("ea")) {
+		return QObject::tr("EA app");
+	}
+	if (text.contains(QRegularExpression(QLatin1String("\\bBattle\\.net\\b"),
+										 QRegularExpression::CaseInsensitiveOption))
+		|| storeKey == QLatin1String("battlenet")) {
+		return QObject::tr("Battle.net");
+	}
+	if (text.contains(QRegularExpression(QLatin1String("\\bXbox\\b"), QRegularExpression::CaseInsensitiveOption))
+		|| storeKey == QLatin1String("xbox")) {
+		return QObject::tr("Xbox");
+	}
+	if (text.contains(QRegularExpression(QLatin1String("\\bPC\\b"), QRegularExpression::CaseInsensitiveOption))) {
+		return QObject::tr("PC");
+	}
+	return QString();
+}
+
+bool previewTextLooksSensitive(const QUrl &url, const QString &title, const QString &description) {
+	const QString text = (url.toString() + QLatin1Char(' ') + title + QLatin1Char(' ') + description).toLower();
+	static const QRegularExpression s_sensitivePattern(
+		QLatin1String("\\b(nsfw|18\\+|adult|vuxet|naken|nude|sex|gore)\\b"),
+		QRegularExpression::CaseInsensitiveOption);
+	return s_sensitivePattern.match(text).hasMatch();
+}
+
+QVariantMap swedishPreviewMetadata(const QUrl &url, const QString &title, const QString &description,
+								   const QString &html,
+								   const QHash< QString, QString > &metaTags) {
+	QVariantMap metadata;
+	const std::optional< RichPreviewProviderInfo > provider = richPreviewProviderForUrl(url);
+	if (provider) {
+		metadata.insert(QStringLiteral("provider"), provider->key);
+		metadata.insert(QStringLiteral("previewProvider"), provider->key);
+		metadata.insert(QStringLiteral("previewKind"), provider->kind);
+		metadata.insert(QStringLiteral("swedishPreviewKind"), provider->kind);
+		metadata.insert(QStringLiteral("providerName"), provider->siteLabel);
+		if (!html.trimmed().isEmpty() || !metaTags.isEmpty()) {
+			metadata.insert(QStringLiteral("richPreviewMetadataVersion"), RICH_PREVIEW_METADATA_VERSION);
+		}
+	}
+
+	if (isTraderaPreviewUrl(url)) {
+		metadata.insert(QStringLiteral("provider"), QStringLiteral("tradera"));
+		metadata.insert(QStringLiteral("previewKind"), QStringLiteral("marketplaceListing"));
+		metadata.insert(QStringLiteral("swedishPreviewKind"), QStringLiteral("marketplaceListing"));
+		metadata.insert(QStringLiteral("marketplaceProvider"), QStringLiteral("tradera"));
+		insertPreviewMetadataValue(metadata, QStringLiteral("listingId"), traderaListingIdFromUrl(url));
+		insertPreviewMetadataValue(metadata, QStringLiteral("listingPrice"),
+								   labelledPreviewDescriptionValue(description,
+																   QStringList { QStringLiteral("Utropspris"),
+																				 QString::fromUtf8("K\xc3\xb6p nu"),
+																				 QStringLiteral("Pris") }));
+		insertPreviewMetadataValue(metadata, QStringLiteral("listingSaleType"),
+								   labelledPreviewDescriptionValue(description, QStringList { QStringLiteral("Typ") }));
+		insertPreviewMetadataValue(metadata, QStringLiteral("listingEndsAt"),
+								   labelledPreviewDescriptionValue(description,
+																   QStringList { QStringLiteral("Slutar") }));
+		insertPreviewMetadataValue(metadata, QStringLiteral("listingCondition"),
+								   labelledPreviewDescriptionValue(description,
+																   QStringList { QStringLiteral("Skick") }));
+		return metadata;
+	}
+
+	if (isBlocketPreviewUrl(url)) {
+		metadata.insert(QStringLiteral("provider"), QStringLiteral("blocket"));
+		metadata.insert(QStringLiteral("previewKind"), QStringLiteral("marketplaceListing"));
+		metadata.insert(QStringLiteral("swedishPreviewKind"), QStringLiteral("marketplaceListing"));
+		metadata.insert(QStringLiteral("marketplaceProvider"), QStringLiteral("blocket"));
+		insertPreviewMetadataValue(metadata, QStringLiteral("listingId"), blocketListingIdFromUrl(url));
+		insertPreviewMetadataValue(metadata, QStringLiteral("listingTitle"), blocketTitleFromHtml(html, title));
+		insertPreviewMetadataValue(metadata, QStringLiteral("listingPrice"),
+								   blocketPriceFromHtml(html, title, description));
+		insertPreviewMetadataValue(metadata, QStringLiteral("listingDescription"), description);
+		insertPreviewMetadataValue(metadata, QStringLiteral("listingLocation"), blocketLocationFromHtml(html));
+		const QVariantList specs = blocketSpecItemsFromHtml(html);
+		if (!specs.isEmpty()) {
+			metadata.insert(QStringLiteral("listingSpecs"), specs);
+		}
+		const QVariantList images = blocketImageItemsFromHtml(html);
+		if (!images.isEmpty()) {
+			metadata.insert(QStringLiteral("listingImages"), images);
+		}
+		return metadata;
+	}
+
+	if (isFlashbackPreviewUrl(url)) {
+		const QString postId   = flashbackPostIdFromUrl(url);
+		QString threadId       = flashbackThreadIdFromUrl(url);
+		const QString htmlThreadId = flashbackThreadIdFromHtml(html, metaTags);
+		if (threadId.isEmpty()) {
+			threadId = htmlThreadId;
+		}
+
+		metadata.insert(QStringLiteral("provider"), QStringLiteral("flashback"));
+		metadata.insert(QStringLiteral("previewKind"), QStringLiteral("forum"));
+		metadata.insert(QStringLiteral("swedishPreviewKind"), QStringLiteral("forum"));
+		insertPreviewMetadataValue(metadata, QStringLiteral("threadId"), threadId);
+		insertPreviewMetadataValue(metadata, QStringLiteral("forumProvider"), QStringLiteral("Flashback"));
+		insertPreviewMetadataValue(metadata, QStringLiteral("forumThreadId"), threadId);
+		insertPreviewMetadataValue(metadata, QStringLiteral("forumThreadTitle"),
+								   flashbackThreadTitleFromPreviewTitle(title));
+		metadata.insert(QStringLiteral("forumLinkKind"), postId.isEmpty() ? QStringLiteral("thread") : QStringLiteral("post"));
+		insertPreviewMetadataValue(metadata, QStringLiteral("postId"), postId);
+		insertPreviewMetadataValue(metadata, QStringLiteral("forumLinkedPostId"), postId);
+		if (!postId.isEmpty()) {
+			const QUrl threadPostUrl = flashbackThreadPostUrl(url, postId);
+			insertPreviewMetadataValue(metadata, QStringLiteral("forumThreadPostUrl"), threadPostUrl.toString());
+		}
+
+		const QStringList breadcrumb = flashbackBreadcrumbPartsFromHtml(html);
+		if (!breadcrumb.isEmpty()) {
+			insertPreviewMetadataValue(metadata, QStringLiteral("forumCategory"), breadcrumb.value(0));
+			insertPreviewMetadataValue(metadata, QStringLiteral("forumName"), breadcrumb.value(1));
+		}
+		insertPreviewMetadataValue(metadata, QStringLiteral("forumPage"),
+								   flashbackFirstHtmlMatch(html, QLatin1String("data-page\\s*=\\s*['\"]([0-9]+)['\"]")));
+		insertPreviewMetadataValue(metadata, QStringLiteral("forumPageCount"),
+								   flashbackFirstHtmlMatch(html, QLatin1String("data-total-pages\\s*=\\s*['\"]([0-9]+)['\"]")));
+		insertPreviewMetadataValue(metadata, QStringLiteral("forumPostCount"), flashbackPostCountFromHtml(html));
+		appendFlashbackPostMetadata(metadata, html, postId);
+		return metadata;
+	}
+
+	if (!provider) {
+		return metadata;
+	}
+
+	if (provider->kind == QLatin1String("article")) {
+		const ArticlePreviewData articleData = articleJsonLdData(html);
+		const QString htmlTitle              = articleTitleFromHtml(html);
+		const QString articleTitle =
+			!articleData.title.isEmpty() ? articleData.title : (!htmlTitle.isEmpty() ? htmlTitle : title);
+		const QString articleDescription =
+			!articleData.description.isEmpty() ? articleData.description : description;
+		const QString articleSection =
+			!articleData.section.isEmpty()
+				? articleData.section
+				: normalizedArticleSectionText(
+					  previewMetaValue(metaTags, QStringList { QStringLiteral("article:section"),
+															   QStringLiteral("parsely-section"),
+															   QStringLiteral("section") }));
+		const QString articlePublishedAt =
+			!articleData.publishedAt.isEmpty()
+				? articleData.publishedAt
+				: previewMetaValue(metaTags, QStringList { QStringLiteral("article:published_time"),
+															QStringLiteral("parsely-pub-date"),
+															QStringLiteral("cxenseparse:publishtime"),
+															QStringLiteral("date"),
+															QStringLiteral("pubdate") });
+		const QString articleModifiedAt =
+			!articleData.modifiedAt.isEmpty()
+				? articleData.modifiedAt
+				: previewMetaValue(metaTags, QStringList { QStringLiteral("article:modified_time"),
+															QStringLiteral("last-modified") });
+		QString articleAuthor = cleanedArticleAuthorText(articleData.author, provider->siteLabel);
+		if (articleAuthor.isEmpty()) {
+			articleAuthor = articleAuthorFromHtml(html, provider->siteLabel);
+		}
+		if (articleAuthor.isEmpty()) {
+			articleAuthor = cleanedArticleAuthorText(
+				previewMetaValue(metaTags, QStringList { QStringLiteral("article:author"),
+														 QStringLiteral("parsely-author"),
+														 QStringLiteral("author"),
+														 QStringLiteral("cxenseparse:author") }),
+				provider->siteLabel);
+		}
+		const QString articleImage =
+			!articleData.image.isEmpty()
+				? articleData.image
+				: previewMetaValue(metaTags, QStringList { QStringLiteral("og:image"),
+															QStringLiteral("twitter:image"),
+															QStringLiteral("twitter:image:src") });
+
+		insertPreviewMetadataValue(metadata, QStringLiteral("articlePublisher"), provider->siteLabel);
+		insertPreviewMetadataValue(metadata, QStringLiteral("articleTitle"),
+								   trimmedPreviewText(articleTitle, 220));
+		insertPreviewMetadataValue(metadata, QStringLiteral("articleDescription"),
+								   trimmedPreviewText(articleDescription, 360));
+		insertPreviewMetadataValue(metadata, QStringLiteral("articleSection"), articleSection);
+		insertPreviewMetadataValue(metadata, QStringLiteral("articlePublishedAt"), articlePublishedAt);
+		insertPreviewMetadataValue(metadata, QStringLiteral("articleModifiedAt"), articleModifiedAt);
+		insertPreviewMetadataValue(metadata, QStringLiteral("articleAuthor"), articleAuthor);
+		insertPreviewMetadataValue(metadata, QStringLiteral("articleImage"), articleImage);
+		if (articleData.hasAccessFlag && !articleData.accessibleForFree) {
+			metadata.insert(QStringLiteral("articlePremium"), true);
+			metadata.insert(QStringLiteral("articleAccess"), QObject::tr("Premium"));
+		}
+		if (!articleImage.isEmpty()) {
+			const QVariantList images = previewImageItemsFromUrl(url, articleImage);
+			if (!images.isEmpty()) {
+				metadata.insert(QStringLiteral("articleImages"), images);
+			}
+		}
+		return metadata;
+	}
+
+	if (provider->kind == QLatin1String("forum")) {
+		insertPreviewMetadataValue(metadata, QStringLiteral("forumProvider"), provider->siteLabel);
+		insertPreviewMetadataValue(metadata, QStringLiteral("forumThreadId"), lastNumericPreviewPathSegment(url, 3, 14));
+		return metadata;
+	}
+
+	if (provider->kind == QLatin1String("linkDigest")) {
+		metadata.insert(QStringLiteral("thumbnailBlur"), previewTextLooksSensitive(url, title, description));
+		if (metadata.value(QStringLiteral("thumbnailBlur")).toBool()) {
+			metadata.insert(QStringLiteral("contentWarning"), QStringLiteral("NSFW"));
+		}
+		return metadata;
+	}
+
+	if (provider->kind == QLatin1String("realEstate")) {
+		insertPreviewMetadataValue(metadata, QStringLiteral("listingPrice"), previewPriceTextFromText(title, description));
+		insertPreviewMetadataValue(metadata, QStringLiteral("realEstateArea"),
+								   realEstateMetricFromText(title, description,
+															QLatin1String("[0-9][0-9\\s\\x{00a0},.]*\\s*(?:m2|m\\x{00b2})")));
+		insertPreviewMetadataValue(metadata, QStringLiteral("realEstateRooms"),
+								   realEstateMetricFromText(title, description,
+															QLatin1String("[0-9][0-9\\s\\x{00a0},.]*\\s*(?:rum|rok)")));
+		insertPreviewMetadataValue(metadata, QStringLiteral("realEstateFee"),
+								   labelledPreviewDescriptionValue(description,
+																   QStringList { QStringLiteral("Avgift"),
+																				 QStringLiteral("Månadsavgift") }));
+		return metadata;
+	}
+
+	if (provider->kind == QLatin1String("product")
+		|| provider->kind == QLatin1String("systembolagetProduct")) {
+		if (provider->key == QLatin1String("inet")) {
+			const QVariantMap inetMetadata = inetProductMetadata(url, title, description, html, metaTags);
+			for (auto it = inetMetadata.cbegin(); it != inetMetadata.cend(); ++it) {
+				metadata.insert(it.key(), it.value());
+			}
+			return metadata;
+		}
+
+		const GameStoreProductData productData = gameStoreJsonLdProductData(url, html);
+		const bool amazonProduct              = isAmazonPreviewUrl(url);
+		const QString productTitle =
+			amazonProduct ? amazonProductTitleFromHtml(html, productData.title.isEmpty() ? title : productData.title)
+						  : (!productData.title.isEmpty() ? productData.title : title);
+		const QString productPrice = !productData.price.isEmpty()
+										 ? productData.price
+										 : (!productMetaPriceText(metaTags).isEmpty()
+												? productMetaPriceText(metaTags)
+												: previewPriceTextFromText(title, description));
+		const QString productAvailability =
+			!productData.availability.isEmpty()
+				? productData.availability
+				: normalizedGameStoreAvailability(previewMetaValue(
+					  metaTags, QStringList { QStringLiteral("product:availability"), QStringLiteral("og:availability") }));
+		const QString productBrand =
+			!productData.brand.isEmpty()
+				? productData.brand
+				: previewMetaValue(metaTags, QStringList { QStringLiteral("product:brand"), QStringLiteral("brand") });
+		const QString productRating =
+			!productData.rating.isEmpty() ? normalizedProductRatingText(productData.rating)
+										  : (amazonProduct ? amazonProductRatingFromHtml(html) : QString());
+		const QString productReviewCount =
+			!productData.reviewCount.isEmpty() ? normalizedProductReviewCountText(productData.reviewCount)
+											   : (amazonProduct ? amazonProductReviewCountFromHtml(html) : QString());
+		const QString productImage = !productData.image.isEmpty()
+										 ? productData.image
+										 : (amazonProduct ? amazonProductImageFromHtml(html) : QString());
+
+		insertPreviewMetadataValue(metadata, QStringLiteral("productProvider"), provider->siteLabel);
+		insertPreviewMetadataValue(metadata, QStringLiteral("productTitle"), productTitle);
+		insertPreviewMetadataValue(metadata, QStringLiteral("productDescription"),
+								   !productData.description.isEmpty() ? productData.description : description);
+		insertPreviewMetadataValue(metadata, QStringLiteral("productPrice"), productPrice);
+		insertPreviewMetadataValue(metadata, QStringLiteral("productAvailability"), productAvailability);
+		insertPreviewMetadataValue(metadata, QStringLiteral("productBrand"), productBrand);
+		insertPreviewMetadataValue(metadata, QStringLiteral("productSku"), productData.sku);
+		insertPreviewMetadataValue(metadata, QStringLiteral("productRating"), productRating);
+		insertPreviewMetadataValue(metadata, QStringLiteral("productReviewCount"), productReviewCount);
+		insertPreviewMetadataValue(metadata, QStringLiteral("productImage"), productImage);
+		QVariantList productImages;
+		if (!productImage.isEmpty()) {
+			productImages = previewImageItemsFromUrl(url, productImage);
+			if (!productImages.isEmpty()) {
+				metadata.insert(QStringLiteral("productImages"), productImages);
+			}
+		}
+		const QVariantList productMedia = productMediaItemsFromHtml(url, html, metaTags, productImages);
+		if (!productMedia.isEmpty()) {
+			metadata.insert(QStringLiteral("productMedia"), productMedia);
+		}
+		if (amazonProduct) {
+			insertPreviewMetadataValue(metadata, QStringLiteral("productDelivery"),
+									   amazonProductDeliveryFromHtml(html));
+		}
+		if (provider->kind == QLatin1String("systembolagetProduct")) {
+			insertPreviewMetadataValue(metadata, QStringLiteral("productAlcohol"),
+									   realEstateMetricFromText(title, description,
+																QLatin1String("[0-9][0-9\\s\\x{00a0},.]*\\s*%")));
+			insertPreviewMetadataValue(metadata, QStringLiteral("productVolume"),
+									   realEstateMetricFromText(title, description,
+																QLatin1String("[0-9][0-9\\s\\x{00a0},.]*\\s*(?:ml|cl|l)")));
+		}
+		return metadata;
+	}
+
+	if (provider->kind == QLatin1String("audio")) {
+		insertPreviewMetadataValue(metadata, QStringLiteral("audioProvider"), provider->siteLabel);
+		insertPreviewMetadataValue(metadata, QStringLiteral("audioProgram"),
+								   previewMetaValue(metaTags, QStringList { QStringLiteral("article:section"),
+																			QStringLiteral("program") }));
+		insertPreviewMetadataValue(metadata, QStringLiteral("articlePublishedAt"),
+								   previewMetaValue(metaTags, QStringList { QStringLiteral("article:published_time"),
+																			QStringLiteral("date") }));
+		return metadata;
+	}
+
+	if (provider->kind == QLatin1String("weather") || provider->kind == QLatin1String("place")
+		|| provider->kind == QLatin1String("traffic")) {
+		insertPreviewMetadataValue(metadata, QStringLiteral("locationLabel"), blocketPreviewTitle(title));
+		insertPreviewMetadataValue(metadata, QStringLiteral("statusLabel"), description.left(80));
+		return metadata;
+	}
+
+	return metadata;
+}
+
+QString gameStorePreviewProductTitle(QString title, const QString &siteLabel) {
+	title = title.simplified();
+	if (title.isEmpty()) {
+		return QString();
+	}
+
+	const QString escapedSite = QRegularExpression::escape(siteLabel);
+	const QStringList suffixes {
+		QStringLiteral("\\s*[\\|\\-\\x{2013}\\x{2014}]\\s*%1\\s*$").arg(escapedSite),
+		QStringLiteral("\\s*[\\|\\-\\x{2013}\\x{2014}]\\s*Official\\s+%1\\s*$").arg(escapedSite),
+		QStringLiteral("\\s+on\\s+%1\\s*$").arg(escapedSite),
+		QStringLiteral("\\s*\\|\\s*(?:PC\\s+)?(?:Steam|Epic\\s+Games|GOG|Ubisoft|EA(?:\\s+app)?|Xbox|Battle\\.net)\\s+(?:Game|Key|CD\\s+Key)\\s*$"),
+		QStringLiteral("\\s+(?:PC\\s+)?(?:Steam|Epic\\s+Games|GOG|Ubisoft\\s+Connect|Uplay|EA\\s+app|Origin|Xbox|Battle\\.net)\\s+(?:CD\\s+)?Key\\s*$"),
+		QStringLiteral("\\s+\\|\\s+Download\\s+and\\s+Buy\\s+Today\\s*$")
+	};
+	for (const QString &suffix : suffixes) {
+		title.remove(QRegularExpression(suffix, QRegularExpression::CaseInsensitiveOption));
+	}
+
+	static const QRegularExpression s_gogSuffix(QLatin1String("\\s*[\\|\\-]\\s*GOG\\.com\\s*$"),
+												QRegularExpression::CaseInsensitiveOption);
+	title.remove(s_gogSuffix);
+	static const QRegularExpression s_epicSuffix(QLatin1String("\\s*[\\|\\-]\\s*Epic\\s+Games\\s+Store\\s*$"),
+												 QRegularExpression::CaseInsensitiveOption);
+	title.remove(s_epicSuffix);
+	return title.trimmed();
+}
+
+QString gameStorePreviewPriceText(const QString &title, const QString &description) {
+	const QString text = QString(title + QLatin1Char(' ') + description).simplified();
+	if (text.isEmpty()) {
+		return QString();
+	}
+
+	static const QRegularExpression s_freePattern(QLatin1String("\\b(free|free to play|gratis)\\b"),
+												  QRegularExpression::CaseInsensitiveOption);
+	if (s_freePattern.match(text).hasMatch()) {
+		return QObject::tr("Free");
+	}
+
+	static const QRegularExpression s_leadingCurrency(
+		QStringLiteral("(?<![A-Za-z0-9])([$\\x{20ac}\\x{00a3}]|USD|EUR|GBP|SEK|NOK|DKK|PLN|CAD|AUD)\\s*[0-9][0-9\\s.,]*(?![A-Za-z0-9])"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch leadingMatch = s_leadingCurrency.match(text);
+	if (leadingMatch.hasMatch()) {
+		return leadingMatch.captured(0).simplified();
+	}
+
+	static const QRegularExpression s_trailingCurrency(
+		QStringLiteral("(?<![A-Za-z0-9])[0-9][0-9\\s.,]*\\s*(kr|SEK|NOK|DKK|PLN|\\x{20ac}|\\x{00a3}|USD|EUR|GBP)(?![A-Za-z0-9])"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch trailingMatch = s_trailingCurrency.match(text);
+	if (trailingMatch.hasMatch()) {
+		return trailingMatch.captured(0).simplified();
+	}
+
+	return QString();
+}
+
+QString gameStorePreviewDiscountText(const QString &title, const QString &description) {
+	const QString text = QString(title + QLatin1Char(' ') + description).simplified();
+	static const QRegularExpression s_discountPattern(
+		QLatin1String("(?<![A-Za-z0-9])-?([0-9]{1,2})\\s*%\\s*(?:off|discount|sale)?(?![A-Za-z0-9])"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_discountPattern.match(text);
+	if (!match.hasMatch()) {
+		return QString();
+	}
+
+	const int discount = match.captured(1).toInt();
+	return discount > 0 ? QStringLiteral("-%1%").arg(discount) : QString();
+}
+
+bool gameStoreTitleLooksBlocked(const QString &title) {
+	const QString normalized = title.simplified().toLower();
+	return normalized == QLatin1String("just a moment...")
+		   || normalized.contains(QLatin1String("access denied"))
+		   || normalized.contains(QLatin1String("attention required"))
+		   || normalized.contains(QLatin1String("forbidden"));
+}
+
+QVariantMap gameStorePreviewMetadata(const QUrl &url, const QString &title, const QString &description,
+									 const QString &html,
+									 const QHash< QString, QString > &metaTags) {
+	QVariantMap metadata;
+	const std::optional< GameStorePreviewInfo > store = gameStorePreviewInfoForUrl(url);
+	if (!store) {
+		return metadata;
+	}
+
+	const GameStoreProductData productData = gameStoreJsonLdProductData(url, html);
+	const QString metaPrice                = gameStoreMetaPriceText(metaTags);
+	const QString pageTitle                = extractHtmlTitle(html);
+	const bool titleLooksBlocked = gameStoreTitleLooksBlocked(title);
+	const QString cleanTitle     = titleLooksBlocked ? QString() : title;
+	QString productTitle =
+		!productData.title.isEmpty() ? productData.title : gameStorePreviewProductTitle(cleanTitle, store->siteLabel);
+	if (productTitle.isEmpty()) {
+		productTitle = store->fallbackTitle;
+	}
+	const QString productDescription = titleLooksBlocked ? QString()
+														 : (!productData.description.isEmpty() ? productData.description
+																							 : description);
+	const QString combinedText       = QString(pageTitle + QLatin1Char(' ') + title + QLatin1Char(' ') + description)
+										 .simplified();
+	const QString price = !productData.price.isEmpty()
+							  ? productData.price
+							  : (!metaPrice.isEmpty() ? metaPrice : gameStorePreviewPriceText(combinedText, QString()));
+	const QString platform =
+		gameStorePreviewPlatformText(store->key, QString(productTitle + QLatin1Char(' ') + cleanTitle), description);
+
+	metadata.insert(QStringLiteral("provider"), QStringLiteral("game-store"));
+	metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("game-store"));
+	metadata.insert(QStringLiteral("previewKind"), QStringLiteral("gameStoreProduct"));
+	metadata.insert(QStringLiteral("gameStoreProvider"), store->key);
+	metadata.insert(QStringLiteral("gameStoreName"), store->siteLabel);
+	insertPreviewMetadataValue(metadata, QStringLiteral("gameStoreProductTitle"), productTitle);
+	insertPreviewMetadataValue(metadata, QStringLiteral("gameStoreDescription"), productDescription);
+	insertPreviewMetadataValue(metadata, QStringLiteral("gameStorePrice"), price);
+	insertPreviewMetadataValue(metadata, QStringLiteral("gameStoreOriginalPrice"), productData.originalPrice);
+	insertPreviewMetadataValue(metadata, QStringLiteral("gameStoreDiscount"),
+							   !productData.discount.isEmpty() ? productData.discount
+															   : gameStorePreviewDiscountText(combinedText, QString()));
+	insertPreviewMetadataValue(metadata, QStringLiteral("gameStoreAvailability"), productData.availability);
+	insertPreviewMetadataValue(metadata, QStringLiteral("gameStoreBrand"), productData.brand);
+	insertPreviewMetadataValue(metadata, QStringLiteral("gameStoreSku"), productData.sku);
+	insertPreviewMetadataValue(metadata, QStringLiteral("gameStoreRating"), productData.rating);
+	insertPreviewMetadataValue(metadata, QStringLiteral("gameStoreReviewCount"), productData.reviewCount);
+	insertPreviewMetadataValue(metadata, QStringLiteral("gameStorePlatform"), platform);
+	insertPreviewMetadataValue(metadata, QStringLiteral("gameStoreImage"), productData.image);
+	return metadata;
+}
+
+QVariantMap previewMetadataWithSwedishData(QVariantMap metadata, const QUrl &url, const QString &title,
+										   const QString &description, const QString &html = QString(),
+										   const QHash< QString, QString > &metaTags = QHash< QString, QString >()) {
+	const QVariantMap updates = swedishPreviewMetadata(url, title, description, html, metaTags);
+	const QVariantMap gameStoreUpdates = gameStorePreviewMetadata(url, title, description, html, metaTags);
+	if (updates.isEmpty() && gameStoreUpdates.isEmpty()) {
+		return metadata;
+	}
+
+	for (auto it = updates.cbegin(); it != updates.cend(); ++it) {
+		metadata.insert(it.key(), it.value());
+	}
+	for (auto it = gameStoreUpdates.cbegin(); it != gameStoreUpdates.cend(); ++it) {
+		metadata.insert(it.key(), it.value());
+	}
+	return metadata;
+}
+
+bool isBlueskyPostUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	if (host != QLatin1String("bsky.app")) {
+		return false;
+	}
+	const QStringList segments = decodedUrlPathSegments(url);
+	return segments.size() >= 4 && segments.at(0) == QLatin1String("profile")
+		   && segments.at(2) == QLatin1String("post");
+}
+
+bool isThreadsPostUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	if (host != QLatin1String("threads.net")) {
+		return false;
+	}
+	const QStringList segments = decodedUrlPathSegments(url);
+	return segments.size() >= 3 && segments.at(0).startsWith(QLatin1Char('@'))
+		   && segments.at(1) == QLatin1String("post");
+}
+
+bool isLikelyMastodonPostUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	if (host.isEmpty() || host == QLatin1String("x.com") || host == QLatin1String("twitter.com")
+		|| host == QLatin1String("bsky.app") || host == QLatin1String("threads.net")
+		|| isYouTubeHost(host)) {
+		return false;
+	}
+
+	const QStringList segments = decodedUrlPathSegments(url);
+	if (segments.size() >= 2 && segments.at(0).startsWith(QLatin1Char('@'))) {
+		static const QRegularExpression s_statusIdPattern(
+			QRegularExpression::anchoredPattern(QLatin1String("[0-9]{5,32}")));
+		return s_statusIdPattern.match(segments.at(1)).hasMatch();
+	}
+	if (segments.size() >= 4 && segments.at(0) == QLatin1String("users")
+		&& segments.at(2) == QLatin1String("statuses")) {
+		return true;
+	}
+	return false;
+}
+
+QString xPostStatusIdFromUrl(const QUrl &url) {
+	if (!url.isValid()) {
+		return QString();
+	}
+
+	const QString host = normalizedPreviewHost(url.host());
+	if (host != QLatin1String("x.com") && host != QLatin1String("twitter.com")) {
+		return QString();
+	}
+
+	static const QRegularExpression s_statusIdPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[0-9]{5,32}")));
+	const QStringList segments = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+	for (int i = 1; i < segments.size(); ++i) {
+		if (segments.at(i - 1).compare(QLatin1String("status"), Qt::CaseInsensitive) == 0
+			|| segments.at(i - 1).compare(QLatin1String("statuses"), Qt::CaseInsensitive) == 0) {
+			const QString statusId = QUrl::fromPercentEncoding(segments.at(i).toUtf8()).trimmed();
+			if (s_statusIdPattern.match(statusId).hasMatch()) {
+				return statusId;
+			}
+		}
+	}
+
+	return QString();
+}
+
+bool isXPostUrl(const QUrl &url) {
+	return !xPostStatusIdFromUrl(url).isEmpty();
+}
+
+QString xPostHandleFromUrl(const QUrl &url) {
+	if (!url.isValid()) {
+		return QString();
+	}
+
+	const QStringList segments = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+	for (int i = 1; i < segments.size(); ++i) {
+		if (segments.at(i).compare(QLatin1String("status"), Qt::CaseInsensitive) == 0
+			|| segments.at(i).compare(QLatin1String("statuses"), Qt::CaseInsensitive) == 0) {
+			QString handle = QUrl::fromPercentEncoding(segments.at(i - 1).toUtf8()).trimmed();
+			if (handle.isEmpty() || handle.compare(QLatin1String("i"), Qt::CaseInsensitive) == 0) {
+				return QString();
+			}
+			if (!handle.startsWith(QLatin1Char('@'))) {
+				handle.prepend(QLatin1Char('@'));
+			}
+			return handle;
+		}
+	}
+
+	return QString();
+}
+
+QUrl xPostOEmbedUrl(const QUrl &postUrl) {
+	QUrl url(QStringLiteral("https://publish.twitter.com/oembed"));
+	QUrlQuery query;
+	query.addQueryItem(QStringLiteral("url"), postUrl.toString(QUrl::FullyEncoded));
+	query.addQueryItem(QStringLiteral("omit_script"), QStringLiteral("true"));
+	query.addQueryItem(QStringLiteral("hide_thread"), QStringLiteral("true"));
+	query.addQueryItem(QStringLiteral("dnt"), QStringLiteral("true"));
+	query.addQueryItem(QStringLiteral("theme"), QStringLiteral("dark"));
+	url.setQuery(query);
+	return url;
+}
+
+QUrl xPostSyndicationUrl(const QString &statusId) {
+	if (statusId.trimmed().isEmpty()) {
+		return QUrl();
+	}
+
+	QUrl url(QStringLiteral("https://cdn.syndication.twimg.com/tweet-result"));
+	QUrlQuery query;
+	query.addQueryItem(QStringLiteral("id"), statusId.trimmed());
+	query.addQueryItem(QStringLiteral("token"), QStringLiteral("x"));
+	query.addQueryItem(QStringLiteral("lang"), QStringLiteral("en"));
+	url.setQuery(query);
+	return url;
+}
+
+QUrl xPostSyndicationUrl(const QUrl &postUrl) {
+	const QString statusId = xPostStatusIdFromUrl(postUrl);
+	if (statusId.isEmpty()) {
+		return QUrl();
+	}
+
+	return xPostSyndicationUrl(statusId);
+}
+
+QString xDisplayHandle(QString handle) {
+	handle = handle.trimmed();
+	if (handle.isEmpty()) {
+		return QString();
+	}
+	if (!handle.startsWith(QLatin1Char('@'))) {
+		handle.prepend(QLatin1Char('@'));
+	}
+	return handle;
+}
+
+QString normalizedJsonUrlString(QString value);
+
+QString xPostSyndicationDisplayText(const QJsonObject &object) {
+	QString text = object.value(QStringLiteral("text")).toString();
+	const QJsonArray range = object.value(QStringLiteral("display_text_range")).toArray();
+	if (range.size() >= 2) {
+		const int start = range.at(0).toInt(-1);
+		const int end   = range.at(1).toInt(-1);
+		if (start >= 0 && end >= start && end <= text.size()) {
+			text = text.mid(start, end - start);
+		}
+	}
+	static const QRegularExpression s_trailingShortUrl(QLatin1String("\\s*https://t\\.co/\\S+\\s*$"));
+	text.remove(s_trailingShortUrl);
+	return text.trimmed();
+}
+
+QString xPostImageMimeFromUrl(const QString &imageUrl) {
+	const QUrl url(imageUrl);
+	const QString path = url.path().toLower();
+	const QString format = QUrlQuery(url).queryItemValue(QStringLiteral("format")).trimmed().toLower();
+	if (path.endsWith(QLatin1String(".png")) || format == QLatin1String("png")) {
+		return QStringLiteral("image/png");
+	}
+	if (path.endsWith(QLatin1String(".webp")) || format == QLatin1String("webp")) {
+		return QStringLiteral("image/webp");
+	}
+	return QStringLiteral("image/jpeg");
+}
+
+QString xPostProfileImageUrl(QString imageUrl) {
+	imageUrl = normalizedJsonUrlString(imageUrl);
+	if (imageUrl.isEmpty()) {
+		return QString();
+	}
+
+	QUrl url(imageUrl);
+	if (!url.isValid() || !hostEqualsOrEndsWith(normalizedPreviewHost(url.host()), QStringLiteral("twimg.com"))) {
+		return QString();
+	}
+
+	QString path = url.path();
+	const int dotIndex = path.lastIndexOf(QLatin1Char('.'));
+	if (dotIndex > 0) {
+		const QString stem = path.left(dotIndex);
+		if (stem.endsWith(QLatin1String("_normal"))) {
+			path = stem.left(stem.size() - QStringLiteral("_normal").size()) + QStringLiteral("_400x400")
+				   + path.mid(dotIndex);
+			url.setPath(path);
+		}
+	}
+
+	return url.toString(QUrl::FullyEncoded);
+}
+
+std::optional< qint64 > xPostIntegerValue(const QJsonObject &object, const QString &key) {
+	if (!object.contains(key)) {
+		return std::nullopt;
+	}
+
+	const QJsonValue value = object.value(key);
+	if (value.isDouble()) {
+		return static_cast< qint64 >(value.toDouble());
+	}
+	if (value.isString()) {
+		bool ok         = false;
+		const qint64 rv = value.toString().trimmed().toLongLong(&ok);
+		if (ok) {
+			return rv;
+		}
+	}
+	return std::nullopt;
+}
+
+QString xPostStringIdValue(const QJsonObject &object, const QString &key) {
+	const QJsonValue value = object.value(key);
+	if (value.isString()) {
+		return value.toString().trimmed();
+	}
+	if (value.isDouble()) {
+		const qint64 numericValue = static_cast< qint64 >(value.toDouble());
+		return numericValue > 0 ? QString::number(numericValue) : QString();
+	}
+	return QString();
+}
+
+QString xPostStatusIdFromSyndicationObject(const QJsonObject &object) {
+	QString statusId = xPostStringIdValue(object, QStringLiteral("id_str"));
+	if (statusId.isEmpty()) {
+		statusId = xPostStringIdValue(object, QStringLiteral("id"));
+	}
+	return statusId;
+}
+
+QString xPostParentStatusIdFromSyndicationObject(const QJsonObject &object) {
+	for (const QString &key :
+		 { QStringLiteral("in_reply_to_status_id_str"), QStringLiteral("in_reply_to_status_id"),
+		   QStringLiteral("parent_id_str"), QStringLiteral("parent_id") }) {
+		const QString statusId = xPostStringIdValue(object, key);
+		if (!statusId.isEmpty()) {
+			return statusId;
+		}
+	}
+
+	const QJsonArray referencedTweets = object.value(QStringLiteral("referenced_tweets")).toArray();
+	for (const QJsonValue &value : referencedTweets) {
+		const QJsonObject reference = value.toObject();
+		if (reference.value(QStringLiteral("type")).toString().compare(QLatin1String("replied_to"), Qt::CaseInsensitive)
+			== 0) {
+			const QString statusId = xPostStringIdValue(reference, QStringLiteral("id"));
+			if (!statusId.isEmpty()) {
+				return statusId;
+			}
+		}
+	}
+
+	return QString();
+}
+
+void xPostInsertCountMetadata(QVariantMap &metadata, const QString &metadataKey, const QJsonObject &object,
+							  const QString &jsonKey) {
+	const std::optional< qint64 > value = xPostIntegerValue(object, jsonKey);
+	if (value && *value >= 0) {
+		metadata.insert(metadataKey, static_cast< qlonglong >(*value));
+	}
+}
+
+QVariantMap xPostSummaryMetadata(const QJsonObject &object) {
+	QVariantMap metadata;
+	const QJsonObject user = object.value(QStringLiteral("user")).toObject();
+	const QString screenName = user.value(QStringLiteral("screen_name")).toString().trimmed();
+	const QString authorName = user.value(QStringLiteral("name")).toString().trimmed();
+	const QString handle     = xDisplayHandle(screenName);
+	const QString statusId   = xPostStatusIdFromSyndicationObject(object);
+	const QString text       = xPostSyndicationDisplayText(object);
+	const QString avatarUrl =
+		xPostProfileImageUrl(user.value(QStringLiteral("profile_image_url_https")).toString());
+
+	if (!statusId.isEmpty()) {
+		metadata.insert(QStringLiteral("id"), statusId);
+	}
+	if (!screenName.isEmpty() && !statusId.isEmpty()) {
+		metadata.insert(QStringLiteral("url"), QStringLiteral("https://x.com/%1/status/%2").arg(screenName, statusId));
+	}
+	if (!authorName.isEmpty()) {
+		metadata.insert(QStringLiteral("displayName"), authorName);
+	}
+	if (!handle.isEmpty()) {
+		metadata.insert(QStringLiteral("handle"), handle);
+	}
+	if (!avatarUrl.isEmpty()) {
+		metadata.insert(QStringLiteral("avatarUrl"), avatarUrl);
+	}
+	const bool verified = user.value(QStringLiteral("verified")).toBool(false)
+						  || user.value(QStringLiteral("is_blue_verified")).toBool(false);
+	if (verified) {
+		metadata.insert(QStringLiteral("verified"), true);
+	}
+	const QString createdAt = object.value(QStringLiteral("created_at")).toString().trimmed();
+	if (!createdAt.isEmpty()) {
+		metadata.insert(QStringLiteral("createdAt"), createdAt);
+	}
+	if (!text.isEmpty()) {
+		metadata.insert(QStringLiteral("text"), text);
+	}
+	xPostInsertCountMetadata(metadata, QStringLiteral("replyCount"), object, QStringLiteral("conversation_count"));
+	xPostInsertCountMetadata(metadata, QStringLiteral("likeCount"), object, QStringLiteral("favorite_count"));
+	xPostInsertCountMetadata(metadata, QStringLiteral("repostCount"), object, QStringLiteral("retweet_count"));
+	xPostInsertCountMetadata(metadata, QStringLiteral("quoteCount"), object, QStringLiteral("quote_count"));
+	xPostInsertCountMetadata(metadata, QStringLiteral("bookmarkCount"), object, QStringLiteral("bookmark_count"));
+	xPostInsertCountMetadata(metadata, QStringLiteral("viewCount"), object, QStringLiteral("view_count"));
+
+	return metadata;
+}
+
+QVariantList xPostEmbeddedReplyContext(const QJsonObject &object, int maxDepth) {
+	QVariantList context;
+	if (maxDepth <= 0) {
+		return context;
+	}
+
+	for (const QString &key :
+		 { QStringLiteral("parent"), QStringLiteral("in_reply_to_status"), QStringLiteral("reply_to_tweet"),
+		   QStringLiteral("replied_to_tweet") }) {
+		const QJsonObject parent = object.value(key).toObject();
+		if (parent.isEmpty()) {
+			continue;
+		}
+
+		context = xPostEmbeddedReplyContext(parent, maxDepth - 1);
+		const QVariantMap parentSummary = xPostSummaryMetadata(parent);
+		if (!parentSummary.isEmpty()) {
+			context.push_back(parentSummary);
+		}
+		while (context.size() > maxDepth) {
+			context.pop_front();
+		}
+		return context;
+	}
+
+	return context;
+}
+
+void xPostAppendImageMediaItem(std::vector< PersistentChatPreviewPlayableMediaMeta > &items,
+							   QSet< QString > &seenUrls, const QString &rawUrl) {
+	const QString url = normalizedJsonUrlString(rawUrl);
+	if (url.isEmpty() || seenUrls.contains(url)) {
+		return;
+	}
+
+	PersistentChatPreviewPlayableMediaMeta media;
+	media.url  = url;
+	media.mime = xPostImageMimeFromUrl(url);
+	items.push_back(media);
+	seenUrls.insert(url);
+}
+
+std::vector< PersistentChatPreviewPlayableMediaMeta > xPostSyndicationImageMediaItems(const QJsonObject &object) {
+	std::vector< PersistentChatPreviewPlayableMediaMeta > items;
+	QSet< QString > seenUrls;
+
+	const QJsonArray mediaDetails = object.value(QStringLiteral("mediaDetails")).toArray();
+	for (const QJsonValue &value : mediaDetails) {
+		const QJsonObject mediaObject = value.toObject();
+		const QString type = mediaObject.value(QStringLiteral("type")).toString().trimmed().toLower();
+		if (type != QLatin1String("photo")) {
+			continue;
+		}
+
+		xPostAppendImageMediaItem(items, seenUrls,
+								  mediaObject.value(QStringLiteral("media_url_https")).toString());
+	}
+
+	const QJsonArray photos = object.value(QStringLiteral("photos")).toArray();
+	for (const QJsonValue &value : photos) {
+		xPostAppendImageMediaItem(items, seenUrls, value.toObject().value(QStringLiteral("url")).toString());
+	}
+
+	if (items.size() > 4) {
+		items.resize(4);
+	}
+	return items;
+}
+
+std::optional< PersistentChatPreviewPlayableMediaMeta >
+	xPostSyndicationPlayableMedia(const QJsonObject &object) {
+	std::optional< PersistentChatPreviewPlayableMediaMeta > bestVideo;
+	int bestVideoScore = -1;
+	std::optional< PersistentChatPreviewPlayableMediaMeta > bestImage;
+	int bestImageScore = -1;
+
+	const auto considerImage = [&bestImage, &bestImageScore](const QString &rawUrl, const QString &mime,
+														   int score) {
+		const QString url = normalizedJsonUrlString(rawUrl);
+		if (url.isEmpty() || score < bestImageScore) {
+			return;
+		}
+		PersistentChatPreviewPlayableMediaMeta media;
+		media.url  = url;
+		media.mime = mime;
+		bestImage  = media;
+		bestImageScore = score;
+	};
+
+	const QJsonArray mediaDetails = object.value(QStringLiteral("mediaDetails")).toArray();
+	for (const QJsonValue &value : mediaDetails) {
+		const QJsonObject mediaObject = value.toObject();
+		const QString type = mediaObject.value(QStringLiteral("type")).toString().trimmed().toLower();
+
+		const QJsonArray variants =
+			mediaObject.value(QStringLiteral("video_info")).toObject().value(QStringLiteral("variants")).toArray();
+		for (const QJsonValue &variantValue : variants) {
+			const QJsonObject variant = variantValue.toObject();
+			const QString contentType =
+				variant.value(QStringLiteral("content_type")).toString().split(QLatin1Char(';')).front().trimmed().toLower();
+			if (contentType != QLatin1String("video/mp4")) {
+				continue;
+			}
+			const QString url = normalizedJsonUrlString(variant.value(QStringLiteral("url")).toString());
+			if (url.isEmpty()) {
+				continue;
+			}
+			const int bitrate = variant.value(QStringLiteral("bitrate")).toInt(1);
+			if (bitrate > bestVideoScore) {
+				PersistentChatPreviewPlayableMediaMeta media;
+				media.url  = url;
+				media.mime = QStringLiteral("video/mp4");
+				bestVideo  = media;
+				bestVideoScore = bitrate;
+			}
+		}
+
+		if (type == QLatin1String("photo")) {
+			const QJsonObject originalInfo = mediaObject.value(QStringLiteral("original_info")).toObject();
+			const int width                = originalInfo.value(QStringLiteral("width")).toInt();
+			const int height               = originalInfo.value(QStringLiteral("height")).toInt();
+			const QString imageUrl = normalizedJsonUrlString(mediaObject.value(QStringLiteral("media_url_https")).toString());
+			considerImage(imageUrl, xPostImageMimeFromUrl(imageUrl), width * height);
+		}
+	}
+
+	if (bestVideo) {
+		return bestVideo;
+	}
+	if (bestImage) {
+		return bestImage;
+	}
+
+	const QJsonArray photos = object.value(QStringLiteral("photos")).toArray();
+	for (const QJsonValue &value : photos) {
+		const QJsonObject photo = value.toObject();
+		const int width         = photo.value(QStringLiteral("width")).toInt();
+		const int height        = photo.value(QStringLiteral("height")).toInt();
+		const QString imageUrl  = normalizedJsonUrlString(photo.value(QStringLiteral("url")).toString());
+		considerImage(imageUrl, xPostImageMimeFromUrl(imageUrl), width * height);
+	}
+
+	if (bestImage) {
+		return bestImage;
+	}
+
+	const QJsonObject quotedTweet = object.value(QStringLiteral("quoted_tweet")).toObject();
+	if (!quotedTweet.isEmpty()) {
+		return xPostSyndicationPlayableMedia(quotedTweet);
+	}
+
+	return std::nullopt;
 }
 
 std::optional< QString > redditVideoIdFromUrl(const QUrl &url) {
@@ -2921,13 +7242,14 @@ QUrl redditDashAudioUrlFromManifest(const QByteArray &data, const QUrl &manifest
 bool isSafePreviewTarget(const QUrl &url);
 
 bool isTrustedRemotePlayableMediaUrl(const QUrl &url, const QString &suggestedMime = QString()) {
-	if (!isSafePreviewTarget(url) || url.scheme().toLower() != QLatin1String("https")) {
+	const QUrl normalizedUrl = normalizedRemotePlayableMediaUrl(url);
+	if (!isSafePreviewTarget(normalizedUrl) || normalizedUrl.scheme().toLower() != QLatin1String("https")) {
 		return false;
 	}
-	if (!isKnownRemotePlayableMediaHost(url.host())) {
+	if (!isKnownRemotePlayableMediaHost(normalizedUrl.host())) {
 		return false;
 	}
-	return isDirectPlayableMediaUrl(url) || isRemotePlayableMediaMime(suggestedMime);
+	return isDirectPlayableMediaUrl(normalizedUrl) || isRemotePlayableMediaMime(suggestedMime);
 }
 
 bool isTrustedRemoteAudioMediaUrl(const QUrl &url, const QString &suggestedMime = QString()) {
@@ -2940,8 +7262,106 @@ bool isTrustedRemoteAudioMediaUrl(const QUrl &url, const QString &suggestedMime 
 	return !playableAudioMimeForUrl(url, suggestedMime).isEmpty();
 }
 
+bool shouldCacheRemotePlayableMediaForPreview(const QUrl &previewUrl, const QUrl &mediaUrl, const QString &suggestedMime) {
+	const QString previewHost = normalizedPreviewHost(previewUrl.host());
+	if (previewHost != QLatin1String("instagram.com") && previewHost != QLatin1String("instagr.am")
+		&& previewHost != QLatin1String("facebook.com") && previewHost != QLatin1String("fb.com")
+		&& previewHost != QLatin1String("fb.watch")) {
+		return false;
+	}
+
+	const QUrl normalizedMediaUrl = normalizedRemotePlayableMediaUrl(mediaUrl);
+	const QString mediaHost       = normalizedPreviewHost(normalizedMediaUrl.host());
+	if (!hostEqualsOrEndsWith(mediaHost, QStringLiteral("cdninstagram.com"))
+		&& !hostEqualsOrEndsWith(mediaHost, QStringLiteral("fbcdn.net"))
+		&& !hostEqualsOrEndsWith(mediaHost, QStringLiteral("fbsbx.com"))) {
+		return false;
+	}
+
+	return playableMediaMimeForUrl(normalizedMediaUrl, suggestedMime).startsWith(QLatin1String("video/"));
+}
+
+bool remotePlayableMediaBytesLookValid(const QByteArray &bytes, const QString &mime) {
+	if (bytes.isEmpty()) {
+		return false;
+	}
+
+	const QString normalizedMime = normalizedPlayableMediaMime(mime);
+	if (normalizedMime == QLatin1String("video/mp4")) {
+		const QByteArray prefix = bytes.left(64);
+		return prefix.contains("ftyp") || prefix.contains("moov") || prefix.contains("mdat");
+	}
+	if (normalizedMime == QLatin1String("video/webm")) {
+		return bytes.startsWith(QByteArray::fromHex("1a45dfa3"));
+	}
+	if (normalizedMime == QLatin1String("image/gif")) {
+		return bytes.startsWith("GIF8");
+	}
+	return normalizedMime.startsWith(QLatin1String("image/"));
+}
+
+bool mp4BytesLikelyHaveAudioTrack(const QByteArray &bytes) {
+	return bytes.contains("soun") || bytes.contains("mp4a") || bytes.contains("Opus");
+}
+
+QString playableMediaDataUrl(const QString &mime, const QByteArray &bytes) {
+	const QString normalizedMime = normalizedPlayableMediaMime(mime);
+	if (!isRemotePlayableMediaMime(normalizedMime) || bytes.isEmpty()) {
+		return QString();
+	}
+
+	return QString::fromLatin1("data:%1;base64,%2").arg(normalizedMime, QString::fromLatin1(bytes.toBase64()));
+}
+
+bool isTrackingPreviewQueryItem(const QString &name) {
+	const QString key = name.trimmed().toLower();
+	return key.startsWith(QLatin1String("utm_")) || key == QLatin1String("fbclid")
+		   || key == QLatin1String("gclid") || key == QLatin1String("mc_cid")
+		   || key == QLatin1String("mc_eid") || key == QLatin1String("igsh")
+		   || key == QLatin1String("igshid") || key == QLatin1String("si")
+		   || key == QLatin1String("feature") || key == QLatin1String("app");
+}
+
+QUrl canonicalInstagramPreviewUrl(const QUrl &url) {
+	if (!isInstagramPreviewUrl(url)) {
+		return url;
+	}
+
+	QUrl normalized = url;
+	normalized.setScheme(QStringLiteral("https"));
+	normalized.setHost(QStringLiteral("www.instagram.com"));
+
+	QStringList segments = normalized.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+	if (segments.size() >= 2 && segments.front().compare(QLatin1String("reels"), Qt::CaseInsensitive) == 0) {
+		segments.front() = QStringLiteral("reel");
+	}
+
+	if ((segments.size() >= 2 && segments.front().compare(QLatin1String("reel"), Qt::CaseInsensitive) == 0)
+		|| (segments.size() >= 2 && segments.front().compare(QLatin1String("p"), Qt::CaseInsensitive) == 0)) {
+		segments = segments.mid(0, 2);
+		normalized.setPath(QStringLiteral("/") + segments.join(QLatin1Char('/')) + QStringLiteral("/"));
+	}
+
+	return normalized;
+}
+
 QString normalizedPreviewUrl(const QUrl &url) {
-	QUrl normalized = url.adjusted(QUrl::NormalizePathSegments | QUrl::RemoveFragment);
+	if (isGoogleSearchUrl(url)) {
+		return normalizedGoogleSearchPreviewUrl(url);
+	}
+
+	QUrl normalized = (isInstagramPreviewUrl(url) ? canonicalInstagramPreviewUrl(url) : url)
+						  .adjusted(QUrl::NormalizePathSegments | QUrl::RemoveFragment);
+	QUrlQuery query(normalized);
+	if (!query.isEmpty()) {
+		QUrlQuery filteredQuery;
+		for (const QPair< QString, QString > &item : query.queryItems()) {
+			if (!isTrackingPreviewQueryItem(item.first)) {
+				filteredQuery.addQueryItem(item.first, item.second);
+			}
+		}
+		normalized.setQuery(filteredQuery);
+	}
 	return normalized.toString(QUrl::FullyEncoded);
 }
 
@@ -2953,11 +7373,121 @@ QString previewDisplayHost(const QUrl &url) {
 	return host;
 }
 
+struct GitHubRepositoryRef {
+	QString owner;
+	QString repo;
+};
+
+bool isValidGitHubPathComponent(const QString &value) {
+	if (value.isEmpty() || value == QLatin1String(".") || value == QLatin1String("..") || value.size() > 100) {
+		return false;
+	}
+
+	static const QRegularExpression s_componentPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[A-Za-z0-9_.-]+")));
+	return s_componentPattern.match(value).hasMatch();
+}
+
+std::optional< GitHubRepositoryRef > githubRepositoryFromUrl(const QUrl &url) {
+	if (!url.isValid() || normalizedPreviewHost(url.host()) != QLatin1String("github.com")) {
+		return std::nullopt;
+	}
+
+	const QStringList segments = decodedUrlPathSegments(url);
+	if (segments.size() < 2) {
+		return std::nullopt;
+	}
+
+	QString owner = segments.at(0).trimmed();
+	QString repo  = segments.at(1).trimmed();
+	if (repo.endsWith(QLatin1String(".git"), Qt::CaseInsensitive)) {
+		repo.chop(4);
+	}
+
+	if (!isValidGitHubPathComponent(owner) || !isValidGitHubPathComponent(repo)) {
+		return std::nullopt;
+	}
+
+	return GitHubRepositoryRef { owner, repo };
+}
+
+bool isGitHubRepositoryUrl(const QUrl &url) {
+	return githubRepositoryFromUrl(url).has_value();
+}
+
+QString githubRepositoryHtmlUrl(const GitHubRepositoryRef &repository) {
+	return QStringLiteral("https://github.com/%1/%2").arg(repository.owner, repository.repo);
+}
+
+QUrl githubApiRepositoryUrl(const GitHubRepositoryRef &repository) {
+	return QUrl(QStringLiteral("https://api.github.com/repos/%1/%2").arg(repository.owner, repository.repo));
+}
+
+QUrl githubApiLatestReleaseUrl(const GitHubRepositoryRef &repository) {
+	return QUrl(QStringLiteral("https://api.github.com/repos/%1/%2/releases/latest")
+					.arg(repository.owner, repository.repo));
+}
+
 std::optional< PersistentChatPreviewProviderInfo > previewProviderInfo(const QUrl &url) {
 	const QString host = previewDisplayHost(url);
+	if (isGoogleSearchUrl(url)) {
+		const QString modeLabel = googleSearchModeLabel(url);
+		return PersistentChatPreviewProviderInfo{ QObject::tr("Google"), googleSearchOpenLabel(url), modeLabel };
+	}
+	if (isGitHubRepositoryUrl(url)) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("GitHub"), QObject::tr("Open on GitHub"),
+												  QObject::tr("GitHub repository") };
+	}
+	if (isSteamStoreHost(url.host())) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("Steam"), QObject::tr("Open on Steam"),
+												  QObject::tr("Steam link") };
+	}
+	if (const std::optional< GameStorePreviewInfo > store = gameStorePreviewInfoForUrl(url); store) {
+		return PersistentChatPreviewProviderInfo{ store->siteLabel, store->openLabel, store->fallbackTitle };
+	}
+	if (const std::optional< RichPreviewProviderInfo > richProvider = richPreviewProviderForUrl(url); richProvider) {
+		return PersistentChatPreviewProviderInfo{ richProvider->siteLabel, richProvider->openLabel,
+												  richProvider->fallbackTitle };
+	}
 	if (host == QLatin1String("open.spotify.com") || host == QLatin1String("spotify.link")) {
 		return PersistentChatPreviewProviderInfo{ QObject::tr("Spotify"), QObject::tr("Open on Spotify"),
 												  QObject::tr("Spotify link") };
+	}
+	if (host == QLatin1String("soundcloud.com") || host == QLatin1String("on.soundcloud.com")) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("SoundCloud"), QObject::tr("Open on SoundCloud"),
+												  QObject::tr("SoundCloud track") };
+	}
+	if (host == QLatin1String("streamable.com")) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("Streamable"), QObject::tr("Open on Streamable"),
+												  QObject::tr("Streamable video") };
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("tiktok.com"))) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("TikTok"), QObject::tr("Open on TikTok"),
+												  QObject::tr("TikTok video") };
+	}
+	if (host == QLatin1String("vimeo.com") || host == QLatin1String("player.vimeo.com")) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("Vimeo"), QObject::tr("Open on Vimeo"),
+												  QObject::tr("Vimeo video") };
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("dailymotion.com")) || host == QLatin1String("dai.ly")) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("Dailymotion"), QObject::tr("Open on Dailymotion"),
+												  QObject::tr("Dailymotion video") };
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("tenor.com"))) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("Tenor"), QObject::tr("Open on Tenor"),
+												  QObject::tr("Tenor GIF") };
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("giphy.com"))) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("GIPHY"), QObject::tr("Open on GIPHY"),
+												  QObject::tr("GIPHY GIF") };
+	}
+	if (host == QLatin1String("bsky.app")) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("Bluesky"), QObject::tr("Open on Bluesky"),
+												  QObject::tr("Bluesky post") };
+	}
+	if (host == QLatin1String("threads.net")) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("Threads"), QObject::tr("Open on Threads"),
+												  QObject::tr("Threads post") };
 	}
 	if (host == QLatin1String("patreon.com")) {
 		return PersistentChatPreviewProviderInfo{ QObject::tr("Patreon"), QObject::tr("Open on Patreon"),
@@ -2987,9 +7517,20 @@ std::optional< PersistentChatPreviewProviderInfo > previewProviderInfo(const QUr
 		return PersistentChatPreviewProviderInfo{ QObject::tr("Imgur"), QObject::tr("Open on Imgur"),
 												  QObject::tr("Imgur link") };
 	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("4chan.org"))
+		|| hostEqualsOrEndsWith(host, QStringLiteral("4channel.org"))
+		|| hostEqualsOrEndsWith(host, QStringLiteral("4cdn.org"))) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("4chan"), QObject::tr("Open on 4chan"),
+												  QObject::tr("4chan post") };
+	}
 	if (isYouTubeHost(url.host())) {
 		return PersistentChatPreviewProviderInfo{ QObject::tr("YouTube"), QObject::tr("Open on YouTube"),
 												  QObject::tr("YouTube video") };
+	}
+	if (isTwitchHost(url.host())) {
+		const std::optional< TwitchPreviewTarget > target = twitchPreviewTargetFromUrl(url);
+		return PersistentChatPreviewProviderInfo{ QObject::tr("Twitch"), QObject::tr("Open on Twitch"),
+												  target ? twitchFallbackTitle(*target) : QObject::tr("Twitch link") };
 	}
 
 	return std::nullopt;
@@ -3076,6 +7617,7 @@ bool isSafePreviewTarget(const QUrl &url) {
 constexpr int PREVIEW_REQUEST_TIMEOUT_MSEC             = 8000;
 constexpr qint64 PREVIEW_MAX_PAGE_BYTES                = 512 * 1024;
 constexpr qint64 PREVIEW_MAX_IMAGE_BYTES               = 4 * 1024 * 1024;
+constexpr qint64 PREVIEW_MAX_MEDIA_CACHE_BYTES         = 24 * 1024 * 1024;
 constexpr int PERSISTENT_CHAT_RESIZE_RENDER_DELAY_MSEC = 120;
 constexpr int PERSISTENT_CHAT_PREVIEW_SOURCE_WIDTH     = 640;
 constexpr int PERSISTENT_CHAT_PREVIEW_SOURCE_HEIGHT    = 480;
@@ -3090,11 +7632,95 @@ static const QByteArray s_previewAcceptHeader =
 	QByteArrayLiteral("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/*,*/*;q=0.8");
 static const QByteArray s_previewAcceptLanguageHeader = QByteArrayLiteral("en-US,en;q=0.9");
 
+bool previewImageReaderSupportsFormat(const QByteArray &format) {
+	const QList< QByteArray > supportedFormats = QImageReader::supportedImageFormats();
+	for (const QByteArray &supportedFormat : supportedFormats) {
+		if (supportedFormat.compare(format, Qt::CaseInsensitive) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+QByteArray previewImageAcceptHeader() {
+	static const QByteArray header = []() {
+		QList< QByteArray > mimes = { QByteArrayLiteral("image/jpeg"), QByteArrayLiteral("image/png"),
+									  QByteArrayLiteral("image/gif"), QByteArrayLiteral("image/bmp") };
+		if (previewImageReaderSupportsFormat(QByteArrayLiteral("webp"))) {
+			mimes.prepend(QByteArrayLiteral("image/webp"));
+		}
+		if (previewImageReaderSupportsFormat(QByteArrayLiteral("avif"))) {
+			mimes.prepend(QByteArrayLiteral("image/avif"));
+		}
+
+		QByteArray value;
+		for (const QByteArray &mime : mimes) {
+			if (!value.isEmpty()) {
+				value.append(',');
+			}
+			value.append(mime);
+		}
+		value.append(QByteArrayLiteral(",*/*;q=0.5"));
+		return value;
+	}();
+	return header;
+}
+
 void preparePreviewRequest(QNetworkRequest &request) {
 	Network::prepareRequest(request);
 	request.setRawHeader(QByteArrayLiteral("User-Agent"), s_previewBrowserUserAgent);
 	request.setRawHeader(QByteArrayLiteral("Accept"), s_previewAcceptHeader);
 	request.setRawHeader(QByteArrayLiteral("Accept-Language"), s_previewAcceptLanguageHeader);
+}
+
+void preparePreviewImageRequest(QNetworkRequest &request) {
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Accept"), previewImageAcceptHeader());
+}
+
+QByteArray previewMediaRefererForUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	if (hostEqualsOrEndsWith(host, QStringLiteral("cdninstagram.com"))) {
+		return QByteArrayLiteral("https://www.instagram.com/");
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("fbcdn.net"))
+		|| hostEqualsOrEndsWith(host, QStringLiteral("fbsbx.com"))) {
+		return QByteArrayLiteral("https://www.facebook.com/");
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("twimg.com"))) {
+		return QByteArrayLiteral("https://x.com/");
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("tenor.com"))) {
+		return QByteArrayLiteral("https://tenor.com/");
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("giphy.com"))) {
+		return QByteArrayLiteral("https://giphy.com/");
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("redd.it"))
+		|| hostEqualsOrEndsWith(host, QStringLiteral("redditmedia.com"))) {
+		return QByteArrayLiteral("https://www.reddit.com/");
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("imgur.com"))) {
+		return QByteArrayLiteral("https://imgur.com/");
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("4cdn.org"))) {
+		return QByteArrayLiteral("https://boards.4chan.org/");
+	}
+	return QByteArray();
+}
+
+void preparePreviewMediaRequest(QNetworkRequest &request, const QUrl &mediaUrl) {
+	Network::prepareRequest(request);
+	request.setRawHeader(QByteArrayLiteral("User-Agent"), s_previewBrowserUserAgent);
+	request.setRawHeader(QByteArrayLiteral("Accept"),
+						 QByteArrayLiteral("video/webm,video/mp4,video/*;q=0.9,audio/*;q=0.8,image/avif,image/webp,image/*,*/*;q=0.5"));
+	request.setRawHeader(QByteArrayLiteral("Accept-Language"), s_previewAcceptLanguageHeader);
+	request.setRawHeader(QByteArrayLiteral("Range"), QByteArrayLiteral("bytes=0-"));
+	const QByteArray referer = previewMediaRefererForUrl(mediaUrl);
+	if (!referer.isEmpty()) {
+		request.setRawHeader(QByteArrayLiteral("Referer"), referer);
+		request.setRawHeader(QByteArrayLiteral("Origin"), referer.left(referer.size() - 1));
+	}
 }
 
 void setPreviewAbortReason(QNetworkReply *reply, const QString &reason) {
@@ -3119,6 +7745,18 @@ QString previewFailureText(const QNetworkReply *reply) {
 	return QObject::tr("Preview unavailable");
 }
 
+bool previewDescriptionIsPlaceholder(const QString &description) {
+	const QString normalized = description.trimmed();
+	return normalized.isEmpty() || normalized == QObject::tr("Fetching page metadata")
+		   || normalized == QObject::tr("Preview unavailable")
+		   || normalized == QObject::tr("Preview exceeded size limit")
+		   || normalized == QObject::tr("Preview request timed out");
+}
+
+qint64 previewMaxPageBytesForUrl(const QUrl &url) {
+	return (isInstagramPreviewUrl(url) || isFacebookPreviewUrl(url)) ? 2 * 1024 * 1024 : PREVIEW_MAX_PAGE_BYTES;
+}
+
 bool previewContentTypeLooksHtml(const QString &contentType) {
 	return contentType.isEmpty() || contentType.contains(QLatin1String("html"))
 		   || contentType.contains(QLatin1String("xml"));
@@ -3138,6 +7776,30 @@ QString previewImageMetaTag(const QHash< QString, QString > &metaTags) {
 	}
 
 	return QString();
+}
+
+std::optional< PersistentChatPreviewPlayableMediaMeta >
+	previewPlayableMediaMetaTag(const QHash< QString, QString > &metaTags) {
+	const QList< QPair< QString, QString > > preferredKeys = {
+		{ QStringLiteral("og:video:secure_url"), QStringLiteral("og:video:type") },
+		{ QStringLiteral("og:video:url"), QStringLiteral("og:video:type") },
+		{ QStringLiteral("og:video"), QStringLiteral("og:video:type") },
+		{ QStringLiteral("twitter:player:stream"), QStringLiteral("twitter:player:stream:content_type") },
+	};
+
+	for (const QPair< QString, QString > &keys : preferredKeys) {
+		const QString url = metaTags.value(keys.first).trimmed();
+		if (url.isEmpty()) {
+			continue;
+		}
+
+		PersistentChatPreviewPlayableMediaMeta media;
+		media.url  = url;
+		media.mime = metaTags.value(keys.second).trimmed();
+		return media;
+	}
+
+	return std::nullopt;
 }
 
 void applyPreviewReplyGuards(QNetworkReply *reply, qint64 maxBytes, bool abortOnContentLength = true) {
@@ -3207,11 +7869,17 @@ QString previewConsentSuppressionScript() {
 (() => {
   const stateKey = '__mumblePreviewConsentCleanupInstalled';
   const styleId = 'mumble-preview-consent-cleanup-style';
-  const socialHost = /(^|\.)((facebook|fb)\.com|fb\.watch|instagram\.com|instagr\.am|reddit\.com|redd\.it|v\.redd\.it)$/i.test(location.hostname || '');
+  const socialHost = /(^|\.)((facebook|fb)\.com|fb\.watch|instagram\.com|instagr\.am|reddit\.com|redd\.it|v\.redd\.it|x\.com|twitter\.com)$/i.test(location.hostname || '');
+  const facebookHost = /(^|\.)((facebook|fb)\.com|fb\.watch)$/i.test(location.hostname || '');
+  const instagramHost = /(^|\.)(instagram\.com|instagr\.am)$/i.test(location.hostname || '');
+  const xHost = /(^|\.)(x\.com|twitter\.com)$/i.test(location.hostname || '');
   let cleanupQueued = false;
   let hiddenAccessGate = false;
   const consentWords = /\b(cookie|cookies|consent|privacy|gdpr|ccpa|cmp|samtycke|kakor|integritet|personuppgift|godk(?:a|\u00e4)nn|acceptera|inst(?:a|\u00e4)llningar)\b/i;
-  const accessGateWords = /\b(see more on facebook|see more from|log in to facebook|log into facebook|log in|login|sign up|create new account|create account|join instagram|continue to instagram|open instagram|please wait for verification|verify you are human|human verification|turn on notifications|not now)\b|(?:visa mer p(?:a|\u00e5) facebook)|(?:logga in)|(?:skapa nytt konto)|(?:g(?:a|\u00e5) med i instagram)|(?:inte nu)/i;
+  const accessGateWords = /\b(see more on facebook|see more from|log in to facebook|log into facebook|log in|login|sign up|create new account|create account|join instagram|continue to instagram|open instagram|don't miss what's happening|people on x are the first to know|did someone say cookies|please wait for verification|verify you are human|human verification|turn on notifications|not now)\b|(?:visa mer p(?:a|\u00e5) facebook)|(?:logga in)|(?:skapa nytt konto)|(?:g(?:a|\u00e5) med i instagram)|(?:inte nu)/i;
+  const facebookGateWords = /\b(see more on facebook|log in to facebook|log into facebook|create new account|forgot account|email or phone|password)\b|(?:visa mer p(?:a|\u00e5) facebook)|(?:logga in)|(?:skapa nytt konto)/i;
+  const instagramGateWords = /\b(never miss a post|sign up for instagram|log in to instagram|join instagram|continue to instagram|open in instagram|view on instagram)\b/i;
+  const xGateWords = /\b(don't miss what's happening|people on x are the first to know|did someone say cookies|log in to x|sign up for x|see what's happening)\b/i;
   const vendorSelectors = [
     '#CybotCookiebotDialog',
     '#CookiebotWidget',
@@ -3277,6 +7945,36 @@ QString previewConsentSuppressionScript() {
     element.style.setProperty('pointer-events', 'none', 'important');
   };
 
+  const hideAccessGateShell = (element) => {
+    if (!(element instanceof HTMLElement)) {
+      return;
+    }
+    hiddenAccessGate = true;
+    let target = element;
+    const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+    for (let depth = 0; depth < 8; depth += 1) {
+      const parent = target.parentElement;
+      if (!(parent instanceof HTMLElement) || parent === document.body || parent === document.documentElement) {
+        break;
+      }
+      const rect = parent.getBoundingClientRect();
+      const area = Math.max(0, rect.width) * Math.max(0, rect.height);
+      if (area > viewportArea * 0.92) {
+        break;
+      }
+      target = parent;
+      const style = window.getComputedStyle(target);
+      const role = (target.getAttribute('role') || '').toLowerCase();
+      const zIndex = Number.parseInt(style ? style.zIndex : '', 10);
+      if ((style && (style.position === 'fixed' || style.position === 'sticky'))
+          || role === 'dialog' || role === 'alertdialog'
+          || (!Number.isNaN(zIndex) && zIndex >= 10)) {
+        break;
+      }
+    }
+    hideElement(target);
+  };
+
   const installStyle = () => {
     if (document.getElementById(styleId)) {
       return;
@@ -3323,6 +8021,92 @@ QString previewConsentSuppressionScript() {
       element.getAttribute('title') || '',
       text
     ].join(' ');
+  };
+
+  const facebookLoginControlSelector = 'input[type="password"], input[type="email"], input[name="pass"], input[name="email"], form[action*="login" i]';
+
+  const facebookAccessGateShell = (element) => {
+    let target = element;
+    const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+    for (let depth = 0; depth < 10; depth += 1) {
+      const parent = target.parentElement;
+      if (!(parent instanceof HTMLElement) || parent === document.body || parent === document.documentElement) {
+        break;
+      }
+      const rect = parent.getBoundingClientRect();
+      const area = Math.max(0, rect.width) * Math.max(0, rect.height);
+      if (area > viewportArea * 0.86) {
+        break;
+      }
+      const haystack = elementText(parent);
+      const hasGateText = facebookGateWords.test(haystack);
+      const hasLoginControls = !!parent.querySelector(facebookLoginControlSelector);
+      const hasSmallDismiss = !!parent.querySelector('[aria-label*="Close" i], [aria-label*="Dismiss" i], [aria-label*="St\u00e4ng" i]');
+      if (!hasGateText && !hasLoginControls && !hasSmallDismiss) {
+        break;
+      }
+      target = parent;
+    }
+    return target;
+  };
+
+  const hideFacebookAccessGate = (element) => {
+    if (!facebookHost || !(element instanceof HTMLElement)) {
+      return;
+    }
+    hiddenAccessGate = true;
+    hideElement(facebookAccessGateShell(element));
+  };
+
+  const cleanupFacebookAccessGates = () => {
+    if (!facebookHost) {
+      return;
+    }
+    try {
+      document.querySelectorAll('[aria-label*="Close" i], [aria-label*="Dismiss" i], [aria-label*="St\u00e4ng" i], [role="button"]').forEach((button) => {
+        if (!(button instanceof HTMLElement)) {
+          return;
+        }
+        const rect = button.getBoundingClientRect();
+        if (rect.width > 96 || rect.height > 96) {
+          return;
+        }
+        const label = elementText(button);
+        if (!/\b(close|dismiss|st(?:a|\u00e4)ng)\b|^[x\u00d7]$/i.test(label.trim())) {
+          return;
+        }
+        try {
+          button.click();
+          hiddenAccessGate = true;
+        } catch (e) {}
+      });
+    } catch (e) {}
+
+    try {
+      document.querySelectorAll('body *').forEach((element) => {
+        if (!(element instanceof HTMLElement)) {
+          return;
+        }
+        if (element.getAttribute('data-mumble-preview-hidden-consent') === '1') {
+          return;
+        }
+        const rect = element.getBoundingClientRect();
+        if (rect.width < 80 || rect.height < 32) {
+          return;
+        }
+        const haystack = elementText(element);
+        const hasGateText = facebookGateWords.test(haystack);
+        const hasLoginControls = !!element.querySelector(facebookLoginControlSelector);
+        if (!hasGateText && !hasLoginControls) {
+          return;
+        }
+        const isTopChrome = rect.top <= 4 && rect.height <= 90 && rect.width >= window.innerWidth * 0.45;
+        if (isTopChrome && !hasGateText) {
+          return;
+        }
+        hideFacebookAccessGate(element);
+      });
+    } catch (e) {}
   };
 
   const isLikelyConsentOverlay = (element) => {
@@ -3479,6 +8263,8 @@ QString previewConsentSuppressionScript() {
       });
     } catch (e) {}
   };
+)JS")
+		+ QString::fromLatin1(R"JS(
 
   const cleanup = () => {
     installStyle();
@@ -3491,6 +8277,7 @@ QString previewConsentSuppressionScript() {
         hideElement(element);
       });
     } catch (e) {}
+    cleanupFacebookAccessGates();
 
     if (document.documentElement) {
       document.documentElement.style.setProperty('overflow', 'auto', 'important');
@@ -3502,11 +8289,15 @@ QString previewConsentSuppressionScript() {
 
     try {
       document.querySelectorAll('body *').forEach((element) => {
-        if (isLikelyConsentOverlay(element)) {
+        if (facebookHost && facebookGateWords.test(elementText(element))) {
+          hideFacebookAccessGate(element);
+        } else if ((instagramHost && instagramGateWords.test(elementText(element)))
+            || (xHost && xGateWords.test(elementText(element)))) {
+          hideAccessGateShell(element);
+        } else if (isLikelyConsentOverlay(element)) {
           hideElement(element);
         } else if (isLikelyAccessGateOverlay(element)) {
-          hiddenAccessGate = true;
-          hideElement(element);
+          hideAccessGateShell(element);
         }
       });
     } catch (e) {}
@@ -3586,8 +8377,16 @@ QString previewSnapshotMediaProbeScript() {
 	return QString::fromLatin1(R"JS(
 (() => {
   const candidates = [];
+  const imageCandidates = [];
+  let imageCandidateOrder = 0;
   const sourceHost = String(location.hostname || '').toLowerCase();
-  const socialVideoPage = /(^|\.)((facebook|fb)\.com|fb\.watch|instagram\.com|instagr\.am|reddit\.com|redd\.it|v\.redd\.it)$/i.test(sourceHost);
+  const socialVideoPage = /(^|\.)((facebook|fb)\.com|fb\.watch|instagram\.com|instagr\.am|reddit\.com|redd\.it|v\.redd\.it|x\.com|twitter\.com)$/i.test(sourceHost);
+  const instagramVideoPage = /(^|\.)(instagram\.com|instagr\.am)$/i.test(sourceHost);
+  const facebookVideoPage = /(^|\.)((facebook|fb)\.com|fb\.watch)$/i.test(sourceHost);
+  const metaVideoPage = instagramVideoPage || facebookVideoPage;
+  const instagramPathSegments = String(location.pathname || '').split('/').filter(Boolean).map((segment) => segment.toLowerCase());
+  const instagramPostPage = instagramVideoPage && instagramPathSegments[0] === 'p';
+  const xPostPage = /(^|\.)(x\.com|twitter\.com)$/i.test(sourceHost);
   const decodeEscapes = (value) => String(value || '')
     .replace(/\\\//g, '/')
     .replace(/\\u0025/ig, '%')
@@ -3613,7 +8412,8 @@ QString previewSnapshotMediaProbeScript() {
     .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
     .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
+    .replace(/&gt;/g, '>')
+    .replace(/\\([<>=?:,&\/'"-])/g, '$1');
   const cleanUrl = (value) => {
     let url = decodeEscapes(value).trim();
     if (!url || /^blob:/i.test(url) || /^data:/i.test(url)) {
@@ -3625,18 +8425,217 @@ QString previewSnapshotMediaProbeScript() {
       return '';
     }
   };
+  const safeDecodeURIComponent = (value) => {
+    try {
+      return decodeURIComponent(String(value || ''));
+    } catch (e) {
+      return String(value || '');
+    }
+  };
+  const normalizedXPathSegments = (pathname) => String(pathname || '').split('/').filter(Boolean).map(safeDecodeURIComponent);
+  const facebookPathSegments = normalizedXPathSegments(location.pathname);
+  const facebookTargetVideoId = (() => {
+    if (!facebookVideoPage) {
+      return '';
+    }
+    const lowerSegments = facebookPathSegments.map((segment) => String(segment || '').toLowerCase());
+    for (let i = 0; i < lowerSegments.length - 1; i += 1) {
+      if (lowerSegments[i] === 'reel' || lowerSegments[i] === 'reels' || lowerSegments[i] === 'videos') {
+        const candidate = String(facebookPathSegments[i + 1] || '').match(/\d{5,}/);
+        if (candidate) {
+          return candidate[0];
+        }
+      }
+    }
+    try {
+      const queryCandidate = new URLSearchParams(location.search || '').get('v');
+      const match = String(queryCandidate || '').match(/\d{5,}/);
+      return match ? match[0] : '';
+    } catch (e) {
+      return '';
+    }
+  })();
+  const xPathSegments = normalizedXPathSegments(location.pathname);
+  const xStatusIndex = xPostPage ? xPathSegments.findIndex((segment) => /^statuses?$/i.test(segment)) : -1;
+  const xStatusId = xStatusIndex >= 0 ? String(xPathSegments[xStatusIndex + 1] || '') : '';
+  const xHandle = xStatusIndex > 0 ? String(xPathSegments[xStatusIndex - 1] || '').replace(/^@+/, '').toLowerCase() : '';
+  const normalizedXHost = (host) => String(host || '').toLowerCase().replace(/^(?:www\.|m\.|mobile\.)/, '');
+  const xPostHrefMatches = (href) => {
+    if (!xStatusId) {
+      return false;
+    }
+    try {
+      const target = new URL(decodeEscapes(href), document.baseURI);
+      const host = normalizedXHost(target.hostname);
+      if (host !== 'x.com' && host !== 'twitter.com') {
+        return false;
+      }
+      const segments = normalizedXPathSegments(target.pathname);
+      for (let i = 0; i < segments.length - 1; i += 1) {
+        if (!/^statuses?$/i.test(segments[i]) || String(segments[i + 1] || '') !== xStatusId) {
+          continue;
+        }
+        const handle = i > 0 ? String(segments[i - 1] || '').replace(/^@+/, '').toLowerCase() : '';
+        return !xHandle || !handle || handle === 'i' || handle === xHandle;
+      }
+    } catch (e) {}
+    return false;
+  };
+  const xTargetPostRoots = [];
+  const addXTargetPostRoot = (element) => {
+    if (!element || xTargetPostRoots.includes(element)) {
+      return;
+    }
+    xTargetPostRoots.push(element);
+  };
+  const xElementHasTargetPostLink = (element) => {
+    if (!element) {
+      return false;
+    }
+    if (element.matches && element.matches('a[href]') && xPostHrefMatches(element.getAttribute('href'))) {
+      return true;
+    }
+    if (!element.querySelectorAll) {
+      return false;
+    }
+    return Array.prototype.some.call(element.querySelectorAll('a[href]'), (anchor) => xPostHrefMatches(anchor.getAttribute('href')));
+  };
+  try {
+    if (xPostPage && xStatusId) {
+      document.querySelectorAll('article, [data-testid="tweet"]').forEach((root) => {
+        if (xElementHasTargetPostLink(root)) {
+          addXTargetPostRoot(root);
+        }
+      });
+      document.querySelectorAll('a[href]').forEach((anchor) => {
+        if (xPostHrefMatches(anchor.getAttribute('href'))) {
+          addXTargetPostRoot(anchor.closest('article, [data-testid="tweet"]'));
+        }
+      });
+    }
+  } catch (e) {}
+  const isInXTargetPost = (element) => {
+    if (!xPostPage) {
+      return true;
+    }
+    if (!element || !xTargetPostRoots.length) {
+      return false;
+    }
+    return xTargetPostRoots.some((root) => root === element || root.contains(element));
+  };
+  const scopedDocumentHtml = () => {
+    if (xPostPage) {
+      return xTargetPostRoots.map((root) => root.outerHTML || '').join('\n').slice(0, 2500000);
+    }
+    return document.documentElement ? document.documentElement.innerHTML.slice(0, 2500000) : '';
+  };
+  const urlPath = (url) => {
+    try {
+      return new URL(url).pathname.toLowerCase();
+    } catch (e) {
+      return String(url || '').toLowerCase();
+    }
+  };
+  const instagramMediaHost = (host) => /(^|\.)(cdninstagram\.com|fbcdn\.net|fbsbx\.com)$/i.test(String(host || ''));
+  const looksAudioOnlyUrl = (url) => {
+    if (instagramMediaLooksAudioOnly(url)) {
+      return true;
+    }
+    return /(^|[._\/-])(?:audio|audioclip)([._\/-]|$)|dash[_-]?audio|audio[_-]?dash|_audio_/i.test(urlPath(url));
+  };
+  const looksFragmentedVideoUrl = (url) => {
+    const value = String(url || '');
+    const path = urlPath(value);
+    return /(?:[?&](?:bytestart|byteend|range)=)|(?:^|[._\/-])dash(?:[._\/-]|$)|dash[_-]?init|\/m4s\//i.test(value)
+      || /(?:^|[._\/-])(?:init|segment|chunk)(?:[._\/-]|$)/i.test(path);
+  };
+  const decodeBase64Url = (value) => {
+    try {
+      let normalized = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
+      while (normalized.length % 4) {
+        normalized += '=';
+      }
+      return atob(normalized);
+    } catch (e) {
+      return '';
+    }
+  };
+  const instagramEncodingTag = (url) => {
+    try {
+      return decodeBase64Url(new URL(url).searchParams.get('efg') || '');
+    } catch (e) {
+      return '';
+    }
+  };
+  const instagramEncodingInfo = (url) => {
+    const tag = instagramEncodingTag(url);
+    let object = {};
+    try {
+      object = JSON.parse(tag);
+    } catch (e) {}
+    const vencodeTag = String(object.vencode_tag || '');
+    const bitrate = Number(object.bitrate) || 0;
+    const videoId = String(object.video_id || object.videoId || '');
+    return { tag, vencodeTag, bitrate, videoId };
+  };
+  const facebookMediaMatchesTargetVideo = (url) => {
+    if (!facebookVideoPage || !facebookTargetVideoId) {
+      return true;
+    }
+    const info = instagramEncodingInfo(url);
+    return !info.videoId || info.videoId === facebookTargetVideoId;
+  };
+  const instagramStandaloneMediaUrl = (url) => {
+    if (!metaVideoPage) {
+      return url;
+    }
+    try {
+      const target = new URL(url);
+      if (!instagramMediaHost(target.hostname)) {
+        return url;
+      }
+      target.searchParams.delete('bytestart');
+      target.searchParams.delete('byteend');
+      target.searchParams.delete('range');
+      return target.href;
+    } catch (e) {
+      return url;
+    }
+  };
+  const instagramMediaLooksAudioOnly = (url) => {
+    if (!metaVideoPage) {
+      return false;
+    }
+    const info = instagramEncodingInfo(url);
+    return /\baudio\b|heaac|audioclip|dash[_-]?(?:ln_)?[^"']*audio/i.test(`${info.tag} ${info.vencodeTag}`);
+  };
+  const instagramMediaScoreBoost = (url) => {
+    if (!metaVideoPage) {
+      return 0;
+    }
+    return Math.min(18000, Math.max(0, instagramEncodingInfo(url).bitrate / 80));
+  };
+  const instagramImageSignals = (url) => {
+    const tag = instagramEncodingTag(url).toLowerCase();
+    return {
+      carousel: instagramPostPage && tag.includes('carousel_item'),
+      primary: /(?:carousel_item|regular_photo|feed|clips|video_thumbnail)/i.test(tag)
+    };
+  };
+  const looksUnsupportedInstagramVideoUrl = (url) => {
+    const value = String(url || '').toLowerCase();
+    const info = instagramEncodingInfo(url);
+    if (instagramMediaLooksAudioOnly(url)) {
+      return true;
+    }
+    return /(?:bytestart|byteend|range|hevc|h265|hdr|av01)/i.test(`${value} ${info.tag} ${info.vencodeTag}`);
+  };
   const mimeForUrl = (url, fallback) => {
     const hinted = String(fallback || '').split(';')[0].trim().toLowerCase();
     if (hinted === 'image/gif' || hinted === 'video/mp4' || hinted === 'video/webm') {
       return hinted;
     }
-    const path = (() => {
-      try {
-        return new URL(url).pathname.toLowerCase();
-      } catch (e) {
-        return String(url || '').toLowerCase();
-      }
-    })();
+    const path = urlPath(url);
     if (path.endsWith('.gif')) {
       return 'image/gif';
     }
@@ -3650,7 +8649,8 @@ QString previewSnapshotMediaProbeScript() {
   };
   const audioCandidates = [];
   const addCandidate = (rawUrl, rawMime, score) => {
-    const url = cleanUrl(rawUrl);
+    let url = cleanUrl(rawUrl);
+    url = instagramStandaloneMediaUrl(url);
     if (!/^https:\/\//i.test(url)) {
       return;
     }
@@ -3661,21 +8661,71 @@ QString previewSnapshotMediaProbeScript() {
     if (socialVideoPage && mime === 'image/gif') {
       return;
     }
+    if (/^video\//i.test(mime) && !facebookMediaMatchesTargetVideo(url)) {
+      return;
+    }
+    if (/^video\//i.test(mime) && looksAudioOnlyUrl(url)) {
+      return;
+    }
+    if (metaVideoPage && /^video\//i.test(mime)
+      && (looksFragmentedVideoUrl(url) || looksUnsupportedInstagramVideoUrl(url))) {
+      return;
+    }
     const videoBoost = /^video\//i.test(mime) ? 5000 : 0;
-    candidates.push({ url, mime, score: (Number(score) || 0) + videoBoost });
+    candidates.push({ url, mime, score: (Number(score) || 0) + videoBoost + instagramMediaScoreBoost(url) });
+  };
+  const imageMimeForUrl = (url, fallback) => {
+    const hinted = String(fallback || '').split(';')[0].trim().toLowerCase();
+    if (hinted === 'image/jpeg' || hinted === 'image/jpg' || hinted === 'image/png' || hinted === 'image/webp') {
+      return hinted === 'image/jpg' ? 'image/jpeg' : hinted;
+    }
+    const path = urlPath(url);
+    if (path.endsWith('.jpg') || path.endsWith('.jpeg')) {
+      return 'image/jpeg';
+    }
+    if (path.endsWith('.png')) {
+      return 'image/png';
+    }
+    if (path.endsWith('.webp')) {
+      return 'image/webp';
+    }
+    return '';
+  };
+  const addImageCandidate = (rawUrl, rawMime, score, minArea, viewportArea) => {
+    const url = cleanUrl(rawUrl);
+    if (!/^https:\/\//i.test(url)) {
+      return;
+    }
+    const mime = imageMimeForUrl(url, rawMime);
+    if (!mime) {
+      return;
+    }
+    const area = Number(minArea) || 0;
+    if (area > 0 && area < 4096) {
+      return;
+    }
+    const instagramSignals = instagramVideoPage ? instagramImageSignals(url) : { carousel: false, primary: false };
+    imageCandidates.push({
+      url,
+      mime,
+      score: Number(score) || 0,
+      kind: 'image',
+      order: imageCandidateOrder++,
+      area,
+      viewportArea: Number(viewportArea) || 0,
+      instagramCarousel: instagramSignals.carousel,
+      instagramPrimary: instagramSignals.primary
+    });
   };
   const audioMimeForUrl = (url, fallback) => {
     const hinted = String(fallback || '').split(';')[0].trim().toLowerCase();
     if (hinted === 'audio/mp4' || hinted === 'audio/aac' || hinted === 'audio/mpeg') {
       return hinted;
     }
-    const path = (() => {
-      try {
-        return new URL(url).pathname.toLowerCase();
-      } catch (e) {
-        return String(url || '').toLowerCase();
-      }
-    })();
+    const path = urlPath(url);
+    if (instagramMediaLooksAudioOnly(url) && path.endsWith('.mp4')) {
+      return 'audio/mp4';
+    }
     if (path.endsWith('.m4a') || path.endsWith('.aac') || path.includes('_audio_')) {
       return 'audio/mp4';
     }
@@ -3685,15 +8735,19 @@ QString previewSnapshotMediaProbeScript() {
     return hinted && /^audio\//i.test(hinted) ? hinted : '';
   };
   const addAudioCandidate = (rawUrl, rawMime, score) => {
-    const url = cleanUrl(rawUrl);
+    let url = cleanUrl(rawUrl);
+    url = instagramStandaloneMediaUrl(url);
     if (!/^https:\/\//i.test(url)) {
+      return;
+    }
+    if (!facebookMediaMatchesTargetVideo(url)) {
       return;
     }
     const mime = audioMimeForUrl(url, rawMime);
     if (mime !== 'audio/mp4' && mime !== 'audio/aac' && mime !== 'audio/mpeg') {
       return;
     }
-    audioCandidates.push({ url, mime, score: Number(score) || 0 });
+    audioCandidates.push({ url, mime, score: (Number(score) || 0) + instagramMediaScoreBoost(url) });
   };
   const addDashAudioCandidates = (rawText, score) => {
     const text = decodeEscapes(rawText);
@@ -3736,20 +8790,66 @@ QString previewSnapshotMediaProbeScript() {
       } catch (e) {}
     });
   };
+)JS")
+		   + QString::fromLatin1(R"JS(
 
   try {
     document.querySelectorAll('video').forEach((video) => {
+      if (!isInXTargetPost(video)) {
+        return;
+      }
       const rect = video.getBoundingClientRect();
       const visibleScore = Math.max(0, rect.width) * Math.max(0, rect.height);
-      addCandidate(video.currentSrc || video.src || video.getAttribute('src'), video.type, visibleScore + 20000);
+      const intrinsicScore = Math.max(0, video.videoWidth || 0) * Math.max(0, video.videoHeight || 0);
+      if (visibleScore > 1 || intrinsicScore > 1) {
+        addCandidate(video.currentSrc || video.src || video.getAttribute('src'), video.type, visibleScore + Math.min(24000, intrinsicScore / 80) + 20000);
+      }
       video.querySelectorAll('source[src]').forEach((source) => {
-        addCandidate(source.currentSrc || source.src || source.getAttribute('src'), source.type, visibleScore + 15000);
+        if (visibleScore > 1 || intrinsicScore > 1) {
+          addCandidate(source.currentSrc || source.src || source.getAttribute('src'), source.type, visibleScore + Math.min(20000, intrinsicScore / 100) + 15000);
+        }
       });
     });
   } catch (e) {}
 
   try {
+    const srcFromSrcset = (srcset) => {
+      const parts = String(srcset || '').split(',').map((part) => part.trim()).filter(Boolean);
+      if (!parts.length) {
+        return '';
+      }
+      return parts[parts.length - 1].split(/\s+/)[0] || '';
+    };
+    document.querySelectorAll('img').forEach((image) => {
+      if (!isInXTargetPost(image)) {
+        return;
+      }
+      const rect = image.getBoundingClientRect();
+      const visibleScore = Math.max(0, rect.width) * Math.max(0, rect.height);
+      const viewportWidth = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 1);
+      const viewportHeight = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
+      const viewportScore = Math.max(0, Math.min(rect.right, viewportWidth) - Math.max(rect.left, 0))
+        * Math.max(0, Math.min(rect.bottom, viewportHeight) - Math.max(rect.top, 0));
+      const intrinsicScore = Math.max(0, image.naturalWidth || 0) * Math.max(0, image.naturalHeight || 0);
+      const area = Math.max(visibleScore, intrinsicScore);
+      addImageCandidate(image.currentSrc || image.src || image.getAttribute('src') || srcFromSrcset(image.getAttribute('srcset')), image.getAttribute('type'), visibleScore + Math.min(20000, intrinsicScore / 120) + 12000, area, viewportScore);
+    });
+    document.querySelectorAll('source[srcset]').forEach((source) => {
+      if (!isInXTargetPost(source)) {
+        return;
+      }
+      addImageCandidate(srcFromSrcset(source.getAttribute('srcset')), source.getAttribute('type'), 7000, 4096);
+    });
+    document.querySelectorAll('meta[property="og:image" i], meta[property="og:image:url" i], meta[property="og:image:secure_url" i], meta[name="twitter:image" i], meta[name="twitter:image:src" i]').forEach((meta) => {
+      addImageCandidate(meta.getAttribute('content'), '', 9000, 4096);
+    });
+  } catch (e) {}
+
+  try {
     document.querySelectorAll('audio').forEach((audio) => {
+      if (!isInXTargetPost(audio)) {
+        return;
+      }
       addAudioCandidate(audio.currentSrc || audio.src || audio.getAttribute('src'), audio.type, 20000);
       audio.querySelectorAll('source[src]').forEach((source) => {
         addAudioCandidate(source.currentSrc || source.src || source.getAttribute('src'), source.type, 15000);
@@ -3758,20 +8858,48 @@ QString previewSnapshotMediaProbeScript() {
   } catch (e) {}
 
   try {
-    document.querySelectorAll('source[src], [data-video-url], [data-audio-url], [data-audio-src], [data-src], [data-href]').forEach((element) => {
-      addCandidate(element.getAttribute('src') || element.getAttribute('data-video-url') || element.getAttribute('data-src') || element.getAttribute('data-href'), element.getAttribute('type'), 8000);
-      addAudioCandidate(element.getAttribute('src') || element.getAttribute('data-audio-url') || element.getAttribute('data-audio-src') || element.getAttribute('data-src') || element.getAttribute('data-href'), element.getAttribute('type'), 8000);
+    document.querySelectorAll('source[src], a[href], [data-video-url], [data-audio-url], [data-audio-src], [data-src], [data-href]').forEach((element) => {
+      if (!isInXTargetPost(element)) {
+        return;
+      }
+      const candidateUrl = element.getAttribute('src') || element.getAttribute('href') || element.getAttribute('data-video-url') || element.getAttribute('data-src') || element.getAttribute('data-href');
+      const audioUrl = element.getAttribute('src') || element.getAttribute('href') || element.getAttribute('data-audio-url') || element.getAttribute('data-audio-src') || element.getAttribute('data-src') || element.getAttribute('data-href');
+      addCandidate(candidateUrl, element.getAttribute('type'), 8000);
+      addAudioCandidate(audioUrl, element.getAttribute('type'), 8000);
     });
   } catch (e) {}
 
   try {
-    const html = document.documentElement ? document.documentElement.innerHTML.slice(0, 2500000) : '';
+    if (!xPostPage && performance && typeof performance.getEntriesByType === 'function') {
+      performance.getEntriesByType('resource').forEach((entry) => {
+        const url = entry && entry.name;
+        const sizeScore = Math.min(16000, (Number(entry && (entry.transferSize || entry.encodedBodySize || entry.decodedBodySize)) || 0) / 512);
+        addCandidate(url, '', 2500 + sizeScore);
+        addImageCandidate(url, '', 1800 + sizeScore, 0);
+        if (/(^|[._\/-])audio([._\/-]|$)|dash[_-]?audio|audioclip|_audio_/i.test(String(url || ''))
+            || (metaVideoPage && instagramMediaLooksAudioOnly(url))) {
+          addAudioCandidate(url, 'audio/mp4', 4500);
+        }
+      });
+    }
+  } catch (e) {}
+
+  try {
+    const html = scopedDocumentHtml();
     const normalizedHtml = decodeEscapes(html);
-    const pattern = /https?:\/\/[^"'<>\\\s]+?\.(?:mp4|m4v|webm|gifv|gif)(?:\?[^"'<>\\\s]*)?/ig;
-    const audioPattern = /https?:\/\/[^"'<>\\\s]+?\.(?:m4a|aac|mp3)(?:\?[^"'<>\\\s]*)?/ig;
+    const pattern = /(?:https?:)?\/\/[^"'<>\\\s]+?\.(?:mp4|m4v|webm|gifv|gif)(?:\?[^"'<>\\\s]*)?/ig;
+    const imagePattern = /(?:https?:)?\/\/[^"'<>\\\s]+?\.(?:jpe?g|png|webp)(?:\?[^"'<>\\\s]*)?/ig;
+    const audioPattern = /(?:https?:)?\/\/[^"'<>\\\s]+?\.(?:m4a|aac|mp3)(?:\?[^"'<>\\\s]*)?/ig;
     let match;
     while ((match = pattern.exec(normalizedHtml)) && candidates.length < 32) {
       addCandidate(match[0], '', 1000);
+    }
+    const videoUrlKeyPattern = /(?:video_url|playable_url|playable_url_quality_hd)["']?\s*[:=]\s*["']((?:https?:)?(?:\\?\/\\?\/|\/\/)[^"']{20,5000})["']/ig;
+    while ((match = videoUrlKeyPattern.exec(normalizedHtml)) && candidates.length < 48) {
+      addCandidate(match[1], 'video/mp4', 18000);
+    }
+    while ((match = imagePattern.exec(normalizedHtml)) && imageCandidates.length < 48) {
+      addImageCandidate(match[0], '', 900, 0);
     }
     while ((match = audioPattern.exec(normalizedHtml)) && audioCandidates.length < 32) {
       addAudioCandidate(match[0], '', 1000);
@@ -3780,13 +8908,84 @@ QString previewSnapshotMediaProbeScript() {
     while ((match = audioKeyPattern.exec(normalizedHtml)) && audioCandidates.length < 48) {
       addAudioCandidate(match[1], 'audio/mp4', 4000);
     }
+    const rawDashManifestPattern = /["']dash_manifest["']\s*:\s*["']((?:\\.|[^"'\\]){20,1200000})["']/ig;
+    while ((match = rawDashManifestPattern.exec(html)) && audioCandidates.length < 64) {
+      addDashAudioCandidates(match[1], 9000);
+    }
+    const nearbyAudioMp4Pattern = /(?:audio|dash_audio|audio_dash|audioclip)[\s\S]{0,1200}?(https?:\/\/[^"'<>\\\s]+?\.mp4(?:\?[^"'<>\\\s]*)?)/ig;
+    while ((match = nearbyAudioMp4Pattern.exec(normalizedHtml)) && audioCandidates.length < 64) {
+      addAudioCandidate(match[1], 'audio/mp4', 5000);
+    }
     addDashAudioCandidates(normalizedHtml, 6000);
   } catch (e) {}
 
   candidates.sort((a, b) => b.score - a.score);
+  imageCandidates.sort((a, b) => b.score - a.score);
   audioCandidates.sort((a, b) => b.score - a.score);
-  const result = candidates[0] || {};
-  if (audioCandidates[0]) {
+  const result = candidates[0] || imageCandidates[0] || {};
+  const imageItemKey = (item) => {
+    try {
+      const url = new URL(item.url);
+      return url.searchParams.get('ig_cache_key') || `${url.hostname}${url.pathname}`;
+    } catch (e) {
+      return String(item && item.url || '');
+    }
+  };
+  const uniqueImageItems = (items) => {
+    const seen = new Set();
+    const output = [];
+    items.forEach((item) => {
+      if (!item || !item.url) {
+        return;
+      }
+      const key = imageItemKey(item);
+      if (!key || seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      output.push({ url: item.url, mime: item.mime, kind: 'image' });
+    });
+    return output;
+  };
+  const instagramVideoPosterItem = () => {
+    if (!instagramVideoPage || instagramPostPage) {
+      return null;
+    }
+    const primary = imageCandidates
+      .filter((item) => item.instagramPrimary && (item.area >= 4096 || item.viewportArea >= 4096))
+      .slice()
+      .sort((a, b) => {
+        const aViewport = Number(a.viewportArea) || 0;
+        const bViewport = Number(b.viewportArea) || 0;
+        if (bViewport !== aViewport) {
+          return bViewport - aViewport;
+        }
+        return b.score - a.score;
+      });
+    const fallback = imageCandidates
+      .filter((item) => item.area >= 4096 || item.viewportArea >= 4096)
+      .slice()
+      .sort((a, b) => b.score - a.score);
+    return primary[0] || fallback[0] || null;
+  };
+  const instagramPoster = instagramVideoPosterItem();
+  if (instagramPoster && candidates[0] && /^video\//i.test(candidates[0].mime || '')) {
+    result.posterUrl = instagramPoster.url;
+    result.posterMime = instagramPoster.mime;
+  }
+  if (instagramPostPage) {
+    const carouselSource = imageCandidates
+      .filter((item) => item.instagramCarousel && item.viewportArea >= 4096)
+      .sort((a, b) => a.order - b.order);
+    const fallbackSource = imageCandidates
+      .filter((item) => item.instagramPrimary && item.viewportArea >= 4096)
+      .sort((a, b) => a.order - b.order);
+    const mediaItems = uniqueImageItems(carouselSource.length > 1 ? carouselSource : fallbackSource).slice(0, 10);
+    if (mediaItems.length > 1) {
+      result.items = mediaItems;
+    }
+  }
+  if (candidates[0] && audioCandidates[0]) {
     result.audioUrl = audioCandidates[0].url;
     result.audioMime = audioCandidates[0].mime;
   }
@@ -3798,7 +8997,8 @@ QString previewSnapshotMediaProbeScript() {
 class PersistentChatPreviewSnapshotRenderer final : public QObject {
 public:
 	using ResultCallback = std::function< void(const QString &, const QImage &, bool, const QString &, const QString &,
-											   const QString &, const QString &) >;
+											   const QString &, const QString &, const QVariantList &, const QString &,
+											   const QString &) >;
 
 	explicit PersistentChatPreviewSnapshotRenderer(QObject *parent = nullptr) : QObject(parent) {
 		m_timeoutTimer = new QTimer(this);
@@ -3855,7 +9055,7 @@ private:
 	static constexpr int kViewportWidth         = 960;
 	static constexpr int kViewportHeight        = 720;
 	static constexpr int kCaptureRetryDelayMsec = 250;
-	static constexpr int kMaxCaptureAttempts    = 2;
+	static constexpr int kMaxCaptureAttempts    = 4;
 
 	void ensureView() {
 		if (m_view) {
@@ -3985,18 +9185,34 @@ private:
 									  const QVariantMap media = mediaResult.toMap();
 									  const QString mediaUrl  = media.value(QStringLiteral("url")).toString().trimmed();
 									  const QString mediaMime = media.value(QStringLiteral("mime")).toString().trimmed();
+									  const QVariantList mediaItems =
+										  media.value(QStringLiteral("items")).toList();
 									  const QString mediaAudioUrl =
 										  media.value(QStringLiteral("audioUrl")).toString().trimmed();
 									  const QString mediaAudioMime =
 										  media.value(QStringLiteral("audioMime")).toString().trimmed();
+									  const QString posterUrl =
+										  media.value(QStringLiteral("posterUrl")).toString().trimmed();
+									  const QString posterMime =
+										  media.value(QStringLiteral("posterMime")).toString().trimmed();
+									  if (!mediaUrl.isEmpty() && mediaMime.startsWith(QLatin1String("video/"))
+										  && mediaAudioUrl.isEmpty()
+										  && isSocialPreviewMediaProbeUrl(m_current.url)
+										  && m_captureAttempts + 1 < kMaxCaptureAttempts) {
+										  ++m_captureAttempts;
+										  m_settleTimer->start(kCaptureRetryDelayMsec);
+										  return;
+									  }
 									  const QPixmap pixmap    = m_view->grab();
 									  const QImage image      = pixmap.toImage();
 									  if (!image.isNull() && image.width() > 1 && image.height() > 1) {
-										  finishCurrent(true, image, mediaUrl, mediaMime, mediaAudioUrl, mediaAudioMime);
+										  finishCurrent(true, image, mediaUrl, mediaMime, mediaAudioUrl, mediaAudioMime,
+														mediaItems, posterUrl, posterMime);
 										  return;
 									  }
 									  if (!mediaUrl.isEmpty()) {
-										  finishCurrent(true, QImage(), mediaUrl, mediaMime, mediaAudioUrl, mediaAudioMime);
+										  finishCurrent(true, QImage(), mediaUrl, mediaMime, mediaAudioUrl,
+														mediaAudioMime, mediaItems, posterUrl, posterMime);
 										  return;
 									  }
 
@@ -4013,7 +9229,8 @@ private:
 
 	void finishCurrent(bool success, const QImage &image, const QString &mediaUrl = QString(),
 					   const QString &mediaMime = QString(), const QString &mediaAudioUrl = QString(),
-					   const QString &mediaAudioMime = QString()) {
+					   const QString &mediaAudioMime = QString(), const QVariantList &mediaItems = QVariantList(),
+					   const QString &posterUrl = QString(), const QString &posterMime = QString()) {
 		if (!m_busy) {
 			return;
 		}
@@ -4033,7 +9250,8 @@ private:
 		}
 
 		if (m_resultCallback) {
-			m_resultCallback(previewKey, image, success, mediaUrl, mediaMime, mediaAudioUrl, mediaAudioMime);
+			m_resultCallback(previewKey, image, success, mediaUrl, mediaMime, mediaAudioUrl, mediaAudioMime, mediaItems,
+							 posterUrl, posterMime);
 		}
 
 		QTimer::singleShot(0, this, [this]() { startNextIfIdle(); });
@@ -4152,6 +9370,50 @@ QString persistentChatThumbnailHtml(const QString &previewKey, const QImage &ima
 
 QString decodedPreviewText(const QString &text) {
 	return QTextDocumentFragment::fromHtml(text).toPlainText().simplified();
+}
+
+QString previewHtmlCharsetFromContentType(const QString &contentType) {
+	static const QRegularExpression s_charsetPattern(
+		QLatin1String("charset\\s*=\\s*['\"]?([^;\\s'\">]+)"), QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_charsetPattern.match(contentType);
+	return match.hasMatch() ? match.captured(1).trimmed().toLower() : QString();
+}
+
+QString previewHtmlCharsetFromBytes(const QByteArray &bytes) {
+	const QString head = QString::fromLatin1(bytes.left(4096)).toLower();
+	static const QRegularExpression s_metaCharsetPattern(
+		QLatin1String("<meta\\b[^>]*(?:charset\\s*=\\s*['\"]?([^\\s'\"/>;]+)|content\\s*=\\s*['\"][^'\"]*charset\\s*=\\s*([^\\s'\"/>;]+))"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_metaCharsetPattern.match(head);
+	if (!match.hasMatch()) {
+		return QString();
+	}
+	return (!match.captured(1).isEmpty() ? match.captured(1) : match.captured(2)).trimmed().toLower();
+}
+
+QString decodedPreviewHtml(const QByteArray &bytes, const QString &contentType) {
+	const QString contentTypeCharset = previewHtmlCharsetFromContentType(contentType);
+	const QString charset = !contentTypeCharset.isEmpty() ? contentTypeCharset : previewHtmlCharsetFromBytes(bytes);
+	if (charset == QLatin1String("iso-8859-1") || charset == QLatin1String("latin1")
+		|| charset == QLatin1String("latin-1")) {
+		return QString::fromLatin1(bytes);
+	}
+	return QString::fromUtf8(bytes);
+}
+
+QString xPostTextFromOEmbedHtml(const QString &html) {
+	static const QRegularExpression s_paragraphRegex(QLatin1String("<p\\b[^>]*>([\\s\\S]*?)</p>"),
+													 QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_paragraphRegex.match(html);
+	QString text = match.hasMatch() ? decodedPreviewText(match.captured(1)) : decodedPreviewText(html);
+	static const QRegularExpression s_mediaLinkRegex(
+		QLatin1String("\\s*(?:https?://t\\.co/\\S+|pic\\.twitter\\.com/\\S+)\\s*$"),
+		QRegularExpression::CaseInsensitiveOption);
+	while (s_mediaLinkRegex.match(text).hasMatch()) {
+		text.replace(s_mediaLinkRegex, QString());
+		text = text.trimmed();
+	}
+	return text;
 }
 
 QString trimmedPreviewText(QString text, int maxLength) {
@@ -4510,6 +9772,12 @@ MainWindow::MainWindow(QWidget *p)
 	qtReconnect->setSingleShot(true);
 	qtReconnect->setObjectName(QLatin1String("Reconnect"));
 
+	m_userTextureRequestTimer = new QTimer(this);
+	m_userTextureRequestTimer->setInterval(UserTextureRequestCoalesceMs);
+	m_userTextureRequestTimer->setSingleShot(true);
+	m_userTextureRequestTimer->setObjectName(QLatin1String("UserTextureRequest"));
+	connect(m_userTextureRequestTimer, &QTimer::timeout, this, &MainWindow::flushUserTextureRequests);
+
 	qmUser     = new QMenu(tr("&User"), this);
 	qmChannel  = new QMenu(tr("&Channel"), this);
 	qmListener = new QMenu(tr("&Listener"), this);
@@ -4602,6 +9870,362 @@ MainWindow::MainWindow(QWidget *p)
 	QObject::connect(this, &MainWindow::channelStateChanged, this, &MainWindow::on_channelStateChanged);
 
 	QAccessible::installFactory(AccessibleSlider::semanticSliderFactory);
+}
+
+bool MainWindow::normalizeUserTextureForDisplay(ClientUser *user, bool clearHashOnFailure) {
+	if (!user || user->qbaTexture.isEmpty()) {
+		return false;
+	}
+	if (!user->qbaTextureFormat.isEmpty()) {
+		return true;
+	}
+
+	bool valid              = true;
+	QByteArray displayBytes = user->qbaTexture;
+	QByteArray displayFormat;
+
+	if (user->qbaTexture.length() < static_cast< int >(sizeof(unsigned int))) {
+		valid = false;
+	} else if (qFromBigEndian< unsigned int >(reinterpret_cast< const unsigned char * >(user->qbaTexture.constData()))
+			   == UserTextureLegacyRgbaSize) {
+		const QByteArray uncompressed = qUncompress(user->qbaTexture);
+		if (uncompressed.length() != UserTextureLegacyRgbaSize) {
+			valid = false;
+		} else {
+			int width               = 0;
+			int height              = 0;
+			const unsigned int *ptr = reinterpret_cast< const unsigned int * >(uncompressed.constData());
+
+			for (int y = 0; y < UserTextureLegacyHeight; ++y) {
+				for (int x = 0; x < UserTextureLegacyWidth; ++x) {
+					if (ptr[y * UserTextureLegacyWidth + x] & 0xff000000) {
+						width  = std::max(width, x);
+						height = std::max(height, y);
+					}
+				}
+			}
+
+			if ((width == UserTextureLegacyWidth - 1) && (height == UserTextureLegacyHeight - 1)) {
+				width  = 0;
+				height = 0;
+				for (int y = 0; y < UserTextureLegacyHeight; ++y) {
+					for (int x = 0; x < UserTextureLegacyWidth; ++x) {
+						if (ptr[y * UserTextureLegacyWidth + x] & 0x00ffffff) {
+							width  = std::max(width, x);
+							height = std::max(height, y);
+						}
+					}
+				}
+			}
+
+			if (!width || !height) {
+				valid = false;
+			} else {
+				QImage img(width + 1, height + 1, QImage::Format_ARGB32);
+				img.fill(0);
+
+				QImage sourceImage(reinterpret_cast< const uchar * >(uncompressed.constData()), UserTextureLegacyWidth,
+								   UserTextureLegacyHeight, QImage::Format_ARGB32);
+				QPainter painter(&img);
+				painter.setRenderHint(QPainter::Antialiasing);
+				painter.setRenderHint(QPainter::TextAntialiasing);
+				painter.setBackground(QColor(0, 0, 0, 0));
+				painter.setCompositionMode(QPainter::CompositionMode_Source);
+				painter.drawImage(0, 0, sourceImage);
+
+				displayBytes.clear();
+				QBuffer buffer(&displayBytes);
+				if (!buffer.open(QIODevice::WriteOnly)) {
+					valid = false;
+				} else {
+					QImageWriter writer(&buffer, "png");
+					valid         = writer.write(img);
+					displayFormat = QByteArray("png");
+				}
+			}
+		}
+	} else {
+		QBuffer buffer(&user->qbaTexture);
+		buffer.open(QIODevice::ReadOnly);
+
+		QImageReader reader;
+		reader.setAutoDetectImageFormat(false);
+
+		QByteArray format;
+		if (RichTextImage::isValidImage(user->qbaTexture, format)) {
+			reader.setFormat(format);
+			reader.setDevice(&buffer);
+			const QSize imageSize = reader.size();
+			if (!reader.canRead() || imageSize.width() > UserTextureMaxImageDimension
+				|| imageSize.height() > UserTextureMaxImageDimension) {
+				valid = false;
+			} else {
+				const QImage image = reader.read();
+				valid              = !image.isNull();
+				displayFormat      = reader.format();
+			}
+		} else {
+			valid = false;
+		}
+	}
+
+	if (!valid) {
+		if (!user->qbaTextureHash.isEmpty()) {
+			m_failedUserTextureHashCooldownUntilMs.insert(
+				user->qbaTextureHash, QDateTime::currentMSecsSinceEpoch() + UserTextureFailedCooldownMs);
+		}
+		user->qbaTexture.clear();
+		user->qbaTextureFormat.clear();
+		if (clearHashOnFailure) {
+			user->qbaTextureHash.clear();
+		}
+		return false;
+	}
+
+	user->qbaTexture       = displayBytes;
+	user->qbaTextureFormat = displayFormat;
+	if (!user->qbaTextureHash.isEmpty()) {
+		m_failedUserTextureHashCooldownUntilMs.remove(user->qbaTextureHash);
+	}
+	return true;
+}
+
+bool MainWindow::ensureUserTextureAvailable(ClientUser *user, UserTextureRequestReason reason) {
+	Q_UNUSED(reason);
+
+	if (!user) {
+		return false;
+	}
+
+	if (!user->qbaTexture.isEmpty()) {
+		return normalizeUserTextureForDisplay(user);
+	}
+
+	if (user->qbaTextureHash.isEmpty()) {
+		return false;
+	}
+
+	const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+	auto failedIt      = m_failedUserTextureHashCooldownUntilMs.find(user->qbaTextureHash);
+	if (failedIt != m_failedUserTextureHashCooldownUntilMs.end()) {
+		if (failedIt.value() > nowMs) {
+			return false;
+		}
+		m_failedUserTextureHashCooldownUntilMs.erase(failedIt);
+	}
+
+	if (Global::get().db) {
+		const QByteArray cachedTexture = Global::get().db->blob(user->qbaTextureHash);
+		if (!cachedTexture.isEmpty()) {
+			user->qbaTexture = cachedTexture;
+			return normalizeUserTextureForDisplay(user);
+		}
+	}
+
+	queueUserTextureRequest(user, user->qbaTextureHash);
+	return false;
+}
+
+void MainWindow::queueUserTextureRequest(ClientUser *user, const QByteArray &expectedHash) {
+	if (!user || expectedHash.isEmpty() || !Global::get().sh || !Global::get().sh->isRunning()) {
+		return;
+	}
+
+	const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+	auto failedIt      = m_failedUserTextureHashCooldownUntilMs.find(expectedHash);
+	if (failedIt != m_failedUserTextureHashCooldownUntilMs.end()) {
+		if (failedIt.value() > nowMs) {
+			return;
+		}
+		m_failedUserTextureHashCooldownUntilMs.erase(failedIt);
+	}
+
+	const unsigned int session              = user->uiSession;
+	const QByteArray previousExpectedHash   = m_requestedUserTextureHashBySession.value(session);
+	const bool alreadyQueuedOrInFlight      = m_queuedUserTextureSessions.contains(session)
+										 || m_inFlightUserTextureSessions.contains(session);
+	if (alreadyQueuedOrInFlight && previousExpectedHash == expectedHash) {
+		return;
+	}
+
+	m_inFlightUserTextureSessions.remove(session);
+	m_queuedUserTextureSessions.insert(session);
+	m_requestedUserTextureHashBySession.insert(session, expectedHash);
+	if (m_userTextureRequestTimer && !m_userTextureRequestTimer->isActive()) {
+		m_userTextureRequestTimer->start();
+	}
+}
+
+void MainWindow::flushUserTextureRequests() {
+	if (!Global::get().sh || !Global::get().sh->isRunning()) {
+		clearUserTextureRequests();
+		return;
+	}
+
+	MumbleProto::RequestBlob request;
+	int requestCount                 = 0;
+	const QList< unsigned int > todo = m_queuedUserTextureSessions.values();
+	for (const unsigned int session : todo) {
+		if (requestCount >= UserTextureRequestMaxBatchSize) {
+			break;
+		}
+
+		ClientUser *user = ClientUser::get(session);
+		const QByteArray expectedHash = m_requestedUserTextureHashBySession.value(session);
+		if (!user || expectedHash.isEmpty() || user->qbaTextureHash != expectedHash) {
+			clearUserTextureRequest(session);
+			continue;
+		}
+
+		m_queuedUserTextureSessions.remove(session);
+		m_inFlightUserTextureSessions.insert(session);
+		request.add_session_texture(session);
+		++requestCount;
+	}
+
+	if (requestCount > 0) {
+		Global::get().sh->sendMessage(request);
+	}
+
+	if (!m_queuedUserTextureSessions.isEmpty() && m_userTextureRequestTimer) {
+		m_userTextureRequestTimer->start();
+	}
+}
+
+void MainWindow::handleUserTextureHash(ClientUser *user, const QByteArray &hash) {
+	if (!user) {
+		return;
+	}
+
+	if (hash.isEmpty()) {
+		if (!user->qbaTextureHash.isEmpty()) {
+			m_failedUserTextureHashCooldownUntilMs.remove(user->qbaTextureHash);
+		}
+		user->qbaTextureHash.clear();
+		user->qbaTexture.clear();
+		user->qbaTextureFormat.clear();
+		clearUserTextureRequest(user->uiSession);
+		refreshUserTextureViews(user);
+		return;
+	}
+
+	if (user->qbaTextureHash != hash) {
+		clearUserTextureRequest(user->uiSession);
+		user->qbaTextureHash = hash;
+		user->qbaTexture.clear();
+		user->qbaTextureFormat.clear();
+	}
+
+	ensureUserTextureAvailable(user, UserTextureRequestReason::UserState);
+	refreshUserTextureViews(user);
+}
+
+void MainWindow::handleUserTextureBlob(ClientUser *user, const QByteArray &texture) {
+	if (!user) {
+		return;
+	}
+
+	const unsigned int session    = user->uiSession;
+	const bool wasRequested       = m_queuedUserTextureSessions.contains(session)
+							  || m_inFlightUserTextureSessions.contains(session)
+							  || m_requestedUserTextureHashBySession.contains(session);
+	const QByteArray expectedHash = m_requestedUserTextureHashBySession.value(session);
+
+	if (texture.isEmpty()) {
+		clearUserTextureRequest(session);
+		if (!user->qbaTextureHash.isEmpty()) {
+			m_failedUserTextureHashCooldownUntilMs.remove(user->qbaTextureHash);
+		}
+		user->qbaTextureHash.clear();
+		user->qbaTexture.clear();
+		user->qbaTextureFormat.clear();
+		refreshUserTextureViews(user);
+		return;
+	}
+
+	const QByteArray textureHash = sha1(texture);
+	if (Global::get().db) {
+		Global::get().db->setBlob(textureHash, texture);
+	}
+
+	if (wasRequested && !expectedHash.isEmpty() && expectedHash != textureHash) {
+		return;
+	}
+
+	clearUserTextureRequest(session);
+	user->qbaTextureHash = textureHash;
+	user->qbaTexture     = texture;
+
+	normalizeUserTextureForDisplay(user);
+	refreshUserTextureViews(user);
+}
+
+void MainWindow::refreshUserTextureViews(ClientUser *user) {
+	if (!user) {
+		return;
+	}
+
+	if (pmModel) {
+		const QVector< int > avatarRoles{ Qt::DecorationRole, UserModel::NavigatorAvatarImageRole };
+		const QModelIndex idx = pmModel->index(user);
+		if (idx.isValid()) {
+			emit pmModel->dataChanged(idx, idx, avatarRoles);
+		}
+		if (Global::get().channelListenerManager) {
+			const QSet< unsigned int > listenedChannels =
+				Global::get().channelListenerManager->getListenedChannelsForUser(user->uiSession);
+			for (const unsigned int channelID : listenedChannels) {
+				const QModelIndex listenerIdx = pmModel->channelListenerIndex(user, Channel::get(channelID));
+				if (listenerIdx.isValid()) {
+					emit pmModel->dataChanged(listenerIdx, listenerIdx, avatarRoles);
+				}
+			}
+		}
+		pmModel->forceVisualUpdate();
+	}
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	publishModernShellRoomStatePatch();
+	queueModernShellSnapshotSync();
+#endif
+
+	if (m_persistentChatHistory && !m_persistentChatMessages.empty()) {
+		bool affectsVisibleChat = false;
+		for (const MumbleProto::ChatMessage &message : m_persistentChatMessages) {
+			if ((message.has_actor() && message.actor() == user->uiSession)
+				|| (message.has_actor_user_id() && user->iId >= 0
+					&& message.actor_user_id() == static_cast< decltype(message.actor_user_id()) >(user->iId))) {
+				affectsVisibleChat = true;
+				break;
+			}
+		}
+		if (affectsVisibleChat) {
+			const bool wasAtBottom = m_persistentChatHistory->isScrolledToBottom();
+			renderPersistentChatView(QString(), wasAtBottom, !wasAtBottom);
+		}
+	}
+
+#ifdef USE_OVERLAY
+	if (Global::get().o) {
+		Global::get().o->updateOverlay();
+	}
+#endif
+}
+
+void MainWindow::clearUserTextureRequest(unsigned int session) {
+	m_queuedUserTextureSessions.remove(session);
+	m_inFlightUserTextureSessions.remove(session);
+	m_requestedUserTextureHashBySession.remove(session);
+}
+
+void MainWindow::clearUserTextureRequests() {
+	if (m_userTextureRequestTimer) {
+		m_userTextureRequestTimer->stop();
+	}
+	m_queuedUserTextureSessions.clear();
+	m_inFlightUserTextureSessions.clear();
+	m_requestedUserTextureHashBySession.clear();
+	m_failedUserTextureHashCooldownUntilMs.clear();
 }
 
 // Loading a state that was stored by a different version of Qt can lead to a crash.
@@ -5981,6 +11605,7 @@ void MainWindow::setupPersistentChatDock() {
 	connect(m_persistentChatController, &PersistentChatController::activeSnapshotChanged, this, [this]() {
 		const std::optional< MumbleProto::ChatScope > previousScope = m_visiblePersistentChatScope;
 		const unsigned int previousScopeID                          = m_visiblePersistentChatScopeID;
+		const PersistentChatLoadingState previousLoadingState        = m_visiblePersistentChatLoadingState;
 		const std::size_t previousMessageCount                       = m_persistentChatMessages.size();
 		const unsigned int previousTailMessageID =
 			m_persistentChatMessages.empty() ? 0 : m_persistentChatMessages.back().message_id();
@@ -6004,7 +11629,7 @@ void MainWindow::setupPersistentChatDock() {
 		if (m_pendingPersistentChatReply) {
 			const MumbleProto::ChatMessage *replyTarget =
 				findPersistentChatMessageByID(m_persistentChatMessages, m_pendingPersistentChatReply->message_id());
-			if (replyTarget && replyTarget->has_deleted_at() && replyTarget->deleted_at() > 0) {
+			if (!replyTarget || (replyTarget->has_deleted_at() && replyTarget->deleted_at() > 0)) {
 				clearPersistentChatReplyTarget(false);
 			}
 		}
@@ -6018,7 +11643,12 @@ void MainWindow::setupPersistentChatDock() {
 		m_visiblePersistentChatLastReadMessageID = snapshot.lastReadMessageId;
 		m_visiblePersistentChatOldestMessageID   = snapshot.oldestLoadedMessageId;
 		m_visiblePersistentChatHasMore           = snapshot.hasOlder;
+		m_visiblePersistentChatLoadingState      = snapshot.loadingState;
 		m_persistentChatLoadingOlder             = snapshot.loadingState == PersistentChatLoadingState::Older;
+		const bool loadingFinished =
+			previousLoadingState != PersistentChatLoadingState::Idle
+			&& snapshot.loadingState == PersistentChatLoadingState::Idle;
+		const bool messageCountChanged = m_persistentChatMessages.size() != previousMessageCount;
 		const bool preserveScrollPosition = m_persistentChatRestoreAnchorPending || (!switchingScope && !wasAtBottom);
 		const bool scrollToBottom =
 			switchingScope || wasAtBottom || snapshot.loadingState == PersistentChatLoadingState::Initial;
@@ -6026,7 +11656,7 @@ void MainWindow::setupPersistentChatDock() {
 			renderPersistentChatView(QString(), scrollToBottom, preserveScrollPosition);
 		}
 		const bool canAppendTail =
-			!switchingScope && snapshot.loadingState != PersistentChatLoadingState::Initial
+			!switchingScope && !loadingFinished && snapshot.loadingState != PersistentChatLoadingState::Initial
 			&& snapshot.loadingState != PersistentChatLoadingState::Older
 			&& previousMessageCount > 0 && m_persistentChatMessages.size() > previousMessageCount
 			&& m_persistentChatMessages[previousMessageCount - 1].message_id() == previousTailMessageID
@@ -6038,6 +11668,7 @@ void MainWindow::setupPersistentChatDock() {
 				buildModernShellMessageStates(currentPersistentChatTarget(), previousMessageCount), scrollToBottom);
 		} else if (switchingScope || snapshot.loadingState == PersistentChatLoadingState::Initial
 				   || snapshot.loadingState == PersistentChatLoadingState::Older
+				   || loadingFinished || messageCountChanged
 				   || (previousMessageCount == 0 && !m_persistentChatMessages.empty())) {
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 			if (modernShellVisible) {
@@ -9479,6 +15110,19 @@ void MainWindow::handleModernDialogAction(const QString &dialogID, const QString
 		return;
 	}
 
+	if (dialogID == QLatin1String("settings") && actionID == QLatin1String("network.clearPreviewCache")) {
+		const quint64 previousSize = PersistentChatMediaCache::sizeBytes();
+		const bool cleared         = PersistentChatMediaCache::clear();
+		if (Global::get().l) {
+			Global::get().l->log(cleared ? Log::Information : Log::Warning,
+								 cleared ? tr("Cleared %1 of local chat media cache.")
+											   .arg(PersistentChatMediaCache::formattedSize(previousSize))
+										 : tr("Unable to clear the local chat media cache."));
+		}
+		publishModernDialogState(m_modernDialogController->state());
+		return;
+	}
+
 	const ModernDialogController::ActionResult result =
 		m_modernDialogController->invokeAction(dialogID, actionID, payload);
 	if (result.genericAction) {
@@ -10111,11 +15755,7 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 	const std::optional< QString > systemText = persistentChatSystemMessageText(message);
 	const bool systemMessage               = systemText.has_value();
 	const bool deletedMessage              = message.has_deleted_at() && message.deleted_at() > 0;
-	const bool ownMessage =
-		self
-		&& ((message.has_actor() && message.actor() == Global::get().uiSession)
-			|| (message.has_actor_user_id() && self->iId >= 0
-				&& message.actor_user_id() == static_cast< decltype(message.actor_user_id()) >(self->iId)));
+	const bool ownMessage                  = isOwnPersistentChatMessage(message);
 	const ClientUser *messageUser = ownMessage ? self : (message.has_actor() ? ClientUser::get(message.actor()) : nullptr);
 
 	QString bodyText = systemMessage ? *systemText : (deletedMessage ? QString() : persistentChatMessageSourceText(message));
@@ -10187,7 +15827,9 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 	messageState.insert(QStringLiteral("deleted"), deletedMessage);
 	messageState.insert(QStringLiteral("canReply"), canReply && !systemMessage && !deletedMessage);
 	messageState.insert(QStringLiteral("canReact"), canReact && !systemMessage && !deletedMessage);
-	messageState.insert(QStringLiteral("canDelete"), canDeleteMessages && !systemMessage && !deletedMessage);
+	messageState.insert(QStringLiteral("canDelete"),
+						(canDeleteMessages || (ownMessage && persistentChatTargetSupportsMessageDelete(target)))
+							&& !systemMessage && !deletedMessage);
 	if (replyReference) {
 		messageState.insert(QStringLiteral("replyMessageId"), static_cast< qulonglong >(replyReference->messageID));
 		messageState.insert(QStringLiteral("replyActor"), replyReference->actor);
@@ -10202,6 +15844,14 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 			reactionState.insert(QStringLiteral("emoji"), u8(reaction.emoji()));
 			reactionState.insert(QStringLiteral("count"), static_cast< qulonglong >(reaction.count()));
 			reactionState.insert(QStringLiteral("selfReacted"), reaction.self_reacted());
+			QVariantList actorNames;
+			for (int actorNameIndex = 0; actorNameIndex < reaction.actor_names_size(); ++actorNameIndex) {
+				const QString actorName = u8(reaction.actor_names(actorNameIndex)).trimmed();
+				if (!actorName.isEmpty()) {
+					actorNames.push_back(actorName);
+				}
+			}
+			reactionState.insert(QStringLiteral("actorNames"), actorNames);
 			reactions.push_back(reactionState);
 		}
 	}
@@ -10231,6 +15881,9 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 				previewState.insert(QStringLiteral("failed"), preview.failed);
 				previewState.insert(QStringLiteral("thumbnailUrl"),
 									persistentChatInlineDataImageThumbnailSource(preview.thumbnailImage));
+				if (!preview.metadata.isEmpty()) {
+					previewState.insert(QStringLiteral("metadata"), preview.metadata);
+				}
 				if (!preview.mediaDataUrl.isEmpty()) {
 					previewState.insert(QStringLiteral("mediaUrl"), preview.mediaDataUrl);
 					previewState.insert(QStringLiteral("mediaMime"), preview.mediaMime);
@@ -10240,6 +15893,43 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 						previewState.insert(QStringLiteral("mediaAudioUrl"), preview.mediaAudioDataUrl);
 						previewState.insert(QStringLiteral("mediaAudioMime"), preview.mediaAudioMime);
 					}
+				}
+				if (!preview.mediaItems.empty()) {
+					QVariantList mediaItems;
+					for (const PersistentChatPreviewMediaItem &item : preview.mediaItems) {
+						if (item.url.trimmed().isEmpty()) {
+							continue;
+						}
+						QVariantMap itemState;
+						itemState.insert(QStringLiteral("url"), item.url);
+						itemState.insert(QStringLiteral("mime"), item.mime);
+						itemState.insert(QStringLiteral("kind"), item.kind);
+						mediaItems.push_back(itemState);
+					}
+					if (!mediaItems.isEmpty()) {
+						previewState.insert(QStringLiteral("mediaItems"), mediaItems);
+					}
+				}
+				std::optional< PersistentChatPreviewEmbedTarget > embedTarget;
+				if (previewKey->startsWith(QLatin1String("youtube:"))) {
+					const QString youtubePayload = previewKey->mid(QStringLiteral("youtube:").size());
+					const std::optional< YouTubePreviewTarget > youtubeTarget =
+						youtubePreviewTargetFromKeyPayload(youtubePayload);
+					if (youtubeTarget) {
+						embedTarget = PersistentChatPreviewEmbedTarget {
+							QStringLiteral("youtube"),
+							youtubeEmbedUrl(*youtubeTarget),
+							youtubeTarget->shorts ? QStringLiteral("short") : QStringLiteral("wide")
+						};
+					}
+				} else {
+					embedTarget = previewEmbedTargetForUrl(QUrl(preview.canonicalUrl));
+				}
+				if (embedTarget) {
+					previewState.insert(QStringLiteral("embedKind"), embedTarget->kind);
+					previewState.insert(QStringLiteral("embedUrl"),
+										embedTarget->url.toString(QUrl::FullyEncoded));
+					previewState.insert(QStringLiteral("embedAspect"), embedTarget->aspect);
 				}
 				messageState.insert(QStringLiteral("preview"), previewState);
 			}
@@ -10335,6 +16025,10 @@ QVariantList MainWindow::buildModernShellMessageStates(const PersistentChatTarge
 	const std::size_t messageCount = m_persistentChatMessages.size();
 	beginIndex = std::min(beginIndex, messageCount);
 	for (std::size_t i = beginIndex; i < messageCount; ++i) {
+		if (m_persistentChatMessages[i].has_deleted_at() && m_persistentChatMessages[i].deleted_at() > 0) {
+			continue;
+		}
+
 		messages.push_back(buildModernShellCachedMessageState(m_persistentChatMessages[i], target, canReply, canReact,
 															  canDeleteMessages, buildMode));
 	}
@@ -16877,6 +22571,7 @@ void MainWindow::clearPersistentChatView(const QString &message, const QString &
 	m_visiblePersistentChatScopeID           = 0;
 	m_visiblePersistentChatLastReadMessageID = 0;
 	m_visiblePersistentChatHasMore           = false;
+	m_visiblePersistentChatLoadingState      = PersistentChatLoadingState::Idle;
 	m_persistentChatLoadingOlder             = false;
 	m_persistentChatPreviewRefreshPending    = false;
 	if (m_persistentChatScrollIdleTimer) {
@@ -16929,13 +22624,18 @@ std::optional< QString > MainWindow::persistentChatPreviewKey(const MumbleProto:
 	}
 	const QList< QUrl > urls = extractPreviewableUrls(messageContent);
 	for (const QUrl &url : urls) {
-		if (const std::optional< QString > videoId = extractYouTubeVideoId(url); videoId) {
-			return QString::fromLatin1("youtube:%1").arg(*videoId);
+		const QString youtubePreviewKey = youtubePreviewKeyForUrl(url);
+		if (!youtubePreviewKey.isEmpty()) {
+			return youtubePreviewKey;
 		}
 		if (isYouTubeHost(url.host())) {
 			// Only create custom previews for actual videos. Generic previews for YouTube
 			// landing pages are noisy, expensive, and were unstable in Windows testing.
 			continue;
+		}
+		const QString twitchPreviewKey = twitchPreviewKeyForUrl(url);
+		if (!twitchPreviewKey.isEmpty()) {
+			return twitchPreviewKey;
 		}
 
 		if (isTrustedRemotePlayableMediaUrl(url)) {
@@ -16952,6 +22652,10 @@ std::optional< QString > MainWindow::persistentChatPreviewKey(const MumbleProto:
 	return std::nullopt;
 }
 
+QString MainWindow::persistentChatMessageIdentityKey(const MumbleProto::ChatMessage &message) const {
+	return QString::fromLatin1("%1:%2").arg(message.thread_id()).arg(message.message_id());
+}
+
 std::optional< MumbleProto::ChatEmbedRef >
 	MainWindow::persistentChatPrimaryEmbed(const MumbleProto::ChatMessage &message) const {
 	for (int i = 0; i < message.embeds_size(); ++i) {
@@ -16962,6 +22666,97 @@ std::optional< MumbleProto::ChatEmbedRef >
 	}
 
 	return std::nullopt;
+}
+
+bool MainWindow::restorePersistentChatPreviewDiskCache(const QString &previewKey) {
+	const std::optional< PersistentChatMediaCache::PreviewEntry > cached =
+		PersistentChatMediaCache::loadPreview(previewKey);
+	if (!cached) {
+		mumble::chatperf::recordValue("chat.preview.disk_cache.miss", 1);
+		return false;
+	}
+	const QUrl cachedUrl(cached->canonicalUrl);
+	if (isGameStorePreviewUrl(cachedUrl)) {
+		mumble::chatperf::recordValue("chat.preview.disk_cache.miss", 1);
+		return false;
+	}
+	if (richPreviewProviderForUrl(cachedUrl)
+		&& cached->metadata.value(QStringLiteral("richPreviewMetadataVersion")).toInt()
+			   != RICH_PREVIEW_METADATA_VERSION) {
+		mumble::chatperf::recordValue("chat.preview.disk_cache.miss", 1);
+		return false;
+	}
+	if ((isInstagramReelPreviewUrl(cachedUrl) || isFacebookReelPreviewUrl(cachedUrl))
+		&& cached->mediaDataUrl.trimmed().isEmpty()) {
+		mumble::chatperf::recordValue("chat.preview.disk_cache.miss", 1);
+		return false;
+	}
+
+	PersistentChatPreview preview;
+	preview.canonicalUrl         = cached->canonicalUrl;
+	preview.title                = cached->title;
+	preview.subtitle             = cached->subtitle;
+	preview.description          = cached->description;
+	preview.thumbnailImage       = cached->thumbnailImage;
+	preview.mediaDataUrl         = cached->mediaDataUrl;
+	preview.mediaAudioDataUrl    = cached->mediaAudioDataUrl;
+	preview.mediaAudioMime       = cached->mediaAudioMime;
+	preview.mediaMime            = cached->mediaMime;
+	preview.mediaKind            = cached->mediaKind;
+	preview.metadata             = cached->metadata;
+	for (const PersistentChatMediaCache::MediaItem &item : cached->mediaItems) {
+		preview.mediaItems.push_back(PersistentChatPreviewMediaItem { item.url, item.mime, item.kind });
+	}
+	preview.openLabel            = cached->openLabel.isEmpty() ? tr("Open link") : cached->openLabel;
+	preview.previewAssetID       = cached->previewAssetID;
+	preview.autoplay             = cached->autoplay;
+	preview.metadataFinished     = cached->metadataFinished;
+	preview.thumbnailFinished    = cached->thumbnailFinished;
+	preview.failed               = cached->failed;
+	preview.siteSnapshotFinished = cached->siteSnapshotFinished;
+	preview.remoteMediaFinished  = cached->remoteMediaFinished;
+
+	m_persistentChatPreviews.insert(previewKey, preview);
+	mumble::chatperf::recordValue("chat.preview.disk_cache.hit", 1);
+	return true;
+}
+
+void MainWindow::storePersistentChatPreviewDiskCache(const QString &previewKey) {
+	const auto it = m_persistentChatPreviews.constFind(previewKey);
+	if (it == m_persistentChatPreviews.cend()) {
+		return;
+	}
+
+	const PersistentChatPreview &preview = it.value();
+	if (preview.siteSnapshotRequested || preview.remoteMediaRequested || !preview.metadataFinished
+		|| !preview.thumbnailFinished) {
+		return;
+	}
+
+	PersistentChatMediaCache::PreviewEntry entry;
+	entry.canonicalUrl         = preview.canonicalUrl;
+	entry.title                = preview.title;
+	entry.subtitle             = preview.subtitle;
+	entry.description          = preview.description;
+	entry.thumbnailImage       = preview.thumbnailImage;
+	entry.mediaDataUrl         = preview.mediaDataUrl;
+	entry.mediaAudioDataUrl    = preview.mediaAudioDataUrl;
+	entry.mediaAudioMime       = preview.mediaAudioMime;
+	entry.mediaMime            = preview.mediaMime;
+	entry.mediaKind            = preview.mediaKind;
+	entry.metadata             = preview.metadata;
+	for (const PersistentChatPreviewMediaItem &item : preview.mediaItems) {
+		entry.mediaItems.push_back(PersistentChatMediaCache::MediaItem { item.url, item.mime, item.kind });
+	}
+	entry.openLabel            = preview.openLabel;
+	entry.previewAssetID       = preview.previewAssetID;
+	entry.autoplay             = preview.autoplay;
+	entry.metadataFinished     = preview.metadataFinished;
+	entry.thumbnailFinished    = preview.thumbnailFinished;
+	entry.failed               = preview.failed;
+	entry.siteSnapshotFinished = preview.siteSnapshotFinished;
+	entry.remoteMediaFinished  = preview.remoteMediaFinished;
+	PersistentChatMediaCache::storePreview(previewKey, entry);
 }
 
 bool MainWindow::applyPersistentChatRemotePlayableMedia(PersistentChatPreview &preview, const QUrl &mediaUrl,
@@ -16978,7 +22773,10 @@ bool MainWindow::applyPersistentChatRemotePlayableMedia(PersistentChatPreview &p
 
 	preview.mediaDataUrl      = normalizedMediaUrl.toString(QUrl::FullyEncoded);
 	preview.mediaMime         = mime;
-	preview.mediaKind         = mime.startsWith(QLatin1String("video/")) ? QStringLiteral("video") : QStringLiteral("gif");
+	preview.mediaKind         = mime.startsWith(QLatin1String("video/"))
+									? QStringLiteral("video")
+									: (mime == QLatin1String("image/gif") ? QStringLiteral("gif")
+																		   : QStringLiteral("image"));
 	preview.autoplay          = false;
 	preview.metadataFinished  = true;
 	preview.thumbnailFinished = true;
@@ -16988,10 +22786,14 @@ bool MainWindow::applyPersistentChatRemotePlayableMedia(PersistentChatPreview &p
 		const QString fileName = QFileInfo(normalizedMediaUrl.path()).fileName();
 		preview.title         = fileName.isEmpty() ? tr("Video preview") : fileName;
 	}
-	if (preview.description.trimmed().isEmpty() || preview.description == tr("Fetching page metadata")
-		|| preview.description == tr("Preview unavailable")) {
-		preview.description =
-			mime == QLatin1String("image/gif") ? tr("Animated image preview") : tr("Video preview");
+	if (previewDescriptionIsPlaceholder(preview.description)) {
+		if (mime == QLatin1String("image/gif")) {
+			preview.description = tr("Animated image preview");
+		} else if (mime.startsWith(QLatin1String("image/"))) {
+			preview.description = tr("Image preview");
+		} else {
+			preview.description = tr("Video preview");
+		}
 	}
 
 	return true;
@@ -17010,6 +22812,987 @@ bool MainWindow::applyPersistentChatRemoteAudioMedia(PersistentChatPreview &prev
 
 	preview.mediaAudioDataUrl = audioUrl.toString(QUrl::FullyEncoded);
 	preview.mediaAudioMime    = mime;
+	return true;
+}
+
+void MainWindow::applyPersistentChatListingMediaItems(PersistentChatPreview &preview) {
+	std::vector< PersistentChatPreviewMediaItem > listingItems;
+	QSet< QString > seenListingImages;
+	for (const QString &imageKey : { QStringLiteral("listingImages"), QStringLiteral("productImages"),
+									 QStringLiteral("articleImages") }) {
+		const QVariantList images = preview.metadata.value(imageKey).toList();
+		for (const QVariant &value : images) {
+			const QVariantMap itemMap = value.toMap();
+			const QUrl itemUrl(itemMap.value(QStringLiteral("url")).toString().trimmed());
+			if (!isSafePreviewTarget(itemUrl)) {
+				continue;
+			}
+			const QString itemUrlString = itemUrl.toString(QUrl::FullyEncoded);
+			if (itemUrlString.isEmpty() || seenListingImages.contains(itemUrlString)) {
+				continue;
+			}
+			seenListingImages.insert(itemUrlString);
+			const QString itemMime = itemMap.value(QStringLiteral("mime")).toString().trimmed().isEmpty()
+										 ? QStringLiteral("image/jpeg")
+										 : itemMap.value(QStringLiteral("mime")).toString().trimmed();
+			listingItems.push_back(
+				PersistentChatPreviewMediaItem { itemUrlString, itemMime, QStringLiteral("image") });
+		}
+	}
+	if (!listingItems.empty()) {
+		preview.mediaItems = listingItems;
+	}
+}
+
+bool MainWindow::requestPersistentChatRemotePlayableMediaCache(const QString &previewKey, const QUrl &mediaUrl,
+															   const QString &suggestedMime, const QUrl &audioUrl,
+															   const QString &suggestedAudioMime) {
+	if (previewKey.isEmpty() || !isTrustedRemotePlayableMediaUrl(mediaUrl, suggestedMime)) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested || it->remoteMediaFinished) {
+		return false;
+	}
+
+	const QUrl normalizedMediaUrl = normalizedRemotePlayableMediaUrl(mediaUrl);
+	const QString mime           = playableMediaMimeForUrl(normalizedMediaUrl, suggestedMime);
+	if (!mime.startsWith(QLatin1String("video/"))) {
+		return false;
+	}
+
+	it->remoteMediaRequested = true;
+
+	QNetworkRequest request(normalizedMediaUrl);
+	preparePreviewMediaRequest(request, normalizedMediaUrl);
+	QNetworkReply *reply = Global::get().nam->get(request);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_MEDIA_CACHE_BYTES);
+	connect(reply, &QNetworkReply::finished, this,
+			[this, reply, previewKey, normalizedMediaUrl, mime, audioUrl, suggestedAudioMime]() {
+				const QByteArray data   = reply->readAll();
+				const bool success      = reply->error() == QNetworkReply::NoError;
+				const QString replyMime = reply->header(QNetworkRequest::ContentTypeHeader)
+											  .toString()
+											  .section(QLatin1Char(';'), 0, 0)
+											  .trimmed()
+											  .toLower();
+				reply->deleteLater();
+
+				auto previewIt = m_persistentChatPreviews.find(previewKey);
+				if (previewIt == m_persistentChatPreviews.end()) {
+					return;
+				}
+
+				previewIt->remoteMediaRequested = false;
+				previewIt->remoteMediaFinished  = true;
+
+				const QString resolvedMime = playableMediaMimeForUrl(normalizedMediaUrl, replyMime.isEmpty() ? mime : replyMime);
+				if (success && remotePlayableMediaBytesLookValid(data, resolvedMime)) {
+					const QString dataUrl = playableMediaDataUrl(resolvedMime, data);
+					if (!dataUrl.isEmpty()) {
+						previewIt->mediaDataUrl = dataUrl;
+						previewIt->mediaMime    = resolvedMime;
+						previewIt->mediaKind    = resolvedMime.startsWith(QLatin1String("video/"))
+													  ? QStringLiteral("video")
+													  : (resolvedMime == QLatin1String("image/gif") ? QStringLiteral("gif")
+																									: QStringLiteral("image"));
+						previewIt->autoplay          = false;
+						previewIt->metadataFinished  = true;
+						previewIt->thumbnailFinished = true;
+						previewIt->failed            = false;
+						if (previewDescriptionIsPlaceholder(previewIt->description)) {
+							previewIt->description = resolvedMime == QLatin1String("image/gif")
+														 ? tr("Animated image preview")
+														 : (resolvedMime.startsWith(QLatin1String("image/"))
+																? tr("Image preview")
+																: tr("Video preview"));
+						}
+
+						const bool mediaHasOwnAudio =
+							resolvedMime == QLatin1String("video/mp4") && mp4BytesLikelyHaveAudioTrack(data);
+						if (!audioUrl.isEmpty() && resolvedMime == QLatin1String("video/mp4")
+							&& !mediaHasOwnAudio) {
+							applyPersistentChatRemoteAudioMedia(*previewIt, audioUrl, suggestedAudioMime);
+						} else if (mediaHasOwnAudio) {
+							previewIt->mediaAudioDataUrl.clear();
+							previewIt->mediaAudioMime.clear();
+						}
+					}
+				}
+
+				publishPersistentChatPreviewUpdate(previewKey);
+			});
+
+	return true;
+}
+
+bool MainWindow::requestPersistentChatPreviewPosterImage(const QString &previewKey, const QUrl &posterUrl,
+														 const QString &suggestedMime) {
+	if (previewKey.isEmpty()) {
+		return false;
+	}
+
+	QUrl normalizedPosterUrl = normalizedRemotePlayableMediaUrl(posterUrl);
+	const QString mime       = playableMediaMimeForUrl(normalizedPosterUrl, suggestedMime);
+	if (!mime.startsWith(QLatin1String("image/")) || mime == QLatin1String("image/gif")
+		|| !isTrustedRemotePlayableMediaUrl(normalizedPosterUrl, mime)) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end()) {
+		return false;
+	}
+
+	it->thumbnailFinished = false;
+
+	QNetworkRequest request(normalizedPosterUrl);
+	preparePreviewImageRequest(request);
+	const QByteArray referer = previewMediaRefererForUrl(normalizedPosterUrl);
+	if (!referer.isEmpty()) {
+		request.setRawHeader(QByteArrayLiteral("Referer"), referer);
+		request.setRawHeader(QByteArrayLiteral("Origin"), referer.left(referer.size() - 1));
+	}
+	QNetworkReply *reply = Global::get().nam->get(request);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_IMAGE_BYTES);
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey]() {
+		const QByteArray data = reply->readAll();
+		const bool success    = reply->error() == QNetworkReply::NoError;
+		reply->deleteLater();
+
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()) {
+			return;
+		}
+
+		previewIt->thumbnailFinished = true;
+		if (success) {
+			const QImage image = decodePersistentChatThumbnailImage(data);
+			if (!image.isNull()) {
+				previewIt->thumbnailImage = persistentChatThumbnailImage(image);
+				previewIt->failed         = false;
+			}
+		}
+
+		publishPersistentChatPreviewUpdate(previewKey);
+	});
+
+	return true;
+}
+
+bool MainWindow::requestPersistentChatWebhallenProductPreview(const QString &previewKey, const QUrl &previewUrl) {
+	if (previewKey.isEmpty() || !isSafePreviewTarget(previewUrl)) {
+		return false;
+	}
+
+	const std::optional< QString > productId = webhallenProductIdFromUrl(previewUrl);
+	if (!productId) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested
+		|| (it->metadata.value(QStringLiteral("richPreviewMetadataVersion")).toInt()
+				== RICH_PREVIEW_METADATA_VERSION
+			&& it->metadata.contains(QStringLiteral("productTitle")))) {
+		return false;
+	}
+
+	it->remoteMediaRequested = true;
+	it->remoteMediaFinished  = false;
+
+	QNetworkRequest request(webhallenProductApiUrl(*productId));
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
+	QNetworkReply *reply = Global::get().nam->get(request);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, previewUrl]() {
+		const QByteArray data = reply->readAll();
+		const bool success    = reply->error() == QNetworkReply::NoError;
+		reply->deleteLater();
+
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()) {
+			return;
+		}
+
+		previewIt->remoteMediaRequested = false;
+		previewIt->remoteMediaFinished  = true;
+		previewIt->metadataFinished     = true;
+
+		if (!success || data.isEmpty()) {
+			publishPersistentChatPreviewUpdate(previewKey);
+			return;
+		}
+
+		QJsonParseError error;
+		const QJsonDocument document = QJsonDocument::fromJson(data, &error);
+		if (error.error != QJsonParseError::NoError || !document.isObject()) {
+			publishPersistentChatPreviewUpdate(previewKey);
+			return;
+		}
+
+		const QJsonObject product = document.object().value(QStringLiteral("product")).toObject();
+		if (product.isEmpty()) {
+			publishPersistentChatPreviewUpdate(previewKey);
+			return;
+		}
+
+		const QVariantMap webhallenMetadata = webhallenProductMetadata(previewUrl, product);
+		for (auto metadataIt = webhallenMetadata.cbegin(); metadataIt != webhallenMetadata.cend(); ++metadataIt) {
+			previewIt->metadata.insert(metadataIt.key(), metadataIt.value());
+		}
+		applyPersistentChatListingMediaItems(*previewIt);
+
+		const QString productTitle = previewIt->metadata.value(QStringLiteral("productTitle")).toString().trimmed();
+		const QString productDescription =
+			previewIt->metadata.value(QStringLiteral("productDescription")).toString().trimmed();
+		if (!productTitle.isEmpty()) {
+			previewIt->title = productTitle;
+		}
+		previewIt->subtitle = QObject::tr("Webhallen");
+		if (!productDescription.isEmpty()) {
+			previewIt->description = productDescription;
+		}
+		previewIt->failed = false;
+
+		const QVariantList productImages = previewIt->metadata.value(QStringLiteral("productImages")).toList();
+		if (!productImages.isEmpty()) {
+			const QString imageUrl = productImages.first().toMap().value(QStringLiteral("url")).toString();
+			requestPersistentChatPreviewPosterImage(previewKey, QUrl(imageUrl), QStringLiteral("image/jpeg"));
+		} else {
+			previewIt->thumbnailFinished = true;
+		}
+
+		publishPersistentChatPreviewUpdate(previewKey);
+	});
+
+	return true;
+}
+
+bool MainWindow::requestPersistentChatRichProviderPreview(const QString &previewKey, const QUrl &previewUrl) {
+	if (previewKey.isEmpty() || !isSafePreviewTarget(previewUrl)) {
+		return false;
+	}
+
+	const std::optional< RichPreviewProviderInfo > richProvider = richPreviewProviderForUrl(previewUrl);
+	if (!richProvider) {
+		return false;
+	}
+	if (richProvider->key == QLatin1String("webhallen")
+		&& requestPersistentChatWebhallenProductPreview(previewKey, previewUrl)) {
+		return true;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested
+		|| it->metadata.value(QStringLiteral("richPreviewMetadataVersion")).toInt()
+			   == RICH_PREVIEW_METADATA_VERSION) {
+		return false;
+	}
+
+	it->remoteMediaRequested = true;
+	it->remoteMediaFinished  = false;
+
+	const QUrl previewPageUrl = flashbackPreviewPageUrl(previewUrl);
+	QNetworkRequest pageRequest(previewPageUrl);
+	preparePreviewRequest(pageRequest);
+	QNetworkReply *pageReply = Global::get().nam->get(pageRequest);
+	applyPreviewReplyGuards(pageReply, previewMaxPageBytesForUrl(previewPageUrl), false);
+	connect(pageReply, &QNetworkReply::finished, this, [this, pageReply, previewKey, previewUrl, previewPageUrl, richProvider]() {
+		const QByteArray data       = pageReply->readAll();
+		const bool success          = pageReply->error() == QNetworkReply::NoError;
+		const QString contentType   = pageReply->header(QNetworkRequest::ContentTypeHeader).toString().toLower();
+		const bool allowPartialHtml = previewAbortReason(pageReply) == QLatin1String("too_large") && !data.isEmpty()
+									  && previewContentTypeLooksHtml(contentType);
+		pageReply->deleteLater();
+
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()) {
+			return;
+		}
+
+		previewIt->remoteMediaRequested = false;
+		previewIt->remoteMediaFinished  = true;
+		previewIt->metadataFinished     = true;
+
+		if ((!success && !allowPartialHtml) || !previewContentTypeLooksHtml(contentType)) {
+			publishPersistentChatPreviewUpdate(previewKey);
+			return;
+		}
+
+		const qint64 maxPageBytes = previewMaxPageBytesForUrl(previewPageUrl);
+		const QByteArray htmlBytes = data.size() > maxPageBytes ? data.left(maxPageBytes) : data;
+		const QString html                       = decodedPreviewHtml(htmlBytes, contentType);
+		const QHash< QString, QString > metaTags = extractMetaTags(html);
+		const QString title                      = metaTags.value(
+			QLatin1String("og:title"), metaTags.value(QLatin1String("twitter:title"), extractHtmlTitle(html)));
+		const QString description = metaTags.value(
+			QLatin1String("og:description"),
+			metaTags.value(QLatin1String("twitter:description"), metaTags.value(QLatin1String("description"))));
+		const QString siteName =
+			metaTags.value(QLatin1String("og:site_name"), richProvider ? richProvider->siteLabel : previewDisplayHost(previewUrl));
+		const QString imageUrlString = previewImageMetaTag(metaTags);
+
+		if (!title.trimmed().isEmpty()) {
+			previewIt->title = title.trimmed();
+		}
+		if (!siteName.trimmed().isEmpty()) {
+			previewIt->subtitle = siteName.trimmed();
+		}
+		if (!description.trimmed().isEmpty()) {
+			previewIt->description = description.trimmed();
+		}
+
+		previewIt->metadata = previewMetadataWithSwedishData(previewIt->metadata, previewUrl, previewIt->title,
+															 previewIt->description, html, metaTags);
+		const QString threadPostUrl =
+			previewIt->metadata.value(QStringLiteral("forumThreadPostUrl")).toString().trimmed();
+		if (!threadPostUrl.isEmpty()) {
+			const QUrl canonicalUrl = previewUrl.resolved(QUrl(threadPostUrl));
+			if (canonicalUrl.isValid()) {
+				previewIt->canonicalUrl = canonicalUrl.toString();
+				previewIt->openLabel    = tr("Open in thread");
+			}
+		}
+		if (previewIt->metadata.value(QStringLiteral("provider")).toString() == QLatin1String("blocket")) {
+			const QString listingTitle = previewIt->metadata.value(QStringLiteral("listingTitle")).toString().trimmed();
+			const QString listingDescription =
+				previewIt->metadata.value(QStringLiteral("listingDescription")).toString().trimmed();
+			if (!listingTitle.isEmpty()) {
+				previewIt->title = listingTitle;
+			}
+			if (!listingDescription.isEmpty()) {
+				previewIt->description = listingDescription;
+			}
+		} else {
+			const QString productTitle =
+				previewIt->metadata.value(QStringLiteral("productTitle")).toString().trimmed();
+			const QString articleTitle =
+				previewIt->metadata.value(QStringLiteral("articleTitle")).toString().trimmed();
+			const QString articleDescription =
+				previewIt->metadata.value(QStringLiteral("articleDescription")).toString().trimmed();
+			if (!productTitle.isEmpty()) {
+				previewIt->title = productTitle;
+			} else if (!articleTitle.isEmpty()) {
+				previewIt->title = articleTitle;
+			}
+			if (!articleDescription.isEmpty()) {
+				previewIt->description = articleDescription;
+			}
+		}
+		applyPersistentChatListingMediaItems(*previewIt);
+		previewIt->failed = false;
+
+		const QString selectedImageUrlString =
+			imageUrlString.isEmpty()
+				? (!previewIt->metadata.value(QStringLiteral("productImage")).toString().trimmed().isEmpty()
+					   ? previewIt->metadata.value(QStringLiteral("productImage")).toString().trimmed()
+					   : previewIt->metadata.value(QStringLiteral("articleImage")).toString().trimmed())
+				: imageUrlString;
+		if (!selectedImageUrlString.isEmpty()) {
+			const QUrl imageUrl = previewPageUrl.resolved(QUrl(selectedImageUrlString));
+			if (isSafePreviewTarget(imageUrl)) {
+				previewIt->thumbnailFinished = false;
+				QNetworkRequest imageRequest(imageUrl);
+				preparePreviewImageRequest(imageRequest);
+				QNetworkReply *imageReply = Global::get().nam->get(imageRequest);
+				applyPreviewReplyGuards(imageReply, PREVIEW_MAX_IMAGE_BYTES);
+				connect(imageReply, &QNetworkReply::finished, this, [this, imageReply, previewKey]() {
+					const QByteArray imageData = imageReply->readAll();
+					const bool imageSuccess    = imageReply->error() == QNetworkReply::NoError;
+					imageReply->deleteLater();
+
+					auto imagePreviewIt = m_persistentChatPreviews.find(previewKey);
+					if (imagePreviewIt == m_persistentChatPreviews.end()) {
+						return;
+					}
+
+					imagePreviewIt->thumbnailFinished = true;
+					if (imageSuccess) {
+						const QImage image = decodePersistentChatThumbnailImage(imageData);
+						if (!image.isNull()) {
+							imagePreviewIt->thumbnailImage = persistentChatThumbnailImage(image);
+						}
+					}
+					publishPersistentChatPreviewUpdate(previewKey);
+				});
+			}
+		}
+
+		publishPersistentChatPreviewUpdate(previewKey);
+	});
+
+	return true;
+}
+
+bool MainWindow::requestPersistentChatSteamAppPreview(const QString &previewKey, const QUrl &previewUrl) {
+	if (previewKey.isEmpty() || !isSafePreviewTarget(previewUrl)) {
+		return false;
+	}
+
+	const std::optional< QString > appId = steamAppIdFromUrl(previewUrl);
+	if (!appId) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested || it->remoteMediaFinished) {
+		return false;
+	}
+
+	it->remoteMediaRequested = true;
+
+	QNetworkRequest request(steamAppDetailsUrl(*appId));
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
+	QNetworkReply *reply = Global::get().nam->get(request);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, appId]() {
+		const QByteArray data     = reply->readAll();
+		const bool success        = reply->error() == QNetworkReply::NoError;
+		reply->deleteLater();
+
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()) {
+			return;
+		}
+
+		previewIt->remoteMediaRequested = false;
+		previewIt->remoteMediaFinished  = true;
+
+		if (success && !data.isEmpty()) {
+			QJsonParseError error;
+			const QJsonDocument document = QJsonDocument::fromJson(data, &error);
+			if (error.error == QJsonParseError::NoError && document.isObject()) {
+				const QJsonObject wrapper = document.object().value(*appId).toObject();
+				const QJsonObject object  = wrapper.value(QStringLiteral("data")).toObject();
+				if (wrapper.value(QStringLiteral("success")).toBool(false) && !object.isEmpty()) {
+					const QString name = object.value(QStringLiteral("name")).toString().trimmed();
+					const QString shortDescription =
+						object.value(QStringLiteral("short_description")).toString().trimmed();
+					const QString developer =
+						steamJsonArrayStrings(object.value(QStringLiteral("developers")).toArray(), QString(), 2);
+					const QString genres =
+						steamJsonArrayStrings(object.value(QStringLiteral("genres")).toArray(),
+											  QStringLiteral("description"), 3);
+					const QJsonObject releaseDate = object.value(QStringLiteral("release_date")).toObject();
+					const bool comingSoon         = releaseDate.value(QStringLiteral("coming_soon")).toBool(false);
+					const QString releaseText     = releaseDate.value(QStringLiteral("date")).toString().trimmed();
+					const QString platforms = steamPlatformText(object.value(QStringLiteral("platforms")).toObject());
+					const QJsonObject price  = object.value(QStringLiteral("price_overview")).toObject();
+					const bool isFree        = object.value(QStringLiteral("is_free")).toBool(false);
+					const int discount       = price.value(QStringLiteral("discount_percent")).toInt(0);
+					QString priceText        = price.value(QStringLiteral("final_formatted")).toString().trimmed();
+					const QString originalPriceText =
+						price.value(QStringLiteral("initial_formatted")).toString().trimmed();
+					if (isFree) {
+						priceText = tr("Free To Play");
+					} else if (priceText.isEmpty() && comingSoon) {
+						priceText = tr("Coming soon");
+					}
+
+					QVariantMap metadata = previewIt->metadata;
+					const QStringList steamMetadataKeys {
+						QStringLiteral("steamAppName"),
+						QStringLiteral("steamDeveloper"),
+						QStringLiteral("steamGenres"),
+						QStringLiteral("steamReleaseDate"),
+						QStringLiteral("steamPlatforms"),
+						QStringLiteral("steamPrice"),
+						QStringLiteral("steamOriginalPrice"),
+						QStringLiteral("steamDiscountPercent"),
+						QStringLiteral("steamHeaderImage"),
+						QStringLiteral("steamCapsuleImage"),
+						QStringLiteral("steamMediaItems")
+					};
+					for (const QString &key : steamMetadataKeys) {
+						metadata.remove(key);
+					}
+					metadata.insert(QStringLiteral("provider"), QStringLiteral("steam"));
+					metadata.insert(QStringLiteral("steamAppId"), *appId);
+					metadata.insert(QStringLiteral("steamStoreUrl"), steamStoreAppUrl(*appId));
+					if (!name.isEmpty()) {
+						metadata.insert(QStringLiteral("steamAppName"), name);
+					}
+					if (!developer.isEmpty()) {
+						metadata.insert(QStringLiteral("steamDeveloper"), developer);
+					}
+					if (!genres.isEmpty()) {
+						metadata.insert(QStringLiteral("steamGenres"), genres);
+					}
+					if (!releaseText.isEmpty()) {
+						metadata.insert(QStringLiteral("steamReleaseDate"), releaseText);
+					}
+					if (!platforms.isEmpty()) {
+						metadata.insert(QStringLiteral("steamPlatforms"), platforms);
+					}
+					if (!priceText.isEmpty()) {
+						metadata.insert(QStringLiteral("steamPrice"), priceText);
+					}
+					if (!originalPriceText.isEmpty() && originalPriceText != priceText) {
+						metadata.insert(QStringLiteral("steamOriginalPrice"), originalPriceText);
+					}
+					if (discount > 0) {
+						metadata.insert(QStringLiteral("steamDiscountPercent"), discount);
+					}
+					const QString headerImage = object.value(QStringLiteral("header_image")).toString().trimmed();
+					if (!headerImage.isEmpty()) {
+						metadata.insert(QStringLiteral("steamHeaderImage"), headerImage);
+					}
+					const QString capsuleImage = object.value(QStringLiteral("capsule_image")).toString().trimmed();
+					if (!capsuleImage.isEmpty()) {
+						metadata.insert(QStringLiteral("steamCapsuleImage"), capsuleImage);
+					}
+					const QVariantList mediaItems = steamMediaItemsFromAppDetails(object);
+					if (!mediaItems.isEmpty()) {
+						metadata.insert(QStringLiteral("steamMediaItems"), mediaItems);
+					}
+					previewIt->metadata = metadata;
+
+					if (!name.isEmpty()
+						&& (previewIt->title.trimmed().isEmpty() || previewIt->title == tr("Steam link")
+							|| previewIt->title == tr("Loading link preview..."))) {
+						previewIt->title = name;
+					}
+					if (previewIt->subtitle.trimmed().isEmpty()
+						|| previewIt->subtitle == previewDisplayHost(QUrl(previewIt->canonicalUrl))) {
+						previewIt->subtitle = tr("Steam");
+					}
+					if (!shortDescription.isEmpty() && previewDescriptionIsPlaceholder(previewIt->description)) {
+						previewIt->description = shortDescription;
+					}
+					previewIt->openLabel        = tr("Open on Steam");
+					previewIt->metadataFinished = true;
+					previewIt->failed           = false;
+				}
+			}
+		}
+
+		publishPersistentChatPreviewUpdate(previewKey);
+	});
+
+	return true;
+}
+
+bool MainWindow::requestPersistentChatXPostPreview(const QString &previewKey, const QUrl &previewUrl) {
+	if (previewKey.isEmpty() || !isXPostUrl(previewUrl)) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested || it->remoteMediaFinished) {
+		return false;
+	}
+
+	it->remoteMediaRequested = true;
+
+	QNetworkRequest request(xPostSyndicationUrl(previewUrl));
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
+	QNetworkReply *reply = Global::get().nam->get(request);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, previewUrl]() {
+		const QByteArray data     = reply->readAll();
+		const bool success        = reply->error() == QNetworkReply::NoError;
+		const QString failureText = previewFailureText(reply);
+		reply->deleteLater();
+
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()) {
+			return;
+		}
+
+		previewIt->remoteMediaRequested = false;
+		previewIt->remoteMediaFinished  = true;
+		previewIt->metadataFinished     = true;
+
+		const QString fallbackHandle = xPostHandleFromUrl(previewUrl);
+		bool parsedSyndication       = false;
+		QString parentStatusId;
+		if (success && !data.isEmpty()) {
+			QJsonParseError error;
+			const QJsonDocument document = QJsonDocument::fromJson(data, &error);
+			if (error.error == QJsonParseError::NoError && document.isObject()) {
+				const QJsonObject object = document.object();
+				parsedSyndication        = true;
+				const QJsonObject user   = object.value(QStringLiteral("user")).toObject();
+				const QString screenName = user.value(QStringLiteral("screen_name")).toString().trimmed();
+				const QString authorName = user.value(QStringLiteral("name")).toString().trimmed();
+				const QString handle     = xDisplayHandle(screenName.isEmpty() ? fallbackHandle : screenName);
+				QString statusId         = xPostStatusIdFromSyndicationObject(object);
+				if (statusId.isEmpty()) {
+					statusId = xPostStatusIdFromUrl(previewUrl);
+				}
+				const QString text       = xPostSyndicationDisplayText(object);
+				const QString avatarUrl =
+					xPostProfileImageUrl(user.value(QStringLiteral("profile_image_url_https")).toString());
+
+				if (!screenName.isEmpty() && !statusId.isEmpty()) {
+					previewIt->canonicalUrl = QStringLiteral("https://x.com/%1/status/%2").arg(screenName, statusId);
+				}
+				previewIt->title = text.isEmpty()
+									   ? (handle.isEmpty() ? tr("Post on X") : tr("Post by %1").arg(handle))
+									   : text;
+				previewIt->subtitle = authorName.isEmpty() ? (handle.isEmpty() ? tr("X") : handle) : authorName;
+				previewIt->description = handle;
+				previewIt->openLabel   = tr("Open on X");
+				previewIt->thumbnailImage = QImage();
+				previewIt->mediaDataUrl.clear();
+				previewIt->mediaAudioDataUrl.clear();
+				previewIt->mediaAudioMime.clear();
+				previewIt->mediaMime.clear();
+				previewIt->mediaKind.clear();
+				previewIt->mediaItems.clear();
+				previewIt->autoplay = false;
+
+				QVariantMap metadata = previewIt->metadata;
+				const QStringList xMetadataKeys {
+					QStringLiteral("xDisplayName"),
+					QStringLiteral("xHandle"),
+					QStringLiteral("xAvatarUrl"),
+					QStringLiteral("xVerified"),
+					QStringLiteral("xCreatedAt"),
+					QStringLiteral("xReplyCount"),
+					QStringLiteral("xLikeCount"),
+					QStringLiteral("xRepostCount"),
+					QStringLiteral("xQuoteCount"),
+					QStringLiteral("xBookmarkCount"),
+					QStringLiteral("xViewCount"),
+					QStringLiteral("xStatsFetchedAt"),
+					QStringLiteral("xReplyContext"),
+					QStringLiteral("xQuotedPost")
+				};
+				for (const QString &key : xMetadataKeys) {
+					metadata.remove(key);
+				}
+				metadata.insert(QStringLiteral("provider"), QStringLiteral("x"));
+				if (!authorName.isEmpty()) {
+					metadata.insert(QStringLiteral("xDisplayName"), authorName);
+				}
+				if (!handle.isEmpty()) {
+					metadata.insert(QStringLiteral("xHandle"), handle);
+				}
+				if (!avatarUrl.isEmpty()) {
+					metadata.insert(QStringLiteral("xAvatarUrl"), avatarUrl);
+				}
+				const bool verified = user.value(QStringLiteral("verified")).toBool(false)
+									  || user.value(QStringLiteral("is_blue_verified")).toBool(false);
+				if (verified) {
+					metadata.insert(QStringLiteral("xVerified"), true);
+				}
+				const QString createdAt = object.value(QStringLiteral("created_at")).toString().trimmed();
+				if (!createdAt.isEmpty()) {
+					metadata.insert(QStringLiteral("xCreatedAt"), createdAt);
+				}
+				xPostInsertCountMetadata(metadata, QStringLiteral("xReplyCount"), object,
+										 QStringLiteral("conversation_count"));
+				xPostInsertCountMetadata(metadata, QStringLiteral("xLikeCount"), object,
+										 QStringLiteral("favorite_count"));
+				xPostInsertCountMetadata(metadata, QStringLiteral("xRepostCount"), object,
+										 QStringLiteral("retweet_count"));
+				xPostInsertCountMetadata(metadata, QStringLiteral("xQuoteCount"), object,
+										 QStringLiteral("quote_count"));
+				xPostInsertCountMetadata(metadata, QStringLiteral("xBookmarkCount"), object,
+										 QStringLiteral("bookmark_count"));
+				xPostInsertCountMetadata(metadata, QStringLiteral("xViewCount"), object,
+										 QStringLiteral("view_count"));
+				const QJsonObject videoObject = object.value(QStringLiteral("video")).toObject();
+				if (!metadata.contains(QStringLiteral("xViewCount"))) {
+					xPostInsertCountMetadata(metadata, QStringLiteral("xViewCount"), videoObject,
+											 QStringLiteral("viewCount"));
+				}
+				const QVariantList embeddedReplyContext = xPostEmbeddedReplyContext(object, 3);
+				if (!embeddedReplyContext.isEmpty()) {
+					metadata.insert(QStringLiteral("xReplyContext"), embeddedReplyContext);
+				}
+				const QJsonObject quotedTweet = object.value(QStringLiteral("quoted_tweet")).toObject();
+				if (!quotedTweet.isEmpty()) {
+					const QVariantMap quotedPost = xPostSummaryMetadata(quotedTweet);
+					if (!quotedPost.isEmpty()) {
+						metadata.insert(QStringLiteral("xQuotedPost"), quotedPost);
+					}
+				}
+				metadata.insert(QStringLiteral("xStatsFetchedAt"),
+								QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+				previewIt->metadata = metadata;
+				parentStatusId      = xPostParentStatusIdFromSyndicationObject(object);
+
+				const std::vector< PersistentChatPreviewPlayableMediaMeta > imageMediaItems =
+					xPostSyndicationImageMediaItems(object);
+				if (!imageMediaItems.empty()) {
+					std::vector< PersistentChatPreviewMediaItem > parsedMediaItems;
+					QSet< QString > seenMediaItemUrls;
+					for (const PersistentChatPreviewPlayableMediaMeta &item : imageMediaItems) {
+						QUrl normalizedItemUrl = normalizedRemotePlayableMediaUrl(QUrl(item.url));
+						const QString itemMime = playableMediaMimeForUrl(normalizedItemUrl, item.mime);
+						if (itemMime.isEmpty() || !isTrustedRemotePlayableMediaUrl(normalizedItemUrl, itemMime)) {
+							continue;
+						}
+
+						const QString itemUrlString = normalizedItemUrl.toString(QUrl::FullyEncoded);
+						if (itemUrlString.isEmpty() || seenMediaItemUrls.contains(itemUrlString)) {
+							continue;
+						}
+
+						parsedMediaItems.push_back(
+							PersistentChatPreviewMediaItem { itemUrlString, itemMime, QStringLiteral("image") });
+						seenMediaItemUrls.insert(itemUrlString);
+					}
+					if (!parsedMediaItems.empty()) {
+						previewIt->mediaItems = parsedMediaItems;
+					}
+				}
+
+				const std::optional< PersistentChatPreviewPlayableMediaMeta > media =
+					xPostSyndicationPlayableMedia(object);
+				if (media && applyPersistentChatRemotePlayableMedia(*previewIt, QUrl(media->url), media->mime)) {
+					previewIt->siteSnapshotRequested = false;
+					previewIt->siteSnapshotFinished  = true;
+				}
+			}
+		}
+
+		if (previewIt->title.trimmed().isEmpty() || previewIt->title == tr("Fetching post metadata")) {
+			previewIt->title =
+				fallbackHandle.isEmpty() ? tr("Post on X") : tr("Post by %1").arg(fallbackHandle);
+		}
+		if (previewIt->subtitle.trimmed().isEmpty()) {
+			previewIt->subtitle = tr("X");
+		}
+		if (!success && previewIt->description.trimmed().isEmpty()) {
+			previewIt->description = failureText;
+		}
+		if (success && !parsedSyndication && previewIt->description.trimmed().isEmpty()) {
+			previewIt->description = tr("Post metadata unavailable");
+		}
+
+		previewIt->siteSnapshotRequested = false;
+		previewIt->siteSnapshotFinished  = true;
+		previewIt->thumbnailFinished     = true;
+		previewIt->failed                = !parsedSyndication;
+		publishPersistentChatPreviewUpdate(previewKey);
+		if (parsedSyndication && !parentStatusId.isEmpty()) {
+			requestPersistentChatXPostReplyContext(previewKey, parentStatusId, 3);
+		}
+	});
+
+	return true;
+}
+
+void MainWindow::requestPersistentChatXPostReplyContext(const QString &previewKey, const QString &statusId,
+														int remaining, QVariantList directChain) {
+	const QString trimmedStatusId = statusId.trimmed();
+	if (previewKey.isEmpty() || trimmedStatusId.isEmpty() || remaining <= 0) {
+		return;
+	}
+
+	const QUrl requestUrl = xPostSyndicationUrl(trimmedStatusId);
+	if (!requestUrl.isValid()) {
+		return;
+	}
+
+	QNetworkRequest request(requestUrl);
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
+	QNetworkReply *reply = Global::get().nam->get(request);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this,
+			[this, reply, previewKey, remaining, directChain = std::move(directChain)]() {
+				const QByteArray data = reply->readAll();
+				const bool success    = reply->error() == QNetworkReply::NoError;
+				reply->deleteLater();
+
+				if (!success || data.isEmpty()) {
+					return;
+				}
+
+				QJsonParseError error;
+				const QJsonDocument document = QJsonDocument::fromJson(data, &error);
+				if (error.error != QJsonParseError::NoError || !document.isObject()) {
+					return;
+				}
+
+				const QJsonObject object = document.object();
+				const QVariantMap summary = xPostSummaryMetadata(object);
+				if (summary.isEmpty()) {
+					return;
+				}
+
+				QVariantList nextChain = directChain;
+				const QString currentStatusId = summary.value(QStringLiteral("id")).toString().trimmed();
+				bool alreadyIncluded          = false;
+				for (const QVariant &value : std::as_const(nextChain)) {
+					if (!currentStatusId.isEmpty()
+						&& value.toMap().value(QStringLiteral("id")).toString().trimmed() == currentStatusId) {
+						alreadyIncluded = true;
+						break;
+					}
+				}
+				if (!alreadyIncluded) {
+					nextChain.push_back(summary);
+				}
+				while (nextChain.size() > 3) {
+					nextChain.removeLast();
+				}
+
+				auto previewIt = m_persistentChatPreviews.find(previewKey);
+				if (previewIt == m_persistentChatPreviews.end()) {
+					return;
+				}
+
+				QVariantList displayChain;
+				for (int i = nextChain.size() - 1; i >= 0; --i) {
+					displayChain.push_back(nextChain.at(i));
+				}
+				if (!displayChain.isEmpty()) {
+					QVariantMap metadata = previewIt->metadata;
+					metadata.insert(QStringLiteral("xReplyContext"), displayChain);
+					previewIt->metadata = metadata;
+				}
+				previewIt->metadataFinished     = true;
+				previewIt->thumbnailFinished    = true;
+				previewIt->siteSnapshotRequested = false;
+				previewIt->siteSnapshotFinished  = true;
+				publishPersistentChatPreviewUpdate(previewKey);
+
+				if (remaining <= 1 || nextChain.size() >= 3) {
+					return;
+				}
+
+				QString parentStatusId = xPostParentStatusIdFromSyndicationObject(object);
+				if (parentStatusId.isEmpty() || parentStatusId == currentStatusId) {
+					return;
+				}
+				for (const QVariant &value : std::as_const(nextChain)) {
+					if (value.toMap().value(QStringLiteral("id")).toString().trimmed() == parentStatusId) {
+						return;
+					}
+				}
+				requestPersistentChatXPostReplyContext(previewKey, parentStatusId, remaining - 1, nextChain);
+			});
+}
+
+bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, const QUrl &previewUrl) {
+	if (previewKey.isEmpty() || !isSafePreviewTarget(previewUrl)) {
+		return false;
+	}
+
+	const std::optional< PersistentChatPreviewOEmbedTarget > target = previewOEmbedTargetForUrl(previewUrl);
+	if (!target) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end()) {
+		return false;
+	}
+
+	if (const std::optional< PersistentChatPreviewEmbedTarget > embedTarget = previewEmbedTargetForUrl(previewUrl);
+		embedTarget) {
+		it->siteSnapshotRequested = false;
+		it->siteSnapshotFinished  = true;
+		it->thumbnailFinished     = true;
+	}
+
+	QNetworkRequest request(target->url);
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
+	QNetworkReply *reply = Global::get().nam->get(request);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, target]() {
+		const QByteArray data     = reply->readAll();
+		const bool success        = reply->error() == QNetworkReply::NoError;
+		const QString failureText = previewFailureText(reply);
+		reply->deleteLater();
+
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()) {
+			return;
+		}
+
+		previewIt->metadataFinished = true;
+		previewIt->openLabel        = target->openLabel;
+		bool thumbnailRequested     = false;
+
+		if (success && !data.isEmpty()) {
+			QJsonParseError error;
+			const QJsonDocument document = QJsonDocument::fromJson(data, &error);
+			if (error.error == QJsonParseError::NoError && document.isObject()) {
+				const QJsonObject object = document.object();
+				const QString title      = object.value(QStringLiteral("title")).toString().trimmed();
+				const QString author     = object.value(QStringLiteral("author_name")).toString().trimmed();
+				const QString provider   = object.value(QStringLiteral("provider_name")).toString().trimmed();
+				const QString html       = object.value(QStringLiteral("html")).toString();
+				const QString postText   = target->socialPost ? xPostTextFromOEmbedHtml(html) : QString();
+
+				previewIt->title = !postText.isEmpty()
+									   ? postText
+									   : (title.isEmpty() ? target->fallbackTitle : trimmedPreviewText(title, 280));
+				if (!author.isEmpty()) {
+					previewIt->subtitle =
+						target->socialPost ? author : QObject::tr("%1 by %2").arg(target->siteLabel, author);
+					previewIt->description = target->socialPost ? target->siteLabel : QString();
+				} else {
+					previewIt->subtitle = provider.isEmpty() ? target->siteLabel : provider;
+					if (target->socialPost) {
+						previewIt->description = target->siteLabel;
+					}
+				}
+
+				const QString thumbnailUrlString = object.value(QStringLiteral("thumbnail_url")).toString().trimmed();
+				const QUrl thumbnailUrl = previewIt->canonicalUrl.isEmpty()
+											  ? QUrl(thumbnailUrlString)
+											  : QUrl(previewIt->canonicalUrl).resolved(QUrl(thumbnailUrlString));
+				if (thumbnailUrl.isValid() && isSafePreviewTarget(thumbnailUrl)) {
+					thumbnailRequested = true;
+					QNetworkRequest thumbnailRequest(thumbnailUrl);
+					preparePreviewImageRequest(thumbnailRequest);
+					QNetworkReply *thumbnailReply = Global::get().nam->get(thumbnailRequest);
+					applyPreviewReplyGuards(thumbnailReply, PREVIEW_MAX_IMAGE_BYTES);
+					connect(thumbnailReply, &QNetworkReply::finished, this,
+							[this, thumbnailReply, previewKey]() {
+						const QByteArray data = thumbnailReply->readAll();
+						const bool success    = thumbnailReply->error() == QNetworkReply::NoError;
+						thumbnailReply->deleteLater();
+
+						auto it = m_persistentChatPreviews.find(previewKey);
+						if (it == m_persistentChatPreviews.end()) {
+							return;
+						}
+						it->thumbnailFinished = true;
+						if (success) {
+							const QImage image = decodePersistentChatThumbnailImage(data);
+							if (!image.isNull()) {
+								it->thumbnailImage = persistentChatThumbnailImage(image);
+								it->failed         = false;
+							}
+						}
+						publishPersistentChatPreviewUpdate(previewKey);
+					});
+				}
+			}
+		}
+
+		if (previewIt->title.trimmed().isEmpty() || previewIt->title == tr("Loading link preview...")) {
+			previewIt->title = target->fallbackTitle;
+		}
+		if (previewIt->subtitle.trimmed().isEmpty()) {
+			previewIt->subtitle = target->siteLabel;
+		}
+		if (!success && previewIt->description.trimmed().isEmpty()) {
+			previewIt->description = failureText;
+			if (previewIt->mediaDataUrl.isEmpty()) {
+				previewIt->failed = true;
+			}
+		}
+		if (!thumbnailRequested) {
+			previewIt->thumbnailFinished = true;
+		}
+		publishPersistentChatPreviewUpdate(previewKey);
+	});
+
 	return true;
 }
 
@@ -17050,6 +23833,306 @@ bool MainWindow::requestPersistentChatRedditVideoAudioPreview(const QString &pre
 		if (applyPersistentChatRemoteAudioMedia(*previewIt, audioUrl, QStringLiteral("audio/mp4"))) {
 			publishPersistentChatPreviewUpdate(previewKey);
 		}
+	});
+
+	return true;
+}
+
+void prepareGitHubPreviewRequest(QNetworkRequest &request) {
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Accept"),
+						 QByteArrayLiteral("application/vnd.github+json,application/json;q=0.9,*/*;q=0.5"));
+	request.setRawHeader(QByteArrayLiteral("X-GitHub-Api-Version"), QByteArrayLiteral("2026-03-10"));
+}
+
+QString githubJsonString(const QJsonObject &object, const QString &key) {
+	return object.value(key).toString().trimmed();
+}
+
+std::optional< qlonglong > githubJsonInteger(const QJsonObject &object, const QString &key) {
+	const QJsonValue value = object.value(key);
+	if (value.isDouble()) {
+		return static_cast< qlonglong >(value.toDouble());
+	}
+	if (value.isString()) {
+		bool ok                = false;
+		const qlonglong parsed = value.toString().trimmed().toLongLong(&ok);
+		if (ok) {
+			return parsed;
+		}
+	}
+	return std::nullopt;
+}
+
+void githubInsertIntegerMetadata(QVariantMap &metadata, const QString &metadataKey, const QJsonObject &object,
+								 const QString &jsonKey) {
+	const std::optional< qlonglong > value = githubJsonInteger(object, jsonKey);
+	if (value && *value >= 0) {
+		metadata.insert(metadataKey, *value);
+	}
+}
+
+QString githubReleaseBodySummary(QString body) {
+	body.replace(QLatin1String("\r\n"), QLatin1String("\n"));
+	body.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+
+	QStringList parts;
+	for (QString line : body.split(QLatin1Char('\n'))) {
+		line = line.trimmed();
+		if (line.isEmpty() || line.startsWith(QLatin1String("<!--"))
+			|| line.startsWith(QLatin1String("[//]:"))) {
+			continue;
+		}
+		line.replace(QRegularExpression(QLatin1String("^#{1,6}\\s+")), QString());
+		line.replace(QRegularExpression(QLatin1String("^[-*+]\\s+")), QString());
+		line.replace(QRegularExpression(QLatin1String("^>\\s*")), QString());
+		if (!line.isEmpty()) {
+			parts.push_back(line);
+		}
+		if (parts.join(QLatin1Char(' ')).size() >= 220) {
+			break;
+		}
+	}
+
+	return trimmedPreviewText(parts.join(QLatin1Char(' ')), 180);
+}
+
+void applyGitHubRepositoryMetadata(MainWindow::PersistentChatPreview &preview,
+								   const GitHubRepositoryRef &repository, const QJsonObject &object) {
+	const QString fallbackFullName = QStringLiteral("%1/%2").arg(repository.owner, repository.repo);
+	const QString fullName         = githubJsonString(object, QStringLiteral("full_name"));
+	const QString htmlUrl          = githubJsonString(object, QStringLiteral("html_url"));
+	const QString description      = githubJsonString(object, QStringLiteral("description"));
+	const QJsonObject owner        = object.value(QStringLiteral("owner")).toObject();
+	const QJsonObject license      = object.value(QStringLiteral("license")).toObject();
+	const QString licenseSpdx      = githubJsonString(license, QStringLiteral("spdx_id"));
+	const QString licenseText      = licenseSpdx == QLatin1String("NOASSERTION")
+										? githubJsonString(license, QStringLiteral("name"))
+										: licenseSpdx;
+
+	QVariantMap metadata = preview.metadata;
+	metadata.insert(QStringLiteral("provider"), QStringLiteral("github"));
+	metadata.insert(QStringLiteral("githubOwner"), repository.owner);
+	metadata.insert(QStringLiteral("githubRepo"), repository.repo);
+	metadata.insert(QStringLiteral("githubFullName"), fullName.isEmpty() ? fallbackFullName : fullName);
+	metadata.insert(QStringLiteral("githubHtmlUrl"), htmlUrl.isEmpty() ? githubRepositoryHtmlUrl(repository) : htmlUrl);
+	insertPreviewMetadataValue(metadata, QStringLiteral("githubDescription"), description);
+	insertPreviewMetadataValue(metadata, QStringLiteral("githubLanguage"),
+							   githubJsonString(object, QStringLiteral("language")));
+	insertPreviewMetadataValue(metadata, QStringLiteral("githubDefaultBranch"),
+							   githubJsonString(object, QStringLiteral("default_branch")));
+	insertPreviewMetadataValue(metadata, QStringLiteral("githubPushedAt"),
+							   githubJsonString(object, QStringLiteral("pushed_at")));
+	insertPreviewMetadataValue(metadata, QStringLiteral("githubOwnerLogin"),
+							   githubJsonString(owner, QStringLiteral("login")));
+	insertPreviewMetadataValue(metadata, QStringLiteral("githubOwnerAvatarUrl"),
+							   githubJsonString(owner, QStringLiteral("avatar_url")));
+	insertPreviewMetadataValue(metadata, QStringLiteral("githubLicense"), licenseText);
+	githubInsertIntegerMetadata(metadata, QStringLiteral("githubStars"), object, QStringLiteral("stargazers_count"));
+	githubInsertIntegerMetadata(metadata, QStringLiteral("githubForks"), object, QStringLiteral("forks_count"));
+	githubInsertIntegerMetadata(metadata, QStringLiteral("githubOpenIssues"), object,
+								QStringLiteral("open_issues_count"));
+	if (object.value(QStringLiteral("private")).toBool(false)) {
+		metadata.insert(QStringLiteral("githubPrivate"), true);
+	}
+	if (object.value(QStringLiteral("archived")).toBool(false)) {
+		metadata.insert(QStringLiteral("githubArchived"), true);
+	}
+	if (object.value(QStringLiteral("fork")).toBool(false)) {
+		metadata.insert(QStringLiteral("githubFork"), true);
+	}
+
+	QVariantList topics;
+	for (const QJsonValue &value : object.value(QStringLiteral("topics")).toArray()) {
+		const QString topic = value.toString().trimmed();
+		if (!topic.isEmpty() && !topics.contains(QVariant(topic))) {
+			topics.push_back(topic);
+		}
+		if (topics.size() >= 4) {
+			break;
+		}
+	}
+	if (!topics.isEmpty()) {
+		metadata.insert(QStringLiteral("githubTopics"), topics);
+	}
+	preview.metadata = metadata;
+
+	preview.canonicalUrl         = htmlUrl.isEmpty() ? githubRepositoryHtmlUrl(repository) : htmlUrl;
+	preview.title                = fullName.isEmpty() ? fallbackFullName : fullName;
+	preview.subtitle             = QObject::tr("GitHub");
+	preview.description          = description;
+	preview.openLabel            = QObject::tr("Open on GitHub");
+	preview.metadataFinished     = true;
+	preview.thumbnailFinished    = true;
+	preview.siteSnapshotFinished = true;
+	preview.failed               = false;
+}
+
+void applyGitHubLatestReleaseMetadata(MainWindow::PersistentChatPreview &preview, const QJsonObject &object) {
+	const QString tagName      = githubJsonString(object, QStringLiteral("tag_name"));
+	const QString name         = githubJsonString(object, QStringLiteral("name"));
+	const QString htmlUrl      = githubJsonString(object, QStringLiteral("html_url"));
+	const QString publishedAt  = githubJsonString(object, QStringLiteral("published_at"));
+	const QString releaseNotes = githubReleaseBodySummary(object.value(QStringLiteral("body")).toString());
+
+	QVariantMap metadata = preview.metadata;
+	metadata.remove(QStringLiteral("githubLatestReleaseLoading"));
+	metadata.remove(QStringLiteral("githubLatestReleaseMissing"));
+	insertPreviewMetadataValue(metadata, QStringLiteral("githubLatestReleaseTag"), tagName);
+	insertPreviewMetadataValue(metadata, QStringLiteral("githubLatestReleaseName"), name);
+	insertPreviewMetadataValue(metadata, QStringLiteral("githubLatestReleaseUrl"), htmlUrl);
+	insertPreviewMetadataValue(metadata, QStringLiteral("githubLatestReleasePublishedAt"), publishedAt);
+	insertPreviewMetadataValue(metadata, QStringLiteral("githubLatestReleaseNotes"), releaseNotes);
+	if (object.value(QStringLiteral("prerelease")).toBool(false)) {
+		metadata.insert(QStringLiteral("githubLatestReleasePrerelease"), true);
+	}
+
+	const QJsonArray assets = object.value(QStringLiteral("assets")).toArray();
+	qlonglong downloadCount = 0;
+	int assetCount          = 0;
+	for (const QJsonValue &value : assets) {
+		const QJsonObject asset = value.toObject();
+		if (asset.isEmpty()) {
+			continue;
+		}
+		++assetCount;
+		if (const std::optional< qlonglong > count = githubJsonInteger(asset, QStringLiteral("download_count"));
+			count && *count > 0) {
+			downloadCount += *count;
+		}
+		if (!metadata.contains(QStringLiteral("githubLatestReleaseAssetName"))) {
+			insertPreviewMetadataValue(metadata, QStringLiteral("githubLatestReleaseAssetName"),
+									   githubJsonString(asset, QStringLiteral("name")));
+			insertPreviewMetadataValue(metadata, QStringLiteral("githubLatestReleaseAssetUrl"),
+									   githubJsonString(asset, QStringLiteral("browser_download_url")));
+		}
+	}
+	if (assetCount > 0) {
+		metadata.insert(QStringLiteral("githubLatestReleaseAssetCount"), assetCount);
+	}
+	if (downloadCount > 0) {
+		metadata.insert(QStringLiteral("githubLatestReleaseDownloadCount"), downloadCount);
+	}
+	preview.metadata = metadata;
+}
+
+void applyGitHubMissingReleaseMetadata(MainWindow::PersistentChatPreview &preview) {
+	QVariantMap metadata = preview.metadata;
+	metadata.remove(QStringLiteral("githubLatestReleaseLoading"));
+	metadata.insert(QStringLiteral("githubLatestReleaseMissing"), true);
+	preview.metadata = metadata;
+}
+
+bool MainWindow::requestPersistentChatGitHubPreview(const QString &previewKey, const QUrl &previewUrl) {
+	if (previewKey.isEmpty() || !isSafePreviewTarget(previewUrl)) {
+		return false;
+	}
+
+	const std::optional< GitHubRepositoryRef > repository = githubRepositoryFromUrl(previewUrl);
+	if (!repository) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested || it->remoteMediaFinished) {
+		return false;
+	}
+
+	it->canonicalUrl             = githubRepositoryHtmlUrl(*repository);
+	it->title                    = QStringLiteral("%1/%2").arg(repository->owner, repository->repo);
+	it->subtitle                 = tr("GitHub");
+	it->description              = tr("Fetching repository metadata");
+	it->openLabel                = tr("Open on GitHub");
+	it->remoteMediaRequested     = true;
+	it->thumbnailFinished        = true;
+	it->siteSnapshotFinished     = true;
+	QVariantMap metadata         = it->metadata;
+	metadata.insert(QStringLiteral("provider"), QStringLiteral("github"));
+	metadata.insert(QStringLiteral("githubOwner"), repository->owner);
+	metadata.insert(QStringLiteral("githubRepo"), repository->repo);
+	metadata.insert(QStringLiteral("githubFullName"), it->title);
+	metadata.insert(QStringLiteral("githubHtmlUrl"), it->canonicalUrl);
+	metadata.insert(QStringLiteral("githubLatestReleaseLoading"), true);
+	it->metadata = metadata;
+
+	QNetworkRequest request(githubApiRepositoryUrl(*repository));
+	prepareGitHubPreviewRequest(request);
+	QNetworkReply *reply = Global::get().nam->get(request);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, repository]() {
+		const QByteArray data     = reply->readAll();
+		const bool success        = reply->error() == QNetworkReply::NoError;
+		const QString failureText = previewFailureText(reply);
+		reply->deleteLater();
+
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()) {
+			return;
+		}
+
+		bool repositoryApplied = false;
+		if (success && !data.isEmpty()) {
+			QJsonParseError error;
+			const QJsonDocument document = QJsonDocument::fromJson(data, &error);
+			if (error.error == QJsonParseError::NoError && document.isObject()) {
+				const QJsonObject object = document.object();
+				if (!githubJsonString(object, QStringLiteral("full_name")).isEmpty()) {
+					applyGitHubRepositoryMetadata(*previewIt, *repository, object);
+					repositoryApplied = true;
+				}
+			}
+		}
+
+		if (!repositoryApplied) {
+			previewIt->metadataFinished     = true;
+			previewIt->thumbnailFinished    = true;
+			previewIt->remoteMediaRequested = false;
+			previewIt->remoteMediaFinished  = true;
+			previewIt->failed               = true;
+			previewIt->description = success ? tr("GitHub repository metadata unavailable") : failureText;
+			applyGitHubMissingReleaseMetadata(*previewIt);
+			publishPersistentChatPreviewUpdate(previewKey);
+			return;
+		}
+
+		publishPersistentChatPreviewUpdate(previewKey);
+
+		QNetworkRequest releaseRequest(githubApiLatestReleaseUrl(*repository));
+		prepareGitHubPreviewRequest(releaseRequest);
+		QNetworkReply *releaseReply = Global::get().nam->get(releaseRequest);
+		applyPreviewReplyGuards(releaseReply, PREVIEW_MAX_PAGE_BYTES, false);
+		connect(releaseReply, &QNetworkReply::finished, this, [this, releaseReply, previewKey]() {
+			const QByteArray releaseData = releaseReply->readAll();
+			const bool releaseSuccess    = releaseReply->error() == QNetworkReply::NoError;
+			releaseReply->deleteLater();
+
+			auto releasePreviewIt = m_persistentChatPreviews.find(previewKey);
+			if (releasePreviewIt == m_persistentChatPreviews.end()) {
+				return;
+			}
+
+			releasePreviewIt->remoteMediaRequested = false;
+			releasePreviewIt->remoteMediaFinished  = true;
+
+			bool releaseApplied = false;
+			if (releaseSuccess && !releaseData.isEmpty()) {
+				QJsonParseError error;
+				const QJsonDocument document = QJsonDocument::fromJson(releaseData, &error);
+				if (error.error == QJsonParseError::NoError && document.isObject()) {
+					const QJsonObject object = document.object();
+					if (!githubJsonString(object, QStringLiteral("tag_name")).isEmpty()
+						|| !githubJsonString(object, QStringLiteral("html_url")).isEmpty()) {
+						applyGitHubLatestReleaseMetadata(*releasePreviewIt, object);
+						releaseApplied = true;
+					}
+				}
+			}
+			if (!releaseApplied) {
+				applyGitHubMissingReleaseMetadata(*releasePreviewIt);
+			}
+
+			publishPersistentChatPreviewUpdate(previewKey);
+		});
 	});
 
 	return true;
@@ -17123,7 +24206,7 @@ bool MainWindow::requestPersistentChatRedditVideoPreview(const QString &previewK
 				if (applied && previewIt->thumbnailImage.isNull() && previewImageUrl.isValid()
 					&& isSafePreviewTarget(previewImageUrl)) {
 					QNetworkRequest imageRequest(previewImageUrl);
-					preparePreviewRequest(imageRequest);
+					preparePreviewImageRequest(imageRequest);
 					QNetworkReply *imageReply = Global::get().nam->get(imageRequest);
 					applyPreviewReplyGuards(imageReply, PREVIEW_MAX_IMAGE_BYTES);
 					connect(imageReply, &QNetworkReply::finished, this, [this, imageReply, previewKey]() {
@@ -17172,6 +24255,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 	}
 
 	const auto renderIfVisible = [this, previewKey]() {
+		storePersistentChatPreviewDiskCache(previewKey);
 		QPointer< MainWindow > guardedThis(this);
 		QMetaObject::invokeMethod(
 			this,
@@ -17198,6 +24282,45 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			},
 			Qt::QueuedConnection);
 	};
+
+	if (restorePersistentChatPreviewDiskCache(previewKey)) {
+		auto restoredIt = m_persistentChatPreviews.find(previewKey);
+		if (restoredIt != m_persistentChatPreviews.end()) {
+			const QUrl restoredPreviewUrl(restoredIt->canonicalUrl);
+			static QSet< QString > s_xPostSessionRefreshes;
+			if (isXPostUrl(restoredPreviewUrl) && !s_xPostSessionRefreshes.contains(previewKey)) {
+				s_xPostSessionRefreshes.insert(previewKey);
+				restoredIt->remoteMediaFinished = false;
+				requestPersistentChatXPostPreview(previewKey, restoredPreviewUrl);
+			}
+			static QSet< QString > s_githubSessionRefreshes;
+			if (isGitHubRepositoryUrl(restoredPreviewUrl) && !s_githubSessionRefreshes.contains(previewKey)) {
+				s_githubSessionRefreshes.insert(previewKey);
+				restoredIt->remoteMediaFinished = false;
+				requestPersistentChatGitHubPreview(previewKey, restoredPreviewUrl);
+			}
+			static QSet< QString > s_steamSessionRefreshes;
+			if (steamAppIdFromUrl(restoredPreviewUrl) && !s_steamSessionRefreshes.contains(previewKey)) {
+				s_steamSessionRefreshes.insert(previewKey);
+				restoredIt->remoteMediaFinished = false;
+				requestPersistentChatSteamAppPreview(previewKey, restoredPreviewUrl);
+			}
+			static QSet< QString > s_richProductSessionRefreshes;
+			const std::optional< RichPreviewProviderInfo > richProvider = richPreviewProviderForUrl(restoredPreviewUrl);
+			if (richProvider
+				&& (richProvider->kind == QLatin1String("product")
+					|| richProvider->kind == QLatin1String("systembolagetProduct")
+					|| richProvider->kind == QLatin1String("marketplaceListing"))
+				&& !s_richProductSessionRefreshes.contains(previewKey)) {
+				s_richProductSessionRefreshes.insert(previewKey);
+				restoredIt->metadata.remove(QStringLiteral("richPreviewMetadataVersion"));
+				restoredIt->remoteMediaFinished = false;
+				requestPersistentChatRichProviderPreview(previewKey, restoredPreviewUrl);
+			}
+		}
+		renderIfVisible();
+		return;
+	}
 
 	PersistentChatPreview preview;
 	preview.openLabel = tr("Open link");
@@ -17254,8 +24377,19 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			preview.description = tr("Preview unavailable");
 		}
 
+		preview.metadata = previewMetadataWithSwedishData(preview.metadata, previewUrl, preview.title,
+														  preview.description);
+		const QString flashbackPostId = flashbackPostIdFromUrl(previewUrl);
+		if (!flashbackPostId.isEmpty()) {
+			const QUrl threadPostUrl = flashbackThreadPostUrl(previewUrl, flashbackPostId);
+			if (threadPostUrl.isValid()) {
+				preview.canonicalUrl = threadPostUrl.toString();
+				preview.openLabel    = tr("Open in thread");
+			}
+		}
 		applyPersistentChatRemotePlayableMedia(preview, previewUrl);
 		m_persistentChatPreviews.insert(previewKey, preview);
+		requestPersistentChatRichProviderPreview(previewKey, previewUrl);
 		requestPersistentChatRedditVideoPreview(previewKey, previewUrl);
 		if (preview.previewAssetID > 0) {
 			ensurePersistentChatPreviewAssetDownload(preview.previewAssetID, previewKey);
@@ -17267,17 +24401,23 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 	}
 
 	if (previewKey.startsWith(QLatin1String("youtube:"))) {
-		const QString videoId = previewKey.mid(QStringLiteral("youtube:").size());
-		preview.canonicalUrl  = QString::fromLatin1("https://www.youtube.com/watch?v=%1").arg(videoId);
-		preview.title         = tr("Loading YouTube preview...");
+		const QString youtubePayload = previewKey.mid(QStringLiteral("youtube:").size());
+		const std::optional< YouTubePreviewTarget > youtubeTarget = youtubePreviewTargetFromKeyPayload(youtubePayload);
+		if (!youtubeTarget) {
+			return;
+		}
+		const QString videoId     = youtubeTarget->videoId;
+		const bool youtubeIsShort = youtubeTarget->shorts;
+		preview.canonicalUrl      = youtubeTarget->canonicalUrl.toString(QUrl::FullyEncoded);
+		preview.title = youtubeIsShort ? tr("Loading YouTube Shorts preview...") : tr("Loading YouTube preview...");
 		preview.subtitle      = tr("Fetching title and thumbnail");
 		preview.openLabel     = tr("Open on YouTube");
+		preview.mediaKind     = QStringLiteral("video");
 		m_persistentChatPreviews.insert(previewKey, preview);
 
 		QUrl oembedUrl(QLatin1String("https://www.youtube.com/oembed"));
 		QUrlQuery oembedQuery;
-		oembedQuery.addQueryItem(QLatin1String("url"),
-								 QString::fromLatin1("https://www.youtube.com/watch?v=%1").arg(videoId));
+		oembedQuery.addQueryItem(QLatin1String("url"), youtubeTarget->canonicalUrl.toString(QUrl::FullyEncoded));
 		oembedQuery.addQueryItem(QLatin1String("format"), QLatin1String("json"));
 		oembedUrl.setQuery(oembedQuery);
 
@@ -17285,7 +24425,8 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		preparePreviewRequest(oembedRequest);
 		QNetworkReply *oembedReply = Global::get().nam->get(oembedRequest);
 		applyPreviewReplyGuards(oembedReply, PREVIEW_MAX_PAGE_BYTES);
-		connect(oembedReply, &QNetworkReply::finished, this, [this, oembedReply, previewKey, renderIfVisible]() {
+		connect(oembedReply, &QNetworkReply::finished, this,
+				[this, oembedReply, previewKey, youtubeIsShort, renderIfVisible]() {
 			const QByteArray response = oembedReply->readAll();
 			const bool success        = oembedReply->error() == QNetworkReply::NoError;
 			const QString failureText = previewFailureText(oembedReply);
@@ -17305,15 +24446,21 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 					const QJsonObject object = document.object();
 					const QString title      = object.value(QLatin1String("title")).toString().trimmed();
 					const QString author     = object.value(QLatin1String("author_name")).toString().trimmed();
-					it->title                = title.isEmpty() ? tr("YouTube video") : title;
-					it->subtitle             = author.isEmpty() ? tr("YouTube") : tr("YouTube by %1").arg(author);
+					it->title                = title.isEmpty()
+												   ? (youtubeIsShort ? tr("YouTube Short") : tr("YouTube video"))
+												   : title;
+					it->subtitle             = author.isEmpty()
+												   ? (youtubeIsShort ? tr("YouTube Shorts") : tr("YouTube"))
+												   : (youtubeIsShort ? tr("YouTube Shorts by %1").arg(author)
+																	: tr("YouTube by %1").arg(author));
 					renderIfVisible();
 					return;
 				}
 			}
 
-			if (it->title == tr("Loading YouTube preview...")) {
-				it->title = tr("YouTube video");
+			if (it->title == tr("Loading YouTube preview...")
+				|| it->title == tr("Loading YouTube Shorts preview...")) {
+				it->title = youtubeIsShort ? tr("YouTube Short") : tr("YouTube video");
 			}
 			if (it->subtitle.isEmpty() || it->subtitle == tr("Fetching title and thumbnail")) {
 				it->subtitle = failureText;
@@ -17327,10 +24474,11 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 
 		QUrl thumbnailUrl(QString::fromLatin1("https://i.ytimg.com/vi/%1/hqdefault.jpg").arg(videoId));
 		QNetworkRequest thumbnailRequest(thumbnailUrl);
-		preparePreviewRequest(thumbnailRequest);
+		preparePreviewImageRequest(thumbnailRequest);
 		QNetworkReply *thumbnailReply = Global::get().nam->get(thumbnailRequest);
 		applyPreviewReplyGuards(thumbnailReply, PREVIEW_MAX_IMAGE_BYTES);
-		connect(thumbnailReply, &QNetworkReply::finished, this, [this, thumbnailReply, previewKey, renderIfVisible]() {
+		connect(thumbnailReply, &QNetworkReply::finished, this,
+				[this, thumbnailReply, previewKey, youtubeIsShort, renderIfVisible]() {
 			const QByteArray data     = thumbnailReply->readAll();
 			const bool success        = thumbnailReply->error() == QNetworkReply::NoError;
 			const QString failureText = previewFailureText(thumbnailReply);
@@ -17352,14 +24500,142 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 				}
 			}
 
-			if (it->metadataFinished && it->title == tr("Loading YouTube preview...")) {
-				it->title = tr("YouTube video");
+			if (it->metadataFinished
+				&& (it->title == tr("Loading YouTube preview...")
+					|| it->title == tr("Loading YouTube Shorts preview..."))) {
+				it->title = youtubeIsShort ? tr("YouTube Short") : tr("YouTube video");
 			}
 			if (it->metadataFinished && it->subtitle.isEmpty()) {
 				it->subtitle = failureText;
 			}
 			if (it->metadataFinished && it->thumbnailImage.isNull()) {
 				it->failed = true;
+			}
+			renderIfVisible();
+		});
+		return;
+	}
+
+	if (previewKey.startsWith(QLatin1String("twitch:"))) {
+		const QString twitchPayload = previewKey.mid(QStringLiteral("twitch:").size());
+		const std::optional< TwitchPreviewTarget > twitchTarget = twitchPreviewTargetFromKeyPayload(twitchPayload);
+		if (!twitchTarget) {
+			return;
+		}
+
+		preview.canonicalUrl = twitchTarget->canonicalUrl.toString(QUrl::FullyEncoded);
+		preview.title        = tr("Loading Twitch preview...");
+		preview.subtitle     = tr("Fetching title and thumbnail");
+		preview.openLabel    = tr("Open on Twitch");
+		preview.mediaKind    = QStringLiteral("video");
+		QVariantMap metadata;
+		metadata.insert(QStringLiteral("provider"), QStringLiteral("twitch"));
+		metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("twitch"));
+		metadata.insert(QStringLiteral("previewKind"), QStringLiteral("video"));
+		metadata.insert(QStringLiteral("providerName"), tr("Twitch"));
+		metadata.insert(QStringLiteral("twitchKind"), twitchTarget->kind);
+		if (!twitchTarget->channel.isEmpty()) {
+			metadata.insert(QStringLiteral("twitchChannel"), twitchTarget->channel);
+		}
+		if (!twitchTarget->id.isEmpty()) {
+			metadata.insert(twitchTarget->kind == QLatin1String("clip") ? QStringLiteral("twitchClipSlug")
+																		 : QStringLiteral("twitchVideoId"),
+							twitchTarget->id);
+		}
+		preview.metadata = metadata;
+		m_persistentChatPreviews.insert(previewKey, preview);
+
+		QNetworkRequest pageRequest(twitchTarget->canonicalUrl);
+		preparePreviewRequest(pageRequest);
+		QNetworkReply *pageReply = Global::get().nam->get(pageRequest);
+		applyPreviewReplyGuards(pageReply, previewMaxPageBytesForUrl(twitchTarget->canonicalUrl), false);
+		connect(pageReply, &QNetworkReply::finished, this,
+				[this, pageReply, previewKey, twitchTarget = *twitchTarget, renderIfVisible]() {
+			const QByteArray data       = pageReply->readAll();
+			const bool success          = pageReply->error() == QNetworkReply::NoError;
+			const QString contentType   = pageReply->header(QNetworkRequest::ContentTypeHeader).toString().toLower();
+			const QString failureText   = previewFailureText(pageReply);
+			const bool allowPartialHtml = previewAbortReason(pageReply) == QLatin1String("too_large") && !data.isEmpty()
+										  && previewContentTypeLooksHtml(contentType);
+			pageReply->deleteLater();
+
+			auto it = m_persistentChatPreviews.find(previewKey);
+			if (it == m_persistentChatPreviews.end()) {
+				return;
+			}
+
+			it->metadataFinished = true;
+			bool thumbnailRequested = false;
+
+			if ((success || allowPartialHtml) && previewContentTypeLooksHtml(contentType)) {
+				const qint64 maxPageBytes = previewMaxPageBytesForUrl(twitchTarget.canonicalUrl);
+				const QByteArray htmlBytes =
+					data.size() > maxPageBytes ? data.left(maxPageBytes) : data;
+				const QString html                       = decodedPreviewHtml(htmlBytes, contentType);
+				const QHash< QString, QString > metaTags = extractMetaTags(html);
+				const QString title                      = metaTags.value(
+					QLatin1String("og:title"), metaTags.value(QLatin1String("twitter:title"), extractHtmlTitle(html)));
+				const QString description = metaTags.value(
+					QLatin1String("og:description"),
+					metaTags.value(QLatin1String("twitter:description"), metaTags.value(QLatin1String("description"))));
+				const QString siteName = metaTags.value(QLatin1String("og:site_name"), tr("Twitch")).trimmed();
+
+				it->title       = title.trimmed().isEmpty() ? twitchFallbackTitle(twitchTarget)
+															: trimmedPreviewText(title, 280);
+				it->subtitle    = siteName.isEmpty() ? twitchFallbackSubtitle(twitchTarget) : siteName;
+				it->description = description.trimmed();
+
+				const QString imageUrlString = previewImageMetaTag(metaTags);
+				const QUrl imageUrl          = twitchTarget.canonicalUrl.resolved(QUrl(imageUrlString));
+				if (!imageUrlString.trimmed().isEmpty() && imageUrl.isValid() && isSafePreviewTarget(imageUrl)) {
+					thumbnailRequested = true;
+					QNetworkRequest imageRequest(imageUrl);
+					preparePreviewImageRequest(imageRequest);
+					QNetworkReply *imageReply = Global::get().nam->get(imageRequest);
+					applyPreviewReplyGuards(imageReply, PREVIEW_MAX_IMAGE_BYTES);
+					connect(imageReply, &QNetworkReply::finished, this,
+							[this, imageReply, previewKey, renderIfVisible]() {
+						const QByteArray imageData = imageReply->readAll();
+						const bool imageSuccess    = imageReply->error() == QNetworkReply::NoError;
+						const QString failureText  = previewFailureText(imageReply);
+						imageReply->deleteLater();
+
+						auto it = m_persistentChatPreviews.find(previewKey);
+						if (it == m_persistentChatPreviews.end()) {
+							return;
+						}
+
+						it->thumbnailFinished = true;
+						if (imageSuccess) {
+							const QImage image = decodePersistentChatThumbnailImage(imageData);
+							if (!image.isNull()) {
+								it->thumbnailImage = persistentChatThumbnailImage(image);
+								it->failed         = false;
+								renderIfVisible();
+								return;
+							}
+						}
+
+						if (it->description.isEmpty()) {
+							it->description = failureText;
+						}
+						renderIfVisible();
+					});
+				}
+			}
+
+			if (it->title == tr("Loading Twitch preview...")) {
+				it->title = twitchFallbackTitle(twitchTarget);
+			}
+			if (it->subtitle.isEmpty() || it->subtitle == tr("Fetching title and thumbnail")) {
+				it->subtitle = twitchFallbackSubtitle(twitchTarget);
+			}
+			if ((!success && !allowPartialHtml) && it->description.isEmpty()) {
+				it->description = failureText;
+				it->failed      = true;
+			}
+			if (!thumbnailRequested) {
+				it->thumbnailFinished = true;
 			}
 			renderIfVisible();
 		});
@@ -17378,6 +24654,27 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 	preview.canonicalUrl = previewUrl.toString();
 	preview.subtitle     = provider ? provider->siteLabel : previewDisplayHost(previewUrl);
 	preview.openLabel    = isImagePreview ? tr("Open image") : (provider ? provider->openLabel : tr("Open link"));
+	const QString flashbackPostId = flashbackPostIdFromUrl(previewUrl);
+	if (!flashbackPostId.isEmpty()) {
+		const QUrl threadPostUrl = flashbackThreadPostUrl(previewUrl, flashbackPostId);
+		if (threadPostUrl.isValid()) {
+			preview.canonicalUrl = threadPostUrl.toString();
+			preview.openLabel    = tr("Open in thread");
+		}
+	}
+
+	if (isGoogleSearchUrl(previewUrl)) {
+		const QString searchQuery = googleSearchQuery(previewUrl);
+		preview.title             = googleSearchModeLabel(previewUrl);
+		preview.description       = searchQuery.isEmpty() ? tr("Google search") : searchQuery;
+		preview.metadataFinished  = true;
+		preview.thumbnailFinished = true;
+		preview.failed            = false;
+		m_persistentChatPreviews.insert(previewKey, preview);
+		storePersistentChatPreviewDiskCache(previewKey);
+		renderIfVisible();
+		return;
+	}
 
 	if (!isSafePreviewTarget(previewUrl)) {
 		preview.title             = isImagePreview ? tr("Image preview blocked") : tr("Link preview blocked");
@@ -17385,6 +24682,19 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		preview.metadataFinished  = true;
 		preview.thumbnailFinished = true;
 		m_persistentChatPreviews.insert(previewKey, preview);
+		renderIfVisible();
+		return;
+	}
+
+	if (!isImagePreview && isFacebookReelPreviewUrl(previewUrl) && previewEmbedTargetForUrl(previewUrl)) {
+		preview.title             = provider ? provider->fallbackTitle : tr("Facebook post");
+		preview.description       = tr("Video preview");
+		preview.mediaKind         = QStringLiteral("video");
+		preview.metadataFinished  = true;
+		preview.thumbnailFinished = true;
+		preview.failed            = false;
+		m_persistentChatPreviews.insert(previewKey, preview);
+		storePersistentChatPreviewDiskCache(previewKey);
 		renderIfVisible();
 		return;
 	}
@@ -17405,7 +24715,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		m_persistentChatPreviews.insert(previewKey, preview);
 
 		QNetworkRequest imageRequest(previewUrl);
-		preparePreviewRequest(imageRequest);
+		preparePreviewImageRequest(imageRequest);
 		QNetworkReply *imageReply = Global::get().nam->get(imageRequest);
 		applyPreviewReplyGuards(imageReply, PREVIEW_MAX_IMAGE_BYTES);
 		connect(imageReply, &QNetworkReply::finished, this, [this, imageReply, previewKey, renderIfVisible]() {
@@ -17440,20 +24750,60 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 
 	preview.title       = provider ? provider->fallbackTitle : tr("Loading link preview...");
 	preview.description = tr("Fetching page metadata");
+	if (isXPostUrl(previewUrl)) {
+		preview.title       = tr("Fetching post metadata");
+		preview.description = QString();
+	}
 	m_persistentChatPreviews.insert(previewKey, preview);
+
+	if (requestPersistentChatXPostPreview(previewKey, previewUrl)) {
+		renderIfVisible();
+		return;
+	}
+
+	if (requestPersistentChatGitHubPreview(previewKey, previewUrl)) {
+		renderIfVisible();
+		return;
+	}
 
 	if (requestPersistentChatRedditVideoPreview(previewKey, previewUrl)) {
 		renderIfVisible();
 		return;
 	}
 
-	QNetworkRequest pageRequest(previewUrl);
+	if (const std::optional< RichPreviewProviderInfo > richProvider = richPreviewProviderForUrl(previewUrl);
+		richProvider && richProvider->key == QLatin1String("webhallen")
+		&& requestPersistentChatRichProviderPreview(previewKey, previewUrl)) {
+		renderIfVisible();
+		return;
+	}
+
+	requestPersistentChatSteamAppPreview(previewKey, previewUrl);
+
+	if (const std::optional< PersistentChatPreviewPlayableMediaMeta > giphyMedia =
+			giphyPlayableMediaFromUrl(previewUrl);
+		giphyMedia) {
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt != m_persistentChatPreviews.end()
+			&& applyPersistentChatRemotePlayableMedia(*previewIt, QUrl(giphyMedia->url), giphyMedia->mime)) {
+			previewIt->siteSnapshotRequested = false;
+			previewIt->siteSnapshotFinished  = true;
+		}
+	}
+
+	if (requestPersistentChatOEmbedPreview(previewKey, previewUrl)) {
+		renderIfVisible();
+		return;
+	}
+
+	const QUrl previewPageUrl = flashbackPreviewPageUrl(previewUrl);
+	QNetworkRequest pageRequest(previewPageUrl);
 	preparePreviewRequest(pageRequest);
 	QNetworkReply *pageReply = Global::get().nam->get(pageRequest);
-	applyPreviewReplyGuards(pageReply, PREVIEW_MAX_PAGE_BYTES, false);
+	applyPreviewReplyGuards(pageReply, previewMaxPageBytesForUrl(previewPageUrl), false);
 	connect(
 		pageReply, &QNetworkReply::finished, this,
-		[this, pageReply, previewKey, previewUrl, provider, renderIfVisible]() {
+		[this, pageReply, previewKey, previewUrl, previewPageUrl, provider, renderIfVisible]() {
 			const QByteArray data       = pageReply->readAll();
 			const bool success          = pageReply->error() == QNetworkReply::NoError;
 			const QString contentType   = pageReply->header(QNetworkRequest::ContentTypeHeader).toString().toLower();
@@ -17484,9 +24834,10 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			// Modern SPA pages often advertise a very large Content-Length even though the useful
 			// preview metadata is available near the start of <head>. Parse the prefix we did receive
 			// instead of failing the entire preview outright.
+			const qint64 maxPageBytes = previewMaxPageBytesForUrl(previewPageUrl);
 			const QByteArray htmlBytes =
-				data.size() > PREVIEW_MAX_PAGE_BYTES ? data.left(PREVIEW_MAX_PAGE_BYTES) : data;
-			const QString html                       = QString::fromUtf8(htmlBytes);
+				data.size() > maxPageBytes ? data.left(maxPageBytes) : data;
+			const QString html                       = decodedPreviewHtml(htmlBytes, contentType);
 			const QHash< QString, QString > metaTags = extractMetaTags(html);
 			const QString title                      = metaTags.value(
                 QLatin1String("og:title"), metaTags.value(QLatin1String("twitter:title"), extractHtmlTitle(html)));
@@ -17496,20 +24847,57 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			const QString siteName       = metaTags.value(QLatin1String("og:site_name"),
                                                     provider ? provider->siteLabel : previewDisplayHost(previewUrl));
 			const QString imageUrlString = previewImageMetaTag(metaTags);
+			const std::optional< PersistentChatPreviewPlayableMediaMeta > playableMediaMeta =
+				previewPlayableMediaMetaTag(metaTags);
 
 			it->title = title.isEmpty() ? (provider ? provider->fallbackTitle : previewDisplayHost(previewUrl)) : title;
 			it->subtitle =
 				siteName.isEmpty() ? (provider ? provider->siteLabel : previewDisplayHost(previewUrl)) : siteName;
 			it->description = description;
+			it->metadata = previewMetadataWithSwedishData(it->metadata, previewUrl, it->title, it->description, html,
+														  metaTags);
+			const QString threadPostUrl =
+				it->metadata.value(QStringLiteral("forumThreadPostUrl")).toString().trimmed();
+			if (!threadPostUrl.isEmpty()) {
+				const QUrl canonicalUrl = previewUrl.resolved(QUrl(threadPostUrl));
+				if (canonicalUrl.isValid()) {
+					it->canonicalUrl = canonicalUrl.toString();
+					it->openLabel    = tr("Open in thread");
+				}
+			}
+			const QString productTitle = it->metadata.value(QStringLiteral("productTitle")).toString().trimmed();
+			if (!productTitle.isEmpty()) {
+				it->title = productTitle;
+			}
+			const QString articleTitle = it->metadata.value(QStringLiteral("articleTitle")).toString().trimmed();
+			if (productTitle.isEmpty() && !articleTitle.isEmpty()) {
+				it->title = articleTitle;
+			}
+			const QString articleDescription =
+				it->metadata.value(QStringLiteral("articleDescription")).toString().trimmed();
+			if (!articleDescription.isEmpty()) {
+				it->description = articleDescription;
+			}
+			applyPersistentChatListingMediaItems(*it);
+			if (playableMediaMeta) {
+				const QUrl mediaUrl = previewPageUrl.resolved(QUrl(playableMediaMeta->url));
+				applyPersistentChatRemotePlayableMedia(*it, mediaUrl, playableMediaMeta->mime);
+			}
 
-			if (imageUrlString.isEmpty()) {
+			const QString selectedImageUrlString =
+				imageUrlString.isEmpty()
+					? (!it->metadata.value(QStringLiteral("productImage")).toString().trimmed().isEmpty()
+						   ? it->metadata.value(QStringLiteral("productImage")).toString().trimmed()
+						   : it->metadata.value(QStringLiteral("articleImage")).toString().trimmed())
+					: imageUrlString;
+			if (selectedImageUrlString.isEmpty()) {
 				it->thumbnailFinished = true;
 				ensurePersistentChatPreviewSiteSnapshot(previewKey);
 				renderIfVisible();
 				return;
 			}
 
-			const QUrl imageUrl = previewUrl.resolved(QUrl(imageUrlString));
+			const QUrl imageUrl = previewPageUrl.resolved(QUrl(selectedImageUrlString));
 			if (!isSafePreviewTarget(imageUrl)) {
 				it->thumbnailFinished = true;
 				ensurePersistentChatPreviewSiteSnapshot(previewKey);
@@ -17518,7 +24906,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			}
 
 			QNetworkRequest imageRequest(imageUrl);
-			preparePreviewRequest(imageRequest);
+			preparePreviewImageRequest(imageRequest);
 			QNetworkReply *imageReply = Global::get().nam->get(imageRequest);
 			applyPreviewReplyGuards(imageReply, PREVIEW_MAX_IMAGE_BYTES);
 			connect(imageReply, &QNetworkReply::finished, this, [this, imageReply, previewKey, renderIfVisible]() {
@@ -17538,6 +24926,9 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 					const QImage image = decodePersistentChatThumbnailImage(imageData);
 					if (!image.isNull()) {
 						it->thumbnailImage = persistentChatThumbnailImage(image);
+						if (shouldProbeSocialPreviewForPlayableMedia(QUrl(it->canonicalUrl), it->mediaKind)) {
+							ensurePersistentChatPreviewSiteSnapshot(previewKey);
+						}
 						renderIfVisible();
 						return;
 					}
@@ -17583,7 +24974,7 @@ void MainWindow::ensurePersistentChatPreviewSiteSnapshot(const QString &previewK
 	Q_UNUSED(previewKey);
 #else
 	if (previewKey.isEmpty() || previewKey.startsWith(QLatin1String("image:"))
-		|| previewKey.startsWith(QLatin1String("youtube:"))) {
+		|| previewKey.startsWith(QLatin1String("youtube:")) || previewKey.startsWith(QLatin1String("twitch:"))) {
 		return;
 	}
 
@@ -17618,9 +25009,11 @@ void MainWindow::ensurePersistentChatPreviewSiteSnapshot(const QString &previewK
 		m_persistentChatPreviewSnapshotRenderer = renderer;
 		renderer->setResultCallback([this](const QString &key, const QImage &image, bool success,
 										   const QString &mediaUrl, const QString &mediaMime,
-										   const QString &mediaAudioUrl, const QString &mediaAudioMime) {
+										   const QString &mediaAudioUrl, const QString &mediaAudioMime,
+										   const QVariantList &mediaItems, const QString &posterUrl,
+										   const QString &posterMime) {
 			handlePersistentChatPreviewSiteSnapshotResult(key, image, success, mediaUrl, mediaMime, mediaAudioUrl,
-														  mediaAudioMime);
+														  mediaAudioMime, mediaItems, posterUrl, posterMime);
 		});
 	}
 
@@ -17633,31 +25026,95 @@ void MainWindow::handlePersistentChatPreviewSiteSnapshotResult(const QString &pr
 															   bool success, const QString &mediaUrl,
 															   const QString &mediaMime,
 															   const QString &mediaAudioUrl,
-															   const QString &mediaAudioMime) {
+															   const QString &mediaAudioMime,
+															   const QVariantList &mediaItems,
+															   const QString &posterUrl,
+															   const QString &posterMime) {
 	auto it = m_persistentChatPreviews.find(previewKey);
 	if (it == m_persistentChatPreviews.end()) {
 		return;
 	}
 
-	const bool hasRemoteMedia = applyPersistentChatRemotePlayableMedia(*it, QUrl(mediaUrl), mediaMime);
-	if (hasRemoteMedia || it->mediaKind == QLatin1String("video")) {
-		applyPersistentChatRemoteAudioMedia(*it, QUrl(mediaAudioUrl), mediaAudioMime);
+	const QUrl probedMediaUrl(mediaUrl);
+	const QUrl probedAudioUrl(mediaAudioUrl);
+	const QUrl previewUrl(it->canonicalUrl);
+	std::vector< PersistentChatPreviewMediaItem > parsedMediaItems;
+	QSet< QString > seenMediaItemUrls;
+	for (const QVariant &value : mediaItems) {
+		const QVariantMap itemMap = value.toMap();
+		const QUrl itemUrl(itemMap.value(QStringLiteral("url")).toString().trimmed());
+		const QString itemMimeHint = itemMap.value(QStringLiteral("mime")).toString().trimmed();
+		QUrl normalizedItemUrl     = normalizedRemotePlayableMediaUrl(itemUrl);
+		const QString itemMime     = playableMediaMimeForUrl(normalizedItemUrl, itemMimeHint);
+		if (itemMime.isEmpty() || !isTrustedRemotePlayableMediaUrl(normalizedItemUrl, itemMime)) {
+			continue;
+		}
+
+		const QString normalizedItemUrlString = normalizedItemUrl.toString(QUrl::FullyEncoded);
+		if (normalizedItemUrlString.isEmpty() || seenMediaItemUrls.contains(normalizedItemUrlString)) {
+			continue;
+		}
+		seenMediaItemUrls.insert(normalizedItemUrlString);
+
+		QString itemKind = itemMap.value(QStringLiteral("kind")).toString().trimmed().toLower();
+		if (itemKind.isEmpty()) {
+			itemKind = itemMime.startsWith(QLatin1String("video/"))
+						   ? QStringLiteral("video")
+						   : (itemMime == QLatin1String("image/gif") ? QStringLiteral("gif")
+																	  : QStringLiteral("image"));
+		}
+		parsedMediaItems.push_back(PersistentChatPreviewMediaItem { normalizedItemUrlString, itemMime, itemKind });
 	}
-	const bool socialMediaProbe =
-		shouldProbeSocialPreviewForPlayableMedia(QUrl(it->canonicalUrl), hasRemoteMedia ? QStringLiteral("video") : it->mediaKind);
+	if (!parsedMediaItems.empty()) {
+		it->mediaItems = parsedMediaItems;
+	}
+
+	const QString probedMediaMime =
+		playableMediaMimeForUrl(normalizedRemotePlayableMediaUrl(probedMediaUrl), mediaMime);
+	const bool hasProbedVideoMedia = probedMediaUrl.isValid() && probedMediaMime.startsWith(QLatin1String("video/"));
+	const bool suppressRemoteImageMedia = isInstagramReelPreviewUrl(previewUrl)
+										  && probedMediaMime.startsWith(QLatin1String("image/"));
+	const bool cacheRemoteMedia =
+		!suppressRemoteImageMedia && shouldCacheRemotePlayableMediaForPreview(previewUrl, probedMediaUrl, mediaMime)
+		&& requestPersistentChatRemotePlayableMediaCache(previewKey, probedMediaUrl, mediaMime, probedAudioUrl,
+														 mediaAudioMime);
+	const bool hasRemoteMedia =
+		cacheRemoteMedia ? false
+						 : (!suppressRemoteImageMedia
+								&& applyPersistentChatRemotePlayableMedia(*it, probedMediaUrl, mediaMime));
+	if (!cacheRemoteMedia && (hasRemoteMedia || it->mediaKind == QLatin1String("video"))) {
+		applyPersistentChatRemoteAudioMedia(*it, probedAudioUrl, mediaAudioMime);
+	}
+	const bool socialMediaProbe = shouldProbeSocialPreviewForPlayableMedia(previewUrl, it->mediaKind);
+	const bool preferRemotePoster = isInstagramReelPreviewUrl(previewUrl) && hasProbedVideoMedia;
+	const bool posterRequested =
+		preferRemotePoster && requestPersistentChatPreviewPosterImage(previewKey, QUrl(posterUrl), posterMime);
 	it->siteSnapshotRequested = false;
 	it->siteSnapshotFinished  = true;
-	if (success && !image.isNull() && (!socialMediaProbe || hasRemoteMedia || it->thumbnailImage.isNull())) {
+	if (success && !image.isNull() && !preferRemotePoster
+		&& (!socialMediaProbe || hasRemoteMedia || it->thumbnailImage.isNull())) {
 		it->thumbnailImage    = persistentChatThumbnailImage(persistentChatOpaquePreviewSnapshot(image));
 		it->thumbnailFinished = true;
 		it->failed            = false;
+		if ((isInstagramPreviewUrl(previewUrl) || isFacebookPreviewUrl(previewUrl))
+			&& previewDescriptionIsPlaceholder(it->description)) {
+			it->description =
+				(isInstagramReelPreviewUrl(previewUrl) || isFacebookReelPreviewUrl(previewUrl)) ? tr("Video preview")
+								  : tr("Image preview");
+		}
+	} else if (posterRequested) {
+		it->failed = false;
 	} else if (hasRemoteMedia) {
+		it->thumbnailFinished = true;
+		it->failed            = false;
+	} else if (preferRemotePoster) {
 		it->thumbnailFinished = true;
 		it->failed            = false;
 	} else if (!it->thumbnailFinished) {
 		it->thumbnailFinished = true;
 	}
 
+	storePersistentChatPreviewDiskCache(previewKey);
 	clearModernShellMessageDtoCache("preview");
 	for (const MumbleProto::ChatMessage &message : m_persistentChatMessages) {
 		const std::optional< QString > messagePreviewKey = persistentChatPreviewKey(message);
@@ -17676,6 +25133,7 @@ void MainWindow::handlePersistentChatPreviewSiteSnapshotResult(const QString &pr
 }
 
 void MainWindow::publishPersistentChatPreviewUpdate(const QString &previewKey) {
+	storePersistentChatPreviewDiskCache(previewKey);
 	clearModernShellMessageDtoCache("preview");
 	for (const MumbleProto::ChatMessage &message : m_persistentChatMessages) {
 		const std::optional< QString > messagePreviewKey = persistentChatPreviewKey(message);
@@ -18027,6 +25485,7 @@ void MainWindow::renderPersistentChatViewImmediately(const QString &statusMessag
 	const PersistentChatTarget target = currentPersistentChatTarget();
 	const bool showInlinePreviews     = Global::get().s.bEnableLinkPreviews && target.scope != MumbleProto::Aggregate;
 	const bool canDeleteMessages      = canDeletePersistentChatMessages(target, true);
+	const bool canDeleteOwnMessages   = persistentChatTargetSupportsMessageDelete(target);
 	m_persistentChatInlineDataImageSources.clear();
 	if (mumble::chatperf::enabled()) {
 		mumble::chatperf::recordNote(
@@ -18187,6 +25646,7 @@ void MainWindow::renderPersistentChatViewImmediately(const QString &statusMessag
 			selfIdentity.userID = self->iId;
 			selfIdentity.name   = self->qsName;
 		}
+		selfIdentity.liveSessionMessageKeys = m_persistentChatLiveMessageKeys;
 
 		std::vector< PersistentChatRender::PersistentChatRenderGroup > renderGroups;
 		std::optional< std::size_t > unreadGroupBoundary;
@@ -18373,7 +25833,9 @@ void MainWindow::renderPersistentChatViewImmediately(const QString &statusMessag
 				bubbleSpec.timeToolTip   = persistentChatTimestampToolTip(bubble.createdAt);
 				bubbleSpec.replyEnabled =
 					!bubble.systemMessage && (target.scope == MumbleProto::Aggregate || !deletedMessage);
-				bubbleSpec.deleteEnabled  = canDeleteMessages && !bubble.systemMessage && !deletedMessage;
+				bubbleSpec.deleteEnabled =
+					(canDeleteMessages || (bubble.selfAuthored && canDeleteOwnMessages)) && !bubble.systemMessage
+					&& !deletedMessage;
 				bubbleSpec.readOnlyAction = target.scope == MumbleProto::Aggregate;
 				bubbleSpec.actionText     = bubble.systemMessage
 											? QString()
@@ -19036,8 +26498,7 @@ bool MainWindow::canDeletePersistentChatMessages(const PersistentChatTarget &tar
 	}
 
 	if (target.scope == MumbleProto::ServerGlobal) {
-		return Global::get().bPersistentGlobalChatEnabled
-			   && (Global::get().pPermissions & (ChanACL::Write | ChanACL::DeleteTextMessage));
+		return Global::get().bPersistentGlobalChatEnabled && (Global::get().pPermissions & ChanACL::Write);
 	}
 
 	if (target.scope != MumbleProto::TextChannel && target.scope != MumbleProto::Channel) {
@@ -19056,7 +26517,38 @@ bool MainWindow::canDeletePersistentChatMessages(const PersistentChatTarget &tar
 		permissionChannel->uiPermissions = textPermissions;
 	}
 
-	return textPermissions & (ChanACL::Write | ChanACL::DeleteTextMessage);
+	return textPermissions & ChanACL::Write;
+}
+
+bool MainWindow::persistentChatTargetSupportsMessageDelete(const PersistentChatTarget &target) const {
+	return target.valid && !target.readOnly && !target.serverLog && !target.directMessage && !target.legacyTextPath
+		   && (target.scope == MumbleProto::Channel || target.scope == MumbleProto::TextChannel
+			   || target.scope == MumbleProto::ServerGlobal)
+		   && (target.scope != MumbleProto::ServerGlobal || Global::get().bPersistentGlobalChatEnabled);
+}
+
+bool MainWindow::isOwnPersistentChatMessage(const MumbleProto::ChatMessage &message) const {
+	const ClientUser *self = ClientUser::get(Global::get().uiSession);
+	if (!self) {
+		return false;
+	}
+
+	if (message.has_actor_user_id() && self->iId >= 0
+		&& message.actor_user_id() == static_cast< decltype(message.actor_user_id()) >(self->iId)) {
+		return true;
+	}
+
+	const bool liveSessionMessage = m_persistentChatLiveMessageKeys.contains(persistentChatMessageIdentityKey(message));
+	if (!liveSessionMessage) {
+		return false;
+	}
+
+	if (message.has_actor() && message.actor() == Global::get().uiSession) {
+		return true;
+	}
+
+	return !message.has_actor() && !message.has_actor_user_id() && message.has_actor_name()
+		   && u8(message.actor_name()) == self->qsName;
 }
 
 bool MainWindow::deletePersistentChatMessage(unsigned int messageID) {
@@ -19065,13 +26557,16 @@ bool MainWindow::deletePersistentChatMessage(unsigned int messageID) {
 	}
 
 	const PersistentChatTarget target = currentPersistentChatTarget();
-	if (!canDeletePersistentChatMessages(target, true)) {
+	if (!persistentChatTargetSupportsMessageDelete(target)) {
 		return false;
 	}
 
 	const MumbleProto::ChatMessage *message = findPersistentChatMessageByID(m_persistentChatMessages, messageID);
 	if (!message || persistentChatSystemMessageText(*message).has_value()
 		|| (message->has_deleted_at() && message->deleted_at() > 0)) {
+		return false;
+	}
+	if (!isOwnPersistentChatMessage(*message) && !canDeletePersistentChatMessages(target, true)) {
 		return false;
 	}
 
@@ -23496,6 +30991,7 @@ void MainWindow::serverConnected() {
 
 	Global::get().uiSession                  = 0;
 	Global::get().pPermissions               = ChanACL::None;
+	clearUserTextureRequests();
 	const bool hiddenLegacyNavigatorSafeMode = modernShellMinimalSnapshotEnabled() && usesModernShell();
 
 #ifdef Q_OS_MAC
@@ -23548,6 +31044,7 @@ void MainWindow::serverConnected() {
 	m_pendingUserInformationSessions.clear();
 	m_persistentChatPreviews.clear();
 	m_persistentChatAssetDownloads.clear();
+	m_persistentChatLiveMessageKeys.clear();
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	clearModernShellMessageDtoCache("connect");
 #endif
@@ -23592,6 +31089,7 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 									  .arg(reason));
 	// clear ChannelListener
 	Global::get().channelListenerManager->clear();
+	clearUserTextureRequests();
 
 	// Reset move-back history
 	qaMoveBack->setEnabled(false);
@@ -23623,6 +31121,7 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	m_pendingUserInformationSessions.clear();
 	m_persistentChatPreviews.clear();
 	m_persistentChatAssetDownloads.clear();
+	m_persistentChatLiveMessageKeys.clear();
 	m_persistentChatLastReadByScope.clear();
 	m_persistentChatUnreadByScope.clear();
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
@@ -24157,9 +31656,15 @@ void MainWindow::on_qteLog_anchorClicked(const QUrl &url) {
 			return;
 #endif
 		if (url.scheme() != QLatin1String("file") && url.scheme() != QLatin1String("qrc") && !url.isRelative()) {
-			const QUrl externalUrl = url;
+			QUrl fallbackUrl;
+			const QUrl externalUrl = preferredExternalUrlForActivatedLink(url, &fallbackUrl);
+			const bool hasFallback = fallbackUrl.isValid() && fallbackUrl != externalUrl;
 			// Let the current click/paint work finish before we hand the URL to the OS.
-			QTimer::singleShot(0, this, [externalUrl]() { QDesktopServices::openUrl(externalUrl); });
+			QTimer::singleShot(0, this, [externalUrl, fallbackUrl, hasFallback]() {
+				if (!QDesktopServices::openUrl(externalUrl) && hasFallback) {
+					QDesktopServices::openUrl(fallbackUrl);
+				}
+			});
 		}
 	}
 }

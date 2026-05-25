@@ -10,6 +10,7 @@
 
 #include <QtCore/QDate>
 #include <QtCore/QDateTime>
+#include <QtCore/QSet>
 #include <QtCore/QString>
 
 #include <optional>
@@ -20,6 +21,7 @@ namespace PersistentChatRender {
 		unsigned int session = 0;
 		int userID          = -1;
 		QString name;
+		QSet< QString > liveSessionMessageKeys;
 	};
 
 	struct ActorKey {

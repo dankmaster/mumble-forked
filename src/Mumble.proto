@@ -806,6 +806,7 @@ message ChatReactionAggregate {
 	required string emoji = 1;
 	required uint32 count = 2;
 	optional bool self_reacted = 3 [default = false];
+	repeated string actor_names = 4;
 }
 
 // Sent by the client to submit a persistent chat message to the server.

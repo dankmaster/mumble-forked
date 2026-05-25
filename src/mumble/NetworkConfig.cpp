@@ -7,9 +7,12 @@
 
 #include "MainWindow.h"
 #include "OSInfo.h"
+#include "PersistentChatMediaCache.h"
 #include "Version.h"
 #include "Global.h"
 
+#include <QMessageBox>
+#include <QPushButton>
 #include <QSignalBlocker>
 #include <QtNetwork/QHostAddress>
 #include <QtNetwork/QNetworkAccessManager>
@@ -30,6 +33,18 @@ NetworkConfig::NetworkConfig(Settings &st) : ConfigWidget(st) {
 	qleAdvertisedOS->setPlaceholderText(OSInfo::getOS());
 	qleAdvertisedOSVersion->setPlaceholderText(OSInfo::getOSDisplayableVersion());
 	qcbScreenShareDiagnostics->hide();
+	connect(qpbClearPersistentChatMediaCache, &QPushButton::clicked, this, [this]() {
+		const quint64 previousSize = PersistentChatMediaCache::sizeBytes();
+		const bool cleared         = PersistentChatMediaCache::clear();
+		if (cleared) {
+			QMessageBox::information(this, tr("Local media cache cleared"),
+									 tr("Removed %1 of cached chat preview media from this profile.")
+										 .arg(PersistentChatMediaCache::formattedSize(previousSize)));
+		} else {
+			QMessageBox::warning(this, tr("Unable to clear cache"),
+								 tr("Mumble could not clear the local chat media cache."));
+		}
+	});
 }
 
 QString NetworkConfig::title() const {

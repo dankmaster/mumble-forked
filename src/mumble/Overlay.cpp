@@ -7,12 +7,9 @@
 
 #include "Channel.h"
 #include "ClientUser.h"
-#include "Database.h"
 #include "MainWindow.h"
 #include "OverlayClient.h"
 #include "OverlayText.h"
-#include "RichTextEditor.h"
-#include "ServerHandler.h"
 #include "User.h"
 #include "Utils.h"
 #include "WebFetch.h"
@@ -20,10 +17,7 @@
 #include "GlobalShortcut.h"
 
 #include <QtCore/QProcessEnvironment>
-#include <QtCore/QtEndian>
 #include <QtGui/QFocusEvent>
-#include <QtGui/QImageReader>
-#include <QtGui/QImageWriter>
 #include <QtNetwork/QLocalServer>
 #include <QtWidgets/QMessageBox>
 
@@ -346,109 +340,13 @@ void Overlay::forceSettings() {
 }
 
 void Overlay::verifyTexture(ClientUser *cp, bool allowupdate) {
-	qsQueried.remove(cp->uiSession);
-
 	ClientUser *self = ClientUser::get(Global::get().uiSession);
 	allowupdate      = allowupdate && self && self->cChannel->isLinked(cp->cChannel);
 
-	if (allowupdate && !cp->qbaTextureHash.isEmpty() && cp->qbaTexture.isEmpty())
-		cp->qbaTexture = Global::get().db->blob(cp->qbaTextureHash);
-
-	if (!cp->qbaTexture.isEmpty()) {
-		bool valid = true;
-
-		if (cp->qbaTexture.length() < static_cast< int >(sizeof(unsigned int))) {
-			valid = false;
-		} else if (qFromBigEndian< unsigned int >(reinterpret_cast< const unsigned char * >(cp->qbaTexture.constData()))
-				   == 600 * 60 * 4) {
-			QByteArray qba = qUncompress(cp->qbaTexture);
-			if (qba.length() != 600 * 60 * 4) {
-				valid = false;
-			} else {
-				int width               = 0;
-				int height              = 0;
-				const unsigned int *ptr = reinterpret_cast< const unsigned int * >(qba.constData());
-
-				// If we have an alpha only part on the right side of the image ignore it
-				for (int y = 0; y < 60; ++y) {
-					for (int x = 0; x < 600; ++x) {
-						if (ptr[y * 600 + x] & 0xff000000) {
-							if (x > width)
-								width = x;
-							if (y > height)
-								height = y;
-						}
-					}
-				}
-
-				// Full size image? More likely image without alpha; fix it.
-				if ((width == 599) && (height == 59)) {
-					width  = 0;
-					height = 0;
-					for (int y = 0; y < 60; ++y) {
-						for (int x = 0; x < 600; ++x) {
-							if (ptr[y * 600 + x] & 0x00ffffff) {
-								if (x > width)
-									width = x;
-								if (y > height)
-									height = y;
-							}
-						}
-					}
-				}
-
-				if (!width || !height) {
-					valid = false;
-				} else {
-					QImage img = QImage(width + 1, height + 1, QImage::Format_ARGB32);
-					{
-						QImage srcimg(reinterpret_cast< const uchar * >(qba.constData()), 600, 60,
-									  QImage::Format_ARGB32);
-
-						QPainter imgp(&img);
-						img.fill(0);
-						imgp.setRenderHint(QPainter::Antialiasing);
-						imgp.setRenderHint(QPainter::TextAntialiasing);
-						imgp.setBackground(QColor(0, 0, 0, 0));
-						imgp.setCompositionMode(QPainter::CompositionMode_Source);
-						imgp.drawImage(0, 0, srcimg);
-					}
-					cp->qbaTexture = QByteArray();
-
-					QBuffer qb(&cp->qbaTexture);
-					qb.open(QIODevice::WriteOnly);
-					QImageWriter qiw(&qb, "png");
-					qiw.write(img);
-
-					cp->qbaTextureFormat = QString::fromLatin1("png").toUtf8();
-				}
-			}
-		} else {
-			QBuffer qb(&cp->qbaTexture);
-			qb.open(QIODevice::ReadOnly);
-
-			QImageReader qir;
-			qir.setAutoDetectImageFormat(false);
-
-			QByteArray fmt;
-			if (RichTextImage::isValidImage(cp->qbaTexture, fmt)) {
-				qir.setFormat(fmt);
-				qir.setDevice(&qb);
-				if (!qir.canRead() || (qir.size().width() > 1024) || (qir.size().height() > 1024)) {
-					valid = false;
-				} else {
-					cp->qbaTextureFormat = qir.format();
-					QImage qi            = qir.read();
-					valid                = !qi.isNull();
-				}
-			} else {
-				valid = false;
-			}
-		}
-		if (!valid) {
-			cp->qbaTexture     = QByteArray();
-			cp->qbaTextureHash = QByteArray();
-		}
+	if (allowupdate && Global::get().mw) {
+		Global::get().mw->ensureUserTextureAvailable(cp, MainWindow::UserTextureRequestReason::Overlay);
+	} else if (!cp->qbaTexture.isEmpty() && Global::get().mw) {
+		Global::get().mw->normalizeUserTextureForDisplay(cp);
 	}
 
 	if (allowupdate)
@@ -458,13 +356,8 @@ void Overlay::verifyTexture(ClientUser *cp, bool allowupdate) {
 typedef QPair< QString, quint32 > qpChanCol;
 
 void Overlay::updateOverlay() {
-	if (!Global::get().uiSession)
-		qsQueried.clear();
-
 	if (qlClients.isEmpty())
 		return;
-
-	qsQuery.clear();
 
 	for (OverlayClient *oc : qlClients) {
 		if (!oc->update()) {
@@ -474,23 +367,10 @@ void Overlay::updateOverlay() {
 			break;
 		}
 	}
-
-	if (!qsQuery.isEmpty()) {
-		MumbleProto::RequestBlob mprb;
-		for (unsigned int session : qsQuery) {
-			qsQueried.insert(session);
-			mprb.add_session_texture(session);
-		}
-		Global::get().sh->sendMessage(mprb);
-	}
 }
 
 void Overlay::requestTexture(ClientUser *cu) {
-	if (cu->qbaTexture.isEmpty() && !qsQueried.contains(cu->uiSession)) {
-		cu->qbaTexture = Global::get().db->blob(cu->qbaTextureHash);
-		if (cu->qbaTexture.isEmpty())
-			qsQuery.insert(cu->uiSession);
-		else
-			verifyTexture(cu, false);
+	if (cu && Global::get().mw) {
+		Global::get().mw->ensureUserTextureAvailable(cu, MainWindow::UserTextureRequestReason::Overlay);
 	}
 }

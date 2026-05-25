@@ -5,6 +5,8 @@
 
 #include <QtTest>
 
+#include <initializer_list>
+
 #include "mumble/PersistentChatController.h"
 
 namespace {
@@ -122,11 +124,15 @@ namespace {
 		return state;
 	}
 
-	MumbleProto::ChatReactionAggregate makeReaction(const QString &emoji, unsigned int count, bool selfReacted) {
+	MumbleProto::ChatReactionAggregate makeReaction(const QString &emoji, unsigned int count, bool selfReacted,
+													std::initializer_list< QString > actorNames = {}) {
 		MumbleProto::ChatReactionAggregate reaction;
 		reaction.set_emoji(emoji.toUtf8().constData());
 		reaction.set_count(count);
 		reaction.set_self_reacted(selfReacted);
+		for (const QString &actorName : actorNames) {
+			reaction.add_actor_names(actorName.toUtf8().constData());
+		}
 		return reaction;
 	}
 
@@ -155,7 +161,7 @@ private slots:
 	void appliesEmbedUpdatesToCachedMessages();
 	void preservesReplyMetadataFromHistory();
 	void appliesReactionUpdatesToCachedMessages();
-	void replacesCachedMessageWithDeletedTombstone();
+	void removesDeletedMessageFromCachedSnapshot();
 };
 
 void TestPersistentChatController::restoresCachedScopeSnapshots() {
@@ -293,8 +299,9 @@ void TestPersistentChatController::appliesReactionUpdatesToCachedMessages() {
 
 	QVERIFY(controller.applyReactionState(
 		makeReactionState(MumbleProto::TextChannel, 55, 50, 50,
-						  { makeReaction(QString::fromUtf8("👍"), 1, true),
-							makeReaction(QString::fromUtf8("🎉"), 3, false) })));
+						  { makeReaction(QString::fromUtf8("👍"), 1, true, { QStringLiteral("Alice") }),
+							makeReaction(QString::fromUtf8("🎉"), 3, false,
+										 { QStringLiteral("Bob"), QStringLiteral("Carol") }) })));
 
 	const PersistentChatScopeStateSnapshot snapshot = controller.activeSnapshot();
 	QCOMPARE(snapshot.messages.size(), 1);
@@ -302,12 +309,20 @@ void TestPersistentChatController::appliesReactionUpdatesToCachedMessages() {
 	QCOMPARE(QString::fromUtf8(snapshot.messages.front().reactions(0).emoji().c_str()), QString::fromUtf8("👍"));
 	QCOMPARE(snapshot.messages.front().reactions(0).count(), 1U);
 	QCOMPARE(snapshot.messages.front().reactions(0).self_reacted(), true);
+	QCOMPARE(snapshot.messages.front().reactions(0).actor_names_size(), 1);
+	QCOMPARE(QString::fromUtf8(snapshot.messages.front().reactions(0).actor_names(0).c_str()),
+			 QStringLiteral("Alice"));
 	QCOMPARE(QString::fromUtf8(snapshot.messages.front().reactions(1).emoji().c_str()), QString::fromUtf8("🎉"));
 	QCOMPARE(snapshot.messages.front().reactions(1).count(), 3U);
 	QCOMPARE(snapshot.messages.front().reactions(1).self_reacted(), false);
+	QCOMPARE(snapshot.messages.front().reactions(1).actor_names_size(), 2);
+	QCOMPARE(QString::fromUtf8(snapshot.messages.front().reactions(1).actor_names(0).c_str()),
+			 QStringLiteral("Bob"));
+	QCOMPARE(QString::fromUtf8(snapshot.messages.front().reactions(1).actor_names(1).c_str()),
+			 QStringLiteral("Carol"));
 }
 
-void TestPersistentChatController::replacesCachedMessageWithDeletedTombstone() {
+void TestPersistentChatController::removesDeletedMessageFromCachedSnapshot() {
 	PersistentChatGateway gateway;
 	PersistentChatController controller;
 	controller.setGateway(&gateway);
@@ -328,12 +343,7 @@ void TestPersistentChatController::replacesCachedMessageWithDeletedTombstone() {
 	gateway.handleIncomingMessage(tombstone);
 
 	const PersistentChatScopeStateSnapshot snapshot = controller.activeSnapshot();
-	QCOMPARE(snapshot.messages.size(), 1);
-	QCOMPARE(snapshot.messages.front().message_id(), 60U);
-	QCOMPARE(static_cast< quint64 >(snapshot.messages.front().deleted_at()), 6100ULL);
-	QVERIFY(!snapshot.messages.front().has_body_text());
-	QVERIFY(!snapshot.messages.front().has_reply_to_message_id());
-	QCOMPARE(snapshot.messages.front().reactions_size(), 0);
+	QCOMPARE(snapshot.messages.size(), 0);
 }
 
 QTEST_MAIN(TestPersistentChatController)

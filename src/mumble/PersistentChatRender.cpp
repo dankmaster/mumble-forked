@@ -23,6 +23,14 @@ namespace {
 		return QTextDocumentFragment::fromHtml(u8(message.message())).toPlainText();
 	}
 
+	QString messageIdentityKey(const MumbleProto::ChatMessage &message) {
+		return QString::fromLatin1("%1:%2").arg(message.thread_id()).arg(message.message_id());
+	}
+
+	bool isDeletedMessage(const MumbleProto::ChatMessage &message) {
+		return message.has_deleted_at() && message.deleted_at() > 0;
+	}
+
 	bool startsPersistentChatGroup(const std::optional< MumbleProto::ChatMessage > &previousMessage,
 								   const QDateTime &previousCreatedAt, const MumbleProto::ChatMessage &message,
 								   const QDateTime &createdAt, bool forceSingleMessageGroups) {
@@ -105,16 +113,20 @@ namespace PersistentChatRender {
 	}
 
 	bool isSelfAuthored(const MumbleProto::ChatMessage &message, const SelfIdentity &selfIdentity) {
-		if (selfIdentity.session != 0 && message.has_actor() && message.actor() == selfIdentity.session) {
-			return true;
-		}
-
 		if (selfIdentity.userID >= 0 && message.has_actor_user_id()
 			&& static_cast< int >(message.actor_user_id()) == selfIdentity.userID) {
 			return true;
 		}
 
-		return !selfIdentity.name.isEmpty() && message.has_actor_name() && u8(message.actor_name()) == selfIdentity.name;
+		if (selfIdentity.session != 0 && message.has_actor() && message.actor() == selfIdentity.session) {
+			return selfIdentity.liveSessionMessageKeys.contains(messageIdentityKey(message));
+		}
+
+		if (!selfIdentity.name.isEmpty() && message.has_actor_name() && u8(message.actor_name()) == selfIdentity.name) {
+			return selfIdentity.liveSessionMessageKeys.contains(messageIdentityKey(message));
+		}
+
+		return false;
 	}
 
 	ConversationLaneRole laneRoleForMessage(const MumbleProto::ChatMessage &message, const SelfIdentity &selfIdentity) {
@@ -137,6 +149,10 @@ namespace PersistentChatRender {
 
 		for (std::size_t i = 0; i < messages.size(); ++i) {
 			const MumbleProto::ChatMessage &message = messages[i];
+			if (isDeletedMessage(message)) {
+				continue;
+			}
+
 			const QDateTime createdAt = QDateTime::fromSecsSinceEpoch(
 				static_cast< qint64 >(message.has_created_at() ? message.created_at() : 0));
 			const ConversationLaneRole laneRole = laneRoleForMessage(message, selfIdentity);

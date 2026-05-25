@@ -257,6 +257,8 @@ set(MUMBLE_SOURCES
 	"PersistentChatHistoryDelegate.h"
 	"PersistentChatHistoryModel.cpp"
 	"PersistentChatHistoryModel.h"
+	"PersistentChatMediaCache.cpp"
+	"PersistentChatMediaCache.h"
 	"PersistentChatState.h"
 	"PersistentChatStore.cpp"
 	"PersistentChatStore.h"

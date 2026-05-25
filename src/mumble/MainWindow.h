@@ -6,6 +6,8 @@
 #ifndef MUMBLE_MUMBLE_MAINWINDOW_H_
 #define MUMBLE_MUMBLE_MAINWINDOW_H_
 
+#include <QtCore/QVariantMap>
+
 #include <QtCore/QHash>
 #include <QtCore/QMap>
 #include <QtCore/QPointer>
@@ -24,6 +26,7 @@
 #include "ModernShellMenuSerializer.h"
 #include "Mumble.pb.h"
 #include "MumbleProtocol.h"
+#include "PersistentChatState.h"
 #include "QtUtils.h"
 #include "UnresolvedServerAddress.h"
 #include "Usage.h"
@@ -48,6 +51,7 @@ class TextToSpeech;
 class UserModel;
 class Tokens;
 class Channel;
+class ClientUser;
 class ScreenShareManager;
 class UserInformation;
 class VoiceRecorderDialog;
@@ -243,6 +247,16 @@ public:
 	};
 
 	enum class RoomCreateType : unsigned char { Voice, Text };
+	enum class UserTextureRequestReason : unsigned char { UserState, Navigator, ModernShell, PersistentChat, Overlay };
+
+	bool ensureUserTextureAvailable(ClientUser *user, UserTextureRequestReason reason);
+	bool normalizeUserTextureForDisplay(ClientUser *user, bool clearHashOnFailure = false);
+
+	struct PersistentChatPreviewMediaItem {
+		QString url;
+		QString mime;
+		QString kind;
+	};
 
 	struct PersistentChatPreview {
 		QString canonicalUrl;
@@ -255,6 +269,8 @@ public:
 		QString mediaAudioMime;
 		QString mediaMime;
 		QString mediaKind;
+		std::vector< PersistentChatPreviewMediaItem > mediaItems;
+		QVariantMap metadata;
 		QString openLabel;
 		unsigned int previewAssetID = 0;
 		bool autoplay               = false;
@@ -304,23 +320,44 @@ public:
 	void setPersistentChatReplyTarget(const std::optional< MumbleProto::ChatMessage > &message);
 	std::optional< MumbleProto::ChatEmbedRef >
 		persistentChatPrimaryEmbed(const MumbleProto::ChatMessage &message) const;
+	QString persistentChatMessageIdentityKey(const MumbleProto::ChatMessage &message) const;
 	std::optional< QString > persistentChatPreviewKey(const MumbleProto::ChatMessage &message) const;
 	PersistentChatPreviewSpec persistentChatPreviewSpec(const QString &previewKey) const;
 	QString persistentChatScopeLabel(MumbleProto::ChatScope scope, unsigned int scopeID) const;
 	void ensurePersistentChatPreview(const QString &previewKey);
 	void ensurePersistentChatPreviewAssetDownload(unsigned int assetID, const QString &previewKey);
 	void ensurePersistentChatPreviewSiteSnapshot(const QString &previewKey);
+	bool restorePersistentChatPreviewDiskCache(const QString &previewKey);
+	void storePersistentChatPreviewDiskCache(const QString &previewKey);
+	bool requestPersistentChatXPostPreview(const QString &previewKey, const QUrl &previewUrl);
+	void requestPersistentChatXPostReplyContext(const QString &previewKey, const QString &statusId, int remaining,
+												QVariantList directChain = QVariantList());
+	bool requestPersistentChatGitHubPreview(const QString &previewKey, const QUrl &previewUrl);
+	bool requestPersistentChatWebhallenProductPreview(const QString &previewKey, const QUrl &previewUrl);
+	bool requestPersistentChatRichProviderPreview(const QString &previewKey, const QUrl &previewUrl);
+	bool requestPersistentChatSteamAppPreview(const QString &previewKey, const QUrl &previewUrl);
+	bool requestPersistentChatOEmbedPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatRedditVideoPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatRedditVideoAudioPreview(const QString &previewKey, const QUrl &dashManifestUrl);
+	bool requestPersistentChatRemotePlayableMediaCache(const QString &previewKey, const QUrl &mediaUrl,
+													   const QString &suggestedMime = QString(),
+													   const QUrl &audioUrl = QUrl(),
+													   const QString &suggestedAudioMime = QString());
+	bool requestPersistentChatPreviewPosterImage(const QString &previewKey, const QUrl &posterUrl,
+												 const QString &suggestedMime = QString());
 	bool applyPersistentChatRemotePlayableMedia(PersistentChatPreview &preview, const QUrl &mediaUrl,
 												const QString &suggestedMime = QString());
 	bool applyPersistentChatRemoteAudioMedia(PersistentChatPreview &preview, const QUrl &audioUrl,
 											 const QString &suggestedMime = QString());
+	void applyPersistentChatListingMediaItems(PersistentChatPreview &preview);
 	void handlePersistentChatPreviewSiteSnapshotResult(const QString &previewKey, const QImage &image, bool success,
 													   const QString &mediaUrl = QString(),
 													   const QString &mediaMime = QString(),
 													   const QString &mediaAudioUrl = QString(),
-													   const QString &mediaAudioMime = QString());
+													   const QString &mediaAudioMime = QString(),
+													   const QVariantList &mediaItems = QVariantList(),
+													   const QString &posterUrl = QString(),
+													   const QString &posterMime = QString());
 	void publishPersistentChatPreviewUpdate(const QString &previewKey);
 	int persistentChatPreviewContentWidth(int leftPadding) const;
 	QString persistentChatPreviewHtml(const QString &previewKey, int availableWidth) const;
@@ -391,6 +428,8 @@ public:
 	bool canViewPersistentChatHistory(const PersistentChatTarget &target, bool requestPermissions) const;
 	bool canSendToPersistentChatTarget(const PersistentChatTarget &target, bool requestPermissions) const;
 	bool canDeletePersistentChatMessages(const PersistentChatTarget &target, bool requestPermissions) const;
+	bool persistentChatTargetSupportsMessageDelete(const PersistentChatTarget &target) const;
+	bool isOwnPersistentChatMessage(const MumbleProto::ChatMessage &message) const;
 	bool deletePersistentChatMessage(unsigned int messageID);
 	void syncPersistentChatInputState(bool baseEnabled);
 	bool attachPersistentChatClipboardImage();
@@ -509,6 +548,13 @@ public:
 	void updateChatBar(bool forcePersistentChatReload = false, bool queueModernShellSnapshot = true);
 	void openTextMessageDialog(ClientUser *p);
 	void openUserLocalNicknameDialog(const ClientUser &p);
+	void queueUserTextureRequest(ClientUser *user, const QByteArray &expectedHash);
+	void flushUserTextureRequests();
+	void handleUserTextureHash(ClientUser *user, const QByteArray &hash);
+	void handleUserTextureBlob(ClientUser *user, const QByteArray &texture);
+	void refreshUserTextureViews(ClientUser *user);
+	void clearUserTextureRequest(unsigned int session);
+	void clearUserTextureRequests();
 
 #ifdef Q_OS_WIN
 	bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) Q_DECL_OVERRIDE;
@@ -543,6 +589,11 @@ protected:
 	int iTargetCounter;
 	QMap< unsigned int, UserInformation * > qmUserInformations;
 	QSet< unsigned int > m_pendingUserInformationSessions;
+	QTimer *m_userTextureRequestTimer = nullptr;
+	QSet< unsigned int > m_queuedUserTextureSessions;
+	QSet< unsigned int > m_inFlightUserTextureSessions;
+	QHash< unsigned int, QByteArray > m_requestedUserTextureHashBySession;
+	QHash< QByteArray, qint64 > m_failedUserTextureHashCooldownUntilMs;
 
 	std::unique_ptr< PositionalAudioViewer > m_paViewer;
 
@@ -636,6 +687,7 @@ protected:
 	QHash< QString, PersistentChatPreview > m_persistentChatPreviews;
 	QHash< unsigned int, PersistentChatAssetDownload > m_persistentChatAssetDownloads;
 	QHash< QString, QString > m_persistentChatInlineDataImageSources;
+	QSet< QString > m_persistentChatLiveMessageKeys;
 	QHash< QString, unsigned int > m_persistentChatLastReadByScope;
 	QHash< QString, int > m_persistentChatUnreadByScope;
 	std::optional< PersistentChatRenderRequest > m_pendingPersistentChatRender;
@@ -644,6 +696,7 @@ protected:
 	unsigned int m_visiblePersistentChatLastReadMessageID = 0;
 	unsigned int m_visiblePersistentChatOldestMessageID   = 0;
 	bool m_visiblePersistentChatHasMore                   = false;
+	PersistentChatLoadingState m_visiblePersistentChatLoadingState = PersistentChatLoadingState::Idle;
 	bool m_persistentChatLoadingOlder                     = false;
 	bool m_persistentChatRenderQueued                     = false;
 	QTimer *m_persistentChatResizeRenderTimer             = nullptr;

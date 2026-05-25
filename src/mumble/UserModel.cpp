@@ -60,7 +60,9 @@ namespace {
 			return QImage();
 		}
 
-		if (user->qbaTexture.isEmpty() && !user->qbaTextureHash.isEmpty() && Global::get().db) {
+		if (Global::get().mw) {
+			Global::get().mw->ensureUserTextureAvailable(user, MainWindow::UserTextureRequestReason::Navigator);
+		} else if (user->qbaTexture.isEmpty() && !user->qbaTextureHash.isEmpty() && Global::get().db) {
 			user->qbaTexture = Global::get().db->blob(user->qbaTextureHash);
 		}
 
@@ -762,15 +764,9 @@ QVariant UserModel::otherRoles(const QModelIndex &idx, int role) const {
 						QString qsImage;
 						if (!p->qbaTextureHash.isEmpty()) {
 							if (p->qbaTexture.isEmpty()) {
-								p->qbaTexture = Global::get().db->blob(p->qbaTextureHash);
-								if (p->qbaTexture.isEmpty()) {
-									MumbleProto::RequestBlob mprb;
-									mprb.add_session_texture(p->uiSession);
-									Global::get().sh->sendMessage(mprb);
-								} else {
-#ifdef USE_OVERLAY
-									Global::get().o->verifyTexture(p);
-#endif
+								if (Global::get().mw) {
+									Global::get().mw->ensureUserTextureAvailable(
+										p, MainWindow::UserTextureRequestReason::Navigator);
 								}
 							}
 							if (!p->qbaTexture.isEmpty()) {

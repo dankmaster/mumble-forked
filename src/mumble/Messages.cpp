@@ -1176,23 +1176,10 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 	const bool textureChanged = msg.has_texture_hash() || msg.has_texture();
 
 	if (msg.has_texture_hash()) {
-		pDst->qbaTextureHash = blob(msg.texture_hash());
-		pDst->qbaTexture     = QByteArray();
-#ifdef USE_OVERLAY
-		Global::get().o->verifyTexture(pDst);
-#endif
+		handleUserTextureHash(pDst, blob(msg.texture_hash()));
 	}
 	if (msg.has_texture()) {
-		pDst->qbaTexture = blob(msg.texture());
-		if (pDst->qbaTexture.isEmpty()) {
-			pDst->qbaTextureHash = QByteArray();
-		} else {
-			pDst->qbaTextureHash = sha1(pDst->qbaTexture);
-			Global::get().db->setBlob(pDst->qbaTextureHash, pDst->qbaTexture);
-		}
-#ifdef USE_OVERLAY
-		Global::get().o->verifyTexture(pDst);
-#endif
+		handleUserTextureBlob(pDst, blob(msg.texture()));
 	}
 	if (msg.has_comment_hash())
 		if (hiddenLegacyUserModelSafeMode) {
@@ -1293,6 +1280,7 @@ void MainWindow::msgUserRemove(const MumbleProto::UserRemove &msg) {
 	}
 
 	if (pDst != pSelf) {
+		clearUserTextureRequest(pDst->uiSession);
 		if (hiddenLegacyUserModelSafeMode) {
 			removeClientUserWithoutModel(pDst);
 			queueModernShellSnapshotSync();
@@ -1922,6 +1910,7 @@ void MainWindow::msgChatSend(const MumbleProto::ChatSend &) {
 
 void MainWindow::msgChatMessage(const MumbleProto::ChatMessage &msg) {
 	markPersistentChatAvailable();
+	m_persistentChatLiveMessageKeys.insert(persistentChatMessageIdentityKey(msg));
 	handlePersistentChatMessage(msg);
 }
 
@@ -2042,6 +2031,7 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 			ensurePersistentChatPreviewSiteSnapshot(previewKey);
 		}
 		ensurePersistentChatPreviewSiteSnapshot(previewKey);
+		storePersistentChatPreviewDiskCache(previewKey);
 		updatePersistentChatPreviewViewIfVisible(previewKey);
 	}
 

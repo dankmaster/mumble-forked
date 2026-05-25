@@ -31,12 +31,14 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
 #include <optional>
 #include <set>
 #include <unordered_map>
+#include <vector>
 
 #include <QtCore/QBuffer>
 #include <QtCore/QCryptographicHash>
@@ -219,6 +221,22 @@ std::optional< unsigned int > persistedUserID(const ServerUser *user) {
 	}
 
 	return static_cast< unsigned int >(user->iId);
+}
+
+std::optional< std::string > connectedUserNameForPersistentID(const QHash< unsigned int, ServerUser * > &users,
+															  unsigned int userID) {
+	for (ServerUser *currentUser : users) {
+		if (!currentUser || currentUser->iId < 0 || static_cast< unsigned int >(currentUser->iId) != userID) {
+			continue;
+		}
+
+		const QString displayName = currentUser->qsName.trimmed();
+		if (!displayName.isEmpty()) {
+			return u8(displayName);
+		}
+	}
+
+	return std::nullopt;
 }
 
 std::string chatScopeKey(MumbleProto::ChatScope scope, unsigned int scopeID) {
@@ -779,7 +797,10 @@ MumbleProto::ChatAssetRef protoAssetRefFromAsset(const msdb::DBChatAsset &asset,
 struct ChatReactionAggregateState {
 	unsigned int count = 0;
 	bool selfReacted   = false;
+	std::vector< std::string > actorNames;
 };
+
+using ChatReactionActorNameResolver = std::function< std::optional< std::string >(unsigned int) >;
 
 struct ChatReplyPreview {
 	std::optional< std::string > actorName;
@@ -788,7 +809,8 @@ struct ChatReplyPreview {
 
 std::vector< std::pair< std::string, ChatReactionAggregateState > >
 	aggregateChatReactions(const std::vector< msdb::DBChatMessageReaction > &reactions,
-						   std::optional< unsigned int > viewerUserID) {
+						   std::optional< unsigned int > viewerUserID,
+						   const ChatReactionActorNameResolver &resolveActorName = {}) {
 	std::map< std::string, ChatReactionAggregateState > grouped;
 	for (const msdb::DBChatMessageReaction &reaction : reactions) {
 		ChatReactionAggregateState &aggregate = grouped[reaction.emoji];
@@ -796,6 +818,18 @@ std::vector< std::pair< std::string, ChatReactionAggregateState > >
 		if (viewerUserID && reaction.actorUserID == viewerUserID.value()) {
 			aggregate.selfReacted = true;
 		}
+		if (resolveActorName) {
+			const std::optional< std::string > actorName = resolveActorName(reaction.actorUserID);
+			if (actorName && !actorName->empty()) {
+				aggregate.actorNames.push_back(actorName.value());
+			}
+		}
+	}
+
+	for (auto &aggregate : grouped) {
+		std::vector< std::string > &actorNames = aggregate.second.actorNames;
+		std::sort(actorNames.begin(), actorNames.end());
+		actorNames.erase(std::unique(actorNames.begin(), actorNames.end()), actorNames.end());
 	}
 
 	std::vector< std::pair< std::string, ChatReactionAggregateState > > ordered(grouped.begin(), grouped.end());
@@ -810,16 +844,20 @@ std::vector< std::pair< std::string, ChatReactionAggregateState > >
 
 void appendProtoReactionAggregates(google::protobuf::RepeatedPtrField< MumbleProto::ChatReactionAggregate > *target,
 								   const std::vector< msdb::DBChatMessageReaction > &reactions,
-								   std::optional< unsigned int > viewerUserID) {
+								   std::optional< unsigned int > viewerUserID,
+								   const ChatReactionActorNameResolver &resolveActorName = {}) {
 	if (!target) {
 		return;
 	}
 
-	for (const auto &aggregate : aggregateChatReactions(reactions, viewerUserID)) {
+	for (const auto &aggregate : aggregateChatReactions(reactions, viewerUserID, resolveActorName)) {
 		MumbleProto::ChatReactionAggregate *protoReaction = target->Add();
 		protoReaction->set_emoji(aggregate.first);
 		protoReaction->set_count(aggregate.second.count);
 		protoReaction->set_self_reacted(aggregate.second.selfReacted);
+		for (const std::string &actorName : aggregate.second.actorNames) {
+			protoReaction->add_actor_names(actorName);
+		}
 	}
 }
 
@@ -953,10 +991,49 @@ static const QByteArray s_chatPreviewAcceptHeader =
 	QByteArrayLiteral("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/*,*/*;q=0.8");
 static const QByteArray s_chatPreviewAcceptLanguageHeader = QByteArrayLiteral("en-US,en;q=0.9");
 
+bool chatPreviewImageReaderSupportsFormat(const QByteArray &format) {
+	const QList< QByteArray > supportedFormats = QImageReader::supportedImageFormats();
+	for (const QByteArray &supportedFormat : supportedFormats) {
+		if (supportedFormat.compare(format, Qt::CaseInsensitive) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
+QByteArray chatPreviewImageAcceptHeader() {
+	static const QByteArray header = []() {
+		QList< QByteArray > mimes = { QByteArrayLiteral("image/jpeg"), QByteArrayLiteral("image/png"),
+									  QByteArrayLiteral("image/gif"), QByteArrayLiteral("image/bmp") };
+		if (chatPreviewImageReaderSupportsFormat(QByteArrayLiteral("webp"))) {
+			mimes.prepend(QByteArrayLiteral("image/webp"));
+		}
+		if (chatPreviewImageReaderSupportsFormat(QByteArrayLiteral("avif"))) {
+			mimes.prepend(QByteArrayLiteral("image/avif"));
+		}
+
+		QByteArray value;
+		for (const QByteArray &mime : mimes) {
+			if (!value.isEmpty()) {
+				value.append(',');
+			}
+			value.append(mime);
+		}
+		value.append(QByteArrayLiteral(",*/*;q=0.5"));
+		return value;
+	}();
+	return header;
+}
+
 void prepareChatPreviewRequest(QNetworkRequest &request) {
 	request.setRawHeader(QByteArrayLiteral("User-Agent"), s_chatPreviewBrowserUserAgent);
 	request.setRawHeader(QByteArrayLiteral("Accept"), s_chatPreviewAcceptHeader);
 	request.setRawHeader(QByteArrayLiteral("Accept-Language"), s_chatPreviewAcceptLanguageHeader);
+}
+
+void prepareChatPreviewImageRequest(QNetworkRequest &request) {
+	prepareChatPreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Accept"), chatPreviewImageAcceptHeader());
 }
 
 bool previewContentTypeLooksHtml(const QString &contentType) {
@@ -1301,7 +1378,8 @@ MumbleProto::ChatMessage protoChatMessageFromDB(const ::msdb::DBChatMessage &mes
 												std::optional< unsigned int > viewerUserID             = std::nullopt,
 												const std::optional< ChatReplyPreview > &replyPreview  = std::nullopt,
 												const QList< int > &supportedChatFeatures =
-													Mumble::ChatFeatures::supportedFeatureList()) {
+													Mumble::ChatFeatures::supportedFeatureList(),
+												const ChatReactionActorNameResolver &resolveReactionActorName = {}) {
 	const bool deleted = message.deletedAt > std::chrono::system_clock::time_point();
 	MumbleProto::ChatMessage protoMessage;
 	protoMessage.set_scope(scope);
@@ -1350,7 +1428,8 @@ MumbleProto::ChatMessage protoChatMessageFromDB(const ::msdb::DBChatMessage &mes
 			}
 		}
 		if (Mumble::ChatFeatures::contains(supportedChatFeatures, MumbleProto::ChatFeatureReactions)) {
-			appendProtoReactionAggregates(protoMessage.mutable_reactions(), message.reactions, viewerUserID);
+			appendProtoReactionAggregates(protoMessage.mutable_reactions(), message.reactions, viewerUserID,
+										  resolveReactionActorName);
 		}
 	}
 	protoMessage.set_created_at(::msdb::toEpochSeconds(message.createdAt));
@@ -1366,13 +1445,14 @@ MumbleProto::ChatMessage protoChatMessageFromDB(const ::msdb::DBChatMessage &mes
 
 MumbleProto::ChatReactionState protoReactionStateForMessage(const ::msdb::DBChatMessage &message,
 															MumbleProto::ChatScope scope, unsigned int scopeID,
-															std::optional< unsigned int > viewerUserID) {
+															std::optional< unsigned int > viewerUserID,
+															const ChatReactionActorNameResolver &resolveActorName = {}) {
 	MumbleProto::ChatReactionState state;
 	state.set_scope(scope);
 	state.set_scope_id(scopeID);
 	state.set_thread_id(message.threadID);
 	state.set_message_id(message.messageID);
-	appendProtoReactionAggregates(state.mutable_reactions(), message.reactions, viewerUserID);
+	appendProtoReactionAggregates(state.mutable_reactions(), message.reactions, viewerUserID, resolveActorName);
 	return state;
 }
 
@@ -1556,6 +1636,21 @@ void Server::persistAndBroadcastChatMessage(ServerUser *uSource, const QString &
 
 		return std::nullopt;
 	};
+	const auto resolvedReactionActorName = [this](unsigned int actorUserID) -> std::optional< std::string > {
+		const std::optional< std::string > connectedName = connectedUserNameForPersistentID(qhUsers, actorUserID);
+		if (connectedName) {
+			return connectedName;
+		}
+
+		if (actorUserID <= static_cast< unsigned int >(std::numeric_limits< int >::max())) {
+			const QString registeredName = getRegisteredUserName(static_cast< int >(actorUserID)).trimmed();
+			if (!registeredName.isEmpty()) {
+				return u8(registeredName);
+			}
+		}
+
+		return std::nullopt;
+	};
 	QSet< ServerUser * > persistentRecipients;
 	if (scope == MumbleProto::Channel) {
 		persistentRecipients = recipientsWithChatHistoryAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache,
@@ -1581,7 +1676,7 @@ void Server::persistAndBroadcastChatMessage(ServerUser *uSource, const QString &
 			}
 			const MumbleProto::ChatMessage protoMessage = protoChatMessageFromDB(
 				storedMessage, scope, scopeID, authorName, persistedUserID(currentUser), replyPreview,
-				effectiveChatFeatures(currentUser));
+				effectiveChatFeatures(currentUser), resolvedReactionActorName);
 			sendMessage(currentUser, protoMessage);
 		}
 	}
@@ -1910,7 +2005,7 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
 
 		updateHostCount(hostKey, +1);
 		QNetworkRequest request(imageUrl);
-		prepareChatPreviewRequest(request);
+		prepareChatPreviewImageRequest(request);
 		request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
 		request.setTransferTimeout(CHAT_PREVIEW_TIMEOUT_MSEC);
 		QNetworkReply *reply = qnamNetwork->get(request);
@@ -3947,8 +4042,13 @@ void Server::msgChatMessageDelete(ServerUser *uSource, MumbleProto::ChatMessageD
 		return;
 	}
 
-	if (!ChanACL::hasPermission(uSource, permissionChannel, ChanACL::DeleteTextMessage, &acCache)) {
-		PERM_DENIED(uSource, permissionChannel, ChanACL::DeleteTextMessage);
+	const bool ownRegisteredMessage =
+		message->authorUserID && uSource->iId >= 0
+		&& message->authorUserID.value() == static_cast< unsigned int >(uSource->iId);
+	const bool ownLiveSessionMessage = message->authorSession && message->authorSession.value() == uSource->uiSession;
+	if (!ownRegisteredMessage && !ownLiveSessionMessage
+		&& !ChanACL::hasPermission(uSource, permissionChannel, ChanACL::Write, &acCache)) {
+		PERM_DENIED(uSource, permissionChannel, ChanACL::Write);
 		return;
 	}
 
@@ -4082,6 +4182,21 @@ void Server::msgChatHistoryRequest(ServerUser *uSource, MumbleProto::ChatHistory
 
 		return std::nullopt;
 	};
+	const auto resolvedReactionActorName = [this](unsigned int actorUserID) -> std::optional< std::string > {
+		const std::optional< std::string > connectedName = connectedUserNameForPersistentID(qhUsers, actorUserID);
+		if (connectedName) {
+			return connectedName;
+		}
+
+		if (actorUserID <= static_cast< unsigned int >(std::numeric_limits< int >::max())) {
+			const QString registeredName = getRegisteredUserName(static_cast< int >(actorUserID)).trimmed();
+			if (!registeredName.isEmpty()) {
+				return u8(registeredName);
+			}
+		}
+
+		return std::nullopt;
+	};
 	response.set_has_more(false);
 	response.set_has_older(false);
 
@@ -4160,7 +4275,8 @@ void Server::msgChatHistoryRequest(ServerUser *uSource, MumbleProto::ChatHistory
 					resolveReplyPreview(m_dbWrapper, iServerNum, entry.message, resolvedAuthorName, entry.visibleAfter);
 				*response.add_messages() =
 					protoChatMessageFromDB(entry.message, entry.scope, entry.scopeID, resolvedAuthorName(entry.message),
-										   persistedUserID(uSource), replyPreview, chatFeatures);
+										   persistedUserID(uSource), replyPreview, chatFeatures,
+										   resolvedReactionActorName);
 			}
 		}
 
@@ -4219,7 +4335,7 @@ void Server::msgChatHistoryRequest(ServerUser *uSource, MumbleProto::ChatHistory
 								effectiveAccess.visibleAfter);
 		*response.add_messages() = protoChatMessageFromDB(
 			currentMessage, scope, scopeID, resolvedAuthorName(currentMessage), persistedUserID(uSource), replyPreview,
-			effectiveChatFeatures(uSource));
+			effectiveChatFeatures(uSource), resolvedReactionActorName);
 	}
 
 	const std::optional< unsigned int > userID = persistedUserID(uSource);
@@ -4872,12 +4988,29 @@ void Server::msgChatReactionToggle(ServerUser *uSource, MumbleProto::ChatReactio
 			recipientsWithLivePersistentChatAccess(qhUsers, scope, permissionChannel, acCache));
 	}
 
+	const auto resolvedReactionActorName = [this](unsigned int actorUserID) -> std::optional< std::string > {
+		const std::optional< std::string > connectedName = connectedUserNameForPersistentID(qhUsers, actorUserID);
+		if (connectedName) {
+			return connectedName;
+		}
+
+		if (actorUserID <= static_cast< unsigned int >(std::numeric_limits< int >::max())) {
+			const QString registeredName = getRegisteredUserName(static_cast< int >(actorUserID)).trimmed();
+			if (!registeredName.isEmpty()) {
+				return u8(registeredName);
+			}
+		}
+
+		return std::nullopt;
+	};
+
 	for (ServerUser *currentUser : persistentRecipients) {
 		if (!clientSupportsChatFeature(currentUser, MumbleProto::ChatFeatureReactions)) {
 			continue;
 		}
 
-		sendMessage(currentUser, protoReactionStateForMessage(*message, scope, scopeID, persistedUserID(currentUser)));
+		sendMessage(currentUser, protoReactionStateForMessage(*message, scope, scopeID, persistedUserID(currentUser),
+															  resolvedReactionActorName));
 	}
 }
 

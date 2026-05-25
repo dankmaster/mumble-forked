@@ -20,6 +20,29 @@ namespace {
 		const QString path = url.path();
 		return path.startsWith(QStringLiteral("/modern-shell")) || path.startsWith(QStringLiteral("/qtwebchannel/"));
 	}
+
+	bool hostEqualsOrEndsWith(const QString &host, const QString &domain) {
+		const QString normalizedHost   = host.trimmed().toLower();
+		const QString normalizedDomain = domain.trimmed().toLower();
+		return normalizedHost == normalizedDomain || normalizedHost.endsWith(QStringLiteral(".") + normalizedDomain);
+	}
+
+	bool isTrustedModernShellEmbedUrl(const QUrl &url) {
+		if (url.scheme().toLower() != QLatin1String("https")) {
+			return false;
+		}
+
+		const QString host = url.host().trimmed().toLower();
+		return hostEqualsOrEndsWith(host, QStringLiteral("youtube.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("youtube-nocookie.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("tiktok.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("vimeo.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("dailymotion.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("spotify.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("soundcloud.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("streamable.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("facebook.com"));
+	}
 } // namespace
 
 ModernShellPage::ModernShellPage(QObject *parent) : QWebEnginePage(parent) {
@@ -36,9 +59,10 @@ bool ModernShellPage::acceptNavigationRequest(const QUrl &url, const NavigationT
 		const QUrl externalUrl = url;
 		// Avoid re-entrant browser launch while WebEngine is still unwinding the click.
 		QTimer::singleShot(0, this, [externalUrl]() { QDesktopServices::openUrl(externalUrl); });
+		return false;
 	}
 
-	return false;
+	return isTrustedModernShellEmbedUrl(url);
 }
 
 void ModernShellPage::javaScriptConsoleMessage(const JavaScriptConsoleMessageLevel level, const QString &message,
