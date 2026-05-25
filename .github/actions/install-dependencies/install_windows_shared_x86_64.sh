@@ -7,7 +7,7 @@ source "$( dirname "$0" )/common.sh"
 
 verify_required_env_variables_set
 
-shared_environment_has_webengine_webchannel_support() {
+shared_environment_has_webengine_required_features() {
 	local webengine_targets_file="$1"
 
 	python - "$webengine_targets_file" <<'PY'
@@ -18,20 +18,34 @@ from pathlib import Path
 targets_file = Path(sys.argv[1])
 text = targets_file.read_text(encoding="utf-8")
 
-enabled_match = re.search(r'QT_ENABLED_PUBLIC_FEATURES\s+"([^"]*)"', text)
-disabled_match = re.search(r'QT_DISABLED_PUBLIC_FEATURES\s+"([^"]*)"', text)
+enabled_public_match = re.search(r'QT_ENABLED_PUBLIC_FEATURES\s+"([^"]*)"', text)
+disabled_public_match = re.search(r'QT_DISABLED_PUBLIC_FEATURES\s+"([^"]*)"', text)
+enabled_private_match = re.search(r'QT_ENABLED_PRIVATE_FEATURES\s+"([^"]*)"', text)
+disabled_private_match = re.search(r'QT_DISABLED_PRIVATE_FEATURES\s+"([^"]*)"', text)
 
-if enabled_match is None or disabled_match is None:
+if (
+    enabled_public_match is None
+    or disabled_public_match is None
+    or enabled_private_match is None
+    or disabled_private_match is None
+):
     raise SystemExit(1)
 
-enabled_features = {feature for feature in enabled_match.group(1).split(";") if feature}
-disabled_features = {feature for feature in disabled_match.group(1).split(";") if feature}
+enabled_public_features = {feature for feature in enabled_public_match.group(1).split(";") if feature}
+disabled_public_features = {feature for feature in disabled_public_match.group(1).split(";") if feature}
+enabled_private_features = {feature for feature in enabled_private_match.group(1).split(";") if feature}
+disabled_private_features = {feature for feature in disabled_private_match.group(1).split(";") if feature}
 
-raise SystemExit(
-    0
-    if "webengine_webchannel" in enabled_features and "webengine_webchannel" not in disabled_features
-    else 1
+has_webchannel = (
+    "webengine_webchannel" in enabled_public_features
+    and "webengine_webchannel" not in disabled_public_features
 )
+has_proprietary_codecs = (
+    "webengine_proprietary_codecs" in enabled_private_features
+    and "webengine_proprietary_codecs" not in disabled_private_features
+)
+
+raise SystemExit(0 if has_webchannel and has_proprietary_codecs else 1)
 PY
 }
 
@@ -44,8 +58,23 @@ shared_environment_has_webengine_runtime() {
 		&& [[ -d "$triplet_dir/share/Qt6WebChannel" ]] \
 		&& [[ -d "$triplet_dir/share/Qt6WebEngineWidgets" ]] \
 		&& [[ -f "$webengine_targets_file" ]] \
-		&& shared_environment_has_webengine_webchannel_support "$webengine_targets_file" \
-		&& [[ -f "$triplet_dir/tools/Qt6/bin/windeployqt.exe" ]]
+		&& shared_environment_has_webengine_required_features "$webengine_targets_file" \
+		&& [[ -f "$triplet_dir/tools/Qt6/bin/windeployqt.exe" ]] \
+		&& [[ -f "$triplet_dir/share/Qt6/resources/icudtl.dat" ]] \
+		&& [[ -f "$triplet_dir/share/Qt6/resources/qtwebengine_resources.pak" ]]
+}
+
+require_shared_environment_bootstrap_allowed() {
+	local missing_reason="$1"
+
+	if [[ "${MUMBLE_ALLOW_ENVIRONMENT_BOOTSTRAP:-}" = "ON" ]]; then
+		return 0
+	fi
+
+	echo "$missing_reason" 1>&2
+	echo "Local shared environment bootstrap is disabled for this job." 1>&2
+	echo "Publish ${MUMBLE_ENVIRONMENT_VERSION}.7z to ${MUMBLE_ENVIRONMENT_SOURCE}, or restore a cache with the same key." 1>&2
+	exit 1
 }
 
 if have_archive_extractor; then
@@ -57,12 +86,14 @@ if have_archive_extractor; then
 fi
 
 if ! shared_environment_has_webengine_runtime; then
+	require_shared_environment_bootstrap_allowed "Shared Windows WebEngine environment is missing required WebEngine/WebChannel/proprietary-codec runtime content."
 	ensure_build_env_repo_checkout
 	ensure_vcpkg_bootstrapped
 	install_mumble_vcpkg_dependencies "x64-windows"
 fi
 
 if ! environment_has_triplet "x86-windows"; then
+	require_shared_environment_bootstrap_allowed "Shared Windows WebEngine environment is missing the x86-windows helper triplet."
 	ensure_build_env_repo_checkout
 	ensure_vcpkg_bootstrapped
 	"$MUMBLE_ENVIRONMENT_DIR/vcpkg.exe" install --triplet "x86-windows" boost

@@ -43,6 +43,8 @@
 #	include "ModernShellBridge.h"
 #	include "ModernShellHost.h"
 #	include <QtWebEngineCore/QWebEngineProfile>
+#	include <QtWebEngineCore/QWebEngineScript>
+#	include <QtWebEngineCore/QWebEngineScriptCollection>
 #	include <QtWebEngineCore/QWebEngineSettings>
 #	include <QtWebEngineCore/QWebEngineUrlRequestInfo>
 #	include <QtWebEngineCore/QWebEngineUrlRequestInterceptor>
@@ -105,6 +107,7 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QFileInfo>
+#include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QLibraryInfo>
@@ -120,6 +123,7 @@
 #include <QtCore/QTime>
 #include <QtCore/QUrlQuery>
 #include <QtCore/QVector>
+#include <QtCore/QXmlStreamReader>
 #include <QtGui/QClipboard>
 #include <QtGui/QDesktopServices>
 #include <QtGui/QImageReader>
@@ -225,6 +229,11 @@ constexpr int ModernShellSnapshotInactiveCoalesceMs = 350;
 constexpr int ModernShellPatchCoalesceMs            = 16;
 constexpr int ModernConnectServerPingIntervalMs     = 75;
 constexpr int NativeWindowMoveResizeWatchdogMs      = 4000;
+#if defined(MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS) && MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS
+constexpr bool ModernShellInlineMp4PlaybackSupported = true;
+#else
+constexpr bool ModernShellInlineMp4PlaybackSupported = false;
+#endif
 
 bool modernShellMinimalSnapshotEnabled() {
 	static const bool enabled = qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0;
@@ -2636,6 +2645,301 @@ bool isDirectImageUrl(const QUrl &url) {
 		   || path.endsWith(QLatin1String(".webp")) || path.endsWith(QLatin1String(".bmp"));
 }
 
+bool isDirectPlayableMediaUrl(const QUrl &url) {
+	if (!url.isValid()) {
+		return false;
+	}
+
+	const QString path = url.path().toLower();
+	return path.endsWith(QLatin1String(".gif")) || path.endsWith(QLatin1String(".gifv"))
+		   || path.endsWith(QLatin1String(".m4v")) || path.endsWith(QLatin1String(".mp4"))
+		   || path.endsWith(QLatin1String(".webm"));
+}
+
+QString normalizedPlayableMediaMime(const QString &mime) {
+	return mime.section(QLatin1Char(';'), 0, 0).trimmed().toLower();
+}
+
+bool isRemotePlayableMediaMime(const QString &mime) {
+	const QString normalized = normalizedPlayableMediaMime(mime);
+	return normalized == QLatin1String("image/gif") || normalized == QLatin1String("video/mp4")
+		   || normalized == QLatin1String("video/webm");
+}
+
+bool isRemotePlayableAudioMime(const QString &mime) {
+	const QString normalized = normalizedPlayableMediaMime(mime);
+	return normalized == QLatin1String("audio/mp4") || normalized == QLatin1String("audio/aac")
+		   || normalized == QLatin1String("audio/mpeg");
+}
+
+QString playableMediaMimeForUrl(const QUrl &url, const QString &suggestedMime = QString()) {
+	const QString normalizedSuggestedMime = normalizedPlayableMediaMime(suggestedMime);
+	if (isRemotePlayableMediaMime(normalizedSuggestedMime)) {
+		return normalizedSuggestedMime;
+	}
+
+	const QString path = url.path().toLower();
+	if (path.endsWith(QLatin1String(".gif"))) {
+		return QStringLiteral("image/gif");
+	}
+	if (path.endsWith(QLatin1String(".gifv")) || path.endsWith(QLatin1String(".m4v"))
+		|| path.endsWith(QLatin1String(".mp4"))) {
+		return QStringLiteral("video/mp4");
+	}
+	if (path.endsWith(QLatin1String(".webm"))) {
+		return QStringLiteral("video/webm");
+	}
+	return QString();
+}
+
+QString playableAudioMimeForUrl(const QUrl &url, const QString &suggestedMime = QString()) {
+	const QString normalizedSuggestedMime = normalizedPlayableMediaMime(suggestedMime);
+	if (isRemotePlayableAudioMime(normalizedSuggestedMime)) {
+		return normalizedSuggestedMime;
+	}
+
+	const QString path = url.path().toLower();
+	if (path.endsWith(QLatin1String(".m4a")) || path.endsWith(QLatin1String(".aac"))
+		|| path.contains(QLatin1String("_audio_"))) {
+		return QStringLiteral("audio/mp4");
+	}
+	if (path.endsWith(QLatin1String(".mp3"))) {
+		return QStringLiteral("audio/mpeg");
+	}
+	return QString();
+}
+
+QUrl normalizedRemotePlayableMediaUrl(QUrl url) {
+	QString path = url.path();
+	if (path.toLower().endsWith(QLatin1String(".gifv"))) {
+		path.chop(5);
+		path.append(QLatin1String(".mp4"));
+		url.setPath(path);
+	}
+	return url;
+}
+
+bool hostEqualsOrEndsWith(const QString &host, const QString &suffix) {
+	return host == suffix || host.endsWith(QStringLiteral(".") + suffix);
+}
+
+bool isKnownRemotePlayableMediaHost(QString host) {
+	host = host.trimmed().toLower();
+	if (host.startsWith(QLatin1String("www."))) {
+		host.remove(0, 4);
+	}
+
+	return hostEqualsOrEndsWith(host, QStringLiteral("redd.it"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("redditmedia.com"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("imgur.com"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("cdninstagram.com"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("fbcdn.net"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("fbsbx.com"));
+}
+
+QString normalizedPreviewHost(QString host) {
+	host = host.trimmed().toLower();
+	if (host.startsWith(QLatin1String("www."))) {
+		host.remove(0, 4);
+	}
+	if (host.startsWith(QLatin1String("old."))) {
+		host.remove(0, 4);
+	}
+	if (host.startsWith(QLatin1String("new."))) {
+		host.remove(0, 4);
+	}
+	if (host.startsWith(QLatin1String("m."))) {
+		host.remove(0, 2);
+	}
+	if (host.startsWith(QLatin1String("mobile."))) {
+		host.remove(0, 7);
+	}
+	return host;
+}
+
+bool isSocialPreviewMediaProbeUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+
+	return host == QLatin1String("reddit.com") || host == QLatin1String("redd.it")
+		   || host == QLatin1String("v.redd.it") || host == QLatin1String("facebook.com")
+		   || host == QLatin1String("fb.watch") || host == QLatin1String("instagram.com")
+		   || host == QLatin1String("instagr.am");
+}
+
+bool shouldProbeSocialPreviewForPlayableMedia(const QUrl &url, const QString &mediaKind) {
+	return isSocialPreviewMediaProbeUrl(url) && mediaKind != QLatin1String("video");
+}
+
+QString firstPathSegment(const QUrl &url) {
+	const QStringList segments = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+	return segments.isEmpty() ? QString() : segments.front();
+}
+
+std::optional< QString > redditVideoIdFromUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	QString videoId;
+	if (host == QLatin1String("v.redd.it")) {
+		videoId = firstPathSegment(url);
+	} else if (host == QLatin1String("reddit.com")) {
+		const QStringList segments = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+		if (segments.size() >= 2 && segments.at(0) == QLatin1String("video")) {
+			videoId = segments.at(1);
+		}
+	}
+
+	static const QRegularExpression s_redditVideoIdPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[A-Za-z0-9_-]{5,64}")));
+	if (!s_redditVideoIdPattern.match(videoId).hasMatch()) {
+		return std::nullopt;
+	}
+
+	return videoId;
+}
+
+QUrl redditVideoMetadataUrl(const QString &videoId) {
+	QUrl url(QString::fromLatin1("https://www.reddit.com/video/%1/.json").arg(videoId));
+	QUrlQuery query;
+	query.addQueryItem(QStringLiteral("raw_json"), QStringLiteral("1"));
+	url.setQuery(query);
+	return url;
+}
+
+QJsonObject redditVideoPostObject(const QJsonDocument &document) {
+	if (!document.isArray()) {
+		return {};
+	}
+	const QJsonArray root = document.array();
+	if (root.isEmpty()) {
+		return {};
+	}
+	const QJsonArray children = root.at(0).toObject()
+									.value(QStringLiteral("data"))
+									.toObject()
+									.value(QStringLiteral("children"))
+									.toArray();
+	if (children.isEmpty()) {
+		return {};
+	}
+	return children.at(0).toObject().value(QStringLiteral("data")).toObject();
+}
+
+QJsonObject redditVideoMediaObject(const QJsonObject &post) {
+	const QJsonObject secureMedia = post.value(QStringLiteral("secure_media")).toObject();
+	QJsonObject video             = secureMedia.value(QStringLiteral("reddit_video")).toObject();
+	if (!video.isEmpty()) {
+		return video;
+	}
+
+	const QJsonObject media = post.value(QStringLiteral("media")).toObject();
+	video                   = media.value(QStringLiteral("reddit_video")).toObject();
+	if (!video.isEmpty()) {
+		return video;
+	}
+
+	return post.value(QStringLiteral("preview"))
+		.toObject()
+		.value(QStringLiteral("reddit_video_preview"))
+		.toObject();
+}
+
+QString normalizedJsonUrlString(QString value) {
+	value = value.trimmed();
+	value.replace(QLatin1String("&amp;"), QLatin1String("&"));
+	value.replace(QLatin1String("\\/"), QLatin1String("/"));
+	return value;
+}
+
+QString redditPreviewImageUrl(const QJsonObject &post) {
+	const QJsonArray images = post.value(QStringLiteral("preview"))
+								  .toObject()
+								  .value(QStringLiteral("images"))
+								  .toArray();
+	if (images.isEmpty()) {
+		return {};
+	}
+
+	return normalizedJsonUrlString(
+		images.at(0).toObject().value(QStringLiteral("source")).toObject().value(QStringLiteral("url")).toString());
+}
+
+QUrl redditDashManifestUrl(const QJsonObject &video) {
+	return QUrl(normalizedJsonUrlString(video.value(QStringLiteral("dash_url")).toString()));
+}
+
+QUrl redditDashAudioUrlFromManifest(const QByteArray &data, const QUrl &manifestUrl) {
+	QXmlStreamReader reader(data);
+	QUrl bestUrl;
+	int bestBandwidth       = -1;
+	bool inAudioAdaptation  = false;
+	bool inAudioRepresentation = false;
+	int currentBandwidth    = -1;
+
+	while (!reader.atEnd()) {
+		reader.readNext();
+		if (reader.isStartElement()) {
+			const QStringView name = reader.name();
+			const QXmlStreamAttributes attributes = reader.attributes();
+			if (name == QLatin1String("AdaptationSet")) {
+				const QString contentType = attributes.value(QLatin1String("contentType")).toString().toLower();
+				const QString mimeType    = attributes.value(QLatin1String("mimeType")).toString().toLower();
+				inAudioAdaptation         = contentType == QLatin1String("audio")
+									|| mimeType.startsWith(QLatin1String("audio/"));
+			} else if (inAudioAdaptation && name == QLatin1String("Representation")) {
+				const QString mimeType = attributes.value(QLatin1String("mimeType")).toString().toLower();
+				const QString codecs   = attributes.value(QLatin1String("codecs")).toString().toLower();
+				bool ok               = false;
+				currentBandwidth       = attributes.value(QLatin1String("bandwidth")).toInt(&ok);
+				if (!ok) {
+					currentBandwidth = 0;
+				}
+				inAudioRepresentation =
+					mimeType.startsWith(QLatin1String("audio/")) || codecs.contains(QLatin1String("mp4a"));
+			} else if (inAudioRepresentation && name == QLatin1String("BaseURL")) {
+				const QString baseText = reader.readElementText(QXmlStreamReader::SkipChildElements).trimmed();
+				const QUrl resolvedUrl = manifestUrl.resolved(QUrl(baseText));
+				if (resolvedUrl.isValid() && (bestUrl.isEmpty() || currentBandwidth > bestBandwidth)) {
+					bestUrl        = resolvedUrl;
+					bestBandwidth  = currentBandwidth;
+				}
+			}
+		} else if (reader.isEndElement()) {
+			const QStringView name = reader.name();
+			if (name == QLatin1String("Representation")) {
+				inAudioRepresentation = false;
+				currentBandwidth      = -1;
+			} else if (name == QLatin1String("AdaptationSet")) {
+				inAudioAdaptation     = false;
+				inAudioRepresentation = false;
+				currentBandwidth      = -1;
+			}
+		}
+	}
+
+	return bestUrl;
+}
+
+bool isSafePreviewTarget(const QUrl &url);
+
+bool isTrustedRemotePlayableMediaUrl(const QUrl &url, const QString &suggestedMime = QString()) {
+	if (!isSafePreviewTarget(url) || url.scheme().toLower() != QLatin1String("https")) {
+		return false;
+	}
+	if (!isKnownRemotePlayableMediaHost(url.host())) {
+		return false;
+	}
+	return isDirectPlayableMediaUrl(url) || isRemotePlayableMediaMime(suggestedMime);
+}
+
+bool isTrustedRemoteAudioMediaUrl(const QUrl &url, const QString &suggestedMime = QString()) {
+	if (!isSafePreviewTarget(url) || url.scheme().toLower() != QLatin1String("https")) {
+		return false;
+	}
+	if (!isKnownRemotePlayableMediaHost(url.host())) {
+		return false;
+	}
+	return !playableAudioMimeForUrl(url, suggestedMime).isEmpty();
+}
+
 QString normalizedPreviewUrl(const QUrl &url) {
 	QUrl normalized = url.adjusted(QUrl::NormalizePathSegments | QUrl::RemoveFragment);
 	return normalized.toString(QUrl::FullyEncoded);
@@ -2660,16 +2964,26 @@ std::optional< PersistentChatPreviewProviderInfo > previewProviderInfo(const QUr
 												  QObject::tr("Patreon post") };
 	}
 	if (host == QLatin1String("reddit.com") || host == QLatin1String("old.reddit.com")
-		|| host == QLatin1String("redd.it")) {
+		|| host == QLatin1String("redd.it") || host == QLatin1String("v.redd.it")) {
 		return PersistentChatPreviewProviderInfo{ QObject::tr("Reddit"), QObject::tr("Open on Reddit"),
 												  QObject::tr("Reddit post") };
+	}
+	if (host == QLatin1String("facebook.com") || host == QLatin1String("m.facebook.com")
+		|| host == QLatin1String("fb.watch")) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("Facebook"), QObject::tr("Open on Facebook"),
+												  QObject::tr("Facebook post") };
+	}
+	if (host == QLatin1String("instagram.com") || host == QLatin1String("instagr.am")) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("Instagram"), QObject::tr("Open on Instagram"),
+												  QObject::tr("Instagram post") };
 	}
 	if (host == QLatin1String("twitter.com") || host == QLatin1String("x.com")
 		|| host == QLatin1String("mobile.twitter.com")) {
 		return PersistentChatPreviewProviderInfo{ QObject::tr("Twitter/X"), QObject::tr("Open on X"),
 												  QObject::tr("Post on X") };
 	}
-	if (host == QLatin1String("imgur.com") || host == QLatin1String("i.imgur.com")) {
+	if (host == QLatin1String("imgur.com") || host == QLatin1String("i.imgur.com")
+		|| host == QLatin1String("m.imgur.com")) {
 		return PersistentChatPreviewProviderInfo{ QObject::tr("Imgur"), QObject::tr("Open on Imgur"),
 												  QObject::tr("Imgur link") };
 	}
@@ -2888,9 +3202,497 @@ public:
 	}
 };
 
+QString previewConsentSuppressionScript() {
+	return QString::fromLatin1(R"JS(
+(() => {
+  const stateKey = '__mumblePreviewConsentCleanupInstalled';
+  const styleId = 'mumble-preview-consent-cleanup-style';
+  const socialHost = /(^|\.)((facebook|fb)\.com|fb\.watch|instagram\.com|instagr\.am|reddit\.com|redd\.it|v\.redd\.it)$/i.test(location.hostname || '');
+  let cleanupQueued = false;
+  let hiddenAccessGate = false;
+  const consentWords = /\b(cookie|cookies|consent|privacy|gdpr|ccpa|cmp|samtycke|kakor|integritet|personuppgift|godk(?:a|\u00e4)nn|acceptera|inst(?:a|\u00e4)llningar)\b/i;
+  const accessGateWords = /\b(see more on facebook|see more from|log in to facebook|log into facebook|log in|login|sign up|create new account|create account|join instagram|continue to instagram|open instagram|please wait for verification|verify you are human|human verification|turn on notifications|not now)\b|(?:visa mer p(?:a|\u00e5) facebook)|(?:logga in)|(?:skapa nytt konto)|(?:g(?:a|\u00e5) med i instagram)|(?:inte nu)/i;
+  const vendorSelectors = [
+    '#CybotCookiebotDialog',
+    '#CookiebotWidget',
+    '#onetrust-consent-sdk',
+    '#onetrust-banner-sdk',
+    '.onetrust-pc-dark-filter',
+    '[id*="cookiebot" i]',
+    '[class*="cookiebot" i]',
+    '[id*="onetrust" i]',
+    '[class*="onetrust" i]',
+    '#didomi-host',
+    '[class*="didomi" i]',
+    '[id*="qc-cmp" i]',
+    '[class*="qc-cmp" i]',
+    '[id^="sp_message"]',
+    '[class*="sp_message" i]',
+    '#coiOverlay',
+    '[class*="coi-banner" i]',
+    '#cookiescript_injected',
+    '.cc-window',
+    '.cc-banner',
+    '.cky-consent-container',
+    '.cky-modal',
+    '.cmplz-cookiebanner',
+    '.osano-cm-window',
+    '.osano-cm-dialog',
+    '.iubenda-cs-container',
+    '#usercentrics-root',
+    '[data-testid="uc-app-container"]',
+    '[role="dialog"][aria-label*="cookie" i]',
+    '[role="dialog"][aria-label*="consent" i]',
+    '[class*="cookie" i][class*="overlay" i]',
+    '[class*="consent" i][class*="overlay" i]',
+    '[class*="cmp" i][class*="overlay" i]',
+    'iframe[src*="cookie" i]',
+    'iframe[src*="consent" i]',
+    'iframe[src*="privacy" i]'
+  ];
+  const accessGateSelectors = [
+    '[role="dialog"][aria-label*="log in" i]',
+    '[role="dialog"][aria-label*="login" i]',
+    '[role="dialog"][aria-label*="sign up" i]',
+    '[role="dialog"][aria-label*="facebook" i]',
+    '[role="dialog"][aria-label*="instagram" i]',
+    '[role="dialog"][aria-label*="verification" i]',
+    '[aria-label*="See more on Facebook" i]',
+    '[aria-label*="Log in to Facebook" i]',
+    '[aria-label*="Join Instagram" i]',
+    '[aria-label*="Continue to Instagram" i]',
+    '[class*="Login" i][role="dialog"]',
+    '[class*="Signup" i][role="dialog"]',
+    '[class*="modal" i][role="dialog"]'
+  ];
+
+  const hideElement = (element) => {
+    if (!element || !element.style) {
+      return;
+    }
+    element.setAttribute('data-mumble-preview-hidden-consent', '1');
+    element.style.setProperty('display', 'none', 'important');
+    element.style.setProperty('visibility', 'hidden', 'important');
+    element.style.setProperty('opacity', '0', 'important');
+    element.style.setProperty('pointer-events', 'none', 'important');
+  };
+
+  const installStyle = () => {
+    if (document.getElementById(styleId)) {
+      return;
+    }
+    const root = document.head || document.documentElement;
+    if (!root) {
+      return;
+    }
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `${vendorSelectors.concat(accessGateSelectors).join(',')} {
+      display: none !important;
+      visibility: hidden !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+    html, body {
+      overflow: auto !important;
+    }`;
+    root.appendChild(style);
+  };
+
+  const colorAlpha = (color) => {
+    const match = String(color || '').match(/rgba?\(([^)]+)\)/i);
+    if (!match) {
+      return 0;
+    }
+    const parts = match[1].split(',').map((part) => part.trim());
+    if (parts.length < 4) {
+      return 1;
+    }
+    const alpha = Number.parseFloat(parts[3]);
+    return Number.isFinite(alpha) ? alpha : 0;
+  };
+
+  const elementText = (element) => {
+    const text = element.textContent ? element.textContent.slice(0, 2400) : '';
+    return [
+      element.id || '',
+      typeof element.className === 'string' ? element.className : '',
+      element.getAttribute('role') || '',
+      element.getAttribute('aria-label') || '',
+      element.getAttribute('data-testid') || '',
+      element.getAttribute('title') || '',
+      text
+    ].join(' ');
+  };
+
+  const isLikelyConsentOverlay = (element) => {
+    if (!(element instanceof HTMLElement)) {
+      return false;
+    }
+    if (element.getAttribute('data-mumble-preview-hidden-consent') === '1') {
+      return false;
+    }
+
+    const style = window.getComputedStyle(element);
+    if (!style || style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+    if (rect.width < 80 || rect.height < 40) {
+      return false;
+    }
+
+    const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+    const area = Math.max(0, rect.width) * Math.max(0, rect.height);
+    const zIndex = Number.parseInt(style.zIndex, 10);
+    const fixedLike = style.position === 'fixed' || style.position === 'sticky';
+    const elevated = !Number.isNaN(zIndex) && zIndex >= 100;
+    const role = (element.getAttribute('role') || '').toLowerCase();
+    const roleDialog = role === 'dialog' || role === 'alertdialog';
+    const attrs = [
+      element.id || '',
+      typeof element.className === 'string' ? element.className : '',
+      element.getAttribute('aria-label') || ''
+    ].join(' ');
+    const attrHint = consentWords.test(attrs);
+    if (!fixedLike && !elevated && !roleDialog && !attrHint) {
+      return false;
+    }
+    if (area < viewportArea * 0.04 && !roleDialog && !attrHint) {
+      return false;
+    }
+
+    const haystack = elementText(element);
+    if (!consentWords.test(haystack)) {
+      return false;
+    }
+
+    const controls = element.querySelectorAll('button, [role="button"], a[href], input[type="button"], input[type="submit"]').length;
+    return controls > 0 || roleDialog || area >= viewportArea * 0.18;
+  };
+
+  const isLikelyAccessGateOverlay = (element) => {
+    if (!(element instanceof HTMLElement)) {
+      return false;
+    }
+    if (element.getAttribute('data-mumble-preview-hidden-consent') === '1') {
+      return false;
+    }
+
+    const style = window.getComputedStyle(element);
+    if (!style || style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+    if (rect.width < 120 || rect.height < 80) {
+      return false;
+    }
+
+    const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+    const area = Math.max(0, rect.width) * Math.max(0, rect.height);
+    const zIndex = Number.parseInt(style.zIndex, 10);
+    const elevated = !Number.isNaN(zIndex) && zIndex >= 20;
+    const fixedLike = style.position === 'fixed' || style.position === 'sticky';
+    const role = (element.getAttribute('role') || '').toLowerCase();
+    const roleDialog = role === 'dialog' || role === 'alertdialog';
+    const attrs = [
+      element.id || '',
+      typeof element.className === 'string' ? element.className : '',
+      element.getAttribute('aria-label') || '',
+      element.getAttribute('data-testid') || ''
+    ].join(' ');
+    const haystack = `${attrs} ${element.textContent ? element.textContent.slice(0, 3200) : ''}`;
+    if (!accessGateWords.test(haystack)) {
+      return false;
+    }
+    if (!socialHost && !roleDialog && !elevated && !fixedLike) {
+      return false;
+    }
+
+    const controls = element.querySelectorAll('button, [role="button"], a[href], input[type="button"], input[type="submit"]').length;
+    return controls > 0 || roleDialog || elevated || fixedLike || area >= viewportArea * 0.12;
+  };
+
+  const isLikelyAccessBackdrop = (element) => {
+    if (!hiddenAccessGate || !(element instanceof HTMLElement)) {
+      return false;
+    }
+    if (element.getAttribute('data-mumble-preview-hidden-consent') === '1') {
+      return false;
+    }
+
+    const style = window.getComputedStyle(element);
+    if (!style || style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+    const viewportArea = Math.max(1, window.innerWidth * window.innerHeight);
+    const area = Math.max(0, rect.width) * Math.max(0, rect.height);
+    const zIndex = Number.parseInt(style.zIndex, 10);
+    const fixedLike = style.position === 'fixed' || style.position === 'sticky';
+    const elevated = !Number.isNaN(zIndex) && zIndex >= 10;
+    if ((!fixedLike && !elevated) || area < viewportArea * 0.25) {
+      return false;
+    }
+    if (element.querySelector('video, img, picture, canvas')) {
+      return false;
+    }
+
+    const text = (element.textContent || '').trim();
+    if (text.length > 120) {
+      return false;
+    }
+
+    const backdropFilter = style.backdropFilter || style.webkitBackdropFilter || 'none';
+    const cssFilter = style.filter || 'none';
+    return colorAlpha(style.backgroundColor) >= 0.12 || backdropFilter !== 'none' || cssFilter !== 'none';
+  };
+
+  const clearAccessGateEffects = () => {
+    if (!hiddenAccessGate) {
+      return;
+    }
+    try {
+      document.querySelectorAll('body *').forEach((element) => {
+        if (!(element instanceof HTMLElement)) {
+          return;
+        }
+        const style = window.getComputedStyle(element);
+        if (!style) {
+          return;
+        }
+        const cssFilter = style.filter || 'none';
+        const backdropFilter = style.backdropFilter || style.webkitBackdropFilter || 'none';
+        if (cssFilter !== 'none') {
+          element.style.setProperty('filter', 'none', 'important');
+        }
+        if (backdropFilter !== 'none') {
+          element.style.setProperty('backdrop-filter', 'none', 'important');
+          element.style.setProperty('-webkit-backdrop-filter', 'none', 'important');
+        }
+        if (isLikelyAccessBackdrop(element)) {
+          hideElement(element);
+        }
+      });
+    } catch (e) {}
+  };
+
+  const cleanup = () => {
+    installStyle();
+    try {
+      document.querySelectorAll(vendorSelectors.join(',')).forEach(hideElement);
+    } catch (e) {}
+    try {
+      document.querySelectorAll(accessGateSelectors.join(',')).forEach((element) => {
+        hiddenAccessGate = true;
+        hideElement(element);
+      });
+    } catch (e) {}
+
+    if (document.documentElement) {
+      document.documentElement.style.setProperty('overflow', 'auto', 'important');
+    }
+    if (document.body) {
+      document.body.style.setProperty('overflow', 'auto', 'important');
+      document.body.classList.remove('modal-open', 'no-scroll', 'noscroll', 'overflow-hidden');
+    }
+
+    try {
+      document.querySelectorAll('body *').forEach((element) => {
+        if (isLikelyConsentOverlay(element)) {
+          hideElement(element);
+        } else if (isLikelyAccessGateOverlay(element)) {
+          hiddenAccessGate = true;
+          hideElement(element);
+        }
+      });
+    } catch (e) {}
+    clearAccessGateEffects();
+  };
+
+  const scheduleCleanup = () => {
+    if (cleanupQueued) {
+      return;
+    }
+    cleanupQueued = true;
+    const run = () => {
+      cleanupQueued = false;
+      cleanup();
+    };
+    if (window.requestAnimationFrame) {
+      window.requestAnimationFrame(run);
+    } else {
+      window.setTimeout(run, 0);
+    }
+    window.setTimeout(cleanup, 250);
+    window.setTimeout(cleanup, 900);
+  };
+
+  const start = () => {
+    scheduleCleanup();
+    if (!window[stateKey]) {
+      window[stateKey] = true;
+      try {
+        const observerTarget = document.documentElement || document;
+        new MutationObserver(scheduleCleanup).observe(observerTarget, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['class', 'style', 'id', 'aria-label', 'role']
+        });
+      } catch (e) {}
+    }
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  }
+  start();
+})();
+)JS");
+}
+
+QString previewSnapshotPreparationScript() {
+	return previewConsentSuppressionScript() + QStringLiteral("\ntry {"
+															 "window.scrollTo(0, 0);"
+															 "document.documentElement.style.scrollBehavior = 'auto';"
+															 "if (document.body) { document.body.style.scrollBehavior = 'auto'; }"
+															 "document.querySelectorAll('video').forEach((video) => {"
+															 "try {"
+															 "video.muted = true;"
+															 "video.playsInline = true;"
+															 "video.preload = 'metadata';"
+															 "const warm = () => {"
+															 "try {"
+															 "const playResult = video.play();"
+															 "if (playResult && typeof playResult.then === 'function') {"
+															 "playResult.then(() => window.setTimeout(() => { try { video.pause(); } catch (e) {} }, 350)).catch(() => {});"
+															 "} else {"
+															 "window.setTimeout(() => { try { video.pause(); } catch (e) {} }, 350);"
+															 "}"
+															 "} catch (e) {}"
+															 "};"
+															 "if (video.readyState >= 2) { warm(); }"
+															 "else { video.addEventListener('loadeddata', warm, { once: true }); }"
+															 "} catch (e) {}"
+															 "});"
+															 "} catch (e) {}");
+}
+
+QString previewSnapshotMediaProbeScript() {
+	return QString::fromLatin1(R"JS(
+(() => {
+  const candidates = [];
+  const sourceHost = String(location.hostname || '').toLowerCase();
+  const socialVideoPage = /(^|\.)((facebook|fb)\.com|fb\.watch|instagram\.com|instagr\.am|reddit\.com|redd\.it|v\.redd\.it)$/i.test(sourceHost);
+  const decodeEscapes = (value) => String(value || '')
+    .replace(/\\\//g, '/')
+    .replace(/\\u0025/ig, '%')
+    .replace(/\\u0026/ig, '&')
+    .replace(/\\u002f/ig, '/')
+    .replace(/\\u003a/ig, ':')
+    .replace(/\\u003d/ig, '=')
+    .replace(/\\u003f/ig, '?')
+    .replace(/\\u002c/ig, ',')
+    .replace(/\\u002d/ig, '-')
+    .replace(/\\u005c/ig, '\\')
+    .replace(/\\x25/ig, '%')
+    .replace(/\\x26/ig, '&')
+    .replace(/\\x2f/ig, '/')
+    .replace(/\\x3a/ig, ':')
+    .replace(/\\x3d/ig, '=')
+    .replace(/\\x3f/ig, '?')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"');
+  const cleanUrl = (value) => {
+    let url = decodeEscapes(value).trim();
+    if (!url || /^blob:/i.test(url) || /^data:/i.test(url)) {
+      return '';
+    }
+    try {
+      return new URL(url, document.baseURI).href;
+    } catch (e) {
+      return '';
+    }
+  };
+  const mimeForUrl = (url, fallback) => {
+    const hinted = String(fallback || '').split(';')[0].trim().toLowerCase();
+    if (hinted === 'image/gif' || hinted === 'video/mp4' || hinted === 'video/webm') {
+      return hinted;
+    }
+    const path = (() => {
+      try {
+        return new URL(url).pathname.toLowerCase();
+      } catch (e) {
+        return String(url || '').toLowerCase();
+      }
+    })();
+    if (path.endsWith('.gif')) {
+      return 'image/gif';
+    }
+    if (path.endsWith('.gifv') || path.endsWith('.m4v') || path.endsWith('.mp4')) {
+      return 'video/mp4';
+    }
+    if (path.endsWith('.webm')) {
+      return 'video/webm';
+    }
+    return hinted;
+  };
+  const addCandidate = (rawUrl, rawMime, score) => {
+    const url = cleanUrl(rawUrl);
+    if (!/^https:\/\//i.test(url)) {
+      return;
+    }
+    const mime = mimeForUrl(url, rawMime);
+    if (mime !== 'image/gif' && mime !== 'video/mp4' && mime !== 'video/webm') {
+      return;
+    }
+    if (socialVideoPage && mime === 'image/gif') {
+      return;
+    }
+    const videoBoost = /^video\//i.test(mime) ? 5000 : 0;
+    candidates.push({ url, mime, score: (Number(score) || 0) + videoBoost });
+  };
+
+  try {
+    document.querySelectorAll('video').forEach((video) => {
+      const rect = video.getBoundingClientRect();
+      const visibleScore = Math.max(0, rect.width) * Math.max(0, rect.height);
+      addCandidate(video.currentSrc || video.src || video.getAttribute('src'), video.type, visibleScore + 20000);
+      video.querySelectorAll('source[src]').forEach((source) => {
+        addCandidate(source.currentSrc || source.src || source.getAttribute('src'), source.type, visibleScore + 15000);
+      });
+    });
+  } catch (e) {}
+
+  try {
+    document.querySelectorAll('source[src], [data-video-url], [data-src], [data-href]').forEach((element) => {
+      addCandidate(element.getAttribute('src') || element.getAttribute('data-video-url') || element.getAttribute('data-src') || element.getAttribute('data-href'), element.getAttribute('type'), 8000);
+    });
+  } catch (e) {}
+
+  try {
+    const html = document.documentElement ? document.documentElement.innerHTML.slice(0, 2500000) : '';
+    const normalizedHtml = decodeEscapes(html);
+    const pattern = /https?:\/\/[^"'<>\\\s]+?\.(?:mp4|m4v|webm|gifv|gif)(?:\?[^"'<>\\\s]*)?/ig;
+    let match;
+    while ((match = pattern.exec(normalizedHtml)) && candidates.length < 32) {
+      addCandidate(match[0], '', 1000);
+    }
+  } catch (e) {}
+
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0] || {};
+})();
+)JS");
+}
+
 class PersistentChatPreviewSnapshotRenderer final : public QObject {
 public:
-	using ResultCallback = std::function< void(const QString &, const QImage &, bool) >;
+	using ResultCallback = std::function< void(const QString &, const QImage &, bool, const QString &, const QString &) >;
 
 	explicit PersistentChatPreviewSnapshotRenderer(QObject *parent = nullptr) : QObject(parent) {
 		m_timeoutTimer = new QTimer(this);
@@ -2977,9 +3779,16 @@ private:
 		m_page = new QWebEnginePage(m_profile, m_view);
 		m_page->setAudioMuted(true);
 		m_page->setBackgroundColor(Qt::white);
+		QWebEngineScript consentSuppressionScript;
+		consentSuppressionScript.setName(QStringLiteral("MumblePreviewConsentCleanup"));
+		consentSuppressionScript.setInjectionPoint(QWebEngineScript::DocumentCreation);
+		consentSuppressionScript.setWorldId(QWebEngineScript::ApplicationWorld);
+		consentSuppressionScript.setRunsOnSubFrames(true);
+		consentSuppressionScript.setSourceCode(previewConsentSuppressionScript());
+		m_page->scripts().insert(consentSuppressionScript);
 		m_view->setPage(m_page);
 
-		m_view->settings()->setAttribute(QWebEngineSettings::PlaybackRequiresUserGesture, true);
+		m_view->settings()->setAttribute(QWebEngineSettings::PlaybackRequiresUserGesture, false);
 		m_view->settings()->setAttribute(QWebEngineSettings::ShowScrollBars, false);
 		m_view->settings()->setAttribute(QWebEngineSettings::ErrorPageEnabled, false);
 
@@ -2993,11 +3802,7 @@ private:
 			}
 
 			m_captureAttempts = 0;
-			m_page->runJavaScript(QStringLiteral("try {"
-												 "window.scrollTo(0, 0);"
-												 "document.documentElement.style.scrollBehavior = 'auto';"
-												 "if (document.body) { document.body.style.scrollBehavior = 'auto'; }"
-												 "} catch (e) {}"),
+			m_page->runJavaScript(previewSnapshotPreparationScript(),
 								  [this](const QVariant &) {
 									  if (m_busy) {
 										  m_settleTimer->start();
@@ -3060,32 +3865,44 @@ private:
 			return;
 		}
 
-		m_page->runJavaScript(QStringLiteral("try {"
-											 "window.scrollTo(0, 0);"
-											 "} catch (e) {}"),
+		m_page->runJavaScript(previewSnapshotPreparationScript(),
 							  [this](const QVariant &) {
 								  if (!m_busy || !m_view) {
 									  return;
 								  }
 
-								  const QPixmap pixmap = m_view->grab();
-								  const QImage image   = pixmap.toImage();
-								  if (!image.isNull() && image.width() > 1 && image.height() > 1) {
-									  finishCurrent(true, image);
-									  return;
-								  }
+								  m_page->runJavaScript(previewSnapshotMediaProbeScript(), [this](const QVariant &mediaResult) {
+									  if (!m_busy || !m_view) {
+										  return;
+									  }
 
-								  ++m_captureAttempts;
-								  if (m_captureAttempts < kMaxCaptureAttempts) {
-									  m_settleTimer->start(kCaptureRetryDelayMsec);
-									  return;
-								  }
+									  const QVariantMap media = mediaResult.toMap();
+									  const QString mediaUrl  = media.value(QStringLiteral("url")).toString().trimmed();
+									  const QString mediaMime = media.value(QStringLiteral("mime")).toString().trimmed();
+									  const QPixmap pixmap    = m_view->grab();
+									  const QImage image      = pixmap.toImage();
+									  if (!image.isNull() && image.width() > 1 && image.height() > 1) {
+										  finishCurrent(true, image, mediaUrl, mediaMime);
+										  return;
+									  }
+									  if (!mediaUrl.isEmpty()) {
+										  finishCurrent(true, QImage(), mediaUrl, mediaMime);
+										  return;
+									  }
 
-								  finishCurrent(false, QImage());
+									  ++m_captureAttempts;
+									  if (m_captureAttempts < kMaxCaptureAttempts) {
+										  m_settleTimer->start(kCaptureRetryDelayMsec);
+										  return;
+									  }
+
+									  finishCurrent(false, QImage());
+								  });
 							  });
 	}
 
-	void finishCurrent(bool success, const QImage &image) {
+	void finishCurrent(bool success, const QImage &image, const QString &mediaUrl = QString(),
+					   const QString &mediaMime = QString()) {
 		if (!m_busy) {
 			return;
 		}
@@ -3105,7 +3922,7 @@ private:
 		}
 
 		if (m_resultCallback) {
-			m_resultCallback(previewKey, image, success);
+			m_resultCallback(previewKey, image, success, mediaUrl, mediaMime);
 		}
 
 		QTimer::singleShot(0, this, [this]() { startNextIfIdle(); });
@@ -6199,7 +7016,7 @@ namespace {
 
 		for (const QVariant &rowValue : model.value(QStringLiteral("groups")).toList()) {
 			const QVariantMap row = rowValue.toMap();
-			QString name = row.value(QStringLiteral("name")).toString().trimmed().toLower();
+			QString name = row.value(QStringLiteral("name")).toString().trimmed();
 			if (name.startsWith(QLatin1Char('@'))) {
 				name.remove(0, 1);
 			}
@@ -6236,7 +7053,7 @@ namespace {
 		if (!password.isEmpty()) {
 			const unsigned int passwordPermissions =
 				ChanACL::Enter | ChanACL::Speak | ChanACL::Whisper | ChanACL::TextMessage | ChanACL::LinkChannel
-				| ChanACL::Traverse;
+				| ChanACL::ViewTextMessageHistory | ChanACL::Traverse;
 			addAcl(true, false, QLatin1String("all"), -1, ChanACL::None, passwordPermissions);
 			addAcl(true, false, QStringLiteral("#%1").arg(password), -1, passwordPermissions, ChanACL::None);
 		}
@@ -9308,6 +10125,10 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 					previewState.insert(QStringLiteral("mediaMime"), preview.mediaMime);
 					previewState.insert(QStringLiteral("mediaKind"), preview.mediaKind);
 					previewState.insert(QStringLiteral("autoplay"), preview.autoplay);
+					if (!preview.mediaAudioDataUrl.isEmpty()) {
+						previewState.insert(QStringLiteral("mediaAudioUrl"), preview.mediaAudioDataUrl);
+						previewState.insert(QStringLiteral("mediaAudioMime"), preview.mediaAudioMime);
+					}
 				}
 				messageState.insert(QStringLiteral("preview"), previewState);
 			}
@@ -9956,6 +10777,7 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 	appState.insert(QStringLiteral("selfVoiceLabel"), selfVoiceChannel ? selfVoiceChannel->qsName : QString());
 	appState.insert(QStringLiteral("canManageTextChannels"), canManagePersistentTextChannels());
 	appState.insert(QStringLiteral("canCreateTextRoom"), canCreateTextRoom());
+	appState.insert(QStringLiteral("inlineMp4PlaybackSupported"), ModernShellInlineMp4PlaybackSupported);
 	appState.insert(QStringLiteral("motdExpanded"), Global::get().s.bModernShellMotdExpanded);
 	if (const Channel *rootVoiceChannel = Channel::get(Mumble::ROOT_CHANNEL_ID)) {
 		appState.insert(QStringLiteral("voiceRootLabel"), QString());
@@ -10591,6 +11413,7 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 	appState.insert(QStringLiteral("selfAvatarUrl"), modernShellAvatarDataUrl(selfUser, 56));
 	appState.insert(QStringLiteral("canManageTextChannels"), canManagePersistentTextChannels());
 	appState.insert(QStringLiteral("canCreateTextRoom"), canCreateTextRoom());
+	appState.insert(QStringLiteral("inlineMp4PlaybackSupported"), ModernShellInlineMp4PlaybackSupported);
 	if (const Channel *rootVoiceChannel = Channel::get(Mumble::ROOT_CHANNEL_ID)) {
 		appState.insert(QStringLiteral("voiceRootLabel"), QString());
 		appState.insert(QStringLiteral("voiceRootScopeToken"),
@@ -16004,6 +16827,10 @@ std::optional< QString > MainWindow::persistentChatPreviewKey(const MumbleProto:
 			continue;
 		}
 
+		if (isTrustedRemotePlayableMediaUrl(url)) {
+			return QString::fromLatin1("url:%1").arg(normalizedPreviewUrl(url));
+		}
+
 		if (isDirectImageUrl(url)) {
 			return QString::fromLatin1("image:%1").arg(normalizedPreviewUrl(url));
 		}
@@ -16024,6 +16851,203 @@ std::optional< MumbleProto::ChatEmbedRef >
 	}
 
 	return std::nullopt;
+}
+
+bool MainWindow::applyPersistentChatRemotePlayableMedia(PersistentChatPreview &preview, const QUrl &mediaUrl,
+														const QString &suggestedMime) {
+	QUrl normalizedMediaUrl = normalizedRemotePlayableMediaUrl(mediaUrl);
+	if (!isTrustedRemotePlayableMediaUrl(normalizedMediaUrl, suggestedMime)) {
+		return false;
+	}
+
+	const QString mime = playableMediaMimeForUrl(normalizedMediaUrl, suggestedMime);
+	if (mime.isEmpty()) {
+		return false;
+	}
+
+	preview.mediaDataUrl      = normalizedMediaUrl.toString(QUrl::FullyEncoded);
+	preview.mediaMime         = mime;
+	preview.mediaKind         = mime.startsWith(QLatin1String("video/")) ? QStringLiteral("video") : QStringLiteral("gif");
+	preview.autoplay          = false;
+	preview.metadataFinished  = true;
+	preview.thumbnailFinished = true;
+	preview.failed            = false;
+
+	if (preview.title.trimmed().isEmpty()) {
+		const QString fileName = QFileInfo(normalizedMediaUrl.path()).fileName();
+		preview.title         = fileName.isEmpty() ? tr("Video preview") : fileName;
+	}
+	if (preview.description.trimmed().isEmpty() || preview.description == tr("Fetching page metadata")
+		|| preview.description == tr("Preview unavailable")) {
+		preview.description =
+			mime == QLatin1String("image/gif") ? tr("Animated image preview") : tr("Video preview");
+	}
+
+	return true;
+}
+
+bool MainWindow::applyPersistentChatRemoteAudioMedia(PersistentChatPreview &preview, const QUrl &audioUrl,
+													 const QString &suggestedMime) {
+	if (!isTrustedRemoteAudioMediaUrl(audioUrl, suggestedMime)) {
+		return false;
+	}
+
+	const QString mime = playableAudioMimeForUrl(audioUrl, suggestedMime);
+	if (mime.isEmpty()) {
+		return false;
+	}
+
+	preview.mediaAudioDataUrl = audioUrl.toString(QUrl::FullyEncoded);
+	preview.mediaAudioMime    = mime;
+	return true;
+}
+
+bool MainWindow::requestPersistentChatRedditVideoAudioPreview(const QString &previewKey, const QUrl &dashManifestUrl) {
+	if (previewKey.isEmpty() || !isSafePreviewTarget(dashManifestUrl)
+		|| dashManifestUrl.scheme().toLower() != QLatin1String("https")
+		|| !isKnownRemotePlayableMediaHost(dashManifestUrl.host())) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end() || it->mediaKind != QLatin1String("video")
+		|| !it->mediaAudioDataUrl.isEmpty()) {
+		return false;
+	}
+
+	QNetworkRequest request(dashManifestUrl);
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Accept"),
+						 QByteArrayLiteral("application/dash+xml,application/xml,text/xml;q=0.9,*/*;q=0.5"));
+	QNetworkReply *reply = Global::get().nam->get(request);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, dashManifestUrl]() {
+		const QByteArray data = reply->readAll();
+		const bool success    = reply->error() == QNetworkReply::NoError;
+		reply->deleteLater();
+
+		if (!success || data.isEmpty()) {
+			return;
+		}
+
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()) {
+			return;
+		}
+
+		const QUrl audioUrl = redditDashAudioUrlFromManifest(data, dashManifestUrl);
+		if (applyPersistentChatRemoteAudioMedia(*previewIt, audioUrl, QStringLiteral("audio/mp4"))) {
+			publishPersistentChatPreviewUpdate(previewKey);
+		}
+	});
+
+	return true;
+}
+
+bool MainWindow::requestPersistentChatRedditVideoPreview(const QString &previewKey, const QUrl &previewUrl) {
+	const std::optional< QString > videoId = redditVideoIdFromUrl(previewUrl);
+	if (!videoId) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested || it->remoteMediaFinished
+		|| it->mediaKind == QLatin1String("video")) {
+		return false;
+	}
+
+	it->remoteMediaRequested = true;
+
+	QNetworkRequest request(redditVideoMetadataUrl(*videoId));
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
+	QNetworkReply *reply = Global::get().nam->get(request);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey]() {
+		const QByteArray data     = reply->readAll();
+		const bool success        = reply->error() == QNetworkReply::NoError;
+		const QString failureText = previewFailureText(reply);
+		reply->deleteLater();
+
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()) {
+			return;
+		}
+
+		previewIt->remoteMediaRequested = false;
+		previewIt->remoteMediaFinished  = true;
+		previewIt->metadataFinished     = true;
+
+		bool applied = false;
+		if (success && !data.isEmpty()) {
+			QJsonParseError error;
+			const QJsonDocument document = QJsonDocument::fromJson(data, &error);
+			if (error.error == QJsonParseError::NoError) {
+				const QJsonObject post       = redditVideoPostObject(document);
+				const QJsonObject video      = redditVideoMediaObject(post);
+				const QString fallbackUrl    = normalizedJsonUrlString(video.value(QStringLiteral("fallback_url")).toString());
+				const QUrl remoteMediaUrl    = QUrl(fallbackUrl);
+				const QUrl dashManifestUrl   = redditDashManifestUrl(video);
+				const QUrl previewImageUrl   = QUrl(redditPreviewImageUrl(post));
+				applied                      = applyPersistentChatRemotePlayableMedia(*previewIt, remoteMediaUrl,
+																				   QStringLiteral("video/mp4"));
+				const QString title          = post.value(QStringLiteral("title")).toString().trimmed();
+				const QString subreddit      = post.value(QStringLiteral("subreddit_name_prefixed")).toString().trimmed();
+				const QString postPermalink  = post.value(QStringLiteral("permalink")).toString().trimmed();
+				if (!postPermalink.isEmpty()) {
+					previewIt->canonicalUrl = QUrl(QStringLiteral("https://www.reddit.com")).resolved(QUrl(postPermalink)).toString();
+				}
+				if (!title.isEmpty()) {
+					previewIt->title = title;
+				}
+				previewIt->subtitle = subreddit.isEmpty() ? tr("Reddit") : subreddit;
+				if (applied && (previewIt->description.isEmpty()
+								|| previewIt->description == tr("Fetching page metadata")
+								|| previewIt->description == tr("Preview unavailable"))) {
+					previewIt->description = tr("Video preview");
+				}
+				if (applied && dashManifestUrl.isValid()) {
+					requestPersistentChatRedditVideoAudioPreview(previewKey, dashManifestUrl);
+				}
+				if (applied && previewIt->thumbnailImage.isNull() && previewImageUrl.isValid()
+					&& isSafePreviewTarget(previewImageUrl)) {
+					QNetworkRequest imageRequest(previewImageUrl);
+					preparePreviewRequest(imageRequest);
+					QNetworkReply *imageReply = Global::get().nam->get(imageRequest);
+					applyPreviewReplyGuards(imageReply, PREVIEW_MAX_IMAGE_BYTES);
+					connect(imageReply, &QNetworkReply::finished, this, [this, imageReply, previewKey]() {
+						const QByteArray imageData = imageReply->readAll();
+						const bool imageSuccess    = imageReply->error() == QNetworkReply::NoError;
+						imageReply->deleteLater();
+
+						if (!imageSuccess || imageData.isEmpty()) {
+							return;
+						}
+						auto imagePreviewIt = m_persistentChatPreviews.find(previewKey);
+						if (imagePreviewIt == m_persistentChatPreviews.end()) {
+							return;
+						}
+						const QImage image = decodePersistentChatThumbnailImage(imageData);
+						if (!image.isNull()) {
+							imagePreviewIt->thumbnailImage = persistentChatThumbnailImage(image);
+							publishPersistentChatPreviewUpdate(previewKey);
+						}
+					});
+				}
+			}
+		}
+
+		if (!applied) {
+			if (previewIt->description.isEmpty() || previewIt->description == tr("Fetching page metadata")) {
+				previewIt->description = success ? tr("Preview unavailable") : failureText;
+			}
+			ensurePersistentChatPreviewSiteSnapshot(previewKey);
+		}
+
+		publishPersistentChatPreviewUpdate(previewKey);
+	});
+
+	return true;
 }
 
 void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
@@ -16119,7 +17143,9 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			preview.description = tr("Preview unavailable");
 		}
 
+		applyPersistentChatRemotePlayableMedia(preview, previewUrl);
 		m_persistentChatPreviews.insert(previewKey, preview);
+		requestPersistentChatRedditVideoPreview(previewKey, previewUrl);
 		if (preview.previewAssetID > 0) {
 			ensurePersistentChatPreviewAssetDownload(preview.previewAssetID, previewKey);
 		} else {
@@ -16252,6 +17278,15 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		return;
 	}
 
+	if (!isImagePreview && applyPersistentChatRemotePlayableMedia(preview, previewUrl)) {
+		if (preview.title == tr("Video preview") && provider) {
+			preview.title = provider->fallbackTitle;
+		}
+		m_persistentChatPreviews.insert(previewKey, preview);
+		renderIfVisible();
+		return;
+	}
+
 	if (isImagePreview) {
 		const QString fileName = QFileInfo(previewUrl.path()).fileName();
 		preview.title = fileName.isEmpty() ? (provider ? provider->fallbackTitle : tr("Image preview")) : fileName;
@@ -16295,6 +17330,11 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 	preview.title       = provider ? provider->fallbackTitle : tr("Loading link preview...");
 	preview.description = tr("Fetching page metadata");
 	m_persistentChatPreviews.insert(previewKey, preview);
+
+	if (requestPersistentChatRedditVideoPreview(previewKey, previewUrl)) {
+		renderIfVisible();
+		return;
+	}
 
 	QNetworkRequest pageRequest(previewUrl);
 	preparePreviewRequest(pageRequest);
@@ -16442,7 +17482,10 @@ void MainWindow::ensurePersistentChatPreviewSiteSnapshot(const QString &previewK
 	}
 
 	PersistentChatPreview &preview = it.value();
-	if (!preview.thumbnailImage.isNull() || preview.siteSnapshotRequested || preview.siteSnapshotFinished) {
+	const QUrl previewUrl(preview.canonicalUrl);
+	const bool socialMediaProbe = shouldProbeSocialPreviewForPlayableMedia(previewUrl, preview.mediaKind);
+	if ((!socialMediaProbe && (!preview.thumbnailImage.isNull() || !preview.mediaDataUrl.isEmpty()))
+		|| preview.siteSnapshotRequested || preview.siteSnapshotFinished) {
 		return;
 	}
 	if (preview.previewAssetID > 0 && !preview.thumbnailFinished) {
@@ -16452,7 +17495,6 @@ void MainWindow::ensurePersistentChatPreviewSiteSnapshot(const QString &previewK
 		return;
 	}
 
-	const QUrl previewUrl(preview.canonicalUrl);
 	if (!isSafePreviewTarget(previewUrl)) {
 		preview.siteSnapshotFinished = true;
 		return;
@@ -16463,8 +17505,9 @@ void MainWindow::ensurePersistentChatPreviewSiteSnapshot(const QString &previewK
 	if (!renderer) {
 		renderer                                = new PersistentChatPreviewSnapshotRenderer(this);
 		m_persistentChatPreviewSnapshotRenderer = renderer;
-		renderer->setResultCallback([this](const QString &key, const QImage &image, bool success) {
-			handlePersistentChatPreviewSiteSnapshotResult(key, image, success);
+		renderer->setResultCallback([this](const QString &key, const QImage &image, bool success,
+										   const QString &mediaUrl, const QString &mediaMime) {
+			handlePersistentChatPreviewSiteSnapshotResult(key, image, success, mediaUrl, mediaMime);
 		});
 	}
 
@@ -16474,22 +17517,48 @@ void MainWindow::ensurePersistentChatPreviewSiteSnapshot(const QString &previewK
 }
 
 void MainWindow::handlePersistentChatPreviewSiteSnapshotResult(const QString &previewKey, const QImage &image,
-															   bool success) {
+															   bool success, const QString &mediaUrl,
+															   const QString &mediaMime) {
 	auto it = m_persistentChatPreviews.find(previewKey);
 	if (it == m_persistentChatPreviews.end()) {
 		return;
 	}
 
+	const bool hasRemoteMedia = applyPersistentChatRemotePlayableMedia(*it, QUrl(mediaUrl), mediaMime);
+	const bool socialMediaProbe =
+		shouldProbeSocialPreviewForPlayableMedia(QUrl(it->canonicalUrl), hasRemoteMedia ? QStringLiteral("video") : it->mediaKind);
 	it->siteSnapshotRequested = false;
 	it->siteSnapshotFinished  = true;
-	if (success && !image.isNull()) {
+	if (success && !image.isNull() && (!socialMediaProbe || hasRemoteMedia || it->thumbnailImage.isNull())) {
 		it->thumbnailImage    = persistentChatThumbnailImage(persistentChatOpaquePreviewSnapshot(image));
+		it->thumbnailFinished = true;
+		it->failed            = false;
+	} else if (hasRemoteMedia) {
 		it->thumbnailFinished = true;
 		it->failed            = false;
 	} else if (!it->thumbnailFinished) {
 		it->thumbnailFinished = true;
 	}
 
+	clearModernShellMessageDtoCache("preview");
+	for (const MumbleProto::ChatMessage &message : m_persistentChatMessages) {
+		const std::optional< QString > messagePreviewKey = persistentChatPreviewKey(message);
+		if (messagePreviewKey && *messagePreviewKey == previewKey) {
+			publishModernShellMessageUpdatePatch(message);
+		}
+	}
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (!usesModernShell()) {
+		queueModernShellSnapshotSync();
+	}
+#else
+	queueModernShellSnapshotSync();
+#endif
+	updatePersistentChatPreviewViewIfVisible(previewKey);
+}
+
+void MainWindow::publishPersistentChatPreviewUpdate(const QString &previewKey) {
+	clearModernShellMessageDtoCache("preview");
 	for (const MumbleProto::ChatMessage &message : m_persistentChatMessages) {
 		const std::optional< QString > messagePreviewKey = persistentChatPreviewKey(message);
 		if (messagePreviewKey && *messagePreviewKey == previewKey) {

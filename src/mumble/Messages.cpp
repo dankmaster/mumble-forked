@@ -50,6 +50,7 @@
 #include <QFile>
 #include <QTextDocumentFragment>
 #include <QTextStream>
+#include <QUrl>
 
 #define ACTOR_INIT                           \
 	ClientUser *pSrc = nullptr;              \
@@ -78,7 +79,8 @@ namespace {
 
 	bool isPersistentChatPlayableMediaMime(const QString &mime) {
 		const QString normalized = normalizedChatAssetMime(mime);
-		return normalized == QLatin1String("image/gif") || normalized == QLatin1String("video/webm");
+		return normalized == QLatin1String("image/gif") || normalized == QLatin1String("video/mp4")
+			   || normalized == QLatin1String("video/webm");
 	}
 
 	QString persistentChatPlayableMediaKind(const QString &mime, MumbleProto::ChatAssetKind kind) {
@@ -102,6 +104,34 @@ namespace {
 		}
 
 		return QString::fromLatin1("data:%1;base64,%2").arg(normalized, QString::fromLatin1(bytes.toBase64()));
+	}
+
+	QString normalizedPreviewHost(QString host) {
+		host = host.trimmed().toLower();
+		if (host.startsWith(QLatin1String("www."))) {
+			host.remove(0, 4);
+		}
+		if (host.startsWith(QLatin1String("old."))) {
+			host.remove(0, 4);
+		}
+		if (host.startsWith(QLatin1String("new."))) {
+			host.remove(0, 4);
+		}
+		if (host.startsWith(QLatin1String("m."))) {
+			host.remove(0, 2);
+		}
+		if (host.startsWith(QLatin1String("mobile."))) {
+			host.remove(0, 7);
+		}
+		return host;
+	}
+
+	bool isSocialVideoPreviewUrl(const QString &url) {
+		const QString host = normalizedPreviewHost(QUrl(url).host());
+		return host == QLatin1String("reddit.com") || host == QLatin1String("redd.it")
+			   || host == QLatin1String("v.redd.it") || host == QLatin1String("facebook.com")
+			   || host == QLatin1String("fb.watch") || host == QLatin1String("instagram.com")
+			   || host == QLatin1String("instagr.am");
 	}
 
 	QList< int > preferredScreenShareCodecsFromConfig(const MumbleProto::ServerConfig &msg) {
@@ -1724,6 +1754,15 @@ void MainWindow::msgPermissionQuery(const MumbleProto::PermissionQuery &msg) {
 	if (!hiddenLegacyChannelModelSafeMode && pmModel && qtvUsers) {
 		current = pmModel->getChannel(qtvUsers->currentIndex());
 	}
+	const PersistentChatTarget activeChatTarget = currentPersistentChatTarget();
+	const bool activeChatTargetMatchesPermissionChannel =
+		activeChatTarget.valid && !activeChatTarget.serverLog && !activeChatTarget.directMessage
+		&& !activeChatTarget.legacyTextPath && activeChatTarget.channel
+		&& activeChatTarget.channel->iId == msg.channel_id();
+	const ChanACL::Permissions previousActiveChatPermissions =
+		activeChatTargetMatchesPermissionChannel
+			? static_cast< ChanACL::Permissions >(activeChatTarget.channel->uiPermissions)
+			: ChanACL::None;
 
 	if (msg.flush()) {
 		for (Channel *c : Channel::c_qhChannels) {
@@ -1747,9 +1786,8 @@ void MainWindow::msgPermissionQuery(const MumbleProto::PermissionQuery &msg) {
 		} else if (hiddenLegacyChannelModelSafeMode) {
 			queueModernShellSnapshotSync();
 		}
-		const PersistentChatTarget target = currentPersistentChatTarget();
-		if (target.valid && !target.serverLog && !target.directMessage && !target.legacyTextPath
-			&& target.channel == c && !canViewPersistentChatHistory(target, false)) {
+		if (activeChatTargetMatchesPermissionChannel && activeChatTarget.channel == c
+			&& previousActiveChatPermissions != static_cast< ChanACL::Permissions >(c->uiPermissions)) {
 			refreshPersistentChatView(true);
 		}
 	}
@@ -1979,12 +2017,20 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 		}
 
 		previewIt->thumbnailFinished = true;
+		const QString incomingKind = persistentChatPlayableMediaKind(it->mime, it->kind);
+		const bool decorativeSocialGif =
+			incomingKind == QLatin1String("gif") && isSocialVideoPreviewUrl(previewIt->canonicalUrl);
 		if (!mediaDataUrl.isEmpty()) {
-			previewIt->mediaDataUrl = mediaDataUrl;
-			previewIt->mediaMime    = it->mime;
-			previewIt->mediaKind    = persistentChatPlayableMediaKind(it->mime, it->kind);
-			previewIt->autoplay     = false;
-			previewIt->failed       = false;
+			const bool keepExistingVideo =
+				previewIt->mediaKind == QLatin1String("video") && incomingKind != QLatin1String("video")
+				&& previewIt->mediaDataUrl.startsWith(QLatin1String("https://"), Qt::CaseInsensitive);
+			if (!keepExistingVideo && !decorativeSocialGif) {
+				previewIt->mediaDataUrl = mediaDataUrl;
+				previewIt->mediaMime    = it->mime;
+				previewIt->mediaKind    = incomingKind;
+				previewIt->autoplay     = false;
+			}
+			previewIt->failed = false;
 			if (!image.isNull()) {
 				previewIt->thumbnailImage = image;
 			}
@@ -1995,6 +2041,7 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 			previewIt->failed = true;
 			ensurePersistentChatPreviewSiteSnapshot(previewKey);
 		}
+		ensurePersistentChatPreviewSiteSnapshot(previewKey);
 		updatePersistentChatPreviewViewIfVisible(previewKey);
 	}
 

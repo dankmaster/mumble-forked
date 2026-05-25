@@ -3428,6 +3428,180 @@
 		return "";
 	}
 
+	function previewInlineMp4PlaybackSupported() {
+		const snapshot = getSnapshot();
+		const app = (snapshot && snapshot.app) || {};
+		if (Object.prototype.hasOwnProperty.call(app, "inlineMp4PlaybackSupported")) {
+			return !!app.inlineMp4PlaybackSupported;
+		}
+		return true;
+	}
+
+	function previewVideoCanPlayInline(mediaMime, mediaUrl) {
+		const video = document.createElement("video");
+		const mime = String(mediaMime || "").split(";")[0].trim().toLowerCase();
+		const shellSupportsMp4 = previewInlineMp4PlaybackSupported();
+		if (mime) {
+			if (mime === "video/mp4" && !shellSupportsMp4) {
+				return false;
+			}
+			if (video.canPlayType(mime)) {
+				return true;
+			}
+			if (mime === "video/mp4") {
+				return !!video.canPlayType('video/mp4; codecs="avc1.42E01E, mp4a.40.2"');
+			}
+			return false;
+		}
+
+		const path = String(mediaUrl || "").split("?")[0].toLowerCase();
+		if (path.endsWith(".mp4") || path.endsWith(".m4v")) {
+			if (!shellSupportsMp4) {
+				return false;
+			}
+			return !!video.canPlayType('video/mp4; codecs="avc1.42E01E, mp4a.40.2"')
+				|| !!video.canPlayType("video/mp4");
+		}
+		if (path.endsWith(".webm")) {
+			return !!video.canPlayType('video/webm; codecs="vp8, vorbis"')
+				|| !!video.canPlayType('video/webm; codecs="vp9, opus"')
+				|| !!video.canPlayType("video/webm");
+		}
+		return false;
+	}
+
+	function previewAudioCanPlayInline(mediaMime, mediaUrl) {
+		const audio = document.createElement("audio");
+		const mime = String(mediaMime || "").split(";")[0].trim().toLowerCase();
+		if (mime) {
+			if (audio.canPlayType(mime)) {
+				return true;
+			}
+			if (mime === "audio/mp4" || mime === "audio/aac") {
+				return !!audio.canPlayType('audio/mp4; codecs="mp4a.40.2"');
+			}
+			return false;
+		}
+
+		const path = String(mediaUrl || "").split("?")[0].toLowerCase();
+		if (path.endsWith(".m4a") || path.endsWith(".aac") || path.endsWith(".mp4")) {
+			return !!audio.canPlayType('audio/mp4; codecs="mp4a.40.2"')
+				|| !!audio.canPlayType("audio/mp4");
+		}
+		if (path.endsWith(".mp3")) {
+			return !!audio.canPlayType("audio/mpeg");
+		}
+		return false;
+	}
+
+	function attachPreviewAudioTrack(media, video, audioUrl, audioMime) {
+		if (!media || !video || !audioUrl || !previewAudioCanPlayInline(audioMime, audioUrl)) {
+			return;
+		}
+
+		const audio = document.createElement("audio");
+		audio.className = "preview-card-audio-track";
+		audio.src = audioUrl;
+		audio.preload = video.preload || "metadata";
+		audio.setAttribute("aria-hidden", "true");
+		audio.tabIndex = -1;
+
+		const syncAudioProperties = function() {
+			audio.muted = video.muted;
+			audio.volume = video.volume;
+			audio.playbackRate = video.playbackRate;
+		};
+		const syncAudioPosition = function(force) {
+			if (!Number.isFinite(video.currentTime)) {
+				return;
+			}
+			const drift = Math.abs((audio.currentTime || 0) - video.currentTime);
+			if (force || drift > 0.35) {
+				try {
+					audio.currentTime = video.currentTime;
+				} catch (error) {
+					// Some fragmented audio tracks reject early seeks until metadata is ready.
+				}
+			}
+		};
+		const playAudio = function() {
+			syncAudioProperties();
+			syncAudioPosition(true);
+			const playPromise = audio.play();
+			if (playPromise && typeof playPromise.catch === "function") {
+				playPromise.catch(function(error) {
+					console.warn("Preview audio playback failed", audioMime || audioUrl, error && error.name ? error.name : error);
+				});
+			}
+		};
+
+		video.addEventListener("play", playAudio);
+		video.addEventListener("playing", function() {
+			if (!video.paused) {
+				playAudio();
+			}
+		});
+		video.addEventListener("pause", function() {
+			audio.pause();
+		});
+		video.addEventListener("waiting", function() {
+			audio.pause();
+		});
+		video.addEventListener("seeking", function() {
+			audio.pause();
+			syncAudioPosition(true);
+		});
+		video.addEventListener("seeked", function() {
+			syncAudioPosition(true);
+			if (!video.paused) {
+				playAudio();
+			}
+		});
+		video.addEventListener("timeupdate", function() {
+			syncAudioPosition(false);
+		});
+		video.addEventListener("ratechange", syncAudioProperties);
+		video.addEventListener("volumechange", syncAudioProperties);
+		video.addEventListener("ended", function() {
+			audio.pause();
+			try {
+				audio.currentTime = 0;
+			} catch (error) {
+				// Ignore reset failures from short-lived media buffers.
+			}
+		});
+		video.addEventListener("emptied", function() {
+			audio.pause();
+		});
+		audio.addEventListener("error", function() {
+			console.warn("Preview audio track failed", audioMime || audioUrl);
+		}, { once: true });
+
+		syncAudioProperties();
+		media.appendChild(audio);
+	}
+
+	function appendPreviewPlaybackFallback(media, preview, fallbackText) {
+		media.classList.add("preview-card-playback-fallback");
+		if (preview.thumbnailUrl) {
+			const image = document.createElement("img");
+			image.className = "preview-card-image preview-card-media-image";
+			image.loading = "lazy";
+			image.src = preview.thumbnailUrl;
+			image.alt = preview.title || preview.subtitle || "Media preview";
+			media.appendChild(image);
+		} else {
+			const placeholder = document.createElement("span");
+			placeholder.className = "preview-card-placeholder-mark";
+			placeholder.textContent = "VID";
+			media.appendChild(placeholder);
+		}
+		const overlay = document.createElement("div");
+		overlay.className = "preview-card-playback-note";
+		overlay.textContent = fallbackText || "Open in browser";
+		media.appendChild(overlay);
+	}
+
 	function previewPlaceholderMark(preview, hostLabel) {
 		const fallbackSource = hostLabel
 			|| String((preview && preview.subtitle) || "").trim()
@@ -3455,9 +3629,12 @@
 		}
 		const mediaUrl = String(preview.mediaUrl || "").trim();
 		const mediaMime = String(preview.mediaMime || "").trim().toLowerCase();
+		const mediaAudioUrl = String(preview.mediaAudioUrl || "").trim();
+		const mediaAudioMime = String(preview.mediaAudioMime || "").trim().toLowerCase();
 		const hasPlayableMedia = !!mediaUrl;
 		const isVideoMedia = hasPlayableMedia && (preview.kind === "video" || /^video\//i.test(mediaMime));
 		const isGifMedia = hasPlayableMedia && (preview.kind === "gif" || mediaMime === "image/gif");
+		const videoInlineSupported = isVideoMedia && previewVideoCanPlayInline(mediaMime, mediaUrl);
 		const hasThumbnail = !!preview.thumbnailUrl;
 		const hostLabel = previewHostLabel(preview.url);
 		const sourceLabel = previewSourceLabel(preview, hostLabel);
@@ -3500,7 +3677,7 @@
 		if (hasPlayableMedia) {
 			const media = document.createElement("div");
 			media.className = "preview-card-media preview-card-playback";
-			if (isVideoMedia) {
+			if (isVideoMedia && videoInlineSupported) {
 				media.addEventListener("click", function(event) {
 					event.stopPropagation();
 				});
@@ -3508,7 +3685,8 @@
 				video.className = "preview-card-video";
 				video.src = mediaUrl;
 				video.controls = true;
-				video.muted = true;
+				video.muted = !!preview.autoplay;
+				video.defaultMuted = !!preview.autoplay;
 				video.loop = true;
 				video.playsInline = true;
 				video.preload = preview.autoplay ? "auto" : "metadata";
@@ -3519,7 +3697,20 @@
 					video.poster = preview.thumbnailUrl;
 				}
 				video.setAttribute("aria-label", preview.title || preview.subtitle || "Media preview");
+				video.addEventListener("error", function() {
+					const code = video.error ? video.error.code : 0;
+					console.warn("Preview video playback failed", mediaMime || mediaUrl, code);
+					if (!media.querySelector(".preview-card-playback-note")) {
+						video.remove();
+						appendPreviewPlaybackFallback(media, preview, "Open in browser");
+					}
+				}, { once: true });
 				media.appendChild(video);
+				if (mediaAudioUrl) {
+					attachPreviewAudioTrack(media, video, mediaAudioUrl, mediaAudioMime);
+				}
+			} else if (isVideoMedia) {
+				appendPreviewPlaybackFallback(media, preview, "Open in browser");
 			} else {
 				const image = document.createElement("img");
 				image.className = "preview-card-image preview-card-media-image";
@@ -3591,9 +3782,13 @@
 
 		const footer = document.createElement("div");
 		footer.className = "preview-card-footer";
-		const action = document.createElement("span");
-		action.className = "preview-card-action";
-		action.textContent = preview.openLabel || "Open link";
+		const action = document.createElement(hasPlayableMedia ? "button" : "span");
+		action.className = "preview-card-action" + (hasPlayableMedia ? " preview-card-open-button" : "");
+		action.textContent = hasPlayableMedia ? (preview.openLabel || "Open in browser") : (preview.openLabel || "Open link");
+		if (hasPlayableMedia) {
+			action.type = "button";
+			action.addEventListener("click", activateCard);
+		}
 		footer.appendChild(action);
 		copy.appendChild(footer);
 
@@ -7217,7 +7412,7 @@
 		detail.className = "modern-dialog-acl-detail";
 		if (selectedIndex >= 0) {
 			const group = groups[selectedIndex];
-			const editable = !group.inherited;
+			const inherited = !!group.inherited;
 			const form = document.createElement("div");
 			form.className = "modern-dialog-acl-detail-grid";
 			const nameLabel = document.createElement("label");
@@ -7227,7 +7422,7 @@
 			const nameInput = document.createElement("input");
 			nameInput.type = "text";
 			nameInput.value = group.name || "";
-			nameInput.disabled = !editable;
+			nameInput.disabled = inherited;
 			nameInput.addEventListener("input", function() {
 				const next = aclCurrentModel(field, model);
 				next.groups[selectedIndex].name = nameInput.value;
@@ -7250,7 +7445,6 @@
 				const checkbox = document.createElement("input");
 				checkbox.type = "checkbox";
 				checkbox.checked = !!group[pair[0]];
-				checkbox.disabled = !editable;
 				checkbox.addEventListener("change", function() {
 					const next = aclCurrentModel(field, model);
 					next.groups[selectedIndex][pair[0]] = checkbox.checked;
@@ -7265,10 +7459,20 @@
 			form.appendChild(flags);
 			const actions = document.createElement("div");
 			actions.className = "modern-dialog-acl-card-actions";
-			appendAclButton(actions, "Delete group", "is-danger", !editable, function() {
+			appendAclButton(actions, inherited ? "Reset group" : "Delete group", "is-danger", false, function() {
 				const next = aclCurrentModel(field, model);
-				next.groups.splice(selectedIndex, 1);
-				next.selectedGroupIndex = Math.max(0, selectedIndex - 1);
+				if (inherited) {
+					next.groups[selectedIndex].inherit = true;
+					next.groups[selectedIndex].inheritable = true;
+					next.groups[selectedIndex].add = [];
+					next.groups[selectedIndex].remove = [];
+					delete next.groups[selectedIndex].addText;
+					delete next.groups[selectedIndex].removeText;
+					next.selectedGroupIndex = selectedIndex;
+				} else {
+					next.groups.splice(selectedIndex, 1);
+					next.selectedGroupIndex = Math.max(0, selectedIndex - 1);
+				}
 				next.activeTab = "groups";
 				aclUpdateModel(field, next, true);
 			});
@@ -7276,8 +7480,8 @@
 			detail.appendChild(form);
 
 			appendAclMemberSection(detail, field, model, selectedIndex, "inheritedMembers", "Inherited members", false);
-			appendAclMemberSection(detail, field, model, selectedIndex, "add", "Add members", editable);
-			appendAclMemberSection(detail, field, model, selectedIndex, "remove", "Remove members", editable && group.inherit !== false);
+			appendAclMemberSection(detail, field, model, selectedIndex, "add", "Add members", true);
+			appendAclMemberSection(detail, field, model, selectedIndex, "remove", "Remove members", group.inherit !== false);
 		}
 		workspace.appendChild(detail);
 		panel.appendChild(workspace);

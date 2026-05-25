@@ -5,6 +5,7 @@ param(
 	[string[]]$AdditionalCMakeOptions = @(),
 	[string]$EnvironmentRelease = "",
 	[string]$EnvironmentCommit = "",
+	[string]$EnvironmentVersionSuffix = "",
 	[switch]$UseBundledSpdlog,
 	[switch]$UseBundledCli11,
 	[switch]$CleanBuild,
@@ -911,8 +912,12 @@ function Test-SharedEnvironmentReady {
 		(Join-Path $EnvironmentDir "vcpkg.exe"),
 		(Join-Path $EnvironmentDir "scripts\buildsystems\vcpkg.cmake"),
 		(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6WebChannel"),
+		(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6WebEngineCore\Qt6WebEngineCoreTargets.cmake"),
 		(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6WebEngineWidgets"),
-		(Join-Path $EnvironmentDir "installed\$Triplet\tools\Qt6\bin\windeployqt.exe")
+		(Join-Path $EnvironmentDir "installed\$Triplet\tools\Qt6\bin\windeployqt.exe"),
+		(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6\resources\icudtl.dat"),
+		(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6\resources\qtwebengine_resources.pak"),
+		(Join-Path $EnvironmentDir "installed\x86-windows")
 	)
 
 	foreach ($path in $requiredPaths) {
@@ -920,8 +925,72 @@ function Test-SharedEnvironmentReady {
 			return $false
 		}
 	}
+	$x86TripletContent = Get-ChildItem -LiteralPath (Join-Path $EnvironmentDir "installed\x86-windows") -Force -ErrorAction SilentlyContinue | Select-Object -First 1
+	if ($null -eq $x86TripletContent) {
+		return $false
+	}
 
-	return $true
+	$webengineTargetsPath = Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6WebEngineCore\Qt6WebEngineCoreTargets.cmake"
+	$webengineTargetsText = Get-Content -Raw -LiteralPath $webengineTargetsPath
+
+	return (Test-CMakeTargetFeatureEnabled `
+		-TargetsText $webengineTargetsText `
+		-EnabledProperty "QT_ENABLED_PUBLIC_FEATURES" `
+		-DisabledProperty "QT_DISABLED_PUBLIC_FEATURES" `
+		-Feature "webengine_webchannel") -and (Test-CMakeTargetFeatureEnabled `
+		-TargetsText $webengineTargetsText `
+		-EnabledProperty "QT_ENABLED_PRIVATE_FEATURES" `
+		-DisabledProperty "QT_DISABLED_PRIVATE_FEATURES" `
+		-Feature "webengine_proprietary_codecs")
+}
+
+function Get-CMakeTargetFeatureMap {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$TargetsText,
+
+		[Parameter(Mandatory = $true)]
+		[string]$PropertyName
+	)
+
+	$pattern = [regex]::Escape($PropertyName) + '\s+"([^"]*)"'
+	$match = [regex]::Match($TargetsText, $pattern)
+	if (-not $match.Success) {
+		return $null
+	}
+
+	$features = @{}
+	foreach ($feature in ($match.Groups[1].Value -split ';')) {
+		if (-not [string]::IsNullOrWhiteSpace($feature)) {
+			$features[$feature] = $true
+		}
+	}
+
+	return $features
+}
+
+function Test-CMakeTargetFeatureEnabled {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$TargetsText,
+
+		[Parameter(Mandatory = $true)]
+		[string]$EnabledProperty,
+
+		[Parameter(Mandatory = $true)]
+		[string]$DisabledProperty,
+
+		[Parameter(Mandatory = $true)]
+		[string]$Feature
+	)
+
+	$enabledFeatures = Get-CMakeTargetFeatureMap -TargetsText $TargetsText -PropertyName $EnabledProperty
+	$disabledFeatures = Get-CMakeTargetFeatureMap -TargetsText $TargetsText -PropertyName $DisabledProperty
+	if ($null -eq $enabledFeatures -or $null -eq $disabledFeatures) {
+		return $false
+	}
+
+	return $enabledFeatures.ContainsKey($Feature) -and (-not $disabledFeatures.ContainsKey($Feature))
 }
 
 function Ensure-LocalBuildTooling {
@@ -1182,6 +1251,13 @@ try {
 	if ($UseBundledCli11) {
 		$env:MUMBLE_BUNDLED_CLI11_OVERRIDE = "ON"
 	}
+	if (-not [string]::IsNullOrWhiteSpace($EnvironmentVersionSuffix)) {
+		if ($EnvironmentVersionSuffix -notmatch '^[A-Za-z0-9._-]+$') {
+			throw "EnvironmentVersionSuffix may only contain letters, numbers, '.', '_' and '-'."
+		}
+
+		$env:MUMBLE_ENVIRONMENT_VERSION_SUFFIX_OVERRIDE = $EnvironmentVersionSuffix
+	}
 	if (-not [string]::IsNullOrWhiteSpace($EnvironmentRelease)) {
 		if ([string]::IsNullOrWhiteSpace($EnvironmentCommit)) {
 			throw "EnvironmentCommit must be specified when EnvironmentRelease is used."
@@ -1214,7 +1290,7 @@ try {
 	Initialize-LocalOnnxRuntimeRoot -RepoRoot $repoRoot
 	Initialize-RustCargoPath
 	$windowsBuildType = if ($SharedWebEngine) { "shared" } else { "static" }
-	if ($SharedWebEngine) {
+	if ($SharedWebEngine -and [string]::IsNullOrWhiteSpace($env:MUMBLE_ALLOW_ENVIRONMENT_BOOTSTRAP)) {
 		$env:MUMBLE_ALLOW_ENVIRONMENT_BOOTSTRAP = "ON"
 	}
 

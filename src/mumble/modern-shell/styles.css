@@ -1336,6 +1336,35 @@ textarea:focus-visible {
 		rgba(0, 0, 0, 0.38);
 }
 
+.preview-card-playback-fallback {
+	cursor: pointer;
+}
+
+.preview-card-playback-fallback .preview-card-media-image {
+	height: 100%;
+	inset: 0;
+	object-fit: cover;
+	position: absolute;
+	width: 100%;
+}
+
+.preview-card-playback-note {
+	align-items: center;
+	backdrop-filter: blur(8px);
+	background: rgba(9, 13, 18, 0.68);
+	border: 1px solid rgba(160, 190, 216, 0.28);
+	border-radius: 6px;
+	color: #e8f2ff;
+	display: inline-flex;
+	font-size: 12px;
+	font-weight: 700;
+	justify-content: center;
+	line-height: 1;
+	padding: 9px 12px;
+	position: relative;
+	z-index: 1;
+}
+
 .preview-card-media-placeholder {
 	flex-direction: column;
 	gap: 8px;
@@ -1383,6 +1412,14 @@ textarea:focus-visible {
 	display: block;
 	object-fit: contain;
 	background: #050608;
+}
+
+.preview-card-audio-track {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	opacity: 0;
+	pointer-events: none;
 }
 
 .preview-card-copy {
@@ -1467,6 +1504,7 @@ textarea:focus-visible {
 	display: flex;
 	align-items: center;
 	justify-content: flex-start;
+	gap: 8px;
 	margin-top: auto;
 	padding-top: 2px;
 }
@@ -1475,6 +1513,28 @@ textarea:focus-visible {
 	color: #69a3c9;
 	font-size: 11px;
 	font-weight: 600;
+}
+
+.preview-card-open-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 26px;
+	padding: 0 10px;
+	border: 1px solid rgba(105, 163, 201, 0.28);
+	border-radius: 6px;
+	background: rgba(105, 163, 201, 0.10);
+	color: #8bc7ee;
+	cursor: pointer;
+	font: inherit;
+	line-height: 1;
+}
+
+.preview-card-open-button:hover,
+.preview-card-open-button:focus-visible {
+	border-color: rgba(105, 163, 201, 0.52);
+	background: rgba(105, 163, 201, 0.18);
+	outline: none;
 }
 
 .preview-card.is-loading .preview-card-action,

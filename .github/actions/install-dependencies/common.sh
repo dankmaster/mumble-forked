@@ -461,7 +461,12 @@ get_vcpkg_buildtrees_root() {
 	local triplet="${1:-}"
 
 	if [[ "$triplet" == "x64-windows" ]]; then
-		echo "$MUMBLE_ENVIRONMENT_DIR/bt"
+		local drive_prefix="${MUMBLE_ENVIRONMENT_DIR%%:*}"
+		if [[ -n "$drive_prefix" && "$drive_prefix" != "$MUMBLE_ENVIRONMENT_DIR" ]]; then
+			echo "$drive_prefix:/btwe"
+		else
+			echo "$MUMBLE_ENVIRONMENT_DIR/bt"
+		fi
 	else
 		echo "$MUMBLE_ENVIRONMENT_DIR/buildtrees"
 	fi
@@ -623,7 +628,7 @@ install_mumble_vcpkg_dependencies() {
 		seen_dependencies["mdnsresponder"]=1
 	fi
 
-	for shared_dependency in qtwebchannel "qtwebengine[webengine,webchannel]"; do
+	for shared_dependency in qtwebchannel "qtwebengine[webengine,webchannel,proprietary-codecs]"; do
 		if [[ "$triplet" == "x64-windows" && -z "${seen_dependencies[$shared_dependency]:-}" ]]; then
 			dependencies+=( "$shared_dependency" )
 			seen_dependencies["$shared_dependency"]=1
@@ -649,7 +654,7 @@ install_mumble_vcpkg_dependencies() {
 
 		local short_buildtrees_root="$( get_vcpkg_buildtrees_root "$triplet" )"
 		mkdir -p "$short_buildtrees_root"
-		vcpkg_install_args+=( --x-buildtrees-root="$short_buildtrees_root" )
+		vcpkg_install_args+=( --x-buildtrees-root="$short_buildtrees_root" --recurse )
 	fi
 	while true; do
 		if [[ "$triplet" == "x64-windows" ]]; then

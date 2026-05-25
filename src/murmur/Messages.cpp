@@ -918,7 +918,7 @@ bool isValidSha256Hex(const QString &sha256) {
 constexpr int CHAT_PREVIEW_TIMEOUT_MSEC        = 8000;
 constexpr qint64 CHAT_PREVIEW_MAX_PAGE_BYTES   = 512 * 1024;
 constexpr qint64 CHAT_PREVIEW_MAX_IMAGE_BYTES  = 4 * 1024 * 1024;
-constexpr qint64 CHAT_PREVIEW_MAX_PLAYABLE_MEDIA_BYTES = 8 * 1024 * 1024;
+constexpr qint64 CHAT_PREVIEW_MAX_PLAYABLE_MEDIA_BYTES = 16 * 1024 * 1024;
 constexpr int CHAT_PREVIEW_MAX_REDIRECTS       = 3;
 constexpr int CHAT_PREVIEW_MAX_CONCURRENT_HOST = 2;
 constexpr int CHAT_PREVIEW_THUMBNAIL_WIDTH     = 640;
@@ -957,6 +957,23 @@ QString previewImageMetaTag(const QHash< QString, QString > &metaTags) {
 	return QString();
 }
 
+QString previewPlayableMediaMetaTag(const QHash< QString, QString > &metaTags) {
+	static const QStringList preferredKeys = {
+		QStringLiteral("og:video:secure_url"),      QStringLiteral("og:video:url"),
+		QStringLiteral("og:video"),                 QStringLiteral("twitter:player:stream"),
+		QStringLiteral("twitter:player:stream:url"),
+	};
+
+	for (const QString &key : preferredKeys) {
+		const QString value = metaTags.value(key).trimmed();
+		if (!value.isEmpty()) {
+			return value;
+		}
+	}
+
+	return QString();
+}
+
 bool isSanitizableImageMime(const QString &mime) {
 	return mime == QLatin1String("image/png") || mime == QLatin1String("image/jpeg")
 		   || mime == QLatin1String("image/webp") || mime == QLatin1String("image/gif")
@@ -971,12 +988,15 @@ bool isDirectImageUrl(const QUrl &url) {
 }
 
 bool isDirectPlayableMediaMime(const QString &mime) {
-	return mime == QLatin1String("image/gif") || mime == QLatin1String("video/webm");
+	return mime == QLatin1String("image/gif") || mime == QLatin1String("video/mp4")
+		   || mime == QLatin1String("video/webm");
 }
 
 bool isDirectPlayableMediaUrl(const QUrl &url) {
 	const QString path = url.path().toLower();
-	return path.endsWith(QLatin1String(".gif")) || path.endsWith(QLatin1String(".webm"));
+	return path.endsWith(QLatin1String(".gif")) || path.endsWith(QLatin1String(".gifv"))
+		   || path.endsWith(QLatin1String(".m4v")) || path.endsWith(QLatin1String(".mp4"))
+		   || path.endsWith(QLatin1String(".webm"));
 }
 
 QString playableMediaMimeForUrl(const QUrl &url) {
@@ -984,16 +1004,33 @@ QString playableMediaMimeForUrl(const QUrl &url) {
 	if (path.endsWith(QLatin1String(".gif"))) {
 		return QStringLiteral("image/gif");
 	}
+	if (path.endsWith(QLatin1String(".gifv")) || path.endsWith(QLatin1String(".m4v"))
+		|| path.endsWith(QLatin1String(".mp4"))) {
+		return QStringLiteral("video/mp4");
+	}
 	if (path.endsWith(QLatin1String(".webm"))) {
 		return QStringLiteral("video/webm");
 	}
 	return QString();
 }
 
+QUrl normalizedPlayableMediaFetchUrl(QUrl url) {
+	QString path = url.path();
+	if (path.toLower().endsWith(QLatin1String(".gifv"))) {
+		path.chop(5);
+		path.append(QLatin1String(".mp4"));
+		url.setPath(path);
+	}
+	return url;
+}
+
 QString playableMediaMimeFromResponse(const QString &contentType, const QUrl &sourceUrl) {
 	const QString normalizedContentType = contentType.section(QLatin1Char(';'), 0, 0).trimmed().toLower();
 	if (isDirectPlayableMediaMime(normalizedContentType)) {
 		return normalizedContentType;
+	}
+	if (!normalizedContentType.isEmpty() && normalizedContentType != QLatin1String("application/octet-stream")) {
+		return QString();
 	}
 	return playableMediaMimeForUrl(sourceUrl);
 }
@@ -1698,10 +1735,24 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
 	auto pageDescription = std::make_shared< QString >();
 	auto pageSiteName    = std::make_shared< QString >();
 
-	auto fetchPlayableMedia = std::make_shared< std::function< void(QUrl, unsigned int) > >();
-	*fetchPlayableMedia = [this, fetchPlayableMedia, embedState, persistPreviewAsset, finish,
-						   updateHostCount](QUrl mediaUrl, unsigned int redirectCount) mutable {
+	auto fetchImage         = std::make_shared< std::function< void(QUrl, unsigned int) > >();
+	auto fetchPlayableMedia = std::make_shared< std::function< void(QUrl, unsigned int, QUrl) > >();
+	*fetchPlayableMedia = [this, fetchPlayableMedia, fetchImage, embedState, pageTitle, pageDescription, pageSiteName,
+						   persistPreviewAsset, finish, updateHostCount](QUrl mediaUrl, unsigned int redirectCount,
+																		 QUrl fallbackImageUrl) mutable {
+		mediaUrl = normalizedPlayableMediaFetchUrl(mediaUrl);
+		const auto fallbackToImage = [&]() -> bool {
+			if (fallbackImageUrl.isValid() && isSafePreviewUrl(fallbackImageUrl) && *fetchImage) {
+				(*fetchImage)(fallbackImageUrl, 0);
+				return true;
+			}
+			return false;
+		};
+
 		if (redirectCount > CHAT_PREVIEW_MAX_REDIRECTS || !isSafePreviewUrl(mediaUrl)) {
+			if (fallbackToImage()) {
+				return;
+			}
 			embedState->status    = ::msdb::ChatEmbedStatus::Blocked;
 			embedState->errorCode = "blocked_target";
 			finish(*embedState);
@@ -1710,6 +1761,9 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
 
 		const QString hostKey = mediaUrl.host().trimmed().toLower();
 		if (qhChatPreviewFetchesByHost.value(hostKey, 0) >= CHAT_PREVIEW_MAX_CONCURRENT_HOST) {
+			if (fallbackToImage()) {
+				return;
+			}
 			embedState->status    = ::msdb::ChatEmbedStatus::Failed;
 			embedState->errorCode = "host_busy";
 			finish(*embedState);
@@ -1720,7 +1774,7 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
 		QNetworkRequest request(mediaUrl);
 		prepareChatPreviewRequest(request);
 		request.setRawHeader(QByteArrayLiteral("Accept"),
-							 QByteArrayLiteral("image/gif,video/webm,image/*;q=0.8,*/*;q=0.5"));
+							 QByteArrayLiteral("video/mp4,video/webm,image/gif,video/*;q=0.9,image/*;q=0.8,*/*;q=0.5"));
 		request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
 		request.setTransferTimeout(CHAT_PREVIEW_TIMEOUT_MSEC);
 		QNetworkReply *reply = qnamNetwork->get(request);
@@ -1739,8 +1793,8 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
 			}
 		});
 		connect(reply, &QNetworkReply::finished, this,
-				[this, reply, hostKey, fetchPlayableMedia, embedState, persistPreviewAsset, finish, updateHostCount,
-				 redirectCount]() mutable {
+				[this, reply, hostKey, fetchPlayableMedia, fetchImage, embedState, persistPreviewAsset, finish, updateHostCount,
+				 pageTitle, pageDescription, pageSiteName, redirectCount, fallbackImageUrl]() mutable {
 					updateHostCount(hostKey, -1);
 					const QVariant redirectTarget = reply->attribute(QNetworkRequest::RedirectionTargetAttribute);
 					const QString contentType =
@@ -1752,13 +1806,20 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
 					reply->deleteLater();
 
 					if (redirectTarget.isValid()) {
-						(*fetchPlayableMedia)(sourceUrl.resolved(redirectTarget.toUrl()), redirectCount + 1);
+						(*fetchPlayableMedia)(sourceUrl.resolved(redirectTarget.toUrl()), redirectCount + 1, fallbackImageUrl);
 						return;
 					}
 
 					const QString mime = playableMediaMimeFromResponse(contentType, sourceUrl);
 					if (!success || bytes.isEmpty() || bytes.size() > CHAT_PREVIEW_MAX_PLAYABLE_MEDIA_BYTES
 						|| !isDirectPlayableMediaMime(mime)) {
+						if (fallbackImageUrl.isValid() && isSafePreviewUrl(fallbackImageUrl)) {
+							embedState->title       = u8(*pageTitle);
+							embedState->description = u8(*pageDescription);
+							embedState->siteName    = u8(*pageSiteName);
+							(*fetchImage)(fallbackImageUrl, 0);
+							return;
+						}
 						embedState->status = ::msdb::ChatEmbedStatus::Failed;
 						embedState->errorCode =
 							abortReason == QLatin1String("too_large") ? "media_too_large" : "media_fetch_failed";
@@ -1784,11 +1845,17 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
 						return;
 					}
 
-					embedState->title = u8(previewTitleForMediaUrl(
-						sourceUrl, mime == QLatin1String("image/gif") ? QObject::tr("Animated GIF") : QObject::tr("WebM media")));
-					embedState->description = u8(mime == QLatin1String("image/gif") ? QObject::tr("Animated image preview")
-																					 : QObject::tr("WebM media preview"));
-					embedState->siteName       = u8(sourceUrl.host());
+					const bool isGif = mime == QLatin1String("image/gif");
+					embedState->title =
+						u8(pageTitle->isEmpty()
+							   ? previewTitleForMediaUrl(sourceUrl,
+														 isGif ? QObject::tr("Animated GIF") : QObject::tr("Video media"))
+							   : *pageTitle);
+					embedState->description =
+						u8(pageDescription->isEmpty()
+							   ? (isGif ? QObject::tr("Animated image preview") : QObject::tr("Video preview"))
+							   : *pageDescription);
+					embedState->siteName       = u8(pageSiteName->isEmpty() ? sourceUrl.host() : *pageSiteName);
 					embedState->previewAssetID = assetID.value();
 					embedState->status         = ::msdb::ChatEmbedStatus::Ready;
 					embedState->errorCode      = "";
@@ -1796,7 +1863,6 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
 				});
 	};
 
-	auto fetchImage = std::make_shared< std::function< void(QUrl, unsigned int) > >();
 	*fetchImage = [this, fetchImage, embedState, pageTitle, pageDescription, pageSiteName, persistPreviewImage, finish,
 				   updateHostCount](QUrl imageUrl, unsigned int redirectCount) mutable {
 		if (redirectCount > CHAT_PREVIEW_MAX_REDIRECTS || !isSafePreviewUrl(imageUrl)) {
@@ -1872,7 +1938,7 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
         }
 
 		if (isDirectPlayableMediaUrl(pageUrl)) {
-			(*fetchPlayableMedia)(pageUrl, redirectCount);
+			(*fetchPlayableMedia)(pageUrl, redirectCount, QUrl());
 			return;
 		}
 
@@ -1919,7 +1985,7 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
                 }
 
 				if (isDirectPlayableMediaMime(playableMediaMimeFromResponse(contentType, sourceUrl))) {
-					(*fetchPlayableMedia)(sourceUrl, 0);
+					(*fetchPlayableMedia)(sourceUrl, 0, QUrl());
 					return;
 				}
 
@@ -1962,6 +2028,14 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
                 embedState->siteName    = u8(pageSiteName->isEmpty() ? sourceUrl.host() : *pageSiteName);
 
                 const QString imageUrlString = previewImageMetaTag(metaTags);
+				const QUrl fallbackImageUrl =
+					imageUrlString.isEmpty() ? QUrl() : sourceUrl.resolved(QUrl(imageUrlString));
+				const QString mediaUrlString = previewPlayableMediaMetaTag(metaTags);
+				if (!mediaUrlString.isEmpty()) {
+					(*fetchPlayableMedia)(sourceUrl.resolved(QUrl(mediaUrlString)), 0, fallbackImageUrl);
+					return;
+				}
+
                 if (imageUrlString.isEmpty()) {
                     embedState->status    = ::msdb::ChatEmbedStatus::Ready;
                     embedState->errorCode = "";
@@ -4824,8 +4898,30 @@ void Server::msgChatHistoryGrantSync(ServerUser *uSource, MumbleProto::ChatHisto
 		return;
 	}
 
-	auto ensureChatHistoryAcl = [this](Channel *permissionChannel, unsigned int userID) {
-		static const QString groupName = QStringLiteral("ChatHistory");
+	auto chatHistoryAclGroupName = [](Channel *permissionChannel) {
+		static const QString canonicalGroupName = QStringLiteral("chathistory");
+		if (!permissionChannel) {
+			return canonicalGroupName;
+		}
+
+		for (const ChanACL *acl : permissionChannel->qlACL) {
+			if (acl && acl->iUserId < 0 && acl->qsGroup.compare(canonicalGroupName, Qt::CaseInsensitive) == 0
+				&& permissionChannel->qhGroups.contains(acl->qsGroup)) {
+				return acl->qsGroup;
+			}
+		}
+
+		for (const Group *group : permissionChannel->qhGroups) {
+			if (group && group->qsName.compare(canonicalGroupName, Qt::CaseInsensitive) == 0) {
+				return group->qsName;
+			}
+		}
+
+		return canonicalGroupName;
+	};
+
+	auto ensureChatHistoryAcl = [chatHistoryAclGroupName](Channel *permissionChannel, unsigned int userID) {
+		const QString groupName = chatHistoryAclGroupName(permissionChannel);
 		Group *group                   = permissionChannel->qhGroups.value(groupName);
 		if (!group) {
 			group = new Group(permissionChannel, groupName);
@@ -4854,14 +4950,15 @@ void Server::msgChatHistoryGrantSync(ServerUser *uSource, MumbleProto::ChatHisto
 	};
 
 	auto removeChatHistoryGroupMember = [](Channel *permissionChannel, unsigned int userID) {
-		static const QString groupName = QStringLiteral("ChatHistory");
-		Group *group                   = permissionChannel->qhGroups.value(groupName);
-		if (!group) {
-			return;
-		}
+		static const QString canonicalGroupName = QStringLiteral("chathistory");
+		for (Group *group : permissionChannel->qhGroups) {
+			if (!group || group->qsName.compare(canonicalGroupName, Qt::CaseInsensitive) != 0) {
+				continue;
+			}
 
-		group->qsAdd.remove(static_cast< int >(userID));
-		group->qsRemove.remove(static_cast< int >(userID));
+			group->qsAdd.remove(static_cast< int >(userID));
+			group->qsRemove.remove(static_cast< int >(userID));
+		}
 	};
 
 	QSet< Channel * > changedChannels;

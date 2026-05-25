@@ -1,0 +1,78 @@
+name: Windows Shared Build Environment
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE: 2025-11
+  MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE_TAG: build-env-2025-11-webengine-codecs
+  MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT: 127cccc01d
+  MUMBLE_SHARED_WINDOWS_ENVIRONMENT_VERSION_SUFFIX: webengine-codecs-v1
+
+jobs:
+  build-and-publish-shared-environment:
+    name: build-and-publish-shared-environment
+    runs-on: windows-2022
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Pin shared codec environment
+        shell: bash
+        run: |
+          echo "MUMBLE_ENVIRONMENT_SOURCE_OVERRIDE=https://github.com/${{ github.repository }}/releases/download/${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE_TAG}" >> "$GITHUB_ENV"
+          echo "MUMBLE_ENVIRONMENT_COMMIT_OVERRIDE=${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT}" >> "$GITHUB_ENV"
+          echo "MUMBLE_ENVIRONMENT_VERSION_SUFFIX_OVERRIDE=${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_VERSION_SUFFIX}" >> "$GITHUB_ENV"
+          echo "MUMBLE_ENVIRONMENT_DIR_OVERRIDE=$GITHUB_WORKSPACE/build_env/${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE}-${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT}-shared" >> "$GITHUB_ENV"
+          echo "MUMBLE_ALLOW_ENVIRONMENT_BOOTSTRAP=ON" >> "$GITHUB_ENV"
+          echo "MUMBLE_SKIP_DATABASE_SETUP=ON" >> "$GITHUB_ENV"
+
+      - name: Set environment variables
+        shell: bash
+        run: $GITHUB_WORKSPACE/.github/workflows/set_environment_variables.sh "windows-2022" "shared" "x86_64" "${{ github.workspace }}"
+
+      - id: restore-shared-build-env-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: '${{ env.MUMBLE_ENVIRONMENT_DIR }}'
+          key: ${{ env.MUMBLE_ENVIRONMENT_VERSION }}
+
+      - name: Build shared codec environment
+        if: ${{ steps.restore-shared-build-env-cache.outputs.cache-hit != 'true' }}
+        uses: ./.github/actions/install-dependencies
+        with:
+          type: shared
+          os: windows-2022
+          arch: x86_64
+
+      - name: Publish shared codec environment archive
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          .\scripts\windows\publish-windows-build-environment.ps1 `
+            -EnvironmentDir "${{ env.MUMBLE_ENVIRONMENT_DIR }}" `
+            -EnvironmentRelease "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE }}" `
+            -EnvironmentCommit "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT }}" `
+            -EnvironmentVersionSuffix "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_VERSION_SUFFIX }}" `
+            -BuildType shared `
+            -ReleaseTag "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE_TAG }}" `
+            -Upload `
+            -CreateRelease `
+            -Clobber
+
+      - if: ${{ steps.restore-shared-build-env-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: '${{ env.MUMBLE_ENVIRONMENT_DIR }}'
+          key: ${{ env.MUMBLE_ENVIRONMENT_VERSION }}

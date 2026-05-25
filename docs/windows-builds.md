@@ -16,6 +16,15 @@ The heavier shared/WebEngine client lane is kept separate:
 - Shared Windows runner: `windows-2022`
 - Output: unsigned shared/WebEngine client payload and installer artifacts
 
+The reusable shared/WebEngine dependency archive has its own manual workflow:
+
+- Workflow: `Windows Shared Build Environment`
+- File: [windows-shared-build-environment.yml](../.github/workflows/windows-shared-build-environment.yml)
+- Trigger: manual dispatch
+- Shared Windows runner: `windows-2022`
+- Output: the `build-env-2025-11-webengine-codecs` release asset consumed by
+  the normal shared/WebEngine client workflows
+
 There is also a small human-facing installer workflow for this fork:
 
 - Workflow: `mumble-forked MSI Release`
@@ -31,6 +40,8 @@ There is also a small human-facing installer workflow for this fork:
 - Use `Windows Shared Client Installer` when you need the shared/WebEngine payload
   under `build-shared-webengine\shared-webengine-stage` or downloadable Windows
   shared client artifacts.
+- Use `Windows Shared Build Environment` only when the pinned shared/WebEngine
+  dependency archive itself needs to be rebuilt and republished.
 - Use `mumble-forked MSI Release` when you want a simple stable download link
   for this fork. It uses the shared/WebEngine lane so the installer includes
   the current Modern/WebEngine functionality, then publishes the MSI to a normal
@@ -63,7 +74,8 @@ The workflow builds the shared/WebEngine Windows client with packaging enabled,
 deletes older `mumble-forked` / `mumble-forked-*` releases and tags, then
 recreates the stable `mumble-forked` tag and release from the current `master`
 commit. It explicitly preserves `build-env-*` releases, including the important
-`build-env-2025-11` release used by the shared Windows build environment.
+`build-env-2025-11-webengine-codecs` release used by the shared Windows build
+environment.
 
 The `Release Publishing` workflow ignores `mumble-forked*` and `build-env-*`
 tags so this convenience MSI does not dispatch Docker publishing or WinGet
@@ -90,15 +102,19 @@ default. To preview a draft manifest locally, set
   still stages and validates the shared payload.
 - The shared/WebEngine workflow verifies the screen-share helper runtime only
   for manual dispatch runs; normal PR helper runtime coverage lives in `CI`.
-- The shared/WebEngine workflow pins the reusable environment to release
-  `2025-11`, commit `127cccc01d`, and ONNX Runtime `1.18.1`.
-- The shared/WebEngine workflow looks for `mumble_env.x64-windows.<commit>.7z`
-  or split `mumble_env.x64-windows.<commit>.7z.001/.002/...` assets under this
-  repo's `build-env-<release>` GitHub release tag before falling back to a slow
-  local Qt/vcpkg bootstrap path.
-- Expect the first shared/WebEngine dependency bootstrap to be heavy. The full
-  Windows vcpkg environment is typically tens of GB on disk and Qt WebEngine can
-  take a long time on a fresh machine.
+- The shared/WebEngine workflow pins the reusable codec environment to release
+  `2025-11`, commit `127cccc01d`, suffix `webengine-codecs-v1`, and ONNX
+  Runtime `1.18.1`.
+- The shared/WebEngine workflow looks for
+  `mumble_env.x64-windows.<commit>.webengine-codecs-v1.7z` or split
+  `mumble_env.x64-windows.<commit>.webengine-codecs-v1.7z.001/.002/...` assets
+  under this repo's `build-env-2025-11-webengine-codecs` GitHub release tag.
+  Normal client/MSI workflows fail fast if that archive is missing instead of
+  falling back to a slow local Qt/vcpkg bootstrap path.
+- Use the manual `Windows Shared Build Environment` workflow, or the local
+  publisher command below, when the codec environment needs to be rebuilt. This
+  is the one intentionally heavy path; the normal build workflows consume the
+  published archive or the matching cache key.
 - `mumble-forked` releases are unsigned convenience builds for this fork.
   Windows SmartScreen can warn on these installers until a real signing flow is
   added.
@@ -183,16 +199,22 @@ shared Windows CI lane expects:
 .\scripts\windows\publish-windows-build-environment.ps1 `
   -EnvironmentRelease 2025-11 `
   -EnvironmentCommit 127cccc01d `
+  -EnvironmentVersionSuffix webengine-codecs-v1 `
   -BuildType shared `
+  -ReleaseTag build-env-2025-11-webengine-codecs `
   -Upload `
   -CreateRelease
 ```
 
 Notes:
 
-- By default the script creates split `mumble_env.x64-windows.<commit>.7z.001`
-  style volumes under `.tmp\build-env-archives\` using a `1900m` size cap, so
-  the assets fit under GitHub's per-release-asset upload limit.
+- For shared/WebEngine environments, the script refuses to publish unless
+  `webengine_webchannel` and `webengine_proprietary_codecs` are enabled in the
+  Qt WebEngine target metadata.
+- By default the script creates split
+  `mumble_env.x64-windows.<commit>.<suffix>.7z.001` style volumes under
+  `.tmp\build-env-archives\` using a `1900m` size cap, so the assets fit under
+  GitHub's per-release-asset upload limit.
 - By default it publishes to the GitHub repo from your `origin` remote and
   uses the release tag `build-env-<release>`.
 - Pass `-Repository <owner>/<repo>` and optionally `-ReleaseTag <tag>` if you

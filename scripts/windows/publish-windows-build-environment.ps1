@@ -3,6 +3,7 @@ param(
 	[string]$EnvironmentDir = "",
 	[string]$EnvironmentRelease = "",
 	[string]$EnvironmentCommit = "",
+	[string]$EnvironmentVersionSuffix = "",
 	[ValidateSet("shared", "static")]
 	[string]$BuildType = "shared",
 	[ValidateSet("x86_64")]
@@ -145,6 +146,135 @@ function Get-VcpkgTriplet {
 	}
 }
 
+function Get-CMakeTargetFeatureMap {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$TargetsText,
+
+		[Parameter(Mandatory = $true)]
+		[string]$PropertyName
+	)
+
+	$pattern = [regex]::Escape($PropertyName) + '\s+"([^"]*)"'
+	$match = [regex]::Match($TargetsText, $pattern)
+	if (-not $match.Success) {
+		return $null
+	}
+
+	$features = @{}
+	foreach ($feature in ($match.Groups[1].Value -split ';')) {
+		if (-not [string]::IsNullOrWhiteSpace($feature)) {
+			$features[$feature] = $true
+		}
+	}
+
+	return $features
+}
+
+function Test-CMakeTargetFeatureEnabled {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$TargetsText,
+
+		[Parameter(Mandatory = $true)]
+		[string]$EnabledProperty,
+
+		[Parameter(Mandatory = $true)]
+		[string]$DisabledProperty,
+
+		[Parameter(Mandatory = $true)]
+		[string]$Feature
+	)
+
+	$enabledFeatures = Get-CMakeTargetFeatureMap -TargetsText $TargetsText -PropertyName $EnabledProperty
+	$disabledFeatures = Get-CMakeTargetFeatureMap -TargetsText $TargetsText -PropertyName $DisabledProperty
+	if ($null -eq $enabledFeatures -or $null -eq $disabledFeatures) {
+		return $false
+	}
+
+	return $enabledFeatures.ContainsKey($Feature) -and (-not $disabledFeatures.ContainsKey($Feature))
+}
+
+function Assert-QtWebEngineFeature {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$TargetsText,
+
+		[Parameter(Mandatory = $true)]
+		[string]$EnabledProperty,
+
+		[Parameter(Mandatory = $true)]
+		[string]$DisabledProperty,
+
+		[Parameter(Mandatory = $true)]
+		[string]$Feature,
+
+		[Parameter(Mandatory = $true)]
+		[string]$TargetsPath
+	)
+
+	if (-not (Test-CMakeTargetFeatureEnabled `
+		-TargetsText $TargetsText `
+		-EnabledProperty $EnabledProperty `
+		-DisabledProperty $DisabledProperty `
+		-Feature $Feature)) {
+		throw "Qt WebEngine feature '$Feature' is not enabled in '$TargetsPath'. Rebuild the shared environment with the required WebEngine feature set before publishing it."
+	}
+}
+
+function Copy-DirectoryContents {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$SourceDir,
+
+		[Parameter(Mandatory = $true)]
+		[string]$DestinationDir
+	)
+
+	New-Item -ItemType Directory -Force -Path $DestinationDir | Out-Null
+	Get-ChildItem -LiteralPath $SourceDir -Force | ForEach-Object {
+		Copy-Item -LiteralPath $_.FullName -Destination $DestinationDir -Recurse -Force
+	}
+}
+
+function Ensure-QtWebEngineDeployResourceLayout {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$EnvironmentDir,
+
+		[Parameter(Mandatory = $true)]
+		[string]$Triplet
+	)
+
+	$tripletRoot = Join-Path $EnvironmentDir "installed\$Triplet"
+	$resourceMirrors = @(
+		@{
+			Source = Join-Path $tripletRoot "resources"
+			Destination = Join-Path $tripletRoot "share\Qt6\resources"
+			Probe = "icudtl.dat"
+		},
+		@{
+			Source = Join-Path $tripletRoot "debug\resources"
+			Destination = Join-Path $tripletRoot "debug\share\Qt6\resources"
+			Probe = "icudtl.dat"
+		}
+	)
+
+	foreach ($mirror in $resourceMirrors) {
+		if (-not (Test-Path -LiteralPath $mirror.Source)) {
+			continue
+		}
+
+		$probePath = Join-Path $mirror.Destination $mirror.Probe
+		if (Test-Path -LiteralPath $probePath) {
+			continue
+		}
+
+		Write-Host "Mirroring Qt WebEngine resources from '$($mirror.Source)' to '$($mirror.Destination)' for windeployqt."
+		Copy-DirectoryContents -SourceDir $mirror.Source -DestinationDir $mirror.Destination
+	}
+}
+
 function Assert-EnvironmentLooksReady {
 	param(
 		[Parameter(Mandatory = $true)]
@@ -157,6 +287,10 @@ function Assert-EnvironmentLooksReady {
 		[string]$BuildType
 	)
 
+	if ($BuildType -eq "shared") {
+		Ensure-QtWebEngineDeployResourceLayout -EnvironmentDir $EnvironmentDir -Triplet $Triplet
+	}
+
 	$requiredPaths = @(
 		(Join-Path $EnvironmentDir "vcpkg.exe"),
 		(Join-Path $EnvironmentDir "scripts\buildsystems\vcpkg.cmake"),
@@ -166,14 +300,42 @@ function Assert-EnvironmentLooksReady {
 	if ($BuildType -eq "shared") {
 		$requiredPaths += @(
 			(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6WebChannel"),
+			(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6WebEngineCore\Qt6WebEngineCoreTargets.cmake"),
 			(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6WebEngineWidgets"),
-			(Join-Path $EnvironmentDir "installed\$Triplet\tools\Qt6\bin\windeployqt.exe")
+			(Join-Path $EnvironmentDir "installed\$Triplet\tools\Qt6\bin\windeployqt.exe"),
+			(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6\resources\icudtl.dat"),
+			(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6\resources\qtwebengine_resources.pak"),
+			(Join-Path $EnvironmentDir "installed\x86-windows")
 		)
 	}
 
 	$missing = @($requiredPaths | Where-Object { -not (Test-Path -LiteralPath $_) })
 	if ($missing.Count -gt 0) {
 		throw "The build environment under '$EnvironmentDir' is missing required content: $($missing -join ', ')"
+	}
+
+	if ($BuildType -eq "shared") {
+		$x86TripletPath = Join-Path $EnvironmentDir "installed\x86-windows"
+		$x86TripletContent = Get-ChildItem -LiteralPath $x86TripletPath -Force -ErrorAction SilentlyContinue | Select-Object -First 1
+		if ($null -eq $x86TripletContent) {
+			throw "The shared build environment under '$EnvironmentDir' has an empty x86-windows triplet. Rebuild or repair the environment before publishing it."
+		}
+
+		$webengineTargetsPath = Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6WebEngineCore\Qt6WebEngineCoreTargets.cmake"
+		$webengineTargetsText = Get-Content -Raw -LiteralPath $webengineTargetsPath
+
+		Assert-QtWebEngineFeature `
+			-TargetsText $webengineTargetsText `
+			-EnabledProperty "QT_ENABLED_PUBLIC_FEATURES" `
+			-DisabledProperty "QT_DISABLED_PUBLIC_FEATURES" `
+			-Feature "webengine_webchannel" `
+			-TargetsPath $webengineTargetsPath
+		Assert-QtWebEngineFeature `
+			-TargetsText $webengineTargetsText `
+			-EnabledProperty "QT_ENABLED_PRIVATE_FEATURES" `
+			-DisabledProperty "QT_DISABLED_PRIVATE_FEATURES" `
+			-Feature "webengine_proprietary_codecs" `
+			-TargetsPath $webengineTargetsPath
 	}
 }
 
@@ -183,16 +345,26 @@ function New-ReleaseNotes {
 		[string]$EnvironmentRelease,
 
 		[Parameter(Mandatory = $true)]
-		[string]$EnvironmentCommit
+		[string]$EnvironmentCommit,
+
+		[string]$EnvironmentVersionSuffix = ""
 	)
 
-	return @"
-Prebuilt Windows build environment archives for environment release $EnvironmentRelease.
+	$lines = @(
+		"Prebuilt Windows build environment archives for environment release $EnvironmentRelease.",
+		"",
+		"- Environment commit: $EnvironmentCommit"
+	)
+	if (-not [string]::IsNullOrWhiteSpace($EnvironmentVersionSuffix)) {
+		$lines += "- Environment version suffix: $EnvironmentVersionSuffix"
+	}
+	$lines += @(
+		"- Shared Windows environments are expected to include Qt WebEngine proprietary codecs",
+		"- Generated from a local build_env checkout",
+		"- Intended for GitHub Actions release-asset reuse"
+	)
 
-- Environment commit: $EnvironmentCommit
-- Generated from a local build_env checkout
-- Intended for GitHub Actions release-asset reuse
-"@
+	return ($lines -join "`n")
 }
 
 function Test-GitHubReleaseExists {
@@ -227,13 +399,21 @@ $metadata = Resolve-EnvironmentMetadata `
 $triplet = Get-VcpkgTriplet -Architecture $Architecture -BuildType $metadata.BuildType
 Assert-EnvironmentLooksReady -EnvironmentDir $metadata.EnvironmentDir -Triplet $triplet -BuildType $metadata.BuildType
 
+if (-not [string]::IsNullOrWhiteSpace($EnvironmentVersionSuffix) -and $EnvironmentVersionSuffix -notmatch '^[A-Za-z0-9._-]+$') {
+	throw "EnvironmentVersionSuffix may only contain letters, numbers, '.', '_' and '-'."
+}
+
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
 	$OutputDirectory = Join-Path $repoRoot ".tmp\build-env-archives"
 }
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 
-$assetName = "mumble_env.$triplet.$($metadata.EnvironmentCommit).7z"
+$assetVersion = "mumble_env.$triplet.$($metadata.EnvironmentCommit)"
+if (-not [string]::IsNullOrWhiteSpace($EnvironmentVersionSuffix)) {
+	$assetVersion = "$assetVersion.$EnvironmentVersionSuffix"
+}
+$assetName = "$assetVersion.7z"
 $archivePath = Join-Path $OutputDirectory $assetName
 $releaseTagToUse = if ([string]::IsNullOrWhiteSpace($ReleaseTag)) {
 	"build-env-$($metadata.EnvironmentRelease)"
@@ -258,6 +438,9 @@ if ($existingArchiveParts.Count -gt 0) {
 Write-Host "Build environment source: $($metadata.EnvironmentDir)"
 Write-Host "Resolved environment release: $($metadata.EnvironmentRelease)"
 Write-Host "Resolved environment commit: $($metadata.EnvironmentCommit)"
+if (-not [string]::IsNullOrWhiteSpace($EnvironmentVersionSuffix)) {
+	Write-Host "Resolved environment version suffix: $EnvironmentVersionSuffix"
+}
 Write-Host "Resolved build type: $($metadata.BuildType)"
 Write-Host "Triplet: $triplet"
 Write-Host "Archive path: $archivePath"
@@ -322,7 +505,10 @@ if (-not $releaseExists) {
 		throw "Release '$releaseTagToUse' does not exist in '$repositoryToUse'. Pass -CreateRelease to create it."
 	}
 
-	$releaseNotes = New-ReleaseNotes -EnvironmentRelease $metadata.EnvironmentRelease -EnvironmentCommit $metadata.EnvironmentCommit
+	$releaseNotes = New-ReleaseNotes `
+		-EnvironmentRelease $metadata.EnvironmentRelease `
+		-EnvironmentCommit $metadata.EnvironmentCommit `
+		-EnvironmentVersionSuffix $EnvironmentVersionSuffix
 	$releaseCreateArgs = @(
 		"release", "create", $releaseTagToUse,
 		"--repo", $repositoryToUse,

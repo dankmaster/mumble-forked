@@ -94,6 +94,18 @@ if(modern-layout-webengine)
 			WebEngineWidgets
 		REQUIRED
 	)
+
+	if(TARGET Qt6::WebEngineCore)
+		get_target_property(MUMBLE_QT_WEBENGINE_ENABLED_PRIVATE_FEATURES Qt6::WebEngineCore QT_ENABLED_PRIVATE_FEATURES)
+		if(MUMBLE_QT_WEBENGINE_ENABLED_PRIVATE_FEATURES
+			AND webengine_proprietary_codecs IN_LIST MUMBLE_QT_WEBENGINE_ENABLED_PRIVATE_FEATURES)
+			set(MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS 1)
+		else()
+			set(MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS 0)
+		endif()
+	else()
+		set(MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS 0)
+	endif()
 endif()
 
 set(MUMBLE_SOURCES
@@ -663,7 +675,11 @@ target_link_libraries(mumble_client_object_lib
 )
 
 if(modern-layout-webengine)
-	target_compile_definitions(mumble_client_object_lib PUBLIC MUMBLE_HAS_MODERN_LAYOUT)
+	target_compile_definitions(mumble_client_object_lib
+		PUBLIC
+			MUMBLE_HAS_MODERN_LAYOUT
+			MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS=${MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS}
+	)
 	target_link_libraries(mumble_client_object_lib
 		PUBLIC
 			Qt6::WebChannel

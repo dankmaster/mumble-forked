@@ -25,10 +25,11 @@ env:
   MUMBLE_FORKED_RELEASE_TAG: mumble-forked
   MUMBLE_FORKED_RELEASE_TITLE: mumble-forked
   MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE: 2025-11
-  MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE_TAG: build-env-2025-11
+  MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE_TAG: build-env-2025-11-webengine-codecs
   MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT: 127cccc01d
+  MUMBLE_SHARED_WINDOWS_ENVIRONMENT_VERSION_SUFFIX: webengine-codecs-v1
   ONNXRUNTIME_VERSION: 1.18.1
-  PROTECTED_BUILD_ENV_RELEASE_TAG: build-env-2025-11
+  PROTECTED_BUILD_ENV_RELEASE_TAG: build-env-2025-11-webengine-codecs
 
 jobs:
   build-and-publish-msi:
@@ -45,27 +46,28 @@ jobs:
         shell: bash
         run: bash "$GITHUB_WORKSPACE/.github/workflows/update_submodules_with_retry.sh"
 
-      - name: Pin shared environment and enable bootstrap fallback
+      - name: Pin shared codec environment
         shell: bash
         run: |
           echo "MUMBLE_ENVIRONMENT_SOURCE_OVERRIDE=https://github.com/${{ github.repository }}/releases/download/${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE_TAG}" >> "$GITHUB_ENV"
           echo "MUMBLE_ENVIRONMENT_COMMIT_OVERRIDE=${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT}" >> "$GITHUB_ENV"
+          echo "MUMBLE_ENVIRONMENT_VERSION_SUFFIX_OVERRIDE=${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_VERSION_SUFFIX}" >> "$GITHUB_ENV"
           echo "MUMBLE_ENVIRONMENT_DIR_OVERRIDE=$GITHUB_WORKSPACE/build_env/${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE}-${MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT}-shared" >> "$GITHUB_ENV"
-          echo "MUMBLE_ALLOW_ENVIRONMENT_BOOTSTRAP=ON" >> "$GITHUB_ENV"
+          echo "MUMBLE_ALLOW_ENVIRONMENT_BOOTSTRAP=OFF" >> "$GITHUB_ENV"
 
       - name: Set environment variables
         shell: bash
         run: $GITHUB_WORKSPACE/.github/workflows/set_environment_variables.sh "windows-2022" "shared" "x86_64" "${{ github.workspace }}"
 
-      - name: Verify shared environment archive or use local bootstrap fallback
+      - name: Verify shared codec environment archive
         shell: bash
         run: |
           set -euxo pipefail
           archive_url="${MUMBLE_ENVIRONMENT_SOURCE}/${MUMBLE_ENVIRONMENT_VERSION}.7z"
           split_archive_url="${archive_url}.001"
           if ! curl -I -f -L "$archive_url" > /dev/null && ! curl -I -f -L "$split_archive_url" > /dev/null; then
-            echo "::notice title=Missing shared build environment::The shared Windows vcpkg environment archive is not published: $archive_url"
-            echo "::notice title=Shared bootstrap fallback::Falling back to local vcpkg bootstrap for the shared Windows environment."
+            echo "::error title=Missing shared codec build environment::Publish ${MUMBLE_ENVIRONMENT_VERSION}.7z to ${MUMBLE_ENVIRONMENT_SOURCE} before running this workflow."
+            exit 1
           fi
 
       - id: restore-shared-build-env-cache

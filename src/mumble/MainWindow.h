@@ -76,6 +76,7 @@ class QTimer;
 class QHostAddress;
 class QPushButton;
 class QToolButton;
+class QUrl;
 class QWidget;
 
 namespace Search {
@@ -250,6 +251,8 @@ public:
 		QString description;
 		QImage thumbnailImage;
 		QString mediaDataUrl;
+		QString mediaAudioDataUrl;
+		QString mediaAudioMime;
 		QString mediaMime;
 		QString mediaKind;
 		QString openLabel;
@@ -260,6 +263,8 @@ public:
 		bool failed                 = false;
 		bool siteSnapshotRequested  = false;
 		bool siteSnapshotFinished   = false;
+		bool remoteMediaRequested   = false;
+		bool remoteMediaFinished    = false;
 	};
 
 	struct PersistentChatAssetDownload {
@@ -305,7 +310,16 @@ public:
 	void ensurePersistentChatPreview(const QString &previewKey);
 	void ensurePersistentChatPreviewAssetDownload(unsigned int assetID, const QString &previewKey);
 	void ensurePersistentChatPreviewSiteSnapshot(const QString &previewKey);
-	void handlePersistentChatPreviewSiteSnapshotResult(const QString &previewKey, const QImage &image, bool success);
+	bool requestPersistentChatRedditVideoPreview(const QString &previewKey, const QUrl &previewUrl);
+	bool requestPersistentChatRedditVideoAudioPreview(const QString &previewKey, const QUrl &dashManifestUrl);
+	bool applyPersistentChatRemotePlayableMedia(PersistentChatPreview &preview, const QUrl &mediaUrl,
+												const QString &suggestedMime = QString());
+	bool applyPersistentChatRemoteAudioMedia(PersistentChatPreview &preview, const QUrl &audioUrl,
+											 const QString &suggestedMime = QString());
+	void handlePersistentChatPreviewSiteSnapshotResult(const QString &previewKey, const QImage &image, bool success,
+													   const QString &mediaUrl = QString(),
+													   const QString &mediaMime = QString());
+	void publishPersistentChatPreviewUpdate(const QString &previewKey);
 	int persistentChatPreviewContentWidth(int leftPadding) const;
 	QString persistentChatPreviewHtml(const QString &previewKey, int availableWidth) const;
 	void updatePersistentChatPreviewViewIfVisible(const QString &previewKey);
