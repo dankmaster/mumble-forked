@@ -254,7 +254,8 @@ QString ChanACL::whatsThis(Perm p) {
 		case Write:
 			return tr("This represents total access to the channel, including the ability to change group and ACL "
 					  "information. "
-					  "This privilege implies all other privileges.");
+					  "This privilege implies most other privileges, but speaking, whispering, and persistent chat "
+					  "history access are controlled separately.");
 		case Traverse:
 			return tr(
 				"This represents the permission to traverse the channel. If a user is denied this privilege, he will "

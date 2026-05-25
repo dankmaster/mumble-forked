@@ -754,7 +754,7 @@ void ACLEditor::updatePasswordACL() {
 			pcaPassword->bInherited = false;
 			pcaPassword->pAllow     = ChanACL::None;
 			pcaPassword->pDeny      = ChanACL::Enter | ChanACL::Speak | ChanACL::Whisper | ChanACL::TextMessage
-								 | ChanACL::LinkChannel | ChanACL::Traverse;
+								 | ChanACL::LinkChannel | ChanACL::ViewTextMessageHistory | ChanACL::Traverse;
 			pcaPassword->qsGroup = QLatin1String("all");
 			qlACLs << pcaPassword;
 
@@ -763,7 +763,7 @@ void ACLEditor::updatePasswordACL() {
 			pcaPassword->bApplySubs = false;
 			pcaPassword->bInherited = false;
 			pcaPassword->pAllow     = ChanACL::Enter | ChanACL::Speak | ChanACL::Whisper | ChanACL::TextMessage
-								  | ChanACL::LinkChannel | ChanACL::Traverse;
+								  | ChanACL::LinkChannel | ChanACL::ViewTextMessageHistory | ChanACL::Traverse;
 			pcaPassword->pDeny   = ChanACL::None;
 			pcaPassword->qsGroup = QString(QLatin1String("#%1")).arg(qleChannelPassword->text());
 			qlACLs << pcaPassword;

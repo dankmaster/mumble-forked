@@ -2503,7 +2503,7 @@
 		detail.className = "modern-dialog-acl-detail";
 		if (selectedIndex >= 0) {
 			const group = groups[selectedIndex];
-			const editable = !group.inherited;
+			const inherited = !!group.inherited;
 			const form = document.createElement("div");
 			form.className = "modern-dialog-acl-detail-grid";
 			const nameLabel = document.createElement("label");
@@ -2513,7 +2513,7 @@
 			const nameInput = document.createElement("input");
 			nameInput.type = "text";
 			nameInput.value = group.name || "";
-			nameInput.disabled = !editable;
+			nameInput.disabled = inherited;
 			nameInput.addEventListener("input", function() {
 				const next = aclCurrentModel(field, model);
 				next.groups[selectedIndex].name = nameInput.value;
@@ -2536,7 +2536,6 @@
 				const checkbox = document.createElement("input");
 				checkbox.type = "checkbox";
 				checkbox.checked = !!group[pair[0]];
-				checkbox.disabled = !editable;
 				checkbox.addEventListener("change", function() {
 					const next = aclCurrentModel(field, model);
 					next.groups[selectedIndex][pair[0]] = checkbox.checked;
@@ -2551,10 +2550,20 @@
 			form.appendChild(flags);
 			const actions = document.createElement("div");
 			actions.className = "modern-dialog-acl-card-actions";
-			appendAclButton(actions, "Delete group", "is-danger", !editable, function() {
+			appendAclButton(actions, inherited ? "Reset group" : "Delete group", "is-danger", false, function() {
 				const next = aclCurrentModel(field, model);
-				next.groups.splice(selectedIndex, 1);
-				next.selectedGroupIndex = Math.max(0, selectedIndex - 1);
+				if (inherited) {
+					next.groups[selectedIndex].inherit = true;
+					next.groups[selectedIndex].inheritable = true;
+					next.groups[selectedIndex].add = [];
+					next.groups[selectedIndex].remove = [];
+					delete next.groups[selectedIndex].addText;
+					delete next.groups[selectedIndex].removeText;
+					next.selectedGroupIndex = selectedIndex;
+				} else {
+					next.groups.splice(selectedIndex, 1);
+					next.selectedGroupIndex = Math.max(0, selectedIndex - 1);
+				}
 				next.activeTab = "groups";
 				aclUpdateModel(field, next, true);
 			});
@@ -2562,8 +2571,8 @@
 			detail.appendChild(form);
 
 			appendAclMemberSection(detail, field, model, selectedIndex, "inheritedMembers", "Inherited members", false);
-			appendAclMemberSection(detail, field, model, selectedIndex, "add", "Add members", editable);
-			appendAclMemberSection(detail, field, model, selectedIndex, "remove", "Remove members", editable && group.inherit !== false);
+			appendAclMemberSection(detail, field, model, selectedIndex, "add", "Add members", true);
+			appendAclMemberSection(detail, field, model, selectedIndex, "remove", "Remove members", group.inherit !== false);
 		}
 		workspace.appendChild(detail);
 		panel.appendChild(workspace);

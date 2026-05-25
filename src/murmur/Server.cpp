@@ -667,17 +667,22 @@ Server::ChatHistoryAccess Server::resolveChatHistoryAccess(ServerUser *user, Mum
 															unsigned int scopeID, Channel *permissionChannel,
 															ChanACL::ACLCache *cache) {
 	ChatHistoryAccess result;
-	Q_UNUSED(scopeID);
 	if (!user || !permissionChannel) {
 		return result;
 	}
 
+	std::optional< msdb::ChatThreadScope > dbScope;
+	unsigned int effectiveScopeID = scopeID;
 	switch (scope) {
 		case MumbleProto::Channel:
+			dbScope = msdb::ChatThreadScope::Channel;
 			break;
 		case MumbleProto::ServerGlobal:
+			dbScope          = msdb::ChatThreadScope::ServerGlobal;
+			effectiveScopeID = 0;
 			break;
 		case MumbleProto::TextChannel:
+			dbScope = msdb::ChatThreadScope::TextChannel;
 			break;
 		case MumbleProto::Aggregate:
 		default:
@@ -690,6 +695,15 @@ Server::ChatHistoryAccess Server::resolveChatHistoryAccess(ServerUser *user, Mum
 	}
 
 	if (user->iId < 0 || !m_dbWrapper.registeredUserExists(iServerNum, static_cast< unsigned int >(user->iId))) {
+		return result;
+	}
+
+	const unsigned int userID = static_cast< unsigned int >(user->iId);
+	const std::optional< msdb::DBChatHistoryGrant > directGrant =
+		m_dbWrapper.getChatHistoryGrant(iServerNum, userID, *dbScope, effectiveScopeID);
+	if (directGrant) {
+		result.allowed      = true;
+		result.visibleAfter = directGrant->visibleAfter;
 		return result;
 	}
 
