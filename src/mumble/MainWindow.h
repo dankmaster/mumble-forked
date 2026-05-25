@@ -318,7 +318,9 @@ public:
 											 const QString &suggestedMime = QString());
 	void handlePersistentChatPreviewSiteSnapshotResult(const QString &previewKey, const QImage &image, bool success,
 													   const QString &mediaUrl = QString(),
-													   const QString &mediaMime = QString());
+													   const QString &mediaMime = QString(),
+													   const QString &mediaAudioUrl = QString(),
+													   const QString &mediaAudioMime = QString());
 	void publishPersistentChatPreviewUpdate(const QString &previewKey);
 	int persistentChatPreviewContentWidth(int leftPadding) const;
 	QString persistentChatPreviewHtml(const QString &previewKey, int availableWidth) const;

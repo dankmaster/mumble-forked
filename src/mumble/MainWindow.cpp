@@ -3593,20 +3593,27 @@ QString previewSnapshotMediaProbeScript() {
     .replace(/\\u0025/ig, '%')
     .replace(/\\u0026/ig, '&')
     .replace(/\\u002f/ig, '/')
+    .replace(/\\u003c/ig, '<')
+    .replace(/\\u003e/ig, '>')
     .replace(/\\u003a/ig, ':')
     .replace(/\\u003d/ig, '=')
     .replace(/\\u003f/ig, '?')
     .replace(/\\u002c/ig, ',')
     .replace(/\\u002d/ig, '-')
     .replace(/\\u005c/ig, '\\')
+    .replace(/\\"/g, '"')
     .replace(/\\x25/ig, '%')
     .replace(/\\x26/ig, '&')
     .replace(/\\x2f/ig, '/')
+    .replace(/\\x3c/ig, '<')
+    .replace(/\\x3e/ig, '>')
     .replace(/\\x3a/ig, ':')
     .replace(/\\x3d/ig, '=')
     .replace(/\\x3f/ig, '?')
     .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"');
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
   const cleanUrl = (value) => {
     let url = decodeEscapes(value).trim();
     if (!url || /^blob:/i.test(url) || /^data:/i.test(url)) {
@@ -3641,6 +3648,7 @@ QString previewSnapshotMediaProbeScript() {
     }
     return hinted;
   };
+  const audioCandidates = [];
   const addCandidate = (rawUrl, rawMime, score) => {
     const url = cleanUrl(rawUrl);
     if (!/^https:\/\//i.test(url)) {
@@ -3656,6 +3664,78 @@ QString previewSnapshotMediaProbeScript() {
     const videoBoost = /^video\//i.test(mime) ? 5000 : 0;
     candidates.push({ url, mime, score: (Number(score) || 0) + videoBoost });
   };
+  const audioMimeForUrl = (url, fallback) => {
+    const hinted = String(fallback || '').split(';')[0].trim().toLowerCase();
+    if (hinted === 'audio/mp4' || hinted === 'audio/aac' || hinted === 'audio/mpeg') {
+      return hinted;
+    }
+    const path = (() => {
+      try {
+        return new URL(url).pathname.toLowerCase();
+      } catch (e) {
+        return String(url || '').toLowerCase();
+      }
+    })();
+    if (path.endsWith('.m4a') || path.endsWith('.aac') || path.includes('_audio_')) {
+      return 'audio/mp4';
+    }
+    if (path.endsWith('.mp3')) {
+      return 'audio/mpeg';
+    }
+    return hinted && /^audio\//i.test(hinted) ? hinted : '';
+  };
+  const addAudioCandidate = (rawUrl, rawMime, score) => {
+    const url = cleanUrl(rawUrl);
+    if (!/^https:\/\//i.test(url)) {
+      return;
+    }
+    const mime = audioMimeForUrl(url, rawMime);
+    if (mime !== 'audio/mp4' && mime !== 'audio/aac' && mime !== 'audio/mpeg') {
+      return;
+    }
+    audioCandidates.push({ url, mime, score: Number(score) || 0 });
+  };
+  const addDashAudioCandidates = (rawText, score) => {
+    const text = decodeEscapes(rawText);
+    if (!/AdaptationSet|BaseURL/i.test(text)) {
+      return;
+    }
+    const fragments = [];
+    const mpdPattern = /<MPD[\s\S]{0,1200000}?<\/MPD>/ig;
+    let match;
+    while ((match = mpdPattern.exec(text)) && fragments.length < 4) {
+      fragments.push(match[0]);
+    }
+    if (!fragments.length) {
+      const adaptationPattern = /<AdaptationSet\b[^>]*(?:contentType=["']audio["']|mimeType=["']audio\/[^"']+["'])[\s\S]{0,180000}?<\/AdaptationSet>/ig;
+      while ((match = adaptationPattern.exec(text)) && fragments.length < 8) {
+        fragments.push('<MPD>' + match[0] + '</MPD>');
+      }
+    }
+    fragments.forEach((fragment) => {
+      try {
+        const documentXml = new DOMParser().parseFromString(fragment, 'application/xml');
+        Array.prototype.forEach.call(documentXml.querySelectorAll('AdaptationSet'), (set) => {
+          const contentType = String(set.getAttribute('contentType') || '').toLowerCase();
+          const mimeType = String(set.getAttribute('mimeType') || '').toLowerCase();
+          if (contentType !== 'audio' && !mimeType.startsWith('audio/')) {
+            return;
+          }
+          Array.prototype.forEach.call(set.querySelectorAll('Representation'), (representation) => {
+            const representationMime = representation.getAttribute('mimeType') || mimeType || 'audio/mp4';
+            const bandwidth = Number(representation.getAttribute('bandwidth')) || 0;
+            let base = representation.querySelector('BaseURL');
+            if (!base) {
+              base = set.querySelector('BaseURL');
+            }
+            if (base) {
+              addAudioCandidate(base.textContent || '', representationMime, (Number(score) || 0) + bandwidth / 1000);
+            }
+          });
+        });
+      } catch (e) {}
+    });
+  };
 
   try {
     document.querySelectorAll('video').forEach((video) => {
@@ -3669,8 +3749,18 @@ QString previewSnapshotMediaProbeScript() {
   } catch (e) {}
 
   try {
-    document.querySelectorAll('source[src], [data-video-url], [data-src], [data-href]').forEach((element) => {
+    document.querySelectorAll('audio').forEach((audio) => {
+      addAudioCandidate(audio.currentSrc || audio.src || audio.getAttribute('src'), audio.type, 20000);
+      audio.querySelectorAll('source[src]').forEach((source) => {
+        addAudioCandidate(source.currentSrc || source.src || source.getAttribute('src'), source.type, 15000);
+      });
+    });
+  } catch (e) {}
+
+  try {
+    document.querySelectorAll('source[src], [data-video-url], [data-audio-url], [data-audio-src], [data-src], [data-href]').forEach((element) => {
       addCandidate(element.getAttribute('src') || element.getAttribute('data-video-url') || element.getAttribute('data-src') || element.getAttribute('data-href'), element.getAttribute('type'), 8000);
+      addAudioCandidate(element.getAttribute('src') || element.getAttribute('data-audio-url') || element.getAttribute('data-audio-src') || element.getAttribute('data-src') || element.getAttribute('data-href'), element.getAttribute('type'), 8000);
     });
   } catch (e) {}
 
@@ -3678,21 +3768,37 @@ QString previewSnapshotMediaProbeScript() {
     const html = document.documentElement ? document.documentElement.innerHTML.slice(0, 2500000) : '';
     const normalizedHtml = decodeEscapes(html);
     const pattern = /https?:\/\/[^"'<>\\\s]+?\.(?:mp4|m4v|webm|gifv|gif)(?:\?[^"'<>\\\s]*)?/ig;
+    const audioPattern = /https?:\/\/[^"'<>\\\s]+?\.(?:m4a|aac|mp3)(?:\?[^"'<>\\\s]*)?/ig;
     let match;
     while ((match = pattern.exec(normalizedHtml)) && candidates.length < 32) {
       addCandidate(match[0], '', 1000);
     }
+    while ((match = audioPattern.exec(normalizedHtml)) && audioCandidates.length < 32) {
+      addAudioCandidate(match[0], '', 1000);
+    }
+    const audioKeyPattern = /(?:audio[_-]?(?:url|src|uri)|dash[_-]?audio[_-]?url|audio[_-]?dash[_-]?url)["']?\s*[:=]\s*["']([^"']{8,3000})["']/ig;
+    while ((match = audioKeyPattern.exec(normalizedHtml)) && audioCandidates.length < 48) {
+      addAudioCandidate(match[1], 'audio/mp4', 4000);
+    }
+    addDashAudioCandidates(normalizedHtml, 6000);
   } catch (e) {}
 
   candidates.sort((a, b) => b.score - a.score);
-  return candidates[0] || {};
+  audioCandidates.sort((a, b) => b.score - a.score);
+  const result = candidates[0] || {};
+  if (audioCandidates[0]) {
+    result.audioUrl = audioCandidates[0].url;
+    result.audioMime = audioCandidates[0].mime;
+  }
+  return result;
 })();
 )JS");
 }
 
 class PersistentChatPreviewSnapshotRenderer final : public QObject {
 public:
-	using ResultCallback = std::function< void(const QString &, const QImage &, bool, const QString &, const QString &) >;
+	using ResultCallback = std::function< void(const QString &, const QImage &, bool, const QString &, const QString &,
+											   const QString &, const QString &) >;
 
 	explicit PersistentChatPreviewSnapshotRenderer(QObject *parent = nullptr) : QObject(parent) {
 		m_timeoutTimer = new QTimer(this);
@@ -3879,14 +3985,18 @@ private:
 									  const QVariantMap media = mediaResult.toMap();
 									  const QString mediaUrl  = media.value(QStringLiteral("url")).toString().trimmed();
 									  const QString mediaMime = media.value(QStringLiteral("mime")).toString().trimmed();
+									  const QString mediaAudioUrl =
+										  media.value(QStringLiteral("audioUrl")).toString().trimmed();
+									  const QString mediaAudioMime =
+										  media.value(QStringLiteral("audioMime")).toString().trimmed();
 									  const QPixmap pixmap    = m_view->grab();
 									  const QImage image      = pixmap.toImage();
 									  if (!image.isNull() && image.width() > 1 && image.height() > 1) {
-										  finishCurrent(true, image, mediaUrl, mediaMime);
+										  finishCurrent(true, image, mediaUrl, mediaMime, mediaAudioUrl, mediaAudioMime);
 										  return;
 									  }
 									  if (!mediaUrl.isEmpty()) {
-										  finishCurrent(true, QImage(), mediaUrl, mediaMime);
+										  finishCurrent(true, QImage(), mediaUrl, mediaMime, mediaAudioUrl, mediaAudioMime);
 										  return;
 									  }
 
@@ -3902,7 +4012,8 @@ private:
 	}
 
 	void finishCurrent(bool success, const QImage &image, const QString &mediaUrl = QString(),
-					   const QString &mediaMime = QString()) {
+					   const QString &mediaMime = QString(), const QString &mediaAudioUrl = QString(),
+					   const QString &mediaAudioMime = QString()) {
 		if (!m_busy) {
 			return;
 		}
@@ -3922,7 +4033,7 @@ private:
 		}
 
 		if (m_resultCallback) {
-			m_resultCallback(previewKey, image, success, mediaUrl, mediaMime);
+			m_resultCallback(previewKey, image, success, mediaUrl, mediaMime, mediaAudioUrl, mediaAudioMime);
 		}
 
 		QTimer::singleShot(0, this, [this]() { startNextIfIdle(); });
@@ -17506,8 +17617,10 @@ void MainWindow::ensurePersistentChatPreviewSiteSnapshot(const QString &previewK
 		renderer                                = new PersistentChatPreviewSnapshotRenderer(this);
 		m_persistentChatPreviewSnapshotRenderer = renderer;
 		renderer->setResultCallback([this](const QString &key, const QImage &image, bool success,
-										   const QString &mediaUrl, const QString &mediaMime) {
-			handlePersistentChatPreviewSiteSnapshotResult(key, image, success, mediaUrl, mediaMime);
+										   const QString &mediaUrl, const QString &mediaMime,
+										   const QString &mediaAudioUrl, const QString &mediaAudioMime) {
+			handlePersistentChatPreviewSiteSnapshotResult(key, image, success, mediaUrl, mediaMime, mediaAudioUrl,
+														  mediaAudioMime);
 		});
 	}
 
@@ -17518,13 +17631,18 @@ void MainWindow::ensurePersistentChatPreviewSiteSnapshot(const QString &previewK
 
 void MainWindow::handlePersistentChatPreviewSiteSnapshotResult(const QString &previewKey, const QImage &image,
 															   bool success, const QString &mediaUrl,
-															   const QString &mediaMime) {
+															   const QString &mediaMime,
+															   const QString &mediaAudioUrl,
+															   const QString &mediaAudioMime) {
 	auto it = m_persistentChatPreviews.find(previewKey);
 	if (it == m_persistentChatPreviews.end()) {
 		return;
 	}
 
 	const bool hasRemoteMedia = applyPersistentChatRemotePlayableMedia(*it, QUrl(mediaUrl), mediaMime);
+	if (hasRemoteMedia || it->mediaKind == QLatin1String("video")) {
+		applyPersistentChatRemoteAudioMedia(*it, QUrl(mediaAudioUrl), mediaAudioMime);
+	}
 	const bool socialMediaProbe =
 		shouldProbeSocialPreviewForPlayableMedia(QUrl(it->canonicalUrl), hasRemoteMedia ? QStringLiteral("video") : it->mediaKind);
 	it->siteSnapshotRequested = false;

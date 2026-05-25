@@ -3496,7 +3496,7 @@
 
 	function attachPreviewAudioTrack(media, video, audioUrl, audioMime) {
 		if (!media || !video || !audioUrl || !previewAudioCanPlayInline(audioMime, audioUrl)) {
-			return;
+			return null;
 		}
 
 		const audio = document.createElement("audio");
@@ -3579,6 +3579,163 @@
 
 		syncAudioProperties();
 		media.appendChild(audio);
+		return audio;
+	}
+
+	function formatPreviewMediaTime(value) {
+		const totalSeconds = Math.max(0, Math.floor(Number(value) || 0));
+		const minutes = Math.floor(totalSeconds / 60);
+		const seconds = totalSeconds % 60;
+		return String(minutes) + ":" + String(seconds).padStart(2, "0");
+	}
+
+	function syncPreviewMediaControls(video, controls) {
+		if (!video || !controls) {
+			return;
+		}
+
+		const playButton = controls.querySelector(".preview-card-media-play");
+		const muteButton = controls.querySelector(".preview-card-media-mute");
+		const seek = controls.querySelector(".preview-card-media-seek");
+		const volume = controls.querySelector(".preview-card-media-volume");
+		const time = controls.querySelector(".preview-card-media-time");
+		const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+		if (playButton) {
+			playButton.textContent = video.paused ? "Play" : "Pause";
+			playButton.setAttribute("aria-label", video.paused ? "Play media" : "Pause media");
+		}
+		if (muteButton) {
+			muteButton.textContent = video.muted || video.volume <= 0 ? "Muted" : "Sound";
+			muteButton.setAttribute("aria-label", video.muted || video.volume <= 0 ? "Unmute media" : "Mute media");
+		}
+		if (seek && duration && !seek.matches(":active")) {
+			seek.value = String(Math.round((video.currentTime / duration) * 1000));
+		}
+		if (seek) {
+			seek.disabled = !duration;
+		}
+		if (volume && !volume.matches(":active")) {
+			volume.value = String(Math.round((video.muted ? 0 : video.volume) * 100));
+		}
+		if (time) {
+			time.textContent = duration
+				? formatPreviewMediaTime(video.currentTime) + " / " + formatPreviewMediaTime(duration)
+				: formatPreviewMediaTime(video.currentTime);
+		}
+	}
+
+	function appendPreviewMediaControls(card, media, video) {
+		if (!card || !media || !video) {
+			return;
+		}
+
+		const controls = document.createElement("div");
+		controls.className = "preview-card-media-controls";
+		controls.addEventListener("click", function(event) {
+			event.stopPropagation();
+		});
+		controls.addEventListener("keydown", function(event) {
+			event.stopPropagation();
+		});
+
+		const playButton = document.createElement("button");
+		playButton.type = "button";
+		playButton.className = "preview-card-media-button preview-card-media-play";
+		playButton.addEventListener("click", function(event) {
+			event.preventDefault();
+			event.stopPropagation();
+			if (video.paused) {
+				const playPromise = video.play();
+				if (playPromise && typeof playPromise.catch === "function") {
+					playPromise.catch(function(error) {
+						console.warn("Preview video playback failed", error && error.name ? error.name : error);
+					});
+				}
+			} else {
+				video.pause();
+			}
+			syncPreviewMediaControls(video, controls);
+		});
+
+		const time = document.createElement("span");
+		time.className = "preview-card-media-time";
+		time.textContent = "0:00";
+
+		const seek = document.createElement("input");
+		seek.type = "range";
+		seek.className = "preview-card-media-seek";
+		seek.min = "0";
+		seek.max = "1000";
+		seek.step = "1";
+		seek.value = "0";
+		seek.setAttribute("aria-label", "Seek media");
+		seek.addEventListener("input", function(event) {
+			event.stopPropagation();
+			const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+			if (!duration) {
+				return;
+			}
+			video.currentTime = (Number(seek.value) / 1000) * duration;
+			syncPreviewMediaControls(video, controls);
+		});
+
+		const muteButton = document.createElement("button");
+		muteButton.type = "button";
+		muteButton.className = "preview-card-media-button preview-card-media-mute";
+		muteButton.addEventListener("click", function(event) {
+			event.preventDefault();
+			event.stopPropagation();
+			video.muted = !(video.muted || video.volume <= 0);
+			if (!video.muted && video.volume <= 0) {
+				video.volume = 0.75;
+			}
+			syncPreviewMediaControls(video, controls);
+		});
+
+		const volume = document.createElement("input");
+		volume.type = "range";
+		volume.className = "preview-card-media-volume";
+		volume.min = "0";
+		volume.max = "100";
+		volume.step = "1";
+		volume.value = String(Math.round((video.volume || 1) * 100));
+		volume.setAttribute("aria-label", "Media volume");
+		volume.addEventListener("input", function(event) {
+			event.stopPropagation();
+			const nextVolume = Math.max(0, Math.min(100, Number(volume.value) || 0)) / 100;
+			video.volume = nextVolume;
+			video.muted = nextVolume <= 0;
+			syncPreviewMediaControls(video, controls);
+		});
+
+		const sizeButton = document.createElement("button");
+		sizeButton.type = "button";
+		sizeButton.className = "preview-card-media-button preview-card-media-size";
+		sizeButton.textContent = "Large";
+		sizeButton.setAttribute("aria-label", "Toggle larger media preview");
+		sizeButton.addEventListener("click", function(event) {
+			event.preventDefault();
+			event.stopPropagation();
+			const expanded = !card.classList.contains("is-expanded");
+			card.classList.toggle("is-expanded", expanded);
+			sizeButton.textContent = expanded ? "Small" : "Large";
+			requestAnimationFrame(syncScrollState);
+		});
+
+		controls.appendChild(playButton);
+		controls.appendChild(time);
+		controls.appendChild(seek);
+		controls.appendChild(muteButton);
+		controls.appendChild(volume);
+		controls.appendChild(sizeButton);
+		media.appendChild(controls);
+
+		["play", "pause", "loadedmetadata", "durationchange", "timeupdate", "volumechange", "ended"].forEach(function(name) {
+			video.addEventListener(name, function() {
+				syncPreviewMediaControls(video, controls);
+			});
+		});
+		syncPreviewMediaControls(video, controls);
 	}
 
 	function appendPreviewPlaybackFallback(media, preview, fallbackText) {
@@ -3684,7 +3841,7 @@
 				const video = document.createElement("video");
 				video.className = "preview-card-video";
 				video.src = mediaUrl;
-				video.controls = true;
+				video.controls = false;
 				video.muted = !!preview.autoplay;
 				video.defaultMuted = !!preview.autoplay;
 				video.loop = true;
@@ -3709,6 +3866,18 @@
 				if (mediaAudioUrl) {
 					attachPreviewAudioTrack(media, video, mediaAudioUrl, mediaAudioMime);
 				}
+				appendPreviewMediaControls(card, media, video);
+				media.addEventListener("dblclick", function(event) {
+					event.preventDefault();
+					event.stopPropagation();
+					const expanded = !card.classList.contains("is-expanded");
+					card.classList.toggle("is-expanded", expanded);
+					const sizeButton = media.querySelector(".preview-card-media-size");
+					if (sizeButton) {
+						sizeButton.textContent = expanded ? "Small" : "Large";
+					}
+					requestAnimationFrame(syncScrollState);
+				});
 			} else if (isVideoMedia) {
 				appendPreviewPlaybackFallback(media, preview, "Open in browser");
 			} else {
@@ -3933,9 +4102,15 @@
 		return footer;
 	}
 
+	function messageHasMediaPreview(message) {
+		return !!String(message && message.preview && message.preview.mediaUrl || "").trim();
+	}
+
 	function renderMessageBubble(message) {
 		const bubble = document.createElement("div");
-		bubble.className = "message-bubble" + (message.own ? " is-own" : "");
+		bubble.className = "message-bubble"
+			+ (message.own ? " is-own" : "")
+			+ (messageHasMediaPreview(message) ? " has-media-preview" : "");
 		bubble.dataset.bodyText = message.bodyText || "";
 		bubble.dataset.messageId = String(message.messageId || "");
 		bubble.dataset.threadId = String(message.threadId || "");
@@ -4072,7 +4247,8 @@
 		}
 
 		const stack = document.createElement("div");
-		stack.className = "message-stack";
+		const groupHasMediaPreview = group.messages.some(messageHasMediaPreview);
+		stack.className = "message-stack" + (groupHasMediaPreview ? " has-media-preview" : "");
 
 		const meta = document.createElement("div");
 		meta.className = "message-meta";
