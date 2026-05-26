@@ -145,6 +145,10 @@ public:
 	quint64 uiChatAssetTotalQuotaBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
 	unsigned int uiChatAttachmentLimit = 4;
 	bool bChatPreviewFetchEnabled = false;
+	bool bChatPreviewClientAssistEnabled = true;
+	unsigned int uiChatPreviewClientAssistLeaseMs = 30000;
+	unsigned int uiChatPreviewClientAssistFallbackMs = 3500;
+	unsigned int uiChatPreviewClientAssistThumbnailMaxBytes = 512 * 1024;
 	bool bStonksEnabled = true;
 	unsigned int uiStonksTextChannelID = 0;
 	bool bStonksSocialAnnouncementsEnabled = true;
@@ -387,6 +391,20 @@ public:
 
 	QHash< quint64, PendingChatAssetUpload > qhPendingChatAssetUploads;
 	QHash< QString, unsigned int > qhChatPreviewFetchesByHost;
+	struct PendingChatEmbedAssist {
+		quint64 leaseID = 0;
+		unsigned int helperSession = 0;
+		MumbleProto::ChatScope scope = MumbleProto::Channel;
+		unsigned int scopeID = 0;
+		unsigned int threadID = 0;
+		unsigned int messageID = 0;
+		unsigned int permissionChannelID = 0;
+		QString canonicalUrl;
+		QString urlHash;
+		std::chrono::system_clock::time_point expiresAt = {};
+		bool fallbackStarted = false;
+	};
+	QHash< QString, PendingChatEmbedAssist > qhPendingChatEmbedAssists;
 	QTimer *qtChatAssetRetention = nullptr;
 
 	std::vector< Ban > m_bans;
@@ -462,9 +480,16 @@ public:
 							  ChanACL::ACLCache *cache = nullptr);
 	bool canAccessChatAsset(ServerUser *user, unsigned int assetID);
 	void runChatAssetRetentionSweep();
-	void scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageID, MumbleProto::ChatScope scope,
-								unsigned int scopeID, unsigned int permissionChannelID,
+	std::optional< unsigned int > persistChatPreviewAsset(const QByteArray &bytes, const QString &mime,
+														  ::mumble::server::db::ChatAssetKind kind,
+														  unsigned int width, unsigned int height);
+	void scheduleChatEmbedFetch(ServerUser *preferredHelper, unsigned int threadID, unsigned int messageID,
+								MumbleProto::ChatScope scope, unsigned int scopeID,
+								unsigned int permissionChannelID,
 								const ::mumble::server::db::DBChatMessageEmbed &embed);
+	void scheduleServerChatEmbedFetch(unsigned int threadID, unsigned int messageID, MumbleProto::ChatScope scope,
+									  unsigned int scopeID, unsigned int permissionChannelID,
+									  const ::mumble::server::db::DBChatMessageEmbed &embed);
 	void applyChatEmbedFetchResult(unsigned int threadID, unsigned int messageID, MumbleProto::ChatScope scope,
 								   unsigned int scopeID, unsigned int permissionChannelID,
 								   const ::mumble::server::db::DBChatMessageEmbed &embed);

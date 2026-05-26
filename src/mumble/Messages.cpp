@@ -2054,6 +2054,13 @@ void MainWindow::msgChatEmbedState(const MumbleProto::ChatEmbedState &msg) {
 	handlePersistentChatEmbedState(msg);
 }
 
+void MainWindow::msgChatEmbedAssistRequest(const MumbleProto::ChatEmbedAssistRequest &msg) {
+	handleChatEmbedAssistRequest(msg);
+}
+
+void MainWindow::msgChatEmbedAssistResult(const MumbleProto::ChatEmbedAssistResult &) {
+}
+
 void MainWindow::msgChatReactionToggle(const MumbleProto::ChatReactionToggle &) {
 }
 

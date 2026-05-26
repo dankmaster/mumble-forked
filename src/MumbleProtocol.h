@@ -75,7 +75,9 @@
 	PROCESS_MUMBLE_TCP_MESSAGE(WatchTogetherSync, 50)   \
 	PROCESS_MUMBLE_TCP_MESSAGE(StonksRequest, 51)        \
 	PROCESS_MUMBLE_TCP_MESSAGE(StonksAction, 52)         \
-	PROCESS_MUMBLE_TCP_MESSAGE(StonksState, 53)
+	PROCESS_MUMBLE_TCP_MESSAGE(StonksState, 53)          \
+	PROCESS_MUMBLE_TCP_MESSAGE(ChatEmbedAssistRequest, 54) \
+	PROCESS_MUMBLE_TCP_MESSAGE(ChatEmbedAssistResult, 55)
 
 /**
  * "X-macro" for all Mumble Protobuf UDP messages types.

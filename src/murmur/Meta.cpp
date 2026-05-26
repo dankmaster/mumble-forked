@@ -143,6 +143,10 @@ MetaParams::MetaParams() {
 	uiChatAssetTotalQuotaBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
 	uiChatAttachmentLimit      = 4;
 	bChatPreviewFetchEnabled   = false;
+	bChatPreviewClientAssistEnabled           = true;
+	uiChatPreviewClientAssistLeaseMs          = 30000;
+	uiChatPreviewClientAssistFallbackMs       = 3500;
+	uiChatPreviewClientAssistThumbnailMaxBytes = 512 * 1024;
 	bStonksEnabled             = true;
 	uiStonksTextChannelID      = 0;
 	bStonksSocialAnnouncementsEnabled = true;
@@ -401,6 +405,17 @@ void MetaParams::read(QString fname) {
 		typeCheckedFromSettings< unsigned int >("chat_attachment_limit", uiChatAttachmentLimit);
 	bChatPreviewFetchEnabled =
 		typeCheckedFromSettings("chat_preview_fetch_enabled", bChatPreviewFetchEnabled);
+	bChatPreviewClientAssistEnabled =
+		typeCheckedFromSettings("chat_preview_client_assist_enabled", bChatPreviewClientAssistEnabled);
+	uiChatPreviewClientAssistLeaseMs =
+		typeCheckedFromSettings< unsigned int >("chat_preview_client_assist_lease_ms",
+												uiChatPreviewClientAssistLeaseMs);
+	uiChatPreviewClientAssistFallbackMs =
+		typeCheckedFromSettings< unsigned int >("chat_preview_client_assist_fallback_ms",
+												uiChatPreviewClientAssistFallbackMs);
+	uiChatPreviewClientAssistThumbnailMaxBytes =
+		typeCheckedFromSettings< unsigned int >("chat_preview_client_assist_thumbnail_max_bytes",
+												uiChatPreviewClientAssistThumbnailMaxBytes);
 	bStonksEnabled = typeCheckedFromSettings("stonks_enabled", bStonksEnabled);
 	uiStonksTextChannelID =
 		typeCheckedFromSettings< unsigned int >("stonks_text_channel_id", uiStonksTextChannelID);
@@ -496,6 +511,14 @@ void MetaParams::read(QString fname) {
 	qmConfig.insert(QLatin1String("chat_attachment_limit"), QString::number(uiChatAttachmentLimit));
 	qmConfig.insert(QLatin1String("chat_preview_fetch_enabled"),
 					bChatPreviewFetchEnabled ? QLatin1String("true") : QLatin1String("false"));
+	qmConfig.insert(QLatin1String("chat_preview_client_assist_enabled"),
+					bChatPreviewClientAssistEnabled ? QLatin1String("true") : QLatin1String("false"));
+	qmConfig.insert(QLatin1String("chat_preview_client_assist_lease_ms"),
+					QString::number(uiChatPreviewClientAssistLeaseMs));
+	qmConfig.insert(QLatin1String("chat_preview_client_assist_fallback_ms"),
+					QString::number(uiChatPreviewClientAssistFallbackMs));
+	qmConfig.insert(QLatin1String("chat_preview_client_assist_thumbnail_max_bytes"),
+					QString::number(uiChatPreviewClientAssistThumbnailMaxBytes));
 	qmConfig.insert(QLatin1String("stonks_enabled"), bStonksEnabled ? QLatin1String("true") : QLatin1String("false"));
 	qmConfig.insert(QLatin1String("stonks_text_channel_id"), QString::number(uiStonksTextChannelID));
 	qmConfig.insert(QLatin1String("stonks_social_announcements_enabled"),

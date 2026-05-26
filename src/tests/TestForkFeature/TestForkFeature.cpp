@@ -11,11 +11,20 @@ class TestForkFeature : public QObject {
 	Q_OBJECT
 
 private slots:
+	void protocolVersionDefaultsMatchCurrent();
 	void advertisesSupportedFeaturesInVersion();
 	void advertisesSupportedFeaturesInServerConfig();
 	void sanitizesUnknownAndFutureFeatures();
 	void exposesFallbackPolicy();
 };
+
+void TestForkFeature::protocolVersionDefaultsMatchCurrent() {
+	MumbleProto::Version version;
+	MumbleProto::ServerConfig config;
+
+	QCOMPARE(version.fork_extension_protocol_version(), Mumble::ForkFeatures::CURRENT_PROTOCOL_VERSION);
+	QCOMPARE(config.fork_extension_protocol_version(), Mumble::ForkFeatures::CURRENT_PROTOCOL_VERSION);
+}
 
 void TestForkFeature::advertisesSupportedFeaturesInVersion() {
 	MumbleProto::Version version;
@@ -28,6 +37,8 @@ void TestForkFeature::advertisesSupportedFeaturesInVersion() {
 	QVERIFY(Mumble::ForkFeatures::contains(features, MumbleProto::ForkFeatureWatchTogetherRooms));
 	QVERIFY(Mumble::ForkFeatures::contains(features, MumbleProto::ForkFeatureScreenShareSessionPresence));
 	QVERIFY(Mumble::ForkFeatures::contains(features, MumbleProto::ForkFeatureVirtualizedChatPresentation));
+	QVERIFY(Mumble::ForkFeatures::contains(features, MumbleProto::ForkFeatureStonksLedger));
+	QVERIFY(Mumble::ForkFeatures::contains(features, MumbleProto::ForkFeatureClientAssistedLinkPreviews));
 }
 
 void TestForkFeature::advertisesSupportedFeaturesInServerConfig() {
@@ -64,6 +75,9 @@ void TestForkFeature::exposesFallbackPolicy() {
 	QCOMPARE(Mumble::ForkFeatures::fallbackPolicyName(Mumble::ForkFeatures::fallbackPolicy(
 				 MumbleProto::ForkFeatureVirtualizedChatPresentation)),
 			 QStringLiteral("none"));
+	QCOMPARE(Mumble::ForkFeatures::fallbackPolicyName(Mumble::ForkFeatures::fallbackPolicy(
+				 MumbleProto::ForkFeatureClientAssistedLinkPreviews)),
+			 QStringLiteral("server_only"));
 }
 
 QTEST_MAIN(TestForkFeature)

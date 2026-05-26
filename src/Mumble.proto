@@ -39,6 +39,9 @@ enum ForkFeature {
 	// Server-backed social finance ledger with snapshots, follows, and
 	// leaderboard state presented by the Modern client.
 	ForkFeatureStonksLedger = 4;
+	// Server-authoritative link previews where one capable client may assist
+	// with bounded metadata/thumbnail fetching.
+	ForkFeatureClientAssistedLinkPreviews = 5;
 }
 
 message Version {
@@ -73,7 +76,7 @@ message Version {
 	// Fine-grained chat protocol features this endpoint supports.
 	repeated ChatFeature supported_chat_features = 14 [packed = true];
 	// Protocol revision for fork-specific extension features.
-	optional uint32 fork_extension_protocol_version = 15 [default = 1];
+	optional uint32 fork_extension_protocol_version = 15 [default = 2];
 	// Fork-specific extension features this endpoint supports.
 	repeated ForkFeature supported_fork_features = 16 [packed = true];
 }
@@ -713,7 +716,7 @@ message ServerConfig {
 	// Fine-grained persistent chat features enabled by this server build.
 	repeated ChatFeature supported_chat_features = 18 [packed = true];
 	// Protocol revision for fork-specific extension features.
-	optional uint32 fork_extension_protocol_version = 19 [default = 1];
+	optional uint32 fork_extension_protocol_version = 19 [default = 2];
 	// Fork-specific extension features enabled by this server build.
 	repeated ForkFeature supported_fork_features = 20 [packed = true];
 	// Whether the server currently allows the Stonks ledger feature.
@@ -966,6 +969,32 @@ message ChatEmbedState {
 	optional uint32 thread_id = 3;
 	optional uint32 message_id = 4;
 	repeated ChatEmbedRef embeds = 5;
+}
+
+message ChatEmbedAssistRequest {
+	optional ChatScope scope = 1 [default = Channel];
+	optional uint32 scope_id = 2 [default = 0];
+	optional uint32 thread_id = 3;
+	optional uint32 message_id = 4;
+	optional string canonical_url = 5;
+	optional string url_hash = 6;
+	optional uint64 lease_id = 7;
+	optional uint64 lease_expires_at = 8;
+	optional uint32 max_thumbnail_bytes = 9 [default = 524288];
+}
+
+message ChatEmbedAssistResult {
+	optional uint64 lease_id = 1;
+	optional uint32 message_id = 2;
+	optional string canonical_url = 3;
+	optional string url_hash = 4;
+	optional ChatEmbedStatus status = 5 [default = ChatEmbedStatusPending];
+	optional string title = 6;
+	optional string description = 7;
+	optional string site_name = 8;
+	optional bytes thumbnail = 9;
+	optional string thumbnail_mime = 10;
+	optional string error_code = 11;
 }
 
 message ChatReactionToggle {

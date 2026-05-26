@@ -62,6 +62,7 @@
 #include <QtCore/QStringList>
 #include <QtCore/QTime>
 #include <QtCore/QTimeZone>
+#include <QtCore/QTimer>
 #include <QtCore/QUuid>
 #include <QtCore/QtEndian>
 #include <QtGui/QImage>
@@ -1368,6 +1369,28 @@ quint64 randomUploadID(const QHash< quint64, Server::PendingChatAssetUpload > &p
 	return uploadID;
 }
 
+QString chatEmbedAssistKey(unsigned int messageID, const QString &urlHash) {
+	return QStringLiteral("%1:%2").arg(messageID).arg(urlHash);
+}
+
+quint64 randomChatEmbedAssistLeaseID(const QHash< QString, Server::PendingChatEmbedAssist > &pendingAssists) {
+	quint64 leaseID = 0;
+	do {
+		leaseID = QRandomGenerator::global()->generate64();
+	} while (leaseID == 0
+			 || std::any_of(pendingAssists.cbegin(), pendingAssists.cend(),
+							[leaseID](const Server::PendingChatEmbedAssist &assist) {
+								return assist.leaseID == leaseID;
+							}));
+
+	return leaseID;
+}
+
+quint64 toEpochMilliseconds(std::chrono::system_clock::time_point timePoint) {
+	return static_cast< quint64 >(
+		std::chrono::duration_cast< std::chrono::milliseconds >(timePoint.time_since_epoch()).count());
+}
+
 void sendChatAssetState(Server *server, ServerUser *recipient, quint64 uploadID,
 						MumbleProto::ChatAssetTransferState state, const QString &reason = QString(),
 						quint64 acceptedByteSize                                = 0,
@@ -2139,7 +2162,7 @@ void Server::persistAndBroadcastChatMessage(ServerUser *uSource, const QString &
 	if (bChatPreviewFetchEnabled && permissionChannel) {
 		for (const ::msdb::DBChatMessageEmbed &embed : initialEmbeds) {
 			if (embed.status == ::msdb::ChatEmbedStatus::Pending) {
-				scheduleChatEmbedFetch(thread.threadID, storedMessage.messageID, scope, scopeID,
+				scheduleChatEmbedFetch(uSource, thread.threadID, storedMessage.messageID, scope, scopeID,
 									   static_cast< unsigned int >(permissionChannel->iId), embed);
 			}
 		}
@@ -2252,11 +2275,56 @@ void Server::persistAndBroadcastServerChatMessage(const QString &bodyText, Mumbl
 	if (bChatPreviewFetchEnabled && permissionChannel) {
 		for (const ::msdb::DBChatMessageEmbed &embed : initialEmbeds) {
 			if (embed.status == ::msdb::ChatEmbedStatus::Pending) {
-				scheduleChatEmbedFetch(thread.threadID, storedMessage.messageID, scope, scopeID,
+				scheduleChatEmbedFetch(nullptr, thread.threadID, storedMessage.messageID, scope, scopeID,
 									   static_cast< unsigned int >(permissionChannel->iId), embed);
 			}
 		}
 	}
+}
+
+std::optional< unsigned int > Server::persistChatPreviewAsset(const QByteArray &bytes, const QString &mime,
+															  msdb::ChatAssetKind kind, unsigned int width,
+															  unsigned int height) {
+	if (bytes.isEmpty() || mime.trimmed().isEmpty()) {
+		return std::nullopt;
+	}
+	if (uiChatAssetTotalQuotaBytes > 0
+		&& chatAssetStoredBytes() + static_cast< quint64 >(bytes.size()) > uiChatAssetTotalQuotaBytes) {
+		return std::nullopt;
+	}
+
+	QString storageError;
+	if (!ensureChatAssetStorageReady(&storageError)) {
+		return std::nullopt;
+	}
+
+	const QString sha256 = QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+	const QString storageKey = chatAssetStorageKey(0, sha256);
+	const QString objectPath = chatAssetAbsolutePath(storageKey);
+	QDir rootDir;
+	if (!rootDir.mkpath(QFileInfo(objectPath).absolutePath())) {
+		return std::nullopt;
+	}
+	if (!QFile::exists(objectPath)) {
+		QFile objectFile(objectPath);
+		if (!objectFile.open(QIODevice::WriteOnly) || objectFile.write(bytes) != bytes.size()) {
+			return std::nullopt;
+		}
+		objectFile.close();
+	}
+
+	msdb::DBChatAsset asset;
+	asset.serverID       = iServerNum;
+	asset.sha256         = u8(sha256);
+	asset.storageKey     = u8(storageKey);
+	asset.mime           = u8(mime);
+	asset.byteSize       = static_cast< std::uint64_t >(bytes.size());
+	asset.kind           = kind;
+	asset.width          = width;
+	asset.height         = height;
+	asset.retentionClass = msdb::ChatAssetRetentionClass::PreviewCache;
+
+	return m_dbWrapper.addChatAsset(asset).assetID;
 }
 
 void Server::applyChatEmbedFetchResult(unsigned int threadID, unsigned int messageID, MumbleProto::ChatScope scope,
@@ -2270,9 +2338,14 @@ void Server::applyChatEmbedFetchResult(unsigned int threadID, unsigned int messa
 	}
 
 	std::vector<::msdb::DBChatMessageEmbed > embeds = m_dbWrapper.getChatMessageEmbeds(iServerNum, messageID);
+	const QString assistKey = chatEmbedAssistKey(messageID, QString::fromStdString(embed.urlHash));
 	bool replaced                                   = false;
 	for (auto &currentEmbed : embeds) {
 		if (currentEmbed.urlHash == embed.urlHash) {
+			if (currentEmbed.status != ::msdb::ChatEmbedStatus::Pending) {
+				qhPendingChatEmbedAssists.remove(assistKey);
+				return;
+			}
 			currentEmbed = embed;
 			replaced     = true;
 			break;
@@ -2281,6 +2354,7 @@ void Server::applyChatEmbedFetchResult(unsigned int threadID, unsigned int messa
 	if (!replaced) {
 		embeds.push_back(embed);
 	}
+	qhPendingChatEmbedAssists.remove(assistKey);
 
 	m_dbWrapper.setChatMessageEmbeds(iServerNum, messageID, embeds);
 
@@ -2315,52 +2389,125 @@ void Server::applyChatEmbedFetchResult(unsigned int threadID, unsigned int messa
 	}
 }
 
-void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageID, MumbleProto::ChatScope scope,
-									unsigned int scopeID, unsigned int permissionChannelID,
+void Server::scheduleChatEmbedFetch(ServerUser *preferredHelper, unsigned int threadID, unsigned int messageID,
+									MumbleProto::ChatScope scope, unsigned int scopeID,
+									unsigned int permissionChannelID,
 									const ::msdb::DBChatMessageEmbed &initialEmbed) {
+	if (!bChatPreviewClientAssistEnabled) {
+		scheduleServerChatEmbedFetch(threadID, messageID, scope, scopeID, permissionChannelID, initialEmbed);
+		return;
+	}
+
+	const QString canonicalUrl = QString::fromStdString(initialEmbed.canonicalUrl);
+	const QString urlHash      = QString::fromStdString(initialEmbed.urlHash);
+	const QString assistKey    = chatEmbedAssistKey(messageID, urlHash);
+	Channel *permissionChannel = qhChannels.value(permissionChannelID);
+	const std::optional<::msdb::DBChatMessage > message = m_dbWrapper.getChatMessage(iServerNum, messageID);
+	const std::optional<::msdb::DBChatThread > thread =
+		message ? std::optional<::msdb::DBChatThread >(m_dbWrapper.getChatThread(iServerNum, message->threadID))
+				: std::nullopt;
+	if (canonicalUrl.isEmpty() || urlHash.isEmpty() || !permissionChannel || !message || !thread
+		|| message->deletedAt > std::chrono::system_clock::time_point()) {
+		scheduleServerChatEmbedFetch(threadID, messageID, scope, scopeID, permissionChannelID, initialEmbed);
+		return;
+	}
+
+	const auto helperIsEligible = [&](ServerUser *user) {
+		return user && user->sState == ServerUser::Authenticated
+			   && clientSupportsChatFeature(user, MumbleProto::ChatFeatureEmbeds)
+			   && clientSupportsForkFeature(user, MumbleProto::ForkFeatureClientAssistedLinkPreviews)
+			   && canAccessChatMessage(user, *message, *thread, permissionChannel, &acCache);
+	};
+
+	ServerUser *helper = helperIsEligible(preferredHelper) ? preferredHelper : nullptr;
+	if (!helper) {
+		QList< unsigned int > sessions = qhUsers.keys();
+		std::sort(sessions.begin(), sessions.end());
+		for (unsigned int session : sessions) {
+			ServerUser *candidate = qhUsers.value(session);
+			if (helperIsEligible(candidate)) {
+				helper = candidate;
+				break;
+			}
+		}
+	}
+	if (!helper) {
+		scheduleServerChatEmbedFetch(threadID, messageID, scope, scopeID, permissionChannelID, initialEmbed);
+		return;
+	}
+
+	PendingChatEmbedAssist assist;
+	assist.leaseID             = randomChatEmbedAssistLeaseID(qhPendingChatEmbedAssists);
+	assist.helperSession       = helper->uiSession;
+	assist.scope               = scope;
+	assist.scopeID             = scopeID;
+	assist.threadID            = threadID;
+	assist.messageID           = messageID;
+	assist.permissionChannelID = permissionChannelID;
+	assist.canonicalUrl        = canonicalUrl;
+	assist.urlHash             = urlHash;
+	assist.expiresAt           = std::chrono::system_clock::now()
+					   + std::chrono::milliseconds(uiChatPreviewClientAssistLeaseMs);
+	qhPendingChatEmbedAssists.insert(assistKey, assist);
+
+	MumbleProto::ChatEmbedAssistRequest request;
+	request.set_scope(scope);
+	request.set_scope_id(scopeID);
+	request.set_thread_id(threadID);
+	request.set_message_id(messageID);
+	request.set_canonical_url(u8(canonicalUrl));
+	request.set_url_hash(u8(urlHash));
+	request.set_lease_id(assist.leaseID);
+	request.set_lease_expires_at(toEpochMilliseconds(assist.expiresAt));
+	request.set_max_thumbnail_bytes(uiChatPreviewClientAssistThumbnailMaxBytes);
+	sendMessage(helper, request);
+
+	QTimer::singleShot(static_cast< int >(uiChatPreviewClientAssistFallbackMs), this,
+					   [this, assistKey, threadID, messageID, scope, scopeID, permissionChannelID, initialEmbed]() {
+						   bool shouldFallback = false;
+						   {
+							   QMutexLocker qml(&qmCache);
+							   auto assistIt = qhPendingChatEmbedAssists.find(assistKey);
+							   if (assistIt != qhPendingChatEmbedAssists.end()) {
+								   const std::vector<::msdb::DBChatMessageEmbed > embeds =
+									   m_dbWrapper.getChatMessageEmbeds(iServerNum, messageID);
+								   const auto pendingIt = std::find_if(
+									   embeds.cbegin(), embeds.cend(), [&initialEmbed](const ::msdb::DBChatMessageEmbed &embed) {
+										   return embed.urlHash == initialEmbed.urlHash
+												  && embed.status == ::msdb::ChatEmbedStatus::Pending;
+									   });
+								   shouldFallback = pendingIt != embeds.cend();
+								   if (shouldFallback) {
+									   assistIt->fallbackStarted = true;
+								   } else {
+									   qhPendingChatEmbedAssists.erase(assistIt);
+								   }
+							   }
+						   }
+						   if (shouldFallback) {
+							   scheduleServerChatEmbedFetch(threadID, messageID, scope, scopeID, permissionChannelID,
+															initialEmbed);
+						   }
+					   });
+	QTimer::singleShot(static_cast< int >(uiChatPreviewClientAssistLeaseMs), this, [this, assistKey, leaseID = assist.leaseID]() {
+		QMutexLocker qml(&qmCache);
+		auto assistIt = qhPendingChatEmbedAssists.find(assistKey);
+		if (assistIt != qhPendingChatEmbedAssists.end() && assistIt->leaseID == leaseID) {
+			qhPendingChatEmbedAssists.erase(assistIt);
+		}
+	});
+}
+
+void Server::scheduleServerChatEmbedFetch(unsigned int threadID, unsigned int messageID, MumbleProto::ChatScope scope,
+										  unsigned int scopeID, unsigned int permissionChannelID,
+										  const ::msdb::DBChatMessageEmbed &initialEmbed) {
 	if (!qnamNetwork) {
 		return;
 	}
 
-	const auto persistPreviewAsset = [this](const QByteArray &bytes, const QString &mime, msdb::ChatAssetKind kind,
-											unsigned int width,
-											unsigned int height) -> std::optional< unsigned int > {
-		if (bytes.isEmpty() || mime.trimmed().isEmpty()) {
-			return std::nullopt;
-		}
-
-		const QString sha256 = QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
-		const QString storageKey = chatAssetStorageKey(0, sha256);
-		const QString objectPath = chatAssetAbsolutePath(storageKey);
-		QDir rootDir;
-		if (!rootDir.mkpath(QFileInfo(objectPath).absolutePath())) {
-			return std::nullopt;
-		}
-		if (!QFile::exists(objectPath)) {
-			QFile objectFile(objectPath);
-			if (!objectFile.open(QIODevice::WriteOnly) || objectFile.write(bytes) != bytes.size()) {
-				return std::nullopt;
-			}
-			objectFile.close();
-		}
-
-		::msdb::DBChatAsset asset;
-		asset.serverID       = iServerNum;
-		asset.sha256         = u8(sha256);
-		asset.storageKey     = u8(storageKey);
-		asset.mime           = u8(mime);
-		asset.byteSize       = static_cast< std::uint64_t >(bytes.size());
-		asset.kind           = kind;
-		asset.width          = width;
-		asset.height         = height;
-		asset.retentionClass = ::msdb::ChatAssetRetentionClass::PreviewCache;
-
-		return m_dbWrapper.addChatAsset(asset).assetID;
-	};
-
-	const auto persistPreviewImage = [persistPreviewAsset](const SanitizedChatImage &thumbnail) -> std::optional< unsigned int > {
-		return persistPreviewAsset(thumbnail.bytes, thumbnail.mime, msdb::ChatAssetKind::Image, thumbnail.width,
-								   thumbnail.height);
+	const auto persistPreviewImage = [this](const SanitizedChatImage &thumbnail) -> std::optional< unsigned int > {
+		return persistChatPreviewAsset(thumbnail.bytes, thumbnail.mime, msdb::ChatAssetKind::Image, thumbnail.width,
+									   thumbnail.height);
 	};
 
 	const auto finish = [this, threadID, messageID, scope, scopeID,
@@ -2400,8 +2547,8 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
 	auto fetchImage         = std::make_shared< std::function< void(QUrl, unsigned int) > >();
 	auto fetchPlayableMedia = std::make_shared< std::function< void(QUrl, unsigned int, QUrl) > >();
 	*fetchPlayableMedia = [this, fetchPlayableMedia, fetchImage, embedState, pageTitle, pageDescription, pageSiteName,
-						   persistPreviewAsset, finish, updateHostCount](QUrl mediaUrl, unsigned int redirectCount,
-																		 QUrl fallbackImageUrl) mutable {
+						   finish, updateHostCount](QUrl mediaUrl, unsigned int redirectCount,
+													QUrl fallbackImageUrl) mutable {
 		mediaUrl = normalizedPlayableMediaFetchUrl(mediaUrl);
 		const auto fallbackToImage = [&]() -> bool {
 			if (fallbackImageUrl.isValid() && isSafePreviewUrl(fallbackImageUrl) && *fetchImage) {
@@ -2455,7 +2602,7 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
 			}
 		});
 		connect(reply, &QNetworkReply::finished, this,
-				[this, reply, hostKey, fetchPlayableMedia, fetchImage, embedState, persistPreviewAsset, finish, updateHostCount,
+				[this, reply, hostKey, fetchPlayableMedia, fetchImage, embedState, finish, updateHostCount,
 				 pageTitle, pageDescription, pageSiteName, redirectCount, fallbackImageUrl]() mutable {
 					updateHostCount(hostKey, -1);
 					const QVariant redirectTarget = reply->attribute(QNetworkRequest::RedirectionTargetAttribute);
@@ -2499,7 +2646,7 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
 						}
 					}
 
-					const auto assetID = persistPreviewAsset(bytes, mime, playableMediaAssetKind(mime), width, height);
+					const auto assetID = persistChatPreviewAsset(bytes, mime, playableMediaAssetKind(mime), width, height);
 					if (!assetID) {
 						embedState->status    = ::msdb::ChatEmbedStatus::Failed;
 						embedState->errorCode = "media_cache_failed";
@@ -5837,6 +5984,141 @@ void Server::msgChatAssetChunk(ServerUser *, MumbleProto::ChatAssetChunk &) {
 }
 
 void Server::msgChatEmbedState(ServerUser *, MumbleProto::ChatEmbedState &) {
+}
+
+void Server::msgChatEmbedAssistRequest(ServerUser *, MumbleProto::ChatEmbedAssistRequest &) {
+}
+
+void Server::msgChatEmbedAssistResult(ServerUser *uSource, MumbleProto::ChatEmbedAssistResult &msg) {
+	ZoneScoped;
+
+	MSG_SETUP(ServerUser::Authenticated);
+
+	std::optional< msdb::DBChatMessageEmbed > fallbackEmbed;
+	std::optional< msdb::DBChatMessageEmbed > resolvedEmbed;
+	MumbleProto::ChatScope scope = MumbleProto::Channel;
+	unsigned int scopeID         = 0;
+	unsigned int threadID        = 0;
+	unsigned int messageID       = 0;
+	unsigned int permissionChannelID = 0;
+	bool fallbackAlreadyStarted = false;
+
+	{
+		QMutexLocker qml(&qmCache);
+
+		if (!bChatPreviewFetchEnabled || !bChatPreviewClientAssistEnabled || !msg.has_lease_id()
+			|| !msg.has_message_id() || !msg.has_canonical_url() || !msg.has_url_hash()) {
+			return;
+		}
+
+		messageID                  = msg.message_id();
+		const QString canonicalUrl = u8(msg.canonical_url());
+		const QString urlHash      = u8(msg.url_hash());
+		const QString assistKey    = chatEmbedAssistKey(messageID, urlHash);
+		auto assistIt              = qhPendingChatEmbedAssists.find(assistKey);
+		if (assistIt == qhPendingChatEmbedAssists.end()) {
+			return;
+		}
+
+		const PendingChatEmbedAssist assist = assistIt.value();
+		if (assist.leaseID != msg.lease_id() || assist.helperSession != uSource->uiSession
+			|| assist.canonicalUrl != canonicalUrl || assist.urlHash != urlHash) {
+			return;
+		}
+
+		scope               = assist.scope;
+		scopeID             = assist.scopeID;
+		threadID            = assist.threadID;
+		permissionChannelID = assist.permissionChannelID;
+		fallbackAlreadyStarted = assist.fallbackStarted;
+
+		const std::optional< msdb::DBChatMessage > message = m_dbWrapper.getChatMessage(iServerNum, messageID);
+		if (!message || message->deletedAt > std::chrono::system_clock::time_point()) {
+			qhPendingChatEmbedAssists.erase(assistIt);
+			return;
+		}
+
+		const msdb::DBChatThread thread = m_dbWrapper.getChatThread(iServerNum, message->threadID);
+		Channel *permissionChannel      = qhChannels.value(permissionChannelID);
+		if (!permissionChannel || !canAccessChatMessage(uSource, *message, thread, permissionChannel, &acCache)) {
+			qhPendingChatEmbedAssists.erase(assistIt);
+			return;
+		}
+
+		std::vector< msdb::DBChatMessageEmbed > embeds = m_dbWrapper.getChatMessageEmbeds(iServerNum, messageID);
+		auto pendingIt = std::find_if(embeds.begin(), embeds.end(), [&](const msdb::DBChatMessageEmbed &embed) {
+			return embed.urlHash == u8(urlHash) && embed.canonicalUrl == u8(canonicalUrl);
+		});
+		if (pendingIt == embeds.end() || pendingIt->status != msdb::ChatEmbedStatus::Pending) {
+			qhPendingChatEmbedAssists.erase(assistIt);
+			return;
+		}
+
+		const bool leaseExpired = std::chrono::system_clock::now() > assist.expiresAt;
+		const MumbleProto::ChatEmbedStatus status =
+			msg.has_status() ? msg.status() : MumbleProto::ChatEmbedStatusPending;
+		if (leaseExpired || status != MumbleProto::ChatEmbedStatusReady) {
+			if (!fallbackAlreadyStarted) {
+				fallbackEmbed = *pendingIt;
+			}
+		} else {
+			msdb::DBChatMessageEmbed updated = *pendingIt;
+			const QString title              = msg.has_title() ? u8(msg.title()).trimmed().left(512) : QString();
+			const QString description =
+				msg.has_description() ? u8(msg.description()).trimmed().left(4096) : QString();
+			const QString siteName = msg.has_site_name() ? u8(msg.site_name()).trimmed().left(255) : QString();
+			updated.title         = u8(title);
+			updated.description   = u8(description);
+			updated.siteName      = u8(siteName);
+
+			const QByteArray thumbnailBytes = msg.has_thumbnail() ? blob(msg.thumbnail()) : QByteArray();
+			if (!thumbnailBytes.isEmpty()
+				&& thumbnailBytes.size() <= static_cast< int >(uiChatPreviewClientAssistThumbnailMaxBytes)) {
+				const QString thumbnailMime =
+					normalizedMime(msg.has_thumbnail_mime() ? u8(msg.thumbnail_mime()) : QString());
+				if (isSanitizableImageMime(thumbnailMime)) {
+					if (const auto thumbnail = sanitizeChatImageBytes(thumbnailBytes, true); thumbnail) {
+						if (thumbnail->bytes.size()
+							<= static_cast< int >(uiChatPreviewClientAssistThumbnailMaxBytes)) {
+							updated.previewAssetID =
+								persistChatPreviewAsset(thumbnail->bytes, thumbnail->mime, msdb::ChatAssetKind::Image,
+														thumbnail->width, thumbnail->height);
+						}
+					}
+				}
+			}
+
+			if (updated.title.empty() && updated.description.empty() && updated.siteName.empty()
+				&& !updated.previewAssetID) {
+				if (!fallbackAlreadyStarted) {
+					fallbackEmbed = *pendingIt;
+				}
+			} else {
+				const QUrl previewUrl(canonicalUrl);
+				if (updated.title.empty()) {
+					updated.title = u8(previewUrl.host());
+				}
+				if (updated.siteName.empty()) {
+					updated.siteName = u8(previewUrl.host());
+				}
+				updated.status    = msdb::ChatEmbedStatus::Ready;
+				updated.errorCode = "";
+				updated.fetchedAt = std::chrono::system_clock::now();
+				updated.expiresAt = updated.fetchedAt + std::chrono::hours(24 * 7);
+
+				resolvedEmbed = updated;
+			}
+		}
+		qhPendingChatEmbedAssists.erase(assistIt);
+	}
+
+	if (fallbackEmbed) {
+		scheduleServerChatEmbedFetch(threadID, messageID, scope, scopeID, permissionChannelID, *fallbackEmbed);
+		return;
+	}
+	if (resolvedEmbed) {
+		applyChatEmbedFetchResult(threadID, messageID, scope, scopeID, permissionChannelID, *resolvedEmbed);
+	}
 }
 
 void Server::msgChatReactionToggle(ServerUser *uSource, MumbleProto::ChatReactionToggle &msg) {

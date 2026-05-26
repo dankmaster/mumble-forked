@@ -12,7 +12,9 @@ This build supports:
 - server-side object storage on local disk
 - image upload normalization for raster formats, including EXIF-orientation application and metadata stripping by re-encoding
 - server-generated bitmap preview derivatives for uploaded images
-- server-fetched URL preview metadata and bitmap thumbnails for public HTTPS targets
+- server-authoritative URL preview metadata and bitmap thumbnails, with one
+  capable client allowed to assist before Murmur falls back to its own public
+  HTTPS fetch path
 - per-message attachment count limits
 - MIME allowlisting and asset-size / storage-quota enforcement
 - background cleanup of abandoned temporary upload files
@@ -30,7 +32,8 @@ This build does not yet support:
 3. Ensure the Murmur service account can create and write files in the chat asset storage root.
 4. Configure conservative upload and quota limits before exposing the feature broadly.
 5. Back up both the database and the asset storage directory together.
-6. If enabling URL previews, ensure the Murmur host has outbound HTTPS access.
+6. If enabling URL previews, ensure capable clients can fetch public HTTPS
+   metadata and the Murmur host has outbound HTTPS access for fallback.
 
 ## Configuration Keys
 
@@ -47,7 +50,21 @@ These keys can be set globally in `mumble-server.ini` or per virtual server thro
 - `chat_attachment_limit`
   Maximum number of attachment asset references accepted on one persistent chat message.
 - `chat_preview_fetch_enabled`
-  Enables the server-side HTTPS preview fetcher for URL embeds. Leave disabled if you want text-only persistent chat.
+  Master switch for automatic URL embeds. When enabled, client-assisted
+  previews are attempted first by default and Murmur falls back to server-side
+  HTTPS fetching if no usable client result arrives.
+- `chat_preview_client_assist_enabled`
+  Allows Murmur to lease one pending URL preview to one capable client while
+  keeping all persistence and `ChatEmbedState` broadcasts server-authoritative.
+  Set to `false` to restore the server-only preview fetch path.
+- `chat_preview_client_assist_lease_ms`
+  Maximum lifetime of one client-assist lease.
+- `chat_preview_client_assist_fallback_ms`
+  Delay before Murmur starts its own server-side fetch while the assisted embed
+  is still pending.
+- `chat_preview_client_assist_thumbnail_max_bytes`
+  Maximum encoded thumbnail payload accepted from an assisting client before
+  Murmur sanitizes and stores it as preview-cache media.
 
 ## Recommended Baseline
 
@@ -60,6 +77,10 @@ chat_asset_max_bytes=26214400
 chat_asset_total_quota_bytes=2147483648
 chat_attachment_limit=4
 chat_preview_fetch_enabled=false
+chat_preview_client_assist_enabled=true
+chat_preview_client_assist_lease_ms=30000
+chat_preview_client_assist_fallback_ms=3500
+chat_preview_client_assist_thumbnail_max_bytes=524288
 ```
 
 These values mean:
@@ -91,7 +112,10 @@ chat-assets/
 - Asset traffic uses the existing authenticated Mumble TCP connection.
 - No extra HTTP endpoint is required for this phase.
 - Reverse proxies do not need special routing for asset download in this phase.
-- URL previews are fetched by the Murmur process itself over outbound HTTPS when `chat_preview_fetch_enabled=true`.
+- URL previews are client-assisted first when `chat_preview_fetch_enabled=true`
+  and `chat_preview_client_assist_enabled=true`; Murmur still performs bounded
+  outbound HTTPS fetches for fallback and remains the only process that persists
+  preview metadata/assets.
 
 ## Operational Notes
 
@@ -123,7 +147,9 @@ Not accepted inline:
 
 1. Build and deploy the updated `mumble-server`.
 2. Confirm the service account can write to the configured `chat_asset_storage_path`.
-3. If you want server-generated URL previews, set `chat_preview_fetch_enabled=true` and ensure outbound HTTPS is permitted.
+3. If you want URL previews, set `chat_preview_fetch_enabled=true`. Keep
+   `chat_preview_client_assist_enabled=true` for the default hybrid path, or set
+   it to `false` for server-only fetching.
 4. Restart Murmur and confirm startup completes without schema errors.
 5. Send a small attachment from a compatible client and verify:
    - the asset row exists in `chat_assets`

@@ -293,6 +293,20 @@ public:
 		QSet< QString > previewKeys;
 	};
 
+	struct PendingChatEmbedAssist {
+		quint64 leaseID = 0;
+		unsigned int messageID = 0;
+		QString canonicalUrl;
+		QString urlHash;
+		quint64 leaseExpiresAt = 0;
+		unsigned int maxThumbnailBytes = 512 * 1024;
+		QString title;
+		QString description;
+		QString siteName;
+		QImage thumbnailImage;
+		bool completed = false;
+	};
+
 	struct PersistentChatRenderRequest {
 		QString statusMessage;
 		bool scrollToBottom         = true;
@@ -329,6 +343,11 @@ public:
 	void ensurePersistentChatPreviewSiteSnapshot(const QString &previewKey);
 	bool restorePersistentChatPreviewDiskCache(const QString &previewKey);
 	void storePersistentChatPreviewDiskCache(const QString &previewKey);
+	void handleChatEmbedAssistRequest(const MumbleProto::ChatEmbedAssistRequest &msg);
+	void requestChatEmbedAssistPage(quint64 leaseID, const QUrl &url, int redirectCount = 0);
+	void requestChatEmbedAssistImage(quint64 leaseID, const QUrl &url, int redirectCount = 0);
+	void finishChatEmbedAssist(quint64 leaseID, const QString &errorCode = QString());
+	void cancelChatEmbedAssistForState(const MumbleProto::ChatEmbedState &msg);
 	bool applyYahooFinanceQuotePreviewFallback(PersistentChatPreview &preview, const QUrl &url) const;
 	bool requestPersistentChatFinancePreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatXPostPreview(const QString &previewKey, const QUrl &previewUrl);
@@ -695,6 +714,8 @@ protected:
 	std::vector< MumbleProto::ChatMessage > m_persistentChatMessages;
 	QHash< QString, PersistentChatPreview > m_persistentChatPreviews;
 	QHash< unsigned int, PersistentChatAssetDownload > m_persistentChatAssetDownloads;
+	QHash< quint64, PendingChatEmbedAssist > m_pendingChatEmbedAssists;
+	QHash< QString, quint64 > m_pendingChatEmbedAssistByKey;
 	QHash< QString, QString > m_persistentChatInlineDataImageSources;
 	QSet< QString > m_persistentChatLiveMessageKeys;
 	QHash< QString, unsigned int > m_persistentChatLastReadByScope;

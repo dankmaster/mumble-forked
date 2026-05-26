@@ -19,6 +19,8 @@ namespace ForkFeatures {
 				{ MumbleProto::ForkFeatureVirtualizedChatPresentation, 1, FallbackPolicy::None,
 				  "virtualized_chat_presentation" },
 				{ MumbleProto::ForkFeatureStonksLedger, 1, FallbackPolicy::ServerOnly, "stonks_ledger" },
+				{ MumbleProto::ForkFeatureClientAssistedLinkPreviews, 2, FallbackPolicy::ServerOnly,
+				  "client_assisted_link_previews" },
 			};
 			return table;
 		}

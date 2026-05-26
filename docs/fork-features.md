@@ -106,15 +106,21 @@ chat_asset_max_bytes=26214400
 chat_asset_total_quota_bytes=2147483648
 chat_attachment_limit=4
 chat_preview_fetch_enabled=false
+chat_preview_client_assist_enabled=true
+chat_preview_client_assist_lease_ms=30000
+chat_preview_client_assist_fallback_ms=3500
+chat_preview_client_assist_thumbnail_max_bytes=524288
 ```
 
 See [`rich-chat-server.md`](rich-chat-server.md) for rollout and storage notes.
 
 ## Link Preview Cards
 
-The preview system combines server-fetched metadata, client-side fallback
-fetches, provider-specific parsing, safe-target checks, thumbnail caching, and
-WebEngine card rendering.
+The preview system is server-authoritative but client-assisted. Murmur creates
+pending embeds, leases at most one public HTTPS preview attempt to one capable
+client, sanitizes any returned thumbnail bytes, stores metadata/assets itself,
+and falls back to its own server-side fetch path if no usable client result
+arrives quickly.
 
 Current provider families include:
 
@@ -136,6 +142,8 @@ Safety behavior:
 
 - localhost and private-network targets are blocked for automatic previews
 - the server-side preview fetcher is disabled by default with `chat_preview_fetch_enabled=false`
+- when previews are enabled, client assist is enabled by default; set
+  `chat_preview_client_assist_enabled=false` to force server-only fetching
 - TikTok video URLs render with the official iframe player when a post ID is available, while oEmbed still supplies title and thumbnail metadata
 
 ## Fork Feature Gates
@@ -150,6 +158,7 @@ Current fork feature gates include:
 - richer screen-share session presence
 - virtualized chat presentation contracts
 - server-backed Stonks ledger state
+- client-assisted, server-authoritative link previews
 
 See [`fork-extension-architecture.md`](fork-extension-architecture.md).
 

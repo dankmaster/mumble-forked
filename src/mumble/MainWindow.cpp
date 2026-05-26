@@ -244,6 +244,9 @@ constexpr int UserTextureLegacyWidth                = 600;
 constexpr int UserTextureLegacyHeight               = 60;
 constexpr int UserTextureLegacyRgbaSize             = UserTextureLegacyWidth * UserTextureLegacyHeight * 4;
 constexpr int UserTextureMaxImageDimension          = 1024;
+QString chatEmbedAssistLocalKey(unsigned int messageID, const QString &urlHash) {
+	return QStringLiteral("%1:%2").arg(messageID).arg(urlHash);
+}
 #if defined(MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS) && MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS
 constexpr bool ModernShellInlineMp4PlaybackSupported = true;
 #else
@@ -24150,6 +24153,256 @@ void MainWindow::storePersistentChatPreviewDiskCache(const QString &previewKey) 
 	PersistentChatMediaCache::storePreview(previewKey, entry);
 }
 
+void MainWindow::handleChatEmbedAssistRequest(const MumbleProto::ChatEmbedAssistRequest &msg) {
+	if (!Global::get().sh || !Global::get().sh->isRunning() || !Global::get().nam || !msg.has_lease_id()
+		|| !msg.has_message_id() || !msg.has_canonical_url() || !msg.has_url_hash()) {
+		return;
+	}
+
+	const QString canonicalUrl = u8(msg.canonical_url());
+	const QUrl previewUrl(canonicalUrl);
+	const QString urlHash      = u8(msg.url_hash());
+	if (!previewUrl.isValid() || previewUrl.scheme() != QLatin1String("https") || !isSafePreviewTarget(previewUrl)
+		|| canonicalUrl.isEmpty() || urlHash.isEmpty()) {
+		return;
+	}
+
+	const quint64 leaseID = msg.lease_id();
+	const QString assistKey = chatEmbedAssistLocalKey(msg.message_id(), urlHash);
+	if (m_pendingChatEmbedAssists.contains(leaseID) || m_pendingChatEmbedAssistByKey.contains(assistKey)) {
+		return;
+	}
+
+	PendingChatEmbedAssist assist;
+	assist.leaseID           = leaseID;
+	assist.messageID         = msg.message_id();
+	assist.canonicalUrl      = canonicalUrl;
+	assist.urlHash           = urlHash;
+	assist.leaseExpiresAt    = msg.has_lease_expires_at() ? msg.lease_expires_at() : 0;
+	assist.maxThumbnailBytes = msg.has_max_thumbnail_bytes() ? msg.max_thumbnail_bytes() : 512 * 1024;
+	m_pendingChatEmbedAssists.insert(leaseID, assist);
+	m_pendingChatEmbedAssistByKey.insert(assistKey, leaseID);
+
+	const QString previewKey =
+		QString::fromLatin1("embed:%1").arg(QString::fromUtf8(QUrl::toPercentEncoding(canonicalUrl)));
+	if (!m_persistentChatPreviews.contains(previewKey)) {
+		restorePersistentChatPreviewDiskCache(previewKey);
+	}
+	const auto cachedIt = m_persistentChatPreviews.constFind(previewKey);
+	if (cachedIt != m_persistentChatPreviews.cend() && cachedIt->metadataFinished && cachedIt->thumbnailFinished
+		&& (!cachedIt->title.isEmpty() || !cachedIt->description.isEmpty() || !cachedIt->thumbnailImage.isNull())) {
+		PendingChatEmbedAssist &pending = m_pendingChatEmbedAssists[leaseID];
+		pending.title                  = cachedIt->title;
+		pending.description            = cachedIt->description;
+		pending.siteName               = cachedIt->subtitle;
+		pending.thumbnailImage         = cachedIt->thumbnailImage;
+		finishChatEmbedAssist(leaseID);
+		return;
+	}
+
+	requestChatEmbedAssistPage(leaseID, previewUrl, 0);
+}
+
+void MainWindow::requestChatEmbedAssistPage(quint64 leaseID, const QUrl &url, int redirectCount) {
+	if (!m_pendingChatEmbedAssists.contains(leaseID) || redirectCount > 3 || !isSafePreviewTarget(url)
+		|| url.scheme() != QLatin1String("https") || !Global::get().nam) {
+		finishChatEmbedAssist(leaseID, QStringLiteral("client_blocked_target"));
+		return;
+	}
+
+	QNetworkRequest request(url);
+	preparePreviewRequest(request);
+	request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+	QNetworkReply *reply = Global::get().nam->get(request);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this, [this, reply, leaseID, redirectCount]() {
+		const QVariant redirectTarget = reply->attribute(QNetworkRequest::RedirectionTargetAttribute);
+		const QString contentType =
+			reply->header(QNetworkRequest::ContentTypeHeader).toString().section(';', 0, 0).trimmed().toLower();
+		const QByteArray bytes = reply->readAll();
+		const bool success     = reply->error() == QNetworkReply::NoError;
+		const QUrl sourceUrl   = reply->request().url();
+		reply->deleteLater();
+
+		if (!m_pendingChatEmbedAssists.contains(leaseID)) {
+			return;
+		}
+
+		if (redirectTarget.isValid()) {
+			const QUrl redirected = sourceUrl.resolved(redirectTarget.toUrl());
+			if (redirected.scheme() == QLatin1String("https") && isSafePreviewTarget(redirected)) {
+				requestChatEmbedAssistPage(leaseID, redirected, redirectCount + 1);
+			} else {
+				finishChatEmbedAssist(leaseID, QStringLiteral("client_blocked_target"));
+			}
+			return;
+		}
+
+		if (!success || bytes.isEmpty() || !previewContentTypeLooksHtml(contentType)) {
+			finishChatEmbedAssist(leaseID, QStringLiteral("client_fetch_failed"));
+			return;
+		}
+
+		const QString html = QString::fromUtf8(bytes.left(PREVIEW_MAX_PAGE_BYTES));
+		const QHash< QString, QString > metaTags = extractMetaTags(html);
+		PendingChatEmbedAssist &assist = m_pendingChatEmbedAssists[leaseID];
+		assist.title = metaTags.value(QLatin1String("og:title"),
+									  metaTags.value(QLatin1String("twitter:title"), extractHtmlTitle(html)))
+						   .trimmed()
+						   .left(512);
+		assist.description = metaTags
+								 .value(QLatin1String("og:description"),
+										metaTags.value(QLatin1String("twitter:description"),
+													   metaTags.value(QLatin1String("description"))))
+								 .trimmed()
+								 .left(4096);
+		assist.siteName = metaTags.value(QLatin1String("og:site_name"), sourceUrl.host()).trimmed().left(255);
+
+		const QString imageUrlString = previewImageMetaTag(metaTags);
+		const QUrl imageUrl = imageUrlString.isEmpty() ? QUrl() : sourceUrl.resolved(QUrl(imageUrlString));
+		if (imageUrl.isValid() && imageUrl.scheme() == QLatin1String("https") && isSafePreviewTarget(imageUrl)) {
+			requestChatEmbedAssistImage(leaseID, imageUrl, 0);
+		} else {
+			finishChatEmbedAssist(leaseID);
+		}
+	});
+}
+
+void MainWindow::requestChatEmbedAssistImage(quint64 leaseID, const QUrl &url, int redirectCount) {
+	if (!m_pendingChatEmbedAssists.contains(leaseID) || redirectCount > 3 || !isSafePreviewTarget(url)
+		|| url.scheme() != QLatin1String("https") || !Global::get().nam) {
+		finishChatEmbedAssist(leaseID);
+		return;
+	}
+
+	QNetworkRequest request(url);
+	preparePreviewImageRequest(request);
+	request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+	QNetworkReply *reply = Global::get().nam->get(request);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_IMAGE_BYTES);
+	connect(reply, &QNetworkReply::finished, this, [this, reply, leaseID, redirectCount]() {
+		const QVariant redirectTarget = reply->attribute(QNetworkRequest::RedirectionTargetAttribute);
+		const QString contentType =
+			reply->header(QNetworkRequest::ContentTypeHeader).toString().section(';', 0, 0).trimmed().toLower();
+		const QByteArray bytes = reply->readAll();
+		const bool success     = reply->error() == QNetworkReply::NoError;
+		const QUrl sourceUrl   = reply->request().url();
+		reply->deleteLater();
+
+		if (!m_pendingChatEmbedAssists.contains(leaseID)) {
+			return;
+		}
+
+		if (redirectTarget.isValid()) {
+			const QUrl redirected = sourceUrl.resolved(redirectTarget.toUrl());
+			if (redirected.scheme() == QLatin1String("https") && isSafePreviewTarget(redirected)) {
+				requestChatEmbedAssistImage(leaseID, redirected, redirectCount + 1);
+			} else {
+				finishChatEmbedAssist(leaseID);
+			}
+			return;
+		}
+
+		if (success && !bytes.isEmpty()
+			&& (contentType.isEmpty() || contentType.startsWith(QLatin1String("image/")))) {
+			QImage image;
+			if (image.loadFromData(bytes)) {
+				m_pendingChatEmbedAssists[leaseID].thumbnailImage = persistentChatThumbnailImage(image);
+			}
+		}
+		finishChatEmbedAssist(leaseID);
+	});
+}
+
+void MainWindow::finishChatEmbedAssist(quint64 leaseID, const QString &errorCode) {
+	auto it = m_pendingChatEmbedAssists.find(leaseID);
+	if (it == m_pendingChatEmbedAssists.end() || it->completed) {
+		return;
+	}
+
+	PendingChatEmbedAssist assist = it.value();
+	assist.completed             = true;
+	m_pendingChatEmbedAssists.erase(it);
+	m_pendingChatEmbedAssistByKey.remove(chatEmbedAssistLocalKey(assist.messageID, assist.urlHash));
+
+	if (assist.leaseExpiresAt > 0
+		&& static_cast< quint64 >(QDateTime::currentMSecsSinceEpoch()) > assist.leaseExpiresAt) {
+		return;
+	}
+	if (!Global::get().sh || !Global::get().sh->isRunning()) {
+		return;
+	}
+
+	MumbleProto::ChatEmbedAssistResult result;
+	result.set_lease_id(assist.leaseID);
+	result.set_message_id(assist.messageID);
+	result.set_canonical_url(u8(assist.canonicalUrl));
+	result.set_url_hash(u8(assist.urlHash));
+
+	const bool hasContent =
+		!assist.title.isEmpty() || !assist.description.isEmpty() || !assist.siteName.isEmpty()
+		|| !assist.thumbnailImage.isNull();
+	if (!errorCode.isEmpty() || !hasContent) {
+		result.set_status(MumbleProto::ChatEmbedStatusFailed);
+		result.set_error_code(u8(errorCode.isEmpty() ? QStringLiteral("client_no_preview") : errorCode.left(255)));
+		Global::get().sh->sendMessage(result);
+		return;
+	}
+
+	result.set_status(MumbleProto::ChatEmbedStatusReady);
+	result.set_title(u8(assist.title.left(512)));
+	result.set_description(u8(assist.description.left(4096)));
+	result.set_site_name(u8(assist.siteName.left(255)));
+
+	if (!assist.thumbnailImage.isNull() && assist.maxThumbnailBytes > 0) {
+		QByteArray encoded;
+		QBuffer buffer(&encoded);
+		if (buffer.open(QIODevice::WriteOnly)) {
+			QImage image = persistentChatThumbnailImage(assist.thumbnailImage);
+			QImageWriter writer(&buffer, image.hasAlphaChannel() ? "png" : "jpg");
+			writer.setQuality(85);
+			if (writer.write(image) && encoded.size() <= static_cast< int >(assist.maxThumbnailBytes)) {
+				result.set_thumbnail(blob(encoded));
+				result.set_thumbnail_mime(image.hasAlphaChannel() ? "image/png" : "image/jpeg");
+			}
+		}
+	}
+
+	Global::get().sh->sendMessage(result);
+}
+
+void MainWindow::cancelChatEmbedAssistForState(const MumbleProto::ChatEmbedState &msg) {
+	if (!msg.has_message_id() || msg.embeds_size() == 0) {
+		return;
+	}
+
+	QSet< QString > finalCanonicalUrls;
+	for (const MumbleProto::ChatEmbedRef &embed : msg.embeds()) {
+		const MumbleProto::ChatEmbedStatus status =
+			embed.has_status() ? embed.status() : MumbleProto::ChatEmbedStatusPending;
+		if (status != MumbleProto::ChatEmbedStatusPending && embed.has_canonical_url()) {
+			finalCanonicalUrls.insert(u8(embed.canonical_url()));
+		}
+	}
+	if (finalCanonicalUrls.isEmpty()) {
+		return;
+	}
+
+	QList< quint64 > leasesToCancel;
+	for (auto it = m_pendingChatEmbedAssists.cbegin(); it != m_pendingChatEmbedAssists.cend(); ++it) {
+		if (it->messageID == msg.message_id() && finalCanonicalUrls.contains(it->canonicalUrl)) {
+			leasesToCancel.push_back(it.key());
+		}
+	}
+	for (quint64 leaseID : leasesToCancel) {
+		const auto it = m_pendingChatEmbedAssists.find(leaseID);
+		if (it != m_pendingChatEmbedAssists.end()) {
+			m_pendingChatEmbedAssistByKey.remove(chatEmbedAssistLocalKey(it->messageID, it->urlHash));
+			m_pendingChatEmbedAssists.erase(it);
+		}
+	}
+}
+
 bool MainWindow::applyPersistentChatRemotePlayableMedia(PersistentChatPreview &preview, const QUrl &mediaUrl,
 														const QString &suggestedMime) {
 	QUrl normalizedMediaUrl = normalizedRemotePlayableMediaUrl(mediaUrl);
@@ -27748,6 +28001,7 @@ void MainWindow::handlePersistentChatEmbedState(const MumbleProto::ChatEmbedStat
 	if (!msg.has_thread_id() || !msg.has_message_id() || !m_persistentChatController) {
 		return;
 	}
+	cancelChatEmbedAssistForState(msg);
 
 	const MumbleProto::ChatScope scope = msg.has_scope() ? msg.scope() : MumbleProto::Channel;
 	const unsigned int scopeID         = msg.has_scope_id() ? msg.scope_id() : 0;

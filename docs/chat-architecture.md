@@ -170,16 +170,20 @@ Future server settings:
 
 ## Embed / Preview Direction
 
-Phase 2 should support link previews.
+Phase 2 supports link previews through a hybrid path.
 
 Recommendation:
 
-- client-side preview fetch first, not server-side
+- client-assisted preview fetch first, with Murmur remaining authoritative
 
 Reason:
 
-- avoids turning the server into a URL fetcher
-- avoids SSRF and caching complexity in the first pass
+- keeps expensive metadata/thumbnail work off Murmur when a capable client is
+  available
+- keeps SSRF checks, thumbnail sanitizing, asset quota enforcement, persistence,
+  and `ChatEmbedState` broadcasts on the server
+- preserves a server-side fallback when no client can assist or the assist result
+  does not arrive in time
 
 ## Media Direction
 

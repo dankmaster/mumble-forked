@@ -408,6 +408,14 @@ private slots:
 		// We only expect pre-encoded values for integer dB adjustments
 		QVERIFY(encoder.getPreEncodedVolumeAdjustment(VolumeAdjustment(std::pow(2.0f, (MAX + 0.5f) / 6.0f))).empty());
 	}
+
+	void test_tcp_message_ids_include_chat_embed_assist() {
+		using Mumble::Protocol::TCPMessageType;
+
+		QCOMPARE(static_cast< int >(TCPMessageType::StonksState), 53);
+		QCOMPARE(static_cast< int >(TCPMessageType::ChatEmbedAssistRequest), 54);
+		QCOMPARE(static_cast< int >(TCPMessageType::ChatEmbedAssistResult), 55);
+	}
 };
 
 QTEST_MAIN(TestMumbleProtocol)

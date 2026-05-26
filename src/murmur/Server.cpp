@@ -401,6 +401,10 @@ void Server::readParams() {
 	uiChatAssetTotalQuotaBytes         = Meta::mp->uiChatAssetTotalQuotaBytes;
 	uiChatAttachmentLimit              = Meta::mp->uiChatAttachmentLimit;
 	bChatPreviewFetchEnabled           = Meta::mp->bChatPreviewFetchEnabled;
+	bChatPreviewClientAssistEnabled    = Meta::mp->bChatPreviewClientAssistEnabled;
+	uiChatPreviewClientAssistLeaseMs   = Meta::mp->uiChatPreviewClientAssistLeaseMs;
+	uiChatPreviewClientAssistFallbackMs = Meta::mp->uiChatPreviewClientAssistFallbackMs;
+	uiChatPreviewClientAssistThumbnailMaxBytes = Meta::mp->uiChatPreviewClientAssistThumbnailMaxBytes;
 	bStonksEnabled                     = Meta::mp->bStonksEnabled;
 	uiStonksTextChannelID              = Meta::mp->uiStonksTextChannelID;
 	bStonksSocialAnnouncementsEnabled  = Meta::mp->bStonksSocialAnnouncementsEnabled;
@@ -506,6 +510,14 @@ void Server::readParams() {
 	m_dbWrapper.getConfigurationTo(iServerNum, "chat_asset_total_quota_bytes", uiChatAssetTotalQuotaBytes);
 	m_dbWrapper.getConfigurationTo(iServerNum, "chat_attachment_limit", uiChatAttachmentLimit);
 	m_dbWrapper.getConfigurationTo(iServerNum, "chat_preview_fetch_enabled", bChatPreviewFetchEnabled);
+	m_dbWrapper.getConfigurationTo(iServerNum, "chat_preview_client_assist_enabled",
+								   bChatPreviewClientAssistEnabled);
+	m_dbWrapper.getConfigurationTo(iServerNum, "chat_preview_client_assist_lease_ms",
+								   uiChatPreviewClientAssistLeaseMs);
+	m_dbWrapper.getConfigurationTo(iServerNum, "chat_preview_client_assist_fallback_ms",
+								   uiChatPreviewClientAssistFallbackMs);
+	m_dbWrapper.getConfigurationTo(iServerNum, "chat_preview_client_assist_thumbnail_max_bytes",
+								   uiChatPreviewClientAssistThumbnailMaxBytes);
 	m_dbWrapper.getConfigurationTo(iServerNum, "stonks_enabled", bStonksEnabled);
 	m_dbWrapper.getConfigurationTo(iServerNum, "stonks_text_channel_id", uiStonksTextChannelID);
 	m_dbWrapper.getConfigurationTo(iServerNum, "stonks_social_announcements_enabled",
@@ -944,6 +956,18 @@ void Server::setLiveConf(const QString &key, const QString &value) {
 		uiChatAttachmentLimit = i > 0 ? static_cast< unsigned int >(i) : Meta::mp->uiChatAttachmentLimit;
 	} else if (key == "chat_preview_fetch_enabled") {
 		bChatPreviewFetchEnabled = !v.isNull() ? QVariant(v).toBool() : Meta::mp->bChatPreviewFetchEnabled;
+	} else if (key == "chat_preview_client_assist_enabled") {
+		bChatPreviewClientAssistEnabled =
+			!v.isNull() ? QVariant(v).toBool() : Meta::mp->bChatPreviewClientAssistEnabled;
+	} else if (key == "chat_preview_client_assist_lease_ms") {
+		uiChatPreviewClientAssistLeaseMs =
+			i > 0 ? static_cast< unsigned int >(i) : Meta::mp->uiChatPreviewClientAssistLeaseMs;
+	} else if (key == "chat_preview_client_assist_fallback_ms") {
+		uiChatPreviewClientAssistFallbackMs =
+			i > 0 ? static_cast< unsigned int >(i) : Meta::mp->uiChatPreviewClientAssistFallbackMs;
+	} else if (key == "chat_preview_client_assist_thumbnail_max_bytes") {
+		uiChatPreviewClientAssistThumbnailMaxBytes =
+			i > 0 ? static_cast< unsigned int >(i) : Meta::mp->uiChatPreviewClientAssistThumbnailMaxBytes;
 	} else if (key == "stonks_enabled") {
 		const bool enabled = !v.isNull() ? QVariant(v).toBool() : Meta::mp->bStonksEnabled;
 		if (enabled != bStonksEnabled) {

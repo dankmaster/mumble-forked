@@ -10,6 +10,9 @@ minimum protocol revision and a fallback policy in `ForkFeature.cpp`.
   thumbnail sanitizing/downscaling, direct GIF/WebM media caching, cache
   retention, and delivery through the existing `ChatEmbedRef` and
   `ChatAssetRef` model.
+- `ForkFeatureClientAssistedLinkPreviews`: protocol revision 2 client assist
+  for link previews, where Murmur leases one pending embed to one capable
+  client but remains the authority that stores assets and broadcasts state.
 - `ForkFeatureWatchTogetherRooms`: ephemeral, room-scoped synchronized media
   sessions that are independent of screen sharing.
 - `ForkFeatureScreenShareSessionPresence`: richer screen-share state for late
@@ -23,10 +26,13 @@ questions that do not help the current chat/media performance work.
 
 ## Link Previews
 
-The server already has the right foundation: URL extraction, safe target checks,
-bounded network fetches, image sanitizing, thumbnail downscaling, and preview
-assets stored with `PreviewCache` retention. The next hardening pass should keep
-that architecture and tighten it in place:
+The link-preview path is server-authoritative. Murmur creates pending embed
+rows, can lease one URL to one capable client for bounded metadata/thumbnail
+work, and still performs all preview persistence, asset sanitizing, quota
+checks, and `ChatEmbedState` broadcasts itself. If no client response wins the
+race, Murmur falls back to its own bounded public HTTPS fetch path.
+
+The hardening baseline remains:
 
 - re-validate DNS and blocked-address policy after every redirect
 - cap response body, content type, redirect count, and per-host concurrency

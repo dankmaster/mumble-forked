@@ -184,6 +184,10 @@ public:
 	quint64 uiChatAssetTotalQuotaBytes;
 	unsigned int uiChatAttachmentLimit;
 	bool bChatPreviewFetchEnabled;
+	bool bChatPreviewClientAssistEnabled;
+	unsigned int uiChatPreviewClientAssistLeaseMs;
+	unsigned int uiChatPreviewClientAssistFallbackMs;
+	unsigned int uiChatPreviewClientAssistThumbnailMaxBytes;
 	bool bStonksEnabled;
 	unsigned int uiStonksTextChannelID;
 	bool bStonksSocialAnnouncementsEnabled;

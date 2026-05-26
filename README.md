@@ -121,6 +121,10 @@ chat_asset_max_bytes=26214400
 chat_asset_total_quota_bytes=2147483648
 chat_attachment_limit=4
 chat_preview_fetch_enabled=false
+chat_preview_client_assist_enabled=true
+chat_preview_client_assist_lease_ms=30000
+chat_preview_client_assist_fallback_ms=3500
+chat_preview_client_assist_thumbnail_max_bytes=524288
 
 screen_share_enabled=false
 screen_share_relay_url="wss://relay.example.com/mumble-screen"
