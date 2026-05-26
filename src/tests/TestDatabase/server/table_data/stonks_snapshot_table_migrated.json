@@ -1,0 +1,15 @@
+{
+	"v6": {
+		"table_name": "stonks_snapshots",
+		"column_names": [
+			"server_id",
+			"snapshot_id",
+			"user_id",
+			"created_at",
+			"currency",
+			"total_value",
+			"note"
+		],
+		"rows": []
+	}
+}

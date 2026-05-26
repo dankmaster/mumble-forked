@@ -401,6 +401,9 @@ void Server::readParams() {
 	uiChatAssetTotalQuotaBytes         = Meta::mp->uiChatAssetTotalQuotaBytes;
 	uiChatAttachmentLimit              = Meta::mp->uiChatAttachmentLimit;
 	bChatPreviewFetchEnabled           = Meta::mp->bChatPreviewFetchEnabled;
+	bStonksEnabled                     = Meta::mp->bStonksEnabled;
+	uiStonksTextChannelID              = Meta::mp->uiStonksTextChannelID;
+	bStonksSocialAnnouncementsEnabled  = Meta::mp->bStonksSocialAnnouncementsEnabled;
 	iDefaultChan                       = Meta::mp->iDefaultChan;
 	bRememberChan                      = Meta::mp->bRememberChan;
 	iRememberChanDuration              = Meta::mp->iRememberChanDuration;
@@ -503,6 +506,10 @@ void Server::readParams() {
 	m_dbWrapper.getConfigurationTo(iServerNum, "chat_asset_total_quota_bytes", uiChatAssetTotalQuotaBytes);
 	m_dbWrapper.getConfigurationTo(iServerNum, "chat_attachment_limit", uiChatAttachmentLimit);
 	m_dbWrapper.getConfigurationTo(iServerNum, "chat_preview_fetch_enabled", bChatPreviewFetchEnabled);
+	m_dbWrapper.getConfigurationTo(iServerNum, "stonks_enabled", bStonksEnabled);
+	m_dbWrapper.getConfigurationTo(iServerNum, "stonks_text_channel_id", uiStonksTextChannelID);
+	m_dbWrapper.getConfigurationTo(iServerNum, "stonks_social_announcements_enabled",
+								   bStonksSocialAnnouncementsEnabled);
 	uiScreenShareMaxWidth  = Mumble::ScreenShare::sanitizeLimit(uiScreenShareMaxWidth, Meta::mp->uiScreenShareMaxWidth,
                                                                Mumble::ScreenShare::HARD_MAX_WIDTH);
 	uiScreenShareMaxHeight = Mumble::ScreenShare::sanitizeLimit(
@@ -937,6 +944,32 @@ void Server::setLiveConf(const QString &key, const QString &value) {
 		uiChatAttachmentLimit = i > 0 ? static_cast< unsigned int >(i) : Meta::mp->uiChatAttachmentLimit;
 	} else if (key == "chat_preview_fetch_enabled") {
 		bChatPreviewFetchEnabled = !v.isNull() ? QVariant(v).toBool() : Meta::mp->bChatPreviewFetchEnabled;
+	} else if (key == "stonks_enabled") {
+		const bool enabled = !v.isNull() ? QVariant(v).toBool() : Meta::mp->bStonksEnabled;
+		if (enabled != bStonksEnabled) {
+			bStonksEnabled = enabled;
+			MumbleProto::ServerConfig mpsc;
+			mpsc.set_stonks_enabled(bStonksEnabled);
+			sendAll(mpsc);
+		}
+	} else if (key == "stonks_text_channel_id") {
+		const unsigned int channelID =
+			(!v.isNull() && i > 0) ? static_cast< unsigned int >(i) : Meta::mp->uiStonksTextChannelID;
+		if (channelID != uiStonksTextChannelID) {
+			uiStonksTextChannelID = channelID;
+			MumbleProto::ServerConfig mpsc;
+			mpsc.set_stonks_text_channel_id(uiStonksTextChannelID);
+			sendAll(mpsc);
+		}
+	} else if (key == "stonks_social_announcements_enabled") {
+		const bool enabled =
+			!v.isNull() ? QVariant(v).toBool() : Meta::mp->bStonksSocialAnnouncementsEnabled;
+		if (enabled != bStonksSocialAnnouncementsEnabled) {
+			bStonksSocialAnnouncementsEnabled = enabled;
+			MumbleProto::ServerConfig mpsc;
+			mpsc.set_stonks_social_announcements_enabled(bStonksSocialAnnouncementsEnabled);
+			sendAll(mpsc);
+		}
 	} else if (key == "persistentglobalchat") {
 		const bool enabled = !v.isNull() ? QVariant(v).toBool() : false;
 		if (enabled != bPersistentGlobalChatEnabled) {

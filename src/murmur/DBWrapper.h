@@ -16,6 +16,8 @@
 #include "murmur/database/DBChatThread.h"
 #include "murmur/database/DBStonksFollow.h"
 #include "murmur/database/DBStonksScore.h"
+#include "murmur/database/DBStonksSnapshot.h"
+#include "murmur/database/DBStonksSnapshotPosition.h"
 #include "murmur/database/DBTextChannel.h"
 #include "murmur/database/DBLogEntry.h"
 #include "murmur/database/DBUserData.h"
@@ -126,6 +128,22 @@ public:
 	void setStonksFollow(const ::mumble::server::db::DBStonksFollow &follow);
 	void removeStonksFollow(unsigned int serverID, unsigned int followerUserID, unsigned int targetUserID);
 	std::vector< unsigned int > getStonksFollowedUsers(unsigned int serverID, unsigned int followerUserID);
+	::mumble::server::db::DBStonksSnapshot
+		addStonksSnapshot(const ::mumble::server::db::DBStonksSnapshot &snapshot,
+						  const std::vector< ::mumble::server::db::DBStonksSnapshotPosition > &positions);
+	std::optional< ::mumble::server::db::DBStonksSnapshot >
+		getStonksSnapshot(unsigned int serverID, unsigned int snapshotID);
+	std::vector< ::mumble::server::db::DBStonksSnapshot >
+		getStonksSnapshotsForUser(unsigned int serverID, unsigned int userID, unsigned int maxEntries = 50);
+	std::optional< ::mumble::server::db::DBStonksSnapshot >
+		getLatestStonksSnapshotForUser(unsigned int serverID, unsigned int userID);
+	std::optional< ::mumble::server::db::DBStonksSnapshot >
+		getStonksSnapshotAtOrBefore(unsigned int serverID, unsigned int userID,
+									std::chrono::system_clock::time_point latestAt);
+	std::vector< ::mumble::server::db::DBStonksSnapshot >
+		getLatestStonksSnapshotsByUser(unsigned int serverID);
+	std::vector< ::mumble::server::db::DBStonksSnapshotPosition >
+		getStonksSnapshotPositions(unsigned int serverID, unsigned int snapshotID);
 	::mumble::server::db::DBChatMessage
 		addChatMessage(unsigned int serverID, unsigned int threadID, const std::string &bodyText,
 					   ::mumble::server::db::ChatMessageBodyFormat bodyFormat =

@@ -1,0 +1,18 @@
+{
+	"v6": {},
+	"v20": {
+		"table_name": "stonks_snapshot_positions",
+		"column_names": [
+			"server_id",
+			"snapshot_id",
+			"display_order",
+			"symbol",
+			"quantity",
+			"price",
+			"market_value",
+			"currency",
+			"display_name"
+		],
+		"rows": []
+	}
+}

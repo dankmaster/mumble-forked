@@ -121,7 +121,7 @@ Current provider families include:
 - direct images, GIFs, WebM, and common video/audio links
 - YouTube and YouTube Shorts
 - Twitch videos and clips
-- Streamable, Vimeo, Dailymotion, and TikTok oEmbed cards
+- Streamable, Vimeo, Dailymotion, and TikTok video cards
 - Spotify and SoundCloud links
 - X/Twitter, Reddit, Facebook, Instagram, Bluesky, Threads, Patreon, Imgur, and 4chan
 - GitHub repository cards
@@ -136,7 +136,7 @@ Safety behavior:
 
 - localhost and private-network targets are blocked for automatic previews
 - the server-side preview fetcher is disabled by default with `chat_preview_fetch_enabled=false`
-- TikTok is kept oEmbed-only in the current client because the iframe player can show an unhideable cross-origin cookie wall inside Qt WebEngine
+- TikTok video URLs render with the official iframe player when a post ID is available, while oEmbed still supplies title and thumbnail metadata
 
 ## Fork Feature Gates
 
@@ -149,6 +149,7 @@ Current fork feature gates include:
 - room-scoped watch-together sessions
 - richer screen-share session presence
 - virtualized chat presentation contracts
+- server-backed Stonks ledger state
 
 See [`fork-extension-architecture.md`](fork-extension-architecture.md).
 
@@ -178,8 +179,10 @@ Current capabilities:
 - finance cards with provider links and sparkline metadata
 - command parsing for `quote <ticker>` and `quote $ticker`
 - a `#stonks` room command handler scoped to that text channel
-- manual scores, leaderboard windows, follows, and user summary commands
-- server database tables for scores and follows
+- server-backed ledger snapshots with position rows, privacy-filtered state, and leaderboard windows
+- manual score commands as a legacy fallback, plus follows and user summary commands
+- server database tables for scores, follows, snapshots, and snapshot positions
+- Modern Stonks panel for overview, ledger, leaderboard, following, and admin config
 
 Typical commands:
 

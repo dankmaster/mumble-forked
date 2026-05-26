@@ -184,6 +184,9 @@ public:
 	quint64 uiChatAssetTotalQuotaBytes;
 	unsigned int uiChatAttachmentLimit;
 	bool bChatPreviewFetchEnabled;
+	bool bStonksEnabled;
+	unsigned int uiStonksTextChannelID;
+	bool bStonksSocialAnnouncementsEnabled;
 
 	/// The number of seconds to keep rolling stats for per client
 	unsigned int rollingStatsWindow;

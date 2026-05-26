@@ -36,6 +36,9 @@ enum ForkFeature {
 	// media cards. This is advertised so servers and clients can reason about
 	// payload shapes without guessing from release strings.
 	ForkFeatureVirtualizedChatPresentation = 3;
+	// Server-backed social finance ledger with snapshots, follows, and
+	// leaderboard state presented by the Modern client.
+	ForkFeatureStonksLedger = 4;
 }
 
 message Version {
@@ -713,6 +716,12 @@ message ServerConfig {
 	optional uint32 fork_extension_protocol_version = 19 [default = 1];
 	// Fork-specific extension features enabled by this server build.
 	repeated ForkFeature supported_fork_features = 20 [packed = true];
+	// Whether the server currently allows the Stonks ledger feature.
+	optional bool stonks_enabled = 21;
+	// Text channel used for social Stonks announcements.
+	optional uint32 stonks_text_channel_id = 22;
+	// Whether Stonks snapshot updates should post a summary into the Stonks text channel.
+	optional bool stonks_social_announcements_enabled = 23;
 }
 
 // Sent by the server to inform the clients of suggested client configuration
@@ -1082,6 +1091,89 @@ message WatchTogetherSync {
 	optional double playback_rate = 12 [default = 1];
 	optional uint64 updated_at = 13;
 	repeated uint32 participant_sessions = 14 [packed = true];
+}
+
+message StonksPosition {
+	required string symbol = 1;
+	optional double quantity = 2;
+	optional double price = 3;
+	optional double market_value = 4;
+	optional string currency = 5;
+	optional string display_name = 6;
+}
+
+message StonksSnapshot {
+	optional uint32 snapshot_id = 1;
+	optional uint32 user_id = 2;
+	optional string user_name = 3;
+	optional uint64 created_at = 4;
+	optional string currency = 5;
+	optional double total_value = 6;
+	optional string note = 7;
+	repeated StonksPosition positions = 8;
+	optional bool positions_redacted = 9 [default = true];
+}
+
+message StonksLeaderboardRow {
+	optional uint32 rank = 1;
+	optional uint32 user_id = 2;
+	optional string user_name = 3;
+	optional string period = 4;
+	optional double return_percent = 5;
+	optional double start_value = 6;
+	optional double end_value = 7;
+	optional uint64 start_snapshot_at = 8;
+	optional uint64 end_snapshot_at = 9;
+	optional bool followed = 10 [default = false];
+}
+
+message StonksUserRef {
+	optional uint32 user_id = 1;
+	optional string user_name = 2;
+	optional bool followed = 3 [default = false];
+}
+
+message StonksRequest {
+	optional string period = 1 [default = "30d"];
+	optional uint32 user_id = 2;
+	optional bool include_positions = 3 [default = false];
+}
+
+enum StonksActionKind {
+	StonksActionSubmitSnapshot = 0;
+	StonksActionFollow = 1;
+	StonksActionUnfollow = 2;
+	StonksActionConfigure = 3;
+}
+
+message StonksAction {
+	optional StonksActionKind action = 1 [default = StonksActionSubmitSnapshot];
+	optional StonksSnapshot snapshot = 2;
+	optional uint32 target_user_id = 3;
+	optional string target_name = 4;
+	optional bool enabled = 5;
+	optional uint32 text_channel_id = 6;
+	optional bool social_announcements_enabled = 7;
+	optional string period = 8 [default = "30d"];
+}
+
+message StonksState {
+	optional bool supported = 1 [default = true];
+	optional bool enabled = 2 [default = true];
+	optional bool registered = 3 [default = false];
+	optional uint32 self_user_id = 4;
+	optional bool can_admin = 5 [default = false];
+	optional uint32 text_channel_id = 6;
+	optional bool social_announcements_enabled = 7 [default = true];
+	optional string selected_period = 8 [default = "30d"];
+	repeated string periods = 9;
+	repeated StonksSnapshot snapshots = 10;
+	repeated StonksLeaderboardRow leaderboard = 11;
+	repeated StonksUserRef following = 12;
+	repeated StonksUserRef users = 13;
+	repeated TextChannelInfo text_channels = 14;
+	optional string status = 15;
+	optional string error = 16;
 }
 
 message TextChannelInfo {

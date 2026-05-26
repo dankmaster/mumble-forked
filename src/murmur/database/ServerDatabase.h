@@ -40,6 +40,8 @@ namespace server {
 		class ChannelListenerTable;
 		class StonksFollowTable;
 		class StonksScoreTable;
+		class StonksSnapshotTable;
+		class StonksSnapshotPositionTable;
 
 		class ServerDatabase : public ::mumble::db::Database {
 		public:
@@ -48,7 +50,7 @@ namespace server {
 			 * has to be accompanied by increasing this number. A decrease is never allowed!
 			 * Using a schema version like this allows us to be able to create migration paths between schema versions.
 			 */
-			static constexpr unsigned int DB_SCHEMA_VERSION = 19;
+			static constexpr unsigned int DB_SCHEMA_VERSION = 20;
 
 			ServerDatabase(::mumble::db::Backend backend);
 			~ServerDatabase() = default;
@@ -82,6 +84,8 @@ namespace server {
 			ChannelListenerTable &getChannelListenerTable();
 			StonksFollowTable &getStonksFollowTable();
 			StonksScoreTable &getStonksScoreTable();
+			StonksSnapshotTable &getStonksSnapshotTable();
+			StonksSnapshotPositionTable &getStonksSnapshotPositionTable();
 
 		protected:
 			void setupStandardTables() override;

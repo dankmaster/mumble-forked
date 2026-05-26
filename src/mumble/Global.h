@@ -114,6 +114,9 @@ public:
 	unsigned int uiScreenShareMaxHeight;
 	unsigned int uiScreenShareMaxFps;
 	QString qsScreenShareRelayUrl;
+	bool bStonksEnabled;
+	unsigned int uiStonksTextChannelID;
+	bool bStonksSocialAnnouncementsEnabled;
 	unsigned int uiMessageLength;
 	unsigned int uiImageLength;
 	unsigned int uiMaxUsers;

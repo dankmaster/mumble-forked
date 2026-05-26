@@ -20,6 +20,7 @@
 #include "Server.h"
 #include "ServerUser.h"
 #include "StonksCommand.h"
+#include "StonksLedger.h"
 #include "User.h"
 #include "Version.h"
 #include "crypto/CryptState.h"
@@ -30,11 +31,14 @@
 #include "murmur/database/DBChatReadState.h"
 #include "murmur/database/DBStonksFollow.h"
 #include "murmur/database/DBStonksScore.h"
+#include "murmur/database/DBStonksSnapshot.h"
+#include "murmur/database/DBStonksSnapshotPosition.h"
 #include "murmur/database/UserProperty.h"
 
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <cmath>
 #include <functional>
 #include <limits>
 #include <map>
@@ -46,14 +50,17 @@
 
 #include <QtCore/QBuffer>
 #include <QtCore/QCryptographicHash>
+#include <QtCore/QDate>
 #include <QtCore/QDateTime>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QLocale>
 #include <QtCore/QRandomGenerator>
 #include <QtCore/QRegularExpressionMatchIterator>
+#include <QtCore/QSet>
 #include <QtCore/QStack>
 #include <QtCore/QStringList>
+#include <QtCore/QTime>
 #include <QtCore/QTimeZone>
 #include <QtCore/QUuid>
 #include <QtCore/QtEndian>
@@ -73,6 +80,8 @@ namespace msdb = ::mumble::server::db;
 namespace {
 constexpr std::size_t MAX_CHAT_HISTORY_LEGACY_MIRROR_BYTES = 64 * 1024;
 constexpr std::size_t MAX_CHAT_HISTORY_RESPONSE_BYTES      = 2 * 1024 * 1024;
+constexpr int MAX_STONKS_LEDGER_POSITIONS                  = 64;
+constexpr unsigned int MAX_STONKS_LEDGER_SNAPSHOTS         = 50;
 
 std::size_t serializedChatHistoryResponseBytes(const MumbleProto::ChatHistoryResponse &response) {
 #if GOOGLE_PROTOBUF_VERSION >= 3004000
@@ -1540,6 +1549,10 @@ struct StonksLeaderboardEntry {
 	unsigned int userID = 0;
 	QString userName;
 	double score = 0.0;
+	double startValue = 0.0;
+	double endValue = 0.0;
+	std::chrono::system_clock::time_point startSnapshotAt = {};
+	std::chrono::system_clock::time_point endSnapshotAt = {};
 };
 
 bool higherStonksScore(const StonksLeaderboardEntry &lhs, const StonksLeaderboardEntry &rhs) {
@@ -1557,6 +1570,354 @@ QString stonksHelpText() {
 		"`leaderboard 30d` - compare scores\n"
 		"`follow <user>` / `unfollow <user>`\n"
 		"`following` / `me`");
+}
+
+QString normalizedStonksLedgerPeriod(QString period) {
+	period = period.trimmed().toLower();
+	return Mumble::Stonks::ledgerPeriods().contains(period) ? period : QStringLiteral("30d");
+}
+
+QString formatStonksMoney(double value, const QString &currency) {
+	QLocale locale = QLocale::c();
+	return QStringLiteral("%1 %2").arg(currency.trimmed().isEmpty() ? QStringLiteral("USD") : currency.trimmed().toUpper(),
+									   locale.toString(value, 'f', 2));
+}
+
+QString stonksRegisteredDisplayName(Server *server, unsigned int userID) {
+	if (!server) {
+		return QStringLiteral("user %1").arg(userID);
+	}
+
+	const QString name = server->getRegisteredUserName(static_cast< int >(userID)).trimmed();
+	return name.isEmpty() ? QStringLiteral("user %1").arg(userID) : name;
+}
+
+std::chrono::system_clock::time_point stonksCutoffForPeriod(
+	const QString &period, const std::chrono::system_clock::time_point &latestAt) {
+	const QString normalizedPeriod = normalizedStonksLedgerPeriod(period);
+	if (normalizedPeriod == QLatin1String("ytd")) {
+		const qint64 latestEpoch = static_cast< qint64 >(::msdb::toEpochSeconds(latestAt));
+		const QDateTime latestDateTime = QDateTime::fromSecsSinceEpoch(latestEpoch, QTimeZone::UTC);
+		const QDateTime yearStart(QDate(latestDateTime.date().year(), 1, 1), QTime(0, 0), QTimeZone::UTC);
+		return std::chrono::system_clock::time_point(std::chrono::seconds(yearStart.toSecsSinceEpoch()));
+	}
+
+	const std::optional< qint64 > seconds = Mumble::Stonks::periodSeconds(normalizedPeriod);
+	return latestAt - std::chrono::seconds(seconds.value_or(30 * 24 * 60 * 60));
+}
+
+std::optional< unsigned int > resolvedStonksTextChannelID(unsigned int configuredTextChannelID,
+														  const std::vector<::msdb::DBTextChannel > &textChannels) {
+	if (configuredTextChannelID > 0 && containsTextChannelID(textChannels, configuredTextChannelID)) {
+		return configuredTextChannelID;
+	}
+
+	std::vector<::msdb::DBTextChannel > sortedTextChannels = textChannels;
+	std::sort(sortedTextChannels.begin(), sortedTextChannels.end(), sortTextChannelsForPresentation);
+	for (const ::msdb::DBTextChannel &textChannel : sortedTextChannels) {
+		if (isStonksTextChannel(textChannel)) {
+			return textChannel.textChannelID;
+		}
+	}
+
+	return std::nullopt;
+}
+
+void appendStonksTextChannelInfo(MumbleProto::StonksState &state, const ::msdb::DBTextChannel &textChannel) {
+	MumbleProto::TextChannelInfo *protoChannel = state.add_text_channels();
+	protoChannel->set_text_channel_id(textChannel.textChannelID);
+	protoChannel->set_name(textChannel.name);
+	protoChannel->set_description(textChannel.description);
+	protoChannel->set_acl_channel_id(textChannel.aclChannelID);
+	protoChannel->set_position(textChannel.position);
+}
+
+MumbleProto::StonksSnapshot protoStonksSnapshotFromDB(
+	const ::msdb::DBStonksSnapshot &snapshot,
+	const std::vector< ::msdb::DBStonksSnapshotPosition > &positions,
+	const QString &userName,
+	bool includePositions) {
+	MumbleProto::StonksSnapshot protoSnapshot;
+	protoSnapshot.set_snapshot_id(snapshot.snapshotID);
+	protoSnapshot.set_user_id(snapshot.userID);
+	protoSnapshot.set_user_name(u8(userName));
+	protoSnapshot.set_created_at(::msdb::toEpochSeconds(snapshot.createdAt));
+	protoSnapshot.set_currency(snapshot.currency);
+	protoSnapshot.set_total_value(snapshot.totalValue);
+	protoSnapshot.set_note(snapshot.note);
+	protoSnapshot.set_positions_redacted(!includePositions);
+
+	if (includePositions) {
+		for (const ::msdb::DBStonksSnapshotPosition &position : positions) {
+			MumbleProto::StonksPosition *protoPosition = protoSnapshot.add_positions();
+			protoPosition->set_symbol(position.symbol);
+			protoPosition->set_quantity(position.quantity);
+			protoPosition->set_price(position.price);
+			protoPosition->set_market_value(position.marketValue);
+			protoPosition->set_currency(position.currency);
+			protoPosition->set_display_name(position.displayName);
+		}
+	}
+
+	return protoSnapshot;
+}
+
+std::vector< StonksLeaderboardEntry > stonksLedgerLeaderboard(Server *server, const QString &period,
+															  unsigned int maxEntries = 100) {
+	std::vector< StonksLeaderboardEntry > entries;
+	if (!server) {
+		return entries;
+	}
+
+	const QString normalizedPeriod = normalizedStonksLedgerPeriod(period);
+	for (const ::msdb::DBStonksSnapshot &latestSnapshot :
+		 server->m_dbWrapper.getLatestStonksSnapshotsByUser(server->iServerNum)) {
+		if (latestSnapshot.totalValue <= 0.0 || !std::isfinite(latestSnapshot.totalValue)) {
+			continue;
+		}
+
+		const auto cutoff = stonksCutoffForPeriod(normalizedPeriod, latestSnapshot.createdAt);
+		const std::optional< ::msdb::DBStonksSnapshot > baseline =
+			server->m_dbWrapper.getStonksSnapshotAtOrBefore(server->iServerNum, latestSnapshot.userID, cutoff);
+		if (!baseline || baseline->snapshotID == latestSnapshot.snapshotID) {
+			continue;
+		}
+
+		const std::optional< double > percent =
+			Mumble::Stonks::returnPercent(baseline->totalValue, latestSnapshot.totalValue);
+		if (!percent) {
+			continue;
+		}
+
+		StonksLeaderboardEntry entry;
+		entry.userID          = latestSnapshot.userID;
+		entry.userName        = stonksRegisteredDisplayName(server, latestSnapshot.userID);
+		entry.score           = *percent;
+		entry.startValue      = baseline->totalValue;
+		entry.endValue        = latestSnapshot.totalValue;
+		entry.startSnapshotAt = baseline->createdAt;
+		entry.endSnapshotAt   = latestSnapshot.createdAt;
+		entries.push_back(std::move(entry));
+	}
+
+	std::sort(entries.begin(), entries.end(), higherStonksScore);
+	if (entries.size() > maxEntries) {
+		entries.resize(maxEntries);
+	}
+	return entries;
+}
+
+MumbleProto::StonksState buildStonksState(Server *server, ServerUser *user, const QString &period,
+										  const QString &status = QString(), const QString &error = QString(),
+										  std::optional< unsigned int > requestedUserID = std::nullopt) {
+	MumbleProto::StonksState state;
+	if (!server || !user) {
+		state.set_supported(false);
+		state.set_error("No active server session.");
+		return state;
+	}
+
+	const QString normalizedPeriod = normalizedStonksLedgerPeriod(period);
+	const std::optional< unsigned int > selfUserID = persistedUserID(user);
+	const bool registered = selfUserID && *selfUserID > 0
+							&& server->m_dbWrapper.registeredUserExists(server->iServerNum, *selfUserID);
+
+	Channel *rootChannel = server->qhChannels.value(Mumble::ROOT_CHANNEL_ID);
+	const bool canAdmin = rootChannel && server->hasPermission(user, rootChannel, ChanACL::Write);
+
+	state.set_supported(true);
+	state.set_enabled(server->bStonksEnabled);
+	state.set_registered(registered);
+	if (selfUserID) {
+		state.set_self_user_id(*selfUserID);
+	}
+	state.set_can_admin(canAdmin);
+	state.set_social_announcements_enabled(server->bStonksSocialAnnouncementsEnabled);
+	state.set_selected_period(u8(normalizedPeriod));
+	if (!status.trimmed().isEmpty()) {
+		state.set_status(u8(status.trimmed()));
+	}
+	if (!error.trimmed().isEmpty()) {
+		state.set_error(u8(error.trimmed()));
+	}
+
+	for (const QString &supportedPeriod : Mumble::Stonks::ledgerPeriods()) {
+		state.add_periods(u8(supportedPeriod));
+	}
+
+	std::vector<::msdb::DBTextChannel > textChannels = server->m_dbWrapper.getTextChannels(server->iServerNum);
+	std::sort(textChannels.begin(), textChannels.end(), sortTextChannelsForPresentation);
+	const std::optional< unsigned int > stonksTextChannelID =
+		resolvedStonksTextChannelID(server->uiStonksTextChannelID, textChannels);
+	if (stonksTextChannelID) {
+		state.set_text_channel_id(*stonksTextChannelID);
+	}
+	if (canAdmin) {
+		for (const ::msdb::DBTextChannel &textChannel : textChannels) {
+			appendStonksTextChannelInfo(state, textChannel);
+		}
+	}
+
+	QSet< unsigned int > followedUsers;
+	if (registered) {
+		for (unsigned int followedUserID :
+			 server->m_dbWrapper.getStonksFollowedUsers(server->iServerNum, *selfUserID)) {
+			followedUsers.insert(followedUserID);
+
+			MumbleProto::StonksUserRef *followedRef = state.add_following();
+			followedRef->set_user_id(followedUserID);
+			followedRef->set_user_name(u8(stonksRegisteredDisplayName(server, followedUserID)));
+			followedRef->set_followed(true);
+		}
+	}
+
+	std::vector< std::pair< QString, unsigned int > > registeredUsers;
+	for (unsigned int userID : server->m_dbWrapper.getRegisteredUserIDs(server->iServerNum)) {
+		if (userID == 0) {
+			continue;
+		}
+
+		const QString userName = stonksRegisteredDisplayName(server, userID);
+		if (!userName.trimmed().isEmpty()) {
+			registeredUsers.push_back({ userName, userID });
+		}
+	}
+	std::sort(registeredUsers.begin(), registeredUsers.end(), [](const auto &lhs, const auto &rhs) {
+		const int byName = lhs.first.localeAwareCompare(rhs.first);
+		return byName == 0 ? lhs.second < rhs.second : byName < 0;
+	});
+	for (const auto &registeredUser : registeredUsers) {
+		MumbleProto::StonksUserRef *userRef = state.add_users();
+		userRef->set_user_id(registeredUser.second);
+		userRef->set_user_name(u8(registeredUser.first));
+		userRef->set_followed(followedUsers.contains(registeredUser.second));
+	}
+
+	unsigned int rank = 1;
+	for (const StonksLeaderboardEntry &entry : stonksLedgerLeaderboard(server, normalizedPeriod, 100)) {
+		MumbleProto::StonksLeaderboardRow *row = state.add_leaderboard();
+		row->set_rank(rank++);
+		row->set_user_id(entry.userID);
+		row->set_user_name(u8(entry.userName));
+		row->set_period(u8(normalizedPeriod));
+		row->set_return_percent(entry.score);
+		row->set_start_value(entry.startValue);
+		row->set_end_value(entry.endValue);
+		row->set_start_snapshot_at(::msdb::toEpochSeconds(entry.startSnapshotAt));
+		row->set_end_snapshot_at(::msdb::toEpochSeconds(entry.endSnapshotAt));
+		row->set_followed(followedUsers.contains(entry.userID));
+	}
+
+	const std::optional< unsigned int > ledgerUserID =
+		requestedUserID && *requestedUserID > 0 ? requestedUserID : (registered ? selfUserID : std::nullopt);
+	if (ledgerUserID && server->m_dbWrapper.registeredUserExists(server->iServerNum, *ledgerUserID)) {
+		const bool includePositions = registered && selfUserID && *ledgerUserID == *selfUserID;
+		for (const ::msdb::DBStonksSnapshot &snapshot : server->m_dbWrapper.getStonksSnapshotsForUser(
+				 server->iServerNum, *ledgerUserID, MAX_STONKS_LEDGER_SNAPSHOTS)) {
+			std::vector< ::msdb::DBStonksSnapshotPosition > positions;
+			if (includePositions) {
+				positions = server->m_dbWrapper.getStonksSnapshotPositions(server->iServerNum, snapshot.snapshotID);
+			}
+			*state.add_snapshots() = protoStonksSnapshotFromDB(
+				snapshot, positions, stonksRegisteredDisplayName(server, snapshot.userID), includePositions);
+		}
+	}
+
+	return state;
+}
+
+struct ValidatedStonksSnapshot {
+	::msdb::DBStonksSnapshot snapshot;
+	std::vector< ::msdb::DBStonksSnapshotPosition > positions;
+};
+
+QString normalizedStonksCurrency(const QString &currencyText) {
+	const QString currency = currencyText.trimmed().toUpper().left(16);
+	return currency.isEmpty() ? QStringLiteral("USD") : currency;
+}
+
+std::optional< ValidatedStonksSnapshot > validatedStonksSnapshotFromProto(
+	unsigned int serverID, unsigned int userID, const MumbleProto::StonksSnapshot &protoSnapshot, QString *error) {
+	if (protoSnapshot.positions_size() <= 0) {
+		if (error) {
+			*error = QStringLiteral("Add at least one position before submitting a snapshot.");
+		}
+		return std::nullopt;
+	}
+	if (protoSnapshot.positions_size() > MAX_STONKS_LEDGER_POSITIONS) {
+		if (error) {
+			*error = QStringLiteral("Snapshots are capped at %1 positions.").arg(MAX_STONKS_LEDGER_POSITIONS);
+		}
+		return std::nullopt;
+	}
+
+	const QString snapshotCurrency =
+		normalizedStonksCurrency(protoSnapshot.has_currency() ? u8(protoSnapshot.currency()) : QString());
+
+	ValidatedStonksSnapshot validated;
+	validated.snapshot              = ::msdb::DBStonksSnapshot(serverID, 0, userID);
+	validated.snapshot.createdAt    = std::chrono::system_clock::now();
+	validated.snapshot.currency     = u8(snapshotCurrency);
+	validated.snapshot.note         = u8(u8(protoSnapshot.note()).trimmed().left(512));
+	validated.snapshot.totalValue   = 0.0;
+	validated.positions.reserve(static_cast< std::size_t >(protoSnapshot.positions_size()));
+
+	for (int i = 0; i < protoSnapshot.positions_size(); ++i) {
+		const MumbleProto::StonksPosition &protoPosition = protoSnapshot.positions(i);
+		const QString symbol = Mumble::Finance::normalizeTickerSymbol(u8(protoPosition.symbol()));
+		if (symbol.isEmpty()) {
+			if (error) {
+				*error = QStringLiteral("Position %1 has an invalid ticker symbol.").arg(i + 1);
+			}
+			return std::nullopt;
+		}
+
+		const double quantity = protoPosition.has_quantity() ? protoPosition.quantity() : 0.0;
+		const double price    = protoPosition.has_price() ? protoPosition.price() : 0.0;
+		double marketValue    = protoPosition.has_market_value() ? protoPosition.market_value() : quantity * price;
+		if (!std::isfinite(quantity) || !std::isfinite(price) || !std::isfinite(marketValue) || price < 0.0
+			|| marketValue < 0.0 || std::abs(quantity) > 1000000000000.0 || price > 1000000000000.0
+			|| marketValue > 1000000000000000.0) {
+			if (error) {
+				*error = QStringLiteral("Position %1 has invalid numeric values.").arg(i + 1);
+			}
+			return std::nullopt;
+		}
+		if (marketValue == 0.0 && quantity != 0.0 && price != 0.0) {
+			marketValue = quantity * price;
+		}
+
+		const QString currency =
+			normalizedStonksCurrency(protoPosition.has_currency() ? u8(protoPosition.currency()) : snapshotCurrency);
+		::msdb::DBStonksSnapshotPosition position(serverID, 0, static_cast< unsigned int >(validated.positions.size()),
+												  u8(symbol));
+		position.quantity    = quantity;
+		position.price       = price;
+		position.marketValue = marketValue;
+		position.currency    = u8(currency);
+		position.displayName = u8(u8(protoPosition.display_name()).trimmed().left(256));
+		validated.snapshot.totalValue += marketValue;
+		validated.positions.push_back(std::move(position));
+	}
+
+	if (!std::isfinite(validated.snapshot.totalValue) || validated.snapshot.totalValue <= 0.0) {
+		if (error) {
+			*error = QStringLiteral("Snapshot total must be greater than zero.");
+		}
+		return std::nullopt;
+	}
+
+	return validated;
+}
+
+QString stonksSocialAnnouncement(Server *server, const ::msdb::DBStonksSnapshot &snapshot,
+								 std::size_t positionCount) {
+	const QString userName = stonksRegisteredDisplayName(server, snapshot.userID);
+	return QStringLiteral("Stonks: %1 posted a new ledger snapshot at %2 across %3 position%4.")
+		.arg(userName,
+			 formatStonksMoney(snapshot.totalValue, u8(snapshot.currency)),
+			 QString::number(positionCount),
+			 positionCount == 1 ? QString() : QStringLiteral("s"));
 }
 } // namespace
 
@@ -2885,6 +3246,13 @@ void Server::msgAuthenticate(ServerUser *uSource, MumbleProto::Authenticate &msg
 	if (!qsScreenShareRelayUrl.isEmpty()) {
 		mpsc.set_screen_share_relay_url(u8(qsScreenShareRelayUrl));
 	}
+	mpsc.set_stonks_enabled(bStonksEnabled);
+	const std::optional< unsigned int > stonksTextChannelID =
+		resolvedStonksTextChannelID(uiStonksTextChannelID, m_dbWrapper.getTextChannels(iServerNum));
+	if (stonksTextChannelID) {
+		mpsc.set_stonks_text_channel_id(*stonksTextChannelID);
+	}
+	mpsc.set_stonks_social_announcements_enabled(bStonksSocialAnnouncementsEnabled);
 	sendMessage(uSource, mpsc);
 	syncScreenShareStateForUser(uSource);
 	syncWatchTogetherStateForUser(uSource);
@@ -4229,7 +4597,13 @@ void Server::msgChatSend(ServerUser *uSource, MumbleProto::ChatSend &msg) {
 	persistAndBroadcastChatMessage(uSource, bodyText, bodyFormat, scope, scopeID, permissionChannel, dbScope,
 								   attachments, replyToMessageID, legacyFallbackRecipients);
 
-	if (scope == MumbleProto::TextChannel && selectedTextChannel && isStonksTextChannel(*selectedTextChannel)) {
+	const std::optional< unsigned int > stonksCommandTextChannelID =
+		selectedTextChannel
+			? resolvedStonksTextChannelID(uiStonksTextChannelID, m_dbWrapper.getTextChannels(iServerNum))
+			: std::nullopt;
+	if (scope == MumbleProto::TextChannel && selectedTextChannel
+		&& (isStonksTextChannel(*selectedTextChannel)
+			|| (stonksCommandTextChannelID && *stonksCommandTextChannelID == selectedTextChannel->textChannelID))) {
 		const std::optional< Mumble::Stonks::Command > command = Mumble::Stonks::parseCommand(bodyText);
 		if (!command) {
 			return;
@@ -4285,16 +4659,18 @@ void Server::msgChatSend(ServerUser *uSource, MumbleProto::ChatSend &msg) {
 				break;
 			}
 			case Mumble::Stonks::CommandType::Leaderboard: {
-				std::vector< StonksLeaderboardEntry > entries;
-				for (const ::msdb::DBStonksScore &score :
-					 m_dbWrapper.getStonksLeaderboard(iServerNum, u8(command->period), 100)) {
-					entries.push_back(
-						StonksLeaderboardEntry { score.userID, registeredDisplayName(score.userID), score.scorePercent });
+				std::vector< StonksLeaderboardEntry > entries = stonksLedgerLeaderboard(this, command->period, 100);
+				if (entries.empty()) {
+					for (const ::msdb::DBStonksScore &score :
+						 m_dbWrapper.getStonksLeaderboard(iServerNum, u8(command->period), 100)) {
+						entries.push_back(StonksLeaderboardEntry { score.userID, registeredDisplayName(score.userID),
+																	score.scorePercent });
+					}
+					std::sort(entries.begin(), entries.end(), higherStonksScore);
 				}
 
-				std::sort(entries.begin(), entries.end(), higherStonksScore);
 				if (entries.empty()) {
-					respond(QStringLiteral("No stonks scores for %1 yet. Use `score %1 +4.2` to join.")
+					respond(QStringLiteral("No stonks ledger returns for %1 yet. Use the Stonks panel or `score %1 +4.2` to join.")
 								.arg(command->period));
 					break;
 				}
@@ -4324,11 +4700,31 @@ void Server::msgChatSend(ServerUser *uSource, MumbleProto::ChatSend &msg) {
 				}
 
 				lines << QStringLiteral("%1's stonks profile").arg(registeredDisplayName(currentUserID.value()));
+				const std::optional< ::msdb::DBStonksSnapshot > latestSnapshot =
+					m_dbWrapper.getLatestStonksSnapshotForUser(iServerNum, currentUserID.value());
+				if (latestSnapshot) {
+					lines << QStringLiteral("Latest snapshot: %1")
+								 .arg(formatStonksMoney(latestSnapshot->totalValue, u8(latestSnapshot->currency)));
+				}
 				for (const QString &period : { QStringLiteral("1d"), QStringLiteral("7d"), QStringLiteral("30d"),
 											   QStringLiteral("ytd") }) {
+					if (latestSnapshot) {
+						const std::optional< ::msdb::DBStonksSnapshot > baseline =
+							m_dbWrapper.getStonksSnapshotAtOrBefore(
+								iServerNum, currentUserID.value(),
+								stonksCutoffForPeriod(period, latestSnapshot->createdAt));
+						if (baseline && baseline->snapshotID != latestSnapshot->snapshotID) {
+							const std::optional< double > percent =
+								Mumble::Stonks::returnPercent(baseline->totalValue, latestSnapshot->totalValue);
+							if (percent) {
+								lines << QStringLiteral("%1: %2").arg(period, formatStonksPercent(*percent));
+								continue;
+							}
+						}
+					}
 					const auto score = scoresByPeriod.find(period);
 					if (score != scoresByPeriod.cend()) {
-						lines << QStringLiteral("%1: %2").arg(period, formatStonksPercent(score->second));
+						lines << QStringLiteral("%1: %2 manual").arg(period, formatStonksPercent(score->second));
 					}
 				}
 
@@ -4863,6 +5259,186 @@ void Server::msgChatReadStateUpdate(ServerUser *uSource, MumbleProto::ChatReadSt
 	if (persistedReadState) {
 		sendMessage(uSource, protoReadStateFromDB(*persistedReadState, scope, scopeID));
 	}
+}
+
+void Server::msgStonksRequest(ServerUser *uSource, MumbleProto::StonksRequest &msg) {
+	ZoneScoped;
+
+	MSG_SETUP(ServerUser::Authenticated);
+	QMutexLocker qml(&qmCache);
+
+	const QString period = normalizedStonksLedgerPeriod(msg.has_period() ? u8(msg.period()) : QString());
+	if (!clientSupportsForkFeature(uSource, MumbleProto::ForkFeatureStonksLedger)) {
+		MumbleProto::StonksState state;
+		state.set_supported(false);
+		state.set_enabled(false);
+		state.set_selected_period(u8(period));
+		state.set_error("This client did not advertise Stonks ledger support.");
+		sendMessage(uSource, state);
+		return;
+	}
+
+	const std::optional< unsigned int > requestedUserID =
+		msg.has_user_id() && msg.user_id() > 0 ? std::optional< unsigned int >(msg.user_id()) : std::nullopt;
+	sendMessage(uSource, buildStonksState(this, uSource, period, QString(), QString(), requestedUserID));
+}
+
+void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg) {
+	ZoneScoped;
+
+	MSG_SETUP(ServerUser::Authenticated);
+	QMutexLocker qml(&qmCache);
+
+	const QString period = normalizedStonksLedgerPeriod(msg.has_period() ? u8(msg.period()) : QString());
+	const auto sendState = [&](const QString &status = QString(), const QString &error = QString()) {
+		sendMessage(uSource, buildStonksState(this, uSource, period, status, error));
+	};
+
+	if (!clientSupportsForkFeature(uSource, MumbleProto::ForkFeatureStonksLedger)) {
+		MumbleProto::StonksState state;
+		state.set_supported(false);
+		state.set_enabled(false);
+		state.set_selected_period(u8(period));
+		state.set_error("This client did not advertise Stonks ledger support.");
+		sendMessage(uSource, state);
+		return;
+	}
+
+	Channel *rootChannel = qhChannels.value(Mumble::ROOT_CHANNEL_ID);
+	const bool canAdmin  = rootChannel && hasPermission(uSource, rootChannel, ChanACL::Write);
+	const MumbleProto::StonksActionKind action =
+		msg.has_action() ? msg.action() : MumbleProto::StonksActionSubmitSnapshot;
+
+	if (!bStonksEnabled && action != MumbleProto::StonksActionConfigure) {
+		sendState(QString(), tr("Stonks ledger is disabled on this server."));
+		return;
+	}
+
+	const auto selfUserID = persistedUserID(uSource);
+	const bool registered = selfUserID && *selfUserID > 0 && m_dbWrapper.registeredUserExists(iServerNum, *selfUserID);
+	const auto requireRegistered = [&]() -> bool {
+		if (registered) {
+			return true;
+		}
+		sendState(QString(), tr("Register your user before using the Stonks ledger."));
+		return false;
+	};
+
+	switch (action) {
+		case MumbleProto::StonksActionSubmitSnapshot: {
+			if (!requireRegistered()) {
+				return;
+			}
+			if (!msg.has_snapshot()) {
+				sendState(QString(), tr("Snapshot payload is missing."));
+				return;
+			}
+
+			QString error;
+			std::optional< ValidatedStonksSnapshot > validated =
+				validatedStonksSnapshotFromProto(iServerNum, *selfUserID, msg.snapshot(), &error);
+			if (!validated) {
+				sendState(QString(), error);
+				return;
+			}
+
+			const ::msdb::DBStonksSnapshot storedSnapshot =
+				m_dbWrapper.addStonksSnapshot(validated->snapshot, validated->positions);
+
+			if (bStonksSocialAnnouncementsEnabled) {
+				std::vector<::msdb::DBTextChannel > textChannels = m_dbWrapper.getTextChannels(iServerNum);
+				const std::optional< unsigned int > stonksTextChannelID =
+					resolvedStonksTextChannelID(uiStonksTextChannelID, textChannels);
+				if (stonksTextChannelID) {
+					const auto textChannel = m_dbWrapper.getTextChannel(iServerNum, *stonksTextChannelID);
+					Channel *permissionChannel =
+						textChannel ? qhChannels.value(textChannel->aclChannelID) : nullptr;
+					if (permissionChannel) {
+						persistAndBroadcastServerChatMessage(
+							stonksSocialAnnouncement(this, storedSnapshot, validated->positions.size()),
+							MumbleProto::TextChannel, *stonksTextChannelID, permissionChannel,
+							::msdb::ChatThreadScope::TextChannel, QStringLiteral("Stonks"));
+					}
+				}
+			}
+
+			sendState(tr("Snapshot saved."));
+			return;
+		}
+		case MumbleProto::StonksActionFollow:
+		case MumbleProto::StonksActionUnfollow: {
+			if (!requireRegistered()) {
+				return;
+			}
+
+			int targetUserID = msg.has_target_user_id() ? static_cast< int >(msg.target_user_id()) : -1;
+			if (targetUserID <= 0 && msg.has_target_name()) {
+				targetUserID = getRegisteredUserID(u8(msg.target_name()));
+			}
+			if (targetUserID <= 0
+				|| !m_dbWrapper.registeredUserExists(iServerNum, static_cast< unsigned int >(targetUserID))) {
+				sendState(QString(), tr("That registered user could not be found."));
+				return;
+			}
+			const unsigned int targetRegisteredUserID = static_cast< unsigned int >(targetUserID);
+			if (targetRegisteredUserID == *selfUserID) {
+				sendState(QString(), tr("You cannot follow yourself."));
+				return;
+			}
+
+			if (action == MumbleProto::StonksActionFollow) {
+				::msdb::DBStonksFollow follow(iServerNum, *selfUserID, targetRegisteredUserID);
+				follow.createdAt = std::chrono::system_clock::now();
+				m_dbWrapper.setStonksFollow(follow);
+				sendState(tr("Following %1.").arg(stonksRegisteredDisplayName(this, targetRegisteredUserID)));
+			} else {
+				m_dbWrapper.removeStonksFollow(iServerNum, *selfUserID, targetRegisteredUserID);
+				sendState(tr("Unfollowed %1.").arg(stonksRegisteredDisplayName(this, targetRegisteredUserID)));
+			}
+			return;
+		}
+		case MumbleProto::StonksActionConfigure: {
+			if (!canAdmin) {
+				if (rootChannel) {
+					PERM_DENIED(uSource, rootChannel, ChanACL::Write);
+				}
+				sendState(QString(), tr("Root Write permission is required to change Stonks config."));
+				return;
+			}
+
+			const auto applyConfig = [this](const char *key, const QString &value) {
+				if (value.trimmed().isEmpty()) {
+					m_dbWrapper.clearConfiguration(iServerNum, key);
+				} else {
+					m_dbWrapper.setConfiguration(iServerNum, key, u8(value));
+				}
+				setLiveConf(QLatin1String(key), value);
+			};
+			if (msg.has_enabled()) {
+				applyConfig("stonks_enabled", msg.enabled() ? QLatin1String("true") : QLatin1String("false"));
+			}
+			if (msg.has_social_announcements_enabled()) {
+				applyConfig("stonks_social_announcements_enabled",
+							msg.social_announcements_enabled() ? QLatin1String("true") : QLatin1String("false"));
+			}
+			if (msg.has_text_channel_id()) {
+				const unsigned int textChannelID = msg.text_channel_id();
+				if (textChannelID > 0 && !m_dbWrapper.getTextChannel(iServerNum, textChannelID)) {
+					sendState(QString(), tr("Selected Stonks text channel could not be found."));
+					return;
+				}
+				applyConfig("stonks_text_channel_id", textChannelID > 0 ? QString::number(textChannelID) : QString());
+			}
+
+			sendState(tr("Stonks settings saved."));
+			return;
+		}
+	}
+
+	sendState(QString(), tr("Unsupported Stonks action."));
+}
+
+void Server::msgStonksState(ServerUser *, MumbleProto::StonksState &) {
 }
 
 void Server::msgChatAssetUploadInit(ServerUser *uSource, MumbleProto::ChatAssetUploadInit &msg) {
@@ -6595,6 +7171,15 @@ void Server::msgServerConfig(ServerUser *uSource, MumbleProto::ServerConfig &msg
 	}
 	if (msg.has_screen_share_relay_url()) {
 		applyConfig("screen_share_relay_url", u8(msg.screen_share_relay_url()).trimmed());
+	}
+	if (msg.has_stonks_enabled()) {
+		applyBoolConfig("stonks_enabled", msg.stonks_enabled());
+	}
+	if (msg.has_stonks_text_channel_id()) {
+		applyPositiveIntConfig("stonks_text_channel_id", msg.stonks_text_channel_id());
+	}
+	if (msg.has_stonks_social_announcements_enabled()) {
+		applyBoolConfig("stonks_social_announcements_enabled", msg.stonks_social_announcements_enabled());
 	}
 }
 

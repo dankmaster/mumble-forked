@@ -22,6 +22,8 @@ add_library(mumble_server_database STATIC
 	"DBTextChannel.cpp"
 	"DBStonksFollow.cpp"
 	"DBStonksScore.cpp"
+	"DBStonksSnapshot.cpp"
+	"DBStonksSnapshotPosition.cpp"
 	"ACLCompat.cpp"
 
 	# Table implementations
@@ -49,6 +51,8 @@ add_library(mumble_server_database STATIC
 	"TextChannelTable.cpp"
 	"StonksFollowTable.cpp"
 	"StonksScoreTable.cpp"
+	"StonksSnapshotTable.cpp"
+	"StonksSnapshotPositionTable.cpp"
 )
 
 set_property(TARGET mumble_server_database PROPERTY INTERPROCEDURAL_OPTIMIZATION ${lto})

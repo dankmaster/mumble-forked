@@ -4,8 +4,11 @@
 // Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
 #include "StonksCommand.h"
+#include "StonksLedger.h"
 
 #include <QtTest>
+
+#include <limits>
 
 class TestStonksCommand : public QObject {
 	Q_OBJECT
@@ -14,6 +17,7 @@ private slots:
 	void parsesQuoteCommands();
 	void parsesScoreCommands();
 	void parsesLeaderboardAndFollowCommands();
+	void computesLedgerPeriodsAndReturns();
 	void ignoresUnknownText();
 };
 
@@ -66,6 +70,26 @@ void TestStonksCommand::parsesLeaderboardAndFollowCommands() {
 	QVERIFY(follow.has_value());
 	QCOMPARE(static_cast< int >(follow->type), static_cast< int >(Mumble::Stonks::CommandType::Follow));
 	QCOMPARE(follow->targetName, QStringLiteral("dank master"));
+}
+
+void TestStonksCommand::computesLedgerPeriodsAndReturns() {
+	QCOMPARE(Mumble::Stonks::ledgerPeriods(), QStringList({ QStringLiteral("1d"), QStringLiteral("7d"),
+															QStringLiteral("30d"), QStringLiteral("ytd") }));
+	QCOMPARE(Mumble::Stonks::periodSeconds(QStringLiteral("1d")).value(), static_cast< qint64 >(24 * 60 * 60));
+	QCOMPARE(Mumble::Stonks::periodSeconds(QStringLiteral("7d")).value(), static_cast< qint64 >(7 * 24 * 60 * 60));
+	QCOMPARE(Mumble::Stonks::periodSeconds(QStringLiteral("30d")).value(), static_cast< qint64 >(30 * 24 * 60 * 60));
+	QVERIFY(!Mumble::Stonks::periodSeconds(QStringLiteral("90d")).has_value());
+
+	const std::optional< double > positive = Mumble::Stonks::returnPercent(100.0, 115.0);
+	QVERIFY(positive.has_value());
+	QCOMPARE(*positive, 15.0);
+
+	const std::optional< double > negative = Mumble::Stonks::returnPercent(200.0, 150.0);
+	QVERIFY(negative.has_value());
+	QCOMPARE(*negative, -25.0);
+
+	QVERIFY(!Mumble::Stonks::returnPercent(0.0, 150.0).has_value());
+	QVERIFY(!Mumble::Stonks::returnPercent(std::numeric_limits< double >::infinity(), 150.0).has_value());
 }
 
 void TestStonksCommand::ignoresUnknownText() {

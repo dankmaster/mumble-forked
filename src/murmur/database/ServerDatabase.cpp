@@ -26,6 +26,8 @@
 #include "ServerTable.h"
 #include "StonksFollowTable.h"
 #include "StonksScoreTable.h"
+#include "StonksSnapshotPositionTable.h"
+#include "StonksSnapshotTable.h"
 #include "UserProperty.h"
 #include "UserPropertyTable.h"
 #include "UserTable.h"
@@ -68,6 +70,8 @@ namespace server {
 				ChannelListenerTable,
 				StonksFollowTable,
 				StonksScoreTable,
+				StonksSnapshotTable,
+				StonksSnapshotPositionTable,
 			};
 		}
 
@@ -172,6 +176,12 @@ namespace server {
 			id = addTable(std::make_unique< StonksScoreTable >(m_sql, m_backend, getUserTable()));
 			assert(id == TableIndex::StonksScoreTable);
 
+			id = addTable(std::make_unique< StonksSnapshotTable >(m_sql, m_backend, getUserTable()));
+			assert(id == TableIndex::StonksSnapshotTable);
+
+			id = addTable(std::make_unique< StonksSnapshotPositionTable >(m_sql, m_backend, getStonksSnapshotTable()));
+			assert(id == TableIndex::StonksSnapshotPositionTable);
+
 			// Mark id as unused in case the asserts are disabled (e.g. in release builds)
 			(void) id;
 		}
@@ -215,6 +225,8 @@ namespace server {
 		GET_TABLE_IMPL(ChannelListenerTable)
 		GET_TABLE_IMPL(StonksFollowTable)
 		GET_TABLE_IMPL(StonksScoreTable)
+		GET_TABLE_IMPL(StonksSnapshotTable)
+		GET_TABLE_IMPL(StonksSnapshotPositionTable)
 
 #undef GET_TABLE_IMPL
 

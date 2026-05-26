@@ -29,12 +29,16 @@
 #include "database/DBLogEntry.h"
 #include "database/DBStonksFollow.h"
 #include "database/DBStonksScore.h"
+#include "database/DBStonksSnapshot.h"
+#include "database/DBStonksSnapshotPosition.h"
 #include "database/GroupMemberTable.h"
 #include "database/GroupTable.h"
 #include "database/LogTable.h"
 #include "database/ServerDatabase.h"
 #include "database/StonksFollowTable.h"
 #include "database/StonksScoreTable.h"
+#include "database/StonksSnapshotTable.h"
+#include "database/StonksSnapshotPositionTable.h"
 #include "database/ServerTable.h"
 #include "database/UserProperty.h"
 #include "database/UserPropertyTable.h"
@@ -259,6 +263,7 @@ private slots:
 	void channelListenerTable_general();
 	void stonksScoreTable_general();
 	void stonksFollowTable_general();
+	void stonksSnapshotTable_general();
 
 	void database_schema_migration();
 	void database_future_schema_migration();
@@ -1762,6 +1767,110 @@ void ServerDatabaseTest::stonksFollowTable_general() {
 
 	db.getUserTable().removeUser(user2);
 	QVERIFY(table.getFollowedUsers(existingServerID, user1.registeredUserID).empty());
+
+	MUMBLE_END_TEST_CASE
+}
+
+void ServerDatabaseTest::stonksSnapshotTable_general() {
+	MUMBLE_BEGIN_TEST_CASE
+
+	unsigned int existingServerID  = 0;
+	unsigned int nonExistingUserID = 99;
+	::msdb::DBUser user1(existingServerID, 2);
+	::msdb::DBUser user2(existingServerID, 3);
+
+	::msdb::DBChannel rootChannel;
+	rootChannel.channelID = Mumble::ROOT_CHANNEL_ID;
+	rootChannel.parentID  = rootChannel.channelID;
+	rootChannel.serverID  = existingServerID;
+	rootChannel.name      = "Root";
+
+	db.getServerTable().addServer(existingServerID);
+	db.getChannelTable().addChannel(rootChannel);
+	db.getUserTable().addUser(user1, "User 1");
+	db.getUserTable().addUser(user2, "User 2");
+
+	::msdb::StonksSnapshotTable &snapshotTable         = db.getStonksSnapshotTable();
+	::msdb::StonksSnapshotPositionTable &positionTable = db.getStonksSnapshotPositionTable();
+
+	QCOMPARE(snapshotTable.getFreeSnapshotID(existingServerID), static_cast< unsigned int >(1));
+	QVERIFY(!snapshotTable.getLatestSnapshotForUser(existingServerID, user1.registeredUserID));
+
+	::msdb::DBStonksSnapshot user1Old(existingServerID, snapshotTable.getFreeSnapshotID(existingServerID),
+									  user1.registeredUserID);
+	user1Old.createdAt  = std::chrono::system_clock::time_point(std::chrono::seconds(100));
+	user1Old.currency   = "USD";
+	user1Old.totalValue = 1000.0;
+	user1Old.note       = "baseline";
+	snapshotTable.addSnapshot(user1Old);
+
+	::msdb::DBStonksSnapshotPosition oldPosition(existingServerID, user1Old.snapshotID, 0, "RKLB");
+	oldPosition.quantity    = 10.0;
+	oldPosition.price       = 100.0;
+	oldPosition.marketValue = 1000.0;
+	oldPosition.currency    = "USD";
+	oldPosition.displayName = "Rocket Lab";
+	positionTable.setPositions(existingServerID, user1Old.snapshotID, { oldPosition });
+
+	::msdb::DBStonksSnapshot user1Latest(existingServerID, snapshotTable.getFreeSnapshotID(existingServerID),
+										 user1.registeredUserID);
+	user1Latest.createdAt  = std::chrono::system_clock::time_point(std::chrono::seconds(200));
+	user1Latest.currency   = "USD";
+	user1Latest.totalValue = 1150.0;
+	user1Latest.note       = "latest";
+	snapshotTable.addSnapshot(user1Latest);
+
+	::msdb::DBStonksSnapshotPosition latestPosition(existingServerID, user1Latest.snapshotID, 0, "RKLB");
+	latestPosition.quantity    = 10.0;
+	latestPosition.price       = 115.0;
+	latestPosition.marketValue = 1150.0;
+	latestPosition.currency    = "USD";
+	latestPosition.displayName = "Rocket Lab";
+	positionTable.setPositions(existingServerID, user1Latest.snapshotID, { latestPosition });
+
+	std::optional<::msdb::DBStonksSnapshot > latest =
+		snapshotTable.getLatestSnapshotForUser(existingServerID, user1.registeredUserID);
+	QVERIFY(latest);
+	QVERIFY(*latest == user1Latest);
+
+	std::optional<::msdb::DBStonksSnapshot > historical = snapshotTable.getSnapshotAtOrBefore(
+		existingServerID, user1.registeredUserID, std::chrono::system_clock::time_point(std::chrono::seconds(150)));
+	QVERIFY(historical);
+	QVERIFY(*historical == user1Old);
+
+	std::vector<::msdb::DBStonksSnapshot > user1Snapshots =
+		snapshotTable.getSnapshotsForUser(existingServerID, user1.registeredUserID, 10);
+	QVERIFY(user1Snapshots == std::vector<::msdb::DBStonksSnapshot >({ user1Latest, user1Old }));
+
+	std::vector<::msdb::DBStonksSnapshotPosition > latestPositions =
+		positionTable.getPositions(existingServerID, user1Latest.snapshotID);
+	QVERIFY(latestPositions == std::vector<::msdb::DBStonksSnapshotPosition >({ latestPosition }));
+
+	latestPosition.price       = 116.0;
+	latestPosition.marketValue = 1160.0;
+	positionTable.setPositions(existingServerID, user1Latest.snapshotID, { latestPosition });
+	latestPositions = positionTable.getPositions(existingServerID, user1Latest.snapshotID);
+	QVERIFY(latestPositions == std::vector<::msdb::DBStonksSnapshotPosition >({ latestPosition }));
+
+	::msdb::DBStonksSnapshot user2Latest(existingServerID, snapshotTable.getFreeSnapshotID(existingServerID),
+										 user2.registeredUserID);
+	user2Latest.createdAt  = std::chrono::system_clock::time_point(std::chrono::seconds(90));
+	user2Latest.currency   = "USD";
+	user2Latest.totalValue = 500.0;
+	user2Latest.note       = "other user";
+	snapshotTable.addSnapshot(user2Latest);
+
+	std::vector<::msdb::DBStonksSnapshot > latestByUser = snapshotTable.getLatestSnapshotsByUser(existingServerID);
+	std::vector<::msdb::DBStonksSnapshot > expectedLatestByUser = { user1Latest, user2Latest };
+	QCOMPARE(latestByUser.size(), expectedLatestByUser.size());
+	QVERIFY(std::is_permutation(latestByUser.begin(), latestByUser.end(), expectedLatestByUser.begin()));
+
+	::msdb::DBStonksSnapshot invalid(existingServerID, snapshotTable.getFreeSnapshotID(existingServerID),
+									 nonExistingUserID);
+	invalid.createdAt  = std::chrono::system_clock::time_point(std::chrono::seconds(300));
+	invalid.currency   = "USD";
+	invalid.totalValue = 1.0;
+	QVERIFY_THROWS_EXCEPTION(::mdb::AccessException, snapshotTable.addSnapshot(invalid));
 
 	MUMBLE_END_TEST_CASE
 }

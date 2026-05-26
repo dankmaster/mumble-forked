@@ -130,6 +130,9 @@ Global::Global(const QString &qsConfigPath) {
 	uiScreenShareMaxHeight           = 0;
 	uiScreenShareMaxFps              = 0;
 	qsScreenShareRelayUrl.clear();
+	bStonksEnabled                   = true;
+	uiStonksTextChannelID            = 0;
+	bStonksSocialAnnouncementsEnabled = true;
 	uiMessageLength             = 5000;
 	uiImageLength               = 131072;
 	uiMaxUsers                  = 0;

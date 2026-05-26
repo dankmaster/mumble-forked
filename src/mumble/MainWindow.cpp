@@ -20,6 +20,7 @@
 #include "Database.h"
 #include "DeveloperConsole.h"
 #include "FinanceQuote.h"
+#include "ForkFeature.h"
 #include "Log.h"
 #include "MumbleConstants.h"
 #include "Net.h"
@@ -3133,6 +3134,52 @@ std::optional< QString > dailymotionVideoIdFromUrl(const QUrl &url) {
 	return s_videoIdPattern.match(videoId).hasMatch() ? std::optional< QString >(videoId) : std::nullopt;
 }
 
+std::optional< QString > tiktokPostIdFromUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	if (!hostEqualsOrEndsWith(host, QStringLiteral("tiktok.com"))) {
+		return std::nullopt;
+	}
+
+	const QStringList segments = decodedUrlPathSegments(url);
+	static const QRegularExpression s_postIdPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[0-9]{8,32}")));
+	for (int i = 0; i < segments.size(); ++i) {
+		const QString segment = segments.at(i).toLower();
+		if ((segment == QLatin1String("video") || segment == QLatin1String("photo")) && i + 1 < segments.size()) {
+			const QString postId = segments.at(i + 1);
+			if (s_postIdPattern.match(postId).hasMatch()) {
+				return postId;
+			}
+		}
+		if (segment == QLatin1String("player") && i + 2 < segments.size()
+			&& segments.at(i + 1).compare(QLatin1String("v1"), Qt::CaseInsensitive) == 0) {
+			const QString postId = segments.at(i + 2);
+			if (s_postIdPattern.match(postId).hasMatch()) {
+				return postId;
+			}
+		}
+	}
+
+	return std::nullopt;
+}
+
+std::optional< PersistentChatPreviewEmbedTarget > tiktokEmbedTargetFromUrl(const QUrl &url) {
+	const std::optional< QString > postId = tiktokPostIdFromUrl(url);
+	if (!postId) {
+		return std::nullopt;
+	}
+
+	QUrl embedUrl(QStringLiteral("https://www.tiktok.com/player/v1/%1").arg(*postId));
+	QUrlQuery query;
+	query.addQueryItem(QStringLiteral("controls"), QStringLiteral("1"));
+	query.addQueryItem(QStringLiteral("autoplay"), QStringLiteral("0"));
+	query.addQueryItem(QStringLiteral("rel"), QStringLiteral("0"));
+	query.addQueryItem(QStringLiteral("music_info"), QStringLiteral("1"));
+	query.addQueryItem(QStringLiteral("description"), QStringLiteral("1"));
+	embedUrl.setQuery(query);
+	return PersistentChatPreviewEmbedTarget { QStringLiteral("tiktok"), embedUrl, QStringLiteral("short") };
+}
+
 std::optional< SpotifyPreviewTarget > spotifyPreviewTargetFromUrl(const QUrl &url) {
 	const QString host = normalizedPreviewHost(url.host());
 	if (host != QLatin1String("open.spotify.com")) {
@@ -3288,6 +3335,10 @@ std::optional< PersistentChatPreviewEmbedTarget > previewEmbedTargetForUrl(const
 
 	if (const std::optional< PersistentChatPreviewEmbedTarget > facebook = facebookEmbedTargetFromUrl(url); facebook) {
 		return facebook;
+	}
+
+	if (const std::optional< PersistentChatPreviewEmbedTarget > tiktok = tiktokEmbedTargetFromUrl(url); tiktok) {
+		return tiktok;
 	}
 
 	const QString host = normalizedPreviewHost(url.host());
@@ -3579,8 +3630,6 @@ std::optional< PersistentChatPreviewOEmbedTarget > previewOEmbedTargetForUrl(con
 	};
 
 	if (hostEqualsOrEndsWith(host, QStringLiteral("tiktok.com"))) {
-		// Keep TikTok oEmbed-only. The official iframe player can show an unhideable
-		// cross-origin cookie wall inside Qt WebEngine.
 		setUrlEndpoint(QStringLiteral("https://www.tiktok.com/oembed"));
 		siteLabel     = QObject::tr("TikTok");
 		fallbackTitle = QObject::tr("TikTok video");
@@ -4532,25 +4581,83 @@ QVariantList blocketSpecItemsFromHtml(const QString &html) {
 	return items;
 }
 
-QVariantList blocketImageItemsFromHtml(const QString &html) {
+int blocketImageVariantScore(const QString &variant) {
+	const QString normalized = variant.trimmed().toLower();
+	static const QRegularExpression s_widthPattern(QLatin1String("^([0-9]{2,5})w$"),
+												   QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch widthMatch = s_widthPattern.match(normalized);
+	if (widthMatch.hasMatch()) {
+		bool ok          = false;
+		const int width = widthMatch.captured(1).toInt(&ok);
+		return ok ? width : 0;
+	}
+
+	if (normalized == QLatin1String("default")) {
+		return 900;
+	}
+
+	static const QRegularExpression s_croppedPattern(QLatin1String("^([0-9]{2,5})x([0-9]{2,5})c$"),
+													 QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch croppedMatch = s_croppedPattern.match(normalized);
+	if (croppedMatch.hasMatch()) {
+		bool widthOk     = false;
+		bool heightOk    = false;
+		const int width  = croppedMatch.captured(1).toInt(&widthOk);
+		const int height = croppedMatch.captured(2).toInt(&heightOk);
+		if (widthOk && heightOk) {
+			return std::min(width, height) - 10000;
+		}
+	}
+
+	return 0;
+}
+
+QVariantMap blocketImageItem(const QString &url) {
+	QVariantMap item;
+	item.insert(QStringLiteral("url"), url);
+	item.insert(QStringLiteral("mime"), QStringLiteral("image/jpeg"));
+	item.insert(QStringLiteral("kind"), QStringLiteral("image"));
+	return item;
+}
+
+QVariantList blocketImageItemsFromHtml(const QString &html, const QString &listingId) {
 	QVariantList items;
-	QSet< QString > seenUrls;
+	QHash< QString, int > itemIndexes;
+	QHash< QString, int > itemScores;
+	const QString expectedListingId = listingId.trimmed();
+	QString normalizedHtml          = html;
+	normalizedHtml.replace(QLatin1String("\\/"), QLatin1String("/"));
 	static const QRegularExpression s_imagePattern(
-		QLatin1String("https://images\\.blocketcdn\\.se/[^\"'<>\\\\\\s]+"),
+		QLatin1String("https://images\\.blocketcdn\\.se/dynamic/([^/\"'<>\\\\\\s]+)/item/([0-9]+)/([0-9A-Za-z-]+)"),
 		QRegularExpression::CaseInsensitiveOption);
-	QRegularExpressionMatchIterator it = s_imagePattern.globalMatch(html);
-	while (it.hasNext() && items.size() < 10) {
-		QString url = it.next().captured(0).trimmed();
-		url.replace(QLatin1String("\\/"), QLatin1String("/"));
-		if (url.isEmpty() || seenUrls.contains(url)) {
+	QRegularExpressionMatchIterator it = s_imagePattern.globalMatch(normalizedHtml);
+	while (it.hasNext()) {
+		const QRegularExpressionMatch match = it.next();
+		const QString itemId                = match.captured(2).trimmed();
+		const QString imageId               = match.captured(3).trimmed().toLower();
+		if ((!expectedListingId.isEmpty() && itemId != expectedListingId) || imageId.isEmpty()) {
 			continue;
 		}
-		seenUrls.insert(url);
-		QVariantMap item;
-		item.insert(QStringLiteral("url"), url);
-		item.insert(QStringLiteral("mime"), QStringLiteral("image/jpeg"));
-		item.insert(QStringLiteral("kind"), QStringLiteral("image"));
-		items.push_back(item);
+
+		const QString key = QStringLiteral("%1/%2").arg(itemId, imageId);
+		QString url       = match.captured(0).trimmed();
+		const int score   = blocketImageVariantScore(match.captured(1));
+		const auto indexIt = itemIndexes.constFind(key);
+		if (indexIt == itemIndexes.cend()) {
+			if (items.size() >= 10) {
+				continue;
+			}
+			itemIndexes.insert(key, items.size());
+			itemScores.insert(key, score);
+			items.push_back(blocketImageItem(url));
+			continue;
+		}
+
+		const auto scoreIt = itemScores.constFind(key);
+		if (scoreIt == itemScores.cend() || score > *scoreIt) {
+			items[*indexIt] = blocketImageItem(url);
+			itemScores.insert(key, score);
+		}
 	}
 	return items;
 }
@@ -6832,7 +6939,7 @@ QVariantMap swedishPreviewMetadata(const QUrl &url, const QString &title, const 
 		if (!specs.isEmpty()) {
 			metadata.insert(QStringLiteral("listingSpecs"), specs);
 		}
-		const QVariantList images = blocketImageItemsFromHtml(html);
+		const QVariantList images = blocketImageItemsFromHtml(html, blocketListingIdFromUrl(url));
 		if (!images.isEmpty()) {
 			metadata.insert(QStringLiteral("listingImages"), images);
 		}
@@ -10649,6 +10756,12 @@ MainWindow::MainWindow(QWidget *p)
 	qaServerSettings->setToolTip(tr("Change server settings for connected clients"));
 	qaServerSettings->setWhatsThis(tr("This opens server settings that are applied live and saved on the server."));
 	connect(qaServerSettings, &QAction::triggered, this, &MainWindow::on_qaServerSettings_triggered);
+	qaServerOpenStonks = new QAction(tr("Open Stonks"), this);
+	qaServerOpenStonks->setToolTip(tr("Open the Stonks ledger panel"));
+	qaServerOpenStonks->setWhatsThis(tr("This opens the server-backed Stonks ledger and leaderboard."));
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	connect(qaServerOpenStonks, &QAction::triggered, this, &MainWindow::openModernStonksDialog);
+#endif
 	qaCreateTextRoom = new QAction(tr("Create Room..."), this);
 	qaCreateTextRoom->setToolTip(tr("Create a voice room or persistent text room on this server"));
 	qaCreateTextRoom->setWhatsThis(tr("This creates a voice room or named text room and saves it on the server."));
@@ -13741,6 +13854,140 @@ namespace {
 				return std::nullopt;
 		}
 	}
+
+	bool stonksLedgerFeatureSupported() {
+		return Mumble::ForkFeatures::contains(Global::get().qlSupportedForkFeatures,
+											  MumbleProto::ForkFeatureStonksLedger);
+	}
+
+	QVariantMap stonksHeaderState() {
+		QVariantMap state;
+		state.insert(QStringLiteral("supported"), stonksLedgerFeatureSupported());
+		state.insert(QStringLiteral("enabled"), Global::get().bStonksEnabled);
+		state.insert(QStringLiteral("textChannelId"), Global::get().uiStonksTextChannelID);
+		state.insert(QStringLiteral("socialAnnouncementsEnabled"),
+					 Global::get().bStonksSocialAnnouncementsEnabled);
+		return state;
+	}
+
+	QVariantMap stonksPositionDto(const MumbleProto::StonksPosition &position) {
+		QVariantMap dto;
+		dto.insert(QStringLiteral("symbol"), u8(position.symbol()));
+		dto.insert(QStringLiteral("quantity"), position.has_quantity() ? position.quantity() : 0.0);
+		dto.insert(QStringLiteral("price"), position.has_price() ? position.price() : 0.0);
+		dto.insert(QStringLiteral("marketValue"), position.has_market_value() ? position.market_value() : 0.0);
+		dto.insert(QStringLiteral("currency"), position.has_currency() ? u8(position.currency()) : QStringLiteral("USD"));
+		dto.insert(QStringLiteral("displayName"), position.has_display_name() ? u8(position.display_name()) : QString());
+		return dto;
+	}
+
+	QVariantMap stonksSnapshotDto(const MumbleProto::StonksSnapshot &snapshot) {
+		QVariantMap dto;
+		dto.insert(QStringLiteral("snapshotId"), snapshot.has_snapshot_id() ? snapshot.snapshot_id() : 0u);
+		dto.insert(QStringLiteral("userId"), snapshot.has_user_id() ? snapshot.user_id() : 0u);
+		dto.insert(QStringLiteral("userName"), snapshot.has_user_name() ? u8(snapshot.user_name()) : QString());
+		dto.insert(QStringLiteral("createdAt"),
+				   snapshot.has_created_at() ? QVariant::fromValue< qulonglong >(snapshot.created_at()) : QVariant());
+		dto.insert(QStringLiteral("currency"), snapshot.has_currency() ? u8(snapshot.currency()) : QStringLiteral("USD"));
+		dto.insert(QStringLiteral("totalValue"), snapshot.has_total_value() ? snapshot.total_value() : 0.0);
+		dto.insert(QStringLiteral("note"), snapshot.has_note() ? u8(snapshot.note()) : QString());
+		dto.insert(QStringLiteral("positionsRedacted"),
+				   snapshot.has_positions_redacted() ? snapshot.positions_redacted() : true);
+
+		QVariantList positions;
+		for (int i = 0; i < snapshot.positions_size(); ++i) {
+			positions.push_back(stonksPositionDto(snapshot.positions(i)));
+		}
+		dto.insert(QStringLiteral("positions"), positions);
+		return dto;
+	}
+
+	QVariantMap stonksLeaderboardRowDto(const MumbleProto::StonksLeaderboardRow &row) {
+		QVariantMap dto;
+		dto.insert(QStringLiteral("rank"), row.has_rank() ? row.rank() : 0u);
+		dto.insert(QStringLiteral("userId"), row.has_user_id() ? row.user_id() : 0u);
+		dto.insert(QStringLiteral("userName"), row.has_user_name() ? u8(row.user_name()) : QString());
+		dto.insert(QStringLiteral("period"), row.has_period() ? u8(row.period()) : QStringLiteral("30d"));
+		dto.insert(QStringLiteral("returnPercent"), row.has_return_percent() ? row.return_percent() : 0.0);
+		dto.insert(QStringLiteral("startValue"), row.has_start_value() ? row.start_value() : 0.0);
+		dto.insert(QStringLiteral("endValue"), row.has_end_value() ? row.end_value() : 0.0);
+		dto.insert(QStringLiteral("startSnapshotAt"),
+				   row.has_start_snapshot_at() ? QVariant::fromValue< qulonglong >(row.start_snapshot_at()) : QVariant());
+		dto.insert(QStringLiteral("endSnapshotAt"),
+				   row.has_end_snapshot_at() ? QVariant::fromValue< qulonglong >(row.end_snapshot_at()) : QVariant());
+		dto.insert(QStringLiteral("followed"), row.has_followed() && row.followed());
+		return dto;
+	}
+
+	QVariantMap stonksUserRefDto(const MumbleProto::StonksUserRef &user) {
+		QVariantMap dto;
+		dto.insert(QStringLiteral("userId"), user.has_user_id() ? user.user_id() : 0u);
+		dto.insert(QStringLiteral("userName"), user.has_user_name() ? u8(user.user_name()) : QString());
+		dto.insert(QStringLiteral("followed"), user.has_followed() && user.followed());
+		return dto;
+	}
+
+	QVariantMap stonksTextChannelDto(const MumbleProto::TextChannelInfo &channel) {
+		QVariantMap dto;
+		dto.insert(QStringLiteral("textChannelId"), channel.has_text_channel_id() ? channel.text_channel_id() : 0u);
+		dto.insert(QStringLiteral("name"), channel.has_name() ? u8(channel.name()) : QString());
+		dto.insert(QStringLiteral("description"), channel.has_description() ? u8(channel.description()) : QString());
+		dto.insert(QStringLiteral("aclChannelId"), channel.has_acl_channel_id() ? channel.acl_channel_id() : 0u);
+		dto.insert(QStringLiteral("position"), channel.has_position() ? channel.position() : 0u);
+		return dto;
+	}
+
+	QVariantMap stonksStateDto(const MumbleProto::StonksState &state) {
+		QVariantMap dto;
+		dto.insert(QStringLiteral("supported"), state.supported());
+		dto.insert(QStringLiteral("enabled"), state.enabled());
+		dto.insert(QStringLiteral("registered"), state.registered());
+		dto.insert(QStringLiteral("selfUserId"), state.has_self_user_id() ? state.self_user_id() : 0u);
+		dto.insert(QStringLiteral("canAdmin"), state.can_admin());
+		dto.insert(QStringLiteral("textChannelId"), state.has_text_channel_id() ? state.text_channel_id() : 0u);
+		dto.insert(QStringLiteral("socialAnnouncementsEnabled"), state.social_announcements_enabled());
+		dto.insert(QStringLiteral("selectedPeriod"),
+				   state.has_selected_period() ? u8(state.selected_period()) : QStringLiteral("30d"));
+		dto.insert(QStringLiteral("status"), state.has_status() ? u8(state.status()) : QString());
+		dto.insert(QStringLiteral("error"), state.has_error() ? u8(state.error()) : QString());
+
+		QVariantList periods;
+		for (int i = 0; i < state.periods_size(); ++i) {
+			periods.push_back(u8(state.periods(i)));
+		}
+		dto.insert(QStringLiteral("periods"), periods);
+
+		QVariantList snapshots;
+		for (int i = 0; i < state.snapshots_size(); ++i) {
+			snapshots.push_back(stonksSnapshotDto(state.snapshots(i)));
+		}
+		dto.insert(QStringLiteral("snapshots"), snapshots);
+
+		QVariantList leaderboard;
+		for (int i = 0; i < state.leaderboard_size(); ++i) {
+			leaderboard.push_back(stonksLeaderboardRowDto(state.leaderboard(i)));
+		}
+		dto.insert(QStringLiteral("leaderboard"), leaderboard);
+
+		QVariantList following;
+		for (int i = 0; i < state.following_size(); ++i) {
+			following.push_back(stonksUserRefDto(state.following(i)));
+		}
+		dto.insert(QStringLiteral("following"), following);
+
+		QVariantList users;
+		for (int i = 0; i < state.users_size(); ++i) {
+			users.push_back(stonksUserRefDto(state.users(i)));
+		}
+		dto.insert(QStringLiteral("users"), users);
+
+		QVariantList textChannels;
+		for (int i = 0; i < state.text_channels_size(); ++i) {
+			textChannels.push_back(stonksTextChannelDto(state.text_channels(i)));
+		}
+		dto.insert(QStringLiteral("textChannels"), textChannels);
+		return dto;
+	}
 } // namespace
 
 void MainWindow::publishModernDialogState(const QVariantMap &state) {
@@ -14054,6 +14301,142 @@ void MainWindow::openModernGenericDialog(const QVariantMap &dialog) {
 	}
 
 	publishModernDialogState(m_modernDialogController->openGenericDialog(dialog));
+}
+
+QVariantMap MainWindow::buildModernStonksDialog() const {
+	QVariantMap state = m_stonksState;
+	if (state.isEmpty()) {
+		state = stonksHeaderState();
+		state.insert(QStringLiteral("registered"), false);
+		state.insert(QStringLiteral("canAdmin"), false);
+		state.insert(QStringLiteral("selectedPeriod"),
+					 m_stonksSelectedPeriod.trimmed().isEmpty() ? QStringLiteral("30d") : m_stonksSelectedPeriod);
+		state.insert(QStringLiteral("periods"), QVariantList { QStringLiteral("1d"), QStringLiteral("7d"),
+															  QStringLiteral("30d"), QStringLiteral("ytd") });
+		state.insert(QStringLiteral("snapshots"), QVariantList());
+		state.insert(QStringLiteral("leaderboard"), QVariantList());
+		state.insert(QStringLiteral("following"), QVariantList());
+		state.insert(QStringLiteral("users"), QVariantList());
+		state.insert(QStringLiteral("textChannels"), QVariantList());
+	}
+	state.insert(QStringLiteral("feature"), stonksHeaderState());
+
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("stonks"), QStringLiteral("stonks"), tr("Stonks"),
+		tr("Ledger snapshots, leaderboard, following, and server settings."),
+		QVariantList(), QVariantList(), QStringLiteral("close"), QSize(1120, 760));
+	dialog.insert(QStringLiteral("stonks"), state);
+	dialog.insert(QStringLiteral("tone"), QStringLiteral("wide"));
+	return dialog;
+}
+
+void MainWindow::requestStonksState(const QString &period) {
+	const QString selectedPeriod = period.trimmed().isEmpty()
+									   ? (m_stonksSelectedPeriod.trimmed().isEmpty() ? QStringLiteral("30d")
+																					: m_stonksSelectedPeriod)
+									   : period.trimmed().toLower();
+	m_stonksSelectedPeriod = selectedPeriod;
+	if (!Global::get().sh || !Global::get().sh->isRunning()) {
+		return;
+	}
+
+	MumbleProto::StonksRequest request;
+	request.set_period(u8(selectedPeriod));
+	request.set_include_positions(true);
+	Global::get().sh->sendMessage(request);
+}
+
+void MainWindow::openModernStonksDialog() {
+	if (!usesModernShell()) {
+		applyShellLayout();
+	}
+
+	if (!stonksLedgerFeatureSupported()) {
+		m_stonksState = stonksHeaderState();
+		m_stonksState.insert(QStringLiteral("registered"), false);
+		m_stonksState.insert(QStringLiteral("canAdmin"), false);
+		m_stonksState.insert(QStringLiteral("selectedPeriod"), QStringLiteral("30d"));
+		m_stonksState.insert(QStringLiteral("error"), tr("This server has not advertised Stonks ledger support."));
+	} else {
+		requestStonksState(m_stonksSelectedPeriod);
+	}
+	openModernGenericDialog(buildModernStonksDialog());
+}
+
+void MainWindow::handleStonksState(const MumbleProto::StonksState &state) {
+	m_stonksState          = stonksStateDto(state);
+	m_stonksSelectedPeriod = m_stonksState.value(QStringLiteral("selectedPeriod"), QStringLiteral("30d")).toString();
+	if (usesModernShell() && m_modernDialogController
+		&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
+		openModernGenericDialog(buildModernStonksDialog());
+	}
+	queueModernShellSnapshotSync();
+}
+
+bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const QVariantMap &payload) {
+	if (!Global::get().sh || !Global::get().sh->isRunning()) {
+		return true;
+	}
+
+	const QString action = actionID.trimmed();
+	if (action == QLatin1String("register")) {
+		handleModernShellLegacyDialogAction(QStringLiteral("self.register"));
+		return true;
+	}
+	if (action == QLatin1String("refresh")) {
+		requestStonksState(m_stonksSelectedPeriod);
+		return true;
+	}
+	if (action == QLatin1String("selectPeriod")) {
+		requestStonksState(payload.value(QStringLiteral("period")).toString());
+		return true;
+	}
+
+	MumbleProto::StonksAction message;
+	message.set_period(u8(m_stonksSelectedPeriod.trimmed().isEmpty() ? QStringLiteral("30d") : m_stonksSelectedPeriod));
+	if (action == QLatin1String("submitSnapshot")) {
+		message.set_action(MumbleProto::StonksActionSubmitSnapshot);
+		MumbleProto::StonksSnapshot *snapshot = message.mutable_snapshot();
+		snapshot->set_currency(u8(payload.value(QStringLiteral("currency"), QStringLiteral("USD")).toString()));
+		snapshot->set_note(u8(payload.value(QStringLiteral("note")).toString()));
+		const QVariantList positions = payload.value(QStringLiteral("positions")).toList();
+		for (const QVariant &positionValue : positions) {
+			const QVariantMap positionMap = positionValue.toMap();
+			MumbleProto::StonksPosition *position = snapshot->add_positions();
+			position->set_symbol(u8(positionMap.value(QStringLiteral("symbol")).toString()));
+			position->set_quantity(positionMap.value(QStringLiteral("quantity")).toDouble());
+			position->set_price(positionMap.value(QStringLiteral("price")).toDouble());
+			position->set_market_value(positionMap.value(QStringLiteral("marketValue")).toDouble());
+			position->set_currency(u8(positionMap.value(QStringLiteral("currency"), QStringLiteral("USD")).toString()));
+			position->set_display_name(u8(positionMap.value(QStringLiteral("displayName")).toString()));
+		}
+		Global::get().sh->sendMessage(message);
+		return true;
+	}
+	if (action == QLatin1String("follow") || action == QLatin1String("unfollow")) {
+		message.set_action(action == QLatin1String("follow") ? MumbleProto::StonksActionFollow
+															 : MumbleProto::StonksActionUnfollow);
+		const unsigned int targetUserID = payload.value(QStringLiteral("userId")).toUInt();
+		if (targetUserID > 0) {
+			message.set_target_user_id(targetUserID);
+		} else {
+			message.set_target_name(u8(payload.value(QStringLiteral("userName")).toString()));
+		}
+		Global::get().sh->sendMessage(message);
+		return true;
+	}
+	if (action == QLatin1String("configure")) {
+		message.set_action(MumbleProto::StonksActionConfigure);
+		message.set_enabled(payload.value(QStringLiteral("enabled"), Global::get().bStonksEnabled).toBool());
+		message.set_text_channel_id(payload.value(QStringLiteral("textChannelId")).toUInt());
+		message.set_social_announcements_enabled(
+			payload.value(QStringLiteral("socialAnnouncementsEnabled"),
+						  Global::get().bStonksSocialAnnouncementsEnabled).toBool());
+		Global::get().sh->sendMessage(message);
+		return true;
+	}
+
+	return false;
 }
 
 void MainWindow::openModernServerInformationDialog() {
@@ -15743,6 +16126,10 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 	if (action == QLatin1String("server.settings")) {
 		return false;
 	}
+	if (action == QLatin1String("server.stonks")) {
+		openModernStonksDialog();
+		return true;
+	}
 	if (action == QLatin1String("server.information")) {
 		openModernServerInformationDialog();
 		return true;
@@ -15929,6 +16316,11 @@ void MainWindow::handleModernDialogOpen(const QString &dialogID, const QVariantM
 		openModernSettingsDialog(context.value(QStringLiteral("page")).toString());
 		return;
 	}
+
+	if (normalizedDialog == QLatin1String("stonks")) {
+		openModernStonksDialog();
+		return;
+	}
 }
 
 void MainWindow::handleModernDialogClose(const QString &dialogID) {
@@ -15977,6 +16369,10 @@ void MainWindow::handleModernDialogAction(const QString &dialogID, const QString
 										 : tr("Unable to clear the local chat media cache."));
 		}
 		publishModernDialogState(m_modernDialogController->state());
+		return;
+	}
+
+	if (dialogID == QLatin1String("stonks") && handleModernStonksDialogAction(actionID, payload)) {
 		return;
 	}
 
@@ -16360,6 +16756,8 @@ ModernShellMenuSerializer::ActionDefinition
 				assignTone(QStringLiteral("danger"));
 			} else if (action == qaCreateTextRoom) {
 				definition.id = QStringLiteral("server.createRoom");
+			} else if (action == qaServerOpenStonks) {
+				definition.id = QStringLiteral("server.stonks");
 			} else if (action == qaServerSettings) {
 				definition.id = QStringLiteral("server.settings");
 			} else if (action == qaServerInformation) {
@@ -17459,6 +17857,7 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 	appState.insert(QStringLiteral("canManageTextChannels"), canManagePersistentTextChannels());
 	appState.insert(QStringLiteral("canCreateTextRoom"), canCreateTextRoom());
 	appState.insert(QStringLiteral("inlineMp4PlaybackSupported"), ModernShellInlineMp4PlaybackSupported);
+	appState.insert(QStringLiteral("stonks"), stonksHeaderState());
 	appState.insert(QStringLiteral("motdExpanded"), Global::get().s.bModernShellMotdExpanded);
 	if (const Channel *rootVoiceChannel = Channel::get(Mumble::ROOT_CHANNEL_ID)) {
 		appState.insert(QStringLiteral("voiceRootLabel"), QString());
@@ -18095,6 +18494,7 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 	appState.insert(QStringLiteral("canManageTextChannels"), canManagePersistentTextChannels());
 	appState.insert(QStringLiteral("canCreateTextRoom"), canCreateTextRoom());
 	appState.insert(QStringLiteral("inlineMp4PlaybackSupported"), ModernShellInlineMp4PlaybackSupported);
+	appState.insert(QStringLiteral("stonks"), stonksHeaderState());
 	if (const Channel *rootVoiceChannel = Channel::get(Mumble::ROOT_CHANNEL_ID)) {
 		appState.insert(QStringLiteral("voiceRootLabel"), QString());
 		appState.insert(QStringLiteral("voiceRootScopeToken"),
@@ -29646,6 +30046,7 @@ void MainWindow::on_qmServer_aboutToShow() {
 	qmServer->addAction(qaServerBanList);
 	qmServer->addSeparator();
 	qmServer->addAction(qaCreateTextRoom);
+	qmServer->addAction(qaServerOpenStonks);
 	qmServer->addAction(qaServerSettings);
 #ifndef Q_OS_MACOS
 	// On macOS, the "Quit" action is automatically placed in the application menu
@@ -29666,6 +30067,13 @@ void MainWindow::on_qmServer_aboutToShow() {
 	}
 	if (qaServerSettings) {
 		qaServerSettings->setEnabled(canManagePersistentTextChannels());
+	}
+	if (qaServerOpenStonks) {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+		qaServerOpenStonks->setEnabled(Global::get().uiSession != 0 && stonksLedgerFeatureSupported());
+#else
+		qaServerOpenStonks->setEnabled(false);
+#endif
 	}
 
 	if (!qlServerActions.isEmpty()) {
@@ -32072,6 +32480,9 @@ void MainWindow::serverConnected() {
 	Global::get().qlSupportedForkFeatures.clear();
 	Global::get().uiPersistentChatProtocolVersion = 0;
 	Global::get().uiForkExtensionProtocolVersion  = 0;
+	Global::get().bStonksEnabled                  = true;
+	Global::get().uiStonksTextChannelID           = 0;
+	Global::get().bStonksSocialAnnouncementsEnabled = true;
 	Global::get().uiMessageLength                  = 5000;
 	Global::get().uiImageLength                    = 131072;
 	Global::get().uiMaxUsers                       = 0;
@@ -32087,6 +32498,8 @@ void MainWindow::serverConnected() {
 	m_persistentChatLiveMessageKeys.clear();
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	clearModernShellMessageDtoCache("connect");
+	m_stonksState.clear();
+	m_stonksSelectedPeriod = QStringLiteral("30d");
 #endif
 	syncPersistentChatGatewayHandler();
 	if (m_persistentChatController) {
@@ -32144,6 +32557,9 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	Global::get().qlSupportedForkFeatures.clear();
 	Global::get().uiPersistentChatProtocolVersion = 0;
 	Global::get().uiForkExtensionProtocolVersion  = 0;
+	Global::get().bStonksEnabled                  = true;
+	Global::get().uiStonksTextChannelID           = 0;
+	Global::get().bStonksSocialAnnouncementsEnabled = true;
 	m_modernLayoutCompatibleServer                 = false;
 	m_modernShellRuntimeDisabled                   = false;
 	m_hasPersistentChatSupport                     = false;
@@ -32166,6 +32582,8 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	m_persistentChatUnreadByScope.clear();
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	clearModernShellMessageDtoCache("disconnect");
+	m_stonksState.clear();
+	m_stonksSelectedPeriod = QStringLiteral("30d");
 #endif
 	syncPersistentChatGatewayHandler();
 	if (m_persistentChatController) {
@@ -32273,6 +32691,9 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	Global::get().qlSupportedForkFeatures.clear();
 	Global::get().uiPersistentChatProtocolVersion = 0;
 	Global::get().uiForkExtensionProtocolVersion = 0;
+	Global::get().bStonksEnabled = true;
+	Global::get().uiStonksTextChannelID = 0;
+	Global::get().bStonksSocialAnnouncementsEnabled = true;
 
 	if (!Global::get().sh->qlErrors.isEmpty()) {
 		for (const QSslError &e : Global::get().sh->qlErrors) {

@@ -145,6 +145,9 @@ public:
 	quint64 uiChatAssetTotalQuotaBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
 	unsigned int uiChatAttachmentLimit = 4;
 	bool bChatPreviewFetchEnabled = false;
+	bool bStonksEnabled = true;
+	unsigned int uiStonksTextChannelID = 0;
+	bool bStonksSocialAnnouncementsEnabled = true;
 	QString qsPassword;
 	QString qsWelcomeText;
 	QString qsWelcomeTextFile;

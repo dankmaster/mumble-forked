@@ -18,6 +18,7 @@ namespace ForkFeatures {
 				  "screen_share_session_presence" },
 				{ MumbleProto::ForkFeatureVirtualizedChatPresentation, 1, FallbackPolicy::None,
 				  "virtualized_chat_presentation" },
+				{ MumbleProto::ForkFeatureStonksLedger, 1, FallbackPolicy::ServerOnly, "stonks_ledger" },
 			};
 			return table;
 		}

@@ -143,6 +143,9 @@ MetaParams::MetaParams() {
 	uiChatAssetTotalQuotaBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
 	uiChatAttachmentLimit      = 4;
 	bChatPreviewFetchEnabled   = false;
+	bStonksEnabled             = true;
+	uiStonksTextChannelID      = 0;
+	bStonksSocialAnnouncementsEnabled = true;
 
 	rollingStatsWindow = 300;
 
@@ -398,6 +401,11 @@ void MetaParams::read(QString fname) {
 		typeCheckedFromSettings< unsigned int >("chat_attachment_limit", uiChatAttachmentLimit);
 	bChatPreviewFetchEnabled =
 		typeCheckedFromSettings("chat_preview_fetch_enabled", bChatPreviewFetchEnabled);
+	bStonksEnabled = typeCheckedFromSettings("stonks_enabled", bStonksEnabled);
+	uiStonksTextChannelID =
+		typeCheckedFromSettings< unsigned int >("stonks_text_channel_id", uiStonksTextChannelID);
+	bStonksSocialAnnouncementsEnabled =
+		typeCheckedFromSettings("stonks_social_announcements_enabled", bStonksSocialAnnouncementsEnabled);
 
 	rollingStatsWindow = typeCheckedFromSettings("rollingStatsWindow", rollingStatsWindow);
 
@@ -488,6 +496,10 @@ void MetaParams::read(QString fname) {
 	qmConfig.insert(QLatin1String("chat_attachment_limit"), QString::number(uiChatAttachmentLimit));
 	qmConfig.insert(QLatin1String("chat_preview_fetch_enabled"),
 					bChatPreviewFetchEnabled ? QLatin1String("true") : QLatin1String("false"));
+	qmConfig.insert(QLatin1String("stonks_enabled"), bStonksEnabled ? QLatin1String("true") : QLatin1String("false"));
+	qmConfig.insert(QLatin1String("stonks_text_channel_id"), QString::number(uiStonksTextChannelID));
+	qmConfig.insert(QLatin1String("stonks_social_announcements_enabled"),
+					bStonksSocialAnnouncementsEnabled ? QLatin1String("true") : QLatin1String("false"));
 	qmConfig.insert(QLatin1String("bandwidth"), QString::number(iMaxBandwidth));
 	qmConfig.insert(QLatin1String("users"), QString::number(iMaxUsers));
 	qmConfig.insert(QLatin1String("defaultchannel"), QString::number(iDefaultChan));

@@ -55,6 +55,8 @@
 #include "murmur/database/DBChatThread.h"
 #include "murmur/database/DBStonksFollow.h"
 #include "murmur/database/DBStonksScore.h"
+#include "murmur/database/DBStonksSnapshot.h"
+#include "murmur/database/DBStonksSnapshotPosition.h"
 #include "murmur/database/DBTextChannel.h"
 #include "murmur/database/DBChannelLink.h"
 #include "murmur/database/DBChannelListener.h"
@@ -68,6 +70,8 @@
 #include "murmur/database/ServerTable.h"
 #include "murmur/database/StonksFollowTable.h"
 #include "murmur/database/StonksScoreTable.h"
+#include "murmur/database/StonksSnapshotPositionTable.h"
+#include "murmur/database/StonksSnapshotTable.h"
 #include "murmur/database/UserPropertyTable.h"
 #include "murmur/database/UserTable.h"
 
@@ -1216,6 +1220,117 @@ std::vector< unsigned int > DBWrapper::getStonksFollowedUsers(unsigned int serve
 	assertRegisteredUserExists(serverID, followerUserID);
 
 	return m_serverDB.getStonksFollowTable().getFollowedUsers(serverID, followerUserID);
+
+	WRAPPER_END
+}
+
+::msdb::DBStonksSnapshot
+	DBWrapper::addStonksSnapshot(const ::msdb::DBStonksSnapshot &snapshot,
+								 const std::vector< ::msdb::DBStonksSnapshotPosition > &positions) {
+	WRAPPER_BEGIN
+
+	assertValidID(snapshot.serverID);
+	assertRegisteredUserExists(snapshot.serverID, snapshot.userID);
+	assert(positions.size() <= static_cast< std::size_t >(std::numeric_limits< int >::max()));
+
+	::mdb::TransactionHolder transaction = m_serverDB.ensureTransaction();
+
+	::msdb::DBStonksSnapshot stored = snapshot;
+	if (stored.snapshotID == 0) {
+		stored.snapshotID = m_serverDB.getStonksSnapshotTable().getFreeSnapshotID(stored.serverID);
+	}
+	if (stored.createdAt == std::chrono::system_clock::time_point()) {
+		stored.createdAt = std::chrono::system_clock::now();
+	}
+
+	m_serverDB.getStonksSnapshotTable().addSnapshot(stored);
+
+	std::vector< ::msdb::DBStonksSnapshotPosition > storedPositions;
+	storedPositions.reserve(positions.size());
+	unsigned int displayOrder = 0;
+	for (const ::msdb::DBStonksSnapshotPosition &position : positions) {
+		::msdb::DBStonksSnapshotPosition normalized = position;
+		normalized.serverID                        = stored.serverID;
+		normalized.snapshotID                      = stored.snapshotID;
+		normalized.displayOrder                    = displayOrder++;
+		storedPositions.push_back(std::move(normalized));
+	}
+	m_serverDB.getStonksSnapshotPositionTable().setPositions(stored.serverID, stored.snapshotID, storedPositions);
+
+	transaction.commit();
+	return stored;
+
+	WRAPPER_END
+}
+
+std::optional< ::msdb::DBStonksSnapshot > DBWrapper::getStonksSnapshot(unsigned int serverID,
+																	   unsigned int snapshotID) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertValidID(snapshotID);
+
+	return m_serverDB.getStonksSnapshotTable().getSnapshot(serverID, snapshotID);
+
+	WRAPPER_END
+}
+
+std::vector< ::msdb::DBStonksSnapshot > DBWrapper::getStonksSnapshotsForUser(unsigned int serverID,
+																			 unsigned int userID,
+																			 unsigned int maxEntries) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertRegisteredUserExists(serverID, userID);
+	assert(maxEntries <= static_cast< unsigned int >(std::numeric_limits< int >::max()));
+
+	return m_serverDB.getStonksSnapshotTable().getSnapshotsForUser(serverID, userID, maxEntries);
+
+	WRAPPER_END
+}
+
+std::optional< ::msdb::DBStonksSnapshot > DBWrapper::getLatestStonksSnapshotForUser(unsigned int serverID,
+																					unsigned int userID) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertRegisteredUserExists(serverID, userID);
+
+	return m_serverDB.getStonksSnapshotTable().getLatestSnapshotForUser(serverID, userID);
+
+	WRAPPER_END
+}
+
+std::optional< ::msdb::DBStonksSnapshot > DBWrapper::getStonksSnapshotAtOrBefore(
+	unsigned int serverID, unsigned int userID, std::chrono::system_clock::time_point latestAt) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertRegisteredUserExists(serverID, userID);
+
+	return m_serverDB.getStonksSnapshotTable().getSnapshotAtOrBefore(serverID, userID, latestAt);
+
+	WRAPPER_END
+}
+
+std::vector< ::msdb::DBStonksSnapshot > DBWrapper::getLatestStonksSnapshotsByUser(unsigned int serverID) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+
+	return m_serverDB.getStonksSnapshotTable().getLatestSnapshotsByUser(serverID);
+
+	WRAPPER_END
+}
+
+std::vector< ::msdb::DBStonksSnapshotPosition > DBWrapper::getStonksSnapshotPositions(unsigned int serverID,
+																					  unsigned int snapshotID) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertValidID(snapshotID);
+
+	return m_serverDB.getStonksSnapshotPositionTable().getPositions(serverID, snapshotID);
 
 	WRAPPER_END
 }

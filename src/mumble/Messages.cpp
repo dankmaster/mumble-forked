@@ -487,6 +487,18 @@ void MainWindow::msgServerConfig(const MumbleProto::ServerConfig &msg) {
 		screenShareConfigChanged = true;
 		modernLayoutCompatibleAdvertised = true;
 	}
+	if (msg.has_stonks_enabled()) {
+		Global::get().bStonksEnabled = msg.stonks_enabled();
+		modernLayoutCompatibleAdvertised = true;
+	}
+	if (msg.has_stonks_text_channel_id()) {
+		Global::get().uiStonksTextChannelID = msg.stonks_text_channel_id();
+		modernLayoutCompatibleAdvertised = true;
+	}
+	if (msg.has_stonks_social_announcements_enabled()) {
+		Global::get().bStonksSocialAnnouncementsEnabled = msg.stonks_social_announcements_enabled();
+		modernLayoutCompatibleAdvertised = true;
+	}
 	if (screenShareConfigChanged && Global::get().s.bScreenShareDiagnostics) {
 		qInfo().noquote()
 			<< QStringLiteral("MainWindow: received screen-share ServerConfig enabled=%1 recording=%2 helper_required=%3 "
@@ -2053,6 +2065,20 @@ void MainWindow::msgChatHistoryGrantSync(const MumbleProto::ChatHistoryGrantSync
 }
 
 void MainWindow::msgWatchTogetherSync(const MumbleProto::WatchTogetherSync &) {
+}
+
+void MainWindow::msgStonksRequest(const MumbleProto::StonksRequest &) {
+}
+
+void MainWindow::msgStonksAction(const MumbleProto::StonksAction &) {
+}
+
+void MainWindow::msgStonksState(const MumbleProto::StonksState &msg) {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	handleStonksState(msg);
+#else
+	Q_UNUSED(msg);
+#endif
 }
 
 void MainWindow::msgScreenShareCreate(const MumbleProto::ScreenShareCreate &) {

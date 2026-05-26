@@ -64,6 +64,8 @@ add_table_pair("chat_thread_table_input.json" "chat_thread_table_migrated.json")
 add_table_pair("text_channel_table_input.json" "text_channel_table_migrated.json")
 add_table_pair("stonks_follow_table_input.json" "stonks_follow_table_migrated.json")
 add_table_pair("stonks_score_table_input.json" "stonks_score_table_migrated.json")
+add_table_pair("stonks_snapshot_table_input.json" "stonks_snapshot_table_migrated.json")
+add_table_pair("stonks_snapshot_position_table_input.json" "stonks_snapshot_position_table_migrated.json")
 
 list(LENGTH input_table_data_paths max_idx)
 math(EXPR max_idx "${max_idx} - 1")

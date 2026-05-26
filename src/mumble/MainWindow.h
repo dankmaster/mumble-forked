@@ -505,6 +505,11 @@ public:
 	bool handleModernShellChannelMove(const QString &sourceScopeToken, const QString &targetScopeToken,
 									  const QString &placement);
 	bool handleModernShellAppAction(const QString &actionId);
+	void openModernStonksDialog();
+	void requestStonksState(const QString &period = QString());
+	void handleStonksState(const MumbleProto::StonksState &state);
+	QVariantMap buildModernStonksDialog() const;
+	bool handleModernStonksDialogAction(const QString &actionID, const QVariantMap &payload);
 	bool sendModernShellMessage(const QString &message);
 	void publishModernShellTalkState(const ClientUser *user);
 	void publishModernShellTalkStateForIndex(const QModelIndex &index);
@@ -572,6 +577,7 @@ protected:
 	QList< QAction * > qlChannelActions;
 	QList< QAction * > qlUserActions;
 	QAction *qaServerSettings = nullptr;
+	QAction *qaServerOpenStonks = nullptr;
 	QAction *qaCreateTextRoom = nullptr;
 
 	QHash< ShortcutTarget, int > qmCurrentTargets;
@@ -723,6 +729,8 @@ protected:
 	ModernShellHost *m_modernShellHost                     = nullptr;
 	std::unique_ptr< ModernDialogController > m_modernDialogController;
 	std::unique_ptr< ModernDialogHost > m_modernDialogHost;
+	QVariantMap m_stonksState;
+	QString m_stonksSelectedPeriod;
 	std::unique_ptr< ModernConnectPingState > m_modernConnectPingState;
 	QObject *m_persistentChatPreviewSnapshotRenderer       = nullptr;
 	quint64 m_modernShellPatchRevision                     = 0;
