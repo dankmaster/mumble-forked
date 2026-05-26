@@ -8478,7 +8478,7 @@ void applyYahooFinanceQuoteData(MainWindow::PersistentChatPreview &preview,
 	}
 	if (quote.regularMarketTime > 0) {
 		metadata.insert(QStringLiteral("financeUpdatedAt"),
-						QDateTime::fromSecsSinceEpoch(quote.regularMarketTime, QTimeZone::UTC)
+						QDateTime::fromSecsSinceEpoch(quote.regularMarketTime, QTimeZone::utc())
 							.toString(Qt::ISODate));
 	}
 

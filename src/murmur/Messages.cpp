@@ -1690,8 +1690,8 @@ std::chrono::system_clock::time_point stonksCutoffForPeriod(
 	const QString normalizedPeriod = normalizedStonksLedgerPeriod(period);
 	if (normalizedPeriod == QLatin1String("ytd")) {
 		const qint64 latestEpoch = static_cast< qint64 >(::msdb::toEpochSeconds(latestAt));
-		const QDateTime latestDateTime = QDateTime::fromSecsSinceEpoch(latestEpoch, QTimeZone::UTC);
-		const QDateTime yearStart(QDate(latestDateTime.date().year(), 1, 1), QTime(0, 0), QTimeZone::UTC);
+		const QDateTime latestDateTime = QDateTime::fromSecsSinceEpoch(latestEpoch, QTimeZone::utc());
+		const QDateTime yearStart(QDate(latestDateTime.date().year(), 1, 1), QTime(0, 0), QTimeZone::utc());
 		return std::chrono::system_clock::time_point(std::chrono::seconds(yearStart.toSecsSinceEpoch()));
 	}
 
@@ -3854,7 +3854,7 @@ void Server::msgBanList(ServerUser *uSource, MumbleProto::BanList &msg) {
 			if (be.has_start()) {
 				b.qdtStart = QDateTime::fromString(u8(be.start()), Qt::ISODate);
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-				b.qdtStart.setTimeZone(QTimeZone::UTC);
+				b.qdtStart.setTimeZone(QTimeZone::utc());
 #else
 				b.qdtStart.setTimeSpec(Qt::UTC);
 #endif

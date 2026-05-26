@@ -33,7 +33,7 @@ BanEditor::BanEditor(const MumbleProto::BanList &msg, QWidget *p) : QDialog(p), 
 		b.qsReason   = u8(be.reason());
 		b.qdtStart   = QDateTime::fromString(u8(be.start()), Qt::ISODate);
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-		b.qdtStart.setTimeZone(QTimeZone::UTC);
+		b.qdtStart.setTimeZone(QTimeZone::utc());
 #else
 		b.qdtStart.setTimeSpec(Qt::UTC);
 #endif

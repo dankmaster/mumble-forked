@@ -641,7 +641,7 @@ namespace Finance {
 			parts << quote.instrumentType;
 		}
 		if (quote.regularMarketTime > 0) {
-			const QDateTime updatedAt = QDateTime::fromSecsSinceEpoch(quote.regularMarketTime, QTimeZone::UTC);
+			const QDateTime updatedAt = QDateTime::fromSecsSinceEpoch(quote.regularMarketTime, QTimeZone::utc());
 			parts << QStringLiteral("Updated %1 UTC").arg(updatedAt.toString(QStringLiteral("yyyy-MM-dd HH:mm")));
 		}
 		const QString providerSummary = financeProviderSummary(quote.symbol, &quote);

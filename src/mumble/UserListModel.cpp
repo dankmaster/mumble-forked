@@ -299,7 +299,7 @@ QString UserListModel::pathForChannelId(const unsigned int channelId) const {
 QDateTime UserListModel::isoUTCToDateTime(const std::string &isoTime) const {
 	QDateTime dt = QDateTime::fromString(u8(isoTime), Qt::ISODate);
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-	dt.setTimeZone(QTimeZone::UTC);
+	dt.setTimeZone(QTimeZone::utc());
 #else
 	dt.setTimeSpec(Qt::UTC);
 #endif
