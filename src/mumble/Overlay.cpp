@@ -22,6 +22,7 @@
 #include <QtWidgets/QMessageBox>
 
 #ifdef Q_OS_WIN
+#	include "win.h"
 #	include <shellapi.h>
 #endif
 
