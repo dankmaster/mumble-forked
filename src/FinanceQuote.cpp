@@ -392,8 +392,8 @@ namespace Finance {
 		const QJsonArray quoteObjects = indicators.value(QStringLiteral("quote")).toArray();
 		const QJsonArray closeValues =
 			quoteObjects.isEmpty() ? QJsonArray() : quoteObjects.first().toObject().value(QStringLiteral("close")).toArray();
-		const int pointCount = std::min(timestamps.size(), closeValues.size());
-		for (int i = 0; i < pointCount; ++i) {
+		const qsizetype pointCount = std::min(timestamps.size(), closeValues.size());
+		for (qsizetype i = 0; i < pointCount; ++i) {
 			const QJsonValue timestampValue = timestamps.at(i);
 			const QJsonValue closeValue     = closeValues.at(i);
 			if (!timestampValue.isDouble() || !closeValue.isDouble()) {
