@@ -719,6 +719,7 @@ textarea:focus-visible {
 	min-width: 0;
 	padding: var(--pane-top-inset) 0 0;
 	overflow: hidden;
+	isolation: isolate;
 }
 
 .conversation-header,
@@ -1020,6 +1021,8 @@ textarea:focus-visible {
 }
 
 .message-list {
+	position: relative;
+	z-index: 1;
 	display: flex;
 	flex: 1 1 auto;
 	flex-direction: column;
@@ -1035,6 +1038,7 @@ textarea:focus-visible {
 	scrollbar-width: auto;
 	scrollbar-color: rgba(105, 163, 201, 0.72) rgba(255, 255, 255, 0.06);
 	transition: box-shadow 180ms ease;
+	isolation: isolate;
 }
 
 .message-list.is-chat-loading {
@@ -1131,15 +1135,12 @@ textarea:focus-visible {
 	align-items: flex-start;
 	gap: 8px;
 	margin-bottom: 10px;
-	transition: filter 150ms ease, opacity 180ms ease;
+	transition: opacity 180ms ease;
+	isolation: isolate;
 }
 
 .message-cluster.is-own {
 	justify-content: flex-end;
-}
-
-.message-cluster:hover {
-	filter: brightness(1.03);
 }
 
 .message-cluster.is-fresh {
@@ -1302,6 +1303,8 @@ textarea:focus-visible {
 	box-shadow: 0 10px 18px rgba(0, 0, 0, 0.10);
 	overflow: hidden;
 	transition: width 180ms ease, border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+	contain: paint;
+	isolation: isolate;
 }
 
 .preview-card[data-preview-size="compact"],
@@ -1420,6 +1423,8 @@ textarea:focus-visible {
 		linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.12)),
 		rgba(255, 255, 255, 0.04);
 	overflow: hidden;
+	contain: paint;
+	isolation: isolate;
 }
 
 .preview-card.has-thumbnail .preview-card-media {
@@ -2845,6 +2850,8 @@ textarea:focus-visible {
 	--store-accent: #66c0f4;
 	--store-accent-soft: rgba(102, 192, 244, 0.14);
 	--store-buy-bg: linear-gradient(180deg, #75b022, #5c8f1d);
+	--sv-accent: var(--store-accent);
+	--sv-accent-soft: var(--store-accent-soft);
 	display: block;
 	grid-template-columns: 1fr;
 	gap: 0;
@@ -3919,6 +3926,205 @@ textarea:focus-visible {
 	}
 }
 
+.preview-card.is-flashback-thread {
+	border-color: #242424;
+	border-radius: 8px;
+	background: #101010;
+	box-shadow: 0 10px 20px rgba(0, 0, 0, 0.18);
+}
+
+.message-bubble.is-own .preview-card.is-flashback-thread,
+.message-cluster.is-own .preview-card.is-flashback-thread {
+	border-color: #242424;
+	background: #101010;
+}
+
+.preview-card.is-flashback-thread:hover,
+.preview-card.is-flashback-thread:focus-visible,
+.message-bubble.is-own .preview-card.is-flashback-thread:hover,
+.message-bubble.is-own .preview-card.is-flashback-thread:focus-visible,
+.message-cluster.is-own .preview-card.is-flashback-thread:hover,
+.message-cluster.is-own .preview-card.is-flashback-thread:focus-visible {
+	border-color: #353535;
+	background: #121212;
+	box-shadow: 0 14px 24px rgba(0, 0, 0, 0.24);
+}
+
+.preview-card-flashback-shell {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	overflow: hidden;
+}
+
+.preview-card-flashback-brand {
+	align-items: center;
+	background: #1f1f1f;
+	border-bottom: 1px solid #060606;
+	display: flex;
+	min-height: 56px;
+	min-width: 0;
+	padding: 8px 12px;
+}
+
+.preview-card-flashback-logo {
+	background: url("https://static.flashback.org/img/2017/logo-top2.svg") 0 -4px / 210px 158px no-repeat;
+	display: block;
+	flex: 0 0 auto;
+	height: 43px;
+	overflow: hidden;
+	width: 178px;
+}
+
+.preview-card-flashback-logo::after {
+	content: none;
+}
+
+.preview-card-flashback-body {
+	background: #111;
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+	min-width: 0;
+	padding: 12px 13px 10px;
+}
+
+.preview-card-flashback-title {
+	color: #f1f4fa;
+	display: -webkit-box;
+	font-size: 16px;
+	font-weight: 850;
+	line-height: 1.28;
+	overflow: hidden;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+}
+
+.preview-card-flashback-context {
+	color: #aeb8c5;
+	font-size: 11px;
+	font-weight: 650;
+	line-height: 1.35;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.preview-card-flashback-author-row {
+	align-items: center;
+	display: flex;
+	gap: 8px;
+	min-width: 0;
+}
+
+.preview-card-flashback-author-avatar {
+	align-items: center;
+	background: hsl(var(--avatar-hue, 24), 34%, 30%);
+	background-position: center;
+	background-size: cover;
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	border-radius: 50%;
+	color: #f3f6fb;
+	display: inline-flex;
+	flex: 0 0 28px;
+	font-size: 10px;
+	font-weight: 850;
+	height: 28px;
+	justify-content: center;
+	line-height: 1;
+	overflow: hidden;
+	width: 28px;
+}
+
+.preview-card-flashback-author-avatar.has-image {
+	background-color: #2a2a2a;
+	color: transparent;
+}
+
+.preview-card-flashback-author-copy {
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.preview-card-flashback-author-name {
+	color: #f1f4fa;
+	font-size: 12px;
+	font-weight: 800;
+	line-height: 1.2;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.preview-card-flashback-author-meta {
+	color: #8f9aa7;
+	font-size: 10px;
+	font-weight: 650;
+	line-height: 1.2;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.preview-card-flashback-message {
+	color: #dce4ee;
+	display: -webkit-box;
+	font-size: 12px;
+	line-height: 1.45;
+	overflow: hidden;
+	padding: 0;
+	text-align: left;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 4;
+}
+
+.preview-card-flashback-footer {
+	align-items: center;
+	background: #111;
+	border-top: 1px solid #202020;
+	display: flex;
+	gap: 8px;
+	justify-content: space-between;
+	min-width: 0;
+	padding: 9px 13px 10px;
+}
+
+.preview-card-flashback-meta {
+	min-width: 0;
+	color: #8c97a5;
+	font-size: 11px;
+	font-weight: 750;
+	line-height: 1.35;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.preview-card-flashback-action {
+	flex: 0 0 auto;
+	color: #ffc069;
+	font-size: 11px;
+	font-weight: 850;
+	line-height: 1.35;
+	white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+	.preview-card-flashback-brand {
+		min-height: 50px;
+		padding: 7px 10px;
+	}
+
+	.preview-card-flashback-logo {
+		background-size: 188px 141px;
+		height: 38px;
+		width: 160px;
+	}
+}
+
 @media (max-width: 520px) {
 	.preview-card-sv-market-shell {
 		grid-template-columns: 1fr;
@@ -3967,8 +4173,8 @@ textarea:focus-visible {
 	--sv-accent: #f2c36e;
 	--sv-accent-soft: rgba(242, 195, 110, 0.16);
 	--sv-accent-text: #f2c36e;
-	--sv-border: #1d1d1d;
-	background: #0c0c0c;
+	--sv-border: #242424;
+	background: #101010;
 }
 
 .preview-card.is-provider-sweclockers {
@@ -4101,9 +4307,9 @@ textarea:focus-visible {
 .message-bubble.is-own .preview-card.is-sv-provider.is-flashback-thread:focus-visible,
 .message-cluster.is-own .preview-card.is-sv-provider.is-flashback-thread:hover,
 .message-cluster.is-own .preview-card.is-sv-provider.is-flashback-thread:focus-visible {
-	border-color: #2c2c2c;
-	background: #101010;
-	box-shadow: 0 16px 30px rgba(0, 0, 0, 0.28);
+	border-color: #353535;
+	background: #121212;
+	box-shadow: 0 14px 24px rgba(0, 0, 0, 0.24);
 }
 
 .preview-card-blocket-shell,

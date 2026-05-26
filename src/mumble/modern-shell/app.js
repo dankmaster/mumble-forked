@@ -5641,15 +5641,23 @@
 		const reviewCount = previewMetadataString(metadata, ["gameStoreReviewCount"]);
 		const brand = previewMetadataString(metadata, ["gameStoreBrand"]);
 		const sku = previewMetadataString(metadata, ["gameStoreSku"]);
-		const detail = [platform, availability].filter(Boolean).join(" / ") || brand || label;
+		let tags = previewMetadataList(metadata, "gameStoreTags").map(function(value) {
+			return String(value || "").trim();
+		}).filter(Boolean);
+		if (!tags.length) {
+			tags = previewMetadataString(metadata, ["gameStoreTags"]).split(/\s*[,;|]\s*/).filter(Boolean);
+		}
+		const detail = [platform, availability, tags[0] || ""].filter(Boolean).join(" / ") || brand || label;
 		const chips = [];
+		const appendChip = function(value) {
+			const text = String(value || "").trim();
+			if (text && chips.indexOf(text) < 0) {
+				chips.push(text);
+			}
+		};
+		tags.slice(0, 4).forEach(appendChip);
 		[platform, availability, rating, reviewCount ? reviewCount + " reviews" : "", brand, sku ? "SKU " + sku : ""]
-			.forEach(function(value) {
-				const text = String(value || "").trim();
-				if (text && chips.indexOf(text) < 0) {
-					chips.push(text);
-				}
-			});
+			.forEach(appendChip);
 		return {
 			kind: kind,
 			label: label,
@@ -5657,11 +5665,31 @@
 			title: title,
 			description: description,
 			detail: detail,
-			chips: chips.slice(0, 5),
+			chips: chips.slice(0, 6),
 			price: previewMetadataString(metadata, ["gameStorePrice", "listingPrice"]),
 			originalPrice: previewMetadataString(metadata, ["gameStoreOriginalPrice", "listingOriginalPrice"]),
 			discount: previewMetadataString(metadata, ["gameStoreDiscount", "listingDiscount"])
 		};
+	}
+
+	function previewGameStoreMediaItems(preview) {
+		const metadata = (preview && preview.metadata) || {};
+		const productMedia = [];
+		["gameStoreMedia", "gameStoreMediaItems"].forEach(function(key) {
+			if (Array.isArray(metadata[key])) {
+				metadata[key].forEach(function(item) {
+					productMedia.push(item);
+				});
+			}
+		});
+		const proxyPreview = Object.assign({}, preview || {}, {
+			metadata: Object.assign({}, metadata, {
+				productMedia: productMedia,
+				productImages: Array.isArray(metadata.gameStoreImages) ? metadata.gameStoreImages : [],
+				productImage: String(metadata.gameStoreImage || "").trim()
+			})
+		});
+		return previewProductMediaItems(proxyPreview);
 	}
 
 	function appendGameStoreChip(parent, value) {
@@ -5675,14 +5703,17 @@
 		parent.appendChild(chip);
 	}
 
-	function appendGameStorePreview(card, preview, kind, hostLabel, sourceLabel, descriptionText) {
+	function appendGameStorePreview(card, preview, kind, hostLabel, sourceLabel, descriptionText, mediaItems) {
 		const info = previewGameStoreInfo(preview, kind, hostLabel, sourceLabel, descriptionText);
 		const metadata = (preview && preview.metadata) || {};
 		const shell = document.createElement("div");
 		shell.className = "preview-card-store-shell";
 
+		const galleryItems = Array.isArray(mediaItems) ? mediaItems : previewGameStoreMediaItems(preview);
 		const imageUrl = String(preview.thumbnailUrl || metadata.gameStoreImage || "").trim();
-		if (imageUrl) {
+		if (galleryItems.length) {
+			appendProductMediaGallery(card, shell, preview, galleryItems);
+		} else if (imageUrl) {
 			const media = document.createElement("div");
 			media.className = "preview-card-store-media";
 			const image = document.createElement("img");
@@ -5963,6 +5994,8 @@
 		const pageCount = previewMetadataString(metadata, ["forumPageCount"]);
 		const postCount = previewMetadataString(metadata, ["forumPostCount"]);
 		const author = previewMetadataString(metadata, ["forumPostAuthor", "forumFirstPostAuthor"]);
+		const authorAvatarUrl = previewMetadataString(metadata,
+			["forumPostAuthorAvatarUrl", "forumFirstPostAuthorAvatarUrl"]);
 		const authorTitle = previewMetadataString(metadata, ["forumPostAuthorTitle", "forumFirstPostAuthorTitle"]);
 		const authorRegistered = previewMetadataString(metadata,
 			["forumPostAuthorRegistered", "forumFirstPostAuthorRegistered"]);
@@ -5985,6 +6018,7 @@
 			postCountLabel: postCount ? (postCount + " inl\u00e4gg") : "",
 			postLinkLabel: isPostLink && postNumber ? ("Svar #" + postNumber) : "",
 			author: author,
+			authorAvatarUrl: authorAvatarUrl,
 			authorTitle: authorTitle,
 			authorRegistered: authorRegistered,
 			authorPosts: authorPosts,
@@ -6134,66 +6168,15 @@
 		const shell = document.createElement("div");
 		shell.className = "preview-card-flashback-shell";
 
-		const masthead = document.createElement("div");
-		masthead.className = "preview-card-flashback-masthead";
+		const brand = document.createElement("div");
+		brand.className = "preview-card-flashback-brand";
 		const logo = document.createElement("span");
 		logo.className = "preview-card-flashback-logo";
-		logo.textContent = "flashback";
-		masthead.appendChild(logo);
-		const nav = document.createElement("div");
-		nav.className = "preview-card-flashback-nav";
-		["AVDELNINGAR", "NYA INL\u00c4GG", "S\u00d6K"].forEach(function(label) {
-			const item = document.createElement("span");
-			item.className = "preview-card-flashback-nav-item";
-			item.textContent = label;
-			nav.appendChild(item);
-		});
-		masthead.appendChild(nav);
-		shell.appendChild(masthead);
-
-		const breadcrumb = document.createElement("div");
-		breadcrumb.className = "preview-card-flashback-breadcrumb";
-		const dot = document.createElement("span");
-		dot.className = "preview-card-flashback-breadcrumb-dot";
-		breadcrumb.appendChild(dot);
-		[info.category, info.forumName].filter(Boolean).forEach(function(part, index) {
-			if (index > 0) {
-				const slash = document.createElement("span");
-				slash.className = "preview-card-flashback-breadcrumb-separator";
-				slash.textContent = "/";
-				breadcrumb.appendChild(slash);
-			}
-			const crumb = document.createElement("span");
-			crumb.className = "preview-card-flashback-breadcrumb-part";
-			crumb.textContent = part;
-			breadcrumb.appendChild(crumb);
-		});
-		if (breadcrumb.childNodes.length > 1) {
-			shell.appendChild(breadcrumb);
-		}
-
-		const header = document.createElement("div");
-		header.className = "preview-card-flashback-header";
-		const mark = document.createElement("span");
-		mark.className = "preview-card-flashback-mark";
-		mark.textContent = "FB";
-		header.appendChild(mark);
-		const heading = document.createElement("div");
-		heading.className = "preview-card-flashback-heading";
-		const source = document.createElement("span");
-		source.className = "preview-card-flashback-source";
-		source.textContent = info.source;
-		heading.appendChild(source);
-		const host = document.createElement("span");
-		host.className = "preview-card-flashback-host";
-		host.textContent = info.host;
-		heading.appendChild(host);
-		header.appendChild(heading);
-		const badge = document.createElement("span");
-		badge.className = "preview-card-flashback-badge";
-		badge.textContent = "Forum";
-		header.appendChild(badge);
-		shell.appendChild(header);
+		logo.setAttribute("role", "img");
+		logo.setAttribute("aria-label", "Flashback");
+		logo.title = "Flashback";
+		brand.appendChild(logo);
+		shell.appendChild(brand);
 
 		const body = document.createElement("div");
 		body.className = "preview-card-flashback-body";
@@ -6202,101 +6185,58 @@
 		titleNode.textContent = info.title;
 		body.appendChild(titleNode);
 
-		const stats = document.createElement("div");
-		stats.className = "preview-card-flashback-stats";
-		[info.postLinkLabel, info.pageLabel, info.postCountLabel, info.threadId ? "t" + info.threadId : ""]
-			.filter(Boolean).forEach(function(value) {
-			const chip = document.createElement("span");
-			chip.className = "preview-card-flashback-stat";
-			chip.textContent = value;
-			stats.appendChild(chip);
-		});
-		if (stats.childNodes.length) {
-			body.appendChild(stats);
+		const contextText = [info.category, info.forumName].filter(Boolean).join(" / ");
+		if (contextText) {
+			const context = document.createElement("div");
+			context.className = "preview-card-flashback-context";
+			context.textContent = contextText;
+			body.appendChild(context);
 		}
 
-		const post = document.createElement("div");
-		post.className = "preview-card-flashback-post";
-		const postHead = document.createElement("div");
-		postHead.className = "preview-card-flashback-post-head";
-		const time = document.createElement("span");
-		time.className = "preview-card-flashback-post-time";
-		time.textContent = info.postTime || (info.isPostLink ? "L\u00e4nkat svar" : "F\u00f6rsta inl\u00e4gget");
-		postHead.appendChild(time);
-		const number = document.createElement("span");
-		number.className = "preview-card-flashback-post-number";
-		number.textContent = info.postNumber ? ("#" + info.postNumber) : (info.postId ? ("p" + info.postId) : "#1");
-		postHead.appendChild(number);
-		post.appendChild(postHead);
+		if (info.author || info.authorAvatarUrl) {
+			const authorRow = document.createElement("div");
+			authorRow.className = "preview-card-flashback-author-row";
+			const avatar = document.createElement("span");
+			avatar.className = "preview-card-flashback-author-avatar";
+			styleAvatar(avatar, info.author || "Flashback", false, info.authorAvatarUrl);
+			authorRow.appendChild(avatar);
 
-		const postBody = document.createElement("div");
-		postBody.className = "preview-card-flashback-post-body";
-		const user = document.createElement("div");
-		user.className = "preview-card-flashback-user";
-		const avatar = document.createElement("span");
-		avatar.className = "preview-card-flashback-avatar";
-		avatar.textContent = (info.author || "FB").trim().slice(0, 2).toUpperCase();
-		user.appendChild(avatar);
-		if (info.author) {
-			const author = document.createElement("span");
-			author.className = "preview-card-flashback-author";
-			author.textContent = info.author;
-			user.appendChild(author);
+			const authorCopy = document.createElement("span");
+			authorCopy.className = "preview-card-flashback-author-copy";
+			const authorName = document.createElement("span");
+			authorName.className = "preview-card-flashback-author-name";
+			authorName.textContent = info.author || "Flashback user";
+			authorCopy.appendChild(authorName);
+			const authorMetaText = [info.authorTitle, info.postTime, info.postNumber ? ("#" + info.postNumber) : ""]
+				.filter(Boolean).join(" / ");
+			if (authorMetaText) {
+				const authorMeta = document.createElement("span");
+				authorMeta.className = "preview-card-flashback-author-meta";
+				authorMeta.textContent = authorMetaText;
+				authorCopy.appendChild(authorMeta);
+			}
+			authorRow.appendChild(authorCopy);
+			body.appendChild(authorRow);
 		}
-		if (info.authorTitle) {
-			const role = document.createElement("span");
-			role.className = "preview-card-flashback-user-role";
-			role.textContent = info.authorTitle;
-			user.appendChild(role);
-		}
-		[info.authorRegistered ? "Reg: " + info.authorRegistered : "", info.authorPosts ? "Inl\u00e4gg: " + info.authorPosts : ""]
-			.filter(Boolean).forEach(function(value) {
-				const detail = document.createElement("span");
-				detail.className = "preview-card-flashback-user-detail";
-				detail.textContent = value;
-				user.appendChild(detail);
-			});
-		postBody.appendChild(user);
 
 		const message = document.createElement("div");
 		message.className = "preview-card-flashback-message";
-		if (info.quoteExcerpt) {
-			message.classList.add("has-quote");
-			const quote = document.createElement("div");
-			quote.className = "preview-card-flashback-quote";
-			const quoteHead = document.createElement("div");
-			quoteHead.className = "preview-card-flashback-quote-head";
-			quoteHead.textContent = info.quoteAuthor ? ("Citat: " + info.quoteAuthor) : "Citat";
-			quote.appendChild(quoteHead);
-			const quoteText = document.createElement("div");
-			quoteText.className = "preview-card-flashback-quote-text";
-			quoteText.textContent = info.quoteExcerpt;
-			quote.appendChild(quoteText);
-			message.appendChild(quote);
-		}
-		const reply = document.createElement("div");
-		reply.className = "preview-card-flashback-reply";
 		if (info.excerpt) {
-			reply.textContent = info.excerpt;
+			message.textContent = info.excerpt;
+		} else if (info.quoteExcerpt) {
+			message.textContent = info.quoteAuthor ? ("Citat: " + info.quoteAuthor + " - " + info.quoteExcerpt)
+				: info.quoteExcerpt;
 		} else {
-			reply.textContent = info.forumName || info.category || "Flashback forumtr\u00e5d";
+			message.textContent = info.forumName || info.category || "Flashback forum thread";
 		}
-		message.appendChild(reply);
-		postBody.appendChild(message);
-		post.appendChild(postBody);
-		body.appendChild(post);
+		body.appendChild(message);
 		shell.appendChild(body);
 
 		const footer = document.createElement("div");
 		footer.className = "preview-card-flashback-footer";
 		const meta = document.createElement("span");
 		meta.className = "preview-card-flashback-meta";
-		if (info.isPostLink && info.postId) {
-			meta.textContent = info.threadId ? ("Svar p" + info.postId + " i tr\u00e5d t" + info.threadId)
-				: ("Svar p" + info.postId);
-		} else {
-			meta.textContent = info.threadId ? "Thread t" + info.threadId : "Discussion thread";
-		}
+		meta.textContent = info.host;
 		footer.appendChild(meta);
 		const action = document.createElement("span");
 		action.className = "preview-card-flashback-action";
@@ -8211,6 +8151,8 @@
 		const hasSteamGallery = steamMediaItems.length > 0;
 		const gameStoreKind = isSteam ? "" : previewGameStoreKind(preview, hostLabel);
 		const isGameStore = !!gameStoreKind;
+		const gameStoreMediaItems = isGameStore ? previewGameStoreMediaItems(preview) : [];
+		const hasGameStoreGallery = gameStoreMediaItems.length > 0;
 		const richProviderSpec = (!isSteam && !isGameStore) ? previewProviderSpec(preview, hostLabel) : null;
 		const swedishSiteKind = previewSwedishSiteKind(preview, hostLabel);
 		const isSwedishMarketplace = swedishSiteKind === "tradera" || swedishSiteKind === "blocket";
@@ -8220,7 +8162,7 @@
 		const isTwitch = previewIsTwitch(preview, hostLabel);
 		const isSocialPost = !isXPost && previewIsSocialPost(preview, hostLabel);
 		const hasImageCarousel = imageMediaItems.length > 1 && !isVideoMedia && !isGifMedia;
-		const hasInteractiveMedia = hasPlayableMedia || hasEmbedMedia || hasImageCarousel || hasSteamGallery;
+		const hasInteractiveMedia = hasPlayableMedia || hasEmbedMedia || hasImageCarousel || hasSteamGallery || hasGameStoreGallery;
 		const cardUsesDiv = hasInteractiveMedia || isGitHub || isGameStore || !!richProviderSpec;
 		const isImagePreview = !isVideoMedia && !isGifMedia
 			&& (preview.kind === "image" || /^image\//i.test(mediaMime))
@@ -8295,7 +8237,8 @@
 			return card;
 		}
 		if (isGameStore) {
-			appendGameStorePreview(card, preview, gameStoreKind, hostLabel, sourceLabel, descriptionText);
+			appendGameStorePreview(card, preview, gameStoreKind, hostLabel, sourceLabel, descriptionText,
+				gameStoreMediaItems);
 			return card;
 		}
 		if (richProviderSpec) {

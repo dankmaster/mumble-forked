@@ -3654,7 +3654,7 @@ struct RichPreviewProviderInfo {
 	QStringList hostSuffixes;
 };
 
-constexpr int RICH_PREVIEW_METADATA_VERSION = 5;
+constexpr int RICH_PREVIEW_METADATA_VERSION = 7;
 
 bool isDirectImageUrl(const QUrl &url) {
 	if (!url.isValid()) {
@@ -4154,6 +4154,30 @@ QUrl webhallenProductApiUrl(const QString &productId) {
 	return url;
 }
 
+QString webhallenProductTitleFromUrl(const QUrl &url) {
+	const std::optional< QString > productId = webhallenProductIdFromUrl(url);
+	if (!productId) {
+		return QString();
+	}
+
+	const QStringList segments = decodedUrlPathSegments(url);
+	for (QString segment : segments) {
+		if (!segment.startsWith(*productId)) {
+			continue;
+		}
+
+		segment = segment.mid(productId->size());
+		segment.remove(QRegularExpression(QLatin1String("^[-_]+")));
+		segment.replace(QRegularExpression(QLatin1String("[-_]+")), QStringLiteral(" "));
+		segment = segment.simplified();
+		if (segment.size() >= 3) {
+			return segment;
+		}
+	}
+
+	return QString();
+}
+
 std::optional< GameStorePreviewInfo > gameStorePreviewInfoForUrl(const QUrl &url) {
 	if (!url.isValid()) {
 		return std::nullopt;
@@ -4556,6 +4580,34 @@ QString flashbackFirstHtmlMatch(const QString &html, const QString &pattern) {
 	return match.hasMatch() ? decodedPreviewText(match.captured(1)).trimmed() : QString();
 }
 
+QString flashbackNormalizedAvatarUrl(QString rawUrl) {
+	rawUrl = decodedPreviewText(rawUrl).trimmed();
+	rawUrl.replace(QLatin1String("\\/"), QLatin1String("/"));
+	if (rawUrl.startsWith(QLatin1String("//"))) {
+		rawUrl.prepend(QStringLiteral("https:"));
+	}
+
+	const QUrl avatarUrl = QUrl(QStringLiteral("https://www.flashback.org/")).resolved(QUrl(rawUrl));
+	if (!isSafePreviewTarget(avatarUrl)) {
+		return QString();
+	}
+	return avatarUrl.toString(QUrl::FullyEncoded);
+}
+
+QString flashbackPostAvatarUrlFromHtml(const QString &postBlock) {
+	static const QRegularExpression s_avatarPattern(
+		QLatin1String("<a\\b(?=[^>]*\\bpost-user-avatar\\b)[^>]*>([\\s\\S]{0,1600}?)</a>"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch avatarMatch = s_avatarPattern.match(postBlock);
+	if (!avatarMatch.hasMatch()) {
+		return QString();
+	}
+
+	const QString rawUrl = flashbackFirstHtmlMatch(
+		avatarMatch.captured(1), QLatin1String("<img\\b[^>]*\\bsrc\\s*=\\s*['\"]([^'\"]+)['\"]"));
+	return rawUrl.isEmpty() ? QString() : flashbackNormalizedAvatarUrl(rawUrl);
+}
+
 QString flashbackPostBlockFromHtml(const QString &html, const QString &preferredPostId) {
 	const QString postId = preferredPostId.trimmed();
 	if (!postId.isEmpty()) {
@@ -4754,6 +4806,8 @@ void appendFlashbackPostMetadata(QVariantMap &metadata, const QString &html, con
 		metadata, QStringLiteral("Author"),
 		flashbackFirstHtmlMatch(postBlock, QLatin1String("<a\\b[^>]*\\bpost-user-username\\b[^>]*>([\\s\\S]*?)</a>")),
 		mirrorAsFirstPost);
+	appendFlashbackPostValue(metadata, QStringLiteral("AuthorAvatarUrl"), flashbackPostAvatarUrlFromHtml(postBlock),
+							 mirrorAsFirstPost);
 	appendFlashbackPostValue(metadata, QStringLiteral("AuthorTitle"),
 							 flashbackFirstHtmlMatch(postBlock,
 													 QLatin1String("<div\\b[^>]*\\bpost-user-title\\b[^>]*>([\\s\\S]*?)</div>")),
@@ -5060,6 +5114,13 @@ QString plainTextFromHtml(QString html) {
 	return decodedPreviewText(html).simplified();
 }
 
+QString htmlBodyFragment(const QString &html) {
+	static const QRegularExpression s_bodyStartPattern(QLatin1String("<body\\b[^>]*>"),
+													   QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_bodyStartPattern.match(html);
+	return match.hasMatch() ? html.mid(match.capturedEnd()) : html;
+}
+
 QString htmlElementTextById(const QString &html, const QString &id, int maxChars = 6000) {
 	if (html.isEmpty() || id.isEmpty()) {
 		return QString();
@@ -5100,25 +5161,184 @@ QString firstHtmlClassText(const QString &html, const QString &className, int ma
 	return match.hasMatch() ? plainTextFromHtml(match.captured(2)) : QString();
 }
 
-QVariantList previewImageItemsFromUrl(const QUrl &baseUrl, const QString &rawUrl, const QString &mime = QStringLiteral("image/jpeg")) {
-	QVariantList items;
-	const QString trimmed = rawUrl.trimmed();
-	if (trimmed.isEmpty()) {
-		return items;
+void appendPreviewImageItem(QVariantList &items, QSet< QString > &seenUrls, const QUrl &baseUrl, QString rawUrl,
+							QString mime = QStringLiteral("image/jpeg"), const QString &title = QString(),
+							QString thumbnail = QString(), QString poster = QString()) {
+	rawUrl = decodedPreviewText(rawUrl).trimmed();
+	rawUrl.replace(QLatin1String("\\/"), QLatin1String("/"));
+	if (rawUrl.startsWith(QLatin1String("//"))) {
+		rawUrl.prepend(QStringLiteral("https:"));
+	}
+	if (rawUrl.isEmpty()) {
+		return;
 	}
 
-	const QUrl imageUrl = baseUrl.resolved(QUrl(trimmed));
+	const QUrl imageUrl = baseUrl.resolved(QUrl(rawUrl));
 	if (!isSafePreviewTarget(imageUrl)) {
-		return items;
+		return;
 	}
+
+	const QString imageUrlString = imageUrl.toString(QUrl::FullyEncoded);
+	if (imageUrlString.isEmpty() || seenUrls.contains(imageUrlString)) {
+		return;
+	}
+	seenUrls.insert(imageUrlString);
 
 	QVariantMap item;
-	item.insert(QStringLiteral("url"), imageUrl.toString(QUrl::FullyEncoded));
+	item.insert(QStringLiteral("url"), imageUrlString);
 	item.insert(QStringLiteral("mime"), mime.trimmed().isEmpty() ? QStringLiteral("image/jpeg") : mime.trimmed());
 	item.insert(QStringLiteral("kind"), QStringLiteral("image"));
+	insertPreviewMetadataValue(item, QStringLiteral("title"), title);
+
+	thumbnail = decodedPreviewText(thumbnail).trimmed();
+	poster    = decodedPreviewText(poster).trimmed();
+	const QUrl thumbnailUrl = baseUrl.resolved(QUrl(thumbnail));
+	if (isSafePreviewTarget(thumbnailUrl)) {
+		item.insert(QStringLiteral("thumbnail"), thumbnailUrl.toString(QUrl::FullyEncoded));
+	}
+	const QUrl posterUrl = baseUrl.resolved(QUrl(poster));
+	if (isSafePreviewTarget(posterUrl)) {
+		item.insert(QStringLiteral("poster"), posterUrl.toString(QUrl::FullyEncoded));
+	}
 	items.push_back(item);
+}
+
+void appendPreviewImageItems(QVariantList &items, QSet< QString > &seenUrls, const QUrl &baseUrl,
+							 const QVariantList &sourceItems) {
+	for (const QVariant &value : sourceItems) {
+		const QVariantMap image = value.toMap();
+		appendPreviewImageItem(items, seenUrls, baseUrl, image.value(QStringLiteral("url")).toString(),
+							   image.value(QStringLiteral("mime")).toString(),
+							   image.value(QStringLiteral("title")).toString(),
+							   image.value(QStringLiteral("thumbnail")).toString(),
+							   image.value(QStringLiteral("poster")).toString());
+	}
+}
+
+QVariantList previewImageItemsFromUrl(const QUrl &baseUrl, const QString &rawUrl, const QString &mime = QStringLiteral("image/jpeg")) {
+	QVariantList items;
+	QSet< QString > seenUrls;
+	appendPreviewImageItem(items, seenUrls, baseUrl, rawUrl, mime);
 	return items;
 }
+
+QVariantList previewImageItemsFromJsonLdValue(const QUrl &baseUrl, const QJsonValue &value, int maxItems = 12) {
+	QVariantList items;
+	QSet< QString > seenUrls;
+
+	std::function< void(const QJsonValue &, int) > collect = [&](const QJsonValue &current, const int depth) {
+		if (depth > 6 || items.size() >= maxItems) {
+			return;
+		}
+
+		if (current.isArray()) {
+			for (const QJsonValue &item : current.toArray()) {
+				collect(item, depth + 1);
+				if (items.size() >= maxItems) {
+					break;
+				}
+			}
+			return;
+		}
+
+		if (current.isObject()) {
+			const QJsonObject object = current.toObject();
+			const QString title =
+				jsonLdObjectText(object, QStringList { QStringLiteral("caption"), QStringLiteral("name"),
+													   QStringLiteral("headline"), QStringLiteral("title") });
+			const QString thumbnail =
+				jsonLdObjectText(object, QStringList { QStringLiteral("thumbnailUrl"), QStringLiteral("thumbnail") });
+			for (const QString &key :
+				 QStringList { QStringLiteral("url"), QStringLiteral("contentUrl"), QStringLiteral("thumbnailUrl"),
+							   QStringLiteral("large"), QStringLiteral("src"), QStringLiteral("original"),
+							   QStringLiteral("@id") }) {
+				appendPreviewImageItem(items, seenUrls, baseUrl, jsonLdScalarText(object.value(key)),
+									   QStringLiteral("image/jpeg"), title, thumbnail);
+				if (items.size() >= maxItems) {
+					return;
+				}
+			}
+			collect(object.value(QStringLiteral("image")), depth + 1);
+			collect(object.value(QStringLiteral("images")), depth + 1);
+			return;
+		}
+
+		appendPreviewImageItem(items, seenUrls, baseUrl, jsonLdScalarText(current));
+	};
+
+	collect(value, 0);
+	return items;
+}
+
+QString bestHtmlSrcSetUrl(QString srcset) {
+	srcset = decodedPreviewText(srcset).trimmed();
+	QString best;
+	for (const QString &part : srcset.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+		const QString candidate = part.simplified().section(QLatin1Char(' '), 0, 0).trimmed();
+		if (!candidate.isEmpty()) {
+			best = candidate;
+		}
+	}
+	return best;
+}
+
+QString htmlImageCandidateFromAttributes(const QString &attrs) {
+	for (const QString &key :
+		 QStringList { QStringLiteral("data-src"), QStringLiteral("data-lazy-src"),
+					   QStringLiteral("data-original"), QStringLiteral("data-zoom-image") }) {
+		const QString value = firstHtmlAttributeValue(attrs, key);
+		if (!value.isEmpty()) {
+			return value;
+		}
+	}
+	for (const QString &key : QStringList { QStringLiteral("srcset"), QStringLiteral("data-srcset") }) {
+		const QString value = bestHtmlSrcSetUrl(firstHtmlAttributeValue(attrs, key));
+		if (!value.isEmpty()) {
+			return value;
+		}
+	}
+	return firstHtmlAttributeValue(attrs, QStringLiteral("src"));
+}
+
+bool productImageAltMatchesTitle(QString alt, QString productTitle) {
+	alt          = decodedPreviewText(alt).simplified().toLower();
+	productTitle = decodedPreviewText(productTitle).simplified().toLower();
+	if (alt.isEmpty() || productTitle.isEmpty()) {
+		return false;
+	}
+	if (alt == productTitle || alt.contains(productTitle) || productTitle.contains(alt)) {
+		return true;
+	}
+
+	QString shortTitle = productTitle;
+	static const QRegularExpression s_keySuffix(
+		QLatin1String("\\s+(?:pc\\s+)?(?:cd\\s+)?(?:key|game|code|closed\\s+beta|steam|epic\\s+games|gog).*$"),
+		QRegularExpression::CaseInsensitiveOption);
+	shortTitle.remove(s_keySuffix);
+	shortTitle = shortTitle.simplified();
+	return shortTitle.size() >= 4 && (alt.contains(shortTitle) || shortTitle.contains(alt));
+}
+
+QVariantList gameStoreImageItemsFromHtml(const QUrl &baseUrl, const QString &html, const QString &productTitle) {
+	QVariantList items;
+	QSet< QString > seenUrls;
+	static const QRegularExpression s_imagePattern(QLatin1String("<img\\b([^>]*)>"),
+												   QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator it = s_imagePattern.globalMatch(html);
+	while (it.hasNext() && items.size() < 12) {
+		const QString attrs = it.next().captured(1);
+		const QString alt   = firstHtmlAttributeValue(attrs, QStringLiteral("alt"));
+		const QString title = firstHtmlAttributeValue(attrs, QStringLiteral("title"));
+		if (!productImageAltMatchesTitle(!alt.isEmpty() ? alt : title, productTitle)) {
+			continue;
+		}
+		appendPreviewImageItem(items, seenUrls, baseUrl, htmlImageCandidateFromAttributes(attrs),
+							   QStringLiteral("image/jpeg"), !alt.isEmpty() ? alt : title);
+	}
+	return items;
+}
+
+QString normalizedProductRatingText(QString rating);
 
 QString webhallenProductPriceText(const QJsonObject &product) {
 	const QJsonObject priceObject = product.value(QStringLiteral("price")).toObject();
@@ -5135,6 +5355,62 @@ QString webhallenProductAvailabilityText(const QJsonObject &product) {
 		return QObject::tr("Discontinued");
 	}
 	return QObject::tr("Out of stock");
+}
+
+QString webhallenProductTitleText(const QJsonObject &product) {
+	return jsonLdObjectText(product, QStringList { QStringLiteral("mainTitle"), QStringLiteral("name"),
+												   QStringLiteral("metaTitle") });
+}
+
+QString webhallenProductDescriptionText(const QJsonObject &product) {
+	QString description = jsonLdScalarText(product.value(QStringLiteral("metaDescription")));
+	if (!description.isEmpty()) {
+		return description;
+	}
+
+	description = plainTextFromHtml(jsonLdScalarText(product.value(QStringLiteral("description"))));
+	if (!description.isEmpty()) {
+		return description;
+	}
+
+	description = jsonLdScalarText(product.value(QStringLiteral("subTitle")));
+	if (!description.isEmpty()) {
+		return description;
+	}
+
+	description = jsonLdScalarText(product.value(QStringLiteral("categoryTree")));
+	description.replace(QLatin1Char('/'), QStringLiteral(" / "));
+	return description.simplified();
+}
+
+QString webhallenProductRatingText(const QJsonObject &product) {
+	const QJsonObject rating = product.value(QStringLiteral("averageRating")).toObject();
+	return normalizedProductRatingText(jsonLdObjectText(rating, QStringList { QStringLiteral("rating"),
+																			  QStringLiteral("ratingValue") }));
+}
+
+QVariantList webhallenProductSpecs(const QJsonObject &product) {
+	QVariantList items;
+	QSet< QString > seenLabels;
+	const QJsonObject groups = product.value(QStringLiteral("data")).toObject();
+	const auto appendFromGroup = [&items, &seenLabels, &groups](const QString &groupName, const QString &fieldName,
+																const QString &label = QString()) {
+		const QJsonObject group = groups.value(groupName).toObject();
+		const QJsonObject field = group.value(fieldName).toObject();
+		appendPreviewSpecItem(items, seenLabels, label.isEmpty() ? field.value(QStringLiteral("name")).toString() : label,
+							  jsonLdScalarText(field.value(QStringLiteral("value"))));
+	};
+
+	appendFromGroup(QStringLiteral("Inmatningsenhet"), QString::fromUtf8("Teknik f\xc3\xb6r r\xc3\xb6relsedetektering"),
+					QString::fromUtf8("R\xc3\xb6relsel\xc3\xa4sare"));
+	appendFromGroup(QStringLiteral("Inmatningsenhet"), QString::fromUtf8("R\xc3\xb6relseuppl\xc3\xb6sning"),
+					QStringLiteral("DPI"));
+	appendFromGroup(QStringLiteral("Inmatningsenhet"), QStringLiteral("Antal knappar"));
+	appendFromGroup(QStringLiteral("Inmatningsenhet"), QStringLiteral("Anslutningsteknik"));
+	appendFromGroup(QStringLiteral("Inmatningsenhet"), QString::fromUtf8("Gr\xc3\xa4nssnitt"));
+	appendFromGroup(QString::fromUtf8("M\xc3\xa5tt och vikt"), QStringLiteral("Vikt"));
+
+	return items;
 }
 
 QVariantList webhallenProductImageItems(const QJsonObject &product) {
@@ -5186,8 +5462,7 @@ QVariantMap webhallenProductMetadata(const QUrl &url, const QJsonObject &product
 
 	insertPreviewMetadataValue(metadata, QStringLiteral("productId"),
 							   jsonLdScalarText(product.value(QStringLiteral("id"))));
-	insertPreviewMetadataValue(metadata, QStringLiteral("productTitle"),
-							   jsonLdScalarText(product.value(QStringLiteral("name"))));
+	insertPreviewMetadataValue(metadata, QStringLiteral("productTitle"), webhallenProductTitleText(product));
 	insertPreviewMetadataValue(metadata, QStringLiteral("productPrice"), webhallenProductPriceText(product));
 	insertPreviewMetadataValue(metadata, QStringLiteral("productAvailability"),
 							   webhallenProductAvailabilityText(product));
@@ -5198,11 +5473,12 @@ QVariantMap webhallenProductMetadata(const QUrl &url, const QJsonObject &product
 	if (!partNumbers.isEmpty()) {
 		metadata.insert(QStringLiteral("productSku"), partNumbers.first());
 	}
-	const QString description =
-		!jsonLdScalarText(product.value(QStringLiteral("metaDescription"))).isEmpty()
-			? jsonLdScalarText(product.value(QStringLiteral("metaDescription")))
-			: plainTextFromHtml(jsonLdScalarText(product.value(QStringLiteral("description"))));
-	insertPreviewMetadataValue(metadata, QStringLiteral("productDescription"), description);
+	insertPreviewMetadataValue(metadata, QStringLiteral("productDescription"), webhallenProductDescriptionText(product));
+	insertPreviewMetadataValue(metadata, QStringLiteral("productRating"), webhallenProductRatingText(product));
+	const QVariantList specs = webhallenProductSpecs(product);
+	if (!specs.isEmpty()) {
+		metadata.insert(QStringLiteral("productSpecs"), specs);
+	}
 	const QVariantList images = webhallenProductImageItems(product);
 	if (!images.isEmpty()) {
 		metadata.insert(QStringLiteral("productImages"), images);
@@ -5307,7 +5583,98 @@ struct GameStoreProductData {
 	QString reviewCount;
 	QString platform;
 	QString image;
+	QStringList tags;
+	QVariantList images;
 };
+
+void appendGameStoreTag(QStringList &tags, QString value, const QString &productTitle = QString(),
+						const QString &siteLabel = QString()) {
+	value = decodedPreviewText(value).simplified();
+	if (value.isEmpty()) {
+		return;
+	}
+
+	const QStringList parts = value.split(QRegularExpression(QLatin1String("\\s*[,;|]\\s*")), Qt::SkipEmptyParts);
+	if (parts.size() > 1) {
+		for (const QString &part : parts) {
+			appendGameStoreTag(tags, part, productTitle, siteLabel);
+		}
+		return;
+	}
+
+	value.remove(QRegularExpression(QLatin1String("^#+")));
+	value = value.simplified();
+	if (value.size() < 2 || value.size() > 48 || value.startsWith(QLatin1String("http"), Qt::CaseInsensitive)) {
+		return;
+	}
+
+	const QString lower = value.toLower();
+	if (lower == QLatin1String("home") || lower == QLatin1String("homepage") || lower == QLatin1String("store")
+		|| lower == QLatin1String("shop") || lower == QLatin1String("game") || lower == QLatin1String("games")
+		|| lower == QLatin1String("product") || lower == QLatin1String("products")
+		|| lower == QString::fromUtf8("strona g\xc5\x82\xc3\xb3wna")
+		|| lower == QLatin1String("strona glowna") || lower == QLatin1String("sklep")
+		|| lower == QLatin1String("gry") || lower == QLatin1String("produkty")) {
+		return;
+	}
+	if (!productTitle.isEmpty() && value.compare(productTitle, Qt::CaseInsensitive) == 0) {
+		return;
+	}
+	if (!siteLabel.isEmpty() && value.compare(siteLabel, Qt::CaseInsensitive) == 0) {
+		return;
+	}
+	if (!tags.contains(value, Qt::CaseInsensitive)) {
+		tags.push_back(value);
+	}
+}
+
+void appendGameStoreTagsFromJsonLdValue(QStringList &tags, const QJsonValue &value, const QString &productTitle = QString(),
+										const QString &siteLabel = QString()) {
+	for (const QString &text : jsonLdStringList(value)) {
+		appendGameStoreTag(tags, text, productTitle, siteLabel);
+	}
+}
+
+QString jsonLdOfferFieldPriceText(const QJsonObject &offer, const QStringList &keys) {
+	const QString price = jsonLdObjectText(offer, keys);
+	const QString currency = jsonLdObjectText(
+		offer, QStringList { QStringLiteral("priceCurrency"), QStringLiteral("currency") });
+	return formatSwedishProductPrice(price, currency);
+}
+
+QString normalizedDiscountText(QString discount) {
+	discount = decodedPreviewText(discount).simplified();
+	if (discount.isEmpty()) {
+		return QString();
+	}
+
+	static const QRegularExpression s_discountPattern(
+		QLatin1String("-?([0-9]{1,3}(?:[\\.,][0-9]+)?)\\s*%"), QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_discountPattern.match(discount);
+	if (match.hasMatch()) {
+		const QString number = match.captured(1).replace(QLatin1Char(','), QLatin1Char('.'));
+		return QStringLiteral("-%1%").arg(number);
+	}
+
+	bool ok = false;
+	const double value = discount.replace(QLatin1Char(','), QLatin1Char('.')).toDouble(&ok);
+	if (ok && value > 0.0 && value < 100.0) {
+		return QStringLiteral("-%1%").arg(QString::number(value, 'f', value == static_cast< int >(value) ? 0 : 1));
+	}
+	return discount;
+}
+
+QString jsonLdOfferDiscountText(const QJsonObject &offer) {
+	for (const QString &key : QStringList { QStringLiteral("discount"), QStringLiteral("discountPercent"),
+											QStringLiteral("discountPercentage"), QStringLiteral("salePercentage"),
+											QStringLiteral("percentOff") }) {
+		const QString discount = normalizedDiscountText(jsonLdNamedText(offer.value(key)));
+		if (!discount.isEmpty()) {
+			return discount;
+		}
+	}
+	return QString();
+}
 
 GameStoreProductData gameStoreJsonLdProductData(const QUrl &url, const QString &html) {
 	GameStoreProductData data;
@@ -5328,7 +5695,17 @@ GameStoreProductData gameStoreJsonLdProductData(const QUrl &url, const QString &
 			object, QStringList { QStringLiteral("description"), QStringLiteral("abstract") });
 		data.sku = jsonLdObjectText(object, QStringList { QStringLiteral("sku"), QStringLiteral("productID") });
 		data.brand = jsonLdNamedText(object.value(QStringLiteral("brand")));
-		data.image = jsonLdNamedText(object.value(QStringLiteral("image")));
+		data.images = previewImageItemsFromJsonLdValue(url, object.value(QStringLiteral("image")));
+		if (!data.images.isEmpty()) {
+			data.image = data.images.first().toMap().value(QStringLiteral("url")).toString();
+		} else {
+			data.image = jsonLdNamedText(object.value(QStringLiteral("image")));
+		}
+		for (const QString &key : QStringList { QStringLiteral("genre"), QStringLiteral("category"),
+												QStringLiteral("keywords"), QStringLiteral("applicationCategory"),
+												QStringLiteral("gamePlatform"), QStringLiteral("operatingSystem") }) {
+			appendGameStoreTagsFromJsonLdValue(data.tags, object.value(key), data.title);
+		}
 
 		const QJsonObject aggregateRating = object.value(QStringLiteral("aggregateRating")).toObject();
 		const QString rating              = jsonLdObjectText(
@@ -5343,12 +5720,35 @@ GameStoreProductData gameStoreJsonLdProductData(const QUrl &url, const QString &
 		const QJsonObject offer = bestJsonLdOfferForUrl(jsonLdOfferObjects(object), url);
 		if (!offer.isEmpty()) {
 			data.price = jsonLdOfferPriceText(offer);
+			data.originalPrice =
+				jsonLdOfferFieldPriceText(offer, QStringList { QStringLiteral("originalPrice"),
+															   QStringLiteral("regularPrice"),
+															   QStringLiteral("listPrice"),
+															   QStringLiteral("wasPrice") });
+			data.discount = jsonLdOfferDiscountText(offer);
 			data.availability = normalizedGameStoreAvailability(jsonLdObjectText(
 				offer, QStringList { QStringLiteral("availability"), QStringLiteral("availabilityStarts") }));
 		}
 
 		if (!data.title.isEmpty() || !data.price.isEmpty()) {
 			break;
+		}
+	}
+
+	for (const QJsonObject &object : objects) {
+		if (!jsonLdTypeContains(object, QStringList { QStringLiteral("BreadcrumbList") })) {
+			continue;
+		}
+		for (const QJsonValue &value : object.value(QStringLiteral("itemListElement")).toArray()) {
+			if (!value.isObject()) {
+				continue;
+			}
+			const QJsonObject item = value.toObject();
+			QString name = jsonLdObjectText(item, QStringList { QStringLiteral("name") });
+			if (name.isEmpty()) {
+				name = jsonLdNamedText(item.value(QStringLiteral("item")));
+			}
+			appendGameStoreTag(data.tags, name, data.title);
 		}
 	}
 
@@ -5809,6 +6209,12 @@ QString inetProductDescriptionFromText(const QString &text, const QString &produ
 		candidate.remove(QRegularExpression(QLatin1String("[0-9]+\\s+st\\s+bilder\\s+och\\s+[0-9]+\\s+st\\s+videor\\.?"),
 											 QRegularExpression::CaseInsensitiveOption));
 		candidate = candidate.simplified();
+		if (!productTitle.isEmpty()) {
+			candidate.remove(QRegularExpression(
+				QStringLiteral("^(?:%1\\s*)+[,\\-:|\\s]*").arg(QRegularExpression::escape(productTitle)),
+				QRegularExpression::CaseInsensitiveOption));
+			candidate = candidate.simplified();
+		}
 		if (candidate.size() >= 24) {
 			description = candidate.left(360).trimmed();
 		}
@@ -5988,7 +6394,7 @@ QVariantList inetProductImageItemsFromHtml(const QUrl &url, const QString &html)
 QVariantMap inetProductMetadata(const QUrl &url, const QString &title, const QString &description,
 								const QString &html, const QHash< QString, QString > &metaTags) {
 	QVariantMap metadata;
-	const QString text                       = plainTextFromHtml(html);
+	const QString text                       = plainTextFromHtml(htmlBodyFragment(html));
 	const QString productTitle               = inetProductTitleFromHtml(html, title);
 	const InetArticleNumbers articleNumbers  = inetArticleNumbersFromText(text);
 	const QString productId                  = inetProductIdFromUrl(url).value_or(articleNumbers.articleId);
@@ -6557,6 +6963,31 @@ bool gameStoreTitleLooksBlocked(const QString &title) {
 		   || normalized.contains(QLatin1String("forbidden"));
 }
 
+QStringList gameStoreMetaTags(const QHash< QString, QString > &metaTags, const QString &productTitle,
+							  const QString &siteLabel) {
+	QStringList tags;
+	for (const QString &key : QStringList { QStringLiteral("keywords"), QStringLiteral("news_keywords"),
+											QStringLiteral("product:category"), QStringLiteral("category"),
+											QStringLiteral("article:tag") }) {
+		appendGameStoreTag(tags, previewMetaValue(metaTags, QStringList { key }), productTitle, siteLabel);
+	}
+	return tags;
+}
+
+QVariantList gameStoreTagValues(const QStringList &tags, int maxItems = 6) {
+	QVariantList values;
+	for (const QString &tag : tags) {
+		const QString clean = tag.trimmed();
+		if (!clean.isEmpty()) {
+			values.push_back(clean);
+		}
+		if (values.size() >= maxItems) {
+			break;
+		}
+	}
+	return values;
+}
+
 QVariantMap gameStorePreviewMetadata(const QUrl &url, const QString &title, const QString &description,
 									 const QString &html,
 									 const QHash< QString, QString > &metaTags) {
@@ -6586,6 +7017,29 @@ QVariantMap gameStorePreviewMetadata(const QUrl &url, const QString &title, cons
 							  : (!metaPrice.isEmpty() ? metaPrice : gameStorePreviewPriceText(combinedText, QString()));
 	const QString platform =
 		gameStorePreviewPlatformText(store->key, QString(productTitle + QLatin1Char(' ') + cleanTitle), description);
+	QStringList tags = productData.tags;
+	for (const QString &tag : gameStoreMetaTags(metaTags, productTitle, store->siteLabel)) {
+		appendGameStoreTag(tags, tag, productTitle, store->siteLabel);
+	}
+
+	QVariantList gameStoreImages;
+	QSet< QString > seenImageUrls;
+	appendPreviewImageItems(gameStoreImages, seenImageUrls, url, productData.images);
+	if (!productData.image.isEmpty()) {
+		appendPreviewImageItem(gameStoreImages, seenImageUrls, url, productData.image);
+	}
+	const QString metaImage = previewMetaValue(metaTags, QStringList { QStringLiteral("og:image"),
+																	   QStringLiteral("twitter:image"),
+																	   QStringLiteral("twitter:image:src") });
+	appendPreviewImageItem(gameStoreImages, seenImageUrls, url, metaImage);
+	appendPreviewImageItems(gameStoreImages, seenImageUrls, url,
+							gameStoreImageItemsFromHtml(url, html, productTitle));
+	const QVariantList gameStoreMedia = productMediaItemsFromHtml(url, html, metaTags, gameStoreImages);
+	const QString gameStoreImage = !productData.image.isEmpty()
+									   ? productData.image
+									   : (!gameStoreImages.isEmpty()
+											  ? gameStoreImages.first().toMap().value(QStringLiteral("url")).toString()
+											  : QString());
 
 	metadata.insert(QStringLiteral("provider"), QStringLiteral("game-store"));
 	metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("game-store"));
@@ -6605,7 +7059,18 @@ QVariantMap gameStorePreviewMetadata(const QUrl &url, const QString &title, cons
 	insertPreviewMetadataValue(metadata, QStringLiteral("gameStoreRating"), productData.rating);
 	insertPreviewMetadataValue(metadata, QStringLiteral("gameStoreReviewCount"), productData.reviewCount);
 	insertPreviewMetadataValue(metadata, QStringLiteral("gameStorePlatform"), platform);
-	insertPreviewMetadataValue(metadata, QStringLiteral("gameStoreImage"), productData.image);
+	insertPreviewMetadataValue(metadata, QStringLiteral("gameStoreImage"), gameStoreImage);
+	const QVariantList tagValues = gameStoreTagValues(tags);
+	if (!tagValues.isEmpty()) {
+		metadata.insert(QStringLiteral("gameStoreTags"), tagValues);
+	}
+	if (!gameStoreImages.isEmpty()) {
+		metadata.insert(QStringLiteral("gameStoreImages"), gameStoreImages);
+	}
+	if (!gameStoreMedia.isEmpty()) {
+		metadata.insert(QStringLiteral("gameStoreMedia"), gameStoreMedia);
+		metadata.insert(QStringLiteral("gameStoreMediaItems"), gameStoreMedia);
+	}
 	return metadata;
 }
 
@@ -15796,14 +16261,19 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 												   buildModernInlineDataImageReplacement);
 		bodyHtml = persistentChatCondensedBodyHtml(bodyHtml, bodyText);
 	}
-	if (!deletedMessage && message.has_edited_at() && message.edited_at() > 0) {
-		bodyHtml += QString::fromLatin1(" <em>%1</em>").arg(tr("(edited)").toHtmlEscaped());
-	}
 	const std::optional< PersistentChatReplyReference > replyReference =
 		(systemMessage || deletedMessage)
 			? std::nullopt
 			: (message.has_body_text() ? resolvedPersistentChatReplyReference(m_persistentChatMessages, message)
 									   : extractPersistentChatReplyReference(bodyHtml, &bodyHtml));
+	const std::optional< QString > previewKey =
+		(!systemMessage && !deletedMessage) ? persistentChatPreviewKey(message) : std::nullopt;
+	if (previewKey && persistentChatSourceTextIsSinglePreviewableUrl(bodyText)) {
+		bodyHtml = persistentChatPreviewSourceUrlHtml(bodyText);
+	}
+	if (!deletedMessage && message.has_edited_at() && message.edited_at() > 0) {
+		bodyHtml += QString::fromLatin1(" <em>%1</em>").arg(tr("(edited)").toHtmlEscaped());
+	}
 
 	QVariantMap messageState;
 	messageState.insert(QStringLiteral("messageId"), static_cast< qulonglong >(message.message_id()));
@@ -15858,7 +16328,7 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 	messageState.insert(QStringLiteral("reactions"), reactions);
 
 	if (!deletedMessage) {
-		if (const std::optional< QString > previewKey = persistentChatPreviewKey(message); previewKey) {
+		if (previewKey) {
 			if (!fastFirstPaint) {
 				ensurePersistentChatPreview(*previewKey);
 			}
@@ -23001,6 +23471,11 @@ bool MainWindow::requestPersistentChatWebhallenProductPreview(const QString &pre
 
 	it->remoteMediaRequested = true;
 	it->remoteMediaFinished  = false;
+	const QString urlTitle   = webhallenProductTitleFromUrl(previewUrl);
+	if (!urlTitle.isEmpty()) {
+		it->title = urlTitle;
+	}
+	it->subtitle = tr("Webhallen");
 
 	QNetworkRequest request(webhallenProductApiUrl(*productId));
 	preparePreviewRequest(request);
