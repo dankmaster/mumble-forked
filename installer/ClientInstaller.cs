@@ -20,6 +20,7 @@ using WixSharp.CommonTasks;
 
 public struct Features {
 	public bool overlay;
+	public bool plugins;
 	public bool g15;
 	public bool rnnoise;
 	public bool screenShareHelper;
@@ -218,7 +219,6 @@ public class ClientInstaller : MumbleInstall {
 		} else {
 			var binaryFiles = new File[binaries.Count];
 			var licenseFiles = new File[licenses.Length];
-			var pluginFiles = new File[plugins.Length];
 
 			for (int i = 0; i < binaries.Count; i++) {
 				if (binaries[i] == "mumble.exe") {
@@ -232,18 +232,21 @@ public class ClientInstaller : MumbleInstall {
 				licenseFiles[i] = new File(@"..\..\licenses\" + licenses[i]);
 			}
 
-			for (int i = 0; i < plugins.Length; i++) {
-				pluginFiles[i] = new File(@"..\..\plugins\" + plugins[i]);
-			}
-
 			installDir.Files = binaryFiles;
 			licenseDir.Files = licenseFiles;
-			pluginDir.Files = pluginFiles;
+
+			if (features.plugins) {
+				var pluginFiles = new File[plugins.Length];
+				for (int i = 0; i < plugins.Length; i++) {
+					pluginFiles[i] = new File(@"..\..\plugins\" + plugins[i]);
+				}
+				pluginDir.Files = pluginFiles;
+			}
 		}
 
 		menuDir.Dirs = new Dir[] { shortcutDir };
 		if (string.IsNullOrWhiteSpace(payloadRoot)) {
-			installDir.Dirs = new Dir[] { licenseDir, pluginDir };
+			installDir.Dirs = features.plugins ? new Dir[] { licenseDir, pluginDir } : new Dir[] { licenseDir };
 		}
 		productDir.Dirs = new Dir[] { installDir };
 		progsDir.Dirs = new Dir[] { productDir};
@@ -301,6 +304,10 @@ class BuildInstaller
 
 			if (args[i] == "--overlay") {
 				features.overlay = true;
+			}
+
+			if (args[i] == "--plugins") {
+				features.plugins = true;
 			}
 
 			if (args[i] == "--rnnoise") {

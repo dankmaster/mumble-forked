@@ -1443,9 +1443,6 @@ target_include_directories(${TARGET_NAME} INTERFACE
 )
 
 if(packaging AND WIN32 AND NOT modern-layout-webengine)
-	set(overlay ON)
-	set(plugins ON)
-
 	if(translations AND windows-installer-all-languages)
 		list(APPEND installer_vars "--all-languages")
 	endif()
@@ -1461,6 +1458,12 @@ if(packaging AND WIN32 AND NOT modern-layout-webengine)
 	if(overlay)
 		list(APPEND installer_vars
 			"--overlay"
+		)
+	endif()
+
+	if(plugins)
+		list(APPEND installer_vars
+			"--plugins"
 		)
 	endif()
 
@@ -1496,7 +1499,7 @@ if(packaging AND WIN32 AND NOT modern-layout-webengine)
 			${CMAKE_BINARY_DIR}/installer/client
 	)
 
-	if (64_BIT AND overlay-xcompile)
+	if (TARGET mumble_overlay_xcompile)
 		# Compilation of the xcompiled overlay binaries is handled by means of an external project
 		# We make the mumble target depend on the custom target created by ExternalProject_Add
 		# to ensure that the external project is built before the mumble target, ensuring that
