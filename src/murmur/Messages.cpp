@@ -1684,7 +1684,9 @@ MumbleProto::StonksSnapshot protoStonksSnapshotFromDB(
 			protoPosition->set_provider_id(position.providerID);
 			protoPosition->set_provider_symbol(position.providerSymbol);
 			protoPosition->set_exchange(position.exchange);
-			protoPosition->set_quote_time(position.quoteTime);
+			const uint64_t quoteTime =
+				position.quoteTime > 0 ? static_cast< uint64_t >(position.quoteTime) : static_cast< uint64_t >(0);
+			protoPosition->set_quote_time(quoteTime);
 			protoPosition->set_quote_source_url(position.quoteSourceURL);
 			protoPosition->set_quote_confidence(position.quoteConfidence);
 		}
