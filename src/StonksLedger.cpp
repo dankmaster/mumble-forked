@@ -152,11 +152,13 @@ namespace Stonks {
 			return QString();
 		}
 
-		const int limit = maxPositions == 0
-							  ? formattedPositions.size()
-							  : std::min< int >(formattedPositions.size(), static_cast< int >(maxPositions));
+		const qsizetype positionCount = formattedPositions.size();
+		qsizetype limit               = positionCount;
+		if (maxPositions > 0 && maxPositions < static_cast< std::size_t >(positionCount)) {
+			limit = static_cast< qsizetype >(maxPositions);
+		}
 		QStringList visible = formattedPositions.mid(0, limit);
-		const int hiddenCount = formattedPositions.size() - limit;
+		const qsizetype hiddenCount = positionCount - limit;
 		if (hiddenCount == 1) {
 			visible << QStringLiteral("1 more position");
 		} else if (hiddenCount > 1) {

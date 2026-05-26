@@ -174,7 +174,7 @@ const QList< YahooMarketFallback > &yahooMarketFallbacks() {
 
 QString systemLocaleCountryCode() {
 	const QString localeName = QLocale::system().name().toUpper();
-	const int separatorIndex = localeName.indexOf(QLatin1Char('_'));
+	const qsizetype separatorIndex = localeName.indexOf(QLatin1Char('_'));
 	if (separatorIndex < 0 || separatorIndex + 3 > localeName.size()) {
 		return {};
 	}
@@ -227,7 +227,7 @@ const YahooMarketFallback *marketFallbackForExplicitSuffix(const QString &symbol
 }
 
 bool hasSingleLetterClassSuffix(const QString &symbol) {
-	const int dashIndex = symbol.lastIndexOf(QLatin1Char('-'));
+	const qsizetype dashIndex = symbol.lastIndexOf(QLatin1Char('-'));
 	if (dashIndex <= 0 || symbol.indexOf(QLatin1Char('-')) != dashIndex) {
 		return false;
 	}
