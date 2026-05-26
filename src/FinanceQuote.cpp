@@ -176,8 +176,8 @@ namespace Finance {
 			seenSymbols.insert(symbol);
 			TickerMention mention;
 			mention.symbol          = symbol;
-			mention.start           = match.capturedStart(2) - 1;
-			mention.length          = match.capturedLength(2) + 1;
+			mention.start           = static_cast< int >(match.capturedStart(2) - 1);
+			mention.length          = static_cast< int >(match.capturedLength(2) + 1);
 			mention.yahooFinanceUrl = yahooFinanceQuoteUrl(symbol);
 			mentions.push_back(mention);
 		}
