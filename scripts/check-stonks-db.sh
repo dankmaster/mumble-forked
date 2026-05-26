@@ -6,11 +6,11 @@ usage() {
 Usage: scripts/check-stonks-db.sh [--expect-version VERSION] <mumble-server.sqlite>
 
 Verifies that a Murmur SQLite database has the stonks schema migration applied.
-Defaults to expecting schema version 20.
+Defaults to expecting schema version 21.
 USAGE
 }
 
-expected_version="20"
+expected_version="21"
 db_path=""
 
 while [[ $# -gt 0 ]]; do
@@ -88,6 +88,23 @@ if [[ ${#missing_tables[@]} -gt 0 ]]; then
 	exit 1
 fi
 
+missing_columns=()
+if [[ "$expected_version" -ge 21 ]]; then
+	for column_name in provider_id provider_symbol exchange quote_time quote_source_url quote_confidence; do
+		exists="$(
+			sqlite3 "$db_path" "SELECT COUNT(*) FROM pragma_table_info('stonks_snapshot_positions') WHERE name = '$column_name';"
+		)"
+		if [[ "$exists" != "1" ]]; then
+			missing_columns+=("stonks_snapshot_positions.$column_name")
+		fi
+	done
+fi
+
+if [[ ${#missing_columns[@]} -gt 0 ]]; then
+	echo "Missing stonks columns: ${missing_columns[*]}" >&2
+	exit 1
+fi
+
 score_count="$(sqlite3 "$db_path" "SELECT COUNT(*) FROM stonks_scores;")"
 follow_count="$(sqlite3 "$db_path" "SELECT COUNT(*) FROM stonks_follows;")"
 
@@ -100,4 +117,8 @@ if [[ "$expected_version" -ge 20 ]]; then
 	position_count="$(sqlite3 "$db_path" "SELECT COUNT(*) FROM stonks_snapshot_positions;")"
 	echo "OK: stonks_snapshots rows=$snapshot_count"
 	echo "OK: stonks_snapshot_positions rows=$position_count"
+fi
+
+if [[ "$expected_version" -ge 21 ]]; then
+	echo "OK: stonks_snapshot_positions quote metadata columns present"
 fi
