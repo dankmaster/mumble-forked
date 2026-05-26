@@ -14812,6 +14812,12 @@
 		}
 
 		const target = document.elementFromPoint(clientX, clientY);
+		if (target && typeof target.closest === "function" && target.closest(".window-actions")) {
+			refs.modernHeader.classList.remove("menu-is-peeked");
+			scheduleTransientMenuDismiss();
+			return;
+		}
+
 		const targetInMenu = !!(target && typeof target.closest === "function"
 			&& target.closest(".menu-band, .menu-group, .menu-panel"));
 		const peeking = targetInMenu || menuPeekHotZoneContains(clientX, clientY);

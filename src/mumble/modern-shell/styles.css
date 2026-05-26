@@ -176,7 +176,7 @@ body.image-viewer-dragging .image-viewer-window {
 	visibility: hidden;
 }
 
-.modern-header:focus-within .menu-band,
+.menu-band:focus-within,
 .modern-header.menu-is-peeked .menu-band,
 .modern-header.menu-is-open .menu-band {
 	max-height: 34px;
