@@ -1129,6 +1129,12 @@ message StonksPosition {
 	optional double market_value = 4;
 	optional string currency = 5;
 	optional string display_name = 6;
+	optional string provider_id = 7;
+	optional string provider_symbol = 8;
+	optional string exchange = 9;
+	optional uint64 quote_time = 10;
+	optional string quote_source_url = 11;
+	optional double quote_confidence = 12;
 }
 
 message StonksSnapshot {
@@ -1154,6 +1160,7 @@ message StonksLeaderboardRow {
 	optional uint64 start_snapshot_at = 8;
 	optional uint64 end_snapshot_at = 9;
 	optional bool followed = 10 [default = false];
+	optional bool insufficient_history = 11 [default = false];
 }
 
 message StonksUserRef {
@@ -1203,6 +1210,8 @@ message StonksState {
 	repeated TextChannelInfo text_channels = 14;
 	optional string status = 15;
 	optional string error = 16;
+	optional string leaderboard_description = 17;
+	optional uint64 leaderboard_updated_at = 18;
 }
 
 message TextChannelInfo {

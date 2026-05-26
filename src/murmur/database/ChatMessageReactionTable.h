@@ -41,10 +41,11 @@ namespace server {
 									 const ChatMessageTable &messageTable, const UserTable &userTable);
 			~ChatMessageReactionTable() = default;
 
-			void setReactionActive(unsigned int serverID, unsigned int messageID, unsigned int actorUserID,
+			bool setReactionActive(unsigned int serverID, unsigned int messageID, unsigned int actorUserID,
 								   const std::string &emoji, bool active);
 			void clearReactions(unsigned int serverID, unsigned int messageID);
 			std::vector< DBChatMessageReaction > getReactions(unsigned int serverID, unsigned int messageID);
+			unsigned int countReactionsByActor(unsigned int serverID, unsigned int actorUserID);
 
 			void migrate(unsigned int fromSchemaVersion, unsigned int toSchemaVersion) override;
 		};

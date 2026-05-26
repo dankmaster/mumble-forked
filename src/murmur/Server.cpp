@@ -2902,6 +2902,14 @@ bool Server::unregisterUser(int id) {
 	qhUserIDCache.remove(details.value(static_cast< int >(::mumble::server::db::UserProperty::Name)));
 	qhUserNameCache.remove(id);
 
+	const unsigned int chatReactionCount =
+		m_dbWrapper.getChatMessageReactionCountByActor(iServerNum, static_cast< unsigned int >(id));
+	if (chatReactionCount > 0) {
+		log(QString::fromLatin1("Unregistering user %1 will remove %2 persistent chat reaction(s)")
+				.arg(id)
+				.arg(chatReactionCount));
+	}
+
 	int res = -2;
 	emit unregisterUserSig(res, id);
 	m_dbWrapper.unregisterUser(iServerNum, static_cast< unsigned int >(id));

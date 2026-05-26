@@ -56,6 +56,7 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QLocale>
 #include <QtCore/QRandomGenerator>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QRegularExpressionMatchIterator>
 #include <QtCore/QSet>
 #include <QtCore/QStack>
@@ -63,6 +64,7 @@
 #include <QtCore/QTime>
 #include <QtCore/QTimeZone>
 #include <QtCore/QTimer>
+#include <QtCore/QUrl>
 #include <QtCore/QUuid>
 #include <QtCore/QtEndian>
 #include <QtGui/QImage>
@@ -1679,6 +1681,12 @@ MumbleProto::StonksSnapshot protoStonksSnapshotFromDB(
 			protoPosition->set_market_value(position.marketValue);
 			protoPosition->set_currency(position.currency);
 			protoPosition->set_display_name(position.displayName);
+			protoPosition->set_provider_id(position.providerID);
+			protoPosition->set_provider_symbol(position.providerSymbol);
+			protoPosition->set_exchange(position.exchange);
+			protoPosition->set_quote_time(position.quoteTime);
+			protoPosition->set_quote_source_url(position.quoteSourceURL);
+			protoPosition->set_quote_confidence(position.quoteConfidence);
 		}
 	}
 
@@ -1758,6 +1766,8 @@ MumbleProto::StonksState buildStonksState(Server *server, ServerUser *user, cons
 	state.set_can_admin(canAdmin);
 	state.set_social_announcements_enabled(server->bStonksSocialAnnouncementsEnabled);
 	state.set_selected_period(u8(normalizedPeriod));
+	state.set_leaderboard_description(
+		"Snapshot return compares each user's latest accepted snapshot with their closest older snapshot for the selected period. It updates when users submit new snapshots.");
 	if (!status.trimmed().isEmpty()) {
 		state.set_status(u8(status.trimmed()));
 	}
@@ -1818,7 +1828,11 @@ MumbleProto::StonksState buildStonksState(Server *server, ServerUser *user, cons
 	}
 
 	unsigned int rank = 1;
+	std::chrono::system_clock::time_point newestLeaderboardSnapshot = {};
+	QSet< unsigned int > rankedLedgerUsers;
 	for (const StonksLeaderboardEntry &entry : stonksLedgerLeaderboard(server, normalizedPeriod, 100)) {
+		rankedLedgerUsers.insert(entry.userID);
+		newestLeaderboardSnapshot = std::max(newestLeaderboardSnapshot, entry.endSnapshotAt);
 		MumbleProto::StonksLeaderboardRow *row = state.add_leaderboard();
 		row->set_rank(rank++);
 		row->set_user_id(entry.userID);
@@ -1830,6 +1844,28 @@ MumbleProto::StonksState buildStonksState(Server *server, ServerUser *user, cons
 		row->set_start_snapshot_at(::msdb::toEpochSeconds(entry.startSnapshotAt));
 		row->set_end_snapshot_at(::msdb::toEpochSeconds(entry.endSnapshotAt));
 		row->set_followed(followedUsers.contains(entry.userID));
+		row->set_insufficient_history(false);
+	}
+	if (newestLeaderboardSnapshot != std::chrono::system_clock::time_point()) {
+		state.set_leaderboard_updated_at(::msdb::toEpochSeconds(newestLeaderboardSnapshot));
+	}
+	if (state.leaderboard_size() < 100) {
+		for (const ::msdb::DBStonksSnapshot &latestSnapshot :
+			 server->m_dbWrapper.getLatestStonksSnapshotsByUser(server->iServerNum)) {
+			if (state.leaderboard_size() >= 100 || rankedLedgerUsers.contains(latestSnapshot.userID)
+				|| latestSnapshot.totalValue <= 0.0 || !std::isfinite(latestSnapshot.totalValue)) {
+				continue;
+			}
+
+			MumbleProto::StonksLeaderboardRow *row = state.add_leaderboard();
+			row->set_user_id(latestSnapshot.userID);
+			row->set_user_name(u8(stonksRegisteredDisplayName(server, latestSnapshot.userID)));
+			row->set_period(u8(normalizedPeriod));
+			row->set_end_value(latestSnapshot.totalValue);
+			row->set_end_snapshot_at(::msdb::toEpochSeconds(latestSnapshot.createdAt));
+			row->set_followed(followedUsers.contains(latestSnapshot.userID));
+			row->set_insufficient_history(true);
+		}
 	}
 
 	const std::optional< unsigned int > ledgerUserID =
@@ -1860,6 +1896,50 @@ QString normalizedStonksCurrency(const QString &currencyText) {
 	return currency.isEmpty() ? QStringLiteral("USD") : currency;
 }
 
+QString normalizedStonksProviderID(QString providerID) {
+	providerID = providerID.trimmed().toLower().left(64);
+	providerID.replace(QRegularExpression(QStringLiteral("[^a-z0-9_.-]+")), QStringLiteral("-"));
+	while (providerID.contains(QLatin1String("--"))) {
+		providerID.replace(QLatin1String("--"), QLatin1String("-"));
+	}
+	providerID = providerID.trimmed();
+	if (providerID.startsWith(QLatin1Char('-'))) {
+		providerID.remove(0, 1);
+	}
+	if (providerID.endsWith(QLatin1Char('-'))) {
+		providerID.chop(1);
+	}
+	return providerID.isEmpty() ? QStringLiteral("manual") : providerID;
+}
+
+QString validatedStonksQuoteSourceURL(QString sourceURL) {
+	sourceURL = sourceURL.trimmed().left(2048);
+	if (sourceURL.isEmpty()) {
+		return QString();
+	}
+
+	const QUrl url(sourceURL);
+	const QString scheme = url.scheme().toLower();
+	return url.isValid() && (scheme == QLatin1String("https") || scheme == QLatin1String("http"))
+			   ? sourceURL
+			   : QString();
+}
+
+double boundedStonksQuoteConfidence(double confidence) {
+	if (!std::isfinite(confidence)) {
+		return 0.0;
+	}
+	return std::clamp(confidence, 0.0, 1.0);
+}
+
+bool stonksValuesClose(double expected, double actual) {
+	if (!std::isfinite(expected) || !std::isfinite(actual)) {
+		return false;
+	}
+	const double tolerance = std::max(0.01, std::abs(expected) * 0.001);
+	return std::abs(expected - actual) <= tolerance;
+}
+
 std::optional< ValidatedStonksSnapshot > validatedStonksSnapshotFromProto(
 	unsigned int serverID, unsigned int userID, const MumbleProto::StonksSnapshot &protoSnapshot, QString *error) {
 	if (protoSnapshot.positions_size() <= 0) {
@@ -1886,6 +1966,7 @@ std::optional< ValidatedStonksSnapshot > validatedStonksSnapshotFromProto(
 	validated.snapshot.totalValue   = 0.0;
 	validated.positions.reserve(static_cast< std::size_t >(protoSnapshot.positions_size()));
 
+	QSet< QString > seenSymbols;
 	for (int i = 0; i < protoSnapshot.positions_size(); ++i) {
 		const MumbleProto::StonksPosition &protoPosition = protoSnapshot.positions(i);
 		const QString symbol = Mumble::Finance::normalizeTickerSymbol(u8(protoPosition.symbol()));
@@ -1895,38 +1976,82 @@ std::optional< ValidatedStonksSnapshot > validatedStonksSnapshotFromProto(
 			}
 			return std::nullopt;
 		}
+		if (seenSymbols.contains(symbol)) {
+			if (error) {
+				*error = QStringLiteral("Position %1 duplicates ticker %2.").arg(i + 1).arg(symbol);
+			}
+			return std::nullopt;
+		}
+		seenSymbols.insert(symbol);
 
 		const double quantity = protoPosition.has_quantity() ? protoPosition.quantity() : 0.0;
 		const double price    = protoPosition.has_price() ? protoPosition.price() : 0.0;
-		double marketValue    = protoPosition.has_market_value() ? protoPosition.market_value() : quantity * price;
-		if (!std::isfinite(quantity) || !std::isfinite(price) || !std::isfinite(marketValue) || price < 0.0
-			|| marketValue < 0.0 || std::abs(quantity) > 1000000000000.0 || price > 1000000000000.0
-			|| marketValue > 1000000000000000.0) {
+		const double computedMarketValue = quantity * price;
+		const double submittedMarketValue =
+			protoPosition.has_market_value() ? protoPosition.market_value() : computedMarketValue;
+		if (!std::isfinite(quantity) || !std::isfinite(price) || !std::isfinite(computedMarketValue)
+			|| !std::isfinite(submittedMarketValue) || quantity <= 0.0 || price <= 0.0
+			|| computedMarketValue <= 0.0 || std::abs(quantity) > 1000000000000.0
+			|| price > 1000000000000.0 || computedMarketValue > 1000000000000000.0) {
 			if (error) {
 				*error = QStringLiteral("Position %1 has invalid numeric values.").arg(i + 1);
 			}
 			return std::nullopt;
 		}
-		if (marketValue == 0.0 && quantity != 0.0 && price != 0.0) {
-			marketValue = quantity * price;
+		if (!stonksValuesClose(computedMarketValue, submittedMarketValue)) {
+			if (error) {
+				*error = QStringLiteral("Position %1 value must match quantity x price.").arg(i + 1);
+			}
+			return std::nullopt;
 		}
 
 		const QString currency =
 			normalizedStonksCurrency(protoPosition.has_currency() ? u8(protoPosition.currency()) : snapshotCurrency);
+		if (currency != snapshotCurrency) {
+			if (error) {
+				*error = QStringLiteral("Position %1 uses %2, but the snapshot currency is %3.")
+							 .arg(i + 1)
+							 .arg(currency, snapshotCurrency);
+			}
+			return std::nullopt;
+		}
+
 		::msdb::DBStonksSnapshotPosition position(serverID, 0, static_cast< unsigned int >(validated.positions.size()),
 												  u8(symbol));
 		position.quantity    = quantity;
 		position.price       = price;
-		position.marketValue = marketValue;
+		position.marketValue = computedMarketValue;
 		position.currency    = u8(currency);
 		position.displayName = u8(u8(protoPosition.display_name()).trimmed().left(256));
-		validated.snapshot.totalValue += marketValue;
+		position.providerID =
+			u8(normalizedStonksProviderID(protoPosition.has_provider_id() ? u8(protoPosition.provider_id()) : QString()));
+		const QString providerSymbol =
+			protoPosition.has_provider_symbol() ? u8(protoPosition.provider_symbol()).trimmed().left(64) : symbol;
+		position.providerSymbol = u8(providerSymbol.isEmpty() ? symbol : providerSymbol);
+		position.exchange =
+			u8(protoPosition.has_exchange() ? u8(protoPosition.exchange()).trimmed().left(64) : QString());
+		position.quoteTime = protoPosition.has_quote_time()
+								 ? static_cast< long long >(std::min< uint64_t >(protoPosition.quote_time(),
+																				  std::numeric_limits< long long >::max()))
+								 : 0LL;
+		position.quoteSourceURL = u8(validatedStonksQuoteSourceURL(
+			protoPosition.has_quote_source_url() ? u8(protoPosition.quote_source_url()) : QString()));
+		const double defaultConfidence = position.providerID == "manual" ? 0.35 : 0.75;
+		position.quoteConfidence       = boundedStonksQuoteConfidence(
+			protoPosition.has_quote_confidence() ? protoPosition.quote_confidence() : defaultConfidence);
+		validated.snapshot.totalValue += computedMarketValue;
 		validated.positions.push_back(std::move(position));
 	}
 
 	if (!std::isfinite(validated.snapshot.totalValue) || validated.snapshot.totalValue <= 0.0) {
 		if (error) {
 			*error = QStringLiteral("Snapshot total must be greater than zero.");
+		}
+		return std::nullopt;
+	}
+	if (protoSnapshot.has_total_value() && !stonksValuesClose(validated.snapshot.totalValue, protoSnapshot.total_value())) {
+		if (error) {
+			*error = QStringLiteral("Snapshot total must match the sum of accepted positions.");
 		}
 		return std::nullopt;
 	}
@@ -6227,7 +6352,18 @@ void Server::msgChatReactionToggle(ServerUser *uSource, MumbleProto::ChatReactio
 	}
 
 	const bool active = msg.has_active() ? msg.active() : true;
-	m_dbWrapper.setChatMessageReactionActive(iServerNum, message->messageID, actorUserID.value(), u8(emoji), active);
+	const bool reactionChanged =
+		m_dbWrapper.setChatMessageReactionActive(iServerNum, message->messageID, actorUserID.value(), u8(emoji), active);
+	if (reactionChanged) {
+		log(uSource,
+			QString::fromLatin1("%1 reaction %2 on persistent chat message %3 (thread %4, scope %5:%6)")
+				.arg(active ? QStringLiteral("Added") : QStringLiteral("Removed"))
+				.arg(emoji)
+				.arg(message->messageID)
+				.arg(message->threadID)
+				.arg(static_cast< int >(scope))
+				.arg(scopeID));
+	}
 
 	message = m_dbWrapper.getChatMessage(iServerNum, msg.message_id());
 	if (!message) {

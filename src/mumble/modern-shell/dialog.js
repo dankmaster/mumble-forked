@@ -17,6 +17,11 @@
 	let stonksDraftPositions = null;
 	let stonksDraftNote = "";
 	let stonksDraftCurrency = "USD";
+	let stonksQuoteSearchText = "";
+	let stonksQuoteSearchBusy = false;
+	let stonksQuoteSearchError = "";
+	let stonksQuoteSuggestions = [];
+	let stonksQuoteSearchRequestId = "";
 	const bridgeRetryDelayMs = 50;
 	const bridgeRetryLimit = 160;
 	let bridgeRetryTimer = 0;
@@ -76,6 +81,10 @@
 							if (modernBridge.modernDialogStateChanged
 									&& typeof modernBridge.modernDialogStateChanged.connect === "function") {
 								modernBridge.modernDialogStateChanged.connect(syncModernDialogState);
+							}
+							if (modernBridge.financeQuoteResultReady
+									&& typeof modernBridge.financeQuoteResultReady.connect === "function") {
+								modernBridge.financeQuoteResultReady.connect(handleStonksQuoteLookupResult);
 							}
 							syncModernDialogState(modernBridge.modernDialogState || { open: false });
 						} else {
@@ -3442,21 +3451,128 @@
 		});
 	}
 
+	function normalizeStonksSymbol(value) {
+		let symbol = String(value || "").trim();
+		if (symbol.startsWith("$")) {
+			symbol = symbol.slice(1);
+		}
+		symbol = symbol.toUpperCase();
+		return /^(\^?[A-Z][A-Z0-9]*(?:[.=-][A-Z0-9]+){0,4}|\d{3,}[A-Z0-9]*(?:[.=-][A-Z0-9]+){1,4})$/.test(symbol)
+			? symbol
+			: "";
+	}
+
+	function stonksYahooQuoteUrl(symbol) {
+		const normalized = normalizeStonksSymbol(symbol);
+		return normalized ? "https://finance.yahoo.com/quote/" + encodeURIComponent(normalized) : "";
+	}
+
+	function stonksYahooChartUrl(symbol) {
+		const normalized = normalizeStonksSymbol(symbol);
+		return normalized
+			? "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(normalized) + "?interval=1d&range=5d"
+			: "";
+	}
+
+	function stonksProviderLinks(symbol) {
+		const normalized = normalizeStonksSymbol(symbol);
+		if (!normalized) {
+			return [];
+		}
+		return [
+			{ id: "yahoo-finance", label: "Yahoo", url: stonksYahooQuoteUrl(normalized) },
+			{ id: "avanza", label: "Avanza", url: "https://www.avanza.se/sok.html?query=" + encodeURIComponent(normalized) },
+			{ id: "nordnet", label: "Nordnet", url: "https://www.nordnet.se/aktier/kurser?search=" + encodeURIComponent(normalized) }
+		];
+	}
+
+	function stonksProviderLabel(providerId) {
+		if (providerId === "yahoo-finance") {
+			return "Yahoo";
+		}
+		if (providerId === "avanza") {
+			return "Avanza";
+		}
+		if (providerId === "nordnet") {
+			return "Nordnet";
+		}
+		return "Manual";
+	}
+
+	function stonksEmptyPosition(currency) {
+		return {
+			symbol: "",
+			quantity: 0,
+			price: 0,
+			marketValue: 0,
+			currency: currency || "USD",
+			displayName: "",
+			providerId: "manual",
+			providerSymbol: "",
+			exchange: "",
+			quoteTime: 0,
+			quoteSourceUrl: "",
+			quoteConfidence: 0.35
+		};
+	}
+
+	function stonksNormalizePosition(position, fallbackCurrency) {
+		const quantity = stonksNumber(position && position.quantity);
+		const price = stonksNumber(position && position.price);
+		const marketValue = quantity > 0 && price > 0 ? quantity * price : stonksNumber(position && position.marketValue);
+		const symbol = normalizeStonksSymbol(position && position.symbol) || String(position && position.symbol || "").trim().toUpperCase();
+		const providerId = String(position && position.providerId || "").trim() || "manual";
+		return {
+			symbol: symbol,
+			quantity: quantity,
+			price: price,
+			marketValue: marketValue,
+			currency: String(position && position.currency || fallbackCurrency || "USD").trim().toUpperCase() || "USD",
+			displayName: String(position && position.displayName || "").trim(),
+			providerId: providerId,
+			providerSymbol: String(position && position.providerSymbol || symbol).trim(),
+			exchange: String(position && position.exchange || "").trim(),
+			quoteTime: Number(position && position.quoteTime) || 0,
+			quoteSourceUrl: String(position && position.quoteSourceUrl || "").trim(),
+			quoteConfidence: Number.isFinite(Number(position && position.quoteConfidence)) ? Number(position.quoteConfidence) : (providerId === "manual" ? 0.35 : 0.75)
+		};
+	}
+
+	function stonksQuoteFreshnessText(position) {
+		if (!position || !position.quoteTime) {
+			return "manual";
+		}
+		const ageSeconds = Math.max(0, (Date.now() / 1000) - Number(position.quoteTime));
+		if (ageSeconds < 60 * 60) {
+			return "fresh";
+		}
+		if (ageSeconds < 36 * 60 * 60) {
+			return Math.round(ageSeconds / 3600) + "h";
+		}
+		return "stale";
+	}
+
+	function stonksSourceLabel(position) {
+		const provider = stonksProviderLabel(position && position.providerId);
+		const freshness = stonksQuoteFreshnessText(position);
+		return freshness === "manual" ? provider : provider + " / " + freshness;
+	}
+
+	function stonksDraftTotalFromPositions(positions) {
+		return (positions || []).reduce(function(total, position) {
+			const normalized = stonksNormalizePosition(position, stonksDraftCurrency);
+			return total + stonksNumber(normalized.marketValue);
+		}, 0);
+	}
+
 	function seedStonksDraft(stonks) {
 		const snapshots = Array.isArray(stonks.snapshots) ? stonks.snapshots : [];
 		const latest = snapshots.length ? snapshots[0] : null;
 		const positions = latest && Array.isArray(latest.positions) && latest.positions.length
 			? latest.positions
-			: [{ symbol: "", quantity: 0, price: 0, marketValue: 0, currency: latest && latest.currency || "USD", displayName: "" }];
+			: [stonksEmptyPosition(latest && latest.currency || "USD")];
 		stonksDraftPositions = positions.map(function(position) {
-			return {
-				symbol: position.symbol || "",
-				quantity: stonksNumber(position.quantity),
-				price: stonksNumber(position.price),
-				marketValue: stonksNumber(position.marketValue),
-				currency: position.currency || latest && latest.currency || "USD",
-				displayName: position.displayName || ""
-			};
+			return stonksNormalizePosition(position, latest && latest.currency || "USD");
 		});
 		stonksDraftCurrency = latest && latest.currency || "USD";
 		stonksDraftNote = "";
@@ -3469,16 +3585,17 @@
 	}
 
 	function stonksDraftTotal() {
-		return (stonksDraftPositions || []).reduce(function(total, position) {
-			return total + stonksNumber(position.marketValue);
-		}, 0);
+		return stonksDraftTotalFromPositions(stonksDraftPositions || []);
 	}
 
-	function stonksInput(value, field, type) {
+	function stonksInput(value, field, type, placeholder) {
 		const input = document.createElement("input");
 		input.type = type || "text";
 		input.value = value == null ? "" : String(value);
 		input.dataset.stonksField = field;
+		if (placeholder) {
+			input.placeholder = placeholder;
+		}
 		return input;
 	}
 
@@ -3488,19 +3605,229 @@
 			const symbol = row.querySelector("[data-stonks-field='symbol']").value.trim();
 			const quantity = Number(row.querySelector("[data-stonks-field='quantity']").value || 0);
 			const price = Number(row.querySelector("[data-stonks-field='price']").value || 0);
-			const marketValue = Number(row.querySelector("[data-stonks-field='marketValue']").value || 0);
+			const computedMarketValue = Number.isFinite(quantity * price) ? quantity * price : 0;
+			const marketValue = computedMarketValue > 0 ? computedMarketValue : Number(row.querySelector("[data-stonks-field='marketValue']").value || 0);
 			const currency = row.querySelector("[data-stonks-field='currency']").value.trim() || stonksDraftCurrency || "USD";
 			const displayName = row.querySelector("[data-stonks-field='displayName']").value.trim();
 			if (symbol || quantity || price || marketValue) {
-				positions.push({ symbol: symbol, quantity: quantity, price: price, marketValue: marketValue, currency: currency, displayName: displayName });
+				positions.push(stonksNormalizePosition({
+					symbol: symbol,
+					quantity: quantity,
+					price: price,
+					marketValue: marketValue,
+					currency: currency,
+					displayName: displayName,
+					providerId: row.dataset.stonksProviderId || "manual",
+					providerSymbol: row.dataset.stonksProviderSymbol || symbol,
+					exchange: row.dataset.stonksExchange || "",
+					quoteTime: Number(row.dataset.stonksQuoteTime || 0),
+					quoteSourceUrl: row.dataset.stonksQuoteSourceUrl || "",
+					quoteConfidence: Number(row.dataset.stonksQuoteConfidence || 0)
+				}, stonksDraftCurrency));
 			}
 		});
-		stonksDraftPositions = positions.length ? positions : [{ symbol: "", quantity: 0, price: 0, marketValue: 0, currency: "USD", displayName: "" }];
+		stonksDraftPositions = positions.length ? positions : [stonksEmptyPosition(stonksDraftCurrency || "USD")];
 		const currencyInput = root.querySelector("[data-stonks-field='snapshotCurrency']");
 		const noteInput = root.querySelector("[data-stonks-field='snapshotNote']");
 		stonksDraftCurrency = currencyInput ? currencyInput.value.trim() || "USD" : stonksDraftCurrency;
 		stonksDraftNote = noteInput ? noteInput.value : stonksDraftNote;
 		return { positions: positions, currency: stonksDraftCurrency, note: stonksDraftNote };
+	}
+
+	function stonksValidateDraft(draft) {
+		const errors = [];
+		const warnings = [];
+		const positions = Array.isArray(draft.positions) ? draft.positions : [];
+		const snapshotCurrency = String(draft.currency || "USD").trim().toUpperCase() || "USD";
+		const seen = new Set();
+		if (!positions.length) {
+			errors.push("Add at least one position.");
+		}
+		positions.forEach(function(position, index) {
+			const label = "Row " + (index + 1);
+			const symbol = normalizeStonksSymbol(position.symbol);
+			if (!symbol) {
+				errors.push(label + ": invalid ticker symbol.");
+			} else if (seen.has(symbol)) {
+				errors.push(label + ": duplicate ticker " + symbol + ".");
+			}
+			seen.add(symbol);
+			if (!(stonksNumber(position.quantity) > 0)) {
+				errors.push(label + ": quantity must be greater than zero.");
+			}
+			if (!(stonksNumber(position.price) > 0)) {
+				errors.push(label + ": price must be greater than zero.");
+			}
+			if (String(position.currency || "").trim().toUpperCase() !== snapshotCurrency) {
+				errors.push(label + ": currency must match " + snapshotCurrency + ".");
+			}
+			if (!position.providerId || position.providerId === "manual") {
+				warnings.push(label + ": manual quote source.");
+			}
+			if (!position.exchange && position.providerId !== "manual") {
+				warnings.push(label + ": exchange is unknown.");
+			}
+			const confidence = stonksNumber(position.quoteConfidence);
+			if (confidence > 0 && confidence < 0.5) {
+				warnings.push(label + ": low quote confidence.");
+			}
+			if (position.quoteTime) {
+				const ageSeconds = Math.max(0, (Date.now() / 1000) - Number(position.quoteTime));
+				if (ageSeconds > 36 * 60 * 60) {
+					warnings.push(label + ": quote looks stale.");
+				}
+			}
+		});
+		return { errors: errors, warnings: warnings };
+	}
+
+	function updateStonksValidation(summary, draft, submit, total) {
+		const validation = stonksValidateDraft(draft);
+		summary.innerHTML = "";
+		summary.className = "stonks-validation" + (validation.errors.length ? " has-errors" : "");
+		const title = document.createElement("strong");
+		title.textContent = validation.errors.length
+			? validation.errors.length + " issue" + (validation.errors.length === 1 ? "" : "s")
+			: "Ready to submit";
+		summary.appendChild(title);
+		const messages = validation.errors.concat(validation.warnings).slice(0, 5);
+		if (messages.length) {
+			const list = document.createElement("div");
+			list.className = "stonks-validation-list";
+			messages.forEach(function(message) {
+				const item = document.createElement("span");
+				item.textContent = message;
+				list.appendChild(item);
+			});
+			summary.appendChild(list);
+		}
+		if (total) {
+			total.textContent = formatStonksMoney(stonksDraftTotalFromPositions(draft.positions), draft.currency);
+		}
+		if (submit) {
+			submit.disabled = !draft.registered || validation.errors.length > 0;
+		}
+		return validation;
+	}
+
+	function stonksApplyQuoteSuggestion(suggestion) {
+		const position = stonksNormalizePosition(suggestion, stonksDraftCurrency || suggestion.currency || "USD");
+		const positions = Array.isArray(stonksDraftPositions) ? stonksDraftPositions.slice() : [];
+		const emptyIndex = positions.findIndex(function(current) {
+			return !String(current.symbol || "").trim() && !stonksNumber(current.quantity) && !stonksNumber(current.price);
+		});
+		if (emptyIndex >= 0) {
+			positions[emptyIndex] = position;
+		} else {
+			positions.push(position);
+		}
+		stonksDraftCurrency = position.currency || stonksDraftCurrency || "USD";
+		stonksDraftPositions = positions;
+		stonksQuoteSuggestions = [];
+		stonksQuoteSearchError = "";
+		renderModernDialog();
+	}
+
+	function handleStonksQuoteLookupResult(result) {
+		const payload = result || {};
+		if (!stonksQuoteSearchRequestId || String(payload.requestId || "") !== stonksQuoteSearchRequestId) {
+			return;
+		}
+
+		stonksQuoteSearchBusy = false;
+		if (!payload.ok) {
+			stonksQuoteSuggestions = [];
+			stonksQuoteSearchError = String(payload.error || "Quote lookup failed.");
+			renderModernDialog();
+			return;
+		}
+
+		const quoteSymbol = normalizeStonksSymbol(payload.symbol || payload.providerSymbol || stonksQuoteSearchText);
+		const price = Number(payload.price);
+		if (!quoteSymbol || !Number.isFinite(price) || price <= 0) {
+			stonksQuoteSuggestions = [];
+			stonksQuoteSearchError = "Quote lookup returned unusable data.";
+			renderModernDialog();
+			return;
+		}
+
+		stonksQuoteSuggestions = [stonksNormalizePosition({
+			symbol: quoteSymbol,
+			quantity: 0,
+			price: price,
+			marketValue: 0,
+			currency: payload.currency || stonksDraftCurrency || "USD",
+			displayName: payload.displayName || quoteSymbol,
+			providerId: payload.providerId || "yahoo-finance",
+			providerSymbol: payload.providerSymbol || quoteSymbol,
+			exchange: payload.exchange || "",
+			quoteTime: Number(payload.quoteTime || 0),
+			quoteSourceUrl: payload.quoteSourceUrl || stonksYahooQuoteUrl(quoteSymbol),
+			quoteConfidence: Number(payload.quoteConfidence || 1)
+		}, stonksDraftCurrency)];
+		stonksQuoteSearchError = "";
+		renderModernDialog();
+	}
+
+	function runStonksQuoteSearch(query) {
+		const symbol = normalizeStonksSymbol(query);
+		stonksQuoteSearchText = query || "";
+		stonksQuoteSearchError = "";
+		stonksQuoteSuggestions = [];
+		if (!symbol) {
+			stonksQuoteSearchError = "Enter a ticker like RKLB or ERIC-B.ST.";
+			renderModernDialog();
+			return;
+		}
+		stonksQuoteSearchBusy = true;
+		stonksQuoteSearchRequestId = String(Date.now()) + "-" + Math.random().toString(36).slice(2);
+		renderModernDialog();
+		if (notifyBridge("lookupFinanceQuote", stonksQuoteSearchRequestId, symbol)) {
+			return;
+		}
+
+		fetch(stonksYahooChartUrl(symbol), { cache: "no-store" })
+			.then(function(response) {
+				if (!response.ok) {
+					throw new Error("Yahoo returned " + response.status);
+				}
+				return response.json();
+			})
+			.then(function(payload) {
+				const chart = payload && payload.chart || {};
+				if (chart.error) {
+					throw new Error(chart.error.description || "Yahoo Finance returned an error.");
+				}
+				const result = chart.result && chart.result[0];
+				const meta = result && result.meta || {};
+				const quoteSymbol = normalizeStonksSymbol(meta.symbol || symbol);
+				const price = Number(meta.regularMarketPrice);
+				if (!quoteSymbol || !Number.isFinite(price) || price <= 0) {
+					throw new Error("Yahoo did not return a usable price.");
+				}
+				const quoteTime = Number(meta.regularMarketTime || 0);
+				stonksQuoteSuggestions = [stonksNormalizePosition({
+					symbol: quoteSymbol,
+					quantity: 0,
+					price: price,
+					marketValue: 0,
+					currency: meta.currency || stonksDraftCurrency || "USD",
+					displayName: meta.shortName || meta.longName || quoteSymbol,
+					providerId: "yahoo-finance",
+					providerSymbol: quoteSymbol,
+					exchange: meta.fullExchangeName || meta.exchangeName || "",
+					quoteTime: Number.isFinite(quoteTime) ? quoteTime : 0,
+					quoteSourceUrl: stonksYahooQuoteUrl(quoteSymbol),
+					quoteConfidence: 1.0
+				}, stonksDraftCurrency)];
+			})
+			.catch(function(error) {
+				stonksQuoteSearchError = error && error.message ? error.message : "Quote lookup failed.";
+			})
+			.finally(function() {
+				stonksQuoteSearchBusy = false;
+				renderModernDialog();
+			});
 	}
 
 	function appendStonksStatus(parent, stonks) {
@@ -3584,7 +3911,14 @@
 				renderModernDialog();
 				return;
 			}
-			invokeModernDialogAction("submitSnapshot", stonksCollectDraft(refs.body));
+			const draft = stonksCollectDraft(refs.body);
+			draft.registered = stonks.registered;
+			if (stonksValidateDraft(draft).errors.length) {
+				stonksActiveTab = "overview";
+				renderModernDialog();
+				return;
+			}
+			invokeModernDialogAction("submitSnapshot", draft);
 		});
 		parent.appendChild(quick);
 	}
@@ -3595,29 +3929,127 @@
 		editor.className = "stonks-editor";
 		const top = document.createElement("div");
 		top.className = "stonks-editor-top";
-		top.appendChild(stonksInput(stonksDraftCurrency, "snapshotCurrency"));
-		const note = stonksInput(stonksDraftNote, "snapshotNote");
-		note.placeholder = "Note";
+		top.appendChild(stonksInput(stonksDraftCurrency, "snapshotCurrency", "text", "Currency"));
+		const note = stonksInput(stonksDraftNote, "snapshotNote", "text", "Note");
 		top.appendChild(note);
 		editor.appendChild(top);
+
+		const search = document.createElement("div");
+		search.className = "stonks-quote-search";
+		const searchInput = document.createElement("input");
+		searchInput.type = "search";
+		searchInput.value = stonksQuoteSearchText;
+		searchInput.placeholder = "Search Yahoo ticker";
+		searchInput.addEventListener("input", function() {
+			stonksQuoteSearchText = searchInput.value;
+		});
+		searchInput.addEventListener("keydown", function(event) {
+			if (event.key === "Enter") {
+				event.preventDefault();
+				runStonksQuoteSearch(searchInput.value);
+			}
+		});
+		const searchButton = document.createElement("button");
+		searchButton.type = "button";
+		searchButton.className = "chip-button";
+		searchButton.textContent = stonksQuoteSearchBusy ? "Searching..." : "Add instrument";
+		searchButton.disabled = stonksQuoteSearchBusy;
+		searchButton.addEventListener("click", function() {
+			runStonksQuoteSearch(searchInput.value);
+		});
+		const manualButton = document.createElement("button");
+		manualButton.type = "button";
+		manualButton.className = "chip-button";
+		manualButton.textContent = "Manual row";
+		manualButton.addEventListener("click", function() {
+			stonksCollectDraft(editor);
+			const symbol = normalizeStonksSymbol(searchInput.value);
+			stonksDraftPositions.push(stonksNormalizePosition({
+				symbol: symbol,
+				currency: stonksDraftCurrency || "USD",
+				providerId: "manual",
+				providerSymbol: symbol,
+				quoteConfidence: 0.35
+			}, stonksDraftCurrency));
+			renderModernDialog();
+		});
+		search.append(searchInput, searchButton, manualButton);
+		const providerLinks = stonksProviderLinks(stonksQuoteSearchText);
+		if (providerLinks.length || stonksQuoteSearchError || stonksQuoteSuggestions.length) {
+			const results = document.createElement("div");
+			results.className = "stonks-quote-results";
+			stonksQuoteSuggestions.forEach(function(suggestion) {
+				const button = document.createElement("button");
+				button.type = "button";
+				button.className = "stonks-quote-result";
+				button.innerHTML = "<strong></strong><span></span>";
+				button.querySelector("strong").textContent = suggestion.symbol + " " + formatStonksMoney(suggestion.price, suggestion.currency);
+				button.querySelector("span").textContent = [suggestion.displayName, suggestion.exchange, stonksSourceLabel(suggestion)].filter(Boolean).join(" / ");
+				button.addEventListener("click", function() {
+					stonksApplyQuoteSuggestion(suggestion);
+				});
+				results.appendChild(button);
+			});
+			if (stonksQuoteSearchError) {
+				const error = document.createElement("span");
+				error.className = "stonks-quote-error";
+				error.textContent = stonksQuoteSearchError;
+				results.appendChild(error);
+			}
+			providerLinks.forEach(function(link) {
+				const anchor = document.createElement("a");
+				anchor.className = "stonks-provider-link";
+				anchor.href = link.url;
+				anchor.target = "_blank";
+				anchor.rel = "noreferrer";
+				anchor.textContent = link.label;
+				results.appendChild(anchor);
+			});
+			search.appendChild(results);
+		}
+		editor.appendChild(search);
+
 		const table = document.createElement("div");
 		table.className = "stonks-position-table";
 		const head = document.createElement("div");
 		head.className = "stonks-position-head";
-		["Symbol", "Qty", "Price", "Value", "Currency", "Name", ""].forEach(function(label) {
+		["Symbol", "Qty", "Price", "Value", "Currency", "Source", "Name", ""].forEach(function(label) {
 			const cell = document.createElement("span");
 			cell.textContent = label;
 			head.appendChild(cell);
 		});
 		table.appendChild(head);
 		stonksDraftPositions.forEach(function(position, index) {
+			position = stonksNormalizePosition(position, stonksDraftCurrency);
 			const row = document.createElement("div");
 			row.className = "stonks-position-row";
-			row.appendChild(stonksInput(position.symbol, "symbol"));
+			row.dataset.stonksProviderId = position.providerId || "manual";
+			row.dataset.stonksProviderSymbol = position.providerSymbol || position.symbol || "";
+			row.dataset.stonksExchange = position.exchange || "";
+			row.dataset.stonksQuoteTime = String(position.quoteTime || 0);
+			row.dataset.stonksQuoteSourceUrl = position.quoteSourceUrl || "";
+			row.dataset.stonksQuoteConfidence = String(position.quoteConfidence || 0);
+			row.appendChild(stonksInput(position.symbol, "symbol", "text", "RKLB"));
 			row.appendChild(stonksInput(position.quantity, "quantity", "number"));
 			row.appendChild(stonksInput(position.price, "price", "number"));
 			row.appendChild(stonksInput(position.marketValue, "marketValue", "number"));
 			row.appendChild(stonksInput(position.currency || stonksDraftCurrency, "currency"));
+			const source = document.createElement("div");
+			source.className = "stonks-source";
+			const sourceLabel = document.createElement(position.quoteSourceUrl ? "a" : "span");
+			sourceLabel.textContent = stonksSourceLabel(position);
+			if (position.quoteSourceUrl) {
+				sourceLabel.href = position.quoteSourceUrl;
+				sourceLabel.target = "_blank";
+				sourceLabel.rel = "noreferrer";
+			}
+			source.appendChild(sourceLabel);
+			if (position.exchange) {
+				const exchange = document.createElement("small");
+				exchange.textContent = position.exchange;
+				source.appendChild(exchange);
+			}
+			row.appendChild(source);
 			row.appendChild(stonksInput(position.displayName, "displayName"));
 			const remove = document.createElement("button");
 			remove.type = "button";
@@ -3628,7 +4060,7 @@
 			remove.addEventListener("click", function() {
 				stonksDraftPositions.splice(index, 1);
 				if (!stonksDraftPositions.length) {
-					stonksDraftPositions.push({ symbol: "", quantity: 0, price: 0, marketValue: 0, currency: "USD", displayName: "" });
+					stonksDraftPositions.push(stonksEmptyPosition(stonksDraftCurrency || "USD"));
 				}
 				renderModernDialog();
 			});
@@ -3639,6 +4071,9 @@
 					const price = Number(row.querySelector("[data-stonks-field='price']").value || 0);
 					row.querySelector("[data-stonks-field='marketValue']").value = Number.isFinite(quantity * price) ? String(quantity * price) : "0";
 				}
+				const liveDraft = stonksCollectDraft(editor);
+				liveDraft.registered = stonks.registered;
+				updateStonksValidation(validationSummary, liveDraft, submit, total);
 			});
 			table.appendChild(row);
 		});
@@ -3651,7 +4086,7 @@
 		add.textContent = "Add position";
 		add.addEventListener("click", function() {
 			stonksCollectDraft(editor);
-			stonksDraftPositions.push({ symbol: "", quantity: 0, price: 0, marketValue: 0, currency: stonksDraftCurrency || "USD", displayName: "" });
+			stonksDraftPositions.push(stonksEmptyPosition(stonksDraftCurrency || "USD"));
 			renderModernDialog();
 		});
 		const total = document.createElement("strong");
@@ -3663,10 +4098,20 @@
 		submit.textContent = "Submit snapshot";
 		submit.disabled = !stonks.registered;
 		submit.addEventListener("click", function() {
-			invokeModernDialogAction("submitSnapshot", stonksCollectDraft(editor));
+			const draft = stonksCollectDraft(editor);
+			draft.registered = stonks.registered;
+			if (stonksValidateDraft(draft).errors.length) {
+				updateStonksValidation(validationSummary, draft, submit, total);
+				return;
+			}
+			invokeModernDialogAction("submitSnapshot", draft);
 		});
 		actions.append(add, total, submit);
 		editor.appendChild(actions);
+		const validationSummary = document.createElement("div");
+		const draft = { positions: stonksDraftPositions || [], currency: stonksDraftCurrency, registered: stonks.registered };
+		updateStonksValidation(validationSummary, draft, submit, total);
+		editor.appendChild(validationSummary);
 		parent.appendChild(editor);
 	}
 
@@ -3683,7 +4128,13 @@
 			(snapshot.positions || []).forEach(function(position) {
 				const row = document.createElement("div");
 				row.className = "stonks-ledger-position";
-				row.textContent = [position.symbol, position.displayName, formatStonksMoney(position.marketValue, position.currency)].filter(Boolean).join(" - ");
+				const quote = stonksSourceLabel(position);
+				row.textContent = [
+					position.symbol,
+					position.displayName,
+					formatStonksMoney(position.marketValue, position.currency),
+					quote
+				].filter(Boolean).join(" - ");
 				details.appendChild(row);
 			});
 			if (snapshot.note) {
@@ -3704,18 +4155,31 @@
 	}
 
 	function appendStonksLeaderboard(parent, stonks) {
+		const description = document.createElement("div");
+		description.className = "stonks-leaderboard-description";
+		description.textContent = stonks.leaderboardDescription
+			|| "Snapshot return compares the latest accepted snapshot with the closest older snapshot for this period. It updates when users submit new snapshots.";
+		if (stonks.leaderboardUpdatedAt) {
+			const updated = document.createElement("span");
+			updated.textContent = "Updated " + formatStonksTime(stonks.leaderboardUpdatedAt);
+			description.appendChild(updated);
+		}
+		parent.appendChild(description);
 		const list = document.createElement("div");
 		list.className = "stonks-list";
 		(stonks.leaderboard || []).forEach(function(row) {
 			const item = document.createElement("div");
 			item.className = "stonks-row";
 			const main = document.createElement("div");
-			main.innerHTML = "<strong></strong><span></span>";
-			main.querySelector("strong").textContent = row.rank + ". " + row.userName;
-			main.querySelector("span").textContent = formatStonksTime(row.endSnapshotAt);
+			main.innerHTML = "<strong></strong><span></span><small></small>";
+			main.querySelector("strong").textContent = (row.insufficientHistory ? "" : row.rank + ". ") + row.userName;
+			main.querySelector("span").textContent = "Latest " + formatStonksTime(row.endSnapshotAt);
+			main.querySelector("small").textContent = row.insufficientHistory
+				? "Insufficient history for " + (row.period || stonks.selectedPeriod || "30d")
+				: "Baseline " + formatStonksTime(row.startSnapshotAt);
 			const percent = document.createElement("strong");
-			percent.className = "stonks-return" + (stonksNumber(row.returnPercent) >= 0 ? " is-positive" : " is-negative");
-			percent.textContent = formatStonksPercent(row.returnPercent);
+			percent.className = "stonks-return" + (row.insufficientHistory ? " is-muted" : (stonksNumber(row.returnPercent) >= 0 ? " is-positive" : " is-negative"));
+			percent.textContent = row.insufficientHistory ? "Need baseline" : formatStonksPercent(row.returnPercent);
 			const follow = document.createElement("button");
 			follow.type = "button";
 			follow.className = "chip-button";

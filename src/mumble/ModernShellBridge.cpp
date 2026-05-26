@@ -328,4 +328,31 @@ void ModernShellBridge::toggleLayout() {
 	emit layoutToggleRequested();
 }
 
+void ModernShellBridge::hydrateMessagePreviews(const QString &scopeToken, const QVariantList &messageIds,
+											   const bool highPriority) {
+	if (scopeToken.trimmed().isEmpty() || messageIds.isEmpty()) {
+		return;
+	}
+
+	emit messagePreviewHydrationRequested(scopeToken.trimmed(), messageIds, highPriority);
+}
+
+void ModernShellBridge::lookupFinanceQuote(const QString &requestId, const QString &symbol) {
+	const QString trimmedRequestID = requestId.trimmed();
+	const QString trimmedSymbol    = symbol.trimmed();
+	if (trimmedRequestID.isEmpty() || trimmedSymbol.isEmpty()) {
+		return;
+	}
+
+	emit financeQuoteLookupRequested(trimmedRequestID, trimmedSymbol);
+}
+
+void ModernShellBridge::publishFinanceQuoteResult(const QVariantMap &result) {
+	if (result.isEmpty()) {
+		return;
+	}
+
+	emit financeQuoteResultReady(result);
+}
+
 #endif // defined(MUMBLE_HAS_MODERN_LAYOUT)

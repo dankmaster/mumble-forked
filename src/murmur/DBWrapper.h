@@ -182,8 +182,9 @@ public:
 							  const std::vector< ::mumble::server::db::DBChatMessageEmbed > &embeds);
 	std::vector< ::mumble::server::db::DBChatMessageReaction > getChatMessageReactions(unsigned int serverID,
 																					 unsigned int messageID);
-	void setChatMessageReactionActive(unsigned int serverID, unsigned int messageID, unsigned int actorUserID,
+	bool setChatMessageReactionActive(unsigned int serverID, unsigned int messageID, unsigned int actorUserID,
 									  const std::string &emoji, bool active);
+	unsigned int getChatMessageReactionCountByActor(unsigned int serverID, unsigned int actorUserID);
 	void setChatReadState(const ::mumble::server::db::DBChatReadState &readState);
 	std::optional< ::mumble::server::db::DBChatReadState > getChatReadState(unsigned int serverID, unsigned int threadID,
 																			 unsigned int userID);

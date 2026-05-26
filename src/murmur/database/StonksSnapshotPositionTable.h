@@ -38,6 +38,12 @@ namespace server {
 				static constexpr const char *market_value    = "market_value";
 				static constexpr const char *currency        = "currency";
 				static constexpr const char *display_name    = "display_name";
+				static constexpr const char *provider_id     = "provider_id";
+				static constexpr const char *provider_symbol = "provider_symbol";
+				static constexpr const char *exchange        = "exchange";
+				static constexpr const char *quote_time      = "quote_time";
+				static constexpr const char *quote_source_url = "quote_source_url";
+				static constexpr const char *quote_confidence = "quote_confidence";
 			};
 
 			static constexpr unsigned int INTRODUCED_IN_SCHEMA_VERSION = 20;

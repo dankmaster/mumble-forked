@@ -24,6 +24,8 @@
 #include "database/DBChannel.h"
 #include "database/DBChannelLink.h"
 #include "database/DBChannelListener.h"
+#include "database/DBChatMessage.h"
+#include "database/DBChatThread.h"
 #include "database/DBGroup.h"
 #include "database/DBGroupMember.h"
 #include "database/DBLogEntry.h"
@@ -33,6 +35,9 @@
 #include "database/DBStonksSnapshotPosition.h"
 #include "database/GroupMemberTable.h"
 #include "database/GroupTable.h"
+#include "database/ChatMessageReactionTable.h"
+#include "database/ChatMessageTable.h"
+#include "database/ChatThreadTable.h"
 #include "database/LogTable.h"
 #include "database/ServerDatabase.h"
 #include "database/StonksFollowTable.h"
@@ -261,6 +266,7 @@ private slots:
 	void ipAddress_conversions();
 	void banTable_general();
 	void channelListenerTable_general();
+	void chatMessageReactionTable_general();
 	void stonksScoreTable_general();
 	void stonksFollowTable_general();
 	void stonksSnapshotTable_general();
@@ -1641,6 +1647,66 @@ void ServerDatabaseTest::channelListenerTable_general() {
 	MUMBLE_END_TEST_CASE
 }
 
+void ServerDatabaseTest::chatMessageReactionTable_general() {
+	MUMBLE_BEGIN_TEST_CASE
+
+	const unsigned int existingServerID = 0;
+	::msdb::DBUser author(existingServerID, 1);
+	::msdb::DBUser actor1(existingServerID, 2);
+	::msdb::DBUser actor2(existingServerID, 3);
+
+	::msdb::DBChannel rootChannel;
+	rootChannel.channelID = Mumble::ROOT_CHANNEL_ID;
+	rootChannel.parentID  = rootChannel.channelID;
+	rootChannel.serverID  = existingServerID;
+	rootChannel.name      = "Root";
+
+	db.getServerTable().addServer(existingServerID);
+	db.getChannelTable().addChannel(rootChannel);
+	db.getUserTable().addUser(author, "Author");
+	db.getUserTable().addUser(actor1, "Actor 1");
+	db.getUserTable().addUser(actor2, "Actor 2");
+
+	::msdb::DBChatThread thread(existingServerID, 1);
+	thread.scope           = ::msdb::ChatThreadScope::TextChannel;
+	thread.scopeKey        = "text:1";
+	thread.createdByUserID = author.registeredUserID;
+	thread.createdAt       = std::chrono::system_clock::time_point(std::chrono::seconds(100));
+	thread.updatedAt       = std::chrono::system_clock::time_point(std::chrono::seconds(100));
+	db.getChatThreadTable().addThread(thread);
+
+	::msdb::DBChatMessage message(existingServerID, 1, thread.threadID);
+	message.authorUserID = author.registeredUserID;
+	message.authorName   = "Author";
+	message.bodyText     = "hello";
+	message.createdAt    = std::chrono::system_clock::time_point(std::chrono::seconds(100));
+	db.getChatMessageTable().addMessage(message);
+
+	::msdb::ChatMessageReactionTable &table = db.getChatMessageReactionTable();
+	QVERIFY(table.getReactions(existingServerID, message.messageID).empty());
+	QCOMPARE(table.countReactionsByActor(existingServerID, actor1.registeredUserID), 0U);
+
+	QVERIFY(table.setReactionActive(existingServerID, message.messageID, actor1.registeredUserID, "🔥", true));
+	QVERIFY(!table.setReactionActive(existingServerID, message.messageID, actor1.registeredUserID, "🔥", true));
+	QVERIFY(table.setReactionActive(existingServerID, message.messageID, actor2.registeredUserID, "🔥", true));
+
+	std::vector<::msdb::DBChatMessageReaction > reactions = table.getReactions(existingServerID, message.messageID);
+	QCOMPARE(reactions.size(), static_cast< std::size_t >(2));
+	QCOMPARE(table.countReactionsByActor(existingServerID, actor1.registeredUserID), 1U);
+	QCOMPARE(table.countReactionsByActor(existingServerID, actor2.registeredUserID), 1U);
+
+	QVERIFY(table.setReactionActive(existingServerID, message.messageID, actor1.registeredUserID, "🔥", false));
+	QVERIFY(!table.setReactionActive(existingServerID, message.messageID, actor1.registeredUserID, "🔥", false));
+	QCOMPARE(table.countReactionsByActor(existingServerID, actor1.registeredUserID), 0U);
+	QCOMPARE(table.getReactions(existingServerID, message.messageID).size(), static_cast< std::size_t >(1));
+
+	db.getUserTable().removeUser(actor2);
+	QCOMPARE(table.countReactionsByActor(existingServerID, actor2.registeredUserID), 0U);
+	QVERIFY(table.getReactions(existingServerID, message.messageID).empty());
+
+	MUMBLE_END_TEST_CASE
+}
+
 void ServerDatabaseTest::stonksScoreTable_general() {
 	MUMBLE_BEGIN_TEST_CASE
 
@@ -1810,6 +1876,12 @@ void ServerDatabaseTest::stonksSnapshotTable_general() {
 	oldPosition.marketValue = 1000.0;
 	oldPosition.currency    = "USD";
 	oldPosition.displayName = "Rocket Lab";
+	oldPosition.providerID = "yahoo-finance";
+	oldPosition.providerSymbol = "RKLB";
+	oldPosition.exchange = "NMS";
+	oldPosition.quoteTime = 100;
+	oldPosition.quoteSourceURL = "https://finance.yahoo.com/quote/RKLB";
+	oldPosition.quoteConfidence = 1.0;
 	positionTable.setPositions(existingServerID, user1Old.snapshotID, { oldPosition });
 
 	::msdb::DBStonksSnapshot user1Latest(existingServerID, snapshotTable.getFreeSnapshotID(existingServerID),
@@ -1826,6 +1898,12 @@ void ServerDatabaseTest::stonksSnapshotTable_general() {
 	latestPosition.marketValue = 1150.0;
 	latestPosition.currency    = "USD";
 	latestPosition.displayName = "Rocket Lab";
+	latestPosition.providerID = "manual";
+	latestPosition.providerSymbol = "RKLB";
+	latestPosition.exchange = "NMS";
+	latestPosition.quoteTime = 200;
+	latestPosition.quoteSourceURL = "https://www.avanza.se/sok.html?query=RKLB";
+	latestPosition.quoteConfidence = 0.4;
 	positionTable.setPositions(existingServerID, user1Latest.snapshotID, { latestPosition });
 
 	std::optional<::msdb::DBStonksSnapshot > latest =

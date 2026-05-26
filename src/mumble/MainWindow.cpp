@@ -12554,7 +12554,7 @@ void MainWindow::setupPersistentChatDock() {
 	connect(m_persistentChatHistoryDelegate, &PersistentChatHistoryDelegate::loadOlderRequested, this,
 			&MainWindow::requestOlderPersistentChatHistory);
 	connect(m_persistentChatHistoryDelegate, &PersistentChatHistoryDelegate::previewRequested, this,
-			[this](const QString &previewKey) { ensurePersistentChatPreview(previewKey); });
+			[this](const QString &previewKey) { queuePersistentChatPreviewRequest(previewKey); });
 	connect(m_persistentChatHistoryDelegate, &PersistentChatHistoryDelegate::replyRequested, this,
 			[this](unsigned int messageID) {
 				if (const MumbleProto::ChatMessage *message =
@@ -12676,17 +12676,14 @@ void MainWindow::setupPersistentChatDock() {
 						const std::size_t messageCount = guardedThis->m_persistentChatMessages.size();
 						const std::size_t beginIndex   = messageCount > 200 ? messageCount - 200 : 0;
 						const bool fastFirstPaint = messageCount > beginIndex;
+						const QString timelineMode = guardedThis->modernShellMessageTimelineMode(beginIndex);
 						guardedThis->publishModernShellMessagesPatch(
 							QStringLiteral("messages.reset"),
 							guardedThis->buildModernShellMessageStates(
 								target, beginIndex,
 								fastFirstPaint ? ModernShellMessageBuildMode::FastFirstPaint
 											   : ModernShellMessageBuildMode::Full),
-							scrollToBottom);
-						if (fastFirstPaint) {
-							guardedThis->scheduleModernShellMessageHydration(queuedScopeToken, generation, beginIndex,
-																			 scrollToBottom);
-						}
+							scrollToBottom, timelineMode);
 					},
 					Qt::QueuedConnection);
 			} else
@@ -12696,7 +12693,7 @@ void MainWindow::setupPersistentChatDock() {
 				const std::size_t beginIndex   = messageCount > 200 ? messageCount - 200 : 0;
 				publishModernShellMessagesPatch(QStringLiteral("messages.reset"),
 												buildModernShellMessageStates(currentPersistentChatTarget(), beginIndex),
-												scrollToBottom);
+												scrollToBottom, modernShellMessageTimelineMode(beginIndex));
 			}
 		} else {
 			++m_modernShellMessagePatchGeneration;
@@ -12911,6 +12908,10 @@ void MainWindow::activateModernShell() {
 				&MainWindow::handleModernShellAppAction);
 		connect(m_modernShellHost->bridge(), &ModernShellBridge::layoutToggleRequested, this,
 				&MainWindow::togglePreferredModernShellLayout);
+		connect(m_modernShellHost->bridge(), &ModernShellBridge::messagePreviewHydrationRequested, this,
+				&MainWindow::handleModernShellPreviewHydrationRequest);
+		connect(m_modernShellHost->bridge(), &ModernShellBridge::financeQuoteLookupRequested, this,
+				&MainWindow::handleModernShellFinanceQuoteLookupRequest);
 		connect(m_modernShellHost->bridge(), &ModernShellBridge::bootReady, this, [this]() {
 			m_modernShellServerLogHtmlRevision = 0;
 			queueModernShellSnapshotSync();
@@ -13881,6 +13882,16 @@ namespace {
 		dto.insert(QStringLiteral("marketValue"), position.has_market_value() ? position.market_value() : 0.0);
 		dto.insert(QStringLiteral("currency"), position.has_currency() ? u8(position.currency()) : QStringLiteral("USD"));
 		dto.insert(QStringLiteral("displayName"), position.has_display_name() ? u8(position.display_name()) : QString());
+		dto.insert(QStringLiteral("providerId"), position.has_provider_id() ? u8(position.provider_id()) : QString());
+		dto.insert(QStringLiteral("providerSymbol"),
+				   position.has_provider_symbol() ? u8(position.provider_symbol()) : QString());
+		dto.insert(QStringLiteral("exchange"), position.has_exchange() ? u8(position.exchange()) : QString());
+		dto.insert(QStringLiteral("quoteTime"),
+				   position.has_quote_time() ? QVariant::fromValue< qulonglong >(position.quote_time()) : QVariant());
+		dto.insert(QStringLiteral("quoteSourceUrl"),
+				   position.has_quote_source_url() ? u8(position.quote_source_url()) : QString());
+		dto.insert(QStringLiteral("quoteConfidence"),
+				   position.has_quote_confidence() ? position.quote_confidence() : 0.0);
 		return dto;
 	}
 
@@ -13919,6 +13930,7 @@ namespace {
 		dto.insert(QStringLiteral("endSnapshotAt"),
 				   row.has_end_snapshot_at() ? QVariant::fromValue< qulonglong >(row.end_snapshot_at()) : QVariant());
 		dto.insert(QStringLiteral("followed"), row.has_followed() && row.followed());
+		dto.insert(QStringLiteral("insufficientHistory"), row.has_insufficient_history() && row.insufficient_history());
 		return dto;
 	}
 
@@ -13953,6 +13965,12 @@ namespace {
 				   state.has_selected_period() ? u8(state.selected_period()) : QStringLiteral("30d"));
 		dto.insert(QStringLiteral("status"), state.has_status() ? u8(state.status()) : QString());
 		dto.insert(QStringLiteral("error"), state.has_error() ? u8(state.error()) : QString());
+		dto.insert(QStringLiteral("leaderboardDescription"),
+				   state.has_leaderboard_description() ? u8(state.leaderboard_description()) : QString());
+		dto.insert(QStringLiteral("leaderboardUpdatedAt"),
+				   state.has_leaderboard_updated_at()
+					   ? QVariant::fromValue< qulonglong >(state.leaderboard_updated_at())
+					   : QVariant());
 
 		QVariantList periods;
 		for (int i = 0; i < state.periods_size(); ++i) {
@@ -14306,6 +14324,109 @@ void MainWindow::openModernGenericDialog(const QVariantMap &dialog) {
 	publishModernDialogState(m_modernDialogController->openGenericDialog(dialog));
 }
 
+void MainWindow::handleModernShellFinanceQuoteLookupRequest(const QString &requestID, const QString &symbol) {
+	QVariantMap result;
+	result.insert(QStringLiteral("requestId"), requestID);
+	result.insert(QStringLiteral("query"), symbol);
+
+	const auto publishResult = [this](const QVariantMap &payload) {
+		if (m_modernShellHost && m_modernShellHost->bridge()) {
+			m_modernShellHost->bridge()->publishFinanceQuoteResult(payload);
+		}
+	};
+
+	const QString normalizedSymbol = Mumble::Finance::normalizeTickerSymbol(symbol);
+	if (requestID.trimmed().isEmpty() || normalizedSymbol.isEmpty()) {
+		result.insert(QStringLiteral("ok"), false);
+		result.insert(QStringLiteral("error"), tr("Enter a valid ticker symbol."));
+		publishResult(result);
+		return;
+	}
+
+	if (!Global::get().nam) {
+		result.insert(QStringLiteral("ok"), false);
+		result.insert(QStringLiteral("error"), tr("Quote lookup is not available right now."));
+		publishResult(result);
+		return;
+	}
+
+	const QUrl chartURL = Mumble::Finance::yahooFinanceChartUrl(normalizedSymbol, QStringLiteral("5d"),
+																QStringLiteral("1d"));
+	if (!chartURL.isValid() || !isSafePreviewTarget(chartURL)) {
+		result.insert(QStringLiteral("ok"), false);
+		result.insert(QStringLiteral("error"), tr("Quote provider URL was rejected."));
+		publishResult(result);
+		return;
+	}
+
+	QNetworkRequest request(chartURL);
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
+	QNetworkReply *reply = Global::get().nam->get(request);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this, [this, reply, requestID, symbol, normalizedSymbol]() {
+		QVariantMap result;
+		result.insert(QStringLiteral("requestId"), requestID);
+		result.insert(QStringLiteral("query"), symbol);
+
+		const QByteArray data = reply->readAll();
+		const bool success    = reply->error() == QNetworkReply::NoError;
+		const QString networkError = reply->errorString();
+		reply->deleteLater();
+
+		if (!success || data.isEmpty()) {
+			result.insert(QStringLiteral("ok"), false);
+			result.insert(QStringLiteral("error"),
+						  networkError.trimmed().isEmpty() ? tr("Quote lookup failed.") : networkError);
+			if (m_modernShellHost && m_modernShellHost->bridge()) {
+				m_modernShellHost->bridge()->publishFinanceQuoteResult(result);
+			}
+			return;
+		}
+
+		QString parseError;
+		const std::optional< Mumble::Finance::YahooChartQuote > quote =
+			Mumble::Finance::parseYahooChartQuote(data, &parseError);
+		if (!quote || !quote->hasRegularMarketPrice || !std::isfinite(quote->regularMarketPrice)
+			|| quote->regularMarketPrice <= 0.0) {
+			result.insert(QStringLiteral("ok"), false);
+			result.insert(QStringLiteral("error"),
+						  parseError.trimmed().isEmpty() ? tr("Yahoo did not return a usable price.") : parseError);
+			if (m_modernShellHost && m_modernShellHost->bridge()) {
+				m_modernShellHost->bridge()->publishFinanceQuoteResult(result);
+			}
+			return;
+		}
+
+		const QString quoteSymbol = Mumble::Finance::normalizeTickerSymbol(
+			quote->symbol.trimmed().isEmpty() ? normalizedSymbol : quote->symbol);
+		const QUrl sourceURL = Mumble::Finance::yahooFinanceQuoteUrl(quoteSymbol);
+		result.insert(QStringLiteral("ok"), true);
+		result.insert(QStringLiteral("providerId"), QStringLiteral("yahoo-finance"));
+		result.insert(QStringLiteral("symbol"), quoteSymbol.isEmpty() ? normalizedSymbol : quoteSymbol);
+		result.insert(QStringLiteral("providerSymbol"), quoteSymbol.isEmpty() ? normalizedSymbol : quoteSymbol);
+		result.insert(QStringLiteral("displayName"),
+					  !quote->shortName.trimmed().isEmpty() ? quote->shortName.trimmed() : quote->longName.trimmed());
+		result.insert(QStringLiteral("exchange"),
+					  !quote->fullExchangeName.trimmed().isEmpty() ? quote->fullExchangeName.trimmed()
+																	: quote->exchangeName.trimmed());
+		result.insert(QStringLiteral("price"), quote->regularMarketPrice);
+		result.insert(QStringLiteral("currency"),
+					  quote->currency.trimmed().isEmpty() ? QStringLiteral("USD") : quote->currency.trimmed());
+		result.insert(QStringLiteral("quoteTime"), QVariant::fromValue< qulonglong >(
+													  quote->regularMarketTime > 0
+														  ? static_cast< qulonglong >(quote->regularMarketTime)
+														  : 0ULL));
+		result.insert(QStringLiteral("quoteSourceUrl"),
+					  sourceURL.isValid() ? sourceURL.toString(QUrl::FullyEncoded) : QString());
+		result.insert(QStringLiteral("quoteConfidence"), 1.0);
+
+		if (m_modernShellHost && m_modernShellHost->bridge()) {
+			m_modernShellHost->bridge()->publishFinanceQuoteResult(result);
+		}
+	});
+}
+
 QVariantMap MainWindow::buildModernStonksDialog() const {
 	QVariantMap state = m_stonksState;
 	if (state.isEmpty()) {
@@ -14412,6 +14533,15 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 			position->set_market_value(positionMap.value(QStringLiteral("marketValue")).toDouble());
 			position->set_currency(u8(positionMap.value(QStringLiteral("currency"), QStringLiteral("USD")).toString()));
 			position->set_display_name(u8(positionMap.value(QStringLiteral("displayName")).toString()));
+			position->set_provider_id(u8(positionMap.value(QStringLiteral("providerId")).toString()));
+			position->set_provider_symbol(u8(positionMap.value(QStringLiteral("providerSymbol")).toString()));
+			position->set_exchange(u8(positionMap.value(QStringLiteral("exchange")).toString()));
+			const qulonglong quoteTime = positionMap.value(QStringLiteral("quoteTime")).toULongLong();
+			if (quoteTime > 0) {
+				position->set_quote_time(quoteTime);
+			}
+			position->set_quote_source_url(u8(positionMap.value(QStringLiteral("quoteSourceUrl")).toString()));
+			position->set_quote_confidence(positionMap.value(QStringLiteral("quoteConfidence")).toDouble());
 		}
 		Global::get().sh->sendMessage(message);
 		return true;
@@ -17135,10 +17265,39 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 	messageState.insert(QStringLiteral("reactions"), reactions);
 
 	if (!deletedMessage) {
-		if (previewKey) {
-			if (!fastFirstPaint) {
-				ensurePersistentChatPreview(*previewKey);
-			}
+		if (previewKey && fastFirstPaint) {
+			const auto previewUrlStringFromKey = [](const QString &key) {
+				const auto decodedPayload = [&key](const QString &prefix) {
+					return QUrl::fromPercentEncoding(key.mid(prefix.size()).toUtf8());
+				};
+				if (key.startsWith(QLatin1String("url:"))) {
+					return key.mid(QStringLiteral("url:").size());
+				}
+				if (key.startsWith(QLatin1String("image:"))) {
+					return key.mid(QStringLiteral("image:").size());
+				}
+				if (key.startsWith(QLatin1String("embed:"))) {
+					return decodedPayload(QStringLiteral("embed:"));
+				}
+				if (key.startsWith(QLatin1String("youtube:"))) {
+					return decodedPayload(QStringLiteral("youtube:"));
+				}
+				if (key.startsWith(QLatin1String("twitch:"))) {
+					return decodedPayload(QStringLiteral("twitch:"));
+				}
+				return QString();
+			};
+			const QString previewUrlString = previewUrlStringFromKey(*previewKey);
+			const QUrl previewUrl(previewUrlString);
+			QVariantMap previewStub;
+			previewStub.insert(QStringLiteral("url"), previewUrlString);
+			previewStub.insert(QStringLiteral("host"),
+							   previewUrl.isValid() ? previewDisplayHost(previewUrl) : tr("Link preview"));
+			previewStub.insert(QStringLiteral("singleUrl"), persistentChatSourceTextIsSinglePreviewableUrl(bodyText));
+			previewStub.insert(QStringLiteral("loadingLabel"), tr("Load preview"));
+			messageState.insert(QStringLiteral("previewStub"), previewStub);
+		} else if (previewKey) {
+			ensurePersistentChatPreview(*previewKey);
 			if (const auto it = m_persistentChatPreviews.constFind(*previewKey);
 				it != m_persistentChatPreviews.cend()) {
 				const PersistentChatPreview &preview = it.value();
@@ -17228,6 +17387,42 @@ void MainWindow::clearModernShellMessageDtoCache(const char *reason) {
 									  .arg(QString::fromLatin1(reason ? reason : "unknown"))
 									  .arg(previousSize)
 									  .arg(static_cast< qulonglong >(m_modernShellMessageDtoContextRevision)));
+}
+
+void MainWindow::evictModernShellMessageDtoCacheForMessage(const MumbleProto::ChatMessage &message) {
+	const QString messageNeedle =
+		QString::fromLatin1("|%1:%2|")
+			.arg(static_cast< qulonglong >(message.thread_id()))
+			.arg(static_cast< qulonglong >(message.message_id()));
+	QStringList keysToRemove;
+	for (auto it = m_modernShellMessageDtoCache.constBegin(); it != m_modernShellMessageDtoCache.constEnd(); ++it) {
+		if (it.key().contains(messageNeedle)) {
+			keysToRemove.push_back(it.key());
+		}
+	}
+
+	for (const QString &key : keysToRemove) {
+		m_modernShellMessageDtoCache.remove(key);
+	}
+	if (!keysToRemove.isEmpty()) {
+		mumble::chatperf::recordValue("modern.message_dto_cache.evict", keysToRemove.size());
+	}
+}
+
+void MainWindow::publishModernShellPreviewUpdateForKey(const QString &previewKey) {
+	if (previewKey.isEmpty()) {
+		return;
+	}
+
+	for (const MumbleProto::ChatMessage &message : m_persistentChatMessages) {
+		const std::optional< QString > messagePreviewKey = persistentChatPreviewKey(message);
+		if (!messagePreviewKey || *messagePreviewKey != previewKey) {
+			continue;
+		}
+
+		evictModernShellMessageDtoCacheForMessage(message);
+		publishModernShellMessageUpdatePatch(message);
+	}
 }
 
 QString MainWindow::modernShellMessageDtoCacheKey(const MumbleProto::ChatMessage &message,
@@ -17321,43 +17516,130 @@ QVariantList MainWindow::buildModernShellMessageStates(const PersistentChatTarge
 	return messages;
 }
 
-void MainWindow::scheduleModernShellMessageHydration(const QString &scopeToken, const quint64 generation,
-													 const std::size_t beginIndex, const bool scrollToBottom) {
-	if (scopeToken.isEmpty() || !usesModernShell()) {
-		return;
-	}
-
-	QPointer< MainWindow > guardedThis(this);
-	QTimer::singleShot(240, this, [guardedThis, scopeToken, generation, beginIndex, scrollToBottom]() {
-		if (!guardedThis || generation != guardedThis->m_modernShellMessagePatchGeneration
-			|| !guardedThis->usesModernShell()) {
-			return;
-		}
-
-		const PersistentChatTarget target = guardedThis->currentPersistentChatTarget();
-		const QString currentScopeToken   = modernShellScopeToken(
-			target.serverLog ? LocalServerLogScope
-							 : (target.directMessage ? LocalDirectMessageScope : static_cast< int >(target.scope)),
-			target.directMessage && target.user ? target.user->uiSession : target.scopeID);
-		if (currentScopeToken != scopeToken || target.serverLog || target.directMessage) {
-			return;
-		}
-
-		guardedThis->publishModernShellMessagesPatch(
-			QStringLiteral("messages.reset"),
-			guardedThis->buildModernShellMessageStates(target, beginIndex, ModernShellMessageBuildMode::Full),
-			scrollToBottom);
-	});
-}
-
-QVariantMap MainWindow::buildModernShellPatchBase(const QString &kind, const PersistentChatTarget &target) {
-	QVariantMap patch;
+QString MainWindow::modernShellScopeTokenForTarget(const PersistentChatTarget &target) const {
 	const int activeScopeValue =
 		target.serverLog ? LocalServerLogScope
 						 : (target.directMessage ? LocalDirectMessageScope : static_cast< int >(target.scope));
 	const unsigned int activeScopeID = target.directMessage && target.user ? target.user->uiSession : target.scopeID;
+	return modernShellScopeToken(activeScopeValue, activeScopeID);
+}
+
+QString MainWindow::modernShellMessageTimelineMode(const std::size_t beginIndex) const {
+	const std::size_t messageCount = m_persistentChatMessages.size();
+	const std::size_t startIndex   = std::min(beginIndex, messageCount);
+	int previewableCount           = 0;
+	for (std::size_t i = startIndex; i < messageCount; ++i) {
+		const MumbleProto::ChatMessage &message = m_persistentChatMessages[i];
+		if (message.has_deleted_at() && message.deleted_at() > 0) {
+			continue;
+		}
+		if (persistentChatPreviewKey(message)) {
+			++previewableCount;
+			if (previewableCount >= 5) {
+				return QStringLiteral("linkDense");
+			}
+		}
+	}
+
+	return QStringLiteral("normal");
+}
+
+void MainWindow::handleModernShellPreviewHydrationRequest(const QString &scopeToken, const QVariantList &messageIds,
+														  const bool highPriority) {
+	const QString requestedScopeToken = scopeToken.trimmed();
+	const PersistentChatTarget target = currentPersistentChatTarget();
+	if (!usesModernShell() || requestedScopeToken.isEmpty() || target.serverLog || target.directMessage
+		|| modernShellScopeTokenForTarget(target) != requestedScopeToken) {
+		return;
+	}
+
+	if (m_modernShellPreviewHydrationScopeToken != requestedScopeToken) {
+		m_modernShellPreviewHydrationScopeToken = requestedScopeToken;
+		m_modernShellPreviewHydrationQueue.clear();
+		m_modernShellPreviewHydrationQueuedIds.clear();
+	}
+
+	const std::size_t messageCount = m_persistentChatMessages.size();
+	const std::size_t beginIndex   = messageCount > 200 ? messageCount - 200 : 0;
+	m_modernShellPreviewHydrationLinkDense =
+		modernShellMessageTimelineMode(beginIndex) == QLatin1String("linkDense");
+
+	bool highPriorityConsumed = false;
+	for (const QVariant &messageIdValue : messageIds) {
+		const qulonglong messageID = messageIdValue.toULongLong();
+		if (messageID == 0) {
+			continue;
+		}
+
+		if (highPriority && !highPriorityConsumed) {
+			if (const MumbleProto::ChatMessage *message =
+					findPersistentChatMessageByID(m_persistentChatMessages, static_cast< unsigned int >(messageID))) {
+				evictModernShellMessageDtoCacheForMessage(*message);
+				publishModernShellMessageUpdatePatch(*message);
+				highPriorityConsumed = true;
+				continue;
+			}
+		}
+
+		if (m_modernShellPreviewHydrationQueuedIds.contains(messageID)) {
+			continue;
+		}
+
+		m_modernShellPreviewHydrationQueuedIds.insert(messageID);
+		m_modernShellPreviewHydrationQueue.push_back(messageID);
+	}
+
+	if (m_modernShellPreviewHydrationQueue.isEmpty()) {
+		return;
+	}
+
+	if (!m_modernShellPreviewHydrationTimer) {
+		m_modernShellPreviewHydrationTimer = new QTimer(this);
+		m_modernShellPreviewHydrationTimer->setSingleShot(true);
+		connect(m_modernShellPreviewHydrationTimer, &QTimer::timeout, this,
+				&MainWindow::flushModernShellPreviewHydrationQueue);
+	}
+
+	if (!m_modernShellPreviewHydrationTimer->isActive()) {
+		m_modernShellPreviewHydrationTimer->start(m_modernShellPreviewHydrationLinkDense ? 80 : 50);
+	}
+}
+
+void MainWindow::flushModernShellPreviewHydrationQueue() {
+	const PersistentChatTarget target = currentPersistentChatTarget();
+	if (!usesModernShell() || target.serverLog || target.directMessage
+		|| modernShellScopeTokenForTarget(target) != m_modernShellPreviewHydrationScopeToken) {
+		m_modernShellPreviewHydrationQueue.clear();
+		m_modernShellPreviewHydrationQueuedIds.clear();
+		m_modernShellPreviewHydrationScopeToken.clear();
+		return;
+	}
+
+	const int budget = m_modernShellPreviewHydrationLinkDense ? 2 : 4;
+	int processed    = 0;
+	while (!m_modernShellPreviewHydrationQueue.isEmpty() && processed < budget) {
+		const qulonglong messageID = m_modernShellPreviewHydrationQueue.takeFirst();
+		m_modernShellPreviewHydrationQueuedIds.remove(messageID);
+		const MumbleProto::ChatMessage *message =
+			findPersistentChatMessageByID(m_persistentChatMessages, static_cast< unsigned int >(messageID));
+		if (!message || (message->has_deleted_at() && message->deleted_at() > 0)) {
+			continue;
+		}
+
+		evictModernShellMessageDtoCacheForMessage(*message);
+		publishModernShellMessageUpdatePatch(*message);
+		++processed;
+	}
+
+	if (!m_modernShellPreviewHydrationQueue.isEmpty() && m_modernShellPreviewHydrationTimer) {
+		m_modernShellPreviewHydrationTimer->start(m_modernShellPreviewHydrationLinkDense ? 80 : 50);
+	}
+}
+
+QVariantMap MainWindow::buildModernShellPatchBase(const QString &kind, const PersistentChatTarget &target) {
+	QVariantMap patch;
 	patch.insert(QStringLiteral("kind"), kind);
-	patch.insert(QStringLiteral("scopeToken"), modernShellScopeToken(activeScopeValue, activeScopeID));
+	patch.insert(QStringLiteral("scopeToken"), modernShellScopeTokenForTarget(target));
 	return patch;
 }
 
@@ -17862,10 +18144,12 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 	appState.insert(QStringLiteral("inlineMp4PlaybackSupported"), ModernShellInlineMp4PlaybackSupported);
 	appState.insert(QStringLiteral("stonks"), stonksHeaderState());
 	appState.insert(QStringLiteral("motdExpanded"), Global::get().s.bModernShellMotdExpanded);
-	if (const Channel *rootVoiceChannel = Channel::get(Mumble::ROOT_CHANNEL_ID)) {
-		appState.insert(QStringLiteral("voiceRootLabel"), QString());
-		appState.insert(QStringLiteral("voiceRootScopeToken"),
-						modernShellScopeToken(static_cast< int >(MumbleProto::Channel), rootVoiceChannel->iId));
+	if (connected) {
+		if (const Channel *rootVoiceChannel = Channel::get(Mumble::ROOT_CHANNEL_ID)) {
+			appState.insert(QStringLiteral("voiceRootLabel"), QString());
+			appState.insert(QStringLiteral("voiceRootScopeToken"),
+							modernShellScopeToken(static_cast< int >(MumbleProto::Channel), rootVoiceChannel->iId));
+		}
 	}
 	on_qmServer_aboutToShow();
 	on_qmSelf_aboutToShow();
@@ -18062,10 +18346,10 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 		textRooms.push_back(room);
 	};
 
-	if (hasPersistentChatCapabilities()) {
-		appendTextRoom(LocalServerLogScope, 0, tr("Activity"),
-					   tr("Server log, connection status, notices, and client diagnostics."), tr("Activity"));
+	appendTextRoom(LocalServerLogScope, 0, tr("Activity"),
+				   tr("Server log, connection status, notices, and client diagnostics."), tr("Activity"));
 
+	if (hasPersistentChatCapabilities()) {
 		QSet< unsigned int > voiceChatTextRoomIDs;
 		const auto appendVoiceChatTextRoom = [&](const Channel *channel) {
 			if (!channel || voiceChatTextRoomIDs.contains(channel->iId)) {
@@ -18133,6 +18417,7 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 		room.insert(QStringLiteral("participants"), buildModernShellChannelParticipantPatchStates(channel, 32, true));
 		room.insert(QStringLiteral("selected"), selected);
 		room.insert(QStringLiteral("joined"), joined);
+		room.insert(QStringLiteral("canJoin"), connected && !joined);
 		room.insert(QStringLiteral("unreadCount"),
 					static_cast< qulonglong >(cachedPersistentChatUnreadCount(MumbleProto::Channel, channel->iId)));
 		room.insert(QStringLiteral("kindLabel"), tr("Voice room"));
@@ -18144,7 +18429,9 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 			appendVoiceRoomTree(child, depth + 1);
 		}
 	};
-	appendVoiceRoomTree(Channel::get(Mumble::ROOT_CHANNEL_ID), 0);
+	if (connected) {
+		appendVoiceRoomTree(Channel::get(Mumble::ROOT_CHANNEL_ID), 0);
+	}
 
 	QVariantList participants;
 	if (target.directMessage && target.user) {
@@ -18350,7 +18637,7 @@ void MainWindow::publishModernShellPatch(const QString &kind, QVariantMap patch)
 }
 
 void MainWindow::publishModernShellMessagesPatch(const QString &kind, const QVariantList &messages,
-												 const bool scrollToBottom) {
+												 const bool scrollToBottom, const QString &timelineMode) {
 	if (messages.isEmpty() && kind != QLatin1String("messages.reset")) {
 		return;
 	}
@@ -18360,6 +18647,10 @@ void MainWindow::publishModernShellMessagesPatch(const QString &kind, const QVar
 	patch.insert(QStringLiteral("activeScope"), buildModernShellActiveScopeState(target));
 	patch.insert(QStringLiteral("messages"), messages);
 	patch.insert(QStringLiteral("scrollToBottom"), scrollToBottom);
+	if (kind == QLatin1String("messages.reset")) {
+		patch.insert(QStringLiteral("timelineMode"),
+					 timelineMode.isEmpty() ? QStringLiteral("normal") : timelineMode);
+	}
 	publishModernShellPatch(kind, patch);
 }
 
@@ -18498,10 +18789,12 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 	appState.insert(QStringLiteral("canCreateTextRoom"), canCreateTextRoom());
 	appState.insert(QStringLiteral("inlineMp4PlaybackSupported"), ModernShellInlineMp4PlaybackSupported);
 	appState.insert(QStringLiteral("stonks"), stonksHeaderState());
-	if (const Channel *rootVoiceChannel = Channel::get(Mumble::ROOT_CHANNEL_ID)) {
-		appState.insert(QStringLiteral("voiceRootLabel"), QString());
-		appState.insert(QStringLiteral("voiceRootScopeToken"),
-						modernShellScopeToken(static_cast< int >(MumbleProto::Channel), rootVoiceChannel->iId));
+	if (connected) {
+		if (const Channel *rootVoiceChannel = Channel::get(Mumble::ROOT_CHANNEL_ID)) {
+			appState.insert(QStringLiteral("voiceRootLabel"), QString());
+			appState.insert(QStringLiteral("voiceRootScopeToken"),
+							modernShellScopeToken(static_cast< int >(MumbleProto::Channel), rootVoiceChannel->iId));
+		}
 	}
 	on_qmServer_aboutToShow();
 	on_qmSelf_aboutToShow();
@@ -19113,6 +19406,7 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 		room.insert(QStringLiteral("participants"), buildChannelParticipants(channel, 32, true, true));
 		room.insert(QStringLiteral("selected"), selectedVoiceRoom);
 		room.insert(QStringLiteral("joined"), joinedVoiceRoom);
+		room.insert(QStringLiteral("canJoin"), connected && !joinedVoiceRoom);
 		room.insert(QStringLiteral("unreadCount"),
 					static_cast< qulonglong >(cachedPersistentChatUnreadCount(MumbleProto::Channel, channel->iId)));
 		room.insert(QStringLiteral("kindLabel"), tr("Voice room"));
@@ -19124,7 +19418,9 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 			appendVoiceRoomTree(child, depth + 1);
 		}
 	};
-	appendVoiceRoomTree(Channel::get(Mumble::ROOT_CHANNEL_ID), 0);
+	if (connected) {
+		appendVoiceRoomTree(Channel::get(Mumble::ROOT_CHANNEL_ID), 0);
+	}
 
 	QString kindLabel = tr("Conversation");
 	if (target.serverLog) {
@@ -19284,7 +19580,8 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 	if (!target.serverLog && !target.directMessage) {
 		const std::size_t messageCount = m_persistentChatMessages.size();
 		const std::size_t beginIndex   = messageCount > 200 ? messageCount - 200 : 0;
-		messages                      = buildModernShellMessageStates(target, beginIndex);
+		messages = buildModernShellMessageStates(target, beginIndex, ModernShellMessageBuildMode::FastFirstPaint);
+		snapshot.insert(QStringLiteral("timelineMode"), modernShellMessageTimelineMode(beginIndex));
 	}
 
 	snapshot.insert(QStringLiteral("messages"), messages);
@@ -20012,10 +20309,11 @@ QVariantList MainWindow::buildModernShellMessageStates(const PersistentChatTarge
 }
 
 void MainWindow::publishModernShellMessagesPatch(const QString &kind, const QVariantList &messages,
-												 bool scrollToBottom) {
+												 bool scrollToBottom, const QString &timelineMode) {
 	Q_UNUSED(kind);
 	Q_UNUSED(messages);
 	Q_UNUSED(scrollToBottom);
+	Q_UNUSED(timelineMode);
 }
 
 void MainWindow::publishModernShellMessageUpdatePatch(const MumbleProto::ChatMessage &message) {
@@ -22187,66 +22485,61 @@ void MainWindow::rebuildPersistentChatChannelList() {
 	clearPersistentChatChannelSelection();
 	m_persistentChatChannelList->clear();
 
-	if (!hasPersistentChatCapabilities()) {
-		m_persistentChatChannelList->blockSignals(oldSignalState);
-		updatePersistentChatChrome(currentPersistentChatTarget());
-		queueModernShellSnapshotSync();
-		return;
-	}
-
 	QListWidgetItem *serverLogItem = new QListWidgetItem(m_persistentChatChannelList);
 	serverLogItem->setData(PersistentChatScopeRole, LocalServerLogScope);
 	serverLogItem->setData(PersistentChatScopeIDRole, 0U);
 	serverLogItem->setToolTip(tr("Server log, connection status, notices, and client diagnostics."));
 
-	QList< Channel * > compatChannels;
-	const auto appendCompatChannel = [&compatChannels](Channel *channel) {
-		if (!channel || compatChannels.contains(channel)) {
-			return;
+	if (hasPersistentChatCapabilities()) {
+		QList< Channel * > compatChannels;
+		const auto appendCompatChannel = [&compatChannels](Channel *channel) {
+			if (!channel || compatChannels.contains(channel)) {
+				return;
+			}
+
+			compatChannels.push_back(channel);
+		};
+		appendCompatChannel(currentVoiceChannel());
+		if (m_persistentChatTargetUsesVoiceTree) {
+			appendCompatChannel(selectedVoiceTreeChannel());
 		}
 
-		compatChannels.push_back(channel);
-	};
-	appendCompatChannel(currentVoiceChannel());
-	if (m_persistentChatTargetUsesVoiceTree) {
-		appendCompatChannel(selectedVoiceTreeChannel());
-	}
-
-	for (Channel *channel : compatChannels) {
-		QListWidgetItem *item = new QListWidgetItem(m_persistentChatChannelList);
-		item->setData(PersistentChatScopeRole, static_cast< int >(MumbleProto::Channel));
-		item->setData(PersistentChatScopeIDRole, static_cast< unsigned int >(channel->iId));
-		item->setToolTip(tr("Legacy-compatible room chat for %1.").arg(persistentTextAclChannelLabel(channel)));
-	}
-
-	QList< PersistentTextChannel > textChannels = m_persistentTextChannels.values();
-	std::sort(textChannels.begin(), textChannels.end(),
-			  [](const PersistentTextChannel &lhs, const PersistentTextChannel &rhs) {
-				  if (lhs.position != rhs.position) {
-					  return lhs.position < rhs.position;
-				  }
-				  if (lhs.name != rhs.name) {
-					  return lhs.name.localeAwareCompare(rhs.name) < 0;
-				  }
-
-				  return lhs.textChannelID < rhs.textChannelID;
-			  });
-
-	for (const PersistentTextChannel &textChannel : textChannels) {
-		QListWidgetItem *item = new QListWidgetItem(m_persistentChatChannelList);
-		item->setData(PersistentChatScopeRole, static_cast< int >(MumbleProto::TextChannel));
-		item->setData(PersistentChatScopeIDRole, textChannel.textChannelID);
-		item->setToolTip(textChannel.description.isEmpty() ? tr("Persistent text channel") : textChannel.description);
-	}
-
-	if (previousScopeValue == LocalDirectMessageScope && previousScopeID != 0
-		&& previousScopeID != Global::get().uiSession) {
-		const ClientUser *user = ClientUser::get(previousScopeID);
-		if (user) {
+		for (Channel *channel : compatChannels) {
 			QListWidgetItem *item = new QListWidgetItem(m_persistentChatChannelList);
-			item->setData(PersistentChatScopeRole, LocalDirectMessageScope);
-			item->setData(PersistentChatScopeIDRole, previousScopeID);
-			item->setToolTip(tr("Direct message with %1.").arg(user->qsName));
+			item->setData(PersistentChatScopeRole, static_cast< int >(MumbleProto::Channel));
+			item->setData(PersistentChatScopeIDRole, static_cast< unsigned int >(channel->iId));
+			item->setToolTip(tr("Legacy-compatible room chat for %1.").arg(persistentTextAclChannelLabel(channel)));
+		}
+
+		QList< PersistentTextChannel > textChannels = m_persistentTextChannels.values();
+		std::sort(textChannels.begin(), textChannels.end(),
+				  [](const PersistentTextChannel &lhs, const PersistentTextChannel &rhs) {
+					  if (lhs.position != rhs.position) {
+						  return lhs.position < rhs.position;
+					  }
+					  if (lhs.name != rhs.name) {
+						  return lhs.name.localeAwareCompare(rhs.name) < 0;
+					  }
+
+					  return lhs.textChannelID < rhs.textChannelID;
+				  });
+
+		for (const PersistentTextChannel &textChannel : textChannels) {
+			QListWidgetItem *item = new QListWidgetItem(m_persistentChatChannelList);
+			item->setData(PersistentChatScopeRole, static_cast< int >(MumbleProto::TextChannel));
+			item->setData(PersistentChatScopeIDRole, textChannel.textChannelID);
+			item->setToolTip(textChannel.description.isEmpty() ? tr("Persistent text channel") : textChannel.description);
+		}
+
+		if (previousScopeValue == LocalDirectMessageScope && previousScopeID != 0
+			&& previousScopeID != Global::get().uiSession) {
+			const ClientUser *user = ClientUser::get(previousScopeID);
+			if (user) {
+				QListWidgetItem *item = new QListWidgetItem(m_persistentChatChannelList);
+				item->setData(PersistentChatScopeRole, LocalDirectMessageScope);
+				item->setData(PersistentChatScopeIDRole, previousScopeID);
+				item->setToolTip(tr("Direct message with %1.").arg(user->qsName));
+			}
 		}
 	}
 
@@ -22320,10 +22613,13 @@ void MainWindow::rebuildPersistentChatChannelList() {
 
 	const bool canApplySelection =
 		usesModernShell() && Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning();
-	if (selectionItem && canApplySelection) {
+	const bool implicitActivityFallback =
+		canApplySelection && !hasPersistentChatCapabilities() && previousScopeValue != LocalServerLogScope
+		&& selectionItem->data(PersistentChatScopeRole).toInt() == LocalServerLogScope;
+	if (selectionItem && canApplySelection && !implicitActivityFallback) {
 		cachePersistentChatChannelSelection(selectionItem);
 		m_persistentChatChannelList->setCurrentItem(selectionItem);
-	} else if (selectionItem) {
+	} else if (selectionItem && !implicitActivityFallback) {
 		cachePersistentChatChannelSelection(selectionItem);
 	}
 	if (m_persistentChatTargetUsesVoiceTree) {
@@ -23565,6 +23861,17 @@ MainWindow::PersistentChatTarget MainWindow::legacyChatTarget() const {
 
 MainWindow::PersistentChatTarget MainWindow::currentPersistentChatTarget() const {
 	PersistentChatTarget target;
+	const auto activityTarget = [this]() {
+		PersistentChatTarget activity;
+		activity.valid       = true;
+		activity.readOnly    = true;
+		activity.serverLog   = true;
+		activity.scope       = MumbleProto::Aggregate;
+		activity.scopeID     = 0;
+		activity.label       = tr("Activity");
+		activity.description = tr("Server log, connection status, notices, and client diagnostics.");
+		return activity;
+	};
 
 	if (!usesModernShell()) {
 		return legacyChatTarget();
@@ -23584,21 +23891,35 @@ MainWindow::PersistentChatTarget MainWindow::currentPersistentChatTarget() const
 		return target;
 	}
 
-	if (Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning()
-		&& !hasPersistentChatCapabilities()) {
+	const bool connected = Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning();
+	const QListWidgetItem *currentItem = persistentChatChannelListCurrentItem();
+	std::optional< int > selectedScopeValue;
+	unsigned int selectedScopeID = 0;
+	if (currentItem) {
+		selectedScopeValue = currentItem->data(PersistentChatScopeRole).toInt();
+		selectedScopeID    = currentItem->data(PersistentChatScopeIDRole).toUInt();
+	} else if (m_persistentChatSelectedScopeValue.has_value()) {
+		selectedScopeValue = *m_persistentChatSelectedScopeValue;
+		selectedScopeID    = m_persistentChatSelectedScopeID;
+	}
+
+	if (selectedScopeValue.has_value() && *selectedScopeValue == LocalServerLogScope) {
+		return activityTarget();
+	}
+
+	if (connected && !hasPersistentChatCapabilities()) {
 		return legacyChatTarget();
 	}
 
 	if (!m_persistentChatChannelList) {
-		target.label = tr("Not connected");
-		if (Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning()) {
-			target.label = tr("No conversation selected");
+		if (!connected) {
+			return activityTarget();
 		}
+		target.label = tr("No conversation selected");
 		return target;
 	}
 
-	if (m_persistentChatTargetUsesVoiceTree && Global::get().uiSession != 0 && Global::get().sh
-		&& Global::get().sh->isRunning()) {
+	if (m_persistentChatTargetUsesVoiceTree && connected) {
 		Channel *selectedChannel = selectedVoiceTreeChannel();
 		if (!selectedChannel) {
 			target.label = tr("No current room");
@@ -23614,33 +23935,21 @@ MainWindow::PersistentChatTarget MainWindow::currentPersistentChatTarget() const
 		return target;
 	}
 
-	const QListWidgetItem *currentItem = persistentChatChannelListCurrentItem();
-	std::optional< int > selectedScopeValue;
-	unsigned int selectedScopeID = 0;
-	if (currentItem) {
-		selectedScopeValue = currentItem->data(PersistentChatScopeRole).toInt();
-		selectedScopeID    = currentItem->data(PersistentChatScopeIDRole).toUInt();
-	} else if (m_persistentChatSelectedScopeValue.has_value()) {
-		selectedScopeValue = *m_persistentChatSelectedScopeValue;
-		selectedScopeID    = m_persistentChatSelectedScopeID;
-	}
-
 	if (!selectedScopeValue.has_value()) {
-		target.label = tr("Not connected");
-		if (Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning()) {
-			target.label = tr("No conversation selected");
+		if (!connected) {
+			return activityTarget();
 		}
+		target.label = tr("No conversation selected");
 		return target;
 	}
 
 	const int scopeValue = *selectedScopeValue;
 	if (scopeValue == LocalServerLogScope) {
-		target.valid       = true;
-		target.readOnly    = true;
-		target.serverLog   = true;
-		target.label       = tr("Activity");
-		target.description = tr("Server log, connection status, notices, and client diagnostics.");
-		return target;
+		return activityTarget();
+	}
+
+	if (!connected) {
+		return activityTarget();
 	}
 
 	if (scopeValue == LocalDirectMessageScope) {
@@ -23658,11 +23967,6 @@ MainWindow::PersistentChatTarget MainWindow::currentPersistentChatTarget() const
 			target.statusMessage = tr(
 				"Direct messages still use the classic text-message transport and do not have persistent history yet.");
 		}
-		return target;
-	}
-
-	if (Global::get().uiSession == 0 || !Global::get().sh || !Global::get().sh->isRunning()) {
-		target.label = tr("Not connected");
 		return target;
 	}
 
@@ -25899,6 +26203,41 @@ bool MainWindow::requestPersistentChatRedditVideoPreview(const QString &previewK
 	return true;
 }
 
+void MainWindow::queuePersistentChatPreviewRequest(const QString &previewKey) {
+	const QString key = previewKey.trimmed();
+	if (key.isEmpty() || m_persistentChatPreviews.contains(key)) {
+		return;
+	}
+
+	m_persistentChatQueuedPreviewRequests.insert(key);
+	if (!m_persistentChatPreviewRequestTimer) {
+		m_persistentChatPreviewRequestTimer = new QTimer(this);
+		m_persistentChatPreviewRequestTimer->setSingleShot(true);
+		connect(m_persistentChatPreviewRequestTimer, &QTimer::timeout, this,
+				&MainWindow::flushPersistentChatPreviewRequests);
+	}
+	if (!m_persistentChatPreviewRequestTimer->isActive()) {
+		m_persistentChatPreviewRequestTimer->start(50);
+	}
+}
+
+void MainWindow::flushPersistentChatPreviewRequests() {
+	const QStringList queuedKeys = m_persistentChatQueuedPreviewRequests.values();
+	int processed               = 0;
+	for (const QString &previewKey : queuedKeys) {
+		m_persistentChatQueuedPreviewRequests.remove(previewKey);
+		ensurePersistentChatPreview(previewKey);
+		++processed;
+		if (processed >= 4) {
+			break;
+		}
+	}
+
+	if (!m_persistentChatQueuedPreviewRequests.isEmpty() && m_persistentChatPreviewRequestTimer) {
+		m_persistentChatPreviewRequestTimer->start(50);
+	}
+}
+
 void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 	mumble::chatperf::ScopedDuration trace("chat.preview.ensure");
 	if (previewKey.isEmpty()) {
@@ -25921,12 +26260,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 				if (guardedThis->usesModernShell()) {
-					for (const MumbleProto::ChatMessage &message : guardedThis->m_persistentChatMessages) {
-						const std::optional< QString > messagePreviewKey = guardedThis->persistentChatPreviewKey(message);
-						if (messagePreviewKey && *messagePreviewKey == previewKey) {
-							guardedThis->publishModernShellMessageUpdatePatch(message);
-						}
-					}
+					guardedThis->publishModernShellPreviewUpdateForKey(previewKey);
 				} else {
 					guardedThis->queueModernShellSnapshotSync();
 				}
@@ -26808,15 +27142,10 @@ void MainWindow::handlePersistentChatPreviewSiteSnapshotResult(const QString &pr
 	}
 
 	storePersistentChatPreviewDiskCache(previewKey);
-	clearModernShellMessageDtoCache("preview");
-	for (const MumbleProto::ChatMessage &message : m_persistentChatMessages) {
-		const std::optional< QString > messagePreviewKey = persistentChatPreviewKey(message);
-		if (messagePreviewKey && *messagePreviewKey == previewKey) {
-			publishModernShellMessageUpdatePatch(message);
-		}
-	}
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	if (!usesModernShell()) {
+	if (usesModernShell()) {
+		publishModernShellPreviewUpdateForKey(previewKey);
+	} else {
 		queueModernShellSnapshotSync();
 	}
 #else
@@ -26827,15 +27156,10 @@ void MainWindow::handlePersistentChatPreviewSiteSnapshotResult(const QString &pr
 
 void MainWindow::publishPersistentChatPreviewUpdate(const QString &previewKey) {
 	storePersistentChatPreviewDiskCache(previewKey);
-	clearModernShellMessageDtoCache("preview");
-	for (const MumbleProto::ChatMessage &message : m_persistentChatMessages) {
-		const std::optional< QString > messagePreviewKey = persistentChatPreviewKey(message);
-		if (messagePreviewKey && *messagePreviewKey == previewKey) {
-			publishModernShellMessageUpdatePatch(message);
-		}
-	}
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	if (!usesModernShell()) {
+	if (usesModernShell()) {
+		publishModernShellPreviewUpdateForKey(previewKey);
+	} else {
 		queueModernShellSnapshotSync();
 	}
 #else
@@ -27039,9 +27363,6 @@ PersistentChatPreviewSpec MainWindow::persistentChatPreviewSpec(const QString &p
 
 void MainWindow::updatePersistentChatPreviewViewIfVisible(const QString &previewKey) {
 	mumble::chatperf::ScopedDuration trace("chat.preview.update_visible");
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	clearModernShellMessageDtoCache("preview");
-#endif
 	if (!m_persistentChatHistory) {
 		return;
 	}
@@ -27060,7 +27381,6 @@ void MainWindow::updatePersistentChatPreviewViewIfVisible(const QString &preview
 	bool hasMatchingBubble    = false;
 	bool updatedModelBubble   = false;
 	bool updatedVisibleBubble = false;
-	std::vector< MumbleProto::ChatMessage > modernUpdatedMessages;
 	const bool wasAtBottom    = m_persistentChatHistory->isScrolledToBottom();
 	const PersistentChatViewportAnchor viewportAnchor =
 		wasAtBottom ? PersistentChatViewportAnchor() : m_persistentChatHistory->captureViewportAnchor();
@@ -27071,7 +27391,6 @@ void MainWindow::updatePersistentChatPreviewViewIfVisible(const QString &preview
 		if (const std::optional< QString > messagePreviewKey = persistentChatPreviewKey(message);
 			messagePreviewKey && *messagePreviewKey == previewKey) {
 			hasMatchingBubble = true;
-			modernUpdatedMessages.push_back(message);
 			if (m_persistentChatHistoryModel) {
 				updatedModelBubble = m_persistentChatHistoryModel->updateBubblePreview(message.message_id(),
 																					   message.thread_id(), previewSpec)
@@ -27089,14 +27408,6 @@ void MainWindow::updatePersistentChatPreviewViewIfVisible(const QString &preview
 	if (!hasMatchingBubble) {
 		return;
 	}
-
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	if (usesModernShell()) {
-		for (const MumbleProto::ChatMessage &message : modernUpdatedMessages) {
-			publishModernShellMessageUpdatePatch(message);
-		}
-	}
-#endif
 
 	if (updatedVisibleBubble) {
 		m_persistentChatHistory->stabilizeVisibleContent();
@@ -33196,18 +33507,18 @@ void MainWindow::updateChatBar(bool forcePersistentChatReload, bool queueModernS
 	updatePersistentChatChrome(target);
 	updatePersistentChatScopeSelectorLabels();
 	updatePersistentTextChannelControls();
-	if (Global::get().uiSession == 0 || !target.valid) {
-		qteChat->setDefaultText(tr("<div>Connect to chat</div>"), true);
-		clearPersistentChatView(tr("Connect to a server to load conversations and history."),
-								tr("Start a conversation"),
-								{ tr("Open Server to connect"), tr("Room chat and history appear here") });
-	} else if (target.serverLog) {
+	if (target.serverLog) {
 		if (m_persistentChatController) {
 			m_persistentChatController->clearActiveScope();
 		}
 		clearPersistentChatReplyTarget(false);
 		qteChat->setDefaultText(tr("<div>Read-only activity</div>"), true);
 		renderServerLogView(true);
+	} else if (Global::get().uiSession == 0 || !target.valid) {
+		qteChat->setDefaultText(tr("<div>Connect to chat</div>"), true);
+		clearPersistentChatView(tr("Connect to a server to load conversations and history."),
+								tr("Start a conversation"),
+								{ tr("Open Server to connect"), tr("Room chat and history appear here") });
 	} else if (target.legacyTextPath && target.directMessage && target.user) {
 		qteChat->setDefaultText(tr("<div>Write to %1...</div>").arg(target.user->qsName.toHtmlEscaped()));
 		refreshPersistentChatView(forcePersistentChatReload);

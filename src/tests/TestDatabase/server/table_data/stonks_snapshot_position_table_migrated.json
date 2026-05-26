@@ -10,7 +10,13 @@
 			"price",
 			"market_value",
 			"currency",
-			"display_name"
+			"display_name",
+			"provider_id",
+			"provider_symbol",
+			"exchange",
+			"quote_time",
+			"quote_source_url",
+			"quote_confidence"
 		],
 		"rows": []
 	}

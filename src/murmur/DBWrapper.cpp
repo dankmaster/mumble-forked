@@ -1664,7 +1664,7 @@ std::vector< ::msdb::DBChatMessageReaction > DBWrapper::getChatMessageReactions(
 	WRAPPER_END
 }
 
-void DBWrapper::setChatMessageReactionActive(unsigned int serverID, unsigned int messageID, unsigned int actorUserID,
+bool DBWrapper::setChatMessageReactionActive(unsigned int serverID, unsigned int messageID, unsigned int actorUserID,
 											 const std::string &emoji, bool active) {
 	WRAPPER_BEGIN
 
@@ -1672,7 +1672,18 @@ void DBWrapper::setChatMessageReactionActive(unsigned int serverID, unsigned int
 	assertValidID(messageID);
 	assertValidID(actorUserID);
 
-	m_serverDB.getChatMessageReactionTable().setReactionActive(serverID, messageID, actorUserID, emoji, active);
+	return m_serverDB.getChatMessageReactionTable().setReactionActive(serverID, messageID, actorUserID, emoji, active);
+
+	WRAPPER_END
+}
+
+unsigned int DBWrapper::getChatMessageReactionCountByActor(unsigned int serverID, unsigned int actorUserID) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertValidID(actorUserID);
+
+	return m_serverDB.getChatMessageReactionTable().countReactionsByActor(serverID, actorUserID);
 
 	WRAPPER_END
 }

@@ -68,6 +68,10 @@ public:
 	Q_INVOKABLE void activateLink(const QString &href);
 	Q_INVOKABLE void invokeAppAction(const QString &actionId);
 	Q_INVOKABLE void toggleLayout();
+	Q_INVOKABLE void hydrateMessagePreviews(const QString &scopeToken, const QVariantList &messageIds,
+											bool highPriority);
+	Q_INVOKABLE void lookupFinanceQuote(const QString &requestId, const QString &symbol);
+	void publishFinanceQuoteResult(const QVariantMap &result);
 
 signals:
 	void bootReady();
@@ -108,6 +112,10 @@ signals:
 	void linkActivationRequested(const QString &href);
 	void appActionRequested(const QString &actionId);
 	void layoutToggleRequested();
+	void messagePreviewHydrationRequested(const QString &scopeToken, const QVariantList &messageIds,
+										  bool highPriority);
+	void financeQuoteLookupRequested(const QString &requestId, const QString &symbol);
+	void financeQuoteResultReady(const QVariantMap &result);
 
 private:
 	QVariantMap m_snapshot;

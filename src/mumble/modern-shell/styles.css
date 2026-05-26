@@ -1215,7 +1215,7 @@ textarea:focus-visible {
 	font-size: 12px;
 	line-height: 1.48;
 	box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
-	transition: transform 140ms ease, box-shadow 140ms ease, background 180ms ease;
+	transition: box-shadow 140ms ease, background 180ms ease;
 	overflow-wrap: anywhere;
 }
 
@@ -1279,6 +1279,70 @@ textarea:focus-visible {
 	border-radius: 8px;
 }
 
+.preview-stub {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	max-width: min(100%, 280px);
+	margin-top: 7px;
+	padding: 6px 9px;
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 8px;
+	background: rgba(255, 255, 255, 0.045);
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.preview-stub:hover,
+.preview-stub:focus-visible {
+	border-color: rgba(255, 255, 255, 0.18);
+	background: rgba(255, 255, 255, 0.075);
+	outline: none;
+}
+
+.preview-stub-mark {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	width: 22px;
+	height: 22px;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.08);
+	color: var(--text-muted);
+	font-size: 11px;
+	font-weight: 800;
+}
+
+.preview-stub-copy {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	gap: 1px;
+}
+
+.preview-stub-copy strong,
+.preview-stub-copy small {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.preview-stub-copy strong {
+	color: var(--text-strong);
+	font-size: 11px;
+	font-weight: 800;
+}
+
+.preview-stub-copy small {
+	color: var(--text-faint);
+	font-size: 10px;
+	font-weight: 650;
+}
+
 .preview-card {
 	--preview-card-target-width: var(--preview-card-width-default);
 	--preview-card-media-height: var(--preview-card-media-height-default);
@@ -1304,7 +1368,7 @@ textarea:focus-visible {
 	cursor: pointer;
 	box-shadow: 0 10px 18px rgba(0, 0, 0, 0.10);
 	overflow: hidden;
-	transition: width 180ms ease, border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+	transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 	contain: paint;
 	isolation: isolate;
 }
@@ -1441,7 +1505,6 @@ textarea:focus-visible {
 	min-height: var(--preview-card-media-min-height);
 	border-radius: 0;
 	border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-	transition: height 180ms ease;
 }
 
 .preview-card.has-media.is-embed .preview-card-media,
@@ -1488,7 +1551,6 @@ textarea:focus-visible {
 	isolation: isolate;
 	overflow: hidden;
 	width: 100%;
-	transition: width 180ms ease, max-width 180ms ease;
 }
 
 .preview-card-embed-frame,
@@ -1551,7 +1613,28 @@ textarea:focus-visible {
 }
 
 .preview-card-playback-fallback {
+	align-items: center;
+	justify-content: center;
 	cursor: pointer;
+}
+
+.preview-card.has-media.is-embed .preview-card-media.preview-card-playback-fallback,
+.preview-card.has-media.is-youtube-embed .preview-card-media.preview-card-playback-fallback {
+	aspect-ratio: 16 / 9;
+	min-height: var(--preview-card-media-min-height);
+}
+
+.preview-card.is-embed-short .preview-card-media.preview-card-playback-fallback,
+.preview-card.is-youtube-short .preview-card-media.preview-card-playback-fallback {
+	aspect-ratio: 9 / 16;
+	max-width: var(--preview-card-short-width);
+	min-height: 0;
+	width: var(--preview-card-short-width);
+}
+
+.preview-card.is-embed-audio .preview-card-media.preview-card-playback-fallback {
+	aspect-ratio: auto;
+	min-height: 166px;
 }
 
 .preview-card-playback-fallback .preview-card-media-image {
@@ -1650,8 +1733,7 @@ textarea:focus-visible {
 	justify-content: center;
 	line-height: 1;
 	position: absolute;
-	top: 50%;
-	transform: translateY(-50%);
+	top: calc(50% - 17px);
 	width: 34px;
 	z-index: 2;
 }
@@ -1697,7 +1779,6 @@ textarea:focus-visible {
 
 .preview-card-carousel-dot.is-active {
 	background: #eaf7ff;
-	transform: scale(1.22);
 }
 
 .preview-card-video {
@@ -4734,8 +4815,7 @@ textarea:focus-visible {
 }
 
 .preview-card-existenz-media.is-blurred .preview-card-existenz-image {
-	filter: blur(14px);
-	transform: scale(1.05);
+	opacity: 0.38;
 }
 
 .preview-card-existenz-warning {
@@ -5906,8 +5986,7 @@ textarea:focus-visible {
 	.bubble-toolbar {
 		opacity: 0;
 		pointer-events: none;
-		transform: translateY(1px);
-		transition: opacity 140ms ease, transform 140ms ease;
+		transition: opacity 140ms ease;
 	}
 
 	.message-cluster:hover .bubble-toolbar,
@@ -5917,7 +5996,6 @@ textarea:focus-visible {
 	.bubble-toolbar:focus-within {
 		opacity: 1;
 		pointer-events: auto;
-		transform: translateY(0);
 	}
 }
 
@@ -7056,14 +7134,12 @@ textarea:focus-visible {
 	border-color: rgba(105, 163, 201, 0.28);
 	box-shadow: 0 16px 28px rgba(0, 0, 0, 0.22);
 	opacity: 0;
-	transform: translateY(10px);
 	pointer-events: none;
-	transition: opacity 160ms ease, transform 160ms ease, background 160ms ease;
+	transition: opacity 160ms ease, background 160ms ease;
 }
 
 .app-shell.chat-is-detached .jump-latest-button {
 	opacity: 1;
-	transform: translateY(0);
 	pointer-events: auto;
 }
 
@@ -9543,7 +9619,9 @@ body.dialog-host {
 .stonks-tabs,
 .stonks-periods,
 .stonks-editor-actions,
-.stonks-admin {
+.stonks-admin,
+.stonks-quote-search,
+.stonks-quote-results {
 	display: flex;
 	align-items: center;
 	gap: 8px;
@@ -9577,7 +9655,9 @@ body.dialog-host {
 
 .stonks-status,
 .stonks-empty,
-.stonks-register-needed {
+.stonks-register-needed,
+.stonks-validation,
+.stonks-leaderboard-description {
 	border: 1px solid var(--shell-divider);
 	background: var(--shell-panel-soft);
 	border-radius: 8px;
@@ -9625,6 +9705,56 @@ body.dialog-host {
 	gap: 8px;
 }
 
+.stonks-quote-search {
+	align-items: stretch;
+}
+
+.stonks-quote-search > input {
+	flex: 1 1 220px;
+	min-width: 180px;
+}
+
+.stonks-quote-results {
+	flex: 1 0 100%;
+	align-items: stretch;
+}
+
+.stonks-quote-result,
+.stonks-provider-link {
+	border: 1px solid var(--shell-divider);
+	border-radius: 8px;
+	background: var(--shell-panel);
+	color: var(--text-main);
+	text-decoration: none;
+}
+
+.stonks-quote-result {
+	display: grid;
+	gap: 3px;
+	min-width: min(100%, 320px);
+	padding: 8px 10px;
+	text-align: left;
+}
+
+.stonks-quote-result span,
+.stonks-quote-error,
+.stonks-leaderboard-description span,
+.stonks-row small,
+.stonks-source small {
+	color: var(--text-muted);
+}
+
+.stonks-provider-link {
+	display: inline-flex;
+	align-items: center;
+	min-height: 34px;
+	padding: 0 10px;
+}
+
+.stonks-quote-error {
+	align-self: center;
+}
+
 .stonks-position-table {
 	display: grid;
 	gap: 6px;
@@ -9634,9 +9764,9 @@ body.dialog-host {
 .stonks-position-head,
 .stonks-position-row {
 	display: grid;
-	grid-template-columns: minmax(80px, 1fr) minmax(70px, 0.8fr) minmax(80px, 0.9fr) minmax(90px, 1fr) minmax(80px, 0.8fr) minmax(120px, 1.2fr) 34px;
+	grid-template-columns: minmax(90px, 1fr) minmax(72px, 0.7fr) minmax(84px, 0.85fr) minmax(96px, 0.95fr) minmax(82px, 0.75fr) minmax(120px, 1fr) minmax(140px, 1.1fr) 34px;
 	gap: 6px;
-	min-width: 760px;
+	min-width: 980px;
 	align-items: center;
 }
 
@@ -9646,6 +9776,7 @@ body.dialog-host {
 }
 
 .stonks-editor input,
+.stonks-quote-search input,
 .stonks-admin select {
 	width: 100%;
 	min-height: 34px;
@@ -9663,6 +9794,51 @@ body.dialog-host {
 
 .stonks-draft-total {
 	margin-inline-start: auto;
+}
+
+.stonks-source {
+	display: grid;
+	gap: 2px;
+	min-width: 0;
+	font-size: 12px;
+	line-height: 1.2;
+}
+
+.stonks-source a,
+.stonks-source span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.stonks-validation {
+	display: grid;
+	gap: 6px;
+}
+
+.stonks-validation.has-errors {
+	border-color: rgba(220, 80, 80, 0.65);
+}
+
+.stonks-validation-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.stonks-validation-list span {
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 999px;
+	padding: 4px 8px;
+	color: var(--text-muted);
+}
+
+.stonks-leaderboard-description {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	color: var(--text-muted);
 }
 
 .stonks-ledger-item,
@@ -9694,6 +9870,10 @@ body.dialog-host {
 	color: var(--danger);
 }
 
+.stonks-return.is-muted {
+	color: var(--text-muted);
+}
+
 .stonks-ledger-item summary {
 	cursor: pointer;
 	font-weight: 700;
@@ -9713,11 +9893,17 @@ body.dialog-host {
 @media (max-width: 760px) {
 	.stonks-stat-grid,
 	.stonks-row,
-	.stonks-editor-top {
+	.stonks-editor-top,
+	.stonks-leaderboard-description {
 		grid-template-columns: 1fr;
 	}
 
 	.stonks-register-needed {
+		align-items: flex-start;
+		flex-direction: column;
+	}
+
+	.stonks-leaderboard-description {
 		align-items: flex-start;
 		flex-direction: column;
 	}

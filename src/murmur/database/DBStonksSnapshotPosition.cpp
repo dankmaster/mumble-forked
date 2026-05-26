@@ -18,7 +18,10 @@ namespace server {
 				   && lhs.displayOrder == rhs.displayOrder && lhs.symbol == rhs.symbol
 				   && lhs.quantity == rhs.quantity && lhs.price == rhs.price
 				   && lhs.marketValue == rhs.marketValue && lhs.currency == rhs.currency
-				   && lhs.displayName == rhs.displayName;
+				   && lhs.displayName == rhs.displayName && lhs.providerID == rhs.providerID
+				   && lhs.providerSymbol == rhs.providerSymbol && lhs.exchange == rhs.exchange
+				   && lhs.quoteTime == rhs.quoteTime && lhs.quoteSourceURL == rhs.quoteSourceURL
+				   && lhs.quoteConfidence == rhs.quoteConfidence;
 		}
 
 		bool operator!=(const DBStonksSnapshotPosition &lhs, const DBStonksSnapshotPosition &rhs) {

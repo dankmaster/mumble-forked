@@ -16,6 +16,7 @@
 
 #include <soci/soci.h>
 
+#include <algorithm>
 #include <exception>
 
 namespace mdb = ::mumble::db;
@@ -61,7 +62,7 @@ namespace server {
 			addIndex(actorMessageIndex, false);
 		}
 
-		void ChatMessageReactionTable::setReactionActive(unsigned int serverID, unsigned int messageID,
+		bool ChatMessageReactionTable::setReactionActive(unsigned int serverID, unsigned int messageID,
 														 unsigned int actorUserID, const std::string &emoji, bool active) {
 			try {
 				::mdb::TransactionHolder transaction = ensureTransaction();
@@ -78,14 +79,19 @@ namespace server {
 						  << column::message_id << "\", \"" << column::actor_user_id << "\", \"" << column::emoji
 						  << "\") VALUES (:serverID, :messageID, :actorUserID, :emoji)",
 						soci::use(serverID), soci::use(messageID), soci::use(actorUserID), soci::use(emoji);
+					transaction.commit();
+					return true;
 				} else if (!active && existing > 0) {
 					m_sql << "DELETE FROM \"" << NAME << "\" WHERE \"" << column::server_id << "\" = :serverID AND \""
 						  << column::message_id << "\" = :messageID AND \"" << column::actor_user_id
 						  << "\" = :actorUserID AND \"" << column::emoji << "\" = :emoji",
 						soci::use(serverID), soci::use(messageID), soci::use(actorUserID), soci::use(emoji);
+					transaction.commit();
+					return true;
 				}
 
 				transaction.commit();
+				return false;
 			} catch (const soci::soci_error &) {
 				std::throw_with_nested(::mdb::AccessException(
 					"Failed at updating reaction state for message ID " + std::to_string(messageID)
@@ -132,6 +138,22 @@ namespace server {
 			} catch (const soci::soci_error &) {
 				std::throw_with_nested(::mdb::AccessException("Failed at getting chat reactions for message ID "
 															  + std::to_string(messageID) + " on server with ID "
+															  + std::to_string(serverID)));
+			}
+		}
+
+		unsigned int ChatMessageReactionTable::countReactionsByActor(unsigned int serverID, unsigned int actorUserID) {
+			try {
+				int count = 0;
+				::mdb::TransactionHolder transaction = ensureTransaction();
+				m_sql << "SELECT COUNT(*) FROM \"" << NAME << "\" WHERE \"" << column::server_id
+					  << "\" = :serverID AND \"" << column::actor_user_id << "\" = :actorUserID",
+					soci::use(serverID), soci::use(actorUserID), soci::into(count);
+				transaction.commit();
+				return static_cast< unsigned int >(std::max(0, count));
+			} catch (const soci::soci_error &) {
+				std::throw_with_nested(::mdb::AccessException("Failed at counting chat reactions for actor user ID "
+															  + std::to_string(actorUserID) + " on server with ID "
 															  + std::to_string(serverID)));
 			}
 		}

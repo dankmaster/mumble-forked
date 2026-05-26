@@ -338,6 +338,8 @@ public:
 	std::optional< QString > persistentChatPreviewKey(const MumbleProto::ChatMessage &message) const;
 	PersistentChatPreviewSpec persistentChatPreviewSpec(const QString &previewKey) const;
 	QString persistentChatScopeLabel(MumbleProto::ChatScope scope, unsigned int scopeID) const;
+	void queuePersistentChatPreviewRequest(const QString &previewKey);
+	void flushPersistentChatPreviewRequests();
 	void ensurePersistentChatPreview(const QString &previewKey);
 	void ensurePersistentChatPreviewAssetDownload(unsigned int assetID, const QString &previewKey);
 	void ensurePersistentChatPreviewSiteSnapshot(const QString &previewKey);
@@ -492,20 +494,27 @@ public:
 	void publishModernShellPatchNow(const QString &kind, QVariantMap patch);
 	void queueModernShellCoalescedPatch(const QString &kind, QVariantMap patch);
 	void flushModernShellCoalescedPatches();
-	void publishModernShellMessagesPatch(const QString &kind, const QVariantList &messages, bool scrollToBottom);
+	void publishModernShellMessagesPatch(const QString &kind, const QVariantList &messages, bool scrollToBottom,
+										  const QString &timelineMode = QString());
 	void publishModernShellMessageUpdatePatch(const MumbleProto::ChatMessage &message);
 	void publishModernShellActiveScopePatch(const QString &kind);
 	void publishModernShellRoomStatePatch();
 	void publishModernShellServerLogPatch(int position, int charsRemoved, int charsAdded);
 	void clearModernShellMessageDtoCache(const char *reason);
+	void evictModernShellMessageDtoCacheForMessage(const MumbleProto::ChatMessage &message);
+	void publishModernShellPreviewUpdateForKey(const QString &previewKey);
 	QString modernShellMessageDtoCacheKey(const MumbleProto::ChatMessage &message, const PersistentChatTarget &target,
 										  bool canReply, bool canReact, bool canDeleteMessages) const;
 	QVariantMap buildModernShellCachedMessageState(const MumbleProto::ChatMessage &message,
 												   const PersistentChatTarget &target, bool canReply, bool canReact,
 												   bool canDeleteMessages,
 												   ModernShellMessageBuildMode buildMode = ModernShellMessageBuildMode::Full);
-	void scheduleModernShellMessageHydration(const QString &scopeToken, quint64 generation, std::size_t beginIndex,
-											 bool scrollToBottom);
+	QString modernShellScopeTokenForTarget(const PersistentChatTarget &target) const;
+	QString modernShellMessageTimelineMode(std::size_t beginIndex) const;
+	void handleModernShellPreviewHydrationRequest(const QString &scopeToken, const QVariantList &messageIds,
+												  bool highPriority);
+	void handleModernShellFinanceQuoteLookupRequest(const QString &requestID, const QString &symbol);
+	void flushModernShellPreviewHydrationQueue();
 	bool handleModernShellScopeSelection(const QString &scopeToken);
 	bool handleModernShellVoiceJoin(const QString &scopeToken);
 	bool handleModernShellScopeAction(const QString &scopeToken, const QString &actionId);
@@ -564,7 +573,8 @@ public:
 											Channel *contextChannel = nullptr);
 #else
 	QVariantList buildModernShellMessageStates(const PersistentChatTarget &target, std::size_t beginIndex = 0);
-	void publishModernShellMessagesPatch(const QString &kind, const QVariantList &messages, bool scrollToBottom);
+	void publishModernShellMessagesPatch(const QString &kind, const QVariantList &messages, bool scrollToBottom,
+										  const QString &timelineMode = QString());
 	void publishModernShellMessageUpdatePatch(const MumbleProto::ChatMessage &message);
 	void publishModernShellActiveScopePatch(const QString &kind);
 	void publishModernShellRoomStatePatch();
@@ -731,11 +741,13 @@ protected:
 	bool m_persistentChatRenderQueued                     = false;
 	QTimer *m_persistentChatResizeRenderTimer             = nullptr;
 	QTimer *m_persistentChatScrollIdleTimer               = nullptr;
+	QTimer *m_persistentChatPreviewRequestTimer           = nullptr;
 	QTimer *m_userPresenceRefreshTimer                    = nullptr;
 	int m_pendingPersistentChatViewportWidth              = -1;
 	int m_lastPersistentChatViewportWidth                 = -1;
 	int m_persistentChatBottomLockRendersRemaining        = 0;
 	bool m_persistentChatPreviewRefreshPending            = false;
+	QSet< QString > m_persistentChatQueuedPreviewRequests;
 	bool m_persistentChatRestoreAnchorPending             = false;
 	bool m_persistentChatLogStickToBottom                 = true;
 	QString m_persistentChatPendingAnchorRowId;
@@ -758,6 +770,11 @@ protected:
 	quint64 m_modernShellMessagePatchGeneration            = 0;
 	quint64 m_modernShellMessageDtoContextRevision         = 1;
 	QHash< QString, QVariantMap > m_modernShellMessageDtoCache;
+	QTimer *m_modernShellPreviewHydrationTimer             = nullptr;
+	QString m_modernShellPreviewHydrationScopeToken;
+	QList< qulonglong > m_modernShellPreviewHydrationQueue;
+	QSet< qulonglong > m_modernShellPreviewHydrationQueuedIds;
+	bool m_modernShellPreviewHydrationLinkDense = false;
 	QTimer *m_modernShellPatchCoalesceTimer                = nullptr;
 	bool m_modernShellRoomStatePatchPending               = false;
 	QVariantMap m_modernShellCoalescedRoomPatch;

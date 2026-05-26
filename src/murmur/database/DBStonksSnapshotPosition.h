@@ -22,6 +22,12 @@ namespace server {
 			double marketValue       = {};
 			std::string currency     = {};
 			std::string displayName  = {};
+			std::string providerID   = {};
+			std::string providerSymbol = {};
+			std::string exchange     = {};
+			long long quoteTime = {};
+			std::string quoteSourceURL = {};
+			double quoteConfidence   = {};
 
 			DBStonksSnapshotPosition() = default;
 			DBStonksSnapshotPosition(unsigned int serverID, unsigned int snapshotID, unsigned int displayOrder,

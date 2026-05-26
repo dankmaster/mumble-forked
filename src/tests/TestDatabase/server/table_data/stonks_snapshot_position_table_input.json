@@ -14,5 +14,26 @@
 			"display_name"
 		],
 		"rows": []
+	},
+	"v21": {
+		"table_name": "stonks_snapshot_positions",
+		"column_names": [
+			"server_id",
+			"snapshot_id",
+			"display_order",
+			"symbol",
+			"quantity",
+			"price",
+			"market_value",
+			"currency",
+			"display_name",
+			"provider_id",
+			"provider_symbol",
+			"exchange",
+			"quote_time",
+			"quote_source_url",
+			"quote_confidence"
+		],
+		"rows": []
 	}
 }
