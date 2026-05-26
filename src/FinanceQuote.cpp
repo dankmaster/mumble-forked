@@ -380,8 +380,7 @@ namespace Finance {
 		quote.hasRegularMarketPrice =
 			jsonNumber(meta, QStringLiteral("regularMarketPrice"), &quote.regularMarketPrice);
 		quote.hasPreviousClose = jsonNumber(meta, QStringLiteral("regularMarketPreviousClose"), &quote.previousClose)
-								 || jsonNumber(meta, QStringLiteral("previousClose"), &quote.previousClose)
-								 || jsonNumber(meta, QStringLiteral("chartPreviousClose"), &quote.previousClose);
+								 || jsonNumber(meta, QStringLiteral("previousClose"), &quote.previousClose);
 
 		if (quote.symbol.isEmpty()) {
 			setError(QStringLiteral("Yahoo Finance response did not include a valid symbol"));
@@ -410,6 +409,14 @@ namespace Finance {
 			point.timestamp = static_cast< qint64 >(timestampValue.toDouble(0.0));
 			point.close     = close;
 			quote.points.push_back(point);
+		}
+
+		if (!quote.hasPreviousClose && quote.points.size() >= 2) {
+			const double previousPointClose = quote.points.at(quote.points.size() - 2).close;
+			if (std::isfinite(previousPointClose) && std::abs(previousPointClose) > 0.0000001) {
+				quote.previousClose    = previousPointClose;
+				quote.hasPreviousClose = true;
+			}
 		}
 
 		return quote;

@@ -6787,6 +6787,19 @@
 		if (points.length >= 2) {
 			const chart = document.createElement("div");
 			chart.className = "preview-card-finance-chart";
+			const chartLabels = document.createElement("div");
+			chartLabels.className = "preview-card-finance-chart-labels";
+			const chartRange = document.createElement("span");
+			chartRange.className = "preview-card-finance-chart-range";
+			chartRange.textContent = rangeLabel;
+			chartLabels.appendChild(chartRange);
+			if (price) {
+				const chartValue = document.createElement("span");
+				chartValue.className = "preview-card-finance-chart-value";
+				chartValue.textContent = price + (currency ? " " + currency : "");
+				chartLabels.appendChild(chartValue);
+			}
+			chart.appendChild(chartLabels);
 			const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
 			svg.setAttribute("viewBox", "0 0 240 76");
 			svg.setAttribute("preserveAspectRatio", "none");

@@ -18,6 +18,7 @@ private slots:
 	void extractsYahooFinanceQuoteSymbols();
 	void buildsFinanceProviderLinks();
 	void parsesYahooChartQuote();
+	void usesSparklinePreviousPointWhenDailyCloseIsMissing();
 	void rejectsYahooChartErrors();
 };
 
@@ -129,6 +130,7 @@ void TestFinanceQuote::parsesYahooChartQuote() {
 							"instrumentType": "EQUITY",
 							"regularMarketTime": 1779480001,
 							"regularMarketPrice": 308.82,
+							"regularMarketPreviousClose": 304.99,
 							"chartPreviousClose": 304.99,
 							"shortName": "Apple Inc.",
 							"priceHint": 2
@@ -162,6 +164,45 @@ void TestFinanceQuote::parsesYahooChartQuote() {
 	QCOMPARE(quote->points.at(1).close, 308.82);
 	QCOMPARE(Mumble::Finance::yahooFinanceQuoteTitle(*quote), QStringLiteral("AAPL 308.82 USD +3.83 (+1.26%)"));
 	QVERIFY(Mumble::Finance::yahooFinanceQuoteDescription(*quote).contains(QStringLiteral("Apple Inc.")));
+}
+
+void TestFinanceQuote::usesSparklinePreviousPointWhenDailyCloseIsMissing() {
+	const QByteArray payload = R"json(
+		{
+			"chart": {
+				"result": [
+					{
+						"meta": {
+							"currency": "USD",
+							"symbol": "RKLB",
+							"exchangeName": "NMS",
+							"regularMarketPrice": 120.00,
+							"chartPreviousClose": 80.00,
+							"shortName": "Rocket Lab Corporation",
+							"priceHint": 2
+						},
+						"timestamp": [1779307200, 1779393600, 1779480000],
+						"indicators": {
+							"quote": [
+								{
+									"close": [84.00, 118.00, 120.00]
+								}
+							]
+						}
+					}
+				],
+				"error": null
+			}
+		}
+	)json";
+
+	QString errorMessage;
+	const std::optional< Mumble::Finance::YahooChartQuote > quote =
+		Mumble::Finance::parseYahooChartQuote(payload, &errorMessage);
+	QVERIFY2(quote.has_value(), qPrintable(errorMessage));
+	QVERIFY(quote->hasPreviousClose);
+	QCOMPARE(quote->previousClose, 118.00);
+	QCOMPARE(Mumble::Finance::yahooFinanceQuoteTitle(*quote), QStringLiteral("RKLB 120.00 USD +2.00 (+1.69%)"));
 }
 
 void TestFinanceQuote::rejectsYahooChartErrors() {

@@ -3327,10 +3327,11 @@ textarea:focus-visible {
 	border: 1px solid rgba(255, 255, 255, 0.07);
 	border-radius: 7px;
 	box-sizing: border-box;
-	height: 82px;
+	height: 92px;
 	min-width: 0;
 	overflow: hidden;
-	padding: 6px;
+	padding: 24px 6px 6px;
+	position: relative;
 	width: 100%;
 }
 
@@ -3338,6 +3339,41 @@ textarea:focus-visible {
 	display: block;
 	height: 100%;
 	width: 100%;
+}
+
+.preview-card-finance-chart-labels {
+	align-items: center;
+	display: flex;
+	gap: 8px;
+	justify-content: space-between;
+	left: 8px;
+	pointer-events: none;
+	position: absolute;
+	right: 8px;
+	top: 6px;
+}
+
+.preview-card-finance-chart-range,
+.preview-card-finance-chart-value {
+	background: rgba(3, 14, 17, 0.58);
+	border: 1px solid rgba(255, 255, 255, 0.07);
+	border-radius: 5px;
+	font-size: 10px;
+	font-weight: 850;
+	line-height: 1.15;
+	max-width: 58%;
+	overflow: hidden;
+	padding: 3px 5px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.preview-card-finance-chart-range {
+	color: rgba(219, 230, 238, 0.58);
+}
+
+.preview-card-finance-chart-value {
+	color: var(--finance-accent);
 }
 
 .preview-card-finance-chart-base {
