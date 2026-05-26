@@ -81,12 +81,12 @@ namespace PersistentChatRender {
 	}
 
 	bool sameActor(const MumbleProto::ChatMessage &lhs, const MumbleProto::ChatMessage &rhs) {
-		if (lhs.has_actor() || rhs.has_actor()) {
-			return lhs.has_actor() && rhs.has_actor() && lhs.actor() == rhs.actor();
-		}
-
 		if (lhs.has_actor_user_id() || rhs.has_actor_user_id()) {
 			return lhs.has_actor_user_id() && rhs.has_actor_user_id() && lhs.actor_user_id() == rhs.actor_user_id();
+		}
+
+		if (lhs.has_actor() || rhs.has_actor()) {
+			return lhs.has_actor() && rhs.has_actor() && lhs.actor() == rhs.actor();
 		}
 
 		if (lhs.has_actor_name() || rhs.has_actor_name()) {

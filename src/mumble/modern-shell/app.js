@@ -1504,7 +1504,7 @@
 			return false;
 		}
 
-		if (String(previous.actor || "") !== String(current.actor || "")) {
+		if (messageActorKey(previous) !== messageActorKey(current)) {
 			return false;
 		}
 
@@ -1518,6 +1518,14 @@
 
 		const gapMs = Math.abs(Number(current.createdAtMs) - Number(previous.createdAtMs));
 		return gapMs <= (8 * 60 * 1000);
+	}
+
+	function messageActorKey(message) {
+		if (!message) {
+			return "";
+		}
+
+		return String(message.actorKey || message.actor || "");
 	}
 
 	function renderMeta(meta) {
@@ -8862,7 +8870,7 @@
 
 		return [
 			String(message.createdAtMs || ""),
-			String(message.actor || ""),
+			messageActorKey(message),
 			String(message.bodyText || ""),
 			message.system ? "system" : "message"
 		].join("|");
@@ -8923,6 +8931,7 @@
 					type: "cluster",
 					own: !!message.own,
 					actor: message.actor || "Unknown",
+					actorKey: messageActorKey(message),
 					messages: []
 				};
 				groups.push(currentGroup);
@@ -8949,6 +8958,7 @@
 		const cluster = document.createElement("section");
 		cluster.className = "message-cluster" + (group.own ? " is-own" : "");
 		cluster.dataset.actor = group.actor || "";
+		cluster.dataset.actorKey = group.actorKey || "";
 		cluster.dataset.own = group.own ? "true" : "false";
 		cluster.dataset.dayLabel = dayLabelFromMs(firstMessage && firstMessage.createdAtMs);
 		cluster.style.setProperty("--avatar-hue", String(hueForLabel(group.actor, group.own)));
@@ -9231,6 +9241,7 @@
 			const lastCluster = !needsDayDivider ? lastTimelineCluster() : null;
 			if (lastCluster && previousMessage && shouldGroupWith(previousMessage, message)
 					&& lastCluster.dataset.actor === (message.actor || "Unknown")
+					&& lastCluster.dataset.actorKey === messageActorKey(message)
 					&& lastCluster.dataset.own === (message.own ? "true" : "false")) {
 				const stack = lastCluster.querySelector(".message-stack");
 				if (stack) {
@@ -9249,6 +9260,7 @@
 				type: "cluster",
 				own: !!message.own,
 				actor: message.actor || "Unknown",
+				actorKey: messageActorKey(message),
 				messages: [message]
 			}, message.renderIndex));
 			previousMessage = message;

@@ -32,6 +32,8 @@ private slots:
 	void groupsMessagesByActorScopeAndTime();
 	void breaksGroupWhenGapExceedsEightMinutes();
 	void detectsSelfAuthoredGroups();
+	void groupsRegisteredActorAcrossSessionChanges();
+	void separatesRegisteredActorsWhenSessionWasReused();
 };
 
 void TestPersistentChatRender::groupsMessagesByActorScopeAndTime() {
@@ -80,6 +82,29 @@ void TestPersistentChatRender::detectsSelfAuthoredGroups() {
 	QVERIFY(groups[0].selfAuthored);
 	QVERIFY(!groups[1].selfAuthored);
 	QVERIFY(groups[0].bubbles[0].selfAuthored);
+}
+
+void TestPersistentChatRender::groupsRegisteredActorAcrossSessionChanges() {
+	std::vector< MumbleProto::ChatMessage > messages;
+	messages.push_back(makeMessage(30, 9000, 4, 99, QStringLiteral("Alice"), MumbleProto::TextChannel, 11));
+	messages.push_back(makeMessage(31, 9020, 8, 99, QStringLiteral("Alice"), MumbleProto::TextChannel, 11));
+
+	const auto groups = PersistentChatRender::buildGroups(messages, {});
+
+	QCOMPARE(groups.size(), static_cast< std::size_t >(1));
+	QCOMPARE(groups[0].bubbles.size(), static_cast< std::size_t >(2));
+}
+
+void TestPersistentChatRender::separatesRegisteredActorsWhenSessionWasReused() {
+	std::vector< MumbleProto::ChatMessage > messages;
+	messages.push_back(makeMessage(40, 10000, 5, 101, QStringLiteral("Alice"), MumbleProto::TextChannel, 11));
+	messages.push_back(makeMessage(41, 10020, 5, 202, QStringLiteral("Bob"), MumbleProto::TextChannel, 11));
+
+	const auto groups = PersistentChatRender::buildGroups(messages, {});
+
+	QCOMPARE(groups.size(), static_cast< std::size_t >(2));
+	QCOMPARE(groups[0].lastMessageID, 40U);
+	QCOMPARE(groups[1].firstMessageID, 41U);
 }
 
 QTEST_MAIN(TestPersistentChatRender)

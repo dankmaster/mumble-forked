@@ -1797,12 +1797,12 @@ void applyNativeTitleBarTheme(QWidget *widget) {
 #endif
 
 bool samePersistentChatActor(const MumbleProto::ChatMessage &lhs, const MumbleProto::ChatMessage &rhs) {
-	if (lhs.has_actor() || rhs.has_actor()) {
-		return lhs.has_actor() && rhs.has_actor() && lhs.actor() == rhs.actor();
-	}
-
 	if (lhs.has_actor_user_id() || rhs.has_actor_user_id()) {
 		return lhs.has_actor_user_id() && rhs.has_actor_user_id() && lhs.actor_user_id() == rhs.actor_user_id();
+	}
+
+	if (lhs.has_actor() || rhs.has_actor()) {
+		return lhs.has_actor() && rhs.has_actor() && lhs.actor() == rhs.actor();
 	}
 
 	if (lhs.has_actor_name() || rhs.has_actor_name()) {
@@ -1810,6 +1810,44 @@ bool samePersistentChatActor(const MumbleProto::ChatMessage &lhs, const MumblePr
 	}
 
 	return true;
+}
+
+QString persistentChatActorIdentityKey(const MumbleProto::ChatMessage &message, bool liveSessionMessage) {
+	if (message.has_actor_user_id()) {
+		return QString::fromLatin1("user:%1").arg(message.actor_user_id());
+	}
+
+	if (liveSessionMessage && message.has_actor()) {
+		return QString::fromLatin1("session:%1").arg(message.actor());
+	}
+
+	if (message.has_actor_name()) {
+		const QString actorName = u8(message.actor_name()).trimmed();
+		if (!actorName.isEmpty()) {
+			return QString::fromLatin1("name:%1").arg(actorName);
+		}
+	}
+
+	return QStringLiteral("unknown");
+}
+
+const ClientUser *connectedUserForPersistentActorID(unsigned int actorUserID) {
+	QReadLocker locker(&ClientUser::c_qrwlUsers);
+	for (const ClientUser *user : ClientUser::c_qmUsers) {
+		if (user && user->iId >= 0 && actorUserID == static_cast< unsigned int >(user->iId)) {
+			return user;
+		}
+	}
+
+	return nullptr;
+}
+
+bool persistentChatLiveSessionMatchesActorName(const MumbleProto::ChatMessage &message, const ClientUser *user) {
+	if (!user || !message.has_actor_name()) {
+		return true;
+	}
+
+	return u8(message.actor_name()).trimmed() == user->qsName.trimmed();
 }
 
 bool samePersistentChatScope(const MumbleProto::ChatMessage &lhs, const MumbleProto::ChatMessage &rhs) {
@@ -11003,6 +11041,7 @@ void MainWindow::refreshUserTextureViews(ClientUser *user) {
 	}
 
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	clearModernShellMessageDtoCache("avatar");
 	publishModernShellRoomStatePatch();
 	queueModernShellSnapshotSync();
 #endif
@@ -16574,7 +16613,20 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 	const bool systemMessage               = systemText.has_value();
 	const bool deletedMessage              = message.has_deleted_at() && message.deleted_at() > 0;
 	const bool ownMessage                  = isOwnPersistentChatMessage(message);
-	const ClientUser *messageUser = ownMessage ? self : (message.has_actor() ? ClientUser::get(message.actor()) : nullptr);
+	const bool liveSessionMessage          = m_persistentChatLiveMessageKeys.contains(persistentChatMessageIdentityKey(message));
+	const QString actorLabel               = systemMessage ? tr("System") : persistentChatActorLabel(message);
+	const QString actorIdentityKey         = persistentChatActorIdentityKey(message, liveSessionMessage);
+	const ClientUser *messageUser          = nullptr;
+	if (ownMessage) {
+		messageUser = self;
+	} else if (message.has_actor_user_id()) {
+		messageUser = connectedUserForPersistentActorID(message.actor_user_id());
+	} else if (liveSessionMessage && message.has_actor()) {
+		const ClientUser *liveSessionUser = ClientUser::get(message.actor());
+		if (persistentChatLiveSessionMatchesActorName(message, liveSessionUser)) {
+			messageUser = liveSessionUser;
+		}
+	}
 
 	QString bodyText = systemMessage ? *systemText : (deletedMessage ? QString() : persistentChatMessageSourceText(message));
 	QString bodyHtml;
@@ -16632,7 +16684,8 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 	messageState.insert(QStringLiteral("messageId"), static_cast< qulonglong >(message.message_id()));
 	messageState.insert(QStringLiteral("threadId"), static_cast< qulonglong >(message.thread_id()));
 	messageState.insert(QStringLiteral("createdAtMs"), static_cast< qulonglong >(message.created_at()));
-	messageState.insert(QStringLiteral("actor"), systemMessage ? tr("System") : persistentChatActorLabel(message));
+	messageState.insert(QStringLiteral("actor"), actorLabel);
+	messageState.insert(QStringLiteral("actorKey"), actorIdentityKey);
 	messageState.insert(QStringLiteral("avatarUrl"), modernShellAvatarDataUrl(messageUser, 40));
 	messageState.insert(
 		QStringLiteral("timeLabel"),

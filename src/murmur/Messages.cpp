@@ -1475,6 +1475,12 @@ MumbleProto::ChatReadStateUpdate protoReadStateFromDB(const ::msdb::DBChatReadSt
 	return protoUpdate;
 }
 
+void clearHistoricChatActorSessions(MumbleProto::ChatHistoryResponse &response) {
+	for (int i = 0; i < response.messages_size(); ++i) {
+		response.mutable_messages(i)->clear_actor();
+	}
+}
+
 MumbleProto::TextMessage legacyTextMessageFromPersistent(const MumbleProto::ChatMessage &message) {
 	MumbleProto::TextMessage legacyMessage;
 	if (message.has_actor()) {
@@ -4674,6 +4680,7 @@ void Server::msgChatHistoryRequest(ServerUser *uSource, MumbleProto::ChatHistory
 			}
 		}
 
+		clearHistoricChatActorSessions(response);
 		constrainChatHistoryResponseSize(response);
 		sendMessage(uSource, response);
 		return;
@@ -4749,6 +4756,7 @@ void Server::msgChatHistoryRequest(ServerUser *uSource, MumbleProto::ChatHistory
 		}
 	}
 
+	clearHistoricChatActorSessions(response);
 	constrainChatHistoryResponseSize(response);
 	sendMessage(uSource, response);
 }
