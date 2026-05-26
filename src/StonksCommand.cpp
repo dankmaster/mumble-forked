@@ -102,15 +102,21 @@ namespace Stonks {
 		}
 
 		if (verb == QLatin1String("help") || verb == QLatin1String("stonks")) {
-			return Command { CommandType::Help };
+			Command command;
+			command.type = CommandType::Help;
+			return command;
 		}
 
 		if (verb == QLatin1String("me")) {
-			return Command { CommandType::Me };
+			Command command;
+			command.type = CommandType::Me;
+			return command;
 		}
 
 		if (verb == QLatin1String("following")) {
-			return Command { CommandType::Following };
+			Command command;
+			command.type = CommandType::Following;
+			return command;
 		}
 
 		if (verb == QLatin1String("leaderboard") || verb == QLatin1String("lb") || verb == QLatin1String("top")) {
