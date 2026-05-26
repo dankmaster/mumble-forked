@@ -27,10 +27,14 @@
 #include "database/DBGroup.h"
 #include "database/DBGroupMember.h"
 #include "database/DBLogEntry.h"
+#include "database/DBStonksFollow.h"
+#include "database/DBStonksScore.h"
 #include "database/GroupMemberTable.h"
 #include "database/GroupTable.h"
 #include "database/LogTable.h"
 #include "database/ServerDatabase.h"
+#include "database/StonksFollowTable.h"
+#include "database/StonksScoreTable.h"
 #include "database/ServerTable.h"
 #include "database/UserProperty.h"
 #include "database/UserPropertyTable.h"
@@ -253,6 +257,8 @@ private slots:
 	void ipAddress_conversions();
 	void banTable_general();
 	void channelListenerTable_general();
+	void stonksScoreTable_general();
+	void stonksFollowTable_general();
 
 	void database_schema_migration();
 	void database_future_schema_migration();
@@ -1626,6 +1632,136 @@ void ServerDatabaseTest::channelListenerTable_general() {
 	invalid.userID    = nonExistingUserID;
 	QVERIFY_THROWS_EXCEPTION(::mdb::AccessException, table.addListener(invalid));
 
+
+	MUMBLE_END_TEST_CASE
+}
+
+void ServerDatabaseTest::stonksScoreTable_general() {
+	MUMBLE_BEGIN_TEST_CASE
+
+	unsigned int existingServerID    = 0;
+	unsigned int nonExistingUserID   = 99;
+	::msdb::DBUser user1(existingServerID, 2);
+	::msdb::DBUser user2(existingServerID, 3);
+	::msdb::DBUser user3(existingServerID, 4);
+
+	::msdb::DBChannel rootChannel;
+	rootChannel.channelID = Mumble::ROOT_CHANNEL_ID;
+	rootChannel.parentID  = rootChannel.channelID;
+	rootChannel.serverID  = existingServerID;
+	rootChannel.name      = "Root";
+
+	db.getServerTable().addServer(existingServerID);
+	db.getChannelTable().addChannel(rootChannel);
+	db.getUserTable().addUser(user1, "User 1");
+	db.getUserTable().addUser(user2, "User 2");
+	db.getUserTable().addUser(user3, "User 3");
+
+	::msdb::StonksScoreTable &table = db.getStonksScoreTable();
+	QVERIFY(!table.getScore(existingServerID, user1.registeredUserID, "30d"));
+
+	::msdb::DBStonksScore user1Month(existingServerID, user1.registeredUserID, "30d");
+	user1Month.scorePercent = 12.5;
+	user1Month.updatedAt    = std::chrono::system_clock::time_point(std::chrono::seconds(100));
+	table.setScore(user1Month);
+
+	std::optional<::msdb::DBStonksScore > stored =
+		table.getScore(existingServerID, user1.registeredUserID, "30d");
+	QVERIFY(stored);
+	QVERIFY(*stored == user1Month);
+
+	user1Month.scorePercent = 14.0;
+	user1Month.updatedAt    = std::chrono::system_clock::time_point(std::chrono::seconds(101));
+	table.setScore(user1Month);
+
+	stored = table.getScore(existingServerID, user1.registeredUserID, "30d");
+	QVERIFY(stored);
+	QVERIFY(*stored == user1Month);
+
+	::msdb::DBStonksScore user1Week(existingServerID, user1.registeredUserID, "7d");
+	user1Week.scorePercent = -2.5;
+	user1Week.updatedAt    = std::chrono::system_clock::time_point(std::chrono::seconds(50));
+	table.setScore(user1Week);
+
+	::msdb::DBStonksScore user2Month(existingServerID, user2.registeredUserID, "30d");
+	user2Month.scorePercent = 30.0;
+	user2Month.updatedAt    = std::chrono::system_clock::time_point(std::chrono::seconds(90));
+	table.setScore(user2Month);
+
+	::msdb::DBStonksScore user3Month(existingServerID, user3.registeredUserID, "30d");
+	user3Month.scorePercent = 30.0;
+	user3Month.updatedAt    = std::chrono::system_clock::time_point(std::chrono::seconds(80));
+	table.setScore(user3Month);
+
+	std::vector<::msdb::DBStonksScore > user1Scores =
+		table.getScores(existingServerID, user1.registeredUserID);
+	QCOMPARE(user1Scores.size(), static_cast< std::size_t >(2));
+	std::vector<::msdb::DBStonksScore > expectedUser1Scores = { user1Month, user1Week };
+	QVERIFY(std::is_permutation(user1Scores.begin(), user1Scores.end(), expectedUser1Scores.begin()));
+
+	std::vector<::msdb::DBStonksScore > leaderboard = table.getLeaderboard(existingServerID, "30d", 2);
+	QCOMPARE(leaderboard.size(), static_cast< std::size_t >(2));
+	QCOMPARE(leaderboard.at(0).userID, user2.registeredUserID);
+	QCOMPARE(leaderboard.at(1).userID, user3.registeredUserID);
+
+	::msdb::DBStonksScore invalid(existingServerID, nonExistingUserID, "30d");
+	invalid.scorePercent = 1.0;
+	QVERIFY_THROWS_EXCEPTION(::mdb::AccessException, table.setScore(invalid));
+
+	MUMBLE_END_TEST_CASE
+}
+
+void ServerDatabaseTest::stonksFollowTable_general() {
+	MUMBLE_BEGIN_TEST_CASE
+
+	unsigned int existingServerID  = 0;
+	unsigned int nonExistingUserID = 99;
+	::msdb::DBUser user1(existingServerID, 2);
+	::msdb::DBUser user2(existingServerID, 3);
+	::msdb::DBUser user3(existingServerID, 4);
+
+	::msdb::DBChannel rootChannel;
+	rootChannel.channelID = Mumble::ROOT_CHANNEL_ID;
+	rootChannel.parentID  = rootChannel.channelID;
+	rootChannel.serverID  = existingServerID;
+	rootChannel.name      = "Root";
+
+	db.getServerTable().addServer(existingServerID);
+	db.getChannelTable().addChannel(rootChannel);
+	db.getUserTable().addUser(user1, "User 1");
+	db.getUserTable().addUser(user2, "User 2");
+	db.getUserTable().addUser(user3, "User 3");
+
+	::msdb::StonksFollowTable &table = db.getStonksFollowTable();
+	QVERIFY(table.getFollowedUsers(existingServerID, user1.registeredUserID).empty());
+
+	::msdb::DBStonksFollow followUser2(existingServerID, user1.registeredUserID, user2.registeredUserID);
+	followUser2.createdAt = std::chrono::system_clock::time_point(std::chrono::seconds(100));
+	table.setFollow(followUser2);
+
+	::msdb::DBStonksFollow followUser3(existingServerID, user1.registeredUserID, user3.registeredUserID);
+	followUser3.createdAt = std::chrono::system_clock::time_point(std::chrono::seconds(90));
+	table.setFollow(followUser3);
+
+	followUser2.createdAt = std::chrono::system_clock::time_point(std::chrono::seconds(110));
+	table.setFollow(followUser2);
+
+	std::vector< unsigned int > followedUsers = table.getFollowedUsers(existingServerID, user1.registeredUserID);
+	QCOMPARE(followedUsers, std::vector< unsigned int >({ user3.registeredUserID, user2.registeredUserID }));
+
+	table.removeFollow(existingServerID, user1.registeredUserID, user3.registeredUserID);
+	followedUsers = table.getFollowedUsers(existingServerID, user1.registeredUserID);
+	QCOMPARE(followedUsers, std::vector< unsigned int >({ user2.registeredUserID }));
+
+	table.removeFollow(existingServerID, user1.registeredUserID, user3.registeredUserID);
+	followedUsers = table.getFollowedUsers(existingServerID, user1.registeredUserID);
+	QCOMPARE(followedUsers, std::vector< unsigned int >({ user2.registeredUserID }));
+
+	::msdb::DBStonksFollow invalid(existingServerID, user1.registeredUserID, nonExistingUserID);
+	QVERIFY_THROWS_EXCEPTION(::mdb::AccessException, table.setFollow(invalid));
+
+	db.getUserTable().removeUser(user2);
+	QVERIFY(table.getFollowedUsers(existingServerID, user1.registeredUserID).empty());
 
 	MUMBLE_END_TEST_CASE
 }

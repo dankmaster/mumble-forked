@@ -200,6 +200,7 @@ struct CLIOptions {
 	std::optional< std::string > dbImportPath;
 	std::tuple< std::string, std::optional< unsigned int > > supwSrv;
 	std::optional< unsigned int > disableSuSrv;
+	bool dbMigrate     = false;
 	bool verboseLogging = false;
 	bool cliDetach      = detach;
 	bool wipeSsl        = false;
@@ -267,6 +268,9 @@ CLIOptions parseCLI(int argc, char **argv) {
 	app.add_option("--db-json-import", options.dbImportPath,
 				   "Reads in the provide JSON file and imports its contents into the database")
 		->option_text("<file>")
+		->group(CLIOptions::CLI_ADMINISTRATION_SECTION);
+	app.add_flag("--db-migrate", options.dbMigrate,
+				 "Initializes the configured database, applies pending schema migrations, and exits.")
 		->group(CLIOptions::CLI_ADMINISTRATION_SECTION);
 
 	app.add_flag("-v,--verbose", options.verboseLogging, "Use verbose logging (include debug-logs).")
@@ -466,6 +470,14 @@ int main(int argc, char **argv) {
 #endif
 
 		Meta::mp->read(inifile);
+
+		if (cli_options.dbMigrate) {
+			DBWrapper wrapper(Meta::getConnectionParameter());
+
+			qInfo("Database schema migration completed.");
+
+			return 0;
+		}
 
 		if (cli_options.dbDumpPath) {
 			DBWrapper wrapper(Meta::getConnectionParameter());

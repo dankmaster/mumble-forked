@@ -9,6 +9,7 @@
 #include "ChatFeature.h"
 #include "ClientType.h"
 #include "Connection.h"
+#include "FinanceQuote.h"
 #include "ForkFeature.h"
 #include "Group.h"
 #include "Meta.h"
@@ -18,6 +19,7 @@
 #include "ScreenShare.h"
 #include "Server.h"
 #include "ServerUser.h"
+#include "StonksCommand.h"
 #include "User.h"
 #include "Version.h"
 #include "crypto/CryptState.h"
@@ -26,6 +28,8 @@
 #include "murmur/database/DBChatHistoryGrant.h"
 #include "murmur/database/DBChatMessage.h"
 #include "murmur/database/DBChatReadState.h"
+#include "murmur/database/DBStonksFollow.h"
+#include "murmur/database/DBStonksScore.h"
 #include "murmur/database/UserProperty.h"
 
 #include <algorithm>
@@ -45,9 +49,11 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QLocale>
 #include <QtCore/QRandomGenerator>
 #include <QtCore/QRegularExpressionMatchIterator>
 #include <QtCore/QStack>
+#include <QtCore/QStringList>
 #include <QtCore/QTimeZone>
 #include <QtCore/QUuid>
 #include <QtCore/QtEndian>
@@ -1505,6 +1511,47 @@ void sendPersistentChatTextDenied(Server *server, ServerUser *user, const QStrin
 	denied.set_reason(u8(reason));
 	server->sendMessage(user, denied);
 }
+
+QString normalizedStonksRoomName(QString name) {
+	name = name.trimmed().toLower();
+	if (name.startsWith(QLatin1Char('#'))) {
+		name.remove(0, 1);
+	}
+	return name;
+}
+
+bool isStonksTextChannel(const ::msdb::DBTextChannel &textChannel) {
+	return normalizedStonksRoomName(u8(textChannel.name)) == QLatin1String("stonks");
+}
+
+QString formatStonksPercent(double value) {
+	QLocale locale = QLocale::c();
+	const QString formatted = locale.toString(value, 'f', 2);
+	return value > 0.0 ? QStringLiteral("+%1%").arg(formatted) : QStringLiteral("%1%").arg(formatted);
+}
+
+struct StonksLeaderboardEntry {
+	unsigned int userID = 0;
+	QString userName;
+	double score = 0.0;
+};
+
+bool higherStonksScore(const StonksLeaderboardEntry &lhs, const StonksLeaderboardEntry &rhs) {
+	if (lhs.score != rhs.score) {
+		return lhs.score > rhs.score;
+	}
+	return lhs.userName.localeAwareCompare(rhs.userName) < 0;
+}
+
+QString stonksHelpText() {
+	return QStringLiteral(
+		"Stonks commands\n"
+		"`rklb` or `quote rklb` - latest quote card\n"
+		"`score 30d +12.3` - publish a manual score\n"
+		"`leaderboard 30d` - compare scores\n"
+		"`follow <user>` / `unfollow <user>`\n"
+		"`following` / `me`");
+}
 } // namespace
 
 void Server::sendPersistentChatUnsupported(ServerUser *uSource) {
@@ -1588,17 +1635,16 @@ void Server::persistAndBroadcastChatMessage(ServerUser *uSource, const QString &
 	std::vector<::msdb::DBChatMessageEmbed > initialEmbeds;
 	if (bChatPreviewFetchEnabled) {
 		QSet< QString > seenUrls;
-		const QList< QUrl > previewUrls = extractPreviewableUrls(bodyText);
-		for (const QUrl &previewUrl : previewUrls) {
+		const auto appendInitialEmbed = [&](const QUrl &previewUrl) -> bool {
 			const QString canonicalUrl = previewUrl.adjusted(QUrl::RemoveFragment).toString();
 			if (canonicalUrl.isEmpty() || seenUrls.contains(canonicalUrl)) {
-				continue;
+				return initialEmbeds.size() < 3;
 			}
 			seenUrls.insert(canonicalUrl);
 
 			::msdb::DBChatMessageEmbed embed(iServerNum, storedMessage.messageID);
 			embed.urlHash      = u8(QString::fromLatin1(
-                QCryptographicHash::hash(canonicalUrl.toUtf8(), QCryptographicHash::Sha256).toHex()));
+				QCryptographicHash::hash(canonicalUrl.toUtf8(), QCryptographicHash::Sha256).toHex()));
 			embed.canonicalUrl = u8(canonicalUrl);
 			embed.status =
 				isSafePreviewUrl(previewUrl) ? ::msdb::ChatEmbedStatus::Pending : ::msdb::ChatEmbedStatus::Blocked;
@@ -1607,8 +1653,21 @@ void Server::persistAndBroadcastChatMessage(ServerUser *uSource, const QString &
 			embed.expiresAt = now + std::chrono::hours(24 * 7);
 			initialEmbeds.push_back(std::move(embed));
 
-			if (initialEmbeds.size() >= 3) {
+			return initialEmbeds.size() < 3;
+		};
+
+		const QList< QUrl > previewUrls = extractPreviewableUrls(bodyText);
+		for (const QUrl &previewUrl : previewUrls) {
+			if (!appendInitialEmbed(previewUrl)) {
 				break;
+			}
+		}
+
+		if (initialEmbeds.size() < 3) {
+			for (const Mumble::Finance::TickerMention &mention : Mumble::Finance::extractTickerMentions(bodyText)) {
+				if (!appendInitialEmbed(mention.yahooFinanceUrl)) {
+					break;
+				}
 			}
 		}
 	}
@@ -1707,6 +1766,119 @@ void Server::persistAndBroadcastChatMessage(ServerUser *uSource, const QString &
 			if (persistedReadState) {
 				sendMessage(uSource, protoReadStateFromDB(*persistedReadState, scope, scopeID));
 			}
+		}
+	}
+
+	if (bChatPreviewFetchEnabled && permissionChannel) {
+		for (const ::msdb::DBChatMessageEmbed &embed : initialEmbeds) {
+			if (embed.status == ::msdb::ChatEmbedStatus::Pending) {
+				scheduleChatEmbedFetch(thread.threadID, storedMessage.messageID, scope, scopeID,
+									   static_cast< unsigned int >(permissionChannel->iId), embed);
+			}
+		}
+	}
+}
+
+void Server::persistAndBroadcastServerChatMessage(const QString &bodyText, MumbleProto::ChatScope scope,
+												  unsigned int scopeID, Channel *permissionChannel,
+												  ::msdb::ChatThreadScope dbScope, const QString &authorName) {
+	if (bodyText.trimmed().isEmpty()) {
+		return;
+	}
+
+	const std::string scopeKey = chatScopeKey(scope, scopeID);
+	if (scopeKey.empty()) {
+		return;
+	}
+
+	::msdb::DBChatThread thread = m_dbWrapper.ensureChatThread(iServerNum, dbScope, scopeKey, std::nullopt);
+	const std::optional< std::string > resolvedAuthorName =
+		authorName.trimmed().isEmpty() ? std::nullopt : std::optional< std::string >(u8(authorName.trimmed()));
+	::msdb::DBChatMessage storedMessage = m_dbWrapper.addChatMessage(
+		iServerNum, thread.threadID, u8(bodyText), ::msdb::ChatMessageBodyFormat::MarkdownLite, {}, std::nullopt,
+		std::nullopt, std::nullopt, resolvedAuthorName);
+
+	const auto now = std::chrono::system_clock::now();
+	std::vector<::msdb::DBChatMessageEmbed > initialEmbeds;
+	if (bChatPreviewFetchEnabled) {
+		QSet< QString > seenUrls;
+		const auto appendInitialEmbed = [&](const QUrl &previewUrl) -> bool {
+			const QString canonicalUrl = previewUrl.adjusted(QUrl::RemoveFragment).toString();
+			if (canonicalUrl.isEmpty() || seenUrls.contains(canonicalUrl)) {
+				return initialEmbeds.size() < 3;
+			}
+			seenUrls.insert(canonicalUrl);
+
+			::msdb::DBChatMessageEmbed embed(iServerNum, storedMessage.messageID);
+			embed.urlHash      = u8(QString::fromLatin1(
+				QCryptographicHash::hash(canonicalUrl.toUtf8(), QCryptographicHash::Sha256).toHex()));
+			embed.canonicalUrl = u8(canonicalUrl);
+			embed.status =
+				isSafePreviewUrl(previewUrl) ? ::msdb::ChatEmbedStatus::Pending : ::msdb::ChatEmbedStatus::Blocked;
+			embed.errorCode = embed.status == ::msdb::ChatEmbedStatus::Blocked ? "blocked_target" : "";
+			embed.fetchedAt = now;
+			embed.expiresAt = now + std::chrono::hours(24 * 7);
+			initialEmbeds.push_back(std::move(embed));
+
+			return initialEmbeds.size() < 3;
+		};
+
+		const QList< QUrl > previewUrls = extractPreviewableUrls(bodyText);
+		for (const QUrl &previewUrl : previewUrls) {
+			if (!appendInitialEmbed(previewUrl)) {
+				break;
+			}
+		}
+
+		if (initialEmbeds.size() < 3) {
+			for (const Mumble::Finance::TickerMention &mention : Mumble::Finance::extractTickerMentions(bodyText)) {
+				if (!appendInitialEmbed(mention.yahooFinanceUrl)) {
+					break;
+				}
+			}
+		}
+	}
+
+	if (!initialEmbeds.empty()) {
+		m_dbWrapper.setChatMessageEmbeds(iServerNum, storedMessage.messageID, initialEmbeds);
+		storedMessage.embeds = initialEmbeds;
+	}
+
+	const auto resolvedReactionActorName = [this](unsigned int actorUserID) -> std::optional< std::string > {
+		const std::optional< std::string > connectedName = connectedUserNameForPersistentID(qhUsers, actorUserID);
+		if (connectedName) {
+			return connectedName;
+		}
+
+		if (actorUserID <= static_cast< unsigned int >(std::numeric_limits< int >::max())) {
+			const QString registeredName = getRegisteredUserName(static_cast< int >(actorUserID)).trimmed();
+			if (!registeredName.isEmpty()) {
+				return u8(registeredName);
+			}
+		}
+
+		return std::nullopt;
+	};
+
+	QSet< ServerUser * > persistentRecipients;
+	if (scope == MumbleProto::Channel) {
+		persistentRecipients = recipientsWithChatHistoryAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache,
+															   storedMessage.createdAt);
+		persistentRecipients.unite(
+			recipientsWithLivePersistentChatAccess(qhUsers, scope, permissionChannel, acCache, {}));
+	} else {
+		persistentRecipients = recipientsWithChatHistoryAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache,
+															   storedMessage.createdAt);
+		persistentRecipients.unite(
+			recipientsWithLivePersistentChatAccess(qhUsers, scope, permissionChannel, acCache));
+	}
+
+	for (ServerUser *currentUser : persistentRecipients) {
+		if (clientSupportsPersistentChat(currentUser)) {
+			const MumbleProto::ChatMessage protoMessage =
+				protoChatMessageFromDB(storedMessage, scope, scopeID, resolvedAuthorName, persistedUserID(currentUser),
+									   std::nullopt, effectiveChatFeatures(currentUser), resolvedReactionActorName);
+			sendMessage(currentUser, protoMessage);
 		}
 	}
 
@@ -2168,9 +2340,65 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
 
                 (*fetchImage)(sourceUrl.resolved(QUrl(imageUrlString)), 0);
             });
+		};
+
+	const auto fetchYahooQuote = [this, fetchPage, embedState, finish, updateHostCount](const QUrl &pageUrl,
+																					 const QString &symbol) {
+		const QUrl chartUrl = Mumble::Finance::yahooFinanceChartUrl(symbol);
+		if (!chartUrl.isValid() || !isSafePreviewUrl(chartUrl)) {
+			(*fetchPage)(pageUrl, 0);
+			return;
+		}
+
+		const QString hostKey = chartUrl.host().trimmed().toLower();
+		if (qhChatPreviewFetchesByHost.value(hostKey, 0) >= CHAT_PREVIEW_MAX_CONCURRENT_HOST) {
+			(*fetchPage)(pageUrl, 0);
+			return;
+		}
+
+		updateHostCount(hostKey, +1);
+		QNetworkRequest request(chartUrl);
+		prepareChatPreviewRequest(request);
+		request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,*/*;q=0.5"));
+		request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+		request.setTransferTimeout(CHAT_PREVIEW_TIMEOUT_MSEC);
+		QNetworkReply *reply = qnamNetwork->get(request);
+		reply->setReadBufferSize(CHAT_PREVIEW_MAX_PAGE_BYTES);
+		connect(reply, &QNetworkReply::finished, this,
+				[reply, pageUrl, fetchPage, embedState, finish, updateHostCount, hostKey]() mutable {
+					updateHostCount(hostKey, -1);
+					const QVariant redirectTarget = reply->attribute(QNetworkRequest::RedirectionTargetAttribute);
+					const QByteArray bytes         = reply->readAll();
+					const bool success             = reply->error() == QNetworkReply::NoError;
+					reply->deleteLater();
+
+					QString parseError;
+					const std::optional< Mumble::Finance::YahooChartQuote > quote =
+						success && !redirectTarget.isValid()
+							? Mumble::Finance::parseYahooChartQuote(bytes, &parseError)
+							: std::nullopt;
+					if (!quote) {
+						(*fetchPage)(pageUrl, 0);
+						return;
+					}
+
+					embedState->title       = u8(Mumble::Finance::yahooFinanceQuoteTitle(*quote));
+					embedState->description = u8(Mumble::Finance::yahooFinanceQuoteDescription(*quote));
+					embedState->siteName    = "Yahoo Finance";
+					embedState->status      = ::msdb::ChatEmbedStatus::Ready;
+					embedState->errorCode   = "";
+					finish(*embedState);
+				});
 	};
 
-	(*fetchPage)(QUrl(QString::fromStdString(initialEmbed.canonicalUrl)), 0);
+	const QUrl initialUrl(QString::fromStdString(initialEmbed.canonicalUrl));
+	QString yahooSymbol;
+	if (Mumble::Finance::symbolFromYahooFinanceQuoteUrl(initialUrl, &yahooSymbol)) {
+		fetchYahooQuote(initialUrl, yahooSymbol);
+		return;
+	}
+
+	(*fetchPage)(initialUrl, 0);
 }
 
 /// Checks whether the given channel has restrictions affecting the ENTER privilege
@@ -3850,6 +4078,7 @@ void Server::msgChatSend(ServerUser *uSource, MumbleProto::ChatSend &msg) {
 		msg.has_scope_id() ? msg.scope_id() : (uSource->cChannel ? uSource->cChannel->iId : Mumble::ROOT_CHANNEL_ID);
 	Channel *permissionChannel      = nullptr;
 	::msdb::ChatThreadScope dbScope = ::msdb::ChatThreadScope::Channel;
+	std::optional<::msdb::DBTextChannel > selectedTextChannel;
 
 	switch (scope) {
 		case MumbleProto::Channel:
@@ -3869,6 +4098,7 @@ void Server::msgChatSend(ServerUser *uSource, MumbleProto::ChatSend &msg) {
 				return;
 			}
 
+			selectedTextChannel = textChannel;
 			permissionChannel = qhChannels.value(textChannel->aclChannelID);
 			dbScope           = ::msdb::ChatThreadScope::TextChannel;
 			break;
@@ -3980,6 +4210,158 @@ void Server::msgChatSend(ServerUser *uSource, MumbleProto::ChatSend &msg) {
 
 	persistAndBroadcastChatMessage(uSource, bodyText, bodyFormat, scope, scopeID, permissionChannel, dbScope,
 								   attachments, replyToMessageID, legacyFallbackRecipients);
+
+	if (scope == MumbleProto::TextChannel && selectedTextChannel && isStonksTextChannel(*selectedTextChannel)) {
+		const std::optional< Mumble::Stonks::Command > command = Mumble::Stonks::parseCommand(bodyText);
+		if (!command) {
+			return;
+		}
+
+		const auto respond = [&](const QString &responseBody) {
+			persistAndBroadcastServerChatMessage(responseBody, scope, scopeID, permissionChannel, dbScope,
+												 QStringLiteral("Stonks"));
+		};
+		const auto currentUserID = persistedUserID(uSource);
+		const auto registeredDisplayName = [this](unsigned int userID) {
+			const QString name = getRegisteredUserName(static_cast< int >(userID)).trimmed();
+			return name.isEmpty() ? QStringLiteral("user %1").arg(userID) : name;
+		};
+		const auto requireRegisteredUser = [&]() -> bool {
+			if (currentUserID) {
+				return true;
+			}
+			respond(QStringLiteral("Register your user first to use social stonks commands."));
+			return false;
+		};
+		const auto followedUserNames = [&](unsigned int followerUserID) {
+			QStringList names;
+			for (unsigned int userID : m_dbWrapper.getStonksFollowedUsers(iServerNum, followerUserID)) {
+				const QString userName = registeredDisplayName(userID);
+				if (!userName.isEmpty()) {
+					names << userName;
+				}
+			}
+			names.sort(Qt::CaseInsensitive);
+			return names;
+		};
+
+		switch (command->type) {
+			case Mumble::Stonks::CommandType::Help:
+				respond(stonksHelpText());
+				break;
+			case Mumble::Stonks::CommandType::Quote:
+				respond(QStringLiteral("Quote: $%1").arg(command->symbol));
+				break;
+			case Mumble::Stonks::CommandType::SetScore: {
+				if (!requireRegisteredUser()) {
+					break;
+				}
+
+				::msdb::DBStonksScore score(iServerNum, currentUserID.value(), u8(command->period));
+				score.scorePercent = command->scorePercent;
+				score.updatedAt    = std::chrono::system_clock::now();
+				m_dbWrapper.setStonksScore(score);
+				respond(QStringLiteral("Recorded %1 at %2 for %3.")
+							.arg(registeredDisplayName(currentUserID.value()),
+								 formatStonksPercent(command->scorePercent), command->period));
+				break;
+			}
+			case Mumble::Stonks::CommandType::Leaderboard: {
+				std::vector< StonksLeaderboardEntry > entries;
+				for (const ::msdb::DBStonksScore &score :
+					 m_dbWrapper.getStonksLeaderboard(iServerNum, u8(command->period), 100)) {
+					entries.push_back(
+						StonksLeaderboardEntry { score.userID, registeredDisplayName(score.userID), score.scorePercent });
+				}
+
+				std::sort(entries.begin(), entries.end(), higherStonksScore);
+				if (entries.empty()) {
+					respond(QStringLiteral("No stonks scores for %1 yet. Use `score %1 +4.2` to join.")
+								.arg(command->period));
+					break;
+				}
+
+				QStringList lines;
+				lines << QStringLiteral("Stonks leaderboard - %1").arg(command->period);
+				const std::size_t count = std::min< std::size_t >(entries.size(), 10);
+				for (std::size_t i = 0; i < count; ++i) {
+					const StonksLeaderboardEntry &entry = entries.at(i);
+					lines << QStringLiteral("%1. %2  %3")
+								 .arg(static_cast< int >(i + 1))
+								 .arg(entry.userName, formatStonksPercent(entry.score));
+				}
+				respond(lines.join(QLatin1Char('\n')));
+				break;
+			}
+			case Mumble::Stonks::CommandType::Me: {
+				if (!requireRegisteredUser()) {
+					break;
+				}
+
+				QStringList lines;
+				std::map< QString, double > scoresByPeriod;
+				for (const ::msdb::DBStonksScore &score :
+					 m_dbWrapper.getStonksScores(iServerNum, currentUserID.value())) {
+					scoresByPeriod[u8(score.period)] = score.scorePercent;
+				}
+
+				lines << QStringLiteral("%1's stonks profile").arg(registeredDisplayName(currentUserID.value()));
+				for (const QString &period : { QStringLiteral("1d"), QStringLiteral("7d"), QStringLiteral("30d"),
+											   QStringLiteral("ytd") }) {
+					const auto score = scoresByPeriod.find(period);
+					if (score != scoresByPeriod.cend()) {
+						lines << QStringLiteral("%1: %2").arg(period, formatStonksPercent(score->second));
+					}
+				}
+
+				const QStringList following = followedUserNames(currentUserID.value());
+				lines << QStringLiteral("Following: %1").arg(following.isEmpty() ? QStringLiteral("nobody yet")
+																				: following.join(QStringLiteral(", ")));
+				respond(lines.join(QLatin1Char('\n')));
+				break;
+			}
+			case Mumble::Stonks::CommandType::Follow:
+			case Mumble::Stonks::CommandType::Unfollow: {
+				if (!requireRegisteredUser()) {
+					break;
+				}
+
+				const int targetUserID = getRegisteredUserID(command->targetName);
+				if (targetUserID < 0) {
+					respond(QStringLiteral("I couldn't find registered user `%1`.").arg(command->targetName));
+					break;
+				}
+				if (static_cast< unsigned int >(targetUserID) == currentUserID.value()) {
+					respond(QStringLiteral("You are already you. Very bullish, but not followable."));
+					break;
+				}
+
+				const unsigned int targetRegisteredUserID = static_cast< unsigned int >(targetUserID);
+				if (command->type == Mumble::Stonks::CommandType::Follow) {
+					::msdb::DBStonksFollow follow(iServerNum, currentUserID.value(), targetRegisteredUserID);
+					follow.createdAt = std::chrono::system_clock::now();
+					m_dbWrapper.setStonksFollow(follow);
+					respond(QStringLiteral("Now following %1.").arg(registeredDisplayName(targetRegisteredUserID)));
+				} else {
+					m_dbWrapper.removeStonksFollow(iServerNum, currentUserID.value(), targetRegisteredUserID);
+					respond(QStringLiteral("Unfollowed %1.").arg(registeredDisplayName(targetRegisteredUserID)));
+				}
+				break;
+			}
+			case Mumble::Stonks::CommandType::Following: {
+				if (!requireRegisteredUser()) {
+					break;
+				}
+
+				const QStringList following = followedUserNames(currentUserID.value());
+				respond(following.isEmpty() ? QStringLiteral("You are not following anyone yet.")
+											 : QStringLiteral("Following: %1").arg(following.join(QStringLiteral(", "))));
+				break;
+			}
+			case Mumble::Stonks::CommandType::None:
+				break;
+		}
+	}
 }
 
 void Server::msgChatMessage(ServerUser *, MumbleProto::ChatMessage &) {

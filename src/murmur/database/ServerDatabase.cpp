@@ -24,6 +24,8 @@
 #include "GroupTable.h"
 #include "LogTable.h"
 #include "ServerTable.h"
+#include "StonksFollowTable.h"
+#include "StonksScoreTable.h"
 #include "UserProperty.h"
 #include "UserPropertyTable.h"
 #include "UserTable.h"
@@ -64,6 +66,8 @@ namespace server {
 				ChannelLinkTable,
 				BanTable,
 				ChannelListenerTable,
+				StonksFollowTable,
+				StonksScoreTable,
 			};
 		}
 
@@ -162,6 +166,12 @@ namespace server {
 				addTable(std::make_unique< ChannelListenerTable >(m_sql, m_backend, getUserTable(), getChannelTable()));
 			assert(id == TableIndex::ChannelListenerTable);
 
+			id = addTable(std::make_unique< StonksFollowTable >(m_sql, m_backend, getUserTable()));
+			assert(id == TableIndex::StonksFollowTable);
+
+			id = addTable(std::make_unique< StonksScoreTable >(m_sql, m_backend, getUserTable()));
+			assert(id == TableIndex::StonksScoreTable);
+
 			// Mark id as unused in case the asserts are disabled (e.g. in release builds)
 			(void) id;
 		}
@@ -203,6 +213,8 @@ namespace server {
 		GET_TABLE_IMPL(ChannelLinkTable)
 		GET_TABLE_IMPL(BanTable)
 		GET_TABLE_IMPL(ChannelListenerTable)
+		GET_TABLE_IMPL(StonksFollowTable)
+		GET_TABLE_IMPL(StonksScoreTable)
 
 #undef GET_TABLE_IMPL
 

@@ -53,6 +53,8 @@
 #include "murmur/database/DBChatMessageReaction.h"
 #include "murmur/database/DBChatReadState.h"
 #include "murmur/database/DBChatThread.h"
+#include "murmur/database/DBStonksFollow.h"
+#include "murmur/database/DBStonksScore.h"
 #include "murmur/database/DBTextChannel.h"
 #include "murmur/database/DBChannelLink.h"
 #include "murmur/database/DBChannelListener.h"
@@ -64,6 +66,8 @@
 #include "murmur/database/GroupTable.h"
 #include "murmur/database/LogTable.h"
 #include "murmur/database/ServerTable.h"
+#include "murmur/database/StonksFollowTable.h"
+#include "murmur/database/StonksScoreTable.h"
 #include "murmur/database/UserPropertyTable.h"
 #include "murmur/database/UserTable.h"
 
@@ -1130,6 +1134,88 @@ void DBWrapper::removeTextChannel(unsigned int serverID, unsigned int textChanne
 	assertValidID(textChannelID);
 
 	m_serverDB.getTextChannelTable().removeTextChannel(serverID, textChannelID);
+
+	WRAPPER_END
+}
+
+void DBWrapper::setStonksScore(const ::msdb::DBStonksScore &score) {
+	WRAPPER_BEGIN
+
+	assertValidID(score.serverID);
+	assertRegisteredUserExists(score.serverID, score.userID);
+
+	m_serverDB.getStonksScoreTable().setScore(score);
+
+	WRAPPER_END
+}
+
+std::optional< ::msdb::DBStonksScore > DBWrapper::getStonksScore(unsigned int serverID, unsigned int userID,
+																 const std::string &period) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertRegisteredUserExists(serverID, userID);
+
+	return m_serverDB.getStonksScoreTable().getScore(serverID, userID, period);
+
+	WRAPPER_END
+}
+
+std::vector< ::msdb::DBStonksScore > DBWrapper::getStonksScores(unsigned int serverID, unsigned int userID) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertRegisteredUserExists(serverID, userID);
+
+	return m_serverDB.getStonksScoreTable().getScores(serverID, userID);
+
+	WRAPPER_END
+}
+
+std::vector< ::msdb::DBStonksScore > DBWrapper::getStonksLeaderboard(unsigned int serverID,
+																	  const std::string &period,
+																	  unsigned int maxEntries) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assert(maxEntries <= static_cast< unsigned int >(std::numeric_limits< int >::max()));
+
+	return m_serverDB.getStonksScoreTable().getLeaderboard(serverID, period, maxEntries);
+
+	WRAPPER_END
+}
+
+void DBWrapper::setStonksFollow(const ::msdb::DBStonksFollow &follow) {
+	WRAPPER_BEGIN
+
+	assertValidID(follow.serverID);
+	assertRegisteredUserExists(follow.serverID, follow.followerUserID);
+	assertRegisteredUserExists(follow.serverID, follow.targetUserID);
+
+	m_serverDB.getStonksFollowTable().setFollow(follow);
+
+	WRAPPER_END
+}
+
+void DBWrapper::removeStonksFollow(unsigned int serverID, unsigned int followerUserID, unsigned int targetUserID) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertRegisteredUserExists(serverID, followerUserID);
+	assertRegisteredUserExists(serverID, targetUserID);
+
+	m_serverDB.getStonksFollowTable().removeFollow(serverID, followerUserID, targetUserID);
+
+	WRAPPER_END
+}
+
+std::vector< unsigned int > DBWrapper::getStonksFollowedUsers(unsigned int serverID, unsigned int followerUserID) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertRegisteredUserExists(serverID, followerUserID);
+
+	return m_serverDB.getStonksFollowTable().getFollowedUsers(serverID, followerUserID);
 
 	WRAPPER_END
 }

@@ -1,0 +1,12 @@
+{
+	"v6": {
+		"table_name": "stonks_follows",
+		"column_names": [
+			"server_id",
+			"follower_user_id",
+			"target_user_id",
+			"created_at"
+		],
+		"rows": []
+	}
+}

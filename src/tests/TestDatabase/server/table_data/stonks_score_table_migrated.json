@@ -1,0 +1,13 @@
+{
+	"v6": {
+		"table_name": "stonks_scores",
+		"column_names": [
+			"server_id",
+			"user_id",
+			"period",
+			"score_percent",
+			"updated_at"
+		],
+		"rows": []
+	}
+}

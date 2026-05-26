@@ -472,6 +472,10 @@ public:
 		const std::vector< ::mumble::server::db::DBChatMessageAttachment > &attachments = {},
 		std::optional< unsigned int > replyToMessageID = std::nullopt,
 		const QSet< ServerUser * > &legacyFallbackRecipients = {});
+	void persistAndBroadcastServerChatMessage(const QString &bodyText, MumbleProto::ChatScope scope,
+											  unsigned int scopeID, Channel *permissionChannel,
+											  ::mumble::server::db::ChatThreadScope dbScope,
+											  const QString &authorName);
 
 	void setLiveConf(const QString &key, const QString &value);
 	bool supportsScreenShareSignaling(const ServerUser *user) const;

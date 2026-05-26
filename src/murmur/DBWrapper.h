@@ -14,6 +14,8 @@
 #include "murmur/database/DBChatMessageReaction.h"
 #include "murmur/database/DBChatReadState.h"
 #include "murmur/database/DBChatThread.h"
+#include "murmur/database/DBStonksFollow.h"
+#include "murmur/database/DBStonksScore.h"
 #include "murmur/database/DBTextChannel.h"
 #include "murmur/database/DBLogEntry.h"
 #include "murmur/database/DBUserData.h"
@@ -114,6 +116,16 @@ public:
 													   unsigned int position);
 	void updateTextChannel(const ::mumble::server::db::DBTextChannel &textChannel);
 	void removeTextChannel(unsigned int serverID, unsigned int textChannelID);
+	void setStonksScore(const ::mumble::server::db::DBStonksScore &score);
+	std::optional< ::mumble::server::db::DBStonksScore > getStonksScore(unsigned int serverID, unsigned int userID,
+																		 const std::string &period);
+	std::vector< ::mumble::server::db::DBStonksScore > getStonksScores(unsigned int serverID, unsigned int userID);
+	std::vector< ::mumble::server::db::DBStonksScore > getStonksLeaderboard(unsigned int serverID,
+																			 const std::string &period,
+																			 unsigned int maxEntries = 100);
+	void setStonksFollow(const ::mumble::server::db::DBStonksFollow &follow);
+	void removeStonksFollow(unsigned int serverID, unsigned int followerUserID, unsigned int targetUserID);
+	std::vector< unsigned int > getStonksFollowedUsers(unsigned int serverID, unsigned int followerUserID);
 	::mumble::server::db::DBChatMessage
 		addChatMessage(unsigned int serverID, unsigned int threadID, const std::string &bodyText,
 					   ::mumble::server::db::ChatMessageBodyFormat bodyFormat =

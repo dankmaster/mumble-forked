@@ -7895,6 +7895,36 @@ QUrl githubApiLatestReleaseUrl(const GitHubRepositoryRef &repository) {
 
 std::optional< PersistentChatPreviewProviderInfo > previewProviderInfo(const QUrl &url) {
 	const QString host = previewDisplayHost(url);
+	const QString path = url.path();
+	if (host == QLatin1String("finance.yahoo.com")) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("Yahoo Finance"),
+												  QObject::tr("Open on Yahoo Finance"),
+												  QObject::tr("Yahoo Finance quote") };
+	}
+	if (host == QLatin1String("google.com") && path.startsWith(QLatin1String("/finance/quote/"))) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("Google Finance"),
+												  QObject::tr("Open on Google Finance"),
+												  QObject::tr("Google Finance quote") };
+	}
+	if ((host == QLatin1String("x.com") || host == QLatin1String("twitter.com"))
+		&& path == QLatin1String("/search")
+		&& QUrlQuery(url).queryItemValue(QStringLiteral("q")).trimmed().startsWith(QLatin1Char('$'))) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("X"), QObject::tr("Open on X"),
+												  QObject::tr("Cashtag on X") };
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("avanza.se"))) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("Avanza"), QObject::tr("Open on Avanza"),
+												  QObject::tr("Avanza finance link") };
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("nordnet.se"))) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("Nordnet"), QObject::tr("Open on Nordnet"),
+												  QObject::tr("Nordnet finance link") };
+	}
+	if (hostEqualsOrEndsWith(host, QStringLiteral("interactivebrokers.com"))) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("Interactive Brokers"),
+												  QObject::tr("Open on Interactive Brokers"),
+												  QObject::tr("Interactive Brokers finance link") };
+	}
 	if (isGoogleSearchUrl(url)) {
 		const QString modeLabel = googleSearchModeLabel(url);
 		return PersistentChatPreviewProviderInfo{ QObject::tr("Google"), googleSearchOpenLabel(url), modeLabel };
