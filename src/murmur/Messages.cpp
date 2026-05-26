@@ -1731,7 +1731,8 @@ std::vector< StonksLeaderboardEntry > stonksLedgerLeaderboard(Server *server, co
 }
 
 MumbleProto::StonksState buildStonksState(Server *server, ServerUser *user, const QString &period,
-										  const QString &status = QString(), const QString &error = QString(),
+										  ChanACL::ACLCache &aclCache, const QString &status = QString(),
+										  const QString &error = QString(),
 										  std::optional< unsigned int > requestedUserID = std::nullopt) {
 	MumbleProto::StonksState state;
 	if (!server || !user) {
@@ -1746,7 +1747,7 @@ MumbleProto::StonksState buildStonksState(Server *server, ServerUser *user, cons
 							&& server->m_dbWrapper.registeredUserExists(server->iServerNum, *selfUserID);
 
 	Channel *rootChannel = server->qhChannels.value(Mumble::ROOT_CHANNEL_ID);
-	const bool canAdmin = rootChannel && server->hasPermission(user, rootChannel, ChanACL::Write);
+	const bool canAdmin = rootChannel && ChanACL::hasPermission(user, rootChannel, ChanACL::Write, &aclCache);
 
 	state.set_supported(true);
 	state.set_enabled(server->bStonksEnabled);
@@ -5427,7 +5428,7 @@ void Server::msgStonksRequest(ServerUser *uSource, MumbleProto::StonksRequest &m
 
 	const std::optional< unsigned int > requestedUserID =
 		msg.has_user_id() && msg.user_id() > 0 ? std::optional< unsigned int >(msg.user_id()) : std::nullopt;
-	sendMessage(uSource, buildStonksState(this, uSource, period, QString(), QString(), requestedUserID));
+	sendMessage(uSource, buildStonksState(this, uSource, period, acCache, QString(), QString(), requestedUserID));
 }
 
 void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg) {
@@ -5438,7 +5439,7 @@ void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg
 
 	const QString period = normalizedStonksLedgerPeriod(msg.has_period() ? u8(msg.period()) : QString());
 	const auto sendState = [&](const QString &status = QString(), const QString &error = QString()) {
-		sendMessage(uSource, buildStonksState(this, uSource, period, status, error));
+		sendMessage(uSource, buildStonksState(this, uSource, period, acCache, status, error));
 	};
 
 	if (!clientSupportsForkFeature(uSource, MumbleProto::ForkFeatureStonksLedger)) {
@@ -5452,7 +5453,7 @@ void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg
 	}
 
 	Channel *rootChannel = qhChannels.value(Mumble::ROOT_CHANNEL_ID);
-	const bool canAdmin  = rootChannel && hasPermission(uSource, rootChannel, ChanACL::Write);
+	const bool canAdmin  = rootChannel && ChanACL::hasPermission(uSource, rootChannel, ChanACL::Write, &acCache);
 	const MumbleProto::StonksActionKind action =
 		msg.has_action() ? msg.action() : MumbleProto::StonksActionSubmitSnapshot;
 
