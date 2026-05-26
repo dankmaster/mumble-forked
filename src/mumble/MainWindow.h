@@ -329,6 +329,8 @@ public:
 	void ensurePersistentChatPreviewSiteSnapshot(const QString &previewKey);
 	bool restorePersistentChatPreviewDiskCache(const QString &previewKey);
 	void storePersistentChatPreviewDiskCache(const QString &previewKey);
+	bool applyYahooFinanceQuotePreviewFallback(PersistentChatPreview &preview, const QUrl &url) const;
+	bool requestPersistentChatFinancePreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatXPostPreview(const QString &previewKey, const QUrl &previewUrl);
 	void requestPersistentChatXPostReplyContext(const QString &previewKey, const QString &statusId, int remaining,
 												QVariantList directChain = QVariantList());

@@ -38,6 +38,11 @@ namespace Finance {
 	};
 
 	struct YahooChartQuote {
+		struct Point {
+			qint64 timestamp = 0;
+			double close     = 0.0;
+		};
+
 		QString symbol;
 		QString shortName;
 		QString longName;
@@ -51,13 +56,15 @@ namespace Finance {
 		qint64 regularMarketTime   = 0;
 		bool hasRegularMarketPrice = false;
 		bool hasPreviousClose      = false;
+		QList< Point > points;
 	};
 
 	QString normalizeTickerSymbol(const QString &symbolText);
 	QList< TickerMention > extractTickerMentions(const QString &text, int maxMentions = 3);
 
 	QUrl yahooFinanceQuoteUrl(const QString &symbol);
-	QUrl yahooFinanceChartUrl(const QString &symbol);
+	QUrl yahooFinanceChartUrl(const QString &symbol, const QString &range = QStringLiteral("1mo"),
+							  const QString &interval = QStringLiteral("1d"));
 	bool symbolFromYahooFinanceQuoteUrl(const QUrl &url, QString *symbol = nullptr);
 
 	QString financeProviderLabel(FinanceProvider provider);

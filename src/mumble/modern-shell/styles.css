@@ -1031,13 +1031,15 @@ textarea:focus-visible {
 	overflow-x: hidden;
 	overflow-y: scroll;
 	overscroll-behavior: contain;
-	scroll-behavior: smooth;
+	scroll-behavior: auto;
 	scrollbar-gutter: stable;
 	padding: 4px 14px 14px 20px;
 	scroll-padding-bottom: calc(var(--footer-row-height) + 18px);
 	scrollbar-width: auto;
 	scrollbar-color: rgba(105, 163, 201, 0.72) rgba(255, 255, 255, 0.06);
+	background: var(--shell-bg);
 	transition: box-shadow 180ms ease;
+	contain: paint;
 	isolation: isolate;
 }
 
@@ -1420,8 +1422,8 @@ textarea:focus-visible {
 	border-radius: 12px;
 	background:
 		radial-gradient(circle at top left, hsla(var(--scope-hue), 68%, 62%, 0.18), transparent 58%),
-		linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.12)),
-		rgba(255, 255, 255, 0.04);
+		linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.10)),
+		#1f2630;
 	overflow: hidden;
 	contain: paint;
 	isolation: isolate;
@@ -1481,7 +1483,10 @@ textarea:focus-visible {
 .preview-card-youtube-frame-wrap {
 	aspect-ratio: 16 / 9;
 	background: #020509;
+	contain: paint;
 	flex: 0 0 auto;
+	isolation: isolate;
+	overflow: hidden;
 	width: 100%;
 	transition: width 180ms ease, max-width 180ms ease;
 }
@@ -1559,8 +1564,7 @@ textarea:focus-visible {
 
 .preview-card-playback-note {
 	align-items: center;
-	backdrop-filter: blur(8px);
-	background: rgba(9, 13, 18, 0.68);
+	background: #0c1219;
 	border: 1px solid rgba(160, 190, 216, 0.28);
 	border-radius: 6px;
 	color: #e8f2ff;
@@ -1728,9 +1732,9 @@ textarea:focus-visible {
 	border: 0;
 	border-top: 1px solid rgba(160, 190, 216, 0.22);
 	border-radius: 0;
-	background: rgba(9, 13, 18, 0.78);
+	background: #101720;
 	box-shadow: none;
-	backdrop-filter: blur(10px);
+	isolation: isolate;
 }
 
 .preview-card-media-controls.is-size-only {
@@ -3199,6 +3203,202 @@ textarea:focus-visible {
 	background: #151b19;
 }
 
+.preview-card.is-provider-yahoo-finance {
+	display: block;
+	grid-template-columns: 1fr;
+	gap: 0;
+	padding: 0;
+	border-color: rgba(95, 190, 150, 0.28);
+	border-radius: 10px;
+	background: #111821;
+}
+
+.message-bubble.is-own .preview-card.is-provider-yahoo-finance,
+.message-cluster.is-own .preview-card.is-provider-yahoo-finance {
+	border-color: rgba(112, 211, 171, 0.32);
+	background: #102024;
+}
+
+.preview-card-finance-shell {
+	--finance-accent: #78d6a3;
+	--finance-accent-soft: rgba(120, 214, 163, 0.14);
+	--finance-text: #e7f0f5;
+	--finance-muted: rgba(219, 230, 238, 0.62);
+	--finance-danger: #ff8a8f;
+	--finance-danger-soft: rgba(255, 138, 143, 0.13);
+	box-sizing: border-box;
+	display: flex;
+	min-width: 0;
+	overflow: hidden;
+	width: 100%;
+}
+
+.preview-card-finance-shell.is-down {
+	--finance-accent: #ff8a8f;
+	--finance-accent-soft: rgba(255, 138, 143, 0.13);
+}
+
+.preview-card-finance-body {
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	gap: 8px;
+	min-width: 0;
+	padding: 12px;
+	width: 100%;
+}
+
+.preview-card-finance-mark {
+	background: rgba(120, 214, 163, 0.14);
+	color: var(--finance-accent);
+}
+
+.preview-card-finance-quote {
+	align-items: flex-start;
+	display: flex;
+	gap: 12px;
+	justify-content: space-between;
+	min-width: 0;
+}
+
+.preview-card-finance-title {
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.preview-card-finance-symbol {
+	color: var(--finance-text);
+	font-size: 19px;
+	font-weight: 900;
+	line-height: 1.05;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.preview-card-finance-name {
+	color: var(--finance-muted);
+	font-size: 11px;
+	font-weight: 700;
+	line-height: 1.3;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.preview-card-finance-price {
+	color: var(--finance-text);
+	flex: 0 0 auto;
+	font-size: 16px;
+	font-weight: 900;
+	line-height: 1.1;
+	max-width: 44%;
+	min-width: 0;
+	overflow: hidden;
+	text-align: right;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.preview-card-finance-day {
+	align-self: flex-start;
+	background: var(--finance-accent-soft);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 6px;
+	color: var(--finance-accent);
+	font-size: 12px;
+	font-weight: 850;
+	line-height: 1.2;
+	padding: 4px 7px;
+}
+
+.preview-card-finance-day.is-down {
+	background: var(--finance-danger-soft);
+	color: var(--finance-danger);
+}
+
+.preview-card-finance-chart {
+	background:
+		linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.015)),
+		rgba(0, 0, 0, 0.16);
+	border: 1px solid rgba(255, 255, 255, 0.07);
+	border-radius: 7px;
+	box-sizing: border-box;
+	height: 82px;
+	min-width: 0;
+	overflow: hidden;
+	padding: 6px;
+	width: 100%;
+}
+
+.preview-card-finance-chart svg {
+	display: block;
+	height: 100%;
+	width: 100%;
+}
+
+.preview-card-finance-chart-base {
+	fill: none;
+	stroke: rgba(255, 255, 255, 0.08);
+	stroke-width: 1;
+}
+
+.preview-card-finance-chart-line {
+	fill: none;
+	stroke: var(--finance-accent);
+	stroke-linecap: round;
+	stroke-linejoin: round;
+	stroke-width: 3;
+	vector-effect: non-scaling-stroke;
+}
+
+.preview-card-finance-stats {
+	align-items: center;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	min-width: 0;
+}
+
+.preview-card-finance-stat {
+	align-items: center;
+	background: rgba(255, 255, 255, 0.06);
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	border-radius: 6px;
+	display: inline-flex;
+	gap: 5px;
+	min-width: 0;
+	padding: 4px 7px;
+	white-space: nowrap;
+}
+
+.preview-card-finance-stat-label {
+	color: rgba(219, 230, 238, 0.52);
+	font-size: 10px;
+	font-weight: 850;
+	line-height: 1.15;
+	white-space: nowrap;
+}
+
+.preview-card-finance-stat-value {
+	color: var(--finance-accent);
+	font-size: 11px;
+	font-weight: 900;
+	line-height: 1.15;
+	white-space: nowrap;
+}
+
+.preview-card-finance-stat.is-down .preview-card-finance-stat-value {
+	color: var(--finance-danger);
+}
+
+.preview-card-finance-stat.is-flat .preview-card-finance-stat-value {
+	color: rgba(226, 233, 240, 0.76);
+}
+
 .message-bubble.is-own .preview-card.is-tradera,
 .message-cluster.is-own .preview-card.is-tradera {
 	border-color: rgba(91, 165, 232, 0.36);
@@ -4081,6 +4281,55 @@ textarea:focus-visible {
 	-webkit-line-clamp: 4;
 }
 
+.preview-card-flashback-message.has-quote {
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+	-webkit-box-orient: initial;
+	-webkit-line-clamp: initial;
+}
+
+.preview-card-flashback-message.has-quote .preview-card-flashback-quote {
+	background: #171717;
+	border: 1px solid #2c2c2c;
+	border-left: 3px solid #c58a36;
+	border-radius: 3px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 0;
+	padding: 7px 8px;
+}
+
+.preview-card-flashback-message.has-quote .preview-card-flashback-quote-head {
+	color: #f0c783;
+	font-size: 10px;
+	font-weight: 850;
+	line-height: 1.25;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.preview-card-flashback-message.has-quote .preview-card-flashback-quote-text,
+.preview-card-flashback-message.has-quote .preview-card-flashback-reply {
+	display: -webkit-box;
+	overflow: hidden;
+	-webkit-box-orient: vertical;
+}
+
+.preview-card-flashback-message.has-quote .preview-card-flashback-quote-text {
+	color: #bfc9d5;
+	font-size: 11px;
+	line-height: 1.4;
+	-webkit-line-clamp: 3;
+}
+
+.preview-card-flashback-message.has-quote .preview-card-flashback-reply {
+	color: #dce4ee;
+	-webkit-line-clamp: 3;
+}
+
 .preview-card-flashback-footer {
 	align-items: center;
 	background: #111;
@@ -4266,6 +4515,10 @@ textarea:focus-visible {
 	--sv-accent-soft: rgba(147, 198, 255, 0.16);
 	--sv-accent-text: #b8dbff;
 	--sv-border: rgba(147, 198, 255, 0.34);
+	display: block;
+	grid-template-columns: 1fr;
+	gap: 0;
+	padding: 0;
 }
 
 .preview-card.is-kind-audio {
@@ -4496,6 +4749,12 @@ textarea:focus-visible {
 	display: flex;
 	flex-direction: column;
 	min-width: 0;
+	width: 100%;
+}
+
+.preview-card-product-shell.is-single-media {
+	display: grid;
+	grid-template-columns: minmax(142px, 36%) minmax(0, 1fr);
 }
 
 .preview-card-product-gallery {
@@ -4504,15 +4763,30 @@ textarea:focus-visible {
 	outline: none;
 }
 
+.preview-card-product-shell.is-single-media .preview-card-product-gallery {
+	border-bottom: 0;
+	border-right: 1px solid var(--sv-accent-soft);
+	display: flex;
+	min-height: 100%;
+}
+
 .preview-card-product-stage {
 	background: #05080b;
-	overflow: visible;
+	contain: paint;
+	flex: 1 1 auto;
+	isolation: isolate;
+	overflow: hidden;
 	position: relative;
 	width: 100%;
 }
 
 .preview-card-product-stage.is-image {
 	aspect-ratio: 16 / 9;
+}
+
+.preview-card-product-shell.is-single-media .preview-card-product-stage.is-image {
+	aspect-ratio: auto;
+	min-height: 100%;
 }
 
 .preview-card-product-stage.is-video {
@@ -4522,11 +4796,17 @@ textarea:focus-visible {
 
 .preview-card-product-stage-image {
 	background: #05080b;
+	box-sizing: border-box;
 	display: block;
 	height: 100%;
 	object-fit: contain;
 	object-position: center;
+	padding: 10px;
 	width: 100%;
+}
+
+.preview-card-product-shell:not(.is-single-media) .preview-card-product-stage-image {
+	padding: 0;
 }
 
 .preview-card-product-stage .preview-card-media {
@@ -5545,13 +5825,17 @@ textarea:focus-visible {
 }
 
 .bubble-toolbar-button {
+	align-items: center;
+	border: 1px solid transparent;
+	border-radius: 5px;
+	display: inline-flex;
+	height: 22px;
+	justify-content: center;
 	padding: 0;
-	border: 0;
-	background: transparent;
+	width: 22px;
 	color: var(--text-faint);
-	font-size: 11px;
-	font-weight: 600;
 	cursor: pointer;
+	transition: background 140ms ease, border-color 140ms ease, color 140ms ease, opacity 140ms ease;
 }
 
 .bubble-toolbar-icon {
@@ -5559,6 +5843,7 @@ textarea:focus-visible {
 	height: 22px;
 }
 
+.bubble-toolbar-button svg,
 .reaction-picker-toggle svg {
 	width: 14px;
 	height: 14px;
@@ -5567,6 +5852,8 @@ textarea:focus-visible {
 .bubble-toolbar-button:hover,
 .bubble-toolbar-button:focus-visible,
 .bubble-toolbar-button.is-active {
+	background: rgba(255, 255, 255, 0.07);
+	border-color: rgba(255, 255, 255, 0.1);
 	color: var(--text-strong);
 }
 
@@ -5577,6 +5864,25 @@ textarea:focus-visible {
 .bubble-toolbar-button.is-danger:hover,
 .bubble-toolbar-button.is-danger:focus-visible {
 	color: #ffd1cf;
+}
+
+@media (hover: hover) and (pointer: fine) {
+	.bubble-toolbar {
+		opacity: 0;
+		pointer-events: none;
+		transform: translateY(1px);
+		transition: opacity 140ms ease, transform 140ms ease;
+	}
+
+	.message-cluster:hover .bubble-toolbar,
+	.message-cluster:focus-within .bubble-toolbar,
+	.message-bubble:hover .bubble-toolbar,
+	.message-bubble:focus-within .bubble-toolbar,
+	.bubble-toolbar:focus-within {
+		opacity: 1;
+		pointer-events: auto;
+		transform: translateY(0);
+	}
 }
 
 .reaction-picker {
@@ -6548,6 +6854,7 @@ textarea:focus-visible {
 }
 
 .composer-bar {
+	position: relative;
 	display: flex;
 	align-items: center;
 	z-index: 4;
@@ -6555,7 +6862,9 @@ textarea:focus-visible {
 	min-height: var(--footer-divider-min-height);
 	border-top: var(--footer-divider-border-width) solid var(--shell-divider);
 	background:
-		linear-gradient(180deg, rgba(35, 40, 49, 0), rgba(35, 40, 49, 0.88) 20%, rgba(35, 40, 49, 0.98) 100%);
+		linear-gradient(180deg, #252b34 0%, #232831 24%, #232831 100%);
+	contain: paint;
+	isolation: isolate;
 }
 
 .composer-shell {
@@ -6568,7 +6877,7 @@ textarea:focus-visible {
 	min-height: var(--composer-shell-min-height);
 	border: 1px solid rgba(255, 255, 255, 0.06);
 	border-radius: 12px;
-	background: rgba(255, 255, 255, 0.04);
+	background: #2b313b;
 	box-shadow: 0 12px 22px rgba(0, 0, 0, 0.16);
 	transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
 }
@@ -6616,7 +6925,7 @@ textarea:focus-visible {
 
 .composer-shell:focus-within {
 	border-color: rgba(105, 163, 201, 0.26);
-	background: rgba(255, 255, 255, 0.055);
+	background: #303743;
 	box-shadow:
 		0 14px 28px rgba(0, 0, 0, 0.18),
 		0 0 0 1px rgba(105, 163, 201, 0.12);
@@ -9150,6 +9459,22 @@ body.dialog-host {
 			"play time mute size"
 			"volume volume volume volume";
 		gap: 6px;
+	}
+
+	.preview-card-product-shell.is-single-media {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.preview-card-product-shell.is-single-media .preview-card-product-gallery {
+		border-bottom: 1px solid var(--sv-accent-soft);
+		border-right: 0;
+		min-height: 0;
+	}
+
+	.preview-card-product-shell.is-single-media .preview-card-product-stage.is-image {
+		aspect-ratio: 16 / 9;
+		min-height: 0;
 	}
 
 	.preview-card-media-time {

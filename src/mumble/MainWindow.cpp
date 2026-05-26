@@ -19,6 +19,7 @@
 #include "Connection.h"
 #include "Database.h"
 #include "DeveloperConsole.h"
+#include "FinanceQuote.h"
 #include "Log.h"
 #include "MumbleConstants.h"
 #include "Net.h"
@@ -124,6 +125,7 @@
 #include <QtCore/QSysInfo>
 #include <QtCore/QTimer>
 #include <QtCore/QTime>
+#include <QtCore/QTimeZone>
 #include <QtCore/QtEndian>
 #include <QtCore/QUrlQuery>
 #include <QtCore/QVector>
@@ -3055,25 +3057,6 @@ std::optional< QString > streamableShortcodeFromUrl(const QUrl &url) {
 	return s_shortcodePattern.match(shortcode).hasMatch() ? std::optional< QString >(shortcode) : std::nullopt;
 }
 
-std::optional< QString > tiktokVideoIdFromUrl(const QUrl &url) {
-	const QString host = normalizedPreviewHost(url.host());
-	if (!hostEqualsOrEndsWith(host, QStringLiteral("tiktok.com"))) {
-		return std::nullopt;
-	}
-	const QStringList segments = decodedUrlPathSegments(url);
-	for (int i = 0; i + 1 < segments.size(); ++i) {
-		if (segments.at(i) == QLatin1String("video")) {
-			const QString videoId = segments.at(i + 1);
-			static const QRegularExpression s_videoIdPattern(
-				QRegularExpression::anchoredPattern(QLatin1String("[0-9]{8,32}")));
-			if (s_videoIdPattern.match(videoId).hasMatch()) {
-				return videoId;
-			}
-		}
-	}
-	return std::nullopt;
-}
-
 std::optional< QString > vimeoVideoIdFromUrl(const QUrl &url) {
 	const QString host = normalizedPreviewHost(url.host());
 	if (host != QLatin1String("vimeo.com") && host != QLatin1String("player.vimeo.com")) {
@@ -3241,16 +3224,6 @@ std::optional< PersistentChatPreviewEmbedTarget > previewEmbedTargetForUrl(const
 			QUrl(QStringLiteral("https://streamable.com/e/%1").arg(*shortcode)),
 			QStringLiteral("wide")
 		};
-	}
-
-	if (const std::optional< QString > videoId = tiktokVideoIdFromUrl(url); videoId) {
-		QUrl embedUrl(QStringLiteral("https://www.tiktok.com/player/v1/%1").arg(*videoId));
-		QUrlQuery query;
-		query.addQueryItem(QStringLiteral("controls"), QStringLiteral("1"));
-		query.addQueryItem(QStringLiteral("volume_control"), QStringLiteral("1"));
-		query.addQueryItem(QStringLiteral("fullscreen_button"), QStringLiteral("1"));
-		embedUrl.setQuery(query);
-		return PersistentChatPreviewEmbedTarget { QStringLiteral("tiktok"), embedUrl, QStringLiteral("short") };
 	}
 
 	if (const std::optional< QString > videoId = vimeoVideoIdFromUrl(url); videoId) {
@@ -3568,6 +3541,8 @@ std::optional< PersistentChatPreviewOEmbedTarget > previewOEmbedTargetForUrl(con
 	};
 
 	if (hostEqualsOrEndsWith(host, QStringLiteral("tiktok.com"))) {
+		// Keep TikTok oEmbed-only. The official iframe player can show an unhideable
+		// cross-origin cookie wall inside Qt WebEngine.
 		setUrlEndpoint(QStringLiteral("https://www.tiktok.com/oembed"));
 		siteLabel     = QObject::tr("TikTok");
 		fallbackTitle = QObject::tr("TikTok video");
@@ -3654,7 +3629,7 @@ struct RichPreviewProviderInfo {
 	QStringList hostSuffixes;
 };
 
-constexpr int RICH_PREVIEW_METADATA_VERSION = 7;
+constexpr int RICH_PREVIEW_METADATA_VERSION = 8;
 
 bool isDirectImageUrl(const QUrl &url) {
 	if (!url.isValid()) {
@@ -4377,6 +4352,7 @@ QString decodedPreviewText(const QString &text);
 QString decodedPreviewHtml(const QByteArray &bytes, const QString &contentType);
 QString extractHtmlTitle(const QString &html);
 QString trimmedPreviewText(QString text, int maxLength);
+bool previewDescriptionIsPlaceholder(const QString &description);
 
 QVariantMap previewSpecItem(const QString &label, const QString &value) {
 	QVariantMap item;
@@ -4608,6 +4584,19 @@ QString flashbackPostAvatarUrlFromHtml(const QString &postBlock) {
 	return rawUrl.isEmpty() ? QString() : flashbackNormalizedAvatarUrl(rawUrl);
 }
 
+QString flashbackPostIdFromPostUrl(QString rawUrl) {
+	rawUrl = decodedPreviewText(rawUrl).trimmed();
+	if (rawUrl.isEmpty()) {
+		return QString();
+	}
+
+	QUrl postUrl(rawUrl);
+	if (postUrl.isRelative()) {
+		postUrl = QUrl(QStringLiteral("https://www.flashback.org/")).resolved(postUrl);
+	}
+	return flashbackPostIdFromUrl(postUrl);
+}
+
 QString flashbackPostBlockFromHtml(const QString &html, const QString &preferredPostId) {
 	const QString postId = preferredPostId.trimmed();
 	if (!postId.isEmpty()) {
@@ -4644,6 +4633,11 @@ QString flashbackPostBlockFromHtml(const QString &html, const QString &preferred
 		QRegularExpression::CaseInsensitiveOption);
 	const QRegularExpressionMatch fallbackMatch = s_fallbackPostPattern.match(html);
 	return fallbackMatch.hasMatch() ? fallbackMatch.captured(1) : QString();
+}
+
+QString flashbackPostNumberFromBlock(const QString &postBlock) {
+	return flashbackFirstHtmlMatch(
+		postBlock, QLatin1String("id\\s*=\\s*['\"]postcount[0-9]+['\"][^>]*\\bname\\s*=\\s*['\"]([0-9]+)['\"]"));
 }
 
 int htmlDivBlockEndIndex(const QString &html, int startTagEnd) {
@@ -4797,11 +4791,8 @@ void appendFlashbackPostMetadata(QVariantMap &metadata, const QString &html, con
 	appendFlashbackPostValue(metadata, QStringLiteral("Time"),
 							 flashbackFirstHtmlMatch(postBlock, QLatin1String("<i\\b[^>]*\\bfa-file[^>]*></i>\\s*([^<]+)")),
 							 mirrorAsFirstPost);
-	appendFlashbackPostValue(
-		metadata, QStringLiteral("Number"),
-		flashbackFirstHtmlMatch(
-			postBlock, QLatin1String("id\\s*=\\s*['\"]postcount[0-9]+['\"][^>]*\\bname\\s*=\\s*['\"]([0-9]+)['\"]")),
-		mirrorAsFirstPost);
+	appendFlashbackPostValue(metadata, QStringLiteral("Number"), flashbackPostNumberFromBlock(postBlock),
+							 mirrorAsFirstPost);
 	appendFlashbackPostValue(
 		metadata, QStringLiteral("Author"),
 		flashbackFirstHtmlMatch(postBlock, QLatin1String("<a\\b[^>]*\\bpost-user-username\\b[^>]*>([\\s\\S]*?)</a>")),
@@ -4823,17 +4814,35 @@ void appendFlashbackPostMetadata(QVariantMap &metadata, const QString &html, con
 	const QString postMessage = htmlDivContentWithClass(postBlock, QStringLiteral("post_message"));
 	const QString quoteBlock  = htmlDivBlockWithClass(postMessage, QStringLiteral("post-bbcode-quote-wrapper"));
 	if (!quoteBlock.isEmpty()) {
+		const QString quotePostUrl =
+			flashbackFirstHtmlMatch(quoteBlock, QLatin1String("<a\\b[^>]*\\bhref\\s*=\\s*['\"]([^'\"]+)['\"]"));
+		const QString quotePostId = flashbackPostIdFromPostUrl(quotePostUrl);
+		const QString quotePostBlock =
+			quotePostId.isEmpty() ? QString() : flashbackPostBlockFromHtml(html, quotePostId);
+		const QString quotePostMessage =
+			quotePostBlock.isEmpty() ? QString()
+									 : htmlDivContentWithClass(quotePostBlock, QStringLiteral("post_message"));
+		const QString quoteAuthor =
+			flashbackFirstHtmlMatch(quoteBlock, QLatin1String("Ursprungligen\\s+postat\\s+av\\s*<strong\\b[^>]*>([\\s\\S]*?)</strong>"));
+		const QString quoteExcerpt = clippedPreviewPlainText(
+			flashbackFirstHtmlMatch(quoteBlock,
+									QLatin1String("<div\\b[^>]*\\bpost-clamped-text\\b[^>]*>([\\s\\S]*?)</div>")),
+			220);
+
 		insertPreviewMetadataValue(
 			metadata, QStringLiteral("forumQuoteAuthor"),
-			flashbackFirstHtmlMatch(quoteBlock, QLatin1String("Ursprungligen\\s+postat\\s+av\\s*<strong\\b[^>]*>([\\s\\S]*?)</strong>")));
+			quoteAuthor.isEmpty()
+				? flashbackFirstHtmlMatch(quotePostBlock,
+										   QLatin1String("<a\\b[^>]*\\bpost-user-username\\b[^>]*>([\\s\\S]*?)</a>"))
+				: quoteAuthor);
 		insertPreviewMetadataValue(
 			metadata, QStringLiteral("forumQuoteExcerpt"),
-			clippedPreviewPlainText(
-				flashbackFirstHtmlMatch(quoteBlock,
-										QLatin1String("<div\\b[^>]*\\bpost-clamped-text\\b[^>]*>([\\s\\S]*?)</div>")),
-				220));
-		insertPreviewMetadataValue(metadata, QStringLiteral("forumQuotePostUrl"),
-								   flashbackFirstHtmlMatch(quoteBlock, QLatin1String("<a\\b[^>]*\\bhref\\s*=\\s*['\"]([^'\"]+)['\"]")));
+			quoteExcerpt.isEmpty() ? clippedPreviewPlainText(flashbackPostMessageWithoutQuotes(quotePostMessage), 220)
+								   : quoteExcerpt);
+		insertPreviewMetadataValue(metadata, QStringLiteral("forumQuotePostUrl"), quotePostUrl);
+		insertPreviewMetadataValue(metadata, QStringLiteral("forumQuotePostId"), quotePostId);
+		insertPreviewMetadataValue(metadata, QStringLiteral("forumQuotePostNumber"),
+								   flashbackPostNumberFromBlock(quotePostBlock));
 	}
 
 	QString postExcerpt = clippedPreviewPlainText(flashbackPostMessageWithoutQuotes(postMessage), 260);
@@ -6355,37 +6364,35 @@ QVariantList inetProductImageItemsFromHtml(const QUrl &url, const QString &html)
 	QVariantList items;
 	QSet< QString > seenUrls;
 	const std::optional< QString > productId = inetProductIdFromUrl(url);
+	if (!productId) {
+		return items;
+	}
+
+	QString normalizedHtml = html;
+	normalizedHtml.replace(QLatin1String("\\/"), QLatin1String("/"));
+	normalizedHtml.replace(QRegularExpression(QLatin1String("\\\\u002[fF]")), QStringLiteral("/"));
+
 	static const QRegularExpression s_imagePattern(
-		QLatin1String("(?:(?:https?:)?//cdn\\.inet\\.se/product/[^\"'<>\\\\\\s]+\\.(?:png|jpe?g|webp))"),
+		QLatin1String("(?:(?:https?:)?//cdn\\.inet\\.se)?/product/([0-9]{2,4}x[0-9]{2,4})/([0-9]{3,12}_[^\"'<>\\\\\\s]+\\.(?:png|jpe?g|webp))"),
 		QRegularExpression::CaseInsensitiveOption);
-	QRegularExpressionMatchIterator it = s_imagePattern.globalMatch(html);
+	QSet< QString > seenProductImageKeys;
+	QRegularExpressionMatchIterator it = s_imagePattern.globalMatch(normalizedHtml);
 	while (it.hasNext() && items.size() < 8) {
-		QString rawUrl = decodedPreviewText(it.next().captured(0)).trimmed();
-		rawUrl.replace(QLatin1String("\\/"), QLatin1String("/"));
-		if (rawUrl.startsWith(QLatin1String("//"))) {
-			rawUrl.prepend(QStringLiteral("https:"));
-		}
-		rawUrl.replace(QRegularExpression(QLatin1String("/[0-9]{2,4}x[0-9]{2,4}/")), QStringLiteral("/688x386/"));
-		if (productId && !rawUrl.contains(QStringLiteral("/%1").arg(*productId))) {
+		const QRegularExpressionMatch match = it.next();
+		const QString fileName              = decodedPreviewText(match.captured(2)).trimmed();
+		if (!fileName.startsWith(QStringLiteral("%1_").arg(*productId))) {
 			continue;
 		}
 
-		const QUrl imageUrl = url.resolved(QUrl(rawUrl));
-		if (!isSafePreviewTarget(imageUrl)) {
+		const QString dedupeKey = fileName.section(QLatin1Char('.'), 0, 0).toLower();
+		if (seenProductImageKeys.contains(dedupeKey)) {
 			continue;
 		}
-		const QString imageUrlString = imageUrl.toString(QUrl::FullyEncoded);
-		const QString dedupeKey      = imageUrlString.section(QLatin1Char('?'), 0, 0).toLower();
-		if (seenUrls.contains(dedupeKey)) {
-			continue;
-		}
-		seenUrls.insert(dedupeKey);
+		seenProductImageKeys.insert(dedupeKey);
 
-		QVariantMap item;
-		item.insert(QStringLiteral("url"), imageUrlString);
-		item.insert(QStringLiteral("mime"), QStringLiteral("image/png"));
-		item.insert(QStringLiteral("kind"), QStringLiteral("image"));
-		items.push_back(item);
+		const QString imageUrl = QStringLiteral("https://cdn.inet.se/product/688x386/%1").arg(fileName);
+		const QString thumbnailUrl = QStringLiteral("https://cdn.inet.se/product/112x63/%1").arg(fileName);
+		appendPreviewImageItem(items, seenUrls, url, imageUrl, QStringLiteral("image/jpeg"), QString(), thumbnailUrl);
 	}
 
 	return items;
@@ -6438,9 +6445,76 @@ QVariantMap inetProductMetadata(const QUrl &url, const QString &title, const QSt
 	return metadata;
 }
 
+std::optional< QString > amazonProductIdFromUrl(const QUrl &url) {
+	if (!isAmazonPreviewUrl(url)) {
+		return std::nullopt;
+	}
+
+	static const QRegularExpression s_asinPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[A-Z0-9]{10}")),
+		QRegularExpression::CaseInsensitiveOption);
+	const QStringList segments = decodedUrlPathSegments(url);
+	for (int i = 0; i < segments.size(); ++i) {
+		const QString segment = segments.at(i).trimmed();
+		if (s_asinPattern.match(segment).hasMatch()) {
+			return segment.toUpper();
+		}
+		if ((segment == QLatin1String("dp") || segment == QLatin1String("product"))
+			&& i + 1 < segments.size()) {
+			const QString next = segments.at(i + 1).trimmed();
+			if (s_asinPattern.match(next).hasMatch()) {
+				return next.toUpper();
+			}
+		}
+	}
+
+	const QString queryAsin = QUrlQuery(url).queryItemValue(QStringLiteral("asin")).trimmed();
+	return s_asinPattern.match(queryAsin).hasMatch() ? std::optional< QString >(queryAsin.toUpper())
+													 : std::nullopt;
+}
+
+QString amazonProductTitleFromUrl(const QUrl &url) {
+	if (!isAmazonPreviewUrl(url)) {
+		return QString();
+	}
+
+	const QStringList segments = decodedUrlPathSegments(url);
+	for (int i = 0; i < segments.size(); ++i) {
+		const QString segment = segments.at(i).trimmed();
+		if (segment != QLatin1String("dp") && segment != QLatin1String("product")) {
+			continue;
+		}
+
+		for (int j = i - 1; j >= 0; --j) {
+			QString title = segments.at(j).trimmed();
+			if (title.isEmpty() || title == QLatin1String("gp") || title == QLatin1String("-")
+				|| title == QLatin1String("en")) {
+				continue;
+			}
+			title.replace(QRegularExpression(QLatin1String("[-_]+")), QStringLiteral(" "));
+			title = decodedPreviewText(title).simplified();
+			if (title.size() >= 3) {
+				return title;
+			}
+		}
+	}
+
+	return QString();
+}
+
+bool amazonProductTitleLooksGeneric(const QString &title) {
+	const QString normalized = decodedPreviewText(title).simplified().toLower();
+	return normalized.isEmpty() || normalized == QLatin1String("amazon product")
+		   || normalized == QLatin1String("amazon.se") || normalized == QLatin1String("amazon")
+		   || normalized == QLatin1String("sidan hittades inte")
+		   || normalized == QLatin1String("page not found")
+		   || normalized.contains(QLatin1String("robot check"))
+		   || normalized.contains(QLatin1String("captcha"));
+}
+
 QString amazonProductTitleFromHtml(const QString &html, const QString &fallbackTitle) {
 	QString title = htmlElementTextById(html, QStringLiteral("productTitle"));
-	if (title.isEmpty()) {
+	if (amazonProductTitleLooksGeneric(title)) {
 		title = fallbackTitle;
 	}
 
@@ -6449,7 +6523,74 @@ QString amazonProductTitleFromHtml(const QString &html, const QString &fallbackT
 									QRegularExpression::CaseInsensitiveOption));
 	title.remove(QRegularExpression(QLatin1String("\\s*[\\|\\-]\\s*Amazon\\.[A-Za-z.]+\\s*$"),
 									QRegularExpression::CaseInsensitiveOption));
-	return title.trimmed();
+	return amazonProductTitleLooksGeneric(title) ? QString() : title.trimmed();
+}
+
+QString amazonNormalizePriceText(QString price) {
+	price = decodedPreviewText(price).simplified();
+	if (price.isEmpty()) {
+		return QString();
+	}
+
+	static const QRegularExpression s_leadingSwedishKronor(
+		QLatin1String("^kr\\s*([0-9][0-9\\s\\x{00a0}.,]*)$"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch leadingMatch = s_leadingSwedishKronor.match(price);
+	if (leadingMatch.hasMatch()) {
+		return formatSwedishProductPrice(leadingMatch.captured(1), QStringLiteral("SEK"));
+	}
+
+	static const QRegularExpression s_trailingSwedishKronor(
+		QLatin1String("^([0-9][0-9\\s\\x{00a0}.,]*)\\s*kr$"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch trailingMatch = s_trailingSwedishKronor.match(price);
+	if (trailingMatch.hasMatch()) {
+		return formatSwedishProductPrice(trailingMatch.captured(1), QStringLiteral("SEK"));
+	}
+
+	return price;
+}
+
+QString amazonProductPriceFromHtml(const QString &html) {
+	QString price = htmlElementTextById(html, QStringLiteral("priceblock_ourprice"));
+	if (price.isEmpty()) {
+		price = htmlElementTextById(html, QStringLiteral("priceblock_dealprice"));
+	}
+	if (price.isEmpty()) {
+		price = htmlElementTextById(html, QStringLiteral("tp_price_block_total_price_ww"));
+	}
+	if (price.isEmpty()) {
+		price = firstHtmlMatchText(
+			html.left(320000),
+			QLatin1String("<span\\b(?=[^>]*\\bclass\\s*=\\s*['\"][^'\"]*\\ba-offscreen\\b[^'\"]*['\"])[^>]*>\\s*([^<]*(?:kr|[$\\x{20ac}\\x{00a3}]|USD|EUR|GBP)[^<]*)\\s*</span>"));
+	}
+	return amazonNormalizePriceText(price);
+}
+
+QString amazonProductAvailabilityFromHtml(const QString &html) {
+	QString availability = htmlElementTextById(html, QStringLiteral("availability"), 8000);
+	availability.remove(QRegularExpression(QLatin1String("\\b(Details|Detaljer)\\b.*$"),
+											QRegularExpression::CaseInsensitiveOption));
+	return decodedPreviewText(availability).simplified().left(80).trimmed();
+}
+
+QString amazonProductBrandFromHtml(const QString &html) {
+	QString brand = htmlElementTextById(html, QStringLiteral("bylineInfo"), 4000);
+	brand.remove(QRegularExpression(QLatin1String("^\\s*(?:Visit\\s+the|Bes\\S+k)\\s+"),
+									QRegularExpression::CaseInsensitiveOption));
+	brand.remove(QRegularExpression(QLatin1String("\\s+(?:Store|Brand Store|butik)\\s*$"),
+									QRegularExpression::CaseInsensitiveOption));
+	brand.remove(QRegularExpression(QLatin1String("^\\s*(?:Brand|Varum\\S+rke)\\s*:\\s*"),
+									QRegularExpression::CaseInsensitiveOption));
+	return decodedPreviewText(brand).simplified().left(80).trimmed();
+}
+
+QString amazonProductDescriptionFromHtml(const QString &html) {
+	QString description = htmlElementTextById(html, QStringLiteral("feature-bullets"), 22000);
+	description.remove(QRegularExpression(QLatin1String("^\\s*(?:About this item|Om denna artikel)\\s*"),
+										  QRegularExpression::CaseInsensitiveOption));
+	description = decodedPreviewText(description).simplified();
+	return description.size() >= 24 ? trimmedPreviewText(description, 360) : QString();
 }
 
 QString amazonProductDeliveryFromHtml(const QString &html) {
@@ -6518,7 +6659,22 @@ QString amazonProductImageFromHtml(const QString &html) {
 		QLatin1String("<img\\b(?=[^>]*\\bid\\s*=\\s*['\"]landingImage['\"])[^>]*\\bsrc\\s*=\\s*(['\"])(.*?)\\1"),
 		QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
 	const QRegularExpressionMatch match = s_landingImagePattern.match(html);
-	return match.hasMatch() ? decodedPreviewText(match.captured(2)).trimmed() : QString();
+	if (match.hasMatch()) {
+		image = decodedPreviewText(match.captured(2)).trimmed();
+		if (!image.isEmpty()) {
+			return image;
+		}
+	}
+
+	const QString dynamicImages = firstHtmlAttributeValue(html, QStringLiteral("data-a-dynamic-image"));
+	static const QRegularExpression s_dynamicImagePattern(
+		QLatin1String("(?:(?:https?:)?//[^\"'<>\\\\\\s]+\\.(?:png|jpe?g|webp))"),
+		QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator it = s_dynamicImagePattern.globalMatch(dynamicImages);
+	while (it.hasNext()) {
+		image = decodedPreviewText(it.next().captured(0)).trimmed();
+	}
+	return image;
 }
 
 QString gameStoreMetaPriceText(const QHash< QString, QString > &metaTags) {
@@ -6797,23 +6953,37 @@ QVariantMap swedishPreviewMetadata(const QUrl &url, const QString &title, const 
 
 		const GameStoreProductData productData = gameStoreJsonLdProductData(url, html);
 		const bool amazonProduct              = isAmazonPreviewUrl(url);
+		const QString amazonUrlTitle          = amazonProduct ? amazonProductTitleFromUrl(url) : QString();
+		const QString amazonProductId         = amazonProduct ? amazonProductIdFromUrl(url).value_or(QString()) : QString();
+		const QString amazonPrice             = amazonProduct ? amazonProductPriceFromHtml(html) : QString();
 		const QString productTitle =
-			amazonProduct ? amazonProductTitleFromHtml(html, productData.title.isEmpty() ? title : productData.title)
+			amazonProduct ? amazonProductTitleFromHtml(
+								html, !productData.title.isEmpty()
+										  ? productData.title
+										  : (!amazonUrlTitle.isEmpty() ? amazonUrlTitle : title))
 						  : (!productData.title.isEmpty() ? productData.title : title);
 		const QString productPrice = !productData.price.isEmpty()
 										 ? productData.price
-										 : (!productMetaPriceText(metaTags).isEmpty()
-												? productMetaPriceText(metaTags)
-												: previewPriceTextFromText(title, description));
+										 : (!amazonPrice.isEmpty()
+												? amazonPrice
+												: (!productMetaPriceText(metaTags).isEmpty()
+													   ? productMetaPriceText(metaTags)
+													   : previewPriceTextFromText(title, description)));
+		const QString amazonAvailability = amazonProduct ? amazonProductAvailabilityFromHtml(html) : QString();
 		const QString productAvailability =
 			!productData.availability.isEmpty()
 				? productData.availability
-				: normalizedGameStoreAvailability(previewMetaValue(
-					  metaTags, QStringList { QStringLiteral("product:availability"), QStringLiteral("og:availability") }));
+				: (!amazonAvailability.isEmpty()
+					   ? amazonAvailability
+					   : normalizedGameStoreAvailability(previewMetaValue(
+							 metaTags, QStringList { QStringLiteral("product:availability"), QStringLiteral("og:availability") })));
+		const QString amazonBrand = amazonProduct ? amazonProductBrandFromHtml(html) : QString();
 		const QString productBrand =
 			!productData.brand.isEmpty()
 				? productData.brand
-				: previewMetaValue(metaTags, QStringList { QStringLiteral("product:brand"), QStringLiteral("brand") });
+				: (!amazonBrand.isEmpty()
+					   ? amazonBrand
+					   : previewMetaValue(metaTags, QStringList { QStringLiteral("product:brand"), QStringLiteral("brand") }));
 		const QString productRating =
 			!productData.rating.isEmpty() ? normalizedProductRatingText(productData.rating)
 										  : (amazonProduct ? amazonProductRatingFromHtml(html) : QString());
@@ -6823,24 +6993,34 @@ QVariantMap swedishPreviewMetadata(const QUrl &url, const QString &title, const 
 		const QString productImage = !productData.image.isEmpty()
 										 ? productData.image
 										 : (amazonProduct ? amazonProductImageFromHtml(html) : QString());
+		QString productDescription = !productData.description.isEmpty() ? productData.description : description;
+		if (amazonProduct && productDescription.isEmpty()) {
+			productDescription = amazonProductDescriptionFromHtml(html);
+		}
+		if (previewDescriptionIsPlaceholder(productDescription)) {
+			productDescription.clear();
+		}
 
 		insertPreviewMetadataValue(metadata, QStringLiteral("productProvider"), provider->siteLabel);
+		insertPreviewMetadataValue(metadata, QStringLiteral("productId"), amazonProductId);
 		insertPreviewMetadataValue(metadata, QStringLiteral("productTitle"), productTitle);
-		insertPreviewMetadataValue(metadata, QStringLiteral("productDescription"),
-								   !productData.description.isEmpty() ? productData.description : description);
+		insertPreviewMetadataValue(metadata, QStringLiteral("productDescription"), productDescription);
 		insertPreviewMetadataValue(metadata, QStringLiteral("productPrice"), productPrice);
 		insertPreviewMetadataValue(metadata, QStringLiteral("productAvailability"), productAvailability);
 		insertPreviewMetadataValue(metadata, QStringLiteral("productBrand"), productBrand);
-		insertPreviewMetadataValue(metadata, QStringLiteral("productSku"), productData.sku);
+		insertPreviewMetadataValue(metadata, QStringLiteral("productSku"),
+								   !productData.sku.isEmpty() ? productData.sku : amazonProductId);
 		insertPreviewMetadataValue(metadata, QStringLiteral("productRating"), productRating);
 		insertPreviewMetadataValue(metadata, QStringLiteral("productReviewCount"), productReviewCount);
 		insertPreviewMetadataValue(metadata, QStringLiteral("productImage"), productImage);
 		QVariantList productImages;
+		QSet< QString > seenProductImages;
+		appendPreviewImageItems(productImages, seenProductImages, url, productData.images);
 		if (!productImage.isEmpty()) {
-			productImages = previewImageItemsFromUrl(url, productImage);
-			if (!productImages.isEmpty()) {
-				metadata.insert(QStringLiteral("productImages"), productImages);
-			}
+			appendPreviewImageItem(productImages, seenProductImages, url, productImage);
+		}
+		if (!productImages.isEmpty()) {
+			metadata.insert(QStringLiteral("productImages"), productImages);
 		}
 		const QVariantList productMedia = productMediaItemsFromHtml(url, html, metaTags, productImages);
 		if (!productMedia.isEmpty()) {
@@ -7880,6 +8060,146 @@ bool isGitHubRepositoryUrl(const QUrl &url) {
 	return githubRepositoryFromUrl(url).has_value();
 }
 
+bool previewTextLooksLikeConsentPage(QString text) {
+	text = text.simplified().toLower();
+	return text.contains(QLatin1String("privacy")) || text.contains(QLatin1String("consent"))
+		   || text.contains(QLatin1String("cookie")) || text.contains(QLatin1String("gdpr"))
+		   || text.contains(QString::fromUtf8("integritet"))
+		   || text.contains(QString::fromUtf8("samtycke"))
+		   || text.contains(QString::fromUtf8("dina integritetsinst"))
+		   || text.contains(QString::fromUtf8("integritetsinst\xc3\xa4llningar"));
+}
+
+QString financeFormatNumber(double value, int priceHint) {
+	return QLocale::c().toString(value, 'f', qBound(0, priceHint, 8));
+}
+
+QString financeSignedNumber(double value, int priceHint) {
+	const QString formatted = financeFormatNumber(value, priceHint);
+	return value > 0.0 ? QStringLiteral("+%1").arg(formatted) : formatted;
+}
+
+QString financeSignedPercent(double value) {
+	const QString formatted = QLocale::c().toString(value, 'f', 2);
+	return value > 0.0 ? QStringLiteral("+%1%").arg(formatted) : QStringLiteral("%1%").arg(formatted);
+}
+
+QString financeTrendDirection(double value) {
+	if (value > 0.0000001) {
+		return QStringLiteral("up");
+	}
+	if (value < -0.0000001) {
+		return QStringLiteral("down");
+	}
+	return QStringLiteral("flat");
+}
+
+void applyYahooFinanceQuoteData(MainWindow::PersistentChatPreview &preview,
+								const Mumble::Finance::YahooChartQuote &quote) {
+	const QString symbol = Mumble::Finance::normalizeTickerSymbol(quote.symbol);
+	if (symbol.isEmpty()) {
+		return;
+	}
+
+	const QUrl canonicalUrl = Mumble::Finance::yahooFinanceQuoteUrl(symbol);
+	if (canonicalUrl.isValid()) {
+		preview.canonicalUrl = canonicalUrl.toString(QUrl::FullyEncoded);
+	}
+
+	preview.title       = Mumble::Finance::yahooFinanceQuoteTitle(quote);
+	preview.subtitle    = QObject::tr("Yahoo Finance");
+	preview.description = Mumble::Finance::yahooFinanceQuoteDescription(quote);
+	preview.openLabel   = QObject::tr("Open on Yahoo Finance");
+
+	QVariantMap metadata = preview.metadata;
+	const QStringList financeMetadataKeys {
+		QStringLiteral("provider"),
+		QStringLiteral("previewProvider"),
+		QStringLiteral("providerName"),
+		QStringLiteral("tickerSymbol"),
+		QStringLiteral("financeName"),
+		QStringLiteral("financeExchange"),
+		QStringLiteral("financeInstrument"),
+		QStringLiteral("financeCurrency"),
+		QStringLiteral("financePrice"),
+		QStringLiteral("financeDayChange"),
+		QStringLiteral("financeDayChangePercent"),
+		QStringLiteral("financeDayTrend"),
+		QStringLiteral("financeRangeLabel"),
+		QStringLiteral("financeRangeChange"),
+		QStringLiteral("financeRangeChangePercent"),
+		QStringLiteral("financeRangeTrend"),
+		QStringLiteral("financeUpdatedAt"),
+		QStringLiteral("financeSparkline"),
+		QStringLiteral("statusLabel")
+	};
+	for (const QString &key : financeMetadataKeys) {
+		metadata.remove(key);
+	}
+
+	metadata.insert(QStringLiteral("provider"), QStringLiteral("yahoo-finance"));
+	metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("yahoo-finance"));
+	metadata.insert(QStringLiteral("providerName"), QObject::tr("Yahoo Finance"));
+	metadata.insert(QStringLiteral("tickerSymbol"), symbol);
+	insertPreviewMetadataValue(metadata, QStringLiteral("financeName"),
+							   !quote.shortName.trimmed().isEmpty() ? quote.shortName.trimmed()
+																	 : quote.longName.trimmed());
+	insertPreviewMetadataValue(metadata, QStringLiteral("financeExchange"),
+							   !quote.fullExchangeName.trimmed().isEmpty() ? quote.fullExchangeName.trimmed()
+																			: quote.exchangeName.trimmed());
+	insertPreviewMetadataValue(metadata, QStringLiteral("financeInstrument"), quote.instrumentType.trimmed());
+	insertPreviewMetadataValue(metadata, QStringLiteral("financeCurrency"), quote.currency.trimmed());
+	if (quote.hasRegularMarketPrice) {
+		metadata.insert(QStringLiteral("financePrice"), financeFormatNumber(quote.regularMarketPrice, quote.priceHint));
+	}
+	if (quote.hasRegularMarketPrice && quote.hasPreviousClose && std::abs(quote.previousClose) > 0.0000001) {
+		const double change        = quote.regularMarketPrice - quote.previousClose;
+		const double changePercent = (change / quote.previousClose) * 100.0;
+		metadata.insert(QStringLiteral("financeDayChange"), financeSignedNumber(change, quote.priceHint));
+		metadata.insert(QStringLiteral("financeDayChangePercent"), financeSignedPercent(changePercent));
+		metadata.insert(QStringLiteral("financeDayTrend"), financeTrendDirection(change));
+		metadata.insert(QStringLiteral("statusLabel"), QStringLiteral("1D %1").arg(financeSignedPercent(changePercent)));
+	}
+
+	QVariantList sparkline;
+	for (const Mumble::Finance::YahooChartQuote::Point &point : quote.points) {
+		if (point.timestamp <= 0 || !std::isfinite(point.close)) {
+			continue;
+		}
+		QVariantMap item;
+		item.insert(QStringLiteral("timestamp"), static_cast< qlonglong >(point.timestamp));
+		item.insert(QStringLiteral("close"), point.close);
+		sparkline.push_back(item);
+	}
+	if (!sparkline.isEmpty()) {
+		metadata.insert(QStringLiteral("financeSparkline"), sparkline);
+		metadata.insert(QStringLiteral("financeRangeLabel"), QStringLiteral("1M"));
+	}
+	if (quote.points.size() >= 2) {
+		const double firstClose = quote.points.first().close;
+		const double lastClose  = quote.points.last().close;
+		if (std::abs(firstClose) > 0.0000001 && std::isfinite(firstClose) && std::isfinite(lastClose)) {
+			const double change        = lastClose - firstClose;
+			const double changePercent = (change / firstClose) * 100.0;
+			metadata.insert(QStringLiteral("financeRangeChange"), financeSignedNumber(change, quote.priceHint));
+			metadata.insert(QStringLiteral("financeRangeChangePercent"), financeSignedPercent(changePercent));
+			metadata.insert(QStringLiteral("financeRangeTrend"), financeTrendDirection(change));
+		}
+	}
+	if (quote.regularMarketTime > 0) {
+		metadata.insert(QStringLiteral("financeUpdatedAt"),
+						QDateTime::fromSecsSinceEpoch(quote.regularMarketTime, QTimeZone::UTC)
+							.toString(Qt::ISODate));
+	}
+
+	preview.metadata             = metadata;
+	preview.metadataFinished     = true;
+	preview.thumbnailFinished    = true;
+	preview.siteSnapshotFinished = true;
+	preview.remoteMediaFinished  = true;
+	preview.failed               = false;
+}
+
 QString githubRepositoryHtmlUrl(const GitHubRepositoryRef &repository) {
 	return QStringLiteral("https://github.com/%1/%2").arg(repository.owner, repository.repo);
 }
@@ -8249,7 +8569,10 @@ bool previewDescriptionIsPlaceholder(const QString &description) {
 }
 
 qint64 previewMaxPageBytesForUrl(const QUrl &url) {
-	return (isInstagramPreviewUrl(url) || isFacebookPreviewUrl(url)) ? 2 * 1024 * 1024 : PREVIEW_MAX_PAGE_BYTES;
+	if (isInstagramPreviewUrl(url) || isFacebookPreviewUrl(url) || isAmazonPreviewUrl(url)) {
+		return 2 * 1024 * 1024;
+	}
+	return PREVIEW_MAX_PAGE_BYTES;
 }
 
 bool previewContentTypeLooksHtml(const QString &contentType) {
@@ -23172,6 +23495,116 @@ std::optional< MumbleProto::ChatEmbedRef >
 	return std::nullopt;
 }
 
+bool MainWindow::applyYahooFinanceQuotePreviewFallback(PersistentChatPreview &preview, const QUrl &url) const {
+	QString symbol;
+	if (!Mumble::Finance::symbolFromYahooFinanceQuoteUrl(url, &symbol)) {
+		return false;
+	}
+
+	const QString normalizedSymbol = Mumble::Finance::normalizeTickerSymbol(symbol);
+	const QUrl canonicalUrl        = Mumble::Finance::yahooFinanceQuoteUrl(normalizedSymbol);
+	if (canonicalUrl.isValid()) {
+		preview.canonicalUrl = canonicalUrl.toString(QUrl::FullyEncoded);
+	}
+
+	const bool badTitle = preview.title.trimmed().isEmpty()
+						  || previewTextLooksLikeConsentPage(preview.title)
+						  || preview.title.trimmed() == previewDisplayHost(url)
+						  || preview.title.trimmed() == tr("Yahoo Finance quote");
+	if (badTitle) {
+		preview.title = normalizedSymbol.isEmpty() ? tr("Yahoo Finance quote")
+													: tr("%1 on Yahoo Finance").arg(normalizedSymbol);
+	}
+
+	if (preview.description.trimmed().isEmpty()
+		|| previewTextLooksLikeConsentPage(preview.description)
+		|| preview.description == tr("Fetching page metadata")
+		|| preview.description == tr("Preview unavailable")) {
+		preview.description = tr("Open on Yahoo Finance for the latest quote.");
+	}
+
+	preview.subtitle        = tr("Yahoo Finance");
+	preview.openLabel       = tr("Open on Yahoo Finance");
+	preview.thumbnailImage  = QImage();
+	preview.previewAssetID  = 0;
+	preview.mediaDataUrl.clear();
+	preview.mediaAudioDataUrl.clear();
+	preview.mediaAudioMime.clear();
+	preview.mediaMime.clear();
+	preview.mediaKind.clear();
+	preview.mediaItems.clear();
+	preview.metadata.insert(QStringLiteral("provider"), QStringLiteral("yahoo-finance"));
+	preview.metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("yahoo-finance"));
+	preview.metadata.insert(QStringLiteral("providerName"), tr("Yahoo Finance"));
+	if (!normalizedSymbol.isEmpty()) {
+		preview.metadata.insert(QStringLiteral("tickerSymbol"), normalizedSymbol);
+	}
+	preview.metadataFinished     = true;
+	preview.thumbnailFinished    = true;
+	preview.failed               = false;
+	preview.siteSnapshotRequested = false;
+	preview.siteSnapshotFinished = true;
+	preview.remoteMediaRequested = false;
+	preview.remoteMediaFinished  = preview.metadata.contains(QStringLiteral("financeSparkline"));
+	return true;
+}
+
+bool MainWindow::requestPersistentChatFinancePreview(const QString &previewKey, const QUrl &previewUrl) {
+	QString symbol;
+	if (previewKey.isEmpty() || !Mumble::Finance::symbolFromYahooFinanceQuoteUrl(previewUrl, &symbol)) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested
+		|| (it->remoteMediaFinished && it->metadata.contains(QStringLiteral("financeSparkline")))) {
+		return false;
+	}
+
+	const QUrl chartUrl = Mumble::Finance::yahooFinanceChartUrl(symbol);
+	if (!chartUrl.isValid() || !isSafePreviewTarget(chartUrl)) {
+		it->remoteMediaFinished = true;
+		return false;
+	}
+
+	it->remoteMediaRequested = true;
+
+	QNetworkRequest request(chartUrl);
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
+	QNetworkReply *reply = Global::get().nam->get(request);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey]() {
+		const QByteArray data = reply->readAll();
+		const bool success    = reply->error() == QNetworkReply::NoError;
+		reply->deleteLater();
+
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()) {
+			return;
+		}
+
+		previewIt->remoteMediaRequested = false;
+		previewIt->remoteMediaFinished  = true;
+		previewIt->metadataFinished     = true;
+		previewIt->thumbnailFinished    = true;
+		previewIt->siteSnapshotFinished = true;
+
+		if (success && !data.isEmpty()) {
+			QString parseError;
+			const std::optional< Mumble::Finance::YahooChartQuote > quote =
+				Mumble::Finance::parseYahooChartQuote(data, &parseError);
+			if (quote) {
+				applyYahooFinanceQuoteData(*previewIt, *quote);
+			}
+		}
+
+		publishPersistentChatPreviewUpdate(previewKey);
+	});
+
+	return true;
+}
+
 bool MainWindow::restorePersistentChatPreviewDiskCache(const QString &previewKey) {
 	const std::optional< PersistentChatMediaCache::PreviewEntry > cached =
 		PersistentChatMediaCache::loadPreview(previewKey);
@@ -23219,6 +23652,7 @@ bool MainWindow::restorePersistentChatPreviewDiskCache(const QString &previewKey
 	preview.failed               = cached->failed;
 	preview.siteSnapshotFinished = cached->siteSnapshotFinished;
 	preview.remoteMediaFinished  = cached->remoteMediaFinished;
+	applyYahooFinanceQuotePreviewFallback(preview, cachedUrl);
 
 	m_persistentChatPreviews.insert(previewKey, preview);
 	mumble::chatperf::recordValue("chat.preview.disk_cache.hit", 1);
@@ -23678,6 +24112,8 @@ bool MainWindow::requestPersistentChatRichProviderPreview(const QString &preview
 		} else {
 			const QString productTitle =
 				previewIt->metadata.value(QStringLiteral("productTitle")).toString().trimmed();
+			const QString productDescription =
+				previewIt->metadata.value(QStringLiteral("productDescription")).toString().trimmed();
 			const QString articleTitle =
 				previewIt->metadata.value(QStringLiteral("articleTitle")).toString().trimmed();
 			const QString articleDescription =
@@ -23687,7 +24123,11 @@ bool MainWindow::requestPersistentChatRichProviderPreview(const QString &preview
 			} else if (!articleTitle.isEmpty()) {
 				previewIt->title = articleTitle;
 			}
-			if (!articleDescription.isEmpty()) {
+			if (!productDescription.isEmpty()) {
+				previewIt->description = productDescription;
+			} else if (!productTitle.isEmpty() && previewDescriptionIsPlaceholder(previewIt->description)) {
+				previewIt->description.clear();
+			} else if (!articleDescription.isEmpty()) {
 				previewIt->description = articleDescription;
 			}
 		}
@@ -24814,6 +25254,13 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 				restoredIt->remoteMediaFinished = false;
 				requestPersistentChatSteamAppPreview(previewKey, restoredPreviewUrl);
 			}
+			static QSet< QString > s_financeSessionRefreshes;
+			if (Mumble::Finance::symbolFromYahooFinanceQuoteUrl(restoredPreviewUrl)
+				&& !s_financeSessionRefreshes.contains(previewKey)) {
+				s_financeSessionRefreshes.insert(previewKey);
+				restoredIt->remoteMediaFinished = false;
+				requestPersistentChatFinancePreview(previewKey, restoredPreviewUrl);
+			}
 			static QSet< QString > s_richProductSessionRefreshes;
 			const std::optional< RichPreviewProviderInfo > richProvider = richPreviewProviderForUrl(restoredPreviewUrl);
 			if (richProvider
@@ -24888,6 +25335,17 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 
 		preview.metadata = previewMetadataWithSwedishData(preview.metadata, previewUrl, preview.title,
 														  preview.description);
+		const QString productTitle = preview.metadata.value(QStringLiteral("productTitle")).toString().trimmed();
+		const QString productDescription =
+			preview.metadata.value(QStringLiteral("productDescription")).toString().trimmed();
+		if (!productTitle.isEmpty()) {
+			preview.title = productTitle;
+		}
+		if (!productDescription.isEmpty()) {
+			preview.description = productDescription;
+		} else if (!productTitle.isEmpty() && previewDescriptionIsPlaceholder(preview.description)) {
+			preview.description.clear();
+		}
 		const QString flashbackPostId = flashbackPostIdFromUrl(previewUrl);
 		if (!flashbackPostId.isEmpty()) {
 			const QUrl threadPostUrl = flashbackThreadPostUrl(previewUrl, flashbackPostId);
@@ -24897,13 +25355,19 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			}
 		}
 		applyPersistentChatRemotePlayableMedia(preview, previewUrl);
+		const bool handledYahooFinanceQuotePreview = applyYahooFinanceQuotePreviewFallback(preview, previewUrl);
 		m_persistentChatPreviews.insert(previewKey, preview);
+		if (handledYahooFinanceQuotePreview) {
+			requestPersistentChatFinancePreview(previewKey, previewUrl);
+		}
 		requestPersistentChatRichProviderPreview(previewKey, previewUrl);
 		requestPersistentChatRedditVideoPreview(previewKey, previewUrl);
 		if (preview.previewAssetID > 0) {
 			ensurePersistentChatPreviewAssetDownload(preview.previewAssetID, previewKey);
 		} else {
-			ensurePersistentChatPreviewSiteSnapshot(previewKey);
+			if (!handledYahooFinanceQuotePreview) {
+				ensurePersistentChatPreviewSiteSnapshot(previewKey);
+			}
 			renderIfVisible();
 		}
 		return;
@@ -25195,6 +25659,14 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		return;
 	}
 
+	if (!isImagePreview && applyYahooFinanceQuotePreviewFallback(preview, previewUrl)) {
+		m_persistentChatPreviews.insert(previewKey, preview);
+		requestPersistentChatFinancePreview(previewKey, previewUrl);
+		storePersistentChatPreviewDiskCache(previewKey);
+		renderIfVisible();
+		return;
+	}
+
 	if (!isImagePreview && isFacebookReelPreviewUrl(previewUrl) && previewEmbedTargetForUrl(previewUrl)) {
 		preview.title             = provider ? provider->fallbackTitle : tr("Facebook post");
 		preview.description       = tr("Video preview");
@@ -25378,13 +25850,19 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			if (!productTitle.isEmpty()) {
 				it->title = productTitle;
 			}
+			const QString productDescription =
+				it->metadata.value(QStringLiteral("productDescription")).toString().trimmed();
 			const QString articleTitle = it->metadata.value(QStringLiteral("articleTitle")).toString().trimmed();
 			if (productTitle.isEmpty() && !articleTitle.isEmpty()) {
 				it->title = articleTitle;
 			}
 			const QString articleDescription =
 				it->metadata.value(QStringLiteral("articleDescription")).toString().trimmed();
-			if (!articleDescription.isEmpty()) {
+			if (!productDescription.isEmpty()) {
+				it->description = productDescription;
+			} else if (!productTitle.isEmpty() && previewDescriptionIsPlaceholder(it->description)) {
+				it->description.clear();
+			} else if (!articleDescription.isEmpty()) {
 				it->description = articleDescription;
 			}
 			applyPersistentChatListingMediaItems(*it);

@@ -43,6 +43,9 @@ bool parsePercent(QString text, double *value) {
 
 bool looksLikeBareTicker(const QString &text) {
 	const QString trimmed = text.trimmed();
+	if (trimmed.startsWith(QLatin1Char('$'))) {
+		return false;
+	}
 	if (trimmed.contains(QRegularExpression(QStringLiteral(R"(\s)")))) {
 		return false;
 	}

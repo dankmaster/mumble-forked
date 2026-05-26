@@ -29,6 +29,13 @@ void TestStonksCommand::parsesQuoteCommands() {
 	QCOMPARE(static_cast< int >(explicitQuote->type), static_cast< int >(Mumble::Stonks::CommandType::Quote));
 	QCOMPARE(explicitQuote->symbol, QStringLiteral("ERIC-B.ST"));
 
+	const std::optional< Mumble::Stonks::Command > explicitCashtagQuote =
+		Mumble::Stonks::parseCommand(QStringLiteral("quote $rklb"));
+	QVERIFY(explicitCashtagQuote.has_value());
+	QCOMPARE(static_cast< int >(explicitCashtagQuote->type), static_cast< int >(Mumble::Stonks::CommandType::Quote));
+	QCOMPARE(explicitCashtagQuote->symbol, QStringLiteral("RKLB"));
+
+	QVERIFY(!Mumble::Stonks::parseCommand(QStringLiteral("$RKLB")).has_value());
 	QVERIFY(!Mumble::Stonks::parseCommand(QStringLiteral("this is just chat")).has_value());
 }
 

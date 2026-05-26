@@ -2342,17 +2342,29 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
             });
 		};
 
-	const auto fetchYahooQuote = [this, fetchPage, embedState, finish, updateHostCount](const QUrl &pageUrl,
-																					 const QString &symbol) {
+	const auto finishYahooQuoteFallback = [embedState, finish](const QString &symbol) {
+		const QString normalizedSymbol = Mumble::Finance::normalizeTickerSymbol(symbol);
+		embedState->title =
+			u8(normalizedSymbol.isEmpty() ? QObject::tr("Yahoo Finance quote")
+										  : QObject::tr("%1 on Yahoo Finance").arg(normalizedSymbol));
+		embedState->description = u8(QObject::tr("Open on Yahoo Finance for the latest quote."));
+		embedState->siteName    = "Yahoo Finance";
+		embedState->status      = ::msdb::ChatEmbedStatus::Ready;
+		embedState->errorCode   = "";
+		finish(*embedState);
+	};
+
+	const auto fetchYahooQuote = [this, embedState, finish, updateHostCount, finishYahooQuoteFallback](
+									 const QString &symbol) {
 		const QUrl chartUrl = Mumble::Finance::yahooFinanceChartUrl(symbol);
 		if (!chartUrl.isValid() || !isSafePreviewUrl(chartUrl)) {
-			(*fetchPage)(pageUrl, 0);
+			finishYahooQuoteFallback(symbol);
 			return;
 		}
 
 		const QString hostKey = chartUrl.host().trimmed().toLower();
 		if (qhChatPreviewFetchesByHost.value(hostKey, 0) >= CHAT_PREVIEW_MAX_CONCURRENT_HOST) {
-			(*fetchPage)(pageUrl, 0);
+			finishYahooQuoteFallback(symbol);
 			return;
 		}
 
@@ -2365,7 +2377,7 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
 		QNetworkReply *reply = qnamNetwork->get(request);
 		reply->setReadBufferSize(CHAT_PREVIEW_MAX_PAGE_BYTES);
 		connect(reply, &QNetworkReply::finished, this,
-				[reply, pageUrl, fetchPage, embedState, finish, updateHostCount, hostKey]() mutable {
+				[reply, symbol, embedState, finish, updateHostCount, hostKey, finishYahooQuoteFallback]() mutable {
 					updateHostCount(hostKey, -1);
 					const QVariant redirectTarget = reply->attribute(QNetworkRequest::RedirectionTargetAttribute);
 					const QByteArray bytes         = reply->readAll();
@@ -2378,7 +2390,7 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
 							? Mumble::Finance::parseYahooChartQuote(bytes, &parseError)
 							: std::nullopt;
 					if (!quote) {
-						(*fetchPage)(pageUrl, 0);
+						finishYahooQuoteFallback(symbol);
 						return;
 					}
 
@@ -2394,7 +2406,7 @@ void Server::scheduleChatEmbedFetch(unsigned int threadID, unsigned int messageI
 	const QUrl initialUrl(QString::fromStdString(initialEmbed.canonicalUrl));
 	QString yahooSymbol;
 	if (Mumble::Finance::symbolFromYahooFinanceQuoteUrl(initialUrl, &yahooSymbol)) {
-		fetchYahooQuote(initialUrl, yahooSymbol);
+		fetchYahooQuote(yahooSymbol);
 		return;
 	}
 

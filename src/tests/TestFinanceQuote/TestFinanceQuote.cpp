@@ -49,6 +49,11 @@ void TestFinanceQuote::extractsTickerMentions() {
 		Mumble::Finance::extractTickerMentions(QStringLiteral("foo$AAPL $MSFT"));
 	QCOMPARE(embedded.size(), 1);
 	QCOMPARE(embedded.at(0).symbol, QStringLiteral("MSFT"));
+
+	const QList< Mumble::Finance::TickerMention > lowercaseOnly =
+		Mumble::Finance::extractTickerMentions(QStringLiteral("$rklb"));
+	QCOMPARE(lowercaseOnly.size(), 1);
+	QCOMPARE(lowercaseOnly.at(0).symbol, QStringLiteral("RKLB"));
 }
 
 void TestFinanceQuote::extractsYahooFinanceQuoteSymbols() {
@@ -127,6 +132,14 @@ void TestFinanceQuote::parsesYahooChartQuote() {
 							"chartPreviousClose": 304.99,
 							"shortName": "Apple Inc.",
 							"priceHint": 2
+						},
+						"timestamp": [1779307200, 1779393600, 1779480000],
+						"indicators": {
+							"quote": [
+								{
+									"close": [302.10, null, 308.82]
+								}
+							]
 						}
 					}
 				],
@@ -143,6 +156,10 @@ void TestFinanceQuote::parsesYahooChartQuote() {
 	QCOMPARE(quote->shortName, QStringLiteral("Apple Inc."));
 	QVERIFY(quote->hasRegularMarketPrice);
 	QVERIFY(quote->hasPreviousClose);
+	QCOMPARE(quote->points.size(), 2);
+	QCOMPARE(quote->points.at(0).timestamp, static_cast< qint64 >(1779307200));
+	QCOMPARE(quote->points.at(0).close, 302.10);
+	QCOMPARE(quote->points.at(1).close, 308.82);
 	QCOMPARE(Mumble::Finance::yahooFinanceQuoteTitle(*quote), QStringLiteral("AAPL 308.82 USD +3.83 (+1.26%)"));
 	QVERIFY(Mumble::Finance::yahooFinanceQuoteDescription(*quote).contains(QStringLiteral("Apple Inc.")));
 }

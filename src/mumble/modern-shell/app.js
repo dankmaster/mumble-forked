@@ -5492,6 +5492,7 @@
 	};
 
 	const richPreviewProviderSpecs = [
+		{ provider: "yahoo-finance", kind: "finance", label: "Yahoo Finance", mark: "YF", hostSuffixes: ["finance.yahoo.com"] },
 		{ provider: "tradera", kind: "marketplaceListing", label: "Tradera", mark: "T", hostSuffixes: ["tradera.com"] },
 		{ provider: "blocket", kind: "marketplaceListing", label: "Blocket", mark: "B", hostSuffixes: ["blocket.se"] },
 		{ provider: "flashback", kind: "forum", label: "Flashback", mark: "FB", hostSuffixes: ["flashback.org"] },
@@ -6007,6 +6008,8 @@
 			|| previewFlashbackDescriptionFallback(descriptionText, title, forumName, category);
 		const quoteAuthor = previewMetadataString(metadata, ["forumQuoteAuthor"]);
 		const quoteExcerpt = previewMetadataString(metadata, ["forumQuoteExcerpt"]);
+		const quotePostNumber = previewMetadataString(metadata, ["forumQuotePostNumber"]);
+		const quotePostUrl = previewMetadataString(metadata, ["forumQuotePostUrl"]);
 		return {
 			threadId: threadId,
 			postId: postId,
@@ -6026,6 +6029,8 @@
 			postNumber: postNumber,
 			quoteAuthor: quoteAuthor,
 			quoteExcerpt: quoteExcerpt,
+			quotePostNumber: quotePostNumber,
+			quotePostUrl: quotePostUrl,
 			excerpt: excerpt,
 			host: hostLabel || "flashback.org",
 			source: sourceLabel || "Flashback"
@@ -6219,13 +6224,41 @@
 			body.appendChild(authorRow);
 		}
 
+		const hasQuoteContext = !!(info.quoteExcerpt || info.quoteAuthor || info.quotePostNumber);
 		const message = document.createElement("div");
-		message.className = "preview-card-flashback-message";
-		if (info.excerpt) {
+		message.className = "preview-card-flashback-message" + (hasQuoteContext ? " has-quote" : "");
+		if (hasQuoteContext) {
+			const quote = document.createElement("div");
+			quote.className = "preview-card-flashback-quote";
+			const quoteHead = document.createElement("div");
+			quoteHead.className = "preview-card-flashback-quote-head";
+			const quoteParts = [];
+			if (info.quotePostNumber) {
+				quoteParts.push("#" + info.quotePostNumber);
+			}
+			if (info.quoteAuthor) {
+				quoteParts.push(info.quoteAuthor);
+			}
+			quoteHead.textContent = quoteParts.length
+				? ("Svarar p\u00e5 " + quoteParts.join(" / "))
+				: "Svarar p\u00e5 tidigare inl\u00e4gg";
+			quote.appendChild(quoteHead);
+			if (info.quoteExcerpt) {
+				const quoteText = document.createElement("div");
+				quoteText.className = "preview-card-flashback-quote-text";
+				quoteText.textContent = info.quoteExcerpt;
+				quote.appendChild(quoteText);
+			}
+			message.appendChild(quote);
+
+			if (info.excerpt) {
+				const reply = document.createElement("div");
+				reply.className = "preview-card-flashback-reply";
+				reply.textContent = info.excerpt;
+				message.appendChild(reply);
+			}
+		} else if (info.excerpt) {
 			message.textContent = info.excerpt;
-		} else if (info.quoteExcerpt) {
-			message.textContent = info.quoteAuthor ? ("Citat: " + info.quoteAuthor + " - " + info.quoteExcerpt)
-				: info.quoteExcerpt;
 		} else {
 			message.textContent = info.forumName || info.category || "Flashback forum thread";
 		}
@@ -6450,6 +6483,9 @@
 		} else if (spec.kind === "audio") {
 			add(previewMetadataString(metadata, ["audioProgram"]));
 			add(previewMetadataString(metadata, ["articlePublishedAt"]));
+		} else if (spec.kind === "finance") {
+			add(previewMetadataString(metadata, ["tickerSymbol"]));
+			add(previewMetadataString(metadata, ["statusLabel"]));
 		} else {
 			add(previewMetadataString(metadata, ["locationLabel"]));
 			add(previewMetadataString(metadata, ["statusLabel"]) || descriptionText);
@@ -6593,6 +6629,7 @@
 			product: "Produkt",
 			systembolagetProduct: "Produkt",
 			audio: "Audio",
+			finance: "Finans",
 			weather: "V\u00e4der",
 			place: "Plats",
 			traffic: "Trafik"
@@ -6605,6 +6642,198 @@
 			previewProviderDescription(preview, descriptionText),
 			badgeMap[spec.kind] || "Link"
 		);
+		card.appendChild(shell);
+	}
+
+	function financePreviewPoints(metadata) {
+		const rawPoints = Array.isArray(metadata && metadata.financeSparkline) ? metadata.financeSparkline : [];
+		return rawPoints.map(function(item) {
+			if (typeof item === "number") {
+				return { close: item };
+			}
+			if (!item || typeof item !== "object") {
+				return null;
+			}
+			const close = Number(item.close);
+			if (!Number.isFinite(close)) {
+				return null;
+			}
+			return {
+				close: close,
+				timestamp: Number(item.timestamp || 0)
+			};
+		}).filter(Boolean);
+	}
+
+	function financeTrendClass(value) {
+		const text = String(value || "").trim().toLowerCase();
+		if (text === "up" || text.charAt(0) === "+") {
+			return " is-up";
+		}
+		if (text === "down" || text.charAt(0) === "-") {
+			return " is-down";
+		}
+		return " is-flat";
+	}
+
+	function financeSparklinePath(points, width, height) {
+		if (!points.length) {
+			return "";
+		}
+		let min = points[0].close;
+		let max = points[0].close;
+		points.forEach(function(point) {
+			min = Math.min(min, point.close);
+			max = Math.max(max, point.close);
+		});
+		const span = Math.max(0.000001, max - min);
+		return points.map(function(point, index) {
+			const x = points.length === 1 ? width / 2 : (index / (points.length - 1)) * width;
+			const y = height - ((point.close - min) / span) * height;
+			return (index ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
+		}).join(" ");
+	}
+
+	function appendFinanceStat(parent, label, value, trend) {
+		const text = String(value || "").trim();
+		if (!text) {
+			return;
+		}
+		const stat = document.createElement("span");
+		stat.className = "preview-card-finance-stat" + financeTrendClass(trend || text);
+		const labelNode = document.createElement("span");
+		labelNode.className = "preview-card-finance-stat-label";
+		labelNode.textContent = label;
+		stat.appendChild(labelNode);
+		const valueNode = document.createElement("span");
+		valueNode.className = "preview-card-finance-stat-value";
+		valueNode.textContent = text;
+		stat.appendChild(valueNode);
+		parent.appendChild(stat);
+	}
+
+	function appendFinancePreview(card, preview, spec, hostLabel, descriptionText) {
+		const metadata = (preview && preview.metadata) || {};
+		const symbol = previewMetadataString(metadata, ["tickerSymbol"]) || "Ticker";
+		const name = previewMetadataString(metadata, ["financeName"]);
+		const price = previewMetadataString(metadata, ["financePrice"]);
+		const currency = previewMetadataString(metadata, ["financeCurrency"]);
+		const dayChange = previewMetadataString(metadata, ["financeDayChange"]);
+		const dayPercent = previewMetadataString(metadata, ["financeDayChangePercent"]);
+		const rangeLabel = previewMetadataString(metadata, ["financeRangeLabel"]) || "1M";
+		const rangeChange = previewMetadataString(metadata, ["financeRangeChange"]);
+		const rangePercent = previewMetadataString(metadata, ["financeRangeChangePercent"]);
+		const exchange = previewMetadataString(metadata, ["financeExchange"]);
+		const instrument = previewMetadataString(metadata, ["financeInstrument"]);
+		const points = financePreviewPoints(metadata);
+		const trend = previewMetadataString(metadata, ["financeRangeTrend"])
+			|| previewMetadataString(metadata, ["financeDayTrend"]);
+
+		const shell = document.createElement("div");
+		shell.className = "preview-card-finance-shell" + financeTrendClass(trend);
+
+		const body = document.createElement("div");
+		body.className = "preview-card-finance-body";
+
+		const top = document.createElement("div");
+		top.className = "preview-card-sv-top";
+		const identity = document.createElement("div");
+		identity.className = "preview-card-sv-identity";
+		const mark = document.createElement("span");
+		mark.className = "preview-card-sv-mark preview-card-finance-mark";
+		mark.textContent = spec.mark || "YF";
+		identity.appendChild(mark);
+		const source = document.createElement("span");
+		source.className = "preview-card-sv-source";
+		source.textContent = previewMetadataString(metadata, ["providerName"]) || spec.label || "Yahoo Finance";
+		identity.appendChild(source);
+		top.appendChild(identity);
+		const badge = document.createElement("span");
+		badge.className = "preview-card-sv-badge";
+		badge.textContent = "Finans";
+		top.appendChild(badge);
+		body.appendChild(top);
+
+		const quoteRow = document.createElement("div");
+		quoteRow.className = "preview-card-finance-quote";
+		const title = document.createElement("div");
+		title.className = "preview-card-finance-title";
+		const symbolNode = document.createElement("span");
+		symbolNode.className = "preview-card-finance-symbol";
+		symbolNode.textContent = symbol;
+		title.appendChild(symbolNode);
+		if (name) {
+			const nameNode = document.createElement("span");
+			nameNode.className = "preview-card-finance-name";
+			nameNode.textContent = name;
+			title.appendChild(nameNode);
+		}
+		quoteRow.appendChild(title);
+		if (price) {
+			const priceNode = document.createElement("div");
+			priceNode.className = "preview-card-finance-price";
+			priceNode.textContent = price + (currency ? " " + currency : "");
+			quoteRow.appendChild(priceNode);
+		}
+		body.appendChild(quoteRow);
+
+		if (dayPercent || dayChange) {
+			const day = document.createElement("div");
+			day.className = "preview-card-finance-day" + financeTrendClass(previewMetadataString(metadata, ["financeDayTrend"]) || dayPercent || dayChange);
+			day.textContent = ["1D", dayChange, dayPercent].filter(Boolean).join(" ");
+			body.appendChild(day);
+		}
+
+		if (points.length >= 2) {
+			const chart = document.createElement("div");
+			chart.className = "preview-card-finance-chart";
+			const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+			svg.setAttribute("viewBox", "0 0 240 76");
+			svg.setAttribute("preserveAspectRatio", "none");
+			svg.setAttribute("aria-hidden", "true");
+			const base = document.createElementNS("http://www.w3.org/2000/svg", "path");
+			base.setAttribute("class", "preview-card-finance-chart-base");
+			base.setAttribute("d", "M0 75.5H240");
+			svg.appendChild(base);
+			const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
+			line.setAttribute("class", "preview-card-finance-chart-line");
+			line.setAttribute("d", financeSparklinePath(points, 240, 68));
+			svg.appendChild(line);
+			chart.appendChild(svg);
+			body.appendChild(chart);
+		}
+
+		const stats = document.createElement("div");
+		stats.className = "preview-card-finance-stats";
+		appendFinanceStat(stats, rangeLabel, [rangeChange, rangePercent].filter(Boolean).join(" "), previewMetadataString(metadata, ["financeRangeTrend"]));
+		appendFinanceStat(stats, "1D", dayPercent || dayChange, previewMetadataString(metadata, ["financeDayTrend"]));
+		appendSwedishPreviewChip(stats, exchange);
+		appendSwedishPreviewChip(stats, instrument);
+		if (stats.childNodes.length) {
+			body.appendChild(stats);
+		}
+
+		const description = String(descriptionText || "").trim();
+		if (description && !name) {
+			const descriptionNode = document.createElement("div");
+			descriptionNode.className = "preview-card-sv-description";
+			descriptionNode.textContent = description;
+			body.appendChild(descriptionNode);
+		}
+
+		const footer = document.createElement("div");
+		footer.className = "preview-card-sv-footer";
+		const host = document.createElement("span");
+		host.className = "preview-card-sv-host";
+		host.textContent = hostLabel || "finance.yahoo.com";
+		footer.appendChild(host);
+		const action = document.createElement("span");
+		action.className = "preview-card-sv-action";
+		action.textContent = (preview && preview.openLabel) || "Open on Yahoo Finance";
+		footer.appendChild(action);
+		body.appendChild(footer);
+
+		shell.appendChild(body);
 		card.appendChild(shell);
 	}
 
@@ -6872,6 +7101,24 @@
 				image.loading = "lazy";
 				image.src = imageUrl;
 				image.alt = item.title || (item.kind === "video" ? "Product video" : "Product image");
+				if (item.url && item.url !== imageUrl) {
+					image.dataset.fallbackSrc = item.url;
+				}
+				image.addEventListener("error", function() {
+					const fallbackSrc = image.dataset.fallbackSrc || "";
+					if (fallbackSrc && image.src !== fallbackSrc) {
+						image.dataset.fallbackSrc = "";
+						image.src = fallbackSrc;
+						return;
+					}
+					image.hidden = true;
+					if (!button.querySelector(".preview-card-product-thumbnail-placeholder")) {
+						const placeholder = document.createElement("span");
+						placeholder.className = "preview-card-product-thumbnail-placeholder";
+						placeholder.textContent = item.kind === "video" ? "VID" : "IMG";
+						button.appendChild(placeholder);
+					}
+				});
 				button.appendChild(image);
 			} else {
 				const placeholder = document.createElement("span");
@@ -6934,6 +7181,17 @@
 				image.loading = "lazy";
 				image.src = item.url;
 				image.alt = item.title || (preview && preview.title) || "Product image";
+				const fallbackImage = item.thumbnail || item.poster || "";
+				if (fallbackImage && fallbackImage !== item.url) {
+					image.dataset.fallbackSrc = fallbackImage;
+				}
+				image.addEventListener("error", function() {
+					const fallbackSrc = image.dataset.fallbackSrc || "";
+					if (fallbackSrc && image.src !== fallbackSrc) {
+						image.dataset.fallbackSrc = "";
+						image.src = fallbackSrc;
+					}
+				});
 				image.addEventListener("load", function() {
 					requestAnimationFrame(syncScrollState);
 				}, { once: true });
@@ -7001,7 +7259,7 @@
 		const specs = previewProductSpecs(preview);
 
 		const shell = document.createElement("div");
-		shell.className = "preview-card-product-shell";
+		shell.className = "preview-card-product-shell" + (mediaItems.length === 1 ? " is-single-media" : "");
 		if (mediaItems.length) {
 			appendProductMediaGallery(card, shell, preview, mediaItems);
 		}
@@ -7244,16 +7502,20 @@
 		if (!spec) {
 			return false;
 		}
+		if (spec.kind === "finance") {
+			appendFinancePreview(card, preview, spec, hostLabel, descriptionText);
+			return true;
+		}
 		if (spec.kind === "article") {
 			appendArticlePreview(card, preview, spec, hostLabel, descriptionText);
 			return true;
 		}
-		if (spec.kind === "product" || spec.kind === "systembolagetProduct") {
-			appendSwedishProductPreview(card, preview, spec, hostLabel, descriptionText);
-			return true;
-		}
 		if (spec.provider === "amazon") {
 			appendAmazonProductPreview(card, preview, spec, hostLabel);
+			return true;
+		}
+		if (spec.kind === "product" || spec.kind === "systembolagetProduct") {
+			appendSwedishProductPreview(card, preview, spec, hostLabel, descriptionText);
 			return true;
 		}
 		if (spec.provider === "blocket") {
@@ -7533,6 +7795,11 @@
 		if (host === "threads.net") {
 			return segments.length >= 3 && /^@/.test(segments[0]) && segments[1] === "post";
 		}
+		if ((host === "tiktok.com" || host.endsWith(".tiktok.com"))
+			&& segments.length >= 3 && /^@/.test(segments[0]) && segments[1] === "video"
+			&& /^[0-9]{8,32}$/.test(segments[2])) {
+			return true;
+		}
 		if (host && segments.length >= 2 && /^@/.test(segments[0]) && /^[0-9]{5,32}$/.test(segments[1])) {
 			return true;
 		}
@@ -7563,6 +7830,14 @@
 				mark: "T",
 				badge: "threads.net",
 				source: source && !/^threads\.net$/i.test(source) ? source : "Threads",
+				handle: segments.length ? String(segments[0] || "") : host
+			};
+		}
+		if (host === "tiktok.com" || host.endsWith(".tiktok.com")) {
+			return {
+				mark: "TT",
+				badge: "TikTok",
+				source: source && !/^tiktok(?:\.com)?$/i.test(source) ? source : "TikTok",
 				handle: segments.length ? String(segments[0] || "") : host
 			};
 		}
@@ -8459,8 +8734,11 @@
 			if (canReply) {
 				const replyButton = document.createElement("button");
 				replyButton.type = "button";
-				replyButton.className = "bubble-toolbar-button";
-				replyButton.textContent = "Reply";
+				replyButton.className = "icon-button bubble-toolbar-button";
+				replyButton.innerHTML =
+					"<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m9 17-5-5 5-5\"></path><path d=\"M20 18v-2a4 4 0 0 0-4-4H4\"></path></svg>";
+				replyButton.title = "Reply";
+				replyButton.setAttribute("aria-label", "Reply");
 				replyButton.addEventListener("click", function(event) {
 					event.preventDefault();
 					event.stopPropagation();
@@ -8497,8 +8775,11 @@
 			if (canDelete) {
 				const deleteButton = document.createElement("button");
 				deleteButton.type = "button";
-				deleteButton.className = "bubble-toolbar-button is-danger";
-				deleteButton.textContent = "Delete";
+				deleteButton.className = "icon-button bubble-toolbar-button is-danger";
+				deleteButton.innerHTML =
+					"<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M3 6h18\"></path><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"></path><path d=\"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6\"></path><path d=\"M10 11v6\"></path><path d=\"M14 11v6\"></path></svg>";
+				deleteButton.title = "Delete";
+				deleteButton.setAttribute("aria-label", "Delete");
 				deleteButton.addEventListener("click", function(event) {
 					event.preventDefault();
 					event.stopPropagation();

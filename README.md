@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>A fork of Mumble for a small community server, focused on persistent chat, richer media, and screen-share experiments.</strong>
+  <strong>A community-focused Mumble fork with persistent rooms, rich media previews, a modern client shell, screen-share experiments, and small-server release tooling.</strong>
 </p>
 
 <p align="center">
@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="screenshots/Mumble.png" alt="Mumble client in light and dark themes" width="900">
+  <img src="screenshots/modern-client-rich-chat.png" alt="Modern Mumble fork client with persistent rich chat" width="900">
 </p>
 
 ## What This Is
@@ -39,27 +39,38 @@ If you want the official stable Mumble project, start at
 [mumble.info](https://www.mumble.info/) or
 [mumble-voip/mumble](https://github.com/mumble-voip/mumble).
 
-## Fork Highlights
-
-| Area | Status | Notes |
-| --- | --- | --- |
-| Persistent chat | Active fork feature | Stored channel history, unread state, and history sync for forked clients and servers. |
-| Server-global chat | Optional server feature | A persistent global thread can be enabled per server. |
-| Aggregate chat | Active fork feature | Users can view an ACL-filtered stream across readable channels. |
-| Rich chat surface | Active fork feature | Reworked chat layout, MOTD treatment, inline images, and link preview groundwork. |
-| Screen sharing | Experimental | Capability negotiation, server config, external helper plumbing, and relay scaffolding are in progress. |
-| Identity overrides | Fork-specific utility | Optional advertised release and OS strings for controlled community deployments. |
-
 ## Screenshots
 
-| Main Client | Developer Tooling |
-| --- | --- |
-| <img src="screenshots/Mumble.png" alt="Mumble client screenshot" width="520"> | <img src="docs/media/images/Mumble_Settings_DeveloperMenu.png" alt="Mumble developer menu setting" width="520"> |
+| Modern Rich Chat | Rich Preview Detail | Classic Mumble Baseline |
+| --- | --- | --- |
+| <img src="screenshots/modern-client-rich-chat.png" alt="Modern persistent chat client with rich YouTube preview" width="360"> | <img src="screenshots/modern-rich-card-youtube.png" alt="Inline rich preview card detail" width="360"> | <img src="screenshots/Mumble.png" alt="Classic Mumble client in light and dark themes" width="360"> |
+
+## Feature Inventory
+
+The fork keeps the normal Mumble voice/chat foundation and layers a small
+community feature set on top. The long-form inventory lives in
+[`docs/fork-features.md`](docs/fork-features.md).
+
+| Area | Status | Highlights |
+| --- | --- | --- |
+| Upstream Mumble baseline | Retained | Low-latency Opus voice, channels, ACLs, certificates, shortcuts, plugins, server tooling, and the classic Qt client/server paths. |
+| Persistent chat | Active fork feature | Stored history for voice-room chats, dedicated text rooms, optional server-global chat, read state, unread counts, pagination, replies, deletion, and reactions. |
+| Rich media chat | Active fork feature | Chunked authenticated uploads, image/video/document/binary asset storage, preview thumbnails, inline media rendering, and quota controls. |
+| Link preview cards | Active fork feature | Provider-aware cards for video, social posts, GitHub, Steam, finance links, product/listing pages, news, maps, weather, transit, game stores, and direct media. |
+| Modern client shell | Active fork feature | WebEngine-based chat/navigator shell with persistent rooms, compact message controls, rich cards, room-aware composer state, and a classic fallback path. |
+| Finance and stonks | Active server feature | Cashtag extraction, Yahoo Finance quote cards with chart data, provider links, and a scoped `#stonks` room with scores, leaderboards, and follows. |
+| Watch together | Protocol/server foundation | Capability-gated room media-session messages for synchronized direct media or YouTube playback; client UI is still a future layer. |
+| Screen sharing | Experimental | Capability-gated signaling, server policy/configuration, external helper process, relay/WebRTC scaffolding, and diagnostic logging. |
+| Speech cleanup | Experimental | RNNoise, DTLN, and DeepFilterNet model paths plus local benchmark/smoke-test support for packaged Windows builds. |
+| Windows fork distribution | Active fork tooling | Shared/WebEngine build lane, unsigned convenience MSI release, generated changelog, and update-manifest support for `mumble-forked`. |
+| Fork identity controls | Active fork utility | Hidden advertised release/OS overrides and update-check environment overrides for controlled community deployments. |
 
 ## Repository Map
 
 - [`src/`](src/) contains the client, server, protocol, helper, and test code.
 - [`relay-webapp/`](relay-webapp/) contains the experimental browser relay shell for screen sharing.
+- [`docs/fork-features.md`](docs/fork-features.md) lists the fork-specific feature surface.
+- [`docs/fork-extension-architecture.md`](docs/fork-extension-architecture.md) covers the feature-gating model for fork experiments.
 - [`docs/chat-architecture.md`](docs/chat-architecture.md) describes the fork-specific persistent chat direction.
 - [`docs/rich-chat-server.md`](docs/rich-chat-server.md) covers server-side rich chat storage and configuration.
 - [`docs/screen-sharing-architecture.md`](docs/screen-sharing-architecture.md) explains the screen-share architecture.
@@ -108,6 +119,8 @@ persistentglobalchat=false
 chat_asset_storage_path=chat-assets
 chat_asset_max_bytes=26214400
 chat_asset_total_quota_bytes=2147483648
+chat_attachment_limit=4
+chat_preview_fetch_enabled=false
 
 screen_share_enabled=false
 screen_share_relay_url="wss://relay.example.com/mumble-screen"

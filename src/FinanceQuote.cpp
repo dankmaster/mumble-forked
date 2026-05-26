@@ -17,6 +17,7 @@
 #include <QtCore/QTimeZone>
 #include <QtCore/QUrlQuery>
 
+#include <algorithm>
 #include <cmath>
 
 namespace {
@@ -198,7 +199,7 @@ namespace Finance {
 		return url;
 	}
 
-	QUrl yahooFinanceChartUrl(const QString &symbol) {
+	QUrl yahooFinanceChartUrl(const QString &symbol, const QString &range, const QString &interval) {
 		const QString normalizedSymbol = normalizeTickerSymbol(symbol);
 		if (normalizedSymbol.isEmpty()) {
 			return {};
@@ -210,8 +211,8 @@ namespace Finance {
 		url.setPath(QStringLiteral("/v8/finance/chart/%1").arg(normalizedSymbol));
 
 		QUrlQuery query;
-		query.addQueryItem(QStringLiteral("interval"), QStringLiteral("1d"));
-		query.addQueryItem(QStringLiteral("range"), QStringLiteral("1d"));
+		query.addQueryItem(QStringLiteral("interval"), interval.trimmed().isEmpty() ? QStringLiteral("1d") : interval.trimmed());
+		query.addQueryItem(QStringLiteral("range"), range.trimmed().isEmpty() ? QStringLiteral("1mo") : range.trimmed());
 		url.setQuery(query);
 		return url;
 	}
@@ -378,11 +379,37 @@ namespace Finance {
 		quote.regularMarketTime = static_cast< qint64 >(meta.value(QStringLiteral("regularMarketTime")).toDouble(0.0));
 		quote.hasRegularMarketPrice =
 			jsonNumber(meta, QStringLiteral("regularMarketPrice"), &quote.regularMarketPrice);
-		quote.hasPreviousClose = jsonNumber(meta, QStringLiteral("chartPreviousClose"), &quote.previousClose);
+		quote.hasPreviousClose = jsonNumber(meta, QStringLiteral("regularMarketPreviousClose"), &quote.previousClose)
+								 || jsonNumber(meta, QStringLiteral("previousClose"), &quote.previousClose)
+								 || jsonNumber(meta, QStringLiteral("chartPreviousClose"), &quote.previousClose);
 
 		if (quote.symbol.isEmpty()) {
 			setError(QStringLiteral("Yahoo Finance response did not include a valid symbol"));
 			return std::nullopt;
+		}
+
+		const QJsonArray timestamps = results.first().toObject().value(QStringLiteral("timestamp")).toArray();
+		const QJsonObject indicators = results.first().toObject().value(QStringLiteral("indicators")).toObject();
+		const QJsonArray quoteObjects = indicators.value(QStringLiteral("quote")).toArray();
+		const QJsonArray closeValues =
+			quoteObjects.isEmpty() ? QJsonArray() : quoteObjects.first().toObject().value(QStringLiteral("close")).toArray();
+		const int pointCount = std::min(timestamps.size(), closeValues.size());
+		for (int i = 0; i < pointCount; ++i) {
+			const QJsonValue timestampValue = timestamps.at(i);
+			const QJsonValue closeValue     = closeValues.at(i);
+			if (!timestampValue.isDouble() || !closeValue.isDouble()) {
+				continue;
+			}
+
+			const double close = closeValue.toDouble();
+			if (!std::isfinite(close)) {
+				continue;
+			}
+
+			YahooChartQuote::Point point;
+			point.timestamp = static_cast< qint64 >(timestampValue.toDouble(0.0));
+			point.close     = close;
+			quote.points.push_back(point);
 		}
 
 		return quote;
