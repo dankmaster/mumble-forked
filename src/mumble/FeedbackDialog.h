@@ -8,6 +8,7 @@
 
 #include "Mumble.pb.h"
 
+#include <QtCore/QList>
 #include <QtCore/QUrl>
 #include <QtWidgets/QDialog>
 
@@ -15,6 +16,8 @@ class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
+class QListWidget;
+class QMimeData;
 class QPlainTextEdit;
 class QPushButton;
 
@@ -55,28 +58,46 @@ private slots:
 	void updateDiagnosticsPreview();
 	void updateDiagnosticsDefault();
 	void toggleCapture();
+	void pasteEvidenceFromClipboard();
+	void clearPastedEvidence();
 	void copyReport();
 	void openFallbackIssue();
 	void submitReport();
 
 private:
+	struct PastedEvidence {
+		QString label;
+		QString markdown;
+		qint64 byteSize = 0;
+	};
+
 	MumbleProto::FeedbackReportKind selectedKind() const;
 	QString diagnosticsText() const;
 	QString consoleLogSnippet() const;
+	QString pastedEvidenceMarkdown() const;
+	bool addEvidenceFromMimeData(const QMimeData *mimeData);
+	bool addEvidenceMarkdown(const QString &label, const QString &markdown, qint64 byteSize);
+	qsizetype maxPastedEvidenceMarkdownBytes() const;
+	qsizetype currentPastedEvidenceMarkdownBytes() const;
+	void updateEvidenceList();
 	void setCaptureActive(bool active);
 
 	ServerCapability m_capability;
 	qint64 m_captureStartOffset = -1;
 	bool m_captureActive        = false;
+	QList< PastedEvidence > m_pastedEvidence;
 
 	QComboBox *m_typeCombo              = nullptr;
 	QLineEdit *m_titleEdit              = nullptr;
 	QPlainTextEdit *m_descriptionEdit   = nullptr;
 	QPlainTextEdit *m_reproductionEdit  = nullptr;
+	QListWidget *m_evidenceList         = nullptr;
 	QCheckBox *m_includeDiagnosticsBox  = nullptr;
 	QPlainTextEdit *m_diagnosticsPreview = nullptr;
 	QLabel *m_statusLabel               = nullptr;
 	QPushButton *m_captureButton        = nullptr;
+	QPushButton *m_pasteEvidenceButton  = nullptr;
+	QPushButton *m_clearEvidenceButton  = nullptr;
 	QPushButton *m_submitButton         = nullptr;
 	QPushButton *m_copyButton           = nullptr;
 	QPushButton *m_openButton           = nullptr;

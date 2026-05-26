@@ -6079,6 +6079,11 @@ void Server::msgFeedbackReport(ServerUser *uSource, MumbleProto::FeedbackReport 
 	fields.clientOS                = msg.has_client_os() ? u8(msg.client_os()) : QString();
 	fields.clientQt                = msg.has_client_qt() ? u8(msg.client_qt()) : QString();
 	fields.serverCapabilitySummary = tr("Server accepted via Murmur in-app feedback relay.");
+	fields.pastedEvidence          = msg.has_pasted_evidence()
+										 ? Mumble::Feedback::truncateUtf8Bytes(
+											   u8(msg.pasted_evidence()), uiFeedbackMaxBodyBytes,
+											   QStringLiteral("[pasted evidence truncated]"))
+										 : QString();
 
 	const QString body = Mumble::Feedback::issueBody(fields, uiFeedbackMaxBodyBytes, uiFeedbackMaxLogBytes);
 	uSource->m_feedbackReportTimer.restart();

@@ -126,6 +126,10 @@ namespace Feedback {
 			stream << "### Steps to reproduce\n" << markdownValue(fields.reproductionSteps) << "\n\n";
 		}
 
+		if (!fields.pastedEvidence.trimmed().isEmpty()) {
+			stream << "### Pasted evidence\n" << fields.pastedEvidence.trimmed() << "\n\n";
+		}
+
 		stream << "### Client environment\n";
 		stream << "- Version: " << markdownValue(fields.clientRelease) << "\n";
 		stream << "- Architecture: " << markdownValue(fields.clientArch) << "\n";

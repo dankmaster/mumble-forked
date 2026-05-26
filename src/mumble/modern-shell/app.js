@@ -954,8 +954,8 @@
 		return previewHydrationObserver;
 	}
 
-	function observePreviewStub(bubble) {
-		if (!bubble || !bubble.querySelector(".preview-stub")) {
+	function observePreviewHydrationTarget(bubble) {
+		if (!bubble || !bubble.querySelector(".preview-stub, .mumble-inline-image-placeholder")) {
 			return;
 		}
 
@@ -4149,6 +4149,9 @@
 	let youtubeIframeApiPromise = null;
 	let youtubeIframeIdCounter = 0;
 	const youtubeIframePlayers = new WeakMap();
+	const tiktokIframePlayers = new WeakMap();
+	const tiktokIframePlayerFrames = new Set();
+	let tiktokIframeMessageListenerAttached = false;
 
 	function previewCardSizeKey(card) {
 		const size = String(card && card.dataset && card.dataset.previewSize || "").trim().toLowerCase();
@@ -4296,6 +4299,19 @@
 		}
 	}
 
+	function previewIsTikTokIframe(iframe) {
+		if (!iframe) {
+			return false;
+		}
+		try {
+			const url = new URL(iframe.src || "", window.location.href);
+			const host = url.hostname.toLowerCase();
+			return host === "tiktok.com" || host.endsWith(".tiktok.com");
+		} catch (error) {
+			return false;
+		}
+	}
+
 	function youtubeIframeTargetOrigin(iframe) {
 		try {
 			const url = new URL(iframe.src || "", window.location.href);
@@ -4307,6 +4323,18 @@
 			// Fall back to the normal player origin below.
 		}
 		return "https://www.youtube.com";
+	}
+
+	function tiktokIframeTargetOrigin(iframe) {
+		try {
+			const url = new URL(iframe.src || "", window.location.href);
+			if (url.protocol === "https:" && previewIsTikTokIframe(iframe)) {
+				return url.origin;
+			}
+		} catch (error) {
+			// Fall back to the normal player origin below.
+		}
+		return "https://www.tiktok.com";
 	}
 
 	function normalizeYouTubeEmbedUrlForApi(embedUrl) {
@@ -4327,6 +4355,30 @@
 			if (window.location && /^https?:$/i.test(window.location.protocol || "")) {
 				url.searchParams.set("origin", window.location.origin);
 			}
+			return url.toString();
+		} catch (error) {
+			return embedUrl;
+		}
+	}
+
+	function normalizeTikTokEmbedUrlForApi(embedUrl) {
+		try {
+			const url = new URL(embedUrl || "", window.location.href);
+			const host = url.hostname.toLowerCase();
+			if (host !== "tiktok.com" && !host.endsWith(".tiktok.com")) {
+				return embedUrl;
+			}
+			url.searchParams.set("controls", "0");
+			url.searchParams.set("progress_bar", "0");
+			url.searchParams.set("play_button", "0");
+			url.searchParams.set("volume_control", "0");
+			url.searchParams.set("fullscreen_button", "0");
+			url.searchParams.set("timestamp", "0");
+			url.searchParams.set("autoplay", "0");
+			url.searchParams.set("music_info", "0");
+			url.searchParams.set("description", "0");
+			url.searchParams.set("closed_caption", "0");
+			url.searchParams.set("native_context_menu", "0");
 			return url.toString();
 		} catch (error) {
 			return embedUrl;
@@ -4511,6 +4563,158 @@
 		}
 	}
 
+	function normalizeTikTokIframeMessageData(data) {
+		if (typeof data === "string") {
+			try {
+				data = JSON.parse(data);
+			} catch (error) {
+				return null;
+			}
+		}
+		if (!data || typeof data !== "object" || data["x-tiktok-player"] !== true) {
+			return null;
+		}
+		return data;
+	}
+
+	function findTikTokIframeStateFromSource(source) {
+		if (!source) {
+			return null;
+		}
+		let match = null;
+		tiktokIframePlayerFrames.forEach(function(iframe) {
+			if (!match && iframe && iframe.contentWindow === source) {
+				match = tiktokIframePlayers.get(iframe) || null;
+			}
+		});
+		return match;
+	}
+
+	function notifyTikTokIframeStateCallbacks(state, data) {
+		if (!state || !Array.isArray(state.stateChangeCallbacks)) {
+			return;
+		}
+		state.stateChangeCallbacks.forEach(function(callback) {
+			try {
+				callback(data, state);
+			} catch (error) {
+				console.warn("TikTok embed state callback failed", error && error.name ? error.name : error);
+			}
+		});
+	}
+
+	function updateTikTokIframeStateFromMessage(state, data) {
+		if (!state || !data) {
+			return;
+		}
+		const type = String(data.type || "");
+		const value = data.value;
+		if (type === "onPlayerReady") {
+			state.ready = true;
+		} else if (type === "onStateChange") {
+			const nextState = Number(value);
+			if (Number.isFinite(nextState)) {
+				state.playerState = nextState;
+			}
+		} else if (type === "onCurrentTime") {
+			if (value && typeof value === "object") {
+				const currentTime = Number(value.currentTime);
+				const duration = Number(value.duration);
+				if (Number.isFinite(currentTime)) {
+					state.currentTime = Math.max(0, currentTime);
+				}
+				if (Number.isFinite(duration)) {
+					state.duration = Math.max(0, duration);
+				}
+			} else {
+				const currentTime = Number(value);
+				if (Number.isFinite(currentTime)) {
+					state.currentTime = Math.max(0, currentTime);
+				}
+			}
+		} else if (type === "onMute") {
+			state.muted = !!value;
+		} else if (type === "onVolumeChange") {
+			const volume = Number(value);
+			if (Number.isFinite(volume)) {
+				state.volume = volume > 1 ? Math.max(0, Math.min(100, volume)) / 100 : normalizedPreviewMediaVolume(volume);
+			}
+		} else if (type === "onPlayerError" || type === "onError") {
+			console.warn("TikTok embed player error", value);
+		}
+		notifyTikTokIframeStateCallbacks(state, data);
+	}
+
+	function handleTikTokIframeMessage(event) {
+		const data = normalizeTikTokIframeMessageData(event && event.data);
+		if (!data) {
+			return;
+		}
+		const state = findTikTokIframeStateFromSource(event.source);
+		if (!state) {
+			return;
+		}
+		try {
+			const origin = new URL(event.origin || "");
+			const host = origin.hostname.toLowerCase();
+			if (host !== "tiktok.com" && !host.endsWith(".tiktok.com")) {
+				return;
+			}
+		} catch (error) {
+			return;
+		}
+		updateTikTokIframeStateFromMessage(state, data);
+	}
+
+	function ensureTikTokIframeMessageListener() {
+		if (tiktokIframeMessageListenerAttached) {
+			return;
+		}
+		tiktokIframeMessageListenerAttached = true;
+		window.addEventListener("message", handleTikTokIframeMessage);
+	}
+
+	function ensureTikTokIframePlayer(iframe) {
+		if (!previewIsTikTokIframe(iframe)) {
+			return null;
+		}
+		ensureTikTokIframeMessageListener();
+		const existing = tiktokIframePlayers.get(iframe);
+		if (existing) {
+			return existing;
+		}
+		const state = {
+			currentTime: 0,
+			duration: 0,
+			iframe: iframe,
+			muted: false,
+			playerState: -1,
+			ready: false,
+			stateChangeCallbacks: [],
+			volume: 1
+		};
+		tiktokIframePlayers.set(iframe, state);
+		tiktokIframePlayerFrames.add(iframe);
+		return state;
+	}
+
+	function postTikTokIframeCommand(iframe, type, value) {
+		if (!previewIsTikTokIframe(iframe) || !iframe.contentWindow || !type) {
+			return false;
+		}
+		try {
+			iframe.contentWindow.postMessage({
+				type: type,
+				value: value,
+				"x-tiktok-player": true
+			}, tiktokIframeTargetOrigin(iframe));
+			return true;
+		} catch (error) {
+			console.warn("TikTok embed command failed", type, error && error.name ? error.name : error);
+			return false;
+		}
+	}
+
 	function syncPreviewEmbedFrameSize(iframe) {
 		const size = previewEmbedIframeSize(iframe);
 		if (!size) {
@@ -4624,6 +4828,10 @@
 		return playerState === 1 || playerState === 3;
 	}
 
+	function tiktokPlayerStateIsPlaying(playerState) {
+		return playerState === 1 || playerState === 3;
+	}
+
 	function youtubeMediaControlStateFromPlayer(player, fallbackState) {
 		const fallback = fallbackState || {};
 		const getNumber = function(methodName, fallbackValue) {
@@ -4649,6 +4857,27 @@
 			playEnabled: true,
 			seekEnabled: duration > 0,
 			volume: playerVolume / 100,
+			volumeEnabled: true
+		};
+	}
+
+	function tiktokMediaControlStateFromState(state, fallbackState) {
+		const fallback = fallbackState || {};
+		const duration = Math.max(0, Number(state && state.duration) || Number(fallback.duration) || 0);
+		const currentTime = Math.max(0, Number(state && state.currentTime) || Number(fallback.currentTime) || 0);
+		const rawVolume = state && Number.isFinite(state.volume) ? state.volume : fallback.volume;
+		const volume = normalizedPreviewMediaVolume(rawVolume);
+		const muted = state ? !!state.muted : !!fallback.muted;
+		const playerState = state ? state.playerState : fallback.playerState;
+		return {
+			currentTime: currentTime,
+			duration: duration,
+			mediaLabel: "TikTok",
+			muted: muted || volume <= 0,
+			paused: !tiktokPlayerStateIsPlaying(playerState),
+			playEnabled: true,
+			seekEnabled: duration > 0,
+			volume: volume,
 			volumeEnabled: true
 		};
 	}
@@ -4821,10 +5050,84 @@
 		return controls;
 	}
 
+	function appendTikTokEmbedMediaControls(card, media, iframe) {
+		const playerState = ensureTikTokIframePlayer(iframe);
+		let controlState = tiktokMediaControlStateFromState(playerState, {
+			currentTime: 0,
+			duration: 0,
+			mediaLabel: "TikTok",
+			muted: false,
+			paused: true,
+			playEnabled: true,
+			seekEnabled: false,
+			volume: 1,
+			volumeEnabled: true
+		});
+
+		const syncControlState = function() {
+			syncPreviewMediaControlState(controls, controlState);
+		};
+		const updateFromPlayerState = function(state) {
+			controlState = tiktokMediaControlStateFromState(state || playerState, controlState);
+			syncControlState();
+		};
+		const applyOptimisticState = function(nextState) {
+			controlState = Object.assign({}, controlState, nextState || {});
+			syncControlState();
+		};
+
+		const controls = appendPreviewMediaControlSurface(card, media, {
+			className: "preview-card-tiktok-controls",
+			volume: false,
+			onPlay: function() {
+				const shouldPlay = controlState.paused !== false;
+				postTikTokIframeCommand(iframe, shouldPlay ? "play" : "pause");
+				applyOptimisticState({
+					paused: !shouldPlay,
+					playerState: shouldPlay ? 1 : 2
+				});
+			},
+			onSeek: function(fraction) {
+				if (!controlState.duration) {
+					return;
+				}
+				const nextTime = Math.max(0, Math.min(1, Number(fraction) || 0)) * controlState.duration;
+				postTikTokIframeCommand(iframe, "seekTo", nextTime);
+				applyOptimisticState({ currentTime: nextTime });
+			},
+			onMute: function() {
+				const nextMuted = !controlState.muted;
+				postTikTokIframeCommand(iframe, nextMuted ? "mute" : "unMute");
+				applyOptimisticState({
+					muted: nextMuted,
+					volume: nextMuted ? 0 : (controlState.volume > 0 ? controlState.volume : 1)
+				});
+			}
+		});
+
+		if (playerState && Array.isArray(playerState.stateChangeCallbacks) && !playerState.previewMediaControlsAttached) {
+			playerState.previewMediaControlsAttached = true;
+			playerState.stateChangeCallbacks.push(function(data, state) {
+				updateFromPlayerState(state);
+			});
+		}
+		syncControlState();
+		iframe.addEventListener("load", function() {
+			ensureTikTokIframePlayer(iframe);
+			schedulePreviewEmbedFrameSizeSync();
+		});
+		return controls;
+	}
+
 	function appendPreviewEmbedControls(card, media, iframe, embedKind) {
 		const isYouTube = embedKind === "youtube" && previewIsYouTubeIframe(iframe);
 		if (isYouTube) {
 			appendYouTubeEmbedMediaControls(card, media, iframe);
+			return;
+		}
+		const isTikTok = embedKind === "tiktok" && previewIsTikTokIframe(iframe);
+		if (isTikTok) {
+			appendTikTokEmbedMediaControls(card, media, iframe);
 			return;
 		}
 		const controls = appendPreviewMediaControlSurface(card, media, {
@@ -4853,7 +5156,7 @@
 		const media = document.createElement("div");
 		media.className = "preview-card-media preview-card-playback preview-card-embed-media preview-card-"
 			+ kindToken + "-embed-media";
-		if (!previewInlineMediaEnabled() || embedKind === "tiktok") {
+		if (!previewInlineMediaEnabled()) {
 			appendPreviewPlaybackFallback(media, preview, previewStaticPlaybackText(preview, "Open in browser"));
 			card.appendChild(media);
 			requestAnimationFrame(syncScrollState);
@@ -4864,7 +5167,7 @@
 			if (event.target && event.target.closest && event.target.closest(".preview-card-media-controls")) {
 				return;
 			}
-			if (embedKind === "youtube") {
+			if (embedKind === "youtube" || embedKind === "tiktok") {
 				const playButton = media.querySelector(".preview-card-media-play");
 				if (playButton && !playButton.disabled) {
 					event.preventDefault();
@@ -4877,9 +5180,10 @@
 		frameWrap.className = "preview-card-embed-frame-wrap preview-card-" + kindToken + "-frame-wrap";
 		const iframe = document.createElement("iframe");
 		iframe.className = "preview-card-embed-frame preview-card-" + kindToken + "-frame";
-		iframe.src = embedKind === "youtube" ? normalizeYouTubeEmbedUrlForApi(embedUrl) : embedUrl;
+		iframe.src = embedKind === "youtube" ? normalizeYouTubeEmbedUrlForApi(embedUrl)
+			: (embedKind === "tiktok" ? normalizeTikTokEmbedUrlForApi(embedUrl) : embedUrl);
 		iframe.title = preview.title || preview.subtitle || "Embedded preview";
-		iframe.loading = embedKind === "youtube" ? "eager" : "lazy";
+		iframe.loading = embedKind === "youtube" || embedKind === "tiktok" ? "eager" : "lazy";
 		if (embedKind === "youtube") {
 			iframe.setAttribute("enablejsapi", "true");
 		}
@@ -9363,7 +9667,7 @@
 		if (footer) {
 			bubble.appendChild(footer);
 		}
-		observePreviewStub(bubble);
+		observePreviewHydrationTarget(bubble);
 		return bubble;
 	}
 

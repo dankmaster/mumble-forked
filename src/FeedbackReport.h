@@ -28,6 +28,7 @@ namespace Feedback {
 		QString clientOS;
 		QString clientQt;
 		QString serverCapabilitySummary;
+		QString pastedEvidence;
 	};
 
 	QString kindLabel(MumbleProto::FeedbackReportKind kind);

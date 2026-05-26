@@ -14,6 +14,7 @@ private slots:
 	void buildsBugMarkdown();
 	void buildsSuggestionWithoutLogsByDefault();
 	void buildsSupportMarkdown();
+	void includesPastedEvidence();
 	void redactsDiagnosticsAndCapsBytes();
 	void splitsLabels();
 };
@@ -68,6 +69,15 @@ void TestFeedbackReport::buildsSupportMarkdown() {
 	QVERIFY(body.contains(QStringLiteral("### Client environment")));
 	QVERIFY(body.contains(QStringLiteral("- Connected server feedback: connected=yes")));
 	QCOMPARE(Mumble::Feedback::issueTitle(fields), QStringLiteral("[Support] Short title"));
+}
+
+void TestFeedbackReport::includesPastedEvidence() {
+	Mumble::Feedback::ReportFields fields = baseFields(MumbleProto::FeedbackReportBug);
+	fields.pastedEvidence                 = QStringLiteral("#### pasted.txt\n```text\nhello\n```");
+
+	const QString body = Mumble::Feedback::issueBody(fields, 60000, 200000);
+	QVERIFY(body.contains(QStringLiteral("### Pasted evidence\n#### pasted.txt")));
+	QVERIFY(body.contains(QStringLiteral("hello")));
 }
 
 void TestFeedbackReport::redactsDiagnosticsAndCapsBytes() {

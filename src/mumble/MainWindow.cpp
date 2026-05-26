@@ -2306,7 +2306,9 @@ QString persistentChatInlineDataImagePlaceholderHtml(const PersistentChatInlineD
 						.arg(openHref.toHtmlEscaped(), QObject::tr("Open image").toHtmlEscaped());
 	}
 
-	return QString::fromLatin1("<div style='margin:6px 0; padding:8px 10px; border-left:3px solid #8b93a6; "
+	return QString::fromLatin1("<div class='mumble-inline-image-placeholder' "
+							   "data-mumble-inline-image-placeholder='1' "
+							   "style='margin:6px 0; padding:8px 10px; border-left:3px solid #8b93a6; "
 							   "background:rgba(139,147,166,0.10); border-radius:4px;'>"
 							   "<div style='font-weight:600;'>%1</div>"
 							   "<div style='margin-top:3px; opacity:0.78;'>%2</div>"
@@ -3179,11 +3181,18 @@ std::optional< PersistentChatPreviewEmbedTarget > tiktokEmbedTargetFromUrl(const
 
 	QUrl embedUrl(QStringLiteral("https://www.tiktok.com/player/v1/%1").arg(*postId));
 	QUrlQuery query;
-	query.addQueryItem(QStringLiteral("controls"), QStringLiteral("1"));
+	query.addQueryItem(QStringLiteral("controls"), QStringLiteral("0"));
+	query.addQueryItem(QStringLiteral("progress_bar"), QStringLiteral("0"));
+	query.addQueryItem(QStringLiteral("play_button"), QStringLiteral("0"));
+	query.addQueryItem(QStringLiteral("volume_control"), QStringLiteral("0"));
+	query.addQueryItem(QStringLiteral("fullscreen_button"), QStringLiteral("0"));
+	query.addQueryItem(QStringLiteral("timestamp"), QStringLiteral("0"));
 	query.addQueryItem(QStringLiteral("autoplay"), QStringLiteral("0"));
 	query.addQueryItem(QStringLiteral("rel"), QStringLiteral("0"));
-	query.addQueryItem(QStringLiteral("music_info"), QStringLiteral("1"));
-	query.addQueryItem(QStringLiteral("description"), QStringLiteral("1"));
+	query.addQueryItem(QStringLiteral("music_info"), QStringLiteral("0"));
+	query.addQueryItem(QStringLiteral("description"), QStringLiteral("0"));
+	query.addQueryItem(QStringLiteral("closed_caption"), QStringLiteral("0"));
+	query.addQueryItem(QStringLiteral("native_context_menu"), QStringLiteral("0"));
 	embedUrl.setQuery(query);
 	return PersistentChatPreviewEmbedTarget { QStringLiteral("tiktok"), embedUrl, QStringLiteral("short") };
 }
@@ -12197,6 +12206,7 @@ void MainWindow::setupGui() {
 	on_qaFilterToggle_triggered();
 
 	qaHelpWhatsThis->setShortcuts(QKeySequence::WhatsThis);
+	qaHelpFeedback->setShortcut(QKeySequence::HelpContents);
 
 	qaConfigMinimal->setChecked(Global::get().s.bMinimalView);
 	qaConfigHideFrame->setChecked(Global::get().s.bHideFrame);
@@ -30075,6 +30085,12 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
 }
 
 void MainWindow::keyPressEvent(QKeyEvent *e) {
+	if (e->key() == Qt::Key_F1 && e->modifiers() == Qt::NoModifier) {
+		on_qaHelpFeedback_triggered();
+		e->accept();
+		return;
+	}
+
 	// Pressing F6 switches between the main
 	// window's main widgets, making it easier
 	// to navigate Mumble's MainWindow with only
