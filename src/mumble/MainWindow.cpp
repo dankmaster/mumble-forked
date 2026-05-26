@@ -19219,6 +19219,10 @@ void MainWindow::publishModernShellActiveScopePatch(const QString &kind) {
 
 void MainWindow::publishModernShellRoomStatePatch() {
 }
+
+void MainWindow::clearModernShellMessageDtoCache(const char *reason) {
+	Q_UNUSED(reason);
+}
 #endif
 
 void MainWindow::triggerContextAction(const QString &actionData, ClientUser *user, Channel *channel) {

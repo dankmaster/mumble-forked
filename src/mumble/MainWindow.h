@@ -542,6 +542,7 @@ public:
 	void publishModernShellMessageUpdatePatch(const MumbleProto::ChatMessage &message);
 	void publishModernShellActiveScopePatch(const QString &kind);
 	void publishModernShellRoomStatePatch();
+	void clearModernShellMessageDtoCache(const char *reason);
 #endif
 	void triggerContextAction(const QString &actionData, ClientUser *user, Channel *channel);
 	bool sendChatbarTextToCurrentTarget(QString msg, bool plainText, bool clearNativeComposer);

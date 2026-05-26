@@ -6,6 +6,7 @@
 #ifndef MUMBLE_MUMBLE_WIDGETS_PERSISTENTCHATLISTWIDGET_H_
 #define MUMBLE_MUMBLE_WIDGETS_PERSISTENTCHATLISTWIDGET_H_
 
+#include <QtCore/QElapsedTimer>
 #include <QtWidgets/QListView>
 
 struct PersistentChatViewportAnchor {
@@ -39,9 +40,13 @@ protected:
 	void resizeEvent(QResizeEvent *event) override;
 
 private:
+	bool isLastMessageGroupBottomVisible(int tolerance) const;
+	void noteUserScrollActivity();
+	bool isUserScrollActive() const;
 	void queueSnapToBottom();
 	void updateBottomPinState();
 
+	QElapsedTimer m_userScrollActivityTimer;
 	bool m_stabilizingVisibleContent = false;
 	bool m_keepBottomPinned          = true;
 	bool m_bottomSnapQueued          = false;

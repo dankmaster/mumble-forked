@@ -10,10 +10,12 @@
 #include <QtCore/QEvent>
 #include <QtCore/QTimer>
 #include <QtGui/QResizeEvent>
+#include <QtWidgets/QAbstractSlider>
 #include <QtWidgets/QScrollBar>
 
 namespace {
 	constexpr int PersistentChatBottomStickThreshold = 18;
+	constexpr int PersistentChatUserScrollSnapSuppressionMsec = 240;
 
 	int persistentChatBottomStickThreshold(const QScrollBar *scrollBar) {
 		if (!scrollBar) {
@@ -53,6 +55,11 @@ PersistentChatListWidget::PersistentChatListWidget(QWidget *parent) : QListView(
 			const bool wasPinned = m_keepBottomPinned
 								   || persistentChatIsNearBottom(verticalScrollBar(), m_lastKnownScrollMaximum);
 			m_lastKnownScrollMaximum = maximum;
+			if (isUserScrollActive()) {
+				updateBottomPinState();
+				return;
+			}
+
 			if (!wasPinned) {
 				updateBottomPinState();
 				return;
@@ -61,6 +68,13 @@ PersistentChatListWidget::PersistentChatListWidget(QWidget *parent) : QListView(
 			m_keepBottomPinned = true;
 			queueSnapToBottom();
 		});
+		connect(scrollBar, &QScrollBar::actionTriggered, this, [this](int action) {
+			if (action != QAbstractSlider::SliderNoAction) {
+				noteUserScrollActivity();
+			}
+		});
+		connect(scrollBar, &QScrollBar::sliderPressed, this, [this]() { noteUserScrollActivity(); });
+		connect(scrollBar, &QScrollBar::sliderReleased, this, [this]() { noteUserScrollActivity(); });
 	}
 }
 
@@ -76,8 +90,7 @@ bool PersistentChatListWidget::isScrolledToBottom() const {
 		return true;
 	}
 
-	const auto *historyModel = qobject_cast< const PersistentChatHistoryModel * >(model());
-	return historyModel && isRowVisible(historyModel->lastMessageGroupRowId());
+	return isLastMessageGroupBottomVisible(stickyThreshold);
 }
 
 PersistentChatViewportAnchor PersistentChatListWidget::captureViewportAnchor() const {
@@ -170,6 +183,35 @@ void PersistentChatListWidget::stabilizeVisibleContent() {
 	m_stabilizingVisibleContent = false;
 }
 
+bool PersistentChatListWidget::isLastMessageGroupBottomVisible(int tolerance) const {
+	const auto *historyModel = qobject_cast< const PersistentChatHistoryModel * >(model());
+	if (!historyModel || !viewport()) {
+		return false;
+	}
+
+	const int row = historyModel->rowForId(historyModel->lastMessageGroupRowId());
+	if (row < 0) {
+		return false;
+	}
+
+	const QRect rect = visualRect(historyModel->index(row, 0));
+	if (!rect.isValid()) {
+		return false;
+	}
+
+	const QRect viewportRect = viewport()->rect();
+	return rect.bottom() >= viewportRect.top() && rect.bottom() <= viewportRect.bottom() + tolerance;
+}
+
+void PersistentChatListWidget::noteUserScrollActivity() {
+	m_userScrollActivityTimer.start();
+}
+
+bool PersistentChatListWidget::isUserScrollActive() const {
+	return m_userScrollActivityTimer.isValid()
+		   && !m_userScrollActivityTimer.hasExpired(PersistentChatUserScrollSnapSuppressionMsec);
+}
+
 void PersistentChatListWidget::queueSnapToBottom() {
 	if (m_bottomSnapQueued) {
 		return;
@@ -178,6 +220,10 @@ void PersistentChatListWidget::queueSnapToBottom() {
 	m_bottomSnapQueued = true;
 	QTimer::singleShot(0, this, [this]() {
 		m_bottomSnapQueued = false;
+		if (isUserScrollActive() || !m_keepBottomPinned) {
+			return;
+		}
+
 		if (QScrollBar *scrollBar = verticalScrollBar()) {
 			scrollBar->setValue(scrollBar->maximum());
 			m_lastKnownScrollMaximum = scrollBar->maximum();
@@ -200,6 +246,9 @@ void PersistentChatListWidget::updateBottomPinState() {
 bool PersistentChatListWidget::eventFilter(QObject *watched, QEvent *event) {
 	if ((watched == this || watched == viewport() || watched == verticalScrollBar()) && event) {
 		switch (event->type()) {
+			case QEvent::Wheel:
+				noteUserScrollActivity();
+				break;
 			case QEvent::Enter:
 			case QEvent::HoverEnter:
 			case QEvent::Leave:
