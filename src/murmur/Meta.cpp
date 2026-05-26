@@ -158,10 +158,10 @@ MetaParams::MetaParams() {
 	qsFeedbackGitHubAPIUrl     = QLatin1String("https://api.github.com");
 	uiFeedbackMaxLogBytes      = Mumble::Feedback::DEFAULT_MAX_LOG_BYTES;
 	uiFeedbackMaxBodyBytes     = Mumble::Feedback::DEFAULT_MAX_BODY_BYTES;
-	qsFeedbackCommonLabels     = QLatin1String("triage,in-app-feedback");
+	qsFeedbackCommonLabels     = QLatin1String("");
 	qsFeedbackBugLabels        = QLatin1String("bug");
-	qsFeedbackSuggestionLabels = QLatin1String("feature-request");
-	qsFeedbackSupportLabels    = QLatin1String("support");
+	qsFeedbackSuggestionLabels = QLatin1String("enhancement");
+	qsFeedbackSupportLabels    = QLatin1String("question");
 
 	rollingStatsWindow = 300;
 

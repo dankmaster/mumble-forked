@@ -71,10 +71,11 @@ namespace Feedback {
 			return decoded;
 		}
 
-		const QString separator = QStringLiteral("\n\n");
-		const int noteBytes     = note.toUtf8().size() + separator.toUtf8().size();
+		const QString separator      = QStringLiteral("\n\n");
+		const QByteArray encodedNote = note.toUtf8();
+		const int noteBytes          = static_cast< int >(encodedNote.size() + separator.toUtf8().size());
 		if (noteBytes >= static_cast< int >(maxBytes)) {
-			return QString::fromUtf8(note.toUtf8().left(static_cast< int >(maxBytes)));
+			return QString::fromUtf8(encodedNote.left(static_cast< int >(maxBytes)));
 		}
 
 		const int allowedDecodedBytes = static_cast< int >(maxBytes) - noteBytes;
