@@ -43,7 +43,7 @@ If you want the official stable Mumble project, start at
 
 | Modern Rich Chat | Rich Preview Detail | Classic Mumble Baseline |
 | --- | --- | --- |
-| <img src="screenshots/modern-client-rich-chat.png" alt="Modern persistent chat client with rich YouTube preview" width="360"> | <img src="screenshots/modern-rich-card-youtube.png" alt="Inline rich preview card detail" width="360"> | <img src="screenshots/Mumble.png" alt="Classic Mumble client in light and dark themes" width="360"> |
+| <img src="screenshots/modern-client-rich-chat.png" alt="Modern persistent chat client with playable YouTube preview controls" width="360"> | <img src="screenshots/modern-rich-card-youtube.png" alt="Playable inline YouTube preview card detail" width="360"> | <img src="screenshots/Mumble.png" alt="Classic Mumble client in light and dark themes" width="360"> |
 
 ## Feature Inventory
 
@@ -56,7 +56,7 @@ community feature set on top. The long-form inventory lives in
 | Upstream Mumble baseline | Retained | Low-latency Opus voice, channels, ACLs, certificates, shortcuts, plugins, server tooling, and the classic Qt client/server paths. |
 | Persistent chat | Active fork feature | Stored history for voice-room chats, dedicated text rooms, optional server-global chat, read state, unread counts, pagination, replies, deletion, and reactions. |
 | Rich media chat | Active fork feature | Chunked authenticated uploads, image/video/document/binary asset storage, preview thumbnails, inline media rendering, and quota controls. |
-| Link preview cards | Active fork feature | Provider-aware cards for video, social posts, GitHub, Steam, finance links, product/listing pages, news, maps, weather, transit, game stores, and direct media. |
+| Link preview cards | Active fork feature | Provider-aware cards for playable YouTube/video previews, social posts, GitHub, Steam, finance links, product/listing pages, news, maps, weather, transit, game stores, and direct media. |
 | Modern client shell | Active fork feature | WebEngine-based chat/navigator shell with persistent rooms, compact message controls, rich cards, room-aware composer state, and a classic fallback path. |
 | Finance and stonks | Active server feature | Cashtag extraction, Yahoo Finance quote cards with chart data, provider links, and a scoped `#stonks` room with scores, leaderboards, and follows. |
 | Watch together | Protocol/server foundation | Capability-gated room media-session messages for synchronized direct media or YouTube playback; client UI is still a future layer. |

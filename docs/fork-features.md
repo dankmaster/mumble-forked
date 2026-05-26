@@ -32,6 +32,7 @@ Current capabilities:
 - server MOTD/sidebar presentation
 - compact message controls for reply/delete actions
 - rich media and provider-specific preview cards
+- playable YouTube/video preview controls when the provider and WebEngine surface support inline playback
 - image, GIF, video, product, Steam/game-store, social posts including X/Twitter, GitHub, finance, forum, article, map, place, traffic, and weather card layouts
 - local disk preview cache with selective session refresh for richer providers
 
