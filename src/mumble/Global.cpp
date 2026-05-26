@@ -133,6 +133,9 @@ Global::Global(const QString &qsConfigPath) {
 	bStonksEnabled                   = true;
 	uiStonksTextChannelID            = 0;
 	bStonksSocialAnnouncementsEnabled = true;
+	bFeedbackEnabled                 = false;
+	uiFeedbackMaxLogBytes            = 200000;
+	uiFeedbackMaxBodyBytes           = 60000;
 	uiMessageLength             = 5000;
 	uiImageLength               = 131072;
 	uiMaxUsers                  = 0;

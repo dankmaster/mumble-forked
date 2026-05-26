@@ -5,7 +5,57 @@
 
 #include "StonksLedger.h"
 
+#include <QtCore/QLocale>
+
+#include <algorithm>
 #include <cmath>
+
+namespace {
+	QString trimmedFixedNumber(double value, int precision) {
+		if (!std::isfinite(value)) {
+			return QString();
+		}
+
+		QLocale locale = QLocale::c();
+		locale.setNumberOptions(QLocale::OmitGroupSeparator);
+		QString text = locale.toString(value, 'f', precision);
+		while (text.contains(QLatin1Char('.')) && text.endsWith(QLatin1Char('0'))) {
+			text.chop(1);
+		}
+		if (text.endsWith(QLatin1Char('.'))) {
+			text.chop(1);
+		}
+		return text == QLatin1String("-0") ? QStringLiteral("0") : text;
+	}
+
+	QString formatSummaryMoney(double value, const QString &currencyText) {
+		if (!std::isfinite(value) || value <= 0.0) {
+			return QString();
+		}
+
+		QLocale locale = QLocale::c();
+		locale.setNumberOptions(QLocale::OmitGroupSeparator);
+		const QString currency =
+			currencyText.trimmed().isEmpty() ? QStringLiteral("USD") : currencyText.trimmed().toUpper();
+		return QStringLiteral("%1 %2").arg(currency, locale.toString(value, 'f', 2));
+	}
+
+	QString naturalJoin(QStringList parts) {
+		parts.removeAll(QString());
+		if (parts.isEmpty()) {
+			return QString();
+		}
+		if (parts.size() == 1) {
+			return parts.front();
+		}
+		if (parts.size() == 2) {
+			return QStringLiteral("%1 and %2").arg(parts.at(0), parts.at(1));
+		}
+
+		const QString last = parts.takeLast();
+		return QStringLiteral("%1, and %2").arg(parts.join(QStringLiteral(", ")), last);
+	}
+}
 
 namespace Mumble {
 namespace Stonks {
@@ -36,6 +86,41 @@ namespace Stonks {
 		}
 
 		return ((endValue - startValue) / startValue) * 100.0;
+	}
+
+	QString formatPositionSummary(const std::vector< LedgerPositionSummary > &positions, std::size_t maxPositions) {
+		QStringList formattedPositions;
+		for (const LedgerPositionSummary &position : positions) {
+			const QString symbol = position.symbol.trimmed().toUpper();
+			const QString quantity = trimmedFixedNumber(position.quantity, 4);
+			if (symbol.isEmpty() || quantity.isEmpty()) {
+				continue;
+			}
+
+			QString summary = QStringLiteral("%1 %2").arg(quantity, symbol);
+			const QString value = formatSummaryMoney(position.marketValue, position.currency);
+			if (!value.isEmpty()) {
+				summary += QStringLiteral(" (%1)").arg(value);
+			}
+			formattedPositions << summary;
+		}
+
+		if (formattedPositions.isEmpty()) {
+			return QString();
+		}
+
+		const int limit = maxPositions == 0
+							  ? formattedPositions.size()
+							  : std::min< int >(formattedPositions.size(), static_cast< int >(maxPositions));
+		QStringList visible = formattedPositions.mid(0, limit);
+		const int hiddenCount = formattedPositions.size() - limit;
+		if (hiddenCount == 1) {
+			visible << QStringLiteral("1 more position");
+		} else if (hiddenCount > 1) {
+			visible << QStringLiteral("%1 more positions").arg(hiddenCount);
+		}
+
+		return naturalJoin(visible);
 	}
 } // namespace Stonks
 } // namespace Mumble

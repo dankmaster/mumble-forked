@@ -9,6 +9,7 @@
 #include <QtTest>
 
 #include <limits>
+#include <vector>
 
 class TestStonksCommand : public QObject {
 	Q_OBJECT
@@ -18,6 +19,7 @@ private slots:
 	void parsesScoreCommands();
 	void parsesLeaderboardAndFollowCommands();
 	void computesLedgerPeriodsAndReturns();
+	void formatsLedgerPositionSummaries();
 	void ignoresUnknownText();
 };
 
@@ -90,6 +92,23 @@ void TestStonksCommand::computesLedgerPeriodsAndReturns() {
 
 	QVERIFY(!Mumble::Stonks::returnPercent(0.0, 150.0).has_value());
 	QVERIFY(!Mumble::Stonks::returnPercent(std::numeric_limits< double >::infinity(), 150.0).has_value());
+}
+
+void TestStonksCommand::formatsLedgerPositionSummaries() {
+	const std::vector< Mumble::Stonks::LedgerPositionSummary > positions {
+		{ QStringLiteral("TSLA"), 1.0, 342.09, QStringLiteral("USD") },
+		{ QStringLiteral("rklb"), 1.0, 229.39, QStringLiteral("usd") },
+	};
+	QCOMPARE(Mumble::Stonks::formatPositionSummary(positions),
+			 QStringLiteral("1 TSLA (USD 342.09) and 1 RKLB (USD 229.39)"));
+
+	const std::vector< Mumble::Stonks::LedgerPositionSummary > manyPositions {
+		{ QStringLiteral("TSLA"), 1.0, 342.09, QStringLiteral("USD") },
+		{ QStringLiteral("RKLB"), 2.5, 573.48, QStringLiteral("USD") },
+		{ QStringLiteral("NVDA"), 3.0, 411.0, QStringLiteral("USD") },
+	};
+	QCOMPARE(Mumble::Stonks::formatPositionSummary(manyPositions, 2),
+			 QStringLiteral("1 TSLA (USD 342.09), 2.5 RKLB (USD 573.48), and 1 more position"));
 }
 
 void TestStonksCommand::ignoresUnknownText() {

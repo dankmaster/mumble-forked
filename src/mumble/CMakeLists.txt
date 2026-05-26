@@ -178,6 +178,8 @@ set(MUMBLE_SOURCES
 	"EchoCancelOption.h"
 	"EnumStringConversions.cpp"
 	"EnumStringConversions.h"
+	"FeedbackDialog.cpp"
+	"FeedbackDialog.h"
 	"Global.cpp"
 	"Global.h"
 	"GlobalShortcut.cpp"

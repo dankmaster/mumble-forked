@@ -69,6 +69,8 @@ namespace {
 
 	bool isPreviewEmbedPlayerHost(const QString &host) {
 		return hostEqualsOrEndsWith(host, QStringLiteral("tiktok.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("instagram.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("instagr.am"))
 			   || hostEqualsOrEndsWith(host, QStringLiteral("vimeo.com"))
 			   || hostEqualsOrEndsWith(host, QStringLiteral("dailymotion.com"))
 			   || hostEqualsOrEndsWith(host, QStringLiteral("spotify.com"))

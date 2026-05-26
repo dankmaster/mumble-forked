@@ -188,10 +188,10 @@ Current capabilities:
 - finance cards with provider links and sparkline metadata
 - command parsing for `quote <ticker>` and `quote $ticker`
 - a `#stonks` room command handler scoped to that text channel
-- server-backed ledger snapshots with position rows, privacy-filtered state, and leaderboard windows
+- server-backed portfolio ledger with versioned position history, privacy-filtered state, and leaderboard windows
 - manual score commands as a legacy fallback, plus follows and user summary commands
-- server database tables for scores, follows, snapshots, and snapshot positions
-- Modern Stonks panel for overview, ledger, leaderboard, following, and admin config
+- server database tables for scores, follows, portfolio history, and saved positions
+- Modern Stonks panel for overview, portfolio ledger, leaderboard, following, and admin config
 
 Typical commands:
 

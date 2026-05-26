@@ -21,6 +21,7 @@ namespace ForkFeatures {
 				{ MumbleProto::ForkFeatureStonksLedger, 1, FallbackPolicy::ServerOnly, "stonks_ledger" },
 				{ MumbleProto::ForkFeatureClientAssistedLinkPreviews, 2, FallbackPolicy::ServerOnly,
 				  "client_assisted_link_previews" },
+				{ MumbleProto::ForkFeatureInAppFeedback, 3, FallbackPolicy::ServerOnly, "in_app_feedback" },
 			};
 			return table;
 		}

@@ -133,6 +133,7 @@ public:
 						  const std::vector< ::mumble::server::db::DBStonksSnapshotPosition > &positions);
 	std::optional< ::mumble::server::db::DBStonksSnapshot >
 		getStonksSnapshot(unsigned int serverID, unsigned int snapshotID);
+	void removeStonksSnapshot(unsigned int serverID, unsigned int snapshotID);
 	std::vector< ::mumble::server::db::DBStonksSnapshot >
 		getStonksSnapshotsForUser(unsigned int serverID, unsigned int userID, unsigned int maxEntries = 50);
 	std::optional< ::mumble::server::db::DBStonksSnapshot >

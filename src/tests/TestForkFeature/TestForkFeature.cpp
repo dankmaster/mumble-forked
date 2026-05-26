@@ -39,6 +39,7 @@ void TestForkFeature::advertisesSupportedFeaturesInVersion() {
 	QVERIFY(Mumble::ForkFeatures::contains(features, MumbleProto::ForkFeatureVirtualizedChatPresentation));
 	QVERIFY(Mumble::ForkFeatures::contains(features, MumbleProto::ForkFeatureStonksLedger));
 	QVERIFY(Mumble::ForkFeatures::contains(features, MumbleProto::ForkFeatureClientAssistedLinkPreviews));
+	QVERIFY(Mumble::ForkFeatures::contains(features, MumbleProto::ForkFeatureInAppFeedback));
 }
 
 void TestForkFeature::advertisesSupportedFeaturesInServerConfig() {
@@ -49,6 +50,8 @@ void TestForkFeature::advertisesSupportedFeaturesInServerConfig() {
 
 	const QList< int > features = Mumble::ForkFeatures::featuresFromServerConfig(config);
 	QCOMPARE(features, Mumble::ForkFeatures::supportedFeatureList());
+	QVERIFY(Mumble::ForkFeatures::serverAllowsClientFeature(features, MumbleProto::ForkFeatureInAppFeedback));
+	QVERIFY(!Mumble::ForkFeatures::serverAllowsClientFeature({}, MumbleProto::ForkFeatureInAppFeedback));
 }
 
 void TestForkFeature::sanitizesUnknownAndFutureFeatures() {
@@ -77,6 +80,9 @@ void TestForkFeature::exposesFallbackPolicy() {
 			 QStringLiteral("none"));
 	QCOMPARE(Mumble::ForkFeatures::fallbackPolicyName(Mumble::ForkFeatures::fallbackPolicy(
 				 MumbleProto::ForkFeatureClientAssistedLinkPreviews)),
+			 QStringLiteral("server_only"));
+	QCOMPARE(Mumble::ForkFeatures::fallbackPolicyName(Mumble::ForkFeatures::fallbackPolicy(
+				 MumbleProto::ForkFeatureInAppFeedback)),
 			 QStringLiteral("server_only"));
 }
 

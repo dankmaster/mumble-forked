@@ -117,6 +117,9 @@ public:
 	bool bStonksEnabled;
 	unsigned int uiStonksTextChannelID;
 	bool bStonksSocialAnnouncementsEnabled;
+	bool bFeedbackEnabled;
+	unsigned int uiFeedbackMaxLogBytes;
+	unsigned int uiFeedbackMaxBodyBytes;
 	unsigned int uiMessageLength;
 	unsigned int uiImageLength;
 	unsigned int uiMaxUsers;

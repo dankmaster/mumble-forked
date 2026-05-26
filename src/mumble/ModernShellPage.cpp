@@ -36,6 +36,8 @@ namespace {
 		return hostEqualsOrEndsWith(host, QStringLiteral("youtube.com"))
 			   || hostEqualsOrEndsWith(host, QStringLiteral("youtube-nocookie.com"))
 			   || hostEqualsOrEndsWith(host, QStringLiteral("tiktok.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("instagram.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("instagr.am"))
 			   || hostEqualsOrEndsWith(host, QStringLiteral("vimeo.com"))
 			   || hostEqualsOrEndsWith(host, QStringLiteral("dailymotion.com"))
 			   || hostEqualsOrEndsWith(host, QStringLiteral("spotify.com"))

@@ -54,6 +54,7 @@ namespace server {
 
 			void setPositions(unsigned int serverID, unsigned int snapshotID,
 							  const std::vector< DBStonksSnapshotPosition > &positions);
+			void removePositions(unsigned int serverID, unsigned int snapshotID);
 			std::vector< DBStonksSnapshotPosition > getPositions(unsigned int serverID, unsigned int snapshotID);
 
 			void migrate(unsigned int fromSchemaVersion, unsigned int toSchemaVersion) override;

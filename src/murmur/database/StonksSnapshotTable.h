@@ -46,6 +46,7 @@ namespace server {
 
 			unsigned int getFreeSnapshotID(unsigned int serverID);
 			void addSnapshot(const DBStonksSnapshot &snapshot);
+			void removeSnapshot(unsigned int serverID, unsigned int snapshotID);
 			std::optional< DBStonksSnapshot > getSnapshot(unsigned int serverID, unsigned int snapshotID);
 			std::vector< DBStonksSnapshot > getSnapshotsForUser(unsigned int serverID, unsigned int userID,
 																unsigned int maxEntries);

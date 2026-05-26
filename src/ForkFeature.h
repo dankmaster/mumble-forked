@@ -13,7 +13,7 @@
 
 namespace Mumble {
 namespace ForkFeatures {
-	constexpr unsigned int CURRENT_PROTOCOL_VERSION = 2;
+	constexpr unsigned int CURRENT_PROTOCOL_VERSION = 3;
 
 	enum class FallbackPolicy { None, PluginData, LegacyText, ServerOnly };
 

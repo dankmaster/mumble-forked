@@ -36,12 +36,15 @@ enum ForkFeature {
 	// media cards. This is advertised so servers and clients can reason about
 	// payload shapes without guessing from release strings.
 	ForkFeatureVirtualizedChatPresentation = 3;
-	// Server-backed social finance ledger with snapshots, follows, and
+	// Server-backed social finance portfolio with history, follows, and
 	// leaderboard state presented by the Modern client.
 	ForkFeatureStonksLedger = 4;
 	// Server-authoritative link previews where one capable client may assist
 	// with bounded metadata/thumbnail fetching.
 	ForkFeatureClientAssistedLinkPreviews = 5;
+	// Client-to-server feedback reports that Murmur can forward to an
+	// administrator-configured issue tracker.
+	ForkFeatureInAppFeedback = 6;
 }
 
 message Version {
@@ -76,7 +79,7 @@ message Version {
 	// Fine-grained chat protocol features this endpoint supports.
 	repeated ChatFeature supported_chat_features = 14 [packed = true];
 	// Protocol revision for fork-specific extension features.
-	optional uint32 fork_extension_protocol_version = 15 [default = 2];
+	optional uint32 fork_extension_protocol_version = 15 [default = 3];
 	// Fork-specific extension features this endpoint supports.
 	repeated ForkFeature supported_fork_features = 16 [packed = true];
 }
@@ -716,15 +719,21 @@ message ServerConfig {
 	// Fine-grained persistent chat features enabled by this server build.
 	repeated ChatFeature supported_chat_features = 18 [packed = true];
 	// Protocol revision for fork-specific extension features.
-	optional uint32 fork_extension_protocol_version = 19 [default = 2];
+	optional uint32 fork_extension_protocol_version = 19 [default = 3];
 	// Fork-specific extension features enabled by this server build.
 	repeated ForkFeature supported_fork_features = 20 [packed = true];
 	// Whether the server currently allows the Stonks ledger feature.
 	optional bool stonks_enabled = 21;
 	// Text channel used for social Stonks announcements.
 	optional uint32 stonks_text_channel_id = 22;
-	// Whether Stonks snapshot updates should post a summary into the Stonks text channel.
+	// Whether Stonks portfolio updates should post a summary into the Stonks text channel.
 	optional bool stonks_social_announcements_enabled = 23;
+	// Whether this server accepts in-app feedback reports for GitHub submission.
+	optional bool feedback_enabled = 24;
+	// Maximum diagnostics/log bytes the server accepts in a feedback report.
+	optional uint32 feedback_max_log_bytes = 25;
+	// Maximum generated issue body bytes the server accepts in a feedback report.
+	optional uint32 feedback_max_body_bytes = 26;
 }
 
 // Sent by the server to inform the clients of suggested client configuration
@@ -1180,6 +1189,8 @@ enum StonksActionKind {
 	StonksActionFollow = 1;
 	StonksActionUnfollow = 2;
 	StonksActionConfigure = 3;
+	StonksActionClearPortfolio = 4;
+	StonksActionDeleteSnapshot = 5;
 }
 
 message StonksAction {
@@ -1191,6 +1202,7 @@ message StonksAction {
 	optional uint32 text_channel_id = 6;
 	optional bool social_announcements_enabled = 7;
 	optional string period = 8 [default = "30d"];
+	optional uint32 snapshot_id = 9;
 }
 
 message StonksState {
@@ -1212,6 +1224,44 @@ message StonksState {
 	optional string error = 16;
 	optional string leaderboard_description = 17;
 	optional uint64 leaderboard_updated_at = 18;
+	optional uint32 selected_user_id = 19;
+	optional string selected_user_name = 20;
+}
+
+enum FeedbackReportKind {
+	FeedbackReportBug = 0;
+	FeedbackReportSuggestion = 1;
+	FeedbackReportSupport = 2;
+}
+
+// Sent by a client to submit a bug report, support request, or suggestion
+// through the connected server. The server validates, caps, redacts, and
+// forwards it using its own private GitHub credentials.
+message FeedbackReport {
+	optional FeedbackReportKind kind = 1 [default = FeedbackReportBug];
+	optional string title = 2;
+	optional string description = 3;
+	optional string reproduction_steps = 4;
+	optional string diagnostics = 5;
+	optional bool diagnostics_included = 6 [default = false];
+	optional string client_report_id = 7;
+	optional uint64 created_at = 8;
+	optional string client_release = 9;
+	optional string client_os = 10;
+	optional string client_qt = 11;
+	optional string client_arch = 12;
+}
+
+// Sent by the server after attempting to create an upstream issue for a
+// FeedbackReport.
+message FeedbackReportState {
+	optional string client_report_id = 1;
+	optional bool accepted = 2 [default = false];
+	optional string issue_url = 3;
+	optional uint32 issue_number = 4;
+	optional string error = 5;
+	optional FeedbackReportKind kind = 6 [default = FeedbackReportBug];
+	optional uint64 created_at = 7;
 }
 
 message TextChannelInfo {

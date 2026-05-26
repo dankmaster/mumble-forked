@@ -191,6 +191,17 @@ public:
 	bool bStonksEnabled;
 	unsigned int uiStonksTextChannelID;
 	bool bStonksSocialAnnouncementsEnabled;
+	bool bFeedbackGitHubEnabled;
+	QString qsFeedbackGitHubOwner;
+	QString qsFeedbackGitHubRepo;
+	QString qsFeedbackGitHubToken;
+	QString qsFeedbackGitHubAPIUrl;
+	unsigned int uiFeedbackMaxLogBytes;
+	unsigned int uiFeedbackMaxBodyBytes;
+	QString qsFeedbackCommonLabels;
+	QString qsFeedbackBugLabels;
+	QString qsFeedbackSuggestionLabels;
+	QString qsFeedbackSupportLabels;
 
 	/// The number of seconds to keep rolling stats for per client
 	unsigned int rollingStatsWindow;

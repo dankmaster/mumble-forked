@@ -64,6 +64,7 @@
 	let stonksDraftPositions = null;
 	let stonksDraftNote = "";
 	let stonksDraftCurrency = "USD";
+	let stonksDraftKey = "";
 	let stonksQuoteSearchText = "";
 	let stonksQuoteSearchBusy = false;
 	let stonksQuoteSearchError = "";
@@ -128,6 +129,7 @@
 		scopeTitle: document.getElementById("scope-title"),
 		scopeDescription: document.getElementById("scope-description"),
 		scopeBanner: document.getElementById("scope-banner"),
+		stonksLeaderboardHeader: document.getElementById("stonks-leaderboard-header"),
 		conversationMeta: document.getElementById("conversation-meta"),
 		voicePresenceStack: document.getElementById("voice-presence-stack"),
 		screenShareButton: document.getElementById("screen-share-button"),
@@ -181,18 +183,33 @@
 	let imageViewerState = loadImageViewerState();
 
 	function previewInlineMediaEnabled() {
-		if (document.body && document.body.dataset.inlinePreviewMedia === "true") {
+		const bodySetting = document.body ? String(document.body.dataset.inlinePreviewMedia || "").trim().toLowerCase() : "";
+		if (bodySetting === "false" || bodySetting === "0" || bodySetting === "off") {
+			return false;
+		}
+		if (bodySetting === "true" || bodySetting === "1" || bodySetting === "on") {
 			return true;
+		}
+		if (window.mumbleInlinePreviewMedia === false) {
+			return false;
 		}
 		if (window.mumbleInlinePreviewMedia === true) {
 			return true;
 		}
 		try {
-			return window.localStorage
-				&& window.localStorage.getItem(inlinePreviewMediaStorageKey) === "1";
+			if (window.localStorage) {
+				const stored = String(window.localStorage.getItem(inlinePreviewMediaStorageKey) || "").trim().toLowerCase();
+				if (stored === "false" || stored === "0" || stored === "off") {
+					return false;
+				}
+				if (stored === "true" || stored === "1" || stored === "on") {
+					return true;
+				}
+			}
 		} catch (error) {
-			return false;
+			return true;
 		}
+		return true;
 	}
 
 	function viewportMatchesCompactRail() {
@@ -1686,6 +1703,83 @@
 		});
 	}
 
+	function parseScopeToken(token) {
+		const parts = String(token || "").split(":");
+		if (parts.length !== 2) {
+			return null;
+		}
+
+		const scope = Number(parts[0]);
+		const id = Number(parts[1]);
+		if (!Number.isFinite(scope) || !Number.isFinite(id)) {
+			return null;
+		}
+		return { scope: scope, id: id };
+	}
+
+	function normalizedStonksRoomLabel(label) {
+		return String(label || "").trim().replace(/^#/, "").toLowerCase();
+	}
+
+	function activeScopeIsStonksRoom(snapshot) {
+		const app = snapshot.app || {};
+		const stonks = app.stonks || {};
+		const scope = snapshot.activeScope || {};
+		const parsedScope = parseScopeToken(scope.scopeToken);
+		const configuredTextChannelId = Number(stonks.textChannelId || 0);
+		if (parsedScope && parsedScope.scope === 3 && configuredTextChannelId > 0
+				&& parsedScope.id === configuredTextChannelId) {
+			return true;
+		}
+		return parsedScope && parsedScope.scope === 3 && normalizedStonksRoomLabel(scope.label) === "stonks";
+	}
+
+	function rankedStonksLeaderboardRows(stonks) {
+		return (Array.isArray(stonks.leaderboard) ? stonks.leaderboard : []).filter(function(row) {
+			return row && !row.insufficientHistory && Number(row.rank || 0) > 0;
+		});
+	}
+
+	function renderStonksChatHeader(snapshot) {
+		if (!refs.stonksLeaderboardHeader) {
+			return;
+		}
+
+		const app = snapshot.app || {};
+		const stonks = app.stonks || {};
+		const visible = activeScopeIsStonksRoom(snapshot) && !!stonks.supported && stonks.enabled !== false;
+		refs.stonksLeaderboardHeader.classList.toggle("hidden", !visible);
+		refs.stonksLeaderboardHeader.innerHTML = "";
+		if (!visible) {
+			return;
+		}
+
+		const label = document.createElement("span");
+		label.className = "stonks-chat-header-label";
+		label.textContent = "Leaderboard " + (stonks.selectedPeriod || "30d");
+		refs.stonksLeaderboardHeader.appendChild(label);
+
+		const rows = rankedStonksLeaderboardRows(stonks).slice(0, 3);
+		if (!rows.length) {
+			const empty = document.createElement("span");
+			empty.className = "stonks-chat-header-empty";
+			empty.textContent = (Array.isArray(stonks.leaderboard) && stonks.leaderboard.length)
+				? "Waiting for baselines"
+				: "No ranked snapshots";
+			refs.stonksLeaderboardHeader.appendChild(empty);
+			return;
+		}
+
+		rows.forEach(function(row) {
+			const item = document.createElement("span");
+			item.className = "stonks-chat-header-rank"
+				+ (stonksNumber(row.returnPercent) >= 0 ? " is-positive" : " is-negative");
+			const name = String(row.userName || "User").trim() || "User";
+			item.textContent = String(row.rank || "") + ". " + name + " " + formatStonksPercent(row.returnPercent);
+			refs.stonksLeaderboardHeader.appendChild(item);
+		});
+	}
+
 	function screenShareVisible(share) {
 		return !!(share && share.visible);
 	}
@@ -3171,6 +3265,7 @@
 			voicePresence: null,
 			hideWhenEmpty: !(app.canManageTextChannels || app.canCreateTextRoom)
 		});
+		renderStonksChatHeader(snapshot);
 		const renderedActiveRailToken = activeRailToken();
 		if (!renderedActiveRailToken) {
 			lastActiveRailToken = "";
@@ -3229,6 +3324,7 @@
 		refs.scopeTitle.textContent = scope.label || "Modern Layout";
 		refs.scopeDescription.textContent = scope.description || "Select a room to see shared history.";
 		renderMeta(scope.meta || []);
+		renderStonksChatHeader(snapshot);
 		renderScreenShareHeader(scope, scope.screenShare || null);
 		renderScreenShareCard(scope, scope.screenShare || null);
 		refs.scopeBanner.textContent = scope.banner || "";
@@ -4221,7 +4317,11 @@
 				&& host !== "youtube-nocookie.com" && !host.endsWith(".youtube-nocookie.com")) {
 				return embedUrl;
 			}
+			url.searchParams.set("controls", "0");
+			url.searchParams.set("disablekb", "1");
 			url.searchParams.set("enablejsapi", "1");
+			url.searchParams.set("fs", "0");
+			url.searchParams.set("iv_load_policy", "3");
 			url.searchParams.set("playsinline", "1");
 			url.searchParams.delete("origin");
 			if (window.location && /^https?:$/i.test(window.location.protocol || "")) {
@@ -4753,7 +4853,7 @@
 		const media = document.createElement("div");
 		media.className = "preview-card-media preview-card-playback preview-card-embed-media preview-card-"
 			+ kindToken + "-embed-media";
-		if (!previewInlineMediaEnabled()) {
+		if (!previewInlineMediaEnabled() || embedKind === "tiktok") {
 			appendPreviewPlaybackFallback(media, preview, previewStaticPlaybackText(preview, "Open in browser"));
 			card.appendChild(media);
 			requestAnimationFrame(syncScrollState);
@@ -4761,6 +4861,16 @@
 		}
 		media.addEventListener("click", function(event) {
 			event.stopPropagation();
+			if (event.target && event.target.closest && event.target.closest(".preview-card-media-controls")) {
+				return;
+			}
+			if (embedKind === "youtube") {
+				const playButton = media.querySelector(".preview-card-media-play");
+				if (playButton && !playButton.disabled) {
+					event.preventDefault();
+					playButton.click();
+				}
+			}
 		});
 
 		const frameWrap = document.createElement("div");
@@ -7967,6 +8077,181 @@
 		card.appendChild(shell);
 	}
 
+	function previewIsInstagramPost(preview, hostLabel) {
+		const metadata = (preview && preview.metadata) || {};
+		if (String(metadata.provider || "").trim().toLowerCase() === "instagram"
+			|| String(metadata.previewProvider || "").trim().toLowerCase() === "instagram") {
+			return true;
+		}
+		const url = previewUrlObject(preview && preview.url);
+		const host = normalizedPreviewHost(url ? url.hostname : hostLabel);
+		if (host !== "instagram.com" && host !== "instagr.am") {
+			return false;
+		}
+		const segments = url ? url.pathname.split("/").filter(Boolean).map(function(segment) {
+			try {
+				return decodeURIComponent(segment);
+			} catch (error) {
+				return segment;
+			}
+		}) : [];
+		const first = String(segments[0] || "").toLowerCase();
+		const second = String(segments[1] || "").toLowerCase();
+		return (first === "p" || first === "reel" || first === "reels" || first === "tv")
+			|| (segments.length >= 3 && second && /^(p|reel|reels|tv)$/.test(second));
+	}
+
+	function previewInstagramHandle(preview) {
+		const metadata = (preview && preview.metadata) || {};
+		const metadataHandle = String(metadata.instagramHandle || "").trim();
+		if (metadataHandle) {
+			return metadataHandle.charAt(0) === "@" ? metadataHandle : "@" + metadataHandle.replace(/^@+/, "");
+		}
+		const url = previewUrlObject(preview && preview.url);
+		if (!url) {
+			return "";
+		}
+		const segments = url.pathname.split("/").filter(Boolean).map(function(segment) {
+			try {
+				return decodeURIComponent(segment);
+			} catch (error) {
+				return segment;
+			}
+		});
+		if (segments.length >= 3 && /^(p|reel|reels|tv)$/i.test(String(segments[1] || ""))) {
+			return "@" + String(segments[0] || "").replace(/^@+/, "");
+		}
+		return "";
+	}
+
+	function previewInstagramDisplayName(preview, handle) {
+		const metadata = (preview && preview.metadata) || {};
+		const metadataName = String(metadata.instagramDisplayName || "").trim();
+		if (metadataName) {
+			return metadataName;
+		}
+		const subtitle = String((preview && preview.subtitle) || "").trim();
+		if (subtitle && !/^instagram$/i.test(subtitle)
+			&& subtitle.toLowerCase() !== String(handle || "").toLowerCase()) {
+			return subtitle;
+		}
+		return "";
+	}
+
+	function previewInstagramCaption(preview, descriptionText) {
+		const metadata = (preview && preview.metadata) || {};
+		const caption = String(metadata.instagramCaption || "").trim();
+		if (caption) {
+			return caption;
+		}
+		const title = String((preview && preview.title) || "").trim();
+		if (title && !/^instagram(?: post| reel)?$/i.test(title)
+			&& !/^fetching instagram/i.test(title)
+			&& !/^post by @/i.test(title)) {
+			return title;
+		}
+		const description = String(descriptionText || "").trim();
+		if (description && !/^@?[a-z0-9._]+$/i.test(description)
+			&& !/^video preview$/i.test(description)
+			&& !/^image preview$/i.test(description)) {
+			return description;
+		}
+		return "";
+	}
+
+	function appendInstagramPostPreview(card, preview, hostLabel, descriptionText, mediaState) {
+		mediaState = mediaState || {};
+		const metadata = (preview && preview.metadata) || {};
+		const handle = previewInstagramHandle(preview);
+		const displayName = previewInstagramDisplayName(preview, handle);
+		const caption = previewInstagramCaption(preview, descriptionText);
+		const shell = document.createElement("div");
+		shell.className = "preview-card-instagram-shell";
+
+		if (mediaState.hasPlayableMedia && (mediaState.isVideoMedia || mediaState.isGifMedia)) {
+			shell.appendChild(createPreviewPlayableMedia(card, preview, mediaState.mediaUrl, mediaState.mediaMime,
+				mediaState.mediaAudioUrl, mediaState.mediaAudioMime, mediaState.isVideoMedia, mediaState.isGifMedia,
+				mediaState.videoInlineSupported, "preview-card-instagram-media"));
+		} else if (mediaState.imageMediaItems && mediaState.imageMediaItems.length > 1) {
+			appendPreviewImageCarousel(shell, preview, mediaState.imageMediaItems, "preview-card-instagram-media");
+		} else {
+			const imageItem = mediaState.imageMediaItems && mediaState.imageMediaItems.length
+				? mediaState.imageMediaItems[0]
+				: null;
+			const imageUrl = imageItem ? imageItem.url : String(preview.thumbnailUrl || "").trim();
+			if (imageUrl) {
+				const media = document.createElement("div");
+				media.className = "preview-card-media preview-card-image-preview-media preview-card-instagram-media";
+				const image = document.createElement("img");
+				image.className = "preview-card-image preview-card-inline-image preview-card-instagram-image";
+				image.loading = "lazy";
+				image.src = imageUrl;
+				image.alt = preview.title || handle || "Instagram preview";
+				media.appendChild(image);
+				shell.appendChild(media);
+			}
+		}
+
+		const body = document.createElement("div");
+		body.className = "preview-card-instagram-body";
+
+		const header = document.createElement("div");
+		header.className = "preview-card-x-header preview-card-instagram-header";
+
+		const avatar = document.createElement("span");
+		avatar.className = "preview-card-x-avatar preview-card-instagram-avatar";
+		styleAvatar(avatar, displayName || handle || "Instagram", false, String(metadata.instagramAvatarUrl || "").trim());
+		header.appendChild(avatar);
+
+		const heading = document.createElement("div");
+		heading.className = "preview-card-x-heading";
+
+		const sourceRow = document.createElement("div");
+		sourceRow.className = "preview-card-x-source-row";
+		const source = document.createElement("span");
+		source.className = "preview-card-x-source";
+		const username = handle ? handle.replace(/^@+/, "") : "";
+		source.textContent = username || displayName || "Instagram";
+		sourceRow.appendChild(source);
+		heading.appendChild(sourceRow);
+
+		const subline = document.createElement("div");
+		subline.className = "preview-card-x-handle";
+		const timestamp = previewXTimestamp(metadata.instagramCreatedAt);
+		const displayHint = displayName && displayName.toLowerCase() !== String(username || "").toLowerCase()
+			? displayName
+			: (handle || hostLabel || "instagram.com");
+		subline.textContent = displayHint + (timestamp ? " · " + timestamp : "");
+		heading.appendChild(subline);
+		header.appendChild(heading);
+
+		const badge = document.createElement("span");
+		badge.className = "preview-card-x-badge preview-card-instagram-badge";
+		badge.textContent = String(metadata.instagramMediaKind || "").toLowerCase() === "reel" ? "Reel" : "Post";
+		header.appendChild(badge);
+		body.appendChild(header);
+
+		if (caption) {
+			const copy = document.createElement("div");
+			copy.className = "preview-card-x-copy preview-card-instagram-copy";
+			const captionNode = document.createElement("div");
+			captionNode.className = "preview-card-x-title preview-card-instagram-caption";
+			captionNode.textContent = caption;
+			copy.appendChild(captionNode);
+			body.appendChild(copy);
+		}
+
+		const footer = document.createElement("div");
+		footer.className = "preview-card-x-footer preview-card-instagram-footer";
+		const action = document.createElement("span");
+		action.className = "preview-card-x-action preview-card-instagram-action";
+		action.textContent = (preview && preview.openLabel) || "Open on Instagram";
+		footer.appendChild(action);
+		body.appendChild(footer);
+		shell.appendChild(body);
+		card.appendChild(shell);
+	}
+
 	function previewIsSocialPost(preview, hostLabel) {
 		const url = previewUrlObject(preview && preview.url);
 		const host = normalizedPreviewHost(url ? url.hostname : hostLabel);
@@ -8625,8 +8910,9 @@
 		const isFlashbackThread = swedishSiteKind === "flashback";
 		const isGitHub = previewIsGitHub(preview, hostLabel);
 		const isXPost = previewIsXPost(preview, hostLabel);
+		const isInstagramPost = !isXPost && previewIsInstagramPost(preview, hostLabel);
 		const isTwitch = previewIsTwitch(preview, hostLabel);
-		const isSocialPost = !isXPost && !hasEmbedMedia && previewIsSocialPost(preview, hostLabel);
+		const isSocialPost = !isXPost && !isInstagramPost && !hasEmbedMedia && previewIsSocialPost(preview, hostLabel);
 		const hasImageCarousel = imageMediaItems.length > 1 && !isVideoMedia && !isGifMedia;
 		const hasInteractiveMedia = hasPlayableMedia || hasEmbedMedia || hasImageCarousel || hasSteamGallery || hasGameStoreGallery;
 		const cardUsesDiv = hasInteractiveMedia || isGitHub || isGameStore || !!richProviderSpec;
@@ -8639,6 +8925,7 @@
 		const isYouTubeEmbed = hasEmbedMedia && embedKind === "youtube";
 		const embedKindToken = previewClassToken(embedKind);
 		const isShortEmbed = hasEmbedMedia && embedAspect === "short";
+		const isSquareEmbed = hasEmbedMedia && embedAspect === "square";
 		const isAudioEmbed = hasEmbedMedia && (embedAspect === "audio" || embedAspect === "compact-audio");
 
 		const card = document.createElement(cardUsesDiv ? "div" : "button");
@@ -8668,11 +8955,13 @@
 			+ (isFlashbackThread ? " is-flashback-thread" : "")
 			+ (isGitHub ? " is-github" : "")
 			+ (isXPost ? " is-x-post" : "")
+			+ (isInstagramPost ? " is-instagram-post is-x-post" : "")
 			+ (isTwitch ? " is-twitch" : "")
 			+ (isSocialPost ? " is-social-post is-x-post" : "")
 			+ (hasEmbedMedia ? " is-embed" : "")
 			+ (embedKindToken ? " is-" + embedKindToken + "-embed" : "")
 			+ (isShortEmbed ? " is-embed-short" : "")
+			+ (isSquareEmbed ? " is-embed-square" : "")
 			+ (isAudioEmbed ? " is-embed-audio" : "")
 			+ (embedAspect === "compact-audio" ? " is-embed-compact-audio" : "")
 			+ (isYouTubeEmbed ? " is-youtube-embed" : "")
@@ -8726,6 +9015,20 @@
 		}
 		if (isXPost) {
 			appendXPostPreview(card, preview, hostLabel, sourceLabel, descriptionText, {
+				mediaUrl: mediaUrl,
+				mediaMime: mediaMime,
+				mediaAudioUrl: mediaAudioUrl,
+				mediaAudioMime: mediaAudioMime,
+				hasPlayableMedia: hasPlayableMedia,
+				isVideoMedia: isVideoMedia,
+				isGifMedia: isGifMedia,
+				videoInlineSupported: videoInlineSupported,
+				imageMediaItems: imageMediaItems
+			});
+			return card;
+		}
+		if (isInstagramPost) {
+			appendInstagramPostPreview(card, preview, hostLabel, descriptionText, {
 				mediaUrl: mediaUrl,
 				mediaMime: mediaMime,
 				mediaAudioUrl: mediaAudioUrl,
@@ -10128,6 +10431,7 @@
 				label: "Help",
 				items: [
 					{ id: "help.whatsThis", label: "What's this", enabled: true },
+					{ id: "help.feedback", label: "Report feedback...", enabled: true },
 					{ id: "help.versionCheck", label: "Check for updates", enabled: true },
 					{ id: "help.about", label: "About Mumble", enabled: true },
 					{ id: "help.aboutQt", label: "About Qt", enabled: true }
@@ -13407,6 +13711,17 @@
 		return (number > 0 ? "+" : "") + number.toFixed(2) + "%";
 	}
 
+	function formatStonksQuantity(value) {
+		return stonksNumber(value).toLocaleString(undefined, {
+			maximumFractionDigits: 4
+		});
+	}
+
+	function formatStonksSignedMoney(value, currency) {
+		const number = stonksNumber(value);
+		return (number > 0 ? "+" : number < 0 ? "-" : "") + formatStonksMoney(Math.abs(number), currency);
+	}
+
 	function formatStonksTime(seconds) {
 		const value = Number(seconds);
 		if (!Number.isFinite(value) || value <= 0) {
@@ -13507,6 +13822,44 @@
 		};
 	}
 
+	function stonksSelectedUserId(stonks) {
+		return Number(stonks && (stonks.selectedUserId || stonks.selfUserId || 0)) || 0;
+	}
+
+	function stonksSelectedUserName(stonks) {
+		const selectedId = stonksSelectedUserId(stonks);
+		const directName = String(stonks && stonks.selectedUserName || "").trim();
+		if (directName) {
+			return directName;
+		}
+		const users = Array.isArray(stonks && stonks.users) ? stonks.users : [];
+		const match = users.find(function(user) {
+			return Number(user && user.userId) === selectedId;
+		});
+		return String(match && match.userName || (selectedId ? "user " + selectedId : "Portfolio")).trim();
+	}
+
+	function stonksCanEditPortfolio(stonks) {
+		const selectedId = stonksSelectedUserId(stonks);
+		const selfId = Number(stonks && stonks.selfUserId || 0);
+		return selectedId > 0 && (!!(stonks && stonks.canAdmin) || (!!(stonks && stonks.registered) && selectedId === selfId));
+	}
+
+	function stonksLatestSnapshot(stonks) {
+		const snapshots = Array.isArray(stonks && stonks.snapshots) ? stonks.snapshots : [];
+		return snapshots.length ? snapshots[0] : null;
+	}
+
+	function stonksDraftIdentity(stonks) {
+		const latest = stonksLatestSnapshot(stonks);
+		return [
+			stonksSelectedUserId(stonks),
+			latest && latest.snapshotId || 0,
+			latest && latest.createdAt || 0,
+			latest && latest.totalValue || 0
+		].join(":");
+	}
+
 	function stonksQuoteFreshnessText(position) {
 		if (!position || !position.quoteTime) {
 			return "manual";
@@ -13545,16 +13898,80 @@
 		});
 		stonksDraftCurrency = latest && latest.currency || "USD";
 		stonksDraftNote = "";
+		stonksDraftKey = stonksDraftIdentity(stonks || {});
 	}
 
 	function ensureStonksDraft(stonks) {
-		if (!Array.isArray(stonksDraftPositions)) {
+		if (!Array.isArray(stonksDraftPositions) || stonksDraftKey !== stonksDraftIdentity(stonks || {})) {
 			seedStonksDraft(stonks || {});
 		}
 	}
 
 	function stonksDraftTotal() {
 		return stonksDraftTotalFromPositions(stonksDraftPositions || []);
+	}
+
+	function stonksPositionMap(snapshot) {
+		const map = new Map();
+		(snapshot && Array.isArray(snapshot.positions) ? snapshot.positions : []).forEach(function(position) {
+			const normalized = stonksNormalizePosition(position, snapshot && snapshot.currency || "USD");
+			if (normalized.symbol) {
+				map.set(normalized.symbol, normalized);
+			}
+		});
+		return map;
+	}
+
+	function stonksValueChanged(before, after) {
+		const delta = Math.abs(stonksNumber(after) - stonksNumber(before));
+		return delta > Math.max(0.01, Math.abs(stonksNumber(before)) * 0.001);
+	}
+
+	function stonksSnapshotChanges(snapshot, previousSnapshot) {
+		const currentPositions = stonksPositionMap(snapshot);
+		const previousPositions = stonksPositionMap(previousSnapshot);
+		const currency = snapshot && snapshot.currency || previousSnapshot && previousSnapshot.currency || "USD";
+		const changes = [];
+
+		if (!currentPositions.size && previousPositions.size) {
+			return ["Cleared portfolio"];
+		}
+		if (currentPositions.size && !previousPositions.size) {
+			currentPositions.forEach(function(position) {
+				changes.push("Added " + position.symbol + " at " + formatStonksMoney(position.marketValue, position.currency));
+			});
+			return changes;
+		}
+
+		currentPositions.forEach(function(position, symbol) {
+			const previous = previousPositions.get(symbol);
+			if (!previous) {
+				changes.push("Added " + symbol + " at " + formatStonksMoney(position.marketValue, position.currency));
+				return;
+			}
+			if (stonksValueChanged(previous.marketValue, position.marketValue)) {
+				changes.push(symbol + " value " + formatStonksSignedMoney(stonksNumber(position.marketValue) - stonksNumber(previous.marketValue), position.currency));
+			}
+			if (stonksValueChanged(previous.quantity, position.quantity)) {
+				changes.push(symbol + " qty " + formatStonksQuantity(previous.quantity) + " -> " + formatStonksQuantity(position.quantity));
+			}
+			if (stonksValueChanged(previous.price, position.price)) {
+				changes.push(symbol + " price " + formatStonksMoney(previous.price, position.currency) + " -> " + formatStonksMoney(position.price, position.currency));
+			}
+		});
+		previousPositions.forEach(function(position, symbol) {
+			if (!currentPositions.has(symbol)) {
+				changes.push("Removed " + symbol + " worth " + formatStonksMoney(position.marketValue, position.currency));
+			}
+		});
+
+		if (previousSnapshot && stonksValueChanged(previousSnapshot.totalValue, snapshot && snapshot.totalValue)) {
+			changes.unshift("Total " + formatStonksSignedMoney(stonksNumber(snapshot && snapshot.totalValue) - stonksNumber(previousSnapshot.totalValue), currency));
+		}
+		if (!changes.length) {
+			changes.push(previousSnapshot ? "Metadata update" : "Initial save");
+		}
+		return changes;
 	}
 
 	function stonksInput(value, field, type, placeholder) {
@@ -13657,7 +14074,7 @@
 		const title = document.createElement("strong");
 		title.textContent = validation.errors.length
 			? validation.errors.length + " issue" + (validation.errors.length === 1 ? "" : "s")
-			: "Ready to submit";
+			: "Ready to save";
 		summary.appendChild(title);
 		const messages = validation.errors.concat(validation.warnings).slice(0, 5);
 		if (messages.length) {
@@ -13815,7 +14232,7 @@
 	}
 
 	function appendStonksTabs(parent, stonks) {
-		const tabs = [["overview", "Overview"], ["ledger", "Ledger"], ["leaderboard", "Leaderboard"], ["following", "Following"]];
+		const tabs = [["overview", "Overview"], ["ledger", "Portfolio"], ["leaderboard", "Leaderboard"], ["following", "Following"], ["audit", "Audit"]];
 		if (stonks.canAdmin) {
 			tabs.push(["admin", "Admin"]);
 		}
@@ -13838,13 +14255,64 @@
 		parent.appendChild(wrap);
 	}
 
+	function appendStonksHeatmap(parent, stonks) {
+		const latest = stonksLatestSnapshot(stonks);
+		const positions = latest && Array.isArray(latest.positions) ? latest.positions.slice() : [];
+		const visiblePositions = positions
+			.map(function(position) {
+				return stonksNormalizePosition(position, latest && latest.currency || "USD");
+			})
+			.filter(function(position) {
+				return position.symbol && stonksNumber(position.marketValue) > 0;
+			})
+			.sort(function(left, right) {
+				return stonksNumber(right.marketValue) - stonksNumber(left.marketValue);
+			});
+		if (!visiblePositions.length) {
+			const empty = document.createElement("div");
+			empty.className = "stonks-empty";
+			empty.textContent = latest && latest.positionsRedacted ? "Portfolio positions are private." : "No open positions to map.";
+			parent.appendChild(empty);
+			return;
+		}
+
+		const total = visiblePositions.reduce(function(sum, position) {
+			return sum + stonksNumber(position.marketValue);
+		}, 0);
+		const heatmap = document.createElement("section");
+		heatmap.className = "stonks-heatmap";
+		const title = document.createElement("div");
+		title.className = "stonks-heatmap-title";
+		title.innerHTML = "<strong></strong><span></span>";
+		title.querySelector("strong").textContent = "Portfolio heatmap";
+		title.querySelector("span").textContent = stonksSelectedUserName(stonks);
+		heatmap.appendChild(title);
+		const grid = document.createElement("div");
+		grid.className = "stonks-heatmap-grid";
+		visiblePositions.forEach(function(position) {
+			const share = total > 0 ? stonksNumber(position.marketValue) / total : 0;
+			const tile = document.createElement("div");
+			tile.className = "stonks-heatmap-tile";
+			tile.style.setProperty("--tile-alpha", String(Math.min(0.82, 0.18 + share * 1.9)));
+			tile.style.setProperty("--tile-weight", Math.max(1, Math.round(share * 7)) + "fr");
+			tile.innerHTML = "<strong></strong><span></span><small></small>";
+			tile.querySelector("strong").textContent = position.symbol;
+			tile.querySelector("span").textContent = formatStonksMoney(position.marketValue, position.currency);
+			tile.querySelector("small").textContent = Math.round(share * 1000) / 10 + "%";
+			grid.appendChild(tile);
+		});
+		heatmap.appendChild(grid);
+		parent.appendChild(heatmap);
+	}
+
 	function appendStonksOverview(parent, stonks) {
 		const snapshots = Array.isArray(stonks.snapshots) ? stonks.snapshots : [];
-		const latest = snapshots.length ? snapshots[0] : null;
+		const latest = stonksLatestSnapshot(stonks);
 		const stats = document.createElement("div");
 		stats.className = "stonks-stat-grid";
 		[["Total value", latest ? formatStonksMoney(latest.totalValue, latest.currency) : "-"],
-		 ["Last snapshot", latest ? formatStonksTime(latest.createdAt) : "-"],
+		 ["Last saved", latest ? formatStonksTime(latest.createdAt) : "-"],
+		 ["Owner", stonksSelectedUserName(stonks)],
 		 ["Leaderboard rows", String((stonks.leaderboard || []).length)]].forEach(function(item) {
 			const card = document.createElement("div");
 			card.className = "stonks-stat";
@@ -13869,11 +14337,12 @@
 			periods.appendChild(button);
 		});
 		parent.appendChild(periods);
+		appendStonksHeatmap(parent, stonks);
 		const quick = document.createElement("button");
 		quick.type = "button";
 		quick.className = "chip-button is-primary";
-		quick.textContent = "Quick snapshot";
-		quick.disabled = !stonks.registered;
+		quick.textContent = "Save portfolio";
+		quick.disabled = !stonksCanEditPortfolio(stonks);
 		quick.addEventListener("click", function() {
 			if (!refs.modernDialogBody.querySelector(".stonks-position-row")) {
 				stonksActiveTab = "overview";
@@ -13881,21 +14350,34 @@
 				return;
 			}
 			const draft = stonksCollectDraft(refs.modernDialogBody);
-			draft.registered = stonks.registered;
+			draft.registered = stonksCanEditPortfolio(stonks);
+			draft.userId = stonksSelectedUserId(stonks);
 			if (stonksValidateDraft(draft).errors.length) {
 				stonksActiveTab = "overview";
 				renderModernDialog();
 				return;
 			}
-			invokeModernDialogAction("submitSnapshot", draft);
+			invokeModernDialogAction("savePortfolio", draft);
 		});
 		parent.appendChild(quick);
 	}
 
 	function appendStonksEditor(parent, stonks) {
 		ensureStonksDraft(stonks);
+		const canEdit = stonksCanEditPortfolio(stonks);
+		const ownerUserId = stonksSelectedUserId(stonks);
+		const ownerName = stonksSelectedUserName(stonks);
+		const latest = stonksLatestSnapshot(stonks);
 		const editor = document.createElement("section");
 		editor.className = "stonks-editor";
+		const owner = document.createElement("div");
+		owner.className = "stonks-portfolio-owner";
+		owner.innerHTML = "<strong></strong><span></span>";
+		owner.querySelector("strong").textContent = ownerName;
+		owner.querySelector("span").textContent = latest
+			? "Current save " + formatStonksTime(latest.createdAt)
+			: "No saved portfolio";
+		editor.appendChild(owner);
 		const top = document.createElement("div");
 		top.className = "stonks-editor-top";
 		top.appendChild(stonksInput(stonksDraftCurrency, "snapshotCurrency", "text", "Currency"));
@@ -14041,7 +14523,8 @@
 					row.querySelector("[data-stonks-field='marketValue']").value = Number.isFinite(quantity * price) ? String(quantity * price) : "0";
 				}
 				const liveDraft = stonksCollectDraft(editor);
-				liveDraft.registered = stonks.registered;
+				liveDraft.registered = canEdit;
+				liveDraft.userId = ownerUserId;
 				updateStonksValidation(validationSummary, liveDraft, submit, total);
 			});
 			table.appendChild(row);
@@ -14064,21 +14547,38 @@
 		const submit = document.createElement("button");
 		submit.type = "button";
 		submit.className = "chip-button is-primary";
-		submit.textContent = "Submit snapshot";
-		submit.disabled = !stonks.registered;
+		submit.textContent = ownerUserId && ownerUserId !== Number(stonks.selfUserId || 0)
+			? "Save for " + ownerName
+			: "Save portfolio";
+		submit.disabled = !canEdit;
 		submit.addEventListener("click", function() {
 			const draft = stonksCollectDraft(editor);
-			draft.registered = stonks.registered;
+			draft.registered = canEdit;
+			draft.userId = ownerUserId;
 			if (stonksValidateDraft(draft).errors.length) {
 				updateStonksValidation(validationSummary, draft, submit, total);
 				return;
 			}
-			invokeModernDialogAction("submitSnapshot", draft);
+			invokeModernDialogAction("savePortfolio", draft);
 		});
-		actions.append(add, total, submit);
+		const clear = document.createElement("button");
+		clear.type = "button";
+		clear.className = "chip-button is-danger";
+		clear.textContent = "Clear portfolio";
+		clear.disabled = !canEdit || !(latest && stonksNumber(latest.totalValue) > 0);
+		clear.addEventListener("click", function() {
+			if (window.confirm("Clear portfolio for " + ownerName + "?")) {
+				invokeModernDialogAction("clearPortfolio", {
+					userId: ownerUserId,
+					currency: stonksDraftCurrency || latest && latest.currency || "USD",
+					note: "Portfolio cleared"
+				});
+			}
+		});
+		actions.append(add, total, clear, submit);
 		editor.appendChild(actions);
 		const validationSummary = document.createElement("div");
-		const draft = { positions: stonksDraftPositions || [], currency: stonksDraftCurrency, registered: stonks.registered };
+		const draft = { positions: stonksDraftPositions || [], currency: stonksDraftCurrency, registered: canEdit };
 		updateStonksValidation(validationSummary, draft, submit, total);
 		editor.appendChild(validationSummary);
 		parent.appendChild(editor);
@@ -14086,14 +14586,59 @@
 
 	function appendStonksLedger(parent, stonks) {
 		appendStonksEditor(parent, stonks);
+		appendStonksHeatmap(parent, stonks);
+	}
+
+	function appendStonksAudit(parent, stonks) {
+		const snapshots = Array.isArray(stonks.snapshots) ? stonks.snapshots : [];
+		const ownerUserId = stonksSelectedUserId(stonks);
+		const ownerName = stonksSelectedUserName(stonks);
+		const canEdit = stonksCanEditPortfolio(stonks);
+		const description = document.createElement("div");
+		description.className = "stonks-leaderboard-description";
+		description.textContent = "Portfolio saves are kept here because leaderboard periods compare the latest save with older saves.";
+		const owner = document.createElement("span");
+		owner.textContent = ownerName;
+		description.appendChild(owner);
+		parent.appendChild(description);
 		const list = document.createElement("div");
 		list.className = "stonks-list";
-		(stonks.snapshots || []).forEach(function(snapshot) {
+		snapshots.forEach(function(snapshot, index) {
+			const previousSnapshot = snapshots[index + 1] || null;
 			const details = document.createElement("details");
 			details.className = "stonks-ledger-item";
 			const summary = document.createElement("summary");
-			summary.textContent = formatStonksMoney(snapshot.totalValue, snapshot.currency) + " · " + formatStonksTime(snapshot.createdAt);
+			const summaryText = document.createElement("span");
+			summaryText.textContent = formatStonksMoney(snapshot.totalValue, snapshot.currency) + " · saved " + formatStonksTime(snapshot.createdAt);
+			summary.appendChild(summaryText);
+			if (canEdit && snapshot.snapshotId) {
+				const remove = document.createElement("button");
+				remove.type = "button";
+				remove.className = "chip-button is-danger stonks-delete-snapshot";
+				remove.textContent = "Delete";
+				remove.addEventListener("click", function(event) {
+					event.preventDefault();
+					event.stopPropagation();
+					if (window.confirm("Delete this portfolio snapshot for " + ownerName + "?")) {
+						invokeModernDialogAction("deleteSnapshot", {
+							snapshotId: snapshot.snapshotId,
+							userId: snapshot.userId || ownerUserId
+						});
+					}
+				});
+				summary.appendChild(remove);
+			}
 			details.appendChild(summary);
+			const changes = stonksSnapshotChanges(snapshot, previousSnapshot).slice(0, 10);
+			const changeList = document.createElement("div");
+			changeList.className = "stonks-audit-changes";
+			changes.forEach(function(change) {
+				const item = document.createElement("span");
+				item.className = "stonks-audit-change";
+				item.textContent = change;
+				changeList.appendChild(item);
+			});
+			details.appendChild(changeList);
 			(snapshot.positions || []).forEach(function(position) {
 				const row = document.createElement("div");
 				row.className = "stonks-ledger-position";
@@ -14112,12 +14657,18 @@
 				note.textContent = snapshot.note;
 				details.appendChild(note);
 			}
+			if (!snapshot.positions || !snapshot.positions.length) {
+				const empty = document.createElement("p");
+				empty.className = "stonks-note";
+				empty.textContent = snapshot.positionsRedacted ? "Positions redacted." : "No open positions.";
+				details.appendChild(empty);
+			}
 			list.appendChild(details);
 		});
 		if (!list.children.length) {
 			const empty = document.createElement("div");
 			empty.className = "stonks-empty";
-			empty.textContent = "No snapshots yet.";
+			empty.textContent = "No audit entries yet.";
 			list.appendChild(empty);
 		}
 		parent.appendChild(list);
@@ -14127,7 +14678,7 @@
 		const description = document.createElement("div");
 		description.className = "stonks-leaderboard-description";
 		description.textContent = stonks.leaderboardDescription
-			|| "Snapshot return compares the latest accepted snapshot with the closest older snapshot for this period. It updates when users submit new snapshots.";
+			|| "Portfolio return compares the latest saved portfolio value with the closest older saved value for this period.";
 		if (stonks.leaderboardUpdatedAt) {
 			const updated = document.createElement("span");
 			updated.textContent = "Updated " + formatStonksTime(stonks.leaderboardUpdatedAt);
@@ -14142,7 +14693,7 @@
 			const main = document.createElement("div");
 			main.innerHTML = "<strong></strong><span></span><small></small>";
 			main.querySelector("strong").textContent = (row.insufficientHistory ? "" : row.rank + ". ") + row.userName;
-			main.querySelector("span").textContent = "Latest " + formatStonksTime(row.endSnapshotAt);
+			main.querySelector("span").textContent = "Latest save " + formatStonksTime(row.endSnapshotAt);
 			main.querySelector("small").textContent = row.insufficientHistory
 				? "Insufficient history for " + (row.period || stonks.selectedPeriod || "30d")
 				: "Baseline " + formatStonksTime(row.startSnapshotAt);
@@ -14157,13 +14708,27 @@
 			follow.addEventListener("click", function() {
 				invokeModernDialogAction(row.followed ? "unfollow" : "follow", { userId: row.userId });
 			});
-			item.append(main, percent, follow);
+			const actions = document.createElement("div");
+			actions.className = "stonks-row-actions";
+			if (stonks.canAdmin) {
+				const view = document.createElement("button");
+				view.type = "button";
+				view.className = "chip-button";
+				view.textContent = "View";
+				view.addEventListener("click", function() {
+					stonksActiveTab = "ledger";
+					invokeModernDialogAction("selectUser", { userId: row.userId });
+				});
+				actions.appendChild(view);
+			}
+			actions.appendChild(follow);
+			item.append(main, percent, actions);
 			list.appendChild(item);
 		});
 		if (!list.children.length) {
 			const empty = document.createElement("div");
 			empty.className = "stonks-empty";
-			empty.textContent = "No ranked snapshots for this period yet.";
+			empty.textContent = "No ranked portfolios for this period yet.";
 			list.appendChild(empty);
 		}
 		parent.appendChild(list);
@@ -14236,6 +14801,61 @@
 		});
 		form.append(enabled, announcements, select, save);
 		parent.appendChild(form);
+
+		const manager = document.createElement("section");
+		manager.className = "stonks-admin stonks-admin-manager";
+		const selectedUserId = stonksSelectedUserId(stonks);
+		const userSelect = document.createElement("select");
+		(stonks.users || []).forEach(function(user) {
+			const option = document.createElement("option");
+			option.value = String(user.userId || 0);
+			option.textContent = user.userName || ("user " + user.userId);
+			option.selected = Number(user.userId || 0) === selectedUserId;
+			userSelect.appendChild(option);
+		});
+		if (!userSelect.children.length) {
+			const option = document.createElement("option");
+			option.value = "0";
+			option.textContent = "No registered users";
+			userSelect.appendChild(option);
+		}
+		const view = document.createElement("button");
+		view.type = "button";
+		view.className = "chip-button";
+		view.textContent = "View portfolio";
+		view.disabled = Number(userSelect.value || 0) <= 0;
+		view.addEventListener("click", function() {
+			stonksActiveTab = "ledger";
+			invokeModernDialogAction("selectUser", { userId: Number(userSelect.value || 0) });
+		});
+		const audit = document.createElement("button");
+		audit.type = "button";
+		audit.className = "chip-button";
+		audit.textContent = "View audit";
+		audit.disabled = Number(userSelect.value || 0) <= 0;
+		audit.addEventListener("click", function() {
+			stonksActiveTab = "audit";
+			invokeModernDialogAction("selectUser", { userId: Number(userSelect.value || 0) });
+		});
+		const clear = document.createElement("button");
+		clear.type = "button";
+		clear.className = "chip-button is-danger";
+		clear.textContent = "Clear portfolio";
+		clear.disabled = Number(userSelect.value || 0) <= 0;
+		clear.addEventListener("click", function() {
+			const targetName = userSelect.options[userSelect.selectedIndex]
+				? userSelect.options[userSelect.selectedIndex].textContent
+				: "selected user";
+			if (window.confirm("Clear portfolio for " + targetName + "?")) {
+				invokeModernDialogAction("clearPortfolio", {
+					userId: Number(userSelect.value || 0),
+					currency: stonksLatestSnapshot(stonks) && stonksLatestSnapshot(stonks).currency || "USD",
+					note: "Portfolio cleared by admin"
+				});
+			}
+		});
+		manager.append(userSelect, view, audit, clear);
+		parent.appendChild(manager);
 	}
 
 	function renderStonksDialog(dialog) {
@@ -14275,6 +14895,8 @@
 			appendStonksLeaderboard(panel, stonks);
 		} else if (stonksActiveTab === "following") {
 			appendStonksFollowing(panel, stonks);
+		} else if (stonksActiveTab === "audit") {
+			appendStonksAudit(panel, stonks);
 		} else if (stonksActiveTab === "admin" && stonks.canAdmin) {
 			appendStonksAdmin(panel, stonks);
 		} else {
@@ -14997,6 +15619,7 @@
 
 		renderVoicePresenceStack(headerPresence);
 		renderMeta(scope.meta || []);
+		renderStonksChatHeader(snapshot);
 		renderScreenShareHeader(scope, scope.screenShare || null);
 		renderScreenShareCard(scope, scope.screenShare || null);
 		renderNote(app, scope);

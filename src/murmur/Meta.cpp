@@ -8,6 +8,7 @@
 #include "Connection.h"
 #include "EnvUtils.h"
 #include "FFDHE.h"
+#include "FeedbackReport.h"
 #include "Net.h"
 #include "OSInfo.h"
 #include "PBKDF2.h"
@@ -150,6 +151,17 @@ MetaParams::MetaParams() {
 	bStonksEnabled             = true;
 	uiStonksTextChannelID      = 0;
 	bStonksSocialAnnouncementsEnabled = true;
+	bFeedbackGitHubEnabled     = false;
+	qsFeedbackGitHubOwner      = QLatin1String("dankmaster");
+	qsFeedbackGitHubRepo       = QLatin1String("mumble-forked");
+	qsFeedbackGitHubToken.clear();
+	qsFeedbackGitHubAPIUrl     = QLatin1String("https://api.github.com");
+	uiFeedbackMaxLogBytes      = Mumble::Feedback::DEFAULT_MAX_LOG_BYTES;
+	uiFeedbackMaxBodyBytes     = Mumble::Feedback::DEFAULT_MAX_BODY_BYTES;
+	qsFeedbackCommonLabels     = QLatin1String("triage,in-app-feedback");
+	qsFeedbackBugLabels        = QLatin1String("bug");
+	qsFeedbackSuggestionLabels = QLatin1String("feature-request");
+	qsFeedbackSupportLabels    = QLatin1String("support");
 
 	rollingStatsWindow = 300;
 
@@ -421,6 +433,27 @@ void MetaParams::read(QString fname) {
 		typeCheckedFromSettings< unsigned int >("stonks_text_channel_id", uiStonksTextChannelID);
 	bStonksSocialAnnouncementsEnabled =
 		typeCheckedFromSettings("stonks_social_announcements_enabled", bStonksSocialAnnouncementsEnabled);
+	bFeedbackGitHubEnabled = typeCheckedFromSettings("feedback_github_enabled", bFeedbackGitHubEnabled);
+	qsFeedbackGitHubOwner =
+		typeCheckedFromSettings("feedback_github_owner", qsFeedbackGitHubOwner).trimmed();
+	qsFeedbackGitHubRepo =
+		typeCheckedFromSettings("feedback_github_repo", qsFeedbackGitHubRepo).trimmed();
+	qsFeedbackGitHubToken =
+		typeCheckedFromSettings("feedback_github_token", qsFeedbackGitHubToken).trimmed();
+	qsFeedbackGitHubAPIUrl =
+		typeCheckedFromSettings("feedback_github_api_url", qsFeedbackGitHubAPIUrl).trimmed();
+	uiFeedbackMaxLogBytes =
+		typeCheckedFromSettings< unsigned int >("feedback_max_log_bytes", uiFeedbackMaxLogBytes);
+	uiFeedbackMaxBodyBytes =
+		typeCheckedFromSettings< unsigned int >("feedback_max_body_bytes", uiFeedbackMaxBodyBytes);
+	qsFeedbackCommonLabels =
+		typeCheckedFromSettings("feedback_common_labels", qsFeedbackCommonLabels).trimmed();
+	qsFeedbackBugLabels =
+		typeCheckedFromSettings("feedback_bug_labels", qsFeedbackBugLabels).trimmed();
+	qsFeedbackSuggestionLabels =
+		typeCheckedFromSettings("feedback_suggestion_labels", qsFeedbackSuggestionLabels).trimmed();
+	qsFeedbackSupportLabels =
+		typeCheckedFromSettings("feedback_support_labels", qsFeedbackSupportLabels).trimmed();
 
 	rollingStatsWindow = typeCheckedFromSettings("rollingStatsWindow", rollingStatsWindow);
 
@@ -523,6 +556,17 @@ void MetaParams::read(QString fname) {
 	qmConfig.insert(QLatin1String("stonks_text_channel_id"), QString::number(uiStonksTextChannelID));
 	qmConfig.insert(QLatin1String("stonks_social_announcements_enabled"),
 					bStonksSocialAnnouncementsEnabled ? QLatin1String("true") : QLatin1String("false"));
+	qmConfig.insert(QLatin1String("feedback_github_enabled"),
+					bFeedbackGitHubEnabled ? QLatin1String("true") : QLatin1String("false"));
+	qmConfig.insert(QLatin1String("feedback_github_owner"), qsFeedbackGitHubOwner);
+	qmConfig.insert(QLatin1String("feedback_github_repo"), qsFeedbackGitHubRepo);
+	qmConfig.insert(QLatin1String("feedback_github_api_url"), qsFeedbackGitHubAPIUrl);
+	qmConfig.insert(QLatin1String("feedback_max_log_bytes"), QString::number(uiFeedbackMaxLogBytes));
+	qmConfig.insert(QLatin1String("feedback_max_body_bytes"), QString::number(uiFeedbackMaxBodyBytes));
+	qmConfig.insert(QLatin1String("feedback_common_labels"), qsFeedbackCommonLabels);
+	qmConfig.insert(QLatin1String("feedback_bug_labels"), qsFeedbackBugLabels);
+	qmConfig.insert(QLatin1String("feedback_suggestion_labels"), qsFeedbackSuggestionLabels);
+	qmConfig.insert(QLatin1String("feedback_support_labels"), qsFeedbackSupportLabels);
 	qmConfig.insert(QLatin1String("bandwidth"), QString::number(iMaxBandwidth));
 	qmConfig.insert(QLatin1String("users"), QString::number(iMaxUsers));
 	qmConfig.insert(QLatin1String("defaultchannel"), QString::number(iDefaultChan));

@@ -19,6 +19,8 @@
 #include "Connection.h"
 #include "Database.h"
 #include "DeveloperConsole.h"
+#include "FeedbackDialog.h"
+#include "FeedbackReport.h"
 #include "FinanceQuote.h"
 #include "ForkFeature.h"
 #include "Log.h"
@@ -2848,8 +2850,11 @@ QUrl youtubeEmbedUrl(const YouTubePreviewTarget &target) {
 	query.addQueryItem(QStringLiteral("rel"), QStringLiteral("0"));
 	query.addQueryItem(QStringLiteral("modestbranding"), QStringLiteral("1"));
 	query.addQueryItem(QStringLiteral("playsinline"), QStringLiteral("1"));
-	query.addQueryItem(QStringLiteral("controls"), QStringLiteral("1"));
+	query.addQueryItem(QStringLiteral("controls"), QStringLiteral("0"));
+	query.addQueryItem(QStringLiteral("disablekb"), QStringLiteral("1"));
 	query.addQueryItem(QStringLiteral("enablejsapi"), QStringLiteral("1"));
+	query.addQueryItem(QStringLiteral("fs"), QStringLiteral("0"));
+	query.addQueryItem(QStringLiteral("iv_load_policy"), QStringLiteral("3"));
 	query.addQueryItem(QStringLiteral("widget_referrer"), QStringLiteral("https://www.mumble.info/"));
 
 	const int startSeconds = youtubeStartSecondsFromUrl(target.canonicalUrl);
@@ -3183,6 +3188,59 @@ std::optional< PersistentChatPreviewEmbedTarget > tiktokEmbedTargetFromUrl(const
 	return PersistentChatPreviewEmbedTarget { QStringLiteral("tiktok"), embedUrl, QStringLiteral("short") };
 }
 
+struct InstagramPreviewTarget {
+	QString kind;
+	QString shortcode;
+	QUrl canonicalUrl;
+};
+
+std::optional< InstagramPreviewTarget > instagramPreviewTargetFromUrl(const QUrl &url) {
+	const QString host = normalizedPreviewHost(url.host());
+	if (host != QLatin1String("instagram.com") && host != QLatin1String("instagr.am")) {
+		return std::nullopt;
+	}
+
+	const QStringList segments = decodedUrlPathSegments(url);
+	if (segments.size() < 2) {
+		return std::nullopt;
+	}
+
+	QString kind = segments.at(0).trimmed().toLower();
+	if (kind == QLatin1String("reels")) {
+		kind = QStringLiteral("reel");
+	}
+	if (kind != QLatin1String("p") && kind != QLatin1String("reel") && kind != QLatin1String("tv")) {
+		return std::nullopt;
+	}
+
+	const QString shortcode = segments.at(1).trimmed();
+	static const QRegularExpression s_shortcodePattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[A-Za-z0-9_-]{3,128}")));
+	if (!s_shortcodePattern.match(shortcode).hasMatch()) {
+		return std::nullopt;
+	}
+
+	const QUrl canonicalUrl(QStringLiteral("https://www.instagram.com/%1/%2/").arg(kind, shortcode));
+	return InstagramPreviewTarget { kind, shortcode, canonicalUrl };
+}
+
+QUrl instagramEmbedUrl(const InstagramPreviewTarget &target) {
+	return QUrl(QStringLiteral("https://www.instagram.com/%1/%2/embed/").arg(target.kind, target.shortcode));
+}
+
+std::optional< PersistentChatPreviewEmbedTarget > instagramEmbedTargetFromUrl(const QUrl &url) {
+	const std::optional< InstagramPreviewTarget > target = instagramPreviewTargetFromUrl(url);
+	if (!target) {
+		return std::nullopt;
+	}
+
+	return PersistentChatPreviewEmbedTarget {
+		QStringLiteral("instagram"),
+		instagramEmbedUrl(*target),
+		target->kind == QLatin1String("reel") ? QStringLiteral("short") : QStringLiteral("square")
+	};
+}
+
 std::optional< SpotifyPreviewTarget > spotifyPreviewTargetFromUrl(const QUrl &url) {
 	const QString host = normalizedPreviewHost(url.host());
 	if (host != QLatin1String("open.spotify.com")) {
@@ -3342,6 +3400,11 @@ std::optional< PersistentChatPreviewEmbedTarget > previewEmbedTargetForUrl(const
 
 	if (const std::optional< PersistentChatPreviewEmbedTarget > tiktok = tiktokEmbedTargetFromUrl(url); tiktok) {
 		return tiktok;
+	}
+
+	if (const std::optional< PersistentChatPreviewEmbedTarget > instagram = instagramEmbedTargetFromUrl(url);
+		instagram) {
+		return instagram;
 	}
 
 	const QString host = normalizedPreviewHost(url.host());
@@ -3719,7 +3782,8 @@ struct RichPreviewProviderInfo {
 	QStringList hostSuffixes;
 };
 
-constexpr int RICH_PREVIEW_METADATA_VERSION = 8;
+constexpr int RICH_PREVIEW_METADATA_VERSION = 10;
+constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 2;
 
 bool isDirectImageUrl(const QUrl &url) {
 	if (!url.isValid()) {
@@ -4240,6 +4304,63 @@ QString webhallenProductTitleFromUrl(const QUrl &url) {
 		}
 	}
 
+	return QString();
+}
+
+QString titleCasedProductSlug(QString slug) {
+	slug = slug.trimmed();
+	slug.replace(QRegularExpression(QLatin1String("[-_]+")), QStringLiteral(" "));
+	slug = slug.simplified();
+	if (slug.isEmpty()) {
+		return QString();
+	}
+
+	QStringList words = slug.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+	for (QString &word : words) {
+		const QString lower = word.toLower();
+		if (lower == QLatin1String("benq")) {
+			word = QStringLiteral("BenQ");
+		} else if (lower == QLatin1String("usb") || lower == QLatin1String("dpi")
+				   || lower == QLatin1String("rgb") || lower == QLatin1String("oled")
+				   || lower == QLatin1String("led") || lower == QLatin1String("pc")) {
+			word = lower.toUpper();
+		} else if (word.size() <= 3 && word.contains(QRegularExpression(QLatin1String("[0-9]")))) {
+			word = word.toUpper();
+		} else if (!word.isEmpty()) {
+			word = word.left(1).toUpper() + word.mid(1).toLower();
+		}
+	}
+	return words.join(QLatin1Char(' ')).trimmed();
+}
+
+QString descriptiveProductTitleFromUrl(const QUrl &url) {
+	const QStringList segments = decodedUrlPathSegments(url);
+	for (auto it = segments.crbegin(); it != segments.crend(); ++it) {
+		QString segment = it->trimmed();
+		if (segment.size() < 4 || !segment.contains(QLatin1Char('-'))) {
+			continue;
+		}
+		if (!segment.contains(QRegularExpression(QLatin1String("[A-Za-z\\x{00c0}-\\x{024f}]")))) {
+			continue;
+		}
+		const QString title = titleCasedProductSlug(segment);
+		if (title.size() >= 4) {
+			return title;
+		}
+	}
+	return QString();
+}
+
+QString lastProductCodeFromUrl(const QUrl &url) {
+	const QStringList segments = decodedUrlPathSegments(url);
+	for (auto it = segments.crbegin(); it != segments.crend(); ++it) {
+		const QString segment = it->trimmed();
+		if (segment.size() >= 4 && segment.size() <= 64
+			&& segment.contains(QRegularExpression(QLatin1String("[A-Za-z]")))
+			&& segment.contains(QRegularExpression(QLatin1String("[0-9]")))) {
+			return segment;
+		}
+	}
 	return QString();
 }
 
@@ -7104,12 +7225,18 @@ QVariantMap swedishPreviewMetadata(const QUrl &url, const QString &title, const 
 		const QString amazonUrlTitle          = amazonProduct ? amazonProductTitleFromUrl(url) : QString();
 		const QString amazonProductId         = amazonProduct ? amazonProductIdFromUrl(url).value_or(QString()) : QString();
 		const QString amazonPrice             = amazonProduct ? amazonProductPriceFromHtml(html) : QString();
+		const QString urlProductTitle =
+			provider->key == QLatin1String("elgiganten") ? descriptiveProductTitleFromUrl(url) : QString();
+		const QString urlProductCode =
+			provider->key == QLatin1String("elgiganten") ? lastProductCodeFromUrl(url) : QString();
 		const QString productTitle =
 			amazonProduct ? amazonProductTitleFromHtml(
 								html, !productData.title.isEmpty()
 										  ? productData.title
 										  : (!amazonUrlTitle.isEmpty() ? amazonUrlTitle : title))
-						  : (!productData.title.isEmpty() ? productData.title : title);
+						  : (!productData.title.isEmpty()
+								 ? productData.title
+								 : (!urlProductTitle.isEmpty() ? urlProductTitle : title));
 		const QString productPrice = !productData.price.isEmpty()
 										 ? productData.price
 										 : (!amazonPrice.isEmpty()
@@ -7150,14 +7277,17 @@ QVariantMap swedishPreviewMetadata(const QUrl &url, const QString &title, const 
 		}
 
 		insertPreviewMetadataValue(metadata, QStringLiteral("productProvider"), provider->siteLabel);
-		insertPreviewMetadataValue(metadata, QStringLiteral("productId"), amazonProductId);
+		insertPreviewMetadataValue(metadata, QStringLiteral("productId"),
+								   !amazonProductId.isEmpty() ? amazonProductId : urlProductCode);
 		insertPreviewMetadataValue(metadata, QStringLiteral("productTitle"), productTitle);
 		insertPreviewMetadataValue(metadata, QStringLiteral("productDescription"), productDescription);
 		insertPreviewMetadataValue(metadata, QStringLiteral("productPrice"), productPrice);
 		insertPreviewMetadataValue(metadata, QStringLiteral("productAvailability"), productAvailability);
 		insertPreviewMetadataValue(metadata, QStringLiteral("productBrand"), productBrand);
 		insertPreviewMetadataValue(metadata, QStringLiteral("productSku"),
-								   !productData.sku.isEmpty() ? productData.sku : amazonProductId);
+								   !productData.sku.isEmpty()
+									   ? productData.sku
+									   : (!amazonProductId.isEmpty() ? amazonProductId : urlProductCode));
 		insertPreviewMetadataValue(metadata, QStringLiteral("productRating"), productRating);
 		insertPreviewMetadataValue(metadata, QStringLiteral("productReviewCount"), productReviewCount);
 		insertPreviewMetadataValue(metadata, QStringLiteral("productImage"), productImage);
@@ -8591,6 +8721,8 @@ constexpr int PERSISTENT_CHAT_PREVIEW_WIDTH_STEP       = 16;
 static const QByteArray s_previewBrowserUserAgent =
 	QByteArrayLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 					  "(KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36");
+static const QByteArray s_instagramPreviewMetadataUserAgent =
+	QByteArrayLiteral("facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)");
 static const QByteArray s_previewAcceptHeader =
 	QByteArrayLiteral("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/*,*/*;q=0.8");
 static const QByteArray s_previewAcceptLanguageHeader = QByteArrayLiteral("en-US,en;q=0.9");
@@ -8634,6 +8766,11 @@ void preparePreviewRequest(QNetworkRequest &request) {
 	request.setRawHeader(QByteArrayLiteral("User-Agent"), s_previewBrowserUserAgent);
 	request.setRawHeader(QByteArrayLiteral("Accept"), s_previewAcceptHeader);
 	request.setRawHeader(QByteArrayLiteral("Accept-Language"), s_previewAcceptLanguageHeader);
+}
+
+void prepareInstagramPreviewMetadataRequest(QNetworkRequest &request) {
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("User-Agent"), s_instagramPreviewMetadataUserAgent);
 }
 
 void preparePreviewImageRequest(QNetworkRequest &request) {
@@ -10426,6 +10563,324 @@ QHash< QString, QString > extractMetaTags(const QString &html) {
 	}
 
 	return tags;
+}
+
+QString instagramNormalizedHandle(QString handle) {
+	handle = handle.trimmed();
+	if (handle.isEmpty()) {
+		return QString();
+	}
+	while (handle.startsWith(QLatin1Char('@'))) {
+		handle.remove(0, 1);
+	}
+	handle = handle.trimmed();
+	static const QRegularExpression s_handlePattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[A-Za-z0-9._]{1,64}")));
+	if (!s_handlePattern.match(handle).hasMatch()) {
+		return QString();
+	}
+	return QStringLiteral("@%1").arg(handle);
+}
+
+std::optional< qlonglong > instagramCountValue(QString value) {
+	value = value.trimmed();
+	if (value.isEmpty()) {
+		return std::nullopt;
+	}
+
+	qlonglong multiplier = 1;
+	const QChar suffix   = value.back().toUpper();
+	if (suffix == QLatin1Char('K') || suffix == QLatin1Char('M') || suffix == QLatin1Char('B')) {
+		if (suffix == QLatin1Char('K')) {
+			multiplier = 1000;
+		} else if (suffix == QLatin1Char('M')) {
+			multiplier = 1000000;
+		} else {
+			multiplier = 1000000000;
+		}
+		value.chop(1);
+		value = value.trimmed();
+		value.replace(QLatin1Char(','), QLatin1Char('.'));
+		bool ok           = false;
+		const double count = value.toDouble(&ok);
+		if (ok && count >= 0) {
+			return static_cast< qlonglong >(std::llround(count * static_cast< double >(multiplier)));
+		}
+		return std::nullopt;
+	}
+
+	value.remove(QRegularExpression(QLatin1String("[^0-9]")));
+	bool ok = false;
+	const qlonglong count = value.toLongLong(&ok);
+	return ok && count >= 0 ? std::optional< qlonglong >(count) : std::nullopt;
+}
+
+QString instagramHandleFromCanonicalMetaUrl(const QString &rawUrl) {
+	const QUrl url(rawUrl.trimmed());
+	if (!url.isValid() || !isInstagramPreviewUrl(url)) {
+		return QString();
+	}
+
+	const QStringList segments = decodedUrlPathSegments(url);
+	if (segments.size() < 3) {
+		return QString();
+	}
+	const QString first = segments.at(0).trimmed().toLower();
+	const QString second = segments.at(1).trimmed().toLower();
+	if (first == QLatin1String("p") || first == QLatin1String("reel") || first == QLatin1String("reels")
+		|| first == QLatin1String("tv")) {
+		return QString();
+	}
+	if (second != QLatin1String("p") && second != QLatin1String("reel") && second != QLatin1String("reels")
+		&& second != QLatin1String("tv")) {
+		return QString();
+	}
+	return instagramNormalizedHandle(segments.at(0));
+}
+
+QString decodedPreviewJsonString(QString value) {
+	value = value.trimmed();
+	if (value.isEmpty()) {
+		return QString();
+	}
+
+	QJsonParseError error;
+	const QJsonDocument document = QJsonDocument::fromJson(
+		QByteArrayLiteral("[\"") + value.toUtf8() + QByteArrayLiteral("\"]"), &error);
+	if (error.error == QJsonParseError::NoError && document.isArray()) {
+		const QVariantList values = document.toVariant().toList();
+		if (!values.isEmpty()) {
+			return values.constFirst().toString().trimmed();
+		}
+	}
+
+	value.replace(QLatin1String("\\/"), QLatin1String("/"));
+	value.replace(QLatin1String("\\u0025"), QLatin1String("%"));
+	value.replace(QLatin1String("\\u0026"), QLatin1String("&"));
+	return decodedPreviewText(value);
+}
+
+QString instagramJsonStringValue(const QString &source, const QString &key) {
+	if (source.isEmpty() || key.isEmpty()) {
+		return QString();
+	}
+
+	const QRegularExpression pattern(
+		QStringLiteral("\"%1\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"").arg(QRegularExpression::escape(key)));
+	const QRegularExpressionMatch match = pattern.match(source);
+	return match.hasMatch() ? decodedPreviewJsonString(match.captured(1)) : QString();
+}
+
+QString instagramJsonUserObjectNear(const QString &html, int needleIndex) {
+	if (html.isEmpty() || needleIndex < 0 || needleIndex >= html.size()) {
+		return QString();
+	}
+
+	const int objectStart = html.lastIndexOf(QLatin1Char('{'), needleIndex);
+	if (objectStart < 0) {
+		return QString();
+	}
+
+	bool escaped  = false;
+	bool inString = false;
+	int depth     = 0;
+	for (int i = objectStart; i < html.size(); ++i) {
+		const QChar ch = html.at(i);
+		if (inString) {
+			if (escaped) {
+				escaped = false;
+			} else if (ch == QLatin1Char('\\')) {
+				escaped = true;
+			} else if (ch == QLatin1Char('"')) {
+				inString = false;
+			}
+			continue;
+		}
+
+		if (ch == QLatin1Char('"')) {
+			inString = true;
+		} else if (ch == QLatin1Char('{')) {
+			++depth;
+		} else if (ch == QLatin1Char('}')) {
+			--depth;
+			if (depth == 0) {
+				return html.mid(objectStart, i - objectStart + 1);
+			}
+		}
+	}
+
+	return QString();
+}
+
+QString instagramJsonUserObject(const QString &html, const QString &ownerUserId, const QString &handle) {
+	QStringList needles;
+	const QString trimmedOwnerUserId = ownerUserId.trimmed();
+	if (!trimmedOwnerUserId.isEmpty()) {
+		needles << QStringLiteral("\"pk\":\"%1\"").arg(trimmedOwnerUserId)
+				<< QStringLiteral("\"id\":\"%1\"").arg(trimmedOwnerUserId);
+	}
+
+	QString normalizedHandle = instagramNormalizedHandle(handle);
+	if (!normalizedHandle.isEmpty()) {
+		normalizedHandle.remove(0, 1);
+		needles << QStringLiteral("\"username\":\"%1\"").arg(normalizedHandle);
+	}
+
+	for (const QString &needle : needles) {
+		const int index = html.indexOf(needle);
+		if (index < 0) {
+			continue;
+		}
+
+		const QString object = instagramJsonUserObjectNear(html, index);
+		if (!object.isEmpty()) {
+			return object;
+		}
+	}
+
+	return QString();
+}
+
+struct InstagramPreviewMetadata {
+	QString displayName;
+	QString handle;
+	QString caption;
+	QString createdAt;
+	QString mediaKind;
+	QString avatarUrl;
+	QString ownerUserId;
+	std::optional< qlonglong > likeCount;
+	std::optional< qlonglong > commentCount;
+};
+
+InstagramPreviewMetadata instagramPreviewMetadataFromMetaTags(const QUrl &url,
+															  const QHash< QString, QString > &metaTags,
+															  const QString &html) {
+	InstagramPreviewMetadata metadata;
+	metadata.mediaKind = isInstagramReelPreviewUrl(url) ? QStringLiteral("reel") : QStringLiteral("post");
+	metadata.ownerUserId = metaTags.value(QLatin1String("instapp:owner_user_id")).trimmed();
+
+	const QString twitterTitle = metaTags.value(QLatin1String("twitter:title")).trimmed();
+	static const QRegularExpression s_twitterTitlePattern(
+		QLatin1String("^\\s*(.*?)\\s*\\(@([^\\)]+)\\)"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch twitterTitleMatch = s_twitterTitlePattern.match(twitterTitle);
+	if (twitterTitleMatch.hasMatch()) {
+		metadata.displayName = twitterTitleMatch.captured(1).trimmed();
+		metadata.handle      = instagramNormalizedHandle(twitterTitleMatch.captured(2));
+	}
+	if (twitterTitle.contains(QLatin1String("reel"), Qt::CaseInsensitive)) {
+		metadata.mediaKind = QStringLiteral("reel");
+	}
+
+	const QString ogTitle = metaTags.value(QLatin1String("og:title")).trimmed();
+	static const QRegularExpression s_ogTitlePattern(
+		QLatin1String("^\\s*(.*?)\\s+on\\s+Instagram\\s*:\\s*[\"\\x{201c}\\x{201d}](.*)[\"\\x{201c}\\x{201d}]\\s*$"),
+		QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+	const QRegularExpressionMatch ogTitleMatch = s_ogTitlePattern.match(ogTitle);
+	if (ogTitleMatch.hasMatch()) {
+		if (metadata.displayName.isEmpty()) {
+			metadata.displayName = ogTitleMatch.captured(1).trimmed();
+		}
+		metadata.caption = ogTitleMatch.captured(2).trimmed();
+	}
+
+	const QString description = metaTags.value(QLatin1String("og:description"),
+											  metaTags.value(QLatin1String("description"))).trimmed();
+	static const QRegularExpression s_descriptionPattern(
+		QLatin1String("^\\s*(?:(\\d[\\d,\\.\\s]*(?:[KMB])?)\\s+likes?\\s*,\\s*(\\d[\\d,\\.\\s]*(?:[KMB])?)\\s+comments?\\s+-\\s*)?(@?[A-Za-z0-9._]+)\\s+on\\s+([^:]+):\\s*[\"\\x{201c}\\x{201d}](.*)[\"\\x{201c}\\x{201d}]\\.?\\s*$"),
+		QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+	const QRegularExpressionMatch descriptionMatch = s_descriptionPattern.match(description);
+	if (descriptionMatch.hasMatch()) {
+		if (!descriptionMatch.captured(1).trimmed().isEmpty()) {
+			metadata.likeCount = instagramCountValue(descriptionMatch.captured(1));
+		}
+		if (!descriptionMatch.captured(2).trimmed().isEmpty()) {
+			metadata.commentCount = instagramCountValue(descriptionMatch.captured(2));
+		}
+		if (metadata.handle.isEmpty()) {
+			metadata.handle = instagramNormalizedHandle(descriptionMatch.captured(3));
+		}
+		metadata.createdAt = descriptionMatch.captured(4).trimmed();
+		if (metadata.caption.isEmpty()) {
+			metadata.caption = descriptionMatch.captured(5).trimmed();
+		}
+	}
+
+	if (metadata.handle.isEmpty()) {
+		metadata.handle = instagramHandleFromCanonicalMetaUrl(metaTags.value(QLatin1String("og:url")));
+	}
+
+	const QString userObject = instagramJsonUserObject(html, metadata.ownerUserId, metadata.handle);
+	if (!userObject.isEmpty()) {
+		const QString jsonHandle = instagramNormalizedHandle(instagramJsonStringValue(userObject, QStringLiteral("username")));
+		if (metadata.handle.isEmpty()) {
+			metadata.handle = jsonHandle;
+		}
+		if (metadata.displayName.isEmpty()) {
+			metadata.displayName = instagramJsonStringValue(userObject, QStringLiteral("full_name"));
+		}
+
+		const QString avatarUrl = instagramJsonStringValue(userObject, QStringLiteral("profile_pic_url"));
+		const QUrl avatar(avatarUrl);
+		if (avatar.isValid() && isSafePreviewTarget(avatar)) {
+			metadata.avatarUrl = avatar.toString(QUrl::FullyEncoded);
+		}
+	}
+
+	metadata.displayName = trimmedPreviewText(metadata.displayName, 96);
+	metadata.caption     = trimmedPreviewText(metadata.caption, 900);
+	metadata.createdAt   = trimmedPreviewText(metadata.createdAt, 80);
+	return metadata;
+}
+
+void applyInstagramPreviewMetadata(MainWindow::PersistentChatPreview &preview, const QUrl &url,
+								   const QHash< QString, QString > &metaTags, const QString &html) {
+	if (!isInstagramPreviewUrl(url)) {
+		return;
+	}
+
+	const InstagramPreviewMetadata instagram = instagramPreviewMetadataFromMetaTags(url, metaTags, html);
+	QVariantMap metadata                     = preview.metadata;
+	metadata.insert(QStringLiteral("provider"), QStringLiteral("instagram"));
+	metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("instagram"));
+	metadata.insert(QStringLiteral("instagramMetadataVersion"), INSTAGRAM_PREVIEW_METADATA_VERSION);
+	metadata.insert(QStringLiteral("instagramMediaKind"), instagram.mediaKind);
+	insertPreviewMetadataValue(metadata, QStringLiteral("instagramDisplayName"), instagram.displayName);
+	insertPreviewMetadataValue(metadata, QStringLiteral("instagramHandle"), instagram.handle);
+	insertPreviewMetadataValue(metadata, QStringLiteral("instagramCaption"), instagram.caption);
+	insertPreviewMetadataValue(metadata, QStringLiteral("instagramCreatedAt"), instagram.createdAt);
+	insertPreviewMetadataValue(metadata, QStringLiteral("instagramAvatarUrl"), instagram.avatarUrl);
+	insertPreviewMetadataValue(metadata, QStringLiteral("instagramOwnerUserId"), instagram.ownerUserId);
+	if (instagram.likeCount) {
+		metadata.insert(QStringLiteral("instagramLikeCount"), *instagram.likeCount);
+	}
+	if (instagram.commentCount) {
+		metadata.insert(QStringLiteral("instagramCommentCount"), *instagram.commentCount);
+	}
+	preview.metadata = metadata;
+
+	const QString fallbackTitle =
+		instagram.mediaKind == QLatin1String("reel") ? QObject::tr("Instagram reel") : QObject::tr("Instagram post");
+	if (!instagram.caption.isEmpty()) {
+		preview.title = trimmedPreviewText(instagram.caption, 280);
+	} else if (!instagram.handle.isEmpty()) {
+		preview.title = QObject::tr("Post by %1").arg(instagram.handle);
+	} else if (preview.title.trimmed().isEmpty()
+			   || preview.title.compare(QLatin1String("Instagram"), Qt::CaseInsensitive) == 0) {
+		preview.title = fallbackTitle;
+	}
+
+	if (!instagram.displayName.isEmpty()) {
+		preview.subtitle = instagram.displayName;
+	} else if (!instagram.handle.isEmpty()) {
+		preview.subtitle = instagram.handle;
+	} else if (preview.subtitle.trimmed().isEmpty()) {
+		preview.subtitle = QObject::tr("Instagram");
+	}
+	preview.description = instagram.caption.isEmpty() ? instagram.handle : instagram.caption;
+	preview.openLabel   = QObject::tr("Open on Instagram");
+	preview.failed      = false;
 }
 
 QList< QUrl > extractPreviewableUrls(const QString &messageHtml) {
@@ -12691,9 +13146,14 @@ void MainWindow::setupPersistentChatDock() {
 			{
 				const std::size_t messageCount = m_persistentChatMessages.size();
 				const std::size_t beginIndex   = messageCount > 200 ? messageCount - 200 : 0;
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+				const QString timelineMode = modernShellMessageTimelineMode(beginIndex);
+#else
+				const QString timelineMode;
+#endif
 				publishModernShellMessagesPatch(QStringLiteral("messages.reset"),
 												buildModernShellMessageStates(currentPersistentChatTarget(), beginIndex),
-												scrollToBottom, modernShellMessageTimelineMode(beginIndex));
+												scrollToBottom, timelineMode);
 			}
 		} else {
 			++m_modernShellMessagePatchGeneration;
@@ -13864,6 +14324,14 @@ namespace {
 											  MumbleProto::ForkFeatureStonksLedger);
 	}
 
+	QString normalizedStonksTextRoomName(QString name) {
+		name = name.trimmed().toLower();
+		if (name.startsWith(QLatin1Char('#'))) {
+			name.remove(0, 1);
+		}
+		return name;
+	}
+
 	QVariantMap stonksHeaderState() {
 		QVariantMap state;
 		state.insert(QStringLiteral("supported"), stonksLedgerFeatureSupported());
@@ -13971,6 +14439,10 @@ namespace {
 				   state.has_leaderboard_updated_at()
 					   ? QVariant::fromValue< qulonglong >(state.leaderboard_updated_at())
 					   : QVariant());
+		dto.insert(QStringLiteral("selectedUserId"),
+				   state.has_selected_user_id() ? state.selected_user_id() : 0u);
+		dto.insert(QStringLiteral("selectedUserName"),
+				   state.has_selected_user_name() ? u8(state.selected_user_name()) : QString());
 
 		QVariantList periods;
 		for (int i = 0; i < state.periods_size(); ++i) {
@@ -14442,24 +14914,29 @@ QVariantMap MainWindow::buildModernStonksDialog() const {
 		state.insert(QStringLiteral("following"), QVariantList());
 		state.insert(QStringLiteral("users"), QVariantList());
 		state.insert(QStringLiteral("textChannels"), QVariantList());
+		state.insert(QStringLiteral("selectedUserId"), m_stonksSelectedUserID);
+		state.insert(QStringLiteral("selectedUserName"), QString());
 	}
 	state.insert(QStringLiteral("feature"), stonksHeaderState());
 
 	QVariantMap dialog = modernDialogDto(
 		QStringLiteral("stonks"), QStringLiteral("stonks"), tr("Stonks"),
-		tr("Ledger snapshots, leaderboard, following, and server settings."),
+		tr("Portfolio, leaderboard, following, and server settings."),
 		QVariantList(), QVariantList(), QStringLiteral("close"), QSize(1120, 760));
 	dialog.insert(QStringLiteral("stonks"), state);
 	dialog.insert(QStringLiteral("tone"), QStringLiteral("wide"));
 	return dialog;
 }
 
-void MainWindow::requestStonksState(const QString &period) {
+void MainWindow::requestStonksState(const QString &period, unsigned int userID) {
 	const QString selectedPeriod = period.trimmed().isEmpty()
 									   ? (m_stonksSelectedPeriod.trimmed().isEmpty() ? QStringLiteral("30d")
 																					: m_stonksSelectedPeriod)
 									   : period.trimmed().toLower();
 	m_stonksSelectedPeriod = selectedPeriod;
+	if (userID > 0 || m_stonksSelectedUserID > 0) {
+		m_stonksSelectedUserID = userID > 0 ? userID : m_stonksSelectedUserID;
+	}
 	if (!Global::get().sh || !Global::get().sh->isRunning()) {
 		return;
 	}
@@ -14467,6 +14944,9 @@ void MainWindow::requestStonksState(const QString &period) {
 	MumbleProto::StonksRequest request;
 	request.set_period(u8(selectedPeriod));
 	request.set_include_positions(true);
+	if (m_stonksSelectedUserID > 0) {
+		request.set_user_id(m_stonksSelectedUserID);
+	}
 	Global::get().sh->sendMessage(request);
 }
 
@@ -14482,7 +14962,7 @@ void MainWindow::openModernStonksDialog() {
 		m_stonksState.insert(QStringLiteral("selectedPeriod"), QStringLiteral("30d"));
 		m_stonksState.insert(QStringLiteral("error"), tr("This server has not advertised Stonks ledger support."));
 	} else {
-		requestStonksState(m_stonksSelectedPeriod);
+		requestStonksState(m_stonksSelectedPeriod, m_stonksSelectedUserID);
 	}
 	openModernGenericDialog(buildModernStonksDialog());
 }
@@ -14490,6 +14970,7 @@ void MainWindow::openModernStonksDialog() {
 void MainWindow::handleStonksState(const MumbleProto::StonksState &state) {
 	m_stonksState          = stonksStateDto(state);
 	m_stonksSelectedPeriod = m_stonksState.value(QStringLiteral("selectedPeriod"), QStringLiteral("30d")).toString();
+	m_stonksSelectedUserID = m_stonksState.value(QStringLiteral("selectedUserId")).toUInt();
 	if (usesModernShell() && m_modernDialogController
 		&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
 		openModernGenericDialog(buildModernStonksDialog());
@@ -14508,18 +14989,27 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 		return true;
 	}
 	if (action == QLatin1String("refresh")) {
-		requestStonksState(m_stonksSelectedPeriod);
+		requestStonksState(m_stonksSelectedPeriod, m_stonksSelectedUserID);
 		return true;
 	}
 	if (action == QLatin1String("selectPeriod")) {
-		requestStonksState(payload.value(QStringLiteral("period")).toString());
+		requestStonksState(payload.value(QStringLiteral("period")).toString(), m_stonksSelectedUserID);
+		return true;
+	}
+	if (action == QLatin1String("selectUser")) {
+		requestStonksState(m_stonksSelectedPeriod, payload.value(QStringLiteral("userId")).toUInt());
 		return true;
 	}
 
 	MumbleProto::StonksAction message;
 	message.set_period(u8(m_stonksSelectedPeriod.trimmed().isEmpty() ? QStringLiteral("30d") : m_stonksSelectedPeriod));
-	if (action == QLatin1String("submitSnapshot")) {
+	if (action == QLatin1String("savePortfolio") || action == QLatin1String("submitSnapshot")) {
 		message.set_action(MumbleProto::StonksActionSubmitSnapshot);
+		const unsigned int targetUserID = payload.value(QStringLiteral("userId")).toUInt();
+		if (targetUserID > 0) {
+			message.set_target_user_id(targetUserID);
+			m_stonksSelectedUserID = targetUserID;
+		}
 		MumbleProto::StonksSnapshot *snapshot = message.mutable_snapshot();
 		snapshot->set_currency(u8(payload.value(QStringLiteral("currency"), QStringLiteral("USD")).toString()));
 		snapshot->set_note(u8(payload.value(QStringLiteral("note")).toString()));
@@ -14542,6 +15032,33 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 			}
 			position->set_quote_source_url(u8(positionMap.value(QStringLiteral("quoteSourceUrl")).toString()));
 			position->set_quote_confidence(positionMap.value(QStringLiteral("quoteConfidence")).toDouble());
+		}
+		Global::get().sh->sendMessage(message);
+		return true;
+	}
+	if (action == QLatin1String("clearPortfolio")) {
+		message.set_action(MumbleProto::StonksActionClearPortfolio);
+		const unsigned int targetUserID = payload.value(QStringLiteral("userId")).toUInt();
+		if (targetUserID > 0) {
+			message.set_target_user_id(targetUserID);
+			m_stonksSelectedUserID = targetUserID;
+		}
+		MumbleProto::StonksSnapshot *snapshot = message.mutable_snapshot();
+		snapshot->set_currency(u8(payload.value(QStringLiteral("currency"), QStringLiteral("USD")).toString()));
+		snapshot->set_note(u8(payload.value(QStringLiteral("note"), tr("Portfolio cleared")).toString()));
+		Global::get().sh->sendMessage(message);
+		return true;
+	}
+	if (action == QLatin1String("deleteSnapshot")) {
+		message.set_action(MumbleProto::StonksActionDeleteSnapshot);
+		const unsigned int targetUserID = payload.value(QStringLiteral("userId")).toUInt();
+		if (targetUserID > 0) {
+			message.set_target_user_id(targetUserID);
+			m_stonksSelectedUserID = targetUserID;
+		}
+		const unsigned int snapshotID = payload.value(QStringLiteral("snapshotId")).toUInt();
+		if (snapshotID > 0) {
+			message.set_snapshot_id(snapshotID);
 		}
 		Global::get().sh->sendMessage(message);
 		return true;
@@ -16335,6 +16852,10 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 		openModernVersionCheckDialog();
 		return true;
 	}
+	if (action == QLatin1String("help.feedback")) {
+		openFeedbackDialog();
+		return true;
+	}
 	if (action == QLatin1String("help.about")) {
 		openModernAboutDialog();
 		return true;
@@ -16955,6 +17476,8 @@ ModernShellMenuSerializer::ActionDefinition
 		case ModernShellMenuContext::AppHelp:
 			if (action == qaHelpWhatsThis) {
 				definition.id = QStringLiteral("help.whatsThis");
+			} else if (action == qaHelpFeedback) {
+				definition.id = QStringLiteral("help.feedback");
 			} else if (action == qaHelpVersionCheck) {
 				definition.id = QStringLiteral("help.versionCheck");
 			} else if (action == qaHelpAbout) {
@@ -17358,7 +17881,7 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 							youtubeTarget->shorts ? QStringLiteral("short") : QStringLiteral("wide")
 						};
 					}
-				} else {
+				} else if (preview.mediaDataUrl.trimmed().isEmpty() && preview.mediaItems.empty()) {
 					embedTarget = previewEmbedTargetForUrl(QUrl(preview.canonicalUrl));
 				}
 				if (embedTarget) {
@@ -18142,7 +18665,12 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 	appState.insert(QStringLiteral("canManageTextChannels"), canManagePersistentTextChannels());
 	appState.insert(QStringLiteral("canCreateTextRoom"), canCreateTextRoom());
 	appState.insert(QStringLiteral("inlineMp4PlaybackSupported"), ModernShellInlineMp4PlaybackSupported);
-	appState.insert(QStringLiteral("stonks"), stonksHeaderState());
+	QVariantMap stonksState = m_stonksState.isEmpty() ? stonksHeaderState() : m_stonksState;
+	const QVariantMap currentStonksHeader = stonksHeaderState();
+	for (auto it = currentStonksHeader.cbegin(); it != currentStonksHeader.cend(); ++it) {
+		stonksState.insert(it.key(), it.value());
+	}
+	appState.insert(QStringLiteral("stonks"), stonksState);
 	appState.insert(QStringLiteral("motdExpanded"), Global::get().s.bModernShellMotdExpanded);
 	if (connected) {
 		if (const Channel *rootVoiceChannel = Channel::get(Mumble::ROOT_CHANNEL_ID)) {
@@ -19634,6 +20162,19 @@ bool MainWindow::handleModernShellScopeSelection(const QString &scopeToken) {
 
 	if (scopeValue == static_cast< int >(MumbleProto::Channel)) {
 		return navigateToPersistentChatScope(MumbleProto::Channel, scopeID);
+	}
+
+	if (scopeValue == static_cast< int >(MumbleProto::TextChannel) && stonksLedgerFeatureSupported()
+		&& Global::get().bStonksEnabled) {
+		const auto textChannelIt = m_persistentTextChannels.constFind(scopeID);
+		const bool isConfiguredStonksRoom =
+			Global::get().uiStonksTextChannelID > 0 && scopeID == Global::get().uiStonksTextChannelID;
+		const bool isNamedStonksRoom =
+			textChannelIt != m_persistentTextChannels.cend()
+			&& normalizedStonksTextRoomName(textChannelIt->name) == QLatin1String("stonks");
+		if (isConfiguredStonksRoom || isNamedStonksRoom) {
+			requestStonksState(m_stonksSelectedPeriod);
+		}
 	}
 
 	return navigateToPersistentChatScope(static_cast< MumbleProto::ChatScope >(scopeValue), scopeID);
@@ -22652,6 +23193,12 @@ void MainWindow::handlePersistentTextChannelSync(const MumbleProto::TextChannelS
 		m_persistentTextChannels.insert(textChannel.textChannelID, textChannel);
 	}
 
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell() && stonksLedgerFeatureSupported() && Global::get().bStonksEnabled) {
+		requestStonksState(m_stonksSelectedPeriod);
+	}
+#endif
+
 	if (hiddenLegacyPersistentChatSafeMode) {
 		queueModernShellSnapshotSync();
 		updateChatBar();
@@ -24236,6 +24783,15 @@ std::optional< QString > MainWindow::persistentChatPreviewKey(const MumbleProto:
 		return QString::fromLatin1("url:%1").arg(normalizedPreviewUrl(url));
 	}
 
+	const QString tickerSourceText = message.has_body_text()
+										 ? persistentChatMessageSourceText(message)
+										 : QTextDocumentFragment::fromHtml(messageContent).toPlainText();
+	const QList< Mumble::Finance::TickerMention > tickerMentions =
+		Mumble::Finance::extractTickerMentions(tickerSourceText, 1);
+	if (!tickerMentions.isEmpty() && tickerMentions.constFirst().yahooFinanceUrl.isValid()) {
+		return QString::fromLatin1("url:%1").arg(normalizedPreviewUrl(tickerMentions.constFirst().yahooFinanceUrl));
+	}
+
 	return std::nullopt;
 }
 
@@ -24380,6 +24936,12 @@ bool MainWindow::restorePersistentChatPreviewDiskCache(const QString &previewKey
 	if (richPreviewProviderForUrl(cachedUrl)
 		&& cached->metadata.value(QStringLiteral("richPreviewMetadataVersion")).toInt()
 			   != RICH_PREVIEW_METADATA_VERSION) {
+		mumble::chatperf::recordValue("chat.preview.disk_cache.miss", 1);
+		return false;
+	}
+	if (isInstagramPreviewUrl(cachedUrl)
+		&& cached->metadata.value(QStringLiteral("instagramMetadataVersion")).toInt()
+			   != INSTAGRAM_PREVIEW_METADATA_VERSION) {
 		mumble::chatperf::recordValue("chat.preview.disk_cache.miss", 1);
 		return false;
 	}
@@ -25648,8 +26210,8 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 		return false;
 	}
 
-	if (const std::optional< PersistentChatPreviewEmbedTarget > embedTarget = previewEmbedTargetForUrl(previewUrl);
-		embedTarget) {
+	const bool hasEmbedTarget = previewEmbedTargetForUrl(previewUrl).has_value();
+	if (hasEmbedTarget) {
 		it->siteSnapshotRequested = false;
 		it->siteSnapshotFinished  = true;
 		it->thumbnailFinished     = true;
@@ -25660,7 +26222,7 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
 	QNetworkReply *reply = Global::get().nam->get(request);
 	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
-	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, target]() {
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, target, hasEmbedTarget]() {
 		const QByteArray data     = reply->readAll();
 		const bool success        = reply->error() == QNetworkReply::NoError;
 		const QString failureText = previewFailureText(reply);
@@ -25740,9 +26302,9 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 		if (previewIt->subtitle.trimmed().isEmpty()) {
 			previewIt->subtitle = target->siteLabel;
 		}
-		if (!success && previewIt->description.trimmed().isEmpty()) {
-			previewIt->description = failureText;
-			if (previewIt->mediaDataUrl.isEmpty()) {
+		if (!success && previewDescriptionIsPlaceholder(previewIt->description)) {
+			previewIt->description = hasEmbedTarget ? QString() : failureText;
+			if (!hasEmbedTarget && previewIt->mediaDataUrl.isEmpty()) {
 				previewIt->failed = true;
 			}
 		}
@@ -26771,8 +27333,30 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 
 	preview.title       = provider ? provider->fallbackTitle : tr("Loading link preview...");
 	preview.description = tr("Fetching page metadata");
+	if (const std::optional< RichPreviewProviderInfo > richProvider = richPreviewProviderForUrl(previewUrl);
+		richProvider && richProvider->key == QLatin1String("elgiganten")) {
+		const QString urlTitle = descriptiveProductTitleFromUrl(previewUrl);
+		if (!urlTitle.isEmpty()) {
+			preview.title = urlTitle;
+			preview.description.clear();
+			preview.metadata.insert(QStringLiteral("provider"), QStringLiteral("elgiganten"));
+			preview.metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("elgiganten"));
+			preview.metadata.insert(QStringLiteral("previewKind"), QStringLiteral("product"));
+			preview.metadata.insert(QStringLiteral("swedishPreviewKind"), QStringLiteral("product"));
+			preview.metadata.insert(QStringLiteral("providerName"), tr("Elgiganten"));
+			preview.metadata.insert(QStringLiteral("productProvider"), tr("Elgiganten"));
+			preview.metadata.insert(QStringLiteral("productTitle"), urlTitle);
+			const QString urlProductCode = lastProductCodeFromUrl(previewUrl);
+			insertPreviewMetadataValue(preview.metadata, QStringLiteral("productId"), urlProductCode);
+			insertPreviewMetadataValue(preview.metadata, QStringLiteral("productSku"), urlProductCode);
+		}
+	}
 	if (isXPostUrl(previewUrl)) {
 		preview.title       = tr("Fetching post metadata");
+		preview.description = QString();
+	} else if (isInstagramPreviewUrl(previewUrl)) {
+		preview.title       = isInstagramReelPreviewUrl(previewUrl) ? tr("Fetching Instagram reel")
+																	: tr("Fetching Instagram post");
 		preview.description = QString();
 	}
 	m_persistentChatPreviews.insert(previewKey, preview);
@@ -26819,7 +27403,11 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 
 	const QUrl previewPageUrl = flashbackPreviewPageUrl(previewUrl);
 	QNetworkRequest pageRequest(previewPageUrl);
-	preparePreviewRequest(pageRequest);
+	if (isInstagramPreviewUrl(previewPageUrl)) {
+		prepareInstagramPreviewMetadataRequest(pageRequest);
+	} else {
+		preparePreviewRequest(pageRequest);
+	}
 	QNetworkReply *pageReply = Global::get().nam->get(pageRequest);
 	applyPreviewReplyGuards(pageReply, previewMaxPageBytesForUrl(previewPageUrl), false);
 	connect(
@@ -26845,8 +27433,19 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 				if (it->title == tr("Loading link preview...") || (provider && it->title == provider->fallbackTitle)) {
 					it->title = provider ? provider->fallbackTitle : previewDisplayHost(previewUrl);
 				}
-				it->description = (success || allowPartialHtml) ? tr("Preview unavailable") : failureText;
-				it->failed      = !allowPartialHtml && !success;
+				const bool hasStructuredFallback =
+					it->metadata.contains(QStringLiteral("productTitle"))
+					|| it->metadata.contains(QStringLiteral("listingTitle"))
+					|| it->metadata.contains(QStringLiteral("articleTitle"));
+				if (hasStructuredFallback) {
+					if (previewDescriptionIsPlaceholder(it->description)) {
+						it->description.clear();
+					}
+					it->failed = false;
+				} else {
+					it->description = (success || allowPartialHtml) ? tr("Preview unavailable") : failureText;
+					it->failed      = !allowPartialHtml && !success;
+				}
 				ensurePersistentChatPreviewSiteSnapshot(previewKey);
 				renderIfVisible();
 				return;
@@ -26877,6 +27476,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			it->description = description;
 			it->metadata = previewMetadataWithSwedishData(it->metadata, previewUrl, it->title, it->description, html,
 														  metaTags);
+			applyInstagramPreviewMetadata(*it, previewUrl, metaTags, html);
 			const QString threadPostUrl =
 				it->metadata.value(QStringLiteral("forumThreadPostUrl")).toString().trimmed();
 			if (!threadPostUrl.isEmpty()) {
@@ -28279,6 +28879,25 @@ void MainWindow::handlePersistentChatMessage(const MumbleProto::ChatMessage &msg
 
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	clearModernShellMessageDtoCache("message");
+	if (usesModernShell() && stonksLedgerFeatureSupported() && Global::get().bStonksEnabled) {
+		const MumbleProto::ChatScope scope = msg.has_scope() ? msg.scope() : MumbleProto::Channel;
+		const unsigned int scopeID         = msg.has_scope_id() ? msg.scope_id() : 0;
+		if (scope == MumbleProto::TextChannel) {
+			const auto textChannelIt = m_persistentTextChannels.constFind(scopeID);
+			const bool isConfiguredStonksRoom =
+				Global::get().uiStonksTextChannelID > 0 && scopeID == Global::get().uiStonksTextChannelID;
+			const bool isNamedStonksRoom =
+				textChannelIt != m_persistentTextChannels.cend()
+				&& normalizedStonksTextRoomName(textChannelIt->name) == QLatin1String("stonks");
+			const QString actorName = msg.has_actor_name() ? u8(msg.actor_name()).trimmed() : QString();
+			const QString bodyText =
+				msg.has_body_text() ? u8(msg.body_text()).trimmed() : persistentChatMessageSourceText(msg).trimmed();
+			if ((isConfiguredStonksRoom || isNamedStonksRoom) && actorName == QLatin1String("Stonks")
+				&& bodyText.startsWith(QLatin1String("Stonks:"))) {
+				requestStonksState(m_stonksSelectedPeriod);
+			}
+		}
+	}
 #endif
 	syncPersistentChatGatewayHandler();
 	m_persistentChatGateway->handleIncomingMessage(msg);
@@ -32366,6 +32985,106 @@ void MainWindow::on_qaHelpAboutQt_triggered() {
 	openAboutQtDialog();
 }
 
+void MainWindow::openFeedbackDialog() {
+	FeedbackDialog::ServerCapability capability;
+	capability.connected = Global::get().sh && Global::get().sh->isConnected() && Global::get().sh->hasSynchronized();
+	capability.supported =
+		capability.connected
+		&& Mumble::ForkFeatures::serverAllowsClientFeature(Global::get().qlSupportedForkFeatures,
+														   MumbleProto::ForkFeatureInAppFeedback);
+	capability.enabled      = Global::get().bFeedbackEnabled;
+	capability.maxLogBytes  = qMax(1u, Global::get().uiFeedbackMaxLogBytes);
+	capability.maxBodyBytes = qMax(1u, Global::get().uiFeedbackMaxBodyBytes);
+	capability.summary =
+		capability.connected
+			? tr("connected=yes; feature=%1; server-submit=%2; max-log-bytes=%3; max-body-bytes=%4")
+				  .arg(capability.supported ? QStringLiteral("yes") : QStringLiteral("no"),
+					   capability.enabled ? QStringLiteral("yes") : QStringLiteral("no"),
+					   QString::number(capability.maxLogBytes), QString::number(capability.maxBodyBytes))
+			: tr("connected=no; feature=no; server-submit=no");
+
+	FeedbackDialog dialog(capability, this);
+	if (dialog.exec() != FeedbackDialog::SubmitReport) {
+		return;
+	}
+
+	const FeedbackDialog::PreparedReport report = dialog.preparedReport();
+	const QString reportID = u8(report.message.client_report_id());
+	PendingFeedbackSubmission submission;
+	submission.kind        = report.message.kind();
+	submission.issueTitle  = report.issueTitle;
+	submission.issueBody   = report.issueBody;
+	submission.fallbackUrl = report.fallbackUrl;
+
+	if (!capability.connected || !capability.supported || !capability.enabled || !Global::get().sh) {
+		showFeedbackFallback(submission, tr("The connected server cannot submit this report."));
+		return;
+	}
+
+	m_pendingFeedbackSubmissions.insert(reportID, submission);
+	Global::get().sh->sendMessage(report.message);
+	QMessageBox::information(this, tr("Feedback submitted"), tr("The report was sent to the connected server."));
+}
+
+void MainWindow::handleFeedbackReportState(const MumbleProto::FeedbackReportState &msg) {
+	const QString reportID = msg.has_client_report_id() ? u8(msg.client_report_id()) : QString();
+	PendingFeedbackSubmission submission = m_pendingFeedbackSubmissions.take(reportID);
+
+	if (msg.accepted()) {
+		QMessageBox box(QMessageBox::Information, tr("Feedback submitted"),
+						msg.has_issue_number()
+							? tr("GitHub issue #%1 was created.").arg(msg.issue_number())
+							: tr("The GitHub issue was created."),
+						QMessageBox::Ok, this);
+		QPushButton *openButton = nullptr;
+		const QUrl issueUrl(msg.has_issue_url() ? u8(msg.issue_url()) : QString());
+		if (issueUrl.isValid()) {
+			openButton = box.addButton(tr("Open issue"), QMessageBox::ActionRole);
+		}
+		box.exec();
+		if (openButton && box.clickedButton() == openButton) {
+			QDesktopServices::openUrl(issueUrl);
+		}
+		return;
+	}
+
+	const QString error =
+		msg.has_error() && !u8(msg.error()).trimmed().isEmpty()
+			? u8(msg.error()).trimmed()
+			: tr("The server could not create the GitHub issue.");
+	if (submission.issueBody.isEmpty()) {
+		QMessageBox::warning(this, tr("Feedback not submitted"), error);
+		return;
+	}
+	showFeedbackFallback(submission, error);
+}
+
+void MainWindow::showFeedbackFallback(const PendingFeedbackSubmission &submission, const QString &error) {
+	QMessageBox box(QMessageBox::Warning, tr("Feedback not submitted"),
+					tr("%1\n\nYou can still copy the report or open a prefilled GitHub issue.").arg(error),
+					QMessageBox::Close, this);
+	QPushButton *copyButton = box.addButton(tr("Copy report"), QMessageBox::ActionRole);
+	QPushButton *openButton = box.addButton(tr("Open GitHub"), QMessageBox::ActionRole);
+	box.exec();
+
+	if (box.clickedButton() == copyButton) {
+		QApplication::clipboard()->setText(
+			tr("Title: %1\n\n%2").arg(submission.issueTitle, submission.issueBody));
+	} else if (box.clickedButton() == openButton) {
+		QDesktopServices::openUrl(submission.fallbackUrl);
+	}
+}
+
+void MainWindow::on_qaHelpFeedback_triggered() {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (handleModernShellLegacyDialogAction(QStringLiteral("help.feedback"))) {
+		return;
+	}
+#endif
+
+	openFeedbackDialog();
+}
+
 void MainWindow::on_qaHelpVersionCheck_triggered() {
 	versionCheck();
 }
@@ -33048,6 +33767,9 @@ void MainWindow::serverConnected() {
 	Global::get().bStonksEnabled                  = true;
 	Global::get().uiStonksTextChannelID           = 0;
 	Global::get().bStonksSocialAnnouncementsEnabled = true;
+	Global::get().bFeedbackEnabled                = false;
+	Global::get().uiFeedbackMaxLogBytes           = Mumble::Feedback::DEFAULT_MAX_LOG_BYTES;
+	Global::get().uiFeedbackMaxBodyBytes          = Mumble::Feedback::DEFAULT_MAX_BODY_BYTES;
 	Global::get().uiMessageLength                  = 5000;
 	Global::get().uiImageLength                    = 131072;
 	Global::get().uiMaxUsers                       = 0;
@@ -33060,11 +33782,13 @@ void MainWindow::serverConnected() {
 	m_pendingUserInformationSessions.clear();
 	m_persistentChatPreviews.clear();
 	m_persistentChatAssetDownloads.clear();
+	m_pendingFeedbackSubmissions.clear();
 	m_persistentChatLiveMessageKeys.clear();
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	clearModernShellMessageDtoCache("connect");
 	m_stonksState.clear();
 	m_stonksSelectedPeriod = QStringLiteral("30d");
+	m_stonksSelectedUserID = 0;
 #endif
 	syncPersistentChatGatewayHandler();
 	if (m_persistentChatController) {
@@ -33125,6 +33849,9 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	Global::get().bStonksEnabled                  = true;
 	Global::get().uiStonksTextChannelID           = 0;
 	Global::get().bStonksSocialAnnouncementsEnabled = true;
+	Global::get().bFeedbackEnabled                = false;
+	Global::get().uiFeedbackMaxLogBytes           = Mumble::Feedback::DEFAULT_MAX_LOG_BYTES;
+	Global::get().uiFeedbackMaxBodyBytes          = Mumble::Feedback::DEFAULT_MAX_BODY_BYTES;
 	m_modernLayoutCompatibleServer                 = false;
 	m_modernShellRuntimeDisabled                   = false;
 	m_hasPersistentChatSupport                     = false;
@@ -33142,6 +33869,7 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	m_pendingUserInformationSessions.clear();
 	m_persistentChatPreviews.clear();
 	m_persistentChatAssetDownloads.clear();
+	m_pendingFeedbackSubmissions.clear();
 	m_persistentChatLiveMessageKeys.clear();
 	m_persistentChatLastReadByScope.clear();
 	m_persistentChatUnreadByScope.clear();
@@ -33149,6 +33877,7 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	clearModernShellMessageDtoCache("disconnect");
 	m_stonksState.clear();
 	m_stonksSelectedPeriod = QStringLiteral("30d");
+	m_stonksSelectedUserID = 0;
 #endif
 	syncPersistentChatGatewayHandler();
 	if (m_persistentChatController) {

@@ -152,6 +152,17 @@ public:
 	bool bStonksEnabled = true;
 	unsigned int uiStonksTextChannelID = 0;
 	bool bStonksSocialAnnouncementsEnabled = true;
+	bool bFeedbackGitHubEnabled = false;
+	QString qsFeedbackGitHubOwner;
+	QString qsFeedbackGitHubRepo;
+	QString qsFeedbackGitHubToken;
+	QString qsFeedbackGitHubAPIUrl;
+	unsigned int uiFeedbackMaxLogBytes = 200000;
+	unsigned int uiFeedbackMaxBodyBytes = 60000;
+	QString qsFeedbackCommonLabels;
+	QString qsFeedbackBugLabels;
+	QString qsFeedbackSuggestionLabels;
+	QString qsFeedbackSupportLabels;
 	QString qsPassword;
 	QString qsWelcomeText;
 	QString qsWelcomeTextFile;
@@ -458,6 +469,13 @@ public:
 	bool isTextAllowed(QString &str, bool &changed);
 	void sendPersistentChatUnsupported(ServerUser *uSource);
 	void sendTextChannelSync(ServerUser *uSource);
+	bool feedbackGitHubConfigured() const;
+	void sendFeedbackReportState(unsigned int session, const QString &clientReportID,
+								 MumbleProto::FeedbackReportKind kind, bool accepted,
+								 const QString &issueUrl, unsigned int issueNumber, const QString &error);
+	void submitFeedbackReportToGitHub(ServerUser *uSource, const MumbleProto::FeedbackReport &msg,
+									  const QString &issueTitle, const QString &issueBody,
+									  const QStringList &labels);
 	bool ensureChatAssetStorageReady(QString *error = nullptr) const;
 	QString chatAssetStorageRootPath() const;
 	QString chatAssetServerRootPath() const;

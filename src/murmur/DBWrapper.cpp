@@ -1275,6 +1275,20 @@ std::optional< ::msdb::DBStonksSnapshot > DBWrapper::getStonksSnapshot(unsigned 
 	WRAPPER_END
 }
 
+void DBWrapper::removeStonksSnapshot(unsigned int serverID, unsigned int snapshotID) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertValidID(snapshotID);
+
+	::mdb::TransactionHolder transaction = m_serverDB.ensureTransaction();
+	m_serverDB.getStonksSnapshotPositionTable().removePositions(serverID, snapshotID);
+	m_serverDB.getStonksSnapshotTable().removeSnapshot(serverID, snapshotID);
+	transaction.commit();
+
+	WRAPPER_END
+}
+
 std::vector< ::msdb::DBStonksSnapshot > DBWrapper::getStonksSnapshotsForUser(unsigned int serverID,
 																			 unsigned int userID,
 																			 unsigned int maxEntries) {

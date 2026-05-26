@@ -579,6 +579,68 @@ textarea:focus-visible {
 	display: none;
 }
 
+.stonks-chat-header {
+	display: inline-flex;
+	align-items: center;
+	flex: 1 1 280px;
+	min-width: 180px;
+	max-width: min(580px, 46vw);
+	gap: 5px;
+	padding: 3px;
+	border: 1px solid rgba(78, 184, 159, 0.18);
+	border-radius: 11px;
+	background:
+		linear-gradient(180deg, rgba(78, 184, 159, 0.10), rgba(78, 184, 159, 0.035)),
+		rgba(255, 255, 255, 0.018);
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+	overflow: hidden;
+}
+
+.stonks-chat-header-label,
+.stonks-chat-header-rank,
+.stonks-chat-header-empty {
+	display: inline-flex;
+	align-items: center;
+	min-height: 18px;
+	padding: 0 7px;
+	border-radius: 7px;
+	font-size: 9px;
+	font-weight: 700;
+	white-space: nowrap;
+}
+
+.stonks-chat-header-label {
+	flex: 0 0 auto;
+	color: #b7eadf;
+	background: rgba(78, 184, 159, 0.12);
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+}
+
+.stonks-chat-header-rank {
+	min-width: 0;
+	max-width: 142px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: var(--text-muted);
+	background: rgba(255, 255, 255, 0.04);
+}
+
+.stonks-chat-header-rank.is-positive {
+	color: #a8e6cf;
+	background: rgba(78, 184, 159, 0.14);
+}
+
+.stonks-chat-header-rank.is-negative {
+	color: #f1b2af;
+	background: var(--danger-soft);
+}
+
+.stonks-chat-header-empty {
+	color: var(--text-muted);
+	background: rgba(255, 255, 255, 0.04);
+}
+
 .conversation-actions {
 	display: inline-flex;
 	flex: 0 0 auto;
@@ -1562,6 +1624,10 @@ textarea:focus-visible {
 	width: 100%;
 }
 
+.preview-card-youtube-frame {
+	pointer-events: none;
+}
+
 .preview-card.is-embed-short .preview-card-embed-media,
 .preview-card.is-youtube-short .preview-card-youtube-embed-media {
 	align-items: center;
@@ -1573,6 +1639,17 @@ textarea:focus-visible {
 	aspect-ratio: 9 / 16;
 	max-width: var(--preview-card-short-width);
 	width: var(--preview-card-short-width);
+}
+
+.preview-card.is-embed-square .preview-card-embed-media {
+	align-items: center;
+	padding: 10px;
+}
+
+.preview-card.is-embed-square .preview-card-embed-frame-wrap {
+	aspect-ratio: 1 / 1;
+	max-width: min(100%, 540px);
+	width: min(100%, 540px);
 }
 
 .preview-card.is-embed-audio .preview-card-embed-frame-wrap {
@@ -1605,7 +1682,8 @@ textarea:focus-visible {
 }
 
 .preview-card.is-embed-short .preview-card-embed-controls,
-.preview-card.is-youtube-short .preview-card-embed-controls {
+.preview-card.is-youtube-short .preview-card-embed-controls,
+.preview-card.is-youtube-short .preview-card-youtube-controls {
 	background: transparent;
 	border-top: 0;
 	padding: 8px 0 0;
@@ -5887,6 +5965,112 @@ textarea:focus-visible {
 	color: #1d9bf0;
 }
 
+.preview-card.is-instagram-post {
+	border-color: #262626;
+	background: #000;
+}
+
+.message-bubble.is-own .preview-card.is-instagram-post,
+.message-cluster.is-own .preview-card.is-instagram-post {
+	border-color: #262626;
+	background: #000;
+}
+
+.preview-card.is-instagram-post:hover,
+.preview-card.is-instagram-post:focus-visible,
+.message-bubble.is-own .preview-card.is-instagram-post:hover,
+.message-bubble.is-own .preview-card.is-instagram-post:focus-visible,
+.message-cluster.is-own .preview-card.is-instagram-post:hover,
+.message-cluster.is-own .preview-card.is-instagram-post:focus-visible {
+	border-color: #3a3a3a;
+	background: #030303;
+}
+
+.preview-card-instagram-shell {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.preview-card.is-instagram-post .preview-card-instagram-media.preview-card-media {
+	background: #000;
+	border: 0;
+	border-bottom: 1px solid #262626;
+	border-radius: 16px 16px 0 0;
+	height: var(--preview-card-media-height);
+	margin: 0;
+	min-height: var(--preview-card-media-min-height);
+	overflow: hidden;
+}
+
+.preview-card.is-instagram-post .preview-card-instagram-media .preview-card-video,
+.preview-card.is-instagram-post .preview-card-instagram-image {
+	background: #000;
+	object-fit: contain;
+	object-position: center;
+}
+
+.preview-card.is-instagram-post .preview-card-instagram-media .preview-card-inline-image {
+	height: 100%;
+	max-height: none;
+	width: 100%;
+}
+
+.preview-card.is-instagram-post .preview-card-carousel.preview-card-instagram-media {
+	height: auto;
+	min-height: 0;
+}
+
+.preview-card-instagram-body {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.preview-card-instagram-header {
+	padding: 10px 13px 4px;
+}
+
+.preview-card-instagram-avatar {
+	background:
+		linear-gradient(#000, #000) padding-box,
+		linear-gradient(135deg, #feda75, #fa7e1e 30%, #d62976 58%, #962fbf 78%, #4f5bd5) border-box;
+	border: 2px solid transparent;
+}
+
+.preview-card-instagram-badge {
+	background: rgba(214, 41, 118, 0.16);
+	color: #ffd4e4;
+}
+
+.message-bubble.is-own .preview-card-instagram-badge,
+.message-cluster.is-own .preview-card-instagram-badge {
+	background: rgba(214, 41, 118, 0.16);
+	color: #ffd4e4;
+}
+
+.preview-card-instagram-copy {
+	padding: 4px 13px 4px 58px;
+}
+
+.preview-card-instagram-caption {
+	-webkit-line-clamp: 5;
+	display: -webkit-box;
+	overflow: hidden;
+	-webkit-box-orient: vertical;
+}
+
+.preview-card-instagram-footer {
+	justify-content: flex-end;
+	padding: 7px 13px 11px;
+}
+
+.preview-card-instagram-action,
+.message-bubble.is-own .preview-card-instagram-action,
+.message-cluster.is-own .preview-card-instagram-action {
+	color: #ff8fc0;
+}
+
 .bubble-footer {
 	display: flex;
 	flex-wrap: wrap;
@@ -9350,6 +9534,11 @@ body.dialog-host {
 		margin-left: 0;
 	}
 
+	.stonks-chat-header {
+		flex: 1 1 100%;
+		max-width: 100%;
+	}
+
 	.conversation-actions {
 		margin-left: 0;
 	}
@@ -9539,6 +9728,14 @@ body.dialog-host {
 		gap: 5px;
 	}
 
+	.stonks-chat-header {
+		min-width: 0;
+	}
+
+	.stonks-chat-header-rank {
+		max-width: 96px;
+	}
+
 	.conversation-actions .chip-button {
 		min-width: 28px;
 		max-width: 76px;
@@ -9656,8 +9853,10 @@ body.dialog-host {
 .stonks-status,
 .stonks-empty,
 .stonks-register-needed,
+.stonks-portfolio-owner,
 .stonks-validation,
-.stonks-leaderboard-description {
+.stonks-leaderboard-description,
+.stonks-heatmap {
 	border: 1px solid var(--shell-divider);
 	background: var(--shell-panel-soft);
 	border-radius: 8px;
@@ -9695,7 +9894,53 @@ body.dialog-host {
 .stonks-stat span,
 .stonks-row span,
 .stonks-ledger-position,
-.stonks-note {
+.stonks-note,
+.stonks-portfolio-owner span,
+.stonks-heatmap-title span {
+	color: var(--text-muted);
+}
+
+.stonks-portfolio-owner,
+.stonks-heatmap-title {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	min-width: 0;
+}
+
+.stonks-heatmap {
+	display: grid;
+	gap: 10px;
+}
+
+.stonks-heatmap-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(132px, var(--tile-weight, 2fr)));
+	gap: 8px;
+}
+
+.stonks-heatmap-tile {
+	min-height: 82px;
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 8px;
+	background: linear-gradient(135deg, rgba(51, 198, 142, var(--tile-alpha, 0.28)), rgba(79, 134, 255, 0.2));
+	padding: 10px;
+	display: grid;
+	align-content: space-between;
+	gap: 4px;
+	min-width: 0;
+}
+
+.stonks-heatmap-tile strong,
+.stonks-heatmap-tile span,
+.stonks-heatmap-tile small {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.stonks-heatmap-tile small {
 	color: var(--text-muted);
 }
 
@@ -9862,6 +10107,14 @@ body.dialog-host {
 	min-width: 0;
 }
 
+.stonks-row > .stonks-row-actions {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
 .stonks-return.is-positive {
 	color: var(--accent);
 }
@@ -9877,10 +10130,28 @@ body.dialog-host {
 .stonks-ledger-item summary {
 	cursor: pointer;
 	font-weight: 700;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
 }
 
 .stonks-ledger-position {
 	padding-top: 8px;
+}
+
+.stonks-audit-changes {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	padding-top: 10px;
+}
+
+.stonks-audit-change {
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	border-radius: 999px;
+	color: var(--text-muted);
+	padding: 4px 8px;
 }
 
 .stonks-check {
@@ -9890,10 +10161,16 @@ body.dialog-host {
 	min-height: 34px;
 }
 
+.stonks-admin-manager {
+	grid-template-columns: minmax(180px, 1fr) auto auto auto;
+	align-items: center;
+}
+
 @media (max-width: 760px) {
 	.stonks-stat-grid,
 	.stonks-row,
 	.stonks-editor-top,
+	.stonks-admin-manager,
 	.stonks-leaderboard-description {
 		grid-template-columns: 1fr;
 	}
@@ -9910,6 +10187,12 @@ body.dialog-host {
 
 	.stonks-draft-total {
 		margin-inline-start: 0;
+	}
+
+	.stonks-portfolio-owner,
+	.stonks-heatmap-title {
+		align-items: flex-start;
+		flex-direction: column;
 	}
 }
 

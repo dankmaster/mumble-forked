@@ -13,6 +13,7 @@
 #include <QtCore/QPointer>
 #include <QtCore/QSet>
 #include <QtCore/QStringList>
+#include <QtCore/QUrl>
 #include <QtCore/QVariant>
 #include <QtCore/QtGlobal>
 #include <QtGui/QImage>
@@ -102,6 +103,13 @@ enum class ConnectionFailType;
 struct ContextMenuTarget {
 	ClientUser *user = nullptr;
 	Channel *channel = nullptr;
+};
+
+struct PendingFeedbackSubmission {
+	MumbleProto::FeedbackReportKind kind = MumbleProto::FeedbackReportBug;
+	QString issueTitle;
+	QString issueBody;
+	QUrl fallbackUrl;
 };
 
 class MessageBoxEvent : public QEvent {
@@ -534,7 +542,7 @@ public:
 									  const QString &placement);
 	bool handleModernShellAppAction(const QString &actionId);
 	void openModernStonksDialog();
-	void requestStonksState(const QString &period = QString());
+	void requestStonksState(const QString &period = QString(), unsigned int userID = 0);
 	void handleStonksState(const MumbleProto::StonksState &state);
 	QVariantMap buildModernStonksDialog() const;
 	bool handleModernStonksDialogAction(const QString &actionID, const QVariantMap &payload);
@@ -727,6 +735,7 @@ protected:
 	QHash< quint64, PendingChatEmbedAssist > m_pendingChatEmbedAssists;
 	QHash< QString, quint64 > m_pendingChatEmbedAssistByKey;
 	QHash< QString, QString > m_persistentChatInlineDataImageSources;
+	QHash< QString, PendingFeedbackSubmission > m_pendingFeedbackSubmissions;
 	QSet< QString > m_persistentChatLiveMessageKeys;
 	QHash< QString, unsigned int > m_persistentChatLastReadByScope;
 	QHash< QString, int > m_persistentChatUnreadByScope;
@@ -764,6 +773,7 @@ protected:
 	std::unique_ptr< ModernDialogHost > m_modernDialogHost;
 	QVariantMap m_stonksState;
 	QString m_stonksSelectedPeriod;
+	unsigned int m_stonksSelectedUserID = 0;
 	std::unique_ptr< ModernConnectPingState > m_modernConnectPingState;
 	QObject *m_persistentChatPreviewSnapshotRenderer       = nullptr;
 	quint64 m_modernShellPatchRevision                     = 0;
@@ -865,6 +875,9 @@ protected:
 	/// the MainWindow.
 	void updateToolbar();
 	void updateFavoriteButton();
+	void openFeedbackDialog();
+	void handleFeedbackReportState(const MumbleProto::FeedbackReportState &msg);
+	void showFeedbackFallback(const PendingFeedbackSubmission &submission, const QString &error);
 	void customEvent(QEvent *evt) Q_DECL_OVERRIDE;
 	void findDesiredChannel();
 	void setupView(bool toggle_minimize = true);
@@ -963,6 +976,7 @@ public slots:
 	void on_qaHelpWhatsThis_triggered();
 	void on_qaHelpAbout_triggered();
 	void on_qaHelpAboutQt_triggered();
+	void on_qaHelpFeedback_triggered();
 	void on_qaHelpVersionCheck_triggered();
 	void on_qaQuit_triggered();
 	void on_qteChat_tabPressed();

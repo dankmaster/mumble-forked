@@ -129,6 +129,20 @@ namespace server {
 			}
 		}
 
+		void StonksSnapshotTable::removeSnapshot(unsigned int serverID, unsigned int snapshotID) {
+			try {
+				::mdb::TransactionHolder transaction = ensureTransaction();
+				m_sql << "DELETE FROM \"" << NAME << "\" WHERE \"" << column::server_id << "\" = :serverID AND \""
+					  << column::snapshot_id << "\" = :snapshotID",
+					soci::use(serverID), soci::use(snapshotID);
+				transaction.commit();
+			} catch (const soci::soci_error &) {
+				std::throw_with_nested(::mdb::AccessException("Failed at removing stonks snapshot "
+															  + std::to_string(snapshotID) + " on server "
+															  + std::to_string(serverID)));
+			}
+		}
+
 		std::optional< DBStonksSnapshot > StonksSnapshotTable::getSnapshot(unsigned int serverID,
 																		   unsigned int snapshotID) {
 			try {

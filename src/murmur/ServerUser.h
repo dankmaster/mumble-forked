@@ -142,6 +142,7 @@ public:
 
 	LeakyBucket leakyBucket;
 	LeakyBucket m_pluginMessageBucket;
+	QElapsedTimer m_feedbackReportTimer;
 
 	int iLastPermissionCheck;
 	QMap< int, unsigned int > qmPermissionSent;

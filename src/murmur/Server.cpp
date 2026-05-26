@@ -12,6 +12,7 @@
 #include "Connection.h"
 #include "DBState.h"
 #include "EnvUtils.h"
+#include "FeedbackReport.h"
 #include "ForkFeature.h"
 #include "Group.h"
 #include "HTMLFilter.h"
@@ -408,6 +409,17 @@ void Server::readParams() {
 	bStonksEnabled                     = Meta::mp->bStonksEnabled;
 	uiStonksTextChannelID              = Meta::mp->uiStonksTextChannelID;
 	bStonksSocialAnnouncementsEnabled  = Meta::mp->bStonksSocialAnnouncementsEnabled;
+	bFeedbackGitHubEnabled             = Meta::mp->bFeedbackGitHubEnabled;
+	qsFeedbackGitHubOwner              = Meta::mp->qsFeedbackGitHubOwner;
+	qsFeedbackGitHubRepo               = Meta::mp->qsFeedbackGitHubRepo;
+	qsFeedbackGitHubToken              = Meta::mp->qsFeedbackGitHubToken;
+	qsFeedbackGitHubAPIUrl             = Meta::mp->qsFeedbackGitHubAPIUrl;
+	uiFeedbackMaxLogBytes              = Meta::mp->uiFeedbackMaxLogBytes;
+	uiFeedbackMaxBodyBytes             = Meta::mp->uiFeedbackMaxBodyBytes;
+	qsFeedbackCommonLabels             = Meta::mp->qsFeedbackCommonLabels;
+	qsFeedbackBugLabels                = Meta::mp->qsFeedbackBugLabels;
+	qsFeedbackSuggestionLabels         = Meta::mp->qsFeedbackSuggestionLabels;
+	qsFeedbackSupportLabels            = Meta::mp->qsFeedbackSupportLabels;
 	iDefaultChan                       = Meta::mp->iDefaultChan;
 	bRememberChan                      = Meta::mp->bRememberChan;
 	iRememberChanDuration              = Meta::mp->iRememberChanDuration;
@@ -522,6 +534,17 @@ void Server::readParams() {
 	m_dbWrapper.getConfigurationTo(iServerNum, "stonks_text_channel_id", uiStonksTextChannelID);
 	m_dbWrapper.getConfigurationTo(iServerNum, "stonks_social_announcements_enabled",
 								   bStonksSocialAnnouncementsEnabled);
+	m_dbWrapper.getConfigurationTo(iServerNum, "feedback_github_enabled", bFeedbackGitHubEnabled);
+	m_dbWrapper.getConfigurationTo(iServerNum, "feedback_github_owner", qsFeedbackGitHubOwner);
+	m_dbWrapper.getConfigurationTo(iServerNum, "feedback_github_repo", qsFeedbackGitHubRepo);
+	m_dbWrapper.getConfigurationTo(iServerNum, "feedback_github_token", qsFeedbackGitHubToken);
+	m_dbWrapper.getConfigurationTo(iServerNum, "feedback_github_api_url", qsFeedbackGitHubAPIUrl);
+	m_dbWrapper.getConfigurationTo(iServerNum, "feedback_max_log_bytes", uiFeedbackMaxLogBytes);
+	m_dbWrapper.getConfigurationTo(iServerNum, "feedback_max_body_bytes", uiFeedbackMaxBodyBytes);
+	m_dbWrapper.getConfigurationTo(iServerNum, "feedback_common_labels", qsFeedbackCommonLabels);
+	m_dbWrapper.getConfigurationTo(iServerNum, "feedback_bug_labels", qsFeedbackBugLabels);
+	m_dbWrapper.getConfigurationTo(iServerNum, "feedback_suggestion_labels", qsFeedbackSuggestionLabels);
+	m_dbWrapper.getConfigurationTo(iServerNum, "feedback_support_labels", qsFeedbackSupportLabels);
 	uiScreenShareMaxWidth  = Mumble::ScreenShare::sanitizeLimit(uiScreenShareMaxWidth, Meta::mp->uiScreenShareMaxWidth,
                                                                Mumble::ScreenShare::HARD_MAX_WIDTH);
 	uiScreenShareMaxHeight = Mumble::ScreenShare::sanitizeLimit(
@@ -532,6 +555,16 @@ void Server::readParams() {
 	qsScreenShareRelayAPIKey    = qsScreenShareRelayAPIKey.trimmed();
 	qsScreenShareRelayAPISecret = qsScreenShareRelayAPISecret.trimmed();
 	qsChatAssetStoragePath      = qsChatAssetStoragePath.trimmed();
+	qsFeedbackGitHubOwner       = qsFeedbackGitHubOwner.trimmed();
+	qsFeedbackGitHubRepo        = qsFeedbackGitHubRepo.trimmed();
+	qsFeedbackGitHubToken       = qsFeedbackGitHubToken.trimmed();
+	qsFeedbackGitHubAPIUrl      = qsFeedbackGitHubAPIUrl.trimmed();
+	if (uiFeedbackMaxLogBytes == 0) {
+		uiFeedbackMaxLogBytes = Mumble::Feedback::DEFAULT_MAX_LOG_BYTES;
+	}
+	if (uiFeedbackMaxBodyBytes == 0) {
+		uiFeedbackMaxBodyBytes = Mumble::Feedback::DEFAULT_MAX_BODY_BYTES;
+	}
 	if (uiChatAttachmentLimit == 0) {
 		uiChatAttachmentLimit = 1;
 	}
@@ -994,6 +1027,54 @@ void Server::setLiveConf(const QString &key, const QString &value) {
 			mpsc.set_stonks_social_announcements_enabled(bStonksSocialAnnouncementsEnabled);
 			sendAll(mpsc);
 		}
+	} else if (key == "feedback_github_enabled") {
+		const bool enabled = !v.isNull() ? QVariant(v).toBool() : Meta::mp->bFeedbackGitHubEnabled;
+		if (enabled != bFeedbackGitHubEnabled) {
+			bFeedbackGitHubEnabled = enabled;
+			MumbleProto::ServerConfig mpsc;
+			mpsc.set_feedback_enabled(feedbackGitHubConfigured());
+			sendAll(mpsc);
+		}
+	} else if (key == "feedback_github_owner") {
+		qsFeedbackGitHubOwner = (!v.isNull() ? v : Meta::mp->qsFeedbackGitHubOwner).trimmed();
+		MumbleProto::ServerConfig mpsc;
+		mpsc.set_feedback_enabled(feedbackGitHubConfigured());
+		sendAll(mpsc);
+	} else if (key == "feedback_github_repo") {
+		qsFeedbackGitHubRepo = (!v.isNull() ? v : Meta::mp->qsFeedbackGitHubRepo).trimmed();
+		MumbleProto::ServerConfig mpsc;
+		mpsc.set_feedback_enabled(feedbackGitHubConfigured());
+		sendAll(mpsc);
+	} else if (key == "feedback_github_token") {
+		qsFeedbackGitHubToken = (!v.isNull() ? v : Meta::mp->qsFeedbackGitHubToken).trimmed();
+		MumbleProto::ServerConfig mpsc;
+		mpsc.set_feedback_enabled(feedbackGitHubConfigured());
+		sendAll(mpsc);
+	} else if (key == "feedback_github_api_url") {
+		qsFeedbackGitHubAPIUrl = (!v.isNull() ? v : Meta::mp->qsFeedbackGitHubAPIUrl).trimmed();
+		MumbleProto::ServerConfig mpsc;
+		mpsc.set_feedback_enabled(feedbackGitHubConfigured());
+		sendAll(mpsc);
+	} else if (key == "feedback_max_log_bytes") {
+		uiFeedbackMaxLogBytes =
+			i > 0 ? static_cast< unsigned int >(i) : Mumble::Feedback::DEFAULT_MAX_LOG_BYTES;
+		MumbleProto::ServerConfig mpsc;
+		mpsc.set_feedback_max_log_bytes(uiFeedbackMaxLogBytes);
+		sendAll(mpsc);
+	} else if (key == "feedback_max_body_bytes") {
+		uiFeedbackMaxBodyBytes =
+			i > 0 ? static_cast< unsigned int >(i) : Mumble::Feedback::DEFAULT_MAX_BODY_BYTES;
+		MumbleProto::ServerConfig mpsc;
+		mpsc.set_feedback_max_body_bytes(uiFeedbackMaxBodyBytes);
+		sendAll(mpsc);
+	} else if (key == "feedback_common_labels") {
+		qsFeedbackCommonLabels = (!v.isNull() ? v : Meta::mp->qsFeedbackCommonLabels).trimmed();
+	} else if (key == "feedback_bug_labels") {
+		qsFeedbackBugLabels = (!v.isNull() ? v : Meta::mp->qsFeedbackBugLabels).trimmed();
+	} else if (key == "feedback_suggestion_labels") {
+		qsFeedbackSuggestionLabels = (!v.isNull() ? v : Meta::mp->qsFeedbackSuggestionLabels).trimmed();
+	} else if (key == "feedback_support_labels") {
+		qsFeedbackSupportLabels = (!v.isNull() ? v : Meta::mp->qsFeedbackSupportLabels).trimmed();
 	} else if (key == "persistentglobalchat") {
 		const bool enabled = !v.isNull() ? QVariant(v).toBool() : false;
 		if (enabled != bPersistentGlobalChatEnabled) {

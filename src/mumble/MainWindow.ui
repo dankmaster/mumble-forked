@@ -62,6 +62,7 @@
      <string>&amp;Help</string>
     </property>
     <addaction name="qaHelpWhatsThis"/>
+    <addaction name="qaHelpFeedback"/>
     <addaction name="separator"/>
     <addaction name="qaHelpAbout"/>
     <addaction name="qaHelpAboutQt"/>
@@ -697,6 +698,17 @@ the channel's context menu.</string>
    </property>
    <property name="whatsThis">
     <string>Click this to enter &quot;What's This?&quot; mode. Your cursor will turn into a question mark. Click on any button, menu choice or area to show a description of what it is.</string>
+   </property>
+  </action>
+  <action name="qaHelpFeedback">
+   <property name="text">
+    <string>Report &amp;feedback...</string>
+   </property>
+   <property name="toolTip">
+    <string>Report feedback</string>
+   </property>
+   <property name="whatsThis">
+    <string>Open the feedback report form.</string>
    </property>
   </action>
   <action name="qaHelpAbout">

@@ -19,6 +19,7 @@
 #include "ConnectDialog.h"
 #include "Connection.h"
 #include "Database.h"
+#include "FeedbackReport.h"
 #include "ForkFeature.h"
 #include "Log.h"
 #include "MainWindow.h"
@@ -309,6 +310,9 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 	Global::get().uiScreenShareMaxHeight = 0;
 	Global::get().uiScreenShareMaxFps = 0;
 	Global::get().qsScreenShareRelayUrl.clear();
+	Global::get().bFeedbackEnabled       = false;
+	Global::get().uiFeedbackMaxLogBytes  = Mumble::Feedback::DEFAULT_MAX_LOG_BYTES;
+	Global::get().uiFeedbackMaxBodyBytes = Mumble::Feedback::DEFAULT_MAX_BODY_BYTES;
 
 	Global::get().sh->sendPing(); // Send initial ping to establish UDP connection
 	appendServerSyncTrace(QStringLiteral("sent-ping"));
@@ -497,6 +501,20 @@ void MainWindow::msgServerConfig(const MumbleProto::ServerConfig &msg) {
 	}
 	if (msg.has_stonks_social_announcements_enabled()) {
 		Global::get().bStonksSocialAnnouncementsEnabled = msg.stonks_social_announcements_enabled();
+		modernLayoutCompatibleAdvertised = true;
+	}
+	if (msg.has_feedback_enabled()) {
+		Global::get().bFeedbackEnabled = msg.feedback_enabled();
+		modernLayoutCompatibleAdvertised = true;
+	}
+	if (msg.has_feedback_max_log_bytes()) {
+		Global::get().uiFeedbackMaxLogBytes =
+			qMax(1u, msg.feedback_max_log_bytes());
+		modernLayoutCompatibleAdvertised = true;
+	}
+	if (msg.has_feedback_max_body_bytes()) {
+		Global::get().uiFeedbackMaxBodyBytes =
+			qMax(1u, msg.feedback_max_body_bytes());
 		modernLayoutCompatibleAdvertised = true;
 	}
 	if (screenShareConfigChanged && Global::get().s.bScreenShareDiagnostics) {
@@ -2086,6 +2104,13 @@ void MainWindow::msgStonksState(const MumbleProto::StonksState &msg) {
 #else
 	Q_UNUSED(msg);
 #endif
+}
+
+void MainWindow::msgFeedbackReport(const MumbleProto::FeedbackReport &) {
+}
+
+void MainWindow::msgFeedbackReportState(const MumbleProto::FeedbackReportState &msg) {
+	handleFeedbackReportState(msg);
 }
 
 void MainWindow::msgScreenShareCreate(const MumbleProto::ScreenShareCreate &) {

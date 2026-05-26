@@ -9,6 +9,7 @@
 #include "ChatFeature.h"
 #include "ClientType.h"
 #include "Connection.h"
+#include "FeedbackReport.h"
 #include "FinanceQuote.h"
 #include "ForkFeature.h"
 #include "Group.h"
@@ -54,6 +55,9 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QLocale>
 #include <QtCore/QRandomGenerator>
 #include <QtCore/QRegularExpression>
@@ -85,6 +89,7 @@ constexpr std::size_t MAX_CHAT_HISTORY_LEGACY_MIRROR_BYTES = 64 * 1024;
 constexpr std::size_t MAX_CHAT_HISTORY_RESPONSE_BYTES      = 2 * 1024 * 1024;
 constexpr int MAX_STONKS_LEDGER_POSITIONS                  = 64;
 constexpr unsigned int MAX_STONKS_LEDGER_SNAPSHOTS         = 50;
+constexpr qint64 FEEDBACK_REPORT_RATE_LIMIT_MS             = 5 * 60 * 1000;
 
 std::size_t serializedChatHistoryResponseBytes(const MumbleProto::ChatHistoryResponse &response) {
 #if GOOGLE_PROTOBUF_VERSION >= 3004000
@@ -102,6 +107,53 @@ void constrainChatHistoryResponseSize(MumbleProto::ChatHistoryResponse &response
 		response.set_has_older(true);
 		response.set_oldest_message_id(response.messages(0).message_id());
 	}
+}
+
+bool isValidGitHubPathComponent(const QString &value) {
+	static const QRegularExpression pattern(QLatin1String("^[A-Za-z0-9_.-]+$"));
+	return pattern.match(value.trimmed()).hasMatch();
+}
+
+QUrl feedbackGitHubIssueUrl(const QString &apiUrl, const QString &owner, const QString &repo) {
+	QUrl url(apiUrl.trimmed());
+	if (!url.isValid() || url.scheme().isEmpty() || url.host().isEmpty()) {
+		return QUrl();
+	}
+
+	QString path = url.path();
+	if (path.endsWith(QLatin1Char('/'))) {
+		path.chop(1);
+	}
+	path += QStringLiteral("/repos/%1/%2/issues")
+				.arg(QString::fromLatin1(QUrl::toPercentEncoding(owner.trimmed())),
+					 QString::fromLatin1(QUrl::toPercentEncoding(repo.trimmed())));
+	url.setPath(path);
+	url.setQuery(QString());
+	url.setFragment(QString());
+	return url;
+}
+
+QString feedbackKindLabels(const Server *server, const MumbleProto::FeedbackReportKind kind) {
+	switch (kind) {
+		case MumbleProto::FeedbackReportBug:
+			return server->qsFeedbackBugLabels;
+		case MumbleProto::FeedbackReportSuggestion:
+			return server->qsFeedbackSuggestionLabels;
+		case MumbleProto::FeedbackReportSupport:
+			return server->qsFeedbackSupportLabels;
+	}
+
+	return QString();
+}
+
+QStringList feedbackLabelsForKind(const Server *server, const MumbleProto::FeedbackReportKind kind) {
+	QStringList labels = Mumble::Feedback::splitLabels(server->qsFeedbackCommonLabels);
+	for (const QString &label : Mumble::Feedback::splitLabels(feedbackKindLabels(server, kind))) {
+		if (!labels.contains(label)) {
+			labels << label;
+		}
+	}
+	return labels;
 }
 } // namespace
 
@@ -1769,7 +1821,7 @@ MumbleProto::StonksState buildStonksState(Server *server, ServerUser *user, cons
 	state.set_social_announcements_enabled(server->bStonksSocialAnnouncementsEnabled);
 	state.set_selected_period(u8(normalizedPeriod));
 	state.set_leaderboard_description(
-		"Snapshot return compares each user's latest accepted snapshot with their closest older snapshot for the selected period. It updates when users submit new snapshots.");
+		"Portfolio return compares each user's latest saved portfolio value with their closest older saved value for the selected period.");
 	if (!status.trimmed().isEmpty()) {
 		state.set_status(u8(status.trimmed()));
 	}
@@ -1873,7 +1925,10 @@ MumbleProto::StonksState buildStonksState(Server *server, ServerUser *user, cons
 	const std::optional< unsigned int > ledgerUserID =
 		requestedUserID && *requestedUserID > 0 ? requestedUserID : (registered ? selfUserID : std::nullopt);
 	if (ledgerUserID && server->m_dbWrapper.registeredUserExists(server->iServerNum, *ledgerUserID)) {
-		const bool includePositions = registered && selfUserID && *ledgerUserID == *selfUserID;
+		state.set_selected_user_id(*ledgerUserID);
+		state.set_selected_user_name(u8(stonksRegisteredDisplayName(server, *ledgerUserID)));
+
+		const bool includePositions = canAdmin || (registered && selfUserID && *ledgerUserID == *selfUserID);
 		for (const ::msdb::DBStonksSnapshot &snapshot : server->m_dbWrapper.getStonksSnapshotsForUser(
 				 server->iServerNum, *ledgerUserID, MAX_STONKS_LEDGER_SNAPSHOTS)) {
 			std::vector< ::msdb::DBStonksSnapshotPosition > positions;
@@ -1946,13 +2001,13 @@ std::optional< ValidatedStonksSnapshot > validatedStonksSnapshotFromProto(
 	unsigned int serverID, unsigned int userID, const MumbleProto::StonksSnapshot &protoSnapshot, QString *error) {
 	if (protoSnapshot.positions_size() <= 0) {
 		if (error) {
-			*error = QStringLiteral("Add at least one position before submitting a snapshot.");
+			*error = QStringLiteral("Add at least one position before saving your portfolio.");
 		}
 		return std::nullopt;
 	}
 	if (protoSnapshot.positions_size() > MAX_STONKS_LEDGER_POSITIONS) {
 		if (error) {
-			*error = QStringLiteral("Snapshots are capped at %1 positions.").arg(MAX_STONKS_LEDGER_POSITIONS);
+			*error = QStringLiteral("Portfolios are capped at %1 positions.").arg(MAX_STONKS_LEDGER_POSITIONS);
 		}
 		return std::nullopt;
 	}
@@ -2011,7 +2066,7 @@ std::optional< ValidatedStonksSnapshot > validatedStonksSnapshotFromProto(
 			normalizedStonksCurrency(protoPosition.has_currency() ? u8(protoPosition.currency()) : snapshotCurrency);
 		if (currency != snapshotCurrency) {
 			if (error) {
-				*error = QStringLiteral("Position %1 uses %2, but the snapshot currency is %3.")
+				*error = QStringLiteral("Position %1 uses %2, but the portfolio currency is %3.")
 							 .arg(i + 1)
 							 .arg(currency, snapshotCurrency);
 			}
@@ -2047,13 +2102,13 @@ std::optional< ValidatedStonksSnapshot > validatedStonksSnapshotFromProto(
 
 	if (!std::isfinite(validated.snapshot.totalValue) || validated.snapshot.totalValue <= 0.0) {
 		if (error) {
-			*error = QStringLiteral("Snapshot total must be greater than zero.");
+			*error = QStringLiteral("Portfolio total must be greater than zero.");
 		}
 		return std::nullopt;
 	}
 	if (protoSnapshot.has_total_value() && !stonksValuesClose(validated.snapshot.totalValue, protoSnapshot.total_value())) {
 		if (error) {
-			*error = QStringLiteral("Snapshot total must match the sum of accepted positions.");
+			*error = QStringLiteral("Portfolio total must match the sum of accepted positions.");
 		}
 		return std::nullopt;
 	}
@@ -2062,13 +2117,36 @@ std::optional< ValidatedStonksSnapshot > validatedStonksSnapshotFromProto(
 }
 
 QString stonksSocialAnnouncement(Server *server, const ::msdb::DBStonksSnapshot &snapshot,
-								 std::size_t positionCount) {
+								 const std::vector< ::msdb::DBStonksSnapshotPosition > &positions) {
 	const QString userName = stonksRegisteredDisplayName(server, snapshot.userID);
-	return QStringLiteral("Stonks: %1 posted a new ledger snapshot at %2 across %3 position%4.")
+	std::vector< Mumble::Stonks::LedgerPositionSummary > positionSummaries;
+	positionSummaries.reserve(positions.size());
+	for (const ::msdb::DBStonksSnapshotPosition &position : positions) {
+		Mumble::Stonks::LedgerPositionSummary summary;
+		summary.symbol      = u8(position.symbol);
+		summary.quantity    = position.quantity;
+		summary.marketValue = position.marketValue;
+		summary.currency    = u8(position.currency);
+		positionSummaries.push_back(std::move(summary));
+	}
+
+	const QString positionSummary = Mumble::Stonks::formatPositionSummary(positionSummaries);
+	if (!positionSummary.isEmpty()) {
+		return QStringLiteral("Stonks: %1 added %2 in a new portfolio snapshot at %3.")
+			.arg(userName, positionSummary, formatStonksMoney(snapshot.totalValue, u8(snapshot.currency)));
+	}
+
+	const std::size_t positionCount = positions.size();
+	return QStringLiteral("Stonks: %1 updated their portfolio to %2 across %3 position%4.")
 		.arg(userName,
 			 formatStonksMoney(snapshot.totalValue, u8(snapshot.currency)),
 			 QString::number(positionCount),
 			 positionCount == 1 ? QString() : QStringLiteral("s"));
+}
+
+QString stonksClearAnnouncement(Server *server, const ::msdb::DBStonksSnapshot &snapshot) {
+	return QStringLiteral("Stonks: %1 cleared their portfolio.")
+		.arg(stonksRegisteredDisplayName(server, snapshot.userID));
 }
 } // namespace
 
@@ -3528,6 +3606,9 @@ void Server::msgAuthenticate(ServerUser *uSource, MumbleProto::Authenticate &msg
 		mpsc.set_stonks_text_channel_id(*stonksTextChannelID);
 	}
 	mpsc.set_stonks_social_announcements_enabled(bStonksSocialAnnouncementsEnabled);
+	mpsc.set_feedback_enabled(feedbackGitHubConfigured());
+	mpsc.set_feedback_max_log_bytes(uiFeedbackMaxLogBytes);
+	mpsc.set_feedback_max_body_bytes(uiFeedbackMaxBodyBytes);
 	sendMessage(uSource, mpsc);
 	syncScreenShareStateForUser(uSource);
 	syncWatchTogetherStateForUser(uSource);
@@ -4978,7 +5059,7 @@ void Server::msgChatSend(ServerUser *uSource, MumbleProto::ChatSend &msg) {
 				const std::optional< ::msdb::DBStonksSnapshot > latestSnapshot =
 					m_dbWrapper.getLatestStonksSnapshotForUser(iServerNum, currentUserID.value());
 				if (latestSnapshot) {
-					lines << QStringLiteral("Latest snapshot: %1")
+					lines << QStringLiteral("Current portfolio: %1")
 								 .arg(formatStonksMoney(latestSnapshot->totalValue, u8(latestSnapshot->currency)));
 				}
 				for (const QString &period : { QStringLiteral("1d"), QStringLiteral("7d"), QStringLiteral("30d"),
@@ -5565,8 +5646,9 @@ void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg
 	QMutexLocker qml(&qmCache);
 
 	const QString period = normalizedStonksLedgerPeriod(msg.has_period() ? u8(msg.period()) : QString());
-	const auto sendState = [&](const QString &status = QString(), const QString &error = QString()) {
-		sendMessage(uSource, buildStonksState(this, uSource, period, acCache, status, error));
+	const auto sendState = [&](const QString &status = QString(), const QString &error = QString(),
+							   std::optional< unsigned int > requestedUserID = std::nullopt) {
+		sendMessage(uSource, buildStonksState(this, uSource, period, acCache, status, error, requestedUserID));
 	};
 
 	if (!clientSupportsForkFeature(uSource, MumbleProto::ForkFeatureStonksLedger)) {
@@ -5598,46 +5680,158 @@ void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg
 		sendState(QString(), tr("Register your user before using the Stonks ledger."));
 		return false;
 	};
+	const auto requireStonksAdmin = [&]() -> bool {
+		if (canAdmin) {
+			return true;
+		}
+		if (rootChannel) {
+			PERM_DENIED(uSource, rootChannel, ChanACL::Write);
+		}
+		sendState(QString(), tr("Root Write permission is required to manage another user's Stonks portfolio."));
+		return false;
+	};
+	const auto resolvePortfolioTarget = [&]() -> std::optional< unsigned int > {
+		int targetUserID = msg.has_target_user_id() ? static_cast< int >(msg.target_user_id()) : -1;
+		if (targetUserID <= 0 && msg.has_target_name()) {
+			targetUserID = getRegisteredUserID(u8(msg.target_name()));
+		}
+		if (targetUserID <= 0) {
+			if (!requireRegistered()) {
+				return std::nullopt;
+			}
+			targetUserID = static_cast< int >(*selfUserID);
+		}
+		if (targetUserID <= 0
+			|| !m_dbWrapper.registeredUserExists(iServerNum, static_cast< unsigned int >(targetUserID))) {
+			sendState(QString(), tr("That registered user could not be found."));
+			return std::nullopt;
+		}
+
+		const unsigned int resolvedTargetUserID = static_cast< unsigned int >(targetUserID);
+		const bool targetsSelf = registered && selfUserID && resolvedTargetUserID == *selfUserID;
+		if (!targetsSelf && !requireStonksAdmin()) {
+			return std::nullopt;
+		}
+
+		return resolvedTargetUserID;
+	};
+	const auto broadcastStonksAnnouncement = [&](const QString &announcement) {
+		if (!bStonksSocialAnnouncementsEnabled || announcement.trimmed().isEmpty()) {
+			return;
+		}
+
+		std::vector<::msdb::DBTextChannel > textChannels = m_dbWrapper.getTextChannels(iServerNum);
+		const std::optional< unsigned int > stonksTextChannelID =
+			resolvedStonksTextChannelID(uiStonksTextChannelID, textChannels);
+		if (!stonksTextChannelID) {
+			return;
+		}
+
+		const auto textChannel = m_dbWrapper.getTextChannel(iServerNum, *stonksTextChannelID);
+		Channel *permissionChannel = textChannel ? qhChannels.value(textChannel->aclChannelID) : nullptr;
+		if (!permissionChannel) {
+			return;
+		}
+
+		persistAndBroadcastServerChatMessage(announcement, MumbleProto::TextChannel, *stonksTextChannelID,
+											 permissionChannel, ::msdb::ChatThreadScope::TextChannel,
+											 QStringLiteral("Stonks"));
+	};
 
 	switch (action) {
 		case MumbleProto::StonksActionSubmitSnapshot: {
-			if (!requireRegistered()) {
+			const std::optional< unsigned int > targetUserID = resolvePortfolioTarget();
+			if (!targetUserID) {
 				return;
 			}
 			if (!msg.has_snapshot()) {
-				sendState(QString(), tr("Snapshot payload is missing."));
+				sendState(QString(), tr("Portfolio payload is missing."), targetUserID);
 				return;
 			}
 
 			QString error;
 			std::optional< ValidatedStonksSnapshot > validated =
-				validatedStonksSnapshotFromProto(iServerNum, *selfUserID, msg.snapshot(), &error);
+				validatedStonksSnapshotFromProto(iServerNum, *targetUserID, msg.snapshot(), &error);
 			if (!validated) {
-				sendState(QString(), error);
+				sendState(QString(), error, targetUserID);
 				return;
 			}
 
 			const ::msdb::DBStonksSnapshot storedSnapshot =
 				m_dbWrapper.addStonksSnapshot(validated->snapshot, validated->positions);
 
-			if (bStonksSocialAnnouncementsEnabled) {
-				std::vector<::msdb::DBTextChannel > textChannels = m_dbWrapper.getTextChannels(iServerNum);
-				const std::optional< unsigned int > stonksTextChannelID =
-					resolvedStonksTextChannelID(uiStonksTextChannelID, textChannels);
-				if (stonksTextChannelID) {
-					const auto textChannel = m_dbWrapper.getTextChannel(iServerNum, *stonksTextChannelID);
-					Channel *permissionChannel =
-						textChannel ? qhChannels.value(textChannel->aclChannelID) : nullptr;
-					if (permissionChannel) {
-						persistAndBroadcastServerChatMessage(
-							stonksSocialAnnouncement(this, storedSnapshot, validated->positions.size()),
-							MumbleProto::TextChannel, *stonksTextChannelID, permissionChannel,
-							::msdb::ChatThreadScope::TextChannel, QStringLiteral("Stonks"));
-					}
-				}
+			broadcastStonksAnnouncement(stonksSocialAnnouncement(this, storedSnapshot, validated->positions));
+
+			const QString targetName = stonksRegisteredDisplayName(this, *targetUserID);
+			const bool targetsSelf = registered && selfUserID && *targetUserID == *selfUserID;
+			sendState(targetsSelf ? tr("Portfolio saved.") : tr("Portfolio saved for %1.").arg(targetName),
+					  QString(), targetUserID);
+			return;
+		}
+		case MumbleProto::StonksActionClearPortfolio: {
+			const std::optional< unsigned int > targetUserID = resolvePortfolioTarget();
+			if (!targetUserID) {
+				return;
 			}
 
-			sendState(tr("Snapshot saved."));
+			QString currency = QStringLiteral("USD");
+			if (const std::optional< ::msdb::DBStonksSnapshot > latest =
+					m_dbWrapper.getLatestStonksSnapshotForUser(iServerNum, *targetUserID)) {
+				currency = normalizedStonksCurrency(u8(latest->currency));
+			}
+			if (msg.has_snapshot() && msg.snapshot().has_currency()) {
+				currency = normalizedStonksCurrency(u8(msg.snapshot().currency()));
+			}
+
+			::msdb::DBStonksSnapshot clearedSnapshot(iServerNum, 0, *targetUserID);
+			clearedSnapshot.createdAt  = std::chrono::system_clock::now();
+			clearedSnapshot.currency   = u8(currency);
+			clearedSnapshot.totalValue = 0.0;
+			clearedSnapshot.note       = u8(msg.has_snapshot() && msg.snapshot().has_note()
+												? u8(msg.snapshot().note()).trimmed().left(512)
+												: tr("Portfolio cleared"));
+
+			const ::msdb::DBStonksSnapshot storedSnapshot = m_dbWrapper.addStonksSnapshot(clearedSnapshot, {});
+			broadcastStonksAnnouncement(stonksClearAnnouncement(this, storedSnapshot));
+
+			const QString targetName = stonksRegisteredDisplayName(this, *targetUserID);
+			const bool targetsSelf = registered && selfUserID && *targetUserID == *selfUserID;
+			sendState(targetsSelf ? tr("Portfolio cleared.") : tr("Portfolio cleared for %1.").arg(targetName),
+					  QString(), targetUserID);
+			return;
+		}
+		case MumbleProto::StonksActionDeleteSnapshot: {
+			const unsigned int snapshotID =
+				msg.has_snapshot_id() ? msg.snapshot_id()
+									  : (msg.has_snapshot() && msg.snapshot().has_snapshot_id()
+											 ? msg.snapshot().snapshot_id()
+											 : 0u);
+			if (snapshotID == 0) {
+				sendState(QString(), tr("Snapshot payload is missing."));
+				return;
+			}
+
+			const std::optional< ::msdb::DBStonksSnapshot > snapshot =
+				m_dbWrapper.getStonksSnapshot(iServerNum, snapshotID);
+			if (!snapshot) {
+				sendState(QString(), tr("That portfolio snapshot could not be found."));
+				return;
+			}
+
+			const bool targetsSelf = registered && selfUserID && snapshot->userID == *selfUserID;
+			if (!targetsSelf && !requireStonksAdmin()) {
+				return;
+			}
+			if (msg.has_target_user_id() && msg.target_user_id() > 0 && msg.target_user_id() != snapshot->userID) {
+				sendState(QString(), tr("Snapshot owner did not match the selected user."), snapshot->userID);
+				return;
+			}
+
+			m_dbWrapper.removeStonksSnapshot(iServerNum, snapshotID);
+
+			const QString targetName = stonksRegisteredDisplayName(this, snapshot->userID);
+			sendState(targetsSelf ? tr("Snapshot deleted.") : tr("Snapshot deleted for %1.").arg(targetName),
+					  QString(), snapshot->userID);
 			return;
 		}
 		case MumbleProto::StonksActionFollow:
@@ -5714,6 +5908,185 @@ void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg
 }
 
 void Server::msgStonksState(ServerUser *, MumbleProto::StonksState &) {
+}
+
+bool Server::feedbackGitHubConfigured() const {
+	return bFeedbackGitHubEnabled && !qsFeedbackGitHubToken.trimmed().isEmpty()
+		   && isValidGitHubPathComponent(qsFeedbackGitHubOwner)
+		   && isValidGitHubPathComponent(qsFeedbackGitHubRepo)
+		   && feedbackGitHubIssueUrl(qsFeedbackGitHubAPIUrl, qsFeedbackGitHubOwner, qsFeedbackGitHubRepo).isValid();
+}
+
+void Server::sendFeedbackReportState(const unsigned int session, const QString &clientReportID,
+									 const MumbleProto::FeedbackReportKind kind, const bool accepted,
+									 const QString &issueUrl, const unsigned int issueNumber,
+									 const QString &error) {
+	ServerUser *user = qhUsers.value(session);
+	if (!user || user->sState != ServerUser::Authenticated) {
+		return;
+	}
+
+	MumbleProto::FeedbackReportState state;
+	state.set_client_report_id(u8(clientReportID));
+	state.set_kind(kind);
+	state.set_accepted(accepted);
+	state.set_created_at(static_cast< uint64_t >(QDateTime::currentSecsSinceEpoch()));
+	if (!issueUrl.isEmpty()) {
+		state.set_issue_url(u8(issueUrl));
+	}
+	if (issueNumber > 0) {
+		state.set_issue_number(issueNumber);
+	}
+	if (!error.isEmpty()) {
+		state.set_error(u8(error));
+	}
+	sendMessage(user, state);
+}
+
+void Server::submitFeedbackReportToGitHub(ServerUser *uSource, const MumbleProto::FeedbackReport &msg,
+										  const QString &issueTitle, const QString &issueBody,
+										  const QStringList &labels) {
+	const unsigned int session = uSource->uiSession;
+	const QString clientReportID =
+		msg.has_client_report_id() ? u8(msg.client_report_id()) : QUuid::createUuid().toString(QUuid::WithoutBraces);
+	const MumbleProto::FeedbackReportKind kind =
+		msg.has_kind() ? msg.kind() : MumbleProto::FeedbackReportBug;
+
+	const QUrl url = feedbackGitHubIssueUrl(qsFeedbackGitHubAPIUrl, qsFeedbackGitHubOwner, qsFeedbackGitHubRepo);
+	if (!qnamNetwork || !url.isValid()) {
+		sendFeedbackReportState(session, clientReportID, kind, false, QString(), 0,
+								tr("Feedback submission is not configured on this server."));
+		return;
+	}
+
+	QJsonObject payload;
+	payload.insert(QStringLiteral("title"), issueTitle);
+	payload.insert(QStringLiteral("body"), issueBody);
+	QJsonArray labelArray;
+	for (const QString &label : labels) {
+		if (!label.trimmed().isEmpty()) {
+			labelArray.append(label.trimmed());
+		}
+	}
+	if (!labelArray.isEmpty()) {
+		payload.insert(QStringLiteral("labels"), labelArray);
+	}
+
+	QNetworkRequest request(url);
+	request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/vnd.github+json"));
+	request.setRawHeader(QByteArrayLiteral("Authorization"),
+						 QByteArrayLiteral("Bearer ") + qsFeedbackGitHubToken.toUtf8());
+	request.setRawHeader(QByteArrayLiteral("X-GitHub-Api-Version"), QByteArrayLiteral("2022-11-28"));
+	request.setRawHeader(QByteArrayLiteral("User-Agent"),
+						 QByteArrayLiteral("mumble-forked-in-app-feedback/") + Version::getRelease().toUtf8());
+	request.setTransferTimeout(30000);
+
+	QNetworkReply *reply = qnamNetwork->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+	connect(reply, &QNetworkReply::finished, this,
+			[this, reply, session, clientReportID, kind]() {
+				const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+				const QByteArray bytes = reply->readAll();
+				const QJsonDocument doc = QJsonDocument::fromJson(bytes);
+				reply->deleteLater();
+
+				if (status == 201 && doc.isObject()) {
+					const QJsonObject obj = doc.object();
+					const QString issueUrl = obj.value(QStringLiteral("html_url")).toString();
+					const unsigned int issueNumber =
+						static_cast< unsigned int >(obj.value(QStringLiteral("number")).toInt());
+					sendFeedbackReportState(session, clientReportID, kind, true, issueUrl, issueNumber, QString());
+					return;
+				}
+
+				QString detail;
+				if (doc.isObject()) {
+					detail = doc.object().value(QStringLiteral("message")).toString();
+				}
+				if (detail.isEmpty() && reply->error() != QNetworkReply::NoError) {
+					detail = reply->errorString();
+				}
+				const QString error = detail.isEmpty()
+										  ? tr("GitHub issue creation failed (HTTP %1).").arg(status)
+										  : tr("GitHub issue creation failed (HTTP %1): %2").arg(status).arg(detail);
+				sendFeedbackReportState(session, clientReportID, kind, false, QString(), 0, error);
+			});
+}
+
+void Server::msgFeedbackReport(ServerUser *uSource, MumbleProto::FeedbackReport &msg) {
+	ZoneScoped;
+
+	MSG_SETUP(ServerUser::Authenticated);
+
+	const QString clientReportID =
+		msg.has_client_report_id() && !u8(msg.client_report_id()).trimmed().isEmpty()
+			? u8(msg.client_report_id()).trimmed().left(128)
+			: QUuid::createUuid().toString(QUuid::WithoutBraces);
+	MumbleProto::FeedbackReportKind kind = msg.has_kind() ? msg.kind() : MumbleProto::FeedbackReportBug;
+	if (kind != MumbleProto::FeedbackReportBug && kind != MumbleProto::FeedbackReportSuggestion
+		&& kind != MumbleProto::FeedbackReportSupport) {
+		kind = MumbleProto::FeedbackReportBug;
+	}
+	const auto reject = [&](const QString &error) {
+		sendFeedbackReportState(uSource->uiSession, clientReportID, kind, false, QString(), 0, error);
+	};
+
+	if (!clientSupportsForkFeature(uSource, MumbleProto::ForkFeatureInAppFeedback)) {
+		reject(tr("This client did not advertise in-app feedback support."));
+		return;
+	}
+	if (!feedbackGitHubConfigured()) {
+		reject(tr("Feedback submission is not configured on this server."));
+		return;
+	}
+#if GOOGLE_PROTOBUF_VERSION >= 3004000
+	const uint64_t payloadBytes = msg.ByteSizeLong();
+#else
+	const uint64_t payloadBytes = static_cast< uint64_t >(msg.ByteSize());
+#endif
+	const uint64_t maxPayloadBytes =
+		static_cast< uint64_t >(uiFeedbackMaxLogBytes) + static_cast< uint64_t >(uiFeedbackMaxBodyBytes) + 8192;
+	if (payloadBytes > maxPayloadBytes) {
+		reject(tr("Feedback report is too large."));
+		return;
+	}
+	if (uSource->m_feedbackReportTimer.isValid()
+		&& uSource->m_feedbackReportTimer.elapsed() < FEEDBACK_REPORT_RATE_LIMIT_MS) {
+		const qint64 secondsLeft =
+			(FEEDBACK_REPORT_RATE_LIMIT_MS - uSource->m_feedbackReportTimer.elapsed() + 999) / 1000;
+		reject(tr("Please wait %1 seconds before submitting another report.").arg(secondsLeft));
+		return;
+	}
+
+	const QString title       = msg.has_title() ? u8(msg.title()).trimmed() : QString();
+	const QString description = msg.has_description() ? u8(msg.description()).trimmed() : QString();
+	if (title.isEmpty() || description.isEmpty()) {
+		reject(tr("Title and description are required."));
+		return;
+	}
+
+	Mumble::Feedback::ReportFields fields;
+	fields.kind                    = kind;
+	fields.title                   = Mumble::Feedback::truncateUtf8Bytes(title, 240, QString());
+	fields.description             = description;
+	fields.reproductionSteps       = msg.has_reproduction_steps() ? u8(msg.reproduction_steps()) : QString();
+	fields.diagnosticsIncluded     = msg.has_diagnostics_included() && msg.diagnostics_included();
+	fields.diagnostics             = fields.diagnosticsIncluded && msg.has_diagnostics()
+										 ? Mumble::Feedback::redactedDiagnostics(u8(msg.diagnostics()), uiFeedbackMaxLogBytes)
+										 : QString();
+	fields.clientRelease           = msg.has_client_release() ? u8(msg.client_release()) : QString();
+	fields.clientArch              = msg.has_client_arch() ? u8(msg.client_arch()) : QString();
+	fields.clientOS                = msg.has_client_os() ? u8(msg.client_os()) : QString();
+	fields.clientQt                = msg.has_client_qt() ? u8(msg.client_qt()) : QString();
+	fields.serverCapabilitySummary = tr("Server accepted via Murmur in-app feedback relay.");
+
+	const QString body = Mumble::Feedback::issueBody(fields, uiFeedbackMaxBodyBytes, uiFeedbackMaxLogBytes);
+	uSource->m_feedbackReportTimer.restart();
+	submitFeedbackReportToGitHub(uSource, msg, Mumble::Feedback::issueTitle(fields), body,
+								 feedbackLabelsForKind(this, kind));
+}
+
+void Server::msgFeedbackReportState(ServerUser *, MumbleProto::FeedbackReportState &) {
 }
 
 void Server::msgChatAssetUploadInit(ServerUser *uSource, MumbleProto::ChatAssetUploadInit &msg) {
@@ -7601,6 +7974,15 @@ void Server::msgServerConfig(ServerUser *uSource, MumbleProto::ServerConfig &msg
 	}
 	if (msg.has_stonks_social_announcements_enabled()) {
 		applyBoolConfig("stonks_social_announcements_enabled", msg.stonks_social_announcements_enabled());
+	}
+	if (msg.has_feedback_enabled()) {
+		applyBoolConfig("feedback_github_enabled", msg.feedback_enabled());
+	}
+	if (msg.has_feedback_max_log_bytes()) {
+		applyPositiveIntConfig("feedback_max_log_bytes", msg.feedback_max_log_bytes());
+	}
+	if (msg.has_feedback_max_body_bytes()) {
+		applyPositiveIntConfig("feedback_max_body_bytes", msg.feedback_max_body_bytes());
 	}
 }
 
