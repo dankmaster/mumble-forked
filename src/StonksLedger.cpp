@@ -4,13 +4,23 @@
 // Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
 #include "StonksLedger.h"
+#include "FinanceQuote.h"
 
+#include <QtCore/QHash>
 #include <QtCore/QLocale>
+#include <QtCore/QSet>
 
 #include <algorithm>
 #include <cmath>
 
 namespace {
+	struct PopularTickerAccumulator {
+		Mumble::Stonks::PopularTickerSummary summary;
+		QSet< unsigned int > holders;
+		unsigned int anonymousHolderCount = 0;
+		bool mixedCurrencies              = false;
+	};
+
 	QString trimmedFixedNumber(double value, int precision) {
 		if (!std::isfinite(value)) {
 			return QString();
@@ -54,6 +64,39 @@ namespace {
 
 		const QString last = parts.takeLast();
 		return QStringLiteral("%1, and %2").arg(parts.join(QStringLiteral(", ")), last);
+	}
+
+	void adoptTickerMetadata(PopularTickerAccumulator &entry,
+							 const Mumble::Stonks::PopularTickerPosition &position) {
+		if (entry.summary.displayName.trimmed().isEmpty() && !position.displayName.trimmed().isEmpty()) {
+			entry.summary.displayName = position.displayName.trimmed();
+		}
+		if (entry.summary.providerID.trimmed().isEmpty() && !position.providerID.trimmed().isEmpty()) {
+			entry.summary.providerID = position.providerID.trimmed();
+		}
+		if (entry.summary.providerSymbol.trimmed().isEmpty() && !position.providerSymbol.trimmed().isEmpty()) {
+			entry.summary.providerSymbol = Mumble::Finance::normalizeTickerSymbol(position.providerSymbol);
+		}
+		if (entry.summary.exchange.trimmed().isEmpty() && !position.exchange.trimmed().isEmpty()) {
+			entry.summary.exchange = position.exchange.trimmed();
+		}
+		if (entry.summary.quoteSourceURL.trimmed().isEmpty() && !position.quoteSourceURL.trimmed().isEmpty()) {
+			entry.summary.quoteSourceURL = position.quoteSourceURL.trimmed();
+		}
+	}
+
+	bool higherPopularTicker(const Mumble::Stonks::PopularTickerSummary &lhs,
+							 const Mumble::Stonks::PopularTickerSummary &rhs) {
+		if (lhs.holderCount != rhs.holderCount) {
+			return lhs.holderCount > rhs.holderCount;
+		}
+		if (lhs.totalMarketValue != rhs.totalMarketValue) {
+			return lhs.totalMarketValue > rhs.totalMarketValue;
+		}
+		if (lhs.totalQuantity != rhs.totalQuantity) {
+			return lhs.totalQuantity > rhs.totalQuantity;
+		}
+		return lhs.symbol.localeAwareCompare(rhs.symbol) < 0;
 	}
 }
 
@@ -121,6 +164,68 @@ namespace Stonks {
 		}
 
 		return naturalJoin(visible);
+	}
+
+	std::vector< PopularTickerSummary > popularTickers(const std::vector< PopularTickerPosition > &positions,
+													   std::size_t maxTickers) {
+		QHash< QString, PopularTickerAccumulator > bySymbol;
+		for (const PopularTickerPosition &position : positions) {
+			const QString symbol = Mumble::Finance::normalizeTickerSymbol(position.symbol);
+			if (symbol.isEmpty()) {
+				continue;
+			}
+
+			const double quantity    = std::isfinite(position.quantity) && position.quantity > 0.0 ? position.quantity : 0.0;
+			const double marketValue = std::isfinite(position.marketValue) && position.marketValue > 0.0
+										   ? position.marketValue
+										   : 0.0;
+			if (quantity <= 0.0 && marketValue <= 0.0) {
+				continue;
+			}
+
+			PopularTickerAccumulator &entry = bySymbol[symbol];
+			entry.summary.symbol            = symbol;
+			if (position.holderID > 0) {
+				entry.holders.insert(position.holderID);
+			} else {
+				++entry.anonymousHolderCount;
+			}
+			entry.summary.totalQuantity += quantity;
+			entry.summary.totalMarketValue += marketValue;
+			entry.summary.latestUpdatedAt = std::max(entry.summary.latestUpdatedAt, position.updatedAt);
+			if (!position.currency.trimmed().isEmpty()) {
+				const QString currency = position.currency.trimmed().toUpper();
+				if (entry.summary.currency.trimmed().isEmpty()) {
+					entry.summary.currency = currency;
+				} else if (entry.summary.currency != currency) {
+					entry.mixedCurrencies = true;
+				}
+			}
+			adoptTickerMetadata(entry, position);
+		}
+
+		std::vector< PopularTickerSummary > summaries;
+		summaries.reserve(static_cast< std::size_t >(bySymbol.size()));
+		for (auto it = bySymbol.cbegin(); it != bySymbol.cend(); ++it) {
+			PopularTickerSummary summary = it.value().summary;
+			summary.holderCount          = static_cast< unsigned int >(it.value().holders.size())
+								  + it.value().anonymousHolderCount;
+			if (it.value().mixedCurrencies) {
+				summary.currency.clear();
+			}
+			if (summary.providerSymbol.trimmed().isEmpty()) {
+				summary.providerSymbol = summary.symbol;
+			}
+			if (summary.holderCount > 0) {
+				summaries.push_back(std::move(summary));
+			}
+		}
+
+		std::sort(summaries.begin(), summaries.end(), higherPopularTicker);
+		if (maxTickers > 0 && summaries.size() > maxTickers) {
+			summaries.resize(maxTickers);
+		}
+		return summaries;
 	}
 } // namespace Stonks
 } // namespace Mumble

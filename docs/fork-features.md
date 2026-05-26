@@ -133,7 +133,7 @@ Current provider families include:
 - GitHub repository cards
 - Steam and game-store links, including Epic Games Store, GOG, Ubisoft, EA, Humble Store, Fanatical, Green Man Gaming, itch.io, Battle.net, and Xbox Store
 - finance links for Yahoo Finance, Google Finance, X cashtags, Avanza, Nordnet, and Interactive Brokers
-- Swedish/product/listing providers including Tradera, Blocket, Prisjakt, PriceRunner, Inet, Webhallen, Elgiganten, Komplett, Systembolaget, and Amazon
+- Swedish/product/listing providers including Tradera, Blocket, Prisjakt, PriceRunner, Inet, Webhallen, Elgiganten, POWER, Komplett, Systembolaget, and Amazon
 - forum/article/audio providers including Flashback, SweClockers, Existenz, GP, SVT, Omni, Aftonbladet, Expressen, DN, and Sveriges Radio
 - real-estate providers including Hemnet and Booli
 - weather/place/traffic providers including SMHI, Klart, Yr, Hitta, Eniro, Google Maps, SJ, SL, and Vasttrafik

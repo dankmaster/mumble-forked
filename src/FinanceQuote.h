@@ -59,7 +59,15 @@ namespace Finance {
 		QList< Point > points;
 	};
 
+	struct YahooFinanceSymbolCandidate {
+		QString symbol;
+		QString market;
+		QString reason;
+		int priority = 0;
+	};
+
 	QString normalizeTickerSymbol(const QString &symbolText);
+	QList< YahooFinanceSymbolCandidate > yahooFinanceSymbolCandidateInfos(const QString &symbolText);
 	QList< QString > yahooFinanceSymbolCandidates(const QString &symbolText);
 	QList< TickerMention > extractTickerMentions(const QString &text, int maxMentions = 3);
 

@@ -1057,9 +1057,19 @@ constexpr int CHAT_PREVIEW_THUMBNAIL_HEIGHT    = 480;
 static const QByteArray s_chatPreviewBrowserUserAgent =
 	QByteArrayLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 					  "(KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36");
+static const QByteArray s_instagramChatPreviewMetadataUserAgent =
+	QByteArrayLiteral("facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)");
 static const QByteArray s_chatPreviewAcceptHeader =
 	QByteArrayLiteral("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/*,*/*;q=0.8");
 static const QByteArray s_chatPreviewAcceptLanguageHeader = QByteArrayLiteral("en-US,en;q=0.9");
+
+bool isInstagramPreviewUrl(const QUrl &url) {
+	QString host = url.host().trimmed().toLower();
+	if (host.startsWith(QLatin1String("www."))) {
+		host.remove(0, 4);
+	}
+	return host == QLatin1String("instagram.com") || host == QLatin1String("instagr.am");
+}
 
 bool chatPreviewImageReaderSupportsFormat(const QByteArray &format) {
 	const QList< QByteArray > supportedFormats = QImageReader::supportedImageFormats();
@@ -1100,6 +1110,11 @@ void prepareChatPreviewRequest(QNetworkRequest &request) {
 	request.setRawHeader(QByteArrayLiteral("User-Agent"), s_chatPreviewBrowserUserAgent);
 	request.setRawHeader(QByteArrayLiteral("Accept"), s_chatPreviewAcceptHeader);
 	request.setRawHeader(QByteArrayLiteral("Accept-Language"), s_chatPreviewAcceptLanguageHeader);
+}
+
+void prepareInstagramChatPreviewRequest(QNetworkRequest &request) {
+	prepareChatPreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("User-Agent"), s_instagramChatPreviewMetadataUserAgent);
 }
 
 void prepareChatPreviewImageRequest(QNetworkRequest &request) {
@@ -1748,6 +1763,100 @@ MumbleProto::StonksSnapshot protoStonksSnapshotFromDB(
 	return protoSnapshot;
 }
 
+MumbleProto::StonksPopularTicker protoStonksPopularTickerFromSummary(
+	const Mumble::Stonks::PopularTickerSummary &ticker) {
+	MumbleProto::StonksPopularTicker protoTicker;
+	protoTicker.set_symbol(u8(ticker.symbol));
+	if (!ticker.displayName.trimmed().isEmpty()) {
+		protoTicker.set_display_name(u8(ticker.displayName.trimmed()));
+	}
+	protoTicker.set_holder_count(ticker.holderCount);
+	protoTicker.set_total_quantity(ticker.totalQuantity);
+	protoTicker.set_total_market_value(ticker.totalMarketValue);
+	if (!ticker.currency.trimmed().isEmpty()) {
+		protoTicker.set_currency(u8(ticker.currency.trimmed().toUpper()));
+	}
+	if (!ticker.providerID.trimmed().isEmpty()) {
+		protoTicker.set_provider_id(u8(ticker.providerID.trimmed()));
+	}
+	if (!ticker.providerSymbol.trimmed().isEmpty()) {
+		protoTicker.set_provider_symbol(u8(ticker.providerSymbol.trimmed()));
+	}
+	if (!ticker.exchange.trimmed().isEmpty()) {
+		protoTicker.set_exchange(u8(ticker.exchange.trimmed()));
+	}
+	if (!ticker.quoteSourceURL.trimmed().isEmpty()) {
+		protoTicker.set_quote_source_url(u8(ticker.quoteSourceURL.trimmed()));
+	}
+	if (ticker.latestUpdatedAt > 0) {
+		protoTicker.set_latest_updated_at(static_cast< uint64_t >(ticker.latestUpdatedAt));
+	}
+	return protoTicker;
+}
+
+std::vector< Mumble::Stonks::PopularTickerSummary > stonksPopularTickers(Server *server,
+																		 unsigned int maxTickers = 5) {
+	std::vector< Mumble::Stonks::PopularTickerPosition > positions;
+	if (!server) {
+		return {};
+	}
+
+	for (const ::msdb::DBStonksSnapshot &snapshot :
+		 server->m_dbWrapper.getLatestStonksSnapshotsByUser(server->iServerNum)) {
+		for (const ::msdb::DBStonksSnapshotPosition &position :
+			 server->m_dbWrapper.getStonksSnapshotPositions(server->iServerNum, snapshot.snapshotID)) {
+			Mumble::Stonks::PopularTickerPosition popularPosition;
+			popularPosition.holderID       = snapshot.userID;
+			popularPosition.symbol         = u8(position.symbol);
+			popularPosition.quantity       = position.quantity;
+			popularPosition.marketValue    = position.marketValue;
+			popularPosition.currency       = u8(position.currency);
+			popularPosition.displayName    = u8(position.displayName);
+			popularPosition.providerID     = u8(position.providerID);
+			popularPosition.providerSymbol = u8(position.providerSymbol);
+			popularPosition.exchange       = u8(position.exchange);
+			popularPosition.quoteSourceURL = u8(position.quoteSourceURL);
+			popularPosition.updatedAt      = static_cast< qint64 >(::msdb::toEpochSeconds(snapshot.createdAt));
+			positions.push_back(std::move(popularPosition));
+		}
+	}
+
+	return Mumble::Stonks::popularTickers(positions, maxTickers);
+}
+
+std::vector< Mumble::Stonks::PopularTickerSummary > stonksPersonalTickers(Server *server, unsigned int userID,
+																		  unsigned int maxTickers = 5) {
+	std::vector< Mumble::Stonks::PopularTickerPosition > positions;
+	if (!server || userID == 0) {
+		return {};
+	}
+
+	const std::optional< ::msdb::DBStonksSnapshot > latestSnapshot =
+		server->m_dbWrapper.getLatestStonksSnapshotForUser(server->iServerNum, userID);
+	if (!latestSnapshot) {
+		return {};
+	}
+
+	for (const ::msdb::DBStonksSnapshotPosition &position :
+		 server->m_dbWrapper.getStonksSnapshotPositions(server->iServerNum, latestSnapshot->snapshotID)) {
+		Mumble::Stonks::PopularTickerPosition personalPosition;
+		personalPosition.holderID       = userID;
+		personalPosition.symbol         = u8(position.symbol);
+		personalPosition.quantity       = position.quantity;
+		personalPosition.marketValue    = position.marketValue;
+		personalPosition.currency       = u8(position.currency);
+		personalPosition.displayName    = u8(position.displayName);
+		personalPosition.providerID     = u8(position.providerID);
+		personalPosition.providerSymbol = u8(position.providerSymbol);
+		personalPosition.exchange       = u8(position.exchange);
+		personalPosition.quoteSourceURL = u8(position.quoteSourceURL);
+		personalPosition.updatedAt      = static_cast< qint64 >(::msdb::toEpochSeconds(latestSnapshot->createdAt));
+		positions.push_back(std::move(personalPosition));
+	}
+
+	return Mumble::Stonks::popularTickers(positions, maxTickers);
+}
+
 std::vector< StonksLeaderboardEntry > stonksLedgerLeaderboard(Server *server, const QString &period,
 															  unsigned int maxEntries = 100) {
 	std::vector< StonksLeaderboardEntry > entries;
@@ -1832,6 +1941,15 @@ MumbleProto::StonksState buildStonksState(Server *server, ServerUser *user, cons
 
 	for (const QString &supportedPeriod : Mumble::Stonks::ledgerPeriods()) {
 		state.add_periods(u8(supportedPeriod));
+	}
+
+	for (const Mumble::Stonks::PopularTickerSummary &ticker : stonksPopularTickers(server, 5)) {
+		*state.add_popular_tickers() = protoStonksPopularTickerFromSummary(ticker);
+	}
+	if (registered && selfUserID) {
+		for (const Mumble::Stonks::PopularTickerSummary &ticker : stonksPersonalTickers(server, *selfUserID, 5)) {
+			*state.add_personal_tickers() = protoStonksPopularTickerFromSummary(ticker);
+		}
 	}
 
 	std::vector<::msdb::DBTextChannel > textChannels = server->m_dbWrapper.getTextChannels(server->iServerNum);
@@ -2968,7 +3086,11 @@ void Server::scheduleServerChatEmbedFetch(unsigned int threadID, unsigned int me
 
         updateHostCount(hostKey, +1);
         QNetworkRequest request(pageUrl);
-        prepareChatPreviewRequest(request);
+        if (isInstagramPreviewUrl(pageUrl)) {
+            prepareInstagramChatPreviewRequest(request);
+        } else {
+            prepareChatPreviewRequest(request);
+        }
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
         request.setTransferTimeout(CHAT_PREVIEW_TIMEOUT_MSEC);
         QNetworkReply *reply = qnamNetwork->get(request);

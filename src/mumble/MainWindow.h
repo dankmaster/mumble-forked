@@ -360,6 +360,7 @@ public:
 	void cancelChatEmbedAssistForState(const MumbleProto::ChatEmbedState &msg);
 	bool applyYahooFinanceQuotePreviewFallback(PersistentChatPreview &preview, const QUrl &url) const;
 	bool requestPersistentChatFinancePreview(const QString &previewKey, const QUrl &previewUrl);
+	bool requestPersistentChatInstagramMetadataPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatXPostPreview(const QString &previewKey, const QUrl &previewUrl);
 	void requestPersistentChatXPostReplyContext(const QString &previewKey, const QString &statusId, int remaining,
 												QVariantList directChain = QVariantList());
@@ -757,6 +758,7 @@ protected:
 	int m_persistentChatBottomLockRendersRemaining        = 0;
 	bool m_persistentChatPreviewRefreshPending            = false;
 	QSet< QString > m_persistentChatQueuedPreviewRequests;
+	QSet< QString > m_pendingPersistentChatInstagramMetadataRequests;
 	bool m_persistentChatRestoreAnchorPending             = false;
 	bool m_persistentChatLogStickToBottom                 = true;
 	QString m_persistentChatPendingAnchorRowId;

@@ -14,6 +14,7 @@
 #include <QtCore/QLocale>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QSet>
+#include <QtCore/QStringList>
 #include <QtCore/QTimeZone>
 #include <QtCore/QUrlQuery>
 
@@ -141,31 +142,119 @@ QUrl urlWithQueryItem(const QString &host, const QString &path, const QString &k
 	return url;
 }
 
-void appendTickerCandidate(QList< QString > &symbols, const QString &symbol) {
-	const QString normalizedSymbol = Mumble::Finance::normalizeTickerSymbol(symbol);
-	if (!normalizedSymbol.isEmpty() && !symbols.contains(normalizedSymbol)) {
-		symbols.push_back(normalizedSymbol);
+constexpr int MAX_YAHOO_SYMBOL_CANDIDATES = 12;
+
+struct YahooMarketFallback {
+	QString market;
+	QString countryCode;
+	QString suffix;
+	QStringList classStyles;
+	int priority = 0;
+};
+
+const QList< YahooMarketFallback > &yahooMarketFallbacks() {
+	static const QList< YahooMarketFallback > fallbacks = {
+		{ QStringLiteral("SE"), QStringLiteral("SE"), QStringLiteral(".ST"),
+		  { QStringLiteral("-B"), QStringLiteral("-A") }, 10 },
+		{ QStringLiteral("NO"), QStringLiteral("NO"), QStringLiteral(".OL"),
+		  { QStringLiteral("-B"), QStringLiteral("-A") }, 20 },
+		{ QStringLiteral("DK"), QStringLiteral("DK"), QStringLiteral(".CO"),
+		  { QStringLiteral("-B"), QStringLiteral("-A") }, 30 },
+		{ QStringLiteral("FI"), QStringLiteral("FI"), QStringLiteral(".HE"),
+		  { QStringLiteral("-B"), QStringLiteral("-A") }, 40 },
+		{ QStringLiteral("DE"), QStringLiteral("DE"), QStringLiteral(".DE"), {}, 50 },
+		{ QStringLiteral("UK"), QStringLiteral("GB"), QStringLiteral(".L"), {}, 60 },
+		{ QStringLiteral("CA-TSX"), QStringLiteral("CA"), QStringLiteral(".TO"), {}, 70 },
+		{ QStringLiteral("CA-TSXV"), QStringLiteral("CA"), QStringLiteral(".V"), {}, 80 },
+		{ QStringLiteral("AU"), QStringLiteral("AU"), QStringLiteral(".AX"), {}, 90 },
+		{ QStringLiteral("HK"), QStringLiteral("HK"), QStringLiteral(".HK"), {}, 100 },
+	};
+	return fallbacks;
+}
+
+QString systemLocaleCountryCode() {
+	const QString localeName = QLocale::system().name().toUpper();
+	const int separatorIndex = localeName.indexOf(QLatin1Char('_'));
+	if (separatorIndex < 0 || separatorIndex + 3 > localeName.size()) {
+		return {};
 	}
+	return localeName.mid(separatorIndex + 1, 2);
 }
 
-bool hasExplicitYahooMarketSuffix(const QString &symbol) {
-	static const QRegularExpression suffixPattern(QStringLiteral(R"(\.[A-Z]{2,4}$)"));
-	return suffixPattern.match(symbol).hasMatch();
+QList< YahooMarketFallback > orderedYahooMarketFallbacks() {
+	QList< YahooMarketFallback > fallbacks = yahooMarketFallbacks();
+	const QString countryCode             = systemLocaleCountryCode();
+	std::stable_sort(fallbacks.begin(), fallbacks.end(), [&countryCode](const YahooMarketFallback &left,
+																		const YahooMarketFallback &right) {
+		const bool leftLocaleMatch  = !countryCode.isEmpty() && left.countryCode == countryCode;
+		const bool rightLocaleMatch = !countryCode.isEmpty() && right.countryCode == countryCode;
+		if (leftLocaleMatch != rightLocaleMatch) {
+			return leftLocaleMatch;
+		}
+		return left.priority < right.priority;
+	});
+	return fallbacks;
 }
 
-bool isStockholmFallbackEligible(const QString &symbol) {
-	if (symbol.isEmpty() || symbol.startsWith(QLatin1Char('^')) || symbol.contains(QLatin1Char('='))
-		|| symbol.contains(QLatin1Char('.')) || hasExplicitYahooMarketSuffix(symbol)) {
+void appendYahooCandidate(QList< Mumble::Finance::YahooFinanceSymbolCandidate > &candidates, QSet< QString > &seenSymbols,
+						  const QString &symbol, const QString &market, const QString &reason, int priority) {
+	if (candidates.size() >= MAX_YAHOO_SYMBOL_CANDIDATES) {
+		return;
+	}
+
+	const QString normalizedSymbol = Mumble::Finance::normalizeTickerSymbol(symbol);
+	if (normalizedSymbol.isEmpty() || seenSymbols.contains(normalizedSymbol)) {
+		return;
+	}
+
+	seenSymbols.insert(normalizedSymbol);
+	Mumble::Finance::YahooFinanceSymbolCandidate candidate;
+	candidate.symbol   = normalizedSymbol;
+	candidate.market   = market;
+	candidate.reason   = reason;
+	candidate.priority = priority;
+	candidates.push_back(candidate);
+}
+
+const YahooMarketFallback *marketFallbackForExplicitSuffix(const QString &symbol) {
+	for (const YahooMarketFallback &fallback : yahooMarketFallbacks()) {
+		if (symbol.endsWith(fallback.suffix)) {
+			return &fallback;
+		}
+	}
+
+	return nullptr;
+}
+
+bool hasSingleLetterClassSuffix(const QString &symbol) {
+	const int dashIndex = symbol.lastIndexOf(QLatin1Char('-'));
+	if (dashIndex <= 0 || symbol.indexOf(QLatin1Char('-')) != dashIndex) {
 		return false;
 	}
 
-	const QStringList classParts = symbol.split(QLatin1Char('-'));
-	if (classParts.size() > 1) {
-		const QString classSuffix = classParts.constLast();
-		return classSuffix.size() == 1 && classSuffix.at(0).isLetter();
+	const QString base        = symbol.left(dashIndex);
+	const QString classSuffix = symbol.mid(dashIndex + 1);
+	return base.size() <= 6 && !base.contains(QLatin1Char('.')) && classSuffix.size() == 1
+		   && classSuffix.at(0).isLetter();
+}
+
+bool isShortClasslessEquitySymbol(const QString &symbol) {
+	return !symbol.isEmpty() && symbol.size() <= 6 && symbol.at(0).isLetter() && !symbol.startsWith(QLatin1Char('^'))
+		   && !symbol.contains(QLatin1Char('=')) && !symbol.contains(QLatin1Char('.'))
+		   && !symbol.contains(QLatin1Char('-'));
+}
+
+bool isMarketFallbackEligible(const QString &symbol) {
+	if (symbol.isEmpty() || symbol.startsWith(QLatin1Char('^')) || symbol.contains(QLatin1Char('='))
+		|| symbol.contains(QLatin1Char('.'))) {
+		return false;
 	}
 
-	return symbol.size() <= 6;
+	if (symbol.contains(QLatin1Char('-'))) {
+		return hasSingleLetterClassSuffix(symbol);
+	}
+
+	return isShortClasslessEquitySymbol(symbol);
 }
 } // namespace
 
@@ -183,38 +272,69 @@ namespace Finance {
 		return validTickerPattern.match(symbol).hasMatch() ? symbol : QString();
 	}
 
-	QList< QString > yahooFinanceSymbolCandidates(const QString &symbolText) {
+	QList< YahooFinanceSymbolCandidate > yahooFinanceSymbolCandidateInfos(const QString &symbolText) {
 		const QString normalizedSymbol = normalizeTickerSymbol(symbolText);
 		if (normalizedSymbol.isEmpty()) {
 			return {};
 		}
 
-		QList< QString > symbols;
-		appendTickerCandidate(symbols, normalizedSymbol);
+		QList< YahooFinanceSymbolCandidate > candidates;
+		QSet< QString > seenSymbols;
+		appendYahooCandidate(candidates, seenSymbols, normalizedSymbol, QString(), QStringLiteral("exact"), 0);
 
-		if (normalizedSymbol.endsWith(QLatin1String(".ST"))) {
-			QString stockholmBase = normalizedSymbol;
-			stockholmBase.chop(3);
-			if (!stockholmBase.contains(QLatin1Char('-')) && !stockholmBase.contains(QLatin1Char('.'))
-				&& stockholmBase.size() <= 6) {
-				appendTickerCandidate(symbols, QStringLiteral("%1-B.ST").arg(stockholmBase));
-				appendTickerCandidate(symbols, QStringLiteral("%1-A.ST").arg(stockholmBase));
+		if (const YahooMarketFallback *explicitMarket = marketFallbackForExplicitSuffix(normalizedSymbol)) {
+			QString marketBase = normalizedSymbol;
+			marketBase.chop(explicitMarket->suffix.size());
+			if (isShortClasslessEquitySymbol(marketBase)) {
+				for (const QString &classStyle : explicitMarket->classStyles) {
+					appendYahooCandidate(candidates, seenSymbols,
+										 QStringLiteral("%1%2%3").arg(marketBase, classStyle, explicitMarket->suffix),
+										 explicitMarket->market, QStringLiteral("explicit-market-class-fallback"),
+										 explicitMarket->priority + 1);
+				}
 			}
-			return symbols;
+			return candidates;
 		}
 
-		if (!isStockholmFallbackEligible(normalizedSymbol)) {
-			return symbols;
+		if (!isMarketFallbackEligible(normalizedSymbol)) {
+			return candidates;
 		}
 
-		if (normalizedSymbol.contains(QLatin1Char('-'))) {
-			appendTickerCandidate(symbols, QStringLiteral("%1.ST").arg(normalizedSymbol));
-			return symbols;
+		const QList< YahooMarketFallback > orderedFallbacks = orderedYahooMarketFallbacks();
+		const bool hasClassSuffix                           = hasSingleLetterClassSuffix(normalizedSymbol);
+
+		if (hasClassSuffix) {
+			for (const YahooMarketFallback &fallback : orderedFallbacks) {
+				if (!fallback.classStyles.isEmpty()) {
+					appendYahooCandidate(candidates, seenSymbols, normalizedSymbol + fallback.suffix, fallback.market,
+										 QStringLiteral("market-class-fallback"), fallback.priority);
+				}
+			}
+			return candidates;
 		}
 
-		appendTickerCandidate(symbols, QStringLiteral("%1.ST").arg(normalizedSymbol));
-		appendTickerCandidate(symbols, QStringLiteral("%1-B.ST").arg(normalizedSymbol));
-		appendTickerCandidate(symbols, QStringLiteral("%1-A.ST").arg(normalizedSymbol));
+		const QString primaryClassStyle = QStringLiteral("-B");
+
+		for (const YahooMarketFallback &fallback : orderedFallbacks) {
+			appendYahooCandidate(candidates, seenSymbols, normalizedSymbol + fallback.suffix, fallback.market,
+								 QStringLiteral("market-fallback"), fallback.priority);
+
+			if (fallback.market == QLatin1String("SE") && fallback.classStyles.contains(primaryClassStyle)) {
+				appendYahooCandidate(candidates, seenSymbols,
+									 QStringLiteral("%1%2%3").arg(normalizedSymbol, primaryClassStyle, fallback.suffix),
+									 fallback.market, QStringLiteral("market-class-fallback"), fallback.priority + 1);
+			}
+		}
+
+		return candidates;
+	}
+
+	QList< QString > yahooFinanceSymbolCandidates(const QString &symbolText) {
+		const QList< YahooFinanceSymbolCandidate > candidateInfos = yahooFinanceSymbolCandidateInfos(symbolText);
+		QList< QString > symbols;
+		for (const YahooFinanceSymbolCandidate &candidate : candidateInfos) {
+			symbols.push_back(candidate.symbol);
+		}
 		return symbols;
 	}
 

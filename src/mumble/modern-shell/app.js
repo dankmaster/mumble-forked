@@ -70,6 +70,9 @@
 	let stonksQuoteSearchError = "";
 	let stonksQuoteSuggestions = [];
 	let stonksQuoteSearchRequestId = "";
+	let stonksPopularQuoteCache = {};
+	let stonksPopularQuoteRequests = {};
+	let stonksVisibleRefreshTimer = 0;
 
 	const imageViewerStorageKey = "mumble-modern-image-viewer";
 	const imageViewerMinWidth = 280;
@@ -89,6 +92,8 @@
 	const messageRenderLoadingThreshold = 36;
 	const previewHydrationDebounceMs = 80;
 	const previewHydrationBatchSize = 6;
+	const stonksVisibleRefreshMs = 5 * 60 * 1000;
+	const stonksPopularQuoteStaleMs = 5 * 60 * 1000;
 	const contextMenuViewportMargin = 8;
 	const contextMenuAnchorGap = 4;
 	const inlinePreviewMediaStorageKey = "mumble-modern-inline-preview-media";
@@ -1734,10 +1739,259 @@
 		return parsedScope && parsedScope.scope === 3 && normalizedStonksRoomLabel(scope.label) === "stonks";
 	}
 
-	function rankedStonksLeaderboardRows(stonks) {
-		return (Array.isArray(stonks.leaderboard) ? stonks.leaderboard : []).filter(function(row) {
-			return row && !row.insufficientHistory && Number(row.rank || 0) > 0;
+	function stonksTickerLookupSymbol(ticker) {
+		return normalizeStonksSymbol(ticker && (ticker.providerSymbol || ticker.symbol));
+	}
+
+	function stonksPopularTickerRows(stonks) {
+		return (Array.isArray(stonks.popularTickers) ? stonks.popularTickers : []).map(function(ticker) {
+			const symbol = normalizeStonksSymbol(ticker && ticker.symbol);
+			if (!symbol) {
+				return null;
+			}
+			return {
+				symbol: symbol,
+				displayName: String(ticker.displayName || "").trim(),
+				holderCount: Number(ticker.holderCount || 0),
+				totalQuantity: stonksNumber(ticker.totalQuantity),
+				totalMarketValue: stonksNumber(ticker.totalMarketValue),
+				currency: String(ticker.currency || "").trim().toUpperCase(),
+				providerId: String(ticker.providerId || "").trim(),
+				providerSymbol: normalizeStonksSymbol(ticker.providerSymbol || symbol) || symbol,
+				exchange: String(ticker.exchange || "").trim(),
+				quoteSourceUrl: String(ticker.quoteSourceUrl || stonksYahooQuoteUrl(symbol)).trim(),
+				latestUpdatedAt: Number(ticker.latestUpdatedAt || 0),
+				source: "popular"
+			};
+		}).filter(Boolean).slice(0, 5);
+	}
+
+	function stonksPersonalTickerRows(stonks) {
+		const personal = Array.isArray(stonks.personalTickers) ? stonks.personalTickers : [];
+		if (personal.length) {
+			return personal.map(function(ticker) {
+				const symbol = normalizeStonksSymbol(ticker && ticker.symbol);
+				if (!symbol) {
+					return null;
+				}
+				return {
+					symbol: symbol,
+					displayName: String(ticker.displayName || "").trim(),
+					holderCount: 1,
+					totalQuantity: stonksNumber(ticker.totalQuantity),
+					totalMarketValue: stonksNumber(ticker.totalMarketValue),
+					currency: String(ticker.currency || "").trim().toUpperCase(),
+					providerId: String(ticker.providerId || "").trim(),
+					providerSymbol: normalizeStonksSymbol(ticker.providerSymbol || symbol) || symbol,
+					exchange: String(ticker.exchange || "").trim(),
+					quoteSourceUrl: String(ticker.quoteSourceUrl || stonksYahooQuoteUrl(symbol)).trim(),
+					latestUpdatedAt: Number(ticker.latestUpdatedAt || 0),
+					source: "mine"
+				};
+			}).filter(Boolean).slice(0, 5);
+		}
+
+		const latest = stonksLatestSnapshot(stonks);
+		const positions = latest && Array.isArray(latest.positions) ? latest.positions : [];
+		return positions.map(function(position) {
+			const normalized = stonksNormalizePosition(position, latest && latest.currency || "USD");
+			if (!normalized.symbol || !(stonksNumber(normalized.marketValue) > 0 || stonksNumber(normalized.quantity) > 0)) {
+				return null;
+			}
+			return Object.assign({}, normalized, {
+				holderCount: 1,
+				totalQuantity: stonksNumber(normalized.quantity),
+				totalMarketValue: stonksNumber(normalized.marketValue),
+				latestUpdatedAt: Number(latest && latest.createdAt || normalized.quoteTime || 0),
+				source: "mine"
+			});
+		}).filter(Boolean).sort(function(left, right) {
+			return stonksNumber(right.marketValue || right.totalMarketValue)
+				- stonksNumber(left.marketValue || left.totalMarketValue);
+		}).slice(0, 5);
+	}
+
+	function stonksTickerQuote(symbol) {
+		const normalized = normalizeStonksSymbol(symbol);
+		return normalized ? stonksPopularQuoteCache[normalized] : null;
+	}
+
+	function stonksTickerQuoteTone(quote) {
+		if (!quote || quote.pending) {
+			return "is-loading";
+		}
+		if (!quote.ok) {
+			return "is-unavailable";
+		}
+		const changePercent = Number(quote.changePercent);
+		if (!Number.isFinite(changePercent) || Math.abs(changePercent) < 0.005) {
+			return "is-flat";
+		}
+		return changePercent > 0 ? "is-positive" : "is-negative";
+	}
+
+	function stonksTickerQuoteLabel(quote) {
+		if (!quote || quote.pending) {
+			return "...";
+		}
+		if (!quote.ok) {
+			return "-";
+		}
+		const changePercent = Number(quote.changePercent);
+		if (Number.isFinite(changePercent)) {
+			return formatStonksPercent(changePercent);
+		}
+		const price = Number(quote.price);
+		return Number.isFinite(price) ? formatStonksMoney(price, quote.currency || "USD") : "-";
+	}
+
+	function stonksTickerTooltip(ticker, quote) {
+		const parts = [];
+		const name = String(ticker.displayName || "").trim();
+		if (name && name !== ticker.symbol) {
+			parts.push(name);
+		}
+		if (ticker.source === "popular") {
+			const holders = Number(ticker.holderCount || 0);
+			parts.push(holders === 1 ? "1 holder" : holders + " holders");
+		} else {
+			parts.push("Your latest saved position");
+		}
+		if (quote && quote.ok) {
+			const price = Number(quote.price);
+			if (Number.isFinite(price)) {
+				parts.push(formatStonksMoney(price, quote.currency || ticker.currency || "USD"));
+			}
+			if (quote.quoteTime) {
+				parts.push("Quote " + formatStonksTime(quote.quoteTime));
+			}
+		} else if (quote && quote.error) {
+			parts.push(String(quote.error));
+		}
+		return parts.filter(Boolean).join(" / ");
+	}
+
+	function requestStonksTickerQuote(ticker, force) {
+		const symbol = stonksTickerLookupSymbol(ticker);
+		if (!symbol) {
+			return;
+		}
+		const now = Date.now();
+		const cached = stonksPopularQuoteCache[symbol];
+		if (!force && cached) {
+			if (cached.pending || (now - Number(cached.fetchedAt || 0)) < stonksPopularQuoteStaleMs) {
+				return;
+			}
+		}
+		const requestId = "stonks-popular-" + now + "-" + Math.random().toString(36).slice(2);
+		stonksPopularQuoteRequests[requestId] = { symbol: symbol };
+		stonksPopularQuoteCache[symbol] = Object.assign({}, cached || {}, {
+			pending: true,
+			requestedAt: now
 		});
+		if (!notifyBridge("lookupFinanceQuote", requestId, symbol)) {
+			delete stonksPopularQuoteRequests[requestId];
+			stonksPopularQuoteCache[symbol] = {
+				ok: false,
+				pending: false,
+				error: "Quote bridge unavailable.",
+				fetchedAt: now
+			};
+		}
+	}
+
+	function requestStonksTickerQuotes(tickers, force) {
+		const seen = new Set();
+		(tickers || []).forEach(function(ticker) {
+			const symbol = stonksTickerLookupSymbol(ticker);
+			if (!symbol || seen.has(symbol)) {
+				return;
+			}
+			seen.add(symbol);
+			requestStonksTickerQuote(ticker, force);
+		});
+	}
+
+	function handleStonksPopularQuoteLookupResult(result) {
+		const requestId = String(result && result.requestId || "");
+		const request = stonksPopularQuoteRequests[requestId];
+		if (!request) {
+			return false;
+		}
+
+		delete stonksPopularQuoteRequests[requestId];
+		const requestedSymbol = normalizeStonksSymbol(request.symbol);
+		const quoteSymbol = normalizeStonksSymbol(result && (result.symbol || result.providerSymbol || request.symbol));
+		const quote = Object.assign({}, result || {}, {
+			symbol: quoteSymbol || requestedSymbol,
+			pending: false,
+			fetchedAt: Date.now()
+		});
+		if (requestedSymbol) {
+			stonksPopularQuoteCache[requestedSymbol] = quote;
+		}
+		if (quoteSymbol && quoteSymbol !== requestedSymbol) {
+			stonksPopularQuoteCache[quoteSymbol] = quote;
+		}
+		renderStonksChatHeader(getSnapshot());
+		return true;
+	}
+
+	function stopStonksVisibleRefreshTimer() {
+		if (stonksVisibleRefreshTimer) {
+			clearTimeout(stonksVisibleRefreshTimer);
+			stonksVisibleRefreshTimer = 0;
+		}
+	}
+
+	function scheduleStonksVisibleRefresh() {
+		if (stonksVisibleRefreshTimer) {
+			return;
+		}
+		stonksVisibleRefreshTimer = setTimeout(function() {
+			stonksVisibleRefreshTimer = 0;
+			const snapshot = getSnapshot();
+			if (!activeScopeIsStonksRoom(snapshot)) {
+				return;
+			}
+			const stonks = (snapshot.app || {}).stonks || {};
+			if (!stonks.supported || stonks.enabled === false) {
+				return;
+			}
+			notifyBridge("invokeAppAction", "stonks.refreshVisible");
+			requestStonksTickerQuotes(stonksPersonalTickerRows(stonks).concat(stonksPopularTickerRows(stonks)), true);
+			scheduleStonksVisibleRefresh();
+		}, stonksVisibleRefreshMs);
+	}
+
+	function appendStonksTickerGroup(parent, labelText, tickers, emptyText) {
+		const group = document.createElement("div");
+		group.className = "stonks-chat-header-group";
+		const label = document.createElement("span");
+		label.className = "stonks-chat-header-label";
+		label.textContent = labelText;
+		group.appendChild(label);
+
+		if (!tickers.length) {
+			const empty = document.createElement("span");
+			empty.className = "stonks-chat-header-empty";
+			empty.textContent = emptyText;
+			group.appendChild(empty);
+			parent.appendChild(group);
+			return;
+		}
+
+		tickers.forEach(function(ticker) {
+			const quote = stonksTickerQuote(stonksTickerLookupSymbol(ticker));
+			const item = document.createElement("span");
+			item.className = "stonks-chat-header-ticker " + stonksTickerQuoteTone(quote);
+			item.innerHTML = "<strong></strong><span></span>";
+			item.querySelector("strong").textContent = ticker.symbol;
+			item.querySelector("span").textContent = stonksTickerQuoteLabel(quote);
+			item.title = stonksTickerTooltip(ticker, quote);
+			group.appendChild(item);
+		});
+		parent.appendChild(group);
 	}
 
 	function renderStonksChatHeader(snapshot) {
@@ -1751,33 +2005,16 @@
 		refs.stonksLeaderboardHeader.classList.toggle("hidden", !visible);
 		refs.stonksLeaderboardHeader.innerHTML = "";
 		if (!visible) {
+			stopStonksVisibleRefreshTimer();
 			return;
 		}
 
-		const label = document.createElement("span");
-		label.className = "stonks-chat-header-label";
-		label.textContent = "Leaderboard " + (stonks.selectedPeriod || "30d");
-		refs.stonksLeaderboardHeader.appendChild(label);
-
-		const rows = rankedStonksLeaderboardRows(stonks).slice(0, 3);
-		if (!rows.length) {
-			const empty = document.createElement("span");
-			empty.className = "stonks-chat-header-empty";
-			empty.textContent = (Array.isArray(stonks.leaderboard) && stonks.leaderboard.length)
-				? "Waiting for baselines"
-				: "No ranked snapshots";
-			refs.stonksLeaderboardHeader.appendChild(empty);
-			return;
-		}
-
-		rows.forEach(function(row) {
-			const item = document.createElement("span");
-			item.className = "stonks-chat-header-rank"
-				+ (stonksNumber(row.returnPercent) >= 0 ? " is-positive" : " is-negative");
-			const name = String(row.userName || "User").trim() || "User";
-			item.textContent = String(row.rank || "") + ". " + name + " " + formatStonksPercent(row.returnPercent);
-			refs.stonksLeaderboardHeader.appendChild(item);
-		});
+		const personalTickers = stonksPersonalTickerRows(stonks);
+		const popularTickers = stonksPopularTickerRows(stonks);
+		requestStonksTickerQuotes(personalTickers.concat(popularTickers), false);
+		scheduleStonksVisibleRefresh();
+		appendStonksTickerGroup(refs.stonksLeaderboardHeader, "Mine", personalTickers, "No saved tickers");
+		appendStonksTickerGroup(refs.stonksLeaderboardHeader, "Popular", popularTickers, "No popular tickers");
 	}
 
 	function screenShareVisible(share) {
@@ -6103,6 +6340,7 @@
 		{ provider: "inet", kind: "product", label: "Inet", mark: "I", hostSuffixes: ["inet.se"] },
 		{ provider: "webhallen", kind: "product", label: "Webhallen", mark: "W", hostSuffixes: ["webhallen.com"] },
 		{ provider: "elgiganten", kind: "product", label: "Elgiganten", mark: "E", hostSuffixes: ["elgiganten.se"] },
+		{ provider: "power", kind: "product", label: "POWER", mark: "P", hostSuffixes: ["power.se"] },
 		{ provider: "komplett", kind: "product", label: "Komplett", mark: "K", hostSuffixes: ["komplett.se"] },
 		{ provider: "systembolaget", kind: "systembolagetProduct", label: "Systembolaget", mark: "SB", hostSuffixes: ["systembolaget.se"] },
 		{ provider: "smhi", kind: "weather", label: "SMHI", mark: "SMHI", hostSuffixes: ["smhi.se"] },
@@ -7645,11 +7883,6 @@
 		rawItems.forEach(function(item) {
 			addItem(item);
 		});
-		if (Array.isArray(preview && preview.mediaItems)) {
-			preview.mediaItems.forEach(function(item) {
-				addItem(item);
-			});
-		}
 		if (Array.isArray(metadata.productImages)) {
 			metadata.productImages.forEach(function(item) {
 				addItem(item, "image");
@@ -7657,6 +7890,11 @@
 		}
 		if (!items.length && metadata.productImage) {
 			addItem({ url: metadata.productImage, mime: "image/jpeg", kind: "image" });
+		}
+		if (!items.length && Array.isArray(preview && preview.mediaItems)) {
+			preview.mediaItems.forEach(function(item) {
+				addItem(item);
+			});
 		}
 		if (!items.length && preview && preview.thumbnailUrl) {
 			addItem({ url: preview.thumbnailUrl, mime: "image/jpeg", kind: "image" });
@@ -8428,6 +8666,13 @@
 		return "";
 	}
 
+	function previewInstagramLooksLikeHost(value) {
+		let normalized = String(value || "").trim().toLowerCase();
+		normalized = normalized.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+		return normalized === "instagram.com" || normalized === "www.instagram.com"
+			|| normalized === "instagr.am" || normalized === "www.instagr.am";
+	}
+
 	function previewInstagramDisplayName(preview, handle) {
 		const metadata = (preview && preview.metadata) || {};
 		const metadataName = String(metadata.instagramDisplayName || "").trim();
@@ -8436,6 +8681,7 @@
 		}
 		const subtitle = String((preview && preview.subtitle) || "").trim();
 		if (subtitle && !/^instagram$/i.test(subtitle)
+			&& !previewInstagramLooksLikeHost(subtitle)
 			&& subtitle.toLowerCase() !== String(handle || "").toLowerCase()) {
 			return subtitle;
 		}
@@ -8451,11 +8697,13 @@
 		const title = String((preview && preview.title) || "").trim();
 		if (title && !/^instagram(?: post| reel)?$/i.test(title)
 			&& !/^fetching instagram/i.test(title)
+			&& !previewInstagramLooksLikeHost(title)
 			&& !/^post by @/i.test(title)) {
 			return title;
 		}
 		const description = String(descriptionText || "").trim();
 		if (description && !/^@?[a-z0-9._]+$/i.test(description)
+			&& !previewInstagramLooksLikeHost(description)
 			&& !/^video preview$/i.test(description)
 			&& !/^image preview$/i.test(description)) {
 			return description;
@@ -14424,6 +14672,10 @@
 	}
 
 	function handleStonksQuoteLookupResult(result) {
+		if (handleStonksPopularQuoteLookupResult(result)) {
+			return;
+		}
+
 		const payload = result || {};
 		if (!stonksQuoteSearchRequestId || String(payload.requestId || "") !== stonksQuoteSearchRequestId) {
 			return;

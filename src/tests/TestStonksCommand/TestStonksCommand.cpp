@@ -20,6 +20,7 @@ private slots:
 	void parsesLeaderboardAndFollowCommands();
 	void computesLedgerPeriodsAndReturns();
 	void formatsLedgerPositionSummaries();
+	void ranksPopularTickers();
 	void ignoresUnknownText();
 };
 
@@ -115,6 +116,27 @@ void TestStonksCommand::formatsLedgerPositionSummaries() {
 	};
 	QCOMPARE(Mumble::Stonks::formatPositionSummary(manyPositions, 2),
 			 QStringLiteral("1 TSLA (USD 342.09), 2.5 RKLB (USD 573.48), and 1 more position"));
+}
+
+void TestStonksCommand::ranksPopularTickers() {
+	const std::vector< Mumble::Stonks::PopularTickerPosition > positions {
+		{ 1, QStringLiteral("rklb"), 2.0, 200.0, QStringLiteral("usd"), QStringLiteral("Rocket Lab"), QString(), QString(), QString(), QString(), 100 },
+		{ 2, QStringLiteral("RKLB"), 1.0, 120.0, QStringLiteral("USD"), QString(), QString(), QString(), QString(), QString(), 120 },
+		{ 3, QStringLiteral("AAPL"), 1.0, 400.0, QStringLiteral("USD"), QStringLiteral("Apple"), QString(), QString(), QString(), QString(), 90 },
+		{ 4, QStringLiteral("TSLA"), 1.0, 300.0, QStringLiteral("USD"), QStringLiteral("Tesla"), QString(), QString(), QString(), QString(), 80 },
+		{ 1, QStringLiteral("not a ticker"), 1.0, 999.0, QStringLiteral("USD"), QString(), QString(), QString(), QString(), QString(), 70 },
+	};
+
+	const std::vector< Mumble::Stonks::PopularTickerSummary > popular =
+		Mumble::Stonks::popularTickers(positions, 2);
+	QCOMPARE(popular.size(), static_cast< std::size_t >(2));
+	QCOMPARE(popular.at(0).symbol, QStringLiteral("RKLB"));
+	QCOMPARE(popular.at(0).displayName, QStringLiteral("Rocket Lab"));
+	QCOMPARE(popular.at(0).holderCount, 2u);
+	QCOMPARE(popular.at(0).totalQuantity, 3.0);
+	QCOMPARE(popular.at(0).totalMarketValue, 320.0);
+	QCOMPARE(popular.at(0).latestUpdatedAt, static_cast< qint64 >(120));
+	QCOMPARE(popular.at(1).symbol, QStringLiteral("AAPL"));
 }
 
 void TestStonksCommand::ignoresUnknownText() {

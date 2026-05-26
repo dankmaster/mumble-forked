@@ -3793,7 +3793,7 @@ struct RichPreviewProviderInfo {
 };
 
 constexpr int RICH_PREVIEW_METADATA_VERSION = 10;
-constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 2;
+constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 3;
 
 bool isDirectImageUrl(const QUrl &url) {
 	if (!url.isValid()) {
@@ -4146,6 +4146,8 @@ std::vector< RichPreviewProviderInfo > richPreviewProviderInfos() {
 		{ QStringLiteral("elgiganten"), QStringLiteral("product"), QObject::tr("Elgiganten"),
 		  QObject::tr("Open on Elgiganten"), QObject::tr("Elgiganten product"),
 		  { QStringLiteral("elgiganten.se") } },
+		{ QStringLiteral("power"), QStringLiteral("product"), QObject::tr("POWER"), QObject::tr("Open on POWER"),
+		  QObject::tr("POWER product"), { QStringLiteral("power.se") } },
 		{ QStringLiteral("komplett"), QStringLiteral("product"), QObject::tr("Komplett"),
 		  QObject::tr("Open on Komplett"), QObject::tr("Komplett product"), { QStringLiteral("komplett.se") } },
 		{ QStringLiteral("systembolaget"), QStringLiteral("systembolagetProduct"), QObject::tr("Systembolaget"),
@@ -14421,6 +14423,28 @@ namespace {
 		return dto;
 	}
 
+	QVariantMap stonksPopularTickerDto(const MumbleProto::StonksPopularTicker &ticker) {
+		QVariantMap dto;
+		dto.insert(QStringLiteral("symbol"), u8(ticker.symbol()));
+		dto.insert(QStringLiteral("displayName"), ticker.has_display_name() ? u8(ticker.display_name()) : QString());
+		dto.insert(QStringLiteral("holderCount"), ticker.has_holder_count() ? ticker.holder_count() : 0u);
+		dto.insert(QStringLiteral("totalQuantity"), ticker.has_total_quantity() ? ticker.total_quantity() : 0.0);
+		dto.insert(QStringLiteral("totalMarketValue"),
+				   ticker.has_total_market_value() ? ticker.total_market_value() : 0.0);
+		dto.insert(QStringLiteral("currency"), ticker.has_currency() ? u8(ticker.currency()) : QString());
+		dto.insert(QStringLiteral("providerId"), ticker.has_provider_id() ? u8(ticker.provider_id()) : QString());
+		dto.insert(QStringLiteral("providerSymbol"),
+				   ticker.has_provider_symbol() ? u8(ticker.provider_symbol()) : QString());
+		dto.insert(QStringLiteral("exchange"), ticker.has_exchange() ? u8(ticker.exchange()) : QString());
+		dto.insert(QStringLiteral("quoteSourceUrl"),
+				   ticker.has_quote_source_url() ? u8(ticker.quote_source_url()) : QString());
+		dto.insert(QStringLiteral("latestUpdatedAt"),
+				   ticker.has_latest_updated_at()
+					   ? QVariant::fromValue< qulonglong >(ticker.latest_updated_at())
+					   : QVariant());
+		return dto;
+	}
+
 	QVariantMap stonksTextChannelDto(const MumbleProto::TextChannelInfo &channel) {
 		QVariantMap dto;
 		dto.insert(QStringLiteral("textChannelId"), channel.has_text_channel_id() ? channel.text_channel_id() : 0u);
@@ -14484,6 +14508,18 @@ namespace {
 			users.push_back(stonksUserRefDto(state.users(i)));
 		}
 		dto.insert(QStringLiteral("users"), users);
+
+		QVariantList popularTickers;
+		for (int i = 0; i < state.popular_tickers_size(); ++i) {
+			popularTickers.push_back(stonksPopularTickerDto(state.popular_tickers(i)));
+		}
+		dto.insert(QStringLiteral("popularTickers"), popularTickers);
+
+		QVariantList personalTickers;
+		for (int i = 0; i < state.personal_tickers_size(); ++i) {
+			personalTickers.push_back(stonksPopularTickerDto(state.personal_tickers(i)));
+		}
+		dto.insert(QStringLiteral("personalTickers"), personalTickers);
 
 		QVariantList textChannels;
 		for (int i = 0; i < state.text_channels_size(); ++i) {
@@ -14916,6 +14952,14 @@ void MainWindow::handleModernShellFinanceQuoteLookupRequest(const QString &reque
 					result.insert(QStringLiteral("price"), quote->regularMarketPrice);
 					result.insert(QStringLiteral("currency"),
 								  quote->currency.trimmed().isEmpty() ? QStringLiteral("USD") : quote->currency.trimmed());
+					result.insert(QStringLiteral("priceHint"), quote->priceHint);
+					if (quote->hasPreviousClose && std::abs(quote->previousClose) > 0.0000001) {
+						const double change        = quote->regularMarketPrice - quote->previousClose;
+						const double changePercent = (change / quote->previousClose) * 100.0;
+						result.insert(QStringLiteral("previousClose"), quote->previousClose);
+						result.insert(QStringLiteral("change"), change);
+						result.insert(QStringLiteral("changePercent"), changePercent);
+					}
 					result.insert(QStringLiteral("quoteTime"), QVariant::fromValue< qulonglong >(
 																  quote->regularMarketTime > 0
 																	  ? static_cast< qulonglong >(quote->regularMarketTime)
@@ -14945,6 +14989,8 @@ QVariantMap MainWindow::buildModernStonksDialog() const {
 		state.insert(QStringLiteral("leaderboard"), QVariantList());
 		state.insert(QStringLiteral("following"), QVariantList());
 		state.insert(QStringLiteral("users"), QVariantList());
+		state.insert(QStringLiteral("popularTickers"), QVariantList());
+		state.insert(QStringLiteral("personalTickers"), QVariantList());
 		state.insert(QStringLiteral("textChannels"), QVariantList());
 		state.insert(QStringLiteral("selectedUserId"), m_stonksSelectedUserID);
 		state.insert(QStringLiteral("selectedUserName"), QString());
@@ -20834,6 +20880,22 @@ bool MainWindow::handleModernShellAppAction(const QString &actionId) {
 		openModernSettingsDialog(QStringLiteral("AudioInput"));
 		publishModernShellRoomStatePatch();
 		return true;
+	} else if (actionId == QLatin1String("stonks.refreshVisible")) {
+		if (stonksLedgerFeatureSupported() && Global::get().bStonksEnabled
+			&& m_persistentChatSelectedScopeValue.has_value()
+			&& *m_persistentChatSelectedScopeValue == static_cast< int >(MumbleProto::TextChannel)) {
+			const unsigned int scopeID = m_persistentChatSelectedScopeID;
+			const auto textChannelIt   = m_persistentTextChannels.constFind(scopeID);
+			const bool isConfiguredStonksRoom =
+				Global::get().uiStonksTextChannelID > 0 && scopeID == Global::get().uiStonksTextChannelID;
+			const bool isNamedStonksRoom =
+				textChannelIt != m_persistentTextChannels.cend()
+				&& normalizedStonksTextRoomName(textChannelIt->name) == QLatin1String("stonks");
+			if (isConfiguredStonksRoom || isNamedStonksRoom) {
+				requestStonksState(m_stonksSelectedPeriod);
+			}
+		}
+		return true;
 	} else if (handleModernShellLegacyDialogAction(actionId)) {
 		return true;
 	}
@@ -24975,6 +25037,75 @@ bool MainWindow::requestPersistentChatFinancePreview(const QString &previewKey, 
 	return true;
 }
 
+bool MainWindow::requestPersistentChatInstagramMetadataPreview(const QString &previewKey, const QUrl &previewUrl) {
+	if (previewKey.isEmpty() || !isInstagramPreviewUrl(previewUrl) || !Global::get().nam) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end()) {
+		return false;
+	}
+	if (it->metadata.value(QStringLiteral("instagramMetadataVersion")).toInt()
+		== INSTAGRAM_PREVIEW_METADATA_VERSION) {
+		return false;
+	}
+	if (m_pendingPersistentChatInstagramMetadataRequests.contains(previewKey)) {
+		return true;
+	}
+
+	m_pendingPersistentChatInstagramMetadataRequests.insert(previewKey);
+	const QUrl requestUrl = canonicalInstagramPreviewUrl(previewUrl);
+	if (!requestUrl.isValid() || !isSafePreviewTarget(requestUrl)) {
+		m_pendingPersistentChatInstagramMetadataRequests.remove(previewKey);
+		return false;
+	}
+	QNetworkRequest pageRequest(requestUrl);
+	prepareInstagramPreviewMetadataRequest(pageRequest);
+	QNetworkReply *pageReply = Global::get().nam->get(pageRequest);
+	applyPreviewReplyGuards(pageReply, previewMaxPageBytesForUrl(requestUrl), false);
+	connect(pageReply, &QNetworkReply::finished, this, [this, pageReply, previewKey, requestUrl]() {
+		const QByteArray data       = pageReply->readAll();
+		const bool success          = pageReply->error() == QNetworkReply::NoError;
+		const QString contentType   = pageReply->header(QNetworkRequest::ContentTypeHeader).toString().toLower();
+		const bool allowPartialHtml = previewAbortReason(pageReply) == QLatin1String("too_large") && !data.isEmpty()
+									  && previewContentTypeLooksHtml(contentType);
+		pageReply->deleteLater();
+		m_pendingPersistentChatInstagramMetadataRequests.remove(previewKey);
+
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()) {
+			return;
+		}
+
+		if ((success || allowPartialHtml) && previewContentTypeLooksHtml(contentType)) {
+			const qint64 maxPageBytes = previewMaxPageBytesForUrl(requestUrl);
+			const QByteArray htmlBytes =
+				data.size() > maxPageBytes ? data.left(maxPageBytes) : data;
+			const QString html                       = decodedPreviewHtml(htmlBytes, contentType);
+			const QHash< QString, QString > metaTags = extractMetaTags(html);
+			applyInstagramPreviewMetadata(*previewIt, requestUrl, metaTags, html);
+		} else {
+			QVariantMap metadata = previewIt->metadata;
+			metadata.insert(QStringLiteral("provider"), QStringLiteral("instagram"));
+			metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("instagram"));
+			metadata.insert(QStringLiteral("instagramMetadataVersion"), INSTAGRAM_PREVIEW_METADATA_VERSION);
+			metadata.insert(QStringLiteral("instagramMediaKind"),
+							isInstagramReelPreviewUrl(requestUrl) ? QStringLiteral("reel") : QStringLiteral("post"));
+			previewIt->metadata = metadata;
+			if (previewIt->openLabel.trimmed().isEmpty()) {
+				previewIt->openLabel = tr("Open on Instagram");
+			}
+		}
+
+		previewIt->metadataFinished = true;
+		ensurePersistentChatPreviewSiteSnapshot(previewKey);
+		publishPersistentChatPreviewUpdate(previewKey);
+	});
+
+	return true;
+}
+
 bool MainWindow::restorePersistentChatPreviewDiskCache(const QString &previewKey) {
 	const std::optional< PersistentChatMediaCache::PreviewEntry > cached =
 		PersistentChatMediaCache::loadPreview(previewKey);
@@ -25131,10 +25262,14 @@ void MainWindow::requestChatEmbedAssistPage(quint64 leaseID, const QUrl &url, in
 	}
 
 	QNetworkRequest request(url);
-	preparePreviewRequest(request);
+	if (isInstagramPreviewUrl(url)) {
+		prepareInstagramPreviewMetadataRequest(request);
+	} else {
+		preparePreviewRequest(request);
+	}
 	request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
 	QNetworkReply *reply = Global::get().nam->get(request);
-	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	applyPreviewReplyGuards(reply, previewMaxPageBytesForUrl(url), false);
 	connect(reply, &QNetworkReply::finished, this, [this, reply, leaseID, redirectCount]() {
 		const QVariant redirectTarget = reply->attribute(QNetworkRequest::RedirectionTargetAttribute);
 		const QString contentType =
@@ -25163,7 +25298,9 @@ void MainWindow::requestChatEmbedAssistPage(quint64 leaseID, const QUrl &url, in
 			return;
 		}
 
-		const QString html = QString::fromUtf8(bytes.left(PREVIEW_MAX_PAGE_BYTES));
+		const qint64 maxPageBytes = previewMaxPageBytesForUrl(sourceUrl);
+		const QByteArray htmlBytes = bytes.size() > maxPageBytes ? bytes.left(maxPageBytes) : bytes;
+		const QString html = decodedPreviewHtml(htmlBytes, contentType);
 		const QHash< QString, QString > metaTags = extractMetaTags(html);
 		PendingChatEmbedAssist &assist = m_pendingChatEmbedAssists[leaseID];
 		assist.title = metaTags.value(QLatin1String("og:title"),
@@ -25177,6 +25314,17 @@ void MainWindow::requestChatEmbedAssistPage(quint64 leaseID, const QUrl &url, in
 								 .trimmed()
 								 .left(4096);
 		assist.siteName = metaTags.value(QLatin1String("og:site_name"), sourceUrl.host()).trimmed().left(255);
+		if (isInstagramPreviewUrl(sourceUrl)) {
+			PersistentChatPreview instagramPreview;
+			instagramPreview.canonicalUrl = sourceUrl.toString(QUrl::FullyEncoded);
+			instagramPreview.title        = assist.title;
+			instagramPreview.description  = assist.description;
+			instagramPreview.subtitle     = assist.siteName;
+			applyInstagramPreviewMetadata(instagramPreview, sourceUrl, metaTags, html);
+			assist.title       = instagramPreview.title.trimmed().left(512);
+			assist.description = instagramPreview.description.trimmed().left(4096);
+			assist.siteName    = instagramPreview.subtitle.trimmed().left(255);
+		}
 
 		const QString imageUrlString = previewImageMetaTag(metaTags);
 		const QUrl imageUrl = imageUrlString.isEmpty() ? QUrl() : sourceUrl.resolved(QUrl(imageUrlString));
@@ -27013,6 +27161,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		applyPersistentChatRemotePlayableMedia(preview, previewUrl);
 		const bool handledYahooFinanceQuotePreview = applyYahooFinanceQuotePreviewFallback(preview, previewUrl);
 		m_persistentChatPreviews.insert(previewKey, preview);
+		requestPersistentChatInstagramMetadataPreview(previewKey, previewUrl);
 		if (handledYahooFinanceQuotePreview) {
 			requestPersistentChatFinancePreview(previewKey, previewUrl);
 		}

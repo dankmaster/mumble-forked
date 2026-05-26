@@ -1178,6 +1178,20 @@ message StonksUserRef {
 	optional bool followed = 3 [default = false];
 }
 
+message StonksPopularTicker {
+	required string symbol = 1;
+	optional string display_name = 2;
+	optional uint32 holder_count = 3;
+	optional double total_quantity = 4;
+	optional double total_market_value = 5;
+	optional string currency = 6;
+	optional string provider_id = 7;
+	optional string provider_symbol = 8;
+	optional string exchange = 9;
+	optional string quote_source_url = 10;
+	optional uint64 latest_updated_at = 11;
+}
+
 message StonksRequest {
 	optional string period = 1 [default = "30d"];
 	optional uint32 user_id = 2;
@@ -1226,6 +1240,8 @@ message StonksState {
 	optional uint64 leaderboard_updated_at = 18;
 	optional uint32 selected_user_id = 19;
 	optional string selected_user_name = 20;
+	repeated StonksPopularTicker popular_tickers = 21;
+	repeated StonksPopularTicker personal_tickers = 22;
 }
 
 enum FeedbackReportKind {

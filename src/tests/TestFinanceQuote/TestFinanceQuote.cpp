@@ -15,6 +15,7 @@ class TestFinanceQuote : public QObject {
 private slots:
 	void normalizesTickerSymbols();
 	void buildsYahooFinanceSymbolCandidates();
+	void buildsYahooFinanceSymbolCandidateMetadata();
 	void extractsTickerMentions();
 	void extractsYahooFinanceQuoteSymbols();
 	void buildsFinanceProviderLinks();
@@ -36,16 +37,44 @@ void TestFinanceQuote::normalizesTickerSymbols() {
 }
 
 void TestFinanceQuote::buildsYahooFinanceSymbolCandidates() {
-	QCOMPARE(Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("saab")),
-			 QList< QString >({ QStringLiteral("SAAB"), QStringLiteral("SAAB.ST"), QStringLiteral("SAAB-B.ST"),
-								QStringLiteral("SAAB-A.ST") }));
-	QCOMPARE(Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("saab-b")),
-			 QList< QString >({ QStringLiteral("SAAB-B"), QStringLiteral("SAAB-B.ST") }));
+	const QList< QString > saabCandidates = Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("saab"));
+	QCOMPARE(saabCandidates.first(), QStringLiteral("SAAB"));
+	QVERIFY(saabCandidates.size() <= 12);
+	QVERIFY(saabCandidates.contains(QStringLiteral("SAAB.ST")));
+	QVERIFY(saabCandidates.contains(QStringLiteral("SAAB-B.ST")));
+	QVERIFY(saabCandidates.contains(QStringLiteral("SAAB.OL")));
+	QVERIFY(saabCandidates.contains(QStringLiteral("SAAB.CO")));
+	QVERIFY(saabCandidates.contains(QStringLiteral("SAAB.HE")));
+	QVERIFY(saabCandidates.contains(QStringLiteral("SAAB.DE")));
+	QVERIFY(saabCandidates.contains(QStringLiteral("SAAB.L")));
+	QVERIFY(saabCandidates.contains(QStringLiteral("SAAB.TO")));
+	QVERIFY(saabCandidates.contains(QStringLiteral("SAAB.V")));
+	QVERIFY(saabCandidates.contains(QStringLiteral("SAAB.AX")));
+	QVERIFY(saabCandidates.contains(QStringLiteral("SAAB.HK")));
+
+	const QList< QString > saabClassCandidates = Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("saab-b"));
+	QCOMPARE(saabClassCandidates.first(), QStringLiteral("SAAB-B"));
+	QVERIFY(saabClassCandidates.contains(QStringLiteral("SAAB-B.ST")));
+	QVERIFY(saabClassCandidates.contains(QStringLiteral("SAAB-B.OL")));
+	QVERIFY(saabClassCandidates.contains(QStringLiteral("SAAB-B.CO")));
+	QVERIFY(saabClassCandidates.contains(QStringLiteral("SAAB-B.HE")));
+	QVERIFY(!saabClassCandidates.contains(QStringLiteral("SAAB-B.DE")));
+
 	QCOMPARE(Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("saab.st")),
 			 QList< QString >({ QStringLiteral("SAAB.ST"), QStringLiteral("SAAB-B.ST"),
 								QStringLiteral("SAAB-A.ST") }));
 	QCOMPARE(Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("eric-b.st")),
 			 QList< QString >({ QStringLiteral("ERIC-B.ST") }));
+
+	const QList< QString > bmwCandidates = Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("bmw"));
+	QCOMPARE(bmwCandidates.first(), QStringLiteral("BMW"));
+	QVERIFY(bmwCandidates.contains(QStringLiteral("BMW.DE")));
+	QVERIFY(bmwCandidates.contains(QStringLiteral("BMW.L")));
+
+	const QList< QString > ryCandidates = Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("ry"));
+	QCOMPARE(ryCandidates.first(), QStringLiteral("RY"));
+	QVERIFY(ryCandidates.contains(QStringLiteral("RY.TO")));
+
 	QCOMPARE(Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("btc-usd")),
 			 QList< QString >({ QStringLiteral("BTC-USD") }));
 	QCOMPARE(Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("^gspc")),
@@ -55,6 +84,27 @@ void TestFinanceQuote::buildsYahooFinanceSymbolCandidates() {
 	QCOMPARE(Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("0700.hk")),
 			 QList< QString >({ QStringLiteral("0700.HK") }));
 	QVERIFY(Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("not a ticker")).isEmpty());
+}
+
+void TestFinanceQuote::buildsYahooFinanceSymbolCandidateMetadata() {
+	const QList< Mumble::Finance::YahooFinanceSymbolCandidate > candidates =
+		Mumble::Finance::yahooFinanceSymbolCandidateInfos(QStringLiteral("bmw"));
+
+	QVERIFY(!candidates.isEmpty());
+	QCOMPARE(candidates.first().symbol, QStringLiteral("BMW"));
+	QCOMPARE(candidates.first().reason, QStringLiteral("exact"));
+	QCOMPARE(candidates.first().priority, 0);
+
+	bool foundGermanyFallback = false;
+	for (const Mumble::Finance::YahooFinanceSymbolCandidate &candidate : candidates) {
+		if (candidate.symbol == QLatin1String("BMW.DE")) {
+			foundGermanyFallback = true;
+			QCOMPARE(candidate.market, QStringLiteral("DE"));
+			QCOMPARE(candidate.reason, QStringLiteral("market-fallback"));
+			QVERIFY(candidate.priority > 0);
+		}
+	}
+	QVERIFY(foundGermanyFallback);
 }
 
 void TestFinanceQuote::extractsTickerMentions() {
