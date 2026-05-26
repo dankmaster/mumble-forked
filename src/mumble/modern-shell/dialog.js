@@ -13,6 +13,10 @@
 	let modernDialogFavoriteClickTimer = 0;
 	let pendingModernDialogFieldFocus = "";
 	let modernDialogSelectState = null;
+	let stonksActiveTab = "overview";
+	let stonksDraftPositions = null;
+	let stonksDraftNote = "";
+	let stonksDraftCurrency = "USD";
 	const bridgeRetryDelayMs = 50;
 	const bridgeRetryLimit = 160;
 	let bridgeRetryTimer = 0;
@@ -3408,6 +3412,445 @@
 		return section;
 	}
 
+	function stonksNumber(value) {
+		const number = Number(value);
+		return Number.isFinite(number) ? number : 0;
+	}
+
+	function formatStonksMoney(value, currency) {
+		return (currency || "USD").toUpperCase() + " " + stonksNumber(value).toLocaleString(undefined, {
+			minimumFractionDigits: 2,
+			maximumFractionDigits: 2
+		});
+	}
+
+	function formatStonksPercent(value) {
+		const number = stonksNumber(value);
+		return (number > 0 ? "+" : "") + number.toFixed(2) + "%";
+	}
+
+	function formatStonksTime(seconds) {
+		const value = Number(seconds);
+		if (!Number.isFinite(value) || value <= 0) {
+			return "-";
+		}
+		return new Date(value * 1000).toLocaleString(undefined, {
+			month: "short",
+			day: "numeric",
+			hour: "2-digit",
+			minute: "2-digit"
+		});
+	}
+
+	function seedStonksDraft(stonks) {
+		const snapshots = Array.isArray(stonks.snapshots) ? stonks.snapshots : [];
+		const latest = snapshots.length ? snapshots[0] : null;
+		const positions = latest && Array.isArray(latest.positions) && latest.positions.length
+			? latest.positions
+			: [{ symbol: "", quantity: 0, price: 0, marketValue: 0, currency: latest && latest.currency || "USD", displayName: "" }];
+		stonksDraftPositions = positions.map(function(position) {
+			return {
+				symbol: position.symbol || "",
+				quantity: stonksNumber(position.quantity),
+				price: stonksNumber(position.price),
+				marketValue: stonksNumber(position.marketValue),
+				currency: position.currency || latest && latest.currency || "USD",
+				displayName: position.displayName || ""
+			};
+		});
+		stonksDraftCurrency = latest && latest.currency || "USD";
+		stonksDraftNote = "";
+	}
+
+	function ensureStonksDraft(stonks) {
+		if (!Array.isArray(stonksDraftPositions)) {
+			seedStonksDraft(stonks || {});
+		}
+	}
+
+	function stonksDraftTotal() {
+		return (stonksDraftPositions || []).reduce(function(total, position) {
+			return total + stonksNumber(position.marketValue);
+		}, 0);
+	}
+
+	function stonksInput(value, field, type) {
+		const input = document.createElement("input");
+		input.type = type || "text";
+		input.value = value == null ? "" : String(value);
+		input.dataset.stonksField = field;
+		return input;
+	}
+
+	function stonksCollectDraft(root) {
+		const positions = [];
+		root.querySelectorAll(".stonks-position-row").forEach(function(row) {
+			const symbol = row.querySelector("[data-stonks-field='symbol']").value.trim();
+			const quantity = Number(row.querySelector("[data-stonks-field='quantity']").value || 0);
+			const price = Number(row.querySelector("[data-stonks-field='price']").value || 0);
+			const marketValue = Number(row.querySelector("[data-stonks-field='marketValue']").value || 0);
+			const currency = row.querySelector("[data-stonks-field='currency']").value.trim() || stonksDraftCurrency || "USD";
+			const displayName = row.querySelector("[data-stonks-field='displayName']").value.trim();
+			if (symbol || quantity || price || marketValue) {
+				positions.push({ symbol: symbol, quantity: quantity, price: price, marketValue: marketValue, currency: currency, displayName: displayName });
+			}
+		});
+		stonksDraftPositions = positions.length ? positions : [{ symbol: "", quantity: 0, price: 0, marketValue: 0, currency: "USD", displayName: "" }];
+		const currencyInput = root.querySelector("[data-stonks-field='snapshotCurrency']");
+		const noteInput = root.querySelector("[data-stonks-field='snapshotNote']");
+		stonksDraftCurrency = currencyInput ? currencyInput.value.trim() || "USD" : stonksDraftCurrency;
+		stonksDraftNote = noteInput ? noteInput.value : stonksDraftNote;
+		return { positions: positions, currency: stonksDraftCurrency, note: stonksDraftNote };
+	}
+
+	function appendStonksStatus(parent, stonks) {
+		if (stonks.error) {
+			const error = document.createElement("div");
+			error.className = "stonks-status is-error";
+			error.textContent = stonks.error;
+			parent.appendChild(error);
+		}
+		if (stonks.status) {
+			const status = document.createElement("div");
+			status.className = "stonks-status";
+			status.textContent = stonks.status;
+			parent.appendChild(status);
+		}
+	}
+
+	function appendStonksTabs(parent, stonks) {
+		const tabs = [["overview", "Overview"], ["ledger", "Ledger"], ["leaderboard", "Leaderboard"], ["following", "Following"]];
+		if (stonks.canAdmin) {
+			tabs.push(["admin", "Admin"]);
+		}
+		if (!tabs.some(function(tab) { return tab[0] === stonksActiveTab; })) {
+			stonksActiveTab = "overview";
+		}
+		const wrap = document.createElement("div");
+		wrap.className = "stonks-tabs";
+		tabs.forEach(function(tab) {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "stonks-tab" + (stonksActiveTab === tab[0] ? " is-selected" : "");
+			button.textContent = tab[1];
+			button.addEventListener("click", function() {
+				stonksActiveTab = tab[0];
+				renderModernDialog();
+			});
+			wrap.appendChild(button);
+		});
+		parent.appendChild(wrap);
+	}
+
+	function appendStonksOverview(parent, stonks) {
+		const snapshots = Array.isArray(stonks.snapshots) ? stonks.snapshots : [];
+		const latest = snapshots.length ? snapshots[0] : null;
+		const stats = document.createElement("div");
+		stats.className = "stonks-stat-grid";
+		[["Total value", latest ? formatStonksMoney(latest.totalValue, latest.currency) : "-"],
+		 ["Last snapshot", latest ? formatStonksTime(latest.createdAt) : "-"],
+		 ["Leaderboard rows", String((stonks.leaderboard || []).length)]].forEach(function(item) {
+			const card = document.createElement("div");
+			card.className = "stonks-stat";
+			const label = document.createElement("span");
+			label.textContent = item[0];
+			const value = document.createElement("strong");
+			value.textContent = item[1];
+			card.append(label, value);
+			stats.appendChild(card);
+		});
+		parent.appendChild(stats);
+		const periods = document.createElement("div");
+		periods.className = "stonks-periods";
+		(stonks.periods || ["1d", "7d", "30d", "ytd"]).forEach(function(period) {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "stonks-chip" + (period === stonks.selectedPeriod ? " is-selected" : "");
+			button.textContent = period;
+			button.addEventListener("click", function() {
+				invokeModernDialogAction("selectPeriod", { period: period });
+			});
+			periods.appendChild(button);
+		});
+		parent.appendChild(periods);
+		const quick = document.createElement("button");
+		quick.type = "button";
+		quick.className = "chip-button is-primary";
+		quick.textContent = "Quick snapshot";
+		quick.disabled = !stonks.registered;
+		quick.addEventListener("click", function() {
+			if (!refs.body.querySelector(".stonks-position-row")) {
+				stonksActiveTab = "overview";
+				renderModernDialog();
+				return;
+			}
+			invokeModernDialogAction("submitSnapshot", stonksCollectDraft(refs.body));
+		});
+		parent.appendChild(quick);
+	}
+
+	function appendStonksEditor(parent, stonks) {
+		ensureStonksDraft(stonks);
+		const editor = document.createElement("section");
+		editor.className = "stonks-editor";
+		const top = document.createElement("div");
+		top.className = "stonks-editor-top";
+		top.appendChild(stonksInput(stonksDraftCurrency, "snapshotCurrency"));
+		const note = stonksInput(stonksDraftNote, "snapshotNote");
+		note.placeholder = "Note";
+		top.appendChild(note);
+		editor.appendChild(top);
+		const table = document.createElement("div");
+		table.className = "stonks-position-table";
+		const head = document.createElement("div");
+		head.className = "stonks-position-head";
+		["Symbol", "Qty", "Price", "Value", "Currency", "Name", ""].forEach(function(label) {
+			const cell = document.createElement("span");
+			cell.textContent = label;
+			head.appendChild(cell);
+		});
+		table.appendChild(head);
+		stonksDraftPositions.forEach(function(position, index) {
+			const row = document.createElement("div");
+			row.className = "stonks-position-row";
+			row.appendChild(stonksInput(position.symbol, "symbol"));
+			row.appendChild(stonksInput(position.quantity, "quantity", "number"));
+			row.appendChild(stonksInput(position.price, "price", "number"));
+			row.appendChild(stonksInput(position.marketValue, "marketValue", "number"));
+			row.appendChild(stonksInput(position.currency || stonksDraftCurrency, "currency"));
+			row.appendChild(stonksInput(position.displayName, "displayName"));
+			const remove = document.createElement("button");
+			remove.type = "button";
+			remove.className = "icon-button stonks-remove-row";
+			remove.title = "Remove";
+			remove.setAttribute("aria-label", "Remove");
+			remove.textContent = "x";
+			remove.addEventListener("click", function() {
+				stonksDraftPositions.splice(index, 1);
+				if (!stonksDraftPositions.length) {
+					stonksDraftPositions.push({ symbol: "", quantity: 0, price: 0, marketValue: 0, currency: "USD", displayName: "" });
+				}
+				renderModernDialog();
+			});
+			row.appendChild(remove);
+			row.addEventListener("input", function(event) {
+				if (event.target.dataset.stonksField === "quantity" || event.target.dataset.stonksField === "price") {
+					const quantity = Number(row.querySelector("[data-stonks-field='quantity']").value || 0);
+					const price = Number(row.querySelector("[data-stonks-field='price']").value || 0);
+					row.querySelector("[data-stonks-field='marketValue']").value = Number.isFinite(quantity * price) ? String(quantity * price) : "0";
+				}
+			});
+			table.appendChild(row);
+		});
+		editor.appendChild(table);
+		const actions = document.createElement("div");
+		actions.className = "stonks-editor-actions";
+		const add = document.createElement("button");
+		add.type = "button";
+		add.className = "chip-button";
+		add.textContent = "Add position";
+		add.addEventListener("click", function() {
+			stonksCollectDraft(editor);
+			stonksDraftPositions.push({ symbol: "", quantity: 0, price: 0, marketValue: 0, currency: stonksDraftCurrency || "USD", displayName: "" });
+			renderModernDialog();
+		});
+		const total = document.createElement("strong");
+		total.className = "stonks-draft-total";
+		total.textContent = formatStonksMoney(stonksDraftTotal(), stonksDraftCurrency);
+		const submit = document.createElement("button");
+		submit.type = "button";
+		submit.className = "chip-button is-primary";
+		submit.textContent = "Submit snapshot";
+		submit.disabled = !stonks.registered;
+		submit.addEventListener("click", function() {
+			invokeModernDialogAction("submitSnapshot", stonksCollectDraft(editor));
+		});
+		actions.append(add, total, submit);
+		editor.appendChild(actions);
+		parent.appendChild(editor);
+	}
+
+	function appendStonksLedger(parent, stonks) {
+		appendStonksEditor(parent, stonks);
+		const list = document.createElement("div");
+		list.className = "stonks-list";
+		(stonks.snapshots || []).forEach(function(snapshot) {
+			const details = document.createElement("details");
+			details.className = "stonks-ledger-item";
+			const summary = document.createElement("summary");
+			summary.textContent = formatStonksMoney(snapshot.totalValue, snapshot.currency) + " - " + formatStonksTime(snapshot.createdAt);
+			details.appendChild(summary);
+			(snapshot.positions || []).forEach(function(position) {
+				const row = document.createElement("div");
+				row.className = "stonks-ledger-position";
+				row.textContent = [position.symbol, position.displayName, formatStonksMoney(position.marketValue, position.currency)].filter(Boolean).join(" - ");
+				details.appendChild(row);
+			});
+			if (snapshot.note) {
+				const note = document.createElement("p");
+				note.className = "stonks-note";
+				note.textContent = snapshot.note;
+				details.appendChild(note);
+			}
+			list.appendChild(details);
+		});
+		if (!list.children.length) {
+			const empty = document.createElement("div");
+			empty.className = "stonks-empty";
+			empty.textContent = "No snapshots yet.";
+			list.appendChild(empty);
+		}
+		parent.appendChild(list);
+	}
+
+	function appendStonksLeaderboard(parent, stonks) {
+		const list = document.createElement("div");
+		list.className = "stonks-list";
+		(stonks.leaderboard || []).forEach(function(row) {
+			const item = document.createElement("div");
+			item.className = "stonks-row";
+			const main = document.createElement("div");
+			main.innerHTML = "<strong></strong><span></span>";
+			main.querySelector("strong").textContent = row.rank + ". " + row.userName;
+			main.querySelector("span").textContent = formatStonksTime(row.endSnapshotAt);
+			const percent = document.createElement("strong");
+			percent.className = "stonks-return" + (stonksNumber(row.returnPercent) >= 0 ? " is-positive" : " is-negative");
+			percent.textContent = formatStonksPercent(row.returnPercent);
+			const follow = document.createElement("button");
+			follow.type = "button";
+			follow.className = "chip-button";
+			follow.textContent = row.followed ? "Unfollow" : "Follow";
+			follow.disabled = !stonks.registered || row.userId === stonks.selfUserId;
+			follow.addEventListener("click", function() {
+				invokeModernDialogAction(row.followed ? "unfollow" : "follow", { userId: row.userId });
+			});
+			item.append(main, percent, follow);
+			list.appendChild(item);
+		});
+		if (!list.children.length) {
+			const empty = document.createElement("div");
+			empty.className = "stonks-empty";
+			empty.textContent = "No ranked snapshots for this period yet.";
+			list.appendChild(empty);
+		}
+		parent.appendChild(list);
+	}
+
+	function appendStonksFollowing(parent, stonks) {
+		const list = document.createElement("div");
+		list.className = "stonks-list";
+		(stonks.users || []).forEach(function(user) {
+			if (user.userId === stonks.selfUserId) {
+				return;
+			}
+			const item = document.createElement("div");
+			item.className = "stonks-row";
+			const name = document.createElement("strong");
+			name.textContent = user.userName;
+			const state = document.createElement("span");
+			state.textContent = user.followed ? "Following" : "";
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "chip-button";
+			button.textContent = user.followed ? "Unfollow" : "Follow";
+			button.disabled = !stonks.registered;
+			button.addEventListener("click", function() {
+				invokeModernDialogAction(user.followed ? "unfollow" : "follow", { userId: user.userId });
+			});
+			item.append(name, state, button);
+			list.appendChild(item);
+		});
+		parent.appendChild(list);
+	}
+
+	function appendStonksAdmin(parent, stonks) {
+		const form = document.createElement("section");
+		form.className = "stonks-admin";
+		const enabled = document.createElement("label");
+		enabled.className = "stonks-check";
+		const enabledInput = document.createElement("input");
+		enabledInput.type = "checkbox";
+		enabledInput.checked = stonks.enabled !== false;
+		enabled.append(enabledInput, document.createTextNode("Enabled"));
+		const announcements = document.createElement("label");
+		announcements.className = "stonks-check";
+		const announcementsInput = document.createElement("input");
+		announcementsInput.type = "checkbox";
+		announcementsInput.checked = stonks.socialAnnouncementsEnabled !== false;
+		announcements.append(announcementsInput, document.createTextNode("Social announcements"));
+		const select = document.createElement("select");
+		const none = document.createElement("option");
+		none.value = "0";
+		none.textContent = "Auto #stonks";
+		select.appendChild(none);
+		(stonks.textChannels || []).forEach(function(channel) {
+			const option = document.createElement("option");
+			option.value = String(channel.textChannelId || 0);
+			option.textContent = "#" + (channel.name || channel.textChannelId);
+			option.selected = channel.textChannelId === stonks.textChannelId;
+			select.appendChild(option);
+		});
+		const save = document.createElement("button");
+		save.type = "button";
+		save.className = "chip-button is-primary";
+		save.textContent = "Save";
+		save.addEventListener("click", function() {
+			invokeModernDialogAction("configure", {
+				enabled: enabledInput.checked,
+				socialAnnouncementsEnabled: announcementsInput.checked,
+				textChannelId: Number(select.value || 0)
+			});
+		});
+		form.append(enabled, announcements, select, save);
+		parent.appendChild(form);
+	}
+
+	function renderStonksDialog(dialog) {
+		const stonks = dialog.stonks || {};
+		ensureStonksDraft(stonks);
+		refs.eyebrow.textContent = "Stonks";
+		appendStonksStatus(refs.body, stonks);
+		if (!stonks.supported || stonks.enabled === false) {
+			const empty = document.createElement("div");
+			empty.className = "stonks-empty";
+			empty.textContent = stonks.error || "Stonks is unavailable on this server.";
+			refs.body.appendChild(empty);
+			return;
+		}
+		if (!stonks.registered) {
+			const needed = document.createElement("section");
+			needed.className = "stonks-register-needed";
+			const text = document.createElement("strong");
+			text.textContent = "Registered user required";
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "chip-button is-primary";
+			button.textContent = "Register";
+			button.addEventListener("click", function() {
+				invokeModernDialogAction("register", {});
+			});
+			needed.append(text, button);
+			refs.body.appendChild(needed);
+		}
+		appendStonksTabs(refs.body, stonks);
+		const panel = document.createElement("section");
+		panel.className = "stonks-panel";
+		if (stonksActiveTab === "ledger") {
+			appendStonksLedger(panel, stonks);
+		} else if (stonksActiveTab === "leaderboard") {
+			appendStonksOverview(panel, stonks);
+			appendStonksLeaderboard(panel, stonks);
+		} else if (stonksActiveTab === "following") {
+			appendStonksFollowing(panel, stonks);
+		} else if (stonksActiveTab === "admin" && stonks.canAdmin) {
+			appendStonksAdmin(panel, stonks);
+		} else {
+			appendStonksOverview(panel, stonks);
+			appendStonksEditor(panel, stonks);
+		}
+		refs.body.appendChild(panel);
+	}
+
 	function appendModernDialogSections(container, sections, errors) {
 		(sections || []).forEach(function(section) {
 			const sectionElement = document.createElement("section");
@@ -3526,7 +3969,9 @@
 		refs.body.innerHTML = "";
 		refs.actions.innerHTML = "";
 
-		if (dialog.kind === "connect") {
+		if (dialog.kind === "stonks") {
+			renderStonksDialog(dialog);
+		} else if (dialog.kind === "connect") {
 			renderConnectDialog(dialog);
 		} else {
 			renderGenericDialog(dialog);
