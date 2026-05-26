@@ -27169,6 +27169,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			requestPersistentChatFinancePreview(previewKey, previewUrl);
 		}
 		requestPersistentChatRichProviderPreview(previewKey, previewUrl);
+		requestPersistentChatSteamAppPreview(previewKey, previewUrl);
 		requestPersistentChatRedditVideoPreview(previewKey, previewUrl);
 		if (preview.previewAssetID > 0) {
 			ensurePersistentChatPreviewAssetDownload(preview.previewAssetID, previewKey);
