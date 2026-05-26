@@ -140,6 +140,33 @@ QUrl urlWithQueryItem(const QString &host, const QString &path, const QString &k
 	url.setQuery(query);
 	return url;
 }
+
+void appendTickerCandidate(QList< QString > &symbols, const QString &symbol) {
+	const QString normalizedSymbol = Mumble::Finance::normalizeTickerSymbol(symbol);
+	if (!normalizedSymbol.isEmpty() && !symbols.contains(normalizedSymbol)) {
+		symbols.push_back(normalizedSymbol);
+	}
+}
+
+bool hasExplicitYahooMarketSuffix(const QString &symbol) {
+	static const QRegularExpression suffixPattern(QStringLiteral(R"(\.[A-Z]{2,4}$)"));
+	return suffixPattern.match(symbol).hasMatch();
+}
+
+bool isStockholmFallbackEligible(const QString &symbol) {
+	if (symbol.isEmpty() || symbol.startsWith(QLatin1Char('^')) || symbol.contains(QLatin1Char('='))
+		|| symbol.contains(QLatin1Char('.')) || hasExplicitYahooMarketSuffix(symbol)) {
+		return false;
+	}
+
+	const QStringList classParts = symbol.split(QLatin1Char('-'));
+	if (classParts.size() > 1) {
+		const QString classSuffix = classParts.constLast();
+		return classSuffix.size() == 1 && classSuffix.at(0).isLetter();
+	}
+
+	return symbol.size() <= 6;
+}
 } // namespace
 
 namespace Mumble {
@@ -154,6 +181,41 @@ namespace Finance {
 		static const QRegularExpression validTickerPattern(QStringLiteral(
 			R"(^(\^?[A-Z][A-Z0-9]*(?:[.=-][A-Z0-9]+){0,4}|\d{3,}[A-Z0-9]*(?:[.=-][A-Z0-9]+){1,4})$)"));
 		return validTickerPattern.match(symbol).hasMatch() ? symbol : QString();
+	}
+
+	QList< QString > yahooFinanceSymbolCandidates(const QString &symbolText) {
+		const QString normalizedSymbol = normalizeTickerSymbol(symbolText);
+		if (normalizedSymbol.isEmpty()) {
+			return {};
+		}
+
+		QList< QString > symbols;
+		appendTickerCandidate(symbols, normalizedSymbol);
+
+		if (normalizedSymbol.endsWith(QLatin1String(".ST"))) {
+			QString stockholmBase = normalizedSymbol;
+			stockholmBase.chop(3);
+			if (!stockholmBase.contains(QLatin1Char('-')) && !stockholmBase.contains(QLatin1Char('.'))
+				&& stockholmBase.size() <= 6) {
+				appendTickerCandidate(symbols, QStringLiteral("%1-B.ST").arg(stockholmBase));
+				appendTickerCandidate(symbols, QStringLiteral("%1-A.ST").arg(stockholmBase));
+			}
+			return symbols;
+		}
+
+		if (!isStockholmFallbackEligible(normalizedSymbol)) {
+			return symbols;
+		}
+
+		if (normalizedSymbol.contains(QLatin1Char('-'))) {
+			appendTickerCandidate(symbols, QStringLiteral("%1.ST").arg(normalizedSymbol));
+			return symbols;
+		}
+
+		appendTickerCandidate(symbols, QStringLiteral("%1.ST").arg(normalizedSymbol));
+		appendTickerCandidate(symbols, QStringLiteral("%1-B.ST").arg(normalizedSymbol));
+		appendTickerCandidate(symbols, QStringLiteral("%1-A.ST").arg(normalizedSymbol));
+		return symbols;
 	}
 
 	QList< TickerMention > extractTickerMentions(const QString &text, int maxMentions) {

@@ -1096,6 +1096,7 @@ QByteArray chatPreviewImageAcceptHeader() {
 }
 
 void prepareChatPreviewRequest(QNetworkRequest &request) {
+	request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
 	request.setRawHeader(QByteArrayLiteral("User-Agent"), s_chatPreviewBrowserUserAgent);
 	request.setRawHeader(QByteArrayLiteral("Accept"), s_chatPreviewAcceptHeader);
 	request.setRawHeader(QByteArrayLiteral("Accept-Language"), s_chatPreviewAcceptLanguageHeader);
@@ -3074,17 +3075,25 @@ void Server::scheduleServerChatEmbedFetch(unsigned int threadID, unsigned int me
 		finish(*embedState);
 	};
 
-	const auto fetchYahooQuote = [this, embedState, finish, updateHostCount, finishYahooQuoteFallback](
-									 const QString &symbol) {
-		const QUrl chartUrl = Mumble::Finance::yahooFinanceChartUrl(symbol);
+	auto fetchYahooQuote = std::make_shared< std::function< void(const QString &, int) > >();
+	*fetchYahooQuote = [this, fetchYahooQuote, embedState, finish, updateHostCount, finishYahooQuoteFallback](
+							const QString &originalSymbol, int symbolIndex) {
+		const QList< QString > symbols = Mumble::Finance::yahooFinanceSymbolCandidates(originalSymbol);
+		if (symbolIndex < 0 || symbolIndex >= symbols.size()) {
+			finishYahooQuoteFallback(originalSymbol);
+			return;
+		}
+
+		const QString symbol = symbols.at(symbolIndex);
+		const QUrl chartUrl  = Mumble::Finance::yahooFinanceChartUrl(symbol);
 		if (!chartUrl.isValid() || !isSafePreviewUrl(chartUrl)) {
-			finishYahooQuoteFallback(symbol);
+			(*fetchYahooQuote)(originalSymbol, symbolIndex + 1);
 			return;
 		}
 
 		const QString hostKey = chartUrl.host().trimmed().toLower();
 		if (qhChatPreviewFetchesByHost.value(hostKey, 0) >= CHAT_PREVIEW_MAX_CONCURRENT_HOST) {
-			finishYahooQuoteFallback(symbol);
+			finishYahooQuoteFallback(originalSymbol);
 			return;
 		}
 
@@ -3097,7 +3106,8 @@ void Server::scheduleServerChatEmbedFetch(unsigned int threadID, unsigned int me
 		QNetworkReply *reply = qnamNetwork->get(request);
 		reply->setReadBufferSize(CHAT_PREVIEW_MAX_PAGE_BYTES);
 		connect(reply, &QNetworkReply::finished, this,
-				[reply, symbol, embedState, finish, updateHostCount, hostKey, finishYahooQuoteFallback]() mutable {
+				[reply, originalSymbol, symbolIndex, fetchYahooQuote, embedState, finish, updateHostCount,
+				 hostKey]() mutable {
 					updateHostCount(hostKey, -1);
 					const QVariant redirectTarget = reply->attribute(QNetworkRequest::RedirectionTargetAttribute);
 					const QByteArray bytes         = reply->readAll();
@@ -3110,8 +3120,15 @@ void Server::scheduleServerChatEmbedFetch(unsigned int threadID, unsigned int me
 							? Mumble::Finance::parseYahooChartQuote(bytes, &parseError)
 							: std::nullopt;
 					if (!quote) {
-						finishYahooQuoteFallback(symbol);
+						(*fetchYahooQuote)(originalSymbol, symbolIndex + 1);
 						return;
+					}
+
+					const QString quoteSymbol = Mumble::Finance::normalizeTickerSymbol(
+						quote->symbol.trimmed().isEmpty() ? originalSymbol : quote->symbol);
+					const QUrl canonicalUrl = Mumble::Finance::yahooFinanceQuoteUrl(quoteSymbol);
+					if (canonicalUrl.isValid()) {
+						embedState->canonicalUrl = u8(canonicalUrl.toString(QUrl::FullyEncoded));
 					}
 
 					embedState->title       = u8(Mumble::Finance::yahooFinanceQuoteTitle(*quote));
@@ -3126,7 +3143,7 @@ void Server::scheduleServerChatEmbedFetch(unsigned int threadID, unsigned int me
 	const QUrl initialUrl(QString::fromStdString(initialEmbed.canonicalUrl));
 	QString yahooSymbol;
 	if (Mumble::Finance::symbolFromYahooFinanceQuoteUrl(initialUrl, &yahooSymbol)) {
-		fetchYahooQuote(yahooSymbol);
+		(*fetchYahooQuote)(yahooSymbol, 0);
 		return;
 	}
 

@@ -14044,7 +14044,12 @@
 		if (symbol.startsWith("$")) {
 			symbol = symbol.slice(1);
 		}
+		symbol = symbol.replace(/\s+/g, " ");
 		symbol = symbol.toUpperCase();
+		const stockholmClass = symbol.match(/^(\^?[A-Z][A-Z0-9]{0,5}|\d{3,}[A-Z0-9]*)\s+([A-Z])$/);
+		if (stockholmClass) {
+			symbol = stockholmClass[1] + "-" + stockholmClass[2];
+		}
 		return /^(\^?[A-Z][A-Z0-9]*(?:[.=-][A-Z0-9]+){0,4}|\d{3,}[A-Z0-9]*(?:[.=-][A-Z0-9]+){1,4})$/.test(symbol)
 			? symbol
 			: "";
@@ -14465,7 +14470,7 @@
 		stonksQuoteSearchError = "";
 		stonksQuoteSuggestions = [];
 		if (!symbol) {
-			stonksQuoteSearchError = "Enter a ticker like RKLB or ERIC-B.ST.";
+			stonksQuoteSearchError = "Enter a ticker like RKLB, SAAB B, or ERIC-B.ST.";
 			renderModernDialog();
 			return;
 		}

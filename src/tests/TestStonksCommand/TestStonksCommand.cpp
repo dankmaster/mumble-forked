@@ -35,6 +35,12 @@ void TestStonksCommand::parsesQuoteCommands() {
 	QCOMPARE(static_cast< int >(explicitQuote->type), static_cast< int >(Mumble::Stonks::CommandType::Quote));
 	QCOMPARE(explicitQuote->symbol, QStringLiteral("ERIC-B.ST"));
 
+	const std::optional< Mumble::Stonks::Command > swedishClassQuote =
+		Mumble::Stonks::parseCommand(QStringLiteral("quote saab b"));
+	QVERIFY(swedishClassQuote.has_value());
+	QCOMPARE(static_cast< int >(swedishClassQuote->type), static_cast< int >(Mumble::Stonks::CommandType::Quote));
+	QCOMPARE(swedishClassQuote->symbol, QStringLiteral("SAAB-B"));
+
 	const std::optional< Mumble::Stonks::Command > explicitCashtagQuote =
 		Mumble::Stonks::parseCommand(QStringLiteral("quote $rklb"));
 	QVERIFY(explicitCashtagQuote.has_value());

@@ -189,6 +189,7 @@ QNetworkReply *Network::get(const QUrl &url) {
 
 void Network::prepareRequest(QNetworkRequest &req) {
 	req.setAttribute(QNetworkRequest::HttpPipeliningAllowedAttribute, true);
+	req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
 
 	// Do not send OS information if the corresponding privacy setting is enabled
 	if (Global::get().s.bHideOS) {

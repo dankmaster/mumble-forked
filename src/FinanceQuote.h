@@ -60,6 +60,7 @@ namespace Finance {
 	};
 
 	QString normalizeTickerSymbol(const QString &symbolText);
+	QList< QString > yahooFinanceSymbolCandidates(const QString &symbolText);
 	QList< TickerMention > extractTickerMentions(const QString &text, int maxMentions = 3);
 
 	QUrl yahooFinanceQuoteUrl(const QString &symbol);

@@ -197,6 +197,7 @@
 #include <cstdlib>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <utility>
@@ -14832,81 +14833,102 @@ void MainWindow::handleModernShellFinanceQuoteLookupRequest(const QString &reque
 		return;
 	}
 
-	const QUrl chartURL = Mumble::Finance::yahooFinanceChartUrl(normalizedSymbol, QStringLiteral("5d"),
-																QStringLiteral("1d"));
-	if (!chartURL.isValid() || !isSafePreviewTarget(chartURL)) {
+	auto symbolCandidates = std::make_shared< QList< QString > >(
+		Mumble::Finance::yahooFinanceSymbolCandidates(normalizedSymbol));
+	if (symbolCandidates->isEmpty()) {
 		result.insert(QStringLiteral("ok"), false);
-		result.insert(QStringLiteral("error"), tr("Quote provider URL was rejected."));
+		result.insert(QStringLiteral("error"), tr("Enter a valid ticker symbol."));
 		publishResult(result);
 		return;
 	}
 
-	QNetworkRequest request(chartURL);
-	preparePreviewRequest(request);
-	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
-	QNetworkReply *reply = Global::get().nam->get(request);
-	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
-	connect(reply, &QNetworkReply::finished, this, [this, reply, requestID, symbol, normalizedSymbol]() {
-		QVariantMap result;
-		result.insert(QStringLiteral("requestId"), requestID);
-		result.insert(QStringLiteral("query"), symbol);
-
-		const QByteArray data = reply->readAll();
-		const bool success    = reply->error() == QNetworkReply::NoError;
-		const QString networkError = reply->errorString();
-		reply->deleteLater();
-
-		if (!success || data.isEmpty()) {
+	auto lastError  = std::make_shared< QString >();
+	auto fetchQuote = std::make_shared< std::function< void(int) > >();
+	*fetchQuote    = [this, requestID, symbol, normalizedSymbol, symbolCandidates, lastError, fetchQuote,
+					  publishResult](int symbolIndex) {
+		if (symbolIndex < 0 || symbolIndex >= symbolCandidates->size()) {
+			QVariantMap result;
+			result.insert(QStringLiteral("requestId"), requestID);
+			result.insert(QStringLiteral("query"), symbol);
 			result.insert(QStringLiteral("ok"), false);
 			result.insert(QStringLiteral("error"),
-						  networkError.trimmed().isEmpty() ? tr("Quote lookup failed.") : networkError);
-			if (m_modernShellHost && m_modernShellHost->bridge()) {
-				m_modernShellHost->bridge()->publishFinanceQuoteResult(result);
-			}
+						  lastError->trimmed().isEmpty() ? tr("Yahoo did not return a usable price.")
+														 : lastError->trimmed());
+			publishResult(result);
 			return;
 		}
 
-		QString parseError;
-		const std::optional< Mumble::Finance::YahooChartQuote > quote =
-			Mumble::Finance::parseYahooChartQuote(data, &parseError);
-		if (!quote || !quote->hasRegularMarketPrice || !std::isfinite(quote->regularMarketPrice)
-			|| quote->regularMarketPrice <= 0.0) {
-			result.insert(QStringLiteral("ok"), false);
-			result.insert(QStringLiteral("error"),
-						  parseError.trimmed().isEmpty() ? tr("Yahoo did not return a usable price.") : parseError);
-			if (m_modernShellHost && m_modernShellHost->bridge()) {
-				m_modernShellHost->bridge()->publishFinanceQuoteResult(result);
-			}
+		const QUrl chartURL = Mumble::Finance::yahooFinanceChartUrl(symbolCandidates->at(symbolIndex),
+																	QStringLiteral("5d"), QStringLiteral("1d"));
+		if (!chartURL.isValid() || !isSafePreviewTarget(chartURL)) {
+			*lastError = tr("Quote provider URL was rejected.");
+			(*fetchQuote)(symbolIndex + 1);
 			return;
 		}
 
-		const QString quoteSymbol = Mumble::Finance::normalizeTickerSymbol(
-			quote->symbol.trimmed().isEmpty() ? normalizedSymbol : quote->symbol);
-		const QUrl sourceURL = Mumble::Finance::yahooFinanceQuoteUrl(quoteSymbol);
-		result.insert(QStringLiteral("ok"), true);
-		result.insert(QStringLiteral("providerId"), QStringLiteral("yahoo-finance"));
-		result.insert(QStringLiteral("symbol"), quoteSymbol.isEmpty() ? normalizedSymbol : quoteSymbol);
-		result.insert(QStringLiteral("providerSymbol"), quoteSymbol.isEmpty() ? normalizedSymbol : quoteSymbol);
-		result.insert(QStringLiteral("displayName"),
-					  !quote->shortName.trimmed().isEmpty() ? quote->shortName.trimmed() : quote->longName.trimmed());
-		result.insert(QStringLiteral("exchange"),
-					  !quote->fullExchangeName.trimmed().isEmpty() ? quote->fullExchangeName.trimmed()
-																	: quote->exchangeName.trimmed());
-		result.insert(QStringLiteral("price"), quote->regularMarketPrice);
-		result.insert(QStringLiteral("currency"),
-					  quote->currency.trimmed().isEmpty() ? QStringLiteral("USD") : quote->currency.trimmed());
-		result.insert(QStringLiteral("quoteTime"), QVariant::fromValue< qulonglong >(
-													  quote->regularMarketTime > 0
-														  ? static_cast< qulonglong >(quote->regularMarketTime)
-														  : 0ULL));
-		result.insert(QStringLiteral("quoteSourceUrl"),
-					  sourceURL.isValid() ? sourceURL.toString(QUrl::FullyEncoded) : QString());
-		result.insert(QStringLiteral("quoteConfidence"), 1.0);
+		QNetworkRequest request(chartURL);
+		preparePreviewRequest(request);
+		request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
+		QNetworkReply *reply = Global::get().nam->get(request);
+		applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+		connect(reply, &QNetworkReply::finished, this,
+				[this, reply, requestID, symbol, normalizedSymbol, symbolIndex, symbolCandidates, lastError, fetchQuote,
+				 publishResult]() {
+					QVariantMap result;
+					result.insert(QStringLiteral("requestId"), requestID);
+					result.insert(QStringLiteral("query"), symbol);
 
-		if (m_modernShellHost && m_modernShellHost->bridge()) {
-			m_modernShellHost->bridge()->publishFinanceQuoteResult(result);
-		}
-	});
+					const QByteArray data     = reply->readAll();
+					const bool success        = reply->error() == QNetworkReply::NoError;
+					const QString networkError = reply->errorString();
+					reply->deleteLater();
+
+					if (!success || data.isEmpty()) {
+						*lastError = networkError.trimmed().isEmpty() ? tr("Quote lookup failed.") : networkError;
+						(*fetchQuote)(symbolIndex + 1);
+						return;
+					}
+
+					QString parseError;
+					const std::optional< Mumble::Finance::YahooChartQuote > quote =
+						Mumble::Finance::parseYahooChartQuote(data, &parseError);
+					if (!quote || !quote->hasRegularMarketPrice || !std::isfinite(quote->regularMarketPrice)
+						|| quote->regularMarketPrice <= 0.0) {
+						*lastError =
+							parseError.trimmed().isEmpty() ? tr("Yahoo did not return a usable price.") : parseError;
+						(*fetchQuote)(symbolIndex + 1);
+						return;
+					}
+
+					const QString quoteSymbol = Mumble::Finance::normalizeTickerSymbol(
+						quote->symbol.trimmed().isEmpty() ? normalizedSymbol : quote->symbol);
+					const QUrl sourceURL = Mumble::Finance::yahooFinanceQuoteUrl(quoteSymbol);
+					result.insert(QStringLiteral("ok"), true);
+					result.insert(QStringLiteral("providerId"), QStringLiteral("yahoo-finance"));
+					result.insert(QStringLiteral("symbol"), quoteSymbol.isEmpty() ? normalizedSymbol : quoteSymbol);
+					result.insert(QStringLiteral("providerSymbol"), quoteSymbol.isEmpty() ? normalizedSymbol : quoteSymbol);
+					result.insert(QStringLiteral("displayName"),
+								  !quote->shortName.trimmed().isEmpty() ? quote->shortName.trimmed()
+																		 : quote->longName.trimmed());
+					result.insert(QStringLiteral("exchange"),
+								  !quote->fullExchangeName.trimmed().isEmpty() ? quote->fullExchangeName.trimmed()
+																				: quote->exchangeName.trimmed());
+					result.insert(QStringLiteral("price"), quote->regularMarketPrice);
+					result.insert(QStringLiteral("currency"),
+								  quote->currency.trimmed().isEmpty() ? QStringLiteral("USD") : quote->currency.trimmed());
+					result.insert(QStringLiteral("quoteTime"), QVariant::fromValue< qulonglong >(
+																  quote->regularMarketTime > 0
+																	  ? static_cast< qulonglong >(quote->regularMarketTime)
+																	  : 0ULL));
+					result.insert(QStringLiteral("quoteSourceUrl"),
+								  sourceURL.isValid() ? sourceURL.toString(QUrl::FullyEncoded) : QString());
+					result.insert(QStringLiteral("quoteConfidence"), 1.0);
+
+					publishResult(result);
+				});
+	};
+
+	(*fetchQuote)(0);
 }
 
 QVariantMap MainWindow::buildModernStonksDialog() const {
@@ -24887,46 +24909,68 @@ bool MainWindow::requestPersistentChatFinancePreview(const QString &previewKey, 
 		return false;
 	}
 
-	const QUrl chartUrl = Mumble::Finance::yahooFinanceChartUrl(symbol);
-	if (!chartUrl.isValid() || !isSafePreviewTarget(chartUrl)) {
-		it->remoteMediaFinished = true;
+	auto symbolCandidates = std::make_shared< QList< QString > >(Mumble::Finance::yahooFinanceSymbolCandidates(symbol));
+	if (symbolCandidates->isEmpty() || !Global::get().nam) {
 		return false;
 	}
 
 	it->remoteMediaRequested = true;
 
-	QNetworkRequest request(chartUrl);
-	preparePreviewRequest(request);
-	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
-	QNetworkReply *reply = Global::get().nam->get(request);
-	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
-	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey]() {
-		const QByteArray data = reply->readAll();
-		const bool success    = reply->error() == QNetworkReply::NoError;
-		reply->deleteLater();
-
+	auto fetchQuote = std::make_shared< std::function< void(int) > >();
+	*fetchQuote    = [this, previewKey, symbolCandidates, fetchQuote](int symbolIndex) {
 		auto previewIt = m_persistentChatPreviews.find(previewKey);
 		if (previewIt == m_persistentChatPreviews.end()) {
 			return;
 		}
 
-		previewIt->remoteMediaRequested = false;
-		previewIt->remoteMediaFinished  = true;
-		previewIt->metadataFinished     = true;
-		previewIt->thumbnailFinished    = true;
-		previewIt->siteSnapshotFinished = true;
-
-		if (success && !data.isEmpty()) {
-			QString parseError;
-			const std::optional< Mumble::Finance::YahooChartQuote > quote =
-				Mumble::Finance::parseYahooChartQuote(data, &parseError);
-			if (quote) {
-				applyYahooFinanceQuoteData(*previewIt, *quote);
-			}
+		if (symbolIndex < 0 || symbolIndex >= symbolCandidates->size()) {
+			previewIt->remoteMediaRequested = false;
+			previewIt->remoteMediaFinished  = true;
+			previewIt->metadataFinished     = true;
+			previewIt->thumbnailFinished    = true;
+			previewIt->siteSnapshotFinished = true;
+			publishPersistentChatPreviewUpdate(previewKey);
+			return;
 		}
 
-		publishPersistentChatPreviewUpdate(previewKey);
-	});
+		const QUrl chartUrl = Mumble::Finance::yahooFinanceChartUrl(symbolCandidates->at(symbolIndex));
+		if (!chartUrl.isValid() || !isSafePreviewTarget(chartUrl)) {
+			(*fetchQuote)(symbolIndex + 1);
+			return;
+		}
+
+		QNetworkRequest request(chartUrl);
+		preparePreviewRequest(request);
+		request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
+		QNetworkReply *reply = Global::get().nam->get(request);
+		applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+		connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, symbolIndex, symbolCandidates, fetchQuote]() {
+			const QByteArray data = reply->readAll();
+			const bool success    = reply->error() == QNetworkReply::NoError;
+			reply->deleteLater();
+
+			auto previewIt = m_persistentChatPreviews.find(previewKey);
+			if (previewIt == m_persistentChatPreviews.end()) {
+				return;
+			}
+
+			if (success && !data.isEmpty()) {
+				QString parseError;
+				const std::optional< Mumble::Finance::YahooChartQuote > quote =
+					Mumble::Finance::parseYahooChartQuote(data, &parseError);
+				if (quote) {
+					previewIt->remoteMediaRequested = false;
+					applyYahooFinanceQuoteData(*previewIt, *quote);
+					publishPersistentChatPreviewUpdate(previewKey);
+					return;
+				}
+			}
+
+			(*fetchQuote)(symbolIndex + 1);
+		});
+	};
+
+	(*fetchQuote)(0);
 
 	return true;
 }

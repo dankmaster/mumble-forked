@@ -14,6 +14,7 @@ class TestFinanceQuote : public QObject {
 
 private slots:
 	void normalizesTickerSymbols();
+	void buildsYahooFinanceSymbolCandidates();
 	void extractsTickerMentions();
 	void extractsYahooFinanceQuoteSymbols();
 	void buildsFinanceProviderLinks();
@@ -32,6 +33,28 @@ void TestFinanceQuote::normalizesTickerSymbols() {
 
 	QVERIFY(Mumble::Finance::normalizeTickerSymbol(QStringLiteral("$5")).isEmpty());
 	QVERIFY(Mumble::Finance::normalizeTickerSymbol(QStringLiteral("not a ticker")).isEmpty());
+}
+
+void TestFinanceQuote::buildsYahooFinanceSymbolCandidates() {
+	QCOMPARE(Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("saab")),
+			 QList< QString >({ QStringLiteral("SAAB"), QStringLiteral("SAAB.ST"), QStringLiteral("SAAB-B.ST"),
+								QStringLiteral("SAAB-A.ST") }));
+	QCOMPARE(Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("saab-b")),
+			 QList< QString >({ QStringLiteral("SAAB-B"), QStringLiteral("SAAB-B.ST") }));
+	QCOMPARE(Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("saab.st")),
+			 QList< QString >({ QStringLiteral("SAAB.ST"), QStringLiteral("SAAB-B.ST"),
+								QStringLiteral("SAAB-A.ST") }));
+	QCOMPARE(Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("eric-b.st")),
+			 QList< QString >({ QStringLiteral("ERIC-B.ST") }));
+	QCOMPARE(Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("btc-usd")),
+			 QList< QString >({ QStringLiteral("BTC-USD") }));
+	QCOMPARE(Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("^gspc")),
+			 QList< QString >({ QStringLiteral("^GSPC") }));
+	QCOMPARE(Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("sek=x")),
+			 QList< QString >({ QStringLiteral("SEK=X") }));
+	QCOMPARE(Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("0700.hk")),
+			 QList< QString >({ QStringLiteral("0700.HK") }));
+	QVERIFY(Mumble::Finance::yahooFinanceSymbolCandidates(QStringLiteral("not a ticker")).isEmpty());
 }
 
 void TestFinanceQuote::extractsTickerMentions() {

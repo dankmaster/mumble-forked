@@ -58,6 +58,27 @@ bool looksLikeBareTicker(const QString &text) {
 
 	return !Mumble::Finance::normalizeTickerSymbol(trimmed).isEmpty();
 }
+
+QString normalizeQuoteSymbolText(const QStringList &tokens) {
+	if (tokens.isEmpty()) {
+		return QString();
+	}
+
+	const QString directSymbol = Mumble::Finance::normalizeTickerSymbol(tokens.join(QLatin1Char(' ')));
+	if (!directSymbol.isEmpty()) {
+		return directSymbol;
+	}
+
+	if (tokens.size() == 2) {
+		const QString classToken = tokens.at(1).trimmed();
+		if (classToken.size() == 1 && classToken.at(0).isLetter()) {
+			return Mumble::Finance::normalizeTickerSymbol(
+				QStringLiteral("%1-%2").arg(tokens.at(0).trimmed(), classToken));
+		}
+	}
+
+	return QString();
+}
 } // namespace
 
 namespace Mumble {
@@ -133,7 +154,7 @@ namespace Stonks {
 
 			Command command;
 			command.type   = CommandType::Quote;
-			command.symbol = Mumble::Finance::normalizeTickerSymbol(rawTokens.at(1));
+			command.symbol = normalizeQuoteSymbolText(rawTokens.mid(1));
 			return command.symbol.isEmpty() ? std::nullopt : std::optional< Command >(command);
 		}
 
