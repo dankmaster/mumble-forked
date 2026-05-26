@@ -876,6 +876,22 @@
 		}
 	}
 
+	function reopenPreviewHydrationForStubs(messages) {
+		(messages || []).forEach(function(message) {
+			if (!message || !message.previewStub || message.preview) {
+				return;
+			}
+
+			const id = Number(message.messageId || 0);
+			if (!Number.isFinite(id) || id <= 0) {
+				return;
+			}
+
+			requestedPreviewHydrationIds.delete(id);
+			pendingPreviewHydrationIds.delete(id);
+		});
+	}
+
 	function flushPreviewHydrationQueue() {
 		previewHydrationTimer = 0;
 		if (activeMessageChunkRender) {
@@ -10790,6 +10806,7 @@
 			openReactionPickerMessageId = null;
 			clearPreviewHydrationState();
 		}
+		reopenPreviewHydrationForStubs(messages);
 		if (openReactionPickerMessageId !== null && !messages.some(function(message) {
 			return message && message.messageId === openReactionPickerMessageId;
 		})) {

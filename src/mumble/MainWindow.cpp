@@ -13120,12 +13120,15 @@ void MainWindow::setupPersistentChatDock() {
 																							  : static_cast< int >(queuedTarget.scope)),
 										  queuedTarget.directMessage && queuedTarget.user ? queuedTarget.user->uiSession
 																						 : queuedTarget.scopeID);
+				const bool shouldFastFirstPaintModernReset =
+					switchingScope || snapshot.loadingState == PersistentChatLoadingState::Initial
+					|| previousMessageCount == 0;
 				const quint64 generation = ++m_modernShellMessagePatchGeneration;
 				publishModernShellActiveScopePatch(QStringLiteral("activeScope.update"));
 				QPointer< MainWindow > guardedThis(this);
 				QMetaObject::invokeMethod(
 					this,
-					[guardedThis, generation, queuedScopeToken, scrollToBottom]() {
+					[guardedThis, generation, queuedScopeToken, scrollToBottom, shouldFastFirstPaintModernReset]() {
 						if (!guardedThis || generation != guardedThis->m_modernShellMessagePatchGeneration
 							|| !guardedThis->usesModernShell()) {
 							return;
@@ -13143,7 +13146,7 @@ void MainWindow::setupPersistentChatDock() {
 
 						const std::size_t messageCount = guardedThis->m_persistentChatMessages.size();
 						const std::size_t beginIndex   = messageCount > 200 ? messageCount - 200 : 0;
-						const bool fastFirstPaint = messageCount > beginIndex;
+						const bool fastFirstPaint = shouldFastFirstPaintModernReset && messageCount > beginIndex;
 						const QString timelineMode = guardedThis->modernShellMessageTimelineMode(beginIndex);
 						guardedThis->publishModernShellMessagesPatch(
 							QStringLiteral("messages.reset"),
