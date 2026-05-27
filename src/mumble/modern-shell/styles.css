@@ -8395,6 +8395,7 @@ body.dialog-host {
 
 .modern-dialog-favorites-add {
 	min-height: 26px;
+	margin: 3px;
 	padding-inline: 9px;
 	font-size: 11px;
 	white-space: nowrap;
@@ -8499,6 +8500,128 @@ body.dialog-host {
 .modern-dialog-section.is-records .modern-dialog-readonly-value {
 	color: var(--text-muted);
 	font-size: 11px;
+}
+
+.modern-dialog.dialog-id-certificate .modern-dialog-body {
+	grid-template-columns: minmax(0, 1.35fr) minmax(310px, 0.75fr);
+	align-content: start;
+	align-items: start;
+	gap: 14px;
+}
+
+.modern-dialog.dialog-id-certificate .modern-dialog-highlights {
+	grid-column: 1 / -1;
+	grid-template-columns: 1.1fr 0.8fr 0.9fr;
+}
+
+.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-current {
+	grid-column: 1;
+	display: grid;
+	grid-template-columns: minmax(108px, 0.28fr) minmax(0, 1fr);
+	gap: 0 14px;
+	padding: 14px;
+	background: rgba(255, 255, 255, 0.014);
+}
+
+.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-action {
+	grid-column: 2;
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	align-self: start;
+	gap: 12px;
+	padding: 14px;
+	background: rgba(255, 255, 255, 0.026);
+}
+
+.modern-dialog.dialog-id-certificate .modern-dialog-section-title,
+.modern-dialog.dialog-id-certificate .modern-dialog-section-subtitle {
+	grid-column: 1 / -1;
+}
+
+.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-current .modern-dialog-field {
+	grid-column: 1 / -1;
+	grid-template-columns: minmax(108px, 0.28fr) minmax(0, 1fr);
+	align-items: baseline;
+	gap: 14px;
+	min-height: 0;
+	padding: 9px 0;
+	border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-current .modern-dialog-field:first-of-type {
+	border-top: 0;
+}
+
+.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-current .field-id-cert-status {
+	grid-template-columns: 1fr;
+	gap: 4px;
+	margin: 2px 0 7px;
+	padding: 10px 12px;
+	border: 1px solid rgba(78, 184, 159, 0.22);
+	border-radius: 7px;
+	border-color: rgba(78, 184, 159, 0.22);
+	background: rgba(78, 184, 159, 0.070);
+}
+
+.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-current .field-id-cert-fingerprint {
+	align-items: start;
+}
+
+.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-current .modern-dialog-field-label {
+	color: var(--text-muted);
+	font-size: 10px;
+	font-weight: 800;
+	line-height: 1.2;
+	text-transform: uppercase;
+}
+
+.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-current .modern-dialog-readonly-value {
+	color: var(--text-strong);
+	font-size: 12px;
+	line-height: 1.35;
+	white-space: normal;
+}
+
+.modern-dialog.dialog-id-certificate .field-id-cert-fingerprint .modern-dialog-readonly-value {
+	font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", monospace;
+	font-size: 11px;
+	overflow-wrap: anywhere;
+}
+
+.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-action .modern-dialog-field {
+	grid-column: auto;
+	grid-template-columns: 1fr;
+	gap: 5px;
+}
+
+.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-action .field-id-cert-mode,
+.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-action .field-id-cert-importPath,
+.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-action .field-id-cert-password,
+.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-action .field-id-cert-exportPath,
+.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-action .modern-dialog-note {
+	grid-column: 1 / -1;
+}
+
+.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-action .modern-dialog-field-label {
+	font-size: 11px;
+	font-weight: 700;
+}
+
+.modern-dialog.dialog-id-certificate .modern-dialog-field.is-select.is-operation .modern-select-button,
+.modern-dialog.dialog-id-certificate .modern-dialog-field.is-select.is-operation select {
+	min-height: 38px;
+	border-color: rgba(78, 184, 159, 0.24);
+	background: rgba(7, 13, 18, 0.72);
+	font-weight: 700;
+}
+
+.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-action .modern-dialog-note {
+	margin: 0;
+	padding: 9px 10px;
+	border: 1px solid rgba(78, 184, 159, 0.15);
+	border-radius: 7px;
+	background: rgba(78, 184, 159, 0.055);
+	color: var(--text-main);
 }
 
 .modern-dialog-connect-details .modern-dialog-section {
@@ -9736,6 +9859,19 @@ body.dialog-host {
 	.modern-dialog-connect-shell,
 	.modern-dialog-connect-shell.has-editor {
 		grid-template-columns: 1fr;
+	}
+
+	.modern-dialog.dialog-id-certificate .modern-dialog-body,
+	.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-current,
+	.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-action,
+	.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-current .modern-dialog-field {
+		grid-template-columns: 1fr;
+	}
+
+	.modern-dialog.dialog-id-certificate .modern-dialog-highlights,
+	.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-current,
+	.modern-dialog.dialog-id-certificate .modern-dialog-section.is-certificate-action {
+		grid-column: 1;
 	}
 
 	.modern-dialog-favorite {

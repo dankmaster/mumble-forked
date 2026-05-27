@@ -13687,6 +13687,11 @@ namespace {
 		return field;
 	}
 
+	QVariantMap modernPresentedField(QVariantMap field, const QString &presentation) {
+		field.insert(QStringLiteral("presentation"), presentation);
+		return field;
+	}
+
 	QVariantMap modernReadonlyField(const QString &label, const QVariant &value, const QString &id = QString()) {
 		QVariantMap field = modernDialogField(id, label, QStringLiteral("readonly"), value, false);
 		return field;
@@ -13866,23 +13871,29 @@ namespace {
 		const bool valid = CertWizard::validateCert(keyPair);
 		fields.push_back(modernReadonlyField(QObject::tr("Status"),
 											 valid ? QObject::tr("A valid certificate is installed")
-												   : QObject::tr("No valid certificate is installed")));
+												   : QObject::tr("No valid certificate is installed"),
+											 QStringLiteral("cert.status")));
 		if (!valid) {
 			return fields;
 		}
 
 		const QSslCertificate cert = keyPair.first.constFirst();
 		fields.push_back(modernReadonlyField(QObject::tr("Name"),
-											 valueOrUnknown(certificateSubjectValue(cert, QSslCertificate::CommonName))));
+											 valueOrUnknown(certificateSubjectValue(cert, QSslCertificate::CommonName)),
+											 QStringLiteral("cert.name")));
 		const QStringList emails = cert.subjectAlternativeNames().values(QSsl::EmailEntry);
 		fields.push_back(modernReadonlyField(QObject::tr("Email"),
-											 emails.isEmpty() ? QObject::tr("None") : emails.join(QStringLiteral(", "))));
+											 emails.isEmpty() ? QObject::tr("None") : emails.join(QStringLiteral(", ")),
+											 QStringLiteral("cert.email")));
 		fields.push_back(modernReadonlyField(QObject::tr("Issuer"),
-											 valueOrUnknown(certificateIssuerValue(cert, QSslCertificate::CommonName))));
+											 valueOrUnknown(certificateIssuerValue(cert, QSslCertificate::CommonName)),
+											 QStringLiteral("cert.issuer")));
 		fields.push_back(modernReadonlyField(QObject::tr("Expires"),
-											 cert.expiryDate().toLocalTime().toString(Qt::ISODate)));
+											 cert.expiryDate().toLocalTime().toString(Qt::ISODate),
+											 QStringLiteral("cert.expires")));
 		fields.push_back(modernReadonlyField(QObject::tr("SHA-1 fingerprint"),
-											 QString::fromLatin1(cert.digest(QCryptographicHash::Sha1).toHex(':'))));
+											 QString::fromLatin1(cert.digest(QCryptographicHash::Sha1).toHex(':')),
+											 QStringLiteral("cert.fingerprint")));
 		return fields;
 	}
 
@@ -15644,7 +15655,9 @@ void MainWindow::openModernCertificateDialog(const QVariantMap &fieldValues, con
 												   : tr("Export");
 
 	QVariantList workflowFields {
-		modernSelectField(QStringLiteral("cert.mode"), tr("Action"), selectedMode, modeOptions, QStringLiteral("string")),
+		modernPresentedField(modernSelectField(QStringLiteral("cert.mode"), tr("Action"), selectedMode, modeOptions,
+											   QStringLiteral("string")),
+							 QStringLiteral("operation")),
 		modernVisibleWhenField(
 			modernNoteField(tr("Creates a new client certificate using the default local identity.")),
 			QStringLiteral("cert.mode"), QStringList { QStringLiteral("quick") }),
@@ -15681,8 +15694,10 @@ void MainWindow::openModernCertificateDialog(const QVariantMap &fieldValues, con
 		QStringLiteral("certificate"), QStringLiteral("certificate"), tr("Certificate"),
 		tr("Manage the client certificate used for account identity and server authentication."),
 		QVariantList { modernDialogSection(tr("Current certificate"), modernCertificateFields(Global::get().s.kpCertificate),
-										   QStringLiteral("list")),
-					   modernDialogSection(tr("Certificate action"), workflowFields, QStringLiteral("form")) },
+										   QStringLiteral("certificate-current")),
+					   modernDialogSection(tr("Certificate action"), workflowFields,
+										   QStringLiteral("certificate-action"),
+										   tr("Choose one operation. The form only shows fields needed for that operation.")) },
 		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Close"), true, QString(), true),
 					   modernDialogAction(QStringLiteral("runCertificateAction"), tr("Apply"), true,
 										  QStringLiteral("accent")) },

@@ -14286,7 +14286,14 @@
 		}
 
 		const row = document.createElement("label");
-		row.className = "modern-dialog-field is-" + type + (modernDialogFieldIsAdvanced(field) ? " is-advanced" : "");
+		const fieldClass = field && field.id
+			? " field-id-" + String(field.id).replace(/[^a-z0-9_-]/gi, "-")
+			: "";
+		const presentationClass = field && field.presentation
+			? " is-" + String(field.presentation).replace(/[^a-z0-9_-]/gi, "-")
+			: "";
+		row.className = "modern-dialog-field is-" + type + fieldClass
+			+ presentationClass + (modernDialogFieldIsAdvanced(field) ? " is-advanced" : "");
 		const fieldTooltip = String(field.tooltip || field.hint || "");
 		if (fieldTooltip) {
 			row.title = fieldTooltip;
