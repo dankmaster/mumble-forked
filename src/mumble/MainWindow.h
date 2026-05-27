@@ -368,6 +368,7 @@ public:
 	bool requestPersistentChatWebhallenProductPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatRichProviderPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatSteamAppPreview(const QString &previewKey, const QUrl &previewUrl);
+	bool requestPersistentChatSteamReviewPreview(const QString &previewKey, const QString &appId);
 	bool requestPersistentChatOEmbedPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatRedditVideoPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatRedditVideoAudioPreview(const QString &previewKey, const QUrl &dashManifestUrl);

@@ -159,8 +159,7 @@ QVariantMap ModernConnectController::state() const {
 	dialog.insert(QStringLiteral("id"), QStringLiteral("connect"));
 	dialog.insert(QStringLiteral("kind"), QStringLiteral("connect"));
 	dialog.insert(QStringLiteral("title"), QObject::tr("Connect to a server"));
-	dialog.insert(QStringLiteral("subtitle"),
-				  QObject::tr("Choose a saved server, or add one when you need new connection details."));
+	dialog.insert(QStringLiteral("subtitle"), QObject::tr("Choose a saved server or add one."));
 	dialog.insert(QStringLiteral("primaryActionId"), QStringLiteral("connect"));
 
 	QVariantList favorites;
@@ -189,7 +188,7 @@ QVariantMap ModernConnectController::state() const {
 		fieldItem(QStringLiteral("password"), QObject::tr("Server password"), QStringLiteral("password"), m_password));
 
 	QVariantMap section;
-	section.insert(QStringLiteral("title"), QObject::tr("Connection details"));
+	section.insert(QStringLiteral("title"), QObject::tr("Details"));
 	section.insert(QStringLiteral("fields"), fields);
 	dialog.insert(QStringLiteral("sections"), m_editorOpen ? QVariantList { section } : QVariantList {});
 
@@ -197,11 +196,11 @@ QVariantMap ModernConnectController::state() const {
 	QVariantList actions;
 	actions.push_back(actionItem(QStringLiteral("cancel"), QObject::tr("Cancel"), true));
 	if (!m_editorOpen) {
-		actions.push_back(actionItem(QStringLiteral("editFavorite"), QObject::tr("Edit server"), hasSelection));
+		actions.push_back(actionItem(QStringLiteral("editFavorite"), QObject::tr("Edit"), hasSelection));
 	} else {
-		actions.push_back(actionItem(QStringLiteral("removeFavorite"), QObject::tr("Remove saved"), hasSelection,
+		actions.push_back(actionItem(QStringLiteral("removeFavorite"), QObject::tr("Remove"), hasSelection,
 									 QStringLiteral("danger")));
-		actions.push_back(actionItem(QStringLiteral("saveFavorite"), QObject::tr("Save server"), canSubmit()));
+		actions.push_back(actionItem(QStringLiteral("saveFavorite"), QObject::tr("Save"), canSubmit()));
 	}
 	actions.push_back(actionItem(QStringLiteral("connect"), QObject::tr("Connect"), canSubmit(),
 								 QStringLiteral("accent")));
@@ -412,11 +411,18 @@ QVariantMap ModernConnectController::favoriteItem(const FavoriteServer &server, 
 					? (telemetry.maxUsers > 0 ? QObject::tr("Users: %1/%2").arg(telemetry.users).arg(telemetry.maxUsers)
 											  : QObject::tr("Users: %1").arg(telemetry.users))
 					: QObject::tr("Users: -"));
+	item.insert(QStringLiteral("usersValue"),
+				telemetry.hasUsers
+					? (telemetry.maxUsers > 0 ? QObject::tr("%1/%2").arg(telemetry.users).arg(telemetry.maxUsers)
+											  : QString::number(telemetry.users))
+					: QStringLiteral("-"));
 	item.insert(QStringLiteral("pingLabel"),
 				telemetry.hasPing ? QObject::tr("Ping: %1 ms").arg(telemetry.ping) : QObject::tr("Ping: -"));
+	item.insert(QStringLiteral("pingValue"),
+				telemetry.hasPing ? QObject::tr("%1 ms").arg(telemetry.ping) : QStringLiteral("-"));
 	item.insert(QStringLiteral("tooltip"), QObject::tr("%1:%2").arg(server.qsHostname).arg(server.usPort));
 	item.insert(QStringLiteral("subtitle"),
-				QObject::tr("%1:%2 as %3")
+				QObject::tr("%1:%2 / %3")
 					.arg(server.qsHostname)
 					.arg(server.usPort)
 					.arg(server.qsUsername.trimmed().isEmpty() ? QObject::tr("username") : server.qsUsername));

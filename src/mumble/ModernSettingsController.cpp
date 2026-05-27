@@ -19,6 +19,9 @@
 #include <cmath>
 
 namespace {
+	constexpr int kMaxAmplificationSliderValue = 19500;
+	constexpr int kAmplificationSliderBase     = 20000;
+
 	QVariantMap optionItem(const QVariant &value, const QString &label, const bool enabled = true,
 						   const QString &hint = QString()) {
 		QVariantMap option;
@@ -71,6 +74,11 @@ namespace {
 		if (!tooltip.isEmpty()) {
 			field.insert(QStringLiteral("tooltip"), tooltip);
 		}
+		return field;
+	}
+
+	QVariantMap advancedField(QVariantMap field) {
+		field.insert(QStringLiteral("advanced"), true);
 		return field;
 	}
 
@@ -317,6 +325,11 @@ namespace {
 		QVariantMap section;
 		section.insert(QStringLiteral("title"), title);
 		section.insert(QStringLiteral("fields"), resolvedFields);
+		return section;
+	}
+
+	QVariantMap advancedSection(QVariantMap section) {
+		section.insert(QStringLiteral("advanced"), true);
 		return section;
 	}
 
@@ -765,11 +778,11 @@ namespace {
 	}
 
 	int amplificationFromMinLoudness(const int minLoudness) {
-		return qBound(0, 20000 - minLoudness, 20000);
+		return qBound(0, kAmplificationSliderBase - minLoudness, kMaxAmplificationSliderValue);
 	}
 
 	int minLoudnessFromAmplification(const QVariant &value) {
-		return 20000 - qBound(0, value.toInt(), 20000);
+		return kAmplificationSliderBase - qBound(0, value.toInt(), kMaxAmplificationSliderValue);
 	}
 
 	int outputDelaySliderFromSettings(const int value) {
@@ -1200,15 +1213,16 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 													 boolField(QStringLiteral("network.autoConnect"),
 															   QObject::tr("Connect to the last server on startup"),
 															   m_draft.bAutoConnect),
-													 boolField(QStringLiteral("network.tcpMode"),
-															   QObject::tr("Force TCP mode"), m_draft.bTCPCompat),
-													 boolField(QStringLiteral("network.qos"),
-															   QObject::tr("Use Quality of Service"),
-															   m_draft.bQoS),
+													 advancedField(boolField(QStringLiteral("network.tcpMode"),
+																			 QObject::tr("Force TCP mode"),
+																			 m_draft.bTCPCompat)),
+													 advancedField(boolField(QStringLiteral("network.qos"),
+																			 QObject::tr("Use Quality of Service"),
+																			 m_draft.bQoS)),
 													 boolField(QStringLiteral("network.linkPreviews"),
 															   QObject::tr("Enable link previews"),
 															   m_draft.bEnableLinkPreviews) }),
-			sectionItem(QObject::tr("Chat media cache"), QVariantList {
+			advancedSection(sectionItem(QObject::tr("Chat media cache"), QVariantList {
 														   hintedField(
 															   tooltippedField(
 																   actionField(QStringLiteral("network.clearPreviewCache"),
@@ -1219,8 +1233,8 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 																   fieldTooltip(QStringLiteral("network.clearPreviewCache"))),
 															   QObject::tr("Current cache: %1. Stored only on this device.")
 																   .arg(PersistentChatMediaCache::formattedSize(
-																	   PersistentChatMediaCache::sizeBytes()))) }),
-			sectionItem(QObject::tr("Proxy and privacy"), QVariantList {
+																	   PersistentChatMediaCache::sizeBytes()))) })),
+			advancedSection(sectionItem(QObject::tr("Proxy and privacy"), QVariantList {
 														   selectField(QStringLiteral("network.proxyType"),
 																	   QObject::tr("Proxy type"),
 																	   static_cast< int >(m_draft.ptProxyType),
@@ -1242,8 +1256,8 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 																	 m_draft.bSuppressIdentity),
 														   boolField(QStringLiteral("network.hideOS"),
 																	 QObject::tr("Hide operating system from servers"),
-																	 m_draft.bHideOS) }),
-			sectionItem(QObject::tr("Updates and advertised version"), QVariantList {
+																	 m_draft.bHideOS) })),
+			advancedSection(sectionItem(QObject::tr("Updates and advertised version"), QVariantList {
 																		boolField(QStringLiteral("network.updateCheck"),
 																				  QObject::tr("Check for client updates"),
 																				  m_draft.bUpdateCheck),
@@ -1264,7 +1278,7 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 																		fieldItem(QStringLiteral("network.advertisedOSVersion"),
 																				  QObject::tr("Advertised OS version"),
 																				  QStringLiteral("text"),
-																				  m_draft.qsAdvertisedOSVersionOverride) })
+																				  m_draft.qsAdvertisedOSVersionOverride) }))
 		};
 	}
 
@@ -1277,9 +1291,9 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 												 boolField(QStringLiteral("screenShare.preferInAppRelay"),
 														   QObject::tr("Prefer the in-app relay window"),
 														   m_draft.bScreenSharePreferInAppRelay),
-												 boolField(QStringLiteral("screenShare.diagnostics"),
-														   QObject::tr("Enable diagnostics logging"),
-														   m_draft.bScreenShareDiagnostics) }),
+												 advancedField(boolField(QStringLiteral("screenShare.diagnostics"),
+																		 QObject::tr("Enable diagnostics logging"),
+																		 m_draft.bScreenShareDiagnostics)) }),
 			sectionItem(QObject::tr("Capabilities"), QVariantList {
 													noteField(QObject::tr("Quality limits and relay modes are negotiated from the server and the current client runtime.")) })
 		};
@@ -1318,10 +1332,10 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 																		QObject::tr("Input device"), inputDevice,
 																		deviceOptions(inputDevices)),
 															!inputDevices.isEmpty()),
-											   enabledField(boolField(QStringLiteral("audio.exclusiveInput"),
-																	  QObject::tr("Use exclusive input mode"),
-																	  m_draft.bExclusiveInput),
-															inputCanExclusive) }),
+											   advancedField(enabledField(boolField(QStringLiteral("audio.exclusiveInput"),
+																				  QObject::tr("Use exclusive input mode"),
+																				  m_draft.bExclusiveInput),
+																	 inputCanExclusive)) }),
 			sectionItem(QObject::tr("Voice activation"), QVariantList {
 												selectField(QStringLiteral("audio.transmitMode"),
 															QObject::tr("Transmit mode"),
@@ -1333,31 +1347,34 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 																					 vadSourceOptions()),
 																		 voiceActivityTransmit),
 															QObject::tr("Use Speech + volume when speech probability opens too easily on non-voice sounds.")),
-												hintedField(enabledField(selectField(QStringLiteral("audio.inputGateMode"),
-																					 QObject::tr("Input gate"),
-																					 static_cast< int >(m_draft.inputGateMode),
-																					 inputGateModeOptions()),
-																		 voiceActivityTransmit),
-															QObject::tr("Optional extra guard after cleanup; Off keeps the original behavior.")),
+												advancedField(hintedField(enabledField(
+													selectField(QStringLiteral("audio.inputGateMode"),
+																QObject::tr("Input gate"),
+																static_cast< int >(m_draft.inputGateMode),
+																inputGateModeOptions()),
+													voiceActivityTransmit),
+																		   QObject::tr("Optional extra guard after cleanup; Off keeps the original behavior."))),
 												voiceMeterField(m_draft),
-												hintedField(enabledField(rangeField(QStringLiteral("audio.vadMin"),
-																					QObject::tr("Stop transmitting below"),
-																					vadThresholdFromFloat(m_draft.fVADmin),
-																					0, 100, 1, QStringLiteral("%")),
-																		 voiceActivityTransmit),
-															QObject::tr("Lower boundary for closing the microphone.")),
-												hintedField(enabledField(rangeField(QStringLiteral("audio.vadMax"),
-																					QObject::tr("Start transmitting above"),
-																					vadThresholdFromFloat(m_draft.fVADmax),
-																					0, 100, 1, QStringLiteral("%")),
-																		 voiceActivityTransmit),
-															QObject::tr("Upper boundary for opening the microphone.")),
-												enabledField(numberField(QStringLiteral("audio.voiceHold"),
-																		QObject::tr("Voice hold"),
-																		m_draft.iVoiceHold, 0, 250, 1,
-																		QObject::tr(" frames")),
-															 voiceActivityTransmit) }),
-			sectionItem(QObject::tr("Push-to-talk"), QVariantList {
+												advancedField(hintedField(enabledField(
+													rangeField(QStringLiteral("audio.vadMin"),
+															   QObject::tr("Stop transmitting below"),
+															   vadThresholdFromFloat(m_draft.fVADmin), 0, 100, 1,
+															   QStringLiteral("%")),
+													voiceActivityTransmit),
+																		   QObject::tr("Lower boundary for closing the microphone."))),
+												advancedField(hintedField(enabledField(
+													rangeField(QStringLiteral("audio.vadMax"),
+															   QObject::tr("Start transmitting above"),
+															   vadThresholdFromFloat(m_draft.fVADmax), 0, 100, 1,
+															   QStringLiteral("%")),
+													voiceActivityTransmit),
+																		   QObject::tr("Upper boundary for opening the microphone."))),
+												advancedField(enabledField(numberField(QStringLiteral("audio.voiceHold"),
+																					  QObject::tr("Voice hold"),
+																					  m_draft.iVoiceHold, 0, 250, 1,
+																					  QObject::tr(" frames")),
+																		 voiceActivityTransmit)) }),
+			advancedSection(sectionItem(QObject::tr("Push-to-talk"), QVariantList {
 												enabledField(numberField(QStringLiteral("audio.doublePush"),
 																		QObject::tr("Double-push lockout"),
 																		static_cast< int >(m_draft.uiDoublePush), 0, 5000,
@@ -1371,8 +1388,8 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 												enabledField(boolField(QStringLiteral("audio.showPttWindow"),
 																	   QObject::tr("Show push-to-talk button window"),
 																	   m_draft.bShowPTTButtonWindow),
-															 pushToTalkTransmit) }),
-			sectionItem(QObject::tr("Compression"), QVariantList {
+															 pushToTalkTransmit) })),
+			advancedSection(sectionItem(QObject::tr("Compression"), QVariantList {
 												   numberField(QStringLiteral("audio.framesPerPacket"),
 															   QObject::tr("Audio per packet"),
 															   m_draft.iFramesPerPacket, 1, 6, 1,
@@ -1387,12 +1404,14 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 															 m_draft.experimentalHighBitrateEnabled),
 												   boolField(QStringLiteral("audio.allowLowDelay"),
 															 QObject::tr("Allow Opus low-delay mode"),
-															 m_draft.bAllowLowDelay) }),
+															 m_draft.bAllowLowDelay) })),
 			sectionItem(QObject::tr("Audio processing"), QVariantList {
-													   rangeField(QStringLiteral("audio.maxAmplification"),
-																  QObject::tr("Maximum amplification"),
-																  amplificationFromMinLoudness(m_draft.iMinLoudness),
-																  0, 20000, 100, QString()),
+													   advancedField(rangeField(QStringLiteral("audio.maxAmplification"),
+																				QObject::tr("Maximum amplification"),
+																				amplificationFromMinLoudness(
+																					m_draft.iMinLoudness),
+																				0, kMaxAmplificationSliderValue, 100,
+																				QString())),
 													   selectField(QStringLiteral("audio.echoMode"),
 																   QObject::tr("Echo cancellation"),
 																   static_cast< int >(m_draft.echoOption),
@@ -1401,30 +1420,33 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 																   QObject::tr("Noise suppression"),
 																   static_cast< int >(m_draft.noiseCancelMode),
 																   noiseCancelModeOptions()),
-													   hiddenField(selectField(QStringLiteral("audio.noiseCancelBackend"),
-																			   QObject::tr("Neural backend"),
-																			   static_cast< int >(inputCleanupBackend),
-																			   speechCleanupBackendOptions()),
+													   hiddenField(advancedField(selectField(
+																	   QStringLiteral("audio.noiseCancelBackend"),
+																	   QObject::tr("Neural backend"),
+																	   static_cast< int >(inputCleanupBackend),
+																	   speechCleanupBackendOptions())),
 																   !inputNeuralCleanupActive),
-													   hiddenField(selectField(QStringLiteral("audio.noiseCancelModel"),
-																			   QObject::tr("Neural model"),
-																			   inputCleanupModel,
-																			   speechCleanupModelOptions(inputCleanupBackend),
-																			   QStringLiteral("string")),
+													   hiddenField(advancedField(selectField(
+																	   QStringLiteral("audio.noiseCancelModel"),
+																	   QObject::tr("Neural model"), inputCleanupModel,
+																	   speechCleanupModelOptions(inputCleanupBackend),
+																	   QStringLiteral("string"))),
 																   !inputNeuralCleanupActive),
-													   hiddenField(fieldItem(QStringLiteral("audio.noiseCancelCustomModelPath"),
-																			  QObject::tr("Custom model file"),
-																			  QStringLiteral("text"),
-																			  m_draft.noiseCancelCustomModelPath),
+													   hiddenField(advancedField(
+																	   fieldItem(QStringLiteral("audio.noiseCancelCustomModelPath"),
+																				 QObject::tr("Custom model file"),
+																				 QStringLiteral("text"),
+																				 m_draft.noiseCancelCustomModelPath)),
 																   !(inputNeuralCleanupActive && inputCustomModel)),
-													   hiddenField(rangeField(QStringLiteral("audio.speexNoiseStrength"),
-																			  QObject::tr("Speex suppression strength"),
-																			  m_draft.iSpeexNoiseCancelStrength == 0
-																				  ? 14
-																				  : -m_draft.iSpeexNoiseCancelStrength,
-																			  0, 100, 1, QString()),
+													   hiddenField(advancedField(rangeField(
+																	   QStringLiteral("audio.speexNoiseStrength"),
+																	   QObject::tr("Speex suppression strength"),
+																	   m_draft.iSpeexNoiseCancelStrength == 0
+																		   ? 14
+																		   : -m_draft.iSpeexNoiseCancelStrength,
+																	   0, 100, 1, QString())),
 																   !inputSpeexCleanupActive) }),
-			sectionItem(QObject::tr("Cues and idle behavior"), QVariantList {
+			advancedSection(sectionItem(QObject::tr("Cues and idle behavior"), QVariantList {
 															boolField(QStringLiteral("audio.cuePtt"),
 																	  QObject::tr("Play transmit cue for push-to-talk"),
 																	  m_draft.audioCueEnabledPTT),
@@ -1453,7 +1475,7 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 																		idleActionOptions()),
 															boolField(QStringLiteral("audio.undoIdleAction"),
 																	  QObject::tr("Undo idle action on activity"),
-																	  m_draft.bUndoIdleActionUponActivity) })
+																	  m_draft.bUndoIdleActionUponActivity) }))
 		};
 	}
 
@@ -1489,37 +1511,37 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 																		QObject::tr("Output device"), outputDevice,
 																		deviceOptions(outputDevices)),
 															!outputDevices.isEmpty()),
-											   enabledField(boolField(QStringLiteral("audio.exclusiveOutput"),
-																	  QObject::tr("Use exclusive output mode"),
-																	  m_draft.bExclusiveOutput),
-															outputCanExclusive) }),
+											   advancedField(enabledField(boolField(QStringLiteral("audio.exclusiveOutput"),
+																				  QObject::tr("Use exclusive output mode"),
+																				  m_draft.bExclusiveOutput),
+																	 outputCanExclusive)) }),
 			sectionItem(QObject::tr("Playback"), QVariantList {
 												rangeField(QStringLiteral("audio.outputVolume"),
 														   QObject::tr("Incoming speech volume"),
 														   percentFromFloat(m_draft.fVolume), 0, 200, 5,
 														   QStringLiteral("%")),
-												enabledField(numberField(QStringLiteral("audio.outputDelay"),
-																		 QObject::tr("Output delay"),
-																		 outputDelaySliderFromSettings(m_draft.iOutputDelay),
-																		 0, 100, 1, QObject::tr(" x10 ms")),
-															 outputUsesDelay),
-												numberField(QStringLiteral("audio.jitterBuffer"),
-															QObject::tr("Jitter buffer"),
-															m_draft.iJitterBufferSize, 0, 10, 1,
-															QObject::tr(" steps")),
-												selectField(QStringLiteral("audio.loopMode"),
-															QObject::tr("Loopback mode"),
-															static_cast< int >(m_draft.lmLoopMode),
-															loopModeOptions()),
-												numberField(QStringLiteral("audio.loopPacketDelay"),
-															QObject::tr("Loopback packet delay"),
-															static_cast< int >(m_draft.dMaxPacketDelay), 0, 1000, 1,
-															QObject::tr(" ms")),
-												rangeField(QStringLiteral("audio.loopPacketLoss"),
-														   QObject::tr("Loopback packet loss"),
-														   static_cast< int >(m_draft.dPacketLoss * 100.0f), 0, 100, 1,
-														   QStringLiteral("%")) }),
-			sectionItem(QObject::tr("Attenuation"), QVariantList {
+												advancedField(enabledField(numberField(
+													QStringLiteral("audio.outputDelay"), QObject::tr("Output delay"),
+													outputDelaySliderFromSettings(m_draft.iOutputDelay), 0, 100, 1,
+													QObject::tr(" x10 ms")),
+																		 outputUsesDelay)),
+												advancedField(numberField(QStringLiteral("audio.jitterBuffer"),
+																		  QObject::tr("Jitter buffer"),
+																		  m_draft.iJitterBufferSize, 0, 10, 1,
+																		  QObject::tr(" steps"))),
+												advancedField(selectField(QStringLiteral("audio.loopMode"),
+																		  QObject::tr("Loopback mode"),
+																		  static_cast< int >(m_draft.lmLoopMode),
+																		  loopModeOptions())),
+												advancedField(numberField(QStringLiteral("audio.loopPacketDelay"),
+																		  QObject::tr("Loopback packet delay"),
+																		  static_cast< int >(m_draft.dMaxPacketDelay), 0,
+																		  1000, 1, QObject::tr(" ms"))),
+												advancedField(rangeField(QStringLiteral("audio.loopPacketLoss"),
+																		 QObject::tr("Loopback packet loss"),
+																		 static_cast< int >(m_draft.dPacketLoss * 100.0f),
+																		 0, 100, 1, QStringLiteral("%"))) }),
+			advancedSection(sectionItem(QObject::tr("Attenuation"), QVariantList {
 												   enabledField(boolField(QStringLiteral("audio.attenuateOthers"),
 																		  QObject::tr("Attenuate external applications while others talk"),
 																		  m_draft.bAttenuateOthers),
@@ -1552,8 +1574,8 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 												   enabledField(boolField(QStringLiteral("audio.attenuateLoopbacks"),
 																		  QObject::tr("Also attenuate loopbacks"),
 																		  m_draft.bAttenuateLoopbacks),
-																canAttenuateApps && m_draft.bOnlyAttenuateSameOutput) }),
-			sectionItem(QObject::tr("Positional audio"), QVariantList {
+																canAttenuateApps && m_draft.bOnlyAttenuateSameOutput) })),
+			advancedSection(sectionItem(QObject::tr("Positional audio"), QVariantList {
 													   boolField(QStringLiteral("audio.positional"),
 																 QObject::tr("Enable positional audio"),
 																 m_draft.bPositionalAudio),
@@ -1578,33 +1600,35 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 													   rangeField(QStringLiteral("audio.bloom"),
 																  QObject::tr("Bloom"),
 																  static_cast< int >(m_draft.fAudioBloom * 100.0f),
-																  0, 75, 1, QStringLiteral("%")) }),
+																  0, 75, 1, QStringLiteral("%")) })),
 			sectionItem(QObject::tr("Remote speech cleanup"), QVariantList {
 															enabledField(boolField(QStringLiteral("audio.remoteCleanupEnabled"),
 																				   QObject::tr("Clean up incoming speech for all users"),
 																				   m_draft.remoteSpeechCleanupEnabled),
 																		 hasRemoteCleanup),
-															enabledField(selectField(QStringLiteral("audio.remoteCleanupBackend"),
-																					  QObject::tr("Backend"),
-																					  static_cast< int >(remoteCleanupBackend),
-																					  speechCleanupBackendOptions()),
-																		 hasRemoteCleanup),
-															enabledField(selectField(QStringLiteral("audio.remoteCleanupModel"),
-																					  QObject::tr("Model"),
-																					  remoteCleanupModel,
-																					  speechCleanupModelOptions(remoteCleanupBackend),
-																					  QStringLiteral("string")),
-																		 hasRemoteCleanup),
-															enabledField(fieldItem(QStringLiteral("audio.remoteCleanupCustomModelPath"),
-																				   QObject::tr("Custom model file"),
-																				   QStringLiteral("text"),
-																				   m_draft.remoteSpeechCleanupCustomModelPath),
-																		 hasRemoteCleanup && remoteCustomModel),
-															enabledField(selectField(QStringLiteral("audio.remoteCleanupPreset"),
-																					  QObject::tr("Preset"),
-																					  static_cast< int >(m_draft.remoteSpeechCleanupPreset),
-																					  remoteSpeechCleanupPresetOptions()),
-																		 hasRemoteCleanup) })
+															advancedField(enabledField(selectField(
+																QStringLiteral("audio.remoteCleanupBackend"),
+																QObject::tr("Backend"),
+																static_cast< int >(remoteCleanupBackend),
+																speechCleanupBackendOptions()),
+																					 hasRemoteCleanup)),
+															advancedField(enabledField(selectField(
+																QStringLiteral("audio.remoteCleanupModel"),
+																QObject::tr("Model"), remoteCleanupModel,
+																speechCleanupModelOptions(remoteCleanupBackend),
+																QStringLiteral("string")),
+																					 hasRemoteCleanup)),
+															advancedField(enabledField(fieldItem(
+																QStringLiteral("audio.remoteCleanupCustomModelPath"),
+																QObject::tr("Custom model file"), QStringLiteral("text"),
+																m_draft.remoteSpeechCleanupCustomModelPath),
+																					 hasRemoteCleanup && remoteCustomModel)),
+															advancedField(enabledField(selectField(
+																QStringLiteral("audio.remoteCleanupPreset"),
+																QObject::tr("Preset"),
+																static_cast< int >(m_draft.remoteSpeechCleanupPreset),
+																remoteSpeechCleanupPresetOptions()),
+																					 hasRemoteCleanup)) })
 		};
 	}
 
@@ -1626,10 +1650,10 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 												   boolField(QStringLiteral("look.stateInTray"),
 															 QObject::tr("Show talking state in tray"),
 															 m_draft.bStateInTray),
-												   boolField(QStringLiteral("look.showTransmitModeComboBox"),
-															 QObject::tr("Show transmit mode control"),
-															 m_draft.bShowTransmitModeComboBox) }),
-		sectionItem(QObject::tr("Room list and presence"), QVariantList {
+												   advancedField(boolField(QStringLiteral("look.showTransmitModeComboBox"),
+																		   QObject::tr("Show transmit mode control"),
+																		   m_draft.bShowTransmitModeComboBox)) }),
+		advancedSection(sectionItem(QObject::tr("Room list and presence"), QVariantList {
 													 boolField(QStringLiteral("look.showUserCount"),
 															   QObject::tr("Show user count"),
 															   m_draft.bShowUserCount),
@@ -1648,7 +1672,7 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 													 selectField(QStringLiteral("look.presenceIdleTimeout"),
 																 QObject::tr("Idle presence timeout"),
 																 m_draft.iPresenceIdleTimeoutMinutes,
-																 presenceTimeoutOptions()) })
+																 presenceTimeoutOptions()) }))
 	};
 }
 

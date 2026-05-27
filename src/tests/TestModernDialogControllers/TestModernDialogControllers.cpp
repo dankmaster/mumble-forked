@@ -372,6 +372,17 @@ void TestModernDialogControllers::settingsControllerClampsAudioSetupPayload() {
 	QVERIFY(qFuzzyCompare(controller.draft().fVADmin, 0.10f));
 	QVERIFY(qFuzzyCompare(controller.draft().fVADmax, 0.95f));
 
+	controller.updateField(QStringLiteral("audio.maxAmplification"), 20000);
+	QCOMPARE(controller.draft().iMinLoudness, 500);
+
+	ModernSettingsController::ActionResult maxAmplificationResult =
+		controller.invokeAction(QStringLiteral("finishAudioSetupWizard"),
+								QVariantMap { { QStringLiteral("silenceThreshold"), 20 },
+											  { QStringLiteral("speechThreshold"), 55 },
+											  { QStringLiteral("maxAmplification"), 20000 } });
+	QVERIFY(maxAmplificationResult.settingsToApply.has_value());
+	QCOMPARE(controller.draft().iMinLoudness, 500);
+
 	ModernSettingsController fallbackController;
 	fallbackController.open(settings, QStringLiteral("AudioInput"));
 	bool neuralCleanupAvailable = false;

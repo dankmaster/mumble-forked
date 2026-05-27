@@ -54,6 +54,7 @@
 	let requestedPreviewHydrationIds = new Set();
 	let modernDialogState = null;
 	let modernDialogRenderedOpen = false;
+	let modernDialogAdvancedPages = {};
 	let audioInputMeterTimer = 0;
 	let voiceCalibrationState = null;
 	let voiceCalibrationSummary = null;
@@ -3976,6 +3977,40 @@
 		return "";
 	}
 
+	function previewNumericValue(value) {
+		const number = Number(value);
+		return Number.isFinite(number) ? number : 0;
+	}
+
+	function formatPreviewCompactNumber(value) {
+		const number = previewNumericValue(value);
+		if (number <= 0) {
+			return "";
+		}
+
+		if (window.Intl && typeof Intl.NumberFormat === "function") {
+			try {
+				return new Intl.NumberFormat(undefined, {
+					notation: "compact",
+					maximumFractionDigits: number >= 1000000 ? 1 : 0
+				}).format(number);
+			} catch (error) {
+				// Fall back to explicit suffixes below when the embedded engine lacks compact notation.
+			}
+		}
+
+		if (number >= 1000000000) {
+			return (number / 1000000000).toFixed(number >= 10000000000 ? 0 : 1).replace(/\.0$/, "") + "B";
+		}
+		if (number >= 1000000) {
+			return (number / 1000000).toFixed(number >= 10000000 ? 0 : 1).replace(/\.0$/, "") + "M";
+		}
+		if (number >= 1000) {
+			return (number / 1000).toFixed(number >= 10000 ? 0 : 1).replace(/\.0$/, "") + "K";
+		}
+		return Math.round(number).toLocaleString();
+	}
+
 	function previewInlineMp4PlaybackSupported() {
 		const snapshot = getSnapshot();
 		const app = (snapshot && snapshot.app) || {};
@@ -5717,6 +5752,11 @@
 	function previewSteamInfo(preview, descriptionText) {
 		const metadata = (preview && preview.metadata) || {};
 		const discount = Number(metadata.steamDiscountPercent || 0);
+		const reviewPercent = Number(metadata.steamReviewPercent);
+		const reviewTotal = Number(metadata.steamReviewTotal);
+		const reviewScore = Number(metadata.steamReviewScore);
+		const recommendationsTotal = Number(metadata.steamRecommendationsTotal);
+		const metacriticScore = Number(metadata.steamMetacriticScore);
 		return {
 			appName: String(metadata.steamAppName || "").trim(),
 			price: String(metadata.steamPrice || "").trim(),
@@ -5726,8 +5766,84 @@
 			releaseDate: String(metadata.steamReleaseDate || "").trim(),
 			platforms: String(metadata.steamPlatforms || "").trim(),
 			genres: String(metadata.steamGenres || "").trim(),
+			reviewSummary: String(metadata.steamReviewSummary || "").trim(),
+			reviewPercent: Number.isFinite(reviewPercent) ? Math.max(0, Math.min(100, Math.round(reviewPercent))) : null,
+			reviewTotal: Number.isFinite(reviewTotal) && reviewTotal > 0 ? reviewTotal : 0,
+			reviewScore: Number.isFinite(reviewScore) ? reviewScore : 0,
+			recommendationsTotal: Number.isFinite(recommendationsTotal) && recommendationsTotal > 0 ? recommendationsTotal : 0,
+			metacriticScore: Number.isFinite(metacriticScore) && metacriticScore > 0 ? metacriticScore : 0,
 			description: String(descriptionText || "").trim()
 		};
+	}
+
+	function steamReviewSentimentClass(info) {
+		const score = Number(info && info.reviewScore);
+		const summary = String(info && info.reviewSummary || "").toLowerCase();
+		if (score >= 7 || summary.indexOf("positive") >= 0) {
+			return "is-positive";
+		}
+		if (score >= 5 || summary.indexOf("mixed") >= 0) {
+			return "is-mixed";
+		}
+		if (score > 0 || summary.indexOf("negative") >= 0) {
+			return "is-negative";
+		}
+		return "";
+	}
+
+	function appendSteamStat(container, labelText, valueText, detailText, className) {
+		if (!container || !valueText) {
+			return false;
+		}
+
+		const stat = document.createElement("div");
+		stat.className = "preview-card-steam-stat" + (className ? " " + className : "");
+		const label = document.createElement("span");
+		label.className = "preview-card-steam-stat-label";
+		label.textContent = labelText;
+		stat.appendChild(label);
+		const value = document.createElement("strong");
+		value.className = "preview-card-steam-stat-value";
+		value.textContent = valueText;
+		stat.appendChild(value);
+		if (detailText) {
+			const detail = document.createElement("span");
+			detail.className = "preview-card-steam-stat-detail";
+			detail.textContent = detailText;
+			stat.appendChild(detail);
+		}
+		container.appendChild(stat);
+		return true;
+	}
+
+	function appendSteamStats(body, info) {
+		const stats = document.createElement("div");
+		stats.className = "preview-card-steam-stats";
+		let appended = false;
+
+		if (info.reviewSummary) {
+			const detailParts = [];
+			if (info.reviewPercent !== null) {
+				detailParts.push(String(info.reviewPercent) + "% positive");
+			}
+			if (info.reviewTotal) {
+				detailParts.push(formatPreviewCompactNumber(info.reviewTotal) + " reviews");
+			}
+			appended = appendSteamStat(stats, "User reviews", info.reviewSummary, detailParts.join(" / "),
+				steamReviewSentimentClass(info)) || appended;
+		}
+		if (info.metacriticScore) {
+			appended = appendSteamStat(stats, "Metacritic", String(Math.round(info.metacriticScore)), "critic score",
+				"is-mixed") || appended;
+		}
+		if (info.recommendationsTotal) {
+			appended = appendSteamStat(stats, "Recommendations",
+				formatPreviewCompactNumber(info.recommendationsTotal), "Steam users", "") || appended;
+		}
+
+		if (appended) {
+			body.appendChild(stats);
+		}
 	}
 
 	function previewSteamMediaItems(preview) {
@@ -6248,6 +6364,8 @@
 			description.textContent = info.description;
 			body.appendChild(description);
 		}
+
+		appendSteamStats(body, info);
 
 		if (info.appName || info.price || info.developer || info.releaseDate || info.platforms) {
 			const product = document.createElement("div");
@@ -9483,7 +9601,7 @@
 		const isSocialPost = !isXPost && !isInstagramPost && !hasEmbedMedia && previewIsSocialPost(preview, hostLabel);
 		const hasImageCarousel = imageMediaItems.length > 1 && !isVideoMedia && !isGifMedia;
 		const hasInteractiveMedia = hasPlayableMedia || hasEmbedMedia || hasImageCarousel || hasSteamGallery || hasGameStoreGallery;
-		const cardUsesDiv = hasInteractiveMedia || isGitHub || isGameStore || !!richProviderSpec;
+		const cardUsesDiv = hasInteractiveMedia || isSteam || isGitHub || isGameStore || !!richProviderSpec;
 		const isImagePreview = !isVideoMedia && !isGifMedia
 			&& (preview.kind === "image" || /^image\//i.test(mediaMime))
 			&& (!!mediaUrl || !!preview.thumbnailUrl || hasImageCarousel);
@@ -9729,14 +9847,14 @@
 		button.addEventListener("click", function(event) {
 			event.preventDefault();
 			event.stopPropagation();
-			openReactionPickerMessageId = null;
+			setOpenReactionPickerMessageId(null);
 			notifyBridge("toggleReaction", message.messageId, reaction.emoji || "", !reaction.selfReacted);
 		});
 		return button;
 	}
 
 	function renderReactionPicker(message) {
-		if (!message || !message.canReact || openReactionPickerMessageId !== message.messageId) {
+		if (!message || !message.canReact || !reactionPickerOpenForMessage(message)) {
 			return null;
 		}
 
@@ -9752,7 +9870,7 @@
 			button.addEventListener("click", function(event) {
 				event.preventDefault();
 				event.stopPropagation();
-				openReactionPickerMessageId = null;
+				setOpenReactionPickerMessageId(null);
 				notifyBridge("toggleReaction", message.messageId, emoji, !(reaction && reaction.selfReacted));
 			});
 			picker.appendChild(button);
@@ -9765,7 +9883,7 @@
 			return;
 		}
 
-		openReactionPickerMessageId = null;
+		setOpenReactionPickerMessageId(null);
 		notifyBridge("deleteMessage", message.messageId);
 	}
 
@@ -9805,7 +9923,7 @@
 				replyButton.addEventListener("click", function(event) {
 					event.preventDefault();
 					event.stopPropagation();
-					openReactionPickerMessageId = null;
+					setOpenReactionPickerMessageId(null);
 					notifyBridge("startReply", message.messageId);
 				});
 				toolbar.appendChild(replyButton);
@@ -9815,7 +9933,7 @@
 				const reactionButton = document.createElement("button");
 				reactionButton.type = "button";
 				reactionButton.className = "icon-button bubble-toolbar-button bubble-toolbar-icon reaction-picker-toggle"
-					+ (openReactionPickerMessageId === message.messageId ? " is-active" : "");
+					+ (reactionPickerOpenForMessage(message) ? " is-active" : "");
 				reactionButton.innerHTML =
 					"<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M22 11v1a10 10 0 1 1-9-10\"></path><path d=\"M8 14s1.5 2 4 2 4-2 4-2\"></path><path d=\"M9 9h.01\"></path><path d=\"M15 9h.01\"></path><path d=\"M16 5h6\"></path><path d=\"M19 2v6\"></path></svg>";
 				reactionButton.title = "Add reaction";
@@ -9823,14 +9941,13 @@
 				reactionButton.addEventListener("click", function(event) {
 					event.preventDefault();
 					event.stopPropagation();
-					const willOpen = openReactionPickerMessageId !== message.messageId;
-					openReactionPickerMessageId = willOpen ? message.messageId : null;
+					const willOpen = !reactionPickerOpenForMessage(message);
+					setOpenReactionPickerMessageId(willOpen ? message.messageId : null);
 					if (willOpen) {
 						pauseReactionPickerScrollClose();
 					} else {
 						reactionPickerScrollClosePausedUntil = 0;
 					}
-					syncSnapshot();
 				});
 				toolbar.appendChild(reactionButton);
 			}
@@ -10366,6 +10483,80 @@
 		return null;
 	}
 
+	function stableRenderValue(value) {
+		if (Array.isArray(value)) {
+			return value.map(stableRenderValue);
+		}
+		if (value && typeof value === "object") {
+			const result = {};
+			Object.keys(value).sort().forEach(function(key) {
+				result[key] = stableRenderValue(value[key]);
+			});
+			return result;
+		}
+		return value;
+	}
+
+	function messageNonFooterRenderSignature(message) {
+		const omittedKeys = {
+			canDelete: true,
+			canReact: true,
+			canReply: true,
+			reactions: true,
+			renderIndex: true
+		};
+		const state = {};
+		Object.keys(message || {}).sort().forEach(function(key) {
+			if (!omittedKeys[key]) {
+				state[key] = stableRenderValue(message[key]);
+			}
+		});
+		return JSON.stringify(state);
+	}
+
+	function messageCanPatchFooterOnly(previousMessage, nextMessage) {
+		return !!previousMessage
+			&& !!nextMessage
+			&& !previousMessage.system
+			&& !nextMessage.system
+			&& messageNonFooterRenderSignature(previousMessage) === messageNonFooterRenderSignature(nextMessage);
+	}
+
+	function directChildWithClass(parent, className) {
+		if (!parent) {
+			return null;
+		}
+		for (let index = 0; index < parent.children.length; index += 1) {
+			const child = parent.children[index];
+			if (child && child.classList && child.classList.contains(className)) {
+				return child;
+			}
+		}
+		return null;
+	}
+
+	function replaceRenderedMessageFooter(message) {
+		const element = renderedMessageElement(message);
+		if (!element || message.system) {
+			return false;
+		}
+
+		const previousFooter = directChildWithClass(element, "bubble-footer");
+		const nextFooter = renderMessageFooter(message);
+		if (previousFooter && nextFooter) {
+			previousFooter.replaceWith(nextFooter);
+		} else if (previousFooter) {
+			previousFooter.remove();
+		} else if (nextFooter) {
+			element.appendChild(nextFooter);
+		} else {
+			return true;
+		}
+
+		requestAnimationFrame(syncScrollState);
+		return true;
+	}
+
 	function replaceRenderedMessage(message) {
 		const element = renderedMessageElement(message);
 		if (!element) {
@@ -10378,6 +10569,13 @@
 		return true;
 	}
 
+	function applyRenderedMessageUpdate(message, options) {
+		if (options && options.footerOnly && replaceRenderedMessageFooter(message)) {
+			return true;
+		}
+		return replaceRenderedMessage(message);
+	}
+
 	function pendingMessageUpdateKey(message) {
 		const id = String(message && message.messageId || "");
 		const threadId = String(message && message.threadId || "");
@@ -10387,18 +10585,21 @@
 		return "key:" + messageKey(message);
 	}
 
-	function queuePendingMessageUpdatePatch(message) {
+	function queuePendingMessageUpdatePatch(message, options) {
 		const key = pendingMessageUpdateKey(message);
 		for (let index = 0; index < pendingMessageUpdatePatches.length; index += 1) {
 			if (pendingMessageUpdatePatches[index].key === key) {
 				pendingMessageUpdatePatches[index].message = message;
+				pendingMessageUpdatePatches[index].footerOnly =
+					pendingMessageUpdatePatches[index].footerOnly && !!(options && options.footerOnly);
 				return;
 			}
 		}
 
 		pendingMessageUpdatePatches.push({
 			key: key,
-			message: message
+			message: message,
+			footerOnly: !!(options && options.footerOnly)
 		});
 	}
 
@@ -10410,7 +10611,7 @@
 		let appliedCount = 0;
 		const remaining = [];
 		pendingMessageUpdatePatches.forEach(function(update) {
-			if (replaceRenderedMessage(update.message)) {
+			if (applyRenderedMessageUpdate(update.message, update)) {
 				appliedCount += 1;
 				return;
 			}
@@ -10769,6 +10970,41 @@
 		return openReactionPickerMessageId !== null && monotonicNow() <= reactionPickerScrollClosePausedUntil;
 	}
 
+	function normalizedReactionPickerMessageId(messageId) {
+		const id = String(messageId === undefined || messageId === null ? "" : messageId).trim();
+		return id ? id : null;
+	}
+
+	function reactionPickerOpenForMessage(message) {
+		return !!message
+			&& normalizedReactionPickerMessageId(openReactionPickerMessageId)
+				=== normalizedReactionPickerMessageId(message.messageId);
+	}
+
+	function refreshRenderedMessageFooter(messageId) {
+		const normalizedId = normalizedReactionPickerMessageId(messageId);
+		if (!normalizedId) {
+			return false;
+		}
+
+		const message = findMessageState(getSnapshot(), normalizedId);
+		return !!message && replaceRenderedMessageFooter(message);
+	}
+
+	function setOpenReactionPickerMessageId(messageId) {
+		const previousId = normalizedReactionPickerMessageId(openReactionPickerMessageId);
+		const nextId = normalizedReactionPickerMessageId(messageId);
+		if (previousId === nextId) {
+			openReactionPickerMessageId = nextId;
+			return false;
+		}
+
+		openReactionPickerMessageId = nextId;
+		refreshRenderedMessageFooter(previousId);
+		refreshRenderedMessageFooter(nextId);
+		return true;
+	}
+
 	function renderMessages(snapshot, options) {
 		const renderOptions = options || {};
 		const scope = snapshot.activeScope || {};
@@ -10808,7 +11044,8 @@
 		}
 		reopenPreviewHydrationForStubs(messages);
 		if (openReactionPickerMessageId !== null && !messages.some(function(message) {
-			return message && message.messageId === openReactionPickerMessageId;
+			return message && normalizedReactionPickerMessageId(message.messageId)
+				=== normalizedReactionPickerMessageId(openReactionPickerMessageId);
 		})) {
 			openReactionPickerMessageId = null;
 		}
@@ -11240,6 +11477,131 @@
 
 	function modernDialogOptionHint(option) {
 		return String(option && (option.tooltip || option.hint) || "");
+	}
+
+	function modernDialogActivePageId(dialog) {
+		const pages = Array.isArray(dialog && dialog.pages) ? dialog.pages : [];
+		for (let i = 0; i < pages.length; ++i) {
+			if (pages[i] && pages[i].selected) {
+				return String(pages[i].id || pages[i].label || i);
+			}
+		}
+		return String(dialog && dialog.kind || "dialog");
+	}
+
+	function modernDialogAdvancedKey(dialog) {
+		return String(dialog && dialog.kind || "dialog") + ":" + modernDialogActivePageId(dialog);
+	}
+
+	function modernDialogAdvancedVisible(dialog) {
+		return !!modernDialogAdvancedPages[modernDialogAdvancedKey(dialog)];
+	}
+
+	function setModernDialogAdvancedVisible(dialog, visible) {
+		modernDialogAdvancedPages[modernDialogAdvancedKey(dialog)] = !!visible;
+	}
+
+	function modernDialogFieldIsAdvanced(field) {
+		return !!(field && field.advanced);
+	}
+
+	function modernDialogFieldValue(dialog, fieldId) {
+		const sections = Array.isArray(dialog && dialog.sections) ? dialog.sections : [];
+		const normalizedId = String(fieldId || "");
+		for (let sectionIndex = 0; sectionIndex < sections.length; ++sectionIndex) {
+			const fields = Array.isArray(sections[sectionIndex] && sections[sectionIndex].fields)
+				? sections[sectionIndex].fields
+				: [];
+			for (let fieldIndex = 0; fieldIndex < fields.length; ++fieldIndex) {
+				const field = fields[fieldIndex] || {};
+				if (String(field.id || "") === normalizedId) {
+					return field.value;
+				}
+			}
+		}
+		return undefined;
+	}
+
+	function modernDialogFieldMatchesVisibility(dialog, field) {
+		if (field && field.visible === false) {
+			return false;
+		}
+
+		const rule = field && (field.visibleWhen || field.when);
+		if (!rule || !rule.fieldId) {
+			return true;
+		}
+
+		const value = modernDialogFieldValue(dialog, rule.fieldId);
+		const allowedValues = Array.isArray(rule.values) ? rule.values : [rule.value];
+		return allowedValues.some(function(allowedValue) {
+			return String(allowedValue) === String(value);
+		});
+	}
+
+	function modernDialogFieldShouldRender(field, showAdvanced, dialog) {
+		const type = String(field && field.type || "text");
+		return type !== "hidden"
+			&& modernDialogFieldMatchesVisibility(dialog, field)
+			&& (showAdvanced || !modernDialogFieldIsAdvanced(field));
+	}
+
+	function modernDialogHasAdvancedContent(dialog) {
+		return !!(dialog && Array.isArray(dialog.sections) && dialog.sections.some(function(section) {
+			if (section && section.advanced) {
+				return true;
+			}
+			return Array.isArray(section && section.fields) && section.fields.some(function(field) {
+				const type = String(field && field.type || "text");
+				return type !== "hidden" && modernDialogFieldIsAdvanced(field);
+			});
+		}));
+	}
+
+	function appendModernDialogAdvancedToggle(container, dialog) {
+		if (!modernDialogHasAdvancedContent(dialog)) {
+			return;
+		}
+
+		const showAdvanced = modernDialogAdvancedVisible(dialog);
+		const bar = document.createElement("div");
+		bar.className = "modern-dialog-advanced-bar";
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "chip-button modern-dialog-advanced-toggle" + (showAdvanced ? " is-active" : "");
+		button.textContent = showAdvanced ? "Basic" : "Advanced";
+		button.setAttribute("aria-pressed", showAdvanced ? "true" : "false");
+		button.title = showAdvanced ? "Hide advanced settings" : "Show advanced settings";
+		button.addEventListener("click", function() {
+			setModernDialogAdvancedVisible(dialog, !showAdvanced);
+			renderModernDialog();
+		});
+		bar.appendChild(button);
+		container.appendChild(bar);
+	}
+
+	function appendModernDialogHighlights(container, dialog) {
+		const highlights = Array.isArray(dialog && dialog.highlights) ? dialog.highlights : [];
+		if (!highlights.length) {
+			return;
+		}
+
+		const grid = document.createElement("div");
+		grid.className = "modern-dialog-highlights";
+		highlights.forEach(function(item) {
+			const card = document.createElement("div");
+			card.className = "modern-dialog-highlight" + (item.tone ? " is-" + item.tone : "");
+			const label = document.createElement("span");
+			label.className = "modern-dialog-highlight-label";
+			label.textContent = item.label || "";
+			const value = document.createElement("strong");
+			value.className = "modern-dialog-highlight-value";
+			value.textContent = item.value == null || item.value === "" ? "-" : String(item.value);
+			card.appendChild(label);
+			card.appendChild(value);
+			grid.appendChild(card);
+		});
+		container.appendChild(grid);
 	}
 
 	function syncModernDialogSelectHint(input, fieldTooltip) {
@@ -13924,7 +14286,7 @@
 		}
 
 		const row = document.createElement("label");
-		row.className = "modern-dialog-field is-" + type;
+		row.className = "modern-dialog-field is-" + type + (modernDialogFieldIsAdvanced(field) ? " is-advanced" : "");
 		const fieldTooltip = String(field.tooltip || field.hint || "");
 		if (fieldTooltip) {
 			row.title = fieldTooltip;
@@ -14233,32 +14595,119 @@
 		container.appendChild(row);
 	}
 
+	function appendModernDialogSections(container, sections, errors, dialog) {
+		const showAdvanced = modernDialogAdvancedVisible(dialog);
+		(sections || []).forEach(function(section) {
+			if (section && section.advanced && !showAdvanced) {
+				return;
+			}
+
+			const fields = (section && section.fields || []).filter(function(field) {
+				return modernDialogFieldShouldRender(field, showAdvanced, dialog);
+			});
+			if (!fields.length) {
+				return;
+			}
+
+			const sectionElement = document.createElement("section");
+			sectionElement.className = "modern-dialog-section"
+				+ (section && section.advanced ? " is-advanced" : "")
+				+ (section && section.presentation ? " is-" + section.presentation : "");
+			if (section && section.title) {
+				const title = document.createElement("h3");
+				title.className = "modern-dialog-section-title";
+				title.textContent = section.title;
+				sectionElement.appendChild(title);
+			}
+			if (section && section.subtitle) {
+				const subtitle = document.createElement("p");
+				subtitle.className = "modern-dialog-section-subtitle";
+				subtitle.textContent = section.subtitle;
+				sectionElement.appendChild(subtitle);
+			}
+			fields.forEach(function(field) {
+				appendModernDialogField(sectionElement, field, errors);
+			});
+			container.appendChild(sectionElement);
+		});
+	}
+
 	function appendModernDialogFavorites(container, dialog) {
-		if (!dialog || !Array.isArray(dialog.favorites) || !dialog.favorites.length) {
+		if (!dialog || !Array.isArray(dialog.favorites)) {
 			return;
 		}
 
 		const section = document.createElement("section");
 		section.className = "modern-dialog-section modern-dialog-favorites";
+		const header = document.createElement("div");
+		header.className = "modern-dialog-section-header";
 		const title = document.createElement("h3");
 		title.className = "modern-dialog-section-title";
 		title.textContent = "Saved servers";
-		section.appendChild(title);
+		header.appendChild(title);
+		const addButton = document.createElement("button");
+		addButton.type = "button";
+		addButton.className = "chip-button modern-dialog-favorites-add";
+		addButton.textContent = "Add server";
+		addButton.addEventListener("click", function() {
+			invokeModernDialogAction("newFavorite", {});
+		});
+		header.appendChild(addButton);
+		section.appendChild(header);
 
 		const list = document.createElement("div");
 		list.className = "modern-dialog-favorite-list";
+		const compactStatLabel = function(value, prefix, emptyText) {
+			const text = String(value || "").trim();
+			if (!text || text === prefix + " -" || text === prefix + "-") {
+				return emptyText;
+			}
+			return text.indexOf(prefix) === 0 ? text.slice(prefix.length).trim() : text;
+		};
 		dialog.favorites.forEach(function(favorite) {
 			const button = document.createElement("button");
 			button.type = "button";
 			button.className = "modern-dialog-favorite" + (favorite.selected ? " is-selected" : "");
-			button.innerHTML = "<span class=\"modern-dialog-favorite-label\"></span><span class=\"modern-dialog-favorite-subtitle\"></span>";
-			button.querySelector(".modern-dialog-favorite-label").textContent = favorite.label || favorite.host || "Server";
-			button.querySelector(".modern-dialog-favorite-subtitle").textContent = favorite.subtitle || "";
+			button.setAttribute("aria-pressed", favorite.selected ? "true" : "false");
+			button.title = favorite.tooltip || favorite.label || favorite.host || "Server";
+			const copy = document.createElement("span");
+			copy.className = "modern-dialog-favorite-copy";
+			const label = document.createElement("span");
+			label.className = "modern-dialog-favorite-label";
+			label.textContent = favorite.label || favorite.host || "Server";
+			const subtitle = document.createElement("span");
+			subtitle.className = "modern-dialog-favorite-subtitle";
+			subtitle.textContent = favorite.subtitle || [favorite.host, favorite.port].filter(Boolean).join(":");
+			copy.appendChild(label);
+			copy.appendChild(subtitle);
+			const stats = document.createElement("span");
+			stats.className = "modern-dialog-favorite-stats";
+			const users = document.createElement("span");
+			users.className = "modern-dialog-favorite-stat";
+			users.textContent = favorite.usersValue || compactStatLabel(favorite.usersLabel, "Users:", "-");
+			users.title = favorite.usersLabel || "Users: -";
+			const ping = document.createElement("span");
+			ping.className = "modern-dialog-favorite-stat";
+			ping.textContent = favorite.pingValue || compactStatLabel(favorite.pingLabel, "Ping:", "-");
+			ping.title = favorite.pingLabel || "Ping: -";
+			stats.appendChild(users);
+			stats.appendChild(ping);
+			button.appendChild(copy);
+			button.appendChild(stats);
 			button.addEventListener("click", function() {
 				invokeModernDialogAction("selectFavorite", { index: Number(favorite.index) || 0 });
 			});
 			list.appendChild(button);
 		});
+		if (!list.children.length) {
+			const empty = document.createElement("div");
+			empty.className = "modern-dialog-favorite-empty";
+			const emptyTitle = document.createElement("p");
+			emptyTitle.className = "modern-dialog-favorite-empty-title";
+			emptyTitle.textContent = "No saved servers";
+			empty.appendChild(emptyTitle);
+			list.appendChild(empty);
+		}
 		section.appendChild(list);
 		container.appendChild(section);
 	}
@@ -15523,8 +15972,9 @@
 		}
 
 		refs.modernDialog.className = "modern-dialog" + (dialog.tone ? " is-" + dialog.tone : "")
-			+ (dialog.kind ? " is-" + dialog.kind : "");
-		refs.modernDialogEyebrow.textContent = dialog.kind === "settings" ? "Settings" : "Mumble";
+			+ (dialog.kind ? " is-" + dialog.kind : "")
+			+ (dialog.id ? " dialog-id-" + String(dialog.id).replace(/[^a-z0-9_-]/gi, "-") : "");
+		refs.modernDialogEyebrow.textContent = dialog.eyebrow || (dialog.kind === "settings" ? "Settings" : "Mumble");
 		refs.modernDialogTitle.textContent = dialog.title || "Dialog";
 		refs.modernDialogSubtitle.textContent = dialog.subtitle || "";
 		refs.modernDialogBody.innerHTML = "";
@@ -15559,23 +16009,12 @@
 			refs.modernDialogBody.appendChild(tabs);
 		}
 
+		appendModernDialogHighlights(refs.modernDialogBody, dialog);
+		appendModernDialogAdvancedToggle(refs.modernDialogBody, dialog);
 		appendModernDialogFavorites(refs.modernDialogBody, dialog);
 
 		const errors = dialog.errors || {};
-		(dialog.sections || []).forEach(function(section) {
-			const sectionElement = document.createElement("section");
-			sectionElement.className = "modern-dialog-section";
-			if (section.title) {
-				const title = document.createElement("h3");
-				title.className = "modern-dialog-section-title";
-				title.textContent = section.title;
-				sectionElement.appendChild(title);
-			}
-			(section.fields || []).forEach(function(field) {
-				appendModernDialogField(sectionElement, field, errors);
-			});
-			refs.modernDialogBody.appendChild(sectionElement);
-		});
+		appendModernDialogSections(refs.modernDialogBody, dialog.sections || [], errors, dialog);
 
 		(dialog.actions || []).forEach(function(action) {
 			const button = document.createElement("button");
@@ -16368,16 +16807,21 @@
 		}
 
 		const updated = Object.assign({}, messages[existingIndex], message);
+		const footerOnlyUpdate = messageCanPatchFooterOnly(messages[existingIndex], updated);
 		messages[existingIndex] = updated;
 		snapshot.messages = messages;
 		if (activeMessageChunkRender) {
-			queuePendingMessageUpdatePatch(Object.assign({ renderIndex: existingIndex }, updated));
+			queuePendingMessageUpdatePatch(Object.assign({ renderIndex: existingIndex }, updated), {
+				footerOnly: footerOnlyUpdate
+			});
 			applyPendingMessageUpdatePatches(true);
 			lastRenderedTailKey = latestTailMessageKey(snapshot.messages);
 			return true;
 		}
 
-		if (!replaceRenderedMessage(Object.assign({ renderIndex: existingIndex }, updated))) {
+		if (!applyRenderedMessageUpdate(Object.assign({ renderIndex: existingIndex }, updated), {
+			footerOnly: footerOnlyUpdate
+		})) {
 			renderMessages(snapshot, { resolvePendingScopeLoading: true });
 		}
 		lastRenderedTailKey = latestTailMessageKey(snapshot.messages);
@@ -16720,9 +17164,8 @@
 					label: "Add reaction",
 					enabled: true,
 					action: function() {
-						openReactionPickerMessageId = message.messageId;
+						setOpenReactionPickerMessageId(message.messageId);
 						pauseReactionPickerScrollClose();
-						syncSnapshot();
 					}
 				});
 			}
@@ -16987,8 +17430,7 @@
 			}
 			if (!target.closest(".reaction-picker") && !target.closest(".reaction-picker-toggle")) {
 				if (openReactionPickerMessageId !== null) {
-					openReactionPickerMessageId = null;
-					syncSnapshot();
+					setOpenReactionPickerMessageId(null);
 				}
 			}
 			if (!target.closest(".menu-group") && openMenuId !== null) {
@@ -17062,8 +17504,7 @@
 				return;
 			}
 			if (event.key === "Escape" && openReactionPickerMessageId !== null) {
-				openReactionPickerMessageId = null;
-				syncSnapshot();
+				setOpenReactionPickerMessageId(null);
 				return;
 			}
 			if (event.key === "Escape") {
@@ -17133,13 +17574,10 @@
 			const shouldCloseReactionPicker =
 				openReactionPickerMessageId !== null && !shouldKeepReactionPickerOpenOnScroll();
 			if (shouldCloseReactionPicker) {
-				openReactionPickerMessageId = null;
+				setOpenReactionPickerMessageId(null);
 				reactionPickerScrollClosePausedUntil = 0;
 			}
 			syncScrollState();
-			if (shouldCloseReactionPicker) {
-				syncSnapshot();
-			}
 		});
 	}
 

@@ -901,7 +901,8 @@ void AudioInput::resetAudioProcessor() {
 
 	m_preprocessor.setAGCTarget(30000);
 
-	const float v = 30000.0f / static_cast< float >(Global::get().s.iMinLoudness);
+	const int minLoudness = std::clamp(Global::get().s.iMinLoudness, 500, 30000);
+	const float v         = 30000.0f / static_cast< float >(minLoudness);
 	m_preprocessor.setAGCMaxGain(static_cast< std::int32_t >(floorf(20.0f * log10f(v))));
 	m_preprocessor.setAGCDecrement(-60);
 

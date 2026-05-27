@@ -3511,7 +3511,7 @@ QUrl steamAppDetailsUrl(const QString &appId) {
 	query.addQueryItem(QStringLiteral("appids"), appId);
 	query.addQueryItem(QStringLiteral("filters"),
 					   QStringLiteral(
-						   "basic,price_overview,release_date,platforms,developers,publishers,categories,genres,header_image,capsule_image,screenshots,movies"));
+						   "basic,price_overview,release_date,platforms,developers,publishers,categories,genres,header_image,capsule_image,screenshots,movies,recommendations,metacritic"));
 	const QString localeName = QLocale::system().name();
 	if (localeName.size() >= 5 && localeName.at(2) == QLatin1Char('_')) {
 		query.addQueryItem(QStringLiteral("cc"), localeName.mid(3, 2).toLower());
@@ -3520,8 +3520,84 @@ QUrl steamAppDetailsUrl(const QString &appId) {
 	return url;
 }
 
+QUrl steamAppReviewsUrl(const QString &appId) {
+	QUrl url(QStringLiteral("https://store.steampowered.com/appreviews/%1").arg(appId));
+	QUrlQuery query;
+	query.addQueryItem(QStringLiteral("json"), QStringLiteral("1"));
+	query.addQueryItem(QStringLiteral("language"), QStringLiteral("all"));
+	query.addQueryItem(QStringLiteral("review_type"), QStringLiteral("all"));
+	query.addQueryItem(QStringLiteral("purchase_type"), QStringLiteral("all"));
+	query.addQueryItem(QStringLiteral("num_per_page"), QStringLiteral("0"));
+	url.setQuery(query);
+	return url;
+}
+
 QString steamStoreAppUrl(const QString &appId) {
 	return QStringLiteral("https://store.steampowered.com/app/%1/").arg(appId);
+}
+
+std::optional< qlonglong > steamJsonInteger(const QJsonObject &object, const QString &key) {
+	const QJsonValue value = object.value(key);
+	if (value.isDouble()) {
+		return static_cast< qlonglong >(value.toDouble());
+	}
+	if (value.isString()) {
+		bool ok                = false;
+		const qlonglong parsed = value.toString().trimmed().toLongLong(&ok);
+		if (ok) {
+			return parsed;
+		}
+	}
+	return std::nullopt;
+}
+
+void steamInsertIntegerMetadata(QVariantMap &metadata, const QString &metadataKey, const QJsonObject &object,
+								const QString &jsonKey) {
+	const std::optional< qlonglong > value = steamJsonInteger(object, jsonKey);
+	if (value && *value >= 0) {
+		metadata.insert(metadataKey, *value);
+	}
+}
+
+void applySteamReviewMetadata(MainWindow::PersistentChatPreview &preview, const QJsonObject &querySummary) {
+	QVariantMap metadata = preview.metadata;
+	const QStringList reviewMetadataKeys {
+		QStringLiteral("steamReviewSummary"),
+		QStringLiteral("steamReviewScore"),
+		QStringLiteral("steamReviewTotal"),
+		QStringLiteral("steamReviewPositive"),
+		QStringLiteral("steamReviewNegative"),
+		QStringLiteral("steamReviewPercent")
+	};
+	for (const QString &key : reviewMetadataKeys) {
+		metadata.remove(key);
+	}
+
+	const QString reviewSummary = querySummary.value(QStringLiteral("review_score_desc")).toString().trimmed();
+	if (!reviewSummary.isEmpty()) {
+		metadata.insert(QStringLiteral("steamReviewSummary"), reviewSummary);
+	}
+	steamInsertIntegerMetadata(metadata, QStringLiteral("steamReviewScore"), querySummary,
+							   QStringLiteral("review_score"));
+	steamInsertIntegerMetadata(metadata, QStringLiteral("steamReviewTotal"), querySummary,
+							   QStringLiteral("total_reviews"));
+	steamInsertIntegerMetadata(metadata, QStringLiteral("steamReviewPositive"), querySummary,
+							   QStringLiteral("total_positive"));
+	steamInsertIntegerMetadata(metadata, QStringLiteral("steamReviewNegative"), querySummary,
+							   QStringLiteral("total_negative"));
+
+	const std::optional< qlonglong > totalReviews =
+		steamJsonInteger(querySummary, QStringLiteral("total_reviews"));
+	const std::optional< qlonglong > positiveReviews =
+		steamJsonInteger(querySummary, QStringLiteral("total_positive"));
+	if (totalReviews && positiveReviews && *totalReviews > 0 && *positiveReviews >= 0) {
+		const int percent =
+			static_cast< int >(std::round((static_cast< double >(*positiveReviews) * 100.0)
+										  / static_cast< double >(*totalReviews)));
+		metadata.insert(QStringLiteral("steamReviewPercent"), std::clamp(percent, 0, 100));
+	}
+
+	preview.metadata = metadata;
 }
 
 QString steamJsonArrayStrings(const QJsonArray &array, const QString &key, int maxItems = 3) {
@@ -13563,11 +13639,28 @@ namespace {
 		return action;
 	}
 
-	QVariantMap modernDialogSection(const QString &title, const QVariantList &fields) {
+	QVariantMap modernDialogSection(const QString &title, const QVariantList &fields,
+									const QString &presentation = QString(), const QString &subtitle = QString()) {
 		QVariantMap section;
 		section.insert(QStringLiteral("title"), title);
 		section.insert(QStringLiteral("fields"), fields);
+		if (!presentation.isEmpty()) {
+			section.insert(QStringLiteral("presentation"), presentation);
+		}
+		if (!subtitle.isEmpty()) {
+			section.insert(QStringLiteral("subtitle"), subtitle);
+		}
 		return section;
+	}
+
+	QVariantMap modernDialogHighlight(const QString &label, const QVariant &value, const QString &tone = QString()) {
+		QVariantMap highlight;
+		highlight.insert(QStringLiteral("label"), label);
+		highlight.insert(QStringLiteral("value"), value);
+		if (!tone.isEmpty()) {
+			highlight.insert(QStringLiteral("tone"), tone);
+		}
+		return highlight;
 	}
 
 	QVariantMap modernDialogField(const QString &id, const QString &label, const QString &type,
@@ -13578,6 +13671,19 @@ namespace {
 		field.insert(QStringLiteral("type"), type);
 		field.insert(QStringLiteral("value"), value);
 		field.insert(QStringLiteral("enabled"), enabled);
+		return field;
+	}
+
+	QVariantMap modernVisibleWhenField(QVariantMap field, const QString &fieldID, const QStringList &values) {
+		QVariantMap rule;
+		rule.insert(QStringLiteral("fieldId"), fieldID);
+		rule.insert(QStringLiteral("values"), values);
+		field.insert(QStringLiteral("visibleWhen"), rule);
+		return field;
+	}
+
+	QVariantMap modernHintedField(QVariantMap field, const QString &hint) {
+		field.insert(QStringLiteral("hint"), hint);
 		return field;
 	}
 
@@ -15235,14 +15341,22 @@ void MainWindow::openModernServerInformationDialog() {
 		}
 	}
 
-	openModernGenericDialog(modernDialogDto(
+	QVariantMap dialog = modernDialogDto(
 		QStringLiteral("serverInformation"), QStringLiteral("info"), tr("Server information"),
 		tr("Live connection details from the active server session."),
-		QVariantList { modernDialogSection(tr("Server"), serverFields),
-					   modernDialogSection(tr("Audio bandwidth"), audioFields),
-					   modernDialogSection(tr("Connection"), connectionFields) },
+		QVariantList { modernDialogSection(tr("Server"), serverFields, QStringLiteral("list")),
+					   modernDialogSection(tr("Audio bandwidth"), audioFields, QStringLiteral("list")),
+					   modernDialogSection(tr("Connection"), connectionFields, QStringLiteral("list")) },
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QStringLiteral("accent"), true) },
-		QStringLiteral("close"), QSize(720, 560)));
+		QStringLiteral("close"), QSize(720, 560));
+	dialog.insert(QStringLiteral("highlights"),
+				  QVariantList { modernDialogHighlight(tr("Host"), valueOrUnknown(host)),
+								 modernDialogHighlight(tr("Users"),
+														QStringLiteral("%1/%2")
+															.arg(ModelItem::c_qhUsers.count())
+															.arg(Global::get().uiMaxUsers)),
+								 modernDialogHighlight(tr("Audio"), tr("%1 kBit/s").arg(currentBandwidth, 0, 'f', 1)) });
+	openModernGenericDialog(dialog);
 }
 
 void MainWindow::openModernServerTokensDialog(const QStringList &providedTokens, const bool useProvidedTokens) {
@@ -15262,22 +15376,27 @@ void MainWindow::openModernServerTokensDialog(const QStringList &providedTokens,
 												QStringLiteral("text"), i < tokenCount ? tokens.at(i) : QString()));
 	}
 
-	openModernGenericDialog(modernDialogDto(
+	QVariantMap dialog = modernDialogDto(
 		QStringLiteral("serverTokens"), QStringLiteral("form"), tr("Access tokens"),
 		tr("Manage the temporary access tokens for the current server."),
-		QVariantList { modernDialogSection(tr("Tokens"), tokenFields) },
+		QVariantList { modernDialogSection(tr("Tokens"), tokenFields, QStringLiteral("form")) },
 		QVariantList {
 			modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
 			modernDialogAction(QStringLiteral("addToken"), tr("Add token")),
 			modernDialogAction(QStringLiteral("saveTokens"), tr("Save tokens"), true, QStringLiteral("accent"), true) },
-		QStringLiteral("saveTokens"), QSize(620, 460)));
+		QStringLiteral("saveTokens"), QSize(620, 460));
+	dialog.insert(QStringLiteral("highlights"),
+				  QVariantList { modernDialogHighlight(tr("Saved tokens"), tokenCount),
+								 modernDialogHighlight(tr("Scope"), tr("Current server")) });
+	openModernGenericDialog(dialog);
 }
 
 void MainWindow::openModernServerUserListLoadingDialog() {
 	openModernGenericDialog(modernDialogDto(
 		QStringLiteral("serverUserList"), QStringLiteral("info"), tr("Registered users"),
 		tr("Requesting the registered user list from the server."),
-		QVariantList { modernDialogSection(tr("Status"), QVariantList { modernNoteField(tr("Loading users...")) }) },
+		QVariantList { modernDialogSection(tr("Status"), QVariantList { modernNoteField(tr("Loading users...")) },
+										   QStringLiteral("list")) },
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true) },
 		QStringLiteral("close"), QSize(660, 460)));
 }
@@ -15308,12 +15427,17 @@ void MainWindow::openModernServerUserListDialog(const MumbleProto::UserList &msg
 		fields.push_back(modernNoteField(tr("Showing %1 of %2 registered users.").arg(limit).arg(msg.users_size())));
 	}
 
-	openModernGenericDialog(modernDialogDto(
+	QVariantMap dialog = modernDialogDto(
 		QStringLiteral("serverUserList"), QStringLiteral("info"), tr("Registered users"),
-		tr("Read-only Modern view of the server's registered users."),
-		QVariantList { modernDialogSection(tr("Users"), fields) },
+		tr("Registered accounts on this server."),
+		QVariantList { modernDialogSection(tr("Users"), fields, QStringLiteral("records")) },
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QStringLiteral("accent"), true) },
-		QStringLiteral("close"), QSize(760, 620)));
+		QStringLiteral("close"), QSize(720, 620));
+	dialog.insert(QStringLiteral("highlights"),
+				  QVariantList { modernDialogHighlight(tr("Registered"), msg.users_size()),
+								 modernDialogHighlight(tr("Shown"), limit),
+								 modernDialogHighlight(tr("Mode"), tr("Read only")) });
+	openModernGenericDialog(dialog);
 }
 
 void MainWindow::openModernServerBanListLoadingDialog() {
@@ -15355,12 +15479,16 @@ void MainWindow::openModernServerBanListDialog(const MumbleProto::BanList &msg) 
 		fields.push_back(modernNoteField(tr("There are no active bans on this server.")));
 	}
 
-	openModernGenericDialog(modernDialogDto(
+	QVariantMap dialog = modernDialogDto(
 		QStringLiteral("serverBanList"), QStringLiteral("info"), tr("Ban list"),
 		tr("Read-only Modern view of the server ban list."),
-		QVariantList { modernDialogSection(tr("Bans"), fields) },
+		QVariantList { modernDialogSection(tr("Bans"), fields, QStringLiteral("records")) },
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QStringLiteral("accent"), true) },
-		QStringLiteral("close"), QSize(780, 620)));
+		QStringLiteral("close"), QSize(760, 620));
+	dialog.insert(QStringLiteral("highlights"),
+				  QVariantList { modernDialogHighlight(tr("Active bans"), msg.bans_size()),
+								 modernDialogHighlight(tr("Mode"), tr("Read only")) });
+	openModernGenericDialog(dialog);
 }
 
 void MainWindow::openModernAclRequestDialog(Channel *channel) {
@@ -15509,35 +15637,67 @@ void MainWindow::openModernCertificateDialog(const QVariantMap &fieldValues, con
 		modernSelectOption(tr("Import PKCS#12"), QStringLiteral("import")),
 		modernSelectOption(tr("Export current certificate"), QStringLiteral("export"), hasCertificate)
 	};
+	const QString selectedModeLabel =
+		selectedMode == QLatin1String("quick")	? tr("Quick create")
+		: selectedMode == QLatin1String("create") ? tr("Create")
+		: selectedMode == QLatin1String("import") ? tr("Import")
+												   : tr("Export");
 
 	QVariantList workflowFields {
 		modernSelectField(QStringLiteral("cert.mode"), tr("Action"), selectedMode, modeOptions, QStringLiteral("string")),
-		modernDialogField(QStringLiteral("cert.name"), tr("Name"), QStringLiteral("text"),
-						  fieldValues.value(QStringLiteral("cert.name")).toString()),
-		modernDialogField(QStringLiteral("cert.email"), tr("Email"), QStringLiteral("text"),
-						  fieldValues.value(QStringLiteral("cert.email")).toString()),
-		modernPathPickerField(QStringLiteral("cert.importPath"), tr("Import file"),
-							  fieldValues.value(QStringLiteral("cert.importPath")).toString(),
-							  QStringLiteral("browseCertificateImport"), tr("Browse")),
-		modernDialogField(QStringLiteral("cert.password"), tr("Import password"), QStringLiteral("password"),
-						  fieldValues.value(QStringLiteral("cert.password")).toString()),
-		modernPathPickerField(QStringLiteral("cert.exportPath"), tr("Export file"),
-							  fieldValues.value(QStringLiteral("cert.exportPath")).toString(),
-							  QStringLiteral("browseCertificateExport"), tr("Browse"))
+		modernVisibleWhenField(
+			modernNoteField(tr("Creates a new client certificate using the default local identity.")),
+			QStringLiteral("cert.mode"), QStringList { QStringLiteral("quick") }),
+		modernVisibleWhenField(
+			modernHintedField(modernDialogField(QStringLiteral("cert.name"), tr("Name"), QStringLiteral("text"),
+												fieldValues.value(QStringLiteral("cert.name")).toString()),
+							  tr("Optional display name stored in the certificate.")),
+			QStringLiteral("cert.mode"), QStringList { QStringLiteral("create") }),
+		modernVisibleWhenField(
+			modernHintedField(modernDialogField(QStringLiteral("cert.email"), tr("Email"), QStringLiteral("text"),
+												fieldValues.value(QStringLiteral("cert.email")).toString()),
+							  tr("Optional. Leave blank if you do not want an email address in the certificate.")),
+			QStringLiteral("cert.mode"), QStringList { QStringLiteral("create") }),
+		modernVisibleWhenField(
+			modernPathPickerField(QStringLiteral("cert.importPath"), tr("Import file"),
+								  fieldValues.value(QStringLiteral("cert.importPath")).toString(),
+								  QStringLiteral("browseCertificateImport"), tr("Browse")),
+			QStringLiteral("cert.mode"), QStringList { QStringLiteral("import") }),
+		modernVisibleWhenField(
+			modernDialogField(QStringLiteral("cert.password"), tr("Import password"), QStringLiteral("password"),
+							  fieldValues.value(QStringLiteral("cert.password")).toString()),
+			QStringLiteral("cert.mode"), QStringList { QStringLiteral("import") }),
+		modernVisibleWhenField(
+			modernPathPickerField(QStringLiteral("cert.exportPath"), tr("Export file"),
+								  fieldValues.value(QStringLiteral("cert.exportPath")).toString(),
+								  QStringLiteral("browseCertificateExport"), tr("Browse")),
+			QStringLiteral("cert.mode"), QStringList { QStringLiteral("export") })
 	};
 	if (!statusMessage.trimmed().isEmpty()) {
 		workflowFields.push_back(modernNoteField(statusMessage));
 	}
 
 	QVariantMap dialog = modernDialogDto(
-		QStringLiteral("certificate"), QStringLiteral("form"), tr("Certificate"),
+		QStringLiteral("certificate"), QStringLiteral("certificate"), tr("Certificate"),
 		tr("Manage the client certificate used for account identity and server authentication."),
-		QVariantList { modernDialogSection(tr("Current certificate"), modernCertificateFields(Global::get().s.kpCertificate)),
-					   modernDialogSection(tr("Certificate action"), workflowFields) },
+		QVariantList { modernDialogSection(tr("Current certificate"), modernCertificateFields(Global::get().s.kpCertificate),
+										   QStringLiteral("list")),
+					   modernDialogSection(tr("Certificate action"), workflowFields, QStringLiteral("form")) },
 		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Close"), true, QString(), true),
 					   modernDialogAction(QStringLiteral("runCertificateAction"), tr("Apply"), true,
 										  QStringLiteral("accent")) },
 		QStringLiteral("runCertificateAction"), QSize(820, 680));
+	QString expiry = tr("None");
+	if (hasCertificate) {
+		const QSslCertificate cert = Global::get().s.kpCertificate.first.constFirst();
+		expiry = cert.expiryDate().toLocalTime().date().toString(Qt::ISODate);
+	}
+	dialog.insert(QStringLiteral("highlights"),
+				  QVariantList { modernDialogHighlight(tr("Status"),
+														hasCertificate ? tr("Installed") : tr("Missing"),
+														hasCertificate ? QStringLiteral("good") : QStringLiteral("warning")),
+								 modernDialogHighlight(tr("Action"), selectedModeLabel),
+								 modernDialogHighlight(tr("Expires"), expiry) });
 	dialog.insert(QStringLiteral("errors"), errors);
 	openModernGenericDialog(dialog);
 }
@@ -15822,14 +15982,19 @@ void MainWindow::openModernAudioStatsDialog() {
 	liveMeter.insert(QStringLiteral("active"), true);
 	fields.push_back(liveMeter);
 
-	openModernGenericDialog(modernDialogDto(
+	QVariantMap dialog = modernDialogDto(
 		QStringLiteral("audioStats"), QStringLiteral("info"), tr("Audio statistics"),
 		tr("Live microphone activity and current audio settings."),
-		QVariantList { modernDialogSection(tr("Current audio setup"), fields) },
+		QVariantList { modernDialogSection(tr("Current audio setup"), fields, QStringLiteral("list")) },
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true),
 					   modernDialogAction(QStringLiteral("openAudioSettings"), tr("Open audio settings"), true,
 										  QStringLiteral("accent")) },
-		QStringLiteral("openAudioSettings"), QSize(660, 520)));
+		QStringLiteral("openAudioSettings"), QSize(660, 520));
+	dialog.insert(QStringLiteral("highlights"),
+				  QVariantList { modernDialogHighlight(tr("Transmit"), transmitMode()),
+								 modernDialogHighlight(tr("VAD"), vadSource()),
+								 modernDialogHighlight(tr("Quality"), tr("%1 bit/s").arg(settings.iQuality)) });
+	openModernGenericDialog(dialog);
 }
 
 void MainWindow::openModernAboutDialog() {
@@ -15848,7 +16013,7 @@ void MainWindow::openModernAboutDialog() {
 		modernNoteField(tr("An Open Source, low-latency, high quality voice-chat utility."))
 	};
 
-	const QString licensePreview = License::license().left(900).trimmed();
+	const QString licensePreview = License::license().left(520).trimmed();
 	const QString licenseText =
 		licensePreview
 		+ (License::license().size() > licensePreview.size() ? QStringLiteral("\n...") : QString());
@@ -15860,34 +16025,45 @@ void MainWindow::openModernAboutDialog() {
 		modernReadonlyField(tr("Third-party licenses"), tr("%1 bundled license record(s)").arg(License::thirdPartyLicenses().size()))
 	};
 
-	openModernGenericDialog(modernDialogDto(
-		QStringLiteral("about"), QStringLiteral("info"), tr("About Mumble"),
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("about"), QStringLiteral("about"), tr("About Mumble"),
 		tr("Version, license, and project information."),
-		QVariantList { modernDialogSection(tr("About"), aboutFields),
+		QVariantList { modernDialogSection(tr("Project"), aboutFields, QStringLiteral("list")),
 					   modernDialogSection(tr("License"), licenseFields),
-					   modernDialogSection(tr("Authors"), authorFields) },
+					   modernDialogSection(tr("Credits"), authorFields, QStringLiteral("list")) },
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true),
 					   modernDialogAction(QStringLiteral("openWebsite"), tr("Open website"), true,
 										  QStringLiteral("accent")) },
-		QStringLiteral("close"), QSize(760, 620)));
+		QStringLiteral("close"), QSize(760, 600));
+	dialog.insert(QStringLiteral("highlights"),
+				  QVariantList { modernDialogHighlight(tr("Version"), Version::getRelease()),
+								 modernDialogHighlight(tr("Architecture"), QString::fromUtf8(MUMBLE_TARGET_ARCH)),
+								 modernDialogHighlight(tr("License"), QStringLiteral("BSD")) });
+	openModernGenericDialog(dialog);
 }
 
 void MainWindow::openModernAboutQtDialog() {
-	openModernGenericDialog(modernDialogDto(
-		QStringLiteral("aboutQt"), QStringLiteral("info"), tr("About Qt"),
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("aboutQt"), QStringLiteral("about"), tr("About Qt"),
 		tr("Qt runtime information for this client."),
 		QVariantList { modernDialogSection(
 			tr("Runtime"),
 			QVariantList { modernReadonlyField(tr("Qt version"), QString::fromLatin1(qVersion())),
 						   modernReadonlyField(tr("Application platform"), QGuiApplication::platformName()),
 						   modernReadonlyField(tr("Operating system"), QSysInfo::prettyProductName()),
-						   modernReadonlyField(tr("Library paths"), QCoreApplication::libraryPaths().join(QStringLiteral("\n"))) }) },
+						   modernReadonlyField(tr("Library paths"), QCoreApplication::libraryPaths().join(QStringLiteral("\n"))) },
+			QStringLiteral("list")) },
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QStringLiteral("accent"), true) },
-		QStringLiteral("close"), QSize(680, 520)));
+		QStringLiteral("close"), QSize(680, 500));
+	dialog.insert(QStringLiteral("highlights"),
+				  QVariantList { modernDialogHighlight(tr("Qt"), QString::fromLatin1(qVersion())),
+								 modernDialogHighlight(tr("Platform"), QGuiApplication::platformName()),
+								 modernDialogHighlight(tr("OS"), QSysInfo::productType()) });
+	openModernGenericDialog(dialog);
 }
 
 void MainWindow::openModernVersionCheckDialog() {
-	openModernGenericDialog(modernDialogDto(
+	QVariantMap dialog = modernDialogDto(
 		QStringLiteral("versionCheck"), QStringLiteral("info"), tr("Update check"),
 		tr("Modern update result UI is being split from the old QMessageBox workflow."),
 		QVariantList { modernDialogSection(
@@ -15895,22 +16071,40 @@ void MainWindow::openModernVersionCheckDialog() {
 			QVariantList { modernReadonlyField(tr("Current version"), Version::getRelease()),
 						   modernReadonlyField(tr("Current build"), Version::getPatch(Version::get())),
 						   modernReadonlyField(tr("Release channel"), QStringLiteral("mumble-forked")),
-						   modernNoteField(tr("Use the release page action while the async Modern update-result dialog is completed.")) }) },
+						   modernNoteField(tr("Use the release page action while the async Modern update-result dialog is completed.")) },
+			QStringLiteral("list")) },
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true),
 					   modernDialogAction(QStringLiteral("openForkRelease"), tr("Open releases"), true,
 										  QStringLiteral("accent")) },
-		QStringLiteral("openForkRelease"), QSize(660, 460)));
+		QStringLiteral("openForkRelease"), QSize(660, 440));
+	dialog.insert(QStringLiteral("highlights"),
+				  QVariantList { modernDialogHighlight(tr("Version"), Version::getRelease()),
+								 modernDialogHighlight(tr("Build"), Version::getPatch(Version::get())),
+								 modernDialogHighlight(tr("Channel"), QStringLiteral("mumble-forked")) });
+	openModernGenericDialog(dialog);
 }
 
 void MainWindow::openModernHelpDialog() {
-	openModernGenericDialog(modernDialogDto(
+	QVariantList menuFields {
+		modernReadonlyField(tr("Server"), tr("Connect, search, server information, tokens, registered users, and bans.")),
+		modernReadonlyField(tr("Room"), tr("Create rooms, manage ACLs, and work with room-specific actions.")),
+		modernReadonlyField(tr("User"), tr("User information, comments, registration, moderation, and history grants.")),
+		modernReadonlyField(tr("Audio"), tr("Mute, deafen, recording, audio statistics, and voice setup.")),
+		modernReadonlyField(tr("Settings"), tr("Client preferences, certificate management, and screen sharing.")),
+		modernReadonlyField(tr("Help"), tr("About, Qt runtime details, update checks, and feedback."))
+	};
+	QVariantMap dialog = modernDialogDto(
 		QStringLiteral("help"), QStringLiteral("info"), tr("Help"),
 		tr("Modern layout keeps contextual help inside the client shell."),
-		QVariantList { modernDialogSection(
-			tr("Help"),
-			QVariantList { modernNoteField(tr("Use the Server, Room, User, Audio, Settings, and Help menus from the Modern header for the actions available in the current view.")) }) },
+		QVariantList { modernDialogSection(tr("Modern header"), menuFields, QStringLiteral("list"),
+										   tr("The header menus expose the actions available in the current view.")) },
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QStringLiteral("accent"), true) },
-		QStringLiteral("close"), QSize(620, 420)));
+		QStringLiteral("close"), QSize(640, 520));
+	dialog.insert(QStringLiteral("highlights"),
+				  QVariantList { modernDialogHighlight(tr("Menus"), tr("6")),
+								 modernDialogHighlight(tr("Layout"), tr("Modern")),
+								 modernDialogHighlight(tr("Context"), tr("Current view")) });
+	openModernGenericDialog(dialog);
 }
 
 void MainWindow::openModernSelfRegisterDialog() {
@@ -25986,7 +26180,7 @@ bool MainWindow::requestPersistentChatSteamAppPreview(const QString &previewKey,
 		}
 
 		previewIt->remoteMediaRequested = false;
-		previewIt->remoteMediaFinished  = true;
+		previewIt->remoteMediaFinished  = false;
 
 		if (success && !data.isEmpty()) {
 			QJsonParseError error;
@@ -26029,6 +26223,15 @@ bool MainWindow::requestPersistentChatSteamAppPreview(const QString &previewKey,
 						QStringLiteral("steamPrice"),
 						QStringLiteral("steamOriginalPrice"),
 						QStringLiteral("steamDiscountPercent"),
+						QStringLiteral("steamRecommendationsTotal"),
+						QStringLiteral("steamMetacriticScore"),
+						QStringLiteral("steamMetacriticUrl"),
+						QStringLiteral("steamReviewSummary"),
+						QStringLiteral("steamReviewScore"),
+						QStringLiteral("steamReviewTotal"),
+						QStringLiteral("steamReviewPositive"),
+						QStringLiteral("steamReviewNegative"),
+						QStringLiteral("steamReviewPercent"),
 						QStringLiteral("steamHeaderImage"),
 						QStringLiteral("steamCapsuleImage"),
 						QStringLiteral("steamMediaItems")
@@ -26063,6 +26266,16 @@ bool MainWindow::requestPersistentChatSteamAppPreview(const QString &previewKey,
 					if (discount > 0) {
 						metadata.insert(QStringLiteral("steamDiscountPercent"), discount);
 					}
+					steamInsertIntegerMetadata(metadata, QStringLiteral("steamRecommendationsTotal"),
+											   object.value(QStringLiteral("recommendations")).toObject(),
+											   QStringLiteral("total"));
+					const QJsonObject metacritic = object.value(QStringLiteral("metacritic")).toObject();
+					steamInsertIntegerMetadata(metadata, QStringLiteral("steamMetacriticScore"), metacritic,
+											   QStringLiteral("score"));
+					const QString metacriticUrl = metacritic.value(QStringLiteral("url")).toString().trimmed();
+					if (!metacriticUrl.isEmpty()) {
+						metadata.insert(QStringLiteral("steamMetacriticUrl"), metacriticUrl);
+					}
 					const QString headerImage = object.value(QStringLiteral("header_image")).toString().trimmed();
 					if (!headerImage.isEmpty()) {
 						metadata.insert(QStringLiteral("steamHeaderImage"), headerImage);
@@ -26090,6 +26303,64 @@ bool MainWindow::requestPersistentChatSteamAppPreview(const QString &previewKey,
 						previewIt->description = shortDescription;
 					}
 					previewIt->openLabel        = tr("Open on Steam");
+					previewIt->metadataFinished = true;
+					previewIt->failed           = false;
+				}
+			}
+		}
+
+		publishPersistentChatPreviewUpdate(previewKey);
+		if (!requestPersistentChatSteamReviewPreview(previewKey, *appId)) {
+			auto finalPreviewIt = m_persistentChatPreviews.find(previewKey);
+			if (finalPreviewIt != m_persistentChatPreviews.end()) {
+				finalPreviewIt->remoteMediaFinished = true;
+				publishPersistentChatPreviewUpdate(previewKey);
+			}
+		}
+	});
+
+	return true;
+}
+
+bool MainWindow::requestPersistentChatSteamReviewPreview(const QString &previewKey, const QString &appId) {
+	if (previewKey.isEmpty() || appId.trimmed().isEmpty()) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested || it->remoteMediaFinished) {
+		return false;
+	}
+
+	it->remoteMediaRequested = true;
+	it->remoteMediaFinished  = false;
+
+	QNetworkRequest request(steamAppReviewsUrl(appId));
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
+	QNetworkReply *reply = Global::get().nam->get(request);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey]() {
+		const QByteArray data = reply->readAll();
+		const bool success    = reply->error() == QNetworkReply::NoError;
+		reply->deleteLater();
+
+		auto previewIt = m_persistentChatPreviews.find(previewKey);
+		if (previewIt == m_persistentChatPreviews.end()) {
+			return;
+		}
+
+		previewIt->remoteMediaRequested = false;
+		previewIt->remoteMediaFinished  = true;
+
+		if (success && !data.isEmpty()) {
+			QJsonParseError error;
+			const QJsonDocument document = QJsonDocument::fromJson(data, &error);
+			if (error.error == QJsonParseError::NoError && document.isObject()) {
+				const QJsonObject querySummary =
+					document.object().value(QStringLiteral("query_summary")).toObject();
+				if (!querySummary.isEmpty()) {
+					applySteamReviewMetadata(*previewIt, querySummary);
 					previewIt->metadataFinished = true;
 					previewIt->failed           = false;
 				}

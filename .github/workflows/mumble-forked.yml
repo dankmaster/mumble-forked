@@ -230,7 +230,9 @@ jobs:
             throw "Unable to locate a shared client MSI under build-shared-webengine."
           }
 
-          $assetName = "mumble-forked.msi"
+          $buildNumber = "${{ github.run_number }}"
+          $projectVersion = "1.7.$buildNumber"
+          $assetName = "mumble-forked-$projectVersion.msi"
           $assetPath = Join-Path $releaseDir $assetName
           Copy-Item -LiteralPath $clientMsi.FullName -Destination $assetPath -Force
 
@@ -242,8 +244,6 @@ jobs:
           $changelogPath = Join-Path $releaseDir "changelog.md"
           $manifestPath = Join-Path $releaseDir "mumble-forked-update.json"
           $previewPath = Join-Path $releaseDir "update-announcement-preview.txt"
-          $buildNumber = "${{ github.run_number }}"
-          $projectVersion = "1.7.$buildNumber"
           $currentCommit = "${{ github.sha }}"
           $shortSha = $currentCommit.Substring(0, 12)
           $releaseUrl = "https://github.com/${{ github.repository }}/releases/tag/${{ env.MUMBLE_FORKED_RELEASE_TAG }}"
@@ -377,8 +377,8 @@ jobs:
           name: mumble-forked-msi
           compression-level: 0
           path: |
-            build-shared-webengine/mumble-forked-release/mumble-forked.msi
-            build-shared-webengine/mumble-forked-release/mumble-forked.msi.sha256
+            build-shared-webengine/mumble-forked-release/mumble-forked-*.msi
+            build-shared-webengine/mumble-forked-release/mumble-forked-*.msi.sha256
             build-shared-webengine/mumble-forked-release/changelog.md
             build-shared-webengine/mumble-forked-release/mumble-forked-update.json
             build-shared-webengine/mumble-forked-release/release-notes.md

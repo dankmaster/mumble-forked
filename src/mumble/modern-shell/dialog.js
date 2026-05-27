@@ -5,6 +5,7 @@
 	let bridgeLoadPromise = null;
 	let modernDialogState = null;
 	let modernDialogRenderedOpen = false;
+	let modernDialogAdvancedPages = {};
 	let audioInputMeterTimer = 0;
 	let voiceCalibrationState = null;
 	let voiceCalibrationSummary = null;
@@ -294,6 +295,131 @@
 
 	function modernDialogOptionHint(option) {
 		return String(option && (option.tooltip || option.hint) || "");
+	}
+
+	function modernDialogActivePageId(dialog) {
+		const pages = Array.isArray(dialog && dialog.pages) ? dialog.pages : [];
+		for (let i = 0; i < pages.length; ++i) {
+			if (pages[i] && pages[i].selected) {
+				return String(pages[i].id || pages[i].label || i);
+			}
+		}
+		return String(dialog && dialog.kind || "dialog");
+	}
+
+	function modernDialogAdvancedKey(dialog) {
+		return String(dialog && dialog.kind || "dialog") + ":" + modernDialogActivePageId(dialog);
+	}
+
+	function modernDialogAdvancedVisible(dialog) {
+		return !!modernDialogAdvancedPages[modernDialogAdvancedKey(dialog)];
+	}
+
+	function setModernDialogAdvancedVisible(dialog, visible) {
+		modernDialogAdvancedPages[modernDialogAdvancedKey(dialog)] = !!visible;
+	}
+
+	function modernDialogFieldIsAdvanced(field) {
+		return !!(field && field.advanced);
+	}
+
+	function modernDialogFieldValue(dialog, fieldId) {
+		const sections = Array.isArray(dialog && dialog.sections) ? dialog.sections : [];
+		const normalizedId = String(fieldId || "");
+		for (let sectionIndex = 0; sectionIndex < sections.length; ++sectionIndex) {
+			const fields = Array.isArray(sections[sectionIndex] && sections[sectionIndex].fields)
+				? sections[sectionIndex].fields
+				: [];
+			for (let fieldIndex = 0; fieldIndex < fields.length; ++fieldIndex) {
+				const field = fields[fieldIndex] || {};
+				if (String(field.id || "") === normalizedId) {
+					return field.value;
+				}
+			}
+		}
+		return undefined;
+	}
+
+	function modernDialogFieldMatchesVisibility(dialog, field) {
+		if (field && field.visible === false) {
+			return false;
+		}
+
+		const rule = field && (field.visibleWhen || field.when);
+		if (!rule || !rule.fieldId) {
+			return true;
+		}
+
+		const value = modernDialogFieldValue(dialog, rule.fieldId);
+		const allowedValues = Array.isArray(rule.values) ? rule.values : [rule.value];
+		return allowedValues.some(function(allowedValue) {
+			return String(allowedValue) === String(value);
+		});
+	}
+
+	function modernDialogFieldShouldRender(field, showAdvanced, dialog) {
+		const type = String(field && field.type || "text");
+		return type !== "hidden"
+			&& modernDialogFieldMatchesVisibility(dialog, field)
+			&& (showAdvanced || !modernDialogFieldIsAdvanced(field));
+	}
+
+	function modernDialogHasAdvancedContent(dialog) {
+		return !!(dialog && Array.isArray(dialog.sections) && dialog.sections.some(function(section) {
+			if (section && section.advanced) {
+				return true;
+			}
+			return Array.isArray(section && section.fields) && section.fields.some(function(field) {
+				const type = String(field && field.type || "text");
+				return type !== "hidden" && modernDialogFieldIsAdvanced(field);
+			});
+		}));
+	}
+
+	function appendModernDialogAdvancedToggle(container, dialog) {
+		if (!modernDialogHasAdvancedContent(dialog)) {
+			return;
+		}
+
+		const showAdvanced = modernDialogAdvancedVisible(dialog);
+		const bar = document.createElement("div");
+		bar.className = "modern-dialog-advanced-bar";
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "chip-button modern-dialog-advanced-toggle" + (showAdvanced ? " is-active" : "");
+		button.textContent = showAdvanced ? "Basic" : "Advanced";
+		button.setAttribute("aria-pressed", showAdvanced ? "true" : "false");
+		button.title = showAdvanced ? "Hide advanced settings" : "Show advanced settings";
+		button.addEventListener("click", function() {
+			setModernDialogAdvancedVisible(dialog, !showAdvanced);
+			renderModernDialog();
+		});
+		bar.appendChild(button);
+		container.appendChild(bar);
+	}
+
+	function appendModernDialogHighlights(container, dialog) {
+		const highlights = Array.isArray(dialog && dialog.highlights) ? dialog.highlights : [];
+		if (!highlights.length) {
+			return;
+		}
+
+		const grid = document.createElement("div");
+		grid.className = "modern-dialog-highlights";
+		highlights.forEach(function(item) {
+			const card = document.createElement("div");
+			card.className = "modern-dialog-highlight" + (item.tone ? " is-" + item.tone : "");
+			const label = document.createElement("span");
+			label.className = "modern-dialog-highlight-label";
+			label.textContent = item.label || "";
+			const value = document.createElement("strong");
+			value.className = "modern-dialog-highlight-value";
+			value.textContent = item.value == null || item.value === "" ? "-" : String(item.value);
+			card.appendChild(label);
+			card.appendChild(value);
+			grid.appendChild(card);
+		});
+		container.appendChild(grid);
 	}
 
 	function syncModernDialogSelectHint(input, fieldTooltip) {
@@ -3035,7 +3161,7 @@
 		}
 
 		const row = document.createElement("label");
-		row.className = "modern-dialog-field is-" + type;
+		row.className = "modern-dialog-field is-" + type + (modernDialogFieldIsAdvanced(field) ? " is-advanced" : "");
 		const fieldTooltip = String(field.tooltip || field.hint || "");
 		if (fieldTooltip) {
 			row.title = fieldTooltip;
@@ -3353,6 +3479,13 @@
 
 		const list = document.createElement("div");
 		list.className = "modern-dialog-favorite-list";
+		const compactStatLabel = function(value, prefix, emptyText) {
+			const text = String(value || "").trim();
+			if (!text || text === prefix + " -" || text === prefix + "-") {
+				return emptyText;
+			}
+			return text.indexOf(prefix) === 0 ? text.slice(prefix.length).trim() : text;
+		};
 		favorites.forEach(function(favorite) {
 			const button = document.createElement("button");
 			button.type = "button";
@@ -3366,15 +3499,21 @@
 			label.className = "modern-dialog-favorite-label";
 			label.textContent = favorite.label || favorite.host || "Server";
 			copy.appendChild(label);
+			const subtitle = document.createElement("span");
+			subtitle.className = "modern-dialog-favorite-subtitle";
+			subtitle.textContent = favorite.subtitle || [favorite.host, favorite.port].filter(Boolean).join(":");
+			copy.appendChild(subtitle);
 
 			const stats = document.createElement("span");
 			stats.className = "modern-dialog-favorite-stats";
 			const users = document.createElement("span");
 			users.className = "modern-dialog-favorite-stat";
-			users.textContent = favorite.usersLabel || "Users: -";
+			users.textContent = favorite.usersValue || compactStatLabel(favorite.usersLabel, "Users:", "-");
+			users.title = favorite.usersLabel || "Users: -";
 			const ping = document.createElement("span");
 			ping.className = "modern-dialog-favorite-stat";
-			ping.textContent = favorite.pingLabel || "Ping: -";
+			ping.textContent = favorite.pingValue || compactStatLabel(favorite.pingLabel, "Ping:", "-");
+			ping.title = favorite.pingLabel || "Ping: -";
 			stats.appendChild(users);
 			stats.appendChild(ping);
 
@@ -4320,17 +4459,37 @@
 		refs.body.appendChild(panel);
 	}
 
-	function appendModernDialogSections(container, sections, errors) {
+	function appendModernDialogSections(container, sections, errors, dialog) {
+		const showAdvanced = modernDialogAdvancedVisible(dialog);
 		(sections || []).forEach(function(section) {
+			if (section && section.advanced && !showAdvanced) {
+				return;
+			}
+
+			const fields = (section && section.fields || []).filter(function(field) {
+				return modernDialogFieldShouldRender(field, showAdvanced, dialog);
+			});
+			if (!fields.length) {
+				return;
+			}
+
 			const sectionElement = document.createElement("section");
-			sectionElement.className = "modern-dialog-section";
-			if (section.title) {
+			sectionElement.className = "modern-dialog-section"
+				+ (section && section.advanced ? " is-advanced" : "")
+				+ (section && section.presentation ? " is-" + section.presentation : "");
+			if (section && section.title) {
 				const title = document.createElement("h2");
 				title.className = "modern-dialog-section-title";
 				title.textContent = section.title;
 				sectionElement.appendChild(title);
 			}
-			(section.fields || []).forEach(function(field) {
+			if (section && section.subtitle) {
+				const subtitle = document.createElement("p");
+				subtitle.className = "modern-dialog-section-subtitle";
+				subtitle.textContent = section.subtitle;
+				sectionElement.appendChild(subtitle);
+			}
+			fields.forEach(function(field) {
 				appendModernDialogField(sectionElement, field, errors);
 			});
 			container.appendChild(sectionElement);
@@ -4370,7 +4529,7 @@
 			detailsTitle.className = "modern-dialog-connect-details-title";
 			detailsTitle.textContent = dialog.editorTitle || "Server";
 			details.appendChild(detailsTitle);
-			appendModernDialogSections(details, dialog.sections || [], dialog.errors || {});
+			appendModernDialogSections(details, dialog.sections || [], dialog.errors || {}, dialog);
 			grid.appendChild(details);
 		}
 
@@ -4379,7 +4538,9 @@
 
 	function renderGenericDialog(dialog) {
 		appendModernDialogTabs(refs.body, dialog);
-		appendModernDialogSections(refs.body, dialog.sections || [], dialog.errors || {});
+		appendModernDialogHighlights(refs.body, dialog);
+		appendModernDialogAdvancedToggle(refs.body, dialog);
+		appendModernDialogSections(refs.body, dialog.sections || [], dialog.errors || {}, dialog);
 	}
 
 	function renderModernDialogActions(dialog) {
@@ -4431,8 +4592,9 @@
 
 		const opening = !modernDialogRenderedOpen;
 		refs.dialog.className = "modern-dialog" + (dialog.tone ? " is-" + dialog.tone : "")
-			+ (dialog.kind ? " is-" + dialog.kind : "");
-		refs.eyebrow.textContent = dialog.kind === "settings" ? "Settings" : "Mumble";
+			+ (dialog.kind ? " is-" + dialog.kind : "")
+			+ (dialog.id ? " dialog-id-" + String(dialog.id).replace(/[^a-z0-9_-]/gi, "-") : "");
+		refs.eyebrow.textContent = dialog.eyebrow || (dialog.kind === "settings" ? "Settings" : "Mumble");
 		refs.title.textContent = dialog.title || "Dialog";
 		refs.subtitle.textContent = dialog.subtitle || "";
 		refs.body.innerHTML = "";

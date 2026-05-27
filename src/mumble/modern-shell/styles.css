@@ -2906,6 +2906,63 @@ textarea:focus-visible {
 	-webkit-line-clamp: 2;
 }
 
+.preview-card-steam-stats {
+	display: grid;
+	gap: 6px;
+	grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
+	min-width: 0;
+}
+
+.preview-card-steam-stat {
+	background: rgba(0, 0, 0, 0.20);
+	border: 1px solid rgba(102, 192, 244, 0.14);
+	border-radius: 6px;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+	padding: 7px 8px;
+}
+
+.preview-card-steam-stat-label {
+	color: #7f98ac;
+	font-size: 9px;
+	font-weight: 800;
+	letter-spacing: 0;
+	line-height: 1.2;
+	text-transform: uppercase;
+}
+
+.preview-card-steam-stat-value {
+	color: #66c0f4;
+	font-size: 13px;
+	font-weight: 900;
+	line-height: 1.25;
+	overflow-wrap: anywhere;
+}
+
+.preview-card-steam-stat-detail {
+	color: #9fb1c0;
+	font-size: 10px;
+	font-weight: 700;
+	line-height: 1.25;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.preview-card-steam-stat.is-positive .preview-card-steam-stat-value {
+	color: #8bc53f;
+}
+
+.preview-card-steam-stat.is-mixed .preview-card-steam-stat-value {
+	color: #f2d06b;
+}
+
+.preview-card-steam-stat.is-negative .preview-card-steam-stat-value {
+	color: #ff8a8a;
+}
+
 .preview-card-steam-product {
 	align-items: center;
 	background: rgba(0, 0, 0, 0.22);
@@ -7997,7 +8054,8 @@ body.dialog-host {
 .modern-dialog-connect-shell {
 	display: grid;
 	grid-template-columns: 1fr;
-	gap: 12px;
+	align-content: start;
+	gap: 10px;
 	min-height: 0;
 }
 
@@ -8008,7 +8066,7 @@ body.dialog-host {
 .modern-dialog-connect-details {
 	display: grid;
 	align-content: start;
-	gap: 10px;
+	gap: 8px;
 	min-height: 0;
 	overflow: auto;
 }
@@ -8023,6 +8081,10 @@ body.dialog-host {
 .dialog-host .modern-dialog.is-connect .modern-dialog-body {
 	overflow: hidden;
 	align-content: stretch;
+}
+
+.dialog-host .modern-dialog.is-connect .modern-dialog-connect-shell {
+	align-content: start;
 }
 
 .dialog-host .modern-dialog.is-connect .modern-dialog-favorites {
@@ -8042,7 +8104,7 @@ body.dialog-host {
 .dialog-host .modern-dialog.is-connect .modern-dialog-favorite {
 	max-width: none;
 	min-width: 0;
-	padding: 10px 11px;
+	padding: 8px 10px;
 	border-radius: 7px;
 }
 
@@ -8122,6 +8184,60 @@ body.dialog-host {
 	padding-bottom: 2px;
 }
 
+.modern-dialog-advanced-bar {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	min-width: 0;
+}
+
+.modern-dialog-highlights {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+	gap: 8px;
+	min-width: 0;
+}
+
+.modern-dialog-highlight {
+	display: grid;
+	gap: 2px;
+	min-width: 0;
+	padding: 9px 10px;
+	border: 1px solid rgba(255, 255, 255, 0.07);
+	border-radius: 8px;
+	background: rgba(255, 255, 255, 0.024);
+}
+
+.modern-dialog-highlight.is-good {
+	border-color: rgba(78, 184, 159, 0.24);
+	background: rgba(78, 184, 159, 0.07);
+}
+
+.modern-dialog-highlight.is-warning {
+	border-color: rgba(215, 192, 113, 0.24);
+	background: rgba(215, 192, 113, 0.07);
+}
+
+.modern-dialog-highlight-label {
+	min-width: 0;
+	color: var(--text-muted);
+	font-size: 10px;
+	font-weight: 700;
+	line-height: 1.2;
+	text-transform: uppercase;
+}
+
+.modern-dialog-highlight-value {
+	min-width: 0;
+	color: var(--text-strong);
+	font-size: 13px;
+	font-weight: 800;
+	line-height: 1.25;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
 .modern-dialog-tab,
 .modern-dialog-favorite {
 	border: 1px solid var(--shell-divider);
@@ -8135,8 +8251,14 @@ body.dialog-host {
 	padding: 0 12px;
 }
 
+.modern-dialog-advanced-toggle {
+	min-height: 30px;
+	padding: 0 12px;
+}
+
 .modern-dialog-tab.is-selected,
-.modern-dialog-favorite.is-selected {
+.modern-dialog-favorite.is-selected,
+.modern-dialog-advanced-toggle.is-active {
 	border-color: var(--accent-border);
 	background: var(--accent-soft);
 	color: var(--text-strong);
@@ -8147,11 +8269,18 @@ body.dialog-host {
 	gap: 10px;
 	padding: 12px;
 	border: 1px solid var(--shell-divider);
-	border-radius: 10px;
+	border-radius: 8px;
 	background: rgba(255, 255, 255, 0.018);
 }
 
+.modern-dialog-section.is-advanced {
+	border-style: dashed;
+	background: rgba(255, 255, 255, 0.012);
+}
+
 .modern-dialog-favorites {
+	align-content: start;
+	gap: 8px;
 	padding: 0;
 	border: 0;
 	background: transparent;
@@ -8162,6 +8291,13 @@ body.dialog-host {
 	color: var(--text-strong);
 	font-size: 13px;
 	font-weight: 700;
+}
+
+.modern-dialog-section-subtitle {
+	margin: -4px 0 0;
+	color: var(--text-muted);
+	font-size: 11px;
+	line-height: 1.4;
 }
 
 .modern-dialog-section-header {
@@ -8188,10 +8324,15 @@ body.dialog-host {
 	width: 100%;
 	min-width: 0;
 	max-width: none;
-	min-height: 48px;
-	padding: 10px 11px;
+	min-height: 42px;
+	padding: 8px 10px;
 	border-radius: 6px;
 	text-align: left;
+}
+
+.modern-dialog-favorite.is-selected {
+	border-color: rgba(78, 184, 159, 0.40);
+	background: rgba(78, 184, 159, 0.11);
 }
 
 .modern-dialog-favorite:hover {
@@ -8207,10 +8348,25 @@ body.dialog-host {
 	white-space: nowrap;
 }
 
+.modern-dialog-favorite-copy {
+	display: grid;
+	gap: 2px;
+}
+
 .modern-dialog-favorite-label {
 	color: var(--text-strong);
 	font-size: 13px;
 	font-weight: 650;
+}
+
+.modern-dialog-favorite-subtitle {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--text-muted);
+	font-size: 10px;
+	line-height: 1.25;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .modern-dialog-favorite-stats {
@@ -8218,7 +8374,7 @@ body.dialog-host {
 	align-items: center;
 	justify-content: flex-end;
 	gap: 6px;
-	min-width: 132px;
+	min-width: 98px;
 	color: var(--text-muted);
 }
 
@@ -8226,14 +8382,14 @@ body.dialog-host {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	min-width: 58px;
-	min-height: 24px;
-	padding: 0 7px;
-	border: 1px solid rgba(255, 255, 255, 0.075);
+	min-width: 42px;
+	min-height: 22px;
+	padding: 0 6px;
+	border: 1px solid rgba(255, 255, 255, 0.055);
 	border-radius: var(--radius-pill);
-	background: rgba(255, 255, 255, 0.032);
+	background: rgba(255, 255, 255, 0.02);
 	color: var(--text-muted);
-	font-size: 11px;
+	font-size: 10px;
 	white-space: nowrap;
 }
 
@@ -8313,6 +8469,42 @@ body.dialog-host {
 	gap: 8px 12px;
 	color: var(--text-main);
 	font-size: 12px;
+}
+
+.modern-dialog-section.is-list,
+.modern-dialog-section.is-records {
+	gap: 6px;
+}
+
+.modern-dialog-section.is-list .modern-dialog-field,
+.modern-dialog-section.is-records .modern-dialog-field {
+	grid-template-columns: 1fr;
+	gap: 2px;
+	padding: 7px 0;
+	border-top: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.modern-dialog-section.is-list .modern-dialog-field:first-of-type,
+.modern-dialog-section.is-records .modern-dialog-field:first-of-type {
+	border-top: 0;
+	padding-top: 0;
+}
+
+.modern-dialog-section.is-list .modern-dialog-field-label,
+.modern-dialog-section.is-records .modern-dialog-field-label {
+	color: var(--text-strong);
+	font-weight: 700;
+}
+
+.modern-dialog-section.is-records .modern-dialog-readonly-value {
+	color: var(--text-muted);
+	font-size: 11px;
+}
+
+.modern-dialog-connect-details .modern-dialog-section {
+	padding: 0;
+	border: 0;
+	background: transparent;
 }
 
 .modern-dialog-field.is-checkbox {
