@@ -877,8 +877,7 @@ void FeedbackDialog::setCaptureActive(const bool active) {
 void FeedbackDialog::updateFormState() {
 	const bool requiredFilled =
 		!m_titleEdit->text().trimmed().isEmpty() && !m_descriptionEdit->toPlainText().trimmed().isEmpty();
-	m_submitButton->setEnabled(requiredFilled && m_capability.connected && m_capability.supported
-							   && m_capability.enabled);
+	m_submitButton->setEnabled(requiredFilled);
 	m_copyButton->setEnabled(requiredFilled);
 	m_openButton->setEnabled(requiredFilled);
 	m_reproductionEdit->setEnabled(selectedKind() == MumbleProto::FeedbackReportBug

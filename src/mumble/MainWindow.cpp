@@ -27,6 +27,7 @@
 #include "MumbleConstants.h"
 #include "Net.h"
 #include "NetworkConfig.h"
+#include "OSInfo.h"
 #include "GlobalShortcut.h"
 #include "GlobalShortcutTypes.h"
 #ifdef USE_OVERLAY
@@ -112,6 +113,7 @@
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDateTime>
 #include <QtCore/QElapsedTimer>
+#include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
@@ -126,9 +128,11 @@
 #include <QtCore/QSignalBlocker>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QSysInfo>
+#include <QtCore/QTextStream>
 #include <QtCore/QTimer>
 #include <QtCore/QTime>
 #include <QtCore/QTimeZone>
+#include <QtCore/QUuid>
 #include <QtCore/QtEndian>
 #include <QtCore/QUrlQuery>
 #include <QtCore/QVector>
@@ -13786,6 +13790,190 @@ namespace {
 		return values;
 	}
 
+	QString feedbackBuildArchitecture() {
+#ifdef MUMBLE_TARGET_ARCH
+		return QString::fromUtf8(MUMBLE_TARGET_ARCH);
+#else
+		return OSInfo::getArchitecture(true);
+#endif
+	}
+
+	MumbleProto::FeedbackReportKind feedbackKindFromValue(const QVariant &value) {
+		const int kind = value.toInt();
+		if (kind == static_cast< int >(MumbleProto::FeedbackReportSuggestion)) {
+			return MumbleProto::FeedbackReportSuggestion;
+		}
+		if (kind == static_cast< int >(MumbleProto::FeedbackReportSupport)) {
+			return MumbleProto::FeedbackReportSupport;
+		}
+		return MumbleProto::FeedbackReportBug;
+	}
+
+	bool feedbackServerCanSubmit(const FeedbackDialog::ServerCapability &capability) {
+		return capability.connected && capability.supported && capability.enabled && Global::get().sh;
+	}
+
+	FeedbackDialog::ServerCapability currentFeedbackServerCapability() {
+		FeedbackDialog::ServerCapability capability;
+		capability.connected = Global::get().sh && Global::get().sh->isConnected() && Global::get().sh->hasSynchronized();
+		capability.supported =
+			capability.connected
+			&& Mumble::ForkFeatures::serverAllowsClientFeature(Global::get().qlSupportedForkFeatures,
+															   MumbleProto::ForkFeatureInAppFeedback);
+		capability.enabled      = Global::get().bFeedbackEnabled;
+		capability.maxLogBytes  = qMax(1u, Global::get().uiFeedbackMaxLogBytes);
+		capability.maxBodyBytes = qMax(1u, Global::get().uiFeedbackMaxBodyBytes);
+		capability.summary =
+			capability.connected
+				? QObject::tr("connected=yes; feature=%1; server-submit=%2; max-log-bytes=%3; max-body-bytes=%4")
+					  .arg(capability.supported ? QStringLiteral("yes") : QStringLiteral("no"),
+						   capability.enabled ? QStringLiteral("yes") : QStringLiteral("no"),
+						   QString::number(capability.maxLogBytes), QString::number(capability.maxBodyBytes))
+				: QObject::tr("connected=no; feature=no; server-submit=no");
+		return capability;
+	}
+
+	QString feedbackConsoleLogSnippet(const FeedbackDialog::ServerCapability &capability,
+									  const qint64 captureStartOffset) {
+		const QFileInfo info(Global::get().qdBasePath.filePath(QStringLiteral("Console.txt")));
+		if (!info.exists() || !info.isFile()) {
+			return QString();
+		}
+
+		QFile file(info.absoluteFilePath());
+		if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+			return QString();
+		}
+
+		const qint64 maxBytes = qMax< qint64 >(1, static_cast< qint64 >(capability.maxLogBytes));
+		const qint64 size     = file.size();
+		const qint64 offset   = (captureStartOffset >= 0 && captureStartOffset <= size)
+									? captureStartOffset
+									: qMax< qint64 >(0, size - maxBytes);
+		if (!file.seek(offset)) {
+			return QString();
+		}
+
+		const QByteArray bytes = file.read(maxBytes + 1024);
+		return Mumble::Feedback::redactedDiagnostics(QString::fromUtf8(bytes), capability.maxLogBytes);
+	}
+
+	QString feedbackDiagnosticsText(const FeedbackDialog::ServerCapability &capability,
+									const qint64 captureStartOffset) {
+		QString diagnostics;
+		QTextStream stream(&diagnostics);
+		stream << "Generated: " << QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs) << "Z\n";
+		stream << "Version: " << Version::getRelease() << "\n";
+		stream << "Architecture: " << feedbackBuildArchitecture() << "\n";
+		stream << "OS: " << OSInfo::getOSDisplayableVersion() << "\n";
+		stream << "Qt: " << QString::fromLatin1(qVersion()) << "\n";
+		stream << "Server feedback: " << capability.summary << "\n";
+
+		const QString logs = feedbackConsoleLogSnippet(capability, captureStartOffset).trimmed();
+		if (!logs.isEmpty()) {
+			stream << "\nConsole.txt:\n" << logs << "\n";
+		}
+
+		return diagnostics;
+	}
+
+	bool feedbackReportRequiredFilled(const QVariantMap &values) {
+		return !values.value(QStringLiteral("feedback.title")).toString().trimmed().isEmpty()
+			   && !values.value(QStringLiteral("feedback.description")).toString().trimmed().isEmpty();
+	}
+
+	QString feedbackStatusText(const FeedbackDialog::ServerCapability &capability, const bool captureActive,
+							   const qint64 captureStartOffset, const QString &statusMessage) {
+		if (!statusMessage.trimmed().isEmpty()) {
+			return statusMessage.trimmed();
+		}
+		if (!capability.connected) {
+			return QObject::tr("Submit will use the GitHub fallback because you are not connected.");
+		}
+		if (!capability.supported) {
+			return QObject::tr("Submit will use the GitHub fallback because this server does not advertise in-app feedback.");
+		}
+		if (!capability.enabled) {
+			return QObject::tr("Submit will use the GitHub fallback because server-side feedback submission is disabled.");
+		}
+		if (captureActive) {
+			return QObject::tr("Capturing new Console.txt lines for this repro.");
+		}
+		if (captureStartOffset >= 0) {
+			return QObject::tr("Capture stopped. Diagnostics use logs since capture start.");
+		}
+		return QObject::tr("Ready to submit through the connected server.");
+	}
+
+	FeedbackDialog::PreparedReport feedbackPreparedReportFromValues(
+		const QVariantMap &values, const FeedbackDialog::ServerCapability &capability,
+		const qint64 captureStartOffset) {
+		const MumbleProto::FeedbackReportKind kind =
+			feedbackKindFromValue(values.value(QStringLiteral("feedback.kind")));
+		const bool includeDiagnostics =
+			values.value(QStringLiteral("feedback.includeDiagnostics"), kind != MumbleProto::FeedbackReportSuggestion)
+				.toBool();
+
+		Mumble::Feedback::ReportFields fields;
+		fields.kind                    = kind;
+		fields.title                   = values.value(QStringLiteral("feedback.title")).toString().trimmed();
+		fields.description             = Mumble::Feedback::truncateUtf8Bytes(
+			values.value(QStringLiteral("feedback.description")).toString().trimmed(), capability.maxBodyBytes,
+			QStringLiteral("[description truncated]"));
+		fields.reproductionSteps       = Mumble::Feedback::truncateUtf8Bytes(
+			values.value(QStringLiteral("feedback.steps")).toString().trimmed(), capability.maxBodyBytes,
+			QStringLiteral("[steps truncated]"));
+		fields.diagnosticsIncluded     = includeDiagnostics;
+		fields.diagnostics             = includeDiagnostics ? feedbackDiagnosticsText(capability, captureStartOffset) : QString();
+		fields.clientRelease           = Version::getRelease();
+		fields.clientArch              = feedbackBuildArchitecture();
+		fields.clientOS                = OSInfo::getOSDisplayableVersion();
+		fields.clientQt                = QString::fromLatin1(qVersion());
+		fields.serverCapabilitySummary = capability.summary;
+		fields.pastedEvidence          = Mumble::Feedback::truncateUtf8Bytes(
+			values.value(QStringLiteral("feedback.evidence")).toString().trimmed(), capability.maxBodyBytes,
+			QStringLiteral("[pasted evidence truncated]"));
+
+		FeedbackDialog::PreparedReport report;
+		report.issueTitle  = Mumble::Feedback::issueTitle(fields);
+		report.issueBody   = Mumble::Feedback::issueBody(fields, capability.maxBodyBytes, capability.maxLogBytes);
+		report.fallbackUrl = FeedbackDialog::fallbackIssueUrl(report.issueTitle, report.issueBody, fields.kind);
+
+		report.message.set_kind(fields.kind);
+		report.message.set_title(u8(fields.title));
+		report.message.set_description(u8(fields.description));
+		if (!fields.reproductionSteps.isEmpty()) {
+			report.message.set_reproduction_steps(u8(fields.reproductionSteps));
+		}
+		report.message.set_diagnostics_included(fields.diagnosticsIncluded);
+		if (fields.diagnosticsIncluded && !fields.diagnostics.isEmpty()) {
+			report.message.set_diagnostics(
+				u8(Mumble::Feedback::redactedDiagnostics(fields.diagnostics, capability.maxLogBytes)));
+		}
+		if (!fields.pastedEvidence.isEmpty()) {
+			report.message.set_pasted_evidence(u8(fields.pastedEvidence));
+		}
+		report.message.set_client_report_id(u8(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+		report.message.set_created_at(static_cast< uint64_t >(QDateTime::currentSecsSinceEpoch()));
+		report.message.set_client_release(u8(fields.clientRelease));
+		report.message.set_client_arch(u8(fields.clientArch));
+		report.message.set_client_os(u8(fields.clientOS));
+		report.message.set_client_qt(u8(fields.clientQt));
+
+		return report;
+	}
+
+	PendingFeedbackSubmission pendingSubmissionFromReport(const FeedbackDialog::PreparedReport &report,
+														  const bool fromModernShell) {
+		PendingFeedbackSubmission submission;
+		submission.kind            = report.message.kind();
+		submission.issueTitle      = report.issueTitle;
+		submission.issueBody       = report.issueBody;
+		submission.fallbackUrl     = report.fallbackUrl;
+		submission.fromModernShell = fromModernShell;
+		return submission;
+	}
+
 	QString valueOrUnknown(const QString &value) {
 		const QString trimmed = value.trimmed();
 		return trimmed.isEmpty() ? QObject::tr("Unknown") : trimmed;
@@ -16122,6 +16310,146 @@ void MainWindow::openModernHelpDialog() {
 	openModernGenericDialog(dialog);
 }
 
+void MainWindow::openModernFeedbackDialog(const QVariantMap &fieldValues, const QVariantMap &errors,
+										  const QString &statusMessage) {
+	if (!usesModernShell()) {
+		applyShellLayout();
+	}
+
+	const FeedbackDialog::ServerCapability capability = currentFeedbackServerCapability();
+	QVariantMap values = fieldValues;
+	const MumbleProto::FeedbackReportKind kind =
+		feedbackKindFromValue(values.value(QStringLiteral("feedback.kind")));
+	values.insert(QStringLiteral("feedback.kind"), static_cast< int >(kind));
+	if (!values.contains(QStringLiteral("feedback.includeDiagnostics"))) {
+		values.insert(QStringLiteral("feedback.includeDiagnostics"),
+					  kind != MumbleProto::FeedbackReportSuggestion);
+	}
+	if (!values.contains(QStringLiteral("feedback.title"))) {
+		values.insert(QStringLiteral("feedback.title"), QString());
+	}
+	if (!values.contains(QStringLiteral("feedback.description"))) {
+		values.insert(QStringLiteral("feedback.description"), QString());
+	}
+	if (!values.contains(QStringLiteral("feedback.steps"))) {
+		values.insert(QStringLiteral("feedback.steps"), QString());
+	}
+	if (!values.contains(QStringLiteral("feedback.evidence"))) {
+		values.insert(QStringLiteral("feedback.evidence"), QString());
+	}
+
+	m_modernFeedbackDraftValues = values;
+
+	QVariantMap statusField =
+		modernReadonlyField(tr("Status"),
+							feedbackStatusText(capability, m_modernFeedbackCaptureActive,
+											   m_modernFeedbackCaptureStartOffset, statusMessage),
+							QStringLiteral("feedback.status"));
+	statusField.insert(QStringLiteral("presentation"), QStringLiteral("status"));
+
+	QVariantMap diagnosticsPreview =
+		modernReadonlyField(tr("Diagnostics preview"),
+							values.value(QStringLiteral("feedback.includeDiagnostics")).toBool()
+								? Mumble::Feedback::redactedDiagnostics(
+									  feedbackDiagnosticsText(capability, m_modernFeedbackCaptureStartOffset),
+									  capability.maxLogBytes)
+								: tr("Diagnostics are not included."),
+							QStringLiteral("feedback.diagnosticsPreview"));
+	diagnosticsPreview.insert(QStringLiteral("monospace"), true);
+
+	QVariantMap stepsField = modernTextareaField(QStringLiteral("feedback.steps"), tr("Steps to reproduce"),
+												 values.value(QStringLiteral("feedback.steps")).toString(), 4);
+	stepsField = modernVisibleWhenField(stepsField, QStringLiteral("feedback.kind"),
+										QStringList { QString::number(static_cast< int >(MumbleProto::FeedbackReportBug)) });
+
+	QVariantList reportFields {
+		modernSelectField(QStringLiteral("feedback.kind"), tr("Type"), static_cast< int >(kind),
+						  QVariantList {
+							  modernSelectOption(tr("Bug"), static_cast< int >(MumbleProto::FeedbackReportBug)),
+							  modernSelectOption(tr("Suggestion"), static_cast< int >(MumbleProto::FeedbackReportSuggestion)),
+							  modernSelectOption(tr("Support"), static_cast< int >(MumbleProto::FeedbackReportSupport)) }),
+		modernDialogField(QStringLiteral("feedback.title"), tr("Title"), QStringLiteral("text"),
+						  values.value(QStringLiteral("feedback.title")).toString()),
+		modernTextareaField(QStringLiteral("feedback.description"), tr("Description"),
+							values.value(QStringLiteral("feedback.description")).toString(), 6),
+		stepsField
+	};
+
+	QVariantList evidenceFields {
+		modernTextareaField(QStringLiteral("feedback.evidence"), tr("Pasted evidence"),
+							values.value(QStringLiteral("feedback.evidence")).toString(), 3),
+	};
+
+	QVariantList diagnosticsFields {
+		modernDialogField(QStringLiteral("feedback.includeDiagnostics"), tr("Include diagnostics"),
+						  QStringLiteral("checkbox"),
+						  values.value(QStringLiteral("feedback.includeDiagnostics")).toBool()),
+		statusField,
+		diagnosticsPreview
+	};
+
+	const bool requiredFilled = feedbackReportRequiredFilled(values);
+	const QString submitLabel = tr("Submit");
+	QVariantMap dialog        = modernDialogDto(
+		QStringLiteral("feedback"), QStringLiteral("feedback"), tr("Report feedback"),
+		tr("Bug reports, suggestions, and support requests for this fork."),
+		QVariantList { modernDialogSection(tr("Report"), reportFields),
+					   modernDialogSection(tr("Evidence"), evidenceFields),
+					   modernDialogSection(tr("Diagnostics"), diagnosticsFields) },
+		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true),
+					   modernDialogAction(QStringLiteral("toggleFeedbackCapture"),
+										  m_modernFeedbackCaptureActive ? tr("Stop capture") : tr("Start capture"),
+										  true),
+					   modernDialogAction(QStringLiteral("copyFeedbackReport"), tr("Copy report"), requiredFilled),
+					   modernDialogAction(QStringLiteral("openFeedbackGitHub"), tr("Open GitHub"), requiredFilled),
+					   modernDialogAction(QStringLiteral("submitFeedback"), submitLabel, requiredFilled,
+										  QStringLiteral("accent")) },
+		QStringLiteral("submitFeedback"), QSize(900, 720));
+	dialog.insert(QStringLiteral("errors"), errors);
+	dialog.insert(QStringLiteral("highlights"),
+				  QVariantList { modernDialogHighlight(tr("Server submit"),
+														feedbackServerCanSubmit(capability) ? tr("Available")
+																							: tr("Fallback")),
+								 modernDialogHighlight(tr("Diagnostics"),
+														values.value(QStringLiteral("feedback.includeDiagnostics")).toBool()
+															? tr("Included")
+															: tr("Off")),
+								 modernDialogHighlight(tr("Max body"),
+														tr("%1 KiB").arg(capability.maxBodyBytes / 1024)) });
+	openModernGenericDialog(dialog);
+}
+
+void MainWindow::openModernFeedbackResultDialog(const PendingFeedbackSubmission &submission, const QString &title,
+												const QString &subtitle, const QString &statusMessage,
+												const QString &primaryActionID,
+												const QString &openActionLabel) {
+	m_modernFeedbackFallbackSubmission = submission;
+
+	const QString openAction =
+		openActionLabel.trimmed().isEmpty() ? tr("Open GitHub") : openActionLabel.trimmed();
+	const QString primary =
+		primaryActionID.trimmed().isEmpty() ? QStringLiteral("openFeedbackFallbackGitHub") : primaryActionID.trimmed();
+	QVariantMap titleField = modernReadonlyField(tr("Title"), submission.issueTitle,
+												 QStringLiteral("feedback.resultTitle"));
+	titleField.insert(QStringLiteral("monospace"), false);
+
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("feedbackResult"), QStringLiteral("feedback"), title, subtitle,
+		QVariantList { modernDialogSection(
+			tr("Status"),
+			QVariantList { modernNoteField(statusMessage), titleField,
+						   modernReadonlyField(tr("Report size"),
+											   tr("%1 bytes").arg(submission.issueBody.toUtf8().size())) },
+			QStringLiteral("list")) },
+		QVariantList { modernDialogAction(QStringLiteral("editFeedbackReport"), tr("Back")),
+					   modernDialogAction(QStringLiteral("copyFeedbackFallbackReport"), tr("Copy report")),
+					   modernDialogAction(QStringLiteral("openFeedbackFallbackGitHub"), openAction, true,
+										  QStringLiteral("accent")),
+					   modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true) },
+		primary, QSize(640, 420));
+	openModernGenericDialog(dialog);
+}
+
 void MainWindow::openModernSelfRegisterDialog() {
 	ClientUser *user = ClientUser::get(Global::get().uiSession);
 	if (!user) {
@@ -16519,8 +16847,112 @@ void MainWindow::openModernRemoveChannelDialog(Channel *channel) {
 		QStringLiteral("confirmRemoveRoom"), QSize(620, 420)));
 }
 
+bool MainWindow::handleModernFeedbackDialogAction(const QString &dialogID, const QString &actionID,
+												  const QVariantMap &fieldValues) {
+	if (dialogID == QLatin1String("feedbackResult")) {
+		if (actionID == QLatin1String("editFeedbackReport")) {
+			openModernFeedbackDialog(m_modernFeedbackDraftValues);
+			return true;
+		}
+		if (actionID == QLatin1String("copyFeedbackFallbackReport")) {
+			if (m_modernFeedbackFallbackSubmission) {
+				QApplication::clipboard()->setText(tr("Title: %1\n\n%2")
+													   .arg(m_modernFeedbackFallbackSubmission->issueTitle,
+															m_modernFeedbackFallbackSubmission->issueBody));
+				openModernFeedbackResultDialog(*m_modernFeedbackFallbackSubmission, tr("Feedback report copied"),
+											   tr("The report is ready outside server submit."),
+											   tr("The feedback report markdown was copied."));
+			}
+			return true;
+		}
+		if (actionID == QLatin1String("openFeedbackFallbackGitHub")) {
+			if (m_modernFeedbackFallbackSubmission) {
+				QDesktopServices::openUrl(m_modernFeedbackFallbackSubmission->fallbackUrl);
+			}
+			return true;
+		}
+		return false;
+	}
+
+	if (dialogID != QLatin1String("feedback")) {
+		return false;
+	}
+
+	QVariantMap values = fieldValues;
+	if (actionID == QLatin1String("toggleFeedbackCapture")) {
+		if (m_modernFeedbackCaptureActive) {
+			m_modernFeedbackCaptureActive = false;
+			openModernFeedbackDialog(values);
+			return true;
+		}
+
+		const QFileInfo info(Global::get().qdBasePath.filePath(QStringLiteral("Console.txt")));
+		m_modernFeedbackCaptureStartOffset = info.exists() ? info.size() : 0;
+		m_modernFeedbackCaptureActive      = true;
+		openModernFeedbackDialog(values);
+		return true;
+	}
+
+	if (actionID != QLatin1String("copyFeedbackReport") && actionID != QLatin1String("openFeedbackGitHub")
+		&& actionID != QLatin1String("submitFeedback")) {
+		return false;
+	}
+
+	QVariantMap errors;
+	if (values.value(QStringLiteral("feedback.title")).toString().trimmed().isEmpty()) {
+		errors.insert(QStringLiteral("feedback.title"), tr("Enter a short title."));
+	}
+	if (values.value(QStringLiteral("feedback.description")).toString().trimmed().isEmpty()) {
+		errors.insert(QStringLiteral("feedback.description"), tr("Describe what happened or what you want changed."));
+	}
+	if (!errors.isEmpty()) {
+		openModernFeedbackDialog(values, errors);
+		return true;
+	}
+
+	const FeedbackDialog::ServerCapability capability = currentFeedbackServerCapability();
+	const FeedbackDialog::PreparedReport report =
+		feedbackPreparedReportFromValues(values, capability, m_modernFeedbackCaptureStartOffset);
+	PendingFeedbackSubmission submission = pendingSubmissionFromReport(report, true);
+	m_modernFeedbackDraftValues          = values;
+
+	if (actionID == QLatin1String("copyFeedbackReport")) {
+		QApplication::clipboard()->setText(tr("Title: %1\n\n%2").arg(report.issueTitle, report.issueBody));
+		openModernFeedbackDialog(values, {}, tr("The feedback report markdown was copied."));
+		return true;
+	}
+
+	if (actionID == QLatin1String("openFeedbackGitHub")) {
+		QDesktopServices::openUrl(report.fallbackUrl);
+		openModernFeedbackDialog(values, {}, tr("Opened the prefilled GitHub issue."));
+		return true;
+	}
+
+	m_modernFeedbackCaptureActive = false;
+	if (!feedbackServerCanSubmit(capability)) {
+		QDesktopServices::openUrl(report.fallbackUrl);
+		openModernFeedbackResultDialog(submission, tr("Feedback fallback opened"),
+									   tr("Server submit is unavailable for this report."),
+									   tr("A prefilled GitHub issue was opened in your browser."));
+		return true;
+	}
+
+	const QString reportID = u8(report.message.client_report_id());
+	m_pendingFeedbackSubmissions.insert(reportID, submission);
+	Global::get().sh->sendMessage(report.message);
+	openModernFeedbackResultDialog(submission, tr("Feedback submitted"),
+								   tr("The report was sent to the connected server."),
+								   tr("The server will return the GitHub issue state shortly."),
+								   QStringLiteral("close"), tr("Open fallback"));
+	return true;
+}
+
 bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const QString &actionID,
 												 const QVariantMap &fieldValues, const QVariantMap &payload) {
+	if (handleModernFeedbackDialogAction(dialogID, actionID, fieldValues)) {
+		return true;
+	}
+
 	if (dialogID == QLatin1String("certificate")) {
 		QVariantMap values = fieldValues;
 		if (actionID == QLatin1String("browseCertificateImport")) {
@@ -17143,7 +17575,7 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 		return true;
 	}
 	if (action == QLatin1String("help.feedback")) {
-		openFeedbackDialog();
+		openModernFeedbackDialog();
 		return true;
 	}
 	if (action == QLatin1String("help.about")) {
@@ -17292,6 +17724,10 @@ void MainWindow::handleModernDialogFieldUpdate(const QString &dialogID, const QS
 	}
 	if (dialogID == QLatin1String("serverSearch") && fieldID.startsWith(QLatin1String("search."))) {
 		openModernSearchDialog(modernDialogFieldValuesFromState(state));
+		return;
+	}
+	if (dialogID == QLatin1String("feedback") && fieldID.startsWith(QLatin1String("feedback."))) {
+		openModernFeedbackDialog(modernDialogFieldValuesFromState(state));
 		return;
 	}
 	publishModernDialogState(state);
@@ -33530,13 +33966,28 @@ void MainWindow::handleFeedbackReportState(const MumbleProto::FeedbackReportStat
 	PendingFeedbackSubmission submission = m_pendingFeedbackSubmissions.take(reportID);
 
 	if (msg.accepted()) {
+		const QUrl issueUrl(msg.has_issue_url() ? u8(msg.issue_url()) : QString());
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+		if (submission.fromModernShell && usesModernShell()) {
+			if (issueUrl.isValid()) {
+				submission.fallbackUrl = issueUrl;
+			}
+			openModernFeedbackResultDialog(
+				submission, tr("Feedback submitted"),
+				msg.has_issue_number()
+					? tr("GitHub issue #%1 was created.").arg(msg.issue_number())
+					: tr("The GitHub issue was created."),
+				tr("The connected server accepted and forwarded the report."),
+				QStringLiteral("openFeedbackFallbackGitHub"), tr("Open issue"));
+			return;
+		}
+#endif
 		QMessageBox box(QMessageBox::Information, tr("Feedback submitted"),
 						msg.has_issue_number()
 							? tr("GitHub issue #%1 was created.").arg(msg.issue_number())
 							: tr("The GitHub issue was created."),
 						QMessageBox::Ok, this);
 		QPushButton *openButton = nullptr;
-		const QUrl issueUrl(msg.has_issue_url() ? u8(msg.issue_url()) : QString());
 		if (issueUrl.isValid()) {
 			openButton = box.addButton(tr("Open issue"), QMessageBox::ActionRole);
 		}
@@ -33555,10 +34006,24 @@ void MainWindow::handleFeedbackReportState(const MumbleProto::FeedbackReportStat
 		QMessageBox::warning(this, tr("Feedback not submitted"), error);
 		return;
 	}
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (submission.fromModernShell && usesModernShell()) {
+		openModernFeedbackResultDialog(submission, tr("Feedback not submitted"),
+									   tr("The connected server could not create the GitHub issue."), error);
+		return;
+	}
+#endif
 	showFeedbackFallback(submission, error);
 }
 
 void MainWindow::showFeedbackFallback(const PendingFeedbackSubmission &submission, const QString &error) {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell()) {
+		openModernFeedbackResultDialog(submission, tr("Feedback fallback ready"),
+									   tr("The connected server cannot submit this report."), error);
+		return;
+	}
+#endif
 	QMessageBox box(QMessageBox::Warning, tr("Feedback not submitted"),
 					tr("%1\n\nYou can still copy the report or open a prefilled GitHub issue.").arg(error),
 					QMessageBox::Close, this);

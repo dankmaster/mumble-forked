@@ -110,6 +110,7 @@ struct PendingFeedbackSubmission {
 	QString issueTitle;
 	QString issueBody;
 	QUrl fallbackUrl;
+	bool fromModernShell = false;
 };
 
 class MessageBoxEvent : public QEvent {
@@ -777,6 +778,10 @@ protected:
 	QVariantMap m_stonksState;
 	QString m_stonksSelectedPeriod;
 	unsigned int m_stonksSelectedUserID = 0;
+	QVariantMap m_modernFeedbackDraftValues;
+	qint64 m_modernFeedbackCaptureStartOffset = -1;
+	bool m_modernFeedbackCaptureActive        = false;
+	std::optional< PendingFeedbackSubmission > m_modernFeedbackFallbackSubmission;
 	std::unique_ptr< ModernConnectPingState > m_modernConnectPingState;
 	QObject *m_persistentChatPreviewSnapshotRenderer       = nullptr;
 	quint64 m_modernShellPatchRevision                     = 0;
@@ -843,6 +848,13 @@ protected:
 	void openModernAboutQtDialog();
 	void openModernVersionCheckDialog();
 	void openModernHelpDialog();
+	void openModernFeedbackDialog(const QVariantMap &fieldValues = QVariantMap(),
+								  const QVariantMap &errors = QVariantMap(),
+								  const QString &statusMessage = QString());
+	void openModernFeedbackResultDialog(const PendingFeedbackSubmission &submission, const QString &title,
+										const QString &subtitle, const QString &statusMessage,
+										const QString &primaryActionID = QString(),
+										const QString &openActionLabel = QString());
 	void openModernSelfRegisterDialog();
 	void openModernUserRegisterDialog(ClientUser *user);
 	void openModernSelfCommentDialog();
@@ -858,6 +870,8 @@ protected:
 	void openModernRemoveChannelDialog(Channel *channel);
 	bool handleModernGenericDialogAction(const QString &dialogID, const QString &actionID,
 										 const QVariantMap &fieldValues, const QVariantMap &payload);
+	bool handleModernFeedbackDialogAction(const QString &dialogID, const QString &actionID,
+										  const QVariantMap &fieldValues);
 	bool tryModernAutoConnectLastServer();
 	bool handleModernShellLegacyDialogAction(const QString &actionID, ClientUser *contextUser = nullptr,
 											 Channel *contextChannel = nullptr);
