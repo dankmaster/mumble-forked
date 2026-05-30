@@ -33203,6 +33203,10 @@ void MainWindow::qmChannel_aboutToShow() {
 	Channel *c                         = getContextMenuTargets().channel;
 	const ClientUser *self             = ClientUser::get(Global::get().uiSession);
 	const QString startScreenShareText = tr("Start Screen Share");
+	Channel *linkTargetChannel         = c ? c : Channel::get(Mumble::ROOT_CHANNEL_ID);
+	const bool hasChannelLinkTarget    = self && self->cChannel && linkTargetChannel && self->cChannel != linkTargetChannel;
+	const bool hasDirectChannelLink =
+		hasChannelLinkTarget && self->cChannel->qsPermLinks.contains(linkTargetChannel);
 
 	qmChannel->clear();
 	qaChannelScreenShareStart->setText(startScreenShareText);
@@ -33270,10 +33274,17 @@ void MainWindow::qmChannel_aboutToShow() {
 	qmChannel->addAction(qaChannelAdd);
 	qmChannel->addAction(qaChannelACL);
 	qmChannel->addAction(qaChannelRemove);
-	qmChannel->addSeparator();
-	qmChannel->addAction(qaChannelLink);
-	qmChannel->addAction(qaChannelUnlink);
-	qmChannel->addAction(qaChannelUnlinkAll);
+
+	if (hasChannelLinkTarget || (self && self->cChannel && !self->cChannel->qsPermLinks.isEmpty())) {
+		qmChannel->addSeparator();
+		if (hasChannelLinkTarget) {
+			qmChannel->addAction(hasDirectChannelLink ? qaChannelUnlink : qaChannelLink);
+		}
+		if (self && self->cChannel && !self->cChannel->qsPermLinks.isEmpty()) {
+			qmChannel->addAction(qaChannelUnlinkAll);
+		}
+	}
+
 	qmChannel->addSeparator();
 	qmChannel->addAction(qaChannelCopyURL);
 	qmChannel->addAction(qaChannelSendMessage);
@@ -33318,9 +33329,9 @@ void MainWindow::qmChannel_aboutToShow() {
 		if (!c) {
 			c = Channel::get(Mumble::ROOT_CHANNEL_ID);
 		}
-		unlinkall = (home->qhLinks.count() > 0);
+		unlinkall = !home->qsPermLinks.isEmpty();
 		if (home != c) {
-			if (c->allLinks().contains(home)) {
+			if (home->qsPermLinks.contains(c)) {
 				unlink = true;
 			} else {
 				link = true;
@@ -33497,19 +33508,33 @@ void MainWindow::on_qaChannelACL_triggered() {
 }
 
 void MainWindow::on_qaChannelLink_triggered() {
-	Channel *c = ClientUser::get(Global::get().uiSession)->cChannel;
-	Channel *l = getContextMenuChannel();
+	ClientUser *user = Global::get().uiSession ? ClientUser::get(Global::get().uiSession) : nullptr;
+	Channel *c      = user ? user->cChannel : nullptr;
+	Channel *l      = getContextMenuChannel();
 	if (!l)
 		l = Channel::get(Mumble::ROOT_CHANNEL_ID);
 
-	Global::get().sh->addChannelLink(c->iId, l->iId);
+	if (!c || !l || c == l) {
+		return;
+	}
+
+	if (c->qsPermLinks.contains(l)) {
+		Global::get().sh->removeChannelLink(c->iId, l->iId);
+	} else {
+		Global::get().sh->addChannelLink(c->iId, l->iId);
+	}
 }
 
 void MainWindow::on_qaChannelUnlink_triggered() {
-	Channel *c = ClientUser::get(Global::get().uiSession)->cChannel;
-	Channel *l = getContextMenuChannel();
+	ClientUser *user = Global::get().uiSession ? ClientUser::get(Global::get().uiSession) : nullptr;
+	Channel *c      = user ? user->cChannel : nullptr;
+	Channel *l      = getContextMenuChannel();
 	if (!l)
 		l = Channel::get(Mumble::ROOT_CHANNEL_ID);
+
+	if (!c || !l || c == l || !c->qsPermLinks.contains(l)) {
+		return;
+	}
 
 	Global::get().sh->removeChannelLink(c->iId, l->iId);
 }
@@ -33605,6 +33630,8 @@ void MainWindow::updateMenuPermissions() {
 	Channel *homec             = user ? user->cChannel : nullptr;
 	ChanACL::Permissions homep = homec ? static_cast< ChanACL::Permissions >(homec->uiPermissions) : ChanACL::None;
 	bool isCurrentChannel      = target.channel && homec == target.channel;
+	bool hasChannelLinkTarget  = homec && target.channel && !isCurrentChannel;
+	bool hasDirectChannelLink  = hasChannelLinkTarget && homec->qsPermLinks.contains(target.channel);
 
 	if (homec && !homep) {
 		Global::get().sh->requestChannelPermissions(homec->iId);
@@ -33640,12 +33667,14 @@ void MainWindow::updateMenuPermissions() {
 	qaChannelRemove->setEnabled(p & ChanACL::Write);
 	qaChannelACL->setEnabled((p & ChanACL::Write) || (Global::get().pPermissions & ChanACL::Write));
 
-	qaChannelLink->setEnabled(!isCurrentChannel && (p & (ChanACL::Write | ChanACL::LinkChannel))
+	qaChannelLink->setEnabled(hasChannelLinkTarget && !hasDirectChannelLink
+							  && (p & (ChanACL::Write | ChanACL::LinkChannel))
 							  && (homep & (ChanACL::Write | ChanACL::LinkChannel)));
 	qaChannelUnlink->setEnabled(
-		!isCurrentChannel
+		hasChannelLinkTarget && hasDirectChannelLink
 		&& ((p & (ChanACL::Write | ChanACL::LinkChannel)) || (homep & (ChanACL::Write | ChanACL::LinkChannel))));
-	qaChannelUnlinkAll->setEnabled(p & (ChanACL::Write | ChanACL::LinkChannel));
+	qaChannelUnlinkAll->setEnabled(
+		homec && !homec->qsPermLinks.isEmpty() && (homep & (ChanACL::Write | ChanACL::LinkChannel)));
 	qaChannelCopyURL->setEnabled(target.channel);
 	qaChannelSendMessage->setEnabled(p & (ChanACL::Write | ChanACL::TextMessage));
 	qaChannelHide->setEnabled(target.channel);
