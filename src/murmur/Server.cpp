@@ -4186,16 +4186,20 @@ Channel *Server::createNewChannel(Channel *parent, const QString &name, bool tem
 }
 
 void Server::linkChannels(Channel &first, Channel &second) {
-	{
-		QWriteLocker wl(&qrwlVoiceThread);
-		first.link(&second);
-	}
-
 	if (first.iId == second.iId) {
 		return;
 	}
 
-	if (first.bTemporary || second.bTemporary) {
+	bool alreadyLinked = false;
+	{
+		QWriteLocker wl(&qrwlVoiceThread);
+		alreadyLinked = first.qsPermLinks.contains(&second);
+		if (!alreadyLinked) {
+			first.link(&second);
+		}
+	}
+
+	if (alreadyLinked || first.bTemporary || second.bTemporary) {
 		return;
 	}
 
