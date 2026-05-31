@@ -272,6 +272,7 @@ jobs:
             -Version $projectVersion `
             -Build ([int]$buildNumber) `
             -Commit $currentCommit `
+            -RequireGStreamerRuntime `
             -Validate
           $packageHash = Get-FileHash -LiteralPath $packagePath -Algorithm SHA256
           $packageHashPath = "$packagePath.sha256"

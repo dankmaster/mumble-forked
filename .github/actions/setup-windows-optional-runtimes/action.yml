@@ -185,8 +185,14 @@ runs:
             [string]$Element
           )
 
-          & $GstInspect $Element *> $null
-          return ($LASTEXITCODE -eq 0)
+          $previousErrorActionPreference = $ErrorActionPreference
+          try {
+            $ErrorActionPreference = "Continue"
+            & $GstInspect $Element > $null 2>&1
+            return ($LASTEXITCODE -eq 0)
+          } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+          }
         }
 
         $gstreamerRoot = Get-GStreamerRuntimeRoot -Root $cacheRoot

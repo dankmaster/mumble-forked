@@ -24,6 +24,8 @@ Param(
 
 	[string] $ManifestOutPath = "",
 
+	[switch] $RequireGStreamerRuntime,
+
 	[switch] $Validate
 )
 
@@ -105,10 +107,29 @@ function Test-PackageArchive {
 		}
 
 		$required = @('mumble.exe', 'mumble-updater.exe')
+		if ($RequireGStreamerRuntime) {
+			$required += @(
+				'gstreamer/bin/gst-launch-1.0.exe',
+				'gstreamer/bin/gst-inspect-1.0.exe',
+				'gstreamer/libexec/gstreamer-1.0/gst-plugin-scanner.exe'
+			)
+		}
 		foreach ($requiredPath in $required) {
 			$requiredFile = Join-Path $payloadRoot $requiredPath
 			if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
 				throw "Package payload is missing required file: $requiredPath"
+			}
+		}
+
+		if ($RequireGStreamerRuntime) {
+			$pluginRoot = Join-Path $payloadRoot 'gstreamer/lib/gstreamer-1.0'
+			if (-not (Test-Path -LiteralPath $pluginRoot -PathType Container)) {
+				throw "Package payload is missing required GStreamer plugin directory: gstreamer/lib/gstreamer-1.0"
+			}
+
+			$pluginFiles = @(Get-ChildItem -Path $pluginRoot -File -Filter '*.dll' -ErrorAction SilentlyContinue)
+			if ($pluginFiles.Count -eq 0) {
+				throw "Package payload is missing GStreamer plugin DLLs under gstreamer/lib/gstreamer-1.0"
 			}
 		}
 
@@ -136,6 +157,37 @@ function Test-PackageArchive {
 	}
 }
 
+function Assert-GStreamerPayload {
+	Param(
+		[Parameter(Mandatory = $true)]
+		[string] $Root
+	)
+
+	$required = @(
+		'gstreamer\bin\gst-launch-1.0.exe',
+		'gstreamer\bin\gst-inspect-1.0.exe',
+		'gstreamer\lib\gstreamer-1.0',
+		'gstreamer\libexec\gstreamer-1.0\gst-plugin-scanner.exe'
+	)
+
+	$missing = New-Object System.Collections.Generic.List[string]
+	foreach ($relativePath in $required) {
+		$fullPath = Join-Path $Root $relativePath
+		if (-not (Test-Path -LiteralPath $fullPath)) {
+			$missing.Add($relativePath)
+		}
+	}
+
+	$pluginFiles = @(Get-ChildItem -Path (Join-Path $Root 'gstreamer\lib\gstreamer-1.0') -File -Filter '*.dll' -ErrorAction SilentlyContinue)
+	if ($pluginFiles.Count -eq 0) {
+		$missing.Add('gstreamer\lib\gstreamer-1.0\*.dll')
+	}
+
+	if ($missing.Count -gt 0) {
+		throw "StageRoot is missing required GStreamer update payload files: $($missing -join ', ')."
+	}
+}
+
 $stageRootResolved = (Resolve-Path -LiteralPath $StageRoot).Path
 if (-not (Test-Path -LiteralPath (Join-Path $stageRootResolved 'mumble.exe') -PathType Leaf)) {
 	throw "StageRoot is missing mumble.exe: $stageRootResolved"
@@ -143,6 +195,10 @@ if (-not (Test-Path -LiteralPath (Join-Path $stageRootResolved 'mumble.exe') -Pa
 
 if (-not (Test-Path -LiteralPath (Join-Path $stageRootResolved 'mumble-updater.exe') -PathType Leaf)) {
 	throw "StageRoot is missing mumble-updater.exe: $stageRootResolved"
+}
+
+if ($RequireGStreamerRuntime) {
+	Assert-GStreamerPayload -Root $stageRootResolved
 }
 
 $outputFullPath = [System.IO.Path]::GetFullPath($OutputPath)

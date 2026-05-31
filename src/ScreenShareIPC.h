@@ -26,6 +26,7 @@ namespace IPC {
 	std::optional< Command > commandFromName(const QString &commandName);
 
 	QString socketBaseName();
+	QString sanitizeSocketBaseName(const QString &baseName);
 	QString socketPath(const QString &baseName = socketBaseName());
 
 	QJsonObject makeRequest(Command command, const QJsonObject &payload = {});

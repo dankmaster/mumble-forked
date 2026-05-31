@@ -11,6 +11,7 @@
 #include "Global.h"
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QCryptographicHash>
 #include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QFileInfo>
@@ -18,13 +19,42 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonParseError>
 #include <QtCore/QProcess>
+#include <QtCore/QProcessEnvironment>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QThread>
 #include <QtNetwork/QLocalSocket>
 
 namespace {
 constexpr int HELPER_CONNECT_TIMEOUT_MSEC = 1000;
-constexpr int HELPER_START_TIMEOUT_MSEC   = 3000;
+constexpr int HELPER_START_TIMEOUT_MSEC   = 20000;
+
+QString helperSocketBaseName() {
+	const QString explicitName = QProcessEnvironment::systemEnvironment().value(
+		QLatin1String("MUMBLE_SCREENSHARE_HELPER_SOCKET"));
+	if (!explicitName.trimmed().isEmpty()) {
+		return Mumble::ScreenShare::IPC::sanitizeSocketBaseName(explicitName);
+	}
+
+	QString basePath = Global::get().qdBasePath.absolutePath().trimmed();
+	if (basePath.isEmpty()) {
+		basePath = QCoreApplication::applicationDirPath();
+	}
+
+	if (basePath.trimmed().isEmpty()) {
+		return Mumble::ScreenShare::IPC::socketBaseName();
+	}
+
+	const QByteArray profileHash =
+		QCryptographicHash::hash(QDir::toNativeSeparators(basePath).toUtf8(), QCryptographicHash::Sha256)
+			.toHex()
+			.left(16);
+	return Mumble::ScreenShare::IPC::sanitizeSocketBaseName(
+		QStringLiteral("%1-%2").arg(Mumble::ScreenShare::IPC::socketBaseName(), QString::fromLatin1(profileHash)));
+}
+
+QString helperSocketPath() {
+	return Mumble::ScreenShare::IPC::socketPath(helperSocketBaseName());
+}
 
 QString streamIDForStopPayload(const QString &streamID) {
 	return streamID.trimmed();
@@ -94,6 +124,19 @@ QString commandToken(const Mumble::ScreenShare::IPC::Command command) {
 	return QStringLiteral("unknown");
 }
 
+QString boolToken(const bool value) {
+	return value ? QStringLiteral("true") : QStringLiteral("false");
+}
+
+QString intListToken(const QList< int > &values) {
+	QStringList tokens;
+	tokens.reserve(values.size());
+	for (const int value : values) {
+		tokens.append(QString::number(value));
+	}
+	return tokens.join(QLatin1Char(','));
+}
+
 QString socketErrorMessage(const QLocalSocket &socket, const QString &fallback) {
 	const QString message = socket.errorString().trimmed();
 	if (message.isEmpty() || message == QLatin1String("Unknown error")) {
@@ -136,8 +179,9 @@ QString ScreenShareHelperClient::diagnosticsLogPath() {
 }
 
 QStringList ScreenShareHelperClient::helperLaunchArguments() {
+	QStringList arguments{ QStringLiteral("--socket-name"), helperSocketBaseName() };
 	if (!Global::get().s.bScreenShareDiagnostics) {
-		return {};
+		return arguments;
 	}
 
 	const QString logPath = diagnosticsLogPath();
@@ -146,7 +190,8 @@ QStringList ScreenShareHelperClient::helperLaunchArguments() {
 		logInfo.absoluteDir().mkpath(QStringLiteral("."));
 	}
 
-	return { QStringLiteral("--diagnostics-log-file"), logPath };
+	arguments << QStringLiteral("--diagnostics-log-file") << logPath;
+	return arguments;
 }
 
 ScreenShareHelperClient::CapabilitySnapshot ScreenShareHelperClient::detectLocalCapabilities() {
@@ -173,7 +218,16 @@ ScreenShareHelperClient::CapabilitySnapshot ScreenShareHelperClient::detectLocal
 		return snapshot;
 	}
 
-	return capabilitySnapshotFromPayload(reply.value(QStringLiteral("payload")).toObject(), snapshot.helperExecutable);
+	snapshot = capabilitySnapshotFromPayload(reply.value(QStringLiteral("payload")).toObject(), snapshot.helperExecutable);
+	qInfo().noquote() << QStringLiteral(
+							 "ScreenShareHelperClient: capability probe succeeded executable=%1 capture_supported=%2 "
+							 "view_supported=%3 gstreamer=%4 livekit_publish=%5 livekit_view=%6 runtime_transports=[%7]")
+							 .arg(snapshot.helperExecutable, boolToken(snapshot.captureSupported),
+								  boolToken(snapshot.viewSupported), boolToken(snapshot.gstreamerAvailable),
+								  boolToken(snapshot.gstreamerLiveKitPublishAvailable),
+								  boolToken(snapshot.gstreamerLiveKitViewAvailable),
+								  intListToken(snapshot.runtimeRelayTransports));
+	return snapshot;
 }
 
 ScreenShareHelperClient::CapabilitySnapshot
@@ -222,18 +276,7 @@ ScreenShareHelperClient::CapabilitySnapshot
 }
 
 bool ScreenShareHelperClient::ensureHelperRunning(const QString &helperExecutable, QString *errorMessage) {
-	const QString socketPath = Mumble::ScreenShare::IPC::socketPath();
-	qInfo().noquote() << QStringLiteral("ScreenShareHelperClient: probing helper socket at %1 for executable %2")
-							 .arg(socketPath, helperExecutable);
-	QLocalSocket probeSocket;
-	probeSocket.connectToServer(socketPath);
-	if (probeSocket.waitForConnected(150)) {
-		probeSocket.disconnectFromServer();
-		qInfo().noquote()
-			<< QStringLiteral("ScreenShareHelperClient: helper already running at socket %1").arg(socketPath);
-		return true;
-	}
-
+	const QString socketPath = helperSocketPath();
 	qInfo().noquote() << QStringLiteral("ScreenShareHelperClient: launching helper executable %1 with socket %2")
 							 .arg(helperExecutable, socketPath);
 	if (!QProcess::startDetached(helperExecutable, helperLaunchArguments())) {
@@ -245,31 +288,13 @@ bool ScreenShareHelperClient::ensureHelperRunning(const QString &helperExecutabl
 		return false;
 	}
 
-	QElapsedTimer timer;
-	timer.start();
-	while (timer.elapsed() < HELPER_START_TIMEOUT_MSEC) {
-		QLocalSocket socket;
-		socket.connectToServer(socketPath);
-		if (socket.waitForConnected(150)) {
-			socket.disconnectFromServer();
-			qInfo().noquote()
-				<< QStringLiteral("ScreenShareHelperClient: helper started successfully at socket %1").arg(socketPath);
-			return true;
-		}
-
-		QThread::msleep(50);
-	}
-
-	if (errorMessage) {
-		*errorMessage = QStringLiteral("Timed out waiting for the screen-share helper socket.");
-	}
-	return false;
+	return true;
 }
 
 QJsonObject ScreenShareHelperClient::sendRequest(Mumble::ScreenShare::IPC::Command command, const QJsonObject &payload,
 												 const QString &helperExecutable, QString *errorMessage,
 												 const bool launchIfNeeded) {
-	const QString socketPath = Mumble::ScreenShare::IPC::socketPath();
+	const QString socketPath = helperSocketPath();
 	const QString streamID   = payload.value(QStringLiteral("stream_id")).toString().trimmed();
 	qInfo().noquote()
 		<< QStringLiteral("ScreenShareHelperClient: sending %1 stream=%2 executable=%3 socket=%4 launch_if_needed=%5")
@@ -284,15 +309,32 @@ QJsonObject ScreenShareHelperClient::sendRequest(Mumble::ScreenShare::IPC::Comma
 	}
 
 	QLocalSocket socket;
-	socket.connectToServer(socketPath);
-	if (!socket.waitForConnected(150)) {
+	auto connectToHelper = [&socket, &socketPath](const int timeoutMsec) {
+		socket.abort();
+		socket.connectToServer(socketPath);
+		return socket.waitForConnected(timeoutMsec);
+	};
+
+	if (!connectToHelper(150)) {
 		if (!launchIfNeeded || !ensureHelperRunning(helperExecutable, errorMessage)) {
 			return {};
 		}
 
-		socket.abort();
-		socket.connectToServer(socketPath);
-		if (!socket.waitForConnected(HELPER_CONNECT_TIMEOUT_MSEC)) {
+		QElapsedTimer timer;
+		timer.start();
+		bool connected = false;
+		while (timer.elapsed() < HELPER_START_TIMEOUT_MSEC) {
+			if (connectToHelper(150)) {
+				connected = true;
+				qInfo().noquote()
+					<< QStringLiteral("ScreenShareHelperClient: helper started successfully at socket %1").arg(socketPath);
+				break;
+			}
+
+			QThread::msleep(50);
+		}
+
+		if (!connected) {
 			if (errorMessage) {
 				*errorMessage = socketErrorMessage(
 					socket, QStringLiteral("Timed out connecting to the screen-share helper socket."));

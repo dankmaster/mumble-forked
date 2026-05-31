@@ -27,6 +27,7 @@ public:
 	~ScreenShareHelperServer() override;
 
 	bool start(QString *errorMessage = nullptr);
+	bool start(const QString &socketBaseName, QString *errorMessage);
 	QJsonObject capabilityPayload() const;
 	QJsonObject runSelfTest();
 

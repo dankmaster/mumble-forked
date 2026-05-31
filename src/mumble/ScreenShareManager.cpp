@@ -70,6 +70,30 @@ bool isWebRtcRelayTransport(const MumbleProto::ScreenShareRelayTransport transpo
 	return Mumble::ScreenShare::isWebRtcRelayTransport(transport);
 }
 
+bool helperRuntimeSupportsRelayTransport(const ScreenShareHelperClient::CapabilitySnapshot &capabilities,
+										 const MumbleProto::ScreenShareRelayTransport transport) {
+	return transport != MumbleProto::ScreenShareRelayTransportUnknown
+		   && capabilities.runtimeRelayTransports.contains(static_cast< int >(transport));
+}
+
+bool helperRuntimeSupportsPublishing(const ScreenShareHelperClient::CapabilitySnapshot &capabilities,
+									 const MumbleProto::ScreenShareRelayTransport transport) {
+	if (!helperRuntimeSupportsRelayTransport(capabilities, transport)) {
+		return false;
+	}
+
+	return !isWebRtcRelayTransport(transport) || capabilities.gstreamerLiveKitPublishAvailable;
+}
+
+bool helperRuntimeSupportsViewing(const ScreenShareHelperClient::CapabilitySnapshot &capabilities,
+								  const MumbleProto::ScreenShareRelayTransport transport) {
+	if (!helperRuntimeSupportsRelayTransport(capabilities, transport)) {
+		return false;
+	}
+
+	return !isWebRtcRelayTransport(transport) || capabilities.gstreamerLiveKitViewAvailable;
+}
+
 QString normalizeScreenShareQualityProfile(const QString &profile) {
 	const QString normalized = profile.trimmed().toLower();
 	if (normalized == QLatin1String("sharp_text") || normalized == QLatin1String("sharp-text")
@@ -212,13 +236,14 @@ QString ScreenShareManager::localShareUnavailableReason() const {
 	if (!supportsInAppRelayTransport(relayTransport) && !capabilities.captureSupported) {
 		return tr("No supported local capture source is available.");
 	}
-	if (!supportsInAppRelayTransport(relayTransport) && !capabilities.runtimeRelayTransports.isEmpty()
-		&& !capabilities.runtimeRelayTransports.contains(static_cast< int >(relayTransport))) {
-		return tr("The local screen-share helper does not support this server's relay transport.");
-	}
 	if (!supportsInAppRelayTransport(relayTransport) && Global::get().bScreenShareHelperRequired
 		&& !capabilities.helperAvailable) {
 		return tr("The local screen-share helper is required but unavailable.");
+	}
+	if (!supportsInAppRelayTransport(relayTransport) && !helperRuntimeSupportsPublishing(capabilities, relayTransport)) {
+		return isWebRtcRelayTransport(relayTransport)
+				   ? tr("The bundled screen-share runtime is missing WebRTC publishing support.")
+				   : tr("The bundled screen-share runtime does not support this server's relay transport.");
 	}
 
 	return QString();
@@ -614,8 +639,7 @@ bool ScreenShareManager::canPublishSession(const ScreenShareSession &session) co
 	if (Global::get().bScreenShareHelperRequired && !capabilities.helperAvailable) {
 		return false;
 	}
-	if (!capabilities.runtimeRelayTransports.isEmpty()
-		&& !capabilities.runtimeRelayTransports.contains(static_cast< int >(session.relayTransport))) {
+	if (!helperRuntimeSupportsPublishing(capabilities, session.relayTransport)) {
 		return false;
 	}
 	return capabilities.supportedCodecs.isEmpty()
@@ -658,8 +682,7 @@ bool ScreenShareManager::canViewSession(const ScreenShareSession &session) const
 	if (Global::get().bScreenShareHelperRequired && !capabilities.helperAvailable) {
 		return false;
 	}
-	if (!capabilities.runtimeRelayTransports.isEmpty()
-		&& !capabilities.runtimeRelayTransports.contains(static_cast< int >(session.relayTransport))) {
+	if (!helperRuntimeSupportsViewing(capabilities, session.relayTransport)) {
 		return false;
 	}
 	if (!capabilities.supportedCodecs.isEmpty()

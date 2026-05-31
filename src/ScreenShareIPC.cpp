@@ -56,17 +56,34 @@ namespace IPC {
 		return QStringLiteral("MumbleScreenShareHelper");
 	}
 
+	QString sanitizeSocketBaseName(const QString &baseName) {
+		QString sanitized;
+		for (const QChar ch : baseName.trimmed()) {
+			if (ch.isLetterOrNumber() || ch == QLatin1Char('_') || ch == QLatin1Char('-')
+				|| ch == QLatin1Char('.')) {
+				sanitized.append(ch);
+			}
+		}
+
+		if (sanitized.isEmpty()) {
+			return socketBaseName();
+		}
+
+		return sanitized.left(96);
+	}
+
 	QString socketPath(const QString &baseName) {
 #ifdef Q_OS_WIN
-		return baseName;
+		return sanitizeSocketBaseName(baseName);
 #else
+		const QString sanitizedBaseName = sanitizeSocketBaseName(baseName);
 		const QString xdgRuntimePath = QProcessEnvironment::systemEnvironment().value(QLatin1String("XDG_RUNTIME_DIR"));
 		const QDir xdgRuntimeDir(xdgRuntimePath);
 		if (!xdgRuntimePath.isNull() && xdgRuntimeDir.exists()) {
-			return xdgRuntimeDir.absoluteFilePath(baseName + QLatin1String("Socket"));
+			return xdgRuntimeDir.absoluteFilePath(sanitizedBaseName + QLatin1String("Socket"));
 		}
 
-		return QDir::home().absoluteFilePath(QLatin1String(".") + baseName + QLatin1String("Socket"));
+		return QDir::home().absoluteFilePath(QLatin1String(".") + sanitizedBaseName + QLatin1String("Socket"));
 #endif
 	}
 

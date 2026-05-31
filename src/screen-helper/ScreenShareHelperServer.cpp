@@ -180,7 +180,11 @@ ScreenShareHelperServer::~ScreenShareHelperServer() {
 }
 
 bool ScreenShareHelperServer::start(QString *errorMessage) {
-	const QString socketName = Mumble::ScreenShare::IPC::socketPath();
+	return start(Mumble::ScreenShare::IPC::socketBaseName(), errorMessage);
+}
+
+bool ScreenShareHelperServer::start(const QString &socketBaseName, QString *errorMessage) {
+	const QString socketName = Mumble::ScreenShare::IPC::socketPath(socketBaseName);
 
 	QLocalServer::removeServer(socketName);
 #ifndef Q_OS_WIN

@@ -119,6 +119,9 @@ int main(int argc, char **argv) {
 	QCommandLineOption diagnosticsLogFileOption(QStringList{ QStringLiteral("diagnostics-log-file") },
 												QStringLiteral("Write helper diagnostics to the given file."),
 												QStringLiteral("path"));
+	QCommandLineOption socketNameOption(QStringList{ QStringLiteral("socket-name") },
+										QStringLiteral("Listen on the given local socket base name."),
+										QStringLiteral("name"));
 	QCommandLineOption printCapabilitiesOption(QStringList{ QStringLiteral("print-capabilities-json") },
 											   QStringLiteral("Print the helper capability payload as JSON and exit."));
 	QCommandLineOption selfTestOption(QStringList{ QStringLiteral("self-test") },
@@ -126,6 +129,7 @@ int main(int argc, char **argv) {
 	parser.addOption(helpOption);
 	parser.addOption(helpAllOption);
 	parser.addOption(diagnosticsLogFileOption);
+	parser.addOption(socketNameOption);
 	parser.addOption(printCapabilitiesOption);
 	parser.addOption(selfTestOption);
 	if (!parser.parse(app.arguments())) {
@@ -156,7 +160,7 @@ int main(int argc, char **argv) {
 	}
 
 	QString errorMessage;
-	if (!helperServer.start(&errorMessage)) {
+	if (!helperServer.start(parser.value(socketNameOption), &errorMessage)) {
 		qCritical().noquote() << QStringLiteral("ScreenShareHelper: failed to start: %1").arg(errorMessage);
 		return 1;
 	}
