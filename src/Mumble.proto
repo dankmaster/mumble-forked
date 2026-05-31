@@ -1047,6 +1047,7 @@ message ScreenShareCreate {
 	optional string capture_source_id = 10;
 	optional uint32 requested_min_bitrate_kbps = 11;
 	optional uint32 requested_max_bitrate_kbps = 12;
+	optional bool capture_audio = 13 [default = false];
 }
 
 // Sent by the server to announce the currently active screen-share session state.
@@ -1074,6 +1075,7 @@ message ScreenShareState {
 	optional string capture_source_id = 21;
 	optional uint32 min_bitrate_kbps = 22;
 	optional uint32 max_bitrate_kbps = 23;
+	optional bool capture_audio = 24 [default = false];
 }
 
 // Relays a publisher or viewer offer blob through Murmur.

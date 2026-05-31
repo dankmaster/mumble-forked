@@ -349,7 +349,7 @@ bool ScreenShareManager::isUsingNativeGpuRuntime(const QString &streamID) const 
 			   || capabilities.captureBackends.contains(QStringLiteral("windows-graphics-capture-d3d11")));
 }
 
-void ScreenShareManager::requestStartChannelShare(unsigned int channelID) {
+void ScreenShareManager::requestStartChannelShare(unsigned int channelID, const ScreenShareStartOptions &options) {
 	if (!Global::get().sh) {
 		return;
 	}
@@ -447,8 +447,15 @@ void ScreenShareManager::requestStartChannelShare(unsigned int channelID) {
 	msg.set_requested_fps(targetFps);
 	msg.set_requested_bitrate_kbps(requestedBitrate);
 	msg.set_quality_profile(u8(qualityProfile));
+	const QString requestedCaptureSource =
+		options.captureSourceID.trimmed().isEmpty()
+			? qEnvironmentVariable("MUMBLE_SCREENSHARE_SOURCE_ID", QStringLiteral("primary-monitor")).trimmed()
+			: options.captureSourceID.trimmed();
 	msg.set_capture_source_id(
-		u8(qEnvironmentVariable("MUMBLE_SCREENSHARE_SOURCE_ID", QStringLiteral("primary-monitor")).trimmed()));
+		u8(requestedCaptureSource.isEmpty() ? QStringLiteral("primary-monitor") : requestedCaptureSource));
+	if (options.captureAudio) {
+		msg.set_capture_audio(true);
+	}
 	msg.set_requested_min_bitrate_kbps(std::min(bitratePolicy.minKbps, requestedBitrate));
 	msg.set_requested_max_bitrate_kbps(qMax(bitratePolicy.maxKbps, requestedBitrate));
 	msg.set_prefer_hardware_encoding(true);
@@ -607,6 +614,9 @@ ScreenShareSession ScreenShareManager::sessionFromState(const MumbleProto::Scree
 	}
 	if (msg.has_capture_source_id()) {
 		session.captureSourceID = u8(msg.capture_source_id()).trimmed();
+	}
+	if (msg.has_capture_audio()) {
+		session.captureAudio = msg.capture_audio();
 	}
 	if (msg.has_min_bitrate_kbps()) {
 		session.minBitrateKbps = msg.min_bitrate_kbps();

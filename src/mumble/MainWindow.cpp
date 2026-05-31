@@ -145,6 +145,7 @@
 #include <QtCore/QXmlStreamReader>
 #include <QtGui/QClipboard>
 #include <QtGui/QDesktopServices>
+#include <QtGui/QGuiApplication>
 #include <QtGui/QImageReader>
 #include <QtGui/QImageWriter>
 #include <QtGui/QMouseEvent>
@@ -203,6 +204,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <functional>
@@ -261,6 +263,75 @@ constexpr int UserTextureLegacyHeight               = 60;
 constexpr int UserTextureLegacyRgbaSize             = UserTextureLegacyWidth * UserTextureLegacyHeight * 4;
 constexpr int UserTextureMaxImageDimension          = 1024;
 constexpr int UpdateResumeStateMaxAgeDays           = 7;
+
+#ifdef Q_OS_WIN
+QString screenShareWindowTitle(HWND hwnd) {
+	std::array< wchar_t, 256 > titleBuffer = {};
+	const int copied = GetWindowTextW(hwnd, titleBuffer.data(), static_cast< int >(titleBuffer.size()));
+	if (copied <= 0) {
+		return QString();
+	}
+
+	return QString::fromWCharArray(titleBuffer.data(), copied).trimmed();
+}
+
+bool isScreenShareWindowCandidate(HWND hwnd, const DWORD currentProcessID) {
+	if (!hwnd || !IsWindowVisible(hwnd) || GetAncestor(hwnd, GA_ROOT) != hwnd) {
+		return false;
+	}
+
+	DWORD windowProcessID = 0;
+	GetWindowThreadProcessId(hwnd, &windowProcessID);
+	if (windowProcessID == 0 || windowProcessID == currentProcessID) {
+		return false;
+	}
+
+	RECT rect = {};
+	if (!GetWindowRect(hwnd, &rect) || rect.right <= rect.left || rect.bottom <= rect.top) {
+		return false;
+	}
+
+	return !screenShareWindowTitle(hwnd).isEmpty();
+}
+
+struct ScreenShareWindowSearch {
+	DWORD currentProcessID = 0;
+	HWND result            = nullptr;
+};
+
+BOOL CALLBACK enumScreenShareWindows(HWND hwnd, LPARAM userData) {
+	auto *search = reinterpret_cast< ScreenShareWindowSearch * >(userData);
+	if (search && isScreenShareWindowCandidate(hwnd, search->currentProcessID)) {
+		search->result = hwnd;
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+quintptr activeExternalWindowForScreenShare(QString *title) {
+	const DWORD currentProcessID = GetCurrentProcessId();
+	HWND hwnd                    = GetForegroundWindow();
+	if (isScreenShareWindowCandidate(hwnd, currentProcessID)) {
+		if (title) {
+			*title = screenShareWindowTitle(hwnd);
+		}
+		return reinterpret_cast< quintptr >(hwnd);
+	}
+
+	ScreenShareWindowSearch search;
+	search.currentProcessID = currentProcessID;
+	EnumWindows(enumScreenShareWindows, reinterpret_cast< LPARAM >(&search));
+	if (!search.result) {
+		return 0;
+	}
+
+	if (title) {
+		*title = screenShareWindowTitle(search.result);
+	}
+	return reinterpret_cast< quintptr >(search.result);
+}
+#endif
 
 QString updateResumeStatePath() {
 	return Global::get().qdBasePath.filePath(QStringLiteral("Updates/mumble-update-resume.json"));
@@ -21550,8 +21621,8 @@ QVariantMap MainWindow::buildModernShellVoiceRoomScreenShareState(const Channel 
 										: (publishing ? QStringLiteral("publishing") : QStringLiteral("error")));
 		shareState.insert(QStringLiteral("statusLabel"), tr("You are sharing in this room"));
 		shareState.insert(QStringLiteral("statusTone"), usingFallback ? QStringLiteral("warning") : QStringLiteral("success"));
-		setPrimaryAction(QStringLiteral("screenShareOpenWindow"), tr("Open share window"), detachedWindowOpen,
-						 detachedWindowOpen ? QString() : tr("The share window is not available right now."),
+		setPrimaryAction(QStringLiteral("screenShareOpenWindow"), tr("Manage share"), true,
+						 tr("View your active screen-share status."),
 						 usingFallback ? QStringLiteral("warning") : QStringLiteral("success"));
 		overflowActions.push_back(ModernShellMenuSerializer::actionItem(
 			QStringLiteral("screenShareStop"), tr("Stop sharing"), true, false, QStringLiteral("danger")));
@@ -21559,8 +21630,8 @@ QVariantMap MainWindow::buildModernShellVoiceRoomScreenShareState(const Channel 
 		shareState.insert(QStringLiteral("mode"), usingFallback ? QStringLiteral("fallback") : QStringLiteral("viewing"));
 		shareState.insert(QStringLiteral("statusLabel"), tr("Watching %1's share").arg(ownerLabel));
 		shareState.insert(QStringLiteral("statusTone"), usingFallback ? QStringLiteral("warning") : QStringLiteral("accent"));
-		setPrimaryAction(QStringLiteral("screenShareOpenWindow"), tr("Open share window"), detachedWindowOpen,
-						 detachedWindowOpen ? QString() : tr("The share window is not available right now."),
+		setPrimaryAction(QStringLiteral("screenShareOpenWindow"), tr("Open share window"), true,
+						 detachedWindowOpen ? QString() : tr("Open or restart the screen-share viewer."),
 						 usingFallback ? QStringLiteral("warning") : QStringLiteral("accent"));
 		overflowActions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("screenShareStopWatching"),
 																		tr("Stop watching"), true, false));
@@ -23201,8 +23272,8 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 			shareState.insert(QStringLiteral("statusLabel"), tr("You are sharing in this room"));
 			shareState.insert(QStringLiteral("statusTone"),
 							  usingFallback ? QStringLiteral("warning") : QStringLiteral("success"));
-			setPrimaryAction(QStringLiteral("screenShareOpenWindow"), tr("Open share window"), detachedWindowOpen,
-							 detachedWindowOpen ? QString() : tr("The share window is not available right now."),
+			setPrimaryAction(QStringLiteral("screenShareOpenWindow"), tr("Manage share"), true,
+							 tr("View your active screen-share status."),
 							 usingFallback ? QStringLiteral("warning") : QStringLiteral("success"));
 			overflowActions.push_back(ModernShellMenuSerializer::actionItem(
 				QStringLiteral("screenShareStop"), tr("Stop sharing"), true, false, QStringLiteral("danger")));
@@ -23212,8 +23283,8 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 			shareState.insert(QStringLiteral("statusLabel"), tr("Watching %1's share").arg(ownerLabel));
 			shareState.insert(QStringLiteral("statusTone"),
 							  usingFallback ? QStringLiteral("warning") : QStringLiteral("accent"));
-			setPrimaryAction(QStringLiteral("screenShareOpenWindow"), tr("Open share window"), detachedWindowOpen,
-							 detachedWindowOpen ? QString() : tr("The share window is not available right now."),
+			setPrimaryAction(QStringLiteral("screenShareOpenWindow"), tr("Open share window"), true,
+							 detachedWindowOpen ? QString() : tr("Open or restart the screen-share viewer."),
 							 usingFallback ? QStringLiteral("warning") : QStringLiteral("accent"));
 			overflowActions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("screenShareStopWatching"),
 																			tr("Stop watching"), true, false));
@@ -24257,8 +24328,11 @@ bool MainWindow::handleModernShellScopeAction(const QString &scopeToken, const Q
 		if (m_screenShareManager) {
 			const QString streamID = screenShareStreamForChannel(channel);
 			if (normalizedActionID == QLatin1String("screenShareStart")) {
-				m_screenShareManager->requestStartChannelShare(static_cast< unsigned int >(channel->iId));
-				handled = true;
+				ScreenShareStartOptions options;
+				if (chooseScreenShareStartOptions(channel, &options)) {
+					m_screenShareManager->requestStartChannelShare(static_cast< unsigned int >(channel->iId), options);
+					handled = true;
+				}
 			} else if (!streamID.isEmpty()) {
 				if (normalizedActionID == QLatin1String("screenShareStop")) {
 					m_screenShareManager->requestStopShare(streamID);
@@ -24270,7 +24344,7 @@ bool MainWindow::handleModernShellScopeAction(const QString &scopeToken, const Q
 					m_screenShareManager->requestStopViewing(streamID);
 					handled = true;
 				} else {
-					handled = m_screenShareManager->focusOrReopenDetachedWindow(streamID);
+					handled = openScreenShareWindowOrStatus(streamID);
 				}
 			}
 		}
@@ -24750,7 +24824,7 @@ bool MainWindow::handleModernShellParticipantAction(const qulonglong session, co
 				m_screenShareManager->requestStopViewing(streamID);
 				handled = true;
 			} else {
-				handled = m_screenShareManager->focusOrReopenDetachedWindow(streamID);
+				handled = openScreenShareWindowOrStatus(streamID);
 			}
 		}
 		if (handled) {
@@ -37151,13 +37225,121 @@ void MainWindow::qmListener_aboutToShow() {
 	}
 }
 
+bool MainWindow::chooseScreenShareStartOptions(Channel *channel, ScreenShareStartOptions *options) {
+	if (!channel || !options) {
+		return false;
+	}
+
+	QDialog dialog(this);
+	dialog.setWindowTitle(tr("Start screen share"));
+	QVBoxLayout *layout = new QVBoxLayout(&dialog);
+
+	QLabel *heading = new QLabel(tr("Share to %1").arg(channel->qsName), &dialog);
+	heading->setWordWrap(true);
+	layout->addWidget(heading);
+
+	QFormLayout *form = new QFormLayout();
+	layout->addLayout(form);
+
+	QComboBox *sourceCombo = new QComboBox(&dialog);
+	const QList< QScreen * > screens = QGuiApplication::screens();
+	for (int i = 0; i < screens.size(); ++i) {
+		const QScreen *screen = screens.at(i);
+		const QRect geometry  = screen ? screen->geometry() : QRect();
+		const QString screenLabel =
+			screen ? tr("Screen %1: %2 (%3x%4)")
+						 .arg(i + 1)
+						 .arg(screen->name().isEmpty() ? tr("Display") : screen->name())
+						 .arg(geometry.width())
+						 .arg(geometry.height())
+				   : tr("Screen %1").arg(i + 1);
+		sourceCombo->addItem(screenLabel, QStringLiteral("monitor:%1").arg(i));
+	}
+	if (sourceCombo->count() == 0) {
+		sourceCombo->addItem(tr("Primary screen"), QStringLiteral("primary-monitor"));
+	}
+
+#ifdef Q_OS_WIN
+	QString windowTitle;
+	const quintptr windowHandle = activeExternalWindowForScreenShare(&windowTitle);
+	if (windowHandle != 0) {
+		sourceCombo->addItem(tr("Focused window: %1").arg(windowTitle),
+							 QStringLiteral("window:%1").arg(static_cast< qulonglong >(windowHandle)));
+	}
+#endif
+
+	form->addRow(tr("Source"), sourceCombo);
+
+	QCheckBox *audioCheck = new QCheckBox(tr("Share system audio"), &dialog);
+	audioCheck->setChecked(false);
+	form->addRow(QString(), audioCheck);
+
+	QDialogButtonBox *buttons =
+		new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, Qt::Horizontal, &dialog);
+	if (QPushButton *startButton = buttons->button(QDialogButtonBox::Ok)) {
+		startButton->setText(tr("Start sharing"));
+	}
+	layout->addWidget(buttons);
+	connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+	connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+	if (dialog.exec() != QDialog::Accepted) {
+		return false;
+	}
+
+	options->captureSourceID = sourceCombo->currentData().toString().trimmed();
+	options->captureAudio    = audioCheck->isChecked();
+	return true;
+}
+
+bool MainWindow::openScreenShareWindowOrStatus(const QString &streamID) {
+	if (streamID.isEmpty() || !m_screenShareManager) {
+		return false;
+	}
+
+	const ScreenShareSession session = m_screenShareManager->sessions().value(streamID);
+	const bool selfPublishing =
+		session.ownerSession == Global::get().uiSession && m_screenShareManager->isPublishingSession(streamID);
+
+	if (selfPublishing) {
+		QMessageBox box(this);
+		box.setIcon(QMessageBox::Information);
+		box.setWindowTitle(tr("Screen share"));
+		box.setText(tr("Your screen share is live."));
+		const QString sourceLabel =
+			session.captureSourceID.trimmed().isEmpty() ? tr("default source") : session.captureSourceID.trimmed();
+		box.setInformativeText(tr("Source: %1\nAudio: %2")
+								   .arg(sourceLabel, session.captureAudio ? tr("on") : tr("off")));
+		QPushButton *stopButton = box.addButton(tr("Stop sharing"), QMessageBox::DestructiveRole);
+		box.addButton(QMessageBox::Ok);
+		box.exec();
+		if (box.clickedButton() == stopButton) {
+			m_screenShareManager->requestStopShare(streamID);
+			publishModernShellRoomStatePatch();
+		}
+		return true;
+	}
+
+	const bool opened = m_screenShareManager->focusOrReopenDetachedWindow(streamID);
+	if (!opened) {
+		QMessageBox::warning(this, tr("Screen share"),
+							 tr("The screen-share window could not be opened right now."));
+	}
+	return opened;
+}
+
 void MainWindow::startChannelScreenShare() {
 	Channel *c = getContextMenuChannel();
 	if (!c || !m_screenShareManager) {
 		return;
 	}
 
-	m_screenShareManager->requestStartChannelShare(static_cast< unsigned int >(c->iId));
+	ScreenShareStartOptions options;
+	if (!chooseScreenShareStartOptions(c, &options)) {
+		return;
+	}
+
+	m_screenShareManager->requestStartChannelShare(static_cast< unsigned int >(c->iId), options);
 }
 
 void MainWindow::stopChannelScreenShare() {
@@ -37213,7 +37395,7 @@ void MainWindow::openChannelScreenShareWindow() {
 		return;
 	}
 
-	m_screenShareManager->focusOrReopenDetachedWindow(streamID);
+	openScreenShareWindowOrStatus(streamID);
 }
 
 void MainWindow::on_qaUserMute_triggered() {

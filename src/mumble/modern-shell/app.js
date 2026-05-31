@@ -931,6 +931,25 @@
 		dismissCompactRailAfterAction();
 	}
 
+	function handleHeaderScreenShareActionActivation(event) {
+		if (event && event.type === "pointerdown"
+				&& ((event.button !== undefined && event.button !== 0) || event.isPrimary === false)) {
+			return;
+		}
+		if (event && event.type === "mousedown"
+				&& (window.PointerEvent || (event.button !== undefined && event.button !== 0))) {
+			return;
+		}
+
+		stopRoomActionEvent(event);
+		const scopeToken = refs.screenShareButton.dataset.scopeToken || "";
+		const actionId = refs.screenShareButton.dataset.actionId || "";
+		if (!scopeToken || !actionId || refs.screenShareButton.disabled) {
+			return;
+		}
+		requestScreenShareAction(scopeToken, actionId);
+	}
+
 	function handleJoinButtonActivation(room, event) {
 		stopRoomActionEvent(event);
 		if (!room || room.joined || room.canJoin === false) {
@@ -5685,6 +5704,8 @@
 				return "Watch";
 			case "open share window":
 				return "Open";
+			case "manage share":
+				return "Manage";
 			default:
 				return label || "Share";
 		}
@@ -25642,14 +25663,9 @@
 				renderNote(app, snapshot.activeScope || {}, snapshot.messages || []);
 			});
 		}
-		refs.screenShareButton.addEventListener("click", function() {
-			const scopeToken = refs.screenShareButton.dataset.scopeToken || "";
-			const actionId = refs.screenShareButton.dataset.actionId || "";
-			if (!scopeToken || !actionId || refs.screenShareButton.disabled) {
-				return;
-			}
-			requestScreenShareAction(scopeToken, actionId);
-		});
+		refs.screenShareButton.addEventListener("pointerdown", handleHeaderScreenShareActionActivation, true);
+		refs.screenShareButton.addEventListener("mousedown", handleHeaderScreenShareActionActivation, true);
+		refs.screenShareButton.addEventListener("click", handleHeaderScreenShareActionActivation);
 		refs.loadOlderButton.addEventListener("click", function() { notifyBridge("loadOlderHistory"); });
 		refs.markReadButton.addEventListener("click", function() { notifyBridge("markRead"); });
 		refs.attachButton.addEventListener("click", function() { notifyBridge("openImagePicker"); });

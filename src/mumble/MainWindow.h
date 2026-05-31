@@ -55,6 +55,7 @@ class Tokens;
 class Channel;
 class ClientUser;
 class ScreenShareManager;
+struct ScreenShareStartOptions;
 class UserInformation;
 class VoiceRecorderDialog;
 class PositionalAudioViewer;
@@ -1145,6 +1146,8 @@ public slots:
 	void watchChannelScreenShare();
 	void stopWatchingChannelScreenShare();
 	void openChannelScreenShareWindow();
+	bool chooseScreenShareStartOptions(Channel *channel, ScreenShareStartOptions *options);
+	bool openScreenShareWindowOrStatus(const QString &streamID);
 	void on_qaAudioReset_triggered();
 	void on_qaAudioMute_triggered();
 	void on_qaAudioDeaf_triggered();

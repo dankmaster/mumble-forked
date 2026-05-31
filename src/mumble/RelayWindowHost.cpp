@@ -409,8 +409,11 @@ QUrl RelayWindowHost::buildPageUrl() const {
 	query.addQueryItem(QStringLiteral("fps"), QString::number(qMax(0U, m_session.fps)));
 	query.addQueryItem(QStringLiteral("bitrate_kbps"), QString::number(qMax(0U, m_session.bitrateKbps)));
 	if (m_mode == Mode::Publish) {
-		query.addQueryItem(QStringLiteral("capture_audio"), QStringLiteral("1"));
-		query.addQueryItem(QStringLiteral("system_audio"), QStringLiteral("include"));
+		if (!m_session.captureSourceID.trimmed().isEmpty()) {
+			query.addQueryItem(QStringLiteral("capture_source_id"), m_session.captureSourceID.trimmed());
+		}
+		query.addQueryItem(QStringLiteral("capture_audio"), m_session.captureAudio ? QStringLiteral("1") : QStringLiteral("0"));
+		query.addQueryItem(QStringLiteral("system_audio"), m_session.captureAudio ? QStringLiteral("include") : QStringLiteral("exclude"));
 		query.addQueryItem(QStringLiteral("surface_switching"), QStringLiteral("include"));
 		query.addQueryItem(QStringLiteral("self_browser_surface"), QStringLiteral("exclude"));
 	}

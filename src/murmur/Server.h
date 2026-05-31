@@ -383,6 +383,7 @@ public:
 		unsigned int uiBitrateKbps = 0;
 		QString qsQualityProfile = QStringLiteral("auto");
 		QString qsCaptureSourceID;
+		bool bCaptureAudio = false;
 		unsigned int uiMinBitrateKbps = 0;
 		unsigned int uiMaxBitrateKbps = 0;
 	};

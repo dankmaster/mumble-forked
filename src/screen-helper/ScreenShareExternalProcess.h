@@ -45,8 +45,12 @@ public:
 		bool gstVideoTestSrcAvailable         = false;
 		bool gstVideoConvertAvailable         = false;
 		bool gstVideoScaleAvailable           = false;
+		bool gstWasapi2SrcAvailable           = false;
+		bool gstAudioConvertAvailable         = false;
+		bool gstAudioResampleAvailable        = false;
 		bool gstDecodeBinAvailable            = false;
 		bool gstAutoVideoSinkAvailable        = false;
+		bool gstAutoAudioSinkAvailable        = false;
 		bool gstD3D11VideoSinkAvailable       = false;
 		bool gstFakeSinkAvailable             = false;
 		QStringList missingGStreamerElements;

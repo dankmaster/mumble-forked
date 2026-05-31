@@ -387,6 +387,7 @@ ScreenShareSessionPlanner::Plan buildPlan(const QJsonObject &payload,
 	const QString qualityProfile =
 		payload.value(QStringLiteral("quality_profile")).toString(QStringLiteral("auto")).trimmed().toLower();
 	const QString captureSourceID = payload.value(QStringLiteral("capture_source_id")).toString().trimmed();
+	const bool captureAudio = payload.value(QStringLiteral("capture_audio")).toBool(false);
 
 	const bool preferHardware              = payload.value(QStringLiteral("prefer_hardware_encoding")).toBool(true);
 	const QList< EncoderBackend > backends = probeEncoderBackends();
@@ -469,6 +470,7 @@ ScreenShareSessionPlanner::Plan buildPlan(const QJsonObject &payload,
 	planPayload.insert(QStringLiteral("quality_profile"),
 					   qualityProfile.isEmpty() ? QStringLiteral("auto") : qualityProfile);
 	planPayload.insert(QStringLiteral("capture_source_id"), captureSourceID);
+	planPayload.insert(QStringLiteral("capture_audio"), captureAudio);
 	planPayload.insert(QStringLiteral("adaptive_degradation_order"), QStringLiteral("fps-then-resolution"));
 	planPayload.insert(QStringLiteral("prefer_hardware_encoding"), preferHardware);
 	planPayload.insert(QStringLiteral("planned_encoder_backend"),

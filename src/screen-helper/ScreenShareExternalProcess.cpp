@@ -9,6 +9,10 @@
 #include "ScreenShareIPC.h"
 #include "ScreenShareWindowsNativeCapture.h"
 
+#ifdef Q_OS_WIN
+#	include "win.h"
+#endif
+
 #include <QtCore/QCoreApplication>
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
@@ -427,12 +431,14 @@ QString browserLaunchUrl(const QJsonObject &plan, QString *errorMessage, QString
 	appendQuery(QStringLiteral("fps"), QString::number(qMax(0, plan.value(QStringLiteral("fps")).toInt())));
 	appendQuery(QStringLiteral("bitrate_kbps"),
 				QString::number(qMax(0, plan.value(QStringLiteral("bitrate_kbps")).toInt())));
+	appendQuery(QStringLiteral("capture_source_id"), plan.value(QStringLiteral("capture_source_id")).toString());
 	const bool browserPublisherCaptureAudio =
 		plan.value(QStringLiteral("relay_contract_mode")).toString() == QLatin1String("browser-webrtc-runtime")
 		&& plan.value(QStringLiteral("relay_role_token")).toString() == QLatin1String("publisher");
 	if (browserPublisherCaptureAudio) {
-		appendQuery(QStringLiteral("capture_audio"), QStringLiteral("1"));
-		appendQuery(QStringLiteral("system_audio"), QStringLiteral("include"));
+		const bool captureAudio = plan.value(QStringLiteral("capture_audio")).toBool(false);
+		appendQuery(QStringLiteral("capture_audio"), captureAudio ? QStringLiteral("1") : QStringLiteral("0"));
+		appendQuery(QStringLiteral("system_audio"), captureAudio ? QStringLiteral("include") : QStringLiteral("exclude"));
 		appendQuery(QStringLiteral("surface_switching"), QStringLiteral("include"));
 		appendQuery(QStringLiteral("self_browser_surface"), QStringLiteral("exclude"));
 	}
@@ -1145,6 +1151,82 @@ QString gstCaptureApiToken() {
 #endif
 }
 
+struct GStreamerCaptureSelection {
+	QString captureApi;
+	QString selectedCaptureSource;
+	QStringList sourceProperties;
+	QStringList warnings;
+};
+
+GStreamerCaptureSelection selectGStreamerCaptureSource(const QJsonObject &plan) {
+	GStreamerCaptureSelection selection;
+	selection.captureApi = gstCaptureApiToken();
+
+	const QString sourceID = plan.value(QStringLiteral("capture_source_id")).toString().trimmed();
+	const QString normalizedSourceID = sourceID.toLower();
+	auto selectPrimaryMonitor = [&]() {
+		selection.sourceProperties.append(QStringLiteral("monitor-index=-1"));
+		selection.selectedCaptureSource =
+			QStringLiteral("gstreamer-d3d11-%1-primary-monitor").arg(selection.captureApi);
+	};
+
+	if (normalizedSourceID.isEmpty() || normalizedSourceID == QLatin1String("primary-monitor")
+		|| normalizedSourceID == QLatin1String("primary") || normalizedSourceID == QLatin1String("screen:primary")
+		|| normalizedSourceID == QLatin1String("monitor:primary")) {
+		selectPrimaryMonitor();
+		return selection;
+	}
+
+	const QRegularExpression monitorExpression(QStringLiteral("^(?:monitor|screen|display):([0-9]+)$"));
+	const QRegularExpressionMatch monitorMatch = monitorExpression.match(normalizedSourceID);
+	if (monitorMatch.hasMatch()) {
+		bool ok = false;
+		const int monitorIndex = monitorMatch.captured(1).toInt(&ok);
+		if (ok && monitorIndex >= 0) {
+			selection.sourceProperties.append(QStringLiteral("monitor-index=%1").arg(monitorIndex));
+			selection.selectedCaptureSource =
+				QStringLiteral("gstreamer-d3d11-%1-monitor-%2").arg(selection.captureApi).arg(monitorIndex);
+			return selection;
+		}
+	}
+
+	if (normalizedSourceID == QLatin1String("focused-window")
+		|| normalizedSourceID == QLatin1String("window:focused")
+		|| normalizedSourceID == QLatin1String("window:foreground")
+		|| normalizedSourceID.startsWith(QLatin1String("window:"))) {
+#ifdef Q_OS_WIN
+		qulonglong windowHandle = 0;
+		if (normalizedSourceID == QLatin1String("focused-window")
+			|| normalizedSourceID == QLatin1String("window:focused")
+			|| normalizedSourceID == QLatin1String("window:foreground")) {
+			windowHandle = reinterpret_cast< qulonglong >(GetForegroundWindow());
+		} else {
+			bool ok = false;
+			windowHandle = normalizedSourceID.mid(QStringLiteral("window:").size()).toULongLong(&ok);
+			if (!ok) {
+				windowHandle = 0;
+			}
+		}
+		if (windowHandle != 0 && IsWindow(reinterpret_cast< HWND >(windowHandle))) {
+			selection.captureApi = QStringLiteral("wgc");
+			selection.sourceProperties.append(QStringLiteral("window-handle=%1").arg(windowHandle));
+			selection.sourceProperties.append(QStringLiteral("window-capture-mode=default"));
+			selection.selectedCaptureSource = QStringLiteral("gstreamer-d3d11-wgc-window-%1").arg(windowHandle);
+			return selection;
+		}
+#endif
+		selection.warnings.append(
+			QStringLiteral("Focused-window capture was requested, but no valid native window handle was available."));
+	}
+
+	selectPrimaryMonitor();
+	if (!sourceID.isEmpty()) {
+		selection.warnings.append(QStringLiteral("Unsupported capture source '%1'; using the primary monitor.")
+									  .arg(sourceID));
+	}
+	return selection;
+}
+
 struct GStreamerEncoderSelection {
 	bool valid = false;
 	QString encoderElement;
@@ -1294,12 +1376,18 @@ ScreenShareExternalProcess::LaunchResult
 	const bool useTestPattern = envFlagEnabled("MUMBLE_SCREENSHARE_TEST_PATTERN")
 								|| qEnvironmentVariable("MUMBLE_SCREENSHARE_CAPTURE_SOURCE").trimmed().toLower()
 									   == QLatin1String("test-pattern");
+	const bool captureAudio = plan.value(QStringLiteral("capture_audio")).toBool(false);
+	const GStreamerCaptureSelection captureSelection = selectGStreamerCaptureSource(plan);
+	QStringList launchWarnings = captureSelection.warnings;
 
 	QStringList arguments;
 	arguments << QStringLiteral("-e");
 	arguments << QStringLiteral("livekitwebrtcsink") << QStringLiteral("name=sink");
 	appendGStreamerLiveKitSignallerArguments(&arguments, plan, wsUrl, identity, participantName);
 	arguments << QStringLiteral("video-caps=video/x-h264");
+	if (captureAudio) {
+		arguments << QStringLiteral("audio-caps=audio/x-opus");
+	}
 
 	if (useTestPattern) {
 		arguments << QStringLiteral("videotestsrc") << QStringLiteral("is-live=true")
@@ -1319,7 +1407,8 @@ ScreenShareExternalProcess::LaunchResult
 				  << QStringLiteral("!");
 	} else {
 		arguments << QStringLiteral("d3d11screencapturesrc")
-				  << QStringLiteral("capture-api=%1").arg(gstCaptureApiToken())
+				  << QStringLiteral("capture-api=%1").arg(captureSelection.captureApi)
+				  << captureSelection.sourceProperties
 				  << QStringLiteral("show-cursor=true") << QStringLiteral("!");
 		if (encoder.consumesD3D11Memory) {
 			arguments << QStringLiteral("video/x-raw(memory:D3D11Memory),framerate=%1/1").arg(fps)
@@ -1352,7 +1441,24 @@ ScreenShareExternalProcess::LaunchResult
 			  << QStringLiteral("!") << QStringLiteral("queue") << QStringLiteral("leaky=downstream")
 			  << QStringLiteral("max-size-buffers=2") << QStringLiteral("!") << QStringLiteral("sink.");
 
+	if (captureAudio) {
+		if (support.gstWasapi2SrcAvailable && support.gstAudioConvertAvailable
+			&& support.gstAudioResampleAvailable) {
+			arguments << QStringLiteral("wasapi2src") << QStringLiteral("loopback=true")
+					  << QStringLiteral("low-latency=true") << QStringLiteral("do-timestamp=true")
+					  << QStringLiteral("!") << QStringLiteral("audioconvert") << QStringLiteral("!")
+					  << QStringLiteral("audioresample") << QStringLiteral("!")
+					  << QStringLiteral("audio/x-raw,rate=48000,channels=2") << QStringLiteral("!")
+					  << QStringLiteral("queue") << QStringLiteral("leaky=downstream")
+					  << QStringLiteral("max-size-buffers=8") << QStringLiteral("!") << QStringLiteral("sink.");
+		} else {
+			launchWarnings.append(
+				QStringLiteral("System audio was requested, but the bundled GStreamer audio capture elements are unavailable."));
+		}
+	}
+
 	launch = startProcess(support.gstLaunchPath, arguments, parent, QStringLiteral("gstreamer-livekit-publish"));
+	launch.warnings += launchWarnings;
 	if (!launch.started) {
 		return launch;
 	}
@@ -1360,7 +1466,7 @@ ScreenShareExternalProcess::LaunchResult
 	launch.endpointUrl           = wsUrl;
 	launch.selectedEncoder       = encoder.selectedEncoder;
 	launch.selectedCaptureSource = useTestPattern ? QStringLiteral("gstreamer-test-pattern")
-												   : QStringLiteral("gstreamer-d3d11-%1").arg(gstCaptureApiToken());
+												   : captureSelection.selectedCaptureSource;
 	return launch;
 }
 
@@ -1414,6 +1520,15 @@ ScreenShareExternalProcess::LaunchResult
 				  << QStringLiteral("sync=false");
 	} else {
 		arguments << QStringLiteral("fakesink") << QStringLiteral("sync=false");
+	}
+	const bool expectAudio = plan.value(QStringLiteral("capture_audio")).toBool(false);
+	if (expectAudio && support.gstAutoAudioSinkAvailable && support.gstAudioConvertAvailable
+		&& support.gstAudioResampleAvailable) {
+		arguments << QStringLiteral("src.") << QStringLiteral("!") << QStringLiteral("queue")
+				  << QStringLiteral("leaky=downstream") << QStringLiteral("max-size-buffers=8")
+				  << QStringLiteral("!") << QStringLiteral("decodebin") << QStringLiteral("!")
+				  << QStringLiteral("audioconvert") << QStringLiteral("!") << QStringLiteral("audioresample")
+				  << QStringLiteral("!") << QStringLiteral("autoaudiosink") << QStringLiteral("sync=false");
 	}
 
 	launch = startProcess(support.gstLaunchPath, arguments, parent, QStringLiteral("gstreamer-livekit-view"));
@@ -1597,9 +1712,16 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 			gstElementAvailable(support.gstInspectPath, QStringLiteral("videoconvert"));
 		support.gstVideoScaleAvailable =
 			gstElementAvailable(support.gstInspectPath, QStringLiteral("videoscale"));
+		support.gstWasapi2SrcAvailable = gstElementAvailable(support.gstInspectPath, QStringLiteral("wasapi2src"));
+		support.gstAudioConvertAvailable =
+			gstElementAvailable(support.gstInspectPath, QStringLiteral("audioconvert"));
+		support.gstAudioResampleAvailable =
+			gstElementAvailable(support.gstInspectPath, QStringLiteral("audioresample"));
 		support.gstDecodeBinAvailable = gstElementAvailable(support.gstInspectPath, QStringLiteral("decodebin"));
 		support.gstAutoVideoSinkAvailable =
 			gstElementAvailable(support.gstInspectPath, QStringLiteral("autovideosink"));
+		support.gstAutoAudioSinkAvailable =
+			gstElementAvailable(support.gstInspectPath, QStringLiteral("autoaudiosink"));
 		support.gstD3D11VideoSinkAvailable =
 			gstElementAvailable(support.gstInspectPath, QStringLiteral("d3d11videosink"));
 		support.gstFakeSinkAvailable = gstElementAvailable(support.gstInspectPath, QStringLiteral("fakesink"));
@@ -1686,8 +1808,12 @@ QJsonObject ScreenShareExternalProcess::runtimeSupportToJson(const RuntimeSuppor
 	payload.insert(QStringLiteral("gst_videotestsrc_available"), support.gstVideoTestSrcAvailable);
 	payload.insert(QStringLiteral("gst_videoconvert_available"), support.gstVideoConvertAvailable);
 	payload.insert(QStringLiteral("gst_videoscale_available"), support.gstVideoScaleAvailable);
+	payload.insert(QStringLiteral("gst_wasapi2src_available"), support.gstWasapi2SrcAvailable);
+	payload.insert(QStringLiteral("gst_audioconvert_available"), support.gstAudioConvertAvailable);
+	payload.insert(QStringLiteral("gst_audioresample_available"), support.gstAudioResampleAvailable);
 	payload.insert(QStringLiteral("gst_decodebin_available"), support.gstDecodeBinAvailable);
 	payload.insert(QStringLiteral("gst_autovideosink_available"), support.gstAutoVideoSinkAvailable);
+	payload.insert(QStringLiteral("gst_autoaudiosink_available"), support.gstAutoAudioSinkAvailable);
 	payload.insert(QStringLiteral("gst_d3d11videosink_available"), support.gstD3D11VideoSinkAvailable);
 	payload.insert(QStringLiteral("gst_fakesink_available"), support.gstFakeSinkAvailable);
 	{

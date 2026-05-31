@@ -37,8 +37,14 @@ struct ScreenShareSession {
 	unsigned int bitrateKbps = 0;
 	QString qualityProfile = QStringLiteral("auto");
 	QString captureSourceID;
+	bool captureAudio = false;
 	unsigned int minBitrateKbps = 0;
 	unsigned int maxBitrateKbps = 0;
+};
+
+struct ScreenShareStartOptions {
+	QString captureSourceID;
+	bool captureAudio = false;
 };
 
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
@@ -68,7 +74,8 @@ public:
 	bool focusOrReopenDetachedWindow(const QString &streamID);
 	bool isUsingFallbackRuntime(const QString &streamID) const;
 	bool isUsingNativeGpuRuntime(const QString &streamID) const;
-	void requestStartChannelShare(unsigned int channelID = 0);
+	void requestStartChannelShare(unsigned int channelID = 0,
+								  const ScreenShareStartOptions &options = ScreenShareStartOptions());
 	void requestStartViewing(const QString &streamID);
 	void requestStopViewing(const QString &streamID);
 	void requestStopShare(const QString &streamID);
