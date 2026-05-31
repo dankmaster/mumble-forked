@@ -20,7 +20,9 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QMimeData>
 #include <QtCore/QPoint>
+#include <QtCore/QStringList>
 #include <QtCore/QTimer>
+#include <QtCore/QUrlQuery>
 #include <QtCore/QVariantList>
 #include <QtGui/QDragEnterEvent>
 #include <QtGui/QDropEvent>
@@ -45,8 +47,41 @@ namespace {
 		QByteArrayLiteral("video/webm,video/mp4,video/*;q=0.9,audio/*;q=0.8,image/avif,image/webp,image/*,*/*;q=0.5");
 	const QByteArray YOUTUBE_EMBED_REFERER = QByteArrayLiteral("https://www.mumble.info/");
 
+	void addModernUiTweaksQuery(QUrl &url, const QVariantMap &uiTweaks) {
+		if (uiTweaks.isEmpty()) {
+			return;
+		}
+
+		QUrlQuery query(url);
+		const QStringList keys { QStringLiteral("theme"), QStringLiteral("accent"), QStringLiteral("density"),
+								 QStringLiteral("userIcons"), QStringLiteral("classicUserIcons"),
+								 QStringLiteral("railSide") };
+		for (const QString &key : keys) {
+			const QVariant value = uiTweaks.value(key);
+			if (!value.isValid() || value.isNull()) {
+				continue;
+			}
+			const QString text = value.toString().trimmed();
+			if (!text.isEmpty()) {
+				query.addQueryItem(key, text);
+			}
+		}
+		url.setQuery(query);
+	}
+
 	QUrl modernShellUrl() {
-		return QUrl(QStringLiteral("qrc:/modern-shell/index.html"));
+		QUrl url(QStringLiteral("qrc:/modern-shell/index.html"));
+		QVariantMap uiTweaks;
+		uiTweaks.insert(QStringLiteral("theme"), Global::get().s.qsModernShellTheme);
+		uiTweaks.insert(QStringLiteral("accent"), Global::get().s.qsModernShellAccent);
+		uiTweaks.insert(QStringLiteral("density"), Global::get().s.qsModernShellDensity);
+		uiTweaks.insert(QStringLiteral("userIcons"),
+						Global::get().s.bModernShellClassicUserIcons ? QStringLiteral("classic")
+																	 : QStringLiteral("avatars"));
+		uiTweaks.insert(QStringLiteral("classicUserIcons"), Global::get().s.bModernShellClassicUserIcons);
+		uiTweaks.insert(QStringLiteral("railSide"), Global::get().s.qsModernShellRailSide);
+		addModernUiTweaksQuery(url, uiTweaks);
+		return url;
 	}
 
 	bool hostEqualsOrEndsWith(const QString &host, const QString &domain) {

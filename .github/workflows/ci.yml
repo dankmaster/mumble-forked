@@ -155,7 +155,7 @@ jobs:
           echo "MUMBLE_BUILD_SERVER=ON" >> "$GITHUB_ENV"
           echo "MUMBLE_ENABLE_WINDOWS_PACKAGING=ON" >> "$GITHUB_ENV"
           echo "MUMBLE_ENABLE_WINDOWS_OVERLAY_XCOMPILE=ON" >> "$GITHUB_ENV"
-          echo "CMAKE_OPTIONS=${CMAKE_OPTIONS} -Dtests=OFF" >> "$GITHUB_ENV"
+          echo "CMAKE_OPTIONS=${CMAKE_OPTIONS} -Dtests=OFF -Dmodern-layout-automation=OFF -Dmodern-layout-mockups=OFF" >> "$GITHUB_ENV"
 
       - id: restore-build-env-cache
         uses: actions/cache/restore@v5

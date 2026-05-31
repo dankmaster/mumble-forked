@@ -59,6 +59,7 @@ signals:
 
 protected:
 	void closeEvent(QCloseEvent *event) override;
+	bool eventFilter(QObject *watched, QEvent *event) override;
 
 private slots:
 	void handleLoadFinished(bool ok);
@@ -69,6 +70,10 @@ private slots:
 
 private:
 	bool start();
+	void showPopup();
+	bool eventTargetsPopup(QObject *watched, const QPoint &globalPosition = QPoint()) const;
+	void installDismissFilter();
+	void removeDismissFilter();
 	void publishMenuState();
 	void updatePopupMask(const QVariantMap &layout = QVariantMap());
 	QSize preferredMenuSize(const QVariantList &items, const QPoint &globalAnchor) const;
@@ -87,6 +92,7 @@ private:
 	bool m_started = false;
 	bool m_loaded = false;
 	bool m_showWhenLoaded = false;
+	bool m_dismissFilterInstalled = false;
 };
 
 #endif // defined(MUMBLE_HAS_MODERN_LAYOUT)

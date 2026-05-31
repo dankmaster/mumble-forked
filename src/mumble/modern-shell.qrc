@@ -4,6 +4,7 @@
         <file alias="dialog.html">modern-shell/dialog.html</file>
         <file alias="popup.html">modern-shell/popup.html</file>
         <file alias="styles.css">modern-shell/styles.css</file>
+        <file alias="theme.js">modern-shell/theme.js</file>
         <file alias="app.js">modern-shell/app.js</file>
         <file alias="dialog.js">modern-shell/dialog.js</file>
         <file alias="popup.js">modern-shell/popup.js</file>

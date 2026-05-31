@@ -6,51 +6,9 @@
 	let pendingPayload = null;
 
 	const menu = document.getElementById("context-menu");
-	const allowedPopupThemes = ["dark", "light", "mocha", "macchiato", "frappe", "latte", "nord", "gruvbox"];
-	const allowedPopupAccents = ["auto", "teal", "blue", "violet", "amber", "rose"];
-	const allowedPopupDensities = ["compact", "comfortable", "spacious"];
-	const modernAccentPalette = {
-		teal: { accent: "#5ec8b0", rgb: "94, 200, 176", soft: "rgba(94, 200, 176, 0.16)", border: "rgba(94, 200, 176, 0.42)" },
-		blue: { accent: "#73b7ff", rgb: "115, 183, 255", soft: "rgba(115, 183, 255, 0.16)", border: "rgba(115, 183, 255, 0.42)" },
-		violet: { accent: "#b59cff", rgb: "181, 156, 255", soft: "rgba(181, 156, 255, 0.16)", border: "rgba(181, 156, 255, 0.42)" },
-		amber: { accent: "#f2c76f", rgb: "242, 199, 111", soft: "rgba(242, 199, 111, 0.16)", border: "rgba(242, 199, 111, 0.42)" },
-		rose: { accent: "#ff8aa0", rgb: "255, 138, 160", soft: "rgba(255, 138, 160, 0.16)", border: "rgba(255, 138, 160, 0.42)" }
-	};
-
-	function normalizedPopupToken(value, fallback, allowed) {
-		const token = String(value || "").trim().toLowerCase();
-		return allowed.indexOf(token) >= 0 ? token : fallback;
-	}
-
 	function applyPopupUiTweaks(uiTweaks) {
-		uiTweaks = uiTweaks || {};
-		const theme = normalizedPopupToken(uiTweaks.theme, "dark", allowedPopupThemes);
-		const accent = normalizedPopupToken(uiTweaks.accent, "auto", allowedPopupAccents);
-		const density = normalizedPopupToken(uiTweaks.density, "comfortable", allowedPopupDensities);
-		const userIcons = normalizedPopupToken(
-			uiTweaks.userIcons || (uiTweaks.classicUserIcons ? "classic" : "avatars"),
-			"avatars",
-			["avatars", "classic"]);
-		const root = document.documentElement;
-		if (root) {
-			root.dataset.theme = theme;
-			root.dataset.accent = accent;
-			const palette = accent === "auto" ? null : modernAccentPalette[accent];
-			if (palette) {
-				root.style.setProperty("--accent", palette.accent);
-				root.style.setProperty("--accent-rgb", palette.rgb);
-				root.style.setProperty("--accent-soft", palette.soft);
-				root.style.setProperty("--accent-border", palette.border);
-			} else {
-				root.style.removeProperty("--accent");
-				root.style.removeProperty("--accent-rgb");
-				root.style.removeProperty("--accent-soft");
-				root.style.removeProperty("--accent-border");
-			}
-		}
-		if (document.body) {
-			document.body.dataset.density = density;
-			document.body.dataset.userIcons = userIcons;
+		if (window.MumbleModernTheme && typeof window.MumbleModernTheme.apply === "function") {
+			window.MumbleModernTheme.apply(uiTweaks || {});
 		}
 	}
 

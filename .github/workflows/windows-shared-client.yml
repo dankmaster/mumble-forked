@@ -107,7 +107,11 @@ jobs:
         shell: powershell
         run: |
           $isPullRequest = '${{ github.event_name }}' -eq 'pull_request'
-          $additionalCMakeOptions = @('-Dserver=OFF')
+          $additionalCMakeOptions = @(
+            '-Dserver=OFF',
+            '-Dmodern-layout-automation=OFF',
+            '-Dmodern-layout-mockups=OFF'
+          )
           if ($isPullRequest) {
             $additionalCMakeOptions += '-Dlto=OFF'
           }

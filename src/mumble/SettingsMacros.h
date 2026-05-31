@@ -96,6 +96,7 @@
 	PROCESS(network, USE_QUALITY_OF_SERVICE_KEY, bQoS)                       \
 	PROCESS(network, AUTO_RECONNECT_KEY, bReconnect)                         \
 	PROCESS(network, AUTO_CONNECT_LAST_SERVER_KEY, bAutoConnect)             \
+	PROCESS(network, RECONNECT_TO_LAST_CHANNEL_KEY, bReconnectToLastChannel) \
 	PROCESS(network, START_WITH_PC_KEY, bStartWithPC)                        \
 	PROCESS(network, PROXY_TYPE_KEY, ptProxyType)                            \
 	PROCESS(network, PROXY_HOST_KEY, qsProxyHost)                            \

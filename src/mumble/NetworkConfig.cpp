@@ -83,6 +83,7 @@ void NetworkConfig::load(const Settings &r) {
 	loadCheckBox(qcbQoS, s.bQoS);
 	loadCheckBox(qcbAutoReconnect, s.bReconnect);
 	loadCheckBox(qcbAutoConnect, s.bAutoConnect);
+	loadCheckBox(qcbReconnectLastChannel, s.bReconnectToLastChannel);
 	loadCheckBox(qcbStartWithPC, r.bStartWithPC);
 	loadCheckBox(qcbDisablePublicList, s.bDisablePublicList);
 	loadCheckBox(qcbSuppressIdentity, s.bSuppressIdentity);
@@ -121,13 +122,14 @@ void NetworkConfig::load(const Settings &r) {
 void NetworkConfig::save() const {
 	s.bTCPCompat         = qcbTcpMode->isChecked();
 	s.bQoS               = qcbQoS->isChecked();
-	s.bReconnect         = qcbAutoReconnect->isChecked();
-	s.bAutoConnect       = qcbAutoConnect->isChecked();
-	s.bStartWithPC       = qcbStartWithPC->isChecked();
-	s.bDisablePublicList = true;
-	s.bSuppressIdentity  = qcbSuppressIdentity->isChecked();
-	s.bEnableLinkPreviews = qcbLinkPreviews->isChecked();
-	s.bHideOS            = qcbHideOS->isChecked();
+	s.bReconnect              = qcbAutoReconnect->isChecked();
+	s.bAutoConnect            = qcbAutoConnect->isChecked();
+	s.bReconnectToLastChannel = qcbReconnectLastChannel->isChecked();
+	s.bStartWithPC            = qcbStartWithPC->isChecked();
+	s.bDisablePublicList      = true;
+	s.bSuppressIdentity       = qcbSuppressIdentity->isChecked();
+	s.bEnableLinkPreviews     = qcbLinkPreviews->isChecked();
+	s.bHideOS                 = qcbHideOS->isChecked();
 	s.qsAdvertisedReleaseOverride   = qleAdvertisedRelease->text().trimmed();
 	s.qsAdvertisedOSOverride        = qleAdvertisedOS->text().trimmed();
 	s.qsAdvertisedOSVersionOverride = qleAdvertisedOSVersion->text().trimmed();

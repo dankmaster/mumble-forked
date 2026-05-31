@@ -96,7 +96,11 @@ jobs:
             EnvironmentRelease = "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE }}"
             EnvironmentCommit = "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT }}"
             SharedWebEngine = $true
-            AdditionalCMakeOptions = @('-Dserver=OFF')
+            AdditionalCMakeOptions = @(
+              '-Dserver=OFF',
+              '-Dmodern-layout-automation=OFF',
+              '-Dmodern-layout-mockups=OFF'
+            )
             EnablePackaging = $true
             UseBundledCli11 = $true
             AllowPendingReboot = $true
@@ -232,6 +236,7 @@ jobs:
 
           $buildNumber = "${{ github.run_number }}"
           $projectVersion = "1.7.$buildNumber"
+          $currentCommit = "${{ github.sha }}"
           $assetName = "mumble-forked-$projectVersion.msi"
           $assetPath = Join-Path $releaseDir $assetName
           Copy-Item -LiteralPath $clientMsi.FullName -Destination $assetPath -Force
@@ -240,19 +245,34 @@ jobs:
           $hashPath = "$assetPath.sha256"
           Set-Content -LiteralPath $hashPath -Value "$($hash.Hash)  $assetName"
 
+          $packageName = "mumble-forked-$projectVersion.mumble-update"
+          $packagePath = Join-Path $releaseDir $packageName
+          .\scripts\windows\create-windows-update-package.ps1 `
+            -StageRoot ".\build-shared-webengine\shared-webengine-stage" `
+            -OutputPath $packagePath `
+            -Version $projectVersion `
+            -Build ([int]$buildNumber) `
+            -Commit $currentCommit `
+            -Validate
+          $packageHash = Get-FileHash -LiteralPath $packagePath -Algorithm SHA256
+          $packageHashPath = "$packagePath.sha256"
+          Set-Content -LiteralPath $packageHashPath -Value "$($packageHash.Hash)  $packageName"
+          $packageSize = (Get-Item -LiteralPath $packagePath).Length
+
           $notesPath = Join-Path $releaseDir "release-notes.md"
           $changelogPath = Join-Path $releaseDir "changelog.md"
           $manifestPath = Join-Path $releaseDir "mumble-forked-update.json"
           $previewPath = Join-Path $releaseDir "update-announcement-preview.txt"
-          $currentCommit = "${{ github.sha }}"
           $shortSha = $currentCommit.Substring(0, 12)
           $releaseUrl = "https://github.com/${{ github.repository }}/releases/tag/${{ env.MUMBLE_FORKED_RELEASE_TAG }}"
           $installerUrl = "https://github.com/${{ github.repository }}/releases/download/${{ env.MUMBLE_FORKED_RELEASE_TAG }}/$assetName"
+          $packageUrl = "https://github.com/${{ github.repository }}/releases/download/${{ env.MUMBLE_FORKED_RELEASE_TAG }}/$packageName"
           $previousCommit = Get-PreviousForkedReleaseCommit -Tag "${{ env.MUMBLE_FORKED_RELEASE_TAG }}"
           $changelog = New-AutomatedChangelog -PreviousCommit $previousCommit -CurrentCommit $currentCommit -Repository "${{ github.repository }}"
           [System.IO.File]::WriteAllText($changelogPath, "$changelog`n", [System.Text.UTF8Encoding]::new($false))
 
           $manifest = [ordered]@{
+            manifestVersion = 2
             name = "mumble-forked"
             version = $projectVersion
             build = [int]$buildNumber
@@ -265,9 +285,24 @@ jobs:
             releaseUrl = $releaseUrl
             installerUrl = $installerUrl
             sha256 = $hash.Hash
+            installer = [ordered]@{
+              format = "msi"
+              url = $installerUrl
+              sha256 = $hash.Hash
+              size = [int64](Get-Item -LiteralPath $assetPath).Length
+            }
+            package = [ordered]@{
+              format = "mumble-update-v1"
+              url = $packageUrl
+              sha256 = $packageHash.Hash
+              size = [int64]$packageSize
+              minUpdaterVersion = 2
+              applyMode = "replace-staged-payload"
+            }
+            preferredUpdate = "installer"
             publishedAt = (Get-Date).ToUniversalTime().ToString("o")
           }
-          $manifestJson = $manifest | ConvertTo-Json -Depth 4
+          $manifestJson = $manifest | ConvertTo-Json -Depth 8
           [System.IO.File]::WriteAllText($manifestPath, $manifestJson, [System.Text.UTF8Encoding]::new($false))
 
           $notesLines = New-Object System.Collections.Generic.List[string]
@@ -295,6 +330,9 @@ jobs:
           $notesLines.Add("- Branch/ref: ${{ github.ref_name }}")
           $notesLines.Add("- Installer: $assetName")
           $notesLines.Add("- SHA256: $($hash.Hash)")
+          $notesLines.Add("- Update package: $packageName")
+          $notesLines.Add("- Update package SHA256: $($packageHash.Hash)")
+          $notesLines.Add("- Preferred update path for this bootstrap release: installer")
           $notesLines.Add("")
           $notesLines.Add("Windows may show a SmartScreen warning because this is not an official signed public release.")
           [System.IO.File]::WriteAllLines($notesPath, $notesLines, [System.Text.UTF8Encoding]::new($false))
@@ -308,7 +346,11 @@ jobs:
             "Current clients below build $buildNumber will see:",
             "Latest: $projectVersion, build $buildNumber",
             "Details: automated changelog from the previous mumble-forked MSI",
-            "Download: $installerUrl"
+            "Download: $installerUrl",
+            "",
+            "Bootstrap metadata:",
+            "preferredUpdate: installer",
+            "package: $packageUrl"
           )
           [System.IO.File]::WriteAllLines($previewPath, $previewLines, [System.Text.UTF8Encoding]::new($false))
           Write-Host "Updater announcement preview:"
@@ -316,6 +358,8 @@ jobs:
 
           "asset_path=$assetPath" >> $env:GITHUB_OUTPUT
           "hash_path=$hashPath" >> $env:GITHUB_OUTPUT
+          "package_path=$packagePath" >> $env:GITHUB_OUTPUT
+          "package_hash_path=$packageHashPath" >> $env:GITHUB_OUTPUT
           "changelog_path=$changelogPath" >> $env:GITHUB_OUTPUT
           "manifest_path=$manifestPath" >> $env:GITHUB_OUTPUT
           "notes_path=$notesPath" >> $env:GITHUB_OUTPUT
@@ -364,6 +408,8 @@ jobs:
           gh release create $tag `
             "${{ steps.prepare-assets.outputs.asset_path }}" `
             "${{ steps.prepare-assets.outputs.hash_path }}" `
+            "${{ steps.prepare-assets.outputs.package_path }}" `
+            "${{ steps.prepare-assets.outputs.package_hash_path }}" `
             "${{ steps.prepare-assets.outputs.changelog_path }}" `
             "${{ steps.prepare-assets.outputs.manifest_path }}" `
             --repo $env:GITHUB_REPOSITORY `
@@ -374,11 +420,13 @@ jobs:
       - name: Publish mumble-forked MSI workflow artifact
         uses: actions/upload-artifact@v6
         with:
-          name: mumble-forked-msi
+          name: mumble-forked-msi-and-update-package
           compression-level: 0
           path: |
             build-shared-webengine/mumble-forked-release/mumble-forked-*.msi
             build-shared-webengine/mumble-forked-release/mumble-forked-*.msi.sha256
+            build-shared-webengine/mumble-forked-release/mumble-forked-*.mumble-update
+            build-shared-webengine/mumble-forked-release/mumble-forked-*.mumble-update.sha256
             build-shared-webengine/mumble-forked-release/changelog.md
             build-shared-webengine/mumble-forked-release/mumble-forked-update.json
             build-shared-webengine/mumble-forked-release/release-notes.md

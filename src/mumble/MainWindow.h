@@ -68,7 +68,9 @@ class PersistentChatHistoryDelegate;
 class ModernDialogController;
 class ModernDialogHost;
 class ModernShellHost;
+#	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 class ModernUiAutomationServer;
+#	endif
 struct ModernConnectPingState;
 #endif
 class QAction;
@@ -81,6 +83,8 @@ class QMenu;
 class QModelIndex;
 class QTimer;
 class QHostAddress;
+class QSslCertificate;
+class QSslError;
 class QPushButton;
 class QToolButton;
 class QUrl;
@@ -130,7 +134,9 @@ public:
 class MainWindow : public QMainWindow, public Ui::MainWindow {
 	friend class UserModel;
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
+#	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 	friend class ModernUiAutomationServer;
+#	endif
 #endif
 
 private:
@@ -617,6 +623,11 @@ public:
 	void publishModernToast(const QString &kind, const QString &title, const QString &message,
 							const QString &actionID = QString(), const QString &actionLabel = QString(),
 							int timeoutMs = 4500);
+	void setModernUpdateBannerState(const QVariantMap &state);
+	void clearModernUpdateBannerState();
+	void publishModernUpdateBannerState();
+	void showModernForkUpdateAvailableBanner(const QJsonObject &info);
+	void showModernForkUpdateDownloadProgress(qint64 received, qint64 total);
 	bool notifyForkUpdateAvailable(const QJsonObject &info, bool autocheck);
 	bool handleModernVersionCheckResult(const QJsonObject &info, bool updateAvailable, bool autocheck);
 	bool handleModernVersionCheckFailure(const QString &message, bool autocheck);
@@ -872,7 +883,9 @@ protected:
 	ModernShellHost *m_modernShellHost                     = nullptr;
 	std::unique_ptr< ModernDialogController > m_modernDialogController;
 	std::unique_ptr< ModernDialogHost > m_modernDialogHost;
+#	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 	std::unique_ptr< ModernUiAutomationServer > m_modernUiAutomationServer;
+#	endif
 	QVariantMap m_stonksState;
 	QVariantMap m_modernConnectionStateProbe;
 	QVariantMap m_modernScreenShareStateProbe;
@@ -886,6 +899,9 @@ protected:
 	std::optional< PendingFeedbackSubmission > m_modernFeedbackFallbackSubmission;
 	QJsonObject m_modernVersionCheckInfo;
 	QString m_modernPreparedUpdateInstallerPath;
+	QVariantMap m_modernUpdateBannerState;
+	qint64 m_modernUpdateLastProgressPublishMs = 0;
+	int m_modernUpdateLastProgressPercent      = -1;
 	bool m_modernUpdateDownloadInProgress = false;
 	QMetaObject::Connection m_modernShortcutCaptureConnection;
 	int m_modernShortcutCaptureRow = -1;
@@ -930,11 +946,18 @@ protected:
 
 	void createActions();
 	void handleModernShellBootFailure(const QString &reason);
+	void connectToServer(const QString &host, unsigned short port, const QString &username, const QString &password,
+						 const QString &serverName, const QString &desiredChannel = QString());
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	void publishModernDialogState(const QVariantMap &state);
 	void openModernConnectDialog();
 	void openModernSettingsDialog(const QString &pageName = QString());
 	bool openModernFailedConnectionDialog(const ConnectDetails &details, ConnectionFailType type);
+	bool openModernSslCertificateWarningDialog(const QString &host, unsigned short port,
+											   const QList< QSslCertificate > &certificates,
+											   const QList< QSslError > &errors);
+	bool openModernSslHandshakeFailureDialog(const QString &reason);
+	void openModernSslCertificateDetailsDialog(const QVariantMap &context);
 	void openModernDisconnectDialog();
 	void openModernQuitDialog(bool allowMinimize);
 	void openModernGenericDialog(const QVariantMap &dialog);
@@ -997,6 +1020,19 @@ protected:
 	void openModernRemoveChannelDialog(Channel *channel);
 	void openModernUnlinkChannelDialog(Channel *source, Channel *target);
 	void openModernUnlinkAllChannelsDialog(Channel *source);
+	void openModernUrlConnectDialog(const QUrl &url, const QString &host, unsigned short port,
+									const QString &password, const QString &serverName,
+									const QString &desiredChannel, const QString &username = QString(),
+									const QVariantMap &errors = QVariantMap());
+	void openModernDragUserConfirmDialog(unsigned int session, const QString &targetScopeToken,
+										 const QString &userName, const QString &targetRoomName);
+	void openModernDragChannelConfirmDialog(const QString &sourceScopeToken, const QString &targetScopeToken,
+											const QString &placement, const QString &sourceRoomName,
+											const QString &targetRoomName);
+	void openModernChannelMoveUnavailableDialog();
+	bool moveModernShellParticipant(unsigned int session, const QString &targetScopeToken, bool confirmIfNeeded);
+	bool moveModernShellChannel(const QString &sourceScopeToken, const QString &targetScopeToken,
+								const QString &placement, bool confirmIfNeeded);
 	bool handleModernGenericDialogAction(const QString &dialogID, const QString &actionID,
 										 const QVariantMap &fieldValues, const QVariantMap &payload);
 	bool handleModernFeedbackDialogAction(const QString &dialogID, const QString &actionID,

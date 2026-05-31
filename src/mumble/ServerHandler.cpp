@@ -940,6 +940,7 @@ void ServerHandler::serverConnectionConnected() {
 		mpa.add_tokens(u8(qs));
 	}
 
+	mpa.set_reconnect_to_last_channel(Global::get().s.bReconnectToLastChannel);
 	mpa.set_opus(true);
 	sendMessage(mpa);
 

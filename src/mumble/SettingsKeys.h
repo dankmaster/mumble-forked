@@ -109,6 +109,7 @@ const SettingsKey RESTRICT_TO_TCP_KEY               = { "restrict_to_tcp" };
 const SettingsKey USE_QUALITY_OF_SERVICE_KEY        = { "use_quality_of_service" };
 const SettingsKey AUTO_RECONNECT_KEY                = { "reconnect_automatically" };
 const SettingsKey AUTO_CONNECT_LAST_SERVER_KEY      = { "auto_connect_to_last_server" };
+const SettingsKey RECONNECT_TO_LAST_CHANNEL_KEY     = { "reconnect_to_last_channel" };
 const SettingsKey START_WITH_PC_KEY                 = { "start_with_pc" };
 const SettingsKey PROXY_TYPE_KEY                    = { "proxy_type" };
 const SettingsKey PROXY_HOST_KEY                    = { "proxy_host" };

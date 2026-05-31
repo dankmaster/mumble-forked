@@ -210,6 +210,15 @@ void ModernShellBridge::deleteMessage(const qulonglong messageId) {
 	emit messageDeleteRequested(messageId);
 }
 
+void ModernShellBridge::retryMessageDelivery(const QString &messageKey) {
+	const QString trimmedKey = messageKey.trimmed();
+	if (trimmedKey.isEmpty()) {
+		return;
+	}
+
+	emit messageDeliveryRetryRequested(trimmedKey);
+}
+
 void ModernShellBridge::messageParticipant(const qulonglong session) {
 	emit participantMessageRequested(session);
 }

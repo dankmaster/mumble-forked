@@ -9,12 +9,15 @@
 #include "MainWindow.h"
 #include "Global.h"
 #include "GlobalShortcut.h"
+#include "UiTheme.h"
 
 #if defined(Q_OS_WIN)
 #	include "GlobalShortcut_win.h"
 #endif
 
 #include <QtGui/QFileOpenEvent>
+#include <QtCore/QPointer>
+#include <QtWidgets/QWidget>
 
 MumbleApplication *MumbleApplication::instance() {
 	return static_cast< MumbleApplication * >(QCoreApplication::instance());
@@ -31,6 +34,30 @@ QString MumbleApplication::applicationVersionRootPath() {
 		return versionRoot;
 	}
 	return this->applicationDirPath();
+}
+
+bool MumbleApplication::notify(QObject *receiver, QEvent *event) {
+	const QEvent::Type type = event ? event->type() : QEvent::None;
+#ifdef Q_OS_WIN
+	const bool applyAllTitleBars = type == QEvent::ApplicationPaletteChange || type == QEvent::ThemeChange;
+	const bool applyReceiverTitleBar =
+		type == QEvent::Show || type == QEvent::WinIdChange || type == QEvent::PaletteChange
+		|| type == QEvent::StyleChange;
+	QPointer< QWidget > receiverWidget =
+		applyReceiverTitleBar ? qobject_cast< QWidget * >(receiver) : nullptr;
+#endif
+	const bool handled = QApplication::notify(receiver, event);
+#ifdef Q_OS_WIN
+	if (applyAllTitleBars) {
+		applyUiThemeNativeTitleBars();
+		return handled;
+	}
+
+	if (receiverWidget) {
+		applyUiThemeNativeTitleBar(receiverWidget);
+	}
+#endif
+	return handled;
 }
 
 void MumbleApplication::onCommitDataRequest(QSessionManager &) {

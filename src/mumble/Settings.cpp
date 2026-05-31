@@ -127,6 +127,26 @@ QPushButton *modernStartupButton(const QString &text, const QString &role, QWidg
 	return button;
 }
 
+QString modernStartupBreakablePath(const QString &path) {
+	QString escaped = path.toHtmlEscaped();
+	const QString breakPoint = QStringLiteral("&#8203;");
+	escaped.replace(QStringLiteral("\\"), QStringLiteral("\\") + breakPoint);
+	escaped.replace(QStringLiteral("/"), QStringLiteral("/") + breakPoint);
+	escaped.replace(QStringLiteral("."), QStringLiteral(".") + breakPoint);
+	escaped.replace(QStringLiteral("_"), QStringLiteral("_") + breakPoint);
+	escaped.replace(QStringLiteral("-"), QStringLiteral("-") + breakPoint);
+	return escaped;
+}
+
+bool isLegacySettingsFilePath(const QString &path) {
+	const QString suffix = QFileInfo(path).suffix().toLower();
+	return suffix == QLatin1String("ini") || suffix == QLatin1String("conf");
+}
+
+QString migratedJsonPathForLegacySettings(const QString &path) {
+	return QFileInfo(path).absoluteDir().filePath(QStringLiteral("mumble_settings.json"));
+}
+
 bool execModernStartupQuestion(const QString &title, const QString &heading, const QString &body,
 							   const QString &acceptText, const QString &rejectText) {
 	QDialog dialog;
@@ -401,23 +421,30 @@ void Settings::load(const QString &path, bool skipSettingsBackupPrompt) {
 				}
 			} else {
 				// This is already the backup we are loading
+				const QString settingsPath =
+					path.left(path.size() - static_cast< int >(std::strlen(BACKUP_FILE_EXTENSION)));
 				execModernStartupNotice(
 					QObject::tr("Potentially broken settings"),
 					QObject::tr("The backup settings may also be unstable."),
 					QObject::tr(
 						"The backed-up settings also seem to have been saved without Mumble exiting normally "
 						"(potentially indicating a crash).<br><br>"
-						"If you experience repeated crashes with these settings, you might have to manually delete the "
-						"settings files at <pre>%1</pre> and <pre>%2</pre> in order to reset all settings to their "
+						"If you experience repeated crashes with these settings, you might have to manually delete "
+						"these settings files:<br><br><code>%1</code><br><br><code>%2</code><br><br>"
+						"in order to reset all settings to their "
 						"default value.")
-						.arg(path.left(path.size() - static_cast< int >(std::strlen(BACKUP_FILE_EXTENSION))))
-						.arg(path));
+						.arg(modernStartupBreakablePath(settingsPath), modernStartupBreakablePath(path)));
 			}
 		}
 	} catch (const nlohmann::json::parse_error &e) {
 		qWarning() << "Failed to load settings from" << path << "due to invalid format: " << e.what();
 
-		if (!path.endsWith(QLatin1String(BACKUP_FILE_EXTENSION)) && QFileInfo(path + BACKUP_FILE_EXTENSION).exists()) {
+		if (isLegacySettingsFilePath(path)) {
+			qWarning() << "Loading legacy settings from explicit config path" << path;
+			legacyLoad(path);
+			settingsLocation = migratedJsonPathForLegacySettings(path);
+		} else if (!path.endsWith(QLatin1String(BACKUP_FILE_EXTENSION))
+				   && QFileInfo(path + BACKUP_FILE_EXTENSION).exists()) {
 			qWarning() << "Falling back to backup" << path + BACKUP_FILE_EXTENSION;
 			load(path + BACKUP_FILE_EXTENSION, skipSettingsBackupPrompt);
 		}
@@ -1058,6 +1085,7 @@ void Settings::legacyLoad(const QString &path) {
 	LOAD(bQoS, "net/qos");
 	LOAD(bReconnect, "net/reconnect");
 	LOAD(bAutoConnect, "net/autoconnect");
+	LOAD(bReconnectToLastChannel, "net/reconnectlastchannel");
 	LOAD(bStartWithPC, "net/startwithpc");
 	LOAD(bSuppressIdentity, "net/suppress");
 	LOADENUM(ptProxyType, "net/proxytype");

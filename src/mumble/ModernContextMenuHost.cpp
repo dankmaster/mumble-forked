@@ -10,7 +10,9 @@
 #include "ModernShellPage.h"
 
 #include <QtCore/QJsonDocument>
+#include <QtCore/QStringList>
 #include <QtCore/QUrl>
+#include <QtCore/QUrlQuery>
 #include <QtGui/QCloseEvent>
 #include <QtGui/QCursor>
 #include <QtGui/QGuiApplication>
@@ -20,7 +22,9 @@
 #include <QtGui/QScreen>
 #include <QtWebChannel/QWebChannel>
 #include <QtWebEngineCore/QWebEngineScript>
+#include <QtWebEngineCore/QWebEngineScriptCollection>
 #include <QtWebEngineCore/QWebEngineSettings>
+#include <QtWidgets/QApplication>
 #include <QtWebEngineWidgets/QWebEngineView>
 #include <QtWidgets/QVBoxLayout>
 
@@ -30,8 +34,54 @@ namespace {
 	constexpr int kContextMenuFlyoutGap = 6;
 	constexpr int kContextMenuHostInset = 12;
 
-	QUrl modernContextMenuUrl() {
-		return QUrl(QStringLiteral("qrc:/modern-shell/popup.html"));
+	void addModernUiTweaksQuery(QUrl &url, const QVariantMap &uiTweaks) {
+		if (uiTweaks.isEmpty()) {
+			return;
+		}
+
+		QUrlQuery query(url);
+		const QStringList keys { QStringLiteral("theme"), QStringLiteral("accent"), QStringLiteral("density"),
+								 QStringLiteral("userIcons"), QStringLiteral("classicUserIcons"),
+								 QStringLiteral("railSide") };
+		for (const QString &key : keys) {
+			const QVariant value = uiTweaks.value(key);
+			if (!value.isValid() || value.isNull()) {
+				continue;
+			}
+			const QString text = value.toString().trimmed();
+			if (!text.isEmpty()) {
+				query.addQueryItem(key, text);
+			}
+		}
+		url.setQuery(query);
+	}
+
+	QUrl modernContextMenuUrl(const QVariantMap &uiTweaks) {
+		QUrl url(QStringLiteral("qrc:/modern-shell/popup.html"));
+		addModernUiTweaksQuery(url, uiTweaks);
+		return url;
+	}
+
+	QString modernUiTweaksBootstrapSource(const QVariantMap &uiTweaks) {
+		QByteArray json = QJsonDocument::fromVariant(uiTweaks).toJson(QJsonDocument::Compact);
+		if (json.isEmpty() || json == QByteArrayLiteral("null")) {
+			json = QByteArrayLiteral("{}");
+		}
+		return QStringLiteral("window.__mumbleModernInitialUiTweaks = %1;").arg(QString::fromUtf8(json));
+	}
+
+	void installModernUiTweaksBootstrap(ModernShellPage *page, const QVariantMap &uiTweaks) {
+		if (!page) {
+			return;
+		}
+
+		QWebEngineScript script;
+		script.setName(QStringLiteral("MumbleModernUiTweaksBootstrap"));
+		script.setInjectionPoint(QWebEngineScript::DocumentCreation);
+		script.setWorldId(QWebEngineScript::MainWorld);
+		script.setRunsOnSubFrames(false);
+		script.setSourceCode(modernUiTweaksBootstrapSource(uiTweaks));
+		page->scripts().insert(script);
 	}
 
 	void makeWidgetTransparent(QWidget *widget) {
@@ -181,6 +231,7 @@ bool ModernContextMenuHost::showMenu(const QString &token, const QVariantList &i
 	if (nextToken.isEmpty() || items.isEmpty()) {
 		return false;
 	}
+	m_uiTweaks = uiTweaks;
 	if (!start()) {
 		return false;
 	}
@@ -188,7 +239,6 @@ bool ModernContextMenuHost::showMenu(const QString &token, const QVariantList &i
 	m_token = nextToken;
 	m_openSubmenuLabel = openSubmenuLabel.trimmed();
 	m_items = items;
-	m_uiTweaks = uiTweaks;
 	const bool hasSubmenu = contextMenuHasSubmenu(items);
 	m_popupLayout.clear();
 	m_popupLayout.insert(QStringLiteral("rootLeft"), 0);
@@ -206,13 +256,12 @@ bool ModernContextMenuHost::showMenu(const QString &token, const QVariantList &i
 	}
 
 	publishMenuState();
-	show();
-	raise();
-	activateWindow();
+	showPopup();
 	return true;
 }
 
 void ModernContextMenuHost::closeEvent(QCloseEvent *event) {
+	removeDismissFilter();
 	const QString token = m_token;
 	m_token.clear();
 	m_openSubmenuLabel.clear();
@@ -225,6 +274,29 @@ void ModernContextMenuHost::closeEvent(QCloseEvent *event) {
 	QWidget::closeEvent(event);
 }
 
+bool ModernContextMenuHost::eventFilter(QObject *watched, QEvent *event) {
+	if (!m_dismissFilterInstalled || !isVisible() || !event) {
+		return QWidget::eventFilter(watched, event);
+	}
+
+	switch (event->type()) {
+		case QEvent::ContextMenu:
+		case QEvent::MouseButtonDblClick:
+		case QEvent::MouseButtonPress:
+		case QEvent::Wheel:
+			if (!eventTargetsPopup(watched, QCursor::pos())) {
+				close();
+				event->accept();
+				return true;
+			}
+			break;
+		default:
+			break;
+	}
+
+	return QWidget::eventFilter(watched, event);
+}
+
 bool ModernContextMenuHost::start() {
 	if (m_started) {
 		return true;
@@ -234,7 +306,8 @@ bool ModernContextMenuHost::start() {
 		return false;
 	}
 
-	const QUrl url = modernContextMenuUrl();
+	const QUrl url = modernContextMenuUrl(m_uiTweaks);
+	installModernUiTweaksBootstrap(m_page, m_uiTweaks);
 	if (!url.isValid() || url.isEmpty()) {
 		emit hostFailed(tr("The modern context-menu URL is invalid."));
 		return false;
@@ -258,9 +331,7 @@ void ModernContextMenuHost::handleLoadFinished(const bool ok) {
 	if (m_showWhenLoaded && !m_token.isEmpty() && !m_items.isEmpty()) {
 		m_showWhenLoaded = false;
 		publishMenuState();
-		show();
-		raise();
-		activateWindow();
+		showPopup();
 	}
 }
 
@@ -285,6 +356,55 @@ void ModernContextMenuHost::handlePopupAction(const int actionIndex) {
 
 void ModernContextMenuHost::handlePopupClose() {
 	close();
+}
+
+void ModernContextMenuHost::showPopup() {
+	show();
+	raise();
+	activateWindow();
+	installDismissFilter();
+}
+
+bool ModernContextMenuHost::eventTargetsPopup(QObject *watched, const QPoint &globalPosition) const {
+	QWidget *widget = qobject_cast< QWidget * >(watched);
+	while (widget) {
+		if (widget == this) {
+			return true;
+		}
+		widget = widget->parentWidget();
+	}
+
+	if (!globalPosition.isNull()) {
+		const QPoint localPosition = mapFromGlobal(globalPosition);
+		if (rect().contains(localPosition)) {
+			const QRegion currentMask = mask();
+			return currentMask.isEmpty() || currentMask.contains(localPosition);
+		}
+	}
+
+	return false;
+}
+
+void ModernContextMenuHost::installDismissFilter() {
+	if (m_dismissFilterInstalled) {
+		return;
+	}
+
+	if (qApp) {
+		qApp->installEventFilter(this);
+		m_dismissFilterInstalled = true;
+	}
+}
+
+void ModernContextMenuHost::removeDismissFilter() {
+	if (!m_dismissFilterInstalled) {
+		return;
+	}
+
+	if (qApp) {
+		qApp->removeEventFilter(this);
+	}
+	m_dismissFilterInstalled = false;
 }
 
 void ModernContextMenuHost::handlePopupMask(const QVariantMap &layout) {

@@ -39,6 +39,7 @@ public:
 	Q_INVOKABLE void cancelReply();
 	Q_INVOKABLE void toggleReaction(qulonglong messageId, const QString &emoji, bool active);
 	Q_INVOKABLE void deleteMessage(qulonglong messageId);
+	Q_INVOKABLE void retryMessageDelivery(const QString &messageKey);
 	Q_INVOKABLE void messageParticipant(qulonglong session);
 	Q_INVOKABLE void openDirectMessage(qulonglong session);
 	Q_INVOKABLE void closeDirectMessage(qulonglong session);
@@ -100,6 +101,7 @@ signals:
 	void replyCancelRequested();
 	void reactionToggleRequested(qulonglong messageId, const QString &emoji, bool active);
 	void messageDeleteRequested(qulonglong messageId);
+	void messageDeliveryRetryRequested(const QString &messageKey);
 	void participantMessageRequested(qulonglong session);
 	void directMessageOpenRequested(qulonglong session);
 	void directMessageCloseRequested(qulonglong session);

@@ -118,10 +118,11 @@ void TestModernDialogControllers::connectControllerSelectsAndSavesFavorites() {
 
 void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft() {
 	Settings settings;
-	settings.modernLayoutPolicy = Settings::ModernLayoutFollowLegacy;
-	settings.wlWindowLayout     = Settings::LayoutClassic;
-	settings.bReconnect         = false;
-	settings.iQuality           = 72000;
+	settings.modernLayoutPolicy       = Settings::ModernLayoutFollowLegacy;
+	settings.wlWindowLayout           = Settings::LayoutClassic;
+	settings.bReconnect               = false;
+	settings.bReconnectToLastChannel  = false;
+	settings.iQuality                 = 72000;
 
 	ModernSettingsController controller;
 	controller.open(settings, QStringLiteral("NetworkConfig"));
@@ -224,6 +225,11 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QVERIFY(!findSettingsFieldById(settingsPageSections(QStringLiteral("look")), tickerFieldID).isEmpty());
 	QVERIFY(findSettingsFieldById(settingsPageSections(QStringLiteral("ui")), tickerFieldID).isEmpty());
 	QVERIFY(findSettingsFieldById(settingsPageSections(QStringLiteral("messages")), tickerFieldID).isEmpty());
+	const QVariantMap reconnectLastChannelField =
+		findSettingsFieldById(settingsPageSections(QStringLiteral("network")),
+							  QStringLiteral("network.reconnectToLastChannel"));
+	QCOMPARE(reconnectLastChannelField.value(QStringLiteral("type")).toString(), QStringLiteral("checkbox"));
+	QCOMPARE(reconnectLastChannelField.value(QStringLiteral("value")).toBool(), false);
 
 	ModernSettingsController tweakController;
 	tweakController.open(settings, QStringLiteral("look"));
@@ -245,12 +251,14 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 			 QStringLiteral("rose"));
 
 	controller.updateField(QStringLiteral("network.autoReconnect"), true);
+	controller.updateField(QStringLiteral("network.reconnectToLastChannel"), true);
 	ModernSettingsController::ActionResult result = controller.invokeAction(QStringLiteral("ok"), QVariantMap());
 
 	QVERIFY(result.settingsToApply.has_value());
 	QCOMPARE(result.settingsToApply->modernLayoutPolicy, Settings::ModernLayoutForced);
 	QCOMPARE(result.settingsToApply->wlWindowLayout, Settings::LayoutHybrid);
 	QCOMPARE(result.settingsToApply->bReconnect, true);
+	QCOMPARE(result.settingsToApply->bReconnectToLastChannel, true);
 	QCOMPARE(result.accepted, true);
 	QCOMPARE(result.closeDialog, true);
 
