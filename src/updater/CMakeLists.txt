@@ -21,6 +21,7 @@ endif()
 target_link_libraries(mumble-updater
 	PRIVATE
 		comctl32
+		dwmapi
 		shell32
 )
 

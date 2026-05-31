@@ -5,12 +5,14 @@
 
 #include <windows.h>
 #include <commctrl.h>
+#include <dwmapi.h>
 #include <shellapi.h>
 
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
+#include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -33,6 +35,7 @@ struct Options {
 	std::wstring workingDirectory;
 	std::wstring updaterLogPath;
 	std::wstring msiLogPath;
+	std::wstring uiTheme;
 	bool passive = true;
 	bool noRelaunch = false;
 	bool elevatedRetry = false;
@@ -111,6 +114,7 @@ std::filesystem::path packageWorkRoot(const Options &options) {
 }
 
 void appendLog(const Options &options, const std::wstring &message) {
+	postUiStatus(message);
 	if (options.updaterLogPath.empty()) {
 		return;
 	}
@@ -121,19 +125,33 @@ void appendLog(const Options &options, const std::wstring &message) {
 		std::filesystem::create_directories(logPath.parent_path(), error);
 	}
 
-	std::ofstream stream(logPath, std::ios::app | std::ios::binary);
-	if (!stream) {
-		return;
-	}
-
 	SYSTEMTIME now;
 	GetLocalTime(&now);
 	std::wostringstream line;
 	line << L'[' << std::setfill(L'0') << std::setw(4) << now.wYear << L'-' << std::setw(2) << now.wMonth << L'-'
 		 << std::setw(2) << now.wDay << L' ' << std::setw(2) << now.wHour << L':' << std::setw(2) << now.wMinute
 		 << L':' << std::setw(2) << now.wSecond << L"] " << message;
-	stream << utf8FromWide(line.str()) << '\n';
-	postUiStatus(message);
+
+	std::string bytes = utf8FromWide(line.str());
+	bytes.push_back('\n');
+
+	HANDLE file = INVALID_HANDLE_VALUE;
+	for (int attempt = 0; attempt < 8; ++attempt) {
+		file = CreateFileW(logPath.wstring().c_str(), FILE_APPEND_DATA,
+						   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_ALWAYS,
+						   FILE_ATTRIBUTE_NORMAL, nullptr);
+		if (file != INVALID_HANDLE_VALUE || GetLastError() != ERROR_SHARING_VIOLATION) {
+			break;
+		}
+		Sleep(25);
+	}
+	if (file == INVALID_HANDLE_VALUE) {
+		return;
+	}
+
+	DWORD written = 0;
+	WriteFile(file, bytes.data(), static_cast< DWORD >(bytes.size()), &written, nullptr);
+	CloseHandle(file);
 }
 
 bool parseArguments(int argc, wchar_t **argv, Options &options) {
@@ -160,6 +178,8 @@ bool parseArguments(int argc, wchar_t **argv, Options &options) {
 			options.updaterLogPath = nextValue();
 		} else if (arg == L"--msi-log") {
 			options.msiLogPath = nextValue();
+		} else if (arg == L"--ui-theme") {
+			options.uiTheme = nextValue();
 		} else if (arg == L"--passive") {
 			options.passive = true;
 		} else if (arg == L"--no-passive") {
@@ -286,6 +306,9 @@ std::wstring packageUpdaterArguments(const Options &options, const bool elevated
 	if (!options.msiLogPath.empty()) {
 		arguments += L" --msi-log " + quoteArgument(options.msiLogPath);
 	}
+	if (!options.uiTheme.empty()) {
+		arguments += L" --ui-theme " + quoteArgument(options.uiTheme);
+	}
 	if (!options.passive) {
 		arguments += L" --no-passive";
 	}
@@ -370,7 +393,25 @@ function Write-UpdaterLog {
 	if (-not [string]::IsNullOrWhiteSpace($logDir)) {
 		New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 	}
-	Add-Content -LiteralPath $UpdaterLogPath -Encoding UTF8 -Value ("[{0}] {1}" -f (Get-Date).ToString('s'), $Message)
+	$line = ("[{0}] {1}" -f (Get-Date).ToString('s'), $Message) + [System.Environment]::NewLine
+	$bytes = [System.Text.Encoding]::UTF8.GetBytes($line)
+	for ($attempt = 0; $attempt -lt 8; $attempt++) {
+		try {
+			$share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+			$stream = [System.IO.File]::Open($UpdaterLogPath, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, $share)
+			try {
+				$stream.Write($bytes, 0, $bytes.Length)
+			} finally {
+				$stream.Dispose()
+			}
+			return
+		} catch [System.IO.IOException] {
+			if ($attempt -ge 7) {
+				throw
+			}
+			Start-Sleep -Milliseconds 25
+		}
+	}
 }
 
 function Assert-SafePackagePath {
@@ -694,6 +735,158 @@ struct UiProgressPayload {
 
 std::atomic< HWND > g_updaterWindow { nullptr };
 
+struct UpdaterTheme {
+	COLORREF crust = RGB(25, 31, 38);
+	COLORREF mantle = RGB(37, 44, 52);
+	COLORREF base = RGB(25, 31, 38);
+	COLORREF surface0 = RGB(49, 58, 68);
+	COLORREF surface1 = RGB(57, 66, 77);
+	COLORREF surface2 = RGB(52, 61, 72);
+	COLORREF text = RGB(224, 231, 239);
+	COLORREF subtext0 = RGB(125, 137, 150);
+	COLORREF overlay0 = RGB(125, 137, 150);
+	COLORREF accent = RGB(106, 166, 207);
+	COLORREF accentHover = RGB(130, 193, 224);
+	COLORREF success = RGB(105, 178, 140);
+	COLORREF warning = RGB(199, 146, 91);
+	COLORREF danger = RGB(196, 106, 116);
+	COLORREF onAccent = RGB(25, 31, 38);
+	COLORREF caption = RGB(25, 31, 38);
+	COLORREF captionText = RGB(224, 231, 239);
+	COLORREF captionBorder = RGB(57, 66, 77);
+	bool dark = true;
+};
+
+int colorRed(const COLORREF color) { return GetRValue(color); }
+int colorGreen(const COLORREF color) { return GetGValue(color); }
+int colorBlue(const COLORREF color) { return GetBValue(color); }
+
+COLORREF mixColors(const COLORREF base, const COLORREF overlay, const double overlayRatio) {
+	const double clampedRatio = std::clamp(overlayRatio, 0.0, 1.0);
+	const double baseRatio = 1.0 - clampedRatio;
+	return RGB(static_cast< int >(colorRed(base) * baseRatio + colorRed(overlay) * clampedRatio),
+			   static_cast< int >(colorGreen(base) * baseRatio + colorGreen(overlay) * clampedRatio),
+			   static_cast< int >(colorBlue(base) * baseRatio + colorBlue(overlay) * clampedRatio));
+}
+
+int colorLightness(const COLORREF color) {
+	const int maxComponent = std::max({ colorRed(color), colorGreen(color), colorBlue(color) });
+	const int minComponent = std::min({ colorRed(color), colorGreen(color), colorBlue(color) });
+	return (maxComponent + minComponent) / 2;
+}
+
+bool parseBoolean(const std::wstring &value, const bool fallback) {
+	std::wstring normalized;
+	normalized.reserve(value.size());
+	for (const wchar_t ch : value) {
+		normalized.push_back(static_cast< wchar_t >(std::towlower(ch)));
+	}
+	if (normalized == L"1" || normalized == L"true" || normalized == L"yes" || normalized == L"on") {
+		return true;
+	}
+	if (normalized == L"0" || normalized == L"false" || normalized == L"no" || normalized == L"off") {
+		return false;
+	}
+	return fallback;
+}
+
+bool parseHexColor(std::wstring value, COLORREF &color) {
+	value.erase(std::remove_if(value.begin(), value.end(), [](const wchar_t ch) { return std::iswspace(ch); }),
+				value.end());
+	if (!value.empty() && value.front() == L'#') {
+		value.erase(value.begin());
+	}
+	if (value.size() != 6) {
+		return false;
+	}
+	for (const wchar_t ch : value) {
+		if (!std::iswxdigit(ch)) {
+			return false;
+		}
+	}
+
+	const unsigned long raw = std::wcstoul(value.c_str(), nullptr, 16);
+	color = RGB(static_cast< int >((raw >> 16) & 0xff), static_cast< int >((raw >> 8) & 0xff),
+				static_cast< int >(raw & 0xff));
+	return true;
+}
+
+std::wstring lowerAscii(std::wstring value) {
+	for (wchar_t &ch : value) {
+		if (ch >= L'A' && ch <= L'Z') {
+			ch = static_cast< wchar_t >(ch - L'A' + L'a');
+		}
+	}
+	return value;
+}
+
+UpdaterTheme themeFromOptions(const Options &options) {
+	UpdaterTheme theme;
+	std::size_t start = 0;
+	while (start <= options.uiTheme.size()) {
+		const std::size_t end = options.uiTheme.find(L';', start);
+		const std::wstring entry =
+			options.uiTheme.substr(start, end == std::wstring::npos ? std::wstring::npos : end - start);
+		const std::size_t separator = entry.find(L'=');
+		if (separator != std::wstring::npos) {
+			const std::wstring key = lowerAscii(entry.substr(0, separator));
+			const std::wstring value = entry.substr(separator + 1);
+			COLORREF parsedColor = 0;
+			if (key == L"dark") {
+				theme.dark = parseBoolean(value, theme.dark);
+			} else if (parseHexColor(value, parsedColor)) {
+				if (key == L"crust") {
+					theme.crust = parsedColor;
+				} else if (key == L"mantle") {
+					theme.mantle = parsedColor;
+				} else if (key == L"base") {
+					theme.base = parsedColor;
+				} else if (key == L"surface0") {
+					theme.surface0 = parsedColor;
+				} else if (key == L"surface1") {
+					theme.surface1 = parsedColor;
+				} else if (key == L"surface2") {
+					theme.surface2 = parsedColor;
+				} else if (key == L"text") {
+					theme.text = parsedColor;
+				} else if (key == L"subtext0") {
+					theme.subtext0 = parsedColor;
+				} else if (key == L"overlay0") {
+					theme.overlay0 = parsedColor;
+				} else if (key == L"accent") {
+					theme.accent = parsedColor;
+				} else if (key == L"accenthover") {
+					theme.accentHover = parsedColor;
+				} else if (key == L"success") {
+					theme.success = parsedColor;
+				} else if (key == L"warning") {
+					theme.warning = parsedColor;
+				} else if (key == L"danger") {
+					theme.danger = parsedColor;
+				} else if (key == L"onaccent") {
+					theme.onAccent = parsedColor;
+				} else if (key == L"caption") {
+					theme.caption = parsedColor;
+				} else if (key == L"captiontext") {
+					theme.captionText = parsedColor;
+				} else if (key == L"captionborder") {
+					theme.captionBorder = parsedColor;
+				}
+			}
+		}
+
+		if (end == std::wstring::npos) {
+			break;
+		}
+		start = end + 1;
+	}
+
+	if (options.uiTheme.empty()) {
+		theme.dark = colorLightness(theme.text) > colorLightness(theme.crust);
+	}
+	return theme;
+}
+
 std::wstring wideFromBytes(const char *data, const int size, const UINT codePage) {
 	if (!data || size <= 0) {
 		return {};
@@ -884,7 +1077,7 @@ bool parsePackageProgress(const std::wstring &text, int &percent) {
 
 class UpdaterProgressWindow {
 public:
-	explicit UpdaterProgressWindow(const Options &options) : m_options(options) {}
+	explicit UpdaterProgressWindow(const Options &options) : m_options(options), m_theme(themeFromOptions(options)) {}
 
 	bool create(HINSTANCE instance) {
 		INITCOMMONCONTROLSEX commonControls {};
@@ -897,7 +1090,7 @@ public:
 		windowClass.hInstance     = instance;
 		windowClass.hCursor       = LoadCursorW(nullptr, IDC_ARROW);
 		windowClass.hIcon         = LoadIconW(nullptr, IDI_APPLICATION);
-		windowClass.hbrBackground = reinterpret_cast< HBRUSH >(COLOR_WINDOW + 1);
+		windowClass.hbrBackground = nullptr;
 		windowClass.lpszClassName = L"MumbleUpdaterProgressWindow";
 		RegisterClassW(&windowClass);
 
@@ -911,6 +1104,7 @@ public:
 			return false;
 		}
 
+		applyNativeTitleBar();
 		g_updaterWindow.store(m_hwnd);
 		ShowWindow(m_hwnd, SW_SHOWNORMAL);
 		UpdateWindow(m_hwnd);
@@ -929,20 +1123,28 @@ public:
 
 private:
 	Options m_options;
+	UpdaterTheme m_theme;
 	HWND m_hwnd = nullptr;
 	HWND m_spinner = nullptr;
 	HWND m_title = nullptr;
 	HWND m_status = nullptr;
-	HWND m_progress = nullptr;
 	HWND m_detailsButton = nullptr;
 	HWND m_closeButton = nullptr;
 	HWND m_log = nullptr;
+	RECT m_progressRect {};
 	HFONT m_uiFont = nullptr;
+	HFONT m_titleFont = nullptr;
 	HFONT m_logFont = nullptr;
+	HBRUSH m_backgroundBrush = nullptr;
+	HBRUSH m_panelBrush = nullptr;
+	HBRUSH m_panelSoftBrush = nullptr;
+	HBRUSH m_logBrush = nullptr;
+	HBRUSH m_accentBrush = nullptr;
 	bool m_detailsVisible = false;
 	bool m_completed = false;
 	bool m_indeterminate = true;
 	int m_exitCode = 1;
+	int m_progressPercent = 0;
 	int m_spinnerFrame = 0;
 	std::wstring m_lastLogText;
 	std::wstring m_statusText = L"Preparing update...";
@@ -950,6 +1152,30 @@ private:
 	int collapsedWidth() const { return 560; }
 	int collapsedHeight() const { return 180; }
 	int expandedHeight() const { return 500; }
+
+	static constexpr DWORD DwmUseImmersiveDarkModeLegacyAttribute = 19;
+	static constexpr DWORD DwmUseImmersiveDarkModeAttribute = 20;
+	static constexpr DWORD DwmBorderColorAttribute = 34;
+	static constexpr DWORD DwmCaptionColorAttribute = 35;
+	static constexpr DWORD DwmTextColorAttribute = 36;
+
+	void applyNativeTitleBar() const {
+		if (!m_hwnd) {
+			return;
+		}
+
+		const BOOL immersiveDarkMode = m_theme.dark ? TRUE : FALSE;
+		HRESULT result = DwmSetWindowAttribute(m_hwnd, DwmUseImmersiveDarkModeAttribute, &immersiveDarkMode,
+											   sizeof(immersiveDarkMode));
+		if (FAILED(result)) {
+			DwmSetWindowAttribute(m_hwnd, DwmUseImmersiveDarkModeLegacyAttribute, &immersiveDarkMode,
+								  sizeof(immersiveDarkMode));
+		}
+
+		DwmSetWindowAttribute(m_hwnd, DwmCaptionColorAttribute, &m_theme.caption, sizeof(m_theme.caption));
+		DwmSetWindowAttribute(m_hwnd, DwmTextColorAttribute, &m_theme.captionText, sizeof(m_theme.captionText));
+		DwmSetWindowAttribute(m_hwnd, DwmBorderColorAttribute, &m_theme.captionBorder, sizeof(m_theme.captionBorder));
+	}
 
 	static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
 		UpdaterProgressWindow *self = nullptr;
@@ -973,9 +1199,24 @@ private:
 				setProgress(-1, true);
 				refreshLogs();
 				return 0;
+			case WM_ERASEBKGND:
+				return 1;
+			case WM_PAINT:
+				paintWindow();
+				return 0;
 			case WM_SIZE:
 				layoutControls();
+				InvalidateRect(m_hwnd, nullptr, TRUE);
 				return 0;
+			case WM_CTLCOLORSTATIC:
+				return handleControlColor(reinterpret_cast< HDC >(wParam), reinterpret_cast< HWND >(lParam));
+			case WM_CTLCOLOREDIT:
+				return handleEditColor(reinterpret_cast< HDC >(wParam));
+			case WM_DRAWITEM:
+				if (drawButton(reinterpret_cast< const DRAWITEMSTRUCT * >(lParam))) {
+					return TRUE;
+				}
+				break;
 			case WM_TIMER:
 				if (wParam == UiRefreshTimer) {
 					advanceSpinner();
@@ -1024,6 +1265,27 @@ private:
 				if (m_logFont) {
 					DeleteObject(m_logFont);
 				}
+				if (m_uiFont) {
+					DeleteObject(m_uiFont);
+				}
+				if (m_titleFont) {
+					DeleteObject(m_titleFont);
+				}
+				if (m_backgroundBrush) {
+					DeleteObject(m_backgroundBrush);
+				}
+				if (m_panelBrush) {
+					DeleteObject(m_panelBrush);
+				}
+				if (m_panelSoftBrush) {
+					DeleteObject(m_panelSoftBrush);
+				}
+				if (m_logBrush) {
+					DeleteObject(m_logBrush);
+				}
+				if (m_accentBrush) {
+					DeleteObject(m_accentBrush);
+				}
 				PostQuitMessage(0);
 				return 0;
 		}
@@ -1031,10 +1293,174 @@ private:
 		return DefWindowProcW(m_hwnd, message, wParam, lParam);
 	}
 
+	void fillRectColor(HDC hdc, const RECT &rect, const COLORREF color) const {
+		HBRUSH brush = CreateSolidBrush(color);
+		FillRect(hdc, &rect, brush);
+		DeleteObject(brush);
+	}
+
+	void drawRoundedRect(HDC hdc, const RECT &rect, const COLORREF fill, const COLORREF border,
+						 const int radius) const {
+		HBRUSH brush = CreateSolidBrush(fill);
+		HPEN pen = CreatePen(PS_SOLID, 1, border);
+		const HGDIOBJ oldBrush = SelectObject(hdc, brush);
+		const HGDIOBJ oldPen = SelectObject(hdc, pen);
+		RoundRect(hdc, rect.left, rect.top, rect.right, rect.bottom, radius, radius);
+		SelectObject(hdc, oldBrush);
+		SelectObject(hdc, oldPen);
+		DeleteObject(pen);
+		DeleteObject(brush);
+	}
+
+	void paintWindow() {
+		PAINTSTRUCT paint {};
+		HDC hdc = BeginPaint(m_hwnd, &paint);
+		RECT client {};
+		GetClientRect(m_hwnd, &client);
+		FillRect(hdc, &client, m_backgroundBrush);
+
+		RECT panel { 12, 12, client.right - 12, client.bottom - 12 };
+		drawRoundedRect(hdc, panel, m_theme.base, mixColors(m_theme.surface1, m_theme.text, 0.08), 14);
+
+		RECT accentStrip { panel.left, panel.top + 8, panel.left + 3, panel.bottom - 8 };
+		fillRectColor(hdc, accentStrip, m_theme.accent);
+
+		RECT badge { 18, 20, 50, 52 };
+		const COLORREF badgeFill = m_completed ? mixColors(m_theme.surface0, m_theme.success, 0.18)
+											   : mixColors(m_theme.surface0, m_theme.accent, 0.16);
+		const COLORREF badgeBorder = m_completed ? mixColors(m_theme.surface1, m_theme.success, 0.42)
+												 : mixColors(m_theme.surface1, m_theme.accent, 0.34);
+		drawRoundedRect(hdc, badge, badgeFill, badgeBorder, 16);
+		paintProgress(hdc);
+
+		if (m_detailsVisible) {
+			RECT logRect {};
+			GetWindowRect(m_log, &logRect);
+			MapWindowPoints(nullptr, m_hwnd, reinterpret_cast< POINT * >(&logRect), 2);
+			RECT frame { logRect.left - 1, logRect.top - 1, logRect.right + 1, logRect.bottom + 1 };
+			drawRoundedRect(hdc, frame, m_theme.crust, mixColors(m_theme.surface1, m_theme.text, 0.06), 8);
+		}
+
+		EndPaint(m_hwnd, &paint);
+	}
+
+	void paintProgress(HDC hdc) const {
+		RECT track = m_progressRect;
+		if (track.right <= track.left || track.bottom <= track.top) {
+			return;
+		}
+
+		drawRoundedRect(hdc, track, m_theme.surface0, mixColors(m_theme.surface1, m_theme.text, 0.08), 7);
+		InflateRect(&track, -2, -2);
+		if (track.right <= track.left || track.bottom <= track.top) {
+			return;
+		}
+
+		RECT fill = track;
+		const int trackWidth = track.right - track.left;
+		if (m_indeterminate && !m_completed) {
+			const int pulseWidth = std::max(70, trackWidth / 3);
+			const int travel = trackWidth + pulseWidth;
+			const int offset = (m_spinnerFrame * 22) % std::max(1, travel);
+			fill.left = track.left + offset - pulseWidth;
+			fill.right = fill.left + pulseWidth;
+			fill.left = std::max(fill.left, track.left);
+			fill.right = std::min(fill.right, track.right);
+			if (fill.right <= fill.left) {
+				return;
+			}
+		} else {
+			fill.right = track.left + ((trackWidth * std::clamp(m_progressPercent, 0, 100)) / 100);
+			if (fill.right <= fill.left) {
+				return;
+			}
+		}
+
+		const COLORREF fillColor = m_completed && m_exitCode != 0 && static_cast< DWORD >(m_exitCode) != RestartRequired
+									   ? m_theme.danger
+									   : m_theme.accent;
+		drawRoundedRect(hdc, fill, mixColors(fillColor, m_theme.accentHover, 0.16), fillColor, 5);
+	}
+
+	LRESULT handleControlColor(HDC hdc, HWND control) const {
+		SetBkMode(hdc, TRANSPARENT);
+		if (control == m_title) {
+			SetTextColor(hdc, m_theme.text);
+			return reinterpret_cast< LRESULT >(m_panelBrush);
+		}
+		if (control == m_spinner) {
+			if (m_completed) {
+				SetTextColor(hdc, m_exitCode == 0 || static_cast< DWORD >(m_exitCode) == RestartRequired
+									  ? m_theme.success
+									  : m_theme.danger);
+			} else {
+				SetTextColor(hdc, m_theme.accentHover);
+			}
+			return reinterpret_cast< LRESULT >(m_panelSoftBrush);
+		}
+		SetTextColor(hdc, m_theme.subtext0);
+		return reinterpret_cast< LRESULT >(m_panelBrush);
+	}
+
+	LRESULT handleEditColor(HDC hdc) const {
+		SetBkMode(hdc, OPAQUE);
+		SetBkColor(hdc, m_theme.crust);
+		SetTextColor(hdc, m_theme.subtext0);
+		return reinterpret_cast< LRESULT >(m_logBrush);
+	}
+
+	bool drawButton(const DRAWITEMSTRUCT *item) const {
+		if (!item || (item->CtlID != ControlDetails && item->CtlID != ControlClose)) {
+			return false;
+		}
+
+		const bool disabled = (item->itemState & ODS_DISABLED) != 0;
+		const bool pressed = (item->itemState & ODS_SELECTED) != 0;
+		const bool focused = (item->itemState & ODS_FOCUS) != 0;
+		const bool primary = item->CtlID == ControlClose && m_completed && !disabled;
+		COLORREF fill = primary ? m_theme.accent : m_theme.surface0;
+		if (pressed) {
+			fill = primary ? mixColors(m_theme.accent, m_theme.crust, 0.16)
+						   : mixColors(m_theme.surface0, m_theme.text, 0.08);
+		}
+		if (disabled) {
+			fill = mixColors(m_theme.base, m_theme.surface0, 0.54);
+		}
+		const COLORREF border = focused ? m_theme.accent
+										: (primary ? mixColors(m_theme.accent, m_theme.text, 0.12)
+												   : mixColors(m_theme.surface1, m_theme.text, 0.08));
+		drawRoundedRect(item->hDC, item->rcItem, fill, border, 8);
+
+		wchar_t text[128] {};
+		GetWindowTextW(item->hwndItem, text, static_cast< int >(sizeof(text) / sizeof(text[0])));
+		SetBkMode(item->hDC, TRANSPARENT);
+		SetTextColor(item->hDC, disabled ? m_theme.overlay0 : (primary ? m_theme.onAccent : m_theme.text));
+		HFONT oldFont = reinterpret_cast< HFONT >(SelectObject(item->hDC, m_uiFont));
+		RECT textRect = item->rcItem;
+		DrawTextW(item->hDC, text, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+		SelectObject(item->hDC, oldFont);
+		return true;
+	}
+
 	void createControls() {
-		m_uiFont = reinterpret_cast< HFONT >(GetStockObject(DEFAULT_GUI_FONT));
+		m_backgroundBrush = CreateSolidBrush(m_theme.mantle);
+		m_panelBrush = CreateSolidBrush(m_theme.base);
+		m_panelSoftBrush = CreateSolidBrush(m_theme.surface0);
+		m_logBrush = CreateSolidBrush(m_theme.crust);
+		m_accentBrush = CreateSolidBrush(m_theme.accent);
+
+		m_uiFont = CreateFontW(-15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+							   CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH | FF_SWISS, L"Segoe UI");
+		m_titleFont = CreateFontW(-20, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+								  OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+								  VARIABLE_PITCH | FF_SWISS, L"Segoe UI");
 		m_logFont = CreateFontW(-13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-								CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
+								CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, L"Cascadia Mono");
+		if (!m_logFont) {
+			m_logFont = CreateFontW(-13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+									OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+									FIXED_PITCH | FF_MODERN, L"Consolas");
+		}
 
 		m_spinner = CreateWindowExW(0, L"STATIC", L"|", WS_CHILD | WS_VISIBLE | SS_CENTER, 0, 0, 0, 0, m_hwnd,
 									reinterpret_cast< HMENU >(ControlSpinner), nullptr, nullptr);
@@ -1042,20 +1468,23 @@ private:
 								  m_hwnd, reinterpret_cast< HMENU >(ControlTitle), nullptr, nullptr);
 		m_status = CreateWindowExW(0, L"STATIC", m_statusText.c_str(), WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, m_hwnd,
 									reinterpret_cast< HMENU >(ControlStatus), nullptr, nullptr);
-		m_progress = CreateWindowExW(0, PROGRESS_CLASSW, nullptr, WS_CHILD | WS_VISIBLE | PBS_MARQUEE, 0, 0, 0, 0,
-									 m_hwnd, reinterpret_cast< HMENU >(ControlProgress), nullptr, nullptr);
-		m_detailsButton = CreateWindowExW(0, L"BUTTON", L"Show details", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0,
-										  0, 0, m_hwnd, reinterpret_cast< HMENU >(ControlDetails), nullptr, nullptr);
-		m_closeButton = CreateWindowExW(0, L"BUTTON", L"Close", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_DISABLED, 0,
-										0, 0, 0, m_hwnd, reinterpret_cast< HMENU >(ControlClose), nullptr, nullptr);
-		m_log = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", nullptr,
-								WS_CHILD | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_HSCROLL,
+		m_detailsButton = CreateWindowExW(0, L"BUTTON", L"Show details",
+										  WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, 0, 0, 0, 0, m_hwnd,
+										  reinterpret_cast< HMENU >(ControlDetails), nullptr, nullptr);
+		m_closeButton = CreateWindowExW(0, L"BUTTON", L"Close",
+										WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_DISABLED | BS_OWNERDRAW, 0, 0, 0,
+										0, m_hwnd, reinterpret_cast< HMENU >(ControlClose), nullptr, nullptr);
+		m_log = CreateWindowExW(0, L"EDIT", nullptr,
+								WS_CHILD | ES_MULTILINE | ES_READONLY | ES_NOHIDESEL,
 								0, 0, 0, 0, m_hwnd, reinterpret_cast< HMENU >(ControlLog), nullptr, nullptr);
 
-		for (HWND control : { m_spinner, m_title, m_status, m_progress, m_detailsButton, m_closeButton, m_log }) {
-			SendMessageW(control, WM_SETFONT, reinterpret_cast< WPARAM >(control == m_log ? m_logFont : m_uiFont),
+		for (HWND control : { m_spinner, m_title, m_status, m_detailsButton, m_closeButton, m_log }) {
+			SendMessageW(control, WM_SETFONT,
+						 reinterpret_cast< WPARAM >(control == m_title ? m_titleFont
+																	   : (control == m_log ? m_logFont : m_uiFont)),
 						 TRUE);
 		}
+		SendMessageW(m_log, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(8, 8));
 
 		layoutControls();
 	}
@@ -1073,7 +1502,7 @@ private:
 		MoveWindow(m_spinner, margin, 22, spinnerSize, 24, TRUE);
 		MoveWindow(m_title, contentLeft, 18, width - contentLeft - margin, 24, TRUE);
 		MoveWindow(m_status, contentLeft, 48, width - contentLeft - margin, 42, TRUE);
-		MoveWindow(m_progress, margin, 98, width - margin * 2, 18, TRUE);
+		m_progressRect = { margin, 98, width - margin * 2, 116 };
 
 		const int buttonTop = m_detailsVisible ? expandedHeight() - 48 : collapsedHeight() - 48;
 		MoveWindow(m_detailsButton, margin, buttonTop, buttonWidth, buttonHeight, TRUE);
@@ -1112,13 +1541,10 @@ private:
 
 	void setProgress(const int percent, const bool indeterminate) {
 		m_indeterminate = indeterminate;
-		if (m_progress) {
-			SendMessageW(m_progress, PBM_SETMARQUEE, indeterminate ? TRUE : FALSE, 30);
-			if (!indeterminate) {
-				SendMessageW(m_progress, PBM_SETRANGE32, 0, 100);
-				SendMessageW(m_progress, PBM_SETPOS, std::clamp(percent, 0, 100), 0);
-			}
+		if (!indeterminate) {
+			m_progressPercent = std::clamp(percent, 0, 100);
 		}
+		InvalidateRect(m_hwnd, &m_progressRect, FALSE);
 	}
 
 	void advanceSpinner() {
@@ -1129,8 +1555,8 @@ private:
 		static const wchar_t *frames[] = { L"|", L"/", L"-", L"\\" };
 		m_spinnerFrame = (m_spinnerFrame + 1) % 4;
 		SetWindowTextW(m_spinner, frames[m_spinnerFrame]);
-		if (m_indeterminate && m_progress) {
-			SendMessageW(m_progress, PBM_SETMARQUEE, TRUE, 30);
+		if (m_indeterminate) {
+			InvalidateRect(m_hwnd, &m_progressRect, FALSE);
 		}
 	}
 
@@ -1190,7 +1616,6 @@ private:
 		m_exitCode = static_cast< int >(exitCode);
 		refreshLogs(true);
 		EnableWindow(m_closeButton, TRUE);
-		SendMessageW(m_progress, PBM_SETMARQUEE, FALSE, 0);
 
 		if (exitCode == 0 || exitCode == RestartRequired) {
 			SetWindowTextW(m_spinner, L"OK");
