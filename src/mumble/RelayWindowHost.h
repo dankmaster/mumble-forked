@@ -18,6 +18,7 @@
 #	include <QtWidgets/QWidget>
 
 class QCloseEvent;
+class QEvent;
 class QTimer;
 class QVBoxLayout;
 class QWebChannel;
@@ -52,6 +53,7 @@ signals:
 	void closeRequested(const QString &reason);
 
 protected:
+	void changeEvent(QEvent *event) override;
 	void closeEvent(QCloseEvent *event) override;
 
 private slots:

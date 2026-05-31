@@ -25,6 +25,15 @@ namespace {
 
 constexpr DWORD ParentExitTimeoutMsec = 180000;
 constexpr DWORD RestartRequired       = 3010;
+constexpr DWORD InstallerUserExit     = 1602;
+
+bool updateSucceeded(const DWORD exitCode) {
+	return exitCode == 0 || exitCode == RestartRequired;
+}
+
+bool updateCancelled(const DWORD exitCode) {
+	return exitCode == ERROR_CANCELLED || exitCode == InstallerUserExit;
+}
 
 struct Options {
 	DWORD parentPid = 0;
@@ -194,7 +203,13 @@ bool parseArguments(int argc, wchar_t **argv, Options &options) {
 
 	const bool hasInstaller = fileExists(options.installerPath);
 	const bool hasPackage   = fileExists(options.packagePath);
-	return fileExists(options.appPath) && (hasInstaller != hasPackage);
+	if (!hasInstaller) {
+		options.installerPath.clear();
+	}
+	if (!hasPackage) {
+		options.packagePath.clear();
+	}
+	return fileExists(options.appPath) && (hasInstaller || hasPackage);
 }
 
 void waitForParent(const Options &options) {
@@ -295,6 +310,9 @@ std::wstring packageUpdaterArguments(const Options &options, const bool elevated
 		arguments += L"--parent-pid " + std::to_wstring(options.parentPid) + L' ';
 	}
 	arguments += L"--package " + quoteArgument(options.packagePath);
+	if (!options.installerPath.empty()) {
+		arguments += L" --installer " + quoteArgument(options.installerPath);
+	}
 	arguments += L" --app " + quoteArgument(options.appPath);
 	if (!options.workingDirectory.empty()) {
 		arguments += L" --working-dir " + quoteArgument(options.workingDirectory);
@@ -1665,10 +1683,13 @@ private:
 		refreshLogs(true);
 		EnableWindow(m_closeButton, TRUE);
 
-		if (exitCode == 0 || exitCode == RestartRequired) {
+		if (updateSucceeded(exitCode)) {
 			setProgress(100, false);
 			setStatus(m_options.noRelaunch ? L"Update completed." : L"Update completed. Restarting Mumble...");
 			SetTimer(m_hwnd, UiAutoCloseTimer, UiAutoCloseDelayMsec, nullptr);
+		} else if (updateCancelled(exitCode)) {
+			setProgress(100, false);
+			setStatus(L"Update cancelled. No fallback installer was run.");
 		} else {
 			setProgress(100, false);
 			setStatus(L"Update failed with exit code " + std::to_wstring(exitCode) + L". Open details for logs.");
@@ -1713,9 +1734,29 @@ DWORD runUpdate(const Options &options) {
 
 	const bool packageMode = !options.packagePath.empty();
 	appendLog(options, packageMode ? L"Applying update package." : L"Running Windows Installer.");
-	const DWORD updateExitCode = packageMode ? runPackageUpdate(options) : runInstaller(options);
-	if (!packageMode && !options.noRelaunch && (updateExitCode == 0 || updateExitCode == RestartRequired)) {
+	DWORD updateExitCode = packageMode ? runPackageUpdate(options) : runInstaller(options);
+	bool installerRan = !packageMode;
+
+	if (packageMode && !updateSucceeded(updateExitCode) && !updateCancelled(updateExitCode)
+		&& fileExists(options.installerPath)) {
+		appendLog(options, L"Package update failed with code " + std::to_wstring(updateExitCode)
+							   + L"; running verified MSI fallback.");
+		postUiProgress(-1, true);
+		updateExitCode = runInstaller(options);
+		installerRan = true;
+	} else if (packageMode && updateCancelled(updateExitCode)) {
+		appendLog(options, L"Package update was cancelled; MSI fallback will not run.");
+	} else if (packageMode && !updateSucceeded(updateExitCode)) {
+		appendLog(options, L"Package update failed and no verified MSI fallback was available.");
+	}
+
+	if (installerRan && !options.noRelaunch && updateSucceeded(updateExitCode)) {
 		appendLog(options, L"Windows Installer completed; preparing to restart Mumble.");
+		postUiProgress(100, false);
+		Sleep(800);
+		relaunchMumble(options);
+	} else if (packageMode && updateCancelled(updateExitCode) && !options.noRelaunch) {
+		appendLog(options, L"Update was cancelled; restarting Mumble without applying the MSI fallback.");
 		postUiProgress(100, false);
 		Sleep(800);
 		relaunchMumble(options);

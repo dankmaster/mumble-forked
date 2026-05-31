@@ -126,6 +126,22 @@ QList< EncoderBackend > probeEncoderBackends() {
 								   : QStringLiteral("ffmpeg NVENC encoders are unavailable");
 	backends.append(nvenc);
 #elif defined(Q_OS_WIN)
+	EncoderBackend nvenc;
+	nvenc.backendID   = QStringLiteral("nvenc");
+	nvenc.displayName = QStringLiteral("NVENC via ffmpeg");
+	if (runtimeSupport.h264NvencAvailable) {
+		nvenc.codecs.append(static_cast< int >(MumbleProto::ScreenShareCodecH264));
+	}
+	if (runtimeSupport.av1NvencAvailable) {
+		nvenc.codecs.append(static_cast< int >(MumbleProto::ScreenShareCodecAV1));
+	}
+	nvenc.hardware  = true;
+	nvenc.available = !nvenc.codecs.isEmpty();
+	nvenc.detail =
+		nvenc.available ? QStringLiteral("ffmpeg NVENC encoder(s) are available for the low-latency D3D11 capture path")
+						 : QStringLiteral("ffmpeg NVENC encoders are unavailable");
+	backends.append(nvenc);
+
 	EncoderBackend mediaFoundation;
 	mediaFoundation.backendID   = QStringLiteral("mf");
 	mediaFoundation.displayName = QStringLiteral("Media Foundation via ffmpeg");
@@ -157,7 +173,54 @@ QList< EncoderBackend > probeEncoderBackends() {
 	qsv.detail    = qsv.available ? QStringLiteral("ffmpeg Intel Quick Sync encoder(s) are available")
 							   : QStringLiteral("ffmpeg Intel Quick Sync encoders are unavailable");
 	backends.append(qsv);
+
+	EncoderBackend gstNvD3D11;
+	gstNvD3D11.backendID   = QStringLiteral("gstreamer-nvd3d11");
+	gstNvD3D11.displayName = QStringLiteral("GStreamer NVENC D3D11 H.264");
+	gstNvD3D11.codecs      = { static_cast< int >(MumbleProto::ScreenShareCodecH264) };
+	gstNvD3D11.hardware    = true;
+	gstNvD3D11.available   = runtimeSupport.gstreamerLiveKitPublishAvailable
+							&& runtimeSupport.gstNvD3D11H264EncoderAvailable;
+	gstNvD3D11.detail =
+		gstNvD3D11.available
+			? QStringLiteral("GStreamer LiveKit publisher can use nvd3d11h264enc with D3D11 screen capture.")
+			: QStringLiteral("GStreamer NVENC D3D11 H.264 publisher is unavailable");
+	backends.append(gstNvD3D11);
+
+	EncoderBackend gstMediaFoundation;
+	gstMediaFoundation.backendID   = QStringLiteral("gstreamer-mf");
+	gstMediaFoundation.displayName = QStringLiteral("GStreamer Media Foundation H.264");
+	gstMediaFoundation.codecs      = { static_cast< int >(MumbleProto::ScreenShareCodecH264) };
+	gstMediaFoundation.hardware    = true;
+	gstMediaFoundation.available   = runtimeSupport.gstreamerLiveKitPublishAvailable
+								   && runtimeSupport.gstMfH264EncoderAvailable;
+	gstMediaFoundation.detail =
+		gstMediaFoundation.available
+			? QStringLiteral("GStreamer LiveKit publisher can use mfh264enc for H.264 hardware encoding.")
+			: QStringLiteral("GStreamer Media Foundation H.264 publisher is unavailable");
+	backends.append(gstMediaFoundation);
 #endif
+
+	EncoderBackend gstX264;
+	gstX264.backendID   = QStringLiteral("gstreamer-x264");
+	gstX264.displayName = QStringLiteral("GStreamer x264 H.264");
+	gstX264.codecs      = { static_cast< int >(MumbleProto::ScreenShareCodecH264) };
+	gstX264.hardware    = false;
+	gstX264.available   = runtimeSupport.gstreamerLiveKitPublishAvailable && runtimeSupport.gstX264EncoderAvailable;
+	gstX264.detail      = gstX264.available ? QStringLiteral("GStreamer LiveKit publisher can use x264enc.")
+										: QStringLiteral("GStreamer x264 publisher is unavailable");
+	backends.append(gstX264);
+
+	EncoderBackend gstOpenH264;
+	gstOpenH264.backendID   = QStringLiteral("gstreamer-openh264");
+	gstOpenH264.displayName = QStringLiteral("GStreamer OpenH264");
+	gstOpenH264.codecs      = { static_cast< int >(MumbleProto::ScreenShareCodecH264) };
+	gstOpenH264.hardware    = false;
+	gstOpenH264.available =
+		runtimeSupport.gstreamerLiveKitPublishAvailable && runtimeSupport.gstOpenH264EncoderAvailable;
+	gstOpenH264.detail = gstOpenH264.available ? QStringLiteral("GStreamer LiveKit publisher can use openh264enc.")
+											   : QStringLiteral("GStreamer OpenH264 publisher is unavailable");
+	backends.append(gstOpenH264);
 
 	EncoderBackend x264;
 	x264.backendID   = QStringLiteral("libx264");
@@ -243,6 +306,29 @@ const EncoderBackend *selectEncoderBackend(const QList< EncoderBackend > &backen
 	return nullptr;
 }
 
+const EncoderBackend *selectGStreamerEncoderBackend(const QList< EncoderBackend > &backends,
+													const MumbleProto::ScreenShareCodec codec,
+													const bool preferHardware) {
+	const int codecValue = static_cast< int >(codec);
+	if (preferHardware) {
+		for (const EncoderBackend &backend : backends) {
+			if (backend.backendID.startsWith(QLatin1String("gstreamer-")) && backend.hardware && backend.available
+				&& backend.codecs.contains(codecValue)) {
+				return &backend;
+			}
+		}
+	}
+
+	for (const EncoderBackend &backend : backends) {
+		if (backend.backendID.startsWith(QLatin1String("gstreamer-")) && backend.available
+			&& backend.codecs.contains(codecValue)) {
+			return &backend;
+		}
+	}
+
+	return nullptr;
+}
+
 ScreenShareSessionPlanner::Plan buildPlan(const QJsonObject &payload,
 										  const ScreenShareMediaSupport::CapabilitySummary &capabilities,
 										  const bool publish) {
@@ -288,6 +374,19 @@ ScreenShareSessionPlanner::Plan buildPlan(const QJsonObject &payload,
 	const unsigned int fps = limitFromPayload(payload, "fps", capabilities.maxFps, Mumble::ScreenShare::HARD_MAX_FPS);
 	const unsigned int bitrate = Mumble::ScreenShare::sanitizeBitrateKbps(
 		nonNegativePayloadValue(payload, "bitrate_kbps"), codec, width, height, fps);
+	const unsigned int requestedMinBitrate = nonNegativePayloadValue(payload, "min_bitrate_kbps");
+	const unsigned int requestedMaxBitrate = nonNegativePayloadValue(payload, "max_bitrate_kbps");
+	const unsigned int minBitrate =
+		requestedMinBitrate > 0
+			? Mumble::ScreenShare::sanitizeBitrateKbps(requestedMinBitrate, codec, width, height, fps)
+			: qMin(1200U, bitrate);
+	const unsigned int maxBitrate =
+		requestedMaxBitrate > 0
+			? Mumble::ScreenShare::sanitizeBitrateKbps(requestedMaxBitrate, codec, width, height, fps)
+			: qMax(6000U, bitrate);
+	const QString qualityProfile =
+		payload.value(QStringLiteral("quality_profile")).toString(QStringLiteral("auto")).trimmed().toLower();
+	const QString captureSourceID = payload.value(QStringLiteral("capture_source_id")).toString().trimmed();
 
 	const bool preferHardware              = payload.value(QStringLiteral("prefer_hardware_encoding")).toBool(true);
 	const QList< EncoderBackend > backends = probeEncoderBackends();
@@ -299,9 +398,13 @@ ScreenShareSessionPlanner::Plan buildPlan(const QJsonObject &payload,
 		return plan;
 	}
 	const bool browserManagedRuntime = publish && relayContract.contractMode == QLatin1String("browser-webrtc-runtime");
+	const bool gstreamerManagedRuntime = relayContract.contractMode == QLatin1String("gstreamer-livekit-runtime");
 	const EncoderBackend *selectedBackend =
-		browserManagedRuntime ? nullptr : selectEncoderBackend(backends, codec, preferHardware);
-	if (!browserManagedRuntime && !selectedBackend) {
+		browserManagedRuntime
+			? nullptr
+			: (gstreamerManagedRuntime && publish ? selectGStreamerEncoderBackend(backends, codec, preferHardware)
+												  : selectEncoderBackend(backends, codec, preferHardware));
+	if (!browserManagedRuntime && publish && !selectedBackend) {
 		plan.errorMessage = QStringLiteral("No encoder backend can be planned for the negotiated codec.");
 		return plan;
 	}
@@ -311,11 +414,13 @@ ScreenShareSessionPlanner::Plan buildPlan(const QJsonObject &payload,
 		warnings.append(
 			QStringLiteral("The negotiated WebRTC relay will be executed through a dedicated browser runtime, so final "
 						   "codec and hardware acceleration decisions are delegated to the browser."));
-	} else if (selectedBackend->backendID == QLatin1String("stub")) {
+	} else if (gstreamerManagedRuntime && !publish) {
+		warnings.append(QStringLiteral("The negotiated WebRTC relay will be viewed through GStreamer LiveKit."));
+	} else if (publish && selectedBackend && selectedBackend->backendID == QLatin1String("stub")) {
 		warnings.append(QStringLiteral("No executable encoder backend was detected for the negotiated codec; "
 									   "start-publish will only work if stub fallback is explicitly enabled."));
 	}
-	if (!browserManagedRuntime && codec == MumbleProto::ScreenShareCodecAV1
+	if (!browserManagedRuntime && publish && selectedBackend && codec == MumbleProto::ScreenShareCodecAV1
 		&& selectedBackend->backendID == QLatin1String("stub")) {
 		warnings.append(
 			QStringLiteral("AV1 is negotiable, but this host currently has no executable AV1 encode backend."));
@@ -359,18 +464,30 @@ ScreenShareSessionPlanner::Plan buildPlan(const QJsonObject &payload,
 	planPayload.insert(QStringLiteral("height"), static_cast< int >(height));
 	planPayload.insert(QStringLiteral("fps"), static_cast< int >(fps));
 	planPayload.insert(QStringLiteral("bitrate_kbps"), static_cast< int >(bitrate));
+	planPayload.insert(QStringLiteral("min_bitrate_kbps"), static_cast< int >(qMin(minBitrate, bitrate)));
+	planPayload.insert(QStringLiteral("max_bitrate_kbps"), static_cast< int >(qMax(maxBitrate, bitrate)));
+	planPayload.insert(QStringLiteral("quality_profile"),
+					   qualityProfile.isEmpty() ? QStringLiteral("auto") : qualityProfile);
+	planPayload.insert(QStringLiteral("capture_source_id"), captureSourceID);
+	planPayload.insert(QStringLiteral("adaptive_degradation_order"), QStringLiteral("fps-then-resolution"));
 	planPayload.insert(QStringLiteral("prefer_hardware_encoding"), preferHardware);
 	planPayload.insert(QStringLiteral("planned_encoder_backend"),
-					   browserManagedRuntime
-						   ? QStringLiteral("browser-webrtc-%1").arg(Mumble::ScreenShare::codecToConfigToken(codec))
-						   : codecBackendToken(selectedBackend->backendID, codec));
+					   !publish ? QStringLiteral("viewer-not-applicable")
+								: (browserManagedRuntime ? QStringLiteral("browser-webrtc-%1")
+																.arg(Mumble::ScreenShare::codecToConfigToken(codec))
+														 : codecBackendToken(selectedBackend->backendID, codec)));
 	planPayload.insert(QStringLiteral("planned_encoder_detail"),
-					   browserManagedRuntime
-						   ? QStringLiteral("Browser-managed WebRTC encode path. Codec preference is negotiated by "
-											"Mumble, while final encoder selection happens inside the browser runtime.")
-						   : selectedBackend->detail);
+					   !publish ? QStringLiteral("Viewer sessions do not encode video.")
+								: (browserManagedRuntime
+									   ? QStringLiteral("Browser-managed WebRTC encode path. Codec preference is "
+														"negotiated by Mumble, while final encoder selection happens "
+														"inside the browser runtime.")
+									   : selectedBackend->detail));
 	planPayload.insert(QStringLiteral("planned_renderer_backend"),
-					   relayContract.contractMode == QLatin1String("browser-webrtc-runtime")
+					   relayContract.contractMode == QLatin1String("gstreamer-livekit-runtime")
+						   ? (publish ? QStringLiteral("gstreamer-livekit-publish")
+									  : QStringLiteral("gstreamer-livekit-view"))
+						   : relayContract.contractMode == QLatin1String("browser-webrtc-runtime")
 						   ? QStringLiteral("browser-webrtc")
 						   : publish ? QStringLiteral("ffmpeg-publish")
 									 : (runtimeSupport.graphicalSessionAvailable ? QStringLiteral("ffplay-view")

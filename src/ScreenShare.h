@@ -32,7 +32,7 @@ namespace ScreenShare {
 	constexpr unsigned int DEFAULT_MAX_WIDTH           = 1280;
 	constexpr unsigned int DEFAULT_MAX_HEIGHT          = 720;
 	constexpr unsigned int DEFAULT_MAX_FPS             = 30;
-	constexpr unsigned int DEFAULT_TARGET_BITRATE_KBPS = 3000;
+	constexpr unsigned int DEFAULT_TARGET_BITRATE_KBPS = 4000;
 
 	constexpr unsigned int HARD_MAX_WIDTH        = 7680;
 	constexpr unsigned int HARD_MAX_HEIGHT       = 4320;

@@ -228,7 +228,11 @@ Current capabilities:
 - per-session capability gating so old clients and servers keep normal voice/chat behavior
 - external `mumble-screen-helper` process
 - helper IPC and runtime diagnostics
-- relay/WebRTC browser shell under [`../relay-webapp/`](../relay-webapp/)
+- GStreamer-first LiveKit WebRTC helper runtime for screen-share publish/view
+- shared/WebEngine and `mumble-forked` Windows release payloads stage the
+  bundled GStreamer runtime under `gstreamer\` for installed clients
+- optional relay/WebRTC browser shell under [`../relay-webapp/`](../relay-webapp/)
+  only when `MUMBLE_SCREENSHARE_ALLOW_RELAY_WEBAPP=1`
 - LiveKit-compatible relay-token path when API key/secret are configured
 
 Important server keys:
@@ -237,7 +241,7 @@ Important server keys:
 screen_share_enabled=false
 screen_share_recording_enabled=false
 screen_share_helper_required=true
-screen_share_codec_preferences="vp8 h264 av1 vp9"
+screen_share_codec_preferences="h264 av1 vp9 vp8"
 screen_share_max_width=1920
 screen_share_max_height=1080
 screen_share_max_fps=60
@@ -280,7 +284,8 @@ Current build/release features:
 - manual `mumble-forked MSI Release` workflow for a stable unsigned convenience MSI
 - generated `changelog.md`
 - generated `mumble-forked-update.json`
-- in-app update prompt/download/install handoff for fork release manifests
+- in-app package update prompt/download/install handoff for fork release
+  manifests, with MSI fallback on package apply failure
 - one-shot update resume snapshot for reopening the client on the same server,
   voice room, chat view, and saved window layout where possible
 

@@ -112,7 +112,10 @@ int main(int argc, char **argv) {
 
 	QCommandLineParser parser;
 	parser.setApplicationDescription(QStringLiteral("Mumble screen-share helper"));
-	parser.addHelpOption();
+	QCommandLineOption helpOption(QStringList{ QStringLiteral("?"), QStringLiteral("h"), QStringLiteral("help") },
+								  QStringLiteral("Displays help on commandline options."));
+	QCommandLineOption helpAllOption(QStringList{ QStringLiteral("help-all") },
+									 QStringLiteral("Displays help, including generic Qt options."));
 	QCommandLineOption diagnosticsLogFileOption(QStringList{ QStringLiteral("diagnostics-log-file") },
 												QStringLiteral("Write helper diagnostics to the given file."),
 												QStringLiteral("path"));
@@ -120,10 +123,19 @@ int main(int argc, char **argv) {
 											   QStringLiteral("Print the helper capability payload as JSON and exit."));
 	QCommandLineOption selfTestOption(QStringList{ QStringLiteral("self-test") },
 									  QStringLiteral("Run a local publish/view helper self-test and exit."));
+	parser.addOption(helpOption);
+	parser.addOption(helpAllOption);
 	parser.addOption(diagnosticsLogFileOption);
 	parser.addOption(printCapabilitiesOption);
 	parser.addOption(selfTestOption);
-	parser.process(app);
+	if (!parser.parse(app.arguments())) {
+		QTextStream(stderr) << parser.errorText() << Qt::endl << parser.helpText() << Qt::endl;
+		return 1;
+	}
+	if (parser.isSet(helpOption) || parser.isSet(helpAllOption)) {
+		QTextStream(stdout) << parser.helpText() << Qt::endl;
+		return 0;
+	}
 
 	if (parser.isSet(diagnosticsLogFileOption)) {
 		installDiagnosticsLogging(parser.value(diagnosticsLogFileOption));

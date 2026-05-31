@@ -1427,6 +1427,7 @@ QString Server::liveKitScreenShareTokenForRecipient(const ScreenShareStream &str
 	videoGrant.insert(QStringLiteral("canSubscribe"), true);
 	if (relayRole == MumbleProto::ScreenShareRelayRolePublisher) {
 		QJsonArray publishSources;
+		publishSources.push_back(QStringLiteral("camera"));
 		publishSources.push_back(QStringLiteral("screen_share"));
 		publishSources.push_back(QStringLiteral("screen_share_audio"));
 		videoGrant.insert(QStringLiteral("canPublishSources"), publishSources);
@@ -1563,6 +1564,18 @@ void Server::populateScreenShareStateMessage(MumbleProto::ScreenShareState &msg,
 	msg.set_height(stream.uiHeight);
 	msg.set_fps(stream.uiFps);
 	msg.set_bitrate_kbps(stream.uiBitrateKbps);
+	if (!stream.qsQualityProfile.isEmpty()) {
+		msg.set_quality_profile(u8(stream.qsQualityProfile));
+	}
+	if (!stream.qsCaptureSourceID.isEmpty()) {
+		msg.set_capture_source_id(u8(stream.qsCaptureSourceID));
+	}
+	if (stream.uiMinBitrateKbps > 0) {
+		msg.set_min_bitrate_kbps(stream.uiMinBitrateKbps);
+	}
+	if (stream.uiMaxBitrateKbps > 0) {
+		msg.set_max_bitrate_kbps(stream.uiMaxBitrateKbps);
+	}
 }
 
 void Server::sendScreenShareStateToAudience(ScreenShareStream &stream, ServerUser *except) {

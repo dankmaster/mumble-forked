@@ -742,6 +742,24 @@ QList< int > screenShareCodecListFromCreate(const MumbleProto::ScreenShareCreate
 	return Mumble::ScreenShare::sanitizeCodecList(codecs);
 }
 
+QString sanitizeScreenShareQualityProfile(const QString &profile) {
+	const QString normalized = profile.trimmed().toLower();
+	if (normalized == QLatin1String("sharp_text") || normalized == QLatin1String("sharp-text")
+		|| normalized == QLatin1String("text")) {
+		return QStringLiteral("sharp_text");
+	}
+	if (normalized == QLatin1String("smooth_motion") || normalized == QLatin1String("smooth-motion")
+		|| normalized == QLatin1String("motion")) {
+		return QStringLiteral("smooth_motion");
+	}
+	if (normalized == QLatin1String("data_saver") || normalized == QLatin1String("data-saver")
+		|| normalized == QLatin1String("low")) {
+		return QStringLiteral("data_saver");
+	}
+
+	return QStringLiteral("auto");
+}
+
 constexpr quint64 MESSAGE_SCREEN_SHARE_RELAY_TOKEN_LIFETIME_MSEC = 5ULL * 60ULL * 1000ULL;
 
 QString randomMessageRelayCredential() {
@@ -8918,6 +8936,25 @@ void Server::msgScreenShareCreate(ServerUser *uSource, MumbleProto::ScreenShareC
 	stream.uiBitrateKbps =
 		Mumble::ScreenShare::sanitizeBitrateKbps(msg.has_requested_bitrate_kbps() ? msg.requested_bitrate_kbps() : 0,
 												 stream.codec, stream.uiWidth, stream.uiHeight, stream.uiFps);
+	stream.qsQualityProfile =
+		sanitizeScreenShareQualityProfile(msg.has_quality_profile() ? u8(msg.quality_profile()) : QString());
+	stream.qsCaptureSourceID = msg.has_capture_source_id() ? u8(msg.capture_source_id()).trimmed() : QString();
+	const unsigned int requestedMinBitrate =
+		msg.has_requested_min_bitrate_kbps() ? msg.requested_min_bitrate_kbps() : 0;
+	const unsigned int requestedMaxBitrate =
+		msg.has_requested_max_bitrate_kbps() ? msg.requested_max_bitrate_kbps() : 0;
+	stream.uiMinBitrateKbps =
+		requestedMinBitrate > 0
+			? qMin(Mumble::ScreenShare::sanitizeBitrateKbps(requestedMinBitrate, stream.codec, stream.uiWidth,
+															stream.uiHeight, stream.uiFps),
+				   stream.uiBitrateKbps)
+			: qMin(1200U, stream.uiBitrateKbps);
+	stream.uiMaxBitrateKbps =
+		requestedMaxBitrate > 0
+			? qMax(Mumble::ScreenShare::sanitizeBitrateKbps(requestedMaxBitrate, stream.codec, stream.uiWidth,
+															stream.uiHeight, stream.uiFps),
+				   stream.uiBitrateKbps)
+			: qMax(stream.uiBitrateKbps, qMin(Mumble::ScreenShare::HARD_MAX_BITRATE_KBPS, stream.uiBitrateKbps + 2000U));
 
 	qhScreenShareStreams.insert(stream.qsStreamID, stream);
 	qhScreenShareStreamByOwnerSession.insert(stream.uiOwnerSession, stream.qsStreamID);
@@ -8926,7 +8963,8 @@ void Server::msgScreenShareCreate(ServerUser *uSource, MumbleProto::ScreenShareC
 	ScreenShareStream &storedStream = qhScreenShareStreams[stream.qsStreamID];
 	sendScreenShareStateToAudience(storedStream);
 	screenShareDiagnosticLog(QStringLiteral("Created stream %1 owner=%2 channel=%3 codec=%4 requested_codecs=%5 "
-											"preferred_codecs=%6 size=%7x%8@%9 bitrate=%10 relay=%11")
+											"preferred_codecs=%6 size=%7x%8@%9 bitrate=%10 min=%11 max=%12 "
+											"profile=%13 relay=%14")
 								 .arg(storedStream.qsStreamID)
 								 .arg(storedStream.uiOwnerSession)
 								 .arg(storedStream.uiScopeID)
@@ -8937,6 +8975,9 @@ void Server::msgScreenShareCreate(ServerUser *uSource, MumbleProto::ScreenShareC
 								 .arg(storedStream.uiHeight)
 								 .arg(storedStream.uiFps)
 								 .arg(storedStream.uiBitrateKbps)
+								 .arg(storedStream.uiMinBitrateKbps)
+								 .arg(storedStream.uiMaxBitrateKbps)
+								 .arg(storedStream.qsQualityProfile)
 								 .arg(Mumble::ScreenShare::relayTransportToConfigToken(storedStream.relayTransport)));
 	log(uSource, QString::fromLatin1("Started screen share %1 (%2 %3x%4@%5 %6 kbps)")
 					 .arg(storedStream.qsStreamID)

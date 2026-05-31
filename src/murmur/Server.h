@@ -381,6 +381,10 @@ public:
 		unsigned int uiHeight = 0;
 		unsigned int uiFps = 0;
 		unsigned int uiBitrateKbps = 0;
+		QString qsQualityProfile = QStringLiteral("auto");
+		QString qsCaptureSourceID;
+		unsigned int uiMinBitrateKbps = 0;
+		unsigned int uiMaxBitrateKbps = 0;
 	};
 
 	QHash< QString, ScreenShareStream > qhScreenShareStreams;

@@ -190,6 +190,7 @@
 	PROCESS(ui, MODERN_SHELL_CLASSIC_USER_ICONS_KEY, bModernShellClassicUserIcons)         \
 	PROCESS(ui, MODERN_SHELL_RAIL_SIDE_KEY, qsModernShellRailSide)                        \
 	PROCESS(ui, MODERN_SHELL_ACCENT_KEY, qsModernShellAccent)                             \
+	PROCESS(ui, MODERN_SHELL_TICKER_BANNER_ENABLED_KEY, bModernShellTickerBannerEnabled)  \
 	PROCESS(ui, MODERN_SHELL_TICKER_ALWAYS_SCROLL_KEY, bModernShellTickerBannerAlwaysScroll) \
 	PROCESS(ui, CONFIG_GEOMETRY_KEY, qbaConfigGeometry)                                   \
 	PROCESS(ui, IMAGE_PREVIEW_GEOMETRY_KEY, qbaImagePreviewGeometry)                      \

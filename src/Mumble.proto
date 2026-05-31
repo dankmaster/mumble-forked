@@ -1043,6 +1043,10 @@ message ScreenShareCreate {
 	optional uint32 requested_fps = 6;
 	optional uint32 requested_bitrate_kbps = 7;
 	optional bool prefer_hardware_encoding = 8 [default = true];
+	optional string quality_profile = 9 [default = "auto"];
+	optional string capture_source_id = 10;
+	optional uint32 requested_min_bitrate_kbps = 11;
+	optional uint32 requested_max_bitrate_kbps = 12;
 }
 
 // Sent by the server to announce the currently active screen-share session state.
@@ -1066,6 +1070,10 @@ message ScreenShareState {
 	optional ScreenShareRelayTransport relay_transport = 17 [default = ScreenShareRelayTransportUnknown];
 	optional ScreenShareRelayRole relay_role = 18 [default = ScreenShareRelayRoleViewer];
 	optional uint64 relay_token_expires_at = 19;
+	optional string quality_profile = 20 [default = "auto"];
+	optional string capture_source_id = 21;
+	optional uint32 min_bitrate_kbps = 22;
+	optional uint32 max_bitrate_kbps = 23;
 }
 
 // Relays a publisher or viewer offer blob through Murmur.

@@ -21,12 +21,17 @@ public:
 		bool zeroCopySupported         = false;
 		bool roiSupported              = false;
 		bool damageMetadataSupported   = false;
+		bool gstreamerAvailable        = false;
+		bool gstreamerLiveKitPublishAvailable = false;
+		bool gstreamerLiveKitViewAvailable    = false;
 		QList< int > supportedCodecs;
 		unsigned int maxWidth  = 0;
 		unsigned int maxHeight = 0;
 		unsigned int maxFps    = 0;
 		QString captureBackend;
 		QStringList captureBackends;
+		QString gstreamerVersion;
+		QStringList missingGStreamerElements;
 		QStringList ingestProtocols;
 		QStringList drmSystems;
 		QString statusMessage;

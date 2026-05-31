@@ -1136,6 +1136,7 @@ void Settings::legacyLoad(const QString &path) {
 	LOAD(bModernShellClassicUserIcons, "ui/modernShellClassicUserIcons");
 	LOAD(qsModernShellRailSide, "ui/modernShellRailSide");
 	LOAD(qsModernShellAccent, "ui/modernShellAccent");
+	LOAD(bModernShellTickerBannerEnabled, "ui/modernShellTickerBannerEnabled");
 	LOAD(bModernShellTickerBannerAlwaysScroll, "ui/modernShellTickerAlwaysScroll");
 	LOAD(qsUsername, "ui/username");
 	LOAD(qsLastServer, "ui/server");

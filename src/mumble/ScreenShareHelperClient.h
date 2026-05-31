@@ -33,6 +33,9 @@ public:
 		bool zeroCopySupported       = false;
 		bool roiSupported            = false;
 		bool damageMetadataSupported = false;
+		bool gstreamerAvailable      = false;
+		bool gstreamerLiveKitPublishAvailable = false;
+		bool gstreamerLiveKitViewAvailable    = false;
 		QList< int > supportedCodecs;
 		QList< int > runtimeRelayTransports;
 		unsigned int maxWidth  = 0;
@@ -41,6 +44,8 @@ public:
 		QString helperExecutable;
 		QString captureBackend;
 		QStringList captureBackends;
+		QString gstreamerVersion;
+		QStringList missingGStreamerElements;
 		QStringList supportedIngestProtocols;
 		QStringList drmSystems;
 		unsigned int queueBudgetFrames = 0;

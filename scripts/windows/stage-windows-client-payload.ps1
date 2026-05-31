@@ -83,6 +83,17 @@ function Copy-FileIfExists {
 	Copy-Item -LiteralPath $Source -Destination $Destination -Force
 }
 
+function Get-GStreamerRuntimeRoot {
+	foreach ($envName in @("MUMBLE_GSTREAMER_ROOT", "GSTREAMER_1_0_ROOT_X86_64", "GSTREAMER_1_0_ROOT_MSVC_X86_64", "GSTREAMER_ROOT_X86_64")) {
+		$value = [System.Environment]::GetEnvironmentVariable($envName, "Process")
+		if (-not [string]::IsNullOrWhiteSpace($value) -and (Test-Path -LiteralPath $value)) {
+			return (Resolve-Path -LiteralPath $value).Path
+		}
+	}
+
+	return $null
+}
+
 $buildRootPath = Resolve-ExistingPath -Path $BuildRoot
 $stageRootPath = if ([string]::IsNullOrWhiteSpace($StageRoot)) {
 	Join-Path $buildRootPath "windows-client-payload"
@@ -125,5 +136,14 @@ Copy-FileIfExists -Source (Join-Path $buildRootPath "speexdsp.dll") -Destination
 Copy-FileIfExists -Source (Join-Path $buildRootPath "rnnoise.dll") -Destination (Join-Path $stageRootPath "rnnoise.dll")
 Copy-FileIfExists -Source (Join-Path $buildRootPath "deepfilter.dll") -Destination (Join-Path $stageRootPath "deepfilter.dll")
 Copy-FileIfExists -Source (Join-Path $buildRootPath "onnxruntime.dll") -Destination (Join-Path $stageRootPath "onnxruntime.dll")
+
+$gstreamerRoot = Get-GStreamerRuntimeRoot
+if ($gstreamerRoot) {
+	Write-Host "Staging optional GStreamer runtime from '$gstreamerRoot'."
+	$stageGStreamerRoot = Join-Path $stageRootPath "gstreamer"
+	Copy-DirectoryContents -Source (Join-Path $gstreamerRoot "bin") -Destination (Join-Path $stageGStreamerRoot "bin")
+	Copy-DirectoryContents -Source (Join-Path $gstreamerRoot "lib\gstreamer-1.0") -Destination (Join-Path $stageGStreamerRoot "lib\gstreamer-1.0")
+	Copy-DirectoryContents -Source (Join-Path $gstreamerRoot "libexec") -Destination (Join-Path $stageGStreamerRoot "libexec")
+}
 
 Write-Host "Staged Windows client payload at '$stageRootPath'."

@@ -213,6 +213,7 @@ const SettingsKey MODERN_SHELL_DENSITY_KEY                = { "modern_shell_dens
 const SettingsKey MODERN_SHELL_CLASSIC_USER_ICONS_KEY     = { "modern_shell_classic_user_icons" };
 const SettingsKey MODERN_SHELL_RAIL_SIDE_KEY              = { "modern_shell_rail_side" };
 const SettingsKey MODERN_SHELL_ACCENT_KEY                 = { "modern_shell_accent" };
+const SettingsKey MODERN_SHELL_TICKER_BANNER_ENABLED_KEY  = { "modern_shell_ticker_banner_enabled" };
 const SettingsKey MODERN_SHELL_TICKER_ALWAYS_SCROLL_KEY   = { "modern_shell_ticker_always_scroll" };
 const SettingsKey CONFIG_GEOMETRY_KEY                     = { "config_geometry" };
 const SettingsKey IMAGE_PREVIEW_GEOMETRY_KEY              = { "image_preview_geometry" };

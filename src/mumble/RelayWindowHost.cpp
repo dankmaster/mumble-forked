@@ -11,9 +11,11 @@
 #	include "RelayWebPage.h"
 #	include "RelayWindowBridge.h"
 #	include "Global.h"
+#	include "UiTheme.h"
 
 #	include <QtCore/QAbstractItemModel>
 #	include <QtCore/QDebug>
+#	include <QtCore/QEvent>
 #	include <QtCore/QTimer>
 #	include <QtCore/QUrlQuery>
 #	include <QtGui/QCloseEvent>
@@ -101,6 +103,7 @@ bool presentDesktopMediaRequest(QWidget *parent, const QWebEngineDesktopMediaReq
 	dialog.setWindowTitle(windowTitle);
 	dialog.setModal(true);
 	dialog.setMinimumSize(520, 360);
+	applyUiThemeNativeTitleBar(&dialog);
 
 	auto *layout = new QVBoxLayout(&dialog);
 	layout->setContentsMargins(16, 16, 16, 16);
@@ -228,6 +231,7 @@ bool RelayWindowHost::start(QString *errorMessage) {
 	m_bootTimeoutTimer->start();
 	setWindowTitle(windowTitle());
 	show();
+	applyUiThemeNativeTitleBar(this);
 	raise();
 	activateWindow();
 	return true;
@@ -262,6 +266,23 @@ void RelayWindowHost::updateSession(const ScreenShareSession &session) {
 void RelayWindowHost::closeFromManager() {
 	m_closingFromManager = true;
 	close();
+}
+
+void RelayWindowHost::changeEvent(QEvent *event) {
+	QWidget::changeEvent(event);
+	if (!event) {
+		return;
+	}
+
+	switch (event->type()) {
+		case QEvent::ApplicationPaletteChange:
+		case QEvent::PaletteChange:
+		case QEvent::StyleChange:
+			applyUiThemeNativeTitleBar(this);
+			break;
+		default:
+			break;
+	}
 }
 
 void RelayWindowHost::closeEvent(QCloseEvent *event) {

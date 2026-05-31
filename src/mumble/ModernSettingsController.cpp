@@ -165,7 +165,9 @@ namespace {
 			{ QStringLiteral("look.modernRailSide"),
 			  QObject::tr("Choose which side of the Modern shell hosts the room rail.") },
 			{ QStringLiteral("look.modernAccent"),
-			  QObject::tr("Choose the Modern shell accent color, or let the client pick automatically.") },
+			  QObject::tr("Choose the Modern shell accent color, or let the active theme decide.") },
+			{ QStringLiteral("look.modernTickerBannerEnabled"),
+			  QObject::tr("Show the Stonks ticker banner in the Modern conversation header.") },
 			{ QStringLiteral("look.modernTickerAlwaysScroll"),
 			  QObject::tr("Keep the Stonks ticker banner moving even when the current ticker list fits on screen.") },
 			{ QStringLiteral("look.hideInTray"),
@@ -927,6 +929,7 @@ namespace {
 		dto.insert(QStringLiteral("railSide"), normalizedModernShellRailSide(settings.qsModernShellRailSide));
 		dto.insert(QStringLiteral("accent"), accent);
 		dto.insert(QStringLiteral("accentDetails"), modernShellAccentDto(accent));
+		dto.insert(QStringLiteral("tickerBannerEnabled"), settings.bModernShellTickerBannerEnabled);
 		dto.insert(QStringLiteral("tickerBannerAlwaysScroll"), settings.bModernShellTickerBannerAlwaysScroll);
 		return dto;
 	}
@@ -1516,6 +1519,8 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		m_draft.qsModernShellRailSide = normalizedModernShellRailSide(value);
 	} else if (id == QLatin1String("look.modernAccent")) {
 		m_draft.qsModernShellAccent = normalizedModernShellAccent(value);
+	} else if (id == QLatin1String("look.modernTickerBannerEnabled")) {
+		m_draft.bModernShellTickerBannerEnabled = value.toBool();
 	} else if (id == QLatin1String("look.modernTickerAlwaysScroll")) {
 		m_draft.bModernShellTickerBannerAlwaysScroll = value.toBool();
 	} else if (id == QLatin1String("look.hideInTray")) {
@@ -2615,9 +2620,13 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 															normalizedModernShellAccent(m_draft.qsModernShellAccent),
 															modernShellAccentOptions(), QStringLiteral("string")),
 												QStringLiteral("accentGrid")),
-											boolField(QStringLiteral("look.modernTickerAlwaysScroll"),
-													  QObject::tr("Always scroll ticker banner"),
-													  m_draft.bModernShellTickerBannerAlwaysScroll) })
+											boolField(QStringLiteral("look.modernTickerBannerEnabled"),
+													  QObject::tr("Show ticker bar"),
+													  m_draft.bModernShellTickerBannerEnabled),
+											enabledField(boolField(QStringLiteral("look.modernTickerAlwaysScroll"),
+																   QObject::tr("Always scroll ticker banner"),
+																   m_draft.bModernShellTickerBannerAlwaysScroll),
+														 m_draft.bModernShellTickerBannerEnabled) })
 	};
 }
 

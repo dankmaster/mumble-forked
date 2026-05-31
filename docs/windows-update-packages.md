@@ -1,9 +1,9 @@
 # Windows Update Packages
 
 This document describes the Windows fork update-package path. The short
-version is: keep the MSI as the canonical installer and recovery path, but add
-a first-class update package that the in-app updater can download, verify,
-apply, and restart through `mumble-updater.exe`.
+version is: use the update package as the normal in-app updater path, while
+keeping the MSI as the canonical installer, recovery path, and verified
+fallback if package apply fails.
 
 ## Current State
 
@@ -21,16 +21,20 @@ The update manifest preserves `installerUrl` and top-level `sha256` for old
 clients. Newer clients also understand `manifestVersion: 2`, structured
 `installer` and `package` entries, and `preferredUpdate`.
 
-Bootstrap releases keep `preferredUpdate: "installer"` so current users get the
-MSI once and receive the package-capable client and updater. A later release can
-switch to `preferredUpdate: "package"` without removing the MSI fallback.
+Current releases use `preferredUpdate: "package"`. Package-capable clients
+download and verify the package first; when installer metadata is available,
+they also prepare the MSI as the fallback that `mumble-updater.exe` can run if
+the package updater reports failure. Older clients ignore the package fields and
+continue to use the MSI through the preserved top-level fields.
 
 `mumble-updater.exe` supports both `--installer <msi>` and
 `--package <mumble-update>`. Package mode waits for Mumble to exit, verifies the
 inner package manifest and file hashes, backs up replaced files, copies the full
 payload into the app directory, verifies the result, and restarts `mumble.exe`.
 If the app directory is not writable, the copied updater relaunches itself with
-`runas`.
+`runas`. When package mode was launched with a verified `--installer` fallback,
+package failure runs the MSI fallback; user cancellation is kept distinct from
+failure and does not trigger the MSI fallback.
 
 ## Goals
 
@@ -40,7 +44,10 @@ If the app directory is not writable, the copied updater relaunches itself with
 - Keep old clients compatible by preserving the existing top-level
   `installerUrl` and `sha256` manifest fields.
 - Let newer clients prefer the package when supported and fall back to MSI when
-  the package is missing, unsupported, or fails validation before handoff.
+  the package is missing, unsupported, fails validation before handoff, or
+  reports failure after handoff.
+- Distinguish user cancellation from failure so cancelled elevation or installer
+  flows do not trigger the MSI fallback.
 - Keep the first package format simple: full staged payload first, delta
   packages later only if bandwidth becomes a real problem.
 - Make the user-facing flow explicit: available, downloading with progress,
@@ -95,7 +102,7 @@ Example:
     "applyMode": "replace-staged-payload",
     "requiresElevation": "auto"
   },
-  "preferredUpdate": "installer",
+  "preferredUpdate": "package",
   "publishedAt": "2026-05-31T00:00:00.0000000Z"
 }
 ```
@@ -134,6 +141,10 @@ payload/
   mumble.exe
   mumble-updater.exe
   Qt6Core.dll
+  gstreamer/
+    bin/
+    lib/gstreamer-1.0/
+    libexec/
   ...
 ```
 
@@ -168,11 +179,13 @@ manifest verifies extracted files before they are copied into the app directory.
 New client behavior:
 
 1. Fetch and normalize `mumble-forked-update.json`.
-2. If `preferredUpdate` is `package`, and `package` is present, trusted,
-   supported by this client, and has a valid SHA-256, choose package mode.
-3. Otherwise use the existing MSI mode if `installerUrl` and top-level `sha256`
+2. If `package` is present, trusted, supported by this client, and has a valid
+   SHA-256, choose package mode.
+3. If package mode is selected and the MSI metadata is valid, download and
+   verify the MSI as the package-failure fallback before handoff.
+4. Otherwise use the existing MSI mode if `installerUrl` and top-level `sha256`
    are valid.
-4. Otherwise show the release URL as a manual fallback.
+5. Otherwise show the release URL as a manual fallback.
 
 The Modern shell banner should not need a second UX model. It can keep the same
 states and actions:
@@ -282,32 +295,21 @@ The `mumble-forked MSI Release` workflow should add a package step after the
 shared payload has been staged and validated:
 
 1. Read `build-shared-webengine/shared-webengine-stage`.
-2. Generate the internal package manifest with file sizes and SHA-256 hashes.
-3. Archive `manifest.json` and `payload/`.
-4. Hash the final `.mumble-update` archive.
-5. Add package fields to `mumble-forked-update.json`.
-6. Upload the package beside the MSI.
-7. Include the package in the workflow artifact.
+2. Verify the staged payload includes the pinned GStreamer runtime and that the
+   packaged helper reports GStreamer LiveKit publish/view capability.
+3. Generate the internal package manifest with file sizes and SHA-256 hashes.
+4. Archive `manifest.json` and `payload/`.
+5. Hash the final `.mumble-update` archive.
+6. Add package fields to `mumble-forked-update.json`.
+7. Upload the package beside the MSI.
+8. Include the package in the workflow artifact.
 
 The existing MSI asset, MSI `.sha256`, `changelog.md`, and manifest upload stay
 in place.
 
-## Bootstrap Release Policy
+## Package Default Policy
 
-The first release that ships package support should still use:
-
-```json
-{
-  "preferredUpdate": "installer"
-}
-```
-
-That makes the release a bootstrap: users install the MSI once, and that MSI
-places the package-capable `mumble-updater.exe` beside the client. The workflow
-still publishes the `.mumble-update` asset and its manifest metadata so the
-package track can be inspected and smoke-tested immediately.
-
-The next release can change only:
+Releases use:
 
 ```json
 {
@@ -315,9 +317,11 @@ The next release can change only:
 }
 ```
 
-New clients then choose package mode when the package fields validate. Older
-clients ignore the package fields and continue to use the MSI through the
-preserved `installerUrl` and top-level `sha256`.
+New clients choose package mode when the package fields validate. Before
+handoff, they also download and verify the MSI fallback when the manifest
+includes installer metadata. Older clients ignore the package fields and
+continue to use the MSI through the preserved `installerUrl` and top-level
+`sha256`.
 
 ## Implementation Phases
 
@@ -334,7 +338,7 @@ being built.
 - Generate the internal package manifest.
 - Publish the package as a release asset.
 - Extend `mumble-forked-update.json` with additive package fields.
-- Keep bootstrap client behavior on MSI with `preferredUpdate: "installer"`.
+- Publish package-capable releases with `preferredUpdate: "package"`.
 
 Acceptance checks:
 
@@ -346,11 +350,12 @@ Acceptance checks:
 ### Phase 2: Client Package Detection And Download
 
 - Add package field parsing to `VersionCheck`.
-- Prefer package mode only when `preferredUpdate` is `package` and all package
-  fields validate.
+- Prefer package mode when all package fields validate.
 - Download package to the existing `Updates` directory.
 - Verify outer package SHA-256.
 - Keep MSI fallback when package fields are missing or invalid.
+- Prepare the verified MSI fallback beside the package when package mode is
+  selected and installer metadata is valid.
 - Surface the selected mode in automation/debug summaries.
 
 Acceptance checks:
@@ -358,6 +363,7 @@ Acceptance checks:
 - New clients choose package mode for a valid package manifest.
 - New clients fall back to MSI for old manifests.
 - Bad package hash fails before handoff and keeps retry/details actions useful.
+- Package handoff passes the verified MSI fallback to `mumble-updater.exe`.
 
 ### Phase 3: Updater Package Mode
 
@@ -366,6 +372,9 @@ Acceptance checks:
 - Apply payload to the app directory with backup and rollback.
 - Restart Mumble after a successful apply.
 - Log each major step to `mumble-updater.log`.
+- If package apply fails and a verified MSI fallback was supplied, run the MSI.
+- Treat cancellation exit codes separately from failure and do not launch the
+  fallback MSI after cancellation.
 
 Acceptance checks:
 
@@ -373,6 +382,7 @@ Acceptance checks:
 - Package update prompts for elevation when required.
 - Failed extraction, failed hash validation, and failed copy leave clear logs.
 - Existing `--installer` MSI mode still works.
+- Cancelled elevation or installer flows are reported as cancelled, not failed.
 
 ### Phase 4: Local And Automated Verification
 

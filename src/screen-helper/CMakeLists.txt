@@ -15,6 +15,8 @@ add_executable(mumble-screen-helper
 	"ScreenShareRelayClient.h"
 	"ScreenShareSessionPlanner.cpp"
 	"ScreenShareSessionPlanner.h"
+	"ScreenShareWindowsNativeCapture.cpp"
+	"ScreenShareWindowsNativeCapture.h"
 )
 
 set_target_properties(mumble-screen-helper
@@ -31,5 +33,9 @@ target_link_libraries(mumble-screen-helper
 		Qt6::Core
 		Qt6::Network
 )
+
+if(WIN32)
+	target_link_libraries(mumble-screen-helper PRIVATE runtimeobject)
+endif()
 
 install(TARGETS mumble-screen-helper RUNTIME DESTINATION "${MUMBLE_INSTALL_EXECUTABLEDIR}" COMPONENT mumble_client)

@@ -56,6 +56,7 @@
 	let directMessageTrayOpen = false;
 	let directMessageDrafts = {};
 	let directMessageWindowUiState = {};
+	let directMessageDragState = null;
 	let noteExpanded = false;
 	let railNoteAutoCollapsed = false;
 	let lastActiveRailToken = "";
@@ -145,6 +146,8 @@
 	const voiceJoinInputDedupeMs = 180;
 	const voiceJoinFeedbackMs = 3200;
 	const scopeLoadingFallbackMs = 2800;
+	const directMessageWindowViewportMarginPx = 10;
+	const directMessageDockSnapZonePx = 110;
 	const messageRenderChunkGroupCount = 28;
 	const messageRenderChunkBudgetMs = 7;
 	const linkDenseMessageRenderChunkGroupCount = 8;
@@ -1115,7 +1118,7 @@
 
 		const snapshot = getSnapshot();
 		if (isDirectMessageScopeToken(token)) {
-			return openMockupDirectMessage(directMessageSessionFromToken(token), true);
+			return openMockupDirectMessage(directMessageSessionFromToken(token), false);
 		}
 
 		const normalizedToken = token.toLowerCase();
@@ -1281,7 +1284,7 @@
 			const windowState = ensureLocalDirectMessageWindow(state, targetSession) || conversation;
 			conversation.open = true;
 			conversation.unreadCount = 0;
-			if (selectScope === false) {
+			if (selectScope !== true) {
 				return;
 			}
 			(snapshot.voiceRooms || []).forEach(function(room) { if (room) { room.selected = false; } });
@@ -1372,7 +1375,7 @@
 	function handleMockupParticipantAction(session, actionId) {
 		const id = String(actionId || "").trim();
 		if (id === "participant.message" || id === "textMessage" || id === "openMessage") {
-			return openMockupDirectMessage(session, true);
+			return openMockupDirectMessage(session, false);
 		}
 		if (id === "join" || id === "joinRoom") {
 			return selectMockupParticipantRoom(session);
@@ -1393,7 +1396,7 @@
 		}
 		if (id === "messageSearchResult" && payload && String(payload.type || "").toLowerCase() === "user") {
 			const session = Number(payload.id) || 0;
-			if (openMockupDirectMessage(session, true)) {
+			if (openMockupDirectMessage(session, false)) {
 				closeModernDialog();
 				return true;
 			}
@@ -1439,7 +1442,7 @@
 			return handleMockupParticipantAction(bridgeArgs[0], bridgeArgs[1]);
 		}
 		if (methodName === "messageParticipant" || methodName === "openDirectMessage") {
-			return openMockupDirectMessage(bridgeArgs[0], true);
+			return openMockupDirectMessage(bridgeArgs[0], false);
 		}
 		if (methodName === "joinParticipant") {
 			return selectMockupParticipantRoom(bridgeArgs[0]);
@@ -2201,6 +2204,7 @@
 					theme: "dark",
 					density: "comfortable",
 					railSide: "right",
+					tickerBannerEnabled: true,
 					tickerBannerAlwaysScroll: true
 				}),
 				serverIdentity: {
@@ -2413,7 +2417,9 @@
 						walkthroughField("look.modernDensity", "Density", "select", "comfortable", { valueType: "string",
 							options: [select("Compact", "compact"), select("Comfortable", "comfortable"),
 								select("Spacious", "spacious")] }),
-						walkthroughField("look.modernClassicUserIcons", "Use classic user icons", "checkbox", false)
+						walkthroughField("look.modernClassicUserIcons", "Use classic user icons", "checkbox", false),
+						walkthroughField("look.modernTickerBannerEnabled", "Show ticker bar", "checkbox", true),
+						walkthroughField("look.modernTickerAlwaysScroll", "Always scroll ticker banner", "checkbox", false)
 					])
 				];
 			}
@@ -5313,8 +5319,12 @@
 		return detachedModernDialogUiTweaks || app.uiTweaks || {};
 	}
 
+	function stonksTickerBannerEnabled(snapshot) {
+		return visibleModernUiTweaks(snapshot).tickerBannerEnabled !== false;
+	}
+
 	function stonksTickerBannerAlwaysScroll(snapshot) {
-		return !!visibleModernUiTweaks(snapshot).tickerBannerAlwaysScroll;
+		return stonksTickerBannerEnabled(snapshot) && !!visibleModernUiTweaks(snapshot).tickerBannerAlwaysScroll;
 	}
 
 	function syncStonksTickerScrollState() {
@@ -5537,7 +5547,8 @@
 		const supported = !!stonks.supported;
 		const loading = !!stonks.loading;
 		const automationHeaderVisible = !!stonks.automationHeaderVisible;
-		const visible = (connected || automationHeaderVisible) && stonks.enabled !== false;
+		const tickerBannerEnabled = stonksTickerBannerEnabled(snapshot);
+		const visible = tickerBannerEnabled && (connected || automationHeaderVisible) && stonks.enabled !== false;
 		const showTickerHeader = visible && supported && (hasTickers || automationHeaderVisible || loading);
 		refs.stonksLeaderboardHeader.classList.toggle("hidden", !showTickerHeader);
 		refs.stonksLeaderboardHeader.classList.toggle("is-empty", visible && supported && !hasTickers && !loading);
@@ -5615,6 +5626,14 @@
 	}
 
 	function screenShareStatusText(share) {
+		const runtimeLabel = String(share && share.runtimeLabel || "");
+		if (/(native|gstreamer) gpu/i.test(runtimeLabel)) {
+			return "GPU";
+		}
+		if (/fallback/i.test(runtimeLabel)) {
+			return "Fallback";
+		}
+
 		switch (String(share && share.mode || "")) {
 			case "publishing":
 				return "Publishing";
@@ -5718,7 +5737,14 @@
 		refs.screenShareCardTitle.textContent = title;
 		refs.screenShareCardSummary.textContent = share.statusLabel || "Screen sharing is available in voice rooms.";
 
-		const note = share.fallbackLabel || ((share.primaryEnabled === false && share.primaryHint) ? share.primaryHint : "");
+		const streamDetails = [
+			share.resolutionLabel || "",
+			share.bitrateKbps ? String(share.bitrateKbps) + " kbps" : "",
+			share.qualityProfile ? String(share.qualityProfile).replace(/_/g, " ") : ""
+		].filter(Boolean).join(" / ");
+		const note = share.fallbackLabel
+			|| ((share.primaryEnabled === false && share.primaryHint) ? share.primaryHint : "")
+			|| streamDetails;
 		refs.screenShareCardNote.textContent = note;
 		refs.screenShareCardNote.classList.toggle("hidden", !note);
 
@@ -5838,12 +5864,15 @@
 		return "dm:" + String(Number(session || 0));
 	}
 
-	function directMessageBridgeScopeToken(session) {
-		return "-2:" + String(Number(session || 0));
-	}
-
 	function isDirectMessageScopeToken(scopeToken) {
 		return /^(?:dm|-2):\d+$/i.test(String(scopeToken || "").trim());
+	}
+
+	function visibleTextRooms(rooms) {
+		return (rooms || []).filter(function(room) {
+			return !isDirectMessageScopeToken(room && room.token)
+				&& String(room && room.kindLabel || "").trim().toLowerCase() !== "direct message";
+		});
 	}
 
 	function directMessageSessionFromToken(scopeToken) {
@@ -5890,6 +5919,189 @@
 		return null;
 	}
 
+	function directMessageWindowStateForSession(session) {
+		const key = directMessageDraftKey(session);
+		if (!key) {
+			return null;
+		}
+		if (!directMessageWindowUiState[key]) {
+			directMessageWindowUiState[key] = {};
+		}
+		return directMessageWindowUiState[key];
+	}
+
+	function directMessageWindowSize(windowElement) {
+		const bounds = windowElement && windowElement.getBoundingClientRect
+			? windowElement.getBoundingClientRect()
+			: null;
+		return {
+			width: Math.max(260, bounds && bounds.width ? bounds.width : 330),
+			height: Math.max(52, bounds && bounds.height ? bounds.height : 430)
+		};
+	}
+
+	function clampDirectMessageWindowPosition(left, top, width, height) {
+		const margin = directMessageWindowViewportMarginPx;
+		const viewportWidth = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
+		const viewportHeight = Math.max(document.documentElement.clientHeight || 0, window.innerHeight || 0);
+		const maxLeft = Math.max(margin, viewportWidth - width - margin);
+		const maxTop = Math.max(margin, viewportHeight - height - margin);
+		return {
+			left: Math.min(Math.max(margin, left), maxLeft),
+			top: Math.min(Math.max(margin, top), maxTop)
+		};
+	}
+
+	function setDirectMessageWindowDetachedPosition(windowElement, left, top) {
+		if (!windowElement) {
+			return;
+		}
+		const session = Number(windowElement.dataset.session || 0);
+		const state = directMessageWindowStateForSession(session);
+		if (!state) {
+			return;
+		}
+		const size = directMessageWindowSize(windowElement);
+		const clamped = clampDirectMessageWindowPosition(left, top, size.width, size.height);
+		state.docked = false;
+		state.left = Math.round(clamped.left);
+		state.top = Math.round(clamped.top);
+		windowElement.classList.add("is-detached");
+		windowElement.style.left = state.left + "px";
+		windowElement.style.top = state.top + "px";
+	}
+
+	function dockDirectMessageWindow(windowElement) {
+		if (!windowElement) {
+			return;
+		}
+		const state = directMessageWindowStateForSession(Number(windowElement.dataset.session || 0));
+		if (state) {
+			state.docked = true;
+		}
+		windowElement.classList.remove("is-detached", "is-near-dock");
+		windowElement.style.left = "";
+		windowElement.style.top = "";
+	}
+
+	function directMessagePointerNearDockZone(clientX, clientY) {
+		const composer = refs.composerForm || refs.composerShell;
+		if (!composer || typeof composer.getBoundingClientRect !== "function") {
+			return false;
+		}
+		const composerBounds = composer.getBoundingClientRect();
+		const pane = refs.messageList && typeof refs.messageList.closest === "function"
+			? refs.messageList.closest(".conversation-pane")
+			: null;
+		const paneBounds = pane && typeof pane.getBoundingClientRect === "function"
+			? pane.getBoundingClientRect()
+			: { left: 0, right: window.innerWidth || document.documentElement.clientWidth || 0 };
+		const xInPane = clientX >= paneBounds.left - 24 && clientX <= paneBounds.right + 24;
+		const yInDockBand = clientY >= composerBounds.top - directMessageDockSnapZonePx
+			&& clientY <= composerBounds.bottom + directMessageDockSnapZonePx;
+		return xInPane && yInDockBand;
+	}
+
+	function trackDirectMessageWindowDrag(event) {
+		if (!directMessageDragState || !directMessageDragState.windowElement) {
+			return;
+		}
+		if (directMessageDragState.pointerId !== null && event.pointerId !== directMessageDragState.pointerId) {
+			return;
+		}
+		const windowElement = directMessageDragState.windowElement;
+		const left = event.clientX - directMessageDragState.offsetX;
+		const top = event.clientY - directMessageDragState.offsetY;
+		setDirectMessageWindowDetachedPosition(windowElement, left, top);
+		windowElement.classList.toggle("is-near-dock",
+			directMessagePointerNearDockZone(event.clientX, event.clientY));
+		event.preventDefault();
+	}
+
+	function finishDirectMessageWindowDrag(event) {
+		if (!directMessageDragState) {
+			return;
+		}
+		if (event && directMessageDragState.pointerId !== null
+				&& event.pointerId !== directMessageDragState.pointerId) {
+			return;
+		}
+		const drag = directMessageDragState;
+		directMessageDragState = null;
+		window.removeEventListener("pointermove", trackDirectMessageWindowDrag, true);
+		window.removeEventListener("pointerup", finishDirectMessageWindowDrag, true);
+		window.removeEventListener("pointercancel", finishDirectMessageWindowDrag, true);
+		if (drag.windowElement) {
+			drag.windowElement.classList.remove("is-dragging");
+			if (event && directMessagePointerNearDockZone(event.clientX, event.clientY)) {
+				dockDirectMessageWindow(drag.windowElement);
+			} else {
+				drag.windowElement.classList.remove("is-near-dock");
+			}
+			try {
+				if (drag.pointerId !== null && typeof drag.windowElement.releasePointerCapture === "function") {
+					drag.windowElement.releasePointerCapture(drag.pointerId);
+				}
+			} catch (error) {
+				// The pointer can already be released if the host window loses capture.
+			}
+		}
+		if (event) {
+			event.preventDefault();
+		}
+	}
+
+	function beginDirectMessageWindowDrag(event, windowElement) {
+		if (!windowElement || event.button !== 0 || event.isPrimary === false
+				|| (event.target && event.target.closest
+					&& event.target.closest("button, textarea, input, select, a"))) {
+			return;
+		}
+		if (directMessageDragState) {
+			finishDirectMessageWindowDrag();
+		}
+		const bounds = windowElement.getBoundingClientRect();
+		setDirectMessageWindowDetachedPosition(windowElement, bounds.left, bounds.top);
+		directMessageDragState = {
+			windowElement: windowElement,
+			pointerId: typeof event.pointerId === "number" ? event.pointerId : null,
+			offsetX: event.clientX - bounds.left,
+			offsetY: event.clientY - bounds.top
+		};
+		windowElement.classList.add("is-dragging");
+		try {
+			if (directMessageDragState.pointerId !== null && typeof windowElement.setPointerCapture === "function") {
+				windowElement.setPointerCapture(directMessageDragState.pointerId);
+			}
+		} catch (error) {
+			// Pointer capture is best-effort inside embedded WebEngine hosts.
+		}
+		window.addEventListener("pointermove", trackDirectMessageWindowDrag, true);
+		window.addEventListener("pointerup", finishDirectMessageWindowDrag, true);
+		window.addEventListener("pointercancel", finishDirectMessageWindowDrag, true);
+		event.preventDefault();
+	}
+
+	function clampDetachedDirectMessageWindows() {
+		if (!refs.directMessageDock) {
+			return;
+		}
+		refs.directMessageDock.querySelectorAll(".direct-message-window.is-detached").forEach(function(windowElement) {
+			const state = directMessageWindowStateForSession(Number(windowElement.dataset.session || 0));
+			if (!state) {
+				return;
+			}
+			const size = directMessageWindowSize(windowElement);
+			const clamped = clampDirectMessageWindowPosition(
+				Number(state.left || 0),
+				Number(state.top || 0),
+				size.width,
+				size.height
+			);
+			setDirectMessageWindowDetachedPosition(windowElement, clamped.left, clamped.top);
+		});
+	}
+
 	function syncDirectMessageInputHeight(input) {
 		if (!input) {
 			return;
@@ -5929,9 +6141,18 @@
 			if (!key) {
 				return;
 			}
-			directMessageWindowUiState[key] = {
-				minimized: windowElement.classList.contains("is-minimized")
-			};
+			const previousState = directMessageWindowUiState[key] || {};
+			const nextState = Object.assign({}, previousState, {
+				minimized: windowElement.classList.contains("is-minimized"),
+				docked: !windowElement.classList.contains("is-detached")
+			});
+			if (windowElement.classList.contains("is-detached")) {
+				const bounds = windowElement.getBoundingClientRect();
+				const clamped = clampDirectMessageWindowPosition(bounds.left, bounds.top, bounds.width, bounds.height);
+				nextState.left = Math.round(clamped.left);
+				nextState.top = Math.round(clamped.top);
+			}
+			directMessageWindowUiState[key] = nextState;
 			const input = windowElement.querySelector(".direct-message-input");
 			if (input) {
 				rememberDirectMessageInputDraft(session, input);
@@ -6160,6 +6381,14 @@
 		if (!Array.isArray(state.windows)) {
 			state.windows = [];
 		}
+		state.conversations.forEach(function(candidate) {
+			if (directMessageSessionValue(candidate) !== session) {
+				candidate.open = false;
+			}
+		});
+		state.windows = state.windows.filter(function(candidate) {
+			return directMessageSessionValue(candidate) === session;
+		});
 
 		let conversation = state.conversations.find(function(candidate) {
 			return directMessageSessionValue(candidate) === session;
@@ -6194,21 +6423,7 @@
 		return windowState;
 	}
 
-	function selectLocalDirectMessage(conversation) {
-		const session = directMessageSessionValue(conversation);
-		if (!session) {
-			return;
-		}
-		updateLocalDirectMessageState(function(state, snapshot) {
-			const windowState = ensureLocalDirectMessageWindow(state, session) || conversation;
-			(snapshot.voiceRooms || []).forEach(function(room) { if (room) { room.selected = false; } });
-			(snapshot.textRooms || []).forEach(function(room) { if (room) { room.selected = false; } });
-			snapshot.activeScope = directMessageActiveScope(windowState);
-			snapshot.messages = [];
-		});
-	}
-
-	function invokeDirectMessageOpen(conversation, selectScope) {
+	function invokeDirectMessageOpen(conversation) {
 		const session = directMessageSessionValue(conversation);
 		if (!session) {
 			return false;
@@ -6219,11 +6434,6 @@
 			handled = updateLocalDirectMessageState(function(state) {
 				ensureLocalDirectMessageWindow(state, session);
 			});
-		}
-		if (selectScope !== false) {
-			if (!notifyBridge("selectScope", directMessageBridgeScopeToken(session))) {
-				selectLocalDirectMessage(conversation);
-			}
 		}
 		notifyBridge("markDirectMessageRead", session);
 		return handled;
@@ -6493,7 +6703,7 @@
 		conversations.forEach(function(conversation) {
 			const session = directMessageSessionValue(conversation);
 			const token = conversation.token || directMessageToken(session);
-			const selected = !!session && activeSession === session;
+			const selected = !!session && (activeSession === session || conversation.open);
 			const unread = Number(conversation.unreadCount || 0);
 			const wrapper = document.createElement("div");
 			wrapper.className = "rail-row-wrapper direct-message-row-wrapper";
@@ -6548,7 +6758,7 @@
 			row.appendChild(meta);
 			row.addEventListener("click", function(event) {
 				event.preventDefault();
-				invokeDirectMessageOpen(conversation, true);
+				invokeDirectMessageOpen(conversation);
 				dismissCompactRailAfterAction();
 			});
 			row.addEventListener("contextmenu", function(event) {
@@ -6573,7 +6783,7 @@
 				label: "Open",
 				enabled: !!session,
 				action: function() {
-					invokeDirectMessageOpen(conversation, true);
+					invokeDirectMessageOpen(conversation);
 				}
 			},
 			{
@@ -6668,7 +6878,7 @@
 				}
 				row.addEventListener("click", function(event) {
 					event.preventDefault();
-					invokeDirectMessageOpen(conversation, true);
+					invokeDirectMessageOpen(conversation);
 				});
 				tray.appendChild(row);
 			});
@@ -6731,14 +6941,25 @@
 		const windowUiState = draftKey ? directMessageWindowUiState[draftKey] || {} : {};
 		const windowElement = document.createElement("section");
 		const privateMode = directMessageIsPrivate(conversation);
+		const detached = windowUiState.docked === false
+			&& Number.isFinite(Number(windowUiState.left))
+			&& Number.isFinite(Number(windowUiState.top));
 		windowElement.className = "direct-message-window" + (privateMode ? " is-private" : "")
-			+ (windowUiState.minimized ? " is-minimized" : "");
+			+ (windowUiState.minimized ? " is-minimized" : "")
+			+ (detached ? " is-detached" : "");
 		windowElement.dataset.session = String(session || "");
 		windowElement.setAttribute("role", "dialog");
 		windowElement.setAttribute("aria-label", "Direct message with " + (conversation.label || "user"));
+		if (detached) {
+			windowElement.style.left = Math.round(Number(windowUiState.left)) + "px";
+			windowElement.style.top = Math.round(Number(windowUiState.top)) + "px";
+		}
 
 		const header = document.createElement("header");
 		header.className = "direct-message-window-header";
+		header.addEventListener("pointerdown", function(event) {
+			beginDirectMessageWindowDrag(event, windowElement);
+		});
 		const avatar = document.createElement("span");
 		avatar.className = "direct-message-window-avatar avatar";
 		styleAvatar(avatar, conversation.label || "Direct message", false, conversation.avatarUrl || "");
@@ -6773,6 +6994,29 @@
 		});
 		header.appendChild(modeButton);
 
+		const dockButton = document.createElement("button");
+		dockButton.type = "button";
+		dockButton.className = "icon-button direct-message-window-dock";
+		dockButton.title = detached ? "Dock above chat input" : "Detach direct message";
+		dockButton.setAttribute("aria-label", dockButton.title);
+		dockButton.innerHTML = detached
+			? "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 16h14v3H5z\"></path><path d=\"M8 5h8v8H8z\"></path></svg>"
+			: "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M8 8h8v8H8z\"></path><path d=\"M4 10V4h6\"></path><path d=\"M20 14v6h-6\"></path></svg>";
+		dockButton.addEventListener("click", function() {
+			if (windowElement.classList.contains("is-detached")) {
+				dockDirectMessageWindow(windowElement);
+				dockButton.title = "Detach direct message";
+				dockButton.innerHTML = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M8 8h8v8H8z\"></path><path d=\"M4 10V4h6\"></path><path d=\"M20 14v6h-6\"></path></svg>";
+			} else {
+				const bounds = windowElement.getBoundingClientRect();
+				setDirectMessageWindowDetachedPosition(windowElement, bounds.left, bounds.top);
+				dockButton.title = "Dock above chat input";
+				dockButton.innerHTML = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 16h14v3H5z\"></path><path d=\"M8 5h8v8H8z\"></path></svg>";
+			}
+			dockButton.setAttribute("aria-label", dockButton.title);
+		});
+		header.appendChild(dockButton);
+
 		const minButton = document.createElement("button");
 		minButton.type = "button";
 		minButton.className = "icon-button direct-message-window-minimize";
@@ -6782,7 +7026,9 @@
 		minButton.addEventListener("click", function() {
 			const minimized = windowElement.classList.toggle("is-minimized");
 			if (draftKey) {
-				directMessageWindowUiState[draftKey] = { minimized: minimized };
+				directMessageWindowUiState[draftKey] = Object.assign({}, directMessageWindowUiState[draftKey] || {}, {
+					minimized: minimized
+				});
 			}
 		});
 		header.appendChild(minButton);
@@ -6891,7 +7137,7 @@
 		const focusState = captureDirectMessageDockState();
 		const windows = directMessageWindows(state).filter(function(conversation) {
 			return conversation.open !== false;
-		});
+		}).slice(0, 1);
 		pruneDirectMessageDraftState(windows);
 		const fragment = document.createDocumentFragment();
 		windows.forEach(function(conversation) {
@@ -6899,6 +7145,7 @@
 		});
 		replaceChildrenWith(dock, fragment);
 		dock.classList.toggle("hidden", !windows.length);
+		clampDetachedDirectMessageWindows();
 		restoreDirectMessageDockFocus(focusState);
 	}
 
@@ -8660,7 +8907,7 @@
 
 	function renderRoomsPatch(snapshot) {
 		const app = snapshot.app || {};
-		const textRooms = snapshot.textRooms || [];
+		const textRooms = visibleTextRooms(snapshot.textRooms);
 		const voiceRooms = snapshot.voiceRooms || [];
 		const voicePresence = snapshot.voicePresence || [];
 
@@ -17628,6 +17875,33 @@
 		return Number.isFinite(numeric) ? numeric : 0;
 	}
 
+	function modernDialogAutoAccentSwatchColors() {
+		const tweaks = visibleModernUiTweaks(getSnapshot());
+		const tokens = tweaks && tweaks.themeTokens && typeof tweaks.themeTokens === "object"
+			? tweaks.themeTokens
+			: {};
+		if (tokens["--accent"]) {
+			return [
+				tokens["--shell-highlight"] || tokens["--shell-panel-soft"] || tokens["--shell-panel"] || "#2b3340",
+				tokens["--accent"]
+			];
+		}
+
+		const theme = String(tweaks && tweaks.theme || document.documentElement.dataset.theme || "dark").toLowerCase();
+		const colors = {
+			dark: ["#2b3340", "#5ec8b0"],
+			light: ["#eff3f7", "#268f7f"],
+			engine: ["#2b3340", "#5ec8b0"],
+			mocha: ["#2d2433", "#94e2d5"],
+			macchiato: ["#2a2d42", "#8bd5ca"],
+			frappe: ["#30344a", "#81c8be"],
+			latte: ["#eef0f5", "#268f7f"],
+			nord: ["#2f3845", "#88c0d0"],
+			gruvbox: ["#332c24", "#8ec07c"]
+		};
+		return colors[theme] || colors.dark;
+	}
+
 	function modernDialogChoiceSwatch(field, option, presentation) {
 		const swatch = document.createElement("span");
 		swatch.className = "modern-dialog-choice-swatch";
@@ -17643,14 +17917,15 @@
 			gruvbox: ["#332c24", "#f2c76f"]
 		};
 		const accentColors = {
-			auto: ["#2b3340", "#5ec8b0"],
 			teal: ["#203734", "#5ec8b0"],
 			blue: ["#21344a", "#73b7ff"],
 			violet: ["#302a4a", "#b59cff"],
 			amber: ["#3d3321", "#f2c76f"],
 			rose: ["#432833", "#ff8aa0"]
 		};
-		const colors = presentation === "accentGrid" ? accentColors[value] : themeColors[value];
+		const colors = presentation === "accentGrid"
+			? (value === "auto" ? modernDialogAutoAccentSwatchColors() : accentColors[value])
+			: themeColors[value];
 		if (colors) {
 			swatch.style.setProperty("--choice-swatch-bg", colors[0]);
 			swatch.style.setProperty("--choice-swatch-accent", colors[1]);
@@ -23640,7 +23915,7 @@
 		const scopeHue = hueForLabel(toneSource, false);
 		refs.appShell.style.setProperty("--scope-hue", String(scopeHue));
 		refs.appShell.dataset.scopeKind = String(scope.kindLabel || "conversation").toLowerCase().replace(/\s+/g, "-");
-		refs.appShell.classList.toggle("ticker-banner-always-scroll", !!visibleUiTweaks.tickerBannerAlwaysScroll);
+		refs.appShell.classList.toggle("ticker-banner-always-scroll", stonksTickerBannerAlwaysScroll(snapshot));
 		applyModernUiTweaks(visibleUiTweaks);
 		scheduleStonksTickerScrollSync();
 	}
@@ -23866,7 +24141,7 @@
 	function render(snapshot) {
 		const app = snapshot.app || {};
 		const scope = snapshot.activeScope || {};
-		const textRooms = snapshot.textRooms || [];
+		const textRooms = visibleTextRooms(snapshot.textRooms);
 		const voiceRooms = snapshot.voiceRooms || [];
 		const voicePresence = snapshot.voicePresence || [];
 		const headerPresence = voicePresence.length ? voicePresence : (snapshot.participants || []);
@@ -25542,6 +25817,7 @@
 			if (directMessageTrayOpen) {
 				positionDirectMessageTray();
 			}
+			clampDetachedDirectMessageWindows();
 			if (refs.imageViewerLayer && !refs.imageViewerLayer.classList.contains("hidden")) {
 				applyImageViewerGeometry();
 				persistImageViewerState();

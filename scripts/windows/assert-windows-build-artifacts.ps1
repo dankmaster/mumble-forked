@@ -10,7 +10,8 @@ param(
 	[switch]$RequireClientInstaller,
 	[switch]$RequireServerInstaller,
 	[switch]$RequireEnglishOnlyInstallers,
-	[switch]$RequireSpeechCleanup
+	[switch]$RequireSpeechCleanup,
+	[switch]$RequireGStreamerRuntime
 )
 
 $ErrorActionPreference = "Stop"
@@ -152,6 +153,42 @@ function Assert-SpeechCleanupPayload {
 	Write-Host "$Label speech-cleanup payload verified."
 }
 
+function Assert-GStreamerPayload {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$Label,
+
+		[Parameter(Mandatory = $true)]
+		[string]$Root
+	)
+
+	$requiredRelativePaths = @(
+		"gstreamer\bin\gst-launch-1.0.exe",
+		"gstreamer\bin\gst-inspect-1.0.exe",
+		"gstreamer\lib\gstreamer-1.0",
+		"gstreamer\libexec\gstreamer-1.0\gst-plugin-scanner.exe"
+	)
+
+	$missing = New-Object System.Collections.Generic.List[string]
+	foreach ($relativePath in $requiredRelativePaths) {
+		$fullPath = Join-Path $Root $relativePath
+		if (-not (Test-Path -LiteralPath $fullPath)) {
+			$missing.Add($relativePath)
+		}
+	}
+
+	$pluginFiles = @(Get-ChildItem -Path (Join-Path $Root "gstreamer\lib\gstreamer-1.0") -File -Filter "*.dll" -ErrorAction SilentlyContinue)
+	if ($pluginFiles.Count -eq 0) {
+		$missing.Add("gstreamer\lib\gstreamer-1.0\*.dll")
+	}
+
+	if ($missing.Count -gt 0) {
+		throw "$Label is missing required GStreamer payload files: $($missing -join ', ')."
+	}
+
+	Write-Host "$Label GStreamer runtime payload verified."
+}
+
 function Get-ArtifactPaths {
 	param(
 		[Parameter(Mandatory = $true)]
@@ -226,6 +263,9 @@ foreach ($verifiedPath in Assert-BinarySet -Label "Build root '$buildRootPath'" 
 if ($RequireSpeechCleanup) {
 	Assert-SpeechCleanupPayload -Label "Build root '$buildRootPath'" -Root $buildRootPath
 }
+if ($RequireGStreamerRuntime -and -not $RequireStage) {
+	Assert-GStreamerPayload -Label "Build root '$buildRootPath'" -Root $buildRootPath
+}
 
 foreach ($artifactPath in Get-ArtifactPaths -Root $buildRootPath) {
 	$allArtifacts.Add($artifactPath)
@@ -264,6 +304,9 @@ if ($RequireStage) {
 	}
 	if ($RequireSpeechCleanup) {
 		Assert-SpeechCleanupPayload -Label "Stage root '$stageRootPath'" -Root $stageRootPath
+	}
+	if ($RequireGStreamerRuntime) {
+		Assert-GStreamerPayload -Label "Stage root '$stageRootPath'" -Root $stageRootPath
 	}
 	foreach ($artifactPath in Get-ArtifactPaths -Root $stageRootPath) {
 		$allArtifacts.Add($artifactPath)

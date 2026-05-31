@@ -69,6 +69,45 @@ bool tokenExpired(const quint64 expiresAt, const qint64 skewMsec = 5000) {
 bool isWebRtcRelayTransport(const MumbleProto::ScreenShareRelayTransport transport) {
 	return Mumble::ScreenShare::isWebRtcRelayTransport(transport);
 }
+
+QString normalizeScreenShareQualityProfile(const QString &profile) {
+	const QString normalized = profile.trimmed().toLower();
+	if (normalized == QLatin1String("sharp_text") || normalized == QLatin1String("sharp-text")
+		|| normalized == QLatin1String("text")) {
+		return QStringLiteral("sharp_text");
+	}
+	if (normalized == QLatin1String("smooth_motion") || normalized == QLatin1String("smooth-motion")
+		|| normalized == QLatin1String("motion")) {
+		return QStringLiteral("smooth_motion");
+	}
+	if (normalized == QLatin1String("data_saver") || normalized == QLatin1String("data-saver")
+		|| normalized == QLatin1String("low")) {
+		return QStringLiteral("data_saver");
+	}
+
+	return QStringLiteral("auto");
+}
+
+struct QualityBitratePolicy {
+	unsigned int startKbps = 4000;
+	unsigned int minKbps   = 1200;
+	unsigned int maxKbps   = 6000;
+};
+
+QualityBitratePolicy bitratePolicyForProfile(const QString &profile) {
+	const QString normalized = normalizeScreenShareQualityProfile(profile);
+	if (normalized == QLatin1String("sharp_text")) {
+		return { 4500, 1500, 7000 };
+	}
+	if (normalized == QLatin1String("smooth_motion")) {
+		return { 5000, 1800, 7500 };
+	}
+	if (normalized == QLatin1String("data_saver")) {
+		return { 1600, 700, 2500 };
+	}
+
+	return { 4000, 1200, 6000 };
+}
 } // namespace
 
 ScreenShareManager::ScreenShareManager(QObject *parent) : QObject(parent) {
@@ -91,7 +130,7 @@ const ScreenShareHelperClient &ScreenShareManager::helperClient() const {
 
 bool ScreenShareManager::supportsInAppRelayTransport(const MumbleProto::ScreenShareRelayTransport transport) const {
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	return isWebRtcRelayTransport(transport);
+	return isWebRtcRelayTransport(transport) && envFlagEnabled("MUMBLE_SCREENSHARE_ALLOW_RELAY_WEBAPP");
 #else
 	Q_UNUSED(transport);
 	return false;
@@ -116,12 +155,15 @@ void ScreenShareManager::logLocalShareAvailabilityDiagnostic(const QString &cont
 	for (const int transport : capabilities.runtimeRelayTransports) {
 		relayTransports << QString::number(transport);
 	}
+	const QString captureBackends =
+		capabilities.captureBackends.isEmpty() ? QStringLiteral("-") : capabilities.captureBackends.join(QStringLiteral(","));
 
 	qInfo().noquote()
 		<< QStringLiteral("ScreenShareManager: availability context=%1 connected=%2 enabled=%3 helper_required=%4 "
 						  "capture_supported=%5 view_supported=%6 helper_available=%7 relay_url=%8 "
 						  "runtime_transports=[%9] in_app_relay=%10 capture_backend=%11 hw_encode=%12 "
-						  "zero_copy=%13 roi=%14 reason=%15")
+						  "zero_copy=%13 roi=%14 damage=%15 queue_budget=%16 capture_backends=[%17] "
+						  "gstreamer=%18 livekit_publish=%19 livekit_view=%20 reason=%21")
 			   .arg(context.isEmpty() ? QStringLiteral("-") : context,
 					Global::get().sh ? QStringLiteral("true") : QStringLiteral("false"),
 					Global::get().bScreenShareEnabled ? QStringLiteral("true") : QStringLiteral("false"),
@@ -140,6 +182,12 @@ void ScreenShareManager::logLocalShareAvailabilityDiagnostic(const QString &cont
 					capabilities.hardwareEncodeSupported ? QStringLiteral("true") : QStringLiteral("false"),
 					capabilities.zeroCopySupported ? QStringLiteral("true") : QStringLiteral("false"),
 					capabilities.roiSupported ? QStringLiteral("true") : QStringLiteral("false"),
+					capabilities.damageMetadataSupported ? QStringLiteral("true") : QStringLiteral("false"),
+					QString::number(capabilities.queueBudgetFrames),
+					captureBackends,
+					capabilities.gstreamerAvailable ? QStringLiteral("true") : QStringLiteral("false"),
+					capabilities.gstreamerLiveKitPublishAvailable ? QStringLiteral("true") : QStringLiteral("false"),
+					capabilities.gstreamerLiveKitViewAvailable ? QStringLiteral("true") : QStringLiteral("false"),
 					reason.isEmpty() ? QStringLiteral("available") : reason);
 }
 
@@ -253,23 +301,24 @@ bool ScreenShareManager::focusOrReopenDetachedWindow(const QString &streamID) {
 }
 
 bool ScreenShareManager::isUsingFallbackRuntime(const QString &streamID) const {
-	if (m_activePublishSessions.contains(streamID)) {
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-		return !m_inAppPublishSessionIDs.contains(streamID);
-#else
-		return true;
-#endif
-	}
+	return m_fallbackRuntimeSessions.contains(streamID);
+}
 
-	if (m_activeViewSessions.contains(streamID)) {
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-		return !m_inAppViewSessionIDs.contains(streamID);
-#else
-		return true;
-#endif
+bool ScreenShareManager::isUsingNativeGpuRuntime(const QString &streamID) const {
+	if (!m_activePublishSessions.contains(streamID) || isUsingFallbackRuntime(streamID)) {
+		return false;
 	}
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (m_inAppPublishSessionIDs.contains(streamID)) {
+		return false;
+	}
+#endif
 
-	return false;
+	const ScreenShareHelperClient::CapabilitySnapshot &capabilities = m_helperClient->capabilities();
+	return capabilities.zeroCopySupported
+		   && (capabilities.captureBackends.contains(QStringLiteral("gstreamer-d3d11-livekit"))
+			   || capabilities.captureBackends.contains(QStringLiteral("d3d11-desktop-duplication"))
+			   || capabilities.captureBackends.contains(QStringLiteral("windows-graphics-capture-d3d11")));
 }
 
 void ScreenShareManager::requestStartChannelShare(unsigned int channelID) {
@@ -342,11 +391,29 @@ void ScreenShareManager::requestStartChannelShare(unsigned int channelID) {
 							 Mumble::ScreenShare::DEFAULT_MAX_FPS);
 	}
 
+	const QString qualityProfile = normalizeScreenShareQualityProfile(
+		qEnvironmentVariable("MUMBLE_SCREENSHARE_QUALITY_PROFILE", QStringLiteral("auto")));
+	if (qualityProfile == QLatin1String("data_saver")) {
+		targetWidth  = std::min(targetWidth, 960U);
+		targetHeight = std::min(targetHeight, 540U);
+		targetFps    = std::min(targetFps, 20U);
+	} else if (qualityProfile == QLatin1String("sharp_text")) {
+		targetFps = std::min(targetFps, 30U);
+	}
+	const QualityBitratePolicy bitratePolicy = bitratePolicyForProfile(qualityProfile);
+	const unsigned int defaultBitrate =
+		Mumble::ScreenShare::defaultBitrateKbps(codec, targetWidth, targetHeight, targetFps);
+	const unsigned int requestedBitrate = qMax(defaultBitrate, bitratePolicy.startKbps);
+
 	msg.set_requested_width(targetWidth);
 	msg.set_requested_height(targetHeight);
 	msg.set_requested_fps(targetFps);
-	msg.set_requested_bitrate_kbps(
-		Mumble::ScreenShare::defaultBitrateKbps(codec, targetWidth, targetHeight, targetFps));
+	msg.set_requested_bitrate_kbps(requestedBitrate);
+	msg.set_quality_profile(u8(qualityProfile));
+	msg.set_capture_source_id(
+		u8(qEnvironmentVariable("MUMBLE_SCREENSHARE_SOURCE_ID", QStringLiteral("primary-monitor")).trimmed()));
+	msg.set_requested_min_bitrate_kbps(std::min(bitratePolicy.minKbps, requestedBitrate));
+	msg.set_requested_max_bitrate_kbps(qMax(bitratePolicy.maxKbps, requestedBitrate));
 	msg.set_prefer_hardware_encoding(true);
 
 	Global::get().sh->sendMessage(msg);
@@ -426,6 +493,7 @@ void ScreenShareManager::resetState() {
 
 	m_activePublishSessions.clear();
 	m_activeViewSessions.clear();
+	m_fallbackRuntimeSessions.clear();
 	m_announcedViewableSessions.clear();
 	m_sessions.clear();
 	m_lastLoggedAvailabilityContext.clear();
@@ -496,6 +564,18 @@ ScreenShareSession ScreenShareManager::sessionFromState(const MumbleProto::Scree
 	}
 	if (msg.has_bitrate_kbps()) {
 		session.bitrateKbps = msg.bitrate_kbps();
+	}
+	if (msg.has_quality_profile()) {
+		session.qualityProfile = normalizeScreenShareQualityProfile(u8(msg.quality_profile()));
+	}
+	if (msg.has_capture_source_id()) {
+		session.captureSourceID = u8(msg.capture_source_id()).trimmed();
+	}
+	if (msg.has_min_bitrate_kbps()) {
+		session.minBitrateKbps = msg.min_bitrate_kbps();
+	}
+	if (msg.has_max_bitrate_kbps()) {
+		session.maxBitrateKbps = msg.max_bitrate_kbps();
 	}
 
 	return session;
@@ -754,6 +834,7 @@ void ScreenShareManager::handleInAppRelayFailure(const QString &streamID, const 
 	if (started) {
 		m_inAppPublishSessionIDs.remove(streamID);
 		m_inAppViewSessionIDs.remove(streamID);
+		m_fallbackRuntimeSessions.insert(streamID);
 		if (publish) {
 			m_activePublishSessions.insert(streamID);
 		} else {
@@ -762,14 +843,14 @@ void ScreenShareManager::handleInAppRelayFailure(const QString &streamID, const 
 		if (Global::get().l) {
 			Global::get().l->log(
 				Log::Information,
-				tr("Fell back to the helper/browser relay runtime for %1.").arg(streamID.toHtmlEscaped()));
+				tr("Fell back to the external screen-share runtime for %1.").arg(streamID.toHtmlEscaped()));
 		}
 		return;
 	}
 
 	if (Global::get().l) {
 		Global::get().l->log(Log::Warning,
-							 tr("Unable to start the helper/browser relay runtime for %1: %2")
+							 tr("Unable to start the external screen-share runtime for %1: %2")
 								 .arg(streamID.toHtmlEscaped(),
 									  errorMessage.isEmpty() ? tr("unknown error") : errorMessage.toHtmlEscaped()));
 	}
@@ -802,11 +883,12 @@ void ScreenShareManager::startLocalPublishSession(const ScreenShareSession &sess
 
 	QString errorMessage;
 	if (m_helperClient->startPublish(session, &errorMessage)) {
+		m_fallbackRuntimeSessions.remove(session.streamID);
 		m_activePublishSessions.insert(session.streamID);
 		if (Global::get().l) {
 			Global::get().l->log(
 				Log::Information,
-				tr("Using the helper/browser screen-share runtime for %1.").arg(session.streamID.toHtmlEscaped()));
+				tr("Using the external screen-share runtime for %1.").arg(session.streamID.toHtmlEscaped()));
 		}
 		return;
 	}
@@ -851,11 +933,12 @@ void ScreenShareManager::startLocalViewSession(const ScreenShareSession &session
 
 	QString errorMessage;
 	if (m_helperClient->startView(session, &errorMessage)) {
+		m_fallbackRuntimeSessions.remove(session.streamID);
 		m_activeViewSessions.insert(session.streamID);
 		if (Global::get().l) {
 			Global::get().l->log(
 				Log::Information,
-				tr("Using the helper/browser screen-share runtime for %1.").arg(session.streamID.toHtmlEscaped()));
+				tr("Using the external screen-share runtime for %1.").arg(session.streamID.toHtmlEscaped()));
 		}
 		return;
 	}
@@ -888,8 +971,10 @@ void ScreenShareManager::stopLocalPublishSession(const QString &streamID) {
 #endif
 
 	if (m_activePublishSessions.remove(streamID)) {
+		m_fallbackRuntimeSessions.remove(streamID);
 		m_helperClient->stopPublish(streamID);
 	}
+	m_fallbackRuntimeSessions.remove(streamID);
 }
 
 void ScreenShareManager::stopLocalViewSession(const QString &streamID) {
@@ -901,8 +986,10 @@ void ScreenShareManager::stopLocalViewSession(const QString &streamID) {
 #endif
 
 	if (m_activeViewSessions.remove(streamID)) {
+		m_fallbackRuntimeSessions.remove(streamID);
 		m_helperClient->stopView(streamID);
 	}
+	m_fallbackRuntimeSessions.remove(streamID);
 }
 
 void ScreenShareManager::logRemoteViewAvailability(const ScreenShareSession &session) {

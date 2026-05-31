@@ -71,40 +71,42 @@ There is also a small human-facing installer workflow for this fork:
    `https://github.com/dankmaster/mumble/releases/tag/mumble-forked`.
 
 The workflow builds the shared/WebEngine Windows client with packaging enabled,
-deletes older `mumble-forked` / `mumble-forked-*` releases and tags, then
-recreates the stable `mumble-forked` tag and release from the current `master`
-commit. It explicitly preserves `build-env-*` releases, including the important
-`build-env-2025-11-webengine-codecs` release used by the shared Windows build
-environment.
+downloads the pinned GStreamer MSVC runtime, stages it under
+`shared-webengine-stage\gstreamer\`, verifies the helper can see the GStreamer
+LiveKit runtime, deletes older `mumble-forked` / `mumble-forked-*` releases and
+tags, then recreates the stable `mumble-forked` tag and release from the current
+`master` commit. It explicitly preserves `build-env-*` releases, including the
+important `build-env-2025-11-webengine-codecs` release used by the shared
+Windows build environment.
 
 The `Release Publishing` workflow ignores `mumble-forked*` and `build-env-*`
 tags so this convenience MSI does not dispatch Docker publishing or WinGet
 updates.
 
 The workflow writes the announcement, optional release notes, generated
-changelog, current commit, previous published commit, installer URL, and SHA256
-into `mumble-forked-update.json`. Modern clients use that checksum for the
-in-app update flow: startup checks show a persistent update banner in the chat
-pane, the Update action downloads and verifies the MSI with progress in that
-banner, and the ready state launches Windows Installer when the user chooses
-to install and restart. Mumble closes before the MSI runs, hands the transition
-to `mumble-updater.exe`, and starts itself again after a successful passive
-install. Before handing off to the updater, the
-client writes a one-shot resume snapshot so the reopened client can return to
-the same server, voice room, chat view, and saved window layout where possible.
-It also uploads `changelog.md` beside the
-MSI and prints an update-notification preview during the run. Local development
-builds use build number `0`, so automatic startup checks skip the public updater
+changelog, current commit, previous published commit, installer URL, package
+URL, and SHA256 values into `mumble-forked-update.json`. Modern clients use the
+package as the normal in-app update flow: startup checks show a persistent
+update banner in the chat pane, the Update action downloads and verifies the
+package with progress in that banner, and the ready state launches
+`mumble-updater.exe` when the user chooses to install and restart. When package
+mode is selected and the MSI metadata validates, the client also prepares the
+verified MSI as fallback. If package apply reports failure, the updater runs the
+MSI fallback; if elevation or installer flow is cancelled, it is reported as
+cancelled instead of failed. Before handing off to the updater, the client writes
+a one-shot resume snapshot so the reopened client can return to the same server,
+voice room, chat view, and saved window layout where possible. It also uploads
+`changelog.md` beside the MSI and package and prints an update-notification
+preview during the run. Local development builds use build number `0`, so
+automatic startup checks skip the public updater
 by default. To preview a draft manifest locally, set
 `MUMBLE_FORK_UPDATE_MANIFEST_URL` to a local
 `file:///.../mumble-forked-update.json` URL and set
 `MUMBLE_FORK_FORCE_UPDATE_NOTIFICATION=1` before launching the dev client.
 
-The next updater step is to keep this MSI path as the canonical installer and
-fallback while publishing a dedicated update package for the normal in-app
-update path. See [windows-update-packages.md](windows-update-packages.md) for
-the planned package format, manifest additions, updater handoff, and rollout
-phases.
+The MSI remains the canonical installer and recovery path. See
+[windows-update-packages.md](windows-update-packages.md) for the package format,
+manifest fields, updater handoff, and fallback behavior.
 
 ## Notes
 
@@ -117,6 +119,10 @@ phases.
   still stages and validates the shared payload.
 - The shared/WebEngine workflow verifies the screen-share helper runtime only
   for manual dispatch runs; normal PR helper runtime coverage lives in `CI`.
+- The shared/WebEngine and `mumble-forked` MSI workflows install the pinned
+  GStreamer MSVC runtime (`GSTREAMER_VERSION`) and fail staging if
+  `gst-launch-1.0.exe`, `gst-inspect-1.0.exe`, plugins, or the helper's
+  GStreamer LiveKit capability probe are missing.
 - The shared/WebEngine workflow pins the reusable codec environment to release
   `2025-11`, commit `127cccc01d`, suffix `webengine-codecs-v1`, and ONNX
   Runtime `1.18.1`.
@@ -185,6 +191,14 @@ Notes for local use:
 - `-InstallFfmpeg` downloads a portable Windows `ffmpeg` bundle into
   `build_tools\ffmpeg` and prepends it to `PATH` for the current run. It does
   not require Chocolatey or an administrator shell.
+- To include GStreamer in local shared/WebEngine payloads and MSI builds, set
+  `MUMBLE_GSTREAMER_ROOT`, `GSTREAMER_1_0_ROOT_X86_64`, or
+  `GSTREAMER_1_0_ROOT_MSVC_X86_64` / `GSTREAMER_ROOT_X86_64` to an installed
+  MSVC GStreamer runtime before running the build. The staging step copies it
+  into `gstreamer\bin`, `gstreamer\lib\gstreamer-1.0`, and
+  `gstreamer\libexec`. Add `-VerifyHelperRuntime -RequireGStreamerRuntime`
+  when you want the build to fail unless the packaged helper can publish/view
+  through GStreamer LiveKit.
 - The local build script skips MSI packaging by default for a faster local test
   loop. Pass `-EnablePackaging` only if you need installers and already have
   WiX available.

@@ -221,10 +221,14 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 				 .value(QStringLiteral("actionId"))
 				 .toString(),
 			 QStringLiteral("about.openQt"));
-	const QString tickerFieldID = QStringLiteral("look.modernTickerAlwaysScroll");
-	QVERIFY(!findSettingsFieldById(settingsPageSections(QStringLiteral("look")), tickerFieldID).isEmpty());
-	QVERIFY(findSettingsFieldById(settingsPageSections(QStringLiteral("ui")), tickerFieldID).isEmpty());
-	QVERIFY(findSettingsFieldById(settingsPageSections(QStringLiteral("messages")), tickerFieldID).isEmpty());
+	const QString tickerEnabledFieldID = QStringLiteral("look.modernTickerBannerEnabled");
+	const QString tickerScrollFieldID  = QStringLiteral("look.modernTickerAlwaysScroll");
+	QVERIFY(!findSettingsFieldById(settingsPageSections(QStringLiteral("look")), tickerEnabledFieldID).isEmpty());
+	QVERIFY(!findSettingsFieldById(settingsPageSections(QStringLiteral("look")), tickerScrollFieldID).isEmpty());
+	QVERIFY(findSettingsFieldById(settingsPageSections(QStringLiteral("ui")), tickerEnabledFieldID).isEmpty());
+	QVERIFY(findSettingsFieldById(settingsPageSections(QStringLiteral("ui")), tickerScrollFieldID).isEmpty());
+	QVERIFY(findSettingsFieldById(settingsPageSections(QStringLiteral("messages")), tickerEnabledFieldID).isEmpty());
+	QVERIFY(findSettingsFieldById(settingsPageSections(QStringLiteral("messages")), tickerScrollFieldID).isEmpty());
 	const QVariantMap reconnectLastChannelField =
 		findSettingsFieldById(settingsPageSections(QStringLiteral("network")),
 							  QStringLiteral("network.reconnectToLastChannel"));
@@ -238,15 +242,20 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	tweakController.updateField(QStringLiteral("look.modernClassicUserIcons"), true);
 	tweakController.updateField(QStringLiteral("look.modernRailSide"), QStringLiteral("left"));
 	tweakController.updateField(QStringLiteral("look.modernAccent"), QStringLiteral("rose"));
+	tweakController.updateField(QStringLiteral("look.modernTickerBannerEnabled"), false);
 	tweakController.updateField(QStringLiteral("look.modernTickerAlwaysScroll"), true);
 	const QVariantMap uiTweaks = tweakController.state().value(QStringLiteral("uiTweaks")).toMap();
+	const QVariantMap disabledTickerScrollField =
+		findSettingsFieldById(tweakController.state().value(QStringLiteral("sections")).toList(), tickerScrollFieldID);
 	QCOMPARE(uiTweaks.value(QStringLiteral("theme")).toString(), QStringLiteral("latte"));
 	QCOMPARE(uiTweaks.value(QStringLiteral("density")).toString(), QStringLiteral("compact"));
 	QCOMPARE(uiTweaks.value(QStringLiteral("userIcons")).toString(), QStringLiteral("classic"));
 	QCOMPARE(uiTweaks.value(QStringLiteral("classicUserIcons")).toBool(), true);
 	QCOMPARE(uiTweaks.value(QStringLiteral("railSide")).toString(), QStringLiteral("left"));
 	QCOMPARE(uiTweaks.value(QStringLiteral("accent")).toString(), QStringLiteral("rose"));
+	QCOMPARE(uiTweaks.value(QStringLiteral("tickerBannerEnabled")).toBool(), false);
 	QCOMPARE(uiTweaks.value(QStringLiteral("tickerBannerAlwaysScroll")).toBool(), true);
+	QCOMPARE(disabledTickerScrollField.value(QStringLiteral("enabled"), true).toBool(), false);
 	QCOMPARE(uiTweaks.value(QStringLiteral("accentDetails")).toMap().value(QStringLiteral("id")).toString(),
 			 QStringLiteral("rose"));
 

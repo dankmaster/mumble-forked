@@ -901,6 +901,7 @@ protected:
 	std::optional< PendingFeedbackSubmission > m_modernFeedbackFallbackSubmission;
 	QJsonObject m_modernVersionCheckInfo;
 	QString m_modernPreparedUpdateInstallerPath;
+	QString m_modernPreparedFallbackInstallerPath;
 	QVariantMap m_modernUpdateBannerState;
 	qint64 m_modernUpdateLastProgressPublishMs = 0;
 	int m_modernUpdateLastProgressPercent      = -1;

@@ -14483,19 +14483,6 @@ namespace {
 		return url.isValid() ? url : QUrl();
 	}
 
-	QJsonObject modernAlphaPackageUpdateInfo(const QJsonObject &info) {
-		QJsonObject packageInfo = info;
-		packageInfo.insert(QStringLiteral("preferredUpdate"), QStringLiteral("package"));
-		return packageInfo;
-	}
-
-	bool modernCanUseAlphaPackageUpdate(const QJsonObject &info) {
-		const QJsonObject packageInfo = modernAlphaPackageUpdateInfo(info);
-		return VersionCheck::canInstallUpdate(packageInfo)
-			   && VersionCheck::updateModeForInfo(packageInfo) == QLatin1String("package")
-			   && VersionCheck::updateModeForInfo(info) != QLatin1String("package");
-	}
-
 	QString modernUpdateLatestLabel(const QJsonObject &info) {
 		const QString version = info.value(QStringLiteral("version")).toString().trimmed();
 		const int build       = modernUpdateJsonInt(info, QStringLiteral("build"));
@@ -14513,7 +14500,7 @@ namespace {
 
 	QString modernUpdateAnnouncementText(const QJsonObject &info) {
 		const QString announcement = info.value(QStringLiteral("announcement")).toString().trimmed();
-		return announcement.isEmpty() ? QObject::tr("Download the newest installer when you are ready to update.")
+		return announcement.isEmpty() ? QObject::tr("Download the newest update when you are ready to install.")
 									  : announcement;
 	}
 
@@ -15694,6 +15681,7 @@ namespace {
 		dto.insert(QStringLiteral("railSide"), normalizedModernShellRailSide(settings.qsModernShellRailSide));
 		dto.insert(QStringLiteral("accent"), accent);
 		dto.insert(QStringLiteral("accentDetails"), modernShellAccentDto(accent));
+		dto.insert(QStringLiteral("tickerBannerEnabled"), settings.bModernShellTickerBannerEnabled);
 		dto.insert(QStringLiteral("tickerBannerAlwaysScroll"), settings.bModernShellTickerBannerAlwaysScroll);
 		return dto;
 	}
@@ -15829,9 +15817,17 @@ void MainWindow::publishModernDialogState(const QVariantMap &state) {
 	if (useWindowDialogHost && publishedState.value(QStringLiteral("open")).toBool()) {
 		publishedState.insert(QStringLiteral("host"), QStringLiteral("window"));
 	}
-	if (publishedState.value(QStringLiteral("open")).toBool()
-		&& !publishedState.contains(QStringLiteral("uiTweaks"))) {
-		publishedState.insert(QStringLiteral("uiTweaks"), modernShellUiTweaksDto(Global::get().s));
+	if (publishedState.value(QStringLiteral("open")).toBool()) {
+		const QVariantMap currentUiTweaks = modernShellUiTweaksDto(Global::get().s);
+		if (!publishedState.contains(QStringLiteral("uiTweaks"))) {
+			publishedState.insert(QStringLiteral("uiTweaks"), currentUiTweaks);
+		} else if (currentUiTweaks.contains(QStringLiteral("themeTokens"))) {
+			QVariantMap dialogUiTweaks = publishedState.value(QStringLiteral("uiTweaks")).toMap();
+			dialogUiTweaks.insert(QStringLiteral("theme"), currentUiTweaks.value(QStringLiteral("theme")));
+			dialogUiTweaks.insert(QStringLiteral("themeSource"), currentUiTweaks.value(QStringLiteral("themeSource")));
+			dialogUiTweaks.insert(QStringLiteral("themeTokens"), currentUiTweaks.value(QStringLiteral("themeTokens")));
+			publishedState.insert(QStringLiteral("uiTweaks"), dialogUiTweaks);
+		}
 	}
 
 	m_modernShellHost->bridge()->publishModernDialogState(publishedState);
@@ -16778,6 +16774,17 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 	if (action == QLatin1String("setTickerBannerAlwaysScroll")) {
 		Global::get().s.bModernShellTickerBannerAlwaysScroll =
 			payload.value(QStringLiteral("tickerBannerAlwaysScroll")).toBool();
+		Global::get().s.save();
+		queueModernShellSnapshotSync();
+		if (usesModernShell() && m_modernDialogController
+			&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
+			openModernGenericDialog(buildModernStonksDialog());
+		}
+		return true;
+	}
+	if (action == QLatin1String("setTickerBannerEnabled")) {
+		Global::get().s.bModernShellTickerBannerEnabled =
+			payload.value(QStringLiteral("tickerBannerEnabled"), true).toBool();
 		Global::get().s.save();
 		queueModernShellSnapshotSync();
 		if (usesModernShell() && m_modernDialogController
@@ -17975,7 +17982,6 @@ void MainWindow::openModernVersionCheckResultDialog(const QJsonObject &info, con
 	const QUrl openUrl      = installerUrl.isValid() ? installerUrl : releaseUrl;
 	const bool canInstall   = VersionCheck::canInstallUpdate(info);
 	const QString updateMode = VersionCheck::updateModeForInfo(info);
-	const bool canInstallAlphaPackage = modernCanUseAlphaPackageUpdate(info);
 	const QJsonObject packageInfo = info.value(QStringLiteral("package")).toObject();
 	const QString packageUrlValue = packageInfo.value(QStringLiteral("url")).toString().trimmed();
 	const QUrl packageUrl = packageUrlValue.isEmpty() ? QUrl() : QUrl(packageUrlValue);
@@ -18047,14 +18053,6 @@ void MainWindow::openModernVersionCheckResultDialog(const QJsonObject &info, con
 	if (canInstall) {
 		actions.push_back(modernDialogAction(QStringLiteral("installForkUpdate"), tr("Install update"), true,
 											 QStringLiteral("accent")));
-		if (canInstallAlphaPackage) {
-			actions.push_back(modernDialogAction(QStringLiteral("installForkUpdatePackageAlpha"),
-												 tr("(ALPHA) Uppdatering utan install"), true));
-		}
-	} else if (canInstallAlphaPackage) {
-		actions.push_back(modernDialogAction(QStringLiteral("installForkUpdatePackageAlpha"),
-											 tr("(ALPHA) Uppdatering utan install"), true,
-											 QStringLiteral("accent")));
 	} else if (installerUrl.isValid()) {
 		actions.push_back(modernDialogAction(QStringLiteral("openForkInstaller"), tr("Download update"), true,
 											 QStringLiteral("accent")));
@@ -18070,9 +18068,7 @@ void MainWindow::openModernVersionCheckResultDialog(const QJsonObject &info, con
 						: tr("This client matches the newest release information."),
 		sections, actions,
 		canInstall ? QStringLiteral("installForkUpdate")
-				   : (canInstallAlphaPackage ? QStringLiteral("installForkUpdatePackageAlpha")
-											  : (installerUrl.isValid() ? QStringLiteral("openForkInstaller")
-																		: QStringLiteral("openForkRelease"))),
+				   : (installerUrl.isValid() ? QStringLiteral("openForkInstaller") : QStringLiteral("openForkRelease")),
 		QSize(660, 560));
 	dialog.insert(QStringLiteral("highlights"),
 				  QVariantList { modernDialogHighlight(tr("Status"),
@@ -19509,19 +19505,6 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 			}
 			m_modernVersionCheckInfo = info;
 			const bool handled = startModernForkUpdateDownload();
-			if (handled && m_modernDialogController) {
-				publishModernDialogState(m_modernDialogController->close(dialogID));
-			}
-			return handled;
-		}
-		if (actionID == QLatin1String("installForkUpdatePackageAlpha")) {
-			const QJsonObject info = modernAlphaPackageUpdateInfo(m_modernVersionCheckInfo);
-			if (!modernCanUseAlphaPackageUpdate(m_modernVersionCheckInfo)) {
-				publishModernToast(QStringLiteral("warning"), tr("Update package"),
-								   tr("This release does not include a usable no-installer update package."));
-				return true;
-			}
-			const bool handled = startModernForkUpdateDownload(info);
 			if (handled && m_modernDialogController) {
 				publishModernDialogState(m_modernDialogController->close(dialogID));
 			}
@@ -21478,6 +21461,7 @@ QVariantMap MainWindow::buildModernShellVoiceRoomScreenShareState(const Channel 
 	shareState.insert(QStringLiteral("statusLabel"), QString());
 	shareState.insert(QStringLiteral("statusTone"), QStringLiteral("muted"));
 	shareState.insert(QStringLiteral("fallbackLabel"), QString());
+	shareState.insert(QStringLiteral("runtimeLabel"), QString());
 	shareState.insert(QStringLiteral("primaryActionId"), QString());
 	shareState.insert(QStringLiteral("primaryLabel"), QString());
 	shareState.insert(QStringLiteral("primaryEnabled"), false);
@@ -21499,6 +21483,12 @@ QVariantMap MainWindow::buildModernShellVoiceRoomScreenShareState(const Channel 
 	const bool joinedRoom             = joinedVoiceChannel && joinedVoiceChannel->iId == channel->iId;
 	const QString streamID            = screenShareStreamForChannel(channel);
 	const bool hasShare               = !streamID.isEmpty();
+	const ScreenShareHelperClient::CapabilitySnapshot &capabilities = m_screenShareManager->helperClient().capabilities();
+	const bool nativeGpuReady = capabilities.zeroCopySupported
+								&& (capabilities.captureBackends.contains(QStringLiteral("gstreamer-d3d11-livekit"))
+									|| capabilities.captureBackends.contains(QStringLiteral("d3d11-desktop-duplication"))
+									|| capabilities.captureBackends.contains(
+										QStringLiteral("windows-graphics-capture-d3d11")));
 	QVariantList overflowActions;
 
 	const auto setPrimaryAction = [&shareState](const QString &id, const QString &actionLabel, const bool enabled,
@@ -21517,6 +21507,11 @@ QVariantMap MainWindow::buildModernShellVoiceRoomScreenShareState(const Channel 
 		shareState.insert(QStringLiteral("statusLabel"), joinedRoom ? tr("Ready to share") : tr("Join this room to share"));
 		shareState.insert(QStringLiteral("statusTone"),
 						  unavailableReason.isEmpty() ? QStringLiteral("success") : QStringLiteral("warning"));
+		if (joinedRoom && nativeGpuReady) {
+			shareState.insert(QStringLiteral("runtimeLabel"), tr("GStreamer GPU ready"));
+			shareState.insert(QStringLiteral("badgeLabel"), tr("GPU"));
+			shareState.insert(QStringLiteral("badgeTone"), QStringLiteral("success"));
+		}
 		setPrimaryAction(QStringLiteral("screenShareStart"), tr("Share screen"), unavailableReason.isEmpty(),
 						 unavailableReason,
 						 unavailableReason.isEmpty() ? QStringLiteral("success") : QStringLiteral("warning"));
@@ -21531,13 +21526,21 @@ QVariantMap MainWindow::buildModernShellVoiceRoomScreenShareState(const Channel 
 	const bool viewing       = !selfOwned && m_screenShareManager->isViewingSession(streamID);
 	const bool detachedWindowOpen = m_screenShareManager->hasDetachedWindow(streamID);
 	const bool usingFallback      = m_screenShareManager->isUsingFallbackRuntime(streamID);
+	const bool usingNativeGpu     = selfOwned && m_screenShareManager->isUsingNativeGpuRuntime(streamID);
 
 	shareState.insert(QStringLiteral("streamId"), streamID);
 	shareState.insert(QStringLiteral("ownerLabel"), ownerLabel);
 	shareState.insert(QStringLiteral("ownerSession"), static_cast< qulonglong >(session.ownerSession));
 	shareState.insert(QStringLiteral("detachedWindowOpen"), detachedWindowOpen);
 	shareState.insert(QStringLiteral("usingFallback"), usingFallback);
-	shareState.insert(QStringLiteral("fallbackLabel"), usingFallback ? tr("Using helper/browser fallback.") : QString());
+	shareState.insert(QStringLiteral("fallbackLabel"), usingFallback ? tr("Using external fallback runtime.") : QString());
+	shareState.insert(QStringLiteral("qualityProfile"), session.qualityProfile);
+	shareState.insert(QStringLiteral("bitrateKbps"), static_cast< int >(session.bitrateKbps));
+	shareState.insert(QStringLiteral("maxBitrateKbps"), static_cast< int >(session.maxBitrateKbps));
+	shareState.insert(QStringLiteral("resolutionLabel"),
+					  tr("%1x%2 @ %3 fps").arg(session.width).arg(session.height).arg(session.fps));
+	shareState.insert(QStringLiteral("runtimeLabel"),
+					  usingFallback ? tr("Fallback runtime") : (usingNativeGpu ? tr("GStreamer GPU") : QString()));
 	shareState.insert(QStringLiteral("badgeLabel"), tr("Live"));
 	shareState.insert(QStringLiteral("badgeTone"), selfOwned ? QStringLiteral("success") : QStringLiteral("accent"));
 
@@ -22216,10 +22219,6 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 						   tr("Text room"), MumbleProto::TextChannel);
 		}
 
-		if (target.directMessage && target.user) {
-			appendTextRoom(LocalDirectMessageScope, target.user->uiSession, target.user->qsName,
-						   tr("Direct message with %1.").arg(target.user->qsName), tr("Direct message"));
-		}
 	}
 
 	std::function< void(const Channel *, int) > appendVoiceRoomTree = [&](const Channel *channel, const int depth) {
@@ -23111,6 +23110,7 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 		shareState.insert(QStringLiteral("statusLabel"), QString());
 		shareState.insert(QStringLiteral("statusTone"), QStringLiteral("muted"));
 		shareState.insert(QStringLiteral("fallbackLabel"), QString());
+		shareState.insert(QStringLiteral("runtimeLabel"), QString());
 		shareState.insert(QStringLiteral("primaryActionId"), QString());
 		shareState.insert(QStringLiteral("primaryLabel"), QString());
 		shareState.insert(QStringLiteral("primaryEnabled"), false);
@@ -23130,6 +23130,13 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 		const bool joinedRoom  = joinedVoiceChannel && joinedVoiceChannel->iId == channel->iId;
 		const QString streamID = screenShareStreamForChannel(channel);
 		const bool hasShare    = !streamID.isEmpty();
+		const ScreenShareHelperClient::CapabilitySnapshot &capabilities =
+			m_screenShareManager->helperClient().capabilities();
+		const bool nativeGpuReady =
+			capabilities.zeroCopySupported
+			&& (capabilities.captureBackends.contains(QStringLiteral("gstreamer-d3d11-livekit"))
+				|| capabilities.captureBackends.contains(QStringLiteral("d3d11-desktop-duplication"))
+				|| capabilities.captureBackends.contains(QStringLiteral("windows-graphics-capture-d3d11")));
 		QVariantList overflowActions;
 
 		const auto setPrimaryAction = [&shareState](const QString &id, const QString &actionLabel, const bool enabled,
@@ -23148,6 +23155,11 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 							  joinedRoom ? tr("Ready to share") : tr("Join this room to share"));
 			shareState.insert(QStringLiteral("statusTone"),
 							  unavailableReason.isEmpty() ? QStringLiteral("success") : QStringLiteral("warning"));
+			if (joinedRoom && nativeGpuReady) {
+				shareState.insert(QStringLiteral("runtimeLabel"), tr("GStreamer GPU ready"));
+				shareState.insert(QStringLiteral("badgeLabel"), tr("GPU"));
+				shareState.insert(QStringLiteral("badgeTone"), QStringLiteral("success"));
+			}
 			setPrimaryAction(QStringLiteral("screenShareStart"), tr("Share screen"), unavailableReason.isEmpty(),
 							 unavailableReason,
 							 unavailableReason.isEmpty() ? QStringLiteral("success") : QStringLiteral("warning"));
@@ -23162,6 +23174,7 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 		const bool viewing       = !selfOwned && m_screenShareManager->isViewingSession(streamID);
 		const bool detachedWindowOpen = m_screenShareManager->hasDetachedWindow(streamID);
 		const bool usingFallback      = m_screenShareManager->isUsingFallbackRuntime(streamID);
+		const bool usingNativeGpu     = selfOwned && m_screenShareManager->isUsingNativeGpuRuntime(streamID);
 
 		shareState.insert(QStringLiteral("streamId"), streamID);
 		shareState.insert(QStringLiteral("ownerLabel"), ownerLabel);
@@ -23169,7 +23182,14 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 		shareState.insert(QStringLiteral("detachedWindowOpen"), detachedWindowOpen);
 		shareState.insert(QStringLiteral("usingFallback"), usingFallback);
 		shareState.insert(QStringLiteral("fallbackLabel"),
-						  usingFallback ? tr("Using helper/browser fallback.") : QString());
+						  usingFallback ? tr("Using external fallback runtime.") : QString());
+		shareState.insert(QStringLiteral("qualityProfile"), session.qualityProfile);
+		shareState.insert(QStringLiteral("bitrateKbps"), static_cast< int >(session.bitrateKbps));
+		shareState.insert(QStringLiteral("maxBitrateKbps"), static_cast< int >(session.maxBitrateKbps));
+		shareState.insert(QStringLiteral("resolutionLabel"),
+						  tr("%1x%2 @ %3 fps").arg(session.width).arg(session.height).arg(session.fps));
+		shareState.insert(QStringLiteral("runtimeLabel"),
+						  usingFallback ? tr("Fallback runtime") : (usingNativeGpu ? tr("GStreamer GPU") : QString()));
 		shareState.insert(QStringLiteral("badgeLabel"), tr("Live"));
 		shareState.insert(QStringLiteral("badgeTone"),
 						  selfOwned ? QStringLiteral("success") : QStringLiteral("accent"));
@@ -23238,7 +23258,7 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 			const bool voiceRoomChat = scopeValue == static_cast< int >(MumbleProto::Channel);
 			if (scopeValue == LocalServerLogScope || scopeValue == static_cast< int >(MumbleProto::TextChannel)
 				|| voiceRoomChat || scopeValue == static_cast< int >(MumbleProto::ServerGlobal)
-				|| scopeValue == LocalDirectMessageScope || scopeValue == static_cast< int >(MumbleProto::Aggregate)) {
+				|| scopeValue == static_cast< int >(MumbleProto::Aggregate)) {
 				QVariantMap room;
 				room.insert(QStringLiteral("token"), modernShellScopeToken(scopeValue, scopeID));
 				room.insert(QStringLiteral("label"), roomLabel.isEmpty() ? tr("Room") : roomLabel);
@@ -23254,13 +23274,10 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 				room.insert(QStringLiteral("kindLabel"),
 							scopeValue == LocalServerLogScope
 								? tr("Activity")
-								: (scopeValue == LocalDirectMessageScope
-									   ? tr("Direct message")
-									   : (voiceRoomChat
-											  ? tr("Voice room")
-											  : (scopeValue == static_cast< int >(MumbleProto::TextChannel)
-													 ? tr("Text room")
-													 : tr("Legacy")))));
+								: (voiceRoomChat ? tr("Voice room")
+												 : (scopeValue == static_cast< int >(MumbleProto::TextChannel)
+														? tr("Text room")
+														: tr("Legacy"))));
 				Channel *roomChannel = nullptr;
 				if (scopeValue == static_cast< int >(MumbleProto::TextChannel)) {
 					const auto textChannelIt = m_persistentTextChannels.constFind(scopeID);
@@ -23273,13 +23290,6 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 				}
 				if (roomChannel && scopeValue != static_cast< int >(MumbleProto::TextChannel)) {
 					room.insert(QStringLiteral("actions"), buildChannelActions(roomChannel, false));
-				}
-				if (scopeValue == LocalDirectMessageScope) {
-					if (ClientUser *roomUser = ClientUser::get(scopeID)) {
-						room.insert(QStringLiteral("participantSession"),
-									static_cast< qulonglong >(roomUser->uiSession));
-						room.insert(QStringLiteral("participantActions"), buildParticipantActions(roomUser));
-					}
 				}
 				textRooms.push_back(room);
 			}
@@ -23716,6 +23726,15 @@ bool MainWindow::openModernDirectMessage(const unsigned int session, const bool 
 		return false;
 	}
 
+	const auto closeOtherDirectMessageWindows = [this, session]() {
+		for (auto it = m_modernDirectMessageConversations.begin(); it != m_modernDirectMessageConversations.end();
+			 ++it) {
+			if (it.key() != session) {
+				it.value().open = false;
+			}
+		}
+	};
+
 	ClientUser *peer = ClientUser::get(session);
 	if (!peer) {
 		auto conversationIt = m_modernDirectMessageConversations.find(session);
@@ -23723,6 +23742,7 @@ bool MainWindow::openModernDirectMessage(const unsigned int session, const bool 
 			return false;
 		}
 
+		closeOtherDirectMessageWindows();
 		ModernDirectMessageConversation &conversation = conversationIt.value();
 		conversation.peerSession                       = session;
 		conversation.open                              = true;
@@ -23734,6 +23754,7 @@ bool MainWindow::openModernDirectMessage(const unsigned int session, const bool 
 	}
 
 	ModernDirectMessageConversation &conversation = m_modernDirectMessageConversations[session];
+	closeOtherDirectMessageWindows();
 	conversation.peerSession = session;
 	conversation.label       = peer->qsName;
 	conversation.subtitle    = peer->cChannel ? tr("In %1").arg(peer->cChannel->qsName) : tr("No active channel");
@@ -24111,21 +24132,7 @@ bool MainWindow::handleModernShellScopeSelection(const QString &scopeToken) {
 		if (!ClientUser::get(scopeID) && !m_modernDirectMessageConversations.contains(scopeID)) {
 			return false;
 		}
-		++m_modernShellMessagePatchGeneration;
-		setPersistentChatTargetUsesVoiceTree(false);
-		m_persistentChatSelectedScopeValue = LocalDirectMessageScope;
-		m_persistentChatSelectedScopeID    = scopeID;
-		if (m_persistentChatChannelList) {
-			const QSignalBlocker signalBlocker(m_persistentChatChannelList);
-			m_persistentChatChannelList->clearSelection();
-			m_persistentChatChannelList->setCurrentRow(-1);
-		}
-		updateServerNavigatorChrome();
-		updatePersistentTextChannelControls();
-		publishModernShellRoomStatePatch();
-		updateChatBar(false, false);
-		publishModernShellRoomStatePatch();
-		return true;
+		return openModernDirectMessage(scopeID, true);
 	}
 
 	if (scopeValue == static_cast< int >(MumbleProto::Channel)) {
@@ -24374,18 +24381,8 @@ bool MainWindow::handleModernShellParticipantMessage(const qulonglong session) {
 		return false;
 	}
 
-	appendModernShellConnectTrace(QStringLiteral("handleModernShellParticipantMessage direct session=%1").arg(targetSession));
-	setPersistentChatTargetUsesVoiceTree(false);
-	m_persistentChatSelectedScopeValue = LocalDirectMessageScope;
-	m_persistentChatSelectedScopeID    = targetSession;
-	if (m_persistentChatChannelList) {
-		const QSignalBlocker signalBlocker(m_persistentChatChannelList);
-		m_persistentChatChannelList->clearSelection();
-	}
-	updateServerNavigatorChrome();
-	updatePersistentTextChannelControls();
-	updateChatBar(false, false);
-	publishModernShellRoomStatePatch();
+	appendModernShellConnectTrace(
+		QStringLiteral("handleModernShellParticipantMessage compact direct session=%1").arg(targetSession));
 	return true;
 }
 
@@ -24813,14 +24810,6 @@ bool MainWindow::handleModernShellAppAction(const QString &actionId) {
 		return false;
 	} else if (actionId == QLatin1String("app.update.download")) {
 		handled = startModernForkUpdateDownload();
-	} else if (actionId == QLatin1String("app.update.downloadPackageAlpha")) {
-		if (modernCanUseAlphaPackageUpdate(m_modernVersionCheckInfo)) {
-			handled = startModernForkUpdateDownload(modernAlphaPackageUpdateInfo(m_modernVersionCheckInfo));
-		} else {
-			publishModernToast(QStringLiteral("warning"), tr("Update package"),
-							   tr("This release does not include a usable no-installer update package."));
-			return true;
-		}
 	} else if (actionId == QLatin1String("app.update.restart")) {
 		handled = restartForPreparedForkUpdate();
 	} else if (actionId == QLatin1String("app.update.retry")) {
@@ -24979,24 +24968,15 @@ void MainWindow::showModernForkUpdateAvailableBanner(const QJsonObject &info) {
 	}
 
 	m_modernPreparedUpdateInstallerPath.clear();
+	m_modernPreparedFallbackInstallerPath.clear();
 	m_modernUpdateDownloadInProgress = false;
 	m_modernUpdateLastProgressPublishMs = 0;
 	m_modernUpdateLastProgressPercent = -1;
 
 	const bool canInstall = VersionCheck::canInstallUpdate(info);
-	const bool canInstallAlphaPackage = modernCanUseAlphaPackageUpdate(info);
 	QVariantList actions;
 	if (canInstall) {
 		actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.download"), tr("Install update"),
-												   QStringLiteral("accent")));
-		if (canInstallAlphaPackage) {
-			actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.downloadPackageAlpha"),
-													   tr("(ALPHA) Uppdatering utan install")));
-		}
-		actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.details"), tr("Details")));
-	} else if (canInstallAlphaPackage) {
-		actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.downloadPackageAlpha"),
-												   tr("(ALPHA) Uppdatering utan install"),
 												   QStringLiteral("accent")));
 		actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.details"), tr("Details")));
 	} else {
@@ -25133,6 +25113,7 @@ bool MainWindow::startModernForkUpdateDownload() {
 	clearModernUpdateSnooze(m_modernVersionCheckInfo);
 	m_modernUpdateDownloadInProgress = true;
 	m_modernPreparedUpdateInstallerPath.clear();
+	m_modernPreparedFallbackInstallerPath.clear();
 	m_modernUpdateLastProgressPublishMs = 0;
 	m_modernUpdateLastProgressPercent = -1;
 
@@ -25155,6 +25136,8 @@ bool MainWindow::startModernForkUpdateDownload() {
 		[this, updateMode](const QString &installerPath) {
 			m_modernUpdateDownloadInProgress = false;
 			m_modernPreparedUpdateInstallerPath = installerPath;
+			m_modernPreparedFallbackInstallerPath =
+				VersionCheck::preparedFallbackInstallerPathForInfo(m_modernVersionCheckInfo);
 			m_modernUpdateLastProgressPublishMs = 0;
 			m_modernUpdateLastProgressPercent = 100;
 
@@ -25163,10 +25146,16 @@ bool MainWindow::startModernForkUpdateDownload() {
 			readyBanner.insert(QStringLiteral("phase"), QStringLiteral("ready"));
 			readyBanner.insert(QStringLiteral("tone"), QStringLiteral("success"));
 			readyBanner.insert(QStringLiteral("title"), tr("Update ready to install"));
+			const bool hasMsiFallback =
+				updateMode == QLatin1String("package")
+				&& VersionCheck::canLaunchPreparedUpdate(m_modernPreparedFallbackInstallerPath,
+														 QStringLiteral("installer"));
 			readyBanner.insert(
 				QStringLiteral("detail"),
 				updateMode == QLatin1String("package")
-					? tr("Mumble will close, mumble-updater will apply the package, and Mumble will reopen to restore this server and chat.")
+					? (hasMsiFallback
+						   ? tr("Mumble will close, mumble-updater will apply the package, use the MSI only if the package fails, and then reopen to restore this server and chat.")
+						   : tr("Mumble will close, mumble-updater will apply the package, and Mumble will reopen to restore this server and chat."))
 					: tr("Mumble will close, mumble-updater will run the installer, and Mumble will reopen to restore this server and chat."));
 			readyBanner.insert(QStringLiteral("progressVisible"), true);
 			readyBanner.insert(QStringLiteral("progressIndeterminate"), false);
@@ -25185,6 +25174,7 @@ bool MainWindow::startModernForkUpdateDownload() {
 		[this](const QString &message) {
 			m_modernUpdateDownloadInProgress = false;
 			m_modernPreparedUpdateInstallerPath.clear();
+			m_modernPreparedFallbackInstallerPath.clear();
 			m_modernUpdateLastProgressPublishMs = 0;
 			m_modernUpdateLastProgressPercent = -1;
 
@@ -25206,6 +25196,8 @@ bool MainWindow::startModernForkUpdateDownload() {
 		},
 		[this]() {
 			m_modernUpdateDownloadInProgress = false;
+			m_modernPreparedUpdateInstallerPath.clear();
+			m_modernPreparedFallbackInstallerPath.clear();
 			m_modernUpdateLastProgressPublishMs = 0;
 			m_modernUpdateLastProgressPercent = -1;
 
@@ -25241,6 +25233,7 @@ bool MainWindow::startModernForkUpdateDownload(const QJsonObject &info) {
 bool MainWindow::restartForPreparedForkUpdate() {
 	const QString updateMode = VersionCheck::updateModeForInfo(m_modernVersionCheckInfo);
 	if (!VersionCheck::canLaunchPreparedUpdate(m_modernPreparedUpdateInstallerPath, updateMode)) {
+		m_modernPreparedFallbackInstallerPath.clear();
 		QVariantMap banner;
 		banner.insert(QStringLiteral("visible"), true);
 		banner.insert(QStringLiteral("phase"), QStringLiteral("missing"));
@@ -25270,7 +25263,8 @@ bool MainWindow::restartForPreparedForkUpdate() {
 	setModernUpdateBannerState(handoffBanner);
 
 	prepareUpdateResumeState();
-	if (!VersionCheck::launchPreparedUpdate(m_modernPreparedUpdateInstallerPath, updateMode)) {
+	if (!VersionCheck::launchPreparedUpdate(m_modernPreparedUpdateInstallerPath, updateMode, true, true,
+											m_modernPreparedFallbackInstallerPath)) {
 		clearPendingUpdateResumeState();
 		QVariantMap failureBanner;
 		failureBanner.insert(QStringLiteral("visible"), true);
@@ -25460,6 +25454,10 @@ bool MainWindow::handleModernShellAppActionPayload(const QString &actionId, cons
 		if (payload.contains(QStringLiteral("tickerBannerAlwaysScroll"))) {
 			Global::get().s.bModernShellTickerBannerAlwaysScroll =
 				payload.value(QStringLiteral("tickerBannerAlwaysScroll")).toBool();
+		}
+		if (payload.contains(QStringLiteral("tickerBannerEnabled"))) {
+			Global::get().s.bModernShellTickerBannerEnabled =
+				payload.value(QStringLiteral("tickerBannerEnabled")).toBool();
 		}
 		Global::get().s.save();
 		queueModernShellSnapshotSync();
@@ -30793,7 +30791,9 @@ bool MainWindow::requestPersistentChatWebhallenProductPreview(const QString &pre
 		const QVariantList productImages = previewIt->metadata.value(QStringLiteral("productImages")).toList();
 		if (!productImages.isEmpty()) {
 			const QString imageUrl = productImages.first().toMap().value(QStringLiteral("url")).toString();
-			requestPersistentChatPreviewPosterImage(previewKey, QUrl(imageUrl), QStringLiteral("image/jpeg"));
+			if (!requestPersistentChatPreviewPosterImage(previewKey, QUrl(imageUrl), QStringLiteral("image/jpeg"))) {
+				previewIt->thumbnailFinished = true;
+			}
 		} else {
 			previewIt->thumbnailFinished = true;
 		}

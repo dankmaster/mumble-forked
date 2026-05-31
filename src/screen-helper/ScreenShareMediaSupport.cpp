@@ -27,7 +27,8 @@ void appendIf(QStringList *values, const bool condition, const QString &value) {
 bool hasHardwareEncoder(const ScreenShareExternalProcess::RuntimeSupport &support) {
 	return support.h264NvencAvailable || support.h264VaapiAvailable || support.h264MfAvailable
 		   || support.h264QsvAvailable || support.av1NvencAvailable || support.av1VaapiAvailable
-		   || support.av1MfAvailable || support.av1QsvAvailable;
+		   || support.av1MfAvailable || support.av1QsvAvailable || support.gstNvD3D11H264EncoderAvailable
+		   || support.gstMfH264EncoderAvailable;
 }
 
 QStringList ingestProtocolsForRuntime(const ScreenShareExternalProcess::RuntimeSupport &support) {
@@ -35,7 +36,8 @@ QStringList ingestProtocolsForRuntime(const ScreenShareExternalProcess::RuntimeS
 	appendIf(&protocols, support.fileProtocolAvailable, QStringLiteral("file"));
 	appendIf(&protocols, support.rtmpProtocolAvailable, QStringLiteral("rtmp"));
 	appendIf(&protocols, support.rtmpsProtocolAvailable, QStringLiteral("rtmps"));
-	appendIf(&protocols, support.browserWebRtcAvailable, QStringLiteral("webrtc"));
+	appendIf(&protocols, support.gstreamerLiveKitPublishAvailable || support.gstreamerLiveKitViewAvailable,
+			 QStringLiteral("webrtc"));
 	return protocols;
 }
 
@@ -76,21 +78,28 @@ ScreenShareMediaSupport::CapabilitySummary ScreenShareMediaSupport::probe() {
 		|| qEnvironmentVariable("MUMBLE_SCREENSHARE_CAPTURE_SOURCE").trimmed().toLower()
 			   == QLatin1String("test-pattern")
 		|| qEnvironmentVariable("MUMBLE_SCREENSHARE_CAPTURE_SOURCE").trimmed().toLower() == QLatin1String("lavfi");
+	const bool browserRelayFallbackEnabled = envFlagEnabled("MUMBLE_SCREENSHARE_ALLOW_RELAY_WEBAPP");
 	summary.hardwareEncodeSupported   = hasHardwareEncoder(runtimeSupport);
 	summary.hardwareEncodingPreferred = summary.hardwareEncodeSupported;
-	summary.hardwareDecodeSupported   = runtimeSupport.browserWebRtcAvailable;
+	summary.hardwareDecodeSupported   = runtimeSupport.gstD3D11VideoSinkAvailable
+									  || (browserRelayFallbackEnabled && runtimeSupport.browserWebRtcAvailable);
 	summary.ingestProtocols           = ingestProtocolsForRuntime(runtimeSupport);
+	summary.gstreamerAvailable        = runtimeSupport.gstreamerAvailable;
+	summary.gstreamerLiveKitPublishAvailable = runtimeSupport.gstreamerLiveKitPublishAvailable;
+	summary.gstreamerLiveKitViewAvailable    = runtimeSupport.gstreamerLiveKitViewAvailable;
+	summary.gstreamerVersion                 = runtimeSupport.gstreamerVersion;
+	summary.missingGStreamerElements         = runtimeSupport.missingGStreamerElements;
 
 #ifdef Q_OS_LINUX
 	QString libraryName;
 	const bool pipeWireAvailable = pipeWireRuntimeAvailable(&libraryName);
 	const bool x11CaptureAvailable =
 		runtimeSupport.ffmpegAvailable && runtimeSupport.x11GrabAvailable && runtimeSupport.x11DisplayAvailable;
-	const bool browserCaptureAvailable = runtimeSupport.browserWebRtcAvailable;
+	const bool browserCaptureAvailable = browserRelayFallbackEnabled && runtimeSupport.browserWebRtcAvailable;
 
 	summary.captureSupported = x11CaptureAvailable || browserCaptureAvailable || testPatternEnabled;
 	summary.viewSupported =
-		runtimeSupport.ffplayAvailable || runtimeSupport.ffmpegAvailable || runtimeSupport.browserWebRtcAvailable;
+		runtimeSupport.ffplayAvailable || runtimeSupport.ffmpegAvailable || browserCaptureAvailable;
 	appendIf(&summary.captureBackends, x11CaptureAvailable, QStringLiteral("x11grab"));
 	appendIf(&summary.captureBackends, browserCaptureAvailable, QStringLiteral("browser-webrtc"));
 	appendIf(&summary.captureBackends, testPatternEnabled && runtimeSupport.lavfiAvailable,
@@ -120,40 +129,83 @@ ScreenShareMediaSupport::CapabilitySummary ScreenShareMediaSupport::probe() {
 											   "or MUMBLE_SCREENSHARE_TEST_PATTERN=1 is required.");
 	}
 #elif defined(Q_OS_WIN)
+	const bool gstreamerLiveKitCaptureAvailable =
+		runtimeSupport.gstreamerLiveKitPublishAvailable && runtimeSupport.gstD3D11ScreenCaptureAvailable;
 	const bool gdiCaptureAvailable     = runtimeSupport.ffmpegAvailable && runtimeSupport.gdigrabAvailable;
-	const bool browserCaptureAvailable = runtimeSupport.browserWebRtcAvailable;
+	const bool d3d11DesktopCaptureAvailable =
+		runtimeSupport.ffmpegAvailable && runtimeSupport.ddagrabAvailable
+		&& runtimeSupport.d3d11HardwareDeviceAvailable;
+	const bool zeroCopyD3D11EncodeAvailable =
+		d3d11DesktopCaptureAvailable && (runtimeSupport.h264NvencAvailable || runtimeSupport.av1NvencAvailable);
+	const bool windowsGraphicsCaptureAvailable = runtimeSupport.windowsNativeCapturePipelineAvailable;
+	const bool browserCaptureAvailable = browserRelayFallbackEnabled && runtimeSupport.browserWebRtcAvailable;
 
-	summary.captureSupported = gdiCaptureAvailable || browserCaptureAvailable || testPatternEnabled;
+	summary.captureSupported =
+		gstreamerLiveKitCaptureAvailable || windowsGraphicsCaptureAvailable || d3d11DesktopCaptureAvailable || gdiCaptureAvailable
+		|| browserCaptureAvailable || testPatternEnabled;
 	summary.viewSupported =
-		runtimeSupport.ffplayAvailable || runtimeSupport.ffmpegAvailable || runtimeSupport.browserWebRtcAvailable;
+		runtimeSupport.gstreamerLiveKitViewAvailable || runtimeSupport.ffplayAvailable || runtimeSupport.ffmpegAvailable
+		|| browserCaptureAvailable;
+	appendIf(&summary.captureBackends, gstreamerLiveKitCaptureAvailable,
+			 QStringLiteral("gstreamer-d3d11-livekit"));
+	appendIf(&summary.captureBackends, windowsGraphicsCaptureAvailable,
+			 QStringLiteral("windows-graphics-capture-d3d11"));
+	appendIf(&summary.captureBackends, d3d11DesktopCaptureAvailable, QStringLiteral("d3d11-desktop-duplication"));
 	appendIf(&summary.captureBackends, gdiCaptureAvailable, QStringLiteral("gdigrab"));
 	appendIf(&summary.captureBackends, browserCaptureAvailable, QStringLiteral("browser-webrtc"));
 	appendIf(&summary.captureBackends, testPatternEnabled && runtimeSupport.lavfiAvailable,
 			 QStringLiteral("lavfi-test-pattern"));
-	summary.captureBackend = testPatternEnabled
-								 ? QStringLiteral("lavfi-test-pattern")
-								 : (gdiCaptureAvailable ? QStringLiteral("gdigrab")
-														: (browserCaptureAvailable ? QStringLiteral("browser-webrtc")
-																				   : QStringLiteral("unavailable")));
+	summary.captureBackend =
+		testPatternEnabled
+			? QStringLiteral("lavfi-test-pattern")
+			: (gstreamerLiveKitCaptureAvailable
+				   ? QStringLiteral("gstreamer-d3d11-livekit")
+				   : (zeroCopyD3D11EncodeAvailable
+				   ? QStringLiteral("d3d11-desktop-duplication")
+				   : (gdiCaptureAvailable
+						  ? QStringLiteral("gdigrab")
+						  : (windowsGraphicsCaptureAvailable ? QStringLiteral("windows-graphics-capture-d3d11")
+															 : (browserCaptureAvailable ? QStringLiteral("browser-webrtc")
+																						: QStringLiteral("unavailable"))))));
+	summary.zeroCopySupported       = gstreamerLiveKitCaptureAvailable || zeroCopyD3D11EncodeAvailable || windowsGraphicsCaptureAvailable;
+	summary.damageMetadataSupported = runtimeSupport.windowsGraphicsCaptureDirtyRegions;
+	summary.queueBudgetFrames       = summary.zeroCopySupported ? 2 : summary.queueBudgetFrames;
 	if (summary.captureSupported) {
-		summary.statusMessage =
-			testPatternEnabled
-				? QStringLiteral("ffmpeg test-pattern mode is enabled for headless screen-share verification.")
-				: (gdiCaptureAvailable ? QStringLiteral("Windows helper runtime can capture the desktop via ffmpeg "
-														"gdigrab and prefers H.264-first encoding.")
-									   : QStringLiteral("Windows helper runtime can execute WebRTC screen sharing "
-														"through a dedicated browser runtime."));
+		if (testPatternEnabled) {
+			summary.statusMessage =
+				QStringLiteral("ffmpeg test-pattern mode is enabled for headless screen-share verification.");
+		} else if (gstreamerLiveKitCaptureAvailable) {
+			summary.statusMessage =
+				QStringLiteral("GStreamer LiveKit runtime is available and will prefer D3D11 screen capture with "
+							   "H.264 hardware encoding for WebRTC screen sharing.");
+		} else if (zeroCopyD3D11EncodeAvailable) {
+			summary.statusMessage =
+				QStringLiteral("Windows helper runtime will prefer D3D11 Desktop Duplication capture with NVENC "
+							   "zero-copy encoding for direct relay publishing.");
+		} else if (windowsGraphicsCaptureAvailable) {
+			summary.statusMessage =
+				QStringLiteral("Windows Graphics Capture and a hardware D3D11 device are available for the native "
+							   "in-process publisher pipeline.");
+		} else if (gdiCaptureAvailable) {
+			summary.statusMessage =
+				QStringLiteral("Windows helper runtime can capture the desktop via ffmpeg gdigrab and prefers "
+							   "H.264-first encoding.");
+		} else {
+			summary.statusMessage =
+				QStringLiteral("Windows helper runtime can execute WebRTC screen sharing through a dedicated browser "
+							   "runtime.");
+		}
 	} else {
 		summary.statusMessage =
-			QStringLiteral("No executable Windows capture path is available. Install an ffmpeg build with gdigrab "
-						   "support or enable MUMBLE_SCREENSHARE_TEST_PATTERN=1 for verification.");
+			QStringLiteral("No executable Windows capture path is available. Install an ffmpeg build with ddagrab or "
+						   "gdigrab support, or enable MUMBLE_SCREENSHARE_TEST_PATTERN=1 for verification.");
 	}
 #else
 	summary.captureBackend = QStringLiteral("unsupported");
 	summary.statusMessage =
 		QStringLiteral("Screen-share media helper has no executable capture backend on this platform yet.");
-	summary.viewSupported =
-		runtimeSupport.ffplayAvailable || runtimeSupport.ffmpegAvailable || runtimeSupport.browserWebRtcAvailable;
+	summary.viewSupported = runtimeSupport.ffplayAvailable || runtimeSupport.ffmpegAvailable
+							|| (browserRelayFallbackEnabled && runtimeSupport.browserWebRtcAvailable);
 #endif
 	if (summary.captureBackends.isEmpty() && !summary.captureBackend.isEmpty()
 		&& summary.captureBackend != QLatin1String("unavailable")

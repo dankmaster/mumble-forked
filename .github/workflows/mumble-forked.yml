@@ -29,6 +29,7 @@ env:
   MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT: 127cccc01d
   MUMBLE_SHARED_WINDOWS_ENVIRONMENT_VERSION_SUFFIX: webengine-codecs-v1
   ONNXRUNTIME_VERSION: 1.18.1
+  GSTREAMER_VERSION: 1.26.7
   PROTECTED_BUILD_ENV_RELEASE_TAG: build-env-2025-11-webengine-codecs
 
 jobs:
@@ -80,8 +81,10 @@ jobs:
         uses: ./.github/actions/setup-windows-optional-runtimes
         with:
           onnxruntime-version: ${{ env.ONNXRUNTIME_VERSION }}
+          gstreamer-version: ${{ env.GSTREAMER_VERSION }}
           install-rust: 'true'
-          install-ffmpeg: 'false'
+          install-ffmpeg: 'true'
+          install-gstreamer: 'true'
 
       - name: Install Windows installer tooling
         uses: ./.github/actions/setup-windows-installer-tooling
@@ -110,6 +113,21 @@ jobs:
           }
           .\scripts\windows\build-local-windows-client.ps1 @arguments
 
+      - name: Verify packaged GStreamer screen-share runtime
+        timeout-minutes: 10
+        shell: powershell
+        run: |
+          .\scripts\windows\build-local-windows-client.ps1 `
+            -BuildNumber "${{ github.run_number }}" `
+            -EnvironmentRelease "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE }}" `
+            -EnvironmentCommit "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT }}" `
+            -SharedWebEngine `
+            -SkipConfigure `
+            -SkipBuild `
+            -VerifyHelperRuntime `
+            -RequireGStreamerRuntime `
+            -AllowPendingReboot
+
       - name: Validate mumble-forked MSI artifacts
         shell: powershell
         run: |
@@ -120,6 +138,7 @@ jobs:
             -RequireClient `
             -RequireScreenHelper `
             -RequireSpeechCleanup `
+            -RequireGStreamerRuntime `
             -RequireClientInstaller `
             -RequireEnglishOnlyInstallers `
             -ArtifactListPath .\build-shared-webengine\mumble-forked-artifacts.txt
@@ -299,7 +318,7 @@ jobs:
               minUpdaterVersion = 2
               applyMode = "replace-staged-payload"
             }
-            preferredUpdate = "installer"
+            preferredUpdate = "package"
             publishedAt = (Get-Date).ToUniversalTime().ToString("o")
           }
           $manifestJson = $manifest | ConvertTo-Json -Depth 8
@@ -332,7 +351,7 @@ jobs:
           $notesLines.Add("- SHA256: $($hash.Hash)")
           $notesLines.Add("- Update package: $packageName")
           $notesLines.Add("- Update package SHA256: $($packageHash.Hash)")
-          $notesLines.Add("- Preferred update path for this bootstrap release: installer")
+          $notesLines.Add("- Preferred update path: package, with MSI fallback")
           $notesLines.Add("")
           $notesLines.Add("Windows may show a SmartScreen warning because this is not an official signed public release.")
           [System.IO.File]::WriteAllLines($notesPath, $notesLines, [System.Text.UTF8Encoding]::new($false))
@@ -346,11 +365,11 @@ jobs:
             "Current clients below build $buildNumber will see:",
             "Latest: $projectVersion, build $buildNumber",
             "Details: automated changelog from the previous mumble-forked MSI",
-            "Download: $installerUrl",
+            "Download: $packageUrl",
             "",
-            "Bootstrap metadata:",
-            "preferredUpdate: installer",
-            "package: $packageUrl"
+            "Update metadata:",
+            "preferredUpdate: package",
+            "installer fallback: $installerUrl"
           )
           [System.IO.File]::WriteAllLines($previewPath, $previewLines, [System.Text.UTF8Encoding]::new($false))
           Write-Host "Updater announcement preview:"
@@ -444,3 +463,9 @@ jobs:
         with:
           path: .cache/onnxruntime/win-x64-${{ env.ONNXRUNTIME_VERSION }}
           key: onnxruntime-${{ runner.os }}-x64-${{ env.ONNXRUNTIME_VERSION }}
+
+      - if: ${{ steps.setup-windows-optional-runtimes.outputs.gstreamer-cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: .cache/gstreamer/msvc-x86_64-${{ env.GSTREAMER_VERSION }}
+          key: gstreamer-${{ runner.os }}-msvc-x86_64-${{ env.GSTREAMER_VERSION }}

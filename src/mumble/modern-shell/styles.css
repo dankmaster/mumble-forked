@@ -14663,6 +14663,11 @@ body[data-rail-side="right"] .mockup-shell .conversation-pane {
 	background: rgba(var(--accent-rgb), 0.07);
 }
 
+.direct-message-row.is-open {
+	background: var(--accent-soft);
+	border-left-color: var(--accent);
+}
+
 .dm-rail-avatar {
 	width: 20px;
 	height: 20px;
@@ -14844,25 +14849,26 @@ body[data-rail-side="right"] .mockup-shell .conversation-pane {
 }
 
 .direct-message-dock {
+	--direct-message-dock-edge: calc(18px + var(--chat-scrollbar-width));
 	position: fixed;
-	right: calc(var(--rail-width) + 28px);
+	right: calc(var(--rail-width) + var(--direct-message-dock-edge));
 	bottom: calc(var(--footer-row-height) + 28px);
 	z-index: 72;
 	display: flex;
 	align-items: flex-end;
 	gap: 12px;
-	max-width: calc(100vw - var(--rail-width) - 56px);
+	max-width: calc(100vw - var(--rail-width) - 36px - var(--chat-scrollbar-width));
 	pointer-events: none;
 }
 
 body[data-rail-side="left"] .direct-message-dock {
-	right: 28px;
+	right: var(--direct-message-dock-edge);
 }
 
 .direct-message-window {
 	display: grid;
 	grid-template-rows: auto minmax(0, 1fr) auto;
-	width: min(330px, calc(100vw - 36px));
+	width: min(330px, calc(100vw - 36px - var(--chat-scrollbar-width)));
 	height: min(430px, calc(100vh - 120px));
 	border: 1px solid var(--shell-divider);
 	border-radius: 12px;
@@ -14888,15 +14894,40 @@ body[data-rail-side="left"] .direct-message-dock {
 	display: none;
 }
 
+.direct-message-window.is-detached {
+	position: fixed;
+	z-index: 96;
+}
+
+.direct-message-window.is-dragging {
+	opacity: 0.96;
+	cursor: grabbing;
+	user-select: none;
+}
+
+.direct-message-window.is-near-dock {
+	border-color: var(--accent-border);
+	box-shadow:
+		0 20px 44px rgba(0, 0, 0, 0.30),
+		0 0 0 1px rgba(var(--accent-rgb), 0.22);
+}
+
 .direct-message-window-header {
 	display: grid;
-	grid-template-columns: 32px minmax(0, 1fr) 28px 28px 28px;
+	grid-template-columns: 32px minmax(0, 1fr) 28px 28px 28px 28px;
 	align-items: center;
 	gap: 7px;
 	min-height: 50px;
 	padding: 9px 10px;
 	border-bottom: 1px solid var(--surface-border-subtle);
 	background: var(--surface-glint-subtle);
+	cursor: grab;
+	touch-action: none;
+	user-select: none;
+}
+
+.direct-message-window-header .icon-button {
+	cursor: pointer;
 }
 
 .direct-message-window-avatar {
@@ -15077,7 +15108,7 @@ body[data-rail-side="left"] .direct-message-dock {
 	.direct-message-dock,
 	body[data-rail-side="right"] .direct-message-dock,
 	body[data-rail-side="left"] .direct-message-dock {
-		right: 18px;
+		right: var(--direct-message-dock-edge);
 		left: 18px;
 		max-width: none;
 		justify-content: flex-end;

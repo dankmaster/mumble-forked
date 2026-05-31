@@ -190,6 +190,11 @@ ScreenShareHelperClient::CapabilitySnapshot
 	snapshot.zeroCopySupported       = payload.value(QStringLiteral("zero_copy_supported")).toBool(false);
 	snapshot.roiSupported            = payload.value(QStringLiteral("roi_supported")).toBool(false);
 	snapshot.damageMetadataSupported = payload.value(QStringLiteral("damage_metadata_supported")).toBool(false);
+	snapshot.gstreamerAvailable      = payload.value(QStringLiteral("gstreamer_available")).toBool(false);
+	snapshot.gstreamerLiveKitPublishAvailable =
+		payload.value(QStringLiteral("gstreamer_livekit_publish_available")).toBool(false);
+	snapshot.gstreamerLiveKitViewAvailable =
+		payload.value(QStringLiteral("gstreamer_livekit_view_available")).toBool(false);
 	snapshot.supportedCodecs =
 		Mumble::ScreenShare::IPC::codecListFromJson(payload.value(QStringLiteral("supported_codecs")));
 	snapshot.runtimeRelayTransports =
@@ -199,6 +204,9 @@ ScreenShareHelperClient::CapabilitySnapshot
 	snapshot.maxFps                   = limitFromPayload(payload, "max_fps", Mumble::ScreenShare::HARD_MAX_FPS);
 	snapshot.captureBackend           = payload.value(QStringLiteral("capture_backend")).toString().trimmed();
 	snapshot.captureBackends          = stringListFromJson(payload.value(QStringLiteral("capture_backends")));
+	snapshot.gstreamerVersion         = payload.value(QStringLiteral("gstreamer_version")).toString().trimmed();
+	snapshot.missingGStreamerElements =
+		stringListFromJson(payload.value(QStringLiteral("gstreamer_missing_elements")));
 	snapshot.supportedIngestProtocols = stringListFromJson(payload.value(QStringLiteral("supported_ingest_protocols")));
 	snapshot.drmSystems               = stringListFromJson(payload.value(QStringLiteral("drm_systems")));
 	snapshot.queueBudgetFrames = limitFromPayload(payload, "queue_budget_frames", Mumble::ScreenShare::HARD_MAX_FPS);
@@ -376,6 +384,14 @@ QJsonObject ScreenShareHelperClient::payloadFromSession(const ScreenShareSession
 	payload.insert(QStringLiteral("height"), static_cast< int >(session.height));
 	payload.insert(QStringLiteral("fps"), static_cast< int >(session.fps));
 	payload.insert(QStringLiteral("bitrate_kbps"), static_cast< int >(session.bitrateKbps));
+	payload.insert(QStringLiteral("quality_profile"),
+				   session.qualityProfile.trimmed().isEmpty() ? QStringLiteral("auto") : session.qualityProfile);
+	payload.insert(QStringLiteral("capture_source_id"), session.captureSourceID);
+	payload.insert(QStringLiteral("min_bitrate_kbps"), static_cast< int >(session.minBitrateKbps));
+	payload.insert(QStringLiteral("max_bitrate_kbps"), static_cast< int >(session.maxBitrateKbps));
+	payload.insert(QStringLiteral("codec_preference"),
+				   Mumble::ScreenShare::codecPreferenceString(session.codecFallbackOrder));
+	payload.insert(QStringLiteral("prefer_hardware_encoding"), true);
 	return payload;
 }
 

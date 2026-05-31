@@ -55,9 +55,11 @@ public:
 									   std::function< void(qint64, qint64) > progressCallback = {});
 	static QJsonObject describeUpdateHandoff(const QJsonObject &info,
 											 const QString &preparedInstallerPath = QString());
+	static QString preparedFallbackInstallerPathForInfo(const QJsonObject &info);
 	static bool canLaunchPreparedUpdate(const QString &updatePath, const QString &updateMode = QString());
 	static bool launchPreparedUpdate(const QString &updatePath, const QString &updateMode = QString(),
-									 bool passive = true, bool restartAfterInstall = true);
+									 bool passive = true, bool restartAfterInstall = true,
+									 const QString &fallbackInstallerPath = QString());
 };
 
 #endif

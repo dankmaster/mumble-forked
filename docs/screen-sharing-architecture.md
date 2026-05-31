@@ -94,9 +94,10 @@ Preferred direction:
 Suggested pieces:
 
 - `Murmur`: auth, ACL, channel membership, stream permissions, stream metadata
-- `Screen relay service`: WebRTC or another modern low-latency video transport
+- `Screen relay service`: LiveKit/WebRTC SFU for low-latency video fanout
 - `TURN/STUN`: connectivity support for NAT traversal
-- `Forked client`: screen capture, hardware encode when available, decode/render for viewers
+- `Forked client`: GStreamer helper with screen capture, hardware H.264 encode
+  when available, decode/render for viewers
 
 ## Reliability Direction
 
@@ -113,7 +114,8 @@ Not reliable on this server:
 
 Practical expectation for a first target:
 
-- target `720p30` first
+- target `720p30` H.264 first
+- use client-side bitrate adaptation and FPS-before-resolution degradation
 - treat `1080p60` as a later goal after uplink and client encode performance are measured
 - assume bandwidth scales with viewers when using a relay, even if server CPU stays moderate
 

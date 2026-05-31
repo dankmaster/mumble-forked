@@ -893,6 +893,33 @@
 		return Number.isFinite(numeric) ? numeric : 0;
 	}
 
+	function modernDialogAutoAccentSwatchColors() {
+		const tweaks = resolvedModernDialogUiTweaks(modernDialogState);
+		const tokens = tweaks && tweaks.themeTokens && typeof tweaks.themeTokens === "object"
+			? tweaks.themeTokens
+			: {};
+		if (tokens["--accent"]) {
+			return [
+				tokens["--shell-highlight"] || tokens["--shell-panel-soft"] || tokens["--shell-panel"] || "#2b3340",
+				tokens["--accent"]
+			];
+		}
+
+		const theme = String(tweaks && tweaks.theme || document.documentElement.dataset.theme || "dark").toLowerCase();
+		const colors = {
+			dark: ["#2b3340", "#5ec8b0"],
+			light: ["#eff3f7", "#268f7f"],
+			engine: ["#2b3340", "#5ec8b0"],
+			mocha: ["#2d2433", "#94e2d5"],
+			macchiato: ["#2a2d42", "#8bd5ca"],
+			frappe: ["#30344a", "#81c8be"],
+			latte: ["#eef0f5", "#268f7f"],
+			nord: ["#2f3845", "#88c0d0"],
+			gruvbox: ["#332c24", "#8ec07c"]
+		};
+		return colors[theme] || colors.dark;
+	}
+
 	function modernDialogChoiceSwatch(field, option, presentation) {
 		const swatch = document.createElement("span");
 		swatch.className = "modern-dialog-choice-swatch";
@@ -908,14 +935,15 @@
 			gruvbox: ["#332c24", "#f2c76f"]
 		};
 		const accentColors = {
-			auto: ["#2b3340", "#5ec8b0"],
 			teal: ["#203734", "#5ec8b0"],
 			blue: ["#21344a", "#73b7ff"],
 			violet: ["#302a4a", "#b59cff"],
 			amber: ["#3d3321", "#f2c76f"],
 			rose: ["#432833", "#ff8aa0"]
 		};
-		const colors = presentation === "accentGrid" ? accentColors[value] : themeColors[value];
+		const colors = presentation === "accentGrid"
+			? (value === "auto" ? modernDialogAutoAccentSwatchColors() : accentColors[value])
+			: themeColors[value];
 		if (colors) {
 			swatch.style.setProperty("--choice-swatch-bg", colors[0]);
 			swatch.style.setProperty("--choice-swatch-accent", colors[1]);

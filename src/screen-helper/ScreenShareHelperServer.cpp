@@ -137,6 +137,10 @@ QJsonObject makeSelfTestPayload(const QString &streamID, const QString &relayUrl
 	payload.insert(QStringLiteral("height"), 720);
 	payload.insert(QStringLiteral("fps"), 30);
 	payload.insert(QStringLiteral("bitrate_kbps"), 4500);
+	payload.insert(QStringLiteral("min_bitrate_kbps"), 1200);
+	payload.insert(QStringLiteral("max_bitrate_kbps"), 6000);
+	payload.insert(QStringLiteral("quality_profile"), QStringLiteral("auto"));
+	payload.insert(QStringLiteral("capture_source_id"), QStringLiteral("self-test"));
 	payload.insert(QStringLiteral("prefer_hardware_encoding"), true);
 	return payload;
 }
@@ -303,6 +307,14 @@ QJsonObject ScreenShareHelperServer::capabilityPayload() const {
 	payload.insert(QStringLiteral("zero_copy_supported"), m_capabilities.zeroCopySupported);
 	payload.insert(QStringLiteral("roi_supported"), m_capabilities.roiSupported);
 	payload.insert(QStringLiteral("damage_metadata_supported"), m_capabilities.damageMetadataSupported);
+	payload.insert(QStringLiteral("gstreamer_available"), m_capabilities.gstreamerAvailable);
+	payload.insert(QStringLiteral("gstreamer_livekit_publish_available"),
+				   m_capabilities.gstreamerLiveKitPublishAvailable);
+	payload.insert(QStringLiteral("gstreamer_livekit_view_available"),
+				   m_capabilities.gstreamerLiveKitViewAvailable);
+	payload.insert(QStringLiteral("gstreamer_version"), m_capabilities.gstreamerVersion);
+	payload.insert(QStringLiteral("gstreamer_missing_elements"),
+				   stringListToJson(m_capabilities.missingGStreamerElements));
 	payload.insert(QStringLiteral("supported_codecs"),
 				   Mumble::ScreenShare::IPC::codecListToJson(m_capabilities.supportedCodecs));
 	payload.insert(QStringLiteral("max_width"), static_cast< int >(m_capabilities.maxWidth));
@@ -429,6 +441,11 @@ QJsonObject ScreenShareHelperServer::handleStartPublish(const QJsonObject &paylo
 	if (!launch.selectedCaptureSource.isEmpty()) {
 		session.payload.insert(QStringLiteral("active_capture_source"), launch.selectedCaptureSource);
 	}
+	session.payload.insert(QStringLiteral("actual_fps"), session.payload.value(QStringLiteral("fps")).toInt());
+	session.payload.insert(QStringLiteral("actual_bitrate_kbps"),
+						   session.payload.value(QStringLiteral("bitrate_kbps")).toInt());
+	session.payload.insert(QStringLiteral("dropped_frames"), 0);
+	session.payload.insert(QStringLiteral("adaptive_downgrade_reason"), QString());
 	appendWarnings(&session.payload, launch.warnings);
 	logSessionPlanSummary(session.payload, QStringLiteral("publish"), QStringLiteral("started"));
 	logPayloadWarnings(session.payload, QStringLiteral("publish"), streamID);
@@ -486,6 +503,11 @@ QJsonObject ScreenShareHelperServer::handleStartView(const QJsonObject &payload)
 	if (!launch.selectedRenderer.isEmpty()) {
 		session.payload.insert(QStringLiteral("active_renderer_backend"), launch.selectedRenderer);
 	}
+	session.payload.insert(QStringLiteral("actual_fps"), session.payload.value(QStringLiteral("fps")).toInt());
+	session.payload.insert(QStringLiteral("actual_bitrate_kbps"),
+						   session.payload.value(QStringLiteral("bitrate_kbps")).toInt());
+	session.payload.insert(QStringLiteral("dropped_frames"), 0);
+	session.payload.insert(QStringLiteral("adaptive_downgrade_reason"), QString());
 	appendWarnings(&session.payload, launch.warnings);
 	logSessionPlanSummary(session.payload, QStringLiteral("view"), QStringLiteral("started"));
 	logPayloadWarnings(session.payload, QStringLiteral("view"), streamID);
@@ -546,14 +568,17 @@ void ScreenShareHelperServer::logSessionPlanSummary(const QJsonObject &payload, 
 	const QString actualBackend  = payload.value(QStringLiteral("active_encoder_backend"))
 									  .toString(payload.value(QStringLiteral("active_renderer_backend")).toString())
 									  .trimmed();
+	const QString plannedCapture = payload.value(QStringLiteral("capture_backend")).toString().trimmed();
 	const QString captureSource = payload.value(QStringLiteral("active_capture_source")).toString().trimmed();
 	const QString executionMode = payload.value(QStringLiteral("execution_mode")).toString().trimmed();
 
 	qInfo().noquote() << QStringLiteral("ScreenShareHelper[%1:%2]: %3 summary role=%4 relay_scheme=%5 codec=%6 "
-										"planned_backend=%7 actual_backend=%8 capture_source=%9 execution_mode=%10")
+										"planned_backend=%7 actual_backend=%8 planned_capture=%9 capture_source=%10 "
+										"execution_mode=%11")
 							 .arg(label, streamID, phase, role, relayScheme, codec,
 								  plannedBackend.isEmpty() ? QStringLiteral("-") : plannedBackend,
 								  actualBackend.isEmpty() ? QStringLiteral("-") : actualBackend,
+								  plannedCapture.isEmpty() ? QStringLiteral("-") : plannedCapture,
 								  captureSource.isEmpty() ? QStringLiteral("-") : captureSource,
 								  executionMode.isEmpty() ? QStringLiteral("-") : executionMode);
 }

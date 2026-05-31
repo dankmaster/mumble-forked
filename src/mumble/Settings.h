@@ -445,6 +445,7 @@ struct Settings {
 	bool bModernShellClassicUserIcons         = false;
 	QString qsModernShellRailSide             = QStringLiteral("right");
 	QString qsModernShellAccent               = QStringLiteral("auto");
+	bool bModernShellTickerBannerEnabled      = true;
 	bool bModernShellTickerBannerAlwaysScroll = false;
 	QByteArray qbaConfigGeometry              = {};
 	QByteArray qbaImagePreviewGeometry        = {};

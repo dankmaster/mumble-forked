@@ -35,6 +35,10 @@ struct ScreenShareSession {
 	unsigned int height = 0;
 	unsigned int fps = 0;
 	unsigned int bitrateKbps = 0;
+	QString qualityProfile = QStringLiteral("auto");
+	QString captureSourceID;
+	unsigned int minBitrateKbps = 0;
+	unsigned int maxBitrateKbps = 0;
 };
 
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
@@ -63,6 +67,7 @@ public:
 	bool hasDetachedWindow(const QString &streamID) const;
 	bool focusOrReopenDetachedWindow(const QString &streamID);
 	bool isUsingFallbackRuntime(const QString &streamID) const;
+	bool isUsingNativeGpuRuntime(const QString &streamID) const;
 	void requestStartChannelShare(unsigned int channelID = 0);
 	void requestStartViewing(const QString &streamID);
 	void requestStopViewing(const QString &streamID);
@@ -105,6 +110,7 @@ private:
 	QHash< QString, ScreenShareSession > m_sessions;
 	QSet< QString > m_activePublishSessions;
 	QSet< QString > m_activeViewSessions;
+	QSet< QString > m_fallbackRuntimeSessions;
 	QSet< QString > m_announcedViewableSessions;
 	mutable QString m_lastLoggedAvailabilityContext;
 	mutable QString m_lastLoggedAvailabilityReason;

@@ -26,6 +26,7 @@ env:
   MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT: 127cccc01d
   MUMBLE_SHARED_WINDOWS_ENVIRONMENT_VERSION_SUFFIX: webengine-codecs-v1
   ONNXRUNTIME_VERSION: 1.18.1
+  GSTREAMER_VERSION: 1.26.7
 
 jobs:
   fetch_build_number:
@@ -95,8 +96,10 @@ jobs:
         uses: ./.github/actions/setup-windows-optional-runtimes
         with:
           onnxruntime-version: ${{ env.ONNXRUNTIME_VERSION }}
+          gstreamer-version: ${{ env.GSTREAMER_VERSION }}
           install-rust: 'true'
           install-ffmpeg: ${{ github.event_name == 'workflow_dispatch' }}
+          install-gstreamer: 'true'
 
       - name: Install Windows installer tooling
         uses: ./.github/actions/setup-windows-installer-tooling
@@ -142,6 +145,7 @@ jobs:
             -RequireClient `
             -RequireScreenHelper `
             -RequireSpeechCleanup `
+            -RequireGStreamerRuntime `
             -ArtifactListPath .\build-shared-webengine\windows-binary-artifacts.txt
 
       - name: Verify shared helper runtime
@@ -157,6 +161,7 @@ jobs:
             -SkipConfigure `
             -SkipBuild `
             -VerifyHelperRuntime `
+            -RequireGStreamerRuntime `
             -AllowPendingReboot
 
       - name: Validate shared Windows client installer
@@ -197,3 +202,9 @@ jobs:
         with:
           path: .cache/onnxruntime/win-x64-${{ env.ONNXRUNTIME_VERSION }}
           key: onnxruntime-${{ runner.os }}-x64-${{ env.ONNXRUNTIME_VERSION }}
+
+      - if: ${{ github.event_name != 'pull_request' && steps.setup-windows-optional-runtimes.outputs.gstreamer-cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: .cache/gstreamer/msvc-x86_64-${{ env.GSTREAMER_VERSION }}
+          key: gstreamer-${{ runner.os }}-msvc-x86_64-${{ env.GSTREAMER_VERSION }}

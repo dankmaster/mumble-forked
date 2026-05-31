@@ -52,10 +52,10 @@ namespace ScreenShare {
 	}
 
 	QList< int > webRtcRelayCodecPreferenceList() {
-		return { static_cast< int >(MumbleProto::ScreenShareCodecVP8),
-				 static_cast< int >(MumbleProto::ScreenShareCodecH264),
+		return { static_cast< int >(MumbleProto::ScreenShareCodecH264),
 				 static_cast< int >(MumbleProto::ScreenShareCodecAV1),
-				 static_cast< int >(MumbleProto::ScreenShareCodecVP9) };
+				 static_cast< int >(MumbleProto::ScreenShareCodecVP9),
+				 static_cast< int >(MumbleProto::ScreenShareCodecVP8) };
 	}
 
 	QList< int > browserWebRtcCodecPreferenceList() { return { static_cast< int >(MumbleProto::ScreenShareCodecVP8) }; }

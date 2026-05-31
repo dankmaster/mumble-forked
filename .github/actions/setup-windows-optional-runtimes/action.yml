@@ -14,11 +14,22 @@ inputs:
     description: 'Install ffmpeg and ffplay for screen-share helper runtime checks.'
     required: false
     default: 'false'
+  install-gstreamer:
+    description: 'Install the GStreamer MSVC runtime for native screen-share publishing and viewing.'
+    required: false
+    default: 'false'
+  gstreamer-version:
+    description: 'GStreamer MSVC runtime version to restore or download.'
+    required: false
+    default: '1.26.7'
 
 outputs:
   onnxruntime-cache-hit:
     description: 'Whether the ONNX Runtime cache was restored.'
     value: ${{ steps.restore-onnxruntime-cache.outputs.cache-hit }}
+  gstreamer-cache-hit:
+    description: 'Whether the GStreamer runtime cache was restored.'
+    value: ${{ steps.restore-gstreamer-cache.outputs.cache-hit }}
 
 runs:
   using: "composite"
@@ -123,6 +134,156 @@ runs:
           throw "Expanded ONNX Runtime archive is missing its include directory"
         }
         "ONNXRUNTIME_ROOT=$onnxRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+    - id: restore-gstreamer-cache
+      if: ${{ inputs.install-gstreamer == 'true' }}
+      uses: actions/cache/restore@v5
+      with:
+        path: .cache/gstreamer/msvc-x86_64-${{ inputs.gstreamer-version }}
+        key: gstreamer-${{ runner.os }}-msvc-x86_64-${{ inputs.gstreamer-version }}
+
+    - name: Install GStreamer runtime for screen sharing
+      if: ${{ inputs.install-gstreamer == 'true' }}
+      shell: powershell
+      run: |
+        $ErrorActionPreference = "Stop"
+
+        $version = "${{ inputs.gstreamer-version }}"
+        $cacheRoot = Join-Path $env:GITHUB_WORKSPACE ".cache\gstreamer\msvc-x86_64-$version"
+        $installRoot = Join-Path $cacheRoot "gstreamer\1.0\msvc_x86_64"
+        $runtimeMsi = Join-Path $env:RUNNER_TEMP "gstreamer-1.0-msvc-x86_64-$version.msi"
+        $installLog = Join-Path $env:RUNNER_TEMP "gstreamer-runtime-install.log"
+
+        function Get-GStreamerRuntimeRoot {
+          param(
+            [Parameter(Mandatory = $true)]
+            [string]$Root
+          )
+
+          $launcher = Get-ChildItem -Path $Root -Recurse -File -Filter "gst-launch-1.0.exe" -ErrorAction SilentlyContinue |
+            Sort-Object -Property FullName |
+            Select-Object -First 1
+          if (-not $launcher) {
+            return ""
+          }
+
+          $binDir = Split-Path -Parent $launcher.FullName
+          $runtimeRoot = Split-Path -Parent $binDir
+          if ((Split-Path -Leaf $binDir) -ieq "bin") {
+            return $runtimeRoot
+          }
+
+          return $binDir
+        }
+
+        function Test-GstElement {
+          param(
+            [Parameter(Mandatory = $true)]
+            [string]$GstInspect,
+
+            [Parameter(Mandatory = $true)]
+            [string]$Element
+          )
+
+          & $GstInspect $Element *> $null
+          return ($LASTEXITCODE -eq 0)
+        }
+
+        $gstreamerRoot = Get-GStreamerRuntimeRoot -Root $cacheRoot
+        if ([string]::IsNullOrWhiteSpace($gstreamerRoot)) {
+          Remove-Item -LiteralPath $cacheRoot -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
+
+          $runtimeUrl = "https://gstreamer.freedesktop.org/data/pkg/windows/$version/msvc/gstreamer-1.0-msvc-x86_64-$version.msi"
+          Invoke-WebRequest -Uri $runtimeUrl -OutFile $runtimeMsi
+
+          $arguments = @(
+            "/i", $runtimeMsi,
+            "/qn",
+            "/norestart",
+            "ADDLOCAL=ALL",
+            "INSTALLDIR=$installRoot",
+            "/L*v", $installLog
+          )
+          $process = Start-Process -FilePath "msiexec.exe" -ArgumentList $arguments -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            if (Test-Path -LiteralPath $installLog) {
+              Get-Content -LiteralPath $installLog -Tail 80 | ForEach-Object { Write-Host $_ }
+            }
+            throw "GStreamer runtime installer failed with exit code $($process.ExitCode)."
+          }
+
+          $gstreamerRoot = Get-GStreamerRuntimeRoot -Root $cacheRoot
+        }
+
+        if ([string]::IsNullOrWhiteSpace($gstreamerRoot)) {
+          throw "Unable to locate gst-launch-1.0.exe in the GStreamer cache."
+        }
+
+        $gstBin = Join-Path $gstreamerRoot "bin"
+        $gstLaunch = Join-Path $gstBin "gst-launch-1.0.exe"
+        $gstInspect = Join-Path $gstBin "gst-inspect-1.0.exe"
+        $gstPluginPath = Join-Path $gstreamerRoot "lib\gstreamer-1.0"
+        $gstScanner = Join-Path $gstreamerRoot "libexec\gstreamer-1.0\gst-plugin-scanner.exe"
+
+        foreach ($requiredPath in @($gstLaunch, $gstInspect, $gstPluginPath, $gstScanner)) {
+          if (-not (Test-Path -LiteralPath $requiredPath)) {
+            throw "GStreamer runtime is missing required path: $requiredPath"
+          }
+        }
+
+        $env:PATH = "$gstBin;$env:PATH"
+        $env:GST_PLUGIN_SYSTEM_PATH_1_0 = $gstPluginPath
+        $env:GST_PLUGIN_PATH = $gstPluginPath
+        $env:GST_PLUGIN_SCANNER = $gstScanner
+
+        $requiredElements = @(
+          "d3d11screencapturesrc",
+          "d3d11convert",
+          "d3d11scale",
+          "d3d11download",
+          "livekitwebrtcsink",
+          "livekitwebrtcsrc",
+          "h264parse",
+          "decodebin",
+          "videotestsrc",
+          "videoconvert",
+          "videoscale"
+        )
+        $missing = New-Object System.Collections.Generic.List[string]
+        foreach ($element in $requiredElements) {
+          if (-not (Test-GstElement -GstInspect $gstInspect -Element $element)) {
+            $missing.Add($element)
+          }
+        }
+
+        $encoderCandidates = @("nvd3d11h264enc", "mfh264enc", "x264enc", "openh264enc")
+        $hasEncoder = $false
+        foreach ($element in $encoderCandidates) {
+          if (Test-GstElement -GstInspect $gstInspect -Element $element) {
+            $hasEncoder = $true
+            break
+          }
+        }
+        if (-not $hasEncoder) {
+          $missing.Add($encoderCandidates -join "|")
+        }
+
+        if ($missing.Count -gt 0) {
+          throw "GStreamer runtime is missing required screen-share elements: $($missing -join ', ')"
+        }
+
+        & $gstLaunch --version
+        "MUMBLE_GSTREAMER_ROOT=$gstreamerRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        "GSTREAMER_1_0_ROOT_X86_64=$gstreamerRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        "GSTREAMER_1_0_ROOT_MSVC_X86_64=$gstreamerRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        "GSTREAMER_ROOT_X86_64=$gstreamerRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        "MUMBLE_SCREENSHARE_GST_LAUNCH_PATH=$gstLaunch" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        "MUMBLE_SCREENSHARE_GST_INSPECT_PATH=$gstInspect" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        "GST_PLUGIN_SYSTEM_PATH_1_0=$gstPluginPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        "GST_PLUGIN_PATH=$gstPluginPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        "GST_PLUGIN_SCANNER=$gstScanner" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        $gstBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
     - name: Install Rust toolchain for DeepFilterNet
       if: ${{ inputs.install-rust == 'true' }}

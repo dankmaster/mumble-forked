@@ -161,7 +161,7 @@ QString packageExpectedSha256(const QJsonObject &info) {
 
 QString preferredUpdateMode(const QJsonObject &info) {
 	const QString mode = info.value(QStringLiteral("preferredUpdate")).toString().trimmed().toLower();
-	return mode.isEmpty() ? QStringLiteral("installer") : mode;
+	return mode.isEmpty() ? QStringLiteral("package") : mode;
 }
 
 bool canUseInstallerUpdate(const QJsonObject &info) {
@@ -175,10 +175,6 @@ bool canUseInstallerUpdate(const QJsonObject &info) {
 
 bool canUsePackageUpdate(const QJsonObject &info) {
 #ifdef Q_OS_WIN
-	if (preferredUpdateMode(info) != QLatin1String("package")) {
-		return false;
-	}
-
 	const QJsonObject package = packageObject(info);
 	if (package.value(QStringLiteral("format")).toString().trimmed() != QLatin1String("mumble-update-v1")) {
 		return false;
@@ -236,9 +232,8 @@ QString fallbackUpdateFileName(const QJsonObject &info, const QString &updateMod
 												  : QStringLiteral("mumble-forked-update.msi");
 }
 
-QString updateAssetFileName(const QJsonObject &info) {
-	const QString updateMode = selectedUpdateMode(info);
-	const QUrl downloadUrl   = selectedDownloadUrl(info);
+QString updateAssetFileNameForMode(const QJsonObject &info, const QString &updateMode) {
+	const QUrl downloadUrl = updateMode == QLatin1String("package") ? packageDownloadUrl(info) : installerDownloadUrl(info);
 	QString fileName         = QFileInfo(downloadUrl.path()).fileName();
 	if (fileName.isEmpty() || !fileName.endsWith(selectedFileSuffix(updateMode), Qt::CaseInsensitive)) {
 		fileName = fallbackUpdateFileName(info, updateMode);
@@ -246,6 +241,15 @@ QString updateAssetFileName(const QJsonObject &info) {
 
 	fileName.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._-]")), QStringLiteral("_"));
 	return fileName;
+}
+
+QString updateAssetFileName(const QJsonObject &info) {
+	return updateAssetFileNameForMode(info, selectedUpdateMode(info));
+}
+
+QString updateAssetPathForMode(const QJsonObject &info, const QString &updateMode) {
+	return QDir(Global::get().qdBasePath.filePath(QStringLiteral("Updates")))
+		.filePath(updateAssetFileNameForMode(info, updateMode));
 }
 
 QString updateModeFromPath(const QString &updatePath, const QString &requestedMode) {
@@ -377,7 +381,7 @@ QString announcementText(const QJsonObject &info) {
 		return announcement;
 	}
 
-	return VersionCheck::tr("Download the newest installer when you are ready to update.");
+	return VersionCheck::tr("Download the newest update when you are ready to install.");
 }
 
 QString releaseNotesText(const QJsonObject &info) {
@@ -455,6 +459,38 @@ QJsonArray stringListJsonArray(const QStringList &items) {
 	return array;
 }
 
+QString fileSha256(const QString &path) {
+	QFile file(path);
+	if (!file.open(QIODevice::ReadOnly)) {
+		return {};
+	}
+
+	QCryptographicHash hash(QCryptographicHash::Sha256);
+	while (!file.atEnd()) {
+		const QByteArray chunk = file.read(1024 * 1024);
+		if (chunk.isEmpty() && file.error() != QFile::NoError) {
+			return {};
+		}
+		hash.addData(chunk);
+	}
+
+	return QString::fromLatin1(hash.result().toHex());
+}
+
+bool fileMatchesSha256(const QString &path, const QString &expectedSha256) {
+	if (expectedSha256.isEmpty()) {
+		return false;
+	}
+	const QFileInfo file(path);
+	return file.isFile() && file.isReadable() && fileSha256(path) == expectedSha256;
+}
+
+bool canUsePreparedInstallerFallback(const QString &path) {
+	const QFileInfo installer(path);
+	return installer.isFile() && installer.isReadable()
+		   && installer.suffix().compare(QLatin1String("msi"), Qt::CaseInsensitive) == 0;
+}
+
 void appendUpdaterThemeColor(QStringList &entries, const QString &key, const QColor &color) {
 	if (color.isValid()) {
 		entries << QStringLiteral("%1=%2").arg(key, color.name(QColor::HexRgb));
@@ -507,7 +543,7 @@ QString updaterUiThemeArgument() {
 }
 
 QStringList bundledUpdaterArguments(const QString &updatePath, const QString &updateDirPath, const bool passive,
-									const QString &updateMode) {
+									const QString &updateMode, const QString &fallbackInstallerPath = QString()) {
 	const QString appPath = QCoreApplication::applicationFilePath();
 	const QString appDir  = QFileInfo(appPath).absolutePath();
 	const QDir updateDir(updateDirPath);
@@ -530,6 +566,9 @@ QStringList bundledUpdaterArguments(const QString &updatePath, const QString &up
 		QDir::toNativeSeparators(msiLogPath),
 		passive ? QStringLiteral("--passive") : QStringLiteral("--no-passive"),
 	};
+	if (mode == QLatin1String("package") && canUsePreparedInstallerFallback(fallbackInstallerPath)) {
+		arguments << QStringLiteral("--installer") << QDir::toNativeSeparators(fallbackInstallerPath);
+	}
 	const QString uiTheme = updaterUiThemeArgument();
 	if (!uiTheme.isEmpty()) {
 		arguments << QStringLiteral("--ui-theme") << uiTheme;
@@ -545,7 +584,8 @@ QStringList msiexecUpdateArguments(const QString &installerPath, const bool pass
 	return arguments;
 }
 
-bool launchBundledUpdater(const QString &updatePath, const bool passive, const QString &updateMode) {
+bool launchBundledUpdater(const QString &updatePath, const bool passive, const QString &updateMode,
+						  const QString &fallbackInstallerPath) {
 #ifdef Q_OS_WIN
 	QDir updateDir(Global::get().qdBasePath.filePath(QStringLiteral("Updates")));
 	if (!updateDir.exists() && !QDir().mkpath(updateDir.absolutePath())) {
@@ -570,12 +610,14 @@ bool launchBundledUpdater(const QString &updatePath, const bool passive, const Q
 		return false;
 	}
 
-	const QStringList arguments = bundledUpdaterArguments(updatePath, updateDir.absolutePath(), passive, updateMode);
+	const QStringList arguments =
+		bundledUpdaterArguments(updatePath, updateDir.absolutePath(), passive, updateMode, fallbackInstallerPath);
 	return QProcess::startDetached(updaterTargetPath, arguments, updateDir.absolutePath());
 #else
 	Q_UNUSED(updatePath);
 	Q_UNUSED(passive);
 	Q_UNUSED(updateMode);
+	Q_UNUSED(fallbackInstallerPath);
 	return false;
 #endif
 }
@@ -588,9 +630,7 @@ public:
 						std::function< void() > cancelledCallback,
 						std::function< void(qint64, qint64) > progressCallback)
 		: QObject(parent ? static_cast< QObject * >(parent) : QCoreApplication::instance())
-		, m_info(info), m_parent(parent), m_downloadUrl(selectedDownloadUrl(info))
-		, m_expectedSha256(selectedExpectedSha256(info)), m_updateMode(selectedUpdateMode(info))
-		, m_showProgress(showProgress)
+		, m_info(info), m_parent(parent), m_updateMode(selectedUpdateMode(info)), m_showProgress(showProgress)
 		, m_readyCallback(std::move(readyCallback)), m_failureCallback(std::move(failureCallback))
 		, m_cancelledCallback(std::move(cancelledCallback)), m_progressCallback(std::move(progressCallback)) {
 	}
@@ -635,7 +675,8 @@ public:
 			m_progress->show();
 		}
 
-		request(m_downloadUrl);
+		beginDownload(selectedDownloadUrl(m_info), selectedExpectedSha256(m_info), updateAssetPathForMode(m_info, m_updateMode),
+					  false);
 #endif
 	}
 
@@ -646,6 +687,8 @@ private:
 	QString m_expectedSha256;
 	QString m_updateMode;
 	QString m_targetPath;
+	QString m_primaryUpdatePath;
+	QString m_fallbackInstallerPath;
 	std::unique_ptr< QSaveFile > m_file;
 	QCryptographicHash m_hash { QCryptographicHash::Sha256 };
 	QProgressDialog *m_progress = nullptr;
@@ -653,11 +696,36 @@ private:
 	QString m_pendingFailure;
 	bool m_showProgress = true;
 	bool m_cancelled    = false;
+	bool m_downloadingFallbackInstaller = false;
 	int m_redirectCount = 0;
 	std::function< void(const QString &) > m_readyCallback;
 	std::function< void(const QString &) > m_failureCallback;
 	std::function< void() > m_cancelledCallback;
 	std::function< void(qint64, qint64) > m_progressCallback;
+
+	void beginDownload(const QUrl &url, const QString &expectedSha256, const QString &targetPath,
+					   const bool fallbackInstaller) {
+		m_downloadUrl = url;
+		m_expectedSha256 = expectedSha256;
+		m_targetPath = targetPath;
+		m_pendingFailure.clear();
+		m_redirectCount = 0;
+		m_downloadingFallbackInstaller = fallbackInstaller;
+		m_hash.reset();
+
+		m_file = std::make_unique< QSaveFile >(m_targetPath);
+		if (!m_file->open(QIODevice::WriteOnly)) {
+			showFailure(VersionCheck::tr("Mumble could not write the update package to %1.").arg(m_targetPath));
+			return;
+		}
+
+		if (m_progress && fallbackInstaller) {
+			m_progress->setLabelText(VersionCheck::tr("Downloading verified MSI fallback..."));
+			m_progress->setRange(0, 0);
+		}
+
+		request(m_downloadUrl);
+	}
 
 	void request(const QUrl &url) {
 		if (!isTrustedUpdateAssetUrl(url)) {
@@ -788,9 +856,37 @@ private:
 		}
 		m_file.reset();
 
+		finishDownloadedAsset();
+	}
+
+	void finishDownloadedAsset() {
+		if (m_downloadingFallbackInstaller) {
+			m_fallbackInstallerPath = m_targetPath;
+			finishReady();
+			return;
+		}
+
+		m_primaryUpdatePath = m_targetPath;
+		if (m_updateMode == QLatin1String("package") && canUseInstallerUpdate(m_info)) {
+			const QString fallbackPath = updateAssetPathForMode(m_info, QStringLiteral("installer"));
+			const QString fallbackSha256 = installerExpectedSha256(m_info);
+			if (fileMatchesSha256(fallbackPath, fallbackSha256)) {
+				m_fallbackInstallerPath = fallbackPath;
+				finishReady();
+				return;
+			}
+
+			beginDownload(installerDownloadUrl(m_info), fallbackSha256, fallbackPath, true);
+			return;
+		}
+
+		finishReady();
+	}
+
+	void finishReady() {
 		finishProgress();
 		if (m_readyCallback) {
-			m_readyCallback(m_targetPath);
+			m_readyCallback(m_primaryUpdatePath.isEmpty() ? m_targetPath : m_primaryUpdatePath);
 			deleteLater();
 		} else {
 			promptAndLaunchInstaller();
@@ -835,9 +931,13 @@ private:
 		QMessageBox messageBox(QMessageBox::Question, VersionCheck::tr("Install Mumble update"),
 							   VersionCheck::tr("The update package was downloaded and verified."),
 							   QMessageBox::NoButton, m_parent);
+		const bool hasMsiFallback = m_updateMode == QLatin1String("package")
+									&& canUsePreparedInstallerFallback(m_fallbackInstallerPath);
 		messageBox.setInformativeText(
 			m_updateMode == QLatin1String("package")
-				? VersionCheck::tr("Mumble will close, the updater will apply the package, and Mumble will reopen to restore your server and chat. Continue?")
+				? (hasMsiFallback
+					   ? VersionCheck::tr("Mumble will close, the updater will apply the package, use the MSI only if the package fails, and Mumble will reopen to restore your server and chat. Continue?")
+					   : VersionCheck::tr("Mumble will close, the updater will apply the package, and Mumble will reopen to restore your server and chat. Continue?"))
 				: VersionCheck::tr("Mumble will close, Windows will run the installer, and Mumble will reopen to restore your server and chat. Continue?"));
 		QPushButton *installButton = messageBox.addButton(VersionCheck::tr("Install update"), QMessageBox::AcceptRole);
 		messageBox.addButton(VersionCheck::tr("Not now"), QMessageBox::RejectRole);
@@ -851,7 +951,8 @@ private:
 		if (Global::get().mw) {
 			Global::get().mw->prepareUpdateResumeState();
 		}
-		if (!VersionCheck::launchPreparedUpdate(m_targetPath, m_updateMode)) {
+		if (!VersionCheck::launchPreparedUpdate(m_primaryUpdatePath.isEmpty() ? m_targetPath : m_primaryUpdatePath,
+												m_updateMode, true, true, m_fallbackInstallerPath)) {
 			if (Global::get().mw) {
 				Global::get().mw->clearPendingUpdateResumeState();
 			}
@@ -935,6 +1036,9 @@ QJsonObject VersionCheck::describeUpdateHandoff(const QJsonObject &info, const Q
 	const bool installerTrusted     = isTrustedUpdateAssetUrl(installerUrl);
 	const bool packageTrusted       = isTrustedUpdateAssetUrl(packageUrl);
 	const bool installable          = canInstallUpdate(info);
+	const bool packageUsesMsiFallback = selectedMode == QLatin1String("package") && canUseInstallerUpdate(info);
+	const QString fallbackInstallerPath =
+		packageUsesMsiFallback ? updateAssetPathForMode(info, QStringLiteral("installer")) : QString();
 
 	const QDir updateDir(Global::get().qdBasePath.filePath(QStringLiteral("Updates")));
 	const QString dryRunUpdatePath = preparedInstallerPath.trimmed().isEmpty()
@@ -983,6 +1087,10 @@ QJsonObject VersionCheck::describeUpdateHandoff(const QJsonObject &info, const Q
 	result.insert(QStringLiteral("wouldOpenInstallerUrl"), installerUrl.isValid());
 	result.insert(QStringLiteral("wouldFallbackToBrowserDownload"), !installable && fallbackOpenUrl.isValid());
 	result.insert(QStringLiteral("wouldStartVerifiedDownload"), installable);
+	result.insert(QStringLiteral("packageUsesMsiFallback"), packageUsesMsiFallback);
+	result.insert(QStringLiteral("fallbackInstallerPath"), QDir::toNativeSeparators(fallbackInstallerPath));
+	result.insert(QStringLiteral("fallbackInstallerReady"),
+				  packageUsesMsiFallback && canUsePreparedInstallerFallback(fallbackInstallerPath));
 	result.insert(QStringLiteral("preparedInstallerPath"), QDir::toNativeSeparators(dryRunUpdatePath));
 	result.insert(QStringLiteral("preparedUpdatePath"), QDir::toNativeSeparators(dryRunUpdatePath));
 	result.insert(QStringLiteral("preparedInstallerAccepted"), canLaunchPreparedUpdate(dryRunUpdatePath, selectedMode));
@@ -998,7 +1106,8 @@ QJsonObject VersionCheck::describeUpdateHandoff(const QJsonObject &info, const Q
 											   .filePath(QStringLiteral("mumble-updater.exe"))));
 	result.insert(QStringLiteral("bundledUpdaterWorkingDir"), QDir::toNativeSeparators(updateDir.absolutePath()));
 	result.insert(QStringLiteral("bundledUpdaterArguments"),
-				  stringListJsonArray(bundledUpdaterArguments(dryRunUpdatePath, updateDir.absolutePath(), true, selectedMode)));
+				  stringListJsonArray(bundledUpdaterArguments(dryRunUpdatePath, updateDir.absolutePath(), true,
+															  selectedMode, fallbackInstallerPath)));
 	result.insert(QStringLiteral("directMsiexecProgram"), QStringLiteral("msiexec.exe"));
 	result.insert(QStringLiteral("directMsiexecArguments"),
 				  selectedMode == QLatin1String("installer")
@@ -1013,6 +1122,13 @@ QJsonObject VersionCheck::describeUpdateHandoff(const QJsonObject &info, const Q
 #endif
 
 	return result;
+}
+
+QString VersionCheck::preparedFallbackInstallerPathForInfo(const QJsonObject &info) {
+	if (selectedUpdateMode(info) != QLatin1String("package") || !canUseInstallerUpdate(info)) {
+		return {};
+	}
+	return updateAssetPathForMode(info, QStringLiteral("installer"));
 }
 
 bool VersionCheck::canLaunchPreparedUpdate(const QString &updatePath, const QString &updateMode) {
@@ -1035,7 +1151,7 @@ bool VersionCheck::canLaunchPreparedUpdate(const QString &updatePath, const QStr
 }
 
 bool VersionCheck::launchPreparedUpdate(const QString &updatePath, const QString &updateMode, const bool passive,
-										const bool restartAfterInstall) {
+										const bool restartAfterInstall, const QString &fallbackInstallerPath) {
 #ifdef Q_OS_WIN
 	const QString mode = updateModeFromPath(updatePath, updateMode);
 	if (!canLaunchPreparedUpdate(updatePath, mode)) {
@@ -1043,7 +1159,7 @@ bool VersionCheck::launchPreparedUpdate(const QString &updatePath, const QString
 	}
 
 	if (restartAfterInstall) {
-		return launchBundledUpdater(updatePath, passive, mode);
+		return launchBundledUpdater(updatePath, passive, mode, fallbackInstallerPath);
 	}
 
 	if (mode == QLatin1String("package")) {
@@ -1057,6 +1173,7 @@ bool VersionCheck::launchPreparedUpdate(const QString &updatePath, const QString
 	Q_UNUSED(updateMode);
 	Q_UNUSED(passive);
 	Q_UNUSED(restartAfterInstall);
+	Q_UNUSED(fallbackInstallerPath);
 	return false;
 #endif
 }
