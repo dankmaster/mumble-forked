@@ -31,7 +31,7 @@ namespace Feedback {
 			case MumbleProto::FeedbackReportSuggestion:
 				return QStringLiteral("Suggestion");
 			case MumbleProto::FeedbackReportSupport:
-				return QStringLiteral("Question");
+				return QStringLiteral("Support");
 		}
 
 		return QStringLiteral("Feedback");
