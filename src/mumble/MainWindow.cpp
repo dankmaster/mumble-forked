@@ -24984,7 +24984,7 @@ void MainWindow::showModernForkUpdateDownloadProgress(const qint64 received, con
 }
 
 bool MainWindow::notifyForkUpdateAvailable(const QJsonObject &info, const bool autocheck) {
-	if (!autocheck || !usesModernShell() || !m_modernShellHost || !m_modernShellHost->bridge()) {
+	if (!autocheck || !usesModernShell()) {
 		return false;
 	}
 
