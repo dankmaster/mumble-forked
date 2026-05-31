@@ -8,6 +8,7 @@
 
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 
+#include <QtCore/QPoint>
 #include <QtCore/QVariantMap>
 #include <QtWebEngineCore/QWebEnginePage>
 #include <QtWidgets/QDialog>
@@ -26,6 +27,7 @@ private:
 
 public:
 	ModernDialogHost(ModernShellBridge *bridge, QWidget *parent = nullptr);
+	~ModernDialogHost() override;
 
 	bool showDialogState(const QVariantMap &state, QString *errorMessage = nullptr);
 	void hideDialog();
@@ -37,6 +39,7 @@ signals:
 
 protected:
 	void closeEvent(QCloseEvent *event) override;
+	bool eventFilter(QObject *watched, QEvent *event) override;
 
 private slots:
 	void handleLoadFinished(bool ok);
@@ -51,6 +54,7 @@ private:
 	void applyAutomationOffscreenFlags();
 	void showForAutomationCapture();
 	void queueDialogStateRepublish();
+	bool shouldStartWindowDrag(const QPoint &viewPosition) const;
 
 	QVBoxLayout *m_layout = nullptr;
 	QWebEngineView *m_view = nullptr;
@@ -61,7 +65,9 @@ private:
 	QVariantMap m_lastDialogState;
 	bool m_started = false;
 	bool m_open = false;
+	bool m_manualDragActive = false;
 	int m_stateRepublishRemaining = 0;
+	QPoint m_manualDragOffset;
 	QString m_currentDialogID;
 };
 

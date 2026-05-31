@@ -84,11 +84,12 @@ updates.
 The workflow writes the announcement, optional release notes, generated
 changelog, current commit, previous published commit, installer URL, and SHA256
 into `mumble-forked-update.json`. Modern clients use that checksum for the
-in-app update flow: startup checks show an update toast, the Update action
-downloads and verifies the MSI in the background, and the ready toast launches
-Windows Installer when the user restarts to update. Mumble closes before the
-MSI runs, hands the transition to `mumble-updater.exe`, and starts itself again
-after a successful passive install. Before handing off to the updater, the
+in-app update flow: startup checks show a persistent update banner in the chat
+pane, the Update action downloads and verifies the MSI with progress in that
+banner, and the ready state launches Windows Installer when the user chooses
+to install and restart. Mumble closes before the MSI runs, hands the transition
+to `mumble-updater.exe`, and starts itself again after a successful passive
+install. Before handing off to the updater, the
 client writes a one-shot resume snapshot so the reopened client can return to
 the same server, voice room, chat view, and saved window layout where possible.
 It also uploads `changelog.md` beside the
@@ -98,6 +99,12 @@ by default. To preview a draft manifest locally, set
 `MUMBLE_FORK_UPDATE_MANIFEST_URL` to a local
 `file:///.../mumble-forked-update.json` URL and set
 `MUMBLE_FORK_FORCE_UPDATE_NOTIFICATION=1` before launching the dev client.
+
+The next updater step is to keep this MSI path as the canonical installer and
+fallback while publishing a dedicated update package for the normal in-app
+update path. See [windows-update-packages.md](windows-update-packages.md) for
+the planned package format, manifest additions, updater handoff, and rollout
+phases.
 
 ## Notes
 

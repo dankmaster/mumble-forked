@@ -79,6 +79,19 @@
        </widget>
       </item>
       <item>
+       <widget class="QCheckBox" name="qcbReconnectLastChannel">
+        <property name="toolTip">
+         <string>Ask compatible servers to place you in your last known channel when connecting</string>
+        </property>
+        <property name="whatsThis">
+         <string>&lt;b&gt;Reconnect to last known channel within server&lt;/b&gt;.&lt;br /&gt;When enabled, Mumble asks compatible servers that remember rooms to place you back in your previous voice channel when you connect.</string>
+        </property>
+        <property name="text">
+         <string>Reconnect to last known channel within server</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <widget class="QCheckBox" name="qcbStartWithPC">
         <property name="toolTip">
          <string>Start Mumble automatically when you sign in to Windows</string>

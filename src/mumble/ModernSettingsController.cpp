@@ -188,6 +188,8 @@ namespace {
 			  QObject::tr("Reconnect automatically if the current server connection drops.") },
 			{ QStringLiteral("network.autoConnect"),
 			  QObject::tr("Client-side startup setting: connect to your last server automatically when Mumble starts.") },
+			{ QStringLiteral("network.reconnectToLastChannel"),
+			  QObject::tr("Ask compatible servers to place you in your last known voice channel when you connect.") },
 			{ QStringLiteral("network.startWithPC"),
 			  QObject::tr("Start Mumble hidden in the system tray when you sign in to Windows.") },
 			{ QStringLiteral("network.tcpMode"),
@@ -1536,6 +1538,8 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		m_draft.bReconnect = value.toBool();
 	} else if (id == QLatin1String("network.autoConnect")) {
 		m_draft.bAutoConnect = value.toBool();
+	} else if (id == QLatin1String("network.reconnectToLastChannel")) {
+		m_draft.bReconnectToLastChannel = value.toBool();
 	} else if (id == QLatin1String("network.startWithPC")) {
 		m_draft.bStartWithPC = value.toBool();
 	} else if (id == QLatin1String("network.tcpMode")) {
@@ -2155,6 +2159,9 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 													 boolField(QStringLiteral("network.autoConnect"),
 															   QObject::tr("Connect to the last server on startup"),
 															   m_draft.bAutoConnect),
+													 boolField(QStringLiteral("network.reconnectToLastChannel"),
+															   QObject::tr("Reconnect to last known channel within server"),
+															   m_draft.bReconnectToLastChannel),
 													 boolField(QStringLiteral("network.startWithPC"),
 															   QObject::tr("Start Mumble with Windows"),
 															   m_draft.bStartWithPC),

@@ -27,6 +27,30 @@ option(dtln "Use DTLN for machine learning speech cleanup." OFF)
 option(deepfilternet "Use DeepFilterNet for machine learning speech cleanup." OFF)
 option(webrtc-aec "Expose WebRTC AEC as an experimental echo cancellation option." OFF)
 option(modern-layout-webengine "Enable the Qt WebEngine-based relay runtime." OFF)
+set(MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT ON)
+if(packaging AND "$ENV{GITHUB_ACTIONS}" STREQUAL "true")
+	set(MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT OFF)
+endif()
+option(modern-layout-automation "Include the Modern UI automation server and JavaScript automation hooks." ${MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT})
+option(modern-layout-mockups "Include Modern shell mockup and walkthrough functionality." ${MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT})
+
+function(mumble_strip_marked_shell_block content_var begin_marker end_marker replacement)
+	set(content "${${content_var}}")
+	string(FIND "${content}" "${begin_marker}" begin_index)
+	if(begin_index EQUAL -1)
+		message(FATAL_ERROR "Unable to find Modern shell marker '${begin_marker}'")
+	endif()
+	string(FIND "${content}" "${end_marker}" end_index)
+	if(end_index EQUAL -1 OR end_index LESS begin_index)
+		message(FATAL_ERROR "Unable to find Modern shell marker '${end_marker}' after '${begin_marker}'")
+	endif()
+
+	string(LENGTH "${end_marker}" end_marker_length)
+	math(EXPR after_index "${end_index} + ${end_marker_length}")
+	string(SUBSTRING "${content}" 0 ${begin_index} before_block)
+	string(SUBSTRING "${content}" ${after_index} -1 after_block)
+	set(${content_var} "${before_block}${replacement}${after_block}" PARENT_SCOPE)
+endfunction()
 
 option(manual-plugin "Include the built-in \"manual\" positional audio plugin." ON)
 
@@ -422,8 +446,6 @@ if(modern-layout-webengine)
 	list(APPEND MUMBLE_SOURCES
 		"ModernShellBridge.cpp"
 		"ModernShellBridge.h"
-		"ModernUiAutomationServer.cpp"
-		"ModernUiAutomationServer.h"
 		"ModernContextMenuHost.cpp"
 		"ModernContextMenuHost.h"
 		"ModernDialogHost.cpp"
@@ -441,6 +463,93 @@ if(modern-layout-webengine)
 		"modern-shell.qrc"
 		"relay-webapp.qrc"
 	)
+
+	if(modern-layout-automation)
+		list(APPEND MUMBLE_SOURCES
+			"ModernUiAutomationServer.cpp"
+			"ModernUiAutomationServer.h"
+		)
+	endif()
+
+	if(modern-layout-automation)
+		set(MUMBLE_MODERN_UI_AUTOMATION_JS "true")
+	else()
+		set(MUMBLE_MODERN_UI_AUTOMATION_JS "false")
+	endif()
+	if(modern-layout-mockups)
+		set(MUMBLE_MODERN_UI_MOCKUPS_JS "true")
+	else()
+		set(MUMBLE_MODERN_UI_MOCKUPS_JS "false")
+	endif()
+	set(MUMBLE_MODERN_SHELL_BUILD_FLAGS_JS "${CMAKE_CURRENT_BINARY_DIR}/modern-shell-build-flags.js")
+	set(MUMBLE_MODERN_SHELL_BUILD_FLAGS_QRC "${CMAKE_CURRENT_BINARY_DIR}/modern-shell-build-flags.qrc")
+	set(MUMBLE_MODERN_SHELL_APP_JS "${CMAKE_CURRENT_BINARY_DIR}/modern-shell-app.js")
+	set(MUMBLE_MODERN_SHELL_DIALOG_JS "${CMAKE_CURRENT_BINARY_DIR}/modern-shell-dialog.js")
+	set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+		"${CMAKE_CURRENT_SOURCE_DIR}/modern-shell/app.js"
+		"${CMAKE_CURRENT_SOURCE_DIR}/modern-shell/dialog.js"
+	)
+
+	file(READ "${CMAKE_CURRENT_SOURCE_DIR}/modern-shell/app.js" MUMBLE_MODERN_SHELL_APP_JS_CONTENT)
+	if(NOT modern-layout-mockups)
+		set(MUMBLE_MODERN_MOCKUPS_STUB [=[
+	/* MUMBLE_MODERN_MOCKUPS_STRIPPED */
+	function handleMockupBridgeCall() {
+		return false;
+	}
+
+	function syncWalkthroughDialogFromQuery() {
+	}
+
+	function syncWalkthroughUiFromQuery() {
+	}
+
+	function fallbackWalkthroughSnapshot() {
+		return null;
+	}
+]=])
+		mumble_strip_marked_shell_block(
+			MUMBLE_MODERN_SHELL_APP_JS_CONTENT
+			"/* MUMBLE_MODERN_MOCKUPS_BEGIN */"
+			"/* MUMBLE_MODERN_MOCKUPS_END */"
+			"${MUMBLE_MODERN_MOCKUPS_STUB}"
+		)
+	endif()
+	if(NOT modern-layout-automation)
+		set(MUMBLE_MODERN_AUTOMATION_STUB [=[
+	/* MUMBLE_MODERN_AUTOMATION_STRIPPED */
+]=])
+		mumble_strip_marked_shell_block(
+			MUMBLE_MODERN_SHELL_APP_JS_CONTENT
+			"/* MUMBLE_MODERN_AUTOMATION_BEGIN */"
+			"/* MUMBLE_MODERN_AUTOMATION_END */"
+			"${MUMBLE_MODERN_AUTOMATION_STUB}"
+		)
+	endif()
+	file(WRITE "${MUMBLE_MODERN_SHELL_APP_JS}" "${MUMBLE_MODERN_SHELL_APP_JS_CONTENT}")
+
+	file(READ "${CMAKE_CURRENT_SOURCE_DIR}/modern-shell/dialog.js" MUMBLE_MODERN_SHELL_DIALOG_JS_CONTENT)
+	if(NOT modern-layout-automation)
+		mumble_strip_marked_shell_block(
+			MUMBLE_MODERN_SHELL_DIALOG_JS_CONTENT
+			"/* MUMBLE_MODERN_AUTOMATION_BEGIN */"
+			"/* MUMBLE_MODERN_AUTOMATION_END */"
+			"${MUMBLE_MODERN_AUTOMATION_STUB}"
+		)
+	endif()
+	file(WRITE "${MUMBLE_MODERN_SHELL_DIALOG_JS}" "${MUMBLE_MODERN_SHELL_DIALOG_JS_CONTENT}")
+
+	configure_file(
+		"${CMAKE_CURRENT_SOURCE_DIR}/modern-shell/build-flags.js.in"
+		"${MUMBLE_MODERN_SHELL_BUILD_FLAGS_JS}"
+		@ONLY
+	)
+	configure_file(
+		"${CMAKE_CURRENT_SOURCE_DIR}/modern-shell-build-flags.qrc.in"
+		"${MUMBLE_MODERN_SHELL_BUILD_FLAGS_QRC}"
+		@ONLY
+	)
+	list(APPEND MUMBLE_SOURCES "${MUMBLE_MODERN_SHELL_BUILD_FLAGS_QRC}")
 endif()
 
 add_library(smallft STATIC "${3RDPARTY_DIR}/smallft/smallft.cpp")
@@ -688,6 +797,12 @@ if(modern-layout-webengine)
 			MUMBLE_HAS_MODERN_LAYOUT
 			MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS=${MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS}
 	)
+	if(modern-layout-automation)
+		target_compile_definitions(mumble_client_object_lib PUBLIC MUMBLE_HAS_MODERN_UI_AUTOMATION)
+	endif()
+	if(modern-layout-mockups)
+		target_compile_definitions(mumble_client_object_lib PUBLIC MUMBLE_HAS_MODERN_UI_MOCKUPS)
+	endif()
 	target_link_libraries(mumble_client_object_lib
 		PUBLIC
 			Qt6::WebChannel

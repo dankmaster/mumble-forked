@@ -1,6 +1,18 @@
 (function() {
 	"use strict";
 
+	function modernBuildFlag(name, fallback) {
+		const flags = window.__mumbleModernBuildFlags || {};
+		if (Object.prototype.hasOwnProperty.call(flags, name)) {
+			return !!flags[name];
+		}
+		return fallback;
+	}
+
+	function modernAutomationEnabled() {
+		return modernBuildFlag("automation", true);
+	}
+
 	let modernBridge = null;
 	let bridgeLoadPromise = null;
 	let modernDialogState = null;
@@ -16,7 +28,10 @@
 	let modernDialogFavoriteClickTimer = 0;
 	let pendingModernDialogFieldFocus = "";
 	let modernDialogSelectState = null;
-	let stonksActiveTab = "overview";
+	let modernDialogLastRenderKey = "";
+	let stonksActiveTab = "market";
+	let stonksLocalPins = null;
+	let stonksPinMenuOpen = false;
 	let stonksDraftPositions = null;
 	let stonksDraftNote = "";
 	let stonksDraftCurrency = "USD";
@@ -77,53 +92,9 @@
 		actions: document.getElementById("modern-dialog-actions")
 	};
 
-	const modernAccentPalette = {
-		teal: { accent: "#5ec8b0", rgb: "94, 200, 176", soft: "rgba(94, 200, 176, 0.16)", border: "rgba(94, 200, 176, 0.42)" },
-		blue: { accent: "#73b7ff", rgb: "115, 183, 255", soft: "rgba(115, 183, 255, 0.16)", border: "rgba(115, 183, 255, 0.42)" },
-		violet: { accent: "#b59cff", rgb: "181, 156, 255", soft: "rgba(181, 156, 255, 0.16)", border: "rgba(181, 156, 255, 0.42)" },
-		amber: { accent: "#f2c76f", rgb: "242, 199, 111", soft: "rgba(242, 199, 111, 0.16)", border: "rgba(242, 199, 111, 0.42)" },
-		rose: { accent: "#ff8aa0", rgb: "255, 138, 160", soft: "rgba(255, 138, 160, 0.16)", border: "rgba(255, 138, 160, 0.42)" }
-	};
-
-	function normalizedModernUiToken(value, fallback, allowed) {
-		const token = String(value || "").trim().toLowerCase();
-		return allowed.indexOf(token) >= 0 ? token : fallback;
-	}
-
 	function applyModernUiTweaks(uiTweaks) {
-		uiTweaks = uiTweaks || {};
-		const theme = normalizedModernUiToken(uiTweaks.theme, "dark",
-			["dark", "light", "mocha", "macchiato", "frappe", "latte", "nord", "gruvbox"]);
-		const density = normalizedModernUiToken(uiTweaks.density, "comfortable",
-			["compact", "comfortable", "spacious"]);
-		const userIcons = normalizedModernUiToken(
-			uiTweaks.userIcons || (uiTweaks.classicUserIcons ? "classic" : "avatars"),
-			"avatars",
-			["avatars", "classic"]);
-		const railSide = normalizedModernUiToken(uiTweaks.railSide, "right", ["left", "right"]);
-		const accent = normalizedModernUiToken(uiTweaks.accent, "auto",
-			["auto", "teal", "blue", "violet", "amber", "rose"]);
-
-		if (document.body) {
-			document.body.dataset.density = density;
-			document.body.dataset.userIcons = userIcons;
-			document.body.dataset.railSide = railSide;
-		}
-		if (document.documentElement) {
-			document.documentElement.dataset.theme = theme;
-			document.documentElement.dataset.accent = accent;
-			const palette = accent === "auto" ? null : modernAccentPalette[accent];
-			if (palette) {
-				document.documentElement.style.setProperty("--accent", palette.accent);
-				document.documentElement.style.setProperty("--accent-rgb", palette.rgb);
-				document.documentElement.style.setProperty("--accent-soft", palette.soft);
-				document.documentElement.style.setProperty("--accent-border", palette.border);
-			} else {
-				document.documentElement.style.removeProperty("--accent");
-				document.documentElement.style.removeProperty("--accent-rgb");
-				document.documentElement.style.removeProperty("--accent-soft");
-				document.documentElement.style.removeProperty("--accent-border");
-			}
+		if (window.MumbleModernTheme && typeof window.MumbleModernTheme.apply === "function") {
+			window.MumbleModernTheme.apply(uiTweaks || {});
 		}
 	}
 
@@ -4830,6 +4801,29 @@
 		return selfUserId !== null ? selfUserId : 0;
 	}
 
+	function stonksSelectedUserName(stonks) {
+		const selectedId = stonksSelectedUserId(stonks);
+		const selfId = stonksUserIdValue(stonks && stonks.selfUserId);
+		if (selfId !== null && selectedId === selfId) {
+			return "You";
+		}
+		const directName = String(stonks && stonks.selectedUserName || "").trim();
+		if (directName) {
+			return directName;
+		}
+		const users = Array.isArray(stonks && stonks.users) ? stonks.users : [];
+		const match = users.find(function(user) {
+			return Number(user && user.userId) === selectedId;
+		});
+		return String(match && match.userName || (selectedId ? "user " + selectedId : "Portfolio")).trim();
+	}
+
+	function stonksCanEditPortfolio(stonks) {
+		const selectedId = stonksSelectedUserId(stonks);
+		const selfId = stonksUserIdValue(stonks && stonks.selfUserId);
+		return selectedId >= 0 && (!!(stonks && stonks.canAdmin) || (!!(stonks && stonks.registered) && selectedId === selfId));
+	}
+
 	function stonksLatestSnapshot(stonks) {
 		const snapshots = Array.isArray(stonks && stonks.snapshots) ? stonks.snapshots : [];
 		return snapshots.length ? snapshots[0] : null;
@@ -4886,6 +4880,15 @@
 			input.placeholder = placeholder;
 		}
 		return input;
+	}
+
+	function stonksInputNumber(value, maxFractionDigits) {
+		const number = Number(value);
+		if (!Number.isFinite(number)) {
+			return "";
+		}
+		const digits = Number.isFinite(Number(maxFractionDigits)) ? Number(maxFractionDigits) : 2;
+		return Number(number.toFixed(digits)).toString();
 	}
 
 	function stonksCollectDraft(root) {
@@ -4993,7 +4996,7 @@
 		const title = document.createElement("strong");
 		title.textContent = validation.errors.length
 			? validation.errors.length + " issue" + (validation.errors.length === 1 ? "" : "s")
-			: "Ready to submit";
+			: "Ready to save";
 		summary.appendChild(title);
 		const messages = validation.errors.concat(validation.warnings).slice(0, 5);
 		if (messages.length) {
@@ -5142,7 +5145,7 @@
 			error.textContent = stonks.error;
 			parent.appendChild(error);
 		}
-		if (stonks.status) {
+		if ((stonks.error || stonks.loading) && stonks.status) {
 			const status = document.createElement("div");
 			status.className = "stonks-status";
 			status.textContent = stonks.status;
@@ -5150,20 +5153,1104 @@
 		}
 	}
 
+	const stonksTickerPalette = ["#86cf86", "#e3b95f", "#5ec8b0", "#6fb0e8", "#e88f7a", "#b18ce0", "#e58bb6", "#9aa6b6"];
+
+	function stonksHash(value) {
+		const text = String(value || "");
+		let hash = 0;
+		for (let index = 0; index < text.length; index += 1) {
+			hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
+		}
+		return Math.abs(hash);
+	}
+
+	function stonksTickerColor(symbol) {
+		const key = normalizeStonksSymbol(symbol) || String(symbol || "").trim().toUpperCase();
+		if (key === "RKLB") {
+			return "#86cf86";
+		}
+		if (key === "GME") {
+			return "#e3b95f";
+		}
+		if (key === "NVDA") {
+			return "#5ec8b0";
+		}
+		if (key === "PLTR") {
+			return "#6fb0e8";
+		}
+		if (key === "TSLA") {
+			return "#e88f7a";
+		}
+		if (key === "AMD") {
+			return "#b18ce0";
+		}
+		return stonksTickerPalette[stonksHash(key) % stonksTickerPalette.length];
+	}
+
+	function stonksBadgeText(symbol) {
+		const compact = String(symbol || "?").replace(/[^A-Za-z0-9]/g, "");
+		return (compact || "?").slice(0, 2).toUpperCase();
+	}
+
+	function formatStonksQuoteMoney(value, currency) {
+		const amount = stonksNumber(value);
+		const code = String(currency || "USD").trim().toUpperCase() || "USD";
+		const text = amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+		if (code === "USD") {
+			return "$" + text;
+		}
+		return code + " " + text;
+	}
+
+	function formatStonksSignedMoney(value, currency) {
+		const amount = stonksNumber(value);
+		const sign = amount >= 0 ? "+" : "-";
+		return sign + formatStonksQuoteMoney(Math.abs(amount), currency).replace(/^\$/, "$");
+	}
+
+	function stonksQuoteForSymbol(stonks, symbol) {
+		const normalized = normalizeStonksSymbol(symbol);
+		if (!normalized || !stonks || !stonks.tickerQuotes || typeof stonks.tickerQuotes !== "object") {
+			return null;
+		}
+		return stonks.tickerQuotes[normalized] || stonks.tickerQuotes[String(symbol || "").trim().toUpperCase()] || null;
+	}
+
+	function stonksSparkPoints(symbol, price, changePct) {
+		const endPrice = Math.max(0.01, stonksNumber(price) || 1);
+		const change = Number.isFinite(Number(changePct)) ? Number(changePct) : 0;
+		const startPrice = Math.max(0.01, endPrice / (1 + change / 100));
+		let seed = stonksHash(symbol) || 17;
+		let value = startPrice;
+		const points = [];
+		for (let index = 0; index < 40; index += 1) {
+			seed = (seed * 9301 + 49297) % 233280;
+			const drift = (seed / 233280 - 0.46) * endPrice * 0.018;
+			value = Math.max(0.01, value + drift);
+			points.push(value);
+		}
+		points[0] = startPrice;
+		points[points.length - 1] = endPrice;
+		return points;
+	}
+
+	function stonksSparkSvg(ticker, width, height, big) {
+		const points = Array.isArray(ticker && ticker.points) ? ticker.points : stonksSparkPoints(ticker && ticker.ticker, ticker && ticker.price, ticker && ticker.changePct);
+		const pad = big ? 6 : 2;
+		const min = Math.min.apply(null, points);
+		const max = Math.max.apply(null, points);
+		const range = (max - min) || 1;
+		const step = (width - pad * 2) / Math.max(1, points.length - 1);
+		const mapped = points.map(function(point, index) {
+			const x = pad + index * step;
+			const y = pad + (height - pad * 2) * (1 - (point - min) / range);
+			return x.toFixed(1) + "," + y.toFixed(1);
+		}).join(" ");
+		const stroke = stonksNumber(ticker && ticker.changePct) >= 0 ? "var(--good)" : "var(--danger)";
+		let svg = '<svg viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="none" aria-hidden="true">';
+		if (big) {
+			svg += '<polygon fill="' + stroke + '" opacity="0.10" points="' + pad + "," + (height - pad) + " " + mapped + " " + (width - pad) + "," + (height - pad) + '"></polygon>';
+		}
+		svg += '<polyline fill="none" stroke="' + stroke + '" stroke-width="' + (big ? "2.4" : "1.6") + '" stroke-linecap="round" stroke-linejoin="round" points="' + mapped + '"></polyline></svg>';
+		return svg;
+	}
+
+	function stonksTickerFromSource(stonks, source) {
+		const symbol = normalizeStonksSymbol(source && source.symbol) || String(source && source.symbol || "").trim().toUpperCase();
+		if (!symbol) {
+			return null;
+		}
+		const quote = stonksQuoteForSymbol(stonks, symbol);
+		const providerId = String(quote && quote.providerId || source && source.providerId || "yahoo-finance").trim() || "yahoo-finance";
+		const providerSymbol = normalizeStonksSymbol(quote && quote.providerSymbol || source && source.providerSymbol || symbol) || symbol;
+		const sourceUrl = stonksSafeExternalUrl(quote && quote.quoteSourceUrl)
+			|| stonksSafeExternalUrl(source && source.quoteSourceUrl)
+			|| stonksYahooQuoteUrl(providerSymbol);
+		const quantity = stonksNumber(source && (source.totalQuantity || source.quantity));
+		const sourceValue = stonksNumber(source && (source.totalMarketValue || source.marketValue));
+		const quotePrice = quote && quote.ok !== false ? stonksNumber(quote.price) : 0;
+		const sourcePrice = stonksNumber(source && source.price);
+		const price = quotePrice || sourcePrice || (quantity > 0 ? sourceValue / quantity : 0) || Math.max(1, (stonksHash(symbol) % 180) + 12);
+		const changePct = quote && quote.ok !== false && Number.isFinite(Number(quote.changePercent))
+			? Number(quote.changePercent)
+			: ((stonksHash(symbol) % 96) / 10 - 4.2);
+		const currency = String(quote && quote.currency || source && source.currency || "USD").trim().toUpperCase() || "USD";
+		return {
+			ticker: symbol,
+			name: String(quote && quote.displayName || source && source.displayName || symbol).trim() || symbol,
+			color: stonksTickerColor(symbol),
+			price: price,
+			changePct: changePct,
+			currency: currency,
+			providerId: providerId,
+			providerSymbol: providerSymbol,
+			quoteSourceUrl: sourceUrl,
+			points: stonksSparkPoints(symbol, price, changePct)
+		};
+	}
+
+	function stonksSafeExternalUrl(value) {
+		const url = String(value || "").trim();
+		return /^https?:\/\//i.test(url) ? url : "";
+	}
+
+	function stonksTickerSourceUrl(row) {
+		if (!row) {
+			return "";
+		}
+		return stonksSafeExternalUrl(row.quoteSourceUrl)
+			|| stonksYahooQuoteUrl(row.providerSymbol || row.ticker);
+	}
+
+	function stonksTickerSourceLabel(row) {
+		const label = stonksProviderLabel(row && row.providerId);
+		return label === "Manual" ? "Yahoo" : label;
+	}
+
+	function openStonksTickerSource(row) {
+		const url = stonksTickerSourceUrl(row);
+		if (!url) {
+			return;
+		}
+		if (!notifyBridge("activateLink", url)) {
+			try {
+				window.open(url, "_blank", "noopener");
+			} catch (error) {
+				console.warn("Unable to open ticker source:", error);
+			}
+		}
+	}
+
+	function stonksLedgerOverviewModel(stonks, marketRows) {
+		const portfolio = stonksPortfolioModel(stonks, marketRows);
+		const snapshots = (Array.isArray(stonks && stonks.snapshots) ? stonks.snapshots : [])
+			.filter(function(snapshot) {
+				return snapshot && stonksNumber(snapshot.totalValue) > 0;
+			})
+			.slice()
+			.sort(function(left, right) {
+				return Number(left && left.createdAt || 0) - Number(right && right.createdAt || 0);
+			});
+		const points = snapshots.length > 1
+			? snapshots.map(function(snapshot) { return stonksNumber(snapshot.totalValue); })
+			: stonksSparkPoints("ledger:" + stonksSelectedUserId(stonks), portfolio.equity, portfolio.pnlPct);
+		const equity = portfolio.equity || points[points.length - 1] || 0;
+		if (points.length) {
+			points[points.length - 1] = equity;
+		}
+		const startValue = points.length ? points[0] : equity;
+		const changePct = startValue > 0 ? ((equity - startValue) / startValue) * 100 : portfolio.pnlPct;
+		const firstSnapshot = snapshots[0] || null;
+		const lastSnapshot = snapshots[snapshots.length - 1] || null;
+		return {
+			ticker: "Ledger value",
+			name: stonksSelectedUserName(stonks) + " · " + portfolio.holdings.length + " positions",
+			price: equity,
+			changePct: changePct,
+			currency: portfolio.currency,
+			points: points,
+			startLabel: firstSnapshot ? formatStonksTime(firstSnapshot.createdAt) : "Start",
+			endLabel: lastSnapshot ? formatStonksTime(lastSnapshot.createdAt) : "Now"
+		};
+	}
+
+	function stonksMarketRows(stonks) {
+		const rows = [];
+		const seen = {};
+		function add(source) {
+			const ticker = stonksTickerFromSource(stonks, source);
+			if (!ticker || seen[ticker.ticker]) {
+				return;
+			}
+			seen[ticker.ticker] = true;
+			rows.push(ticker);
+		}
+		(Array.isArray(stonks && stonks.personalTickers) ? stonks.personalTickers : []).forEach(add);
+		const latest = stonksLatestSnapshot(stonks);
+		(latest && Array.isArray(latest.positions) ? latest.positions : []).forEach(add);
+		(Array.isArray(stonks && stonks.popularTickers) ? stonks.popularTickers : []).forEach(add);
+		if (!rows.length) {
+			["RKLB", "GME", "NVDA", "AMD"].forEach(function(symbol) {
+				add({ symbol: symbol, displayName: symbol, currency: "USD" });
+			});
+		}
+		return rows.slice(0, 8);
+	}
+
+	function stonksFeedPreferencesForModel(stonks) {
+		const preferences = stonks && stonks.feedPreferences && typeof stonks.feedPreferences === "object"
+			? stonks.feedPreferences
+			: {};
+		return {
+			showMine: preferences.showMine !== false,
+			showPopular: preferences.showPopular !== false,
+			showPins: preferences.showPins !== false
+		};
+	}
+
+	function stonksSendFeedPreferences(stonks, overrides) {
+		const preferences = Object.assign({}, stonksFeedPreferencesForModel(stonks), overrides || {});
+		if (stonks && stonks.feedPreferences && typeof stonks.feedPreferences === "object") {
+			Object.assign(stonks.feedPreferences, preferences);
+		} else if (stonks) {
+			stonks.feedPreferences = preferences;
+		}
+		invokeModernDialogAction("setFeedPreferences", { feedPreferences: preferences });
+		renderModernDialog();
+	}
+
+	function stonksTickerBannerAlwaysScrollEnabled() {
+		const tweaks = modernDialogState && modernDialogState.uiTweaks && typeof modernDialogState.uiTweaks === "object"
+			? modernDialogState.uiTweaks
+			: {};
+		return !!tweaks.tickerBannerAlwaysScroll;
+	}
+
+	function stonksSetTickerBannerAlwaysScroll(enabled) {
+		if (!modernDialogState.uiTweaks || typeof modernDialogState.uiTweaks !== "object") {
+			modernDialogState.uiTweaks = {};
+		}
+		modernDialogState.uiTweaks.tickerBannerAlwaysScroll = !!enabled;
+		invokeModernDialogAction("setTickerBannerAlwaysScroll", { tickerBannerAlwaysScroll: !!enabled });
+		renderModernDialog();
+	}
+
+	function stonksPinnedTickerPayload(stonks, symbol, source) {
+		const normalized = normalizeStonksSymbol(symbol || source && (source.symbol || source.ticker)) || "";
+		const row = source || stonksTickerFromSource(stonks, { symbol: normalized });
+		return {
+			symbol: normalized,
+			displayName: String(row && (row.displayName || row.name) || "").trim(),
+			providerId: String(row && row.providerId || "").trim(),
+			providerSymbol: normalizeStonksSymbol(row && row.providerSymbol || normalized) || normalized,
+			exchange: String(row && row.exchange || "").trim(),
+			quoteSourceUrl: stonksSafeExternalUrl(row && row.quoteSourceUrl) || stonksYahooQuoteUrl(normalized)
+		};
+	}
+
+	function stonksSetLocalPin(symbol, pinned) {
+		const normalized = normalizeStonksSymbol(symbol) || String(symbol || "").trim().toUpperCase();
+		if (!normalized) {
+			return;
+		}
+		if (!Array.isArray(stonksLocalPins)) {
+			stonksLocalPins = [];
+		}
+		const index = stonksLocalPins.indexOf(normalized);
+		if (pinned && index < 0) {
+			stonksLocalPins.push(normalized);
+		} else if (!pinned && index >= 0) {
+			stonksLocalPins.splice(index, 1);
+		}
+	}
+
+	function stonksPinsForModel(stonks, marketRows) {
+		if (Array.isArray(stonksLocalPins)) {
+			return stonksLocalPins;
+		}
+		const pins = [];
+		(Array.isArray(stonks && stonks.pinnedTickers) ? stonks.pinnedTickers : []).forEach(function(pin) {
+			const symbol = normalizeStonksSymbol(pin && (pin.symbol || pin.ticker) || pin);
+			if (symbol && pins.indexOf(symbol) < 0) {
+				pins.push(symbol);
+			}
+		});
+		stonksLocalPins = pins;
+		return stonksLocalPins;
+	}
+
+	function stonksIsPinned(symbol) {
+		const normalized = normalizeStonksSymbol(symbol) || String(symbol || "").trim().toUpperCase();
+		return Array.isArray(stonksLocalPins) && stonksLocalPins.indexOf(normalized) >= 0;
+	}
+
+	function stonksTogglePin(symbol, source) {
+		const normalized = normalizeStonksSymbol(symbol) || String(symbol || "").trim().toUpperCase();
+		if (!normalized) {
+			return;
+		}
+		const pinned = !stonksIsPinned(normalized);
+		const stonks = modernDialogState && modernDialogState.stonks || {};
+		stonksSetLocalPin(normalized, pinned);
+		stonksPinMenuOpen = false;
+		invokeModernDialogAction("setTickerPin", {
+			ticker: stonksPinnedTickerPayload(stonks, normalized, source),
+			pinned: pinned
+		});
+		renderModernDialog();
+	}
+
+	function clearStonksDialogHeader() {
+		if (!refs.dialog) {
+			return;
+		}
+		const extra = refs.dialog.querySelector(".stonks-head-actions");
+		if (extra && extra.parentNode) {
+			extra.parentNode.removeChild(extra);
+		}
+	}
+
+	function syncStonksDialogHeader(stonks, marketRows) {
+		clearStonksDialogHeader();
+		refs.eyebrow.textContent = "#stonks · live tape";
+		refs.title.textContent = "";
+		refs.title.appendChild(document.createTextNode("Stonks "));
+		const meme = document.createElement("span");
+		meme.className = "stonks-meme";
+		meme.textContent = "↗";
+		refs.title.appendChild(meme);
+		refs.subtitle.textContent = "";
+
+		const header = refs.dialog && refs.dialog.querySelector(".modern-dialog-header");
+		if (!header) {
+			return;
+		}
+		const index = document.createElement("div");
+		index.className = "stonks-head-actions";
+		const indexValue = document.createElement("div");
+		indexValue.className = "stonks-index";
+		const rows = Array.isArray(stonks && stonks.leaderboard) ? stonks.leaderboard : [];
+		const selfRow = rows.find(function(row) { return Number(row && row.userId) === Number(stonks && stonks.selfUserId); }) || rows[0] || null;
+		const change = selfRow ? stonksNumber(selfRow.returnPercent) : (marketRows[0] ? stonksNumber(marketRows[0].changePct) : 0);
+		const name = document.createElement("span");
+		name.className = "idx-name";
+		name.textContent = selfRow ? "Server PnL" : "S&P 500";
+		const value = document.createElement("span");
+		value.className = "idx-val";
+		value.classList.add(change >= 0 ? "is-up" : "is-down");
+		value.textContent = (change >= 0 ? "▲ " : "▼ ") + Math.abs(change).toFixed(1) + "%";
+		indexValue.append(name, value);
+		index.appendChild(indexValue);
+		header.insertBefore(index, refs.closeButton || null);
+	}
+
+	function appendStonksPinPicker(parent, marketRows) {
+		const picker = document.createElement("div");
+		picker.className = "pin-picker-wrap";
+		const add = document.createElement("button");
+		add.type = "button";
+		add.className = "pin-add" + (stonksPinMenuOpen ? " is-open" : "");
+		add.textContent = "Pin";
+		add.setAttribute("aria-haspopup", "menu");
+		add.setAttribute("aria-expanded", stonksPinMenuOpen ? "true" : "false");
+		add.addEventListener("click", function() {
+			stonksPinMenuOpen = !stonksPinMenuOpen;
+			renderModernDialog();
+		});
+		add.addEventListener("keydown", function(event) {
+			if (event.key === "Escape" && stonksPinMenuOpen) {
+				event.preventDefault();
+				stonksPinMenuOpen = false;
+				renderModernDialog();
+			}
+		});
+		picker.appendChild(add);
+
+		if (stonksPinMenuOpen) {
+			const menu = document.createElement("div");
+			menu.className = "pin-picker";
+			menu.setAttribute("role", "menu");
+			const candidates = (marketRows || []).filter(function(row) {
+				return row && row.ticker && !stonksIsPinned(row.ticker);
+			});
+			candidates.forEach(function(row) {
+				const item = document.createElement("button");
+				item.type = "button";
+				item.className = "pin-picker-item";
+				item.setAttribute("role", "menuitem");
+				const dot = document.createElement("span");
+				dot.className = "pin-dot";
+				dot.style.background = row.color || stonksTickerColor(row.ticker);
+				const copy = document.createElement("span");
+				copy.className = "pin-picker-copy";
+				const ticker = document.createElement("strong");
+				ticker.textContent = row.ticker;
+				const name = document.createElement("small");
+				name.textContent = row.name || stonksTickerSourceLabel(row);
+				copy.append(ticker, name);
+				const change = document.createElement("span");
+				change.className = "pin-change " + (stonksNumber(row.changePct) >= 0 ? "is-up" : "is-down");
+				change.textContent = (stonksNumber(row.changePct) >= 0 ? "▲" : "▼")
+					+ Math.abs(stonksNumber(row.changePct)).toFixed(1) + "%";
+				item.append(dot, copy, change);
+				item.addEventListener("click", function() {
+					stonksTogglePin(row.ticker, row);
+				});
+				menu.appendChild(item);
+			});
+			if (!candidates.length) {
+				const empty = document.createElement("div");
+				empty.className = "pin-picker-empty";
+				empty.textContent = "All visible tickers are pinned.";
+				menu.appendChild(empty);
+			}
+			picker.appendChild(menu);
+		}
+
+		parent.appendChild(picker);
+	}
+
+	function appendStonksPins(parent, stonks, marketRows) {
+		const pins = stonksPinsForModel(stonks, marketRows);
+		const wrap = document.createElement("div");
+		wrap.className = "stonks-pins";
+		pins.forEach(function(symbol) {
+			const ticker = marketRows.find(function(row) { return row.ticker === symbol; }) || stonksTickerFromSource(stonks, { symbol: symbol });
+			const chip = document.createElement("div");
+			chip.className = "pin-chip is-link";
+			chip.setAttribute("role", "link");
+			chip.tabIndex = 0;
+			chip.title = "Open " + symbol + " on " + stonksTickerSourceLabel(ticker);
+			chip.addEventListener("click", function() {
+				openStonksTickerSource(ticker);
+			});
+			chip.addEventListener("keydown", function(event) {
+				if (event.key === "Enter" || event.key === " ") {
+					event.preventDefault();
+					openStonksTickerSource(ticker);
+				}
+			});
+			const dot = document.createElement("span");
+			dot.className = "pin-dot";
+			dot.style.background = ticker ? ticker.color : stonksTickerColor(symbol);
+			const label = document.createElement("b");
+			label.textContent = symbol;
+			chip.append(dot, label);
+			if (ticker) {
+				const change = document.createElement("span");
+				change.className = "pin-change " + (ticker.changePct >= 0 ? "is-up" : "is-down");
+				change.textContent = (ticker.changePct >= 0 ? "▲" : "▼") + Math.abs(ticker.changePct).toFixed(1) + "%";
+				chip.appendChild(change);
+			}
+			const close = document.createElement("button");
+			close.type = "button";
+			close.className = "pin-x";
+			close.title = "Unpin";
+			close.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 8l8 8M16 8l-8 8"></path></svg>';
+			close.addEventListener("click", function(event) {
+				event.stopPropagation();
+				stonksTogglePin(symbol, ticker);
+			});
+			chip.appendChild(close);
+			wrap.appendChild(chip);
+		});
+		appendStonksPinPicker(wrap, marketRows);
+		parent.appendChild(wrap);
+	}
+
+	function appendStonksTickerTapeControls(parent, stonks) {
+		const preferences = stonksFeedPreferencesForModel(stonks);
+		const registered = stonks && stonks.registered !== false;
+		const card = document.createElement("section");
+		card.className = "stonks-tape-controls";
+		const copy = document.createElement("div");
+		copy.className = "stonks-tape-copy";
+		const label = document.createElement("span");
+		label.className = "section-label";
+		label.textContent = "Ticker tape";
+		const sub = document.createElement("small");
+		sub.textContent = registered ? "Main window banner source" : "Register to save banner sources";
+		copy.append(label, sub);
+		const actions = document.createElement("div");
+		actions.className = "stonks-tape-actions";
+		const button = function(text, checked, enabled, callback) {
+			const item = document.createElement("button");
+			item.type = "button";
+			item.className = "sel-pill stonks-tape-toggle " + (checked ? "is-buy" : "is-muted");
+			item.setAttribute("role", "switch");
+			item.setAttribute("aria-checked", checked ? "true" : "false");
+			item.textContent = text;
+			item.disabled = !enabled;
+			item.addEventListener("click", callback);
+			actions.appendChild(item);
+		};
+		button("Scroll", stonksTickerBannerAlwaysScrollEnabled(), true, function() {
+			stonksSetTickerBannerAlwaysScroll(!stonksTickerBannerAlwaysScrollEnabled());
+		});
+		button("Pinned", preferences.showPins, registered, function() {
+			stonksSendFeedPreferences(stonks, { showPins: !preferences.showPins });
+		});
+		button("Portfolio", preferences.showMine, registered, function() {
+			stonksSendFeedPreferences(stonks, { showMine: !preferences.showMine });
+		});
+		button("Popular", preferences.showPopular, registered, function() {
+			stonksSendFeedPreferences(stonks, { showPopular: !preferences.showPopular });
+		});
+		card.append(copy, actions);
+		parent.appendChild(card);
+	}
+
+	function appendStonksMarketTab(parent, stonks, marketRows) {
+		if (!marketRows.length) {
+			const empty = document.createElement("div");
+			empty.className = "stonks-empty";
+			empty.textContent = "No ticker quotes yet.";
+			parent.appendChild(empty);
+			return;
+		}
+		const overview = stonksLedgerOverviewModel(stonks, marketRows);
+		const up = stonksNumber(overview.changePct) >= 0;
+		const chart = document.createElement("section");
+		chart.className = "stonks-chart-card";
+		const top = document.createElement("div");
+		top.className = "stonks-chart-top";
+		const copy = document.createElement("div");
+		const ticker = document.createElement("p");
+		ticker.className = "stonks-focus-ticker";
+		ticker.textContent = overview.ticker;
+		const name = document.createElement("p");
+		name.className = "stonks-focus-name";
+		name.textContent = overview.name;
+		copy.append(ticker, name);
+		const price = document.createElement("div");
+		price.className = "stonks-focus-price";
+		const value = document.createElement("p");
+		value.className = "stonks-focus-value";
+		value.textContent = formatStonksQuoteMoney(overview.price, overview.currency);
+		const change = document.createElement("p");
+		change.className = "stonks-focus-change " + (up ? "is-up" : "is-down");
+		change.textContent = (up ? "▲ " : "▼ ") + Math.abs(overview.changePct).toFixed(1) + "% total";
+		price.append(value, change);
+		top.append(copy, price);
+		const spark = document.createElement("div");
+		spark.className = "stonks-spark";
+		spark.innerHTML = stonksSparkSvg(overview, 660, 120, true);
+		const range = document.createElement("div");
+		range.className = "stonks-range";
+		range.innerHTML = "<span></span><span></span>";
+		range.children[0].textContent = overview.startLabel;
+		range.children[1].textContent = overview.endLabel;
+		chart.append(top, spark, range);
+		parent.appendChild(chart);
+
+		const card = document.createElement("section");
+		card.className = "stonks-list-card";
+		const head = document.createElement("div");
+		head.className = "stonks-list-head";
+		const label = document.createElement("span");
+		label.className = "section-label";
+		label.textContent = "Watchlist";
+		head.appendChild(label);
+		const list = document.createElement("div");
+		list.className = "stonks-list";
+		list.setAttribute("role", "list");
+		marketRows.forEach(function(row, index) {
+			const rowUp = stonksNumber(row.changePct) >= 0;
+			const item = document.createElement("div");
+			item.className = "stonks-row";
+			item.setAttribute("role", "link");
+			item.tabIndex = 0;
+			item.title = "Open " + row.ticker + " on " + stonksTickerSourceLabel(row);
+			const badge = document.createElement("div");
+			badge.className = "stonks-row-badge";
+			badge.style.background = row.color;
+			badge.textContent = stonksBadgeText(row.ticker);
+			const rowCopy = document.createElement("div");
+			rowCopy.className = "stonks-row-copy";
+			const rowTicker = document.createElement("div");
+			rowTicker.className = "stonks-row-ticker";
+			rowTicker.textContent = row.ticker;
+			const rowName = document.createElement("div");
+			rowName.className = "stonks-row-name";
+			rowName.textContent = row.name;
+			rowCopy.append(rowTicker, rowName);
+			const mini = document.createElement("div");
+			mini.className = "stonks-row-mini";
+			mini.innerHTML = stonksSparkSvg(row, 56, 24, false);
+			const rowNum = document.createElement("div");
+			rowNum.className = "stonks-row-num";
+			const rowPrice = document.createElement("div");
+			rowPrice.className = "stonks-row-price";
+			rowPrice.textContent = formatStonksQuoteMoney(row.price, row.currency);
+			const rowChange = document.createElement("div");
+			rowChange.className = "stonks-row-change " + (rowUp ? "is-up" : "is-down");
+			rowChange.textContent = (rowUp ? "▲ " : "▼ ") + Math.abs(row.changePct).toFixed(1) + "%";
+			rowNum.append(rowPrice, rowChange);
+			const pin = document.createElement("button");
+			pin.type = "button";
+			pin.className = "stonks-pinbtn" + (stonksIsPinned(row.ticker) ? " is-pinned" : "");
+			pin.title = stonksIsPinned(row.ticker) ? "Unpin" : "Pin";
+			pin.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 4h6l-1 6 3 3v2h-4v5l-1 1-1-1v-5H6v-2l3-3z"></path></svg>';
+			pin.addEventListener("click", function(event) {
+				event.stopPropagation();
+				stonksTogglePin(row.ticker, row);
+			});
+			item.append(badge, rowCopy, mini, rowNum, pin);
+			item.addEventListener("click", function() {
+				openStonksTickerSource(row);
+			});
+			item.addEventListener("keydown", function(event) {
+				if (event.key === "Enter" || event.key === " ") {
+					event.preventDefault();
+					openStonksTickerSource(row);
+				}
+			});
+			list.appendChild(item);
+		});
+		card.append(head, list);
+		parent.appendChild(card);
+	}
+
+	function stonksPortfolioModel(stonks, marketRows) {
+		const latest = stonksLatestSnapshot(stonks);
+		const previous = Array.isArray(stonks && stonks.snapshots) ? stonks.snapshots[1] : null;
+		const previousBySymbol = {};
+		(previous && Array.isArray(previous.positions) ? previous.positions : []).forEach(function(position) {
+			const normalized = stonksNormalizePosition(position, previous.currency || "USD");
+			if (normalized.symbol) {
+				previousBySymbol[normalized.symbol] = normalized;
+			}
+		});
+		const positions = (latest && Array.isArray(latest.positions) ? latest.positions : []).map(function(position) {
+			return stonksNormalizePosition(position, latest && latest.currency || "USD");
+		}).filter(function(position) {
+			return !!position.symbol;
+		});
+		let value = 0;
+		let cost = 0;
+		let dayAbs = 0;
+		const holdings = positions.map(function(position) {
+			const market = marketRows.find(function(row) { return row.ticker === position.symbol; });
+			const quantity = stonksNumber(position.quantity);
+			const price = market ? market.price : (stonksNumber(position.price) || (quantity > 0 ? stonksNumber(position.marketValue) / quantity : 0));
+			const marketValue = quantity > 0 ? quantity * price : stonksNumber(position.marketValue);
+			const previousPosition = previousBySymbol[position.symbol];
+			const avgCost = previousPosition && stonksNumber(previousPosition.price) > 0
+				? stonksNumber(previousPosition.price)
+				: (market ? price / (1 + stonksNumber(market.changePct) / 100) : price);
+			const positionCost = quantity * avgCost;
+			const previousPrice = market ? price / (1 + stonksNumber(market.changePct) / 100) : avgCost;
+			value += marketValue;
+			cost += positionCost;
+			dayAbs += quantity * (price - previousPrice);
+			return {
+				ticker: position.symbol,
+				name: position.displayName || position.symbol,
+				shares: quantity,
+				avgCost: avgCost,
+				value: marketValue,
+				currency: position.currency,
+				color: market ? market.color : stonksTickerColor(position.symbol),
+				pnlAbs: marketValue - positionCost,
+				pnlPct: positionCost ? (marketValue - positionCost) / positionCost * 100 : 0
+			};
+		});
+		const latestTotal = latest ? stonksNumber(latest.totalValue) : value;
+		const cash = Math.max(0, latestTotal - value);
+		const equity = Math.max(latestTotal, value + cash);
+		const baseline = previous && stonksNumber(previous.totalValue) > 0 ? stonksNumber(previous.totalValue) : cost;
+		const pnlAbs = baseline ? equity - baseline : value - cost;
+		const pnlPct = baseline ? pnlAbs / baseline * 100 : (cost ? (value - cost) / cost * 100 : 0);
+		const dayPct = value ? dayAbs / Math.max(1, value - dayAbs) * 100 : 0;
+		return { holdings: holdings, value: value, cash: cash, equity: equity, pnlAbs: pnlAbs, pnlPct: pnlPct, dayAbs: dayAbs, dayPct: dayPct, currency: latest && latest.currency || "USD" };
+	}
+
+	function appendStonksPortfolioTab(parent, stonks, marketRows) {
+		if (stonksCanEditPortfolio(stonks)) {
+			appendStonksEditor(parent, stonks);
+		}
+
+		const portfolio = stonksPortfolioModel(stonks, marketRows);
+		const upTotal = portfolio.pnlAbs >= 0;
+		const upDay = portfolio.dayAbs >= 0;
+		const summary = document.createElement("section");
+		summary.className = "pf-summary";
+		[["Net worth", formatStonksQuoteMoney(portfolio.equity, portfolio.currency), ""],
+		 ["Total PnL", formatStonksSignedMoney(portfolio.pnlAbs, portfolio.currency) + " (" + formatStonksPercent(portfolio.pnlPct) + ")", upTotal ? "is-up" : "is-down"],
+		 ["Today", (upDay ? "▲ " : "▼ ") + Math.abs(portfolio.dayPct).toFixed(2) + "%", upDay ? "is-up" : "is-down"]].forEach(function(cell) {
+			const item = document.createElement("div");
+			item.className = "pf-cell";
+			const key = document.createElement("div");
+			key.className = "k";
+			key.textContent = cell[0];
+			const value = document.createElement("div");
+			value.className = "v" + (cell[0] === "Net worth" ? "" : " sm") + (cell[2] ? " " + cell[2] : "");
+			value.textContent = cell[1];
+			item.append(key, value);
+			summary.appendChild(item);
+		});
+		parent.appendChild(summary);
+		const allocWrap = document.createElement("div");
+		const alloc = document.createElement("div");
+		alloc.className = "pf-alloc";
+		portfolio.holdings.forEach(function(holding) {
+			const segment = document.createElement("span");
+			segment.style.width = (portfolio.equity > 0 ? holding.value / portfolio.equity * 100 : 0) + "%";
+			segment.style.background = holding.color;
+			segment.title = holding.ticker;
+			alloc.appendChild(segment);
+		});
+		if (portfolio.cash > 0) {
+			const cash = document.createElement("span");
+			cash.style.width = (portfolio.cash / Math.max(1, portfolio.equity) * 100) + "%";
+			cash.style.background = "var(--bg-4)";
+			cash.title = "Cash";
+			alloc.appendChild(cash);
+		}
+		const range = document.createElement("div");
+		range.className = "stonks-range";
+		const holdings = document.createElement("span");
+		holdings.textContent = "Holdings " + formatStonksQuoteMoney(portfolio.value, portfolio.currency);
+		const cashText = document.createElement("span");
+		cashText.textContent = "Cash " + formatStonksQuoteMoney(portfolio.cash, portfolio.currency);
+		range.append(holdings, cashText);
+		allocWrap.append(alloc, range);
+		parent.appendChild(allocWrap);
+		const card = document.createElement("section");
+		card.className = "stonks-list-card";
+		const head = document.createElement("div");
+		head.className = "stonks-list-head";
+		const label = document.createElement("span");
+		label.className = "section-label";
+		label.textContent = "Positions";
+		const count = document.createElement("span");
+		count.className = "quiet-count";
+		count.textContent = String(portfolio.holdings.length);
+		head.append(label, count);
+		const list = document.createElement("div");
+		if (!portfolio.holdings.length) {
+			const empty = document.createElement("div");
+			empty.className = "stonks-empty";
+			empty.textContent = "No portfolio positions yet.";
+			list.appendChild(empty);
+		}
+		portfolio.holdings.forEach(function(holding) {
+			const up = holding.pnlAbs >= 0;
+			const row = document.createElement("div");
+			row.className = "holding-row";
+			const badge = document.createElement("div");
+			badge.className = "holding-badge";
+			badge.style.background = holding.color;
+			badge.textContent = stonksBadgeText(holding.ticker);
+			const copy = document.createElement("div");
+			copy.className = "holding-copy";
+			const ticker = document.createElement("div");
+			ticker.className = "holding-ticker";
+			ticker.textContent = holding.ticker;
+			const sub = document.createElement("div");
+			sub.className = "holding-sub";
+			sub.textContent = holding.shares + " sh · avg " + formatStonksQuoteMoney(holding.avgCost, holding.currency);
+			copy.append(ticker, sub);
+			const num = document.createElement("div");
+			num.className = "holding-num";
+			const val = document.createElement("div");
+			val.className = "holding-val";
+			val.textContent = formatStonksQuoteMoney(holding.value, holding.currency);
+			const pnl = document.createElement("div");
+			pnl.className = "holding-pnl " + (up ? "is-up" : "is-down");
+			pnl.textContent = formatStonksPercent(holding.pnlPct);
+			num.append(val, pnl);
+			const pin = document.createElement("button");
+			pin.type = "button";
+			pin.className = "stonks-pinbtn" + (stonksIsPinned(holding.ticker) ? " is-pinned" : "");
+			pin.title = stonksIsPinned(holding.ticker) ? "Unpin" : "Pin";
+			pin.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 4h6l-1 6 3 3v2h-4v5l-1 1-1-1v-5H6v-2l3-3z"></path></svg>';
+			pin.addEventListener("click", function() {
+				stonksTogglePin(holding.ticker, holding);
+			});
+			row.append(badge, copy, num, pin);
+			list.appendChild(row);
+		});
+		card.append(head, list);
+		parent.appendChild(card);
+	}
+
+	function stonksAvatarColor(index) {
+		return stonksTickerPalette[index % stonksTickerPalette.length];
+	}
+
+	function appendStonksLeaderboardTab(parent, stonks, marketRows) {
+		const rows = (Array.isArray(stonks && stonks.leaderboard) ? stonks.leaderboard : []).slice().sort(function(left, right) {
+			return stonksNumber(right.returnPercent) - stonksNumber(left.returnPercent);
+		});
+		const card = document.createElement("section");
+		card.className = "stonks-list-card";
+		const head = document.createElement("div");
+		head.className = "stonks-list-head";
+		const label = document.createElement("span");
+		label.className = "section-label";
+		label.textContent = "Today's PnL · server";
+		const count = document.createElement("span");
+		count.className = "quiet-count";
+		count.textContent = String(rows.length);
+		head.append(label, count);
+		const list = document.createElement("div");
+		rows.forEach(function(row, index) {
+			const up = stonksNumber(row.returnPercent) >= 0;
+			const item = document.createElement("div");
+			item.className = "lb-row medal-" + (index + 1) + (Number(row.userId) === Number(stonks && stonks.selfUserId) ? " is-self" : "");
+			const rank = document.createElement("div");
+			rank.className = "lb-rank";
+			rank.textContent = index === 0 ? "1" : index === 1 ? "2" : index === 2 ? "3" : String(index + 1);
+			const avatar = document.createElement("div");
+			avatar.className = "lb-av";
+			avatar.style.background = stonksAvatarColor(index);
+			avatar.textContent = initialsFor(row.userName || "U");
+			const copy = document.createElement("div");
+			copy.className = "lb-copy";
+			const name = document.createElement("div");
+			name.className = "lb-name";
+			name.textContent = row.userName || ("user " + row.userId);
+			const pinLine = document.createElement("div");
+			pinLine.className = "lb-pin";
+			const pinTag = document.createElement("span");
+			pinTag.className = "pin-tag";
+			const pinnedTicker = marketRows[index % Math.max(1, marketRows.length)];
+			pinTag.textContent = pinnedTicker ? pinnedTicker.ticker : "CASH";
+			if (pinnedTicker) {
+				pinTag.style.color = pinnedTicker.color;
+			}
+			pinLine.append(document.createTextNode("playing "), pinTag);
+			copy.append(name, pinLine);
+			const num = document.createElement("div");
+			num.className = "lb-num";
+			const pct = document.createElement("div");
+			pct.className = "lb-pct " + (up ? "is-up" : "is-down");
+			pct.textContent = formatStonksPercent(row.returnPercent);
+			const val = document.createElement("div");
+			val.className = "lb-val";
+			val.textContent = row.insufficientHistory ? "need baseline" : (row.period || stonks.selectedPeriod || "today");
+			num.append(pct, val);
+			item.append(rank, avatar, copy, num);
+			list.appendChild(item);
+		});
+		if (!rows.length) {
+			const empty = document.createElement("div");
+			empty.className = "stonks-empty";
+			empty.textContent = "No ranked PnL for this period yet.";
+			list.appendChild(empty);
+		}
+		card.append(head, list);
+		parent.appendChild(card);
+	}
+
+	function appendStonksFollowingTab(parent, stonks, marketRows) {
+		const users = (Array.isArray(stonks && stonks.users) ? stonks.users : []).filter(function(user) {
+			return Number(user && user.userId) !== Number(stonks && stonks.selfUserId);
+		});
+		const card = document.createElement("section");
+		card.className = "stonks-list-card";
+		const head = document.createElement("div");
+		head.className = "stonks-list-head";
+		const label = document.createElement("span");
+		label.className = "section-label";
+		label.textContent = "Following · " + users.length;
+		const live = document.createElement("span");
+		live.className = "quiet-count";
+		live.textContent = "live";
+		head.append(label, live);
+		const list = document.createElement("div");
+		list.className = "sel-list";
+		users.forEach(function(user, index) {
+			const ticker = marketRows[index % Math.max(1, marketRows.length)];
+			const row = document.createElement("div");
+			row.className = "sel-row";
+			const avatar = document.createElement("div");
+			avatar.className = "lb-av";
+			avatar.style.background = stonksAvatarColor(index + 2);
+			avatar.textContent = initialsFor(user.userName || "U");
+			const copy = document.createElement("div");
+			copy.className = "grow";
+			const name = document.createElement("div");
+			name.className = "nm";
+			name.textContent = user.userName || ("user " + user.userId);
+			const sub = document.createElement("div");
+			sub.className = "sub";
+			sub.textContent = user.followed ? "following" : "not followed";
+			if (ticker) {
+				sub.textContent += " · " + ticker.ticker;
+			}
+			copy.append(name, sub);
+			const pill = document.createElement("button");
+			pill.type = "button";
+			pill.className = "sel-pill";
+			pill.textContent = user.followed ? "Unfollow" : "Follow";
+			pill.disabled = !stonks.registered;
+			pill.addEventListener("click", function() {
+				invokeModernDialogAction(user.followed ? "unfollow" : "follow", { userId: user.userId });
+			});
+			row.append(avatar, copy, pill);
+			list.appendChild(row);
+		});
+		if (!users.length) {
+			const empty = document.createElement("div");
+			empty.className = "stonks-empty";
+			empty.textContent = "No traders to follow yet.";
+			list.appendChild(empty);
+		}
+		card.append(head, list);
+		parent.appendChild(card);
+	}
+
+	function appendStonksAuditTab(parent, stonks) {
+		const snapshots = Array.isArray(stonks && stonks.snapshots) ? stonks.snapshots : [];
+		const card = document.createElement("section");
+		card.className = "stonks-list-card";
+		const head = document.createElement("div");
+		head.className = "stonks-list-head";
+		const label = document.createElement("span");
+		label.className = "section-label";
+		label.textContent = "Recent trades · audit";
+		const count = document.createElement("span");
+		count.className = "quiet-count";
+		count.textContent = String(snapshots.length);
+		head.append(label, count);
+		const list = document.createElement("div");
+		list.className = "sel-list";
+		snapshots.forEach(function(snapshot, index) {
+			const row = document.createElement("div");
+			row.className = "sel-row";
+			const side = document.createElement("span");
+			side.className = "sel-pill";
+			side.textContent = index === 0 ? "BUY" : "SAVE";
+			side.classList.add(index === 0 ? "is-buy" : "is-neutral");
+			const copy = document.createElement("div");
+			copy.className = "grow";
+			const name = document.createElement("div");
+			name.className = "nm";
+			name.textContent = formatStonksMoney(snapshot.totalValue, snapshot.currency || "USD");
+			const sub = document.createElement("div");
+			sub.className = "sub";
+			sub.textContent = (snapshot.userName || stonksSelectedUserName(stonks)) + " · " + formatStonksTime(snapshot.createdAt);
+			copy.append(name, sub);
+			const pill = document.createElement("span");
+			pill.className = "sel-pill";
+			pill.textContent = String((snapshot.positions || []).length) + " pos";
+			row.append(side, copy, pill);
+			list.appendChild(row);
+		});
+		if (!snapshots.length) {
+			const empty = document.createElement("div");
+			empty.className = "stonks-empty";
+			empty.textContent = "No portfolio updates yet.";
+			list.appendChild(empty);
+		}
+		card.append(head, list);
+		parent.appendChild(card);
+	}
+
+	function appendStonksAdminTab(parent, stonks) {
+		if (!stonks.canAdmin) {
+			const empty = document.createElement("div");
+			empty.className = "stonks-empty";
+			empty.textContent = "Root Write permission is required.";
+			parent.appendChild(empty);
+			return;
+		}
+		const currentTextChannelId = Number(stonks.textChannelId || 0);
+		const adminConfigPayload = function(overrides) {
+			const payload = {
+				enabled: stonks.enabled !== false,
+				socialAnnouncementsEnabled: stonks.socialAnnouncementsEnabled !== false,
+				textChannelId: currentTextChannelId
+			};
+			Object.keys(overrides || {}).forEach(function(key) {
+				payload[key] = overrides[key];
+			});
+			return payload;
+		};
+		const sendConfig = function(overrides) {
+			invokeModernDialogAction("configure", adminConfigPayload(overrides));
+		};
+		const configuredChannel = (stonks.textChannels || []).find(function(channel) {
+			return Number(channel && channel.textChannelId || 0) === currentTextChannelId;
+		});
+		const card = document.createElement("section");
+		card.className = "stonks-list-card";
+		const head = document.createElement("div");
+		head.className = "stonks-list-head";
+		const label = document.createElement("span");
+		label.className = "section-label";
+		label.textContent = "Server Stonks settings";
+		const badge = document.createElement("span");
+		badge.className = "quiet-count";
+		badge.textContent = stonks.canAdmin ? "admin" : "read only";
+		head.append(label, badge);
+		const list = document.createElement("div");
+		list.className = "sel-list";
+		const appendRow = function(label, control, subtitle) {
+			const row = document.createElement("div");
+			row.className = "sel-row";
+			const copy = document.createElement("div");
+			copy.className = "grow";
+			const name = document.createElement("div");
+			name.className = "nm";
+			name.textContent = label;
+			copy.appendChild(name);
+			if (subtitle) {
+				const sub = document.createElement("div");
+				sub.className = "sub";
+				sub.textContent = subtitle;
+				copy.appendChild(sub);
+			}
+			row.append(copy, control);
+			list.appendChild(row);
+		};
+		const toggle = function(label, checked, callback) {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "sel-pill stonks-admin-toggle " + (checked ? "is-buy" : "is-muted");
+			button.setAttribute("role", "switch");
+			button.setAttribute("aria-checked", checked ? "true" : "false");
+			button.textContent = checked ? "On" : "Off";
+			button.addEventListener("click", callback);
+			appendRow(label, button);
+		};
+		const readonlyPill = function(text, muted) {
+			const pill = document.createElement("span");
+			pill.className = "sel-pill" + (muted ? " is-muted" : "");
+			pill.textContent = text;
+			return pill;
+		};
+		toggle("Enable Stonks", stonks.enabled !== false, function() {
+			sendConfig({ enabled: stonks.enabled === false });
+		});
+		appendRow("Server-wide leaderboard", readonlyPill("On"));
+		toggle("Social announcements", stonks.socialAnnouncementsEnabled !== false, function() {
+			sendConfig({ socialAnnouncementsEnabled: stonks.socialAnnouncementsEnabled === false });
+		});
+		appendRow("Quote source", readonlyPill(stonks.disableQuoteLookup ? "Automation feed" : "Delayed feed", true));
+		const select = document.createElement("select");
+		select.className = "stonks-admin-select";
+		const none = document.createElement("option");
+		none.value = "0";
+		none.textContent = "Auto #stonks";
+		select.appendChild(none);
+		(stonks.textChannels || []).forEach(function(channel) {
+			const option = document.createElement("option");
+			option.value = String(channel.textChannelId || 0);
+			option.textContent = "#" + (channel.name || channel.textChannelId);
+			select.appendChild(option);
+		});
+		if (currentTextChannelId > 0 && !configuredChannel) {
+			const missing = document.createElement("option");
+			missing.value = String(currentTextChannelId);
+			missing.textContent = "#" + currentTextChannelId;
+			select.appendChild(missing);
+		}
+		select.value = String(currentTextChannelId);
+		select.addEventListener("change", function() {
+			sendConfig({ textChannelId: Number(select.value || 0) });
+		});
+		appendRow("Text room", select);
+		card.append(head, list);
+		parent.appendChild(card);
+	}
+
 	function appendStonksTabs(parent, stonks) {
-		const tabs = [["overview", "Overview"], ["ledger", "Ledger"], ["leaderboard", "Leaderboard"], ["following", "Following"]];
+		const tabs = [["market", "Overview"], ["portfolio", "Portfolio"], ["leaderboard", "Leaderboard"], ["following", "Following"], ["audit", "Audit"]];
 		if (stonks.canAdmin) {
 			tabs.push(["admin", "Admin"]);
 		}
 		if (!tabs.some(function(tab) { return tab[0] === stonksActiveTab; })) {
-			stonksActiveTab = "overview";
+			stonksActiveTab = "market";
 		}
 		const wrap = document.createElement("div");
 		wrap.className = "stonks-tabs";
 		tabs.forEach(function(tab) {
 			const button = document.createElement("button");
 			button.type = "button";
-			button.className = "stonks-tab" + (stonksActiveTab === tab[0] ? " is-selected" : "");
+			button.className = "stonks-tab" + (stonksActiveTab === tab[0] ? " is-on is-selected" : "");
 			button.textContent = tab[1];
 			button.addEventListener("click", function() {
 				stonksActiveTab = tab[0];
@@ -5174,13 +6261,63 @@
 		parent.appendChild(wrap);
 	}
 
+	function appendStonksHeatmap(parent, stonks) {
+		const latest = stonksLatestSnapshot(stonks);
+		const positions = latest && Array.isArray(latest.positions) ? latest.positions.slice() : [];
+		const visiblePositions = positions
+			.map(function(position) {
+				return stonksNormalizePosition(position, latest && latest.currency || "USD");
+			})
+			.filter(function(position) {
+				return position.symbol && stonksNumber(position.marketValue) > 0;
+			})
+			.sort(function(left, right) {
+				return stonksNumber(right.marketValue) - stonksNumber(left.marketValue);
+			});
+		if (!visiblePositions.length) {
+			const empty = document.createElement("div");
+			empty.className = "stonks-empty";
+			empty.textContent = latest && latest.positionsRedacted ? "Portfolio positions are private." : "No open positions to map.";
+			parent.appendChild(empty);
+			return;
+		}
+
+		const total = visiblePositions.reduce(function(sum, position) {
+			return sum + stonksNumber(position.marketValue);
+		}, 0);
+		const heatmap = document.createElement("section");
+		heatmap.className = "stonks-heatmap";
+		const title = document.createElement("div");
+		title.className = "stonks-heatmap-title";
+		title.innerHTML = "<strong></strong><span></span>";
+		title.querySelector("strong").textContent = "Portfolio heatmap";
+		title.querySelector("span").textContent = stonksSelectedUserName(stonks);
+		heatmap.appendChild(title);
+		const grid = document.createElement("div");
+		grid.className = "stonks-heatmap-grid";
+		visiblePositions.forEach(function(position) {
+			const share = total > 0 ? stonksNumber(position.marketValue) / total : 0;
+			const tile = document.createElement("div");
+			tile.className = "stonks-heatmap-tile";
+			tile.style.setProperty("--tile-alpha", String(Math.min(0.82, 0.18 + share * 1.9)));
+			tile.style.setProperty("--tile-weight", Math.max(1, Math.round(share * 7)) + "fr");
+			tile.innerHTML = "<strong></strong><span></span><small></small>";
+			tile.querySelector("strong").textContent = position.symbol;
+			tile.querySelector("span").textContent = formatStonksMoney(position.marketValue, position.currency);
+			tile.querySelector("small").textContent = Math.round(share * 1000) / 10 + "%";
+			grid.appendChild(tile);
+		});
+		heatmap.appendChild(grid);
+		parent.appendChild(heatmap);
+	}
+
 	function appendStonksOverview(parent, stonks) {
-		const snapshots = Array.isArray(stonks.snapshots) ? stonks.snapshots : [];
-		const latest = snapshots.length ? snapshots[0] : null;
+		const latest = stonksLatestSnapshot(stonks);
 		const stats = document.createElement("div");
 		stats.className = "stonks-stat-grid";
 		[["Total value", latest ? formatStonksMoney(latest.totalValue, latest.currency) : "-"],
-		 ["Last snapshot", latest ? formatStonksTime(latest.createdAt) : "-"],
+		 ["Last saved", latest ? formatStonksTime(latest.createdAt) : "-"],
+		 ["Owner", stonksSelectedUserName(stonks)],
 		 ["Leaderboard rows", String((stonks.leaderboard || []).length)]].forEach(function(item) {
 			const card = document.createElement("div");
 			card.className = "stonks-stat";
@@ -5205,33 +6342,25 @@
 			periods.appendChild(button);
 		});
 		parent.appendChild(periods);
-		const quick = document.createElement("button");
-		quick.type = "button";
-		quick.className = "chip-button is-primary";
-		quick.textContent = "Quick snapshot";
-		quick.disabled = !stonks.registered;
-		quick.addEventListener("click", function() {
-			if (!refs.body.querySelector(".stonks-position-row")) {
-				stonksActiveTab = "overview";
-				renderModernDialog();
-				return;
-			}
-			const draft = stonksCollectDraft(refs.body);
-			draft.registered = stonks.registered;
-			if (stonksValidateDraft(draft).errors.length) {
-				stonksActiveTab = "overview";
-				renderModernDialog();
-				return;
-			}
-			invokeModernDialogAction("savePortfolio", draft);
-		});
-		parent.appendChild(quick);
+		appendStonksHeatmap(parent, stonks);
 	}
 
 	function appendStonksEditor(parent, stonks) {
 		ensureStonksDraft(stonks);
+		const canEdit = stonksCanEditPortfolio(stonks);
+		const ownerUserId = stonksSelectedUserId(stonks);
+		const ownerName = stonksSelectedUserName(stonks);
+		const latest = stonksLatestSnapshot(stonks);
 		const editor = document.createElement("section");
 		editor.className = "stonks-editor";
+		const owner = document.createElement("div");
+		owner.className = "stonks-portfolio-owner";
+		owner.innerHTML = "<strong></strong><span></span>";
+		owner.querySelector("strong").textContent = ownerName;
+		owner.querySelector("span").textContent = latest
+			? "Current save " + formatStonksTime(latest.createdAt)
+			: "No portfolio saves";
+		editor.appendChild(owner);
 		const top = document.createElement("div");
 		top.className = "stonks-editor-top";
 		top.appendChild(stonksInput(stonksDraftCurrency, "snapshotCurrency", "text", "Currency"));
@@ -5318,7 +6447,7 @@
 		table.className = "stonks-position-table";
 		const head = document.createElement("div");
 		head.className = "stonks-position-head";
-		["Symbol", "Qty", "Price", "Value", "Currency", "Source", "Name", ""].forEach(function(label) {
+		["Symbol", "Qty", "Price", "Value", "Currency", "Source", ""].forEach(function(label) {
 			const cell = document.createElement("span");
 			cell.textContent = label;
 			head.appendChild(cell);
@@ -5335,14 +6464,14 @@
 			row.dataset.stonksQuoteSourceUrl = position.quoteSourceUrl || "";
 			row.dataset.stonksQuoteConfidence = String(position.quoteConfidence || 0);
 			row.appendChild(stonksInput(position.symbol, "symbol", "text", "RKLB"));
-			row.appendChild(stonksInput(position.quantity, "quantity", "number"));
-			row.appendChild(stonksInput(position.price, "price", "number"));
-			row.appendChild(stonksInput(position.marketValue, "marketValue", "number"));
+			row.appendChild(stonksInput(stonksInputNumber(position.quantity, 6), "quantity", "number"));
+			row.appendChild(stonksInput(stonksInputNumber(position.price, 4), "price", "number"));
+			row.appendChild(stonksInput(stonksInputNumber(position.marketValue, 2), "marketValue", "number"));
 			row.appendChild(stonksInput(position.currency || stonksDraftCurrency, "currency"));
 			const source = document.createElement("div");
 			source.className = "stonks-source";
 			const sourceLabel = document.createElement(position.quoteSourceUrl ? "a" : "span");
-			sourceLabel.textContent = stonksSourceLabel(position);
+			sourceLabel.textContent = stonksProviderLabel(position.providerId);
 			if (position.quoteSourceUrl) {
 				sourceLabel.href = position.quoteSourceUrl;
 				sourceLabel.target = "_blank";
@@ -5355,7 +6484,9 @@
 				source.appendChild(exchange);
 			}
 			row.appendChild(source);
-			row.appendChild(stonksInput(position.displayName, "displayName"));
+			const displayName = stonksInput(position.displayName, "displayName");
+			displayName.type = "hidden";
+			row.appendChild(displayName);
 			const remove = document.createElement("button");
 			remove.type = "button";
 			remove.className = "icon-button stonks-remove-row";
@@ -5377,7 +6508,8 @@
 					row.querySelector("[data-stonks-field='marketValue']").value = Number.isFinite(quantity * price) ? String(quantity * price) : "0";
 				}
 				const liveDraft = stonksCollectDraft(editor);
-				liveDraft.registered = stonks.registered;
+				liveDraft.registered = canEdit;
+				liveDraft.userId = ownerUserId;
 				updateStonksValidation(validationSummary, liveDraft, submit, total);
 			});
 			table.appendChild(row);
@@ -5387,9 +6519,9 @@
 			empty.className = "stonks-position-empty";
 			empty.innerHTML = "<strong></strong><span></span>";
 			empty.querySelector("strong").textContent = "No positions yet";
-			empty.querySelector("span").textContent = stonks.registered
-				? "Search for a ticker or add a manual row to start the ledger."
-				: "This ledger has no visible positions.";
+			empty.querySelector("span").textContent = canEdit
+				? "Search for a ticker or add a manual row to start the portfolio."
+				: "This portfolio has no visible positions.";
 			table.appendChild(empty);
 		}
 		editor.appendChild(table);
@@ -5410,24 +6542,37 @@
 		const submit = document.createElement("button");
 		submit.type = "button";
 		submit.className = "chip-button is-primary";
-		submit.textContent = "Submit snapshot";
-		submit.disabled = !stonks.registered;
+		submit.textContent = "Save portfolio";
+		submit.disabled = !canEdit;
 		submit.addEventListener("click", function() {
 			const draft = stonksCollectDraft(editor);
-			draft.registered = stonks.registered;
+			draft.registered = canEdit;
+			draft.userId = ownerUserId;
 			if (stonksValidateDraft(draft).errors.length) {
 				updateStonksValidation(validationSummary, draft, submit, total);
 				return;
 			}
 			invokeModernDialogAction("savePortfolio", draft);
 		});
-		actions.append(add, total, submit);
+		const clear = document.createElement("button");
+		clear.type = "button";
+		clear.className = "chip-button is-danger";
+		clear.textContent = "Clear portfolio";
+		clear.disabled = !canEdit || !(latest && stonksNumber(latest.totalValue) > 0);
+		clear.addEventListener("click", function() {
+			invokeModernDialogAction("clearPortfolio", {
+				userId: ownerUserId,
+				currency: stonksDraftCurrency || latest && latest.currency || "USD",
+				note: "Portfolio cleared"
+			});
+		});
+		actions.append(add, total, clear, submit);
 		editor.appendChild(actions);
 		const validationSummary = document.createElement("div");
 		const draft = {
 			positions: stonksDraftHasUserPositions() ? (stonksDraftPositions || []) : [],
 			currency: stonksDraftCurrency,
-			registered: stonks.registered,
+			registered: canEdit,
 			pristine: !stonksDraftHasUserPositions()
 		};
 		updateStonksValidation(validationSummary, draft, submit, total);
@@ -5437,13 +6582,26 @@
 
 	function appendStonksLedger(parent, stonks) {
 		appendStonksEditor(parent, stonks);
+		appendStonksHeatmap(parent, stonks);
+	}
+
+	function appendStonksAudit(parent, stonks) {
+		const snapshots = Array.isArray(stonks.snapshots) ? stonks.snapshots : [];
+		const description = document.createElement("div");
+		description.className = "stonks-leaderboard-description";
+		description.textContent = "Portfolio updates are kept here for review.";
+		const owner = document.createElement("span");
+		owner.textContent = stonksSelectedUserName(stonks);
+		description.appendChild(owner);
+		parent.appendChild(description);
+
 		const list = document.createElement("div");
 		list.className = "stonks-list";
-		(stonks.snapshots || []).forEach(function(snapshot) {
+		snapshots.forEach(function(snapshot) {
 			const details = document.createElement("details");
 			details.className = "stonks-ledger-item";
 			const summary = document.createElement("summary");
-			summary.textContent = formatStonksMoney(snapshot.totalValue, snapshot.currency) + " - " + formatStonksTime(snapshot.createdAt);
+			summary.textContent = formatStonksMoney(snapshot.totalValue, snapshot.currency) + " - updated " + formatStonksTime(snapshot.createdAt);
 			details.appendChild(summary);
 			(snapshot.positions || []).forEach(function(position) {
 				const row = document.createElement("div");
@@ -5468,7 +6626,7 @@
 		if (!list.children.length) {
 			const empty = document.createElement("div");
 			empty.className = "stonks-empty";
-			empty.textContent = "No snapshots yet.";
+			empty.textContent = "No portfolio updates yet.";
 			list.appendChild(empty);
 		}
 		parent.appendChild(list);
@@ -5592,16 +6750,20 @@
 	function renderStonksDialog(dialog) {
 		const stonks = dialog.stonks || {};
 		ensureStonksDraft(stonks);
-		refs.eyebrow.textContent = "Stonks";
+		const marketRows = stonksMarketRows(stonks);
+		syncStonksDialogHeader(stonks, marketRows);
 		appendStonksStatus(refs.body, stonks);
-		if (!stonks.supported || stonks.enabled === false) {
+		if (!stonks.supported || (stonks.enabled === false && !stonks.canAdmin)) {
 			const empty = document.createElement("div");
 			empty.className = "stonks-empty";
 			empty.textContent = stonks.error || "Stonks is unavailable on this server.";
 			refs.body.appendChild(empty);
 			return;
 		}
-		if (!stonks.registered) {
+		if (stonks.enabled === false && stonks.canAdmin) {
+			stonksActiveTab = "admin";
+		}
+		if (!stonks.registered && stonks.enabled !== false) {
 			const needed = document.createElement("section");
 			needed.className = "stonks-register-needed";
 			const text = document.createElement("strong");
@@ -5617,22 +6779,38 @@
 			refs.body.appendChild(needed);
 		}
 		appendStonksTabs(refs.body, stonks);
+		if (stonks.enabled !== false) {
+			appendStonksPins(refs.body, stonks, marketRows);
+			appendStonksTickerTapeControls(refs.body, stonks);
+		}
 		const panel = document.createElement("section");
 		panel.className = "stonks-panel";
-		if (stonksActiveTab === "ledger") {
-			appendStonksLedger(panel, stonks);
+		if (stonks.enabled === false && stonks.canAdmin) {
+			appendStonksAdminTab(panel, stonks);
+		} else if (stonksActiveTab === "portfolio") {
+			appendStonksPortfolioTab(panel, stonks, marketRows);
 		} else if (stonksActiveTab === "leaderboard") {
-			appendStonksOverview(panel, stonks);
-			appendStonksLeaderboard(panel, stonks);
+			appendStonksLeaderboardTab(panel, stonks, marketRows);
 		} else if (stonksActiveTab === "following") {
-			appendStonksFollowing(panel, stonks);
+			appendStonksFollowingTab(panel, stonks, marketRows);
+		} else if (stonksActiveTab === "audit") {
+			appendStonksAuditTab(panel, stonks);
 		} else if (stonksActiveTab === "admin" && stonks.canAdmin) {
-			appendStonksAdmin(panel, stonks);
+			appendStonksAdminTab(panel, stonks);
 		} else {
-			appendStonksOverview(panel, stonks);
-			appendStonksEditor(panel, stonks);
+			appendStonksMarketTab(panel, stonks, marketRows);
 		}
 		refs.body.appendChild(panel);
+		const foot = document.createElement("footer");
+		foot.className = "stonks-foot";
+		const note = document.createElement("span");
+		note.className = "stonks-foot-note";
+		note.textContent = "Delayed quotes · not financial advice";
+		const clock = document.createElement("span");
+		clock.className = "stonks-foot-note";
+		clock.textContent = new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+		foot.append(note, clock);
+		refs.body.appendChild(foot);
 	}
 
 	function appendModernDialogSections(container, sections, errors, dialog) {
@@ -5859,6 +7037,28 @@
 		});
 	}
 
+	function modernDialogRenderKey(dialog) {
+		const stonks = dialog && dialog.stonks || {};
+		return [
+			dialog && dialog.id || "",
+			dialog && dialog.kind || "",
+			dialog && dialog.title || "",
+			dialog && dialog.subtitle || "",
+			dialog && dialog.tone || "",
+			stonksActiveTab || "",
+			stonks.status || "",
+			stonks.error || "",
+			stonks.loading ? "loading" : "",
+			stonks.supported === false ? "unsupported" : "",
+			stonks.enabled === false ? "disabled" : "",
+			stonks.registered === false ? "anonymous" : "",
+			stonks.selectedUserId || "",
+			Array.isArray(stonks.snapshots) ? stonks.snapshots.length : "",
+			Array.isArray(stonks.leaderboard) ? stonks.leaderboard.length : "",
+			Array.isArray(stonks.personalTickers) ? stonks.personalTickers.length : ""
+		].join("|");
+	}
+
 	function renderModernDialog() {
 		const dialog = modernDialogState || {};
 		const open = !!dialog.open;
@@ -5889,15 +7089,19 @@
 			refs.body.innerHTML = "";
 			refs.actions.innerHTML = "";
 			modernDialogRenderedOpen = false;
+			modernDialogLastRenderKey = "";
 			syncAudioInputMeterTimer();
 			return;
 		}
 
 		const opening = !modernDialogRenderedOpen;
+		const renderKey = modernDialogRenderKey(dialog);
+		const shouldResetBodyScroll = opening || renderKey !== modernDialogLastRenderKey;
 		refs.dialog.className = "modern-dialog" + (dialog.tone ? " is-" + dialog.tone : "")
 			+ (dialog.kind ? " is-" + dialog.kind : "")
 			+ (dialog.kind === "connect" && dialog.editorOpen ? " has-connect-editor" : "")
 			+ (dialog.id ? " dialog-id-" + String(dialog.id).replace(/[^a-z0-9_-]/gi, "-") : "");
+		clearStonksDialogHeader();
 		refs.eyebrow.textContent = dialog.eyebrow || (dialog.kind === "settings" ? "Settings" : "Mumble");
 		refs.title.textContent = dialog.title || "Dialog";
 		refs.subtitle.textContent = dialog.subtitle || "";
@@ -5913,11 +7117,15 @@
 		} else {
 			renderGenericDialog(dialog);
 		}
-		if (dialog.kind !== "settings") {
+		if (dialog.kind !== "settings" && dialog.kind !== "stonks") {
 			renderModernDialogActions(dialog);
 		}
 		enhanceModernDialogSelects(refs.body);
 		syncAudioInputMeterTimer();
+		if (shouldResetBodyScroll) {
+			refs.body.scrollTop = 0;
+		}
+		modernDialogLastRenderKey = renderKey;
 
 		modernDialogRenderedOpen = true;
 		if (pendingModernDialogFieldFocus) {
@@ -5935,6 +7143,7 @@
 		}
 	}
 
+	/* MUMBLE_MODERN_AUTOMATION_BEGIN */
 	function automationModernDialogFieldElement(fieldId) {
 		const targetId = String(fieldId || "");
 		const root = refs.dialog || document.getElementById("modern-dialog") || document;
@@ -6010,8 +7219,11 @@
 		return automationModernDialogFieldState(fieldId);
 	}
 
-	window.__mumbleModernDialogFieldState = automationModernDialogFieldState;
-	window.__mumbleModernSetDialogFieldValue = automationSetModernDialogFieldValue;
+	if (modernAutomationEnabled()) {
+		window.__mumbleModernDialogFieldState = automationModernDialogFieldState;
+		window.__mumbleModernSetDialogFieldValue = automationSetModernDialogFieldValue;
+	}
+	/* MUMBLE_MODERN_AUTOMATION_END */
 
 	function wireActions() {
 		if (refs.closeButton) {

@@ -15,6 +15,8 @@
 #include "ModernDialogController.h"
 #include "ModernDialogHost.h"
 #include "ModernShellHost.h"
+#include "MumbleConstants.h"
+#include "Net.h"
 #include "OSInfo.h"
 #include "Version.h"
 #include "VersionCheck.h"
@@ -1190,6 +1192,183 @@ namespace {
 				QStringLiteral("openFeedbackFallbackGitHub"), QString(), QSize(640, 420));
 		}
 
+		if (variant == QLatin1String("sslCertificateWarning")) {
+			QVariantMap dialog = automationDialogFromSections(
+				QStringLiteral("sslCertificateWarning"), QStringLiteral("warning"),
+				QObject::tr("Server certificate warning"),
+				QObject::tr("The server certificate could not be verified."),
+				QVariantList {
+					automationSection(QObject::tr("Server"),
+									  QVariantList {
+										  automationHiddenField(QStringLiteral("ssl.host"),
+																QStringLiteral("mumble.quistify.com")),
+										  automationHiddenField(QStringLiteral("ssl.port"), 64739),
+										  automationHiddenField(QStringLiteral("ssl.digest"),
+																QStringLiteral("b455f36c5e1d8188f8d2d927f278c1f29e5ad7d8")),
+										  automationReadonlyField(QObject::tr("Server"),
+																  QStringLiteral("mumble.quistify.com:64739")),
+										  automationReadonlyField(
+											  QObject::tr("Presented digest"),
+											  QStringLiteral("b4:55:f3:6c:5e:1d:81:88:f8:d2:d9:27:f2:78:c1:f2:9e:5a:d7:d8")) },
+									  QStringLiteral("list")),
+					automationSection(QObject::tr("Certificate"),
+									  QVariantList {
+										  automationReadonlyField(QObject::tr("Subject"),
+																  QStringLiteral("mumble.quistify.com")),
+										  automationReadonlyField(QObject::tr("Issuer"),
+																  QStringLiteral("Quistify Dev CA")),
+										  automationReadonlyField(QObject::tr("Expires"),
+																  QStringLiteral("2027-05-31T12:00:00")) },
+									  QStringLiteral("list")),
+					automationSection(QObject::tr("Verification errors"),
+									  QVariantList { automationReadonlyField(
+										  QObject::tr("Error 1"),
+										  QObject::tr("The certificate is self-signed, and untrusted.")) },
+									  QStringLiteral("list")) },
+				QVariantList {
+					automationDialogAction(QStringLiteral("rejectSslCertificate"), QObject::tr("Reject"), QString(),
+										   true),
+					automationDialogAction(QStringLiteral("viewSslCertificateDetails"),
+										   QObject::tr("View details"), QString(), false),
+					automationDialogAction(QStringLiteral("trustSslCertificate"),
+										   QObject::tr("Accept certificate"), QStringLiteral("danger"), true) },
+				QStringLiteral("rejectSslCertificate"), QStringLiteral("warning"), QSize(760, 620));
+			dialog.insert(QStringLiteral("highlights"),
+						  QVariantList { automationHighlight(QObject::tr("Server"),
+															 QStringLiteral("mumble.quistify.com:64739")),
+										 automationHighlight(QObject::tr("Trust"), QObject::tr("Unverified"),
+															 QStringLiteral("warning")),
+										 automationHighlight(QObject::tr("Errors"), 1,
+															 QStringLiteral("warning")) });
+			return dialog;
+		}
+		if (variant == QLatin1String("sslCertificateDetails")) {
+			return automationDialogFromSections(
+				QStringLiteral("sslCertificateDetails"), QStringLiteral("warning"),
+				QObject::tr("Certificate details"),
+				QObject::tr("Review the certificate before deciding whether to trust it for this server."),
+				QVariantList { automationSection(
+					QObject::tr("Certificate"),
+					QVariantList {
+						automationReadonlyField(QObject::tr("Server"),
+												QStringLiteral("mumble.quistify.com:64739")),
+						automationReadonlyField(QObject::tr("Subject"),
+												QStringLiteral("mumble.quistify.com")),
+						automationReadonlyField(QObject::tr("Issuer"),
+												QStringLiteral("Quistify Dev CA")),
+						automationReadonlyField(QObject::tr("Serial number"),
+												QStringLiteral("00A17C5")),
+						automationReadonlyField(QObject::tr("Valid from"),
+												QStringLiteral("2026-05-31T12:00:00")),
+						automationReadonlyField(QObject::tr("Expires"),
+												QStringLiteral("2027-05-31T12:00:00")),
+						automationReadonlyField(
+							QObject::tr("Presented digest"),
+							QStringLiteral("b4:55:f3:6c:5e:1d:81:88:f8:d2:d9:27:f2:78:c1:f2:9e:5a:d7:d8")),
+						automationDialogField(
+							QStringLiteral("ssl.errorDetails"), QObject::tr("Verification errors"),
+							QStringLiteral("textarea"),
+							QObject::tr("The certificate is self-signed, and untrusted."), false) },
+					QStringLiteral("list")) },
+				QVariantList { automationDialogAction(QStringLiteral("rejectSslCertificate"),
+													  QObject::tr("Close"), QString(), true),
+							   automationDialogAction(QStringLiteral("trustSslCertificate"),
+													  QObject::tr("Accept certificate"),
+													  QStringLiteral("danger"), true) },
+				QStringLiteral("rejectSslCertificate"), QStringLiteral("warning"), QSize(760, 620));
+		}
+		if (variant == QLatin1String("sslHandshakeFailure")) {
+			return automationDialogFromSections(
+				QStringLiteral("sslHandshakeFailure"), QStringLiteral("warning"),
+				QObject::tr("SSL error"),
+				QObject::tr("Mumble is unable to establish a secure connection to the server."),
+				QVariantList { automationSection(
+					QObject::tr("Connection"),
+					QVariantList {
+						automationReadonlyField(QObject::tr("Reason"),
+												QObject::tr("The TLS handshake failed.")),
+						automationNoteField(QObject::tr(
+							"This can happen when the client and server support different encryption standards, one side is using an old operating system, the address is not a Mumble server, or the selected port belongs to another service.")) }) },
+				QVariantList { automationDialogAction(QStringLiteral("close"), QObject::tr("Close"),
+													  QStringLiteral("accent"), true) },
+				QStringLiteral("close"), QStringLiteral("warning"), QSize(720, 440));
+		}
+
+		if (variant == QLatin1String("dragUserConfirm")) {
+			QVariantMap dialog = automationDialogFromSections(
+				QStringLiteral("dragUserConfirm"), QStringLiteral("confirm"),
+				QObject::tr("Move user?"),
+				QObject::tr("Confirm this voice-room move before it is sent to the server."),
+				QVariantList { automationSection(
+					QObject::tr("Move"),
+					QVariantList {
+						automationHiddenField(QStringLiteral("dragUser.session"), 42),
+						automationHiddenField(QStringLiteral("dragUser.targetScopeToken"),
+											  QStringLiteral("0:100")),
+						automationReadonlyField(QObject::tr("User"), QStringLiteral("Demo User")),
+						automationReadonlyField(QObject::tr("Target room"),
+												QStringLiteral("Root / Landing")),
+						automationNoteField(QObject::tr(
+							"Your User Dragging preference is set to ask before moving people between voice rooms.")) }) },
+				QVariantList { automationDialogAction(QStringLiteral("cancel"), QObject::tr("Cancel"),
+													  QString(), true),
+							   automationDialogAction(QStringLiteral("confirmDragUser"),
+													  QObject::tr("Move user"), QStringLiteral("warning"), true) },
+				QStringLiteral("confirmDragUser"), QStringLiteral("warning"), QSize(560, 360));
+			dialog.insert(QStringLiteral("highlights"),
+						  QVariantList { automationHighlight(QObject::tr("User"),
+															 QStringLiteral("Demo User")),
+										 automationHighlight(QObject::tr("Target"),
+															 QStringLiteral("Root / Landing")) });
+			return dialog;
+		}
+		if (variant == QLatin1String("dragChannelConfirm")) {
+			QVariantMap dialog = automationDialogFromSections(
+				QStringLiteral("dragChannelConfirm"), QStringLiteral("confirm"),
+				QObject::tr("Move room?"),
+				QObject::tr("Confirm this room move before it is sent to the server."),
+				QVariantList { automationSection(
+					QObject::tr("Move"),
+					QVariantList {
+						automationHiddenField(QStringLiteral("dragChannel.sourceScopeToken"),
+											  QStringLiteral("0:101")),
+						automationHiddenField(QStringLiteral("dragChannel.targetScopeToken"),
+											  QStringLiteral("0:100")),
+						automationHiddenField(QStringLiteral("dragChannel.placement"),
+											  QStringLiteral("inside")),
+						automationReadonlyField(QObject::tr("Room"),
+												QStringLiteral("Root / Strategy")),
+						automationReadonlyField(QObject::tr("Target"),
+												QStringLiteral("Root / Landing")),
+						automationReadonlyField(QObject::tr("Placement"), QStringLiteral("inside")),
+						automationNoteField(QObject::tr(
+							"Your Channel Dragging preference is set to ask before moving rooms.")) }) },
+				QVariantList { automationDialogAction(QStringLiteral("cancel"), QObject::tr("Cancel"),
+													  QString(), true),
+							   automationDialogAction(QStringLiteral("confirmDragChannel"),
+													  QObject::tr("Move room"), QStringLiteral("warning"), true) },
+				QStringLiteral("confirmDragChannel"), QStringLiteral("warning"), QSize(580, 380));
+			dialog.insert(QStringLiteral("highlights"),
+						  QVariantList { automationHighlight(QObject::tr("Room"),
+															 QStringLiteral("Root / Strategy")),
+										 automationHighlight(QObject::tr("Target"),
+															 QStringLiteral("Root / Landing")) });
+			return dialog;
+		}
+		if (variant == QLatin1String("channelMoveUnavailable")) {
+			return automationDialogFromSections(
+				QStringLiteral("channelMoveUnavailable"), QStringLiteral("warning"),
+				QObject::tr("Cannot move room"),
+				QObject::tr("This room cannot be moved automatically."),
+				QVariantList { automationSection(
+					QObject::tr("Reason"),
+					QVariantList { automationNoteField(QObject::tr(
+						"Reset the numeric sorting indicators or adjust the room manually.")) }) },
+				QVariantList { automationDialogAction(QStringLiteral("close"), QObject::tr("Close"),
+													  QStringLiteral("accent"), true) },
+				QStringLiteral("close"), QStringLiteral("warning"), QSize(560, 320));
+		}
+
 		if (variant == QLatin1String("aboutMumble")) {
 			QVariantMap dialog = automationDialogFromSections(
 				QStringLiteral("aboutMumbleProbe"), QStringLiteral("about"), QObject::tr("About Mumble"),
@@ -1926,6 +2105,15 @@ namespace {
 								   QStringLiteral("USD"), QStringLiteral("Nasdaq")),
 			automationStonksTicker(QStringLiteral("AMD"), QObject::tr("Advanced Micro Devices"), 1, 12.0, 1970.4,
 								   QStringLiteral("USD"), QStringLiteral("Nasdaq")) };
+		const QVariantList pinnedTickers {
+			automationStonksTicker(QStringLiteral("RKLB"), QObject::tr("Rocket Lab USA"), 1, 42.0, 773.64,
+								   QStringLiteral("USD"), QStringLiteral("Nasdaq")),
+			automationStonksTicker(QStringLiteral("SAAB-B.ST"), QObject::tr("Saab AB"), 1, 20.0, 5848.0,
+								   QStringLiteral("SEK"), QStringLiteral("Stockholm")) };
+		const QVariantMap feedPreferences {
+			{ QStringLiteral("showMine"), true },
+			{ QStringLiteral("showPopular"), true },
+			{ QStringLiteral("showPins"), true } };
 		const QVariantList users { automationStonksUser(1, QStringLiteral("dankmaster"), false),
 								   automationStonksUser(2, QStringLiteral("Trader Joe"), true),
 								   automationStonksUser(3, QStringLiteral("Long Only"), false) };
@@ -1949,6 +2137,10 @@ namespace {
 		state.insert(QStringLiteral("users"), users);
 		state.insert(QStringLiteral("popularTickers"), popularTickers);
 		state.insert(QStringLiteral("personalTickers"), personalTickers);
+		state.insert(QStringLiteral("pinnedTickers"), pinnedTickers);
+		state.insert(QStringLiteral("feedPreferences"), feedPreferences);
+		state.insert(QStringLiteral("textChannelId"), 7u);
+		state.insert(QStringLiteral("socialAnnouncementsEnabled"), true);
 		state.insert(QStringLiteral("textChannels"),
 					 QVariantList { QVariantMap { { QStringLiteral("textChannelId"), 7u },
 												   { QStringLiteral("name"), QStringLiteral("stonks") } } });
@@ -1960,6 +2152,7 @@ namespace {
 
 		const QString normalizedVariant = variant.trimmed().toLower();
 		if (normalizedVariant == QLatin1String("loading") || normalizedVariant == QLatin1String("headerloading")) {
+			state.insert(QStringLiteral("loading"), true);
 			state.insert(QStringLiteral("status"), QObject::tr("Loading Stonks leaderboard and ticker quotes..."));
 			state.insert(QStringLiteral("snapshots"), QVariantList());
 			state.insert(QStringLiteral("leaderboard"), QVariantList());
@@ -1979,14 +2172,32 @@ namespace {
 			return state;
 		}
 		if (normalizedVariant == QLatin1String("empty") || normalizedVariant == QLatin1String("headerempty")) {
-			state.insert(QStringLiteral("status"), QObject::tr("No Stonks ledger updates yet."));
+			state.insert(QStringLiteral("status"), QObject::tr("No Stonks portfolio updates yet."));
 			state.insert(QStringLiteral("snapshots"), QVariantList());
 			state.insert(QStringLiteral("leaderboard"), QVariantList());
 			state.insert(QStringLiteral("popularTickers"), QVariantList());
 			state.insert(QStringLiteral("personalTickers"), QVariantList());
+			state.insert(QStringLiteral("pinnedTickers"), QVariantList());
 			state.insert(QStringLiteral("tickerQuotes"), QVariantMap());
 			state.insert(QStringLiteral("leaderboardDescription"),
 						 QObject::tr("No PnL rankings exist for the selected period yet."));
+			return state;
+		}
+		if (normalizedVariant == QLatin1String("disabled") || normalizedVariant == QLatin1String("admindisabled")) {
+			state.insert(QStringLiteral("enabled"), false);
+			state.insert(QStringLiteral("status"), QObject::tr("Stonks is disabled for regular clients."));
+			return state;
+		}
+		if (normalizedVariant == QLatin1String("nonadmin") || normalizedVariant == QLatin1String("readonly")) {
+			state.insert(QStringLiteral("canAdmin"), false);
+			state.insert(QStringLiteral("textChannels"), QVariantList());
+			return state;
+		}
+		if (normalizedVariant == QLatin1String("disablednonadmin") || normalizedVariant == QLatin1String("readonlydisabled")) {
+			state.insert(QStringLiteral("enabled"), false);
+			state.insert(QStringLiteral("canAdmin"), false);
+			state.insert(QStringLiteral("textChannels"), QVariantList());
+			state.insert(QStringLiteral("status"), QObject::tr("Stonks is disabled on this server."));
 			return state;
 		}
 		if (normalizedVariant.isEmpty() || normalizedVariant == QLatin1String("populated")
@@ -2021,8 +2232,8 @@ namespace {
 					  QObject::tr("Portfolio, leaderboard, following, and server settings."));
 		dialog.insert(QStringLiteral("primaryActionId"), QStringLiteral("close"));
 		dialog.insert(QStringLiteral("tone"), QStringLiteral("wide"));
-		dialog.insert(QStringLiteral("width"), 1120);
-		dialog.insert(QStringLiteral("height"), 760);
+		dialog.insert(QStringLiteral("width"), 760);
+		dialog.insert(QStringLiteral("height"), 620);
 		dialog.insert(QStringLiteral("stonks"), stonks);
 		return dialog;
 	}
@@ -2198,6 +2409,14 @@ namespace {
 			preferenceSummary.insert(QStringLiteral("showPins"),
 									 preferences.value(QStringLiteral("showPins"), true).toBool());
 			summary.insert(QStringLiteral("feedPreferences"), preferenceSummary);
+			return summary;
+		}
+
+		if (action == QLatin1String("setTickerBannerAlwaysScroll")) {
+			summary.insert(QStringLiteral("serverAction"), QStringLiteral("setTickerBannerAlwaysScroll"));
+			summary.insert(QStringLiteral("protoAction"), QStringLiteral("localSettings"));
+			summary.insert(QStringLiteral("tickerBannerAlwaysScroll"),
+						   payload.value(QStringLiteral("tickerBannerAlwaysScroll")).toBool());
 			return summary;
 		}
 
@@ -3557,6 +3776,47 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		return response;
 	}
 
+	if (command == QLatin1String("modernDialogDomState")) {
+		if (!m_mainWindow->m_modernDialogHost && !m_mainWindow->m_modernShellHost) {
+			return errorResponse(tr("Modern dialog host is not available."));
+		}
+
+		const QString script =
+			QStringLiteral("(function(){"
+						   "function text(node){return node ? String(node.textContent || '').trim() : '';}"
+						   "var dialog=document.getElementById('modern-dialog');"
+						   "var body=document.getElementById('modern-dialog-body');"
+						   "var root=dialog || document.body;"
+						   "var tab=root ? root.querySelector('.stonks-tab.is-selected,[role=\"tab\"][aria-selected=\"true\"],.modern-dialog-tab.is-selected,.modern-tab.is-selected') : null;"
+						   "return {"
+						   "exists:!!dialog,"
+						   "ready:!!(dialog && body),"
+						   "className:dialog ? String(dialog.className || '') : '',"
+						   "title:text(document.getElementById('modern-dialog-title')),"
+						   "eyebrow:text(document.getElementById('modern-dialog-eyebrow')),"
+						   "subtitle:text(document.getElementById('modern-dialog-subtitle')),"
+						   "activeTab:text(tab),"
+						   "bodyText:body ? String(body.innerText || body.textContent || '').trim() : ''"
+						   "};"
+						   "})()");
+		QVariantMap response = okResponse();
+		QVariant domState;
+		if (m_mainWindow->m_modernDialogHost) {
+			domState = m_mainWindow->m_modernDialogHost->runAutomationScriptResult(script);
+		}
+		if (!domState.toMap().value(QStringLiteral("exists")).toBool() && m_mainWindow->m_modernShellHost) {
+			domState = m_mainWindow->m_modernShellHost->runAutomationScriptResult(script);
+		}
+		if (!domState.toMap().value(QStringLiteral("exists")).toBool() && m_mainWindow->m_modernDialogController) {
+			const QVariantMap state = m_mainWindow->m_modernDialogController->state();
+			if (state.value(QStringLiteral("open")).toBool()) {
+				m_mainWindow->publishModernDialogState(state);
+			}
+		}
+		response.insert(QStringLiteral("state"), domState);
+		return response;
+	}
+
 	if (command == QLatin1String("setModernDialogFieldValue")) {
 		if (!m_mainWindow->m_modernDialogHost && !m_mainWindow->m_modernShellHost) {
 			return errorResponse(tr("Modern dialog host is not available."));
@@ -3796,6 +4056,48 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 				window->m_modernDialogController = std::make_unique< ModernDialogController >();
 			}
 			window->publishModernDialogState(window->m_modernDialogController->openGenericDialog(dialog));
+		};
+
+		if (async) {
+			scheduleAction(openProbe);
+			return asyncResponse();
+		}
+
+		openProbe(m_mainWindow);
+		return okResponse();
+	}
+
+	if (command == QLatin1String("openUrlMissingUsernameProbe")) {
+		QString host = request.value(QStringLiteral("host"), QStringLiteral("missing-user.invalid")).toString().trimmed();
+		if (host.isEmpty()) {
+			host = QStringLiteral("missing-user.invalid");
+		}
+		int requestedPort = request.value(QStringLiteral("port"), DEFAULT_MUMBLE_PORT).toInt();
+		if (requestedPort <= 0 || requestedPort > 65535) {
+			requestedPort = DEFAULT_MUMBLE_PORT;
+		}
+		QString path = request.value(QStringLiteral("path"), QStringLiteral("/Lobby")).toString().trimmed();
+		if (path.isEmpty()) {
+			path = QStringLiteral("/");
+		}
+		if (!path.startsWith(QLatin1Char('/'))) {
+			path.prepend(QLatin1Char('/'));
+		}
+
+		QUrl url;
+		url.setScheme(QLatin1String("mumble"));
+		url.setHost(host);
+		url.setPort(requestedPort);
+		url.setPath(path);
+		QUrlQuery query;
+		const QString title = request.value(QStringLiteral("title"), QStringLiteral("Invite from Modern test")).toString();
+		if (!title.trimmed().isEmpty()) {
+			query.addQueryItem(QStringLiteral("title"), title.trimmed());
+		}
+		url.setQuery(query);
+
+		const auto openProbe = [url](MainWindow *window) {
+			window->openUrl(url);
 		};
 
 		if (async) {

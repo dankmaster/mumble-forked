@@ -3692,7 +3692,8 @@ void Server::msgAuthenticate(ServerUser *uSource, MumbleProto::Authenticate &msg
 	}
 
 	Channel *lc = nullptr;
-	if (uSource->iId >= 0 && Meta::mp->bRememberChan) {
+	const bool reconnectToLastChannel = msg.reconnect_to_last_channel();
+	if (uSource->iId >= 0 && Meta::mp->bRememberChan && reconnectToLastChannel) {
 		unsigned int lastChannelID = m_dbWrapper.getLastChannelID(iServerNum, static_cast< unsigned int >(uSource->iId),
 																  static_cast< unsigned int >(iRememberChanDuration),
 																  tUptime.elapsed< std::chrono::seconds >());

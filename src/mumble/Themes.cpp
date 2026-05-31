@@ -159,6 +159,7 @@ bool Themes::apply() {
 	if (Global::get().mw) {
 		Global::get().mw->refreshTextDocumentStylesheets();
 	}
+	applyUiThemeNativeTitleBars();
 	return result;
 }
 

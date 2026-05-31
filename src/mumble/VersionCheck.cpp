@@ -36,6 +36,7 @@
 namespace {
 
 constexpr int MaxRedirects = 5;
+constexpr int SupportedPackageUpdaterVersion = 2;
 
 QUrl defaultReleaseApiUrl() {
 	return QUrl(QStringLiteral("https://api.github.com/repos/dankmaster/mumble/releases/tags/mumble-forked"));
@@ -90,17 +91,30 @@ int jsonInt(const QJsonObject &object, const QString &key, int fallback = -1) {
 }
 
 QUrl jsonUrl(const QJsonObject &object, const QString &key) {
-	const QUrl url(object.value(key).toString().trimmed());
+	const QString value = object.value(key).toString().trimmed();
+	if (value.isEmpty()) {
+		return {};
+	}
+	const QUrl url(value);
 	return url.isValid() ? url : QUrl();
 }
 
-QString normalizedSha256(const QJsonObject &object) {
-	const QString sha256 = object.value(QStringLiteral("sha256")).toString().trimmed();
+QString normalizedSha256String(const QString &value) {
+	const QString sha256 = value.trimmed();
 	static const QRegularExpression sha256Regex(QStringLiteral("^[0-9A-Fa-f]{64}$"));
 	return sha256Regex.match(sha256).hasMatch() ? sha256.toLower() : QString();
 }
 
-bool isTrustedInstallerUrl(const QUrl &url) {
+QString normalizedSha256(const QJsonObject &object) {
+	return normalizedSha256String(object.value(QStringLiteral("sha256")).toString());
+}
+
+QJsonObject jsonObject(const QJsonObject &object, const QString &key) {
+	const QJsonValue value = object.value(key);
+	return value.isObject() ? value.toObject() : QJsonObject();
+}
+
+bool isTrustedUpdateAssetUrl(const QUrl &url) {
 	if (!url.isValid()) {
 		return false;
 	}
@@ -111,8 +125,136 @@ bool isTrustedInstallerUrl(const QUrl &url) {
 	return url.isLocalFile() && hasConfiguredUpdateOverride();
 }
 
+QJsonObject installerObject(const QJsonObject &info) {
+	return jsonObject(info, QStringLiteral("installer"));
+}
+
+QUrl installerDownloadUrl(const QJsonObject &info) {
+	const QUrl nestedUrl = jsonUrl(installerObject(info), QStringLiteral("url"));
+	return nestedUrl.isValid() ? nestedUrl : jsonUrl(info, QStringLiteral("installerUrl"));
+}
+
+QString installerExpectedSha256(const QJsonObject &info) {
+	const QString nestedSha256 = normalizedSha256(installerObject(info));
+	return !nestedSha256.isEmpty() ? nestedSha256 : normalizedSha256(info);
+}
+
+QJsonObject packageObject(const QJsonObject &info) {
+	return jsonObject(info, QStringLiteral("package"));
+}
+
+QUrl packageDownloadUrl(const QJsonObject &info) {
+	return jsonUrl(packageObject(info), QStringLiteral("url"));
+}
+
+QString packageExpectedSha256(const QJsonObject &info) {
+	return normalizedSha256(packageObject(info));
+}
+
+QString preferredUpdateMode(const QJsonObject &info) {
+	const QString mode = info.value(QStringLiteral("preferredUpdate")).toString().trimmed().toLower();
+	return mode.isEmpty() ? QStringLiteral("installer") : mode;
+}
+
+bool canUseInstallerUpdate(const QJsonObject &info) {
+#ifdef Q_OS_WIN
+	return isTrustedUpdateAssetUrl(installerDownloadUrl(info)) && !installerExpectedSha256(info).isEmpty();
+#else
+	Q_UNUSED(info);
+	return false;
+#endif
+}
+
+bool canUsePackageUpdate(const QJsonObject &info) {
+#ifdef Q_OS_WIN
+	if (preferredUpdateMode(info) != QLatin1String("package")) {
+		return false;
+	}
+
+	const QJsonObject package = packageObject(info);
+	if (package.value(QStringLiteral("format")).toString().trimmed() != QLatin1String("mumble-update-v1")) {
+		return false;
+	}
+	if (package.value(QStringLiteral("applyMode")).toString().trimmed() != QLatin1String("replace-staged-payload")) {
+		return false;
+	}
+
+	const int minUpdaterVersion = jsonInt(package, QStringLiteral("minUpdaterVersion"), -1);
+	if (minUpdaterVersion < 0 || minUpdaterVersion > SupportedPackageUpdaterVersion) {
+		return false;
+	}
+
+	return isTrustedUpdateAssetUrl(packageDownloadUrl(info)) && !packageExpectedSha256(info).isEmpty();
+#else
+	Q_UNUSED(info);
+	return false;
+#endif
+}
+
+QString selectedUpdateMode(const QJsonObject &info) {
+	if (canUsePackageUpdate(info)) {
+		return QStringLiteral("package");
+	}
+	if (canUseInstallerUpdate(info)) {
+		return QStringLiteral("installer");
+	}
+	return QStringLiteral("manual");
+}
+
+QUrl selectedDownloadUrl(const QJsonObject &info) {
+	return selectedUpdateMode(info) == QLatin1String("package") ? packageDownloadUrl(info) : installerDownloadUrl(info);
+}
+
+QString selectedExpectedSha256(const QJsonObject &info) {
+	return selectedUpdateMode(info) == QLatin1String("package") ? packageExpectedSha256(info)
+																: installerExpectedSha256(info);
+}
+
+QString selectedFileSuffix(const QString &updateMode) {
+	return updateMode == QLatin1String("package") ? QStringLiteral(".mumble-update") : QStringLiteral(".msi");
+}
+
+QString fallbackUpdateFileName(const QJsonObject &info, const QString &updateMode) {
+	const QString version = info.value(QStringLiteral("version")).toString().trimmed();
+	const int build       = jsonInt(info, QStringLiteral("build"));
+	const QString suffix  = selectedFileSuffix(updateMode);
+	if (!version.isEmpty()) {
+		return QStringLiteral("mumble-forked-%1%2").arg(version, suffix);
+	}
+	if (build >= 0) {
+		return QStringLiteral("mumble-forked-build-%1%2").arg(build).arg(suffix);
+	}
+	return updateMode == QLatin1String("package") ? QStringLiteral("mumble-forked-update.mumble-update")
+												  : QStringLiteral("mumble-forked-update.msi");
+}
+
+QString updateAssetFileName(const QJsonObject &info) {
+	const QString updateMode = selectedUpdateMode(info);
+	const QUrl downloadUrl   = selectedDownloadUrl(info);
+	QString fileName         = QFileInfo(downloadUrl.path()).fileName();
+	if (fileName.isEmpty() || !fileName.endsWith(selectedFileSuffix(updateMode), Qt::CaseInsensitive)) {
+		fileName = fallbackUpdateFileName(info, updateMode);
+	}
+
+	fileName.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._-]")), QStringLiteral("_"));
+	return fileName;
+}
+
+QString updateModeFromPath(const QString &updatePath, const QString &requestedMode) {
+	const QString mode = requestedMode.trimmed().toLower();
+	if (mode == QLatin1String("package") || mode == QLatin1String("installer")) {
+		return mode;
+	}
+
+	const QFileInfo updateFile(updatePath);
+	if (updateFile.fileName().endsWith(QLatin1String(".mumble-update"), Qt::CaseInsensitive)) {
+		return QStringLiteral("package");
+	}
+	return QStringLiteral("installer");
+}
+
 QString updateInstallerFileName(const QJsonObject &info) {
-	const QUrl installerUrl = jsonUrl(info, QStringLiteral("installerUrl"));
+	const QUrl installerUrl = installerDownloadUrl(info);
 	QString fileName       = QFileInfo(installerUrl.path()).fileName();
 	if (fileName.isEmpty() || !fileName.endsWith(QLatin1String(".msi"), Qt::CaseInsensitive)) {
 		const QString version = info.value(QStringLiteral("version")).toString().trimmed();
@@ -183,7 +325,9 @@ QJsonObject updateInfoFromRelease(const QJsonObject &release, QUrl *manifestUrl)
 		const QString url       = asset.value(QStringLiteral("browser_download_url")).toString();
 		if (name == QLatin1String("mumble-forked-update.json") && manifestUrl) {
 			*manifestUrl = QUrl(url);
-		} else if (name == QLatin1String("mumble-forked.msi")) {
+		} else if (name == QLatin1String("mumble-forked.msi")
+				   || (name.startsWith(QLatin1String("mumble-forked-"))
+					   && name.endsWith(QLatin1String(".msi"), Qt::CaseInsensitive))) {
 			info.insert(QStringLiteral("installerUrl"), url);
 		}
 	}
@@ -197,6 +341,21 @@ QJsonObject normalizeManifestInfo(const QJsonObject &manifest) {
 		info.insert(QStringLiteral("releaseUrl"),
 					QStringLiteral("https://github.com/dankmaster/mumble/releases/tag/mumble-forked"));
 	}
+
+	const QJsonObject installer = installerObject(info);
+	if (!info.contains(QStringLiteral("installerUrl"))) {
+		const QUrl nestedInstallerUrl = jsonUrl(installer, QStringLiteral("url"));
+		if (nestedInstallerUrl.isValid()) {
+			info.insert(QStringLiteral("installerUrl"), nestedInstallerUrl.toString());
+		}
+	}
+	if (!info.contains(QStringLiteral("sha256"))) {
+		const QString nestedInstallerSha256 = normalizedSha256(installer);
+		if (!nestedInstallerSha256.isEmpty()) {
+			info.insert(QStringLiteral("sha256"), nestedInstallerSha256);
+		}
+	}
+
 	if (!info.contains(QStringLiteral("installerUrl"))) {
 		info.insert(QStringLiteral("installerUrl"),
 					QStringLiteral("https://github.com/dankmaster/mumble/releases/download/mumble-forked/mumble-forked.msi"));
@@ -288,18 +447,20 @@ QJsonArray stringListJsonArray(const QStringList &items) {
 	return array;
 }
 
-QStringList bundledUpdaterArguments(const QString &installerPath, const QString &updateDirPath, const bool passive) {
+QStringList bundledUpdaterArguments(const QString &updatePath, const QString &updateDirPath, const bool passive,
+									const QString &updateMode) {
 	const QString appPath = QCoreApplication::applicationFilePath();
 	const QString appDir  = QFileInfo(appPath).absolutePath();
 	const QDir updateDir(updateDirPath);
 	const QString updaterLogPath = updateDir.filePath(QStringLiteral("mumble-updater.log"));
 	const QString msiLogPath     = updateDir.filePath(QStringLiteral("mumble-update-msi.log"));
+	const QString mode           = updateModeFromPath(updatePath, updateMode);
 
 	return QStringList {
 		QStringLiteral("--parent-pid"),
 		QString::number(QCoreApplication::applicationPid()),
-		QStringLiteral("--installer"),
-		QDir::toNativeSeparators(installerPath),
+		mode == QLatin1String("package") ? QStringLiteral("--package") : QStringLiteral("--installer"),
+		QDir::toNativeSeparators(updatePath),
 		QStringLiteral("--app"),
 		QDir::toNativeSeparators(appPath),
 		QStringLiteral("--working-dir"),
@@ -320,7 +481,7 @@ QStringList msiexecUpdateArguments(const QString &installerPath, const bool pass
 	return arguments;
 }
 
-bool launchBundledUpdater(const QString &installerPath, const bool passive) {
+bool launchBundledUpdater(const QString &updatePath, const bool passive, const QString &updateMode) {
 #ifdef Q_OS_WIN
 	QDir updateDir(Global::get().qdBasePath.filePath(QStringLiteral("Updates")));
 	if (!updateDir.exists() && !QDir().mkpath(updateDir.absolutePath())) {
@@ -345,11 +506,12 @@ bool launchBundledUpdater(const QString &installerPath, const bool passive) {
 		return false;
 	}
 
-	const QStringList arguments = bundledUpdaterArguments(installerPath, updateDir.absolutePath(), passive);
+	const QStringList arguments = bundledUpdaterArguments(updatePath, updateDir.absolutePath(), passive, updateMode);
 	return QProcess::startDetached(updaterTargetPath, arguments, updateDir.absolutePath());
 #else
-	Q_UNUSED(installerPath);
+	Q_UNUSED(updatePath);
 	Q_UNUSED(passive);
+	Q_UNUSED(updateMode);
 	return false;
 #endif
 }
@@ -359,12 +521,14 @@ public:
 	ForkUpdateInstaller(const QJsonObject &info, QWidget *parent, bool showProgress,
 						std::function< void(const QString &) > readyCallback,
 						std::function< void(const QString &) > failureCallback,
-						std::function< void() > cancelledCallback)
+						std::function< void() > cancelledCallback,
+						std::function< void(qint64, qint64) > progressCallback)
 		: QObject(parent ? static_cast< QObject * >(parent) : QCoreApplication::instance())
-		, m_info(info), m_parent(parent), m_downloadUrl(jsonUrl(info, QStringLiteral("installerUrl")))
-		, m_expectedSha256(normalizedSha256(info)), m_showProgress(showProgress)
+		, m_info(info), m_parent(parent), m_downloadUrl(selectedDownloadUrl(info))
+		, m_expectedSha256(selectedExpectedSha256(info)), m_updateMode(selectedUpdateMode(info))
+		, m_showProgress(showProgress)
 		, m_readyCallback(std::move(readyCallback)), m_failureCallback(std::move(failureCallback))
-		, m_cancelledCallback(std::move(cancelledCallback)) {
+		, m_cancelledCallback(std::move(cancelledCallback)), m_progressCallback(std::move(progressCallback)) {
 	}
 
 	void start() {
@@ -375,7 +539,7 @@ public:
 #else
 		if (!VersionCheck::canInstallUpdate(m_info)) {
 			showFailure(VersionCheck::tr("This update cannot be installed automatically because the update manifest is "
-										 "missing a trusted installer URL or SHA256 checksum."));
+										 "missing a trusted update URL or SHA256 checksum."));
 			return;
 		}
 
@@ -385,10 +549,10 @@ public:
 			return;
 		}
 
-		m_targetPath = updateDir.filePath(updateInstallerFileName(m_info));
+		m_targetPath = updateDir.filePath(updateAssetFileName(m_info));
 		m_file       = std::make_unique< QSaveFile >(m_targetPath);
 		if (!m_file->open(QIODevice::WriteOnly)) {
-			showFailure(VersionCheck::tr("Mumble could not write the update installer to %1.").arg(m_targetPath));
+			showFailure(VersionCheck::tr("Mumble could not write the update package to %1.").arg(m_targetPath));
 			return;
 		}
 
@@ -416,6 +580,7 @@ private:
 	QWidget *m_parent = nullptr;
 	QUrl m_downloadUrl;
 	QString m_expectedSha256;
+	QString m_updateMode;
 	QString m_targetPath;
 	std::unique_ptr< QSaveFile > m_file;
 	QCryptographicHash m_hash { QCryptographicHash::Sha256 };
@@ -428,10 +593,11 @@ private:
 	std::function< void(const QString &) > m_readyCallback;
 	std::function< void(const QString &) > m_failureCallback;
 	std::function< void() > m_cancelledCallback;
+	std::function< void(qint64, qint64) > m_progressCallback;
 
 	void request(const QUrl &url) {
-		if (!isTrustedInstallerUrl(url)) {
-			showFailure(VersionCheck::tr("The update installer URL is invalid."));
+		if (!isTrustedUpdateAssetUrl(url)) {
+			showFailure(VersionCheck::tr("The update URL is invalid."));
 			return;
 		}
 
@@ -442,6 +608,9 @@ private:
 		m_reply = Global::get().nam->get(request);
 		connect(m_reply, &QNetworkReply::readyRead, this, [this]() { writeReplyData(); });
 		connect(m_reply, &QNetworkReply::downloadProgress, this, [this](qint64 received, qint64 total) {
+			if (m_progressCallback) {
+				m_progressCallback(received, total);
+			}
 			if (!m_progress) {
 				return;
 			}
@@ -484,7 +653,7 @@ private:
 
 		const qint64 written = m_file ? m_file->write(data) : -1;
 		if (written != data.size()) {
-			m_pendingFailure = VersionCheck::tr("Mumble could not finish writing the update installer.");
+			m_pendingFailure = VersionCheck::tr("Mumble could not finish writing the update package.");
 			m_reply->abort();
 			return;
 		}
@@ -532,25 +701,25 @@ private:
 			return;
 		}
 		if (error != QNetworkReply::NoError) {
-			showFailure(VersionCheck::tr("Mumble failed to download the update installer: %1").arg(errorString));
+			showFailure(VersionCheck::tr("Mumble failed to download the update package: %1").arg(errorString));
 			return;
 		}
 		if (statusValue.isValid()) {
 			const int status = statusValue.toInt();
 			if (status < 200 || status >= 300) {
-				showFailure(VersionCheck::tr("Mumble failed to download the update installer (HTTP %1).").arg(status));
+				showFailure(VersionCheck::tr("Mumble failed to download the update package (HTTP %1).").arg(status));
 				return;
 			}
 		}
 
 		const QString actualSha256 = QString::fromLatin1(m_hash.result().toHex());
 		if (actualSha256 != m_expectedSha256) {
-			showFailure(VersionCheck::tr("The downloaded update installer did not match the published SHA256 checksum."));
+			showFailure(VersionCheck::tr("The downloaded update package did not match the published SHA256 checksum."));
 			return;
 		}
 
 		if (!m_file || !m_file->commit()) {
-			showFailure(VersionCheck::tr("Mumble could not save the verified update installer."));
+			showFailure(VersionCheck::tr("Mumble could not save the verified update package."));
 			return;
 		}
 		m_file.reset();
@@ -600,10 +769,12 @@ private:
 
 	void promptAndLaunchInstaller() {
 		QMessageBox messageBox(QMessageBox::Question, VersionCheck::tr("Install Mumble update"),
-							   VersionCheck::tr("The update installer was downloaded and verified."),
+							   VersionCheck::tr("The update package was downloaded and verified."),
 							   QMessageBox::NoButton, m_parent);
 		messageBox.setInformativeText(
-			VersionCheck::tr("Mumble will close, Windows will run the installer, and Mumble will reopen to restore your server and chat. Continue?"));
+			m_updateMode == QLatin1String("package")
+				? VersionCheck::tr("Mumble will close, the updater will apply the package, and Mumble will reopen to restore your server and chat. Continue?")
+				: VersionCheck::tr("Mumble will close, Windows will run the installer, and Mumble will reopen to restore your server and chat. Continue?"));
 		QPushButton *installButton = messageBox.addButton(VersionCheck::tr("Install update"), QMessageBox::AcceptRole);
 		messageBox.addButton(VersionCheck::tr("Not now"), QMessageBox::RejectRole);
 		messageBox.exec();
@@ -616,11 +787,11 @@ private:
 		if (Global::get().mw) {
 			Global::get().mw->prepareUpdateResumeState();
 		}
-		if (!VersionCheck::launchPreparedUpdate(m_targetPath)) {
+		if (!VersionCheck::launchPreparedUpdate(m_targetPath, m_updateMode)) {
 			if (Global::get().mw) {
 				Global::get().mw->clearPendingUpdateResumeState();
 			}
-			showFailure(VersionCheck::tr("Mumble could not launch the update installer."));
+			showFailure(VersionCheck::tr("Mumble could not launch the update package."));
 			return;
 		}
 
@@ -636,13 +807,12 @@ VersionCheck::VersionCheck(bool autocheck, QObject *parent, bool, bool emitResul
 	QTimer::singleShot(0, this, &VersionCheck::performRequest);
 }
 
+QString VersionCheck::updateModeForInfo(const QJsonObject &info) {
+	return selectedUpdateMode(info);
+}
+
 bool VersionCheck::canInstallUpdate(const QJsonObject &info) {
-#ifdef Q_OS_WIN
-	return isTrustedInstallerUrl(jsonUrl(info, QStringLiteral("installerUrl"))) && !normalizedSha256(info).isEmpty();
-#else
-	Q_UNUSED(info);
-	return false;
-#endif
+	return canUsePackageUpdate(info) || canUseInstallerUpdate(info);
 }
 
 void VersionCheck::installUpdateFromInfo(const QJsonObject &info, QWidget *parent) {
@@ -654,7 +824,7 @@ void VersionCheck::installUpdateFromInfo(const QJsonObject &info, QWidget *paren
 #endif
 
 	if (!canInstallUpdate(info)) {
-		const QUrl installerUrl = jsonUrl(info, QStringLiteral("installerUrl"));
+		const QUrl installerUrl = installerDownloadUrl(info);
 		if (installerUrl.isValid()) {
 			QDesktopServices::openUrl(installerUrl);
 		} else {
@@ -670,7 +840,8 @@ void VersionCheck::installUpdateFromInfo(const QJsonObject &info, QWidget *paren
 void VersionCheck::downloadUpdateFromInfo(const QJsonObject &info, QWidget *parent, const bool showProgress,
 										  std::function< void(const QString &) > readyCallback,
 										  std::function< void(const QString &) > failureCallback,
-										  std::function< void() > cancelledCallback) {
+										  std::function< void() > cancelledCallback,
+										  std::function< void(qint64, qint64) > progressCallback) {
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	const bool wouldUseNativeUi = showProgress || !readyCallback || !failureCallback;
 	if (wouldUseNativeUi && Global::get().mw && Global::get().mw->startModernForkUpdateDownload(info)) {
@@ -680,7 +851,8 @@ void VersionCheck::downloadUpdateFromInfo(const QJsonObject &info, QWidget *pare
 #endif
 
 	ForkUpdateInstaller *installer = new ForkUpdateInstaller(info, parent, showProgress, std::move(readyCallback),
-															 std::move(failureCallback), std::move(cancelledCallback));
+															 std::move(failureCallback), std::move(cancelledCallback),
+															 std::move(progressCallback));
 	installer->start();
 }
 
@@ -688,18 +860,22 @@ QJsonObject VersionCheck::describeUpdateHandoff(const QJsonObject &info, const Q
 	const QUrl releaseApiUrl  = configuredReleaseApiUrl();
 	const QUrl manifestUrl    = configuredManifestUrl();
 	const QUrl releaseUrl     = jsonUrl(info, QStringLiteral("releaseUrl"));
-	const QUrl installerUrl   = jsonUrl(info, QStringLiteral("installerUrl"));
+	const QUrl installerUrl   = installerDownloadUrl(info);
+	const QUrl packageUrl     = packageDownloadUrl(info);
 	const QUrl fallbackOpenUrl = installerUrl.isValid() ? installerUrl : releaseUrl;
-	const QString sha256      = normalizedSha256(info);
+	const QString installerSha256 = installerExpectedSha256(info);
+	const QString packageSha256   = packageExpectedSha256(info);
 	const QString installerFileName = updateInstallerFileName(info);
-	const bool installerTrusted     = isTrustedInstallerUrl(installerUrl);
+	const QString selectedMode      = selectedUpdateMode(info);
+	const QString selectedFileName  = updateAssetFileName(info);
+	const bool installerTrusted     = isTrustedUpdateAssetUrl(installerUrl);
+	const bool packageTrusted       = isTrustedUpdateAssetUrl(packageUrl);
 	const bool installable          = canInstallUpdate(info);
 
 	const QDir updateDir(Global::get().qdBasePath.filePath(QStringLiteral("Updates")));
-	const QString dryRunInstallerPath =
-		preparedInstallerPath.trimmed().isEmpty()
-			? updateDir.filePath(installerFileName)
-			: preparedInstallerPath.trimmed();
+	const QString dryRunUpdatePath = preparedInstallerPath.trimmed().isEmpty()
+										 ? updateDir.filePath(selectedFileName)
+										 : preparedInstallerPath.trimmed();
 
 	QJsonObject result;
 	result.insert(QStringLiteral("releaseApiUrl"), releaseApiUrl.toString());
@@ -709,17 +885,31 @@ QJsonObject VersionCheck::describeUpdateHandoff(const QJsonObject &info, const Q
 	result.insert(QStringLiteral("releaseUrlScheme"), releaseUrl.scheme());
 	result.insert(QStringLiteral("releaseUrlHost"), releaseUrl.host());
 	result.insert(QStringLiteral("releaseUrlPath"), releaseUrl.path());
+	result.insert(QStringLiteral("preferredUpdate"), preferredUpdateMode(info));
+	result.insert(QStringLiteral("selectedUpdateMode"), selectedMode);
 	result.insert(QStringLiteral("installerUrl"), installerUrl.toString());
 	result.insert(QStringLiteral("installerUrlScheme"), installerUrl.scheme());
 	result.insert(QStringLiteral("installerUrlHost"), installerUrl.host());
 	result.insert(QStringLiteral("installerUrlPath"), installerUrl.path());
 	result.insert(QStringLiteral("installerUrlTrusted"), installerTrusted);
-	result.insert(QStringLiteral("sha256"), sha256);
-	result.insert(QStringLiteral("sha256Valid"), !sha256.isEmpty());
-	result.insert(QStringLiteral("sha256Length"), sha256.size());
+	result.insert(QStringLiteral("packageUrl"), packageUrl.toString());
+	result.insert(QStringLiteral("packageUrlScheme"), packageUrl.scheme());
+	result.insert(QStringLiteral("packageUrlHost"), packageUrl.host());
+	result.insert(QStringLiteral("packageUrlPath"), packageUrl.path());
+	result.insert(QStringLiteral("packageUrlTrusted"), packageTrusted);
+	result.insert(QStringLiteral("packageSha256"), packageSha256);
+	result.insert(QStringLiteral("packageSha256Valid"), !packageSha256.isEmpty());
+	result.insert(QStringLiteral("packageMinUpdaterVersion"),
+				  jsonInt(packageObject(info), QStringLiteral("minUpdaterVersion"), -1));
+	result.insert(QStringLiteral("packageApplyMode"),
+				  packageObject(info).value(QStringLiteral("applyMode")).toString().trimmed());
+	result.insert(QStringLiteral("sha256"), installerSha256);
+	result.insert(QStringLiteral("sha256Valid"), !installerSha256.isEmpty());
+	result.insert(QStringLiteral("sha256Length"), installerSha256.size());
 	result.insert(QStringLiteral("canInstallUpdate"), installable);
 	result.insert(QStringLiteral("installerFileName"), installerFileName);
-	result.insert(QStringLiteral("downloadTargetPath"), QDir::toNativeSeparators(updateDir.filePath(installerFileName)));
+	result.insert(QStringLiteral("updateFileName"), selectedFileName);
+	result.insert(QStringLiteral("downloadTargetPath"), QDir::toNativeSeparators(updateDir.filePath(selectedFileName)));
 	result.insert(QStringLiteral("downloadRequiresTrustedInstallerUrl"), true);
 	result.insert(QStringLiteral("downloadRequiresSha256"), true);
 	result.insert(QStringLiteral("downloadWouldVerifySha256"), installable);
@@ -729,8 +919,10 @@ QJsonObject VersionCheck::describeUpdateHandoff(const QJsonObject &info, const Q
 	result.insert(QStringLiteral("wouldOpenInstallerUrl"), installerUrl.isValid());
 	result.insert(QStringLiteral("wouldFallbackToBrowserDownload"), !installable && fallbackOpenUrl.isValid());
 	result.insert(QStringLiteral("wouldStartVerifiedDownload"), installable);
-	result.insert(QStringLiteral("preparedInstallerPath"), QDir::toNativeSeparators(dryRunInstallerPath));
-	result.insert(QStringLiteral("preparedInstallerAccepted"), canLaunchPreparedUpdate(dryRunInstallerPath));
+	result.insert(QStringLiteral("preparedInstallerPath"), QDir::toNativeSeparators(dryRunUpdatePath));
+	result.insert(QStringLiteral("preparedUpdatePath"), QDir::toNativeSeparators(dryRunUpdatePath));
+	result.insert(QStringLiteral("preparedInstallerAccepted"), canLaunchPreparedUpdate(dryRunUpdatePath, selectedMode));
+	result.insert(QStringLiteral("preparedUpdateAccepted"), canLaunchPreparedUpdate(dryRunUpdatePath, selectedMode));
 
 #ifdef Q_OS_WIN
 	result.insert(QStringLiteral("platformCanInstall"), true);
@@ -742,9 +934,12 @@ QJsonObject VersionCheck::describeUpdateHandoff(const QJsonObject &info, const Q
 											   .filePath(QStringLiteral("mumble-updater.exe"))));
 	result.insert(QStringLiteral("bundledUpdaterWorkingDir"), QDir::toNativeSeparators(updateDir.absolutePath()));
 	result.insert(QStringLiteral("bundledUpdaterArguments"),
-				  stringListJsonArray(bundledUpdaterArguments(dryRunInstallerPath, updateDir.absolutePath(), true)));
+				  stringListJsonArray(bundledUpdaterArguments(dryRunUpdatePath, updateDir.absolutePath(), true, selectedMode)));
 	result.insert(QStringLiteral("directMsiexecProgram"), QStringLiteral("msiexec.exe"));
-	result.insert(QStringLiteral("directMsiexecArguments"), stringListJsonArray(msiexecUpdateArguments(dryRunInstallerPath, true)));
+	result.insert(QStringLiteral("directMsiexecArguments"),
+				  selectedMode == QLatin1String("installer")
+					  ? stringListJsonArray(msiexecUpdateArguments(dryRunUpdatePath, true))
+					  : QJsonArray());
 #else
 	result.insert(QStringLiteral("platformCanInstall"), false);
 	result.insert(QStringLiteral("launchMode"), QStringLiteral("browserDownload"));
@@ -756,31 +951,46 @@ QJsonObject VersionCheck::describeUpdateHandoff(const QJsonObject &info, const Q
 	return result;
 }
 
-bool VersionCheck::canLaunchPreparedUpdate(const QString &installerPath) {
+bool VersionCheck::canLaunchPreparedUpdate(const QString &updatePath, const QString &updateMode) {
 #ifdef Q_OS_WIN
-	const QFileInfo installer(installerPath);
-	return installer.isFile() && installer.isReadable()
-		   && installer.suffix().compare(QLatin1String("msi"), Qt::CaseInsensitive) == 0;
+	const QFileInfo update(updatePath);
+	if (!update.isFile() || !update.isReadable()) {
+		return false;
+	}
+
+	const QString mode = updateModeFromPath(updatePath, updateMode);
+	if (mode == QLatin1String("package")) {
+		return update.fileName().endsWith(QLatin1String(".mumble-update"), Qt::CaseInsensitive);
+	}
+	return update.suffix().compare(QLatin1String("msi"), Qt::CaseInsensitive) == 0;
 #else
-	Q_UNUSED(installerPath);
+	Q_UNUSED(updatePath);
+	Q_UNUSED(updateMode);
 	return false;
 #endif
 }
 
-bool VersionCheck::launchPreparedUpdate(const QString &installerPath, const bool passive, const bool restartAfterInstall) {
+bool VersionCheck::launchPreparedUpdate(const QString &updatePath, const QString &updateMode, const bool passive,
+										const bool restartAfterInstall) {
 #ifdef Q_OS_WIN
-	if (!canLaunchPreparedUpdate(installerPath)) {
+	const QString mode = updateModeFromPath(updatePath, updateMode);
+	if (!canLaunchPreparedUpdate(updatePath, mode)) {
 		return false;
 	}
 
 	if (restartAfterInstall) {
-		return launchBundledUpdater(installerPath, passive);
+		return launchBundledUpdater(updatePath, passive, mode);
 	}
 
-	const QStringList arguments = msiexecUpdateArguments(installerPath, passive);
+	if (mode == QLatin1String("package")) {
+		return false;
+	}
+
+	const QStringList arguments = msiexecUpdateArguments(updatePath, passive);
 	return QProcess::startDetached(QStringLiteral("msiexec.exe"), arguments);
 #else
-	Q_UNUSED(installerPath);
+	Q_UNUSED(updatePath);
+	Q_UNUSED(updateMode);
 	Q_UNUSED(passive);
 	Q_UNUSED(restartAfterInstall);
 	return false;
@@ -898,7 +1108,7 @@ void VersionCheck::finishWithInfo(const QJsonObject &info) {
 		}
 #endif
 
-		const QUrl installerUrl = jsonUrl(info, QStringLiteral("installerUrl"));
+		const QUrl installerUrl = installerDownloadUrl(info);
 		const QUrl releaseUrl   = jsonUrl(info, QStringLiteral("releaseUrl"));
 		const QUrl openUrl      = installerUrl.isValid() ? installerUrl : releaseUrl;
 
@@ -922,7 +1132,7 @@ void VersionCheck::finishWithInfo(const QJsonObject &info) {
 		if (!commit.isEmpty()) {
 			details += tr("Commit: %1\n").arg(commit);
 		}
-		const QString sha256 = info.value(QStringLiteral("sha256")).toString().trimmed();
+		const QString sha256 = selectedExpectedSha256(info);
 		if (!sha256.isEmpty()) {
 			details += tr("SHA256: %1\n").arg(sha256);
 		}

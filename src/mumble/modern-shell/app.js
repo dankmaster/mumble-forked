@@ -1,6 +1,22 @@
 (function() {
 	"use strict";
 
+	function modernBuildFlag(name, fallback) {
+		const flags = window.__mumbleModernBuildFlags || {};
+		if (Object.prototype.hasOwnProperty.call(flags, name)) {
+			return !!flags[name];
+		}
+		return fallback;
+	}
+
+	function modernAutomationEnabled() {
+		return modernBuildFlag("automation", true);
+	}
+
+	function modernMockupsEnabled() {
+		return modernBuildFlag("mockups", true);
+	}
+
 	let modernBridge = null;
 	let bridgeLoadPromise = null;
 	let lastRenderedMessageCount = 0;
@@ -56,6 +72,7 @@
 	let cachedServerLogRevision = "";
 	let liveSnapshot = {};
 	let walkthroughSnapshotCache = null;
+	let mockupSettingsActivePage = "";
 	let railActionIntent = null;
 	let railJoinPriorityUntil = 0;
 	let lastVoiceJoinRequest = { token: "", time: 0 };
@@ -85,7 +102,11 @@
 	let voiceReplayStopTimer = 0;
 	let modernDialogReturnFocus = null;
 	let modernDialogSelectState = null;
-	let stonksActiveTab = "overview";
+	let detachedModernDialogUiTweaks = null;
+	let modernDialogLastRenderKey = "";
+	let stonksActiveTab = "market";
+	let stonksFocusIndex = 0;
+	let stonksLocalPins = null;
 	let stonksDraftPositions = null;
 	let stonksDraftNote = "";
 	let stonksDraftCurrency = "USD";
@@ -921,12 +942,12 @@
 	}
 
 	function notifyBridge(method) {
+		const args = Array.prototype.slice.call(arguments, 1);
 		if (!modernBridge || typeof modernBridge[method] !== "function") {
-			return false;
+			return handleMockupBridgeCall(method, args);
 		}
 
-		const args = Array.prototype.slice.call(arguments, 1);
-		if (method !== "openNativeContextMenu" && method !== "closeNativeContextMenu") {
+		if (modernAutomationEnabled() && method !== "openNativeContextMenu" && method !== "closeNativeContextMenu") {
 			automationBridgeCalls.push({
 				method: String(method || ""),
 				args: args.map(function(arg) {
@@ -949,6 +970,486 @@
 			console.warn("Modern bridge call failed:", method, error);
 			return false;
 		}
+	}
+
+	/* MUMBLE_MODERN_MOCKUPS_BEGIN */
+	function mockupBridgeFallbackEnabled() {
+		return !modernBridge && walkthroughAllowedForLocation() && requestedWalkthroughMode() === "mockup";
+	}
+
+	function mockupDialogNameForAppAction(actionId) {
+		const id = String(actionId || "").trim();
+		const aliases = {
+			"server.information": "server-information",
+			"server.search": "search",
+			"server.connect": "connect",
+			"server.disconnect": "disconnect",
+			"server.createRoom": "create-room",
+			"server.tokens": "tokens",
+			"server.users": "registered-users",
+			"server.bans": "ban-list",
+			"server.acl": "acl",
+			"server.settings": "server-settings",
+			"room.create": "create-room",
+			"room.acl": "acl",
+			"room.unlink": "unlink-room",
+			"room.unlinkAll": "unlink-all-rooms",
+			"room.remove": "remove-room",
+			"participant.info": "member-user-information",
+			"participant.comment": "member-comment",
+			"participant.nickname": "local-nickname",
+			"participant.history": "grant-history",
+			"participant.kick": "kick-user",
+			"participant.ban": "ban-user",
+			"userInfo": "member-user-information",
+			"commentView": "member-comment",
+			"localNickname": "local-nickname",
+			"grantChatHistory": "grant-history",
+			"kick": "kick-user",
+			"ban": "ban-user",
+			"screenShare.settings": "settings",
+			"stonks.open": "stonks",
+			"configure.settings": "settings",
+			"configure.screenShare": "settings",
+			"configure.audioWizard": "settings",
+			"configure.minimal": "settings",
+			"configure.hideFrame": "settings",
+			"configure.certificate": "certificate",
+			"self.info": "self-user-information",
+			"self.comment": "self-comment",
+			"self.avatar": "avatar",
+			"self.resetAvatar": "self-reset-avatar",
+			"self.register": "register",
+			"self.audioStats": "audio-statistics",
+			"self.voiceRecorder": "voice-recorder",
+			"help.update": "update",
+			"help.versionCheck": "update",
+			"help.feedback": "feedback",
+			"help.help": "help",
+			"help.whatsThis": "help",
+			"about.openMumble": "about",
+			"about.openQt": "about-qt",
+			"app.quit": "quit"
+		};
+		return aliases[id] || "";
+	}
+
+	function mockupSettingsPageForAction(actionId) {
+		const id = String(actionId || "").trim();
+		const pages = {
+			"screenShare.settings": "screenShare",
+			"screenShare.start": "screenShare",
+			"room.shareScreen": "screenShare",
+			"configure.screenShare": "screenShare",
+			"configure.audioWizard": "audioInput",
+			"configure.minimal": "ui",
+			"configure.hideFrame": "ui"
+		};
+		return pages[id] || "";
+	}
+
+	function openMockupModernDialog(name, options) {
+		if (!mockupBridgeFallbackEnabled()) {
+			return false;
+		}
+
+		const opts = options || {};
+		if (opts.settingsPage) {
+			mockupSettingsActivePage = String(opts.settingsPage || "");
+		}
+		const dialog = mockupWalkthroughDialogState(name);
+		if (!dialog) {
+			return false;
+		}
+
+		hideAppMenu();
+		hideSelfMenu();
+		hideContextMenu();
+		hideDirectMessageTray();
+		closeTopMenu();
+		stonksPendingConfirm = null;
+		stonksPendingConfirmFocus = false;
+		modernDialogPendingFieldUpdates = {};
+		modernDialogLocalFieldValues = {};
+		modernDialogReturnFocus = document.activeElement || null;
+		syncModernDialogState(dialog);
+		return true;
+	}
+
+	function openMockupDialogForAction(actionId) {
+		const id = String(actionId || "").trim();
+		const dialogName = mockupDialogNameForAppAction(id);
+		if (!dialogName) {
+			return false;
+		}
+
+		return openMockupModernDialog(dialogName, {
+			settingsPage: mockupSettingsPageForAction(id)
+		});
+	}
+
+	function mockupScopeAlias(scopeToken) {
+		const raw = String(scopeToken || "").trim();
+		const key = raw.toLowerCase().replace(/^#/, "");
+		const aliases = {
+			general: "text:general",
+			clips: "text:clips",
+			stonks: "text:stonks",
+			rules: "text:rules",
+			valorant: "voice:valorant",
+			lobby: "voice:lobby",
+			minecraft: "voice:minecraft"
+		};
+		return aliases[key] || raw;
+	}
+
+	function selectMockupScope(scopeToken) {
+		const token = mockupScopeAlias(scopeToken);
+		if (!token) {
+			return false;
+		}
+
+		const snapshot = getSnapshot();
+		if (isDirectMessageScopeToken(token)) {
+			return openMockupDirectMessage(directMessageSessionFromToken(token), true);
+		}
+
+		const normalizedToken = token.toLowerCase();
+		const allRooms = [].concat(snapshot.voiceRooms || [], snapshot.textRooms || []);
+		let room = null;
+		allRooms.forEach(function(candidate) {
+			if (String(candidate && candidate.token || "").toLowerCase() === normalizedToken) {
+				room = candidate;
+			}
+			if (candidate) {
+				candidate.selected = false;
+			}
+		});
+		if (!room) {
+			return false;
+		}
+
+		room.selected = true;
+		if (String(room.token || "").indexOf("voice:") === 0) {
+			room.joined = true;
+		}
+		const isText = String(room.token || "").indexOf("text:") === 0;
+		const label = isText ? "#" + String(room.label || "").replace(/^#/, "") : (room.label || "Room");
+		snapshot.activeScope = {
+			scopeToken: room.token,
+			kindLabel: room.kindLabel || (isText ? "Text room" : "Voice room"),
+			label: label,
+			description: room.description || "",
+			meta: isText
+				? ["Text room", "Persistent history", (room.unreadCount || 0) + " unread"]
+				: ["Voice room", "Persistent history", "28 ms"],
+			canLoadOlder: true,
+			canMarkRead: true,
+			canSend: true,
+			canAttachImages: true,
+			composerPlaceholder: "Message " + label,
+			composerHint: "Persistent room history stays with " + label + ".",
+			screenShare: room.screenShare || null,
+			emptyCopy: "No messages in " + label + " yet."
+		};
+		snapshot.messages = walkthroughRoomMessages(snapshot.activeScope);
+		if (!isText) {
+			snapshot.voicePresence = room.participants || [];
+		}
+		hideDirectMessageTray();
+		scheduleSnapshotRender();
+		return true;
+	}
+
+	function markMockupRead() {
+		const snapshot = getSnapshot();
+		const activeToken = String(snapshot.activeScope && snapshot.activeScope.scopeToken || "");
+		(snapshot.textRooms || []).forEach(function(room) {
+			if (String(room && room.token || "") === activeToken) {
+				room.unreadCount = 0;
+			}
+		});
+		if (snapshot.activeScope) {
+			snapshot.activeScope.canMarkRead = false;
+		}
+		scheduleSnapshotRender();
+		return true;
+	}
+
+	function mockupSetSelfPresence(actionId) {
+		const id = String(actionId || "");
+		const snapshot = getSnapshot();
+		const state = {
+			"presence.online": ["grinding ranked", "success"],
+			"presence.away": ["Away", "warning"],
+			"presence.busy": ["Do not disturb", "danger"]
+		}[id];
+		if (!state) {
+			return false;
+		}
+
+		if (snapshot.app) {
+			snapshot.app.selfStatusLabel = state[0];
+			snapshot.app.selfStatusTone = state[1];
+			if (snapshot.app.selfMenu) {
+				snapshot.app.selfMenu.statusLabel = state[0];
+				snapshot.app.selfMenu.statusTone = state[1];
+				(snapshot.app.selfMenu.presence || []).forEach(function(item) {
+					if (item) {
+						item.checked = String(item.id || "") === id;
+					}
+				});
+			}
+		}
+		scheduleSnapshotRender();
+		return true;
+	}
+
+	function mockupSetScreenShare(scopeToken, active) {
+		const snapshot = getSnapshot();
+		const token = scopeToken || (snapshot.activeScope && snapshot.activeScope.scopeToken) || "voice:lobby";
+		const rooms = snapshot.voiceRooms || [];
+		let share = null;
+		rooms.forEach(function(room) {
+			if (String(room && room.token || "") === String(token)) {
+				if (!room.screenShare) {
+					room.screenShare = {};
+				}
+				share = room.screenShare;
+			}
+		});
+		if (!share && snapshot.activeScope) {
+			if (!snapshot.activeScope.screenShare) {
+				snapshot.activeScope.screenShare = {};
+			}
+			share = snapshot.activeScope.screenShare;
+		}
+		if (!share) {
+			return false;
+		}
+
+		share.visible = true;
+		share.available = true;
+		share.mode = active ? "publishing" : "available";
+		share.ownerLabel = active ? "Your screen share" : "Lobby screen share";
+		share.statusLabel = active ? "Sharing" : "Available";
+		share.statusTone = active ? "warning" : "success";
+		share.badgeLabel = active ? "You" : "Live";
+		share.badgeTone = active ? "warning" : "success";
+		share.primaryActionId = active ? "screenShare.stop" : "screenShare.start";
+		share.primaryLabel = active ? "Stop sharing" : "Share screen";
+		share.primaryTone = active ? "danger" : "primary";
+		share.primaryHint = active ? "Stop sharing your screen" : "Share your screen to Lobby";
+		share.primaryEnabled = true;
+		share.note = active ? "Mockup sharing state is active for this presentation." : share.note;
+		if (snapshot.activeScope && String(snapshot.activeScope.scopeToken || "") === String(token)) {
+			snapshot.activeScope.screenShare = share;
+		}
+		scheduleSnapshotRender();
+		showToast({
+			kind: active ? "success" : "info",
+			title: "Screen sharing",
+			message: active ? "Mockup sharing state is now visible." : "Mockup sharing state was reset.",
+			timeoutMs: 2200
+		});
+		return true;
+	}
+
+	function mockupDirectMessageConversation(session) {
+		const snapshot = getSnapshot();
+		const state = snapshot.app && snapshot.app.directMessages || {};
+		const conversations = Array.isArray(state.conversations) ? state.conversations : [];
+		const requestedSession = Number(session || 0);
+		return conversations.find(function(conversation) {
+			return directMessageSessionValue(conversation) === requestedSession;
+		}) || conversations.find(function(conversation) {
+			return String(conversation && conversation.label || "").toLowerCase() === "kira";
+		}) || conversations[0] || null;
+	}
+
+	function openMockupDirectMessage(session, selectScope) {
+		const conversation = mockupDirectMessageConversation(session);
+		if (!conversation) {
+			return false;
+		}
+		const targetSession = directMessageSessionValue(conversation);
+		updateLocalDirectMessageState(function(state, snapshot) {
+			const windowState = ensureLocalDirectMessageWindow(state, targetSession) || conversation;
+			conversation.open = true;
+			conversation.unreadCount = 0;
+			if (selectScope === false) {
+				return;
+			}
+			(snapshot.voiceRooms || []).forEach(function(room) { if (room) { room.selected = false; } });
+			(snapshot.textRooms || []).forEach(function(room) { if (room) { room.selected = false; } });
+			snapshot.activeScope = directMessageActiveScope(windowState);
+			snapshot.messages = [];
+			snapshot.voicePresence = [snapshot.participants && snapshot.participants[0], snapshot.participants && snapshot.participants[1]].filter(Boolean);
+		});
+		hideDirectMessageTray();
+		scheduleSnapshotRender();
+		return true;
+	}
+
+	function selectMockupParticipantRoom(session) {
+		const targetSession = Number(session || 0);
+		if (!targetSession) {
+			return false;
+		}
+		const snapshot = getSnapshot();
+		const room = (snapshot.voiceRooms || []).find(function(candidate) {
+			return (candidate && candidate.participants || []).some(function(participant) {
+				return Number(participant && participant.session || 0) === targetSession;
+			});
+		});
+		return room ? selectMockupScope(room.token) : false;
+	}
+
+	function handleMockupAppAction(actionId) {
+		const id = String(actionId || "").trim();
+		if (!id) {
+			return false;
+		}
+		if (mockupSetSelfPresence(id)) {
+			return true;
+		}
+		if (id === "stonks.refreshVisible" || id === "motd.markSeen") {
+			return true;
+		}
+		if (id === "motd.show" || id === "motd.restore") {
+			const snapshot = getSnapshot();
+			if (snapshot.app) {
+				snapshot.app.motdDismissedSignature = "";
+				snapshot.app.motdExpanded = true;
+			}
+			renderNote(snapshot.app || {}, snapshot.activeScope || {}, snapshot.messages || []);
+			return true;
+		}
+		if (id === "motd.hide" || id === "motd.dismiss") {
+			const snapshot = getSnapshot();
+			if (snapshot.app) {
+				snapshot.app.motdDismissedSignature = motdContentSignature(snapshot.app.motdHtml || "");
+				snapshot.app.motdExpanded = false;
+			}
+			renderNote(snapshot.app || {}, snapshot.activeScope || {}, snapshot.messages || []);
+			return true;
+		}
+		if (id === "server.favorite" || id === "room.muteNotifications" || id === "room.copyInvite") {
+			showToast({ title: "Mockup", message: "Action state captured for presentation.", timeoutMs: 1800 });
+			return true;
+		}
+		return openMockupDialogForAction(id);
+	}
+
+	function handleMockupScopeAction(scopeToken, actionId) {
+		const id = String(actionId || "").trim();
+		if (id === "room.openChat") {
+			return selectMockupScope(scopeToken);
+		}
+		if (id === "room.markRead") {
+			return markMockupRead();
+		}
+		if (id === "room.copyInvite" || id === "room.muteNotifications") {
+			showToast({ title: "Mockup", message: "Room action state captured for presentation.", timeoutMs: 1800 });
+			return true;
+		}
+		if (id === "room.shareScreen" || id === "screenShare.start") {
+			return mockupSetScreenShare(scopeToken, true);
+		}
+		if (id === "screenShare.stop") {
+			return mockupSetScreenShare(scopeToken, false);
+		}
+		if (openMockupDialogForAction(id)) {
+			return true;
+		}
+		return handleMockupAppAction(id);
+	}
+
+	function handleMockupParticipantAction(session, actionId) {
+		const id = String(actionId || "").trim();
+		if (id === "participant.message" || id === "textMessage" || id === "openMessage") {
+			return openMockupDirectMessage(session, true);
+		}
+		if (id === "join" || id === "joinRoom") {
+			return selectMockupParticipantRoom(session);
+		}
+		return openMockupDialogForAction(id);
+	}
+
+	function mockupModernDialogAction(actionId, payload) {
+		if (!mockupBridgeFallbackEnabled()) {
+			return false;
+		}
+
+		const id = String(actionId || "");
+		const dialog = modernDialogState || {};
+		if (id === "selectPage" && dialog.kind === "settings") {
+			mockupSettingsActivePage = String(payload && payload.pageId || "");
+			return openMockupModernDialog("settings");
+		}
+		if (openMockupDialogForAction(id)) {
+			return true;
+		}
+		if (id === "screenShare.diagnostics") {
+			showToast({ title: "Screen sharing", message: "Diagnostics are represented in the mockup settings.", timeoutMs: 2200 });
+			return true;
+		}
+
+		const action = (dialog.actions || []).find(function(candidate) {
+			return candidate && String(candidate.id || "") === id;
+		});
+		if (id === "close" || id === "cancel" || id === "done" || id === "ok"
+				|| (action && action.closesDialog !== false)) {
+			closeModernDialog();
+		}
+		return true;
+	}
+
+	function handleMockupBridgeCall(method, args) {
+		if (!mockupBridgeFallbackEnabled()) {
+			return false;
+		}
+
+		const methodName = String(method || "");
+		const bridgeArgs = args || [];
+		if (methodName === "openModernDialog") {
+			return openMockupModernDialog(bridgeArgs[0]);
+		}
+		if (methodName === "invokeModernDialogAction") {
+			return mockupModernDialogAction(bridgeArgs[1], bridgeArgs[2] || {});
+		}
+		if (methodName === "invokeAppAction" || methodName === "invokeAppActionPayload") {
+			return handleMockupAppAction(bridgeArgs[0]);
+		}
+		if (methodName === "invokeScopeAction") {
+			return handleMockupScopeAction(bridgeArgs[0], bridgeArgs[1]);
+		}
+		if (methodName === "invokeParticipantAction") {
+			return handleMockupParticipantAction(bridgeArgs[0], bridgeArgs[1]);
+		}
+		if (methodName === "messageParticipant" || methodName === "openDirectMessage") {
+			return openMockupDirectMessage(bridgeArgs[0], true);
+		}
+		if (methodName === "joinParticipant") {
+			return selectMockupParticipantRoom(bridgeArgs[0]);
+		}
+		if (methodName === "joinVoiceChannel" || methodName === "selectScope") {
+			return selectMockupScope(bridgeArgs[0]);
+		}
+		if (methodName === "markRead" || methodName === "markDirectMessageRead") {
+			return markMockupRead();
+		}
+		if (methodName === "loadOlderHistory") {
+			showToast({ title: "Mockup", message: "Older history is represented in this presentation snapshot.", timeoutMs: 1800 });
+			return true;
+		}
+		if (methodName === "openImagePicker" || methodName === "attachClipboardImage"
+				|| methodName === "cancelReply" || methodName === "toggleLayout"
+				|| methodName === "toggleSelfMute" || methodName === "toggleSelfDeaf") {
+			showToast({ title: "Mockup", message: "Control state captured for presentation.", timeoutMs: 1800 });
+			return true;
+		}
+		return false;
 	}
 
 	function ensureToastStack() {
@@ -1135,6 +1636,9 @@
 	}
 
 	function walkthroughAllowedForLocation() {
+		if (!modernMockupsEnabled()) {
+			return false;
+		}
 		const protocol = String(window.location && window.location.protocol || "");
 		const host = String(window.location && window.location.hostname || "").toLowerCase();
 		return protocol === "file:" || host === "localhost" || host === "127.0.0.1" || host === "::1";
@@ -1463,7 +1967,7 @@
 				createdAt: 1780147200,
 				currency: "USD",
 				totalValue: 8582.64,
-				note: "Walkthrough ledger with live-looking quote metadata.",
+				note: "Walkthrough portfolio with live-looking quote metadata.",
 				positionsRedacted: false,
 				positions: [
 					{ symbol: "RKLB", quantity: 42, price: 28.40, marketValue: 1192.8, currency: "USD", displayName: "Rocket Lab USA" },
@@ -1635,6 +2139,8 @@
 						label: "Configure",
 						items: [
 							walkthroughAction("configure.settings", "Settings..."),
+							walkthroughAction("configure.screenShare", "Screen sharing settings..."),
+							walkthroughAction("configure.audioWizard", "Audio setup..."),
 							walkthroughAction("configure.certificate", "Certificate..."),
 							walkthroughAction("self.avatar", "Change avatar...")
 						]
@@ -1742,7 +2248,8 @@
 			};
 		};
 		const settingsPage = function() {
-			const raw = String(walkthroughQueryValue("page") || walkthroughQueryValue("settingsPage") || "audioInput")
+			const raw = String(mockupSettingsActivePage || walkthroughQueryValue("page")
+					|| walkthroughQueryValue("settingsPage") || "audioInput")
 				.trim()
 				.toLowerCase()
 				.replace(/[\s_-]+/g, "");
@@ -1764,6 +2271,10 @@
 				keys: "keys",
 				keybindings: "keys",
 				network: "network",
+				screen: "screenShare",
+				screenshare: "screenShare",
+				screensharing: "screenShare",
+				sharing: "screenShare",
 				about: "about"
 			};
 			return aliases[raw] || "audioInput";
@@ -1777,6 +2288,7 @@
 				{ id: "messages", label: "Messages & Sounds", selected: activePage === "messages" },
 				{ id: "keys", label: "Key Bindings", selected: activePage === "keys" },
 				{ id: "network", label: "Network", selected: activePage === "network" },
+				{ id: "screenShare", label: "Screen Sharing", selected: activePage === "screenShare" },
 				{ id: "about", label: "About", selected: activePage === "about" }
 			];
 		};
@@ -1930,11 +2442,38 @@
 					])
 				];
 			}
+			if (activePage === "screenShare") {
+				return [
+					walkthroughSection("Session", [
+						walkthroughField("screenShare.enabled", "Enable screen sharing", "checkbox", true),
+						walkthroughField("screenShare.mode", "Default action", "select", "ask", { valueType: "string",
+							options: [select("Ask before sharing", "ask"), select("Share current monitor", "monitor"),
+								select("Share selected window", "window")] }),
+						walkthroughField("screenShare.includeCursor", "Include cursor", "checkbox", true),
+						walkthroughField("screenShare.showPreview", "Show local preview before publishing", "checkbox", true)
+					]),
+					walkthroughSection("Capture quality", [
+						walkthroughField("screenShare.frameRate", "Frame rate", "range", 30, { min: 5, max: 60, suffix: " fps" }),
+						walkthroughField("screenShare.quality", "Quality", "range", 82, { min: 10, max: 100, suffix: "%" }),
+						walkthroughField("screenShare.maxBitrate", "Maximum bitrate", "number", 3500, { min: 250, max: 20000, suffix: " kbit/s" })
+					]),
+					walkthroughSection("Helper runtime", [
+						walkthroughReadonly("Helper", "Packaged and ready"),
+						walkthroughReadonly("Transport", "Server relay"),
+						walkthroughField("screenShare.openDiagnostics", "Diagnostics", "button", "Open diagnostics", {
+							actionId: "screenShare.diagnostics",
+							buttonLabel: "Open diagnostics"
+						})
+					], { presentation: "list" })
+				];
+			}
 			if (activePage === "network") {
 				return [
 					walkthroughSection("Connection", [
 						walkthroughField("network.autoReconnect", "Reconnect automatically", "checkbox", true),
 						walkthroughField("network.autoConnect", "Connect to last server on startup", "checkbox", true),
+						walkthroughField("network.reconnectToLastChannel",
+							"Reconnect to last known channel within server", "checkbox", true),
 						walkthroughField("network.tcpMode", "Force TCP mode", "checkbox", false),
 						walkthroughField("network.qos", "Use Quality of Service", "checkbox", true)
 					]),
@@ -2010,9 +2549,9 @@
 		if (name === "stonks") {
 			const requestedTab = String(walkthroughQueryValue("tab") || "").trim().toLowerCase();
 			if (["overview", "ledger", "portfolio", "leaderboard", "following", "audit", "admin"].indexOf(requestedTab) >= 0) {
-				stonksActiveTab = requestedTab === "portfolio" ? "ledger" : requestedTab;
+				stonksActiveTab = requestedTab === "overview" ? "market" : (requestedTab === "ledger" ? "portfolio" : requestedTab);
 			}
-			return Object.assign(walkthroughDialogBase("stonks", "stonks", "Stonks", "Ledger, leaderboard, following, and server settings.", {
+			return Object.assign(walkthroughDialogBase("stonks", "stonks", "Stonks", "Portfolio, leaderboard, following, and server settings.", {
 				primaryActionId: "close",
 				tone: "wide",
 				actions: [close]
@@ -2586,7 +3125,7 @@
 		if (token === "text:stonks") {
 			return [
 				{ messageId: 9201, threadId: 3, createdAtMs: base, actor: "Kira", actorKey: "kira", timeLabel: "15:06", bodyText: "#stonks RKLB 42", bodyHtml: "#stonks RKLB 42", own: false, system: false, canReply: true, canReact: true, canDelete: false, reactions: [] },
-				{ messageId: 9202, threadId: 3, createdAtMs: base + 70000, actor: "stonks-bot", actorKey: "stonks-bot", timeLabel: "15:07", bodyText: "Kira updated their ledger.", bodyHtml: "Kira updated their ledger.", own: false, system: true, canReply: false, canReact: false, canDelete: false, reactions: [] }
+				{ messageId: 9202, threadId: 3, createdAtMs: base + 70000, actor: "stonks-bot", actorKey: "stonks-bot", timeLabel: "15:07", bodyText: "Kira updated their portfolio.", bodyHtml: "Kira updated their portfolio.", own: false, system: true, canReply: false, canReact: false, canDelete: false, reactions: [] }
 			];
 		}
 		if (token === "text:rules") {
@@ -2720,6 +3259,51 @@
 			snapshot.app.motdAlwaysVisible = true;
 		}
 
+		if (variantQuery === "update-available") {
+			snapshot.app.updateBanner = {
+				visible: true,
+				phase: "available",
+				tone: "warning",
+				title: "Update available",
+				detail: "Security and Modern shell polish are included in this release. Latest: 1.7.0, build 124",
+				actions: [
+					{ id: "app.update.download", label: "Install update", tone: "accent", enabled: true },
+					{ id: "app.update.details", label: "Details", enabled: true },
+					{ id: "app.update.dismiss", label: "Not now", enabled: true }
+				]
+			};
+		} else if (variantQuery === "update-downloading") {
+			snapshot.app.updateBanner = {
+				visible: true,
+				phase: "downloading",
+				tone: "accent",
+				title: "Downloading update",
+				detail: "Mumble is downloading and verifying the update. You can keep using the client.",
+				progressVisible: true,
+				progressIndeterminate: false,
+				progressPercent: 46,
+				progressLabel: "46%",
+				actions: [{ id: "app.update.details", label: "Details", enabled: true }]
+			};
+		} else if (variantQuery === "update-ready") {
+			snapshot.app.updateBanner = {
+				visible: true,
+				phase: "ready",
+				tone: "success",
+				title: "Update ready to install",
+				detail: "Mumble will close, mumble-updater will run the installer, and Mumble will reopen to restore this server and chat.",
+				progressVisible: true,
+				progressIndeterminate: false,
+				progressPercent: 100,
+				progressLabel: "Verified",
+				actions: [
+					{ id: "app.update.restart", label: "Install and restart", tone: "accent", enabled: true },
+					{ id: "app.update.details", label: "Details", enabled: true },
+					{ id: "app.update.dismiss", label: "Later", enabled: true }
+				]
+			};
+		}
+
 		return snapshot;
 	}
 
@@ -2732,6 +3316,7 @@
 		}
 		return walkthroughSnapshotCache;
 	}
+	/* MUMBLE_MODERN_MOCKUPS_END */
 
 	function getSnapshot() {
 		if (modernBridge && (!liveSnapshot || !Object.keys(liveSnapshot).length)) {
@@ -3317,12 +3902,40 @@
 		return null;
 	}
 
+	function updateBannerState(app) {
+		const update = app && app.updateBanner;
+		if (!update || typeof update !== "object" || !update.visible) {
+			return null;
+		}
+
+		const actions = Array.isArray(update.actions)
+			? update.actions.filter(function(action) {
+				return action && action.id && action.label && action.enabled !== false;
+			})
+			: [];
+		const percent = Number(update.progressPercent);
+		return {
+			tone: String(update.tone || "accent").trim().toLowerCase() || "accent",
+			title: String(update.title || "Mumble update"),
+			detail: String(update.detail || ""),
+			actions: actions,
+			progressVisible: !!update.progressVisible,
+			progressIndeterminate: !!update.progressIndeterminate || !(percent >= 0),
+			progressPercent: percent >= 0 ? Math.max(0, Math.min(100, percent)) : -1,
+			progressLabel: String(update.progressLabel || "")
+		};
+	}
+
+	function primaryBannerState(app) {
+		return updateBannerState(app) || connectionBannerState(app);
+	}
+
 	function renderConnectionOrScopeBanner(app, scope) {
 		if (!refs.scopeBanner) {
 			return;
 		}
 
-		const banner = connectionBannerState(app || {});
+		const banner = primaryBannerState(app || {});
 		const scopeText = String(scope && scope.banner || "");
 		refs.scopeBanner.replaceChildren();
 		refs.scopeBanner.className = "banner connection-banner";
@@ -3346,21 +3959,67 @@
 		const detail = document.createElement("span");
 		detail.textContent = banner.detail;
 		copy.append(title, detail);
+		if (banner.progressVisible) {
+			const progress = document.createElement("div");
+			progress.className = "connection-banner-progress";
+			const track = document.createElement("div");
+			track.className = "connection-banner-progress-track";
+			track.setAttribute("role", "progressbar");
+			track.setAttribute("aria-label", banner.title);
+			const bar = document.createElement("div");
+			bar.className = "connection-banner-progress-bar";
+			if (banner.progressIndeterminate) {
+				progress.classList.add("is-indeterminate");
+			} else {
+				track.setAttribute("aria-valuemin", "0");
+				track.setAttribute("aria-valuemax", "100");
+				track.setAttribute("aria-valuenow", String(Math.round(banner.progressPercent)));
+				bar.style.width = String(banner.progressPercent) + "%";
+			}
+			track.appendChild(bar);
+			progress.appendChild(track);
+			const label = document.createElement("span");
+			label.className = "connection-banner-progress-label";
+			label.textContent = banner.progressLabel || (banner.progressIndeterminate
+				? "Working"
+				: String(Math.round(banner.progressPercent)) + "%");
+			progress.appendChild(label);
+			copy.appendChild(progress);
+		}
 		refs.scopeBanner.appendChild(copy);
 
-		if (banner.action) {
-			const button = document.createElement("button");
-			button.type = "button";
-			button.className = "chip-button connection-banner-action";
-			button.textContent = banner.action === "connect" ? "Reconnect" : "Cancel";
-			button.addEventListener("click", function() {
-				if (banner.action === "connect") {
-					notifyBridge("openModernDialog", "connect", {});
+		const bannerActions = Array.isArray(banner.actions) && banner.actions.length
+			? banner.actions
+			: (banner.action ? [{ id: banner.action, label: banner.action === "connect" ? "Reconnect" : "Cancel" }] : []);
+		if (bannerActions.length) {
+			const actions = document.createElement("div");
+			actions.className = "connection-banner-actions";
+			bannerActions.forEach(function(bannerAction) {
+				const actionId = String(bannerAction.id || "");
+				if (!actionId) {
 					return;
 				}
-				notifyBridge("disconnectServer");
+				const button = document.createElement("button");
+				button.type = "button";
+				button.className = "chip-button connection-banner-action";
+				if (bannerAction.tone) {
+					button.classList.add("is-" + String(bannerAction.tone).trim().toLowerCase());
+				}
+				button.textContent = String(bannerAction.label || actionId);
+				button.addEventListener("click", function() {
+					if (actionId === "connect") {
+						notifyBridge("openModernDialog", "connect", {});
+						return;
+					}
+					if (actionId === "cancel") {
+						notifyBridge("disconnectServer");
+						return;
+					}
+					notifyBridge("invokeAppAction", actionId);
+				});
+				actions.appendChild(button);
 			});
-			refs.scopeBanner.appendChild(button);
+			refs.scopeBanner.appendChild(actions);
 		}
 	}
 
@@ -3881,7 +4540,10 @@
 		});
 	}
 
-	function stonksPopularTickerRows(stonks, excludedTickerKeys) {
+	function stonksPopularTickerRows(stonks, excludedTickerKeys, limit) {
+		const maxRows = limit === Number.POSITIVE_INFINITY
+			? Number.MAX_SAFE_INTEGER
+			: (Number.isFinite(Number(limit)) ? Math.max(0, Number(limit)) : 5);
 		return (Array.isArray(stonks.popularTickers) ? stonks.popularTickers : []).map(function(ticker) {
 			const symbol = normalizeStonksSymbol(ticker && ticker.symbol);
 			if (!symbol) {
@@ -3903,18 +4565,30 @@
 			};
 		}).filter(function(ticker) {
 			return !!ticker && !stonksTickerMatchesKeySet(ticker, excludedTickerKeys);
-		}).slice(0, 5);
+		}).slice(0, maxRows);
 	}
 
-	function stonksPersonalTickerRows(stonks) {
+	function stonksPersonalTickerRows(stonks, limit) {
+		const maxRows = limit === Number.POSITIVE_INFINITY
+			? Number.MAX_SAFE_INTEGER
+			: (Number.isFinite(Number(limit)) ? Math.max(0, Number(limit)) : 5);
 		const personal = Array.isArray(stonks.personalTickers) ? stonks.personalTickers : [];
+		const rows = [];
+		const seen = new Set();
+		function add(row) {
+			if (!row || !row.symbol || seen.has(row.symbol)) {
+				return;
+			}
+			seen.add(row.symbol);
+			rows.push(row);
+		}
 		if (personal.length) {
-			return personal.map(function(ticker) {
+			personal.forEach(function(ticker) {
 				const symbol = normalizeStonksSymbol(ticker && ticker.symbol);
 				if (!symbol) {
-					return null;
+					return;
 				}
-				return {
+				add({
 					symbol: symbol,
 					displayName: String(ticker.displayName || "").trim(),
 					holderCount: 1,
@@ -3927,13 +4601,13 @@
 					quoteSourceUrl: String(ticker.quoteSourceUrl || stonksYahooQuoteUrl(symbol)).trim(),
 					latestUpdatedAt: Number(ticker.latestUpdatedAt || 0),
 					source: "mine"
-				};
-			}).filter(Boolean).slice(0, 5);
+				});
+			});
 		}
 
 		const latest = stonksLatestSnapshot(stonks);
 		const positions = latest && Array.isArray(latest.positions) ? latest.positions : [];
-		return positions.map(function(position) {
+		positions.map(function(position) {
 			const normalized = stonksNormalizePosition(position, latest && latest.currency || "USD");
 			if (!normalized.symbol || !(stonksNumber(normalized.marketValue) > 0 || stonksNumber(normalized.quantity) > 0)) {
 				return null;
@@ -3948,13 +4622,58 @@
 		}).filter(Boolean).sort(function(left, right) {
 			return stonksNumber(right.marketValue || right.totalMarketValue)
 				- stonksNumber(left.marketValue || left.totalMarketValue);
-		}).slice(0, 5);
+		}).forEach(add);
+		return rows.slice(0, maxRows);
+	}
+
+	function stonksPinnedTickerRows(stonks) {
+		return (Array.isArray(stonks.pinnedTickers) ? stonks.pinnedTickers : []).map(function(ticker) {
+			const symbol = normalizeStonksSymbol(ticker && (ticker.symbol || ticker.ticker));
+			if (!symbol) {
+				return null;
+			}
+			return {
+				symbol: symbol,
+				displayName: String(ticker.displayName || "").trim(),
+				holderCount: 1,
+				totalQuantity: stonksNumber(ticker.totalQuantity),
+				totalMarketValue: stonksNumber(ticker.totalMarketValue),
+				currency: String(ticker.currency || "").trim().toUpperCase(),
+				providerId: String(ticker.providerId || "").trim(),
+				providerSymbol: normalizeStonksSymbol(ticker.providerSymbol || symbol) || symbol,
+				exchange: String(ticker.exchange || "").trim(),
+				quoteSourceUrl: String(ticker.quoteSourceUrl || stonksYahooQuoteUrl(symbol)).trim(),
+				latestUpdatedAt: Number(ticker.latestUpdatedAt || ticker.updatedAt || ticker.createdAt || 0),
+				source: "pinned"
+			};
+		}).filter(Boolean);
+	}
+
+	function stonksFeedPreferences(stonks) {
+		const preferences = stonks && stonks.feedPreferences && typeof stonks.feedPreferences === "object"
+			? stonks.feedPreferences
+			: {};
+		return {
+			showMine: preferences.showMine !== false,
+			showPopular: preferences.showPopular !== false,
+			showPins: preferences.showPins !== false
+		};
 	}
 
 	function stonksHeaderTickerRows(stonks) {
-		const personalTickers = stonksPersonalTickerRows(stonks);
-		const popularTickers = stonksPopularTickerRows(stonks, stonksTickerKeySet(personalTickers));
+		const preferences = stonksFeedPreferences(stonks);
+		const pinnedTickers = preferences.showPins ? stonksPinnedTickerRows(stonks) : [];
+		const pinnedKeys = stonksTickerKeySet(pinnedTickers);
+		const personalLimit = preferences.showPopular ? 8 : Number.POSITIVE_INFINITY;
+		const personalTickers = preferences.showMine
+			? stonksPersonalTickerRows(stonks, personalLimit).filter(function(ticker) {
+				return !stonksTickerMatchesKeySet(ticker, pinnedKeys);
+			})
+			: [];
+		const usedKeys = stonksTickerKeySet(pinnedTickers.concat(personalTickers));
+		const popularTickers = preferences.showPopular ? stonksPopularTickerRows(stonks, usedKeys, 5) : [];
 		return {
+			pinnedTickers: pinnedTickers,
 			personalTickers: personalTickers,
 			popularTickers: popularTickers
 		};
@@ -4013,8 +4732,10 @@
 		if (ticker.source === "popular") {
 			const holders = Number(ticker.holderCount || 0);
 			parts.push(holders === 1 ? "1 holder" : holders + " holders");
+		} else if (ticker.source === "pinned") {
+			parts.push("Pinned ticker");
 		} else {
-			parts.push("Your latest ledger position");
+			parts.push("Your latest portfolio position");
 		}
 		if (quote && quote.ok) {
 			const price = Number(quote.price);
@@ -4115,7 +4836,8 @@
 				return;
 			}
 			const headerTickers = stonksHeaderTickerRows(stonks);
-			const visibleTickers = headerTickers.personalTickers.concat(headerTickers.popularTickers);
+			const visibleTickers = headerTickers.pinnedTickers
+				.concat(headerTickers.personalTickers, headerTickers.popularTickers);
 			if (!activeScopeIsStonksRoom(snapshot) && !visibleTickers.length) {
 				return;
 			}
@@ -4127,9 +4849,10 @@
 
 	function visibleModernUiTweaks(snapshot) {
 		const app = (snapshot || getSnapshot()).app || {};
-		return modernDialogState && modernDialogState.open && modernDialogState.uiTweaks
-			? modernDialogState.uiTweaks
-			: (app.uiTweaks || {});
+		if (modernDialogState && modernDialogState.open && modernDialogState.uiTweaks) {
+			return modernDialogState.uiTweaks;
+		}
+		return detachedModernDialogUiTweaks || app.uiTweaks || {};
 	}
 
 	function stonksTickerBannerAlwaysScroll(snapshot) {
@@ -4286,7 +5009,7 @@
 		delete header.dataset.stonksMarqueeSignature;
 	}
 
-	function stonksTickerHeaderRenderSignature(personalTickers, popularTickers, stonks) {
+	function stonksTickerHeaderRenderSignature(pinnedTickers, personalTickers, popularTickers, stonks) {
 		const tickerSignature = function(ticker) {
 			const quote = stonksTickerQuote(stonksTickerLookupSymbol(ticker), stonks);
 			return {
@@ -4297,6 +5020,7 @@
 			};
 		};
 		return JSON.stringify({
+			pinned: pinnedTickers.map(tickerSignature),
 			yours: personalTickers.map(tickerSignature),
 			popular: popularTickers.map(tickerSignature)
 		});
@@ -4310,9 +5034,10 @@
 		const app = snapshot.app || {};
 		const stonks = app.stonks || {};
 		const headerTickers = stonksHeaderTickerRows(stonks);
+		const pinnedTickers = headerTickers.pinnedTickers;
 		const personalTickers = headerTickers.personalTickers;
 		const popularTickers = headerTickers.popularTickers;
-		const hasTickers = personalTickers.length || popularTickers.length;
+		const hasTickers = pinnedTickers.length || personalTickers.length || popularTickers.length;
 		const connected = !!app.canDisconnect;
 		const supported = !!stonks.supported;
 		const automationHeaderVisible = !!stonks.automationHeaderVisible;
@@ -4338,7 +5063,7 @@
 		if (stonks.disableQuoteLookup) {
 			stopStonksVisibleRefreshTimer();
 		} else {
-			requestStonksTickerQuotes(personalTickers.concat(popularTickers), false);
+			requestStonksTickerQuotes(pinnedTickers.concat(personalTickers, popularTickers), false);
 			scheduleStonksVisibleRefresh();
 		}
 		if (!hasTickers) {
@@ -4350,7 +5075,7 @@
 			clearStonksTickerHeader(refs.stonksLeaderboardHeader);
 			return;
 		}
-		const nextSignature = stonksTickerHeaderRenderSignature(personalTickers, popularTickers, stonks);
+		const nextSignature = stonksTickerHeaderRenderSignature(pinnedTickers, personalTickers, popularTickers, stonks);
 		if (stonksTickerRenderSignature === nextSignature
 				&& refs.stonksLeaderboardHeader.querySelector(".stonks-chat-header-viewport")) {
 			scheduleStonksTickerScrollSync();
@@ -4362,7 +5087,8 @@
 		refs.stonksLeaderboardHeader.style.removeProperty("--stonks-marquee-duration");
 		refs.stonksLeaderboardHeader.style.removeProperty("--stonks-marquee-distance");
 		delete refs.stonksLeaderboardHeader.dataset.stonksMarqueeSignature;
-		appendStonksTickerGroup(refs.stonksLeaderboardHeader, "Yours", personalTickers, "", stonks);
+		appendStonksTickerGroup(refs.stonksLeaderboardHeader, "Pinned", pinnedTickers, "", stonks);
+		appendStonksTickerGroup(refs.stonksLeaderboardHeader, "Portfolio", personalTickers, "", stonks);
 		appendStonksTickerGroup(refs.stonksLeaderboardHeader, "Popular", popularTickers, "", stonks);
 		const viewport = document.createElement("div");
 		viewport.className = "stonks-chat-header-viewport";
@@ -7028,7 +7754,10 @@
 	function buildRoomRow(room, joinable, selectedVoicePresence) {
 		const depthValue = Number(room.depth);
 		const depth = Number.isFinite(depthValue) && depthValue > 0 ? depthValue : 0;
-		const roomPathLabel = room.pathLabel || "";
+		const roomPathLabel = String(room.pathLabel || "").trim();
+		const hasRoomTopic = Object.prototype.hasOwnProperty.call(room || {}, "topic");
+		const roomTopic = String(hasRoomTopic ? (room.topic || "") : (joinable ? (room.description || "") : "")).trim();
+		const roomDescription = String(room.description || "").trim();
 		const unreadCount = Number(room.unreadCount || 0);
 		const screenShare = room.screenShare || {};
 		const isRootRoom = !!room.isRoot;
@@ -7039,10 +7768,20 @@
 		});
 		const canJoinRoom = joinable && room.canJoin !== false && !room.joined && !joining;
 		const subtitleText = joinable
-			? ((room.joined || room.selected) ? (roomPathLabel || room.description || "") : "")
+			? roomTopic
 			: ((room.selected || unreadCount > 0 || roomKind === "activity" || roomKind === "direct message")
-				? (room.description || "")
+				? roomDescription
 				: "");
+		const tooltipParts = [];
+		if (roomTopic) {
+			tooltipParts.push(roomTopic);
+		}
+		if (roomPathLabel && roomPathLabel !== roomTopic) {
+			tooltipParts.push(roomPathLabel);
+		}
+		if (!tooltipParts.length && roomDescription) {
+			tooltipParts.push(roomDescription);
+		}
 		const wrapper = document.createElement("div");
 		wrapper.className = "rail-row-wrapper room-item" + (joinable ? " is-voice-room" : "");
 		wrapper.setAttribute("role", "option");
@@ -7073,7 +7812,7 @@
 		if (room.participantSession) {
 			button.dataset.participantSession = String(room.participantSession);
 		}
-		button.title = roomPathLabel || room.description || "";
+		button.title = tooltipParts.join(" - ");
 
 		const chip = document.createElement("span");
 		chip.className = "kind-chip room-icon";
@@ -7430,7 +8169,7 @@
 		if (appMenuOpen) {
 			renderAppMenu(snapshot);
 		}
-		if (selfMenuOpen) {
+		if (selfMenuOpen && !nativeSelfMenuOpen()) {
 			renderSelfMenu(snapshot);
 		}
 
@@ -8262,6 +9001,38 @@
 		return Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 1;
 	}
 
+	function previewMediaIconSvg(iconName) {
+		switch (String(iconName || "")) {
+			case "pause":
+				return "<svg class=\"preview-card-media-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path class=\"preview-card-media-icon-fill\" d=\"M7 5h4v14H7zM13 5h4v14h-4z\"></path></svg>";
+			case "volume":
+				return "<svg class=\"preview-card-media-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M4 9v6h4l5 4V5L8 9H4z\"></path><path d=\"M16 9.5a4 4 0 010 5\"></path><path d=\"M18.5 6.5a8 8 0 010 11\"></path></svg>";
+			case "muted":
+				return "<svg class=\"preview-card-media-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M4 9v6h4l5 4V5L8 9H4z\"></path><path d=\"M16 9l5 6\"></path><path d=\"M21 9l-5 6\"></path></svg>";
+			case "size-compact":
+				return "<svg class=\"preview-card-media-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M4 14h6v6\"></path><path d=\"M10 14l-7 7\"></path><path d=\"M20 10h-6V4\"></path><path d=\"M14 10l7-7\"></path></svg>";
+			case "size-default":
+				return "<svg class=\"preview-card-media-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><rect x=\"5\" y=\"6\" width=\"14\" height=\"12\" rx=\"2\"></rect><path d=\"M8 3h13v11\"></path></svg>";
+			case "size-large":
+				return "<svg class=\"preview-card-media-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path d=\"M8 3H3v5\"></path><path d=\"M3 3l7 7\"></path><path d=\"M16 21h5v-5\"></path><path d=\"M21 21l-7-7\"></path></svg>";
+			case "play":
+			default:
+				return "<svg class=\"preview-card-media-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" focusable=\"false\"><path class=\"preview-card-media-icon-fill\" d=\"M8 5.5v13l10-6.5z\"></path></svg>";
+		}
+	}
+
+	function setPreviewMediaButtonIcon(button, iconName) {
+		if (!button) {
+			return;
+		}
+		const normalizedIcon = String(iconName || "play");
+		if (button.dataset.previewIcon === normalizedIcon && button.firstElementChild) {
+			return;
+		}
+		button.dataset.previewIcon = normalizedIcon;
+		button.innerHTML = previewMediaIconSvg(normalizedIcon);
+	}
+
 	function previewVideoControlState(video) {
 		const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
 		const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
@@ -8296,14 +9067,21 @@
 		const seekEnabled = state.seekEnabled !== false && !!duration;
 		const volumeEnabled = state.volumeEnabled !== false;
 		if (playButton) {
-			playButton.textContent = state.paused === false ? "Pause" : "Play";
+			const isPlaying = state.paused === false;
+			const label = (isPlaying ? "Pause " : "Play ") + mediaLabel;
+			setPreviewMediaButtonIcon(playButton, isPlaying ? "pause" : "play");
+			playButton.classList.toggle("is-playing", isPlaying);
 			playButton.disabled = !playEnabled;
-			playButton.setAttribute("aria-label", (state.paused === false ? "Pause " : "Play ") + mediaLabel);
+			playButton.title = label;
+			playButton.setAttribute("aria-label", label);
 		}
 		if (muteButton) {
-			muteButton.textContent = isMuted ? "Muted" : "Sound";
+			const label = (isMuted ? "Unmute " : "Mute ") + mediaLabel;
+			setPreviewMediaButtonIcon(muteButton, isMuted ? "muted" : "volume");
+			muteButton.classList.toggle("is-muted", isMuted);
 			muteButton.disabled = !volumeEnabled;
-			muteButton.setAttribute("aria-label", (isMuted ? "Unmute " : "Mute ") + mediaLabel);
+			muteButton.title = label;
+			muteButton.setAttribute("aria-label", label);
 		}
 		if (seek && duration && !seek.matches(":active")) {
 			seek.value = String(Math.round((currentTime / duration) * 1000));
@@ -8517,6 +9295,11 @@
 		"large": "Compact",
 		"compact": "Default"
 	};
+	const previewCardSizeNextIcons = {
+		"default": "size-large",
+		"large": "size-compact",
+		"compact": "size-default"
+	};
 	const previewCardBubbleWidthVars = {
 		"default": "var(--preview-card-width-default)",
 		"large": "var(--preview-card-width-large)",
@@ -8585,13 +9368,9 @@
 		const currentLabel = previewCardSizeLabels[current] || previewCardSizeLabels.default;
 		const nextLabel = previewCardSizeLabels[next] || previewCardSizeLabels.default;
 		const buttonLabel = previewCardSizeNextLabels[current] || nextLabel;
-		const label = button.querySelector(".preview-card-media-size-label");
-		if (label) {
-			label.textContent = buttonLabel;
-		} else {
-			button.textContent = buttonLabel;
-		}
+		setPreviewMediaButtonIcon(button, previewCardSizeNextIcons[current] || previewCardSizeNextIcons.default);
 		button.dataset.sizeLabel = buttonLabel;
+		button.dataset.sizeAction = next;
 		button.title = "Preview size: " + currentLabel + ". Switch to " + nextLabel + ".";
 		button.setAttribute("aria-label", button.title);
 	}
@@ -8628,10 +9407,7 @@
 		sizeButton.type = "button";
 		sizeButton.className = "preview-card-media-button preview-card-media-size";
 		sizeButton.dataset.sizeLabel = previewCardSizeNextLabels.default;
-		const sizeLabel = document.createElement("span");
-		sizeLabel.className = "preview-card-media-size-label";
-		sizeLabel.textContent = previewCardSizeNextLabels.default;
-		sizeButton.appendChild(sizeLabel);
+		setPreviewMediaButtonIcon(sizeButton, previewCardSizeNextIcons.default);
 		sizeButton.addEventListener("click", function(event) {
 			event.preventDefault();
 			event.stopPropagation();
@@ -15855,11 +16631,15 @@
 	function syncModernDialogState(state) {
 		const detachedDialogHost = state && state.open
 			&& String(state.host || "") === "window";
+		detachedModernDialogUiTweaks = detachedDialogHost && state.uiTweaks
+			? state.uiTweaks
+			: null;
 		if (!renderContainedModernDialogs || detachedDialogHost) {
 			modernDialogState = null;
 			modernDialogPendingFieldUpdates = {};
 			modernDialogLocalFieldValues = {};
 			renderModernDialog();
+			syncAmbientState(getSnapshot());
 			return;
 		}
 
@@ -20210,6 +20990,10 @@
 
 	function stonksSelectedUserName(stonks) {
 		const selectedId = stonksSelectedUserId(stonks);
+		const selfId = stonksUserIdValue(stonks && stonks.selfUserId);
+		if (selfId !== null && selectedId === selfId) {
+			return "You";
+		}
 		const directName = String(stonks && stonks.selectedUserName || "").trim();
 		if (directName) {
 			return directName;
@@ -20218,7 +21002,7 @@
 		const match = users.find(function(user) {
 			return Number(user && user.userId) === selectedId;
 		});
-		return String(match && match.userName || (selectedId ? "user " + selectedId : "Ledger")).trim();
+		return String(match && match.userName || (selectedId ? "user " + selectedId : "Portfolio")).trim();
 	}
 
 	function stonksCanEditPortfolio(stonks) {
@@ -20336,7 +21120,7 @@
 		const changes = [];
 
 		if (!currentPositions.size && previousPositions.size) {
-			return ["Cleared ledger"];
+			return ["Cleared portfolio"];
 		}
 		if (currentPositions.size && !previousPositions.size) {
 			currentPositions.forEach(function(position, symbol) {
@@ -20366,7 +21150,7 @@
 		});
 
 		if (!changes.length) {
-			changes.push(previousSnapshot ? "Ledger details updated" : "Initial ledger update");
+			changes.push(previousSnapshot ? "Portfolio details updated" : "Initial portfolio update");
 		}
 		return changes;
 	}
@@ -20380,6 +21164,15 @@
 			input.placeholder = placeholder;
 		}
 		return input;
+	}
+
+	function stonksInputNumber(value, maxFractionDigits) {
+		const number = Number(value);
+		if (!Number.isFinite(number)) {
+			return "";
+		}
+		const digits = Number.isFinite(Number(maxFractionDigits)) ? Number(maxFractionDigits) : 2;
+		return Number(number.toFixed(digits)).toString();
 	}
 
 	function stonksCollectDraft(root) {
@@ -20470,7 +21263,7 @@
 			summary.innerHTML = "";
 			summary.className = "stonks-validation is-idle";
 			const title = document.createElement("strong");
-			title.textContent = "Add positions to update";
+			title.textContent = "Add positions to save";
 			summary.appendChild(title);
 			if (total) {
 				total.textContent = formatStonksMoney(0, draft.currency);
@@ -20487,7 +21280,7 @@
 		const title = document.createElement("strong");
 		title.textContent = validation.errors.length
 			? validation.errors.length + " issue" + (validation.errors.length === 1 ? "" : "s")
-			: "Ready to update";
+			: "Ready to save";
 		summary.appendChild(title);
 		const messages = validation.errors.concat(validation.warnings).slice(0, 5);
 		if (messages.length) {
@@ -20640,7 +21433,7 @@
 			error.textContent = stonks.error;
 			parent.appendChild(error);
 		}
-		if (stonks.status) {
+		if ((stonks.error || stonks.loading) && stonks.status) {
 			const status = document.createElement("div");
 			status.className = "stonks-status";
 			status.textContent = stonks.status;
@@ -20746,12 +21539,12 @@
 	}
 
 	function appendStonksTabs(parent, stonks) {
-		const tabs = [["overview", "Overview"], ["ledger", "Ledger"], ["leaderboard", "Leaderboard"], ["following", "Following"], ["audit", "Updates"]];
+		const tabs = [["overview", "Overview"], ["ledger", "Portfolio"], ["leaderboard", "Leaderboard"], ["following", "Following"], ["audit", "Audit"]];
 		if (stonks.canAdmin) {
 			tabs.push(["admin", "Admin"]);
 		}
 		if (!tabs.some(function(tab) { return tab[0] === stonksActiveTab; })) {
-			stonksActiveTab = "overview";
+			stonksActiveTab = "ledger";
 		}
 		const wrap = document.createElement("div");
 		wrap.className = "stonks-tabs";
@@ -20785,7 +21578,7 @@
 		if (!visiblePositions.length) {
 			const empty = document.createElement("div");
 			empty.className = "stonks-empty";
-			empty.textContent = latest && latest.positionsRedacted ? "Ledger positions are private." : "No open positions to map.";
+			empty.textContent = latest && latest.positionsRedacted ? "Portfolio positions are private." : "No open positions to map.";
 			parent.appendChild(empty);
 			return;
 		}
@@ -20798,7 +21591,7 @@
 		const title = document.createElement("div");
 		title.className = "stonks-heatmap-title";
 		title.innerHTML = "<strong></strong><span></span>";
-		title.querySelector("strong").textContent = "Ledger heatmap";
+		title.querySelector("strong").textContent = "Portfolio heatmap";
 		title.querySelector("span").textContent = stonksSelectedUserName(stonks);
 		heatmap.appendChild(title);
 		const grid = document.createElement("div");
@@ -20824,7 +21617,7 @@
 		const latest = stonksLatestSnapshot(stonks);
 		const stats = document.createElement("div");
 		stats.className = "stonks-stat-grid";
-		[["Ledger value", latest ? formatStonksMoney(latest.totalValue, latest.currency) : "-"],
+		[["Total value", latest ? formatStonksMoney(latest.totalValue, latest.currency) : "-"],
 		 ["Last update", latest ? formatStonksTime(latest.createdAt) : "-"],
 		 ["Owner", stonksSelectedUserName(stonks)],
 		 ["PnL rows", String((stonks.leaderboard || []).length)]].forEach(function(item) {
@@ -20867,8 +21660,8 @@
 		owner.innerHTML = "<strong></strong><span></span>";
 		owner.querySelector("strong").textContent = ownerName;
 		owner.querySelector("span").textContent = latest
-			? "Last update " + formatStonksTime(latest.createdAt)
-			: "No ledger updates";
+			? "Current save " + formatStonksTime(latest.createdAt)
+			: "No portfolio saves";
 		editor.appendChild(owner);
 		const top = document.createElement("div");
 		top.className = "stonks-editor-top";
@@ -20956,7 +21749,7 @@
 		table.className = "stonks-position-table";
 		const head = document.createElement("div");
 		head.className = "stonks-position-head";
-		["Symbol", "Qty", "Price", "Value", "Currency", "Source", "Name", ""].forEach(function(label) {
+		["Symbol", "Qty", "Price", "Value", "Currency", "Source", ""].forEach(function(label) {
 			const cell = document.createElement("span");
 			cell.textContent = label;
 			head.appendChild(cell);
@@ -20973,14 +21766,14 @@
 			row.dataset.stonksQuoteSourceUrl = position.quoteSourceUrl || "";
 			row.dataset.stonksQuoteConfidence = String(position.quoteConfidence || 0);
 			row.appendChild(stonksInput(position.symbol, "symbol", "text", "RKLB"));
-			row.appendChild(stonksInput(position.quantity, "quantity", "number"));
-			row.appendChild(stonksInput(position.price, "price", "number"));
-			row.appendChild(stonksInput(position.marketValue, "marketValue", "number"));
+			row.appendChild(stonksInput(stonksInputNumber(position.quantity, 6), "quantity", "number"));
+			row.appendChild(stonksInput(stonksInputNumber(position.price, 4), "price", "number"));
+			row.appendChild(stonksInput(stonksInputNumber(position.marketValue, 2), "marketValue", "number"));
 			row.appendChild(stonksInput(position.currency || stonksDraftCurrency, "currency"));
 			const source = document.createElement("div");
 			source.className = "stonks-source";
 			const sourceLabel = document.createElement(position.quoteSourceUrl ? "a" : "span");
-			sourceLabel.textContent = stonksSourceLabel(position);
+			sourceLabel.textContent = stonksProviderLabel(position.providerId);
 			if (position.quoteSourceUrl) {
 				sourceLabel.href = position.quoteSourceUrl;
 				sourceLabel.target = "_blank";
@@ -20993,7 +21786,9 @@
 				source.appendChild(exchange);
 			}
 			row.appendChild(source);
-			row.appendChild(stonksInput(position.displayName, "displayName"));
+			const displayName = stonksInput(position.displayName, "displayName");
+			displayName.type = "hidden";
+			row.appendChild(displayName);
 			const remove = document.createElement("button");
 			remove.type = "button";
 			remove.className = "icon-button stonks-remove-row";
@@ -21027,8 +21822,8 @@
 			empty.innerHTML = "<strong></strong><span></span>";
 			empty.querySelector("strong").textContent = "No positions yet";
 			empty.querySelector("span").textContent = canEdit
-				? "Search for a ticker or add a manual row to start the ledger."
-				: "This ledger has no visible positions.";
+				? "Search for a ticker or add a manual row to start the portfolio."
+				: "This portfolio has no visible positions.";
 			table.appendChild(empty);
 		}
 		editor.appendChild(table);
@@ -21050,8 +21845,8 @@
 		submit.type = "button";
 		submit.className = "chip-button is-primary";
 		submit.textContent = ownerUserId && ownerUserId !== Number(stonks.selfUserId || 0)
-			? "Update ledger for " + ownerName
-			: "Update ledger";
+			? "Save portfolio for " + ownerName
+			: "Save portfolio";
 		submit.disabled = !canEdit;
 		submit.addEventListener("click", function() {
 			const draft = stonksCollectDraft(editor);
@@ -21066,18 +21861,18 @@
 		const clear = document.createElement("button");
 		clear.type = "button";
 		clear.className = "chip-button is-danger";
-		clear.textContent = "Clear ledger";
+		clear.textContent = "Clear portfolio";
 		clear.disabled = !canEdit || !(latest && stonksNumber(latest.totalValue) > 0);
 		clear.addEventListener("click", function() {
 			requestStonksConfirm({
-				title: "Clear ledger",
-				message: "Clear ledger for " + ownerName + "?",
-				confirmLabel: "Clear ledger",
+				title: "Clear portfolio",
+				message: "Clear portfolio for " + ownerName + "?",
+				confirmLabel: "Clear portfolio",
 				onConfirm: function() {
 					invokeModernDialogAction("clearPortfolio", {
 						userId: ownerUserId,
 						currency: stonksDraftCurrency || latest && latest.currency || "USD",
-						note: "Ledger cleared"
+						note: "Portfolio cleared"
 					});
 				}
 			});
@@ -21108,7 +21903,7 @@
 		const canEdit = stonksCanEditPortfolio(stonks);
 		const description = document.createElement("div");
 		description.className = "stonks-leaderboard-description";
-		description.textContent = "Ledger updates are kept here for your own review.";
+		description.textContent = "Portfolio updates are kept here for your own review.";
 		const owner = document.createElement("span");
 		owner.textContent = ownerName;
 		description.appendChild(owner);
@@ -21132,8 +21927,8 @@
 					event.preventDefault();
 					event.stopPropagation();
 					requestStonksConfirm({
-						title: "Delete ledger update",
-						message: "Delete this ledger update for " + ownerName + "?",
+						title: "Delete portfolio update",
+						message: "Delete this portfolio update for " + ownerName + "?",
 						confirmLabel: "Delete update",
 						onConfirm: function() {
 							invokeModernDialogAction("deleteSnapshot", {
@@ -21185,7 +21980,7 @@
 		if (!list.children.length) {
 			const empty = document.createElement("div");
 			empty.className = "stonks-empty";
-			empty.textContent = "No ledger updates yet.";
+			empty.textContent = "No portfolio updates yet.";
 			list.appendChild(empty);
 		}
 		parent.appendChild(list);
@@ -21314,7 +22109,7 @@
 		const view = document.createElement("button");
 		view.type = "button";
 		view.className = "chip-button";
-		view.textContent = "View ledger";
+		view.textContent = "View portfolio";
 		view.disabled = !userSelect.children.length || stonksUserIdValue(userSelect.value) === null;
 		view.addEventListener("click", function() {
 			stonksActiveTab = "ledger";
@@ -21332,21 +22127,21 @@
 		const clear = document.createElement("button");
 		clear.type = "button";
 		clear.className = "chip-button is-danger";
-		clear.textContent = "Clear ledger";
+		clear.textContent = "Clear portfolio";
 		clear.disabled = !userSelect.children.length || stonksUserIdValue(userSelect.value) === null;
 		clear.addEventListener("click", function() {
 			const targetName = userSelect.options[userSelect.selectedIndex]
 				? userSelect.options[userSelect.selectedIndex].textContent
 				: "selected user";
 			requestStonksConfirm({
-				title: "Clear ledger",
-				message: "Clear ledger for " + targetName + "?",
-				confirmLabel: "Clear ledger",
+				title: "Clear portfolio",
+				message: "Clear portfolio for " + targetName + "?",
+				confirmLabel: "Clear portfolio",
 				onConfirm: function() {
 					invokeModernDialogAction("clearPortfolio", {
 						userId: Number(userSelect.value || 0),
 						currency: stonksLatestSnapshot(stonks) && stonksLatestSnapshot(stonks).currency || "USD",
-						note: "Ledger cleared by admin"
+						note: "Portfolio cleared by admin"
 					});
 				}
 			});
@@ -21587,6 +22382,28 @@
 		refs.modernDialogBody.appendChild(content);
 	}
 
+	function modernDialogRenderKey(dialog) {
+		const stonks = dialog && dialog.stonks || {};
+		return [
+			dialog && dialog.id || "",
+			dialog && dialog.kind || "",
+			dialog && dialog.title || "",
+			dialog && dialog.subtitle || "",
+			dialog && dialog.tone || "",
+			stonksActiveTab || "",
+			stonks.status || "",
+			stonks.error || "",
+			stonks.loading ? "loading" : "",
+			stonks.supported === false ? "unsupported" : "",
+			stonks.enabled === false ? "disabled" : "",
+			stonks.registered === false ? "anonymous" : "",
+			stonks.selectedUserId || "",
+			Array.isArray(stonks.snapshots) ? stonks.snapshots.length : "",
+			Array.isArray(stonks.leaderboard) ? stonks.leaderboard.length : "",
+			Array.isArray(stonks.personalTickers) ? stonks.personalTickers.length : ""
+		].join("|");
+	}
+
 	function renderModernDialog() {
 		const dialog = modernDialogState || {};
 		const open = !!dialog.open;
@@ -21621,6 +22438,7 @@
 			refs.modernDialogBody.innerHTML = "";
 			refs.modernDialogActions.innerHTML = "";
 			modernDialogRenderedOpen = false;
+			modernDialogLastRenderKey = "";
 			syncAudioInputMeterTimer();
 			applyModernUiTweaks(((getSnapshot().app || {}).uiTweaks) || {});
 			if (closing) {
@@ -21629,6 +22447,8 @@
 			return;
 		}
 
+		const renderKey = modernDialogRenderKey(dialog);
+		const shouldResetBodyScroll = opening || renderKey !== modernDialogLastRenderKey;
 		refs.modernDialog.className = "modern-dialog" + (dialog.tone ? " is-" + dialog.tone : "")
 			+ (dialog.kind ? " is-" + dialog.kind : "")
 			+ (dialog.id ? " dialog-id-" + String(dialog.id).replace(/[^a-z0-9_-]/gi, "-") : "");
@@ -21641,6 +22461,10 @@
 		if (dialog.kind === "stonks") {
 			renderStonksDialog(dialog);
 			syncAudioInputMeterTimer();
+			if (shouldResetBodyScroll) {
+				refs.modernDialogBody.scrollTop = 0;
+			}
+			modernDialogLastRenderKey = renderKey;
 			modernDialogRenderedOpen = true;
 			if (focusState && restoreModernDialogFocus(focusState)) {
 				return;
@@ -21681,6 +22505,10 @@
 		}
 		enhanceModernDialogSelects(refs.modernDialogBody);
 		syncAudioInputMeterTimer();
+		if (shouldResetBodyScroll) {
+			refs.modernDialogBody.scrollTop = 0;
+		}
+		modernDialogLastRenderKey = renderKey;
 		modernDialogRenderedOpen = true;
 		if (focusState && restoreModernDialogFocus(focusState)) {
 			return;
@@ -21813,6 +22641,10 @@
 		if (wasOpen) {
 			closeNativeContextMenu();
 		}
+	}
+
+	function nativeSelfMenuOpen() {
+		return !!activeNativeContextMenuToken && activeNativeContextMenuKind === "self";
 	}
 
 	function positionSelfMenu() {
@@ -22088,53 +22920,9 @@
 		refs.composerReplySnippet.textContent = normalizedReplyPreviewText(scope.replySnippet);
 	}
 
-	const modernAccentPalette = {
-		teal: { accent: "#5ec8b0", rgb: "94, 200, 176", soft: "rgba(94, 200, 176, 0.16)", border: "rgba(94, 200, 176, 0.42)" },
-		blue: { accent: "#73b7ff", rgb: "115, 183, 255", soft: "rgba(115, 183, 255, 0.16)", border: "rgba(115, 183, 255, 0.42)" },
-		violet: { accent: "#b59cff", rgb: "181, 156, 255", soft: "rgba(181, 156, 255, 0.16)", border: "rgba(181, 156, 255, 0.42)" },
-		amber: { accent: "#f2c76f", rgb: "242, 199, 111", soft: "rgba(242, 199, 111, 0.16)", border: "rgba(242, 199, 111, 0.42)" },
-		rose: { accent: "#ff8aa0", rgb: "255, 138, 160", soft: "rgba(255, 138, 160, 0.16)", border: "rgba(255, 138, 160, 0.42)" }
-	};
-
-	function normalizedModernUiToken(value, fallback, allowed) {
-		const token = String(value || "").trim().toLowerCase();
-		return allowed.indexOf(token) >= 0 ? token : fallback;
-	}
-
 	function applyModernUiTweaks(uiTweaks) {
-		uiTweaks = uiTweaks || {};
-		const theme = normalizedModernUiToken(uiTweaks.theme, "dark",
-			["dark", "light", "mocha", "macchiato", "frappe", "latte", "nord", "gruvbox"]);
-		const density = normalizedModernUiToken(uiTweaks.density, "comfortable",
-			["compact", "comfortable", "spacious"]);
-		const userIcons = normalizedModernUiToken(
-			uiTweaks.userIcons || (uiTweaks.classicUserIcons ? "classic" : "avatars"),
-			"avatars",
-			["avatars", "classic"]);
-		const railSide = normalizedModernUiToken(uiTweaks.railSide, "right", ["left", "right"]);
-		const accent = normalizedModernUiToken(uiTweaks.accent, "auto",
-			["auto", "teal", "blue", "violet", "amber", "rose"]);
-
-		if (document.body) {
-			document.body.dataset.density = density;
-			document.body.dataset.userIcons = userIcons;
-			document.body.dataset.railSide = railSide;
-		}
-		if (document.documentElement) {
-			document.documentElement.dataset.theme = theme;
-			document.documentElement.dataset.accent = accent;
-			const palette = accent === "auto" ? null : modernAccentPalette[accent];
-			if (palette) {
-				document.documentElement.style.setProperty("--accent", palette.accent);
-				document.documentElement.style.setProperty("--accent-rgb", palette.rgb);
-				document.documentElement.style.setProperty("--accent-soft", palette.soft);
-				document.documentElement.style.setProperty("--accent-border", palette.border);
-			} else {
-				document.documentElement.style.removeProperty("--accent");
-				document.documentElement.style.removeProperty("--accent-rgb");
-				document.documentElement.style.removeProperty("--accent-soft");
-				document.documentElement.style.removeProperty("--accent-border");
-			}
+		if (window.MumbleModernTheme && typeof window.MumbleModernTheme.apply === "function") {
+			window.MumbleModernTheme.apply(uiTweaks || {});
 		}
 	}
 
@@ -22426,7 +23214,7 @@
 		if (appMenuOpen) {
 			renderAppMenu(snapshot);
 		}
-		if (selfMenuOpen) {
+		if (selfMenuOpen && !nativeSelfMenuOpen()) {
 			renderSelfMenu(snapshot);
 		}
 
@@ -23138,6 +23926,7 @@
 		}
 	}
 
+	/* MUMBLE_MODERN_AUTOMATION_BEGIN */
 	function visibleMenuLabels(kind) {
 		const variant = String(kind || "").trim().toLowerCase();
 		let root = null;
@@ -23425,6 +24214,11 @@
 		}
 		if (isActive && kind === "self") {
 			selfMenuOpen = false;
+			if (refs.selfMenu) {
+				refs.selfMenu.classList.add("hidden");
+				refs.selfMenu.setAttribute("aria-hidden", "true");
+				refs.selfMenu.innerHTML = "";
+			}
 			if (refs.selfCard) {
 				refs.selfCard.setAttribute("aria-expanded", "false");
 			}
@@ -23691,12 +24485,15 @@
 		return false;
 	}
 
-	window.__mumbleModernOpenMenuProbe = openAutomationMenuProbe;
-	window.__mumbleModernVisibleMenuLabels = visibleMenuLabels;
-	window.__mumbleModernAutomationActionState = automationActionState;
-	window.__mumbleModernResetAutomationActionState = resetAutomationActionState;
-	window.__mumbleModernDialogFieldState = automationModernDialogFieldState;
-	window.__mumbleModernSetDialogFieldValue = automationSetModernDialogFieldValue;
+	if (modernAutomationEnabled()) {
+		window.__mumbleModernOpenMenuProbe = openAutomationMenuProbe;
+		window.__mumbleModernVisibleMenuLabels = visibleMenuLabels;
+		window.__mumbleModernAutomationActionState = automationActionState;
+		window.__mumbleModernResetAutomationActionState = resetAutomationActionState;
+		window.__mumbleModernDialogFieldState = automationModernDialogFieldState;
+		window.__mumbleModernSetDialogFieldValue = automationSetModernDialogFieldValue;
+	}
+	/* MUMBLE_MODERN_AUTOMATION_END */
 
 	function wireActions() {
 		document.addEventListener("click", handleAnchorActivation, true);

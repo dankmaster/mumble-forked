@@ -9,8 +9,23 @@
 #include "Themes.h"
 
 #include <QtCore/QtGlobal>
+#include <QtGui/QPalette>
+#include <QtWidgets/QApplication>
+#include <QtWidgets/QWidget>
+
+#ifdef Q_OS_WIN
+#	include <windows.h>
+#endif
 
 namespace {
+	QColor mixUiThemeColors(const QColor &baseColor, const QColor &overlayColor, qreal overlayRatio) {
+		const qreal clampedRatio = qBound< qreal >(0.0, overlayRatio, 1.0);
+		const qreal baseRatio    = 1.0 - clampedRatio;
+		return QColor::fromRgbF(baseColor.redF() * baseRatio + overlayColor.redF() * clampedRatio,
+								baseColor.greenF() * baseRatio + overlayColor.greenF() * clampedRatio,
+								baseColor.blueF() * baseRatio + overlayColor.blueF() * clampedRatio, 1.0);
+	}
+
 	void applyRuntimeAliases(UiThemeTokens &tokens) {
 		tokens.surface       = tokens.mantle;
 		tokens.overlay       = tokens.surface0;
@@ -28,6 +43,29 @@ namespace {
 			tokens.focusAccent = tokens.lavender.isValid() ? tokens.lavender : tokens.accent;
 		}
 	}
+
+#ifdef Q_OS_WIN
+	using DwmSetWindowAttributeFn = HRESULT(WINAPI *)(HWND, DWORD, LPCVOID, DWORD);
+
+	constexpr DWORD DwmUseImmersiveDarkModeLegacyAttribute = 19;
+	constexpr DWORD DwmUseImmersiveDarkModeAttribute       = 20;
+	constexpr DWORD DwmBorderColorAttribute                = 34;
+	constexpr DWORD DwmCaptionColorAttribute               = 35;
+	constexpr DWORD DwmTextColorAttribute                  = 36;
+
+	COLORREF colorRefFromQColor(const QColor &color) {
+		return RGB(color.red(), color.green(), color.blue());
+	}
+
+	bool shouldThemeNativeTitleBar(const QWidget *widget) {
+		if (!widget || !widget->isWindow()) {
+			return false;
+		}
+
+		const Qt::WindowFlags flags = widget->windowFlags();
+		return !(flags.testFlag(Qt::Popup) || flags.testFlag(Qt::ToolTip) || flags.testFlag(Qt::SplashScreen));
+	}
+#endif
 }
 
 QColor uiThemeColorWithAlpha(const QColor &color, qreal alpha) {
@@ -48,7 +86,108 @@ QString uiThemeQssColor(const QColor &color) {
 	return color.name();
 }
 
+bool uiThemePaletteIsDark(const QPalette &palette) {
+	return palette.color(QPalette::WindowText).lightness() > palette.color(QPalette::Window).lightness();
+}
+
+UiThemeWindowChrome uiThemeWindowChromeForPalette(const QPalette &palette) {
+	const bool darkTheme         = uiThemePaletteIsDark(palette);
+	const QColor windowColor     = palette.color(QPalette::Window);
+	const QColor baseColor       = palette.color(QPalette::Base);
+	const QColor accentColor     = palette.color(QPalette::Highlight);
+	UiThemeWindowChrome chrome;
+	chrome.dark    = darkTheme;
+	chrome.text    = palette.color(QPalette::WindowText);
+	chrome.caption = darkTheme ? mixUiThemeColors(windowColor, baseColor, 0.22)
+							   : mixUiThemeColors(windowColor, accentColor, 0.08);
+	chrome.border  = darkTheme ? mixUiThemeColors(chrome.caption, accentColor, 0.18)
+							   : mixUiThemeColors(chrome.caption, accentColor, 0.26);
+	return chrome;
+}
+
+UiThemeWindowChrome uiThemeWindowChromeForActiveTheme(const QPalette &fallbackPalette) {
+	UiThemeWindowChrome chrome = uiThemeWindowChromeForPalette(fallbackPalette);
+
+	if (const std::optional< UiThemeTokens > tokens = activeUiThemeTokens(); tokens) {
+		chrome.caption = tokens->crust;
+		chrome.text    = tokens->text;
+		chrome.border  = tokens->surface1;
+		chrome.dark    = tokens->text.lightness() > tokens->crust.lightness();
+	}
+
+	return chrome;
+}
+
+void applyUiThemeNativeTitleBar(QWidget *widget) {
+	if (!widget) {
+		return;
+	}
+	applyUiThemeNativeTitleBar(widget, uiThemeWindowChromeForActiveTheme(widget->palette()));
+}
+
+void applyUiThemeNativeTitleBar(QWidget *widget, const UiThemeWindowChrome &chrome) {
+#ifdef Q_OS_WIN
+	if (!shouldThemeNativeTitleBar(widget)) {
+		return;
+	}
+
+	const HWND hwnd = reinterpret_cast< HWND >(widget->winId());
+	if (!hwnd) {
+		return;
+	}
+
+	static const HMODULE dwmapiModule = GetModuleHandleW(L"dwmapi.dll");
+	if (!dwmapiModule) {
+		return;
+	}
+
+	static const DwmSetWindowAttributeFn setWindowAttribute =
+		reinterpret_cast< DwmSetWindowAttributeFn >(GetProcAddress(dwmapiModule, "DwmSetWindowAttribute"));
+	if (!setWindowAttribute) {
+		return;
+	}
+
+	const UiThemeWindowChrome fallbackChrome =
+		chrome.caption.isValid() && chrome.text.isValid() && chrome.border.isValid()
+			? chrome
+			: uiThemeWindowChromeForPalette(widget->palette());
+	const BOOL immersiveDarkMode = fallbackChrome.dark ? TRUE : FALSE;
+	HRESULT result =
+		setWindowAttribute(hwnd, DwmUseImmersiveDarkModeAttribute, &immersiveDarkMode, sizeof(immersiveDarkMode));
+	if (FAILED(result)) {
+		setWindowAttribute(hwnd, DwmUseImmersiveDarkModeLegacyAttribute, &immersiveDarkMode,
+						   sizeof(immersiveDarkMode));
+	}
+
+	const COLORREF captionColorRef = colorRefFromQColor(fallbackChrome.caption);
+	const COLORREF textColorRef    = colorRefFromQColor(fallbackChrome.text);
+	const COLORREF borderColorRef  = colorRefFromQColor(fallbackChrome.border);
+	setWindowAttribute(hwnd, DwmCaptionColorAttribute, &captionColorRef, sizeof(captionColorRef));
+	setWindowAttribute(hwnd, DwmTextColorAttribute, &textColorRef, sizeof(textColorRef));
+	setWindowAttribute(hwnd, DwmBorderColorAttribute, &borderColorRef, sizeof(borderColorRef));
+#else
+	Q_UNUSED(widget);
+	Q_UNUSED(chrome);
+#endif
+}
+
+void applyUiThemeNativeTitleBars() {
+#ifdef Q_OS_WIN
+	if (!qApp) {
+		return;
+	}
+
+	for (QWidget *widget : QApplication::topLevelWidgets()) {
+		applyUiThemeNativeTitleBar(widget);
+	}
+#endif
+}
+
 std::optional< UiThemeTokens > activeUiThemeTokens() {
+	if (!Global::g_global_struct) {
+		return std::nullopt;
+	}
+
 	const std::optional< ThemeInfo::StyleInfo > style = Themes::getConfiguredStyle(Global::get().s);
 	if (!style) {
 		return std::nullopt;

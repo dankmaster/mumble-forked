@@ -48,7 +48,9 @@
 #	include "ModernDialogHost.h"
 #	include "ModernShellBridge.h"
 #	include "ModernShellHost.h"
-#	include "ModernUiAutomationServer.h"
+#	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
+#		include "ModernUiAutomationServer.h"
+#	endif
 #	include <QtWebEngineCore/QWebEngineProfile>
 #	include <QtWebEngineCore/QWebEngineScript>
 #	include <QtWebEngineCore/QWebEngineScriptCollection>
@@ -1963,72 +1965,8 @@ public:
 };
 
 #ifdef Q_OS_WIN
-using DwmSetWindowAttributeFn = HRESULT(WINAPI *)(HWND, DWORD, LPCVOID, DWORD);
-
-constexpr DWORD DwmUseImmersiveDarkModeAttribute       = 20;
-constexpr DWORD DwmUseImmersiveDarkModeLegacyAttribute = 19;
-constexpr DWORD DwmBorderColorAttribute                = 34;
-constexpr DWORD DwmCaptionColorAttribute               = 35;
-constexpr DWORD DwmTextColorAttribute                  = 36;
-
-COLORREF colorRefFromQColor(const QColor &color) {
-	return RGB(color.red(), color.green(), color.blue());
-}
-
 void applyNativeTitleBarTheme(QWidget *widget) {
-	if (!widget) {
-		return;
-	}
-
-	const HWND hwnd = reinterpret_cast< HWND >(widget->winId());
-	if (!hwnd) {
-		return;
-	}
-
-	static const HMODULE dwmapiModule = GetModuleHandleW(L"dwmapi.dll");
-	if (!dwmapiModule) {
-		return;
-	}
-
-	static const DwmSetWindowAttributeFn setWindowAttribute =
-		reinterpret_cast< DwmSetWindowAttributeFn >(GetProcAddress(dwmapiModule, "DwmSetWindowAttribute"));
-	if (!setWindowAttribute) {
-		return;
-	}
-
-	const QPalette palette = widget->palette();
-	const bool darkTheme   = isDarkPalette(palette);
-	QColor captionColor;
-	QColor titleTextColor;
-	QColor borderColor;
-
-	if (const std::optional< UiThemeTokens > tokens = activeUiThemeTokens(); tokens) {
-		captionColor   = tokens->crust;
-		titleTextColor = tokens->text;
-		borderColor    = tokens->surface1;
-	} else {
-		const QColor windowColor = palette.color(QPalette::Window);
-		const QColor baseColor   = palette.color(QPalette::Base);
-		const QColor accentColor = palette.color(QPalette::Highlight);
-		titleTextColor           = palette.color(QPalette::WindowText);
-		captionColor = darkTheme ? mixColors(windowColor, baseColor, 0.22) : mixColors(windowColor, accentColor, 0.08);
-		borderColor =
-			darkTheme ? mixColors(captionColor, accentColor, 0.18) : mixColors(captionColor, accentColor, 0.26);
-	}
-
-	const BOOL immersiveDarkMode = darkTheme ? TRUE : FALSE;
-	HRESULT result =
-		setWindowAttribute(hwnd, DwmUseImmersiveDarkModeAttribute, &immersiveDarkMode, sizeof(immersiveDarkMode));
-	if (FAILED(result)) {
-		setWindowAttribute(hwnd, DwmUseImmersiveDarkModeLegacyAttribute, &immersiveDarkMode, sizeof(immersiveDarkMode));
-	}
-
-	const COLORREF captionColorRef = colorRefFromQColor(captionColor);
-	const COLORREF textColorRef    = colorRefFromQColor(titleTextColor);
-	const COLORREF borderColorRef  = colorRefFromQColor(borderColor);
-	setWindowAttribute(hwnd, DwmCaptionColorAttribute, &captionColorRef, sizeof(captionColorRef));
-	setWindowAttribute(hwnd, DwmTextColorAttribute, &textColorRef, sizeof(textColorRef));
-	setWindowAttribute(hwnd, DwmBorderColorAttribute, &borderColorRef, sizeof(borderColorRef));
+	applyUiThemeNativeTitleBar(widget);
 }
 #endif
 
@@ -11516,7 +11454,7 @@ MainWindow::MainWindow(QWidget *p)
 	  m_userLocalVolumeSlider(make_qt_unique< UserLocalVolumeSlider >(this)),
 	  m_listenerVolumeController(make_qt_unique< ListenerVolumeController >(this)),
 	  m_listenerVolumeSlider(make_qt_unique< ListenerVolumeSlider >(*m_listenerVolumeController, this)) {
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+#if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 	if (qEnvironmentVariableIsSet("MUMBLE_MODERN_AUTOMATION_OFFSCREEN")) {
 		setAttribute(Qt::WA_ShowWithoutActivating, true);
 		setWindowFlag(Qt::WindowDoesNotAcceptFocus, true);
@@ -11605,8 +11543,8 @@ MainWindow::MainWindow(QWidget *p)
 	qaServerSettings->setWhatsThis(tr("This opens server settings that are applied live and saved on the server."));
 	connect(qaServerSettings, &QAction::triggered, this, &MainWindow::on_qaServerSettings_triggered);
 	qaServerOpenStonks = new QAction(tr("Open Stonks"), this);
-	qaServerOpenStonks->setToolTip(tr("Open the Stonks ledger panel"));
-	qaServerOpenStonks->setWhatsThis(tr("This opens the server-backed Stonks ledger and leaderboard."));
+	qaServerOpenStonks->setToolTip(tr("Open the Stonks portfolio panel"));
+	qaServerOpenStonks->setWhatsThis(tr("This opens the server-backed Stonks portfolio and leaderboard."));
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	connect(qaServerOpenStonks, &QAction::triggered, this, &MainWindow::openModernStonksDialog);
 #endif
@@ -13814,6 +13752,12 @@ void MainWindow::activateModernShell() {
 				&MainWindow::handleModernShellReactionToggle);
 		connect(m_modernShellHost->bridge(), &ModernShellBridge::messageDeleteRequested, this,
 				&MainWindow::handleModernShellMessageDelete);
+		connect(m_modernShellHost->bridge(), &ModernShellBridge::messageDeliveryRetryRequested, this,
+				[this](const QString &messageKey) {
+					Q_UNUSED(messageKey);
+					publishModernToast(QStringLiteral("info"), tr("Message delivery"),
+									   tr("Retry requested for this message."));
+				});
 		connect(m_modernShellHost->bridge(), &ModernShellBridge::participantMessageRequested, this,
 				&MainWindow::handleModernShellParticipantMessage);
 		connect(m_modernShellHost->bridge(), &ModernShellBridge::directMessageOpenRequested, this,
@@ -13906,6 +13850,7 @@ void MainWindow::activateModernShell() {
 			return;
 		}
 		appendModernShellConnectTrace(QStringLiteral("activateModernShell start-ok"));
+#if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 		if (qEnvironmentVariableIsSet("MUMBLE_MODERN_AUTOMATION_PORT") && !m_modernUiAutomationServer) {
 			m_modernUiAutomationServer = std::make_unique< ModernUiAutomationServer >(this, this);
 			QString automationError;
@@ -13920,6 +13865,7 @@ void MainWindow::activateModernShell() {
 				m_modernUiAutomationServer.reset();
 			}
 		}
+#endif
 	}
 
 	if (centralWidget() != m_modernShellHost) {
@@ -14491,6 +14437,18 @@ namespace {
 		}
 		const QDateTime parsed = QDateTime::fromString(published, Qt::ISODate);
 		return parsed.isValid() ? QLocale().toString(parsed.toLocalTime(), QLocale::ShortFormat) : published;
+	}
+
+	QVariantMap modernUpdateBannerAction(const QString &id, const QString &label,
+										 const QString &tone = QString()) {
+		QVariantMap action;
+		action.insert(QStringLiteral("id"), id);
+		action.insert(QStringLiteral("label"), label);
+		action.insert(QStringLiteral("enabled"), true);
+		if (!tone.isEmpty()) {
+			action.insert(QStringLiteral("tone"), tone);
+		}
+		return action;
 	}
 
 	QString repairedUtf8Mojibake(const QString &text) {
@@ -15487,10 +15445,85 @@ namespace {
 		return dto;
 	}
 
+	QString modernShellRgbTriplet(const QColor &color) {
+		return QString::fromLatin1("%1, %2, %3").arg(color.red()).arg(color.green()).arg(color.blue());
+	}
+
+	QVariantMap modernShellThemeTokenDto(const UiThemeTokens &tokens) {
+		QVariantMap dto;
+		dto.insert(QStringLiteral("--shell-bg"), uiThemeQssColor(tokens.base));
+		dto.insert(QStringLiteral("--shell-panel"), uiThemeQssColor(tokens.base));
+		dto.insert(QStringLiteral("--shell-panel-soft"), uiThemeQssColor(tokens.surface0));
+		dto.insert(QStringLiteral("--shell-rail"), uiThemeQssColor(tokens.mantle));
+		dto.insert(QStringLiteral("--shell-strip"), uiThemeQssColor(tokens.crust));
+		dto.insert(QStringLiteral("--shell-highlight"), uiThemeQssColor(tokens.surface1));
+		dto.insert(QStringLiteral("--shell-divider"), uiThemeQssColor(uiThemeColorWithAlpha(tokens.surface1, 0.72)));
+		dto.insert(QStringLiteral("--shell-divider-soft"), uiThemeQssColor(uiThemeColorWithAlpha(tokens.surface1, 0.45)));
+		dto.insert(QStringLiteral("--text-strong"), uiThemeQssColor(tokens.text));
+		dto.insert(QStringLiteral("--text-main"), uiThemeQssColor(tokens.textSecondary));
+		dto.insert(QStringLiteral("--text-muted"), uiThemeQssColor(tokens.textMuted));
+		dto.insert(QStringLiteral("--text-faint"), uiThemeQssColor(uiThemeColorWithAlpha(tokens.textMuted, 0.72)));
+		dto.insert(QStringLiteral("--accent"), uiThemeQssColor(tokens.accent));
+		dto.insert(QStringLiteral("--accent-strong"), uiThemeQssColor(tokens.accentHover));
+		dto.insert(QStringLiteral("--accent-soft"), uiThemeQssColor(tokens.accentSubtle));
+		dto.insert(QStringLiteral("--accent-border"), uiThemeQssColor(uiThemeColorWithAlpha(tokens.accent, 0.42)));
+		dto.insert(QStringLiteral("--body-bg-glow"), uiThemeQssColor(uiThemeColorWithAlpha(tokens.accent, 0.09)));
+		dto.insert(QStringLiteral("--body-bg-top"), uiThemeQssColor(tokens.mantle));
+		dto.insert(QStringLiteral("--body-bg-bottom"), uiThemeQssColor(tokens.crust));
+		dto.insert(QStringLiteral("--control-hover-bg"), uiThemeQssColor(tokens.surface0));
+		dto.insert(QStringLiteral("--select-menu-bg"), uiThemeQssColor(tokens.crust));
+		dto.insert(QStringLiteral("--select-option-text"), uiThemeQssColor(tokens.text));
+		dto.insert(QStringLiteral("--select-option-hover-bg"), uiThemeQssColor(tokens.surface0));
+		dto.insert(QStringLiteral("--select-option-hover-text"), uiThemeQssColor(tokens.text));
+		dto.insert(QStringLiteral("--settings-selected-text"), uiThemeQssColor(tokens.text));
+		dto.insert(QStringLiteral("--reply-bg"), uiThemeQssColor(uiThemeColorWithAlpha(tokens.accent, 0.32)));
+		dto.insert(QStringLiteral("--reply-text"), uiThemeQssColor(tokens.text));
+		dto.insert(QStringLiteral("--incoming-bg"), uiThemeQssColor(tokens.surface0));
+		dto.insert(QStringLiteral("--incoming-text"), uiThemeQssColor(tokens.textSecondary));
+		dto.insert(QStringLiteral("--chip-bg"), uiThemeQssColor(tokens.surface0));
+		dto.insert(QStringLiteral("--chip-text"), uiThemeQssColor(tokens.textMuted));
+		dto.insert(QStringLiteral("--warn"), uiThemeQssColor(tokens.warning));
+		dto.insert(QStringLiteral("--danger"), uiThemeQssColor(tokens.danger));
+		dto.insert(QStringLiteral("--success"), uiThemeQssColor(tokens.success));
+		dto.insert(QStringLiteral("--warning"), uiThemeQssColor(tokens.warning));
+		dto.insert(QStringLiteral("--latency-orange"), uiThemeQssColor(tokens.orange));
+		dto.insert(QStringLiteral("--accent-rgb"), modernShellRgbTriplet(tokens.accent));
+		dto.insert(QStringLiteral("--info-rgb"), modernShellRgbTriplet(tokens.lavender));
+		dto.insert(QStringLiteral("--success-rgb"), modernShellRgbTriplet(tokens.success));
+		dto.insert(QStringLiteral("--warning-rgb"), modernShellRgbTriplet(tokens.warning));
+		dto.insert(QStringLiteral("--latency-orange-rgb"), modernShellRgbTriplet(tokens.orange));
+		dto.insert(QStringLiteral("--danger-rgb"), modernShellRgbTriplet(tokens.danger));
+		dto.insert(QStringLiteral("--surface-glint-subtle"), uiThemeQssColor(uiThemeColorWithAlpha(tokens.text, 0.018)));
+		dto.insert(QStringLiteral("--surface-glint-soft"), uiThemeQssColor(uiThemeColorWithAlpha(tokens.text, 0.035)));
+		dto.insert(QStringLiteral("--surface-glint-medium"), uiThemeQssColor(uiThemeColorWithAlpha(tokens.text, 0.055)));
+		dto.insert(QStringLiteral("--surface-border-subtle"), uiThemeQssColor(uiThemeColorWithAlpha(tokens.text, 0.055)));
+		dto.insert(QStringLiteral("--surface-border"), uiThemeQssColor(uiThemeColorWithAlpha(tokens.text, 0.08)));
+		dto.insert(QStringLiteral("--popup-bg"), uiThemeQssColor(uiThemeColorWithAlpha(tokens.mantle, 0.985)));
+		dto.insert(QStringLiteral("--popup-arrow-bg"), QStringLiteral("var(--popup-bg)"));
+		dto.insert(QStringLiteral("--composer-shell-bg"), uiThemeQssColor(tokens.surface0));
+		dto.insert(QStringLiteral("--composer-shell-focus-bg"), uiThemeQssColor(tokens.surface1));
+		dto.insert(QStringLiteral("--composer-reply-bg"), uiThemeQssColor(uiThemeColorWithAlpha(tokens.text, 0.035)));
+		dto.insert(QStringLiteral("--self-card-bg"), uiThemeQssColor(uiThemeColorWithAlpha(tokens.text, 0.012)));
+		dto.insert(QStringLiteral("--self-card-bg-solid"), uiThemeQssColor(tokens.mantle));
+		dto.insert(QStringLiteral("--self-card-hover-bg"), uiThemeQssColor(uiThemeColorWithAlpha(tokens.text, 0.035)));
+		dto.insert(QStringLiteral("--selected-bg"), uiThemeQssColor(uiThemeColorWithAlpha(tokens.accent, 0.16)));
+		dto.insert(QStringLiteral("--selected-text"), uiThemeQssColor(tokens.text));
+		dto.insert(QStringLiteral("--on-accent"),
+				   uiThemeQssColor(tokens.accent.lightness() > 145 ? tokens.crust : tokens.text));
+		return dto;
+	}
+
 	QVariantMap modernShellUiTweaksDto(const Settings &settings) {
 		const QString accent = normalizedModernShellAccent(settings.qsModernShellAccent);
 		QVariantMap dto;
-		dto.insert(QStringLiteral("theme"), normalizedModernShellTheme(settings.qsModernShellTheme));
+		if (const std::optional< UiThemeTokens > tokens = activeUiThemeTokens(); tokens) {
+			dto.insert(QStringLiteral("theme"), QStringLiteral("engine"));
+			dto.insert(QStringLiteral("themeSource"), QStringLiteral("uiTheme"));
+			dto.insert(QStringLiteral("themeTokens"), modernShellThemeTokenDto(*tokens));
+		} else {
+			dto.insert(QStringLiteral("theme"), normalizedModernShellTheme(settings.qsModernShellTheme));
+			dto.insert(QStringLiteral("themeSource"), QStringLiteral("modernShell"));
+		}
 		dto.insert(QStringLiteral("density"), normalizedModernShellDensity(settings.qsModernShellDensity));
 		dto.insert(QStringLiteral("userIcons"),
 				   settings.bModernShellClassicUserIcons ? QStringLiteral("classic") : QStringLiteral("avatars"));
@@ -15619,7 +15652,7 @@ void MainWindow::publishModernDialogState(const QVariantMap &state) {
 
 	const bool useWindowDialogHost = modernDialogWindowHostEnabled();
 	if (useWindowDialogHost && state.value(QStringLiteral("open")).toBool() && !m_modernDialogHost) {
-		m_modernDialogHost = std::make_unique< ModernDialogHost >(m_modernShellHost->bridge());
+		m_modernDialogHost = std::make_unique< ModernDialogHost >(m_modernShellHost->bridge(), this);
 		connect(m_modernDialogHost.get(), &ModernDialogHost::nativeCloseRequested, this,
 				&MainWindow::handleModernDialogClose);
 		connect(m_modernDialogHost.get(), &ModernDialogHost::hostFailed, this, [this](const QString &reason) {
@@ -15938,6 +15971,269 @@ void MainWindow::openModernGenericDialog(const QVariantMap &dialog) {
 	publishModernDialogState(m_modernDialogController->openGenericDialog(dialog));
 }
 
+bool MainWindow::openModernSslCertificateWarningDialog(const QString &host, const unsigned short port,
+													   const QList< QSslCertificate > &certificates,
+													   const QList< QSslError > &errors) {
+	if (!usesModernShell() || certificates.isEmpty()) {
+		return false;
+	}
+
+	const QSslCertificate certificate = certificates.constFirst();
+	const QString digest             = QString::fromLatin1(certificate.digest(QCryptographicHash::Sha1).toHex());
+	const QString expectedDigest     = Global::get().db ? Global::get().db->getDigest(host, port) : QString();
+	const bool certificateChanged    = !expectedDigest.isNull();
+	const QString serverLabel        = QStringLiteral("%1:%2").arg(host).arg(port);
+	const QString subject =
+		certificate.subjectInfo(QSslCertificate::CommonName).join(QStringLiteral(", ")).trimmed();
+	const QString issuer =
+		certificate.issuerInfo(QSslCertificate::CommonName).join(QStringLiteral(", ")).trimmed();
+	QStringList errorStrings;
+	for (const QSslError &error : errors) {
+		errorStrings.push_back(error.errorString());
+	}
+	if (errorStrings.isEmpty()) {
+		errorStrings.push_back(tr("The certificate could not be verified."));
+	}
+
+	QVariantList serverFields {
+		modernHiddenField(QStringLiteral("ssl.host"), host),
+		modernHiddenField(QStringLiteral("ssl.port"), port),
+		modernHiddenField(QStringLiteral("ssl.digest"), digest),
+		modernHiddenField(QStringLiteral("ssl.expectedDigest"), expectedDigest),
+		modernHiddenField(QStringLiteral("ssl.errors"), errorStrings.join(QLatin1Char('\n'))),
+		modernHiddenField(QStringLiteral("ssl.subject"), subject),
+		modernHiddenField(QStringLiteral("ssl.issuer"), issuer),
+		modernHiddenField(QStringLiteral("ssl.serial"), QString::fromLatin1(certificate.serialNumber())),
+		modernHiddenField(QStringLiteral("ssl.effective"),
+						  certificate.effectiveDate().toLocalTime().toString(Qt::ISODate)),
+		modernHiddenField(QStringLiteral("ssl.expires"),
+						  certificate.expiryDate().toLocalTime().toString(Qt::ISODate)),
+		modernReadonlyField(tr("Server"), serverLabel),
+		modernReadonlyField(tr("Presented digest"), ViewCert::prettifyDigest(digest))
+	};
+	if (certificateChanged) {
+		serverFields.push_back(modernReadonlyField(tr("Stored digest"), ViewCert::prettifyDigest(expectedDigest)));
+	}
+
+	QVariantList errorFields;
+	for (int index = 0; index < errorStrings.size(); ++index) {
+		errorFields.push_back(modernReadonlyField(tr("Error %1").arg(index + 1), errorStrings.at(index)));
+	}
+
+	QVariantList certificateFields {
+		modernReadonlyField(tr("Subject"), subject.isEmpty() ? tr("Unknown") : subject),
+		modernReadonlyField(tr("Issuer"), issuer.isEmpty() ? tr("Unknown") : issuer),
+		modernReadonlyField(tr("Valid from"), certificate.effectiveDate().toLocalTime().toString(Qt::ISODate)),
+		modernReadonlyField(tr("Expires"), certificate.expiryDate().toLocalTime().toString(Qt::ISODate)),
+		modernReadonlyField(tr("Serial number"), QString::fromLatin1(certificate.serialNumber()))
+	};
+
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("sslCertificateWarning"), QStringLiteral("warning"), tr("Server certificate warning"),
+		certificateChanged ? tr("The server presented a certificate that differs from the one you trusted before.")
+						   : tr("The server certificate could not be verified."),
+		QVariantList {
+			modernDialogSection(tr("Server"), serverFields, QStringLiteral("list")),
+			modernDialogSection(tr("Certificate"), certificateFields, QStringLiteral("list")),
+			modernDialogSection(tr("Verification errors"), errorFields, QStringLiteral("list"))
+		},
+		QVariantList {
+			modernDialogAction(QStringLiteral("rejectSslCertificate"), tr("Reject"), true, QString(), true),
+			modernDialogAction(QStringLiteral("viewSslCertificateDetails"), tr("View details"), true),
+			modernDialogAction(QStringLiteral("trustSslCertificate"), tr("Accept certificate"), true,
+							   QStringLiteral("danger"), true)
+		},
+		QStringLiteral("rejectSslCertificate"), QSize(760, 620));
+	dialog.insert(QStringLiteral("tone"), QStringLiteral("warning"));
+	dialog.insert(QStringLiteral("highlights"),
+				  QVariantList {
+					  modernDialogHighlight(tr("Server"), serverLabel),
+					  modernDialogHighlight(tr("Trust"), certificateChanged ? tr("Changed") : tr("Unverified"),
+											QStringLiteral("warning")),
+					  modernDialogHighlight(tr("Errors"), errorStrings.size(), QStringLiteral("warning"))
+				  });
+	openModernGenericDialog(dialog);
+	return true;
+}
+
+void MainWindow::openModernSslCertificateDetailsDialog(const QVariantMap &context) {
+	QVariantList fields {
+		modernHiddenField(QStringLiteral("ssl.host"), context.value(QStringLiteral("ssl.host")).toString()),
+		modernHiddenField(QStringLiteral("ssl.port"), context.value(QStringLiteral("ssl.port")).toUInt()),
+		modernHiddenField(QStringLiteral("ssl.digest"), context.value(QStringLiteral("ssl.digest")).toString()),
+		modernHiddenField(QStringLiteral("ssl.expectedDigest"),
+						  context.value(QStringLiteral("ssl.expectedDigest")).toString()),
+		modernReadonlyField(tr("Server"), QStringLiteral("%1:%2")
+											.arg(context.value(QStringLiteral("ssl.host")).toString())
+											.arg(context.value(QStringLiteral("ssl.port")).toUInt())),
+		modernReadonlyField(tr("Subject"), context.value(QStringLiteral("ssl.subject")).toString()),
+		modernReadonlyField(tr("Issuer"), context.value(QStringLiteral("ssl.issuer")).toString()),
+		modernReadonlyField(tr("Serial number"), context.value(QStringLiteral("ssl.serial")).toString()),
+		modernReadonlyField(tr("Valid from"), context.value(QStringLiteral("ssl.effective")).toString()),
+		modernReadonlyField(tr("Expires"), context.value(QStringLiteral("ssl.expires")).toString()),
+		modernReadonlyField(tr("Presented digest"),
+							ViewCert::prettifyDigest(context.value(QStringLiteral("ssl.digest")).toString()))
+	};
+	const QString expectedDigest = context.value(QStringLiteral("ssl.expectedDigest")).toString();
+	if (!expectedDigest.isEmpty()) {
+		fields.push_back(modernReadonlyField(tr("Stored digest"), ViewCert::prettifyDigest(expectedDigest)));
+	}
+	const QString errors = context.value(QStringLiteral("ssl.errors")).toString().trimmed();
+	if (!errors.isEmpty()) {
+		fields.push_back(modernTextareaField(QStringLiteral("ssl.errorDetails"), tr("Verification errors"), errors, 4,
+											 false));
+	}
+
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("sslCertificateDetails"), QStringLiteral("warning"), tr("Certificate details"),
+		tr("Review the certificate before deciding whether to trust it for this server."),
+		QVariantList { modernDialogSection(tr("Certificate"), fields, QStringLiteral("list")) },
+		QVariantList {
+			modernDialogAction(QStringLiteral("rejectSslCertificate"), tr("Close"), true, QString(), true),
+			modernDialogAction(QStringLiteral("trustSslCertificate"), tr("Accept certificate"), true,
+							   QStringLiteral("danger"), true)
+		},
+		QStringLiteral("rejectSslCertificate"), QSize(760, 620));
+	dialog.insert(QStringLiteral("tone"), QStringLiteral("warning"));
+	openModernGenericDialog(dialog);
+}
+
+void MainWindow::openModernUrlConnectDialog(const QUrl &url, const QString &host, const unsigned short port,
+											const QString &password, const QString &serverName,
+											const QString &desiredChannel, const QString &username,
+											const QVariantMap &errors) {
+	const QString fallbackUsername = username.trimmed().isEmpty() ? Global::get().s.qsUsername : username.trimmed();
+	const QString serverLabel      = QStringLiteral("%1:%2").arg(host).arg(port);
+	const QString displayName      = serverName.trimmed().isEmpty()
+										 ? QString::fromLatin1("%1@%2")
+											   .arg(fallbackUsername.trimmed().isEmpty() ? tr("user") : fallbackUsername)
+											   .arg(host)
+										 : serverName.trimmed();
+	QVariantList fields {
+		modernHiddenField(QStringLiteral("urlConnect.url"), url.toString(QUrl::RemovePassword)),
+		modernHiddenField(QStringLiteral("urlConnect.host"), host),
+		modernHiddenField(QStringLiteral("urlConnect.port"), port),
+		modernHiddenField(QStringLiteral("urlConnect.password"), password),
+		modernHiddenField(QStringLiteral("urlConnect.name"), serverName),
+		modernHiddenField(QStringLiteral("urlConnect.channel"), desiredChannel),
+		modernReadonlyField(tr("Server"), serverLabel),
+		modernDialogField(QStringLiteral("urlConnect.username"), tr("Username"), QStringLiteral("text"),
+						  fallbackUsername, true),
+		modernNoteField(tr("This mumble:// link did not include a username. Enter the name to use before connecting."))
+	};
+	if (!desiredChannel.trimmed().isEmpty()) {
+		fields.insert(fields.size() - 1, modernReadonlyField(tr("Target room"), desiredChannel));
+	}
+
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("urlConnect"), QStringLiteral("form"), tr("Complete connection"),
+		tr("Enter a username to open this server link."),
+		QVariantList { modernDialogSection(tr("Connection"), fields) },
+		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
+					   modernDialogAction(QStringLiteral("connectUrl"), tr("Connect"), true,
+										  QStringLiteral("accent"), true) },
+		QStringLiteral("connectUrl"), QSize(640, 430));
+	dialog.insert(QStringLiteral("errors"), errors);
+	dialog.insert(QStringLiteral("highlights"),
+				  QVariantList { modernDialogHighlight(tr("Server"), serverLabel),
+								 modernDialogHighlight(tr("Profile"), displayName) });
+	openModernGenericDialog(dialog);
+}
+
+void MainWindow::openModernDragUserConfirmDialog(const unsigned int session, const QString &targetScopeToken,
+												 const QString &userName, const QString &targetRoomName) {
+	const QString displayUser = userName.trimmed().isEmpty() ? tr("Selected user") : userName.trimmed();
+	const QString displayRoom = targetRoomName.trimmed().isEmpty() ? tr("Selected room") : targetRoomName.trimmed();
+	const QVariantList fields {
+		modernHiddenField(QStringLiteral("dragUser.session"), static_cast< int >(session)),
+		modernHiddenField(QStringLiteral("dragUser.targetScopeToken"), targetScopeToken),
+		modernReadonlyField(tr("User"), displayUser),
+		modernReadonlyField(tr("Target room"), displayRoom),
+		modernNoteField(tr("Your User Dragging preference is set to ask before moving people between voice rooms."))
+	};
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("dragUserConfirm"), QStringLiteral("confirm"), tr("Move user?"),
+		tr("Confirm this voice-room move before it is sent to the server."),
+		QVariantList { modernDialogSection(tr("Move"), fields) },
+		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
+					   modernDialogAction(QStringLiteral("confirmDragUser"), tr("Move user"), true,
+										  QStringLiteral("warning"), true) },
+		QStringLiteral("confirmDragUser"), QSize(560, 360));
+	dialog.insert(QStringLiteral("tone"), QStringLiteral("warning"));
+	dialog.insert(QStringLiteral("highlights"),
+				  QVariantList { modernDialogHighlight(tr("User"), displayUser),
+								 modernDialogHighlight(tr("Target"), displayRoom) });
+	openModernGenericDialog(dialog);
+}
+
+void MainWindow::openModernDragChannelConfirmDialog(const QString &sourceScopeToken, const QString &targetScopeToken,
+													const QString &placement, const QString &sourceRoomName,
+													const QString &targetRoomName) {
+	const QString displaySource = sourceRoomName.trimmed().isEmpty() ? tr("Selected room") : sourceRoomName.trimmed();
+	const QString displayTarget = targetRoomName.trimmed().isEmpty() ? tr("Target room") : targetRoomName.trimmed();
+	const QVariantList fields {
+		modernHiddenField(QStringLiteral("dragChannel.sourceScopeToken"), sourceScopeToken),
+		modernHiddenField(QStringLiteral("dragChannel.targetScopeToken"), targetScopeToken),
+		modernHiddenField(QStringLiteral("dragChannel.placement"), placement),
+		modernReadonlyField(tr("Room"), displaySource),
+		modernReadonlyField(tr("Target"), displayTarget),
+		modernReadonlyField(tr("Placement"), placement.trimmed().isEmpty() ? tr("Inside") : placement.trimmed()),
+		modernNoteField(tr("Your Channel Dragging preference is set to ask before moving rooms."))
+	};
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("dragChannelConfirm"), QStringLiteral("confirm"), tr("Move room?"),
+		tr("Confirm this room move before it is sent to the server."),
+		QVariantList { modernDialogSection(tr("Move"), fields) },
+		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
+					   modernDialogAction(QStringLiteral("confirmDragChannel"), tr("Move room"), true,
+										  QStringLiteral("warning"), true) },
+		QStringLiteral("confirmDragChannel"), QSize(580, 380));
+	dialog.insert(QStringLiteral("tone"), QStringLiteral("warning"));
+	dialog.insert(QStringLiteral("highlights"),
+				  QVariantList { modernDialogHighlight(tr("Room"), displaySource),
+								 modernDialogHighlight(tr("Target"), displayTarget) });
+	openModernGenericDialog(dialog);
+}
+
+void MainWindow::openModernChannelMoveUnavailableDialog() {
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("channelMoveUnavailable"), QStringLiteral("warning"), tr("Cannot move room"),
+		tr("This room cannot be moved automatically."),
+		QVariantList { modernDialogSection(
+			tr("Reason"),
+			QVariantList { modernNoteField(tr("Reset the numeric sorting indicators or adjust the room manually.")) }) },
+		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QStringLiteral("accent"),
+										  true) },
+		QStringLiteral("close"), QSize(560, 320));
+	dialog.insert(QStringLiteral("tone"), QStringLiteral("warning"));
+	openModernGenericDialog(dialog);
+}
+
+bool MainWindow::openModernSslHandshakeFailureDialog(const QString &reason) {
+	if (!usesModernShell()) {
+		return false;
+	}
+
+	const QString normalizedReason = reason.trimmed().isEmpty() ? tr("SSL handshake failed.") : reason.trimmed();
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("sslHandshakeFailure"), QStringLiteral("warning"), tr("SSL error"),
+		tr("Mumble is unable to establish a secure connection to the server."),
+		QVariantList { modernDialogSection(
+			tr("Connection"),
+			QVariantList {
+				modernReadonlyField(tr("Reason"), normalizedReason),
+				modernNoteField(tr("This can happen when the client and server support different encryption standards, "
+								   "one side is using an old operating system, the address is not a Mumble server, or "
+								   "the selected port belongs to another service."))
+			}) },
+		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QStringLiteral("accent"),
+										  true) },
+		QStringLiteral("close"), QSize(720, 440));
+	dialog.insert(QStringLiteral("tone"), QStringLiteral("warning"));
+	openModernGenericDialog(dialog);
+	return true;
+}
+
 void MainWindow::handleModernShellFinanceQuoteLookupRequest(const QString &requestID, const QString &symbol) {
 	QVariantMap result;
 	result.insert(QStringLiteral("requestId"), requestID);
@@ -16241,8 +16537,8 @@ QVariantMap MainWindow::buildModernStonksDialog() const {
 
 	QVariantMap dialog = modernDialogDto(
 		QStringLiteral("stonks"), QStringLiteral("stonks"), tr("Stonks"),
-		tr("Ledger, leaderboard, following, and server settings."),
-		QVariantList(), QVariantList(), QStringLiteral("close"), QSize(1120, 760));
+		tr("Portfolio, leaderboard, following, and server settings."),
+		QVariantList(), QVariantList(), QStringLiteral("close"), QSize(760, 620));
 	dialog.insert(QStringLiteral("stonks"), state);
 	dialog.insert(QStringLiteral("tone"), QStringLiteral("wide"));
 	return dialog;
@@ -16280,7 +16576,7 @@ void MainWindow::openModernStonksDialog() {
 		m_stonksState.insert(QStringLiteral("registered"), false);
 		m_stonksState.insert(QStringLiteral("canAdmin"), false);
 		m_stonksState.insert(QStringLiteral("selectedPeriod"), QStringLiteral("30d"));
-		m_stonksState.insert(QStringLiteral("error"), tr("This server has not advertised Stonks ledger support."));
+		m_stonksState.insert(QStringLiteral("error"), tr("This server has not advertised Stonks portfolio support."));
 	} else {
 		requestStonksState(m_stonksSelectedPeriod, m_stonksSelectedUserID);
 	}
@@ -16310,11 +16606,23 @@ void MainWindow::handleStonksState(const MumbleProto::StonksState &state) {
 }
 
 bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const QVariantMap &payload) {
+	const QString action = actionID.trimmed();
+	if (action == QLatin1String("setTickerBannerAlwaysScroll")) {
+		Global::get().s.bModernShellTickerBannerAlwaysScroll =
+			payload.value(QStringLiteral("tickerBannerAlwaysScroll")).toBool();
+		Global::get().s.save();
+		queueModernShellSnapshotSync();
+		if (usesModernShell() && m_modernDialogController
+			&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
+			openModernGenericDialog(buildModernStonksDialog());
+		}
+		return true;
+	}
+
 	if (!Global::get().sh || !Global::get().sh->isRunning()) {
 		return true;
 	}
 
-	const QString action = actionID.trimmed();
 	if (action == QLatin1String("register")) {
 		handleModernShellLegacyDialogAction(QStringLiteral("self.register"));
 		return true;
@@ -16380,7 +16688,7 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 		}
 		MumbleProto::StonksSnapshot *snapshot = message.mutable_snapshot();
 		snapshot->set_currency(u8(payload.value(QStringLiteral("currency"), QStringLiteral("USD")).toString()));
-		snapshot->set_note(u8(payload.value(QStringLiteral("note"), tr("Ledger cleared")).toString()));
+		snapshot->set_note(u8(payload.value(QStringLiteral("note"), tr("Portfolio cleared")).toString()));
 		Global::get().sh->sendMessage(message);
 		return true;
 	}
@@ -17483,6 +17791,10 @@ void MainWindow::openModernVersionCheckResultDialog(const QJsonObject &info, con
 	const QUrl installerUrl = modernUpdateJsonUrl(info, QStringLiteral("installerUrl"));
 	const QUrl openUrl      = installerUrl.isValid() ? installerUrl : releaseUrl;
 	const bool canInstall   = VersionCheck::canInstallUpdate(info);
+	const QString updateMode = VersionCheck::updateModeForInfo(info);
+	const QJsonObject packageInfo = info.value(QStringLiteral("package")).toObject();
+	const QString packageUrlValue = packageInfo.value(QStringLiteral("url")).toString().trimmed();
+	const QUrl packageUrl = packageUrlValue.isEmpty() ? QUrl() : QUrl(packageUrlValue);
 
 	QVariantList currentFields {
 		modernReadonlyField(tr("Current version"), Version::getRelease()),
@@ -17505,8 +17817,20 @@ void MainWindow::openModernVersionCheckResultDialog(const QJsonObject &info, con
 	if (releaseUrl.isValid()) {
 		latestFields.push_back(modernReadonlyField(tr("Release"), releaseUrl.toString()));
 	}
+	if (canInstall) {
+		latestFields.push_back(modernReadonlyField(
+			tr("Update path"),
+			updateMode == QLatin1String("package") ? tr("Update package") : tr("Installer")));
+	}
 	if (installerUrl.isValid()) {
 		latestFields.push_back(modernReadonlyField(tr("Installer"), installerUrl.toString()));
+	}
+	if (packageUrl.isValid()) {
+		latestFields.push_back(modernReadonlyField(tr("Package"), packageUrl.toString()));
+		const QString packageSha256 = packageInfo.value(QStringLiteral("sha256")).toString().trimmed();
+		if (!packageSha256.isEmpty()) {
+			latestFields.push_back(modernReadonlyField(tr("Package SHA256"), packageSha256));
+		}
 	}
 	latestFields.push_back(modernHiddenField(QStringLiteral("update.releaseUrl"), releaseUrl.toString()));
 	latestFields.push_back(modernHiddenField(QStringLiteral("update.installerUrl"), installerUrl.toString()));
@@ -18346,6 +18670,79 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 		return true;
 	}
 
+	if (dialogID == QLatin1String("sslCertificateWarning")
+		|| dialogID == QLatin1String("sslCertificateDetails")) {
+		if (actionID == QLatin1String("viewSslCertificateDetails")) {
+			openModernSslCertificateDetailsDialog(fieldValues);
+			return true;
+		}
+
+		if (actionID == QLatin1String("trustSslCertificate")) {
+			const QString host   = fieldValues.value(QStringLiteral("ssl.host")).toString();
+			const unsigned short port =
+				static_cast< unsigned short >(fieldValues.value(QStringLiteral("ssl.port")).toUInt());
+			const QString digest = fieldValues.value(QStringLiteral("ssl.digest")).toString();
+			if (!host.trimmed().isEmpty() && port != 0 && !digest.trimmed().isEmpty() && Global::get().db) {
+				Global::get().db->setDigest(host, port, digest);
+				qaServerDisconnect->setEnabled(true);
+				on_Reconnect_timeout();
+			}
+			return true;
+		}
+
+		return true;
+	}
+
+	if (dialogID == QLatin1String("urlConnect")) {
+		if (actionID == QLatin1String("connectUrl")) {
+			const QString host = fieldValues.value(QStringLiteral("urlConnect.host")).toString();
+			const unsigned short port =
+				static_cast< unsigned short >(fieldValues.value(QStringLiteral("urlConnect.port")).toUInt());
+			const QString username = fieldValues.value(QStringLiteral("urlConnect.username")).toString().trimmed();
+			const QString password = fieldValues.value(QStringLiteral("urlConnect.password")).toString();
+			const QString serverName = fieldValues.value(QStringLiteral("urlConnect.name")).toString();
+			const QString desiredChannel = fieldValues.value(QStringLiteral("urlConnect.channel")).toString();
+			if (username.isEmpty()) {
+				QVariantMap errors;
+				errors.insert(QStringLiteral("urlConnect.username"), tr("Enter a username before connecting."));
+				QUrl url(fieldValues.value(QStringLiteral("urlConnect.url")).toString());
+				if (!url.isValid()) {
+					url.setScheme(QLatin1String("mumble"));
+					url.setHost(host);
+					url.setPort(port);
+					url.setPath(desiredChannel);
+				}
+				openModernUrlConnectDialog(url, host, port, password, serverName, desiredChannel, username, errors);
+				return true;
+			}
+
+			const QString connectionName = serverName.trimmed().isEmpty()
+											   ? QString::fromLatin1("%1@%2").arg(username, host)
+											   : serverName.trimmed();
+			connectToServer(host, port, username, password, connectionName, desiredChannel);
+			return true;
+		}
+		return true;
+	}
+
+	if (dialogID == QLatin1String("dragUserConfirm")) {
+		if (actionID == QLatin1String("confirmDragUser")) {
+			const unsigned int session = fieldValues.value(QStringLiteral("dragUser.session")).toUInt();
+			const QString targetScopeToken = fieldValues.value(QStringLiteral("dragUser.targetScopeToken")).toString();
+			moveModernShellParticipant(session, targetScopeToken, false);
+		}
+		return true;
+	}
+
+	if (dialogID == QLatin1String("dragChannelConfirm")) {
+		if (actionID == QLatin1String("confirmDragChannel")) {
+			moveModernShellChannel(fieldValues.value(QStringLiteral("dragChannel.sourceScopeToken")).toString(),
+								   fieldValues.value(QStringLiteral("dragChannel.targetScopeToken")).toString(),
+								   fieldValues.value(QStringLiteral("dragChannel.placement")).toString(), false);
+		}
+		return true;
+	}
+
 	if (dialogID == QLatin1String("disconnectServer") && actionID == QLatin1String("confirmDisconnect")) {
 		disconnectFromServer();
 		return true;
@@ -18898,19 +19295,26 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 			return true;
 		}
 		if (actionID == QLatin1String("installForkUpdate")) {
-			QJsonObject info;
-			info.insert(QStringLiteral("installerUrl"),
-						fieldValues.value(QStringLiteral("update.installerUrl")).toString());
-			info.insert(QStringLiteral("releaseUrl"), fieldValues.value(QStringLiteral("update.releaseUrl")).toString());
-			info.insert(QStringLiteral("sha256"), fieldValues.value(QStringLiteral("update.sha256")).toString());
-			info.insert(QStringLiteral("version"), fieldValues.value(QStringLiteral("update.version")).toString());
-			bool buildOk = false;
-			const int build = fieldValues.value(QStringLiteral("update.build")).toInt(&buildOk);
-			if (buildOk) {
-				info.insert(QStringLiteral("build"), build);
+			QJsonObject info = m_modernVersionCheckInfo;
+			if (info.isEmpty()) {
+				info.insert(QStringLiteral("installerUrl"),
+							fieldValues.value(QStringLiteral("update.installerUrl")).toString());
+				info.insert(QStringLiteral("releaseUrl"),
+							fieldValues.value(QStringLiteral("update.releaseUrl")).toString());
+				info.insert(QStringLiteral("sha256"), fieldValues.value(QStringLiteral("update.sha256")).toString());
+				info.insert(QStringLiteral("version"), fieldValues.value(QStringLiteral("update.version")).toString());
+				bool buildOk = false;
+				const int build = fieldValues.value(QStringLiteral("update.build")).toInt(&buildOk);
+				if (buildOk) {
+					info.insert(QStringLiteral("build"), build);
+				}
 			}
 			m_modernVersionCheckInfo = info;
-			return startModernForkUpdateDownload();
+			const bool handled = startModernForkUpdateDownload();
+			if (handled && m_modernDialogController) {
+				publishModernDialogState(m_modernDialogController->close(dialogID));
+			}
+			return handled;
 		}
 		if (actionID == QLatin1String("openForkInstaller")) {
 			const QUrl installerUrl(fieldValues.value(QStringLiteral("update.installerUrl")).toString());
@@ -19690,12 +20094,6 @@ void MainWindow::connectFromModernDialog(const QString &host, const unsigned sho
 		return;
 	}
 
-	stopModernConnectServerPing();
-	recreateServerHandler();
-	qsDesiredChannel = QString();
-	rtLast           = MumbleProto::Reject_RejectType_None;
-	bRetryServer     = true;
-	qaServerDisconnect->setEnabled(true);
 	Global::get().s.qsUsername = username.trimmed();
 	QString lastServerName = host.trimmed();
 	const QList< FavoriteServer > favorites = Global::get().db->getFavorites();
@@ -19705,13 +20103,7 @@ void MainWindow::connectFromModernDialog(const QString &host, const unsigned sho
 			break;
 		}
 	}
-	Global::get().s.qsLastServer = lastServerName;
-	Global::get().l->log(Log::Information,
-						 tr("Connecting to server %1.").arg(Log::msgColor(host.toHtmlEscaped(), Log::Server)));
-	Global::get().sh->setConnectionInfo(host, port, username.trimmed(), password);
-	Global::get().sh->start(QThread::TimeCriticalPriority);
-	updateFavoriteButton();
-	queueModernShellSnapshotSync();
+	connectToServer(host, port, username, password, lastServerName);
 }
 
 void MainWindow::applyModernSettings(const Settings &settings, const bool accepted) {
@@ -21381,6 +21773,7 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 					Global::get().s.qsModernShellMotdDismissedSignature);
 	appState.insert(QStringLiteral("motdLastSeenSignature"),
 					Global::get().s.qsModernShellMotdLastSeenSignature);
+	appState.insert(QStringLiteral("updateBanner"), m_modernUpdateBannerState);
 	if (connected) {
 		if (const Channel *rootVoiceChannel = Channel::get(Mumble::ROOT_CHANNEL_ID)) {
 			appState.insert(QStringLiteral("voiceRootLabel"), QString());
@@ -21630,6 +22023,7 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 		room.insert(QStringLiteral("token"),
 					modernShellScopeToken(static_cast< int >(MumbleProto::Channel), channel->iId));
 		room.insert(QStringLiteral("label"), channel->qsName);
+		room.insert(QStringLiteral("topic"), voiceRoomTopicSummary(channel));
 		room.insert(QStringLiteral("description"), voiceRoomBrowserDescription(channel));
 		room.insert(QStringLiteral("pathLabel"), persistentTextAclChannelLabel(channel));
 		room.insert(QStringLiteral("depth"), depth);
@@ -22014,6 +22408,7 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 					Global::get().s.qsModernShellMotdDismissedSignature);
 	appState.insert(QStringLiteral("motdLastSeenSignature"),
 					Global::get().s.qsModernShellMotdLastSeenSignature);
+	appState.insert(QStringLiteral("updateBanner"), m_modernUpdateBannerState);
 	appState.insert(QStringLiteral("layoutLabel"), autoSwitchedModern ? tr("Modern (auto)") : tr("Modern"));
 	appState.insert(QStringLiteral("layoutTone"), QStringLiteral("accent"));
 	appState.insert(QStringLiteral("layoutSwitchLabel"), tr("Modern layout is required by this fork"));
@@ -22689,6 +23084,7 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 		room.insert(QStringLiteral("token"),
 					modernShellScopeToken(static_cast< int >(MumbleProto::Channel), channel->iId));
 		room.insert(QStringLiteral("label"), channel->qsName);
+		room.insert(QStringLiteral("topic"), voiceRoomTopicSummary(channel));
 		room.insert(QStringLiteral("description"), voiceRoomBrowserDescription(channel));
 		room.insert(QStringLiteral("pathLabel"), persistentTextAclChannelLabel(channel));
 		room.insert(QStringLiteral("depth"), depth);
@@ -23838,6 +24234,15 @@ bool MainWindow::handleModernShellParticipantJoin(const qulonglong session) {
 }
 
 bool MainWindow::handleModernShellParticipantMove(const qulonglong session, const QString &targetScopeToken) {
+	if (session == 0 || session > std::numeric_limits< unsigned int >::max()) {
+		return false;
+	}
+
+	return moveModernShellParticipant(static_cast< unsigned int >(session), targetScopeToken, true);
+}
+
+bool MainWindow::moveModernShellParticipant(const unsigned int session, const QString &targetScopeToken,
+											const bool confirmIfNeeded) {
 	int scopeValue       = 0;
 	unsigned int scopeID = 0;
 	if (!parseModernShellScopeToken(targetScopeToken, scopeValue, scopeID)
@@ -23846,7 +24251,7 @@ bool MainWindow::handleModernShellParticipantMove(const qulonglong session, cons
 	}
 
 	Channel *targetChannel         = Channel::get(scopeID);
-	ClientUser *participant        = ClientUser::get(static_cast< unsigned int >(session));
+	ClientUser *participant        = ClientUser::get(session);
 	ClientUser *self               = ClientUser::get(Global::get().uiSession);
 	ServerHandlerPtr serverHandler = Global::get().sh;
 	if (!targetChannel || !participant || !serverHandler) {
@@ -23860,9 +24265,9 @@ bool MainWindow::handleModernShellParticipantMove(const qulonglong session, cons
 	// Respect the same drag preference the original tree view uses.
 	switch (Global::get().s.ceUserDrag) {
 		case Settings::Ask:
-			if (QMessageBox::question(this, QLatin1String("Mumble"), tr("Are you sure you want to drag this user?"),
-									  QMessageBox::Yes, QMessageBox::No)
-				== QMessageBox::No) {
+			if (confirmIfNeeded) {
+				openModernDragUserConfirmDialog(session, targetScopeToken, participant->qsName,
+												persistentTextAclChannelLabel(targetChannel));
 				return false;
 			}
 			break;
@@ -23881,7 +24286,7 @@ bool MainWindow::handleModernShellParticipantMove(const qulonglong session, cons
 	}
 
 	MumbleProto::UserState userState;
-	userState.set_session(static_cast< unsigned int >(session));
+	userState.set_session(session);
 	userState.set_channel_id(targetChannel->iId);
 	serverHandler->sendMessage(userState);
 	publishModernShellRoomStatePatch();
@@ -23890,6 +24295,11 @@ bool MainWindow::handleModernShellParticipantMove(const qulonglong session, cons
 
 bool MainWindow::handleModernShellChannelMove(const QString &sourceScopeToken, const QString &targetScopeToken,
 											  const QString &placement) {
+	return moveModernShellChannel(sourceScopeToken, targetScopeToken, placement, true);
+}
+
+bool MainWindow::moveModernShellChannel(const QString &sourceScopeToken, const QString &targetScopeToken,
+										const QString &placement, const bool confirmIfNeeded) {
 	int sourceScopeValue       = 0;
 	unsigned int sourceScopeID = 0;
 	int targetScopeValue       = 0;
@@ -23938,9 +24348,10 @@ bool MainWindow::handleModernShellChannelMove(const QString &sourceScopeToken, c
 
 	switch (Global::get().s.ceChannelDrag) {
 		case Settings::Ask:
-			if (QMessageBox::question(this, QLatin1String("Mumble"), tr("Are you sure you want to drag this channel?"),
-									  QMessageBox::Yes, QMessageBox::No)
-				== QMessageBox::No) {
+			if (confirmIfNeeded) {
+				openModernDragChannelConfirmDialog(sourceScopeToken, targetScopeToken, normalizedPlacement,
+												   persistentTextAclChannelLabel(sourceChannel),
+												   persistentTextAclChannelLabel(targetChannel));
 				return false;
 			}
 			break;
@@ -23953,9 +24364,7 @@ bool MainWindow::handleModernShellChannelMove(const QString &sourceScopeToken, c
 	}
 
 	const auto showPositionError = [this]() {
-		QMessageBox::critical(this, QLatin1String("Mumble"),
-							  tr("Cannot perform this movement automatically, please reset the numeric sorting "
-								 "indicators or adjust it manually."));
+		openModernChannelMoveUnavailableDialog();
 	};
 	const auto sendPositionAdjustment = [serverHandler](Channel *channel, const int position) {
 		if (!channel) {
@@ -24195,6 +24604,21 @@ bool MainWindow::handleModernShellAppAction(const QString &actionId) {
 		handled = startModernForkUpdateDownload();
 	} else if (actionId == QLatin1String("app.update.restart")) {
 		handled = restartForPreparedForkUpdate();
+	} else if (actionId == QLatin1String("app.update.retry")) {
+		handled = startModernForkUpdateDownload();
+	} else if (actionId == QLatin1String("app.update.details")) {
+		if (m_modernVersionCheckInfo.isEmpty()) {
+			openModernVersionCheckDialog();
+		} else {
+			openModernVersionCheckResultDialog(m_modernVersionCheckInfo, true);
+		}
+		return true;
+	} else if (actionId == QLatin1String("app.update.dismiss")) {
+		if (!m_modernUpdateDownloadInProgress
+			&& m_modernUpdateBannerState.value(QStringLiteral("phase")).toString() != QLatin1String("handoff")) {
+			clearModernUpdateBannerState();
+		}
+		return true;
 	} else if (actionId == QLatin1String("motd.show")) {
 		if (!Global::get().s.bModernShellMotdExpanded) {
 			Global::get().s.bModernShellMotdExpanded = true;
@@ -24299,22 +24723,103 @@ void MainWindow::publishModernToast(const QString &kind, const QString &title, c
 	m_modernShellHost->bridge()->publishToast(toast);
 }
 
+void MainWindow::setModernUpdateBannerState(const QVariantMap &state) {
+	m_modernUpdateBannerState = state;
+	publishModernUpdateBannerState();
+}
+
+void MainWindow::clearModernUpdateBannerState() {
+	m_modernUpdateBannerState.clear();
+	m_modernUpdateLastProgressPublishMs = 0;
+	m_modernUpdateLastProgressPercent = -1;
+	publishModernUpdateBannerState();
+}
+
+void MainWindow::publishModernUpdateBannerState() {
+	if (!usesModernShell() || !m_modernShellHost || !m_modernShellHost->bridge()) {
+		return;
+	}
+
+	QVariantMap app;
+	app.insert(QStringLiteral("updateBanner"), m_modernUpdateBannerState);
+	QVariantMap patch;
+	patch.insert(QStringLiteral("app"), app);
+	publishModernShellPatchNow(QStringLiteral("rooms.update"), patch);
+}
+
+void MainWindow::showModernForkUpdateAvailableBanner(const QJsonObject &info) {
+	m_modernVersionCheckInfo = info;
+	const QString currentPhase = m_modernUpdateBannerState.value(QStringLiteral("phase")).toString();
+	if (m_modernUpdateDownloadInProgress || currentPhase == QLatin1String("ready")
+		|| currentPhase == QLatin1String("handoff")) {
+		return;
+	}
+
+	m_modernPreparedUpdateInstallerPath.clear();
+	m_modernUpdateDownloadInProgress = false;
+	m_modernUpdateLastProgressPublishMs = 0;
+	m_modernUpdateLastProgressPercent = -1;
+
+	const bool canInstall = VersionCheck::canInstallUpdate(info);
+	QVariantList actions;
+	if (canInstall) {
+		actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.download"), tr("Install update"),
+												   QStringLiteral("accent")));
+		actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.details"), tr("Details")));
+	} else {
+		actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.details"), tr("Details"),
+												   QStringLiteral("accent")));
+	}
+	actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.dismiss"), tr("Not now")));
+
+	QVariantMap banner;
+	banner.insert(QStringLiteral("visible"), true);
+	banner.insert(QStringLiteral("phase"), QStringLiteral("available"));
+	banner.insert(QStringLiteral("tone"), canInstall ? QStringLiteral("warning") : QStringLiteral("accent"));
+	banner.insert(QStringLiteral("title"), tr("Update available"));
+	banner.insert(QStringLiteral("detail"), tr("%1 Latest: %2")
+											.arg(modernUpdateAnnouncementText(info), modernUpdateLatestLabel(info)));
+	banner.insert(QStringLiteral("actions"), actions);
+	setModernUpdateBannerState(banner);
+}
+
+void MainWindow::showModernForkUpdateDownloadProgress(const qint64 received, const qint64 total) {
+	if (!m_modernUpdateDownloadInProgress
+		|| m_modernUpdateBannerState.value(QStringLiteral("phase")).toString() != QLatin1String("downloading")) {
+		return;
+	}
+
+	const int progressPercent =
+		total > 0 ? qBound(0, static_cast< int >((static_cast< double >(received) / total) * 100.0), 100) : -1;
+	const qint64 now = QDateTime::currentMSecsSinceEpoch();
+	if (progressPercent == m_modernUpdateLastProgressPercent
+		&& now - m_modernUpdateLastProgressPublishMs < 500) {
+		return;
+	}
+
+	m_modernUpdateLastProgressPublishMs = now;
+	m_modernUpdateLastProgressPercent = progressPercent;
+
+	QVariantMap banner = m_modernUpdateBannerState;
+	banner.insert(QStringLiteral("progressVisible"), true);
+	if (progressPercent >= 0) {
+		banner.insert(QStringLiteral("progressIndeterminate"), false);
+		banner.insert(QStringLiteral("progressPercent"), progressPercent);
+		banner.insert(QStringLiteral("progressLabel"), tr("%1%").arg(progressPercent));
+	} else {
+		banner.insert(QStringLiteral("progressIndeterminate"), true);
+		banner.remove(QStringLiteral("progressPercent"));
+		banner.insert(QStringLiteral("progressLabel"), tr("Downloading"));
+	}
+	setModernUpdateBannerState(banner);
+}
+
 bool MainWindow::notifyForkUpdateAvailable(const QJsonObject &info, const bool autocheck) {
 	if (!autocheck || !usesModernShell() || !m_modernShellHost || !m_modernShellHost->bridge()) {
 		return false;
 	}
 
-	m_modernVersionCheckInfo          = info;
-	m_modernPreparedUpdateInstallerPath.clear();
-	m_modernUpdateDownloadInProgress = false;
-
-	const QString latest = modernUpdateLatestLabel(info);
-	const QString message =
-		tr("%1 Latest: %2").arg(modernUpdateAnnouncementText(info), latest);
-	publishModernToast(QStringLiteral("info"), tr("Update available"), message,
-					   VersionCheck::canInstallUpdate(info) ? QStringLiteral("app.update.download")
-															: QStringLiteral("help.versionCheck"),
-					   VersionCheck::canInstallUpdate(info) ? tr("Update") : tr("Details"), 20000);
+	showModernForkUpdateAvailableBanner(info);
 	return true;
 }
 
@@ -24329,6 +24834,12 @@ bool MainWindow::handleModernVersionCheckResult(const QJsonObject &info, const b
 			notifyForkUpdateAvailable(info, autocheck);
 		}
 		return true;
+	}
+
+	if (updateAvailable) {
+		showModernForkUpdateAvailableBanner(info);
+	} else if (!m_modernUpdateDownloadInProgress) {
+		clearModernUpdateBannerState();
 	}
 
 	openModernVersionCheckResultDialog(info, updateAvailable);
@@ -24350,40 +24861,133 @@ bool MainWindow::handleModernVersionCheckFailure(const QString &message, const b
 
 bool MainWindow::startModernForkUpdateDownload() {
 	if (m_modernUpdateDownloadInProgress) {
-		publishModernToast(QStringLiteral("info"), tr("Mumble update"), tr("The update is already downloading."));
+		if (m_modernUpdateBannerState.isEmpty()) {
+			QVariantMap banner;
+			banner.insert(QStringLiteral("visible"), true);
+			banner.insert(QStringLiteral("phase"), QStringLiteral("downloading"));
+			banner.insert(QStringLiteral("tone"), QStringLiteral("accent"));
+			banner.insert(QStringLiteral("title"), tr("Downloading update"));
+			banner.insert(QStringLiteral("detail"),
+						  tr("Mumble is downloading and verifying the update. You can keep using the client."));
+			banner.insert(QStringLiteral("progressVisible"), true);
+			banner.insert(QStringLiteral("progressIndeterminate"), true);
+			banner.insert(QStringLiteral("progressLabel"), tr("Downloading"));
+			setModernUpdateBannerState(banner);
+		}
 		return true;
 	}
 
 	if (!VersionCheck::canInstallUpdate(m_modernVersionCheckInfo)) {
-		publishModernToast(QStringLiteral("warning"), tr("Mumble update"),
-						   tr("This update needs to be opened from the release page."),
-						   QStringLiteral("help.versionCheck"), tr("Details"), 12000);
+		QVariantMap banner;
+		banner.insert(QStringLiteral("visible"), true);
+		banner.insert(QStringLiteral("phase"), QStringLiteral("manual"));
+		banner.insert(QStringLiteral("tone"), QStringLiteral("warning"));
+		banner.insert(QStringLiteral("title"), tr("Manual update required"));
+		banner.insert(QStringLiteral("detail"),
+					  tr("This release does not include a verified Windows update package that Mumble can run automatically."));
+		banner.insert(QStringLiteral("actions"),
+					  QVariantList { modernUpdateBannerAction(QStringLiteral("app.update.details"), tr("Details"),
+															  QStringLiteral("accent")),
+									 modernUpdateBannerAction(QStringLiteral("app.update.dismiss"), tr("Dismiss")) });
+		setModernUpdateBannerState(banner);
 		return true;
 	}
 
+	const QString updateMode = VersionCheck::updateModeForInfo(m_modernVersionCheckInfo);
 	m_modernUpdateDownloadInProgress = true;
 	m_modernPreparedUpdateInstallerPath.clear();
-	publishModernToast(QStringLiteral("info"), tr("Mumble update"),
-					   tr("Downloading and verifying the update in the background."), QString(), QString(), 8000);
+	m_modernUpdateLastProgressPublishMs = 0;
+	m_modernUpdateLastProgressPercent = -1;
+
+	QVariantMap banner;
+	banner.insert(QStringLiteral("visible"), true);
+	banner.insert(QStringLiteral("phase"), QStringLiteral("downloading"));
+	banner.insert(QStringLiteral("tone"), QStringLiteral("accent"));
+	banner.insert(QStringLiteral("title"), tr("Downloading update"));
+	banner.insert(QStringLiteral("detail"),
+				  tr("Mumble is downloading and verifying the update. You can keep using the client."));
+	banner.insert(QStringLiteral("progressVisible"), true);
+	banner.insert(QStringLiteral("progressIndeterminate"), true);
+	banner.insert(QStringLiteral("progressLabel"), tr("Starting download"));
+	banner.insert(QStringLiteral("actions"),
+				  QVariantList { modernUpdateBannerAction(QStringLiteral("app.update.details"), tr("Details")) });
+	setModernUpdateBannerState(banner);
 
 	VersionCheck::downloadUpdateFromInfo(
 		m_modernVersionCheckInfo, this, false,
-		[this](const QString &installerPath) {
+		[this, updateMode](const QString &installerPath) {
 			m_modernUpdateDownloadInProgress = false;
 			m_modernPreparedUpdateInstallerPath = installerPath;
-			publishModernToast(QStringLiteral("success"), tr("Update ready"),
-							   tr("Restart Mumble to install the verified update. Mumble will reopen and restore this server and chat when it is done."),
-							   QStringLiteral("app.update.restart"), tr("Restart"), 60000);
+			m_modernUpdateLastProgressPublishMs = 0;
+			m_modernUpdateLastProgressPercent = 100;
+
+			QVariantMap readyBanner;
+			readyBanner.insert(QStringLiteral("visible"), true);
+			readyBanner.insert(QStringLiteral("phase"), QStringLiteral("ready"));
+			readyBanner.insert(QStringLiteral("tone"), QStringLiteral("success"));
+			readyBanner.insert(QStringLiteral("title"), tr("Update ready to install"));
+			readyBanner.insert(
+				QStringLiteral("detail"),
+				updateMode == QLatin1String("package")
+					? tr("Mumble will close, mumble-updater will apply the package, and Mumble will reopen to restore this server and chat.")
+					: tr("Mumble will close, mumble-updater will run the installer, and Mumble will reopen to restore this server and chat."));
+			readyBanner.insert(QStringLiteral("progressVisible"), true);
+			readyBanner.insert(QStringLiteral("progressIndeterminate"), false);
+			readyBanner.insert(QStringLiteral("progressPercent"), 100);
+			readyBanner.insert(QStringLiteral("progressLabel"), tr("Verified"));
+			readyBanner.insert(QStringLiteral("actions"),
+							   QVariantList { modernUpdateBannerAction(QStringLiteral("app.update.restart"),
+																	   tr("Install and restart"),
+																	   QStringLiteral("accent")),
+											  modernUpdateBannerAction(QStringLiteral("app.update.details"),
+																	   tr("Details")),
+											  modernUpdateBannerAction(QStringLiteral("app.update.dismiss"),
+																	   tr("Later")) });
+			setModernUpdateBannerState(readyBanner);
 		},
 		[this](const QString &message) {
 			m_modernUpdateDownloadInProgress = false;
 			m_modernPreparedUpdateInstallerPath.clear();
-			publishModernToast(QStringLiteral("error"), tr("Update failed"), message,
-							   QStringLiteral("help.versionCheck"), tr("Details"), 20000);
+			m_modernUpdateLastProgressPublishMs = 0;
+			m_modernUpdateLastProgressPercent = -1;
+
+			QVariantMap failureBanner;
+			failureBanner.insert(QStringLiteral("visible"), true);
+			failureBanner.insert(QStringLiteral("phase"), QStringLiteral("failed"));
+			failureBanner.insert(QStringLiteral("tone"), QStringLiteral("danger"));
+			failureBanner.insert(QStringLiteral("title"), tr("Update failed"));
+			failureBanner.insert(QStringLiteral("detail"), message);
+			failureBanner.insert(QStringLiteral("actions"),
+								 QVariantList { modernUpdateBannerAction(QStringLiteral("app.update.retry"),
+																		 tr("Try again"),
+																		 QStringLiteral("accent")),
+												modernUpdateBannerAction(QStringLiteral("app.update.details"),
+																		 tr("Details")),
+												modernUpdateBannerAction(QStringLiteral("app.update.dismiss"),
+																		 tr("Dismiss")) });
+			setModernUpdateBannerState(failureBanner);
 		},
 		[this]() {
 			m_modernUpdateDownloadInProgress = false;
-			publishModernToast(QStringLiteral("info"), tr("Mumble update"), tr("Update download cancelled."));
+			m_modernUpdateLastProgressPublishMs = 0;
+			m_modernUpdateLastProgressPercent = -1;
+
+			QVariantMap cancelledBanner;
+			cancelledBanner.insert(QStringLiteral("visible"), true);
+			cancelledBanner.insert(QStringLiteral("phase"), QStringLiteral("cancelled"));
+			cancelledBanner.insert(QStringLiteral("tone"), QStringLiteral("warning"));
+			cancelledBanner.insert(QStringLiteral("title"), tr("Update cancelled"));
+			cancelledBanner.insert(QStringLiteral("detail"), tr("The update download was cancelled."));
+			cancelledBanner.insert(QStringLiteral("actions"),
+								   QVariantList { modernUpdateBannerAction(QStringLiteral("app.update.retry"),
+																		   tr("Try again"),
+																		   QStringLiteral("accent")),
+												  modernUpdateBannerAction(QStringLiteral("app.update.dismiss"),
+																		   tr("Dismiss")) });
+			setModernUpdateBannerState(cancelledBanner);
+		},
+		[this](const qint64 received, const qint64 total) {
+			showModernForkUpdateDownloadProgress(received, total);
 		});
 	return true;
 }
@@ -24398,18 +25002,52 @@ bool MainWindow::startModernForkUpdateDownload(const QJsonObject &info) {
 }
 
 bool MainWindow::restartForPreparedForkUpdate() {
-	if (!VersionCheck::canLaunchPreparedUpdate(m_modernPreparedUpdateInstallerPath)) {
-		publishModernToast(QStringLiteral("warning"), tr("Mumble update"),
-						   tr("The verified installer is no longer available. Download the update again."),
-						   QStringLiteral("app.update.download"), tr("Download"), 12000);
+	const QString updateMode = VersionCheck::updateModeForInfo(m_modernVersionCheckInfo);
+	if (!VersionCheck::canLaunchPreparedUpdate(m_modernPreparedUpdateInstallerPath, updateMode)) {
+		QVariantMap banner;
+		banner.insert(QStringLiteral("visible"), true);
+		banner.insert(QStringLiteral("phase"), QStringLiteral("missing"));
+		banner.insert(QStringLiteral("tone"), QStringLiteral("warning"));
+		banner.insert(QStringLiteral("title"), tr("Update package missing"));
+		banner.insert(QStringLiteral("detail"),
+					  tr("The verified update package is no longer available. Download the update again."));
+		banner.insert(QStringLiteral("actions"),
+					  QVariantList { modernUpdateBannerAction(QStringLiteral("app.update.download"), tr("Download"),
+															  QStringLiteral("accent")),
+									 modernUpdateBannerAction(QStringLiteral("app.update.dismiss"), tr("Dismiss")) });
+		setModernUpdateBannerState(banner);
 		return true;
 	}
 
+	QVariantMap handoffBanner;
+	handoffBanner.insert(QStringLiteral("visible"), true);
+	handoffBanner.insert(QStringLiteral("phase"), QStringLiteral("handoff"));
+	handoffBanner.insert(QStringLiteral("tone"), QStringLiteral("accent"));
+	handoffBanner.insert(QStringLiteral("title"), tr("Installing update"));
+	handoffBanner.insert(
+		QStringLiteral("detail"),
+		tr("Mumble is closing now. The updater will finish the install and reopen Mumble when it is done."));
+	handoffBanner.insert(QStringLiteral("progressVisible"), true);
+	handoffBanner.insert(QStringLiteral("progressIndeterminate"), true);
+	handoffBanner.insert(QStringLiteral("progressLabel"), tr("Starting updater"));
+	setModernUpdateBannerState(handoffBanner);
+
 	prepareUpdateResumeState();
-	if (!VersionCheck::launchPreparedUpdate(m_modernPreparedUpdateInstallerPath)) {
+	if (!VersionCheck::launchPreparedUpdate(m_modernPreparedUpdateInstallerPath, updateMode)) {
 		clearPendingUpdateResumeState();
-		publishModernToast(QStringLiteral("error"), tr("Mumble update"),
-						   tr("Mumble could not launch the update installer."), QString(), QString(), 12000);
+		QVariantMap failureBanner;
+		failureBanner.insert(QStringLiteral("visible"), true);
+		failureBanner.insert(QStringLiteral("phase"), QStringLiteral("failed"));
+		failureBanner.insert(QStringLiteral("tone"), QStringLiteral("danger"));
+		failureBanner.insert(QStringLiteral("title"), tr("Update failed"));
+		failureBanner.insert(QStringLiteral("detail"), tr("Mumble could not launch the update package."));
+		failureBanner.insert(QStringLiteral("actions"),
+							 QVariantList { modernUpdateBannerAction(QStringLiteral("app.update.restart"),
+																	 tr("Try again"),
+																	 QStringLiteral("accent")),
+											modernUpdateBannerAction(QStringLiteral("app.update.dismiss"),
+																	 tr("Dismiss")) });
+		setModernUpdateBannerState(failureBanner);
 		return true;
 	}
 
@@ -24636,7 +25274,7 @@ bool MainWindow::handleModernShellAppActionPayload(const QString &actionId, cons
 		}
 		if (!stonksLedgerFeatureSupported()) {
 			publishModernToast(QStringLiteral("error"), tr("Stonks"),
-							   tr("This server has not advertised Stonks ledger support."));
+							   tr("This server has not advertised Stonks portfolio support."));
 			return true;
 		}
 
@@ -24682,7 +25320,7 @@ bool MainWindow::handleModernShellAppActionPayload(const QString &actionId, cons
 		}
 		if (!stonksLedgerFeatureSupported()) {
 			publishModernToast(QStringLiteral("error"), tr("Stonks"),
-							   tr("This server has not advertised Stonks ledger support."));
+							   tr("This server has not advertised Stonks portfolio support."));
 			return true;
 		}
 
@@ -35226,6 +35864,36 @@ static void recreateServerHandler() {
 										 &PluginManager::on_serverDisconnected, Qt::DirectConnection);
 }
 
+void MainWindow::connectToServer(const QString &host, const unsigned short port, const QString &username,
+								 const QString &password, const QString &serverName,
+								 const QString &desiredChannel) {
+	const QString normalizedHost     = host.trimmed();
+	const QString normalizedUsername = username.trimmed();
+	if (normalizedHost.isEmpty() || port == 0 || normalizedUsername.isEmpty()) {
+		return;
+	}
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	stopModernConnectServerPing();
+#endif
+	recreateServerHandler();
+
+	qsDesiredChannel = desiredChannel;
+	rtLast           = MumbleProto::Reject_RejectType_None;
+	bRetryServer     = true;
+	qaServerDisconnect->setEnabled(true);
+	Global::get().s.qsUsername = normalizedUsername;
+	Global::get().s.qsLastServer =
+		serverName.trimmed().isEmpty() ? QString::fromLatin1("%1@%2").arg(normalizedUsername, normalizedHost)
+									   : serverName.trimmed();
+	Global::get().l->log(Log::Information,
+						 tr("Connecting to server %1.").arg(Log::msgColor(normalizedHost.toHtmlEscaped(), Log::Server)));
+	Global::get().sh->setConnectionInfo(normalizedHost, port, normalizedUsername, password);
+	Global::get().sh->start(QThread::TimeCriticalPriority);
+	updateFavoriteButton();
+	queueModernShellSnapshotSync();
+}
+
 void MainWindow::openUrl(const QUrl &url) {
 	Global::get().l->log(Log::Information,
 						 tr("Opening URL %1").arg(url.toString(QUrl::RemovePassword).toHtmlEscaped()));
@@ -35314,6 +35982,12 @@ void MainWindow::openUrl(const QUrl &url) {
 	Global::get().db->fuzzyMatch(name, user, pw, host, port);
 
 	if (user.isEmpty()) {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+		if (usesModernShell()) {
+			openModernUrlConnectDialog(url, host, port, pw, name, qsDesiredChannel);
+			return;
+		}
+#endif
 		bool ok;
 		user = QInputDialog::getText(this, tr("Connecting to %1").arg(url.toString()), tr("Enter username"),
 									 QLineEdit::Normal, Global::get().s.qsUsername, &ok);
@@ -35325,16 +35999,7 @@ void MainWindow::openUrl(const QUrl &url) {
 	if (name.isEmpty())
 		name = QString::fromLatin1("%1@%2").arg(user).arg(host);
 
-	recreateServerHandler();
-
-	Global::get().s.qsLastServer = name;
-	rtLast                       = MumbleProto::Reject_RejectType_None;
-	bRetryServer                 = true;
-	qaServerDisconnect->setEnabled(true);
-	Global::get().l->log(Log::Information,
-						 tr("Connecting to server %1.").arg(Log::msgColor(host.toHtmlEscaped(), Log::Server)));
-	Global::get().sh->setConnectionInfo(host, port, user, pw);
-	Global::get().sh->start(QThread::TimeCriticalPriority);
+	connectToServer(host, port, user, pw, name, qsDesiredChannel);
 }
 
 /**
@@ -38597,6 +39262,19 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 			Global::get().l->log(Log::Warning, tr("SSL Verification failed: %1").arg(e.errorString().toHtmlEscaped()));
 		}
 		if (!Global::get().sh->qscCert.isEmpty()) {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+			if (openModernSslCertificateWarningDialog(host, port, Global::get().sh->qscCert,
+													  Global::get().sh->qlErrors)) {
+				AudioInput::setMaxBandwidth(-1);
+
+				if (Global::get().s.bMinimalView) {
+					qdwMinimalViewNote->show();
+				}
+
+				emit disconnectedFromServer();
+				return;
+			}
+#endif
 			QSslCertificate c = Global::get().sh->qscCert.at(0);
 			QString basereason;
 			QString actual_digest = QString::fromLatin1(c.digest(QCryptographicHash::Sha1).toHex());
@@ -38646,6 +39324,18 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 			}
 		}
 	} else if (err == QAbstractSocket::SslHandshakeFailedError) {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+		if (openModernSslHandshakeFailureDialog(reason)) {
+			AudioInput::setMaxBandwidth(-1);
+
+			if (Global::get().s.bMinimalView) {
+				qdwMinimalViewNote->show();
+			}
+
+			emit disconnectedFromServer();
+			return;
+		}
+#endif
 		QMessageBox msgBox;
 		msgBox.addButton(QMessageBox::Ok);
 		msgBox.setIcon(QMessageBox::Warning);
@@ -38756,12 +39446,14 @@ void MainWindow::resolverError(QAbstractSocket::SocketError, QString reason) {
 
 void MainWindow::showRaiseWindow() {
 	endNativeWindowMoveOrResize();
+#if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 	if (qEnvironmentVariableIsSet("MUMBLE_MODERN_AUTOMATION_OFFSCREEN")) {
 		setAttribute(Qt::WA_ShowWithoutActivating, true);
 		move(-32000, -32000);
 		show();
 		return;
 	}
+#endif
 
 	setWindowState(windowState() & ~Qt::WindowMinimized);
 	QTimer::singleShot(0, [this]() {

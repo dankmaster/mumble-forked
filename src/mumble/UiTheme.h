@@ -11,6 +11,9 @@
 
 #include <optional>
 
+class QPalette;
+class QWidget;
+
 enum class UiThemePreset {
 	MumbleDark,
 	MumbleLight,
@@ -57,8 +60,21 @@ struct UiThemeTokens {
 	QColor focusAccent;
 };
 
+struct UiThemeWindowChrome {
+	QColor caption;
+	QColor text;
+	QColor border;
+	bool dark = true;
+};
+
 std::optional< UiThemeTokens > activeUiThemeTokens();
 QColor uiThemeColorWithAlpha(const QColor &color, qreal alpha);
 QString uiThemeQssColor(const QColor &color);
+bool uiThemePaletteIsDark(const QPalette &palette);
+UiThemeWindowChrome uiThemeWindowChromeForPalette(const QPalette &palette);
+UiThemeWindowChrome uiThemeWindowChromeForActiveTheme(const QPalette &fallbackPalette);
+void applyUiThemeNativeTitleBar(QWidget *widget);
+void applyUiThemeNativeTitleBar(QWidget *widget, const UiThemeWindowChrome &chrome);
+void applyUiThemeNativeTitleBars();
 
 #endif // MUMBLE_MUMBLE_UITHEME_H_
