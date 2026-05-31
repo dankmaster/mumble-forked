@@ -8,6 +8,13 @@
 			"actor_user_id",
 			"emoji"
 		],
-		"rows": []
+		"rows": [
+			[
+				0,
+				1,
+				1,
+				"🔥"
+			]
+		]
 	}
 }

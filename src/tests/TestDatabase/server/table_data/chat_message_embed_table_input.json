@@ -16,6 +16,21 @@
 			"expires_at",
 			"error_code"
 		],
-		"rows": []
+		"rows": [
+			[
+				0,
+				1,
+				"embed-hash",
+				"https://example.com/image",
+				"Example image",
+				"Example description",
+				"Example",
+				1,
+				1,
+				1700000005,
+				1700003605,
+				""
+			]
+		]
 	}
 }

@@ -208,8 +208,11 @@ namespace server {
 		}
 
 		void ChatMessageAttachmentTable::migrate(unsigned int fromSchemaVersion, unsigned int toSchemaVersion) {
-			(void) fromSchemaVersion;
-			(void) toSchemaVersion;
+			if (fromSchemaVersion < INTRODUCED_IN_SCHEMA_VERSION) {
+				return;
+			}
+
+			::mdb::Table::migrate(fromSchemaVersion, toSchemaVersion);
 		}
 
 	} // namespace db

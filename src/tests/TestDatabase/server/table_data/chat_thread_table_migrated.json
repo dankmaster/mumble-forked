@@ -11,5 +11,28 @@
 			"updated_at"
 		],
 		"rows": []
+	},
+	"v12": {
+		"table_name": "chat_threads",
+		"column_names": [
+			"server_id",
+			"thread_id",
+			"thread_scope",
+			"scope_key",
+			"created_by_user_id",
+			"created_at",
+			"updated_at"
+		],
+		"rows": [
+			[
+				0,
+				1,
+				0,
+				"channel:0",
+				1,
+				1700000000,
+				1700000001
+			]
+		]
 	}
 }

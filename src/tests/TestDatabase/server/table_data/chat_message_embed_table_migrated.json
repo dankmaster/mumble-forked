@@ -16,5 +16,38 @@
 			"error_code"
 		],
 		"rows": []
+	},
+	"v16": {
+		"table_name": "chat_message_embeds",
+		"column_names": [
+			"server_id",
+			"message_id",
+			"url_hash",
+			"canonical_url",
+			"title",
+			"description",
+			"site_name",
+			"preview_asset_id",
+			"status",
+			"fetched_at",
+			"expires_at",
+			"error_code"
+		],
+		"rows": [
+			[
+				0,
+				1,
+				"embed-hash",
+				"https://example.com/image",
+				"Example image",
+				"Example description",
+				"Example",
+				1,
+				1,
+				1700000005,
+				1700003605,
+				""
+			]
+		]
 	}
 }

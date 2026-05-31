@@ -20,6 +20,25 @@
 			"created_at",
 			"last_accessed_at"
 		],
-		"rows": []
+		"rows": [
+			[
+				0,
+				1,
+				1,
+				null,
+				null,
+				"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+				"server-0/test/image.png",
+				"image/png",
+				1234,
+				1,
+				640,
+				480,
+				0,
+				1,
+				1700000003,
+				1700000004
+			]
+		]
 	}
 }

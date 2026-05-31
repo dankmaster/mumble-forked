@@ -10,6 +10,15 @@
 			"filename",
 			"inline_safe"
 		],
-		"rows": []
+		"rows": [
+			[
+				0,
+				1,
+				1,
+				0,
+				"image.png",
+				1
+			]
+		]
 	}
 }
