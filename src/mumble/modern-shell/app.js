@@ -77,6 +77,7 @@
 	let railActionIntent = null;
 	let railJoinPriorityUntil = 0;
 	let lastVoiceJoinRequest = { token: "", time: 0 };
+	let lastScreenShareActionRequest = { token: "", actionId: "", time: 0 };
 	let pendingVoiceJoin = null;
 	let pendingVoiceJoinTimer = 0;
 	let messageRenderGeneration = 0;
@@ -144,6 +145,7 @@
 	const railActionSuppressMs = 850;
 	const railJoinPriorityMs = 900;
 	const voiceJoinInputDedupeMs = 180;
+	const screenShareActionDedupeMs = 180;
 	const voiceJoinFeedbackMs = 3200;
 	const scopeLoadingFallbackMs = 2800;
 	const directMessageWindowViewportMarginPx = 10;
@@ -902,6 +904,31 @@
 			return false;
 		}
 		return true;
+	}
+
+	function requestScreenShareAction(scopeToken, actionId) {
+		const token = String(scopeToken || "");
+		const action = String(actionId || "");
+		if (!token || !action) {
+			return false;
+		}
+
+		const now = monotonicNow();
+		if (lastScreenShareActionRequest.token === token
+				&& lastScreenShareActionRequest.actionId === action
+				&& now - lastScreenShareActionRequest.time < screenShareActionDedupeMs) {
+			return false;
+		}
+
+		lastScreenShareActionRequest = { token: token, actionId: action, time: now };
+		return notifyBridge("invokeScopeAction", token, action);
+	}
+
+	function handleScreenShareActionActivation(scopeToken, actionId, event) {
+		stopRoomActionEvent(event);
+		markRailActionIntent(scopeToken);
+		requestScreenShareAction(scopeToken, actionId);
+		dismissCompactRailAfterAction();
 	}
 
 	function handleJoinButtonActivation(room, event) {
@@ -8650,15 +8677,19 @@
 			shareActionButton.disabled = screenShare.primaryEnabled === false;
 			shareActionButton.title = screenShare.primaryHint || screenShare.primaryLabel || "Screen share";
 			shareActionButton.addEventListener("pointerdown", function(event) {
-				markRailActionIntent(room.token);
-				event.stopPropagation();
+				if ((event.button !== undefined && event.button !== 0) || event.isPrimary === false) {
+					return;
+				}
+				handleScreenShareActionActivation(room.token, screenShare.primaryActionId, event);
+			}, true);
+			shareActionButton.addEventListener("mousedown", function(event) {
+				if (window.PointerEvent || (event.button !== undefined && event.button !== 0)) {
+					return;
+				}
+				handleScreenShareActionActivation(room.token, screenShare.primaryActionId, event);
 			}, true);
 			shareActionButton.addEventListener("click", function(event) {
-				markRailActionIntent(room.token);
-				event.preventDefault();
-				event.stopPropagation();
-				notifyBridge("invokeScopeAction", room.token, screenShare.primaryActionId);
-				dismissCompactRailAfterAction();
+				handleScreenShareActionActivation(room.token, screenShare.primaryActionId, event);
 			});
 			meta.appendChild(shareActionButton);
 		}
@@ -25617,7 +25648,7 @@
 			if (!scopeToken || !actionId || refs.screenShareButton.disabled) {
 				return;
 			}
-			notifyBridge("invokeScopeAction", scopeToken, actionId);
+			requestScreenShareAction(scopeToken, actionId);
 		});
 		refs.loadOlderButton.addEventListener("click", function() { notifyBridge("loadOlderHistory"); });
 		refs.markReadButton.addEventListener("click", function() { notifyBridge("markRead"); });

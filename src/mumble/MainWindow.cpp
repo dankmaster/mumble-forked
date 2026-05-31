@@ -24248,6 +24248,38 @@ bool MainWindow::handleModernShellScopeAction(const QString &scopeToken, const Q
 		return false;
 	}
 
+	if (normalizedActionID == QLatin1String("screenShareStart")
+		|| normalizedActionID == QLatin1String("screenShareStop")
+		|| normalizedActionID == QLatin1String("screenShareWatch")
+		|| normalizedActionID == QLatin1String("screenShareStopWatching")
+		|| normalizedActionID == QLatin1String("screenShareOpenWindow")) {
+		bool handled = false;
+		if (m_screenShareManager) {
+			const QString streamID = screenShareStreamForChannel(channel);
+			if (normalizedActionID == QLatin1String("screenShareStart")) {
+				m_screenShareManager->requestStartChannelShare(static_cast< unsigned int >(channel->iId));
+				handled = true;
+			} else if (!streamID.isEmpty()) {
+				if (normalizedActionID == QLatin1String("screenShareStop")) {
+					m_screenShareManager->requestStopShare(streamID);
+					handled = true;
+				} else if (normalizedActionID == QLatin1String("screenShareWatch")) {
+					m_screenShareManager->requestStartViewing(streamID);
+					handled = true;
+				} else if (normalizedActionID == QLatin1String("screenShareStopWatching")) {
+					m_screenShareManager->requestStopViewing(streamID);
+					handled = true;
+				} else {
+					handled = m_screenShareManager->focusOrReopenDetachedWindow(streamID);
+				}
+			}
+		}
+		if (handled) {
+			publishModernShellRoomStatePatch();
+		}
+		return handled;
+	}
+
 	if (normalizedActionID == QLatin1String("unlinkAll")) {
 		const bool handled = handleModernShellLegacyDialogAction(normalizedActionID, nullptr, channel);
 		if (handled) {

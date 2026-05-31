@@ -34,7 +34,8 @@ target_link_libraries(mumble-screen-helper
 		Qt6::Network
 )
 
-if(WIN32)
+if(WIN32 AND screen-helper-cppwinrt-capture)
+	target_compile_definitions(mumble-screen-helper PRIVATE MUMBLE_SCREENSHARE_ENABLE_CPPWINRT_CAPTURE=1)
 	target_link_libraries(mumble-screen-helper PRIVATE runtimeobject)
 endif()
 

@@ -24,11 +24,37 @@ void appendIf(QStringList *values, const bool condition, const QString &value) {
 	}
 }
 
+void appendCodecIf(QList< int > *values, const bool condition, const MumbleProto::ScreenShareCodec codec) {
+	const int value = static_cast< int >(codec);
+	if (condition && values && !values->contains(value)) {
+		values->append(value);
+	}
+}
+
 bool hasHardwareEncoder(const ScreenShareExternalProcess::RuntimeSupport &support) {
 	return support.h264NvencAvailable || support.h264VaapiAvailable || support.h264MfAvailable
 		   || support.h264QsvAvailable || support.av1NvencAvailable || support.av1VaapiAvailable
 		   || support.av1MfAvailable || support.av1QsvAvailable || support.gstNvD3D11H264EncoderAvailable
 		   || support.gstMfH264EncoderAvailable;
+}
+
+QList< int > executableCodecListForRuntime(const ScreenShareExternalProcess::RuntimeSupport &support,
+										   const bool browserRelayFallbackEnabled) {
+	QList< int > codecs;
+	appendCodecIf(&codecs,
+				  support.gstreamerLiveKitPublishAvailable || support.gstreamerLiveKitViewAvailable
+					  || support.h264NvencAvailable || support.h264VaapiAvailable || support.h264MfAvailable
+					  || support.h264QsvAvailable || support.libx264Available,
+				  MumbleProto::ScreenShareCodecH264);
+	appendCodecIf(&codecs,
+				  support.av1NvencAvailable || support.av1VaapiAvailable || support.av1MfAvailable
+					  || support.av1QsvAvailable || support.libSvtAv1Available,
+				  MumbleProto::ScreenShareCodecAV1);
+	appendCodecIf(&codecs, support.libVpxVp9Available, MumbleProto::ScreenShareCodecVP9);
+	appendCodecIf(&codecs,
+				  support.libVpxVp8Available || (browserRelayFallbackEnabled && support.browserWebRtcAvailable),
+				  MumbleProto::ScreenShareCodecVP8);
+	return Mumble::ScreenShare::sanitizeCodecList(codecs);
 }
 
 QStringList ingestProtocolsForRuntime(const ScreenShareExternalProcess::RuntimeSupport &support) {
@@ -67,7 +93,6 @@ bool pipeWireRuntimeAvailable(QString *libraryName) {
 
 ScreenShareMediaSupport::CapabilitySummary ScreenShareMediaSupport::probe() {
 	CapabilitySummary summary;
-	summary.supportedCodecs = Mumble::ScreenShare::defaultCodecPreferenceList();
 	summary.maxWidth        = Mumble::ScreenShare::DEFAULT_MAX_WIDTH;
 	summary.maxHeight       = Mumble::ScreenShare::DEFAULT_MAX_HEIGHT;
 	summary.maxFps          = Mumble::ScreenShare::DEFAULT_MAX_FPS;
@@ -89,6 +114,7 @@ ScreenShareMediaSupport::CapabilitySummary ScreenShareMediaSupport::probe() {
 	summary.gstreamerLiveKitViewAvailable    = runtimeSupport.gstreamerLiveKitViewAvailable;
 	summary.gstreamerVersion                 = runtimeSupport.gstreamerVersion;
 	summary.missingGStreamerElements         = runtimeSupport.missingGStreamerElements;
+	summary.supportedCodecs = executableCodecListForRuntime(runtimeSupport, browserRelayFallbackEnabled);
 
 #ifdef Q_OS_LINUX
 	QString libraryName;

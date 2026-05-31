@@ -19,6 +19,7 @@ if(client AND (WIN32 OR (UNIX AND NOT APPLE)))
 	set(SCREEN_HELPER_DEFAULT ON)
 endif()
 option(screen-helper "Build the external screen-share helper." ${SCREEN_HELPER_DEFAULT})
+option(screen-helper-cppwinrt-capture "Probe Windows Graphics Capture through C++/WinRT in the screen-share helper." OFF)
 
 option(bundled-json "Build the included version of nlohmann_json instead of looking for one on the system" ON)
 option(bundled-spdlog "Use the bundled spdlog version instead of looking for one on the system" ON)

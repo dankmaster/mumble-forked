@@ -11,7 +11,7 @@
 #if defined(Q_OS_WIN)
 #	include "win.h"
 #	include <d3d11.h>
-#	if defined(__has_include)
+#	if defined(MUMBLE_SCREENSHARE_ENABLE_CPPWINRT_CAPTURE) && defined(__has_include)
 #		if __has_include(<winrt/Windows.Foundation.Metadata.h>) && __has_include(<winrt/Windows.Graphics.Capture.h>)
 #			define MUMBLE_SCREENSHARE_HAS_CPPWINRT_CAPTURE 1
 #		endif
@@ -122,7 +122,8 @@ ScreenShareWindowsNativeCapture::Capability ScreenShareWindowsNativeCapture::pro
 #	if defined(MUMBLE_SCREENSHARE_HAS_CPPWINRT_CAPTURE)
 	probeWindowsGraphicsCapture(&capability);
 #	else
-	capability.warnings.append(QStringLiteral("C++/WinRT Windows Graphics Capture headers were not available at build time."));
+	capability.warnings.append(
+		QStringLiteral("C++/WinRT Windows Graphics Capture probing is disabled or unavailable in this build."));
 #	endif
 
 	capability.inProcessCapturePipelinePlanned =

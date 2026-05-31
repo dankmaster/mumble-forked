@@ -49,8 +49,8 @@ void TestScreenShare::usesVp8ForBrowserWebRtcRuntime() {
 			 (QList< int >{ codecValue(MumbleProto::ScreenShareCodecVP8) }));
 	QCOMPARE(
 		Mumble::ScreenShare::webRtcRelayCodecPreferenceList(),
-		(QList< int >{ codecValue(MumbleProto::ScreenShareCodecVP8), codecValue(MumbleProto::ScreenShareCodecH264),
-					   codecValue(MumbleProto::ScreenShareCodecAV1), codecValue(MumbleProto::ScreenShareCodecVP9) }));
+		(QList< int >{ codecValue(MumbleProto::ScreenShareCodecH264), codecValue(MumbleProto::ScreenShareCodecAV1),
+					   codecValue(MumbleProto::ScreenShareCodecVP9), codecValue(MumbleProto::ScreenShareCodecVP8) }));
 }
 
 void TestScreenShare::negotiatesWebRtcRelayWithLegacyFallback() {
@@ -59,7 +59,10 @@ void TestScreenShare::negotiatesWebRtcRelayWithLegacyFallback() {
 	QCOMPARE(
 		Mumble::ScreenShare::selectPreferredCodec(webRtcPreferences, { codecValue(MumbleProto::ScreenShareCodecVP8),
 																	   codecValue(MumbleProto::ScreenShareCodecH264) }),
-		MumbleProto::ScreenShareCodecVP8);
+		MumbleProto::ScreenShareCodecH264);
+	QCOMPARE(Mumble::ScreenShare::selectPreferredCodec(webRtcPreferences,
+													   { codecValue(MumbleProto::ScreenShareCodecVP8) }),
+			 MumbleProto::ScreenShareCodecVP8);
 	QCOMPARE(
 		Mumble::ScreenShare::selectPreferredCodec(webRtcPreferences, { codecValue(MumbleProto::ScreenShareCodecH264),
 																	   codecValue(MumbleProto::ScreenShareCodecAV1) }),
@@ -74,8 +77,8 @@ void TestScreenShare::recommendsVp8Bitrate() {
 		MumbleProto::ScreenShareCodecVP8, Mumble::ScreenShare::DEFAULT_MAX_WIDTH,
 		Mumble::ScreenShare::DEFAULT_MAX_HEIGHT, Mumble::ScreenShare::DEFAULT_MAX_FPS);
 
-	QCOMPARE(h264Bitrate, 3000U);
-	QCOMPARE(vp8Bitrate, 3150U);
+	QCOMPARE(h264Bitrate, 4000U);
+	QCOMPARE(vp8Bitrate, 4200U);
 }
 
 QTEST_MAIN(TestScreenShare)

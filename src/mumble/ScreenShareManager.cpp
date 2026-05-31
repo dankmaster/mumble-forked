@@ -245,6 +245,9 @@ QString ScreenShareManager::localShareUnavailableReason() const {
 				   ? tr("The bundled screen-share runtime is missing WebRTC publishing support.")
 				   : tr("The bundled screen-share runtime does not support this server's relay transport.");
 	}
+	if (!supportsInAppRelayTransport(relayTransport) && capabilities.supportedCodecs.isEmpty()) {
+		return tr("The bundled screen-share runtime does not advertise an executable video codec.");
+	}
 
 	return QString();
 }
@@ -385,11 +388,20 @@ void ScreenShareManager::requestStartChannelShare(unsigned int channelID) {
 	if (channelID != 0) {
 		msg.set_scope_id(channelID);
 	}
-	QList< int > availableCodecs = capabilities.supportedCodecs.isEmpty()
-									   ? Mumble::ScreenShare::defaultCodecPreferenceList()
-									   : capabilities.supportedCodecs;
-	if (isWebRtcRelayTransport(relayTransport)) {
+	QList< int > availableCodecs = capabilities.supportedCodecs;
+	const bool useBrowserWebRtcRuntime =
+		isWebRtcRelayTransport(relayTransport) && supportsInAppRelayTransport(relayTransport)
+		&& (Global::get().s.bScreenSharePreferInAppRelay
+			|| !helperRuntimeSupportsPublishing(capabilities, relayTransport) || availableCodecs.isEmpty());
+	if (useBrowserWebRtcRuntime) {
 		availableCodecs = Mumble::ScreenShare::browserWebRtcCodecPreferenceList();
+	}
+	if (availableCodecs.isEmpty()) {
+		if (Global::get().l) {
+			Global::get().l->log(Log::Warning,
+								 tr("Unable to start screen sharing: no executable video codec is available."));
+		}
+		return;
 	}
 	const QList< int > preferredCodecs = Global::get().qlPreferredScreenShareCodecs.isEmpty()
 											 ? availableCodecs
@@ -642,8 +654,7 @@ bool ScreenShareManager::canPublishSession(const ScreenShareSession &session) co
 	if (!helperRuntimeSupportsPublishing(capabilities, session.relayTransport)) {
 		return false;
 	}
-	return capabilities.supportedCodecs.isEmpty()
-		   || capabilities.supportedCodecs.contains(static_cast< int >(session.codec));
+	return capabilities.supportedCodecs.contains(static_cast< int >(session.codec));
 }
 
 bool ScreenShareManager::canViewSession(const ScreenShareSession &session) const {
@@ -685,8 +696,7 @@ bool ScreenShareManager::canViewSession(const ScreenShareSession &session) const
 	if (!helperRuntimeSupportsViewing(capabilities, session.relayTransport)) {
 		return false;
 	}
-	if (!capabilities.supportedCodecs.isEmpty()
-		&& !capabilities.supportedCodecs.contains(static_cast< int >(session.codec))) {
+	if (!capabilities.supportedCodecs.contains(static_cast< int >(session.codec))) {
 		return false;
 	}
 

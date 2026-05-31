@@ -26,6 +26,7 @@
 
 namespace {
 constexpr int HELPER_CONNECT_TIMEOUT_MSEC = 1000;
+constexpr int HELPER_REQUEST_TIMEOUT_MSEC = 45000;
 constexpr int HELPER_START_TIMEOUT_MSEC   = 20000;
 
 QString helperSocketBaseName() {
@@ -44,10 +45,17 @@ QString helperSocketBaseName() {
 		return Mumble::ScreenShare::IPC::socketBaseName();
 	}
 
-	const QByteArray profileHash =
-		QCryptographicHash::hash(QDir::toNativeSeparators(basePath).toUtf8(), QCryptographicHash::Sha256)
-			.toHex()
-			.left(16);
+	MumbleApplication *app = MumbleApplication::instance();
+	QString appRoot        = app ? app->applicationVersionRootPath() : QCoreApplication::applicationDirPath();
+	if (appRoot.trimmed().isEmpty()) {
+		appRoot = QCoreApplication::applicationDirPath();
+	}
+
+	const QString socketIdentity =
+		QDir::toNativeSeparators(basePath) + QLatin1Char('\n') + QDir::toNativeSeparators(appRoot);
+	const QByteArray profileHash = QCryptographicHash::hash(socketIdentity.toUtf8(), QCryptographicHash::Sha256)
+									   .toHex()
+									   .left(16);
 	return Mumble::ScreenShare::IPC::sanitizeSocketBaseName(
 		QStringLiteral("%1-%2").arg(Mumble::ScreenShare::IPC::socketBaseName(), QString::fromLatin1(profileHash)));
 }
@@ -122,6 +130,20 @@ QString commandToken(const Mumble::ScreenShare::IPC::Command command) {
 	}
 
 	return QStringLiteral("unknown");
+}
+
+int helperRequestTimeoutMsec(const Mumble::ScreenShare::IPC::Command command) {
+	switch (command) {
+		case Mumble::ScreenShare::IPC::Command::StartPublish:
+		case Mumble::ScreenShare::IPC::Command::StartView:
+			return HELPER_REQUEST_TIMEOUT_MSEC;
+		case Mumble::ScreenShare::IPC::Command::QueryCapabilities:
+		case Mumble::ScreenShare::IPC::Command::StopPublish:
+		case Mumble::ScreenShare::IPC::Command::StopView:
+			return HELPER_CONNECT_TIMEOUT_MSEC;
+	}
+
+	return HELPER_CONNECT_TIMEOUT_MSEC;
 }
 
 QString boolToken(const bool value) {
@@ -265,9 +287,6 @@ ScreenShareHelperClient::CapabilitySnapshot
 	snapshot.drmSystems               = stringListFromJson(payload.value(QStringLiteral("drm_systems")));
 	snapshot.queueBudgetFrames = limitFromPayload(payload, "queue_budget_frames", Mumble::ScreenShare::HARD_MAX_FPS);
 
-	if (snapshot.supportedCodecs.isEmpty()) {
-		snapshot.supportedCodecs = Mumble::ScreenShare::defaultCodecPreferenceList();
-	}
 	if (snapshot.captureBackends.isEmpty() && !snapshot.captureBackend.isEmpty()) {
 		snapshot.captureBackends.append(snapshot.captureBackend);
 	}
@@ -346,6 +365,7 @@ QJsonObject ScreenShareHelperClient::sendRequest(Mumble::ScreenShare::IPC::Comma
 	const QByteArray requestData =
 		QJsonDocument(Mumble::ScreenShare::IPC::makeRequest(command, payload)).toJson(QJsonDocument::Compact)
 		+ QByteArray(1, '\n');
+	const int requestTimeoutMsec = helperRequestTimeoutMsec(command);
 	if (socket.write(requestData) < 0) {
 		if (errorMessage) {
 			*errorMessage =
@@ -353,7 +373,7 @@ QJsonObject ScreenShareHelperClient::sendRequest(Mumble::ScreenShare::IPC::Comma
 		}
 		return {};
 	}
-	if (!socket.waitForBytesWritten(HELPER_CONNECT_TIMEOUT_MSEC)) {
+	if (!socket.waitForBytesWritten(requestTimeoutMsec)) {
 		if (errorMessage) {
 			*errorMessage =
 				socketErrorMessage(socket, QStringLiteral("Timed out sending the screen-share helper request."));
@@ -363,7 +383,7 @@ QJsonObject ScreenShareHelperClient::sendRequest(Mumble::ScreenShare::IPC::Comma
 
 	QByteArray replyBytes;
 	while (!replyBytes.contains('\n')) {
-		if (!socket.waitForReadyRead(HELPER_CONNECT_TIMEOUT_MSEC)) {
+		if (!socket.waitForReadyRead(requestTimeoutMsec)) {
 			if (socket.state() == QLocalSocket::UnconnectedState) {
 				replyBytes.append(socket.readAll());
 				break;
@@ -464,9 +484,23 @@ const ScreenShareHelperClient::CapabilitySnapshot &ScreenShareHelperClient::capa
 }
 
 bool ScreenShareHelperClient::startPublish(const ScreenShareSession &session, QString *errorMessage) {
+	QString localError;
 	const QJsonObject reply = sendRequest(Mumble::ScreenShare::IPC::Command::StartPublish, payloadFromSession(session),
-										  m_capabilities.helperExecutable, errorMessage, true);
-	return !reply.isEmpty() && Mumble::ScreenShare::IPC::replySucceeded(reply, errorMessage);
+										  m_capabilities.helperExecutable, &localError, true);
+	const bool started = !reply.isEmpty() && Mumble::ScreenShare::IPC::replySucceeded(reply, &localError);
+	if (!started) {
+		if (errorMessage) {
+			*errorMessage = localError;
+		}
+		qWarning().noquote() << QStringLiteral("ScreenShareHelperClient: start-publish stream=%1 failed: %2")
+									.arg(session.streamID,
+										 localError.isEmpty() ? QStringLiteral("unknown error") : localError);
+		return false;
+	}
+
+	qInfo().noquote()
+		<< QStringLiteral("ScreenShareHelperClient: start-publish stream=%1 accepted").arg(session.streamID);
+	return true;
 }
 
 bool ScreenShareHelperClient::stopPublish(const QString &streamID, QString *errorMessage) {
@@ -478,9 +512,23 @@ bool ScreenShareHelperClient::stopPublish(const QString &streamID, QString *erro
 }
 
 bool ScreenShareHelperClient::startView(const ScreenShareSession &session, QString *errorMessage) {
+	QString localError;
 	const QJsonObject reply = sendRequest(Mumble::ScreenShare::IPC::Command::StartView, payloadFromSession(session),
-										  m_capabilities.helperExecutable, errorMessage, true);
-	return !reply.isEmpty() && Mumble::ScreenShare::IPC::replySucceeded(reply, errorMessage);
+										  m_capabilities.helperExecutable, &localError, true);
+	const bool started = !reply.isEmpty() && Mumble::ScreenShare::IPC::replySucceeded(reply, &localError);
+	if (!started) {
+		if (errorMessage) {
+			*errorMessage = localError;
+		}
+		qWarning().noquote() << QStringLiteral("ScreenShareHelperClient: start-view stream=%1 failed: %2")
+									.arg(session.streamID,
+										 localError.isEmpty() ? QStringLiteral("unknown error") : localError);
+		return false;
+	}
+
+	qInfo().noquote()
+		<< QStringLiteral("ScreenShareHelperClient: start-view stream=%1 accepted").arg(session.streamID);
+	return true;
 }
 
 bool ScreenShareHelperClient::stopView(const QString &streamID, QString *errorMessage) {

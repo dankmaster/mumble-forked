@@ -416,8 +416,16 @@ QJsonObject ScreenShareHelperServer::runSelfTest() {
 }
 
 QJsonObject ScreenShareHelperServer::handleStartPublish(const QJsonObject &payload) {
+	const QString requestedStreamID = streamIDFromPayload(payload);
+	const QString requestedCodec    = codecTokenFromPayload(payload);
+	qInfo().noquote() << QStringLiteral("ScreenShareHelper: received start-publish stream=%1 codec=%2")
+							 .arg(requestedStreamID.isEmpty() ? QStringLiteral("-") : requestedStreamID,
+								  requestedCodec.isEmpty() ? QStringLiteral("-") : requestedCodec);
 	const ScreenShareSessionPlanner::Plan plan = ScreenShareSessionPlanner::planPublish(payload, m_capabilities);
 	if (!plan.valid) {
+		qWarning().noquote() << QStringLiteral("ScreenShareHelper: rejected start-publish stream=%1: %2")
+									.arg(requestedStreamID.isEmpty() ? QStringLiteral("-") : requestedStreamID,
+										 plan.errorMessage);
 		return Mumble::ScreenShare::IPC::makeErrorReply(plan.errorMessage);
 	}
 	logSessionPlanSummary(plan.payload, QStringLiteral("publish"), QStringLiteral("planned"));
@@ -481,8 +489,16 @@ QJsonObject ScreenShareHelperServer::handleStopPublish(const QJsonObject &payloa
 }
 
 QJsonObject ScreenShareHelperServer::handleStartView(const QJsonObject &payload) {
+	const QString requestedStreamID = streamIDFromPayload(payload);
+	const QString requestedCodec    = codecTokenFromPayload(payload);
+	qInfo().noquote() << QStringLiteral("ScreenShareHelper: received start-view stream=%1 codec=%2")
+							 .arg(requestedStreamID.isEmpty() ? QStringLiteral("-") : requestedStreamID,
+								  requestedCodec.isEmpty() ? QStringLiteral("-") : requestedCodec);
 	const ScreenShareSessionPlanner::Plan plan = ScreenShareSessionPlanner::planView(payload, m_capabilities);
 	if (!plan.valid) {
+		qWarning().noquote() << QStringLiteral("ScreenShareHelper: rejected start-view stream=%1: %2")
+									.arg(requestedStreamID.isEmpty() ? QStringLiteral("-") : requestedStreamID,
+										 plan.errorMessage);
 		return Mumble::ScreenShare::IPC::makeErrorReply(plan.errorMessage);
 	}
 	logSessionPlanSummary(plan.payload, QStringLiteral("view"), QStringLiteral("planned"));
