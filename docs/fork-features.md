@@ -40,6 +40,9 @@ Tracked public screenshot assets:
 
 - [`../screenshots/modern-client-rich-chat.png`](../screenshots/modern-client-rich-chat.png)
 - [`../screenshots/modern-rich-card-youtube.png`](../screenshots/modern-rich-card-youtube.png)
+- [`../screenshots/modern-direct-messages.png`](../screenshots/modern-direct-messages.png)
+- [`../screenshots/modern-screen-sharing-settings.png`](../screenshots/modern-screen-sharing-settings.png)
+- [`../screenshots/modern-stonks-overview.png`](../screenshots/modern-stonks-overview.png)
 - [`../screenshots/Mumble.png`](../screenshots/Mumble.png)
 
 ## Persistent Chat
@@ -273,7 +276,9 @@ Current build/release features:
 - manual `mumble-forked MSI Release` workflow for a stable unsigned convenience MSI
 - generated `changelog.md`
 - generated `mumble-forked-update.json`
-- in-app update popup support for fork release manifests
+- in-app update prompt/download/install handoff for fork release manifests
+- one-shot update resume snapshot for reopening the client on the same server,
+  voice room, chat view, and saved window layout where possible
 
 See [`windows-builds.md`](windows-builds.md).
 
@@ -291,6 +296,8 @@ Current controls:
 - `MUMBLE_FORK_UPDATE_MANIFEST_URL` for pointing at a generated update manifest
 - `MUMBLE_FORK_FORCE_UPDATE_NOTIFICATION` for local preview of update popups
 - automatic startup update checks skip the public `mumble-forked` manifest for local build-number-0 clients unless an override is set
+- `Connect to the last server on startup` is a client-side network setting; update
+  restarts also use a one-shot client resume snapshot when the user accepts the update
 
 ## Compatibility Notes
 

@@ -18,6 +18,7 @@ namespace ChatFeatures {
 			case MumbleProto::ChatFeatureEmbeds:
 			case MumbleProto::ChatFeatureHistoryGrants:
 			case MumbleProto::ChatFeatureTextChannels:
+			case MumbleProto::ChatFeatureDirectMessages:
 				return true;
 			default:
 				return false;
@@ -33,7 +34,8 @@ namespace ChatFeatures {
 				 static_cast< int >(MumbleProto::ChatFeatureAttachments),
 				 static_cast< int >(MumbleProto::ChatFeatureEmbeds),
 				 static_cast< int >(MumbleProto::ChatFeatureHistoryGrants),
-				 static_cast< int >(MumbleProto::ChatFeatureTextChannels) };
+				 static_cast< int >(MumbleProto::ChatFeatureTextChannels),
+				 static_cast< int >(MumbleProto::ChatFeatureDirectMessages) };
 	}
 
 	QList< int > sanitizeFeatureList(const QList< int > &features) {
@@ -63,7 +65,8 @@ namespace ChatFeatures {
 			return contains(features, feature);
 		}
 
-		return feature != MumbleProto::ChatFeatureHistoryGrants;
+		return feature != MumbleProto::ChatFeatureHistoryGrants
+			   && feature != MumbleProto::ChatFeatureDirectMessages;
 	}
 
 	void addSupportedFeatures(MumbleProto::Version &version) {
@@ -88,7 +91,10 @@ namespace ChatFeatures {
 
 		features = sanitizeFeatureList(features);
 		if (features.isEmpty() && version.has_supports_persistent_chat() && version.supports_persistent_chat()) {
-			return supportedFeatureList();
+			QList< int > legacyFeatures = supportedFeatureList();
+			legacyFeatures.removeAll(static_cast< int >(MumbleProto::ChatFeatureHistoryGrants));
+			legacyFeatures.removeAll(static_cast< int >(MumbleProto::ChatFeatureDirectMessages));
+			return legacyFeatures;
 		}
 
 		return features;

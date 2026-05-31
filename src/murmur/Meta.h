@@ -17,6 +17,7 @@
 #	include "win.h"
 #endif
 
+#include <QtCore/QByteArray>
 #include <QtCore/QDir>
 #include <QtCore/QList>
 #include <QtCore/QRegularExpression>
@@ -95,6 +96,9 @@ public:
 	QString qsIceSecretRead, qsIceSecretWrite;
 
 	QString qsRegName;
+	QString qsServerDisplayName;
+	QString qsServerMonogram;
+	QByteArray qbaServerImage;
 	QString qsRegPassword;
 	QString qsRegHost;
 	QString qsRegLocation;

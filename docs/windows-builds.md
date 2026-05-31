@@ -61,8 +61,8 @@ There is also a small human-facing installer workflow for this fork:
 2. Open `Actions` in the fork.
 3. Select `mumble-forked MSI Release`.
 4. Enter a short `update_announcement`. This is the user-facing sentence shown
-   in the in-app update popup, so write it before publishing instead of relying
-   on the generic build metadata.
+   in the in-app update notification, so write it before publishing instead of
+   relying on the generic build metadata.
 5. Optionally enter `release_notes` for extra hand-written detail. The workflow
    also generates a changelog automatically from the previous published
    `mumble-forked` commit to the new `master` commit.
@@ -83,10 +83,18 @@ updates.
 
 The workflow writes the announcement, optional release notes, generated
 changelog, current commit, previous published commit, installer URL, and SHA256
-into `mumble-forked-update.json`. It also uploads `changelog.md` beside the MSI
-and prints an update-popup preview during the run. Local development builds use
-build number `0`, so automatic startup checks skip the public updater by
-default. To preview a draft manifest locally, set
+into `mumble-forked-update.json`. Modern clients use that checksum for the
+in-app update flow: startup checks show an update toast, the Update action
+downloads and verifies the MSI in the background, and the ready toast launches
+Windows Installer when the user restarts to update. Mumble closes before the
+MSI runs, hands the transition to `mumble-updater.exe`, and starts itself again
+after a successful passive install. Before handing off to the updater, the
+client writes a one-shot resume snapshot so the reopened client can return to
+the same server, voice room, chat view, and saved window layout where possible.
+It also uploads `changelog.md` beside the
+MSI and prints an update-notification preview during the run. Local development
+builds use build number `0`, so automatic startup checks skip the public updater
+by default. To preview a draft manifest locally, set
 `MUMBLE_FORK_UPDATE_MANIFEST_URL` to a local
 `file:///.../mumble-forked-update.json` URL and set
 `MUMBLE_FORK_FORCE_UPDATE_NOTIFICATION=1` before launching the dev client.

@@ -30,7 +30,9 @@
 #include "murmur/database/DBChatHistoryGrant.h"
 #include "murmur/database/DBChatMessage.h"
 #include "murmur/database/DBChatReadState.h"
+#include "murmur/database/DBStonksFeedPreferences.h"
 #include "murmur/database/DBStonksFollow.h"
+#include "murmur/database/DBStonksPinnedTicker.h"
 #include "murmur/database/DBStonksScore.h"
 #include "murmur/database/DBStonksSnapshot.h"
 #include "murmur/database/DBStonksSnapshotPosition.h"
@@ -46,6 +48,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <utility>
 #include <unordered_map>
 #include <vector>
 
@@ -59,9 +62,11 @@
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
 #include <QtCore/QLocale>
+#include <QtCore/QObject>
 #include <QtCore/QRandomGenerator>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QRegularExpressionMatchIterator>
+#include <QtCore/QRect>
 #include <QtCore/QSet>
 #include <QtCore/QStack>
 #include <QtCore/QStringList>
@@ -90,6 +95,9 @@ constexpr std::size_t MAX_CHAT_HISTORY_RESPONSE_BYTES      = 2 * 1024 * 1024;
 constexpr int MAX_STONKS_LEDGER_POSITIONS                  = 64;
 constexpr unsigned int MAX_STONKS_LEDGER_SNAPSHOTS         = 50;
 constexpr qint64 FEEDBACK_REPORT_RATE_LIMIT_MS             = 5 * 60 * 1000;
+constexpr int SERVER_IDENTITY_IMAGE_SIZE                   = 256;
+constexpr qint64 SERVER_IDENTITY_IMAGE_MAX_INPUT_BYTES     = 4 * 1024 * 1024;
+constexpr qint64 SERVER_IDENTITY_IMAGE_MAX_STORED_BYTES    = 512 * 1024;
 
 std::size_t serializedChatHistoryResponseBytes(const MumbleProto::ChatHistoryResponse &response) {
 #if GOOGLE_PROTOBUF_VERSION >= 3004000
@@ -309,6 +317,68 @@ std::optional< std::string > connectedUserNameForPersistentID(const QHash< unsig
 	return std::nullopt;
 }
 
+std::string privateChatScopeKey(unsigned int firstUserID, unsigned int secondUserID) {
+	if (firstUserID == secondUserID) {
+		return {};
+	}
+
+	const unsigned int lowerUserID = std::min(firstUserID, secondUserID);
+	const unsigned int upperUserID = std::max(firstUserID, secondUserID);
+	return "private:" + std::to_string(lowerUserID) + ":" + std::to_string(upperUserID);
+}
+
+std::optional< std::pair< unsigned int, unsigned int > > privateChatParticipantsFromScopeKey(
+	const std::string &scopeKey) {
+	const QString key = QString::fromStdString(scopeKey);
+	if (!key.startsWith(QStringLiteral("private:"))) {
+		return std::nullopt;
+	}
+
+	const QStringList parts = key.mid(QStringLiteral("private:").size()).split(QLatin1Char(':'));
+	if (parts.size() != 2) {
+		return std::nullopt;
+	}
+
+	bool firstOK              = false;
+	bool secondOK             = false;
+	const unsigned int first  = parts.at(0).toUInt(&firstOK);
+	const unsigned int second = parts.at(1).toUInt(&secondOK);
+	if (!firstOK || !secondOK || first == second) {
+		return std::nullopt;
+	}
+
+	return std::make_pair(std::min(first, second), std::max(first, second));
+}
+
+std::optional< unsigned int > privateChatPeerIDForViewer(const std::string &scopeKey, unsigned int viewerUserID) {
+	const std::optional< std::pair< unsigned int, unsigned int > > participants =
+		privateChatParticipantsFromScopeKey(scopeKey);
+	if (!participants) {
+		return std::nullopt;
+	}
+
+	if (participants->first == viewerUserID) {
+		return participants->second;
+	}
+	if (participants->second == viewerUserID) {
+		return participants->first;
+	}
+
+	return std::nullopt;
+}
+
+QSet< ServerUser * > connectedPrivateChatParticipants(const QHash< unsigned int, ServerUser * > &connectedUsers,
+													  unsigned int firstUserID, unsigned int secondUserID) {
+	QSet< ServerUser * > recipients;
+	for (ServerUser *currentUser : connectedUsers) {
+		const std::optional< unsigned int > currentUserID = persistedUserID(currentUser);
+		if (currentUserID && (*currentUserID == firstUserID || *currentUserID == secondUserID)) {
+			recipients.insert(currentUser);
+		}
+	}
+	return recipients;
+}
+
 std::string chatScopeKey(MumbleProto::ChatScope scope, unsigned int scopeID) {
 	switch (scope) {
 		case MumbleProto::Channel:
@@ -319,6 +389,8 @@ std::string chatScopeKey(MumbleProto::ChatScope scope, unsigned int scopeID) {
 			return {};
 		case MumbleProto::TextChannel:
 			return "text:" + std::to_string(scopeID);
+		case MumbleProto::Private:
+			return {};
 	}
 
 	return {};
@@ -413,6 +485,8 @@ std::optional< msdb::ChatThreadScope > dbScopeFromProto(MumbleProto::ChatScope s
 			return msdb::ChatThreadScope::ServerGlobal;
 		case MumbleProto::TextChannel:
 			return msdb::ChatThreadScope::TextChannel;
+		case MumbleProto::Private:
+			return msdb::ChatThreadScope::Private;
 		case MumbleProto::Aggregate:
 			return std::nullopt;
 	}
@@ -539,6 +613,10 @@ bool clientSupportsChatFeature(const ServerUser *user, const MumbleProto::ChatFe
 
 	if (!user->qlSupportedChatFeatures.isEmpty()) {
 		return Mumble::ChatFeatures::contains(user->qlSupportedChatFeatures, feature);
+	}
+
+	if (feature == MumbleProto::ChatFeatureHistoryGrants || feature == MumbleProto::ChatFeatureDirectMessages) {
+		return false;
 	}
 
 	return user->bSupportsPersistentChat;
@@ -1293,6 +1371,48 @@ std::optional< SanitizedChatImage > sanitizeChatImageBytes(const QByteArray &byt
 	return result;
 }
 
+std::optional< QByteArray > sanitizeServerIdentityImageBytes(const QByteArray &bytes, QString *error = nullptr) {
+	if (bytes.isEmpty()) {
+		return QByteArray();
+	}
+	if (bytes.size() > SERVER_IDENTITY_IMAGE_MAX_INPUT_BYTES) {
+		if (error) {
+			*error = QObject::tr("Choose a server image smaller than 4 MB.");
+		}
+		return std::nullopt;
+	}
+
+	const QImage image = decodeChatImage(bytes);
+	if (image.isNull()) {
+		if (error) {
+			*error = QObject::tr("Choose a readable image file supported by this Mumble build.");
+		}
+		return std::nullopt;
+	}
+
+	const int side = qMin(image.width(), image.height());
+	if (side <= 0) {
+		if (error) {
+			*error = QObject::tr("Choose a readable server image.");
+		}
+		return std::nullopt;
+	}
+
+	QImage normalized = image.convertToFormat(QImage::Format_ARGB32);
+	normalized        = normalized.copy(QRect((normalized.width() - side) / 2, (normalized.height() - side) / 2, side, side))
+					 .scaled(SERVER_IDENTITY_IMAGE_SIZE, SERVER_IDENTITY_IMAGE_SIZE, Qt::KeepAspectRatioByExpanding,
+							 Qt::SmoothTransformation);
+	const QByteArray encoded = encodeChatImage(normalized, "PNG");
+	if (encoded.isEmpty() || encoded.size() > SERVER_IDENTITY_IMAGE_MAX_STORED_BYTES) {
+		if (error) {
+			*error = QObject::tr("The server image could not be stored safely.");
+		}
+		return std::nullopt;
+	}
+
+	return encoded;
+}
+
 bool isBlockedPreviewAddress(const QHostAddress &address) {
 	if (address.isNull() || address.isLoopback() || address.isBroadcast() || address.isMulticast()) {
 		return true;
@@ -1602,6 +1722,7 @@ MumbleProto::TextMessage legacyTextMessageFromPersistent(const MumbleProto::Chat
 			break;
 		case MumbleProto::Aggregate:
 		case MumbleProto::TextChannel:
+		case MumbleProto::Private:
 			break;
 	}
 
@@ -1642,10 +1763,6 @@ struct StonksLeaderboardEntry {
 	unsigned int userID = 0;
 	QString userName;
 	double score = 0.0;
-	double startValue = 0.0;
-	double endValue = 0.0;
-	std::chrono::system_clock::time_point startSnapshotAt = {};
-	std::chrono::system_clock::time_point endSnapshotAt = {};
 };
 
 bool higherStonksScore(const StonksLeaderboardEntry &lhs, const StonksLeaderboardEntry &rhs) {
@@ -1660,7 +1777,7 @@ QString stonksHelpText() {
 		"Stonks commands\n"
 		"`rklb` or `quote rklb` - latest quote card\n"
 		"`score 30d +12.3` - publish a manual score\n"
-		"`leaderboard 30d` - compare scores\n"
+		"`leaderboard 30d` - compare PnL\n"
 		"`follow <user>` / `unfollow <user>`\n"
 		"`following` / `me`");
 }
@@ -1764,15 +1881,17 @@ MumbleProto::StonksSnapshot protoStonksSnapshotFromDB(
 }
 
 MumbleProto::StonksPopularTicker protoStonksPopularTickerFromSummary(
-	const Mumble::Stonks::PopularTickerSummary &ticker) {
+	const Mumble::Stonks::PopularTickerSummary &ticker, bool includePositionTotals) {
 	MumbleProto::StonksPopularTicker protoTicker;
 	protoTicker.set_symbol(u8(ticker.symbol));
 	if (!ticker.displayName.trimmed().isEmpty()) {
 		protoTicker.set_display_name(u8(ticker.displayName.trimmed()));
 	}
 	protoTicker.set_holder_count(ticker.holderCount);
-	protoTicker.set_total_quantity(ticker.totalQuantity);
-	protoTicker.set_total_market_value(ticker.totalMarketValue);
+	if (includePositionTotals) {
+		protoTicker.set_total_quantity(ticker.totalQuantity);
+		protoTicker.set_total_market_value(ticker.totalMarketValue);
+	}
 	if (!ticker.currency.trimmed().isEmpty()) {
 		protoTicker.set_currency(u8(ticker.currency.trimmed().toUpper()));
 	}
@@ -1792,6 +1911,46 @@ MumbleProto::StonksPopularTicker protoStonksPopularTickerFromSummary(
 		protoTicker.set_latest_updated_at(static_cast< uint64_t >(ticker.latestUpdatedAt));
 	}
 	return protoTicker;
+}
+
+MumbleProto::StonksPinnedTicker protoStonksPinnedTickerFromDB(const ::msdb::DBStonksPinnedTicker &ticker) {
+	MumbleProto::StonksPinnedTicker protoTicker;
+	protoTicker.set_symbol(ticker.symbol);
+	if (!ticker.displayName.empty()) {
+		protoTicker.set_display_name(ticker.displayName);
+	}
+	if (!ticker.providerID.empty()) {
+		protoTicker.set_provider_id(ticker.providerID);
+	}
+	if (!ticker.providerSymbol.empty()) {
+		protoTicker.set_provider_symbol(ticker.providerSymbol);
+	}
+	if (!ticker.exchange.empty()) {
+		protoTicker.set_exchange(ticker.exchange);
+	}
+	if (!ticker.quoteSourceURL.empty()) {
+		protoTicker.set_quote_source_url(ticker.quoteSourceURL);
+	}
+	protoTicker.set_display_order(ticker.displayOrder);
+	if (ticker.createdAt != std::chrono::system_clock::time_point()) {
+		protoTicker.set_created_at(::msdb::toEpochSeconds(ticker.createdAt));
+	}
+	if (ticker.updatedAt != std::chrono::system_clock::time_point()) {
+		protoTicker.set_updated_at(::msdb::toEpochSeconds(ticker.updatedAt));
+	}
+	return protoTicker;
+}
+
+MumbleProto::StonksFeedPreferences protoStonksFeedPreferencesFromDB(
+	const ::msdb::DBStonksFeedPreferences &preferences) {
+	MumbleProto::StonksFeedPreferences protoPreferences;
+	protoPreferences.set_show_mine(preferences.showMine);
+	protoPreferences.set_show_popular(preferences.showPopular);
+	protoPreferences.set_show_pins(preferences.showPins);
+	if (preferences.updatedAt != std::chrono::system_clock::time_point()) {
+		protoPreferences.set_updated_at(::msdb::toEpochSeconds(preferences.updatedAt));
+	}
+	return protoPreferences;
 }
 
 std::vector< Mumble::Stonks::PopularTickerSummary > stonksPopularTickers(Server *server,
@@ -1827,7 +1986,7 @@ std::vector< Mumble::Stonks::PopularTickerSummary > stonksPopularTickers(Server 
 std::vector< Mumble::Stonks::PopularTickerSummary > stonksPersonalTickers(Server *server, unsigned int userID,
 																		  unsigned int maxTickers = 5) {
 	std::vector< Mumble::Stonks::PopularTickerPosition > positions;
-	if (!server || userID == 0) {
+	if (!server) {
 		return {};
 	}
 
@@ -1885,13 +2044,9 @@ std::vector< StonksLeaderboardEntry > stonksLedgerLeaderboard(Server *server, co
 		}
 
 		StonksLeaderboardEntry entry;
-		entry.userID          = latestSnapshot.userID;
-		entry.userName        = stonksRegisteredDisplayName(server, latestSnapshot.userID);
-		entry.score           = *percent;
-		entry.startValue      = baseline->totalValue;
-		entry.endValue        = latestSnapshot.totalValue;
-		entry.startSnapshotAt = baseline->createdAt;
-		entry.endSnapshotAt   = latestSnapshot.createdAt;
+		entry.userID   = latestSnapshot.userID;
+		entry.userName = stonksRegisteredDisplayName(server, latestSnapshot.userID);
+		entry.score    = *percent;
 		entries.push_back(std::move(entry));
 	}
 
@@ -1915,8 +2070,8 @@ MumbleProto::StonksState buildStonksState(Server *server, ServerUser *user, cons
 
 	const QString normalizedPeriod = normalizedStonksLedgerPeriod(period);
 	const std::optional< unsigned int > selfUserID = persistedUserID(user);
-	const bool registered = selfUserID && *selfUserID > 0
-							&& server->m_dbWrapper.registeredUserExists(server->iServerNum, *selfUserID);
+	const bool registered =
+		selfUserID && server->m_dbWrapper.registeredUserExists(server->iServerNum, *selfUserID);
 
 	Channel *rootChannel = server->qhChannels.value(Mumble::ROOT_CHANNEL_ID);
 	const bool canAdmin = rootChannel && ChanACL::hasPermission(user, rootChannel, ChanACL::Write, &aclCache);
@@ -1930,8 +2085,7 @@ MumbleProto::StonksState buildStonksState(Server *server, ServerUser *user, cons
 	state.set_can_admin(canAdmin);
 	state.set_social_announcements_enabled(server->bStonksSocialAnnouncementsEnabled);
 	state.set_selected_period(u8(normalizedPeriod));
-	state.set_leaderboard_description(
-		"Portfolio return compares each user's latest saved portfolio value with their closest older saved value for the selected period.");
+	state.set_leaderboard_description("Leaderboard ranks only PnL for the selected period.");
 	if (!status.trimmed().isEmpty()) {
 		state.set_status(u8(status.trimmed()));
 	}
@@ -1944,12 +2098,24 @@ MumbleProto::StonksState buildStonksState(Server *server, ServerUser *user, cons
 	}
 
 	for (const Mumble::Stonks::PopularTickerSummary &ticker : stonksPopularTickers(server, 5)) {
-		*state.add_popular_tickers() = protoStonksPopularTickerFromSummary(ticker);
+		*state.add_popular_tickers() = protoStonksPopularTickerFromSummary(ticker, false);
 	}
 	if (registered && selfUserID) {
 		for (const Mumble::Stonks::PopularTickerSummary &ticker : stonksPersonalTickers(server, *selfUserID, 5)) {
-			*state.add_personal_tickers() = protoStonksPopularTickerFromSummary(ticker);
+			*state.add_personal_tickers() = protoStonksPopularTickerFromSummary(ticker, true);
 		}
+		for (const ::msdb::DBStonksPinnedTicker &ticker :
+			 server->m_dbWrapper.getStonksPinnedTickers(server->iServerNum, *selfUserID)) {
+			*state.add_pinned_tickers() = protoStonksPinnedTickerFromDB(ticker);
+		}
+		const ::msdb::DBStonksFeedPreferences defaultPreferences(server->iServerNum, *selfUserID);
+		const std::optional< ::msdb::DBStonksFeedPreferences > preferences =
+			server->m_dbWrapper.getStonksFeedPreferences(server->iServerNum, *selfUserID);
+		*state.mutable_feed_preferences() =
+			protoStonksFeedPreferencesFromDB(preferences.value_or(defaultPreferences));
+	} else {
+		::msdb::DBStonksFeedPreferences defaultPreferences;
+		*state.mutable_feed_preferences() = protoStonksFeedPreferencesFromDB(defaultPreferences);
 	}
 
 	std::vector<::msdb::DBTextChannel > textChannels = server->m_dbWrapper.getTextChannels(server->iServerNum);
@@ -1980,10 +2146,6 @@ MumbleProto::StonksState buildStonksState(Server *server, ServerUser *user, cons
 
 	std::vector< std::pair< QString, unsigned int > > registeredUsers;
 	for (unsigned int userID : server->m_dbWrapper.getRegisteredUserIDs(server->iServerNum)) {
-		if (userID == 0) {
-			continue;
-		}
-
 		const QString userName = stonksRegisteredDisplayName(server, userID);
 		if (!userName.trimmed().isEmpty()) {
 			registeredUsers.push_back({ userName, userID });
@@ -2001,48 +2163,23 @@ MumbleProto::StonksState buildStonksState(Server *server, ServerUser *user, cons
 	}
 
 	unsigned int rank = 1;
-	std::chrono::system_clock::time_point newestLeaderboardSnapshot = {};
-	QSet< unsigned int > rankedLedgerUsers;
 	for (const StonksLeaderboardEntry &entry : stonksLedgerLeaderboard(server, normalizedPeriod, 100)) {
-		rankedLedgerUsers.insert(entry.userID);
-		newestLeaderboardSnapshot = std::max(newestLeaderboardSnapshot, entry.endSnapshotAt);
 		MumbleProto::StonksLeaderboardRow *row = state.add_leaderboard();
 		row->set_rank(rank++);
 		row->set_user_id(entry.userID);
 		row->set_user_name(u8(entry.userName));
 		row->set_period(u8(normalizedPeriod));
 		row->set_return_percent(entry.score);
-		row->set_start_value(entry.startValue);
-		row->set_end_value(entry.endValue);
-		row->set_start_snapshot_at(::msdb::toEpochSeconds(entry.startSnapshotAt));
-		row->set_end_snapshot_at(::msdb::toEpochSeconds(entry.endSnapshotAt));
 		row->set_followed(followedUsers.contains(entry.userID));
 		row->set_insufficient_history(false);
 	}
-	if (newestLeaderboardSnapshot != std::chrono::system_clock::time_point()) {
-		state.set_leaderboard_updated_at(::msdb::toEpochSeconds(newestLeaderboardSnapshot));
-	}
-	if (state.leaderboard_size() < 100) {
-		for (const ::msdb::DBStonksSnapshot &latestSnapshot :
-			 server->m_dbWrapper.getLatestStonksSnapshotsByUser(server->iServerNum)) {
-			if (state.leaderboard_size() >= 100 || rankedLedgerUsers.contains(latestSnapshot.userID)
-				|| latestSnapshot.totalValue <= 0.0 || !std::isfinite(latestSnapshot.totalValue)) {
-				continue;
-			}
 
-			MumbleProto::StonksLeaderboardRow *row = state.add_leaderboard();
-			row->set_user_id(latestSnapshot.userID);
-			row->set_user_name(u8(stonksRegisteredDisplayName(server, latestSnapshot.userID)));
-			row->set_period(u8(normalizedPeriod));
-			row->set_end_value(latestSnapshot.totalValue);
-			row->set_end_snapshot_at(::msdb::toEpochSeconds(latestSnapshot.createdAt));
-			row->set_followed(followedUsers.contains(latestSnapshot.userID));
-			row->set_insufficient_history(true);
-		}
+	std::optional< unsigned int > ledgerUserID;
+	if (canAdmin && requestedUserID) {
+		ledgerUserID = requestedUserID;
+	} else if (registered) {
+		ledgerUserID = selfUserID;
 	}
-
-	const std::optional< unsigned int > ledgerUserID =
-		requestedUserID && *requestedUserID > 0 ? requestedUserID : (registered ? selfUserID : std::nullopt);
 	if (ledgerUserID && server->m_dbWrapper.registeredUserExists(server->iServerNum, *ledgerUserID)) {
 		state.set_selected_user_id(*ledgerUserID);
 		state.set_selected_user_name(u8(stonksRegisteredDisplayName(server, *ledgerUserID)));
@@ -2108,6 +2245,48 @@ double boundedStonksQuoteConfidence(double confidence) {
 	return std::clamp(confidence, 0.0, 1.0);
 }
 
+std::optional< ::msdb::DBStonksPinnedTicker > validatedStonksPinnedTickerFromProto(
+	unsigned int serverID, unsigned int userID, const MumbleProto::StonksPinnedTicker &protoTicker, QString *error) {
+	const QString symbol = Mumble::Finance::normalizeTickerSymbol(u8(protoTicker.symbol()));
+	if (symbol.isEmpty()) {
+		if (error) {
+			*error = QStringLiteral("Choose a valid ticker symbol to pin.");
+		}
+		return std::nullopt;
+	}
+
+	::msdb::DBStonksPinnedTicker ticker(serverID, userID, u8(symbol));
+	const QString displayName = protoTicker.has_display_name() ? u8(protoTicker.display_name()).trimmed().left(128)
+															   : QString();
+	const QString providerID =
+		normalizedStonksProviderID(protoTicker.has_provider_id() ? u8(protoTicker.provider_id()) : QString());
+	ticker.displayName = u8(displayName);
+	ticker.providerID  = u8(providerID);
+	const QString providerSymbol =
+		protoTicker.has_provider_symbol() ? u8(protoTicker.provider_symbol()).trimmed().left(64) : symbol;
+	ticker.providerSymbol = u8(providerSymbol.isEmpty() ? symbol : providerSymbol);
+	ticker.exchange       = u8(protoTicker.has_exchange() ? u8(protoTicker.exchange()).trimmed().left(64) : QString());
+	ticker.quoteSourceURL =
+		u8(validatedStonksQuoteSourceURL(protoTicker.has_quote_source_url() ? u8(protoTicker.quote_source_url())
+																		: QString()));
+	ticker.displayOrder = protoTicker.has_display_order()
+							  ? std::min(protoTicker.display_order(), static_cast< uint32_t >(1000))
+							  : 0u;
+	ticker.createdAt = std::chrono::system_clock::now();
+	ticker.updatedAt = ticker.createdAt;
+	return ticker;
+}
+
+::msdb::DBStonksFeedPreferences stonksFeedPreferencesFromProto(
+	unsigned int serverID, unsigned int userID, const MumbleProto::StonksFeedPreferences &protoPreferences) {
+	::msdb::DBStonksFeedPreferences preferences(serverID, userID);
+	preferences.showMine    = !protoPreferences.has_show_mine() || protoPreferences.show_mine();
+	preferences.showPopular = !protoPreferences.has_show_popular() || protoPreferences.show_popular();
+	preferences.showPins    = !protoPreferences.has_show_pins() || protoPreferences.show_pins();
+	preferences.updatedAt   = std::chrono::system_clock::now();
+	return preferences;
+}
+
 bool stonksValuesClose(double expected, double actual) {
 	if (!std::isfinite(expected) || !std::isfinite(actual)) {
 		return false;
@@ -2120,13 +2299,13 @@ std::optional< ValidatedStonksSnapshot > validatedStonksSnapshotFromProto(
 	unsigned int serverID, unsigned int userID, const MumbleProto::StonksSnapshot &protoSnapshot, QString *error) {
 	if (protoSnapshot.positions_size() <= 0) {
 		if (error) {
-			*error = QStringLiteral("Add at least one position before saving your portfolio.");
+			*error = QStringLiteral("Add at least one position before updating your ledger.");
 		}
 		return std::nullopt;
 	}
 	if (protoSnapshot.positions_size() > MAX_STONKS_LEDGER_POSITIONS) {
 		if (error) {
-			*error = QStringLiteral("Portfolios are capped at %1 positions.").arg(MAX_STONKS_LEDGER_POSITIONS);
+			*error = QStringLiteral("Ledgers are capped at %1 positions.").arg(MAX_STONKS_LEDGER_POSITIONS);
 		}
 		return std::nullopt;
 	}
@@ -2185,7 +2364,7 @@ std::optional< ValidatedStonksSnapshot > validatedStonksSnapshotFromProto(
 			normalizedStonksCurrency(protoPosition.has_currency() ? u8(protoPosition.currency()) : snapshotCurrency);
 		if (currency != snapshotCurrency) {
 			if (error) {
-				*error = QStringLiteral("Position %1 uses %2, but the portfolio currency is %3.")
+				*error = QStringLiteral("Position %1 uses %2, but the ledger currency is %3.")
 							 .arg(i + 1)
 							 .arg(currency, snapshotCurrency);
 			}
@@ -2221,13 +2400,13 @@ std::optional< ValidatedStonksSnapshot > validatedStonksSnapshotFromProto(
 
 	if (!std::isfinite(validated.snapshot.totalValue) || validated.snapshot.totalValue <= 0.0) {
 		if (error) {
-			*error = QStringLiteral("Portfolio total must be greater than zero.");
+			*error = QStringLiteral("Ledger total must be greater than zero.");
 		}
 		return std::nullopt;
 	}
 	if (protoSnapshot.has_total_value() && !stonksValuesClose(validated.snapshot.totalValue, protoSnapshot.total_value())) {
 		if (error) {
-			*error = QStringLiteral("Portfolio total must match the sum of accepted positions.");
+			*error = QStringLiteral("Ledger total must match the sum of accepted positions.");
 		}
 		return std::nullopt;
 	}
@@ -2235,36 +2414,97 @@ std::optional< ValidatedStonksSnapshot > validatedStonksSnapshotFromProto(
 	return validated;
 }
 
-QString stonksSocialAnnouncement(Server *server, const ::msdb::DBStonksSnapshot &snapshot,
-								 const std::vector< ::msdb::DBStonksSnapshotPosition > &positions) {
-	const QString userName = stonksRegisteredDisplayName(server, snapshot.userID);
-	std::vector< Mumble::Stonks::LedgerPositionSummary > positionSummaries;
-	positionSummaries.reserve(positions.size());
+std::map< QString, ::msdb::DBStonksSnapshotPosition >
+	stonksPositionsBySymbol(const std::vector< ::msdb::DBStonksSnapshotPosition > &positions) {
+	std::map< QString, ::msdb::DBStonksSnapshotPosition > bySymbol;
 	for (const ::msdb::DBStonksSnapshotPosition &position : positions) {
-		Mumble::Stonks::LedgerPositionSummary summary;
-		summary.symbol      = u8(position.symbol);
-		summary.quantity    = position.quantity;
-		summary.marketValue = position.marketValue;
-		summary.currency    = u8(position.currency);
-		positionSummaries.push_back(std::move(summary));
+		const QString symbol = Mumble::Finance::normalizeTickerSymbol(u8(position.symbol));
+		if (!symbol.isEmpty()) {
+			bySymbol[symbol] = position;
+		}
+	}
+	return bySymbol;
+}
+
+QString stonksPricePerShareText(const ::msdb::DBStonksSnapshotPosition &position) {
+	if (!std::isfinite(position.price) || position.price <= 0.0) {
+		return QString();
+	}
+	return QStringLiteral("%1/share").arg(formatStonksMoney(position.price, u8(position.currency)));
+}
+
+QString stonksSymbolWithPrice(const QString &symbol, const ::msdb::DBStonksSnapshotPosition &position) {
+	const QString priceText = stonksPricePerShareText(position);
+	return priceText.isEmpty() ? symbol : QStringLiteral("%1 at %2").arg(symbol, priceText);
+}
+
+QString joinedStonksLedgerActions(QStringList actions) {
+	actions.removeAll(QString());
+	const qsizetype maxVisibleActions = 4;
+	if (actions.size() > maxVisibleActions) {
+		actions = actions.mid(0, maxVisibleActions);
+		actions << QStringLiteral("made more ledger updates");
+	}
+	if (actions.isEmpty()) {
+		return QString();
+	}
+	if (actions.size() == 1) {
+		return actions.front();
+	}
+	if (actions.size() == 2) {
+		return QStringLiteral("%1 and %2").arg(actions.at(0), actions.at(1));
 	}
 
-	const QString positionSummary = Mumble::Stonks::formatPositionSummary(positionSummaries);
-	if (!positionSummary.isEmpty()) {
-		return QStringLiteral("Stonks: %1 added %2 in a new portfolio snapshot at %3.")
-			.arg(userName, positionSummary, formatStonksMoney(snapshot.totalValue, u8(snapshot.currency)));
+	const QString last = actions.takeLast();
+	return QStringLiteral("%1, and %2").arg(actions.join(QStringLiteral(", ")), last);
+}
+
+QString stonksSocialAnnouncement(Server *server, const ::msdb::DBStonksSnapshot &snapshot,
+								 const std::vector< ::msdb::DBStonksSnapshotPosition > &positions,
+								 const std::vector< ::msdb::DBStonksSnapshotPosition > &previousPositions) {
+	const QString userName = stonksRegisteredDisplayName(server, snapshot.userID);
+	const std::map< QString, ::msdb::DBStonksSnapshotPosition > currentBySymbol = stonksPositionsBySymbol(positions);
+	const std::map< QString, ::msdb::DBStonksSnapshotPosition > previousBySymbol =
+		stonksPositionsBySymbol(previousPositions);
+
+	QStringList actions;
+	for (const auto &currentEntry : currentBySymbol) {
+		const QString &symbol = currentEntry.first;
+		const ::msdb::DBStonksSnapshotPosition &position = currentEntry.second;
+		const auto previousIt = previousBySymbol.find(symbol);
+		if (previousIt == previousBySymbol.cend()) {
+			actions << QStringLiteral("entered %1").arg(stonksSymbolWithPrice(symbol, position));
+			continue;
+		}
+
+		const double previousQuantity = previousIt->second.quantity;
+		if (!stonksValuesClose(previousQuantity, position.quantity)) {
+			actions << QStringLiteral("%1 %2")
+						   .arg(position.quantity > previousQuantity ? QStringLiteral("added more")
+																	  : QStringLiteral("removed some"),
+								stonksSymbolWithPrice(symbol, position));
+			continue;
+		}
+		if (!stonksValuesClose(previousIt->second.price, position.price)) {
+			actions << QStringLiteral("updated %1").arg(stonksSymbolWithPrice(symbol, position));
+		}
+	}
+	for (const auto &previousEntry : previousBySymbol) {
+		if (currentBySymbol.find(previousEntry.first) == currentBySymbol.cend()) {
+			actions << QStringLiteral("exited %1").arg(previousEntry.first);
+		}
 	}
 
-	const std::size_t positionCount = positions.size();
-	return QStringLiteral("Stonks: %1 updated their portfolio to %2 across %3 position%4.")
-		.arg(userName,
-			 formatStonksMoney(snapshot.totalValue, u8(snapshot.currency)),
-			 QString::number(positionCount),
-			 positionCount == 1 ? QString() : QStringLiteral("s"));
+	const QString actionSummary = joinedStonksLedgerActions(actions);
+	if (!actionSummary.isEmpty()) {
+		return QStringLiteral("Stonks: %1 %2.").arg(userName, actionSummary);
+	}
+
+	return QStringLiteral("Stonks: %1 updated their ledger.").arg(userName);
 }
 
 QString stonksClearAnnouncement(Server *server, const ::msdb::DBStonksSnapshot &snapshot) {
-	return QStringLiteral("Stonks: %1 cleared their portfolio.")
+	return QStringLiteral("Stonks: %1 cleared their ledger.")
 		.arg(stonksRegisteredDisplayName(server, snapshot.userID));
 }
 } // namespace
@@ -2336,7 +2576,9 @@ void Server::persistAndBroadcastChatMessage(ServerUser *uSource, const QString &
 	const std::optional< unsigned int > authorUserID = persistedUserID(uSource);
 	const std::optional< std::string > authorName =
 		uSource->qsName.isEmpty() ? std::nullopt : std::optional< std::string >(u8(uSource->qsName));
-	const std::string scopeKey = chatScopeKey(scope, scopeID);
+	const std::string scopeKey =
+		scope == MumbleProto::Private && authorUserID ? privateChatScopeKey(authorUserID.value(), scopeID)
+													  : chatScopeKey(scope, scopeID);
 	if (scopeKey.empty()) {
 		return;
 	}
@@ -2426,7 +2668,9 @@ void Server::persistAndBroadcastChatMessage(ServerUser *uSource, const QString &
 		return std::nullopt;
 	};
 	QSet< ServerUser * > persistentRecipients;
-	if (scope == MumbleProto::Channel) {
+	if (scope == MumbleProto::Private && authorUserID) {
+		persistentRecipients = connectedPrivateChatParticipants(qhUsers, authorUserID.value(), scopeID);
+	} else if (scope == MumbleProto::Channel) {
 		persistentRecipients = recipientsWithChatHistoryAccess(this, qhUsers, scope, scopeID, permissionChannel, acCache,
 															   storedMessage.createdAt);
 		persistentRecipients.unite(recipientsWithLivePersistentChatAccess(
@@ -2440,18 +2684,45 @@ void Server::persistAndBroadcastChatMessage(ServerUser *uSource, const QString &
 	}
 
 	for (ServerUser *currentUser : persistentRecipients) {
-		if (clientSupportsPersistentChat(currentUser)) {
+		if (clientSupportsPersistentChat(currentUser)
+			&& (scope != MumbleProto::Private
+				|| clientSupportsChatFeature(currentUser, MumbleProto::ChatFeatureDirectMessages))) {
+			unsigned int messageScopeID = scopeID;
+			if (scope == MumbleProto::Private) {
+				const std::optional< unsigned int > currentUserID = persistedUserID(currentUser);
+				const std::optional< unsigned int > peerUserID =
+					currentUserID ? privateChatPeerIDForViewer(scopeKey, currentUserID.value()) : std::nullopt;
+				if (!peerUserID) {
+					continue;
+				}
+				messageScopeID = peerUserID.value();
+			}
 			const ChatHistoryAccess access =
-				resolveChatHistoryAccess(currentUser, scope, scopeID, permissionChannel, &acCache);
+				resolveChatHistoryAccess(currentUser, scope, messageScopeID, permissionChannel, &acCache);
 			std::optional< ChatReplyPreview > replyPreview;
 			if (access.allowed) {
 				replyPreview = resolveReplyPreview(m_dbWrapper, iServerNum, storedMessage, resolvedAuthorName,
 												   access.visibleAfter);
 			}
 			const MumbleProto::ChatMessage protoMessage = protoChatMessageFromDB(
-				storedMessage, scope, scopeID, authorName, persistedUserID(currentUser), replyPreview,
+				storedMessage, scope, messageScopeID, authorName, persistedUserID(currentUser), replyPreview,
 				effectiveChatFeatures(currentUser), resolvedReactionActorName);
 			sendMessage(currentUser, protoMessage);
+		}
+	}
+
+	if (scope == MumbleProto::Private && authorUserID) {
+		MumbleProto::TextMessage legacyDirectMessage;
+		legacyDirectMessage.set_actor(uSource->uiSession);
+		legacyDirectMessage.set_message(u8(structuredChatLegacyHtml(bodyText, bodyFormat)));
+		for (ServerUser *currentUser : connectedPrivateChatParticipants(qhUsers, authorUserID.value(), scopeID)) {
+			if (!currentUser || currentUser == uSource
+				|| clientSupportsChatFeature(currentUser, MumbleProto::ChatFeatureDirectMessages)) {
+				continue;
+			}
+			legacyDirectMessage.clear_session();
+			legacyDirectMessage.add_session(currentUser->uiSession);
+			sendMessage(currentUser, legacyDirectMessage);
 		}
 	}
 
@@ -2484,7 +2755,7 @@ void Server::persistAndBroadcastChatMessage(ServerUser *uSource, const QString &
 		}
 	}
 
-	if (bChatPreviewFetchEnabled && permissionChannel) {
+	if (bChatPreviewFetchEnabled && permissionChannel && scope != MumbleProto::Private) {
 		for (const ::msdb::DBChatMessageEmbed &embed : initialEmbeds) {
 			if (embed.status == ::msdb::ChatEmbedStatus::Pending) {
 				scheduleChatEmbedFetch(uSource, thread.threadID, storedMessage.messageID, scope, scopeID,
@@ -3748,6 +4019,9 @@ void Server::msgAuthenticate(ServerUser *uSource, MumbleProto::Authenticate &msg
 	mpsc.set_feedback_enabled(feedbackGitHubConfigured());
 	mpsc.set_feedback_max_log_bytes(uiFeedbackMaxLogBytes);
 	mpsc.set_feedback_max_body_bytes(uiFeedbackMaxBodyBytes);
+	mpsc.set_server_display_name(u8(qsServerDisplayName));
+	mpsc.set_server_monogram(u8(qsServerMonogram));
+	mpsc.set_server_image(blob(qbaServerImage));
 	sendMessage(uSource, mpsc);
 	syncScreenShareStateForUser(uSource);
 	syncWatchTogetherStateForUser(uSource);
@@ -4960,6 +5234,7 @@ void Server::msgChatSend(ServerUser *uSource, MumbleProto::ChatSend &msg) {
 	Channel *permissionChannel      = nullptr;
 	::msdb::ChatThreadScope dbScope = ::msdb::ChatThreadScope::Channel;
 	std::optional<::msdb::DBTextChannel > selectedTextChannel;
+	const std::optional< unsigned int > sourceUserID = persistedUserID(uSource);
 
 	switch (scope) {
 		case MumbleProto::Channel:
@@ -4984,6 +5259,25 @@ void Server::msgChatSend(ServerUser *uSource, MumbleProto::ChatSend &msg) {
 			dbScope           = ::msdb::ChatThreadScope::TextChannel;
 			break;
 		}
+		case MumbleProto::Private:
+			if (!clientSupportsChatFeature(uSource, MumbleProto::ChatFeatureDirectMessages)) {
+				sendPersistentChatTextDenied(this, uSource,
+											 tr("This client did not advertise persistent direct-message support."));
+				return;
+			}
+			if (!sourceUserID) {
+				sendPersistentChatTextDenied(this, uSource,
+											 tr("Register your user before keeping direct-message history."));
+				return;
+			}
+			if (!msg.has_scope_id() || scopeID == sourceUserID.value()
+				|| !m_dbWrapper.registeredUserExists(iServerNum, scopeID)) {
+				sendPersistentChatTextDenied(this, uSource, tr("That direct-message recipient is unavailable."));
+				return;
+			}
+			permissionChannel = qhChannels.value(Mumble::ROOT_CHANNEL_ID);
+			dbScope           = ::msdb::ChatThreadScope::Private;
+			break;
 		default:
 			return;
 	}
@@ -5003,12 +5297,15 @@ void Server::msgChatSend(ServerUser *uSource, MumbleProto::ChatSend &msg) {
 		return;
 	}
 
-	if (!ChanACL::hasPermission(uSource, permissionChannel, ChanACL::TextMessage, &acCache)) {
+	if (scope != MumbleProto::Private
+		&& !ChanACL::hasPermission(uSource, permissionChannel, ChanACL::TextMessage, &acCache)) {
 		PERM_DENIED(uSource, permissionChannel, ChanACL::TextMessage);
 		return;
 	}
 
-	const std::string scopeKey = chatScopeKey(scope, scopeID);
+	const std::string scopeKey =
+		scope == MumbleProto::Private && sourceUserID ? privateChatScopeKey(sourceUserID.value(), scopeID)
+													  : chatScopeKey(scope, scopeID);
 	if (scopeKey.empty()) {
 		return;
 	}
@@ -5198,8 +5495,7 @@ void Server::msgChatSend(ServerUser *uSource, MumbleProto::ChatSend &msg) {
 				const std::optional< ::msdb::DBStonksSnapshot > latestSnapshot =
 					m_dbWrapper.getLatestStonksSnapshotForUser(iServerNum, currentUserID.value());
 				if (latestSnapshot) {
-					lines << QStringLiteral("Current portfolio: %1")
-								 .arg(formatStonksMoney(latestSnapshot->totalValue, u8(latestSnapshot->currency)));
+					lines << QStringLiteral("Ledger: active");
 				}
 				for (const QString &period : { QStringLiteral("1d"), QStringLiteral("7d"), QStringLiteral("30d"),
 											   QStringLiteral("ytd") }) {
@@ -5417,6 +5713,7 @@ void Server::msgChatHistoryRequest(ServerUser *uSource, MumbleProto::ChatHistory
 		msg.has_scope_id() ? msg.scope_id() : (uSource->cChannel ? uSource->cChannel->iId : Mumble::ROOT_CHANNEL_ID);
 	Channel *permissionChannel      = nullptr;
 	::msdb::ChatThreadScope dbScope = ::msdb::ChatThreadScope::Channel;
+	const std::optional< unsigned int > sourceUserID = persistedUserID(uSource);
 
 	switch (scope) {
 		case MumbleProto::Channel:
@@ -5440,6 +5737,25 @@ void Server::msgChatHistoryRequest(ServerUser *uSource, MumbleProto::ChatHistory
 			dbScope           = ::msdb::ChatThreadScope::TextChannel;
 			break;
 		}
+		case MumbleProto::Private:
+			if (!clientSupportsChatFeature(uSource, MumbleProto::ChatFeatureDirectMessages)) {
+				sendPersistentChatTextDenied(this, uSource,
+											 tr("This client did not advertise persistent direct-message support."));
+				return;
+			}
+			if (!sourceUserID) {
+				sendPersistentChatTextDenied(this, uSource,
+											 tr("Register your user before loading direct-message history."));
+				return;
+			}
+			if (!msg.has_scope_id() || scopeID == sourceUserID.value()
+				|| !m_dbWrapper.registeredUserExists(iServerNum, scopeID)) {
+				sendPersistentChatTextDenied(this, uSource, tr("That direct-message recipient is unavailable."));
+				return;
+			}
+			permissionChannel = qhChannels.value(Mumble::ROOT_CHANNEL_ID);
+			dbScope           = ::msdb::ChatThreadScope::Private;
+			break;
 		default:
 			return;
 	}
@@ -5596,7 +5912,9 @@ void Server::msgChatHistoryRequest(ServerUser *uSource, MumbleProto::ChatHistory
 		return;
 	}
 
-	const std::string scopeKey                  = chatScopeKey(scope, scopeID);
+	const std::string scopeKey =
+		scope == MumbleProto::Private && sourceUserID ? privateChatScopeKey(sourceUserID.value(), scopeID)
+													  : chatScopeKey(scope, scopeID);
 	std::optional<::msdb::DBChatThread > thread = m_dbWrapper.getChatThreadByScope(iServerNum, dbScope, scopeKey);
 	if (!thread) {
 		sendMessage(uSource, response);
@@ -5701,6 +6019,20 @@ void Server::msgChatReadStateUpdate(ServerUser *uSource, MumbleProto::ChatReadSt
 			dbScope           = ::msdb::ChatThreadScope::TextChannel;
 			break;
 		}
+		case MumbleProto::Private:
+			if (!clientSupportsChatFeature(uSource, MumbleProto::ChatFeatureDirectMessages)) {
+				sendPersistentChatTextDenied(this, uSource,
+											 tr("This client did not advertise persistent direct-message support."));
+				return;
+			}
+			if (!msg.has_scope_id() || scopeID == userID.value()
+				|| !m_dbWrapper.registeredUserExists(iServerNum, scopeID)) {
+				sendPersistentChatTextDenied(this, uSource, tr("That direct-message recipient is unavailable."));
+				return;
+			}
+			permissionChannel = qhChannels.value(Mumble::ROOT_CHANNEL_ID);
+			dbScope           = ::msdb::ChatThreadScope::Private;
+			break;
 		default:
 			return;
 	}
@@ -5726,7 +6058,8 @@ void Server::msgChatReadStateUpdate(ServerUser *uSource, MumbleProto::ChatReadSt
 		return;
 	}
 
-	const std::string scopeKey                  = chatScopeKey(scope, scopeID);
+	const std::string scopeKey =
+		scope == MumbleProto::Private ? privateChatScopeKey(userID.value(), scopeID) : chatScopeKey(scope, scopeID);
 	std::optional<::msdb::DBChatThread > thread = m_dbWrapper.getChatThreadByScope(iServerNum, dbScope, scopeKey);
 	if (!thread) {
 		return;
@@ -5774,7 +6107,7 @@ void Server::msgStonksRequest(ServerUser *uSource, MumbleProto::StonksRequest &m
 	}
 
 	const std::optional< unsigned int > requestedUserID =
-		msg.has_user_id() && msg.user_id() > 0 ? std::optional< unsigned int >(msg.user_id()) : std::nullopt;
+		msg.has_user_id() ? std::optional< unsigned int >(msg.user_id()) : std::nullopt;
 	sendMessage(uSource, buildStonksState(this, uSource, period, acCache, QString(), QString(), requestedUserID));
 }
 
@@ -5811,7 +6144,7 @@ void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg
 	}
 
 	const auto selfUserID = persistedUserID(uSource);
-	const bool registered = selfUserID && *selfUserID > 0 && m_dbWrapper.registeredUserExists(iServerNum, *selfUserID);
+	const bool registered = selfUserID && m_dbWrapper.registeredUserExists(iServerNum, *selfUserID);
 	const auto requireRegistered = [&]() -> bool {
 		if (registered) {
 			return true;
@@ -5826,28 +6159,31 @@ void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg
 		if (rootChannel) {
 			PERM_DENIED(uSource, rootChannel, ChanACL::Write);
 		}
-		sendState(QString(), tr("Root Write permission is required to manage another user's Stonks portfolio."));
+		sendState(QString(), tr("Root Write permission is required to manage another user's Stonks ledger."));
 		return false;
 	};
 	const auto resolvePortfolioTarget = [&]() -> std::optional< unsigned int > {
-		int targetUserID = msg.has_target_user_id() ? static_cast< int >(msg.target_user_id()) : -1;
-		if (targetUserID <= 0 && msg.has_target_name()) {
-			targetUserID = getRegisteredUserID(u8(msg.target_name()));
+		std::optional< unsigned int > targetUserID =
+			msg.has_target_user_id() ? std::optional< unsigned int >(msg.target_user_id()) : std::nullopt;
+		if (!targetUserID && msg.has_target_name()) {
+			const int resolvedUserID = getRegisteredUserID(u8(msg.target_name()));
+			if (resolvedUserID >= 0) {
+				targetUserID = static_cast< unsigned int >(resolvedUserID);
+			}
 		}
-		if (targetUserID <= 0) {
+		if (!targetUserID) {
 			if (!requireRegistered()) {
 				return std::nullopt;
 			}
-			targetUserID = static_cast< int >(*selfUserID);
+			targetUserID = *selfUserID;
 		}
-		if (targetUserID <= 0
-			|| !m_dbWrapper.registeredUserExists(iServerNum, static_cast< unsigned int >(targetUserID))) {
+		if (!m_dbWrapper.registeredUserExists(iServerNum, *targetUserID)) {
 			sendState(QString(), tr("That registered user could not be found."));
 			return std::nullopt;
 		}
 
-		const unsigned int resolvedTargetUserID = static_cast< unsigned int >(targetUserID);
-		const bool targetsSelf = registered && selfUserID && resolvedTargetUserID == *selfUserID;
+		const unsigned int resolvedTargetUserID = *targetUserID;
+		const bool targetsSelf                  = registered && selfUserID && resolvedTargetUserID == *selfUserID;
 		if (!targetsSelf && !requireStonksAdmin()) {
 			return std::nullopt;
 		}
@@ -5884,8 +6220,14 @@ void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg
 				return;
 			}
 			if (!msg.has_snapshot()) {
-				sendState(QString(), tr("Portfolio payload is missing."), targetUserID);
+				sendState(QString(), tr("Ledger update payload is missing."), targetUserID);
 				return;
+			}
+
+			std::vector< ::msdb::DBStonksSnapshotPosition > previousPositions;
+			if (const std::optional< ::msdb::DBStonksSnapshot > latestSnapshot =
+					m_dbWrapper.getLatestStonksSnapshotForUser(iServerNum, *targetUserID)) {
+				previousPositions = m_dbWrapper.getStonksSnapshotPositions(iServerNum, latestSnapshot->snapshotID);
 			}
 
 			QString error;
@@ -5899,11 +6241,12 @@ void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg
 			const ::msdb::DBStonksSnapshot storedSnapshot =
 				m_dbWrapper.addStonksSnapshot(validated->snapshot, validated->positions);
 
-			broadcastStonksAnnouncement(stonksSocialAnnouncement(this, storedSnapshot, validated->positions));
+			broadcastStonksAnnouncement(
+				stonksSocialAnnouncement(this, storedSnapshot, validated->positions, previousPositions));
 
 			const QString targetName = stonksRegisteredDisplayName(this, *targetUserID);
 			const bool targetsSelf = registered && selfUserID && *targetUserID == *selfUserID;
-			sendState(targetsSelf ? tr("Portfolio saved.") : tr("Portfolio saved for %1.").arg(targetName),
+			sendState(targetsSelf ? tr("Ledger updated.") : tr("Ledger updated for %1.").arg(targetName),
 					  QString(), targetUserID);
 			return;
 		}
@@ -5928,14 +6271,14 @@ void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg
 			clearedSnapshot.totalValue = 0.0;
 			clearedSnapshot.note       = u8(msg.has_snapshot() && msg.snapshot().has_note()
 												? u8(msg.snapshot().note()).trimmed().left(512)
-												: tr("Portfolio cleared"));
+												: tr("Ledger cleared"));
 
 			const ::msdb::DBStonksSnapshot storedSnapshot = m_dbWrapper.addStonksSnapshot(clearedSnapshot, {});
 			broadcastStonksAnnouncement(stonksClearAnnouncement(this, storedSnapshot));
 
 			const QString targetName = stonksRegisteredDisplayName(this, *targetUserID);
 			const bool targetsSelf = registered && selfUserID && *targetUserID == *selfUserID;
-			sendState(targetsSelf ? tr("Portfolio cleared.") : tr("Portfolio cleared for %1.").arg(targetName),
+			sendState(targetsSelf ? tr("Ledger cleared.") : tr("Ledger cleared for %1.").arg(targetName),
 					  QString(), targetUserID);
 			return;
 		}
@@ -5946,14 +6289,14 @@ void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg
 											 ? msg.snapshot().snapshot_id()
 											 : 0u);
 			if (snapshotID == 0) {
-				sendState(QString(), tr("Snapshot payload is missing."));
+				sendState(QString(), tr("Ledger update payload is missing."));
 				return;
 			}
 
 			const std::optional< ::msdb::DBStonksSnapshot > snapshot =
 				m_dbWrapper.getStonksSnapshot(iServerNum, snapshotID);
 			if (!snapshot) {
-				sendState(QString(), tr("That portfolio snapshot could not be found."));
+				sendState(QString(), tr("That ledger update could not be found."));
 				return;
 			}
 
@@ -5961,15 +6304,15 @@ void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg
 			if (!targetsSelf && !requireStonksAdmin()) {
 				return;
 			}
-			if (msg.has_target_user_id() && msg.target_user_id() > 0 && msg.target_user_id() != snapshot->userID) {
-				sendState(QString(), tr("Snapshot owner did not match the selected user."), snapshot->userID);
+			if (msg.has_target_user_id() && msg.target_user_id() != snapshot->userID) {
+				sendState(QString(), tr("Ledger update owner did not match the selected user."), snapshot->userID);
 				return;
 			}
 
 			m_dbWrapper.removeStonksSnapshot(iServerNum, snapshotID);
 
 			const QString targetName = stonksRegisteredDisplayName(this, snapshot->userID);
-			sendState(targetsSelf ? tr("Snapshot deleted.") : tr("Snapshot deleted for %1.").arg(targetName),
+			sendState(targetsSelf ? tr("Ledger update deleted.") : tr("Ledger update deleted for %1.").arg(targetName),
 					  QString(), snapshot->userID);
 			return;
 		}
@@ -5979,16 +6322,19 @@ void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg
 				return;
 			}
 
-			int targetUserID = msg.has_target_user_id() ? static_cast< int >(msg.target_user_id()) : -1;
-			if (targetUserID <= 0 && msg.has_target_name()) {
-				targetUserID = getRegisteredUserID(u8(msg.target_name()));
+			std::optional< unsigned int > targetUserID =
+				msg.has_target_user_id() ? std::optional< unsigned int >(msg.target_user_id()) : std::nullopt;
+			if (!targetUserID && msg.has_target_name()) {
+				const int resolvedUserID = getRegisteredUserID(u8(msg.target_name()));
+				if (resolvedUserID >= 0) {
+					targetUserID = static_cast< unsigned int >(resolvedUserID);
+				}
 			}
-			if (targetUserID <= 0
-				|| !m_dbWrapper.registeredUserExists(iServerNum, static_cast< unsigned int >(targetUserID))) {
+			if (!targetUserID || !m_dbWrapper.registeredUserExists(iServerNum, *targetUserID)) {
 				sendState(QString(), tr("That registered user could not be found."));
 				return;
 			}
-			const unsigned int targetRegisteredUserID = static_cast< unsigned int >(targetUserID);
+			const unsigned int targetRegisteredUserID = *targetUserID;
 			if (targetRegisteredUserID == *selfUserID) {
 				sendState(QString(), tr("You cannot follow yourself."));
 				return;
@@ -6003,6 +6349,47 @@ void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg
 				m_dbWrapper.removeStonksFollow(iServerNum, *selfUserID, targetRegisteredUserID);
 				sendState(tr("Unfollowed %1.").arg(stonksRegisteredDisplayName(this, targetRegisteredUserID)));
 			}
+			return;
+		}
+		case MumbleProto::StonksActionSetTickerPin: {
+			if (!requireRegistered()) {
+				return;
+			}
+			if (!msg.has_pinned_ticker()) {
+				sendState(QString(), tr("Ticker pin payload is missing."));
+				return;
+			}
+
+			QString error;
+			std::optional< ::msdb::DBStonksPinnedTicker > ticker =
+				validatedStonksPinnedTickerFromProto(iServerNum, *selfUserID, msg.pinned_ticker(), &error);
+			if (!ticker) {
+				sendState(QString(), error);
+				return;
+			}
+
+			const bool pinned = !msg.has_pinned() || msg.pinned();
+			if (pinned) {
+				m_dbWrapper.setStonksPinnedTicker(*ticker);
+				sendState(tr("Pinned %1.").arg(u8(ticker->symbol)));
+			} else {
+				m_dbWrapper.removeStonksPinnedTicker(iServerNum, *selfUserID, ticker->symbol);
+				sendState(tr("Unpinned %1.").arg(u8(ticker->symbol)));
+			}
+			return;
+		}
+		case MumbleProto::StonksActionSetFeedPreferences: {
+			if (!requireRegistered()) {
+				return;
+			}
+			if (!msg.has_feed_preferences()) {
+				sendState(QString(), tr("Ticker feed preferences payload is missing."));
+				return;
+			}
+
+			m_dbWrapper.setStonksFeedPreferences(
+				stonksFeedPreferencesFromProto(iServerNum, *selfUserID, msg.feed_preferences()));
+			sendState(tr("Ticker feed preferences saved."));
 			return;
 		}
 		case MumbleProto::StonksActionConfigure: {
@@ -7047,7 +7434,7 @@ void Server::msgChatHistoryGrantSync(ServerUser *uSource, MumbleProto::ChatHisto
 
 	for (int i = 0; i < msg.grants_size(); ++i) {
 		const MumbleProto::ChatHistoryGrantInfo &info = msg.grants(i);
-		if (!info.has_user_id() || info.user_id() == 0 || !m_dbWrapper.registeredUserExists(iServerNum, info.user_id())) {
+		if (!info.has_user_id() || !m_dbWrapper.registeredUserExists(iServerNum, info.user_id())) {
 			continue;
 		}
 
@@ -7076,6 +7463,7 @@ void Server::msgChatHistoryGrantSync(ServerUser *uSource, MumbleProto::ChatHisto
 				break;
 			}
 			case MumbleProto::Aggregate:
+			case MumbleProto::Private:
 				continue;
 		}
 
@@ -7095,7 +7483,7 @@ void Server::msgChatHistoryGrantSync(ServerUser *uSource, MumbleProto::ChatHisto
 			msdb::DBChatHistoryGrant grant(iServerNum, info.user_id(), *dbScope, scopeID);
 			grant.visibleAfter = chatTimePointFromEpochSeconds(info.has_visible_after() ? info.visible_after() : 0);
 			grant.grantedAt = std::chrono::system_clock::now();
-			if (uSource->iId > 0) {
+			if (uSource->iId >= 0) {
 				grant.grantedByUserID = static_cast< unsigned int >(uSource->iId);
 			}
 			m_dbWrapper.setChatHistoryGrant(grant);
@@ -8127,6 +8515,25 @@ void Server::msgServerConfig(ServerUser *uSource, MumbleProto::ServerConfig &msg
 	}
 	if (msg.has_feedback_max_body_bytes()) {
 		applyPositiveIntConfig("feedback_max_body_bytes", msg.feedback_max_body_bytes());
+	}
+	if (msg.has_server_display_name()) {
+		applyConfig("server_display_name", u8(msg.server_display_name()).trimmed().left(128));
+	}
+	if (msg.has_server_monogram()) {
+		applyConfig("server_monogram", u8(msg.server_monogram()).trimmed().left(12));
+	}
+	if (msg.has_server_image()) {
+		QString error;
+		const std::optional< QByteArray > sanitizedImage =
+			sanitizeServerIdentityImageBytes(blob(msg.server_image()), &error);
+		if (!sanitizedImage) {
+			MumbleProto::PermissionDenied denied;
+			denied.set_type(MumbleProto::PermissionDenied_DenyType_Text);
+			denied.set_reason(u8(error.isEmpty() ? tr("Server image could not be saved.") : error));
+			sendMessage(uSource, denied);
+			return;
+		}
+		applyConfig("server_image", QString::fromLatin1(sanitizedImage->toBase64()));
 	}
 }
 

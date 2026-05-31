@@ -6,6 +6,7 @@
 #ifndef MUMBLE_MUMBLE_GLOBAL_H_
 #define MUMBLE_MUMBLE_GLOBAL_H_
 
+#include <QtCore/QByteArray>
 #include <QtCore/QDir>
 #include <QtCore/QList>
 
@@ -120,6 +121,9 @@ public:
 	bool bFeedbackEnabled;
 	unsigned int uiFeedbackMaxLogBytes;
 	unsigned int uiFeedbackMaxBodyBytes;
+	QString qsServerDisplayName;
+	QString qsServerMonogram;
+	QByteArray qbaServerImage;
 	unsigned int uiMessageLength;
 	unsigned int uiImageLength;
 	unsigned int uiMaxUsers;

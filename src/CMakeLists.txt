@@ -260,6 +260,11 @@ endif()
 if(client)
 	add_subdirectory(mumble)
 
+	if(WIN32)
+		add_subdirectory(updater)
+		add_dependencies(mumble mumble-updater)
+	endif()
+
 	if(screen-helper)
 		add_subdirectory(screen-helper)
 		add_dependencies(mumble mumble-screen-helper)

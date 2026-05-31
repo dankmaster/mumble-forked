@@ -9,14 +9,19 @@
 
 #include "Global.h"
 #include "Log.h"
+#include "ModernContextMenuHost.h"
 #include "ModernShellBridge.h"
 #include "ModernShellPage.h"
 
 #include <QtCore/QEvent>
 #include <QtCore/QDateTime>
+#include <QtCore/QEventLoop>
 #include <QtCore/QFile>
+#include <QtCore/QJsonDocument>
 #include <QtCore/QMimeData>
+#include <QtCore/QPoint>
 #include <QtCore/QTimer>
+#include <QtCore/QVariantList>
 #include <QtGui/QDragEnterEvent>
 #include <QtGui/QDropEvent>
 #include <QtGui/QPixmap>
@@ -25,6 +30,7 @@
 #include <QtWebChannel/QWebChannel>
 #include <QtWebEngineCore/QWebEnginePage>
 #include <QtWebEngineCore/QWebEngineProfile>
+#include <QtWebEngineCore/QWebEngineScript>
 #include <QtWebEngineCore/QWebEngineSettings>
 #include <QtWebEngineCore/QWebEngineUrlRequestInfo>
 #include <QtWebEngineCore/QWebEngineUrlRequestInterceptor>
@@ -215,6 +221,8 @@ ModernShellHost::ModernShellHost(QWidget *parent) : QWidget(parent) {
 	connect(m_view, &QWebEngineView::loadFinished, this, &ModernShellHost::handleLoadFinished);
 	connect(m_page, &QWebEnginePage::renderProcessTerminated, this, &ModernShellHost::handleRenderProcessTerminated);
 	connect(m_bridge, &ModernShellBridge::bootReady, this, &ModernShellHost::handleBridgeBootReady);
+	connect(m_bridge, &ModernShellBridge::nativeContextMenuRequested, this, &ModernShellHost::showNativeContextMenu);
+	connect(m_bridge, &ModernShellBridge::nativeContextMenuCloseRequested, this, &ModernShellHost::closeNativeContextMenu);
 	connect(m_bootTimeoutTimer, &QTimer::timeout, this, &ModernShellHost::handleBootTimeout);
 	connect(m_page, &ModernShellPage::externalNavigationRequested, this, [](const QUrl &url) {
 		if (Global::get().l) {
@@ -265,6 +273,179 @@ ModernShellBridge *ModernShellHost::bridge() const {
 	return m_bridge;
 }
 
+void ModernShellHost::runAutomationScript(const QString &script) {
+	if (!m_page || script.trimmed().isEmpty()) {
+		return;
+	}
+
+	m_page->runJavaScript(script, QWebEngineScript::MainWorld);
+}
+
+QVariant ModernShellHost::runAutomationScriptResult(const QString &script, const int timeoutMilliseconds) {
+	if (!m_page || script.trimmed().isEmpty()) {
+		return QVariant();
+	}
+
+	QVariant result;
+	bool finished = false;
+	QEventLoop loop;
+	QTimer timeout;
+	timeout.setSingleShot(true);
+	connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+	m_page->runJavaScript(script, QWebEngineScript::MainWorld, [&result, &finished, &loop](const QVariant &value) {
+		result   = value;
+		finished = true;
+		loop.quit();
+	});
+	timeout.start(qBound(50, timeoutMilliseconds, 10000));
+	loop.exec();
+	return finished ? result : QVariant();
+}
+
+QVariantMap ModernShellHost::lastNativeContextMenuRequest() const {
+	return m_lastNativeContextMenuRequest;
+}
+
+void ModernShellHost::clearLastNativeContextMenuRequest() {
+	m_lastNativeContextMenuRequest.clear();
+}
+
+void ModernShellHost::closeNativeContextMenuForAutomation() {
+	closeNativeContextMenu();
+}
+
+void ModernShellHost::notifyNativeContextMenuClosed(const QString &token) {
+	if (!m_page || token.trimmed().isEmpty()) {
+		return;
+	}
+
+	const QVariantList args { token };
+	const QString script =
+		QStringLiteral("if(window.__mumbleModernNativeContextMenuClosed){"
+					   "window.__mumbleModernNativeContextMenuClosed.apply(null,%1);"
+					   "}")
+			.arg(QString::fromUtf8(QJsonDocument::fromVariant(args).toJson(QJsonDocument::Compact)));
+	m_page->runJavaScript(script, QWebEngineScript::MainWorld);
+}
+
+void ModernShellHost::invokeNativeContextMenuAction(const QString &token, const int actionIndex) {
+	if (!m_page || token.trimmed().isEmpty() || actionIndex < 0) {
+		return;
+	}
+
+	const QVariantList args { token, actionIndex };
+	const QString script =
+		QStringLiteral("if(window.__mumbleModernInvokeNativeContextMenuAction){"
+					   "window.__mumbleModernInvokeNativeContextMenuAction.apply(null,%1);"
+					   "}")
+			.arg(QString::fromUtf8(QJsonDocument::fromVariant(args).toJson(QJsonDocument::Compact)));
+	m_page->runJavaScript(script, QWebEngineScript::MainWorld);
+}
+
+void ModernShellHost::closeNativeContextMenu() {
+	m_lastNativeContextMenuRequest.clear();
+	if (!m_nativeContextMenu) {
+		return;
+	}
+
+	m_nativeContextMenu->close();
+}
+
+ModernContextMenuHost *ModernShellHost::ensureNativeContextMenuHost() {
+	if (m_nativeContextMenu) {
+		return m_nativeContextMenu;
+	}
+
+	auto *menu = new ModernContextMenuHost(window());
+	menu->setObjectName(QStringLiteral("modernShellNativeContextMenu"));
+	m_nativeContextMenu = menu;
+	connect(menu, &ModernContextMenuHost::actionRequested, this,
+			[this](const QString &actionToken, const int actionIndex) {
+				invokeNativeContextMenuAction(actionToken, actionIndex);
+			});
+	connect(menu, &ModernContextMenuHost::popupClosed, this, [this](const QString &closedToken) {
+		notifyNativeContextMenuClosed(closedToken);
+	});
+	connect(menu, &ModernContextMenuHost::hostFailed, this, [this, menu](const QString &reason) {
+		if (m_nativeContextMenu == menu) {
+			m_nativeContextMenu = nullptr;
+		}
+		menu->deleteLater();
+		emit bootFailed(reason);
+	});
+	return menu;
+}
+
+void ModernShellHost::showNativeContextMenu(const QVariantMap &request) {
+	if (!m_page || !m_view) {
+		return;
+	}
+
+	const QString token      = request.value(QStringLiteral("token")).toString().trimmed();
+	const QVariantList items = request.value(QStringLiteral("items")).toList();
+	if (token.isEmpty() || items.isEmpty()) {
+		return;
+	}
+	m_lastNativeContextMenuRequest = request;
+
+	if (m_nativeContextMenu) {
+		m_nativeContextMenu->close();
+	}
+
+	const int clientX = request.value(QStringLiteral("x")).toInt();
+	const int clientY = request.value(QStringLiteral("y")).toInt();
+	const QPoint globalAnchor = m_view->mapToGlobal(QPoint(clientX, clientY));
+	const QString openSubmenuLabel = request.value(QStringLiteral("openSubmenuLabel")).toString();
+	const QVariantMap uiTweaks = request.value(QStringLiteral("uiTweaks")).toMap();
+
+	ModernContextMenuHost *menu = ensureNativeContextMenuHost();
+	if (!menu) {
+		m_lastNativeContextMenuRequest.clear();
+		return;
+	}
+	if (!menu->showMenu(token, items, globalAnchor, openSubmenuLabel, uiTweaks)) {
+		if (m_nativeContextMenu == menu) {
+			m_nativeContextMenu = nullptr;
+		}
+		menu->deleteLater();
+		m_lastNativeContextMenuRequest.clear();
+	}
+}
+
+void ModernShellHost::publishHostViewportMetrics(const QSize &viewportSize, bool openRail) {
+	if (!m_page || !m_view) {
+		return;
+	}
+
+	const QSize size = viewportSize.isValid() ? viewportSize : m_view->size();
+	const QString script =
+		QStringLiteral("window.mumbleHostViewportWidth=%1;"
+					   "window.mumbleHostViewportHeight=%2;"
+					   "(function(){"
+					   "var shell=document.querySelector('.app-shell');"
+					   "if(shell){"
+					   "var compact=%1<=940;"
+					   "shell.classList.toggle('is-compact-layout',compact);"
+					   "if(compact){"
+					   "shell.classList.add('rail-is-collapsed');"
+					   "shell.classList.remove('rail-user-opened');"
+					   "}"
+					   "}"
+					   "window.dispatchEvent(new CustomEvent('mumble-host-viewport',"
+					   "{detail:{width:%1,height:%2}}));"
+					   "if(compact&&%3){"
+					   "window.setTimeout(function(){"
+					   "var button=document.getElementById('rail-toggle-button');"
+					   "if(button&&button.getAttribute('aria-expanded')!=='true'){button.click();}"
+					   "},0);"
+					   "}"
+					   "})();")
+			.arg(size.width())
+			.arg(size.height())
+			.arg(openRail ? QStringLiteral("true") : QStringLiteral("false"));
+	m_page->runJavaScript(script, QWebEngineScript::MainWorld);
+}
+
 bool ModernShellHost::eventFilter(QObject *watched, QEvent *event) {
 	if (watched == m_view) {
 		const auto extractImageUrls = [](const QMimeData *mimeData) {
@@ -305,7 +486,9 @@ bool ModernShellHost::eventFilter(QObject *watched, QEvent *event) {
 			return pixmap.isNull() ? QImage() : pixmap.toImage();
 		};
 
-		if (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove) {
+		if (event->type() == QEvent::Resize) {
+			publishHostViewportMetrics();
+		} else if (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove) {
 			QDropEvent *dropEvent = static_cast< QDropEvent * >(event);
 			const QList< QUrl > imageUrls = extractImageUrls(dropEvent->mimeData());
 			const QImage image            = extractMimeImage(dropEvent->mimeData());
@@ -362,6 +545,12 @@ void ModernShellHost::handleBridgeBootReady() {
 	appendModernShellConnectTrace(QStringLiteral("ModernShellHost::handleBridgeBootReady"));
 	m_bootReady = true;
 	m_bootTimeoutTimer->stop();
+	publishHostViewportMetrics();
+	QTimer::singleShot(0, this, [this]() {
+		if (ModernContextMenuHost *menu = ensureNativeContextMenuHost()) {
+			menu->prewarm();
+		}
+	});
 }
 
 void ModernShellHost::handleBootTimeout() {

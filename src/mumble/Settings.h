@@ -438,6 +438,14 @@ struct Settings {
 	QByteArray qbaModernMinimalViewGeometry   = {};
 	QByteArray qbaModernMinimalViewState      = {};
 	bool bModernShellMotdExpanded             = true;
+	QString qsModernShellMotdDismissedSignature;
+	QString qsModernShellMotdLastSeenSignature;
+	QString qsModernShellTheme                = QStringLiteral("dark");
+	QString qsModernShellDensity              = QStringLiteral("comfortable");
+	bool bModernShellClassicUserIcons         = false;
+	QString qsModernShellRailSide             = QStringLiteral("right");
+	QString qsModernShellAccent               = QStringLiteral("auto");
+	bool bModernShellTickerBannerAlwaysScroll = false;
 	QByteArray qbaConfigGeometry              = {};
 	QByteArray qbaImagePreviewGeometry        = {};
 	WindowLayout wlWindowLayout               = LayoutHybrid;
@@ -455,7 +463,6 @@ struct Settings {
 	bool bHideInTray                          = false;
 	bool bStateInTray                         = true;
 	bool bUsage                               = false;
-	bool bShowUserCount                       = false;
 	bool bShowVolumeAdjustments               = true;
 	bool bShowNicknamesOnly                   = false;
 	bool bChatBarUseSelection                 = false;
@@ -493,7 +500,8 @@ struct Settings {
 	// Network settings
 	bool bTCPCompat   = false;
 	bool bReconnect   = true;
-	bool bAutoConnect = false;
+	bool bAutoConnect = true;
+	bool bStartWithPC = false;
 	bool bQoS         = true;
 	/// Disables the "Public Internet" section in the connect dialog if set.
 	bool bDisablePublicList    = true;

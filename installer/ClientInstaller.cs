@@ -142,6 +142,7 @@ public class ClientInstaller : MumbleInstall {
 			binaries = new List<string>() {
 				"speexdsp.dll",
 				"mumble.exe",
+				"mumble-updater.exe",
 			};
 
 			if (features.rnnoise) {
@@ -168,6 +169,7 @@ public class ClientInstaller : MumbleInstall {
 			binaries = new List<string>() {
 				"speexdsp.dll",
 				"mumble.exe",
+				"mumble-updater.exe",
 			};
 
 			if (features.rnnoise) {

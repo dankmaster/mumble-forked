@@ -313,6 +313,9 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 	Global::get().bFeedbackEnabled       = false;
 	Global::get().uiFeedbackMaxLogBytes  = Mumble::Feedback::DEFAULT_MAX_LOG_BYTES;
 	Global::get().uiFeedbackMaxBodyBytes = Mumble::Feedback::DEFAULT_MAX_BODY_BYTES;
+	Global::get().qsServerDisplayName.clear();
+	Global::get().qsServerMonogram.clear();
+	Global::get().qbaServerImage.clear();
 
 	Global::get().sh->sendPing(); // Send initial ping to establish UDP connection
 	appendServerSyncTrace(QStringLiteral("sent-ping"));
@@ -515,6 +518,18 @@ void MainWindow::msgServerConfig(const MumbleProto::ServerConfig &msg) {
 	if (msg.has_feedback_max_body_bytes()) {
 		Global::get().uiFeedbackMaxBodyBytes =
 			qMax(1u, msg.feedback_max_body_bytes());
+		modernLayoutCompatibleAdvertised = true;
+	}
+	if (msg.has_server_display_name()) {
+		Global::get().qsServerDisplayName = u8(msg.server_display_name()).trimmed().left(128);
+		modernLayoutCompatibleAdvertised  = true;
+	}
+	if (msg.has_server_monogram()) {
+		Global::get().qsServerMonogram = u8(msg.server_monogram()).trimmed().left(12);
+		modernLayoutCompatibleAdvertised = true;
+	}
+	if (msg.has_server_image()) {
+		Global::get().qbaServerImage = blob(msg.server_image());
 		modernLayoutCompatibleAdvertised = true;
 	}
 	if (screenShareConfigChanged && Global::get().s.bScreenShareDiagnostics) {
@@ -1204,6 +1219,7 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 	appendUserStateTrace(QStringLiteral("post-server-mute"));
 
 	const bool textureChanged = msg.has_texture_hash() || msg.has_texture();
+	const bool commentChanged = msg.has_comment_hash() || msg.has_comment();
 
 	if (msg.has_texture_hash()) {
 		handleUserTextureHash(pDst, blob(msg.texture_hash()));
@@ -1229,6 +1245,9 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 			pmModel->setComment(pDst, u8(msg.comment()));
 		}
 	}
+	if (commentChanged) {
+		clearUserCommentRequest(pDst->uiSession);
+	}
 	appendUserStateTrace(QStringLiteral("post-comment"));
 
 	if (hiddenLegacyUserModelSafeMode) {
@@ -1248,7 +1267,7 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 				queueModernShellSnapshotSync();
 			}
 		}
-		if (textureChanged) {
+		if (textureChanged || commentChanged) {
 			queueModernShellSnapshotSync();
 		}
 	}
@@ -1574,6 +1593,12 @@ void MainWindow::msgTextMessage(const MumbleProto::TextMessage &msg) {
 	Global::get().l->log(privateMessage ? Log::PrivateTextMessage : Log::TextMessage,
 						 tr("%1: %2").arg(prefixMessage).arg(u8(msg.message())), tr("Message from %1").arg(plainName),
 						 false, overrideTTS, pSrc ? pSrc->bLocalIgnoreTTS : false);
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell() && privateMessage && pSrc) {
+		appendModernDirectMessage(pSrc->uiSession, u8(msg.message()), false);
+	}
+#endif
 }
 
 /// This message is being received when the server informs the client about the access control list (ACL) for

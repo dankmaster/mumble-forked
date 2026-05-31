@@ -9,11 +9,15 @@
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 
 #include <QtCore/QUrl>
+#include <QtCore/QSize>
+#include <QtCore/QVariantMap>
 #include <QtGui/QImage>
+#include <QtCore/QPointer>
 #include <QtWidgets/QWidget>
 #include <QtWebEngineCore/QWebEnginePage>
 
 class ModernShellBridge;
+class ModernContextMenuHost;
 class ModernShellPage;
 class QTimer;
 class QVBoxLayout;
@@ -31,6 +35,12 @@ public:
 
 	bool start(QString *errorMessage = nullptr);
 	ModernShellBridge *bridge() const;
+	void publishHostViewportMetrics(const QSize &viewportSize = QSize(), bool openRail = false);
+	void runAutomationScript(const QString &script);
+	QVariant runAutomationScriptResult(const QString &script, int timeoutMilliseconds = 3000);
+	QVariantMap lastNativeContextMenuRequest() const;
+	void clearLastNativeContextMenuRequest();
+	void closeNativeContextMenuForAutomation();
 
 signals:
 	void bootFailed(const QString &reason);
@@ -42,9 +52,15 @@ private slots:
 	void handleRenderProcessTerminated(QWebEnginePage::RenderProcessTerminationStatus status, int exitCode);
 	void handleBridgeBootReady();
 	void handleBootTimeout();
+	void showNativeContextMenu(const QVariantMap &request);
 
 private:
 	bool eventFilter(QObject *watched, QEvent *event) override;
+
+	void notifyNativeContextMenuClosed(const QString &token);
+	void invokeNativeContextMenuAction(const QString &token, int actionIndex);
+	void closeNativeContextMenu();
+	ModernContextMenuHost *ensureNativeContextMenuHost();
 
 	QVBoxLayout *m_layout = nullptr;
 	QWebEngineView *m_view = nullptr;
@@ -53,6 +69,8 @@ private:
 	ModernShellBridge *m_bridge = nullptr;
 	QWebEngineUrlRequestInterceptor *m_requestInterceptor = nullptr;
 	QTimer *m_bootTimeoutTimer = nullptr;
+	QPointer< ModernContextMenuHost > m_nativeContextMenu;
+	QVariantMap m_lastNativeContextMenuRequest;
 	bool m_started = false;
 	bool m_bootReady = false;
 };

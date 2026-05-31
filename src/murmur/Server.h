@@ -28,6 +28,7 @@
 
 #include "database/ConnectionParameter.h"
 
+#include <QtCore/QByteArray>
 #include <QtCore/QEvent>
 #include <QtCore/QMutex>
 #include <QtCore/QQueue>
@@ -171,6 +172,9 @@ public:
 	unsigned int m_botCount = 0;
 
 	QString qsRegName;
+	QString qsServerDisplayName;
+	QString qsServerMonogram;
+	QByteArray qbaServerImage;
 	QString qsRegPassword;
 	QString qsRegHost;
 	QString qsRegLocation;

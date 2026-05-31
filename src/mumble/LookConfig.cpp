@@ -288,7 +288,6 @@ void LookConfig::load(const Settings &r) {
 	loadCheckBox(qcbLockLayout, (r.wlWindowLayout == Settings::LayoutCustom) && r.bLockLayout);
 	loadCheckBox(qcbHideTray, r.bHideInTray);
 	loadCheckBox(qcbStateInTray, r.bStateInTray);
-	loadCheckBox(qcbShowUserCount, r.bShowUserCount);
 	loadCheckBox(qcbShowVolumeAdjustments, r.bShowVolumeAdjustments);
 	loadCheckBox(qcbShowNicknamesOnly, r.bShowNicknamesOnly);
 	loadCheckBox(qcbShowContextMenuInMenuBar, r.bShowContextMenuInMenuBar);
@@ -385,7 +384,6 @@ void LookConfig::save() const {
 	s.bLockLayout               = qcbLockLayout->isChecked();
 	s.bHideInTray               = qcbHideTray->isChecked();
 	s.bStateInTray              = qcbStateInTray->isChecked();
-	s.bShowUserCount            = qcbShowUserCount->isChecked();
 	s.bShowVolumeAdjustments    = qcbShowVolumeAdjustments->isChecked();
 	s.bShowNicknamesOnly        = qcbShowNicknamesOnly->isChecked();
 	s.bShowContextMenuInMenuBar = qcbShowContextMenuInMenuBar->isChecked();

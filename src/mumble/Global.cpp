@@ -136,6 +136,9 @@ Global::Global(const QString &qsConfigPath) {
 	bFeedbackEnabled                 = false;
 	uiFeedbackMaxLogBytes            = 200000;
 	uiFeedbackMaxBodyBytes           = 60000;
+	qsServerDisplayName.clear();
+	qsServerMonogram.clear();
+	qbaServerImage.clear();
 	uiMessageLength             = 5000;
 	uiImageLength               = 131072;
 	uiMaxUsers                  = 0;

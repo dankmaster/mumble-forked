@@ -96,6 +96,7 @@
 	PROCESS(network, USE_QUALITY_OF_SERVICE_KEY, bQoS)                       \
 	PROCESS(network, AUTO_RECONNECT_KEY, bReconnect)                         \
 	PROCESS(network, AUTO_CONNECT_LAST_SERVER_KEY, bAutoConnect)             \
+	PROCESS(network, START_WITH_PC_KEY, bStartWithPC)                        \
 	PROCESS(network, PROXY_TYPE_KEY, ptProxyType)                            \
 	PROCESS(network, PROXY_HOST_KEY, qsProxyHost)                            \
 	PROCESS(network, PROXY_PORT_KEY, usProxyPort)                            \
@@ -181,6 +182,14 @@
 	PROCESS(ui, MODERN_WINDOW_STATE_KEY, qbaModernMainWindowState)                        \
 	PROCESS(ui, MODERN_MINIMAL_VIEW_STATE_KEY, qbaModernMinimalViewState)                 \
 	PROCESS(ui, MODERN_SHELL_MOTD_EXPANDED_KEY, bModernShellMotdExpanded)                 \
+	PROCESS(ui, MODERN_SHELL_MOTD_DISMISSED_SIGNATURE_KEY, qsModernShellMotdDismissedSignature) \
+	PROCESS(ui, MODERN_SHELL_MOTD_LAST_SEEN_SIGNATURE_KEY, qsModernShellMotdLastSeenSignature) \
+	PROCESS(ui, MODERN_SHELL_THEME_KEY, qsModernShellTheme)                               \
+	PROCESS(ui, MODERN_SHELL_DENSITY_KEY, qsModernShellDensity)                           \
+	PROCESS(ui, MODERN_SHELL_CLASSIC_USER_ICONS_KEY, bModernShellClassicUserIcons)         \
+	PROCESS(ui, MODERN_SHELL_RAIL_SIDE_KEY, qsModernShellRailSide)                        \
+	PROCESS(ui, MODERN_SHELL_ACCENT_KEY, qsModernShellAccent)                             \
+	PROCESS(ui, MODERN_SHELL_TICKER_ALWAYS_SCROLL_KEY, bModernShellTickerBannerAlwaysScroll) \
 	PROCESS(ui, CONFIG_GEOMETRY_KEY, qbaConfigGeometry)                                   \
 	PROCESS(ui, IMAGE_PREVIEW_GEOMETRY_KEY, qbaImagePreviewGeometry)                      \
 	PROCESS(ui, WINDOW_LAYOUT_KEY, wlWindowLayout)                                        \
@@ -188,7 +197,6 @@
 	PROCESS(ui, HIDE_IN_TRAY_KEY, bHideInTray)                                            \
 	PROCESS(ui, DISPLAY_TALKING_STATE_IN_TRAY_KEY, bStateInTray)                          \
 	PROCESS(ui, SEND_USAGE_STATISTICS_KEY, bUsage)                                        \
-	PROCESS(ui, DISPLAY_USER_COUNT_KEY, bShowUserCount)                                   \
 	PROCESS(ui, DISPLAY_VOLUME_ADJUSTMENTS_KEY, bShowVolumeAdjustments)                   \
 	PROCESS(ui, DISPLAY_NICKNAMES_ONLY_KEY, bShowNicknamesOnly)                           \
 	PROCESS(ui, SELECTED_ITEM_AS_CHATBAR_TARGET_KEY, bChatBarUseSelection)                \

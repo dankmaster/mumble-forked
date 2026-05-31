@@ -6,6 +6,8 @@
 	let modernDialogState = null;
 	let modernDialogRenderedOpen = false;
 	let modernDialogAdvancedPages = {};
+	let modernDialogPendingFieldUpdates = {};
+	let modernDialogLocalFieldValues = {};
 	let audioInputMeterTimer = 0;
 	let voiceCalibrationState = null;
 	let voiceCalibrationSummary = null;
@@ -18,6 +20,7 @@
 	let stonksDraftPositions = null;
 	let stonksDraftNote = "";
 	let stonksDraftCurrency = "USD";
+	let stonksDraftKey = "";
 	let stonksQuoteSearchText = "";
 	let stonksQuoteSearchBusy = false;
 	let stonksQuoteSearchError = "";
@@ -27,6 +30,40 @@
 	const bridgeRetryLimit = 160;
 	let bridgeRetryTimer = 0;
 	let bridgeRetryCount = 0;
+	const serverIdentityImageMaxFileBytes = 4 * 1024 * 1024;
+	const serverIdentityImageAccept = "image/*,.png,.jpg,.jpeg,.jpe,.jfif,.pjpeg,.pjp,.webp,.gif,.bmp,.dib,.tif,.tiff,.ico,.cur,.icns,.avif,.heic,.heif,.jxl,.svg,.svgz,.tga,.tpic,.pbm,.pgm,.ppm,.wbmp,.xbm,.xpm";
+	const serverIdentityImageExtensionMime = {
+		avif: "image/avif",
+		bmp: "image/bmp",
+		cur: "image/x-icon",
+		dib: "image/bmp",
+		gif: "image/gif",
+		heic: "image/heic",
+		heif: "image/heif",
+		icns: "image/icns",
+		ico: "image/x-icon",
+		jpe: "image/jpeg",
+		jpeg: "image/jpeg",
+		jfif: "image/jpeg",
+		jpg: "image/jpeg",
+		jxl: "image/jxl",
+		pbm: "image/x-portable-bitmap",
+		pgm: "image/x-portable-graymap",
+		png: "image/png",
+		pjp: "image/jpeg",
+		pjpeg: "image/jpeg",
+		ppm: "image/x-portable-pixmap",
+		svg: "image/svg+xml",
+		svgz: "image/svg+xml",
+		tga: "image/x-tga",
+		tif: "image/tiff",
+		tiff: "image/tiff",
+		tpic: "image/x-tga",
+		wbmp: "image/vnd.wap.wbmp",
+		webp: "image/webp",
+		xbm: "image/x-xbitmap",
+		xpm: "image/x-xpixmap"
+	};
 
 	const refs = {
 		layer: document.getElementById("modern-dialog-layer"),
@@ -39,6 +76,115 @@
 		body: document.getElementById("modern-dialog-body"),
 		actions: document.getElementById("modern-dialog-actions")
 	};
+
+	const modernAccentPalette = {
+		teal: { accent: "#5ec8b0", rgb: "94, 200, 176", soft: "rgba(94, 200, 176, 0.16)", border: "rgba(94, 200, 176, 0.42)" },
+		blue: { accent: "#73b7ff", rgb: "115, 183, 255", soft: "rgba(115, 183, 255, 0.16)", border: "rgba(115, 183, 255, 0.42)" },
+		violet: { accent: "#b59cff", rgb: "181, 156, 255", soft: "rgba(181, 156, 255, 0.16)", border: "rgba(181, 156, 255, 0.42)" },
+		amber: { accent: "#f2c76f", rgb: "242, 199, 111", soft: "rgba(242, 199, 111, 0.16)", border: "rgba(242, 199, 111, 0.42)" },
+		rose: { accent: "#ff8aa0", rgb: "255, 138, 160", soft: "rgba(255, 138, 160, 0.16)", border: "rgba(255, 138, 160, 0.42)" }
+	};
+
+	function normalizedModernUiToken(value, fallback, allowed) {
+		const token = String(value || "").trim().toLowerCase();
+		return allowed.indexOf(token) >= 0 ? token : fallback;
+	}
+
+	function applyModernUiTweaks(uiTweaks) {
+		uiTweaks = uiTweaks || {};
+		const theme = normalizedModernUiToken(uiTweaks.theme, "dark",
+			["dark", "light", "mocha", "macchiato", "frappe", "latte", "nord", "gruvbox"]);
+		const density = normalizedModernUiToken(uiTweaks.density, "comfortable",
+			["compact", "comfortable", "spacious"]);
+		const userIcons = normalizedModernUiToken(
+			uiTweaks.userIcons || (uiTweaks.classicUserIcons ? "classic" : "avatars"),
+			"avatars",
+			["avatars", "classic"]);
+		const railSide = normalizedModernUiToken(uiTweaks.railSide, "right", ["left", "right"]);
+		const accent = normalizedModernUiToken(uiTweaks.accent, "auto",
+			["auto", "teal", "blue", "violet", "amber", "rose"]);
+
+		if (document.body) {
+			document.body.dataset.density = density;
+			document.body.dataset.userIcons = userIcons;
+			document.body.dataset.railSide = railSide;
+		}
+		if (document.documentElement) {
+			document.documentElement.dataset.theme = theme;
+			document.documentElement.dataset.accent = accent;
+			const palette = accent === "auto" ? null : modernAccentPalette[accent];
+			if (palette) {
+				document.documentElement.style.setProperty("--accent", palette.accent);
+				document.documentElement.style.setProperty("--accent-rgb", palette.rgb);
+				document.documentElement.style.setProperty("--accent-soft", palette.soft);
+				document.documentElement.style.setProperty("--accent-border", palette.border);
+			} else {
+				document.documentElement.style.removeProperty("--accent");
+				document.documentElement.style.removeProperty("--accent-rgb");
+				document.documentElement.style.removeProperty("--accent-soft");
+				document.documentElement.style.removeProperty("--accent-border");
+			}
+		}
+	}
+
+	function initialsFor(label) {
+		const parts = String(label || "").trim().split(/\s+/).filter(Boolean);
+		if (!parts.length) {
+			return "?";
+		}
+		if (parts.length === 1) {
+			return parts[0].slice(0, 1).toUpperCase();
+		}
+		return (parts[0].slice(0, 1) + parts[1].slice(0, 1)).toUpperCase();
+	}
+
+	function readFileAsDataUrl(file) {
+		return new Promise(function(resolve, reject) {
+			const reader = new FileReader();
+			reader.onload = function() {
+				resolve(String(reader.result || ""));
+			};
+			reader.onerror = function() {
+				reject(reader.error || new Error("Unable to read image file"));
+			};
+			reader.readAsDataURL(file);
+		});
+	}
+
+	function serverIdentityImageExtension(file) {
+		const name = String(file && file.name || "").toLowerCase();
+		const dot = name.lastIndexOf(".");
+		return dot >= 0 ? name.slice(dot + 1) : "";
+	}
+
+	function serverIdentityImageMimeForFile(file) {
+		const type = String(file && file.type || "").trim().toLowerCase();
+		if (type.indexOf("image/") === 0) {
+			return type;
+		}
+		const extension = serverIdentityImageExtension(file);
+		if (Object.prototype.hasOwnProperty.call(serverIdentityImageExtensionMime, extension)) {
+			return serverIdentityImageExtensionMime[extension];
+		}
+		return type ? "" : "image/x-unknown";
+	}
+
+	function serverIdentityFileLooksLikeImage(file) {
+		return !!serverIdentityImageMimeForFile(file);
+	}
+
+	function normalizedServerIdentityImageDataUrl(file, dataUrl) {
+		const value = String(dataUrl || "");
+		if (/^data:image\//i.test(value)) {
+			return value;
+		}
+		const mime = serverIdentityImageMimeForFile(file);
+		const comma = value.indexOf(",");
+		if (!mime || comma < 0) {
+			return value;
+		}
+		return "data:" + mime + ";base64," + value.slice(comma + 1);
+	}
 
 	function notifyBridge(method) {
 		if (!modernBridge || typeof modernBridge[method] !== "function") {
@@ -132,8 +278,159 @@
 		await bridgeLoadPromise;
 	}
 
+	function modernDialogFieldKey(dialogId, fieldId) {
+		return String(dialogId || "") + "\n" + String(fieldId || "");
+	}
+
+	function modernDialogValuesEqual(left, right) {
+		if (left === right) {
+			return true;
+		}
+		if (left == null || right == null) {
+			return left == null && right == null;
+		}
+		if (typeof left === "object" || typeof right === "object") {
+			try {
+				return JSON.stringify(left) === JSON.stringify(right);
+			} catch (error) {
+				// Fall through to string comparison for non-serializable values.
+			}
+		}
+		return String(left) === String(right);
+	}
+
+	function modernDialogCloneFieldValue(value) {
+		if (value == null || typeof value !== "object") {
+			return value;
+		}
+		try {
+			return JSON.parse(JSON.stringify(value));
+		} catch (error) {
+			return value;
+		}
+	}
+
+	function forEachModernDialogField(state, callback) {
+		if (!state || !Array.isArray(state.sections)) {
+			return;
+		}
+
+		state.sections.forEach(function(section) {
+			(section.fields || []).forEach(function(field) {
+				callback(field);
+			});
+		});
+	}
+
+	function findModernDialogField(state, fieldId) {
+		const normalizedId = String(fieldId || "");
+		if (!normalizedId || !state || !Array.isArray(state.sections)) {
+			return null;
+		}
+		for (let sectionIndex = 0; sectionIndex < state.sections.length; sectionIndex += 1) {
+			const fields = Array.isArray(state.sections[sectionIndex] && state.sections[sectionIndex].fields)
+				? state.sections[sectionIndex].fields
+				: [];
+			for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex += 1) {
+				const field = fields[fieldIndex] || {};
+				if (String(field.id || "") === normalizedId) {
+					return field;
+				}
+			}
+		}
+		return null;
+	}
+
+	function modernDialogFocusedFieldId() {
+		const activeElement = document.activeElement;
+		if (!activeElement || !activeElement.dataset) {
+			return "";
+		}
+		return String(activeElement.dataset.modernDialogFieldId || "");
+	}
+
+	function rememberFocusedModernDialogFieldValue() {
+		const activeElement = document.activeElement;
+		const fieldId = modernDialogFocusedFieldId();
+		if (!fieldId || !activeElement) {
+			return;
+		}
+		const field = findModernDialogField(modernDialogState, fieldId);
+		if (!field) {
+			return;
+		}
+		rememberModernDialogFieldValue(fieldId, modernDialogInputValue(field, activeElement));
+	}
+
+	function applyPendingModernDialogFieldValues(state) {
+		if (!state || !Array.isArray(state.sections)) {
+			return state;
+		}
+
+		const dialogId = String(state.id || "");
+		const focusedFieldId = modernDialogFocusedFieldId();
+		const now = Date.now();
+		const localRetentionMs = 10 * 60 * 1000;
+		const sourceConflictGraceMs = 2500;
+
+		forEachModernDialogField(state, function(field) {
+			const fieldId = String(field && field.id || "");
+			if (!fieldId) {
+				return;
+			}
+
+			const pending = modernDialogPendingFieldUpdates[fieldId];
+			if (pending && String(pending.dialogId || "") === dialogId) {
+				field.value = pending.value;
+				return;
+			}
+
+			const key = modernDialogFieldKey(dialogId, fieldId);
+			const local = modernDialogLocalFieldValues[key];
+			if (!local) {
+				return;
+			}
+			const localAgeMs = Math.max(0, now - Number(local.updatedAt || 0));
+
+			if (modernDialogValuesEqual(field.value, local.value)) {
+				if (focusedFieldId !== fieldId) {
+					delete modernDialogLocalFieldValues[key];
+				}
+				return;
+			}
+
+			if (focusedFieldId === fieldId) {
+				field.value = modernDialogCloneFieldValue(local.value);
+				return;
+			}
+
+			if (Object.prototype.hasOwnProperty.call(local, "sourceValue")
+					&& !modernDialogValuesEqual(field.value, local.sourceValue)
+					&& localAgeMs >= sourceConflictGraceMs) {
+				delete modernDialogLocalFieldValues[key];
+				return;
+			}
+
+			if (localAgeMs < localRetentionMs) {
+				field.value = modernDialogCloneFieldValue(local.value);
+				return;
+			}
+
+			delete modernDialogLocalFieldValues[key];
+		});
+
+		return state;
+	}
+
 	function syncModernDialogState(state) {
-		modernDialogState = state || null;
+		if (state && state.open) {
+			rememberFocusedModernDialogFieldValue();
+		}
+		if (!state || !state.open) {
+			modernDialogPendingFieldUpdates = {};
+			modernDialogLocalFieldValues = {};
+		}
+		modernDialogState = applyPendingModernDialogFieldValues(state || null);
 		renderModernDialog();
 	}
 
@@ -154,7 +451,16 @@
 		const firstField = focusable.find(function(element) {
 			return !!element.dataset.modernDialogFieldId;
 		});
-		const target = firstField || focusable[0] || refs.dialog;
+		const firstBodyControl = focusable.find(function(element) {
+			return refs.body && refs.body.contains(element);
+		});
+		const firstAction = focusable.find(function(element) {
+			return refs.actions && refs.actions.contains(element);
+		});
+		const firstNonClose = focusable.find(function(element) {
+			return element !== refs.closeButton;
+		});
+		const target = firstField || firstBodyControl || firstAction || firstNonClose || focusable[0] || refs.dialog;
 		if (target && typeof target.focus === "function") {
 			target.focus({ preventScroll: true });
 		}
@@ -237,6 +543,8 @@
 		if (dialogId) {
 			notifyBridge("closeModernDialog", dialogId);
 		}
+		modernDialogPendingFieldUpdates = {};
+		modernDialogLocalFieldValues = {};
 	}
 
 	function invokeModernDialogAction(actionId, payload) {
@@ -244,16 +552,20 @@
 		if (!dialogId || !actionId) {
 			return;
 		}
+		flushModernDialogFieldUpdates();
 		notifyBridge("invokeModernDialogAction", dialogId, String(actionId), payload || {});
 	}
 
-	function modernDialogFieldValue(field, input) {
+	function modernDialogInputValue(field, input) {
 		const type = String(field && field.type || "text");
 		if (type === "checkbox") {
 			return !!input.checked;
 		}
 		if (type === "select" && String(field && field.valueType || "number") === "string") {
 			return input.value;
+		}
+		if (type === "number" && input.value === "") {
+			return "";
 		}
 		if (type === "number" || type === "range" || type === "select") {
 			const numeric = Number(input.value);
@@ -268,7 +580,9 @@
 		if (!dialogId || !fieldId) {
 			return;
 		}
-		notifyBridge("updateModernDialogField", dialogId, fieldId, modernDialogFieldValue(field, input));
+		const value = modernDialogInputValue(field, input);
+		rememberModernDialogFieldValue(fieldId, value);
+		scheduleModernDialogFieldUpdate(dialogId, fieldId, value, !modernDialogFieldUpdateShouldDebounce(field));
 	}
 
 	function updateModernDialogFieldValue(fieldId, value) {
@@ -277,19 +591,72 @@
 		if (!dialogId || !fieldId) {
 			return;
 		}
+		rememberModernDialogFieldValue(fieldId, value);
+		flushModernDialogFieldUpdate(fieldId);
 		notifyBridge("updateModernDialogField", dialogId, fieldId, value);
 	}
 
+	function modernDialogFieldUpdateShouldDebounce(field) {
+		const type = String(field && field.type || "text");
+		return type === "text" || type === "password" || type === "textarea"
+			|| type === "number" || type === "pathPicker";
+	}
+
+	function scheduleModernDialogFieldUpdate(dialogId, fieldId, value, immediate) {
+		const existing = modernDialogPendingFieldUpdates[fieldId];
+		if (existing && existing.timer) {
+			clearTimeout(existing.timer);
+		}
+		modernDialogPendingFieldUpdates[fieldId] = { dialogId: dialogId, fieldId: fieldId, value: value, timer: 0 };
+		if (immediate) {
+			flushModernDialogFieldUpdate(fieldId);
+			return;
+		}
+		modernDialogPendingFieldUpdates[fieldId].timer = window.setTimeout(function() {
+			flushModernDialogFieldUpdate(fieldId);
+		}, 350);
+	}
+
+	function flushModernDialogFieldUpdate(fieldId) {
+		const pending = modernDialogPendingFieldUpdates[fieldId];
+		if (!pending) {
+			return;
+		}
+		if (pending.timer) {
+			clearTimeout(pending.timer);
+		}
+		delete modernDialogPendingFieldUpdates[fieldId];
+		notifyBridge("updateModernDialogField", pending.dialogId, pending.fieldId, pending.value);
+	}
+
+	function flushModernDialogFieldUpdates() {
+		Object.keys(modernDialogPendingFieldUpdates).forEach(flushModernDialogFieldUpdate);
+	}
+
 	function rememberModernDialogFieldValue(fieldId, value) {
+		const dialogId = String(modernDialogState && modernDialogState.id || "");
+		fieldId = String(fieldId || "");
+		const key = modernDialogFieldKey(dialogId, fieldId);
+		const previousLocal = modernDialogLocalFieldValues[key];
+		const existingField = findModernDialogField(modernDialogState, fieldId);
+		if (dialogId && fieldId) {
+			modernDialogLocalFieldValues[key] = {
+				dialogId: dialogId,
+				fieldId: fieldId,
+				value: modernDialogCloneFieldValue(value),
+				sourceValue: previousLocal && Object.prototype.hasOwnProperty.call(previousLocal, "sourceValue")
+					? previousLocal.sourceValue
+					: (existingField ? modernDialogCloneFieldValue(existingField.value) : undefined),
+				updatedAt: Date.now()
+			};
+		}
 		if (!modernDialogState || !Array.isArray(modernDialogState.sections)) {
 			return;
 		}
-		modernDialogState.sections.forEach(function(section) {
-			(section.fields || []).forEach(function(field) {
-				if (String(field.id || "") === String(fieldId || "")) {
-					field.value = value;
-				}
-			});
+		forEachModernDialogField(modernDialogState, function(field) {
+			if (String(field.id || "") === fieldId) {
+				field.value = modernDialogCloneFieldValue(value);
+			}
 		});
 	}
 
@@ -323,7 +690,7 @@
 		return !!(field && field.advanced);
 	}
 
-	function modernDialogFieldValue(dialog, fieldId) {
+	function modernDialogFieldValueById(dialog, fieldId) {
 		const sections = Array.isArray(dialog && dialog.sections) ? dialog.sections : [];
 		const normalizedId = String(fieldId || "");
 		for (let sectionIndex = 0; sectionIndex < sections.length; ++sectionIndex) {
@@ -350,7 +717,7 @@
 			return true;
 		}
 
-		const value = modernDialogFieldValue(dialog, rule.fieldId);
+		const value = modernDialogFieldValueById(dialog, rule.fieldId);
 		const allowedValues = Array.isArray(rule.values) ? rule.values : [rule.value];
 		return allowedValues.some(function(allowedValue) {
 			return String(allowedValue) === String(value);
@@ -396,6 +763,157 @@
 		});
 		bar.appendChild(button);
 		container.appendChild(bar);
+	}
+
+	function createModernDialogLineIcon(paths) {
+		const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+		svg.setAttribute("viewBox", "0 0 24 24");
+		svg.setAttribute("aria-hidden", "true");
+		(paths || []).forEach(function(pathData) {
+			const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+			path.setAttribute("d", pathData);
+			svg.appendChild(path);
+		});
+		return svg;
+	}
+
+	function modernSettingsIconPaths(pageId) {
+		const paths = {
+			audioInput: ["M12 3v8", "M8 11a4 4 0 0 0 8 0", "M12 17v4", "M8 21h8"],
+			audioOutput: ["M4 9v6h4l5 4V5L8 9H4z", "M16 9a4 4 0 0 1 0 6"],
+			look: ["M12 3a9 9 0 1 0 9 9h-4a2 2 0 0 1-2-2V8a5 5 0 0 0-5-5z", "M7 11h.01", "M10 7h.01", "M15 6h.01"],
+			ui: ["M4 5h16v14H4z", "M4 10h16", "M9 5v14"],
+			messages: ["M5 6h14v9H8l-3 3V6z", "M8 10h8", "M8 13h5"],
+			keys: ["M8 14a4 4 0 1 1 2.8-6.8A4 4 0 0 1 8 14z", "M11 11l7 7", "M15 18l3-3", "M13 16l3-3"],
+			network: ["M12 4a12 12 0 0 1 0 16", "M12 4a12 12 0 0 0 0 16", "M3 12h18", "M5 7h14", "M5 17h14"],
+			screenShare: ["M4 5h16v12H4z", "M8 21h8", "M12 17v4"],
+			about: ["M12 11v6", "M12 7h.01", "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z"],
+			close: ["M8 8l8 8", "M16 8l-8 8"]
+		};
+		return paths[pageId] || paths.ui;
+	}
+
+	function createModernSettingsPageIcon(pageId) {
+		const icon = document.createElement("span");
+		icon.className = "modern-dialog-tab-icon";
+		icon.appendChild(createModernDialogLineIcon(modernSettingsIconPaths(pageId)));
+		return icon;
+	}
+
+	function modernSettingsSelectedPage(dialog) {
+		const pages = Array.isArray(dialog && dialog.pages) ? dialog.pages : [];
+		return pages.find(function(page) {
+			return page && page.selected;
+		}) || pages.find(function(page) {
+			return page && page.id === dialog.activePage;
+		}) || pages[0] || {};
+	}
+
+	function modernSettingsPageMeta(pageId) {
+		const meta = {
+			audioInput: { eyebrow: "Audio", title: "Audio Input", status: "Input changes are staged until Done." },
+			audioOutput: { eyebrow: "Audio", title: "Audio Output", status: "Output changes are staged until Done." },
+			look: { eyebrow: "Preferences", title: "Appearance", status: "Visual changes preview live." },
+			ui: { eyebrow: "Preferences", title: "User Interface", status: "Window and room-list changes are staged until Done." },
+			messages: { eyebrow: "Preferences", title: "Messages & Sounds", status: "Message and sound changes are staged until Done." },
+			keys: { eyebrow: "Controls", title: "Key Bindings", status: "Shortcut edits are staged until Done." },
+			network: { eyebrow: "Network", title: "Network", status: "Connection changes apply after Done." },
+			screenShare: { eyebrow: "Sharing", title: "Screen Sharing", status: "Screen-share changes are staged until Done." },
+			about: { eyebrow: "About", title: "About", status: "Version, Qt, and runtime details." }
+		};
+		return meta[pageId] || { eyebrow: "Settings", title: "Settings", status: "" };
+	}
+
+	function modernDialogAdvancedContentCount(dialog) {
+		let count = 0;
+		(dialog.sections || []).forEach(function(section) {
+			if (section && section.advanced) {
+				count += 1;
+				return;
+			}
+			(section && section.fields || []).forEach(function(field) {
+				if (field && field.advanced && String(field.type || "") !== "hidden") {
+					count += 1;
+				}
+			});
+		});
+		return count;
+	}
+
+	function modernDialogChoiceOptionValue(field, option) {
+		const value = option ? option.value : "";
+		if (String(field && field.valueType || "number") === "string") {
+			return value == null ? "" : String(value);
+		}
+		const numeric = Number(value);
+		return Number.isFinite(numeric) ? numeric : 0;
+	}
+
+	function modernDialogChoiceSwatch(field, option, presentation) {
+		const swatch = document.createElement("span");
+		swatch.className = "modern-dialog-choice-swatch";
+		const value = String(option && option.value || "").toLowerCase();
+		const themeColors = {
+			dark: ["#20262f", "#5ec8b0"],
+			light: ["#eff3f7", "#5ec8b0"],
+			mocha: ["#2d2433", "#b59cff"],
+			macchiato: ["#2a2d42", "#b59cff"],
+			frappe: ["#30344a", "#b59cff"],
+			latte: ["#eef0f5", "#8d6ce6"],
+			nord: ["#2f3845", "#73b7ff"],
+			gruvbox: ["#332c24", "#f2c76f"]
+		};
+		const accentColors = {
+			auto: ["#2b3340", "#5ec8b0"],
+			teal: ["#203734", "#5ec8b0"],
+			blue: ["#21344a", "#73b7ff"],
+			violet: ["#302a4a", "#b59cff"],
+			amber: ["#3d3321", "#f2c76f"],
+			rose: ["#432833", "#ff8aa0"]
+		};
+		const colors = presentation === "accentGrid" ? accentColors[value] : themeColors[value];
+		if (colors) {
+			swatch.style.setProperty("--choice-swatch-bg", colors[0]);
+			swatch.style.setProperty("--choice-swatch-accent", colors[1]);
+		}
+		return swatch;
+	}
+
+	function appendModernDialogChoiceControl(row, field) {
+		const presentation = String(field && field.presentation || "");
+		if (presentation !== "themeGrid" && presentation !== "accentGrid" && presentation !== "segmented") {
+			return false;
+		}
+		const selectedValue = !field || field.value == null ? "" : String(field.value);
+		const wrap = document.createElement("div");
+		wrap.className = "modern-dialog-choice-control is-" + presentation;
+		(field.options || []).forEach(function(option) {
+			const optionValue = !option || option.value == null ? "" : String(option.value);
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "modern-dialog-choice-option" + (optionValue === selectedValue ? " is-selected" : "");
+			button.disabled = field.enabled === false || option.enabled === false;
+			button.setAttribute("aria-pressed", optionValue === selectedValue ? "true" : "false");
+			button.title = modernDialogOptionHint(option) || option.label || optionValue;
+			if (presentation === "themeGrid" || presentation === "accentGrid") {
+				button.appendChild(modernDialogChoiceSwatch(field, option, presentation));
+			}
+			const label = document.createElement("span");
+			label.className = "modern-dialog-choice-label";
+			label.textContent = option.label || optionValue;
+			button.appendChild(label);
+			button.addEventListener("click", function(event) {
+				event.preventDefault();
+				if (button.disabled) {
+					return;
+				}
+				updateModernDialogFieldValue(field.id || "", modernDialogChoiceOptionValue(field, option));
+				renderModernDialog();
+			});
+			wrap.appendChild(button);
+		});
+		row.appendChild(wrap);
+		return true;
 	}
 
 	function appendModernDialogHighlights(container, dialog) {
@@ -786,6 +1304,65 @@
 			hybrid: Number.isFinite(hybrid) ? clampPercent(hybrid) : null,
 			peakCleanMicDb: Number.isFinite(peakCleanMicDb) ? peakCleanMicDb : null
 		};
+	}
+
+	function voiceMeterPayloadNumber(candidate, keys) {
+		if (!candidate || typeof candidate !== "object") {
+			return null;
+		}
+		for (let index = 0; index < keys.length; index += 1) {
+			if (!Object.prototype.hasOwnProperty.call(candidate, keys[index])) {
+				continue;
+			}
+			const value = Number(candidate[keys[index]]);
+			if (Number.isFinite(value)) {
+				return value;
+			}
+		}
+		return null;
+	}
+
+	function voiceMeterInitialPayload(field) {
+		if (!field || typeof field !== "object") {
+			return null;
+		}
+		const value = field.value && typeof field.value === "object" && !Array.isArray(field.value)
+			? field.value
+			: null;
+		const meter = field.meter && typeof field.meter === "object" && !Array.isArray(field.meter)
+			? field.meter
+			: null;
+		const candidate = value || meter;
+		if (!candidate) {
+			return null;
+		}
+		const amplitude = voiceMeterPayloadNumber(candidate, ["amplitude", "level", "value"]);
+		const signalToNoise = voiceMeterPayloadNumber(candidate, ["signalToNoise", "snr", "level"]);
+		const hybrid = voiceMeterPayloadNumber(candidate, ["hybrid", "level"]);
+		const peakCleanMicDb = voiceMeterPayloadNumber(candidate, ["peakCleanMicDb", "peakDb"]);
+		const payload = {
+			available: Object.prototype.hasOwnProperty.call(candidate, "available")
+				? !!candidate.available
+				: (amplitude !== null || signalToNoise !== null || hybrid !== null),
+			transmitting: !!candidate.transmitting,
+			connected: candidate.connected !== false
+		};
+		if (amplitude !== null) {
+			payload.amplitude = amplitude;
+		}
+		if (signalToNoise !== null) {
+			payload.signalToNoise = signalToNoise;
+		}
+		if (hybrid !== null) {
+			payload.hybrid = hybrid;
+		}
+		if (peakCleanMicDb !== null) {
+			payload.peakCleanMicDb = peakCleanMicDb;
+		}
+		if (Object.prototype.hasOwnProperty.call(candidate, "loopbackMode")) {
+			payload.loopbackMode = Number(candidate.loopbackMode) || 0;
+		}
+		return payload;
 	}
 
 	function setVoiceCalibrationMessage(element, message, durationMs) {
@@ -1351,7 +1928,9 @@
 		if (!modernBridge || typeof modernBridge.currentAudioInputMeter !== "function") {
 			return;
 		}
-		const meters = Array.prototype.slice.call(document.querySelectorAll(".modern-dialog-voice-meter"));
+		const meters = Array.prototype.slice.call(document.querySelectorAll(".modern-dialog-voice-meter")).filter(function(element) {
+			return element.dataset.staticMeter !== "true";
+		});
 		if (!meters.length) {
 			return;
 		}
@@ -3139,6 +3718,397 @@
 		container.appendChild(wrap);
 	}
 
+	function modernShortcutEditorOptions(options) {
+		return Array.isArray(options) ? options : [];
+	}
+
+	function modernShortcutEditorSelect(options, selectedValue, valueType, onChange) {
+		const select = document.createElement("select");
+		const selected = selectedValue == null ? "" : String(selectedValue);
+		modernShortcutEditorOptions(options).forEach(function(option) {
+			const item = document.createElement("option");
+			const optionValue = option && option.value != null ? option.value : "";
+			item.value = String(optionValue);
+			item.textContent = option && option.label ? String(option.label) : item.value;
+			item.disabled = option && option.enabled === false;
+			const hint = modernDialogOptionHint(option);
+			if (hint) {
+				item.title = hint;
+			}
+			select.appendChild(item);
+		});
+		if (selected && !Array.prototype.some.call(select.options, function(option) {
+			return option.value === selected;
+		})) {
+			const fallback = document.createElement("option");
+			fallback.value = selected;
+			fallback.textContent = selected;
+			fallback.hidden = true;
+			select.appendChild(fallback);
+		}
+		select.value = selected;
+		select.addEventListener("change", function() {
+			const raw = select.value;
+			const value = valueType === "number" ? Number(raw) : raw;
+			onChange(Number.isFinite(value) || valueType !== "number" ? value : 0);
+		});
+		return select;
+	}
+
+	function modernShortcutEditorChip(text, tone) {
+		const chip = document.createElement("span");
+		chip.className = "modern-shortcut-chip" + (tone ? " is-" + tone : "");
+		chip.textContent = text || "";
+		return chip;
+	}
+
+	function invokeModernShortcutTarget(rowIndex, patch) {
+		const payload = Object.assign({ index: rowIndex }, patch || {});
+		invokeModernDialogAction("keys.shortcutTarget", payload);
+	}
+
+	function appendModernShortcutTargetToggle(container, rowIndex, label, targetAction, checked, disabled) {
+		const toggle = document.createElement("label");
+		toggle.className = "modern-shortcut-target-check";
+		const checkbox = document.createElement("input");
+		checkbox.type = "checkbox";
+		checkbox.checked = !!checked;
+		checkbox.disabled = disabled;
+		checkbox.addEventListener("change", function() {
+			invokeModernShortcutTarget(rowIndex, {
+				targetAction: targetAction,
+				enabled: checkbox.checked
+			});
+		});
+		toggle.appendChild(checkbox);
+		toggle.appendChild(document.createTextNode(label));
+		container.appendChild(toggle);
+	}
+
+	function appendModernShortcutTargetControl(container, field, row, disabled) {
+		const rowIndex = Number(row && row.index) || 0;
+		const target = row && row.target && typeof row.target === "object" ? row.target : {};
+		const mode = String(target.mode || "channel");
+		const panel = document.createElement("div");
+		panel.className = "modern-shortcut-target";
+
+		const summary = document.createElement("div");
+		summary.className = "modern-shortcut-target-summary";
+		summary.appendChild(modernShortcutEditorChip(target.summary || row && row.dataLabel || "Current", "assigned"));
+		panel.appendChild(summary);
+
+		const modeLabel = document.createElement("label");
+		modeLabel.className = "modern-shortcut-target-mode";
+		const modeText = document.createElement("span");
+		modeText.textContent = "Target";
+		modeLabel.appendChild(modeText);
+		const modeSelect = modernShortcutEditorSelect(field.targetModeOptions || [
+			{ value: "selection", label: "Current selection" },
+			{ value: "users", label: "List of users" },
+			{ value: "channel", label: "Channel" }
+		], mode, "string", function(value) {
+			invokeModernShortcutTarget(rowIndex, {
+				targetAction: "mode",
+				mode: value
+			});
+		});
+		modeSelect.disabled = disabled;
+		modeLabel.appendChild(modeSelect);
+		panel.appendChild(modeLabel);
+
+		if (mode === "users") {
+			const users = Array.isArray(target.users) ? target.users : [];
+			const userList = document.createElement("div");
+			userList.className = "modern-shortcut-target-users";
+			if (!users.length) {
+				const empty = document.createElement("span");
+				empty.className = "modern-shortcut-target-empty";
+				empty.textContent = "No users selected";
+				userList.appendChild(empty);
+			}
+			users.forEach(function(user) {
+				const chip = document.createElement("span");
+				chip.className = "modern-shortcut-target-user";
+				chip.appendChild(document.createTextNode(user && user.label || user && user.value || "Unknown"));
+				const remove = document.createElement("button");
+				remove.type = "button";
+				remove.textContent = "Remove";
+				remove.disabled = disabled;
+				remove.addEventListener("click", function(event) {
+					event.preventDefault();
+					invokeModernShortcutTarget(rowIndex, {
+						targetAction: "removeUser",
+						hash: user && user.value || ""
+					});
+				});
+				chip.appendChild(remove);
+				userList.appendChild(chip);
+			});
+			panel.appendChild(userList);
+
+			const addRow = document.createElement("div");
+			addRow.className = "modern-shortcut-target-add-user";
+			const userOptions = Array.isArray(field.targetUserOptions) ? field.targetUserOptions : [];
+			const addSelect = modernShortcutEditorSelect(userOptions, userOptions[0] && userOptions[0].value, "string", function() {});
+			addSelect.disabled = disabled || !userOptions.length;
+			addRow.appendChild(addSelect);
+			const addButton = document.createElement("button");
+			addButton.type = "button";
+			addButton.className = "chip-button";
+			addButton.textContent = "Add";
+			addButton.disabled = disabled || !userOptions.length;
+			addButton.addEventListener("click", function(event) {
+				event.preventDefault();
+				invokeModernShortcutTarget(rowIndex, {
+					targetAction: "addUser",
+					hash: addSelect.value
+				});
+			});
+			addRow.appendChild(addButton);
+			panel.appendChild(addRow);
+		} else if (mode === "channel") {
+			const channelLabel = document.createElement("label");
+			channelLabel.className = "modern-shortcut-target-channel";
+			const label = document.createElement("span");
+			label.textContent = "Channel";
+			channelLabel.appendChild(label);
+			const channelSelect = modernShortcutEditorSelect(field.targetChannelOptions || [], target.channelId, "number", function(value) {
+				invokeModernShortcutTarget(rowIndex, {
+					targetAction: "channel",
+					channelId: value
+				});
+			});
+			channelSelect.disabled = disabled;
+			channelLabel.appendChild(channelSelect);
+			panel.appendChild(channelLabel);
+
+			const groupLabel = document.createElement("label");
+			groupLabel.className = "modern-shortcut-target-group";
+			const groupText = document.createElement("span");
+			groupText.textContent = "Restrict to group";
+			const groupInput = document.createElement("input");
+			groupInput.type = "text";
+			groupInput.value = target.group == null ? "" : String(target.group);
+			groupInput.disabled = disabled;
+			const commitGroup = function() {
+				invokeModernShortcutTarget(rowIndex, {
+					targetAction: "group",
+					group: groupInput.value
+				});
+			};
+			groupInput.addEventListener("change", commitGroup);
+			groupInput.addEventListener("keydown", function(event) {
+				if (event.key === "Enter") {
+					event.preventDefault();
+					commitGroup();
+				}
+			});
+			groupLabel.appendChild(groupText);
+			groupLabel.appendChild(groupInput);
+			panel.appendChild(groupLabel);
+		}
+
+		const checks = document.createElement("div");
+		checks.className = "modern-shortcut-target-checks";
+		appendModernShortcutTargetToggle(checks, rowIndex, "Linked channels", "links", target.links, disabled);
+		appendModernShortcutTargetToggle(checks, rowIndex, "Subchannels", "children", target.children, disabled);
+		appendModernShortcutTargetToggle(checks, rowIndex, "Ignore positional audio", "forceCenter", target.forceCenter, disabled);
+		panel.appendChild(checks);
+
+		container.appendChild(panel);
+	}
+
+	function appendModernShortcutDataControl(container, field, row, disabled) {
+		const type = String(row && row.dataType || "none");
+		if (type === "toggle") {
+			const select = modernShortcutEditorSelect(field.toggleOptions, row.dataValue, "number", function(value) {
+				invokeModernDialogAction("keys.shortcutData", { index: Number(row.index) || 0, value: value });
+			});
+			select.disabled = disabled;
+			container.appendChild(select);
+			return;
+		}
+		if (type === "channel") {
+			const select = modernShortcutEditorSelect(field.channelOptions, row.dataValue, "number", function(value) {
+				invokeModernDialogAction("keys.shortcutData", { index: Number(row.index) || 0, value: value });
+			});
+			select.disabled = disabled;
+			container.appendChild(select);
+			return;
+		}
+		if (type === "target") {
+			appendModernShortcutTargetControl(container, field, row || {}, disabled);
+			return;
+		}
+		if (type === "text") {
+			const input = document.createElement("input");
+			input.type = "text";
+			input.value = row.dataValue == null ? "" : String(row.dataValue);
+			input.disabled = disabled;
+			const commit = function() {
+				invokeModernDialogAction("keys.shortcutData", { index: Number(row.index) || 0, value: input.value });
+			};
+			input.addEventListener("change", commit);
+			input.addEventListener("keydown", function(event) {
+				if (event.key === "Enter") {
+					event.preventDefault();
+					commit();
+				}
+			});
+			container.appendChild(input);
+			return;
+		}
+		container.appendChild(modernShortcutEditorChip(row && row.dataLabel || "No data", "muted"));
+	}
+
+	function appendModernShortcutEditor(container, field, errors) {
+		const wrap = document.createElement("div");
+		wrap.className = "modern-shortcut-editor";
+		const rows = Array.isArray(field && field.rows) ? field.rows : [];
+		const disabled = field && field.enabled === false;
+		const assigned = rows.filter(function(row) {
+			return row && row.assigned;
+		}).length;
+
+		const toolbar = document.createElement("div");
+		toolbar.className = "modern-shortcut-toolbar";
+		const summary = document.createElement("div");
+		summary.className = "modern-shortcut-summary";
+		const title = document.createElement("strong");
+		title.textContent = String(assigned) + " assigned";
+		const subtitle = document.createElement("span");
+		subtitle.textContent = String(rows.length) + " total";
+		summary.appendChild(title);
+		summary.appendChild(subtitle);
+		toolbar.appendChild(summary);
+
+		const add = document.createElement("button");
+		add.type = "button";
+		add.className = "chip-button is-accent modern-shortcut-add";
+		add.textContent = "Add shortcut";
+		add.disabled = disabled;
+		add.addEventListener("click", function(event) {
+			event.preventDefault();
+			invokeModernDialogAction("keys.addShortcut", {});
+		});
+		toolbar.appendChild(add);
+		wrap.appendChild(toolbar);
+
+		if (!rows.length) {
+			const empty = document.createElement("div");
+			empty.className = "modern-shortcut-empty";
+			empty.textContent = "No shortcuts are configured yet.";
+			wrap.appendChild(empty);
+		}
+
+		const list = document.createElement("div");
+		list.className = "modern-shortcut-list";
+		rows.forEach(function(row) {
+			const rowIndex = Number(row && row.index) || 0;
+			const item = document.createElement("article");
+			item.className = "modern-shortcut-row"
+				+ (row && row.capturing ? " is-capturing" : "")
+				+ (row && row.assigned ? " is-assigned" : "");
+
+			const main = document.createElement("div");
+			main.className = "modern-shortcut-main";
+
+			const action = document.createElement("label");
+			action.className = "modern-shortcut-cell is-action";
+			const actionLabel = document.createElement("span");
+			actionLabel.textContent = "Function";
+			const actionSelect = modernShortcutEditorSelect(field.actionOptions, row && row.actionIndex, "number", function(value) {
+				invokeModernDialogAction("keys.shortcutAction", { index: rowIndex, actionIndex: value });
+			});
+			actionSelect.disabled = disabled;
+			action.appendChild(actionLabel);
+			action.appendChild(actionSelect);
+			main.appendChild(action);
+
+			const data = document.createElement("label");
+			data.className = "modern-shortcut-cell is-data";
+			const dataLabel = document.createElement("span");
+			dataLabel.textContent = "Data";
+			data.appendChild(dataLabel);
+			appendModernShortcutDataControl(data, field, row || {}, disabled || row && row.dataEditable === false);
+			main.appendChild(data);
+
+			const input = document.createElement("div");
+			input.className = "modern-shortcut-cell is-input";
+			const inputLabel = document.createElement("span");
+			inputLabel.textContent = "Shortcut";
+			input.appendChild(inputLabel);
+			input.appendChild(modernShortcutEditorChip(row && row.capturing ? "Listening..." : row && row.inputLabel || "Not assigned",
+				row && row.capturing ? "capture" : (row && row.assigned ? "assigned" : "muted")));
+			main.appendChild(input);
+			item.appendChild(main);
+
+			const controls = document.createElement("div");
+			controls.className = "modern-shortcut-controls";
+			if (field && field.canSuppress) {
+				const suppress = document.createElement("label");
+				suppress.className = "modern-shortcut-suppress";
+				const checkbox = document.createElement("input");
+				checkbox.type = "checkbox";
+				checkbox.checked = !!(row && row.suppress);
+				checkbox.disabled = disabled;
+				checkbox.addEventListener("change", function() {
+					invokeModernDialogAction("keys.shortcutSuppress", { index: rowIndex, suppress: checkbox.checked });
+				});
+				suppress.appendChild(checkbox);
+				suppress.appendChild(document.createTextNode("Suppress"));
+				controls.appendChild(suppress);
+			}
+
+			const record = document.createElement("button");
+			record.type = "button";
+			record.className = "chip-button modern-shortcut-record" + (row && row.capturing ? " is-warning" : "");
+			record.textContent = row && row.capturing ? "Cancel" : "Record";
+			record.disabled = disabled || !(field && field.canCapture);
+			record.addEventListener("click", function(event) {
+				event.preventDefault();
+				invokeModernDialogAction(row && row.capturing ? "keys.cancelShortcutCapture" : "keys.beginShortcutCapture", {
+					index: rowIndex
+				});
+			});
+			controls.appendChild(record);
+
+			const clear = document.createElement("button");
+			clear.type = "button";
+			clear.className = "chip-button modern-shortcut-clear";
+			clear.textContent = "Clear";
+			clear.disabled = disabled || !(row && (row.assigned || row.capturing));
+			clear.addEventListener("click", function(event) {
+				event.preventDefault();
+				invokeModernDialogAction("keys.clearShortcut", { index: rowIndex });
+			});
+			controls.appendChild(clear);
+
+			const remove = document.createElement("button");
+			remove.type = "button";
+			remove.className = "chip-button modern-shortcut-remove is-danger";
+			remove.textContent = "Remove";
+			remove.disabled = disabled;
+			remove.addEventListener("click", function(event) {
+				event.preventDefault();
+				invokeModernDialogAction("keys.removeShortcut", { index: rowIndex });
+			});
+			controls.appendChild(remove);
+			item.appendChild(controls);
+			list.appendChild(item);
+		});
+		wrap.appendChild(list);
+
+		const errorText = errors && field && field.id ? errors[field.id] : "";
+		if (errorText) {
+			const error = document.createElement("span");
+			error.className = "modern-dialog-field-error";
+			error.textContent = errorText;
+			wrap.appendChild(error);
+		}
+		container.appendChild(wrap);
+	}
+
 	function appendModernDialogField(container, field, errors) {
 		const type = String(field && field.type || "text");
 		if (type === "hidden") {
@@ -3157,6 +4127,10 @@
 		}
 		if (type === "aclEditor") {
 			appendModernAclEditor(container, field, errors);
+			return;
+		}
+		if (type === "shortcutEditor") {
+			appendModernShortcutEditor(container, field, errors);
 			return;
 		}
 
@@ -3195,18 +4169,23 @@
 			input = document.createElement("input");
 			input.type = "checkbox";
 			input.checked = !!field.value;
+		} else if (type === "select" && appendModernDialogChoiceControl(row, field)) {
+			input = null;
 		} else if (type === "select") {
 			input = document.createElement("select");
 			const selectedValue = field.value == null ? "" : String(field.value);
 			let hasSelectedValue = false;
 			let hasOptionHint = false;
-			(field.options || []).forEach(function(option) {
+			let selectedOptionIndex = -1;
+			(field.options || []).forEach(function(option, optionIndex) {
 				const item = document.createElement("option");
 				item.value = String(option.value);
 				item.textContent = option.label || String(option.value);
 				item.disabled = option.enabled === false;
 				if (item.value === selectedValue) {
 					hasSelectedValue = true;
+					selectedOptionIndex = optionIndex;
+					item.selected = true;
 				}
 				const optionHint = modernDialogOptionHint(option);
 				if (optionHint) {
@@ -3224,6 +4203,9 @@
 				input.appendChild(fallback);
 			}
 			input.value = selectedValue;
+			if (selectedOptionIndex >= 0 && input.value !== selectedValue) {
+				input.selectedIndex = selectedOptionIndex;
+			}
 			if (hasOptionHint) {
 				syncSelectHint = function() {
 					syncModernDialogSelectHint(input, fieldTooltip);
@@ -3258,6 +4240,7 @@
 			meter.dataset.silenceThreshold = String(field.silenceThreshold || 0);
 			meter.dataset.speechThreshold = String(field.speechThreshold || 0);
 			meter.dataset.active = field.active === false ? "false" : "true";
+			meter.dataset.staticMeter = field.staticMeter ? "true" : "false";
 			meter.dataset.calibrationState = String(field.calibrationState || "idle");
 			meter.dataset.calibrationStatusText = String(field.calibrationStatusText || "");
 			meter.dataset.loopbackMode = String(field.loopbackMode || 0);
@@ -3280,7 +4263,7 @@
 				? field.maxAmplification || 0
 				: field.recommendedMaxAmplification);
 			if (fieldTooltip) {
-				meter.title = fieldTooltip;
+				meter.setAttribute("aria-label", fieldTooltip);
 			}
 
 			const header = document.createElement("div");
@@ -3387,7 +4370,7 @@
 			meter.appendChild(track);
 			meter.appendChild(footer);
 			meter.appendChild(coach);
-			updateVoiceMeterElement(meter, null);
+			updateVoiceMeterElement(meter, voiceMeterInitialPayload(field));
 			row.appendChild(meter);
 		} else if (type === "textarea") {
 			input = document.createElement("textarea");
@@ -3411,6 +4394,113 @@
 			picker.appendChild(input);
 			picker.appendChild(browse);
 			row.appendChild(picker);
+		} else if (type === "imagePicker") {
+			const picker = document.createElement("div");
+			picker.className = "modern-dialog-image-picker";
+			input = document.createElement("input");
+			input.type = "hidden";
+			input.value = field.value == null ? "" : String(field.value);
+
+			const imageError = document.createElement("span");
+			imageError.className = "modern-dialog-field-error";
+			imageError.style.display = "none";
+			const setImageError = function(message) {
+				const text = String(message || "");
+				imageError.textContent = text;
+				imageError.style.display = text ? "" : "none";
+			};
+
+			const preview = document.createElement("div");
+			preview.className = "modern-dialog-image-preview";
+			const syncPreview = function() {
+				const value = String(input.value || "");
+				if (value) {
+					preview.classList.add("has-image");
+					preview.style.backgroundImage = "url(\"" + value.replace(/"/g, "%22") + "\")";
+					preview.textContent = "";
+				} else {
+					preview.classList.remove("has-image");
+					preview.style.backgroundImage = "";
+					preview.textContent = initialsFor(field.label || "Server");
+				}
+			};
+
+			const fileInput = document.createElement("input");
+			fileInput.type = "file";
+			fileInput.className = "modern-dialog-image-file";
+			fileInput.accept = field.accept || serverIdentityImageAccept;
+
+			const controls = document.createElement("div");
+			controls.className = "modern-dialog-image-controls";
+			const choose = document.createElement("button");
+			choose.type = "button";
+			choose.className = "chip-button";
+			choose.textContent = field.chooseLabel || "Choose image";
+			choose.disabled = field.enabled === false;
+			choose.addEventListener("click", function(event) {
+				event.preventDefault();
+				fileInput.click();
+			});
+			const remove = document.createElement("button");
+			remove.type = "button";
+			remove.className = "chip-button";
+			remove.textContent = field.removeLabel || "Remove";
+			remove.disabled = field.enabled === false;
+			remove.addEventListener("click", function(event) {
+				event.preventDefault();
+				input.value = "";
+				fileInput.value = "";
+				setImageError("");
+				syncPreview();
+				updateModernDialogField(field, input);
+			});
+			fileInput.addEventListener("change", function() {
+				const file = fileInput.files && fileInput.files[0];
+				if (!file) {
+					return;
+				}
+				if (!serverIdentityFileLooksLikeImage(file)) {
+					setImageError("Choose an image file.");
+					return;
+				}
+				if (file.size > serverIdentityImageMaxFileBytes) {
+					setImageError("Choose an image smaller than 4 MB.");
+					return;
+				}
+				readFileAsDataUrl(file).then(function(dataUrl) {
+					input.value = normalizedServerIdentityImageDataUrl(file, dataUrl);
+					setImageError("");
+					syncPreview();
+					updateModernDialogField(field, input);
+				}).catch(function(error) {
+					console.warn("Unable to read server image:", error);
+					setImageError("Could not read that image.");
+				});
+			});
+			controls.appendChild(choose);
+			controls.appendChild(remove);
+			picker.appendChild(preview);
+			picker.appendChild(controls);
+			picker.appendChild(fileInput);
+			picker.appendChild(input);
+			syncPreview();
+			row.appendChild(picker);
+			row.appendChild(imageError);
+		} else if (type === "button") {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "chip-button modern-dialog-field-button"
+				+ (field.tone ? " is-" + field.tone : "");
+			button.textContent = field.buttonLabel || field.value || field.label || "Action";
+			button.disabled = field.enabled === false;
+			if (fieldTooltip) {
+				button.title = fieldTooltip;
+			}
+			button.addEventListener("click", function(event) {
+				event.preventDefault();
+				invokeModernDialogAction(field.actionId || field.id || "", { fieldId: field.id || "" });
+			});
+			row.appendChild(button);
 		} else {
 			input = document.createElement("input");
 			input.type = type === "password" ? "password" : (type === "number" ? "number" : "text");
@@ -3428,7 +4518,7 @@
 			}
 		}
 
-		if (input && type !== "range" && type !== "pathPicker") {
+		if (input && type !== "range" && type !== "pathPicker" && type !== "imagePicker") {
 			row.appendChild(input);
 		}
 		if (input) {
@@ -3440,6 +4530,14 @@
 			input.addEventListener(type === "checkbox" || type === "select" || type === "range" ? "change" : "input", function() {
 				updateModernDialogField(field, input);
 			});
+			if (modernDialogFieldUpdateShouldDebounce(field)) {
+				input.addEventListener("change", function() {
+					flushModernDialogFieldUpdate(String(field.id || ""));
+				});
+				input.addEventListener("blur", function() {
+					flushModernDialogFieldUpdate(String(field.id || ""));
+				});
+			}
 			if (syncSelectHint) {
 				syncSelectHint();
 			}
@@ -3716,27 +4814,67 @@
 		}, 0);
 	}
 
+	function stonksUserIdValue(value) {
+		const number = Number(value);
+		return Number.isFinite(number) && number >= 0 ? number : null;
+	}
+
+	function stonksSelectedUserId(stonks) {
+		if (stonks && stonks.selectedUserId !== undefined && stonks.selectedUserId !== null) {
+			const selectedUserId = stonksUserIdValue(stonks.selectedUserId);
+			if (selectedUserId !== null) {
+				return selectedUserId;
+			}
+		}
+		const selfUserId = stonksUserIdValue(stonks && stonks.selfUserId);
+		return selfUserId !== null ? selfUserId : 0;
+	}
+
+	function stonksLatestSnapshot(stonks) {
+		const snapshots = Array.isArray(stonks && stonks.snapshots) ? stonks.snapshots : [];
+		return snapshots.length ? snapshots[0] : null;
+	}
+
+	function stonksDraftIdentity(stonks) {
+		const latest = stonksLatestSnapshot(stonks);
+		return [
+			stonksSelectedUserId(stonks),
+			latest && latest.snapshotId || 0,
+			latest && latest.createdAt || 0,
+			latest && latest.totalValue || 0
+		].join(":");
+	}
+
 	function seedStonksDraft(stonks) {
 		const snapshots = Array.isArray(stonks.snapshots) ? stonks.snapshots : [];
 		const latest = snapshots.length ? snapshots[0] : null;
 		const positions = latest && Array.isArray(latest.positions) && latest.positions.length
 			? latest.positions
-			: [stonksEmptyPosition(latest && latest.currency || "USD")];
+			: [];
 		stonksDraftPositions = positions.map(function(position) {
 			return stonksNormalizePosition(position, latest && latest.currency || "USD");
 		});
 		stonksDraftCurrency = latest && latest.currency || "USD";
 		stonksDraftNote = "";
+		stonksDraftKey = stonksDraftIdentity(stonks || {});
 	}
 
 	function ensureStonksDraft(stonks) {
-		if (!Array.isArray(stonksDraftPositions)) {
+		if (!Array.isArray(stonksDraftPositions) || stonksDraftKey !== stonksDraftIdentity(stonks || {})) {
 			seedStonksDraft(stonks || {});
 		}
 	}
 
 	function stonksDraftTotal() {
 		return stonksDraftTotalFromPositions(stonksDraftPositions || []);
+	}
+
+	function stonksDraftHasUserPositions() {
+		return (stonksDraftPositions || []).some(function(position) {
+			const normalized = stonksNormalizePosition(position, stonksDraftCurrency || "USD");
+			return !!(normalized.symbol || stonksNumber(normalized.quantity) || stonksNumber(normalized.price)
+				|| stonksNumber(normalized.marketValue) || normalized.displayName);
+		});
 	}
 
 	function stonksInput(value, field, type, placeholder) {
@@ -3833,6 +4971,22 @@
 	}
 
 	function updateStonksValidation(summary, draft, submit, total) {
+		const positions = Array.isArray(draft.positions) ? draft.positions : [];
+		if (draft.pristine && !positions.length) {
+			summary.innerHTML = "";
+			summary.className = "stonks-validation is-idle";
+			const title = document.createElement("strong");
+			title.textContent = "Add positions to save";
+			summary.appendChild(title);
+			if (total) {
+				total.textContent = formatStonksMoney(0, draft.currency);
+			}
+			if (submit) {
+				submit.disabled = true;
+			}
+			return { errors: [], warnings: [] };
+		}
+
 		const validation = stonksValidateDraft(draft);
 		summary.innerHTML = "";
 		summary.className = "stonks-validation" + (validation.errors.length ? " has-errors" : "");
@@ -4069,7 +5223,7 @@
 				renderModernDialog();
 				return;
 			}
-			invokeModernDialogAction("submitSnapshot", draft);
+			invokeModernDialogAction("savePortfolio", draft);
 		});
 		parent.appendChild(quick);
 	}
@@ -4228,6 +5382,16 @@
 			});
 			table.appendChild(row);
 		});
+		if (!stonksDraftPositions.length) {
+			const empty = document.createElement("div");
+			empty.className = "stonks-position-empty";
+			empty.innerHTML = "<strong></strong><span></span>";
+			empty.querySelector("strong").textContent = "No positions yet";
+			empty.querySelector("span").textContent = stonks.registered
+				? "Search for a ticker or add a manual row to start the ledger."
+				: "This ledger has no visible positions.";
+			table.appendChild(empty);
+		}
 		editor.appendChild(table);
 		const actions = document.createElement("div");
 		actions.className = "stonks-editor-actions";
@@ -4255,12 +5419,17 @@
 				updateStonksValidation(validationSummary, draft, submit, total);
 				return;
 			}
-			invokeModernDialogAction("submitSnapshot", draft);
+			invokeModernDialogAction("savePortfolio", draft);
 		});
 		actions.append(add, total, submit);
 		editor.appendChild(actions);
 		const validationSummary = document.createElement("div");
-		const draft = { positions: stonksDraftPositions || [], currency: stonksDraftCurrency, registered: stonks.registered };
+		const draft = {
+			positions: stonksDraftHasUserPositions() ? (stonksDraftPositions || []) : [],
+			currency: stonksDraftCurrency,
+			registered: stonks.registered,
+			pristine: !stonksDraftHasUserPositions()
+		};
 		updateStonksValidation(validationSummary, draft, submit, total);
 		editor.appendChild(validationSummary);
 		parent.appendChild(editor);
@@ -4509,12 +5678,27 @@
 		}
 
 		const tabs = document.createElement("div");
-		tabs.className = "modern-dialog-tabs";
+		const settingsTabs = dialog && dialog.kind === "settings";
+		tabs.className = "modern-dialog-tabs" + (settingsTabs ? " modern-settings-rail" : "");
 		dialog.pages.forEach(function(page) {
+			const pageId = String(page.id || "");
 			const tab = document.createElement("button");
 			tab.type = "button";
-			tab.className = "modern-dialog-tab" + (page.selected ? " is-selected" : "");
-			tab.textContent = page.label || page.id || "Page";
+			tab.className = "modern-dialog-tab"
+				+ (page.selected ? " is-selected" : "")
+				+ (pageId ? " page-id-" + pageId.replace(/[^a-z0-9_-]/gi, "-") : "");
+			if (pageId) {
+				tab.dataset.pageId = pageId;
+			}
+			if (settingsTabs) {
+				tab.appendChild(createModernSettingsPageIcon(pageId));
+				const label = document.createElement("span");
+				label.className = "modern-dialog-tab-label";
+				label.textContent = page.label || pageId || "Page";
+				tab.appendChild(label);
+			} else {
+				tab.textContent = page.label || page.id || "Page";
+			}
 			tab.addEventListener("click", function() {
 				invokeModernDialogAction("selectPage", { pageId: page.id || "" });
 			});
@@ -4550,6 +5734,115 @@
 		appendModernDialogSections(refs.body, dialog.sections || [], dialog.errors || {}, dialog);
 	}
 
+	function renderSettingsDialog(dialog) {
+		const selectedPage = modernSettingsSelectedPage(dialog);
+		const pageId = String(selectedPage.id || dialog.activePage || "");
+		const meta = modernSettingsPageMeta(pageId);
+		const showAdvanced = modernDialogAdvancedVisible(dialog);
+		const hiddenAdvancedCount = showAdvanced ? 0 : modernDialogAdvancedContentCount(dialog);
+
+		appendModernDialogTabs(refs.body, dialog);
+
+		const content = document.createElement("div");
+		content.className = "modern-settings-content";
+
+		const header = document.createElement("header");
+		header.className = "modern-settings-header";
+		const copy = document.createElement("div");
+		copy.className = "modern-settings-title-copy";
+		const eyebrow = document.createElement("p");
+		eyebrow.className = "modern-settings-eyebrow";
+		eyebrow.textContent = meta.eyebrow;
+		const title = document.createElement("h2");
+		title.className = "modern-settings-title";
+		title.textContent = meta.title || selectedPage.label || "Settings";
+		copy.appendChild(eyebrow);
+		copy.appendChild(title);
+		header.appendChild(copy);
+
+		const tools = document.createElement("div");
+		tools.className = "modern-settings-tools";
+		if (modernDialogHasAdvancedContent(dialog)) {
+			const advanced = document.createElement("button");
+			advanced.type = "button";
+			advanced.className = "chip-button modern-settings-advanced-toggle" + (showAdvanced ? " is-active" : "");
+			advanced.textContent = showAdvanced ? "Basic" : "Advanced";
+			advanced.setAttribute("aria-pressed", showAdvanced ? "true" : "false");
+			advanced.addEventListener("click", function() {
+				setModernDialogAdvancedVisible(dialog, !showAdvanced);
+				renderModernDialog();
+			});
+			tools.appendChild(advanced);
+		}
+		const closeButton = document.createElement("button");
+		closeButton.type = "button";
+		closeButton.className = "icon-button modern-settings-close";
+		closeButton.title = "Close";
+		closeButton.setAttribute("aria-label", "Close");
+		closeButton.appendChild(createModernDialogLineIcon(modernSettingsIconPaths("close")));
+		closeButton.addEventListener("click", closeModernDialog);
+		tools.appendChild(closeButton);
+		header.appendChild(tools);
+		content.appendChild(header);
+
+		const scroll = document.createElement("div");
+		scroll.className = "modern-settings-scroll";
+		appendModernDialogHighlights(scroll, dialog);
+		appendModernDialogSections(scroll, dialog.sections || [], dialog.errors || {}, dialog);
+		content.appendChild(scroll);
+
+		const footer = document.createElement("footer");
+		footer.className = "modern-settings-footer";
+		const status = document.createElement("div");
+		status.className = "modern-settings-status";
+		if (hiddenAdvancedCount > 0 || meta.status) {
+			const text = document.createElement("span");
+			if (hiddenAdvancedCount > 0) {
+				text.textContent = String(hiddenAdvancedCount) + " advanced option"
+					+ (hiddenAdvancedCount === 1 ? "" : "s") + " hidden";
+				const show = document.createElement("button");
+				show.type = "button";
+				show.className = "modern-settings-status-link";
+				show.textContent = "Show advanced";
+				show.addEventListener("click", function() {
+					setModernDialogAdvancedVisible(dialog, true);
+					renderModernDialog();
+				});
+				status.appendChild(text);
+				status.appendChild(show);
+			} else {
+				text.textContent = meta.status;
+				status.appendChild(text);
+			}
+		}
+		footer.appendChild(status);
+
+		const footerActions = document.createElement("div");
+		footerActions.className = "modern-settings-footer-actions";
+		const actions = Array.isArray(dialog.actions) && dialog.actions.length
+			? dialog.actions
+			: [
+				{ id: "cancel", label: "Close", enabled: true },
+				{ id: "ok", label: "Done", enabled: true }
+			];
+		actions.forEach(function(action) {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "chip-button modern-settings-footer-action"
+				+ (action.tone ? " is-" + action.tone : "")
+				+ (dialog.primaryActionId === action.id ? " is-primary" : "");
+			button.disabled = action.enabled === false;
+			button.textContent = action.label || action.id || "Action";
+			button.addEventListener("click", function() {
+				invokeModernDialogAction(action.id || "", {});
+			});
+			footerActions.appendChild(button);
+		});
+		footer.appendChild(footerActions);
+		content.appendChild(footer);
+		refs.body.appendChild(content);
+	}
+
 	function renderModernDialogActions(dialog) {
 		(dialog.actions || []).forEach(function(action) {
 			const button = document.createElement("button");
@@ -4571,6 +5864,9 @@
 		const open = !!dialog.open;
 		if (!refs.layer || !refs.body || !refs.actions || !refs.dialog) {
 			return;
+		}
+		if (open && dialog.uiTweaks) {
+			applyModernUiTweaks(dialog.uiTweaks);
 		}
 		clearModernDialogFavoriteClickTimer();
 		closeModernDialogFavoriteMenu();
@@ -4600,6 +5896,7 @@
 		const opening = !modernDialogRenderedOpen;
 		refs.dialog.className = "modern-dialog" + (dialog.tone ? " is-" + dialog.tone : "")
 			+ (dialog.kind ? " is-" + dialog.kind : "")
+			+ (dialog.kind === "connect" && dialog.editorOpen ? " has-connect-editor" : "")
 			+ (dialog.id ? " dialog-id-" + String(dialog.id).replace(/[^a-z0-9_-]/gi, "-") : "");
 		refs.eyebrow.textContent = dialog.eyebrow || (dialog.kind === "settings" ? "Settings" : "Mumble");
 		refs.title.textContent = dialog.title || "Dialog";
@@ -4611,10 +5908,14 @@
 			renderStonksDialog(dialog);
 		} else if (dialog.kind === "connect") {
 			renderConnectDialog(dialog);
+		} else if (dialog.kind === "settings") {
+			renderSettingsDialog(dialog);
 		} else {
 			renderGenericDialog(dialog);
 		}
-		renderModernDialogActions(dialog);
+		if (dialog.kind !== "settings") {
+			renderModernDialogActions(dialog);
+		}
 		enhanceModernDialogSelects(refs.body);
 		syncAudioInputMeterTimer();
 
@@ -4634,12 +5935,94 @@
 		}
 	}
 
+	function automationModernDialogFieldElement(fieldId) {
+		const targetId = String(fieldId || "");
+		const root = refs.dialog || document.getElementById("modern-dialog") || document;
+		if (!targetId || !root) {
+			return null;
+		}
+		const candidates = root.querySelectorAll("[data-modern-dialog-field-id]");
+		for (let index = 0; index < candidates.length; index += 1) {
+			const candidate = candidates[index];
+			if (String(candidate.dataset.modernDialogFieldId || "") === targetId) {
+				return candidate;
+			}
+		}
+		return null;
+	}
+
+	function automationModernDialogFieldState(fieldId) {
+		const element = automationModernDialogFieldElement(fieldId);
+		const root = refs.dialog || document.getElementById("modern-dialog") || document;
+		const dialog = modernDialogState || {};
+		const field = findModernDialogField(dialog, fieldId);
+		const type = String(field && field.type || (element && element.type) || "");
+		const value = element
+			? (type === "checkbox" ? !!element.checked : String(element.value || ""))
+			: "";
+		const availableFieldIds = root
+			? Array.prototype.slice.call(root.querySelectorAll("[data-modern-dialog-field-id]")).map(function(candidate) {
+				return String(candidate.dataset.modernDialogFieldId || "");
+			}).filter(function(id) {
+				return !!id;
+			})
+			: [];
+		return {
+			dialogId: String(dialog.id || ""),
+			fieldId: String(fieldId || ""),
+			exists: !!element,
+			active: !!(element && document.activeElement === element),
+			type: type,
+			value: value,
+			availableFieldIds: availableFieldIds,
+			stateValue: field ? modernDialogCloneFieldValue(field.value) : null
+		};
+	}
+
+	function automationSetModernDialogFieldValue(fieldId, value, options) {
+		const element = automationModernDialogFieldElement(fieldId);
+		if (!element) {
+			return automationModernDialogFieldState(fieldId);
+		}
+		const setOptions = options || {};
+		const field = findModernDialogField(modernDialogState, fieldId);
+		const type = String(field && field.type || element.type || "");
+		if (setOptions.focus !== false && typeof element.focus === "function") {
+			element.focus({ preventScroll: true });
+		}
+		if (type === "checkbox") {
+			element.checked = !!value;
+			element.dispatchEvent(new Event("change", { bubbles: true }));
+		} else {
+			element.value = value == null ? "" : String(value);
+			if (typeof element.setSelectionRange === "function") {
+				try {
+					const end = element.value.length;
+					element.setSelectionRange(end, end);
+				} catch (error) {
+					// Some input types expose selection APIs but reject range updates.
+				}
+			}
+			element.dispatchEvent(new Event(type === "select" || type === "range" ? "change" : "input", {
+				bubbles: true
+			}));
+		}
+		return automationModernDialogFieldState(fieldId);
+	}
+
+	window.__mumbleModernDialogFieldState = automationModernDialogFieldState;
+	window.__mumbleModernSetDialogFieldValue = automationSetModernDialogFieldValue;
+
 	function wireActions() {
 		if (refs.closeButton) {
 			refs.closeButton.addEventListener("click", closeModernDialog);
 		}
 		if (refs.backdrop) {
-			refs.backdrop.addEventListener("click", closeModernDialog);
+			refs.backdrop.addEventListener("click", function() {
+				if (!modernDialogState || !modernDialogState.preventBackdropClose) {
+					closeModernDialog();
+				}
+			});
 		}
 		window.addEventListener("click", function(event) {
 			if (modernDialogFavoriteMenu && !modernDialogFavoriteMenu.contains(event.target)) {

@@ -27,7 +27,6 @@ namespace {
 			Global::g_global_struct = new Global(configPath);
 		}
 
-		Global::get().s.bShowUserCount = true;
 		Global::get().s.bUserTop       = false;
 		Global::get().s.ceExpand       = Settings::NoChannels;
 

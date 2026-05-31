@@ -34,11 +34,13 @@ private:
 	Settings m_original;
 	Settings m_draft;
 	QString m_activePage = QStringLiteral("look");
+	int m_shortcutCaptureIndex = -1;
 
 	QVariantList pages() const;
 	QVariantList sectionsForActivePage() const;
 	void setActivePage(const QString &pageID);
 	void forceModernLayout();
+	void refreshShortcutRestartFlag();
 };
 
 #endif // MUMBLE_MUMBLE_MODERNSETTINGSCONTROLLER_H_

@@ -1241,9 +1241,6 @@ void ServerHandler::sendChatMessageDelete(MumbleProto::ChatScope scope, unsigned
 
 void ServerHandler::sendChatHistoryGrant(unsigned int userID, MumbleProto::ChatScope scope, unsigned int scopeID,
 										 quint64 visibleAfter, bool revoke) {
-	if (userID == 0) {
-		return;
-	}
 	if (!serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureHistoryGrants)) {
 		return;
 	}

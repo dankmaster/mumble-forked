@@ -9,9 +9,13 @@
 #include <QtCore/QByteArray>
 #include <QtCore/QJsonObject>
 #include <QtCore/QObject>
+#include <QtCore/QString>
 #include <QtCore/QUrl>
 
+#include <functional>
+
 class QNetworkReply;
+class QWidget;
 
 class VersionCheck : public QObject {
 private:
@@ -24,6 +28,7 @@ private:
 	QNetworkReply *m_reply = nullptr;
 	RequestKind m_requestKind = RequestKind::Release;
 	bool m_autocheck         = false;
+	bool m_emitResultsOnly   = false;
 	int m_redirectCount      = 0;
 
 	void request(const QUrl &url, RequestKind kind);
@@ -32,11 +37,24 @@ private:
 protected slots:
 	void performRequest();
 	void replyFinished();
+signals:
+	void updateInfoReceived(const QJsonObject &info, bool updateAvailable);
+	void updateCheckFailed(const QString &message);
 public slots:
 	void fetched(QByteArray data, QUrl url);
 
 public:
-	VersionCheck(bool autocheck, QObject *parent = nullptr, bool focus = false);
+	VersionCheck(bool autocheck, QObject *parent = nullptr, bool focus = false, bool emitResultsOnly = false);
+	static bool canInstallUpdate(const QJsonObject &info);
+	static void installUpdateFromInfo(const QJsonObject &info, QWidget *parent = nullptr);
+	static void downloadUpdateFromInfo(const QJsonObject &info, QWidget *parent, bool showProgress,
+									   std::function< void(const QString &) > readyCallback = {},
+									   std::function< void(const QString &) > failureCallback = {},
+									   std::function< void() > cancelledCallback = {});
+	static QJsonObject describeUpdateHandoff(const QJsonObject &info,
+											 const QString &preparedInstallerPath = QString());
+	static bool canLaunchPreparedUpdate(const QString &installerPath);
+	static bool launchPreparedUpdate(const QString &installerPath, bool passive = true, bool restartAfterInstall = true);
 };
 
 #endif

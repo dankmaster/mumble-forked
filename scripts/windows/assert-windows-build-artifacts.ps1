@@ -34,6 +34,7 @@ function Get-RequiredBinaryNames {
 	if (-not $explicitSelection) {
 		return @(
 			"mumble.exe",
+			"mumble-updater.exe",
 			"mumble-server.exe",
 			"mumble-screen-helper.exe"
 		)
@@ -42,6 +43,7 @@ function Get-RequiredBinaryNames {
 	$required = New-Object System.Collections.Generic.List[string]
 	if ($RequireClient) {
 		$required.Add("mumble.exe")
+		$required.Add("mumble-updater.exe")
 	}
 	if ($RequireServer) {
 		$required.Add("mumble-server.exe")

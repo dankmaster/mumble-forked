@@ -37,6 +37,13 @@ public:
 							const QMap< UnresolvedServerAddress, unsigned int > &pingCache = {});
 	QVariantMap openSettings(const Settings &settings, const QString &pageName = QString());
 	QVariantMap openFailedConnection(const QVariantMap &context);
+	QVariantMap openDisconnectConfirmation(const QString &serverLabel = QString());
+	QVariantMap openQuitConfirmation(bool connected, bool allowMinimize);
+	QVariantMap openDeleteMessageConfirmation(qulonglong messageID, const QString &conversationLabel = QString());
+	QVariantMap openChangeAvatar(unsigned int session, const QString &userName,
+								 const QVariantMap &fieldValues = QVariantMap(),
+								 const QVariantMap &errors = QVariantMap());
+	QVariantMap openMigrationNotice(const QString &dialogID, const QString &title, const QString &message);
 	QVariantMap openGenericDialog(const QVariantMap &dialog);
 	QVariantMap close(const QString &dialogID = QString());
 	QVariantMap updateField(const QString &dialogID, const QString &fieldID, const QVariant &value);

@@ -68,6 +68,7 @@
 #include <functional>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace msdb = ::mumble::server::db;
@@ -96,6 +97,29 @@ QByteArray base64UrlEncode(const QByteArray &input) {
 std::chrono::system_clock::time_point serverCurrentConnectionVisibleAfter(const ServerUser *user) {
 	const int onlineSeconds = user ? std::max(0, user->bwr.onlineSeconds()) : 0;
 	return std::chrono::system_clock::now() - std::chrono::seconds(onlineSeconds + 1);
+}
+
+std::optional< std::pair< unsigned int, unsigned int > > serverPrivateChatParticipantsFromScopeKey(
+	const std::string &scopeKey) {
+	const QString key = QString::fromStdString(scopeKey);
+	if (!key.startsWith(QStringLiteral("private:"))) {
+		return std::nullopt;
+	}
+
+	const QStringList parts = key.mid(QStringLiteral("private:").size()).split(QLatin1Char(':'));
+	if (parts.size() != 2) {
+		return std::nullopt;
+	}
+
+	bool firstOK              = false;
+	bool secondOK             = false;
+	const unsigned int first  = parts.at(0).toUInt(&firstOK);
+	const unsigned int second = parts.at(1).toUInt(&secondOK);
+	if (!firstOK || !secondOK || first == second) {
+		return std::nullopt;
+	}
+
+	return std::make_pair(std::min(first, second), std::max(first, second));
 }
 } // namespace
 
@@ -427,6 +451,8 @@ void Server::readParams() {
 	qsWelcomeTextFile                  = Meta::mp->qsWelcomeTextFile;
 	qlBind                             = Meta::mp->qlBind;
 	qsRegName                          = Meta::mp->qsRegName;
+	qsServerDisplayName                = Meta::mp->qsServerDisplayName;
+	qsServerMonogram                   = Meta::mp->qsServerMonogram;
 	qsRegPassword                      = Meta::mp->qsRegPassword;
 	qsRegHost                          = Meta::mp->qsRegHost;
 	qsRegLocation                      = Meta::mp->qsRegLocation;
@@ -590,6 +616,14 @@ void Server::readParams() {
 	}
 
 	m_dbWrapper.getConfigurationTo(iServerNum, "registername", qsRegName);
+	qbaServerImage = Meta::mp->qbaServerImage;
+	m_dbWrapper.getConfigurationTo(iServerNum, "server_display_name", qsServerDisplayName);
+	m_dbWrapper.getConfigurationTo(iServerNum, "server_monogram", qsServerMonogram);
+	QString serverImageBase64 = QString::fromLatin1(qbaServerImage.toBase64());
+	m_dbWrapper.getConfigurationTo(iServerNum, "server_image", serverImageBase64);
+	qbaServerImage = QByteArray::fromBase64(serverImageBase64.toLatin1());
+	qsServerDisplayName = qsServerDisplayName.trimmed().left(128);
+	qsServerMonogram    = qsServerMonogram.trimmed().left(12);
 	m_dbWrapper.getConfigurationTo(iServerNum, "registerpassword", qsRegPassword);
 	m_dbWrapper.getConfigurationTo(iServerNum, "registerhostname", qsRegHost);
 	m_dbWrapper.getConfigurationTo(iServerNum, "registerlocation", qsRegLocation);
@@ -719,7 +753,7 @@ Server::ChatHistoryAccess Server::resolveChatHistoryAccess(ServerUser *user, Mum
 															unsigned int scopeID, Channel *permissionChannel,
 															ChanACL::ACLCache *cache) {
 	ChatHistoryAccess result;
-	if (!user || !permissionChannel) {
+	if (!user) {
 		return result;
 	}
 
@@ -736,9 +770,21 @@ Server::ChatHistoryAccess Server::resolveChatHistoryAccess(ServerUser *user, Mum
 		case MumbleProto::TextChannel:
 			dbScope = msdb::ChatThreadScope::TextChannel;
 			break;
+		case MumbleProto::Private:
+			if (user->iId < 0 || scopeID == static_cast< unsigned int >(user->iId)
+				|| !m_dbWrapper.registeredUserExists(iServerNum, static_cast< unsigned int >(user->iId))
+				|| !m_dbWrapper.registeredUserExists(iServerNum, scopeID)) {
+				return result;
+			}
+			result.allowed = true;
+			return result;
 		case MumbleProto::Aggregate:
 		default:
 			return result;
+	}
+
+	if (!permissionChannel) {
+		return result;
 	}
 
 	if (user->iId == 0) {
@@ -787,8 +833,27 @@ Server::ChatHistoryAccess Server::resolveChatHistoryAccess(ServerUser *user, con
 			return ok ? resolveChatHistoryAccess(user, MumbleProto::TextChannel, textChannelID, permissionChannel, cache)
 					  : ChatHistoryAccess();
 		}
-		case msdb::ChatThreadScope::Private:
-			return ChatHistoryAccess();
+		case msdb::ChatThreadScope::Private: {
+			if (!user || user->iId < 0) {
+				return ChatHistoryAccess();
+			}
+			const std::optional< std::pair< unsigned int, unsigned int > > participants =
+				serverPrivateChatParticipantsFromScopeKey(thread.scopeKey);
+			if (!participants) {
+				return ChatHistoryAccess();
+			}
+			const unsigned int userID = static_cast< unsigned int >(user->iId);
+			if (participants->first != userID && participants->second != userID) {
+				return ChatHistoryAccess();
+			}
+			if (!m_dbWrapper.registeredUserExists(iServerNum, participants->first)
+				|| !m_dbWrapper.registeredUserExists(iServerNum, participants->second)) {
+				return ChatHistoryAccess();
+			}
+			ChatHistoryAccess access;
+			access.allowed = true;
+			return access;
+		}
 	}
 
 	return ChatHistoryAccess();
@@ -868,7 +933,8 @@ bool Server::canAccessChatAsset(ServerUser *user, unsigned int assetID) {
 				break;
 			}
 			case ::mumble::server::db::ChatThreadScope::Private:
-				continue;
+				permissionChannel = qhChannels.value(Mumble::ROOT_CHANNEL_ID);
+				break;
 		}
 		if (!permissionChannel) {
 			continue;
@@ -1209,6 +1275,31 @@ void Server::setLiveConf(const QString &key, const QString &value) {
 			qsWelcomeText = text;
 			MumbleProto::ServerConfig mpsc;
 			mpsc.set_welcome_text(u8(qsWelcomeText));
+			sendAll(mpsc);
+		}
+	} else if (key == "server_display_name") {
+		QString text = (!v.isNull() ? v : Meta::mp->qsServerDisplayName).trimmed().left(128);
+		if (text != qsServerDisplayName) {
+			qsServerDisplayName = text;
+			MumbleProto::ServerConfig mpsc;
+			mpsc.set_server_display_name(u8(qsServerDisplayName));
+			sendAll(mpsc);
+		}
+	} else if (key == "server_monogram") {
+		QString text = (!v.isNull() ? v : Meta::mp->qsServerMonogram).trimmed().left(12);
+		if (text != qsServerMonogram) {
+			qsServerMonogram = text;
+			MumbleProto::ServerConfig mpsc;
+			mpsc.set_server_monogram(u8(qsServerMonogram));
+			sendAll(mpsc);
+		}
+	} else if (key == "server_image") {
+		const QByteArray imageBytes =
+			!v.isNull() ? QByteArray::fromBase64(v.toLatin1()) : Meta::mp->qbaServerImage;
+		if (imageBytes != qbaServerImage) {
+			qbaServerImage = imageBytes;
+			MumbleProto::ServerConfig mpsc;
+			mpsc.set_server_image(blob(qbaServerImage));
 			sendAll(mpsc);
 		}
 	} else if (key == "registername") {
