@@ -8,8 +8,10 @@
 #include "Global.h"
 #include "MainWindow.h"
 #include "NetworkConfig.h"
+#include "UiTheme.h"
 #include "Version.h"
 
+#include <QApplication>
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -22,6 +24,7 @@
 #include <QMessageBox>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QPalette>
 #include <QProcess>
 #include <QProgressDialog>
 #include <QPushButton>
@@ -447,6 +450,57 @@ QJsonArray stringListJsonArray(const QStringList &items) {
 	return array;
 }
 
+void appendUpdaterThemeColor(QStringList &entries, const QString &key, const QColor &color) {
+	if (color.isValid()) {
+		entries << QStringLiteral("%1=%2").arg(key, color.name(QColor::HexRgb));
+	}
+}
+
+QString updaterUiThemeArgument() {
+	const QPalette palette = qApp ? qApp->palette() : QPalette();
+	const UiThemeWindowChrome chrome = uiThemeWindowChromeForActiveTheme(palette);
+
+	QStringList entries;
+	entries << QStringLiteral("dark=%1").arg(chrome.dark ? 1 : 0);
+	appendUpdaterThemeColor(entries, QStringLiteral("caption"), chrome.caption);
+	appendUpdaterThemeColor(entries, QStringLiteral("captionText"), chrome.text);
+	appendUpdaterThemeColor(entries, QStringLiteral("captionBorder"), chrome.border);
+
+	if (const std::optional< UiThemeTokens > tokens = activeUiThemeTokens(); tokens) {
+		appendUpdaterThemeColor(entries, QStringLiteral("crust"), tokens->crust);
+		appendUpdaterThemeColor(entries, QStringLiteral("mantle"), tokens->mantle);
+		appendUpdaterThemeColor(entries, QStringLiteral("base"), tokens->base);
+		appendUpdaterThemeColor(entries, QStringLiteral("surface0"), tokens->surface0);
+		appendUpdaterThemeColor(entries, QStringLiteral("surface1"), tokens->surface1);
+		appendUpdaterThemeColor(entries, QStringLiteral("surface2"), tokens->surface2);
+		appendUpdaterThemeColor(entries, QStringLiteral("text"), tokens->text);
+		appendUpdaterThemeColor(entries, QStringLiteral("subtext0"), tokens->subtext0);
+		appendUpdaterThemeColor(entries, QStringLiteral("overlay0"), tokens->overlay0);
+		appendUpdaterThemeColor(entries, QStringLiteral("accent"), tokens->accent);
+		appendUpdaterThemeColor(entries, QStringLiteral("accentHover"), tokens->accentHover);
+		appendUpdaterThemeColor(entries, QStringLiteral("success"), tokens->success);
+		appendUpdaterThemeColor(entries, QStringLiteral("warning"), tokens->warning);
+		appendUpdaterThemeColor(entries, QStringLiteral("danger"), tokens->danger);
+		appendUpdaterThemeColor(entries, QStringLiteral("onAccent"),
+								tokens->accent.lightness() > 145 ? tokens->crust : tokens->text);
+	} else {
+		appendUpdaterThemeColor(entries, QStringLiteral("crust"), palette.color(QPalette::Window));
+		appendUpdaterThemeColor(entries, QStringLiteral("mantle"), palette.color(QPalette::Window));
+		appendUpdaterThemeColor(entries, QStringLiteral("base"), palette.color(QPalette::Base));
+		appendUpdaterThemeColor(entries, QStringLiteral("surface0"), palette.color(QPalette::Button));
+		appendUpdaterThemeColor(entries, QStringLiteral("surface1"), palette.color(QPalette::Mid));
+		appendUpdaterThemeColor(entries, QStringLiteral("surface2"), palette.color(QPalette::Light));
+		appendUpdaterThemeColor(entries, QStringLiteral("text"), palette.color(QPalette::WindowText));
+		appendUpdaterThemeColor(entries, QStringLiteral("subtext0"), palette.color(QPalette::Text));
+		appendUpdaterThemeColor(entries, QStringLiteral("overlay0"), palette.color(QPalette::Disabled, QPalette::Text));
+		appendUpdaterThemeColor(entries, QStringLiteral("accent"), palette.color(QPalette::Highlight));
+		appendUpdaterThemeColor(entries, QStringLiteral("accentHover"), palette.color(QPalette::Highlight));
+		appendUpdaterThemeColor(entries, QStringLiteral("onAccent"), palette.color(QPalette::HighlightedText));
+	}
+
+	return entries.join(QLatin1Char(';'));
+}
+
 QStringList bundledUpdaterArguments(const QString &updatePath, const QString &updateDirPath, const bool passive,
 									const QString &updateMode) {
 	const QString appPath = QCoreApplication::applicationFilePath();
@@ -456,7 +510,7 @@ QStringList bundledUpdaterArguments(const QString &updatePath, const QString &up
 	const QString msiLogPath     = updateDir.filePath(QStringLiteral("mumble-update-msi.log"));
 	const QString mode           = updateModeFromPath(updatePath, updateMode);
 
-	return QStringList {
+	QStringList arguments {
 		QStringLiteral("--parent-pid"),
 		QString::number(QCoreApplication::applicationPid()),
 		mode == QLatin1String("package") ? QStringLiteral("--package") : QStringLiteral("--installer"),
@@ -471,6 +525,11 @@ QStringList bundledUpdaterArguments(const QString &updatePath, const QString &up
 		QDir::toNativeSeparators(msiLogPath),
 		passive ? QStringLiteral("--passive") : QStringLiteral("--no-passive"),
 	};
+	const QString uiTheme = updaterUiThemeArgument();
+	if (!uiTheme.isEmpty()) {
+		arguments << QStringLiteral("--ui-theme") << uiTheme;
+	}
+	return arguments;
 }
 
 QStringList msiexecUpdateArguments(const QString &installerPath, const bool passive) {
