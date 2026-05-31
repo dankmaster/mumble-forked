@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="screenshots/modern-client-rich-chat.png" alt="Modern Mumble fork client with a sanitized persistent rich chat preview" width="900">
+  <img src="screenshots/modern-shell-showcase.png" alt="Modern Mumble fork shell showcase with rich preview playback, Stonks, and themeable settings" width="900">
 </p>
 
 ## What This Is
@@ -41,16 +41,16 @@ If you want the official stable Mumble project, start at
 
 ## Screenshots
 
-The modern client shots are cropped from sanitized automation states so the
-README can show real UI surfaces without private server data.
+The modern client shots are cropped or redacted from sanitized automation states
+so the README can show real UI surfaces without private server data.
 
-| Modern Rich Chat | Rich Preview Detail | Direct Messages |
+| Rich Preview Playback | Themeable Settings | Feedback Report |
 | --- | --- | --- |
-| <img src="screenshots/modern-client-rich-chat.png" alt="Modern persistent chat client with playable YouTube preview controls" width="360"> | <img src="screenshots/modern-rich-card-youtube.png" alt="Playable inline YouTube preview card detail" width="360"> | <img src="screenshots/modern-direct-messages.png" alt="Modern direct-message timeline in the WebEngine shell" width="360"> |
+| <img src="screenshots/modern-rich-card-youtube.png" alt="Playable rich preview card with embedded media controls" width="360"> | <img src="screenshots/modern-theme-settings.png" alt="Light theme settings dialog in the Modern shell" width="360"> | <img src="screenshots/modern-feedback-report.png" alt="Modern feedback report dialog with diagnostics and GitHub submit actions" width="360"> |
 
-| Screen Sharing Settings | Stonks Overview | Classic Mumble Baseline |
+| Stonks Live Tape | Modern Context Menus | Crash Archive Guard |
 | --- | --- | --- |
-| <img src="screenshots/modern-screen-sharing-settings.png" alt="Modern screen sharing settings dialog" width="360"> | <img src="screenshots/modern-stonks-overview.png" alt="Modern stonks dashboard overview dialog" width="360"> | <img src="screenshots/Mumble.png" alt="Classic Mumble client in light and dark themes" width="360"> |
+| <img src="screenshots/modern-stonks-overview.png" alt="Modern Stonks live tape dashboard with ledger chart" width="360"> | <img src="screenshots/modern-context-menu.png" alt="Modern cascading context menu popup" width="360"> | <img src="screenshots/modern-crash-github-submit.png" alt="Redacted crash archive dialog with GitHub handoff action" width="360"> |
 
 ## Feature Inventory
 
@@ -64,7 +64,7 @@ community feature set on top. The long-form inventory lives in
 | Persistent chat | Active fork feature | Stored history for voice-room chats, dedicated text rooms, optional server-global chat, read state, unread counts, pagination, replies, deletion, and reactions. |
 | Rich media chat | Active fork feature | Chunked authenticated uploads, image/video/document/binary asset storage, preview thumbnails, inline media rendering, and quota controls. |
 | Link preview cards | Active fork feature | Provider-aware cards for playable YouTube/video previews, social posts, GitHub, Steam, finance links, product/listing pages, news, maps, weather, transit, game stores, and direct media. |
-| Modern client shell | Active fork feature | WebEngine-based chat/navigator shell with persistent rooms, compact message controls, rich cards, room-aware composer state, and a classic fallback path. |
+| Modern client shell | Active fork feature | WebEngine-based chat/navigator shell with persistent rooms, compact message controls, rich cards, room-aware composer state, theme/density variants, Modern dialogs, and a classic fallback path. |
 | Finance and stonks | Active server feature | Cashtag extraction, Yahoo Finance quote cards with chart data, provider links, and a scoped `#stonks` room with scores, leaderboards, and follows. |
 | Watch together | Protocol/server foundation | Capability-gated room media-session messages for synchronized direct media or YouTube playback; client UI is still a future layer. |
 | Screen sharing | Experimental | Capability-gated signaling, server policy/configuration, external helper process, relay/WebRTC scaffolding, and diagnostic logging. |

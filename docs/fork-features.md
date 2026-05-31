@@ -35,15 +35,19 @@ Current capabilities:
 - playable YouTube/video preview controls when the provider and WebEngine surface support inline playback
 - image, GIF, video, product, Steam/game-store, social posts including X/Twitter, GitHub, finance, forum, article, map, place, traffic, and weather card layouts
 - local disk preview cache with selective session refresh for richer providers
+- theme, accent, density, dialog, and context-menu polish for the Modern shell
+- feedback and crash-report handoff flows that avoid publishing private local context by default
 
 Tracked public screenshot assets:
 
+- [`../screenshots/modern-shell-showcase.png`](../screenshots/modern-shell-showcase.png)
 - [`../screenshots/modern-client-rich-chat.png`](../screenshots/modern-client-rich-chat.png)
 - [`../screenshots/modern-rich-card-youtube.png`](../screenshots/modern-rich-card-youtube.png)
-- [`../screenshots/modern-direct-messages.png`](../screenshots/modern-direct-messages.png)
-- [`../screenshots/modern-screen-sharing-settings.png`](../screenshots/modern-screen-sharing-settings.png)
+- [`../screenshots/modern-theme-settings.png`](../screenshots/modern-theme-settings.png)
+- [`../screenshots/modern-feedback-report.png`](../screenshots/modern-feedback-report.png)
+- [`../screenshots/modern-context-menu.png`](../screenshots/modern-context-menu.png)
+- [`../screenshots/modern-crash-github-submit.png`](../screenshots/modern-crash-github-submit.png)
 - [`../screenshots/modern-stonks-overview.png`](../screenshots/modern-stonks-overview.png)
-- [`../screenshots/Mumble.png`](../screenshots/Mumble.png)
 
 ## Persistent Chat
 
