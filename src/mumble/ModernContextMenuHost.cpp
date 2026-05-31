@@ -283,9 +283,6 @@ bool ModernContextMenuHost::eventFilter(QObject *watched, QEvent *event) {
 	}
 
 	switch (event->type()) {
-		case QEvent::ApplicationDeactivate:
-			close();
-			return QWidget::eventFilter(watched, event);
 		case QEvent::KeyPress: {
 			const QKeyEvent *keyEvent = static_cast< QKeyEvent * >(event);
 			if (keyEvent->key() == Qt::Key_Escape) {

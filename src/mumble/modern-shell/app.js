@@ -24622,6 +24622,31 @@
 		window.requestAnimationFrame(fitContextMenuToViewport);
 	}
 
+	function repositionOpenContextMenu() {
+		if (!refs.contextMenu || refs.contextMenu.classList.contains("hidden")) {
+			return;
+		}
+
+		const bounds = refs.contextMenu.getBoundingClientRect();
+		const currentLeft = Number.parseFloat(refs.contextMenu.style.left);
+		const currentTop = Number.parseFloat(refs.contextMenu.style.top);
+		const left = clampedViewportPosition(
+			Number.isFinite(currentLeft) ? currentLeft : bounds.left,
+			bounds.width,
+			window.innerWidth);
+		const top = clampedViewportPosition(
+			Number.isFinite(currentTop) ? currentTop : bounds.top,
+			bounds.height,
+			window.innerHeight);
+		refs.contextMenu.style.left = left + "px";
+		refs.contextMenu.style.top = top + "px";
+		if (contextMenuState) {
+			contextMenuState.left = left;
+			contextMenuState.top = top;
+		}
+		fitContextMenuToViewport();
+	}
+
 	function openContextSubmenuByLabel(label) {
 		if (!refs.contextMenu || refs.contextMenu.classList.contains("hidden")) {
 			return;
@@ -25519,7 +25544,7 @@
 		});
 		window.addEventListener("resize", function() {
 			syncCompactRailState(false);
-			hideContextMenu();
+			repositionOpenContextMenu();
 			if (appMenuOpen) {
 				positionAppMenu();
 			}
@@ -25551,6 +25576,13 @@
 		}
 		window.addEventListener("blur", function() {
 			clearMenuPeekState();
+			closeModernDialogSelect();
+			clearComposerImageDropTarget();
+		});
+		document.addEventListener("visibilitychange", function() {
+			if (!document.hidden) {
+				return;
+			}
 			hideContextMenu();
 			hideAppMenu();
 			hideSelfMenu();
@@ -25575,20 +25607,22 @@
 		refs.voiceRoomList.addEventListener("click", handleRailVoiceJoinCapture, true);
 		refs.utilityScroll.addEventListener("wheel", handleUtilityWheel, { passive: false });
 		refs.utilityScroll.addEventListener("scroll", function() {
-			hideContextMenu();
-			hideSelfMenu();
-			hideDirectMessageTray();
+			if (directMessageTrayOpen) {
+				positionDirectMessageTray();
+			}
 			syncRailOverflowState();
 		});
-		refs.messageList.addEventListener("click", handleMessageImageActivation);
-		refs.messageList.addEventListener("scroll", function() {
-			noteMessageListScrollActivity();
+		refs.messageList.addEventListener("wheel", function() {
 			if (contextMenuState) {
 				hideContextMenu();
 			}
 			if (selfMenuOpen) {
 				hideSelfMenu();
 			}
+		}, { passive: true });
+		refs.messageList.addEventListener("click", handleMessageImageActivation);
+		refs.messageList.addEventListener("scroll", function() {
+			noteMessageListScrollActivity();
 			const shouldCloseReactionPicker =
 				openReactionPickerMessageId !== null && !shouldKeepReactionPickerOpenOnScroll();
 			if (shouldCloseReactionPicker) {
