@@ -4,7 +4,6 @@
 // Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
 #include <windows.h>
-#include <commctrl.h>
 #include <dwmapi.h>
 #include <shellapi.h>
 
@@ -717,6 +716,7 @@ constexpr UINT_PTR UiAutoCloseTimer = 2;
 constexpr DWORD UiRefreshIntervalMsec = 350;
 constexpr DWORD UiAutoCloseDelayMsec = 1800;
 constexpr std::uintmax_t MaxLogTailBytes = 256 * 1024;
+constexpr int MumbleUpdaterIconResourceId = 101;
 
 enum : int {
 	ControlTitle = 1001,
@@ -1078,19 +1078,29 @@ public:
 	explicit UpdaterProgressWindow(const Options &options) : m_options(options), m_theme(themeFromOptions(options)) {}
 
 	bool create(HINSTANCE instance) {
-		INITCOMMONCONTROLSEX commonControls {};
-		commonControls.dwSize = sizeof(commonControls);
-		commonControls.dwICC  = ICC_PROGRESS_CLASS;
-		InitCommonControlsEx(&commonControls);
+		HICON largeIcon = reinterpret_cast< HICON >(LoadImageW(
+			instance, MAKEINTRESOURCEW(MumbleUpdaterIconResourceId), IMAGE_ICON, GetSystemMetrics(SM_CXICON),
+			GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
+		HICON smallIcon = reinterpret_cast< HICON >(LoadImageW(
+			instance, MAKEINTRESOURCEW(MumbleUpdaterIconResourceId), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+			GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+		if (!largeIcon) {
+			largeIcon = LoadIconW(nullptr, IDI_APPLICATION);
+		}
+		if (!smallIcon) {
+			smallIcon = largeIcon;
+		}
 
-		WNDCLASSW windowClass {};
+		WNDCLASSEXW windowClass {};
+		windowClass.cbSize        = sizeof(windowClass);
 		windowClass.lpfnWndProc   = &UpdaterProgressWindow::windowProc;
 		windowClass.hInstance     = instance;
 		windowClass.hCursor       = LoadCursorW(nullptr, IDC_ARROW);
-		windowClass.hIcon         = LoadIconW(nullptr, IDI_APPLICATION);
+		windowClass.hIcon         = largeIcon;
+		windowClass.hIconSm       = smallIcon;
 		windowClass.hbrBackground = nullptr;
 		windowClass.lpszClassName = L"MumbleUpdaterProgressWindow";
-		RegisterClassW(&windowClass);
+		RegisterClassExW(&windowClass);
 
 		const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
 		RECT rect { 0, 0, collapsedWidth(), collapsedHeight() };
@@ -1135,9 +1145,7 @@ private:
 	HFONT m_logFont = nullptr;
 	HBRUSH m_backgroundBrush = nullptr;
 	HBRUSH m_panelBrush = nullptr;
-	HBRUSH m_panelSoftBrush = nullptr;
 	HBRUSH m_logBrush = nullptr;
-	HBRUSH m_accentBrush = nullptr;
 	bool m_detailsVisible = false;
 	bool m_completed = false;
 	bool m_indeterminate = true;
@@ -1275,14 +1283,8 @@ private:
 				if (m_panelBrush) {
 					DeleteObject(m_panelBrush);
 				}
-				if (m_panelSoftBrush) {
-					DeleteObject(m_panelSoftBrush);
-				}
 				if (m_logBrush) {
 					DeleteObject(m_logBrush);
-				}
-				if (m_accentBrush) {
-					DeleteObject(m_accentBrush);
 				}
 				if (m_hwnd == g_updaterWindow.load()) {
 					g_updaterWindow.store(nullptr);
@@ -1423,7 +1425,7 @@ private:
 		if (m_indeterminate && !m_completed) {
 			const int pulseWidth = std::max(70, trackWidth / 3);
 			const int travel = trackWidth + pulseWidth;
-			const int offset = (m_spinnerFrame * 22) % std::max(1, travel);
+			const int offset = (m_activityFrame * 22) % std::max(1, travel);
 			fill.left = track.left + offset - pulseWidth;
 			fill.right = fill.left + pulseWidth;
 			fill.left = std::max(fill.left, track.left);
@@ -1497,9 +1499,7 @@ private:
 	void createControls() {
 		m_backgroundBrush = CreateSolidBrush(m_theme.mantle);
 		m_panelBrush = CreateSolidBrush(m_theme.base);
-		m_panelSoftBrush = CreateSolidBrush(m_theme.surface0);
 		m_logBrush = CreateSolidBrush(m_theme.crust);
-		m_accentBrush = CreateSolidBrush(m_theme.accent);
 
 		m_uiFont = CreateFontW(-15, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
 							   CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH | FF_SWISS, L"Segoe UI");
@@ -1543,23 +1543,23 @@ private:
 		RECT client {};
 		GetClientRect(m_hwnd, &client);
 		const int width = client.right - client.left;
-		const int margin = 18;
-		const int buttonWidth = 104;
-		const int buttonHeight = 28;
-		const int spinnerSize = 28;
-		const int contentLeft = margin + spinnerSize + 12;
+		const int margin = 22;
+		const int buttonWidth = 118;
+		const int buttonHeight = 34;
+		const int badgeSize = 32;
+		const int contentLeft = margin + badgeSize + 12;
 
-		MoveWindow(m_spinner, margin, 22, spinnerSize, 24, TRUE);
-		MoveWindow(m_title, contentLeft, 18, width - contentLeft - margin, 24, TRUE);
-		MoveWindow(m_status, contentLeft, 48, width - contentLeft - margin, 42, TRUE);
-		m_progressRect = { margin, 98, width - margin * 2, 116 };
+		m_badgeRect = { margin, 22, margin + badgeSize, 22 + badgeSize };
+		MoveWindow(m_title, contentLeft, 22, width - contentLeft - margin, 26, TRUE);
+		MoveWindow(m_status, contentLeft, 55, width - contentLeft - margin, 40, TRUE);
+		m_progressRect = { margin, 108, width - margin, 122 };
 
-		const int buttonTop = m_detailsVisible ? expandedHeight() - 48 : collapsedHeight() - 48;
+		const int buttonTop = m_detailsVisible ? expandedHeight() - 56 : collapsedHeight() - 56;
 		MoveWindow(m_detailsButton, margin, buttonTop, buttonWidth, buttonHeight, TRUE);
 		MoveWindow(m_closeButton, width - margin - buttonWidth, buttonTop, buttonWidth, buttonHeight, TRUE);
 
 		if (m_detailsVisible) {
-			MoveWindow(m_log, margin, 132, width - margin * 2, expandedHeight() - 190, TRUE);
+			MoveWindow(m_log, margin, 142, width - margin * 2, expandedHeight() - 214, TRUE);
 			ShowWindow(m_log, SW_SHOWNORMAL);
 		} else {
 			ShowWindow(m_log, SW_HIDE);
@@ -1602,9 +1602,8 @@ private:
 			return;
 		}
 
-		static const wchar_t *frames[] = { L"|", L"/", L"-", L"\\" };
-		m_spinnerFrame = (m_spinnerFrame + 1) % 4;
-		SetWindowTextW(m_spinner, frames[m_spinnerFrame]);
+		m_activityFrame = (m_activityFrame + 1) % 90;
+		InvalidateRect(m_hwnd, &m_badgeRect, FALSE);
 		if (m_indeterminate) {
 			InvalidateRect(m_hwnd, &m_progressRect, FALSE);
 		}
@@ -1619,11 +1618,10 @@ private:
 		if (!target.empty()) {
 			target.append(L"\r\n");
 		}
-		target.append(L"===== ");
 		target.append(label);
-		target.append(L": ");
+		target.append(L" - ");
 		target.append(fileNameForDisplay(path));
-		target.append(L" =====\r\n");
+		target.append(L"\r\n");
 		target.append(text);
 	}
 
@@ -1643,9 +1641,9 @@ private:
 
 		std::wstring combined;
 		if (!updaterLog.empty()) {
-			combined.append(L"===== Updater log: ");
+			combined.append(L"Updater log - ");
 			combined.append(fileNameForDisplay(m_options.updaterLogPath));
-			combined.append(L" =====\r\n");
+			combined.append(L"\r\n");
 			combined.append(updaterLog);
 		}
 		appendLogSection(combined, L"Windows Installer log", m_options.msiLogPath);
@@ -1668,18 +1666,17 @@ private:
 		EnableWindow(m_closeButton, TRUE);
 
 		if (exitCode == 0 || exitCode == RestartRequired) {
-			SetWindowTextW(m_spinner, L"OK");
 			setProgress(100, false);
 			setStatus(m_options.noRelaunch ? L"Update completed." : L"Update completed. Restarting Mumble...");
 			SetTimer(m_hwnd, UiAutoCloseTimer, UiAutoCloseDelayMsec, nullptr);
 		} else {
-			SetWindowTextW(m_spinner, L"!");
 			setProgress(100, false);
 			setStatus(L"Update failed with exit code " + std::to_wstring(exitCode) + L". Open details for logs.");
 			if (!m_detailsVisible) {
 				toggleDetails();
 			}
 		}
+		InvalidateRect(m_hwnd, &m_badgeRect, FALSE);
 	}
 };
 
