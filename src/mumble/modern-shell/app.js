@@ -130,8 +130,11 @@
 	let motdLastSeenSignature = "";
 	let toastStack = null;
 	let toastTimers = {};
+	let toastSequence = 0;
 
 	const imageViewerStorageKey = "mumble-modern-image-viewer";
+	const updateBannerCollapseStorageKey = "mumble-modern-update-banner-collapsed";
+	const maxVisibleToasts = 1;
 	const imageViewerMinWidth = 280;
 	const imageViewerMinHeight = 220;
 	const imageViewerViewportMargin = 12;
@@ -1465,6 +1468,26 @@
 		return toastStack;
 	}
 
+	function toastSignature(toast) {
+		return [
+			String(toast.kind || "info").trim().toLowerCase() || "info",
+			String(toast.title || ""),
+			String(toast.message || ""),
+			String(toast.actionId || ""),
+			String(toast.actionLabel || "")
+		].join("\u001f");
+	}
+
+	function findToastBySignature(signature) {
+		if (!toastStack || !signature) {
+			return null;
+		}
+
+		return Array.prototype.find.call(toastStack.children, function(node) {
+			return node && node.dataset && node.dataset.toastSignature === signature;
+		}) || null;
+	}
+
 	function removeToast(id) {
 		id = String(id || "");
 		if (!id) {
@@ -1483,19 +1506,83 @@
 		}
 	}
 
+	function resetToastTimer(id, timeoutMs) {
+		if (toastTimers[id]) {
+			clearTimeout(toastTimers[id]);
+			delete toastTimers[id];
+		}
+		if (timeoutMs > 0) {
+			toastTimers[id] = setTimeout(function() {
+				removeToast(id);
+			}, timeoutMs);
+		}
+	}
+
+	function updateToastCount(node, count) {
+		if (!node) {
+			return;
+		}
+		node.dataset.toastCount = String(count);
+		let counter = node.querySelector(".toast-count");
+		if (count < 2) {
+			if (counter) {
+				counter.remove();
+			}
+			return;
+		}
+		if (!counter) {
+			counter = document.createElement("span");
+			counter.className = "toast-count";
+			node.appendChild(counter);
+		}
+		counter.textContent = "x" + count;
+	}
+
+	function trimToastStack() {
+		if (!toastStack) {
+			return;
+		}
+		while (toastStack.children.length > maxVisibleToasts) {
+			const oldest = toastStack.firstElementChild;
+			if (!oldest) {
+				return;
+			}
+			removeToast(oldest.dataset.toastId || "");
+		}
+	}
+
 	function showToast(payload) {
 		const toast = payload && typeof payload === "object" ? payload : {};
-		const id = String(toast.id || ("toast-" + Date.now() + "-" + Math.random().toString(36).slice(2)));
 		const kind = String(toast.kind || "info").trim().toLowerCase() || "info";
 		const title = String(toast.title || "");
 		const message = String(toast.message || "");
 		const timeoutMs = Math.max(0, Number(toast.timeoutMs || 4500));
 		const stack = ensureToastStack();
+		const signature = toastSignature({
+			kind: kind,
+			title: title,
+			message: message,
+			actionId: toast.actionId || "",
+			actionLabel: toast.actionLabel || ""
+		});
+		const existing = findToastBySignature(signature);
+		if (existing) {
+			const existingId = existing.dataset.toastId || "";
+			const count = Math.max(1, Number(existing.dataset.toastCount || 1)) + 1;
+			updateToastCount(existing, count);
+			resetToastTimer(existingId, timeoutMs);
+			stack.appendChild(existing);
+			return;
+		}
+
+		const id = String(toast.id || ("toast-" + Date.now() + "-" + (++toastSequence)));
 
 		removeToast(id);
 		const node = document.createElement("section");
 		node.className = "toast is-" + kind;
 		node.dataset.toastId = id;
+		node.dataset.toastSignature = signature;
+		node.dataset.toastCount = "1";
 		node.setAttribute("role", kind === "error" ? "alert" : "status");
 
 		const copy = document.createElement("div");
@@ -1536,12 +1623,8 @@
 		});
 		node.appendChild(close);
 		stack.appendChild(node);
-
-		if (timeoutMs > 0) {
-			toastTimers[id] = setTimeout(function() {
-				removeToast(id);
-			}, timeoutMs);
-		}
+		trimToastStack();
+		resetToastTimer(id, timeoutMs);
 	}
 
 	async function ensureBridge() {
@@ -3915,6 +3998,7 @@
 			: [];
 		const percent = Number(update.progressPercent);
 		return {
+			isUpdate: true,
 			tone: String(update.tone || "accent").trim().toLowerCase() || "accent",
 			title: String(update.title || "Mumble update"),
 			detail: String(update.detail || ""),
@@ -3922,12 +4006,61 @@
 			progressVisible: !!update.progressVisible,
 			progressIndeterminate: !!update.progressIndeterminate || !(percent >= 0),
 			progressPercent: percent >= 0 ? Math.max(0, Math.min(100, percent)) : -1,
-			progressLabel: String(update.progressLabel || "")
+			progressLabel: String(update.progressLabel || ""),
+			signature: updateBannerSignature(update)
 		};
 	}
 
 	function primaryBannerState(app) {
 		return updateBannerState(app) || connectionBannerState(app);
+	}
+
+	function updateBannerSignature(update) {
+		return [
+			String(update && update.phase || ""),
+			String(update && update.title || ""),
+			String(update && update.detail || "")
+		].join("\u001f");
+	}
+
+	function readCollapsedUpdateBannerSignatures() {
+		try {
+			const raw = window.localStorage
+				? String(window.localStorage.getItem(updateBannerCollapseStorageKey) || "")
+				: "";
+			const parsed = raw ? JSON.parse(raw) : [];
+			return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [];
+		} catch (error) {
+			return [];
+		}
+	}
+
+	function writeCollapsedUpdateBannerSignatures(signatures) {
+		try {
+			if (window.localStorage) {
+				window.localStorage.setItem(updateBannerCollapseStorageKey, JSON.stringify(signatures.slice(-12)));
+			}
+		} catch (error) {
+			// Ignore storage failures; collapse is a convenience state.
+		}
+	}
+
+	function updateBannerIsCollapsed(signature) {
+		return readCollapsedUpdateBannerSignatures().indexOf(String(signature || "")) >= 0;
+	}
+
+	function setUpdateBannerCollapsed(signature, collapsed) {
+		signature = String(signature || "");
+		if (!signature) {
+			return;
+		}
+		const signatures = readCollapsedUpdateBannerSignatures().filter(function(item) {
+			return item !== signature;
+		});
+		if (collapsed) {
+			signatures.push(signature);
+		}
+		writeCollapsedUpdateBannerSignatures(signatures);
 	}
 
 	function renderConnectionOrScopeBanner(app, scope) {
@@ -3951,9 +4084,23 @@
 			return;
 		}
 
+		const bannerCollapsed = banner.isUpdate && updateBannerIsCollapsed(banner.signature);
+		if (banner.isUpdate) {
+			refs.scopeBanner.classList.add("is-update");
+			refs.scopeBanner.dataset.updateBannerSignature = banner.signature || "";
+		} else {
+			delete refs.scopeBanner.dataset.updateBannerSignature;
+		}
+		refs.scopeBanner.classList.toggle("is-collapsed", !!bannerCollapsed);
 		refs.scopeBanner.classList.add("is-" + banner.tone);
 		const copy = document.createElement("div");
 		copy.className = "connection-banner-copy";
+		if (banner.isUpdate) {
+			const eyebrow = document.createElement("span");
+			eyebrow.className = "connection-banner-eyebrow";
+			eyebrow.textContent = "Update";
+			copy.appendChild(eyebrow);
+		}
 		const title = document.createElement("strong");
 		title.textContent = banner.title;
 		const detail = document.createElement("span");
@@ -3991,9 +4138,23 @@
 		const bannerActions = Array.isArray(banner.actions) && banner.actions.length
 			? banner.actions
 			: (banner.action ? [{ id: banner.action, label: banner.action === "connect" ? "Reconnect" : "Cancel" }] : []);
-		if (bannerActions.length) {
+		if (bannerActions.length || banner.isUpdate) {
 			const actions = document.createElement("div");
 			actions.className = "connection-banner-actions";
+			if (banner.isUpdate) {
+				const collapse = document.createElement("button");
+				collapse.type = "button";
+				collapse.className = "icon-button connection-banner-collapse";
+				collapse.title = bannerCollapsed ? "Expand update notice" : "Collapse update notice";
+				collapse.setAttribute("aria-label", collapse.title);
+				collapse.setAttribute("aria-expanded", bannerCollapsed ? "false" : "true");
+				collapse.innerHTML = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M6 9l6 6 6-6\"></path></svg>";
+				collapse.addEventListener("click", function() {
+					setUpdateBannerCollapsed(banner.signature, !bannerCollapsed);
+					renderConnectionOrScopeBanner(app, scope);
+				});
+				actions.appendChild(collapse);
+			}
 			bannerActions.forEach(function(bannerAction) {
 				const actionId = String(bannerAction.id || "");
 				if (!actionId) {

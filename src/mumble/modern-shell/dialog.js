@@ -98,6 +98,23 @@
 		}
 	}
 
+	function initialModernUiTweaks() {
+		if (!window.MumbleModernTheme) {
+			return {};
+		}
+		const fromBootstrap = typeof window.MumbleModernTheme.uiTweaksFromBootstrap === "function"
+			? window.MumbleModernTheme.uiTweaksFromBootstrap()
+			: {};
+		const fromSearch = typeof window.MumbleModernTheme.uiTweaksFromSearch === "function"
+			? window.MumbleModernTheme.uiTweaksFromSearch(window.location.search)
+			: {};
+		return Object.assign({}, fromBootstrap || {}, fromSearch || {});
+	}
+
+	function resolvedModernDialogUiTweaks(state) {
+		return Object.assign({}, initialModernUiTweaks(), (state && state.uiTweaks) || {});
+	}
+
 	function initialsFor(label) {
 		const parts = String(label || "").trim().split(/\s+/).filter(Boolean);
 		if (!parts.length) {
@@ -394,6 +411,9 @@
 	}
 
 	function syncModernDialogState(state) {
+		if (state && state.open) {
+			applyModernUiTweaks(resolvedModernDialogUiTweaks(state));
+		}
 		if (state && state.open) {
 			rememberFocusedModernDialogFieldValue();
 		}
@@ -7065,8 +7085,8 @@
 		if (!refs.layer || !refs.body || !refs.actions || !refs.dialog) {
 			return;
 		}
-		if (open && dialog.uiTweaks) {
-			applyModernUiTweaks(dialog.uiTweaks);
+		if (open) {
+			applyModernUiTweaks(resolvedModernDialogUiTweaks(dialog));
 		}
 		clearModernDialogFavoriteClickTimer();
 		closeModernDialogFavoriteMenu();
