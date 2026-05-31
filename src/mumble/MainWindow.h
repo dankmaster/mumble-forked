@@ -416,6 +416,8 @@ public:
 	bool requestPersistentChatSteamReviewPreview(const QString &previewKey, const QString &appId);
 	bool requestPersistentChatOEmbedPreview(const QString &previewKey, const QUrl &previewUrl);
 	bool requestPersistentChatRedditVideoPreview(const QString &previewKey, const QUrl &previewUrl);
+	bool requestPersistentChatRedditDashManifestPreview(const QString &previewKey, const QString &videoId,
+														const QString &metadataFailureText = QString());
 	bool requestPersistentChatRedditVideoAudioPreview(const QString &previewKey, const QUrl &dashManifestUrl);
 	bool requestPersistentChatRemotePlayableMediaCache(const QString &previewKey, const QUrl &mediaUrl,
 													   const QString &suggestedMime = QString(),

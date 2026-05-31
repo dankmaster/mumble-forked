@@ -1,18 +1,14 @@
 (function() {
 	"use strict";
 
-	const allowedThemes = ["dark", "light", "engine", "mocha", "macchiato", "frappe", "latte", "nord", "gruvbox"];
-	const allowedAccents = ["auto", "teal", "blue", "violet", "amber", "rose"];
+	const fallbackThemes = ["dark", "light", "engine", "mocha", "macchiato", "frappe", "latte", "nord", "gruvbox"];
+	const fallbackAccents = ["auto", "teal", "blue", "violet", "amber", "rose"];
+	let allowedThemes = fallbackThemes.slice();
+	let allowedAccents = fallbackAccents.slice();
 	const allowedDensities = ["compact", "comfortable", "spacious"];
 	const allowedUserIcons = ["avatars", "classic"];
 	const allowedRailSides = ["left", "right"];
-	const accentPalette = {
-		teal: { accent: "#5ec8b0", rgb: "94, 200, 176", soft: "rgba(94, 200, 176, 0.16)", border: "rgba(94, 200, 176, 0.42)" },
-		blue: { accent: "#73b7ff", rgb: "115, 183, 255", soft: "rgba(115, 183, 255, 0.16)", border: "rgba(115, 183, 255, 0.42)" },
-		violet: { accent: "#b59cff", rgb: "181, 156, 255", soft: "rgba(181, 156, 255, 0.16)", border: "rgba(181, 156, 255, 0.42)" },
-		amber: { accent: "#f2c76f", rgb: "242, 199, 111", soft: "rgba(242, 199, 111, 0.16)", border: "rgba(242, 199, 111, 0.42)" },
-		rose: { accent: "#ff8aa0", rgb: "255, 138, 160", soft: "rgba(255, 138, 160, 0.16)", border: "rgba(255, 138, 160, 0.42)" }
-	};
+	const accentPalette = {};
 	let lastAppliedTweaks = null;
 	let lastAppliedThemeTokenNames = [];
 
@@ -64,7 +60,59 @@
 		return contrastWithBlack >= contrastWithWhite ? "#081210" : "#ffffff";
 	}
 
+	function computedCssVariable(root, name) {
+		if (!root || !window.getComputedStyle) {
+			return "";
+		}
+		return window.getComputedStyle(root).getPropertyValue(name).trim();
+	}
+
+	function cssTokenList(root, name, fallback) {
+		const value = computedCssVariable(root, name);
+		const tokens = value.split(/\s+/).map(function(token) {
+			return token.trim().toLowerCase();
+		}).filter(function(token) {
+			return /^[a-z0-9-]+$/i.test(token);
+		});
+		return tokens.length ? tokens : fallback.slice();
+	}
+
+	function refreshThemeMetadata(root) {
+		allowedThemes = cssTokenList(root, "--theme-supported-themes", fallbackThemes);
+		allowedAccents = cssTokenList(root, "--theme-supported-accents", fallbackAccents);
+	}
+
+	function accentPaletteEntryFromTokens(root, accent) {
+		const prefix = "--theme-accent-" + accent;
+		const color = computedCssVariable(root, prefix);
+		const rgb = computedCssVariable(root, prefix + "-rgb");
+		if (!color || !rgb) {
+			return null;
+		}
+		return {
+			accent: color,
+			rgb: rgb,
+			soft: computedCssVariable(root, prefix + "-soft") || ("rgba(" + rgb + ", 0.16)"),
+			border: computedCssVariable(root, prefix + "-border") || ("rgba(" + rgb + ", 0.42)")
+		};
+	}
+
+	function refreshAccentPalette(root) {
+		allowedAccents.forEach(function(accent) {
+			if (accent === "auto") {
+				return;
+			}
+			const palette = accentPaletteEntryFromTokens(root, accent);
+			if (palette) {
+				accentPalette[accent] = palette;
+			} else {
+				delete accentPalette[accent];
+			}
+		});
+	}
+
 	function applyAccent(root, accent) {
+		refreshAccentPalette(root);
 		const palette = accent === "auto" ? null : accentPalette[accent];
 		if (palette) {
 			root.style.setProperty("--accent", palette.accent);
@@ -140,14 +188,20 @@
 	}
 
 	function apply(uiTweaks) {
-		const normalized = normalizedTweaks(uiTweaks);
+		uiTweaks = uiTweaks || {};
+		const root = document.documentElement;
+		const incomingThemeTokens = normalizedThemeTokens(uiTweaks.themeTokens);
+		if (root) {
+			applyThemeTokens(root, incomingThemeTokens);
+			refreshThemeMetadata(root);
+		}
+		const normalized = normalizedTweaks(Object.assign({}, uiTweaks, { themeTokens: incomingThemeTokens }));
 		lastAppliedTweaks = normalized;
 
-		const root = document.documentElement;
 		if (root) {
 			root.dataset.theme = normalized.theme;
 			root.dataset.accent = normalized.accent;
-			applyThemeTokens(root, normalized.themeTokens);
+			refreshAccentPalette(root);
 			if (normalized.accent !== "auto" || !Object.keys(normalized.themeTokens).length) {
 				applyAccent(root, normalized.accent);
 			}
@@ -159,6 +213,23 @@
 			document.body.dataset.railSide = normalized.railSide;
 		}
 
+		return normalized;
+	}
+
+	function applyTokens(target, tokens) {
+		const root = target && target.style ? target : document.documentElement;
+		const normalized = normalizedThemeTokens(tokens);
+		Object.keys(normalized).forEach(function(name) {
+			root.style.setProperty(name, normalized[name]);
+		});
+		if (root === document.documentElement) {
+			refreshThemeMetadata(root);
+			if (root.dataset.accent && root.dataset.accent !== "auto") {
+				applyAccent(root, root.dataset.accent);
+			} else {
+				refreshAccentPalette(root);
+			}
+		}
 		return normalized;
 	}
 
@@ -186,7 +257,11 @@
 	window.MumbleModernTheme = {
 		accentPalette: accentPalette,
 		apply: apply,
+		applyTokens: applyTokens,
 		normalizedTweaks: normalizedTweaks,
+		normalizedThemeTokens: normalizedThemeTokens,
+		supportedAccents: function() { return allowedAccents.slice(); },
+		supportedThemes: function() { return allowedThemes.slice(); },
 		uiTweaksFromBootstrap: uiTweaksFromBootstrap,
 		uiTweaksFromSearch: uiTweaksFromSearch
 	};

@@ -1503,6 +1503,52 @@ QList< QUrl > extractPreviewableUrls(const QString &text) {
 	return urls;
 }
 
+QString normalizedChatPreviewHost(QString host) {
+	host = host.trimmed().toLower();
+	if (host.startsWith(QLatin1String("www."))) {
+		host.remove(0, 4);
+	}
+	if (host.startsWith(QLatin1String("old."))) {
+		host.remove(0, 4);
+	}
+	if (host.startsWith(QLatin1String("new."))) {
+		host.remove(0, 4);
+	}
+	if (host.startsWith(QLatin1String("m."))) {
+		host.remove(0, 2);
+	}
+	if (host.startsWith(QLatin1String("mobile."))) {
+		host.remove(0, 7);
+	}
+	return host;
+}
+
+QString firstChatPreviewPathSegment(const QUrl &url) {
+	const QStringList segments = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+	return segments.isEmpty() ? QString() : segments.front();
+}
+
+std::optional< QString > redditVideoIdFromUrl(const QUrl &url) {
+	const QString host = normalizedChatPreviewHost(url.host());
+	QString videoId;
+	if (host == QLatin1String("v.redd.it")) {
+		videoId = firstChatPreviewPathSegment(url);
+	} else if (host == QLatin1String("reddit.com")) {
+		const QStringList segments = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
+		if (segments.size() >= 2 && segments.at(0) == QLatin1String("video")) {
+			videoId = segments.at(1);
+		}
+	}
+
+	static const QRegularExpression s_redditVideoIdPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[A-Za-z0-9_-]{5,64}")));
+	if (!s_redditVideoIdPattern.match(videoId).hasMatch()) {
+		return std::nullopt;
+	}
+
+	return videoId;
+}
+
 QString decodeHtmlEntityPreviewText(QString text) {
 	text.replace(QStringLiteral("&amp;"), QStringLiteral("&"));
 	text.replace(QStringLiteral("&quot;"), QStringLiteral("\""));
@@ -3534,6 +3580,16 @@ void Server::scheduleServerChatEmbedFetch(unsigned int threadID, unsigned int me
 	};
 
 	const QUrl initialUrl(QString::fromStdString(initialEmbed.canonicalUrl));
+	if (redditVideoIdFromUrl(initialUrl)) {
+		embedState->title       = u8(QObject::tr("Reddit video"));
+		embedState->description = u8(QObject::tr("Video preview"));
+		embedState->siteName    = "Reddit";
+		embedState->status      = ::msdb::ChatEmbedStatus::Ready;
+		embedState->errorCode   = "";
+		finish(*embedState);
+		return;
+	}
+
 	QString yahooSymbol;
 	if (Mumble::Finance::symbolFromYahooFinanceQuoteUrl(initialUrl, &yahooSymbol)) {
 		(*fetchYahooQuote)(yahooSymbol, 0);

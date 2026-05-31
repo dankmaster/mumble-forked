@@ -1761,15 +1761,15 @@ namespace {
 				automationSearchResult(QStringLiteral("channel"), 1, 0, QObject::tr("Relay Ops"),
 									   QObject::tr("Root / Operations - room name match"), 0, 5,
 									   QObject::tr("Open"), QObject::tr("Join")),
-				automationSearchResult(QStringLiteral("channel"), 2, 1, QObject::tr("#relay"),
+				automationSearchResult(QStringLiteral("textRoom"), 2, 1, QObject::tr("#relay"),
 									   QObject::tr("Text room - 4 matching messages"), 1, 5,
-									   QObject::tr("Open"), QObject::tr("Open")),
+									   QObject::tr("Open"), QString()),
 				automationSearchResult(QStringLiteral("user"), 7, 2, QObject::tr("Relay_Bot"),
 									   QObject::tr("User - Root / Operations"), 0, 5,
-									   QObject::tr("Select"), QObject::tr("Message")),
+									   QObject::tr("Message"), QObject::tr("Select")),
 				automationSearchResult(QStringLiteral("user"), 9, 3, QObject::tr("Kira Relay"),
 									   QObject::tr("User - Root / Lobby"), 5, 5,
-									   QObject::tr("Select"), QObject::tr("Message"))
+									   QObject::tr("Message"), QObject::tr("Select"))
 			};
 			QVariantMap dialog = automationDialogFromSections(
 				QStringLiteral("serverSearch"), QStringLiteral("form"), QObject::tr("Search"),

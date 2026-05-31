@@ -653,10 +653,10 @@ QVariantList modernShellParticipantStatuses(const ClientUser *user) {
 														QStringLiteral("danger")));
 	} else if (user->bMute) {
 		statuses.push_back(modernShellParticipantStatus(QStringLiteral("serverMuted"), QObject::tr("Server muted"),
-														QStringLiteral("warning")));
+														QStringLiteral("danger")));
 	} else if (user->bSelfMute) {
 		statuses.push_back(
-			modernShellParticipantStatus(QStringLiteral("selfMuted"), QObject::tr("Muted"), QStringLiteral("warning")));
+			modernShellParticipantStatus(QStringLiteral("selfMuted"), QObject::tr("Muted"), QStringLiteral("danger")));
 	}
 
 	if (user->bLocalMute) {
@@ -8303,6 +8303,12 @@ std::optional< PersistentChatPreviewPlayableMediaMeta >
 	return std::nullopt;
 }
 
+bool isValidRedditVideoId(const QString &videoId) {
+	static const QRegularExpression s_redditVideoIdPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[A-Za-z0-9_-]{5,64}")));
+	return s_redditVideoIdPattern.match(videoId).hasMatch();
+}
+
 std::optional< QString > redditVideoIdFromUrl(const QUrl &url) {
 	const QString host = normalizedPreviewHost(url.host());
 	QString videoId;
@@ -8315,9 +8321,7 @@ std::optional< QString > redditVideoIdFromUrl(const QUrl &url) {
 		}
 	}
 
-	static const QRegularExpression s_redditVideoIdPattern(
-		QRegularExpression::anchoredPattern(QLatin1String("[A-Za-z0-9_-]{5,64}")));
-	if (!s_redditVideoIdPattern.match(videoId).hasMatch()) {
+	if (!isValidRedditVideoId(videoId)) {
 		return std::nullopt;
 	}
 
@@ -8330,6 +8334,10 @@ QUrl redditVideoMetadataUrl(const QString &videoId) {
 	query.addQueryItem(QStringLiteral("raw_json"), QStringLiteral("1"));
 	url.setQuery(query);
 	return url;
+}
+
+QUrl redditVideoDirectDashManifestUrl(const QString &videoId) {
+	return QUrl(QString::fromLatin1("https://v.redd.it/%1/DASHPlaylist.mpd").arg(videoId));
 }
 
 QJsonObject redditVideoPostObject(const QJsonDocument &document) {
@@ -8394,13 +8402,68 @@ QUrl redditDashManifestUrl(const QJsonObject &video) {
 	return QUrl(normalizedJsonUrlString(video.value(QStringLiteral("dash_url")).toString()));
 }
 
-QUrl redditDashAudioUrlFromManifest(const QByteArray &data, const QUrl &manifestUrl) {
+struct RedditDashMediaCandidate {
+	QUrl url;
+	QString mime;
+	int bandwidth = -1;
+};
+
+struct RedditDashMediaUrls {
+	RedditDashMediaCandidate video;
+	RedditDashMediaCandidate audio;
+};
+
+enum class RedditDashAdaptationKind { None, Video, Audio };
+
+RedditDashAdaptationKind redditDashAdaptationKind(const QXmlStreamAttributes &attributes) {
+	const QString contentType = attributes.value(QLatin1String("contentType")).toString().trimmed().toLower();
+	const QString mimeType    = attributes.value(QLatin1String("mimeType")).toString().trimmed().toLower();
+	const QString codecs      = attributes.value(QLatin1String("codecs")).toString().trimmed().toLower();
+
+	if (contentType == QLatin1String("video") || mimeType.startsWith(QLatin1String("video/"))
+		|| codecs.contains(QLatin1String("avc")) || codecs.contains(QLatin1String("h264"))
+		|| codecs.contains(QLatin1String("hev1")) || codecs.contains(QLatin1String("hvc1"))
+		|| codecs.contains(QLatin1String("vp9"))) {
+		return RedditDashAdaptationKind::Video;
+	}
+	if (contentType == QLatin1String("audio") || mimeType.startsWith(QLatin1String("audio/"))
+		|| codecs.contains(QLatin1String("mp4a"))) {
+		return RedditDashAdaptationKind::Audio;
+	}
+
+	return RedditDashAdaptationKind::None;
+}
+
+QString redditDashMediaMime(const QUrl &url, const QString &manifestMime, RedditDashAdaptationKind kind) {
+	if (kind == RedditDashAdaptationKind::Audio) {
+		const QString fallback = manifestMime.isEmpty() ? QStringLiteral("audio/mp4") : manifestMime;
+		return playableAudioMimeForUrl(url, fallback);
+	}
+
+	const QString fallback = manifestMime.isEmpty() ? QStringLiteral("video/mp4") : manifestMime;
+	return playableMediaMimeForUrl(normalizedRemotePlayableMediaUrl(url), fallback);
+}
+
+void redditDashConsiderCandidate(RedditDashMediaCandidate &best, const QUrl &url, const QString &mime, int bandwidth) {
+	if (!url.isValid() || mime.isEmpty()) {
+		return;
+	}
+	if (best.url.isEmpty() || bandwidth > best.bandwidth) {
+		best.url       = url;
+		best.mime      = mime;
+		best.bandwidth = bandwidth;
+	}
+}
+
+RedditDashMediaUrls redditDashMediaUrlsFromManifest(const QByteArray &data, const QUrl &manifestUrl) {
 	QXmlStreamReader reader(data);
-	QUrl bestUrl;
-	int bestBandwidth       = -1;
-	bool inAudioAdaptation  = false;
-	bool inAudioRepresentation = false;
-	int currentBandwidth    = -1;
+	RedditDashMediaUrls result;
+	RedditDashAdaptationKind adaptationKind       = RedditDashAdaptationKind::None;
+	RedditDashAdaptationKind representationKind   = RedditDashAdaptationKind::None;
+	QString adaptationMime;
+	QString representationMime;
+	bool inRepresentation                         = false;
+	int currentBandwidth                          = -1;
 
 	while (!reader.atEnd()) {
 		reader.readNext();
@@ -8408,42 +8471,57 @@ QUrl redditDashAudioUrlFromManifest(const QByteArray &data, const QUrl &manifest
 			const QStringView name = reader.name();
 			const QXmlStreamAttributes attributes = reader.attributes();
 			if (name == QLatin1String("AdaptationSet")) {
-				const QString contentType = attributes.value(QLatin1String("contentType")).toString().toLower();
-				const QString mimeType    = attributes.value(QLatin1String("mimeType")).toString().toLower();
-				inAudioAdaptation         = contentType == QLatin1String("audio")
-									|| mimeType.startsWith(QLatin1String("audio/"));
-			} else if (inAudioAdaptation && name == QLatin1String("Representation")) {
-				const QString mimeType = attributes.value(QLatin1String("mimeType")).toString().toLower();
-				const QString codecs   = attributes.value(QLatin1String("codecs")).toString().toLower();
-				bool ok               = false;
-				currentBandwidth       = attributes.value(QLatin1String("bandwidth")).toInt(&ok);
+				adaptationKind = redditDashAdaptationKind(attributes);
+				adaptationMime = attributes.value(QLatin1String("mimeType")).toString().trimmed().toLower();
+			} else if (adaptationKind != RedditDashAdaptationKind::None && name == QLatin1String("Representation")) {
+				bool ok         = false;
+				currentBandwidth = attributes.value(QLatin1String("bandwidth")).toInt(&ok);
 				if (!ok) {
 					currentBandwidth = 0;
 				}
-				inAudioRepresentation =
-					mimeType.startsWith(QLatin1String("audio/")) || codecs.contains(QLatin1String("mp4a"));
-			} else if (inAudioRepresentation && name == QLatin1String("BaseURL")) {
+				representationKind = redditDashAdaptationKind(attributes);
+				if (representationKind == RedditDashAdaptationKind::None) {
+					representationKind = adaptationKind;
+				}
+				representationMime = attributes.value(QLatin1String("mimeType")).toString().trimmed().toLower();
+				if (representationMime.isEmpty()) {
+					representationMime = adaptationMime;
+				}
+				inRepresentation = representationKind != RedditDashAdaptationKind::None;
+			} else if (inRepresentation && name == QLatin1String("BaseURL")) {
 				const QString baseText = reader.readElementText(QXmlStreamReader::SkipChildElements).trimmed();
 				const QUrl resolvedUrl = manifestUrl.resolved(QUrl(baseText));
-				if (resolvedUrl.isValid() && (bestUrl.isEmpty() || currentBandwidth > bestBandwidth)) {
-					bestUrl        = resolvedUrl;
-					bestBandwidth  = currentBandwidth;
+				const QString mime     = redditDashMediaMime(resolvedUrl, representationMime, representationKind);
+				if (representationKind == RedditDashAdaptationKind::Video && mime.startsWith(QLatin1String("video/"))) {
+					redditDashConsiderCandidate(result.video, resolvedUrl, mime, currentBandwidth);
+				} else if (representationKind == RedditDashAdaptationKind::Audio
+						   && mime.startsWith(QLatin1String("audio/"))) {
+					redditDashConsiderCandidate(result.audio, resolvedUrl, mime, currentBandwidth);
 				}
 			}
 		} else if (reader.isEndElement()) {
 			const QStringView name = reader.name();
 			if (name == QLatin1String("Representation")) {
-				inAudioRepresentation = false;
-				currentBandwidth      = -1;
+				representationKind = RedditDashAdaptationKind::None;
+				representationMime.clear();
+				inRepresentation = false;
+				currentBandwidth = -1;
 			} else if (name == QLatin1String("AdaptationSet")) {
-				inAudioAdaptation     = false;
-				inAudioRepresentation = false;
-				currentBandwidth      = -1;
+				adaptationKind = RedditDashAdaptationKind::None;
+				adaptationMime.clear();
+				representationKind = RedditDashAdaptationKind::None;
+				representationMime.clear();
+				inRepresentation = false;
+				currentBandwidth = -1;
 			}
 		}
 	}
 
-	return bestUrl;
+	return result;
+}
+
+QUrl redditDashAudioUrlFromManifest(const QByteArray &data, const QUrl &manifestUrl) {
+	return redditDashMediaUrlsFromManifest(data, manifestUrl).audio.url;
 }
 
 bool isSafePreviewTarget(const QUrl &url);
@@ -8659,6 +8737,15 @@ bool previewTextLooksLikeConsentPage(QString text) {
 		   || text.contains(QString::fromUtf8("samtycke"))
 		   || text.contains(QString::fromUtf8("dina integritetsinst"))
 		   || text.contains(QString::fromUtf8("integritetsinst\xc3\xa4llningar"));
+}
+
+bool redditTextLooksLikeAccessGate(QString text) {
+	text = text.simplified().toLower();
+	return text.contains(QLatin1String("please wait for verification"))
+		   || text.contains(QLatin1String("verify you are human"))
+		   || text.contains(QLatin1String("human verification"))
+		   || text.contains(QLatin1String("you've been blocked"))
+		   || text.contains(QLatin1String("network security")) || text.contains(QLatin1String("whoa there"));
 }
 
 QString financeFormatNumber(double value, int priceHint) {
@@ -8899,8 +8986,12 @@ std::optional< PersistentChatPreviewProviderInfo > previewProviderInfo(const QUr
 		return PersistentChatPreviewProviderInfo{ QObject::tr("Patreon"), QObject::tr("Open on Patreon"),
 												  QObject::tr("Patreon post") };
 	}
+	if (host == QLatin1String("v.redd.it")) {
+		return PersistentChatPreviewProviderInfo{ QObject::tr("Reddit"), QObject::tr("Open on Reddit"),
+												  QObject::tr("Reddit video") };
+	}
 	if (host == QLatin1String("reddit.com") || host == QLatin1String("old.reddit.com")
-		|| host == QLatin1String("redd.it") || host == QLatin1String("v.redd.it")) {
+		|| host == QLatin1String("redd.it")) {
 		return PersistentChatPreviewProviderInfo{ QObject::tr("Reddit"), QObject::tr("Open on Reddit"),
 												  QObject::tr("Reddit post") };
 	}
@@ -14392,6 +14483,19 @@ namespace {
 		return url.isValid() ? url : QUrl();
 	}
 
+	QJsonObject modernAlphaPackageUpdateInfo(const QJsonObject &info) {
+		QJsonObject packageInfo = info;
+		packageInfo.insert(QStringLiteral("preferredUpdate"), QStringLiteral("package"));
+		return packageInfo;
+	}
+
+	bool modernCanUseAlphaPackageUpdate(const QJsonObject &info) {
+		const QJsonObject packageInfo = modernAlphaPackageUpdateInfo(info);
+		return VersionCheck::canInstallUpdate(packageInfo)
+			   && VersionCheck::updateModeForInfo(packageInfo) == QLatin1String("package")
+			   && VersionCheck::updateModeForInfo(info) != QLatin1String("package");
+	}
+
 	QString modernUpdateLatestLabel(const QJsonObject &info) {
 		const QString version = info.value(QStringLiteral("version")).toString().trimmed();
 		const int build       = modernUpdateJsonInt(info, QStringLiteral("build"));
@@ -14685,8 +14789,13 @@ namespace {
 			item.insert(QStringLiteral("subtitle"), result.channelHierarchy);
 			item.insert(QStringLiteral("matchStart"), static_cast< int >(result.begin));
 			item.insert(QStringLiteral("matchLength"), static_cast< int >(result.length));
-			item.insert(QStringLiteral("primaryAction"), QObject::tr("Select"));
-			item.insert(QStringLiteral("secondaryAction"), QObject::tr("Join"));
+			if (result.type == Search::SearchType::User) {
+				item.insert(QStringLiteral("primaryAction"), QObject::tr("Message"));
+				item.insert(QStringLiteral("secondaryAction"), QObject::tr("Select"));
+			} else {
+				item.insert(QStringLiteral("primaryAction"), QObject::tr("Open"));
+				item.insert(QStringLiteral("secondaryAction"), QObject::tr("Join"));
+			}
 			items.push_back(item);
 		}
 		return items;
@@ -16507,6 +16616,7 @@ void MainWindow::handleModernShellFinanceChartLookupRequest(const QString &reque
 
 QVariantMap MainWindow::buildModernStonksDialog() const {
 	QVariantMap state = m_stonksState;
+	const bool loadingInitialState = state.isEmpty() && stonksLedgerFeatureSupported();
 	if (state.isEmpty()) {
 		state = stonksHeaderState();
 		state.insert(QStringLiteral("registered"), false);
@@ -16532,6 +16642,10 @@ QVariantMap MainWindow::buildModernStonksDialog() const {
 			state.insert(QStringLiteral("selectedUserId"), *m_stonksSelectedUserID);
 		}
 		state.insert(QStringLiteral("selectedUserName"), QString());
+		if (loadingInitialState) {
+			state.insert(QStringLiteral("loading"), true);
+			state.insert(QStringLiteral("status"), tr("Loading Stonks market data..."));
+		}
 	}
 	state.insert(QStringLiteral("feature"), stonksHeaderState());
 
@@ -16846,13 +16960,16 @@ void MainWindow::openModernServerTokensDialog(const QStringList &providedTokens,
 }
 
 void MainWindow::openModernServerUserListLoadingDialog() {
-	openModernGenericDialog(modernDialogDto(
+	QVariantMap dialog = modernDialogDto(
 		QStringLiteral("serverUserList"), QStringLiteral("info"), tr("Registered users"),
 		tr("Requesting the registered user list from the server."),
 		QVariantList { modernDialogSection(tr("Status"), QVariantList { modernNoteField(tr("Loading users...")) },
 										   QStringLiteral("list")) },
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true) },
-		QStringLiteral("close"), QSize(660, 460)));
+		QStringLiteral("close"), QSize(660, 460));
+	dialog.insert(QStringLiteral("loading"), true);
+	dialog.insert(QStringLiteral("loadingScaffold"), QStringLiteral("records"));
+	openModernGenericDialog(dialog);
 }
 
 void MainWindow::openModernServerUserListDialog(const MumbleProto::UserList &msg) {
@@ -16895,12 +17012,15 @@ void MainWindow::openModernServerUserListDialog(const MumbleProto::UserList &msg
 }
 
 void MainWindow::openModernServerBanListLoadingDialog() {
-	openModernGenericDialog(modernDialogDto(
+	QVariantMap dialog = modernDialogDto(
 		QStringLiteral("serverBanList"), QStringLiteral("info"), tr("Ban list"),
 		tr("Requesting the ban list from the server."),
 		QVariantList { modernDialogSection(tr("Status"), QVariantList { modernNoteField(tr("Loading bans...")) }) },
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true) },
-		QStringLiteral("close"), QSize(660, 460)));
+		QStringLiteral("close"), QSize(660, 460));
+	dialog.insert(QStringLiteral("loading"), true);
+	dialog.insert(QStringLiteral("loadingScaffold"), QStringLiteral("records"));
+	openModernGenericDialog(dialog);
 }
 
 void MainWindow::openModernServerBanListDialog(const MumbleProto::BanList &msg) {
@@ -16970,12 +17090,15 @@ void MainWindow::openModernAclRequestDialog(Channel *channel) {
 		aclEdit = nullptr;
 	}
 
-	openModernGenericDialog(modernDialogDto(
+	QVariantMap dialog = modernDialogDto(
 		QStringLiteral("acl"), QStringLiteral("info"), tr("Edit room"),
 		tr("Requesting room details and ACL data for %1.").arg(channel->qsName),
 		QVariantList { modernDialogSection(tr("Status"), QVariantList { modernNoteField(tr("Loading ACL...")) }) },
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true) },
-		QStringLiteral("close"), QSize(720, 520)));
+		QStringLiteral("close"), QSize(720, 520));
+	dialog.insert(QStringLiteral("loading"), true);
+	dialog.insert(QStringLiteral("loadingScaffold"), QStringLiteral("acl"));
+	openModernGenericDialog(dialog);
 }
 
 void MainWindow::openModernAclDialog(const MumbleProto::ACL &msg) {
@@ -17792,6 +17915,7 @@ void MainWindow::openModernVersionCheckResultDialog(const QJsonObject &info, con
 	const QUrl openUrl      = installerUrl.isValid() ? installerUrl : releaseUrl;
 	const bool canInstall   = VersionCheck::canInstallUpdate(info);
 	const QString updateMode = VersionCheck::updateModeForInfo(info);
+	const bool canInstallAlphaPackage = modernCanUseAlphaPackageUpdate(info);
 	const QJsonObject packageInfo = info.value(QStringLiteral("package")).toObject();
 	const QString packageUrlValue = packageInfo.value(QStringLiteral("url")).toString().trimmed();
 	const QUrl packageUrl = packageUrlValue.isEmpty() ? QUrl() : QUrl(packageUrlValue);
@@ -17863,6 +17987,14 @@ void MainWindow::openModernVersionCheckResultDialog(const QJsonObject &info, con
 	if (canInstall) {
 		actions.push_back(modernDialogAction(QStringLiteral("installForkUpdate"), tr("Install update"), true,
 											 QStringLiteral("accent")));
+		if (canInstallAlphaPackage) {
+			actions.push_back(modernDialogAction(QStringLiteral("installForkUpdatePackageAlpha"),
+												 tr("(ALPHA) Uppdatering utan install"), true));
+		}
+	} else if (canInstallAlphaPackage) {
+		actions.push_back(modernDialogAction(QStringLiteral("installForkUpdatePackageAlpha"),
+											 tr("(ALPHA) Uppdatering utan install"), true,
+											 QStringLiteral("accent")));
 	} else if (installerUrl.isValid()) {
 		actions.push_back(modernDialogAction(QStringLiteral("openForkInstaller"), tr("Download update"), true,
 											 QStringLiteral("accent")));
@@ -17878,8 +18010,9 @@ void MainWindow::openModernVersionCheckResultDialog(const QJsonObject &info, con
 						: tr("This client matches the newest release information."),
 		sections, actions,
 		canInstall ? QStringLiteral("installForkUpdate")
-				   : (installerUrl.isValid() ? QStringLiteral("openForkInstaller")
-											 : QStringLiteral("openForkRelease")),
+				   : (canInstallAlphaPackage ? QStringLiteral("installForkUpdatePackageAlpha")
+											  : (installerUrl.isValid() ? QStringLiteral("openForkInstaller")
+																		: QStringLiteral("openForkRelease"))),
 		QSize(660, 560));
 	dialog.insert(QStringLiteral("highlights"),
 				  QVariantList { modernDialogHighlight(tr("Status"),
@@ -18884,20 +19017,25 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 	}
 
 	if (dialogID == QLatin1String("serverSearch")) {
-		if (actionID == QLatin1String("selectSearchResult") || actionID == QLatin1String("joinSearchResult")) {
+		if (actionID == QLatin1String("selectSearchResult") || actionID == QLatin1String("joinSearchResult")
+			|| actionID == QLatin1String("messageSearchResult")) {
 			const QString type = payload.value(QStringLiteral("type")).toString();
 			const unsigned int id = payload.value(QStringLiteral("id")).toUInt();
 			const bool join = actionID == QLatin1String("joinSearchResult");
+			const bool message = actionID == QLatin1String("messageSearchResult");
 			if (type == QLatin1String("user")) {
 				if (ClientUser *user = ClientUser::get(id)) {
 					pmModel->setSelectedUser(user->uiSession);
-					if (join) {
+					if (message) {
+						openModernDirectMessage(user->uiSession, true);
+					} else if (join) {
 						cuContextUser = user;
 						on_qaUserJoin_triggered();
 						cuContextUser = nullptr;
 					}
 				}
-			} else if (type == QLatin1String("channel")) {
+			} else if (type == QLatin1String("channel") || type == QLatin1String("textRoom")
+					   || type == QLatin1String("text-room") || type == QLatin1String("text_room")) {
 				if (Channel *channel = Channel::get(id)) {
 					pmModel->setSelectedChannel(channel->iId);
 					if (join) {
@@ -18907,7 +19045,7 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 					}
 				}
 			}
-			if (join && m_modernDialogController) {
+			if ((join || message) && m_modernDialogController) {
 				publishModernDialogState(m_modernDialogController->close(dialogID));
 			}
 			return true;
@@ -19311,6 +19449,19 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 			}
 			m_modernVersionCheckInfo = info;
 			const bool handled = startModernForkUpdateDownload();
+			if (handled && m_modernDialogController) {
+				publishModernDialogState(m_modernDialogController->close(dialogID));
+			}
+			return handled;
+		}
+		if (actionID == QLatin1String("installForkUpdatePackageAlpha")) {
+			const QJsonObject info = modernAlphaPackageUpdateInfo(m_modernVersionCheckInfo);
+			if (!modernCanUseAlphaPackageUpdate(m_modernVersionCheckInfo)) {
+				publishModernToast(QStringLiteral("warning"), tr("Update package"),
+								   tr("This release does not include a usable no-installer update package."));
+				return true;
+			}
+			const bool handled = startModernForkUpdateDownload(info);
 			if (handled && m_modernDialogController) {
 				publishModernDialogState(m_modernDialogController->close(dialogID));
 			}
@@ -24602,6 +24753,14 @@ bool MainWindow::handleModernShellAppAction(const QString &actionId) {
 		return false;
 	} else if (actionId == QLatin1String("app.update.download")) {
 		handled = startModernForkUpdateDownload();
+	} else if (actionId == QLatin1String("app.update.downloadPackageAlpha")) {
+		if (modernCanUseAlphaPackageUpdate(m_modernVersionCheckInfo)) {
+			handled = startModernForkUpdateDownload(modernAlphaPackageUpdateInfo(m_modernVersionCheckInfo));
+		} else {
+			publishModernToast(QStringLiteral("warning"), tr("Update package"),
+							   tr("This release does not include a usable no-installer update package."));
+			return true;
+		}
 	} else if (actionId == QLatin1String("app.update.restart")) {
 		handled = restartForPreparedForkUpdate();
 	} else if (actionId == QLatin1String("app.update.retry")) {
@@ -24761,9 +24920,19 @@ void MainWindow::showModernForkUpdateAvailableBanner(const QJsonObject &info) {
 	m_modernUpdateLastProgressPercent = -1;
 
 	const bool canInstall = VersionCheck::canInstallUpdate(info);
+	const bool canInstallAlphaPackage = modernCanUseAlphaPackageUpdate(info);
 	QVariantList actions;
 	if (canInstall) {
 		actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.download"), tr("Install update"),
+												   QStringLiteral("accent")));
+		if (canInstallAlphaPackage) {
+			actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.downloadPackageAlpha"),
+													   tr("(ALPHA) Uppdatering utan install")));
+		}
+		actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.details"), tr("Details")));
+	} else if (canInstallAlphaPackage) {
+		actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.downloadPackageAlpha"),
+												   tr("(ALPHA) Uppdatering utan install"),
 												   QStringLiteral("accent")));
 		actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.details"), tr("Details")));
 	} else {
@@ -29955,6 +30124,15 @@ void MainWindow::handleChatEmbedAssistRequest(const MumbleProto::ChatEmbedAssist
 	m_pendingChatEmbedAssists.insert(leaseID, assist);
 	m_pendingChatEmbedAssistByKey.insert(assistKey, leaseID);
 
+	if (redditVideoIdFromUrl(previewUrl)) {
+		PendingChatEmbedAssist &pending = m_pendingChatEmbedAssists[leaseID];
+		pending.title                   = tr("Reddit video");
+		pending.description             = tr("Video preview");
+		pending.siteName                = tr("Reddit");
+		finishChatEmbedAssist(leaseID);
+		return;
+	}
+
 	const QString previewKey =
 		QString::fromLatin1("embed:%1").arg(QString::fromUtf8(QUrl::toPercentEncoding(canonicalUrl)));
 	if (!m_persistentChatPreviews.contains(previewKey)) {
@@ -31366,6 +31544,122 @@ bool MainWindow::requestPersistentChatOEmbedPreview(const QString &previewKey, c
 	return true;
 }
 
+bool MainWindow::requestPersistentChatRedditDashManifestPreview(const QString &previewKey, const QString &videoId,
+																const QString &metadataFailureText) {
+	const QUrl dashManifestUrl = redditVideoDirectDashManifestUrl(videoId);
+	if (previewKey.isEmpty() || !isValidRedditVideoId(videoId) || !Global::get().nam
+		|| !isSafePreviewTarget(dashManifestUrl) || dashManifestUrl.scheme().toLower() != QLatin1String("https")
+		|| !isKnownRemotePlayableMediaHost(dashManifestUrl.host())) {
+		return false;
+	}
+
+	auto it = m_persistentChatPreviews.find(previewKey);
+	if (it == m_persistentChatPreviews.end() || it->remoteMediaRequested || it->mediaKind == QLatin1String("video")) {
+		return false;
+	}
+
+	const bool accessGateMetadata =
+		redditTextLooksLikeAccessGate(it->title) || redditTextLooksLikeAccessGate(it->description);
+	it->remoteMediaRequested     = true;
+	it->remoteMediaFinished      = false;
+	it->metadataFinished         = true;
+	it->siteSnapshotRequested    = false;
+	it->siteSnapshotFinished     = true;
+	it->previewAssetID           = 0;
+	if (accessGateMetadata) {
+		it->thumbnailImage = QImage();
+		it->title          = tr("Reddit video");
+		it->description    = tr("Fetching page metadata");
+	}
+	if (it->title.trimmed().isEmpty() || it->title == tr("Loading link preview...")) {
+		it->title = tr("Reddit video");
+	}
+	if (it->subtitle.trimmed().isEmpty()) {
+		it->subtitle = tr("Reddit");
+	}
+	if (it->openLabel.trimmed().isEmpty() || it->openLabel == tr("Open link")) {
+		it->openLabel = tr("Open on Reddit");
+	}
+	QVariantMap metadata = it->metadata;
+	metadata.insert(QStringLiteral("provider"), QStringLiteral("reddit"));
+	metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("reddit"));
+	metadata.insert(QStringLiteral("redditVideoId"), videoId);
+	it->metadata = metadata;
+
+	QNetworkRequest request(dashManifestUrl);
+	preparePreviewRequest(request);
+	request.setRawHeader(QByteArrayLiteral("Accept"),
+						 QByteArrayLiteral("application/dash+xml,application/xml,text/xml;q=0.9,*/*;q=0.5"));
+	const QByteArray referer = previewMediaRefererForUrl(dashManifestUrl);
+	if (!referer.isEmpty()) {
+		request.setRawHeader(QByteArrayLiteral("Referer"), referer);
+		request.setRawHeader(QByteArrayLiteral("Origin"), referer.left(referer.size() - 1));
+	}
+	QNetworkReply *reply = Global::get().nam->get(request);
+	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+	connect(reply, &QNetworkReply::finished, this,
+			[this, reply, previewKey, dashManifestUrl, metadataFailureText]() {
+				const QByteArray data     = reply->readAll();
+				const bool success        = reply->error() == QNetworkReply::NoError;
+				const QString failureText = previewFailureText(reply);
+				reply->deleteLater();
+
+				auto previewIt = m_persistentChatPreviews.find(previewKey);
+				if (previewIt == m_persistentChatPreviews.end()) {
+					return;
+				}
+
+				previewIt->remoteMediaRequested  = false;
+				previewIt->remoteMediaFinished   = true;
+				previewIt->metadataFinished      = true;
+				previewIt->siteSnapshotRequested = false;
+				previewIt->siteSnapshotFinished  = true;
+				previewIt->previewAssetID        = 0;
+
+				bool applied = false;
+				if (success && !data.isEmpty()) {
+					const RedditDashMediaUrls media = redditDashMediaUrlsFromManifest(data, dashManifestUrl);
+					applied = applyPersistentChatRemotePlayableMedia(*previewIt, media.video.url, media.video.mime);
+					if (applied) {
+						applyPersistentChatRemoteAudioMedia(*previewIt, media.audio.url, media.audio.mime);
+					}
+				}
+
+				if (applied) {
+					if (redditTextLooksLikeAccessGate(previewIt->title) || previewIt->title.trimmed().isEmpty()) {
+						previewIt->title = tr("Reddit video");
+					}
+					if (previewIt->subtitle.trimmed().isEmpty()) {
+						previewIt->subtitle = tr("Reddit");
+					}
+					if (previewDescriptionIsPlaceholder(previewIt->description)
+						|| redditTextLooksLikeAccessGate(previewIt->description)) {
+						previewIt->description = tr("Video preview");
+					}
+					previewIt->thumbnailFinished = true;
+					previewIt->failed            = false;
+				} else {
+					if (redditTextLooksLikeAccessGate(previewIt->title) || previewIt->title.trimmed().isEmpty()) {
+						previewIt->title = tr("Reddit video");
+					}
+					if (previewIt->subtitle.trimmed().isEmpty()) {
+						previewIt->subtitle = tr("Reddit");
+					}
+					if (previewDescriptionIsPlaceholder(previewIt->description)
+						|| redditTextLooksLikeAccessGate(previewIt->description)) {
+						previewIt->description =
+							!success && !metadataFailureText.isEmpty() ? metadataFailureText : failureText;
+					}
+					previewIt->thumbnailFinished = true;
+					previewIt->failed            = false;
+				}
+
+				publishPersistentChatPreviewUpdate(previewKey);
+			});
+
+	return true;
+}
+
 bool MainWindow::requestPersistentChatRedditVideoAudioPreview(const QString &previewKey, const QUrl &dashManifestUrl) {
 	if (previewKey.isEmpty() || !isSafePreviewTarget(dashManifestUrl)
 		|| dashManifestUrl.scheme().toLower() != QLatin1String("https")
@@ -31720,14 +32014,31 @@ bool MainWindow::requestPersistentChatRedditVideoPreview(const QString &previewK
 		return false;
 	}
 
-	it->remoteMediaRequested = true;
+	const bool accessGateMetadata =
+		redditTextLooksLikeAccessGate(it->title) || redditTextLooksLikeAccessGate(it->description);
+	it->remoteMediaRequested  = true;
+	it->remoteMediaFinished   = false;
+	it->siteSnapshotRequested = false;
+	it->siteSnapshotFinished  = true;
+	it->previewAssetID        = 0;
+	if (accessGateMetadata) {
+		it->thumbnailImage = QImage();
+		it->title          = tr("Reddit video");
+		it->description    = tr("Fetching page metadata");
+	}
+	if (it->subtitle.trimmed().isEmpty()) {
+		it->subtitle = tr("Reddit");
+	}
+	if (it->openLabel.trimmed().isEmpty() || it->openLabel == tr("Open link")) {
+		it->openLabel = tr("Open on Reddit");
+	}
 
 	QNetworkRequest request(redditVideoMetadataUrl(*videoId));
 	preparePreviewRequest(request);
 	request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
 	QNetworkReply *reply = Global::get().nam->get(request);
 	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
-	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey]() {
+	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, videoId]() {
 		const QByteArray data     = reply->readAll();
 		const bool success        = reply->error() == QNetworkReply::NoError;
 		const QString failureText = previewFailureText(reply);
@@ -31739,8 +32050,11 @@ bool MainWindow::requestPersistentChatRedditVideoPreview(const QString &previewK
 		}
 
 		previewIt->remoteMediaRequested = false;
-		previewIt->remoteMediaFinished  = true;
+		previewIt->remoteMediaFinished  = false;
 		previewIt->metadataFinished     = true;
+		previewIt->siteSnapshotRequested = false;
+		previewIt->siteSnapshotFinished  = true;
+		previewIt->previewAssetID        = 0;
 
 		bool applied = false;
 		if (success && !data.isEmpty()) {
@@ -31802,10 +32116,26 @@ bool MainWindow::requestPersistentChatRedditVideoPreview(const QString &previewK
 		}
 
 		if (!applied) {
-			if (previewIt->description.isEmpty() || previewIt->description == tr("Fetching page metadata")) {
+			if (requestPersistentChatRedditDashManifestPreview(previewKey, *videoId, failureText)) {
+				publishPersistentChatPreviewUpdate(previewKey);
+				return;
+			}
+
+			previewIt->remoteMediaFinished = true;
+			previewIt->thumbnailFinished   = true;
+			if (redditTextLooksLikeAccessGate(previewIt->title) || previewIt->title.trimmed().isEmpty()) {
+				previewIt->title = tr("Reddit video");
+			}
+			if (previewIt->subtitle.trimmed().isEmpty()) {
+				previewIt->subtitle = tr("Reddit");
+			}
+			if (previewIt->description.isEmpty() || previewIt->description == tr("Fetching page metadata")
+				|| redditTextLooksLikeAccessGate(previewIt->description)) {
 				previewIt->description = success ? tr("Preview unavailable") : failureText;
 			}
-			ensurePersistentChatPreviewSiteSnapshot(previewKey);
+			previewIt->siteSnapshotFinished = true;
+		} else {
+			previewIt->remoteMediaFinished = true;
 		}
 
 		publishPersistentChatPreviewUpdate(previewKey);
@@ -31912,6 +32242,39 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 				restoredIt->remoteMediaFinished = false;
 				requestPersistentChatFinancePreview(previewKey, restoredPreviewUrl);
 			}
+			static QSet< QString > s_redditVideoSessionRefreshes;
+			const std::optional< QString > restoredUrlRedditVideoId = redditVideoIdFromUrl(restoredPreviewUrl);
+			QString restoredRedditVideoId = restoredUrlRedditVideoId ? *restoredUrlRedditVideoId : QString();
+			if (restoredRedditVideoId.isEmpty()) {
+				const QString metadataVideoId =
+					restoredIt->metadata.value(QStringLiteral("redditVideoId")).toString().trimmed();
+				if (isValidRedditVideoId(metadataVideoId)) {
+					restoredRedditVideoId = metadataVideoId;
+				}
+			}
+			if (!restoredRedditVideoId.isEmpty() && restoredIt->mediaKind != QLatin1String("video")
+				&& !s_redditVideoSessionRefreshes.contains(previewKey)) {
+				s_redditVideoSessionRefreshes.insert(previewKey);
+				restoredIt->remoteMediaRequested  = false;
+				restoredIt->remoteMediaFinished   = false;
+				restoredIt->siteSnapshotRequested = false;
+				restoredIt->siteSnapshotFinished  = false;
+				if (redditTextLooksLikeAccessGate(restoredIt->title)
+					|| redditTextLooksLikeAccessGate(restoredIt->description)) {
+					restoredIt->thumbnailImage  = QImage();
+					restoredIt->previewAssetID  = 0;
+					restoredIt->thumbnailFinished = false;
+				}
+				bool requested = false;
+				if (restoredUrlRedditVideoId) {
+					requested = requestPersistentChatRedditVideoPreview(previewKey, restoredPreviewUrl);
+				} else {
+					requested = requestPersistentChatRedditDashManifestPreview(previewKey, restoredRedditVideoId);
+				}
+				if (!requested) {
+					restoredIt->remoteMediaFinished = true;
+				}
+			}
 			static QSet< QString > s_richProductSessionRefreshes;
 			const std::optional< RichPreviewProviderInfo > richProvider = richPreviewProviderForUrl(restoredPreviewUrl);
 			if (richProvider
@@ -32014,11 +32377,11 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		}
 		requestPersistentChatRichProviderPreview(previewKey, previewUrl);
 		requestPersistentChatSteamAppPreview(previewKey, previewUrl);
-		requestPersistentChatRedditVideoPreview(previewKey, previewUrl);
-		if (preview.previewAssetID > 0) {
+		const bool handledRedditVideoPreview = requestPersistentChatRedditVideoPreview(previewKey, previewUrl);
+		if (preview.previewAssetID > 0 && !handledRedditVideoPreview) {
 			ensurePersistentChatPreviewAssetDownload(preview.previewAssetID, previewKey);
 		} else {
-			if (!handledYahooFinanceQuotePreview) {
+			if (!handledYahooFinanceQuotePreview && !handledRedditVideoPreview) {
 				ensurePersistentChatPreviewSiteSnapshot(previewKey);
 			}
 			renderIfVisible();

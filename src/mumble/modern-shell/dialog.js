@@ -20,6 +20,8 @@
 	let modernDialogAdvancedPages = {};
 	let modernDialogPendingFieldUpdates = {};
 	let modernDialogLocalFieldValues = {};
+	let modernSettingsScrollPositions = {};
+	let modernSettingsRenderedScrollKey = "";
 	let audioInputMeterTimer = 0;
 	let voiceCalibrationState = null;
 	let voiceCalibrationSummary = null;
@@ -420,6 +422,8 @@
 		if (!state || !state.open) {
 			modernDialogPendingFieldUpdates = {};
 			modernDialogLocalFieldValues = {};
+			modernSettingsScrollPositions = {};
+			modernSettingsRenderedScrollKey = "";
 		}
 		modernDialogState = applyPendingModernDialogFieldValues(state || null);
 		renderModernDialog();
@@ -536,6 +540,8 @@
 		}
 		modernDialogPendingFieldUpdates = {};
 		modernDialogLocalFieldValues = {};
+		modernSettingsScrollPositions = {};
+		modernSettingsRenderedScrollKey = "";
 	}
 
 	function invokeModernDialogAction(actionId, payload) {
@@ -547,7 +553,19 @@
 		notifyBridge("invokeModernDialogAction", dialogId, String(actionId), payload || {});
 	}
 
+	function modernDialogValueElement(input) {
+		if (input && input.classList && input.classList.contains("modern-select-button")) {
+			const shell = input.closest(".modern-select");
+			const select = shell ? shell.querySelector("select") : null;
+			if (select) {
+				return select;
+			}
+		}
+		return input;
+	}
+
 	function modernDialogInputValue(field, input) {
+		input = modernDialogValueElement(input);
 		const type = String(field && field.type || "text");
 		if (type === "checkbox") {
 			return !!input.checked;
@@ -798,6 +816,41 @@
 		}) || pages.find(function(page) {
 			return page && page.id === dialog.activePage;
 		}) || pages[0] || {};
+	}
+
+	function modernSettingsScrollKey(dialog) {
+		if (!dialog || dialog.kind !== "settings") {
+			return "";
+		}
+		const selectedPage = modernSettingsSelectedPage(dialog);
+		const pageId = String(selectedPage.id || dialog.activePage || "");
+		return modernDialogFieldKey(dialog.id || "", pageId || "settings");
+	}
+
+	function currentModernSettingsScrollElement() {
+		return refs.body ? refs.body.querySelector(".modern-settings-scroll") : null;
+	}
+
+	function rememberRenderedModernSettingsScrollPosition() {
+		const key = modernSettingsRenderedScrollKey;
+		const scroll = currentModernSettingsScrollElement();
+		if (!key || !scroll) {
+			return;
+		}
+		modernSettingsScrollPositions[key] = {
+			left: scroll.scrollLeft,
+			top: scroll.scrollTop
+		};
+	}
+
+	function restoreModernSettingsScrollPosition(key) {
+		const scroll = currentModernSettingsScrollElement();
+		const position = key ? modernSettingsScrollPositions[key] : null;
+		if (!scroll || !position) {
+			return;
+		}
+		scroll.scrollLeft = Math.max(0, Number(position.left) || 0);
+		scroll.scrollTop = Math.max(0, Number(position.top) || 0);
 	}
 
 	function modernSettingsPageMeta(pageId) {
@@ -2349,6 +2402,112 @@
 		container.appendChild(wrap);
 	}
 
+	function modernResultItemKind(item) {
+		const type = String(item && item.type || "").trim().toLowerCase();
+		const title = String(item && item.title || "").trim();
+		const subtitle = String(item && item.subtitle || "").trim().toLowerCase();
+		if (type === "user") {
+			return "user";
+		}
+		if (type === "textroom" || type === "text-room" || type === "text_room" || type === "text") {
+			return "textRoom";
+		}
+		if (title.charAt(0) === "#" || subtitle.indexOf("text room") !== -1) {
+			return "textRoom";
+		}
+		return "room";
+	}
+
+	function modernResultTypeLabel(kind) {
+		if (kind === "user") {
+			return "User";
+		}
+		if (kind === "textRoom") {
+			return "Text room";
+		}
+		return "Room";
+	}
+
+	function modernResultSubtitle(kind, subtitle, separator) {
+		const label = modernResultTypeLabel(kind);
+		const text = String(subtitle || "").trim();
+		if (!text) {
+			return label;
+		}
+		if (text.toLowerCase().indexOf(label.toLowerCase()) === 0) {
+			return text;
+		}
+		return label + separator + text;
+	}
+
+	function modernResultLabel(value) {
+		return String(value || "").trim();
+	}
+
+	function modernResultActionLabel(item, role, fallback) {
+		const primary = modernResultLabel(item && item.primaryAction);
+		const secondary = modernResultLabel(item && item.secondaryAction);
+		const direct = modernResultLabel(item && item[role + "Action"]);
+		const primaryKey = primary.toLowerCase();
+		const secondaryKey = secondary.toLowerCase();
+		if (direct) {
+			return direct;
+		}
+		if (role === "message") {
+			if (primaryKey.indexOf("message") !== -1) {
+				return primary;
+			}
+			if (secondaryKey.indexOf("message") !== -1) {
+				return secondary;
+			}
+		}
+		if (role === "select") {
+			if (primaryKey === "select") {
+				return primary;
+			}
+			if (secondaryKey === "select") {
+				return secondary;
+			}
+		}
+		if (role === "join") {
+			if (secondary && secondaryKey !== "open" && secondaryKey !== "select" && secondaryKey.indexOf("message") === -1) {
+				return secondary;
+			}
+		}
+		if (role === "open") {
+			if (primary && primaryKey !== "select" && primaryKey !== "join" && primaryKey.indexOf("message") === -1) {
+				return primary;
+			}
+		}
+		return fallback;
+	}
+
+	function modernResultActions(item) {
+		const kind = modernResultItemKind(item);
+		const actions = kind === "user"
+			? [
+				{ id: "messageSearchResult", label: modernResultActionLabel(item, "message", "Message"), primary: true },
+				{ id: "selectSearchResult", label: modernResultActionLabel(item, "select", "Select"), primary: false }
+			]
+			: (kind === "textRoom"
+				? [
+					{ id: "selectSearchResult", label: modernResultActionLabel(item, "open", "Open"), primary: true }
+				]
+				: [
+					{ id: "selectSearchResult", label: modernResultActionLabel(item, "open", "Open"), primary: true },
+					{ id: "joinSearchResult", label: modernResultActionLabel(item, "join", "Join"), primary: false }
+				]);
+		const seen = {};
+		return actions.filter(function(action) {
+			const key = String(action.label || "").trim().toLowerCase();
+			if (!key || seen[key]) {
+				return false;
+			}
+			seen[key] = true;
+			return true;
+		});
+	}
+
 	function appendModernResultList(container, field) {
 		const list = document.createElement("div");
 		list.className = "modern-dialog-result-list";
@@ -2360,6 +2519,7 @@
 			list.appendChild(empty);
 		}
 		items.forEach(function(item) {
+			const kind = modernResultItemKind(item);
 			const row = document.createElement("div");
 			row.className = "modern-dialog-result";
 			const copy = document.createElement("div");
@@ -2369,23 +2529,20 @@
 			title.textContent = item.title || "";
 			const subtitle = document.createElement("span");
 			subtitle.className = "modern-dialog-result-subtitle";
-			subtitle.textContent = (item.type === "user" ? "User" : "Room") + (item.subtitle ? " - " + item.subtitle : "");
+			subtitle.textContent = modernResultSubtitle(kind, item.subtitle, " - ");
 			copy.appendChild(title);
 			copy.appendChild(subtitle);
 			row.appendChild(copy);
 			const actions = document.createElement("span");
 			actions.className = "modern-dialog-result-actions";
-			[
-				["selectSearchResult", item.primaryAction || "Select"],
-				["joinSearchResult", item.secondaryAction || "Join"]
-			].forEach(function(pair) {
+			modernResultActions(item).forEach(function(action) {
 				const button = document.createElement("button");
 				button.type = "button";
-				button.className = "chip-button";
-				button.textContent = pair[1];
+				button.className = "chip-button" + (action.primary ? " is-primary" : "");
+				button.textContent = action.label;
 				button.addEventListener("click", function(event) {
 					event.preventDefault();
-					invokeModernDialogAction(pair[0], {
+					invokeModernDialogAction(action.id, {
 						type: item.type || "",
 						id: Number(item.id) || 0,
 						index: Number(item.index) || 0
@@ -5173,6 +5330,201 @@
 		}
 	}
 
+	function createModernSkeleton(kind, size) {
+		const skeleton = document.createElement("span");
+		skeleton.className = "modern-skeleton"
+			+ (kind ? " is-" + kind : " is-line")
+			+ (size ? " " + size : "");
+		skeleton.setAttribute("aria-hidden", "true");
+		return skeleton;
+	}
+
+	function appendModernSkeletonLines(parent, sizes) {
+		(sizes || ["is-medium"]).forEach(function(size) {
+			parent.appendChild(createModernSkeleton("line", size));
+		});
+	}
+
+	function modernDialogLoadingText(dialog) {
+		const sections = Array.isArray(dialog && dialog.sections) ? dialog.sections : [];
+		for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex += 1) {
+			const fields = Array.isArray(sections[sectionIndex] && sections[sectionIndex].fields)
+				? sections[sectionIndex].fields
+				: [];
+			for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex += 1) {
+				const field = fields[fieldIndex] || {};
+				const text = String(field.value || field.text || "").trim();
+				if (field.type === "note" && text) {
+					return text;
+				}
+			}
+		}
+		return String(dialog && dialog.subtitle || "Loading...").trim() || "Loading...";
+	}
+
+	function modernDialogLoadingScaffoldKind(dialog) {
+		const explicit = String(dialog && dialog.loadingScaffold || "").trim().toLowerCase();
+		if (explicit) {
+			return explicit;
+		}
+		const id = String(dialog && dialog.id || "").trim().toLowerCase();
+		if (id === "acl") {
+			return "acl";
+		}
+		if (id === "serveruserlist" || id === "registeredusers" || id === "serverbanlist" || id === "banlist") {
+			return "records";
+		}
+		return "records";
+	}
+
+	function appendModernRecordLoadingScaffold(container, dialog) {
+		const shell = document.createElement("section");
+		shell.className = "modern-dialog-loading-scaffold is-records";
+		shell.setAttribute("aria-busy", "true");
+
+		const status = document.createElement("div");
+		status.className = "modern-dialog-loading-status";
+		const statusText = document.createElement("span");
+		statusText.textContent = modernDialogLoadingText(dialog);
+		status.appendChild(statusText);
+		appendModernSkeletonLines(status, ["is-short"]);
+		shell.appendChild(status);
+
+		const stats = document.createElement("div");
+		stats.className = "modern-dialog-loading-stats";
+		for (let index = 0; index < 3; index += 1) {
+			const stat = document.createElement("div");
+			stat.className = "modern-dialog-loading-stat";
+			appendModernSkeletonLines(stat, ["is-tiny", index === 1 ? "is-medium" : "is-short"]);
+			stats.appendChild(stat);
+		}
+		shell.appendChild(stats);
+
+		const list = document.createElement("div");
+		list.className = "modern-dialog-loading-list";
+		for (let index = 0; index < 4; index += 1) {
+			const row = document.createElement("div");
+			row.className = "modern-dialog-loading-row";
+			row.appendChild(createModernSkeleton("avatar"));
+			const copy = document.createElement("div");
+			copy.className = "modern-dialog-loading-row-copy";
+			appendModernSkeletonLines(copy, ["is-medium", index % 2 ? "is-short" : "is-long"]);
+			row.appendChild(copy);
+			row.appendChild(createModernSkeleton("pill", "is-short"));
+			list.appendChild(row);
+		}
+		shell.appendChild(list);
+		container.appendChild(shell);
+	}
+
+	function appendModernAclLoadingScaffold(container, dialog) {
+		const shell = document.createElement("section");
+		shell.className = "modern-dialog-loading-scaffold is-acl";
+		shell.setAttribute("aria-busy", "true");
+
+		const status = document.createElement("div");
+		status.className = "modern-dialog-loading-status";
+		const statusText = document.createElement("span");
+		statusText.textContent = modernDialogLoadingText(dialog);
+		status.appendChild(statusText);
+		appendModernSkeletonLines(status, ["is-short"]);
+		shell.appendChild(status);
+
+		const policy = document.createElement("div");
+		policy.className = "modern-dialog-loading-acl-policy";
+		appendModernSkeletonLines(policy, ["is-medium", "is-long"]);
+		shell.appendChild(policy);
+
+		const tabs = document.createElement("div");
+		tabs.className = "modern-dialog-loading-acl-tabs";
+		for (let index = 0; index < 3; index += 1) {
+			tabs.appendChild(createModernSkeleton("pill", index === 0 ? "is-medium" : "is-short"));
+		}
+		shell.appendChild(tabs);
+
+		const workspace = document.createElement("div");
+		workspace.className = "modern-dialog-loading-acl-workspace";
+		const sidebar = document.createElement("div");
+		sidebar.className = "modern-dialog-loading-acl-sidebar";
+		for (let index = 0; index < 4; index += 1) {
+			appendModernSkeletonLines(sidebar, [index === 0 ? "is-long" : "is-medium"]);
+		}
+		const detail = document.createElement("div");
+		detail.className = "modern-dialog-loading-acl-detail";
+		appendModernSkeletonLines(detail, ["is-medium", "is-long", "is-long"]);
+		const matrix = document.createElement("div");
+		matrix.className = "modern-dialog-loading-acl-matrix";
+		for (let index = 0; index < 8; index += 1) {
+			matrix.appendChild(createModernSkeleton("block"));
+		}
+		detail.appendChild(matrix);
+		workspace.append(sidebar, detail);
+		shell.appendChild(workspace);
+		container.appendChild(shell);
+	}
+
+	function appendModernDialogLoadingScaffold(container, dialog) {
+		if (modernDialogLoadingScaffoldKind(dialog) === "acl") {
+			appendModernAclLoadingScaffold(container, dialog);
+			return;
+		}
+		appendModernRecordLoadingScaffold(container, dialog);
+	}
+
+	function appendStonksLoadingSkeleton(parent) {
+		const shell = document.createElement("section");
+		shell.className = "stonks-loading-scaffold";
+		shell.setAttribute("aria-busy", "true");
+
+		const stats = document.createElement("div");
+		stats.className = "stonks-stat-grid stonks-loading-stats";
+		for (let index = 0; index < 3; index += 1) {
+			const card = document.createElement("div");
+			card.className = "stonks-stat is-loading";
+			appendModernSkeletonLines(card, ["is-tiny", index === 0 ? "is-long" : "is-medium"]);
+			stats.appendChild(card);
+		}
+		shell.appendChild(stats);
+
+		const chart = document.createElement("div");
+		chart.className = "stonks-chart-card is-loading";
+		const chartTop = document.createElement("div");
+		chartTop.className = "stonks-chart-top";
+		const copy = document.createElement("div");
+		appendModernSkeletonLines(copy, ["is-medium", "is-short"]);
+		const value = document.createElement("div");
+		value.className = "stonks-focus-price";
+		appendModernSkeletonLines(value, ["is-medium", "is-short"]);
+		chartTop.append(copy, value);
+		const block = createModernSkeleton("block", "is-chart");
+		chart.append(chartTop, block);
+		shell.appendChild(chart);
+
+		const listCard = document.createElement("div");
+		listCard.className = "stonks-list-card is-loading";
+		const head = document.createElement("div");
+		head.className = "stonks-list-head";
+		appendModernSkeletonLines(head, ["is-short", "is-tiny"]);
+		listCard.appendChild(head);
+		const list = document.createElement("div");
+		list.className = "stonks-list";
+		for (let index = 0; index < 4; index += 1) {
+			const row = document.createElement("div");
+			row.className = "stonks-row is-loading";
+			row.appendChild(createModernSkeleton("avatar"));
+			const rowCopy = document.createElement("div");
+			rowCopy.className = "stonks-row-copy";
+			appendModernSkeletonLines(rowCopy, ["is-short", "is-medium"]);
+			row.appendChild(rowCopy);
+			row.appendChild(createModernSkeleton("line", "is-short"));
+			row.appendChild(createModernSkeleton("pill", "is-tiny"));
+			list.appendChild(row);
+		}
+		listCard.appendChild(list);
+		shell.appendChild(listCard);
+		parent.appendChild(shell);
+	}
+
 	const stonksTickerPalette = ["#86cf86", "#e3b95f", "#5ec8b0", "#6fb0e8", "#e88f7a", "#b18ce0", "#e58bb6", "#9aa6b6"];
 
 	function stonksHash(value) {
@@ -5375,6 +5727,9 @@
 	}
 
 	function stonksMarketRows(stonks) {
+		if (stonks && stonks.loading) {
+			return [];
+		}
 		const rows = [];
 		const seen = {};
 		function add(source) {
@@ -5537,8 +5892,13 @@
 		name.textContent = selfRow ? "Server PnL" : "S&P 500";
 		const value = document.createElement("span");
 		value.className = "idx-val";
-		value.classList.add(change >= 0 ? "is-up" : "is-down");
-		value.textContent = (change >= 0 ? "▲ " : "▼ ") + Math.abs(change).toFixed(1) + "%";
+		if (stonks && stonks.loading) {
+			value.classList.add("is-loading");
+			value.appendChild(createModernSkeleton("line", "is-short"));
+		} else {
+			value.classList.add(change >= 0 ? "is-up" : "is-down");
+			value.textContent = (change >= 0 ? "▲ " : "▼ ") + Math.abs(change).toFixed(1) + "%";
+		}
 		indexValue.append(name, value);
 		index.appendChild(indexValue);
 		header.insertBefore(index, refs.closeButton || null);
@@ -6780,6 +7140,10 @@
 			refs.body.appendChild(empty);
 			return;
 		}
+		if (stonks.loading) {
+			appendStonksLoadingSkeleton(refs.body);
+			return;
+		}
 		if (stonks.enabled === false && stonks.canAdmin) {
 			stonksActiveTab = "admin";
 		}
@@ -6929,6 +7293,10 @@
 		appendModernDialogTabs(refs.body, dialog);
 		appendModernDialogHighlights(refs.body, dialog);
 		appendModernDialogAdvancedToggle(refs.body, dialog);
+		if (dialog.loading) {
+			appendModernDialogLoadingScaffold(refs.body, dialog);
+			return;
+		}
 		appendModernDialogSections(refs.body, dialog.sections || [], dialog.errors || {}, dialog);
 	}
 
@@ -7065,6 +7433,8 @@
 			dialog && dialog.title || "",
 			dialog && dialog.subtitle || "",
 			dialog && dialog.tone || "",
+			dialog && dialog.loading ? "loading" : "",
+			dialog && dialog.loadingScaffold || "",
 			stonksActiveTab || "",
 			stonks.status || "",
 			stonks.error || "",
@@ -7110,6 +7480,8 @@
 			refs.actions.innerHTML = "";
 			modernDialogRenderedOpen = false;
 			modernDialogLastRenderKey = "";
+			modernSettingsScrollPositions = {};
+			modernSettingsRenderedScrollKey = "";
 			syncAudioInputMeterTimer();
 			return;
 		}
@@ -7117,6 +7489,8 @@
 		const opening = !modernDialogRenderedOpen;
 		const renderKey = modernDialogRenderKey(dialog);
 		const shouldResetBodyScroll = opening || renderKey !== modernDialogLastRenderKey;
+		rememberRenderedModernSettingsScrollPosition();
+		const settingsScrollKey = dialog.kind === "settings" ? modernSettingsScrollKey(dialog) : "";
 		refs.dialog.className = "modern-dialog" + (dialog.tone ? " is-" + dialog.tone : "")
 			+ (dialog.kind ? " is-" + dialog.kind : "")
 			+ (dialog.kind === "connect" && dialog.editorOpen ? " has-connect-editor" : "")
@@ -7145,6 +7519,8 @@
 		if (shouldResetBodyScroll) {
 			refs.body.scrollTop = 0;
 		}
+		modernSettingsRenderedScrollKey = settingsScrollKey;
+		restoreModernSettingsScrollPosition(settingsScrollKey);
 		modernDialogLastRenderKey = renderKey;
 
 		modernDialogRenderedOpen = true;
@@ -7182,12 +7558,13 @@
 
 	function automationModernDialogFieldState(fieldId) {
 		const element = automationModernDialogFieldElement(fieldId);
+		const valueElement = modernDialogValueElement(element);
 		const root = refs.dialog || document.getElementById("modern-dialog") || document;
 		const dialog = modernDialogState || {};
 		const field = findModernDialogField(dialog, fieldId);
-		const type = String(field && field.type || (element && element.type) || "");
-		const value = element
-			? (type === "checkbox" ? !!element.checked : String(element.value || ""))
+		const type = String(field && field.type || (valueElement && valueElement.type) || "");
+		const value = valueElement
+			? (type === "checkbox" ? !!valueElement.checked : String(valueElement.value || ""))
 			: "";
 		const availableFieldIds = root
 			? Array.prototype.slice.call(root.querySelectorAll("[data-modern-dialog-field-id]")).map(function(candidate) {
@@ -7213,26 +7590,27 @@
 		if (!element) {
 			return automationModernDialogFieldState(fieldId);
 		}
+		const valueElement = modernDialogValueElement(element);
 		const setOptions = options || {};
 		const field = findModernDialogField(modernDialogState, fieldId);
-		const type = String(field && field.type || element.type || "");
+		const type = String(field && field.type || valueElement.type || "");
 		if (setOptions.focus !== false && typeof element.focus === "function") {
 			element.focus({ preventScroll: true });
 		}
 		if (type === "checkbox") {
-			element.checked = !!value;
-			element.dispatchEvent(new Event("change", { bubbles: true }));
+			valueElement.checked = !!value;
+			valueElement.dispatchEvent(new Event("change", { bubbles: true }));
 		} else {
-			element.value = value == null ? "" : String(value);
-			if (typeof element.setSelectionRange === "function") {
+			valueElement.value = value == null ? "" : String(value);
+			if (typeof valueElement.setSelectionRange === "function") {
 				try {
-					const end = element.value.length;
-					element.setSelectionRange(end, end);
+					const end = valueElement.value.length;
+					valueElement.setSelectionRange(end, end);
 				} catch (error) {
 					// Some input types expose selection APIs but reject range updates.
 				}
 			}
-			element.dispatchEvent(new Event(type === "select" || type === "range" ? "change" : "input", {
+			valueElement.dispatchEvent(new Event(type === "select" || type === "range" ? "change" : "input", {
 				bubbles: true
 			}));
 		}

@@ -16,6 +16,7 @@
 #include <QtGui/QCloseEvent>
 #include <QtGui/QCursor>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QKeyEvent>
 #include <QtGui/QPalette>
 #include <QtGui/QPainterPath>
 #include <QtGui/QRegion>
@@ -181,7 +182,9 @@ void ModernContextMenuHostBridge::updateMask(const QVariantMap &layout) {
 }
 
 ModernContextMenuHost::ModernContextMenuHost(QWidget *parent) : QWidget(parent) {
-	setWindowFlags(Qt::Popup | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
+	setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint
+				   | Qt::WindowDoesNotAcceptFocus);
+	setAttribute(Qt::WA_ShowWithoutActivating, true);
 	setWindowTitle(tr("Mumble menu"));
 	makeWidgetTransparent(this);
 	resize(272, 160);
@@ -280,6 +283,18 @@ bool ModernContextMenuHost::eventFilter(QObject *watched, QEvent *event) {
 	}
 
 	switch (event->type()) {
+		case QEvent::ApplicationDeactivate:
+			close();
+			return QWidget::eventFilter(watched, event);
+		case QEvent::KeyPress: {
+			const QKeyEvent *keyEvent = static_cast< QKeyEvent * >(event);
+			if (keyEvent->key() == Qt::Key_Escape) {
+				close();
+				event->accept();
+				return true;
+			}
+			break;
+		}
 		case QEvent::ContextMenu:
 		case QEvent::MouseButtonDblClick:
 		case QEvent::MouseButtonPress:
@@ -361,7 +376,6 @@ void ModernContextMenuHost::handlePopupClose() {
 void ModernContextMenuHost::showPopup() {
 	show();
 	raise();
-	activateWindow();
 	installDismissFilter();
 }
 

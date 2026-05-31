@@ -208,6 +208,7 @@
 		menuBar: document.getElementById("menu-bar"),
 		railToggleButton: document.getElementById("rail-toggle-button"),
 		utilityRail: document.querySelector(".utility-rail"),
+		utilityRailHeader: document.querySelector(".utility-rail-header"),
 		utilityScroll: document.querySelector(".utility-scroll"),
 		utilityRailBackdrop: document.getElementById("utility-rail-backdrop"),
 		railCloseButton: document.getElementById("rail-close-button"),
@@ -1390,6 +1391,13 @@
 			mockupSettingsActivePage = String(payload && payload.pageId || "");
 			return openMockupModernDialog("settings");
 		}
+		if (id === "messageSearchResult" && payload && String(payload.type || "").toLowerCase() === "user") {
+			const session = Number(payload.id) || 0;
+			if (openMockupDirectMessage(session, true)) {
+				closeModernDialog();
+				return true;
+			}
+		}
 		if (openMockupDialogForAction(id)) {
 			return true;
 		}
@@ -1716,6 +1724,14 @@
 			}
 		}
 		return "";
+	}
+
+	function walkthroughUiTweaks(defaults) {
+		const base = defaults && typeof defaults === "object" ? defaults : {};
+		const fromSearch = window.MumbleModernTheme && typeof window.MumbleModernTheme.uiTweaksFromSearch === "function"
+			? window.MumbleModernTheme.uiTweaksFromSearch(window.location.search)
+			: {};
+		return Object.assign({}, base, fromSearch || {});
 	}
 
 	function walkthroughAllowedForLocation() {
@@ -2181,12 +2197,12 @@
 				motdSummary: "Ranked scrims, clips, Stonks, and room rules for the weekend.",
 				motdExpanded: true,
 				motdAlwaysVisible: true,
-				uiTweaks: {
+				uiTweaks: walkthroughUiTweaks({
 					theme: "dark",
 					density: "comfortable",
 					railSide: "right",
 					tickerBannerAlwaysScroll: true
-				},
+				}),
 				serverIdentity: {
 					canEdit: true,
 					resolvedMonogram: "T",
@@ -2303,6 +2319,8 @@
 		const cancel = walkthroughDialogAction("cancel", "Cancel");
 		const snapshot = fallbackWalkthroughSnapshot() || buildMockupWalkthroughSnapshot();
 		const stonks = snapshot.app && snapshot.app.stonks ? snapshot.app.stonks : {};
+		const stateQuery = String(walkthroughQueryValue("state") || walkthroughQueryValue("variant") || "")
+			.trim().toLowerCase();
 		const select = function(label, value) {
 			return { label: label, value: value, enabled: true };
 		};
@@ -2634,11 +2652,24 @@
 			if (["overview", "ledger", "portfolio", "leaderboard", "following", "audit", "admin"].indexOf(requestedTab) >= 0) {
 				stonksActiveTab = requestedTab === "overview" ? "market" : (requestedTab === "ledger" ? "portfolio" : requestedTab);
 			}
+			const stonksState = stateQuery === "loading" || stateQuery === "stonks-loading"
+				? Object.assign({}, stonks, {
+					loading: true,
+					status: "Loading Stonks market data...",
+					personalTickers: [],
+					popularTickers: [],
+					pinnedTickers: [],
+					tickerQuotes: {},
+					snapshots: [],
+					leaderboard: [],
+					users: []
+				})
+				: stonks;
 			return Object.assign(walkthroughDialogBase("stonks", "stonks", "Stonks", "Portfolio, leaderboard, following, and server settings.", {
 				primaryActionId: "close",
 				tone: "wide",
 				actions: [close]
-			}), { stonks: stonks });
+			}), { stonks: stonksState });
 		}
 
 		if (name === "server-info" || name === "server-information") {
@@ -2668,9 +2699,9 @@
 					walkthroughSection("Results", [
 						walkthroughField("search.results", "", "resultList", [
 							{ type: "room", id: 1, index: 0, title: "Lobby", subtitle: "Voice room - 3 matching messages", primaryAction: "Open", secondaryAction: "Join" },
-							{ type: "room", id: 2, index: 1, title: "#general", subtitle: "Text room - 2 matching messages", primaryAction: "Open", secondaryAction: "Open" },
-							{ type: "user", id: 2, index: 2, title: "Kira", subtitle: "Mentioned ranked tonight", primaryAction: "Open", secondaryAction: "Message" },
-							{ type: "user", id: 3, index: 3, title: "Dev_Ops", subtitle: "Relay deployment thread", primaryAction: "Open", secondaryAction: "Message" }
+							{ type: "textRoom", id: 2, index: 1, title: "#general", subtitle: "Text room - 2 matching messages", primaryAction: "Open" },
+							{ type: "user", id: 2, index: 2, title: "Kira", subtitle: "Mentioned ranked tonight", primaryAction: "Message", secondaryAction: "Select" },
+							{ type: "user", id: 3, index: 3, title: "Dev_Ops", subtitle: "Relay deployment thread", primaryAction: "Message", secondaryAction: "Select" }
 						])
 					])
 				],
@@ -2725,6 +2756,16 @@
 		}
 
 		if (name === "users" || name === "registered-users") {
+			if (stateQuery === "loading" || stateQuery === "userlist-loading" || stateQuery === "registered-users-loading") {
+				return Object.assign(walkthroughDialogBase("registeredUsers", "info", "Registered users",
+					"Requesting the registered user list from the server.", {
+						sections: [walkthroughSection("Status", [walkthroughNote("Loading users...")], { presentation: "list" })],
+						actions: [close]
+					}), {
+					loading: true,
+					loadingScaffold: "records"
+				});
+			}
 			return walkthroughDialogBase("registeredUsers", "info", "Registered users", "Registered accounts on this server.", {
 				highlights: [walkthroughHighlight("Registered", 5), walkthroughHighlight("Shown", 5), walkthroughHighlight("Mode", "Read only")],
 				sections: [
@@ -2736,6 +2777,16 @@
 		}
 
 		if (name === "bans" || name === "ban-list") {
+			if (stateQuery === "loading" || stateQuery === "banlist-loading" || stateQuery === "bans-loading") {
+				return Object.assign(walkthroughDialogBase("banList", "info", "Ban list",
+					"Requesting the ban list from the server.", {
+						sections: [walkthroughSection("Status", [walkthroughNote("Loading bans...")], { presentation: "list" })],
+						actions: [close]
+					}), {
+					loading: true,
+					loadingScaffold: "records"
+				});
+			}
 			return walkthroughDialogBase("banList", "info", "Ban list", "Read-only Modern view of the server ban list.", {
 				highlights: [walkthroughHighlight("Active bans", 2), walkthroughHighlight("Mode", "Read only")],
 				sections: [
@@ -2746,6 +2797,17 @@
 		}
 
 		if (name === "acl" || name === "room-acl") {
+			if (stateQuery === "loading" || stateQuery === "acl-loading") {
+				return Object.assign(walkthroughDialogBase("acl", "info", "Edit room",
+					"Requesting room details and ACL data for Lobby.", {
+						tone: "wide",
+						sections: [walkthroughSection("Status", [walkthroughNote("Loading ACL...")])],
+						actions: [close]
+					}), {
+					loading: true,
+					loadingScaffold: "acl"
+				});
+			}
 			return walkthroughDialogBase("acl", "form", "Edit room", "Manage room details, inherited groups, and explicit access rules.", {
 				primaryActionId: "saveAcl",
 				tone: "wide",
@@ -3385,6 +3447,58 @@
 					{ id: "app.update.dismiss", label: "Later", enabled: true }
 				]
 			};
+		}
+
+		if (variantQuery === "self-muted" || variantQuery === "self-deafened") {
+			snapshot.app.selfMuted = true;
+			snapshot.app.selfDeafened = variantQuery === "self-deafened";
+			snapshot.app.selfStatusTone = "danger";
+			snapshot.app.selfStatusLabel = variantQuery === "self-deafened" ? "deafened" : "muted";
+		}
+
+		if (variantQuery === "stonks-loading") {
+			snapshot.app.stonks = Object.assign({}, snapshot.app.stonks || {}, {
+				supported: true,
+				enabled: true,
+				registered: true,
+				loading: true,
+				status: "Loading Stonks market data...",
+				personalTickers: [],
+				popularTickers: [],
+				pinnedTickers: [],
+				tickerQuotes: {},
+				snapshots: [],
+				leaderboard: [],
+				users: []
+			});
+		}
+
+		if (variantQuery === "rich-preview-loading" || variantQuery === "preview-loading") {
+			snapshot.messages = [{
+				messageId: 9301,
+				threadId: 1,
+				createdAtMs: Date.now(),
+				actor: "Kira",
+				actorKey: "kira",
+				timeLabel: "15:12",
+				bodyText: "checking this link https://example.com/loading-preview",
+				bodyHtml: "checking this link https://example.com/loading-preview",
+				own: false,
+				system: false,
+				canReply: true,
+				canReact: true,
+				canDelete: false,
+				reactions: [],
+				preview: {
+					kind: "link",
+					url: "https://example.com/loading-preview",
+					title: "Loading link preview...",
+					subtitle: "example.com",
+					description: "",
+					loading: true,
+					openLabel: "Open link"
+				}
+			}];
 		}
 
 		return snapshot;
@@ -4884,6 +4998,201 @@
 		return Number.isFinite(price) ? formatStonksMoney(price, quote.currency || "USD") : "-";
 	}
 
+	function createModernSkeleton(kind, size) {
+		const skeleton = document.createElement("span");
+		skeleton.className = "modern-skeleton"
+			+ (kind ? " is-" + kind : " is-line")
+			+ (size ? " " + size : "");
+		skeleton.setAttribute("aria-hidden", "true");
+		return skeleton;
+	}
+
+	function appendModernSkeletonLines(parent, sizes) {
+		(sizes || ["is-medium"]).forEach(function(size) {
+			parent.appendChild(createModernSkeleton("line", size));
+		});
+	}
+
+	function modernDialogLoadingText(dialog) {
+		const sections = Array.isArray(dialog && dialog.sections) ? dialog.sections : [];
+		for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex += 1) {
+			const fields = Array.isArray(sections[sectionIndex] && sections[sectionIndex].fields)
+				? sections[sectionIndex].fields
+				: [];
+			for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex += 1) {
+				const field = fields[fieldIndex] || {};
+				const text = String(field.value || field.text || "").trim();
+				if (field.type === "note" && text) {
+					return text;
+				}
+			}
+		}
+		return String(dialog && dialog.subtitle || "Loading...").trim() || "Loading...";
+	}
+
+	function modernDialogLoadingScaffoldKind(dialog) {
+		const explicit = String(dialog && dialog.loadingScaffold || "").trim().toLowerCase();
+		if (explicit) {
+			return explicit;
+		}
+		const id = String(dialog && dialog.id || "").trim().toLowerCase();
+		if (id === "acl") {
+			return "acl";
+		}
+		if (id === "serveruserlist" || id === "registeredusers" || id === "serverbanlist" || id === "banlist") {
+			return "records";
+		}
+		return "records";
+	}
+
+	function appendModernRecordLoadingScaffold(container, dialog) {
+		const shell = document.createElement("section");
+		shell.className = "modern-dialog-loading-scaffold is-records";
+		shell.setAttribute("aria-busy", "true");
+
+		const status = document.createElement("div");
+		status.className = "modern-dialog-loading-status";
+		const statusText = document.createElement("span");
+		statusText.textContent = modernDialogLoadingText(dialog);
+		status.appendChild(statusText);
+		appendModernSkeletonLines(status, ["is-short"]);
+		shell.appendChild(status);
+
+		const stats = document.createElement("div");
+		stats.className = "modern-dialog-loading-stats";
+		for (let index = 0; index < 3; index += 1) {
+			const stat = document.createElement("div");
+			stat.className = "modern-dialog-loading-stat";
+			appendModernSkeletonLines(stat, ["is-tiny", index === 1 ? "is-medium" : "is-short"]);
+			stats.appendChild(stat);
+		}
+		shell.appendChild(stats);
+
+		const list = document.createElement("div");
+		list.className = "modern-dialog-loading-list";
+		for (let index = 0; index < 4; index += 1) {
+			const row = document.createElement("div");
+			row.className = "modern-dialog-loading-row";
+			row.appendChild(createModernSkeleton("avatar"));
+			const copy = document.createElement("div");
+			copy.className = "modern-dialog-loading-row-copy";
+			appendModernSkeletonLines(copy, ["is-medium", index % 2 ? "is-short" : "is-long"]);
+			row.appendChild(copy);
+			row.appendChild(createModernSkeleton("pill", "is-short"));
+			list.appendChild(row);
+		}
+		shell.appendChild(list);
+		container.appendChild(shell);
+	}
+
+	function appendModernAclLoadingScaffold(container, dialog) {
+		const shell = document.createElement("section");
+		shell.className = "modern-dialog-loading-scaffold is-acl";
+		shell.setAttribute("aria-busy", "true");
+
+		const status = document.createElement("div");
+		status.className = "modern-dialog-loading-status";
+		const statusText = document.createElement("span");
+		statusText.textContent = modernDialogLoadingText(dialog);
+		status.appendChild(statusText);
+		appendModernSkeletonLines(status, ["is-short"]);
+		shell.appendChild(status);
+
+		const policy = document.createElement("div");
+		policy.className = "modern-dialog-loading-acl-policy";
+		appendModernSkeletonLines(policy, ["is-medium", "is-long"]);
+		shell.appendChild(policy);
+
+		const tabs = document.createElement("div");
+		tabs.className = "modern-dialog-loading-acl-tabs";
+		for (let index = 0; index < 3; index += 1) {
+			tabs.appendChild(createModernSkeleton("pill", index === 0 ? "is-medium" : "is-short"));
+		}
+		shell.appendChild(tabs);
+
+		const workspace = document.createElement("div");
+		workspace.className = "modern-dialog-loading-acl-workspace";
+		const sidebar = document.createElement("div");
+		sidebar.className = "modern-dialog-loading-acl-sidebar";
+		for (let index = 0; index < 4; index += 1) {
+			appendModernSkeletonLines(sidebar, [index === 0 ? "is-long" : "is-medium"]);
+		}
+		const detail = document.createElement("div");
+		detail.className = "modern-dialog-loading-acl-detail";
+		appendModernSkeletonLines(detail, ["is-medium", "is-long", "is-long"]);
+		const matrix = document.createElement("div");
+		matrix.className = "modern-dialog-loading-acl-matrix";
+		for (let index = 0; index < 8; index += 1) {
+			matrix.appendChild(createModernSkeleton("block"));
+		}
+		detail.appendChild(matrix);
+		workspace.append(sidebar, detail);
+		shell.appendChild(workspace);
+		container.appendChild(shell);
+	}
+
+	function appendModernDialogLoadingScaffold(container, dialog) {
+		if (modernDialogLoadingScaffoldKind(dialog) === "acl") {
+			appendModernAclLoadingScaffold(container, dialog);
+			return;
+		}
+		appendModernRecordLoadingScaffold(container, dialog);
+	}
+
+	function appendStonksLoadingSkeleton(parent) {
+		const shell = document.createElement("section");
+		shell.className = "stonks-loading-scaffold";
+		shell.setAttribute("aria-busy", "true");
+
+		const stats = document.createElement("div");
+		stats.className = "stonks-stat-grid stonks-loading-stats";
+		for (let index = 0; index < 3; index += 1) {
+			const card = document.createElement("div");
+			card.className = "stonks-stat is-loading";
+			appendModernSkeletonLines(card, ["is-tiny", index === 0 ? "is-long" : "is-medium"]);
+			stats.appendChild(card);
+		}
+		shell.appendChild(stats);
+
+		const chart = document.createElement("div");
+		chart.className = "stonks-chart-card is-loading";
+		const chartTop = document.createElement("div");
+		chartTop.className = "stonks-chart-top";
+		const copy = document.createElement("div");
+		appendModernSkeletonLines(copy, ["is-medium", "is-short"]);
+		const value = document.createElement("div");
+		value.className = "stonks-focus-price";
+		appendModernSkeletonLines(value, ["is-medium", "is-short"]);
+		chartTop.append(copy, value);
+		const block = createModernSkeleton("block", "is-chart");
+		chart.append(chartTop, block);
+		shell.appendChild(chart);
+
+		const listCard = document.createElement("div");
+		listCard.className = "stonks-list-card is-loading";
+		const head = document.createElement("div");
+		head.className = "stonks-list-head";
+		appendModernSkeletonLines(head, ["is-short", "is-tiny"]);
+		listCard.appendChild(head);
+		const list = document.createElement("div");
+		list.className = "stonks-list";
+		for (let index = 0; index < 4; index += 1) {
+			const row = document.createElement("div");
+			row.className = "stonks-row is-loading";
+			row.appendChild(createModernSkeleton("avatar"));
+			const rowCopy = document.createElement("div");
+			rowCopy.className = "stonks-row-copy";
+			appendModernSkeletonLines(rowCopy, ["is-short", "is-medium"]);
+			row.appendChild(rowCopy);
+			row.appendChild(createModernSkeleton("line", "is-short"));
+			row.appendChild(createModernSkeleton("pill", "is-tiny"));
+			list.appendChild(row);
+		}
+		listCard.appendChild(list);
+		shell.appendChild(listCard);
+		parent.appendChild(shell);
+	}
+
 	function stonksTickerTooltip(ticker, quote) {
 		const parts = [];
 		const name = String(ticker.displayName || "").trim();
@@ -5151,11 +5460,48 @@
 			item.className = "stonks-chat-header-ticker " + stonksTickerQuoteTone(quote);
 			item.innerHTML = "<strong></strong><span></span>";
 			item.querySelector("strong").textContent = ticker.symbol;
-			item.querySelector("span").textContent = stonksTickerQuoteLabel(quote);
+			if (!quote || quote.pending) {
+				item.querySelector("span").appendChild(createModernSkeleton("line", "is-tiny"));
+				item.setAttribute("aria-label", ticker.symbol + " quote loading");
+			} else {
+				item.querySelector("span").textContent = stonksTickerQuoteLabel(quote);
+			}
 			item.title = stonksTickerTooltip(ticker, quote);
 			group.appendChild(item);
 		});
 		parent.appendChild(group);
+	}
+
+	function appendStonksTickerHeaderLoading(parent) {
+		const group = document.createElement("div");
+		group.className = "stonks-chat-header-group";
+		const label = document.createElement("span");
+		label.className = "stonks-chat-header-label";
+		label.textContent = "Stonks";
+		group.appendChild(label);
+		for (let index = 0; index < 3; index += 1) {
+			const item = document.createElement("span");
+			item.className = "stonks-chat-header-ticker is-loading";
+			item.setAttribute("aria-label", "Ticker quote loading");
+			item.appendChild(createModernSkeleton("line", index === 0 ? "is-medium" : "is-short"));
+			group.appendChild(item);
+		}
+		parent.appendChild(group);
+	}
+
+	function wrapStonksTickerHeaderContent(header) {
+		const viewport = document.createElement("div");
+		viewport.className = "stonks-chat-header-viewport";
+		const track = document.createElement("div");
+		track.className = "stonks-chat-header-track";
+		const primaryRun = document.createElement("div");
+		primaryRun.className = "stonks-chat-header-run";
+		while (header.firstChild) {
+			primaryRun.appendChild(header.firstChild);
+		}
+		track.appendChild(primaryRun);
+		viewport.appendChild(track);
+		header.appendChild(viewport);
 	}
 
 	function clearStonksTickerHeader(header) {
@@ -5201,15 +5547,18 @@
 		const hasTickers = pinnedTickers.length || personalTickers.length || popularTickers.length;
 		const connected = !!app.canDisconnect;
 		const supported = !!stonks.supported;
+		const loading = !!stonks.loading;
 		const automationHeaderVisible = !!stonks.automationHeaderVisible;
 		const visible = (connected || automationHeaderVisible) && stonks.enabled !== false;
-		const showTickerHeader = visible && supported && (hasTickers || automationHeaderVisible);
+		const showTickerHeader = visible && supported && (hasTickers || automationHeaderVisible || loading);
 		refs.stonksLeaderboardHeader.classList.toggle("hidden", !showTickerHeader);
-		refs.stonksLeaderboardHeader.classList.toggle("is-empty", visible && supported && !hasTickers);
+		refs.stonksLeaderboardHeader.classList.toggle("is-empty", visible && supported && !hasTickers && !loading);
+		refs.stonksLeaderboardHeader.classList.toggle("is-loading", visible && supported && loading);
 		refs.stonksLeaderboardHeader.classList.toggle("is-unavailable", visible && !supported);
 		refs.stonksLeaderboardHeader.title = hasTickers
 			? "Followed tickers - click to open Stonks"
-			: (supported ? "Waiting for Stonks tickers - click to open Stonks" : "This server has not advertised Stonks support");
+			: (loading ? "Loading Stonks tickers - click to open Stonks"
+				: (supported ? "Waiting for Stonks tickers - click to open Stonks" : "This server has not advertised Stonks support"));
 		if (!visible) {
 			clearStonksTickerHeader(refs.stonksLeaderboardHeader);
 			stopStonksVisibleRefreshTimer();
@@ -5218,6 +5567,24 @@
 		if (!supported) {
 			clearStonksTickerHeader(refs.stonksLeaderboardHeader);
 			stopStonksVisibleRefreshTimer();
+			return;
+		}
+		if (loading && !hasTickers) {
+			if (stonksTickerRenderSignature === "loading"
+					&& refs.stonksLeaderboardHeader.querySelector(".stonks-chat-header-viewport")) {
+				scheduleStonksTickerScrollSync();
+				return;
+			}
+			stonksTickerRenderSignature = "loading";
+			refs.stonksLeaderboardHeader.innerHTML = "";
+			refs.stonksLeaderboardHeader.classList.remove("can-scroll", "is-scrolling", "is-static");
+			refs.stonksLeaderboardHeader.style.removeProperty("--stonks-marquee-duration");
+			refs.stonksLeaderboardHeader.style.removeProperty("--stonks-marquee-distance");
+			delete refs.stonksLeaderboardHeader.dataset.stonksMarqueeSignature;
+			appendStonksTickerHeaderLoading(refs.stonksLeaderboardHeader);
+			wrapStonksTickerHeaderContent(refs.stonksLeaderboardHeader);
+			stopStonksVisibleRefreshTimer();
+			scheduleStonksTickerScrollSync();
 			return;
 		}
 
@@ -5251,18 +5618,7 @@
 		appendStonksTickerGroup(refs.stonksLeaderboardHeader, "Pinned", pinnedTickers, "", stonks);
 		appendStonksTickerGroup(refs.stonksLeaderboardHeader, "Portfolio", personalTickers, "", stonks);
 		appendStonksTickerGroup(refs.stonksLeaderboardHeader, "Popular", popularTickers, "", stonks);
-		const viewport = document.createElement("div");
-		viewport.className = "stonks-chat-header-viewport";
-		const track = document.createElement("div");
-		track.className = "stonks-chat-header-track";
-		const primaryRun = document.createElement("div");
-		primaryRun.className = "stonks-chat-header-run";
-		while (refs.stonksLeaderboardHeader.firstChild) {
-			primaryRun.appendChild(refs.stonksLeaderboardHeader.firstChild);
-		}
-		track.appendChild(primaryRun);
-		viewport.appendChild(track);
-		refs.stonksLeaderboardHeader.appendChild(viewport);
+		wrapStonksTickerHeaderContent(refs.stonksLeaderboardHeader);
 		scheduleStonksTickerScrollSync();
 	}
 
@@ -9162,6 +9518,17 @@
 		return Number.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 1;
 	}
 
+	function setPreviewMediaRangeProgress(input) {
+		if (!input || !input.style) {
+			return;
+		}
+		const min = Number(input.min || 0);
+		const max = Number(input.max || 100);
+		const value = Number(input.value || 0);
+		const progress = max > min ? ((value - min) / (max - min)) * 100 : 0;
+		input.style.setProperty("--preview-media-range-progress", String(Math.max(0, Math.min(100, progress))) + "%");
+	}
+
 	function previewMediaIconSvg(iconName) {
 		switch (String(iconName || "")) {
 			case "pause":
@@ -9244,17 +9611,19 @@
 			muteButton.title = label;
 			muteButton.setAttribute("aria-label", label);
 		}
-		if (seek && duration && !seek.matches(":active")) {
-			seek.value = String(Math.round((currentTime / duration) * 1000));
-		}
 		if (seek) {
+			if (!seek.matches(":active")) {
+				seek.value = duration ? String(Math.round((currentTime / duration) * 1000)) : "0";
+			}
 			seek.disabled = !seekEnabled;
-		}
-		if (volume && !volume.matches(":active")) {
-			volume.value = String(Math.round((isMuted ? 0 : normalizedPreviewMediaVolume(state.volume)) * 100));
+			setPreviewMediaRangeProgress(seek);
 		}
 		if (volume) {
+			if (!volume.matches(":active")) {
+				volume.value = String(Math.round((isMuted ? 0 : normalizedPreviewMediaVolume(state.volume)) * 100));
+			}
 			volume.disabled = !volumeEnabled;
+			setPreviewMediaRangeProgress(volume);
 		}
 		if (time) {
 			time.textContent = duration
@@ -9315,9 +9684,11 @@
 			seek.max = "1000";
 			seek.step = "1";
 			seek.value = "0";
+			setPreviewMediaRangeProgress(seek);
 			seek.setAttribute("aria-label", "Seek media");
 			seek.addEventListener("input", function(event) {
 				event.stopPropagation();
+				setPreviewMediaRangeProgress(seek);
 				if (typeof options.onSeek === "function") {
 					options.onSeek((Number(seek.value) || 0) / 1000, controls);
 				}
@@ -9347,9 +9718,11 @@
 			volume.max = "100";
 			volume.step = "1";
 			volume.value = "100";
+			setPreviewMediaRangeProgress(volume);
 			volume.setAttribute("aria-label", "Media volume");
 			volume.addEventListener("input", function(event) {
 				event.stopPropagation();
+				setPreviewMediaRangeProgress(volume);
 				if (typeof options.onVolume === "function") {
 					options.onVolume((Number(volume.value) || 0) / 100, controls);
 				}
@@ -14451,6 +14824,33 @@
 		return media;
 	}
 
+	function appendPreviewLoadingSkeleton(card, preview, hostLabel, sourceLabel) {
+		const media = document.createElement("div");
+		media.className = "preview-card-media preview-card-loading-media";
+		media.appendChild(createModernSkeleton("block", "is-preview-media"));
+		card.appendChild(media);
+
+		const copy = document.createElement("div");
+		copy.className = "preview-card-copy preview-card-loading-copy";
+		const meta = document.createElement("div");
+		meta.className = "preview-card-meta";
+		const source = document.createElement("span");
+		source.className = "preview-card-subtitle";
+		source.textContent = sourceLabel || hostLabel || "Link preview";
+		meta.appendChild(source);
+		copy.appendChild(meta);
+		appendModernSkeletonLines(copy, ["is-long", "is-medium", "is-short"]);
+		const footer = document.createElement("div");
+		footer.className = "preview-card-footer";
+		footer.appendChild(createModernSkeleton("pill", "is-short"));
+		copy.appendChild(footer);
+		card.appendChild(copy);
+		if (preview && preview.url) {
+			card.title = "Loading preview for " + preview.url;
+			card.setAttribute("aria-label", card.title);
+		}
+	}
+
 	function renderPreviewCard(message) {
 		const preview = message && message.preview;
 		if (!preview || (!preview.url && !preview.title && !preview.description && !preview.thumbnailUrl && !preview.mediaUrl && !preview.embedUrl)) {
@@ -14569,6 +14969,11 @@
 					activateCard(event);
 				}
 			});
+		}
+
+		if (preview.loading) {
+			appendPreviewLoadingSkeleton(card, preview, hostLabel, sourceLabel);
+			return card;
 		}
 
 		if (isGoogleSearch) {
@@ -15730,7 +16135,7 @@
 			scrollTop: scrollTop,
 			maxScrollTop: maxScrollTop,
 			distanceFromBottom: distanceFromBottom,
-			nearBottom: distanceFromBottom <= 28
+			nearBottom: distanceFromBottom <= 80
 		};
 	}
 
@@ -16930,7 +17335,19 @@
 		renderModernDialog();
 	}
 
+	function modernDialogValueElement(input) {
+		if (input && input.classList && input.classList.contains("modern-select-button")) {
+			const shell = input.closest(".modern-select");
+			const select = shell ? shell.querySelector("select") : null;
+			if (select) {
+				return select;
+			}
+		}
+		return input;
+	}
+
 	function modernDialogInputValue(field, input) {
+		input = modernDialogValueElement(input);
 		const type = String(field && field.type || "text");
 		if (type === "checkbox") {
 			return !!input.checked;
@@ -18675,6 +19092,112 @@
 		container.appendChild(wrap);
 	}
 
+	function modernResultItemKind(item) {
+		const type = String(item && item.type || "").trim().toLowerCase();
+		const title = String(item && item.title || "").trim();
+		const subtitle = String(item && item.subtitle || "").trim().toLowerCase();
+		if (type === "user") {
+			return "user";
+		}
+		if (type === "textroom" || type === "text-room" || type === "text_room" || type === "text") {
+			return "textRoom";
+		}
+		if (title.charAt(0) === "#" || subtitle.indexOf("text room") !== -1) {
+			return "textRoom";
+		}
+		return "room";
+	}
+
+	function modernResultTypeLabel(kind) {
+		if (kind === "user") {
+			return "User";
+		}
+		if (kind === "textRoom") {
+			return "Text room";
+		}
+		return "Room";
+	}
+
+	function modernResultSubtitle(kind, subtitle, separator) {
+		const label = modernResultTypeLabel(kind);
+		const text = String(subtitle || "").trim();
+		if (!text) {
+			return label;
+		}
+		if (text.toLowerCase().indexOf(label.toLowerCase()) === 0) {
+			return text;
+		}
+		return label + separator + text;
+	}
+
+	function modernResultLabel(value) {
+		return String(value || "").trim();
+	}
+
+	function modernResultActionLabel(item, role, fallback) {
+		const primary = modernResultLabel(item && item.primaryAction);
+		const secondary = modernResultLabel(item && item.secondaryAction);
+		const direct = modernResultLabel(item && item[role + "Action"]);
+		const primaryKey = primary.toLowerCase();
+		const secondaryKey = secondary.toLowerCase();
+		if (direct) {
+			return direct;
+		}
+		if (role === "message") {
+			if (primaryKey.indexOf("message") !== -1) {
+				return primary;
+			}
+			if (secondaryKey.indexOf("message") !== -1) {
+				return secondary;
+			}
+		}
+		if (role === "select") {
+			if (primaryKey === "select") {
+				return primary;
+			}
+			if (secondaryKey === "select") {
+				return secondary;
+			}
+		}
+		if (role === "join") {
+			if (secondary && secondaryKey !== "open" && secondaryKey !== "select" && secondaryKey.indexOf("message") === -1) {
+				return secondary;
+			}
+		}
+		if (role === "open") {
+			if (primary && primaryKey !== "select" && primaryKey !== "join" && primaryKey.indexOf("message") === -1) {
+				return primary;
+			}
+		}
+		return fallback;
+	}
+
+	function modernResultActions(item) {
+		const kind = modernResultItemKind(item);
+		const actions = kind === "user"
+			? [
+				{ id: "messageSearchResult", label: modernResultActionLabel(item, "message", "Message"), primary: true },
+				{ id: "selectSearchResult", label: modernResultActionLabel(item, "select", "Select"), primary: false }
+			]
+			: (kind === "textRoom"
+				? [
+					{ id: "selectSearchResult", label: modernResultActionLabel(item, "open", "Open"), primary: true }
+				]
+				: [
+					{ id: "selectSearchResult", label: modernResultActionLabel(item, "open", "Open"), primary: true },
+					{ id: "joinSearchResult", label: modernResultActionLabel(item, "join", "Join"), primary: false }
+				]);
+		const seen = {};
+		return actions.filter(function(action) {
+			const key = String(action.label || "").trim().toLowerCase();
+			if (!key || seen[key]) {
+				return false;
+			}
+			seen[key] = true;
+			return true;
+		});
+	}
+
 	function appendModernResultList(container, field) {
 		const list = document.createElement("div");
 		list.className = "modern-dialog-result-list";
@@ -18686,6 +19209,7 @@
 			list.appendChild(empty);
 		}
 		items.forEach(function(item) {
+			const kind = modernResultItemKind(item);
 			const row = document.createElement("div");
 			row.className = "modern-dialog-result";
 			const copy = document.createElement("div");
@@ -18695,23 +19219,20 @@
 			title.textContent = item.title || "";
 			const subtitle = document.createElement("span");
 			subtitle.className = "modern-dialog-result-subtitle";
-			subtitle.textContent = (item.type === "user" ? "User" : "Room") + (item.subtitle ? " · " + item.subtitle : "");
+			subtitle.textContent = modernResultSubtitle(kind, item.subtitle, " · ");
 			copy.appendChild(title);
 			copy.appendChild(subtitle);
 			row.appendChild(copy);
 			const actions = document.createElement("span");
 			actions.className = "modern-dialog-result-actions";
-			[
-				["selectSearchResult", item.primaryAction || "Select"],
-				["joinSearchResult", item.secondaryAction || "Join"]
-			].forEach(function(pair) {
+			modernResultActions(item).forEach(function(action) {
 				const button = document.createElement("button");
 				button.type = "button";
-				button.className = "chip-button";
-				button.textContent = pair[1];
+				button.className = "chip-button" + (action.primary ? " is-primary" : "");
+				button.textContent = action.label;
 				button.addEventListener("click", function(event) {
 					event.preventDefault();
-					invokeModernDialogAction(pair[0], {
+					invokeModernDialogAction(action.id, {
 						type: item.type || "",
 						id: Number(item.id) || 0,
 						index: Number(item.index) || 0
@@ -22363,6 +22884,10 @@
 			refs.modernDialogBody.appendChild(empty);
 			return;
 		}
+		if (stonks.loading) {
+			appendStonksLoadingSkeleton(refs.modernDialogBody);
+			return;
+		}
 		if (!stonks.registered) {
 			const needed = document.createElement("section");
 			needed.className = "stonks-register-needed";
@@ -22551,6 +23076,8 @@
 			dialog && dialog.title || "",
 			dialog && dialog.subtitle || "",
 			dialog && dialog.tone || "",
+			dialog && dialog.loading ? "loading" : "",
+			dialog && dialog.loadingScaffold || "",
 			stonksActiveTab || "",
 			stonks.status || "",
 			stonks.error || "",
@@ -22645,7 +23172,11 @@
 			appendModernDialogFavorites(refs.modernDialogBody, dialog);
 
 			const errors = dialog.errors || {};
-			appendModernDialogSections(refs.modernDialogBody, dialog.sections || [], errors, dialog);
+			if (dialog.loading) {
+				appendModernDialogLoadingScaffold(refs.modernDialogBody, dialog);
+			} else {
+				appendModernDialogSections(refs.modernDialogBody, dialog.sections || [], errors, dialog);
+			}
 		}
 
 		if (dialog.kind !== "settings") {
@@ -22790,6 +23321,32 @@
 		openMenuPinned = false;
 		renderMenus(resolvedAppMenus(snapshot.app || {}));
 		renderAppMenu(snapshot);
+	}
+
+	function serverCardMenuTargetFromEvent(event) {
+		const target = eventElementTarget(event);
+		if (!target || typeof target.closest !== "function") {
+			return null;
+		}
+		if (target.closest("#brand-badge") || target.closest("#rail-close-button")) {
+			return null;
+		}
+		if (target.closest("#settings-button")) {
+			return target;
+		}
+		if (refs.utilityRailHeader && refs.utilityRailHeader.contains(target)) {
+			return target;
+		}
+		return null;
+	}
+
+	function handleServerCardMenuClick(event) {
+		if (!serverCardMenuTargetFromEvent(event)) {
+			return;
+		}
+		event.preventDefault();
+		event.stopPropagation();
+		toggleAppMenu();
 	}
 
 	function hideSelfMenu() {
@@ -24159,12 +24716,13 @@
 
 	function automationModernDialogFieldState(fieldId) {
 		const element = automationModernDialogFieldElement(fieldId);
+		const valueElement = modernDialogValueElement(element);
 		const root = refs.modernDialog || document.getElementById("modern-dialog") || document;
 		const dialog = modernDialogState || {};
 		const field = findModernDialogField(dialog, fieldId);
-		const type = String(field && field.type || (element && element.type) || "");
-		const value = element
-			? (type === "checkbox" ? !!element.checked : String(element.value || ""))
+		const type = String(field && field.type || (valueElement && valueElement.type) || "");
+		const value = valueElement
+			? (type === "checkbox" ? !!valueElement.checked : String(valueElement.value || ""))
 			: "";
 		const availableFieldIds = root
 			? Array.prototype.slice.call(root.querySelectorAll("[data-modern-dialog-field-id]")).map(function(candidate) {
@@ -24190,26 +24748,27 @@
 		if (!element) {
 			return automationModernDialogFieldState(fieldId);
 		}
+		const valueElement = modernDialogValueElement(element);
 		const setOptions = options || {};
 		const field = findModernDialogField(modernDialogState, fieldId);
-		const type = String(field && field.type || element.type || "");
+		const type = String(field && field.type || valueElement.type || "");
 		if (setOptions.focus !== false && typeof element.focus === "function") {
 			element.focus({ preventScroll: true });
 		}
 		if (type === "checkbox") {
-			element.checked = !!value;
-			element.dispatchEvent(new Event("change", { bubbles: true }));
+			valueElement.checked = !!value;
+			valueElement.dispatchEvent(new Event("change", { bubbles: true }));
 		} else {
-			element.value = value == null ? "" : String(value);
-			if (typeof element.setSelectionRange === "function") {
+			valueElement.value = value == null ? "" : String(value);
+			if (typeof valueElement.setSelectionRange === "function") {
 				try {
-					const end = element.value.length;
-					element.setSelectionRange(end, end);
+					const end = valueElement.value.length;
+					valueElement.setSelectionRange(end, end);
 				} catch (error) {
 					// Some input types expose selection APIs but reject range updates.
 				}
 			}
-			element.dispatchEvent(new Event(type === "select" || type === "range" ? "change" : "input", {
+			valueElement.dispatchEvent(new Event(type === "select" || type === "range" ? "change" : "input", {
 				bubbles: true
 			}));
 		}
@@ -24674,10 +25233,7 @@
 				notifyBridge("openModernDialog", "stonks", {});
 			}
 		});
-		refs.settingsButton.addEventListener("click", function(event) {
-			event.stopPropagation();
-			toggleAppMenu();
-		});
+		(refs.utilityRailHeader || refs.settingsButton).addEventListener("click", handleServerCardMenuClick);
 		if (refs.brandBadge) {
 			refs.brandBadge.addEventListener("click", function(event) {
 				const app = getSnapshot().app || {};
@@ -24877,6 +25433,16 @@
 			const contextTarget = eventElementTarget(event);
 			if (contextTarget && typeof contextTarget.closest === "function" && contextTarget.closest(".image-viewer-layer")) {
 				event.preventDefault();
+				return;
+			}
+			if (contextTarget && typeof contextTarget.closest === "function" && contextTarget.closest("#brand-badge")) {
+				event.preventDefault();
+				hideContextMenu();
+				return;
+			}
+			if (serverCardMenuTargetFromEvent(event)) {
+				event.preventDefault();
+				toggleAppMenu(true);
 				return;
 			}
 			if (contextTarget && contextTarget.closest(".context-menu")) {
