@@ -54,6 +54,8 @@
 #include "murmur/database/DBChatReadState.h"
 #include "murmur/database/DBChatThread.h"
 #include "murmur/database/DBStonksFollow.h"
+#include "murmur/database/DBStonksFeedPreferences.h"
+#include "murmur/database/DBStonksPinnedTicker.h"
 #include "murmur/database/DBStonksScore.h"
 #include "murmur/database/DBStonksSnapshot.h"
 #include "murmur/database/DBStonksSnapshotPosition.h"
@@ -68,7 +70,9 @@
 #include "murmur/database/GroupTable.h"
 #include "murmur/database/LogTable.h"
 #include "murmur/database/ServerTable.h"
+#include "murmur/database/StonksFeedPreferenceTable.h"
 #include "murmur/database/StonksFollowTable.h"
+#include "murmur/database/StonksPinnedTickerTable.h"
 #include "murmur/database/StonksScoreTable.h"
 #include "murmur/database/StonksSnapshotPositionTable.h"
 #include "murmur/database/StonksSnapshotTable.h"
@@ -1220,6 +1224,63 @@ std::vector< unsigned int > DBWrapper::getStonksFollowedUsers(unsigned int serve
 	assertRegisteredUserExists(serverID, followerUserID);
 
 	return m_serverDB.getStonksFollowTable().getFollowedUsers(serverID, followerUserID);
+
+	WRAPPER_END
+}
+
+void DBWrapper::setStonksPinnedTicker(const ::msdb::DBStonksPinnedTicker &ticker) {
+	WRAPPER_BEGIN
+
+	assertValidID(ticker.serverID);
+	assertRegisteredUserExists(ticker.serverID, ticker.userID);
+
+	m_serverDB.getStonksPinnedTickerTable().setPinnedTicker(ticker);
+
+	WRAPPER_END
+}
+
+void DBWrapper::removeStonksPinnedTicker(unsigned int serverID, unsigned int userID, const std::string &symbol) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertRegisteredUserExists(serverID, userID);
+
+	m_serverDB.getStonksPinnedTickerTable().removePinnedTicker(serverID, userID, symbol);
+
+	WRAPPER_END
+}
+
+std::vector< ::msdb::DBStonksPinnedTicker > DBWrapper::getStonksPinnedTickers(unsigned int serverID,
+																			  unsigned int userID) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertRegisteredUserExists(serverID, userID);
+
+	return m_serverDB.getStonksPinnedTickerTable().getPinnedTickers(serverID, userID);
+
+	WRAPPER_END
+}
+
+void DBWrapper::setStonksFeedPreferences(const ::msdb::DBStonksFeedPreferences &preferences) {
+	WRAPPER_BEGIN
+
+	assertValidID(preferences.serverID);
+	assertRegisteredUserExists(preferences.serverID, preferences.userID);
+
+	m_serverDB.getStonksFeedPreferenceTable().setPreferences(preferences);
+
+	WRAPPER_END
+}
+
+std::optional< ::msdb::DBStonksFeedPreferences > DBWrapper::getStonksFeedPreferences(unsigned int serverID,
+																					 unsigned int userID) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+	assertRegisteredUserExists(serverID, userID);
+
+	return m_serverDB.getStonksFeedPreferenceTable().getPreferences(serverID, userID);
 
 	WRAPPER_END
 }

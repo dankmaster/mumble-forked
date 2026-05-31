@@ -10,18 +10,82 @@
 #include "ModernShellBridge.h"
 #include "ModernShellPage.h"
 
+#include <QtCore/QEventLoop>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
 #include <QtGui/QCloseEvent>
+#include <QtGui/QColor>
+#include <QtGui/QPalette>
 #include <QtWidgets/QVBoxLayout>
 #include <QtWebChannel/QWebChannel>
+#include <QtWebEngineCore/QWebEngineScript>
 #include <QtWebEngineCore/QWebEngineSettings>
 #include <QtWebEngineWidgets/QWebEngineView>
 
+#ifdef Q_OS_WIN
+#	include <windows.h>
+#endif
+
 namespace {
+	struct ModernDialogChromeColors {
+		QColor caption;
+		QColor text;
+		QColor border;
+	};
+
 	QUrl modernDialogUrl() {
 		return QUrl(QStringLiteral("qrc:/modern-shell/dialog.html"));
 	}
+
+	bool modernDialogThemeIsLight(const QString &theme) {
+		const QString normalized = theme.trimmed().toLower();
+		return normalized == QLatin1String("light") || normalized == QLatin1String("latte");
+	}
+
+	ModernDialogChromeColors modernDialogChromeColorsForTheme(const QString &theme, const QPalette &palette) {
+		const QString normalized = theme.trimmed().toLower();
+		if (normalized == QLatin1String("light") || normalized == QLatin1String("latte")) {
+			return { QColor(QStringLiteral("#f7f9fc")), QColor(QStringLiteral("#1f2937")),
+					 QColor(QStringLiteral("#cfd7e0")) };
+		}
+		if (normalized == QLatin1String("mocha")) {
+			return { QColor(QStringLiteral("#1e1e2e")), QColor(QStringLiteral("#cdd6f4")),
+					 QColor(QStringLiteral("#45475a")) };
+		}
+		if (normalized == QLatin1String("macchiato")) {
+			return { QColor(QStringLiteral("#24273a")), QColor(QStringLiteral("#cad3f5")),
+					 QColor(QStringLiteral("#494d64")) };
+		}
+		if (normalized == QLatin1String("frappe")) {
+			return { QColor(QStringLiteral("#303446")), QColor(QStringLiteral("#c6d0f5")),
+					 QColor(QStringLiteral("#51576d")) };
+		}
+		if (normalized == QLatin1String("nord")) {
+			return { QColor(QStringLiteral("#2e3440")), QColor(QStringLiteral("#eceff4")),
+					 QColor(QStringLiteral("#434c5e")) };
+		}
+		if (normalized == QLatin1String("gruvbox")) {
+			return { QColor(QStringLiteral("#282828")), QColor(QStringLiteral("#fbf1c7")),
+					 QColor(QStringLiteral("#504945")) };
+		}
+
+		return { palette.color(QPalette::Window), palette.color(QPalette::WindowText),
+				 palette.color(QPalette::Mid) };
+	}
+
+#ifdef Q_OS_WIN
+	using DwmSetWindowAttributeFn = HRESULT(WINAPI *)(HWND, DWORD, LPCVOID, DWORD);
+
+	constexpr DWORD DwmUseImmersiveDarkModeLegacyAttribute = 19;
+	constexpr DWORD DwmUseImmersiveDarkModeAttribute       = 20;
+	constexpr DWORD DwmBorderColorAttribute                = 34;
+	constexpr DWORD DwmCaptionColorAttribute               = 35;
+	constexpr DWORD DwmTextColorAttribute                  = 36;
+
+	COLORREF colorRefFromQColor(const QColor &color) {
+		return RGB(color.red(), color.green(), color.blue());
+	}
+#endif
 } // namespace
 
 ModernDialogHost::ModernDialogHost(ModernShellBridge *bridge, QWidget *parent)
@@ -31,6 +95,7 @@ ModernDialogHost::ModernDialogHost(ModernShellBridge *bridge, QWidget *parent)
 	setWindowTitle(tr("Mumble"));
 	setMinimumSize(560, 360);
 	resize(760, 560);
+	applyAutomationOffscreenFlags();
 
 	m_layout = new QVBoxLayout(this);
 	m_layout->setContentsMargins(0, 0, 0, 0);
@@ -91,15 +156,18 @@ bool ModernDialogHost::showDialogState(const QVariantMap &state, QString *errorM
 	const QString title = state.value(QStringLiteral("title")).toString().trimmed();
 	setWindowTitle(title.isEmpty() ? tr("Mumble") : title);
 	applyDialogGeometry(state);
+	applyWindowChrome(state);
 
 	if (shouldPresent) {
-		show();
-		raise();
-		activateWindow();
+		if (automationOffscreenModeEnabled()) {
+			showForAutomationCapture();
+		} else {
+			show();
+			raise();
+			activateWindow();
+		}
 	}
-	if (shouldPresent) {
-		queueDialogStateRepublish();
-	}
+	queueDialogStateRepublish();
 	return true;
 }
 
@@ -112,6 +180,27 @@ void ModernDialogHost::hideDialog() {
 	m_currentDialogID.clear();
 	m_lastDialogState.clear();
 	hide();
+}
+
+QVariant ModernDialogHost::runAutomationScriptResult(const QString &script, const int timeoutMilliseconds) {
+	if (!m_page || script.trimmed().isEmpty()) {
+		return QVariant();
+	}
+
+	QVariant result;
+	bool finished = false;
+	QEventLoop loop;
+	QTimer timeout;
+	timeout.setSingleShot(true);
+	connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
+	m_page->runJavaScript(script, QWebEngineScript::MainWorld, [&result, &finished, &loop](const QVariant &value) {
+		result   = value;
+		finished = true;
+		loop.quit();
+	});
+	timeout.start(qBound(50, timeoutMilliseconds, 10000));
+	loop.exec();
+	return finished ? result : QVariant();
 }
 
 void ModernDialogHost::closeEvent(QCloseEvent *event) {
@@ -154,13 +243,16 @@ bool ModernDialogHost::start(QString *errorMessage) {
 void ModernDialogHost::applyDialogGeometry(const QVariantMap &state) {
 	const QString kind = state.value(QStringLiteral("kind")).toString();
 	QSize desiredSize(760, 560);
+	QSize minimumSize(560, 360);
 
 	if (kind == QLatin1String("connect")) {
 		desiredSize = QSize(880, 620);
 	} else if (kind == QLatin1String("settings")) {
-		desiredSize = QSize(980, 700);
+		desiredSize = QSize(900, 620);
 	} else if (kind == QLatin1String("failedConnection")) {
 		desiredSize = QSize(600, 420);
+	} else if (kind == QLatin1String("confirm")) {
+		minimumSize = QSize(420, 220);
 	}
 
 	const int requestedWidth  = state.value(QStringLiteral("width")).toInt();
@@ -169,9 +261,79 @@ void ModernDialogHost::applyDialogGeometry(const QVariantMap &state) {
 		desiredSize = QSize(requestedWidth, requestedHeight);
 	}
 
+	setMinimumSize(minimumSize);
 	if (!isVisible()) {
 		resize(desiredSize);
 	}
+	if (automationOffscreenModeEnabled()) {
+		move(-32000, -32000);
+	}
+}
+
+void ModernDialogHost::applyWindowChrome(const QVariantMap &state) {
+	const QString theme = state.value(QStringLiteral("uiTweaks")).toMap().value(QStringLiteral("theme")).toString();
+	const ModernDialogChromeColors colors = modernDialogChromeColorsForTheme(theme, palette());
+
+	QPalette themedPalette = palette();
+	themedPalette.setColor(QPalette::Window, colors.caption);
+	themedPalette.setColor(QPalette::WindowText, colors.text);
+	themedPalette.setColor(QPalette::Base, colors.caption);
+	setPalette(themedPalette);
+	if (m_view) {
+		m_view->setStyleSheet(QString::fromLatin1("background: %1;").arg(colors.caption.name()));
+	}
+
+#ifdef Q_OS_WIN
+	const HWND hwnd = reinterpret_cast< HWND >(winId());
+	if (!hwnd) {
+		return;
+	}
+
+	static const HMODULE dwmapiModule = GetModuleHandleW(L"dwmapi.dll");
+	if (!dwmapiModule) {
+		return;
+	}
+
+	static const DwmSetWindowAttributeFn setWindowAttribute =
+		reinterpret_cast< DwmSetWindowAttributeFn >(GetProcAddress(dwmapiModule, "DwmSetWindowAttribute"));
+	if (!setWindowAttribute) {
+		return;
+	}
+
+	const BOOL immersiveDarkMode = modernDialogThemeIsLight(theme) ? FALSE : TRUE;
+	HRESULT result =
+		setWindowAttribute(hwnd, DwmUseImmersiveDarkModeAttribute, &immersiveDarkMode, sizeof(immersiveDarkMode));
+	if (FAILED(result)) {
+		setWindowAttribute(hwnd, DwmUseImmersiveDarkModeLegacyAttribute, &immersiveDarkMode, sizeof(immersiveDarkMode));
+	}
+
+	const COLORREF captionColorRef = colorRefFromQColor(colors.caption);
+	const COLORREF textColorRef    = colorRefFromQColor(colors.text);
+	const COLORREF borderColorRef  = colorRefFromQColor(colors.border);
+	setWindowAttribute(hwnd, DwmCaptionColorAttribute, &captionColorRef, sizeof(captionColorRef));
+	setWindowAttribute(hwnd, DwmTextColorAttribute, &textColorRef, sizeof(textColorRef));
+	setWindowAttribute(hwnd, DwmBorderColorAttribute, &borderColorRef, sizeof(borderColorRef));
+#endif
+}
+
+bool ModernDialogHost::automationOffscreenModeEnabled() const {
+	return qEnvironmentVariableIsSet("MUMBLE_MODERN_AUTOMATION_OFFSCREEN");
+}
+
+void ModernDialogHost::applyAutomationOffscreenFlags() {
+	if (!automationOffscreenModeEnabled()) {
+		return;
+	}
+
+	setAttribute(Qt::WA_ShowWithoutActivating, true);
+	setWindowFlag(Qt::WindowDoesNotAcceptFocus, true);
+	move(-32000, -32000);
+}
+
+void ModernDialogHost::showForAutomationCapture() {
+	applyAutomationOffscreenFlags();
+	move(-32000, -32000);
+	show();
 }
 
 void ModernDialogHost::handleLoadFinished(const bool ok) {

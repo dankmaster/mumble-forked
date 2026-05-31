@@ -29,6 +29,7 @@ public:
 
 	bool showDialogState(const QVariantMap &state, QString *errorMessage = nullptr);
 	void hideDialog();
+	QVariant runAutomationScriptResult(const QString &script, int timeoutMilliseconds = 3000);
 
 signals:
 	void nativeCloseRequested(const QString &dialogID);
@@ -45,6 +46,10 @@ private slots:
 private:
 	bool start(QString *errorMessage = nullptr);
 	void applyDialogGeometry(const QVariantMap &state);
+	void applyWindowChrome(const QVariantMap &state);
+	bool automationOffscreenModeEnabled() const;
+	void applyAutomationOffscreenFlags();
+	void showForAutomationCapture();
 	void queueDialogStateRepublish();
 
 	QVBoxLayout *m_layout = nullptr;

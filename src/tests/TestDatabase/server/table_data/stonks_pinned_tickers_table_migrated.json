@@ -1,0 +1,19 @@
+{
+	"v6": {
+		"table_name": "stonks_pinned_tickers",
+		"column_names": [
+			"server_id",
+			"user_id",
+			"symbol",
+			"display_name",
+			"provider_id",
+			"provider_symbol",
+			"exchange",
+			"quote_source_url",
+			"display_order",
+			"created_at",
+			"updated_at"
+		],
+		"rows": []
+	}
+}

@@ -19,6 +19,7 @@ enum ChatFeature {
 	ChatFeatureEmbeds = 6;
 	ChatFeatureHistoryGrants = 7;
 	ChatFeatureTextChannels = 8;
+	ChatFeatureDirectMessages = 9;
 }
 
 enum ForkFeature {
@@ -734,6 +735,12 @@ message ServerConfig {
 	optional uint32 feedback_max_log_bytes = 25;
 	// Maximum generated issue body bytes the server accepts in a feedback report.
 	optional uint32 feedback_max_body_bytes = 26;
+	// Fork-specific display name shown by Modern clients.
+	optional string server_display_name = 27;
+	// Short fork-specific branding label shown by Modern clients.
+	optional string server_monogram = 28;
+	// Fork-specific server image shown by Modern clients. Empty bytes clears the image.
+	optional bytes server_image = 29;
 }
 
 // Sent by the server to inform the clients of suggested client configuration
@@ -770,6 +777,7 @@ enum ChatScope {
 	ServerGlobal = 1;
 	Aggregate = 2;
 	TextChannel = 3;
+	Private = 4;
 }
 
 enum ChatBodyFormat {
@@ -1192,6 +1200,25 @@ message StonksPopularTicker {
 	optional uint64 latest_updated_at = 11;
 }
 
+message StonksPinnedTicker {
+	required string symbol = 1;
+	optional string display_name = 2;
+	optional string provider_id = 3;
+	optional string provider_symbol = 4;
+	optional string exchange = 5;
+	optional string quote_source_url = 6;
+	optional uint32 display_order = 7;
+	optional uint64 created_at = 8;
+	optional uint64 updated_at = 9;
+}
+
+message StonksFeedPreferences {
+	optional bool show_mine = 1 [default = true];
+	optional bool show_popular = 2 [default = true];
+	optional bool show_pins = 3 [default = true];
+	optional uint64 updated_at = 4;
+}
+
 message StonksRequest {
 	optional string period = 1 [default = "30d"];
 	optional uint32 user_id = 2;
@@ -1205,6 +1232,8 @@ enum StonksActionKind {
 	StonksActionConfigure = 3;
 	StonksActionClearPortfolio = 4;
 	StonksActionDeleteSnapshot = 5;
+	StonksActionSetTickerPin = 6;
+	StonksActionSetFeedPreferences = 7;
 }
 
 message StonksAction {
@@ -1217,6 +1246,9 @@ message StonksAction {
 	optional bool social_announcements_enabled = 7;
 	optional string period = 8 [default = "30d"];
 	optional uint32 snapshot_id = 9;
+	optional StonksPinnedTicker pinned_ticker = 10;
+	optional StonksFeedPreferences feed_preferences = 11;
+	optional bool pinned = 12 [default = true];
 }
 
 message StonksState {
@@ -1242,6 +1274,8 @@ message StonksState {
 	optional string selected_user_name = 20;
 	repeated StonksPopularTicker popular_tickers = 21;
 	repeated StonksPopularTicker personal_tickers = 22;
+	repeated StonksPinnedTicker pinned_tickers = 23;
+	optional StonksFeedPreferences feed_preferences = 24;
 }
 
 enum FeedbackReportKind {

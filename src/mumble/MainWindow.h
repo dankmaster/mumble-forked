@@ -9,6 +9,7 @@
 #include <QtCore/QVariantMap>
 
 #include <QtCore/QHash>
+#include <QtCore/QJsonObject>
 #include <QtCore/QMap>
 #include <QtCore/QPointer>
 #include <QtCore/QSet>
@@ -67,6 +68,7 @@ class PersistentChatHistoryDelegate;
 class ModernDialogController;
 class ModernDialogHost;
 class ModernShellHost;
+class ModernUiAutomationServer;
 struct ModernConnectPingState;
 #endif
 class QAction;
@@ -127,6 +129,9 @@ public:
 
 class MainWindow : public QMainWindow, public Ui::MainWindow {
 	friend class UserModel;
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	friend class ModernUiAutomationServer;
+#endif
 
 private:
 	Q_OBJECT
@@ -259,6 +264,7 @@ public:
 	enum class UserTextureRequestReason : unsigned char { UserState, Navigator, ModernShell, PersistentChat, Overlay };
 
 	bool ensureUserTextureAvailable(ClientUser *user, UserTextureRequestReason reason);
+	bool ensureUserCommentAvailable(ClientUser *user);
 	bool normalizeUserTextureForDisplay(ClientUser *user, bool clearHashOnFailure = false);
 
 	struct PersistentChatPreviewMediaItem {
@@ -323,6 +329,38 @@ public:
 	};
 
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	struct ModernDirectMessageEntry {
+		quint64 localID = 0;
+		unsigned int peerSession  = 0;
+		unsigned int actorSession = 0;
+		QString actorName;
+		QString messageHtml;
+		QString plainText;
+		qint64 createdAtMs = 0;
+		bool outgoing      = false;
+		bool persistent    = false;
+		unsigned int threadID  = 0;
+		unsigned int messageID = 0;
+	};
+
+	struct ModernDirectMessageConversation {
+		unsigned int peerSession = 0;
+		unsigned int peerUserID  = 0;
+		QString label;
+		QString subtitle;
+		qint64 lastActivityAtMs = 0;
+		unsigned int unreadCount = 0;
+		bool open                = false;
+		bool persistentHistory   = false;
+		bool historyLoading      = false;
+		bool historyLoaded       = false;
+		QString historyError;
+		unsigned int lastReadMessageID = 0;
+		unsigned int lastMessageID     = 0;
+		QSet< QString > persistentMessageKeys;
+		std::vector< ModernDirectMessageEntry > messages;
+	};
+
 	enum class ModernShellMessageBuildMode : unsigned char { Full, FastFirstPaint };
 #endif
 
@@ -464,6 +502,9 @@ public:
 	bool canDeletePersistentChatMessages(const PersistentChatTarget &target, bool requestPermissions) const;
 	bool persistentChatTargetSupportsMessageDelete(const PersistentChatTarget &target) const;
 	bool isOwnPersistentChatMessage(const MumbleProto::ChatMessage &message) const;
+	const MumbleProto::ChatMessage *deletablePersistentChatMessage(unsigned int messageID,
+																   PersistentChatTarget *target = nullptr) const;
+	bool executePersistentChatMessageDelete(const PersistentChatTarget &target, const MumbleProto::ChatMessage &message);
 	bool deletePersistentChatMessage(unsigned int messageID);
 	void syncPersistentChatInputState(bool baseEnabled);
 	bool attachPersistentChatClipboardImage();
@@ -480,6 +521,9 @@ public:
 	bool markPersistentChatRead(bool rerender = true, bool willScrollToBottom = false);
 	void updatePersistentChatChrome(const PersistentChatTarget &target);
 	void updatePersistentChatSendButton();
+	bool tryConnectFromUpdateResumeState();
+	void loadPendingUpdateResumeState();
+	void applyPendingUpdateResumeState();
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	QVariantMap buildModernShellSnapshot();
 	QVariantMap buildModernShellMessageState(const MumbleProto::ChatMessage &message,
@@ -525,7 +569,27 @@ public:
 	void handleModernShellPreviewHydrationRequest(const QString &scopeToken, const QVariantList &messageIds,
 												  bool highPriority);
 	void handleModernShellFinanceQuoteLookupRequest(const QString &requestID, const QString &symbol);
+	void handleModernShellFinanceChartLookupRequest(const QString &requestID, const QString &symbol,
+													const QString &range, const QString &interval);
 	void flushModernShellPreviewHydrationQueue();
+	QVariantMap buildModernShellDirectMessagesState() const;
+	QVariantMap buildModernShellDirectMessageConversationState(const ModernDirectMessageConversation &conversation,
+															   bool includeMessages) const;
+	QVariantMap buildModernShellDirectMessageEntryState(const ModernDirectMessageEntry &entry) const;
+	std::optional< unsigned int > persistentUserIDForClientUser(const ClientUser *user) const;
+	ClientUser *clientUserByPersistentUserID(unsigned int userID) const;
+	QString modernDirectMessagePersistentHistoryUnavailableReason(const ClientUser *peer) const;
+	bool modernDirectMessagePersistentHistoryAvailable(const ClientUser *peer) const;
+	bool openModernDirectMessage(unsigned int session, bool markRead = true);
+	bool closeModernDirectMessage(unsigned int session);
+	bool markModernDirectMessageRead(unsigned int session);
+	void appendModernDirectMessage(unsigned int peerSession, const QString &messageHtml, bool outgoing);
+	bool appendModernPersistentDirectMessage(const MumbleProto::ChatMessage &message, bool markReadIfOpen);
+	bool mergeModernDirectMessageHistory(const MumbleProto::ChatHistoryResponse &response);
+	bool setModernDirectMessageMode(unsigned int session, const QString &mode);
+	void requestModernDirectMessageHistory(unsigned int session);
+	bool sendModernDirectMessage(unsigned int session, const QString &message);
+	void publishModernDirectMessagesPatch();
 	bool handleModernShellScopeSelection(const QString &scopeToken);
 	bool handleModernShellVoiceJoin(const QString &scopeToken);
 	bool handleModernShellScopeAction(const QString &scopeToken, const QString &actionId);
@@ -536,6 +600,11 @@ public:
 	bool handleModernShellReactionToggle(qulonglong messageID, const QString &emoji, bool active);
 	bool handleModernShellMessageDelete(qulonglong messageID);
 	bool handleModernShellParticipantMessage(qulonglong session);
+	bool handleModernShellDirectMessageOpen(qulonglong session);
+	bool handleModernShellDirectMessageClose(qulonglong session);
+	bool handleModernShellDirectMessageMarkRead(qulonglong session);
+	bool handleModernShellDirectMessageSend(qulonglong session, const QString &message);
+	bool handleModernShellDirectMessageModeChange(qulonglong session, const QString &mode);
 	bool handleModernShellParticipantJoin(qulonglong session);
 	bool handleModernShellParticipantMove(qulonglong session, const QString &targetScopeToken);
 	bool handleModernShellParticipantAction(qulonglong session, const QString &actionId);
@@ -544,11 +613,24 @@ public:
 	bool handleModernShellChannelMove(const QString &sourceScopeToken, const QString &targetScopeToken,
 									  const QString &placement);
 	bool handleModernShellAppAction(const QString &actionId);
+	bool handleModernShellAppActionPayload(const QString &actionId, const QVariantMap &payload);
+	void publishModernToast(const QString &kind, const QString &title, const QString &message,
+							const QString &actionID = QString(), const QString &actionLabel = QString(),
+							int timeoutMs = 4500);
+	bool notifyForkUpdateAvailable(const QJsonObject &info, bool autocheck);
+	bool handleModernVersionCheckResult(const QJsonObject &info, bool updateAvailable, bool autocheck);
+	bool handleModernVersionCheckFailure(const QString &message, bool autocheck);
+	bool startModernForkUpdateDownload();
+	bool startModernForkUpdateDownload(const QJsonObject &info);
+	bool restartForPreparedForkUpdate();
 	void openModernStonksDialog();
-	void requestStonksState(const QString &period = QString(), unsigned int userID = 0);
+	void requestStonksState(const QString &period = QString(),
+							std::optional< unsigned int > userID = std::nullopt);
 	void handleStonksState(const MumbleProto::StonksState &state);
 	QVariantMap buildModernStonksDialog() const;
 	bool handleModernStonksDialogAction(const QString &actionID, const QVariantMap &payload);
+	bool openModernDeleteMessageDialog(unsigned int messageID, const PersistentChatTarget &target,
+									   const MumbleProto::ChatMessage &message);
 	bool sendModernShellMessage(const QString &message);
 	void publishModernShellTalkState(const ClientUser *user);
 	void publishModernShellTalkStateForIndex(const QModelIndex &index);
@@ -577,8 +659,9 @@ public:
 	QVariantList serializeModernShellMenu(QMenu *menu, ModernShellMenuContext context,
 										  ModernShellMenuSerializer::ActionRegistry *registry = nullptr) const;
 	QVariantList buildModernShellConfigureMenuItems() const;
+	QVariantList buildModernShellAppMenus() const;
 	ModernShellMenuSerializer::ActionDefinition modernShellActionDefinition(ModernShellMenuContext context,
-																			QAction *action) const;
+																		   QAction *action) const;
 	bool triggerModernShellSerializedAction(const ModernShellMenuSerializer::ActionRegistry &registry,
 											const QString &actionId, ClientUser *contextUser = nullptr,
 											Channel *contextChannel = nullptr);
@@ -603,6 +686,10 @@ public:
 	void refreshUserTextureViews(ClientUser *user);
 	void clearUserTextureRequest(unsigned int session);
 	void clearUserTextureRequests();
+	void queueUserCommentRequest(ClientUser *user, const QByteArray &expectedHash);
+	void flushUserCommentRequests();
+	void clearUserCommentRequest(unsigned int session);
+	void clearUserCommentRequests();
 
 #ifdef Q_OS_WIN
 	bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) Q_DECL_OVERRIDE;
@@ -643,6 +730,10 @@ protected:
 	QSet< unsigned int > m_inFlightUserTextureSessions;
 	QHash< unsigned int, QByteArray > m_requestedUserTextureHashBySession;
 	QHash< QByteArray, qint64 > m_failedUserTextureHashCooldownUntilMs;
+	QTimer *m_userCommentRequestTimer = nullptr;
+	QSet< unsigned int > m_queuedUserCommentSessions;
+	QSet< unsigned int > m_inFlightUserCommentSessions;
+	QHash< unsigned int, QByteArray > m_requestedUserCommentHashBySession;
 
 	std::unique_ptr< PositionalAudioViewer > m_paViewer;
 
@@ -771,23 +862,44 @@ protected:
 	qint64 m_modernShellLastSnapshotSyncMs        = 0;
 	quint64 m_modernShellServerLogRevision        = 1;
 	quint64 m_modernShellServerLogHtmlRevision    = 0;
+	QJsonObject m_updateResumeState;
+	bool m_updateResumePending                 = false;
+	bool m_updateResumeConnectAttempted        = false;
+	bool m_updateResumeVoiceChannelApplied     = false;
+	bool m_updateResumeChatScopeApplied        = false;
+	bool m_updateResumeTextChannelSyncObserved = false;
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	ModernShellHost *m_modernShellHost                     = nullptr;
 	std::unique_ptr< ModernDialogController > m_modernDialogController;
 	std::unique_ptr< ModernDialogHost > m_modernDialogHost;
+	std::unique_ptr< ModernUiAutomationServer > m_modernUiAutomationServer;
 	QVariantMap m_stonksState;
+	QVariantMap m_modernConnectionStateProbe;
+	QVariantMap m_modernScreenShareStateProbe;
+	QVariantList m_modernRichPreviewProbeMessages;
+	QVariantList m_modernMessageDeliveryProbeMessages;
 	QString m_stonksSelectedPeriod;
-	unsigned int m_stonksSelectedUserID = 0;
+	std::optional< unsigned int > m_stonksSelectedUserID;
 	QVariantMap m_modernFeedbackDraftValues;
 	qint64 m_modernFeedbackCaptureStartOffset = -1;
 	bool m_modernFeedbackCaptureActive        = false;
 	std::optional< PendingFeedbackSubmission > m_modernFeedbackFallbackSubmission;
+	QJsonObject m_modernVersionCheckInfo;
+	QString m_modernPreparedUpdateInstallerPath;
+	bool m_modernUpdateDownloadInProgress = false;
+	QMetaObject::Connection m_modernShortcutCaptureConnection;
+	int m_modernShortcutCaptureRow = -1;
+	bool m_modernShortcutCaptureRestoreEnabled = false;
+	bool m_modernShortcutCaptureHasRestore     = false;
 	std::unique_ptr< ModernConnectPingState > m_modernConnectPingState;
 	QObject *m_persistentChatPreviewSnapshotRenderer       = nullptr;
 	quint64 m_modernShellPatchRevision                     = 0;
 	quint64 m_modernShellMessagePatchGeneration            = 0;
 	quint64 m_modernShellMessageDtoContextRevision         = 1;
 	QHash< QString, QVariantMap > m_modernShellMessageDtoCache;
+	QHash< unsigned int, ModernDirectMessageConversation > m_modernDirectMessageConversations;
+	quint64 m_modernDirectMessageLocalID = 0;
+	bool m_modernDirectMessageTrayOpenProbe = false;
 	QTimer *m_modernShellPreviewHydrationTimer             = nullptr;
 	QString m_modernShellPreviewHydrationScopeToken;
 	QList< qulonglong > m_modernShellPreviewHydrationQueue;
@@ -823,6 +935,8 @@ protected:
 	void openModernConnectDialog();
 	void openModernSettingsDialog(const QString &pageName = QString());
 	bool openModernFailedConnectionDialog(const ConnectDetails &details, ConnectionFailType type);
+	void openModernDisconnectDialog();
+	void openModernQuitDialog(bool allowMinimize);
 	void openModernGenericDialog(const QVariantMap &dialog);
 	void openModernServerInformationDialog();
 	void openModernServerTokensDialog(const QStringList &tokens = QStringList(), bool useProvidedTokens = false);
@@ -842,11 +956,22 @@ protected:
 	void openModernVoiceRecorderDialog(const QVariantMap &fieldValues = QVariantMap(),
 									   const QVariantMap &errors = QVariantMap(),
 									   const QString &statusMessage = QString());
-	void openModernCreateRoomDialog(RoomCreateType preferredType, Channel *preferredVoiceParent = nullptr);
+	void openModernCreateRoomDialog(RoomCreateType preferredType, Channel *preferredVoiceParent = nullptr,
+									const QVariantMap &fieldValues = QVariantMap(),
+									const QVariantMap &errors = QVariantMap());
+	void openModernEditTextRoomDialog(unsigned int textChannelID, const QVariantMap &fieldValues = QVariantMap(),
+									  const QVariantMap &errors = QVariantMap());
+	void openModernDeleteTextRoomDialog(unsigned int textChannelID);
+	void openModernServerSettingsDialog(const QVariantMap &fieldValues = QVariantMap(),
+										const QVariantMap &errors = QVariantMap(),
+										const QString &statusMessage = QString());
 	void openModernAudioStatsDialog();
 	void openModernAboutDialog();
 	void openModernAboutQtDialog();
 	void openModernVersionCheckDialog();
+	void openModernVersionCheckLoadingDialog();
+	void openModernVersionCheckResultDialog(const QJsonObject &info, bool updateAvailable);
+	void openModernVersionCheckFailureDialog(const QString &message);
 	void openModernHelpDialog();
 	void openModernFeedbackDialog(const QVariantMap &fieldValues = QVariantMap(),
 								  const QVariantMap &errors = QVariantMap(),
@@ -864,10 +989,14 @@ protected:
 	void openModernLocalNicknameDialog(const ClientUser *user);
 	void openModernUserCommentDialog(ClientUser *user);
 	void openModernUserCommentResetDialog(ClientUser *user);
+	void openModernUserTextureChangeDialog(ClientUser *user, const QVariantMap &fieldValues = QVariantMap(),
+										   const QVariantMap &errors = QVariantMap());
 	void openModernUserTextureResetDialog(ClientUser *user);
 	void openModernUserInformationRequestDialog(ClientUser *user);
 	void openModernUserInformationDialog(const MumbleProto::UserStats &msg);
 	void openModernRemoveChannelDialog(Channel *channel);
+	void openModernUnlinkChannelDialog(Channel *source, Channel *target);
+	void openModernUnlinkAllChannelsDialog(Channel *source);
 	bool handleModernGenericDialogAction(const QString &dialogID, const QString &actionID,
 										 const QVariantMap &fieldValues, const QVariantMap &payload);
 	bool handleModernFeedbackDialogAction(const QString &dialogID, const QString &actionID,
@@ -882,6 +1011,8 @@ protected:
 	void connectFromModernDialog(const QString &host, unsigned short port, const QString &username,
 								 const QString &password);
 	void applyModernSettings(const Settings &settings, bool accepted);
+	bool beginModernShortcutCapture(int rowIndex);
+	void cancelModernShortcutCapture();
 #endif
 	void setupGui();
 	void updateWindowTitle();
@@ -1140,6 +1271,9 @@ public:
 	std::optional< unsigned int > userIdleSeconds(unsigned int session) const;
 	bool isUserIdle(unsigned int session) const;
 	void refreshUserPresenceStats();
+	bool hasPendingUpdateResumeState() const;
+	void prepareUpdateResumeState();
+	void clearPendingUpdateResumeState();
 
 	// Implementation in Messages.cpp
 #define PROCESS_MUMBLE_TCP_MESSAGE(name, value) void msg##name(const MumbleProto::name &);

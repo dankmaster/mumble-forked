@@ -32,6 +32,53 @@ namespace {
 		return section;
 	}
 
+	QVariantMap noteItem(const QString &text) {
+		QVariantMap field;
+		field.insert(QStringLiteral("type"), QStringLiteral("note"));
+		field.insert(QStringLiteral("text"), text);
+		return field;
+	}
+
+	QVariantMap hiddenItem(const QString &id, const QVariant &value) {
+		return fieldItem(id, QString(), QStringLiteral("hidden"), value);
+	}
+
+	QVariantMap readonlyItem(const QString &label, const QVariant &value) {
+		QVariantMap field = fieldItem(QString(), label, QStringLiteral("readonly"), value);
+		field.insert(QStringLiteral("enabled"), false);
+		return field;
+	}
+
+	QVariantMap checkboxItem(const QString &id, const QString &label, const bool value) {
+		QVariantMap field = fieldItem(id, label, QStringLiteral("checkbox"), value);
+		field.insert(QStringLiteral("enabled"), true);
+		return field;
+	}
+
+	QVariantMap pathPickerItem(const QString &id, const QString &label, const QString &value,
+							   const QString &browseActionID, const QString &browseLabel) {
+		QVariantMap field = fieldItem(id, label, QStringLiteral("pathPicker"), value);
+		field.insert(QStringLiteral("enabled"), true);
+		field.insert(QStringLiteral("browseActionId"), browseActionID);
+		field.insert(QStringLiteral("browseLabel"), browseLabel);
+		return field;
+	}
+
+	QVariantMap dialogActionItem(const QString &id, const QString &label, const QString &tone = QString(),
+								 const bool closesDialog = false) {
+		QVariantMap action;
+		action.insert(QStringLiteral("kind"), QStringLiteral("action"));
+		action.insert(QStringLiteral("id"), id);
+		action.insert(QStringLiteral("label"), label);
+		action.insert(QStringLiteral("enabled"), true);
+		action.insert(QStringLiteral("checked"), false);
+		action.insert(QStringLiteral("closesDialog"), closesDialog);
+		if (!tone.isEmpty()) {
+			action.insert(QStringLiteral("tone"), tone);
+		}
+		return action;
+	}
+
 	void collectFieldValues(const QVariantList &sections, QVariantMap &values) {
 		for (const QVariant &sectionValue : sections) {
 			const QVariantMap section = sectionValue.toMap();
@@ -127,6 +174,146 @@ QVariantMap ModernDialogController::openFailedConnection(const QVariantMap &cont
 	m_failedConnection = context;
 	m_activeDialogID   = QStringLiteral("failedConnection");
 	return state();
+}
+
+QVariantMap ModernDialogController::openDisconnectConfirmation(const QString &serverLabel) {
+	QVariantList fields {
+		noteItem(QObject::tr("Voice, text, screen sharing, and room state will leave the current server."))
+	};
+	if (!serverLabel.trimmed().isEmpty()) {
+		fields.insert(0, readonlyItem(QObject::tr("Server"), serverLabel.trimmed()));
+	}
+
+	QVariantMap dialog;
+	dialog.insert(QStringLiteral("id"), QStringLiteral("disconnectServer"));
+	dialog.insert(QStringLiteral("kind"), QStringLiteral("confirm"));
+	dialog.insert(QStringLiteral("title"), QObject::tr("Disconnect"));
+	dialog.insert(QStringLiteral("subtitle"), QObject::tr("Disconnect from this server?"));
+	dialog.insert(QStringLiteral("sections"),
+				  QVariantList { sectionItem(QObject::tr("Confirmation"), fields) });
+	dialog.insert(QStringLiteral("actions"),
+				  QVariantList { dialogActionItem(QStringLiteral("cancel"), QObject::tr("Cancel"), QString(), true),
+								 dialogActionItem(QStringLiteral("confirmDisconnect"), QObject::tr("Disconnect"),
+												  QStringLiteral("danger"), true) });
+	dialog.insert(QStringLiteral("primaryActionId"), QStringLiteral("confirmDisconnect"));
+	dialog.insert(QStringLiteral("tone"), QStringLiteral("danger"));
+	dialog.insert(QStringLiteral("width"), 520);
+	dialog.insert(QStringLiteral("height"), 260);
+	return openGenericDialog(dialog);
+}
+
+QVariantMap ModernDialogController::openQuitConfirmation(const bool connected, const bool allowMinimize) {
+	QVariantList fields {
+		hiddenItem(QStringLiteral("quit.connected"), connected),
+		hiddenItem(QStringLiteral("quit.allowMinimize"), allowMinimize),
+		noteItem(connected ? QObject::tr("Quitting will disconnect from the current server and close Mumble.")
+						   : QObject::tr("Mumble will close and stop running."))
+	};
+	if (allowMinimize) {
+		fields.push_back(checkboxItem(QStringLiteral("quit.remember"), QObject::tr("Remember this setting"), false));
+	}
+
+	QVariantList actions { dialogActionItem(QStringLiteral("cancel"), QObject::tr("Cancel"), QString(), true) };
+	if (allowMinimize) {
+		actions.push_back(dialogActionItem(QStringLiteral("minimizeMumble"), QObject::tr("Minimize"),
+										   QStringLiteral("accent"), true));
+	}
+	actions.push_back(dialogActionItem(QStringLiteral("confirmQuit"), QObject::tr("Quit Mumble"),
+									   QStringLiteral("danger"), true));
+
+	QVariantMap dialog;
+	dialog.insert(QStringLiteral("id"), QStringLiteral("quitMumble"));
+	dialog.insert(QStringLiteral("kind"), QStringLiteral("confirm"));
+	dialog.insert(QStringLiteral("title"), QObject::tr("Quit Mumble"));
+	dialog.insert(QStringLiteral("subtitle"), allowMinimize
+					 ? QObject::tr("Quit Mumble or keep it running in the background?")
+					 : QObject::tr("Are you sure you want to quit Mumble?"));
+	dialog.insert(QStringLiteral("sections"),
+				  QVariantList { sectionItem(QObject::tr("Confirmation"), fields) });
+	dialog.insert(QStringLiteral("actions"), actions);
+	dialog.insert(QStringLiteral("primaryActionId"), QStringLiteral("confirmQuit"));
+	dialog.insert(QStringLiteral("tone"), QStringLiteral("danger"));
+	dialog.insert(QStringLiteral("width"), allowMinimize ? 560 : 520);
+	dialog.insert(QStringLiteral("height"), allowMinimize ? 320 : 280);
+	return openGenericDialog(dialog);
+}
+
+QVariantMap ModernDialogController::openDeleteMessageConfirmation(const qulonglong messageID,
+																  const QString &conversationLabel) {
+	QVariantList fields {
+		hiddenItem(QStringLiteral("message.id"), messageID),
+		noteItem(QObject::tr("The message body, attachments, link previews, and reactions will be removed."))
+	};
+	if (!conversationLabel.trimmed().isEmpty()) {
+		fields.insert(1, readonlyItem(QObject::tr("Conversation"), conversationLabel.trimmed()));
+	}
+
+	QVariantMap dialog;
+	dialog.insert(QStringLiteral("id"), QStringLiteral("deleteMessage:%1").arg(messageID));
+	dialog.insert(QStringLiteral("kind"), QStringLiteral("confirm"));
+	dialog.insert(QStringLiteral("title"), QObject::tr("Delete message"));
+	dialog.insert(QStringLiteral("subtitle"), QObject::tr("Delete this message from chat history?"));
+	dialog.insert(QStringLiteral("sections"),
+				  QVariantList { sectionItem(QObject::tr("Confirmation"), fields) });
+	dialog.insert(QStringLiteral("actions"),
+				  QVariantList { dialogActionItem(QStringLiteral("cancel"), QObject::tr("Cancel"), QString(), true),
+								 dialogActionItem(QStringLiteral("confirmDeleteMessage"), QObject::tr("Delete"),
+												  QStringLiteral("danger"), true) });
+	dialog.insert(QStringLiteral("primaryActionId"), QStringLiteral("confirmDeleteMessage"));
+	dialog.insert(QStringLiteral("tone"), QStringLiteral("danger"));
+	dialog.insert(QStringLiteral("width"), 430);
+	dialog.insert(QStringLiteral("height"), 230);
+	return openGenericDialog(dialog);
+}
+
+QVariantMap ModernDialogController::openChangeAvatar(const unsigned int session, const QString &userName,
+													 const QVariantMap &fieldValues, const QVariantMap &errors) {
+	const QString displayName = userName.trimmed().isEmpty() ? QObject::tr("this user") : userName.trimmed();
+	QVariantList fields {
+		hiddenItem(QStringLiteral("session"), session),
+		readonlyItem(QObject::tr("User"), displayName),
+		pathPickerItem(QStringLiteral("avatar.path"), QObject::tr("Image file"),
+					   fieldValues.value(QStringLiteral("avatar.path")).toString(),
+					   QStringLiteral("browseAvatarImage"), QObject::tr("Browse")),
+		noteItem(QObject::tr("Choose a PNG or JPEG image to upload as your server avatar."))
+	};
+
+	QVariantMap dialog;
+	dialog.insert(QStringLiteral("id"), QStringLiteral("changeAvatar:%1").arg(session));
+	dialog.insert(QStringLiteral("kind"), QStringLiteral("form"));
+	dialog.insert(QStringLiteral("title"), QObject::tr("Change Avatar"));
+	dialog.insert(QStringLiteral("subtitle"), QObject::tr("Choose a new server-side avatar for %1.").arg(displayName));
+	dialog.insert(QStringLiteral("sections"), QVariantList { sectionItem(QObject::tr("Avatar"), fields) });
+	dialog.insert(QStringLiteral("actions"),
+				  QVariantList { dialogActionItem(QStringLiteral("cancel"), QObject::tr("Cancel"), QString(), true),
+								 dialogActionItem(QStringLiteral("confirmChangeAvatar"), QObject::tr("Apply avatar"),
+												  QStringLiteral("accent"), true) });
+	dialog.insert(QStringLiteral("primaryActionId"), QStringLiteral("confirmChangeAvatar"));
+	dialog.insert(QStringLiteral("width"), 680);
+	dialog.insert(QStringLiteral("height"), 440);
+	if (!errors.isEmpty()) {
+		dialog.insert(QStringLiteral("errors"), errors);
+	}
+	return openGenericDialog(dialog);
+}
+
+QVariantMap ModernDialogController::openMigrationNotice(const QString &dialogID, const QString &title,
+														const QString &message) {
+	QVariantMap dialog;
+	const QString id = dialogID.trimmed().isEmpty() ? QStringLiteral("migrationNotice") : dialogID.trimmed();
+	dialog.insert(QStringLiteral("id"), id);
+	dialog.insert(QStringLiteral("kind"), QStringLiteral("migrationNotice"));
+	dialog.insert(QStringLiteral("title"), title.trimmed().isEmpty() ? QObject::tr("Modern dialog") : title.trimmed());
+	dialog.insert(QStringLiteral("subtitle"), message);
+	dialog.insert(QStringLiteral("sections"),
+				  QVariantList { sectionItem(QObject::tr("Status"), QVariantList { noteItem(message) }) });
+	dialog.insert(QStringLiteral("actions"),
+				  QVariantList { dialogActionItem(QStringLiteral("close"), QObject::tr("Close"),
+												  QStringLiteral("accent"), true) });
+	dialog.insert(QStringLiteral("primaryActionId"), QStringLiteral("close"));
+	dialog.insert(QStringLiteral("width"), 600);
+	dialog.insert(QStringLiteral("height"), 380);
+	return openGenericDialog(dialog);
 }
 
 QVariantMap ModernDialogController::openGenericDialog(const QVariantMap &dialog) {

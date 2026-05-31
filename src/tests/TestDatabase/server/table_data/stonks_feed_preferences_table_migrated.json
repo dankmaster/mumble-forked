@@ -1,0 +1,14 @@
+{
+	"v6": {
+		"table_name": "stonks_feed_preferences",
+		"column_names": [
+			"server_id",
+			"user_id",
+			"show_mine",
+			"show_popular",
+			"show_pins",
+			"updated_at"
+		],
+		"rows": []
+	}
+}

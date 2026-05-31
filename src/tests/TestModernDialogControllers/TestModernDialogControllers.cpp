@@ -20,6 +20,10 @@ private slots:
 	void audioInputVoiceActivityLevelUsesExpectedSignals();
 	void dialogControllerBuildsFailedConnectionReconnect();
 	void dialogControllerDispatchesGenericDialogAction();
+	void dialogControllerBuildsDisconnectConfirmation();
+	void dialogControllerBuildsQuitConfirmation();
+	void dialogControllerBuildsDeleteMessageConfirmation();
+	void dialogControllerBuildsChangeAvatar();
 	void dialogControllerBuildsMigrationNotice();
 };
 
@@ -129,11 +133,13 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QVariantMap state = controller.state();
 	QCOMPARE(state.value(QStringLiteral("id")).toString(), QStringLiteral("settings"));
 	QCOMPARE(state.value(QStringLiteral("activePage")).toString(), QStringLiteral("network"));
+	QCOMPARE(state.value(QStringLiteral("preventBackdropClose")).toBool(), true);
 
 	auto verifySettingsTooltips = [](const Settings &sourceSettings) {
 		ModernSettingsController tooltipController;
-		const QStringList pages { QStringLiteral("look"), QStringLiteral("network"), QStringLiteral("screenShare"),
-								  QStringLiteral("audioInput"), QStringLiteral("audioOutput") };
+		const QStringList pages { QStringLiteral("look"), QStringLiteral("ui"), QStringLiteral("messages"),
+								  QStringLiteral("keys"), QStringLiteral("network"), QStringLiteral("screenShare"),
+								  QStringLiteral("about"), QStringLiteral("audioInput"), QStringLiteral("audioOutput") };
 		for (const QString &page : pages) {
 			tooltipController.open(sourceSettings, page);
 			const QVariantList sections = tooltipController.state().value(QStringLiteral("sections")).toList();
@@ -152,6 +158,91 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 		}
 	};
 	verifySettingsTooltips(settings);
+
+	auto findSettingsFieldById = [](const QVariantList &sections, const QString &id) {
+		for (const QVariant &sectionValue : sections) {
+			const QVariantMap section = sectionValue.toMap();
+			for (const QVariant &fieldValue : section.value(QStringLiteral("fields")).toList()) {
+				const QVariantMap field = fieldValue.toMap();
+				if (field.value(QStringLiteral("id")).toString() == id) {
+					return field;
+				}
+			}
+		}
+		return QVariantMap();
+	};
+	auto findSettingsFieldByLabel = [](const QVariantList &sections, const QString &label) {
+		for (const QVariant &sectionValue : sections) {
+			const QVariantMap section = sectionValue.toMap();
+			for (const QVariant &fieldValue : section.value(QStringLiteral("fields")).toList()) {
+				const QVariantMap field = fieldValue.toMap();
+				if (field.value(QStringLiteral("label")).toString() == label) {
+					return field;
+				}
+			}
+		}
+		return QVariantMap();
+	};
+	auto settingsPageSections = [&settings](const QString &page) {
+		ModernSettingsController pageController;
+		pageController.open(settings, page);
+		return pageController.state().value(QStringLiteral("sections")).toList();
+	};
+
+	ModernSettingsController keyController;
+	keyController.open(settings, QStringLiteral("keys"));
+	QCOMPARE(keyController.activePage(), QStringLiteral("keys"));
+	QVariantList keySections = keyController.state().value(QStringLiteral("sections")).toList();
+	const QVariantMap globalShortcutsField =
+		findSettingsFieldById(keySections, QStringLiteral("keys.globalShortcuts"));
+	QCOMPARE(globalShortcutsField.value(QStringLiteral("type")).toString(), QStringLiteral("checkbox"));
+	const QVariantMap shortcutEditorField =
+		findSettingsFieldById(keySections, QStringLiteral("keys.shortcuts"));
+	QCOMPARE(shortcutEditorField.value(QStringLiteral("type")).toString(), QStringLiteral("shortcutEditor"));
+	keyController.updateField(QStringLiteral("keys.globalShortcuts"), true);
+	QCOMPARE(keyController.draft().bShortcutEnable, true);
+
+	ModernSettingsController aboutController;
+	aboutController.open(settings, QStringLiteral("about"));
+	QCOMPARE(aboutController.activePage(), QStringLiteral("about"));
+	const QVariantList aboutSections = aboutController.state().value(QStringLiteral("sections")).toList();
+	QCOMPARE(findSettingsFieldByLabel(aboutSections, QStringLiteral("Version")).value(QStringLiteral("type")).toString(),
+			 QStringLiteral("readonly"));
+	QCOMPARE(findSettingsFieldByLabel(aboutSections, QStringLiteral("Qt version"))
+				 .value(QStringLiteral("type"))
+				 .toString(),
+			 QStringLiteral("readonly"));
+	QCOMPARE(findSettingsFieldById(aboutSections, QStringLiteral("about.openMumble"))
+				 .value(QStringLiteral("actionId"))
+				 .toString(),
+			 QStringLiteral("about.openMumble"));
+	QCOMPARE(findSettingsFieldById(aboutSections, QStringLiteral("about.openQt"))
+				 .value(QStringLiteral("actionId"))
+				 .toString(),
+			 QStringLiteral("about.openQt"));
+	const QString tickerFieldID = QStringLiteral("look.modernTickerAlwaysScroll");
+	QVERIFY(!findSettingsFieldById(settingsPageSections(QStringLiteral("look")), tickerFieldID).isEmpty());
+	QVERIFY(findSettingsFieldById(settingsPageSections(QStringLiteral("ui")), tickerFieldID).isEmpty());
+	QVERIFY(findSettingsFieldById(settingsPageSections(QStringLiteral("messages")), tickerFieldID).isEmpty());
+
+	ModernSettingsController tweakController;
+	tweakController.open(settings, QStringLiteral("look"));
+	tweakController.updateField(QStringLiteral("look.modernTheme"), QStringLiteral("latte"));
+	tweakController.updateField(QStringLiteral("look.modernDensity"), QStringLiteral("compact"));
+	tweakController.updateField(QStringLiteral("look.modernClassicUserIcons"), true);
+	tweakController.updateField(QStringLiteral("look.modernRailSide"), QStringLiteral("left"));
+	tweakController.updateField(QStringLiteral("look.modernAccent"), QStringLiteral("rose"));
+	tweakController.updateField(QStringLiteral("look.modernTickerAlwaysScroll"), true);
+	const QVariantMap uiTweaks = tweakController.state().value(QStringLiteral("uiTweaks")).toMap();
+	QCOMPARE(uiTweaks.value(QStringLiteral("theme")).toString(), QStringLiteral("latte"));
+	QCOMPARE(uiTweaks.value(QStringLiteral("density")).toString(), QStringLiteral("compact"));
+	QCOMPARE(uiTweaks.value(QStringLiteral("userIcons")).toString(), QStringLiteral("classic"));
+	QCOMPARE(uiTweaks.value(QStringLiteral("classicUserIcons")).toBool(), true);
+	QCOMPARE(uiTweaks.value(QStringLiteral("railSide")).toString(), QStringLiteral("left"));
+	QCOMPARE(uiTweaks.value(QStringLiteral("accent")).toString(), QStringLiteral("rose"));
+	QCOMPARE(uiTweaks.value(QStringLiteral("tickerBannerAlwaysScroll")).toBool(), true);
+	QCOMPARE(uiTweaks.value(QStringLiteral("accentDetails")).toMap().value(QStringLiteral("id")).toString(),
+			 QStringLiteral("rose"));
 
 	controller.updateField(QStringLiteral("network.autoReconnect"), true);
 	ModernSettingsController::ActionResult result = controller.invokeAction(QStringLiteral("ok"), QVariantMap());
@@ -506,6 +597,190 @@ void TestModernDialogControllers::dialogControllerDispatchesGenericDialogAction(
 	QCOMPARE(result.genericAction->actionID, QStringLiteral("confirm"));
 	QCOMPARE(result.genericAction->fieldValues.value(QStringLiteral("reason")).toString(),
 			 QStringLiteral("AFK cleanup"));
+	QCOMPARE(result.closeDialog, true);
+	QCOMPARE(controller.state().value(QStringLiteral("open")).toBool(), false);
+}
+
+void TestModernDialogControllers::dialogControllerBuildsDisconnectConfirmation() {
+	ModernDialogController controller;
+	QVariantMap state = controller.openDisconnectConfirmation(QStringLiteral("Demo Server"));
+
+	QCOMPARE(state.value(QStringLiteral("id")).toString(), QStringLiteral("disconnectServer"));
+	QCOMPARE(state.value(QStringLiteral("kind")).toString(), QStringLiteral("confirm"));
+	QCOMPARE(state.value(QStringLiteral("open")).toBool(), true);
+	QCOMPARE(state.value(QStringLiteral("title")).toString(), QStringLiteral("Disconnect"));
+	QCOMPARE(state.value(QStringLiteral("subtitle")).toString(), QStringLiteral("Disconnect from this server?"));
+	QCOMPARE(state.value(QStringLiteral("primaryActionId")).toString(), QStringLiteral("confirmDisconnect"));
+	QCOMPARE(state.value(QStringLiteral("tone")).toString(), QStringLiteral("danger"));
+
+	const QVariantList fields = state.value(QStringLiteral("sections")).toList().at(0).toMap().value(
+		QStringLiteral("fields")).toList();
+	QCOMPARE(fields.at(0).toMap().value(QStringLiteral("label")).toString(), QStringLiteral("Server"));
+	QCOMPARE(fields.at(0).toMap().value(QStringLiteral("value")).toString(), QStringLiteral("Demo Server"));
+
+	const QVariantList actions = state.value(QStringLiteral("actions")).toList();
+	QCOMPARE(actions.size(), 2);
+	QCOMPARE(actions.at(0).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("cancel"));
+	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("confirmDisconnect"));
+	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("tone")).toString(), QStringLiteral("danger"));
+	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("closesDialog")).toBool(), true);
+
+	ModernDialogController::ActionResult result =
+		controller.invokeAction(QStringLiteral("disconnectServer"), QStringLiteral("confirmDisconnect"),
+								QVariantMap());
+	QVERIFY(result.genericAction.has_value());
+	QCOMPARE(result.genericAction->dialogID, QStringLiteral("disconnectServer"));
+	QCOMPARE(result.genericAction->actionID, QStringLiteral("confirmDisconnect"));
+	QCOMPARE(result.closeDialog, true);
+	QCOMPARE(controller.state().value(QStringLiteral("open")).toBool(), false);
+}
+
+void TestModernDialogControllers::dialogControllerBuildsQuitConfirmation() {
+	ModernDialogController controller;
+	QVariantMap state = controller.openQuitConfirmation(true, true);
+
+	QCOMPARE(state.value(QStringLiteral("id")).toString(), QStringLiteral("quitMumble"));
+	QCOMPARE(state.value(QStringLiteral("kind")).toString(), QStringLiteral("confirm"));
+	QCOMPARE(state.value(QStringLiteral("open")).toBool(), true);
+	QCOMPARE(state.value(QStringLiteral("title")).toString(), QStringLiteral("Quit Mumble"));
+	QCOMPARE(state.value(QStringLiteral("primaryActionId")).toString(), QStringLiteral("confirmQuit"));
+	QCOMPARE(state.value(QStringLiteral("tone")).toString(), QStringLiteral("danger"));
+
+	const QVariantList fields = state.value(QStringLiteral("sections")).toList().at(0).toMap().value(
+		QStringLiteral("fields")).toList();
+	QCOMPARE(fields.at(0).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("quit.connected"));
+	QCOMPARE(fields.at(0).toMap().value(QStringLiteral("value")).toBool(), true);
+	QCOMPARE(fields.at(1).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("quit.allowMinimize"));
+	QCOMPARE(fields.at(1).toMap().value(QStringLiteral("value")).toBool(), true);
+	QCOMPARE(fields.at(3).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("quit.remember"));
+	QCOMPARE(fields.at(3).toMap().value(QStringLiteral("type")).toString(), QStringLiteral("checkbox"));
+
+	const QVariantList actions = state.value(QStringLiteral("actions")).toList();
+	QCOMPARE(actions.size(), 3);
+	QCOMPARE(actions.at(0).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("cancel"));
+	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("minimizeMumble"));
+	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("tone")).toString(), QStringLiteral("accent"));
+	QCOMPARE(actions.at(2).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("confirmQuit"));
+	QCOMPARE(actions.at(2).toMap().value(QStringLiteral("tone")).toString(), QStringLiteral("danger"));
+
+	controller.updateField(QStringLiteral("quitMumble"), QStringLiteral("quit.remember"), true);
+	ModernDialogController::ActionResult result =
+		controller.invokeAction(QStringLiteral("quitMumble"), QStringLiteral("minimizeMumble"), QVariantMap());
+	QVERIFY(result.genericAction.has_value());
+	QCOMPARE(result.genericAction->dialogID, QStringLiteral("quitMumble"));
+	QCOMPARE(result.genericAction->actionID, QStringLiteral("minimizeMumble"));
+	QCOMPARE(result.genericAction->fieldValues.value(QStringLiteral("quit.connected")).toBool(), true);
+	QCOMPARE(result.genericAction->fieldValues.value(QStringLiteral("quit.remember")).toBool(), true);
+	QCOMPARE(result.closeDialog, true);
+	QCOMPARE(controller.state().value(QStringLiteral("open")).toBool(), false);
+
+	state = controller.openQuitConfirmation(false, false);
+	QCOMPARE(state.value(QStringLiteral("actions")).toList().size(), 2);
+	const QVariantList quitOnlyFields = state.value(QStringLiteral("sections")).toList().at(0).toMap().value(
+		QStringLiteral("fields")).toList();
+	for (const QVariant &fieldValue : quitOnlyFields) {
+		QVERIFY(fieldValue.toMap().value(QStringLiteral("id")).toString() != QLatin1String("quit.remember"));
+	}
+}
+
+void TestModernDialogControllers::dialogControllerBuildsDeleteMessageConfirmation() {
+	ModernDialogController controller;
+	QVariantMap state = controller.openDeleteMessageConfirmation(42, QStringLiteral("#general"));
+
+	QCOMPARE(state.value(QStringLiteral("id")).toString(), QStringLiteral("deleteMessage:42"));
+	QCOMPARE(state.value(QStringLiteral("kind")).toString(), QStringLiteral("confirm"));
+	QCOMPARE(state.value(QStringLiteral("open")).toBool(), true);
+	QCOMPARE(state.value(QStringLiteral("title")).toString(), QStringLiteral("Delete message"));
+	QCOMPARE(state.value(QStringLiteral("subtitle")).toString(),
+			 QStringLiteral("Delete this message from chat history?"));
+	QCOMPARE(state.value(QStringLiteral("primaryActionId")).toString(), QStringLiteral("confirmDeleteMessage"));
+	QCOMPARE(state.value(QStringLiteral("tone")).toString(), QStringLiteral("danger"));
+	QCOMPARE(state.value(QStringLiteral("width")).toInt(), 430);
+	QCOMPARE(state.value(QStringLiteral("height")).toInt(), 230);
+
+	const QVariantList sections = state.value(QStringLiteral("sections")).toList();
+	QCOMPARE(sections.size(), 1);
+	const QVariantList fields = sections.at(0).toMap().value(QStringLiteral("fields")).toList();
+	QCOMPARE(fields.at(0).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("message.id"));
+	QCOMPARE(fields.at(0).toMap().value(QStringLiteral("value")).toULongLong(), 42ULL);
+	QCOMPARE(fields.at(1).toMap().value(QStringLiteral("label")).toString(), QStringLiteral("Conversation"));
+	QCOMPARE(fields.at(1).toMap().value(QStringLiteral("value")).toString(), QStringLiteral("#general"));
+
+	const QVariantList actions = state.value(QStringLiteral("actions")).toList();
+	QCOMPARE(actions.size(), 2);
+	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("id")).toString(),
+			 QStringLiteral("confirmDeleteMessage"));
+	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("tone")).toString(), QStringLiteral("danger"));
+	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("closesDialog")).toBool(), true);
+
+	ModernDialogController::ActionResult result =
+		controller.invokeAction(QStringLiteral("deleteMessage:42"), QStringLiteral("confirmDeleteMessage"),
+								QVariantMap());
+	QVERIFY(result.genericAction.has_value());
+	QCOMPARE(result.genericAction->dialogID, QStringLiteral("deleteMessage:42"));
+	QCOMPARE(result.genericAction->actionID, QStringLiteral("confirmDeleteMessage"));
+	QCOMPARE(result.genericAction->fieldValues.value(QStringLiteral("message.id")).toULongLong(), 42ULL);
+	QCOMPARE(result.closeDialog, true);
+	QCOMPARE(controller.state().value(QStringLiteral("open")).toBool(), false);
+}
+
+void TestModernDialogControllers::dialogControllerBuildsChangeAvatar() {
+	ModernDialogController controller;
+	QVariantMap fieldValues;
+	fieldValues.insert(QStringLiteral("avatar.path"), QStringLiteral("C:/tmp/avatar.png"));
+	QVariantMap errors;
+	errors.insert(QStringLiteral("avatar.path"), QStringLiteral("Too large"));
+
+	QVariantMap state = controller.openChangeAvatar(7, QStringLiteral("Demo User"), fieldValues, errors);
+
+	QCOMPARE(state.value(QStringLiteral("id")).toString(), QStringLiteral("changeAvatar:7"));
+	QCOMPARE(state.value(QStringLiteral("kind")).toString(), QStringLiteral("form"));
+	QCOMPARE(state.value(QStringLiteral("open")).toBool(), true);
+	QCOMPARE(state.value(QStringLiteral("title")).toString(), QStringLiteral("Change Avatar"));
+	QCOMPARE(state.value(QStringLiteral("subtitle")).toString(),
+			 QStringLiteral("Choose a new server-side avatar for Demo User."));
+	QCOMPARE(state.value(QStringLiteral("primaryActionId")).toString(), QStringLiteral("confirmChangeAvatar"));
+	QCOMPARE(state.value(QStringLiteral("width")).toInt(), 680);
+	QCOMPARE(state.value(QStringLiteral("height")).toInt(), 440);
+	QCOMPARE(state.value(QStringLiteral("errors")).toMap().value(QStringLiteral("avatar.path")).toString(),
+			 QStringLiteral("Too large"));
+
+	const QVariantList sections = state.value(QStringLiteral("sections")).toList();
+	QCOMPARE(sections.size(), 1);
+	const QVariantList fields = sections.at(0).toMap().value(QStringLiteral("fields")).toList();
+	QCOMPARE(fields.size(), 4);
+	QCOMPARE(fields.at(0).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("session"));
+	QCOMPARE(fields.at(0).toMap().value(QStringLiteral("value")).toUInt(), 7U);
+	QCOMPARE(fields.at(1).toMap().value(QStringLiteral("label")).toString(), QStringLiteral("User"));
+	QCOMPARE(fields.at(1).toMap().value(QStringLiteral("value")).toString(), QStringLiteral("Demo User"));
+	const QVariantMap pathField = fields.at(2).toMap();
+	QCOMPARE(pathField.value(QStringLiteral("id")).toString(), QStringLiteral("avatar.path"));
+	QCOMPARE(pathField.value(QStringLiteral("label")).toString(), QStringLiteral("Image file"));
+	QCOMPARE(pathField.value(QStringLiteral("type")).toString(), QStringLiteral("pathPicker"));
+	QCOMPARE(pathField.value(QStringLiteral("value")).toString(), QStringLiteral("C:/tmp/avatar.png"));
+	QCOMPARE(pathField.value(QStringLiteral("browseActionId")).toString(), QStringLiteral("browseAvatarImage"));
+	QCOMPARE(pathField.value(QStringLiteral("browseLabel")).toString(), QStringLiteral("Browse"));
+	QCOMPARE(fields.at(3).toMap().value(QStringLiteral("type")).toString(), QStringLiteral("note"));
+
+	const QVariantList actions = state.value(QStringLiteral("actions")).toList();
+	QCOMPARE(actions.size(), 2);
+	QCOMPARE(actions.at(0).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("cancel"));
+	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("id")).toString(),
+			 QStringLiteral("confirmChangeAvatar"));
+	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("tone")).toString(), QStringLiteral("accent"));
+	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("closesDialog")).toBool(), true);
+
+	controller.updateField(QStringLiteral("changeAvatar:7"), QStringLiteral("avatar.path"),
+						   QStringLiteral("C:/tmp/new-avatar.jpg"));
+	ModernDialogController::ActionResult result =
+		controller.invokeAction(QStringLiteral("changeAvatar:7"), QStringLiteral("confirmChangeAvatar"),
+								QVariantMap());
+	QVERIFY(result.genericAction.has_value());
+	QCOMPARE(result.genericAction->dialogID, QStringLiteral("changeAvatar:7"));
+	QCOMPARE(result.genericAction->actionID, QStringLiteral("confirmChangeAvatar"));
+	QCOMPARE(result.genericAction->fieldValues.value(QStringLiteral("session")).toUInt(), 7U);
+	QCOMPARE(result.genericAction->fieldValues.value(QStringLiteral("avatar.path")).toString(),
+			 QStringLiteral("C:/tmp/new-avatar.jpg"));
 	QCOMPARE(result.closeDialog, true);
 	QCOMPARE(controller.state().value(QStringLiteral("open")).toBool(), false);
 }

@@ -23,7 +23,7 @@
 #include <algorithm>
 
 namespace {
-constexpr int CACHE_VERSION                  = 11;
+constexpr int CACHE_VERSION                  = 12;
 constexpr qint64 CACHE_MAX_AGE_SECONDS       = 30LL * 24LL * 60LL * 60LL;
 constexpr quint64 CACHE_MAX_TOTAL_BYTES      = 512ULL * 1024ULL * 1024ULL;
 constexpr int CACHE_MAX_DATA_URL_CHARACTERS  = 40 * 1024 * 1024;
@@ -142,6 +142,10 @@ void pruneCache() {
 
 namespace PersistentChatMediaCache {
 QString cacheRootPath() {
+	if (!Global::g_global_struct) {
+		return QDir::temp().filePath(QLatin1String("mumble/cache/persistent-chat-media"));
+	}
+
 	return Global::get().qdBasePath.filePath(QLatin1String(CACHE_DIR_NAME));
 }
 

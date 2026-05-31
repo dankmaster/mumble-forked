@@ -7,13 +7,23 @@
 
 #include "AudioInput.h"
 #include "AudioOutput.h"
+#include "ClientUser.h"
 #include "EchoCancelOption.h"
+#include "GlobalShortcut.h"
+#include "Database.h"
+#include "Global.h"
 #include "ModernShellMenuSerializer.h"
 #include "PersistentChatMediaCache.h"
 #include "SpeechCleanup.h"
+#include "Version.h"
 
 #include <QtCore/QHash>
+#include <QtCore/QMap>
 #include <QtCore/QObject>
+#include <QtCore/QPair>
+#include <QtCore/QReadLocker>
+#include <QtCore/QSet>
+#include <QtCore/QSysInfo>
 
 #include <algorithm>
 #include <cmath>
@@ -82,6 +92,11 @@ namespace {
 		return field;
 	}
 
+	QVariantMap presentationField(QVariantMap field, const QString &presentation) {
+		field.insert(QStringLiteral("presentation"), presentation);
+		return field;
+	}
+
 	QVariantMap numberField(const QString &id, const QString &label, const int value, const int min, const int max,
 							const int step = 1, const QString &suffix = QString()) {
 		QVariantMap field = fieldItem(id, label, QStringLiteral("number"), value);
@@ -103,6 +118,10 @@ namespace {
 
 	QVariantMap boolField(const QString &id, const QString &label, const bool value) {
 		return fieldItem(id, label, QStringLiteral("checkbox"), value);
+	}
+
+	QVariantMap readonlyField(const QString &label, const QVariant &value) {
+		return fieldItem(QString(), label, QStringLiteral("readonly"), value);
 	}
 
 	QVariantMap actionField(const QString &id, const QString &label, const QString &buttonLabel,
@@ -137,12 +156,22 @@ namespace {
 			  QObject::tr("Choose whether closing the main window asks, minimizes to tray, or quits the client.") },
 			{ QStringLiteral("look.alwaysOnTop"),
 			  QObject::tr("Keep the Mumble window above other windows in the selected layout modes.") },
+			{ QStringLiteral("look.modernTheme"),
+			  QObject::tr("Choose the Modern shell color theme sent to the embedded client UI.") },
+			{ QStringLiteral("look.modernDensity"),
+			  QObject::tr("Adjust spacing density for Modern shell lists, controls, and panels.") },
+			{ QStringLiteral("look.modernClassicUserIcons"),
+			  QObject::tr("Use the original Mumble user icons in room lists instead of avatar bubbles.") },
+			{ QStringLiteral("look.modernRailSide"),
+			  QObject::tr("Choose which side of the Modern shell hosts the room rail.") },
+			{ QStringLiteral("look.modernAccent"),
+			  QObject::tr("Choose the Modern shell accent color, or let the client pick automatically.") },
+			{ QStringLiteral("look.modernTickerAlwaysScroll"),
+			  QObject::tr("Keep the Stonks ticker banner moving even when the current ticker list fits on screen.") },
 			{ QStringLiteral("look.hideInTray"),
 			  QObject::tr("Hide the taskbar window when Mumble is minimized to the system tray.") },
 			{ QStringLiteral("look.stateInTray"),
 			  QObject::tr("Reflect your talking, muted, and deafened state in the tray icon.") },
-			{ QStringLiteral("look.showUserCount"),
-			  QObject::tr("Show participant counts next to rooms in the room list.") },
 			{ QStringLiteral("look.showVolumeAdjustments"),
 			  QObject::tr("Show when users have local volume adjustments applied.") },
 			{ QStringLiteral("look.showNicknamesOnly"),
@@ -158,7 +187,9 @@ namespace {
 			{ QStringLiteral("network.autoReconnect"),
 			  QObject::tr("Reconnect automatically if the current server connection drops.") },
 			{ QStringLiteral("network.autoConnect"),
-			  QObject::tr("Connect to your last server automatically when Mumble starts.") },
+			  QObject::tr("Client-side startup setting: connect to your last server automatically when Mumble starts.") },
+			{ QStringLiteral("network.startWithPC"),
+			  QObject::tr("Start Mumble hidden in the system tray when you sign in to Windows.") },
 			{ QStringLiteral("network.tcpMode"),
 			  QObject::tr("Use TCP instead of UDP for voice traffic when networks block or degrade UDP.") },
 			{ QStringLiteral("network.qos"),
@@ -305,7 +336,19 @@ namespace {
 			{ QStringLiteral("audio.remoteCleanupCustomModelPath"),
 			  QObject::tr("Path to a custom neural cleanup model for incoming speech.") },
 			{ QStringLiteral("audio.remoteCleanupPreset"),
-			  QObject::tr("Balance cleanup strength against speech naturalness for incoming audio.") }
+			  QObject::tr("Balance cleanup strength against speech naturalness for incoming audio.") },
+			{ QStringLiteral("keys.globalShortcuts"),
+			  QObject::tr("Enable or disable the global shortcut engine without changing configured bindings.") },
+			{ QStringLiteral("keys.shortcuts"),
+			  QObject::tr("Add, remove, capture, and rebind global shortcuts in the Modern settings window.") },
+			{ QStringLiteral("keys.enableUiAccess"),
+			  QObject::tr("Allow the Windows shortcut engine to work while elevated applications are focused.") },
+			{ QStringLiteral("keys.enableGKey"), QObject::tr("Enable Logitech G-key shortcut input.") },
+			{ QStringLiteral("keys.enableXboxInput"), QObject::tr("Enable XInput controller shortcut input.") },
+			{ QStringLiteral("about.openMumble"),
+			  QObject::tr("Open the full Mumble About dialog with project, license, and credits.") },
+			{ QStringLiteral("about.openQt"),
+			  QObject::tr("Open Qt runtime and licensing information for this client.") }
 		};
 		return tooltips.value(id);
 	}
@@ -753,8 +796,7 @@ namespace {
 		field.insert(QStringLiteral("calibrationLabel"), QObject::tr("Audio setup"));
 		field.insert(QStringLiteral("calibrationTooltip"),
 					 QObject::tr("Open guided audio setup for microphone level, voice activation, replay, and cleanup tuning."));
-		field.insert(QStringLiteral("calibrationStatusText"),
-					 QObject::tr("Ready to tune voice activation, gain, cleanup, and replay."));
+		field.insert(QStringLiteral("calibrationStatusText"), QObject::tr("Ready to tune voice input."));
 		field.insert(QStringLiteral("replayStartActionId"), QStringLiteral("startVoiceReplay"));
 		field.insert(QStringLiteral("replayStopActionId"), QStringLiteral("stopVoiceReplay"));
 		field.insert(QStringLiteral("replayLabel"), QObject::tr("Replay"));
@@ -802,11 +844,634 @@ namespace {
 		const auto backend = static_cast< Settings::SpeechCleanupBackend >(value.toInt());
 		return Mumble::SpeechCleanup::isBackendAvailable(backend) ? backend : Mumble::SpeechCleanup::fallbackBackend();
 	}
+
+	QString normalizedModernShellTheme(const QVariant &value) {
+		const QString normalized = value.toString().trimmed().toLower();
+		static const QSet< QString > allowed { QStringLiteral("dark"), QStringLiteral("light"),
+											   QStringLiteral("mocha"), QStringLiteral("macchiato"),
+											   QStringLiteral("frappe"), QStringLiteral("latte"),
+											   QStringLiteral("nord"), QStringLiteral("gruvbox") };
+		return allowed.contains(normalized) ? normalized : QStringLiteral("dark");
+	}
+
+	QString normalizedModernShellDensity(const QVariant &value) {
+		const QString normalized = value.toString().trimmed().toLower();
+		static const QSet< QString > allowed { QStringLiteral("compact"), QStringLiteral("comfortable"),
+											   QStringLiteral("spacious") };
+		return allowed.contains(normalized) ? normalized : QStringLiteral("comfortable");
+	}
+
+	QString normalizedModernShellRailSide(const QVariant &value) {
+		const QString normalized = value.toString().trimmed().toLower();
+		return normalized == QLatin1String("left") || normalized == QLatin1String("right")
+				   ? normalized
+				   : QStringLiteral("right");
+	}
+
+	QString normalizedModernShellAccent(const QVariant &value) {
+		const QString normalized = value.toString().trimmed().toLower();
+		static const QSet< QString > allowed { QStringLiteral("auto"), QStringLiteral("teal"),
+											   QStringLiteral("blue"), QStringLiteral("violet"),
+											   QStringLiteral("amber"), QStringLiteral("rose") };
+		return allowed.contains(normalized) ? normalized : QStringLiteral("auto");
+	}
+
+	QVariantList modernShellThemeOptions() {
+		return QVariantList { optionItem(QStringLiteral("dark"), QObject::tr("Dark")),
+							  optionItem(QStringLiteral("light"), QObject::tr("Light")),
+							  optionItem(QStringLiteral("mocha"), QObject::tr("Mocha")),
+							  optionItem(QStringLiteral("macchiato"), QObject::tr("Macchiato")),
+							  optionItem(QStringLiteral("frappe"), QObject::tr("Frappe")),
+							  optionItem(QStringLiteral("latte"), QObject::tr("Latte")),
+							  optionItem(QStringLiteral("nord"), QObject::tr("Nord")),
+							  optionItem(QStringLiteral("gruvbox"), QObject::tr("Gruvbox")) };
+	}
+
+	QVariantList modernShellDensityOptions() {
+		return QVariantList { optionItem(QStringLiteral("compact"), QObject::tr("Compact")),
+							  optionItem(QStringLiteral("comfortable"), QObject::tr("Comfortable")),
+							  optionItem(QStringLiteral("spacious"), QObject::tr("Spacious")) };
+	}
+
+	QVariantList modernShellRailSideOptions() {
+		return QVariantList { optionItem(QStringLiteral("left"), QObject::tr("Left")),
+							  optionItem(QStringLiteral("right"), QObject::tr("Right")) };
+	}
+
+	QVariantList modernShellAccentOptions() {
+		return QVariantList { optionItem(QStringLiteral("auto"), QObject::tr("Auto")),
+							  optionItem(QStringLiteral("teal"), QObject::tr("Teal")),
+							  optionItem(QStringLiteral("blue"), QObject::tr("Blue")),
+							  optionItem(QStringLiteral("violet"), QObject::tr("Violet")),
+							  optionItem(QStringLiteral("amber"), QObject::tr("Amber")),
+							  optionItem(QStringLiteral("rose"), QObject::tr("Rose")) };
+	}
+
+	QVariantMap modernShellAccentDto(const QString &accent) {
+		const QString normalized = normalizedModernShellAccent(accent);
+		QVariantMap dto;
+		dto.insert(QStringLiteral("id"), normalized);
+		return dto;
+	}
+
+	QVariantMap modernShellUiTweaksDto(const Settings &settings) {
+		const QString accent = normalizedModernShellAccent(settings.qsModernShellAccent);
+		QVariantMap dto;
+		dto.insert(QStringLiteral("theme"), normalizedModernShellTheme(settings.qsModernShellTheme));
+		dto.insert(QStringLiteral("density"), normalizedModernShellDensity(settings.qsModernShellDensity));
+		dto.insert(QStringLiteral("userIcons"),
+				   settings.bModernShellClassicUserIcons ? QStringLiteral("classic") : QStringLiteral("avatars"));
+		dto.insert(QStringLiteral("classicUserIcons"), settings.bModernShellClassicUserIcons);
+		dto.insert(QStringLiteral("railSide"), normalizedModernShellRailSide(settings.qsModernShellRailSide));
+		dto.insert(QStringLiteral("accent"), accent);
+		dto.insert(QStringLiteral("accentDetails"), modernShellAccentDto(accent));
+		dto.insert(QStringLiteral("tickerBannerAlwaysScroll"), settings.bModernShellTickerBannerAlwaysScroll);
+		return dto;
+	}
+
+	QString buildArchitectureLabel() {
+#ifdef MUMBLE_TARGET_ARCH
+		return QString::fromUtf8(MUMBLE_TARGET_ARCH);
+#else
+		return QObject::tr("Unknown");
+#endif
+	}
+
+	QString shortcutActionLabel(const Shortcut &shortcut) {
+		if (GlobalShortcutEngine::engine) {
+			if (GlobalShortcut *registered = GlobalShortcutEngine::engine->qmShortcuts.value(shortcut.iIndex, nullptr)) {
+				return registered->name;
+			}
+		}
+
+		if (shortcut.iIndex < 0) {
+			return QObject::tr("New shortcut");
+		}
+		return QObject::tr("Unknown shortcut %1").arg(shortcut.iIndex);
+	}
+
+	QString shortcutButtonsLabel(const Shortcut &shortcut) {
+		if (shortcut.qlButtons.isEmpty()) {
+			return QObject::tr("Not assigned");
+		}
+
+		if (!GlobalShortcutEngine::engine) {
+			return QObject::tr("%n input(s)", nullptr, static_cast< int >(shortcut.qlButtons.size()));
+		}
+
+		QStringList labels;
+		for (const QVariant &button : shortcut.qlButtons) {
+			const GlobalShortcutEngine::ButtonInfo info = GlobalShortcutEngine::engine->buttonInfo(button);
+			const QString device                       = info.device.trimmed();
+			const QString name                         = info.name.trimmed();
+			if (!device.isEmpty() && device != name) {
+				labels << QObject::tr("%1: %2").arg(device, name.isEmpty() ? QObject::tr("Unknown") : name);
+			} else {
+				labels << (name.isEmpty() ? QObject::tr("Unknown") : name);
+			}
+		}
+		return labels.join(QStringLiteral(" + "));
+	}
+
+	const GlobalShortcut *shortcutDefinition(const int index) {
+		if (!GlobalShortcutEngine::engine) {
+			return nullptr;
+		}
+		return GlobalShortcutEngine::engine->qmShortcuts.value(index, nullptr);
+	}
+
+	QVariant shortcutEffectiveData(const Shortcut &shortcut) {
+		const GlobalShortcut *definition = shortcutDefinition(shortcut.iIndex);
+		if (shortcut.qvData.isValid() && definition && shortcut.qvData.metaType() == definition->qvDefault.metaType()) {
+			return shortcut.qvData;
+		}
+		return definition ? definition->qvDefault : shortcut.qvData;
+	}
+
+	QString shortcutTargetMode(const ShortcutTarget &target) {
+		if (target.bCurrentSelection) {
+			return QStringLiteral("selection");
+		}
+		if (target.bUsers) {
+			return QStringLiteral("users");
+		}
+		if (target.iChannel == SHORTCUT_TARGET_ROOT) {
+			return QStringLiteral("root");
+		}
+		if (target.iChannel == SHORTCUT_TARGET_PARENT) {
+			return QStringLiteral("parent");
+		}
+		if (target.iChannel == SHORTCUT_TARGET_CURRENT) {
+			return QStringLiteral("current");
+		}
+		if (target.iChannel >= 0) {
+			return QStringLiteral("channel:%1").arg(target.iChannel);
+		}
+		return QStringLiteral("current");
+	}
+
+	ShortcutTarget shortcutTargetFromMode(const QString &mode) {
+		ShortcutTarget target;
+		target.bUsers            = false;
+		target.bCurrentSelection = false;
+
+		if (mode == QLatin1String("selection")) {
+			target.bCurrentSelection = true;
+			return target;
+		}
+		if (mode == QLatin1String("users")) {
+			target.bUsers = true;
+			return target;
+		}
+		if (mode == QLatin1String("root")) {
+			target.iChannel = SHORTCUT_TARGET_ROOT;
+			return target;
+		}
+		if (mode == QLatin1String("parent")) {
+			target.iChannel = SHORTCUT_TARGET_PARENT;
+			return target;
+		}
+		if (mode.startsWith(QLatin1String("channel:"))) {
+			bool ok = false;
+			const int channelID = mode.mid(QStringLiteral("channel:").size()).toInt(&ok);
+			if (ok && channelID >= 0) {
+				target.iChannel = channelID;
+				return target;
+			}
+		}
+
+		target.iChannel = SHORTCUT_TARGET_CURRENT;
+		return target;
+	}
+
+	QString shortcutTargetKind(const ShortcutTarget &target) {
+		if (target.bCurrentSelection) {
+			return QStringLiteral("selection");
+		}
+		if (target.bUsers) {
+			return QStringLiteral("users");
+		}
+		return QStringLiteral("channel");
+	}
+
+	QVariantList shortcutTargetModeOptions() {
+		return QVariantList { optionItem(QStringLiteral("selection"), QObject::tr("Current selection")),
+							  optionItem(QStringLiteral("users"), QObject::tr("List of users")),
+							  optionItem(QStringLiteral("channel"), QObject::tr("Channel")) };
+	}
+
+	QString shortcutTargetChannelLabel(const int channelID) {
+		switch (channelID) {
+			case SHORTCUT_TARGET_ROOT:
+				return QObject::tr("Root");
+			case SHORTCUT_TARGET_PARENT:
+				return QObject::tr("Parent");
+			case SHORTCUT_TARGET_CURRENT:
+				return QObject::tr("Current");
+			default:
+				if (channelID <= SHORTCUT_TARGET_PARENT_SUBCHANNEL && channelID > SHORTCUT_TARGET_PARENT_SUBCHANNEL - 8) {
+					return QObject::tr("Parent / Subchannel #%1").arg(SHORTCUT_TARGET_PARENT_SUBCHANNEL + 1 - channelID);
+				}
+				if (channelID <= SHORTCUT_TARGET_SUBCHANNEL && channelID > SHORTCUT_TARGET_SUBCHANNEL - 8) {
+					return QObject::tr("Current / Subchannel #%1").arg(SHORTCUT_TARGET_CURRENT - channelID);
+				}
+				break;
+		}
+
+		if (channelID >= 0) {
+			if (const Channel *channel = Channel::get(static_cast< unsigned int >(channelID))) {
+				const QString path = channel->getPath().trimmed();
+				return path.isEmpty() ? channel->qsName : path;
+			}
+		}
+
+		return QObject::tr("Current");
+	}
+
+	QVariantList shortcutWhisperChannelOptions() {
+		QVariantList options {
+			optionItem(SHORTCUT_TARGET_CURRENT, QObject::tr("Current")),
+			optionItem(SHORTCUT_TARGET_ROOT, QObject::tr("Root")),
+			optionItem(SHORTCUT_TARGET_PARENT, QObject::tr("Parent"))
+		};
+
+		for (int i = 0; i < 8; ++i) {
+			options.push_back(optionItem(SHORTCUT_TARGET_SUBCHANNEL - i, QObject::tr("Current / Subchannel #%1").arg(i + 1)));
+		}
+		for (int i = 0; i < 8; ++i) {
+			options.push_back(optionItem(SHORTCUT_TARGET_PARENT_SUBCHANNEL - i,
+										 QObject::tr("Parent / Subchannel #%1").arg(i + 1)));
+		}
+
+		QReadLocker lock(&Channel::c_qrwlChannels);
+		QList< Channel * > channels = Channel::c_qhChannels.values();
+		std::sort(channels.begin(), channels.end(), [](const Channel *lhs, const Channel *rhs) {
+			const QString left  = lhs ? lhs->getPath().toCaseFolded() : QString();
+			const QString right = rhs ? rhs->getPath().toCaseFolded() : QString();
+			return left < right;
+		});
+		for (const Channel *channel : channels) {
+			if (!channel) {
+				continue;
+			}
+			const QString path = channel->getPath().trimmed();
+			options.push_back(optionItem(static_cast< int >(channel->iId), path.isEmpty() ? channel->qsName : path));
+		}
+		return options;
+	}
+
+	QMap< QString, QString > shortcutTargetKnownUsers() {
+		QMap< QString, QString > namesByHash;
+		const Global *global = Global::g_global_struct;
+		if (!global) {
+			return namesByHash;
+		}
+
+		if (global->db) {
+			const QMap< QString, QString > friends = global->db->getFriends();
+			for (auto it = friends.constBegin(); it != friends.constEnd(); ++it) {
+				const QString name = it.key().trimmed();
+				const QString hash = it.value().trimmed();
+				if (!hash.isEmpty()) {
+					namesByHash.insert(hash, name.isEmpty() ? QString::fromLatin1("#%1").arg(hash) : name);
+				}
+			}
+		}
+
+		if (global->uiSession) {
+			QReadLocker lock(&ClientUser::c_qrwlUsers);
+			for (const ClientUser *user : ClientUser::c_qmUsers) {
+				if (!user || user->uiSession == global->uiSession || user->qsHash.isEmpty()) {
+					continue;
+				}
+				const QString displayName =
+					user->qsFriendName.trimmed().isEmpty() ? user->qsName.trimmed() : user->qsFriendName.trimmed();
+				namesByHash.insert(user->qsHash, displayName.isEmpty() ? QString::fromLatin1("#%1").arg(user->qsHash)
+																	  : displayName);
+			}
+		}
+
+		return namesByHash;
+	}
+
+	QVariantList shortcutTargetUserOptions() {
+		QVariantList options;
+		const QMap< QString, QString > namesByHash = shortcutTargetKnownUsers();
+		QList< QPair< QString, QString > > users;
+		for (auto it = namesByHash.constBegin(); it != namesByHash.constEnd(); ++it) {
+			users.push_back(qMakePair(it.value(), it.key()));
+		}
+		std::sort(users.begin(), users.end(), [](const QPair< QString, QString > &lhs,
+												 const QPair< QString, QString > &rhs) {
+			const int nameCompare = QString::localeAwareCompare(lhs.first, rhs.first);
+			if (nameCompare == 0) {
+				return lhs.second < rhs.second;
+			}
+			return nameCompare < 0;
+		});
+		for (const QPair< QString, QString > &user : users) {
+			options.push_back(optionItem(user.second, user.first));
+		}
+		return options;
+	}
+
+	QVariantList shortcutTargetSelectedUsers(const ShortcutTarget &target) {
+		QVariantList users;
+		const QMap< QString, QString > namesByHash = shortcutTargetKnownUsers();
+		for (const QString &hash : target.qlUsers) {
+			if (hash.trimmed().isEmpty()) {
+				continue;
+			}
+			users.push_back(optionItem(hash, namesByHash.value(hash, QString::fromLatin1("#%1").arg(hash))));
+		}
+		return users;
+	}
+
+	QVariantMap shortcutTargetDetail(const ShortcutTarget &target) {
+		QVariantMap detail;
+		detail.insert(QStringLiteral("mode"), shortcutTargetKind(target));
+		detail.insert(QStringLiteral("channelId"), target.iChannel);
+		detail.insert(QStringLiteral("channelLabel"), shortcutTargetChannelLabel(target.iChannel));
+		detail.insert(QStringLiteral("group"), target.qsGroup);
+		detail.insert(QStringLiteral("links"), target.bLinks);
+		detail.insert(QStringLiteral("children"), target.bChildren);
+		detail.insert(QStringLiteral("forceCenter"), target.bForceCenter);
+		detail.insert(QStringLiteral("users"), shortcutTargetSelectedUsers(target));
+		detail.insert(QStringLiteral("summary"), ShortcutTargetWidget::targetString(target));
+		return detail;
+	}
+
+	void applyShortcutTargetMode(ShortcutTarget &target, const QString &mode) {
+		if (mode == QLatin1String("selection")) {
+			target.bCurrentSelection = true;
+			target.bUsers            = false;
+			return;
+		}
+		if (mode == QLatin1String("users")) {
+			target.bCurrentSelection = false;
+			target.bUsers            = true;
+			return;
+		}
+		if (mode == QLatin1String("channel")) {
+			target.bCurrentSelection = false;
+			target.bUsers            = false;
+			if (target.iChannel < SHORTCUT_TARGET_PARENT_SUBCHANNEL - 7) {
+				target.iChannel = SHORTCUT_TARGET_CURRENT;
+			}
+		}
+	}
+
+	QString shortcutDataType(const QVariant &data) {
+		if (!data.isValid()) {
+			return QStringLiteral("none");
+		}
+		if (data.userType() == QVariant::fromValue(ShortcutTarget()).userType()) {
+			return QStringLiteral("target");
+		}
+		if (data.userType() == QVariant::fromValue(ChannelTarget()).userType()) {
+			return QStringLiteral("channel");
+		}
+		switch (data.typeId()) {
+			case QMetaType::Int:
+				return QStringLiteral("toggle");
+			case QMetaType::QString:
+				return QStringLiteral("text");
+			default:
+				return QStringLiteral("readonly");
+		}
+	}
+
+	QString shortcutDataLabel(const QVariant &data) {
+		if (!data.isValid()) {
+			return QObject::tr("No data");
+		}
+		if (data.userType() == QVariant::fromValue(ShortcutTarget()).userType()) {
+			return ShortcutTargetWidget::targetString(data.value< ShortcutTarget >());
+		}
+		if (data.userType() == QVariant::fromValue(ChannelTarget()).userType()) {
+			const ChannelTarget target = data.value< ChannelTarget >();
+			const Channel *channel     = Channel::get(target.channelID);
+			return channel ? channel->qsName : QObject::tr("< Unknown Channel >");
+		}
+		switch (data.typeId()) {
+			case QMetaType::Int: {
+				const int value = data.toInt();
+				if (value > 0) {
+					return QObject::tr("On");
+				}
+				if (value < 0) {
+					return QObject::tr("Off");
+				}
+				return QObject::tr("Toggle");
+			}
+			case QMetaType::QString:
+				return data.toString().isEmpty() ? QObject::tr("Empty") : data.toString();
+			default:
+				return data.toString();
+		}
+	}
+
+	QVariantList shortcutActionOptions() {
+		QVariantList options;
+		options.push_back(optionItem(-1, QObject::tr("Unassigned")));
+
+		if (!GlobalShortcutEngine::engine) {
+			return options;
+		}
+
+		QList< GlobalShortcut * > definitions = GlobalShortcutEngine::engine->qmShortcuts.values();
+		std::sort(definitions.begin(), definitions.end(), [](const GlobalShortcut *lhs, const GlobalShortcut *rhs) {
+			const QString left  = lhs ? lhs->name.toCaseFolded() : QString();
+			const QString right = rhs ? rhs->name.toCaseFolded() : QString();
+			if (left == right) {
+				return (lhs ? lhs->idx : 0) < (rhs ? rhs->idx : 0);
+			}
+			return left < right;
+		});
+
+		for (const GlobalShortcut *definition : definitions) {
+			if (!definition) {
+				continue;
+			}
+			const QString hint =
+				!definition->qsToolTip.trimmed().isEmpty() ? definition->qsToolTip.trimmed()
+														   : definition->qsWhatsThis.trimmed();
+			options.push_back(optionItem(definition->idx, definition->name, true, hint));
+		}
+		return options;
+	}
+
+	QVariantList shortcutTargetOptions() {
+		QVariantList options {
+			optionItem(QStringLiteral("current"), QObject::tr("Current channel")),
+			optionItem(QStringLiteral("selection"), QObject::tr("Current selection")),
+			optionItem(QStringLiteral("users"), QObject::tr("Selected users")),
+			optionItem(QStringLiteral("root"), QObject::tr("Root")),
+			optionItem(QStringLiteral("parent"), QObject::tr("Parent channel"))
+		};
+
+		QReadLocker lock(&Channel::c_qrwlChannels);
+		QList< Channel * > channels = Channel::c_qhChannels.values();
+		std::sort(channels.begin(), channels.end(), [](const Channel *lhs, const Channel *rhs) {
+			const QString left  = lhs ? lhs->getPath().toCaseFolded() : QString();
+			const QString right = rhs ? rhs->getPath().toCaseFolded() : QString();
+			return left < right;
+		});
+		for (const Channel *channel : channels) {
+			if (!channel) {
+				continue;
+			}
+			options.push_back(
+				optionItem(QStringLiteral("channel:%1").arg(channel->iId), channel->getPath().trimmed().isEmpty()
+																			? channel->qsName
+																			: channel->getPath()));
+		}
+		return options;
+	}
+
+	QVariantList shortcutChannelOptions() {
+		QVariantList options;
+
+		QReadLocker lock(&Channel::c_qrwlChannels);
+		QList< Channel * > channels = Channel::c_qhChannels.values();
+		std::sort(channels.begin(), channels.end(), [](const Channel *lhs, const Channel *rhs) {
+			const QString left  = lhs ? lhs->getPath().toCaseFolded() : QString();
+			const QString right = rhs ? rhs->getPath().toCaseFolded() : QString();
+			return left < right;
+		});
+		for (const Channel *channel : channels) {
+			if (!channel) {
+				continue;
+			}
+			options.push_back(optionItem(static_cast< int >(channel->iId), channel->getPath().trimmed().isEmpty()
+																		   ? channel->qsName
+																		   : channel->getPath()));
+		}
+		if (options.isEmpty()) {
+			options.push_back(optionItem(static_cast< int >(Mumble::ROOT_CHANNEL_ID), QObject::tr("Root")));
+		}
+		return options;
+	}
+
+	QVariantList shortcutToggleOptions() {
+		return QVariantList { optionItem(-1, QObject::tr("Off")), optionItem(0, QObject::tr("Toggle")),
+							  optionItem(1, QObject::tr("On")) };
+	}
+
+	QVariantMap shortcutEditorField(const Settings &settings, const int captureIndex) {
+		QVariantMap field = fieldItem(QStringLiteral("keys.shortcuts"), QObject::tr("Shortcuts"),
+									  QStringLiteral("shortcutEditor"), QVariant());
+		field.insert(QStringLiteral("rows"), QVariantList());
+		field.insert(QStringLiteral("actionOptions"), shortcutActionOptions());
+		field.insert(QStringLiteral("toggleOptions"), shortcutToggleOptions());
+		field.insert(QStringLiteral("targetOptions"), shortcutTargetOptions());
+		field.insert(QStringLiteral("channelOptions"), shortcutChannelOptions());
+		field.insert(QStringLiteral("targetModeOptions"), shortcutTargetModeOptions());
+		field.insert(QStringLiteral("targetChannelOptions"), shortcutWhisperChannelOptions());
+		field.insert(QStringLiteral("targetUserOptions"), shortcutTargetUserOptions());
+		field.insert(QStringLiteral("canSuppress"),
+					 GlobalShortcutEngine::engine && GlobalShortcutEngine::engine->canSuppress());
+		field.insert(QStringLiteral("canCapture"), GlobalShortcutEngine::engine != nullptr);
+		field.insert(QStringLiteral("enabled"), settings.bShortcutEnable);
+
+		QVariantList rows;
+		for (int i = 0; i < settings.qlShortcuts.size(); ++i) {
+			const Shortcut &shortcut = settings.qlShortcuts.at(i);
+			const QVariant data      = shortcutEffectiveData(shortcut);
+
+			QVariantMap row;
+			row.insert(QStringLiteral("index"), i);
+			row.insert(QStringLiteral("actionIndex"), shortcut.iIndex);
+			row.insert(QStringLiteral("actionLabel"), shortcutActionLabel(shortcut));
+			row.insert(QStringLiteral("dataType"), shortcutDataType(data));
+			row.insert(QStringLiteral("dataLabel"), shortcutDataLabel(data));
+			row.insert(QStringLiteral("dataEditable"), data.isValid());
+			row.insert(QStringLiteral("inputLabel"), shortcutButtonsLabel(shortcut));
+			row.insert(QStringLiteral("assigned"), !shortcut.qlButtons.isEmpty());
+			row.insert(QStringLiteral("suppress"), shortcut.bSuppress);
+			row.insert(QStringLiteral("capturing"), i == captureIndex);
+
+			const QString dataType = row.value(QStringLiteral("dataType")).toString();
+			if (dataType == QLatin1String("toggle")) {
+				row.insert(QStringLiteral("dataValue"), data.toInt());
+			} else if (dataType == QLatin1String("text")) {
+				row.insert(QStringLiteral("dataValue"), data.toString());
+			} else if (dataType == QLatin1String("channel")) {
+				row.insert(QStringLiteral("dataValue"), static_cast< int >(data.value< ChannelTarget >().channelID));
+			} else if (dataType == QLatin1String("target")) {
+				const ShortcutTarget target = data.value< ShortcutTarget >();
+				row.insert(QStringLiteral("dataValue"), shortcutTargetMode(target));
+				row.insert(QStringLiteral("target"), shortcutTargetDetail(target));
+			}
+
+			rows.push_back(row);
+		}
+
+		field.insert(QStringLiteral("rows"), rows);
+		return field;
+	}
+
+	int shortcutPayloadIndex(const QVariantMap &payload, const QList< Shortcut > &shortcuts) {
+		bool ok        = false;
+		const int row  = payload.value(QStringLiteral("index")).toInt(&ok);
+		const int size = shortcuts.size();
+		if (!ok || row < 0 || row >= size) {
+			return -1;
+		}
+		return row;
+	}
+
+	void normalizeShortcutData(Shortcut &shortcut) {
+		const GlobalShortcut *definition = shortcutDefinition(shortcut.iIndex);
+		if (!definition) {
+			shortcut.qvData = QVariant();
+			return;
+		}
+		if (!shortcut.qvData.isValid() || shortcut.qvData.metaType() != definition->qvDefault.metaType()) {
+			shortcut.qvData = definition->qvDefault;
+		}
+	}
+
+	QVariantList shortcutSummaryFields(const Settings &settings) {
+		QList< Shortcut > shortcuts = settings.qlShortcuts;
+		std::stable_sort(shortcuts.begin(), shortcuts.end());
+
+		int assignedCount = 0;
+		for (const Shortcut &shortcut : shortcuts) {
+			if (!shortcut.qlButtons.isEmpty()) {
+				++assignedCount;
+			}
+		}
+
+		QVariantList fields;
+		fields.push_back(readonlyField(QObject::tr("Configured"),
+									   QObject::tr("%1 assigned / %2 total").arg(assignedCount).arg(shortcuts.size())));
+
+		int shown = 0;
+		for (const Shortcut &shortcut : shortcuts) {
+			if (shortcut.qlButtons.isEmpty()) {
+				continue;
+			}
+			fields.push_back(readonlyField(shortcutActionLabel(shortcut), shortcutButtonsLabel(shortcut)));
+			if (++shown >= 8) {
+				break;
+			}
+		}
+
+		if (shortcuts.isEmpty()) {
+			fields.push_back(noteField(QObject::tr("No shortcuts are configured yet.")));
+		} else if (assignedCount > shown) {
+			fields.push_back(noteField(QObject::tr("%n more assigned shortcut(s) are available in the editor.", nullptr,
+												  assignedCount - shown)));
+		}
+		return fields;
+	}
 } // namespace
 
 void ModernSettingsController::open(const Settings &settings, const QString &pageName) {
 	m_original = settings;
 	m_draft    = settings;
+	m_shortcutCaptureIndex = -1;
 	forceModernLayout();
 	setActivePage(pageName);
 }
@@ -817,17 +1482,17 @@ QVariantMap ModernSettingsController::state() const {
 	dialog.insert(QStringLiteral("id"), QStringLiteral("settings"));
 	dialog.insert(QStringLiteral("kind"), QStringLiteral("settings"));
 	dialog.insert(QStringLiteral("title"), QObject::tr("Settings"));
-	dialog.insert(QStringLiteral("subtitle"), QObject::tr("Modern client settings. Classic layout options are retired in this fork."));
+	dialog.insert(QStringLiteral("subtitle"), QString());
 	dialog.insert(QStringLiteral("primaryActionId"), QStringLiteral("ok"));
+	dialog.insert(QStringLiteral("preventBackdropClose"), true);
+	dialog.insert(QStringLiteral("uiTweaks"), modernShellUiTweaksDto(m_draft));
 	dialog.insert(QStringLiteral("pages"), pages());
 	dialog.insert(QStringLiteral("activePage"), m_activePage);
 	dialog.insert(QStringLiteral("sections"), sectionsForActivePage());
 
 	QVariantList actions;
-	actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("cancel"), QObject::tr("Cancel"), true, false));
-	actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("reset"), QObject::tr("Reset all changes"), true, false));
-	actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("apply"), QObject::tr("Apply"), true, false));
-	actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("ok"), QObject::tr("OK"), true, false,
+	actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("cancel"), QObject::tr("Close"), true, false));
+	actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("ok"), QObject::tr("Done"), true, false,
 															QStringLiteral("accent")));
 	dialog.insert(QStringLiteral("actions"), actions);
 	return dialog;
@@ -839,12 +1504,22 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		m_draft.quitBehavior = static_cast< QuitBehavior >(value.toInt());
 	} else if (id == QLatin1String("look.alwaysOnTop")) {
 		m_draft.aotbAlwaysOnTop = static_cast< Settings::AlwaysOnTopBehaviour >(value.toInt());
+	} else if (id == QLatin1String("look.modernTheme")) {
+		m_draft.qsModernShellTheme = normalizedModernShellTheme(value);
+	} else if (id == QLatin1String("look.modernDensity")) {
+		m_draft.qsModernShellDensity = normalizedModernShellDensity(value);
+	} else if (id == QLatin1String("look.modernClassicUserIcons")) {
+		m_draft.bModernShellClassicUserIcons = value.toBool();
+	} else if (id == QLatin1String("look.modernRailSide")) {
+		m_draft.qsModernShellRailSide = normalizedModernShellRailSide(value);
+	} else if (id == QLatin1String("look.modernAccent")) {
+		m_draft.qsModernShellAccent = normalizedModernShellAccent(value);
+	} else if (id == QLatin1String("look.modernTickerAlwaysScroll")) {
+		m_draft.bModernShellTickerBannerAlwaysScroll = value.toBool();
 	} else if (id == QLatin1String("look.hideInTray")) {
 		m_draft.bHideInTray = value.toBool();
 	} else if (id == QLatin1String("look.stateInTray")) {
 		m_draft.bStateInTray = value.toBool();
-	} else if (id == QLatin1String("look.showUserCount")) {
-		m_draft.bShowUserCount = value.toBool();
 	} else if (id == QLatin1String("look.showVolumeAdjustments")) {
 		m_draft.bShowVolumeAdjustments = value.toBool();
 	} else if (id == QLatin1String("look.showNicknamesOnly")) {
@@ -861,6 +1536,8 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		m_draft.bReconnect = value.toBool();
 	} else if (id == QLatin1String("network.autoConnect")) {
 		m_draft.bAutoConnect = value.toBool();
+	} else if (id == QLatin1String("network.startWithPC")) {
+		m_draft.bStartWithPC = value.toBool();
 	} else if (id == QLatin1String("network.tcpMode")) {
 		m_draft.bTCPCompat = value.toBool();
 	} else if (id == QLatin1String("network.qos")) {
@@ -1071,6 +1748,17 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		m_draft.iaeIdleAction = static_cast< Settings::IdleAction >(value.toInt());
 	} else if (id == QLatin1String("audio.undoIdleAction")) {
 		m_draft.bUndoIdleActionUponActivity = value.toBool();
+	} else if (id == QLatin1String("keys.globalShortcuts")) {
+		m_draft.bShortcutEnable = value.toBool();
+	} else if (id == QLatin1String("keys.enableUiAccess")) {
+		m_draft.bEnableUIAccess = value.toBool();
+		refreshShortcutRestartFlag();
+	} else if (id == QLatin1String("keys.enableGKey")) {
+		m_draft.bEnableGKey = value.toBool();
+		refreshShortcutRestartFlag();
+	} else if (id == QLatin1String("keys.enableXboxInput")) {
+		m_draft.bEnableXboxInput = value.toBool();
+		refreshShortcutRestartFlag();
 	}
 
 	forceModernLayout();
@@ -1081,18 +1769,159 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 	ActionResult result;
 	const QString action = actionID.trimmed();
 	if (action == QLatin1String("selectPage")) {
+		m_shortcutCaptureIndex = -1;
 		setActivePage(payload.value(QStringLiteral("pageId")).toString());
 		return result;
 	}
 
 	if (action == QLatin1String("cancel")) {
+		m_shortcutCaptureIndex = -1;
 		result.closeDialog = true;
 		return result;
 	}
 
 	if (action == QLatin1String("reset")) {
 		m_draft = m_original;
+		m_shortcutCaptureIndex = -1;
 		forceModernLayout();
+		return result;
+	}
+
+	if (action == QLatin1String("keys.addShortcut")) {
+		Shortcut shortcut;
+		shortcut.iIndex    = -1;
+		shortcut.bSuppress = false;
+		m_draft.qlShortcuts.push_back(shortcut);
+		m_shortcutCaptureIndex = -1;
+		return result;
+	}
+
+	if (action == QLatin1String("keys.removeShortcut")) {
+		const int row = shortcutPayloadIndex(payload, m_draft.qlShortcuts);
+		if (row >= 0) {
+			m_draft.qlShortcuts.removeAt(row);
+			if (m_shortcutCaptureIndex == row) {
+				m_shortcutCaptureIndex = -1;
+			} else if (m_shortcutCaptureIndex > row) {
+				--m_shortcutCaptureIndex;
+			}
+		}
+		return result;
+	}
+
+	if (action == QLatin1String("keys.shortcutAction")) {
+		const int row = shortcutPayloadIndex(payload, m_draft.qlShortcuts);
+		if (row >= 0) {
+			Shortcut &shortcut = m_draft.qlShortcuts[row];
+			shortcut.iIndex    = payload.value(QStringLiteral("actionIndex"), -1).toInt();
+			shortcut.qvData    = shortcutDefinition(shortcut.iIndex) ? shortcutDefinition(shortcut.iIndex)->qvDefault
+																	 : QVariant();
+			normalizeShortcutData(shortcut);
+		}
+		return result;
+	}
+
+	if (action == QLatin1String("keys.shortcutTarget")) {
+		const int row = shortcutPayloadIndex(payload, m_draft.qlShortcuts);
+		if (row >= 0) {
+			Shortcut &shortcut = m_draft.qlShortcuts[row];
+			normalizeShortcutData(shortcut);
+			const QVariant data = shortcutEffectiveData(shortcut);
+			if (shortcutDataType(data) == QLatin1String("target")) {
+				ShortcutTarget target = data.value< ShortcutTarget >();
+				const QString targetAction = payload.value(QStringLiteral("targetAction")).toString();
+
+				if (targetAction == QLatin1String("mode")) {
+					applyShortcutTargetMode(target, payload.value(QStringLiteral("mode")).toString());
+				} else if (targetAction == QLatin1String("channel")) {
+					target.iChannel = payload.value(QStringLiteral("channelId"), target.iChannel).toInt();
+					target.bUsers = false;
+					target.bCurrentSelection = false;
+				} else if (targetAction == QLatin1String("group")) {
+					target.qsGroup = payload.value(QStringLiteral("group")).toString().trimmed();
+				} else if (targetAction == QLatin1String("links")) {
+					target.bLinks = payload.value(QStringLiteral("enabled")).toBool();
+				} else if (targetAction == QLatin1String("children")) {
+					target.bChildren = payload.value(QStringLiteral("enabled")).toBool();
+				} else if (targetAction == QLatin1String("forceCenter")) {
+					target.bForceCenter = payload.value(QStringLiteral("enabled")).toBool();
+				} else if (targetAction == QLatin1String("addUser")) {
+					const QString hash =
+						payload.value(QStringLiteral("hash"), payload.value(QStringLiteral("value"))).toString().trimmed();
+					if (!hash.isEmpty() && !target.qlUsers.contains(hash)) {
+						target.qlUsers.push_back(hash);
+					}
+					target.bUsers            = true;
+					target.bCurrentSelection = false;
+				} else if (targetAction == QLatin1String("removeUser")) {
+					const QString hash =
+						payload.value(QStringLiteral("hash"), payload.value(QStringLiteral("value"))).toString().trimmed();
+					target.qlUsers.removeAll(hash);
+				}
+
+				shortcut.qvData = QVariant::fromValue(target);
+			}
+		}
+		return result;
+	}
+
+	if (action == QLatin1String("keys.shortcutData")) {
+		const int row = shortcutPayloadIndex(payload, m_draft.qlShortcuts);
+		if (row >= 0) {
+			Shortcut &shortcut = m_draft.qlShortcuts[row];
+			normalizeShortcutData(shortcut);
+			const QVariant data = shortcutEffectiveData(shortcut);
+			const QString type  = shortcutDataType(data);
+			const QVariant value = payload.value(QStringLiteral("value"));
+			if (type == QLatin1String("toggle")) {
+				shortcut.qvData = qBound(-1, value.toInt(), 1);
+			} else if (type == QLatin1String("text")) {
+				shortcut.qvData = value.toString();
+			} else if (type == QLatin1String("channel")) {
+				const int channelID = qMax(0, value.toInt());
+				shortcut.qvData    = QVariant::fromValue(ChannelTarget(static_cast< unsigned int >(channelID)));
+			} else if (type == QLatin1String("target")) {
+				shortcut.qvData = QVariant::fromValue(shortcutTargetFromMode(value.toString()));
+			}
+		}
+		return result;
+	}
+
+	if (action == QLatin1String("keys.shortcutSuppress")) {
+		const int row = shortcutPayloadIndex(payload, m_draft.qlShortcuts);
+		if (row >= 0) {
+			m_draft.qlShortcuts[row].bSuppress = payload.value(QStringLiteral("suppress")).toBool();
+		}
+		return result;
+	}
+
+	if (action == QLatin1String("keys.beginShortcutCapture")) {
+		m_shortcutCaptureIndex = shortcutPayloadIndex(payload, m_draft.qlShortcuts);
+		return result;
+	}
+
+	if (action == QLatin1String("keys.cancelShortcutCapture")) {
+		m_shortcutCaptureIndex = -1;
+		return result;
+	}
+
+	if (action == QLatin1String("keys.finishShortcutCapture")) {
+		const int row = shortcutPayloadIndex(payload, m_draft.qlShortcuts);
+		if (row >= 0) {
+			m_draft.qlShortcuts[row].qlButtons = payload.value(QStringLiteral("buttons")).toList();
+		}
+		m_shortcutCaptureIndex = -1;
+		return result;
+	}
+
+	if (action == QLatin1String("keys.clearShortcut")) {
+		const int row = shortcutPayloadIndex(payload, m_draft.qlShortcuts);
+		if (row >= 0) {
+			m_draft.qlShortcuts[row].qlButtons.clear();
+			if (m_shortcutCaptureIndex == row) {
+				m_shortcutCaptureIndex = -1;
+			}
+		}
 		return result;
 	}
 
@@ -1168,6 +1997,8 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 	}
 
 	if (action == QLatin1String("apply") || action == QLatin1String("ok")) {
+		m_shortcutCaptureIndex = -1;
+		refreshShortcutRestartFlag();
 		forceModernLayout();
 		result.settingsToApply = m_draft;
 		result.accepted        = action == QLatin1String("ok");
@@ -1197,22 +2028,136 @@ QVariantList ModernSettingsController::pages() const {
 		return item;
 	};
 
-	return QVariantList { page(QStringLiteral("look"), QObject::tr("Look")),
+	return QVariantList { page(QStringLiteral("audioInput"), QObject::tr("Audio Input")),
+						  page(QStringLiteral("audioOutput"), QObject::tr("Audio Output")),
+						  page(QStringLiteral("look"), QObject::tr("Appearance")),
+						  page(QStringLiteral("ui"), QObject::tr("User Interface")),
+						  page(QStringLiteral("messages"), QObject::tr("Messages & Sounds")),
+						  page(QStringLiteral("keys"), QObject::tr("Key Bindings")),
 						  page(QStringLiteral("network"), QObject::tr("Network")),
-						  page(QStringLiteral("screenShare"), QObject::tr("Screen sharing")),
-						  page(QStringLiteral("audioInput"), QObject::tr("Audio input")),
-						  page(QStringLiteral("audioOutput"), QObject::tr("Audio output")) };
+						  page(QStringLiteral("screenShare"), QObject::tr("Screen Sharing")),
+						  page(QStringLiteral("about"), QObject::tr("About")) };
 }
 
 QVariantList ModernSettingsController::sectionsForActivePage() const {
+	if (m_activePage == QLatin1String("ui")) {
+		return QVariantList {
+			sectionItem(QObject::tr("Window behavior"), QVariantList {
+												   selectField(QStringLiteral("look.quitBehavior"),
+															   QObject::tr("Close button"),
+															   static_cast< int >(m_draft.quitBehavior),
+															   quitBehaviorOptions()),
+												   selectField(QStringLiteral("look.alwaysOnTop"),
+															   QObject::tr("Always on top"),
+															   static_cast< int >(m_draft.aotbAlwaysOnTop),
+															   alwaysOnTopOptions()),
+												   boolField(QStringLiteral("look.hideInTray"),
+															 QObject::tr("Hide in tray when minimized"),
+															 m_draft.bHideInTray),
+												   boolField(QStringLiteral("look.stateInTray"),
+															 QObject::tr("Show talking state in tray"),
+															 m_draft.bStateInTray),
+												   advancedField(boolField(QStringLiteral("look.showTransmitModeComboBox"),
+																		   QObject::tr("Show transmit mode control"),
+																		   m_draft.bShowTransmitModeComboBox)) }),
+			sectionItem(QObject::tr("Room browser and presence"), QVariantList {
+															 boolField(QStringLiteral("look.showVolumeAdjustments"),
+																	   QObject::tr("Show local volume badges"),
+																	   m_draft.bShowVolumeAdjustments),
+															 boolField(QStringLiteral("look.showNicknamesOnly"),
+																	   QObject::tr("Show nicknames only"),
+																	   m_draft.bShowNicknamesOnly),
+															 boolField(QStringLiteral("look.showContextMenuInMenuBar"),
+																	   QObject::tr("Expose context menus in the app menu"),
+																	   m_draft.bShowContextMenuInMenuBar),
+															 boolField(QStringLiteral("look.filterHidesEmptyChannels"),
+																	   QObject::tr("Filter hides empty rooms"),
+																	   m_draft.bFilterHidesEmptyChannels),
+															 selectField(QStringLiteral("look.presenceIdleTimeout"),
+																		 QObject::tr("Idle presence timeout"),
+																		 m_draft.iPresenceIdleTimeoutMinutes,
+																		 presenceTimeoutOptions()) })
+		};
+	}
+
+	if (m_activePage == QLatin1String("messages")) {
+		return QVariantList {
+			sectionItem(QObject::tr("Messages"), QVariantList {
+											 boolField(QStringLiteral("network.linkPreviews"),
+													   QObject::tr("Enable link previews"),
+													   m_draft.bEnableLinkPreviews) }),
+			sectionItem(QObject::tr("Sounds"), QVariantList {
+										   boolField(QStringLiteral("audio.cuePtt"),
+													 QObject::tr("Play transmit cue for push-to-talk"),
+													 m_draft.audioCueEnabledPTT),
+										   boolField(QStringLiteral("audio.cueVad"),
+													 QObject::tr("Play transmit cue for voice activity"),
+													 m_draft.audioCueEnabledVAD),
+										   fieldItem(QStringLiteral("audio.cueOnPath"),
+													 QObject::tr("Transmit cue on file"),
+													 QStringLiteral("text"), m_draft.qsTxAudioCueOn),
+										   fieldItem(QStringLiteral("audio.cueOffPath"),
+													 QObject::tr("Transmit cue off file"),
+													 QStringLiteral("text"), m_draft.qsTxAudioCueOff),
+										   boolField(QStringLiteral("audio.muteCue"),
+													 QObject::tr("Play mute cue"),
+													 m_draft.bTxMuteCue),
+										   fieldItem(QStringLiteral("audio.muteCuePath"),
+													 QObject::tr("Mute cue file"),
+													 QStringLiteral("text"), m_draft.qsTxMuteCue) })
+		};
+	}
+
+	if (m_activePage == QLatin1String("keys")) {
+		return QVariantList {
+			sectionItem(QObject::tr("Shortcut controls"), QVariantList {
+													 boolField(QStringLiteral("keys.globalShortcuts"),
+															   QObject::tr("Enable global shortcuts"),
+															   m_draft.bShortcutEnable) }),
+			sectionItem(QObject::tr("Configured shortcuts"), QVariantList { shortcutEditorField(m_draft, m_shortcutCaptureIndex) }),
+			advancedSection(sectionItem(QObject::tr("Additional shortcut engines"), QVariantList {
+										 boolField(QStringLiteral("keys.enableUiAccess"),
+												   QObject::tr("Enable shortcuts in privileged applications"),
+												   m_draft.bEnableUIAccess),
+										 boolField(QStringLiteral("keys.enableGKey"),
+												   QObject::tr("Enable GKey"),
+												   m_draft.bEnableGKey),
+										 boolField(QStringLiteral("keys.enableXboxInput"),
+												   QObject::tr("Enable XInput"),
+												   m_draft.bEnableXboxInput) }))
+		};
+	}
+
+	if (m_activePage == QLatin1String("about")) {
+		return QVariantList {
+			sectionItem(QObject::tr("Mumble"), QVariantList {
+										 readonlyField(QObject::tr("Version"), Version::getRelease()),
+										 readonlyField(QObject::tr("Architecture"), buildArchitectureLabel()),
+										 actionField(QStringLiteral("about.openMumble"),
+													 QObject::tr("Project, license, and credits"),
+													 QObject::tr("Open About Mumble"),
+													 QStringLiteral("about.openMumble"), QStringLiteral("accent")) }),
+			sectionItem(QObject::tr("Qt runtime"), QVariantList {
+											 readonlyField(QObject::tr("Qt version"), QString::fromLatin1(qVersion())),
+											 readonlyField(QObject::tr("Operating system"), QSysInfo::prettyProductName()),
+											 actionField(QStringLiteral("about.openQt"),
+														 QObject::tr("Qt details"),
+														 QObject::tr("Open About Qt"),
+														 QStringLiteral("about.openQt")) })
+		};
+	}
+
 	if (m_activePage == QLatin1String("network")) {
 		return QVariantList {
-			sectionItem(QObject::tr("Connection"), QVariantList {
+			sectionItem(QObject::tr("Client connection"), QVariantList {
 													 boolField(QStringLiteral("network.autoReconnect"),
 															   QObject::tr("Reconnect automatically"), m_draft.bReconnect),
 													 boolField(QStringLiteral("network.autoConnect"),
 															   QObject::tr("Connect to the last server on startup"),
 															   m_draft.bAutoConnect),
+													 boolField(QStringLiteral("network.startWithPC"),
+															   QObject::tr("Start Mumble with Windows"),
+															   m_draft.bStartWithPC),
 													 advancedField(boolField(QStringLiteral("network.tcpMode"),
 																			 QObject::tr("Force TCP mode"),
 																			 m_draft.bTCPCompat)),
@@ -1635,44 +2580,37 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 	return QVariantList {
 		sectionItem(QObject::tr("Modern layout"), QVariantList {
 												 noteField(QObject::tr("This fork now uses the Modern layout as the visible client shell. Classic layout switching is disabled.")) }),
-		sectionItem(QObject::tr("Window behavior"), QVariantList {
-												   selectField(QStringLiteral("look.quitBehavior"),
-															   QObject::tr("Quit behavior"),
-															   static_cast< int >(m_draft.quitBehavior),
-															   quitBehaviorOptions()),
-												   selectField(QStringLiteral("look.alwaysOnTop"),
-															   QObject::tr("Always on top"),
-															   static_cast< int >(m_draft.aotbAlwaysOnTop),
-															   alwaysOnTopOptions()),
-												   boolField(QStringLiteral("look.hideInTray"),
-															 QObject::tr("Hide in tray when minimized"),
-															 m_draft.bHideInTray),
-												   boolField(QStringLiteral("look.stateInTray"),
-															 QObject::tr("Show talking state in tray"),
-															 m_draft.bStateInTray),
-												   advancedField(boolField(QStringLiteral("look.showTransmitModeComboBox"),
-																		   QObject::tr("Show transmit mode control"),
-																		   m_draft.bShowTransmitModeComboBox)) }),
-		advancedSection(sectionItem(QObject::tr("Room list and presence"), QVariantList {
-													 boolField(QStringLiteral("look.showUserCount"),
-															   QObject::tr("Show user count"),
-															   m_draft.bShowUserCount),
-													 boolField(QStringLiteral("look.showVolumeAdjustments"),
-															   QObject::tr("Show volume adjustments"),
-															   m_draft.bShowVolumeAdjustments),
-													 boolField(QStringLiteral("look.showNicknamesOnly"),
-															   QObject::tr("Show nicknames only"),
-															   m_draft.bShowNicknamesOnly),
-													 boolField(QStringLiteral("look.showContextMenuInMenuBar"),
-															   QObject::tr("Expose context menus in the app menu"),
-															   m_draft.bShowContextMenuInMenuBar),
-													 boolField(QStringLiteral("look.filterHidesEmptyChannels"),
-															   QObject::tr("Filter hides empty channels"),
-															   m_draft.bFilterHidesEmptyChannels),
-													 selectField(QStringLiteral("look.presenceIdleTimeout"),
-																 QObject::tr("Idle presence timeout"),
-																 m_draft.iPresenceIdleTimeoutMinutes,
-																 presenceTimeoutOptions()) }))
+		sectionItem(QObject::tr("Tweaks"), QVariantList {
+											hintedField(presentationField(
+															selectField(QStringLiteral("look.modernTheme"),
+																		QObject::tr("Theme"),
+																		normalizedModernShellTheme(m_draft.qsModernShellTheme),
+																		modernShellThemeOptions(),
+																		QStringLiteral("string")),
+															QStringLiteral("themeGrid")),
+														QObject::tr("Catppuccin, standard light/dark, and more")),
+											presentationField(
+												selectField(QStringLiteral("look.modernDensity"), QObject::tr("Density"),
+															normalizedModernShellDensity(m_draft.qsModernShellDensity),
+															modernShellDensityOptions(), QStringLiteral("string")),
+												QStringLiteral("segmented")),
+											boolField(QStringLiteral("look.modernClassicUserIcons"),
+													  QObject::tr("Use classic user icons"),
+													  m_draft.bModernShellClassicUserIcons),
+											presentationField(
+												selectField(QStringLiteral("look.modernRailSide"),
+															QObject::tr("Rail side"),
+															normalizedModernShellRailSide(m_draft.qsModernShellRailSide),
+															modernShellRailSideOptions(), QStringLiteral("string")),
+												QStringLiteral("segmented")),
+											presentationField(
+												selectField(QStringLiteral("look.modernAccent"), QObject::tr("Accent"),
+															normalizedModernShellAccent(m_draft.qsModernShellAccent),
+															modernShellAccentOptions(), QStringLiteral("string")),
+												QStringLiteral("accentGrid")),
+											boolField(QStringLiteral("look.modernTickerAlwaysScroll"),
+													  QObject::tr("Always scroll ticker banner"),
+													  m_draft.bModernShellTickerBannerAlwaysScroll) })
 	};
 }
 
@@ -1688,16 +2626,33 @@ void ModernSettingsController::setActivePage(const QString &pageID) {
 		m_activePage = QStringLiteral("audioOutput");
 	} else if (normalized == QLatin1String("network") || normalized == QLatin1String("screenShare")
 			   || normalized == QLatin1String("audioInput") || normalized == QLatin1String("audioOutput")
-			   || normalized == QLatin1String("look")) {
+			   || normalized == QLatin1String("look") || normalized == QLatin1String("ui")
+			   || normalized == QLatin1String("messages") || normalized == QLatin1String("keys")
+			   || normalized == QLatin1String("about")) {
 		m_activePage = normalized;
+	} else if (normalized == QLatin1String("appearance")) {
+		m_activePage = QStringLiteral("look");
+	} else if (normalized == QLatin1String("UserInterface")) {
+		m_activePage = QStringLiteral("ui");
+	} else if (normalized == QLatin1String("MessagesSounds") || normalized == QLatin1String("MessagesAndSounds")) {
+		m_activePage = QStringLiteral("messages");
+	} else if (normalized == QLatin1String("KeyBindings") || normalized == QLatin1String("GlobalShortcutConfig")) {
+		m_activePage = QStringLiteral("keys");
 	} else if (normalized == QLatin1String("audio")) {
 		m_activePage = QStringLiteral("audioInput");
 	} else {
-		m_activePage = QStringLiteral("look");
+		m_activePage = QStringLiteral("audioInput");
 	}
 }
 
 void ModernSettingsController::forceModernLayout() {
 	m_draft.modernLayoutPolicy = Settings::ModernLayoutForced;
 	m_draft.wlWindowLayout     = Settings::LayoutHybrid;
+}
+
+void ModernSettingsController::refreshShortcutRestartFlag() {
+	const bool enginesChanged = m_draft.bEnableUIAccess != m_original.bEnableUIAccess
+								|| m_draft.bEnableGKey != m_original.bEnableGKey
+								|| m_draft.bEnableXboxInput != m_original.bEnableXboxInput;
+	m_draft.requireRestartToApply = m_original.requireRestartToApply || enginesChanged;
 }

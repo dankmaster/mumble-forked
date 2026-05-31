@@ -79,6 +79,19 @@
        </widget>
       </item>
       <item>
+       <widget class="QCheckBox" name="qcbStartWithPC">
+        <property name="toolTip">
+         <string>Start Mumble automatically when you sign in to Windows</string>
+        </property>
+        <property name="whatsThis">
+         <string>&lt;b&gt;Start with PC&lt;/b&gt;.&lt;br /&gt;This starts Mumble hidden in the system tray when you sign in to Windows. If reconnect to last server is enabled, Mumble will reconnect automatically.</string>
+        </property>
+        <property name="text">
+         <string>Start Mumble with Windows</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <widget class="QCheckBox" name="qcbSuppressIdentity">
         <property name="toolTip">
          <string>Don't send certificate to server and don't save passwords. (Not saved).</string>
@@ -458,7 +471,7 @@ Prevents the client from sending potentially identifying information about the o
          <string>Check for new mumble-forked builds automatically.</string>
         </property>
         <property name="whatsThis">
-         <string>This will check the mumble-forked GitHub release every time you start the program, and notify you if a newer installer build is available.</string>
+         <string>This will check the mumble-forked GitHub release every time you start the program, notify you if a newer installer build is available, and let Mumble download and verify the update before you restart to install it.</string>
         </property>
         <property name="text">
          <string>Check for mumble-forked updates on startup</string>

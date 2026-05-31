@@ -29,7 +29,9 @@
 #include "database/DBGroup.h"
 #include "database/DBGroupMember.h"
 #include "database/DBLogEntry.h"
+#include "database/DBStonksFeedPreferences.h"
 #include "database/DBStonksFollow.h"
+#include "database/DBStonksPinnedTicker.h"
 #include "database/DBStonksScore.h"
 #include "database/DBStonksSnapshot.h"
 #include "database/DBStonksSnapshotPosition.h"
@@ -40,7 +42,9 @@
 #include "database/ChatThreadTable.h"
 #include "database/LogTable.h"
 #include "database/ServerDatabase.h"
+#include "database/StonksFeedPreferenceTable.h"
 #include "database/StonksFollowTable.h"
+#include "database/StonksPinnedTickerTable.h"
 #include "database/StonksScoreTable.h"
 #include "database/StonksSnapshotTable.h"
 #include "database/StonksSnapshotPositionTable.h"
@@ -269,6 +273,8 @@ private slots:
 	void chatMessageReactionTable_general();
 	void stonksScoreTable_general();
 	void stonksFollowTable_general();
+	void stonksPinnedTickerTable_general();
+	void stonksFeedPreferenceTable_general();
 	void stonksSnapshotTable_general();
 
 	void database_schema_migration();
@@ -1833,6 +1839,131 @@ void ServerDatabaseTest::stonksFollowTable_general() {
 
 	db.getUserTable().removeUser(user2);
 	QVERIFY(table.getFollowedUsers(existingServerID, user1.registeredUserID).empty());
+
+	MUMBLE_END_TEST_CASE
+}
+
+void ServerDatabaseTest::stonksPinnedTickerTable_general() {
+	MUMBLE_BEGIN_TEST_CASE
+
+	unsigned int existingServerID  = 0;
+	unsigned int nonExistingUserID = 99;
+	::msdb::DBUser user1(existingServerID, 2);
+	::msdb::DBUser user2(existingServerID, 3);
+
+	::msdb::DBChannel rootChannel;
+	rootChannel.channelID = Mumble::ROOT_CHANNEL_ID;
+	rootChannel.parentID  = rootChannel.channelID;
+	rootChannel.serverID  = existingServerID;
+	rootChannel.name      = "Root";
+
+	db.getServerTable().addServer(existingServerID);
+	db.getChannelTable().addChannel(rootChannel);
+	db.getUserTable().addUser(user1, "User 1");
+	db.getUserTable().addUser(user2, "User 2");
+
+	::msdb::StonksPinnedTickerTable &table = db.getStonksPinnedTickerTable();
+	QVERIFY(table.getPinnedTickers(existingServerID, user1.registeredUserID).empty());
+
+	::msdb::DBStonksPinnedTicker rklb(existingServerID, user1.registeredUserID, "RKLB");
+	rklb.displayName    = "Rocket Lab";
+	rklb.providerID     = "yahoo-finance";
+	rklb.providerSymbol = "RKLB";
+	rklb.exchange       = "NMS";
+	rklb.quoteSourceURL = "https://finance.yahoo.com/quote/RKLB";
+	rklb.displayOrder   = 2;
+	rklb.createdAt      = std::chrono::system_clock::time_point(std::chrono::seconds(100));
+	rklb.updatedAt      = std::chrono::system_clock::time_point(std::chrono::seconds(101));
+	table.setPinnedTicker(rklb);
+
+	::msdb::DBStonksPinnedTicker amd(existingServerID, user1.registeredUserID, "AMD");
+	amd.displayName    = "Advanced Micro Devices";
+	amd.providerID     = "yahoo-finance";
+	amd.providerSymbol = "AMD";
+	amd.exchange       = "NMS";
+	amd.quoteSourceURL = "https://finance.yahoo.com/quote/AMD";
+	amd.displayOrder   = 1;
+	amd.createdAt      = std::chrono::system_clock::time_point(std::chrono::seconds(90));
+	amd.updatedAt      = std::chrono::system_clock::time_point(std::chrono::seconds(91));
+	table.setPinnedTicker(amd);
+
+	QVERIFY(table.getPinnedTickers(existingServerID, user1.registeredUserID)
+			== std::vector<::msdb::DBStonksPinnedTicker >({ amd, rklb }));
+	QVERIFY(table.getPinnedTickers(existingServerID, user2.registeredUserID).empty());
+
+	rklb.displayName  = "Rocket Lab USA";
+	rklb.displayOrder = 0;
+	rklb.updatedAt    = std::chrono::system_clock::time_point(std::chrono::seconds(120));
+	table.setPinnedTicker(rklb);
+	QVERIFY(table.getPinnedTickers(existingServerID, user1.registeredUserID)
+			== std::vector<::msdb::DBStonksPinnedTicker >({ rklb, amd }));
+
+	table.removePinnedTicker(existingServerID, user1.registeredUserID, "AMD");
+	QVERIFY(table.getPinnedTickers(existingServerID, user1.registeredUserID)
+			== std::vector<::msdb::DBStonksPinnedTicker >({ rklb }));
+
+	::msdb::DBStonksPinnedTicker invalid(existingServerID, nonExistingUserID, "NVDA");
+	invalid.displayName    = "NVIDIA";
+	invalid.providerID     = "yahoo-finance";
+	invalid.providerSymbol = "NVDA";
+	invalid.exchange       = "NMS";
+	QVERIFY_THROWS_EXCEPTION(::mdb::AccessException, table.setPinnedTicker(invalid));
+
+	db.getUserTable().removeUser(user1);
+	QVERIFY(table.getPinnedTickers(existingServerID, user1.registeredUserID).empty());
+
+	MUMBLE_END_TEST_CASE
+}
+
+void ServerDatabaseTest::stonksFeedPreferenceTable_general() {
+	MUMBLE_BEGIN_TEST_CASE
+
+	unsigned int existingServerID  = 0;
+	unsigned int nonExistingUserID = 99;
+	::msdb::DBUser user1(existingServerID, 2);
+	::msdb::DBUser user2(existingServerID, 3);
+
+	::msdb::DBChannel rootChannel;
+	rootChannel.channelID = Mumble::ROOT_CHANNEL_ID;
+	rootChannel.parentID  = rootChannel.channelID;
+	rootChannel.serverID  = existingServerID;
+	rootChannel.name      = "Root";
+
+	db.getServerTable().addServer(existingServerID);
+	db.getChannelTable().addChannel(rootChannel);
+	db.getUserTable().addUser(user1, "User 1");
+	db.getUserTable().addUser(user2, "User 2");
+
+	::msdb::StonksFeedPreferenceTable &table = db.getStonksFeedPreferenceTable();
+	QVERIFY(!table.getPreferences(existingServerID, user1.registeredUserID));
+
+	::msdb::DBStonksFeedPreferences prefs(existingServerID, user1.registeredUserID);
+	prefs.showMine    = true;
+	prefs.showPopular = false;
+	prefs.showPins    = true;
+	prefs.updatedAt   = std::chrono::system_clock::time_point(std::chrono::seconds(200));
+	table.setPreferences(prefs);
+
+	std::optional<::msdb::DBStonksFeedPreferences > stored =
+		table.getPreferences(existingServerID, user1.registeredUserID);
+	QVERIFY(stored);
+	QVERIFY(*stored == prefs);
+	QVERIFY(!table.getPreferences(existingServerID, user2.registeredUserID));
+
+	prefs.showMine    = false;
+	prefs.showPopular = true;
+	prefs.showPins    = false;
+	prefs.updatedAt   = std::chrono::system_clock::time_point(std::chrono::seconds(210));
+	table.setPreferences(prefs);
+	stored = table.getPreferences(existingServerID, user1.registeredUserID);
+	QVERIFY(stored);
+	QVERIFY(*stored == prefs);
+
+	::msdb::DBStonksFeedPreferences invalid(existingServerID, nonExistingUserID);
+	QVERIFY_THROWS_EXCEPTION(::mdb::AccessException, table.setPreferences(invalid));
+
+	db.getUserTable().removeUser(user1);
+	QVERIFY(!table.getPreferences(existingServerID, user1.registeredUserID));
 
 	MUMBLE_END_TEST_CASE
 }

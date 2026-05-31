@@ -11,8 +11,11 @@
 #include "Version.h"
 #include "Global.h"
 
+#include <QCoreApplication>
+#include <QDir>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSettings>
 #include <QSignalBlocker>
 #include <QtNetwork/QHostAddress>
 #include <QtNetwork/QNetworkAccessManager>
@@ -26,8 +29,24 @@ static ConfigWidget *NetworkConfigNew(Settings &st) {
 
 static ConfigRegistrar registrarNetworkConfig(1300, NetworkConfigNew);
 
+namespace {
+
+QString startWithPCRunValueName() {
+	return QStringLiteral("mumble-forked");
+}
+
+QString startWithPCCommand() {
+	return QStringLiteral("\"%1\" --hidden").arg(QDir::toNativeSeparators(QCoreApplication::applicationFilePath()));
+}
+
+} // namespace
+
 NetworkConfig::NetworkConfig(Settings &st) : ConfigWidget(st) {
 	setupUi(this);
+
+#ifndef Q_OS_WIN
+	qcbStartWithPC->hide();
+#endif
 
 	qleAdvertisedRelease->setPlaceholderText(Version::getRelease());
 	qleAdvertisedOS->setPlaceholderText(OSInfo::getOS());
@@ -64,6 +83,7 @@ void NetworkConfig::load(const Settings &r) {
 	loadCheckBox(qcbQoS, s.bQoS);
 	loadCheckBox(qcbAutoReconnect, s.bReconnect);
 	loadCheckBox(qcbAutoConnect, s.bAutoConnect);
+	loadCheckBox(qcbStartWithPC, r.bStartWithPC);
 	loadCheckBox(qcbDisablePublicList, s.bDisablePublicList);
 	loadCheckBox(qcbSuppressIdentity, s.bSuppressIdentity);
 	loadCheckBox(qcbLinkPreviews, s.bEnableLinkPreviews);
@@ -103,6 +123,7 @@ void NetworkConfig::save() const {
 	s.bQoS               = qcbQoS->isChecked();
 	s.bReconnect         = qcbAutoReconnect->isChecked();
 	s.bAutoConnect       = qcbAutoConnect->isChecked();
+	s.bStartWithPC       = qcbStartWithPC->isChecked();
 	s.bDisablePublicList = true;
 	s.bSuppressIdentity  = qcbSuppressIdentity->isChecked();
 	s.bEnableLinkPreviews = qcbLinkPreviews->isChecked();
@@ -146,6 +167,23 @@ void NetworkConfig::SetupProxy() {
 	QNetworkProxy::setApplicationProxy(proxy);
 }
 
+bool NetworkConfig::ApplyStartWithPCRegistration(const bool enabled) {
+#ifdef Q_OS_WIN
+	QSettings runKey(QStringLiteral("HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"),
+					 QSettings::NativeFormat);
+	if (enabled) {
+		runKey.setValue(startWithPCRunValueName(), startWithPCCommand());
+	} else {
+		runKey.remove(startWithPCRunValueName());
+	}
+	runKey.sync();
+	return runKey.status() == QSettings::NoError;
+#else
+	Q_UNUSED(enabled);
+	return false;
+#endif
+}
+
 bool NetworkConfig::TcpModeEnabled() {
 	/*
 	 * We force TCP mode for both HTTP and SOCKS5 proxies, even though SOCKS5 supports UDP.
@@ -167,6 +205,7 @@ bool NetworkConfig::TcpModeEnabled() {
 
 void NetworkConfig::accept() const {
 	NetworkConfig::SetupProxy();
+	NetworkConfig::ApplyStartWithPCRegistration(Global::get().s.bStartWithPC);
 }
 
 void NetworkConfig::on_qcbType_currentIndexChanged(int v) {

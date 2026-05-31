@@ -113,14 +113,6 @@ namespace {
 		return text.simplified();
 	}
 
-	QString occupantLabel(int count) {
-		if (count <= 0) {
-			return QString();
-		}
-
-		return QString::fromLatin1("(%1)").arg(count);
-	}
-
 	QPolygonF branchIndicatorPolygon(const QRectF &rect, bool expanded) {
 		const qreal left    = rect.left() + 0.5;
 		const qreal right   = rect.right() - 0.5;
@@ -278,31 +270,21 @@ void UserDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option, 
 			? ((currentLocation || isRoot || linkedLocation || occupancy > 0 || hasChildren) ? colors.textColor
 																							  : colors.channelTextColor)
 			: (idle ? colors.mutedTextColor : colors.textColor);
-	const QColor secondaryTextColor = colors.mutedTextColor;
 	const UserView *view = qobject_cast< const UserView * >(opt.widget);
 
 	QRect contentRect = option.rect.adjusted(isChannel ? 10 : 18, 1, -10, -1);
 	const int statusIconsWidth = static_cast< int >(statusIcons.size() * m_iconTotalDimension);
 	int iconRight = contentRect.right();
 
-	QString occupancyText;
-	if (itemKind == UserModel::NavigatorChannelItem && Global::get().s.bShowUserCount) {
-		occupancyText = occupantLabel(occupancy);
-	}
 	static const QIcon s_voiceRoomIcon(QLatin1String("skin:priority_speaker.svg"));
 
 	QFont secondaryFont(opt.font);
 	secondaryFont.setPointSizeF(std::max(secondaryFont.pointSizeF() - 0.5, 8.0));
-	QFontMetrics secondaryMetrics(secondaryFont);
 	QFont badgeFont(secondaryFont);
 	badgeFont.setBold(true);
 	badgeFont.setPointSizeF(std::max(badgeFont.pointSizeF() - 0.6, 7.0));
 	QFontMetrics badgeMetrics(badgeFont);
 	const int badgeHeight = 14;
-	int occupancyWidth = 0;
-	if (!occupancyText.isEmpty()) {
-		occupancyWidth = secondaryMetrics.horizontalAdvance(occupancyText);
-	}
 	int badgeClusterWidth = 0;
 	for (int i = 0; i < stateBadges.size(); ++i) {
 		const int badgeWidth = badgeMetrics.horizontalAdvance(stateBadges.at(i).label) + 12;
@@ -314,9 +296,6 @@ void UserDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option, 
 	int textRight = contentRect.right();
 	if (statusIconsWidth > 0) {
 		textRight -= statusIconsWidth + 4;
-	}
-	if (occupancyWidth > 0) {
-		textRight -= occupancyWidth + 8;
 	}
 	if (badgeClusterWidth > 0) {
 		textRight -= badgeClusterWidth + 8;
@@ -432,17 +411,6 @@ void UserDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option, 
 		}
 		painter->setFont(titleFont);
 	}
-	if (!occupancyText.isEmpty()) {
-		const int occupancyLeft = std::min(textRect.right() - occupancyWidth, titleRight + 8);
-		if (occupancyLeft > titleRight) {
-			const QRect occupancyRect(occupancyLeft, contentRect.top(), occupancyWidth, contentRect.height());
-			painter->setFont(secondaryFont);
-			painter->setPen(secondaryTextColor);
-			painter->drawText(occupancyRect, Qt::AlignVCenter | Qt::AlignLeft, occupancyText);
-			painter->setFont(titleFont);
-		}
-	}
-
 	if (!statusIcons.isEmpty()) {
 		const int iconPosY = contentRect.center().y() - (m_iconIconDimension / 2);
 		for (int i = static_cast< int >(statusIcons.size()) - 1; i >= 0; --i) {

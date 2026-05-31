@@ -8,9 +8,19 @@
 	let lastScopeToken = "";
 	let openMenuId = null;
 	let openMenuPinned = false;
-	let railCollapsed = false;
+	let railCollapsed = true;
+	let railOpenedByUser = false;
 	let compactViewport = false;
 	let contextMenuState = null;
+	let nativeContextMenuCounter = 0;
+	let nativeContextMenuActions = {};
+	let nativeContextMenuKinds = {};
+	let activeNativeContextMenuToken = "";
+	let activeNativeContextMenuKind = "";
+	let automationBridgeCalls = [];
+	let automationLastCopiedText = "";
+	let automationCopyCount = 0;
+	let automationLastMenuProbe = {};
 	let unreadDetachedMessages = 0;
 	let selfMenuOpen = false;
 	let openReactionPickerMessageId = null;
@@ -18,17 +28,24 @@
 	let keepMessageListPinnedToBottom = true;
 	let pendingBottomPinFrames = 0;
 	let pendingBottomPinHandle = 0;
+	let messageListScrollSyncFrame = 0;
 	let footerAlignmentFrame = 0;
+	let stableFooterRowHeight = 0;
 	let railLayoutFrame = 0;
 	let railSelectionRevealFrame = 0;
 	let pendingActiveRailReveal = false;
 	let snapshotRenderFrame = 0;
 	let menuDismissTimer = 0;
 	let appMenuOpen = false;
+	let directMessageTrayOpen = false;
+	let directMessageDrafts = {};
+	let directMessageWindowUiState = {};
 	let noteExpanded = false;
 	let railNoteAutoCollapsed = false;
 	let lastActiveRailToken = "";
 	let lastMotdSignature = "";
+	let motdExpansionTouched = false;
+	let conversationMotdHiddenForHistory = false;
 	let messageListMutationObserver = null;
 	let dragState = null;
 	let imageViewerDragState = null;
@@ -38,6 +55,7 @@
 	let cachedServerLogElement = null;
 	let cachedServerLogRevision = "";
 	let liveSnapshot = {};
+	let walkthroughSnapshotCache = null;
 	let railActionIntent = null;
 	let railJoinPriorityUntil = 0;
 	let lastVoiceJoinRequest = { token: "", time: 0 };
@@ -50,11 +68,17 @@
 	let pendingScopeLoadingTimer = 0;
 	let previewHydrationObserver = null;
 	let previewHydrationTimer = 0;
+	let previewHydrationScrollIdleTimer = 0;
+	let previewHydrationPausedUntil = 0;
+	let messageListScrollActiveUntil = 0;
+	let messageListEnterTimer = 0;
 	let pendingPreviewHydrationIds = new Set();
 	let requestedPreviewHydrationIds = new Set();
 	let modernDialogState = null;
 	let modernDialogRenderedOpen = false;
 	let modernDialogAdvancedPages = {};
+	let modernDialogPendingFieldUpdates = {};
+	let modernDialogLocalFieldValues = {};
 	let audioInputMeterTimer = 0;
 	let voiceCalibrationState = null;
 	let voiceCalibrationSummary = null;
@@ -74,13 +98,24 @@
 	let stonksPopularQuoteCache = {};
 	let stonksPopularQuoteRequests = {};
 	let stonksVisibleRefreshTimer = 0;
+	let stonksTickerScrollFrame = 0;
+	let stonksTickerRenderSignature = "";
+	let stonksEmptyStateRefreshAt = 0;
+	let stonksPendingConfirm = null;
+	let stonksPendingConfirmFocus = false;
+	let messageSearchOpen = false;
+	let messageSearchText = "";
+	let motdDismissedSignature = "";
+	let motdLastSeenSignature = "";
+	let toastStack = null;
+	let toastTimers = {};
 
 	const imageViewerStorageKey = "mumble-modern-image-viewer";
 	const imageViewerMinWidth = 280;
 	const imageViewerMinHeight = 220;
 	const imageViewerViewportMargin = 12;
 	const compactRailBreakpointPx = 940;
-	const reactionPickerScrollCloseGraceMs = 220;
+	const reactionPickerScrollCloseGraceMs = 900;
 	const railActionSuppressMs = 850;
 	const railJoinPriorityMs = 900;
 	const voiceJoinInputDedupeMs = 180;
@@ -91,10 +126,48 @@
 	const linkDenseMessageRenderChunkGroupCount = 8;
 	const linkDenseMessageRenderChunkBudgetMs = 4;
 	const messageRenderLoadingThreshold = 36;
-	const previewHydrationDebounceMs = 80;
-	const previewHydrationBatchSize = 6;
+	const previewHydrationDebounceMs = 120;
+	const previewHydrationScrollIdleMs = 280;
+	const previewHydrationTimelineSettleMs = 650;
+	const previewHydrationViewportMarginPx = 220;
+	const previewHydrationBatchSize = 3;
 	const stonksVisibleRefreshMs = 5 * 60 * 1000;
+	const stonksEmptyStateRefreshMs = 15 * 1000;
 	const stonksPopularQuoteStaleMs = 5 * 60 * 1000;
+	const serverIdentityImageMaxFileBytes = 4 * 1024 * 1024;
+	const serverIdentityImageAccept = "image/*,.png,.jpg,.jpeg,.jpe,.jfif,.pjpeg,.pjp,.webp,.gif,.bmp,.dib,.tif,.tiff,.ico,.cur,.icns,.avif,.heic,.heif,.jxl,.svg,.svgz,.tga,.tpic,.pbm,.pgm,.ppm,.wbmp,.xbm,.xpm";
+	const serverIdentityImageExtensionMime = {
+		avif: "image/avif",
+		bmp: "image/bmp",
+		cur: "image/x-icon",
+		dib: "image/bmp",
+		gif: "image/gif",
+		heic: "image/heic",
+		heif: "image/heif",
+		icns: "image/icns",
+		ico: "image/x-icon",
+		jpe: "image/jpeg",
+		jpeg: "image/jpeg",
+		jfif: "image/jpeg",
+		jpg: "image/jpeg",
+		jxl: "image/jxl",
+		pbm: "image/x-portable-bitmap",
+		pgm: "image/x-portable-graymap",
+		png: "image/png",
+		pjp: "image/jpeg",
+		pjpeg: "image/jpeg",
+		ppm: "image/x-portable-pixmap",
+		svg: "image/svg+xml",
+		svgz: "image/svg+xml",
+		tga: "image/x-tga",
+		tif: "image/tiff",
+		tiff: "image/tiff",
+		tpic: "image/x-tga",
+		wbmp: "image/vnd.wap.wbmp",
+		webp: "image/webp",
+		xbm: "image/x-xbitmap",
+		xpm: "image/x-xpixmap"
+	};
 	const contextMenuViewportMargin = 8;
 	const contextMenuAnchorGap = 4;
 	const inlinePreviewMediaStorageKey = "mumble-modern-inline-preview-media";
@@ -107,6 +180,7 @@
 		conversationHeader: document.querySelector(".conversation-header"),
 		brandTitle: document.getElementById("brand-title"),
 		brandSubtitle: document.getElementById("brand-subtitle"),
+		brandBadge: document.getElementById("brand-badge"),
 		menuBar: document.getElementById("menu-bar"),
 		railToggleButton: document.getElementById("rail-toggle-button"),
 		utilityRail: document.querySelector(".utility-rail"),
@@ -128,8 +202,6 @@
 		settingsButton: document.getElementById("settings-button"),
 		muteButton: document.getElementById("mute-button"),
 		deafButton: document.getElementById("deaf-button"),
-		textRoomCount: document.getElementById("text-room-count"),
-		voiceRoomCount: document.getElementById("voice-room-count"),
 		textRoomList: document.getElementById("text-room-list"),
 		voiceRoomList: document.getElementById("voice-room-list"),
 		scopeTitle: document.getElementById("scope-title"),
@@ -138,6 +210,16 @@
 		stonksLeaderboardHeader: document.getElementById("stonks-leaderboard-header"),
 		conversationMeta: document.getElementById("conversation-meta"),
 		voicePresenceStack: document.getElementById("voice-presence-stack"),
+		msgSearchButton: document.getElementById("msg-search-button"),
+		msgSearchBar: document.getElementById("msg-search-bar"),
+		msgSearchInput: document.getElementById("msg-search-input"),
+		msgSearchCount: document.getElementById("msg-search-count"),
+		msgSearchClose: document.getElementById("msg-search-close"),
+		motdToggle: document.getElementById("motd-toggle"),
+		motdBanner: document.getElementById("motd-banner"),
+		motdBody: document.getElementById("motd-body"),
+		motdCollapse: document.getElementById("motd-collapse"),
+		motdDismiss: document.getElementById("motd-dismiss"),
 		screenShareButton: document.getElementById("screen-share-button"),
 		screenShareCard: document.getElementById("screen-share-card"),
 		screenShareCardStatus: document.getElementById("screen-share-card-status"),
@@ -165,6 +247,13 @@
 		selfCopy: document.querySelector(".self-copy"),
 		selfName: document.getElementById("self-name"),
 		selfStatus: document.getElementById("self-status"),
+		directMessageButton: null,
+		directMessageBadge: null,
+		directMessageSection: null,
+		directMessageList: null,
+		directMessageCount: null,
+		directMessageTray: null,
+		directMessageDock: null,
 		appMenu: document.getElementById("app-menu-popover"),
 		selfMenu: document.getElementById("self-menu-popover"),
 		contextMenu: document.getElementById("context-menu"),
@@ -219,13 +308,34 @@
 	}
 
 	function viewportMatchesCompactRail() {
-		return window.innerWidth <= compactRailBreakpointPx;
+		const widths = [window.innerWidth || compactRailBreakpointPx + 1];
+		const deviceScale = Math.max(window.devicePixelRatio || 1, 1);
+		if (window.mumbleHostViewportWidth > 0) {
+			widths.push(window.mumbleHostViewportWidth);
+		}
+		if (window.outerWidth > 0) {
+			widths.push(window.outerWidth);
+		}
+		if (window.visualViewport && window.visualViewport.width > 0) {
+			widths.push(window.visualViewport.width);
+		}
+		if (deviceScale > 1) {
+			widths.push((window.innerWidth || compactRailBreakpointPx + 1) / deviceScale);
+			if (window.outerWidth > 0) {
+				widths.push(window.outerWidth / deviceScale);
+			}
+			if (window.visualViewport && window.visualViewport.width > 0) {
+				widths.push(window.visualViewport.width / deviceScale);
+			}
+		}
+		return Math.min.apply(Math, widths) <= compactRailBreakpointPx;
 	}
 
 	function applyRailPresentation() {
 		const railOpen = !railCollapsed;
 		refs.appShell.classList.toggle("is-compact-layout", compactViewport);
 		refs.appShell.classList.toggle("rail-is-collapsed", railCollapsed);
+		refs.appShell.classList.toggle("rail-user-opened", compactViewport && railOpen && railOpenedByUser);
 		refs.railToggleButton.classList.toggle("is-active", railOpen);
 		refs.railToggleButton.textContent = compactViewport && railOpen ? "Close" : "Rooms";
 		refs.railToggleButton.title = compactViewport && railOpen ? "Close room browser" : "Open room browser";
@@ -244,6 +354,9 @@
 		}
 
 		railCollapsed = normalized;
+		if (railCollapsed) {
+			railOpenedByUser = false;
+		}
 		if (!railCollapsed) {
 			hideContextMenu();
 			hideSelfMenu();
@@ -255,9 +368,14 @@
 
 	function syncCompactRailState(force) {
 		const nextCompactViewport = viewportMatchesCompactRail();
+		const wasCompactViewport = compactViewport;
 		if (force || nextCompactViewport !== compactViewport) {
 			compactViewport = nextCompactViewport;
 			railCollapsed = compactViewport ? true : false;
+			railOpenedByUser = false;
+			if (wasCompactViewport && !compactViewport) {
+				resetUtilityRailScroll();
+			}
 		}
 		applyRailPresentation();
 	}
@@ -283,6 +401,10 @@
 			listMinHeight: listMinHeight,
 			sectionMinHeight: chromeHeight + listMinHeight
 		};
+	}
+
+	function countRailRoomRows(listElement) {
+		return listElement ? listElement.querySelectorAll(".rail-row").length : 0;
 	}
 
 	function scheduleRailLayoutSync() {
@@ -313,6 +435,17 @@
 		refs.appShell.classList.toggle("rail-has-overflow", overflow > 1);
 		refs.appShell.classList.toggle("rail-note-auto-compacted", railNoteAutoCollapsed);
 		return overflow;
+	}
+
+	function resetUtilityRailScroll() {
+		if (!refs.utilityScroll) {
+			return;
+		}
+
+		if (refs.utilityScroll.scrollTop > 0) {
+			refs.utilityScroll.scrollTop = 0;
+		}
+		syncRailOverflowState();
 	}
 
 	function scheduleActiveRailRowReveal() {
@@ -359,6 +492,23 @@
 		return row ? String(row.dataset.scopeToken || row.dataset.roomLabel || "") : "";
 	}
 
+	function trackActiveRailTokenForReveal(renderedActiveRailToken) {
+		if (!renderedActiveRailToken) {
+			lastActiveRailToken = "";
+			return;
+		}
+
+		if (!lastActiveRailToken) {
+			lastActiveRailToken = renderedActiveRailToken;
+			return;
+		}
+
+		if (renderedActiveRailToken !== lastActiveRailToken) {
+			lastActiveRailToken = renderedActiveRailToken;
+			pendingActiveRailReveal = true;
+		}
+	}
+
 	function syncRailLayout() {
 		if (!refs.appShell || !refs.utilityScroll || !refs.noteCard || !refs.serverSubtitle
 			|| !refs.voiceRoomList || !refs.textRoomList) {
@@ -373,8 +523,8 @@
 		const voiceSection = refs.voiceRoomList.closest(".room-card-block");
 		const textSection = refs.textRoomList.closest(".room-card-block");
 		const sections = [
-			measureRailSection(voiceSection, refs.voiceRoomList, Number(refs.voiceRoomCount.textContent || 0)),
-			measureRailSection(textSection, refs.textRoomList, Number(refs.textRoomCount.textContent || 0))
+			measureRailSection(voiceSection, refs.voiceRoomList, countRailRoomRows(refs.voiceRoomList)),
+			measureRailSection(textSection, refs.textRoomList, countRailRoomRows(refs.textRoomList))
 		].filter(function(entry) {
 			return !!entry;
 		});
@@ -776,12 +926,120 @@
 		}
 
 		const args = Array.prototype.slice.call(arguments, 1);
+		if (method !== "openNativeContextMenu" && method !== "closeNativeContextMenu") {
+			automationBridgeCalls.push({
+				method: String(method || ""),
+				args: args.map(function(arg) {
+					if (arg === null || arg === undefined || typeof arg === "string"
+							|| typeof arg === "number" || typeof arg === "boolean") {
+						return arg;
+					}
+					return String(arg);
+				}),
+				timeMs: Date.now()
+			});
+			if (automationBridgeCalls.length > 32) {
+				automationBridgeCalls = automationBridgeCalls.slice(-32);
+			}
+		}
 		try {
 			modernBridge[method].apply(modernBridge, args);
 			return true;
 		} catch (error) {
 			console.warn("Modern bridge call failed:", method, error);
 			return false;
+		}
+	}
+
+	function ensureToastStack() {
+		if (toastStack && document.body.contains(toastStack)) {
+			return toastStack;
+		}
+
+		toastStack = document.createElement("div");
+		toastStack.className = "toast-stack";
+		toastStack.setAttribute("aria-live", "polite");
+		toastStack.setAttribute("aria-relevant", "additions");
+		document.body.appendChild(toastStack);
+		return toastStack;
+	}
+
+	function removeToast(id) {
+		id = String(id || "");
+		if (!id) {
+			return;
+		}
+		if (toastTimers[id]) {
+			clearTimeout(toastTimers[id]);
+			delete toastTimers[id];
+		}
+		if (!toastStack) {
+			return;
+		}
+		const node = toastStack.querySelector("[data-toast-id=\"" + id.replace(/"/g, "\\\"") + "\"]");
+		if (node) {
+			node.remove();
+		}
+	}
+
+	function showToast(payload) {
+		const toast = payload && typeof payload === "object" ? payload : {};
+		const id = String(toast.id || ("toast-" + Date.now() + "-" + Math.random().toString(36).slice(2)));
+		const kind = String(toast.kind || "info").trim().toLowerCase() || "info";
+		const title = String(toast.title || "");
+		const message = String(toast.message || "");
+		const timeoutMs = Math.max(0, Number(toast.timeoutMs || 4500));
+		const stack = ensureToastStack();
+
+		removeToast(id);
+		const node = document.createElement("section");
+		node.className = "toast is-" + kind;
+		node.dataset.toastId = id;
+		node.setAttribute("role", kind === "error" ? "alert" : "status");
+
+		const copy = document.createElement("div");
+		copy.className = "toast-copy";
+		if (title) {
+			const titleElement = document.createElement("p");
+			titleElement.className = "toast-title";
+			titleElement.textContent = title;
+			copy.appendChild(titleElement);
+		}
+		if (message) {
+			const messageElement = document.createElement("p");
+			messageElement.className = "toast-message";
+			messageElement.textContent = message;
+			copy.appendChild(messageElement);
+		}
+		node.appendChild(copy);
+
+		if (toast.actionId && toast.actionLabel) {
+			const action = document.createElement("button");
+			action.type = "button";
+			action.className = "toast-action";
+			action.textContent = String(toast.actionLabel);
+			action.addEventListener("click", function() {
+				notifyBridge("invokeAppAction", String(toast.actionId));
+				removeToast(id);
+			});
+			node.appendChild(action);
+		}
+
+		const close = document.createElement("button");
+		close.type = "button";
+		close.className = "toast-close";
+		close.textContent = "x";
+		close.setAttribute("aria-label", "Dismiss notification");
+		close.addEventListener("click", function() {
+			removeToast(id);
+		});
+		node.appendChild(close);
+		stack.appendChild(node);
+
+		if (timeoutMs > 0) {
+			toastTimers[id] = setTimeout(function() {
+				removeToast(id);
+			}, timeoutMs);
 		}
 	}
 
@@ -818,6 +1076,10 @@
 							if (modernBridge.financeQuoteResultReady
 									&& typeof modernBridge.financeQuoteResultReady.connect === "function") {
 								modernBridge.financeQuoteResultReady.connect(handleStonksQuoteLookupResult);
+							}
+							if (modernBridge.toastRequested
+									&& typeof modernBridge.toastRequested.connect === "function") {
+								modernBridge.toastRequested.connect(showToast);
 							}
 							syncModernDialogState(modernBridge.modernDialogState || { open: false });
 							notifyBridge("ready");
@@ -856,9 +1118,1627 @@
 		await bridgeLoadPromise;
 	}
 
+	function walkthroughQueryValue(name) {
+		const query = String(window.location && window.location.search || "").replace(/^\?/, "");
+		if (!query) {
+			return "";
+		}
+
+		const pairs = query.split("&");
+		for (let index = 0; index < pairs.length; index += 1) {
+			const pair = pairs[index].split("=");
+			if (decodeURIComponent(pair[0] || "") === name) {
+				return decodeURIComponent(pair.slice(1).join("=") || "");
+			}
+		}
+		return "";
+	}
+
+	function walkthroughAllowedForLocation() {
+		const protocol = String(window.location && window.location.protocol || "");
+		const host = String(window.location && window.location.hostname || "").toLowerCase();
+		return protocol === "file:" || host === "localhost" || host === "127.0.0.1" || host === "::1";
+	}
+
+	function requestedWalkthroughMode() {
+		const value = walkthroughQueryValue("walkthrough") || walkthroughQueryValue("demo");
+		return String(value || "").trim().toLowerCase();
+	}
+
+	function walkthroughAction(id, label, options) {
+		const opts = options || {};
+		return {
+			kind: "action",
+			id: id,
+			label: label,
+			enabled: opts.enabled !== false,
+			checked: !!opts.checked,
+			tone: opts.tone || "",
+			hint: opts.hint || ""
+		};
+	}
+
+	function walkthroughDialogAction(id, label, options) {
+		const opts = options || {};
+		return {
+			kind: "action",
+			id: id,
+			label: label,
+			enabled: opts.enabled !== false,
+			checked: !!opts.checked,
+			tone: opts.tone || "",
+			closesDialog: opts.closesDialog !== false
+		};
+	}
+
+	function walkthroughSeparator() {
+		return { kind: "separator" };
+	}
+
+	function walkthroughField(id, label, type, value, options) {
+		const opts = options || {};
+		const field = {
+			id: id || "",
+			label: label || "",
+			type: type || "text",
+			value: value,
+			enabled: opts.enabled !== false
+		};
+		if (type === "voiceMeter" && value && typeof value === "object" && !Array.isArray(value)) {
+			Object.keys(value).forEach(function(key) {
+				field[key] = value[key];
+			});
+		}
+		["hint", "tooltip", "presentation", "valueType", "browseActionId", "browseLabel", "chooseLabel",
+			"removeLabel", "monospace", "rows", "min", "max", "step", "suffix", "advanced", "actionId",
+			"buttonLabel", "tone"].forEach(function(key) {
+			if (Object.prototype.hasOwnProperty.call(opts, key)) {
+				field[key] = opts[key];
+			}
+		});
+		if (opts.options) {
+			field.options = opts.options;
+		}
+		return field;
+	}
+
+	function walkthroughNote(text) {
+		return { type: "note", text: text || "" };
+	}
+
+	function walkthroughReadonly(label, value, options) {
+		return walkthroughField("", label, "readonly", value, options);
+	}
+
+	function walkthroughSection(title, fields, options) {
+		const opts = options || {};
+		return {
+			title: title || "",
+			subtitle: opts.subtitle || "",
+			presentation: opts.presentation || "",
+			fields: fields || []
+		};
+	}
+
+	function walkthroughHighlight(label, value, tone) {
+		return {
+			label: label || "",
+			value: value == null ? "" : value,
+			tone: tone || ""
+		};
+	}
+
+	function walkthroughDialogBase(id, kind, title, subtitle, options) {
+		const opts = options || {};
+		return {
+			open: true,
+			id: id,
+			kind: kind || "info",
+			eyebrow: opts.eyebrow || "Mumble",
+			title: title || "Dialog",
+			subtitle: subtitle || "",
+			tone: opts.tone || "",
+			primaryActionId: opts.primaryActionId || "close",
+			highlights: opts.highlights || [],
+			pages: opts.pages || [],
+			favorites: opts.favorites || null,
+			sections: opts.sections || [],
+			actions: opts.actions || [
+				walkthroughDialogAction("close", "Close", { tone: "accent" })
+			],
+			errors: opts.errors || {},
+			statusMessage: opts.statusMessage || ""
+		};
+	}
+
+	function walkthroughPreviewImage(title, subtitle, accent, accent2) {
+		const safeTitle = String(title || "Preview").replace(/[<>&]/g, "");
+		const safeSubtitle = String(subtitle || "").replace(/[<>&]/g, "");
+		const svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"960\" height=\"540\" viewBox=\"0 0 960 540\">"
+			+ "<defs><linearGradient id=\"g\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"1\">"
+			+ "<stop offset=\"0\" stop-color=\"" + (accent || "#43c6ac") + "\"/>"
+			+ "<stop offset=\"1\" stop-color=\"" + (accent2 || "#2e86de") + "\"/>"
+			+ "</linearGradient></defs>"
+			+ "<rect width=\"960\" height=\"540\" fill=\"#101823\"/>"
+			+ "<rect x=\"32\" y=\"32\" width=\"896\" height=\"476\" rx=\"28\" fill=\"url(#g)\" opacity=\"0.92\"/>"
+			+ "<circle cx=\"774\" cy=\"128\" r=\"86\" fill=\"#fff\" opacity=\"0.14\"/>"
+			+ "<circle cx=\"168\" cy=\"420\" r=\"118\" fill=\"#000\" opacity=\"0.18\"/>"
+			+ "<text x=\"72\" y=\"266\" font-family=\"Segoe UI, Arial, sans-serif\" font-size=\"54\" "
+			+ "font-weight=\"700\" fill=\"#fff\">" + safeTitle + "</text>"
+			+ "<text x=\"76\" y=\"326\" font-family=\"Segoe UI, Arial, sans-serif\" font-size=\"26\" "
+			+ "fill=\"#dff8ff\" opacity=\"0.92\">" + safeSubtitle + "</text>"
+			+ "</svg>";
+		return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
+	}
+
+	function walkthroughQuote(price, changePercent, currency) {
+		return {
+			ok: true,
+			pending: false,
+			price: price,
+			changePercent: changePercent,
+			currency: currency || "USD",
+			quoteTime: 1780147200
+		};
+	}
+
+	function walkthroughTicker(symbol, name, holders, quantity, marketValue, currency, exchange) {
+		return {
+			symbol: symbol,
+			displayName: name,
+			holderCount: holders,
+			totalQuantity: quantity,
+			totalMarketValue: marketValue,
+			currency: currency || "USD",
+			providerId: "yahoo-finance",
+			providerSymbol: symbol,
+			exchange: exchange || "Nasdaq",
+			quoteSourceUrl: "https://finance.yahoo.com/quote/" + encodeURIComponent(symbol),
+			latestUpdatedAt: 1780147200
+		};
+	}
+
+	function walkthroughParticipant(session, label, options) {
+		const opts = options || {};
+		return {
+			session: session,
+			label: label,
+			scopeToken: opts.scopeToken || "voice:lobby",
+			subtitle: opts.subtitle || "",
+			entryKind: opts.entryKind || "user",
+			isSelf: !!opts.isSelf,
+			talkState: opts.talkState || "passive",
+			canMessage: opts.canMessage !== false,
+			canJoin: !!opts.canJoin,
+			statuses: opts.statuses || [],
+			actions: opts.actions || [
+				walkthroughAction("participant.info", "User information..."),
+				walkthroughAction("participant.message", "Direct message"),
+				walkthroughAction("participant.comment", "View comment..."),
+				walkthroughSeparator(),
+				walkthroughAction("participant.nickname", "Local nickname..."),
+				walkthroughAction("participant.history", "Grant chat history..."),
+				walkthroughSeparator(),
+				walkthroughAction("participant.kick", "Kick...", { tone: "danger" }),
+				walkthroughAction("participant.ban", "Ban...", { tone: "danger" })
+			]
+		};
+	}
+
+	function buildMockupWalkthroughSnapshot() {
+		const messageBaseMs = Date.UTC(2026, 4, 30, 14, 20, 0);
+		const screenShare = {
+			visible: true,
+			mode: "available",
+			scopeToken: "voice:lobby",
+			ownerLabel: "Lobby screen share",
+			statusLabel: "Available",
+			statusTone: "success",
+			badgeLabel: "Live",
+			badgeTone: "success",
+			primaryActionId: "screenShare.start",
+			primaryLabel: "Share screen",
+			primaryTone: "primary",
+			primaryHint: "Share your screen to Lobby",
+			primaryEnabled: true,
+			overflowActions: [
+				walkthroughAction("screenShare.start", "Share screen"),
+				walkthroughAction("screenShare.settings", "Screen sharing settings...")
+			]
+		};
+		const userActions = [
+			walkthroughAction("participant.info", "User information..."),
+			walkthroughAction("participant.message", "Direct message"),
+			walkthroughAction("participant.comment", "View comment..."),
+			walkthroughSeparator(),
+			walkthroughAction("participant.nickname", "Local nickname..."),
+			walkthroughAction("participant.history", "Grant chat history..."),
+			walkthroughSeparator(),
+			walkthroughAction("participant.kick", "Kick...", { tone: "danger" }),
+			walkthroughAction("participant.ban", "Ban...", { tone: "danger" })
+		];
+		const selfActions = [
+			walkthroughAction("self.info", "User information..."),
+			walkthroughAction("self.comment", "My comment..."),
+			walkthroughAction("self.avatar", "Change avatar..."),
+			walkthroughAction("self.resetAvatar", "Reset avatar...", { tone: "danger" }),
+			walkthroughAction("self.register", "Register..."),
+			walkthroughSeparator(),
+			walkthroughAction("self.audioStats", "Audio statistics..."),
+			walkthroughAction("self.voiceRecorder", "Voice recorder..."),
+			walkthroughAction("configure.settings", "Settings..."),
+			walkthroughAction("configure.certificate", "Certificate...")
+		];
+		const you = walkthroughParticipant(1, "You", {
+			isSelf: true,
+			subtitle: "grinding ranked",
+			talkState: "talking",
+			statuses: [{ kind: "talking", label: "Talking", tone: "success" }],
+			actions: selfActions
+		});
+		const kira = walkthroughParticipant(2, "Kira", {
+			subtitle: "queueing ranked",
+			talkState: "talking",
+			statuses: [{ kind: "friend", label: "Friend", tone: "success" }],
+			actions: userActions
+		});
+		const devOps = walkthroughParticipant(3, "Dev_Ops", {
+			subtitle: "redeploying relay",
+			statuses: [{ kind: "authenticated", label: "Authenticated" }],
+			actions: userActions
+		});
+		const nova = walkthroughParticipant(4, "Nova", {
+			scopeToken: "voice:valorant",
+			subtitle: "duelist",
+			actions: userActions
+		});
+		const byte = walkthroughParticipant(5, "Byte", {
+			scopeToken: "voice:valorant",
+			subtitle: "controller",
+			actions: userActions
+		});
+		const rhea = walkthroughParticipant(6, "Rhea", {
+			scopeToken: "voice:valorant",
+			subtitle: "sentinel",
+			actions: userActions
+		});
+		const lux = walkthroughParticipant(7, "Lux", {
+			scopeToken: "voice:valorant",
+			subtitle: "coach",
+			actions: userActions
+		});
+		const zed = walkthroughParticipant(8, "Zed", {
+			scopeToken: "voice:valorant",
+			subtitle: "observer",
+			actions: userActions
+		});
+		const pixel = walkthroughParticipant(9, "Pixel", {
+			scopeToken: "voice:minecraft",
+			subtitle: "building spawn",
+			actions: userActions
+		});
+		const roomActions = [
+			walkthroughAction("room.openChat", "Open chat"),
+			walkthroughAction("room.markRead", "Mark as read"),
+			walkthroughAction("room.muteNotifications", "Mute notifications"),
+			walkthroughAction("room.copyInvite", "Copy invite link"),
+			walkthroughAction("room.shareScreen", "Share screen"),
+			walkthroughSeparator(),
+			walkthroughAction("room.create", "Create room..."),
+			walkthroughAction("room.acl", "Edit room..."),
+			walkthroughAction("room.unlink", "Unlink room..."),
+			walkthroughAction("room.unlinkAll", "Unlink all rooms..."),
+			walkthroughAction("room.remove", "Remove room...", { tone: "danger" })
+		];
+		const stonks = {
+			supported: true,
+			enabled: true,
+			registered: true,
+			canAdmin: true,
+			selfUserId: 1,
+			selectedUserId: 1,
+			selectedUserName: "You",
+			selectedPeriod: "30d",
+			periods: ["1d", "7d", "30d", "ytd"],
+			automationHeaderVisible: true,
+			disableQuoteLookup: true,
+			personalTickers: [
+				walkthroughTicker("RKLB", "Rocket Lab USA", 1, 42, 1192.8, "USD", "Nasdaq"),
+				walkthroughTicker("GME", "GameStop", 1, 12, 290.16, "USD", "NYSE")
+			],
+			popularTickers: [
+				walkthroughTicker("RKLB", "Rocket Lab USA", 4, 113, 3209.2, "USD", "Nasdaq"),
+				walkthroughTicker("GME", "GameStop", 3, 55, 1329.9, "USD", "NYSE"),
+				walkthroughTicker("NVDA", "NVIDIA", 2, 21, 2760.45, "USD", "Nasdaq")
+			],
+			tickerQuotes: {
+				RKLB: walkthroughQuote(28.40, 4.2, "USD"),
+				GME: walkthroughQuote(24.18, 12.6, "USD"),
+				NVDA: walkthroughQuote(131.45, 2.2, "USD")
+			},
+			snapshots: [{
+				snapshotId: 77,
+				userId: 1,
+				userName: "You",
+				createdAt: 1780147200,
+				currency: "USD",
+				totalValue: 8582.64,
+				note: "Walkthrough ledger with live-looking quote metadata.",
+				positionsRedacted: false,
+				positions: [
+					{ symbol: "RKLB", quantity: 42, price: 28.40, marketValue: 1192.8, currency: "USD", displayName: "Rocket Lab USA" },
+					{ symbol: "GME", quantity: 12, price: 24.18, marketValue: 290.16, currency: "USD", displayName: "GameStop" }
+				]
+			}, {
+				snapshotId: 71,
+				userId: 1,
+				userName: "You",
+				createdAt: 1777555200,
+				currency: "USD",
+				totalValue: 7702.10,
+				note: "Baseline update before the weekend run.",
+				positionsRedacted: false,
+				positions: [
+					{ symbol: "RKLB", quantity: 36, price: 23.10, marketValue: 831.6, currency: "USD", displayName: "Rocket Lab USA" },
+					{ symbol: "GME", quantity: 10, price: 21.04, marketValue: 210.4, currency: "USD", displayName: "GameStop" }
+				]
+			}],
+			leaderboard: [
+				{ rank: 1, userId: 2, userName: "Kira", period: "30d", returnPercent: 18.42, followed: true },
+				{ rank: 2, userId: 1, userName: "You", period: "30d", returnPercent: 9.75, followed: false },
+				{ rank: 3, userId: 4, userName: "Nova", period: "30d", returnPercent: -2.35, followed: false }
+			],
+			leaderboardDescription: "Leaderboard ranks only PnL for the selected period.",
+			users: [
+				{ userId: 1, userName: "You", followed: false },
+				{ userId: 2, userName: "Kira", followed: true },
+				{ userId: 4, userName: "Nova", followed: false }
+			],
+			textChannels: [
+				{ textChannelId: 1, name: "stonks" },
+				{ textChannelId: 2, name: "general" },
+				{ textChannelId: 3, name: "clips" }
+			]
+		};
+		const directMessages = {
+			available: true,
+			transport: "persistentChat",
+			persistentHistory: true,
+			persistentHistoryAvailable: true,
+			privateModeAvailable: true,
+			defaultMode: "history",
+			canOpen: true,
+			title: "Direct messages",
+			description: "Direct messages can use persistent history or private in-memory mode.",
+			unreadTotal: 2,
+			hasUnread: true,
+			conversations: [
+				{
+					token: "dm:2",
+					session: 2,
+					peerSession: 2,
+					label: "Kira",
+					subtitle: "In Lobby",
+					open: false,
+					unreadCount: 0,
+					canSend: true,
+					mode: "history",
+					persistentHistory: true,
+					privateMode: false,
+					persistentHistoryAvailable: true,
+					canPersistHistory: true,
+					status: "available",
+					statusLabel: "Direct message",
+					lastActivityAtMs: messageBaseMs + 720000,
+					lastMessagePreview: "dm mockup pass looks clean",
+					lastMessageOwn: false,
+					emptyCopy: "Direct messages with Kira will appear here.",
+					messages: [
+						{ id: "kira-1", localId: 1, peerSession: 2, actorName: "Kira", own: false, direction: "incoming", messageHtml: "hey, can you check the new shell?", plainText: "hey, can you check the new shell?", createdAtMs: messageBaseMs + 600000 },
+						{ id: "kira-2", localId: 2, peerSession: 2, actorName: "You", own: true, direction: "outgoing", messageHtml: "yeah - mapping it against the API walkthrough now", plainText: "yeah - mapping it against the API walkthrough now", createdAtMs: messageBaseMs + 660000 },
+						{ id: "kira-3", localId: 3, peerSession: 2, actorName: "Kira", own: false, direction: "incoming", messageHtml: "dm mockup pass looks clean", plainText: "dm mockup pass looks clean", createdAtMs: messageBaseMs + 720000 }
+					]
+				},
+				{
+					token: "dm:4",
+					session: 4,
+					peerSession: 4,
+					label: "Nova",
+					subtitle: "In Valorant",
+					open: false,
+					unreadCount: 2,
+					canSend: true,
+					mode: "private",
+					persistentHistory: false,
+					privateMode: true,
+					persistentHistoryAvailable: true,
+					canPersistHistory: true,
+					status: "available",
+					statusLabel: "Private direct message",
+					lastActivityAtMs: messageBaseMs + 780000,
+					lastMessagePreview: "private mode needs the ghost badge",
+					lastMessageOwn: false,
+					emptyCopy: "Direct messages with Nova will appear here.",
+					messages: [
+						{ id: "nova-1", localId: 4, peerSession: 4, actorName: "Nova", own: false, direction: "incoming", messageHtml: "private mode needs the ghost badge", plainText: "private mode needs the ghost badge", createdAtMs: messageBaseMs + 780000 }
+					]
+				}
+			],
+			windows: []
+		};
+
+		return {
+			app: {
+				serverEyebrow: "Twinfinity",
+				serverTitle: "Twinfinity",
+				serverSubtitle: "Connected - voice.twinfinity.com - 28 ms",
+				serverAvatarUrl: "",
+				connectionLabel: "28 ms",
+				connectionTone: "success",
+				compatibilityLabel: "Modern server",
+				compatibilityTone: "success",
+				layoutLabel: "Modern",
+				layoutTone: "",
+				canConnect: false,
+				canDisconnect: true,
+				canCreateTextRoom: true,
+				canManageTextChannels: true,
+				voiceRootLabel: "Voice rooms",
+				voiceRootScopeToken: "voice:root",
+				selfName: "You",
+				selfStatusLabel: "grinding ranked",
+				selfStatusTone: "success",
+				selfMuted: false,
+				selfDeafened: false,
+				motdHtml: "<p><strong>Welcome to Twinfinity</strong></p><p>Ranked scrims every night at 21:00 CET in <em>Valorant</em>. Drop clips in <code>#clips</code> and keep <code>#general</code> on-topic.</p><p>New: the Stonks board is live. Pin your plays and climb the PnL leaderboard.</p>",
+				motdSummary: "Ranked scrims, clips, Stonks, and room rules for the weekend.",
+				motdExpanded: true,
+				motdAlwaysVisible: true,
+				uiTweaks: {
+					theme: "dark",
+					density: "comfortable",
+					railSide: "right",
+					tickerBannerAlwaysScroll: true
+				},
+				serverIdentity: {
+					canEdit: true,
+					resolvedMonogram: "T",
+					imageUrl: ""
+				},
+				menus: [
+					{
+						id: "server",
+						label: "Server",
+						items: [
+							walkthroughAction("server.information", "Server information..."),
+							walkthroughAction("server.search", "Search..."),
+							walkthroughAction("server.connect", "Connect to a server...", { enabled: false }),
+							walkthroughAction("server.disconnect", "Disconnect...", { tone: "danger" }),
+							walkthroughSeparator(),
+							walkthroughAction("server.tokens", "Access tokens..."),
+							walkthroughAction("server.users", "Registered users..."),
+							walkthroughAction("server.bans", "Ban list..."),
+							walkthroughAction("server.acl", "Access control (ACL)..."),
+							walkthroughAction("server.settings", "Server settings...")
+						]
+					},
+					{
+						id: "room",
+						label: "Room",
+						items: [
+							walkthroughAction("room.create", "Create room..."),
+							walkthroughAction("stonks.open", "Stonks...")
+						]
+					},
+					{
+						id: "configure",
+						label: "Configure",
+						items: [
+							walkthroughAction("configure.settings", "Settings..."),
+							walkthroughAction("configure.certificate", "Certificate..."),
+							walkthroughAction("self.avatar", "Change avatar...")
+						]
+					},
+					{
+						id: "help",
+						label: "Help",
+						items: [
+							walkthroughAction("help.update", "Check for updates..."),
+							walkthroughAction("help.feedback", "Report feedback..."),
+							walkthroughAction("help.help", "Help"),
+							walkthroughAction("app.quit", "Quit Mumble...", { tone: "danger" })
+						]
+					}
+				],
+				selfMenu: {
+					name: "You",
+					statusLabel: "grinding ranked",
+					statusTone: "success",
+					presence: [
+						walkthroughAction("presence.online", "Online", { checked: true, tone: "success" }),
+						walkthroughAction("presence.away", "Away"),
+						walkthroughAction("presence.busy", "Do not disturb", { tone: "danger" })
+					],
+					actions: selfActions
+				},
+				directMessages: directMessages,
+				stonks: stonks
+			},
+			voiceRooms: [
+				{ token: "voice:lobby", kindLabel: "Voice room", label: "Lobby", description: "General hangout", pathLabel: "Voice rooms / Lobby", selected: true, joined: true, canJoin: true, participants: [you, kira, devOps], actions: roomActions, screenShare: screenShare },
+				{ token: "voice:valorant", kindLabel: "Voice room", label: "Valorant", description: "Ranked scrims - 21:00 CET", pathLabel: "Voice rooms / Valorant", selected: false, joined: false, canJoin: true, participants: [nova, byte, rhea, lux, zed], actions: roomActions },
+				{ token: "voice:minecraft", kindLabel: "Voice room", label: "Minecraft", description: "Survival build", pathLabel: "Voice rooms / Minecraft", selected: false, joined: false, canJoin: true, participants: [pixel], actions: roomActions },
+				{ token: "voice:afk", kindLabel: "Voice room", label: "AFK / Away", description: "", pathLabel: "Voice rooms / AFK / Away", selected: false, joined: false, canJoin: true, participants: [], actions: roomActions }
+			],
+			textRooms: [
+				{ token: "text:general", kindLabel: "Text room", label: "general", description: "Server-wide chatter", selected: false, unreadCount: 3, actions: roomActions },
+				{ token: "text:clips", kindLabel: "Text room", label: "clips", description: "Drop your best plays", selected: false, unreadCount: 1, actions: roomActions },
+				{ token: "text:stonks", kindLabel: "Text room", label: "stonks", description: "Not financial advice", selected: false, unreadCount: 0, actions: roomActions },
+				{ token: "text:rules", kindLabel: "Text room", label: "rules", description: "Read before posting", selected: false, unreadCount: 0, actions: roomActions }
+			],
+			voicePresence: [you, kira, devOps],
+			participants: [you, kira, devOps, nova, byte, rhea, lux, zed, pixel],
+			activeScope: {
+				scopeToken: "voice:lobby",
+				kindLabel: "Voice room",
+				label: "Lobby",
+				description: "General hangout",
+				meta: ["3 in voice", "Persistent history", "28 ms"],
+				canLoadOlder: true,
+				canMarkRead: true,
+				canSend: true,
+				canAttachImages: true,
+				composerPlaceholder: "Message Lobby",
+				composerHint: "Persistent room history stays with Lobby.",
+				screenShare: screenShare,
+				emptyCopy: "No messages in Lobby yet."
+			},
+			messages: [
+				{ messageId: 9001, threadId: 1, createdAtMs: messageBaseMs, actor: "Kira", actorKey: "kira", timeLabel: "14:21", bodyText: "anyone up for ranked tonight?\ni can host", bodyHtml: "anyone up for ranked tonight?<br>i can host", own: false, system: false, canReply: true, canReact: true, canDelete: false, reactions: [] },
+				{ messageId: 9002, threadId: 1, createdAtMs: messageBaseMs + 120000, actor: "Dev_Ops", actorKey: "dev_ops", timeLabel: "14:23", bodyText: "give me 10, redeploying the relay", bodyHtml: "give me 10, redeploying the relay", own: false, system: false, canReply: true, canReact: true, canDelete: false, reactions: [{ emoji: "ship", count: 2, selfReacted: false }] },
+				{ messageId: 9003, threadId: 1, createdAtMs: messageBaseMs + 240000, actor: "Kira", actorKey: "kira", timeLabel: "14:24", replyActor: "Dev_Ops", replySnippet: "give me 10, redeploying the relay", bodyText: "no rush - found this while waiting\nhttps://youtu.be/dQw4w9WgXcQ", bodyHtml: "no rush - found this while waiting<br>https://youtu.be/dQw4w9WgXcQ", own: false, system: false, canReply: true, canReact: true, canDelete: false, reactions: [], preview: { kind: "link", url: "https://youtu.be/dQw4w9WgXcQ", title: "Cellist sets off the most FIRE jam ever", subtitle: "YouTube", description: "Embedded video card with playback controls.", thumbnailUrl: walkthroughPreviewImage("YouTube preview", "Lobby watch party", "#d93a35", "#101823"), openLabel: "Open on YouTube", previewSize: "large" } },
+				{ messageId: 9004, threadId: 1, createdAtMs: messageBaseMs + 300000, actor: "You", actorKey: "you", timeLabel: "14:25", bodyText: "lol that's unreal\nok relay is back - joining Lobby", bodyHtml: "lol that's unreal<br>ok relay is back - joining Lobby", own: true, system: false, canReply: true, canReact: true, canDelete: true, reactions: [{ emoji: "check", count: 1, selfReacted: true }] },
+				{ messageId: 9005, threadId: 1, createdAtMs: messageBaseMs + 420000, actor: "preview-bot", actorKey: "preview-bot", timeLabel: "14:27", bodyText: "Mockup previews should feel native in chat", bodyHtml: "Mockup previews should feel native in chat", own: false, system: false, canReply: true, canReact: true, canDelete: true, reactions: [], preview: { kind: "link", url: "https://x.com/dankpreview/status/1790000000000000000", title: "Mockup previews should feel native in chat", subtitle: "dankpreview", description: "A social card with post text, media, metrics, and source chrome.", thumbnailUrl: walkthroughPreviewImage("X preview", "Social post media", "#14171a", "#1d9bf0"), openLabel: "Open on X", metadata: { xHandle: "@dankpreview", xDisplayName: "Dank Preview", xLikeCount: 362000, xViewCount: 8100000 } } },
+				{ messageId: 9006, threadId: 1, createdAtMs: messageBaseMs + 540000, actor: "preview-bot", actorKey: "preview-bot", timeLabel: "14:29", bodyText: "Attached image from chat composer", bodyHtml: "Attached image from chat composer", own: false, system: false, canReply: true, canReact: true, canDelete: true, reactions: [], preview: { kind: "image", url: "https://example.com/local-image", title: "Inline image", subtitle: "Local chat attachment", description: "Image preview state from the walkthrough snapshot.", mediaUrl: walkthroughPreviewImage("Inline image", "Local chat attachment", "#43c6ac", "#2e86de"), mediaMime: "image/svg+xml", openLabel: "Open image", previewSize: "default" } }
+			]
+		};
+	}
+
+	function mockupWalkthroughDialogState(name) {
+		name = String(name || "").trim().toLowerCase();
+		if (!name || !walkthroughAllowedForLocation() || requestedWalkthroughMode() !== "mockup") {
+			return null;
+		}
+
+		const close = walkthroughDialogAction("close", "Close", { tone: "accent" });
+		const cancel = walkthroughDialogAction("cancel", "Cancel");
+		const snapshot = fallbackWalkthroughSnapshot() || buildMockupWalkthroughSnapshot();
+		const stonks = snapshot.app && snapshot.app.stonks ? snapshot.app.stonks : {};
+		const select = function(label, value) {
+			return { label: label, value: value, enabled: true };
+		};
+		const aclValue = function() {
+			return {
+				inheritAcls: true,
+				password: "scrim-night",
+				activeTab: "rules",
+				permissions: [
+					{ id: 1, label: "Write" },
+					{ id: 2, label: "Traverse" },
+					{ id: 4, label: "Enter" },
+					{ id: 8, label: "Speak" },
+					{ id: 16, label: "Mute/deafen" },
+					{ id: 32, label: "Move" }
+				],
+				groups: [
+					{ name: "auth", inherit: true, inheritable: true, inherited: true, add: [], remove: [], inheritedMembers: [1, 2, 3] },
+					{ name: "scrim-team", inherit: false, inheritable: true, inherited: false, add: [1, 2, 4, 7], remove: [] }
+				],
+				acls: [
+					{ targetType: "group", target: "all", inherited: true, applyHere: true, applySubs: true, allow: [2], deny: [1], expanded: false },
+					{ targetType: "group", target: "scrim-team", inherited: false, applyHere: true, applySubs: false, allow: [1, 2, 4, 8], deny: [], expanded: true },
+					{ targetType: "user", target: "Kira", userId: 2, inherited: false, applyHere: true, applySubs: true, allow: [16, 32], deny: [] }
+				]
+			};
+		};
+		const settingsPage = function() {
+			const raw = String(walkthroughQueryValue("page") || walkthroughQueryValue("settingsPage") || "audioInput")
+				.trim()
+				.toLowerCase()
+				.replace(/[\s_-]+/g, "");
+			const aliases = {
+				audio: "audioInput",
+				audioinput: "audioInput",
+				input: "audioInput",
+				audiooutput: "audioOutput",
+				output: "audioOutput",
+				appearance: "look",
+				look: "look",
+				ui: "ui",
+				userinterface: "ui",
+				interface: "ui",
+				messages: "messages",
+				sounds: "messages",
+				messagessounds: "messages",
+				messagesandsounds: "messages",
+				keys: "keys",
+				keybindings: "keys",
+				network: "network",
+				about: "about"
+			};
+			return aliases[raw] || "audioInput";
+		};
+		const settingsPages = function(activePage) {
+			return [
+				{ id: "audioInput", label: "Audio Input", selected: activePage === "audioInput" },
+				{ id: "audioOutput", label: "Audio Output", selected: activePage === "audioOutput" },
+				{ id: "look", label: "Appearance", selected: activePage === "look" },
+				{ id: "ui", label: "User Interface", selected: activePage === "ui" },
+				{ id: "messages", label: "Messages & Sounds", selected: activePage === "messages" },
+				{ id: "keys", label: "Key Bindings", selected: activePage === "keys" },
+				{ id: "network", label: "Network", selected: activePage === "network" },
+				{ id: "about", label: "About", selected: activePage === "about" }
+			];
+		};
+		const settingsSections = function(activePage) {
+			if (activePage === "look") {
+				return [
+					walkthroughSection("Theme", [
+						walkthroughField("look.modernTheme", "Theme", "select", "dark", { valueType: "string",
+							options: [select("Dark", "dark"), select("Light", "light"), select("Mocha", "mocha"),
+								select("Macchiato", "macchiato"), select("Frappe", "frappe"), select("Latte", "latte"),
+								select("Nord", "nord"), select("Gruvbox", "gruvbox")] }),
+						walkthroughField("look.modernAccent", "Accent", "select", "teal", { valueType: "string",
+							options: [select("Auto", "auto"), select("Teal", "teal"), select("Blue", "blue"),
+								select("Violet", "violet"), select("Amber", "amber"), select("Rose", "rose")] })
+					]),
+					walkthroughSection("Layout", [
+						walkthroughField("look.roomBrowserLayout", "Room browser layout", "select", "roster", { valueType: "string",
+							options: [select("Tree", "tree"), select("Rooms", "rooms"), select("Roster", "roster")] }),
+						walkthroughField("look.modernRailSide", "Rail side", "select", "right", { valueType: "string",
+							options: [select("Left", "left"), select("Right", "right")] }),
+						walkthroughField("look.modernDensity", "Density", "select", "comfortable", { valueType: "string",
+							options: [select("Compact", "compact"), select("Comfortable", "comfortable"),
+								select("Spacious", "spacious")] }),
+						walkthroughField("look.modernClassicUserIcons", "Use classic user icons", "checkbox", false)
+					])
+				];
+			}
+			if (activePage === "ui") {
+				return [
+					walkthroughSection("Window behavior", [
+						walkthroughField("look.quitBehavior", "Close button", "select", "ask", { valueType: "string",
+							options: [select("Ask", "ask"), select("Minimize to tray", "tray"), select("Quit", "quit")] }),
+						walkthroughField("look.hideInTray", "Hide in tray when minimized", "checkbox", true),
+						walkthroughField("look.alwaysOnTop", "Always on top", "select", "never", { valueType: "string",
+							options: [select("Never", "never"), select("Always", "always"), select("When active", "active")] })
+					]),
+					walkthroughSection("Room browser", [
+						walkthroughField("look.showVolumeAdjustments", "Show local volume badges", "checkbox", true),
+						walkthroughField("look.presenceIdleTimeout", "Idle presence timeout", "number", 10, { min: 1, max: 240, suffix: " min" })
+					])
+				];
+			}
+			if (activePage === "messages") {
+				return [
+					walkthroughSection("Chat", [
+						walkthroughField("network.linkPreviews", "Link previews", "checkbox", true),
+						walkthroughField("messages.enterToSend", "Enter sends message", "checkbox", true)
+					]),
+					walkthroughSection("Sounds", [
+						walkthroughField("audio.cuePtt", "Push-to-talk cue", "checkbox", true),
+						walkthroughField("audio.cueVad", "Voice activity cue", "checkbox", false),
+						walkthroughField("audio.muteCue", "Mute cue", "checkbox", true),
+						walkthroughField("audio.cueOnPath", "Transmit cue on", "pathPicker", "C:/Sounds/on.wav", {
+							browseActionId: "browseCueOn",
+							browseLabel: "Browse"
+						})
+					])
+				];
+			}
+			if (activePage === "keys") {
+				return [
+					walkthroughSection("Shortcut controls", [
+						walkthroughField("keys.globalShortcuts", "Enable global shortcuts", "checkbox", true)
+					]),
+					walkthroughSection("Configured shortcuts", [
+						{
+							id: "keys.shortcuts",
+							label: "Shortcuts",
+							type: "shortcutEditor",
+							enabled: true,
+							canCapture: true,
+							canSuppress: true,
+							actionOptions: [
+								select("Unassigned", -1),
+								select("Push-to-Talk", 0),
+								select("Mute Self", 2),
+								select("Deafen Self", 3),
+								select("Whisper/Shout", 12),
+								select("Toggle search dialog", 32),
+								select("Send Text Message", 24)
+							],
+							toggleOptions: [
+								select("Off", -1),
+								select("Toggle", 0),
+								select("On", 1)
+							],
+							targetOptions: [
+								select("Current channel", "current"),
+								select("Current selection", "selection"),
+								select("Root", "root")
+							],
+							targetModeOptions: [
+								select("Current selection", "selection"),
+								select("List of users", "users"),
+								select("Channel", "channel")
+							],
+							targetChannelOptions: [
+								select("Current", -3),
+								select("Root", -1),
+								select("Parent", -2),
+								select("Current / Subchannel #1", -4),
+								select("Parent / Subchannel #1", -12),
+								select("VC Root / AFK", 1),
+								select("VC Root / Moneyhaters", 2)
+							],
+							targetUserOptions: [
+								select("Kira", "hash-kira"),
+								select("Nova", "hash-nova"),
+								select("dänkmäster", "hash-dank")
+							],
+							channelOptions: [
+								select("Root", 0),
+								select("VC Root / AFK", 1),
+								select("VC Root / Moneyhaters", 2)
+							],
+							rows: [
+								{ index: 0, actionIndex: 0, actionLabel: "Push-to-Talk", dataType: "none", dataLabel: "No data", inputLabel: "Mouse 4", assigned: true, suppress: false },
+								{ index: 1, actionIndex: 2, actionLabel: "Mute Self", dataType: "toggle", dataValue: 0, dataLabel: "Toggle", inputLabel: "Ctrl+Shift+M", assigned: true, suppress: true },
+								{ index: 2, actionIndex: 3, actionLabel: "Deafen Self", dataType: "toggle", dataValue: 0, dataLabel: "Toggle", inputLabel: "Ctrl+Shift+D", assigned: true, suppress: true },
+								{ index: 3, actionIndex: 24, actionLabel: "Send Text Message", dataType: "text", dataValue: "brb", dataLabel: "brb", inputLabel: "Ctrl+Enter", assigned: true, suppress: false },
+								{
+									index: 4,
+									actionIndex: 12,
+									actionLabel: "Whisper/Shout",
+									dataType: "target",
+									dataValue: "channel",
+									dataLabel: "VC Root / Moneyhaters",
+									target: {
+										mode: "channel",
+										channelId: 2,
+										channelLabel: "VC Root / Moneyhaters",
+										group: "raid",
+										links: true,
+										children: true,
+										forceCenter: false,
+										users: [],
+										summary: "VC Root / Moneyhaters"
+									},
+									inputLabel: "Alt+W",
+									assigned: true,
+									suppress: false
+								},
+								{ index: 5, actionIndex: -1, actionLabel: "New shortcut", dataType: "none", dataLabel: "No data", inputLabel: "Not assigned", assigned: false, suppress: false, capturing: true }
+							]
+						}
+					]),
+					walkthroughSection("Additional shortcut engines", [
+						walkthroughField("keys.enableUiAccess", "Enable shortcuts in privileged applications", "checkbox", true, { advanced: true }),
+						walkthroughField("keys.enableGKey", "Enable GKey", "checkbox", false, { advanced: true }),
+						walkthroughField("keys.enableXboxInput", "Enable XInput", "checkbox", true, { advanced: true })
+					])
+				];
+			}
+			if (activePage === "network") {
+				return [
+					walkthroughSection("Connection", [
+						walkthroughField("network.autoReconnect", "Reconnect automatically", "checkbox", true),
+						walkthroughField("network.autoConnect", "Connect to last server on startup", "checkbox", true),
+						walkthroughField("network.tcpMode", "Force TCP mode", "checkbox", false),
+						walkthroughField("network.qos", "Use Quality of Service", "checkbox", true)
+					]),
+					walkthroughSection("Proxy and privacy", [
+						walkthroughField("network.proxyType", "Proxy type", "select", "none", { valueType: "string",
+							options: [select("None", "none"), select("HTTP", "http"), select("SOCKS5", "socks5")] }),
+						walkthroughField("network.suppressIdentity", "Suppress certificate identity", "checkbox", false),
+						walkthroughField("network.hideOS", "Hide operating system", "checkbox", false)
+					])
+				];
+			}
+			if (activePage === "about") {
+				return [
+					walkthroughSection("Mumble", [
+						walkthroughReadonly("Version", "Local development build"),
+						walkthroughReadonly("Architecture", "x64"),
+						walkthroughField("about.openMumble", "Project, license, and credits", "button",
+							"Open About Mumble", {
+								actionId: "about.openMumble",
+								buttonLabel: "Open About Mumble",
+								tone: "accent"
+							})
+					]),
+					walkthroughSection("Qt runtime", [
+						walkthroughReadonly("Qt version", "Qt WebEngine runtime"),
+						walkthroughReadonly("Operating system", "Windows"),
+						walkthroughField("about.openQt", "Qt details", "button", "Open About Qt", {
+							actionId: "about.openQt",
+							buttonLabel: "Open About Qt"
+						})
+					])
+				];
+			}
+			return [
+				walkthroughSection("Device", [
+					walkthroughField("audio.inputDevice", "Input device", "select", "default", {
+						valueType: "string",
+						options: [select("Default - Realtek", "default"), select("Yeti X", "yeti"),
+							select("Elgato Wave:3", "wave"), select("Virtual Cable", "virtual")]
+					}),
+					walkthroughField("audio.transmit", "Transmission", "select", "vad", {
+						valueType: "string",
+						options: [select("Voice activity", "vad"), select("Push-to-talk", "ptt"),
+							select("Continuous", "continuous")]
+					})
+				]),
+				walkthroughSection("Voice activity", [
+					walkthroughField("audio.inputLevel", "Input level", "voiceMeter", { level: 28, peak: 54, transmitting: false, source: "Default - Realtek" }),
+					walkthroughField("audio.vadMin", "Silence below", "range", 30, { min: 0, max: 100, suffix: "%" }),
+					walkthroughField("audio.vadMax", "Speech above", "range", 52, { min: 0, max: 100, suffix: "%" })
+				]),
+				walkthroughSection("Processing", [
+					walkthroughField("audio.cleanup", "Noise cleanup", "select", "neural", {
+						valueType: "string",
+						options: [select("Off", "off"), select("Speex", "speex"), select("Neural cleanup", "neural")]
+					}),
+					walkthroughField("audio.agc", "Automatic gain", "checkbox", true)
+				])
+			];
+		};
+
+		if (name === "settings") {
+			const activeSettingsPage = settingsPage();
+			return walkthroughDialogBase("settings", "settings", "Settings", "", {
+				eyebrow: "Settings",
+				primaryActionId: "done",
+				pages: settingsPages(activeSettingsPage),
+				sections: settingsSections(activeSettingsPage),
+				actions: [cancel, walkthroughDialogAction("done", "Done", { tone: "accent" })]
+			});
+		}
+
+		if (name === "stonks") {
+			const requestedTab = String(walkthroughQueryValue("tab") || "").trim().toLowerCase();
+			if (["overview", "ledger", "portfolio", "leaderboard", "following", "audit", "admin"].indexOf(requestedTab) >= 0) {
+				stonksActiveTab = requestedTab === "portfolio" ? "ledger" : requestedTab;
+			}
+			return Object.assign(walkthroughDialogBase("stonks", "stonks", "Stonks", "Ledger, leaderboard, following, and server settings.", {
+				primaryActionId: "close",
+				tone: "wide",
+				actions: [close]
+			}), { stonks: stonks });
+		}
+
+		if (name === "server-info" || name === "server-information") {
+			return walkthroughDialogBase("serverInformation", "info", "Server information", "Current server details and advertised limits.", {
+				highlights: [walkthroughHighlight("Status", "Connected", "good"), walkthroughHighlight("Codec", "Opus")],
+				sections: [walkthroughSection("Server", [
+					walkthroughReadonly("Name", "Twinfinity"),
+					walkthroughReadonly("Version", "Mumble 1.7.0 DEV"),
+					walkthroughReadonly("Uptime", "3 days, 4 hours"),
+					walkthroughReadonly("Users", "9 / 100"),
+					walkthroughReadonly("Max bitrate", "72 kbit/s")
+				], { presentation: "list" })]
+			});
+		}
+
+		if (name === "search" || name === "message-search") {
+			return walkthroughDialogBase("search", "form", "Search", "Search messages, rooms, and users on the current server.", {
+				primaryActionId: "search",
+				highlights: [walkthroughHighlight("Scope", "Twinfinity"), walkthroughHighlight("Results", 4)],
+				sections: [
+					walkthroughSection("Query", [
+						walkthroughField("search.query", "Search for", "text", "ranked relay"),
+						walkthroughField("search.scope", "Scope", "select", "messages", { valueType: "string",
+							options: [select("Messages", "messages"), select("Rooms", "rooms"), select("Users", "users")] }),
+						walkthroughField("search.regex", "Regular expression", "checkbox", false)
+					]),
+					walkthroughSection("Results", [
+						walkthroughField("search.results", "", "resultList", [
+							{ type: "room", id: 1, index: 0, title: "Lobby", subtitle: "Voice room - 3 matching messages", primaryAction: "Open", secondaryAction: "Join" },
+							{ type: "room", id: 2, index: 1, title: "#general", subtitle: "Text room - 2 matching messages", primaryAction: "Open", secondaryAction: "Open" },
+							{ type: "user", id: 2, index: 2, title: "Kira", subtitle: "Mentioned ranked tonight", primaryAction: "Open", secondaryAction: "Message" },
+							{ type: "user", id: 3, index: 3, title: "Dev_Ops", subtitle: "Relay deployment thread", primaryAction: "Open", secondaryAction: "Message" }
+						])
+					])
+				],
+				actions: [cancel, walkthroughDialogAction("search", "Search", { tone: "accent" })]
+			});
+		}
+
+		if (name === "connect") {
+			return walkthroughDialogBase("connect", "connect", "Connect to a server", "Choose a saved server or add one.", {
+				primaryActionId: "connect",
+				favorites: [
+					{ id: "twinfinity", label: "Twinfinity", subtitle: "voice.twinfinity.com:64738 / You", selected: true,
+						stats: [{ label: "Users", value: "9/50" }, { label: "Ping", value: "28 ms" }] },
+					{ id: "scrimhub", label: "Scrim Hub EU", subtitle: "eu.scrimhub.gg:64738 / You",
+						stats: [{ label: "Users", value: "142/50" }, { label: "Ping", value: "41 ms" }] },
+					{ id: "basement", label: "Basement LAN", subtitle: "10.0.0.4:64738 / You",
+						stats: [{ label: "Users", value: "0/50" }, { label: "Ping", value: "3 ms" }] }
+				],
+				sections: [walkthroughSection("Add server", [
+					walkthroughField("connect.host", "Address", "text", "", { hint: "voice.example.com" }),
+					walkthroughField("connect.port", "Port", "number", 64738),
+					walkthroughField("connect.nick", "Nickname", "text", "You"),
+					walkthroughField("connect.password", "Password", "password", "")
+				])],
+				actions: [cancel, walkthroughDialogAction("edit", "Edit"), walkthroughDialogAction("connect", "Connect", { tone: "accent" })]
+			});
+		}
+
+		if (name === "disconnect") {
+			return walkthroughDialogBase("disconnect", "confirm", "Disconnect", "Disconnect from this server?", {
+				primaryActionId: "disconnect",
+				tone: "danger",
+				sections: [walkthroughSection("Confirmation", [
+					walkthroughReadonly("Server", "Twinfinity"),
+					walkthroughNote("Voice, text, screen sharing, and room state will leave the current server.")
+				])],
+				actions: [cancel, walkthroughDialogAction("disconnect", "Disconnect", { tone: "danger" })]
+			});
+		}
+
+		if (name === "tokens") {
+			return walkthroughDialogBase("tokens", "form", "Access tokens", "Manage temporary access tokens for the current server.", {
+				highlights: [walkthroughHighlight("Saved tokens", 2), walkthroughHighlight("Scope", "Current server")],
+				primaryActionId: "saveTokens",
+				sections: [walkthroughSection("Tokens", [
+					walkthroughField("token.1", "Token 1", "text", "design-review-token"),
+					walkthroughField("token.2", "Token 2", "text", "temporary-event-pass"),
+					walkthroughNote("Access tokens are saved for this server and sent with future reconnects.")
+				])],
+				actions: [cancel, walkthroughDialogAction("addToken", "Add token"), walkthroughDialogAction("saveTokens", "Save tokens", { tone: "accent" })]
+			});
+		}
+
+		if (name === "users" || name === "registered-users") {
+			return walkthroughDialogBase("registeredUsers", "info", "Registered users", "Registered accounts on this server.", {
+				highlights: [walkthroughHighlight("Registered", 5), walkthroughHighlight("Shown", 5), walkthroughHighlight("Mode", "Read only")],
+				sections: [
+					walkthroughSection("Kira", [walkthroughReadonly("User ID", 1), walkthroughReadonly("Last seen", "Online now"), walkthroughReadonly("Certificate", "Verified")], { presentation: "records" }),
+					walkthroughSection("Dev_Ops", [walkthroughReadonly("User ID", 2), walkthroughReadonly("Last seen", "Online now"), walkthroughReadonly("Certificate", "Verified")], { presentation: "records" }),
+					walkthroughSection("Nova", [walkthroughReadonly("User ID", 3), walkthroughReadonly("Last seen", "2h ago"), walkthroughReadonly("Certificate", "Verified")], { presentation: "records" })
+				]
+			});
+		}
+
+		if (name === "bans" || name === "ban-list") {
+			return walkthroughDialogBase("banList", "info", "Ban list", "Read-only Modern view of the server ban list.", {
+				highlights: [walkthroughHighlight("Active bans", 2), walkthroughHighlight("Mode", "Read only")],
+				sections: [
+					walkthroughSection("203.0.113.x", [walkthroughReadonly("Username", "spammer_99"), walkthroughReadonly("Reason", "Advertising"), walkthroughReadonly("Expires", "2026-06-02")], { presentation: "records" }),
+					walkthroughSection("198.51.100.x", [walkthroughReadonly("Username", "rage_quit"), walkthroughReadonly("Reason", "Harassment"), walkthroughReadonly("Expires", "Never")], { presentation: "records" })
+				]
+			});
+		}
+
+		if (name === "acl" || name === "room-acl") {
+			return walkthroughDialogBase("acl", "form", "Edit room", "Manage room details, inherited groups, and explicit access rules.", {
+				primaryActionId: "saveAcl",
+				tone: "wide",
+				highlights: [walkthroughHighlight("Room", "Lobby"), walkthroughHighlight("Rules", 3), walkthroughHighlight("Password", "Set")],
+				sections: [walkthroughSection("Room details", [
+					walkthroughField("channel.name", "Name", "text", "Lobby"),
+					walkthroughField("channel.description", "Topic", "textarea", "Main voice lobby.", { rows: 4 }),
+					walkthroughField("channel.position", "Order", "number", 0),
+					walkthroughField("channel.maxUsers", "Max users", "number", 0)
+				]), walkthroughSection("Access control", [
+					walkthroughField("acl.model", "ACL", "aclEditor", aclValue())
+				])],
+				actions: [cancel, walkthroughDialogAction("saveAcl", "Save room", { tone: "accent" })]
+			});
+		}
+
+		if (name === "create-room" || name === "room-create-room") {
+			return walkthroughDialogBase("createRoom", "form", "Create room", "Create a voice room or persistent text room without leaving Modern layout.", {
+				primaryActionId: "createRoom",
+				sections: [walkthroughSection("Room", [
+					walkthroughField("room.type", "Type", "select", "voice", { valueType: "string",
+						options: [select("Voice room", "voice"), select("Text room", "text")] }),
+					walkthroughField("room.name", "Name", "text", "Demo room"),
+					walkthroughField("room.description", "Topic", "textarea", "Modern UI review room created from walkthrough.", { rows: 3 }),
+					walkthroughField("room.parent", "Parent room", "select", "root", { valueType: "string",
+						options: [select("Root", "root"), select("Lobby", "lobby"), select("Valorant", "valorant"),
+							select("general", "general"), select("clips", "clips")] }),
+					walkthroughField("room.temporary", "Temporary", "checkbox", false)
+				])],
+				actions: [cancel, walkthroughDialogAction("createRoom", "Create", { tone: "accent" })]
+			});
+		}
+
+		if (name === "self-user-information" || name === "member-user-information" || name === "user-information" || name === "user-info") {
+			const isSelf = name.indexOf("self") === 0;
+			const userName = isSelf ? "You" : "Kira";
+			return walkthroughDialogBase(isSelf ? "selfUserInformation" : "userInformation", "info", "User information", "Identity, certificate, and server registration details.", {
+				highlights: [walkthroughHighlight("User", userName), walkthroughHighlight("Session", isSelf ? 1 : 2), walkthroughHighlight("Status", "Online", "good")],
+				sections: [
+					walkthroughSection("Identity", [
+						walkthroughReadonly("Name", userName),
+						walkthroughReadonly("User ID", isSelf ? 1 : 2),
+						walkthroughReadonly("Session", isSelf ? 1 : 2),
+						walkthroughReadonly("Hash", "7b51901e...a4", { monospace: true })
+					], { presentation: "list" }),
+					walkthroughSection("Connection", [
+						walkthroughReadonly("Channel", "Lobby"),
+						walkthroughReadonly("Online time", "42 min"),
+						walkthroughReadonly("Authenticated", "Yes")
+					], { presentation: "records" })
+				],
+				actions: [close, walkthroughDialogAction("messageUser", "Message", { tone: "accent" })]
+			});
+		}
+
+		if (name === "self-comment" || name === "member-comment" || name === "user-comment") {
+			const editingSelf = name.indexOf("self") === 0;
+			return walkthroughDialogBase(editingSelf ? "selfComment" : "userComment", "form", editingSelf ? "My comment" : "User comment", "Edit rich text that appears in user information.", {
+				primaryActionId: "saveComment",
+				sections: [walkthroughSection("Comment", [
+					walkthroughReadonly("User", editingSelf ? "You" : "Kira"),
+					walkthroughField("comment.body", "Comment", "textarea", "<p>Ranked queue, relay ops, and weekend scrims.</p>", { rows: 6 }),
+					walkthroughField("comment.preview", "Preview HTML", "checkbox", true)
+				])],
+				actions: [cancel, walkthroughDialogAction("resetComment", "Reset", { tone: "danger" }), walkthroughDialogAction("saveComment", "Save", { tone: "accent" })]
+			});
+		}
+
+		if (name === "self-change-avatar" || name === "member-change-avatar") {
+			const member = name === "member-change-avatar";
+			return walkthroughDialogBase(member ? "memberChangeAvatar" : "selfChangeAvatar", "form", "Change Avatar", "Choose a new server-side avatar for " + (member ? "Kira" : "You") + ".", {
+				primaryActionId: "applyAvatar",
+				sections: [walkthroughSection("Avatar", [
+					walkthroughReadonly("User", member ? "Kira" : "You"),
+					walkthroughField("avatar.path", "Image file", "pathPicker", "", {
+						browseActionId: "browseAvatar",
+						browseLabel: "Browse",
+						hint: "Choose a PNG or JPEG image to upload as a server avatar."
+					})
+				])],
+				actions: [cancel, walkthroughDialogAction("applyAvatar", "Apply avatar", { tone: "accent" })]
+			});
+		}
+
+		if (name === "self-reset-avatar" || name === "member-reset-avatar") {
+			const member = name === "member-reset-avatar";
+			return walkthroughDialogBase(member ? "memberResetAvatar" : "selfResetAvatar", "confirm", "Reset avatar", "Remove the server-side avatar for " + (member ? "Kira" : "You") + "?", {
+				primaryActionId: "resetAvatar",
+				tone: "danger",
+				sections: [walkthroughSection("Confirmation", [
+					walkthroughReadonly("User", member ? "Kira" : "You"),
+					walkthroughNote("The avatar will be removed from the server and replaced by the generated initials avatar.")
+				])],
+				actions: [cancel, walkthroughDialogAction("resetAvatar", "Reset avatar", { tone: "danger" })]
+			});
+		}
+
+		if (name === "reset-comment") {
+			return walkthroughDialogBase("resetComment", "confirm", "Reset comment", "Clear the stored user comment?", {
+				primaryActionId: "resetComment",
+				tone: "danger",
+				sections: [walkthroughSection("Confirmation", [
+					walkthroughReadonly("User", "Kira"),
+					walkthroughNote("The saved comment HTML will be removed from the server.")
+				])],
+				actions: [cancel, walkthroughDialogAction("resetComment", "Reset comment", { tone: "danger" })]
+			});
+		}
+
+		if (name === "self-register" || name === "register") {
+			return walkthroughDialogBase("selfRegister", "confirm", "Register", "Register your current certificate with this server?", {
+				primaryActionId: "register",
+				highlights: [walkthroughHighlight("User", "You"), walkthroughHighlight("Server", "Twinfinity")],
+				sections: [walkthroughSection("Registration", [
+					walkthroughReadonly("Name", "You"),
+					walkthroughReadonly("Certificate", "7B:51:90:1E:...:A4", { monospace: true }),
+					walkthroughNote("Registration lets server admins grant persistent permissions to this identity.")
+				])],
+				actions: [cancel, walkthroughDialogAction("register", "Register", { tone: "accent" })]
+			});
+		}
+
+		if (name === "audio-statistics") {
+			return walkthroughDialogBase("audioStatistics", "info", "Audio statistics", "Live input, packet, and jitter diagnostics for the selected user.", {
+				highlights: [walkthroughHighlight("User", "You"), walkthroughHighlight("Signal", "-18 dB", "good"), walkthroughHighlight("Jitter", "2 ms")],
+				sections: [
+					walkthroughSection("Input", [
+						walkthroughField("audio.meter", "Voice level", "voiceMeter", { level: 74, peak: 91, transmitting: true, source: "Yeti X" }),
+						walkthroughReadonly("Audio bandwidth", "72 kbit/s"),
+						walkthroughReadonly("Packets lost", "0.2%")
+					]),
+					walkthroughSection("Network", [
+						walkthroughReadonly("Ping", "28 ms"),
+						walkthroughReadonly("Jitter", "2 ms"),
+						walkthroughReadonly("Codec", "Opus")
+					], { presentation: "list" })
+				],
+				actions: [close, walkthroughDialogAction("resetStats", "Reset stats")]
+			});
+		}
+
+		if (name === "local-nickname") {
+			return walkthroughDialogBase("localNickname", "form", "Local nickname", "Choose a local display name override for this user.", {
+				primaryActionId: "saveNickname",
+				sections: [walkthroughSection("Nickname", [
+					walkthroughReadonly("User", "Kira"),
+					walkthroughField("nickname.value", "Local nickname", "text", "Kira - IGL"),
+					walkthroughNote("This label is only shown on this client.")
+				])],
+				actions: [cancel, walkthroughDialogAction("clearNickname", "Clear"), walkthroughDialogAction("saveNickname", "Save", { tone: "accent" })]
+			});
+		}
+
+		if (name === "grant-history") {
+			return walkthroughDialogBase("grantHistory", "form", "Grant chat history", "Allow a user to read recent persistent room history.", {
+				primaryActionId: "grantHistory",
+				sections: [walkthroughSection("Access", [
+					walkthroughReadonly("User", "Kira"),
+					walkthroughField("history.room", "Room", "select", "lobby", { valueType: "string",
+						options: [select("Lobby", "lobby"), select("#general", "general"), select("#clips", "clips")] }),
+					walkthroughField("history.window", "History window", "select", "24h", { valueType: "string",
+						options: [select("Last hour", "1h"), select("Last 24 hours", "24h"), select("Last 7 days", "7d")] }),
+					walkthroughField("history.includeMedia", "Include rich previews", "checkbox", true)
+				])],
+				actions: [cancel, walkthroughDialogAction("grantHistory", "Grant", { tone: "accent" })]
+			});
+		}
+
+		if (name === "kick-user" || name === "kick") {
+			return walkthroughDialogBase("kickUser", "confirm", "Kick user", "Kick Kira from the current server?", {
+				primaryActionId: "kick",
+				tone: "danger",
+				sections: [walkthroughSection("Moderation", [
+					walkthroughReadonly("User", "Kira"),
+					walkthroughField("kick.reason", "Reason", "textarea", "Take a break and rejoin when ready.", { rows: 4 })
+				])],
+				actions: [cancel, walkthroughDialogAction("kick", "Kick", { tone: "danger" })]
+			});
+		}
+
+		if (name === "ban-user" || name === "ban") {
+			return walkthroughDialogBase("banUser", "confirm", "Ban user", "Ban Kira from the current server?", {
+				primaryActionId: "ban",
+				tone: "danger",
+				sections: [walkthroughSection("Moderation", [
+					walkthroughReadonly("User", "Kira"),
+					walkthroughField("ban.reason", "Reason", "textarea", "Repeated disruption after warning.", { rows: 4 }),
+					walkthroughField("ban.ip", "Ban IP address", "checkbox", true),
+					walkthroughField("ban.duration", "Duration", "select", "24h", { valueType: "string",
+						options: [select("1 hour", "1h"), select("24 hours", "24h"), select("Permanent", "permanent")] })
+				])],
+				actions: [cancel, walkthroughDialogAction("ban", "Ban", { tone: "danger" })]
+			});
+		}
+
+		if (name === "certificate" || name === "self-certificate") {
+			return walkthroughDialogBase("certificate", "form", "Certificate", "Manage the client certificate used for account identity and server authentication.", {
+				highlights: [walkthroughHighlight("Status", "Installed", "good"), walkthroughHighlight("Action", "Export"), walkthroughHighlight("Expires", "2042-04-06")],
+				primaryActionId: "applyCertificate",
+				sections: [
+					walkthroughSection("Current certificate", [
+						walkthroughReadonly("Status", "A valid certificate is installed."),
+						walkthroughReadonly("Name", "You"),
+						walkthroughReadonly("Email", "None"),
+						walkthroughReadonly("Issuer", "You"),
+						walkthroughReadonly("Fingerprint", "7B:51:90:1E:...:A4", { monospace: true })
+					], { presentation: "certificate-current" }),
+					walkthroughSection("Certificate action", [
+						walkthroughField("cert.mode", "Action", "select", "export", { valueType: "string",
+							options: [select("Export current certificate", "export"), select("Import certificate", "import"),
+								select("Generate new certificate", "generate")] }),
+						walkthroughField("cert.exportPath", "Export file", "pathPicker", "C:/Users/You/Desktop/mumble-cert.p12", {
+							browseActionId: "browseCertificateExport",
+							browseLabel: "Browse"
+						})
+					], { presentation: "certificate-action" })
+				],
+				actions: [close, walkthroughDialogAction("applyCertificate", "Apply", { tone: "accent" })]
+			});
+		}
+
+		if (name === "avatar" || name === "change-avatar") {
+			return walkthroughDialogBase("changeAvatar", "form", "Change Avatar", "Choose a new server-side avatar for You.", {
+				primaryActionId: "applyAvatar",
+				sections: [walkthroughSection("Avatar", [
+					walkthroughReadonly("User", "You"),
+					walkthroughField("avatar.path", "Image file", "pathPicker", "", {
+						browseActionId: "browseAvatar",
+						browseLabel: "Browse",
+						hint: "Choose a PNG or JPEG image to upload as your server avatar."
+					})
+				])],
+				actions: [cancel, walkthroughDialogAction("applyAvatar", "Apply avatar", { tone: "accent" })]
+			});
+		}
+
+		if (name === "server-settings") {
+			return walkthroughDialogBase("serverSettings", "form", "Server settings", "Change connected server settings from the Modern layout.", {
+				primaryActionId: "saveServerSettings",
+				sections: [walkthroughSection("Chat", [
+					walkthroughField("server.welcome", "Welcome text", "textarea", "Welcome to Twinfinity. Ranked scrims every night at 21:00 CET.", { rows: 4 }),
+					walkthroughField("server.allowHtml", "Allow HTML", "checkbox", true),
+					walkthroughField("server.chatEnabled", "Server-wide chat", "checkbox", true)
+				])],
+				actions: [cancel, walkthroughDialogAction("saveServerSettings", "Apply", { tone: "accent" })]
+			});
+		}
+
+		if (name === "about") {
+			return walkthroughDialogBase("about", "info", "About Mumble", "Version, license, and project information.", {
+				highlights: [walkthroughHighlight("Version", "1.7.0"), walkthroughHighlight("Architecture", "x64"), walkthroughHighlight("License", "BSD")],
+				sections: [walkthroughSection("Project", [
+					walkthroughReadonly("Website", "https://www.mumble.info/"),
+					walkthroughNote("An Open Source, low-latency, high quality voice-chat utility.")
+				])],
+				actions: [close, walkthroughDialogAction("website", "Open website", { tone: "accent" })]
+			});
+		}
+
+		if (name === "about-qt") {
+			return walkthroughDialogBase("aboutQt", "info", "About Qt", "Qt runtime and licensing details.", {
+				highlights: [walkthroughHighlight("Qt", "6.x"), walkthroughHighlight("WebEngine", "Enabled"), walkthroughHighlight("License", "LGPL")],
+				sections: [walkthroughSection("Runtime", [
+					walkthroughReadonly("Qt build", "Qt 6 shared WebEngine"),
+					walkthroughReadonly("Platform", "Windows x64"),
+					walkthroughNote("Modern shell rendering uses Qt WebEngine inside the desktop client.")
+				], { presentation: "list" })],
+				actions: [close, walkthroughDialogAction("qtWebsite", "Open Qt", { tone: "accent" })]
+			});
+		}
+
+		if (name === "update") {
+			return walkthroughDialogBase("versionCheck", "update", "Update available", "A new mumble-forked build is ready.", {
+				primaryActionId: "openForkInstaller",
+				highlights: [walkthroughHighlight("Status", "Available", "warning"), walkthroughHighlight("Current build", "0"), walkthroughHighlight("Latest", "1.7.1, build 42")],
+				sections: [
+					walkthroughSection("Available update", [
+						walkthroughReadonly("Latest build", "1.7.1, build 42"),
+						walkthroughReadonly("Published", "May 30, 2026"),
+						walkthroughReadonly("Commit", "abc1234"),
+						walkthroughReadonly("Release", "https://github.com/dankmaster/mumble/releases/tag/mumble-forked"),
+						walkthroughReadonly("Installer", "https://github.com/dankmaster/mumble/releases/download/mumble-forked/mumble-forked.msi")
+					], { presentation: "list", subtitle: "Security and Modern shell polish are included in this release." }),
+					walkthroughSection("Installed build", [
+					walkthroughReadonly("Current version", "1.7.0"),
+					walkthroughReadonly("Current build", "0"),
+					walkthroughReadonly("Release channel", "mumble-forked")
+					], { presentation: "list" }),
+					walkthroughSection("Release notes", [
+						walkthroughReadonly("Notes", "Modern dialogs now follow the hardened shell mockup and update checks use the in-app flow.")
+					], { presentation: "list" })
+				],
+				actions: [
+					close,
+					walkthroughDialogAction("runVersionCheck", "Check again", { closesDialog: false }),
+					walkthroughDialogAction("openForkRelease", "Open releases", { closesDialog: false }),
+					walkthroughDialogAction("openForkInstaller", "Download update", { tone: "accent", closesDialog: false })
+				]
+			});
+		}
+
+		if (name === "feedback" || name === "report-feedback") {
+			return walkthroughDialogBase("feedback", "feedback", "Report feedback", "Bug reports, suggestions, and questions for this fork.", {
+				primaryActionId: "submitFeedback",
+				highlights: [walkthroughHighlight("Server submit", "Fallback"), walkthroughHighlight("Diagnostics", "Included"), walkthroughHighlight("Max body", "58 KiB")],
+				sections: [
+					walkthroughSection("Report", [
+						walkthroughField("feedback.kind", "Type", "select", 0, {
+							options: [select("Bug", 0), select("Suggestion", 1), select("Question", 2)]
+						}),
+						walkthroughField("feedback.title", "Title", "text", "Update window does not match mockup"),
+						walkthroughField("feedback.description", "Description", "textarea", "The update available flow needs to use the same narrow Modern dialog style as the mockup.", { rows: 5 }),
+						walkthroughField("feedback.steps", "Steps to reproduce", "textarea", "1. Open Help.\n2. Choose Check for updates.\n3. Compare the result dialog with the mockup.", { rows: 4 })
+					]),
+					walkthroughSection("Evidence", [
+						walkthroughField("feedback.evidence", "Pasted evidence", "textarea", "Mockup slide 37 and API capture need to match.", { rows: 3 })
+					]),
+					walkthroughSection("Diagnostics", [
+						walkthroughField("feedback.includeDiagnostics", "Include diagnostics", "checkbox", true),
+						walkthroughReadonly("Status", "Submit will use the GitHub fallback because server-side feedback submission is disabled."),
+						walkthroughReadonly("Diagnostics preview", "Client: Mumble 1.7.0\nQt: packaged runtime\nServer feedback: fallback", { monospace: true })
+					])
+				],
+				actions: [
+					close,
+					walkthroughDialogAction("toggleFeedbackCapture", "Start capture", { closesDialog: false }),
+					walkthroughDialogAction("copyFeedbackReport", "Copy report", { closesDialog: false }),
+					walkthroughDialogAction("openFeedbackGitHub", "Open GitHub", { closesDialog: false }),
+					walkthroughDialogAction("submitFeedback", "Submit", { tone: "accent", closesDialog: false })
+				]
+			});
+		}
+
+		if (name === "help") {
+			return walkthroughDialogBase("help", "info", "Help", "Modern layout keeps contextual help inside the client shell.", {
+				highlights: [walkthroughHighlight("Menus", 6), walkthroughHighlight("Layout", "Modern"), walkthroughHighlight("Context", "Current view")],
+				sections: [walkthroughSection("Modern header", [
+					walkthroughReadonly("Server", "Connect, search, server information, tokens, registered users, and bans."),
+					walkthroughReadonly("Room", "Create rooms, manage ACLs, and room-specific actions."),
+					walkthroughReadonly("User", "User information, comments, registration, moderation, and history grants.")
+				], { presentation: "list" })]
+			});
+		}
+
+		if (name === "unlink-room") {
+			return walkthroughDialogBase("unlinkRoom", "confirm", "Unlink room", "Unlink Lobby from its linked room group?", {
+				primaryActionId: "unlinkRoom",
+				tone: "danger",
+				sections: [walkthroughSection("Room links", [
+					walkthroughReadonly("Room", "Lobby"),
+					walkthroughReadonly("Linked rooms", "Valorant, Minecraft"),
+					walkthroughNote("This room will stop sharing audio with the linked group.")
+				])],
+				actions: [cancel, walkthroughDialogAction("unlinkRoom", "Unlink", { tone: "danger" })]
+			});
+		}
+
+		if (name === "unlink-all-rooms") {
+			return walkthroughDialogBase("unlinkAllRooms", "confirm", "Unlink all rooms", "Remove all room links for Lobby?", {
+				primaryActionId: "unlinkAllRooms",
+				tone: "danger",
+				sections: [walkthroughSection("Room links", [
+					walkthroughReadonly("Room", "Lobby"),
+					walkthroughReadonly("Links removed", "2"),
+					walkthroughNote("Every linked room edge connected to Lobby will be removed.")
+				])],
+				actions: [cancel, walkthroughDialogAction("unlinkAllRooms", "Unlink all", { tone: "danger" })]
+			});
+		}
+
+		if (name === "remove-room") {
+			return walkthroughDialogBase("removeRoom", "confirm", "Remove room", "Remove Lobby and its persistent settings?", {
+				primaryActionId: "removeRoom",
+				tone: "danger",
+				sections: [walkthroughSection("Room", [
+					walkthroughReadonly("Room", "Lobby"),
+					walkthroughReadonly("Messages", "Persistent history retained by server policy"),
+					walkthroughNote("This cannot be undone from the Modern shell.")
+				])],
+				actions: [cancel, walkthroughDialogAction("removeRoom", "Remove room", { tone: "danger" })]
+			});
+		}
+
+		if (name === "voice-recorder") {
+			return walkthroughDialogBase("voiceRecorder", "form", "Voice recorder", "Record the current session from the Modern shell.", {
+				primaryActionId: "startRecording",
+				sections: [
+					walkthroughSection("Recorder", [
+						walkthroughReadonly("Status", "Idle"),
+						walkthroughReadonly("Elapsed", "00:00:00")
+					]),
+					walkthroughSection("Output", [
+						walkthroughField("recording.path", "Target directory", "pathPicker", "C:/Recordings", {
+							browseActionId: "browseRecordingDirectory",
+							browseLabel: "Browse"
+						}),
+						walkthroughField("recording.format", "Format", "select", "wav", { valueType: "string",
+							options: [select("WAV", "wav"), select("FLAC", "flac"), select("Ogg Opus", "opus")] })
+					])
+				],
+				actions: [close, walkthroughDialogAction("refresh", "Refresh"), walkthroughDialogAction("startRecording", "Start", { tone: "accent" })]
+			});
+		}
+
+		if (name === "quit") {
+			return walkthroughDialogBase("quit", "confirm", "Quit Mumble", "Are you sure you want to quit Mumble?", {
+				primaryActionId: "quit",
+				tone: "danger",
+				sections: [walkthroughSection("Confirmation", [
+					walkthroughNote("Quitting will disconnect from the current server and close Mumble.")
+				])],
+				actions: [cancel, walkthroughDialogAction("quit", "Quit Mumble", { tone: "danger" })]
+			});
+		}
+
+		return null;
+	}
+
+	function syncWalkthroughDialogFromQuery() {
+		const dialog = mockupWalkthroughDialogState(walkthroughQueryValue("dialog") || walkthroughQueryValue("window"));
+		if (dialog) {
+			modernDialogState = dialog;
+			renderModernDialog();
+		}
+	}
+
+	function syncWalkthroughUiFromQuery() {
+		if (modernBridge || !walkthroughAllowedForLocation() || requestedWalkthroughMode() !== "mockup") {
+			return;
+		}
+		const search = String(walkthroughQueryValue("search") || "").trim();
+		if (!search) {
+			return;
+		}
+		requestAnimationFrame(function() {
+			messageSearchText = search;
+			messageSearchOpen = true;
+			syncMessageSearchState();
+		});
+	}
+
+	function cloneWalkthroughSnapshot(snapshot) {
+		try {
+			return JSON.parse(JSON.stringify(snapshot || {}));
+		} catch (error) {
+			return snapshot || {};
+		}
+	}
+
+	function walkthroughRoomMessages(scope) {
+		const token = String(scope && scope.scopeToken || "");
+		const label = String(scope && scope.label || "room");
+		const base = Date.UTC(2026, 4, 30, 15, 0, 0);
+		if (token === "text:clips") {
+			return [
+				{ messageId: 9101, threadId: 2, createdAtMs: base, actor: "Nova", actorKey: "nova", timeLabel: "15:01", bodyText: "ace clip from last round", bodyHtml: "ace clip from last round", own: false, system: false, canReply: true, canReact: true, canDelete: false, reactions: [{ emoji: "fire", count: 4, selfReacted: false }], preview: { kind: "image", url: "https://example.com/clip.png", title: "Valorant ace", subtitle: "#clips", description: "Image preview for a shared gameplay clip.", mediaUrl: walkthroughPreviewImage("Clip preview", "Round-winning ace", "#7c3aed", "#43c6ac"), mediaMime: "image/svg+xml", openLabel: "Open image" } },
+				{ messageId: 9102, threadId: 2, createdAtMs: base + 90000, actor: "You", actorKey: "you", timeLabel: "15:02", bodyText: "that flick was nasty", bodyHtml: "that flick was nasty", own: true, system: false, canReply: true, canReact: true, canDelete: true, reactions: [] }
+			];
+		}
+		if (token === "text:stonks") {
+			return [
+				{ messageId: 9201, threadId: 3, createdAtMs: base, actor: "Kira", actorKey: "kira", timeLabel: "15:06", bodyText: "#stonks RKLB 42", bodyHtml: "#stonks RKLB 42", own: false, system: false, canReply: true, canReact: true, canDelete: false, reactions: [] },
+				{ messageId: 9202, threadId: 3, createdAtMs: base + 70000, actor: "stonks-bot", actorKey: "stonks-bot", timeLabel: "15:07", bodyText: "Kira updated their ledger.", bodyHtml: "Kira updated their ledger.", own: false, system: true, canReply: false, canReact: false, canDelete: false, reactions: [] }
+			];
+		}
+		if (token === "text:rules") {
+			return [
+				{ messageId: 9301, threadId: 4, createdAtMs: base, actor: "Server", actorKey: "server", timeLabel: "15:10", bodyText: "Keep comms civil, use clips for media, and no spoilers in Lobby.", bodyHtml: "Keep comms civil, use clips for media, and no spoilers in Lobby.", own: false, system: true, canReply: false, canReact: false, canDelete: false, reactions: [] }
+			];
+		}
+		if (token === "voice:valorant") {
+			return [
+				{ messageId: 9401, threadId: 5, createdAtMs: base, actor: "Nova", actorKey: "nova", timeLabel: "15:12", bodyText: "queue pops in two minutes", bodyHtml: "queue pops in two minutes", own: false, system: false, canReply: true, canReact: true, canDelete: false, reactions: [] },
+				{ messageId: 9402, threadId: 5, createdAtMs: base + 120000, actor: "Byte", actorKey: "byte", timeLabel: "15:14", bodyText: "I'll fill smokes", bodyHtml: "I'll fill smokes", own: false, system: false, canReply: true, canReact: true, canDelete: false, reactions: [{ emoji: "check", count: 2, selfReacted: false }] }
+			];
+		}
+		return [
+			{ messageId: 9007, threadId: 1, createdAtMs: base, actor: "Kira", actorKey: "kira", timeLabel: "15:00", bodyText: "checking " + label + " from the walkthrough", bodyHtml: "checking " + escapeHtml(label) + " from the walkthrough", own: false, system: false, canReply: true, canReact: true, canDelete: false, reactions: [] }
+		];
+	}
+
+	function applyMockupWalkthroughVariant(snapshot) {
+		const scopeQuery = String(walkthroughQueryValue("scope") || "").trim().toLowerCase();
+		const dmQuery = String(walkthroughQueryValue("dm") || walkthroughQueryValue("direct") || "").trim().toLowerCase();
+		const motdQuery = String(walkthroughQueryValue("motd") || "").trim().toLowerCase();
+		const variantQuery = String(walkthroughQueryValue("state") || walkthroughQueryValue("variant") || "").trim().toLowerCase();
+		const scopeAliases = {
+			general: "text:general",
+			clips: "text:clips",
+			stonks: "text:stonks",
+			rules: "text:rules",
+			valorant: "voice:valorant",
+			lobby: "voice:lobby"
+		};
+		const targetScope = scopeAliases[scopeQuery] || scopeQuery;
+
+		if (targetScope) {
+			const allRooms = [].concat(snapshot.voiceRooms || [], snapshot.textRooms || []);
+			let room = null;
+			allRooms.forEach(function(candidate) {
+				if (String(candidate && candidate.token || "").toLowerCase() === targetScope) {
+					room = candidate;
+				}
+				if (candidate) {
+					candidate.selected = false;
+				}
+			});
+			if (room) {
+				room.selected = true;
+				const isText = String(room.token || "").indexOf("text:") === 0;
+				const label = isText ? "#" + String(room.label || "").replace(/^#/, "") : (room.label || "Room");
+				snapshot.activeScope = {
+					scopeToken: room.token,
+					kindLabel: room.kindLabel || (isText ? "Text room" : "Voice room"),
+					label: label,
+					description: room.description || "",
+					meta: isText
+						? ["Text room", "Persistent history", (room.unreadCount || 0) + " unread"]
+						: ["Voice room", "Persistent history", "28 ms"],
+					canLoadOlder: true,
+					canMarkRead: true,
+					canSend: true,
+					canAttachImages: true,
+					composerPlaceholder: "Message " + label,
+					composerHint: "Persistent room history stays with " + label + ".",
+					screenShare: room.screenShare || null,
+					emptyCopy: "No messages in " + label + " yet."
+				};
+				snapshot.messages = walkthroughRoomMessages(snapshot.activeScope);
+				if (!isText) {
+					snapshot.voicePresence = room.participants || [];
+				}
+			}
+		}
+
+		if (dmQuery) {
+			const dmState = snapshot.app.directMessages || {};
+			const conversations = Array.isArray(dmState.conversations) ? dmState.conversations : [];
+			const target = conversations.find(function(conversation) {
+				return String(conversation && conversation.label || "").toLowerCase() === "kira";
+			}) || conversations[0];
+			if (target) {
+				const privateMode = dmQuery === "private" || variantQuery === "dm-private";
+				target.open = dmQuery !== "main";
+				target.unreadCount = 0;
+				target.mode = privateMode ? "private" : "history";
+				target.privateMode = privateMode;
+				target.persistentHistory = !privateMode;
+				target.statusLabel = privateMode ? "Private direct message" : "Direct message";
+				const windowState = Object.assign({}, target, {
+					open: true,
+					messages: Array.isArray(target.messages) ? target.messages.slice() : []
+				});
+
+				if (dmQuery === "tray" || variantQuery === "dm-tray") {
+					dmState.trayOpen = true;
+					dmState.windows = [];
+				} else if (dmQuery === "window" || dmQuery === "private" || variantQuery === "dm-window"
+						|| variantQuery === "dm-private") {
+					dmState.trayOpen = false;
+					dmState.windows = [windowState];
+				} else {
+					dmState.trayOpen = false;
+					dmState.windows = [];
+				}
+
+				dmState.unreadTotal = conversations.reduce(function(total, conversation) {
+					return total + Number(conversation && conversation.unreadCount || 0);
+				}, 0);
+				dmState.hasUnread = dmState.unreadTotal > 0;
+				snapshot.app.directMessages = dmState;
+
+				if (dmQuery !== "tray") {
+					(snapshot.voiceRooms || []).forEach(function(room) { if (room) { room.selected = false; } });
+					(snapshot.textRooms || []).forEach(function(room) { if (room) { room.selected = false; } });
+					snapshot.activeScope = directMessageActiveScope(windowState);
+					if (isDirectMessageScopeToken(scopeQuery)) {
+						snapshot.activeScope.scopeToken = scopeQuery;
+					}
+					snapshot.messages = [];
+					snapshot.voicePresence = [snapshot.participants[0], snapshot.participants[1]].filter(Boolean);
+				}
+			}
+		}
+
+		if (motdQuery === "collapsed" || variantQuery === "motd-collapsed") {
+			snapshot.app.motdExpanded = false;
+			snapshot.app.motdAlwaysVisible = true;
+		} else if (motdQuery === "dismissed" || variantQuery === "motd-dismissed") {
+			const dismissedSignature = motdContentSignature(snapshot.app.motdHtml || "");
+			snapshot.app.motdDismissedSignature = dismissedSignature;
+			snapshot.app.motdLastSeenSignature = dismissedSignature;
+			snapshot.app.motdExpanded = false;
+			snapshot.app.motdAlwaysVisible = true;
+		}
+
+		return snapshot;
+	}
+
+	function fallbackWalkthroughSnapshot() {
+		if (modernBridge || !walkthroughAllowedForLocation() || requestedWalkthroughMode() !== "mockup") {
+			return null;
+		}
+		if (!walkthroughSnapshotCache) {
+			walkthroughSnapshotCache = applyMockupWalkthroughVariant(cloneWalkthroughSnapshot(buildMockupWalkthroughSnapshot()));
+		}
+		return walkthroughSnapshotCache;
+	}
+
 	function getSnapshot() {
 		if (modernBridge && (!liveSnapshot || !Object.keys(liveSnapshot).length)) {
 			liveSnapshot = modernBridge.snapshot || {};
+		}
+		if (!modernBridge && (!liveSnapshot || !Object.keys(liveSnapshot).length)) {
+			liveSnapshot = fallbackWalkthroughSnapshot() || {};
 		}
 		return liveSnapshot || {};
 	}
@@ -875,6 +2755,12 @@
 			clearTimeout(previewHydrationTimer);
 			previewHydrationTimer = 0;
 		}
+		if (previewHydrationScrollIdleTimer) {
+			clearTimeout(previewHydrationScrollIdleTimer);
+			previewHydrationScrollIdleTimer = 0;
+		}
+		messageListScrollActiveUntil = 0;
+		previewHydrationPausedUntil = 0;
 	}
 
 	function reopenPreviewHydrationForStubs(messages) {
@@ -893,10 +2779,67 @@
 		});
 	}
 
+	function messageListScrollBusy() {
+		return monotonicNow() < messageListScrollActiveUntil;
+	}
+
+	function previewHydrationPaused() {
+		return monotonicNow() < previewHydrationPausedUntil;
+	}
+
+	function noteMessageListScrollActivity() {
+		messageListScrollActiveUntil = monotonicNow() + previewHydrationScrollIdleMs;
+		if (previewHydrationScrollIdleTimer) {
+			clearTimeout(previewHydrationScrollIdleTimer);
+		}
+		previewHydrationScrollIdleTimer = setTimeout(function() {
+			previewHydrationScrollIdleTimer = 0;
+			if (pendingPreviewHydrationIds.size) {
+				schedulePreviewHydrationFlush(0);
+			}
+		}, previewHydrationScrollIdleMs + 20);
+	}
+
+	function previewHydrationTargetForMessageId(messageId) {
+		if (!refs.messageList) {
+			return null;
+		}
+
+		const id = String(messageId || "").replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+		if (!id) {
+			return null;
+		}
+
+		return refs.messageList.querySelector(".message-bubble[data-message-id=\"" + id + "\"]");
+	}
+
+	function previewHydrationTargetNearViewport(messageId) {
+		const target = previewHydrationTargetForMessageId(messageId);
+		if (!target || !target.querySelector(".preview-stub, .mumble-inline-image-placeholder")) {
+			pendingPreviewHydrationIds.delete(messageId);
+			requestedPreviewHydrationIds.delete(messageId);
+			return false;
+		}
+
+		const rootRect = refs.messageList.getBoundingClientRect();
+		const targetRect = target.getBoundingClientRect();
+		const margin = previewHydrationViewportMarginPx;
+		return targetRect.bottom >= rootRect.top - margin
+			&& targetRect.top <= rootRect.bottom + margin;
+	}
+
 	function flushPreviewHydrationQueue() {
 		previewHydrationTimer = 0;
 		if (activeMessageChunkRender) {
 			schedulePreviewHydrationFlush();
+			return;
+		}
+		if (messageListScrollBusy()) {
+			schedulePreviewHydrationFlush(previewHydrationScrollIdleMs);
+			return;
+		}
+		if (previewHydrationPaused()) {
+			schedulePreviewHydrationFlush(previewHydrationPausedUntil - monotonicNow() + 20);
 			return;
 		}
 
@@ -905,7 +2848,20 @@
 			return;
 		}
 
-		const ids = Array.from(pendingPreviewHydrationIds).slice(0, previewHydrationBatchSize);
+		const ids = [];
+		Array.from(pendingPreviewHydrationIds).some(function(id) {
+			if (ids.length >= previewHydrationBatchSize) {
+				return true;
+			}
+			if (previewHydrationTargetNearViewport(id)) {
+				ids.push(id);
+			}
+			return false;
+		});
+		if (!ids.length) {
+			return;
+		}
+
 		ids.forEach(function(id) {
 			pendingPreviewHydrationIds.delete(id);
 		});
@@ -915,17 +2871,25 @@
 				pendingPreviewHydrationIds.add(id);
 			});
 		}
-		if (pendingPreviewHydrationIds.size) {
+		if (ids.length >= previewHydrationBatchSize) {
 			schedulePreviewHydrationFlush();
 		}
 	}
 
-	function schedulePreviewHydrationFlush() {
+	function schedulePreviewHydrationFlush(delayMs) {
 		if (previewHydrationTimer) {
 			return;
 		}
 
-		previewHydrationTimer = setTimeout(flushPreviewHydrationQueue, previewHydrationDebounceMs);
+		const requestedDelay = Number.isFinite(Number(delayMs)) ? Math.max(0, Number(delayMs)) : previewHydrationDebounceMs;
+		const scrollDelay = messageListScrollBusy()
+			? Math.max(0, messageListScrollActiveUntil - monotonicNow() + 20)
+			: 0;
+		const pauseDelay = previewHydrationPaused()
+			? Math.max(0, previewHydrationPausedUntil - monotonicNow() + 20)
+			: 0;
+		previewHydrationTimer = setTimeout(flushPreviewHydrationQueue,
+			Math.max(requestedDelay, scrollDelay, pauseDelay));
 	}
 
 	function queuePreviewHydration(messageId) {
@@ -970,7 +2934,7 @@
 			});
 		}, {
 			root: refs.messageList,
-			rootMargin: "600px 0px",
+			rootMargin: previewHydrationViewportMarginPx + "px 0px",
 			threshold: 0.01
 		});
 		return previewHydrationObserver;
@@ -1004,6 +2968,11 @@
 		}
 	}
 
+	function messageListHasRenderedTimeline() {
+		return !!refs.messageList
+			&& !!refs.messageList.querySelector(".message-cluster, .system-message, .message-log, .empty-state");
+	}
+
 	function createChatLoadingIndicator() {
 		const indicator = document.createElement("div");
 		indicator.className = "chat-loading-indicator";
@@ -1021,16 +2990,22 @@
 		if (!refs.messageList) {
 			return;
 		}
+		cancelActiveMessageChunkRender("scope-loading");
+		pendingMessageUpdatePatches = [];
+		if (messageListHasRenderedTimeline()) {
+			refs.messageList.classList.remove("is-chat-loading");
+			refs.messageList.classList.add("is-chat-transitioning");
+			return;
+		}
 		if (refs.messageList.classList.contains("is-chat-loading")
 				&& refs.messageList.querySelector(".chat-loading-spinner")) {
 			return;
 		}
 
-		cancelActiveMessageChunkRender("scope-loading");
-		pendingMessageUpdatePatches = [];
 		const fragment = document.createDocumentFragment();
 		fragment.appendChild(createChatLoadingIndicator());
 		refs.messageList.classList.add("is-chat-loading");
+		refs.messageList.classList.remove("is-chat-transitioning");
 		replaceChildrenWith(refs.messageList, fragment);
 	}
 
@@ -1047,7 +3022,7 @@
 		clearPendingScopeLoadingTimer();
 		pendingScopeLoading = null;
 		if (refs.messageList) {
-			refs.messageList.classList.remove("is-chat-loading");
+			refs.messageList.classList.remove("is-chat-loading", "is-chat-transitioning");
 		}
 	}
 
@@ -1287,27 +3262,145 @@
 		element.textContent = initialsFor(label);
 	}
 
-	function applyStatePill(element, label, tone) {
+	function applyStatePill(element, label, tone, tooltip) {
 		element.textContent = label;
 		element.className = "state-pill";
+		element.title = tooltip || label || "";
 		if (tone) {
 			element.classList.add("is-" + tone);
 		}
 	}
 
-	function kindChipText(kindLabel) {
+	function appCanCancelConnection(app) {
+		return Object.prototype.hasOwnProperty.call(app || {}, "canCancelConnection")
+			? !!app.canCancelConnection
+			: !!(app && app.canDisconnect);
+	}
+
+	function connectionBannerState(app) {
+		const state = String(app && app.connectionState || "").toLowerCase();
+		if (!state || state === "connected") {
+			return null;
+		}
+
+		if (state === "retrying") {
+			const remainingMs = Number(app.connectionRetryRemainingMs || 0);
+			const remainingSeconds = remainingMs > 0 ? Math.max(1, Math.ceil(remainingMs / 1000)) : 0;
+			return {
+				tone: "retry",
+				title: "Connection lost - reconnecting...",
+				detail: remainingSeconds > 0
+					? "Automatic reconnect will retry in " + remainingSeconds + "s."
+					: (app.connectionTooltip || app.connectionLabel || "Automatic reconnect is scheduled."),
+				action: appCanCancelConnection(app) ? "cancel" : ""
+			};
+		}
+
+		if (state === "connecting") {
+			return {
+				tone: "warning",
+				title: "Connecting to server...",
+				detail: app.connectionTooltip || app.connectionLabel || "Opening the voice connection.",
+				action: appCanCancelConnection(app) ? "cancel" : ""
+			};
+		}
+
+		if (state === "disconnected") {
+			return {
+				tone: "danger",
+				title: "You're disconnected",
+				detail: app.connectionTooltip || "Open the server browser to reconnect.",
+				action: app && app.canConnect ? "connect" : ""
+			};
+		}
+
+		return null;
+	}
+
+	function renderConnectionOrScopeBanner(app, scope) {
+		if (!refs.scopeBanner) {
+			return;
+		}
+
+		const banner = connectionBannerState(app || {});
+		const scopeText = String(scope && scope.banner || "");
+		refs.scopeBanner.replaceChildren();
+		refs.scopeBanner.className = "banner connection-banner";
+		if (!banner && !scopeText) {
+			refs.scopeBanner.classList.add("hidden");
+			return;
+		}
+
+		refs.scopeBanner.classList.remove("hidden");
+		if (!banner) {
+			refs.scopeBanner.classList.add("is-scope");
+			refs.scopeBanner.textContent = scopeText;
+			return;
+		}
+
+		refs.scopeBanner.classList.add("is-" + banner.tone);
+		const copy = document.createElement("div");
+		copy.className = "connection-banner-copy";
+		const title = document.createElement("strong");
+		title.textContent = banner.title;
+		const detail = document.createElement("span");
+		detail.textContent = banner.detail;
+		copy.append(title, detail);
+		refs.scopeBanner.appendChild(copy);
+
+		if (banner.action) {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "chip-button connection-banner-action";
+			button.textContent = banner.action === "connect" ? "Reconnect" : "Cancel";
+			button.addEventListener("click", function() {
+				if (banner.action === "connect") {
+					notifyBridge("openModernDialog", "connect", {});
+					return;
+				}
+				notifyBridge("disconnectServer");
+			});
+			refs.scopeBanner.appendChild(button);
+		}
+	}
+
+	function kindChipKind(kindLabel) {
 		switch (String(kindLabel || "").toLowerCase()) {
 			case "activity":
-				return "LOG";
+				return "activity";
 			case "voice room":
-				return "VC";
+				return "voice";
 			case "text room":
-				return "TXT";
+				return "text";
 			case "direct message":
+				return "direct";
+			default:
+				return "text";
+		}
+	}
+
+	function kindChipText(kindLabel) {
+		switch (kindChipKind(kindLabel)) {
+			case "activity":
+				return "LOG";
+			case "text":
+				return "#";
+			case "direct":
 				return "DM";
 			default:
-				return "TXT";
+				return "";
 		}
+	}
+
+	function kindChipIconSvg(kindLabel) {
+		if (kindChipKind(kindLabel) !== "voice") {
+			return "";
+		}
+		return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M11 5L6 9H3v6h3l5 4z\"></path><path d=\"M15.5 8.5a5 5 0 010 7\"></path><path d=\"M18.5 5.5a9 9 0 010 13\"></path></svg>";
+	}
+
+	function privateModeGhostSvg() {
+		return "<svg class=\"private-mode-ghost\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path class=\"private-mode-ghost-body\" d=\"M5.75 20V10.25A6.25 6.25 0 0112 4a6.25 6.25 0 016.25 6.25V20l-2.15-1.45L14.05 20 12 18.55 9.95 20 7.9 18.55 5.75 20z\"></path><circle class=\"private-mode-ghost-eye\" cx=\"9.8\" cy=\"11\" r=\"1.35\"></circle><circle class=\"private-mode-ghost-eye\" cx=\"14.2\" cy=\"11\" r=\"1.35\"></circle></svg>";
 	}
 
 	function eventElementTarget(event) {
@@ -1760,7 +3853,35 @@
 		return normalizeStonksSymbol(ticker && (ticker.providerSymbol || ticker.symbol));
 	}
 
-	function stonksPopularTickerRows(stonks) {
+	function stonksTickerDedupKeys(ticker) {
+		const keys = [
+			stonksTickerLookupSymbol(ticker),
+			normalizeStonksSymbol(ticker && ticker.symbol),
+			normalizeStonksSymbol(ticker && ticker.providerSymbol)
+		].filter(Boolean);
+		return Array.from(new Set(keys));
+	}
+
+	function stonksTickerKeySet(tickers) {
+		const keys = new Set();
+		(tickers || []).forEach(function(ticker) {
+			stonksTickerDedupKeys(ticker).forEach(function(key) {
+				keys.add(key);
+			});
+		});
+		return keys;
+	}
+
+	function stonksTickerMatchesKeySet(ticker, keys) {
+		if (!keys || !keys.size) {
+			return false;
+		}
+		return stonksTickerDedupKeys(ticker).some(function(key) {
+			return keys.has(key);
+		});
+	}
+
+	function stonksPopularTickerRows(stonks, excludedTickerKeys) {
 		return (Array.isArray(stonks.popularTickers) ? stonks.popularTickers : []).map(function(ticker) {
 			const symbol = normalizeStonksSymbol(ticker && ticker.symbol);
 			if (!symbol) {
@@ -1780,7 +3901,9 @@
 				latestUpdatedAt: Number(ticker.latestUpdatedAt || 0),
 				source: "popular"
 			};
-		}).filter(Boolean).slice(0, 5);
+		}).filter(function(ticker) {
+			return !!ticker && !stonksTickerMatchesKeySet(ticker, excludedTickerKeys);
+		}).slice(0, 5);
 	}
 
 	function stonksPersonalTickerRows(stonks) {
@@ -1828,9 +3951,28 @@
 		}).slice(0, 5);
 	}
 
-	function stonksTickerQuote(symbol) {
+	function stonksHeaderTickerRows(stonks) {
+		const personalTickers = stonksPersonalTickerRows(stonks);
+		const popularTickers = stonksPopularTickerRows(stonks, stonksTickerKeySet(personalTickers));
+		return {
+			personalTickers: personalTickers,
+			popularTickers: popularTickers
+		};
+	}
+
+	function stonksTickerQuote(symbol, stonks) {
 		const normalized = normalizeStonksSymbol(symbol);
-		return normalized ? stonksPopularQuoteCache[normalized] : null;
+		if (!normalized) {
+			return null;
+		}
+		const stateQuotes = stonks && stonks.tickerQuotes;
+		if (stateQuotes && typeof stateQuotes === "object") {
+			const direct = stateQuotes[normalized] || stateQuotes[String(symbol || "").trim().toUpperCase()];
+			if (direct) {
+				return direct;
+			}
+		}
+		return stonksPopularQuoteCache[normalized] || null;
 	}
 
 	function stonksTickerQuoteTone(quote) {
@@ -1872,7 +4014,7 @@
 			const holders = Number(ticker.holderCount || 0);
 			parts.push(holders === 1 ? "1 holder" : holders + " holders");
 		} else {
-			parts.push("Your latest saved position");
+			parts.push("Your latest ledger position");
 		}
 		if (quote && quote.ok) {
 			const price = Number(quote.price);
@@ -1968,20 +4110,141 @@
 		stonksVisibleRefreshTimer = setTimeout(function() {
 			stonksVisibleRefreshTimer = 0;
 			const snapshot = getSnapshot();
-			if (!activeScopeIsStonksRoom(snapshot)) {
-				return;
-			}
 			const stonks = (snapshot.app || {}).stonks || {};
 			if (!stonks.supported || stonks.enabled === false) {
 				return;
 			}
+			const headerTickers = stonksHeaderTickerRows(stonks);
+			const visibleTickers = headerTickers.personalTickers.concat(headerTickers.popularTickers);
+			if (!activeScopeIsStonksRoom(snapshot) && !visibleTickers.length) {
+				return;
+			}
 			notifyBridge("invokeAppAction", "stonks.refreshVisible");
-			requestStonksTickerQuotes(stonksPersonalTickerRows(stonks).concat(stonksPopularTickerRows(stonks)), true);
+			requestStonksTickerQuotes(visibleTickers, true);
 			scheduleStonksVisibleRefresh();
 		}, stonksVisibleRefreshMs);
 	}
 
-	function appendStonksTickerGroup(parent, labelText, tickers, emptyText) {
+	function visibleModernUiTweaks(snapshot) {
+		const app = (snapshot || getSnapshot()).app || {};
+		return modernDialogState && modernDialogState.open && modernDialogState.uiTweaks
+			? modernDialogState.uiTweaks
+			: (app.uiTweaks || {});
+	}
+
+	function stonksTickerBannerAlwaysScroll(snapshot) {
+		return !!visibleModernUiTweaks(snapshot).tickerBannerAlwaysScroll;
+	}
+
+	function syncStonksTickerScrollState() {
+		stonksTickerScrollFrame = 0;
+		const header = refs.stonksLeaderboardHeader;
+		if (!header || header.classList.contains("hidden")) {
+			return;
+		}
+		const viewport = header.querySelector(".stonks-chat-header-viewport");
+		const track = header.querySelector(".stonks-chat-header-track");
+		const primaryRun = header.querySelector(".stonks-chat-header-run:not(.is-clone)");
+		if (!viewport || !track || !primaryRun) {
+			header.classList.remove("is-scrolling", "can-scroll", "is-static");
+			delete header.dataset.stonksMarqueeSignature;
+			return;
+		}
+		const hasTickerContent = !!primaryRun.children.length;
+		const overflows = hasTickerContent && primaryRun.scrollWidth > viewport.clientWidth + 1;
+		const alwaysScroll = hasTickerContent && stonksTickerBannerAlwaysScroll();
+		const shouldScroll = overflows || alwaysScroll;
+		const gap = stonksTickerMarqueeGap(track);
+		const distance = Math.max(1, Math.round(primaryRun.scrollWidth + gap));
+		const runCount = shouldScroll
+			? stonksTickerRunCount(viewport.clientWidth, primaryRun.scrollWidth, gap)
+			: 1;
+		const clonesChanged = syncStonksTickerCloneRuns(track, primaryRun, runCount);
+		if (shouldScroll) {
+			const durationSeconds = Math.max(18, Math.min(60, Math.round(distance / 28)));
+			header.style.setProperty("--stonks-marquee-duration", durationSeconds + "s");
+			header.style.setProperty("--stonks-marquee-distance", "-" + distance + "px");
+			const signature = [
+				runCount,
+				durationSeconds,
+				distance,
+				Math.round(viewport.clientWidth),
+				overflows ? "overflow" : "fit"
+			].join(":");
+			if (clonesChanged || header.dataset.stonksMarqueeSignature !== signature) {
+				header.dataset.stonksMarqueeSignature = signature;
+				restartStonksTickerAnimation(track);
+			}
+		} else {
+			header.style.removeProperty("--stonks-marquee-duration");
+			header.style.removeProperty("--stonks-marquee-distance");
+			delete header.dataset.stonksMarqueeSignature;
+		}
+		header.classList.toggle("can-scroll", overflows);
+		header.classList.toggle("is-scrolling", shouldScroll);
+		header.classList.toggle("is-static", hasTickerContent && !shouldScroll);
+	}
+
+	function stonksTickerMarqueeGap(track) {
+		if (!track || typeof window.getComputedStyle !== "function") {
+			return 0;
+		}
+		const style = window.getComputedStyle(track);
+		const value = style.getPropertyValue("--stonks-marquee-gap") || style.columnGap || style.gap || "0";
+		const gap = Number.parseFloat(value);
+		return Number.isFinite(gap) ? Math.max(0, gap) : 0;
+	}
+
+	function stonksTickerRunCount(viewportWidth, runWidth, gap) {
+		const safeViewportWidth = Math.max(0, Number(viewportWidth) || 0);
+		const safeRunWidth = Math.max(1, Number(runWidth) || 1);
+		const safeGap = Math.max(0, Number(gap) || 0);
+		const periodWidth = Math.max(1, safeRunWidth + safeGap);
+		const runCount = Math.ceil((safeViewportWidth + safeRunWidth + (safeGap * 2)) / periodWidth);
+		return Math.max(2, Math.min(16, runCount));
+	}
+
+	function syncStonksTickerCloneRuns(track, primaryRun, runCount) {
+		const targetCloneCount = Math.max(0, runCount - 1);
+		const clones = Array.from(track.querySelectorAll(".stonks-chat-header-run.is-clone"));
+		let changed = false;
+		while (clones.length > targetCloneCount) {
+			const clone = clones.pop();
+			clone.remove();
+			changed = true;
+		}
+		while (clones.length < targetCloneCount) {
+			const clone = primaryRun.cloneNode(true);
+			clone.classList.add("is-clone");
+			clone.setAttribute("aria-hidden", "true");
+			track.appendChild(clone);
+			clones.push(clone);
+			changed = true;
+		}
+		return changed;
+	}
+
+	function restartStonksTickerAnimation(track) {
+		if (!track) {
+			return;
+		}
+		track.style.animation = "none";
+		void track.offsetWidth;
+		track.style.removeProperty("animation");
+	}
+
+	function scheduleStonksTickerScrollSync() {
+		if (stonksTickerScrollFrame) {
+			return;
+		}
+		stonksTickerScrollFrame = requestAnimationFrame(syncStonksTickerScrollState);
+	}
+
+	function appendStonksTickerGroup(parent, labelText, tickers, emptyText, stonks) {
+		if (!tickers.length && !emptyText) {
+			return;
+		}
+
 		const group = document.createElement("div");
 		group.className = "stonks-chat-header-group";
 		const label = document.createElement("span");
@@ -1999,7 +4262,7 @@
 		}
 
 		tickers.forEach(function(ticker) {
-			const quote = stonksTickerQuote(stonksTickerLookupSymbol(ticker));
+			const quote = stonksTickerQuote(stonksTickerLookupSymbol(ticker), stonks);
 			const item = document.createElement("span");
 			item.className = "stonks-chat-header-ticker " + stonksTickerQuoteTone(quote);
 			item.innerHTML = "<strong></strong><span></span>";
@@ -2011,6 +4274,34 @@
 		parent.appendChild(group);
 	}
 
+	function clearStonksTickerHeader(header) {
+		if (!header) {
+			return;
+		}
+		stonksTickerRenderSignature = "";
+		header.innerHTML = "";
+		header.classList.remove("can-scroll", "is-scrolling", "is-static");
+		header.style.removeProperty("--stonks-marquee-duration");
+		header.style.removeProperty("--stonks-marquee-distance");
+		delete header.dataset.stonksMarqueeSignature;
+	}
+
+	function stonksTickerHeaderRenderSignature(personalTickers, popularTickers, stonks) {
+		const tickerSignature = function(ticker) {
+			const quote = stonksTickerQuote(stonksTickerLookupSymbol(ticker), stonks);
+			return {
+				symbol: ticker.symbol,
+				tone: stonksTickerQuoteTone(quote),
+				label: stonksTickerQuoteLabel(quote),
+				title: stonksTickerTooltip(ticker, quote)
+			};
+		};
+		return JSON.stringify({
+			yours: personalTickers.map(tickerSignature),
+			popular: popularTickers.map(tickerSignature)
+		});
+	}
+
 	function renderStonksChatHeader(snapshot) {
 		if (!refs.stonksLeaderboardHeader) {
 			return;
@@ -2018,20 +4309,74 @@
 
 		const app = snapshot.app || {};
 		const stonks = app.stonks || {};
-		const visible = activeScopeIsStonksRoom(snapshot) && !!stonks.supported && stonks.enabled !== false;
-		refs.stonksLeaderboardHeader.classList.toggle("hidden", !visible);
-		refs.stonksLeaderboardHeader.innerHTML = "";
+		const headerTickers = stonksHeaderTickerRows(stonks);
+		const personalTickers = headerTickers.personalTickers;
+		const popularTickers = headerTickers.popularTickers;
+		const hasTickers = personalTickers.length || popularTickers.length;
+		const connected = !!app.canDisconnect;
+		const supported = !!stonks.supported;
+		const automationHeaderVisible = !!stonks.automationHeaderVisible;
+		const visible = (connected || automationHeaderVisible) && stonks.enabled !== false;
+		const showTickerHeader = visible && supported && (hasTickers || automationHeaderVisible);
+		refs.stonksLeaderboardHeader.classList.toggle("hidden", !showTickerHeader);
+		refs.stonksLeaderboardHeader.classList.toggle("is-empty", visible && supported && !hasTickers);
+		refs.stonksLeaderboardHeader.classList.toggle("is-unavailable", visible && !supported);
+		refs.stonksLeaderboardHeader.title = hasTickers
+			? "Followed tickers - click to open Stonks"
+			: (supported ? "Waiting for Stonks tickers - click to open Stonks" : "This server has not advertised Stonks support");
 		if (!visible) {
+			clearStonksTickerHeader(refs.stonksLeaderboardHeader);
+			stopStonksVisibleRefreshTimer();
+			return;
+		}
+		if (!supported) {
+			clearStonksTickerHeader(refs.stonksLeaderboardHeader);
 			stopStonksVisibleRefreshTimer();
 			return;
 		}
 
-		const personalTickers = stonksPersonalTickerRows(stonks);
-		const popularTickers = stonksPopularTickerRows(stonks);
-		requestStonksTickerQuotes(personalTickers.concat(popularTickers), false);
-		scheduleStonksVisibleRefresh();
-		appendStonksTickerGroup(refs.stonksLeaderboardHeader, "Mine", personalTickers, "No saved tickers");
-		appendStonksTickerGroup(refs.stonksLeaderboardHeader, "Popular", popularTickers, "No popular tickers");
+		if (stonks.disableQuoteLookup) {
+			stopStonksVisibleRefreshTimer();
+		} else {
+			requestStonksTickerQuotes(personalTickers.concat(popularTickers), false);
+			scheduleStonksVisibleRefresh();
+		}
+		if (!hasTickers) {
+			const now = Date.now();
+			if (!stonks.disableQuoteLookup && (now - stonksEmptyStateRefreshAt) > stonksEmptyStateRefreshMs) {
+				stonksEmptyStateRefreshAt = now;
+				notifyBridge("invokeAppAction", "stonks.refreshVisible");
+			}
+			clearStonksTickerHeader(refs.stonksLeaderboardHeader);
+			return;
+		}
+		const nextSignature = stonksTickerHeaderRenderSignature(personalTickers, popularTickers, stonks);
+		if (stonksTickerRenderSignature === nextSignature
+				&& refs.stonksLeaderboardHeader.querySelector(".stonks-chat-header-viewport")) {
+			scheduleStonksTickerScrollSync();
+			return;
+		}
+		stonksTickerRenderSignature = nextSignature;
+		refs.stonksLeaderboardHeader.innerHTML = "";
+		refs.stonksLeaderboardHeader.classList.remove("can-scroll", "is-scrolling", "is-static");
+		refs.stonksLeaderboardHeader.style.removeProperty("--stonks-marquee-duration");
+		refs.stonksLeaderboardHeader.style.removeProperty("--stonks-marquee-distance");
+		delete refs.stonksLeaderboardHeader.dataset.stonksMarqueeSignature;
+		appendStonksTickerGroup(refs.stonksLeaderboardHeader, "Yours", personalTickers, "", stonks);
+		appendStonksTickerGroup(refs.stonksLeaderboardHeader, "Popular", popularTickers, "", stonks);
+		const viewport = document.createElement("div");
+		viewport.className = "stonks-chat-header-viewport";
+		const track = document.createElement("div");
+		track.className = "stonks-chat-header-track";
+		const primaryRun = document.createElement("div");
+		primaryRun.className = "stonks-chat-header-run";
+		while (refs.stonksLeaderboardHeader.firstChild) {
+			primaryRun.appendChild(refs.stonksLeaderboardHeader.firstChild);
+		}
+		track.appendChild(primaryRun);
+		viewport.appendChild(track);
+		refs.stonksLeaderboardHeader.appendChild(viewport);
+		scheduleStonksTickerScrollSync();
 	}
 
 	function screenShareVisible(share) {
@@ -2068,8 +4413,24 @@
 		}
 	}
 
+	function renderScreenShareButtonContent(label, status) {
+		refs.screenShareButton.innerHTML = "<svg class=\"screen-share-button-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" width=\"15\" height=\"15\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"3\" y=\"4\" width=\"18\" height=\"12\" rx=\"2\"></rect><path d=\"M8 20h8\"></path><path d=\"M12 16v4\"></path></svg><span class=\"screen-share-button-label\"></span><span class=\"screen-share-button-status\"></span>";
+		const labelEl = refs.screenShareButton.querySelector(".screen-share-button-label");
+		const statusEl = refs.screenShareButton.querySelector(".screen-share-button-status");
+		if (labelEl) {
+			labelEl.textContent = label || "Share screen";
+		}
+		if (statusEl) {
+			statusEl.textContent = status || "";
+			statusEl.classList.toggle("hidden", !status);
+		}
+	}
+
 	function renderScreenShareHeader(scope, share) {
 		const visible = screenShareVisible(share);
+		if (refs.appShell) {
+			refs.appShell.classList.toggle("scope-has-screen-share", visible);
+		}
 		const active = String(share && share.mode || "") === "publishing"
 			|| String(share && share.mode || "") === "viewing"
 			|| String(share && share.mode || "") === "fallback";
@@ -2085,7 +4446,7 @@
 		refs.screenShareButton.className = buttonClasses.join(" ");
 		if (!visible) {
 			refs.screenShareButton.disabled = true;
-			refs.screenShareButton.textContent = "Share screen";
+			renderScreenShareButtonContent("Share screen", "");
 			refs.screenShareButton.title = "Share screen";
 			refs.screenShareButton.dataset.scopeToken = "";
 			refs.screenShareButton.dataset.actionId = "";
@@ -2094,7 +4455,7 @@
 
 		const label = share.primaryLabel || "Share screen";
 		const hint = share.primaryHint || label;
-		refs.screenShareButton.textContent = label;
+		renderScreenShareButtonContent(label, screenShareStatusText(share));
 		refs.screenShareButton.disabled = share.primaryEnabled === false;
 		refs.screenShareButton.title = hint;
 		refs.screenShareButton.dataset.scopeToken = scope.scopeToken || share.scopeToken || "";
@@ -2237,6 +4598,1104 @@
 		}) || null;
 	}
 
+	function directMessageSessionValue(conversation) {
+		const value = Number(conversation && (conversation.session || conversation.peerSession || 0));
+		return Number.isFinite(value) && value > 0 ? value : 0;
+	}
+
+	function directMessageToken(session) {
+		return "dm:" + String(Number(session || 0));
+	}
+
+	function directMessageBridgeScopeToken(session) {
+		return "-2:" + String(Number(session || 0));
+	}
+
+	function isDirectMessageScopeToken(scopeToken) {
+		return /^(?:dm|-2):\d+$/i.test(String(scopeToken || "").trim());
+	}
+
+	function directMessageSessionFromToken(scopeToken) {
+		const match = /^(?:dm|-2):(\d+)$/i.exec(String(scopeToken || "").trim());
+		if (!match) {
+			return 0;
+		}
+		const session = Number(match[1]);
+		return Number.isFinite(session) && session > 0 ? session : 0;
+	}
+
+	function directMessageState(snapshot) {
+		const app = snapshot && snapshot.app ? snapshot.app : {};
+		const state = app.directMessages;
+		return state && typeof state === "object" ? state : null;
+	}
+
+	function directMessageConversations(state) {
+		return Array.isArray(state && state.conversations) ? state.conversations.filter(Boolean) : [];
+	}
+
+	function directMessageWindows(state) {
+		return Array.isArray(state && state.windows) ? state.windows.filter(Boolean) : [];
+	}
+
+	function directMessageDraftKey(session) {
+		session = Number(session || 0);
+		return Number.isFinite(session) && session > 0 ? String(session) : "";
+	}
+
+	function directMessageInputForSession(session) {
+		const key = directMessageDraftKey(session);
+		if (!key || !refs.directMessageDock) {
+			return null;
+		}
+		const windows = Array.prototype.slice.call(
+			refs.directMessageDock.querySelectorAll(".direct-message-window")
+		);
+		for (let index = 0; index < windows.length; index += 1) {
+			if (String(windows[index].dataset.session || "") === key) {
+				return windows[index].querySelector(".direct-message-input");
+			}
+		}
+		return null;
+	}
+
+	function syncDirectMessageInputHeight(input) {
+		if (!input) {
+			return;
+		}
+		input.style.height = "0px";
+		input.style.height = Math.min(input.scrollHeight, 120) + "px";
+	}
+
+	function rememberDirectMessageInputDraft(session, input) {
+		const key = directMessageDraftKey(session);
+		if (!key || !input) {
+			return;
+		}
+		const value = String(input.value || "");
+		if (!value) {
+			delete directMessageDrafts[key];
+			return;
+		}
+		directMessageDrafts[key] = {
+			value: value,
+			selectionStart: typeof input.selectionStart === "number" ? input.selectionStart : value.length,
+			selectionEnd: typeof input.selectionEnd === "number" ? input.selectionEnd : value.length,
+			updatedAt: Date.now()
+		};
+	}
+
+	function captureDirectMessageDockState() {
+		if (!refs.directMessageDock) {
+			return null;
+		}
+
+		const activeElement = document.activeElement;
+		let focusState = null;
+		refs.directMessageDock.querySelectorAll(".direct-message-window").forEach(function(windowElement) {
+			const session = Number(windowElement.dataset.session || 0);
+			const key = directMessageDraftKey(session);
+			if (!key) {
+				return;
+			}
+			directMessageWindowUiState[key] = {
+				minimized: windowElement.classList.contains("is-minimized")
+			};
+			const input = windowElement.querySelector(".direct-message-input");
+			if (input) {
+				rememberDirectMessageInputDraft(session, input);
+				if (input === activeElement) {
+					focusState = {
+						session: session,
+						selectionStart: typeof input.selectionStart === "number" ? input.selectionStart : null,
+						selectionEnd: typeof input.selectionEnd === "number" ? input.selectionEnd : null
+					};
+				}
+			}
+		});
+		return focusState;
+	}
+
+	function restoreDirectMessageDockFocus(focusState) {
+		if (!focusState || !focusState.session) {
+			return;
+		}
+		const input = directMessageInputForSession(focusState.session);
+		if (!input || typeof input.focus !== "function") {
+			return;
+		}
+		input.focus({ preventScroll: true });
+		if (typeof input.setSelectionRange === "function"
+				&& typeof focusState.selectionStart === "number"
+				&& typeof focusState.selectionEnd === "number") {
+			try {
+				input.setSelectionRange(focusState.selectionStart, focusState.selectionEnd);
+			} catch (error) {
+				// Some input implementations reject selection restoration.
+			}
+		}
+		syncDirectMessageInputHeight(input);
+	}
+
+	function pruneDirectMessageDraftState(windows) {
+		const activeKeys = {};
+		(windows || []).forEach(function(conversation) {
+			const key = directMessageDraftKey(directMessageSessionValue(conversation));
+			if (key) {
+				activeKeys[key] = true;
+			}
+		});
+		Object.keys(directMessageDrafts).forEach(function(key) {
+			if (!activeKeys[key]) {
+				delete directMessageDrafts[key];
+			}
+		});
+		Object.keys(directMessageWindowUiState).forEach(function(key) {
+			if (!activeKeys[key]) {
+				delete directMessageWindowUiState[key];
+			}
+		});
+	}
+
+	function mergedDirectMessageConversation(state, session) {
+		if (!state || !session) {
+			return null;
+		}
+
+		const matchSession = function(conversation) {
+			return directMessageSessionValue(conversation) === session;
+		};
+		const base = directMessageConversations(state).find(matchSession) || null;
+		const windowState = directMessageWindows(state).find(matchSession) || null;
+		if (!base && !windowState) {
+			return null;
+		}
+
+		const merged = Object.assign({}, base || {}, windowState || {});
+		if (!Array.isArray(merged.messages)) {
+			merged.messages = Array.isArray(base && base.messages) ? base.messages : [];
+		}
+		if (!merged.token) {
+			merged.token = directMessageToken(session);
+		}
+		if (!merged.session) {
+			merged.session = session;
+		}
+		if (!merged.peerSession) {
+			merged.peerSession = session;
+		}
+		return merged;
+	}
+
+	function activeDirectMessageConversation(snapshot) {
+		const scopeToken = String(snapshot && snapshot.activeScope && snapshot.activeScope.scopeToken || "");
+		const session = directMessageSessionFromToken(scopeToken);
+		const state = directMessageState(snapshot);
+		if (session) {
+			const conversation = mergedDirectMessageConversation(state, session);
+			if (conversation) {
+				return conversation;
+			}
+		}
+
+		const activeScope = snapshot && snapshot.activeScope ? snapshot.activeScope : {};
+		const activeLabel = String(activeScope.label || "").trim();
+		const conversations = directMessageConversations(state);
+		const match = activeLabel
+			? conversations.find(function(conversation) {
+				return String(conversation && conversation.label || "").trim() === activeLabel;
+			})
+			: null;
+		if (match) {
+			return mergedDirectMessageConversation(state, directMessageSessionValue(match));
+		}
+
+		const kindLabel = String(activeScope.kindLabel || "").trim().toLowerCase();
+		if (kindLabel !== "direct message") {
+			return null;
+		}
+
+		const fallback = conversations[0] || null;
+		return fallback ? mergedDirectMessageConversation(state, directMessageSessionValue(fallback)) : null;
+	}
+
+	function directMessageIsPrivate(conversation) {
+		const mode = String(conversation && conversation.mode || "").toLowerCase();
+		return !!(conversation && (conversation.privateMode || mode === "private"));
+	}
+
+	function formatDirectMessageTime(createdAtMs) {
+		const value = Number(createdAtMs || 0);
+		if (!Number.isFinite(value) || value <= 0) {
+			return "";
+		}
+		const date = new Date(value);
+		if (Number.isNaN(date.getTime())) {
+			return "";
+		}
+		const hours = String(date.getHours()).padStart(2, "0");
+		const minutes = String(date.getMinutes()).padStart(2, "0");
+		return hours + ":" + minutes;
+	}
+
+	function directMessageTimelineMessages(conversation) {
+		const peerSession = directMessageSessionValue(conversation);
+		return (conversation && Array.isArray(conversation.messages) ? conversation.messages : []).map(function(entry, index) {
+			const messageId = entry.messageId || entry.localId || entry.id || (peerSession + "-" + index);
+			const own = !!entry.own || String(entry.direction || "").toLowerCase() === "outgoing";
+			const bodyHtml = String(entry.messageHtml || "").trim()
+				|| escapedMultilineText(entry.plainText || "");
+			return {
+				messageId: "dm-" + String(messageId),
+				threadId: "dm-" + String(peerSession || "conversation"),
+				createdAtMs: entry.createdAtMs || 0,
+				actor: entry.actorName || (own ? "You" : (conversation.label || "Direct message")),
+				actorKey: own ? "self" : ("dm-" + String(peerSession || "peer")),
+				timeLabel: formatDirectMessageTime(entry.createdAtMs),
+				bodyText: entry.plainText || "",
+				bodyHtml: bodyHtml,
+				own: own,
+				system: false,
+				canReply: false,
+				canReact: false,
+				canDelete: false,
+				reactions: []
+			};
+		});
+	}
+
+	function directMessagePreviewText(conversation) {
+		const preview = String(conversation && conversation.lastMessagePreview || "").trim();
+		if (preview) {
+			return (conversation.lastMessageOwn ? "You: " : "") + preview;
+		}
+		return String(conversation && conversation.subtitle || conversation && conversation.statusLabel || "Direct message");
+	}
+
+	function directMessageActiveScope(conversation) {
+		const session = directMessageSessionValue(conversation);
+		const label = String(conversation && conversation.label || "Direct message");
+		const privateMode = directMessageIsPrivate(conversation);
+		const canSend = conversation && conversation.canSend !== false;
+		return {
+			scopeToken: directMessageToken(session),
+			kindLabel: "Direct message",
+			label: label,
+			description: privateMode ? "Private - in-memory only" : (conversation.statusLabel || "Direct message"),
+			meta: [
+				privateMode ? "Private mode" : (conversation.persistentHistory ? "Persistent history" : "Private transport"),
+				conversation && conversation.subtitle ? conversation.subtitle : "",
+				conversation && conversation.unreadCount ? String(conversation.unreadCount) + " unread" : ""
+			].filter(Boolean),
+			canLoadOlder: false,
+			canMarkRead: !!(conversation && conversation.unreadCount),
+			canSend: canSend,
+			canAttachImages: false,
+			composerPlaceholder: "Message " + label,
+			composerHint: privateMode
+				? "Private direct messages stay in memory for this session."
+				: "Direct messages stay separate from room chat.",
+			emptyCopy: conversation && conversation.emptyCopy
+				? conversation.emptyCopy
+				: "Direct messages with " + label + " will appear here.",
+			screenShare: { visible: false, available: false, mode: "idle", overflowActions: [] },
+			scrollToBottom: true
+		};
+	}
+
+	function updateLocalDirectMessageState(mutator) {
+		if (modernBridge) {
+			return false;
+		}
+		const snapshot = getSnapshot();
+		const app = snapshot.app || {};
+		const state = app.directMessages;
+		if (!state || typeof state !== "object" || typeof mutator !== "function") {
+			return false;
+		}
+		snapshot.app = app;
+		mutator(state, snapshot);
+		render(snapshot);
+		return true;
+	}
+
+	function ensureLocalDirectMessageWindow(state, session) {
+		if (!state || !session) {
+			return null;
+		}
+		if (!Array.isArray(state.conversations)) {
+			state.conversations = [];
+		}
+		if (!Array.isArray(state.windows)) {
+			state.windows = [];
+		}
+
+		let conversation = state.conversations.find(function(candidate) {
+			return directMessageSessionValue(candidate) === session;
+		});
+		if (!conversation) {
+			conversation = {
+				token: directMessageToken(session),
+				session: session,
+				peerSession: session,
+				label: "User " + session,
+				subtitle: "Direct message",
+				canSend: true,
+				mode: state.defaultMode || "private",
+				messages: []
+			};
+			state.conversations.push(conversation);
+		}
+
+		let windowState = state.windows.find(function(candidate) {
+			return directMessageSessionValue(candidate) === session;
+		});
+		if (!windowState) {
+			windowState = Object.assign({}, conversation);
+			windowState.messages = Array.isArray(conversation.messages) ? conversation.messages.slice() : [];
+			state.windows.push(windowState);
+		}
+
+		conversation.open = true;
+		conversation.unreadCount = 0;
+		windowState.open = true;
+		windowState.unreadCount = 0;
+		return windowState;
+	}
+
+	function selectLocalDirectMessage(conversation) {
+		const session = directMessageSessionValue(conversation);
+		if (!session) {
+			return;
+		}
+		updateLocalDirectMessageState(function(state, snapshot) {
+			const windowState = ensureLocalDirectMessageWindow(state, session) || conversation;
+			(snapshot.voiceRooms || []).forEach(function(room) { if (room) { room.selected = false; } });
+			(snapshot.textRooms || []).forEach(function(room) { if (room) { room.selected = false; } });
+			snapshot.activeScope = directMessageActiveScope(windowState);
+			snapshot.messages = [];
+		});
+	}
+
+	function invokeDirectMessageOpen(conversation, selectScope) {
+		const session = directMessageSessionValue(conversation);
+		if (!session) {
+			return false;
+		}
+		hideDirectMessageTray();
+		let handled = notifyBridge("openDirectMessage", session);
+		if (!handled) {
+			handled = updateLocalDirectMessageState(function(state) {
+				ensureLocalDirectMessageWindow(state, session);
+			});
+		}
+		if (selectScope !== false) {
+			if (!notifyBridge("selectScope", directMessageBridgeScopeToken(session))) {
+				selectLocalDirectMessage(conversation);
+			}
+		}
+		notifyBridge("markDirectMessageRead", session);
+		return handled;
+	}
+
+	function invokeDirectMessageClose(session) {
+		session = Number(session || 0);
+		if (!session) {
+			return false;
+		}
+		if (notifyBridge("closeDirectMessage", session)) {
+			return true;
+		}
+		return updateLocalDirectMessageState(function(state) {
+			(state.conversations || []).forEach(function(conversation) {
+				if (directMessageSessionValue(conversation) === session) {
+					conversation.open = false;
+				}
+			});
+			state.windows = (state.windows || []).filter(function(conversation) {
+				return directMessageSessionValue(conversation) !== session;
+			});
+		});
+	}
+
+	function invokeDirectMessageMode(session, mode) {
+		session = Number(session || 0);
+		mode = String(mode || "private");
+		if (!session) {
+			return false;
+		}
+		if (notifyBridge("setDirectMessageMode", session, mode)) {
+			return true;
+		}
+		return updateLocalDirectMessageState(function(state, snapshot) {
+			const windowState = ensureLocalDirectMessageWindow(state, session);
+			[state.conversations || [], state.windows || []].forEach(function(list) {
+				list.forEach(function(conversation) {
+					if (directMessageSessionValue(conversation) !== session) {
+						return;
+					}
+					conversation.mode = mode === "history" ? "history" : "private";
+					conversation.privateMode = conversation.mode === "private";
+					conversation.persistentHistory = conversation.mode === "history";
+				});
+			});
+			if (isDirectMessageScopeToken(snapshot.activeScope && snapshot.activeScope.scopeToken)) {
+				snapshot.activeScope = directMessageActiveScope(windowState || mergedDirectMessageConversation(state, session));
+			}
+		});
+	}
+
+	function invokeDirectMessageSend(session, message) {
+		session = Number(session || 0);
+		const value = String(message || "").trim();
+		if (!session || !value) {
+			return false;
+		}
+		if (notifyBridge("sendDirectMessage", session, value)) {
+			return true;
+		}
+		return updateLocalDirectMessageState(function(state) {
+			const windowState = ensureLocalDirectMessageWindow(state, session);
+			if (!windowState) {
+				return;
+			}
+			const entry = {
+				id: "local-" + Date.now(),
+				localId: Date.now(),
+				peerSession: session,
+				actorName: "You",
+				own: true,
+				direction: "outgoing",
+				messageHtml: escapedMultilineText(value),
+				plainText: value,
+				createdAtMs: Date.now()
+			};
+			if (!Array.isArray(windowState.messages)) {
+				windowState.messages = [];
+			}
+			windowState.messages.push(entry);
+			(state.conversations || []).forEach(function(conversation) {
+				if (directMessageSessionValue(conversation) !== session) {
+					return;
+				}
+				conversation.lastMessagePreview = value;
+				conversation.lastMessageOwn = true;
+				conversation.messages = windowState.messages.slice();
+			});
+		});
+	}
+
+	function ensureDirectMessageButton() {
+		if (refs.directMessageButton && document.body.contains(refs.directMessageButton)) {
+			return refs.directMessageButton;
+		}
+		const controls = refs.selfCard ? refs.selfCard.querySelector(".self-controls") : null;
+		if (!controls) {
+			return null;
+		}
+
+		const button = document.createElement("button");
+		button.id = "direct-message-button";
+		button.type = "button";
+		button.className = "icon-button self-control direct-message-button hidden";
+		button.title = "Direct messages";
+		button.setAttribute("aria-label", "Direct messages");
+		button.setAttribute("aria-haspopup", "dialog");
+		button.setAttribute("aria-expanded", "false");
+		button.innerHTML =
+			"<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 5h16v11H8l-4 4z\"></path><path d=\"M8 9h8\"></path><path d=\"M8 12h5\"></path></svg>"
+			+ "<span class=\"direct-message-button-badge\" hidden></span>";
+		button.addEventListener("click", function(event) {
+			event.preventDefault();
+			event.stopPropagation();
+			toggleDirectMessageTray();
+		});
+
+		controls.insertBefore(button, refs.stonksButton || refs.selfCardSettingsButton || null);
+		refs.directMessageButton = button;
+		refs.directMessageBadge = button.querySelector(".direct-message-button-badge");
+		return button;
+	}
+
+	function ensureDirectMessageRailSection() {
+		if (refs.directMessageSection && document.body.contains(refs.directMessageSection)) {
+			return refs.directMessageSection;
+		}
+		if (!refs.utilityScroll) {
+			return null;
+		}
+
+		const section = document.createElement("section");
+		section.id = "direct-message-section";
+		section.className = "rail-section direct-message-section hidden";
+		section.innerHTML =
+			"<div class=\"section-heading\">"
+			+ "<span id=\"direct-message-section-label\" class=\"section-label\">Direct messages</span>"
+			+ "<span id=\"direct-message-count\" class=\"quiet-count\">0</span>"
+			+ "</div>"
+			+ "<div id=\"direct-message-list\" class=\"rail-list direct-message-list\" role=\"listbox\" aria-labelledby=\"direct-message-section-label\"></div>";
+
+		const textSection = document.getElementById("text-section");
+		if (textSection && textSection.parentElement === refs.utilityScroll) {
+			textSection.insertAdjacentElement("afterend", section);
+		} else {
+			refs.utilityScroll.appendChild(section);
+		}
+
+		refs.directMessageSection = section;
+		refs.directMessageList = section.querySelector("#direct-message-list");
+		refs.directMessageCount = section.querySelector("#direct-message-count");
+		return section;
+	}
+
+	function ensureDirectMessageTray() {
+		if (refs.directMessageTray && document.body.contains(refs.directMessageTray)) {
+			return refs.directMessageTray;
+		}
+		const tray = document.createElement("div");
+		tray.id = "direct-message-tray";
+		tray.className = "direct-message-tray self-menu-popover hidden";
+		tray.setAttribute("role", "dialog");
+		tray.setAttribute("aria-hidden", "true");
+		document.body.appendChild(tray);
+		refs.directMessageTray = tray;
+		return tray;
+	}
+
+	function ensureDirectMessageDock() {
+		if (refs.directMessageDock && document.body.contains(refs.directMessageDock)) {
+			return refs.directMessageDock;
+		}
+		const dock = document.createElement("div");
+		dock.id = "direct-message-dock";
+		dock.className = "direct-message-dock";
+		document.body.appendChild(dock);
+		refs.directMessageDock = dock;
+		return dock;
+	}
+
+	function hideDirectMessageTray() {
+		directMessageTrayOpen = false;
+		if (refs.directMessageTray) {
+			refs.directMessageTray.classList.add("hidden");
+			refs.directMessageTray.setAttribute("aria-hidden", "true");
+		}
+		if (refs.directMessageButton) {
+			refs.directMessageButton.setAttribute("aria-expanded", "false");
+		}
+	}
+
+	function positionDirectMessageTray() {
+		if (!directMessageTrayOpen || !refs.directMessageTray || !refs.directMessageButton
+				|| refs.directMessageTray.classList.contains("hidden")) {
+			return;
+		}
+		const anchorBounds = refs.directMessageButton.getBoundingClientRect();
+		const trayBounds = refs.directMessageTray.getBoundingClientRect();
+		const left = Math.max(8, Math.min(anchorBounds.right - trayBounds.width + 8,
+			window.innerWidth - trayBounds.width - 8));
+		const belowTop = anchorBounds.bottom + 10;
+		const aboveTop = anchorBounds.top - trayBounds.height - 10;
+		const top = (belowTop + trayBounds.height <= window.innerHeight - 8)
+			? belowTop
+			: Math.max(8, aboveTop);
+		refs.directMessageTray.style.left = left + "px";
+		refs.directMessageTray.style.top = top + "px";
+	}
+
+	function toggleDirectMessageTray(forceOpen) {
+		const nextOpen = typeof forceOpen === "boolean" ? forceOpen : !directMessageTrayOpen;
+		if (!nextOpen) {
+			hideDirectMessageTray();
+			return;
+		}
+		hideAppMenu();
+		hideSelfMenu();
+		hideContextMenu();
+		directMessageTrayOpen = true;
+		renderDirectMessageTray(directMessageState(getSnapshot()) || {});
+	}
+
+	function renderDirectMessageButton(state) {
+		const button = ensureDirectMessageButton();
+		if (!button) {
+			return;
+		}
+		const conversations = directMessageConversations(state);
+		const unreadTotal = Number(state && state.unreadTotal || conversations.reduce(function(total, conversation) {
+			return total + Number(conversation.unreadCount || 0);
+		}, 0));
+		const available = !!state && (state.available !== false || conversations.length > 0);
+		button.classList.toggle("hidden", !available);
+		button.disabled = !available;
+		button.classList.toggle("has-unread", unreadTotal > 0);
+		button.title = unreadTotal > 0
+			? String(unreadTotal) + " unread direct message" + (unreadTotal === 1 ? "" : "s")
+			: (state && state.title) || "Direct messages";
+		if (refs.directMessageBadge) {
+			const hasUnread = unreadTotal > 0;
+			refs.directMessageBadge.hidden = !hasUnread;
+			refs.directMessageBadge.textContent = hasUnread ? (unreadTotal > 9 ? "9+" : String(unreadTotal)) : "";
+		}
+	}
+
+	function renderDirectMessageRail(state, snapshot) {
+		const section = ensureDirectMessageRailSection();
+		if (!section || !refs.directMessageList) {
+			return;
+		}
+		const conversations = directMessageConversations(state);
+		const hasConversations = conversations.length > 0;
+		section.classList.toggle("hidden", !hasConversations);
+		if (refs.directMessageCount) {
+			const unreadTotal = Number(state && state.unreadTotal || 0);
+			refs.directMessageCount.textContent = String(unreadTotal || conversations.length);
+			refs.directMessageCount.classList.toggle("has-unread", unreadTotal > 0);
+		}
+		if (!hasConversations) {
+			refs.directMessageList.innerHTML = "";
+			return;
+		}
+
+		const activeSession = directMessageSessionFromToken(snapshot && snapshot.activeScope && snapshot.activeScope.scopeToken);
+		const fragment = document.createDocumentFragment();
+		conversations.forEach(function(conversation) {
+			const session = directMessageSessionValue(conversation);
+			const token = conversation.token || directMessageToken(session);
+			const selected = !!session && activeSession === session;
+			const unread = Number(conversation.unreadCount || 0);
+			const wrapper = document.createElement("div");
+			wrapper.className = "rail-row-wrapper direct-message-row-wrapper";
+			wrapper.setAttribute("role", "option");
+			wrapper.setAttribute("aria-label", conversation.label || "Direct message");
+			wrapper.setAttribute("aria-selected", selected ? "true" : "false");
+			wrapper.dataset.scopeToken = token;
+
+			const row = document.createElement("button");
+			row.type = "button";
+			row.className = "rail-row room-node direct-message-row"
+				+ (selected ? " is-selected is-active" : "")
+				+ (conversation.open ? " is-open" : "")
+				+ (unread > 0 ? " has-unread" : "");
+			row.dataset.scopeToken = token;
+			row.dataset.session = String(session || "");
+			row.title = directMessagePreviewText(conversation);
+
+			const avatar = document.createElement("span");
+			avatar.className = "dm-rail-avatar avatar";
+			styleAvatar(avatar, conversation.label || "Direct message", false, conversation.avatarUrl || "");
+
+			const copy = document.createElement("span");
+			copy.className = "rail-row-copy room-copy";
+			const title = document.createElement("span");
+			title.className = "rail-row-title room-name";
+			title.textContent = conversation.label || "Direct message";
+			const subtitle = document.createElement("span");
+			subtitle.className = "rail-row-subtitle room-subtitle";
+			subtitle.textContent = directMessagePreviewText(conversation);
+			copy.appendChild(title);
+			copy.appendChild(subtitle);
+
+			const meta = document.createElement("span");
+			meta.className = "rail-row-meta room-meta";
+			if (directMessageIsPrivate(conversation)) {
+				const modeGlyph = document.createElement("span");
+				modeGlyph.className = "dm-mode-glyph";
+				modeGlyph.innerHTML = privateModeGhostSvg();
+				modeGlyph.title = "Private mode";
+				meta.appendChild(modeGlyph);
+			}
+			if (unread > 0) {
+				const unreadBadge = document.createElement("span");
+				unreadBadge.className = "row-count dm-unread-count";
+				unreadBadge.textContent = unread > 99 ? "99+" : String(unread);
+				meta.appendChild(unreadBadge);
+			}
+
+			row.appendChild(avatar);
+			row.appendChild(copy);
+			row.appendChild(meta);
+			row.addEventListener("click", function(event) {
+				event.preventDefault();
+				invokeDirectMessageOpen(conversation, true);
+				dismissCompactRailAfterAction();
+			});
+			row.addEventListener("contextmenu", function(event) {
+				event.preventDefault();
+				event.stopPropagation();
+				showContextMenu(directMessageContextItems(conversation), event.clientX, event.clientY);
+			});
+			wrapper.appendChild(row);
+			fragment.appendChild(wrapper);
+		});
+		replaceChildrenWith(refs.directMessageList, fragment);
+	}
+
+	function directMessageContextItems(conversation) {
+		const session = directMessageSessionValue(conversation);
+		const privateMode = directMessageIsPrivate(conversation);
+		const historyUnavailableReason = conversation && conversation.historyUnavailableReason
+			? String(conversation.historyUnavailableReason)
+			: "Persistent history is unavailable for this direct message.";
+		return normalizedActionPanelItems([
+			{
+				label: "Open",
+				enabled: !!session,
+				action: function() {
+					invokeDirectMessageOpen(conversation, true);
+				}
+			},
+			{
+				label: "Mark read",
+				enabled: !!session && Number(conversation.unreadCount || 0) > 0,
+				action: function() {
+					if (!notifyBridge("markDirectMessageRead", session)) {
+						updateLocalDirectMessageState(function(state) {
+							(state.conversations || []).concat(state.windows || []).forEach(function(item) {
+								if (directMessageSessionValue(item) === session) {
+									item.unreadCount = 0;
+								}
+							});
+						});
+					}
+				}
+			},
+			{ separator: true },
+			{
+				label: privateMode ? "Use history mode" : "Use private mode",
+				icon: privateMode ? "history" : "ghost",
+				enabled: !!session && (!privateMode || conversation.canPersistHistory !== false),
+				hint: privateMode && conversation.canPersistHistory === false ? historyUnavailableReason : "",
+				action: function() {
+					invokeDirectMessageMode(session, privateMode ? "history" : "private");
+				}
+			},
+			{
+				label: "Close window",
+				enabled: !!session && !!conversation.open,
+				tone: "danger",
+				action: function() {
+					invokeDirectMessageClose(session);
+				}
+			}
+		], { hideDisabled: true });
+	}
+
+	function renderDirectMessageTray(state) {
+		const tray = ensureDirectMessageTray();
+		if (!tray) {
+			return;
+		}
+		const conversations = directMessageConversations(state);
+		tray.innerHTML = "";
+
+		const header = document.createElement("div");
+		header.className = "direct-message-tray-header";
+		const title = document.createElement("p");
+		title.className = "direct-message-tray-title";
+		title.textContent = (state && state.title) || "Direct messages";
+		const description = document.createElement("p");
+		description.className = "direct-message-tray-description";
+		description.textContent = (state && state.description) || "Private conversations stay separate from room chat.";
+		header.appendChild(title);
+		header.appendChild(description);
+		tray.appendChild(header);
+
+		if (!conversations.length) {
+			const empty = document.createElement("div");
+			empty.className = "direct-message-tray-empty";
+			empty.textContent = "No conversations yet.";
+			tray.appendChild(empty);
+		} else {
+			conversations.forEach(function(conversation) {
+				const session = directMessageSessionValue(conversation);
+				const row = document.createElement("button");
+				row.type = "button";
+				row.className = "direct-message-tray-row" + (conversation.unreadCount ? " has-unread" : "");
+				row.dataset.session = String(session || "");
+
+				const avatar = document.createElement("span");
+				avatar.className = "direct-message-tray-avatar avatar";
+				styleAvatar(avatar, conversation.label || "Direct message", false, conversation.avatarUrl || "");
+				const copy = document.createElement("span");
+				copy.className = "direct-message-tray-copy";
+				const name = document.createElement("span");
+				name.className = "direct-message-tray-name";
+				name.textContent = conversation.label || "Direct message";
+				const preview = document.createElement("span");
+				preview.className = "direct-message-tray-preview";
+				preview.textContent = directMessagePreviewText(conversation);
+				copy.appendChild(name);
+				copy.appendChild(preview);
+				row.appendChild(avatar);
+				row.appendChild(copy);
+				if (conversation.unreadCount) {
+					const badge = document.createElement("span");
+					badge.className = "direct-message-tray-badge";
+					badge.textContent = conversation.unreadCount > 99 ? "99+" : String(conversation.unreadCount);
+					row.appendChild(badge);
+				}
+				row.addEventListener("click", function(event) {
+					event.preventDefault();
+					invokeDirectMessageOpen(conversation, true);
+				});
+				tray.appendChild(row);
+			});
+		}
+
+		if (directMessageTrayOpen || state.trayOpen === true) {
+			directMessageTrayOpen = true;
+			tray.classList.remove("hidden");
+			tray.setAttribute("aria-hidden", "false");
+			if (refs.directMessageButton) {
+				refs.directMessageButton.setAttribute("aria-expanded", "true");
+			}
+			requestAnimationFrame(positionDirectMessageTray);
+		} else {
+			hideDirectMessageTray();
+		}
+	}
+
+	function renderDirectMessageWindowMessage(list, entry, conversation) {
+		const message = document.createElement("article");
+		const own = !!entry.own || String(entry.direction || "").toLowerCase() === "outgoing";
+		message.className = "direct-message-message" + (own ? " is-own" : "");
+		message.dataset.messageId = String(entry.messageId || entry.localId || entry.id || "");
+
+		const avatar = document.createElement("span");
+		avatar.className = "direct-message-message-avatar avatar";
+		styleAvatar(avatar, entry.actorName || (own ? "You" : conversation.label), own, own ? "" : conversation.avatarUrl || "");
+
+		const body = document.createElement("div");
+		body.className = "direct-message-message-body";
+		const head = document.createElement("div");
+		head.className = "direct-message-message-head";
+		const author = document.createElement("span");
+		author.className = "direct-message-message-author";
+		author.textContent = entry.actorName || (own ? "You" : conversation.label || "Direct message");
+		const time = document.createElement("span");
+		time.className = "direct-message-message-time";
+		time.textContent = formatDirectMessageTime(entry.createdAtMs);
+		head.appendChild(author);
+		head.appendChild(time);
+		const text = document.createElement("div");
+		text.className = "direct-message-message-text";
+		const rawMessageHtml = String(entry.messageHtml || "").trim();
+		const embeddedReply = extractEmbeddedReplyQuote(rawMessageHtml);
+		const messageHtml = embeddedReply.found ? embeddedReply.bodyHtml : rawMessageHtml;
+		text.innerHTML = messageHtml || escapedMultilineText(entry.plainText || "");
+		body.appendChild(head);
+		if (embeddedReply.found) {
+			appendReplyBlock(body, embeddedReply);
+		}
+		body.appendChild(text);
+		message.appendChild(avatar);
+		message.appendChild(body);
+		list.appendChild(message);
+	}
+
+	function renderDirectMessageWindow(conversation) {
+		const session = directMessageSessionValue(conversation);
+		const draftKey = directMessageDraftKey(session);
+		const windowUiState = draftKey ? directMessageWindowUiState[draftKey] || {} : {};
+		const windowElement = document.createElement("section");
+		const privateMode = directMessageIsPrivate(conversation);
+		windowElement.className = "direct-message-window" + (privateMode ? " is-private" : "")
+			+ (windowUiState.minimized ? " is-minimized" : "");
+		windowElement.dataset.session = String(session || "");
+		windowElement.setAttribute("role", "dialog");
+		windowElement.setAttribute("aria-label", "Direct message with " + (conversation.label || "user"));
+
+		const header = document.createElement("header");
+		header.className = "direct-message-window-header";
+		const avatar = document.createElement("span");
+		avatar.className = "direct-message-window-avatar avatar";
+		styleAvatar(avatar, conversation.label || "Direct message", false, conversation.avatarUrl || "");
+		const copy = document.createElement("div");
+		copy.className = "direct-message-window-copy";
+		const title = document.createElement("p");
+		title.className = "direct-message-window-title";
+		title.textContent = conversation.label || "Direct message";
+		const subtitle = document.createElement("p");
+		subtitle.className = "direct-message-window-subtitle";
+		subtitle.textContent = privateMode ? "Private - in-memory only" : (conversation.statusLabel || conversation.subtitle || "Direct message");
+		copy.appendChild(title);
+		copy.appendChild(subtitle);
+		header.appendChild(avatar);
+		header.appendChild(copy);
+
+		const modeButton = document.createElement("button");
+		modeButton.type = "button";
+		modeButton.className = "icon-button direct-message-window-mode";
+		const historyUnavailableReason = conversation && conversation.historyUnavailableReason
+			? String(conversation.historyUnavailableReason)
+			: "Persistent history is unavailable for this direct message.";
+		modeButton.title = privateMode && conversation.canPersistHistory === false
+			? historyUnavailableReason
+			: (privateMode ? "Use history mode" : "Use private mode");
+		modeButton.setAttribute("aria-label", modeButton.title);
+		modeButton.setAttribute("aria-pressed", privateMode ? "true" : "false");
+		modeButton.disabled = privateMode && conversation.canPersistHistory === false;
+		modeButton.innerHTML = privateModeGhostSvg();
+		modeButton.addEventListener("click", function() {
+			invokeDirectMessageMode(session, privateMode ? "history" : "private");
+		});
+		header.appendChild(modeButton);
+
+		const minButton = document.createElement("button");
+		minButton.type = "button";
+		minButton.className = "icon-button direct-message-window-minimize";
+		minButton.title = "Minimize";
+		minButton.setAttribute("aria-label", "Minimize direct message");
+		minButton.innerHTML = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M6 12h12\"></path></svg>";
+		minButton.addEventListener("click", function() {
+			const minimized = windowElement.classList.toggle("is-minimized");
+			if (draftKey) {
+				directMessageWindowUiState[draftKey] = { minimized: minimized };
+			}
+		});
+		header.appendChild(minButton);
+
+		const closeButton = document.createElement("button");
+		closeButton.type = "button";
+		closeButton.className = "icon-button direct-message-window-close";
+		closeButton.title = "Close";
+		closeButton.setAttribute("aria-label", "Close direct message");
+		closeButton.innerHTML = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M8 8l8 8\"></path><path d=\"M16 8l-8 8\"></path></svg>";
+		closeButton.addEventListener("click", function() {
+			invokeDirectMessageClose(session);
+		});
+		header.appendChild(closeButton);
+		windowElement.appendChild(header);
+
+		const list = document.createElement("div");
+		list.className = "direct-message-window-list";
+		if (privateMode) {
+			const banner = document.createElement("div");
+			banner.className = "direct-message-mode-banner";
+			banner.textContent = "Private mode - messages clear when this window closes.";
+			list.appendChild(banner);
+		}
+		if (conversation.historyLoading) {
+			const loading = document.createElement("div");
+			loading.className = "direct-message-mode-banner";
+			loading.textContent = "Loading direct-message history...";
+			list.appendChild(loading);
+		}
+		if (conversation.historyError) {
+			const error = document.createElement("div");
+			error.className = "direct-message-mode-banner is-error";
+			error.textContent = conversation.historyError;
+			list.appendChild(error);
+		}
+		const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
+		if (!messages.length) {
+			const empty = document.createElement("div");
+			empty.className = "direct-message-empty";
+			empty.textContent = conversation.emptyCopy || "Direct messages will appear here.";
+			list.appendChild(empty);
+		} else {
+			messages.forEach(function(entry) {
+				renderDirectMessageWindowMessage(list, entry, conversation);
+			});
+		}
+		windowElement.appendChild(list);
+
+		const form = document.createElement("form");
+		form.className = "direct-message-composer";
+		const input = document.createElement("textarea");
+		input.className = "direct-message-input";
+		input.rows = 1;
+		input.placeholder = conversation.canSend === false ? "Unavailable" : "Message " + (conversation.label || "user");
+		input.disabled = conversation.canSend === false;
+		if (draftKey && directMessageDrafts[draftKey]) {
+			input.value = directMessageDrafts[draftKey].value || "";
+		}
+		const send = document.createElement("button");
+		send.type = "submit";
+		send.className = "icon-button direct-message-send";
+		send.title = "Send";
+		send.setAttribute("aria-label", "Send direct message");
+		send.disabled = conversation.canSend === false;
+		send.innerHTML = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M22 2L11 13\"></path><path d=\"M22 2L15 22l-4-9-9-4z\"></path></svg>";
+		form.appendChild(input);
+		form.appendChild(send);
+		form.addEventListener("submit", function(event) {
+			event.preventDefault();
+			const value = input.value.trim();
+			if (!value) {
+				return;
+			}
+			if (invokeDirectMessageSend(session, value)) {
+				input.value = "";
+				input.style.height = "";
+				if (draftKey) {
+					delete directMessageDrafts[draftKey];
+				}
+			}
+		});
+		input.addEventListener("keydown", function(event) {
+			if ((event.key === "Enter" || event.key === "Return") && !event.shiftKey && !event.isComposing) {
+				event.preventDefault();
+				form.requestSubmit();
+			}
+		});
+		input.addEventListener("input", function() {
+			rememberDirectMessageInputDraft(session, input);
+			syncDirectMessageInputHeight(input);
+		});
+		windowElement.appendChild(form);
+		requestAnimationFrame(function() {
+			list.scrollTop = list.scrollHeight;
+			syncDirectMessageInputHeight(input);
+		});
+		return windowElement;
+	}
+
+	function renderDirectMessageDock(state) {
+		const dock = ensureDirectMessageDock();
+		if (!dock) {
+			return;
+		}
+		const focusState = captureDirectMessageDockState();
+		const windows = directMessageWindows(state).filter(function(conversation) {
+			return conversation.open !== false;
+		});
+		pruneDirectMessageDraftState(windows);
+		const fragment = document.createDocumentFragment();
+		windows.forEach(function(conversation) {
+			fragment.appendChild(renderDirectMessageWindow(conversation));
+		});
+		replaceChildrenWith(dock, fragment);
+		dock.classList.toggle("hidden", !windows.length);
+		restoreDirectMessageDockFocus(focusState);
+	}
+
+	function renderDirectMessages(snapshot) {
+		const state = directMessageState(snapshot);
+		if (!state) {
+			if (refs.directMessageButton) {
+				refs.directMessageButton.classList.add("hidden");
+			}
+			if (refs.directMessageSection) {
+				refs.directMessageSection.classList.add("hidden");
+			}
+			if (refs.directMessageDock) {
+				refs.directMessageDock.innerHTML = "";
+				refs.directMessageDock.classList.add("hidden");
+			}
+			directMessageDrafts = {};
+			directMessageWindowUiState = {};
+			hideDirectMessageTray();
+			return;
+		}
+		renderDirectMessageButton(state);
+		renderDirectMessageRail(state, snapshot);
+		renderDirectMessageDock(state);
+		renderDirectMessageTray(state);
+		scheduleRailLayoutSync();
+	}
+
 	function actionItemsFromActionStates(actionStates, handlers) {
 		return (actionStates || []).map(function(item) {
 			if (!item) {
@@ -2290,6 +5749,7 @@
 				kind: "action",
 				id: item.id || "",
 				label: item.label || "Action",
+				icon: item.icon || "",
 				enabled: item.enabled !== false,
 				checked: !!item.checked,
 				tone: item.tone || "",
@@ -2470,91 +5930,158 @@
 		return normalizedActionPanelItems(grouped, { hideDisabled: true });
 	}
 
+	function cloneContextItem(item, overrides) {
+		if (!item) {
+			return null;
+		}
+		return Object.assign({}, item, overrides || {});
+	}
+
+	function takeContextItem(pool, ids, overrides) {
+		const idList = Array.isArray(ids) ? ids : [ids];
+		const index = (pool || []).findIndex(function(item) {
+			if (!item || actionPanelItemKind(item) === "separator" || actionPanelItemKind(item) === "label") {
+				return false;
+			}
+			return idList.indexOf(String(item.id || "")) !== -1;
+		});
+		if (index < 0) {
+			return null;
+		}
+		const item = pool.splice(index, 1)[0];
+		return cloneContextItem(item, overrides);
+	}
+
+	function discardContextItems(pool, ids) {
+		const idList = Array.isArray(ids) ? ids : [ids];
+		for (let index = (pool || []).length - 1; index >= 0; index--) {
+			const item = pool[index];
+			if (item && idList.indexOf(String(item.id || "")) !== -1) {
+				pool.splice(index, 1);
+			}
+		}
+	}
+
+	function pushContextItem(target, item) {
+		if (item) {
+			target.push(item);
+		}
+	}
+
+	function pushContextSeparator(target) {
+		if (!target.length || actionPanelItemKind(target[target.length - 1]) === "separator") {
+			return;
+		}
+		target.push({ separator: true });
+	}
+
+	function appendRemainingContextItems(target, pool) {
+		const remaining = normalizedActionPanelItems(pool, { hideDisabled: true }).filter(function(item) {
+			return actionPanelItemKind(item) !== "label";
+		});
+		if (!remaining.length) {
+			return;
+		}
+		pushContextSeparator(target);
+		remaining.forEach(function(item) {
+			target.push(item);
+		});
+	}
+
 	function participantContextGroups(items) {
-		return groupedContextMenuItems(
-			items,
-			["openMessage", "joinRoom", "join", "textMessage", "userInfo"],
-			[
-				{
-					label: "Voice",
-					ids: [
-						"localVolume",
-						"mute",
-						"deaf",
-						"prioritySpeaker",
-						"localMute",
-						"remoteSpeechCleanup",
-						"self.toggleMute",
-						"self.toggleDeaf"
-					]
-				},
-				{
-					label: "Screen Share",
-					ids: [
-						"screenShareStart",
-						"screenShareStop",
-						"screenShareWatch",
-						"screenShareStopWatching",
-						"screenShareOpenWindow"
-					]
-				},
-				{
-					label: "Messages",
-					ids: ["ignoreMessages", "ignoreTts", "grantChatHistory"]
-				},
-				{
-					label: "Profile",
-					ids: [
-						"localNickname",
-						"selfComment",
-						"commentView",
-						"commentReset",
-						"textureReset",
-						"register",
-						"friendAdd",
-						"friendUpdate",
-						"friendRemove",
-						"avatarChange",
-						"avatarRemove",
-						"audioStats",
-						"recording"
-					]
-				},
-				{
-					label: "Moderation",
-					ids: ["move", "kick", "ban"]
-				}
-			],
-			"More"
-		);
+		const pool = normalizedActionPanelItems(items, { hideDisabled: true }).slice();
+		const flat = [];
+		pool.filter(function(item) {
+			return actionPanelItemKind(item) === "label";
+		}).forEach(function(item) {
+			flat.push(item);
+		});
+
+		pushContextItem(flat, takeContextItem(pool, "userInfo", { label: "User information..." }));
+		pushContextItem(flat, takeContextItem(pool, ["openMessage", "textMessage"], { label: "Direct message" }));
+		discardContextItems(pool, ["openMessage", "textMessage"]);
+		pushContextItem(flat, takeContextItem(pool, ["joinRoom", "join"], { label: "Join room" }));
+		discardContextItems(pool, ["joinRoom", "join"]);
+		pushContextItem(flat, takeContextItem(pool, "commentView", { label: "View comment..." }));
+		pushContextItem(flat, takeContextItem(pool, "localMute", { label: "Local mute" }));
+		pushContextItem(flat, takeContextItem(pool, "prioritySpeaker", { label: "Set priority speaker" }));
+		pushContextItem(flat, takeContextItem(pool, "localNickname", { label: "Local nickname..." }));
+		pushContextItem(flat, takeContextItem(pool, "copyUsername", { label: "Copy username" }));
+
+		const adminItems = [
+			takeContextItem(pool, "register", { label: "Register..." }),
+			takeContextItem(pool, "move", { label: "Move to my room" }),
+			takeContextItem(pool, "acl", { label: "Channel access (ACL)..." }),
+			takeContextItem(pool, "grantChatHistory", { label: "Grant chat history..." }),
+			takeContextItem(pool, "avatarChange", { label: "Change avatar..." }),
+			takeContextItem(pool, ["avatarRemove", "textureReset"], { label: "Reset avatar..." }),
+			takeContextItem(pool, "commentReset", { label: "Reset comment..." }),
+			takeContextItem(pool, "kick", { label: "Kick..." }),
+			takeContextItem(pool, "ban", { label: "Ban..." })
+		].filter(Boolean);
+		if (adminItems.length) {
+			pushContextSeparator(flat);
+			adminItems.forEach(function(item) {
+				flat.push(item);
+			});
+		}
+
+		appendRemainingContextItems(flat, pool);
+		return normalizedActionPanelItems(flat, { hideDisabled: true });
 	}
 
 	function roomContextGroups(items) {
-		return groupedContextMenuItems(
-			items,
-			["openRoom", "joinVoice", "join", "listen", "markRead"],
-			[
-				{
-					label: "Screen Share",
-					ids: [
-						"screenShareStart",
-						"screenShareStop",
-						"screenShareWatch",
-						"screenShareStopWatching",
-						"screenShareOpenWindow"
-					]
-				},
-				{
-					label: "Room",
-					ids: ["sendMessage", "copyUrl", "hide", "pin"]
-				},
-				{
-					label: "Manage",
-					ids: ["add", "acl", "remove", "link", "unlink", "unlinkAll"]
-				}
-			],
-			"More"
-		);
+		const pool = normalizedActionPanelItems(items, { hideDisabled: true }).slice();
+		const flat = [];
+		pool.filter(function(item) {
+			return actionPanelItemKind(item) === "label";
+		}).forEach(function(item) {
+			flat.push(item);
+		});
+
+		pushContextItem(flat, takeContextItem(pool, ["joinVoice", "join", "listen"]));
+		discardContextItems(pool, ["joinVoice", "join", "listen"]);
+		pushContextItem(flat, takeContextItem(pool, ["openRoom", "sendMessage"], { label: "Open chat" }));
+		discardContextItems(pool, ["openRoom", "sendMessage"]);
+		pushContextItem(flat, takeContextItem(pool, "markRead", { label: "Mark as read" }));
+		pushContextItem(flat, takeContextItem(pool, "hide", { label: "Mute notifications" }));
+		pushContextItem(flat, takeContextItem(pool, "pin"));
+
+		const shareItem = takeContextItem(pool, [
+			"screenShareStart",
+			"screenShareStop",
+			"screenShareWatch",
+			"screenShareStopWatching",
+			"screenShareOpenWindow"
+		]);
+		const copyItem = takeContextItem(pool, "copyUrl", { label: "Copy invite link" });
+		if (copyItem || shareItem) {
+			pushContextSeparator(flat);
+			pushContextItem(flat, copyItem);
+			pushContextItem(flat, shareItem);
+		}
+
+		const manageItems = [
+			takeContextItem(pool, "add", { label: "Create room..." }),
+			takeContextItem(pool, ["acl", "textRoom.acl"], { label: "Room ACL..." }),
+			takeContextItem(pool, "textRoom.edit", { label: "Edit text room..." }),
+			takeContextItem(pool, "textRoom.setDefault", { label: "Set as default" }),
+			takeContextItem(pool, "textRoom.visibilitySource", { label: "Go to visibility source" }),
+			takeContextItem(pool, "link", { label: "Link room" }),
+			takeContextItem(pool, "unlink", { label: "Unlink room..." }),
+			takeContextItem(pool, "unlinkAll", { label: "Unlink all rooms..." }),
+			takeContextItem(pool, "remove", { label: "Remove room..." }),
+			takeContextItem(pool, "textRoom.delete", { label: "Delete text room..." })
+		].filter(Boolean);
+		if (manageItems.length) {
+			pushContextSeparator(flat);
+			manageItems.forEach(function(item) {
+				flat.push(item);
+			});
+		}
+
+		appendRemainingContextItems(flat, pool);
+		return normalizedActionPanelItems(flat, { hideDisabled: true });
 	}
 
 	function sliderValueLabel(item, value) {
@@ -2565,6 +6092,267 @@
 
 		const prefix = numericValue > 0 ? "+" : "";
 		return prefix + String(numericValue) + String(item && item.suffix ? item.suffix : "");
+	}
+
+	function actionPanelIconName(item) {
+		const explicit = String(item && item.icon ? item.icon : "").toLowerCase();
+		if (explicit) {
+			return explicit;
+		}
+
+		const id = String(item && item.id ? item.id : "").toLowerCase();
+		const label = String(item && item.label ? item.label : "").toLowerCase();
+		const text = id + " " + label;
+
+		if (text.indexOf("disconnect") !== -1 || text.indexOf("quit") !== -1 || text.indexOf("exit") !== -1) {
+			return "log-out";
+		}
+		if (text.indexOf("delete") !== -1 || text.indexOf("remove") !== -1 || text.indexOf("clear") !== -1
+			|| text.indexOf("reset") !== -1 || text.indexOf("unlink") !== -1) {
+			return "trash";
+		}
+		if (text.indexOf("ban") !== -1 || text.indexOf("block") !== -1) {
+			return "ban";
+		}
+		if (text.indexOf("kick") !== -1) {
+			return "log-out";
+		}
+		if (text.indexOf("certificate") !== -1 || text.indexOf("acl") !== -1
+			|| text.indexOf("access control") !== -1 || text.indexOf("privilege") !== -1) {
+			return "shield";
+		}
+		if (text.indexOf("token") !== -1 || text.indexOf("key") !== -1 || text.indexOf("password") !== -1) {
+			return "key";
+		}
+		if (text.indexOf("private mode") !== -1) {
+			return "ghost";
+		}
+		if (text.indexOf("registered") !== -1 || text.indexOf("users") !== -1 || text.indexOf("members") !== -1) {
+			return "users";
+		}
+		if (text.indexOf("server information") !== -1 || text.indexOf("user information") !== -1
+			|| text.indexOf("about") !== -1 || text.indexOf("info") !== -1) {
+			return "info";
+		}
+		if (text.indexOf("search") !== -1 || text.indexOf("find") !== -1) {
+			return "search";
+		}
+		if (text.indexOf("update") !== -1 || text.indexOf("download") !== -1) {
+			return "download";
+		}
+		if (text.indexOf("feedback") !== -1 || text.indexOf("bug") !== -1 || text.indexOf("report") !== -1) {
+			return "bug";
+		}
+		if (text.indexOf("settings") !== -1 || text.indexOf("configuration") !== -1
+			|| text.indexOf("preferences") !== -1 || text.indexOf("configure") !== -1) {
+			return "settings";
+		}
+		if (text.indexOf("stonks") !== -1 || text.indexOf("finance") !== -1 || text.indexOf("stock") !== -1) {
+			return "chart";
+		}
+		if (text.indexOf("screen share") !== -1 || text.indexOf("screenshare") !== -1
+			|| text.indexOf("screen") !== -1 || text.indexOf("watch") !== -1) {
+			return "screen";
+		}
+		if (text.indexOf("message") !== -1 || text.indexOf("chat") !== -1 || text.indexOf("comment") !== -1) {
+			return "message";
+		}
+		if (text.indexOf("reply") !== -1) {
+			return "reply";
+		}
+		if (text.indexOf("reaction") !== -1 || text.indexOf("emoji") !== -1) {
+			return "smile";
+		}
+		if (text.indexOf("copy") !== -1) {
+			return "copy";
+		}
+		if (text.indexOf("quote") !== -1) {
+			return "quote";
+		}
+		if (text.indexOf("mark read") !== -1 || text.indexOf("read") !== -1) {
+			return "check";
+		}
+		if (text.indexOf("load older") !== -1 || text.indexOf("history") !== -1) {
+			return "history";
+		}
+		if (text.indexOf("pin") !== -1) {
+			return "pin";
+		}
+		if (text.indexOf("hide") !== -1 || text.indexOf("ignore") !== -1) {
+			return "eye-off";
+		}
+		if (text.indexOf("join") !== -1 || text.indexOf("connect") !== -1 || text.indexOf("open room") !== -1
+			|| text.indexOf("listen") !== -1) {
+			return "log-in";
+		}
+		if (text.indexOf("add") !== -1 || text.indexOf("new") !== -1 || text.indexOf("create") !== -1) {
+			return "plus";
+		}
+		if (text.indexOf("move") !== -1) {
+			return "move";
+		}
+		if (text.indexOf("link") !== -1 || text.indexOf("url") !== -1) {
+			return "link";
+		}
+		if (text.indexOf("avatar") !== -1 || text.indexOf("texture") !== -1 || text.indexOf("image") !== -1) {
+			return "image";
+		}
+		if (text.indexOf("friend") !== -1 || text.indexOf("priority") !== -1) {
+			return "star";
+		}
+		if (text.indexOf("record") !== -1) {
+			return "record";
+		}
+		if (text.indexOf("statistics") !== -1 || text.indexOf("stats") !== -1 || text.indexOf("activity") !== -1) {
+			return "activity";
+		}
+		if (text.indexOf("deaf") !== -1) {
+			return "headphones";
+		}
+		if (text.indexOf("mute") !== -1 || text.indexOf("microphone") !== -1) {
+			return "mic";
+		}
+		if (text.indexOf("volume") !== -1 || text.indexOf("voice") !== -1) {
+			return "speaker";
+		}
+		if (text.indexOf("room") !== -1 || text.indexOf("channel") !== -1) {
+			return "hash";
+		}
+		if (text.indexOf("profile") !== -1 || text.indexOf("nickname") !== -1 || text.indexOf("self") !== -1) {
+			return "user";
+		}
+		if (text.indexOf("manage") !== -1) {
+			return "sliders";
+		}
+		if (text.indexOf("more") !== -1) {
+			return "more";
+		}
+		return "dot";
+	}
+
+	function actionPanelIconSvg(name) {
+		switch (String(name || "dot")) {
+			case "activity":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M3 12h4l3-7 4 14 3-7h4\"></path></svg>";
+			case "ban":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"8\"></circle><path d=\"M7 7l10 10\"></path></svg>";
+			case "bug":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M8 8a4 4 0 018 0v8a4 4 0 01-8 0z\"></path><path d=\"M3 13h5\"></path><path d=\"M16 13h5\"></path><path d=\"M5 6l3 3\"></path><path d=\"M19 6l-3 3\"></path></svg>";
+			case "chart":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 19V5\"></path><path d=\"M4 19h16\"></path><path d=\"M7 15l4-4 3 3 5-7\"></path></svg>";
+			case "check":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4.5 12.5l5 5L20 7\"></path></svg>";
+			case "copy":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"8\" y=\"8\" width=\"11\" height=\"11\" rx=\"2\"></rect><path d=\"M5 15V5h10\"></path></svg>";
+			case "download":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 4v10\"></path><path d=\"M8 10l4 4 4-4\"></path><path d=\"M5 19h14\"></path></svg>";
+			case "eye-off":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M3 3l18 18\"></path><path d=\"M10.5 10.5a2 2 0 002.8 2.8\"></path><path d=\"M9 5.5A9.8 9.8 0 0121 12a10.7 10.7 0 01-3 3.7\"></path><path d=\"M6.5 6.5A10.6 10.6 0 003 12a10.8 10.8 0 009.7 5.9\"></path></svg>";
+			case "hash":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M9 4L7 20\"></path><path d=\"M17 4l-2 16\"></path><path d=\"M4 9h16\"></path><path d=\"M3 15h16\"></path></svg>";
+			case "headphones":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 14a8 8 0 0116 0\"></path><path d=\"M4 14v4a2 2 0 002 2h2v-6H4z\"></path><path d=\"M20 14v4a2 2 0 01-2 2h-2v-6h4z\"></path></svg>";
+			case "ghost":
+				return privateModeGhostSvg();
+			case "history":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 12a8 8 0 108-8\"></path><path d=\"M4 5v7h7\"></path><path d=\"M12 8v5l3 2\"></path></svg>";
+			case "image":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"4\" y=\"5\" width=\"16\" height=\"14\" rx=\"2\"></rect><path d=\"M8 14l3-3 3 3 2-2 3 4\"></path><circle cx=\"9\" cy=\"9\" r=\"1.3\"></circle></svg>";
+			case "info":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\"></circle><path d=\"M12 10v6\"></path><path d=\"M12 7h.01\"></path></svg>";
+			case "key":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"7.5\" cy=\"12.5\" r=\"3.5\"></circle><path d=\"M11 12.5h9\"></path><path d=\"M17 12.5v3\"></path><path d=\"M14.5 12.5v2\"></path></svg>";
+			case "link":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M9.5 14.5l5-5\"></path><path d=\"M8 10l-1.2 1.2a4 4 0 105.7 5.6l1.1-1.1\"></path><path d=\"M16 14l1.2-1.2a4 4 0 10-5.7-5.6l-1.1 1.1\"></path></svg>";
+			case "log-in":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3\"></path><path d=\"M10 17l5-5-5-5\"></path><path d=\"M15 12H3\"></path></svg>";
+			case "log-out":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M9 4H6a2 2 0 00-2 2v12a2 2 0 002 2h3\"></path><path d=\"M14 17l5-5-5-5\"></path><path d=\"M19 12H8\"></path></svg>";
+			case "message":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 5h16v11H8l-4 4z\"></path><path d=\"M8 9h8\"></path><path d=\"M8 12h5\"></path></svg>";
+			case "mic":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"9\" y=\"3\" width=\"6\" height=\"11\" rx=\"3\"></rect><path d=\"M5 11a7 7 0 0014 0\"></path><path d=\"M12 18v3\"></path></svg>";
+			case "more":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"5\" cy=\"12\" r=\"1.6\"></circle><circle cx=\"12\" cy=\"12\" r=\"1.6\"></circle><circle cx=\"19\" cy=\"12\" r=\"1.6\"></circle></svg>";
+			case "move":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3v18\"></path><path d=\"M8 7l4-4 4 4\"></path><path d=\"M8 17l4 4 4-4\"></path><path d=\"M3 12h18\"></path><path d=\"M7 8l-4 4 4 4\"></path><path d=\"M17 8l4 4-4 4\"></path></svg>";
+			case "pin":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M14 4l6 6-3 1-4 4v5l-2 2-2-7-7-2 2-2h5l4-4z\"></path></svg>";
+			case "plus":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 5v14\"></path><path d=\"M5 12h14\"></path></svg>";
+			case "quote":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M8 11H5a4 4 0 014-4v8H5v-4\"></path><path d=\"M18 11h-3a4 4 0 014-4v8h-4v-4\"></path></svg>";
+			case "record":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"8\"></circle><circle cx=\"12\" cy=\"12\" r=\"3\" fill=\"currentColor\" stroke=\"none\"></circle></svg>";
+			case "reply":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M9 17l-5-5 5-5\"></path><path d=\"M20 18v-2a4 4 0 00-4-4H4\"></path></svg>";
+			case "screen":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"5\" width=\"18\" height=\"12\" rx=\"2\"></rect><path d=\"M8 21h8\"></path><path d=\"M12 17v4\"></path></svg>";
+			case "search":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"11\" cy=\"11\" r=\"7\"></circle><path d=\"M20 20l-4-4\"></path></svg>";
+			case "settings":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"3\"></circle><path d=\"M19 12a7 7 0 00-.1-1l2-1.5-2-3.4-2.4 1a7 7 0 00-1.7-1L14.5 3h-5l-.4 3.1a7 7 0 00-1.7 1L5 6.1l-2 3.4L5 11a7 7 0 000 2l-2 1.5 2 3.4 2.4-1a7 7 0 001.7 1l.4 3.1h5l.4-3.1a7 7 0 001.7-1l2.4 1 2-3.4-2-1.5a7 7 0 00.1-1z\"></path></svg>";
+			case "shield":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3l7 3v5c0 4.5-2.8 8-7 10-4.2-2-7-5.5-7-10V6z\"></path><path d=\"M9 12l2 2 4-4\"></path></svg>";
+			case "sliders":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 7h10\"></path><path d=\"M18 7h2\"></path><circle cx=\"16\" cy=\"7\" r=\"2\"></circle><path d=\"M4 17h2\"></path><path d=\"M10 17h10\"></path><circle cx=\"8\" cy=\"17\" r=\"2\"></circle></svg>";
+			case "smile":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"9\"></circle><path d=\"M8 14s1.5 2 4 2 4-2 4-2\"></path><path d=\"M9 9h.01\"></path><path d=\"M15 9h.01\"></path></svg>";
+			case "speaker":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M11 5L6 9H3v6h3l5 4z\"></path><path d=\"M15.5 8.5a5 5 0 010 7\"></path><path d=\"M18.5 5.5a9 9 0 010 13\"></path></svg>";
+			case "star":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3l2.6 5.5 6 .8-4.3 4.2 1 6-5.3-2.8-5.3 2.8 1-6L3.4 9.3l6-.8z\"></path></svg>";
+			case "trash":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M4 7h16\"></path><path d=\"M9 7V5h6v2\"></path><path d=\"M18 7l-1 13H7L6 7\"></path><path d=\"M10 11v5\"></path><path d=\"M14 11v5\"></path></svg>";
+			case "user":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"8\" r=\"4\"></circle><path d=\"M5 21a7 7 0 0114 0\"></path></svg>";
+			case "users":
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"9\" cy=\"8\" r=\"3\"></circle><path d=\"M3 20a6 6 0 0112 0\"></path><path d=\"M16 11a3 3 0 10-1-5.8\"></path><path d=\"M17 20h4a5 5 0 00-5-5\"></path></svg>";
+			default:
+				return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"3\"></circle></svg>";
+		}
+	}
+
+	function themedActionPanelIconSvg(name) {
+		return actionPanelIconSvg(name).replace("<svg ",
+			"<svg fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" ");
+	}
+
+	function actionPanelIconHtml(item, prefix) {
+		return "<span class=\"" + prefix + "-icon\" aria-hidden=\"true\">" + themedActionPanelIconSvg(actionPanelIconName(item)) + "</span>";
+	}
+
+	function updateContextMenuOpenSubmenuState(menu) {
+		if (!menu || !menu.classList) {
+			return;
+		}
+		menu.classList.toggle("has-open-submenu", !!menu.querySelector(".context-menu-submenu.is-open"));
+	}
+
+	function positionContextSubmenuFlyout(submenu, trigger, panel) {
+		if (!submenu || !trigger || !panel) {
+			return;
+		}
+
+		const margin = contextMenuViewportMargin;
+		const gap = 6;
+		const triggerBounds = trigger.getBoundingClientRect();
+		const submenuBounds = submenu.getBoundingClientRect();
+		const measuredWidth = panel.offsetWidth || 236;
+		const hasRightSpace = triggerBounds.right + gap + measuredWidth <= window.innerWidth - margin;
+		const hasLeftSpace = triggerBounds.left - gap - measuredWidth >= margin;
+		const useLeft = !hasRightSpace && hasLeftSpace;
+		submenu.classList.toggle("is-flyout-left", useLeft);
+
+		const availableHeight = Math.max(96, window.innerHeight - (margin * 2));
+		const measuredHeight = Math.min(panel.scrollHeight || availableHeight, availableHeight);
+		const absoluteTop = Math.max(
+			margin,
+			Math.min(triggerBounds.top - 4, window.innerHeight - margin - measuredHeight));
+		panel.style.left = "";
+		panel.style.right = "";
+		panel.style.top = (absoluteTop - submenuBounds.top) + "px";
+		panel.style.maxHeight = Math.max(96, window.innerHeight - margin - absoluteTop) + "px";
 	}
 
 	function appendActionPanelItem(container, item, variant, hideOnAction) {
@@ -2661,8 +6449,8 @@
 			trigger.className = prefix + "-item " + prefix + "-submenu-trigger";
 			trigger.setAttribute("aria-haspopup", "menu");
 			trigger.setAttribute("aria-expanded", "false");
-			trigger.innerHTML = "<span class=\"" + labelClass + "\"></span><span class=\"" + stateClass
-				+ "\" aria-hidden=\"true\">&gt;</span>";
+			trigger.innerHTML = actionPanelIconHtml(item, prefix) + "<span class=\"" + labelClass + "\"></span><span class=\""
+				+ stateClass + "\" aria-hidden=\"true\">&gt;</span>";
 			trigger.querySelector("." + labelClass).textContent = item.label || "More";
 
 			const panel = document.createElement("div");
@@ -2676,6 +6464,19 @@
 				submenu.classList.toggle("is-open", open);
 				trigger.setAttribute("aria-expanded", open ? "true" : "false");
 				if (variant !== "menu") {
+					const menu = submenu.closest(".context-menu");
+					if (open) {
+						positionContextSubmenuFlyout(submenu, trigger, panel);
+						window.requestAnimationFrame(function() {
+							positionContextSubmenuFlyout(submenu, trigger, panel);
+						});
+					} else {
+						panel.style.left = "";
+						panel.style.right = "";
+						panel.style.top = "";
+						panel.style.maxHeight = "";
+					}
+					updateContextMenuOpenSubmenuState(menu);
 					requestContextMenuViewportFit();
 				}
 			};
@@ -2716,7 +6517,8 @@
 		if (item.hint) {
 			button.title = item.hint;
 		}
-		button.innerHTML = "<span class=\"" + labelClass + "\"></span><span class=\"" + stateClass + "\"></span>";
+		button.innerHTML = actionPanelIconHtml(item, prefix) + "<span class=\"" + labelClass + "\"></span><span class=\""
+			+ stateClass + "\"></span>";
 		button.querySelector("." + labelClass).textContent = item.label || "Action";
 		button.querySelector("." + stateClass).textContent = item.checked ? "On" : "";
 		button.addEventListener("click", function(event) {
@@ -2797,13 +6599,97 @@
 		container.innerHTML = "";
 		container.classList.toggle("hidden", !visibleStatuses.length);
 		visibleStatuses.forEach(function(status) {
+			const kind = String(status.kind || "");
 			const indicator = document.createElement("span");
-			indicator.className = "presence-status" + (status.tone ? " is-" + status.tone : "");
+			indicator.className = "presence-status is-status-" + kind
+				+ (classicStatusIconUrl(kind) ? " has-classic-icon" : "")
+				+ (classicTalkStatusKind(kind) ? " is-talk-state-status" : "")
+				+ (status.tone ? " is-" + status.tone : "");
 			indicator.title = status.label || "";
 			indicator.setAttribute("aria-label", status.label || "");
-			indicator.innerHTML = presenceStatusIconSvg(status.kind);
+			const modernIcon = document.createElement("span");
+			modernIcon.className = "presence-status-modern-icon";
+			modernIcon.innerHTML = presenceStatusIconSvg(kind);
+			indicator.appendChild(modernIcon);
+			const classicIconUrl = classicStatusIconUrl(kind);
+			if (classicIconUrl) {
+				const classicIcon = document.createElement("img");
+				classicIcon.className = "presence-status-classic-icon";
+				classicIcon.src = classicIconUrl;
+				classicIcon.alt = "";
+				classicIcon.setAttribute("aria-hidden", "true");
+				indicator.appendChild(classicIcon);
+			}
 			container.appendChild(indicator);
 		});
+	}
+
+	const classicUserIconBaseUrl = "qrc:///themes/Default/";
+
+	function classicUserIconUrl(name) {
+		return classicUserIconBaseUrl + name;
+	}
+
+	function classicTalkStatusKind(kind) {
+		return ["talking", "whispering", "shouting", "mutedTalking"].indexOf(String(kind || "")) >= 0;
+	}
+
+	function classicStateIconUrl(person) {
+		if (person && person.entryKind === "listener") {
+			return classicUserIconUrl("ear.svg");
+		}
+
+		switch (normalizedTalkState(person)) {
+			case "talking":
+				return classicUserIconUrl("talking_on.svg");
+			case "whispering":
+				return classicUserIconUrl("talking_whisper.svg");
+			case "shouting":
+				return classicUserIconUrl("talking_alt.svg");
+			case "mutedTalking":
+				return classicUserIconUrl("talking_muted.svg");
+			case "passive":
+			default:
+				return classicUserIconUrl("talking_off.svg");
+		}
+	}
+
+	function classicStatusIconUrl(kind) {
+		switch (String(kind || "")) {
+			case "friend":
+				return classicUserIconUrl("emblems/emblem-favorite.svg");
+			case "authenticated":
+				return classicUserIconUrl("authenticated.svg");
+			case "priority":
+				return classicUserIconUrl("priority_speaker.svg");
+			case "recording":
+				return classicUserIconUrl("actions/media-record.svg");
+			case "listener":
+				return classicUserIconUrl("ear.svg");
+			case "serverDeafened":
+				return classicUserIconUrl("deafened_server.svg");
+			case "selfDeafened":
+				return classicUserIconUrl("deafened_self.svg");
+			case "serverMuted":
+				return classicUserIconUrl("muted_server.svg");
+			case "selfMuted":
+				return classicUserIconUrl("muted_self.svg");
+			case "localMuted":
+				return classicUserIconUrl("muted_local.svg");
+			case "suppressed":
+				return classicUserIconUrl("muted_suppressed.svg");
+			default:
+				return "";
+		}
+	}
+
+	function appendClassicUserIcon(element, person) {
+		const icon = document.createElement("img");
+		icon.className = "classic-user-icon";
+		icon.src = classicStateIconUrl(person);
+		icon.alt = "";
+		icon.setAttribute("aria-hidden", "true");
+		element.appendChild(icon);
 	}
 
 	function presenceRowTitle(person) {
@@ -2841,9 +6727,22 @@
 			return String(person && person.entryKind || "user") !== "listener";
 		}).slice(0, 5).forEach(function(person) {
 			const avatar = document.createElement("div");
-			avatar.className = "stack-avatar" + (person.isSelf ? " is-self" : "") + talkStateClass(person);
+			avatar.className = "stack-avatar participant-context-target" + (person.isSelf ? " is-self" : "") + talkStateClass(person);
 			styleAvatar(avatar, person.label, !!person.isSelf, person.avatarUrl || "");
+			appendClassicUserIcon(avatar, person);
 			avatar.title = [person.label || "", person.talkLabel || ""].filter(Boolean).join(" | ");
+			avatar.setAttribute("role", "button");
+			avatar.tabIndex = 0;
+			avatar.dataset.session = person.session ? String(person.session) : "";
+			avatar.dataset.participantKey = participantStateKey(person);
+			avatar.dataset.scopeToken = person.scopeToken || "";
+			avatar.addEventListener("contextmenu", function(event) {
+				event.preventDefault();
+				event.stopPropagation();
+				showContextMenu(participantContextMenuItems(person, avatar.dataset.scopeToken),
+					event.clientX,
+					event.clientY);
+			});
 			refs.voicePresenceStack.appendChild(avatar);
 		});
 	}
@@ -2935,11 +6834,16 @@
 			return items;
 		}
 
+		items.push({
+			kind: "label",
+			label: participant.label || participant.name || "User"
+		});
+
 		if (participant.entryKind !== "listener" && participant.canMessage
 			&& !actionStatesContainId(participant.actions, "textMessage")) {
 			items.push({
 				id: "openMessage",
-				label: "Open message",
+				label: "Direct message",
 				enabled: true,
 				action: function() {
 					notifyBridge("messageParticipant", participant.session);
@@ -2979,10 +6883,25 @@
 					notifyBridge("participantActionValueChanged", participant.session, actionId, value, final);
 				}
 			});
-		if (items.length && participantActionItems.length) {
+		const hasPrimaryItems = items.some(function(item) {
+			const kind = actionPanelItemKind(item);
+			return kind && kind !== "label" && kind !== "separator";
+		});
+		if (hasPrimaryItems && participantActionItems.length) {
 			items.push({ separator: true });
 		}
-		return participantContextGroups(items.concat(participantActionItems));
+		const allItems = items.concat(participantActionItems);
+		if (participant.entryKind !== "listener") {
+			allItems.push({
+				id: "copyUsername",
+				label: "Copy username",
+				enabled: !!(participant.label || participant.name),
+				action: function() {
+					copyPlainText(participant.label || participant.name || "");
+				}
+			});
+		}
+		return participantContextGroups(allItems);
 	}
 
 	function renderPresenceList(container, room, people) {
@@ -2995,7 +6914,7 @@
 
 			const row = document.createElement("button");
 			row.type = "button";
-			row.className = "presence-row"
+			row.className = "presence-row member-row"
 				+ (person.isSelf ? " is-self" : "")
 				+ (person.entryKind === "listener" ? " is-listener" : "")
 				+ talkStateClass(person);
@@ -3012,11 +6931,12 @@
 			row.title = presenceRowTitle(person);
 
 			const avatar = document.createElement("span");
-			avatar.className = "presence-avatar"
+			avatar.className = "presence-avatar avatar"
 				+ (person.isSelf ? " is-self" : "")
 				+ (person.entryKind === "listener" ? " is-listener" : "")
 				+ talkStateClass(person);
 			styleAvatar(avatar, person.label, !!person.isSelf, person.avatarUrl || "");
+			appendClassicUserIcon(avatar, person);
 
 			const dot = document.createElement("span");
 			dot.className = "presence-dot" + (person.entryKind === "listener" ? " is-listener" : "")
@@ -3025,6 +6945,7 @@
 			const label = document.createElement("span");
 			label.className = "presence-copy";
 			label.innerHTML = "<span class=\"presence-heading\"><span class=\"presence-name\"></span><span class=\"presence-statuses hidden\"></span></span><span class=\"presence-subtitle\"></span>";
+			label.querySelector(".presence-name").classList.add("member-name");
 			label.querySelector(".presence-name").textContent = person.label || "Unknown";
 			renderPresenceStatuses(label.querySelector(".presence-statuses"), person.statuses || []);
 			label.querySelector(".presence-subtitle").textContent = person.subtitle || "";
@@ -3069,6 +6990,13 @@
 				}
 				dismissCompactRailAfterAction();
 			});
+			row.addEventListener("contextmenu", function(event) {
+				event.preventDefault();
+				event.stopPropagation();
+				showContextMenu(participantContextMenuItems(person, row.dataset.scopeToken),
+					event.clientX,
+					event.clientY);
+			});
 			row.addEventListener("dragstart", function(event) {
 				if (!row.dataset.session || row.dataset.entryKind === "listener") {
 					event.preventDefault();
@@ -3102,7 +7030,6 @@
 		const depth = Number.isFinite(depthValue) && depthValue > 0 ? depthValue : 0;
 		const roomPathLabel = room.pathLabel || "";
 		const unreadCount = Number(room.unreadCount || 0);
-		const memberCount = Number(room.memberCount || 0);
 		const screenShare = room.screenShare || {};
 		const isRootRoom = !!room.isRoot;
 		const joining = joinable && String(room.token || "") === pendingVoiceJoinToken();
@@ -3117,7 +7044,7 @@
 				? (room.description || "")
 				: "");
 		const wrapper = document.createElement("div");
-		wrapper.className = "rail-row-wrapper" + (joinable ? " is-voice-room" : "");
+		wrapper.className = "rail-row-wrapper room-item" + (joinable ? " is-voice-room" : "");
 		wrapper.setAttribute("role", "option");
 		wrapper.setAttribute("aria-label", room.label || "Room");
 		wrapper.setAttribute("aria-selected", room.selected ? "true" : "false");
@@ -3128,14 +7055,14 @@
 		const button = document.createElement("div");
 		button.setAttribute("role", "button");
 		button.tabIndex = 0;
-		button.className = "rail-row"
+		button.className = "rail-row room-node"
 			+ (room.selected ? " is-selected" : "")
+			+ (room.selected ? " is-active" : "")
 			+ (room.joined ? " is-joined" : "")
 			+ (joining ? " is-joining" : "")
 			+ (isRootRoom ? " is-root-room" : "");
 		button.classList.toggle("has-subtitle", !!subtitleText);
 		button.classList.toggle("has-unread", unreadCount > 0);
-		button.classList.toggle("is-populated", joinable && memberCount > 0);
 		button.dataset.scopeToken = room.token || "";
 		button.dataset.canJoin = canJoinRoom ? "true" : "false";
 		button.dataset.roomLabel = room.label || "";
@@ -3149,18 +7076,28 @@
 		button.title = roomPathLabel || room.description || "";
 
 		const chip = document.createElement("span");
-		chip.className = "kind-chip";
-		chip.textContent = kindChipText(room.kindLabel);
+		chip.className = "kind-chip room-icon";
+		const chipKind = kindChipKind(room.kindLabel);
+		const chipText = kindChipText(room.kindLabel);
+		chip.dataset.kindLabel = chipKind;
+		chip.title = room.kindLabel || (joinable ? "Voice room" : "Text room");
+		chip.setAttribute("aria-hidden", "true");
+		const chipIcon = kindChipIconSvg(room.kindLabel);
+		if (chipIcon) {
+			chip.innerHTML = chipIcon;
+		} else {
+			chip.textContent = chipText;
+		}
 
 		const copy = document.createElement("span");
-		copy.className = "rail-row-copy";
+		copy.className = "rail-row-copy room-copy";
 
 		const title = document.createElement("span");
-		title.className = "rail-row-title";
+		title.className = "rail-row-title room-name";
 		title.textContent = room.label || "Room";
 
 		const subtitle = document.createElement("span");
-		subtitle.className = "rail-row-subtitle";
+		subtitle.className = "rail-row-subtitle room-subtitle";
 		subtitle.textContent = subtitleText;
 		subtitle.classList.toggle("hidden", !subtitleText);
 
@@ -3168,22 +7105,13 @@
 		copy.appendChild(subtitle);
 
 		const meta = document.createElement("span");
-		meta.className = "rail-row-meta";
+		meta.className = "rail-row-meta room-meta";
 
 		if (unreadCount > 0) {
 			const unread = document.createElement("span");
 			unread.className = "row-badge";
 			unread.textContent = String(unreadCount);
 			meta.appendChild(unread);
-		}
-
-		if (joinable && memberCount > 0) {
-			const count = document.createElement("span");
-			count.className = "row-count";
-			count.classList.toggle("is-active-room", !!room.joined);
-			count.textContent = String(memberCount);
-			count.title = memberCount === 1 ? "1 person in room" : (String(memberCount) + " people in room");
-			meta.appendChild(count);
 		}
 
 		if (joinable && screenShareVisible(screenShare) && screenShare.badgeLabel) {
@@ -3198,7 +7126,7 @@
 		if (joinable) {
 			const joinButton = document.createElement("button");
 			joinButton.type = "button";
-			joinButton.className = "mini-action room-join-action" + (joining ? " is-loading" : "");
+			joinButton.className = "mini-action room-join room-join-action" + (joining ? " is-loading" : "");
 			joinButton.textContent = room.joined ? "Live" : (joining ? "Joining" : "Join");
 			joinButton.disabled = !canJoinRoom;
 			joinButton.addEventListener("pointerdown", function(event) {
@@ -3492,8 +7420,9 @@
 		const voiceRooms = snapshot.voiceRooms || [];
 		const voicePresence = snapshot.voicePresence || [];
 
+		syncMockupShellChrome(app);
 		refs.connectButton.disabled = !app.canConnect;
-		refs.disconnectButton.disabled = !app.canDisconnect;
+		refs.disconnectButton.disabled = !appCanCancelConnection(app);
 		refs.muteButton.classList.toggle("is-active", !!app.selfMuted);
 		refs.deafButton.classList.toggle("is-active", !!app.selfDeafened);
 		renderMenus(resolvedAppMenus(app));
@@ -3506,8 +7435,6 @@
 		}
 
 		reconcilePendingVoiceJoin(snapshot);
-		refs.textRoomCount.textContent = String(textRooms.length);
-		refs.voiceRoomCount.textContent = String(voiceRooms.length);
 		renderRoomList(refs.voiceRoomList, voiceRooms, {
 			joinable: true,
 			voicePresence: voicePresence,
@@ -3519,14 +7446,9 @@
 			voicePresence: null,
 			hideWhenEmpty: !(app.canManageTextChannels || app.canCreateTextRoom)
 		});
+		renderDirectMessages(snapshot);
 		renderStonksChatHeader(snapshot);
-		const renderedActiveRailToken = activeRailToken();
-		if (!renderedActiveRailToken) {
-			lastActiveRailToken = "";
-		} else if (renderedActiveRailToken !== lastActiveRailToken) {
-			lastActiveRailToken = renderedActiveRailToken;
-			pendingActiveRailReveal = true;
-		}
+		trackActiveRailTokenForReveal(activeRailToken());
 		scheduleRailLayoutSync();
 	}
 
@@ -3559,30 +7481,26 @@
 		refs.utilityScroll.querySelectorAll(".rail-row").forEach(function(row) {
 			row.classList.toggle("is-selected", !!scopeToken && String(row.dataset.scopeToken || "") === scopeToken);
 		});
-		const renderedActiveRailToken = activeRailToken();
-		if (!renderedActiveRailToken) {
-			lastActiveRailToken = "";
-		} else if (renderedActiveRailToken !== lastActiveRailToken) {
-			lastActiveRailToken = renderedActiveRailToken;
-			pendingActiveRailReveal = true;
-		}
+		trackActiveRailTokenForReveal(activeRailToken());
 		scheduleRailLayoutSync();
 	}
 
 	function renderActiveScopePatch(snapshot) {
 		const app = snapshot.app || {};
 		const scope = snapshot.activeScope || {};
+		const directConversation = activeDirectMessageConversation(snapshot);
 
 		renderRailSelectionPatch(snapshot);
+		renderDirectMessages(snapshot);
 		refs.serverEyebrow.textContent = app.serverEyebrow || scope.kindLabel || "Mumble";
-		refs.scopeTitle.textContent = scope.label || "Modern Layout";
-		refs.scopeDescription.textContent = scope.description || "Select a room to see shared history.";
+		refs.scopeTitle.textContent = scope.label || app.serverTitle || "Mumble";
+		refs.scopeDescription.textContent = scope.description || app.serverSubtitle || "Select a room to see shared history.";
 		renderMeta(scope.meta || []);
 		renderStonksChatHeader(snapshot);
 		renderScreenShareHeader(scope, scope.screenShare || null);
 		renderScreenShareCard(scope, scope.screenShare || null);
-		refs.scopeBanner.textContent = scope.banner || "";
-		refs.scopeBanner.classList.toggle("hidden", !scope.banner);
+		renderNote(app, scope, snapshot.messages || []);
+		renderConnectionOrScopeBanner(app, scope);
 		refs.loadOlderButton.disabled = !scope.canLoadOlder;
 		refs.markReadButton.disabled = !scope.canMarkRead;
 		refs.composerInput.disabled = !scope.canSend;
@@ -3596,7 +7514,9 @@
 		if (shouldShowScopeLoading(scope, snapshot.messages || [])) {
 			beginScopeLoading(scope.scopeToken, { force: true });
 		}
-		if (scope.serverLogRevision || Object.prototype.hasOwnProperty.call(scope, "serverLogHtml")) {
+		if (directConversation) {
+			renderMessages(snapshot, { resolvePendingScopeLoading: true });
+		} else if (scope.serverLogRevision || Object.prototype.hasOwnProperty.call(scope, "serverLogHtml")) {
 			renderMessages(snapshot, { resolvePendingScopeLoading: true });
 		}
 		if (scope.autoMarkRead) {
@@ -3677,6 +7597,41 @@
 			};
 			reader.readAsDataURL(file);
 		});
+	}
+
+	function serverIdentityImageExtension(file) {
+		const name = String(file && file.name || "").toLowerCase();
+		const dot = name.lastIndexOf(".");
+		return dot >= 0 ? name.slice(dot + 1) : "";
+	}
+
+	function serverIdentityImageMimeForFile(file) {
+		const type = String(file && file.type || "").trim().toLowerCase();
+		if (type.indexOf("image/") === 0) {
+			return type;
+		}
+		const extension = serverIdentityImageExtension(file);
+		if (Object.prototype.hasOwnProperty.call(serverIdentityImageExtensionMime, extension)) {
+			return serverIdentityImageExtensionMime[extension];
+		}
+		return type ? "" : "image/x-unknown";
+	}
+
+	function serverIdentityFileLooksLikeImage(file) {
+		return !!serverIdentityImageMimeForFile(file);
+	}
+
+	function normalizedServerIdentityImageDataUrl(file, dataUrl) {
+		const value = String(dataUrl || "");
+		if (/^data:image\//i.test(value)) {
+			return value;
+		}
+		const mime = serverIdentityImageMimeForFile(file);
+		const comma = value.indexOf(",");
+		if (!mime || comma < 0) {
+			return value;
+		}
+		return "data:" + mime + ";base64," + value.slice(comma + 1);
 	}
 
 	function attachImageDataUrl(dataUrl) {
@@ -3816,10 +7771,24 @@
 			return false;
 		}
 
-		notifyBridge("sendMessage", value);
+		const directSession = directMessageSessionFromToken(currentScopeToken());
+		if (directSession) {
+			invokeDirectMessageSend(directSession, value);
+		} else {
+			notifyBridge("sendMessage", value);
+		}
 		refs.composerInput.value = "";
 		syncComposerHeight();
 		return true;
+	}
+
+	function focusComposerInput() {
+		if (!refs.composerInput || refs.composerInput.disabled || typeof refs.composerInput.focus !== "function") {
+			return false;
+		}
+
+		refs.composerInput.focus({ preventScroll: true });
+		return document.activeElement === refs.composerInput;
 	}
 
 	function handleComposerInputKeyDown(event) {
@@ -3854,6 +7823,7 @@
 	function renderSystemMessage(message) {
 		const article = document.createElement("article");
 		article.className = "system-message";
+		article.dataset.bodyText = message.bodyText || "";
 		article.dataset.messageKey = messageKey(message);
 		article.dataset.messageId = String(message.messageId || "");
 		article.dataset.threadId = String(message.threadId || "");
@@ -3865,17 +7835,116 @@
 		return article;
 	}
 
-	function appendReplyBlock(container, message) {
-		if (!message.replyActor && !message.replySnippet) {
-			return;
+	function normalizedReplyPreviewText(value) {
+		return String(value || "").replace(/\s+/g, " ").trim();
+	}
+
+	function extractEmbeddedReplyQuote(bodyHtml) {
+		const source = String(bodyHtml || "");
+		const result = {
+			bodyHtml: source,
+			replyActor: "",
+			replySnippet: "",
+			found: false
+		};
+		if (!source || (source.indexOf("data-mumble-reply-quote") === -1 && source.indexOf("mumble-reply:") === -1)) {
+			return result;
 		}
 
+		const template = document.createElement("template");
+		template.innerHTML = source;
+		const nodes = Array.prototype.slice.call(template.content.childNodes);
+		let metadataNode = null;
+		let quoteNode = null;
+
+		for (let index = 0; index < nodes.length; index += 1) {
+			const node = nodes[index];
+			if (node.nodeType === 3 && !String(node.textContent || "").trim()) {
+				continue;
+			}
+			if (node.nodeType === 8 && String(node.data || "").trim().indexOf("mumble-reply:") === 0) {
+				metadataNode = node;
+				continue;
+			}
+			if (node.nodeType === 1 && node.matches && node.matches("blockquote[data-mumble-reply-quote]")) {
+				quoteNode = node;
+			}
+			break;
+		}
+
+		if (!metadataNode && !quoteNode) {
+			return result;
+		}
+
+		if (metadataNode) {
+			const metadataText = String(metadataNode.data || "").trim();
+			try {
+				const metadata = JSON.parse(metadataText.slice("mumble-reply:".length));
+				result.replyActor = normalizedReplyPreviewText(metadata.actor);
+				result.replySnippet = normalizedReplyPreviewText(metadata.snippet);
+			} catch (error) {
+				// Older reply payloads still expose readable text in the quote block.
+			}
+			if (metadataNode.parentNode) {
+				metadataNode.parentNode.removeChild(metadataNode);
+			}
+		}
+
+		if (quoteNode) {
+			if (!result.replyActor) {
+				result.replyActor = normalizedReplyPreviewText(
+					quoteNode.querySelector("strong") && quoteNode.querySelector("strong").textContent);
+			}
+			if (!result.replySnippet) {
+				const quoteCopy = quoteNode.cloneNode(true);
+				const actor = quoteCopy.querySelector("strong");
+				if (actor && actor.parentNode) {
+					actor.parentNode.removeChild(actor);
+				}
+				Array.prototype.slice.call(quoteCopy.querySelectorAll("br")).forEach(function(lineBreak) {
+					lineBreak.parentNode.replaceChild(document.createTextNode("\n"), lineBreak);
+				});
+				result.replySnippet = normalizedReplyPreviewText(quoteCopy.textContent);
+			}
+			if (quoteNode.parentNode) {
+				quoteNode.parentNode.removeChild(quoteNode);
+			}
+		}
+
+		result.bodyHtml = template.innerHTML.trim();
+		result.found = true;
+		return result;
+	}
+
+	function appendReplyBlock(container, message) {
+		const rawReplyActor = normalizedReplyPreviewText(message && message.replyActor);
+		const replySnippet = normalizedReplyPreviewText(message && message.replySnippet);
+		if (!rawReplyActor && !replySnippet) {
+			return;
+		}
+		const replyActor = rawReplyActor || "Reply";
+
 		const reply = document.createElement("div");
-		reply.className = "reply-block";
-		reply.innerHTML =
-			"<div class=\"reply-actor\"></div><div class=\"reply-snippet\"></div>";
-		reply.querySelector(".reply-actor").textContent = message.replyActor || "Reply";
-		reply.querySelector(".reply-snippet").textContent = message.replySnippet || "";
+		reply.className = "reply-block" + (replySnippet ? "" : " has-no-snippet");
+		reply.setAttribute("role", "note");
+		reply.setAttribute("aria-label", replySnippet ? (replyActor + ": " + replySnippet) : replyActor);
+
+		const copy = document.createElement("span");
+		copy.className = "reply-copy";
+		const actor = document.createElement("span");
+		actor.className = "reply-actor";
+		actor.textContent = replyActor;
+		copy.appendChild(actor);
+
+		if (replySnippet) {
+			const snippet = document.createElement("span");
+			snippet.className = "reply-snippet";
+			snippet.textContent = replySnippet;
+			copy.appendChild(snippet);
+			reply.title = replyActor + ": " + replySnippet;
+		}
+
+		reply.appendChild(copy);
 		container.appendChild(reply);
 	}
 
@@ -4105,6 +8174,7 @@
 			audio.muted = video.muted;
 			audio.volume = video.volume;
 			audio.playbackRate = video.playbackRate;
+			audio.loop = video.loop;
 		};
 		const syncAudioPosition = function(force) {
 			if (!Number.isFinite(video.currentTime)) {
@@ -4172,6 +8242,9 @@
 			console.warn("Preview audio track failed", audioMime || audioUrl);
 		}, { once: true });
 
+		video.__previewAudioTrack = audio;
+		video.__previewPlayAudioTrack = playAudio;
+		video.__previewSyncAudioTrack = syncAudioPosition;
 		syncAudioProperties();
 		media.appendChild(audio);
 		return audio;
@@ -4358,10 +8431,26 @@
 			return;
 		}
 
+		const playLinkedAudio = function() {
+			if (typeof video.__previewPlayAudioTrack === "function") {
+				video.__previewPlayAudioTrack();
+			}
+		};
 		const playPromise = video.play();
+		playLinkedAudio();
 		if (playPromise && typeof playPromise.catch === "function") {
 			playPromise.catch(function(error) {
+				if (video.__previewAudioTrack) {
+					video.__previewAudioTrack.pause();
+				}
 				console.warn("Preview video playback failed", error && error.name ? error.name : error);
+			});
+		}
+		if (playPromise && typeof playPromise.then === "function") {
+			playPromise.then(function() {
+				if (!video.paused) {
+					playLinkedAudio();
+				}
 			});
 		}
 	}
@@ -4437,9 +8526,6 @@
 	let youtubeIframeApiPromise = null;
 	let youtubeIframeIdCounter = 0;
 	const youtubeIframePlayers = new WeakMap();
-	const tiktokIframePlayers = new WeakMap();
-	const tiktokIframePlayerFrames = new Set();
-	let tiktokIframeMessageListenerAttached = false;
 
 	function previewCardSizeKey(card) {
 		const size = String(card && card.dataset && card.dataset.previewSize || "").trim().toLowerCase();
@@ -4613,18 +8699,6 @@
 		return "https://www.youtube.com";
 	}
 
-	function tiktokIframeTargetOrigin(iframe) {
-		try {
-			const url = new URL(iframe.src || "", window.location.href);
-			if (url.protocol === "https:" && previewIsTikTokIframe(iframe)) {
-				return url.origin;
-			}
-		} catch (error) {
-			// Fall back to the normal player origin below.
-		}
-		return "https://www.tiktok.com";
-	}
-
 	function normalizeYouTubeEmbedUrlForApi(embedUrl) {
 		try {
 			const url = new URL(embedUrl || "", window.location.href);
@@ -4649,24 +8723,26 @@
 		}
 	}
 
-	function normalizeTikTokEmbedUrlForApi(embedUrl) {
+	function normalizeTikTokEmbedUrlForNativeControls(embedUrl) {
 		try {
 			const url = new URL(embedUrl || "", window.location.href);
 			const host = url.hostname.toLowerCase();
 			if (host !== "tiktok.com" && !host.endsWith(".tiktok.com")) {
 				return embedUrl;
 			}
-			url.searchParams.set("controls", "0");
-			url.searchParams.set("progress_bar", "0");
-			url.searchParams.set("play_button", "0");
-			url.searchParams.set("volume_control", "0");
-			url.searchParams.set("fullscreen_button", "0");
-			url.searchParams.set("timestamp", "0");
+			[
+				"controls",
+				"progress_bar",
+				"play_button",
+				"volume_control",
+				"fullscreen_button",
+				"timestamp",
+				"closed_caption",
+				"native_context_menu"
+			].forEach(function(parameter) {
+				url.searchParams.delete(parameter);
+			});
 			url.searchParams.set("autoplay", "0");
-			url.searchParams.set("music_info", "0");
-			url.searchParams.set("description", "0");
-			url.searchParams.set("closed_caption", "0");
-			url.searchParams.set("native_context_menu", "0");
 			return url.toString();
 		} catch (error) {
 			return embedUrl;
@@ -4851,158 +8927,6 @@
 		}
 	}
 
-	function normalizeTikTokIframeMessageData(data) {
-		if (typeof data === "string") {
-			try {
-				data = JSON.parse(data);
-			} catch (error) {
-				return null;
-			}
-		}
-		if (!data || typeof data !== "object" || data["x-tiktok-player"] !== true) {
-			return null;
-		}
-		return data;
-	}
-
-	function findTikTokIframeStateFromSource(source) {
-		if (!source) {
-			return null;
-		}
-		let match = null;
-		tiktokIframePlayerFrames.forEach(function(iframe) {
-			if (!match && iframe && iframe.contentWindow === source) {
-				match = tiktokIframePlayers.get(iframe) || null;
-			}
-		});
-		return match;
-	}
-
-	function notifyTikTokIframeStateCallbacks(state, data) {
-		if (!state || !Array.isArray(state.stateChangeCallbacks)) {
-			return;
-		}
-		state.stateChangeCallbacks.forEach(function(callback) {
-			try {
-				callback(data, state);
-			} catch (error) {
-				console.warn("TikTok embed state callback failed", error && error.name ? error.name : error);
-			}
-		});
-	}
-
-	function updateTikTokIframeStateFromMessage(state, data) {
-		if (!state || !data) {
-			return;
-		}
-		const type = String(data.type || "");
-		const value = data.value;
-		if (type === "onPlayerReady") {
-			state.ready = true;
-		} else if (type === "onStateChange") {
-			const nextState = Number(value);
-			if (Number.isFinite(nextState)) {
-				state.playerState = nextState;
-			}
-		} else if (type === "onCurrentTime") {
-			if (value && typeof value === "object") {
-				const currentTime = Number(value.currentTime);
-				const duration = Number(value.duration);
-				if (Number.isFinite(currentTime)) {
-					state.currentTime = Math.max(0, currentTime);
-				}
-				if (Number.isFinite(duration)) {
-					state.duration = Math.max(0, duration);
-				}
-			} else {
-				const currentTime = Number(value);
-				if (Number.isFinite(currentTime)) {
-					state.currentTime = Math.max(0, currentTime);
-				}
-			}
-		} else if (type === "onMute") {
-			state.muted = !!value;
-		} else if (type === "onVolumeChange") {
-			const volume = Number(value);
-			if (Number.isFinite(volume)) {
-				state.volume = volume > 1 ? Math.max(0, Math.min(100, volume)) / 100 : normalizedPreviewMediaVolume(volume);
-			}
-		} else if (type === "onPlayerError" || type === "onError") {
-			console.warn("TikTok embed player error", value);
-		}
-		notifyTikTokIframeStateCallbacks(state, data);
-	}
-
-	function handleTikTokIframeMessage(event) {
-		const data = normalizeTikTokIframeMessageData(event && event.data);
-		if (!data) {
-			return;
-		}
-		const state = findTikTokIframeStateFromSource(event.source);
-		if (!state) {
-			return;
-		}
-		try {
-			const origin = new URL(event.origin || "");
-			const host = origin.hostname.toLowerCase();
-			if (host !== "tiktok.com" && !host.endsWith(".tiktok.com")) {
-				return;
-			}
-		} catch (error) {
-			return;
-		}
-		updateTikTokIframeStateFromMessage(state, data);
-	}
-
-	function ensureTikTokIframeMessageListener() {
-		if (tiktokIframeMessageListenerAttached) {
-			return;
-		}
-		tiktokIframeMessageListenerAttached = true;
-		window.addEventListener("message", handleTikTokIframeMessage);
-	}
-
-	function ensureTikTokIframePlayer(iframe) {
-		if (!previewIsTikTokIframe(iframe)) {
-			return null;
-		}
-		ensureTikTokIframeMessageListener();
-		const existing = tiktokIframePlayers.get(iframe);
-		if (existing) {
-			return existing;
-		}
-		const state = {
-			currentTime: 0,
-			duration: 0,
-			iframe: iframe,
-			muted: false,
-			playerState: -1,
-			ready: false,
-			stateChangeCallbacks: [],
-			volume: 1
-		};
-		tiktokIframePlayers.set(iframe, state);
-		tiktokIframePlayerFrames.add(iframe);
-		return state;
-	}
-
-	function postTikTokIframeCommand(iframe, type, value) {
-		if (!previewIsTikTokIframe(iframe) || !iframe.contentWindow || !type) {
-			return false;
-		}
-		try {
-			iframe.contentWindow.postMessage({
-				type: type,
-				value: value,
-				"x-tiktok-player": true
-			}, tiktokIframeTargetOrigin(iframe));
-			return true;
-		} catch (error) {
-			console.warn("TikTok embed command failed", type, error && error.name ? error.name : error);
-			return false;
-		}
-	}
-
 	function syncPreviewEmbedFrameSize(iframe) {
 		const size = previewEmbedIframeSize(iframe);
 		if (!size) {
@@ -5116,10 +9040,6 @@
 		return playerState === 1 || playerState === 3;
 	}
 
-	function tiktokPlayerStateIsPlaying(playerState) {
-		return playerState === 1 || playerState === 3;
-	}
-
 	function youtubeMediaControlStateFromPlayer(player, fallbackState) {
 		const fallback = fallbackState || {};
 		const getNumber = function(methodName, fallbackValue) {
@@ -5145,27 +9065,6 @@
 			playEnabled: true,
 			seekEnabled: duration > 0,
 			volume: playerVolume / 100,
-			volumeEnabled: true
-		};
-	}
-
-	function tiktokMediaControlStateFromState(state, fallbackState) {
-		const fallback = fallbackState || {};
-		const duration = Math.max(0, Number(state && state.duration) || Number(fallback.duration) || 0);
-		const currentTime = Math.max(0, Number(state && state.currentTime) || Number(fallback.currentTime) || 0);
-		const rawVolume = state && Number.isFinite(state.volume) ? state.volume : fallback.volume;
-		const volume = normalizedPreviewMediaVolume(rawVolume);
-		const muted = state ? !!state.muted : !!fallback.muted;
-		const playerState = state ? state.playerState : fallback.playerState;
-		return {
-			currentTime: currentTime,
-			duration: duration,
-			mediaLabel: "TikTok",
-			muted: muted || volume <= 0,
-			paused: !tiktokPlayerStateIsPlaying(playerState),
-			playEnabled: true,
-			seekEnabled: duration > 0,
-			volume: volume,
 			volumeEnabled: true
 		};
 	}
@@ -5320,88 +9219,7 @@
 		});
 
 		syncControlState();
-		ensureYouTubeIframePlayer(iframe).then(function(state) {
-			registerPlayerStateCallback(state);
-			if (state && state.player) {
-				updateFromPlayer(state.player);
-			}
-		}).catch(function(error) {
-			console.warn("YouTube embed controls could not attach",
-				error && error.message ? error.message : error);
-		});
 		iframe.addEventListener("load", function() {
-			schedulePreviewEmbedFrameSizeSync();
-			withYouTubePlayer(function(player) {
-				updateFromPlayer(player);
-			});
-		});
-		return controls;
-	}
-
-	function appendTikTokEmbedMediaControls(card, media, iframe) {
-		const playerState = ensureTikTokIframePlayer(iframe);
-		let controlState = tiktokMediaControlStateFromState(playerState, {
-			currentTime: 0,
-			duration: 0,
-			mediaLabel: "TikTok",
-			muted: false,
-			paused: true,
-			playEnabled: true,
-			seekEnabled: false,
-			volume: 1,
-			volumeEnabled: true
-		});
-
-		const syncControlState = function() {
-			syncPreviewMediaControlState(controls, controlState);
-		};
-		const updateFromPlayerState = function(state) {
-			controlState = tiktokMediaControlStateFromState(state || playerState, controlState);
-			syncControlState();
-		};
-		const applyOptimisticState = function(nextState) {
-			controlState = Object.assign({}, controlState, nextState || {});
-			syncControlState();
-		};
-
-		const controls = appendPreviewMediaControlSurface(card, media, {
-			className: "preview-card-tiktok-controls",
-			volume: false,
-			onPlay: function() {
-				const shouldPlay = controlState.paused !== false;
-				postTikTokIframeCommand(iframe, shouldPlay ? "play" : "pause");
-				applyOptimisticState({
-					paused: !shouldPlay,
-					playerState: shouldPlay ? 1 : 2
-				});
-			},
-			onSeek: function(fraction) {
-				if (!controlState.duration) {
-					return;
-				}
-				const nextTime = Math.max(0, Math.min(1, Number(fraction) || 0)) * controlState.duration;
-				postTikTokIframeCommand(iframe, "seekTo", nextTime);
-				applyOptimisticState({ currentTime: nextTime });
-			},
-			onMute: function() {
-				const nextMuted = !controlState.muted;
-				postTikTokIframeCommand(iframe, nextMuted ? "mute" : "unMute");
-				applyOptimisticState({
-					muted: nextMuted,
-					volume: nextMuted ? 0 : (controlState.volume > 0 ? controlState.volume : 1)
-				});
-			}
-		});
-
-		if (playerState && Array.isArray(playerState.stateChangeCallbacks) && !playerState.previewMediaControlsAttached) {
-			playerState.previewMediaControlsAttached = true;
-			playerState.stateChangeCallbacks.push(function(data, state) {
-				updateFromPlayerState(state);
-			});
-		}
-		syncControlState();
-		iframe.addEventListener("load", function() {
-			ensureTikTokIframePlayer(iframe);
 			schedulePreviewEmbedFrameSizeSync();
 		});
 		return controls;
@@ -5415,7 +9233,6 @@
 		}
 		const isTikTok = embedKind === "tiktok" && previewIsTikTokIframe(iframe);
 		if (isTikTok) {
-			appendTikTokEmbedMediaControls(card, media, iframe);
 			return;
 		}
 		const controls = appendPreviewMediaControlSurface(card, media, {
@@ -5455,7 +9272,7 @@
 			if (event.target && event.target.closest && event.target.closest(".preview-card-media-controls")) {
 				return;
 			}
-			if (embedKind === "youtube" || embedKind === "tiktok") {
+			if (embedKind === "youtube") {
 				const playButton = media.querySelector(".preview-card-media-play");
 				if (playButton && !playButton.disabled) {
 					event.preventDefault();
@@ -5469,9 +9286,9 @@
 		const iframe = document.createElement("iframe");
 		iframe.className = "preview-card-embed-frame preview-card-" + kindToken + "-frame";
 		iframe.src = embedKind === "youtube" ? normalizeYouTubeEmbedUrlForApi(embedUrl)
-			: (embedKind === "tiktok" ? normalizeTikTokEmbedUrlForApi(embedUrl) : embedUrl);
+			: (embedKind === "tiktok" ? normalizeTikTokEmbedUrlForNativeControls(embedUrl) : embedUrl);
 		iframe.title = preview.title || preview.subtitle || "Embedded preview";
-		iframe.loading = embedKind === "youtube" || embedKind === "tiktok" ? "eager" : "lazy";
+		iframe.loading = "lazy";
 		if (embedKind === "youtube") {
 			iframe.setAttribute("enablejsapi", "true");
 		}
@@ -5484,6 +9301,142 @@
 		card.appendChild(media);
 		schedulePreviewEmbedFrameSizeSync();
 		return media;
+	}
+
+	function previewTikTokUrlHandle(preview) {
+		const url = previewUrlObject(preview && preview.url);
+		if (!url) {
+			return "";
+		}
+		const segments = url.pathname.split("/").filter(Boolean).map(function(segment) {
+			try {
+				return decodeURIComponent(segment);
+			} catch (error) {
+				return segment;
+			}
+		});
+		const handle = segments.length && /^@/.test(segments[0]) ? segments[0] : "";
+		return handle ? "@" + handle.replace(/^@+/, "") : "";
+	}
+
+	function previewTikTokAuthor(preview, sourceLabel) {
+		const candidates = [
+			String((preview && preview.subtitle) || "").trim(),
+			String(sourceLabel || "").trim()
+		];
+		for (let i = 0; i < candidates.length; ++i) {
+			let candidate = candidates[i];
+			if (!candidate || /^tiktok(?:\.com)?$/i.test(candidate)) {
+				continue;
+			}
+			const byMatch = candidate.match(/^TikTok\s+by\s+(.+)$/i);
+			if (byMatch && byMatch[1]) {
+				candidate = byMatch[1].trim();
+			}
+			if (candidate && !/^tiktok(?:\.com)?$/i.test(candidate)) {
+				return candidate;
+			}
+		}
+		return "";
+	}
+
+	function previewCleanTikTokCaption(value) {
+		return String(value || "")
+			.replace(/\s+/g, " ")
+			.replace(/([^\s#])#/g, "$1 #")
+			.trim();
+	}
+
+	function previewTikTokCaptionText(preview, descriptionText) {
+		const placeholders = {
+			"fetching page metadata": true,
+			"loading link preview...": true,
+			"preview unavailable": true,
+			"tiktok video": true
+		};
+		const title = previewCleanTikTokCaption(preview && preview.title);
+		const description = previewCleanTikTokCaption(descriptionText);
+		const titleKey = title.toLowerCase();
+		if (title && !placeholders[titleKey]) {
+			return title;
+		}
+		const descriptionKey = description.toLowerCase();
+		return description && !placeholders[descriptionKey] ? description : "";
+	}
+
+	function previewTikTokCaptionParts(captionText) {
+		const caption = previewCleanTikTokCaption(captionText);
+		const tags = caption.match(/#[^\s#]+/g) || [];
+		const body = caption.replace(/#[^\s#]+/g, "").replace(/\s+/g, " ").trim();
+		return { body: body, tags: tags };
+	}
+
+	function appendTikTokEmbedCopy(card, preview, hostLabel, sourceLabel, descriptionText, activateCard) {
+		const copy = document.createElement("div");
+		copy.className = "preview-card-copy preview-card-tiktok-copy";
+
+		const meta = document.createElement("div");
+		meta.className = "preview-card-meta preview-card-tiktok-meta";
+		const source = document.createElement("div");
+		source.className = "preview-card-subtitle preview-card-tiktok-source";
+		source.textContent = "TikTok";
+		meta.appendChild(source);
+		const badge = document.createElement("div");
+		badge.className = "preview-card-badge preview-card-tiktok-badge";
+		badge.textContent = hostLabel || "tiktok.com";
+		meta.appendChild(badge);
+		copy.appendChild(meta);
+
+		const author = previewTikTokAuthor(preview, sourceLabel);
+		const handle = previewTikTokUrlHandle(preview);
+		if (author || handle) {
+			const authorLine = document.createElement("div");
+			authorLine.className = "preview-card-tiktok-author";
+			const normalizedAuthor = author.replace(/^@+/, "").toLowerCase();
+			const normalizedHandle = handle.replace(/^@+/, "").toLowerCase();
+			authorLine.textContent = author && handle && normalizedAuthor !== normalizedHandle
+				? "By " + author + " " + handle
+				: "By " + (author || handle);
+			copy.appendChild(authorLine);
+		}
+
+		const caption = previewTikTokCaptionParts(previewTikTokCaptionText(preview, descriptionText));
+		const captionBody = caption.body || "TikTok video";
+		const title = document.createElement("div");
+		title.className = "preview-card-title preview-card-tiktok-caption";
+		title.textContent = captionBody;
+		copy.appendChild(title);
+
+		if (caption.tags.length) {
+			const tags = document.createElement("div");
+			tags.className = "preview-card-tiktok-tags";
+			const visibleTags = caption.tags.slice(0, 5);
+			visibleTags.forEach(function(tagText) {
+				const tag = document.createElement("span");
+				tag.className = "preview-card-tiktok-tag";
+				tag.textContent = tagText;
+				tags.appendChild(tag);
+			});
+			if (caption.tags.length > visibleTags.length) {
+				const more = document.createElement("span");
+				more.className = "preview-card-tiktok-tag preview-card-tiktok-more";
+				more.textContent = "+" + String(caption.tags.length - visibleTags.length);
+				tags.appendChild(more);
+			}
+			copy.appendChild(tags);
+		}
+
+		const footer = document.createElement("div");
+		footer.className = "preview-card-footer preview-card-tiktok-footer";
+		const action = document.createElement("button");
+		action.type = "button";
+		action.className = "preview-card-action preview-card-open-button preview-card-tiktok-open-button";
+		action.textContent = (preview && preview.openLabel) || "Open on TikTok";
+		action.addEventListener("click", activateCard);
+		footer.appendChild(action);
+		copy.appendChild(footer);
+
+		card.appendChild(copy);
 	}
 
 	function createPreviewPlayableMedia(card, preview, mediaUrl, mediaMime, mediaAudioUrl, mediaAudioMime, isVideoMedia, isGifMedia, videoInlineSupported, extraClass) {
@@ -9613,6 +13566,10 @@
 		const isShortEmbed = hasEmbedMedia && embedAspect === "short";
 		const isSquareEmbed = hasEmbedMedia && embedAspect === "square";
 		const isAudioEmbed = hasEmbedMedia && (embedAspect === "audio" || embedAspect === "compact-audio");
+		const requestedPreviewSize = String(preview.previewSize || preview.size || "").trim().toLowerCase();
+		const initialPreviewSize = previewCardSizeOrder.indexOf(requestedPreviewSize) >= 0
+			? requestedPreviewSize
+			: "";
 
 		const card = document.createElement(cardUsesDiv ? "div" : "button");
 		if (!cardUsesDiv) {
@@ -9651,7 +13608,14 @@
 			+ (isAudioEmbed ? " is-embed-audio" : "")
 			+ (embedAspect === "compact-audio" ? " is-embed-compact-audio" : "")
 			+ (isYouTubeEmbed ? " is-youtube-embed" : "")
-			+ (isYouTubeEmbed && embedAspect === "short" ? " is-youtube-short" : "");
+			+ (isYouTubeEmbed && embedAspect === "short" ? " is-youtube-short" : "")
+			+ (initialPreviewSize === "large" ? " is-expanded" : "")
+			+ (initialPreviewSize === "compact" ? " is-compact" : "");
+		if (initialPreviewSize) {
+			card.dataset.previewSize = initialPreviewSize;
+			card.style.setProperty("--preview-card-target-width",
+				previewCardBubbleWidthVars[initialPreviewSize] || previewCardBubbleWidthVars.default);
+		}
 		card.title = preview.openLabel || "Open link";
 		card.setAttribute("aria-label", preview.openLabel || "Open link");
 		const activateCard = function(event) {
@@ -9734,6 +13698,10 @@
 
 		if (hasEmbedMedia) {
 			appendEmbedPreview(card, preview, embedUrl, embedAspect, embedKind);
+			if (embedKind === "tiktok") {
+				appendTikTokEmbedCopy(card, preview, hostLabel, sourceLabel, descriptionText, activateCard);
+				return card;
+			}
 		} else if (isImagePreview) {
 			if (hasImageCarousel) {
 				appendPreviewImageCarousel(card, preview, imageMediaItems);
@@ -9887,6 +13855,48 @@
 		notifyBridge("deleteMessage", message.messageId);
 	}
 
+	function normalizedDeliveryState(message) {
+		if (!message || !message.own) {
+			return "";
+		}
+		const state = String(message.deliveryState || "").trim().toLowerCase();
+		if (state === "sending" || state === "failed") {
+			return state;
+		}
+		return "";
+	}
+
+	function renderMessageDeliveryStatus(message) {
+		const state = normalizedDeliveryState(message);
+		if (!state) {
+			return null;
+		}
+
+		const row = document.createElement("div");
+		row.className = "message-delivery-status is-" + state;
+		row.dataset.deliveryState = state;
+		const label = document.createElement("span");
+		label.className = "message-delivery-label";
+		label.textContent = String(message.deliveryLabel || (state === "sending" ? "Sending..." : "Not delivered"));
+		row.appendChild(label);
+
+		if (state === "failed" && message.deliveryCanRetry !== false) {
+			const retry = document.createElement("button");
+			retry.type = "button";
+			retry.className = "message-delivery-retry";
+			retry.textContent = String(message.deliveryRetryLabel || "Retry");
+			retry.addEventListener("click", function(event) {
+				event.preventDefault();
+				event.stopPropagation();
+				notifyBridge("retryMessageDelivery",
+					String(message.clientMessageId || message.localMessageId || message.messageId || ""));
+			});
+			row.appendChild(retry);
+		}
+
+		return row;
+	}
+
 	function renderMessageFooter(message) {
 		const reactions = (message && message.reactions) || [];
 		const canReply = !!(message && message.canReply);
@@ -9925,6 +13935,7 @@
 					event.stopPropagation();
 					setOpenReactionPickerMessageId(null);
 					notifyBridge("startReply", message.messageId);
+					focusComposerInput();
 				});
 				toolbar.appendChild(replyButton);
 			}
@@ -10018,6 +14029,86 @@
 		return button;
 	}
 
+	function normalizedMessageSearchText() {
+		return String(messageSearchText || "").trim().toLowerCase();
+	}
+
+	function setMessageSearchOpen(open) {
+		messageSearchOpen = !!open;
+		if (!messageSearchOpen) {
+			messageSearchText = "";
+			if (refs.msgSearchInput) {
+				refs.msgSearchInput.value = "";
+			}
+		}
+		syncMessageSearchState();
+		if (messageSearchOpen && refs.msgSearchInput) {
+			refs.msgSearchInput.focus({ preventScroll: true });
+			refs.msgSearchInput.select();
+		}
+	}
+
+	function messageElementSearchText(element) {
+		if (!element) {
+			return "";
+		}
+		return String(element.dataset.bodyText || element.textContent || "").toLowerCase();
+	}
+
+	function syncMessageSearchState() {
+		if (!refs.msgSearchBar || !refs.messageList) {
+			return;
+		}
+
+		const query = normalizedMessageSearchText();
+		const active = messageSearchOpen || !!query;
+		let matchCount = 0;
+		refs.msgSearchBar.classList.toggle("hidden", !active);
+		refs.msgSearchBar.setAttribute("aria-hidden", active ? "false" : "true");
+		if (refs.msgSearchButton) {
+			refs.msgSearchButton.classList.toggle("is-active", active);
+			refs.msgSearchButton.setAttribute("aria-pressed", active ? "true" : "false");
+		}
+		if (refs.msgSearchInput && refs.msgSearchInput.value !== messageSearchText) {
+			refs.msgSearchInput.value = messageSearchText;
+		}
+
+		refs.messageList.querySelectorAll(".message-bubble").forEach(function(bubble) {
+			const matched = !!query && messageElementSearchText(bubble).indexOf(query) !== -1;
+			bubble.classList.toggle("is-search-match", matched);
+			if (matched) {
+				matchCount += 1;
+			}
+		});
+		refs.messageList.querySelectorAll(".message-cluster").forEach(function(cluster) {
+			if (!query) {
+				cluster.classList.remove("is-search-hidden");
+				return;
+			}
+			cluster.classList.toggle("is-search-hidden", !cluster.querySelector(".message-bubble.is-search-match"));
+		});
+		refs.messageList.querySelectorAll(".system-message").forEach(function(message) {
+			if (!query) {
+				message.classList.remove("is-search-hidden", "is-search-match");
+				return;
+			}
+			const matched = messageElementSearchText(message).indexOf(query) !== -1;
+			message.classList.toggle("is-search-hidden", !matched);
+			message.classList.toggle("is-search-match", matched);
+			if (matched) {
+				matchCount += 1;
+			}
+		});
+		refs.messageList.querySelectorAll(".day-divider").forEach(function(divider) {
+			divider.classList.toggle("is-search-hidden", !!query);
+		});
+		if (refs.msgSearchCount) {
+			refs.msgSearchCount.textContent = query
+				? (matchCount === 1 ? "1 match" : String(matchCount) + " matches")
+				: "";
+		}
+	}
+
 	function renderMessageBubble(message) {
 		const bubble = document.createElement("div");
 		bubble.className = "message-bubble"
@@ -10028,11 +14119,17 @@
 		bubble.dataset.messageId = String(message.messageId || "");
 		bubble.dataset.threadId = String(message.threadId || "");
 		bubble.dataset.messageKey = messageKey(message);
-		appendReplyBlock(bubble, message);
+		const embeddedReply = extractEmbeddedReplyQuote(message.bodyHtml || "");
+		appendReplyBlock(bubble, {
+			replyActor: normalizedReplyPreviewText(message.replyActor) || embeddedReply.replyActor,
+			replySnippet: normalizedReplyPreviewText(message.replySnippet) || embeddedReply.replySnippet
+		});
 
 		const body = document.createElement("div");
 		body.className = "bubble-copy";
-		body.innerHTML = message.bodyHtml || escapeHtml(message.bodyText || "");
+		const rawBodyHtml = String(message.bodyHtml || "");
+		const bodyHtml = embeddedReply.found ? embeddedReply.bodyHtml : rawBodyHtml;
+		body.innerHTML = bodyHtml || (rawBodyHtml.trim() ? "" : escapeHtml(message.bodyText || ""));
 		bubble.appendChild(body);
 
 		const previewCard = renderPreviewCard(message);
@@ -10042,6 +14139,11 @@
 		const previewStub = renderPreviewStub(message);
 		if (previewStub) {
 			bubble.appendChild(previewStub);
+		}
+
+		const deliveryStatus = renderMessageDeliveryStatus(message);
+		if (deliveryStatus) {
+			bubble.appendChild(deliveryStatus);
 		}
 
 		const footer = renderMessageFooter(message);
@@ -10217,9 +14319,31 @@
 		traceModernUi("messages chunk cancel " + (reason || "render"), startedAt);
 	}
 
+	function setTimelineEmptyState(isEmpty) {
+		if (refs.messageList) {
+			refs.messageList.classList.toggle("is-empty-timeline", !!isEmpty);
+		}
+	}
+
+	function markTimelineEntered() {
+		if (!refs.messageList) {
+			return;
+		}
+		if (messageListEnterTimer) {
+			clearTimeout(messageListEnterTimer);
+		}
+		refs.messageList.classList.add("is-chat-entering");
+		messageListEnterTimer = setTimeout(function() {
+			messageListEnterTimer = 0;
+			if (refs.messageList) {
+				refs.messageList.classList.remove("is-chat-entering");
+			}
+		}, 220);
+	}
+
 	function renderTimeline(messages, emptyCopy, freshTailCount) {
 		cancelActiveMessageChunkRender("sync");
-		refs.messageList.classList.remove("is-chat-loading");
+		refs.messageList.classList.remove("is-chat-loading", "is-chat-transitioning");
 		const indexedMessages = (messages || []).map(function(message, index) {
 			return Object.assign({ renderIndex: index }, message);
 		});
@@ -10234,15 +14358,18 @@
 				emptyCopy || "Messages will appear here once the selected room has activity.";
 			fragment.appendChild(empty);
 			replaceChildrenWith(refs.messageList, fragment);
+			setTimelineEmptyState(true);
 			return;
 		}
 
+		setTimelineEmptyState(false);
 		const freshStartIndex = Math.max(0, indexedMessages.length - Math.max(0, freshTailCount || 0));
 
 		groups.forEach(function(group) {
 			appendRenderedMessageGroup(fragment, group, freshStartIndex);
 		});
 		replaceChildrenWith(refs.messageList, fragment);
+		markTimelineEntered();
 	}
 
 	function applyTimelineRenderScrollState(renderState, complete) {
@@ -10276,6 +14403,7 @@
 		const linkDenseMode = renderState && renderState.timelineMode === "linkDense";
 		const chunkGroupCount = linkDenseMode ? linkDenseMessageRenderChunkGroupCount : messageRenderChunkGroupCount;
 		const chunkBudgetMs = linkDenseMode ? linkDenseMessageRenderChunkBudgetMs : messageRenderChunkBudgetMs;
+		const atomicReplace = !!(renderState && renderState.atomicReplace);
 		messageRenderGeneration = generation;
 		activeMessageChunkRender = {
 			generation: generation,
@@ -10286,13 +14414,20 @@
 		const sourceMessages = messages || [];
 		const shouldYieldBeforeRender = refs.messageList.classList.contains("is-chat-loading")
 			|| sourceMessages.length >= messageRenderLoadingThreshold;
-		if (shouldYieldBeforeRender && !refs.messageList.querySelector(".chat-loading-spinner")) {
+		const keepExistingDuringPrepare = atomicReplace && messageListHasRenderedTimeline();
+		if (shouldYieldBeforeRender && keepExistingDuringPrepare) {
+			refs.messageList.classList.remove("is-chat-loading");
+			refs.messageList.classList.add("is-chat-transitioning");
+			setTimelineEmptyState(false);
+		} else if (shouldYieldBeforeRender && !refs.messageList.querySelector(".chat-loading-spinner")) {
 			const loadingFragment = document.createDocumentFragment();
 			loadingFragment.appendChild(createChatLoadingIndicator());
 			refs.messageList.classList.add("is-chat-loading");
+			refs.messageList.classList.remove("is-chat-transitioning");
+			setTimelineEmptyState(false);
 			replaceChildrenWith(refs.messageList, loadingFragment);
 		} else if (!shouldYieldBeforeRender) {
-			refs.messageList.classList.remove("is-chat-loading");
+			refs.messageList.classList.remove("is-chat-loading", "is-chat-transitioning");
 		}
 
 		const beginChunkRender = function() {
@@ -10305,9 +14440,11 @@
 				return Object.assign({ renderIndex: index }, message);
 			});
 			const groups = renderMessageGroups(indexedMessages);
-			const emptyFragment = document.createDocumentFragment();
-			refs.messageList.classList.remove("is-chat-loading");
-			replaceChildrenWith(refs.messageList, emptyFragment);
+			if (!atomicReplace) {
+				const emptyFragment = document.createDocumentFragment();
+				refs.messageList.classList.remove("is-chat-loading", "is-chat-transitioning");
+				replaceChildrenWith(refs.messageList, emptyFragment);
+			}
 
 			if (!groups.length) {
 				const fragment = document.createDocumentFragment();
@@ -10317,7 +14454,10 @@
 				empty.querySelector("p").textContent =
 					emptyCopy || "Messages will appear here once the selected room has activity.";
 				fragment.appendChild(empty);
+				refs.messageList.classList.remove("is-chat-loading", "is-chat-transitioning");
 				replaceChildrenWith(refs.messageList, fragment);
+				setTimelineEmptyState(true);
+				markTimelineEntered();
 				activeMessageChunkRender = null;
 				applyTimelineRenderScrollState(renderState, true);
 				if (renderState && typeof renderState.onComplete === "function") {
@@ -10328,10 +14468,14 @@
 			}
 
 			const freshStartIndex = Math.max(0, indexedMessages.length - Math.max(0, freshTailCount || 0));
+			setTimelineEmptyState(false);
 			activeMessageChunkRender = {
 				generation: generation,
 				startedAt: startedAt
 			};
+			if (atomicReplace) {
+				renderState.fragment = document.createDocumentFragment();
+			}
 
 			const appendChunk = function() {
 				if (!activeMessageChunkRender || activeMessageChunkRender.generation !== generation
@@ -10350,9 +14494,11 @@
 					renderedGroupCount += 1;
 				}
 
-				refs.messageList.appendChild(fragment);
-				applyPendingMessageUpdatePatches(true);
-				applyTimelineRenderScrollState(renderState, false);
+				(atomicReplace ? renderState.fragment : refs.messageList).appendChild(fragment);
+				if (!atomicReplace) {
+					applyPendingMessageUpdatePatches(true);
+					applyTimelineRenderScrollState(renderState, false);
+				}
 				traceModernUi("messages chunk " + String(renderState.nextGroupIndex) + "/" + String(groups.length), chunkStartedAt);
 
 				if (renderState.nextGroupIndex < groups.length) {
@@ -10361,10 +14507,20 @@
 				}
 
 				activeMessageChunkRender = null;
+				if (atomicReplace) {
+					refs.messageList.classList.remove("is-chat-loading", "is-chat-transitioning");
+					replaceChildrenWith(refs.messageList, renderState.fragment);
+					markTimelineEntered();
+				}
 				applyPendingMessageUpdatePatches(false);
 				applyTimelineRenderScrollState(renderState, true);
 				if (typeof renderState.onComplete === "function") {
 					renderState.onComplete();
+				}
+				if (renderState.deferPreviewHydrationMs) {
+					previewHydrationPausedUntil = Math.max(
+						previewHydrationPausedUntil,
+						monotonicNow() + Math.max(0, Number(renderState.deferPreviewHydrationMs) || 0));
 				}
 				schedulePreviewHydrationFlush();
 				traceModernUi("messages chunk complete", startedAt);
@@ -10409,7 +14565,8 @@
 			return false;
 		}
 
-		refs.messageList.classList.remove("is-chat-loading");
+		refs.messageList.classList.remove("is-chat-loading", "is-chat-transitioning");
+		setTimelineEmptyState(false);
 		const loadingState = refs.messageList.querySelector(".chat-loading-indicator");
 		if (loadingState && refs.messageList.children.length === 1) {
 			refs.messageList.innerHTML = "";
@@ -10662,6 +14819,17 @@
 		refs.appShell.classList.toggle("chat-is-detached", !metrics.nearBottom);
 		syncJumpLatestButton(metrics);
 		return metrics;
+	}
+
+	function scheduleMessageListScrollStateSync() {
+		if (messageListScrollSyncFrame) {
+			return;
+		}
+
+		messageListScrollSyncFrame = requestAnimationFrame(function() {
+			messageListScrollSyncFrame = 0;
+			syncScrollState();
+		});
 	}
 
 	function scheduleMessageListBottomPin(frameCount) {
@@ -11008,7 +15176,11 @@
 	function renderMessages(snapshot, options) {
 		const renderOptions = options || {};
 		const scope = snapshot.activeScope || {};
-		const messages = snapshot.messages || [];
+		const directConversation = activeDirectMessageConversation(snapshot);
+		const messages = directConversation ? directMessageTimelineMessages(directConversation) : (snapshot.messages || []);
+		const emptyCopy = directConversation
+			? (directConversation.emptyCopy || ("Direct messages with " + (directConversation.label || "this user") + " will appear here."))
+			: (scope.emptyCopy || "");
 		const scopeToken = scope.scopeToken || [
 			String(scope.kindLabel || ""),
 			String(scope.label || ""),
@@ -11054,7 +15226,8 @@
 			unreadDetachedMessages += freshTailCount;
 		}
 
-		if (scope.serverLogRevision || Object.prototype.hasOwnProperty.call(scope, "serverLogHtml")) {
+		if (!directConversation
+			&& (scope.serverLogRevision || Object.prototype.hasOwnProperty.call(scope, "serverLogHtml"))) {
 			cancelActiveMessageChunkRender("server-log");
 			const serverLogRevision = String(scope.serverLogRevision || "");
 			if (Object.prototype.hasOwnProperty.call(scope, "serverLogHtml")) {
@@ -11066,10 +15239,11 @@
 
 			const fragment = document.createDocumentFragment();
 			if (cachedServerLogElement && (!serverLogRevision || cachedServerLogRevision === serverLogRevision)) {
-				refs.messageList.classList.remove("is-chat-loading");
+				refs.messageList.classList.remove("is-chat-loading", "is-chat-transitioning");
 				fragment.appendChild(cachedServerLogElement);
 			} else {
 				refs.messageList.classList.add("is-chat-loading");
+				refs.messageList.classList.remove("is-chat-transitioning");
 				fragment.appendChild(createChatLoadingIndicator());
 			}
 			replaceChildrenWith(refs.messageList, fragment);
@@ -11089,19 +15263,24 @@
 			lastRenderedMessageCount = 0;
 			lastRenderedTailKey = "";
 			lastScopeToken = scopeToken;
+			syncMessageSearchState();
 			return;
 		}
 
 		const shouldStickToBottom = (scope.scrollToBottom !== false)
 			&& (scopeChanged || (!detachedBeforeRender && messages.length >= lastRenderedMessageCount));
+		const shouldAtomicReplaceTimeline = scopeChanged
+			|| (lastRenderedMessageCount === 0 && messages.length >= messageRenderLoadingThreshold)
+			|| (timelineMode === "linkDense" && messages.length >= messageRenderLoadingThreshold);
 		const finishRender = function() {
 			lastRenderedMessageCount = messages.length;
 			lastRenderedTailKey = latestTailKey;
 			lastScopeToken = scopeToken;
+			syncMessageSearchState();
 		};
 
 		if (renderOptions.forceSync) {
-			renderTimeline(messages, scope.emptyCopy || "", freshTailCount);
+			renderTimeline(messages, emptyCopy, freshTailCount);
 			requestAnimationFrame(function() {
 				if (shouldStickToBottom) {
 					keepMessageListPinnedToBottom = true;
@@ -11120,36 +15299,211 @@
 		}
 
 		pendingMessageUpdatePatches = [];
-		renderTimelineChunked(messages, scope.emptyCopy || "", freshTailCount, {
+		renderTimelineChunked(messages, emptyCopy, freshTailCount, {
 			detachedBeforeRender: detachedBeforeRender,
 			distanceFromBottom: distanceFromBottom,
 			shouldStickToBottom: shouldStickToBottom,
 			timelineMode: timelineMode,
+			atomicReplace: shouldAtomicReplaceTimeline,
+			deferPreviewHydrationMs: shouldAtomicReplaceTimeline ? previewHydrationTimelineSettleMs : 0,
 			onComplete: finishRender
 		});
 	}
 
-	function renderNote(app, scope) {
+	function setMotdExpanded(nextExpanded) {
+		const snapshot = getSnapshot();
+		const app = snapshot.app || {};
+		motdExpansionTouched = true;
+		app.motdExpanded = !!nextExpanded;
+		snapshot.app = app;
+		railNoteAutoCollapsed = false;
+		markMotdSeen(app);
+		notifyBridge("invokeAppAction", nextExpanded ? "motd.show" : "motd.hide");
+		renderNote(app, snapshot.activeScope || {}, snapshot.messages || []);
+	}
+
+	function motdContentSignature(value) {
+		const text = String(value || "").trim();
+		if (!text) {
+			return "";
+		}
+
+		let hash = 2166136261;
+		for (let index = 0; index < text.length; index += 1) {
+			hash ^= text.charCodeAt(index);
+			hash = Math.imul(hash, 16777619) >>> 0;
+		}
+		return "v1:" + text.length + ":" + hash.toString(16);
+	}
+
+	function syncMotdDismissedSignature(app) {
+		if (app && Object.prototype.hasOwnProperty.call(app, "motdDismissedSignature")) {
+			motdDismissedSignature = String(app.motdDismissedSignature || "").trim();
+		}
+		if (app && Object.prototype.hasOwnProperty.call(app, "motdLastSeenSignature")) {
+			motdLastSeenSignature = String(app.motdLastSeenSignature || "").trim();
+		}
+		return motdDismissedSignature;
+	}
+
+	function markMotdSeen(app, signature) {
+		const seenSignature = String(signature || motdContentSignature(app && app.motdHtml || "")).trim();
+		if (!seenSignature) {
+			return;
+		}
+		if (motdLastSeenSignature === seenSignature) {
+			return;
+		}
+		motdLastSeenSignature = seenSignature;
+		if (app) {
+			app.motdLastSeenSignature = seenSignature;
+		}
+		notifyBridge("invokeAppActionPayload", "motd.markSeen", {
+			signature: seenSignature
+		});
+	}
+
+	function setMotdDismissedSignature(app, signature) {
+		motdDismissedSignature = String(signature || "").trim();
+		if (app) {
+			app.motdDismissedSignature = motdDismissedSignature;
+		}
+		if (motdDismissedSignature) {
+			motdLastSeenSignature = motdDismissedSignature;
+			if (app) {
+				app.motdLastSeenSignature = motdDismissedSignature;
+			}
+		}
+		notifyBridge("invokeAppActionPayload", motdDismissedSignature ? "motd.dismiss" : "motd.restore", {
+			signature: motdDismissedSignature
+		});
+	}
+
+	function motdMatchesDismissedSignature(motdHtml, signature) {
+		const normalizedSignature = String(signature || "").trim();
+		return !!normalizedSignature
+			&& (normalizedSignature === motdContentSignature(motdHtml)
+				|| normalizedSignature === String(motdHtml || "").trim());
+	}
+
+	function motdChangedSinceLastSeen(motdHtml) {
+		const comparisonSignature = String(motdLastSeenSignature || motdDismissedSignature || "").trim();
+		return !!String(motdHtml || "").trim()
+			&& !!comparisonSignature
+			&& !motdMatchesDismissedSignature(motdHtml, comparisonSignature);
+	}
+
+	window.__mumbleModernMotdProbeAction = function(action, signature) {
+		const snapshot = getSnapshot();
+		const app = snapshot.app || {};
+		const normalizedAction = String(action || "").trim().toLowerCase();
+		const resolvedSignature = String(signature || motdContentSignature(app.motdHtml || "")).trim();
+		if (!String(app.motdHtml || "").trim()) {
+			return { handled: false, reason: "missing-motd" };
+		}
+		if (normalizedAction === "collapse") {
+			setMotdDismissedSignature(app, "");
+			motdExpansionTouched = true;
+			setMotdExpanded(false);
+			renderNote(app, snapshot.activeScope || {}, snapshot.messages || []);
+			return { handled: true, expanded: false, dismissedSignature: "" };
+		}
+		if (normalizedAction === "dismiss") {
+			if (!resolvedSignature) {
+				return { handled: false, reason: "missing-signature" };
+			}
+			motdExpansionTouched = true;
+			setMotdDismissedSignature(app, resolvedSignature);
+			renderNote(app, snapshot.activeScope || {}, snapshot.messages || []);
+			return { handled: true, expanded: !!app.motdExpanded, dismissedSignature: resolvedSignature };
+		}
+		if (normalizedAction === "restore") {
+			setMotdDismissedSignature(app, "");
+			motdExpansionTouched = true;
+			renderNote(app, snapshot.activeScope || {}, snapshot.messages || []);
+			return { handled: true, expanded: !!app.motdExpanded, dismissedSignature: "" };
+		}
+		return { handled: false, reason: "unknown-action" };
+	};
+
+	function syncMotdToggleState(hasMotd, dismissed, hiddenForHistory, changed) {
+		if (!refs.motdToggle) {
+			return;
+		}
+
+		const visible = hasMotd && !dismissed && !hiddenForHistory;
+		refs.motdToggle.classList.toggle("hidden", !hasMotd);
+		refs.motdToggle.classList.toggle("is-active", visible);
+		refs.motdToggle.classList.toggle("has-update", hasMotd && changed);
+		refs.motdToggle.setAttribute("aria-expanded", visible ? "true" : "false");
+		refs.motdToggle.setAttribute("aria-pressed", visible ? "true" : "false");
+		refs.motdToggle.dataset.motdToast = hasMotd && changed ? "New" : "";
+		refs.motdToggle.title = !hasMotd
+			? "Server message of the day"
+			: (visible ? "Close welcome message" : (changed ? "Welcome message changed" : "Show welcome message"));
+	}
+
+	function renderConversationMotd(app, motdHtml, motdSummary, fullText, hasSummary, messages) {
+		if (!refs.motdBanner || !refs.motdBody) {
+			return;
+		}
+
+		const hasMotd = !!String(motdHtml || "").trim();
+		const dismissed = hasMotd && motdMatchesDismissedSignature(motdHtml, motdDismissedSignature);
+		const changed = hasMotd && motdChangedSinceLastSeen(motdHtml);
+		const hasHistory = (messages || []).some(function(message) {
+			return message && !message.system && !message.deleted;
+		});
+		const hiddenForHistory = hasMotd && hasHistory && !motdExpansionTouched && app.motdAlwaysVisible !== true;
+		conversationMotdHiddenForHistory = hiddenForHistory;
+		refs.motdBanner.classList.toggle("hidden", !hasMotd || dismissed || hiddenForHistory);
+		refs.motdBanner.setAttribute("aria-hidden", hasMotd && !dismissed && !hiddenForHistory ? "false" : "true");
+		syncMotdToggleState(hasMotd, dismissed, hiddenForHistory, changed);
+		if (hasMotd && !dismissed && !hiddenForHistory && !changed
+			&& !motdLastSeenSignature && !motdDismissedSignature) {
+			markMotdSeen(app, motdContentSignature(motdHtml));
+		}
+		if (!hasMotd || dismissed || hiddenForHistory) {
+			refs.motdBody.innerHTML = "";
+			return;
+		}
+
+		refs.motdBanner.classList.toggle("is-collapsed", !noteExpanded);
+		if (refs.motdCollapse) {
+			refs.motdCollapse.setAttribute("aria-expanded", noteExpanded ? "true" : "false");
+			refs.motdCollapse.title = noteExpanded ? "Collapse" : "Expand";
+			refs.motdCollapse.setAttribute("aria-label", noteExpanded ? "Collapse message of the day" : "Expand message of the day");
+		}
+		refs.motdBody.innerHTML = noteExpanded
+			? "<div class=\"motd-body-content\">" + motdHtml + "</div>"
+			: (hasSummary ? escapedMultilineText(motdSummary) : escapeHtml(fullText || ""));
+	}
+
+	function renderNote(app, scope, messages) {
 		const motdHtml = String(app.motdHtml || "").trim();
 		const motdSummary = String(app.motdSummary || "").trim();
+		syncMotdDismissedSignature(app);
 		const hasMotd = !!motdHtml;
 		refs.noteCard.classList.toggle("hidden", !hasMotd);
 		if (!hasMotd) {
 			noteExpanded = true;
 			railNoteAutoCollapsed = false;
 			lastMotdSignature = "";
+			motdExpansionTouched = false;
 			refs.noteCard.style.maxHeight = "";
 			refs.serverSubtitle.style.maxHeight = "";
 			refs.noteCard.classList.remove("is-expanded", "has-rich-note");
 			refs.noteToggleButton.classList.add("hidden");
 			refs.noteToggleButton.setAttribute("aria-expanded", "false");
+			renderConversationMotd(app, "", "", "", false, messages || []);
 			return;
 		}
 
-		const preferredExpanded = app.motdExpanded !== false;
+		const preferredExpanded = app.motdExpanded === true;
 		if (lastMotdSignature !== motdHtml) {
 			lastMotdSignature = motdHtml;
 			railNoteAutoCollapsed = false;
+			motdExpansionTouched = false;
 		}
 		noteExpanded = preferredExpanded;
 
@@ -11177,13 +15531,16 @@
 			refs.serverSubtitle.title = fullText;
 		}
 
+		renderConversationMotd(app, motdHtml, motdSummary, fullText, hasSummary, messages || []);
 		scheduleRailLayoutSync();
 	}
 
 	function renderSelfCard(app) {
+		const selfName = String(app.selfName || "You").trim() || "You";
 		refs.selfAvatar.className = "self-avatar";
-		styleAvatar(refs.selfAvatar, app.selfName || "You", true, app.selfAvatarUrl || "");
-		refs.selfName.textContent = app.selfName || "You";
+		styleAvatar(refs.selfAvatar, selfName, true, app.selfAvatarUrl || "");
+		refs.selfName.textContent = selfName;
+		refs.selfName.title = selfName;
 		refs.selfStatus.textContent = app.selfStatusLabel || "Offline";
 		refs.selfStatus.className = "self-status";
 		if (app.selfStatusTone) {
@@ -11194,6 +15551,40 @@
 		}
 		refs.selfCard.dataset.statusTone = app.selfStatusTone || "";
 		refs.selfCard.setAttribute("aria-expanded", selfMenuOpen ? "true" : "false");
+	}
+
+	function syncMockupShellChrome(app) {
+		app = app || {};
+		const serverIdentity = app.serverIdentity || {};
+		const serverIdentityKind = String(app.serverIdentityKind || "").trim().toLowerCase();
+		const appIdentity = serverIdentityKind === "application" || (!app.canDisconnect && !app.serverAvatarUrl);
+		refs.brandTitle.textContent = app.serverTitle || "Mumble";
+		refs.brandSubtitle.textContent = app.serverSubtitle || "Room-first shell";
+		if (refs.brandBadge) {
+			refs.brandBadge.classList.toggle("is-mumble-app", appIdentity);
+			refs.brandBadge.classList.toggle("is-editable", !!serverIdentity.canEdit);
+			refs.brandBadge.dataset.identityKind = appIdentity ? "application" : "server";
+			styleAvatar(refs.brandBadge,
+				serverIdentity.resolvedMonogram || app.serverTitle || "Mumble",
+				false,
+				app.serverAvatarUrl || serverIdentity.imageUrl || "");
+			if (!(app.serverAvatarUrl || serverIdentity.imageUrl) && serverIdentity.resolvedMonogram) {
+				refs.brandBadge.textContent = String(serverIdentity.resolvedMonogram).slice(0, 4).toUpperCase();
+			}
+			refs.brandBadge.tabIndex = serverIdentity.canEdit ? 0 : -1;
+			refs.brandBadge.setAttribute("role", serverIdentity.canEdit ? "button" : "img");
+			refs.brandBadge.title = serverIdentity.canEdit
+				? "Open server settings"
+				: (app.serverTitle || "Server");
+		}
+		applyStatePill(refs.layoutPill, app.layoutLabel || "Modern", app.layoutTone || "");
+		applyStatePill(refs.connectionPill, app.connectionLabel || "Disconnected", app.connectionTone || "",
+			app.connectionTooltip || "");
+		applyStatePill(refs.compatPill, app.compatibilityLabel || "Standard server", app.compatibilityTone || "");
+		refs.muteButton.setAttribute("aria-pressed", app.selfMuted ? "true" : "false");
+		refs.deafButton.setAttribute("aria-pressed", app.selfDeafened ? "true" : "false");
+		refs.settingsButton.title = app.serverTitle ? "Open " + app.serverTitle + " menu" : "Open Mumble menu";
+		refs.settingsButton.setAttribute("aria-label", app.serverTitle ? "Open " + app.serverTitle + " menu" : "Open Mumble menu");
 	}
 
 	function fallbackMenus(app) {
@@ -11238,9 +15629,7 @@
 				items: [
 					{ id: "help.whatsThis", label: "What's this", enabled: true },
 					{ id: "help.feedback", label: "Report feedback...", enabled: true },
-					{ id: "help.versionCheck", label: "Check for updates", enabled: true },
-					{ id: "help.about", label: "About Mumble", enabled: true },
-					{ id: "help.aboutQt", label: "About Qt", enabled: true }
+					{ id: "help.versionCheck", label: "Check for updates", enabled: true }
 				]
 			}
 		];
@@ -11319,14 +15708,173 @@
 		return mergedItems;
 	}
 
+	function modernDialogFieldKey(dialogId, fieldId) {
+		return String(dialogId || "") + "\n" + String(fieldId || "");
+	}
+
+	function modernDialogValuesEqual(left, right) {
+		if (left === right) {
+			return true;
+		}
+		if (left == null || right == null) {
+			return left == null && right == null;
+		}
+		if (typeof left === "object" || typeof right === "object") {
+			try {
+				return JSON.stringify(left) === JSON.stringify(right);
+			} catch (error) {
+				// Fall through to string comparison for non-serializable values.
+			}
+		}
+		return String(left) === String(right);
+	}
+
+	function modernDialogCloneFieldValue(value) {
+		if (value == null || typeof value !== "object") {
+			return value;
+		}
+		try {
+			return JSON.parse(JSON.stringify(value));
+		} catch (error) {
+			return value;
+		}
+	}
+
+	function forEachModernDialogField(state, callback) {
+		if (!state || !Array.isArray(state.sections)) {
+			return;
+		}
+
+		state.sections.forEach(function(section) {
+			(section.fields || []).forEach(function(field) {
+				callback(field);
+			});
+		});
+	}
+
+	function findModernDialogField(state, fieldId) {
+		const normalizedId = String(fieldId || "");
+		if (!normalizedId || !state || !Array.isArray(state.sections)) {
+			return null;
+		}
+		for (let sectionIndex = 0; sectionIndex < state.sections.length; sectionIndex += 1) {
+			const fields = Array.isArray(state.sections[sectionIndex] && state.sections[sectionIndex].fields)
+				? state.sections[sectionIndex].fields
+				: [];
+			for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex += 1) {
+				const field = fields[fieldIndex] || {};
+				if (String(field.id || "") === normalizedId) {
+					return field;
+				}
+			}
+		}
+		return null;
+	}
+
+	function modernDialogFocusedFieldId() {
+		const activeElement = document.activeElement;
+		if (!activeElement || !activeElement.dataset) {
+			return "";
+		}
+		return String(activeElement.dataset.modernDialogFieldId || "");
+	}
+
+	function rememberFocusedModernDialogFieldValue() {
+		const activeElement = document.activeElement;
+		const fieldId = modernDialogFocusedFieldId();
+		if (!fieldId || !activeElement) {
+			return;
+		}
+		const field = findModernDialogField(modernDialogState, fieldId);
+		if (!field) {
+			return;
+		}
+		rememberModernDialogFieldValue(fieldId, modernDialogInputValue(field, activeElement));
+	}
+
+	function applyPendingModernDialogFieldValues(state) {
+		if (!state || !Array.isArray(state.sections)) {
+			return state;
+		}
+
+		const dialogId = String(state.id || "");
+		const focusedFieldId = modernDialogFocusedFieldId();
+		const now = Date.now();
+		const localRetentionMs = 10 * 60 * 1000;
+		const sourceConflictGraceMs = 2500;
+
+		forEachModernDialogField(state, function(field) {
+			const fieldId = String(field && field.id || "");
+			if (!fieldId) {
+				return;
+			}
+
+			const pending = modernDialogPendingFieldUpdates[fieldId];
+			if (pending && String(pending.dialogId || "") === dialogId) {
+				field.value = pending.value;
+				return;
+			}
+
+			const key = modernDialogFieldKey(dialogId, fieldId);
+			const local = modernDialogLocalFieldValues[key];
+			if (!local) {
+				return;
+			}
+			const localAgeMs = Math.max(0, now - Number(local.updatedAt || 0));
+
+			if (modernDialogValuesEqual(field.value, local.value)) {
+				if (focusedFieldId !== fieldId) {
+					delete modernDialogLocalFieldValues[key];
+				}
+				return;
+			}
+
+			if (focusedFieldId === fieldId) {
+				field.value = modernDialogCloneFieldValue(local.value);
+				return;
+			}
+
+			if (Object.prototype.hasOwnProperty.call(local, "sourceValue")
+					&& !modernDialogValuesEqual(field.value, local.sourceValue)
+					&& localAgeMs >= sourceConflictGraceMs) {
+				delete modernDialogLocalFieldValues[key];
+				return;
+			}
+
+			if (localAgeMs < localRetentionMs) {
+				field.value = modernDialogCloneFieldValue(local.value);
+				return;
+			}
+
+			delete modernDialogLocalFieldValues[key];
+		});
+
+		return state;
+	}
+
 	function syncModernDialogState(state) {
-		if (!renderContainedModernDialogs) {
+		const detachedDialogHost = state && state.open
+			&& String(state.host || "") === "window";
+		if (!renderContainedModernDialogs || detachedDialogHost) {
 			modernDialogState = null;
+			modernDialogPendingFieldUpdates = {};
+			modernDialogLocalFieldValues = {};
 			renderModernDialog();
 			return;
 		}
 
-		modernDialogState = state || null;
+		if (state && state.open) {
+			rememberFocusedModernDialogFieldValue();
+		}
+		if (!state || !state.open) {
+			modernDialogPendingFieldUpdates = {};
+			modernDialogLocalFieldValues = {};
+		}
+		if (!state || !state.open || String(state.kind || "") !== "stonks") {
+			stonksPendingConfirm = null;
+			stonksPendingConfirmFocus = false;
+		}
+		modernDialogState = applyPendingModernDialogFieldValues(state || null);
 		renderModernDialog();
 	}
 
@@ -11373,7 +15921,16 @@
 		const firstField = focusable.find(function(element) {
 			return !!element.dataset.modernDialogFieldId;
 		});
-		const target = firstField || focusable[0] || refs.modernDialog;
+		const firstBodyControl = focusable.find(function(element) {
+			return refs.modernDialogBody && refs.modernDialogBody.contains(element);
+		});
+		const firstAction = focusable.find(function(element) {
+			return refs.modernDialogActions && refs.modernDialogActions.contains(element);
+		});
+		const firstNonClose = focusable.find(function(element) {
+			return element !== refs.modernDialogCloseButton;
+		});
+		const target = firstField || firstBodyControl || firstAction || firstNonClose || focusable[0] || refs.modernDialog;
 		if (target && typeof target.focus === "function") {
 			target.focus({ preventScroll: true });
 		}
@@ -11417,6 +15974,7 @@
 		if (!dialogId || !actionId) {
 			return;
 		}
+		flushModernDialogFieldUpdates();
 		notifyBridge("invokeModernDialogAction", dialogId, String(actionId), payload || {});
 	}
 
@@ -11425,17 +15983,22 @@
 		if (dialogId) {
 			notifyBridge("closeModernDialog", dialogId);
 		}
+		modernDialogPendingFieldUpdates = {};
+		modernDialogLocalFieldValues = {};
 		modernDialogState = null;
 		renderModernDialog();
 	}
 
-	function modernDialogFieldValue(field, input) {
+	function modernDialogInputValue(field, input) {
 		const type = String(field && field.type || "text");
 		if (type === "checkbox") {
 			return !!input.checked;
 		}
 		if (type === "select" && String(field && field.valueType || "number") === "string") {
 			return input.value;
+		}
+		if (type === "number" && input.value === "") {
+			return "";
 		}
 		if (type === "number" || type === "range" || type === "select") {
 			const numeric = Number(input.value);
@@ -11450,7 +16013,9 @@
 		if (!dialogId || !fieldId) {
 			return;
 		}
-		notifyBridge("updateModernDialogField", dialogId, fieldId, modernDialogFieldValue(field, input));
+		const value = modernDialogInputValue(field, input);
+		rememberModernDialogFieldValue(fieldId, value);
+		scheduleModernDialogFieldUpdate(dialogId, fieldId, value, !modernDialogFieldUpdateShouldDebounce(field));
 	}
 
 	function updateModernDialogFieldValue(fieldId, value) {
@@ -11459,19 +16024,72 @@
 		if (!dialogId || !fieldId) {
 			return;
 		}
+		rememberModernDialogFieldValue(fieldId, value);
+		flushModernDialogFieldUpdate(fieldId);
 		notifyBridge("updateModernDialogField", dialogId, fieldId, value);
 	}
 
+	function modernDialogFieldUpdateShouldDebounce(field) {
+		const type = String(field && field.type || "text");
+		return type === "text" || type === "password" || type === "textarea"
+			|| type === "number" || type === "pathPicker";
+	}
+
+	function scheduleModernDialogFieldUpdate(dialogId, fieldId, value, immediate) {
+		const existing = modernDialogPendingFieldUpdates[fieldId];
+		if (existing && existing.timer) {
+			clearTimeout(existing.timer);
+		}
+		modernDialogPendingFieldUpdates[fieldId] = { dialogId: dialogId, fieldId: fieldId, value: value, timer: 0 };
+		if (immediate) {
+			flushModernDialogFieldUpdate(fieldId);
+			return;
+		}
+		modernDialogPendingFieldUpdates[fieldId].timer = window.setTimeout(function() {
+			flushModernDialogFieldUpdate(fieldId);
+		}, 350);
+	}
+
+	function flushModernDialogFieldUpdate(fieldId) {
+		const pending = modernDialogPendingFieldUpdates[fieldId];
+		if (!pending) {
+			return;
+		}
+		if (pending.timer) {
+			clearTimeout(pending.timer);
+		}
+		delete modernDialogPendingFieldUpdates[fieldId];
+		notifyBridge("updateModernDialogField", pending.dialogId, pending.fieldId, pending.value);
+	}
+
+	function flushModernDialogFieldUpdates() {
+		Object.keys(modernDialogPendingFieldUpdates).forEach(flushModernDialogFieldUpdate);
+	}
+
 	function rememberModernDialogFieldValue(fieldId, value) {
+		const dialogId = String(modernDialogState && modernDialogState.id || "");
+		fieldId = String(fieldId || "");
+		const key = modernDialogFieldKey(dialogId, fieldId);
+		const previousLocal = modernDialogLocalFieldValues[key];
+		const existingField = findModernDialogField(modernDialogState, fieldId);
+		if (dialogId && fieldId) {
+			modernDialogLocalFieldValues[key] = {
+				dialogId: dialogId,
+				fieldId: fieldId,
+				value: modernDialogCloneFieldValue(value),
+				sourceValue: previousLocal && Object.prototype.hasOwnProperty.call(previousLocal, "sourceValue")
+					? previousLocal.sourceValue
+					: (existingField ? modernDialogCloneFieldValue(existingField.value) : undefined),
+				updatedAt: Date.now()
+			};
+		}
 		if (!modernDialogState || !Array.isArray(modernDialogState.sections)) {
 			return;
 		}
-		modernDialogState.sections.forEach(function(section) {
-			(section.fields || []).forEach(function(field) {
-				if (String(field.id || "") === String(fieldId || "")) {
-					field.value = value;
-				}
-			});
+		forEachModernDialogField(modernDialogState, function(field) {
+			if (String(field.id || "") === fieldId) {
+				field.value = modernDialogCloneFieldValue(value);
+			}
 		});
 	}
 
@@ -11505,7 +16123,7 @@
 		return !!(field && field.advanced);
 	}
 
-	function modernDialogFieldValue(dialog, fieldId) {
+	function modernDialogFieldValueById(dialog, fieldId) {
 		const sections = Array.isArray(dialog && dialog.sections) ? dialog.sections : [];
 		const normalizedId = String(fieldId || "");
 		for (let sectionIndex = 0; sectionIndex < sections.length; ++sectionIndex) {
@@ -11532,7 +16150,7 @@
 			return true;
 		}
 
-		const value = modernDialogFieldValue(dialog, rule.fieldId);
+		const value = modernDialogFieldValueById(dialog, rule.fieldId);
 		const allowedValues = Array.isArray(rule.values) ? rule.values : [rule.value];
 		return allowedValues.some(function(allowedValue) {
 			return String(allowedValue) === String(value);
@@ -11578,6 +16196,157 @@
 		});
 		bar.appendChild(button);
 		container.appendChild(bar);
+	}
+
+	function createModernDialogLineIcon(paths) {
+		const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+		svg.setAttribute("viewBox", "0 0 24 24");
+		svg.setAttribute("aria-hidden", "true");
+		(paths || []).forEach(function(pathData) {
+			const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+			path.setAttribute("d", pathData);
+			svg.appendChild(path);
+		});
+		return svg;
+	}
+
+	function modernSettingsIconPaths(pageId) {
+		const paths = {
+			audioInput: ["M12 3v8", "M8 11a4 4 0 0 0 8 0", "M12 17v4", "M8 21h8"],
+			audioOutput: ["M4 9v6h4l5 4V5L8 9H4z", "M16 9a4 4 0 0 1 0 6"],
+			look: ["M12 3a9 9 0 1 0 9 9h-4a2 2 0 0 1-2-2V8a5 5 0 0 0-5-5z", "M7 11h.01", "M10 7h.01", "M15 6h.01"],
+			ui: ["M4 5h16v14H4z", "M4 10h16", "M9 5v14"],
+			messages: ["M5 6h14v9H8l-3 3V6z", "M8 10h8", "M8 13h5"],
+			keys: ["M8 14a4 4 0 1 1 2.8-6.8A4 4 0 0 1 8 14z", "M11 11l7 7", "M15 18l3-3", "M13 16l3-3"],
+			network: ["M12 4a12 12 0 0 1 0 16", "M12 4a12 12 0 0 0 0 16", "M3 12h18", "M5 7h14", "M5 17h14"],
+			screenShare: ["M4 5h16v12H4z", "M8 21h8", "M12 17v4"],
+			about: ["M12 11v6", "M12 7h.01", "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z"],
+			close: ["M8 8l8 8", "M16 8l-8 8"]
+		};
+		return paths[pageId] || paths.ui;
+	}
+
+	function createModernSettingsPageIcon(pageId) {
+		const icon = document.createElement("span");
+		icon.className = "modern-dialog-tab-icon";
+		icon.appendChild(createModernDialogLineIcon(modernSettingsIconPaths(pageId)));
+		return icon;
+	}
+
+	function modernSettingsSelectedPage(dialog) {
+		const pages = Array.isArray(dialog && dialog.pages) ? dialog.pages : [];
+		return pages.find(function(page) {
+			return page && page.selected;
+		}) || pages.find(function(page) {
+			return page && page.id === dialog.activePage;
+		}) || pages[0] || {};
+	}
+
+	function modernSettingsPageMeta(pageId) {
+		const meta = {
+			audioInput: { eyebrow: "Audio", title: "Audio Input", status: "Input changes are staged until Done." },
+			audioOutput: { eyebrow: "Audio", title: "Audio Output", status: "Output changes are staged until Done." },
+			look: { eyebrow: "Preferences", title: "Appearance", status: "Visual changes preview live." },
+			ui: { eyebrow: "Preferences", title: "User Interface", status: "Window and room-list changes are staged until Done." },
+			messages: { eyebrow: "Preferences", title: "Messages & Sounds", status: "Message and sound changes are staged until Done." },
+			keys: { eyebrow: "Controls", title: "Key Bindings", status: "Shortcut edits are staged until Done." },
+			network: { eyebrow: "Network", title: "Network", status: "Connection changes apply after Done." },
+			screenShare: { eyebrow: "Sharing", title: "Screen Sharing", status: "Screen-share changes are staged until Done." },
+			about: { eyebrow: "About", title: "About", status: "Version, Qt, and runtime details." }
+		};
+		return meta[pageId] || { eyebrow: "Settings", title: "Settings", status: "" };
+	}
+
+	function modernDialogAdvancedContentCount(dialog) {
+		let count = 0;
+		(dialog.sections || []).forEach(function(section) {
+			if (section && section.advanced) {
+				count += 1;
+				return;
+			}
+			(section && section.fields || []).forEach(function(field) {
+				if (field && field.advanced && String(field.type || "") !== "hidden") {
+					count += 1;
+				}
+			});
+		});
+		return count;
+	}
+
+	function modernDialogChoiceOptionValue(field, option) {
+		const value = option ? option.value : "";
+		if (String(field && field.valueType || "number") === "string") {
+			return value == null ? "" : String(value);
+		}
+		const numeric = Number(value);
+		return Number.isFinite(numeric) ? numeric : 0;
+	}
+
+	function modernDialogChoiceSwatch(field, option, presentation) {
+		const swatch = document.createElement("span");
+		swatch.className = "modern-dialog-choice-swatch";
+		const value = String(option && option.value || "").toLowerCase();
+		const themeColors = {
+			dark: ["#20262f", "#5ec8b0"],
+			light: ["#eff3f7", "#5ec8b0"],
+			mocha: ["#2d2433", "#b59cff"],
+			macchiato: ["#2a2d42", "#b59cff"],
+			frappe: ["#30344a", "#b59cff"],
+			latte: ["#eef0f5", "#8d6ce6"],
+			nord: ["#2f3845", "#73b7ff"],
+			gruvbox: ["#332c24", "#f2c76f"]
+		};
+		const accentColors = {
+			auto: ["#2b3340", "#5ec8b0"],
+			teal: ["#203734", "#5ec8b0"],
+			blue: ["#21344a", "#73b7ff"],
+			violet: ["#302a4a", "#b59cff"],
+			amber: ["#3d3321", "#f2c76f"],
+			rose: ["#432833", "#ff8aa0"]
+		};
+		const colors = presentation === "accentGrid" ? accentColors[value] : themeColors[value];
+		if (colors) {
+			swatch.style.setProperty("--choice-swatch-bg", colors[0]);
+			swatch.style.setProperty("--choice-swatch-accent", colors[1]);
+		}
+		return swatch;
+	}
+
+	function appendModernDialogChoiceControl(row, field) {
+		const presentation = String(field && field.presentation || "");
+		if (presentation !== "themeGrid" && presentation !== "accentGrid" && presentation !== "segmented") {
+			return false;
+		}
+		const selectedValue = !field || field.value == null ? "" : String(field.value);
+		const wrap = document.createElement("div");
+		wrap.className = "modern-dialog-choice-control is-" + presentation;
+		(field.options || []).forEach(function(option) {
+			const optionValue = !option || option.value == null ? "" : String(option.value);
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "modern-dialog-choice-option" + (optionValue === selectedValue ? " is-selected" : "");
+			button.disabled = field.enabled === false || option.enabled === false;
+			button.setAttribute("aria-pressed", optionValue === selectedValue ? "true" : "false");
+			button.title = modernDialogOptionHint(option) || option.label || optionValue;
+			if (presentation === "themeGrid" || presentation === "accentGrid") {
+				button.appendChild(modernDialogChoiceSwatch(field, option, presentation));
+			}
+			const label = document.createElement("span");
+			label.className = "modern-dialog-choice-label";
+			label.textContent = option.label || optionValue;
+			button.appendChild(label);
+			button.addEventListener("click", function(event) {
+				event.preventDefault();
+				if (button.disabled) {
+					return;
+				}
+				updateModernDialogFieldValue(field.id || "", modernDialogChoiceOptionValue(field, option));
+				renderModernDialog();
+			});
+			wrap.appendChild(button);
+		});
+		row.appendChild(wrap);
+		return true;
 	}
 
 	function appendModernDialogHighlights(container, dialog) {
@@ -11912,6 +16681,65 @@
 			hybrid: Number.isFinite(hybrid) ? clampPercent(hybrid) : null,
 			peakCleanMicDb: Number.isFinite(peakCleanMicDb) ? peakCleanMicDb : null
 		};
+	}
+
+	function voiceMeterPayloadNumber(candidate, keys) {
+		if (!candidate || typeof candidate !== "object") {
+			return null;
+		}
+		for (let index = 0; index < keys.length; index += 1) {
+			if (!Object.prototype.hasOwnProperty.call(candidate, keys[index])) {
+				continue;
+			}
+			const value = Number(candidate[keys[index]]);
+			if (Number.isFinite(value)) {
+				return value;
+			}
+		}
+		return null;
+	}
+
+	function voiceMeterInitialPayload(field) {
+		if (!field || typeof field !== "object") {
+			return null;
+		}
+		const value = field.value && typeof field.value === "object" && !Array.isArray(field.value)
+			? field.value
+			: null;
+		const meter = field.meter && typeof field.meter === "object" && !Array.isArray(field.meter)
+			? field.meter
+			: null;
+		const candidate = value || meter;
+		if (!candidate) {
+			return null;
+		}
+		const amplitude = voiceMeterPayloadNumber(candidate, ["amplitude", "level", "value"]);
+		const signalToNoise = voiceMeterPayloadNumber(candidate, ["signalToNoise", "snr", "level"]);
+		const hybrid = voiceMeterPayloadNumber(candidate, ["hybrid", "level"]);
+		const peakCleanMicDb = voiceMeterPayloadNumber(candidate, ["peakCleanMicDb", "peakDb"]);
+		const payload = {
+			available: Object.prototype.hasOwnProperty.call(candidate, "available")
+				? !!candidate.available
+				: (amplitude !== null || signalToNoise !== null || hybrid !== null),
+			transmitting: !!candidate.transmitting,
+			connected: candidate.connected !== false
+		};
+		if (amplitude !== null) {
+			payload.amplitude = amplitude;
+		}
+		if (signalToNoise !== null) {
+			payload.signalToNoise = signalToNoise;
+		}
+		if (hybrid !== null) {
+			payload.hybrid = hybrid;
+		}
+		if (peakCleanMicDb !== null) {
+			payload.peakCleanMicDb = peakCleanMicDb;
+		}
+		if (Object.prototype.hasOwnProperty.call(candidate, "loopbackMode")) {
+			payload.loopbackMode = Number(candidate.loopbackMode) || 0;
+		}
+		return payload;
 	}
 
 	function setVoiceCalibrationMessage(element, message, durationMs) {
@@ -12476,7 +17304,9 @@
 		if (!modernBridge || typeof modernBridge.currentAudioInputMeter !== "function") {
 			return;
 		}
-		const meters = Array.prototype.slice.call(document.querySelectorAll(".modern-dialog-voice-meter"));
+		const meters = Array.prototype.slice.call(document.querySelectorAll(".modern-dialog-voice-meter")).filter(function(element) {
+			return element.dataset.staticMeter !== "true";
+		});
 		if (!meters.length) {
 			return;
 		}
@@ -14264,6 +19094,413 @@
 		container.appendChild(wrap);
 	}
 
+	function modernShortcutEditorOptions(options) {
+		return Array.isArray(options) ? options : [];
+	}
+
+	function modernShortcutEditorSelect(options, selectedValue, valueType, onChange) {
+		const select = document.createElement("select");
+		const selected = selectedValue == null ? "" : String(selectedValue);
+		modernShortcutEditorOptions(options).forEach(function(option) {
+			const item = document.createElement("option");
+			const optionValue = option && option.value != null ? option.value : "";
+			item.value = String(optionValue);
+			item.textContent = option && option.label ? String(option.label) : item.value;
+			item.disabled = option && option.enabled === false;
+			const hint = modernDialogOptionHint(option);
+			if (hint) {
+				item.title = hint;
+			}
+			select.appendChild(item);
+		});
+		if (selected && !Array.prototype.some.call(select.options, function(option) {
+			return option.value === selected;
+		})) {
+			const fallback = document.createElement("option");
+			fallback.value = selected;
+			fallback.textContent = selected;
+			fallback.hidden = true;
+			select.appendChild(fallback);
+		}
+		select.value = selected;
+		select.addEventListener("change", function() {
+			const raw = select.value;
+			const value = valueType === "number" ? Number(raw) : raw;
+			onChange(Number.isFinite(value) || valueType !== "number" ? value : 0);
+		});
+		return select;
+	}
+
+	function modernShortcutEditorChip(text, tone) {
+		const chip = document.createElement("span");
+		chip.className = "modern-shortcut-chip" + (tone ? " is-" + tone : "");
+		chip.textContent = text || "";
+		return chip;
+	}
+
+	function invokeModernShortcutTarget(rowIndex, patch) {
+		const payload = Object.assign({ index: rowIndex }, patch || {});
+		invokeModernDialogAction("keys.shortcutTarget", payload);
+	}
+
+	function appendModernShortcutTargetToggle(container, rowIndex, label, targetAction, checked, disabled) {
+		const toggle = document.createElement("label");
+		toggle.className = "modern-shortcut-target-check";
+		const checkbox = document.createElement("input");
+		checkbox.type = "checkbox";
+		checkbox.checked = !!checked;
+		checkbox.disabled = disabled;
+		checkbox.addEventListener("change", function() {
+			invokeModernShortcutTarget(rowIndex, {
+				targetAction: targetAction,
+				enabled: checkbox.checked
+			});
+		});
+		toggle.appendChild(checkbox);
+		toggle.appendChild(document.createTextNode(label));
+		container.appendChild(toggle);
+	}
+
+	function appendModernShortcutTargetControl(container, field, row, disabled) {
+		const rowIndex = Number(row && row.index) || 0;
+		const target = row && row.target && typeof row.target === "object" ? row.target : {};
+		const mode = String(target.mode || "channel");
+		const panel = document.createElement("div");
+		panel.className = "modern-shortcut-target";
+
+		const summary = document.createElement("div");
+		summary.className = "modern-shortcut-target-summary";
+		summary.appendChild(modernShortcutEditorChip(target.summary || row && row.dataLabel || "Current", "assigned"));
+		panel.appendChild(summary);
+
+		const modeLabel = document.createElement("label");
+		modeLabel.className = "modern-shortcut-target-mode";
+		const modeText = document.createElement("span");
+		modeText.textContent = "Target";
+		modeLabel.appendChild(modeText);
+		const modeSelect = modernShortcutEditorSelect(field.targetModeOptions || [
+			{ value: "selection", label: "Current selection" },
+			{ value: "users", label: "List of users" },
+			{ value: "channel", label: "Channel" }
+		], mode, "string", function(value) {
+			invokeModernShortcutTarget(rowIndex, {
+				targetAction: "mode",
+				mode: value
+			});
+		});
+		modeSelect.disabled = disabled;
+		modeLabel.appendChild(modeSelect);
+		panel.appendChild(modeLabel);
+
+		if (mode === "users") {
+			const users = Array.isArray(target.users) ? target.users : [];
+			const userList = document.createElement("div");
+			userList.className = "modern-shortcut-target-users";
+			if (!users.length) {
+				const empty = document.createElement("span");
+				empty.className = "modern-shortcut-target-empty";
+				empty.textContent = "No users selected";
+				userList.appendChild(empty);
+			}
+			users.forEach(function(user) {
+				const chip = document.createElement("span");
+				chip.className = "modern-shortcut-target-user";
+				chip.appendChild(document.createTextNode(user && user.label || user && user.value || "Unknown"));
+				const remove = document.createElement("button");
+				remove.type = "button";
+				remove.textContent = "Remove";
+				remove.disabled = disabled;
+				remove.addEventListener("click", function(event) {
+					event.preventDefault();
+					invokeModernShortcutTarget(rowIndex, {
+						targetAction: "removeUser",
+						hash: user && user.value || ""
+					});
+				});
+				chip.appendChild(remove);
+				userList.appendChild(chip);
+			});
+			panel.appendChild(userList);
+
+			const addRow = document.createElement("div");
+			addRow.className = "modern-shortcut-target-add-user";
+			const userOptions = Array.isArray(field.targetUserOptions) ? field.targetUserOptions : [];
+			const addSelect = modernShortcutEditorSelect(userOptions, userOptions[0] && userOptions[0].value, "string", function() {});
+			addSelect.disabled = disabled || !userOptions.length;
+			addRow.appendChild(addSelect);
+			const addButton = document.createElement("button");
+			addButton.type = "button";
+			addButton.className = "chip-button";
+			addButton.textContent = "Add";
+			addButton.disabled = disabled || !userOptions.length;
+			addButton.addEventListener("click", function(event) {
+				event.preventDefault();
+				invokeModernShortcutTarget(rowIndex, {
+					targetAction: "addUser",
+					hash: addSelect.value
+				});
+			});
+			addRow.appendChild(addButton);
+			panel.appendChild(addRow);
+		} else if (mode === "channel") {
+			const channelLabel = document.createElement("label");
+			channelLabel.className = "modern-shortcut-target-channel";
+			const label = document.createElement("span");
+			label.textContent = "Channel";
+			channelLabel.appendChild(label);
+			const channelSelect = modernShortcutEditorSelect(field.targetChannelOptions || [], target.channelId, "number", function(value) {
+				invokeModernShortcutTarget(rowIndex, {
+					targetAction: "channel",
+					channelId: value
+				});
+			});
+			channelSelect.disabled = disabled;
+			channelLabel.appendChild(channelSelect);
+			panel.appendChild(channelLabel);
+
+			const groupLabel = document.createElement("label");
+			groupLabel.className = "modern-shortcut-target-group";
+			const groupText = document.createElement("span");
+			groupText.textContent = "Restrict to group";
+			const groupInput = document.createElement("input");
+			groupInput.type = "text";
+			groupInput.value = target.group == null ? "" : String(target.group);
+			groupInput.disabled = disabled;
+			const commitGroup = function() {
+				invokeModernShortcutTarget(rowIndex, {
+					targetAction: "group",
+					group: groupInput.value
+				});
+			};
+			groupInput.addEventListener("change", commitGroup);
+			groupInput.addEventListener("keydown", function(event) {
+				if (event.key === "Enter") {
+					event.preventDefault();
+					commitGroup();
+				}
+			});
+			groupLabel.appendChild(groupText);
+			groupLabel.appendChild(groupInput);
+			panel.appendChild(groupLabel);
+		}
+
+		const checks = document.createElement("div");
+		checks.className = "modern-shortcut-target-checks";
+		appendModernShortcutTargetToggle(checks, rowIndex, "Linked channels", "links", target.links, disabled);
+		appendModernShortcutTargetToggle(checks, rowIndex, "Subchannels", "children", target.children, disabled);
+		appendModernShortcutTargetToggle(checks, rowIndex, "Ignore positional audio", "forceCenter", target.forceCenter, disabled);
+		panel.appendChild(checks);
+
+		container.appendChild(panel);
+	}
+
+	function appendModernShortcutDataControl(container, field, row, disabled) {
+		const type = String(row && row.dataType || "none");
+		if (type === "toggle") {
+			const select = modernShortcutEditorSelect(field.toggleOptions, row.dataValue, "number", function(value) {
+				invokeModernDialogAction("keys.shortcutData", {
+					index: Number(row.index) || 0,
+					value: value
+				});
+			});
+			select.disabled = disabled;
+			container.appendChild(select);
+			return;
+		}
+		if (type === "channel") {
+			const select = modernShortcutEditorSelect(field.channelOptions, row.dataValue, "number", function(value) {
+				invokeModernDialogAction("keys.shortcutData", {
+					index: Number(row.index) || 0,
+					value: value
+				});
+			});
+			select.disabled = disabled;
+			container.appendChild(select);
+			return;
+		}
+		if (type === "target") {
+			appendModernShortcutTargetControl(container, field, row || {}, disabled);
+			return;
+		}
+		if (type === "text") {
+			const input = document.createElement("input");
+			input.type = "text";
+			input.value = row.dataValue == null ? "" : String(row.dataValue);
+			input.disabled = disabled;
+			const commit = function() {
+				invokeModernDialogAction("keys.shortcutData", {
+					index: Number(row.index) || 0,
+					value: input.value
+				});
+			};
+			input.addEventListener("change", commit);
+			input.addEventListener("keydown", function(event) {
+				if (event.key === "Enter") {
+					event.preventDefault();
+					commit();
+				}
+			});
+			container.appendChild(input);
+			return;
+		}
+		container.appendChild(modernShortcutEditorChip(row && row.dataLabel || "No data", "muted"));
+	}
+
+	function appendModernShortcutEditor(container, field, errors) {
+		const wrap = document.createElement("div");
+		wrap.className = "modern-shortcut-editor";
+
+		const rows = Array.isArray(field && field.rows) ? field.rows : [];
+		const disabled = field && field.enabled === false;
+		const assigned = rows.filter(function(row) {
+			return row && row.assigned;
+		}).length;
+
+		const toolbar = document.createElement("div");
+		toolbar.className = "modern-shortcut-toolbar";
+		const summary = document.createElement("div");
+		summary.className = "modern-shortcut-summary";
+		const title = document.createElement("strong");
+		title.textContent = String(assigned) + " assigned";
+		const subtitle = document.createElement("span");
+		subtitle.textContent = String(rows.length) + " total";
+		summary.appendChild(title);
+		summary.appendChild(subtitle);
+		toolbar.appendChild(summary);
+
+		const add = document.createElement("button");
+		add.type = "button";
+		add.className = "chip-button is-accent modern-shortcut-add";
+		add.textContent = "Add shortcut";
+		add.disabled = disabled;
+		add.addEventListener("click", function(event) {
+			event.preventDefault();
+			invokeModernDialogAction("keys.addShortcut", {});
+		});
+		toolbar.appendChild(add);
+		wrap.appendChild(toolbar);
+
+		if (!rows.length) {
+			const empty = document.createElement("div");
+			empty.className = "modern-shortcut-empty";
+			empty.textContent = "No shortcuts are configured yet.";
+			wrap.appendChild(empty);
+		}
+
+		const list = document.createElement("div");
+		list.className = "modern-shortcut-list";
+		rows.forEach(function(row) {
+			const rowIndex = Number(row && row.index) || 0;
+			const item = document.createElement("article");
+			item.className = "modern-shortcut-row"
+				+ (row && row.capturing ? " is-capturing" : "")
+				+ (row && row.assigned ? " is-assigned" : "");
+
+			const main = document.createElement("div");
+			main.className = "modern-shortcut-main";
+
+			const action = document.createElement("label");
+			action.className = "modern-shortcut-cell is-action";
+			const actionLabel = document.createElement("span");
+			actionLabel.textContent = "Function";
+			const actionSelect = modernShortcutEditorSelect(field.actionOptions, row && row.actionIndex, "number", function(value) {
+				invokeModernDialogAction("keys.shortcutAction", {
+					index: rowIndex,
+					actionIndex: value
+				});
+			});
+			actionSelect.disabled = disabled;
+			action.appendChild(actionLabel);
+			action.appendChild(actionSelect);
+			main.appendChild(action);
+
+			const data = document.createElement("label");
+			data.className = "modern-shortcut-cell is-data";
+			const dataLabel = document.createElement("span");
+			dataLabel.textContent = "Data";
+			data.appendChild(dataLabel);
+			appendModernShortcutDataControl(data, field, row || {}, disabled || row && row.dataEditable === false);
+			main.appendChild(data);
+
+			const input = document.createElement("div");
+			input.className = "modern-shortcut-cell is-input";
+			const inputLabel = document.createElement("span");
+			inputLabel.textContent = "Shortcut";
+			input.appendChild(inputLabel);
+			input.appendChild(modernShortcutEditorChip(row && row.capturing ? "Listening..." : row && row.inputLabel || "Not assigned",
+				row && row.capturing ? "capture" : (row && row.assigned ? "assigned" : "muted")));
+			main.appendChild(input);
+			item.appendChild(main);
+
+			const controls = document.createElement("div");
+			controls.className = "modern-shortcut-controls";
+			if (field && field.canSuppress) {
+				const suppress = document.createElement("label");
+				suppress.className = "modern-shortcut-suppress";
+				const checkbox = document.createElement("input");
+				checkbox.type = "checkbox";
+				checkbox.checked = !!(row && row.suppress);
+				checkbox.disabled = disabled;
+				checkbox.addEventListener("change", function() {
+					invokeModernDialogAction("keys.shortcutSuppress", {
+						index: rowIndex,
+						suppress: checkbox.checked
+					});
+				});
+				suppress.appendChild(checkbox);
+				suppress.appendChild(document.createTextNode("Suppress"));
+				controls.appendChild(suppress);
+			}
+
+			const record = document.createElement("button");
+			record.type = "button";
+			record.className = "chip-button modern-shortcut-record" + (row && row.capturing ? " is-warning" : "");
+			record.textContent = row && row.capturing ? "Cancel" : "Record";
+			record.disabled = disabled || !(field && field.canCapture);
+			record.addEventListener("click", function(event) {
+				event.preventDefault();
+				invokeModernDialogAction(row && row.capturing ? "keys.cancelShortcutCapture" : "keys.beginShortcutCapture", {
+					index: rowIndex
+				});
+			});
+			controls.appendChild(record);
+
+			const clear = document.createElement("button");
+			clear.type = "button";
+			clear.className = "chip-button modern-shortcut-clear";
+			clear.textContent = "Clear";
+			clear.disabled = disabled || !(row && (row.assigned || row.capturing));
+			clear.addEventListener("click", function(event) {
+				event.preventDefault();
+				invokeModernDialogAction("keys.clearShortcut", { index: rowIndex });
+			});
+			controls.appendChild(clear);
+
+			const remove = document.createElement("button");
+			remove.type = "button";
+			remove.className = "chip-button modern-shortcut-remove is-danger";
+			remove.textContent = "Remove";
+			remove.disabled = disabled;
+			remove.addEventListener("click", function(event) {
+				event.preventDefault();
+				invokeModernDialogAction("keys.removeShortcut", { index: rowIndex });
+			});
+			controls.appendChild(remove);
+			item.appendChild(controls);
+			list.appendChild(item);
+		});
+		wrap.appendChild(list);
+
+		const errorText = errors && field && field.id ? errors[field.id] : "";
+		if (errorText) {
+			const error = document.createElement("span");
+			error.className = "modern-dialog-field-error";
+			error.textContent = errorText;
+			wrap.appendChild(error);
+		}
+		container.appendChild(wrap);
+	}
+
 	function appendModernDialogField(container, field, errors) {
 		const type = String(field && field.type || "text");
 		if (type === "hidden") {
@@ -14282,6 +19519,10 @@
 		}
 		if (type === "aclEditor") {
 			appendModernAclEditor(container, field, errors);
+			return;
+		}
+		if (type === "shortcutEditor") {
+			appendModernShortcutEditor(container, field, errors);
 			return;
 		}
 
@@ -14320,18 +19561,23 @@
 			input = document.createElement("input");
 			input.type = "checkbox";
 			input.checked = !!field.value;
+		} else if (type === "select" && appendModernDialogChoiceControl(row, field)) {
+			input = null;
 		} else if (type === "select") {
 			input = document.createElement("select");
 			const selectedValue = field.value == null ? "" : String(field.value);
 			let hasSelectedValue = false;
 			let hasOptionHint = false;
-			(field.options || []).forEach(function(option) {
+			let selectedOptionIndex = -1;
+			(field.options || []).forEach(function(option, optionIndex) {
 				const item = document.createElement("option");
 				item.value = String(option.value);
 				item.textContent = option.label || String(option.value);
 				item.disabled = option.enabled === false;
 				if (item.value === selectedValue) {
 					hasSelectedValue = true;
+					selectedOptionIndex = optionIndex;
+					item.selected = true;
 				}
 				const optionHint = modernDialogOptionHint(option);
 				if (optionHint) {
@@ -14349,6 +19595,9 @@
 				input.appendChild(fallback);
 			}
 			input.value = selectedValue;
+			if (selectedOptionIndex >= 0 && input.value !== selectedValue) {
+				input.selectedIndex = selectedOptionIndex;
+			}
 			if (hasOptionHint) {
 				syncSelectHint = function() {
 					syncModernDialogSelectHint(input, fieldTooltip);
@@ -14383,6 +19632,7 @@
 			meter.dataset.silenceThreshold = String(field.silenceThreshold || 0);
 			meter.dataset.speechThreshold = String(field.speechThreshold || 0);
 			meter.dataset.active = field.active === false ? "false" : "true";
+			meter.dataset.staticMeter = field.staticMeter ? "true" : "false";
 			meter.dataset.calibrationState = String(field.calibrationState || "idle");
 			meter.dataset.calibrationStatusText = String(field.calibrationStatusText || "");
 			meter.dataset.loopbackMode = String(field.loopbackMode || 0);
@@ -14405,7 +19655,7 @@
 				? field.maxAmplification || 0
 				: field.recommendedMaxAmplification);
 			if (fieldTooltip) {
-				meter.title = fieldTooltip;
+				meter.setAttribute("aria-label", fieldTooltip);
 			}
 
 			const header = document.createElement("div");
@@ -14512,7 +19762,7 @@
 			meter.appendChild(track);
 			meter.appendChild(footer);
 			meter.appendChild(coach);
-			updateVoiceMeterElement(meter, null);
+			updateVoiceMeterElement(meter, voiceMeterInitialPayload(field));
 			row.appendChild(meter);
 		} else if (type === "textarea") {
 			input = document.createElement("textarea");
@@ -14535,6 +19785,88 @@
 			});
 			picker.appendChild(input);
 			picker.appendChild(browse);
+			row.appendChild(picker);
+		} else if (type === "imagePicker") {
+			const picker = document.createElement("div");
+			picker.className = "modern-dialog-image-picker";
+			input = document.createElement("input");
+			input.type = "hidden";
+			input.value = field.value == null ? "" : String(field.value);
+
+			const preview = document.createElement("div");
+			preview.className = "modern-dialog-image-preview";
+			const syncPreview = function() {
+				const value = String(input.value || "");
+				if (value) {
+					preview.classList.add("has-image");
+					preview.style.backgroundImage = "url(\"" + value.replace(/"/g, "%22") + "\")";
+					preview.textContent = "";
+				} else {
+					preview.classList.remove("has-image");
+					preview.style.backgroundImage = "";
+					preview.textContent = initialsFor(field.label || "Server");
+				}
+			};
+
+			const fileInput = document.createElement("input");
+			fileInput.type = "file";
+			fileInput.className = "modern-dialog-image-file";
+			fileInput.accept = field.accept || serverIdentityImageAccept;
+
+			const controls = document.createElement("div");
+			controls.className = "modern-dialog-image-controls";
+			const choose = document.createElement("button");
+			choose.type = "button";
+			choose.className = "chip-button";
+			choose.textContent = field.chooseLabel || "Choose image";
+			choose.disabled = field.enabled === false;
+			choose.addEventListener("click", function(event) {
+				event.preventDefault();
+				fileInput.click();
+			});
+			const remove = document.createElement("button");
+			remove.type = "button";
+			remove.className = "chip-button";
+			remove.textContent = field.removeLabel || "Remove";
+			remove.disabled = field.enabled === false;
+			remove.addEventListener("click", function(event) {
+				event.preventDefault();
+				input.value = "";
+				fileInput.value = "";
+				syncPreview();
+				updateModernDialogField(field, input);
+				rememberModernDialogFieldValue(field.id, input.value);
+			});
+			fileInput.addEventListener("change", function() {
+				const file = fileInput.files && fileInput.files[0];
+				if (!file) {
+					return;
+				}
+				if (!serverIdentityFileLooksLikeImage(file)) {
+					showToast({ kind: "error", title: "Server image", message: "Choose an image file." });
+					return;
+				}
+				if (file.size > serverIdentityImageMaxFileBytes) {
+					showToast({ kind: "error", title: "Server image", message: "Choose an image smaller than 4 MB." });
+					return;
+				}
+				readFileAsDataUrl(file).then(function(dataUrl) {
+					input.value = normalizedServerIdentityImageDataUrl(file, dataUrl);
+					syncPreview();
+					updateModernDialogField(field, input);
+					rememberModernDialogFieldValue(field.id, input.value);
+				}).catch(function(error) {
+					console.warn("Unable to read server image:", error);
+					showToast({ kind: "error", title: "Server image", message: "Could not read that image." });
+				});
+			});
+			controls.appendChild(choose);
+			controls.appendChild(remove);
+			picker.appendChild(preview);
+			picker.appendChild(controls);
+			picker.appendChild(fileInput);
+			picker.appendChild(input);
+			syncPreview();
 			row.appendChild(picker);
 		} else if (type === "button") {
 			const button = document.createElement("button");
@@ -14568,7 +19900,7 @@
 			}
 		}
 
-		if (input && type !== "range" && type !== "pathPicker") {
+		if (input && type !== "range" && type !== "pathPicker" && type !== "imagePicker") {
 			row.appendChild(input);
 		}
 		if (input) {
@@ -14580,6 +19912,14 @@
 			input.addEventListener(type === "checkbox" || type === "select" || type === "range" ? "change" : "input", function() {
 				updateModernDialogField(field, input);
 			});
+			if (modernDialogFieldUpdateShouldDebounce(field)) {
+				input.addEventListener("change", function() {
+					flushModernDialogFieldUpdate(String(field.id || ""));
+				});
+				input.addEventListener("blur", function() {
+					flushModernDialogFieldUpdate(String(field.id || ""));
+				});
+			}
 			if (syncSelectHint) {
 				syncSelectHint();
 			}
@@ -14852,8 +20192,20 @@
 		};
 	}
 
+	function stonksUserIdValue(value) {
+		const userId = Number(value);
+		return Number.isFinite(userId) && userId >= 0 ? userId : null;
+	}
+
 	function stonksSelectedUserId(stonks) {
-		return Number(stonks && (stonks.selectedUserId || stonks.selfUserId || 0)) || 0;
+		if (stonks && Object.prototype.hasOwnProperty.call(stonks, "selectedUserId")) {
+			const selectedUserId = stonksUserIdValue(stonks.selectedUserId);
+			if (selectedUserId !== null) {
+				return selectedUserId;
+			}
+		}
+		const selfUserId = stonksUserIdValue(stonks && stonks.selfUserId);
+		return selfUserId !== null ? selfUserId : 0;
 	}
 
 	function stonksSelectedUserName(stonks) {
@@ -14866,13 +20218,13 @@
 		const match = users.find(function(user) {
 			return Number(user && user.userId) === selectedId;
 		});
-		return String(match && match.userName || (selectedId ? "user " + selectedId : "Portfolio")).trim();
+		return String(match && match.userName || (selectedId ? "user " + selectedId : "Ledger")).trim();
 	}
 
 	function stonksCanEditPortfolio(stonks) {
 		const selectedId = stonksSelectedUserId(stonks);
-		const selfId = Number(stonks && stonks.selfUserId || 0);
-		return selectedId > 0 && (!!(stonks && stonks.canAdmin) || (!!(stonks && stonks.registered) && selectedId === selfId));
+		const selfId = stonksUserIdValue(stonks && stonks.selfUserId);
+		return selectedId >= 0 && (!!(stonks && stonks.canAdmin) || (!!(stonks && stonks.registered) && selectedId === selfId));
 	}
 
 	function stonksLatestSnapshot(stonks) {
@@ -14922,7 +20274,7 @@
 		const latest = snapshots.length ? snapshots[0] : null;
 		const positions = latest && Array.isArray(latest.positions) && latest.positions.length
 			? latest.positions
-			: [stonksEmptyPosition(latest && latest.currency || "USD")];
+			: [];
 		stonksDraftPositions = positions.map(function(position) {
 			return stonksNormalizePosition(position, latest && latest.currency || "USD");
 		});
@@ -14941,6 +20293,14 @@
 		return stonksDraftTotalFromPositions(stonksDraftPositions || []);
 	}
 
+	function stonksDraftHasUserPositions() {
+		return (stonksDraftPositions || []).some(function(position) {
+			const normalized = stonksNormalizePosition(position, stonksDraftCurrency || "USD");
+			return !!(normalized.symbol || stonksNumber(normalized.quantity) || stonksNumber(normalized.price)
+				|| stonksNumber(normalized.marketValue) || normalized.displayName);
+		});
+	}
+
 	function stonksPositionMap(snapshot) {
 		const map = new Map();
 		(snapshot && Array.isArray(snapshot.positions) ? snapshot.positions : []).forEach(function(position) {
@@ -14957,18 +20317,30 @@
 		return delta > Math.max(0.01, Math.abs(stonksNumber(before)) * 0.001);
 	}
 
+	function stonksPositionPriceLabel(position) {
+		const price = stonksNumber(position && position.price);
+		if (!(price > 0)) {
+			return "";
+		}
+		return formatStonksMoney(price, position && position.currency || "USD") + "/share";
+	}
+
+	function stonksPositionActionText(action, symbol, position) {
+		const priceLabel = stonksPositionPriceLabel(position);
+		return action + " " + symbol + (priceLabel ? " at " + priceLabel : "");
+	}
+
 	function stonksSnapshotChanges(snapshot, previousSnapshot) {
 		const currentPositions = stonksPositionMap(snapshot);
 		const previousPositions = stonksPositionMap(previousSnapshot);
-		const currency = snapshot && snapshot.currency || previousSnapshot && previousSnapshot.currency || "USD";
 		const changes = [];
 
 		if (!currentPositions.size && previousPositions.size) {
-			return ["Cleared portfolio"];
+			return ["Cleared ledger"];
 		}
 		if (currentPositions.size && !previousPositions.size) {
-			currentPositions.forEach(function(position) {
-				changes.push("Added " + position.symbol + " at " + formatStonksMoney(position.marketValue, position.currency));
+			currentPositions.forEach(function(position, symbol) {
+				changes.push(stonksPositionActionText("Entered", symbol, position));
 			});
 			return changes;
 		}
@@ -14976,30 +20348,25 @@
 		currentPositions.forEach(function(position, symbol) {
 			const previous = previousPositions.get(symbol);
 			if (!previous) {
-				changes.push("Added " + symbol + " at " + formatStonksMoney(position.marketValue, position.currency));
+				changes.push(stonksPositionActionText("Entered", symbol, position));
 				return;
 			}
-			if (stonksValueChanged(previous.marketValue, position.marketValue)) {
-				changes.push(symbol + " value " + formatStonksSignedMoney(stonksNumber(position.marketValue) - stonksNumber(previous.marketValue), position.currency));
-			}
 			if (stonksValueChanged(previous.quantity, position.quantity)) {
-				changes.push(symbol + " qty " + formatStonksQuantity(previous.quantity) + " -> " + formatStonksQuantity(position.quantity));
-			}
-			if (stonksValueChanged(previous.price, position.price)) {
-				changes.push(symbol + " price " + formatStonksMoney(previous.price, position.currency) + " -> " + formatStonksMoney(position.price, position.currency));
+				changes.push(stonksPositionActionText(stonksNumber(position.quantity) > stonksNumber(previous.quantity)
+					? "Added more"
+					: "Removed some", symbol, position));
+			} else if (stonksValueChanged(previous.price, position.price)) {
+				changes.push(stonksPositionActionText("Updated", symbol, position));
 			}
 		});
 		previousPositions.forEach(function(position, symbol) {
 			if (!currentPositions.has(symbol)) {
-				changes.push("Removed " + symbol + " worth " + formatStonksMoney(position.marketValue, position.currency));
+				changes.push("Exited " + symbol);
 			}
 		});
 
-		if (previousSnapshot && stonksValueChanged(previousSnapshot.totalValue, snapshot && snapshot.totalValue)) {
-			changes.unshift("Total " + formatStonksSignedMoney(stonksNumber(snapshot && snapshot.totalValue) - stonksNumber(previousSnapshot.totalValue), currency));
-		}
 		if (!changes.length) {
-			changes.push(previousSnapshot ? "Metadata update" : "Initial save");
+			changes.push(previousSnapshot ? "Ledger details updated" : "Initial ledger update");
 		}
 		return changes;
 	}
@@ -15098,13 +20465,29 @@
 	}
 
 	function updateStonksValidation(summary, draft, submit, total) {
+		const positions = Array.isArray(draft.positions) ? draft.positions : [];
+		if (draft.pristine && !positions.length) {
+			summary.innerHTML = "";
+			summary.className = "stonks-validation is-idle";
+			const title = document.createElement("strong");
+			title.textContent = "Add positions to update";
+			summary.appendChild(title);
+			if (total) {
+				total.textContent = formatStonksMoney(0, draft.currency);
+			}
+			if (submit) {
+				submit.disabled = true;
+			}
+			return { errors: [], warnings: [] };
+		}
+
 		const validation = stonksValidateDraft(draft);
 		summary.innerHTML = "";
 		summary.className = "stonks-validation" + (validation.errors.length ? " has-errors" : "");
 		const title = document.createElement("strong");
 		title.textContent = validation.errors.length
 			? validation.errors.length + " issue" + (validation.errors.length === 1 ? "" : "s")
-			: "Ready to save";
+			: "Ready to update";
 		summary.appendChild(title);
 		const messages = validation.errors.concat(validation.warnings).slice(0, 5);
 		if (messages.length) {
@@ -15265,8 +20648,105 @@
 		}
 	}
 
+	function clearStonksPendingConfirm() {
+		stonksPendingConfirm = null;
+		stonksPendingConfirmFocus = false;
+	}
+
+	function requestStonksConfirm(options) {
+		const opts = options || {};
+		stonksPendingConfirm = {
+			title: String(opts.title || "Confirm action"),
+			message: String(opts.message || "Continue?"),
+			confirmLabel: String(opts.confirmLabel || "Confirm"),
+			cancelLabel: String(opts.cancelLabel || "Cancel"),
+			tone: String(opts.tone || "danger"),
+			onConfirm: typeof opts.onConfirm === "function" ? opts.onConfirm : null
+		};
+		stonksPendingConfirmFocus = true;
+		renderModernDialog();
+	}
+
+	function appendStonksPendingConfirm(parent) {
+		const pending = stonksPendingConfirm;
+		if (!pending) {
+			return;
+		}
+
+		const overlay = document.createElement("div");
+		overlay.className = "stonks-confirm-overlay";
+		overlay.addEventListener("click", function(event) {
+			if (event.target === overlay) {
+				clearStonksPendingConfirm();
+				renderModernDialog();
+			}
+		});
+
+		const panel = document.createElement("section");
+		panel.className = "stonks-confirm-panel" + (pending.tone ? " is-" + pending.tone : "");
+		panel.setAttribute("role", "alertdialog");
+		panel.setAttribute("aria-modal", "true");
+		panel.setAttribute("aria-labelledby", "stonks-confirm-title");
+		panel.setAttribute("aria-describedby", "stonks-confirm-message");
+
+		const header = document.createElement("div");
+		header.className = "stonks-confirm-header";
+		const icon = document.createElement("span");
+		icon.className = "stonks-confirm-icon";
+		icon.textContent = "!";
+		icon.setAttribute("aria-hidden", "true");
+		const copy = document.createElement("div");
+		copy.className = "stonks-confirm-copy";
+		const title = document.createElement("h3");
+		title.id = "stonks-confirm-title";
+		title.textContent = pending.title;
+		const message = document.createElement("p");
+		message.id = "stonks-confirm-message";
+		message.textContent = pending.message;
+		copy.append(title, message);
+		header.append(icon, copy);
+
+		const actions = document.createElement("div");
+		actions.className = "stonks-confirm-actions";
+		const cancel = document.createElement("button");
+		cancel.type = "button";
+		cancel.className = "chip-button";
+		cancel.textContent = pending.cancelLabel;
+		cancel.dataset.stonksConfirmCancel = "true";
+		cancel.addEventListener("click", function() {
+			clearStonksPendingConfirm();
+			renderModernDialog();
+		});
+		const confirm = document.createElement("button");
+		confirm.type = "button";
+		confirm.className = "chip-button is-" + (pending.tone || "danger");
+		confirm.textContent = pending.confirmLabel;
+		confirm.addEventListener("click", function() {
+			const onConfirm = pending.onConfirm;
+			clearStonksPendingConfirm();
+			renderModernDialog();
+			if (onConfirm) {
+				onConfirm();
+			}
+		});
+		actions.append(cancel, confirm);
+
+		panel.append(header, actions);
+		overlay.appendChild(panel);
+		parent.appendChild(overlay);
+
+		if (stonksPendingConfirmFocus) {
+			stonksPendingConfirmFocus = false;
+			window.requestAnimationFrame(function() {
+				if (document.contains(cancel)) {
+					cancel.focus({ preventScroll: true });
+				}
+			});
+		}
+	}
+
 	function appendStonksTabs(parent, stonks) {
-		const tabs = [["overview", "Overview"], ["ledger", "Portfolio"], ["leaderboard", "Leaderboard"], ["following", "Following"], ["audit", "Audit"]];
+		const tabs = [["overview", "Overview"], ["ledger", "Ledger"], ["leaderboard", "Leaderboard"], ["following", "Following"], ["audit", "Updates"]];
 		if (stonks.canAdmin) {
 			tabs.push(["admin", "Admin"]);
 		}
@@ -15305,7 +20785,7 @@
 		if (!visiblePositions.length) {
 			const empty = document.createElement("div");
 			empty.className = "stonks-empty";
-			empty.textContent = latest && latest.positionsRedacted ? "Portfolio positions are private." : "No open positions to map.";
+			empty.textContent = latest && latest.positionsRedacted ? "Ledger positions are private." : "No open positions to map.";
 			parent.appendChild(empty);
 			return;
 		}
@@ -15318,7 +20798,7 @@
 		const title = document.createElement("div");
 		title.className = "stonks-heatmap-title";
 		title.innerHTML = "<strong></strong><span></span>";
-		title.querySelector("strong").textContent = "Portfolio heatmap";
+		title.querySelector("strong").textContent = "Ledger heatmap";
 		title.querySelector("span").textContent = stonksSelectedUserName(stonks);
 		heatmap.appendChild(title);
 		const grid = document.createElement("div");
@@ -15344,10 +20824,10 @@
 		const latest = stonksLatestSnapshot(stonks);
 		const stats = document.createElement("div");
 		stats.className = "stonks-stat-grid";
-		[["Total value", latest ? formatStonksMoney(latest.totalValue, latest.currency) : "-"],
-		 ["Last saved", latest ? formatStonksTime(latest.createdAt) : "-"],
+		[["Ledger value", latest ? formatStonksMoney(latest.totalValue, latest.currency) : "-"],
+		 ["Last update", latest ? formatStonksTime(latest.createdAt) : "-"],
 		 ["Owner", stonksSelectedUserName(stonks)],
-		 ["Leaderboard rows", String((stonks.leaderboard || []).length)]].forEach(function(item) {
+		 ["PnL rows", String((stonks.leaderboard || []).length)]].forEach(function(item) {
 			const card = document.createElement("div");
 			card.className = "stonks-stat";
 			const label = document.createElement("span");
@@ -15372,28 +20852,6 @@
 		});
 		parent.appendChild(periods);
 		appendStonksHeatmap(parent, stonks);
-		const quick = document.createElement("button");
-		quick.type = "button";
-		quick.className = "chip-button is-primary";
-		quick.textContent = "Save portfolio";
-		quick.disabled = !stonksCanEditPortfolio(stonks);
-		quick.addEventListener("click", function() {
-			if (!refs.modernDialogBody.querySelector(".stonks-position-row")) {
-				stonksActiveTab = "overview";
-				renderModernDialog();
-				return;
-			}
-			const draft = stonksCollectDraft(refs.modernDialogBody);
-			draft.registered = stonksCanEditPortfolio(stonks);
-			draft.userId = stonksSelectedUserId(stonks);
-			if (stonksValidateDraft(draft).errors.length) {
-				stonksActiveTab = "overview";
-				renderModernDialog();
-				return;
-			}
-			invokeModernDialogAction("savePortfolio", draft);
-		});
-		parent.appendChild(quick);
 	}
 
 	function appendStonksEditor(parent, stonks) {
@@ -15409,8 +20867,8 @@
 		owner.innerHTML = "<strong></strong><span></span>";
 		owner.querySelector("strong").textContent = ownerName;
 		owner.querySelector("span").textContent = latest
-			? "Current save " + formatStonksTime(latest.createdAt)
-			: "No saved portfolio";
+			? "Last update " + formatStonksTime(latest.createdAt)
+			: "No ledger updates";
 		editor.appendChild(owner);
 		const top = document.createElement("div");
 		top.className = "stonks-editor-top";
@@ -15563,6 +21021,16 @@
 			});
 			table.appendChild(row);
 		});
+		if (!stonksDraftPositions.length) {
+			const empty = document.createElement("div");
+			empty.className = "stonks-position-empty";
+			empty.innerHTML = "<strong></strong><span></span>";
+			empty.querySelector("strong").textContent = "No positions yet";
+			empty.querySelector("span").textContent = canEdit
+				? "Search for a ticker or add a manual row to start the ledger."
+				: "This ledger has no visible positions.";
+			table.appendChild(empty);
+		}
 		editor.appendChild(table);
 		const actions = document.createElement("div");
 		actions.className = "stonks-editor-actions";
@@ -15582,8 +21050,8 @@
 		submit.type = "button";
 		submit.className = "chip-button is-primary";
 		submit.textContent = ownerUserId && ownerUserId !== Number(stonks.selfUserId || 0)
-			? "Save for " + ownerName
-			: "Save portfolio";
+			? "Update ledger for " + ownerName
+			: "Update ledger";
 		submit.disabled = !canEdit;
 		submit.addEventListener("click", function() {
 			const draft = stonksCollectDraft(editor);
@@ -15598,21 +21066,31 @@
 		const clear = document.createElement("button");
 		clear.type = "button";
 		clear.className = "chip-button is-danger";
-		clear.textContent = "Clear portfolio";
+		clear.textContent = "Clear ledger";
 		clear.disabled = !canEdit || !(latest && stonksNumber(latest.totalValue) > 0);
 		clear.addEventListener("click", function() {
-			if (window.confirm("Clear portfolio for " + ownerName + "?")) {
-				invokeModernDialogAction("clearPortfolio", {
-					userId: ownerUserId,
-					currency: stonksDraftCurrency || latest && latest.currency || "USD",
-					note: "Portfolio cleared"
-				});
-			}
+			requestStonksConfirm({
+				title: "Clear ledger",
+				message: "Clear ledger for " + ownerName + "?",
+				confirmLabel: "Clear ledger",
+				onConfirm: function() {
+					invokeModernDialogAction("clearPortfolio", {
+						userId: ownerUserId,
+						currency: stonksDraftCurrency || latest && latest.currency || "USD",
+						note: "Ledger cleared"
+					});
+				}
+			});
 		});
 		actions.append(add, total, clear, submit);
 		editor.appendChild(actions);
 		const validationSummary = document.createElement("div");
-		const draft = { positions: stonksDraftPositions || [], currency: stonksDraftCurrency, registered: canEdit };
+		const draft = {
+			positions: stonksDraftHasUserPositions() ? (stonksDraftPositions || []) : [],
+			currency: stonksDraftCurrency,
+			registered: canEdit,
+			pristine: !stonksDraftHasUserPositions()
+		};
 		updateStonksValidation(validationSummary, draft, submit, total);
 		editor.appendChild(validationSummary);
 		parent.appendChild(editor);
@@ -15630,7 +21108,7 @@
 		const canEdit = stonksCanEditPortfolio(stonks);
 		const description = document.createElement("div");
 		description.className = "stonks-leaderboard-description";
-		description.textContent = "Portfolio saves are kept here because leaderboard periods compare the latest save with older saves.";
+		description.textContent = "Ledger updates are kept here for your own review.";
 		const owner = document.createElement("span");
 		owner.textContent = ownerName;
 		description.appendChild(owner);
@@ -15643,7 +21121,7 @@
 			details.className = "stonks-ledger-item";
 			const summary = document.createElement("summary");
 			const summaryText = document.createElement("span");
-			summaryText.textContent = formatStonksMoney(snapshot.totalValue, snapshot.currency) + " · saved " + formatStonksTime(snapshot.createdAt);
+			summaryText.textContent = formatStonksMoney(snapshot.totalValue, snapshot.currency) + " · updated " + formatStonksTime(snapshot.createdAt);
 			summary.appendChild(summaryText);
 			if (canEdit && snapshot.snapshotId) {
 				const remove = document.createElement("button");
@@ -15653,12 +21131,17 @@
 				remove.addEventListener("click", function(event) {
 					event.preventDefault();
 					event.stopPropagation();
-					if (window.confirm("Delete this portfolio snapshot for " + ownerName + "?")) {
-						invokeModernDialogAction("deleteSnapshot", {
-							snapshotId: snapshot.snapshotId,
-							userId: snapshot.userId || ownerUserId
-						});
-					}
+					requestStonksConfirm({
+						title: "Delete ledger update",
+						message: "Delete this ledger update for " + ownerName + "?",
+						confirmLabel: "Delete update",
+						onConfirm: function() {
+							invokeModernDialogAction("deleteSnapshot", {
+								snapshotId: snapshot.snapshotId,
+								userId: snapshot.userId || ownerUserId
+							});
+						}
+					});
 				});
 				summary.appendChild(remove);
 			}
@@ -15694,7 +21177,7 @@
 			if (!snapshot.positions || !snapshot.positions.length) {
 				const empty = document.createElement("p");
 				empty.className = "stonks-note";
-				empty.textContent = snapshot.positionsRedacted ? "Positions redacted." : "No open positions.";
+				empty.textContent = snapshot.positionsRedacted ? "Positions are private." : "No open positions.";
 				details.appendChild(empty);
 			}
 			list.appendChild(details);
@@ -15702,7 +21185,7 @@
 		if (!list.children.length) {
 			const empty = document.createElement("div");
 			empty.className = "stonks-empty";
-			empty.textContent = "No audit entries yet.";
+			empty.textContent = "No ledger updates yet.";
 			list.appendChild(empty);
 		}
 		parent.appendChild(list);
@@ -15712,12 +21195,7 @@
 		const description = document.createElement("div");
 		description.className = "stonks-leaderboard-description";
 		description.textContent = stonks.leaderboardDescription
-			|| "Portfolio return compares the latest saved portfolio value with the closest older saved value for this period.";
-		if (stonks.leaderboardUpdatedAt) {
-			const updated = document.createElement("span");
-			updated.textContent = "Updated " + formatStonksTime(stonks.leaderboardUpdatedAt);
-			description.appendChild(updated);
-		}
+			|| "Leaderboard ranks only PnL for the selected period.";
 		parent.appendChild(description);
 		const list = document.createElement("div");
 		list.className = "stonks-list";
@@ -15727,13 +21205,13 @@
 			const main = document.createElement("div");
 			main.innerHTML = "<strong></strong><span></span><small></small>";
 			main.querySelector("strong").textContent = (row.insufficientHistory ? "" : row.rank + ". ") + row.userName;
-			main.querySelector("span").textContent = "Latest save " + formatStonksTime(row.endSnapshotAt);
+			main.querySelector("span").textContent = "PnL " + (row.period || stonks.selectedPeriod || "30d");
 			main.querySelector("small").textContent = row.insufficientHistory
-				? "Insufficient history for " + (row.period || stonks.selectedPeriod || "30d")
-				: "Baseline " + formatStonksTime(row.startSnapshotAt);
+				? "Insufficient history"
+				: "";
 			const percent = document.createElement("strong");
 			percent.className = "stonks-return" + (row.insufficientHistory ? " is-muted" : (stonksNumber(row.returnPercent) >= 0 ? " is-positive" : " is-negative"));
-			percent.textContent = row.insufficientHistory ? "Need baseline" : formatStonksPercent(row.returnPercent);
+			percent.textContent = row.insufficientHistory ? "Need PnL" : formatStonksPercent(row.returnPercent);
 			const follow = document.createElement("button");
 			follow.type = "button";
 			follow.className = "chip-button";
@@ -15762,7 +21240,7 @@
 		if (!list.children.length) {
 			const empty = document.createElement("div");
 			empty.className = "stonks-empty";
-			empty.textContent = "No ranked portfolios for this period yet.";
+			empty.textContent = "No ranked PnL for this period yet.";
 			list.appendChild(empty);
 		}
 		parent.appendChild(list);
@@ -15796,6 +21274,86 @@
 	}
 
 	function appendStonksAdmin(parent, stonks) {
+		const selectedUserId = stonksSelectedUserId(stonks);
+		const adminUsers = [];
+		const seenUserIds = {};
+		(Array.isArray(stonks && stonks.users) ? stonks.users : []).forEach(function(user) {
+			const userId = stonksUserIdValue(user && user.userId);
+			if (userId === null || seenUserIds[userId]) {
+				return;
+			}
+			seenUserIds[userId] = true;
+			adminUsers.push({
+				userId: userId,
+				userName: String(user && user.userName || ("user " + userId)).trim()
+			});
+		});
+		if (selectedUserId >= 0 && !seenUserIds[selectedUserId]) {
+			adminUsers.push({
+				userId: selectedUserId,
+				userName: stonksSelectedUserName(stonks) || ("user " + selectedUserId)
+			});
+		}
+
+		const manager = document.createElement("section");
+		manager.className = "stonks-admin stonks-admin-manager";
+		const userSelect = document.createElement("select");
+		adminUsers.forEach(function(user) {
+			const option = document.createElement("option");
+			option.value = String(user.userId);
+			option.textContent = user.userName || ("user " + user.userId);
+			option.selected = user.userId === selectedUserId;
+			userSelect.appendChild(option);
+		});
+		if (!userSelect.children.length) {
+			const option = document.createElement("option");
+			option.value = "-1";
+			option.textContent = "No registered users";
+			userSelect.appendChild(option);
+		}
+		const view = document.createElement("button");
+		view.type = "button";
+		view.className = "chip-button";
+		view.textContent = "View ledger";
+		view.disabled = !userSelect.children.length || stonksUserIdValue(userSelect.value) === null;
+		view.addEventListener("click", function() {
+			stonksActiveTab = "ledger";
+			invokeModernDialogAction("selectUser", { userId: Number(userSelect.value || 0) });
+		});
+		const audit = document.createElement("button");
+		audit.type = "button";
+		audit.className = "chip-button";
+		audit.textContent = "View updates";
+		audit.disabled = !userSelect.children.length || stonksUserIdValue(userSelect.value) === null;
+		audit.addEventListener("click", function() {
+			stonksActiveTab = "audit";
+			invokeModernDialogAction("selectUser", { userId: Number(userSelect.value || 0) });
+		});
+		const clear = document.createElement("button");
+		clear.type = "button";
+		clear.className = "chip-button is-danger";
+		clear.textContent = "Clear ledger";
+		clear.disabled = !userSelect.children.length || stonksUserIdValue(userSelect.value) === null;
+		clear.addEventListener("click", function() {
+			const targetName = userSelect.options[userSelect.selectedIndex]
+				? userSelect.options[userSelect.selectedIndex].textContent
+				: "selected user";
+			requestStonksConfirm({
+				title: "Clear ledger",
+				message: "Clear ledger for " + targetName + "?",
+				confirmLabel: "Clear ledger",
+				onConfirm: function() {
+					invokeModernDialogAction("clearPortfolio", {
+						userId: Number(userSelect.value || 0),
+						currency: stonksLatestSnapshot(stonks) && stonksLatestSnapshot(stonks).currency || "USD",
+						note: "Ledger cleared by admin"
+					});
+				}
+			});
+		});
+		manager.append(userSelect, view, audit, clear);
+		parent.appendChild(manager);
+
 		const form = document.createElement("section");
 		form.className = "stonks-admin";
 		const enabled = document.createElement("label");
@@ -15835,61 +21393,6 @@
 		});
 		form.append(enabled, announcements, select, save);
 		parent.appendChild(form);
-
-		const manager = document.createElement("section");
-		manager.className = "stonks-admin stonks-admin-manager";
-		const selectedUserId = stonksSelectedUserId(stonks);
-		const userSelect = document.createElement("select");
-		(stonks.users || []).forEach(function(user) {
-			const option = document.createElement("option");
-			option.value = String(user.userId || 0);
-			option.textContent = user.userName || ("user " + user.userId);
-			option.selected = Number(user.userId || 0) === selectedUserId;
-			userSelect.appendChild(option);
-		});
-		if (!userSelect.children.length) {
-			const option = document.createElement("option");
-			option.value = "0";
-			option.textContent = "No registered users";
-			userSelect.appendChild(option);
-		}
-		const view = document.createElement("button");
-		view.type = "button";
-		view.className = "chip-button";
-		view.textContent = "View portfolio";
-		view.disabled = Number(userSelect.value || 0) <= 0;
-		view.addEventListener("click", function() {
-			stonksActiveTab = "ledger";
-			invokeModernDialogAction("selectUser", { userId: Number(userSelect.value || 0) });
-		});
-		const audit = document.createElement("button");
-		audit.type = "button";
-		audit.className = "chip-button";
-		audit.textContent = "View audit";
-		audit.disabled = Number(userSelect.value || 0) <= 0;
-		audit.addEventListener("click", function() {
-			stonksActiveTab = "audit";
-			invokeModernDialogAction("selectUser", { userId: Number(userSelect.value || 0) });
-		});
-		const clear = document.createElement("button");
-		clear.type = "button";
-		clear.className = "chip-button is-danger";
-		clear.textContent = "Clear portfolio";
-		clear.disabled = Number(userSelect.value || 0) <= 0;
-		clear.addEventListener("click", function() {
-			const targetName = userSelect.options[userSelect.selectedIndex]
-				? userSelect.options[userSelect.selectedIndex].textContent
-				: "selected user";
-			if (window.confirm("Clear portfolio for " + targetName + "?")) {
-				invokeModernDialogAction("clearPortfolio", {
-					userId: Number(userSelect.value || 0),
-					currency: stonksLatestSnapshot(stonks) && stonksLatestSnapshot(stonks).currency || "USD",
-					note: "Portfolio cleared by admin"
-				});
-			}
-		});
-		manager.append(userSelect, view, audit, clear);
-		parent.appendChild(manager);
 	}
 
 	function renderStonksDialog(dialog) {
@@ -15935,9 +21438,153 @@
 			appendStonksAdmin(panel, stonks);
 		} else {
 			appendStonksOverview(panel, stonks);
-			appendStonksEditor(panel, stonks);
 		}
 		refs.modernDialogBody.appendChild(panel);
+		appendStonksPendingConfirm(refs.modernDialogBody);
+	}
+
+	function appendModernDialogTabs(container, dialog) {
+		if (!Array.isArray(dialog.pages) || !dialog.pages.length) {
+			return;
+		}
+
+		const settingsTabs = dialog && dialog.kind === "settings";
+		const tabs = document.createElement("div");
+		tabs.className = "modern-dialog-tabs" + (settingsTabs ? " modern-settings-rail" : "");
+		dialog.pages.forEach(function(page) {
+			const pageId = String(page.id || "");
+			const tab = document.createElement("button");
+			tab.type = "button";
+			tab.className = "modern-dialog-tab"
+				+ (page.selected ? " is-selected" : "")
+				+ (pageId ? " page-id-" + pageId.replace(/[^a-z0-9_-]/gi, "-") : "");
+			if (pageId) {
+				tab.dataset.pageId = pageId;
+			}
+			if (settingsTabs) {
+				tab.appendChild(createModernSettingsPageIcon(pageId));
+				const label = document.createElement("span");
+				label.className = "modern-dialog-tab-label";
+				label.textContent = page.label || pageId || "Page";
+				tab.appendChild(label);
+			} else {
+				tab.textContent = page.label || page.id || "Page";
+			}
+			tab.addEventListener("click", function() {
+				invokeModernDialogAction("selectPage", { pageId: page.id || "" });
+			});
+			tabs.appendChild(tab);
+		});
+		container.appendChild(tabs);
+	}
+
+	function renderSettingsDialog(dialog) {
+		const selectedPage = modernSettingsSelectedPage(dialog);
+		const pageId = String(selectedPage.id || dialog.activePage || "");
+		const meta = modernSettingsPageMeta(pageId);
+		const showAdvanced = modernDialogAdvancedVisible(dialog);
+		const hiddenAdvancedCount = showAdvanced ? 0 : modernDialogAdvancedContentCount(dialog);
+
+		appendModernDialogTabs(refs.modernDialogBody, dialog);
+
+		const content = document.createElement("div");
+		content.className = "modern-settings-content";
+
+		const header = document.createElement("header");
+		header.className = "modern-settings-header";
+		const copy = document.createElement("div");
+		copy.className = "modern-settings-title-copy";
+		const eyebrow = document.createElement("p");
+		eyebrow.className = "modern-settings-eyebrow";
+		eyebrow.textContent = meta.eyebrow;
+		const title = document.createElement("h2");
+		title.className = "modern-settings-title";
+		title.textContent = meta.title || selectedPage.label || "Settings";
+		copy.appendChild(eyebrow);
+		copy.appendChild(title);
+		header.appendChild(copy);
+
+		const tools = document.createElement("div");
+		tools.className = "modern-settings-tools";
+		if (modernDialogHasAdvancedContent(dialog)) {
+			const advanced = document.createElement("button");
+			advanced.type = "button";
+			advanced.className = "chip-button modern-settings-advanced-toggle" + (showAdvanced ? " is-active" : "");
+			advanced.textContent = showAdvanced ? "Basic" : "Advanced";
+			advanced.setAttribute("aria-pressed", showAdvanced ? "true" : "false");
+			advanced.addEventListener("click", function() {
+				setModernDialogAdvancedVisible(dialog, !showAdvanced);
+				renderModernDialog();
+			});
+			tools.appendChild(advanced);
+		}
+		const closeButton = document.createElement("button");
+		closeButton.type = "button";
+		closeButton.className = "icon-button modern-settings-close";
+		closeButton.title = "Close";
+		closeButton.setAttribute("aria-label", "Close");
+		closeButton.appendChild(createModernDialogLineIcon(modernSettingsIconPaths("close")));
+		closeButton.addEventListener("click", closeModernDialog);
+		tools.appendChild(closeButton);
+		header.appendChild(tools);
+		content.appendChild(header);
+
+		const scroll = document.createElement("div");
+		scroll.className = "modern-settings-scroll";
+		appendModernDialogHighlights(scroll, dialog);
+		appendModernDialogSections(scroll, dialog.sections || [], dialog.errors || {}, dialog);
+		content.appendChild(scroll);
+
+		const footer = document.createElement("footer");
+		footer.className = "modern-settings-footer";
+		const status = document.createElement("div");
+		status.className = "modern-settings-status";
+		if (hiddenAdvancedCount > 0 || meta.status) {
+			const text = document.createElement("span");
+			if (hiddenAdvancedCount > 0) {
+				text.textContent = String(hiddenAdvancedCount) + " advanced option"
+					+ (hiddenAdvancedCount === 1 ? "" : "s") + " hidden";
+				const show = document.createElement("button");
+				show.type = "button";
+				show.className = "modern-settings-status-link";
+				show.textContent = "Show advanced";
+				show.addEventListener("click", function() {
+					setModernDialogAdvancedVisible(dialog, true);
+					renderModernDialog();
+				});
+				status.appendChild(text);
+				status.appendChild(show);
+			} else {
+				text.textContent = meta.status;
+				status.appendChild(text);
+			}
+		}
+		footer.appendChild(status);
+
+		const footerActions = document.createElement("div");
+		footerActions.className = "modern-settings-footer-actions";
+		const actions = Array.isArray(dialog.actions) && dialog.actions.length
+			? dialog.actions
+			: [
+				{ id: "cancel", label: "Close", enabled: true },
+				{ id: "ok", label: "Done", enabled: true }
+			];
+		actions.forEach(function(action) {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "chip-button modern-settings-footer-action"
+				+ (action.tone ? " is-" + action.tone : "")
+				+ (dialog.primaryActionId === action.id ? " is-primary" : "");
+			button.disabled = action.enabled === false;
+			button.textContent = action.label || action.id || "Action";
+			button.addEventListener("click", function() {
+				invokeModernDialogAction(action.id || "", {});
+			});
+			footerActions.appendChild(button);
+		});
+		footer.appendChild(footerActions);
+		content.appendChild(footer);
+		refs.modernDialogBody.appendChild(content);
 	}
 
 	function renderModernDialog() {
@@ -15945,6 +21592,9 @@
 		const open = !!dialog.open;
 		if (!refs.modernDialogLayer) {
 			return;
+		}
+		if (open && dialog.uiTweaks) {
+			applyModernUiTweaks(dialog.uiTweaks);
 		}
 		closeModernDialogSelect();
 
@@ -15972,6 +21622,7 @@
 			refs.modernDialogActions.innerHTML = "";
 			modernDialogRenderedOpen = false;
 			syncAudioInputMeterTimer();
+			applyModernUiTweaks(((getSnapshot().app || {}).uiTweaks) || {});
 			if (closing) {
 				restoreModernDialogReturnFocus();
 			}
@@ -16000,43 +21651,34 @@
 			return;
 		}
 
-		if (Array.isArray(dialog.pages) && dialog.pages.length) {
-			const tabs = document.createElement("div");
-			tabs.className = "modern-dialog-tabs";
-			dialog.pages.forEach(function(page) {
-				const tab = document.createElement("button");
-				tab.type = "button";
-				tab.className = "modern-dialog-tab" + (page.selected ? " is-selected" : "");
-				tab.textContent = page.label || page.id || "Page";
-				tab.addEventListener("click", function() {
-					invokeModernDialogAction("selectPage", { pageId: page.id || "" });
-				});
-				tabs.appendChild(tab);
-			});
-			refs.modernDialogBody.appendChild(tabs);
+		if (dialog.kind === "settings") {
+			renderSettingsDialog(dialog);
+		} else {
+			appendModernDialogTabs(refs.modernDialogBody, dialog);
+			appendModernDialogHighlights(refs.modernDialogBody, dialog);
+			appendModernDialogAdvancedToggle(refs.modernDialogBody, dialog);
+			appendModernDialogFavorites(refs.modernDialogBody, dialog);
+
+			const errors = dialog.errors || {};
+			appendModernDialogSections(refs.modernDialogBody, dialog.sections || [], errors, dialog);
 		}
 
-		appendModernDialogHighlights(refs.modernDialogBody, dialog);
-		appendModernDialogAdvancedToggle(refs.modernDialogBody, dialog);
-		appendModernDialogFavorites(refs.modernDialogBody, dialog);
-
-		const errors = dialog.errors || {};
-		appendModernDialogSections(refs.modernDialogBody, dialog.sections || [], errors, dialog);
-
-		(dialog.actions || []).forEach(function(action) {
-			const button = document.createElement("button");
-			button.type = "button";
-			button.className = "chip-button modern-dialog-action"
-				+ (action.tone ? " is-" + action.tone : "")
-				+ (dialog.primaryActionId === action.id ? " is-primary" : "");
-			button.disabled = action.enabled === false;
-			button.textContent = action.label || action.id || "Action";
-			button.dataset.modernDialogActionId = String(action.id || "");
-			button.addEventListener("click", function() {
-				invokeModernDialogAction(action.id || "", {});
+		if (dialog.kind !== "settings") {
+			(dialog.actions || []).forEach(function(action) {
+				const button = document.createElement("button");
+				button.type = "button";
+				button.className = "chip-button modern-dialog-action"
+					+ (action.tone ? " is-" + action.tone : "")
+					+ (dialog.primaryActionId === action.id ? " is-primary" : "");
+				button.disabled = action.enabled === false;
+				button.textContent = action.label || action.id || "Action";
+				button.dataset.modernDialogActionId = String(action.id || "");
+				button.addEventListener("click", function() {
+					invokeModernDialogAction(action.id || "", {});
+				});
+				refs.modernDialogActions.appendChild(button);
 			});
-			refs.modernDialogActions.appendChild(button);
-		});
+		}
 		enhanceModernDialogSelects(refs.modernDialogBody);
 		syncAudioInputMeterTimer();
 		modernDialogRenderedOpen = true;
@@ -16084,19 +21726,28 @@
 
 		const eyebrow = document.createElement("p");
 		eyebrow.className = "app-menu-eyebrow";
-		eyebrow.textContent = "Mumble menu";
+		eyebrow.textContent = app.serverEyebrow || app.connectionLabel || "Mumble";
 
 		const title = document.createElement("p");
 		title.className = "app-menu-title";
 		title.textContent = app.serverTitle || "Mumble";
 
-		const subtitle = document.createElement("p");
-		subtitle.className = "app-menu-subtitle";
-		subtitle.textContent = "Classic main menus collected behind the gear button.";
+		const subtitleParts = [];
+		if (app.selfName) {
+			subtitleParts.push(app.selfName);
+		}
+		if (app.selfStatusLabel) {
+			subtitleParts.push(app.selfStatusLabel);
+		}
 
 		header.appendChild(eyebrow);
 		header.appendChild(title);
-		header.appendChild(subtitle);
+		if (subtitleParts.length) {
+			const subtitle = document.createElement("p");
+			subtitle.className = "app-menu-subtitle";
+			subtitle.textContent = subtitleParts.join(" · ");
+			header.appendChild(subtitle);
+		}
 		refs.appMenu.appendChild(header);
 
 		menus.forEach(function(menu) {
@@ -16145,6 +21796,7 @@
 		const snapshot = getSnapshot();
 		hideContextMenu();
 		hideSelfMenu();
+		hideDirectMessageTray();
 		openMenuId = null;
 		openMenuPinned = false;
 		renderMenus(resolvedAppMenus(snapshot.app || {}));
@@ -16152,11 +21804,15 @@
 	}
 
 	function hideSelfMenu() {
+		const wasOpen = selfMenuOpen;
 		selfMenuOpen = false;
 		refs.selfMenu.classList.add("hidden");
 		refs.selfMenu.setAttribute("aria-hidden", "true");
 		refs.selfMenu.innerHTML = "";
 		refs.selfCard.setAttribute("aria-expanded", "false");
+		if (wasOpen) {
+			closeNativeContextMenu();
+		}
 	}
 
 	function positionSelfMenu() {
@@ -16253,10 +21909,16 @@
 				button.title = item.hint;
 			}
 
+		const icon = document.createElement("span");
+		icon.className = "self-menu-icon";
+		icon.setAttribute("aria-hidden", "true");
+		icon.innerHTML = themedActionPanelIconSvg(actionPanelIconName(item));
+
 			const label = document.createElement("span");
 			label.className = "self-menu-label";
 			label.textContent = item.label || "Action";
 
+			button.appendChild(icon);
 			button.appendChild(label);
 			button.addEventListener("click", function() {
 				hideSelfMenu();
@@ -16275,22 +21937,93 @@
 		positionSelfMenu();
 	}
 
+	function selfMenuContextItems(snapshot, includeHeader) {
+		const app = (snapshot && snapshot.app) || {};
+		const menuState = app.selfMenu || {};
+		const handlers = {
+			invokeAction: function(actionId) {
+				notifyBridge("invokeAppAction", actionId);
+			}
+		};
+		const items = [];
+		if (includeHeader) {
+			const name = menuState.name || app.selfName || "You";
+			items.push({
+				kind: "profileHeader",
+				label: name,
+				statusLabel: menuState.statusLabel || app.selfStatusLabel || "Offline",
+				statusTone: menuState.statusTone || app.selfStatusTone || "",
+				avatarText: initialsFor(name),
+				avatarUrl: app.selfAvatarUrl || ""
+			});
+		}
+		const presenceItems = actionItemsFromActionStates(menuState.presence, handlers);
+		const actionItems = actionItemsFromActionStates(menuState.actions, handlers);
+		if (presenceItems.length) {
+			items.push.apply(items, presenceItems);
+		}
+		if (presenceItems.length && actionItems.length) {
+			items.push({ separator: true });
+		}
+		if (actionItems.length) {
+			items.push.apply(items, actionItems);
+		}
+		return normalizedActionPanelItems(items, { hideDisabled: true });
+	}
+
 	function toggleSelfMenu(forceOpen) {
 		const nextOpen = typeof forceOpen === "boolean" ? forceOpen : !selfMenuOpen;
 		if (!nextOpen) {
+			closeNativeContextMenu();
 			hideSelfMenu();
 			return;
 		}
 
 		hideAppMenu();
 		hideContextMenu();
-		renderSelfMenu(getSnapshot());
+		hideDirectMessageTray();
+		const bounds = refs.selfCard.getBoundingClientRect();
+		const opened = showContextMenu(selfMenuContextItems(getSnapshot(), true),
+			bounds.right,
+			bounds.top,
+			{
+				horizontal: "left-of-anchor",
+				anchorBounds: { left: bounds.left, right: bounds.right },
+				menuKind: "self"
+			});
+		selfMenuOpen = !!opened;
+		refs.selfCard.setAttribute("aria-expanded", selfMenuOpen ? "true" : "false");
 	}
 
 	function syncComposerHeight() {
 		refs.composerInput.style.height = "0px";
 		refs.composerInput.style.height = Math.min(refs.composerInput.scrollHeight, 160) + "px";
 		scheduleFooterAlignmentSync();
+	}
+
+	function composerRaisesFooter() {
+		if (refs.composerShell && refs.composerShell.classList.contains("has-reply")) {
+			return true;
+		}
+		if (!refs.composerInput) {
+			return false;
+		}
+
+		const draft = String(refs.composerInput.value || "");
+		if (draft.indexOf("\n") !== -1) {
+			return true;
+		}
+
+		const inputRect = refs.composerInput.getBoundingClientRect();
+		const inputStyle = window.getComputedStyle(refs.composerInput);
+		const lineHeight = Number.parseFloat(inputStyle.lineHeight || "0");
+		const verticalChrome =
+			Number.parseFloat(inputStyle.paddingTop || "0")
+			+ Number.parseFloat(inputStyle.paddingBottom || "0")
+			+ Number.parseFloat(inputStyle.borderTopWidth || "0")
+			+ Number.parseFloat(inputStyle.borderBottomWidth || "0");
+		const singleLineHeight = lineHeight > 0 ? lineHeight + verticalChrome : 0;
+		return singleLineHeight > 0 && inputRect.height > singleLineHeight + 4;
 	}
 
 	function syncFooterAlignment() {
@@ -16302,24 +22035,21 @@
 		const composerHeight = refs.composerForm.getBoundingClientRect().height;
 		if (!composerHeight) {
 			refs.appShell.style.removeProperty("--footer-row-height");
+			refs.appShell.style.removeProperty("--self-card-row-height");
 			return;
 		}
 
 		const dpr = window.devicePixelRatio || 1;
-		const selfCardStyle = window.getComputedStyle(refs.selfCard);
-		const selfCardChromeHeight =
-			Number.parseFloat(selfCardStyle.paddingTop || "0")
-			+ Number.parseFloat(selfCardStyle.paddingBottom || "0")
-			+ Number.parseFloat(selfCardStyle.borderTopWidth || "0")
-			+ Number.parseFloat(selfCardStyle.borderBottomWidth || "0");
-		const selfContentHeight = Math.max(
-			refs.selfAvatar ? refs.selfAvatar.getBoundingClientRect().height : 0,
-			refs.selfCopy ? refs.selfCopy.getBoundingClientRect().height : 0,
-			refs.selfCardSettingsButton ? refs.selfCardSettingsButton.getBoundingClientRect().height : 0
-		);
-		const selfMinimumHeight = selfContentHeight + selfCardChromeHeight;
-		const snappedHeight = Math.ceil(Math.max(composerHeight, selfMinimumHeight) * dpr) / dpr;
+		const snappedHeight = Math.ceil(composerHeight * dpr) / dpr;
 		refs.appShell.style.setProperty("--footer-row-height", snappedHeight + "px");
+		if (!composerRaisesFooter()) {
+			stableFooterRowHeight = snappedHeight;
+		} else if (!stableFooterRowHeight) {
+			stableFooterRowHeight = Math.ceil(refs.selfCard.getBoundingClientRect().height * dpr) / dpr;
+		}
+		if (stableFooterRowHeight) {
+			refs.appShell.style.setProperty("--self-card-row-height", stableFooterRowHeight + "px");
+		}
 	}
 
 	function scheduleFooterAlignmentSync() {
@@ -16355,16 +22085,70 @@
 		refs.composerReplyLabel.textContent = scope.replyActor
 			? "Replying to " + String(scope.replyActor)
 			: "Replying";
-		refs.composerReplySnippet.textContent = scope.replySnippet || "";
+		refs.composerReplySnippet.textContent = normalizedReplyPreviewText(scope.replySnippet);
+	}
+
+	const modernAccentPalette = {
+		teal: { accent: "#5ec8b0", rgb: "94, 200, 176", soft: "rgba(94, 200, 176, 0.16)", border: "rgba(94, 200, 176, 0.42)" },
+		blue: { accent: "#73b7ff", rgb: "115, 183, 255", soft: "rgba(115, 183, 255, 0.16)", border: "rgba(115, 183, 255, 0.42)" },
+		violet: { accent: "#b59cff", rgb: "181, 156, 255", soft: "rgba(181, 156, 255, 0.16)", border: "rgba(181, 156, 255, 0.42)" },
+		amber: { accent: "#f2c76f", rgb: "242, 199, 111", soft: "rgba(242, 199, 111, 0.16)", border: "rgba(242, 199, 111, 0.42)" },
+		rose: { accent: "#ff8aa0", rgb: "255, 138, 160", soft: "rgba(255, 138, 160, 0.16)", border: "rgba(255, 138, 160, 0.42)" }
+	};
+
+	function normalizedModernUiToken(value, fallback, allowed) {
+		const token = String(value || "").trim().toLowerCase();
+		return allowed.indexOf(token) >= 0 ? token : fallback;
+	}
+
+	function applyModernUiTweaks(uiTweaks) {
+		uiTweaks = uiTweaks || {};
+		const theme = normalizedModernUiToken(uiTweaks.theme, "dark",
+			["dark", "light", "mocha", "macchiato", "frappe", "latte", "nord", "gruvbox"]);
+		const density = normalizedModernUiToken(uiTweaks.density, "comfortable",
+			["compact", "comfortable", "spacious"]);
+		const userIcons = normalizedModernUiToken(
+			uiTweaks.userIcons || (uiTweaks.classicUserIcons ? "classic" : "avatars"),
+			"avatars",
+			["avatars", "classic"]);
+		const railSide = normalizedModernUiToken(uiTweaks.railSide, "right", ["left", "right"]);
+		const accent = normalizedModernUiToken(uiTweaks.accent, "auto",
+			["auto", "teal", "blue", "violet", "amber", "rose"]);
+
+		if (document.body) {
+			document.body.dataset.density = density;
+			document.body.dataset.userIcons = userIcons;
+			document.body.dataset.railSide = railSide;
+		}
+		if (document.documentElement) {
+			document.documentElement.dataset.theme = theme;
+			document.documentElement.dataset.accent = accent;
+			const palette = accent === "auto" ? null : modernAccentPalette[accent];
+			if (palette) {
+				document.documentElement.style.setProperty("--accent", palette.accent);
+				document.documentElement.style.setProperty("--accent-rgb", palette.rgb);
+				document.documentElement.style.setProperty("--accent-soft", palette.soft);
+				document.documentElement.style.setProperty("--accent-border", palette.border);
+			} else {
+				document.documentElement.style.removeProperty("--accent");
+				document.documentElement.style.removeProperty("--accent-rgb");
+				document.documentElement.style.removeProperty("--accent-soft");
+				document.documentElement.style.removeProperty("--accent-border");
+			}
+		}
 	}
 
 	function syncAmbientState(snapshot) {
 		const app = snapshot.app || {};
 		const scope = snapshot.activeScope || {};
+		const visibleUiTweaks = visibleModernUiTweaks(snapshot);
 		const toneSource = scope.label || app.serverTitle || "Mumble";
 		const scopeHue = hueForLabel(toneSource, false);
 		refs.appShell.style.setProperty("--scope-hue", String(scopeHue));
 		refs.appShell.dataset.scopeKind = String(scope.kindLabel || "conversation").toLowerCase().replace(/\s+/g, "-");
+		refs.appShell.classList.toggle("ticker-banner-always-scroll", !!visibleUiTweaks.tickerBannerAlwaysScroll);
+		applyModernUiTweaks(visibleUiTweaks);
+		scheduleStonksTickerScrollSync();
 	}
 
 	function syncMenuBandChrome() {
@@ -16593,15 +22377,11 @@
 		const voicePresence = snapshot.voicePresence || [];
 		const headerPresence = voicePresence.length ? voicePresence : (snapshot.participants || []);
 
-		refs.brandTitle.textContent = app.serverTitle || "Mumble";
-		refs.brandSubtitle.textContent = app.serverSubtitle || "Room-first shell";
+		syncMockupShellChrome(app);
 		refs.serverEyebrow.textContent = app.serverEyebrow || scope.kindLabel || "Mumble";
-		refs.scopeTitle.textContent = scope.label || "Modern Layout";
-		refs.scopeDescription.textContent = scope.description || "Select a room to see shared history.";
+		refs.scopeTitle.textContent = scope.label || app.serverTitle || "Mumble";
+		refs.scopeDescription.textContent = scope.description || app.serverSubtitle || "Select a room to see shared history.";
 
-		applyStatePill(refs.layoutPill, app.layoutLabel || "Modern", app.layoutTone || "");
-		applyStatePill(refs.connectionPill, app.connectionLabel || "Disconnected", app.connectionTone || "");
-		applyStatePill(refs.compatPill, app.compatibilityLabel || "Standard server", app.compatibilityTone || "");
 		refs.layoutSwitchButton.disabled = app.canToggleLayout === false;
 		refs.layoutSwitchButton.classList.toggle("hidden", app.canToggleLayout === false);
 		refs.layoutSwitchButton.title = app.layoutSwitchLabel || "Switch layout";
@@ -16612,15 +22392,13 @@
 		refs.stonksButton.classList.toggle("is-disabled", !stonksAvailable);
 
 		refs.connectButton.disabled = !app.canConnect;
-		refs.disconnectButton.disabled = !app.canDisconnect;
+		refs.disconnectButton.disabled = !appCanCancelConnection(app);
 		refs.muteButton.classList.toggle("is-active", !!app.selfMuted);
 		refs.deafButton.classList.toggle("is-active", !!app.selfDeafened);
 		renderMenus(resolvedAppMenus(app));
 		refs.settingsButton.setAttribute("aria-expanded", appMenuOpen ? "true" : "false");
 
 		reconcilePendingVoiceJoin(snapshot);
-		refs.textRoomCount.textContent = String(textRooms.length);
-		refs.voiceRoomCount.textContent = String(voiceRooms.length);
 		renderRoomList(refs.voiceRoomList, voiceRooms, {
 			joinable: true,
 			voicePresence: voicePresence,
@@ -16632,21 +22410,16 @@
 			voicePresence: null,
 			hideWhenEmpty: !(app.canManageTextChannels || app.canCreateTextRoom)
 		});
-		renderNote(app, snapshot.activeScope || {});
-		const renderedActiveRailToken = activeRailToken();
-		if (!renderedActiveRailToken) {
-			lastActiveRailToken = "";
-		} else if (renderedActiveRailToken !== lastActiveRailToken) {
-			lastActiveRailToken = renderedActiveRailToken;
-			pendingActiveRailReveal = true;
-		}
+		renderDirectMessages(snapshot);
+		renderNote(app, snapshot.activeScope || {}, snapshot.messages || []);
+		trackActiveRailTokenForReveal(activeRailToken());
 
 		renderVoicePresenceStack(headerPresence);
 		renderMeta(scope.meta || []);
 		renderStonksChatHeader(snapshot);
 		renderScreenShareHeader(scope, scope.screenShare || null);
 		renderScreenShareCard(scope, scope.screenShare || null);
-		renderNote(app, scope);
+		renderNote(app, scope, snapshot.messages || []);
 		renderMessages(snapshot, { resolvePendingScopeLoading: true });
 		renderSelfCard(app);
 		syncAmbientState(snapshot);
@@ -16657,8 +22430,7 @@
 			renderSelfMenu(snapshot);
 		}
 
-		refs.scopeBanner.textContent = scope.banner || "";
-		refs.scopeBanner.classList.toggle("hidden", !scope.banner);
+		renderConnectionOrScopeBanner(app, scope);
 		refs.loadOlderButton.disabled = !scope.canLoadOlder;
 		refs.markReadButton.disabled = !scope.canMarkRead;
 		refs.composerInput.disabled = !scope.canSend;
@@ -16677,7 +22449,7 @@
 	}
 
 	function syncSnapshot() {
-		liveSnapshot = modernBridge ? (modernBridge.snapshot || {}) : {};
+		liveSnapshot = modernBridge ? (modernBridge.snapshot || {}) : (fallbackWalkthroughSnapshot() || {});
 		scheduleSnapshotRender();
 	}
 
@@ -16749,6 +22521,7 @@
 
 		const willTrimHead = nextMessages.length > 200;
 		snapshot.messages = willTrimHead ? nextMessages.slice(nextMessages.length - 200) : nextMessages;
+		renderNote(snapshot.app || {}, snapshot.activeScope || {}, snapshot.messages || []);
 		if (activeMessageChunkRender) {
 			renderMessages(snapshot, { forceSync: true, resolvePendingScopeLoading: true });
 			return true;
@@ -16762,7 +22535,7 @@
 		if (pendingScopeLoadingBlocksRender(activeScopeToken, { resolvePendingScopeLoading: true })) {
 			return true;
 		}
-		refs.messageList.classList.remove("is-chat-loading");
+		refs.messageList.classList.remove("is-chat-loading", "is-chat-transitioning");
 		const metricsBefore = messageListMetrics();
 		const detachedBeforeRender = !metricsBefore.nearBottom;
 		const distanceFromBottom = metricsBefore.distanceFromBottom;
@@ -16776,6 +22549,7 @@
 			renderMessages(snapshot, { resolvePendingScopeLoading: true });
 			return true;
 		}
+		syncMessageSearchState();
 
 		const shouldStickToBottom = (patch.scrollToBottom !== false)
 			&& (!detachedBeforeRender || keepMessageListPinnedToBottom);
@@ -16830,6 +22604,8 @@
 			footerOnly: footerOnlyUpdate
 		})) {
 			renderMessages(snapshot, { resolvePendingScopeLoading: true });
+		} else {
+			syncMessageSearchState();
 		}
 		lastRenderedTailKey = latestTailMessageKey(snapshot.messages);
 		return true;
@@ -16908,6 +22684,7 @@
 				renderVoicePresenceStack((snapshot.voicePresence || []).length
 					? (snapshot.voicePresence || [])
 					: (snapshot.participants || []));
+				renderActiveScopePatch(snapshot);
 				return;
 			}
 			if (kind === "presence.update") {
@@ -16935,6 +22712,7 @@
 	function hideContextMenu() {
 		contextMenuState = null;
 		refs.contextMenu.classList.add("hidden");
+		refs.contextMenu.classList.remove("has-open-submenu");
 		refs.contextMenu.setAttribute("aria-hidden", "true");
 		refs.contextMenu.style.maxHeight = "";
 		refs.contextMenu.innerHTML = "";
@@ -16945,6 +22723,8 @@
 		if (!value) {
 			return Promise.resolve(false);
 		}
+		automationLastCopiedText = value;
+		automationCopyCount += 1;
 
 		if (modernBridge && typeof modernBridge.setClipboardText === "function") {
 			try {
@@ -16989,14 +22769,81 @@
 		input.dispatchEvent(new Event("input", { bubbles: true }));
 	}
 
+	function quotedMessageText(text) {
+		return "> " + String(text || "").split(/\r?\n/).join("\n> ") + "\n";
+	}
+
+	function buildMessageContextItems(message, fallbackText) {
+		const bodyText = String((message && (message.bodyText || message.plainText)) || fallbackText || "");
+		const items = [];
+		if (message && message.canReply) {
+			items.push({
+				label: "Reply",
+				enabled: true,
+				action: function() {
+					notifyBridge("startReply", message.messageId);
+					focusComposerInput();
+				}
+			});
+		}
+		if (message && message.canReact) {
+			items.push({
+				label: "Add reaction",
+				enabled: true,
+				action: function() {
+					setOpenReactionPickerMessageId(message.messageId);
+					pauseReactionPickerScrollClose();
+				}
+			});
+		}
+		items.push(
+			{
+				label: "Copy text",
+				enabled: !!bodyText,
+				action: function() {
+					copyPlainText(bodyText);
+				}
+			},
+			{
+				label: "Quote",
+				enabled: !!bodyText,
+				action: function() {
+					replaceComposerSelection(quotedMessageText(bodyText));
+					if (refs.composerInput) {
+						refs.composerInput.focus();
+					}
+				}
+			}
+		);
+		if (message && message.canDelete) {
+			items.push(
+				{ separator: true },
+				{
+					label: "Delete message",
+					enabled: true,
+					tone: "danger",
+					action: function() {
+						requestDeleteMessage(message);
+					}
+				}
+			);
+		}
+		return normalizedActionPanelItems(items, { hideDisabled: true });
+	}
+
 	function buildRoomContextMenuItems(snapshot, room, roomRow) {
 		const scope = (snapshot && snapshot.activeScope) || {};
 		const roomToken = (room && room.token) || (roomRow && roomRow.dataset.scopeToken) || "";
 		const isVoiceRoom = roomRow && roomRow.dataset.roomType === "voice";
+		const roomLabel = (room && room.label) || (roomRow && roomRow.dataset.roomLabel) || "Room";
 		const items = [
 			{
+				kind: "label",
+				label: roomLabel
+			},
+			{
 				id: "openRoom",
-				label: "Open room",
+				label: "Open chat",
 				enabled: !!roomToken,
 				action: function() {
 					selectRoomScope(roomToken);
@@ -17007,7 +22854,7 @@
 		if (isVoiceRoom && !(room && actionStatesContainId(room.actions, "join"))) {
 			items.push({
 				id: "joinVoice",
-				label: "Join voice",
+				label: "Join room",
 				enabled: roomRow && roomRow.dataset.canJoin === "true",
 				action: function() {
 					notifyBridge("joinVoiceChannel", roomToken);
@@ -17044,12 +22891,22 @@
 			items.push({ separator: true });
 			items.push.apply(items, roomActionItems);
 		}
+		if (roomToken && room && !actionStatesContainId(room.actions, "copyUrl")) {
+			items.push({
+				id: "copyUrl",
+				label: "Copy invite link",
+				enabled: true,
+				action: function() {
+					copyPlainText(roomLabel);
+				}
+			});
+		}
 
 		if (room && room.selected && scope.canMarkRead) {
 			items.push({ separator: true });
 			items.push({
 				id: "markRead",
-				label: "Mark read",
+				label: "Mark as read",
 				enabled: true,
 				action: function() {
 					notifyBridge("markRead");
@@ -17060,18 +22917,72 @@
 		return roomContextGroups(items);
 	}
 
+	function buildBackgroundContextMenuItems(snapshot) {
+		const scope = (snapshot && snapshot.activeScope) || {};
+		const items = [
+			{
+				label: "Load older",
+				enabled: !!scope.canLoadOlder,
+				action: function() {
+					notifyBridge("loadOlderHistory");
+				}
+			},
+			{
+				label: "Mark read",
+				enabled: !!scope.canMarkRead,
+				action: function() {
+					notifyBridge("markRead");
+				}
+			},
+			{
+				label: "Attach image",
+				enabled: !!scope.canAttachImages,
+				action: function() {
+					notifyBridge("openImagePicker");
+				}
+			}
+		];
+
+		const appItems = appMenuContextItems(snapshot, ["server", "room", "configure"]);
+		if (appItems.length) {
+			items.push({ separator: true });
+			items.push.apply(items, appItems);
+		}
+
+		return items;
+	}
+
 	function buildContextMenuItems(event) {
 		const snapshot = getSnapshot();
 		const scope = snapshot.activeScope || {};
 		const roomRow = event.target.closest(".rail-row");
 		const presenceActionButton = event.target.closest(".presence-action-button");
-		const presenceRow = event.target.closest(".presence-row")
+		const presenceRow = event.target.closest(".presence-row, .participant-context-target")
 			|| (presenceActionButton && presenceActionButton.parentElement
 				? presenceActionButton.parentElement.querySelector(".presence-row")
 				: null);
-		const bubble = event.target.closest(".message-bubble");
+		const bubble = event.target.closest(".message-bubble, .system-message");
 		const composer = event.target.closest("#composer-input");
 		const selfCard = event.target.closest("#self-card");
+		const brandBadge = event.target.closest("#brand-badge");
+
+		if (brandBadge) {
+			const app = snapshot.app || {};
+			const serverIdentity = app.serverIdentity || {};
+			if (!serverIdentity.canEdit) {
+				return [];
+			}
+			return [
+				{
+					id: "server.settings",
+					label: "Server settings",
+					enabled: !!app.canManageTextChannels,
+					action: function() {
+						notifyBridge("invokeAppAction", "server.settings");
+					}
+				}
+			];
+		}
 
 		if (composer) {
 			const input = refs.composerInput;
@@ -17147,106 +23058,15 @@
 		}
 
 		if (bubble) {
-			const message = findMessageState(snapshot, bubble.dataset.messageId);
-			const items = [
-				{
-					label: "Copy message",
-					enabled: !!bubble.dataset.bodyText,
-					action: function() {
-						copyPlainText(bubble.dataset.bodyText);
-					}
-				}
-			];
-			if (message && message.canReply) {
-				items.push({
-					label: "Reply",
-					enabled: true,
-					action: function() {
-						notifyBridge("startReply", message.messageId);
-					}
-				});
-			}
-			if (message && message.canReact) {
-				items.push({
-					label: "Add reaction",
-					enabled: true,
-					action: function() {
-						setOpenReactionPickerMessageId(message.messageId);
-						pauseReactionPickerScrollClose();
-					}
-				});
-			}
-			if (message && message.canDelete) {
-				items.push({
-					label: "Delete message",
-					enabled: true,
-					tone: "danger",
-					action: function() {
-						requestDeleteMessage(message);
-					}
-				});
-			}
-			items.push(
-				{
-					separator: true
-				},
-				{
-					label: "Load older",
-					enabled: !!scope.canLoadOlder,
-					action: function() {
-						notifyBridge("loadOlderHistory");
-					}
-				},
-				{
-					label: "Mark read",
-					enabled: !!scope.canMarkRead,
-					action: function() {
-						notifyBridge("markRead");
-					}
-				}
-			);
-			return normalizedActionPanelItems(items, { hideDisabled: true });
+			const message = bubble.dataset.messageId ? findMessageState(snapshot, bubble.dataset.messageId) : null;
+			return buildMessageContextItems(message, bubble.dataset.bodyText);
 		}
 
 		if (selfCard) {
-			const selfMenu = (snapshot.app && snapshot.app.selfMenu) || {};
-			const handlers = {
-				invokeAction: function(actionId) {
-					notifyBridge("invokeAppAction", actionId);
-				}
-			};
-			const presenceItems = actionItemsFromActionStates(selfMenu.presence, handlers);
-			const actionItems = actionItemsFromActionStates(selfMenu.actions, handlers);
-			if (presenceItems.length && actionItems.length) {
-				presenceItems.push({ separator: true });
-			}
-			return normalizedActionPanelItems(presenceItems.concat(actionItems), { hideDisabled: true });
+			return selfMenuContextItems(snapshot, true);
 		}
 
-		const defaultItems = [
-			{
-				label: "Load older",
-				enabled: !!scope.canLoadOlder,
-				action: function() {
-					notifyBridge("loadOlderHistory");
-				}
-			},
-			{
-				label: "Mark read",
-				enabled: !!scope.canMarkRead,
-				action: function() {
-					notifyBridge("markRead");
-				}
-			},
-			{
-				label: "Attach image",
-				enabled: !!scope.canAttachImages,
-				action: function() {
-					notifyBridge("openImagePicker");
-				}
-			}
-		];
-		return withAppMenuContextItems(defaultItems, snapshot);
+		return buildBackgroundContextMenuItems(snapshot);
 	}
 
 	function clampedViewportPosition(position, size, viewportSize) {
@@ -17296,15 +23116,341 @@
 		window.requestAnimationFrame(fitContextMenuToViewport);
 	}
 
-	function showContextMenu(items, clientX, clientY, options) {
-		hideAppMenu();
-		hideSelfMenu();
-		const filteredItems = normalizedActionPanelItems(items, { hideDisabled: true });
-		if (!filteredItems.length) {
-			hideContextMenu();
+	function openContextSubmenuByLabel(label) {
+		if (!refs.contextMenu || refs.contextMenu.classList.contains("hidden")) {
 			return;
 		}
 
+		const targetLabel = String(label || "").trim().toLowerCase();
+		if (!targetLabel) {
+			return;
+		}
+
+		const triggers = refs.contextMenu.querySelectorAll(".context-menu-submenu-trigger");
+		for (let index = 0; index < triggers.length; index += 1) {
+			const trigger = triggers[index];
+			const labelNode = trigger.querySelector(".context-menu-label");
+			if (String(labelNode && labelNode.textContent || "").trim().toLowerCase() !== targetLabel) {
+				continue;
+			}
+			trigger.click();
+			break;
+		}
+	}
+
+	function visibleMenuLabels(kind) {
+		const variant = String(kind || "").trim().toLowerCase();
+		let root = null;
+		let selector = "";
+		if (variant === "app") {
+			root = refs.appMenu;
+			selector = ".app-menu-section-heading, .menu-item-label";
+		} else if (variant === "self") {
+			root = refs.selfMenu;
+			selector = ".self-menu-title, .self-menu-status, .self-menu-label";
+		} else if (variant === "context" || variant === "chat" || variant === "background") {
+			root = refs.contextMenu;
+			selector = ".context-menu-label";
+		}
+		if (!root || root.classList.contains("hidden")) {
+			return [];
+		}
+
+		return Array.prototype.slice.call(root.querySelectorAll(selector)).map(function(node) {
+			return String(node.textContent || "").trim();
+		}).filter(function(label) {
+			return !!label;
+		});
+	}
+
+	function automationActionState() {
+		const input = refs.composerInput;
+		return {
+			composerText: input ? String(input.value || "") : "",
+			activeElementId: document.activeElement && document.activeElement.id ? document.activeElement.id : "",
+			openReactionPickerMessageId: normalizedReactionPickerMessageId(openReactionPickerMessageId),
+			bridgeCalls: automationBridgeCalls.slice(-16),
+			lastCopiedText: automationLastCopiedText,
+			copyCount: automationCopyCount,
+			lastMenuProbe: Object.assign({}, automationLastMenuProbe || {})
+		};
+	}
+
+	function resetAutomationActionState(options) {
+		const resetOptions = options || {};
+		automationBridgeCalls = [];
+		automationLastCopiedText = "";
+		automationCopyCount = 0;
+		automationLastMenuProbe = {};
+		setOpenReactionPickerMessageId(null);
+		if (resetOptions.clearComposer !== false && refs.composerInput) {
+			refs.composerInput.value = "";
+			syncComposerHeight();
+			refs.composerInput.dispatchEvent(new Event("input", { bubbles: true }));
+		}
+		return automationActionState();
+	}
+
+	function automationModernDialogFieldElement(fieldId) {
+		const targetId = String(fieldId || "");
+		const root = refs.modernDialog || document.getElementById("modern-dialog") || document;
+		if (!targetId || !root) {
+			return null;
+		}
+		const candidates = root.querySelectorAll("[data-modern-dialog-field-id]");
+		for (let index = 0; index < candidates.length; index += 1) {
+			const candidate = candidates[index];
+			if (String(candidate.dataset.modernDialogFieldId || "") === targetId) {
+				return candidate;
+			}
+		}
+		return null;
+	}
+
+	function automationModernDialogFieldState(fieldId) {
+		const element = automationModernDialogFieldElement(fieldId);
+		const root = refs.modernDialog || document.getElementById("modern-dialog") || document;
+		const dialog = modernDialogState || {};
+		const field = findModernDialogField(dialog, fieldId);
+		const type = String(field && field.type || (element && element.type) || "");
+		const value = element
+			? (type === "checkbox" ? !!element.checked : String(element.value || ""))
+			: "";
+		const availableFieldIds = root
+			? Array.prototype.slice.call(root.querySelectorAll("[data-modern-dialog-field-id]")).map(function(candidate) {
+				return String(candidate.dataset.modernDialogFieldId || "");
+			}).filter(function(id) {
+				return !!id;
+			})
+			: [];
+		return {
+			dialogId: String(dialog.id || ""),
+			fieldId: String(fieldId || ""),
+			exists: !!element,
+			active: !!(element && document.activeElement === element),
+			type: type,
+			value: value,
+			availableFieldIds: availableFieldIds,
+			stateValue: field ? modernDialogCloneFieldValue(field.value) : null
+		};
+	}
+
+	function automationSetModernDialogFieldValue(fieldId, value, options) {
+		const element = automationModernDialogFieldElement(fieldId);
+		if (!element) {
+			return automationModernDialogFieldState(fieldId);
+		}
+		const setOptions = options || {};
+		const field = findModernDialogField(modernDialogState, fieldId);
+		const type = String(field && field.type || element.type || "");
+		if (setOptions.focus !== false && typeof element.focus === "function") {
+			element.focus({ preventScroll: true });
+		}
+		if (type === "checkbox") {
+			element.checked = !!value;
+			element.dispatchEvent(new Event("change", { bubbles: true }));
+		} else {
+			element.value = value == null ? "" : String(value);
+			if (typeof element.setSelectionRange === "function") {
+				try {
+					const end = element.value.length;
+					element.setSelectionRange(end, end);
+				} catch (error) {
+					// Some input types expose selection APIs but reject range updates.
+				}
+			}
+			element.dispatchEvent(new Event(type === "select" || type === "range" ? "change" : "input", {
+				bubbles: true
+			}));
+		}
+		return automationModernDialogFieldState(fieldId);
+	}
+
+	function contextMenuCanUseNativePopup(items) {
+		return !(items || []).some(function(item) {
+			const kind = actionPanelItemKind(item);
+			if (kind === "slider") {
+				return true;
+			}
+			if (kind === "submenu") {
+				return !contextMenuCanUseNativePopup(item.items || []);
+			}
+			return false;
+		});
+	}
+
+	function serializeNativeContextMenuItems(items, actionItems) {
+		const serialized = [];
+		(items || []).forEach(function(item) {
+			const kind = actionPanelItemKind(item);
+			if (!kind) {
+				return;
+			}
+			if (kind === "separator") {
+				serialized.push({ kind: "separator" });
+				return;
+			}
+			if (kind === "label") {
+				serialized.push({
+					kind: "label",
+					label: item.label || ""
+				});
+				return;
+			}
+			if (kind === "profileHeader") {
+				serialized.push({
+					kind: "profileHeader",
+					label: item.label || "",
+					statusLabel: item.statusLabel || "",
+					statusTone: item.statusTone || "",
+					avatarText: item.avatarText || "",
+					avatarUrl: item.avatarUrl || ""
+				});
+				return;
+			}
+			if (kind === "submenu") {
+				const childItems = serializeNativeContextMenuItems(
+					normalizedActionPanelItems(item.items || [], { hideDisabled: true }),
+					actionItems);
+				if (!childItems.length) {
+					return;
+				}
+				serialized.push({
+					kind: "submenu",
+					label: item.label || "More",
+					enabled: item.enabled !== false,
+					icon: actionPanelIconName(item),
+					items: childItems
+				});
+				return;
+			}
+
+			const actionIndex = actionItems.length;
+			actionItems.push(item);
+			serialized.push({
+				kind: "action",
+				label: item.label || "Action",
+				enabled: item.enabled !== false,
+				checked: !!item.checked,
+				tone: item.tone || "",
+				icon: actionPanelIconName(item),
+				actionIndex: actionIndex
+			});
+		});
+		return serialized;
+	}
+
+	function tryShowNativeContextMenu(items, clientX, clientY, options) {
+		if (window.mumbleDisableNativeContextPopups === true) {
+			return false;
+		}
+		if (!modernBridge || typeof modernBridge.openNativeContextMenu !== "function"
+			|| !contextMenuCanUseNativePopup(items)) {
+			return false;
+		}
+
+		const actionItems = [];
+		const serializedItems = serializeNativeContextMenuItems(items, actionItems);
+		if (!serializedItems.length || !actionItems.length) {
+			return false;
+		}
+
+		const token = "ctx-" + Date.now().toString(36) + "-" + (++nativeContextMenuCounter).toString(36);
+		const menuKind = String(options && options.menuKind || "context");
+		nativeContextMenuActions = {};
+		nativeContextMenuKinds = {};
+		nativeContextMenuActions[token] = actionItems;
+		nativeContextMenuKinds[token] = menuKind;
+		activeNativeContextMenuToken = token;
+		activeNativeContextMenuKind = menuKind;
+		const request = {
+			token: token,
+			x: Math.round(clientX || 0),
+			y: Math.round(clientY || 0),
+			items: serializedItems,
+			uiTweaks: Object.assign({}, visibleModernUiTweaks(getSnapshot()), {
+				theme: document.documentElement.dataset.theme || "dark",
+				accent: document.documentElement.dataset.accent || "auto",
+				density: document.body.dataset.density || "comfortable",
+				userIcons: document.body.dataset.userIcons || "avatars",
+				classicUserIcons: document.body.dataset.userIcons === "classic"
+			})
+		};
+		if (options && options.openSubmenuLabel) {
+			request.openSubmenuLabel = String(options.openSubmenuLabel);
+		}
+		if (!notifyBridge("openNativeContextMenu", request)) {
+			delete nativeContextMenuActions[token];
+			delete nativeContextMenuKinds[token];
+			if (activeNativeContextMenuToken === token) {
+				activeNativeContextMenuToken = "";
+				activeNativeContextMenuKind = "";
+			}
+			return false;
+		}
+		return true;
+	}
+
+	function closeNativeContextMenu() {
+		if (modernBridge && typeof modernBridge.closeNativeContextMenu === "function") {
+			modernBridge.closeNativeContextMenu();
+		}
+		nativeContextMenuActions = {};
+		nativeContextMenuKinds = {};
+		activeNativeContextMenuToken = "";
+		activeNativeContextMenuKind = "";
+	}
+
+	window.__mumbleModernInvokeNativeContextMenuAction = function(token, actionIndex) {
+		const key = String(token || "");
+		if (!key || key !== activeNativeContextMenuToken) {
+			return false;
+		}
+		const actionItems = nativeContextMenuActions[key];
+		const item = actionItems && actionItems[Number(actionIndex)];
+		if (!item || item.enabled === false || typeof item.action !== "function") {
+			return false;
+		}
+		item.action();
+		return true;
+	};
+
+	window.__mumbleModernNativeContextMenuClosed = function(token) {
+		const key = String(token || "");
+		const isActive = !!key && key === activeNativeContextMenuToken;
+		const kind = nativeContextMenuKinds[key] || (isActive ? activeNativeContextMenuKind : "");
+		if (isActive) {
+			activeNativeContextMenuToken = "";
+			activeNativeContextMenuKind = "";
+		}
+		if (isActive && kind === "self") {
+			selfMenuOpen = false;
+			if (refs.selfCard) {
+				refs.selfCard.setAttribute("aria-expanded", "false");
+			}
+		}
+		window.setTimeout(function() {
+			delete nativeContextMenuActions[key];
+			delete nativeContextMenuKinds[key];
+		}, 250);
+	};
+
+	function showContextMenu(items, clientX, clientY, options) {
+		hideAppMenu();
+		hideSelfMenu();
+		hideDirectMessageTray();
+		const filteredItems = normalizedActionPanelItems(items, { hideDisabled: true });
+		if (!filteredItems.length) {
+			hideContextMenu();
+			return false;
+		}
+
+		if (!(options && options.forceDom) && tryShowNativeContextMenu(filteredItems, clientX, clientY, options || {})) {
+			hideContextMenu();
+			return true;
+		}
+
+		closeNativeContextMenu();
 		refs.contextMenu.innerHTML = "";
 		refs.contextMenu.style.maxHeight = "";
 		filteredItems.forEach(function(item) {
@@ -17319,8 +23465,238 @@
 		refs.contextMenu.style.left = left + "px";
 		refs.contextMenu.style.top = top + "px";
 		contextMenuState = { left: left, top: top };
+		if (options && options.openSubmenuLabel) {
+			openContextSubmenuByLabel(options.openSubmenuLabel);
+		}
 		fitContextMenuToViewport();
+		return true;
 	}
+
+	function firstAutomationRoomForMenu(snapshot) {
+		const voiceRooms = snapshot.voiceRooms || [];
+		const textRooms = snapshot.textRooms || [];
+		const rooms = voiceRooms.concat(textRooms).filter(Boolean);
+		return rooms.find(function(room) {
+			return Array.isArray(room.actions) && room.actions.length;
+		}) || rooms.find(function(room) {
+			return !!room.token;
+		}) || null;
+	}
+
+	function automationTextRoomMenuFallback() {
+		return {
+			label: "Demo text room",
+			token: "3:9001",
+			selected: true,
+			actions: [
+				{ id: "textRoom.edit", label: "Edit text room...", enabled: true },
+				{ id: "textRoom.acl", label: "Configure ACL...", enabled: true },
+				{ id: "textRoom.setDefault", label: "Set as default", enabled: true },
+				{ id: "textRoom.visibilitySource", label: "Go to visibility source", enabled: true },
+				{ id: "textRoom.delete", label: "Delete text room...", enabled: true, tone: "danger" }
+			]
+		};
+	}
+
+	function firstAutomationTextRoomForMenu(snapshot) {
+		const textRooms = (snapshot.textRooms || []).filter(Boolean);
+		return textRooms.find(function(room) {
+			return Array.isArray(room.actions) && room.actions.some(function(action) {
+				return action && (action.id === "textRoom.edit" || action.id === "textRoom.delete");
+			});
+		}) || textRooms.find(function(room) {
+			return Array.isArray(room.actions) && room.actions.length;
+		}) || automationTextRoomMenuFallback();
+	}
+
+	function firstAutomationRealTextRoomForMenu(snapshot) {
+		const textRooms = (snapshot.textRooms || []).filter(Boolean);
+		return textRooms.find(function(room) {
+			return Array.isArray(room.actions) && room.actions.some(function(action) {
+				return action && (action.id === "textRoom.edit" || action.id === "textRoom.delete");
+			});
+		}) || null;
+	}
+
+	function firstAutomationParticipantForMenu(snapshot) {
+		const candidates = [];
+		(snapshot.participants || []).forEach(function(person) {
+			if (person) {
+				candidates.push(person);
+			}
+		});
+		(snapshot.voiceRooms || []).forEach(function(room) {
+			(room && room.participants || []).forEach(function(person) {
+				if (person) {
+					candidates.push(person);
+				}
+			});
+		});
+		const canUseNativeMenu = function(person) {
+			return !!person && !person.isSelf
+				&& contextMenuCanUseNativePopup(participantContextMenuItems(person, person.scopeToken || ""));
+		};
+		return candidates.find(function(person) {
+			return canUseNativeMenu(person) && Array.isArray(person.actions) && person.actions.length;
+		}) || candidates.find(function(person) {
+			return canUseNativeMenu(person) && (person.canMessage || person.canJoin);
+		}) || {
+			label: "Demo User",
+			session: 7,
+			canMessage: true,
+			canJoin: true,
+			entryKind: "user",
+			actions: [
+				{ id: "userInfo", label: "User information...", enabled: true },
+				{ id: "localNickname", label: "Local nickname...", enabled: true },
+				{ id: "commentView", label: "View comment...", enabled: true },
+				{ id: "grantChatHistory", label: "Grant history...", enabled: true },
+				{ id: "kick", label: "Kick...", enabled: true, tone: "danger" },
+				{ id: "ban", label: "Ban...", enabled: true, tone: "danger" }
+			]
+		};
+	}
+
+	function firstAutomationMessageForMenu(snapshot) {
+		return (snapshot.messages || []).find(function(message) {
+			return message && (message.canReply || message.canReact || message.canDelete);
+		}) || (snapshot.messages || []).find(Boolean) || null;
+	}
+
+	function automationMessageContextItems(snapshot, message) {
+		return buildMessageContextItems(message, message && (message.bodyText || message.plainText));
+	}
+
+	function openAutomationMenuProbe(kind) {
+		const snapshot = getSnapshot();
+		const variant = String(kind || "").trim().toLowerCase();
+		automationLastMenuProbe = { variant: variant };
+		hideContextMenu();
+		hideAppMenu();
+		hideSelfMenu();
+		hideDirectMessageTray();
+		closeTopMenu();
+
+		if (variant === "app") {
+			closeNativeContextMenu();
+			toggleAppMenu(true);
+			return true;
+		}
+		if (variant === "self") {
+			closeNativeContextMenu();
+			toggleSelfMenu(true);
+			return true;
+		}
+		if (variant === "chat" || variant === "background" || variant === "chatbackground") {
+			showContextMenu(buildBackgroundContextMenuItems(snapshot),
+				48,
+				Math.max(132, Math.floor(window.innerHeight * 0.28)),
+				{ openSubmenuLabel: "Configure" });
+			return true;
+		}
+		if (variant === "room") {
+			const room = firstAutomationRoomForMenu(snapshot);
+			if (!room) {
+				return false;
+			}
+			const isVoiceRoom = (snapshot.voiceRooms || []).indexOf(room) >= 0;
+			automationLastMenuProbe = {
+				variant: "room",
+				scopeToken: String(room.token || ""),
+				label: String(room.label || ""),
+				roomType: isVoiceRoom ? "voice" : "text",
+				canJoin: room.canJoin !== false
+			};
+			const fakeRow = {
+				dataset: {
+					scopeToken: String(room.token || ""),
+					roomType: isVoiceRoom ? "voice" : "text",
+					canJoin: room.canJoin === false ? "false" : "true"
+				}
+			};
+			showContextMenu(buildRoomContextMenuItems(snapshot, room, fakeRow),
+				window.innerWidth - 48,
+				190,
+				{
+					horizontal: "left-of-anchor",
+					anchorBounds: { left: window.innerWidth - 64, right: window.innerWidth - 32 }
+			});
+			return true;
+		}
+		if (variant === "textroom" || variant === "textroomreal") {
+			const room = variant === "textroomreal"
+				? firstAutomationRealTextRoomForMenu(snapshot)
+				: automationTextRoomMenuFallback();
+			if (!room) {
+				return false;
+			}
+			automationLastMenuProbe = {
+				variant: variant === "textroomreal" ? "textRoomReal" : "textRoom",
+				scopeToken: String(room.token || ""),
+				label: String(room.label || ""),
+				roomType: "text",
+				canJoin: false
+			};
+			const fakeRow = {
+				dataset: {
+					scopeToken: String(room.token || ""),
+					roomType: "text",
+					canJoin: "false"
+				}
+			};
+			showContextMenu(buildRoomContextMenuItems(snapshot, room, fakeRow),
+				window.innerWidth - 48,
+				218,
+				{
+					horizontal: "left-of-anchor",
+					anchorBounds: { left: window.innerWidth - 64, right: window.innerWidth - 32 }
+				});
+			return true;
+		}
+		if (variant === "member") {
+			const participant = firstAutomationParticipantForMenu(snapshot);
+			if (!participant) {
+				return false;
+			}
+			automationLastMenuProbe = {
+				variant: "member",
+				session: String(participant.session || participant.ownerSession || ""),
+				label: String(participant.label || participant.name || "User"),
+				entryKind: String(participant.entryKind || "user")
+			};
+			showContextMenu(participantContextMenuItems(participant, participant.scopeToken || ""),
+				window.innerWidth - 48,
+				245,
+				{
+					horizontal: "left-of-anchor",
+					anchorBounds: { left: window.innerWidth - 64, right: window.innerWidth - 32 }
+				});
+			return true;
+		}
+		if (variant === "message") {
+			const message = firstAutomationMessageForMenu(snapshot);
+			if (!message) {
+				return false;
+			}
+			automationLastMenuProbe = {
+				variant: "message",
+				messageId: String(message.messageId || ""),
+				bodyText: String((message && (message.bodyText || message.plainText)) || "")
+			};
+			showContextMenu(automationMessageContextItems(snapshot, message),
+				Math.max(360, Math.floor(window.innerWidth * 0.34)),
+				Math.max(220, Math.floor(window.innerHeight * 0.52)));
+			return true;
+		}
+		return false;
+	}
+
+	window.__mumbleModernOpenMenuProbe = openAutomationMenuProbe;
+	window.__mumbleModernVisibleMenuLabels = visibleMenuLabels;
+	window.__mumbleModernAutomationActionState = automationActionState;
+	window.__mumbleModernResetAutomationActionState = resetAutomationActionState;
+	window.__mumbleModernDialogFieldState = automationModernDialogFieldState;
+	window.__mumbleModernSetDialogFieldValue = automationSetModernDialogFieldValue;
 
 	function wireActions() {
 		document.addEventListener("click", handleAnchorActivation, true);
@@ -17344,8 +23720,95 @@
 			event.stopPropagation();
 			toggleAppMenu();
 		});
+		if (refs.brandBadge) {
+			refs.brandBadge.addEventListener("click", function(event) {
+				const app = getSnapshot().app || {};
+				if (!(app.serverIdentity && app.serverIdentity.canEdit)) {
+					return;
+				}
+				event.preventDefault();
+				event.stopPropagation();
+				notifyBridge("invokeAppAction", "server.settings");
+			});
+			refs.brandBadge.addEventListener("keydown", function(event) {
+				if (event.key !== "Enter" && event.key !== " ") {
+					return;
+				}
+				const app = getSnapshot().app || {};
+				if (!(app.serverIdentity && app.serverIdentity.canEdit)) {
+					return;
+				}
+				event.preventDefault();
+				event.stopPropagation();
+				notifyBridge("invokeAppAction", "server.settings");
+			});
+		}
 		refs.muteButton.addEventListener("click", function() { notifyBridge("toggleSelfMute"); });
 		refs.deafButton.addEventListener("click", function() { notifyBridge("toggleSelfDeaf"); });
+		if (refs.stonksLeaderboardHeader) {
+			refs.stonksLeaderboardHeader.addEventListener("click", function() {
+				const stonks = (getSnapshot().app || {}).stonks || {};
+				if (stonks.supported && stonks.enabled !== false) {
+					notifyBridge("openModernDialog", "stonks", {});
+				}
+			});
+		}
+		if (refs.msgSearchButton) {
+			refs.msgSearchButton.addEventListener("click", function() {
+				setMessageSearchOpen(!messageSearchOpen);
+			});
+		}
+		if (refs.msgSearchInput) {
+			refs.msgSearchInput.addEventListener("input", function() {
+				messageSearchText = refs.msgSearchInput.value || "";
+				messageSearchOpen = true;
+				syncMessageSearchState();
+			});
+			refs.msgSearchInput.addEventListener("keydown", function(event) {
+				if (event.key === "Escape") {
+					event.preventDefault();
+					setMessageSearchOpen(false);
+					refs.msgSearchButton.focus({ preventScroll: true });
+				}
+			});
+		}
+		if (refs.msgSearchClose) {
+			refs.msgSearchClose.addEventListener("click", function() {
+				setMessageSearchOpen(false);
+				refs.msgSearchButton.focus({ preventScroll: true });
+			});
+		}
+		if (refs.motdToggle) {
+			refs.motdToggle.addEventListener("click", function() {
+				const snapshot = getSnapshot();
+				const app = snapshot.app || {};
+				const motdHtml = String(app.motdHtml || "").trim();
+				const wasDismissed = !!motdHtml && motdMatchesDismissedSignature(motdHtml, motdDismissedSignature);
+				const signature = motdContentSignature(motdHtml);
+				if (wasDismissed || conversationMotdHiddenForHistory) {
+					setMotdDismissedSignature(app, "");
+					motdExpansionTouched = true;
+					markMotdSeen(app, signature);
+					renderNote(app, snapshot.activeScope || {}, snapshot.messages || []);
+					return;
+				}
+				setMotdDismissedSignature(app, signature);
+				renderNote(app, snapshot.activeScope || {}, snapshot.messages || []);
+			});
+		}
+		if (refs.motdCollapse) {
+			refs.motdCollapse.addEventListener("click", function() {
+				setMotdExpanded(!noteExpanded);
+			});
+		}
+		if (refs.motdDismiss) {
+			refs.motdDismiss.addEventListener("click", function() {
+				const snapshot = getSnapshot();
+				const app = snapshot.app || {};
+				setMotdDismissedSignature(app, motdContentSignature(app.motdHtml || ""));
+				renderNote(app, snapshot.activeScope || {}, snapshot.messages || []);
+			});
+		}
 		refs.screenShareButton.addEventListener("click", function() {
 			const scopeToken = refs.screenShareButton.dataset.scopeToken || "";
 			const actionId = refs.screenShareButton.dataset.actionId || "";
@@ -17362,7 +23825,7 @@
 			refs.composerInput.focus();
 		});
 		refs.selfCard.addEventListener("click", function(event) {
-			if (event.target.closest("#self-card-settings-button")) {
+			if (event.target.closest("#self-card-settings-button, .self-control")) {
 				return;
 			}
 			toggleSelfMenu();
@@ -17378,16 +23841,13 @@
 			notifyBridge("openModernDialog", "settings", {});
 		});
 		refs.modernDialogCloseButton.addEventListener("click", closeModernDialog);
-		refs.modernDialogBackdrop.addEventListener("click", closeModernDialog);
+		refs.modernDialogBackdrop.addEventListener("click", function() {
+			if (!modernDialogState || !modernDialogState.preventBackdropClose) {
+				closeModernDialog();
+			}
+		});
 		refs.noteToggleButton.addEventListener("click", function() {
-			const snapshot = getSnapshot();
-			const app = snapshot.app || {};
-			const nextExpanded = !noteExpanded;
-			app.motdExpanded = nextExpanded;
-			snapshot.app = app;
-			railNoteAutoCollapsed = false;
-			notifyBridge("invokeAppAction", nextExpanded ? "motd.show" : "motd.hide");
-			renderNote(app, snapshot.activeScope || {});
+			setMotdExpanded(!noteExpanded);
 		});
 		refs.jumpLatestButton.addEventListener("click", function() {
 			keepMessageListPinnedToBottom = true;
@@ -17400,7 +23860,9 @@
 			event.preventDefault();
 		});
 		refs.railToggleButton.addEventListener("click", function() {
-			setRailCollapsed(!railCollapsed);
+			const nextCollapsed = !railCollapsed;
+			railOpenedByUser = compactViewport && !nextCollapsed;
+			setRailCollapsed(nextCollapsed);
 		});
 		refs.utilityRailBackdrop.addEventListener("click", function() {
 			setRailCollapsed(true);
@@ -17434,6 +23896,9 @@
 			}
 			if (!target.closest(".self-menu-popover") && !target.closest("#self-card")) {
 				hideSelfMenu();
+			}
+			if (!target.closest(".direct-message-tray") && !target.closest("#direct-message-button")) {
+				hideDirectMessageTray();
 			}
 			if (!target.closest(".reaction-picker") && !target.closest(".reaction-picker-toggle")) {
 				if (openReactionPickerMessageId !== null) {
@@ -17486,6 +23951,11 @@
 						closeModernDialogSelect();
 						return;
 					}
+					if (stonksPendingConfirm) {
+						clearStonksPendingConfirm();
+						renderModernDialog();
+						return;
+					}
 					closeModernDialog();
 					return;
 				}
@@ -17504,6 +23974,10 @@
 			}
 			if (event.key === "Escape" && appMenuOpen) {
 				hideAppMenu();
+				return;
+			}
+			if (event.key === "Escape" && directMessageTrayOpen) {
+				hideDirectMessageTray();
 				return;
 			}
 			if (event.key === "Escape" && openMenuId !== null) {
@@ -17528,6 +24002,9 @@
 			if (selfMenuOpen) {
 				positionSelfMenu();
 			}
+			if (directMessageTrayOpen) {
+				positionDirectMessageTray();
+			}
 			if (refs.imageViewerLayer && !refs.imageViewerLayer.classList.contains("hidden")) {
 				applyImageViewerGeometry();
 				persistImageViewerState();
@@ -17537,6 +24014,13 @@
 			schedulePreviewEmbedFrameSizeSync();
 			scheduleFooterAlignmentSync();
 			scheduleRailLayoutSync();
+			scheduleStonksTickerScrollSync();
+		});
+		window.addEventListener("mumble-host-viewport", function() {
+			syncCompactRailState(true);
+			scheduleFooterAlignmentSync();
+			scheduleRailLayoutSync();
+			scheduleStonksTickerScrollSync();
 		});
 		if (window.visualViewport) {
 			window.visualViewport.addEventListener("resize", scheduleFooterAlignmentSync);
@@ -17546,6 +24030,7 @@
 			hideContextMenu();
 			hideAppMenu();
 			hideSelfMenu();
+			hideDirectMessageTray();
 			closeModernDialogSelect();
 			clearComposerImageDropTarget();
 		});
@@ -17568,10 +24053,12 @@
 		refs.utilityScroll.addEventListener("scroll", function() {
 			hideContextMenu();
 			hideSelfMenu();
+			hideDirectMessageTray();
 			syncRailOverflowState();
 		});
 		refs.messageList.addEventListener("click", handleMessageImageActivation);
 		refs.messageList.addEventListener("scroll", function() {
+			noteMessageListScrollActivity();
 			if (contextMenuState) {
 				hideContextMenu();
 			}
@@ -17584,7 +24071,7 @@
 				setOpenReactionPickerMessageId(null);
 				reactionPickerScrollClosePausedUntil = 0;
 			}
-			syncScrollState();
+			scheduleMessageListScrollStateSync();
 		});
 	}
 
@@ -17596,6 +24083,8 @@
 		syncComposerHeight();
 		await ensureBridge();
 		syncSnapshot();
+		syncWalkthroughUiFromQuery();
+		syncWalkthroughDialogFromQuery();
 	}
 
 	boot();

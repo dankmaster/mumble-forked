@@ -26,6 +26,7 @@ public:
 	virtual QIcon icon() const Q_DECL_OVERRIDE;
 	static void SetupProxy();
 	static bool TcpModeEnabled();
+	static bool ApplyStartWithPCRegistration(bool enabled);
 public slots:
 	void accept() const Q_DECL_OVERRIDE;
 	void save() const Q_DECL_OVERRIDE;

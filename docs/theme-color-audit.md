@@ -2,6 +2,9 @@
 
 Date: 2026-03-30
 
+For the ongoing checklist used when adding or reviewing theme work, see
+`docs/theme-coverage-guide.md`.
+
 ## Scope
 
 This audit covers the Windows-facing theme work for:

@@ -24,7 +24,9 @@
 #include "GroupTable.h"
 #include "LogTable.h"
 #include "ServerTable.h"
+#include "StonksFeedPreferenceTable.h"
 #include "StonksFollowTable.h"
+#include "StonksPinnedTickerTable.h"
 #include "StonksScoreTable.h"
 #include "StonksSnapshotPositionTable.h"
 #include "StonksSnapshotTable.h"
@@ -68,7 +70,9 @@ namespace server {
 				ChannelLinkTable,
 				BanTable,
 				ChannelListenerTable,
+				StonksFeedPreferenceTable,
 				StonksFollowTable,
+				StonksPinnedTickerTable,
 				StonksScoreTable,
 				StonksSnapshotTable,
 				StonksSnapshotPositionTable,
@@ -170,8 +174,14 @@ namespace server {
 				addTable(std::make_unique< ChannelListenerTable >(m_sql, m_backend, getUserTable(), getChannelTable()));
 			assert(id == TableIndex::ChannelListenerTable);
 
+			id = addTable(std::make_unique< StonksFeedPreferenceTable >(m_sql, m_backend, getUserTable()));
+			assert(id == TableIndex::StonksFeedPreferenceTable);
+
 			id = addTable(std::make_unique< StonksFollowTable >(m_sql, m_backend, getUserTable()));
 			assert(id == TableIndex::StonksFollowTable);
+
+			id = addTable(std::make_unique< StonksPinnedTickerTable >(m_sql, m_backend, getUserTable()));
+			assert(id == TableIndex::StonksPinnedTickerTable);
 
 			id = addTable(std::make_unique< StonksScoreTable >(m_sql, m_backend, getUserTable()));
 			assert(id == TableIndex::StonksScoreTable);
@@ -223,7 +233,9 @@ namespace server {
 		GET_TABLE_IMPL(ChannelLinkTable)
 		GET_TABLE_IMPL(BanTable)
 		GET_TABLE_IMPL(ChannelListenerTable)
+		GET_TABLE_IMPL(StonksFeedPreferenceTable)
 		GET_TABLE_IMPL(StonksFollowTable)
+		GET_TABLE_IMPL(StonksPinnedTickerTable)
 		GET_TABLE_IMPL(StonksScoreTable)
 		GET_TABLE_IMPL(StonksSnapshotTable)
 		GET_TABLE_IMPL(StonksSnapshotPositionTable)

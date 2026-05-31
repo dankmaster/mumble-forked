@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="screenshots/modern-client-rich-chat.png" alt="Modern Mumble fork client with persistent rich chat" width="900">
+  <img src="screenshots/modern-client-rich-chat.png" alt="Modern Mumble fork client with a sanitized persistent rich chat preview" width="900">
 </p>
 
 ## What This Is
@@ -41,9 +41,16 @@ If you want the official stable Mumble project, start at
 
 ## Screenshots
 
-| Modern Rich Chat | Rich Preview Detail | Classic Mumble Baseline |
+The modern client shots are cropped from sanitized automation states so the
+README can show real UI surfaces without private server data.
+
+| Modern Rich Chat | Rich Preview Detail | Direct Messages |
 | --- | --- | --- |
-| <img src="screenshots/modern-client-rich-chat.png" alt="Modern persistent chat client with playable YouTube preview controls" width="360"> | <img src="screenshots/modern-rich-card-youtube.png" alt="Playable inline YouTube preview card detail" width="360"> | <img src="screenshots/Mumble.png" alt="Classic Mumble client in light and dark themes" width="360"> |
+| <img src="screenshots/modern-client-rich-chat.png" alt="Modern persistent chat client with playable YouTube preview controls" width="360"> | <img src="screenshots/modern-rich-card-youtube.png" alt="Playable inline YouTube preview card detail" width="360"> | <img src="screenshots/modern-direct-messages.png" alt="Modern direct-message timeline in the WebEngine shell" width="360"> |
+
+| Screen Sharing Settings | Stonks Overview | Classic Mumble Baseline |
+| --- | --- | --- |
+| <img src="screenshots/modern-screen-sharing-settings.png" alt="Modern screen sharing settings dialog" width="360"> | <img src="screenshots/modern-stonks-overview.png" alt="Modern stonks dashboard overview dialog" width="360"> | <img src="screenshots/Mumble.png" alt="Classic Mumble client in light and dark themes" width="360"> |
 
 ## Feature Inventory
 

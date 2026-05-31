@@ -214,6 +214,46 @@ void ModernShellBridge::messageParticipant(const qulonglong session) {
 	emit participantMessageRequested(session);
 }
 
+void ModernShellBridge::openDirectMessage(const qulonglong session) {
+	if (session == 0) {
+		return;
+	}
+
+	emit directMessageOpenRequested(session);
+}
+
+void ModernShellBridge::closeDirectMessage(const qulonglong session) {
+	if (session == 0) {
+		return;
+	}
+
+	emit directMessageCloseRequested(session);
+}
+
+void ModernShellBridge::markDirectMessageRead(const qulonglong session) {
+	if (session == 0) {
+		return;
+	}
+
+	emit directMessageMarkReadRequested(session);
+}
+
+void ModernShellBridge::sendDirectMessage(const qulonglong session, const QString &message) {
+	if (session == 0 || message.trimmed().isEmpty()) {
+		return;
+	}
+
+	emit directMessageSendRequested(session, message);
+}
+
+void ModernShellBridge::setDirectMessageMode(const qulonglong session, const QString &mode) {
+	if (session == 0) {
+		return;
+	}
+
+	emit directMessageModeChangeRequested(session, mode.trimmed());
+}
+
 void ModernShellBridge::joinParticipant(const qulonglong session) {
 	emit participantJoinRequested(session);
 }
@@ -324,6 +364,10 @@ void ModernShellBridge::invokeAppAction(const QString &actionId) {
 	emit appActionRequested(actionId.trimmed());
 }
 
+void ModernShellBridge::invokeAppActionPayload(const QString &actionId, const QVariantMap &payload) {
+	emit appActionPayloadRequested(actionId.trimmed(), payload);
+}
+
 void ModernShellBridge::toggleLayout() {
 	emit layoutToggleRequested();
 }
@@ -347,12 +391,51 @@ void ModernShellBridge::lookupFinanceQuote(const QString &requestId, const QStri
 	emit financeQuoteLookupRequested(trimmedRequestID, trimmedSymbol);
 }
 
+void ModernShellBridge::lookupFinanceChart(const QString &requestId, const QString &symbol, const QString &range,
+										   const QString &interval) {
+	const QString trimmedRequestID = requestId.trimmed();
+	const QString trimmedSymbol    = symbol.trimmed();
+	if (trimmedRequestID.isEmpty() || trimmedSymbol.isEmpty()) {
+		return;
+	}
+
+	emit financeChartLookupRequested(trimmedRequestID, trimmedSymbol, range.trimmed(), interval.trimmed());
+}
+
+void ModernShellBridge::openNativeContextMenu(const QVariantMap &request) {
+	if (request.isEmpty()) {
+		return;
+	}
+
+	emit nativeContextMenuRequested(request);
+}
+
+void ModernShellBridge::closeNativeContextMenu() {
+	emit nativeContextMenuCloseRequested();
+}
+
 void ModernShellBridge::publishFinanceQuoteResult(const QVariantMap &result) {
 	if (result.isEmpty()) {
 		return;
 	}
 
 	emit financeQuoteResultReady(result);
+}
+
+void ModernShellBridge::publishFinanceChartResult(const QVariantMap &result) {
+	if (result.isEmpty()) {
+		return;
+	}
+
+	emit financeChartResultReady(result);
+}
+
+void ModernShellBridge::publishToast(const QVariantMap &toast) {
+	if (toast.isEmpty()) {
+		return;
+	}
+
+	emit toastRequested(toast);
 }
 
 #endif // defined(MUMBLE_HAS_MODERN_LAYOUT)

@@ -40,6 +40,11 @@ public:
 	Q_INVOKABLE void toggleReaction(qulonglong messageId, const QString &emoji, bool active);
 	Q_INVOKABLE void deleteMessage(qulonglong messageId);
 	Q_INVOKABLE void messageParticipant(qulonglong session);
+	Q_INVOKABLE void openDirectMessage(qulonglong session);
+	Q_INVOKABLE void closeDirectMessage(qulonglong session);
+	Q_INVOKABLE void markDirectMessageRead(qulonglong session);
+	Q_INVOKABLE void sendDirectMessage(qulonglong session, const QString &message);
+	Q_INVOKABLE void setDirectMessageMode(qulonglong session, const QString &mode);
 	Q_INVOKABLE void joinParticipant(qulonglong session);
 	Q_INVOKABLE void moveParticipantToChannel(qulonglong session, const QString &scopeToken);
 	Q_INVOKABLE void invokeParticipantAction(qulonglong session, const QString &actionId);
@@ -67,11 +72,18 @@ public:
 	Q_INVOKABLE void attachImageData(const QString &dataUrl);
 	Q_INVOKABLE void activateLink(const QString &href);
 	Q_INVOKABLE void invokeAppAction(const QString &actionId);
+	Q_INVOKABLE void invokeAppActionPayload(const QString &actionId, const QVariantMap &payload);
 	Q_INVOKABLE void toggleLayout();
 	Q_INVOKABLE void hydrateMessagePreviews(const QString &scopeToken, const QVariantList &messageIds,
 											bool highPriority);
 	Q_INVOKABLE void lookupFinanceQuote(const QString &requestId, const QString &symbol);
+	Q_INVOKABLE void lookupFinanceChart(const QString &requestId, const QString &symbol, const QString &range,
+										 const QString &interval);
+	Q_INVOKABLE void openNativeContextMenu(const QVariantMap &request);
+	Q_INVOKABLE void closeNativeContextMenu();
 	void publishFinanceQuoteResult(const QVariantMap &result);
+	void publishFinanceChartResult(const QVariantMap &result);
+	void publishToast(const QVariantMap &toast);
 
 signals:
 	void bootReady();
@@ -89,6 +101,11 @@ signals:
 	void reactionToggleRequested(qulonglong messageId, const QString &emoji, bool active);
 	void messageDeleteRequested(qulonglong messageId);
 	void participantMessageRequested(qulonglong session);
+	void directMessageOpenRequested(qulonglong session);
+	void directMessageCloseRequested(qulonglong session);
+	void directMessageMarkReadRequested(qulonglong session);
+	void directMessageSendRequested(qulonglong session, const QString &message);
+	void directMessageModeChangeRequested(qulonglong session, const QString &mode);
 	void participantJoinRequested(qulonglong session);
 	void participantMoveRequested(qulonglong session, const QString &scopeToken);
 	void participantActionRequested(qulonglong session, const QString &actionId);
@@ -111,11 +128,18 @@ signals:
 	void imageDataAttachmentRequested(const QString &dataUrl);
 	void linkActivationRequested(const QString &href);
 	void appActionRequested(const QString &actionId);
+	void appActionPayloadRequested(const QString &actionId, const QVariantMap &payload);
 	void layoutToggleRequested();
 	void messagePreviewHydrationRequested(const QString &scopeToken, const QVariantList &messageIds,
 										  bool highPriority);
 	void financeQuoteLookupRequested(const QString &requestId, const QString &symbol);
+	void financeChartLookupRequested(const QString &requestId, const QString &symbol, const QString &range,
+									  const QString &interval);
+	void nativeContextMenuRequested(const QVariantMap &request);
+	void nativeContextMenuCloseRequested();
 	void financeQuoteResultReady(const QVariantMap &result);
+	void financeChartResultReady(const QVariantMap &result);
+	void toastRequested(const QVariantMap &toast);
 
 private:
 	QVariantMap m_snapshot;

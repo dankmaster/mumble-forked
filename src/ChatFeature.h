@@ -12,7 +12,7 @@
 
 namespace Mumble {
 namespace ChatFeatures {
-	constexpr unsigned int CURRENT_PROTOCOL_VERSION = 1;
+	constexpr unsigned int CURRENT_PROTOCOL_VERSION = 2;
 
 	bool isKnownFeature(MumbleProto::ChatFeature feature);
 	QList< int > supportedFeatureList();

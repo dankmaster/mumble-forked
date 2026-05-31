@@ -357,6 +357,11 @@ void MetaParams::read(QString fname) {
 	qsPid     = typeCheckedFromSettings("pidfile", qsPid);
 
 	qsRegName     = typeCheckedFromSettings("registerName", qsRegName);
+	qsServerDisplayName = typeCheckedFromSettings("server_display_name", qsServerDisplayName).trimmed();
+	qsServerMonogram    = typeCheckedFromSettings("server_monogram", qsServerMonogram).trimmed().left(12);
+	const QString serverImageBase64 =
+		typeCheckedFromSettings("server_image", QString::fromLatin1(qbaServerImage.toBase64()));
+	qbaServerImage = QByteArray::fromBase64(serverImageBase64.toLatin1());
 	qsRegPassword = typeCheckedFromSettings("registerPassword", qsRegPassword);
 	qsRegHost     = typeCheckedFromSettings("registerHostname", qsRegHost);
 	qsRegLocation = typeCheckedFromSettings("registerLocation", qsRegLocation);
@@ -575,6 +580,9 @@ void MetaParams::read(QString fname) {
 	qmConfig.insert(QLatin1String("welcometext"), qsWelcomeText);
 	qmConfig.insert(QLatin1String("welcometextfile"), qsWelcomeTextFile);
 	qmConfig.insert(QLatin1String("registername"), qsRegName);
+	qmConfig.insert(QLatin1String("server_display_name"), qsServerDisplayName);
+	qmConfig.insert(QLatin1String("server_monogram"), qsServerMonogram);
+	qmConfig.insert(QLatin1String("server_image"), QString::fromLatin1(qbaServerImage.toBase64()));
 	qmConfig.insert(QLatin1String("registerpassword"), qsRegPassword);
 	qmConfig.insert(QLatin1String("registerhostname"), qsRegHost);
 	qmConfig.insert(QLatin1String("registerlocation"), qsRegLocation);

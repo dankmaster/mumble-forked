@@ -422,6 +422,10 @@ if(modern-layout-webengine)
 	list(APPEND MUMBLE_SOURCES
 		"ModernShellBridge.cpp"
 		"ModernShellBridge.h"
+		"ModernUiAutomationServer.cpp"
+		"ModernUiAutomationServer.h"
+		"ModernContextMenuHost.cpp"
+		"ModernContextMenuHost.h"
 		"ModernDialogHost.cpp"
 		"ModernDialogHost.h"
 		"ModernShellHost.cpp"

@@ -15,6 +15,8 @@
 #include "murmur/database/DBChatReadState.h"
 #include "murmur/database/DBChatThread.h"
 #include "murmur/database/DBStonksFollow.h"
+#include "murmur/database/DBStonksFeedPreferences.h"
+#include "murmur/database/DBStonksPinnedTicker.h"
 #include "murmur/database/DBStonksScore.h"
 #include "murmur/database/DBStonksSnapshot.h"
 #include "murmur/database/DBStonksSnapshotPosition.h"
@@ -128,6 +130,13 @@ public:
 	void setStonksFollow(const ::mumble::server::db::DBStonksFollow &follow);
 	void removeStonksFollow(unsigned int serverID, unsigned int followerUserID, unsigned int targetUserID);
 	std::vector< unsigned int > getStonksFollowedUsers(unsigned int serverID, unsigned int followerUserID);
+	void setStonksPinnedTicker(const ::mumble::server::db::DBStonksPinnedTicker &ticker);
+	void removeStonksPinnedTicker(unsigned int serverID, unsigned int userID, const std::string &symbol);
+	std::vector< ::mumble::server::db::DBStonksPinnedTicker >
+		getStonksPinnedTickers(unsigned int serverID, unsigned int userID);
+	void setStonksFeedPreferences(const ::mumble::server::db::DBStonksFeedPreferences &preferences);
+	std::optional< ::mumble::server::db::DBStonksFeedPreferences >
+		getStonksFeedPreferences(unsigned int serverID, unsigned int userID);
 	::mumble::server::db::DBStonksSnapshot
 		addStonksSnapshot(const ::mumble::server::db::DBStonksSnapshot &snapshot,
 						  const std::vector< ::mumble::server::db::DBStonksSnapshotPosition > &positions);

@@ -78,7 +78,7 @@ QString kindLabelForUrl(const MumbleProto::FeedbackReportKind kind) {
 		case MumbleProto::FeedbackReportSuggestion:
 			return QStringLiteral("enhancement");
 		case MumbleProto::FeedbackReportSupport:
-			return QStringLiteral("support");
+			return QStringLiteral("question");
 	}
 
 	return QStringLiteral("feedback");
@@ -399,7 +399,7 @@ FeedbackDialog::FeedbackDialog(const ServerCapability &capability, QWidget *pare
 	m_typeCombo = new QComboBox(this);
 	m_typeCombo->addItem(tr("Bug"), static_cast< int >(MumbleProto::FeedbackReportBug));
 	m_typeCombo->addItem(tr("Suggestion"), static_cast< int >(MumbleProto::FeedbackReportSuggestion));
-	m_typeCombo->addItem(tr("Support"), static_cast< int >(MumbleProto::FeedbackReportSupport));
+	m_typeCombo->addItem(tr("Question"), static_cast< int >(MumbleProto::FeedbackReportSupport));
 
 	m_titleEdit = new QLineEdit(this);
 	m_titleEdit->setMaxLength(160);

@@ -48,6 +48,7 @@
 #	include "ModernDialogHost.h"
 #	include "ModernShellBridge.h"
 #	include "ModernShellHost.h"
+#	include "ModernUiAutomationServer.h"
 #	include <QtWebEngineCore/QWebEngineProfile>
 #	include <QtWebEngineCore/QWebEngineScript>
 #	include <QtWebEngineCore/QWebEngineScriptCollection>
@@ -112,6 +113,7 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDateTime>
+#include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
@@ -123,6 +125,8 @@
 #include <QtCore/QMimeData>
 #include <QtCore/QPointer>
 #include <QtCore/QRegularExpression>
+#include <QtCore/QRect>
+#include <QtCore/QSaveFile>
 #include <QtCore/QSet>
 #include <QtCore/QSettings>
 #include <QtCore/QSignalBlocker>
@@ -242,15 +246,136 @@ constexpr int PersistentChatBottomInsetHeight       = 18;
 constexpr int ModernShellSnapshotActiveCoalesceMs   = 100;
 constexpr int ModernShellSnapshotInactiveCoalesceMs = 350;
 constexpr int ModernShellPatchCoalesceMs            = 16;
+constexpr std::size_t ModernDirectMessageMaxMessages = 200;
 constexpr int ModernConnectServerPingIntervalMs     = 75;
 constexpr int NativeWindowMoveResizeWatchdogMs      = 4000;
 constexpr int UserTextureRequestCoalesceMs          = 75;
 constexpr int UserTextureRequestMaxBatchSize        = 64;
 constexpr qint64 UserTextureFailedCooldownMs        = 60 * 1000;
+constexpr int UserCommentRequestCoalesceMs          = 75;
+constexpr int UserCommentRequestMaxBatchSize        = 64;
 constexpr int UserTextureLegacyWidth                = 600;
 constexpr int UserTextureLegacyHeight               = 60;
 constexpr int UserTextureLegacyRgbaSize             = UserTextureLegacyWidth * UserTextureLegacyHeight * 4;
 constexpr int UserTextureMaxImageDimension          = 1024;
+constexpr int UpdateResumeStateMaxAgeDays           = 7;
+
+QString updateResumeStatePath() {
+	return Global::get().qdBasePath.filePath(QStringLiteral("Updates/mumble-update-resume.json"));
+}
+
+QString modernShellConnectionTr(const char *sourceText) {
+	return QCoreApplication::translate("MainWindow", sourceText);
+}
+
+QString modernShellConnectionToneForPing(const double pingMs) {
+	if (pingMs < 50.0) {
+		return QStringLiteral("success");
+	}
+	if (pingMs < 100.0) {
+		return QStringLiteral("warning");
+	}
+	if (pingMs < 200.0) {
+		return QStringLiteral("orange");
+	}
+	return QStringLiteral("danger");
+}
+
+QVariantMap modernShellConnectionStatus(QTimer *reconnectTimer, const bool connectionAttemptActive) {
+	QVariantMap state;
+	const ServerHandlerPtr handler = Global::get().sh;
+	const bool connected           = Global::get().uiSession != 0 && handler && handler->isConnected();
+	const bool retrying            = !connected && reconnectTimer && reconnectTimer->isActive();
+	const bool connecting          = !connected && connectionAttemptActive && handler && handler->isRunning();
+
+	QString label;
+	QString tone;
+	QString tooltip;
+	QString connectionState;
+
+	if (connected) {
+		const auto accumulatorCount = [](const auto &accumulator) { return boost::accumulators::count(accumulator); };
+		const auto accumulatorMean  = [](const auto &accumulator) { return boost::accumulators::mean(accumulator); };
+		const bool preferTcp        = NetworkConfig::TcpModeEnabled();
+		const bool hasUdpPing       = accumulatorCount(handler->accUDP) > 0;
+		const bool hasTcpPing       = accumulatorCount(handler->accTCP) > 0;
+		const bool useUdpPing       = hasUdpPing && (!preferTcp || !hasTcpPing);
+		const bool hasPing          = useUdpPing ? hasUdpPing : hasTcpPing;
+
+		connectionState = QStringLiteral("connected");
+		if (hasPing) {
+			const double pingMs = accumulatorMean(useUdpPing ? handler->accUDP : handler->accTCP);
+			const int roundedPingMs = std::max(0, static_cast< int >(std::lround(pingMs)));
+			label   = modernShellConnectionTr("Connected %1 ms").arg(roundedPingMs);
+			tone    = modernShellConnectionToneForPing(pingMs);
+			tooltip = modernShellConnectionTr("Current ping: %1 ms").arg(roundedPingMs);
+			state.insert(QStringLiteral("connectionPingMs"), roundedPingMs);
+		} else {
+			label   = modernShellConnectionTr("Connected");
+			tone    = QStringLiteral("success");
+			tooltip = modernShellConnectionTr("Waiting for ping samples");
+		}
+	} else if (retrying) {
+		const int remainingMs = reconnectTimer->remainingTime();
+		const int remainingSeconds = remainingMs > 0 ? std::max(1, (remainingMs + 999) / 1000) : 0;
+		connectionState = QStringLiteral("retrying");
+		label = remainingSeconds > 0 ? modernShellConnectionTr("Retry in %1s").arg(remainingSeconds)
+									 : modernShellConnectionTr("Retrying");
+		tone    = QStringLiteral("retry");
+		tooltip = modernShellConnectionTr("Automatic reconnect is scheduled");
+		state.insert(QStringLiteral("connectionRetryRemainingMs"), std::max(0, remainingMs));
+	} else if (connecting) {
+		connectionState = QStringLiteral("connecting");
+		label           = modernShellConnectionTr("Connecting");
+		tone            = QStringLiteral("warning");
+		tooltip         = modernShellConnectionTr("Connecting to server");
+	} else {
+		connectionState = QStringLiteral("disconnected");
+		label           = modernShellConnectionTr("Disconnected");
+		tone            = QStringLiteral("muted");
+		tooltip         = modernShellConnectionTr("Disconnected");
+	}
+
+	state.insert(QStringLiteral("connectionState"), connectionState);
+	state.insert(QStringLiteral("connectionLabel"), label);
+	state.insert(QStringLiteral("connectionTone"), tone);
+	state.insert(QStringLiteral("connectionTooltip"), tooltip);
+	state.insert(QStringLiteral("canConnect"), !connected && !connecting && !retrying);
+	state.insert(QStringLiteral("canDisconnect"), connected);
+	state.insert(QStringLiteral("canCancelConnection"), connected || connecting || retrying);
+	return state;
+}
+
+void insertModernShellConnectionStatus(QVariantMap &appState, QTimer *reconnectTimer,
+									   const bool connectionAttemptActive) {
+	const QVariantMap connectionState = modernShellConnectionStatus(reconnectTimer, connectionAttemptActive);
+	for (auto it = connectionState.cbegin(); it != connectionState.cend(); ++it) {
+		appState.insert(it.key(), it.value());
+	}
+}
+
+void overlayModernShellConnectionStateProbe(QVariantMap &appState, const QVariantMap &connectionProbe) {
+	for (auto it = connectionProbe.cbegin(); it != connectionProbe.cend(); ++it) {
+		appState.insert(it.key(), it.value());
+	}
+}
+
+void overlayModernShellScreenShareStateProbe(QVariantMap &shareState, const QVariantMap &screenShareProbe) {
+	if (screenShareProbe.isEmpty()) {
+		return;
+	}
+
+	const QString expectedScopeToken = screenShareProbe.value(QStringLiteral("scopeToken")).toString();
+	const QString actualScopeToken   = shareState.value(QStringLiteral("scopeToken")).toString();
+	if (!expectedScopeToken.isEmpty() && expectedScopeToken != actualScopeToken) {
+		return;
+	}
+
+	for (auto it = screenShareProbe.cbegin(); it != screenShareProbe.cend(); ++it) {
+		shareState.insert(it.key(), it.value());
+	}
+}
+
 QString chatEmbedAssistLocalKey(unsigned int messageID, const QString &urlHash) {
 	return QStringLiteral("%1:%2").arg(messageID).arg(urlHash);
 }
@@ -338,23 +463,25 @@ QString modernShellScopeToken(const int scopeValue, const unsigned int scopeID) 
 
 QString modernShellParticipantSubtitle(const ClientUser *user, const Channel *contextChannel, const ClientUser *self,
 									   const ClientUser *directMessageUser) {
+	Q_UNUSED(contextChannel);
+	Q_UNUSED(self);
+	Q_UNUSED(directMessageUser);
+
 	if (!user) {
 		return QObject::tr("Unavailable");
 	}
-	if (user == self) {
-		return QObject::tr("You");
-	}
-	if (directMessageUser && user == directMessageUser) {
-		return QObject::tr("Direct conversation");
-	}
-	if (!user->cChannel) {
-		return QObject::tr("No active channel");
-	}
-	if (contextChannel && user->cChannel == contextChannel) {
-		return QObject::tr("In this room");
+
+	ClientUser *mutableUser = const_cast< ClientUser * >(user);
+	if (Global::get().mw) {
+		Global::get().mw->ensureUserCommentAvailable(mutableUser);
 	}
 
-	return QObject::tr("In %1").arg(user->cChannel->qsName);
+	const QString plainComment = QTextDocumentFragment::fromHtml(mutableUser->qsComment).toPlainText().simplified();
+	if (!plainComment.isEmpty()) {
+		return plainComment;
+	}
+
+	return QString();
 }
 
 Settings::TalkState modernShellEffectiveTalkState(const ClientUser *user) {
@@ -1346,6 +1473,104 @@ QImage persistentChatAvatarTexture(const ClientUser *user, int avatarSize) {
 	}
 
 	return QString::fromLatin1("data:image/png;base64,%1").arg(QString::fromLatin1(encodedBytes.toBase64()));
+}
+
+constexpr int ModernServerIdentityImageSize               = 256;
+constexpr qint64 ModernServerIdentityImageMaxInputBytes   = 4 * 1024 * 1024;
+constexpr qint64 ModernServerIdentityImageMaxStoredBytes  = 512 * 1024;
+
+QString modernShellServerImageDataUrl(const QByteArray &imageBytes) {
+	if (imageBytes.isEmpty()) {
+		return QString();
+	}
+
+	return QString::fromLatin1("data:image/png;base64,%1").arg(QString::fromLatin1(imageBytes.toBase64()));
+}
+
+std::optional< QByteArray > modernShellNormalizeServerIdentityImageBytes(const QByteArray &imageBytes,
+																		 QString *error = nullptr) {
+	if (imageBytes.isEmpty()) {
+		return QByteArray();
+	}
+	if (imageBytes.size() > ModernServerIdentityImageMaxInputBytes) {
+		if (error) {
+			*error = QCoreApplication::translate("MainWindow", "Choose a server image smaller than 4 MB.");
+		}
+		return std::nullopt;
+	}
+
+	QBuffer buffer;
+	buffer.setData(imageBytes);
+	if (!buffer.open(QIODevice::ReadOnly)) {
+		if (error) {
+			*error = QCoreApplication::translate("MainWindow", "Choose a readable server image.");
+		}
+		return std::nullopt;
+	}
+
+	QImageReader reader(&buffer);
+	reader.setAutoTransform(true);
+	const QImage image = reader.read();
+	if (image.isNull()) {
+		if (error) {
+			*error = QCoreApplication::translate("MainWindow",
+												 "Choose a readable image file supported by this Mumble build.");
+		}
+		return std::nullopt;
+	}
+
+	const int side = qMin(image.width(), image.height());
+	if (side <= 0) {
+		if (error) {
+			*error = QCoreApplication::translate("MainWindow", "Choose a readable server image.");
+		}
+		return std::nullopt;
+	}
+
+	QImage normalized = image.convertToFormat(QImage::Format_ARGB32);
+	normalized        = normalized.copy(QRect((normalized.width() - side) / 2, (normalized.height() - side) / 2, side, side))
+					 .scaled(ModernServerIdentityImageSize, ModernServerIdentityImageSize,
+							 Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+
+	QByteArray encodedBytes;
+	QBuffer encodedBuffer(&encodedBytes);
+	if (!encodedBuffer.open(QIODevice::WriteOnly) || !normalized.save(&encodedBuffer, "PNG")
+		|| encodedBytes.isEmpty() || encodedBytes.size() > ModernServerIdentityImageMaxStoredBytes) {
+		if (error) {
+			*error = QCoreApplication::translate("MainWindow", "The server image could not be prepared for saving.");
+		}
+		return std::nullopt;
+	}
+
+	return encodedBytes;
+}
+
+std::optional< QByteArray > modernShellServerIdentityImageFromDataUrl(const QString &dataUrl,
+																	  QString *error = nullptr) {
+	const QString value = dataUrl.trimmed();
+	if (value.isEmpty()) {
+		return QByteArray();
+	}
+
+	const int commaIndex = value.indexOf(QLatin1Char(','));
+	const QString metadata = commaIndex >= 0 ? value.left(commaIndex).toLower() : QString();
+	if (commaIndex <= 0 || !metadata.startsWith(QLatin1String("data:image/"))
+		|| !metadata.contains(QLatin1String(";base64"))) {
+		if (error) {
+			*error = QCoreApplication::translate("MainWindow", "Choose an image file from this device.");
+		}
+		return std::nullopt;
+	}
+
+	const QByteArray decodedBytes = QByteArray::fromBase64(value.mid(commaIndex + 1).toLatin1());
+	if (decodedBytes.isEmpty()) {
+		if (error) {
+			*error = QCoreApplication::translate("MainWindow", "Choose a readable server image.");
+		}
+		return std::nullopt;
+	}
+
+	return modernShellNormalizeServerIdentityImageBytes(decodedBytes, error);
 }
 
 bool isDarkPalette(const QPalette &palette) {
@@ -2585,6 +2810,38 @@ QString persistentTextAclChannelLabel(const Channel *channel) {
 	return segments.join(QString::fromLatin1(" / "));
 }
 
+QString voiceRoomTopicSummary(const Channel *channel, const int maxLength = 160) {
+	if (!channel) {
+		return QString();
+	}
+
+	QString description = channel->qsDesc;
+	if (description.isEmpty() && !channel->qbaDescHash.isEmpty() && Global::get().db) {
+		description = QString::fromUtf8(Global::get().db->blob(channel->qbaDescHash));
+	}
+
+	return persistentChatPlainTextSummary(description, maxLength);
+}
+
+QString voiceRoomChatDescription(const Channel *channel) {
+	const QString topic = voiceRoomTopicSummary(channel);
+	return topic.isEmpty() ? QObject::tr("Legacy-compatible room chat.") : topic;
+}
+
+QString voiceRoomChatListDescription(const Channel *channel) {
+	const QString topic = voiceRoomTopicSummary(channel);
+	return topic.isEmpty() ? QObject::tr("Voice room chat for %1.").arg(persistentTextAclChannelLabel(channel))
+						   : topic;
+}
+
+QString voiceRoomBrowserDescription(const Channel *channel) {
+	const QString topic = voiceRoomTopicSummary(channel);
+	return topic.isEmpty() ? QObject::tr("%1 people in %2")
+								 .arg(channel ? channel->qlUsers.count() : 0)
+								 .arg(persistentTextAclChannelLabel(channel))
+						   : topic;
+}
+
 QString trimTrailingUrlPunctuation(QString url) {
 	while (!url.isEmpty()) {
 		const QChar last = url.back();
@@ -3186,18 +3443,10 @@ std::optional< PersistentChatPreviewEmbedTarget > tiktokEmbedTargetFromUrl(const
 
 	QUrl embedUrl(QStringLiteral("https://www.tiktok.com/player/v1/%1").arg(*postId));
 	QUrlQuery query;
-	query.addQueryItem(QStringLiteral("controls"), QStringLiteral("0"));
-	query.addQueryItem(QStringLiteral("progress_bar"), QStringLiteral("0"));
-	query.addQueryItem(QStringLiteral("play_button"), QStringLiteral("0"));
-	query.addQueryItem(QStringLiteral("volume_control"), QStringLiteral("0"));
-	query.addQueryItem(QStringLiteral("fullscreen_button"), QStringLiteral("0"));
-	query.addQueryItem(QStringLiteral("timestamp"), QStringLiteral("0"));
 	query.addQueryItem(QStringLiteral("autoplay"), QStringLiteral("0"));
 	query.addQueryItem(QStringLiteral("rel"), QStringLiteral("0"));
 	query.addQueryItem(QStringLiteral("music_info"), QStringLiteral("0"));
 	query.addQueryItem(QStringLiteral("description"), QStringLiteral("0"));
-	query.addQueryItem(QStringLiteral("closed_caption"), QStringLiteral("0"));
-	query.addQueryItem(QStringLiteral("native_context_menu"), QStringLiteral("0"));
 	embedUrl.setQuery(query);
 	return PersistentChatPreviewEmbedTarget { QStringLiteral("tiktok"), embedUrl, QStringLiteral("short") };
 }
@@ -3962,6 +4211,11 @@ QString playableAudioMimeForUrl(const QUrl &url, const QString &suggestedMime = 
 		return QStringLiteral("audio/mpeg");
 	}
 	return QString();
+}
+
+QString playableAudioMimeForReply(const QUrl &url, const QString &suggestedMime, const QString &replyMime) {
+	const QString fromReply = playableAudioMimeForUrl(url, replyMime);
+	return fromReply.isEmpty() ? playableAudioMimeForUrl(url, suggestedMime) : fromReply;
 }
 
 QUrl normalizedRemotePlayableMediaUrl(QUrl url) {
@@ -8315,6 +8569,26 @@ bool remotePlayableMediaBytesLookValid(const QByteArray &bytes, const QString &m
 	return normalizedMime.startsWith(QLatin1String("image/"));
 }
 
+bool remotePlayableAudioBytesLookValid(const QByteArray &bytes, const QString &mime) {
+	if (bytes.isEmpty()) {
+		return false;
+	}
+
+	const QString normalizedMime = normalizedPlayableMediaMime(mime);
+	if (normalizedMime == QLatin1String("audio/mp4") || normalizedMime == QLatin1String("audio/aac")) {
+		const QByteArray prefix = bytes.left(64);
+		return prefix.contains("ftyp") || prefix.contains("moov") || prefix.contains("mdat")
+			   || (bytes.size() >= 2 && static_cast< unsigned char >(bytes.at(0)) == 0xff
+				   && (static_cast< unsigned char >(bytes.at(1)) & 0xf0) == 0xf0);
+	}
+	if (normalizedMime == QLatin1String("audio/mpeg")) {
+		return bytes.startsWith("ID3")
+			   || (bytes.size() >= 2 && static_cast< unsigned char >(bytes.at(0)) == 0xff
+				   && (static_cast< unsigned char >(bytes.at(1)) & 0xe0) == 0xe0);
+	}
+	return false;
+}
+
 bool mp4BytesLikelyHaveAudioTrack(const QByteArray &bytes) {
 	return bytes.contains("soun") || bytes.contains("mp4a") || bytes.contains("Opus");
 }
@@ -8322,6 +8596,15 @@ bool mp4BytesLikelyHaveAudioTrack(const QByteArray &bytes) {
 QString playableMediaDataUrl(const QString &mime, const QByteArray &bytes) {
 	const QString normalizedMime = normalizedPlayableMediaMime(mime);
 	if (!isRemotePlayableMediaMime(normalizedMime) || bytes.isEmpty()) {
+		return QString();
+	}
+
+	return QString::fromLatin1("data:%1;base64,%2").arg(normalizedMime, QString::fromLatin1(bytes.toBase64()));
+}
+
+QString playableAudioDataUrl(const QString &mime, const QByteArray &bytes) {
+	const QString normalizedMime = normalizedPlayableMediaMime(mime);
+	if (!isRemotePlayableAudioMime(normalizedMime) || bytes.isEmpty()) {
 		return QString();
 	}
 
@@ -8803,6 +9086,7 @@ constexpr int PREVIEW_REQUEST_TIMEOUT_MSEC             = 8000;
 constexpr qint64 PREVIEW_MAX_PAGE_BYTES                = 512 * 1024;
 constexpr qint64 PREVIEW_MAX_IMAGE_BYTES               = 4 * 1024 * 1024;
 constexpr qint64 PREVIEW_MAX_MEDIA_CACHE_BYTES         = 24 * 1024 * 1024;
+constexpr qint64 PREVIEW_MAX_AUDIO_CACHE_BYTES         = 8 * 1024 * 1024;
 constexpr int PERSISTENT_CHAT_RESIZE_RENDER_DELAY_MSEC = 120;
 constexpr int PERSISTENT_CHAT_PREVIEW_SOURCE_WIDTH     = 640;
 constexpr int PERSISTENT_CHAT_PREVIEW_SOURCE_HEIGHT    = 480;
@@ -11232,6 +11516,14 @@ MainWindow::MainWindow(QWidget *p)
 	  m_userLocalVolumeSlider(make_qt_unique< UserLocalVolumeSlider >(this)),
 	  m_listenerVolumeController(make_qt_unique< ListenerVolumeController >(this)),
 	  m_listenerVolumeSlider(make_qt_unique< ListenerVolumeSlider >(*m_listenerVolumeController, this)) {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (qEnvironmentVariableIsSet("MUMBLE_MODERN_AUTOMATION_OFFSCREEN")) {
+		setAttribute(Qt::WA_ShowWithoutActivating, true);
+		setWindowFlag(Qt::WindowDoesNotAcceptFocus, true);
+		move(-32000, -32000);
+	}
+#endif
+
 	SvgIcon::addSvgPixmapsToIcon(qiIconMuteSelf, QLatin1String("skin:muted_self.svg"));
 	SvgIcon::addSvgPixmapsToIcon(qiIconMuteServer, QLatin1String("skin:muted_server.svg"));
 	SvgIcon::addSvgPixmapsToIcon(qiIconMuteSuppressed, QLatin1String("skin:muted_suppressed.svg"));
@@ -11290,6 +11582,12 @@ MainWindow::MainWindow(QWidget *p)
 	m_userTextureRequestTimer->setSingleShot(true);
 	m_userTextureRequestTimer->setObjectName(QLatin1String("UserTextureRequest"));
 	connect(m_userTextureRequestTimer, &QTimer::timeout, this, &MainWindow::flushUserTextureRequests);
+
+	m_userCommentRequestTimer = new QTimer(this);
+	m_userCommentRequestTimer->setInterval(UserCommentRequestCoalesceMs);
+	m_userCommentRequestTimer->setSingleShot(true);
+	m_userCommentRequestTimer->setObjectName(QLatin1String("UserCommentRequest"));
+	connect(m_userCommentRequestTimer, &QTimer::timeout, this, &MainWindow::flushUserCommentRequests);
 
 	qmUser     = new QMenu(tr("&User"), this);
 	qmChannel  = new QMenu(tr("&Channel"), this);
@@ -11385,8 +11683,11 @@ MainWindow::MainWindow(QWidget *p)
 	// Set up initial client side talking state without the need for the user to do anything.
 	// This will, for example, make sure the correct status tray icon is used on connect.
 	QObject::connect(this, &MainWindow::serverSynchronized, this, &MainWindow::userStateChanged);
+	QObject::connect(this, &MainWindow::serverSynchronized, this, &MainWindow::applyPendingUpdateResumeState);
 
 	QObject::connect(this, &MainWindow::channelStateChanged, this, &MainWindow::on_channelStateChanged);
+
+	loadPendingUpdateResumeState();
 
 	QAccessible::installFactory(AccessibleSlider::semanticSliderFactory);
 }
@@ -11542,6 +11843,31 @@ bool MainWindow::ensureUserTextureAvailable(ClientUser *user, UserTextureRequest
 	}
 
 	queueUserTextureRequest(user, user->qbaTextureHash);
+	return false;
+}
+
+bool MainWindow::ensureUserCommentAvailable(ClientUser *user) {
+	if (!user) {
+		return false;
+	}
+
+	if (!user->qsComment.isEmpty()) {
+		return true;
+	}
+
+	if (user->qbaCommentHash.isEmpty()) {
+		return false;
+	}
+
+	if (Global::get().db) {
+		const QByteArray cachedComment = Global::get().db->blob(user->qbaCommentHash);
+		if (!cachedComment.isEmpty()) {
+			user->qsComment = QString::fromUtf8(cachedComment);
+			return !user->qsComment.isEmpty();
+		}
+	}
+
+	queueUserCommentRequest(user, user->qbaCommentHash);
 	return false;
 }
 
@@ -11746,6 +12072,78 @@ void MainWindow::clearUserTextureRequests() {
 	m_inFlightUserTextureSessions.clear();
 	m_requestedUserTextureHashBySession.clear();
 	m_failedUserTextureHashCooldownUntilMs.clear();
+}
+
+void MainWindow::queueUserCommentRequest(ClientUser *user, const QByteArray &expectedHash) {
+	if (!user || expectedHash.isEmpty() || !Global::get().sh || !Global::get().sh->isRunning()) {
+		return;
+	}
+
+	const unsigned int session              = user->uiSession;
+	const QByteArray previousExpectedHash   = m_requestedUserCommentHashBySession.value(session);
+	const bool alreadyQueuedOrInFlight      = m_queuedUserCommentSessions.contains(session)
+										 || m_inFlightUserCommentSessions.contains(session);
+	if (alreadyQueuedOrInFlight && previousExpectedHash == expectedHash) {
+		return;
+	}
+
+	m_inFlightUserCommentSessions.remove(session);
+	m_queuedUserCommentSessions.insert(session);
+	m_requestedUserCommentHashBySession.insert(session, expectedHash);
+	if (m_userCommentRequestTimer && !m_userCommentRequestTimer->isActive()) {
+		m_userCommentRequestTimer->start();
+	}
+}
+
+void MainWindow::flushUserCommentRequests() {
+	if (!Global::get().sh || !Global::get().sh->isRunning()) {
+		clearUserCommentRequests();
+		return;
+	}
+
+	MumbleProto::RequestBlob request;
+	int requestCount                 = 0;
+	const QList< unsigned int > todo = m_queuedUserCommentSessions.values();
+	for (const unsigned int session : todo) {
+		if (requestCount >= UserCommentRequestMaxBatchSize) {
+			break;
+		}
+
+		ClientUser *user = ClientUser::get(session);
+		const QByteArray expectedHash = m_requestedUserCommentHashBySession.value(session);
+		if (!user || expectedHash.isEmpty() || user->qbaCommentHash != expectedHash || !user->qsComment.isEmpty()) {
+			clearUserCommentRequest(session);
+			continue;
+		}
+
+		m_queuedUserCommentSessions.remove(session);
+		m_inFlightUserCommentSessions.insert(session);
+		request.add_session_comment(session);
+		++requestCount;
+	}
+
+	if (requestCount > 0) {
+		Global::get().sh->sendMessage(request);
+	}
+
+	if (!m_queuedUserCommentSessions.isEmpty() && m_userCommentRequestTimer) {
+		m_userCommentRequestTimer->start();
+	}
+}
+
+void MainWindow::clearUserCommentRequest(unsigned int session) {
+	m_queuedUserCommentSessions.remove(session);
+	m_inFlightUserCommentSessions.remove(session);
+	m_requestedUserCommentHashBySession.remove(session);
+}
+
+void MainWindow::clearUserCommentRequests() {
+	if (m_userCommentRequestTimer) {
+		m_userCommentRequestTimer->stop();
+	}
+	m_queuedUserCommentSessions.clear();
+	m_inFlightUserCommentSessions.clear();
+	m_requestedUserCommentHashBySession.clear();
 }
 
 // Loading a state that was stored by a different version of Qt can lead to a crash.
@@ -13108,6 +13506,9 @@ void MainWindow::setupPersistentChatDock() {
 				if (const MumbleProto::ChatMessage *message =
 						findPersistentChatMessageByID(m_persistentChatMessages, messageID)) {
 					setPersistentChatReplyTarget(*message);
+					if (qteChat && qteChat->isEnabled()) {
+						qteChat->setFocus(Qt::MouseFocusReason);
+					}
 				}
 			});
 	connect(m_persistentChatHistoryDelegate, &PersistentChatHistoryDelegate::deleteRequested, this,
@@ -13226,8 +13627,12 @@ void MainWindow::setupPersistentChatDock() {
 
 						const std::size_t messageCount = guardedThis->m_persistentChatMessages.size();
 						const std::size_t beginIndex   = messageCount > 200 ? messageCount - 200 : 0;
-						const bool fastFirstPaint = shouldFastFirstPaintModernReset && messageCount > beginIndex;
 						const QString timelineMode = guardedThis->modernShellMessageTimelineMode(beginIndex);
+						const bool resetHasManyMessages = messageCount > beginIndex && (messageCount - beginIndex) >= 36;
+						const bool fastFirstPaint =
+							messageCount > beginIndex
+							&& (shouldFastFirstPaintModernReset || resetHasManyMessages
+								|| timelineMode == QLatin1String("linkDense"));
 						guardedThis->publishModernShellMessagesPatch(
 							QStringLiteral("messages.reset"),
 							guardedThis->buildModernShellMessageStates(
@@ -13411,6 +13816,16 @@ void MainWindow::activateModernShell() {
 				&MainWindow::handleModernShellMessageDelete);
 		connect(m_modernShellHost->bridge(), &ModernShellBridge::participantMessageRequested, this,
 				&MainWindow::handleModernShellParticipantMessage);
+		connect(m_modernShellHost->bridge(), &ModernShellBridge::directMessageOpenRequested, this,
+				&MainWindow::handleModernShellDirectMessageOpen);
+		connect(m_modernShellHost->bridge(), &ModernShellBridge::directMessageCloseRequested, this,
+				&MainWindow::handleModernShellDirectMessageClose);
+		connect(m_modernShellHost->bridge(), &ModernShellBridge::directMessageMarkReadRequested, this,
+				&MainWindow::handleModernShellDirectMessageMarkRead);
+		connect(m_modernShellHost->bridge(), &ModernShellBridge::directMessageSendRequested, this,
+				&MainWindow::handleModernShellDirectMessageSend);
+		connect(m_modernShellHost->bridge(), &ModernShellBridge::directMessageModeChangeRequested, this,
+				&MainWindow::handleModernShellDirectMessageModeChange);
 		connect(m_modernShellHost->bridge(), &ModernShellBridge::participantJoinRequested, this,
 				&MainWindow::handleModernShellParticipantJoin);
 		connect(m_modernShellHost->bridge(), &ModernShellBridge::participantMoveRequested, this,
@@ -13462,12 +13877,16 @@ void MainWindow::activateModernShell() {
 				});
 		connect(m_modernShellHost->bridge(), &ModernShellBridge::appActionRequested, this,
 				&MainWindow::handleModernShellAppAction);
+		connect(m_modernShellHost->bridge(), &ModernShellBridge::appActionPayloadRequested, this,
+				&MainWindow::handleModernShellAppActionPayload);
 		connect(m_modernShellHost->bridge(), &ModernShellBridge::layoutToggleRequested, this,
 				&MainWindow::togglePreferredModernShellLayout);
 		connect(m_modernShellHost->bridge(), &ModernShellBridge::messagePreviewHydrationRequested, this,
 				&MainWindow::handleModernShellPreviewHydrationRequest);
 		connect(m_modernShellHost->bridge(), &ModernShellBridge::financeQuoteLookupRequested, this,
 				&MainWindow::handleModernShellFinanceQuoteLookupRequest);
+		connect(m_modernShellHost->bridge(), &ModernShellBridge::financeChartLookupRequested, this,
+				&MainWindow::handleModernShellFinanceChartLookupRequest);
 		connect(m_modernShellHost->bridge(), &ModernShellBridge::bootReady, this, [this]() {
 			m_modernShellServerLogHtmlRevision = 0;
 			queueModernShellSnapshotSync();
@@ -13487,6 +13906,20 @@ void MainWindow::activateModernShell() {
 			return;
 		}
 		appendModernShellConnectTrace(QStringLiteral("activateModernShell start-ok"));
+		if (qEnvironmentVariableIsSet("MUMBLE_MODERN_AUTOMATION_PORT") && !m_modernUiAutomationServer) {
+			m_modernUiAutomationServer = std::make_unique< ModernUiAutomationServer >(this, this);
+			QString automationError;
+			if (m_modernUiAutomationServer->start(&automationError)) {
+				if (m_modernUiAutomationServer->isListening()) {
+					appendModernShellConnectTrace(QStringLiteral("activateModernShell automation-listening port=%1")
+													  .arg(m_modernUiAutomationServer->port()));
+				}
+			} else {
+				appendModernShellConnectTrace(
+					QStringLiteral("activateModernShell automation-failed error=%1").arg(automationError));
+				m_modernUiAutomationServer.reset();
+			}
+		}
 	}
 
 	if (centralWidget() != m_modernShellHost) {
@@ -13622,10 +14055,15 @@ namespace {
 		const QString normalized = pageName.trimmed();
 		return normalized.isEmpty() || normalized == QLatin1String("NetworkConfig")
 			   || normalized == QLatin1String("ScreenShareConfig") || normalized == QLatin1String("AudioInput")
-			   || normalized == QLatin1String("AudioOutput") || normalized == QLatin1String("network")
+			   || normalized == QLatin1String("AudioOutput") || normalized == QLatin1String("GlobalShortcutConfig")
+			   || normalized == QLatin1String("KeyBindings") || normalized == QLatin1String("network")
 			   || normalized == QLatin1String("screenShare") || normalized == QLatin1String("audio")
 			   || normalized == QLatin1String("audioInput") || normalized == QLatin1String("audioOutput")
-			   || normalized == QLatin1String("look");
+			   || normalized == QLatin1String("look") || normalized == QLatin1String("appearance")
+			   || normalized == QLatin1String("ui") || normalized == QLatin1String("UserInterface")
+			   || normalized == QLatin1String("messages") || normalized == QLatin1String("MessagesSounds")
+			   || normalized == QLatin1String("MessagesAndSounds") || normalized == QLatin1String("keys")
+			   || normalized == QLatin1String("about");
 	}
 
 	QVariantMap modernDialogAction(const QString &id, const QString &label, const bool enabled = true,
@@ -13741,6 +14179,15 @@ namespace {
 		QVariantMap field = modernDialogField(id, label, QStringLiteral("pathPicker"), value, enabled);
 		field.insert(QStringLiteral("browseActionId"), browseActionID);
 		field.insert(QStringLiteral("browseLabel"), browseLabel);
+		return field;
+	}
+
+	QVariantMap modernImagePickerField(const QString &id, const QString &label, const QString &value,
+									   const QString &hint = QString(), const bool enabled = true) {
+		QVariantMap field = modernDialogField(id, label, QStringLiteral("imagePicker"), value, enabled);
+		if (!hint.isEmpty()) {
+			field.insert(QStringLiteral("hint"), hint);
+		}
 		return field;
 	}
 
@@ -13979,6 +14426,102 @@ namespace {
 		return trimmed.isEmpty() ? QObject::tr("Unknown") : trimmed;
 	}
 
+	int modernUpdateJsonInt(const QJsonObject &object, const QString &key, const int fallback = -1) {
+		const QJsonValue value = object.value(key);
+		if (value.isDouble()) {
+			return value.toInt(fallback);
+		}
+		if (value.isString()) {
+			bool ok = false;
+			const int parsed = value.toString().trimmed().toInt(&ok);
+			if (ok) {
+				return parsed;
+			}
+		}
+		return fallback;
+	}
+
+	QUrl modernUpdateJsonUrl(const QJsonObject &object, const QString &key) {
+		const QUrl url(object.value(key).toString().trimmed());
+		return url.isValid() ? url : QUrl();
+	}
+
+	QString modernUpdateLatestLabel(const QJsonObject &info) {
+		const QString version = info.value(QStringLiteral("version")).toString().trimmed();
+		const int build       = modernUpdateJsonInt(info, QStringLiteral("build"));
+		if (!version.isEmpty() && build >= 0) {
+			return QObject::tr("%1, build %2").arg(version).arg(build);
+		}
+		if (!version.isEmpty()) {
+			return version;
+		}
+		if (build >= 0) {
+			return QObject::tr("build %1").arg(build);
+		}
+		return QObject::tr("Latest release");
+	}
+
+	QString modernUpdateAnnouncementText(const QJsonObject &info) {
+		const QString announcement = info.value(QStringLiteral("announcement")).toString().trimmed();
+		return announcement.isEmpty() ? QObject::tr("Download the newest installer when you are ready to update.")
+									  : announcement;
+	}
+
+	QString modernUpdateReleaseNotesText(const QJsonObject &info) {
+		QStringList sections;
+		const QString releaseNotes = info.value(QStringLiteral("releaseNotes")).toString().trimmed();
+		const QString notes        = info.value(QStringLiteral("notes")).toString().trimmed();
+		const QString changelog    = info.value(QStringLiteral("changelog")).toString().trimmed();
+		if (!releaseNotes.isEmpty()) {
+			sections << releaseNotes;
+		}
+		if (!notes.isEmpty() && notes != releaseNotes) {
+			sections << notes;
+		}
+		if (!changelog.isEmpty() && changelog != releaseNotes && changelog != notes) {
+			sections << changelog;
+		}
+		return sections.join(QStringLiteral("\n\n"));
+	}
+
+	QString modernUpdatePublishedLabel(const QJsonObject &info) {
+		const QString published = info.value(QStringLiteral("publishedAt")).toString().trimmed();
+		if (published.isEmpty()) {
+			return QObject::tr("Unknown");
+		}
+		const QDateTime parsed = QDateTime::fromString(published, Qt::ISODate);
+		return parsed.isValid() ? QLocale().toString(parsed.toLocalTime(), QLocale::ShortFormat) : published;
+	}
+
+	QString repairedUtf8Mojibake(const QString &text) {
+		if (!text.contains(QChar(0x00c3)) && !text.contains(QChar(0x00c2))) {
+			return text;
+		}
+
+		const QByteArray latin1Bytes = text.toLatin1();
+		const QString repaired       = QString::fromUtf8(latin1Bytes);
+		if (repaired.isEmpty() || repaired.contains(QChar(0xfffd))) {
+			return text;
+		}
+
+		const int before = text.count(QChar(0x00c3)) + text.count(QChar(0x00c2));
+		const int after  = repaired.count(QChar(0x00c3)) + repaired.count(QChar(0x00c2));
+		return after < before ? repaired : text;
+	}
+
+	QString certificateInfoValues(const QStringList &values) {
+		if (values.isEmpty()) {
+			return QString();
+		}
+
+		QStringList displayValues;
+		displayValues.reserve(values.size());
+		for (const QString &value : values) {
+			displayValues.push_back(repairedUtf8Mojibake(value));
+		}
+		return displayValues.join(QStringLiteral(", "));
+	}
+
 	QString yesNoText(const bool value) {
 		return value ? QObject::tr("Yes") : QObject::tr("No");
 	}
@@ -14046,12 +14589,12 @@ namespace {
 
 	QString certificateSubjectValue(const QSslCertificate &cert, const QSslCertificate::SubjectInfo subject) {
 		const QStringList values = cert.subjectInfo(subject);
-		return values.isEmpty() ? QString() : values.join(QStringLiteral(", "));
+		return certificateInfoValues(values);
 	}
 
 	QString certificateIssuerValue(const QSslCertificate &cert, const QSslCertificate::SubjectInfo subject) {
 		const QStringList values = cert.issuerInfo(subject);
-		return values.isEmpty() ? QString() : values.join(QStringLiteral(", "));
+		return certificateInfoValues(values);
 	}
 
 	QVariantList modernCertificateFields(const Settings::KeyPair &keyPair) {
@@ -14558,6 +15101,70 @@ namespace {
 		return true;
 	}
 
+	QVariantMap modernAclDialogForChannel(Channel *channel, const QVariantMap &aclModel,
+										  const QVariantMap &fieldValues = QVariantMap(),
+										  const QVariantMap &errors = QVariantMap(),
+										  const QString &subtitleOverride = QString()) {
+		const unsigned int channelID =
+			channel ? channel->iId : aclModel.value(QStringLiteral("channelId")).toUInt();
+		const QString channelName = channel ? channel->qsName : QObject::tr("Room %1").arg(channelID);
+		const bool isRootChannel  = channelID == Mumble::ROOT_CHANNEL_ID;
+		const bool supportsVoiceMaxUsers =
+			Global::get().sh && Global::get().sh->m_version >= Version::fromComponents(1, 3, 0);
+		const auto valueOrDefault = [&fieldValues](const QString &key, const QVariant &fallback) {
+			return fieldValues.contains(key) ? fieldValues.value(key) : fallback;
+		};
+
+		QVariantList roomFields {
+			modernHiddenField(QStringLiteral("channel.id"), static_cast< int >(channelID)),
+			modernDialogField(QStringLiteral("channel.name"), QObject::tr("Name"), QStringLiteral("text"),
+							  valueOrDefault(QStringLiteral("channel.name"), channel ? channel->qsName : QString()),
+							  !isRootChannel),
+			modernTextareaField(
+				QStringLiteral("channel.description"), QObject::tr("Topic"),
+				valueOrDefault(QStringLiteral("channel.description"), channel ? channel->qsDesc : QString()).toString(),
+				4),
+			modernDialogField(
+				QStringLiteral("channel.position"), QObject::tr("Order"), QStringLiteral("number"),
+				valueOrDefault(QStringLiteral("channel.position"), channel ? channel->iPosition : 0))
+		};
+		if (supportsVoiceMaxUsers) {
+			roomFields.push_back(modernDialogField(
+				QStringLiteral("channel.maxUsers"), QObject::tr("Max users"), QStringLiteral("number"),
+				valueOrDefault(QStringLiteral("channel.maxUsers"),
+							   channel ? static_cast< int >(channel->uiMaxUsers) : 0)));
+		}
+
+		const QString subtitle =
+			subtitleOverride.trimmed().isEmpty()
+				? QObject::tr("Edit details, access rules, and groups for %1. Room ID %2.")
+					  .arg(channelName)
+					  .arg(channelID)
+				: subtitleOverride;
+		QVariantMap dialog = modernDialogDto(
+			QStringLiteral("acl"), QStringLiteral("form"), QObject::tr("Edit room"), subtitle,
+			QVariantList {
+				modernDialogSection(QObject::tr("Room details"), roomFields),
+				modernDialogSection(QObject::tr("Access control"),
+									QVariantList { modernAclEditorField(QStringLiteral("acl.model"),
+																		QObject::tr("Rules and groups"),
+																		aclModel) }) },
+			QVariantList { modernDialogAction(QStringLiteral("cancel"), QObject::tr("Cancel"), true, QString(), true),
+						   modernDialogAction(QStringLiteral("saveAcl"), QObject::tr("Save room"), true,
+											  QStringLiteral("accent")) },
+			QStringLiteral("saveAcl"), QSize(1040, 780));
+		dialog.insert(QStringLiteral("highlights"),
+					  QVariantList { modernDialogHighlight(QObject::tr("Room"), channelName),
+									 modernDialogHighlight(QObject::tr("Rules"),
+														   aclModel.value(QStringLiteral("acls")).toList().size()),
+									 modernDialogHighlight(QObject::tr("Groups"),
+														   aclModel.value(QStringLiteral("groups")).toList().size()) });
+		if (!errors.isEmpty()) {
+			dialog.insert(QStringLiteral("errors"), errors);
+		}
+		return dialog;
+	}
+
 	QString secondsToShortString(unsigned int secs) {
 		QStringList parts;
 		const unsigned int weeks = secs / (60 * 60 * 24 * 7);
@@ -14599,6 +15206,19 @@ namespace {
 		tokens.removeDuplicates();
 		tokens.sort();
 		return tokens;
+	}
+
+	std::optional< unsigned int > unsignedIDFromPayload(const QVariantMap &payload, const QString &key) {
+		if (!payload.contains(key)) {
+			return std::nullopt;
+		}
+
+		bool ok = false;
+		const unsigned int value = payload.value(key).toUInt(&ok);
+		if (!ok) {
+			return std::nullopt;
+		}
+		return value;
 	}
 
 	std::optional< unsigned int > modernDialogIDValue(const QString &dialogID, const QString &prefix) {
@@ -14712,12 +15332,18 @@ namespace {
 		dto.insert(QStringLiteral("userName"), row.has_user_name() ? u8(row.user_name()) : QString());
 		dto.insert(QStringLiteral("period"), row.has_period() ? u8(row.period()) : QStringLiteral("30d"));
 		dto.insert(QStringLiteral("returnPercent"), row.has_return_percent() ? row.return_percent() : 0.0);
-		dto.insert(QStringLiteral("startValue"), row.has_start_value() ? row.start_value() : 0.0);
-		dto.insert(QStringLiteral("endValue"), row.has_end_value() ? row.end_value() : 0.0);
-		dto.insert(QStringLiteral("startSnapshotAt"),
-				   row.has_start_snapshot_at() ? QVariant::fromValue< qulonglong >(row.start_snapshot_at()) : QVariant());
-		dto.insert(QStringLiteral("endSnapshotAt"),
-				   row.has_end_snapshot_at() ? QVariant::fromValue< qulonglong >(row.end_snapshot_at()) : QVariant());
+		if (row.has_start_value()) {
+			dto.insert(QStringLiteral("startValue"), row.start_value());
+		}
+		if (row.has_end_value()) {
+			dto.insert(QStringLiteral("endValue"), row.end_value());
+		}
+		if (row.has_start_snapshot_at()) {
+			dto.insert(QStringLiteral("startSnapshotAt"), QVariant::fromValue< qulonglong >(row.start_snapshot_at()));
+		}
+		if (row.has_end_snapshot_at()) {
+			dto.insert(QStringLiteral("endSnapshotAt"), QVariant::fromValue< qulonglong >(row.end_snapshot_at()));
+		}
 		dto.insert(QStringLiteral("followed"), row.has_followed() && row.followed());
 		dto.insert(QStringLiteral("insufficientHistory"), row.has_insufficient_history() && row.insufficient_history());
 		return dto;
@@ -14753,6 +15379,129 @@ namespace {
 		return dto;
 	}
 
+	QVariantMap stonksPinnedTickerDto(const MumbleProto::StonksPinnedTicker &ticker) {
+		QVariantMap dto;
+		dto.insert(QStringLiteral("symbol"), u8(ticker.symbol()));
+		dto.insert(QStringLiteral("displayName"), ticker.has_display_name() ? u8(ticker.display_name()) : QString());
+		dto.insert(QStringLiteral("providerId"), ticker.has_provider_id() ? u8(ticker.provider_id()) : QString());
+		dto.insert(QStringLiteral("providerSymbol"),
+				   ticker.has_provider_symbol() ? u8(ticker.provider_symbol()) : QString());
+		dto.insert(QStringLiteral("exchange"), ticker.has_exchange() ? u8(ticker.exchange()) : QString());
+		dto.insert(QStringLiteral("quoteSourceUrl"),
+				   ticker.has_quote_source_url() ? u8(ticker.quote_source_url()) : QString());
+		dto.insert(QStringLiteral("displayOrder"), ticker.has_display_order() ? ticker.display_order() : 0u);
+		dto.insert(QStringLiteral("createdAt"),
+				   ticker.has_created_at() ? QVariant::fromValue< qulonglong >(ticker.created_at()) : QVariant());
+		dto.insert(QStringLiteral("updatedAt"),
+				   ticker.has_updated_at() ? QVariant::fromValue< qulonglong >(ticker.updated_at()) : QVariant());
+		return dto;
+	}
+
+	QVariantMap stonksFeedPreferencesDto(const MumbleProto::StonksFeedPreferences &preferences) {
+		QVariantMap dto;
+		dto.insert(QStringLiteral("showMine"), !preferences.has_show_mine() || preferences.show_mine());
+		dto.insert(QStringLiteral("showPopular"), !preferences.has_show_popular() || preferences.show_popular());
+		dto.insert(QStringLiteral("showPins"), !preferences.has_show_pins() || preferences.show_pins());
+		dto.insert(QStringLiteral("updatedAt"),
+				   preferences.has_updated_at() ? QVariant::fromValue< qulonglong >(preferences.updated_at())
+												: QVariant());
+		return dto;
+	}
+
+	QVariantList financeChartPointDtos(const QList< Mumble::Finance::YahooChartQuote::Point > &points) {
+		QVariantList dto;
+		for (const Mumble::Finance::YahooChartQuote::Point &point : points) {
+			if (point.timestamp <= 0 || !std::isfinite(point.close) || point.close <= 0.0) {
+				continue;
+			}
+			QVariantMap item;
+			item.insert(QStringLiteral("timestamp"), QVariant::fromValue< qulonglong >(
+														 static_cast< qulonglong >(point.timestamp)));
+			item.insert(QStringLiteral("close"), point.close);
+			dto.push_back(item);
+		}
+		return dto;
+	}
+
+	bool modernFinanceChartWindowAllowed(const QString &range, const QString &interval) {
+		const QString normalizedRange    = range.trimmed().toLower();
+		const QString normalizedInterval = interval.trimmed().toLower();
+		return (normalizedRange == QLatin1String("1d") && normalizedInterval == QLatin1String("5m"))
+			   || (normalizedRange == QLatin1String("5d") && normalizedInterval == QLatin1String("15m"))
+			   || (normalizedRange == QLatin1String("1mo") && normalizedInterval == QLatin1String("1d"))
+			   || (normalizedRange == QLatin1String("6mo") && normalizedInterval == QLatin1String("1d"))
+			   || (normalizedRange == QLatin1String("1y") && normalizedInterval == QLatin1String("1d"));
+	}
+
+	QString normalizedModernShellTheme(const QString &value) {
+		const QString normalized = value.trimmed().toLower();
+		static const QSet< QString > allowed { QStringLiteral("dark"), QStringLiteral("light"),
+											   QStringLiteral("mocha"), QStringLiteral("macchiato"),
+											   QStringLiteral("frappe"), QStringLiteral("latte"),
+											   QStringLiteral("nord"), QStringLiteral("gruvbox") };
+		return allowed.contains(normalized) ? normalized : QStringLiteral("dark");
+	}
+
+	QString normalizedModernShellDensity(const QString &value) {
+		const QString normalized = value.trimmed().toLower();
+		static const QSet< QString > allowed { QStringLiteral("compact"), QStringLiteral("comfortable"),
+											   QStringLiteral("spacious") };
+		return allowed.contains(normalized) ? normalized : QStringLiteral("comfortable");
+	}
+
+	QString normalizedModernShellRailSide(const QString &value) {
+		const QString normalized = value.trimmed().toLower();
+		return normalized == QLatin1String("left") || normalized == QLatin1String("right")
+				   ? normalized
+				   : QStringLiteral("right");
+	}
+
+	QString normalizedModernShellAccent(const QString &value) {
+		const QString normalized = value.trimmed().toLower();
+		static const QSet< QString > allowed { QStringLiteral("auto"), QStringLiteral("teal"),
+											   QStringLiteral("blue"), QStringLiteral("violet"),
+											   QStringLiteral("amber"), QStringLiteral("rose") };
+		return allowed.contains(normalized) ? normalized : QStringLiteral("auto");
+	}
+
+	QVariantMap modernShellAccentDto(const QString &accent) {
+		QVariantMap dto;
+		const QString normalized = normalizedModernShellAccent(accent);
+		dto.insert(QStringLiteral("id"), normalized);
+		if (normalized == QLatin1String("teal")) {
+			dto.insert(QStringLiteral("h"), 172);
+			dto.insert(QStringLiteral("c"), 0.085);
+		} else if (normalized == QLatin1String("blue")) {
+			dto.insert(QStringLiteral("h"), 245);
+			dto.insert(QStringLiteral("c"), 0.09);
+		} else if (normalized == QLatin1String("violet")) {
+			dto.insert(QStringLiteral("h"), 300);
+			dto.insert(QStringLiteral("c"), 0.09);
+		} else if (normalized == QLatin1String("amber")) {
+			dto.insert(QStringLiteral("h"), 70);
+			dto.insert(QStringLiteral("c"), 0.1);
+		} else if (normalized == QLatin1String("rose")) {
+			dto.insert(QStringLiteral("h"), 18);
+			dto.insert(QStringLiteral("c"), 0.1);
+		}
+		return dto;
+	}
+
+	QVariantMap modernShellUiTweaksDto(const Settings &settings) {
+		const QString accent = normalizedModernShellAccent(settings.qsModernShellAccent);
+		QVariantMap dto;
+		dto.insert(QStringLiteral("theme"), normalizedModernShellTheme(settings.qsModernShellTheme));
+		dto.insert(QStringLiteral("density"), normalizedModernShellDensity(settings.qsModernShellDensity));
+		dto.insert(QStringLiteral("userIcons"),
+				   settings.bModernShellClassicUserIcons ? QStringLiteral("classic") : QStringLiteral("avatars"));
+		dto.insert(QStringLiteral("classicUserIcons"), settings.bModernShellClassicUserIcons);
+		dto.insert(QStringLiteral("railSide"), normalizedModernShellRailSide(settings.qsModernShellRailSide));
+		dto.insert(QStringLiteral("accent"), accent);
+		dto.insert(QStringLiteral("accentDetails"), modernShellAccentDto(accent));
+		dto.insert(QStringLiteral("tickerBannerAlwaysScroll"), settings.bModernShellTickerBannerAlwaysScroll);
+		return dto;
+	}
+
 	QVariantMap stonksTextChannelDto(const MumbleProto::TextChannelInfo &channel) {
 		QVariantMap dto;
 		dto.insert(QStringLiteral("textChannelId"), channel.has_text_channel_id() ? channel.text_channel_id() : 0u);
@@ -14782,8 +15531,9 @@ namespace {
 				   state.has_leaderboard_updated_at()
 					   ? QVariant::fromValue< qulonglong >(state.leaderboard_updated_at())
 					   : QVariant());
-		dto.insert(QStringLiteral("selectedUserId"),
-				   state.has_selected_user_id() ? state.selected_user_id() : 0u);
+		if (state.has_selected_user_id()) {
+			dto.insert(QStringLiteral("selectedUserId"), state.selected_user_id());
+		}
 		dto.insert(QStringLiteral("selectedUserName"),
 				   state.has_selected_user_name() ? u8(state.selected_user_name()) : QString());
 
@@ -14829,12 +15579,32 @@ namespace {
 		}
 		dto.insert(QStringLiteral("personalTickers"), personalTickers);
 
+		QVariantList pinnedTickers;
+		for (int i = 0; i < state.pinned_tickers_size(); ++i) {
+			pinnedTickers.push_back(stonksPinnedTickerDto(state.pinned_tickers(i)));
+		}
+		dto.insert(QStringLiteral("pinnedTickers"), pinnedTickers);
+		if (state.has_feed_preferences()) {
+			dto.insert(QStringLiteral("feedPreferences"), stonksFeedPreferencesDto(state.feed_preferences()));
+		} else {
+			MumbleProto::StonksFeedPreferences defaultPreferences;
+			dto.insert(QStringLiteral("feedPreferences"), stonksFeedPreferencesDto(defaultPreferences));
+		}
+
 		QVariantList textChannels;
 		for (int i = 0; i < state.text_channels_size(); ++i) {
 			textChannels.push_back(stonksTextChannelDto(state.text_channels(i)));
 		}
 		dto.insert(QStringLiteral("textChannels"), textChannels);
 		return dto;
+	}
+
+	bool modernDialogWindowHostEnabled() {
+		if (!qEnvironmentVariableIsSet("MUMBLE_MODERN_DIALOG_WINDOW_HOST")) {
+			return true;
+		}
+
+		return qEnvironmentVariableIntValue("MUMBLE_MODERN_DIALOG_WINDOW_HOST") != 0;
 	}
 } // namespace
 
@@ -14847,8 +15617,9 @@ void MainWindow::publishModernDialogState(const QVariantMap &state) {
 		return;
 	}
 
-	if (state.value(QStringLiteral("open")).toBool() && !m_modernDialogHost) {
-		m_modernDialogHost = std::make_unique< ModernDialogHost >(m_modernShellHost->bridge(), this);
+	const bool useWindowDialogHost = modernDialogWindowHostEnabled();
+	if (useWindowDialogHost && state.value(QStringLiteral("open")).toBool() && !m_modernDialogHost) {
+		m_modernDialogHost = std::make_unique< ModernDialogHost >(m_modernShellHost->bridge());
 		connect(m_modernDialogHost.get(), &ModernDialogHost::nativeCloseRequested, this,
 				&MainWindow::handleModernDialogClose);
 		connect(m_modernDialogHost.get(), &ModernDialogHost::hostFailed, this, [this](const QString &reason) {
@@ -14858,11 +15629,27 @@ void MainWindow::publishModernDialogState(const QVariantMap &state) {
 		});
 	}
 
-	m_modernShellHost->bridge()->publishModernDialogState(state);
+	QVariantMap publishedState = state;
+	if (useWindowDialogHost && publishedState.value(QStringLiteral("open")).toBool()) {
+		publishedState.insert(QStringLiteral("host"), QStringLiteral("window"));
+	}
+	if (publishedState.value(QStringLiteral("open")).toBool()
+		&& !publishedState.contains(QStringLiteral("uiTweaks"))) {
+		publishedState.insert(QStringLiteral("uiTweaks"), modernShellUiTweaksDto(Global::get().s));
+	}
+
+	m_modernShellHost->bridge()->publishModernDialogState(publishedState);
+
+	if (!useWindowDialogHost) {
+		if (m_modernDialogHost) {
+			m_modernDialogHost->hideDialog();
+		}
+		return;
+	}
 
 	if (m_modernDialogHost) {
 		QString errorMessage;
-		if (!m_modernDialogHost->showDialogState(state, &errorMessage) && !errorMessage.trimmed().isEmpty()) {
+		if (!m_modernDialogHost->showDialogState(publishedState, &errorMessage) && !errorMessage.trimmed().isEmpty()) {
 			msgBox(errorMessage);
 		}
 	}
@@ -15275,12 +16062,151 @@ void MainWindow::handleModernShellFinanceQuoteLookupRequest(const QString &reque
 					result.insert(QStringLiteral("quoteSourceUrl"),
 								  sourceURL.isValid() ? sourceURL.toString(QUrl::FullyEncoded) : QString());
 					result.insert(QStringLiteral("quoteConfidence"), 1.0);
+					result.insert(QStringLiteral("chartPoints"), financeChartPointDtos(quote->points));
 
 					publishResult(result);
 				});
 	};
 
 	(*fetchQuote)(0);
+}
+
+void MainWindow::handleModernShellFinanceChartLookupRequest(const QString &requestID, const QString &symbol,
+															const QString &range, const QString &interval) {
+	QVariantMap result;
+	result.insert(QStringLiteral("requestId"), requestID);
+	result.insert(QStringLiteral("query"), symbol);
+	result.insert(QStringLiteral("range"), range);
+	result.insert(QStringLiteral("interval"), interval);
+
+	const auto publishResult = [this](const QVariantMap &payload) {
+		if (m_modernShellHost && m_modernShellHost->bridge()) {
+			m_modernShellHost->bridge()->publishFinanceChartResult(payload);
+		}
+	};
+
+	const QString normalizedSymbol = Mumble::Finance::normalizeTickerSymbol(symbol);
+	const QString normalizedRange = range.trimmed().toLower();
+	const QString normalizedInterval = interval.trimmed().toLower();
+	if (requestID.trimmed().isEmpty() || normalizedSymbol.isEmpty()) {
+		result.insert(QStringLiteral("ok"), false);
+		result.insert(QStringLiteral("error"), tr("Enter a valid ticker symbol."));
+		publishResult(result);
+		return;
+	}
+	if (!modernFinanceChartWindowAllowed(normalizedRange, normalizedInterval)) {
+		result.insert(QStringLiteral("ok"), false);
+		result.insert(QStringLiteral("error"), tr("Unsupported chart range."));
+		publishResult(result);
+		return;
+	}
+	if (!Global::get().nam) {
+		result.insert(QStringLiteral("ok"), false);
+		result.insert(QStringLiteral("error"), tr("Chart lookup is not available right now."));
+		publishResult(result);
+		return;
+	}
+
+	auto symbolCandidates = std::make_shared< QList< QString > >(
+		Mumble::Finance::yahooFinanceSymbolCandidates(normalizedSymbol));
+	if (symbolCandidates->isEmpty()) {
+		result.insert(QStringLiteral("ok"), false);
+		result.insert(QStringLiteral("error"), tr("Enter a valid ticker symbol."));
+		publishResult(result);
+		return;
+	}
+
+	auto lastError = std::make_shared< QString >();
+	auto fetchChart = std::make_shared< std::function< void(int) > >();
+	*fetchChart = [this, requestID, symbol, normalizedSymbol, normalizedRange, normalizedInterval, symbolCandidates,
+				   lastError, fetchChart, publishResult](int symbolIndex) {
+		if (symbolIndex < 0 || symbolIndex >= symbolCandidates->size()) {
+			QVariantMap result;
+			result.insert(QStringLiteral("requestId"), requestID);
+			result.insert(QStringLiteral("query"), symbol);
+			result.insert(QStringLiteral("range"), normalizedRange);
+			result.insert(QStringLiteral("interval"), normalizedInterval);
+			result.insert(QStringLiteral("ok"), false);
+			result.insert(QStringLiteral("error"),
+						  lastError->trimmed().isEmpty() ? tr("Yahoo did not return usable chart data.")
+														 : lastError->trimmed());
+			publishResult(result);
+			return;
+		}
+
+		const QUrl chartURL = Mumble::Finance::yahooFinanceChartUrl(symbolCandidates->at(symbolIndex),
+																	normalizedRange, normalizedInterval);
+		if (!chartURL.isValid() || !isSafePreviewTarget(chartURL)) {
+			*lastError = tr("Chart provider URL was rejected.");
+			(*fetchChart)(symbolIndex + 1);
+			return;
+		}
+
+		QNetworkRequest request(chartURL);
+		preparePreviewRequest(request);
+		request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
+		QNetworkReply *reply = Global::get().nam->get(request);
+		applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
+		connect(reply, &QNetworkReply::finished, this,
+				[this, reply, requestID, symbol, normalizedSymbol, normalizedRange, normalizedInterval, symbolIndex,
+				 symbolCandidates, lastError, fetchChart, publishResult]() {
+					QVariantMap result;
+					result.insert(QStringLiteral("requestId"), requestID);
+					result.insert(QStringLiteral("query"), symbol);
+					result.insert(QStringLiteral("range"), normalizedRange);
+					result.insert(QStringLiteral("interval"), normalizedInterval);
+
+					const QByteArray data     = reply->readAll();
+					const bool success        = reply->error() == QNetworkReply::NoError;
+					const QString networkError = reply->errorString();
+					reply->deleteLater();
+
+					if (!success || data.isEmpty()) {
+						*lastError = networkError.trimmed().isEmpty() ? tr("Chart lookup failed.") : networkError;
+						(*fetchChart)(symbolIndex + 1);
+						return;
+					}
+
+					QString parseError;
+					const std::optional< Mumble::Finance::YahooChartQuote > quote =
+						Mumble::Finance::parseYahooChartQuote(data, &parseError);
+					if (!quote) {
+						*lastError =
+							parseError.trimmed().isEmpty() ? tr("Yahoo did not return usable chart data.") : parseError;
+						(*fetchChart)(symbolIndex + 1);
+						return;
+					}
+
+					const QVariantList chartPoints = financeChartPointDtos(quote->points);
+					if (chartPoints.isEmpty()) {
+						*lastError = tr("Yahoo did not return usable chart points.");
+						(*fetchChart)(symbolIndex + 1);
+						return;
+					}
+
+					const QString quoteSymbol = Mumble::Finance::normalizeTickerSymbol(
+						quote->symbol.trimmed().isEmpty() ? normalizedSymbol : quote->symbol);
+					const QUrl sourceURL = Mumble::Finance::yahooFinanceQuoteUrl(quoteSymbol);
+					result.insert(QStringLiteral("ok"), true);
+					result.insert(QStringLiteral("providerId"), QStringLiteral("yahoo-finance"));
+					result.insert(QStringLiteral("symbol"), quoteSymbol.isEmpty() ? normalizedSymbol : quoteSymbol);
+					result.insert(QStringLiteral("providerSymbol"), quoteSymbol.isEmpty() ? normalizedSymbol : quoteSymbol);
+					result.insert(QStringLiteral("displayName"),
+								  !quote->shortName.trimmed().isEmpty() ? quote->shortName.trimmed()
+																		 : quote->longName.trimmed());
+					result.insert(QStringLiteral("exchange"),
+								  !quote->fullExchangeName.trimmed().isEmpty() ? quote->fullExchangeName.trimmed()
+																				: quote->exchangeName.trimmed());
+					result.insert(QStringLiteral("currency"),
+								  quote->currency.trimmed().isEmpty() ? QStringLiteral("USD") : quote->currency.trimmed());
+					result.insert(QStringLiteral("quoteSourceUrl"),
+								  sourceURL.isValid() ? sourceURL.toString(QUrl::FullyEncoded) : QString());
+					result.insert(QStringLiteral("chartPoints"), chartPoints);
+					publishResult(result);
+				});
+	};
+
+	(*fetchChart)(0);
 }
 
 QVariantMap MainWindow::buildModernStonksDialog() const {
@@ -15299,29 +16225,37 @@ QVariantMap MainWindow::buildModernStonksDialog() const {
 		state.insert(QStringLiteral("users"), QVariantList());
 		state.insert(QStringLiteral("popularTickers"), QVariantList());
 		state.insert(QStringLiteral("personalTickers"), QVariantList());
+		state.insert(QStringLiteral("pinnedTickers"), QVariantList());
+		QVariantMap defaultFeedPreferences;
+		defaultFeedPreferences.insert(QStringLiteral("showMine"), true);
+		defaultFeedPreferences.insert(QStringLiteral("showPopular"), true);
+		defaultFeedPreferences.insert(QStringLiteral("showPins"), true);
+		state.insert(QStringLiteral("feedPreferences"), defaultFeedPreferences);
 		state.insert(QStringLiteral("textChannels"), QVariantList());
-		state.insert(QStringLiteral("selectedUserId"), m_stonksSelectedUserID);
+		if (m_stonksSelectedUserID) {
+			state.insert(QStringLiteral("selectedUserId"), *m_stonksSelectedUserID);
+		}
 		state.insert(QStringLiteral("selectedUserName"), QString());
 	}
 	state.insert(QStringLiteral("feature"), stonksHeaderState());
 
 	QVariantMap dialog = modernDialogDto(
 		QStringLiteral("stonks"), QStringLiteral("stonks"), tr("Stonks"),
-		tr("Portfolio, leaderboard, following, and server settings."),
+		tr("Ledger, leaderboard, following, and server settings."),
 		QVariantList(), QVariantList(), QStringLiteral("close"), QSize(1120, 760));
 	dialog.insert(QStringLiteral("stonks"), state);
 	dialog.insert(QStringLiteral("tone"), QStringLiteral("wide"));
 	return dialog;
 }
 
-void MainWindow::requestStonksState(const QString &period, unsigned int userID) {
+void MainWindow::requestStonksState(const QString &period, std::optional< unsigned int > userID) {
 	const QString selectedPeriod = period.trimmed().isEmpty()
 									   ? (m_stonksSelectedPeriod.trimmed().isEmpty() ? QStringLiteral("30d")
 																					: m_stonksSelectedPeriod)
 									   : period.trimmed().toLower();
 	m_stonksSelectedPeriod = selectedPeriod;
-	if (userID > 0 || m_stonksSelectedUserID > 0) {
-		m_stonksSelectedUserID = userID > 0 ? userID : m_stonksSelectedUserID;
+	if (userID) {
+		m_stonksSelectedUserID = userID;
 	}
 	if (!Global::get().sh || !Global::get().sh->isRunning()) {
 		return;
@@ -15330,8 +16264,8 @@ void MainWindow::requestStonksState(const QString &period, unsigned int userID) 
 	MumbleProto::StonksRequest request;
 	request.set_period(u8(selectedPeriod));
 	request.set_include_positions(true);
-	if (m_stonksSelectedUserID > 0) {
-		request.set_user_id(m_stonksSelectedUserID);
+	if (m_stonksSelectedUserID) {
+		request.set_user_id(*m_stonksSelectedUserID);
 	}
 	Global::get().sh->sendMessage(request);
 }
@@ -15356,7 +16290,18 @@ void MainWindow::openModernStonksDialog() {
 void MainWindow::handleStonksState(const MumbleProto::StonksState &state) {
 	m_stonksState          = stonksStateDto(state);
 	m_stonksSelectedPeriod = m_stonksState.value(QStringLiteral("selectedPeriod"), QStringLiteral("30d")).toString();
-	m_stonksSelectedUserID = m_stonksState.value(QStringLiteral("selectedUserId")).toUInt();
+	if (m_stonksState.contains(QStringLiteral("selectedUserId"))) {
+		m_stonksSelectedUserID = m_stonksState.value(QStringLiteral("selectedUserId")).toUInt();
+	} else {
+		m_stonksSelectedUserID.reset();
+	}
+	const QString stonksError  = m_stonksState.value(QStringLiteral("error")).toString().trimmed();
+	const QString stonksStatus = m_stonksState.value(QStringLiteral("status")).toString().trimmed();
+	if (!stonksError.isEmpty()) {
+		publishModernToast(QStringLiteral("error"), tr("Stonks"), stonksError);
+	} else if (!stonksStatus.isEmpty()) {
+		publishModernToast(QStringLiteral("success"), tr("Stonks"), stonksStatus);
+	}
 	if (usesModernShell() && m_modernDialogController
 		&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
 		openModernGenericDialog(buildModernStonksDialog());
@@ -15383,17 +16328,22 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 		return true;
 	}
 	if (action == QLatin1String("selectUser")) {
-		requestStonksState(m_stonksSelectedPeriod, payload.value(QStringLiteral("userId")).toUInt());
+		requestStonksState(m_stonksSelectedPeriod, unsignedIDFromPayload(payload, QStringLiteral("userId")));
 		return true;
+	}
+	if (action == QLatin1String("setTickerPin")) {
+		return handleModernShellAppActionPayload(QStringLiteral("stonks.setTickerPin"), payload);
+	}
+	if (action == QLatin1String("setFeedPreferences")) {
+		return handleModernShellAppActionPayload(QStringLiteral("stonks.setFeedPreferences"), payload);
 	}
 
 	MumbleProto::StonksAction message;
 	message.set_period(u8(m_stonksSelectedPeriod.trimmed().isEmpty() ? QStringLiteral("30d") : m_stonksSelectedPeriod));
 	if (action == QLatin1String("savePortfolio") || action == QLatin1String("submitSnapshot")) {
 		message.set_action(MumbleProto::StonksActionSubmitSnapshot);
-		const unsigned int targetUserID = payload.value(QStringLiteral("userId")).toUInt();
-		if (targetUserID > 0) {
-			message.set_target_user_id(targetUserID);
+		if (const std::optional< unsigned int > targetUserID = unsignedIDFromPayload(payload, QStringLiteral("userId"))) {
+			message.set_target_user_id(*targetUserID);
 			m_stonksSelectedUserID = targetUserID;
 		}
 		MumbleProto::StonksSnapshot *snapshot = message.mutable_snapshot();
@@ -15424,22 +16374,20 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 	}
 	if (action == QLatin1String("clearPortfolio")) {
 		message.set_action(MumbleProto::StonksActionClearPortfolio);
-		const unsigned int targetUserID = payload.value(QStringLiteral("userId")).toUInt();
-		if (targetUserID > 0) {
-			message.set_target_user_id(targetUserID);
+		if (const std::optional< unsigned int > targetUserID = unsignedIDFromPayload(payload, QStringLiteral("userId"))) {
+			message.set_target_user_id(*targetUserID);
 			m_stonksSelectedUserID = targetUserID;
 		}
 		MumbleProto::StonksSnapshot *snapshot = message.mutable_snapshot();
 		snapshot->set_currency(u8(payload.value(QStringLiteral("currency"), QStringLiteral("USD")).toString()));
-		snapshot->set_note(u8(payload.value(QStringLiteral("note"), tr("Portfolio cleared")).toString()));
+		snapshot->set_note(u8(payload.value(QStringLiteral("note"), tr("Ledger cleared")).toString()));
 		Global::get().sh->sendMessage(message);
 		return true;
 	}
 	if (action == QLatin1String("deleteSnapshot")) {
 		message.set_action(MumbleProto::StonksActionDeleteSnapshot);
-		const unsigned int targetUserID = payload.value(QStringLiteral("userId")).toUInt();
-		if (targetUserID > 0) {
-			message.set_target_user_id(targetUserID);
+		if (const std::optional< unsigned int > targetUserID = unsignedIDFromPayload(payload, QStringLiteral("userId"))) {
+			message.set_target_user_id(*targetUserID);
 			m_stonksSelectedUserID = targetUserID;
 		}
 		const unsigned int snapshotID = payload.value(QStringLiteral("snapshotId")).toUInt();
@@ -15452,9 +16400,8 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 	if (action == QLatin1String("follow") || action == QLatin1String("unfollow")) {
 		message.set_action(action == QLatin1String("follow") ? MumbleProto::StonksActionFollow
 															 : MumbleProto::StonksActionUnfollow);
-		const unsigned int targetUserID = payload.value(QStringLiteral("userId")).toUInt();
-		if (targetUserID > 0) {
-			message.set_target_user_id(targetUserID);
+		if (const std::optional< unsigned int > targetUserID = unsignedIDFromPayload(payload, QStringLiteral("userId"))) {
+			message.set_target_user_id(*targetUserID);
 		} else {
 			message.set_target_name(u8(payload.value(QStringLiteral("userName")).toString()));
 		}
@@ -15716,8 +16663,8 @@ void MainWindow::openModernAclRequestDialog(Channel *channel) {
 	}
 
 	openModernGenericDialog(modernDialogDto(
-		QStringLiteral("acl"), QStringLiteral("info"), tr("Room ACL"),
-		tr("Requesting ACL data for %1.").arg(channel->qsName),
+		QStringLiteral("acl"), QStringLiteral("info"), tr("Edit room"),
+		tr("Requesting room details and ACL data for %1.").arg(channel->qsName),
 		QVariantList { modernDialogSection(tr("Status"), QVariantList { modernNoteField(tr("Loading ACL...")) }) },
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true) },
 		QStringLiteral("close"), QSize(720, 520)));
@@ -15725,7 +16672,6 @@ void MainWindow::openModernAclRequestDialog(Channel *channel) {
 
 void MainWindow::openModernAclDialog(const MumbleProto::ACL &msg) {
 	Channel *channel = Channel::get(msg.channel_id());
-	const QString channelName = channel ? channel->qsName : tr("Room %1").arg(msg.channel_id());
 	modernAclCacheOnlineUsers(m_modernAclRegisteredUserNames);
 	QVariantMap aclModel = modernAclModelFromProto(msg, m_modernAclRegisteredUserNames);
 
@@ -15744,17 +16690,7 @@ void MainWindow::openModernAclDialog(const MumbleProto::ACL &msg) {
 		Global::get().sh->requestUserList();
 	}
 
-	openModernGenericDialog(modernDialogDto(
-		QStringLiteral("acl"), QStringLiteral("form"), tr("Room ACL"),
-		tr("Edit access rules and groups for %1. Room ID %2.").arg(channelName).arg(msg.channel_id()),
-		QVariantList { modernDialogSection(tr("Permissions"),
-										   QVariantList { modernAclEditorField(QStringLiteral("acl.model"),
-																			   tr("Rules and groups"),
-																			   aclModel) }) },
-		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
-					   modernDialogAction(QStringLiteral("saveAcl"), tr("Save ACL"), true,
-										  QStringLiteral("accent")) },
-		QStringLiteral("saveAcl"), QSize(1040, 780)));
+	openModernGenericDialog(modernAclDialogForChannel(channel, aclModel));
 }
 
 bool MainWindow::handleModernAclQueryUsers(const MumbleProto::QueryUsers &msg) {
@@ -16031,7 +16967,8 @@ void MainWindow::openModernVoiceRecorderDialog(const QVariantMap &fieldValues, c
 	openModernGenericDialog(dialog);
 }
 
-void MainWindow::openModernCreateRoomDialog(const RoomCreateType preferredType, Channel *preferredVoiceParent) {
+void MainWindow::openModernCreateRoomDialog(const RoomCreateType preferredType, Channel *preferredVoiceParent,
+											const QVariantMap &fieldValues, const QVariantMap &errors) {
 	if (!preferredVoiceParent) {
 		preferredVoiceParent = selectedVoiceTreeChannel();
 	}
@@ -16078,14 +17015,32 @@ void MainWindow::openModernCreateRoomDialog(const RoomCreateType preferredType, 
 		typeOptions.push_back(modernSelectOption(tr("Text room"), static_cast< int >(RoomCreateType::Text)));
 	}
 
+	const auto valueOrDefault = [&fieldValues](const QString &key, const QVariant &fallback) {
+		return fieldValues.contains(key) ? fieldValues.value(key) : fallback;
+	};
+
 	const int preferredTypeValue = static_cast< int >(preferredType);
+	const int requestedTypeValue =
+		valueOrDefault(QStringLiteral("room.type"), preferredTypeValue).toInt();
+	const RoomCreateType requestedType = static_cast< RoomCreateType >(requestedTypeValue);
 	const bool preferredTypeAvailable =
 		(preferredType == RoomCreateType::Voice && voiceAvailable) || (preferredType == RoomCreateType::Text && textAvailable);
-	const int selectedType = preferredTypeAvailable ? preferredTypeValue
-													: typeOptions.constFirst().toMap().value(QStringLiteral("value")).toInt();
+	const bool requestedTypeAvailable =
+		(requestedType == RoomCreateType::Voice && voiceAvailable) || (requestedType == RoomCreateType::Text && textAvailable);
+	const int selectedType = requestedTypeAvailable
+								 ? requestedTypeValue
+								 : (preferredTypeAvailable ? preferredTypeValue
+														   : typeOptions.constFirst().toMap().value(QStringLiteral("value")).toInt());
 
 	unsigned int selectedVoiceParent = Mumble::ROOT_CHANNEL_ID;
-	if (preferredVoiceParent && canCreateVoiceRoom(preferredVoiceParent)) {
+	const unsigned int requestedVoiceParent =
+		valueOrDefault(QStringLiteral("voice.parent"),
+					   preferredVoiceParent ? preferredVoiceParent->iId : Mumble::ROOT_CHANNEL_ID)
+			.toUInt();
+	Channel *requestedVoiceParentChannel = Channel::get(requestedVoiceParent);
+	if (requestedVoiceParentChannel && canCreateVoiceRoom(requestedVoiceParentChannel)) {
+		selectedVoiceParent = requestedVoiceParentChannel->iId;
+	} else if (preferredVoiceParent && canCreateVoiceRoom(preferredVoiceParent)) {
 		selectedVoiceParent = preferredVoiceParent->iId;
 	} else if (!voiceParentOptions.isEmpty()) {
 		selectedVoiceParent = voiceParentOptions.constFirst().toMap().value(QStringLiteral("value")).toUInt();
@@ -16100,103 +17055,324 @@ void MainWindow::openModernCreateRoomDialog(const RoomCreateType preferredType, 
 
 	const bool supportsVoiceMaxUsers =
 		Global::get().sh && Global::get().sh->m_version >= Version::fromComponents(1, 3, 0);
+	Channel *selectedVoiceParentChannel = Channel::get(selectedVoiceParent);
+	const bool forcedTemporary =
+		selectedVoiceParentChannel && voiceRoomCreationForcesTemporary(selectedVoiceParentChannel);
 	QVariantList fields {
 		modernSelectField(QStringLiteral("room.type"), tr("Type"), selectedType, typeOptions),
-		modernDialogField(QStringLiteral("room.name"), tr("Name"), QStringLiteral("text"), QString()),
-		modernDialogField(QStringLiteral("room.description"), tr("Topic"), QStringLiteral("textarea"), QString()),
+		modernDialogField(QStringLiteral("room.name"), tr("Name"), QStringLiteral("text"),
+						  valueOrDefault(QStringLiteral("room.name"), QString())),
+		modernDialogField(QStringLiteral("room.description"), tr("Topic"), QStringLiteral("textarea"),
+						  valueOrDefault(QStringLiteral("room.description"), QString())),
 		modernSelectField(QStringLiteral("voice.parent"), tr("Voice parent"), selectedVoiceParent, voiceParentOptions),
-		modernDialogField(QStringLiteral("voice.position"), tr("Voice order"), QStringLiteral("number"), 0),
+		modernDialogField(QStringLiteral("voice.position"), tr("Voice order"), QStringLiteral("number"),
+						  valueOrDefault(QStringLiteral("voice.position"), 0)),
 		modernDialogField(QStringLiteral("voice.temporary"), tr("Temporary voice room"), QStringLiteral("checkbox"),
-						  preferredVoiceParent && voiceRoomCreationForcesTemporary(preferredVoiceParent)),
-		modernDialogField(QStringLiteral("voice.maxUsers"), tr("Max voice users"), QStringLiteral("number"), 0,
-						  supportsVoiceMaxUsers),
-		modernSelectField(QStringLiteral("text.visibility"), tr("Text visibility source"), Mumble::ROOT_CHANNEL_ID,
+						  forcedTemporary || valueOrDefault(QStringLiteral("voice.temporary"), false).toBool(),
+						  !forcedTemporary),
+		modernDialogField(QStringLiteral("voice.maxUsers"), tr("Max voice users"), QStringLiteral("number"),
+						  valueOrDefault(QStringLiteral("voice.maxUsers"), 0), supportsVoiceMaxUsers),
+		modernSelectField(QStringLiteral("text.visibility"), tr("Text visibility source"),
+						  valueOrDefault(QStringLiteral("text.visibility"), Mumble::ROOT_CHANNEL_ID),
 						  textVisibilityOptions),
 		modernDialogField(QStringLiteral("text.position"), tr("Text order"), QStringLiteral("number"),
-						  static_cast< int >(m_persistentTextChannels.size()))
+						  valueOrDefault(QStringLiteral("text.position"),
+										 static_cast< int >(m_persistentTextChannels.size())))
 	};
 
-	openModernGenericDialog(modernDialogDto(
+	QVariantMap dialog = modernDialogDto(
 		QStringLiteral("createRoom"), QStringLiteral("form"), tr("Create room"),
 		tr("Create a voice room or a persistent text room without leaving Modern layout."),
 		QVariantList { modernDialogSection(tr("Room"), fields) },
 		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
 					   modernDialogAction(QStringLiteral("createRoom"), tr("Create"), true, QStringLiteral("accent")) },
-		QStringLiteral("createRoom"), QSize(720, 620)));
+		QStringLiteral("createRoom"), QSize(720, 620));
+	if (!errors.isEmpty()) {
+		dialog.insert(QStringLiteral("errors"), errors);
+		dialog.insert(QStringLiteral("highlights"),
+					  QVariantList { modernDialogHighlight(tr("Validation"), tr("Needs attention"),
+															QStringLiteral("warning")) });
+	}
+	openModernGenericDialog(dialog);
+}
+
+void MainWindow::openModernEditTextRoomDialog(const unsigned int textChannelID, const QVariantMap &fieldValues,
+											  const QVariantMap &errors) {
+	const auto textChannelIt = m_persistentTextChannels.constFind(textChannelID);
+	if (textChannelIt == m_persistentTextChannels.cend()) {
+		return;
+	}
+
+	QList< Channel * > channels = Channel::c_qhChannels.values();
+	std::sort(channels.begin(), channels.end(), [this](const Channel *lhs, const Channel *rhs) {
+		if (lhs == rhs) {
+			return false;
+		}
+		if (!lhs || !rhs) {
+			return lhs != nullptr;
+		}
+		if (lhs->iId == Mumble::ROOT_CHANNEL_ID || rhs->iId == Mumble::ROOT_CHANNEL_ID) {
+			return lhs->iId == Mumble::ROOT_CHANNEL_ID;
+		}
+		return persistentTextAclChannelLabel(lhs).localeAwareCompare(persistentTextAclChannelLabel(rhs)) < 0;
+	});
+
+	QVariantList visibilityOptions;
+	for (Channel *channel : channels) {
+		if (channel) {
+			visibilityOptions.push_back(modernSelectOption(persistentTextAclChannelLabel(channel), channel->iId));
+		}
+	}
+
+	const auto valueOrDefault = [&fieldValues](const QString &key, const QVariant &fallback) {
+		return fieldValues.contains(key) ? fieldValues.value(key) : fallback;
+	};
+	QVariantList fields {
+		modernHiddenField(QStringLiteral("text.id"), static_cast< int >(textChannelID)),
+		modernDialogField(QStringLiteral("text.name"), tr("Name"), QStringLiteral("text"),
+						  valueOrDefault(QStringLiteral("text.name"), textChannelIt->name)),
+		modernTextareaField(QStringLiteral("text.description"), tr("Description"),
+							 valueOrDefault(QStringLiteral("text.description"), textChannelIt->description).toString(), 3),
+		modernSelectField(QStringLiteral("text.visibility"), tr("Visibility source"),
+						  valueOrDefault(QStringLiteral("text.visibility"), static_cast< int >(textChannelIt->aclChannelID)),
+						  visibilityOptions),
+		modernDialogField(QStringLiteral("text.position"), tr("Order"), QStringLiteral("number"),
+						  valueOrDefault(QStringLiteral("text.position"), static_cast< int >(textChannelIt->position)))
+	};
+
+	QVariantList actions {
+		modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
+		modernDialogAction(QStringLiteral("editTextRoomAcl"), tr("Configure ACL"), !visibilityOptions.isEmpty()),
+		modernDialogAction(QStringLiteral("saveTextRoom"), tr("Save"), true, QStringLiteral("accent"))
+	};
+
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("editTextRoom:%1").arg(textChannelID), QStringLiteral("form"), tr("Edit text room"),
+		tr("Update the persistent text room without leaving Modern layout."),
+		QVariantList { modernDialogSection(tr("Room"), fields) },
+		actions, QStringLiteral("saveTextRoom"), QSize(680, 500));
+	if (!errors.isEmpty()) {
+		dialog.insert(QStringLiteral("errors"), errors);
+	}
+	openModernGenericDialog(dialog);
+}
+
+void MainWindow::openModernDeleteTextRoomDialog(const unsigned int textChannelID) {
+	const auto textChannelIt = m_persistentTextChannels.constFind(textChannelID);
+	if (textChannelIt == m_persistentTextChannels.cend()) {
+		return;
+	}
+
+	openModernGenericDialog(modernDialogDto(
+		QStringLiteral("deleteTextRoom:%1").arg(textChannelID), QStringLiteral("confirm"),
+		tr("Delete text room"), tr("Delete #%1?").arg(textChannelIt->name),
+		QVariantList { modernDialogSection(
+			tr("Confirmation"),
+			QVariantList { modernHiddenField(QStringLiteral("text.id"), static_cast< int >(textChannelID)),
+						   modernReadonlyField(tr("Text room"), QStringLiteral("#%1").arg(textChannelIt->name)),
+						   modernReadonlyField(tr("Result"),
+											   tr("Existing history will no longer be visible in this room.")) }) },
+		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
+					   modernDialogAction(QStringLiteral("confirmDeleteTextRoom"), tr("Delete"), true,
+										  QStringLiteral("danger"), true) },
+		QStringLiteral("confirmDeleteTextRoom"), QSize(620, 420)));
+}
+
+void MainWindow::openModernServerSettingsDialog(const QVariantMap &fieldValues, const QVariantMap &errors,
+												const QString &statusMessage) {
+	if (!canManagePersistentTextChannels() || !Global::get().sh || !Global::get().sh->isRunning()) {
+		return;
+	}
+
+	const int spinMax = std::numeric_limits< int >::max();
+	const auto clampSpinValue = [spinMax](unsigned int value) {
+		return static_cast< int >(std::min(value, static_cast< unsigned int >(spinMax)));
+	};
+	const auto valueOrDefault = [&fieldValues](const QString &key, const QVariant &fallback) {
+		return fieldValues.contains(key) ? fieldValues.value(key) : fallback;
+	};
+
+	QVariantList identityFields {
+		modernDialogField(QStringLiteral("server.displayName"), tr("Name"), QStringLiteral("text"),
+						  valueOrDefault(QStringLiteral("server.displayName"), Global::get().qsServerDisplayName)),
+		modernHintedField(
+			modernDialogField(QStringLiteral("server.monogram"), tr("Monogram"), QStringLiteral("text"),
+							  valueOrDefault(QStringLiteral("server.monogram"), Global::get().qsServerMonogram)),
+			tr("Shown when no server image is configured.")),
+		modernImagePickerField(QStringLiteral("server.image"), tr("Image"),
+							   valueOrDefault(QStringLiteral("server.image"),
+											  modernShellServerImageDataUrl(Global::get().qbaServerImage))
+								   .toString(),
+							   tr("Square images work best. The server stores a normalized 256 px PNG."))
+	};
+
+	QVariantList chatFields {
+		modernTextareaField(QStringLiteral("server.welcomeText"), tr("Welcome text"),
+							 valueOrDefault(QStringLiteral("server.welcomeText"), m_persistentChatWelcomeText).toString(), 4),
+		modernDialogField(QStringLiteral("server.allowHtml"), tr("Allow HTML"), QStringLiteral("checkbox"),
+						  valueOrDefault(QStringLiteral("server.allowHtml"), Global::get().bAllowHTML)),
+		modernDialogField(QStringLiteral("server.persistentGlobalChat"), tr("Server-wide chat"),
+						  QStringLiteral("checkbox"),
+						  valueOrDefault(QStringLiteral("server.persistentGlobalChat"),
+										 Global::get().bPersistentGlobalChatEnabled))
+	};
+
+	QVariantList limitFields {
+		modernDialogField(QStringLiteral("server.maxBandwidth"), tr("Audio bandwidth"), QStringLiteral("number"),
+						  valueOrDefault(QStringLiteral("server.maxBandwidth"), std::max(Global::get().iMaxBandwidth, 0))),
+		modernDialogField(QStringLiteral("server.maxUsers"), tr("Max users"), QStringLiteral("number"),
+						  valueOrDefault(QStringLiteral("server.maxUsers"), clampSpinValue(Global::get().uiMaxUsers))),
+		modernDialogField(QStringLiteral("server.messageLength"), tr("Text message length"), QStringLiteral("number"),
+						  valueOrDefault(QStringLiteral("server.messageLength"),
+										 clampSpinValue(Global::get().uiMessageLength))),
+		modernDialogField(QStringLiteral("server.imageLength"), tr("Image message length"), QStringLiteral("number"),
+						  valueOrDefault(QStringLiteral("server.imageLength"),
+										 clampSpinValue(Global::get().uiImageLength)))
+	};
+
+	QVariantList screenShareFields {
+		modernDialogField(QStringLiteral("server.screenShareEnabled"), tr("Enabled"), QStringLiteral("checkbox"),
+						  valueOrDefault(QStringLiteral("server.screenShareEnabled"), Global::get().bScreenShareEnabled)),
+		modernDialogField(QStringLiteral("server.screenShareRecording"), tr("Recording allowed"),
+						  QStringLiteral("checkbox"),
+						  valueOrDefault(QStringLiteral("server.screenShareRecording"),
+										 Global::get().bScreenShareRecordingEnabled)),
+		modernDialogField(QStringLiteral("server.screenShareHelper"), tr("Helper required"), QStringLiteral("checkbox"),
+						  valueOrDefault(QStringLiteral("server.screenShareHelper"),
+										 Global::get().bScreenShareHelperRequired)),
+		modernDialogField(QStringLiteral("server.screenShareWidth"), tr("Max width"), QStringLiteral("number"),
+						  valueOrDefault(QStringLiteral("server.screenShareWidth"),
+										 static_cast< int >(Mumble::ScreenShare::sanitizeLimit(
+											 Global::get().uiScreenShareMaxWidth, 0,
+											 Mumble::ScreenShare::HARD_MAX_WIDTH)))),
+		modernDialogField(QStringLiteral("server.screenShareHeight"), tr("Max height"), QStringLiteral("number"),
+						  valueOrDefault(QStringLiteral("server.screenShareHeight"),
+										 static_cast< int >(Mumble::ScreenShare::sanitizeLimit(
+											 Global::get().uiScreenShareMaxHeight, 0,
+											 Mumble::ScreenShare::HARD_MAX_HEIGHT)))),
+		modernDialogField(QStringLiteral("server.screenShareFps"), tr("Max frame rate"), QStringLiteral("number"),
+						  valueOrDefault(QStringLiteral("server.screenShareFps"),
+										 static_cast< int >(Mumble::ScreenShare::sanitizeLimit(
+											 Global::get().uiScreenShareMaxFps, 0, Mumble::ScreenShare::HARD_MAX_FPS)))),
+		modernDialogField(QStringLiteral("server.screenShareRelay"), tr("Relay URL"), QStringLiteral("text"),
+						  valueOrDefault(QStringLiteral("server.screenShareRelay"),
+										 Global::get().qsScreenShareRelayUrl))
+	};
+
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("serverSettings"), QStringLiteral("form"), tr("Server settings"),
+		tr("Change connected server settings from the Modern layout."),
+		QVariantList { modernDialogSection(tr("Identity"), identityFields),
+					   modernDialogSection(tr("Chat"), chatFields), modernDialogSection(tr("Limits"), limitFields),
+					   modernDialogSection(tr("Screen sharing"), screenShareFields) },
+		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
+					   modernDialogAction(QStringLiteral("saveServerSettings"), tr("Apply"), true,
+										  QStringLiteral("accent")) },
+		QStringLiteral("saveServerSettings"), QSize(760, 700));
+	if (!errors.isEmpty()) {
+		dialog.insert(QStringLiteral("errors"), errors);
+	}
+	if (!statusMessage.trimmed().isEmpty()) {
+		dialog.insert(QStringLiteral("statusMessage"), statusMessage.trimmed());
+	}
+	openModernGenericDialog(dialog);
 }
 
 void MainWindow::openModernAudioStatsDialog() {
 	const Settings &settings = Global::get().s;
-	const auto transmitMode = [&settings, this]() {
-		switch (settings.atTransmit) {
-			case Settings::Continuous:
-				return tr("Continuous");
-			case Settings::VAD:
-				return tr("Voice activity");
-			case Settings::PushToTalk:
-				return tr("Push-to-talk");
-		}
-		return tr("Unknown");
-	};
-	const auto vadSource = [&settings, this]() {
-		switch (settings.vsVAD) {
-			case Settings::SignalToNoise:
-				return tr("Speech probability");
-			case Settings::Hybrid:
-				return tr("Speech + volume");
-			case Settings::Amplitude:
-				return tr("Volume level");
-		}
-		return tr("Unknown");
-	};
-	const auto noiseMode = [&settings, this]() {
-		switch (settings.noiseCancelMode) {
-			case Settings::NoiseCancelOff:
-				return tr("Disabled");
-			case Settings::NoiseCancelSpeex:
-				return tr("Speex");
-			case Settings::NoiseCancelRNN:
-				return tr("Neural");
-			case Settings::NoiseCancelBoth:
-				return tr("Speex + neural");
-		}
-		return tr("Unknown");
-	};
+	const AudioInputPtr audioInput = Global::get().ai;
+	const bool connected = Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isConnected();
+	const bool transmitting = audioInput && audioInput->isTransmitting();
+	const bool hasProcessedInput =
+		audioInput && (audioInput->dPeakCleanMic < 0.0f || audioInput->dPeakSignal < 0.0f
+					   || audioInput->fSpeechProb > 0.0f || transmitting);
 
-	QVariantList fields {
-		modernReadonlyField(tr("Input system"), valueOrUnknown(settings.qsAudioInput)),
-		modernReadonlyField(tr("Output system"), valueOrUnknown(settings.qsAudioOutput)),
-		modernReadonlyField(tr("Transmit mode"), transmitMode()),
-		modernReadonlyField(tr("VAD source"), vadSource()),
-		modernReadonlyField(tr("VAD minimum"), tr("%1%").arg(qRound(settings.fVADmin * 100.0f))),
-		modernReadonlyField(tr("VAD maximum"), tr("%1%").arg(qRound(settings.fVADmax * 100.0f))),
-		modernReadonlyField(tr("Quality"), tr("%1 bit/s").arg(settings.iQuality)),
-		modernReadonlyField(tr("Noise suppression"), noiseMode()),
-		modernReadonlyField(tr("Double push"), Global::get().uiDoublePush > 1000000
-												? tr(">1000 ms")
-												: tr("%1 ms").arg(Global::get().uiDoublePush / 1000))
-	};
+	QVariantMap meterPayload;
+	meterPayload.insert(QStringLiteral("available"), hasProcessedInput);
+	meterPayload.insert(QStringLiteral("connected"), connected);
+	meterPayload.insert(QStringLiteral("loopbackMode"), static_cast< int >(settings.lmLoopMode));
+	if (audioInput) {
+		const float amplitudeLevel = audioInput->amplitudeVoiceActivityLevel();
+		const float speechProb     = audioInput->fSpeechProb;
+		meterPayload.insert(QStringLiteral("amplitude"), qBound(0, qRound(amplitudeLevel * 100.0f), 100));
+		meterPayload.insert(QStringLiteral("signalToNoise"), qBound(0, qRound(speechProb * 100.0f), 100));
+		meterPayload.insert(QStringLiteral("hybrid"),
+							qBound(0,
+								   qRound(AudioInput::voiceActivityLevelFor(Settings::Hybrid, amplitudeLevel,
+																			speechProb)
+										  * 100.0f),
+								   100));
+		meterPayload.insert(QStringLiteral("transmitting"), transmitting);
+		meterPayload.insert(QStringLiteral("peakCleanMicDb"), static_cast< double >(audioInput->dPeakCleanMic));
+	}
+
 	QVariantMap liveMeter = modernDialogField(QStringLiteral("audio.liveInput"), tr("Live input"),
-											  QStringLiteral("voiceMeter"));
-	liveMeter.insert(QStringLiteral("sourceLabel"), tr("Current microphone"));
+											  QStringLiteral("voiceMeter"), meterPayload);
+	liveMeter.insert(QStringLiteral("sourceLabel"),
+					 settings.qsAudioInput.isEmpty() ? tr("Current microphone") : settings.qsAudioInput);
 	liveMeter.insert(QStringLiteral("vadSource"), static_cast< int >(settings.vsVAD));
 	liveMeter.insert(QStringLiteral("silenceThreshold"), qRound(settings.fVADmin * 100.0f));
 	liveMeter.insert(QStringLiteral("speechThreshold"), qRound(settings.fVADmax * 100.0f));
 	liveMeter.insert(QStringLiteral("active"), true);
-	fields.push_back(liveMeter);
+
+	const auto packetLossText = [this]() {
+		const ConnectionPtr connection = Global::get().sh ? Global::get().sh->cConnection : ConnectionPtr();
+		if (!connection || !connection->csCrypt) {
+			return tr("Not reported");
+		}
+		const auto stats = connection->csCrypt->m_statsLocal;
+		const unsigned int total = stats.good + stats.late + stats.lost;
+		if (total == 0) {
+			return tr("0.0%");
+		}
+		return tr("%1%").arg(static_cast< double >(stats.lost) * 100.0 / static_cast< double >(total), 0, 'f', 1);
+	};
+
+	const bool preferTcp = NetworkConfig::TcpModeEnabled();
+	const auto accumulatorCount = [](const auto &accumulator) { return boost::accumulators::count(accumulator); };
+	const auto accumulatorMean = [](const auto &accumulator) { return boost::accumulators::mean(accumulator); };
+	const auto accumulatorDeviation = [](const auto &accumulator) {
+		const double variance = boost::accumulators::variance(accumulator);
+		return variance > 0.0 ? sqrt(variance) : 0.0;
+	};
+	const bool hasUdpPing = Global::get().sh && accumulatorCount(Global::get().sh->accUDP) > 0;
+	const bool hasTcpPing = Global::get().sh && accumulatorCount(Global::get().sh->accTCP) > 0;
+	const bool useUdpPing = hasUdpPing && (!preferTcp || !hasTcpPing);
+	const bool hasPing    = useUdpPing ? hasUdpPing : hasTcpPing;
+	const double pingMs   = hasPing ? accumulatorMean(useUdpPing ? Global::get().sh->accUDP : Global::get().sh->accTCP) : 0.0;
+	const double jitterMs =
+		hasPing ? accumulatorDeviation(useUdpPing ? Global::get().sh->accUDP : Global::get().sh->accTCP) : 0.0;
+	const QString pingText      = hasPing ? tr("%1 ms").arg(pingMs, 0, 'f', 0) : tr("Waiting");
+	const QString jitterText    = hasPing ? tr("%1 ms").arg(jitterMs, 0, 'f', 1) : tr("Waiting");
+	const QString bandwidthText = audioInput
+									  ? tr("%1 kbit/s").arg(static_cast< double >(audioInput->iBitrate) / 1000.0, 0, 'f', 1)
+									  : tr("%1 kbit/s").arg(static_cast< double >(Global::get().iAudioBandwidth) / 1000.0, 0, 'f', 1);
+	const QString signalText =
+		hasProcessedInput && audioInput ? tr("%1 dB").arg(static_cast< double >(audioInput->dPeakCleanMic), 0, 'f', 0)
+										: tr("Idle");
+	const QString userName =
+		ClientUser::get(Global::get().uiSession) ? ClientUser::get(Global::get().uiSession)->qsName : tr("You");
+
+	QVariantList inputFields { liveMeter, modernReadonlyField(tr("Audio bandwidth"), bandwidthText),
+							   modernReadonlyField(tr("Packets lost"), packetLossText()) };
+
+	QVariantList networkFields { modernReadonlyField(tr("Ping"), pingText), modernReadonlyField(tr("Jitter"), jitterText),
+								 modernReadonlyField(tr("Codec"), QStringLiteral("Opus")) };
 
 	QVariantMap dialog = modernDialogDto(
 		QStringLiteral("audioStats"), QStringLiteral("info"), tr("Audio statistics"),
-		tr("Live microphone activity and current audio settings."),
-		QVariantList { modernDialogSection(tr("Current audio setup"), fields, QStringLiteral("list")) },
+		tr("Live input, packet, and jitter diagnostics for the selected user."),
+		QVariantList { modernDialogSection(tr("Input"), inputFields),
+					   modernDialogSection(tr("Network"), networkFields, QStringLiteral("list")) },
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true),
 					   modernDialogAction(QStringLiteral("openAudioSettings"), tr("Open audio settings"), true,
 										  QStringLiteral("accent")) },
-		QStringLiteral("openAudioSettings"), QSize(660, 520));
+		QStringLiteral("openAudioSettings"), QSize(700, 560));
 	dialog.insert(QStringLiteral("highlights"),
-				  QVariantList { modernDialogHighlight(tr("Transmit"), transmitMode()),
-								 modernDialogHighlight(tr("VAD"), vadSource()),
-								 modernDialogHighlight(tr("Quality"), tr("%1 bit/s").arg(settings.iQuality)) });
+				  QVariantList { modernDialogHighlight(tr("User"), userName),
+								 modernDialogHighlight(tr("Signal"), signalText,
+														hasProcessedInput ? QStringLiteral("good") : QString()),
+								 modernDialogHighlight(tr("Jitter"), jitterText) });
 	openModernGenericDialog(dialog);
 }
 
@@ -16266,15 +17442,29 @@ void MainWindow::openModernAboutQtDialog() {
 }
 
 void MainWindow::openModernVersionCheckDialog() {
+	openModernVersionCheckLoadingDialog();
+
+	VersionCheck *check = new VersionCheck(false, this, false, true);
+	connect(check, &VersionCheck::updateInfoReceived, this,
+			[this](const QJsonObject &info, const bool updateAvailable) {
+				openModernVersionCheckResultDialog(info, updateAvailable);
+			});
+	connect(check, &VersionCheck::updateCheckFailed, this,
+			[this](const QString &message) { openModernVersionCheckFailureDialog(message); });
+}
+
+void MainWindow::openModernVersionCheckLoadingDialog() {
+	m_modernVersionCheckInfo = QJsonObject();
+
 	QVariantMap dialog = modernDialogDto(
-		QStringLiteral("versionCheck"), QStringLiteral("info"), tr("Update check"),
-		tr("Modern update result UI is being split from the old QMessageBox workflow."),
+		QStringLiteral("versionCheck"), QStringLiteral("update"), tr("Checking for updates"),
+		tr("Looking for the newest mumble-forked build."),
 		QVariantList { modernDialogSection(
 			tr("Installed build"),
 			QVariantList { modernReadonlyField(tr("Current version"), Version::getRelease()),
 						   modernReadonlyField(tr("Current build"), Version::getPatch(Version::get())),
 						   modernReadonlyField(tr("Release channel"), QStringLiteral("mumble-forked")),
-						   modernNoteField(tr("Use the release page action while the async Modern update-result dialog is completed.")) },
+						   modernNoteField(tr("Contacting the release channel now. This window will update when the check finishes.")) },
 			QStringLiteral("list")) },
 		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true),
 					   modernDialogAction(QStringLiteral("openForkRelease"), tr("Open releases"), true,
@@ -16282,6 +17472,123 @@ void MainWindow::openModernVersionCheckDialog() {
 		QStringLiteral("openForkRelease"), QSize(660, 440));
 	dialog.insert(QStringLiteral("highlights"),
 				  QVariantList { modernDialogHighlight(tr("Version"), Version::getRelease()),
+								 modernDialogHighlight(tr("Build"), Version::getPatch(Version::get())),
+								 modernDialogHighlight(tr("Channel"), QStringLiteral("mumble-forked")) });
+	openModernGenericDialog(dialog);
+}
+
+void MainWindow::openModernVersionCheckResultDialog(const QJsonObject &info, const bool updateAvailable) {
+	m_modernVersionCheckInfo = info;
+	const QUrl releaseUrl   = modernUpdateJsonUrl(info, QStringLiteral("releaseUrl"));
+	const QUrl installerUrl = modernUpdateJsonUrl(info, QStringLiteral("installerUrl"));
+	const QUrl openUrl      = installerUrl.isValid() ? installerUrl : releaseUrl;
+	const bool canInstall   = VersionCheck::canInstallUpdate(info);
+
+	QVariantList currentFields {
+		modernReadonlyField(tr("Current version"), Version::getRelease()),
+		modernReadonlyField(tr("Current build"), Version::getPatch(Version::get())),
+		modernReadonlyField(tr("Release channel"), QStringLiteral("mumble-forked"))
+	};
+
+	QVariantList latestFields {
+		modernReadonlyField(tr("Latest build"), modernUpdateLatestLabel(info)),
+		modernReadonlyField(tr("Published"), modernUpdatePublishedLabel(info))
+	};
+	const QString commit = info.value(QStringLiteral("commit")).toString().trimmed();
+	if (!commit.isEmpty()) {
+		latestFields.push_back(modernReadonlyField(tr("Commit"), commit));
+	}
+	const QString sha256 = info.value(QStringLiteral("sha256")).toString().trimmed();
+	if (!sha256.isEmpty()) {
+		latestFields.push_back(modernReadonlyField(tr("SHA256"), sha256));
+	}
+	if (releaseUrl.isValid()) {
+		latestFields.push_back(modernReadonlyField(tr("Release"), releaseUrl.toString()));
+	}
+	if (installerUrl.isValid()) {
+		latestFields.push_back(modernReadonlyField(tr("Installer"), installerUrl.toString()));
+	}
+	latestFields.push_back(modernHiddenField(QStringLiteral("update.releaseUrl"), releaseUrl.toString()));
+	latestFields.push_back(modernHiddenField(QStringLiteral("update.installerUrl"), installerUrl.toString()));
+	latestFields.push_back(modernHiddenField(QStringLiteral("update.sha256"), sha256));
+	latestFields.push_back(modernHiddenField(QStringLiteral("update.version"),
+											 info.value(QStringLiteral("version")).toString().trimmed()));
+	latestFields.push_back(modernHiddenField(QStringLiteral("update.build"),
+											 modernUpdateJsonInt(info, QStringLiteral("build"))));
+
+	QVariantList sections {
+		modernDialogSection(updateAvailable ? tr("Available update") : tr("Latest release"),
+							latestFields, QStringLiteral("list"),
+							updateAvailable ? modernUpdateAnnouncementText(info)
+											: tr("No newer mumble-forked build was found.")),
+		modernDialogSection(tr("Installed build"), currentFields, QStringLiteral("list"))
+	};
+
+	const QString releaseNotes = modernUpdateReleaseNotesText(info);
+	if (!releaseNotes.isEmpty()) {
+		sections.push_back(modernDialogSection(tr("Release notes"),
+											   QVariantList { modernReadonlyField(tr("Notes"), releaseNotes) },
+											   QStringLiteral("list")));
+	}
+
+	QVariantList actions {
+		modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true),
+		modernDialogAction(QStringLiteral("runVersionCheck"), tr("Check again"), true),
+		modernDialogAction(QStringLiteral("openForkRelease"), tr("Open releases"), releaseUrl.isValid())
+	};
+	if (canInstall) {
+		actions.push_back(modernDialogAction(QStringLiteral("installForkUpdate"), tr("Install update"), true,
+											 QStringLiteral("accent")));
+	} else if (installerUrl.isValid()) {
+		actions.push_back(modernDialogAction(QStringLiteral("openForkInstaller"), tr("Download update"), true,
+											 QStringLiteral("accent")));
+	} else if (openUrl.isValid()) {
+		actions.push_back(modernDialogAction(QStringLiteral("openForkRelease"), tr("Open release"), true,
+											 QStringLiteral("accent")));
+	}
+
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("versionCheck"), QStringLiteral("update"),
+		updateAvailable ? tr("Update available") : tr("You're up to date"),
+		updateAvailable ? tr("A new mumble-forked build is ready.")
+						: tr("This client matches the newest release information."),
+		sections, actions,
+		canInstall ? QStringLiteral("installForkUpdate")
+				   : (installerUrl.isValid() ? QStringLiteral("openForkInstaller")
+											 : QStringLiteral("openForkRelease")),
+		QSize(660, 560));
+	dialog.insert(QStringLiteral("highlights"),
+				  QVariantList { modernDialogHighlight(tr("Status"),
+														updateAvailable ? tr("Available") : tr("Current"),
+														updateAvailable ? QStringLiteral("warning")
+																		: QStringLiteral("good")),
+								 modernDialogHighlight(tr("Current build"), Version::getPatch(Version::get())),
+								 modernDialogHighlight(tr("Latest"), modernUpdateLatestLabel(info)) });
+	openModernGenericDialog(dialog);
+}
+
+void MainWindow::openModernVersionCheckFailureDialog(const QString &message) {
+	m_modernVersionCheckInfo = QJsonObject();
+
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("versionCheck"), QStringLiteral("update"), tr("Update check failed"),
+		tr("Mumble could not retrieve the latest mumble-forked release information."),
+		QVariantList {
+			modernDialogSection(tr("Status"),
+								QVariantList { modernNoteField(message),
+											   modernReadonlyField(tr("Current version"), Version::getRelease()),
+											   modernReadonlyField(tr("Current build"), Version::getPatch(Version::get())),
+											   modernReadonlyField(tr("Release channel"), QStringLiteral("mumble-forked")) },
+								QStringLiteral("list"))
+		},
+		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true),
+					   modernDialogAction(QStringLiteral("runVersionCheck"), tr("Try again"), true,
+										  QStringLiteral("accent")),
+					   modernDialogAction(QStringLiteral("openForkRelease"), tr("Open releases"), true) },
+		QStringLiteral("runVersionCheck"), QSize(660, 480));
+	dialog.insert(QStringLiteral("tone"), QStringLiteral("danger"));
+	dialog.insert(QStringLiteral("highlights"),
+				  QVariantList { modernDialogHighlight(tr("Status"), tr("Failed"), QStringLiteral("warning")),
 								 modernDialogHighlight(tr("Build"), Version::getPatch(Version::get())),
 								 modernDialogHighlight(tr("Channel"), QStringLiteral("mumble-forked")) });
 	openModernGenericDialog(dialog);
@@ -16367,7 +17674,7 @@ void MainWindow::openModernFeedbackDialog(const QVariantMap &fieldValues, const 
 						  QVariantList {
 							  modernSelectOption(tr("Bug"), static_cast< int >(MumbleProto::FeedbackReportBug)),
 							  modernSelectOption(tr("Suggestion"), static_cast< int >(MumbleProto::FeedbackReportSuggestion)),
-							  modernSelectOption(tr("Support"), static_cast< int >(MumbleProto::FeedbackReportSupport)) }),
+							  modernSelectOption(tr("Question"), static_cast< int >(MumbleProto::FeedbackReportSupport)) }),
 		modernDialogField(QStringLiteral("feedback.title"), tr("Title"), QStringLiteral("text"),
 						  values.value(QStringLiteral("feedback.title")).toString()),
 		modernTextareaField(QStringLiteral("feedback.description"), tr("Description"),
@@ -16392,7 +17699,7 @@ void MainWindow::openModernFeedbackDialog(const QVariantMap &fieldValues, const 
 	const QString submitLabel = tr("Submit");
 	QVariantMap dialog        = modernDialogDto(
 		QStringLiteral("feedback"), QStringLiteral("feedback"), tr("Report feedback"),
-		tr("Bug reports, suggestions, and support requests for this fork."),
+		tr("Bug reports, suggestions, and questions for this fork."),
 		QVariantList { modernDialogSection(tr("Report"), reportFields),
 					   modernDialogSection(tr("Evidence"), evidenceFields),
 					   modernDialogSection(tr("Diagnostics"), diagnosticsFields) },
@@ -16480,7 +17787,7 @@ void MainWindow::openModernSelfRegisterDialog() {
 		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
 					   modernDialogAction(QStringLiteral("confirmSelfRegister"), tr("Register"), true,
 										  QStringLiteral("accent"), true) },
-		QStringLiteral("confirmSelfRegister"), QSize(620, 430)));
+		QStringLiteral("confirmSelfRegister"), QSize(520, 300)));
 }
 
 void MainWindow::openModernUserRegisterDialog(ClientUser *user) {
@@ -16517,7 +17824,7 @@ void MainWindow::openModernUserRegisterDialog(ClientUser *user) {
 		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
 					   modernDialogAction(QStringLiteral("confirmRegisterUser"), tr("Register"), true,
 										  QStringLiteral("accent"), true) },
-		QStringLiteral("confirmRegisterUser"), QSize(640, 440)));
+		QStringLiteral("confirmRegisterUser"), QSize(560, 320)));
 }
 
 void MainWindow::openModernSelfCommentDialog() {
@@ -16572,7 +17879,7 @@ void MainWindow::openModernKickUserDialog(ClientUser *user) {
 		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
 					   modernDialogAction(QStringLiteral("confirmKick"), tr("Kick"), true, QStringLiteral("danger"),
 										  true) },
-		QStringLiteral("confirmKick"), QSize(620, 430)));
+		QStringLiteral("confirmKick"), QSize(520, 320)));
 }
 
 void MainWindow::openModernBanUserDialog(ClientUser *user) {
@@ -16599,7 +17906,7 @@ void MainWindow::openModernBanUserDialog(ClientUser *user) {
 		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
 					   modernDialogAction(QStringLiteral("confirmBan"), tr("Ban"), true, QStringLiteral("danger"),
 										  true) },
-		QStringLiteral("confirmBan"), QSize(640, 480)));
+		QStringLiteral("confirmBan"), QSize(560, 390)));
 }
 
 void MainWindow::openModernChatHistoryGrantDialog(ClientUser *user) {
@@ -16751,7 +18058,21 @@ void MainWindow::openModernUserCommentResetDialog(ClientUser *user) {
 		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
 					   modernDialogAction(QStringLiteral("confirmResetComment"), tr("Reset"), true,
 										  QStringLiteral("danger"), true) },
-		QStringLiteral("confirmResetComment"), QSize(620, 420)));
+		QStringLiteral("confirmResetComment"), QSize(520, 260)));
+}
+
+void MainWindow::openModernUserTextureChangeDialog(ClientUser *user, const QVariantMap &fieldValues,
+												   const QVariantMap &errors) {
+	if (!user) {
+		return;
+	}
+
+	if (!m_modernDialogController) {
+		m_modernDialogController = std::make_unique< ModernDialogController >();
+	}
+
+	publishModernDialogState(
+		m_modernDialogController->openChangeAvatar(user->uiSession, user->qsName, fieldValues, errors));
 }
 
 void MainWindow::openModernUserTextureResetDialog(ClientUser *user) {
@@ -16767,7 +18088,7 @@ void MainWindow::openModernUserTextureResetDialog(ClientUser *user) {
 		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
 					   modernDialogAction(QStringLiteral("confirmResetAvatar"), tr("Reset"), true,
 										  QStringLiteral("danger"), true) },
-		QStringLiteral("confirmResetAvatar"), QSize(620, 420)));
+		QStringLiteral("confirmResetAvatar"), QSize(520, 260)));
 }
 
 void MainWindow::openModernUserInformationRequestDialog(ClientUser *user) {
@@ -16844,7 +18165,72 @@ void MainWindow::openModernRemoveChannelDialog(Channel *channel) {
 		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
 					   modernDialogAction(QStringLiteral("confirmRemoveRoom"), tr("Delete"), true,
 										  QStringLiteral("danger"), true) },
-		QStringLiteral("confirmRemoveRoom"), QSize(620, 420)));
+		QStringLiteral("confirmRemoveRoom"), QSize(520, 280)));
+}
+
+void MainWindow::openModernUnlinkChannelDialog(Channel *source, Channel *target) {
+	if (!source || !target || source == target) {
+		return;
+	}
+
+	openModernGenericDialog(modernDialogDto(
+		QStringLiteral("unlinkRoom:%1").arg(source->iId), QStringLiteral("confirm"),
+		tr("Unlink room"), tr("Remove the link between %1 and %2.").arg(source->qsName, target->qsName),
+		QVariantList { modernDialogSection(
+			tr("Confirmation"),
+			QVariantList { modernHiddenField(QStringLiteral("source"), source->iId),
+						   modernHiddenField(QStringLiteral("target"), target->iId),
+						   modernReadonlyField(tr("Current room"), source->qsName),
+						   modernReadonlyField(tr("Linked room"), target->qsName) }) },
+		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
+					   modernDialogAction(QStringLiteral("confirmUnlinkRoom"), tr("Unlink"), true,
+										  QStringLiteral("danger"), true) },
+		QStringLiteral("confirmUnlinkRoom"), QSize(520, 280)));
+}
+
+void MainWindow::openModernUnlinkAllChannelsDialog(Channel *source) {
+	if (!source) {
+		return;
+	}
+
+	QSet< Channel * > linkedSet = source->allLinks();
+	linkedSet.remove(source);
+	if (linkedSet.isEmpty()) {
+		return;
+	}
+
+	QStringList linkedRooms;
+	for (Channel *linked : linkedSet) {
+		if (linked) {
+			linkedRooms << linked->qsName;
+		}
+	}
+	linkedRooms.sort(Qt::CaseInsensitive);
+
+	openModernGenericDialog(modernDialogDto(
+		QStringLiteral("unlinkAllRooms:%1").arg(source->iId), QStringLiteral("confirm"),
+		tr("Unlink all rooms"),
+		tr("Remove %n permanent room link(s) from %1.", nullptr, linkedRooms.count()).arg(source->qsName),
+		QVariantList { modernDialogSection(
+			tr("Confirmation"),
+			QVariantList { modernHiddenField(QStringLiteral("source"), source->iId),
+						   modernReadonlyField(tr("Current room"), source->qsName),
+						   modernReadonlyField(tr("Linked rooms"), linkedRooms.join(QLatin1String(", "))) }) },
+		QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
+					   modernDialogAction(QStringLiteral("confirmUnlinkAllRooms"), tr("Unlink all"), true,
+										  QStringLiteral("danger"), true) },
+		QStringLiteral("confirmUnlinkAllRooms"), QSize(560, 300)));
+}
+
+bool MainWindow::openModernDeleteMessageDialog(const unsigned int messageID, const PersistentChatTarget &target,
+											   const MumbleProto::ChatMessage &message) {
+	if (!m_modernDialogController) {
+		m_modernDialogController = std::make_unique< ModernDialogController >();
+	}
+
+	Q_UNUSED(message);
+	publishModernDialogState(m_modernDialogController->openDeleteMessageConfirmation(messageID, target.label));
+	return true;
 }
 
 bool MainWindow::handleModernFeedbackDialogAction(const QString &dialogID, const QString &actionID,
@@ -16951,6 +18337,39 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 												 const QVariantMap &fieldValues, const QVariantMap &payload) {
 	if (handleModernFeedbackDialogAction(dialogID, actionID, fieldValues)) {
 		return true;
+	}
+
+	if (dialogID == QLatin1String("muteCueNotice")) {
+		if (actionID == QLatin1String("disableMuteCue")) {
+			Global::get().s.bTxMuteCue = false;
+		}
+		return true;
+	}
+
+	if (dialogID == QLatin1String("disconnectServer") && actionID == QLatin1String("confirmDisconnect")) {
+		disconnectFromServer();
+		return true;
+	}
+
+	if (dialogID == QLatin1String("quitMumble")) {
+		if (actionID == QLatin1String("minimizeMumble")) {
+			if (fieldValues.value(QStringLiteral("quit.remember")).toBool()) {
+				Global::get().s.quitBehavior = fieldValues.value(QStringLiteral("quit.connected")).toBool()
+												   ? QuitBehavior::MINIMIZE_WHEN_CONNECTED
+												   : QuitBehavior::ALWAYS_MINIMIZE;
+			}
+			setWindowState(windowState() | Qt::WindowMinimized);
+			return true;
+		}
+
+		if (actionID == QLatin1String("confirmQuit")) {
+			if (fieldValues.value(QStringLiteral("quit.remember")).toBool()) {
+				Global::get().s.quitBehavior = QuitBehavior::ALWAYS_QUIT;
+			}
+			forceQuit = true;
+			close();
+			return true;
+		}
 	}
 
 	if (dialogID == QLatin1String("certificate")) {
@@ -17227,24 +18646,72 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 	if (dialogID == QLatin1String("acl") && actionID == QLatin1String("saveAcl")) {
 		MumbleProto::ACL msg;
 		QString errorMessage;
-		if (!modernAclMessageFromModel(fieldValues.value(QStringLiteral("acl.model")).toMap(), msg, &errorMessage)) {
+		const QVariantMap aclModel = fieldValues.value(QStringLiteral("acl.model")).toMap();
+		if (!modernAclMessageFromModel(aclModel, msg, &errorMessage)) {
 			QVariantMap dialogErrors;
 			dialogErrors.insert(QStringLiteral("acl.model"), errorMessage);
-			QVariantMap dialog = modernDialogDto(
-				QStringLiteral("acl"), QStringLiteral("form"), tr("Room ACL"), tr("Review the highlighted ACL issue."),
-				QVariantList { modernDialogSection(tr("Permissions"),
-												   QVariantList { modernAclEditorField(QStringLiteral("acl.model"),
-																					   tr("Rules and groups"),
-																					   fieldValues.value(QStringLiteral("acl.model")).toMap()) }) },
-				QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
-							   modernDialogAction(QStringLiteral("saveAcl"), tr("Save ACL"), true,
-												  QStringLiteral("accent")) },
-				QStringLiteral("saveAcl"), QSize(1040, 780));
-			dialog.insert(QStringLiteral("errors"), dialogErrors);
-			openModernGenericDialog(dialog);
+			openModernGenericDialog(modernAclDialogForChannel(Channel::get(aclModel.value(QStringLiteral("channelId")).toUInt()),
+															  aclModel, fieldValues, dialogErrors,
+															  tr("Review the highlighted ACL issue.")));
 			return true;
 		}
+		Channel *channel = Channel::get(msg.channel_id());
+		if (!channel || !canEditChannelACL(channel)) {
+			QVariantMap dialogErrors;
+			dialogErrors.insert(QStringLiteral("acl.model"),
+								tr("You need Write permission on this room to edit details or ACLs."));
+			openModernGenericDialog(modernAclDialogForChannel(channel, aclModel, fieldValues, dialogErrors,
+															  tr("Review the highlighted ACL issue.")));
+			return true;
+		}
+
+		const QString name =
+			fieldValues.value(QStringLiteral("channel.name"), channel->qsName).toString().trimmed();
+		if (channel->iId != Mumble::ROOT_CHANNEL_ID && name.isEmpty()) {
+			QVariantMap dialogErrors;
+			dialogErrors.insert(QStringLiteral("channel.name"), tr("A voice room needs a name."));
+			openModernGenericDialog(modernAclDialogForChannel(channel, aclModel, fieldValues, dialogErrors,
+															  tr("Review the highlighted room detail.")));
+			return true;
+		}
+
 		if (Global::get().sh) {
+			bool needsChannelUpdate = false;
+			MumbleProto::ChannelState channelState;
+			channelState.set_channel_id(channel->iId);
+			if (channel->iId != Mumble::ROOT_CHANNEL_ID && channel->qsName != name) {
+				channelState.set_name(u8(name));
+				needsChannelUpdate = true;
+			}
+
+			const QString description =
+				fieldValues.value(QStringLiteral("channel.description"), channel->qsDesc).toString().trimmed();
+			if (channel->qsDesc != description) {
+				channelState.set_description(u8(description));
+				needsChannelUpdate = true;
+				if (Global::get().db && !description.isEmpty()) {
+					Global::get().db->setBlob(sha1(description), description.toUtf8());
+				}
+			}
+
+			const int position = fieldValues.value(QStringLiteral("channel.position"), channel->iPosition).toInt();
+			if (channel->iPosition != position) {
+				channelState.set_position(position);
+				needsChannelUpdate = true;
+			}
+
+			const bool supportsVoiceMaxUsers =
+				Global::get().sh->m_version >= Version::fromComponents(1, 3, 0);
+			const unsigned int maxUsers = static_cast< unsigned int >(
+				std::max(0, fieldValues.value(QStringLiteral("channel.maxUsers"),
+											  static_cast< int >(channel->uiMaxUsers)).toInt()));
+			if (supportsVoiceMaxUsers && channel->uiMaxUsers != maxUsers) {
+				channelState.set_max_users(maxUsers);
+				needsChannelUpdate = true;
+			}
+			if (needsChannelUpdate) {
+				Global::get().sh->sendMessage(channelState);
+			}
 			Global::get().sh->sendMessage(msg);
 		}
 		if (m_modernDialogController) {
@@ -17270,19 +18737,118 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 		}
 	}
 
-	if (dialogID == QLatin1String("createRoom") && actionID == QLatin1String("createRoom")) {
-		const QString name = fieldValues.value(QStringLiteral("room.name")).toString().trimmed();
-		if (name.isEmpty()) {
-			Global::get().l->log(Log::Warning, tr("A room needs a name."));
+	if (const std::optional< unsigned int > textChannelID =
+			modernDialogIDValue(dialogID, QStringLiteral("editTextRoom:"));
+		textChannelID && (actionID == QLatin1String("saveTextRoom")
+						  || actionID == QLatin1String("editTextRoomAcl"))) {
+		const auto textChannelIt = m_persistentTextChannels.constFind(*textChannelID);
+		if (textChannelIt == m_persistentTextChannels.cend()) {
 			return true;
 		}
+		if (actionID == QLatin1String("editTextRoomAcl")) {
+			Channel *aclChannel =
+				Channel::get(fieldValues.value(QStringLiteral("text.visibility"), textChannelIt->aclChannelID).toUInt());
+			if (!aclChannel || !canEditChannelACL(aclChannel)) {
+				QVariantMap dialogErrors;
+				dialogErrors.insert(QStringLiteral("text.visibility"),
+									tr("Choose a visibility source whose ACL you can edit."));
+				openModernEditTextRoomDialog(*textChannelID, fieldValues, dialogErrors);
+				return true;
+			}
+			openModernAclRequestDialog(aclChannel);
+			return true;
+		}
+		const QString name = fieldValues.value(QStringLiteral("text.name")).toString().trimmed();
+		if (name.isEmpty()) {
+			QVariantMap dialogErrors;
+			dialogErrors.insert(QStringLiteral("text.name"), tr("A text room needs a name."));
+			openModernEditTextRoomDialog(*textChannelID, fieldValues, dialogErrors);
+			return true;
+		}
+		if (Global::get().sh && Global::get().sh->isRunning()) {
+			Global::get().sh->upsertTextChannel(
+				*textChannelID, name, fieldValues.value(QStringLiteral("text.description")).toString().trimmed(),
+				fieldValues.value(QStringLiteral("text.visibility")).toUInt(),
+				fieldValues.value(QStringLiteral("text.position")).toUInt(), false);
+		}
+		if (m_modernDialogController) {
+			publishModernDialogState(m_modernDialogController->close(dialogID));
+		}
+		return true;
+	}
+
+	if (dialogID == QLatin1String("serverSettings") && actionID == QLatin1String("saveServerSettings")) {
+		if (Global::get().sh && Global::get().sh->isRunning() && canManagePersistentTextChannels()) {
+			QVariantMap dialogErrors;
+			QString imageError;
+			const std::optional< QByteArray > serverImage =
+				modernShellServerIdentityImageFromDataUrl(fieldValues.value(QStringLiteral("server.image")).toString(),
+														  &imageError);
+			if (!serverImage) {
+				dialogErrors.insert(QStringLiteral("server.image"), imageError);
+				openModernServerSettingsDialog(fieldValues, dialogErrors);
+				return true;
+			}
+
+			const QString displayName =
+				fieldValues.value(QStringLiteral("server.displayName")).toString().trimmed().left(128);
+			const QString monogram = fieldValues.value(QStringLiteral("server.monogram")).toString().trimmed().left(12);
+			MumbleProto::ServerConfig config;
+			config.set_server_display_name(u8(displayName));
+			config.set_server_monogram(u8(monogram));
+			config.set_server_image(blob(*serverImage));
+			config.set_welcome_text(u8(fieldValues.value(QStringLiteral("server.welcomeText")).toString()));
+			config.set_max_bandwidth(fieldValues.value(QStringLiteral("server.maxBandwidth")).toUInt());
+			config.set_allow_html(fieldValues.value(QStringLiteral("server.allowHtml")).toBool());
+			config.set_message_length(fieldValues.value(QStringLiteral("server.messageLength")).toUInt());
+			config.set_image_message_length(fieldValues.value(QStringLiteral("server.imageLength")).toUInt());
+			config.set_max_users(fieldValues.value(QStringLiteral("server.maxUsers")).toUInt());
+			config.set_persistent_global_chat_enabled(
+				fieldValues.value(QStringLiteral("server.persistentGlobalChat")).toBool());
+			config.set_screen_share_enabled(fieldValues.value(QStringLiteral("server.screenShareEnabled")).toBool());
+			config.set_screen_share_recording_enabled(
+				fieldValues.value(QStringLiteral("server.screenShareRecording")).toBool());
+			config.set_screen_share_helper_required(
+				fieldValues.value(QStringLiteral("server.screenShareHelper")).toBool());
+			config.set_screen_share_max_width(fieldValues.value(QStringLiteral("server.screenShareWidth")).toUInt());
+			config.set_screen_share_max_height(fieldValues.value(QStringLiteral("server.screenShareHeight")).toUInt());
+			config.set_screen_share_max_fps(fieldValues.value(QStringLiteral("server.screenShareFps")).toUInt());
+			config.set_screen_share_relay_url(
+				u8(fieldValues.value(QStringLiteral("server.screenShareRelay")).toString().trimmed()));
+			Global::get().qsServerDisplayName = displayName;
+			Global::get().qsServerMonogram    = monogram;
+			Global::get().qbaServerImage      = *serverImage;
+			Global::get().sh->sendMessage(config);
+			queueModernShellSnapshotSync();
+			publishModernToast(QStringLiteral("success"), tr("Server settings"), tr("Server settings saved."));
+		} else {
+			publishModernToast(QStringLiteral("error"), tr("Server settings"),
+							   tr("Root Write permission is required to edit server settings."));
+		}
+		if (m_modernDialogController) {
+			publishModernDialogState(m_modernDialogController->close(dialogID));
+		}
+		return true;
+	}
+
+	if (dialogID == QLatin1String("createRoom") && actionID == QLatin1String("createRoom")) {
+		const QString name = fieldValues.value(QStringLiteral("room.name")).toString().trimmed();
 		const QString description = fieldValues.value(QStringLiteral("room.description")).toString().trimmed();
 		const RoomCreateType type =
 			static_cast< RoomCreateType >(fieldValues.value(QStringLiteral("room.type")).toInt());
+		if (name.isEmpty()) {
+			QVariantMap errors;
+			errors.insert(QStringLiteral("room.name"), tr("Enter a room name."));
+			openModernCreateRoomDialog(type, Channel::get(fieldValues.value(QStringLiteral("voice.parent")).toUInt()),
+									   fieldValues, errors);
+			return true;
+		}
 		if (type == RoomCreateType::Voice) {
 			Channel *parent = Channel::get(fieldValues.value(QStringLiteral("voice.parent")).toUInt());
 			if (!parent || !Global::get().sh || !Global::get().sh->isRunning() || !canCreateVoiceRoom(parent)) {
-				Global::get().l->log(Log::Warning, tr("You cannot create a voice room there."));
+				QVariantMap errors;
+				errors.insert(QStringLiteral("voice.parent"), tr("You cannot create a voice room there."));
+				openModernCreateRoomDialog(type, parent, fieldValues, errors);
 				return true;
 			}
 			const bool temporary =
@@ -17301,7 +18867,10 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 		}
 
 		if (!Global::get().sh || !Global::get().sh->isRunning() || !canCreateTextRoom()) {
-			Global::get().l->log(Log::Warning, tr("You cannot create text rooms on this server."));
+			QVariantMap errors;
+			errors.insert(QStringLiteral("room.type"), tr("You cannot create text rooms on this server."));
+			openModernCreateRoomDialog(type, Channel::get(fieldValues.value(QStringLiteral("voice.parent")).toUInt()),
+									   fieldValues, errors);
 			return true;
 		}
 		Global::get().sh->upsertTextChannel(0, name, description,
@@ -17323,8 +18892,41 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 		return true;
 	}
 
-	if (dialogID == QLatin1String("versionCheck") && actionID == QLatin1String("openForkRelease")) {
-		QDesktopServices::openUrl(QUrl(QStringLiteral("https://github.com/dankmaster/mumble/releases/tag/mumble-forked")));
+	if (dialogID == QLatin1String("versionCheck")) {
+		if (actionID == QLatin1String("runVersionCheck")) {
+			openModernVersionCheckDialog();
+			return true;
+		}
+		if (actionID == QLatin1String("installForkUpdate")) {
+			QJsonObject info;
+			info.insert(QStringLiteral("installerUrl"),
+						fieldValues.value(QStringLiteral("update.installerUrl")).toString());
+			info.insert(QStringLiteral("releaseUrl"), fieldValues.value(QStringLiteral("update.releaseUrl")).toString());
+			info.insert(QStringLiteral("sha256"), fieldValues.value(QStringLiteral("update.sha256")).toString());
+			info.insert(QStringLiteral("version"), fieldValues.value(QStringLiteral("update.version")).toString());
+			bool buildOk = false;
+			const int build = fieldValues.value(QStringLiteral("update.build")).toInt(&buildOk);
+			if (buildOk) {
+				info.insert(QStringLiteral("build"), build);
+			}
+			m_modernVersionCheckInfo = info;
+			return startModernForkUpdateDownload();
+		}
+		if (actionID == QLatin1String("openForkInstaller")) {
+			const QUrl installerUrl(fieldValues.value(QStringLiteral("update.installerUrl")).toString());
+			if (installerUrl.isValid()) {
+				QDesktopServices::openUrl(installerUrl);
+				return true;
+			}
+		}
+		if (actionID == QLatin1String("openForkRelease") || actionID == QLatin1String("openForkInstaller")) {
+			const QUrl releaseUrl(fieldValues.value(QStringLiteral("update.releaseUrl")).toString());
+			QDesktopServices::openUrl(
+				releaseUrl.isValid()
+					? releaseUrl
+					: QUrl(QStringLiteral("https://github.com/dankmaster/mumble/releases/tag/mumble-forked")));
+			return true;
+		}
 		return true;
 	}
 
@@ -17411,6 +19013,74 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 		return true;
 	}
 
+	if (const std::optional< unsigned int > session = modernDialogIDValue(dialogID, QStringLiteral("changeAvatar:"));
+		session) {
+		ClientUser *user = ClientUser::get(*session);
+		if (!user) {
+			return true;
+		}
+
+		QVariantMap values = fieldValues;
+		if (actionID == QLatin1String("browseAvatarImage")) {
+			const QString currentPath = values.value(QStringLiteral("avatar.path")).toString().trimmed();
+			const QString path =
+				QFileDialog::getOpenFileName(this, tr("Choose image file"),
+											 currentPath.isEmpty() ? getImagePath() : currentPath,
+											 tr("Images (*.png *.jpg *.jpeg)"));
+			if (!path.isNull()) {
+				values.insert(QStringLiteral("avatar.path"), QDir::toNativeSeparators(path));
+			}
+			openModernUserTextureChangeDialog(user, values);
+			return true;
+		}
+
+		if (actionID == QLatin1String("confirmChangeAvatar")) {
+			QVariantMap errors;
+			const QString path =
+				QDir::fromNativeSeparators(values.value(QStringLiteral("avatar.path")).toString().trimmed());
+			QFile file(path);
+			if (path.isEmpty() || !file.open(QIODevice::ReadOnly)) {
+				errors.insert(QStringLiteral("avatar.path"), tr("Choose a readable PNG or JPEG image."));
+				openModernUserTextureChangeDialog(user, values, errors);
+				return true;
+			}
+
+			QByteArray bytes = file.readAll();
+			file.close();
+
+			QByteArray format;
+			if (!RichTextImage::isValidImage(bytes, format)) {
+				errors.insert(QStringLiteral("avatar.path"), tr("Image format not recognized."));
+				openModernUserTextureChangeDialog(user, values, errors);
+				return true;
+			}
+
+			QBuffer buffer(&bytes);
+			buffer.open(QIODevice::ReadOnly);
+			QImageReader reader;
+			reader.setAutoDetectImageFormat(false);
+			reader.setFormat(format);
+			reader.setDevice(&buffer);
+			const QImage image = reader.read();
+			if (image.isNull()) {
+				errors.insert(QStringLiteral("avatar.path"), tr("Image format not recognized."));
+				openModernUserTextureChangeDialog(user, values, errors);
+				return true;
+			}
+			if (image.height() > 1024 || image.width() > 1024) {
+				errors.insert(QStringLiteral("avatar.path"), tr("Choose an image no larger than 1024 x 1024 pixels."));
+				openModernUserTextureChangeDialog(user, values, errors);
+				return true;
+			}
+
+			updateImagePath(path);
+			if (Global::get().sh) {
+				Global::get().sh->setUserTexture(user->uiSession, bytes);
+			}
+			return true;
+		}
+	}
+
 	if (const std::optional< unsigned int > session =
 			modernDialogIDValue(dialogID, QStringLiteral("chatHistoryGrant:"));
 		session && actionID == QLatin1String("saveChatHistoryGrant")) {
@@ -17440,6 +19110,54 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 		channelID && actionID == QLatin1String("confirmRemoveRoom")) {
 		if (Channel *channel = Channel::get(*channelID)) {
 			Global::get().sh->removeChannel(channel->iId);
+		}
+		return true;
+	}
+
+	if (const std::optional< unsigned int > sourceID = modernDialogIDValue(dialogID, QStringLiteral("unlinkRoom:"));
+		sourceID && actionID == QLatin1String("confirmUnlinkRoom")) {
+		const unsigned int targetID = fieldValues.value(QStringLiteral("target")).toUInt();
+		if (Channel *source = Channel::get(*sourceID); source && Channel::get(targetID)) {
+			Global::get().sh->removeChannelLink(source->iId, targetID);
+		}
+		return true;
+	}
+
+	if (const std::optional< unsigned int > sourceID =
+			modernDialogIDValue(dialogID, QStringLiteral("unlinkAllRooms:"));
+		sourceID && actionID == QLatin1String("confirmUnlinkAllRooms")) {
+		if (Channel *source = Channel::get(*sourceID)) {
+			QSet< Channel * > linkedSet = source->allLinks();
+			linkedSet.remove(source);
+			if (linkedSet.isEmpty()) {
+				return true;
+			}
+			MumbleProto::ChannelState message;
+			message.set_channel_id(source->iId);
+			for (Channel *linked : linkedSet) {
+				if (linked) {
+					message.add_links_remove(linked->iId);
+				}
+			}
+			Global::get().sh->sendMessage(message);
+		}
+		return true;
+	}
+
+	if (const std::optional< unsigned int > textChannelID =
+			modernDialogIDValue(dialogID, QStringLiteral("deleteTextRoom:"));
+		textChannelID && actionID == QLatin1String("confirmDeleteTextRoom")) {
+		if (canManagePersistentTextChannels() && m_persistentTextChannels.contains(*textChannelID)) {
+			Global::get().sh->removeTextChannel(*textChannelID);
+		}
+		return true;
+	}
+
+	if (const std::optional< unsigned int > messageID = modernDialogIDValue(dialogID, QStringLiteral("deleteMessage:"));
+		messageID && actionID == QLatin1String("confirmDeleteMessage")) {
+		PersistentChatTarget target;
+		if (const MumbleProto::ChatMessage *message = deletablePersistentChatMessage(*messageID, &target)) {
+			executePersistentChatMessageDelete(target, *message);
 		}
 		return true;
 	}
@@ -17495,8 +19213,9 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 		openModernCertificateDialog();
 		return true;
 	}
-	if (action == QLatin1String("server.settings")) {
-		return false;
+	if (action == QLatin1String("server.settings") || action == QLatin1String("server.identity")) {
+		openModernServerSettingsDialog();
+		return true;
 	}
 	if (action == QLatin1String("server.stonks")) {
 		openModernStonksDialog();
@@ -17532,7 +19251,7 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 		openModernSearchDialog();
 		return true;
 	}
-	if (action == QLatin1String("acl")) {
+	if (action == QLatin1String("server.acl") || action == QLatin1String("acl")) {
 		Channel *channel = contextChannel;
 		if (!channel) {
 			channel = getContextMenuChannel();
@@ -17586,7 +19305,7 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 		openModernAboutQtDialog();
 		return true;
 	}
-	if (action == QLatin1String("help.whatsThis")) {
+	if (action == QLatin1String("help.help") || action == QLatin1String("help.whatsThis")) {
 		openModernHelpDialog();
 		return true;
 	}
@@ -17614,6 +19333,16 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 		openModernUserTextureResetDialog(contextUser);
 		return true;
 	}
+	if (action == QLatin1String("self.avatarRemove") || action == QLatin1String("avatarRemove")) {
+		ClientUser *user = contextUser ? contextUser : ClientUser::get(Global::get().uiSession);
+		openModernUserTextureResetDialog(user);
+		return true;
+	}
+	if (action == QLatin1String("self.avatarChange") || action == QLatin1String("avatarChange")) {
+		ClientUser *user = contextUser ? contextUser : ClientUser::get(Global::get().uiSession);
+		openModernUserTextureChangeDialog(user);
+		return true;
+	}
 	if (action == QLatin1String("userInfo")) {
 		openModernUserInformationRequestDialog(contextUser);
 		return true;
@@ -17624,6 +19353,42 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 	}
 	if (action == QLatin1String("remove")) {
 		openModernRemoveChannelDialog(contextChannel);
+		return true;
+	}
+	if (action == QLatin1String("unlink")) {
+		Channel *source = currentVoiceChannel();
+		Channel *target = contextChannel ? contextChannel : getContextMenuChannel();
+		if (!target) {
+			target = Channel::get(Mumble::ROOT_CHANNEL_ID);
+		}
+		if (!source || !target || source == target) {
+			return false;
+		}
+		openModernUnlinkChannelDialog(source, target);
+		return true;
+	}
+	if (action == QLatin1String("unlinkAll")) {
+		Channel *source = currentVoiceChannel();
+		if (!source) {
+			source = contextChannel;
+		}
+		if (!source) {
+			return false;
+		}
+		QSet< Channel * > linkedSet = source->allLinks();
+		linkedSet.remove(source);
+		if (linkedSet.isEmpty() && contextChannel && contextChannel != source) {
+			QSet< Channel * > contextLinkedSet = contextChannel->allLinks();
+			contextLinkedSet.remove(contextChannel);
+			if (!contextLinkedSet.isEmpty()) {
+				source    = contextChannel;
+				linkedSet = contextLinkedSet;
+			}
+		}
+		if (linkedSet.isEmpty()) {
+			return false;
+		}
+		openModernUnlinkAllChannelsDialog(source);
 		return true;
 	}
 	if (action == QLatin1String("textMessage")) {
@@ -17681,6 +19446,35 @@ bool MainWindow::openModernFailedConnectionDialog(const ConnectDetails &details,
 	return true;
 }
 
+void MainWindow::openModernDisconnectDialog() {
+	if (!m_modernDialogController) {
+		m_modernDialogController = std::make_unique< ModernDialogController >();
+	}
+
+	QString serverLabel = Global::get().s.qsLastServer.trimmed();
+	if (serverLabel.isEmpty() && Global::get().sh) {
+		QString host;
+		QString username;
+		QString password;
+		unsigned short port = 0;
+		Global::get().sh->getConnectionInfo(host, port, username, password);
+		if (!host.trimmed().isEmpty()) {
+			serverLabel = port == 0 ? host.trimmed() : tr("%1:%2").arg(host.trimmed()).arg(port);
+		}
+	}
+
+	publishModernDialogState(m_modernDialogController->openDisconnectConfirmation(serverLabel));
+}
+
+void MainWindow::openModernQuitDialog(const bool allowMinimize) {
+	if (!m_modernDialogController) {
+		m_modernDialogController = std::make_unique< ModernDialogController >();
+	}
+
+	const bool connected = Global::get().sh && Global::get().sh->isRunning();
+	publishModernDialogState(m_modernDialogController->openQuitConfirmation(connected, allowMinimize));
+}
+
 void MainWindow::handleModernDialogOpen(const QString &dialogID, const QVariantMap &context) {
 	const QString normalizedDialog = dialogID.trimmed();
 	if (normalizedDialog == QLatin1String("connect")) {
@@ -17702,6 +19496,9 @@ void MainWindow::handleModernDialogOpen(const QString &dialogID, const QVariantM
 void MainWindow::handleModernDialogClose(const QString &dialogID) {
 	if (dialogID.isEmpty() || dialogID == QLatin1String("connect")) {
 		stopModernConnectServerPing();
+	}
+	if (dialogID.isEmpty() || dialogID == QLatin1String("settings")) {
+		cancelModernShortcutCapture();
 	}
 
 	if (!m_modernDialogController) {
@@ -17752,6 +19549,43 @@ void MainWindow::handleModernDialogAction(const QString &dialogID, const QString
 		return;
 	}
 
+	if (dialogID == QLatin1String("settings") && actionID == QLatin1String("keys.beginShortcutCapture")) {
+		const int rowIndex = payload.value(QStringLiteral("index"), -1).toInt();
+		if (!beginModernShortcutCapture(rowIndex)) {
+			return;
+		}
+		const ModernDialogController::ActionResult result =
+			m_modernDialogController->invokeAction(dialogID, actionID, payload);
+		if (result.stateChanged) {
+			publishModernDialogState(m_modernDialogController->state());
+		}
+		return;
+	}
+
+	if (dialogID == QLatin1String("settings") && actionID == QLatin1String("keys.cancelShortcutCapture")) {
+		cancelModernShortcutCapture();
+		const ModernDialogController::ActionResult result =
+			m_modernDialogController->invokeAction(dialogID, actionID, payload);
+		if (result.stateChanged) {
+			publishModernDialogState(m_modernDialogController->state());
+		}
+		return;
+	}
+
+	if (dialogID == QLatin1String("settings") && m_modernShortcutCaptureRow >= 0) {
+		cancelModernShortcutCapture();
+	}
+
+	if (dialogID == QLatin1String("settings") && actionID == QLatin1String("about.openMumble")) {
+		openModernAboutDialog();
+		return;
+	}
+
+	if (dialogID == QLatin1String("settings") && actionID == QLatin1String("about.openQt")) {
+		openModernAboutQtDialog();
+		return;
+	}
+
 	if (dialogID == QLatin1String("stonks") && handleModernStonksDialogAction(actionID, payload)) {
 		return;
 	}
@@ -17793,6 +19627,63 @@ void MainWindow::handleModernDialogAction(const QString &dialogID, const QString
 	}
 }
 
+bool MainWindow::beginModernShortcutCapture(const int rowIndex) {
+	if (rowIndex < 0 || !GlobalShortcutEngine::engine) {
+		publishModernToast(QStringLiteral("error"), tr("Shortcuts"),
+						   tr("Shortcut capture is not available on this platform."));
+		return false;
+	}
+
+	cancelModernShortcutCapture();
+	m_modernShortcutCaptureRow = rowIndex;
+	if (GlobalShortcutEngine::engine->canDisable()) {
+		m_modernShortcutCaptureRestoreEnabled = GlobalShortcutEngine::engine->enabled();
+		m_modernShortcutCaptureHasRestore     = true;
+		GlobalShortcutEngine::engine->setEnabled(true);
+	}
+	GlobalShortcutEngine::engine->resetMap();
+	m_modernShortcutCaptureConnection =
+		connect(GlobalShortcutEngine::engine, &GlobalShortcutEngine::buttonPressed, this, [this](const bool last) {
+			if (!last || m_modernShortcutCaptureRow < 0 || !m_modernDialogController
+				|| m_modernDialogController->activeDialogID() != QLatin1String("settings")
+				|| !GlobalShortcutEngine::engine) {
+				return;
+			}
+
+			QVariantList buttons;
+			for (const QVariant &button : GlobalShortcutEngine::engine->qlActiveButtons) {
+				buttons.push_back(button);
+			}
+
+			const int rowIndex = m_modernShortcutCaptureRow;
+			cancelModernShortcutCapture();
+
+			QVariantMap payload;
+			payload.insert(QStringLiteral("index"), rowIndex);
+			payload.insert(QStringLiteral("buttons"), buttons);
+			const ModernDialogController::ActionResult result = m_modernDialogController->invokeAction(
+				QStringLiteral("settings"), QStringLiteral("keys.finishShortcutCapture"), payload);
+			if (result.stateChanged) {
+				publishModernDialogState(m_modernDialogController->state());
+			}
+		});
+	return true;
+}
+
+void MainWindow::cancelModernShortcutCapture() {
+	if (m_modernShortcutCaptureConnection) {
+		disconnect(m_modernShortcutCaptureConnection);
+		m_modernShortcutCaptureConnection = QMetaObject::Connection();
+	}
+	if (m_modernShortcutCaptureHasRestore && GlobalShortcutEngine::engine
+		&& GlobalShortcutEngine::engine->canDisable()) {
+		GlobalShortcutEngine::engine->setEnabled(m_modernShortcutCaptureRestoreEnabled);
+	}
+	m_modernShortcutCaptureHasRestore     = false;
+	m_modernShortcutCaptureRestoreEnabled = false;
+	m_modernShortcutCaptureRow            = -1;
+}
+
 void MainWindow::connectFromModernDialog(const QString &host, const unsigned short port, const QString &username,
 										 const QString &password) {
 	if (host.trimmed().isEmpty() || port == 0 || username.trimmed().isEmpty()) {
@@ -17824,6 +19715,7 @@ void MainWindow::connectFromModernDialog(const QString &host, const unsigned sho
 }
 
 void MainWindow::applyModernSettings(const Settings &settings, const bool accepted) {
+	cancelModernShortcutCapture();
 	Audio::stop();
 	Global::get().s = settings;
 	if (!Global::get().s.bAttenuateOthersOnTalk) {
@@ -17831,6 +19723,12 @@ void MainWindow::applyModernSettings(const Settings &settings, const bool accept
 	}
 	Global::get().iPushToTalk = 0;
 	NetworkConfig::SetupProxy();
+	NetworkConfig::ApplyStartWithPCRegistration(Global::get().s.bStartWithPC);
+	if (GlobalShortcutEngine::engine) {
+		GlobalShortcutEngine::engine->bNeedRemap = true;
+		GlobalShortcutEngine::engine->needRemap();
+		GlobalShortcutEngine::engine->setEnabled(Global::get().s.bShortcutEnable);
+	}
 	Audio::start();
 
 	if (Global::get().talkingUI) {
@@ -17848,8 +19746,13 @@ void MainWindow::applyModernSettings(const Settings &settings, const bool accept
 	queueModernShellSnapshotSync();
 
 	if (accepted) {
+		if (Global::get().sh && Global::get().sh->hasSynchronized()) {
+			Global::get().db->setShortcuts(Global::get().sh->qbaDigest, Global::get().s.qlShortcuts);
+		}
 		Global::get().s.save();
 	}
+	publishModernToast(QStringLiteral("success"), tr("Settings"),
+					   accepted ? tr("Settings saved.") : tr("Settings applied."));
 }
 #endif
 
@@ -18114,6 +20017,77 @@ QVariantList MainWindow::buildModernShellConfigureMenuItems() const {
 	return ModernShellMenuSerializer::normalize(items);
 }
 
+QVariantList MainWindow::buildModernShellAppMenus() const {
+	const auto actionEnabled = [](const QAction *action) { return action && action->isEnabled(); };
+	const auto appendMenu = [](QVariantList &menus, const QString &id, const QString &menuLabel,
+							   const QVariantList &items) {
+		QVariantMap menu;
+		menu.insert(QStringLiteral("id"), id);
+		menu.insert(QStringLiteral("label"), menuLabel);
+		menu.insert(QStringLiteral("items"), ModernShellMenuSerializer::normalize(items));
+		menus.push_back(menu);
+	};
+	const auto actionItem = [](const QString &id, const QString &actionLabel, const bool enabled,
+							   const QString &tone = QString(), const QString &hint = QString()) {
+		return ModernShellMenuSerializer::actionItem(id, actionLabel, enabled, false, tone, hint);
+	};
+
+	const bool connected = Global::get().uiSession != 0 && Global::get().sh;
+	Channel *rootChannel = Channel::get(Mumble::ROOT_CHANNEL_ID);
+	const bool canEditRootAcl = connected && rootChannel && canEditChannelACL(rootChannel);
+
+	QVariantList menus;
+
+	QVariantList serverItems;
+	serverItems.push_back(actionItem(QStringLiteral("server.information"), tr("Server information..."),
+									 actionEnabled(qaServerInformation)));
+	serverItems.push_back(actionItem(QStringLiteral("server.search"), tr("Search..."), actionEnabled(qaSearch)));
+	serverItems.push_back(actionItem(QStringLiteral("server.connect"), tr("Connect to a server..."),
+									 actionEnabled(qaServerConnect)));
+	serverItems.push_back(actionItem(QStringLiteral("server.disconnect"), tr("Disconnect..."),
+									 actionEnabled(qaServerDisconnect), QStringLiteral("danger")));
+	serverItems.push_back(ModernShellMenuSerializer::separatorItem());
+	serverItems.push_back(actionItem(QStringLiteral("server.tokens"), tr("Access tokens..."),
+									 actionEnabled(qaServerTokens)));
+	serverItems.push_back(actionItem(QStringLiteral("server.userList"), tr("Registered users..."),
+									 actionEnabled(qaServerUserList)));
+	serverItems.push_back(actionItem(QStringLiteral("server.banList"), tr("Ban list..."),
+									 actionEnabled(qaServerBanList)));
+	serverItems.push_back(actionItem(QStringLiteral("server.acl"), tr("Access control (ACL)..."), canEditRootAcl));
+	serverItems.push_back(actionItem(QStringLiteral("server.settings"), tr("Server settings..."),
+									 actionEnabled(qaServerSettings)));
+	appendMenu(menus, QStringLiteral("server"), tr("Server"), serverItems);
+
+	QVariantList roomItems;
+	roomItems.push_back(actionItem(QStringLiteral("server.createRoom"), tr("Create room..."),
+								   actionEnabled(qaCreateTextRoom)));
+	roomItems.push_back(actionItem(QStringLiteral("server.stonks"), tr("Stonks..."),
+								   actionEnabled(qaServerOpenStonks)));
+	appendMenu(menus, QStringLiteral("room"), tr("Room"), roomItems);
+
+	QVariantList configureItems;
+	configureItems.push_back(actionItem(QStringLiteral("configure.settings"), tr("Settings..."),
+										actionEnabled(qaConfigDialog)));
+	configureItems.push_back(actionItem(QStringLiteral("configure.certificate"), tr("Certificate..."), true));
+	configureItems.push_back(actionItem(QStringLiteral("self.avatarChange"), tr("Change avatar..."), connected));
+	appendMenu(menus, QStringLiteral("configure"), tr("Configure"), configureItems);
+
+	QVariantList helpItems;
+	helpItems.push_back(actionItem(QStringLiteral("help.about"), tr("About Mumble"), true));
+	helpItems.push_back(actionItem(QStringLiteral("help.aboutQt"), tr("About Qt"), true));
+	helpItems.push_back(actionItem(QStringLiteral("help.versionCheck"), tr("Check for updates..."),
+								   actionEnabled(qaHelpVersionCheck)));
+	helpItems.push_back(actionItem(QStringLiteral("help.feedback"), tr("Report feedback..."),
+								   actionEnabled(qaHelpFeedback)));
+	helpItems.push_back(actionItem(QStringLiteral("help.help"), tr("Help"), true));
+	helpItems.push_back(ModernShellMenuSerializer::separatorItem());
+	helpItems.push_back(actionItem(QStringLiteral("server.quit"), tr("Quit Mumble..."), true,
+								   QStringLiteral("danger")));
+	appendMenu(menus, QStringLiteral("help"), tr("Help"), helpItems);
+
+	return menus;
+}
+
 ModernShellMenuSerializer::ActionDefinition
 	MainWindow::modernShellActionDefinition(const ModernShellMenuContext context, QAction *action) const {
 	ModernShellMenuSerializer::ActionDefinition definition;
@@ -18206,10 +20180,6 @@ ModernShellMenuSerializer::ActionDefinition
 				definition.id = QStringLiteral("help.feedback");
 			} else if (action == qaHelpVersionCheck) {
 				definition.id = QStringLiteral("help.versionCheck");
-			} else if (action == qaHelpAbout) {
-				definition.id = QStringLiteral("help.about");
-			} else if (action == qaHelpAboutQt) {
-				definition.id = QStringLiteral("help.aboutQt");
 			}
 			break;
 		case ModernShellMenuContext::Participant:
@@ -18312,7 +20282,7 @@ ModernShellMenuSerializer::ActionDefinition
 				definition.label = tr("Create room...");
 			} else if (action == qaChannelACL) {
 				definition.id    = QStringLiteral("acl");
-				definition.label = tr("Edit room ACL...");
+				definition.label = tr("Edit room...");
 			} else if (action == qaChannelRemove) {
 				definition.id    = QStringLiteral("remove");
 				definition.label = tr("Remove room...");
@@ -18850,7 +20820,7 @@ void MainWindow::handleModernShellPreviewHydrationRequest(const QString &scopeTo
 	}
 
 	if (!m_modernShellPreviewHydrationTimer->isActive()) {
-		m_modernShellPreviewHydrationTimer->start(m_modernShellPreviewHydrationLinkDense ? 80 : 50);
+		m_modernShellPreviewHydrationTimer->start(m_modernShellPreviewHydrationLinkDense ? 140 : 90);
 	}
 }
 
@@ -18864,7 +20834,7 @@ void MainWindow::flushModernShellPreviewHydrationQueue() {
 		return;
 	}
 
-	const int budget = m_modernShellPreviewHydrationLinkDense ? 2 : 4;
+	const int budget = m_modernShellPreviewHydrationLinkDense ? 1 : 2;
 	int processed    = 0;
 	while (!m_modernShellPreviewHydrationQueue.isEmpty() && processed < budget) {
 		const qulonglong messageID = m_modernShellPreviewHydrationQueue.takeFirst();
@@ -18881,7 +20851,7 @@ void MainWindow::flushModernShellPreviewHydrationQueue() {
 	}
 
 	if (!m_modernShellPreviewHydrationQueue.isEmpty() && m_modernShellPreviewHydrationTimer) {
-		m_modernShellPreviewHydrationTimer->start(m_modernShellPreviewHydrationLinkDense ? 80 : 50);
+		m_modernShellPreviewHydrationTimer->start(m_modernShellPreviewHydrationLinkDense ? 140 : 90);
 	}
 }
 
@@ -19058,9 +21028,10 @@ QVariantMap MainWindow::buildModernShellActiveScopeState(const PersistentChatTar
 		} else if (target.directMessage) {
 			scopeDescription = tr("Direct messages still use the classic text-message path.");
 		} else if (target.scope == MumbleProto::TextChannel) {
-			scopeDescription = tr("Persistent history for this text room.");
+			scopeDescription = tr("Persistent text room") + QStringLiteral(" · ") + tr("history kept");
 		} else if (target.scope == MumbleProto::Channel) {
-			scopeDescription = tr("Persistent history for this voice room.");
+			const int voiceUserCount = target.channel ? target.channel->qlUsers.count() : 0;
+			scopeDescription        = tr("%1 in voice").arg(voiceUserCount) + QStringLiteral(" · ") + tr("history kept");
 		}
 	}
 
@@ -19151,7 +21122,9 @@ QVariantMap MainWindow::buildModernShellActiveScopeState(const PersistentChatTar
 		}
 	}
 	if (target.scope == MumbleProto::Channel && target.channel) {
-		activeScope.insert(QStringLiteral("screenShare"), buildModernShellVoiceRoomScreenShareState(target.channel));
+		QVariantMap screenShare = buildModernShellVoiceRoomScreenShareState(target.channel);
+		overlayModernShellScreenShareStateProbe(screenShare, m_modernScreenShareStateProbe);
+		activeScope.insert(QStringLiteral("screenShare"), screenShare);
 	} else {
 		QVariantMap hiddenScreenShare;
 		hiddenScreenShare.insert(QStringLiteral("visible"), false);
@@ -19257,8 +21230,7 @@ QVariantMap MainWindow::buildModernShellListenerPatchState(const ClientUser *use
 	participant.insert(QStringLiteral("scopeToken"),
 					   modernShellScopeToken(static_cast< int >(MumbleProto::Channel), channel->iId));
 	participant.insert(QStringLiteral("label"), user->qsName);
-	participant.insert(QStringLiteral("subtitle"),
-					   user == selfUser ? tr("You are listening in this room") : tr("Listening in this room"));
+	participant.insert(QStringLiteral("subtitle"), modernShellParticipantSubtitle(user, channel, selfUser, nullptr));
 	participant.insert(QStringLiteral("isSelf"), user == selfUser);
 	if (includeAvatar) {
 		participant.insert(QStringLiteral("avatarUrl"), modernShellAvatarDataUrl(user, avatarSize));
@@ -19388,16 +21360,27 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 														: (Global::get().s.bMute ? QStringLiteral("warning")
 																				 : QStringLiteral("success"))));
 	appState.insert(QStringLiteral("selfVoiceLabel"), selfVoiceChannel ? selfVoiceChannel->qsName : QString());
+	insertModernShellConnectionStatus(appState, qtReconnect, qaServerDisconnect && qaServerDisconnect->isEnabled());
+	overlayModernShellConnectionStateProbe(appState, m_modernConnectionStateProbe);
 	appState.insert(QStringLiteral("canManageTextChannels"), canManagePersistentTextChannels());
 	appState.insert(QStringLiteral("canCreateTextRoom"), canCreateTextRoom());
 	appState.insert(QStringLiteral("inlineMp4PlaybackSupported"), ModernShellInlineMp4PlaybackSupported);
 	QVariantMap stonksState = m_stonksState.isEmpty() ? stonksHeaderState() : m_stonksState;
 	const QVariantMap currentStonksHeader = stonksHeaderState();
+	const bool automationStonksHeader =
+		stonksState.value(QStringLiteral("automationHeaderVisible"), false).toBool();
 	for (auto it = currentStonksHeader.cbegin(); it != currentStonksHeader.cend(); ++it) {
+		if (automationStonksHeader && stonksState.contains(it.key())) {
+			continue;
+		}
 		stonksState.insert(it.key(), it.value());
 	}
 	appState.insert(QStringLiteral("stonks"), stonksState);
 	appState.insert(QStringLiteral("motdExpanded"), Global::get().s.bModernShellMotdExpanded);
+	appState.insert(QStringLiteral("motdDismissedSignature"),
+					Global::get().s.qsModernShellMotdDismissedSignature);
+	appState.insert(QStringLiteral("motdLastSeenSignature"),
+					Global::get().s.qsModernShellMotdLastSeenSignature);
 	if (connected) {
 		if (const Channel *rootVoiceChannel = Channel::get(Mumble::ROOT_CHANNEL_ID)) {
 			appState.insert(QStringLiteral("voiceRootLabel"), QString());
@@ -19410,22 +21393,7 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 	on_qmConfig_aboutToShow();
 	qmHelp->ensurePolished();
 
-	QVariantList appMenus;
-	const auto addAppMenu = [&appMenus](const QString &id, const QString &menuLabel, const QVariantList &items) {
-		QVariantMap menu;
-		menu.insert(QStringLiteral("id"), id);
-		menu.insert(QStringLiteral("label"), menuLabel);
-		menu.insert(QStringLiteral("items"), items);
-		appMenus.push_back(menu);
-	};
-	addAppMenu(QStringLiteral("server"), ModernShellMenuSerializer::normalizedActionLabel(qmServer->title()),
-			   serializeModernShellMenu(qmServer, ModernShellMenuContext::AppServer));
-	addAppMenu(QStringLiteral("self"), ModernShellMenuSerializer::normalizedActionLabel(qmSelf->title()),
-			   serializeModernShellMenu(qmSelf, ModernShellMenuContext::AppSelf));
-	addAppMenu(QStringLiteral("configure"), ModernShellMenuSerializer::normalizedActionLabel(qmConfig->title()),
-			   buildModernShellConfigureMenuItems());
-	addAppMenu(QStringLiteral("help"), ModernShellMenuSerializer::normalizedActionLabel(qmHelp->title()),
-			   serializeModernShellMenu(qmHelp, ModernShellMenuContext::AppHelp));
+	QVariantList appMenus = buildModernShellAppMenus();
 	appState.insert(QStringLiteral("menus"), appMenus);
 
 	const bool selfIdle = connected && selfUser && isUserIdle(selfUser->uiSession);
@@ -19478,12 +21446,13 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 																	false, QStringLiteral("danger")));
 	selfMenu.insert(QStringLiteral("actions"), ModernShellMenuSerializer::normalize(selfMenuActions));
 	appState.insert(QStringLiteral("selfMenu"), selfMenu);
+	appState.insert(QStringLiteral("directMessages"), buildModernShellDirectMessagesState());
 	patch.insert(QStringLiteral("app"), appState);
 
 	const auto selectedScope = [&target](const int scopeValue, const unsigned int scopeID) {
 		return (target.serverLog && scopeValue == LocalServerLogScope)
-			   || (target.directMessage && target.user && scopeValue == LocalDirectMessageScope
-				   && target.user->uiSession == scopeID)
+			   || (target.directMessage && scopeValue == LocalDirectMessageScope
+				   && ((target.user && target.user->uiSession == scopeID) || (!target.user && target.scopeID == scopeID)))
 			   || (!target.serverLog && !target.directMessage && target.valid
 				   && static_cast< int >(target.scope) == scopeValue && target.scopeID == scopeID);
 	};
@@ -19539,7 +21508,7 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 		}
 		if (canEditPersistentTextChannelACL(textChannel)) {
 			actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("textRoom.acl"),
-																	tr("Edit visibility rules..."), true, false));
+																	tr("Configure ACL..."), true, false));
 		}
 		if (Channel::get(textChannel.aclChannelID)) {
 			actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("textRoom.visibilitySource"),
@@ -19612,8 +21581,7 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 
 			voiceChatTextRoomIDs.insert(channel->iId);
 			appendTextRoom(static_cast< int >(MumbleProto::Channel), channel->iId, channel->qsName,
-						   tr("Voice room chat for %1.").arg(persistentTextAclChannelLabel(channel)),
-						   tr("Voice room"), MumbleProto::Channel,
+						   voiceRoomChatListDescription(channel), tr("Voice room"), MumbleProto::Channel,
 						   joinedVoiceChannel && joinedVoiceChannel->iId == channel->iId);
 		};
 		appendVoiceChatTextRoom(joinedVoiceChannel);
@@ -19662,12 +21630,10 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 		room.insert(QStringLiteral("token"),
 					modernShellScopeToken(static_cast< int >(MumbleProto::Channel), channel->iId));
 		room.insert(QStringLiteral("label"), channel->qsName);
-		room.insert(QStringLiteral("description"),
-					tr("%1 people in %2").arg(channel->qlUsers.count()).arg(persistentTextAclChannelLabel(channel)));
+		room.insert(QStringLiteral("description"), voiceRoomBrowserDescription(channel));
 		room.insert(QStringLiteral("pathLabel"), persistentTextAclChannelLabel(channel));
 		room.insert(QStringLiteral("depth"), depth);
 		room.insert(QStringLiteral("isRoot"), isRootRoom);
-		room.insert(QStringLiteral("memberCount"), channel->qlUsers.count());
 		room.insert(QStringLiteral("participants"), buildModernShellChannelParticipantPatchStates(channel, 32, true));
 		room.insert(QStringLiteral("selected"), selected);
 		room.insert(QStringLiteral("joined"), joined);
@@ -19990,30 +21956,71 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 		Global::get().sh->getConnectionInfo(host, port, username, password);
 	}
 
-	const QString serverLabel =
+	const QString endpointLabel =
 		host.trimmed().isEmpty() ? tr("Mumble")
 								 : (port == 0 || port == DEFAULT_MUMBLE_PORT ? host : tr("%1:%2").arg(host).arg(port));
+	const QString lastServerName = Global::get().s.qsLastServer.trimmed();
+	const QString serverLabel    = connected && !lastServerName.isEmpty() ? lastServerName : endpointLabel;
+	const Channel *rootVoiceChannelForIdentity = Channel::get(Mumble::ROOT_CHANNEL_ID);
+	const QString rootServerLabel =
+		connected && rootVoiceChannelForIdentity && rootVoiceChannelForIdentity->qsName != tr("Root")
+			? rootVoiceChannelForIdentity->qsName.trimmed()
+			: QString();
+	const QString configuredServerDisplayName = Global::get().qsServerDisplayName.trimmed();
+	const QString fallbackServerDisplayName = !rootServerLabel.isEmpty() ? rootServerLabel : serverLabel;
+	const QString visibleServerTitle = connected && !configuredServerDisplayName.isEmpty()
+										   ? configuredServerDisplayName
+										   : fallbackServerDisplayName;
+	const QString configuredServerMonogram = Global::get().qsServerMonogram.trimmed();
+	const QString resolvedServerMonogram = !configuredServerMonogram.isEmpty()
+											   ? configuredServerMonogram
+											   : persistentChatInitials(visibleServerTitle);
+	const QString configuredServerImageUrl = modernShellServerImageDataUrl(Global::get().qbaServerImage);
 	const Channel *joinedVoiceChannel   = currentVoiceChannel();
 	const Channel *selfVoiceChannel     = currentVoiceChannel();
-	const ClientUser *selfUser          = ClientUser::get(Global::get().uiSession);
+	ClientUser *selfUser                = ClientUser::get(Global::get().uiSession);
 	const bool canUsePersistedReactions = selfUser && selfUser->iId >= 0;
 	appState.insert(QStringLiteral("serverEyebrow"), connected ? tr("Connected server") : tr("Mumble"));
-	appState.insert(QStringLiteral("serverTitle"), connected ? serverLabel : tr("Modern Layout"));
+	appState.insert(QStringLiteral("serverTitle"), connected ? visibleServerTitle : tr("Mumble"));
 	appState.insert(QStringLiteral("serverSubtitle"),
 					connected ? (username.trimmed().isEmpty()
 									 ? tr("Room-first shell with persistent chat history")
 									 : tr("Room-first shell with persistent chat history as %1").arg(username))
-							  : tr("Connect to a server to populate rooms, activity, and history."));
+							  : tr("Modern layout"));
+	appState.insert(QStringLiteral("serverAvatarUrl"),
+					connected ? configuredServerImageUrl : QStringLiteral("qrc:///modern-shell/mumble.svg"));
+	appState.insert(QStringLiteral("serverIdentityKind"),
+					connected ? QStringLiteral("server") : QStringLiteral("application"));
+	QVariantMap serverIdentity;
+	serverIdentity.insert(QStringLiteral("displayName"), configuredServerDisplayName);
+	serverIdentity.insert(QStringLiteral("monogram"), configuredServerMonogram);
+	serverIdentity.insert(QStringLiteral("imageUrl"), connected ? configuredServerImageUrl : QString());
+	serverIdentity.insert(QStringLiteral("hasImage"), connected && !configuredServerImageUrl.isEmpty());
+	serverIdentity.insert(QStringLiteral("fallbackDisplayName"), connected ? fallbackServerDisplayName : tr("Mumble"));
+	serverIdentity.insert(QStringLiteral("resolvedDisplayName"), connected ? visibleServerTitle : tr("Mumble"));
+	serverIdentity.insert(QStringLiteral("resolvedMonogram"), connected ? resolvedServerMonogram : QStringLiteral("M"));
+	serverIdentity.insert(QStringLiteral("rootName"), rootServerLabel);
+	serverIdentity.insert(QStringLiteral("canEdit"), canManagePersistentTextChannels());
+	serverIdentity.insert(QStringLiteral("source"),
+						  !configuredServerDisplayName.isEmpty()
+							  ? QStringLiteral("serverConfig")
+							  : (!rootServerLabel.isEmpty() ? QStringLiteral("root") : QStringLiteral("connection")));
+	appState.insert(QStringLiteral("serverIdentity"), serverIdentity);
+	appState.insert(QStringLiteral("uiTweaks"), modernShellUiTweaksDto(Global::get().s));
 	appState.insert(QStringLiteral("motdHtml"), persistentChatContentHtml(m_persistentChatWelcomeText));
 	appState.insert(QStringLiteral("motdSummary"), persistentChatPlainTextSummary(m_persistentChatWelcomeText));
 	appState.insert(QStringLiteral("motdExpanded"), Global::get().s.bModernShellMotdExpanded);
+	appState.insert(QStringLiteral("motdDismissedSignature"),
+					Global::get().s.qsModernShellMotdDismissedSignature);
+	appState.insert(QStringLiteral("motdLastSeenSignature"),
+					Global::get().s.qsModernShellMotdLastSeenSignature);
 	appState.insert(QStringLiteral("layoutLabel"), autoSwitchedModern ? tr("Modern (auto)") : tr("Modern"));
 	appState.insert(QStringLiteral("layoutTone"), QStringLiteral("accent"));
 	appState.insert(QStringLiteral("layoutSwitchLabel"), tr("Modern layout is required by this fork"));
 	appState.insert(QStringLiteral("layoutSwitchTargetLabel"), QString());
 	appState.insert(QStringLiteral("canToggleLayout"), false);
-	appState.insert(QStringLiteral("connectionLabel"), connected ? tr("Connected") : tr("Disconnected"));
-	appState.insert(QStringLiteral("connectionTone"), connected ? QStringLiteral("success") : QStringLiteral("danger"));
+	insertModernShellConnectionStatus(appState, qtReconnect, qaServerDisconnect && qaServerDisconnect->isEnabled());
+	overlayModernShellConnectionStateProbe(appState, m_modernConnectionStateProbe);
 	appState.insert(QStringLiteral("compatibilityLabel"),
 					!connected
 						? tr("Waiting for server config")
@@ -20022,8 +22029,6 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 					!connected
 						? QStringLiteral("warning")
 						: (m_modernLayoutCompatibleServer ? QStringLiteral("accent") : QStringLiteral("warning")));
-	appState.insert(QStringLiteral("canConnect"), !connected);
-	appState.insert(QStringLiteral("canDisconnect"), connected);
 	appState.insert(QStringLiteral("selfMuted"), Global::get().s.bMute);
 	appState.insert(QStringLiteral("selfDeafened"), Global::get().s.bDeaf);
 	appState.insert(QStringLiteral("selfName"),
@@ -20039,10 +22044,35 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 																				 : QStringLiteral("success"))));
 	appState.insert(QStringLiteral("selfVoiceLabel"), selfVoiceChannel ? selfVoiceChannel->qsName : QString());
 	appState.insert(QStringLiteral("selfAvatarUrl"), modernShellAvatarDataUrl(selfUser, 56));
+	QVariantMap selfComment;
+	QString selfCommentPlainText;
+	bool selfCommentLoading = false;
+	if (selfUser) {
+		if (!selfUser->qbaCommentHash.isEmpty() && selfUser->qsComment.isEmpty() && Global::get().db) {
+			selfUser->qsComment = QString::fromUtf8(Global::get().db->blob(selfUser->qbaCommentHash));
+			selfCommentLoading  = selfUser->qsComment.isEmpty();
+		}
+		selfCommentPlainText = QTextDocumentFragment::fromHtml(selfUser->qsComment).toPlainText();
+	}
+	selfComment.insert(QStringLiteral("plainText"), selfCommentPlainText);
+	selfComment.insert(QStringLiteral("loading"), selfCommentLoading);
+	selfComment.insert(QStringLiteral("error"), QString());
+	selfComment.insert(QStringLiteral("canEdit"), connected && selfUser);
+	appState.insert(QStringLiteral("selfComment"), selfComment);
 	appState.insert(QStringLiteral("canManageTextChannels"), canManagePersistentTextChannels());
 	appState.insert(QStringLiteral("canCreateTextRoom"), canCreateTextRoom());
 	appState.insert(QStringLiteral("inlineMp4PlaybackSupported"), ModernShellInlineMp4PlaybackSupported);
-	appState.insert(QStringLiteral("stonks"), stonksHeaderState());
+	QVariantMap disconnectedStonksState = m_stonksState.isEmpty() ? stonksHeaderState() : m_stonksState;
+	const QVariantMap currentDisconnectedStonksHeader = stonksHeaderState();
+	const bool automationDisconnectedStonksHeader =
+		disconnectedStonksState.value(QStringLiteral("automationHeaderVisible"), false).toBool();
+	for (auto it = currentDisconnectedStonksHeader.cbegin(); it != currentDisconnectedStonksHeader.cend(); ++it) {
+		if (automationDisconnectedStonksHeader && disconnectedStonksState.contains(it.key())) {
+			continue;
+		}
+		disconnectedStonksState.insert(it.key(), it.value());
+	}
+	appState.insert(QStringLiteral("stonks"), disconnectedStonksState);
 	if (connected) {
 		if (const Channel *rootVoiceChannel = Channel::get(Mumble::ROOT_CHANNEL_ID)) {
 			appState.insert(QStringLiteral("voiceRootLabel"), QString());
@@ -20054,22 +22084,7 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 	on_qmSelf_aboutToShow();
 	on_qmConfig_aboutToShow();
 	qmHelp->ensurePolished();
-	QVariantList appMenus;
-	const auto addAppMenu = [&appMenus](const QString &id, const QString &menuLabel, const QVariantList &items) {
-		QVariantMap menu;
-		menu.insert(QStringLiteral("id"), id);
-		menu.insert(QStringLiteral("label"), menuLabel);
-		menu.insert(QStringLiteral("items"), items);
-		appMenus.push_back(menu);
-	};
-	addAppMenu(QStringLiteral("server"), ModernShellMenuSerializer::normalizedActionLabel(qmServer->title()),
-			   serializeModernShellMenu(qmServer, ModernShellMenuContext::AppServer));
-	addAppMenu(QStringLiteral("self"), ModernShellMenuSerializer::normalizedActionLabel(qmSelf->title()),
-			   serializeModernShellMenu(qmSelf, ModernShellMenuContext::AppSelf));
-	addAppMenu(QStringLiteral("configure"), ModernShellMenuSerializer::normalizedActionLabel(qmConfig->title()),
-			   buildModernShellConfigureMenuItems());
-	addAppMenu(QStringLiteral("help"), ModernShellMenuSerializer::normalizedActionLabel(qmHelp->title()),
-			   serializeModernShellMenu(qmHelp, ModernShellMenuContext::AppHelp));
+	QVariantList appMenus = buildModernShellAppMenus();
 	appState.insert(QStringLiteral("menus"), appMenus);
 
 	const bool selfIdle = connected && selfUser && isUserIdle(selfUser->uiSession);
@@ -20122,6 +22137,7 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 																	false, QStringLiteral("danger")));
 	selfMenu.insert(QStringLiteral("actions"), ModernShellMenuSerializer::normalize(selfMenuActions));
 	appState.insert(QStringLiteral("selfMenu"), selfMenu);
+	appState.insert(QStringLiteral("directMessages"), buildModernShellDirectMessagesState());
 	snapshot.insert(QStringLiteral("app"), appState);
 
 	if (modernShellMinimalSnapshotEnabled()) {
@@ -20155,6 +22171,54 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 		snapshot.insert(QStringLiteral("activeScope"), activeScope);
 		snapshot.insert(QStringLiteral("messages"), QVariantList());
 		appendModernShellConnectTrace(QStringLiteral("buildModernShellSnapshot minimal-return"));
+		return snapshot;
+	}
+
+	if (!m_modernRichPreviewProbeMessages.isEmpty()) {
+		activeScope.insert(QStringLiteral("kindLabel"), tr("Preview probe"));
+		activeScope.insert(QStringLiteral("label"), QStringLiteral("#rich-preview"));
+		activeScope.insert(QStringLiteral("description"), tr("Seeded chat preview state for mockup review."));
+		activeScope.insert(QStringLiteral("scopeToken"), QStringLiteral("automation:rich-preview"));
+		activeScope.insert(QStringLiteral("meta"), QVariantList());
+		activeScope.insert(QStringLiteral("canSend"), false);
+		activeScope.insert(QStringLiteral("canLoadOlder"), false);
+		activeScope.insert(QStringLiteral("canMarkRead"), false);
+		activeScope.insert(QStringLiteral("composerPlaceholder"), tr("Preview probe"));
+		activeScope.insert(QStringLiteral("composerHint"), tr("Automation-only state; no message will be sent."));
+		activeScope.insert(QStringLiteral("emptyCopy"), tr("Preview probe has no messages."));
+		activeScope.insert(QStringLiteral("scrollToBottom"), true);
+		activeScope.insert(QStringLiteral("autoMarkRead"), false);
+		activeScope.insert(QStringLiteral("serverLog"), false);
+		activeScope.insert(QStringLiteral("readOnly"), true);
+		snapshot.insert(QStringLiteral("textRooms"), QVariantList());
+		snapshot.insert(QStringLiteral("voiceRooms"), QVariantList());
+		snapshot.insert(QStringLiteral("activeScope"), activeScope);
+		snapshot.insert(QStringLiteral("messages"), m_modernRichPreviewProbeMessages);
+		appendModernShellConnectTrace(QStringLiteral("buildModernShellSnapshot rich-preview-probe-return"));
+		return snapshot;
+	}
+
+	if (!m_modernMessageDeliveryProbeMessages.isEmpty()) {
+		activeScope.insert(QStringLiteral("kindLabel"), tr("Delivery probe"));
+		activeScope.insert(QStringLiteral("label"), QStringLiteral("#delivery"));
+		activeScope.insert(QStringLiteral("description"), tr("Seeded message delivery state for mockup review."));
+		activeScope.insert(QStringLiteral("scopeToken"), QStringLiteral("automation:message-delivery"));
+		activeScope.insert(QStringLiteral("meta"), QVariantList());
+		activeScope.insert(QStringLiteral("canSend"), false);
+		activeScope.insert(QStringLiteral("canLoadOlder"), false);
+		activeScope.insert(QStringLiteral("canMarkRead"), false);
+		activeScope.insert(QStringLiteral("composerPlaceholder"), tr("Delivery probe"));
+		activeScope.insert(QStringLiteral("composerHint"), tr("Automation-only state; no message will be sent."));
+		activeScope.insert(QStringLiteral("emptyCopy"), tr("Delivery probe has no messages."));
+		activeScope.insert(QStringLiteral("scrollToBottom"), true);
+		activeScope.insert(QStringLiteral("autoMarkRead"), false);
+		activeScope.insert(QStringLiteral("serverLog"), false);
+		activeScope.insert(QStringLiteral("readOnly"), true);
+		snapshot.insert(QStringLiteral("textRooms"), QVariantList());
+		snapshot.insert(QStringLiteral("voiceRooms"), QVariantList());
+		snapshot.insert(QStringLiteral("activeScope"), activeScope);
+		snapshot.insert(QStringLiteral("messages"), m_modernMessageDeliveryProbeMessages);
+		appendModernShellConnectTrace(QStringLiteral("buildModernShellSnapshot message-delivery-probe-return"));
 		return snapshot;
 	}
 
@@ -20236,7 +22300,7 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 		}
 		if (canEditPersistentTextChannelACL(textChannel)) {
 			actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("textRoom.acl"),
-																	tr("Edit visibility rules..."), true, false));
+																	tr("Configure ACL..."), true, false));
 		}
 		if (Channel::get(textChannel.aclChannelID)) {
 			actions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("textRoom.visibilitySource"),
@@ -20253,27 +22317,6 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 
 		return ModernShellMenuSerializer::normalize(actions);
 	};
-	const bool exposeChannelMenuInAppChrome =
-		target.channel && (target.scope == MumbleProto::TextChannel || target.scope == MumbleProto::Channel);
-	if (exposeChannelMenuInAppChrome) {
-		QVariantList channelMenuItems;
-		if (target.scope == MumbleProto::TextChannel) {
-			const auto textChannelIt = m_persistentTextChannels.constFind(target.scopeID);
-			if (textChannelIt != m_persistentTextChannels.cend()) {
-				channelMenuItems = buildPersistentTextRoomActions(*textChannelIt);
-			}
-		} else {
-			channelMenuItems = buildChannelActions(target.channel, true);
-		}
-		QVariantMap channelMenu;
-		channelMenu.insert(QStringLiteral("id"), QStringLiteral("channel"));
-		channelMenu.insert(QStringLiteral("label"),
-						   ModernShellMenuSerializer::normalizedActionLabel(qmChannel->title()));
-		channelMenu.insert(QStringLiteral("items"), channelMenuItems);
-		appMenus.insert(1, channelMenu);
-		appState.insert(QStringLiteral("menus"), appMenus);
-		snapshot.insert(QStringLiteral("app"), appState);
-	}
 	const auto buildListenerActions = [this, restoreModernShellInputState](ClientUser *owner, Channel *channel) {
 		QVariantList actions;
 		if (!owner || !channel) {
@@ -20383,8 +22426,7 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 		participant.insert(QStringLiteral("scopeToken"),
 						   modernShellScopeToken(static_cast< int >(MumbleProto::Channel), channel->iId));
 		participant.insert(QStringLiteral("label"), user->qsName);
-		participant.insert(QStringLiteral("subtitle"),
-						   user == selfUser ? tr("You are listening in this room") : tr("Listening in this room"));
+		participant.insert(QStringLiteral("subtitle"), modernShellParticipantSubtitle(user, channel, selfUser, nullptr));
 		participant.insert(QStringLiteral("isSelf"), user == selfUser);
 		if (includeAvatar) {
 			participant.insert(QStringLiteral("avatarUrl"), modernShellAvatarDataUrl(user, avatarSize));
@@ -20582,8 +22624,8 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 			const QString itemToolTip  = item->toolTip();
 			const bool selectedScope =
 				(target.serverLog && scopeValue == LocalServerLogScope)
-				|| (target.directMessage && target.user && scopeValue == LocalDirectMessageScope
-					&& target.user->uiSession == scopeID)
+				|| (target.directMessage && scopeValue == LocalDirectMessageScope
+					&& ((target.user && target.user->uiSession == scopeID) || (!target.user && target.scopeID == scopeID)))
 				|| (!target.serverLog && !target.directMessage && target.valid && target.scopeID == scopeID
 					&& scopeValue == static_cast< int >(target.scope));
 
@@ -20647,13 +22689,11 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 		room.insert(QStringLiteral("token"),
 					modernShellScopeToken(static_cast< int >(MumbleProto::Channel), channel->iId));
 		room.insert(QStringLiteral("label"), channel->qsName);
-		room.insert(QStringLiteral("description"),
-					tr("%1 people in %2").arg(channel->qlUsers.count()).arg(persistentTextAclChannelLabel(channel)));
+		room.insert(QStringLiteral("description"), voiceRoomBrowserDescription(channel));
 		room.insert(QStringLiteral("pathLabel"), persistentTextAclChannelLabel(channel));
 		room.insert(QStringLiteral("depth"), depth);
 		const bool isRootRoom = channel->iId == Mumble::ROOT_CHANNEL_ID;
 		room.insert(QStringLiteral("isRoot"), isRootRoom);
-		room.insert(QStringLiteral("memberCount"), channel->qlUsers.count());
 		const bool selectedVoiceRoom =
 			target.valid && target.scope == MumbleProto::Channel && target.scopeID == channel->iId;
 		const bool joinedVoiceRoom = joinedVoiceChannel && joinedVoiceChannel->iId == channel->iId;
@@ -20698,9 +22738,10 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 		} else if (target.directMessage) {
 			scopeDescription = tr("Direct messages still use the classic text-message path.");
 		} else if (target.scope == MumbleProto::TextChannel) {
-			scopeDescription = tr("Persistent history for this text room.");
+			scopeDescription = tr("Persistent text room") + QStringLiteral(" · ") + tr("history kept");
 		} else if (target.scope == MumbleProto::Channel) {
-			scopeDescription = tr("Persistent history for this voice room.");
+			const int voiceUserCount = target.channel ? target.channel->qlUsers.count() : 0;
+			scopeDescription        = tr("%1 in voice").arg(voiceUserCount) + QStringLiteral(" · ") + tr("history kept");
 		}
 	}
 
@@ -20789,7 +22830,9 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 		}
 	}
 	if (target.scope == MumbleProto::Channel && target.channel) {
-		activeScope.insert(QStringLiteral("screenShare"), buildVoiceRoomScreenShareState(target.channel));
+		QVariantMap screenShare = buildVoiceRoomScreenShareState(target.channel);
+		overlayModernShellScreenShareStateProbe(screenShare, m_modernScreenShareStateProbe);
+		activeScope.insert(QStringLiteral("screenShare"), screenShare);
 	} else {
 		QVariantMap hiddenScreenShare;
 		hiddenScreenShare.insert(QStringLiteral("visible"), false);
@@ -20842,6 +22885,596 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 	return snapshot;
 }
 
+QVariantMap MainWindow::buildModernShellDirectMessageEntryState(const ModernDirectMessageEntry &entry) const {
+	QVariantMap state;
+	state.insert(QStringLiteral("id"), QString::number(entry.localID));
+	state.insert(QStringLiteral("localId"), static_cast< qulonglong >(entry.localID));
+	state.insert(QStringLiteral("peerSession"), static_cast< qulonglong >(entry.peerSession));
+	state.insert(QStringLiteral("actorSession"), static_cast< qulonglong >(entry.actorSession));
+	state.insert(QStringLiteral("actorName"), entry.actorName);
+	state.insert(QStringLiteral("own"), entry.outgoing);
+	state.insert(QStringLiteral("direction"), entry.outgoing ? QStringLiteral("outgoing") : QStringLiteral("incoming"));
+	state.insert(QStringLiteral("messageHtml"), entry.messageHtml);
+	state.insert(QStringLiteral("plainText"), entry.plainText);
+	state.insert(QStringLiteral("createdAtMs"), static_cast< qulonglong >(std::max< qint64 >(0, entry.createdAtMs)));
+	state.insert(QStringLiteral("persistent"), entry.persistent);
+	state.insert(QStringLiteral("threadId"), static_cast< qulonglong >(entry.threadID));
+	state.insert(QStringLiteral("messageId"), static_cast< qulonglong >(entry.messageID));
+	return state;
+}
+
+std::optional< unsigned int > MainWindow::persistentUserIDForClientUser(const ClientUser *user) const {
+	if (!user || user->iId < 0) {
+		return std::nullopt;
+	}
+
+	return static_cast< unsigned int >(user->iId);
+}
+
+ClientUser *MainWindow::clientUserByPersistentUserID(const unsigned int userID) const {
+	QReadLocker locker(&ClientUser::c_qrwlUsers);
+	for (ClientUser *user : ClientUser::c_qmUsers) {
+		if (user && user->iId >= 0 && static_cast< unsigned int >(user->iId) == userID) {
+			return user;
+		}
+	}
+
+	return nullptr;
+}
+
+QString MainWindow::modernDirectMessagePersistentHistoryUnavailableReason(const ClientUser *peer) const {
+	if (!peer) {
+		return tr("That user is no longer available.");
+	}
+	if (peer->uiSession == Global::get().uiSession) {
+		return tr("Choose another user before opening persistent direct-message history.");
+	}
+	if (!Global::get().sh || !Global::get().sh->isRunning()) {
+		return tr("Connect to a server before using persistent direct-message history.");
+	}
+	if (!m_persistentChatGateway) {
+		return tr("Persistent chat history is not ready for this connection.");
+	}
+	if (!Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures,
+														 MumbleProto::ChatFeaturePersistentHistory)) {
+		return tr("This server does not advertise persistent chat history.");
+	}
+	if (!Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures,
+														 MumbleProto::ChatFeatureDirectMessages)) {
+		return tr("This server does not advertise persistent direct-message history.");
+	}
+
+	const ClientUser *self = ClientUser::get(Global::get().uiSession);
+	if (!persistentUserIDForClientUser(self)) {
+		return tr("Register your user before using persistent direct-message history.");
+	}
+	if (!persistentUserIDForClientUser(peer)) {
+		return tr("%1 needs a registered account before persistent direct-message history can be used.").arg(peer->qsName);
+	}
+
+	return QString();
+}
+
+bool MainWindow::modernDirectMessagePersistentHistoryAvailable(const ClientUser *peer) const {
+	return modernDirectMessagePersistentHistoryUnavailableReason(peer).isEmpty();
+}
+
+QVariantMap MainWindow::buildModernShellDirectMessageConversationState(
+	const ModernDirectMessageConversation &conversation, const bool includeMessages) const {
+	QVariantMap state;
+	const ClientUser *peer = ClientUser::get(conversation.peerSession);
+	const bool connected   = Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning();
+	const QString historyUnavailableReason = modernDirectMessagePersistentHistoryUnavailableReason(peer);
+	const bool historyAvailable            = historyUnavailableReason.isEmpty();
+
+	PersistentChatTarget target;
+	target.valid         = peer != nullptr;
+	target.directMessage = true;
+	target.user          = const_cast< ClientUser * >(peer);
+	target.channel       = peer ? peer->cChannel : nullptr;
+
+	const QString conversationLabel =
+		peer ? peer->qsName
+			 : (!conversation.label.trimmed().isEmpty()
+					? conversation.label
+					: tr("User %1").arg(static_cast< qulonglong >(conversation.peerSession)));
+	const QString subtitle =
+		peer && peer->cChannel
+			? tr("In %1").arg(peer->cChannel->qsName)
+			: (!conversation.subtitle.trimmed().isEmpty() ? conversation.subtitle : tr("Offline or unavailable"));
+	const bool canSend = connected && peer && peer->uiSession != Global::get().uiSession
+						 && canSendToPersistentChatTarget(target, false);
+
+	state.insert(QStringLiteral("token"),
+				 QStringLiteral("dm:%1").arg(static_cast< qulonglong >(conversation.peerSession)));
+	state.insert(QStringLiteral("session"), static_cast< qulonglong >(conversation.peerSession));
+	state.insert(QStringLiteral("peerSession"), static_cast< qulonglong >(conversation.peerSession));
+	state.insert(QStringLiteral("label"), conversationLabel);
+	state.insert(QStringLiteral("subtitle"), subtitle);
+	state.insert(QStringLiteral("avatarUrl"), peer ? modernShellAvatarDataUrl(peer, 40) : QString());
+	state.insert(QStringLiteral("open"), conversation.open);
+	state.insert(QStringLiteral("unreadCount"), static_cast< qulonglong >(conversation.unreadCount));
+	state.insert(QStringLiteral("canSend"), canSend);
+	state.insert(QStringLiteral("mode"), conversation.persistentHistory ? QStringLiteral("history") : QStringLiteral("private"));
+	state.insert(QStringLiteral("persistentHistory"), conversation.persistentHistory);
+	state.insert(QStringLiteral("privateMode"), !conversation.persistentHistory);
+	state.insert(QStringLiteral("persistentHistoryAvailable"), historyAvailable);
+	state.insert(QStringLiteral("canPersistHistory"), historyAvailable);
+	state.insert(QStringLiteral("historyUnavailableReason"), historyUnavailableReason);
+	state.insert(QStringLiteral("historyLoading"), conversation.historyLoading);
+	state.insert(QStringLiteral("historyLoaded"), conversation.historyLoaded);
+	state.insert(QStringLiteral("historyError"), conversation.historyError);
+	state.insert(QStringLiteral("peerUserId"), static_cast< qulonglong >(conversation.peerUserID));
+	state.insert(QStringLiteral("lastReadMessageId"), static_cast< qulonglong >(conversation.lastReadMessageID));
+	state.insert(QStringLiteral("status"),
+				 canSend ? QStringLiteral("available")
+						 : (connected ? QStringLiteral("unavailable") : QStringLiteral("disconnected")));
+	state.insert(QStringLiteral("statusLabel"),
+				 canSend ? tr("Direct message")
+						 : (connected ? tr("Direct message unavailable") : tr("Connect to send")));
+	state.insert(QStringLiteral("lastActivityAtMs"),
+				 static_cast< qulonglong >(std::max< qint64 >(0, conversation.lastActivityAtMs)));
+	if (!conversation.messages.empty()) {
+		const ModernDirectMessageEntry &lastMessage = conversation.messages.back();
+		state.insert(QStringLiteral("lastMessagePreview"), lastMessage.plainText);
+		state.insert(QStringLiteral("lastMessageOwn"), lastMessage.outgoing);
+	} else {
+		state.insert(QStringLiteral("lastMessagePreview"), QString());
+		state.insert(QStringLiteral("lastMessageOwn"), false);
+	}
+
+	if (includeMessages) {
+		QVariantList messages;
+		for (const ModernDirectMessageEntry &entry : conversation.messages) {
+			messages.push_back(buildModernShellDirectMessageEntryState(entry));
+		}
+		state.insert(QStringLiteral("messages"), messages);
+		state.insert(QStringLiteral("emptyCopy"),
+					 tr("Direct messages with %1 will appear here.").arg(conversationLabel));
+	}
+
+	return state;
+}
+
+QVariantMap MainWindow::buildModernShellDirectMessagesState() const {
+	QVariantMap state;
+	const bool connected = Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning();
+	const ClientUser *self = ClientUser::get(Global::get().uiSession);
+	const bool directHistoryAvailable =
+		connected && persistentUserIDForClientUser(self).has_value()
+		&& Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures,
+														   MumbleProto::ChatFeaturePersistentHistory)
+		&& Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures,
+														   MumbleProto::ChatFeatureDirectMessages);
+	state.insert(QStringLiteral("available"), connected);
+	state.insert(QStringLiteral("transport"), directHistoryAvailable ? QStringLiteral("persistentChat")
+																	 : QStringLiteral("legacyTextMessage"));
+	state.insert(QStringLiteral("persistentHistory"), directHistoryAvailable);
+	state.insert(QStringLiteral("persistentHistoryAvailable"), directHistoryAvailable);
+	state.insert(QStringLiteral("privateModeAvailable"), connected);
+	state.insert(QStringLiteral("defaultMode"), directHistoryAvailable ? QStringLiteral("history")
+																	   : QStringLiteral("private"));
+	state.insert(QStringLiteral("canOpen"), connected);
+	state.insert(QStringLiteral("title"), tr("Direct messages"));
+	state.insert(QStringLiteral("trayOpen"), m_modernDirectMessageTrayOpenProbe);
+	state.insert(QStringLiteral("description"),
+				 directHistoryAvailable
+					 ? tr("Direct messages can use persistent history or private in-memory mode.")
+					 : tr("Direct messages use the private text-message transport and stay separate from room chat."));
+
+	QList< unsigned int > sessions = m_modernDirectMessageConversations.keys();
+	std::sort(sessions.begin(), sessions.end(), [this](const unsigned int lhs, const unsigned int rhs) {
+		const auto leftIt  = m_modernDirectMessageConversations.constFind(lhs);
+		const auto rightIt = m_modernDirectMessageConversations.constFind(rhs);
+		if (leftIt == m_modernDirectMessageConversations.cend()
+			|| rightIt == m_modernDirectMessageConversations.cend()) {
+			return lhs < rhs;
+		}
+		const ModernDirectMessageConversation &left  = leftIt.value();
+		const ModernDirectMessageConversation &right = rightIt.value();
+		if (left.lastActivityAtMs != right.lastActivityAtMs) {
+			return left.lastActivityAtMs > right.lastActivityAtMs;
+		}
+		if (left.unreadCount != right.unreadCount) {
+			return left.unreadCount > right.unreadCount;
+		}
+		return lhs < rhs;
+	});
+
+	QVariantList conversations;
+	QVariantList windows;
+	qulonglong unreadTotal = 0;
+	for (const unsigned int session : sessions) {
+		const auto conversationIt = m_modernDirectMessageConversations.constFind(session);
+		if (conversationIt == m_modernDirectMessageConversations.cend()) {
+			continue;
+		}
+		const ModernDirectMessageConversation &conversation = conversationIt.value();
+		unreadTotal += conversation.unreadCount;
+		conversations.push_back(buildModernShellDirectMessageConversationState(conversation, true));
+		if (conversation.open) {
+			windows.push_back(buildModernShellDirectMessageConversationState(conversation, true));
+		}
+	}
+
+	state.insert(QStringLiteral("unreadTotal"), unreadTotal);
+	state.insert(QStringLiteral("hasUnread"), unreadTotal > 0);
+	state.insert(QStringLiteral("conversations"), conversations);
+	state.insert(QStringLiteral("windows"), windows);
+	return state;
+}
+
+bool MainWindow::openModernDirectMessage(const unsigned int session, const bool markRead) {
+	if (session == 0 || session == Global::get().uiSession) {
+		return false;
+	}
+
+	ClientUser *peer = ClientUser::get(session);
+	if (!peer) {
+		auto conversationIt = m_modernDirectMessageConversations.find(session);
+		if (conversationIt == m_modernDirectMessageConversations.end()) {
+			return false;
+		}
+
+		ModernDirectMessageConversation &conversation = conversationIt.value();
+		conversation.peerSession                       = session;
+		conversation.open                              = true;
+		if (markRead) {
+			conversation.unreadCount = 0;
+		}
+		publishModernDirectMessagesPatch();
+		return true;
+	}
+
+	ModernDirectMessageConversation &conversation = m_modernDirectMessageConversations[session];
+	conversation.peerSession = session;
+	conversation.label       = peer->qsName;
+	conversation.subtitle    = peer->cChannel ? tr("In %1").arg(peer->cChannel->qsName) : tr("No active channel");
+	conversation.peerUserID  = persistentUserIDForClientUser(peer).value_or(conversation.peerUserID);
+	conversation.open        = true;
+	if (markRead) {
+		conversation.unreadCount = 0;
+	}
+	if (conversation.persistentHistory && !conversation.historyLoaded && !conversation.historyLoading) {
+		requestModernDirectMessageHistory(session);
+	}
+	publishModernDirectMessagesPatch();
+	return true;
+}
+
+bool MainWindow::closeModernDirectMessage(const unsigned int session) {
+	auto it = m_modernDirectMessageConversations.find(session);
+	if (it == m_modernDirectMessageConversations.end()) {
+		return false;
+	}
+
+	it->open = false;
+	publishModernDirectMessagesPatch();
+	return true;
+}
+
+bool MainWindow::markModernDirectMessageRead(const unsigned int session) {
+	auto it = m_modernDirectMessageConversations.find(session);
+	if (it == m_modernDirectMessageConversations.end()) {
+		return false;
+	}
+
+	it->unreadCount = 0;
+	ClientUser *peer = ClientUser::get(session);
+	const std::optional< unsigned int > peerUserID = persistentUserIDForClientUser(peer);
+	if (it->persistentHistory && it->lastMessageID > 0 && peerUserID && m_persistentChatGateway) {
+		syncPersistentChatGatewayHandler();
+		it->peerUserID = peerUserID.value();
+		m_persistentChatGateway->markRead(MumbleProto::Private, it->peerUserID, it->lastMessageID);
+	}
+	publishModernDirectMessagesPatch();
+	return true;
+}
+
+void MainWindow::appendModernDirectMessage(const unsigned int peerSession, const QString &messageHtml,
+										   const bool outgoing) {
+	if (peerSession == 0) {
+		return;
+	}
+
+	ClientUser *peer = ClientUser::get(peerSession);
+	ModernDirectMessageConversation &conversation = m_modernDirectMessageConversations[peerSession];
+	conversation.peerSession = peerSession;
+	if (peer) {
+		conversation.label    = peer->qsName;
+		conversation.subtitle = peer->cChannel ? tr("In %1").arg(peer->cChannel->qsName) : tr("No active channel");
+		conversation.peerUserID = persistentUserIDForClientUser(peer).value_or(conversation.peerUserID);
+	} else if (conversation.label.trimmed().isEmpty()) {
+		conversation.label = tr("User %1").arg(static_cast< qulonglong >(peerSession));
+	}
+
+	ModernDirectMessageEntry entry;
+	entry.localID      = ++m_modernDirectMessageLocalID;
+	entry.peerSession  = peerSession;
+	entry.actorSession = outgoing ? Global::get().uiSession : peerSession;
+	entry.actorName    = outgoing ? tr("You") : conversation.label;
+	entry.messageHtml  = messageHtml;
+	entry.plainText    = QTextDocumentFragment::fromHtml(messageHtml).toPlainText();
+	if (entry.plainText.trimmed().isEmpty()) {
+		entry.plainText = messageHtml;
+	}
+	entry.createdAtMs = QDateTime::currentMSecsSinceEpoch();
+	entry.outgoing    = outgoing;
+
+	conversation.messages.push_back(entry);
+	while (conversation.messages.size() > ModernDirectMessageMaxMessages) {
+		conversation.messages.erase(conversation.messages.begin());
+	}
+	conversation.lastActivityAtMs = entry.createdAtMs;
+
+	const PersistentChatTarget activeTarget = currentPersistentChatTarget();
+	const bool activeLegacyDirect =
+		activeTarget.directMessage && activeTarget.user && activeTarget.user->uiSession == peerSession;
+	if (!outgoing && !conversation.open && !activeLegacyDirect) {
+		++conversation.unreadCount;
+	} else if (!outgoing && (conversation.open || activeLegacyDirect)) {
+		conversation.unreadCount = 0;
+	}
+
+	publishModernDirectMessagesPatch();
+}
+
+bool MainWindow::appendModernPersistentDirectMessage(const MumbleProto::ChatMessage &message,
+													 const bool markReadIfOpen) {
+	const MumbleProto::ChatScope scope = message.has_scope() ? message.scope() : MumbleProto::Channel;
+	if (scope != MumbleProto::Private || !message.has_scope_id() || !message.has_thread_id()
+		|| !message.has_message_id()) {
+		return false;
+	}
+
+	const unsigned int peerUserID = message.scope_id();
+	ClientUser *peer              = clientUserByPersistentUserID(peerUserID);
+	if (!peer) {
+		return false;
+	}
+
+	ModernDirectMessageConversation &conversation = m_modernDirectMessageConversations[peer->uiSession];
+	conversation.peerSession       = peer->uiSession;
+	conversation.peerUserID        = peerUserID;
+	conversation.label             = peer->qsName;
+	conversation.subtitle          = peer->cChannel ? tr("In %1").arg(peer->cChannel->qsName) : tr("No active channel");
+	conversation.persistentHistory = true;
+	conversation.historyLoaded     = true;
+	conversation.historyLoading    = false;
+	conversation.historyError.clear();
+
+	const QString key = QStringLiteral("%1:%2")
+							.arg(static_cast< qulonglong >(message.thread_id()))
+							.arg(static_cast< qulonglong >(message.message_id()));
+	if (conversation.persistentMessageKeys.contains(key)) {
+		return true;
+	}
+
+	const ClientUser *self = ClientUser::get(Global::get().uiSession);
+	const std::optional< unsigned int > selfUserID = persistentUserIDForClientUser(self);
+	const bool outgoing = selfUserID && message.has_actor_user_id() && message.actor_user_id() == selfUserID.value();
+
+	QString messageHtml = message.has_message() ? u8(message.message()) : QString();
+	if (messageHtml.trimmed().isEmpty() && message.has_body_text()) {
+		messageHtml = u8(message.body_text()).toHtmlEscaped().replace(QLatin1Char('\n'), QStringLiteral("<br>"));
+	}
+	if (messageHtml.trimmed().isEmpty()) {
+		messageHtml = QStringLiteral("&nbsp;");
+	}
+
+	ModernDirectMessageEntry entry;
+	entry.localID      = ++m_modernDirectMessageLocalID;
+	entry.peerSession  = peer->uiSession;
+	entry.actorSession = outgoing ? Global::get().uiSession : peer->uiSession;
+	entry.actorName    = outgoing ? tr("You")
+								  : (message.has_actor_name() ? u8(message.actor_name()) : conversation.label);
+	entry.messageHtml  = messageHtml;
+	entry.plainText    = message.has_body_text() ? u8(message.body_text())
+												 : QTextDocumentFragment::fromHtml(messageHtml).toPlainText();
+	if (entry.plainText.trimmed().isEmpty()) {
+		entry.plainText = QTextDocumentFragment::fromHtml(messageHtml).toPlainText();
+	}
+	entry.createdAtMs = message.has_created_at() ? static_cast< qint64 >(message.created_at()) * 1000
+												 : QDateTime::currentMSecsSinceEpoch();
+	entry.outgoing    = outgoing;
+	entry.persistent  = true;
+	entry.threadID    = message.thread_id();
+	entry.messageID   = message.message_id();
+
+	conversation.persistentMessageKeys.insert(key);
+	conversation.messages.push_back(entry);
+	std::stable_sort(conversation.messages.begin(), conversation.messages.end(),
+					 [](const ModernDirectMessageEntry &left, const ModernDirectMessageEntry &right) {
+						 if (left.createdAtMs != right.createdAtMs) {
+							 return left.createdAtMs < right.createdAtMs;
+						 }
+						 if (left.persistent && right.persistent && left.messageID != right.messageID) {
+							 return left.messageID < right.messageID;
+						 }
+						 return left.localID < right.localID;
+					 });
+	while (conversation.messages.size() > ModernDirectMessageMaxMessages) {
+		const ModernDirectMessageEntry &removed = conversation.messages.front();
+		if (removed.persistent && removed.threadID > 0 && removed.messageID > 0) {
+			conversation.persistentMessageKeys.remove(QStringLiteral("%1:%2")
+														  .arg(static_cast< qulonglong >(removed.threadID))
+														  .arg(static_cast< qulonglong >(removed.messageID)));
+		}
+		conversation.messages.erase(conversation.messages.begin());
+	}
+
+	conversation.lastMessageID     = std::max(conversation.lastMessageID, entry.messageID);
+	conversation.lastActivityAtMs  = conversation.messages.empty() ? entry.createdAtMs : conversation.messages.back().createdAtMs;
+	const PersistentChatTarget activeTarget = currentPersistentChatTarget();
+	const bool activeLegacyDirect =
+		activeTarget.directMessage && activeTarget.user && activeTarget.user->uiSession == peer->uiSession;
+	if (markReadIfOpen) {
+		if (!outgoing && !conversation.open && !activeLegacyDirect) {
+			++conversation.unreadCount;
+		} else if (!outgoing && (conversation.open || activeLegacyDirect)) {
+			conversation.unreadCount = 0;
+		}
+
+		if (conversation.open && conversation.lastMessageID > 0 && m_persistentChatGateway) {
+			syncPersistentChatGatewayHandler();
+			m_persistentChatGateway->markRead(MumbleProto::Private, peerUserID, conversation.lastMessageID);
+			conversation.lastReadMessageID = conversation.lastMessageID;
+		}
+	}
+
+	publishModernDirectMessagesPatch();
+	return true;
+}
+
+bool MainWindow::mergeModernDirectMessageHistory(const MumbleProto::ChatHistoryResponse &response) {
+	const MumbleProto::ChatScope scope = response.has_scope() ? response.scope() : MumbleProto::Channel;
+	if (scope != MumbleProto::Private || !response.has_scope_id()) {
+		return false;
+	}
+
+	ClientUser *peer = clientUserByPersistentUserID(response.scope_id());
+	if (!peer) {
+		return false;
+	}
+
+	ModernDirectMessageConversation &conversation = m_modernDirectMessageConversations[peer->uiSession];
+	conversation.peerSession       = peer->uiSession;
+	conversation.peerUserID        = response.scope_id();
+	conversation.label             = peer->qsName;
+	conversation.subtitle          = peer->cChannel ? tr("In %1").arg(peer->cChannel->qsName) : tr("No active channel");
+	conversation.persistentHistory = true;
+	conversation.historyLoading    = false;
+	conversation.historyLoaded     = true;
+	conversation.historyError.clear();
+	if (response.has_last_read_message_id()) {
+		conversation.lastReadMessageID = response.last_read_message_id();
+	}
+
+	for (int i = 0; i < response.messages_size(); ++i) {
+		appendModernPersistentDirectMessage(response.messages(i), false);
+	}
+	publishModernDirectMessagesPatch();
+	return true;
+}
+
+bool MainWindow::setModernDirectMessageMode(const unsigned int session, const QString &mode) {
+	if (!openModernDirectMessage(session, true)) {
+		return false;
+	}
+
+	ClientUser *peer = ClientUser::get(session);
+	ModernDirectMessageConversation &conversation = m_modernDirectMessageConversations[session];
+	const QString normalizedMode                   = mode.trimmed().toLower();
+	const bool requestHistory = normalizedMode == QLatin1String("history")
+								|| normalizedMode == QLatin1String("persistent")
+								|| normalizedMode == QLatin1String("persisted");
+	if (requestHistory) {
+		const QString unavailableReason = modernDirectMessagePersistentHistoryUnavailableReason(peer);
+		if (!unavailableReason.isEmpty()) {
+			conversation.persistentHistory = false;
+			conversation.historyLoading    = false;
+			conversation.historyError      = unavailableReason;
+			publishModernToast(QStringLiteral("error"), tr("Direct messages"), conversation.historyError);
+			publishModernDirectMessagesPatch();
+			return true;
+		}
+
+		conversation.peerUserID        = persistentUserIDForClientUser(peer).value_or(conversation.peerUserID);
+		conversation.persistentHistory = true;
+		requestModernDirectMessageHistory(session);
+		publishModernToast(QStringLiteral("success"), tr("Direct messages"), tr("Persistent DM history enabled."));
+		return true;
+	}
+
+	conversation.persistentHistory = false;
+	conversation.historyLoading    = false;
+	conversation.historyError.clear();
+	publishModernToast(QStringLiteral("info"), tr("Direct messages"), tr("Private DM mode enabled for this window."));
+	publishModernDirectMessagesPatch();
+	return true;
+}
+
+void MainWindow::requestModernDirectMessageHistory(const unsigned int session) {
+	ClientUser *peer = ClientUser::get(session);
+	if (!peer || !m_persistentChatGateway || !modernDirectMessagePersistentHistoryAvailable(peer)) {
+		return;
+	}
+
+	ModernDirectMessageConversation &conversation = m_modernDirectMessageConversations[session];
+	conversation.peerSession    = session;
+	conversation.peerUserID     = persistentUserIDForClientUser(peer).value_or(conversation.peerUserID);
+	conversation.historyLoading = true;
+	conversation.historyError.clear();
+	syncPersistentChatGatewayHandler();
+	m_persistentChatGateway->requestInitialPage(MumbleProto::Private, conversation.peerUserID);
+	publishModernDirectMessagesPatch();
+}
+
+bool MainWindow::sendModernDirectMessage(const unsigned int session, const QString &message) {
+	if (session == 0 || session == Global::get().uiSession || !Global::get().sh || !Global::get().sh->isRunning()) {
+		publishModernToast(QStringLiteral("error"), tr("Direct message"),
+						   tr("Connect to a server before sending a direct message."));
+		return false;
+	}
+
+	ClientUser *peer = ClientUser::get(session);
+	if (!peer) {
+		publishModernToast(QStringLiteral("error"), tr("Direct message"), tr("That user is no longer available."));
+		return false;
+	}
+
+	PersistentChatTarget target;
+	target.valid         = true;
+	target.directMessage = true;
+	target.user          = peer;
+	target.channel       = peer->cChannel;
+	if (!canSendToPersistentChatTarget(target, true)) {
+		publishModernToast(QStringLiteral("error"), tr("Direct message"),
+						   tr("You do not have permission to message that user."));
+		return false;
+	}
+
+	const QString normalizedMessage = message.trimmed();
+	if (normalizedMessage.isEmpty()) {
+		return false;
+	}
+
+	ModernDirectMessageConversation &conversation = m_modernDirectMessageConversations[session];
+	conversation.peerSession = session;
+	const std::optional< unsigned int > peerUserID = persistentUserIDForClientUser(peer);
+	conversation.peerUserID                        = peerUserID.value_or(conversation.peerUserID);
+	if (conversation.persistentHistory && modernDirectMessagePersistentHistoryAvailable(peer) && peerUserID
+		&& m_persistentChatGateway) {
+		syncPersistentChatGatewayHandler();
+		m_persistentChatGateway->send(MumbleProto::Private, peerUserID.value(), normalizedMessage,
+									  MumbleProto::ChatBodyFormatPlainText, std::nullopt);
+		openModernDirectMessage(session, true);
+		return true;
+	}
+
+	const QString messageHtml = Markdown::markdownToHTML(normalizedMessage);
+	Global::get().sh->sendUserTextMessage(session, messageHtml);
+	Global::get().l->log(Log::TextMessage,
+						 tr("To %1: %2").arg(Log::formatClientUser(peer, Log::Target), messageHtml),
+						 tr("Message to %1").arg(peer->qsName), true);
+	appendModernDirectMessage(session, messageHtml, true);
+	openModernDirectMessage(session, true);
+	return true;
+}
+
+void MainWindow::publishModernDirectMessagesPatch() {
+	if (!m_modernShellHost || !m_modernShellHost->bridge() || modernShellStaticModeEnabled()
+		|| modernShellMinimalSnapshotEnabled()) {
+		return;
+	}
+
+	QVariantMap app;
+	app.insert(QStringLiteral("directMessages"), buildModernShellDirectMessagesState());
+	QVariantMap patch;
+	patch.insert(QStringLiteral("app"), app);
+	publishModernShellPatch(QStringLiteral("rooms.update"), patch);
+}
+
 bool MainWindow::handleModernShellScopeSelection(const QString &scopeToken) {
 	int scopeValue       = 0;
 	unsigned int scopeID = 0;
@@ -20857,6 +23490,7 @@ bool MainWindow::handleModernShellScopeSelection(const QString &scopeToken) {
 		if (m_persistentChatChannelList) {
 			const QSignalBlocker signalBlocker(m_persistentChatChannelList);
 			m_persistentChatChannelList->clearSelection();
+			m_persistentChatChannelList->setCurrentRow(-1);
 		}
 		updateServerNavigatorChrome();
 		updatePersistentTextChannelControls();
@@ -20867,7 +23501,7 @@ bool MainWindow::handleModernShellScopeSelection(const QString &scopeToken) {
 	}
 
 	if (scopeValue == LocalDirectMessageScope) {
-		if (!ClientUser::get(scopeID)) {
+		if (!ClientUser::get(scopeID) && !m_modernDirectMessageConversations.contains(scopeID)) {
 			return false;
 		}
 		++m_modernShellMessagePatchGeneration;
@@ -20877,6 +23511,7 @@ bool MainWindow::handleModernShellScopeSelection(const QString &scopeToken) {
 		if (m_persistentChatChannelList) {
 			const QSignalBlocker signalBlocker(m_persistentChatChannelList);
 			m_persistentChatChannelList->clearSelection();
+			m_persistentChatChannelList->setCurrentRow(-1);
 		}
 		updateServerNavigatorChrome();
 		updatePersistentTextChannelControls();
@@ -20989,7 +23624,7 @@ bool MainWindow::handleModernShellScopeAction(const QString &scopeToken, const Q
 			return handled;
 		}
 		if (normalizedActionID == QLatin1String("textRoom.delete")) {
-			removePersistentTextChannel(scopeID);
+			openModernDeleteTextRoomDialog(scopeID);
 			publishModernShellRoomStatePatch();
 			return true;
 		}
@@ -20997,6 +23632,14 @@ bool MainWindow::handleModernShellScopeAction(const QString &scopeToken, const Q
 
 	if (!channel) {
 		return false;
+	}
+
+	if (normalizedActionID == QLatin1String("unlinkAll")) {
+		const bool handled = handleModernShellLegacyDialogAction(normalizedActionID, nullptr, channel);
+		if (handled) {
+			publishModernShellRoomStatePatch();
+		}
+		return handled;
 	}
 
 	if (scopeValue != static_cast< int >(MumbleProto::Channel)
@@ -21068,7 +23711,7 @@ bool MainWindow::handleModernShellScopeActionValueChanged(const QString &scopeTo
 }
 
 bool MainWindow::handleModernShellReplyStart(const qulonglong messageID) {
-	if (messageID == 0) {
+	if (messageID == 0 || messageID > std::numeric_limits< unsigned int >::max()) {
 		return false;
 	}
 
@@ -21120,7 +23763,7 @@ bool MainWindow::handleModernShellParticipantMessage(const qulonglong session) {
 	}
 
 	const unsigned int targetSession = static_cast< unsigned int >(session);
-	if (!ClientUser::get(targetSession)) {
+	if (!openModernDirectMessage(targetSession, true)) {
 		return false;
 	}
 
@@ -21137,6 +23780,46 @@ bool MainWindow::handleModernShellParticipantMessage(const qulonglong session) {
 	updateChatBar(false, false);
 	publishModernShellRoomStatePatch();
 	return true;
+}
+
+bool MainWindow::handleModernShellDirectMessageOpen(const qulonglong session) {
+	if (session == 0 || session > std::numeric_limits< unsigned int >::max()) {
+		return false;
+	}
+
+	return openModernDirectMessage(static_cast< unsigned int >(session), true);
+}
+
+bool MainWindow::handleModernShellDirectMessageClose(const qulonglong session) {
+	if (session == 0 || session > std::numeric_limits< unsigned int >::max()) {
+		return false;
+	}
+
+	return closeModernDirectMessage(static_cast< unsigned int >(session));
+}
+
+bool MainWindow::handleModernShellDirectMessageMarkRead(const qulonglong session) {
+	if (session == 0 || session > std::numeric_limits< unsigned int >::max()) {
+		return false;
+	}
+
+	return markModernDirectMessageRead(static_cast< unsigned int >(session));
+}
+
+bool MainWindow::handleModernShellDirectMessageSend(const qulonglong session, const QString &message) {
+	if (session == 0 || session > std::numeric_limits< unsigned int >::max()) {
+		return false;
+	}
+
+	return sendModernDirectMessage(static_cast< unsigned int >(session), message);
+}
+
+bool MainWindow::handleModernShellDirectMessageModeChange(const qulonglong session, const QString &mode) {
+	if (session == 0 || session > std::numeric_limits< unsigned int >::max()) {
+		return false;
+	}
+
+	return setModernDirectMessageMode(static_cast< unsigned int >(session), mode);
 }
 
 bool MainWindow::handleModernShellParticipantJoin(const qulonglong session) {
@@ -21508,12 +24191,22 @@ bool MainWindow::handleModernShellAppAction(const QString &actionId) {
 		handled = true;
 	} else if (actionId == QLatin1String("self.presence.away")) {
 		return false;
+	} else if (actionId == QLatin1String("app.update.download")) {
+		handled = startModernForkUpdateDownload();
+	} else if (actionId == QLatin1String("app.update.restart")) {
+		handled = restartForPreparedForkUpdate();
 	} else if (actionId == QLatin1String("motd.show")) {
-		Global::get().s.bModernShellMotdExpanded = true;
-		handled                                  = true;
+		if (!Global::get().s.bModernShellMotdExpanded) {
+			Global::get().s.bModernShellMotdExpanded = true;
+			Global::get().s.save();
+		}
+		handled = true;
 	} else if (actionId == QLatin1String("motd.hide")) {
-		Global::get().s.bModernShellMotdExpanded = false;
-		handled                                  = true;
+		if (Global::get().s.bModernShellMotdExpanded) {
+			Global::get().s.bModernShellMotdExpanded = false;
+			Global::get().s.save();
+		}
+		handled = true;
 	} else if (actionId == QLatin1String("server.connect")) {
 		openModernConnectDialog();
 		return true;
@@ -21582,7 +24275,708 @@ bool MainWindow::handleModernShellAppAction(const QString &actionId) {
 	}
 	return handled;
 }
+
+void MainWindow::publishModernToast(const QString &kind, const QString &title, const QString &message,
+									const QString &actionID, const QString &actionLabel, const int timeoutMs) {
+	if (!m_modernShellHost || !m_modernShellHost->bridge()) {
+		return;
+	}
+
+	QVariantMap toast;
+	const QString normalizedKind = kind.trimmed().isEmpty() ? QStringLiteral("info") : kind.trimmed().toLower();
+	toast.insert(QStringLiteral("id"),
+				 QStringLiteral("%1-%2").arg(normalizedKind).arg(QDateTime::currentMSecsSinceEpoch()));
+	toast.insert(QStringLiteral("kind"), normalizedKind);
+	toast.insert(QStringLiteral("title"), title);
+	toast.insert(QStringLiteral("message"), message);
+	toast.insert(QStringLiteral("timeoutMs"), timeoutMs > 0 ? timeoutMs : 4500);
+	if (!actionID.trimmed().isEmpty()) {
+		toast.insert(QStringLiteral("actionId"), actionID.trimmed());
+	}
+	if (!actionLabel.trimmed().isEmpty()) {
+		toast.insert(QStringLiteral("actionLabel"), actionLabel.trimmed());
+	}
+	m_modernShellHost->bridge()->publishToast(toast);
+}
+
+bool MainWindow::notifyForkUpdateAvailable(const QJsonObject &info, const bool autocheck) {
+	if (!autocheck || !usesModernShell() || !m_modernShellHost || !m_modernShellHost->bridge()) {
+		return false;
+	}
+
+	m_modernVersionCheckInfo          = info;
+	m_modernPreparedUpdateInstallerPath.clear();
+	m_modernUpdateDownloadInProgress = false;
+
+	const QString latest = modernUpdateLatestLabel(info);
+	const QString message =
+		tr("%1 Latest: %2").arg(modernUpdateAnnouncementText(info), latest);
+	publishModernToast(QStringLiteral("info"), tr("Update available"), message,
+					   VersionCheck::canInstallUpdate(info) ? QStringLiteral("app.update.download")
+															: QStringLiteral("help.versionCheck"),
+					   VersionCheck::canInstallUpdate(info) ? tr("Update") : tr("Details"), 20000);
+	return true;
+}
+
+bool MainWindow::handleModernVersionCheckResult(const QJsonObject &info, const bool updateAvailable,
+												const bool autocheck) {
+	if (!usesModernShell()) {
+		return false;
+	}
+
+	if (autocheck) {
+		if (updateAvailable) {
+			notifyForkUpdateAvailable(info, autocheck);
+		}
+		return true;
+	}
+
+	openModernVersionCheckResultDialog(info, updateAvailable);
+	return true;
+}
+
+bool MainWindow::handleModernVersionCheckFailure(const QString &message, const bool autocheck) {
+	if (!usesModernShell()) {
+		return false;
+	}
+
+	if (autocheck) {
+		return true;
+	}
+
+	openModernVersionCheckFailureDialog(message);
+	return true;
+}
+
+bool MainWindow::startModernForkUpdateDownload() {
+	if (m_modernUpdateDownloadInProgress) {
+		publishModernToast(QStringLiteral("info"), tr("Mumble update"), tr("The update is already downloading."));
+		return true;
+	}
+
+	if (!VersionCheck::canInstallUpdate(m_modernVersionCheckInfo)) {
+		publishModernToast(QStringLiteral("warning"), tr("Mumble update"),
+						   tr("This update needs to be opened from the release page."),
+						   QStringLiteral("help.versionCheck"), tr("Details"), 12000);
+		return true;
+	}
+
+	m_modernUpdateDownloadInProgress = true;
+	m_modernPreparedUpdateInstallerPath.clear();
+	publishModernToast(QStringLiteral("info"), tr("Mumble update"),
+					   tr("Downloading and verifying the update in the background."), QString(), QString(), 8000);
+
+	VersionCheck::downloadUpdateFromInfo(
+		m_modernVersionCheckInfo, this, false,
+		[this](const QString &installerPath) {
+			m_modernUpdateDownloadInProgress = false;
+			m_modernPreparedUpdateInstallerPath = installerPath;
+			publishModernToast(QStringLiteral("success"), tr("Update ready"),
+							   tr("Restart Mumble to install the verified update. Mumble will reopen and restore this server and chat when it is done."),
+							   QStringLiteral("app.update.restart"), tr("Restart"), 60000);
+		},
+		[this](const QString &message) {
+			m_modernUpdateDownloadInProgress = false;
+			m_modernPreparedUpdateInstallerPath.clear();
+			publishModernToast(QStringLiteral("error"), tr("Update failed"), message,
+							   QStringLiteral("help.versionCheck"), tr("Details"), 20000);
+		},
+		[this]() {
+			m_modernUpdateDownloadInProgress = false;
+			publishModernToast(QStringLiteral("info"), tr("Mumble update"), tr("Update download cancelled."));
+		});
+	return true;
+}
+
+bool MainWindow::startModernForkUpdateDownload(const QJsonObject &info) {
+	if (!usesModernShell()) {
+		return false;
+	}
+
+	m_modernVersionCheckInfo = info;
+	return startModernForkUpdateDownload();
+}
+
+bool MainWindow::restartForPreparedForkUpdate() {
+	if (!VersionCheck::canLaunchPreparedUpdate(m_modernPreparedUpdateInstallerPath)) {
+		publishModernToast(QStringLiteral("warning"), tr("Mumble update"),
+						   tr("The verified installer is no longer available. Download the update again."),
+						   QStringLiteral("app.update.download"), tr("Download"), 12000);
+		return true;
+	}
+
+	prepareUpdateResumeState();
+	if (!VersionCheck::launchPreparedUpdate(m_modernPreparedUpdateInstallerPath)) {
+		clearPendingUpdateResumeState();
+		publishModernToast(QStringLiteral("error"), tr("Mumble update"),
+						   tr("Mumble could not launch the update installer."), QString(), QString(), 12000);
+		return true;
+	}
+
+	forceQuit = true;
+	close();
+	return true;
+}
+
+bool MainWindow::handleModernShellAppActionPayload(const QString &actionId, const QVariantMap &payload) {
+	const QString normalizedActionID = actionId.trimmed();
+	const auto nestedPayload = [&payload](const QString &key) {
+		const QVariantMap nested = payload.value(key).toMap();
+		return nested.isEmpty() ? payload : nested;
+	};
+	const auto payloadString = [](const QVariantMap &source, const QString &key,
+								  const QString &fallback = QString()) {
+		return source.value(key, fallback).toString();
+	};
+	const auto motdSignatureFromPayload = [&payload]() {
+		return payload.value(QStringLiteral("signature")).toString().trimmed().left(256);
+	};
+
+	if (normalizedActionID == QLatin1String("motd.dismiss")
+		|| normalizedActionID == QLatin1String("motd.restore")) {
+		const QString signature = normalizedActionID == QLatin1String("motd.restore")
+									  ? QString()
+									  : motdSignatureFromPayload();
+		bool settingsChanged = false;
+		if (Global::get().s.qsModernShellMotdDismissedSignature != signature) {
+			Global::get().s.qsModernShellMotdDismissedSignature = signature;
+			settingsChanged                                     = true;
+		}
+		if (!signature.isEmpty() && Global::get().s.qsModernShellMotdLastSeenSignature != signature) {
+			Global::get().s.qsModernShellMotdLastSeenSignature = signature;
+			settingsChanged                                    = true;
+		}
+		if (settingsChanged) {
+			Global::get().s.save();
+		}
+		publishModernShellRoomStatePatch();
+		return true;
+	}
+
+	if (normalizedActionID == QLatin1String("motd.markSeen")) {
+		const QString signature = motdSignatureFromPayload();
+		if (!signature.isEmpty() && Global::get().s.qsModernShellMotdLastSeenSignature != signature) {
+			Global::get().s.qsModernShellMotdLastSeenSignature = signature;
+			Global::get().s.save();
+		}
+		publishModernShellRoomStatePatch();
+		return true;
+	}
+
+	if (normalizedActionID == QLatin1String("self.setComment")) {
+		if (!Global::get().sh || !Global::get().sh->isRunning()) {
+			publishModernToast(QStringLiteral("error"), tr("Self comment"), tr("Connect to a server before saving."));
+			return true;
+		}
+		ClientUser *selfUser = ClientUser::get(Global::get().uiSession);
+		if (!selfUser) {
+			publishModernToast(QStringLiteral("error"), tr("Self comment"), tr("Your user state is not available yet."));
+			return true;
+		}
+
+		const QString plainComment =
+			payload.value(QStringLiteral("comment"), payload.value(QStringLiteral("plainText"))).toString();
+		const QString comment = plainComment.isEmpty()
+									? QString()
+									: plainComment.toHtmlEscaped().replace(QLatin1Char('\n'), QLatin1String("<br/>"));
+
+		MumbleProto::UserState state;
+		state.set_session(selfUser->uiSession);
+		state.set_comment(u8(comment));
+		Global::get().sh->sendMessage(state);
+		selfUser->qsComment      = comment;
+		selfUser->qbaCommentHash = comment.isEmpty() ? QByteArray() : sha1(comment);
+		if (!comment.isEmpty() && Global::get().db) {
+			Global::get().db->setBlob(selfUser->qbaCommentHash, comment.toUtf8());
+		}
+		queueModernShellSnapshotSync();
+		publishModernToast(QStringLiteral("success"), tr("Self comment"), tr("Comment saved."));
+		return true;
+	}
+
+	if (normalizedActionID == QLatin1String("serverIdentity.save")
+		|| normalizedActionID == QLatin1String("server.identity.save")) {
+		if (!Global::get().sh || !Global::get().sh->isRunning()) {
+			publishModernToast(QStringLiteral("error"), tr("Server identity"), tr("Connect to a server before saving."));
+			return true;
+		}
+		if (!canManagePersistentTextChannels()) {
+			publishModernToast(QStringLiteral("error"), tr("Server identity"),
+							   tr("Root Write permission is required to edit the server identity."));
+			return true;
+		}
+
+		MumbleProto::ServerConfig config;
+		bool hasUpdate = false;
+		if (payload.contains(QStringLiteral("displayName"))) {
+			const QString displayName = payload.value(QStringLiteral("displayName")).toString().trimmed().left(128);
+			config.set_server_display_name(u8(displayName));
+			Global::get().qsServerDisplayName = displayName;
+			hasUpdate                         = true;
+		}
+		if (payload.contains(QStringLiteral("monogram"))) {
+			const QString monogram = payload.value(QStringLiteral("monogram")).toString().trimmed().left(12);
+			config.set_server_monogram(u8(monogram));
+			Global::get().qsServerMonogram = monogram;
+			hasUpdate                      = true;
+		}
+		const bool hasImagePayload = payload.contains(QStringLiteral("serverImageDataUrl"))
+									 || payload.contains(QStringLiteral("imageDataUrl"))
+									 || payload.contains(QStringLiteral("imageUrl"))
+									 || payload.value(QStringLiteral("clearImage")).toBool();
+		if (hasImagePayload) {
+			const QString imageDataUrl =
+				payload.value(QStringLiteral("serverImageDataUrl"),
+							  payload.value(QStringLiteral("imageDataUrl"),
+											payload.value(QStringLiteral("imageUrl"))))
+					.toString();
+			QString imageError;
+			const std::optional< QByteArray > imageBytes =
+				modernShellServerIdentityImageFromDataUrl(payload.value(QStringLiteral("clearImage")).toBool()
+															  ? QString()
+															  : imageDataUrl,
+														  &imageError);
+			if (!imageBytes) {
+				publishModernToast(QStringLiteral("error"), tr("Server identity"), imageError);
+				return true;
+			}
+			config.set_server_image(blob(*imageBytes));
+			Global::get().qbaServerImage = *imageBytes;
+			hasUpdate                    = true;
+		}
+		if (!hasUpdate) {
+			publishModernToast(QStringLiteral("error"), tr("Server identity"),
+							   tr("Nothing changed in the server identity payload."));
+			return true;
+		}
+
+		Global::get().sh->sendMessage(config);
+		queueModernShellSnapshotSync();
+		publishModernToast(QStringLiteral("success"), tr("Server identity"), tr("Server identity saved."));
+		return true;
+	}
+
+	if (normalizedActionID == QLatin1String("uiTweaks.set")
+		|| normalizedActionID == QLatin1String("settings.uiTweaks.set")) {
+		if (payload.contains(QStringLiteral("theme"))) {
+			Global::get().s.qsModernShellTheme =
+				normalizedModernShellTheme(payload.value(QStringLiteral("theme")).toString());
+		}
+		if (payload.contains(QStringLiteral("density"))) {
+			Global::get().s.qsModernShellDensity =
+				normalizedModernShellDensity(payload.value(QStringLiteral("density")).toString());
+		}
+		if (payload.contains(QStringLiteral("userIcons"))) {
+			Global::get().s.bModernShellClassicUserIcons =
+				payload.value(QStringLiteral("userIcons")).toString().trimmed().toLower() == QLatin1String("classic");
+		}
+		if (payload.contains(QStringLiteral("classicUserIcons"))) {
+			Global::get().s.bModernShellClassicUserIcons =
+				payload.value(QStringLiteral("classicUserIcons")).toBool();
+		}
+		if (payload.contains(QStringLiteral("railSide"))) {
+			Global::get().s.qsModernShellRailSide =
+				normalizedModernShellRailSide(payload.value(QStringLiteral("railSide")).toString());
+		}
+		if (payload.contains(QStringLiteral("accent"))) {
+			Global::get().s.qsModernShellAccent =
+				normalizedModernShellAccent(payload.value(QStringLiteral("accent")).toString());
+		}
+		if (payload.contains(QStringLiteral("tickerBannerAlwaysScroll"))) {
+			Global::get().s.bModernShellTickerBannerAlwaysScroll =
+				payload.value(QStringLiteral("tickerBannerAlwaysScroll")).toBool();
+		}
+		Global::get().s.save();
+		queueModernShellSnapshotSync();
+		publishModernToast(QStringLiteral("success"), tr("Tweaks"), tr("Tweaks saved."));
+		return true;
+	}
+
+	if (normalizedActionID == QLatin1String("dm.open")
+		|| normalizedActionID == QLatin1String("directMessage.open")) {
+		const qulonglong session =
+			payload.value(QStringLiteral("session"), payload.value(QStringLiteral("peerSession"))).toULongLong();
+		return handleModernShellDirectMessageOpen(session);
+	}
+
+	if (normalizedActionID == QLatin1String("dm.close")
+		|| normalizedActionID == QLatin1String("directMessage.close")) {
+		const qulonglong session =
+			payload.value(QStringLiteral("session"), payload.value(QStringLiteral("peerSession"))).toULongLong();
+		return handleModernShellDirectMessageClose(session);
+	}
+
+	if (normalizedActionID == QLatin1String("dm.markRead")
+		|| normalizedActionID == QLatin1String("directMessage.markRead")) {
+		const qulonglong session =
+			payload.value(QStringLiteral("session"), payload.value(QStringLiteral("peerSession"))).toULongLong();
+		return handleModernShellDirectMessageMarkRead(session);
+	}
+
+	if (normalizedActionID == QLatin1String("dm.send")
+		|| normalizedActionID == QLatin1String("directMessage.send")) {
+		const qulonglong session =
+			payload.value(QStringLiteral("session"), payload.value(QStringLiteral("peerSession"))).toULongLong();
+		return handleModernShellDirectMessageSend(session, payload.value(QStringLiteral("message")).toString());
+	}
+
+	if (normalizedActionID == QLatin1String("dm.setMode")
+		|| normalizedActionID == QLatin1String("directMessage.setMode")) {
+		const qulonglong session =
+			payload.value(QStringLiteral("session"), payload.value(QStringLiteral("peerSession"))).toULongLong();
+		return handleModernShellDirectMessageModeChange(session, payload.value(QStringLiteral("mode")).toString());
+	}
+
+	if (normalizedActionID == QLatin1String("stonks.setTickerPin")
+		|| normalizedActionID == QLatin1String("stonks.pinTicker")
+		|| normalizedActionID == QLatin1String("stonks.unpinTicker")) {
+		if (!Global::get().sh || !Global::get().sh->isRunning()) {
+			publishModernToast(QStringLiteral("error"), tr("Stonks"), tr("Connect to a server before saving pins."));
+			return true;
+		}
+		if (!stonksLedgerFeatureSupported()) {
+			publishModernToast(QStringLiteral("error"), tr("Stonks"),
+							   tr("This server has not advertised Stonks ledger support."));
+			return true;
+		}
+
+		const QVariantMap tickerPayload = nestedPayload(QStringLiteral("ticker"));
+		const QString symbol =
+			Mumble::Finance::normalizeTickerSymbol(payloadString(tickerPayload, QStringLiteral("symbol")));
+		if (symbol.isEmpty()) {
+			publishModernToast(QStringLiteral("error"), tr("Stonks"), tr("Choose a valid ticker symbol to pin."));
+			return true;
+		}
+
+		const bool pinned = normalizedActionID == QLatin1String("stonks.unpinTicker")
+								? false
+								: payload.value(QStringLiteral("pinned"),
+												tickerPayload.value(QStringLiteral("pinned"), true)).toBool();
+
+		MumbleProto::StonksAction message;
+		message.set_action(MumbleProto::StonksActionSetTickerPin);
+		message.set_period(u8(m_stonksSelectedPeriod.trimmed().isEmpty() ? QStringLiteral("30d")
+																		  : m_stonksSelectedPeriod));
+		message.set_pinned(pinned);
+		MumbleProto::StonksPinnedTicker *ticker = message.mutable_pinned_ticker();
+		ticker->set_symbol(u8(symbol));
+		ticker->set_display_name(u8(payloadString(tickerPayload, QStringLiteral("displayName")).trimmed()));
+		ticker->set_provider_id(u8(payloadString(tickerPayload, QStringLiteral("providerId")).trimmed()));
+		ticker->set_provider_symbol(u8(payloadString(tickerPayload, QStringLiteral("providerSymbol"), symbol).trimmed()));
+		ticker->set_exchange(u8(payloadString(tickerPayload, QStringLiteral("exchange")).trimmed()));
+		ticker->set_quote_source_url(u8(payloadString(tickerPayload, QStringLiteral("quoteSourceUrl")).trimmed()));
+		ticker->set_display_order(payload.value(QStringLiteral("displayOrder"),
+												 tickerPayload.value(QStringLiteral("displayOrder"), 0)).toUInt());
+		Global::get().sh->sendMessage(message);
+		publishModernToast(QStringLiteral("info"), tr("Stonks"),
+						   pinned ? tr("Saving ticker pin...") : tr("Removing ticker pin..."), QString(), QString(),
+						   1800);
+		return true;
+	}
+
+	if (normalizedActionID == QLatin1String("stonks.setFeedPreferences")) {
+		if (!Global::get().sh || !Global::get().sh->isRunning()) {
+			publishModernToast(QStringLiteral("error"), tr("Stonks"),
+							   tr("Connect to a server before saving feed preferences."));
+			return true;
+		}
+		if (!stonksLedgerFeatureSupported()) {
+			publishModernToast(QStringLiteral("error"), tr("Stonks"),
+							   tr("This server has not advertised Stonks ledger support."));
+			return true;
+		}
+
+		const QVariantMap preferencesPayload = nestedPayload(QStringLiteral("feedPreferences"));
+		const auto preferenceValue = [&preferencesPayload](const QString &key, const bool fallback) {
+			return preferencesPayload.contains(key) ? preferencesPayload.value(key).toBool() : fallback;
+		};
+
+		MumbleProto::StonksAction message;
+		message.set_action(MumbleProto::StonksActionSetFeedPreferences);
+		message.set_period(u8(m_stonksSelectedPeriod.trimmed().isEmpty() ? QStringLiteral("30d")
+																		  : m_stonksSelectedPeriod));
+		MumbleProto::StonksFeedPreferences *preferences = message.mutable_feed_preferences();
+		preferences->set_show_mine(preferenceValue(QStringLiteral("showMine"), true));
+		preferences->set_show_popular(preferenceValue(QStringLiteral("showPopular"), true));
+		preferences->set_show_pins(preferenceValue(QStringLiteral("showPins"), true));
+		Global::get().sh->sendMessage(message);
+		publishModernToast(QStringLiteral("info"), tr("Stonks"), tr("Saving feed preferences..."), QString(),
+						   QString(), 1800);
+		return true;
+	}
+
+	return false;
+}
 #endif
+
+bool MainWindow::hasPendingUpdateResumeState() const {
+	return m_updateResumePending;
+}
+
+void MainWindow::prepareUpdateResumeState() {
+	storeState(Global::get().s.bMinimalView);
+	Global::get().s.save();
+
+	QJsonObject state;
+	state.insert(QStringLiteral("schema"), 1);
+	state.insert(QStringLiteral("pending"), true);
+	state.insert(QStringLiteral("reason"), QStringLiteral("update"));
+	state.insert(QStringLiteral("createdAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+	state.insert(QStringLiteral("modernShell"), usesModernShell());
+	state.insert(QStringLiteral("minimalView"), Global::get().s.bMinimalView);
+
+	QJsonObject server;
+	server.insert(QStringLiteral("lastServerName"), Global::get().s.qsLastServer.trimmed());
+	server.insert(QStringLiteral("settingsUsername"), Global::get().s.qsUsername.trimmed());
+	if (Global::get().sh) {
+		QString host;
+		QString username;
+		QString password;
+		unsigned short port = 0;
+		Global::get().sh->getConnectionInfo(host, port, username, password);
+		server.insert(QStringLiteral("host"), host.trimmed());
+		server.insert(QStringLiteral("port"), static_cast< int >(port));
+		server.insert(QStringLiteral("username"), username.trimmed());
+	}
+	state.insert(QStringLiteral("server"), server);
+
+	if (const Channel *voiceChannel = currentVoiceChannel()) {
+		state.insert(QStringLiteral("voiceChannelID"), static_cast< int >(voiceChannel->iId));
+		state.insert(QStringLiteral("voiceChannelName"), voiceChannel->qsName);
+	}
+
+	const PersistentChatTarget chatTarget = currentPersistentChatTarget();
+	if (chatTarget.valid && !chatTarget.directMessage && !chatTarget.serverLog
+		&& (chatTarget.scope == MumbleProto::Channel || chatTarget.scope == MumbleProto::TextChannel)) {
+		QJsonObject chat;
+		chat.insert(QStringLiteral("scope"), static_cast< int >(chatTarget.scope));
+		chat.insert(QStringLiteral("scopeID"), static_cast< int >(chatTarget.scopeID));
+		chat.insert(QStringLiteral("label"), chatTarget.label);
+		state.insert(QStringLiteral("chat"), chat);
+	}
+
+	QDir updateDir(Global::get().qdBasePath.filePath(QStringLiteral("Updates")));
+	if (!updateDir.exists() && !QDir().mkpath(updateDir.absolutePath())) {
+		qWarning("Unable to create update resume directory '%s'.", qUtf8Printable(updateDir.absolutePath()));
+		return;
+	}
+
+	QSaveFile file(updateResumeStatePath());
+	if (!file.open(QIODevice::WriteOnly)) {
+		qWarning("Unable to write update resume state '%s'.", qUtf8Printable(file.fileName()));
+		return;
+	}
+	file.write(QJsonDocument(state).toJson(QJsonDocument::Indented));
+	if (!file.commit()) {
+		qWarning("Unable to commit update resume state '%s'.", qUtf8Printable(file.fileName()));
+		return;
+	}
+
+	m_updateResumeState                   = state;
+	m_updateResumePending                 = true;
+	m_updateResumeConnectAttempted        = false;
+	m_updateResumeVoiceChannelApplied     = false;
+	m_updateResumeChatScopeApplied        = false;
+	m_updateResumeTextChannelSyncObserved = false;
+}
+
+void MainWindow::loadPendingUpdateResumeState() {
+	m_updateResumeState                   = QJsonObject();
+	m_updateResumePending                 = false;
+	m_updateResumeConnectAttempted        = false;
+	m_updateResumeVoiceChannelApplied     = false;
+	m_updateResumeChatScopeApplied        = false;
+	m_updateResumeTextChannelSyncObserved = false;
+
+	QFile file(updateResumeStatePath());
+	if (!file.exists()) {
+		return;
+	}
+	if (!file.open(QIODevice::ReadOnly)) {
+		qWarning("Unable to read update resume state '%s'.", qUtf8Printable(file.fileName()));
+		return;
+	}
+
+	QJsonParseError error;
+	const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
+	if (error.error != QJsonParseError::NoError || !document.isObject()) {
+		clearPendingUpdateResumeState();
+		return;
+	}
+
+	const QJsonObject state = document.object();
+	if (!state.value(QStringLiteral("pending")).toBool(false)
+		|| state.value(QStringLiteral("reason")).toString() != QLatin1String("update")) {
+		clearPendingUpdateResumeState();
+		return;
+	}
+
+	const QDateTime createdAt =
+		QDateTime::fromString(state.value(QStringLiteral("createdAt")).toString(), Qt::ISODateWithMs);
+	if (createdAt.isValid() && createdAt.daysTo(QDateTime::currentDateTimeUtc()) > UpdateResumeStateMaxAgeDays) {
+		clearPendingUpdateResumeState();
+		return;
+	}
+
+	m_updateResumeState   = state;
+	m_updateResumePending = true;
+}
+
+void MainWindow::clearPendingUpdateResumeState() {
+	m_updateResumeState                   = QJsonObject();
+	m_updateResumePending                 = false;
+	m_updateResumeConnectAttempted        = false;
+	m_updateResumeVoiceChannelApplied     = false;
+	m_updateResumeChatScopeApplied        = false;
+	m_updateResumeTextChannelSyncObserved = false;
+
+	const QString path = updateResumeStatePath();
+	if (QFile::exists(path) && !QFile::remove(path)) {
+		qWarning("Unable to remove update resume state '%s'.", qUtf8Printable(path));
+	}
+}
+
+bool MainWindow::tryConnectFromUpdateResumeState() {
+	if (!m_updateResumePending || m_updateResumeConnectAttempted) {
+		return false;
+	}
+	m_updateResumeConnectAttempted = true;
+
+	const QJsonObject server   = m_updateResumeState.value(QStringLiteral("server")).toObject();
+	const QString requestedName = server.value(QStringLiteral("lastServerName")).toString().trimmed();
+	QString host                = server.value(QStringLiteral("host")).toString().trimmed();
+	unsigned short port =
+		static_cast< unsigned short >(qBound(0, server.value(QStringLiteral("port")).toInt(), 65535));
+	QString username = server.value(QStringLiteral("username")).toString().trimmed();
+	if (username.isEmpty()) {
+		username = server.value(QStringLiteral("settingsUsername")).toString().trimmed();
+	}
+	QString password;
+	QString lastServerName = requestedName.isEmpty() ? host : requestedName;
+
+	const QList< FavoriteServer > favorites =
+		Global::get().db ? Global::get().db->getFavorites() : QList< FavoriteServer >();
+	for (const FavoriteServer &favorite : favorites) {
+		const QString favoriteName = favorite.qsName.trimmed();
+		const QString favoriteHost = favorite.qsHostname.trimmed();
+		const bool nameMatches     = !requestedName.isEmpty()
+								 && (favoriteName.compare(requestedName, Qt::CaseInsensitive) == 0
+									 || favoriteHost.compare(requestedName, Qt::CaseInsensitive) == 0);
+		const bool endpointMatches = !host.isEmpty() && port != 0
+									 && favoriteHost.compare(host, Qt::CaseInsensitive) == 0
+									 && favorite.usPort == port;
+		if (!nameMatches && !endpointMatches) {
+			continue;
+		}
+
+		host = favoriteHost;
+		port = favorite.usPort;
+		if (!favorite.qsUsername.trimmed().isEmpty()) {
+			username = favorite.qsUsername.trimmed();
+		}
+		password       = favorite.qsPassword;
+		lastServerName = favoriteName.isEmpty() ? favoriteHost : favoriteName;
+		break;
+	}
+
+	if (host.isEmpty() || port == 0 || username.isEmpty()) {
+		clearPendingUpdateResumeState();
+		return false;
+	}
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	stopModernConnectServerPing();
+#endif
+	recreateServerHandler();
+	qsDesiredChannel = QString();
+	rtLast           = MumbleProto::Reject_RejectType_None;
+	bRetryServer     = true;
+	qaServerDisconnect->setEnabled(true);
+	Global::get().s.qsUsername   = username.trimmed();
+	Global::get().s.qsLastServer = lastServerName.trimmed().isEmpty() ? host : lastServerName.trimmed();
+	Global::get().l->log(Log::Information,
+						 tr("Connecting to server %1.").arg(Log::msgColor(host.toHtmlEscaped(), Log::Server)));
+	Global::get().sh->setConnectionInfo(host, port, username.trimmed(), password);
+	Global::get().sh->start(QThread::TimeCriticalPriority);
+	updateFavoriteButton();
+	queueModernShellSnapshotSync();
+	return true;
+}
+
+void MainWindow::applyPendingUpdateResumeState() {
+	if (!m_updateResumePending || !Global::get().sh || !Global::get().sh->hasSynchronized()
+		|| Global::get().uiSession == 0) {
+		return;
+	}
+
+	const QJsonObject resumeServer = m_updateResumeState.value(QStringLiteral("server")).toObject();
+	const QString resumeHost       = resumeServer.value(QStringLiteral("host")).toString().trimmed();
+	const int resumePort           = resumeServer.value(QStringLiteral("port")).toInt(0);
+	if (!resumeHost.isEmpty() && resumePort > 0) {
+		QString host;
+		QString username;
+		QString password;
+		unsigned short port = 0;
+		Global::get().sh->getConnectionInfo(host, port, username, password);
+		if (host.compare(resumeHost, Qt::CaseInsensitive) != 0 || port != static_cast< unsigned short >(resumePort)) {
+			clearPendingUpdateResumeState();
+			return;
+		}
+	}
+
+	bool waitingForServerState = false;
+
+	if (!m_updateResumeVoiceChannelApplied) {
+		const int voiceChannelID = m_updateResumeState.value(QStringLiteral("voiceChannelID")).toInt(0);
+		if (voiceChannelID > 0) {
+			Channel *voiceChannel = Channel::get(static_cast< unsigned int >(voiceChannelID));
+			if (voiceChannel) {
+				const Channel *currentChannel = currentVoiceChannel();
+				if (!currentChannel || currentChannel->iId != static_cast< unsigned int >(voiceChannelID)) {
+					m_pendingModernShellVoiceJoinScopeID = static_cast< unsigned int >(voiceChannelID);
+					Global::get().sh->joinChannel(Global::get().uiSession,
+												  static_cast< unsigned int >(voiceChannelID));
+				}
+				m_updateResumeVoiceChannelApplied = true;
+			} else {
+				waitingForServerState = true;
+			}
+		} else {
+			m_updateResumeVoiceChannelApplied = true;
+		}
+	}
+
+	if (!m_updateResumeChatScopeApplied) {
+		const QJsonObject chat   = m_updateResumeState.value(QStringLiteral("chat")).toObject();
+		const int scopeValue     = chat.value(QStringLiteral("scope")).toInt(LocalServerLogScope);
+		const unsigned int scopeID = static_cast< unsigned int >(chat.value(QStringLiteral("scopeID")).toInt(0));
+		const bool channelScope  = scopeValue == static_cast< int >(MumbleProto::Channel);
+		const bool textScope     = scopeValue == static_cast< int >(MumbleProto::TextChannel);
+
+		if (channelScope || textScope) {
+			if (channelScope && !Channel::get(scopeID)) {
+				waitingForServerState = true;
+			} else if (textScope && !m_persistentTextChannels.contains(scopeID)) {
+				if (m_updateResumeTextChannelSyncObserved) {
+					m_updateResumeChatScopeApplied = true;
+				} else {
+					waitingForServerState = true;
+				}
+			} else {
+				if (usesModernShell()) {
+					navigateToPersistentChatScope(static_cast< MumbleProto::ChatScope >(scopeValue), scopeID, true);
+				}
+				m_updateResumeChatScopeApplied = true;
+			}
+		} else {
+			m_updateResumeChatScopeApplied = true;
+		}
+	}
+
+	if (!waitingForServerState && m_updateResumeVoiceChannelApplied && m_updateResumeChatScopeApplied) {
+		clearPendingUpdateResumeState();
+	}
+}
 
 #if !defined(MUMBLE_HAS_MODERN_LAYOUT)
 QVariantList MainWindow::buildModernShellMessageStates(const PersistentChatTarget &target, std::size_t beginIndex) {
@@ -23791,7 +27185,7 @@ void MainWindow::rebuildPersistentChatChannelList() {
 			QListWidgetItem *item = new QListWidgetItem(m_persistentChatChannelList);
 			item->setData(PersistentChatScopeRole, static_cast< int >(MumbleProto::Channel));
 			item->setData(PersistentChatScopeIDRole, static_cast< unsigned int >(channel->iId));
-			item->setToolTip(tr("Legacy-compatible room chat for %1.").arg(persistentTextAclChannelLabel(channel)));
+			item->setToolTip(voiceRoomChatListDescription(channel));
 		}
 
 		QList< PersistentTextChannel > textChannels = m_persistentTextChannels.values();
@@ -23917,6 +27311,7 @@ void MainWindow::rebuildPersistentChatChannelList() {
 void MainWindow::handlePersistentTextChannelSync(const MumbleProto::TextChannelSync &msg) {
 	const bool hiddenLegacyPersistentChatSafeMode = modernShellMinimalSnapshotEnabled() && usesModernShell();
 	const bool hadExistingTextChannels            = !m_persistentTextChannels.isEmpty();
+	m_updateResumeTextChannelSyncObserved         = true;
 	m_persistentTextChannels.clear();
 	m_defaultPersistentTextChannelID = msg.has_default_text_channel_id() ? msg.default_text_channel_id() : 0;
 
@@ -23944,6 +27339,7 @@ void MainWindow::handlePersistentTextChannelSync(const MumbleProto::TextChannelS
 	if (hiddenLegacyPersistentChatSafeMode) {
 		queueModernShellSnapshotSync();
 		updateChatBar();
+		applyPendingUpdateResumeState();
 		return;
 	}
 
@@ -23976,6 +27372,7 @@ void MainWindow::handlePersistentTextChannelSync(const MumbleProto::TextChannelS
 	}
 	updatePersistentTextChannelControls();
 	updateChatBar();
+	applyPendingUpdateResumeState();
 }
 
 void MainWindow::setPersistentChatTargetUsesVoiceTree(bool useVoiceTree) {
@@ -24820,6 +28217,13 @@ void MainWindow::editPersistentTextChannel(const unsigned int textChannelID) {
 		return;
 	}
 
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell()) {
+		openModernEditTextRoomDialog(textChannelID);
+		return;
+	}
+#endif
+
 	PersistentTextChannel updated = *textChannelIt;
 	if (!promptForPersistentTextChannel(updated, false)) {
 		return;
@@ -24847,6 +28251,13 @@ void MainWindow::removePersistentTextChannel(const unsigned int textChannelID) {
 	if (textChannelIt == m_persistentTextChannels.cend()) {
 		return;
 	}
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell()) {
+		openModernDeleteTextRoomDialog(textChannelID);
+		return;
+	}
+#endif
 
 	const int result =
 		QMessageBox::question(this, tr("Delete text room"),
@@ -24984,7 +28395,7 @@ void MainWindow::showPersistentTextChannelContextMenu(const QPoint &position) {
 			editAction = menu.addAction(tr("Edit text room"));
 		}
 		if (canEditAcl) {
-			editAclAction = menu.addAction(tr("Edit visibility rules"));
+			editAclAction = menu.addAction(tr("Configure ACL"));
 		}
 		if (canManage) {
 			deleteAction = menu.addAction(tr("Delete text room"));
@@ -25220,7 +28631,7 @@ MainWindow::PersistentChatTarget MainWindow::currentPersistentChatTarget() const
 		target.scopeID     = selectedChannel->iId;
 		target.channel     = selectedChannel;
 		target.label       = selectedChannel->qsName;
-		target.description = tr("Legacy-compatible room chat.");
+		target.description = voiceRoomChatDescription(selectedChannel);
 		return target;
 	}
 
@@ -25237,26 +28648,50 @@ MainWindow::PersistentChatTarget MainWindow::currentPersistentChatTarget() const
 		return activityTarget();
 	}
 
-	if (!connected) {
+	bool selectedModernDirectConversationAvailable = false;
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	selectedModernDirectConversationAvailable =
+		scopeValue == LocalDirectMessageScope && m_modernDirectMessageConversations.contains(selectedScopeID);
+#endif
+
+	if (!connected && !selectedModernDirectConversationAvailable) {
 		return activityTarget();
 	}
 
 	if (scopeValue == LocalDirectMessageScope) {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 		target.valid          = true;
 		target.directMessage  = true;
 		target.legacyTextPath = true;
+		target.scopeID        = selectedScopeID;
 		target.user           = ClientUser::get(selectedScopeID);
 		target.channel        = target.user ? target.user->cChannel : nullptr;
-		target.label          = target.user ? target.user->qsName : tr("Direct message");
-		target.description    = tr("Classic direct message");
+		const auto conversationIt = m_modernDirectMessageConversations.constFind(selectedScopeID);
+		target.label = target.user ? target.user->qsName
+								   : (conversationIt != m_modernDirectMessageConversations.cend()
+										  && !conversationIt->label.trimmed().isEmpty()
+										  ? conversationIt->label
+										  : tr("Direct message"));
+		target.description =
+			target.user
+				? tr("Classic direct message")
+				: (conversationIt != m_modernDirectMessageConversations.cend()
+					   && !conversationIt->subtitle.trimmed().isEmpty()
+					   ? conversationIt->subtitle
+					   : tr("Classic direct message"));
 		if (!target.user) {
 			target.readOnly      = true;
-			target.statusMessage = tr("This direct conversation is no longer available.");
+			target.statusMessage = conversationIt == m_modernDirectMessageConversations.cend()
+									   ? tr("This direct conversation is no longer available.")
+									   : QString();
 		} else {
 			target.statusMessage = tr(
 				"Direct messages still use the classic text-message transport and do not have persistent history yet.");
 		}
 		return target;
+#else
+		return activityTarget();
+#endif
 	}
 
 	const MumbleProto::ChatScope scope = static_cast< MumbleProto::ChatScope >(scopeValue);
@@ -25289,7 +28724,7 @@ MainWindow::PersistentChatTarget MainWindow::currentPersistentChatTarget() const
 			target.channel = Channel::get(scopeID);
 			if (target.channel) {
 				target.label       = target.channel->qsName;
-				target.description = tr("Legacy-compatible room chat.");
+				target.description = voiceRoomChatDescription(target.channel);
 			} else {
 				target.readOnly      = true;
 				target.label         = tr("Channel %1").arg(scopeID);
@@ -26273,7 +29708,56 @@ bool MainWindow::requestPersistentChatRemotePlayableMediaCache(const QString &pr
 							resolvedMime == QLatin1String("video/mp4") && mp4BytesLikelyHaveAudioTrack(data);
 						if (!audioUrl.isEmpty() && resolvedMime == QLatin1String("video/mp4")
 							&& !mediaHasOwnAudio) {
-							applyPersistentChatRemoteAudioMedia(*previewIt, audioUrl, suggestedAudioMime);
+							const QString audioMime = playableAudioMimeForUrl(audioUrl, suggestedAudioMime);
+							if (!audioMime.isEmpty() && isTrustedRemoteAudioMediaUrl(audioUrl, audioMime)) {
+								previewIt->remoteMediaRequested = true;
+								previewIt->remoteMediaFinished  = false;
+
+								QNetworkRequest audioRequest(audioUrl);
+								preparePreviewMediaRequest(audioRequest, audioUrl);
+								QNetworkReply *audioReply = Global::get().nam->get(audioRequest);
+								applyPreviewReplyGuards(audioReply, PREVIEW_MAX_AUDIO_CACHE_BYTES);
+								connect(audioReply, &QNetworkReply::finished, this,
+										[this, audioReply, previewKey, audioUrl, suggestedAudioMime]() {
+											const QByteArray audioData = audioReply->readAll();
+											const bool audioSuccess    = audioReply->error() == QNetworkReply::NoError;
+											const QString audioReplyMime =
+												audioReply->header(QNetworkRequest::ContentTypeHeader)
+													.toString()
+													.section(QLatin1Char(';'), 0, 0)
+													.trimmed()
+													.toLower();
+											audioReply->deleteLater();
+
+											auto audioPreviewIt = m_persistentChatPreviews.find(previewKey);
+											if (audioPreviewIt == m_persistentChatPreviews.end()) {
+												return;
+											}
+
+											audioPreviewIt->remoteMediaRequested = false;
+											audioPreviewIt->remoteMediaFinished  = true;
+
+											const QString resolvedAudioMime =
+												playableAudioMimeForReply(audioUrl, suggestedAudioMime, audioReplyMime);
+											const QString audioDataUrl =
+												(audioSuccess
+												 && remotePlayableAudioBytesLookValid(audioData, resolvedAudioMime))
+													? playableAudioDataUrl(resolvedAudioMime, audioData)
+													: QString();
+											if (!audioDataUrl.isEmpty()) {
+												audioPreviewIt->mediaAudioDataUrl = audioDataUrl;
+												audioPreviewIt->mediaAudioMime    = resolvedAudioMime;
+											} else {
+												audioPreviewIt->mediaAudioDataUrl.clear();
+												audioPreviewIt->mediaAudioMime.clear();
+											}
+
+											publishPersistentChatPreviewUpdate(previewKey);
+										});
+								return;
+							}
+							previewIt->mediaAudioDataUrl.clear();
+							previewIt->mediaAudioMime.clear();
 						} else if (mediaHasOwnAudio) {
 							previewIt->mediaAudioDataUrl.clear();
 							previewIt->mediaAudioMime.clear();
@@ -29808,6 +33292,10 @@ void MainWindow::handlePersistentChatMessage(const MumbleProto::ChatMessage &msg
 
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	clearModernShellMessageDtoCache("message");
+	if ((msg.has_scope() ? msg.scope() : MumbleProto::Channel) == MumbleProto::Private) {
+		appendModernPersistentDirectMessage(msg, true);
+		return;
+	}
 	if (usesModernShell() && stonksLedgerFeatureSupported() && Global::get().bStonksEnabled) {
 		const MumbleProto::ChatScope scope = msg.has_scope() ? msg.scope() : MumbleProto::Channel;
 		const unsigned int scopeID         = msg.has_scope_id() ? msg.scope_id() : 0;
@@ -29840,6 +33328,10 @@ void MainWindow::handlePersistentChatHistory(const MumbleProto::ChatHistoryRespo
 
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	clearModernShellMessageDtoCache("history");
+	if ((msg.has_scope() ? msg.scope() : MumbleProto::Channel) == MumbleProto::Private) {
+		mergeModernDirectMessageHistory(msg);
+		return;
+	}
 #endif
 	syncPersistentChatGatewayHandler();
 	m_persistentChatGateway->handleIncomingHistory(msg);
@@ -29850,6 +33342,26 @@ void MainWindow::handlePersistentChatReadState(const MumbleProto::ChatReadStateU
 	if (!m_persistentChatGateway) {
 		return;
 	}
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if ((msg.has_scope() ? msg.scope() : MumbleProto::Channel) == MumbleProto::Private && msg.has_scope_id()) {
+		ClientUser *peer = clientUserByPersistentUserID(msg.scope_id());
+		if (peer) {
+			ModernDirectMessageConversation &conversation = m_modernDirectMessageConversations[peer->uiSession];
+			conversation.peerSession       = peer->uiSession;
+			conversation.peerUserID        = msg.scope_id();
+			conversation.persistentHistory = true;
+			if (msg.has_last_read_message_id()) {
+				conversation.lastReadMessageID = msg.last_read_message_id();
+			}
+			if (conversation.lastReadMessageID >= conversation.lastMessageID) {
+				conversation.unreadCount = 0;
+			}
+			publishModernDirectMessagesPatch();
+		}
+		return;
+	}
+#endif
 
 	syncPersistentChatGatewayHandler();
 	m_persistentChatGateway->handleIncomingReadState(msg);
@@ -30104,24 +33616,55 @@ bool MainWindow::isOwnPersistentChatMessage(const MumbleProto::ChatMessage &mess
 		   && u8(message.actor_name()) == self->qsName;
 }
 
-bool MainWindow::deletePersistentChatMessage(unsigned int messageID) {
+const MumbleProto::ChatMessage *MainWindow::deletablePersistentChatMessage(const unsigned int messageID,
+																		   PersistentChatTarget *targetOut) const {
 	if (!m_persistentChatGateway || messageID == 0) {
-		return false;
+		return nullptr;
 	}
 
 	const PersistentChatTarget target = currentPersistentChatTarget();
 	if (!persistentChatTargetSupportsMessageDelete(target)) {
-		return false;
+		return nullptr;
 	}
 
 	const MumbleProto::ChatMessage *message = findPersistentChatMessageByID(m_persistentChatMessages, messageID);
 	if (!message || persistentChatSystemMessageText(*message).has_value()
 		|| (message->has_deleted_at() && message->deleted_at() > 0)) {
-		return false;
+		return nullptr;
 	}
 	if (!isOwnPersistentChatMessage(*message) && !canDeletePersistentChatMessages(target, true)) {
+		return nullptr;
+	}
+
+	if (targetOut) {
+		*targetOut = target;
+	}
+	return message;
+}
+
+bool MainWindow::executePersistentChatMessageDelete(const PersistentChatTarget &target,
+												   const MumbleProto::ChatMessage &message) {
+	if (!m_persistentChatGateway || !persistentChatTargetSupportsMessageDelete(target) || message.message_id() == 0) {
 		return false;
 	}
+
+	syncPersistentChatGatewayHandler();
+	m_persistentChatGateway->deleteMessage(target.scope, target.scopeID, message.thread_id(), message.message_id());
+	return true;
+}
+
+bool MainWindow::deletePersistentChatMessage(unsigned int messageID) {
+	PersistentChatTarget target;
+	const MumbleProto::ChatMessage *message = deletablePersistentChatMessage(messageID, &target);
+	if (!message) {
+		return false;
+	}
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell()) {
+		return openModernDeleteMessageDialog(messageID, target, *message);
+	}
+#endif
 
 	QMessageBox confirm(this);
 	confirm.setIcon(QMessageBox::Warning);
@@ -30136,9 +33679,7 @@ bool MainWindow::deletePersistentChatMessage(unsigned int messageID) {
 		return false;
 	}
 
-	syncPersistentChatGatewayHandler();
-	m_persistentChatGateway->deleteMessage(target.scope, target.scopeID, message->thread_id(), message->message_id());
-	return true;
+	return executePersistentChatMessageDelete(target, *message);
 }
 
 void MainWindow::syncPersistentChatInputState(bool baseEnabled) {
@@ -30829,6 +34370,14 @@ void MainWindow::closeEvent(QCloseEvent *e) {
 	const bool minimizeDueToConnected = sh && sh->isRunning() && quitBehavior == QuitBehavior::MINIMIZE_WHEN_CONNECTED;
 
 	if (!forceQuit && (alwaysAsk || askDueToConnected)) {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+		if (usesModernShell()) {
+			e->ignore();
+			openModernQuitDialog(true);
+			return;
+		}
+#endif
+
 		QMessageBox mb(QMessageBox::Warning, QLatin1String("Mumble"),
 					   tr("Are you sure you want to close Mumble? Perhaps you prefer to minimize it instead?"),
 					   QMessageBox::NoButton, this);
@@ -31658,6 +35207,10 @@ static void recreateServerHandler() {
 							  SLOT(serverDisconnected(QAbstractSocket::SocketError, QString)));
 	Global::get().mw->connect(sh.get(), SIGNAL(error(QAbstractSocket::SocketError, QString)), Global::get().mw,
 							  SLOT(resolverError(QAbstractSocket::SocketError, QString)));
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	Global::get().mw->connect(sh.get(), &ServerHandler::pingRequested, Global::get().mw,
+							  &MainWindow::publishModernShellRoomStatePatch);
+#endif
 
 	QObject::connect(sh.get(), &ServerHandler::disconnected, Global::get().talkingUI,
 					 &TalkingUI::on_serverDisconnected);
@@ -32095,6 +35648,7 @@ void MainWindow::on_Reconnect_timeout() {
 
 	Global::get().l->log(Log::Information, tr("Reconnecting."));
 	Global::get().sh->start(QThread::TimeCriticalPriority);
+	queueModernShellSnapshotSync();
 }
 
 void MainWindow::on_qmSelf_aboutToShow() {
@@ -32204,6 +35758,13 @@ void MainWindow::on_qmServer_aboutToShow() {
 }
 
 void MainWindow::on_qaServerDisconnect_triggered() {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell() && Global::get().sh && Global::get().sh->isRunning()) {
+		openModernDisconnectDialog();
+		return;
+	}
+#endif
+
 	disconnectFromServer();
 }
 
@@ -33025,6 +36586,13 @@ void MainWindow::on_qaUserInformation_triggered() {
 }
 
 void MainWindow::on_qaQuit_triggered() {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell()) {
+		openModernQuitDialog(false);
+		return;
+	}
+#endif
+
 	forceQuit = true;
 	this->close();
 }
@@ -33116,6 +36684,12 @@ void MainWindow::sendChatbarMessage(QString qsMessage) {
 		Global::get().l->log(Log::TextMessage,
 							 tr("To %1: %2").arg(Log::formatClientUser(target.user, Log::Target), qsMessage),
 							 tr("Message to %1").arg(target.user->qsName), true);
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+		if (usesModernShell()) {
+			appendModernDirectMessage(target.user->uiSession, qsMessage, true);
+			openModernDirectMessage(target.user->uiSession, true);
+		}
+#endif
 		setPersistentChatReplyTarget(std::nullopt);
 		return;
 	}
@@ -33526,9 +37100,15 @@ void MainWindow::on_qaChannelLink_triggered() {
 }
 
 void MainWindow::on_qaChannelUnlink_triggered() {
+	Channel *l = getContextMenuChannel();
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (handleModernShellLegacyDialogAction(QStringLiteral("unlink"), nullptr, l)) {
+		return;
+	}
+#endif
+
 	ClientUser *user = Global::get().uiSession ? ClientUser::get(Global::get().uiSession) : nullptr;
 	Channel *c      = user ? user->cChannel : nullptr;
-	Channel *l      = getContextMenuChannel();
 	if (!l)
 		l = Channel::get(Mumble::ROOT_CHANNEL_ID);
 
@@ -33540,6 +37120,13 @@ void MainWindow::on_qaChannelUnlink_triggered() {
 }
 
 void MainWindow::on_qaChannelUnlinkAll_triggered() {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell()) {
+		handleModernShellLegacyDialogAction(QStringLiteral("unlinkAll"), nullptr, currentVoiceChannel());
+		return;
+	}
+#endif
+
 	Channel *c = ClientUser::get(Global::get().uiSession)->cChannel;
 
 	MumbleProto::ChannelState mpcs;
@@ -33741,18 +37328,26 @@ void MainWindow::on_channelStateChanged(Channel *channel, bool forceUpdateTree) 
 		return;
 	}
 
-	if (channel == pmModel->getChannel(qtvUsers->currentIndex())) {
+	const bool changedTreeSelection = channel == pmModel->getChannel(qtvUsers->currentIndex());
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
-		if (usesModernShell()) {
+	if (usesModernShell()) {
+		const PersistentChatTarget target = currentPersistentChatTarget();
+		const bool changedActiveVoiceRoom = channel && target.valid && !target.serverLog && !target.directMessage
+											&& target.scope == MumbleProto::Channel && target.scopeID == channel->iId;
+		if (changedTreeSelection) {
 			updateChatBar(false, false);
-			publishModernShellRoomStatePatch();
-		} else {
-			updateChatBar();
 		}
-#else
+		if (changedTreeSelection || changedActiveVoiceRoom) {
+			publishModernShellRoomStatePatch();
+		}
+	} else if (changedTreeSelection) {
 		updateChatBar();
-#endif
 	}
+#else
+	if (changedTreeSelection) {
+		updateChatBar();
+	}
+#endif
 
 	if (forceUpdateTree) {
 		pmModel->forceVisualUpdate();
@@ -33950,6 +37545,13 @@ void MainWindow::on_qaHelpAboutQt_triggered() {
 }
 
 void MainWindow::openFeedbackDialog() {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell()) {
+		openModernFeedbackDialog();
+		return;
+	}
+#endif
+
 	FeedbackDialog::ServerCapability capability;
 	capability.connected = Global::get().sh && Global::get().sh->isConnected() && Global::get().sh->hasSynchronized();
 	capability.supported =
@@ -34717,6 +38319,7 @@ void MainWindow::serverConnected() {
 	Global::get().uiSession                  = 0;
 	Global::get().pPermissions               = ChanACL::None;
 	clearUserTextureRequests();
+	clearUserCommentRequests();
 	const bool hiddenLegacyNavigatorSafeMode = modernShellMinimalSnapshotEnabled() && usesModernShell();
 
 #ifdef Q_OS_MAC
@@ -34763,6 +38366,9 @@ void MainWindow::serverConnected() {
 	Global::get().bFeedbackEnabled                = false;
 	Global::get().uiFeedbackMaxLogBytes           = Mumble::Feedback::DEFAULT_MAX_LOG_BYTES;
 	Global::get().uiFeedbackMaxBodyBytes          = Mumble::Feedback::DEFAULT_MAX_BODY_BYTES;
+	Global::get().qsServerDisplayName.clear();
+	Global::get().qsServerMonogram.clear();
+	Global::get().qbaServerImage.clear();
 	Global::get().uiMessageLength                  = 5000;
 	Global::get().uiImageLength                    = 131072;
 	Global::get().uiMaxUsers                       = 0;
@@ -34781,7 +38387,7 @@ void MainWindow::serverConnected() {
 	clearModernShellMessageDtoCache("connect");
 	m_stonksState.clear();
 	m_stonksSelectedPeriod = QStringLiteral("30d");
-	m_stonksSelectedUserID = 0;
+	m_stonksSelectedUserID.reset();
 #endif
 	syncPersistentChatGatewayHandler();
 	if (m_persistentChatController) {
@@ -34825,6 +38431,7 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	// clear ChannelListener
 	Global::get().channelListenerManager->clear();
 	clearUserTextureRequests();
+	clearUserCommentRequests();
 
 	// Reset move-back history
 	qaMoveBack->setEnabled(false);
@@ -34845,6 +38452,9 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	Global::get().bFeedbackEnabled                = false;
 	Global::get().uiFeedbackMaxLogBytes           = Mumble::Feedback::DEFAULT_MAX_LOG_BYTES;
 	Global::get().uiFeedbackMaxBodyBytes          = Mumble::Feedback::DEFAULT_MAX_BODY_BYTES;
+	Global::get().qsServerDisplayName.clear();
+	Global::get().qsServerMonogram.clear();
+	Global::get().qbaServerImage.clear();
 	m_modernLayoutCompatibleServer                 = false;
 	m_modernShellRuntimeDisabled                   = false;
 	m_hasPersistentChatSupport                     = false;
@@ -34870,7 +38480,7 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	clearModernShellMessageDtoCache("disconnect");
 	m_stonksState.clear();
 	m_stonksSelectedPeriod = QStringLiteral("30d");
-	m_stonksSelectedUserID = 0;
+	m_stonksSelectedUserID.reset();
 #endif
 	syncPersistentChatGatewayHandler();
 	if (m_persistentChatController) {
@@ -35113,6 +38723,7 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 					qaServerDisconnect->setEnabled(true);
 					if (bRetryServer) {
 						qtReconnect->start();
+						queueModernShellSnapshotSync();
 					}
 				}
 				break;
@@ -35138,12 +38749,20 @@ void MainWindow::resolverError(QAbstractSocket::SocketError, QString reason) {
 		qaServerDisconnect->setEnabled(true);
 		if (bRetryServer) {
 			qtReconnect->start();
+			queueModernShellSnapshotSync();
 		}
 	}
 }
 
 void MainWindow::showRaiseWindow() {
 	endNativeWindowMoveOrResize();
+	if (qEnvironmentVariableIsSet("MUMBLE_MODERN_AUTOMATION_OFFSCREEN")) {
+		setAttribute(Qt::WA_ShowWithoutActivating, true);
+		move(-32000, -32000);
+		show();
+		return;
+	}
+
 	setWindowState(windowState() & ~Qt::WindowMinimized);
 	QTimer::singleShot(0, [this]() {
 		show();
@@ -35512,6 +39131,10 @@ void MainWindow::destroyUserInformation() {
 }
 
 void MainWindow::openServerConnectDialog(bool autoconnect) {
+	if ((autoconnect || hasPendingUpdateResumeState()) && tryConnectFromUpdateResumeState()) {
+		return;
+	}
+
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	if (usesModernShell()) {
 		if (autoconnect && Global::get().s.bAutoConnect && tryModernAutoConnectLastServer()) {
@@ -35560,6 +39183,7 @@ void MainWindow::disconnectFromServer() {
 	if (qtReconnect->isActive()) {
 		qtReconnect->stop();
 		qaServerDisconnect->setEnabled(false);
+		queueModernShellSnapshotSync();
 	}
 
 	m_reconnectSoundBlocker.reset();
@@ -35718,6 +39342,13 @@ void MainWindow::openSelfCommentDialog() {
 }
 
 void MainWindow::changeServerTexture() {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell()) {
+		openModernUserTextureChangeDialog(ClientUser::get(Global::get().uiSession));
+		return;
+	}
+#endif
+
 	QPair< QByteArray, QImage > choice = openImageFile();
 	if (choice.first.isEmpty())
 		return;
@@ -35729,6 +39360,13 @@ void MainWindow::changeServerTexture() {
 }
 
 void MainWindow::removeServerTexture() {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell()) {
+		openModernUserTextureResetDialog(ClientUser::get(Global::get().uiSession));
+		return;
+	}
+#endif
+
 	Global::get().sh->setUserTexture(Global::get().uiSession, QByteArray());
 }
 
@@ -35911,6 +39549,23 @@ void MainWindow::showMuteCuePopup() {
 	}
 
 	Global::get().s.muteCueShown = true;
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell()) {
+		const QVariantList sections {
+			modernDialogSection(tr("Mute cue"),
+								QVariantList { modernNoteField(tr("That sound was the mute cue. It activates when you "
+																  "speak while muted. Would you like to keep it enabled?")) })
+		};
+		const QVariantList actions {
+			modernDialogAction(QStringLiteral("disableMuteCue"), tr("No"), true, QStringLiteral("danger"), true),
+			modernDialogAction(QStringLiteral("keepMuteCue"), tr("Yes"), true, QStringLiteral("accent"), true)
+		};
+		openModernGenericDialog(modernDialogDto(QStringLiteral("muteCueNotice"), QStringLiteral("warning"),
+												tr("Mute cue"), tr("Voice feedback"),
+												sections, actions, QStringLiteral("keepMuteCue"), QSize(520, 320)));
+		return;
+	}
+#endif
 	QMessageBox mb(
 		QMessageBox::Warning, QLatin1String("Mumble"),
 		tr("That sound was the mute cue. It activates when you speak while muted. Would you like to keep it enabled?"),

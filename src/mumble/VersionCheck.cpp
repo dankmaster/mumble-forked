@@ -10,16 +10,28 @@
 #include "NetworkConfig.h"
 #include "Version.h"
 
+#include <QCoreApplication>
+#include <QCryptographicHash>
+#include <QDateTime>
 #include <QDesktopServices>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMessageBox>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QProcess>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QStringList>
 #include <QTimer>
+
+#include <memory>
+#include <utility>
 
 namespace {
 
@@ -80,6 +92,42 @@ int jsonInt(const QJsonObject &object, const QString &key, int fallback = -1) {
 QUrl jsonUrl(const QJsonObject &object, const QString &key) {
 	const QUrl url(object.value(key).toString().trimmed());
 	return url.isValid() ? url : QUrl();
+}
+
+QString normalizedSha256(const QJsonObject &object) {
+	const QString sha256 = object.value(QStringLiteral("sha256")).toString().trimmed();
+	static const QRegularExpression sha256Regex(QStringLiteral("^[0-9A-Fa-f]{64}$"));
+	return sha256Regex.match(sha256).hasMatch() ? sha256.toLower() : QString();
+}
+
+bool isTrustedInstallerUrl(const QUrl &url) {
+	if (!url.isValid()) {
+		return false;
+	}
+	if (url.scheme() == QLatin1String("https")) {
+		return true;
+	}
+
+	return url.isLocalFile() && hasConfiguredUpdateOverride();
+}
+
+QString updateInstallerFileName(const QJsonObject &info) {
+	const QUrl installerUrl = jsonUrl(info, QStringLiteral("installerUrl"));
+	QString fileName       = QFileInfo(installerUrl.path()).fileName();
+	if (fileName.isEmpty() || !fileName.endsWith(QLatin1String(".msi"), Qt::CaseInsensitive)) {
+		const QString version = info.value(QStringLiteral("version")).toString().trimmed();
+		const int build       = jsonInt(info, QStringLiteral("build"));
+		if (!version.isEmpty()) {
+			fileName = QStringLiteral("mumble-forked-%1.msi").arg(version);
+		} else if (build >= 0) {
+			fileName = QStringLiteral("mumble-forked-build-%1.msi").arg(build);
+		} else {
+			fileName = QStringLiteral("mumble-forked-update.msi");
+		}
+	}
+
+	fileName.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._-]")), QStringLiteral("_"));
+	return fileName;
 }
 
 QJsonObject parseJsonObject(const QByteArray &data, QString *errorMessage) {
@@ -232,10 +280,511 @@ bool shouldSkipAutomaticUpdateCheck(bool autocheck) {
 	return Version::getPatch(Version::get()) == 0;
 }
 
+QJsonArray stringListJsonArray(const QStringList &items) {
+	QJsonArray array;
+	for (const QString &item : items) {
+		array.push_back(item);
+	}
+	return array;
+}
+
+QStringList bundledUpdaterArguments(const QString &installerPath, const QString &updateDirPath, const bool passive) {
+	const QString appPath = QCoreApplication::applicationFilePath();
+	const QString appDir  = QFileInfo(appPath).absolutePath();
+	const QDir updateDir(updateDirPath);
+	const QString updaterLogPath = updateDir.filePath(QStringLiteral("mumble-updater.log"));
+	const QString msiLogPath     = updateDir.filePath(QStringLiteral("mumble-update-msi.log"));
+
+	return QStringList {
+		QStringLiteral("--parent-pid"),
+		QString::number(QCoreApplication::applicationPid()),
+		QStringLiteral("--installer"),
+		QDir::toNativeSeparators(installerPath),
+		QStringLiteral("--app"),
+		QDir::toNativeSeparators(appPath),
+		QStringLiteral("--working-dir"),
+		QDir::toNativeSeparators(appDir),
+		QStringLiteral("--updater-log"),
+		QDir::toNativeSeparators(updaterLogPath),
+		QStringLiteral("--msi-log"),
+		QDir::toNativeSeparators(msiLogPath),
+		passive ? QStringLiteral("--passive") : QStringLiteral("--no-passive"),
+	};
+}
+
+QStringList msiexecUpdateArguments(const QString &installerPath, const bool passive) {
+	QStringList arguments { QStringLiteral("/i"), QDir::toNativeSeparators(installerPath) };
+	if (passive) {
+		arguments << QStringLiteral("/passive") << QStringLiteral("/norestart");
+	}
+	return arguments;
+}
+
+bool launchBundledUpdater(const QString &installerPath, const bool passive) {
+#ifdef Q_OS_WIN
+	QDir updateDir(Global::get().qdBasePath.filePath(QStringLiteral("Updates")));
+	if (!updateDir.exists() && !QDir().mkpath(updateDir.absolutePath())) {
+		return false;
+	}
+
+	const QString updaterSourcePath =
+		QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("mumble-updater.exe"));
+	const QFileInfo updaterSource(updaterSourcePath);
+	if (!updaterSource.isFile() || !updaterSource.isReadable()) {
+		return false;
+	}
+
+	const QString updaterTargetPath =
+		updateDir.filePath(QStringLiteral("mumble-updater-%1-%2.exe")
+							   .arg(QCoreApplication::applicationPid())
+							   .arg(QDateTime::currentMSecsSinceEpoch()));
+	if (QFile::exists(updaterTargetPath) && !QFile::remove(updaterTargetPath)) {
+		return false;
+	}
+	if (!QFile::copy(updaterSourcePath, updaterTargetPath)) {
+		return false;
+	}
+
+	const QStringList arguments = bundledUpdaterArguments(installerPath, updateDir.absolutePath(), passive);
+	return QProcess::startDetached(updaterTargetPath, arguments, updateDir.absolutePath());
+#else
+	Q_UNUSED(installerPath);
+	Q_UNUSED(passive);
+	return false;
+#endif
+}
+
+class ForkUpdateInstaller : public QObject {
+public:
+	ForkUpdateInstaller(const QJsonObject &info, QWidget *parent, bool showProgress,
+						std::function< void(const QString &) > readyCallback,
+						std::function< void(const QString &) > failureCallback,
+						std::function< void() > cancelledCallback)
+		: QObject(parent ? static_cast< QObject * >(parent) : QCoreApplication::instance())
+		, m_info(info), m_parent(parent), m_downloadUrl(jsonUrl(info, QStringLiteral("installerUrl")))
+		, m_expectedSha256(normalizedSha256(info)), m_showProgress(showProgress)
+		, m_readyCallback(std::move(readyCallback)), m_failureCallback(std::move(failureCallback))
+		, m_cancelledCallback(std::move(cancelledCallback)) {
+	}
+
+	void start() {
+#ifndef Q_OS_WIN
+		QDesktopServices::openUrl(m_downloadUrl);
+		deleteLater();
+		return;
+#else
+		if (!VersionCheck::canInstallUpdate(m_info)) {
+			showFailure(VersionCheck::tr("This update cannot be installed automatically because the update manifest is "
+										 "missing a trusted installer URL or SHA256 checksum."));
+			return;
+		}
+
+		QDir updateDir(Global::get().qdBasePath.filePath(QStringLiteral("Updates")));
+		if (!updateDir.exists() && !QDir().mkpath(updateDir.absolutePath())) {
+			showFailure(VersionCheck::tr("Mumble could not create the update download folder."));
+			return;
+		}
+
+		m_targetPath = updateDir.filePath(updateInstallerFileName(m_info));
+		m_file       = std::make_unique< QSaveFile >(m_targetPath);
+		if (!m_file->open(QIODevice::WriteOnly)) {
+			showFailure(VersionCheck::tr("Mumble could not write the update installer to %1.").arg(m_targetPath));
+			return;
+		}
+
+		if (m_showProgress) {
+			m_progress = new QProgressDialog(VersionCheck::tr("Downloading mumble-forked update..."),
+											 VersionCheck::tr("Cancel"), 0, 0, m_parent);
+			m_progress->setWindowTitle(VersionCheck::tr("Mumble update"));
+			m_progress->setWindowModality(Qt::WindowModal);
+			m_progress->setMinimumDuration(0);
+			connect(m_progress, &QProgressDialog::canceled, this, [this]() {
+				m_cancelled = true;
+				if (m_reply) {
+					m_reply->abort();
+				}
+			});
+			m_progress->show();
+		}
+
+		request(m_downloadUrl);
+#endif
+	}
+
+private:
+	QJsonObject m_info;
+	QWidget *m_parent = nullptr;
+	QUrl m_downloadUrl;
+	QString m_expectedSha256;
+	QString m_targetPath;
+	std::unique_ptr< QSaveFile > m_file;
+	QCryptographicHash m_hash { QCryptographicHash::Sha256 };
+	QProgressDialog *m_progress = nullptr;
+	QNetworkReply *m_reply      = nullptr;
+	QString m_pendingFailure;
+	bool m_showProgress = true;
+	bool m_cancelled    = false;
+	int m_redirectCount = 0;
+	std::function< void(const QString &) > m_readyCallback;
+	std::function< void(const QString &) > m_failureCallback;
+	std::function< void() > m_cancelledCallback;
+
+	void request(const QUrl &url) {
+		if (!isTrustedInstallerUrl(url)) {
+			showFailure(VersionCheck::tr("The update installer URL is invalid."));
+			return;
+		}
+
+		QNetworkRequest request(url);
+		Network::prepareRequest(request);
+		request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::AlwaysNetwork);
+
+		m_reply = Global::get().nam->get(request);
+		connect(m_reply, &QNetworkReply::readyRead, this, [this]() { writeReplyData(); });
+		connect(m_reply, &QNetworkReply::downloadProgress, this, [this](qint64 received, qint64 total) {
+			if (!m_progress) {
+				return;
+			}
+			if (total > 0) {
+				m_progress->setRange(0, 1000);
+				m_progress->setValue(static_cast< int >((received * 1000) / total));
+			} else {
+				m_progress->setRange(0, 0);
+			}
+		});
+		connect(m_reply, &QNetworkReply::finished, this, [this]() { replyFinished(); });
+	}
+
+	bool replyHasInstallerBody() const {
+		if (!m_reply) {
+			return false;
+		}
+
+		const QVariant statusValue = m_reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+		if (!statusValue.isValid()) {
+			return true;
+		}
+
+		const int status = statusValue.toInt();
+		return status >= 200 && status < 300;
+	}
+
+	void writeReplyData() {
+		if (!m_reply || m_pendingFailure.size() > 0 || !replyHasInstallerBody()) {
+			if (m_reply) {
+				m_reply->readAll();
+			}
+			return;
+		}
+
+		const QByteArray data = m_reply->readAll();
+		if (data.isEmpty()) {
+			return;
+		}
+
+		const qint64 written = m_file ? m_file->write(data) : -1;
+		if (written != data.size()) {
+			m_pendingFailure = VersionCheck::tr("Mumble could not finish writing the update installer.");
+			m_reply->abort();
+			return;
+		}
+		m_hash.addData(data);
+	}
+
+	void replyFinished() {
+		QNetworkReply *reply = m_reply;
+		if (!reply) {
+			showFailure(VersionCheck::tr("The update download failed."));
+			return;
+		}
+
+		const QVariant redirectTarget = reply->attribute(QNetworkRequest::RedirectionTargetAttribute);
+		if (redirectTarget.isValid() && m_pendingFailure.isEmpty() && !m_cancelled) {
+			const QUrl nextUrl = reply->url().resolved(redirectTarget.toUrl());
+			reply->deleteLater();
+			m_reply = nullptr;
+			if (m_redirectCount >= MaxRedirects) {
+				showFailure(VersionCheck::tr("The update installer redirected too many times."));
+				return;
+			}
+			++m_redirectCount;
+			request(nextUrl);
+			return;
+		}
+
+		if (m_cancelled) {
+			reply->deleteLater();
+			m_reply = nullptr;
+			cancelDownload();
+			return;
+		}
+
+		writeReplyData();
+
+		const QNetworkReply::NetworkError error = reply->error();
+		const QString errorString               = reply->errorString();
+		const QVariant statusValue              = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+		reply->deleteLater();
+		m_reply = nullptr;
+
+		if (!m_pendingFailure.isEmpty()) {
+			showFailure(m_pendingFailure);
+			return;
+		}
+		if (error != QNetworkReply::NoError) {
+			showFailure(VersionCheck::tr("Mumble failed to download the update installer: %1").arg(errorString));
+			return;
+		}
+		if (statusValue.isValid()) {
+			const int status = statusValue.toInt();
+			if (status < 200 || status >= 300) {
+				showFailure(VersionCheck::tr("Mumble failed to download the update installer (HTTP %1).").arg(status));
+				return;
+			}
+		}
+
+		const QString actualSha256 = QString::fromLatin1(m_hash.result().toHex());
+		if (actualSha256 != m_expectedSha256) {
+			showFailure(VersionCheck::tr("The downloaded update installer did not match the published SHA256 checksum."));
+			return;
+		}
+
+		if (!m_file || !m_file->commit()) {
+			showFailure(VersionCheck::tr("Mumble could not save the verified update installer."));
+			return;
+		}
+		m_file.reset();
+
+		finishProgress();
+		if (m_readyCallback) {
+			m_readyCallback(m_targetPath);
+			deleteLater();
+		} else {
+			promptAndLaunchInstaller();
+		}
+	}
+
+	void cancelDownload() {
+		if (m_file) {
+			m_file->cancelWriting();
+			m_file.reset();
+		}
+		finishProgress();
+		if (m_cancelledCallback) {
+			m_cancelledCallback();
+		}
+		deleteLater();
+	}
+
+	void showFailure(const QString &message) {
+		if (m_file) {
+			m_file->cancelWriting();
+			m_file.reset();
+		}
+		finishProgress();
+		if (m_failureCallback) {
+			m_failureCallback(message);
+		} else {
+			QMessageBox::warning(m_parent, VersionCheck::tr("Mumble update"), message);
+		}
+		deleteLater();
+	}
+
+	void finishProgress() {
+		if (m_progress) {
+			m_progress->hide();
+			m_progress->deleteLater();
+			m_progress = nullptr;
+		}
+	}
+
+	void promptAndLaunchInstaller() {
+		QMessageBox messageBox(QMessageBox::Question, VersionCheck::tr("Install Mumble update"),
+							   VersionCheck::tr("The update installer was downloaded and verified."),
+							   QMessageBox::NoButton, m_parent);
+		messageBox.setInformativeText(
+			VersionCheck::tr("Mumble will close, Windows will run the installer, and Mumble will reopen to restore your server and chat. Continue?"));
+		QPushButton *installButton = messageBox.addButton(VersionCheck::tr("Install update"), QMessageBox::AcceptRole);
+		messageBox.addButton(VersionCheck::tr("Not now"), QMessageBox::RejectRole);
+		messageBox.exec();
+
+		if (messageBox.clickedButton() != installButton) {
+			deleteLater();
+			return;
+		}
+
+		if (Global::get().mw) {
+			Global::get().mw->prepareUpdateResumeState();
+		}
+		if (!VersionCheck::launchPreparedUpdate(m_targetPath)) {
+			if (Global::get().mw) {
+				Global::get().mw->clearPendingUpdateResumeState();
+			}
+			showFailure(VersionCheck::tr("Mumble could not launch the update installer."));
+			return;
+		}
+
+		QTimer::singleShot(0, []() { QCoreApplication::quit(); });
+		deleteLater();
+	}
+};
+
 } // namespace
 
-VersionCheck::VersionCheck(bool autocheck, QObject *parent, bool) : QObject(parent), m_autocheck(autocheck) {
+VersionCheck::VersionCheck(bool autocheck, QObject *parent, bool, bool emitResultsOnly)
+	: QObject(parent), m_autocheck(autocheck), m_emitResultsOnly(emitResultsOnly) {
 	QTimer::singleShot(0, this, &VersionCheck::performRequest);
+}
+
+bool VersionCheck::canInstallUpdate(const QJsonObject &info) {
+#ifdef Q_OS_WIN
+	return isTrustedInstallerUrl(jsonUrl(info, QStringLiteral("installerUrl"))) && !normalizedSha256(info).isEmpty();
+#else
+	Q_UNUSED(info);
+	return false;
+#endif
+}
+
+void VersionCheck::installUpdateFromInfo(const QJsonObject &info, QWidget *parent) {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (Global::get().mw && Global::get().mw->startModernForkUpdateDownload(info)) {
+		Q_UNUSED(parent);
+		return;
+	}
+#endif
+
+	if (!canInstallUpdate(info)) {
+		const QUrl installerUrl = jsonUrl(info, QStringLiteral("installerUrl"));
+		if (installerUrl.isValid()) {
+			QDesktopServices::openUrl(installerUrl);
+		} else {
+			QMessageBox::warning(parent, tr("Mumble update"),
+								 tr("This update does not include an installer that Mumble can open."));
+		}
+		return;
+	}
+
+	downloadUpdateFromInfo(info, parent, true);
+}
+
+void VersionCheck::downloadUpdateFromInfo(const QJsonObject &info, QWidget *parent, const bool showProgress,
+										  std::function< void(const QString &) > readyCallback,
+										  std::function< void(const QString &) > failureCallback,
+										  std::function< void() > cancelledCallback) {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	const bool wouldUseNativeUi = showProgress || !readyCallback || !failureCallback;
+	if (wouldUseNativeUi && Global::get().mw && Global::get().mw->startModernForkUpdateDownload(info)) {
+		Q_UNUSED(parent);
+		return;
+	}
+#endif
+
+	ForkUpdateInstaller *installer = new ForkUpdateInstaller(info, parent, showProgress, std::move(readyCallback),
+															 std::move(failureCallback), std::move(cancelledCallback));
+	installer->start();
+}
+
+QJsonObject VersionCheck::describeUpdateHandoff(const QJsonObject &info, const QString &preparedInstallerPath) {
+	const QUrl releaseApiUrl  = configuredReleaseApiUrl();
+	const QUrl manifestUrl    = configuredManifestUrl();
+	const QUrl releaseUrl     = jsonUrl(info, QStringLiteral("releaseUrl"));
+	const QUrl installerUrl   = jsonUrl(info, QStringLiteral("installerUrl"));
+	const QUrl fallbackOpenUrl = installerUrl.isValid() ? installerUrl : releaseUrl;
+	const QString sha256      = normalizedSha256(info);
+	const QString installerFileName = updateInstallerFileName(info);
+	const bool installerTrusted     = isTrustedInstallerUrl(installerUrl);
+	const bool installable          = canInstallUpdate(info);
+
+	const QDir updateDir(Global::get().qdBasePath.filePath(QStringLiteral("Updates")));
+	const QString dryRunInstallerPath =
+		preparedInstallerPath.trimmed().isEmpty()
+			? updateDir.filePath(installerFileName)
+			: preparedInstallerPath.trimmed();
+
+	QJsonObject result;
+	result.insert(QStringLiteral("releaseApiUrl"), releaseApiUrl.toString());
+	result.insert(QStringLiteral("configuredManifestUrl"), manifestUrl.toString());
+	result.insert(QStringLiteral("hasConfiguredUpdateOverride"), hasConfiguredUpdateOverride());
+	result.insert(QStringLiteral("releaseUrl"), releaseUrl.toString());
+	result.insert(QStringLiteral("releaseUrlScheme"), releaseUrl.scheme());
+	result.insert(QStringLiteral("releaseUrlHost"), releaseUrl.host());
+	result.insert(QStringLiteral("releaseUrlPath"), releaseUrl.path());
+	result.insert(QStringLiteral("installerUrl"), installerUrl.toString());
+	result.insert(QStringLiteral("installerUrlScheme"), installerUrl.scheme());
+	result.insert(QStringLiteral("installerUrlHost"), installerUrl.host());
+	result.insert(QStringLiteral("installerUrlPath"), installerUrl.path());
+	result.insert(QStringLiteral("installerUrlTrusted"), installerTrusted);
+	result.insert(QStringLiteral("sha256"), sha256);
+	result.insert(QStringLiteral("sha256Valid"), !sha256.isEmpty());
+	result.insert(QStringLiteral("sha256Length"), sha256.size());
+	result.insert(QStringLiteral("canInstallUpdate"), installable);
+	result.insert(QStringLiteral("installerFileName"), installerFileName);
+	result.insert(QStringLiteral("downloadTargetPath"), QDir::toNativeSeparators(updateDir.filePath(installerFileName)));
+	result.insert(QStringLiteral("downloadRequiresTrustedInstallerUrl"), true);
+	result.insert(QStringLiteral("downloadRequiresSha256"), true);
+	result.insert(QStringLiteral("downloadWouldVerifySha256"), installable);
+	result.insert(QStringLiteral("maxRedirects"), MaxRedirects);
+	result.insert(QStringLiteral("fallbackOpenUrl"), fallbackOpenUrl.toString());
+	result.insert(QStringLiteral("wouldOpenReleaseUrl"), releaseUrl.isValid());
+	result.insert(QStringLiteral("wouldOpenInstallerUrl"), installerUrl.isValid());
+	result.insert(QStringLiteral("wouldFallbackToBrowserDownload"), !installable && fallbackOpenUrl.isValid());
+	result.insert(QStringLiteral("wouldStartVerifiedDownload"), installable);
+	result.insert(QStringLiteral("preparedInstallerPath"), QDir::toNativeSeparators(dryRunInstallerPath));
+	result.insert(QStringLiteral("preparedInstallerAccepted"), canLaunchPreparedUpdate(dryRunInstallerPath));
+
+#ifdef Q_OS_WIN
+	result.insert(QStringLiteral("platformCanInstall"), true);
+	result.insert(QStringLiteral("launchMode"), QStringLiteral("bundledUpdater"));
+	result.insert(QStringLiteral("directLaunchMode"), QStringLiteral("msiexec"));
+	result.insert(QStringLiteral("updateDir"), QDir::toNativeSeparators(updateDir.absolutePath()));
+	result.insert(QStringLiteral("bundledUpdaterSourcePath"),
+				  QDir::toNativeSeparators(QDir(QCoreApplication::applicationDirPath())
+											   .filePath(QStringLiteral("mumble-updater.exe"))));
+	result.insert(QStringLiteral("bundledUpdaterWorkingDir"), QDir::toNativeSeparators(updateDir.absolutePath()));
+	result.insert(QStringLiteral("bundledUpdaterArguments"),
+				  stringListJsonArray(bundledUpdaterArguments(dryRunInstallerPath, updateDir.absolutePath(), true)));
+	result.insert(QStringLiteral("directMsiexecProgram"), QStringLiteral("msiexec.exe"));
+	result.insert(QStringLiteral("directMsiexecArguments"), stringListJsonArray(msiexecUpdateArguments(dryRunInstallerPath, true)));
+#else
+	result.insert(QStringLiteral("platformCanInstall"), false);
+	result.insert(QStringLiteral("launchMode"), QStringLiteral("browserDownload"));
+	result.insert(QStringLiteral("directLaunchMode"), QStringLiteral("browserDownload"));
+	result.insert(QStringLiteral("bundledUpdaterArguments"), QJsonArray());
+	result.insert(QStringLiteral("directMsiexecArguments"), QJsonArray());
+#endif
+
+	return result;
+}
+
+bool VersionCheck::canLaunchPreparedUpdate(const QString &installerPath) {
+#ifdef Q_OS_WIN
+	const QFileInfo installer(installerPath);
+	return installer.isFile() && installer.isReadable()
+		   && installer.suffix().compare(QLatin1String("msi"), Qt::CaseInsensitive) == 0;
+#else
+	Q_UNUSED(installerPath);
+	return false;
+#endif
+}
+
+bool VersionCheck::launchPreparedUpdate(const QString &installerPath, const bool passive, const bool restartAfterInstall) {
+#ifdef Q_OS_WIN
+	if (!canLaunchPreparedUpdate(installerPath)) {
+		return false;
+	}
+
+	if (restartAfterInstall) {
+		return launchBundledUpdater(installerPath, passive);
+	}
+
+	const QStringList arguments = msiexecUpdateArguments(installerPath, passive);
+	return QProcess::startDetached(QStringLiteral("msiexec.exe"), arguments);
+#else
+	Q_UNUSED(installerPath);
+	Q_UNUSED(passive);
+	Q_UNUSED(restartAfterInstall);
+	return false;
+#endif
 }
 
 void VersionCheck::performRequest() {
@@ -327,7 +876,28 @@ void VersionCheck::replyFinished() {
 }
 
 void VersionCheck::finishWithInfo(const QJsonObject &info) {
-	if (isUpdateAvailable(info)) {
+	const bool updateAvailable = isUpdateAvailable(info);
+	if (m_emitResultsOnly) {
+		emit updateInfoReceived(info, updateAvailable);
+		deleteLater();
+		return;
+	}
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (Global::get().mw && Global::get().mw->handleModernVersionCheckResult(info, updateAvailable, m_autocheck)) {
+		deleteLater();
+		return;
+	}
+#endif
+
+	if (updateAvailable) {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+		if (Global::get().mw && Global::get().mw->notifyForkUpdateAvailable(info, m_autocheck)) {
+			deleteLater();
+			return;
+		}
+#endif
+
 		const QUrl installerUrl = jsonUrl(info, QStringLiteral("installerUrl"));
 		const QUrl releaseUrl   = jsonUrl(info, QStringLiteral("releaseUrl"));
 		const QUrl openUrl      = installerUrl.isValid() ? installerUrl : releaseUrl;
@@ -363,14 +933,22 @@ void VersionCheck::finishWithInfo(const QJsonObject &info) {
 			messageBox.setDetailedText(details.trimmed());
 		}
 
-		QPushButton *openButton = nullptr;
-		if (openUrl.isValid()) {
+		QPushButton *installButton = nullptr;
+		QPushButton *openButton    = nullptr;
+		if (canInstallUpdate(info)) {
+			installButton = messageBox.addButton(tr("Install update"), QMessageBox::AcceptRole);
+			if (openUrl.isValid()) {
+				openButton = messageBox.addButton(tr("Open download"), QMessageBox::ActionRole);
+			}
+		} else if (openUrl.isValid()) {
 			openButton = messageBox.addButton(tr("Open download"), QMessageBox::AcceptRole);
 		}
 		messageBox.addButton(tr("Not now"), QMessageBox::RejectRole);
 		messageBox.exec();
 
-		if (openButton && messageBox.clickedButton() == openButton) {
+		if (installButton && messageBox.clickedButton() == installButton) {
+			installUpdateFromInfo(info, Global::get().mw);
+		} else if (openButton && messageBox.clickedButton() == openButton) {
 			QDesktopServices::openUrl(openUrl);
 		}
 	} else if (!m_autocheck && Global::get().mw) {
@@ -384,6 +962,19 @@ void VersionCheck::finishWithInfo(const QJsonObject &info) {
 }
 
 void VersionCheck::finishWithFailure(const QString &message) {
+	if (m_emitResultsOnly) {
+		emit updateCheckFailed(message);
+		deleteLater();
+		return;
+	}
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (Global::get().mw && Global::get().mw->handleModernVersionCheckFailure(message, m_autocheck)) {
+		deleteLater();
+		return;
+	}
+#endif
+
 	if (!m_autocheck && Global::get().mw) {
 		Global::get().mw->msgBox(message);
 	}
