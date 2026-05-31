@@ -39,7 +39,20 @@ function Get-RelativePackagePath {
 		[string] $Path
 	)
 
-	return [System.IO.Path]::GetRelativePath($Root, $Path).Replace('\', '/')
+	$rootPath = [System.IO.Path]::GetFullPath($Root)
+	$filePath = [System.IO.Path]::GetFullPath($Path)
+	if (-not $rootPath.EndsWith([System.IO.Path]::DirectorySeparatorChar) -and -not $rootPath.EndsWith([System.IO.Path]::AltDirectorySeparatorChar)) {
+		$rootPath += [System.IO.Path]::DirectorySeparatorChar
+	}
+
+	$getRelativePath = [System.IO.Path].GetMethods() | Where-Object { $_.Name -eq "GetRelativePath" } | Select-Object -First 1
+	if ($null -ne $getRelativePath) {
+		return [System.IO.Path]::GetRelativePath($rootPath, $filePath).Replace('\', '/')
+	}
+
+	$rootUri = New-Object System.Uri($rootPath)
+	$fileUri = New-Object System.Uri($filePath)
+	return [System.Uri]::UnescapeDataString($rootUri.MakeRelativeUri($fileUri).ToString()).Replace('\', '/')
 }
 
 function Assert-SafePackagePath {
