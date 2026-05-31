@@ -492,6 +492,8 @@ struct Settings {
 	bool bUpdateCheck      = true;
 	bool bPluginCheck      = true;
 	bool bPluginAutoUpdate = false;
+	QString qsForkUpdateSnoozedSignature = {};
+	qint64 iForkUpdateSnoozedUntilMs     = 0;
 
 	// PTT Button window
 	bool bShowPTTButtonWindow             = false;

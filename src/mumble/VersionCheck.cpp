@@ -45,6 +45,11 @@ QUrl defaultReleaseApiUrl() {
 	return QUrl(QStringLiteral("https://api.github.com/repos/dankmaster/mumble/releases/tags/mumble-forked"));
 }
 
+QUrl defaultManifestUrl() {
+	return QUrl(QStringLiteral(
+		"https://github.com/dankmaster/mumble-forked/releases/download/mumble-forked/mumble-forked-update.json"));
+}
+
 bool hasConfiguredUpdateOverride() {
 	return !qEnvironmentVariable("MUMBLE_FORK_UPDATE_URL").trimmed().isEmpty()
 		   || !qEnvironmentVariable("MUMBLE_FORK_UPDATE_MANIFEST_URL").trimmed().isEmpty();
@@ -65,7 +70,7 @@ QUrl configuredReleaseApiUrl() {
 QUrl configuredManifestUrl() {
 	const QString override = qEnvironmentVariable("MUMBLE_FORK_UPDATE_MANIFEST_URL").trimmed();
 	if (override.isEmpty()) {
-		return {};
+		return defaultManifestUrl();
 	}
 
 	const QUrl url(override);
@@ -1062,7 +1067,8 @@ void VersionCheck::performRequest() {
 		return;
 	}
 
-	if (!qEnvironmentVariable("MUMBLE_FORK_UPDATE_MANIFEST_URL").trimmed().isEmpty()) {
+	if (!qEnvironmentVariable("MUMBLE_FORK_UPDATE_MANIFEST_URL").trimmed().isEmpty()
+		|| qEnvironmentVariable("MUMBLE_FORK_UPDATE_URL").trimmed().isEmpty()) {
 		request(configuredManifestUrl(), RequestKind::Manifest);
 	} else {
 		request(configuredReleaseApiUrl(), RequestKind::Release);

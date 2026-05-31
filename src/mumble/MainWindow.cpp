@@ -14555,6 +14555,60 @@ namespace {
 		return action;
 	}
 
+	QString modernUpdateSnoozeSignature(const QJsonObject &info) {
+		QStringList parts;
+		const QString version = info.value(QStringLiteral("version")).toString().trimmed();
+		const int build       = modernUpdateJsonInt(info, QStringLiteral("build"));
+		const QString commit  = info.value(QStringLiteral("commit")).toString().trimmed();
+		const QUrl releaseUrl = modernUpdateJsonUrl(info, QStringLiteral("releaseUrl"));
+
+		if (!version.isEmpty()) {
+			parts << version;
+		}
+		if (build >= 0) {
+			parts << QString::number(build);
+		}
+		if (!commit.isEmpty()) {
+			parts << commit;
+		}
+		if (parts.isEmpty() && releaseUrl.isValid()) {
+			parts << releaseUrl.toString();
+		}
+		return parts.join(QChar(0x1f));
+	}
+
+	bool modernUpdateSnoozed(const QJsonObject &info) {
+		const QString signature = modernUpdateSnoozeSignature(info);
+		if (signature.isEmpty() || Global::get().s.qsForkUpdateSnoozedSignature != signature) {
+			return false;
+		}
+		return Global::get().s.iForkUpdateSnoozedUntilMs > QDateTime::currentMSecsSinceEpoch();
+	}
+
+	void clearModernUpdateSnooze(const QJsonObject &info) {
+		const QString signature = modernUpdateSnoozeSignature(info);
+		if (!signature.isEmpty() && Global::get().s.qsForkUpdateSnoozedSignature != signature) {
+			return;
+		}
+		if (Global::get().s.qsForkUpdateSnoozedSignature.isEmpty()
+			&& Global::get().s.iForkUpdateSnoozedUntilMs <= 0) {
+			return;
+		}
+		Global::get().s.qsForkUpdateSnoozedSignature.clear();
+		Global::get().s.iForkUpdateSnoozedUntilMs = 0;
+		Global::get().s.save();
+	}
+
+	void snoozeModernUpdate(const QJsonObject &info) {
+		const QString signature = modernUpdateSnoozeSignature(info);
+		if (signature.isEmpty()) {
+			return;
+		}
+		Global::get().s.qsForkUpdateSnoozedSignature = signature;
+		Global::get().s.iForkUpdateSnoozedUntilMs = QDateTime::currentMSecsSinceEpoch() + 24 * 60 * 60 * 1000;
+		Global::get().s.save();
+	}
+
 	QString repairedUtf8Mojibake(const QString &text) {
 		if (!text.contains(QChar(0x00c3)) && !text.contains(QChar(0x00c2))) {
 			return text;
@@ -17878,6 +17932,12 @@ void MainWindow::openModernVersionCheckDialog() {
 	VersionCheck *check = new VersionCheck(false, this, false, true);
 	connect(check, &VersionCheck::updateInfoReceived, this,
 			[this](const QJsonObject &info, const bool updateAvailable) {
+				if (updateAvailable) {
+					clearModernUpdateSnooze(info);
+					showModernForkUpdateAvailableBanner(info);
+				} else if (!m_modernUpdateDownloadInProgress) {
+					clearModernUpdateBannerState();
+				}
 				openModernVersionCheckResultDialog(info, updateAvailable);
 			});
 	connect(check, &VersionCheck::updateCheckFailed, this,
@@ -24773,8 +24833,12 @@ bool MainWindow::handleModernShellAppAction(const QString &actionId) {
 		}
 		return true;
 	} else if (actionId == QLatin1String("app.update.dismiss")) {
+		const QString phase = m_modernUpdateBannerState.value(QStringLiteral("phase")).toString();
 		if (!m_modernUpdateDownloadInProgress
-			&& m_modernUpdateBannerState.value(QStringLiteral("phase")).toString() != QLatin1String("handoff")) {
+			&& phase != QLatin1String("handoff")) {
+			if (phase == QLatin1String("available") || phase == QLatin1String("manual")) {
+				snoozeModernUpdate(m_modernVersionCheckInfo);
+			}
 			clearModernUpdateBannerState();
 		}
 		return true;
@@ -24939,7 +25003,7 @@ void MainWindow::showModernForkUpdateAvailableBanner(const QJsonObject &info) {
 		actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.details"), tr("Details"),
 												   QStringLiteral("accent")));
 	}
-	actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.dismiss"), tr("Not now")));
+	actions.push_back(modernUpdateBannerAction(QStringLiteral("app.update.dismiss"), tr("Remind tomorrow")));
 
 	QVariantMap banner;
 	banner.insert(QStringLiteral("visible"), true);
@@ -24987,6 +25051,9 @@ bool MainWindow::notifyForkUpdateAvailable(const QJsonObject &info, const bool a
 	if (!autocheck || !usesModernShell()) {
 		return false;
 	}
+	if (modernUpdateSnoozed(info)) {
+		return true;
+	}
 
 	showModernForkUpdateAvailableBanner(info);
 	return true;
@@ -24999,7 +25066,7 @@ bool MainWindow::handleModernVersionCheckResult(const QJsonObject &info, const b
 	}
 
 	if (autocheck) {
-		if (updateAvailable) {
+		if (updateAvailable && !modernUpdateSnoozed(info)) {
 			notifyForkUpdateAvailable(info, autocheck);
 		}
 		return true;
@@ -25063,6 +25130,7 @@ bool MainWindow::startModernForkUpdateDownload() {
 	}
 
 	const QString updateMode = VersionCheck::updateModeForInfo(m_modernVersionCheckInfo);
+	clearModernUpdateSnooze(m_modernVersionCheckInfo);
 	m_modernUpdateDownloadInProgress = true;
 	m_modernPreparedUpdateInstallerPath.clear();
 	m_modernUpdateLastProgressPublishMs = 0;

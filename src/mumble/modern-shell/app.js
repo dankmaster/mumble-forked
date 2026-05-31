@@ -128,12 +128,12 @@
 	let messageSearchText = "";
 	let motdDismissedSignature = "";
 	let motdLastSeenSignature = "";
+	let collapsedUpdateBannerSignatures = [];
 	let toastStack = null;
 	let toastTimers = {};
 	let toastSequence = 0;
 
 	const imageViewerStorageKey = "mumble-modern-image-viewer";
-	const updateBannerCollapseStorageKey = "mumble-modern-update-banner-collapsed";
 	const maxVisibleToasts = 1;
 	const imageViewerMinWidth = 280;
 	const imageViewerMinHeight = 220;
@@ -3414,7 +3414,7 @@
 				actions: [
 					{ id: "app.update.download", label: "Install update", tone: "accent", enabled: true },
 					{ id: "app.update.details", label: "Details", enabled: true },
-					{ id: "app.update.dismiss", label: "Not now", enabled: true }
+					{ id: "app.update.dismiss", label: "Remind tomorrow", enabled: true }
 				]
 			};
 		} else if (variantQuery === "update-downloading") {
@@ -4138,25 +4138,13 @@
 	}
 
 	function readCollapsedUpdateBannerSignatures() {
-		try {
-			const raw = window.localStorage
-				? String(window.localStorage.getItem(updateBannerCollapseStorageKey) || "")
-				: "";
-			const parsed = raw ? JSON.parse(raw) : [];
-			return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [];
-		} catch (error) {
-			return [];
-		}
+		return collapsedUpdateBannerSignatures.slice();
 	}
 
 	function writeCollapsedUpdateBannerSignatures(signatures) {
-		try {
-			if (window.localStorage) {
-				window.localStorage.setItem(updateBannerCollapseStorageKey, JSON.stringify(signatures.slice(-12)));
-			}
-		} catch (error) {
-			// Ignore storage failures; collapse is a convenience state.
-		}
+		collapsedUpdateBannerSignatures = Array.isArray(signatures)
+			? signatures.map(String).filter(Boolean).slice(-12)
+			: [];
 	}
 
 	function updateBannerIsCollapsed(signature) {

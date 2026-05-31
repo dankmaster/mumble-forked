@@ -252,6 +252,8 @@ const SettingsKey LAST_SERVER_NAME_KEY = { "server_name" };
 const SettingsKey CHECK_FOR_UPDATES_KEY        = { "check_for_updates" };
 const SettingsKey CHECK_FOR_PLUGIN_UPDATES_KEY = { "check_for_plugin_updates" };
 const SettingsKey AUTO_UPDATE_PLUGINS_KEY      = { "auto_update_plugins" };
+const SettingsKey FORK_UPDATE_SNOOZED_SIGNATURE_KEY = { "fork_update_snoozed_signature" };
+const SettingsKey FORK_UPDATE_SNOOZED_UNTIL_MS_KEY   = { "fork_update_snoozed_until_ms" };
 
 // Misc
 const SettingsKey DATABASE_LOCATION_KEY                  = { "database_location" };

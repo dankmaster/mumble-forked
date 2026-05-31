@@ -221,7 +221,9 @@
 #define UPDATE_SETTINGS                                         \
 	PROCESS(update, CHECK_FOR_UPDATES_KEY, bUpdateCheck)        \
 	PROCESS(update, CHECK_FOR_PLUGIN_UPDATES_KEY, bPluginCheck) \
-	PROCESS(update, AUTO_UPDATE_PLUGINS_KEY, bPluginAutoUpdate)
+	PROCESS(update, AUTO_UPDATE_PLUGINS_KEY, bPluginAutoUpdate) \
+	PROCESS(update, FORK_UPDATE_SNOOZED_SIGNATURE_KEY, qsForkUpdateSnoozedSignature) \
+	PROCESS(update, FORK_UPDATE_SNOOZED_UNTIL_MS_KEY, iForkUpdateSnoozedUntilMs)
 
 
 #define LAST_CONNECTION_SETTINGS                            \
