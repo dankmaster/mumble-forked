@@ -28,6 +28,7 @@
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
+#include <QtWidgets/QSlider>
 #include <QtWidgets/QStyle>
 #include <QtWidgets/QToolButton>
 #include <QtWidgets/QVBoxLayout>
@@ -38,7 +39,7 @@
 
 namespace {
 #ifdef Q_OS_WIN
-enum class ProcessAudioMuteResult { Applied, NoSession, Failed };
+enum class ProcessAudioControlResult { Applied, NoSession, Failed };
 
 struct ExternalWindowSearch {
 	DWORD processID = 0;
@@ -120,8 +121,8 @@ HWND findExternalProcessWindow(const qint64 processID) {
 	return search.window;
 }
 
-bool setMuteForAudioSession(IAudioSessionControl *control, const DWORD processID, const bool muted,
-							bool *matchedSession) {
+bool setControlsForAudioSession(IAudioSessionControl *control, const DWORD processID, const bool muted,
+								const float volumeLevel, bool *matchedSession) {
 	if (!control || !matchedSession) {
 		return false;
 	}
@@ -153,13 +154,16 @@ bool setMuteForAudioSession(IAudioSessionControl *control, const DWORD processID
 		return false;
 	}
 
-	hr = volume->SetMute(muted ? TRUE : FALSE, nullptr);
+	const float clampedVolume = std::clamp(volumeLevel, 0.0f, 1.0f);
+	const HRESULT volumeHr   = volume->SetMasterVolume(clampedVolume, nullptr);
+	const HRESULT muteHr     = volume->SetMute(muted ? TRUE : FALSE, nullptr);
 	releaseComObject(volume);
 	releaseComObject(control2);
-	return SUCCEEDED(hr);
+	return SUCCEEDED(volumeHr) && SUCCEEDED(muteHr);
 }
 
-bool setMuteForAudioDevice(IMMDevice *device, const DWORD processID, const bool muted, bool *matchedSession) {
+bool setControlsForAudioDevice(IMMDevice *device, const DWORD processID, const bool muted, const float volumeLevel,
+							   bool *matchedSession) {
 	if (!device || !matchedSession) {
 		return false;
 	}
@@ -188,7 +192,7 @@ bool setMuteForAudioDevice(IMMDevice *device, const DWORD processID, const bool 
 				continue;
 			}
 
-			ok = setMuteForAudioSession(sessionControl, processID, muted, matchedSession) && ok;
+			ok = setControlsForAudioSession(sessionControl, processID, muted, volumeLevel, matchedSession) && ok;
 			releaseComObject(sessionControl);
 		}
 	}
@@ -198,28 +202,29 @@ bool setMuteForAudioDevice(IMMDevice *device, const DWORD processID, const bool 
 	return ok;
 }
 
-ProcessAudioMuteResult setMuteForProcessAudioSessions(const qint64 processID, const bool muted) {
+ProcessAudioControlResult setControlsForProcessAudioSessions(const qint64 processID, const bool muted,
+															 const float volumeLevel) {
 	if (processID <= 0 || processID > std::numeric_limits< DWORD >::max()) {
-		return ProcessAudioMuteResult::Failed;
+		return ProcessAudioControlResult::Failed;
 	}
 
 	ScopedComApartment com;
 	if (!com.usable()) {
-		return ProcessAudioMuteResult::Failed;
+		return ProcessAudioControlResult::Failed;
 	}
 
 	IMMDeviceEnumerator *deviceEnumerator = nullptr;
 	HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
 								  __uuidof(IMMDeviceEnumerator), reinterpret_cast< void ** >(&deviceEnumerator));
 	if (FAILED(hr) || !deviceEnumerator) {
-		return ProcessAudioMuteResult::Failed;
+		return ProcessAudioControlResult::Failed;
 	}
 
 	IMMDeviceCollection *devices = nullptr;
 	hr = deviceEnumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &devices);
 	if (FAILED(hr) || !devices) {
 		releaseComObject(deviceEnumerator);
-		return ProcessAudioMuteResult::Failed;
+		return ProcessAudioControlResult::Failed;
 	}
 
 	UINT deviceCount = 0;
@@ -233,7 +238,8 @@ ProcessAudioMuteResult setMuteForProcessAudioSessions(const qint64 processID, co
 				continue;
 			}
 
-			ok = setMuteForAudioDevice(device, static_cast< DWORD >(processID), muted, &matched) && ok;
+			ok = setControlsForAudioDevice(device, static_cast< DWORD >(processID), muted, volumeLevel, &matched)
+				 && ok;
 			releaseComObject(device);
 		}
 	}
@@ -242,9 +248,9 @@ ProcessAudioMuteResult setMuteForProcessAudioSessions(const qint64 processID, co
 	releaseComObject(deviceEnumerator);
 
 	if (!matched) {
-		return ProcessAudioMuteResult::NoSession;
+		return ProcessAudioControlResult::NoSession;
 	}
-	return ok ? ProcessAudioMuteResult::Applied : ProcessAudioMuteResult::Failed;
+	return ok ? ProcessAudioControlResult::Applied : ProcessAudioControlResult::Failed;
 }
 
 void attachExternalWindowToSurface(HWND window, QWidget *surfaceWidget) {
@@ -346,6 +352,32 @@ ExternalScreenShareWindowHost::ExternalScreenShareWindowHost(const ScreenShareSe
 	connect(m_audioButton, &QToolButton::clicked, this, &ExternalScreenShareWindowHost::handleAudioButton);
 	headerLayout->addWidget(m_audioButton);
 
+	auto *audioVolumeGroup = new QWidget(m_headerFrame);
+	audioVolumeGroup->setObjectName(QStringLiteral("qwScreenShareExternalVolumeGroup"));
+	auto *audioVolumeLayout = new QHBoxLayout(audioVolumeGroup);
+	audioVolumeLayout->setContentsMargins(0, 0, 0, 0);
+	audioVolumeLayout->setSpacing(6);
+
+	m_audioVolumeSlider = new QSlider(Qt::Horizontal, audioVolumeGroup);
+	m_audioVolumeSlider->setObjectName(QStringLiteral("qsScreenShareExternalVolume"));
+	m_audioVolumeSlider->setAccessibleName(tr("Stream volume"));
+	m_audioVolumeSlider->setRange(0, 100);
+	m_audioVolumeSlider->setSingleStep(5);
+	m_audioVolumeSlider->setPageStep(10);
+	m_audioVolumeSlider->setFixedWidth(128);
+	m_audioVolumeSlider->setValue(m_audioVolumePercent);
+	m_audioVolumeSlider->setToolTip(tr("Adjust this viewer's stream audio volume."));
+	connect(m_audioVolumeSlider, &QSlider::valueChanged, this,
+			&ExternalScreenShareWindowHost::handleAudioVolumeChanged);
+	audioVolumeLayout->addWidget(m_audioVolumeSlider);
+
+	m_audioVolumeLabel = new QLabel(audioVolumeGroup);
+	m_audioVolumeLabel->setObjectName(QStringLiteral("qlScreenShareExternalVolume"));
+	m_audioVolumeLabel->setMinimumWidth(40);
+	m_audioVolumeLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+	audioVolumeLayout->addWidget(m_audioVolumeLabel);
+	headerLayout->addWidget(audioVolumeGroup);
+
 	m_stopButton = new QToolButton(m_headerFrame);
 	m_stopButton->setObjectName(QStringLiteral("qtbScreenShareExternalStop"));
 	m_stopButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
@@ -387,9 +419,10 @@ ExternalScreenShareWindowHost::ExternalScreenShareWindowHost(const ScreenShareSe
 	m_embedPollTimer->setInterval(250);
 	connect(m_embedPollTimer, &QTimer::timeout, this, &ExternalScreenShareWindowHost::pollForExternalWindow);
 
-	m_audioMuteTimer = new QTimer(this);
-	m_audioMuteTimer->setInterval(500);
-	connect(m_audioMuteTimer, &QTimer::timeout, this, &ExternalScreenShareWindowHost::retryApplyExternalAudioMute);
+	m_audioControlTimer = new QTimer(this);
+	m_audioControlTimer->setInterval(500);
+	connect(m_audioControlTimer, &QTimer::timeout, this,
+			&ExternalScreenShareWindowHost::retryApplyExternalAudioControls);
 
 	updateSession(session);
 	updateControls();
@@ -406,7 +439,7 @@ void ExternalScreenShareWindowHost::closeFromManager() {
 void ExternalScreenShareWindowHost::setAudioMuted(const bool muted) {
 	m_audioMuted = muted;
 	updateControls();
-	applyExternalAudioMute(true);
+	applyExternalAudioControls(true);
 }
 
 void ExternalScreenShareWindowHost::setPaused(const bool paused) {
@@ -425,14 +458,14 @@ void ExternalScreenShareWindowHost::setProcessID(const qint64 processID) {
 
 	clearEmbeddedWindow();
 	m_processID = processID;
-	m_audioMuteAttempts = 0;
+	m_audioControlAttempts = 0;
 	updatePlaceholder();
 	if (m_processID > 0) {
 		m_embedPollTimer->start();
 	} else {
 		m_embedPollTimer->stop();
 	}
-	applyExternalAudioMute(true);
+	applyExternalAudioControls(true);
 }
 
 void ExternalScreenShareWindowHost::updateSession(const ScreenShareSession &session) {
@@ -493,15 +526,40 @@ void ExternalScreenShareWindowHost::handleAudioButton() {
 		return;
 	}
 
-	emit audioMuteToggled(m_session.streamID, !m_audioMuted);
+	const bool muted = !m_audioMuted;
+	setAudioMuted(muted);
+	emit audioMuteToggled(m_session.streamID, muted);
+}
+
+void ExternalScreenShareWindowHost::handleAudioVolumeChanged(const int volumePercent) {
+	m_audioVolumePercent = std::clamp(volumePercent, 0, 100);
+	updateAudioVolumeLabel();
+
+	if (!m_session.captureAudio) {
+		return;
+	}
+
+	if (m_audioVolumePercent <= 0 && !m_audioMuted) {
+		setAudioMuted(true);
+		emit audioMuteToggled(m_session.streamID, true);
+		return;
+	}
+
+	if (m_audioVolumePercent > 0 && m_audioMuted) {
+		setAudioMuted(false);
+		emit audioMuteToggled(m_session.streamID, false);
+		return;
+	}
+
+	applyExternalAudioControls(true);
 }
 
 void ExternalScreenShareWindowHost::handlePauseButton() {
 	emit pauseToggled(m_session.streamID, !m_paused);
 }
 
-void ExternalScreenShareWindowHost::retryApplyExternalAudioMute() {
-	applyExternalAudioMute(true);
+void ExternalScreenShareWindowHost::retryApplyExternalAudioControls() {
+	applyExternalAudioControls(true);
 }
 
 void ExternalScreenShareWindowHost::pollForExternalWindow() {
@@ -544,50 +602,58 @@ void ExternalScreenShareWindowHost::pollForExternalWindow() {
 #endif
 }
 
-void ExternalScreenShareWindowHost::applyExternalAudioMute(const bool allowRetry) {
+void ExternalScreenShareWindowHost::applyExternalAudioControls(const bool allowRetry) {
 #ifdef Q_OS_WIN
 	if (!m_session.captureAudio || m_processID <= 0) {
-		if (m_audioMuteTimer) {
-			m_audioMuteTimer->stop();
+		if (m_audioControlTimer) {
+			m_audioControlTimer->stop();
 		}
 		return;
 	}
 
-	const ProcessAudioMuteResult result = setMuteForProcessAudioSessions(m_processID, m_audioMuted);
-	if (result == ProcessAudioMuteResult::Applied) {
-		m_audioMuteAttempts = 0;
-		if (m_audioMuteTimer) {
-			m_audioMuteTimer->stop();
+	const float volumeLevel = std::clamp(static_cast< float >(m_audioVolumePercent) / 100.0f, 0.0f, 1.0f);
+	const ProcessAudioControlResult result =
+		setControlsForProcessAudioSessions(m_processID, m_audioMuted, volumeLevel);
+	if (result == ProcessAudioControlResult::Applied) {
+		m_audioControlAttempts = 0;
+		if (m_audioControlTimer) {
+			m_audioControlTimer->stop();
 		}
-		setStatusText(m_audioMuted ? tr("Stream audio muted locally. Video remains live via GStreamer.")
-								   : tr("Stream audio enabled for this viewer."));
+		if (m_audioMuted) {
+			setStatusText(tr("Stream audio muted locally. Video remains live via GStreamer."));
+		} else if (m_audioVolumePercent != 100) {
+			setStatusText(tr("Stream audio set to %1% for this viewer.").arg(m_audioVolumePercent));
+		} else {
+			setStatusText(tr("Stream audio enabled for this viewer."));
+		}
 		return;
 	}
 
-	if (result == ProcessAudioMuteResult::Failed) {
-		if (m_audioMuteTimer) {
-			m_audioMuteTimer->stop();
+	if (result == ProcessAudioControlResult::Failed) {
+		if (m_audioControlTimer) {
+			m_audioControlTimer->stop();
 		}
 		if (Global::get().l) {
 			Global::get().l->log(Log::Warning,
-								 tr("Unable to change screen-share audio mute state for viewer process %1.")
+								 tr("Unable to change screen-share audio controls for viewer process %1.")
 									 .arg(QString::number(m_processID).toHtmlEscaped()));
 		}
 		setStatusText(tr("Could not change this viewer's audio state."));
 		return;
 	}
 
-	if (allowRetry && m_audioMuted && m_audioMuteAttempts < 40) {
-		++m_audioMuteAttempts;
-		if (m_audioMuteTimer && !m_audioMuteTimer->isActive()) {
-			m_audioMuteTimer->start();
+	const bool needsDeferredControls = m_audioMuted || m_audioVolumePercent != 100;
+	if (allowRetry && needsDeferredControls && m_audioControlAttempts < 40) {
+		++m_audioControlAttempts;
+		if (m_audioControlTimer && !m_audioControlTimer->isActive()) {
+			m_audioControlTimer->start();
 		}
-		setStatusText(tr("Stream audio will mute when the GStreamer audio session starts."));
+		setStatusText(tr("Stream audio controls will apply when the GStreamer audio session starts."));
 		return;
 	}
 
-	if (m_audioMuteTimer) {
-		m_audioMuteTimer->stop();
+	if (m_audioControlTimer) {
+		m_audioControlTimer->stop();
 	}
 #else
 	Q_UNUSED(allowRetry)
@@ -638,15 +704,23 @@ void ExternalScreenShareWindowHost::applyTheme() {
 					  "QFrame#qfScreenShareExternalHeader { background: %3; border: 1px solid %2; border-radius: 8px; }"
 					  "QFrame#qfScreenShareExternalVideoFrame { background: #05070a; border: 1px solid %2; border-radius: 8px; }"
 					  "QWidget#qwScreenShareExternalVideoSurface { background: #05070a; }"
+					  "QWidget#qwScreenShareExternalVolumeGroup { background: transparent; }"
 					  "QLabel#qlScreenShareExternalTitle { color: %4; font-size: 14px; font-weight: 700; }"
 					  "QLabel#qlScreenShareExternalDetail, QLabel#qlScreenShareExternalStatus,"
 					  "QLabel#qlScreenShareExternalPlaceholder { color: %5; }"
+					  "QLabel#qlScreenShareExternalVolume { color: %4; font-weight: 600; }"
 					  "QToolButton { background: %6; color: %4; border: 1px solid %2; border-radius: 7px;"
 					  "padding: 6px 10px; font-weight: 600; }"
 					  "QToolButton:hover { border-color: %7; }"
 					  "QToolButton:checked { background: %8; border-color: %7; }"
 					  "QToolButton:disabled { color: %5; }"
-					  "QToolButton#qtbScreenShareExternalStop { color: %9; }")
+					  "QToolButton#qtbScreenShareExternalStop { color: %9; }"
+					  "QSlider#qsScreenShareExternalVolume::groove:horizontal { background: %2; height: 4px; border-radius: 2px; }"
+					  "QSlider#qsScreenShareExternalVolume::sub-page:horizontal { background: %7; border-radius: 2px; }"
+					  "QSlider#qsScreenShareExternalVolume::add-page:horizontal { background: %2; border-radius: 2px; }"
+					  "QSlider#qsScreenShareExternalVolume::handle:horizontal { background: %4; border: 1px solid %7;"
+					  "width: 12px; margin: -5px 0; border-radius: 6px; }"
+					  "QSlider#qsScreenShareExternalVolume:disabled::handle:horizontal { background: %5; border-color: %2; }")
 					  .arg(uiThemeQssColor(crust), uiThemeQssColor(surface2), uiThemeQssColor(mantle),
 						   uiThemeQssColor(text), uiThemeQssColor(muted), uiThemeQssColor(surface),
 						   uiThemeQssColor(accent), uiThemeQssColor(uiThemeColorWithAlpha(accent, 0.24)),
@@ -691,6 +765,12 @@ void ExternalScreenShareWindowHost::setStatusText(const QString &status) {
 	}
 }
 
+void ExternalScreenShareWindowHost::updateAudioVolumeLabel() {
+	if (m_audioVolumeLabel) {
+		m_audioVolumeLabel->setText(tr("%1%").arg(m_audioVolumePercent));
+	}
+}
+
 void ExternalScreenShareWindowHost::updateControls() {
 	if (m_pauseButton) {
 		m_pauseButton->setText(m_paused ? tr("Resume live") : tr("Pause view"));
@@ -707,6 +787,15 @@ void ExternalScreenShareWindowHost::updateControls() {
 														  : tr("This stream does not include audio."));
 		m_audioButton->setChecked(m_audioMuted);
 	}
+	if (m_audioVolumeSlider) {
+		m_audioVolumeSlider->setEnabled(m_session.captureAudio);
+		m_audioVolumeSlider->setToolTip(m_session.captureAudio ? tr("Adjust this viewer's stream audio volume.")
+															   : tr("This stream does not include audio."));
+	}
+	if (m_audioVolumeLabel) {
+		m_audioVolumeLabel->setEnabled(m_session.captureAudio);
+	}
+	updateAudioVolumeLabel();
 
 	if (m_paused) {
 		setStatusText(tr("Paused locally. Resume returns to the live edge; no playback buffer is kept."));

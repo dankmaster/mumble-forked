@@ -17,6 +17,7 @@ class QEvent;
 class QFrame;
 class QLabel;
 class QResizeEvent;
+class QSlider;
 class QTimer;
 class QToolButton;
 class QVBoxLayout;
@@ -50,18 +51,20 @@ protected:
 
 private slots:
 	void handleAudioButton();
+	void handleAudioVolumeChanged(int volumePercent);
 	void handlePauseButton();
 	void pollForExternalWindow();
-	void retryApplyExternalAudioMute();
+	void retryApplyExternalAudioControls();
 
 private:
-	void applyExternalAudioMute(bool allowRetry);
+	void applyExternalAudioControls(bool allowRetry);
 	QString ownerLabel() const;
 	QString windowTitle() const;
 	void applyTheme();
 	void clearEmbeddedWindow();
 	void moveEmbeddedWindow();
 	void setStatusText(const QString &status);
+	void updateAudioVolumeLabel();
 	void updateControls();
 	void updatePlaceholder();
 
@@ -75,14 +78,17 @@ private:
 	QLabel *m_detailLabel       = nullptr;
 	QLabel *m_statusLabel       = nullptr;
 	QLabel *m_placeholderLabel  = nullptr;
+	QLabel *m_audioVolumeLabel  = nullptr;
 	QToolButton *m_pauseButton  = nullptr;
 	QToolButton *m_audioButton  = nullptr;
 	QToolButton *m_stopButton   = nullptr;
+	QSlider *m_audioVolumeSlider = nullptr;
 	QTimer *m_embedPollTimer    = nullptr;
-	QTimer *m_audioMuteTimer    = nullptr;
+	QTimer *m_audioControlTimer = nullptr;
 	qint64 m_processID          = 0;
 	quintptr m_externalWindowID = 0;
-	int m_audioMuteAttempts     = 0;
+	int m_audioControlAttempts  = 0;
+	int m_audioVolumePercent    = 100;
 	bool m_audioMuted           = false;
 	bool m_applyingTheme        = false;
 	bool m_closingFromManager   = false;
