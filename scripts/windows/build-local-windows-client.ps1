@@ -348,28 +348,23 @@ function Invoke-ProcessWithTimeout {
 		ConvertTo-WindowsProcessArgument -Value $argument
 	}
 
-	$tempRoot = if (-not [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
-		$env:RUNNER_TEMP
-	} else {
-		[System.IO.Path]::GetTempPath()
-	}
-	New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+	$startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+	$startInfo.FileName = $FilePath
+	$startInfo.Arguments = $quotedArguments -join ' '
+	$startInfo.UseShellExecute = $false
+	$startInfo.RedirectStandardOutput = $true
+	$startInfo.RedirectStandardError = $true
+	$startInfo.CreateNoWindow = $true
 
-	$outputToken = [Guid]::NewGuid().ToString("N")
-	$stdoutPath = Join-Path $tempRoot "$outputToken.stdout.log"
-	$stderrPath = Join-Path $tempRoot "$outputToken.stderr.log"
-	$argumentList = $quotedArguments -join ' '
-	$process = $null
+	$process = [System.Diagnostics.Process]::new()
+	$process.StartInfo = $startInfo
 
 	Write-Host "$Description timeout: $TimeoutSeconds seconds"
 
 	try {
-		$process = Start-Process -FilePath $FilePath `
-			-ArgumentList $argumentList `
-			-PassThru `
-			-RedirectStandardOutput $stdoutPath `
-			-RedirectStandardError $stderrPath `
-			-WindowStyle Hidden
+		[void]$process.Start()
+		$stdoutTask = $process.StandardOutput.ReadToEndAsync()
+		$stderrTask = $process.StandardError.ReadToEndAsync()
 
 		if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
 			& taskkill.exe /PID $process.Id /T /F *> $null
@@ -377,31 +372,14 @@ function Invoke-ProcessWithTimeout {
 		}
 
 		$process.Refresh()
-		[string]$stdout = ""
-		[string]$stderr = ""
-		if (Test-Path -LiteralPath $stdoutPath) {
-			$content = Get-Content -LiteralPath $stdoutPath -Raw -ErrorAction SilentlyContinue
-			if ($null -ne $content) {
-				$stdout = $content
-			}
-		}
-		if (Test-Path -LiteralPath $stderrPath) {
-			$content = Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue
-			if ($null -ne $content) {
-				$stderr = $content
-			}
-		}
 
 		return [PSCustomObject]@{
 			ExitCode = $process.ExitCode
-			StdOut   = $stdout
-			StdErr   = $stderr
+			StdOut   = $stdoutTask.GetAwaiter().GetResult()
+			StdErr   = $stderrTask.GetAwaiter().GetResult()
 		}
 	} finally {
-		Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
-		if ($process) {
-			$process.Dispose()
-		}
+		$process.Dispose()
 	}
 }
 
