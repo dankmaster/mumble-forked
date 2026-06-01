@@ -89,9 +89,11 @@ Windows publisher path prefers:
 - `mfh264enc`
 - `x264enc` / `openh264enc` fallback
 
-Default compression profile is `auto`: `720p30`, about `4000 kbps` start,
-`1200 kbps` minimum, and `6000 kbps` maximum. The first adaptive degradation
-policy is FPS first, then resolution.
+The default picker selection is `720p30` with the `auto` compression profile:
+about `4000 kbps` start, `1200 kbps` minimum, and `6000 kbps` maximum. The
+publisher picker also exposes `720p`, `1080p`, and `1440p` at `30 FPS` or
+`60 FPS` when the server and local runtime advertise those limits. The first
+adaptive degradation policy is FPS first, then resolution.
 
 The helper currently launches GStreamer as an external process and records
 planned/active capture, encoder, renderer, bitrate, dropped-frame placeholders,

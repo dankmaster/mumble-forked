@@ -45,9 +45,10 @@ First quality target:
 
 - `720p30` stable
 
-Later quality target:
+Expanded publisher picker targets:
 
-- `1080p60` when uplink, helper packaging, and client encode performance are proven
+- `720p`, `1080p`, and `1440p` at `30 FPS` or `60 FPS` when uplink, helper
+  packaging, and client encode performance are proven
 
 ## Compatibility Contract
 
@@ -562,6 +563,7 @@ Test:
 Test:
 
 - 720p30 stability
+- 720p60, 1080p30, 1080p60, 1440p30, and 1440p60 negotiation
 - multi-viewer fanout
 - packet loss
 - temporary relay loss

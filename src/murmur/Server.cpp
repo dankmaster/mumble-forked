@@ -1579,6 +1579,9 @@ void Server::populateScreenShareStateMessage(MumbleProto::ScreenShareState &msg,
 	}
 	if (stream.bCaptureAudio) {
 		msg.set_capture_audio(true);
+		if (!stream.qsAudioSourceID.isEmpty()) {
+			msg.set_audio_source_id(u8(stream.qsAudioSourceID));
+		}
 	}
 	if (stream.uiMinBitrateKbps > 0) {
 		msg.set_min_bitrate_kbps(stream.uiMinBitrateKbps);

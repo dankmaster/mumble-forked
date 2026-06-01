@@ -165,6 +165,7 @@
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
 #include <QtNetwork/QUdpSocket>
+#include <QtWidgets/QAbstractItemView>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
@@ -201,7 +202,16 @@
 #include "widgets/SemanticSlider.h"
 
 #ifdef Q_OS_WIN
+#	include <wtypes.h>
 #	include <dbt.h>
+#	include <audioclient.h>
+#	include <functiondiscoverykeys.h>
+#	include <mmdeviceapi.h>
+#	include <mmreg.h>
+#	ifdef _INC_FUNCTIONDISCOVERYKEYS
+#		undef _INC_FUNCTIONDISCOVERYKEYS
+#	endif
+#	include <propidl.h>
 #endif
 
 #include <algorithm>
@@ -245,6 +255,9 @@ constexpr int PersistentChatThreadRole              = Qt::UserRole + 2;
 constexpr int PersistentChatMessageIDRole           = Qt::UserRole + 3;
 constexpr int PersistentChatLabelRole               = Qt::UserRole + 4;
 constexpr int PersistentChatUnreadRole              = Qt::UserRole + 5;
+constexpr int ScreenSharePickerSourceIDRole         = Qt::UserRole + 610;
+constexpr int ScreenSharePickerProcessIDRole        = Qt::UserRole + 611;
+constexpr int ScreenSharePickerAudioAutoRole        = Qt::UserRole + 612;
 constexpr int LocalServerLogScope                   = -1;
 constexpr int LocalDirectMessageScope               = -2;
 constexpr int PersistentChatBottomInsetHeight       = 18;
@@ -266,6 +279,48 @@ constexpr int UserTextureMaxImageDimension          = 1024;
 constexpr int UpdateResumeStateMaxAgeDays           = 7;
 
 #ifdef Q_OS_WIN
+struct ScreenShareWindowSource {
+	quintptr handle = 0;
+	DWORD processID = 0;
+	QString title;
+	QString processName;
+	QRect geometry;
+};
+
+struct ScreenShareAudioSource {
+	QString sourceID;
+	QString label;
+	bool isDefault = false;
+};
+
+template< typename T > void releaseScreenShareComObject(T *&object) {
+	if (object) {
+		object->Release();
+		object = nullptr;
+	}
+}
+
+class ScreenShareComApartment {
+public:
+	ScreenShareComApartment() {
+		const HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+		m_usable         = SUCCEEDED(hr) || hr == RPC_E_CHANGED_MODE;
+		m_uninitialize   = SUCCEEDED(hr);
+	}
+
+	~ScreenShareComApartment() {
+		if (m_uninitialize) {
+			CoUninitialize();
+		}
+	}
+
+	bool usable() const { return m_usable; }
+
+private:
+	bool m_usable       = false;
+	bool m_uninitialize = false;
+};
+
 QString screenShareWindowTitle(HWND hwnd) {
 	std::array< wchar_t, 256 > titleBuffer = {};
 	const int copied = GetWindowTextW(hwnd, titleBuffer.data(), static_cast< int >(titleBuffer.size()));
@@ -278,6 +333,14 @@ QString screenShareWindowTitle(HWND hwnd) {
 
 bool isScreenShareWindowCandidate(HWND hwnd, const DWORD currentProcessID) {
 	if (!hwnd || !IsWindowVisible(hwnd) || GetAncestor(hwnd, GA_ROOT) != hwnd) {
+		return false;
+	}
+	if (hwnd == GetShellWindow()) {
+		return false;
+	}
+
+	const LONG_PTR extendedStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+	if ((extendedStyle & WS_EX_TOOLWINDOW) != 0) {
 		return false;
 	}
 
@@ -295,42 +358,234 @@ bool isScreenShareWindowCandidate(HWND hwnd, const DWORD currentProcessID) {
 	return !screenShareWindowTitle(hwnd).isEmpty();
 }
 
-struct ScreenShareWindowSearch {
-	DWORD currentProcessID = 0;
-	HWND result            = nullptr;
-};
-
-BOOL CALLBACK enumScreenShareWindows(HWND hwnd, LPARAM userData) {
-	auto *search = reinterpret_cast< ScreenShareWindowSearch * >(userData);
-	if (search && isScreenShareWindowCandidate(hwnd, search->currentProcessID)) {
-		search->result = hwnd;
-		return FALSE;
+QRect screenShareWindowGeometry(HWND hwnd) {
+	RECT rect = {};
+	if (!hwnd || !GetWindowRect(hwnd, &rect)) {
+		return QRect();
 	}
 
+	return QRect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+}
+
+QString screenShareProcessName(const DWORD processID) {
+	if (processID == 0) {
+		return QString();
+	}
+
+	HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processID);
+	if (!process) {
+		return QString();
+	}
+
+	std::array< wchar_t, MAX_PATH > pathBuffer = {};
+	DWORD pathLength                           = static_cast< DWORD >(pathBuffer.size());
+	QString processName;
+	if (QueryFullProcessImageNameW(process, 0, pathBuffer.data(), &pathLength) && pathLength > 0) {
+		processName = QFileInfo(QString::fromWCharArray(pathBuffer.data(), static_cast< int >(pathLength))).completeBaseName();
+	}
+	CloseHandle(process);
+	return processName.trimmed();
+}
+
+QString screenShareReadableAppName(const QString &processName) {
+	const QString cleaned = processName.trimmed();
+	if (cleaned.isEmpty()) {
+		return QString();
+	}
+
+	if (cleaned.compare(QLatin1String("brave"), Qt::CaseInsensitive) == 0) {
+		return QStringLiteral("Brave");
+	}
+	if (cleaned.compare(QLatin1String("chrome"), Qt::CaseInsensitive) == 0) {
+		return QStringLiteral("Chrome");
+	}
+	if (cleaned.compare(QLatin1String("msedge"), Qt::CaseInsensitive) == 0) {
+		return QStringLiteral("Edge");
+	}
+	if (cleaned.compare(QLatin1String("firefox"), Qt::CaseInsensitive) == 0) {
+		return QStringLiteral("Firefox");
+	}
+	if (cleaned.compare(QLatin1String("ApplicationFrameHost"), Qt::CaseInsensitive) == 0) {
+		return QString();
+	}
+
+	QString readable = cleaned;
+	readable.replace(QLatin1Char('_'), QLatin1Char(' '));
+	readable.replace(QLatin1Char('-'), QLatin1Char(' '));
+	if (!readable.isEmpty()) {
+		readable[0] = readable.at(0).toUpper();
+	}
+	return readable;
+}
+
+QString screenShareCompactText(QString text, const qsizetype maxLength = 72) {
+	text = text.simplified();
+	if (text.size() <= maxLength || maxLength <= 3) {
+		return text;
+	}
+
+	return text.left(maxLength - 3).trimmed() + QStringLiteral("...");
+}
+
+ScreenShareWindowSource screenShareWindowSourceFromHandle(HWND hwnd) {
+	ScreenShareWindowSource source;
+	if (!hwnd) {
+		return source;
+	}
+
+	DWORD processID = 0;
+	GetWindowThreadProcessId(hwnd, &processID);
+	source.handle      = reinterpret_cast< quintptr >(hwnd);
+	source.processID   = processID;
+	source.title       = screenShareWindowTitle(hwnd);
+	source.processName = screenShareProcessName(processID);
+	source.geometry    = screenShareWindowGeometry(hwnd);
+	return source;
+}
+
+struct ScreenShareWindowEnumeration {
+	DWORD currentProcessID = 0;
+	QList< ScreenShareWindowSource > sources;
+	QSet< quintptr > seenHandles;
+};
+
+BOOL CALLBACK enumScreenShareWindowSources(HWND hwnd, LPARAM userData) {
+	auto *enumeration = reinterpret_cast< ScreenShareWindowEnumeration * >(userData);
+	if (!enumeration || !isScreenShareWindowCandidate(hwnd, enumeration->currentProcessID)) {
+		return TRUE;
+	}
+
+	const quintptr handle = reinterpret_cast< quintptr >(hwnd);
+	if (enumeration->seenHandles.contains(handle)) {
+		return TRUE;
+	}
+
+	ScreenShareWindowSource source = screenShareWindowSourceFromHandle(hwnd);
+	if (!source.title.trimmed().isEmpty()) {
+		enumeration->seenHandles.insert(handle);
+		enumeration->sources.append(source);
+	}
 	return TRUE;
 }
 
-quintptr activeExternalWindowForScreenShare(QString *title) {
-	const DWORD currentProcessID = GetCurrentProcessId();
-	HWND hwnd                    = GetForegroundWindow();
-	if (isScreenShareWindowCandidate(hwnd, currentProcessID)) {
-		if (title) {
-			*title = screenShareWindowTitle(hwnd);
+QList< ScreenShareWindowSource > screenShareWindowSources() {
+	ScreenShareWindowEnumeration enumeration;
+	enumeration.currentProcessID = GetCurrentProcessId();
+	EnumWindows(enumScreenShareWindowSources, reinterpret_cast< LPARAM >(&enumeration));
+	std::sort(enumeration.sources.begin(), enumeration.sources.end(),
+			  [](const ScreenShareWindowSource &left, const ScreenShareWindowSource &right) {
+				  const QString leftKey =
+					  QStringLiteral("%1 %2")
+						  .arg(screenShareReadableAppName(left.processName).toCaseFolded(), left.title.toCaseFolded());
+				  const QString rightKey =
+					  QStringLiteral("%1 %2")
+						  .arg(screenShareReadableAppName(right.processName).toCaseFolded(), right.title.toCaseFolded());
+				  return QString::localeAwareCompare(leftKey, rightKey) < 0;
+			  });
+	return enumeration.sources;
+}
+
+QString screenShareCoTaskMemString(LPWSTR value) {
+	QString result;
+	if (value) {
+		result = QString::fromWCharArray(value).trimmed();
+		CoTaskMemFree(value);
+	}
+	return result;
+}
+
+QString screenShareAudioDeviceName(IMMDevice *device) {
+	if (!device) {
+		return QString();
+	}
+
+	IPropertyStore *properties = nullptr;
+	HRESULT hr = device->OpenPropertyStore(STGM_READ, &properties);
+	if (FAILED(hr) || !properties) {
+		return QString();
+	}
+
+	PROPVARIANT value;
+	PropVariantInit(&value);
+	QString name;
+	hr = properties->GetValue(PKEY_Device_FriendlyName, &value);
+	if (SUCCEEDED(hr) && value.vt == VT_LPWSTR && value.pwszVal) {
+		name = QString::fromWCharArray(value.pwszVal).trimmed();
+	}
+	PropVariantClear(&value);
+	releaseScreenShareComObject(properties);
+	return name;
+}
+
+QList< ScreenShareAudioSource > screenShareRenderAudioSources() {
+	QList< ScreenShareAudioSource > sources;
+	ScreenShareComApartment com;
+	if (!com.usable()) {
+		return sources;
+	}
+
+	IMMDeviceEnumerator *enumerator = nullptr;
+	HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+								  __uuidof(IMMDeviceEnumerator), reinterpret_cast< void ** >(&enumerator));
+	if (FAILED(hr) || !enumerator) {
+		return sources;
+	}
+
+	QString defaultDeviceID;
+	IMMDevice *defaultDevice = nullptr;
+	hr = enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &defaultDevice);
+	if (SUCCEEDED(hr) && defaultDevice) {
+		LPWSTR rawDefaultID = nullptr;
+		if (SUCCEEDED(defaultDevice->GetId(&rawDefaultID))) {
+			defaultDeviceID = screenShareCoTaskMemString(rawDefaultID);
 		}
-		return reinterpret_cast< quintptr >(hwnd);
+	}
+	releaseScreenShareComObject(defaultDevice);
+
+	IMMDeviceCollection *devices = nullptr;
+	hr = enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &devices);
+	if (FAILED(hr) || !devices) {
+		releaseScreenShareComObject(enumerator);
+		return sources;
 	}
 
-	ScreenShareWindowSearch search;
-	search.currentProcessID = currentProcessID;
-	EnumWindows(enumScreenShareWindows, reinterpret_cast< LPARAM >(&search));
-	if (!search.result) {
-		return 0;
+	UINT deviceCount = 0;
+	if (SUCCEEDED(devices->GetCount(&deviceCount))) {
+		for (UINT i = 0; i < deviceCount; ++i) {
+			IMMDevice *device = nullptr;
+			hr                = devices->Item(i, &device);
+			if (FAILED(hr) || !device) {
+				continue;
+			}
+
+			LPWSTR rawDeviceID = nullptr;
+			QString deviceID;
+			if (SUCCEEDED(device->GetId(&rawDeviceID))) {
+				deviceID = screenShareCoTaskMemString(rawDeviceID);
+			}
+			const QString label = screenShareAudioDeviceName(device);
+			if (!deviceID.isEmpty() && !label.isEmpty()) {
+				ScreenShareAudioSource source;
+				source.sourceID  = QStringLiteral("device:%1").arg(deviceID);
+				source.label     = label;
+				source.isDefault = !defaultDeviceID.isEmpty() && deviceID == defaultDeviceID;
+				sources.append(source);
+			}
+
+			releaseScreenShareComObject(device);
+		}
 	}
 
-	if (title) {
-		*title = screenShareWindowTitle(search.result);
-	}
-	return reinterpret_cast< quintptr >(search.result);
+	releaseScreenShareComObject(devices);
+	releaseScreenShareComObject(enumerator);
+
+	std::sort(sources.begin(), sources.end(), [](const ScreenShareAudioSource &left, const ScreenShareAudioSource &right) {
+		if (left.isDefault != right.isDefault) {
+			return left.isDefault;
+		}
+		return QString::localeAwareCompare(left.label, right.label) < 0;
+	});
+	return sources;
 }
 #endif
 
@@ -37239,53 +37494,312 @@ bool MainWindow::chooseScreenShareStartOptions(Channel *channel, ScreenShareStar
 	}
 
 	QDialog dialog(this);
+	dialog.setObjectName(QStringLiteral("screenSharePickerDialog"));
 	dialog.setWindowTitle(tr("Start screen share"));
+	dialog.resize(680, 560);
+	applyUiThemeNativeTitleBar(&dialog);
 	QVBoxLayout *layout = new QVBoxLayout(&dialog);
+	layout->setContentsMargins(18, 18, 18, 18);
+	layout->setSpacing(14);
 
 	QLabel *heading = new QLabel(tr("Share to %1").arg(channel->qsName), &dialog);
+	heading->setObjectName(QStringLiteral("screenSharePickerHeading"));
+	QFont headingFont = heading->font();
+	headingFont.setBold(true);
+	headingFont.setPointSize(headingFont.pointSize() + 2);
+	heading->setFont(headingFont);
 	heading->setWordWrap(true);
 	layout->addWidget(heading);
 
-	QFormLayout *form = new QFormLayout();
-	layout->addLayout(form);
+	QHBoxLayout *contentLayout = new QHBoxLayout();
+	contentLayout->setSpacing(14);
+	layout->addLayout(contentLayout, 1);
 
-	QComboBox *sourceCombo = new QComboBox(&dialog);
+	QGroupBox *videoGroup = new QGroupBox(tr("Video"), &dialog);
+	videoGroup->setObjectName(QStringLiteral("screenSharePickerPanel"));
+	QVBoxLayout *videoLayout = new QVBoxLayout(videoGroup);
+	QListWidget *sourceList  = new QListWidget(videoGroup);
+	sourceList->setObjectName(QStringLiteral("screenShareSourceList"));
+	sourceList->setAlternatingRowColors(true);
+	sourceList->setFrameShape(QFrame::NoFrame);
+	sourceList->setIconSize(QSize(22, 22));
+	sourceList->setMinimumHeight(340);
+	sourceList->setSpacing(4);
+	sourceList->setSelectionMode(QAbstractItemView::SingleSelection);
+	sourceList->setTextElideMode(Qt::ElideRight);
+	videoLayout->addWidget(sourceList, 1);
+	contentLayout->addWidget(videoGroup, 3);
+
+	QVBoxLayout *sideLayout = new QVBoxLayout();
+	sideLayout->setSpacing(14);
+	contentLayout->addLayout(sideLayout, 2);
+
+	QListWidgetItem *firstSourceItem = nullptr;
+	auto addSourceSection = [sourceList](const QString &sectionLabel) {
+		QListWidgetItem *item = new QListWidgetItem(sectionLabel, sourceList);
+		QFont font            = item->font();
+		font.setBold(true);
+		item->setFont(font);
+		item->setFlags(Qt::NoItemFlags);
+	};
+	auto addSourceItem = [&](const QIcon &icon, const QString &title, const QString &detail, const QString &sourceID,
+							 const quint64 processID = 0) {
+		QListWidgetItem *item =
+			new QListWidgetItem(icon, detail.isEmpty() ? title : QStringLiteral("%1\n%2").arg(title, detail),
+								sourceList);
+		item->setData(ScreenSharePickerSourceIDRole, sourceID);
+		item->setData(ScreenSharePickerProcessIDRole, QVariant::fromValue(processID));
+		item->setData(ScreenSharePickerAudioAutoRole, processID > 0);
+		item->setSizeHint(QSize(0, detail.isEmpty() ? 34 : 50));
+		item->setToolTip(detail.isEmpty() ? title : QStringLiteral("%1\n%2").arg(title, detail));
+		if (!firstSourceItem) {
+			firstSourceItem = item;
+		}
+	};
+
+	const QIcon screenIcon = style()->standardIcon(QStyle::SP_ComputerIcon);
+	const QIcon windowIcon = style()->standardIcon(QStyle::SP_FileDialogDetailedView);
+
+	addSourceSection(tr("Screens"));
 	const QList< QScreen * > screens = QGuiApplication::screens();
 	for (int i = 0; i < screens.size(); ++i) {
 		const QScreen *screen = screens.at(i);
 		const QRect geometry  = screen ? screen->geometry() : QRect();
 		const QString screenLabel =
-			screen ? tr("Screen %1: %2 (%3x%4)")
+			screen ? tr("Screen %1")
 						 .arg(i + 1)
-						 .arg(screen->name().isEmpty() ? tr("Display") : screen->name())
-						 .arg(geometry.width())
-						 .arg(geometry.height())
 				   : tr("Screen %1").arg(i + 1);
-		sourceCombo->addItem(screenLabel, QStringLiteral("monitor:%1").arg(i));
+		QStringList detailParts;
+		if (screen && !screen->name().isEmpty()) {
+			detailParts << screen->name();
+		}
+		if (geometry.isValid()) {
+			detailParts << tr("%1x%2").arg(geometry.width()).arg(geometry.height());
+		}
+		if (screen && screen == QGuiApplication::primaryScreen()) {
+			detailParts << tr("Primary display");
+		}
+		const QString detail = detailParts.join(QStringLiteral(" - "));
+		addSourceItem(screenIcon, screenLabel, detail, QStringLiteral("monitor:%1").arg(i));
 	}
-	if (sourceCombo->count() == 0) {
-		sourceCombo->addItem(tr("Primary screen"), QStringLiteral("primary-monitor"));
+	if (!firstSourceItem) {
+		addSourceItem(screenIcon, tr("Primary screen"), QString(), QStringLiteral("primary-monitor"));
 	}
 
 #ifdef Q_OS_WIN
-	QString windowTitle;
-	const quintptr windowHandle = activeExternalWindowForScreenShare(&windowTitle);
-	if (windowHandle != 0) {
-		sourceCombo->addItem(tr("Focused window: %1").arg(windowTitle),
-							 QStringLiteral("window:%1").arg(static_cast< qulonglong >(windowHandle)));
+	const QList< ScreenShareWindowSource > windowSources = screenShareWindowSources();
+	addSourceSection(tr("Open windows"));
+	if (windowSources.isEmpty()) {
+		QListWidgetItem *emptyItem = new QListWidgetItem(tr("No shareable app windows are open"), sourceList);
+		emptyItem->setFlags(Qt::NoItemFlags);
+	} else {
+		for (const ScreenShareWindowSource &windowSource : windowSources) {
+			QString appLabel = screenShareReadableAppName(windowSource.processName);
+			if (appLabel.isEmpty()) {
+				appLabel = screenShareCompactText(windowSource.title, 42);
+			}
+			const QString titleDetail =
+				windowSource.title.compare(appLabel, Qt::CaseInsensitive) == 0
+					? QString()
+					: screenShareCompactText(windowSource.title, 64);
+			addSourceItem(windowIcon, appLabel, titleDetail,
+						  QStringLiteral("window:%1").arg(static_cast< qulonglong >(windowSource.handle)),
+						  static_cast< quint64 >(windowSource.processID));
+		}
 	}
 #endif
 
-	form->addRow(tr("Source"), sourceCombo);
+	if (firstSourceItem) {
+		sourceList->setCurrentItem(firstSourceItem);
+	}
 
-	QCheckBox *audioCheck = new QCheckBox(tr("Share system audio"), &dialog);
-	audioCheck->setChecked(false);
-	form->addRow(QString(), audioCheck);
+	QGroupBox *qualityGroup = new QGroupBox(tr("Quality"), &dialog);
+	qualityGroup->setObjectName(QStringLiteral("screenSharePickerPanel"));
+	QFormLayout *qualityLayout = new QFormLayout(qualityGroup);
+	QComboBox *resolutionCombo = new QComboBox(qualityGroup);
+	QComboBox *frameRateCombo  = new QComboBox(qualityGroup);
+	resolutionCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+	frameRateCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+
+	const ScreenShareHelperClient::CapabilitySnapshot capabilities =
+		m_screenShareManager ? m_screenShareManager->helperClient().capabilities()
+							 : ScreenShareHelperClient::CapabilitySnapshot();
+	auto screenShareQualityLimit = [](const unsigned int advertised, const unsigned int fallback,
+									  const unsigned int hardMax) {
+		return Mumble::ScreenShare::sanitizeLimit(advertised, fallback, hardMax);
+	};
+	const unsigned int maxQualityWidth = std::min(
+		screenShareQualityLimit(Global::get().uiScreenShareMaxWidth,
+								Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH, Mumble::ScreenShare::HARD_MAX_WIDTH),
+		screenShareQualityLimit(capabilities.maxWidth, Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH,
+								Mumble::ScreenShare::HARD_MAX_WIDTH));
+	const unsigned int maxQualityHeight = std::min(
+		screenShareQualityLimit(Global::get().uiScreenShareMaxHeight,
+								Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT, Mumble::ScreenShare::HARD_MAX_HEIGHT),
+		screenShareQualityLimit(capabilities.maxHeight, Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT,
+								Mumble::ScreenShare::HARD_MAX_HEIGHT));
+	const unsigned int maxQualityFps = std::min(
+		screenShareQualityLimit(Global::get().uiScreenShareMaxFps, Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_FPS,
+								Mumble::ScreenShare::HARD_MAX_FPS),
+		screenShareQualityLimit(capabilities.maxFps, Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_FPS,
+								Mumble::ScreenShare::HARD_MAX_FPS));
+
+	auto addResolutionChoice = [this, resolutionCombo, maxQualityWidth,
+								maxQualityHeight](const unsigned int width, const unsigned int height) {
+		if (width > maxQualityWidth || height > maxQualityHeight) {
+			return;
+		}
+		resolutionCombo->addItem(tr("%1p (%2x%3)").arg(height).arg(width).arg(height),
+								 QVariant::fromValue(QSize(static_cast< int >(width), static_cast< int >(height))));
+	};
+	addResolutionChoice(1280, 720);
+	addResolutionChoice(1920, 1080);
+	addResolutionChoice(2560, 1440);
+	if (resolutionCombo->count() == 0) {
+		const unsigned int fallbackWidth =
+			std::min(maxQualityWidth, Mumble::ScreenShare::DEFAULT_MAX_WIDTH);
+		const unsigned int fallbackHeight =
+			std::min(maxQualityHeight, Mumble::ScreenShare::DEFAULT_MAX_HEIGHT);
+		resolutionCombo->addItem(tr("Best available (%1x%2)").arg(fallbackWidth).arg(fallbackHeight),
+								 QVariant::fromValue(QSize(static_cast< int >(fallbackWidth),
+														  static_cast< int >(fallbackHeight))));
+	}
+
+	auto addFrameRateChoice = [this, frameRateCombo, maxQualityFps](const unsigned int fps) {
+		if (fps > maxQualityFps) {
+			return;
+		}
+		frameRateCombo->addItem(tr("%1 FPS").arg(fps), static_cast< int >(fps));
+	};
+	addFrameRateChoice(30);
+	addFrameRateChoice(60);
+	if (frameRateCombo->count() == 0) {
+		const unsigned int fallbackFps = qMax(1U, std::min(maxQualityFps, Mumble::ScreenShare::DEFAULT_MAX_FPS));
+		frameRateCombo->addItem(tr("%1 FPS").arg(fallbackFps), static_cast< int >(fallbackFps));
+	}
+
+	const int defaultResolutionIndex = resolutionCombo->findData(
+		QVariant::fromValue(QSize(static_cast< int >(Mumble::ScreenShare::DEFAULT_MAX_WIDTH),
+								  static_cast< int >(Mumble::ScreenShare::DEFAULT_MAX_HEIGHT))));
+	if (defaultResolutionIndex >= 0) {
+		resolutionCombo->setCurrentIndex(defaultResolutionIndex);
+	}
+	const int defaultFrameRateIndex =
+		frameRateCombo->findData(static_cast< int >(Mumble::ScreenShare::DEFAULT_MAX_FPS));
+	if (defaultFrameRateIndex >= 0) {
+		frameRateCombo->setCurrentIndex(defaultFrameRateIndex);
+	}
+
+	qualityLayout->addRow(tr("Resolution"), resolutionCombo);
+	qualityLayout->addRow(tr("Frame rate"), frameRateCombo);
+	sideLayout->addWidget(qualityGroup);
+
+	QGroupBox *audioGroup = new QGroupBox(tr("Audio"), &dialog);
+	audioGroup->setObjectName(QStringLiteral("screenSharePickerPanel"));
+	QVBoxLayout *audioLayout = new QVBoxLayout(audioGroup);
+	QComboBox *audioCombo    = new QComboBox(audioGroup);
+	audioCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+	audioCombo->addItem(tr("No audio"), QString());
+	audioCombo->addItem(tr("System audio"), QStringLiteral("default-loopback"));
+#ifdef Q_OS_WIN
+	const QList< ScreenShareAudioSource > renderAudioSources = screenShareRenderAudioSources();
+	if (!renderAudioSources.isEmpty()) {
+		audioCombo->insertSeparator(audioCombo->count());
+		for (const ScreenShareAudioSource &audioSource : renderAudioSources) {
+			const QString audioLabel = audioSource.isDefault ? tr("Output: %1 (default)").arg(audioSource.label)
+															 : tr("Output: %1").arg(audioSource.label);
+			audioCombo->addItem(audioLabel, audioSource.sourceID);
+		}
+	}
+
+	QSet< quint64 > addedProcessAudioSources;
+	bool addedProcessAudioSeparator = false;
+	for (const ScreenShareWindowSource &windowSource : windowSources) {
+		if (windowSource.processID == 0 || addedProcessAudioSources.contains(windowSource.processID)) {
+			continue;
+		}
+		if (!addedProcessAudioSeparator) {
+			audioCombo->insertSeparator(audioCombo->count());
+			addedProcessAudioSeparator = true;
+		}
+		addedProcessAudioSources.insert(windowSource.processID);
+		QString appLabel = screenShareReadableAppName(windowSource.processName);
+		if (appLabel.isEmpty()) {
+			appLabel = screenShareCompactText(windowSource.title, 42);
+		}
+		audioCombo->addItem(tr("App: %1").arg(appLabel),
+							QStringLiteral("process:%1").arg(static_cast< quint64 >(windowSource.processID)));
+	}
+#endif
+	audioLayout->addWidget(audioCombo);
+	audioLayout->addStretch(1);
+	sideLayout->addWidget(audioGroup);
+	sideLayout->addStretch(1);
+
+	bool audioFollowsSelectedApp = true;
+	auto setAudioComboIndex = [audioCombo](const int index) {
+		if (index >= 0 && index < audioCombo->count() && audioCombo->currentIndex() != index) {
+			const QSignalBlocker blocker(audioCombo);
+			audioCombo->setCurrentIndex(index);
+		}
+	};
+	auto chooseRecommendedAudioForSelectedSource = [&]() {
+		if (!audioFollowsSelectedApp || !sourceList->currentItem()) {
+			return;
+		}
+
+		const quint64 processID = sourceList->currentItem()->data(ScreenSharePickerProcessIDRole).toULongLong();
+		if (processID == 0) {
+			return;
+		}
+
+		const int audioIndex = audioCombo->findData(QStringLiteral("process:%1").arg(processID));
+		if (audioIndex >= 0) {
+			setAudioComboIndex(audioIndex);
+		}
+	};
+	chooseRecommendedAudioForSelectedSource();
+	connect(audioCombo, QOverload< int >::of(&QComboBox::activated), &dialog,
+			[&audioFollowsSelectedApp](int) { audioFollowsSelectedApp = false; });
+	connect(sourceList, &QListWidget::itemSelectionChanged, &dialog, chooseRecommendedAudioForSelectedSource);
+
+	if (const std::optional< UiThemeTokens > tokens = activeUiThemeTokens(); tokens) {
+		dialog.setStyleSheet(
+			QString::fromLatin1(
+				"QDialog#screenSharePickerDialog { background-color: %1; color: %2; }"
+				"QLabel#screenSharePickerHeading { color: %2; font-weight: 700; }"
+				"QGroupBox#screenSharePickerPanel { background-color: %3; border: 1px solid %4; border-radius: 8px; "
+				"margin-top: 18px; padding: 10px; }"
+				"QGroupBox#screenSharePickerPanel::title { subcontrol-origin: margin; left: 10px; padding: 0 6px; "
+				"color: %5; font-weight: 600; }"
+				"QListWidget#screenShareSourceList { background-color: transparent; border: none; outline: none; }"
+				"QListWidget#screenShareSourceList::item { border-radius: 6px; padding: 7px; color: %2; }"
+				"QListWidget#screenShareSourceList::item:selected { background-color: %6; color: %2; }"
+				"QListWidget#screenShareSourceList::item:hover { background-color: %7; }"
+				"QListWidget#screenShareSourceList::item:disabled { color: %5; background-color: transparent; }"
+				"QComboBox { background-color: %1; border: 1px solid %4; border-radius: 6px; padding: 6px 8px; "
+				"color: %2; min-height: 22px; }"
+				"QComboBox:hover, QComboBox:focus { border-color: %8; }"
+				"QComboBox QAbstractItemView { background-color: %3; border: 1px solid %4; selection-background-color: %6; "
+				"color: %2; outline: none; }"
+				"QPushButton { background-color: %3; border: 1px solid %4; border-radius: 6px; padding: 7px 18px; "
+				"color: %2; }"
+				"QPushButton:hover { background-color: %7; }"
+				"QPushButton:default { background-color: %6; border-color: %8; }")
+				.arg(qssColor(tokens->mantle), qssColor(tokens->text), qssColor(tokens->surface0),
+					 qssColor(tokens->surface1), qssColor(tokens->subtext0), qssColor(tokens->accentSubtle),
+					 qssColor(tokens->surface1), qssColor(tokens->accent)));
+	}
 
 	QDialogButtonBox *buttons =
 		new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, Qt::Horizontal, &dialog);
 	if (QPushButton *startButton = buttons->button(QDialogButtonBox::Ok)) {
 		startButton->setText(tr("Start sharing"));
+		startButton->setEnabled(sourceList->currentItem() != nullptr);
+		connect(sourceList, &QListWidget::itemSelectionChanged, startButton, [sourceList, startButton]() {
+			startButton->setEnabled(sourceList->currentItem() != nullptr
+									&& sourceList->currentItem()->data(ScreenSharePickerSourceIDRole).isValid());
+		});
 	}
 	layout->addWidget(buttons);
 	connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -37295,8 +37809,17 @@ bool MainWindow::chooseScreenShareStartOptions(Channel *channel, ScreenShareStar
 		return false;
 	}
 
-	options->captureSourceID = sourceCombo->currentData().toString().trimmed();
-	options->captureAudio    = audioCheck->isChecked();
+	const QListWidgetItem *selectedSource = sourceList->currentItem();
+	options->captureSourceID =
+		selectedSource ? selectedSource->data(ScreenSharePickerSourceIDRole).toString().trimmed() : QString();
+	const QSize requestedSize = resolutionCombo->currentData().toSize();
+	const int requestedFps    = qMax(0, frameRateCombo->currentData().toInt());
+	options->requestedWidth   = requestedSize.width() > 0 ? static_cast< unsigned int >(requestedSize.width()) : 0;
+	options->requestedHeight  = requestedSize.height() > 0 ? static_cast< unsigned int >(requestedSize.height()) : 0;
+	options->requestedFps     = static_cast< unsigned int >(requestedFps);
+	options->qualityProfile   = QStringLiteral("auto");
+	options->audioSourceID    = audioCombo->currentData().toString().trimmed();
+	options->captureAudio     = !options->audioSourceID.isEmpty();
 	return true;
 }
 
@@ -37316,8 +37839,15 @@ bool MainWindow::openScreenShareWindowOrStatus(const QString &streamID) {
 		box.setText(tr("Your screen share is live."));
 		const QString sourceLabel =
 			session.captureSourceID.trimmed().isEmpty() ? tr("default source") : session.captureSourceID.trimmed();
-		box.setInformativeText(tr("Source: %1\nAudio: %2")
-								   .arg(sourceLabel, session.captureAudio ? tr("on") : tr("off")));
+		const QString audioLabel =
+			!session.captureAudio
+				? tr("off")
+				: (session.audioSourceID.trimmed().isEmpty() ? tr("system") : session.audioSourceID.trimmed());
+		const QString qualityLabel =
+			(session.width > 0 && session.height > 0 && session.fps > 0)
+				? tr("%1x%2 @ %3 FPS").arg(session.width).arg(session.height).arg(session.fps)
+				: tr("auto");
+		box.setInformativeText(tr("Source: %1\nQuality: %2\nAudio: %3").arg(sourceLabel, qualityLabel, audioLabel));
 		QPushButton *stopButton = box.addButton(tr("Stop sharing"), QMessageBox::DestructiveRole);
 		box.addButton(QMessageBox::Ok);
 		box.exec();
@@ -37355,12 +37885,16 @@ bool MainWindow::openScreenShareWindowOrStatus(const QString &streamID) {
 		if (m_screenShareManager->isViewingSession(streamID)) {
 			if (m_screenShareManager->hasRunningExternalRuntime(streamID)) {
 				const QString message = tr("The video window will open when media starts.");
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 				if (usesModernShell()) {
 					publishModernToast(QStringLiteral("info"), tr("Screen-share viewer is connecting"), message,
 									   QString(), QString(), 8000);
 				} else {
+#endif
 					statusBar()->showMessage(tr("Screen-share viewer is connecting. %1").arg(message), 8000);
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 				}
+#endif
 				return true;
 			}
 

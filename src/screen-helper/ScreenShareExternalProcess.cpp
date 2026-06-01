@@ -25,6 +25,7 @@
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
 
+#include <limits>
 #include <optional>
 
 namespace {
@@ -439,6 +440,9 @@ QString browserLaunchUrl(const QJsonObject &plan, QString *errorMessage, QString
 		const bool captureAudio = plan.value(QStringLiteral("capture_audio")).toBool(false);
 		appendQuery(QStringLiteral("capture_audio"), captureAudio ? QStringLiteral("1") : QStringLiteral("0"));
 		appendQuery(QStringLiteral("system_audio"), captureAudio ? QStringLiteral("include") : QStringLiteral("exclude"));
+		if (captureAudio) {
+			appendQuery(QStringLiteral("audio_source_id"), plan.value(QStringLiteral("audio_source_id")).toString());
+		}
 		appendQuery(QStringLiteral("surface_switching"), QStringLiteral("include"));
 		appendQuery(QStringLiteral("self_browser_surface"), QStringLiteral("exclude"));
 	}
@@ -1227,6 +1231,76 @@ GStreamerCaptureSelection selectGStreamerCaptureSource(const QJsonObject &plan) 
 	return selection;
 }
 
+bool appendWasapiLoopbackProcessProperties(QStringList *properties, const qulonglong processID) {
+	if (!properties || processID == 0 || processID > std::numeric_limits< quint32 >::max()) {
+		return false;
+	}
+
+	properties->append(QStringLiteral("loopback-mode=include-process-tree"));
+	properties->append(QStringLiteral("loopback-target-pid=%1").arg(processID));
+	return true;
+}
+
+QStringList selectWasapiLoopbackSourceProperties(const QJsonObject &plan, QStringList *warnings) {
+	QStringList properties;
+	properties << QStringLiteral("loopback=true") << QStringLiteral("low-latency=true")
+			   << QStringLiteral("do-timestamp=true");
+
+	const QString sourceID = plan.value(QStringLiteral("audio_source_id")).toString().trimmed();
+	const QString normalizedSourceID = sourceID.toLower();
+	if (normalizedSourceID.isEmpty() || normalizedSourceID == QLatin1String("default-loopback")
+		|| normalizedSourceID == QLatin1String("system") || normalizedSourceID == QLatin1String("system:default")) {
+		return properties;
+	}
+
+	if (normalizedSourceID.startsWith(QLatin1String("device:"))) {
+		const QString deviceID = sourceID.mid(QStringLiteral("device:").size()).trimmed();
+		if (!deviceID.isEmpty()) {
+			properties.append(QStringLiteral("device=%1").arg(deviceID));
+		} else if (warnings) {
+			warnings->append(QStringLiteral("Audio device capture was requested without a device ID; using default output."));
+		}
+		return properties;
+	}
+
+	if (normalizedSourceID.startsWith(QLatin1String("process:"))) {
+		bool ok = false;
+		const qulonglong processID = normalizedSourceID.mid(QStringLiteral("process:").size()).toULongLong(&ok);
+		if (ok && appendWasapiLoopbackProcessProperties(&properties, processID)) {
+			return properties;
+		}
+		if (warnings) {
+			warnings->append(QStringLiteral("Process audio capture source '%1' is invalid; using default output.")
+								 .arg(sourceID));
+		}
+		return properties;
+	}
+
+	if (normalizedSourceID.startsWith(QLatin1String("window:"))) {
+#ifdef Q_OS_WIN
+		bool ok = false;
+		const qulonglong windowHandle = normalizedSourceID.mid(QStringLiteral("window:").size()).toULongLong(&ok);
+		if (ok && windowHandle != 0 && IsWindow(reinterpret_cast< HWND >(windowHandle))) {
+			DWORD processID = 0;
+			GetWindowThreadProcessId(reinterpret_cast< HWND >(windowHandle), &processID);
+			if (appendWasapiLoopbackProcessProperties(&properties, processID)) {
+				return properties;
+			}
+		}
+#endif
+		if (warnings) {
+			warnings->append(QStringLiteral("Window audio capture source '%1' is invalid; using default output.")
+								 .arg(sourceID));
+		}
+		return properties;
+	}
+
+	if (warnings) {
+		warnings->append(QStringLiteral("Unsupported audio capture source '%1'; using default output.").arg(sourceID));
+	}
+	return properties;
+}
+
 struct GStreamerEncoderSelection {
 	bool valid = false;
 	QString encoderElement;
@@ -1444,9 +1518,9 @@ ScreenShareExternalProcess::LaunchResult
 	if (captureAudio) {
 		if (support.gstWasapi2SrcAvailable && support.gstAudioConvertAvailable
 			&& support.gstAudioResampleAvailable) {
-			arguments << QStringLiteral("wasapi2src") << QStringLiteral("loopback=true")
-					  << QStringLiteral("low-latency=true") << QStringLiteral("do-timestamp=true")
-					  << QStringLiteral("!") << QStringLiteral("audioconvert") << QStringLiteral("!")
+			const QStringList audioSourceProperties = selectWasapiLoopbackSourceProperties(plan, &launchWarnings);
+			arguments << QStringLiteral("wasapi2src") << audioSourceProperties << QStringLiteral("!")
+					  << QStringLiteral("audioconvert") << QStringLiteral("!")
 					  << QStringLiteral("audioresample") << QStringLiteral("!")
 					  << QStringLiteral("audio/x-raw,rate=48000,channels=2") << QStringLiteral("!")
 					  << QStringLiteral("queue") << QStringLiteral("leaky=downstream")
@@ -1523,10 +1597,32 @@ ScreenShareExternalProcess::LaunchResult
 	if (forceH264Session) {
 		arguments << QStringLiteral("video-codecs=<H264>");
 	}
+	const bool expectAudio = plan.value(QStringLiteral("capture_audio")).toBool(false);
+	if (expectAudio) {
+		arguments << QStringLiteral("audio-codecs=<OPUS>");
+	}
+	const bool receiveRawPads = expectAudio;
 	arguments << QStringLiteral("src.") << QStringLiteral("!") << QStringLiteral("queue")
 			  << QStringLiteral("leaky=downstream") << QStringLiteral("max-size-buffers=4") << QStringLiteral("!");
+	if (receiveRawPads) {
+		arguments << QStringLiteral("video/x-raw(ANY)") << QStringLiteral("!");
+	} else if (forceH264Session) {
+		arguments << QStringLiteral("video/x-h264;application/x-rtp,media=video,encoding-name=H264")
+				  << QStringLiteral("!");
+	} else {
+		arguments << QStringLiteral("application/x-rtp,media=video;video/x-h264;video/x-vp8;video/x-vp9")
+				  << QStringLiteral("!");
+	}
 	QString selectedRenderer;
-	if (useD3D11DecodedSink) {
+	if (receiveRawPads && (useD3D11DecodedSink || useD3D11RawSink)) {
+		arguments << QStringLiteral("videoconvert") << QStringLiteral("!") << QStringLiteral("d3d11videosink")
+				  << QStringLiteral("sync=false");
+		selectedRenderer = QStringLiteral("gstreamer-d3d11videosink-raw-livekit");
+	} else if (receiveRawPads && (useAutoDecodedSink || useAutoRawSink)) {
+		arguments << QStringLiteral("videoconvert") << QStringLiteral("!") << QStringLiteral("autovideosink")
+				  << QStringLiteral("sync=false");
+		selectedRenderer = QStringLiteral("gstreamer-autovideosink-raw-livekit");
+	} else if (useD3D11DecodedSink) {
 		arguments << QStringLiteral("decodebin") << QStringLiteral("!") << QStringLiteral("videoconvert")
 				  << QStringLiteral("!") << QStringLiteral("d3d11videosink") << QStringLiteral("sync=false");
 		selectedRenderer = QStringLiteral("gstreamer-d3d11videosink-decodebin");
@@ -1559,12 +1655,11 @@ ScreenShareExternalProcess::LaunchResult
 		launch.errorMessage = QStringLiteral("No usable GStreamer video renderer is available for LiveKit viewing.");
 		return launch;
 	}
-	const bool expectAudio = plan.value(QStringLiteral("capture_audio")).toBool(false);
-	if (expectAudio && support.gstDecodeBinAvailable && support.gstAutoAudioSinkAvailable
-		&& support.gstAudioConvertAvailable && support.gstAudioResampleAvailable) {
+	if (expectAudio && support.gstAutoAudioSinkAvailable && support.gstAudioConvertAvailable
+		&& support.gstAudioResampleAvailable) {
 		arguments << QStringLiteral("src.") << QStringLiteral("!") << QStringLiteral("queue")
 				  << QStringLiteral("leaky=downstream") << QStringLiteral("max-size-buffers=8")
-				  << QStringLiteral("!") << QStringLiteral("decodebin") << QStringLiteral("!")
+				  << QStringLiteral("!") << QStringLiteral("audio/x-raw(ANY)") << QStringLiteral("!")
 				  << QStringLiteral("audioconvert") << QStringLiteral("!") << QStringLiteral("audioresample")
 				  << QStringLiteral("!") << QStringLiteral("autoaudiosink") << QStringLiteral("sync=false");
 	}

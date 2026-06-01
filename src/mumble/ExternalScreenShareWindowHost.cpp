@@ -7,11 +7,15 @@
 
 #include "ClientUser.h"
 #include "Global.h"
+#include "Log.h"
 #include "ScreenShare.h"
 #include "UiTheme.h"
 
 #ifdef Q_OS_WIN
 #	include "win.h"
+
+#	include <mmdeviceapi.h>
+#	include <audiopolicy.h>
 #endif
 
 #include <QtCore/QEvent>
@@ -34,9 +38,39 @@
 
 namespace {
 #ifdef Q_OS_WIN
+enum class ProcessAudioMuteResult { Applied, NoSession, Failed };
+
 struct ExternalWindowSearch {
 	DWORD processID = 0;
 	HWND window     = nullptr;
+};
+
+template< typename T > void releaseComObject(T *&object) {
+	if (object) {
+		object->Release();
+		object = nullptr;
+	}
+}
+
+class ScopedComApartment {
+public:
+	ScopedComApartment() {
+		const HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+		m_usable         = SUCCEEDED(hr) || hr == RPC_E_CHANGED_MODE;
+		m_uninitialize   = SUCCEEDED(hr);
+	}
+
+	~ScopedComApartment() {
+		if (m_uninitialize) {
+			CoUninitialize();
+		}
+	}
+
+	bool usable() const { return m_usable; }
+
+private:
+	bool m_usable       = false;
+	bool m_uninitialize = false;
 };
 
 BOOL CALLBACK enumExternalProcessWindows(HWND hwnd, LPARAM userData) {
@@ -84,6 +118,133 @@ HWND findExternalProcessWindow(const qint64 processID) {
 	search.processID = static_cast< DWORD >(processID);
 	EnumWindows(enumExternalProcessWindows, reinterpret_cast< LPARAM >(&search));
 	return search.window;
+}
+
+bool setMuteForAudioSession(IAudioSessionControl *control, const DWORD processID, const bool muted,
+							bool *matchedSession) {
+	if (!control || !matchedSession) {
+		return false;
+	}
+
+	IAudioSessionControl2 *control2 = nullptr;
+	HRESULT hr = control->QueryInterface(__uuidof(IAudioSessionControl2), reinterpret_cast< void ** >(&control2));
+	if (FAILED(hr) || !control2) {
+		return false;
+	}
+
+	DWORD sessionProcessID = 0;
+	hr = control2->GetProcessId(&sessionProcessID);
+	if (FAILED(hr) || sessionProcessID != processID) {
+		releaseComObject(control2);
+		return true;
+	}
+
+	AudioSessionState state = AudioSessionStateExpired;
+	if (FAILED(control2->GetState(&state)) || state == AudioSessionStateExpired) {
+		releaseComObject(control2);
+		return true;
+	}
+
+	*matchedSession = true;
+	ISimpleAudioVolume *volume = nullptr;
+	hr = control2->QueryInterface(__uuidof(ISimpleAudioVolume), reinterpret_cast< void ** >(&volume));
+	if (FAILED(hr) || !volume) {
+		releaseComObject(control2);
+		return false;
+	}
+
+	hr = volume->SetMute(muted ? TRUE : FALSE, nullptr);
+	releaseComObject(volume);
+	releaseComObject(control2);
+	return SUCCEEDED(hr);
+}
+
+bool setMuteForAudioDevice(IMMDevice *device, const DWORD processID, const bool muted, bool *matchedSession) {
+	if (!device || !matchedSession) {
+		return false;
+	}
+
+	IAudioSessionManager2 *sessionManager = nullptr;
+	HRESULT hr = device->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr,
+								  reinterpret_cast< void ** >(&sessionManager));
+	if (FAILED(hr) || !sessionManager) {
+		return true;
+	}
+
+	IAudioSessionEnumerator *sessionEnumerator = nullptr;
+	hr                                        = sessionManager->GetSessionEnumerator(&sessionEnumerator);
+	if (FAILED(hr) || !sessionEnumerator) {
+		releaseComObject(sessionManager);
+		return true;
+	}
+
+	int sessionCount = 0;
+	bool ok          = true;
+	if (SUCCEEDED(sessionEnumerator->GetCount(&sessionCount))) {
+		for (int i = 0; i < sessionCount; ++i) {
+			IAudioSessionControl *sessionControl = nullptr;
+			hr                                  = sessionEnumerator->GetSession(i, &sessionControl);
+			if (FAILED(hr) || !sessionControl) {
+				continue;
+			}
+
+			ok = setMuteForAudioSession(sessionControl, processID, muted, matchedSession) && ok;
+			releaseComObject(sessionControl);
+		}
+	}
+
+	releaseComObject(sessionEnumerator);
+	releaseComObject(sessionManager);
+	return ok;
+}
+
+ProcessAudioMuteResult setMuteForProcessAudioSessions(const qint64 processID, const bool muted) {
+	if (processID <= 0 || processID > std::numeric_limits< DWORD >::max()) {
+		return ProcessAudioMuteResult::Failed;
+	}
+
+	ScopedComApartment com;
+	if (!com.usable()) {
+		return ProcessAudioMuteResult::Failed;
+	}
+
+	IMMDeviceEnumerator *deviceEnumerator = nullptr;
+	HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+								  __uuidof(IMMDeviceEnumerator), reinterpret_cast< void ** >(&deviceEnumerator));
+	if (FAILED(hr) || !deviceEnumerator) {
+		return ProcessAudioMuteResult::Failed;
+	}
+
+	IMMDeviceCollection *devices = nullptr;
+	hr = deviceEnumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &devices);
+	if (FAILED(hr) || !devices) {
+		releaseComObject(deviceEnumerator);
+		return ProcessAudioMuteResult::Failed;
+	}
+
+	UINT deviceCount = 0;
+	bool matched     = false;
+	bool ok          = true;
+	if (SUCCEEDED(devices->GetCount(&deviceCount))) {
+		for (UINT i = 0; i < deviceCount; ++i) {
+			IMMDevice *device = nullptr;
+			hr                = devices->Item(i, &device);
+			if (FAILED(hr) || !device) {
+				continue;
+			}
+
+			ok = setMuteForAudioDevice(device, static_cast< DWORD >(processID), muted, &matched) && ok;
+			releaseComObject(device);
+		}
+	}
+
+	releaseComObject(devices);
+	releaseComObject(deviceEnumerator);
+
+	if (!matched) {
+		return ProcessAudioMuteResult::NoSession;
+	}
+	return ok ? ProcessAudioMuteResult::Applied : ProcessAudioMuteResult::Failed;
 }
 
 void attachExternalWindowToSurface(HWND window, QWidget *surfaceWidget) {
@@ -226,6 +387,10 @@ ExternalScreenShareWindowHost::ExternalScreenShareWindowHost(const ScreenShareSe
 	m_embedPollTimer->setInterval(250);
 	connect(m_embedPollTimer, &QTimer::timeout, this, &ExternalScreenShareWindowHost::pollForExternalWindow);
 
+	m_audioMuteTimer = new QTimer(this);
+	m_audioMuteTimer->setInterval(500);
+	connect(m_audioMuteTimer, &QTimer::timeout, this, &ExternalScreenShareWindowHost::retryApplyExternalAudioMute);
+
 	updateSession(session);
 	updateControls();
 	updatePlaceholder();
@@ -241,6 +406,7 @@ void ExternalScreenShareWindowHost::closeFromManager() {
 void ExternalScreenShareWindowHost::setAudioMuted(const bool muted) {
 	m_audioMuted = muted;
 	updateControls();
+	applyExternalAudioMute(true);
 }
 
 void ExternalScreenShareWindowHost::setPaused(const bool paused) {
@@ -259,12 +425,14 @@ void ExternalScreenShareWindowHost::setProcessID(const qint64 processID) {
 
 	clearEmbeddedWindow();
 	m_processID = processID;
+	m_audioMuteAttempts = 0;
 	updatePlaceholder();
 	if (m_processID > 0) {
 		m_embedPollTimer->start();
 	} else {
 		m_embedPollTimer->stop();
 	}
+	applyExternalAudioMute(true);
 }
 
 void ExternalScreenShareWindowHost::updateSession(const ScreenShareSession &session) {
@@ -332,6 +500,10 @@ void ExternalScreenShareWindowHost::handlePauseButton() {
 	emit pauseToggled(m_session.streamID, !m_paused);
 }
 
+void ExternalScreenShareWindowHost::retryApplyExternalAudioMute() {
+	applyExternalAudioMute(true);
+}
+
 void ExternalScreenShareWindowHost::pollForExternalWindow() {
 	if (m_processID <= 0) {
 		m_embedPollTimer->stop();
@@ -369,6 +541,56 @@ void ExternalScreenShareWindowHost::pollForExternalWindow() {
 #else
 	m_embedPollTimer->stop();
 	setStatusText(tr("The GStreamer viewer is running in an external video window."));
+#endif
+}
+
+void ExternalScreenShareWindowHost::applyExternalAudioMute(const bool allowRetry) {
+#ifdef Q_OS_WIN
+	if (!m_session.captureAudio || m_processID <= 0) {
+		if (m_audioMuteTimer) {
+			m_audioMuteTimer->stop();
+		}
+		return;
+	}
+
+	const ProcessAudioMuteResult result = setMuteForProcessAudioSessions(m_processID, m_audioMuted);
+	if (result == ProcessAudioMuteResult::Applied) {
+		m_audioMuteAttempts = 0;
+		if (m_audioMuteTimer) {
+			m_audioMuteTimer->stop();
+		}
+		setStatusText(m_audioMuted ? tr("Stream audio muted locally. Video remains live via GStreamer.")
+								   : tr("Stream audio enabled for this viewer."));
+		return;
+	}
+
+	if (result == ProcessAudioMuteResult::Failed) {
+		if (m_audioMuteTimer) {
+			m_audioMuteTimer->stop();
+		}
+		if (Global::get().l) {
+			Global::get().l->log(Log::Warning,
+								 tr("Unable to change screen-share audio mute state for viewer process %1.")
+									 .arg(QString::number(m_processID).toHtmlEscaped()));
+		}
+		setStatusText(tr("Could not change this viewer's audio state."));
+		return;
+	}
+
+	if (allowRetry && m_audioMuted && m_audioMuteAttempts < 40) {
+		++m_audioMuteAttempts;
+		if (m_audioMuteTimer && !m_audioMuteTimer->isActive()) {
+			m_audioMuteTimer->start();
+		}
+		setStatusText(tr("Stream audio will mute when the GStreamer audio session starts."));
+		return;
+	}
+
+	if (m_audioMuteTimer) {
+		m_audioMuteTimer->stop();
+	}
+#else
+	Q_UNUSED(allowRetry)
 #endif
 }
 

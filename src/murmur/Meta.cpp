@@ -132,9 +132,9 @@ MetaParams::MetaParams() {
 	screenShareRecordingEnabled  = false;
 	screenShareHelperRequired    = true;
 	qlPreferredScreenShareCodecs = Mumble::ScreenShare::defaultCodecPreferenceList();
-	uiScreenShareMaxWidth        = Mumble::ScreenShare::DEFAULT_MAX_WIDTH;
-	uiScreenShareMaxHeight       = Mumble::ScreenShare::DEFAULT_MAX_HEIGHT;
-	uiScreenShareMaxFps          = Mumble::ScreenShare::DEFAULT_MAX_FPS;
+	uiScreenShareMaxWidth        = Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH;
+	uiScreenShareMaxHeight       = Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT;
+	uiScreenShareMaxFps          = Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_FPS;
 	qsScreenShareRelayUrl.clear();
 	qsScreenShareRelayAPIKey.clear();
 	qsScreenShareRelayAPISecret.clear();
@@ -397,13 +397,13 @@ void MetaParams::read(QString fname) {
 		qlPreferredScreenShareCodecs);
 	uiScreenShareMaxWidth = Mumble::ScreenShare::sanitizeLimit(
 		typeCheckedFromSettings< unsigned int >("screen_share_max_width", uiScreenShareMaxWidth),
-		Mumble::ScreenShare::DEFAULT_MAX_WIDTH, Mumble::ScreenShare::HARD_MAX_WIDTH);
+		Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH, Mumble::ScreenShare::HARD_MAX_WIDTH);
 	uiScreenShareMaxHeight = Mumble::ScreenShare::sanitizeLimit(
 		typeCheckedFromSettings< unsigned int >("screen_share_max_height", uiScreenShareMaxHeight),
-		Mumble::ScreenShare::DEFAULT_MAX_HEIGHT, Mumble::ScreenShare::HARD_MAX_HEIGHT);
+		Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT, Mumble::ScreenShare::HARD_MAX_HEIGHT);
 	uiScreenShareMaxFps = Mumble::ScreenShare::sanitizeLimit(
 		typeCheckedFromSettings< unsigned int >("screen_share_max_fps", uiScreenShareMaxFps),
-		Mumble::ScreenShare::DEFAULT_MAX_FPS, Mumble::ScreenShare::HARD_MAX_FPS);
+		Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_FPS, Mumble::ScreenShare::HARD_MAX_FPS);
 	qsScreenShareRelayUrl = Mumble::ScreenShare::normalizeRelayUrl(
 		typeCheckedFromSettings("screen_share_relay_url", qsScreenShareRelayUrl));
 	qsScreenShareRelayAPIKey =

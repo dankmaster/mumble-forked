@@ -414,6 +414,9 @@ QUrl RelayWindowHost::buildPageUrl() const {
 		}
 		query.addQueryItem(QStringLiteral("capture_audio"), m_session.captureAudio ? QStringLiteral("1") : QStringLiteral("0"));
 		query.addQueryItem(QStringLiteral("system_audio"), m_session.captureAudio ? QStringLiteral("include") : QStringLiteral("exclude"));
+		if (m_session.captureAudio && !m_session.audioSourceID.trimmed().isEmpty()) {
+			query.addQueryItem(QStringLiteral("audio_source_id"), m_session.audioSourceID.trimmed());
+		}
 		query.addQueryItem(QStringLiteral("surface_switching"), QStringLiteral("include"));
 		query.addQueryItem(QStringLiteral("self_browser_surface"), QStringLiteral("exclude"));
 		query.addQueryItem(QStringLiteral("auto_start"), QStringLiteral("1"));

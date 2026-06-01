@@ -482,6 +482,7 @@ QJsonObject ScreenShareHelperClient::payloadFromSession(const ScreenShareSession
 				   session.qualityProfile.trimmed().isEmpty() ? QStringLiteral("auto") : session.qualityProfile);
 	payload.insert(QStringLiteral("capture_source_id"), session.captureSourceID);
 	payload.insert(QStringLiteral("capture_audio"), session.captureAudio);
+	payload.insert(QStringLiteral("audio_source_id"), session.captureAudio ? session.audioSourceID : QString());
 	payload.insert(QStringLiteral("min_bitrate_kbps"), static_cast< int >(session.minBitrateKbps));
 	payload.insert(QStringLiteral("max_bitrate_kbps"), static_cast< int >(session.maxBitrateKbps));
 	payload.insert(QStringLiteral("codec_preference"),
@@ -499,13 +500,13 @@ void ScreenShareHelperClient::applyAdvertisedCapabilities(MumbleProto::Version &
 		snapshot.viewSupported     = true;
 		appendUniqueCodecs(snapshot.supportedCodecs, Mumble::ScreenShare::browserWebRtcCodecPreferenceList());
 		if (snapshot.maxWidth == 0) {
-			snapshot.maxWidth = Mumble::ScreenShare::DEFAULT_MAX_WIDTH;
+			snapshot.maxWidth = Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH;
 		}
 		if (snapshot.maxHeight == 0) {
-			snapshot.maxHeight = Mumble::ScreenShare::DEFAULT_MAX_HEIGHT;
+			snapshot.maxHeight = Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT;
 		}
 		if (snapshot.maxFps == 0) {
-			snapshot.maxFps = Mumble::ScreenShare::DEFAULT_MAX_FPS;
+			snapshot.maxFps = Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_FPS;
 		}
 	}
 

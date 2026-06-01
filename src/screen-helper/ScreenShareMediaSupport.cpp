@@ -93,9 +93,9 @@ bool pipeWireRuntimeAvailable(QString *libraryName) {
 
 ScreenShareMediaSupport::CapabilitySummary ScreenShareMediaSupport::probe() {
 	CapabilitySummary summary;
-	summary.maxWidth        = Mumble::ScreenShare::DEFAULT_MAX_WIDTH;
-	summary.maxHeight       = Mumble::ScreenShare::DEFAULT_MAX_HEIGHT;
-	summary.maxFps          = Mumble::ScreenShare::DEFAULT_MAX_FPS;
+	summary.maxWidth        = Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH;
+	summary.maxHeight       = Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT;
+	summary.maxFps          = Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_FPS;
 
 	const ScreenShareExternalProcess::RuntimeSupport runtimeSupport = ScreenShareExternalProcess::probeRuntimeSupport();
 	const bool testPatternEnabled =

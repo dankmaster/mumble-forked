@@ -554,24 +554,32 @@ void ScreenShareManager::requestStartChannelShare(unsigned int channelID, const 
 		msg.add_requested_codecs(static_cast< MumbleProto::ScreenShareCodec >(availableCodec));
 	}
 
-	unsigned int targetWidth  = clampRequestedLimit(Global::get().uiScreenShareMaxWidth, capabilities.maxWidth);
-	unsigned int targetHeight = clampRequestedLimit(Global::get().uiScreenShareMaxHeight, capabilities.maxHeight);
-	unsigned int targetFps    = clampRequestedLimit(Global::get().uiScreenShareMaxFps, capabilities.maxFps);
+	const unsigned int requestedWidth =
+		options.requestedWidth > 0 ? options.requestedWidth : Global::get().uiScreenShareMaxWidth;
+	const unsigned int requestedHeight =
+		options.requestedHeight > 0 ? options.requestedHeight : Global::get().uiScreenShareMaxHeight;
+	const unsigned int requestedFps = options.requestedFps > 0 ? options.requestedFps : Global::get().uiScreenShareMaxFps;
+	unsigned int targetWidth        = clampRequestedLimit(requestedWidth, capabilities.maxWidth);
+	unsigned int targetHeight       = clampRequestedLimit(requestedHeight, capabilities.maxHeight);
+	unsigned int targetFps          = clampRequestedLimit(requestedFps, capabilities.maxFps);
 	if (supportsInAppRelayTransport(relayTransport)) {
 		targetWidth = std::min(Mumble::ScreenShare::sanitizeLimit(targetWidth, Mumble::ScreenShare::DEFAULT_MAX_WIDTH,
 																  Mumble::ScreenShare::HARD_MAX_WIDTH),
-							   Mumble::ScreenShare::DEFAULT_MAX_WIDTH);
+							   Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH);
 		targetHeight =
 			std::min(Mumble::ScreenShare::sanitizeLimit(targetHeight, Mumble::ScreenShare::DEFAULT_MAX_HEIGHT,
 														Mumble::ScreenShare::HARD_MAX_HEIGHT),
-					 Mumble::ScreenShare::DEFAULT_MAX_HEIGHT);
+					 Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT);
 		targetFps = std::min(Mumble::ScreenShare::sanitizeLimit(targetFps, Mumble::ScreenShare::DEFAULT_MAX_FPS,
 																Mumble::ScreenShare::HARD_MAX_FPS),
-							 Mumble::ScreenShare::DEFAULT_MAX_FPS);
+							 Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_FPS);
 	}
 
-	const QString qualityProfile = normalizeScreenShareQualityProfile(
-		qEnvironmentVariable("MUMBLE_SCREENSHARE_QUALITY_PROFILE", QStringLiteral("auto")));
+	const QString requestedQualityProfile = options.qualityProfile.trimmed().isEmpty()
+												? qEnvironmentVariable("MUMBLE_SCREENSHARE_QUALITY_PROFILE",
+																	   QStringLiteral("auto"))
+												: options.qualityProfile;
+	const QString qualityProfile = normalizeScreenShareQualityProfile(requestedQualityProfile);
 	if (qualityProfile == QLatin1String("data_saver")) {
 		targetWidth  = std::min(targetWidth, 960U);
 		targetHeight = std::min(targetHeight, 540U);
@@ -597,6 +605,10 @@ void ScreenShareManager::requestStartChannelShare(unsigned int channelID, const 
 		u8(requestedCaptureSource.isEmpty() ? QStringLiteral("primary-monitor") : requestedCaptureSource));
 	if (options.captureAudio) {
 		msg.set_capture_audio(true);
+		const QString requestedAudioSource = options.audioSourceID.trimmed();
+		if (!requestedAudioSource.isEmpty()) {
+			msg.set_audio_source_id(u8(requestedAudioSource));
+		}
 	}
 	msg.set_requested_min_bitrate_kbps(std::min(bitratePolicy.minKbps, requestedBitrate));
 	msg.set_requested_max_bitrate_kbps(qMax(bitratePolicy.maxKbps, requestedBitrate));
@@ -769,6 +781,9 @@ ScreenShareSession ScreenShareManager::sessionFromState(const MumbleProto::Scree
 	}
 	if (msg.has_capture_audio()) {
 		session.captureAudio = msg.capture_audio();
+	}
+	if (msg.has_audio_source_id()) {
+		session.audioSourceID = u8(msg.audio_source_id()).trimmed();
 	}
 	if (msg.has_min_bitrate_kbps()) {
 		session.minBitrateKbps = msg.min_bitrate_kbps();
@@ -1024,13 +1039,9 @@ void ScreenShareManager::handleInAppRelayFailure(const QString &streamID, const 
 	}
 
 	QString errorMessage;
-	qint64 processID                 = 0;
-	ScreenShareSession helperSession = session;
-	if (!publish && m_externalViewAudioMuted.contains(streamID)) {
-		helperSession.captureAudio = false;
-	}
-	const bool started = publish ? m_helperClient->startPublish(helperSession, &errorMessage, &processID)
-								 : m_helperClient->startView(helperSession, &errorMessage, &processID);
+	qint64 processID = 0;
+	const bool started = publish ? m_helperClient->startPublish(session, &errorMessage, &processID)
+								 : m_helperClient->startView(session, &errorMessage, &processID);
 	if (started) {
 		m_inAppPublishSessionIDs.remove(streamID);
 		m_inAppViewSessionIDs.remove(streamID);
@@ -1067,13 +1078,9 @@ void ScreenShareManager::handleInAppRelayFailure(const QString &streamID, const 
 
 bool ScreenShareManager::restartExternalViewSession(const ScreenShareSession &session) {
 	QString errorMessage;
-	qint64 processID                 = 0;
-	ScreenShareSession helperSession = session;
-	if (m_externalViewAudioMuted.contains(session.streamID)) {
-		helperSession.captureAudio = false;
-	}
+	qint64 processID = 0;
 
-	if (m_helperClient->startView(helperSession, &errorMessage, &processID)) {
+	if (m_helperClient->startView(session, &errorMessage, &processID)) {
 		m_activeViewSessions.insert(session.streamID);
 		m_pausedExternalViewSessions.remove(session.streamID);
 		m_externalViewProcessIDs.insert(session.streamID, processID);
@@ -1116,9 +1123,9 @@ void ScreenShareManager::showExternalViewWindow(const ScreenShareSession &sessio
 		host->updateSession(session);
 	}
 
+	host->setProcessID(processID);
 	host->setAudioMuted(m_externalViewAudioMuted.contains(session.streamID));
 	host->setPaused(m_pausedExternalViewSessions.contains(session.streamID));
-	host->setProcessID(processID);
 	if (host->isMinimized()) {
 		host->showNormal();
 	} else {
@@ -1219,12 +1226,8 @@ void ScreenShareManager::startLocalViewSession(const ScreenShareSession &session
 #endif
 
 	QString errorMessage;
-	qint64 processID                 = 0;
-	ScreenShareSession helperSession = session;
-	if (m_externalViewAudioMuted.contains(session.streamID)) {
-		helperSession.captureAudio = false;
-	}
-	if (m_helperClient->startView(helperSession, &errorMessage, &processID)) {
+	qint64 processID = 0;
+	if (m_helperClient->startView(session, &errorMessage, &processID)) {
 		m_fallbackRuntimeSessions.remove(session.streamID);
 		m_activeViewSessions.insert(session.streamID);
 		m_externalViewProcessIDs.insert(session.streamID, processID);
@@ -1321,15 +1324,6 @@ void ScreenShareManager::setExternalViewAudioMuted(const QString &streamID, cons
 	ExternalScreenShareWindowHost *host = m_externalViewWindows.value(streamID, nullptr);
 	if (host) {
 		host->setAudioMuted(muted);
-	}
-
-	if (!m_pausedExternalViewSessions.contains(streamID) && m_activeViewSessions.remove(streamID)) {
-		m_helperClient->stopView(streamID);
-		m_externalViewProcessIDs.remove(streamID);
-		if (host) {
-			host->setProcessID(0);
-		}
-		restartExternalViewSession(it.value());
 	}
 
 	emit sessionUpdated(streamID);

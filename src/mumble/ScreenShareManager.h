@@ -38,6 +38,7 @@ struct ScreenShareSession {
 	QString qualityProfile = QStringLiteral("auto");
 	QString captureSourceID;
 	bool captureAudio = false;
+	QString audioSourceID;
 	unsigned int minBitrateKbps = 0;
 	unsigned int maxBitrateKbps = 0;
 };
@@ -45,6 +46,11 @@ struct ScreenShareSession {
 struct ScreenShareStartOptions {
 	QString captureSourceID;
 	bool captureAudio = false;
+	QString audioSourceID;
+	unsigned int requestedWidth  = 0;
+	unsigned int requestedHeight = 0;
+	unsigned int requestedFps    = 0;
+	QString qualityProfile;
 };
 
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)

@@ -52,8 +52,10 @@ private slots:
 	void handleAudioButton();
 	void handlePauseButton();
 	void pollForExternalWindow();
+	void retryApplyExternalAudioMute();
 
 private:
+	void applyExternalAudioMute(bool allowRetry);
 	QString ownerLabel() const;
 	QString windowTitle() const;
 	void applyTheme();
@@ -77,8 +79,10 @@ private:
 	QToolButton *m_audioButton  = nullptr;
 	QToolButton *m_stopButton   = nullptr;
 	QTimer *m_embedPollTimer    = nullptr;
+	QTimer *m_audioMuteTimer    = nullptr;
 	qint64 m_processID          = 0;
 	quintptr m_externalWindowID = 0;
+	int m_audioMuteAttempts     = 0;
 	bool m_audioMuted           = false;
 	bool m_applyingTheme        = false;
 	bool m_closingFromManager   = false;
