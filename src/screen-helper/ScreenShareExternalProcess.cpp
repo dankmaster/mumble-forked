@@ -25,6 +25,7 @@
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
 
+#include <array>
 #include <limits>
 #include <optional>
 
@@ -943,6 +944,84 @@ QString liveKitIdentityFromToken(const QJsonObject &plan, const QString &fallbac
 	return QStringLiteral("mumble-%1-%2").arg(fallbackRole, streamID.isEmpty() ? QStringLiteral("screen-share") : streamID);
 }
 
+#ifdef Q_OS_WIN
+QString processBaseNameForWindow(HWND window) {
+	DWORD processID = 0;
+	GetWindowThreadProcessId(window, &processID);
+	if (processID == 0) {
+		return QString();
+	}
+
+	HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processID);
+	if (!process) {
+		return QString();
+	}
+
+	std::array< wchar_t, MAX_PATH > pathBuffer = {};
+	DWORD pathLength                           = static_cast< DWORD >(pathBuffer.size());
+	QString processName;
+	if (QueryFullProcessImageNameW(process, 0, pathBuffer.data(), &pathLength) && pathLength > 0) {
+		processName =
+			QFileInfo(QString::fromWCharArray(pathBuffer.data(), static_cast< int >(pathLength))).completeBaseName();
+	}
+
+	CloseHandle(process);
+	return processName.trimmed().toLower();
+}
+
+bool isChromiumBrowserProcess(const QString &processName) {
+	static const QStringList chromiumBrowsers = {
+		QStringLiteral("brave"),
+		QStringLiteral("chrome"),
+		QStringLiteral("chromium"),
+		QStringLiteral("msedge"),
+		QStringLiteral("opera"),
+		QStringLiteral("opera_gx"),
+		QStringLiteral("vivaldi"),
+	};
+
+	return chromiumBrowsers.contains(processName.trimmed().toLower());
+}
+
+bool extendedFrameBounds(HWND window, RECT *rect) {
+	if (!window || !rect) {
+		return false;
+	}
+
+	using DwmGetWindowAttributeFn = HRESULT(WINAPI *)(HWND, DWORD, PVOID, DWORD);
+	constexpr DWORD DwmExtendedFrameBoundsAttribute = 9;
+	static const HMODULE dwmapiModule               = LoadLibraryW(L"dwmapi.dll");
+	static const DwmGetWindowAttributeFn getWindowAttribute =
+		dwmapiModule
+			? reinterpret_cast< DwmGetWindowAttributeFn >(GetProcAddress(dwmapiModule, "DwmGetWindowAttribute"))
+			: nullptr;
+	if (!getWindowAttribute) {
+		return false;
+	}
+
+	RECT frameRect  = {};
+	const HRESULT hr = getWindowAttribute(window, DwmExtendedFrameBoundsAttribute, &frameRect, sizeof(frameRect));
+	if (FAILED(hr) || frameRect.right <= frameRect.left || frameRect.bottom <= frameRect.top) {
+		return false;
+	}
+
+	*rect = frameRect;
+	return true;
+}
+
+bool visibleWindowBounds(HWND window, RECT *rect) {
+	if (!window || !rect) {
+		return false;
+	}
+
+	if (extendedFrameBounds(window, rect)) {
+		return true;
+	}
+
+	return GetWindowRect(window, rect) && rect->right > rect->left && rect->bottom > rect->top;
+}
+#endif
+
 QString gstCaptureApiToken() {
 	const QString configured = qEnvironmentVariable("MUMBLE_SCREENSHARE_GST_CAPTURE_API").trimmed().toLower();
 	if (configured == QLatin1String("dxgi") || configured == QLatin1String("wgc")) {
@@ -962,6 +1041,56 @@ struct GStreamerCaptureSelection {
 	QStringList sourceProperties;
 	QStringList warnings;
 };
+
+#ifdef Q_OS_WIN
+bool selectBrowserMonitorCropCapture(HWND window, GStreamerCaptureSelection *selection) {
+	if (!window || !selection) {
+		return false;
+	}
+
+	const QString processName = processBaseNameForWindow(window);
+	if (!isChromiumBrowserProcess(processName)) {
+		return false;
+	}
+
+	RECT windowRect = {};
+	if (!visibleWindowBounds(window, &windowRect)) {
+		return false;
+	}
+
+	const HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+	if (!monitor) {
+		return false;
+	}
+
+	MONITORINFO monitorInfo = {};
+	monitorInfo.cbSize     = sizeof(monitorInfo);
+	if (!GetMonitorInfoW(monitor, &monitorInfo)) {
+		return false;
+	}
+
+	const LONG left   = qMax(windowRect.left, monitorInfo.rcMonitor.left);
+	const LONG top    = qMax(windowRect.top, monitorInfo.rcMonitor.top);
+	const LONG right  = qMin(windowRect.right, monitorInfo.rcMonitor.right);
+	const LONG bottom = qMin(windowRect.bottom, monitorInfo.rcMonitor.bottom);
+	if (right <= left || bottom <= top) {
+		return false;
+	}
+
+	const qulonglong monitorHandle = reinterpret_cast< qulonglong >(monitor);
+	const qulonglong windowHandle  = reinterpret_cast< qulonglong >(window);
+	selection->sourceProperties.append(QStringLiteral("monitor-handle=%1").arg(monitorHandle));
+	selection->sourceProperties.append(QStringLiteral("crop-x=%1").arg(left - monitorInfo.rcMonitor.left));
+	selection->sourceProperties.append(QStringLiteral("crop-y=%1").arg(top - monitorInfo.rcMonitor.top));
+	selection->sourceProperties.append(QStringLiteral("crop-width=%1").arg(right - left));
+	selection->sourceProperties.append(QStringLiteral("crop-height=%1").arg(bottom - top));
+	selection->selectedCaptureSource =
+		QStringLiteral("gstreamer-d3d11-%1-browser-window-crop-%2").arg(selection->captureApi).arg(windowHandle);
+	selection->warnings.append(QStringLiteral(
+		"Using monitor-cropped capture for a Chromium browser window so the active tab content is captured."));
+	return true;
+}
+#endif
 
 GStreamerCaptureSelection selectGStreamerCaptureSource(const QJsonObject &plan) {
 	GStreamerCaptureSelection selection;
@@ -1013,6 +1142,10 @@ GStreamerCaptureSelection selectGStreamerCaptureSource(const QJsonObject &plan) 
 			}
 		}
 		if (windowHandle != 0 && IsWindow(reinterpret_cast< HWND >(windowHandle))) {
+			if (selectBrowserMonitorCropCapture(reinterpret_cast< HWND >(windowHandle), &selection)) {
+				return selection;
+			}
+
 			selection.captureApi = QStringLiteral("wgc");
 			selection.sourceProperties.append(QStringLiteral("window-handle=%1").arg(windowHandle));
 			selection.sourceProperties.append(QStringLiteral("window-capture-mode=default"));
