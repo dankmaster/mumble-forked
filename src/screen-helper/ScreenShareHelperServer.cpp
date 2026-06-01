@@ -453,6 +453,9 @@ QJsonObject ScreenShareHelperServer::handleStartPublish(const QJsonObject &paylo
 	if (!launch.selectedCaptureSource.isEmpty()) {
 		session.payload.insert(QStringLiteral("active_capture_source"), launch.selectedCaptureSource);
 	}
+	if (launch.processID > 0) {
+		session.payload.insert(QStringLiteral("active_process_id"), QString::number(launch.processID));
+	}
 	session.payload.insert(QStringLiteral("actual_fps"), session.payload.value(QStringLiteral("fps")).toInt());
 	session.payload.insert(QStringLiteral("actual_bitrate_kbps"),
 						   session.payload.value(QStringLiteral("bitrate_kbps")).toInt());
@@ -523,6 +526,9 @@ QJsonObject ScreenShareHelperServer::handleStartView(const QJsonObject &payload)
 	if (!launch.selectedRenderer.isEmpty()) {
 		session.payload.insert(QStringLiteral("active_renderer_backend"), launch.selectedRenderer);
 	}
+	if (launch.processID > 0) {
+		session.payload.insert(QStringLiteral("active_process_id"), QString::number(launch.processID));
+	}
 	session.payload.insert(QStringLiteral("actual_fps"), session.payload.value(QStringLiteral("fps")).toInt());
 	session.payload.insert(QStringLiteral("actual_bitrate_kbps"),
 						   session.payload.value(QStringLiteral("bitrate_kbps")).toInt());
@@ -590,16 +596,20 @@ void ScreenShareHelperServer::logSessionPlanSummary(const QJsonObject &payload, 
 									  .trimmed();
 	const QString plannedCapture = payload.value(QStringLiteral("capture_backend")).toString().trimmed();
 	const QString captureSource = payload.value(QStringLiteral("active_capture_source")).toString().trimmed();
+	const bool captureAudio = payload.value(QStringLiteral("capture_audio")).toBool(false);
+	const QString audioSource = payload.value(QStringLiteral("audio_source_id")).toString().trimmed();
 	const QString executionMode = payload.value(QStringLiteral("execution_mode")).toString().trimmed();
 
 	qInfo().noquote() << QStringLiteral("ScreenShareHelper[%1:%2]: %3 summary role=%4 relay_scheme=%5 codec=%6 "
 										"planned_backend=%7 actual_backend=%8 planned_capture=%9 capture_source=%10 "
-										"execution_mode=%11")
+										"capture_audio=%11 audio_source=%12 execution_mode=%13")
 							 .arg(label, streamID, phase, role, relayScheme, codec,
 								  plannedBackend.isEmpty() ? QStringLiteral("-") : plannedBackend,
 								  actualBackend.isEmpty() ? QStringLiteral("-") : actualBackend,
 								  plannedCapture.isEmpty() ? QStringLiteral("-") : plannedCapture,
 								  captureSource.isEmpty() ? QStringLiteral("-") : captureSource,
+								  captureAudio ? QStringLiteral("true") : QStringLiteral("false"),
+								  audioSource.isEmpty() ? QStringLiteral("-") : audioSource,
 								  executionMode.isEmpty() ? QStringLiteral("-") : executionMode);
 }
 

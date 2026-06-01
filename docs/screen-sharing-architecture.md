@@ -114,9 +114,10 @@ Not reliable on this server:
 
 Practical expectation for a first target:
 
-- target `720p30` H.264 first
+- keep `720p30` H.264 as the safe default picker choice
 - use client-side bitrate adaptation and FPS-before-resolution degradation
-- treat `1080p60` as a later goal after uplink and client encode performance are measured
+- expose `720p`, `1080p`, and `1440p` at `30 FPS` or `60 FPS` when the server
+  and local runtime advertise those limits
 - assume bandwidth scales with viewers when using a relay, even if server CPU stays moderate
 
 ## Protocol Direction

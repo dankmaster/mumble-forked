@@ -253,6 +253,42 @@ function Invoke-WithProcessEnvironment {
 	}
 }
 
+function New-IsolatedHelperRuntimeDirectory {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$RepoRoot,
+
+		[Parameter(Mandatory = $true)]
+		[string]$SourceAppDir
+	)
+
+	$runtimeRoot = Join-Path $RepoRoot ".tmp\helper-runtime-checks"
+	New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
+
+	$runtimeName = "{0}-{1}" -f (Get-Date -Format "yyyyMMdd-HHmmss"), ([guid]::NewGuid().ToString("N").Substring(0, 8))
+	$runtimeDir = Join-Path $runtimeRoot $runtimeName
+	New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null
+	Copy-DirectoryContents -Source $SourceAppDir -Destination $runtimeDir
+
+	return $runtimeDir
+}
+
+function Remove-IsolatedHelperRuntimeDirectory {
+	param(
+		[string]$RuntimeDir
+	)
+
+	if ([string]::IsNullOrWhiteSpace($RuntimeDir) -or -not (Test-Path -LiteralPath $RuntimeDir)) {
+		return
+	}
+
+	try {
+		Remove-Item -LiteralPath $RuntimeDir -Recurse -Force
+	} catch {
+		Write-Warning "Leaving helper runtime check directory '$RuntimeDir' in place because it could not be removed: $($_.Exception.Message)"
+	}
+}
+
 function Invoke-ProcessWithTimeout {
 	param(
 		[Parameter(Mandatory = $true)]
@@ -1509,103 +1545,115 @@ try {
 		$artifactListPath = Join-Path $buildRoot "windows-client-artifacts.txt"
 
 		$helperAppDir = Split-Path -Parent $helper.FullName
-		$stagedGStreamerLaunchEnvironment = Get-StagedGStreamerLaunchEnvironment -AppDir $helperAppDir
-		if ($RequireGStreamerRuntime -and -not $stagedGStreamerLaunchEnvironment.ContainsKey("MUMBLE_SCREENSHARE_GST_LAUNCH_PATH")) {
-			throw "Packaged GStreamer runtime was not found next to '$($helper.FullName)'."
-		}
+		$helperRuntimeDir = $null
+		try {
+			$helperRuntimeDir = New-IsolatedHelperRuntimeDirectory -RepoRoot $repoRoot -SourceAppDir $helperAppDir
+			$runtimeHelperPath = Join-Path $helperRuntimeDir "mumble-screen-helper.exe"
+			if (-not (Test-Path -LiteralPath $runtimeHelperPath)) {
+				throw "Unable to locate mumble-screen-helper.exe in isolated runtime check directory '$helperRuntimeDir'."
+			}
+			Write-Host "Verifying screen-share helper runtime from isolated snapshot '$helperRuntimeDir'."
 
-		Invoke-WithProcessEnvironment -Variables $stagedGStreamerLaunchEnvironment -ScriptBlock {
-			$capabilityProbe = Invoke-ProcessWithTimeout -FilePath $helper.FullName `
-				-Arguments @("--diagnostics-log-file", $logPath, "--print-capabilities-json") `
-				-Description "Helper capability probe" `
-				-TimeoutSeconds 180
-			if (-not [string]::IsNullOrWhiteSpace($capabilityProbe.StdErr)) {
-				Write-Host $capabilityProbe.StdErr.TrimEnd()
-			}
-			if ($capabilityProbe.ExitCode -ne 0) {
-				throw "Helper capability probe failed with exit code $($capabilityProbe.ExitCode)."
-			}
-			$capabilitiesJson = $capabilityProbe.StdOut
-			Set-Content -LiteralPath $capabilitiesPath -Value $capabilitiesJson -NoNewline
-
-			$capabilitiesEnvelope = Get-Content -LiteralPath $capabilitiesPath -Raw | ConvertFrom-Json
-			$capabilities = if (Test-ObjectHasProperty -Object $capabilitiesEnvelope -Name "payload") {
-				$capabilitiesEnvelope.payload
-			} else {
-				$capabilitiesEnvelope
-			}
-			$runtimeSupport = if (Test-ObjectHasProperty -Object $capabilities -Name "runtime_support") {
-				$capabilities.runtime_support
-			} else {
-				$capabilities
+			$stagedGStreamerLaunchEnvironment = Get-StagedGStreamerLaunchEnvironment -AppDir $helperRuntimeDir
+			if ($RequireGStreamerRuntime -and -not $stagedGStreamerLaunchEnvironment.ContainsKey("MUMBLE_SCREENSHARE_GST_LAUNCH_PATH")) {
+				throw "Packaged GStreamer runtime was not found next to '$runtimeHelperPath'."
 			}
 
-			if (-not $runtimeSupport.ffmpeg_available) {
-				throw "Helper runtime probe reports ffmpeg_available=false."
-			}
-			if (-not $capabilities.capture_supported) {
-				throw "Helper runtime probe reports capture_supported=false."
-			}
-			if (-not ($runtimeSupport.h264_mf_available -or $runtimeSupport.h264_qsv_available -or $runtimeSupport.libx264_available)) {
-				throw "Helper runtime probe found no usable H.264 encoder."
-			}
-			if ($RequireGStreamerRuntime) {
-				if (-not $runtimeSupport.gstreamer_available) {
-					throw "Helper runtime probe reports gstreamer_available=false."
+			Invoke-WithProcessEnvironment -Variables $stagedGStreamerLaunchEnvironment -ScriptBlock {
+				$capabilityProbe = Invoke-ProcessWithTimeout -FilePath $runtimeHelperPath `
+					-Arguments @("--diagnostics-log-file", $logPath, "--print-capabilities-json") `
+					-Description "Helper capability probe" `
+					-TimeoutSeconds 180
+				if (-not [string]::IsNullOrWhiteSpace($capabilityProbe.StdErr)) {
+					Write-Host $capabilityProbe.StdErr.TrimEnd()
 				}
-				if (-not $runtimeSupport.gstreamer_livekit_publish_available) {
-					$missing = if (Test-ObjectHasProperty -Object $runtimeSupport -Name "gstreamer_missing_elements") {
-						($runtimeSupport.gstreamer_missing_elements -join ", ")
-					} else {
-						"unknown"
+				if ($capabilityProbe.ExitCode -ne 0) {
+					throw "Helper capability probe failed with exit code $($capabilityProbe.ExitCode)."
+				}
+				$capabilitiesJson = $capabilityProbe.StdOut
+				Set-Content -LiteralPath $capabilitiesPath -Value $capabilitiesJson -NoNewline
+
+				$capabilitiesEnvelope = Get-Content -LiteralPath $capabilitiesPath -Raw | ConvertFrom-Json
+				$capabilities = if (Test-ObjectHasProperty -Object $capabilitiesEnvelope -Name "payload") {
+					$capabilitiesEnvelope.payload
+				} else {
+					$capabilitiesEnvelope
+				}
+				$runtimeSupport = if (Test-ObjectHasProperty -Object $capabilities -Name "runtime_support") {
+					$capabilities.runtime_support
+				} else {
+					$capabilities
+				}
+
+				if (-not $runtimeSupport.ffmpeg_available) {
+					throw "Helper runtime probe reports ffmpeg_available=false."
+				}
+				if (-not $capabilities.capture_supported) {
+					throw "Helper runtime probe reports capture_supported=false."
+				}
+				if (-not ($runtimeSupport.h264_mf_available -or $runtimeSupport.h264_qsv_available -or $runtimeSupport.libx264_available)) {
+					throw "Helper runtime probe found no usable H.264 encoder."
+				}
+				if ($RequireGStreamerRuntime) {
+					if (-not $runtimeSupport.gstreamer_available) {
+						throw "Helper runtime probe reports gstreamer_available=false."
 					}
-					throw "Helper runtime probe reports gstreamer_livekit_publish_available=false. Missing elements: $missing"
-				}
-				if (-not $runtimeSupport.gstreamer_livekit_view_available) {
-					$missing = if (Test-ObjectHasProperty -Object $runtimeSupport -Name "gstreamer_missing_elements") {
-						($runtimeSupport.gstreamer_missing_elements -join ", ")
-					} else {
-						"unknown"
+					if (-not $runtimeSupport.gstreamer_livekit_publish_available) {
+						$missing = if (Test-ObjectHasProperty -Object $runtimeSupport -Name "gstreamer_missing_elements") {
+							($runtimeSupport.gstreamer_missing_elements -join ", ")
+						} else {
+							"unknown"
+						}
+						throw "Helper runtime probe reports gstreamer_livekit_publish_available=false. Missing elements: $missing"
 					}
-					throw "Helper runtime probe reports gstreamer_livekit_view_available=false. Missing elements: $missing"
+					if (-not $runtimeSupport.gstreamer_livekit_view_available) {
+						$missing = if (Test-ObjectHasProperty -Object $runtimeSupport -Name "gstreamer_missing_elements") {
+							($runtimeSupport.gstreamer_missing_elements -join ", ")
+						} else {
+							"unknown"
+						}
+						throw "Helper runtime probe reports gstreamer_livekit_view_available=false. Missing elements: $missing"
+					}
+				}
+
+				$selfTestProbe = Invoke-ProcessWithTimeout -FilePath $runtimeHelperPath `
+					-Arguments @("--diagnostics-log-file", $logPath, "--self-test") `
+					-Description "Helper self-test" `
+					-TimeoutSeconds 180
+				if (-not [string]::IsNullOrWhiteSpace($selfTestProbe.StdErr)) {
+					Write-Host $selfTestProbe.StdErr.TrimEnd()
+				}
+				if ($selfTestProbe.ExitCode -ne 0) {
+					throw "Helper self-test failed with exit code $($selfTestProbe.ExitCode)."
+				}
+				$selfTestJson = $selfTestProbe.StdOut
+				Set-Content -LiteralPath $selfTestPath -Value $selfTestJson -NoNewline
+
+				$selfTestEnvelope = Get-Content -LiteralPath $selfTestPath -Raw | ConvertFrom-Json
+				$selfTest = if (Test-ObjectHasProperty -Object $selfTestEnvelope -Name "payload") {
+					$selfTestEnvelope.payload
+				} else {
+					$selfTestEnvelope
+				}
+
+				$selfTestSucceeded = $false
+				if (Test-ObjectHasProperty -Object $selfTestEnvelope -Name "ok") {
+					$selfTestSucceeded = [bool]$selfTestEnvelope.ok
+				} elseif (Test-ObjectHasProperty -Object $selfTestEnvelope -Name "success") {
+					$selfTestSucceeded = [bool]$selfTestEnvelope.success
+				} elseif (Test-ObjectHasProperty -Object $selfTest -Name "success") {
+					$selfTestSucceeded = [bool]$selfTest.success
+				}
+
+				if (-not $selfTestSucceeded) {
+					throw "Helper self-test reported success=false."
+				}
+				if (-not $selfTest.output_file) {
+					throw "Helper self-test did not report an output_file."
 				}
 			}
-
-			$selfTestProbe = Invoke-ProcessWithTimeout -FilePath $helper.FullName `
-				-Arguments @("--diagnostics-log-file", $logPath, "--self-test") `
-				-Description "Helper self-test" `
-				-TimeoutSeconds 180
-			if (-not [string]::IsNullOrWhiteSpace($selfTestProbe.StdErr)) {
-				Write-Host $selfTestProbe.StdErr.TrimEnd()
-			}
-			if ($selfTestProbe.ExitCode -ne 0) {
-				throw "Helper self-test failed with exit code $($selfTestProbe.ExitCode)."
-			}
-			$selfTestJson = $selfTestProbe.StdOut
-			Set-Content -LiteralPath $selfTestPath -Value $selfTestJson -NoNewline
-
-			$selfTestEnvelope = Get-Content -LiteralPath $selfTestPath -Raw | ConvertFrom-Json
-			$selfTest = if (Test-ObjectHasProperty -Object $selfTestEnvelope -Name "payload") {
-				$selfTestEnvelope.payload
-			} else {
-				$selfTestEnvelope
-			}
-
-			$selfTestSucceeded = $false
-			if (Test-ObjectHasProperty -Object $selfTestEnvelope -Name "ok") {
-				$selfTestSucceeded = [bool]$selfTestEnvelope.ok
-			} elseif (Test-ObjectHasProperty -Object $selfTestEnvelope -Name "success") {
-				$selfTestSucceeded = [bool]$selfTestEnvelope.success
-			} elseif (Test-ObjectHasProperty -Object $selfTest -Name "success") {
-				$selfTestSucceeded = [bool]$selfTest.success
-			}
-
-			if (-not $selfTestSucceeded) {
-				throw "Helper self-test reported success=false."
-			}
-			if (-not $selfTest.output_file) {
-				throw "Helper self-test did not report an output_file."
-			}
+		} finally {
+			Remove-IsolatedHelperRuntimeDirectory -RuntimeDir $helperRuntimeDir
 		}
 
 		$artifacts = Get-RepoArtifactPaths -BuildRoot $buildRoot

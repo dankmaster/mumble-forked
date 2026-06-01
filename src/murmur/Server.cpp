@@ -1422,14 +1422,21 @@ QString Server::liveKitScreenShareTokenForRecipient(const ScreenShareStream &str
 	QJsonObject videoGrant;
 	videoGrant.insert(QStringLiteral("room"), stream.qsRelayRoomID);
 	videoGrant.insert(QStringLiteral("roomJoin"), true);
-	videoGrant.insert(QStringLiteral("canPublish"), relayRole == MumbleProto::ScreenShareRelayRolePublisher);
+	const bool publisherRole = relayRole == MumbleProto::ScreenShareRelayRolePublisher;
+	videoGrant.insert(QStringLiteral("canPublish"), publisherRole);
 	videoGrant.insert(QStringLiteral("canPublishData"), false);
-	videoGrant.insert(QStringLiteral("canSubscribe"), relayRole == MumbleProto::ScreenShareRelayRoleViewer);
-	if (relayRole == MumbleProto::ScreenShareRelayRolePublisher) {
+	// livekitwebrtcsink expects producer tokens to be publish-only.
+	videoGrant.insert(QStringLiteral("canSubscribe"), !publisherRole);
+	if (publisherRole) {
 		QJsonArray publishSources;
 		publishSources.push_back(QStringLiteral("camera"));
 		publishSources.push_back(QStringLiteral("screen_share"));
-		publishSources.push_back(QStringLiteral("screen_share_audio"));
+		if (stream.bCaptureAudio) {
+			// livekitwebrtcsink currently publishes its audio pad as a regular
+			// microphone source even when it is fed by WASAPI loopback.
+			publishSources.push_back(QStringLiteral("microphone"));
+			publishSources.push_back(QStringLiteral("screen_share_audio"));
+		}
 		videoGrant.insert(QStringLiteral("canPublishSources"), publishSources);
 	}
 
@@ -1572,6 +1579,9 @@ void Server::populateScreenShareStateMessage(MumbleProto::ScreenShareState &msg,
 	}
 	if (stream.bCaptureAudio) {
 		msg.set_capture_audio(true);
+		if (!stream.qsAudioSourceID.isEmpty()) {
+			msg.set_audio_source_id(u8(stream.qsAudioSourceID));
+		}
 	}
 	if (stream.uiMinBitrateKbps > 0) {
 		msg.set_min_bitrate_kbps(stream.uiMinBitrateKbps);

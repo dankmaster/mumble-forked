@@ -67,7 +67,7 @@ community feature set on top. The long-form inventory lives in
 | Modern client shell | Active fork feature | WebEngine-based chat/navigator shell with persistent rooms, compact message controls, rich cards, room-aware composer state, theme/density variants, Modern dialogs, and a classic fallback path. |
 | Finance and stonks | Active server feature | Cashtag extraction, Yahoo Finance quote cards with chart data, provider links, and a scoped `#stonks` room with scores, leaderboards, and follows. |
 | Watch together | Protocol/server foundation | Capability-gated room media-session messages for synchronized direct media or YouTube playback; client UI is still a future layer. |
-| Screen sharing | Experimental | Capability-gated signaling, server policy/configuration, external helper process, relay/WebRTC scaffolding, and diagnostic logging. |
+| Screen sharing | Experimental | Capability-gated signaling, server policy/configuration, external helper process, GStreamer LiveKit publish/view, and diagnostic logging. |
 | Speech cleanup | Experimental | RNNoise, DTLN, and DeepFilterNet model paths plus local benchmark/smoke-test support for packaged Windows builds. |
 | Windows fork distribution | Active fork tooling | Shared/WebEngine build lane, unsigned convenience MSI release, generated changelog, and update-manifest support for `mumble-forked`. |
 | Fork identity controls | Active fork utility | Hidden advertised release/OS overrides and update-check environment overrides for controlled community deployments. |
@@ -75,7 +75,6 @@ community feature set on top. The long-form inventory lives in
 ## Repository Map
 
 - [`src/`](src/) contains the client, server, protocol, helper, and test code.
-- [`relay-webapp/`](relay-webapp/) contains the experimental browser relay shell for screen sharing.
 - [`docs/fork-features.md`](docs/fork-features.md) lists the fork-specific feature surface.
 - [`docs/fork-extension-architecture.md`](docs/fork-extension-architecture.md) covers the feature-gating model for fork experiments.
 - [`docs/chat-architecture.md`](docs/chat-architecture.md) describes the fork-specific persistent chat direction.

@@ -19,9 +19,10 @@ class TestScreenShare : public QObject {
 private slots:
 	void parsesAndFormatsVp8CodecPreferences();
 	void keepsDirectDefaultH264First();
-	void usesVp8ForBrowserWebRtcRuntime();
+	void keepsWebRtcRelayH264First();
 	void negotiatesWebRtcRelayWithLegacyFallback();
 	void recommendsVp8Bitrate();
+	void exposesPublisherQualityCeiling();
 };
 
 void TestScreenShare::parsesAndFormatsVp8CodecPreferences() {
@@ -44,9 +45,7 @@ void TestScreenShare::keepsDirectDefaultH264First() {
 	QVERIFY(codecs.contains(codecValue(MumbleProto::ScreenShareCodecVP8)));
 }
 
-void TestScreenShare::usesVp8ForBrowserWebRtcRuntime() {
-	QCOMPARE(Mumble::ScreenShare::browserWebRtcCodecPreferenceList(),
-			 (QList< int >{ codecValue(MumbleProto::ScreenShareCodecVP8) }));
+void TestScreenShare::keepsWebRtcRelayH264First() {
 	QCOMPARE(
 		Mumble::ScreenShare::webRtcRelayCodecPreferenceList(),
 		(QList< int >{ codecValue(MumbleProto::ScreenShareCodecH264), codecValue(MumbleProto::ScreenShareCodecAV1),
@@ -79,6 +78,15 @@ void TestScreenShare::recommendsVp8Bitrate() {
 
 	QCOMPARE(h264Bitrate, 4000U);
 	QCOMPARE(vp8Bitrate, 4200U);
+}
+
+void TestScreenShare::exposesPublisherQualityCeiling() {
+	QCOMPARE(Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH, 2560U);
+	QCOMPARE(Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT, 1440U);
+	QCOMPARE(Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_FPS, 60U);
+	QVERIFY(Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH >= Mumble::ScreenShare::DEFAULT_MAX_WIDTH);
+	QVERIFY(Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT >= Mumble::ScreenShare::DEFAULT_MAX_HEIGHT);
+	QVERIFY(Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_FPS >= Mumble::ScreenShare::DEFAULT_MAX_FPS);
 }
 
 QTEST_MAIN(TestScreenShare)

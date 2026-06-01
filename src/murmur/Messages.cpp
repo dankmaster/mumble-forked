@@ -8940,6 +8940,8 @@ void Server::msgScreenShareCreate(ServerUser *uSource, MumbleProto::ScreenShareC
 		sanitizeScreenShareQualityProfile(msg.has_quality_profile() ? u8(msg.quality_profile()) : QString());
 	stream.qsCaptureSourceID = msg.has_capture_source_id() ? u8(msg.capture_source_id()).trimmed() : QString();
 	stream.bCaptureAudio     = msg.has_capture_audio() && msg.capture_audio();
+	stream.qsAudioSourceID =
+		stream.bCaptureAudio && msg.has_audio_source_id() ? u8(msg.audio_source_id()).trimmed() : QString();
 	const unsigned int requestedMinBitrate =
 		msg.has_requested_min_bitrate_kbps() ? msg.requested_min_bitrate_kbps() : 0;
 	const unsigned int requestedMaxBitrate =
@@ -8965,7 +8967,7 @@ void Server::msgScreenShareCreate(ServerUser *uSource, MumbleProto::ScreenShareC
 	sendScreenShareStateToAudience(storedStream);
 	screenShareDiagnosticLog(QStringLiteral("Created stream %1 owner=%2 channel=%3 codec=%4 requested_codecs=%5 "
 											"preferred_codecs=%6 size=%7x%8@%9 bitrate=%10 min=%11 max=%12 "
-											"profile=%13 relay=%14 source=%15 audio=%16")
+											"profile=%13 relay=%14 source=%15 audio=%16 audio_source=%17")
 								 .arg(storedStream.qsStreamID)
 								 .arg(storedStream.uiOwnerSession)
 								 .arg(storedStream.uiScopeID)
@@ -8982,7 +8984,9 @@ void Server::msgScreenShareCreate(ServerUser *uSource, MumbleProto::ScreenShareC
 								 .arg(Mumble::ScreenShare::relayTransportToConfigToken(storedStream.relayTransport))
 								 .arg(storedStream.qsCaptureSourceID.isEmpty() ? QStringLiteral("-")
 																			   : storedStream.qsCaptureSourceID)
-								 .arg(storedStream.bCaptureAudio ? QStringLiteral("1") : QStringLiteral("0")));
+								 .arg(storedStream.bCaptureAudio ? QStringLiteral("1") : QStringLiteral("0"))
+								 .arg(storedStream.qsAudioSourceID.isEmpty() ? QStringLiteral("-")
+																			 : storedStream.qsAudioSourceID));
 	log(uSource, QString::fromLatin1("Started screen share %1 (%2 %3x%4@%5 %6 kbps)")
 					 .arg(storedStream.qsStreamID)
 					 .arg(Mumble::ScreenShare::codecToConfigToken(storedStream.codec))

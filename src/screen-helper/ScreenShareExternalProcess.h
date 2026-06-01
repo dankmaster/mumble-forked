@@ -17,15 +17,12 @@ class ScreenShareExternalProcess {
 public:
 	struct RuntimeSupport {
 		QString ffmpegPath;
-		QString ffplayPath;
-		QString gstLaunchPath;
-		QString gstInspectPath;
-		QString gstreamerVersion;
-		QString edgePath;
-		QString chromePath;
-		QString firefoxPath;
-		bool ffmpegAvailable           = false;
-		bool ffplayAvailable           = false;
+	QString ffplayPath;
+	QString gstLaunchPath;
+	QString gstInspectPath;
+	QString gstreamerVersion;
+	bool ffmpegAvailable           = false;
+	bool ffplayAvailable           = false;
 		bool gstLaunchAvailable        = false;
 		bool gstInspectAvailable       = false;
 		bool gstreamerAvailable        = false;
@@ -51,8 +48,14 @@ public:
 		bool gstDecodeBinAvailable            = false;
 		bool gstAutoVideoSinkAvailable        = false;
 		bool gstAutoAudioSinkAvailable        = false;
+		bool gstD3DVideoSinkAvailable         = false;
 		bool gstD3D11VideoSinkAvailable       = false;
 		bool gstFakeSinkAvailable             = false;
+		bool gstAvDecH264Available            = false;
+		bool gstOpenH264DecAvailable          = false;
+		bool gstRawLiveKitViewerAvailable     = false;
+		bool gstEncodedH264ViewerAvailable    = false;
+		bool gstDecodeBinViewerAvailable      = false;
 		QStringList missingGStreamerElements;
 		bool graphicalSessionAvailable = false;
 		bool x11GrabAvailable          = false;
@@ -79,13 +82,9 @@ public:
 		bool libVpxVp8Available        = false;
 		bool libVpxVp9Available        = false;
 		bool fileProtocolAvailable     = false;
-		bool rtmpProtocolAvailable     = false;
-		bool rtmpsProtocolAvailable    = false;
-		bool edgeAvailable             = false;
-		bool chromeAvailable           = false;
-		bool firefoxAvailable          = false;
-		bool browserWebRtcAvailable    = false;
-	};
+	bool rtmpProtocolAvailable     = false;
+	bool rtmpsProtocolAvailable    = false;
+};
 
 	struct LaunchResult {
 		bool started  = false;
@@ -98,6 +97,7 @@ public:
 		QString selectedRenderer;
 		QString program;
 		QStringList warnings;
+		qint64 processID = 0;
 		QProcess *process = nullptr;
 	};
 

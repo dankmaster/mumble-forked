@@ -25,6 +25,8 @@
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
 
+#include <array>
+#include <limits>
 #include <optional>
 
 namespace {
@@ -314,202 +316,6 @@ QString preferredExecutablePath(const char *envName, const QStringList &candidat
 	}
 
 	return findExecutableAny(candidates);
-}
-
-#ifdef Q_OS_WIN
-QString existingWindowsBrowserPath(const QStringList &relativePaths) {
-	QStringList roots;
-	for (const char *envName : { "ProgramFiles", "ProgramFiles(x86)", "LocalAppData" }) {
-		const QString root = qEnvironmentVariable(envName).trimmed();
-		if (!root.isEmpty() && !roots.contains(root)) {
-			roots.append(root);
-		}
-	}
-
-	for (const QString &root : roots) {
-		for (const QString &relativePath : relativePaths) {
-			const QString candidate = QDir(root).filePath(relativePath);
-			if (QFileInfo(candidate).isExecutable()) {
-				return candidate;
-			}
-		}
-	}
-
-	return QString();
-}
-#endif
-
-QString preferredBrowserPath(const ScreenShareExternalProcess::RuntimeSupport &support, QString *browserID = nullptr) {
-	if (support.edgeAvailable) {
-		if (browserID) {
-			*browserID = QStringLiteral("edge");
-		}
-		return support.edgePath;
-	}
-	if (support.chromeAvailable) {
-		if (browserID) {
-			*browserID = QStringLiteral("chrome");
-		}
-		return support.chromePath;
-	}
-	if (support.firefoxAvailable) {
-		if (browserID) {
-			*browserID = QStringLiteral("firefox");
-		}
-		return support.firefoxPath;
-	}
-
-	if (browserID) {
-		browserID->clear();
-	}
-	return QString();
-}
-
-QString browserProfileDirectory(const QJsonObject &plan, const bool publish, const QString &browserID) {
-	const QString streamID          = plan.value(QStringLiteral("stream_id")).toString().trimmed();
-	const QString sanitizedStreamID = streamID.isEmpty() ? QStringLiteral("screen-share") : sanitizeRoomToken(streamID);
-	QString tempBase                = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
-	if (tempBase.trimmed().isEmpty()) {
-		tempBase = QDir::tempPath();
-	}
-
-	return QDir(tempBase).filePath(
-		QStringLiteral("mumble-screen-share/%1/%2-%3")
-			.arg(browserID, publish ? QStringLiteral("publish") : QStringLiteral("view"), sanitizedStreamID));
-}
-
-QString browserLaunchUrl(const QJsonObject &plan, QString *errorMessage, QStringList *warnings) {
-	const QString relayUrl = Mumble::ScreenShare::normalizeRelayUrl(plan.value(QStringLiteral("relay_url")).toString());
-	if (relayUrl.isEmpty()) {
-		if (errorMessage) {
-			*errorMessage = QStringLiteral("Missing or invalid relay_url.");
-		}
-		return QString();
-	}
-
-	QUrl launchUrl(relayUrl);
-	const QString originalScheme = launchUrl.scheme().trimmed().toLower();
-	if (originalScheme == QLatin1String("wss")) {
-		launchUrl.setScheme(QStringLiteral("https"));
-		if (warnings) {
-			warnings->append(QStringLiteral("Launching the WebRTC relay UI over https while preserving the original "
-											"wss relay URL as signaling metadata."));
-		}
-	} else if (originalScheme == QLatin1String("ws")) {
-		launchUrl.setScheme(QStringLiteral("http"));
-		if (warnings) {
-			warnings->append(QStringLiteral("Launching the WebRTC relay UI over http while preserving the original ws "
-											"relay URL as signaling metadata."));
-		}
-	}
-
-	if (launchUrl.scheme().trimmed().isEmpty() || launchUrl.host().trimmed().isEmpty()) {
-		if (errorMessage) {
-			*errorMessage = QStringLiteral("Unable to derive a browser launch URL from relay_url.");
-		}
-		return QString();
-	}
-
-	QUrlQuery query(launchUrl);
-	auto appendQuery = [&](const QString &key, const QString &value) {
-		if (!value.trimmed().isEmpty()) {
-			query.addQueryItem(key, value);
-		}
-	};
-
-	appendQuery(QStringLiteral("mumble_screen_share"), QStringLiteral("1"));
-	appendQuery(QStringLiteral("relay_url"), relayUrl);
-	appendQuery(QStringLiteral("relay_room_id"), plan.value(QStringLiteral("relay_room_id")).toString());
-	appendQuery(QStringLiteral("relay_session_id"), plan.value(QStringLiteral("relay_session_id")).toString());
-	appendQuery(QStringLiteral("stream_id"), plan.value(QStringLiteral("stream_id")).toString());
-	appendQuery(QStringLiteral("relay_role"), plan.value(QStringLiteral("relay_role_token")).toString());
-	appendQuery(QStringLiteral("codec"), plan.value(QStringLiteral("codec_token")).toString());
-	appendQuery(QStringLiteral("requested_codec"), plan.value(QStringLiteral("requested_codec_token")).toString());
-	appendQuery(QStringLiteral("transport"), plan.value(QStringLiteral("relay_transport_token")).toString());
-	appendQuery(QStringLiteral("width"), QString::number(qMax(0, plan.value(QStringLiteral("width")).toInt())));
-	appendQuery(QStringLiteral("height"), QString::number(qMax(0, plan.value(QStringLiteral("height")).toInt())));
-	appendQuery(QStringLiteral("fps"), QString::number(qMax(0, plan.value(QStringLiteral("fps")).toInt())));
-	appendQuery(QStringLiteral("bitrate_kbps"),
-				QString::number(qMax(0, plan.value(QStringLiteral("bitrate_kbps")).toInt())));
-	appendQuery(QStringLiteral("capture_source_id"), plan.value(QStringLiteral("capture_source_id")).toString());
-	const bool browserPublisherCaptureAudio =
-		plan.value(QStringLiteral("relay_contract_mode")).toString() == QLatin1String("browser-webrtc-runtime")
-		&& plan.value(QStringLiteral("relay_role_token")).toString() == QLatin1String("publisher");
-	if (browserPublisherCaptureAudio) {
-		const bool captureAudio = plan.value(QStringLiteral("capture_audio")).toBool(false);
-		appendQuery(QStringLiteral("capture_audio"), captureAudio ? QStringLiteral("1") : QStringLiteral("0"));
-		appendQuery(QStringLiteral("system_audio"), captureAudio ? QStringLiteral("include") : QStringLiteral("exclude"));
-		appendQuery(QStringLiteral("surface_switching"), QStringLiteral("include"));
-		appendQuery(QStringLiteral("self_browser_surface"), QStringLiteral("exclude"));
-	}
-	launchUrl.setQuery(query);
-	const QString relayToken = plan.value(QStringLiteral("relay_token")).toString().trimmed();
-	if (!relayToken.isEmpty()) {
-		QUrlQuery fragment;
-		fragment.addQueryItem(QStringLiteral("relay_token"), relayToken);
-		launchUrl.setFragment(fragment.toString(QUrl::FullyEncoded));
-	}
-	return launchUrl.toString(QUrl::FullyEncoded);
-}
-
-ScreenShareExternalProcess::LaunchResult
-	startBrowserWebRtcSession(const ScreenShareExternalProcess::RuntimeSupport &support, const QJsonObject &plan,
-							  QObject *parent, const bool publish) {
-	ScreenShareExternalProcess::LaunchResult launch;
-	if (!support.graphicalSessionAvailable) {
-		launch.errorMessage =
-			QStringLiteral("A graphical desktop session is required for the helper WebRTC browser runtime.");
-		return launch;
-	}
-
-	QString browserID;
-	const QString browserPath = preferredBrowserPath(support, &browserID);
-	if (browserPath.isEmpty()) {
-		launch.errorMessage = QStringLiteral("No supported browser runtime was found for WebRTC screen sharing.");
-		return launch;
-	}
-
-	QString launchUrlError;
-	QStringList warnings;
-	const QString launchUrl = browserLaunchUrl(plan, &launchUrlError, &warnings);
-	if (launchUrl.isEmpty()) {
-		launch.errorMessage = launchUrlError;
-		return launch;
-	}
-
-	const QString profileDir = browserProfileDirectory(plan, publish, browserID);
-	QDir(profileDir).removeRecursively();
-	QDir().mkpath(profileDir);
-
-	QStringList arguments;
-	if (browserID == QLatin1String("edge") || browserID == QLatin1String("chrome")) {
-		arguments << QStringLiteral("--new-window") << QStringLiteral("--disable-session-crashed-bubble")
-				  << QStringLiteral("--autoplay-policy=no-user-gesture-required")
-				  << QStringLiteral("--user-data-dir=%1").arg(profileDir) << QStringLiteral("--app=%1").arg(launchUrl);
-	} else if (browserID == QLatin1String("firefox")) {
-		arguments << QStringLiteral("-new-instance") << QStringLiteral("-profile") << profileDir
-				  << QStringLiteral("-new-window") << launchUrl;
-	} else {
-		launch.errorMessage = QStringLiteral("Unsupported browser runtime selected for WebRTC.");
-		return launch;
-	}
-
-	launch = startProcess(browserPath, arguments, parent,
-						  publish ? QStringLiteral("browser-webrtc-publish") : QStringLiteral("browser-webrtc-view"));
-	if (!launch.started) {
-		return launch;
-	}
-
-	launch.endpointUrl = launchUrl;
-	launch.warnings    = warnings;
-	if (publish) {
-		launch.selectedCaptureSource = QStringLiteral("browser-webrtc-%1").arg(browserID);
-		launch.selectedEncoder       = QStringLiteral("browser-webrtc");
-	} else {
-		launch.selectedRenderer = QStringLiteral("browser-webrtc-%1").arg(browserID);
-	}
-
-	return launch;
 }
 
 QString detectRenderNode() {
@@ -1138,6 +944,84 @@ QString liveKitIdentityFromToken(const QJsonObject &plan, const QString &fallbac
 	return QStringLiteral("mumble-%1-%2").arg(fallbackRole, streamID.isEmpty() ? QStringLiteral("screen-share") : streamID);
 }
 
+#ifdef Q_OS_WIN
+QString processBaseNameForWindow(HWND window) {
+	DWORD processID = 0;
+	GetWindowThreadProcessId(window, &processID);
+	if (processID == 0) {
+		return QString();
+	}
+
+	HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processID);
+	if (!process) {
+		return QString();
+	}
+
+	std::array< wchar_t, MAX_PATH > pathBuffer = {};
+	DWORD pathLength                           = static_cast< DWORD >(pathBuffer.size());
+	QString processName;
+	if (QueryFullProcessImageNameW(process, 0, pathBuffer.data(), &pathLength) && pathLength > 0) {
+		processName =
+			QFileInfo(QString::fromWCharArray(pathBuffer.data(), static_cast< int >(pathLength))).completeBaseName();
+	}
+
+	CloseHandle(process);
+	return processName.trimmed().toLower();
+}
+
+bool isChromiumBrowserProcess(const QString &processName) {
+	static const QStringList chromiumBrowsers = {
+		QStringLiteral("brave"),
+		QStringLiteral("chrome"),
+		QStringLiteral("chromium"),
+		QStringLiteral("msedge"),
+		QStringLiteral("opera"),
+		QStringLiteral("opera_gx"),
+		QStringLiteral("vivaldi"),
+	};
+
+	return chromiumBrowsers.contains(processName.trimmed().toLower());
+}
+
+bool extendedFrameBounds(HWND window, RECT *rect) {
+	if (!window || !rect) {
+		return false;
+	}
+
+	using DwmGetWindowAttributeFn = HRESULT(WINAPI *)(HWND, DWORD, PVOID, DWORD);
+	constexpr DWORD DwmExtendedFrameBoundsAttribute = 9;
+	static const HMODULE dwmapiModule               = LoadLibraryW(L"dwmapi.dll");
+	static const DwmGetWindowAttributeFn getWindowAttribute =
+		dwmapiModule
+			? reinterpret_cast< DwmGetWindowAttributeFn >(GetProcAddress(dwmapiModule, "DwmGetWindowAttribute"))
+			: nullptr;
+	if (!getWindowAttribute) {
+		return false;
+	}
+
+	RECT frameRect  = {};
+	const HRESULT hr = getWindowAttribute(window, DwmExtendedFrameBoundsAttribute, &frameRect, sizeof(frameRect));
+	if (FAILED(hr) || frameRect.right <= frameRect.left || frameRect.bottom <= frameRect.top) {
+		return false;
+	}
+
+	*rect = frameRect;
+	return true;
+}
+
+bool visibleWindowBounds(HWND window, RECT *rect) {
+	if (!window || !rect) {
+		return false;
+	}
+
+	if (extendedFrameBounds(window, rect)) {
+		return true;
+	}
+
+	return GetWindowRect(window, rect) && rect->right > rect->left && rect->bottom > rect->top;
+}
+#endif
+
 QString gstCaptureApiToken() {
 	const QString configured = qEnvironmentVariable("MUMBLE_SCREENSHARE_GST_CAPTURE_API").trimmed().toLower();
 	if (configured == QLatin1String("dxgi") || configured == QLatin1String("wgc")) {
@@ -1157,6 +1041,56 @@ struct GStreamerCaptureSelection {
 	QStringList sourceProperties;
 	QStringList warnings;
 };
+
+#ifdef Q_OS_WIN
+bool selectBrowserMonitorCropCapture(HWND window, GStreamerCaptureSelection *selection) {
+	if (!window || !selection) {
+		return false;
+	}
+
+	const QString processName = processBaseNameForWindow(window);
+	if (!isChromiumBrowserProcess(processName)) {
+		return false;
+	}
+
+	RECT windowRect = {};
+	if (!visibleWindowBounds(window, &windowRect)) {
+		return false;
+	}
+
+	const HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+	if (!monitor) {
+		return false;
+	}
+
+	MONITORINFO monitorInfo = {};
+	monitorInfo.cbSize     = sizeof(monitorInfo);
+	if (!GetMonitorInfoW(monitor, &monitorInfo)) {
+		return false;
+	}
+
+	const LONG left   = qMax(windowRect.left, monitorInfo.rcMonitor.left);
+	const LONG top    = qMax(windowRect.top, monitorInfo.rcMonitor.top);
+	const LONG right  = qMin(windowRect.right, monitorInfo.rcMonitor.right);
+	const LONG bottom = qMin(windowRect.bottom, monitorInfo.rcMonitor.bottom);
+	if (right <= left || bottom <= top) {
+		return false;
+	}
+
+	const qulonglong monitorHandle = reinterpret_cast< qulonglong >(monitor);
+	const qulonglong windowHandle  = reinterpret_cast< qulonglong >(window);
+	selection->sourceProperties.append(QStringLiteral("monitor-handle=%1").arg(monitorHandle));
+	selection->sourceProperties.append(QStringLiteral("crop-x=%1").arg(left - monitorInfo.rcMonitor.left));
+	selection->sourceProperties.append(QStringLiteral("crop-y=%1").arg(top - monitorInfo.rcMonitor.top));
+	selection->sourceProperties.append(QStringLiteral("crop-width=%1").arg(right - left));
+	selection->sourceProperties.append(QStringLiteral("crop-height=%1").arg(bottom - top));
+	selection->selectedCaptureSource =
+		QStringLiteral("gstreamer-d3d11-%1-browser-window-crop-%2").arg(selection->captureApi).arg(windowHandle);
+	selection->warnings.append(QStringLiteral(
+		"Using monitor-cropped capture for a Chromium browser window so the active tab content is captured."));
+	return true;
+}
+#endif
 
 GStreamerCaptureSelection selectGStreamerCaptureSource(const QJsonObject &plan) {
 	GStreamerCaptureSelection selection;
@@ -1208,6 +1142,10 @@ GStreamerCaptureSelection selectGStreamerCaptureSource(const QJsonObject &plan) 
 			}
 		}
 		if (windowHandle != 0 && IsWindow(reinterpret_cast< HWND >(windowHandle))) {
+			if (selectBrowserMonitorCropCapture(reinterpret_cast< HWND >(windowHandle), &selection)) {
+				return selection;
+			}
+
 			selection.captureApi = QStringLiteral("wgc");
 			selection.sourceProperties.append(QStringLiteral("window-handle=%1").arg(windowHandle));
 			selection.sourceProperties.append(QStringLiteral("window-capture-mode=default"));
@@ -1225,6 +1163,76 @@ GStreamerCaptureSelection selectGStreamerCaptureSource(const QJsonObject &plan) 
 									  .arg(sourceID));
 	}
 	return selection;
+}
+
+bool appendWasapiLoopbackProcessProperties(QStringList *properties, const qulonglong processID) {
+	if (!properties || processID == 0 || processID > std::numeric_limits< quint32 >::max()) {
+		return false;
+	}
+
+	properties->append(QStringLiteral("loopback-mode=include-process-tree"));
+	properties->append(QStringLiteral("loopback-target-pid=%1").arg(processID));
+	return true;
+}
+
+QStringList selectWasapiLoopbackSourceProperties(const QJsonObject &plan, QStringList *warnings) {
+	QStringList properties;
+	properties << QStringLiteral("loopback=true") << QStringLiteral("low-latency=true")
+			   << QStringLiteral("do-timestamp=true");
+
+	const QString sourceID = plan.value(QStringLiteral("audio_source_id")).toString().trimmed();
+	const QString normalizedSourceID = sourceID.toLower();
+	if (normalizedSourceID.isEmpty() || normalizedSourceID == QLatin1String("default-loopback")
+		|| normalizedSourceID == QLatin1String("system") || normalizedSourceID == QLatin1String("system:default")) {
+		return properties;
+	}
+
+	if (normalizedSourceID.startsWith(QLatin1String("device:"))) {
+		const QString deviceID = sourceID.mid(QStringLiteral("device:").size()).trimmed();
+		if (!deviceID.isEmpty()) {
+			properties.append(QStringLiteral("device=%1").arg(deviceID));
+		} else if (warnings) {
+			warnings->append(QStringLiteral("Audio device capture was requested without a device ID; using default output."));
+		}
+		return properties;
+	}
+
+	if (normalizedSourceID.startsWith(QLatin1String("process:"))) {
+		bool ok = false;
+		const qulonglong processID = normalizedSourceID.mid(QStringLiteral("process:").size()).toULongLong(&ok);
+		if (ok && appendWasapiLoopbackProcessProperties(&properties, processID)) {
+			return properties;
+		}
+		if (warnings) {
+			warnings->append(QStringLiteral("Process audio capture source '%1' is invalid; using default output.")
+								 .arg(sourceID));
+		}
+		return properties;
+	}
+
+	if (normalizedSourceID.startsWith(QLatin1String("window:"))) {
+#ifdef Q_OS_WIN
+		bool ok = false;
+		const qulonglong windowHandle = normalizedSourceID.mid(QStringLiteral("window:").size()).toULongLong(&ok);
+		if (ok && windowHandle != 0 && IsWindow(reinterpret_cast< HWND >(windowHandle))) {
+			DWORD processID = 0;
+			GetWindowThreadProcessId(reinterpret_cast< HWND >(windowHandle), &processID);
+			if (appendWasapiLoopbackProcessProperties(&properties, processID)) {
+				return properties;
+			}
+		}
+#endif
+		if (warnings) {
+			warnings->append(QStringLiteral("Window audio capture source '%1' is invalid; using default output.")
+								 .arg(sourceID));
+		}
+		return properties;
+	}
+
+	if (warnings) {
+		warnings->append(QStringLiteral("Unsupported audio capture source '%1'; using default output.").arg(sourceID));
+	}
+	return properties;
 }
 
 struct GStreamerEncoderSelection {
@@ -1444,9 +1452,9 @@ ScreenShareExternalProcess::LaunchResult
 	if (captureAudio) {
 		if (support.gstWasapi2SrcAvailable && support.gstAudioConvertAvailable
 			&& support.gstAudioResampleAvailable) {
-			arguments << QStringLiteral("wasapi2src") << QStringLiteral("loopback=true")
-					  << QStringLiteral("low-latency=true") << QStringLiteral("do-timestamp=true")
-					  << QStringLiteral("!") << QStringLiteral("audioconvert") << QStringLiteral("!")
+			const QStringList audioSourceProperties = selectWasapiLoopbackSourceProperties(plan, &launchWarnings);
+			arguments << QStringLiteral("wasapi2src") << audioSourceProperties << QStringLiteral("!")
+					  << QStringLiteral("audioconvert") << QStringLiteral("!")
 					  << QStringLiteral("audioresample") << QStringLiteral("!")
 					  << QStringLiteral("audio/x-raw,rate=48000,channels=2") << QStringLiteral("!")
 					  << QStringLiteral("queue") << QStringLiteral("leaky=downstream")
@@ -1500,34 +1508,91 @@ ScreenShareExternalProcess::LaunchResult
 	const QString identity = liveKitIdentityFromToken(plan, QStringLiteral("viewer"));
 	const QString participantName =
 		QStringLiteral("Mumble viewer %1").arg(plan.value(QStringLiteral("stream_id")).toString());
-	const QString publisherIdentity = liveKitPublisherIdentityFromPlan(plan);
 
 	QStringList arguments;
 	arguments << QStringLiteral("-e");
 	arguments << QStringLiteral("livekitwebrtcsrc") << QStringLiteral("name=src");
 	appendGStreamerLiveKitSignallerArguments(&arguments, plan, wsUrl, identity, participantName);
-	if (!publisherIdentity.isEmpty()) {
-		arguments << QStringLiteral("signaller::producer-peer-id=%1").arg(publisherIdentity);
-	}
-	arguments << QStringLiteral("video-codecs=<H264>");
-	arguments << QStringLiteral("src.") << QStringLiteral("!") << QStringLiteral("queue")
-			  << QStringLiteral("leaky=downstream") << QStringLiteral("max-size-buffers=4") << QStringLiteral("!")
-			  << QStringLiteral("decodebin") << QStringLiteral("!");
-	if (support.gstD3D11VideoSinkAvailable) {
-		arguments << QStringLiteral("d3d11videosink") << QStringLiteral("sync=false");
-	} else if (support.gstAutoVideoSinkAvailable) {
-		arguments << QStringLiteral("videoconvert") << QStringLiteral("!") << QStringLiteral("autovideosink")
-				  << QStringLiteral("sync=false");
-	} else {
-		arguments << QStringLiteral("fakesink") << QStringLiteral("sync=false");
+	const QString softwareH264Decoder = support.gstAvDecH264Available
+											? QStringLiteral("avdec_h264")
+											: (support.gstOpenH264DecAvailable ? QStringLiteral("openh264dec")
+																				: QString());
+	const bool useD3D11DecodedSink = support.gstDecodeBinAvailable && support.gstVideoConvertAvailable
+									 && support.gstD3D11VideoSinkAvailable;
+	const bool useAutoDecodedSink = support.gstDecodeBinAvailable && support.gstVideoConvertAvailable
+									&& support.gstAutoVideoSinkAvailable;
+	const bool useD3D11RawSink = !useD3D11DecodedSink && support.gstVideoConvertAvailable
+								 && support.gstD3D11VideoSinkAvailable;
+	const bool useAutoRawSink = !useD3D11DecodedSink && !useAutoDecodedSink && support.gstVideoConvertAvailable
+								&& support.gstAutoVideoSinkAvailable;
+	const bool useLegacyD3DWindowSink = support.gstD3DVideoSinkAvailable && support.gstH264ParseAvailable
+										&& support.gstVideoConvertAvailable && !softwareH264Decoder.isEmpty();
+	const bool forceH264Session = useD3D11DecodedSink || useAutoDecodedSink || useLegacyD3DWindowSink;
+	if (forceH264Session) {
+		arguments << QStringLiteral("video-codecs=<H264>");
 	}
 	const bool expectAudio = plan.value(QStringLiteral("capture_audio")).toBool(false);
+	if (expectAudio) {
+		arguments << QStringLiteral("audio-codecs=<OPUS>");
+	}
+	const bool receiveRawPads = expectAudio;
+	arguments << QStringLiteral("src.") << QStringLiteral("!") << QStringLiteral("queue")
+			  << QStringLiteral("leaky=downstream") << QStringLiteral("max-size-buffers=4") << QStringLiteral("!");
+	if (forceH264Session && !receiveRawPads) {
+		arguments << QStringLiteral("video/x-h264;application/x-rtp,media=video,encoding-name=H264")
+				  << QStringLiteral("!");
+	} else if (!receiveRawPads) {
+		arguments << QStringLiteral("application/x-rtp,media=video;video/x-h264;video/x-vp8;video/x-vp9")
+				  << QStringLiteral("!");
+	}
+	QString selectedRenderer;
+	if (receiveRawPads && (useD3D11DecodedSink || useD3D11RawSink)) {
+		arguments << QStringLiteral("videoconvert") << QStringLiteral("!") << QStringLiteral("d3d11videosink")
+				  << QStringLiteral("sync=false");
+		selectedRenderer = QStringLiteral("gstreamer-d3d11videosink-raw-livekit");
+	} else if (receiveRawPads && (useAutoDecodedSink || useAutoRawSink)) {
+		arguments << QStringLiteral("videoconvert") << QStringLiteral("!") << QStringLiteral("autovideosink")
+				  << QStringLiteral("sync=false");
+		selectedRenderer = QStringLiteral("gstreamer-autovideosink-raw-livekit");
+	} else if (useD3D11DecodedSink) {
+		arguments << QStringLiteral("decodebin") << QStringLiteral("!") << QStringLiteral("videoconvert")
+				  << QStringLiteral("!") << QStringLiteral("d3d11videosink") << QStringLiteral("sync=false");
+		selectedRenderer = QStringLiteral("gstreamer-d3d11videosink-decodebin");
+	} else if (useAutoDecodedSink) {
+		arguments << QStringLiteral("decodebin") << QStringLiteral("!") << QStringLiteral("videoconvert")
+				  << QStringLiteral("!") << QStringLiteral("autovideosink") << QStringLiteral("sync=false");
+		selectedRenderer = QStringLiteral("gstreamer-autovideosink-decodebin");
+	} else if (useD3D11RawSink) {
+		arguments << QStringLiteral("videoconvert") << QStringLiteral("!") << QStringLiteral("d3d11videosink")
+				  << QStringLiteral("sync=false");
+		selectedRenderer = QStringLiteral("gstreamer-d3d11videosink-raw");
+	} else if (useAutoRawSink) {
+		arguments << QStringLiteral("videoconvert") << QStringLiteral("!") << QStringLiteral("autovideosink")
+				  << QStringLiteral("sync=false");
+		selectedRenderer = QStringLiteral("gstreamer-autovideosink-raw");
+	} else if (useLegacyD3DWindowSink) {
+		arguments << QStringLiteral("h264parse") << QStringLiteral("!") << softwareH264Decoder
+				  << QStringLiteral("!") << QStringLiteral("videoconvert") << QStringLiteral("!")
+				  << QStringLiteral("d3dvideosink") << QStringLiteral("sync=false");
+		selectedRenderer = QStringLiteral("gstreamer-d3dvideosink-%1").arg(softwareH264Decoder);
+	} else if (support.gstDecodeBinAvailable && support.gstAutoVideoSinkAvailable) {
+		arguments << QStringLiteral("decodebin") << QStringLiteral("!") << QStringLiteral("videoconvert")
+				  << QStringLiteral("!") << QStringLiteral("autovideosink") << QStringLiteral("sync=false");
+		selectedRenderer = QStringLiteral("gstreamer-autovideosink");
+	} else if (support.gstDecodeBinAvailable && support.gstFakeSinkAvailable) {
+		arguments << QStringLiteral("decodebin") << QStringLiteral("!") << QStringLiteral("fakesink")
+				  << QStringLiteral("sync=false");
+		selectedRenderer = QStringLiteral("gstreamer-fakesink");
+	} else {
+		launch.errorMessage = QStringLiteral("No usable GStreamer video renderer is available for LiveKit viewing.");
+		return launch;
+	}
 	if (expectAudio && support.gstAutoAudioSinkAvailable && support.gstAudioConvertAvailable
 		&& support.gstAudioResampleAvailable) {
 		arguments << QStringLiteral("src.") << QStringLiteral("!") << QStringLiteral("queue")
 				  << QStringLiteral("leaky=downstream") << QStringLiteral("max-size-buffers=8")
-				  << QStringLiteral("!") << QStringLiteral("decodebin") << QStringLiteral("!")
-				  << QStringLiteral("audioconvert") << QStringLiteral("!") << QStringLiteral("audioresample")
+				  << QStringLiteral("!") << QStringLiteral("audioconvert") << QStringLiteral("!")
+				  << QStringLiteral("audioresample")
 				  << QStringLiteral("!") << QStringLiteral("autoaudiosink") << QStringLiteral("sync=false");
 	}
 
@@ -1537,10 +1602,7 @@ ScreenShareExternalProcess::LaunchResult
 	}
 
 	launch.endpointUrl       = wsUrl;
-	launch.selectedRenderer = support.gstD3D11VideoSinkAvailable ? QStringLiteral("gstreamer-d3d11videosink")
-																 : (support.gstAutoVideoSinkAvailable
-																		? QStringLiteral("gstreamer-autovideosink")
-																		: QStringLiteral("gstreamer-fakesink"));
+	launch.selectedRenderer = selectedRenderer;
 	return launch;
 }
 
@@ -1570,6 +1632,7 @@ ScreenShareExternalProcess::LaunchResult startProcess(const QString &program, co
 
 	launch.started = true;
 	launch.process = process;
+	launch.processID = process->processId();
 	return launch;
 }
 } // namespace
@@ -1595,47 +1658,17 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 								QStringList{ QStringLiteral("gst-inspect-1.0"),
 											 QStringLiteral("gst-inspect-1.0.exe") },
 								bundledGStreamerDirs);
-#ifdef Q_OS_WIN
-	support.edgePath = findExecutableAny(QStringList{ QStringLiteral("msedge.exe") });
-	if (support.edgePath.isEmpty()) {
-		support.edgePath =
-			existingWindowsBrowserPath(QStringList{ QStringLiteral("Microsoft/Edge/Application/msedge.exe"),
-													QStringLiteral("Microsoft/Edge Beta/Application/msedge.exe") });
-	}
-	support.chromePath = findExecutableAny(QStringList{ QStringLiteral("chrome.exe") });
-	if (support.chromePath.isEmpty()) {
-		support.chromePath =
-			existingWindowsBrowserPath(QStringList{ QStringLiteral("Google/Chrome/Application/chrome.exe"),
-													QStringLiteral("Chromium/Application/chrome.exe") });
-	}
-	support.firefoxPath = findExecutableAny(QStringList{ QStringLiteral("firefox.exe") });
-	if (support.firefoxPath.isEmpty()) {
-		support.firefoxPath = existingWindowsBrowserPath(QStringList{ QStringLiteral("Mozilla Firefox/firefox.exe") });
-	}
-#else
-	support.edgePath =
-		findExecutableAny(QStringList{ QStringLiteral("microsoft-edge"), QStringLiteral("microsoft-edge-stable") });
-	support.chromePath =
-		findExecutableAny(QStringList{ QStringLiteral("google-chrome"), QStringLiteral("google-chrome-stable"),
-									   QStringLiteral("chromium"), QStringLiteral("chromium-browser") });
-	support.firefoxPath               = findExecutableAny(QStringList{ QStringLiteral("firefox") });
-#endif
 	support.ffmpegAvailable  = !support.ffmpegPath.isEmpty();
 	support.ffplayAvailable  = !support.ffplayPath.isEmpty();
 	support.gstLaunchAvailable  = !support.gstLaunchPath.isEmpty();
 	support.gstInspectAvailable = !support.gstInspectPath.isEmpty();
 	support.gstreamerAvailable  = support.gstLaunchAvailable && support.gstInspectAvailable;
-	support.edgeAvailable    = !support.edgePath.isEmpty();
-	support.chromeAvailable  = !support.chromePath.isEmpty();
-	support.firefoxAvailable = !support.firefoxPath.isEmpty();
 #ifdef Q_OS_WIN
 	support.graphicalSessionAvailable = true;
 #else
 	support.graphicalSessionAvailable = !qEnvironmentVariable("DISPLAY").trimmed().isEmpty()
 										|| !qEnvironmentVariable("WAYLAND_DISPLAY").trimmed().isEmpty();
 #endif
-	support.browserWebRtcAvailable = support.graphicalSessionAvailable
-									 && (support.edgeAvailable || support.chromeAvailable || support.firefoxAvailable);
 	support.x11DisplayAvailable     = !qEnvironmentVariable("DISPLAY").trimmed().isEmpty();
 	support.windowedViewerAvailable = hasWindowedViewerSurface();
 #ifdef Q_OS_WIN
@@ -1722,9 +1755,14 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 			gstElementAvailable(support.gstInspectPath, QStringLiteral("autovideosink"));
 		support.gstAutoAudioSinkAvailable =
 			gstElementAvailable(support.gstInspectPath, QStringLiteral("autoaudiosink"));
+		support.gstD3DVideoSinkAvailable =
+			gstElementAvailable(support.gstInspectPath, QStringLiteral("d3dvideosink"));
 		support.gstD3D11VideoSinkAvailable =
 			gstElementAvailable(support.gstInspectPath, QStringLiteral("d3d11videosink"));
 		support.gstFakeSinkAvailable = gstElementAvailable(support.gstInspectPath, QStringLiteral("fakesink"));
+		support.gstAvDecH264Available = gstElementAvailable(support.gstInspectPath, QStringLiteral("avdec_h264"));
+		support.gstOpenH264DecAvailable =
+			gstElementAvailable(support.gstInspectPath, QStringLiteral("openh264dec"));
 
 		const bool gstSystemMemoryH264Available =
 			support.gstD3D11DownloadAvailable && support.gstVideoConvertAvailable
@@ -1739,13 +1777,24 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 #else
 			support.gstVideoTestSrcAvailable && envFlagEnabled("MUMBLE_SCREENSHARE_TEST_PATTERN");
 #endif
-		const bool gstViewerSinkAvailable =
-			support.gstD3D11VideoSinkAvailable || support.gstAutoVideoSinkAvailable || support.gstFakeSinkAvailable;
+		support.gstRawLiveKitViewerAvailable =
+			support.gstVideoConvertAvailable
+			&& (support.gstD3D11VideoSinkAvailable || support.gstAutoVideoSinkAvailable);
+		support.gstEncodedH264ViewerAvailable =
+			support.gstD3DVideoSinkAvailable && support.gstH264ParseAvailable && support.gstVideoConvertAvailable
+			&& (support.gstAvDecH264Available || support.gstOpenH264DecAvailable);
+		support.gstDecodeBinViewerAvailable =
+			support.gstDecodeBinAvailable
+			&& (support.gstD3D11VideoSinkAvailable || support.gstAutoVideoSinkAvailable
+				|| support.gstFakeSinkAvailable);
+		const bool gstViewerSinkAvailable = support.gstRawLiveKitViewerAvailable
+											|| support.gstEncodedH264ViewerAvailable
+											|| support.gstDecodeBinViewerAvailable;
 		support.gstreamerLiveKitPublishAvailable =
 			support.gstLiveKitWebRtcSinkAvailable && support.gstH264ParseAvailable && gstH264EncoderAvailable
 			&& gstDesktopCaptureAvailable;
 		support.gstreamerLiveKitViewAvailable =
-			support.gstLiveKitWebRtcSrcAvailable && support.gstDecodeBinAvailable && gstViewerSinkAvailable;
+			support.gstLiveKitWebRtcSrcAvailable && gstViewerSinkAvailable;
 
 		appendMissingGStreamerElement(&support, QStringLiteral("livekitwebrtcsink"),
 									  support.gstLiveKitWebRtcSinkAvailable);
@@ -1770,9 +1819,14 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 			appendMissingGStreamerElement(&support, QStringLiteral("nvd3d11h264enc|mfh264enc|x264enc|openh264enc"),
 										  false);
 		}
-		appendMissingGStreamerElement(&support, QStringLiteral("decodebin"), support.gstDecodeBinAvailable);
+		appendMissingGStreamerElement(&support, QStringLiteral("videoconvert"),
+									  support.gstVideoConvertAvailable);
+		appendMissingGStreamerElement(&support, QStringLiteral("decodebin"),
+									  support.gstDecodeBinAvailable || support.gstRawLiveKitViewerAvailable
+										  || support.gstEncodedH264ViewerAvailable);
 		if (!gstViewerSinkAvailable) {
-			appendMissingGStreamerElement(&support, QStringLiteral("d3d11videosink|autovideosink|fakesink"), false);
+			appendMissingGStreamerElement(&support, QStringLiteral("d3dvideosink|d3d11videosink|autovideosink|fakesink"),
+										  false);
 		}
 	}
 
@@ -1814,19 +1868,23 @@ QJsonObject ScreenShareExternalProcess::runtimeSupportToJson(const RuntimeSuppor
 	payload.insert(QStringLiteral("gst_decodebin_available"), support.gstDecodeBinAvailable);
 	payload.insert(QStringLiteral("gst_autovideosink_available"), support.gstAutoVideoSinkAvailable);
 	payload.insert(QStringLiteral("gst_autoaudiosink_available"), support.gstAutoAudioSinkAvailable);
+	payload.insert(QStringLiteral("gst_d3dvideosink_available"), support.gstD3DVideoSinkAvailable);
 	payload.insert(QStringLiteral("gst_d3d11videosink_available"), support.gstD3D11VideoSinkAvailable);
 	payload.insert(QStringLiteral("gst_fakesink_available"), support.gstFakeSinkAvailable);
+	payload.insert(QStringLiteral("gst_avdec_h264_available"), support.gstAvDecH264Available);
+	payload.insert(QStringLiteral("gst_openh264dec_available"), support.gstOpenH264DecAvailable);
+	payload.insert(QStringLiteral("gst_raw_livekit_viewer_available"),
+				   support.gstRawLiveKitViewerAvailable);
+	payload.insert(QStringLiteral("gst_encoded_h264_viewer_available"),
+				   support.gstEncodedH264ViewerAvailable);
+	payload.insert(QStringLiteral("gst_decodebin_viewer_available"), support.gstDecodeBinViewerAvailable);
 	{
 		QJsonArray missingElements;
 		for (const QString &element : support.missingGStreamerElements) {
 			missingElements.push_back(element);
-		}
-		payload.insert(QStringLiteral("gstreamer_missing_elements"), missingElements);
 	}
-	payload.insert(QStringLiteral("browser_webrtc_available"), support.browserWebRtcAvailable);
-	payload.insert(QStringLiteral("edge_available"), support.edgeAvailable);
-	payload.insert(QStringLiteral("chrome_available"), support.chromeAvailable);
-	payload.insert(QStringLiteral("firefox_available"), support.firefoxAvailable);
+	payload.insert(QStringLiteral("gstreamer_missing_elements"), missingElements);
+	}
 	payload.insert(QStringLiteral("graphical_session_available"), support.graphicalSessionAvailable);
 	payload.insert(QStringLiteral("x11_display_available"), support.x11DisplayAvailable);
 	payload.insert(QStringLiteral("x11grab_available"), support.x11GrabAvailable);
@@ -1885,9 +1943,6 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startPublis
 	const RuntimeSupport support = probeRuntimeSupport();
 	if (plan.value(QStringLiteral("relay_contract_mode")).toString() == QLatin1String("gstreamer-livekit-runtime")) {
 		return startGStreamerLiveKitPublish(support, plan, parent);
-	}
-	if (plan.value(QStringLiteral("relay_contract_mode")).toString() == QLatin1String("browser-webrtc-runtime")) {
-		return startBrowserWebRtcSession(support, plan, parent, true);
 	}
 	if (!plan.value(QStringLiteral("relay_runtime_executable")).toBool(true)) {
 		launch.errorMessage =
@@ -2010,9 +2065,6 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startView(c
 	const RuntimeSupport support = probeRuntimeSupport();
 	if (plan.value(QStringLiteral("relay_contract_mode")).toString() == QLatin1String("gstreamer-livekit-runtime")) {
 		return startGStreamerLiveKitView(support, plan, parent);
-	}
-	if (plan.value(QStringLiteral("relay_contract_mode")).toString() == QLatin1String("browser-webrtc-runtime")) {
-		return startBrowserWebRtcSession(support, plan, parent, false);
 	}
 	if (!plan.value(QStringLiteral("relay_runtime_executable")).toBool(true)) {
 		launch.errorMessage =

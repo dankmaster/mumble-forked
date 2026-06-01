@@ -19,8 +19,8 @@ This fork now supports two practical relay execution modes:
   detached viewer process supervision
 
 For small Windows-heavy groups, this keeps Murmur out of the media path and
-avoids server-side transcoding. The relay web app remains in the tree only as
-an explicit fallback/debug path gated by `MUMBLE_SCREENSHARE_ALLOW_RELAY_WEBAPP=1`.
+avoids server-side transcoding. LiveKit sessions are executed by the bundled
+GStreamer helper; the old browser/WebRTC relay fallback is no longer shipped.
 
 ### Server Config
 
@@ -89,9 +89,11 @@ Windows publisher path prefers:
 - `mfh264enc`
 - `x264enc` / `openh264enc` fallback
 
-Default compression profile is `auto`: `720p30`, about `4000 kbps` start,
-`1200 kbps` minimum, and `6000 kbps` maximum. The first adaptive degradation
-policy is FPS first, then resolution.
+The default picker selection is `720p30` with the `auto` compression profile:
+about `4000 kbps` start, `1200 kbps` minimum, and `6000 kbps` maximum. The
+publisher picker also exposes `720p`, `1080p`, and `1440p` at `30 FPS` or
+`60 FPS` when the server and local runtime advertise those limits. The first
+adaptive degradation policy is FPS first, then resolution.
 
 The helper currently launches GStreamer as an external process and records
 planned/active capture, encoder, renderer, bitrate, dropped-frame placeholders,
@@ -109,8 +111,17 @@ Publisher grant:
 
 - `roomJoin=true`
 - `canPublish=true`
-- `canPublishSources=["camera", "screen_share", "screen_share_audio"]`
-- `canSubscribe=true`
+- `canPublishSources=["camera", "screen_share"]`
+- when system audio is requested, also `["microphone", "screen_share_audio"]`
+- `canSubscribe=false`
+
+The GStreamer `livekitwebrtcsink` producer path expects a publish-only token.
+If a publisher token can also subscribe, LiveKit can leave the producer in the
+join path until it closes the connection with `JOIN_TIMEOUT`. Current
+GStreamer LiveKit builds expose the WASAPI loopback audio pad as a regular
+LiveKit microphone source, so audio-enabled screen-share sessions must allow
+`microphone` until the helper can mark that pad as `screen_share_audio`
+explicitly.
 
 Viewer grant:
 
@@ -129,6 +140,13 @@ cleanup.
 - Serve the LiveKit WebSocket over TLS from the public
   `screen_share_relay_url`; do not expose the internal LiveKit API port directly
   without a reverse proxy or load balancer.
+- If the LiveKit WebSocket is behind nginx, Caddy, Traefik, or another reverse
+  proxy, set the WebSocket read/send/idle timeouts longer than the relay token
+  lifetime. A default 60-second proxy timeout will drop active GStreamer
+  sessions with `Signalling error: Error: Server disconnected`.
+- If the WebSocket stays alive with ping/pong but LiveKit logs `JOIN_TIMEOUT`
+  at roughly 60 seconds, inspect publisher JWT grants, ICE candidate reachability,
+  and whether the GStreamer publisher reaches an active peer connection.
 - Keep `7881/tcp` exposed for WebRTC-over-TCP fallback and either expose
   `7882/udp` when using LiveKit UDP mux or the configured UDP port range when
   not using mux.

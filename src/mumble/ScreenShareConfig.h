@@ -17,7 +17,6 @@ private:
 	Q_DISABLE_COPY(ScreenShareConfig)
 
 	QCheckBox *m_autoOpenCurrentRoomShare = nullptr;
-	QCheckBox *m_preferInAppRelay         = nullptr;
 	QCheckBox *m_diagnosticsLogging       = nullptr;
 	QLabel *m_capabilitiesNote            = nullptr;
 

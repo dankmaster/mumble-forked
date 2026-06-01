@@ -134,8 +134,8 @@ public:
 	bool bScreenShareRecordingEnabled = false;
 	bool bScreenShareHelperRequired = true;
 	QList< int > qlPreferredScreenShareCodecs;
-	unsigned int uiScreenShareMaxWidth = 1920;
-	unsigned int uiScreenShareMaxHeight = 1080;
+	unsigned int uiScreenShareMaxWidth = 2560;
+	unsigned int uiScreenShareMaxHeight = 1440;
 	unsigned int uiScreenShareMaxFps = 60;
 	QString qsScreenShareRelayUrl;
 	QString qsScreenShareRelayAPIKey;
@@ -384,6 +384,7 @@ public:
 		QString qsQualityProfile = QStringLiteral("auto");
 		QString qsCaptureSourceID;
 		bool bCaptureAudio = false;
+		QString qsAudioSourceID;
 		unsigned int uiMinBitrateKbps = 0;
 		unsigned int uiMaxBitrateKbps = 0;
 	};

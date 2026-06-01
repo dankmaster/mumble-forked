@@ -388,6 +388,8 @@ ScreenShareSessionPlanner::Plan buildPlan(const QJsonObject &payload,
 		payload.value(QStringLiteral("quality_profile")).toString(QStringLiteral("auto")).trimmed().toLower();
 	const QString captureSourceID = payload.value(QStringLiteral("capture_source_id")).toString().trimmed();
 	const bool captureAudio = payload.value(QStringLiteral("capture_audio")).toBool(false);
+	const QString audioSourceID =
+		captureAudio ? payload.value(QStringLiteral("audio_source_id")).toString().trimmed() : QString();
 
 	const bool preferHardware              = payload.value(QStringLiteral("prefer_hardware_encoding")).toBool(true);
 	const QList< EncoderBackend > backends = probeEncoderBackends();
@@ -398,30 +400,23 @@ ScreenShareSessionPlanner::Plan buildPlan(const QJsonObject &payload,
 		plan.errorMessage = relayContract.errorMessage;
 		return plan;
 	}
-	const bool browserManagedRuntime = publish && relayContract.contractMode == QLatin1String("browser-webrtc-runtime");
 	const bool gstreamerManagedRuntime = relayContract.contractMode == QLatin1String("gstreamer-livekit-runtime");
 	const EncoderBackend *selectedBackend =
-		browserManagedRuntime
-			? nullptr
-			: (gstreamerManagedRuntime && publish ? selectGStreamerEncoderBackend(backends, codec, preferHardware)
-												  : selectEncoderBackend(backends, codec, preferHardware));
-	if (!browserManagedRuntime && publish && !selectedBackend) {
+		gstreamerManagedRuntime && publish ? selectGStreamerEncoderBackend(backends, codec, preferHardware)
+										   : selectEncoderBackend(backends, codec, preferHardware);
+	if (publish && !selectedBackend) {
 		plan.errorMessage = QStringLiteral("No encoder backend can be planned for the negotiated codec.");
 		return plan;
 	}
 
 	QJsonArray warnings;
-	if (browserManagedRuntime) {
-		warnings.append(
-			QStringLiteral("The negotiated WebRTC relay will be executed through a dedicated browser runtime, so final "
-						   "codec and hardware acceleration decisions are delegated to the browser."));
-	} else if (gstreamerManagedRuntime && !publish) {
-		warnings.append(QStringLiteral("The negotiated WebRTC relay will be viewed through GStreamer LiveKit."));
+	if (gstreamerManagedRuntime && !publish) {
+		warnings.append(QStringLiteral("The LiveKit relay will be viewed through GStreamer."));
 	} else if (publish && selectedBackend && selectedBackend->backendID == QLatin1String("stub")) {
 		warnings.append(QStringLiteral("No executable encoder backend was detected for the negotiated codec; "
 									   "start-publish will only work if stub fallback is explicitly enabled."));
 	}
-	if (!browserManagedRuntime && publish && selectedBackend && codec == MumbleProto::ScreenShareCodecAV1
+	if (publish && selectedBackend && codec == MumbleProto::ScreenShareCodecAV1
 		&& selectedBackend->backendID == QLatin1String("stub")) {
 		warnings.append(
 			QStringLiteral("AV1 is negotiable, but this host currently has no executable AV1 encode backend."));
@@ -471,26 +466,19 @@ ScreenShareSessionPlanner::Plan buildPlan(const QJsonObject &payload,
 					   qualityProfile.isEmpty() ? QStringLiteral("auto") : qualityProfile);
 	planPayload.insert(QStringLiteral("capture_source_id"), captureSourceID);
 	planPayload.insert(QStringLiteral("capture_audio"), captureAudio);
+	planPayload.insert(QStringLiteral("audio_source_id"), audioSourceID);
 	planPayload.insert(QStringLiteral("adaptive_degradation_order"), QStringLiteral("fps-then-resolution"));
 	planPayload.insert(QStringLiteral("prefer_hardware_encoding"), preferHardware);
 	planPayload.insert(QStringLiteral("planned_encoder_backend"),
 					   !publish ? QStringLiteral("viewer-not-applicable")
-								: (browserManagedRuntime ? QStringLiteral("browser-webrtc-%1")
-																.arg(Mumble::ScreenShare::codecToConfigToken(codec))
-														 : codecBackendToken(selectedBackend->backendID, codec)));
+								: codecBackendToken(selectedBackend->backendID, codec));
 	planPayload.insert(QStringLiteral("planned_encoder_detail"),
 					   !publish ? QStringLiteral("Viewer sessions do not encode video.")
-								: (browserManagedRuntime
-									   ? QStringLiteral("Browser-managed WebRTC encode path. Codec preference is "
-														"negotiated by Mumble, while final encoder selection happens "
-														"inside the browser runtime.")
-									   : selectedBackend->detail));
+								: selectedBackend->detail);
 	planPayload.insert(QStringLiteral("planned_renderer_backend"),
 					   relayContract.contractMode == QLatin1String("gstreamer-livekit-runtime")
 						   ? (publish ? QStringLiteral("gstreamer-livekit-publish")
 									  : QStringLiteral("gstreamer-livekit-view"))
-						   : relayContract.contractMode == QLatin1String("browser-webrtc-runtime")
-						   ? QStringLiteral("browser-webrtc")
 						   : publish ? QStringLiteral("ffmpeg-publish")
 									 : (runtimeSupport.graphicalSessionAvailable ? QStringLiteral("ffplay-view")
 																				 : QStringLiteral("ffmpeg-view")));

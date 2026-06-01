@@ -571,7 +571,7 @@ struct Settings {
 
 	bool bShowTransmitModeComboBox       = false;
 	bool bScreenShareAutoOpenCurrentRoom = false;
-	bool bScreenSharePreferInAppRelay    = true;
+	bool bScreenSharePreferInAppRelay    = false;
 
 	// Accessibility
 	bool bHighContrast = false;

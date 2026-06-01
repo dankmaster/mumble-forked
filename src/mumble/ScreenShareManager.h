@@ -38,6 +38,7 @@ struct ScreenShareSession {
 	QString qualityProfile = QStringLiteral("auto");
 	QString captureSourceID;
 	bool captureAudio = false;
+	QString audioSourceID;
 	unsigned int minBitrateKbps = 0;
 	unsigned int maxBitrateKbps = 0;
 };
@@ -45,11 +46,14 @@ struct ScreenShareSession {
 struct ScreenShareStartOptions {
 	QString captureSourceID;
 	bool captureAudio = false;
+	QString audioSourceID;
+	unsigned int requestedWidth  = 0;
+	unsigned int requestedHeight = 0;
+	unsigned int requestedFps    = 0;
+	QString qualityProfile;
 };
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-class RelayWindowHost;
-#endif
+class ExternalScreenShareWindowHost;
 
 class ScreenShareManager : public QObject {
 private:
@@ -71,6 +75,7 @@ public:
 	bool isPublishingSession(const QString &streamID) const;
 	bool isViewingSession(const QString &streamID) const;
 	bool hasDetachedWindow(const QString &streamID) const;
+	bool hasRunningExternalRuntime(const QString &streamID) const;
 	bool focusOrReopenDetachedWindow(const QString &streamID);
 	bool isUsingFallbackRuntime(const QString &streamID) const;
 	bool isUsingNativeGpuRuntime(const QString &streamID) const;
@@ -97,19 +102,17 @@ signals:
 
 private:
 	ScreenShareSession sessionFromState(const MumbleProto::ScreenShareState &msg) const;
-	bool supportsInAppRelayTransport(MumbleProto::ScreenShareRelayTransport transport) const;
 	bool canViewSession(const ScreenShareSession &session) const;
 	bool canPublishSession(const ScreenShareSession &session) const;
 	bool shouldAutoViewSession(const ScreenShareSession &session) const;
-	bool startInAppPublishSession(const ScreenShareSession &session);
-	bool startInAppViewSession(const ScreenShareSession &session);
-	void stopInAppPublishSession(const QString &streamID);
-	void stopInAppViewSession(const QString &streamID);
-	void handleInAppRelayFailure(const QString &streamID, bool publish, const QString &reason);
+	bool restartExternalViewSession(const ScreenShareSession &session);
+	void showExternalViewWindow(const ScreenShareSession &session, qint64 processID);
 	void startLocalPublishSession(const ScreenShareSession &session);
 	void startLocalViewSession(const ScreenShareSession &session);
 	void stopLocalPublishSession(const QString &streamID);
 	void stopLocalViewSession(const QString &streamID);
+	void setExternalViewAudioMuted(const QString &streamID, bool muted);
+	void setExternalViewPaused(const QString &streamID, bool paused);
 	void logRemoteViewAvailability(const ScreenShareSession &session);
 	void stopLocalHelperSessions(const QString &streamID);
 
@@ -117,17 +120,14 @@ private:
 	QHash< QString, ScreenShareSession > m_sessions;
 	QSet< QString > m_activePublishSessions;
 	QSet< QString > m_activeViewSessions;
-	QSet< QString > m_fallbackRuntimeSessions;
+	QHash< QString, qint64 > m_externalPublishProcessIDs;
+	QHash< QString, qint64 > m_externalViewProcessIDs;
+	QHash< QString, ExternalScreenShareWindowHost * > m_externalViewWindows;
+	QSet< QString > m_externalViewAudioMuted;
+	QSet< QString > m_pausedExternalViewSessions;
 	QSet< QString > m_announcedViewableSessions;
 	mutable QString m_lastLoggedAvailabilityContext;
 	mutable QString m_lastLoggedAvailabilityReason;
-
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	QHash< QString, RelayWindowHost * > m_inAppPublishWindows;
-	QHash< QString, RelayWindowHost * > m_inAppViewWindows;
-	QSet< QString > m_inAppPublishSessionIDs;
-	QSet< QString > m_inAppViewSessionIDs;
-#endif
 };
 
 #endif // MUMBLE_MUMBLE_SCREENSHAREMANAGER_H_

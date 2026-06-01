@@ -57,9 +57,9 @@ public:
 	static void applyAdvertisedCapabilities(MumbleProto::Version &msg);
 
 	const CapabilitySnapshot &capabilities() const;
-	bool startPublish(const ScreenShareSession &session, QString *errorMessage = nullptr);
+	bool startPublish(const ScreenShareSession &session, QString *errorMessage = nullptr, qint64 *processID = nullptr);
 	bool stopPublish(const QString &streamID, QString *errorMessage = nullptr);
-	bool startView(const ScreenShareSession &session, QString *errorMessage = nullptr);
+	bool startView(const ScreenShareSession &session, QString *errorMessage = nullptr, qint64 *processID = nullptr);
 	bool stopView(const QString &streamID, QString *errorMessage = nullptr);
 
 public slots:

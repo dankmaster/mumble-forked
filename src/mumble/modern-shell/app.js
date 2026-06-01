@@ -134,9 +134,14 @@
 	let toastStack = null;
 	let toastTimers = {};
 	let toastSequence = 0;
+	let editableTextControlWeakKeyCounter = 0;
+	let editableTextControlHistoryApplying = false;
 
 	const imageViewerStorageKey = "mumble-modern-image-viewer";
 	const maxVisibleToasts = 1;
+	const editableTextControlHistoryLimit = 80;
+	const editableTextControlHistories = new Map();
+	const editableTextControlWeakKeys = new WeakMap();
 	const imageViewerMinWidth = 280;
 	const imageViewerMinHeight = 220;
 	const imageViewerViewportMargin = 12;
@@ -5685,6 +5690,8 @@
 				return "Publishing";
 			case "available":
 				return "Available";
+			case "connecting":
+				return "Connecting";
 			case "viewing":
 				return "Viewing";
 			case "fallback":
@@ -5730,6 +5737,7 @@
 			refs.appShell.classList.toggle("scope-has-screen-share", visible);
 		}
 		const active = String(share && share.mode || "") === "publishing"
+			|| String(share && share.mode || "") === "connecting"
 			|| String(share && share.mode || "") === "viewing"
 			|| String(share && share.mode || "") === "fallback";
 		const buttonClasses = ["chip-button", "screen-share-button"];
@@ -5774,7 +5782,7 @@
 		let title = "Screen sharing";
 		if (mode === "publishing") {
 			title = "Your screen share";
-		} else if ((mode === "available" || mode === "viewing" || mode === "fallback") && share.ownerLabel) {
+		} else if ((mode === "available" || mode === "connecting" || mode === "viewing" || mode === "fallback") && share.ownerLabel) {
 			title = share.ownerLabel;
 		} else if (mode === "idle") {
 			title = "No active share";
@@ -24576,6 +24584,492 @@
 		return Promise.resolve(copied);
 	}
 
+	function editableTextControlFromTarget(target) {
+		if (!target || typeof target.closest !== "function") {
+			return null;
+		}
+
+		const control = target.closest("input, textarea");
+		if (!control || control.disabled || control.readOnly) {
+			return null;
+		}
+		if (refs.composerInput && control === refs.composerInput) {
+			return null;
+		}
+
+		const tagName = String(control.tagName || "").toLowerCase();
+		if (tagName === "textarea") {
+			return control;
+		}
+		if (tagName !== "input") {
+			return null;
+		}
+
+		const type = String(control.type || "text").toLowerCase();
+		const editableTypes = {
+			email: true,
+			number: true,
+			password: true,
+			search: true,
+			tel: true,
+			text: true,
+			url: true
+		};
+		return editableTypes[type] ? control : null;
+	}
+
+	function resolveEditableTextControl(control) {
+		if (control && document.contains(control)) {
+			if (control.disabled || control.readOnly || (refs.composerInput && control === refs.composerInput)) {
+				return null;
+			}
+			return control;
+		}
+
+		const fieldId = control && control.dataset ? String(control.dataset.modernDialogFieldId || "") : "";
+		if (!fieldId) {
+			return null;
+		}
+
+		const root = refs.modernDialog || document;
+		const candidates = root.querySelectorAll("input, textarea");
+		for (let index = 0; index < candidates.length; index += 1) {
+			const candidate = candidates[index];
+			if (candidate.dataset && String(candidate.dataset.modernDialogFieldId || "") === fieldId) {
+				return editableTextControlFromTarget(candidate);
+			}
+		}
+		return null;
+	}
+
+	function editableTextControlHistoryKey(control) {
+		control = resolveEditableTextControl(control);
+		if (!control) {
+			return "";
+		}
+
+		const fieldId = control.dataset ? String(control.dataset.modernDialogFieldId || "") : "";
+		if (fieldId) {
+			return "modern-dialog:" + String(modernDialogState && modernDialogState.id || "") + ":" + fieldId;
+		}
+		if (control.id) {
+			return "id:" + String(control.id);
+		}
+
+		const directMessageWindow = typeof control.closest === "function"
+			? control.closest(".direct-message-window")
+			: null;
+		const directSession = directMessageWindow && directMessageWindow.dataset
+			? String(directMessageWindow.dataset.session || "")
+			: "";
+		if (directSession) {
+			return "direct-message:" + directSession;
+		}
+
+		const stonksField = control.dataset ? String(control.dataset.stonksField || "") : "";
+		if (stonksField) {
+			return "stonks:" + stonksField;
+		}
+		if (control.name) {
+			return "name:" + String(control.name);
+		}
+		if (!editableTextControlWeakKeys.has(control)) {
+			editableTextControlWeakKeyCounter += 1;
+			editableTextControlWeakKeys.set(control, "weak:" + editableTextControlWeakKeyCounter);
+		}
+		return editableTextControlWeakKeys.get(control);
+	}
+
+	function editableTextControlSnapshot(control) {
+		control = resolveEditableTextControl(control);
+		if (!control) {
+			return null;
+		}
+
+		const value = String(control.value || "");
+		const selectionStart = typeof control.selectionStart === "number" ? control.selectionStart : value.length;
+		const selectionEnd = typeof control.selectionEnd === "number" ? control.selectionEnd : selectionStart;
+		return {
+			value: value,
+			selectionStart: Math.max(0, Math.min(value.length, selectionStart)),
+			selectionEnd: Math.max(0, Math.min(value.length, selectionEnd))
+		};
+	}
+
+	function editableTextControlHistory(control) {
+		const key = editableTextControlHistoryKey(control);
+		if (!key) {
+			return null;
+		}
+		let history = editableTextControlHistories.get(key);
+		if (!history) {
+			history = { entries: [], index: -1 };
+			editableTextControlHistories.set(key, history);
+		}
+		return history;
+	}
+
+	function ensureEditableTextControlHistory(control) {
+		control = resolveEditableTextControl(control);
+		if (!control) {
+			return null;
+		}
+
+		const history = editableTextControlHistory(control);
+		const snapshot = editableTextControlSnapshot(control);
+		if (!history || !snapshot) {
+			return null;
+		}
+		if (history.index < 0 || !history.entries.length) {
+			history.entries = [snapshot];
+			history.index = 0;
+		}
+		return history;
+	}
+
+	function recordEditableTextControlHistory(control) {
+		control = resolveEditableTextControl(control);
+		if (!control || editableTextControlHistoryApplying) {
+			return null;
+		}
+
+		const history = ensureEditableTextControlHistory(control);
+		const snapshot = editableTextControlSnapshot(control);
+		if (!history || !snapshot) {
+			return null;
+		}
+
+		const current = history.entries[history.index];
+		if (current && current.value === snapshot.value) {
+			history.entries[history.index] = snapshot;
+			return history;
+		}
+
+		if (history.index < history.entries.length - 1) {
+			history.entries = history.entries.slice(0, history.index + 1);
+		}
+		history.entries.push(snapshot);
+		if (history.entries.length > editableTextControlHistoryLimit) {
+			history.entries.shift();
+		}
+		history.index = history.entries.length - 1;
+		return history;
+	}
+
+	function applyEditableTextControlSnapshot(control, snapshot) {
+		control = resolveEditableTextControl(control);
+		if (!control || !snapshot) {
+			return false;
+		}
+
+		editableTextControlHistoryApplying = true;
+		try {
+			control.focus({ preventScroll: true });
+			control.value = String(snapshot.value || "");
+			if (typeof control.setSelectionRange === "function") {
+				try {
+					control.setSelectionRange(snapshot.selectionStart || 0, snapshot.selectionEnd || 0);
+				} catch (error) {}
+			}
+			dispatchEditableTextControlInput(control);
+		} finally {
+			editableTextControlHistoryApplying = false;
+		}
+		return true;
+	}
+
+	function stepEditableTextControlHistory(control, direction) {
+		control = resolveEditableTextControl(control);
+		if (!control) {
+			return false;
+		}
+
+		recordEditableTextControlHistory(control);
+		const history = ensureEditableTextControlHistory(control);
+		if (!history) {
+			return false;
+		}
+
+		const nextIndex = Math.max(0, Math.min(history.entries.length - 1, history.index + direction));
+		if (nextIndex === history.index) {
+			return false;
+		}
+		history.index = nextIndex;
+		return applyEditableTextControlSnapshot(control, history.entries[history.index]);
+	}
+
+	function editableTextControlCanUndo(control) {
+		recordEditableTextControlHistory(control);
+		const history = ensureEditableTextControlHistory(control);
+		return !!history && history.index > 0;
+	}
+
+	function editableTextControlCanRedo(control) {
+		recordEditableTextControlHistory(control);
+		const history = ensureEditableTextControlHistory(control);
+		return !!history && history.index >= 0 && history.index < history.entries.length - 1;
+	}
+
+	function handleEditableTextControlBeforeInput(event) {
+		const control = editableTextControlFromTarget(event.target);
+		if (control) {
+			recordEditableTextControlHistory(control);
+		}
+	}
+
+	function handleEditableTextControlInput(event) {
+		const control = editableTextControlFromTarget(event.target);
+		if (control) {
+			recordEditableTextControlHistory(control);
+		}
+	}
+
+	function handleEditableTextControlFocusIn(event) {
+		const control = editableTextControlFromTarget(event.target);
+		if (control) {
+			recordEditableTextControlHistory(control);
+		}
+	}
+
+	function editableTextControlHasSelection(control) {
+		control = resolveEditableTextControl(control);
+		return !!(control
+			&& typeof control.selectionStart === "number"
+			&& typeof control.selectionEnd === "number"
+			&& control.selectionEnd > control.selectionStart);
+	}
+
+	function editableTextControlSelectedText(control) {
+		control = resolveEditableTextControl(control);
+		if (!editableTextControlHasSelection(control)) {
+			return "";
+		}
+		return String(control.value || "").slice(control.selectionStart || 0, control.selectionEnd || 0);
+	}
+
+	function dispatchEditableTextControlInput(control) {
+		control.dispatchEvent(new Event("input", { bubbles: true }));
+	}
+
+	function selectEditableTextControlText(control) {
+		control = resolveEditableTextControl(control);
+		if (!control || typeof control.select !== "function") {
+			return false;
+		}
+		try {
+			control.focus({ preventScroll: true });
+			control.select();
+			return true;
+		} catch (error) {
+			return false;
+		}
+	}
+
+	function replaceEditableTextControlSelection(control, replacement) {
+		control = resolveEditableTextControl(control);
+		const value = String(replacement || "");
+		if (!control) {
+			return false;
+		}
+		ensureEditableTextControlHistory(control);
+		control.focus({ preventScroll: true });
+
+		if (typeof control.setRangeText === "function"
+				&& typeof control.selectionStart === "number"
+				&& typeof control.selectionEnd === "number") {
+			try {
+				editableTextControlHistoryApplying = true;
+				try {
+					control.setRangeText(value, control.selectionStart || 0, control.selectionEnd || 0, "end");
+					dispatchEditableTextControlInput(control);
+				} finally {
+					editableTextControlHistoryApplying = false;
+				}
+				recordEditableTextControlHistory(control);
+				return true;
+			} catch (error) {
+				editableTextControlHistoryApplying = false;
+				// Some input types expose selection APIs but reject range edits.
+			}
+		}
+
+		editableTextControlHistoryApplying = true;
+		try {
+			const original = String(control.value || "");
+			if (typeof control.selectionStart === "number" && typeof control.selectionEnd === "number") {
+				const start = control.selectionStart || 0;
+				const end = control.selectionEnd || 0;
+				control.value = original.slice(0, start) + value + original.slice(end);
+				const caret = start + value.length;
+				if (typeof control.setSelectionRange === "function") {
+					try {
+						control.setSelectionRange(caret, caret);
+					} catch (error) {}
+				}
+			} else {
+				control.value = value;
+			}
+			dispatchEditableTextControlInput(control);
+		} finally {
+			editableTextControlHistoryApplying = false;
+		}
+		recordEditableTextControlHistory(control);
+		return true;
+	}
+
+	function pastePlainTextIntoEditableTextControl(control) {
+		control = resolveEditableTextControl(control);
+		if (!control) {
+			return;
+		}
+		if (modernBridge && typeof modernBridge.clipboardText === "function") {
+			bridgeClipboardText(function(text) {
+				if (text) {
+					replaceEditableTextControlSelection(control, text);
+				}
+			});
+			return;
+		}
+
+		control.focus({ preventScroll: true });
+		try {
+			if (typeof document.execCommand === "function" && document.execCommand("paste")) {
+				dispatchEditableTextControlInput(control);
+				return;
+			}
+		} catch (error) {}
+
+		if (navigator.clipboard && typeof navigator.clipboard.readText === "function") {
+			navigator.clipboard.readText().then(function(text) {
+				if (text) {
+					replaceEditableTextControlSelection(control, text);
+				}
+			}).catch(function() {});
+		}
+	}
+
+	function copyEditableTextControlSelection(control) {
+		control = resolveEditableTextControl(control);
+		const selectedText = editableTextControlSelectedText(control);
+		if (!selectedText) {
+			return Promise.resolve(false);
+		}
+		return copyPlainText(selectedText);
+	}
+
+	function cutEditableTextControlSelection(control) {
+		control = resolveEditableTextControl(control);
+		if (!editableTextControlHasSelection(control)) {
+			return;
+		}
+		copyEditableTextControlSelection(control).then(function(copied) {
+			if (copied) {
+				replaceEditableTextControlSelection(control, "");
+			}
+		});
+	}
+
+	function editableTextControlContextItems(control) {
+		control = resolveEditableTextControl(control);
+		const hasSelection = editableTextControlHasSelection(control);
+		const hasValue = !!(control && String(control.value || ""));
+		return [
+			{
+				label: "Undo",
+				enabled: editableTextControlCanUndo(control),
+				action: function() {
+					stepEditableTextControlHistory(control, -1);
+				}
+			},
+			{
+				label: "Redo",
+				enabled: editableTextControlCanRedo(control),
+				action: function() {
+					stepEditableTextControlHistory(control, 1);
+				}
+			},
+			{ separator: true },
+			{
+				label: "Cut",
+				enabled: hasSelection,
+				action: function() {
+					cutEditableTextControlSelection(control);
+				}
+			},
+			{
+				label: "Copy",
+				enabled: hasSelection,
+				action: function() {
+					copyEditableTextControlSelection(control);
+				}
+			},
+			{
+				label: "Paste",
+				enabled: true,
+				action: function() {
+					pastePlainTextIntoEditableTextControl(control);
+				}
+			},
+			{ separator: true },
+			{
+				label: "Select all",
+				enabled: hasValue,
+				action: function() {
+					selectEditableTextControlText(control);
+				}
+			}
+		];
+	}
+
+	function handleEditableTextControlShortcut(event) {
+		const control = editableTextControlFromTarget(event.target);
+		if (!control || event.defaultPrevented || event.altKey || event.isComposing) {
+			return;
+		}
+
+		const key = String(event.key || "").toLowerCase();
+		const hasCommandModifier = event.ctrlKey || event.metaKey;
+		const isDeleteKey = key === "delete" || event.keyCode === 46;
+		const isInsertKey = key === "insert" || event.keyCode === 45;
+		if (hasCommandModifier && key === "z") {
+			event.preventDefault();
+			stepEditableTextControlHistory(control, event.shiftKey ? 1 : -1);
+			return;
+		}
+		if (hasCommandModifier && key === "y" && !event.shiftKey) {
+			event.preventDefault();
+			stepEditableTextControlHistory(control, 1);
+			return;
+		}
+		if (hasCommandModifier && key === "a") {
+			if (selectEditableTextControlText(control)) {
+				event.preventDefault();
+			}
+			return;
+		}
+		if ((hasCommandModifier && key === "c")
+				|| (event.ctrlKey && !event.metaKey && !event.shiftKey && isInsertKey)) {
+			if (editableTextControlHasSelection(control)) {
+				event.preventDefault();
+				copyEditableTextControlSelection(control);
+			}
+			return;
+		}
+		if ((hasCommandModifier && key === "x")
+				|| (!event.ctrlKey && !event.metaKey && event.shiftKey && isDeleteKey)) {
+			if (editableTextControlHasSelection(control)) {
+				event.preventDefault();
+				cutEditableTextControlSelection(control);
+			}
+			return;
+		}
+		if ((hasCommandModifier && key === "v")
+				|| (!event.ctrlKey && !event.metaKey && event.shiftKey && isInsertKey)) {
+			event.preventDefault();
+			pastePlainTextIntoEditableTextControl(control);
+		}
+	}
+
 	function replaceComposerSelection(replacement) {
 		const input = refs.composerInput;
 		const start = input.selectionStart || 0;
@@ -24786,6 +25280,7 @@
 		const composer = event.target.closest("#composer-input");
 		const selfCard = event.target.closest("#self-card");
 		const brandBadge = event.target.closest("#brand-badge");
+		const editableControl = editableTextControlFromTarget(event.target);
 
 		if (brandBadge) {
 			const app = snapshot.app || {};
@@ -24864,6 +25359,10 @@
 					}
 				}
 			];
+		}
+
+		if (editableControl) {
+			return editableTextControlContextItems(editableControl);
 		}
 
 		if (presenceRow) {
@@ -25722,6 +26221,10 @@
 		refs.composerInput.addEventListener("input", syncComposerHeight);
 		refs.composerInput.addEventListener("keydown", handleComposerInputKeyDown);
 		refs.composerInput.addEventListener("paste", handleComposerImagePaste);
+		document.addEventListener("beforeinput", handleEditableTextControlBeforeInput, true);
+		document.addEventListener("input", handleEditableTextControlInput, true);
+		document.addEventListener("focusin", handleEditableTextControlFocusIn, true);
+		document.addEventListener("keydown", handleEditableTextControlShortcut, true);
 		refs.composerForm.addEventListener("submit", function(event) {
 			event.preventDefault();
 			sendComposerDraft();
