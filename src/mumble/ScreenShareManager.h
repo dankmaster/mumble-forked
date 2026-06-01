@@ -50,6 +50,7 @@ struct ScreenShareStartOptions {
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 class RelayWindowHost;
 #endif
+class ExternalScreenShareWindowHost;
 
 class ScreenShareManager : public QObject {
 private:
@@ -107,10 +108,14 @@ private:
 	void stopInAppPublishSession(const QString &streamID);
 	void stopInAppViewSession(const QString &streamID);
 	void handleInAppRelayFailure(const QString &streamID, bool publish, const QString &reason);
+	bool restartExternalViewSession(const ScreenShareSession &session);
+	void showExternalViewWindow(const ScreenShareSession &session, qint64 processID);
 	void startLocalPublishSession(const ScreenShareSession &session);
 	void startLocalViewSession(const ScreenShareSession &session);
 	void stopLocalPublishSession(const QString &streamID);
 	void stopLocalViewSession(const QString &streamID);
+	void setExternalViewAudioMuted(const QString &streamID, bool muted);
+	void setExternalViewPaused(const QString &streamID, bool paused);
 	void logRemoteViewAvailability(const ScreenShareSession &session);
 	void stopLocalHelperSessions(const QString &streamID);
 
@@ -120,6 +125,9 @@ private:
 	QSet< QString > m_activeViewSessions;
 	QHash< QString, qint64 > m_externalPublishProcessIDs;
 	QHash< QString, qint64 > m_externalViewProcessIDs;
+	QHash< QString, ExternalScreenShareWindowHost * > m_externalViewWindows;
+	QSet< QString > m_externalViewAudioMuted;
+	QSet< QString > m_pausedExternalViewSessions;
 	QSet< QString > m_fallbackRuntimeSessions;
 	QSet< QString > m_announcedViewableSessions;
 	mutable QString m_lastLoggedAvailabilityContext;

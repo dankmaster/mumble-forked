@@ -6,8 +6,9 @@
 #include "ScreenShareManager.h"
 
 #include "ClientUser.h"
-#include "Log.h"
+#include "ExternalScreenShareWindowHost.h"
 #include "Global.h"
+#include "Log.h"
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 #	include "RelayWindowHost.h"
 #endif
@@ -355,7 +356,7 @@ bool ScreenShareManager::isPublishingSession(const QString &streamID) const {
 }
 
 bool ScreenShareManager::isViewingSession(const QString &streamID) const {
-	return m_activeViewSessions.contains(streamID);
+	return m_activeViewSessions.contains(streamID) || m_pausedExternalViewSessions.contains(streamID);
 }
 
 bool ScreenShareManager::hasDetachedWindow(const QString &streamID) const {
@@ -367,6 +368,9 @@ bool ScreenShareManager::hasDetachedWindow(const QString &streamID) const {
 		return true;
 	}
 #endif
+	if (ExternalScreenShareWindowHost *host = m_externalViewWindows.value(streamID, nullptr); host && host->isVisible()) {
+		return true;
+	}
 
 	if (m_activePublishSessions.contains(streamID)
 		&& externalProcessHasWindow(m_externalPublishProcessIDs.value(streamID))) {
@@ -408,6 +412,24 @@ bool ScreenShareManager::focusOrReopenDetachedWindow(const QString &streamID) {
 		return true;
 	}
 #endif
+	auto focusExternalViewHost = [](ExternalScreenShareWindowHost *host) {
+		if (!host) {
+			return false;
+		}
+
+		if (host->isMinimized()) {
+			host->showNormal();
+		} else {
+			host->show();
+		}
+		host->raise();
+		host->activateWindow();
+		return true;
+	};
+
+	if (focusExternalViewHost(m_externalViewWindows.value(streamID, nullptr))) {
+		return true;
+	}
 
 	const auto it = m_sessions.constFind(streamID);
 	if (it == m_sessions.cend()) {
@@ -426,6 +448,10 @@ bool ScreenShareManager::focusOrReopenDetachedWindow(const QString &streamID) {
 		m_activePublishSessions.remove(streamID);
 		m_externalPublishProcessIDs.remove(streamID);
 		return false;
+	}
+	if (m_pausedExternalViewSessions.contains(streamID)) {
+		showExternalViewWindow(it.value(), 0);
+		return true;
 	}
 	if (m_activeViewSessions.contains(streamID)) {
 		const qint64 processID = m_externalViewProcessIDs.value(streamID);
@@ -631,6 +657,14 @@ void ScreenShareManager::resetState() {
 	for (const QString &streamID : m_activeViewSessions) {
 		m_helperClient->stopView(streamID);
 	}
+	for (ExternalScreenShareWindowHost *host : m_externalViewWindows.values()) {
+		if (host) {
+			host->closeFromManager();
+		}
+	}
+	m_externalViewWindows.clear();
+	m_externalViewAudioMuted.clear();
+	m_pausedExternalViewSessions.clear();
 
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	for (RelayWindowHost *host : m_inAppPublishWindows.values()) {
@@ -990,9 +1024,13 @@ void ScreenShareManager::handleInAppRelayFailure(const QString &streamID, const 
 	}
 
 	QString errorMessage;
-	qint64 processID = 0;
-	const bool started = publish ? m_helperClient->startPublish(session, &errorMessage, &processID)
-								 : m_helperClient->startView(session, &errorMessage, &processID);
+	qint64 processID                 = 0;
+	ScreenShareSession helperSession = session;
+	if (!publish && m_externalViewAudioMuted.contains(streamID)) {
+		helperSession.captureAudio = false;
+	}
+	const bool started = publish ? m_helperClient->startPublish(helperSession, &errorMessage, &processID)
+								 : m_helperClient->startView(helperSession, &errorMessage, &processID);
 	if (started) {
 		m_inAppPublishSessionIDs.remove(streamID);
 		m_inAppViewSessionIDs.remove(streamID);
@@ -1003,6 +1041,7 @@ void ScreenShareManager::handleInAppRelayFailure(const QString &streamID, const 
 		} else {
 			m_activeViewSessions.insert(streamID);
 			m_externalViewProcessIDs.insert(streamID, processID);
+			showExternalViewWindow(session, processID);
 		}
 		if (Global::get().l) {
 			Global::get().l->log(
@@ -1025,6 +1064,69 @@ void ScreenShareManager::handleInAppRelayFailure(const QString &streamID, const 
 	}
 }
 #endif
+
+bool ScreenShareManager::restartExternalViewSession(const ScreenShareSession &session) {
+	QString errorMessage;
+	qint64 processID                 = 0;
+	ScreenShareSession helperSession = session;
+	if (m_externalViewAudioMuted.contains(session.streamID)) {
+		helperSession.captureAudio = false;
+	}
+
+	if (m_helperClient->startView(helperSession, &errorMessage, &processID)) {
+		m_activeViewSessions.insert(session.streamID);
+		m_pausedExternalViewSessions.remove(session.streamID);
+		m_externalViewProcessIDs.insert(session.streamID, processID);
+		showExternalViewWindow(session, processID);
+		if (Global::get().l) {
+			Global::get().l->log(Log::Information,
+								 tr("Using the external screen-share runtime for %1.")
+									 .arg(session.streamID.toHtmlEscaped()));
+		}
+		return true;
+	}
+
+	if (Global::get().l) {
+		Global::get().l->log(Log::Warning, tr("Unable to start screen-share viewer for %1: %2")
+											   .arg(session.streamID.toHtmlEscaped(),
+													errorMessage.isEmpty() ? tr("unknown error")
+																		   : errorMessage.toHtmlEscaped()));
+	}
+	return false;
+}
+
+void ScreenShareManager::showExternalViewWindow(const ScreenShareSession &session, const qint64 processID) {
+	ExternalScreenShareWindowHost *host = m_externalViewWindows.value(session.streamID, nullptr);
+	if (!host) {
+		host = new ExternalScreenShareWindowHost(session);
+		m_externalViewWindows.insert(session.streamID, host);
+
+		connect(host, &ExternalScreenShareWindowHost::stopRequested, this, &ScreenShareManager::requestStopViewing);
+		connect(host, &ExternalScreenShareWindowHost::closeRequested, this, &ScreenShareManager::requestStopViewing);
+		connect(host, &ExternalScreenShareWindowHost::pauseToggled, this,
+				&ScreenShareManager::setExternalViewPaused);
+		connect(host, &ExternalScreenShareWindowHost::audioMuteToggled, this,
+				&ScreenShareManager::setExternalViewAudioMuted);
+		connect(host, &QObject::destroyed, this, [this, streamID = session.streamID, host]() {
+			if (m_externalViewWindows.value(streamID, nullptr) == host) {
+				m_externalViewWindows.remove(streamID);
+			}
+		});
+	} else {
+		host->updateSession(session);
+	}
+
+	host->setAudioMuted(m_externalViewAudioMuted.contains(session.streamID));
+	host->setPaused(m_pausedExternalViewSessions.contains(session.streamID));
+	host->setProcessID(processID);
+	if (host->isMinimized()) {
+		host->showNormal();
+	} else {
+		host->show();
+	}
+	host->raise();
+	host->activateWindow();
+}
 
 void ScreenShareManager::startLocalPublishSession(const ScreenShareSession &session) {
 	if (m_activePublishSessions.contains(session.streamID)) {
@@ -1091,6 +1193,11 @@ void ScreenShareManager::startLocalPublishSession(const ScreenShareSession &sess
 
 void ScreenShareManager::startLocalViewSession(const ScreenShareSession &session) {
 	if (m_activeViewSessions.contains(session.streamID)) {
+		focusOrReopenDetachedWindow(session.streamID);
+		return;
+	}
+	if (m_pausedExternalViewSessions.contains(session.streamID)) {
+		setExternalViewPaused(session.streamID, false);
 		return;
 	}
 
@@ -1112,11 +1219,16 @@ void ScreenShareManager::startLocalViewSession(const ScreenShareSession &session
 #endif
 
 	QString errorMessage;
-	qint64 processID = 0;
-	if (m_helperClient->startView(session, &errorMessage, &processID)) {
+	qint64 processID                 = 0;
+	ScreenShareSession helperSession = session;
+	if (m_externalViewAudioMuted.contains(session.streamID)) {
+		helperSession.captureAudio = false;
+	}
+	if (m_helperClient->startView(helperSession, &errorMessage, &processID)) {
 		m_fallbackRuntimeSessions.remove(session.streamID);
 		m_activeViewSessions.insert(session.streamID);
 		m_externalViewProcessIDs.insert(session.streamID, processID);
+		showExternalViewWindow(session, processID);
 		if (Global::get().l) {
 			Global::get().l->log(
 				Log::Information,
@@ -1162,6 +1274,17 @@ void ScreenShareManager::stopLocalPublishSession(const QString &streamID) {
 }
 
 void ScreenShareManager::stopLocalViewSession(const QString &streamID) {
+	const auto hostIt = m_externalViewWindows.find(streamID);
+	if (hostIt != m_externalViewWindows.end()) {
+		ExternalScreenShareWindowHost *host = hostIt.value();
+		m_externalViewWindows.erase(hostIt);
+		if (host) {
+			host->closeFromManager();
+		}
+	}
+	m_externalViewAudioMuted.remove(streamID);
+	m_pausedExternalViewSessions.remove(streamID);
+
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	if (m_inAppViewSessionIDs.contains(streamID)) {
 		stopInAppViewSession(streamID);
@@ -1176,6 +1299,79 @@ void ScreenShareManager::stopLocalViewSession(const QString &streamID) {
 	}
 	m_externalViewProcessIDs.remove(streamID);
 	m_fallbackRuntimeSessions.remove(streamID);
+}
+
+void ScreenShareManager::setExternalViewAudioMuted(const QString &streamID, const bool muted) {
+	const auto it = m_sessions.constFind(streamID);
+	if (it == m_sessions.cend()) {
+		return;
+	}
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (m_inAppViewSessionIDs.contains(streamID)) {
+		return;
+	}
+#endif
+
+	if (muted) {
+		m_externalViewAudioMuted.insert(streamID);
+	} else {
+		m_externalViewAudioMuted.remove(streamID);
+	}
+
+	ExternalScreenShareWindowHost *host = m_externalViewWindows.value(streamID, nullptr);
+	if (host) {
+		host->setAudioMuted(muted);
+	}
+
+	if (!m_pausedExternalViewSessions.contains(streamID) && m_activeViewSessions.remove(streamID)) {
+		m_helperClient->stopView(streamID);
+		m_externalViewProcessIDs.remove(streamID);
+		if (host) {
+			host->setProcessID(0);
+		}
+		restartExternalViewSession(it.value());
+	}
+
+	emit sessionUpdated(streamID);
+}
+
+void ScreenShareManager::setExternalViewPaused(const QString &streamID, const bool paused) {
+	const auto it = m_sessions.constFind(streamID);
+	if (it == m_sessions.cend()) {
+		return;
+	}
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (m_inAppViewSessionIDs.contains(streamID)) {
+		return;
+	}
+#endif
+
+	ExternalScreenShareWindowHost *host = m_externalViewWindows.value(streamID, nullptr);
+	if (paused) {
+		m_pausedExternalViewSessions.insert(streamID);
+		if (m_activeViewSessions.remove(streamID)) {
+			m_helperClient->stopView(streamID);
+		}
+		m_externalViewProcessIDs.remove(streamID);
+		if (host) {
+			host->setProcessID(0);
+			host->setPaused(true);
+		}
+		emit sessionUpdated(streamID);
+		return;
+	}
+
+	m_pausedExternalViewSessions.remove(streamID);
+	if (host) {
+		host->setPaused(false);
+	}
+	if (!m_activeViewSessions.contains(streamID)) {
+		if (!canViewSession(it.value()) || !restartExternalViewSession(it.value())) {
+			requestStopViewing(streamID);
+			return;
+		}
+	}
+	emit sessionUpdated(streamID);
 }
 
 void ScreenShareManager::logRemoteViewAvailability(const ScreenShareSession &session) {
@@ -1200,6 +1396,9 @@ void ScreenShareManager::handleScreenShareState(const MumbleProto::ScreenShareSt
 
 	const ScreenShareSession session = sessionFromState(msg);
 	m_sessions.insert(session.streamID, session);
+	if (ExternalScreenShareWindowHost *host = m_externalViewWindows.value(session.streamID, nullptr)) {
+		host->updateSession(session);
+	}
 
 	if (canPublishSession(session)) {
 		startLocalPublishSession(session);
@@ -1208,7 +1407,8 @@ void ScreenShareManager::handleScreenShareState(const MumbleProto::ScreenShareSt
 	}
 
 	if (canViewSession(session)) {
-		if (m_activeViewSessions.contains(session.streamID)) {
+		if (m_activeViewSessions.contains(session.streamID)
+			|| m_pausedExternalViewSessions.contains(session.streamID)) {
 			m_announcedViewableSessions.remove(session.streamID);
 		} else if (shouldAutoViewSession(session)) {
 			startLocalViewSession(session);

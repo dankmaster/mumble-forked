@@ -202,6 +202,8 @@ set(MUMBLE_SOURCES
 	"EchoCancelOption.h"
 	"EnumStringConversions.cpp"
 	"EnumStringConversions.h"
+	"ExternalScreenShareWindowHost.cpp"
+	"ExternalScreenShareWindowHost.h"
 	"FeedbackDialog.cpp"
 	"FeedbackDialog.h"
 	"Global.cpp"
