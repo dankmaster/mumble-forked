@@ -110,7 +110,11 @@ Publisher grant:
 - `roomJoin=true`
 - `canPublish=true`
 - `canPublishSources=["camera", "screen_share", "screen_share_audio"]`
-- `canSubscribe=true`
+- `canSubscribe=false`
+
+The GStreamer `livekitwebrtcsink` producer path expects a publish-only token.
+If a publisher token can also subscribe, LiveKit can leave the producer in the
+join path until it closes the connection with `JOIN_TIMEOUT`.
 
 Viewer grant:
 
@@ -129,6 +133,13 @@ cleanup.
 - Serve the LiveKit WebSocket over TLS from the public
   `screen_share_relay_url`; do not expose the internal LiveKit API port directly
   without a reverse proxy or load balancer.
+- If the LiveKit WebSocket is behind nginx, Caddy, Traefik, or another reverse
+  proxy, set the WebSocket read/send/idle timeouts longer than the relay token
+  lifetime. A default 60-second proxy timeout will drop active GStreamer
+  sessions with `Signalling error: Error: Server disconnected`.
+- If the WebSocket stays alive with ping/pong but LiveKit logs `JOIN_TIMEOUT`
+  at roughly 60 seconds, inspect publisher JWT grants, ICE candidate reachability,
+  and whether the GStreamer publisher reaches an active peer connection.
 - Keep `7881/tcp` exposed for WebRTC-over-TCP fallback and either expose
   `7882/udp` when using LiveKit UDP mux or the configured UDP port range when
   not using mux.

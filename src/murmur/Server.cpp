@@ -1422,10 +1422,12 @@ QString Server::liveKitScreenShareTokenForRecipient(const ScreenShareStream &str
 	QJsonObject videoGrant;
 	videoGrant.insert(QStringLiteral("room"), stream.qsRelayRoomID);
 	videoGrant.insert(QStringLiteral("roomJoin"), true);
-	videoGrant.insert(QStringLiteral("canPublish"), relayRole == MumbleProto::ScreenShareRelayRolePublisher);
+	const bool publisherRole = relayRole == MumbleProto::ScreenShareRelayRolePublisher;
+	videoGrant.insert(QStringLiteral("canPublish"), publisherRole);
 	videoGrant.insert(QStringLiteral("canPublishData"), false);
-	videoGrant.insert(QStringLiteral("canSubscribe"), true);
-	if (relayRole == MumbleProto::ScreenShareRelayRolePublisher) {
+	// livekitwebrtcsink expects producer tokens to be publish-only.
+	videoGrant.insert(QStringLiteral("canSubscribe"), !publisherRole);
+	if (publisherRole) {
 		QJsonArray publishSources;
 		publishSources.push_back(QStringLiteral("camera"));
 		publishSources.push_back(QStringLiteral("screen_share"));
