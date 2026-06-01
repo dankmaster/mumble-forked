@@ -110,9 +110,16 @@ New-Item -ItemType Directory -Force -Path $stageRootPath | Out-Null
 $cmakeExecutable = Get-CMakeExecutable
 Write-Host "Using cmake from '$cmakeExecutable'."
 
-& $cmakeExecutable --install $buildRootPath --config $BuildType --prefix $stageRootPath
-if ($LASTEXITCODE -ne 0) {
-	throw "cmake --install failed while staging the Windows client payload."
+try {
+	& $cmakeExecutable --install $buildRootPath --config $BuildType --prefix $stageRootPath
+	if ($LASTEXITCODE -ne 0) {
+		throw "cmake --install failed while staging the Windows client payload."
+	}
+} catch {
+	if (Test-Path -LiteralPath $stageRootPath) {
+		Remove-Item -LiteralPath $stageRootPath -Recurse -Force
+	}
+	throw
 }
 
 # `cmake --install` covers most of the runtime tree, but some CI payload bits are

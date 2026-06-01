@@ -303,48 +303,57 @@ function Invoke-ProcessWithTimeout {
 		[int]$TimeoutSeconds = 180
 	)
 
-	function ConvertTo-CmdQuotedArgument {
+	function ConvertTo-WindowsProcessArgument {
 		param(
 			[Parameter(Mandatory = $true)]
 			[string]$Value
 		)
 
-		return '"' + ($Value -replace '"', '\"') + '"'
-	}
+		if ($Value.Length -eq 0) {
+			return '""'
+		}
+		if ($Value -notmatch '[\s"]') {
+			return $Value
+		}
 
-	$tempRoot = if (-not [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
-		$env:RUNNER_TEMP
-	} else {
-		[System.IO.Path]::GetTempPath()
+		$result = '"'
+		$backslashCount = 0
+		foreach ($character in $Value.ToCharArray()) {
+			if ($character -eq '\') {
+				$backslashCount++
+				continue
+			}
+			if ($character -eq '"') {
+				if ($backslashCount -gt 0) {
+					$result += ('\' * ($backslashCount * 2))
+					$backslashCount = 0
+				}
+				$result += '\"'
+				continue
+			}
+			if ($backslashCount -gt 0) {
+				$result += ('\' * $backslashCount)
+				$backslashCount = 0
+			}
+			$result += $character
+		}
+		if ($backslashCount -gt 0) {
+			$result += ('\' * ($backslashCount * 2))
+		}
+		$result += '"'
+		return $result
 	}
-	New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
-
-	$outputToken = [Guid]::NewGuid().ToString("N")
-	$stdoutPath = Join-Path $tempRoot "$outputToken.stdout.log"
-	$stderrPath = Join-Path $tempRoot "$outputToken.stderr.log"
 
 	$quotedArguments = foreach ($argument in $Arguments) {
-		ConvertTo-CmdQuotedArgument -Value $argument
+		ConvertTo-WindowsProcessArgument -Value $argument
 	}
-	$commandLine = @(
-		(ConvertTo-CmdQuotedArgument -Value $FilePath),
-		($quotedArguments -join ' '),
-		"1>",
-		(ConvertTo-CmdQuotedArgument -Value $stdoutPath),
-		"2>",
-		(ConvertTo-CmdQuotedArgument -Value $stderrPath)
-	) -join ' '
 
 	$startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-	$startInfo.FileName = if (-not [string]::IsNullOrWhiteSpace($env:ComSpec)) {
-		$env:ComSpec
-	} else {
-		"cmd.exe"
-	}
-	$startInfo.Arguments = '/D /S /C "' + $commandLine + '"'
+	$startInfo.FileName = $FilePath
+	$startInfo.Arguments = $quotedArguments -join ' '
 	$startInfo.UseShellExecute = $false
-	$startInfo.RedirectStandardOutput = $false
-	$startInfo.RedirectStandardError = $false
+	$startInfo.RedirectStandardOutput = $true
+	$startInfo.RedirectStandardError = $true
 	$startInfo.CreateNoWindow = $true
 
 	$process = [System.Diagnostics.Process]::new()
@@ -354,6 +363,8 @@ function Invoke-ProcessWithTimeout {
 
 	try {
 		[void]$process.Start()
+		$stdoutTask = $process.StandardOutput.ReadToEndAsync()
+		$stderrTask = $process.StandardError.ReadToEndAsync()
 
 		if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
 			& taskkill.exe /PID $process.Id /T /F *> $null
@@ -361,28 +372,13 @@ function Invoke-ProcessWithTimeout {
 		}
 
 		$process.Refresh()
-		[string]$stdout = ""
-		[string]$stderr = ""
-		if (Test-Path -LiteralPath $stdoutPath) {
-			$content = Get-Content -LiteralPath $stdoutPath -Raw -ErrorAction SilentlyContinue
-			if ($null -ne $content) {
-				$stdout = $content
-			}
-		}
-		if (Test-Path -LiteralPath $stderrPath) {
-			$content = Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue
-			if ($null -ne $content) {
-				$stderr = $content
-			}
-		}
 
 		return [PSCustomObject]@{
 			ExitCode = $process.ExitCode
-			StdOut   = $stdout
-			StdErr   = $stderr
+			StdOut   = $stdoutTask.GetAwaiter().GetResult()
+			StdErr   = $stderrTask.GetAwaiter().GetResult()
 		}
 	} finally {
-		Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
 		$process.Dispose()
 	}
 }
@@ -1519,11 +1515,20 @@ try {
 		$env:MUMBLE_SCREENSHARE_HEADLESS_VIEW = "1"
 
 		$helperSearchRoots = @()
+		$stagedRuntimeRoots = @()
 		if ($SharedWebEngine) {
 			$stagedHelperRoot = Join-Path $buildRoot "shared-webengine-stage"
 			if (Test-Path -LiteralPath $stagedHelperRoot) {
-				$helperSearchRoots += $stagedHelperRoot
+				$resolvedStagedHelperRoot = (Resolve-Path -LiteralPath $stagedHelperRoot).Path
+				$stagedRuntimeRoots += $resolvedStagedHelperRoot
+				$helperSearchRoots += $resolvedStagedHelperRoot
 			}
+		}
+		$stagedWindowsPayloadRoot = Join-Path $buildRoot "windows-client-payload"
+		if (Test-Path -LiteralPath $stagedWindowsPayloadRoot) {
+			$resolvedStagedWindowsPayloadRoot = (Resolve-Path -LiteralPath $stagedWindowsPayloadRoot).Path
+			$stagedRuntimeRoots += $resolvedStagedWindowsPayloadRoot
+			$helperSearchRoots += $resolvedStagedWindowsPayloadRoot
 		}
 		$helperSearchRoots += $buildRoot
 
@@ -1544,15 +1549,38 @@ try {
 		$selfTestPath = Join-Path $buildRoot "windows-screen-share-self-test.json"
 		$artifactListPath = Join-Path $buildRoot "windows-client-artifacts.txt"
 
-		$helperAppDir = Split-Path -Parent $helper.FullName
+		$helperAppDir = (Resolve-Path -LiteralPath (Split-Path -Parent $helper.FullName)).Path
+		$useStagedAppDir = $false
+		foreach ($stagedRuntimeRoot in $stagedRuntimeRoots) {
+			$normalizedStagedRuntimeRoot = $stagedRuntimeRoot.TrimEnd(
+				[System.IO.Path]::DirectorySeparatorChar,
+				[System.IO.Path]::AltDirectorySeparatorChar
+			)
+			if ($helperAppDir.Equals($normalizedStagedRuntimeRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+				$helperAppDir.StartsWith(
+					"$normalizedStagedRuntimeRoot$([System.IO.Path]::DirectorySeparatorChar)",
+					[System.StringComparison]::OrdinalIgnoreCase
+				)) {
+				$useStagedAppDir = $true
+				break
+			}
+		}
+
 		$helperRuntimeDir = $null
+		$removeHelperRuntimeDir = $false
 		try {
-			$helperRuntimeDir = New-IsolatedHelperRuntimeDirectory -RepoRoot $repoRoot -SourceAppDir $helperAppDir
+			if ($useStagedAppDir) {
+				$helperRuntimeDir = $helperAppDir
+				Write-Host "Verifying screen-share helper runtime from staged app directory '$helperRuntimeDir'."
+			} else {
+				$helperRuntimeDir = New-IsolatedHelperRuntimeDirectory -RepoRoot $repoRoot -SourceAppDir $helperAppDir
+				$removeHelperRuntimeDir = $true
+				Write-Host "Verifying screen-share helper runtime from isolated snapshot '$helperRuntimeDir'."
+			}
 			$runtimeHelperPath = Join-Path $helperRuntimeDir "mumble-screen-helper.exe"
 			if (-not (Test-Path -LiteralPath $runtimeHelperPath)) {
 				throw "Unable to locate mumble-screen-helper.exe in isolated runtime check directory '$helperRuntimeDir'."
 			}
-			Write-Host "Verifying screen-share helper runtime from isolated snapshot '$helperRuntimeDir'."
 
 			$stagedGStreamerLaunchEnvironment = Get-StagedGStreamerLaunchEnvironment -AppDir $helperRuntimeDir
 			if ($RequireGStreamerRuntime -and -not $stagedGStreamerLaunchEnvironment.ContainsKey("MUMBLE_SCREENSHARE_GST_LAUNCH_PATH")) {
@@ -1590,6 +1618,12 @@ try {
 				}
 				if (-not $capabilities.capture_supported) {
 					throw "Helper runtime probe reports capture_supported=false."
+				}
+				if (-not $runtimeSupport.browser_webrtc_available) {
+					throw "Helper runtime probe reports browser_webrtc_available=false."
+				}
+				if (-not ($runtimeSupport.edge_available -or $runtimeSupport.chrome_available -or $runtimeSupport.firefox_available)) {
+					throw "Helper runtime probe found no supported browser on this machine."
 				}
 				if (-not ($runtimeSupport.h264_mf_available -or $runtimeSupport.h264_qsv_available -or $runtimeSupport.libx264_available)) {
 					throw "Helper runtime probe found no usable H.264 encoder."
@@ -1653,7 +1687,9 @@ try {
 				}
 			}
 		} finally {
-			Remove-IsolatedHelperRuntimeDirectory -RuntimeDir $helperRuntimeDir
+			if ($removeHelperRuntimeDir) {
+				Remove-IsolatedHelperRuntimeDirectory -RuntimeDir $helperRuntimeDir
+			}
 		}
 
 		$artifacts = Get-RepoArtifactPaths -BuildRoot $buildRoot
