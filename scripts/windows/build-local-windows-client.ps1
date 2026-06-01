@@ -348,23 +348,28 @@ function Invoke-ProcessWithTimeout {
 		ConvertTo-WindowsProcessArgument -Value $argument
 	}
 
-	$startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-	$startInfo.FileName = $FilePath
-	$startInfo.Arguments = $quotedArguments -join ' '
-	$startInfo.UseShellExecute = $false
-	$startInfo.RedirectStandardOutput = $true
-	$startInfo.RedirectStandardError = $true
-	$startInfo.CreateNoWindow = $true
+	$tempRoot = if (-not [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
+		$env:RUNNER_TEMP
+	} else {
+		[System.IO.Path]::GetTempPath()
+	}
+	New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
 
-	$process = [System.Diagnostics.Process]::new()
-	$process.StartInfo = $startInfo
+	$outputToken = [Guid]::NewGuid().ToString("N")
+	$stdoutPath = Join-Path $tempRoot "$outputToken.stdout.log"
+	$stderrPath = Join-Path $tempRoot "$outputToken.stderr.log"
+	$argumentList = $quotedArguments -join ' '
+	$process = $null
 
 	Write-Host "$Description timeout: $TimeoutSeconds seconds"
 
 	try {
-		[void]$process.Start()
-		$stdoutTask = $process.StandardOutput.ReadToEndAsync()
-		$stderrTask = $process.StandardError.ReadToEndAsync()
+		$process = Start-Process -FilePath $FilePath `
+			-ArgumentList $argumentList `
+			-PassThru `
+			-RedirectStandardOutput $stdoutPath `
+			-RedirectStandardError $stderrPath `
+			-WindowStyle Hidden
 
 		if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
 			& taskkill.exe /PID $process.Id /T /F *> $null
@@ -372,14 +377,31 @@ function Invoke-ProcessWithTimeout {
 		}
 
 		$process.Refresh()
+		[string]$stdout = ""
+		[string]$stderr = ""
+		if (Test-Path -LiteralPath $stdoutPath) {
+			$content = Get-Content -LiteralPath $stdoutPath -Raw -ErrorAction SilentlyContinue
+			if ($null -ne $content) {
+				$stdout = $content
+			}
+		}
+		if (Test-Path -LiteralPath $stderrPath) {
+			$content = Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue
+			if ($null -ne $content) {
+				$stderr = $content
+			}
+		}
 
 		return [PSCustomObject]@{
 			ExitCode = $process.ExitCode
-			StdOut   = $stdoutTask.GetAwaiter().GetResult()
-			StdErr   = $stderrTask.GetAwaiter().GetResult()
+			StdOut   = $stdout
+			StdErr   = $stderr
 		}
 	} finally {
-		$process.Dispose()
+		Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+		if ($process) {
+			$process.Dispose()
+		}
 	}
 }
 
@@ -1328,6 +1350,22 @@ function Test-ObjectHasProperty {
 	return $Object -and $Object.PSObject.Properties.Name -contains $Name
 }
 
+function Get-ObjectBooleanProperty {
+	param(
+		[Parameter(Mandatory = $true)]
+		[object]$Object,
+
+		[Parameter(Mandatory = $true)]
+		[string]$Name
+	)
+
+	if (-not (Test-ObjectHasProperty -Object $Object -Name $Name)) {
+		return $false
+	}
+
+	return [bool]$Object.PSObject.Properties[$Name].Value
+}
+
 function Get-RepoArtifactPaths {
 	param(
 		[Parameter(Mandatory = $true)]
@@ -1587,7 +1625,10 @@ try {
 				throw "Packaged GStreamer runtime was not found next to '$runtimeHelperPath'."
 			}
 
-			Invoke-WithProcessEnvironment -Variables $stagedGStreamerLaunchEnvironment -ScriptBlock {
+			$helperLaunchEnvironment = $stagedGStreamerLaunchEnvironment.Clone()
+			$helperLaunchEnvironment["QT_DEBUG_PLUGINS"] = $null
+
+			Invoke-WithProcessEnvironment -Variables $helperLaunchEnvironment -ScriptBlock {
 				$capabilityProbe = Invoke-ProcessWithTimeout -FilePath $runtimeHelperPath `
 					-Arguments @("--diagnostics-log-file", $logPath, "--print-capabilities-json") `
 					-Description "Helper capability probe" `
@@ -1613,26 +1654,36 @@ try {
 					$capabilities
 				}
 
-				if (-not $runtimeSupport.ffmpeg_available) {
+				if (-not (Get-ObjectBooleanProperty -Object $runtimeSupport -Name "ffmpeg_available")) {
 					throw "Helper runtime probe reports ffmpeg_available=false."
 				}
-				if (-not $capabilities.capture_supported) {
+				if (-not (Get-ObjectBooleanProperty -Object $capabilities -Name "capture_supported")) {
 					throw "Helper runtime probe reports capture_supported=false."
 				}
-				if (-not $runtimeSupport.browser_webrtc_available) {
+				if ((Test-ObjectHasProperty -Object $runtimeSupport -Name "browser_webrtc_available") -and
+					-not (Get-ObjectBooleanProperty -Object $runtimeSupport -Name "browser_webrtc_available")) {
 					throw "Helper runtime probe reports browser_webrtc_available=false."
 				}
-				if (-not ($runtimeSupport.edge_available -or $runtimeSupport.chrome_available -or $runtimeSupport.firefox_available)) {
+				$browserAvailabilityKeys = @("edge_available", "chrome_available", "firefox_available")
+				$browserAvailabilityReported = @($browserAvailabilityKeys | Where-Object {
+						Test-ObjectHasProperty -Object $runtimeSupport -Name $_
+					}).Count -gt 0
+				$browserAvailable = @($browserAvailabilityKeys | Where-Object {
+						Get-ObjectBooleanProperty -Object $runtimeSupport -Name $_
+					}).Count -gt 0
+				if ($browserAvailabilityReported -and -not $browserAvailable) {
 					throw "Helper runtime probe found no supported browser on this machine."
 				}
-				if (-not ($runtimeSupport.h264_mf_available -or $runtimeSupport.h264_qsv_available -or $runtimeSupport.libx264_available)) {
+				if (-not ((Get-ObjectBooleanProperty -Object $runtimeSupport -Name "h264_mf_available") -or
+					(Get-ObjectBooleanProperty -Object $runtimeSupport -Name "h264_qsv_available") -or
+					(Get-ObjectBooleanProperty -Object $runtimeSupport -Name "libx264_available"))) {
 					throw "Helper runtime probe found no usable H.264 encoder."
 				}
 				if ($RequireGStreamerRuntime) {
-					if (-not $runtimeSupport.gstreamer_available) {
+					if (-not (Get-ObjectBooleanProperty -Object $runtimeSupport -Name "gstreamer_available")) {
 						throw "Helper runtime probe reports gstreamer_available=false."
 					}
-					if (-not $runtimeSupport.gstreamer_livekit_publish_available) {
+					if (-not (Get-ObjectBooleanProperty -Object $runtimeSupport -Name "gstreamer_livekit_publish_available")) {
 						$missing = if (Test-ObjectHasProperty -Object $runtimeSupport -Name "gstreamer_missing_elements") {
 							($runtimeSupport.gstreamer_missing_elements -join ", ")
 						} else {
@@ -1640,7 +1691,7 @@ try {
 						}
 						throw "Helper runtime probe reports gstreamer_livekit_publish_available=false. Missing elements: $missing"
 					}
-					if (-not $runtimeSupport.gstreamer_livekit_view_available) {
+					if (-not (Get-ObjectBooleanProperty -Object $runtimeSupport -Name "gstreamer_livekit_view_available")) {
 						$missing = if (Test-ObjectHasProperty -Object $runtimeSupport -Name "gstreamer_missing_elements") {
 							($runtimeSupport.gstreamer_missing_elements -join ", ")
 						} else {
