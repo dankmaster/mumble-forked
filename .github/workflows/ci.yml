@@ -173,6 +173,7 @@ jobs:
         uses: ./.github/actions/setup-windows-optional-runtimes
         with:
           onnxruntime-version: ${{ env.ONNXRUNTIME_VERSION }}
+          rnnoise-model-release-tag: build-env-2025-11-webengine-codecs
           install-rust: 'true'
           install-ffmpeg: 'true'
 

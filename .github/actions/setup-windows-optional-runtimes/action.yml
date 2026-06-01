@@ -26,6 +26,10 @@ inputs:
     description: 'Optional primary RNNoise model archive URL.'
     required: false
     default: ''
+  rnnoise-model-release-tag:
+    description: 'Optional GitHub release tag in the current repository that mirrors the RNNoise model archive.'
+    required: false
+    default: ''
 
 outputs:
   rnnoise-model-cache-hit:
@@ -183,6 +187,15 @@ runs:
 
         Add-ArchiveUrl "${{ inputs.rnnoise-model-url }}"
         Add-ArchiveUrl ([System.Environment]::GetEnvironmentVariable("MUMBLE_RNNOISE_MODEL_ARCHIVE_URL", "Process"))
+
+        $releaseTag = "${{ inputs.rnnoise-model-release-tag }}".Trim()
+        if ([string]::IsNullOrWhiteSpace($releaseTag)) {
+          $releaseTag = [System.Environment]::GetEnvironmentVariable("MUMBLE_RNNOISE_MODEL_RELEASE_TAG", "Process")
+        }
+        $repository = [System.Environment]::GetEnvironmentVariable("GITHUB_REPOSITORY", "Process")
+        if (-not [string]::IsNullOrWhiteSpace($releaseTag) -and -not [string]::IsNullOrWhiteSpace($repository)) {
+          Add-ArchiveUrl "https://github.com/$repository/releases/download/$releaseTag/$archiveName"
+        }
 
         $environmentSource = [System.Environment]::GetEnvironmentVariable("MUMBLE_ENVIRONMENT_SOURCE", "Process")
         if (-not [string]::IsNullOrWhiteSpace($environmentSource)) {

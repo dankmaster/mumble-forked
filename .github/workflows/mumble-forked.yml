@@ -82,6 +82,7 @@ jobs:
         with:
           onnxruntime-version: ${{ env.ONNXRUNTIME_VERSION }}
           gstreamer-version: ${{ env.GSTREAMER_VERSION }}
+          rnnoise-model-release-tag: ${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE_TAG }}
           install-rust: 'true'
           install-ffmpeg: 'true'
           install-gstreamer: 'true'
