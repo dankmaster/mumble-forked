@@ -1424,7 +1424,7 @@ QString Server::liveKitScreenShareTokenForRecipient(const ScreenShareStream &str
 	videoGrant.insert(QStringLiteral("roomJoin"), true);
 	videoGrant.insert(QStringLiteral("canPublish"), relayRole == MumbleProto::ScreenShareRelayRolePublisher);
 	videoGrant.insert(QStringLiteral("canPublishData"), false);
-	videoGrant.insert(QStringLiteral("canSubscribe"), true);
+	videoGrant.insert(QStringLiteral("canSubscribe"), relayRole == MumbleProto::ScreenShareRelayRoleViewer);
 	if (relayRole == MumbleProto::ScreenShareRelayRolePublisher) {
 		QJsonArray publishSources;
 		publishSources.push_back(QStringLiteral("camera"));
