@@ -109,12 +109,17 @@ Publisher grant:
 
 - `roomJoin=true`
 - `canPublish=true`
-- `canPublishSources=["camera", "screen_share", "screen_share_audio"]`
+- `canPublishSources=["camera", "screen_share"]`
+- when system audio is requested, also `["microphone", "screen_share_audio"]`
 - `canSubscribe=false`
 
 The GStreamer `livekitwebrtcsink` producer path expects a publish-only token.
 If a publisher token can also subscribe, LiveKit can leave the producer in the
-join path until it closes the connection with `JOIN_TIMEOUT`.
+join path until it closes the connection with `JOIN_TIMEOUT`. Current
+GStreamer LiveKit builds expose the WASAPI loopback audio pad as a regular
+LiveKit microphone source, so audio-enabled screen-share sessions must allow
+`microphone` until the helper can mark that pad as `screen_share_audio`
+explicitly.
 
 Viewer grant:
 

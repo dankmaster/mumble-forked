@@ -1431,7 +1431,12 @@ QString Server::liveKitScreenShareTokenForRecipient(const ScreenShareStream &str
 		QJsonArray publishSources;
 		publishSources.push_back(QStringLiteral("camera"));
 		publishSources.push_back(QStringLiteral("screen_share"));
-		publishSources.push_back(QStringLiteral("screen_share_audio"));
+		if (stream.bCaptureAudio) {
+			// livekitwebrtcsink currently publishes its audio pad as a regular
+			// microphone source even when it is fed by WASAPI loopback.
+			publishSources.push_back(QStringLiteral("microphone"));
+			publishSources.push_back(QStringLiteral("screen_share_audio"));
+		}
 		videoGrant.insert(QStringLiteral("canPublishSources"), publishSources);
 	}
 
