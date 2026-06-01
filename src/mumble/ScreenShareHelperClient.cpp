@@ -102,6 +102,28 @@ QStringList stringListFromJson(const QJsonValue &value) {
 	return values;
 }
 
+bool inAppWebRtcRelayAdvertised() {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (!qEnvironmentVariableIsSet("MUMBLE_SCREENSHARE_ALLOW_RELAY_WEBAPP")) {
+		return true;
+	}
+
+	const QString value = qEnvironmentVariable("MUMBLE_SCREENSHARE_ALLOW_RELAY_WEBAPP").trimmed().toLower();
+	return value != QLatin1String("0") && value != QLatin1String("false") && value != QLatin1String("no")
+		   && value != QLatin1String("off");
+#else
+	return false;
+#endif
+}
+
+void appendUniqueCodecs(QList< int > &target, const QList< int > &codecs) {
+	for (const int codec : Mumble::ScreenShare::sanitizeCodecList(codecs)) {
+		if (!target.contains(codec)) {
+			target.append(codec);
+		}
+	}
+}
+
 unsigned int nonNegativePayloadValue(const QJsonObject &payload, const char *key) {
 	const int rawValue = payload.value(QLatin1String(key)).toInt();
 	if (rawValue <= 0) {
@@ -166,6 +188,16 @@ QString socketErrorMessage(const QLocalSocket &socket, const QString &fallback) 
 	}
 
 	return message;
+}
+
+qint64 activeProcessIDFromReply(const QJsonObject &reply) {
+	const QJsonValue value = reply.value(QStringLiteral("payload"))
+								 .toObject()
+								 .value(QStringLiteral("active_process_id"));
+	bool ok = false;
+	const qint64 processID =
+		value.isString() ? value.toString().toLongLong(&ok) : static_cast< qint64 >(value.toDouble(0));
+	return ok || processID > 0 ? processID : 0;
 }
 } // namespace
 
@@ -459,7 +491,23 @@ QJsonObject ScreenShareHelperClient::payloadFromSession(const ScreenShareSession
 }
 
 void ScreenShareHelperClient::applyAdvertisedCapabilities(MumbleProto::Version &msg) {
-	const CapabilitySnapshot snapshot = detectLocalCapabilities();
+	CapabilitySnapshot snapshot = detectLocalCapabilities();
+
+	if (inAppWebRtcRelayAdvertised()) {
+		snapshot.supportsSignaling = true;
+		snapshot.captureSupported  = true;
+		snapshot.viewSupported     = true;
+		appendUniqueCodecs(snapshot.supportedCodecs, Mumble::ScreenShare::browserWebRtcCodecPreferenceList());
+		if (snapshot.maxWidth == 0) {
+			snapshot.maxWidth = Mumble::ScreenShare::DEFAULT_MAX_WIDTH;
+		}
+		if (snapshot.maxHeight == 0) {
+			snapshot.maxHeight = Mumble::ScreenShare::DEFAULT_MAX_HEIGHT;
+		}
+		if (snapshot.maxFps == 0) {
+			snapshot.maxFps = Mumble::ScreenShare::DEFAULT_MAX_FPS;
+		}
+	}
 
 	msg.set_supports_screen_share_signaling(snapshot.supportsSignaling);
 	msg.set_supports_screen_share_capture(snapshot.captureSupported);
@@ -484,7 +532,11 @@ const ScreenShareHelperClient::CapabilitySnapshot &ScreenShareHelperClient::capa
 	return m_capabilities;
 }
 
-bool ScreenShareHelperClient::startPublish(const ScreenShareSession &session, QString *errorMessage) {
+bool ScreenShareHelperClient::startPublish(const ScreenShareSession &session, QString *errorMessage,
+										   qint64 *processID) {
+	if (processID) {
+		*processID = 0;
+	}
 	QString localError;
 	const QJsonObject reply = sendRequest(Mumble::ScreenShare::IPC::Command::StartPublish, payloadFromSession(session),
 										  m_capabilities.helperExecutable, &localError, true);
@@ -499,6 +551,9 @@ bool ScreenShareHelperClient::startPublish(const ScreenShareSession &session, QS
 		return false;
 	}
 
+	if (processID) {
+		*processID = activeProcessIDFromReply(reply);
+	}
 	qInfo().noquote()
 		<< QStringLiteral("ScreenShareHelperClient: start-publish stream=%1 accepted").arg(session.streamID);
 	return true;
@@ -512,7 +567,11 @@ bool ScreenShareHelperClient::stopPublish(const QString &streamID, QString *erro
 	return !reply.isEmpty() && Mumble::ScreenShare::IPC::replySucceeded(reply, errorMessage);
 }
 
-bool ScreenShareHelperClient::startView(const ScreenShareSession &session, QString *errorMessage) {
+bool ScreenShareHelperClient::startView(const ScreenShareSession &session, QString *errorMessage,
+										qint64 *processID) {
+	if (processID) {
+		*processID = 0;
+	}
 	QString localError;
 	const QJsonObject reply = sendRequest(Mumble::ScreenShare::IPC::Command::StartView, payloadFromSession(session),
 										  m_capabilities.helperExecutable, &localError, true);
@@ -527,6 +586,9 @@ bool ScreenShareHelperClient::startView(const ScreenShareSession &session, QStri
 		return false;
 	}
 
+	if (processID) {
+		*processID = activeProcessIDFromReply(reply);
+	}
 	qInfo().noquote()
 		<< QStringLiteral("ScreenShareHelperClient: start-view stream=%1 accepted").arg(session.streamID);
 	return true;

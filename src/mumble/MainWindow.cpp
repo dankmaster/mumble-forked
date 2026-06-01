@@ -186,6 +186,7 @@
 #include <QtWidgets/QSizePolicy>
 #include <QtWidgets/QSpinBox>
 #include <QtWidgets/QSplitter>
+#include <QtWidgets/QStatusBar>
 #include <QtWidgets/QStyle>
 #include <QtWidgets/QStyledItemDelegate>
 #include <QtWidgets/QToolButton>
@@ -11727,7 +11728,7 @@ MainWindow::MainWindow(QWidget *p)
 	connect(qaUserGrantChatHistory, &QAction::triggered, this, &MainWindow::on_qaUserGrantChatHistory_triggered);
 	qaChannelScreenShareStart        = new QAction(tr("Start Screen Share"), this);
 	qaChannelScreenShareStop         = new QAction(tr("Stop Screen Share"), this);
-	qaChannelScreenShareWatch        = new QAction(tr("Watch Screen Share"), this);
+	qaChannelScreenShareWatch        = new QAction(tr("Open Screen Share Window"), this);
 	qaChannelScreenShareStopWatching = new QAction(tr("Stop Watching Screen Share"), this);
 	qaChannelScreenShareOpenWindow   = new QAction(tr("Open Screen Share Window"), this);
 	connect(qaChannelScreenShareStart, &QAction::triggered, this, &MainWindow::startChannelScreenShare);
@@ -21627,12 +21628,21 @@ QVariantMap MainWindow::buildModernShellVoiceRoomScreenShareState(const Channel 
 		overflowActions.push_back(ModernShellMenuSerializer::actionItem(
 			QStringLiteral("screenShareStop"), tr("Stop sharing"), true, false, QStringLiteral("danger")));
 	} else if (viewing) {
-		shareState.insert(QStringLiteral("mode"), usingFallback ? QStringLiteral("fallback") : QStringLiteral("viewing"));
-		shareState.insert(QStringLiteral("statusLabel"), tr("Watching %1's share").arg(ownerLabel));
-		shareState.insert(QStringLiteral("statusTone"), usingFallback ? QStringLiteral("warning") : QStringLiteral("accent"));
+		const bool viewerWindowOpen = detachedWindowOpen;
+		shareState.insert(QStringLiteral("mode"),
+						  usingFallback ? QStringLiteral("fallback")
+										: (viewerWindowOpen ? QStringLiteral("viewing")
+															: QStringLiteral("connecting")));
+		shareState.insert(QStringLiteral("statusLabel"),
+						  viewerWindowOpen ? tr("Watching %1's share").arg(ownerLabel)
+										   : tr("Connecting to %1's share").arg(ownerLabel));
+		shareState.insert(QStringLiteral("statusTone"),
+						  usingFallback || !viewerWindowOpen ? QStringLiteral("warning") : QStringLiteral("accent"));
 		setPrimaryAction(QStringLiteral("screenShareOpenWindow"), tr("Open share window"), true,
-						 detachedWindowOpen ? QString() : tr("Open or restart the screen-share viewer."),
-						 usingFallback ? QStringLiteral("warning") : QStringLiteral("accent"));
+						 viewerWindowOpen
+							 ? QString()
+							 : tr("Open the screen-share window. The viewer may still be waiting for relay media."),
+						 usingFallback || !viewerWindowOpen ? QStringLiteral("warning") : QStringLiteral("accent"));
 		overflowActions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("screenShareStopWatching"),
 																		tr("Stop watching"), true, false));
 	} else {
@@ -21644,7 +21654,7 @@ QVariantMap MainWindow::buildModernShellVoiceRoomScreenShareState(const Channel 
 		shareState.insert(QStringLiteral("mode"), canWatch || !joinedRoom ? QStringLiteral("available") : QStringLiteral("error"));
 		shareState.insert(QStringLiteral("statusLabel"), tr("%1 is sharing in this room").arg(ownerLabel));
 		shareState.insert(QStringLiteral("statusTone"), canWatch ? QStringLiteral("accent") : QStringLiteral("warning"));
-		setPrimaryAction(QStringLiteral("screenShareWatch"), tr("Watch share"), canWatch, unavailableReason,
+		setPrimaryAction(QStringLiteral("screenShareOpenWindow"), tr("Open share window"), canWatch, unavailableReason,
 						 canWatch ? QStringLiteral("accent") : QStringLiteral("warning"));
 	}
 
@@ -23299,7 +23309,7 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 			shareState.insert(QStringLiteral("statusLabel"), tr("%1 is sharing in this room").arg(ownerLabel));
 			shareState.insert(QStringLiteral("statusTone"),
 							  canWatch ? QStringLiteral("accent") : QStringLiteral("warning"));
-			setPrimaryAction(QStringLiteral("screenShareWatch"), tr("Watch share"), canWatch, unavailableReason,
+			setPrimaryAction(QStringLiteral("screenShareOpenWindow"), tr("Open share window"), canWatch, unavailableReason,
 							 canWatch ? QStringLiteral("accent") : QStringLiteral("warning"));
 		}
 
@@ -24338,8 +24348,7 @@ bool MainWindow::handleModernShellScopeAction(const QString &scopeToken, const Q
 					m_screenShareManager->requestStopShare(streamID);
 					handled = true;
 				} else if (normalizedActionID == QLatin1String("screenShareWatch")) {
-					m_screenShareManager->requestStartViewing(streamID);
-					handled = true;
+					handled = openScreenShareWindowOrStatus(streamID);
 				} else if (normalizedActionID == QLatin1String("screenShareStopWatching")) {
 					m_screenShareManager->requestStopViewing(streamID);
 					handled = true;
@@ -24818,8 +24827,7 @@ bool MainWindow::handleModernShellParticipantAction(const qulonglong session, co
 				m_screenShareManager->requestStopShare(streamID);
 				handled = true;
 			} else if (normalizedActionID == QLatin1String("screenShareWatch")) {
-				m_screenShareManager->requestStartViewing(streamID);
-				handled = true;
+				handled = openScreenShareWindowOrStatus(streamID);
 			} else if (normalizedActionID == QLatin1String("screenShareStopWatching")) {
 				m_screenShareManager->requestStopViewing(streamID);
 				handled = true;
@@ -37043,8 +37051,8 @@ void MainWindow::qmUser_aboutToShow() {
 					qaChannelScreenShareStopWatching->setEnabled(true);
 					addedShareAction = true;
 				} else {
-					qmUser->addAction(qaChannelScreenShareWatch);
-					qaChannelScreenShareWatch->setEnabled(m_screenShareManager->canViewSession(streamID));
+					qmUser->addAction(qaChannelScreenShareOpenWindow);
+					qaChannelScreenShareOpenWindow->setEnabled(m_screenShareManager->canViewSession(streamID));
 					addedShareAction = true;
 				}
 
@@ -37320,10 +37328,48 @@ bool MainWindow::openScreenShareWindowOrStatus(const QString &streamID) {
 		return true;
 	}
 
+	bool startedViewing = false;
+	if (!m_screenShareManager->isViewingSession(streamID)) {
+		if (!m_screenShareManager->canViewSession(streamID)) {
+			QMessageBox::warning(this, tr("Screen share"),
+								 tr("The screen-share window could not be opened right now."));
+			return false;
+		}
+
+		m_screenShareManager->requestStartViewing(streamID);
+		startedViewing = m_screenShareManager->isViewingSession(streamID);
+		publishModernShellRoomStatePatch();
+	}
+
 	const bool opened = m_screenShareManager->focusOrReopenDetachedWindow(streamID);
+	if (startedViewing) {
+		for (const int delayMsec : { 350, 1000, 2500, 5000 }) {
+			QTimer::singleShot(delayMsec, this, [this, streamID]() {
+				if (m_screenShareManager && m_screenShareManager->isViewingSession(streamID)) {
+					m_screenShareManager->focusOrReopenDetachedWindow(streamID);
+				}
+			});
+		}
+	}
 	if (!opened) {
-		QMessageBox::warning(this, tr("Screen share"),
-							 tr("The screen-share window could not be opened right now."));
+		if (m_screenShareManager->isViewingSession(streamID)) {
+			if (m_screenShareManager->hasRunningExternalRuntime(streamID)) {
+				const QString message = tr("The video window will open when media starts.");
+				if (usesModernShell()) {
+					publishModernToast(QStringLiteral("info"), tr("Screen-share viewer is connecting"), message,
+									   QString(), QString(), 8000);
+				} else {
+					statusBar()->showMessage(tr("Screen-share viewer is connecting. %1").arg(message), 8000);
+				}
+				return true;
+			}
+
+			QMessageBox::warning(this, tr("Screen share"),
+								 tr("The screen-share viewer stopped before a video window was available."));
+		} else {
+			QMessageBox::warning(this, tr("Screen share"),
+								 tr("The screen-share window could not be opened right now."));
+		}
 	}
 	return opened;
 }
@@ -37367,7 +37413,7 @@ void MainWindow::watchChannelScreenShare() {
 		return;
 	}
 
-	m_screenShareManager->requestStartViewing(streamID);
+	openScreenShareWindowOrStatus(streamID);
 }
 
 void MainWindow::stopWatchingChannelScreenShare() {
@@ -38142,8 +38188,8 @@ void MainWindow::qmChannel_aboutToShow() {
 				qmChannel->addAction(qaChannelScreenShareStopWatching);
 				qaChannelScreenShareStopWatching->setEnabled(true);
 			} else {
-				qmChannel->addAction(qaChannelScreenShareWatch);
-				qaChannelScreenShareWatch->setEnabled(m_screenShareManager->canViewSession(streamID));
+				qmChannel->addAction(qaChannelScreenShareOpenWindow);
+				qaChannelScreenShareOpenWindow->setEnabled(m_screenShareManager->canViewSession(streamID));
 			}
 			addedScreenShareAction = true;
 		}

@@ -5685,6 +5685,8 @@
 				return "Publishing";
 			case "available":
 				return "Available";
+			case "connecting":
+				return "Connecting";
 			case "viewing":
 				return "Viewing";
 			case "fallback":
@@ -5730,6 +5732,7 @@
 			refs.appShell.classList.toggle("scope-has-screen-share", visible);
 		}
 		const active = String(share && share.mode || "") === "publishing"
+			|| String(share && share.mode || "") === "connecting"
 			|| String(share && share.mode || "") === "viewing"
 			|| String(share && share.mode || "") === "fallback";
 		const buttonClasses = ["chip-button", "screen-share-button"];
@@ -5774,7 +5777,7 @@
 		let title = "Screen sharing";
 		if (mode === "publishing") {
 			title = "Your screen share";
-		} else if ((mode === "available" || mode === "viewing" || mode === "fallback") && share.ownerLabel) {
+		} else if ((mode === "available" || mode === "connecting" || mode === "viewing" || mode === "fallback") && share.ownerLabel) {
 			title = share.ownerLabel;
 		} else if (mode === "idle") {
 			title = "No active share";

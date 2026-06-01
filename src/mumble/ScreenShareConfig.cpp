@@ -35,12 +35,12 @@ ScreenShareConfig::ScreenShareConfig(Settings &st) : ConfigWidget(st) {
 		   "available in the voice room you are already in. Developer environment variables can still override this "
 		   "behavior."));
 
-	m_preferInAppRelay = new QCheckBox(tr("Prefer the in-app relay window before helper/browser fallback"), behaviorGroup);
+	m_preferInAppRelay = new QCheckBox(tr("Prefer the in-app relay window before the helper runtime"), behaviorGroup);
 	m_preferInAppRelay->setToolTip(
-		tr("Use Mumble's detachable in-app relay window first, then fall back to the helper/browser flow if needed."));
+		tr("Use Mumble's detachable in-app relay window first, then fall back to the helper runtime if needed."));
 	m_preferInAppRelay->setWhatsThis(
 		tr("When enabled, Mumble tries the in-app relay window first for publishing and viewing. If that cannot start, "
-		   "Mumble falls back to the helper/browser relay flow when available."));
+		   "Mumble falls back to the external helper runtime when available."));
 
 	m_diagnosticsLogging = new QCheckBox(tr("Enable screen-share diagnostics logging"), behaviorGroup);
 	m_diagnosticsLogging->setToolTip(

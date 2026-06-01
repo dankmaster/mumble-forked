@@ -1500,30 +1500,68 @@ ScreenShareExternalProcess::LaunchResult
 	const QString identity = liveKitIdentityFromToken(plan, QStringLiteral("viewer"));
 	const QString participantName =
 		QStringLiteral("Mumble viewer %1").arg(plan.value(QStringLiteral("stream_id")).toString());
-	const QString publisherIdentity = liveKitPublisherIdentityFromPlan(plan);
 
 	QStringList arguments;
 	arguments << QStringLiteral("-e");
 	arguments << QStringLiteral("livekitwebrtcsrc") << QStringLiteral("name=src");
 	appendGStreamerLiveKitSignallerArguments(&arguments, plan, wsUrl, identity, participantName);
-	if (!publisherIdentity.isEmpty()) {
-		arguments << QStringLiteral("signaller::producer-peer-id=%1").arg(publisherIdentity);
+	const QString softwareH264Decoder = support.gstAvDecH264Available
+											? QStringLiteral("avdec_h264")
+											: (support.gstOpenH264DecAvailable ? QStringLiteral("openh264dec")
+																				: QString());
+	const bool useD3D11DecodedSink = support.gstDecodeBinAvailable && support.gstVideoConvertAvailable
+									 && support.gstD3D11VideoSinkAvailable;
+	const bool useAutoDecodedSink = support.gstDecodeBinAvailable && support.gstVideoConvertAvailable
+									&& support.gstAutoVideoSinkAvailable;
+	const bool useD3D11RawSink = !useD3D11DecodedSink && support.gstVideoConvertAvailable
+								 && support.gstD3D11VideoSinkAvailable;
+	const bool useAutoRawSink = !useD3D11DecodedSink && !useAutoDecodedSink && support.gstVideoConvertAvailable
+								&& support.gstAutoVideoSinkAvailable;
+	const bool useLegacyD3DWindowSink = support.gstD3DVideoSinkAvailable && support.gstH264ParseAvailable
+										&& support.gstVideoConvertAvailable && !softwareH264Decoder.isEmpty();
+	const bool forceH264Session = useD3D11DecodedSink || useAutoDecodedSink || useLegacyD3DWindowSink;
+	if (forceH264Session) {
+		arguments << QStringLiteral("video-codecs=<H264>");
 	}
-	arguments << QStringLiteral("video-codecs=<H264>");
 	arguments << QStringLiteral("src.") << QStringLiteral("!") << QStringLiteral("queue")
-			  << QStringLiteral("leaky=downstream") << QStringLiteral("max-size-buffers=4") << QStringLiteral("!")
-			  << QStringLiteral("decodebin") << QStringLiteral("!");
-	if (support.gstD3D11VideoSinkAvailable) {
-		arguments << QStringLiteral("d3d11videosink") << QStringLiteral("sync=false");
-	} else if (support.gstAutoVideoSinkAvailable) {
+			  << QStringLiteral("leaky=downstream") << QStringLiteral("max-size-buffers=4") << QStringLiteral("!");
+	QString selectedRenderer;
+	if (useD3D11DecodedSink) {
+		arguments << QStringLiteral("decodebin") << QStringLiteral("!") << QStringLiteral("videoconvert")
+				  << QStringLiteral("!") << QStringLiteral("d3d11videosink") << QStringLiteral("sync=false");
+		selectedRenderer = QStringLiteral("gstreamer-d3d11videosink-decodebin");
+	} else if (useAutoDecodedSink) {
+		arguments << QStringLiteral("decodebin") << QStringLiteral("!") << QStringLiteral("videoconvert")
+				  << QStringLiteral("!") << QStringLiteral("autovideosink") << QStringLiteral("sync=false");
+		selectedRenderer = QStringLiteral("gstreamer-autovideosink-decodebin");
+	} else if (useD3D11RawSink) {
+		arguments << QStringLiteral("videoconvert") << QStringLiteral("!") << QStringLiteral("d3d11videosink")
+				  << QStringLiteral("sync=false");
+		selectedRenderer = QStringLiteral("gstreamer-d3d11videosink-raw");
+	} else if (useAutoRawSink) {
 		arguments << QStringLiteral("videoconvert") << QStringLiteral("!") << QStringLiteral("autovideosink")
 				  << QStringLiteral("sync=false");
+		selectedRenderer = QStringLiteral("gstreamer-autovideosink-raw");
+	} else if (useLegacyD3DWindowSink) {
+		arguments << QStringLiteral("h264parse") << QStringLiteral("!") << softwareH264Decoder
+				  << QStringLiteral("!") << QStringLiteral("videoconvert") << QStringLiteral("!")
+				  << QStringLiteral("d3dvideosink") << QStringLiteral("sync=false");
+		selectedRenderer = QStringLiteral("gstreamer-d3dvideosink-%1").arg(softwareH264Decoder);
+	} else if (support.gstDecodeBinAvailable && support.gstAutoVideoSinkAvailable) {
+		arguments << QStringLiteral("decodebin") << QStringLiteral("!") << QStringLiteral("videoconvert")
+				  << QStringLiteral("!") << QStringLiteral("autovideosink") << QStringLiteral("sync=false");
+		selectedRenderer = QStringLiteral("gstreamer-autovideosink");
+	} else if (support.gstDecodeBinAvailable && support.gstFakeSinkAvailable) {
+		arguments << QStringLiteral("decodebin") << QStringLiteral("!") << QStringLiteral("fakesink")
+				  << QStringLiteral("sync=false");
+		selectedRenderer = QStringLiteral("gstreamer-fakesink");
 	} else {
-		arguments << QStringLiteral("fakesink") << QStringLiteral("sync=false");
+		launch.errorMessage = QStringLiteral("No usable GStreamer video renderer is available for LiveKit viewing.");
+		return launch;
 	}
 	const bool expectAudio = plan.value(QStringLiteral("capture_audio")).toBool(false);
-	if (expectAudio && support.gstAutoAudioSinkAvailable && support.gstAudioConvertAvailable
-		&& support.gstAudioResampleAvailable) {
+	if (expectAudio && support.gstDecodeBinAvailable && support.gstAutoAudioSinkAvailable
+		&& support.gstAudioConvertAvailable && support.gstAudioResampleAvailable) {
 		arguments << QStringLiteral("src.") << QStringLiteral("!") << QStringLiteral("queue")
 				  << QStringLiteral("leaky=downstream") << QStringLiteral("max-size-buffers=8")
 				  << QStringLiteral("!") << QStringLiteral("decodebin") << QStringLiteral("!")
@@ -1537,10 +1575,7 @@ ScreenShareExternalProcess::LaunchResult
 	}
 
 	launch.endpointUrl       = wsUrl;
-	launch.selectedRenderer = support.gstD3D11VideoSinkAvailable ? QStringLiteral("gstreamer-d3d11videosink")
-																 : (support.gstAutoVideoSinkAvailable
-																		? QStringLiteral("gstreamer-autovideosink")
-																		: QStringLiteral("gstreamer-fakesink"));
+	launch.selectedRenderer = selectedRenderer;
 	return launch;
 }
 
@@ -1570,6 +1605,7 @@ ScreenShareExternalProcess::LaunchResult startProcess(const QString &program, co
 
 	launch.started = true;
 	launch.process = process;
+	launch.processID = process->processId();
 	return launch;
 }
 } // namespace
@@ -1722,9 +1758,14 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 			gstElementAvailable(support.gstInspectPath, QStringLiteral("autovideosink"));
 		support.gstAutoAudioSinkAvailable =
 			gstElementAvailable(support.gstInspectPath, QStringLiteral("autoaudiosink"));
+		support.gstD3DVideoSinkAvailable =
+			gstElementAvailable(support.gstInspectPath, QStringLiteral("d3dvideosink"));
 		support.gstD3D11VideoSinkAvailable =
 			gstElementAvailable(support.gstInspectPath, QStringLiteral("d3d11videosink"));
 		support.gstFakeSinkAvailable = gstElementAvailable(support.gstInspectPath, QStringLiteral("fakesink"));
+		support.gstAvDecH264Available = gstElementAvailable(support.gstInspectPath, QStringLiteral("avdec_h264"));
+		support.gstOpenH264DecAvailable =
+			gstElementAvailable(support.gstInspectPath, QStringLiteral("openh264dec"));
 
 		const bool gstSystemMemoryH264Available =
 			support.gstD3D11DownloadAvailable && support.gstVideoConvertAvailable
@@ -1739,13 +1780,24 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 #else
 			support.gstVideoTestSrcAvailable && envFlagEnabled("MUMBLE_SCREENSHARE_TEST_PATTERN");
 #endif
-		const bool gstViewerSinkAvailable =
-			support.gstD3D11VideoSinkAvailable || support.gstAutoVideoSinkAvailable || support.gstFakeSinkAvailable;
+		support.gstRawLiveKitViewerAvailable =
+			support.gstVideoConvertAvailable
+			&& (support.gstD3D11VideoSinkAvailable || support.gstAutoVideoSinkAvailable);
+		support.gstEncodedH264ViewerAvailable =
+			support.gstD3DVideoSinkAvailable && support.gstH264ParseAvailable && support.gstVideoConvertAvailable
+			&& (support.gstAvDecH264Available || support.gstOpenH264DecAvailable);
+		support.gstDecodeBinViewerAvailable =
+			support.gstDecodeBinAvailable
+			&& (support.gstD3D11VideoSinkAvailable || support.gstAutoVideoSinkAvailable
+				|| support.gstFakeSinkAvailable);
+		const bool gstViewerSinkAvailable = support.gstRawLiveKitViewerAvailable
+											|| support.gstEncodedH264ViewerAvailable
+											|| support.gstDecodeBinViewerAvailable;
 		support.gstreamerLiveKitPublishAvailable =
 			support.gstLiveKitWebRtcSinkAvailable && support.gstH264ParseAvailable && gstH264EncoderAvailable
 			&& gstDesktopCaptureAvailable;
 		support.gstreamerLiveKitViewAvailable =
-			support.gstLiveKitWebRtcSrcAvailable && support.gstDecodeBinAvailable && gstViewerSinkAvailable;
+			support.gstLiveKitWebRtcSrcAvailable && gstViewerSinkAvailable;
 
 		appendMissingGStreamerElement(&support, QStringLiteral("livekitwebrtcsink"),
 									  support.gstLiveKitWebRtcSinkAvailable);
@@ -1770,9 +1822,14 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 			appendMissingGStreamerElement(&support, QStringLiteral("nvd3d11h264enc|mfh264enc|x264enc|openh264enc"),
 										  false);
 		}
-		appendMissingGStreamerElement(&support, QStringLiteral("decodebin"), support.gstDecodeBinAvailable);
+		appendMissingGStreamerElement(&support, QStringLiteral("videoconvert"),
+									  support.gstVideoConvertAvailable);
+		appendMissingGStreamerElement(&support, QStringLiteral("decodebin"),
+									  support.gstDecodeBinAvailable || support.gstRawLiveKitViewerAvailable
+										  || support.gstEncodedH264ViewerAvailable);
 		if (!gstViewerSinkAvailable) {
-			appendMissingGStreamerElement(&support, QStringLiteral("d3d11videosink|autovideosink|fakesink"), false);
+			appendMissingGStreamerElement(&support, QStringLiteral("d3dvideosink|d3d11videosink|autovideosink|fakesink"),
+										  false);
 		}
 	}
 
@@ -1814,8 +1871,16 @@ QJsonObject ScreenShareExternalProcess::runtimeSupportToJson(const RuntimeSuppor
 	payload.insert(QStringLiteral("gst_decodebin_available"), support.gstDecodeBinAvailable);
 	payload.insert(QStringLiteral("gst_autovideosink_available"), support.gstAutoVideoSinkAvailable);
 	payload.insert(QStringLiteral("gst_autoaudiosink_available"), support.gstAutoAudioSinkAvailable);
+	payload.insert(QStringLiteral("gst_d3dvideosink_available"), support.gstD3DVideoSinkAvailable);
 	payload.insert(QStringLiteral("gst_d3d11videosink_available"), support.gstD3D11VideoSinkAvailable);
 	payload.insert(QStringLiteral("gst_fakesink_available"), support.gstFakeSinkAvailable);
+	payload.insert(QStringLiteral("gst_avdec_h264_available"), support.gstAvDecH264Available);
+	payload.insert(QStringLiteral("gst_openh264dec_available"), support.gstOpenH264DecAvailable);
+	payload.insert(QStringLiteral("gst_raw_livekit_viewer_available"),
+				   support.gstRawLiveKitViewerAvailable);
+	payload.insert(QStringLiteral("gst_encoded_h264_viewer_available"),
+				   support.gstEncodedH264ViewerAvailable);
+	payload.insert(QStringLiteral("gst_decodebin_viewer_available"), support.gstDecodeBinViewerAvailable);
 	{
 		QJsonArray missingElements;
 		for (const QString &element : support.missingGStreamerElements) {

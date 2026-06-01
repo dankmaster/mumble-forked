@@ -51,8 +51,14 @@ public:
 		bool gstDecodeBinAvailable            = false;
 		bool gstAutoVideoSinkAvailable        = false;
 		bool gstAutoAudioSinkAvailable        = false;
+		bool gstD3DVideoSinkAvailable         = false;
 		bool gstD3D11VideoSinkAvailable       = false;
 		bool gstFakeSinkAvailable             = false;
+		bool gstAvDecH264Available            = false;
+		bool gstOpenH264DecAvailable          = false;
+		bool gstRawLiveKitViewerAvailable     = false;
+		bool gstEncodedH264ViewerAvailable    = false;
+		bool gstDecodeBinViewerAvailable      = false;
 		QStringList missingGStreamerElements;
 		bool graphicalSessionAvailable = false;
 		bool x11GrabAvailable          = false;
@@ -98,6 +104,7 @@ public:
 		QString selectedRenderer;
 		QString program;
 		QStringList warnings;
+		qint64 processID = 0;
 		QProcess *process = nullptr;
 	};
 

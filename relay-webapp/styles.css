@@ -40,33 +40,37 @@ body::before {
 }
 
 body {
-	padding: 28px;
+	padding: 16px;
 }
 
 .shell {
 	position: relative;
 	z-index: 1;
-	max-width: 1160px;
+	max-width: 1440px;
 	margin: 0 auto;
 	display: grid;
-	gap: 18px;
+	gap: 12px;
 }
 
 .hero,
 .panel {
 	background: var(--panel);
 	border: 1px solid var(--panel-border);
-	border-radius: 22px;
+	border-radius: 12px;
 	box-shadow: var(--shadow);
 	backdrop-filter: blur(18px);
 }
 
 .hero {
-	padding: 28px 30px 26px;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 6px 18px;
+	padding: 14px 16px;
 }
 
 .eyebrow {
-	margin: 0 0 10px;
+	margin: 0;
 	color: var(--accent);
 	letter-spacing: 0.14em;
 	text-transform: uppercase;
@@ -84,14 +88,13 @@ dt {
 }
 
 h1 {
-	font-size: clamp(2rem, 5vw, 3.8rem);
-	line-height: 0.96;
-	letter-spacing: -0.04em;
-	max-width: 11ch;
+	font-size: 1.65rem;
+	line-height: 1.12;
+	letter-spacing: 0;
+	max-width: none;
 }
 
 .subtitle {
-	margin-top: 14px;
 	max-width: 54rem;
 	color: var(--muted);
 	font-size: 1rem;
@@ -107,15 +110,18 @@ h1 {
 }
 
 .status-row {
-	margin-top: 20px;
+	grid-column: 2;
+	grid-row: 1 / span 3;
+	justify-content: flex-end;
+	margin-top: 0;
 }
 
 .pill {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	min-width: 92px;
-	padding: 0.55rem 0.9rem;
+	min-width: 82px;
+	padding: 0.46rem 0.76rem;
 	border-radius: 999px;
 	font-size: 0.84rem;
 	font-weight: 700;
@@ -155,19 +161,21 @@ h1 {
 }
 
 .panel {
-	padding: 20px 22px;
+	padding: 12px 14px;
 }
 
 .panel-actions {
 	display: grid;
-	gap: 14px;
+	grid-template-columns: auto minmax(0, 1fr);
+	align-items: center;
+	gap: 12px;
 }
 
 button {
 	appearance: none;
 	border: 0;
-	border-radius: 14px;
-	padding: 0.95rem 1.25rem;
+	border-radius: 8px;
+	padding: 0.72rem 0.95rem;
 	font-size: 0.98rem;
 	font-weight: 700;
 	letter-spacing: 0.01em;
@@ -208,13 +216,14 @@ button:disabled {
 }
 
 .panel-stage {
-	padding: 14px;
+	padding: 8px;
 }
 
 .video-stage {
 	position: relative;
-	min-height: min(62vh, 720px);
-	border-radius: 18px;
+	height: clamp(320px, calc(100vh - 220px), 780px);
+	min-height: 320px;
+	border-radius: 8px;
 	overflow: hidden;
 	background:
 		radial-gradient(circle at top left, rgba(86, 200, 255, 0.16), transparent 40%),
@@ -284,7 +293,7 @@ button:disabled {
 	max-height: 240px;
 	overflow: auto;
 	padding: 16px;
-	border-radius: 16px;
+	border-radius: 8px;
 	background: rgba(0, 0, 0, 0.26);
 	border: 1px solid rgba(255, 255, 255, 0.06);
 	color: #d6e7f8;
@@ -310,8 +319,20 @@ button:disabled {
 		padding-right: 18px;
 	}
 
+	.hero,
+	.panel-actions {
+		grid-template-columns: 1fr;
+	}
+
+	.status-row {
+		grid-column: 1;
+		grid-row: auto;
+		justify-content: flex-start;
+	}
+
 	.video-stage {
-		min-height: 40vh;
+		height: 44vh;
+		min-height: 260px;
 	}
 
 	button {

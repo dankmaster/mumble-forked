@@ -416,6 +416,7 @@ QUrl RelayWindowHost::buildPageUrl() const {
 		query.addQueryItem(QStringLiteral("system_audio"), m_session.captureAudio ? QStringLiteral("include") : QStringLiteral("exclude"));
 		query.addQueryItem(QStringLiteral("surface_switching"), QStringLiteral("include"));
 		query.addQueryItem(QStringLiteral("self_browser_surface"), QStringLiteral("exclude"));
+		query.addQueryItem(QStringLiteral("auto_start"), QStringLiteral("1"));
 	}
 
 	url.setQuery(query);

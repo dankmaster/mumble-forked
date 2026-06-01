@@ -561,6 +561,17 @@
 			|| message.includes("selection was canceled") || message.includes("selection was cancelled");
 	}
 
+	function isUserActivationScreenShareError(error) {
+		if (!error) {
+			return false;
+		}
+
+		const name = String(error.name || "").trim();
+		const message = String(error.message || error.toString() || "").toLowerCase();
+		return name === "InvalidStateError" || message.includes("user activation") || message.includes("user gesture")
+			|| message.includes("gesture is required") || message.includes("transient activation");
+	}
+
 	function setText(element, value) {
 		element.textContent = value;
 	}
@@ -749,6 +760,7 @@
 			fps,
 			bitrateKbps: parseScreenShareBitrateKbps(params.get("bitrate_kbps"), codec, width, height, fps),
 			captureAudio: parseBooleanFlag(params.get("capture_audio"), false),
+			autoStart: parseBooleanFlag(params.get("auto_start"), false),
 			systemAudio: parseIncludeExclude(params.get("system_audio"), "exclude"),
 			surfaceSwitching: parseIncludeExclude(params.get("surface_switching"), "include"),
 			selfBrowserSurface: parseIncludeExclude(params.get("self_browser_surface"), "exclude")
@@ -855,6 +867,17 @@
 		}
 	}
 
+	function updateAttachedTrackStatus(localTrack, participant) {
+		const actor = describeParticipant(participant);
+		if (localTrack) {
+			setPill(refs.connectionPill, "live", "success");
+			setHint("Screen share is live. You can keep this window open while sharing.");
+		} else {
+			setPill(refs.connectionPill, "live", "success");
+			setHint("Screen share is live from " + actor + ".");
+		}
+	}
+
 	function attachTrack(track, publication, participant, localTrack) {
 		if (!isScreenShareTrack(track, publication)) {
 			return;
@@ -863,6 +886,7 @@
 
 		const key = trackKey(publication, participant, localTrack);
 		if (state.currentTrackKey === key && state.currentTrackElement) {
+			updateAttachedTrackStatus(localTrack, participant);
 			return;
 		}
 
@@ -910,6 +934,7 @@
 		}
 
 		const actor = describeParticipant(participant);
+		updateAttachedTrackStatus(localTrack, participant);
 		log((localTrack ? "Showing local preview for " : "Showing remote screen share from ") + actor + ".");
 	}
 
@@ -990,8 +1015,13 @@
 		}
 
 		if (localTrack) {
+			setHint("Share stopped. You can start again without reopening this window.");
 			showEmpty("Share stopped", "Your screen is no longer being published.");
 		} else {
+			if (state.isConnected) {
+				setPill(refs.connectionPill, "connected", "success");
+			}
+			setHint("Connected. Waiting for the publisher to start screen sharing.");
 			showEmpty("Waiting for screen share", "The screen-share track is not currently active.");
 		}
 
@@ -1364,6 +1394,12 @@
 				showEmpty("Share canceled", "No screen-share source was selected.");
 				return;
 			}
+			if (config.autoStart && isUserActivationScreenShareError(error)) {
+				setHint("Connected. Click Start sharing to choose a screen or window.");
+				log("Automatic capture start was blocked by the embedded browser gesture requirement.", "warn");
+				showEmpty("Ready to share", "Choose Start sharing to open the screen picker.");
+				return;
+			}
 
 			log("Unable to start screen sharing: " + describeError(error), "error");
 			showEmpty("Share did not start", "The browser did not grant or keep screen-capture permission.");
@@ -1501,6 +1537,9 @@
 
 		try {
 			await ensureConnected();
+			if (state.isPublisher && config.autoStart) {
+				await startSharing();
+			}
 		} catch (error) {
 			showEmpty("Relay connection failed", "The window could not connect to the configured WebRTC relay.");
 			requestFallback("The in-app relay window could not connect to the relay server: " + describeError(error));

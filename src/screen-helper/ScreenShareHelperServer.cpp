@@ -453,6 +453,9 @@ QJsonObject ScreenShareHelperServer::handleStartPublish(const QJsonObject &paylo
 	if (!launch.selectedCaptureSource.isEmpty()) {
 		session.payload.insert(QStringLiteral("active_capture_source"), launch.selectedCaptureSource);
 	}
+	if (launch.processID > 0) {
+		session.payload.insert(QStringLiteral("active_process_id"), QString::number(launch.processID));
+	}
 	session.payload.insert(QStringLiteral("actual_fps"), session.payload.value(QStringLiteral("fps")).toInt());
 	session.payload.insert(QStringLiteral("actual_bitrate_kbps"),
 						   session.payload.value(QStringLiteral("bitrate_kbps")).toInt());
@@ -522,6 +525,9 @@ QJsonObject ScreenShareHelperServer::handleStartView(const QJsonObject &payload)
 	}
 	if (!launch.selectedRenderer.isEmpty()) {
 		session.payload.insert(QStringLiteral("active_renderer_backend"), launch.selectedRenderer);
+	}
+	if (launch.processID > 0) {
+		session.payload.insert(QStringLiteral("active_process_id"), QString::number(launch.processID));
 	}
 	session.payload.insert(QStringLiteral("actual_fps"), session.payload.value(QStringLiteral("fps")).toInt());
 	session.payload.insert(QStringLiteral("actual_bitrate_kbps"),

@@ -71,6 +71,7 @@ public:
 	bool isPublishingSession(const QString &streamID) const;
 	bool isViewingSession(const QString &streamID) const;
 	bool hasDetachedWindow(const QString &streamID) const;
+	bool hasRunningExternalRuntime(const QString &streamID) const;
 	bool focusOrReopenDetachedWindow(const QString &streamID);
 	bool isUsingFallbackRuntime(const QString &streamID) const;
 	bool isUsingNativeGpuRuntime(const QString &streamID) const;
@@ -117,6 +118,8 @@ private:
 	QHash< QString, ScreenShareSession > m_sessions;
 	QSet< QString > m_activePublishSessions;
 	QSet< QString > m_activeViewSessions;
+	QHash< QString, qint64 > m_externalPublishProcessIDs;
+	QHash< QString, qint64 > m_externalViewProcessIDs;
 	QSet< QString > m_fallbackRuntimeSessions;
 	QSet< QString > m_announcedViewableSessions;
 	mutable QString m_lastLoggedAvailabilityContext;
