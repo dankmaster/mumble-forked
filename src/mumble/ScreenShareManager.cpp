@@ -9,9 +9,6 @@
 #include "ExternalScreenShareWindowHost.h"
 #include "Global.h"
 #include "Log.h"
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-#	include "RelayWindowHost.h"
-#endif
 #ifdef Q_OS_WIN
 #	include "win.h"
 #endif
@@ -242,19 +239,6 @@ const ScreenShareHelperClient &ScreenShareManager::helperClient() const {
 	return *m_helperClient;
 }
 
-bool ScreenShareManager::supportsInAppRelayTransport(const MumbleProto::ScreenShareRelayTransport transport) const {
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	if (!isWebRtcRelayTransport(transport)) {
-		return false;
-	}
-
-	return envFlagOverride("MUMBLE_SCREENSHARE_ALLOW_RELAY_WEBAPP").value_or(true);
-#else
-	Q_UNUSED(transport);
-	return false;
-#endif
-}
-
 void ScreenShareManager::logLocalShareAvailabilityDiagnostic(const QString &context) const {
 	if (!Global::get().s.bScreenShareDiagnostics) {
 		return;
@@ -292,10 +276,7 @@ void ScreenShareManager::logLocalShareAvailabilityDiagnostic(const QString &cont
 					Global::get().qsScreenShareRelayUrl.isEmpty() ? QStringLiteral("-")
 																  : Global::get().qsScreenShareRelayUrl,
 					relayTransports.join(QStringLiteral(",")),
-					supportsInAppRelayTransport(
-						Mumble::ScreenShare::relayTransportFromUrl(Global::get().qsScreenShareRelayUrl))
-						? QStringLiteral("true")
-						: QStringLiteral("false"),
+					QStringLiteral("false"),
 					capabilities.captureBackend.isEmpty() ? QStringLiteral("-") : capabilities.captureBackend,
 					capabilities.hardwareEncodeSupported ? QStringLiteral("true") : QStringLiteral("false"),
 					capabilities.zeroCopySupported ? QStringLiteral("true") : QStringLiteral("false"),
@@ -327,19 +308,18 @@ QString ScreenShareManager::localShareUnavailableReason() const {
 	if (!Mumble::ScreenShare::isValidRelayUrl(Global::get().qsScreenShareRelayUrl)) {
 		return tr("This server has no valid screen-share relay endpoint configured.");
 	}
-	if (!supportsInAppRelayTransport(relayTransport) && !capabilities.captureSupported) {
+	if (!capabilities.captureSupported) {
 		return tr("No supported local capture source is available.");
 	}
-	if (!supportsInAppRelayTransport(relayTransport) && Global::get().bScreenShareHelperRequired
-		&& !capabilities.helperAvailable) {
+	if (Global::get().bScreenShareHelperRequired && !capabilities.helperAvailable) {
 		return tr("The local screen-share helper is required but unavailable.");
 	}
-	if (!supportsInAppRelayTransport(relayTransport) && !helperRuntimeSupportsPublishing(capabilities, relayTransport)) {
+	if (!helperRuntimeSupportsPublishing(capabilities, relayTransport)) {
 		return isWebRtcRelayTransport(relayTransport)
 				   ? tr("The bundled screen-share runtime is missing WebRTC publishing support.")
 				   : tr("The bundled screen-share runtime does not support this server's relay transport.");
 	}
-	if (!supportsInAppRelayTransport(relayTransport) && capabilities.supportedCodecs.isEmpty()) {
+	if (capabilities.supportedCodecs.isEmpty()) {
 		return tr("The bundled screen-share runtime does not advertise an executable video codec.");
 	}
 
@@ -360,14 +340,6 @@ bool ScreenShareManager::isViewingSession(const QString &streamID) const {
 }
 
 bool ScreenShareManager::hasDetachedWindow(const QString &streamID) const {
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	if (RelayWindowHost *host = m_inAppPublishWindows.value(streamID, nullptr); host && host->isVisible()) {
-		return true;
-	}
-	if (RelayWindowHost *host = m_inAppViewWindows.value(streamID, nullptr); host && host->isVisible()) {
-		return true;
-	}
-#endif
 	if (ExternalScreenShareWindowHost *host = m_externalViewWindows.value(streamID, nullptr); host && host->isVisible()) {
 		return true;
 	}
@@ -391,27 +363,6 @@ bool ScreenShareManager::hasRunningExternalRuntime(const QString &streamID) cons
 }
 
 bool ScreenShareManager::focusOrReopenDetachedWindow(const QString &streamID) {
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	auto focusHost = [](RelayWindowHost *host) {
-		if (!host) {
-			return false;
-		}
-
-		if (host->isMinimized()) {
-			host->showNormal();
-		} else {
-			host->show();
-		}
-		host->raise();
-		host->activateWindow();
-		return true;
-	};
-
-	if (focusHost(m_inAppPublishWindows.value(streamID, nullptr))
-		|| focusHost(m_inAppViewWindows.value(streamID, nullptr))) {
-		return true;
-	}
-#endif
 	auto focusExternalViewHost = [](ExternalScreenShareWindowHost *host) {
 		if (!host) {
 			return false;
@@ -471,18 +422,14 @@ bool ScreenShareManager::focusOrReopenDetachedWindow(const QString &streamID) {
 }
 
 bool ScreenShareManager::isUsingFallbackRuntime(const QString &streamID) const {
-	return m_fallbackRuntimeSessions.contains(streamID);
+	Q_UNUSED(streamID);
+	return false;
 }
 
 bool ScreenShareManager::isUsingNativeGpuRuntime(const QString &streamID) const {
-	if (!m_activePublishSessions.contains(streamID) || isUsingFallbackRuntime(streamID)) {
+	if (!m_activePublishSessions.contains(streamID)) {
 		return false;
 	}
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	if (m_inAppPublishSessionIDs.contains(streamID)) {
-		return false;
-	}
-#endif
 
 	const ScreenShareHelperClient::CapabilitySnapshot &capabilities = m_helperClient->capabilities();
 	return capabilities.zeroCopySupported
@@ -508,8 +455,6 @@ void ScreenShareManager::requestStartChannelShare(unsigned int channelID, const 
 		return;
 	}
 
-	const MumbleProto::ScreenShareRelayTransport relayTransport =
-		Mumble::ScreenShare::relayTransportFromUrl(Global::get().qsScreenShareRelayUrl);
 	const ScreenShareHelperClient::CapabilitySnapshot &capabilities = m_helperClient->capabilities();
 	auto clampRequestedLimit = [](const unsigned int requested, const unsigned int capabilityLimit) {
 		if (requested > 0 && capabilityLimit > 0) {
@@ -531,13 +476,6 @@ void ScreenShareManager::requestStartChannelShare(unsigned int channelID, const 
 		msg.set_scope_id(channelID);
 	}
 	QList< int > availableCodecs = capabilities.supportedCodecs;
-	const bool useBrowserWebRtcRuntime =
-		isWebRtcRelayTransport(relayTransport) && supportsInAppRelayTransport(relayTransport)
-		&& (Global::get().s.bScreenSharePreferInAppRelay
-			|| !helperRuntimeSupportsPublishing(capabilities, relayTransport) || availableCodecs.isEmpty());
-	if (useBrowserWebRtcRuntime) {
-		availableCodecs = Mumble::ScreenShare::browserWebRtcCodecPreferenceList();
-	}
 	if (availableCodecs.isEmpty()) {
 		if (Global::get().l) {
 			Global::get().l->log(Log::Warning,
@@ -562,18 +500,6 @@ void ScreenShareManager::requestStartChannelShare(unsigned int channelID, const 
 	unsigned int targetWidth        = clampRequestedLimit(requestedWidth, capabilities.maxWidth);
 	unsigned int targetHeight       = clampRequestedLimit(requestedHeight, capabilities.maxHeight);
 	unsigned int targetFps          = clampRequestedLimit(requestedFps, capabilities.maxFps);
-	if (supportsInAppRelayTransport(relayTransport)) {
-		targetWidth = std::min(Mumble::ScreenShare::sanitizeLimit(targetWidth, Mumble::ScreenShare::DEFAULT_MAX_WIDTH,
-																  Mumble::ScreenShare::HARD_MAX_WIDTH),
-							   Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH);
-		targetHeight =
-			std::min(Mumble::ScreenShare::sanitizeLimit(targetHeight, Mumble::ScreenShare::DEFAULT_MAX_HEIGHT,
-														Mumble::ScreenShare::HARD_MAX_HEIGHT),
-					 Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT);
-		targetFps = std::min(Mumble::ScreenShare::sanitizeLimit(targetFps, Mumble::ScreenShare::DEFAULT_MAX_FPS,
-																Mumble::ScreenShare::HARD_MAX_FPS),
-							 Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_FPS);
-	}
 
 	const QString requestedQualityProfile = options.qualityProfile.trimmed().isEmpty()
 												? qEnvironmentVariable("MUMBLE_SCREENSHARE_QUALITY_PROFILE",
@@ -678,30 +604,10 @@ void ScreenShareManager::resetState() {
 	m_externalViewAudioMuted.clear();
 	m_pausedExternalViewSessions.clear();
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	for (RelayWindowHost *host : m_inAppPublishWindows.values()) {
-		if (host) {
-			host->closeFromManager();
-			host->deleteLater();
-		}
-	}
-	for (RelayWindowHost *host : m_inAppViewWindows.values()) {
-		if (host) {
-			host->closeFromManager();
-			host->deleteLater();
-		}
-	}
-	m_inAppPublishWindows.clear();
-	m_inAppViewWindows.clear();
-	m_inAppPublishSessionIDs.clear();
-	m_inAppViewSessionIDs.clear();
-#endif
-
 	m_activePublishSessions.clear();
 	m_activeViewSessions.clear();
 	m_externalPublishProcessIDs.clear();
 	m_externalViewProcessIDs.clear();
-	m_fallbackRuntimeSessions.clear();
 	m_announcedViewableSessions.clear();
 	m_sessions.clear();
 	m_lastLoggedAvailabilityContext.clear();
@@ -797,7 +703,6 @@ ScreenShareSession ScreenShareManager::sessionFromState(const MumbleProto::Scree
 
 bool ScreenShareManager::canPublishSession(const ScreenShareSession &session) const {
 	const ScreenShareHelperClient::CapabilitySnapshot &capabilities = m_helperClient->capabilities();
-	const bool inAppRelayAvailable = supportsInAppRelayTransport(session.relayTransport);
 	if (!Global::get().bScreenShareEnabled || !Global::get().sh) {
 		return false;
 	}
@@ -819,9 +724,6 @@ bool ScreenShareManager::canPublishSession(const ScreenShareSession &session) co
 	if (!Mumble::ScreenShare::isValidCodec(session.codec)) {
 		return false;
 	}
-	if (inAppRelayAvailable) {
-		return true;
-	}
 	if (!capabilities.captureSupported) {
 		return false;
 	}
@@ -836,7 +738,6 @@ bool ScreenShareManager::canPublishSession(const ScreenShareSession &session) co
 
 bool ScreenShareManager::canViewSession(const ScreenShareSession &session) const {
 	const ScreenShareHelperClient::CapabilitySnapshot &capabilities = m_helperClient->capabilities();
-	const bool inAppRelayAvailable = supportsInAppRelayTransport(session.relayTransport);
 	if (!Global::get().bScreenShareEnabled || session.ownerSession == Global::get().uiSession
 		|| session.state != MumbleProto::ScreenShareLifecycleStateActive) {
 		return false;
@@ -854,15 +755,6 @@ bool ScreenShareManager::canViewSession(const ScreenShareSession &session) const
 	}
 	if (!Mumble::ScreenShare::isValidCodec(session.codec)) {
 		return false;
-	}
-	if (inAppRelayAvailable) {
-		const ClientUser *self = ClientUser::get(Global::get().uiSession);
-		if (!self || !self->cChannel) {
-			return false;
-		}
-
-		return session.scope == MumbleProto::ScreenShareScopeChannel && session.scopeID != 0
-			   && self->cChannel->iId == session.scopeID;
 	}
 	if (!capabilities.viewSupported) {
 		return false;
@@ -898,183 +790,6 @@ bool ScreenShareManager::shouldAutoViewSession(const ScreenShareSession &session
 
 	return Global::get().s.bScreenShareAutoOpenCurrentRoom;
 }
-
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-bool ScreenShareManager::startInAppPublishSession(const ScreenShareSession &session) {
-	if (m_inAppPublishWindows.contains(session.streamID)) {
-		if (RelayWindowHost *existingHost = m_inAppPublishWindows.value(session.streamID)) {
-			existingHost->updateSession(session);
-		}
-		return true;
-	}
-
-	auto *host = new RelayWindowHost(session, RelayWindowHost::Mode::Publish, qobject_cast< QWidget * >(parent()));
-	connect(host, &RelayWindowHost::fallbackRequested, this,
-			[this, streamID = session.streamID](const QString &reason) {
-				handleInAppRelayFailure(streamID, true, reason);
-			});
-	connect(host, &RelayWindowHost::closeRequested, this, [this, streamID = session.streamID](const QString &) {
-		stopLocalPublishSession(streamID);
-		requestStopShare(streamID);
-	});
-	connect(host, &QObject::destroyed, this,
-			[this, streamID = session.streamID]() { m_inAppPublishWindows.remove(streamID); });
-
-	m_inAppPublishWindows.insert(session.streamID, host);
-	m_inAppPublishSessionIDs.insert(session.streamID);
-	QString errorMessage;
-	if (!host->start(&errorMessage)) {
-		m_inAppPublishWindows.remove(session.streamID);
-		m_inAppPublishSessionIDs.remove(session.streamID);
-		host->deleteLater();
-		if (Global::get().l) {
-			Global::get().l->log(Log::Warning,
-								 tr("Unable to start the in-app screen-share publisher for %1: %2")
-									 .arg(session.streamID.toHtmlEscaped(),
-										  errorMessage.isEmpty() ? tr("unknown error") : errorMessage.toHtmlEscaped()));
-		}
-		return false;
-	}
-
-	return true;
-}
-
-bool ScreenShareManager::startInAppViewSession(const ScreenShareSession &session) {
-	if (m_inAppViewWindows.contains(session.streamID)) {
-		if (RelayWindowHost *existingHost = m_inAppViewWindows.value(session.streamID)) {
-			existingHost->updateSession(session);
-		}
-		return true;
-	}
-
-	auto *host = new RelayWindowHost(session, RelayWindowHost::Mode::View, qobject_cast< QWidget * >(parent()));
-	connect(host, &RelayWindowHost::fallbackRequested, this,
-			[this, streamID = session.streamID](const QString &reason) {
-				handleInAppRelayFailure(streamID, false, reason);
-			});
-	connect(host, &RelayWindowHost::closeRequested, this,
-			[this, streamID = session.streamID](const QString &) { requestStopViewing(streamID); });
-	connect(host, &QObject::destroyed, this,
-			[this, streamID = session.streamID]() { m_inAppViewWindows.remove(streamID); });
-
-	m_inAppViewWindows.insert(session.streamID, host);
-	m_inAppViewSessionIDs.insert(session.streamID);
-	QString errorMessage;
-	if (!host->start(&errorMessage)) {
-		m_inAppViewWindows.remove(session.streamID);
-		m_inAppViewSessionIDs.remove(session.streamID);
-		host->deleteLater();
-		if (Global::get().l) {
-			Global::get().l->log(Log::Warning,
-								 tr("Unable to start the in-app screen-share viewer for %1: %2")
-									 .arg(session.streamID.toHtmlEscaped(),
-										  errorMessage.isEmpty() ? tr("unknown error") : errorMessage.toHtmlEscaped()));
-		}
-		return false;
-	}
-
-	return true;
-}
-
-void ScreenShareManager::stopInAppPublishSession(const QString &streamID) {
-	m_inAppPublishSessionIDs.remove(streamID);
-	m_activePublishSessions.remove(streamID);
-	const auto it = m_inAppPublishWindows.find(streamID);
-	if (it == m_inAppPublishWindows.end()) {
-		return;
-	}
-
-	RelayWindowHost *host = it.value();
-	m_inAppPublishWindows.erase(it);
-	if (host) {
-		host->closeFromManager();
-		host->deleteLater();
-	}
-}
-
-void ScreenShareManager::stopInAppViewSession(const QString &streamID) {
-	m_inAppViewSessionIDs.remove(streamID);
-	m_activeViewSessions.remove(streamID);
-	const auto it = m_inAppViewWindows.find(streamID);
-	if (it == m_inAppViewWindows.end()) {
-		return;
-	}
-
-	RelayWindowHost *host = it.value();
-	m_inAppViewWindows.erase(it);
-	if (host) {
-		host->closeFromManager();
-		host->deleteLater();
-	}
-}
-
-void ScreenShareManager::handleInAppRelayFailure(const QString &streamID, const bool publish, const QString &reason) {
-	const auto sessionIt = m_sessions.constFind(streamID);
-	if (sessionIt == m_sessions.cend()) {
-		if (Global::get().l) {
-			Global::get().l->log(Log::Warning,
-								 tr("In-app screen-share %1 fallback requested for unknown session %2.")
-									 .arg(publish ? tr("publisher") : tr("viewer"), streamID.toHtmlEscaped()));
-		}
-		if (publish) {
-			requestStopShare(streamID);
-		} else {
-			requestStopViewing(streamID);
-		}
-		return;
-	}
-
-	const ScreenShareSession session = sessionIt.value();
-	const QString trimmedReason      = reason.trimmed();
-	if (Global::get().l && !trimmedReason.isEmpty()) {
-		Global::get().l->log(Log::Warning, tr("In-app screen-share %1 for %2 failed: %3")
-											   .arg(publish ? tr("publisher") : tr("viewer"),
-													session.streamID.toHtmlEscaped(), trimmedReason.toHtmlEscaped()));
-	}
-
-	if (publish) {
-		stopInAppPublishSession(streamID);
-	} else {
-		stopInAppViewSession(streamID);
-	}
-
-	QString errorMessage;
-	qint64 processID = 0;
-	const bool started = publish ? m_helperClient->startPublish(session, &errorMessage, &processID)
-								 : m_helperClient->startView(session, &errorMessage, &processID);
-	if (started) {
-		m_inAppPublishSessionIDs.remove(streamID);
-		m_inAppViewSessionIDs.remove(streamID);
-		m_fallbackRuntimeSessions.insert(streamID);
-		if (publish) {
-			m_activePublishSessions.insert(streamID);
-			m_externalPublishProcessIDs.insert(streamID, processID);
-		} else {
-			m_activeViewSessions.insert(streamID);
-			m_externalViewProcessIDs.insert(streamID, processID);
-			showExternalViewWindow(session, processID);
-		}
-		if (Global::get().l) {
-			Global::get().l->log(
-				Log::Information,
-				tr("Fell back to the external screen-share runtime for %1.").arg(streamID.toHtmlEscaped()));
-		}
-		return;
-	}
-
-	if (Global::get().l) {
-		Global::get().l->log(Log::Warning,
-							 tr("Unable to start the external screen-share runtime for %1: %2")
-								 .arg(streamID.toHtmlEscaped(),
-									  errorMessage.isEmpty() ? tr("unknown error") : errorMessage.toHtmlEscaped()));
-	}
-	if (publish) {
-		requestStopShare(streamID);
-	} else {
-		requestStopViewing(streamID);
-	}
-}
-#endif
 
 bool ScreenShareManager::restartExternalViewSession(const ScreenShareSession &session) {
 	QString errorMessage;
@@ -1140,34 +855,9 @@ void ScreenShareManager::startLocalPublishSession(const ScreenShareSession &sess
 		return;
 	}
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	const bool canUseInAppRelay = supportsInAppRelayTransport(session.relayTransport);
-	const ScreenShareHelperClient::CapabilitySnapshot &capabilities = m_helperClient->capabilities();
-	const bool helperCanPublish =
-		helperRuntimeSupportsPublishing(capabilities, session.relayTransport)
-		&& capabilities.supportedCodecs.contains(static_cast< int >(session.codec));
-	const bool preferInAppRelay =
-		envFlagOverride("MUMBLE_SCREENSHARE_PREFER_IN_APP_PUBLISH")
-			.value_or(Global::get().s.bScreenSharePreferInAppRelay || !helperCanPublish);
-	bool triedInAppRelay = false;
-	if (canUseInAppRelay && preferInAppRelay) {
-		triedInAppRelay = true;
-		if (startInAppPublishSession(session)) {
-			m_activePublishSessions.insert(session.streamID);
-			if (Global::get().l) {
-				Global::get().l->log(
-					Log::Information,
-					tr("Opened in-app screen-share publisher for %1.").arg(session.streamID.toHtmlEscaped()));
-			}
-			return;
-		}
-	}
-#endif
-
 	QString errorMessage;
 	qint64 processID = 0;
 	if (m_helperClient->startPublish(session, &errorMessage, &processID)) {
-		m_fallbackRuntimeSessions.remove(session.streamID);
 		m_activePublishSessions.insert(session.streamID);
 		m_externalPublishProcessIDs.insert(session.streamID, processID);
 		if (Global::get().l) {
@@ -1177,19 +867,6 @@ void ScreenShareManager::startLocalPublishSession(const ScreenShareSession &sess
 		}
 		return;
 	}
-
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	if (canUseInAppRelay && !triedInAppRelay && startInAppPublishSession(session)) {
-		m_activePublishSessions.insert(session.streamID);
-		if (Global::get().l) {
-			Global::get().l->log(
-				Log::Information,
-				tr("Opened in-app screen-share publisher for %1 after helper/browser startup was unavailable.")
-					.arg(session.streamID.toHtmlEscaped()));
-		}
-		return;
-	}
-#endif
 
 	if (Global::get().l) {
 		Global::get().l->log(Log::Warning, tr("Unable to start local screen-share helper for %1: %2")
@@ -1208,27 +885,9 @@ void ScreenShareManager::startLocalViewSession(const ScreenShareSession &session
 		return;
 	}
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	const bool canUseInAppRelay = supportsInAppRelayTransport(session.relayTransport);
-	const ScreenShareHelperClient::CapabilitySnapshot &capabilities = m_helperClient->capabilities();
-	const bool helperCanView =
-		helperRuntimeSupportsViewing(capabilities, session.relayTransport)
-		&& capabilities.supportedCodecs.contains(static_cast< int >(session.codec));
-	const bool preferInAppRelay = Global::get().s.bScreenSharePreferInAppRelay || !helperCanView;
-	if (canUseInAppRelay && preferInAppRelay && startInAppViewSession(session)) {
-		m_activeViewSessions.insert(session.streamID);
-		if (Global::get().l) {
-			Global::get().l->log(Log::Information,
-								 tr("Opened in-app screen-share viewer for %1.").arg(session.streamID.toHtmlEscaped()));
-		}
-		return;
-	}
-#endif
-
 	QString errorMessage;
 	qint64 processID = 0;
 	if (m_helperClient->startView(session, &errorMessage, &processID)) {
-		m_fallbackRuntimeSessions.remove(session.streamID);
 		m_activeViewSessions.insert(session.streamID);
 		m_externalViewProcessIDs.insert(session.streamID, processID);
 		showExternalViewWindow(session, processID);
@@ -1240,19 +899,6 @@ void ScreenShareManager::startLocalViewSession(const ScreenShareSession &session
 		return;
 	}
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	if (canUseInAppRelay && !preferInAppRelay && startInAppViewSession(session)) {
-		m_activeViewSessions.insert(session.streamID);
-		if (Global::get().l) {
-			Global::get().l->log(
-				Log::Information,
-				tr("Opened in-app screen-share viewer for %1 after helper/browser startup was unavailable.")
-					.arg(session.streamID.toHtmlEscaped()));
-		}
-		return;
-	}
-#endif
-
 	if (Global::get().l) {
 		Global::get().l->log(Log::Warning, tr("Unable to start screen-share viewer for %1: %2")
 											   .arg(session.streamID.toHtmlEscaped(), errorMessage.toHtmlEscaped()));
@@ -1260,20 +906,11 @@ void ScreenShareManager::startLocalViewSession(const ScreenShareSession &session
 }
 
 void ScreenShareManager::stopLocalPublishSession(const QString &streamID) {
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	if (m_inAppPublishSessionIDs.contains(streamID)) {
-		stopInAppPublishSession(streamID);
-		return;
-	}
-#endif
-
 	if (m_activePublishSessions.remove(streamID)) {
-		m_fallbackRuntimeSessions.remove(streamID);
 		m_externalPublishProcessIDs.remove(streamID);
 		m_helperClient->stopPublish(streamID);
 	}
 	m_externalPublishProcessIDs.remove(streamID);
-	m_fallbackRuntimeSessions.remove(streamID);
 }
 
 void ScreenShareManager::stopLocalViewSession(const QString &streamID) {
@@ -1288,20 +925,11 @@ void ScreenShareManager::stopLocalViewSession(const QString &streamID) {
 	m_externalViewAudioMuted.remove(streamID);
 	m_pausedExternalViewSessions.remove(streamID);
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	if (m_inAppViewSessionIDs.contains(streamID)) {
-		stopInAppViewSession(streamID);
-		return;
-	}
-#endif
-
 	if (m_activeViewSessions.remove(streamID)) {
-		m_fallbackRuntimeSessions.remove(streamID);
 		m_externalViewProcessIDs.remove(streamID);
 		m_helperClient->stopView(streamID);
 	}
 	m_externalViewProcessIDs.remove(streamID);
-	m_fallbackRuntimeSessions.remove(streamID);
 }
 
 void ScreenShareManager::setExternalViewAudioMuted(const QString &streamID, const bool muted) {
@@ -1309,11 +937,6 @@ void ScreenShareManager::setExternalViewAudioMuted(const QString &streamID, cons
 	if (it == m_sessions.cend()) {
 		return;
 	}
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	if (m_inAppViewSessionIDs.contains(streamID)) {
-		return;
-	}
-#endif
 
 	if (muted) {
 		m_externalViewAudioMuted.insert(streamID);
@@ -1334,11 +957,6 @@ void ScreenShareManager::setExternalViewPaused(const QString &streamID, const bo
 	if (it == m_sessions.cend()) {
 		return;
 	}
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	if (m_inAppViewSessionIDs.contains(streamID)) {
-		return;
-	}
-#endif
 
 	ExternalScreenShareWindowHost *host = m_externalViewWindows.value(streamID, nullptr);
 	if (paused) {

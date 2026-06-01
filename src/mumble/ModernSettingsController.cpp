@@ -225,8 +225,6 @@ namespace {
 			  QObject::tr("Override the operating-system version Mumble reports to servers for compatibility testing.") },
 			{ QStringLiteral("screenShare.autoOpenCurrentRoom"),
 			  QObject::tr("Open screen shares automatically when they are posted in your current voice room.") },
-			{ QStringLiteral("screenShare.preferInAppRelay"),
-			  QObject::tr("Prefer Mumble's built-in relay window instead of an external browser for shared screens.") },
 			{ QStringLiteral("screenShare.diagnostics"),
 			  QObject::tr("Write extra screen-sharing diagnostics to the profile log folder.") },
 			{ QStringLiteral("audio.inputMeter"),
@@ -1581,8 +1579,6 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		m_draft.qsAdvertisedOSVersionOverride = value.toString().trimmed();
 	} else if (id == QLatin1String("screenShare.autoOpenCurrentRoom")) {
 		m_draft.bScreenShareAutoOpenCurrentRoom = value.toBool();
-	} else if (id == QLatin1String("screenShare.preferInAppRelay")) {
-		m_draft.bScreenSharePreferInAppRelay = value.toBool();
 	} else if (id == QLatin1String("screenShare.diagnostics")) {
 		m_draft.bScreenShareDiagnostics = value.toBool();
 	} else if (id == QLatin1String("audio.inputSystem")) {
@@ -2245,9 +2241,6 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 												 boolField(QStringLiteral("screenShare.autoOpenCurrentRoom"),
 														   QObject::tr("Auto-open shares in my current voice room"),
 														   m_draft.bScreenShareAutoOpenCurrentRoom),
-												 boolField(QStringLiteral("screenShare.preferInAppRelay"),
-														   QObject::tr("Prefer the in-app relay window"),
-														   m_draft.bScreenSharePreferInAppRelay),
 												 advancedField(boolField(QStringLiteral("screenShare.diagnostics"),
 																		 QObject::tr("Enable diagnostics logging"),
 																		 m_draft.bScreenShareDiagnostics)) }),

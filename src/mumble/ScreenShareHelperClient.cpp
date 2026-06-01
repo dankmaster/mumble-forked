@@ -102,28 +102,6 @@ QStringList stringListFromJson(const QJsonValue &value) {
 	return values;
 }
 
-bool inAppWebRtcRelayAdvertised() {
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	if (!qEnvironmentVariableIsSet("MUMBLE_SCREENSHARE_ALLOW_RELAY_WEBAPP")) {
-		return true;
-	}
-
-	const QString value = qEnvironmentVariable("MUMBLE_SCREENSHARE_ALLOW_RELAY_WEBAPP").trimmed().toLower();
-	return value != QLatin1String("0") && value != QLatin1String("false") && value != QLatin1String("no")
-		   && value != QLatin1String("off");
-#else
-	return false;
-#endif
-}
-
-void appendUniqueCodecs(QList< int > &target, const QList< int > &codecs) {
-	for (const int codec : Mumble::ScreenShare::sanitizeCodecList(codecs)) {
-		if (!target.contains(codec)) {
-			target.append(codec);
-		}
-	}
-}
-
 unsigned int nonNegativePayloadValue(const QJsonObject &payload, const char *key) {
 	const int rawValue = payload.value(QLatin1String(key)).toInt();
 	if (rawValue <= 0) {
@@ -493,22 +471,6 @@ QJsonObject ScreenShareHelperClient::payloadFromSession(const ScreenShareSession
 
 void ScreenShareHelperClient::applyAdvertisedCapabilities(MumbleProto::Version &msg) {
 	CapabilitySnapshot snapshot = detectLocalCapabilities();
-
-	if (inAppWebRtcRelayAdvertised()) {
-		snapshot.supportsSignaling = true;
-		snapshot.captureSupported  = true;
-		snapshot.viewSupported     = true;
-		appendUniqueCodecs(snapshot.supportedCodecs, Mumble::ScreenShare::browserWebRtcCodecPreferenceList());
-		if (snapshot.maxWidth == 0) {
-			snapshot.maxWidth = Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH;
-		}
-		if (snapshot.maxHeight == 0) {
-			snapshot.maxHeight = Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT;
-		}
-		if (snapshot.maxFps == 0) {
-			snapshot.maxFps = Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_FPS;
-		}
-	}
 
 	msg.set_supports_screen_share_signaling(snapshot.supportsSignaling);
 	msg.set_supports_screen_share_capture(snapshot.captureSupported);

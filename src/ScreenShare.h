@@ -47,7 +47,6 @@ namespace ScreenShare {
 	QString codecToConfigToken(MumbleProto::ScreenShareCodec codec);
 	QList< int > defaultCodecPreferenceList();
 	QList< int > webRtcRelayCodecPreferenceList();
-	QList< int > browserWebRtcCodecPreferenceList();
 	QList< int > sanitizeCodecList(const QList< int > &codecs);
 	QList< int > parseCodecPreferenceString(const QString &codecList, const QList< int > &fallback = {});
 	QString codecPreferenceString(const QList< int > &codecs);

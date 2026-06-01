@@ -19,8 +19,8 @@ This fork now supports two practical relay execution modes:
   detached viewer process supervision
 
 For small Windows-heavy groups, this keeps Murmur out of the media path and
-avoids server-side transcoding. The relay web app remains in the tree only as
-an explicit fallback/debug path gated by `MUMBLE_SCREENSHARE_ALLOW_RELAY_WEBAPP=1`.
+avoids server-side transcoding. LiveKit sessions are executed by the bundled
+GStreamer helper; the old browser/WebRTC relay fallback is no longer shipped.
 
 ### Server Config
 

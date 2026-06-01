@@ -19,7 +19,7 @@ class TestScreenShare : public QObject {
 private slots:
 	void parsesAndFormatsVp8CodecPreferences();
 	void keepsDirectDefaultH264First();
-	void usesVp8ForBrowserWebRtcRuntime();
+	void keepsWebRtcRelayH264First();
 	void negotiatesWebRtcRelayWithLegacyFallback();
 	void recommendsVp8Bitrate();
 	void exposesPublisherQualityCeiling();
@@ -45,9 +45,7 @@ void TestScreenShare::keepsDirectDefaultH264First() {
 	QVERIFY(codecs.contains(codecValue(MumbleProto::ScreenShareCodecVP8)));
 }
 
-void TestScreenShare::usesVp8ForBrowserWebRtcRuntime() {
-	QCOMPARE(Mumble::ScreenShare::browserWebRtcCodecPreferenceList(),
-			 (QList< int >{ codecValue(MumbleProto::ScreenShareCodecVP8) }));
+void TestScreenShare::keepsWebRtcRelayH264First() {
 	QCOMPARE(
 		Mumble::ScreenShare::webRtcRelayCodecPreferenceList(),
 		(QList< int >{ codecValue(MumbleProto::ScreenShareCodecH264), codecValue(MumbleProto::ScreenShareCodecAV1),

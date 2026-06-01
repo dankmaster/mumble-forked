@@ -17,15 +17,12 @@ class ScreenShareExternalProcess {
 public:
 	struct RuntimeSupport {
 		QString ffmpegPath;
-		QString ffplayPath;
-		QString gstLaunchPath;
-		QString gstInspectPath;
-		QString gstreamerVersion;
-		QString edgePath;
-		QString chromePath;
-		QString firefoxPath;
-		bool ffmpegAvailable           = false;
-		bool ffplayAvailable           = false;
+	QString ffplayPath;
+	QString gstLaunchPath;
+	QString gstInspectPath;
+	QString gstreamerVersion;
+	bool ffmpegAvailable           = false;
+	bool ffplayAvailable           = false;
 		bool gstLaunchAvailable        = false;
 		bool gstInspectAvailable       = false;
 		bool gstreamerAvailable        = false;
@@ -85,13 +82,9 @@ public:
 		bool libVpxVp8Available        = false;
 		bool libVpxVp9Available        = false;
 		bool fileProtocolAvailable     = false;
-		bool rtmpProtocolAvailable     = false;
-		bool rtmpsProtocolAvailable    = false;
-		bool edgeAvailable             = false;
-		bool chromeAvailable           = false;
-		bool firefoxAvailable          = false;
-		bool browserWebRtcAvailable    = false;
-	};
+	bool rtmpProtocolAvailable     = false;
+	bool rtmpsProtocolAvailable    = false;
+};
 
 	struct LaunchResult {
 		bool started  = false;

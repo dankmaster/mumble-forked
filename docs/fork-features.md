@@ -231,8 +231,6 @@ Current capabilities:
 - GStreamer-first LiveKit WebRTC helper runtime for screen-share publish/view
 - shared/WebEngine and `mumble-forked` Windows release payloads stage the
   bundled GStreamer runtime under `gstreamer\` for installed clients
-- optional relay/WebRTC browser shell under [`../relay-webapp/`](../relay-webapp/)
-  only when `MUMBLE_SCREENSHARE_ALLOW_RELAY_WEBAPP=1`
 - LiveKit-compatible relay-token path when API key/secret are configured
 
 Important server keys:

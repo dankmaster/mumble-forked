@@ -596,17 +596,19 @@ void ScreenShareHelperServer::logSessionPlanSummary(const QJsonObject &payload, 
 									  .trimmed();
 	const QString plannedCapture = payload.value(QStringLiteral("capture_backend")).toString().trimmed();
 	const QString captureSource = payload.value(QStringLiteral("active_capture_source")).toString().trimmed();
+	const bool captureAudio = payload.value(QStringLiteral("capture_audio")).toBool(false);
 	const QString audioSource = payload.value(QStringLiteral("audio_source_id")).toString().trimmed();
 	const QString executionMode = payload.value(QStringLiteral("execution_mode")).toString().trimmed();
 
 	qInfo().noquote() << QStringLiteral("ScreenShareHelper[%1:%2]: %3 summary role=%4 relay_scheme=%5 codec=%6 "
 										"planned_backend=%7 actual_backend=%8 planned_capture=%9 capture_source=%10 "
-										"audio_source=%11 execution_mode=%12")
+										"capture_audio=%11 audio_source=%12 execution_mode=%13")
 							 .arg(label, streamID, phase, role, relayScheme, codec,
 								  plannedBackend.isEmpty() ? QStringLiteral("-") : plannedBackend,
 								  actualBackend.isEmpty() ? QStringLiteral("-") : actualBackend,
 								  plannedCapture.isEmpty() ? QStringLiteral("-") : plannedCapture,
 								  captureSource.isEmpty() ? QStringLiteral("-") : captureSource,
+								  captureAudio ? QStringLiteral("true") : QStringLiteral("false"),
 								  audioSource.isEmpty() ? QStringLiteral("-") : audioSource,
 								  executionMode.isEmpty() ? QStringLiteral("-") : executionMode);
 }

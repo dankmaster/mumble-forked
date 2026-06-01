@@ -317,205 +317,6 @@ QString preferredExecutablePath(const char *envName, const QStringList &candidat
 	return findExecutableAny(candidates);
 }
 
-#ifdef Q_OS_WIN
-QString existingWindowsBrowserPath(const QStringList &relativePaths) {
-	QStringList roots;
-	for (const char *envName : { "ProgramFiles", "ProgramFiles(x86)", "LocalAppData" }) {
-		const QString root = qEnvironmentVariable(envName).trimmed();
-		if (!root.isEmpty() && !roots.contains(root)) {
-			roots.append(root);
-		}
-	}
-
-	for (const QString &root : roots) {
-		for (const QString &relativePath : relativePaths) {
-			const QString candidate = QDir(root).filePath(relativePath);
-			if (QFileInfo(candidate).isExecutable()) {
-				return candidate;
-			}
-		}
-	}
-
-	return QString();
-}
-#endif
-
-QString preferredBrowserPath(const ScreenShareExternalProcess::RuntimeSupport &support, QString *browserID = nullptr) {
-	if (support.edgeAvailable) {
-		if (browserID) {
-			*browserID = QStringLiteral("edge");
-		}
-		return support.edgePath;
-	}
-	if (support.chromeAvailable) {
-		if (browserID) {
-			*browserID = QStringLiteral("chrome");
-		}
-		return support.chromePath;
-	}
-	if (support.firefoxAvailable) {
-		if (browserID) {
-			*browserID = QStringLiteral("firefox");
-		}
-		return support.firefoxPath;
-	}
-
-	if (browserID) {
-		browserID->clear();
-	}
-	return QString();
-}
-
-QString browserProfileDirectory(const QJsonObject &plan, const bool publish, const QString &browserID) {
-	const QString streamID          = plan.value(QStringLiteral("stream_id")).toString().trimmed();
-	const QString sanitizedStreamID = streamID.isEmpty() ? QStringLiteral("screen-share") : sanitizeRoomToken(streamID);
-	QString tempBase                = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
-	if (tempBase.trimmed().isEmpty()) {
-		tempBase = QDir::tempPath();
-	}
-
-	return QDir(tempBase).filePath(
-		QStringLiteral("mumble-screen-share/%1/%2-%3")
-			.arg(browserID, publish ? QStringLiteral("publish") : QStringLiteral("view"), sanitizedStreamID));
-}
-
-QString browserLaunchUrl(const QJsonObject &plan, QString *errorMessage, QStringList *warnings) {
-	const QString relayUrl = Mumble::ScreenShare::normalizeRelayUrl(plan.value(QStringLiteral("relay_url")).toString());
-	if (relayUrl.isEmpty()) {
-		if (errorMessage) {
-			*errorMessage = QStringLiteral("Missing or invalid relay_url.");
-		}
-		return QString();
-	}
-
-	QUrl launchUrl(relayUrl);
-	const QString originalScheme = launchUrl.scheme().trimmed().toLower();
-	if (originalScheme == QLatin1String("wss")) {
-		launchUrl.setScheme(QStringLiteral("https"));
-		if (warnings) {
-			warnings->append(QStringLiteral("Launching the WebRTC relay UI over https while preserving the original "
-											"wss relay URL as signaling metadata."));
-		}
-	} else if (originalScheme == QLatin1String("ws")) {
-		launchUrl.setScheme(QStringLiteral("http"));
-		if (warnings) {
-			warnings->append(QStringLiteral("Launching the WebRTC relay UI over http while preserving the original ws "
-											"relay URL as signaling metadata."));
-		}
-	}
-
-	if (launchUrl.scheme().trimmed().isEmpty() || launchUrl.host().trimmed().isEmpty()) {
-		if (errorMessage) {
-			*errorMessage = QStringLiteral("Unable to derive a browser launch URL from relay_url.");
-		}
-		return QString();
-	}
-
-	QUrlQuery query(launchUrl);
-	auto appendQuery = [&](const QString &key, const QString &value) {
-		if (!value.trimmed().isEmpty()) {
-			query.addQueryItem(key, value);
-		}
-	};
-
-	appendQuery(QStringLiteral("mumble_screen_share"), QStringLiteral("1"));
-	appendQuery(QStringLiteral("relay_url"), relayUrl);
-	appendQuery(QStringLiteral("relay_room_id"), plan.value(QStringLiteral("relay_room_id")).toString());
-	appendQuery(QStringLiteral("relay_session_id"), plan.value(QStringLiteral("relay_session_id")).toString());
-	appendQuery(QStringLiteral("stream_id"), plan.value(QStringLiteral("stream_id")).toString());
-	appendQuery(QStringLiteral("relay_role"), plan.value(QStringLiteral("relay_role_token")).toString());
-	appendQuery(QStringLiteral("codec"), plan.value(QStringLiteral("codec_token")).toString());
-	appendQuery(QStringLiteral("requested_codec"), plan.value(QStringLiteral("requested_codec_token")).toString());
-	appendQuery(QStringLiteral("transport"), plan.value(QStringLiteral("relay_transport_token")).toString());
-	appendQuery(QStringLiteral("width"), QString::number(qMax(0, plan.value(QStringLiteral("width")).toInt())));
-	appendQuery(QStringLiteral("height"), QString::number(qMax(0, plan.value(QStringLiteral("height")).toInt())));
-	appendQuery(QStringLiteral("fps"), QString::number(qMax(0, plan.value(QStringLiteral("fps")).toInt())));
-	appendQuery(QStringLiteral("bitrate_kbps"),
-				QString::number(qMax(0, plan.value(QStringLiteral("bitrate_kbps")).toInt())));
-	appendQuery(QStringLiteral("capture_source_id"), plan.value(QStringLiteral("capture_source_id")).toString());
-	const bool browserPublisherCaptureAudio =
-		plan.value(QStringLiteral("relay_contract_mode")).toString() == QLatin1String("browser-webrtc-runtime")
-		&& plan.value(QStringLiteral("relay_role_token")).toString() == QLatin1String("publisher");
-	if (browserPublisherCaptureAudio) {
-		const bool captureAudio = plan.value(QStringLiteral("capture_audio")).toBool(false);
-		appendQuery(QStringLiteral("capture_audio"), captureAudio ? QStringLiteral("1") : QStringLiteral("0"));
-		appendQuery(QStringLiteral("system_audio"), captureAudio ? QStringLiteral("include") : QStringLiteral("exclude"));
-		if (captureAudio) {
-			appendQuery(QStringLiteral("audio_source_id"), plan.value(QStringLiteral("audio_source_id")).toString());
-		}
-		appendQuery(QStringLiteral("surface_switching"), QStringLiteral("include"));
-		appendQuery(QStringLiteral("self_browser_surface"), QStringLiteral("exclude"));
-	}
-	launchUrl.setQuery(query);
-	const QString relayToken = plan.value(QStringLiteral("relay_token")).toString().trimmed();
-	if (!relayToken.isEmpty()) {
-		QUrlQuery fragment;
-		fragment.addQueryItem(QStringLiteral("relay_token"), relayToken);
-		launchUrl.setFragment(fragment.toString(QUrl::FullyEncoded));
-	}
-	return launchUrl.toString(QUrl::FullyEncoded);
-}
-
-ScreenShareExternalProcess::LaunchResult
-	startBrowserWebRtcSession(const ScreenShareExternalProcess::RuntimeSupport &support, const QJsonObject &plan,
-							  QObject *parent, const bool publish) {
-	ScreenShareExternalProcess::LaunchResult launch;
-	if (!support.graphicalSessionAvailable) {
-		launch.errorMessage =
-			QStringLiteral("A graphical desktop session is required for the helper WebRTC browser runtime.");
-		return launch;
-	}
-
-	QString browserID;
-	const QString browserPath = preferredBrowserPath(support, &browserID);
-	if (browserPath.isEmpty()) {
-		launch.errorMessage = QStringLiteral("No supported browser runtime was found for WebRTC screen sharing.");
-		return launch;
-	}
-
-	QString launchUrlError;
-	QStringList warnings;
-	const QString launchUrl = browserLaunchUrl(plan, &launchUrlError, &warnings);
-	if (launchUrl.isEmpty()) {
-		launch.errorMessage = launchUrlError;
-		return launch;
-	}
-
-	const QString profileDir = browserProfileDirectory(plan, publish, browserID);
-	QDir(profileDir).removeRecursively();
-	QDir().mkpath(profileDir);
-
-	QStringList arguments;
-	if (browserID == QLatin1String("edge") || browserID == QLatin1String("chrome")) {
-		arguments << QStringLiteral("--new-window") << QStringLiteral("--disable-session-crashed-bubble")
-				  << QStringLiteral("--autoplay-policy=no-user-gesture-required")
-				  << QStringLiteral("--user-data-dir=%1").arg(profileDir) << QStringLiteral("--app=%1").arg(launchUrl);
-	} else if (browserID == QLatin1String("firefox")) {
-		arguments << QStringLiteral("-new-instance") << QStringLiteral("-profile") << profileDir
-				  << QStringLiteral("-new-window") << launchUrl;
-	} else {
-		launch.errorMessage = QStringLiteral("Unsupported browser runtime selected for WebRTC.");
-		return launch;
-	}
-
-	launch = startProcess(browserPath, arguments, parent,
-						  publish ? QStringLiteral("browser-webrtc-publish") : QStringLiteral("browser-webrtc-view"));
-	if (!launch.started) {
-		return launch;
-	}
-
-	launch.endpointUrl = launchUrl;
-	launch.warnings    = warnings;
-	if (publish) {
-		launch.selectedCaptureSource = QStringLiteral("browser-webrtc-%1").arg(browserID);
-		launch.selectedEncoder       = QStringLiteral("browser-webrtc");
-	} else {
-		launch.selectedRenderer = QStringLiteral("browser-webrtc-%1").arg(browserID);
-	}
-
-	return launch;
-}
-
 QString detectRenderNode() {
 #ifdef Q_OS_LINUX
 	const QDir driDir(QStringLiteral("/dev/dri"));
@@ -1604,12 +1405,10 @@ ScreenShareExternalProcess::LaunchResult
 	const bool receiveRawPads = expectAudio;
 	arguments << QStringLiteral("src.") << QStringLiteral("!") << QStringLiteral("queue")
 			  << QStringLiteral("leaky=downstream") << QStringLiteral("max-size-buffers=4") << QStringLiteral("!");
-	if (receiveRawPads) {
-		arguments << QStringLiteral("video/x-raw(ANY)") << QStringLiteral("!");
-	} else if (forceH264Session) {
+	if (forceH264Session && !receiveRawPads) {
 		arguments << QStringLiteral("video/x-h264;application/x-rtp,media=video,encoding-name=H264")
 				  << QStringLiteral("!");
-	} else {
+	} else if (!receiveRawPads) {
 		arguments << QStringLiteral("application/x-rtp,media=video;video/x-h264;video/x-vp8;video/x-vp9")
 				  << QStringLiteral("!");
 	}
@@ -1659,8 +1458,8 @@ ScreenShareExternalProcess::LaunchResult
 		&& support.gstAudioResampleAvailable) {
 		arguments << QStringLiteral("src.") << QStringLiteral("!") << QStringLiteral("queue")
 				  << QStringLiteral("leaky=downstream") << QStringLiteral("max-size-buffers=8")
-				  << QStringLiteral("!") << QStringLiteral("audio/x-raw(ANY)") << QStringLiteral("!")
-				  << QStringLiteral("audioconvert") << QStringLiteral("!") << QStringLiteral("audioresample")
+				  << QStringLiteral("!") << QStringLiteral("audioconvert") << QStringLiteral("!")
+				  << QStringLiteral("audioresample")
 				  << QStringLiteral("!") << QStringLiteral("autoaudiosink") << QStringLiteral("sync=false");
 	}
 
@@ -1726,47 +1525,17 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 								QStringList{ QStringLiteral("gst-inspect-1.0"),
 											 QStringLiteral("gst-inspect-1.0.exe") },
 								bundledGStreamerDirs);
-#ifdef Q_OS_WIN
-	support.edgePath = findExecutableAny(QStringList{ QStringLiteral("msedge.exe") });
-	if (support.edgePath.isEmpty()) {
-		support.edgePath =
-			existingWindowsBrowserPath(QStringList{ QStringLiteral("Microsoft/Edge/Application/msedge.exe"),
-													QStringLiteral("Microsoft/Edge Beta/Application/msedge.exe") });
-	}
-	support.chromePath = findExecutableAny(QStringList{ QStringLiteral("chrome.exe") });
-	if (support.chromePath.isEmpty()) {
-		support.chromePath =
-			existingWindowsBrowserPath(QStringList{ QStringLiteral("Google/Chrome/Application/chrome.exe"),
-													QStringLiteral("Chromium/Application/chrome.exe") });
-	}
-	support.firefoxPath = findExecutableAny(QStringList{ QStringLiteral("firefox.exe") });
-	if (support.firefoxPath.isEmpty()) {
-		support.firefoxPath = existingWindowsBrowserPath(QStringList{ QStringLiteral("Mozilla Firefox/firefox.exe") });
-	}
-#else
-	support.edgePath =
-		findExecutableAny(QStringList{ QStringLiteral("microsoft-edge"), QStringLiteral("microsoft-edge-stable") });
-	support.chromePath =
-		findExecutableAny(QStringList{ QStringLiteral("google-chrome"), QStringLiteral("google-chrome-stable"),
-									   QStringLiteral("chromium"), QStringLiteral("chromium-browser") });
-	support.firefoxPath               = findExecutableAny(QStringList{ QStringLiteral("firefox") });
-#endif
 	support.ffmpegAvailable  = !support.ffmpegPath.isEmpty();
 	support.ffplayAvailable  = !support.ffplayPath.isEmpty();
 	support.gstLaunchAvailable  = !support.gstLaunchPath.isEmpty();
 	support.gstInspectAvailable = !support.gstInspectPath.isEmpty();
 	support.gstreamerAvailable  = support.gstLaunchAvailable && support.gstInspectAvailable;
-	support.edgeAvailable    = !support.edgePath.isEmpty();
-	support.chromeAvailable  = !support.chromePath.isEmpty();
-	support.firefoxAvailable = !support.firefoxPath.isEmpty();
 #ifdef Q_OS_WIN
 	support.graphicalSessionAvailable = true;
 #else
 	support.graphicalSessionAvailable = !qEnvironmentVariable("DISPLAY").trimmed().isEmpty()
 										|| !qEnvironmentVariable("WAYLAND_DISPLAY").trimmed().isEmpty();
 #endif
-	support.browserWebRtcAvailable = support.graphicalSessionAvailable
-									 && (support.edgeAvailable || support.chromeAvailable || support.firefoxAvailable);
 	support.x11DisplayAvailable     = !qEnvironmentVariable("DISPLAY").trimmed().isEmpty();
 	support.windowedViewerAvailable = hasWindowedViewerSurface();
 #ifdef Q_OS_WIN
@@ -1980,13 +1749,9 @@ QJsonObject ScreenShareExternalProcess::runtimeSupportToJson(const RuntimeSuppor
 		QJsonArray missingElements;
 		for (const QString &element : support.missingGStreamerElements) {
 			missingElements.push_back(element);
-		}
-		payload.insert(QStringLiteral("gstreamer_missing_elements"), missingElements);
 	}
-	payload.insert(QStringLiteral("browser_webrtc_available"), support.browserWebRtcAvailable);
-	payload.insert(QStringLiteral("edge_available"), support.edgeAvailable);
-	payload.insert(QStringLiteral("chrome_available"), support.chromeAvailable);
-	payload.insert(QStringLiteral("firefox_available"), support.firefoxAvailable);
+	payload.insert(QStringLiteral("gstreamer_missing_elements"), missingElements);
+	}
 	payload.insert(QStringLiteral("graphical_session_available"), support.graphicalSessionAvailable);
 	payload.insert(QStringLiteral("x11_display_available"), support.x11DisplayAvailable);
 	payload.insert(QStringLiteral("x11grab_available"), support.x11GrabAvailable);
@@ -2045,9 +1810,6 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startPublis
 	const RuntimeSupport support = probeRuntimeSupport();
 	if (plan.value(QStringLiteral("relay_contract_mode")).toString() == QLatin1String("gstreamer-livekit-runtime")) {
 		return startGStreamerLiveKitPublish(support, plan, parent);
-	}
-	if (plan.value(QStringLiteral("relay_contract_mode")).toString() == QLatin1String("browser-webrtc-runtime")) {
-		return startBrowserWebRtcSession(support, plan, parent, true);
 	}
 	if (!plan.value(QStringLiteral("relay_runtime_executable")).toBool(true)) {
 		launch.errorMessage =
@@ -2170,9 +1932,6 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startView(c
 	const RuntimeSupport support = probeRuntimeSupport();
 	if (plan.value(QStringLiteral("relay_contract_mode")).toString() == QLatin1String("gstreamer-livekit-runtime")) {
 		return startGStreamerLiveKitView(support, plan, parent);
-	}
-	if (plan.value(QStringLiteral("relay_contract_mode")).toString() == QLatin1String("browser-webrtc-runtime")) {
-		return startBrowserWebRtcSession(support, plan, parent, false);
 	}
 	if (!plan.value(QStringLiteral("relay_runtime_executable")).toBool(true)) {
 		launch.errorMessage =

@@ -456,14 +456,7 @@ if(modern-layout-webengine)
 		"ModernShellHost.h"
 		"ModernShellPage.cpp"
 		"ModernShellPage.h"
-		"RelayWebPage.cpp"
-		"RelayWebPage.h"
-		"RelayWindowBridge.cpp"
-		"RelayWindowBridge.h"
-		"RelayWindowHost.cpp"
-		"RelayWindowHost.h"
 		"modern-shell.qrc"
-		"relay-webapp.qrc"
 	)
 
 	if(modern-layout-automation)

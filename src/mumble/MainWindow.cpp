@@ -37520,6 +37520,7 @@ bool MainWindow::chooseScreenShareStartOptions(Channel *channel, ScreenShareStar
 	QVBoxLayout *videoLayout = new QVBoxLayout(videoGroup);
 	QListWidget *sourceList  = new QListWidget(videoGroup);
 	sourceList->setObjectName(QStringLiteral("screenShareSourceList"));
+	sourceList->setAccessibleName(tr("Screen-share source"));
 	sourceList->setAlternatingRowColors(true);
 	sourceList->setFrameShape(QFrame::NoFrame);
 	sourceList->setIconSize(QSize(22, 22));
@@ -37618,6 +37619,10 @@ bool MainWindow::chooseScreenShareStartOptions(Channel *channel, ScreenShareStar
 	QFormLayout *qualityLayout = new QFormLayout(qualityGroup);
 	QComboBox *resolutionCombo = new QComboBox(qualityGroup);
 	QComboBox *frameRateCombo  = new QComboBox(qualityGroup);
+	resolutionCombo->setObjectName(QStringLiteral("screenShareResolutionCombo"));
+	resolutionCombo->setAccessibleName(tr("Resolution"));
+	frameRateCombo->setObjectName(QStringLiteral("screenShareFrameRateCombo"));
+	frameRateCombo->setAccessibleName(tr("Frame rate"));
 	resolutionCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
 	frameRateCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
 
@@ -37698,6 +37703,8 @@ bool MainWindow::chooseScreenShareStartOptions(Channel *channel, ScreenShareStar
 	audioGroup->setObjectName(QStringLiteral("screenSharePickerPanel"));
 	QVBoxLayout *audioLayout = new QVBoxLayout(audioGroup);
 	QComboBox *audioCombo    = new QComboBox(audioGroup);
+	audioCombo->setObjectName(QStringLiteral("screenShareAudioCombo"));
+	audioCombo->setAccessibleName(tr("Audio"));
 	audioCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
 	audioCombo->addItem(tr("No audio"), QString());
 	audioCombo->addItem(tr("System audio"), QStringLiteral("default-loopback"));
