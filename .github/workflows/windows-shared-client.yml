@@ -208,3 +208,9 @@ jobs:
         with:
           path: .cache/gstreamer/msvc-x86_64-${{ env.GSTREAMER_VERSION }}
           key: gstreamer-${{ runner.os }}-msvc-x86_64-${{ env.GSTREAMER_VERSION }}
+
+      - if: ${{ github.event_name != 'pull_request' && steps.setup-windows-optional-runtimes.outputs.rnnoise-model-cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ steps.setup-windows-optional-runtimes.outputs.rnnoise-model-cache-path }}
+          key: ${{ steps.setup-windows-optional-runtimes.outputs.rnnoise-model-cache-key }}

@@ -6,7 +6,8 @@
 include(FetchContent)
 
 set(RNNOISE_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../rnnoise-src")
-set(RNNOISE_MODEL_URL "https://media.xiph.org/rnnoise/models/rnnoise_data-")
+set(RNNOISE_MODEL_URL_PREFIX "https://media.xiph.org/rnnoise/models/rnnoise_data-" CACHE STRING "RNNoise model archive URL prefix")
+set(RNNOISE_MODEL_ARCHIVE "" CACHE FILEPATH "Optional local RNNoise model archive to use instead of downloading during configure")
 
 if(NOT EXISTS "${RNNOISE_SRC_DIR}/COPYING")
 	message(FATAL_ERROR
@@ -44,8 +45,37 @@ target_include_directories(rnnoise
 )
 
 file(READ "${RNNOISE_SRC_DIR}/model_version" rnnoise_model_hash)
-string(STRIP ${rnnoise_model_hash} rnnoise_model_hash)
-string(CONCAT rnnoise_model_url "${RNNOISE_MODEL_URL}" "${rnnoise_model_hash}" ".tar.gz")
+string(STRIP "${rnnoise_model_hash}" rnnoise_model_hash)
+
+if(NOT RNNOISE_MODEL_ARCHIVE AND DEFINED ENV{MUMBLE_RNNOISE_MODEL_ARCHIVE})
+	set(RNNOISE_MODEL_ARCHIVE "$ENV{MUMBLE_RNNOISE_MODEL_ARCHIVE}")
+endif()
+
+if(NOT RNNOISE_MODEL_ARCHIVE AND DEFINED ENV{RNNOISE_MODEL_ARCHIVE})
+	set(RNNOISE_MODEL_ARCHIVE "$ENV{RNNOISE_MODEL_ARCHIVE}")
+endif()
+
+if(RNNOISE_MODEL_ARCHIVE)
+	file(TO_CMAKE_PATH "${RNNOISE_MODEL_ARCHIVE}" rnnoise_model_archive)
+	if(NOT EXISTS "${rnnoise_model_archive}")
+		message(FATAL_ERROR "RNNoise model archive was requested but does not exist: ${rnnoise_model_archive}")
+	endif()
+
+	file(SHA256 "${rnnoise_model_archive}" rnnoise_model_archive_hash)
+	string(TOLOWER "${rnnoise_model_archive_hash}" rnnoise_model_archive_hash)
+	if(NOT rnnoise_model_archive_hash STREQUAL rnnoise_model_hash)
+		message(FATAL_ERROR
+			"RNNoise model archive checksum mismatch for ${rnnoise_model_archive}.\n"
+			"Expected: ${rnnoise_model_hash}\n"
+			"Actual:   ${rnnoise_model_archive_hash}"
+		)
+	endif()
+
+	set(rnnoise_model_url "${rnnoise_model_archive}")
+	message(STATUS "Using cached RNNoise model archive: ${rnnoise_model_archive}")
+else()
+	string(CONCAT rnnoise_model_url "${RNNOISE_MODEL_URL_PREFIX}" "${rnnoise_model_hash}" ".tar.gz")
+endif()
 
 FetchContent_Declare(
   rnnoise_model

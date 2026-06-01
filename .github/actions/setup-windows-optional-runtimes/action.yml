@@ -22,8 +22,21 @@ inputs:
     description: 'GStreamer MSVC runtime version to restore or download.'
     required: false
     default: '1.26.7'
+  rnnoise-model-url:
+    description: 'Optional primary RNNoise model archive URL.'
+    required: false
+    default: ''
 
 outputs:
+  rnnoise-model-cache-hit:
+    description: 'Whether the RNNoise model archive cache was restored.'
+    value: ${{ steps.restore-rnnoise-model-cache.outputs.cache-hit }}
+  rnnoise-model-cache-key:
+    description: 'Cache key for the RNNoise model archive.'
+    value: ${{ steps.rnnoise-model-metadata.outputs.cache-key }}
+  rnnoise-model-cache-path:
+    description: 'Cache path for the RNNoise model archive.'
+    value: ${{ steps.rnnoise-model-metadata.outputs.cache-path }}
   onnxruntime-cache-hit:
     description: 'Whether the ONNX Runtime cache was restored.'
     value: ${{ steps.restore-onnxruntime-cache.outputs.cache-hit }}
@@ -108,6 +121,158 @@ runs:
 
           Copy-DirectoryContents -Source $g15SourceRoot.FullName -Destination $g15Root
         }
+
+    - id: rnnoise-model-metadata
+      name: Resolve RNNoise model archive
+      shell: powershell
+      run: |
+        $ErrorActionPreference = "Stop"
+
+        $modelVersionPath = Join-Path $env:GITHUB_WORKSPACE "3rdparty\rnnoise-src\model_version"
+        if (-not (Test-Path -LiteralPath $modelVersionPath)) {
+          throw "Unable to locate RNNoise model version file at '$modelVersionPath'."
+        }
+
+        $hash = (Get-Content -LiteralPath $modelVersionPath -Raw).Trim().ToLowerInvariant()
+        if ($hash -notmatch '^[0-9a-f]{64}$') {
+          throw "RNNoise model version '$hash' is not a SHA-256 hash."
+        }
+
+        $cacheRootRelative = ".cache/rnnoise-model/$hash"
+        $cacheRoot = Join-Path $env:GITHUB_WORKSPACE ".cache\rnnoise-model\$hash"
+        $archiveName = "rnnoise_data-$hash.tar.gz"
+        $archivePath = Join-Path $cacheRoot $archiveName
+        $runnerOs = if ([string]::IsNullOrWhiteSpace($env:RUNNER_OS)) { "Windows" } else { $env:RUNNER_OS }
+        $cacheKey = "rnnoise-model-$runnerOs-$hash"
+
+        "hash=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        "archive-name=$archiveName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        "archive-path=$archivePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        "cache-key=$cacheKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        "cache-path=$cacheRootRelative" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+    - id: restore-rnnoise-model-cache
+      uses: actions/cache/restore@v5
+      with:
+        path: ${{ steps.rnnoise-model-metadata.outputs.cache-path }}
+        key: ${{ steps.rnnoise-model-metadata.outputs.cache-key }}
+
+    - name: Download RNNoise model archive
+      shell: powershell
+      run: |
+        $ErrorActionPreference = "Stop"
+        $ProgressPreference = "SilentlyContinue"
+
+        $hash = "${{ steps.rnnoise-model-metadata.outputs.hash }}"
+        $archivePath = "${{ steps.rnnoise-model-metadata.outputs.archive-path }}"
+        $archiveName = "${{ steps.rnnoise-model-metadata.outputs.archive-name }}"
+        $cacheRoot = Split-Path -Parent $archivePath
+        $tempArchive = Join-Path $env:RUNNER_TEMP "$archiveName.download"
+        $archiveUrls = New-Object System.Collections.Generic.List[string]
+
+        function Add-ArchiveUrl {
+          param(
+            [string]$Url
+          )
+
+          $normalizedUrl = ([string]$Url).Trim()
+          if (-not [string]::IsNullOrWhiteSpace($normalizedUrl) -and -not $archiveUrls.Contains($normalizedUrl)) {
+            $archiveUrls.Add($normalizedUrl) | Out-Null
+          }
+        }
+
+        Add-ArchiveUrl "${{ inputs.rnnoise-model-url }}"
+        Add-ArchiveUrl ([System.Environment]::GetEnvironmentVariable("MUMBLE_RNNOISE_MODEL_ARCHIVE_URL", "Process"))
+
+        $environmentSource = [System.Environment]::GetEnvironmentVariable("MUMBLE_ENVIRONMENT_SOURCE", "Process")
+        if (-not [string]::IsNullOrWhiteSpace($environmentSource)) {
+          Add-ArchiveUrl "$(([string]$environmentSource).TrimEnd('/'))/$archiveName"
+        }
+
+        Add-ArchiveUrl "https://media.xiph.org/rnnoise/models/$archiveName"
+
+        function Get-FileSha256 {
+          param(
+            [Parameter(Mandatory = $true)]
+            [string]$Path
+          )
+
+          return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+
+        function Test-ArchiveHash {
+          param(
+            [Parameter(Mandatory = $true)]
+            [string]$Path,
+
+            [Parameter(Mandatory = $true)]
+            [string]$ExpectedHash
+          )
+
+          if (-not (Test-Path -LiteralPath $Path)) {
+            return $false
+          }
+
+          $actualHash = Get-FileSha256 -Path $Path
+          if ($actualHash -ne $ExpectedHash) {
+            Write-Warning "RNNoise model archive hash mismatch at '$Path'. Expected $ExpectedHash but got $actualHash."
+            return $false
+          }
+
+          return $true
+        }
+
+        if (-not (Test-ArchiveHash -Path $archivePath -ExpectedHash $hash)) {
+          Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $tempArchive -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $cacheRoot | Out-Null
+
+          foreach ($archiveUrl in $archiveUrls) {
+            for ($attempt = 1; $attempt -le 4; $attempt++) {
+              try {
+                Write-Host "Downloading RNNoise model archive (attempt $attempt/4): $archiveUrl"
+                Invoke-WebRequest -Uri $archiveUrl -OutFile $tempArchive -TimeoutSec 120
+                if (-not (Test-ArchiveHash -Path $tempArchive -ExpectedHash $hash)) {
+                  throw "Downloaded RNNoise model archive failed checksum validation."
+                }
+                Move-Item -LiteralPath $tempArchive -Destination $archivePath -Force
+                break
+              } catch {
+                Remove-Item -LiteralPath $tempArchive -Force -ErrorAction SilentlyContinue
+
+                $statusCode = $null
+                if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                  $statusCode = [int]$_.Exception.Response.StatusCode
+                }
+                if ($statusCode -ge 400 -and $statusCode -lt 500 -and $statusCode -notin @(408, 429)) {
+                  Write-Warning "RNNoise model URL returned HTTP $statusCode and will not be retried: $archiveUrl"
+                  break
+                }
+
+                if ($attempt -eq 4) {
+                  Write-Warning "RNNoise model download failed after $attempt attempts from '$archiveUrl': $($_.Exception.Message)"
+                  break
+                }
+
+                $delaySeconds = [Math]::Min(60, 10 * $attempt)
+                Write-Warning "RNNoise model download failed: $($_.Exception.Message). Retrying in $delaySeconds seconds."
+                Start-Sleep -Seconds $delaySeconds
+              }
+            }
+
+            if (Test-ArchiveHash -Path $archivePath -ExpectedHash $hash) {
+              break
+            }
+          }
+        }
+
+        if (-not (Test-ArchiveHash -Path $archivePath -ExpectedHash $hash)) {
+          throw "RNNoise model archive is unavailable or invalid after download: $archivePath"
+        }
+
+        Write-Host "Using RNNoise model archive: $archivePath"
+        "MUMBLE_RNNOISE_MODEL_ARCHIVE=$archivePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        "RNNOISE_MODEL_ARCHIVE=$archivePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
     - id: restore-onnxruntime-cache
       uses: actions/cache/restore@v5
