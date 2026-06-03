@@ -36,7 +36,7 @@ namespace ScreenShare {
 
 	constexpr unsigned int PUBLISHER_QUALITY_MAX_WIDTH  = 2560;
 	constexpr unsigned int PUBLISHER_QUALITY_MAX_HEIGHT = 1440;
-	constexpr unsigned int PUBLISHER_QUALITY_MAX_FPS    = 60;
+	constexpr unsigned int PUBLISHER_QUALITY_MAX_FPS    = 144;
 
 	constexpr unsigned int HARD_MAX_WIDTH        = 7680;
 	constexpr unsigned int HARD_MAX_HEIGHT       = 4320;

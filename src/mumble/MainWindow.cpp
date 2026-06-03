@@ -38153,6 +38153,8 @@ bool MainWindow::chooseScreenShareStartOptions(Channel *channel, ScreenShareStar
 	};
 	addFrameRateChoice(30);
 	addFrameRateChoice(60);
+	addFrameRateChoice(120);
+	addFrameRateChoice(144);
 	if (frameRateCombo->count() == 0) {
 		const unsigned int fallbackFps = qMax(1U, std::min(maxQualityFps, Mumble::ScreenShare::DEFAULT_MAX_FPS));
 		frameRateCombo->addItem(tr("%1 FPS").arg(fallbackFps), static_cast< int >(fallbackFps));
@@ -38525,6 +38527,8 @@ QVariantMap MainWindow::buildModernScreenShareState(Channel *channel) {
 	};
 	addFrameRate(30);
 	addFrameRate(60);
+	addFrameRate(120);
+	addFrameRate(144);
 	if (frameRateOptions.isEmpty()) {
 		const unsigned int fallbackFps = qMax(1U, std::min(maxFps, Mumble::ScreenShare::DEFAULT_MAX_FPS));
 		QVariantMap option;

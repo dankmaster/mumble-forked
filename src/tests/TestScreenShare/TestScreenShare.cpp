@@ -83,7 +83,7 @@ void TestScreenShare::recommendsVp8Bitrate() {
 void TestScreenShare::exposesPublisherQualityCeiling() {
 	QCOMPARE(Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH, 2560U);
 	QCOMPARE(Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT, 1440U);
-	QCOMPARE(Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_FPS, 60U);
+	QCOMPARE(Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_FPS, 144U);
 	QVERIFY(Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH >= Mumble::ScreenShare::DEFAULT_MAX_WIDTH);
 	QVERIFY(Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT >= Mumble::ScreenShare::DEFAULT_MAX_HEIGHT);
 	QVERIFY(Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_FPS >= Mumble::ScreenShare::DEFAULT_MAX_FPS);

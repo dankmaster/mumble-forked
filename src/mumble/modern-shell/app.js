@@ -2613,7 +2613,7 @@
 						walkthroughField("screenShare.showPreview", "Show local preview before publishing", "checkbox", true)
 					]),
 					walkthroughSection("Capture quality", [
-						walkthroughField("screenShare.frameRate", "Frame rate", "range", 30, { min: 5, max: 60, suffix: " fps" }),
+						walkthroughField("screenShare.frameRate", "Frame rate", "range", 30, { min: 5, max: 144, suffix: " fps" }),
 						walkthroughField("screenShare.quality", "Quality", "range", 82, { min: 10, max: 100, suffix: "%" }),
 						walkthroughField("screenShare.maxBitrate", "Maximum bitrate", "number", 3500, { min: 250, max: 20000, suffix: " kbit/s" })
 					]),
