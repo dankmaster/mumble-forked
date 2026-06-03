@@ -743,22 +743,43 @@ void ExternalScreenShareWindowHost::handleCursorPoll() {
 
 	const QPoint cursor = QCursor::pos();
 	const qint64 now    = QDateTime::currentMSecsSinceEpoch();
-	const bool overBar  = m_overlayBar->isVisible() && m_overlayBar->geometry().contains(cursor);
+	const QPoint delta  = cursor - m_lastCursorPos;
+	m_lastCursorPos     = cursor;
 
-	if (cursor != m_lastCursorPos) {
-		m_lastCursorPos     = cursor;
+	const bool overBar    = m_overlayBar->isVisible() && m_overlayBar->geometry().contains(cursor);
+	// Only react to the pointer while it is over the player window itself - movement on
+	// other monitors (or elsewhere on the desktop) must not summon the controls.
+	const bool overPlayer = overBar || frameGeometry().contains(cursor);
+
+	// The pointer left the player: drop the controls immediately.
+	if (!overPlayer) {
+		hideOverlay();
+		return;
+	}
+
+	// Sensitivity gradient: a tiny nudge near the bottom (where the bar lives) reveals the
+	// controls, while higher up the screen a progressively larger move is required.
+	const QRect screenRect = screen() ? screen()->geometry() : frameGeometry();
+	const double aboveBottom =
+		static_cast< double >(screenRect.bottom() - cursor.y()) / static_cast< double >(qMax(1, screenRect.height()));
+	const double frac    = std::clamp(aboveBottom, 0.0, 1.0);
+	const int threshold  = 4 + static_cast< int >(frac * 90.0);
+	const int moveMag    = qAbs(delta.x()) + qAbs(delta.y());
+
+	if (moveMag >= threshold) {
 		m_overlayActivityMs = now;
 		if (!m_overlayBar->isVisible()) {
 			revealOverlay();
 		}
 	}
 
-	// Keep the bar up while the pointer rests on the controls (e.g. dragging the slider).
+	// Keep it up only while the pointer actually rests on the controls (e.g. dragging the
+	// volume slider) - otherwise it always fades out, even near the bottom.
 	if (overBar) {
 		m_overlayActivityMs = now;
 	}
 
-	constexpr qint64 hideDelayMs = 2600;
+	constexpr qint64 hideDelayMs = 2000;
 	if (m_overlayBar->isVisible()) {
 		if (!overBar && now - m_overlayActivityMs > hideDelayMs) {
 			hideOverlay();
