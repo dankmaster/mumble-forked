@@ -7,6 +7,7 @@
 
 #include "ScreenShare.h"
 #include "ScreenShareIPC.h"
+#include "ScreenShareWindowFollowPipeline.h"
 #include "ScreenShareWindowsNativeCapture.h"
 
 #ifdef Q_OS_WIN
@@ -983,43 +984,6 @@ bool isChromiumBrowserProcess(const QString &processName) {
 	return chromiumBrowsers.contains(processName.trimmed().toLower());
 }
 
-bool extendedFrameBounds(HWND window, RECT *rect) {
-	if (!window || !rect) {
-		return false;
-	}
-
-	using DwmGetWindowAttributeFn = HRESULT(WINAPI *)(HWND, DWORD, PVOID, DWORD);
-	constexpr DWORD DwmExtendedFrameBoundsAttribute = 9;
-	static const HMODULE dwmapiModule               = LoadLibraryW(L"dwmapi.dll");
-	static const DwmGetWindowAttributeFn getWindowAttribute =
-		dwmapiModule
-			? reinterpret_cast< DwmGetWindowAttributeFn >(GetProcAddress(dwmapiModule, "DwmGetWindowAttribute"))
-			: nullptr;
-	if (!getWindowAttribute) {
-		return false;
-	}
-
-	RECT frameRect  = {};
-	const HRESULT hr = getWindowAttribute(window, DwmExtendedFrameBoundsAttribute, &frameRect, sizeof(frameRect));
-	if (FAILED(hr) || frameRect.right <= frameRect.left || frameRect.bottom <= frameRect.top) {
-		return false;
-	}
-
-	*rect = frameRect;
-	return true;
-}
-
-bool visibleWindowBounds(HWND window, RECT *rect) {
-	if (!window || !rect) {
-		return false;
-	}
-
-	if (extendedFrameBounds(window, rect)) {
-		return true;
-	}
-
-	return GetWindowRect(window, rect) && rect->right > rect->left && rect->bottom > rect->top;
-}
 #endif
 
 QString gstCaptureApiToken() {
@@ -1040,6 +1004,11 @@ struct GStreamerCaptureSelection {
 	QString selectedCaptureSource;
 	QStringList sourceProperties;
 	QStringList warnings;
+	// When set, the capture is a monitor crop locked onto a Chromium browser window. The crop is
+	// driven live by the --internal-gst-window-follow helper sub-mode so it tracks window moves.
+	bool browserWindowFollow      = false;
+	qulonglong followWindowHandle = 0;
+	QString followSourceName;
 };
 
 #ifdef Q_OS_WIN
@@ -1053,41 +1022,26 @@ bool selectBrowserMonitorCropCapture(HWND window, GStreamerCaptureSelection *sel
 		return false;
 	}
 
-	RECT windowRect = {};
-	if (!visibleWindowBounds(window, &windowRect)) {
+	const qulonglong windowHandle = reinterpret_cast< qulonglong >(window);
+	const ScreenShareWindowFollow::WindowCrop crop = ScreenShareWindowFollow::computeWindowCrop(windowHandle);
+	if (!crop.valid) {
 		return false;
 	}
 
-	const HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
-	if (!monitor) {
-		return false;
-	}
-
-	MONITORINFO monitorInfo = {};
-	monitorInfo.cbSize     = sizeof(monitorInfo);
-	if (!GetMonitorInfoW(monitor, &monitorInfo)) {
-		return false;
-	}
-
-	const LONG left   = qMax(windowRect.left, monitorInfo.rcMonitor.left);
-	const LONG top    = qMax(windowRect.top, monitorInfo.rcMonitor.top);
-	const LONG right  = qMin(windowRect.right, monitorInfo.rcMonitor.right);
-	const LONG bottom = qMin(windowRect.bottom, monitorInfo.rcMonitor.bottom);
-	if (right <= left || bottom <= top) {
-		return false;
-	}
-
-	const qulonglong monitorHandle = reinterpret_cast< qulonglong >(monitor);
-	const qulonglong windowHandle  = reinterpret_cast< qulonglong >(window);
-	selection->sourceProperties.append(QStringLiteral("monitor-handle=%1").arg(monitorHandle));
-	selection->sourceProperties.append(QStringLiteral("crop-x=%1").arg(left - monitorInfo.rcMonitor.left));
-	selection->sourceProperties.append(QStringLiteral("crop-y=%1").arg(top - monitorInfo.rcMonitor.top));
-	selection->sourceProperties.append(QStringLiteral("crop-width=%1").arg(right - left));
-	selection->sourceProperties.append(QStringLiteral("crop-height=%1").arg(bottom - top));
+	const QString sourceName = QStringLiteral("screencap");
+	selection->sourceProperties.append(QStringLiteral("name=%1").arg(sourceName));
+	selection->sourceProperties.append(QStringLiteral("monitor-handle=%1").arg(crop.monitorHandle));
+	selection->sourceProperties.append(QStringLiteral("crop-x=%1").arg(crop.cropX));
+	selection->sourceProperties.append(QStringLiteral("crop-y=%1").arg(crop.cropY));
+	selection->sourceProperties.append(QStringLiteral("crop-width=%1").arg(crop.cropWidth));
+	selection->sourceProperties.append(QStringLiteral("crop-height=%1").arg(crop.cropHeight));
 	selection->selectedCaptureSource =
 		QStringLiteral("gstreamer-d3d11-%1-browser-window-crop-%2").arg(selection->captureApi).arg(windowHandle);
-	selection->warnings.append(QStringLiteral(
-		"Using monitor-cropped capture for a Chromium browser window so the active tab content is captured."));
+	selection->browserWindowFollow = true;
+	selection->followWindowHandle  = windowHandle;
+	selection->followSourceName    = sourceName;
+	selection->warnings.append(QStringLiteral("Using monitor-cropped capture for a Chromium browser window so the "
+											  "active tab content is captured and follows the window as it moves."));
 	return true;
 }
 #endif
@@ -1515,7 +1469,34 @@ ScreenShareExternalProcess::LaunchResult
 		}
 	}
 
-	launch = startProcess(support.gstLaunchPath, arguments, parent, QStringLiteral("gstreamer-livekit-publish"));
+	if (!useTestPattern && captureSelection.browserWindowFollow) {
+		// Run the pipeline in-process (via the helper's --internal-gst-window-follow sub-mode) so the
+		// monitor crop tracks the Chromium window as it moves, instead of staying pinned to its start
+		// position. The pipeline tokens are forwarded verbatim after "--" and fed to gst_parse_launchv.
+		QStringList pipelineTokens = arguments;
+		pipelineTokens.removeOne(QStringLiteral("-e"));
+
+		QStringList followArguments;
+		followArguments << QStringLiteral("--internal-gst-window-follow")
+						<< QStringLiteral("--source-name=%1").arg(captureSelection.followSourceName)
+						<< QStringLiteral("--window-handle=%1").arg(captureSelection.followWindowHandle)
+						<< QStringLiteral("--gst-bin-dir=%1").arg(QFileInfo(support.gstLaunchPath).absolutePath())
+						<< QStringLiteral("--") << pipelineTokens;
+
+		launch = startProcess(QCoreApplication::applicationFilePath(), followArguments, parent,
+							  QStringLiteral("gstreamer-livekit-publish-window-follow"));
+		if (!launch.started) {
+			// Fall back to the static-crop gst-launch path so browser sharing still works (without
+			// follow) if the in-process pipeline could not start.
+			launchWarnings.append(QStringLiteral("Window-following capture could not start (%1); falling back to a "
+												 "fixed monitor crop that will not track window moves.")
+									  .arg(launch.errorMessage.trimmed()));
+			launch = startProcess(support.gstLaunchPath, arguments, parent,
+								  QStringLiteral("gstreamer-livekit-publish"));
+		}
+	} else {
+		launch = startProcess(support.gstLaunchPath, arguments, parent, QStringLiteral("gstreamer-livekit-publish"));
+	}
 	launch.warnings += launchWarnings;
 	if (!launch.started) {
 		return launch;

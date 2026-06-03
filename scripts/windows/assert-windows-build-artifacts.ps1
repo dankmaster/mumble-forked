@@ -182,6 +182,16 @@ function Assert-GStreamerPayload {
 		$missing.Add("gstreamer\lib\gstreamer-1.0\*.dll")
 	}
 
+	# The screen-share helper's window-follow capture mode loads these core libraries directly
+	# (LoadLibrary), not just by exec'ing gst-launch, so they must be present in the staged bin.
+	$gstBinDir = Join-Path $Root "gstreamer\bin"
+	foreach ($corePattern in @("gstreamer-1.0-*.dll", "gobject-2.0-*.dll", "glib-2.0-*.dll")) {
+		$coreMatches = @(Get-ChildItem -Path $gstBinDir -File -Filter $corePattern -ErrorAction SilentlyContinue)
+		if ($coreMatches.Count -eq 0) {
+			$missing.Add("gstreamer\bin\$corePattern")
+		}
+	}
+
 	if ($missing.Count -gt 0) {
 		throw "$Label is missing required GStreamer payload files: $($missing -join ', ')."
 	}

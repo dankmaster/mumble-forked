@@ -15,6 +15,8 @@ add_executable(mumble-screen-helper
 	"ScreenShareRelayClient.h"
 	"ScreenShareSessionPlanner.cpp"
 	"ScreenShareSessionPlanner.h"
+	"ScreenShareWindowFollowPipeline.cpp"
+	"ScreenShareWindowFollowPipeline.h"
 	"ScreenShareWindowsNativeCapture.cpp"
 	"ScreenShareWindowsNativeCapture.h"
 )

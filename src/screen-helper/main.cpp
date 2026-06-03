@@ -6,6 +6,7 @@
 #include "ScreenShareHelperServer.h"
 
 #include "ScreenShareIPC.h"
+#include "ScreenShareWindowFollowPipeline.h"
 
 #include <QtCore/QCommandLineOption>
 #include <QtCore/QCommandLineParser>
@@ -126,12 +127,29 @@ int main(int argc, char **argv) {
 											   QStringLiteral("Print the helper capability payload as JSON and exit."));
 	QCommandLineOption selfTestOption(QStringList{ QStringLiteral("self-test") },
 									  QStringLiteral("Run a local publish/view helper self-test and exit."));
+	// Internal sub-mode: run a capture pipeline in-process and keep its monitor crop following the
+	// given window. Not part of the public interface; spawned by the helper for browser captures.
+	QCommandLineOption windowFollowOption(QStringList{ QStringLiteral("internal-gst-window-follow") },
+										  QStringLiteral("Internal: run a window-following capture pipeline and exit."));
+	QCommandLineOption windowFollowSourceNameOption(QStringList{ QStringLiteral("source-name") },
+													QStringLiteral("Internal: name of the capture element to retarget."),
+													QStringLiteral("name"));
+	QCommandLineOption windowFollowHandleOption(QStringList{ QStringLiteral("window-handle") },
+												QStringLiteral("Internal: native handle of the window to follow."),
+												QStringLiteral("handle"));
+	QCommandLineOption windowFollowGstBinDirOption(QStringList{ QStringLiteral("gst-bin-dir") },
+												   QStringLiteral("Internal: bundled GStreamer bin directory."),
+												   QStringLiteral("dir"));
 	parser.addOption(helpOption);
 	parser.addOption(helpAllOption);
 	parser.addOption(diagnosticsLogFileOption);
 	parser.addOption(socketNameOption);
 	parser.addOption(printCapabilitiesOption);
 	parser.addOption(selfTestOption);
+	parser.addOption(windowFollowOption);
+	parser.addOption(windowFollowSourceNameOption);
+	parser.addOption(windowFollowHandleOption);
+	parser.addOption(windowFollowGstBinDirOption);
 	if (!parser.parse(app.arguments())) {
 		QTextStream(stderr) << parser.errorText() << Qt::endl << parser.helpText() << Qt::endl;
 		return 1;
@@ -143,6 +161,19 @@ int main(int argc, char **argv) {
 
 	if (parser.isSet(diagnosticsLogFileOption)) {
 		installDiagnosticsLogging(parser.value(diagnosticsLogFileOption));
+	}
+
+	if (parser.isSet(windowFollowOption)) {
+		ScreenShareWindowFollow::Options options;
+		options.pipelineTokens = parser.positionalArguments();
+		options.sourceName     = parser.value(windowFollowSourceNameOption);
+		options.gstBinDir      = parser.value(windowFollowGstBinDirOption);
+		bool handleOk          = false;
+		options.windowHandle   = parser.value(windowFollowHandleOption).toULongLong(&handleOk);
+		if (!handleOk) {
+			options.windowHandle = 0;
+		}
+		return ScreenShareWindowFollow::run(options);
 	}
 
 	ScreenShareHelperServer helperServer;
