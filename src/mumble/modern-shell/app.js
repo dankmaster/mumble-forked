@@ -9080,10 +9080,9 @@
 			}
 		});
 
-		const usedKeys = new Set();
+		const placedNodes = new Set();
 		let cursor = null;
 		rows.forEach(function(row) {
-			usedKeys.add(row.key);
 			let node = existingByKey.get(row.key);
 			const state = node ? reconcileRowState.get(node) : null;
 			if (!node || !state || state.signature !== row.signature) {
@@ -9095,13 +9094,16 @@
 				container.insertBefore(node, reference);
 			}
 			cursor = node;
+			placedNodes.add(node);
 		});
 
+		// Remove by node identity, not by key: when a row's signature changes we build a
+		// fresh node for the same key, so the previous node (same key) must still be
+		// dropped — keying the removal on usedKeys would keep both and duplicate the row.
 		let child = container.firstChild;
 		while (child) {
 			const next = child.nextSibling;
-			const state = reconcileRowState.get(child);
-			if (!state || !state.key || !usedKeys.has(state.key)) {
+			if (!placedNodes.has(child)) {
 				container.removeChild(child);
 			}
 			child = next;

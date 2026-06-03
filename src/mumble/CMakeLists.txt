@@ -33,6 +33,10 @@ if(packaging AND "$ENV{GITHUB_ACTIONS}" STREQUAL "true")
 endif()
 option(modern-layout-automation "Include the Modern UI automation server and JavaScript automation hooks." ${MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT})
 option(modern-layout-mockups "Include Modern shell mockup and walkthrough functionality." ${MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT})
+# Developer-only chat performance tracer. Compiled into local dev clients but kept
+# out of GitHub/CI packaging builds (same default policy as the Modern tooling above).
+# Even when compiled in, it stays dormant until MUMBLE_CHAT_PERF_TRACE is set at runtime.
+option(chat-perf-trace "Include the developer chat performance tracer (mumble::chatperf)." ${MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT})
 
 function(mumble_strip_marked_shell_block content_var begin_marker end_marker replacement)
 	set(content "${${content_var}}")
@@ -808,6 +812,10 @@ if(modern-layout-webengine)
 			Qt6::WebChannel
 			Qt6::WebEngineWidgets
 	)
+endif()
+
+if(chat-perf-trace)
+	target_compile_definitions(mumble_client_object_lib PUBLIC MUMBLE_HAS_CHAT_PERF_TRACE)
 endif()
 
 if(static)

@@ -6,6 +6,13 @@
 #ifndef MUMBLE_MUMBLE_CHATPERFTRACE_H_
 #define MUMBLE_MUMBLE_CHATPERFTRACE_H_
 
+// The chat performance tracer is a developer-only facility. It is compiled into
+// local dev clients (CMake option `chat-perf-trace`, defined as
+// MUMBLE_HAS_CHAT_PERF_TRACE) but deliberately kept out of GitHub/CI packaging
+// builds. When the macro is absent every entry point below collapses to a
+// zero-cost no-op so call sites compile unchanged and produce no code.
+#if defined(MUMBLE_HAS_CHAT_PERF_TRACE)
+
 #include <QtCore/QDebug>
 #include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
@@ -251,5 +258,34 @@ namespace chatperf {
 	};
 } // namespace chatperf
 } // namespace mumble
+
+#else // MUMBLE_HAS_CHAT_PERF_TRACE
+
+#include <QtCore/QString>
+#include <QtCore/QtGlobal>
+
+// No-op fallback used by GitHub/CI builds (and any build without the
+// chat-perf-trace option). Every function is an empty inline definition and
+// enabled() is constexpr false, so the optimizer eliminates guarded blocks and
+// argument evaluation entirely. ScopedDuration keeps a user-provided constructor
+// so MSVC does not flag the RAII locals as unreferenced under /WX.
+namespace mumble {
+namespace chatperf {
+	constexpr bool enabled() {
+		return false;
+	}
+
+	inline void recordDuration(const char *, qint64) {}
+	inline void recordValue(const char *, qint64) {}
+	inline void recordNote(const char *, const QString &) {}
+
+	class ScopedDuration {
+	public:
+		explicit ScopedDuration(const char *) {}
+	};
+} // namespace chatperf
+} // namespace mumble
+
+#endif // MUMBLE_HAS_CHAT_PERF_TRACE
 
 #endif // MUMBLE_MUMBLE_CHATPERFTRACE_H_
