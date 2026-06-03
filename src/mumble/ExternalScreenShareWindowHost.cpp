@@ -18,12 +18,16 @@
 #	include <audiopolicy.h>
 #endif
 
+#include <QtCore/QDateTime>
 #include <QtCore/QEvent>
 #include <QtCore/QPoint>
 #include <QtCore/QTimer>
 #include <QtGui/QCloseEvent>
+#include <QtGui/QCursor>
+#include <QtGui/QKeyEvent>
 #include <QtGui/QPalette>
 #include <QtGui/QResizeEvent>
+#include <QtGui/QScreen>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QHBoxLayout>
@@ -313,9 +317,9 @@ ExternalScreenShareWindowHost::ExternalScreenShareWindowHost(const ScreenShareSe
 	m_rootFrame->setObjectName(QStringLiteral("qfScreenShareExternalWindow"));
 	m_layout->addWidget(m_rootFrame);
 
-	auto *rootLayout = new QVBoxLayout(m_rootFrame);
-	rootLayout->setContentsMargins(12, 12, 12, 12);
-	rootLayout->setSpacing(10);
+	m_rootLayout = new QVBoxLayout(m_rootFrame);
+	m_rootLayout->setContentsMargins(12, 12, 12, 12);
+	m_rootLayout->setSpacing(10);
 
 	m_headerFrame = new QFrame(m_rootFrame);
 	m_headerFrame->setObjectName(QStringLiteral("qfScreenShareExternalHeader"));
@@ -378,6 +382,15 @@ ExternalScreenShareWindowHost::ExternalScreenShareWindowHost(const ScreenShareSe
 	audioVolumeLayout->addWidget(m_audioVolumeLabel);
 	headerLayout->addWidget(audioVolumeGroup);
 
+	m_fullScreenButton = new QToolButton(m_headerFrame);
+	m_fullScreenButton->setObjectName(QStringLiteral("qtbScreenShareExternalFullScreen"));
+	m_fullScreenButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+	m_fullScreenButton->setAutoRaise(false);
+	m_fullScreenButton->setIcon(style()->standardIcon(QStyle::SP_TitleBarMaxButton));
+	connect(m_fullScreenButton, &QToolButton::clicked, this,
+			&ExternalScreenShareWindowHost::handleFullScreenButton);
+	headerLayout->addWidget(m_fullScreenButton);
+
 	m_stopButton = new QToolButton(m_headerFrame);
 	m_stopButton->setObjectName(QStringLiteral("qtbScreenShareExternalStop"));
 	m_stopButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
@@ -388,7 +401,7 @@ ExternalScreenShareWindowHost::ExternalScreenShareWindowHost(const ScreenShareSe
 	connect(m_stopButton, &QToolButton::clicked, this, [this]() { emit stopRequested(m_session.streamID); });
 	headerLayout->addWidget(m_stopButton);
 
-	rootLayout->addWidget(m_headerFrame);
+	m_rootLayout->addWidget(m_headerFrame);
 
 	m_videoFrame = new QFrame(m_rootFrame);
 	m_videoFrame->setObjectName(QStringLiteral("qfScreenShareExternalVideoFrame"));
@@ -409,11 +422,11 @@ ExternalScreenShareWindowHost::ExternalScreenShareWindowHost(const ScreenShareSe
 	m_placeholderLabel->setText(tr("Waiting for the GStreamer video surface..."));
 	m_placeholderLabel->setGeometry(m_videoSurface->rect());
 	m_placeholderLabel->show();
-	rootLayout->addWidget(m_videoFrame, 1);
+	m_rootLayout->addWidget(m_videoFrame, 1);
 
 	m_statusLabel = new QLabel(m_rootFrame);
 	m_statusLabel->setObjectName(QStringLiteral("qlScreenShareExternalStatus"));
-	rootLayout->addWidget(m_statusLabel);
+	m_rootLayout->addWidget(m_statusLabel);
 
 	m_embedPollTimer = new QTimer(this);
 	m_embedPollTimer->setInterval(250);
@@ -423,6 +436,10 @@ ExternalScreenShareWindowHost::ExternalScreenShareWindowHost(const ScreenShareSe
 	m_audioControlTimer->setInterval(500);
 	connect(m_audioControlTimer, &QTimer::timeout, this,
 			&ExternalScreenShareWindowHost::retryApplyExternalAudioControls);
+
+	m_cursorPollTimer = new QTimer(this);
+	m_cursorPollTimer->setInterval(90);
+	connect(m_cursorPollTimer, &QTimer::timeout, this, &ExternalScreenShareWindowHost::handleCursorPoll);
 
 	updateSession(session);
 	updateControls();
@@ -513,6 +530,23 @@ void ExternalScreenShareWindowHost::closeEvent(QCloseEvent *event) {
 	event->accept();
 }
 
+void ExternalScreenShareWindowHost::keyPressEvent(QKeyEvent *event) {
+	if (event) {
+		if (event->key() == Qt::Key_Escape && m_fullScreen) {
+			setFullScreen(false);
+			event->accept();
+			return;
+		}
+		if (event->key() == Qt::Key_F11
+			|| (event->key() == Qt::Key_F && (event->modifiers() & Qt::ControlModifier))) {
+			setFullScreen(!m_fullScreen);
+			event->accept();
+			return;
+		}
+	}
+	QWidget::keyPressEvent(event);
+}
+
 void ExternalScreenShareWindowHost::resizeEvent(QResizeEvent *event) {
 	QWidget::resizeEvent(event);
 	if (m_placeholderLabel && m_videoSurface) {
@@ -554,8 +588,185 @@ void ExternalScreenShareWindowHost::handleAudioVolumeChanged(const int volumePer
 	applyExternalAudioControls(true);
 }
 
+void ExternalScreenShareWindowHost::handleFullScreenButton() {
+	setFullScreen(!m_fullScreen);
+}
+
 void ExternalScreenShareWindowHost::handlePauseButton() {
 	emit pauseToggled(m_session.streamID, !m_paused);
+}
+
+void ExternalScreenShareWindowHost::setFullScreen(const bool fullScreen) {
+	if (m_fullScreen == fullScreen && isFullScreen() == fullScreen) {
+		return;
+	}
+
+	m_fullScreen = fullScreen;
+	if (m_fullScreen) {
+		enterFullScreen();
+	} else {
+		leaveFullScreen();
+	}
+	updateControls();
+}
+
+void ExternalScreenShareWindowHost::enterFullScreen() {
+	ensureOverlayBar();
+
+	// Float the whole control header (title + controls) into the auto-hiding overlay
+	// so the video can fill the screen edge to edge.
+	if (m_headerFrame && m_rootLayout && m_overlayLayout && m_headerFrame->parentWidget() != m_overlayBar) {
+		m_rootLayout->removeWidget(m_headerFrame);
+		m_headerFrame->setParent(m_overlayBar);
+		m_overlayLayout->addWidget(m_headerFrame);
+		m_headerFrame->show();
+	}
+	if (m_statusLabel) {
+		m_statusLabel->hide();
+	}
+	if (m_rootLayout) {
+		m_rootLayout->setContentsMargins(0, 0, 0, 0);
+		m_rootLayout->setSpacing(0);
+	}
+
+	showFullScreen();
+	moveEmbeddedWindow();
+
+	m_lastCursorPos       = QCursor::pos();
+	m_overlayActivityMs   = QDateTime::currentMSecsSinceEpoch();
+	revealOverlay();
+	if (m_cursorPollTimer) {
+		m_cursorPollTimer->start();
+	}
+}
+
+void ExternalScreenShareWindowHost::leaveFullScreen() {
+	if (m_cursorPollTimer) {
+		m_cursorPollTimer->stop();
+	}
+	hideOverlay();
+
+	// Dock the control header back into the window.
+	if (m_headerFrame && m_rootLayout && m_headerFrame->parentWidget() != m_rootFrame) {
+		if (m_overlayLayout) {
+			m_overlayLayout->removeWidget(m_headerFrame);
+		}
+		m_headerFrame->setParent(m_rootFrame);
+		m_rootLayout->insertWidget(0, m_headerFrame);
+		m_headerFrame->show();
+	}
+	if (m_rootLayout) {
+		m_rootLayout->setContentsMargins(12, 12, 12, 12);
+		m_rootLayout->setSpacing(10);
+	}
+	if (m_statusLabel) {
+		m_statusLabel->show();
+	}
+
+	showNormal();
+	moveEmbeddedWindow();
+}
+
+void ExternalScreenShareWindowHost::ensureOverlayBar() {
+	if (m_overlayBar) {
+		return;
+	}
+
+	// A frameless tool window parented to this host: it stays with the host but is a
+	// real Qt window, so its controls receive mouse input even though the embedded
+	// native video window swallows events over the video surface itself.
+	m_overlayBar = new QWidget(this, Qt::Window | Qt::FramelessWindowHint | Qt::Tool
+									 | Qt::WindowDoesNotAcceptFocus | Qt::NoDropShadowWindowHint);
+	m_overlayBar->setObjectName(QStringLiteral("qwScreenShareOverlayBar"));
+	m_overlayBar->setAttribute(Qt::WA_TranslucentBackground, true);
+	m_overlayBar->setAttribute(Qt::WA_ShowWithoutActivating, true);
+
+	m_overlayLayout = new QVBoxLayout(m_overlayBar);
+	m_overlayLayout->setContentsMargins(0, 0, 0, 0);
+	m_overlayLayout->setSpacing(0);
+}
+
+void ExternalScreenShareWindowHost::positionOverlayBar() {
+	if (!m_overlayBar) {
+		return;
+	}
+
+	if (m_overlayLayout) {
+		m_overlayLayout->activate();
+	}
+	const QScreen *hostScreen = screen();
+	const QRect available     = hostScreen ? hostScreen->geometry() : geometry();
+	const QSize hint          = m_overlayBar->sizeHint();
+	const int width           = qMin(hint.width(), available.width() - 48);
+	const int height          = hint.height();
+	const int x               = available.x() + (available.width() - width) / 2;
+	const int y               = available.y() + available.height() - height - 48;
+	m_overlayBar->setGeometry(x, y, qMax(1, width), qMax(1, height));
+}
+
+void ExternalScreenShareWindowHost::revealOverlay() {
+	if (!m_overlayBar) {
+		return;
+	}
+	positionOverlayBar();
+	if (!m_overlayBar->isVisible()) {
+		m_overlayBar->show();
+	}
+	raiseOverlayAboveVideo();
+	m_overlayActivityMs = QDateTime::currentMSecsSinceEpoch();
+}
+
+void ExternalScreenShareWindowHost::hideOverlay() {
+	if (m_overlayBar && m_overlayBar->isVisible()) {
+		m_overlayBar->hide();
+	}
+}
+
+void ExternalScreenShareWindowHost::raiseOverlayAboveVideo() {
+	if (!m_overlayBar || !m_overlayBar->isVisible()) {
+		return;
+	}
+#ifdef Q_OS_WIN
+	const HWND overlay = reinterpret_cast< HWND >(m_overlayBar->winId());
+	if (overlay) {
+		SetWindowPos(overlay, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+	}
+#else
+	m_overlayBar->raise();
+#endif
+}
+
+void ExternalScreenShareWindowHost::handleCursorPoll() {
+	if (!m_fullScreen || !m_overlayBar) {
+		return;
+	}
+
+	const QPoint cursor = QCursor::pos();
+	const qint64 now    = QDateTime::currentMSecsSinceEpoch();
+	const bool overBar  = m_overlayBar->isVisible() && m_overlayBar->geometry().contains(cursor);
+
+	if (cursor != m_lastCursorPos) {
+		m_lastCursorPos     = cursor;
+		m_overlayActivityMs = now;
+		if (!m_overlayBar->isVisible()) {
+			revealOverlay();
+		}
+	}
+
+	// Keep the bar up while the pointer rests on the controls (e.g. dragging the slider).
+	if (overBar) {
+		m_overlayActivityMs = now;
+	}
+
+	constexpr qint64 hideDelayMs = 2600;
+	if (m_overlayBar->isVisible()) {
+		if (!overBar && now - m_overlayActivityMs > hideDelayMs) {
+			hideOverlay();
+		} else {
+			// The embedded video repeatedly raises itself; stay above it while shown.
+			raiseOverlayAboveVideo();
+		}
+	}
 }
 
 void ExternalScreenShareWindowHost::retryApplyExternalAudioControls() {
@@ -756,6 +967,8 @@ void ExternalScreenShareWindowHost::moveEmbeddedWindow() {
 	}
 
 	moveExternalWindowToSurface(window, m_videoSurface);
+	// The video window jumps to the top of the z-order; keep the overlay controls above it.
+	raiseOverlayAboveVideo();
 #endif
 }
 
@@ -794,6 +1007,14 @@ void ExternalScreenShareWindowHost::updateControls() {
 	}
 	if (m_audioVolumeLabel) {
 		m_audioVolumeLabel->setEnabled(m_session.captureAudio);
+	}
+	if (m_fullScreenButton) {
+		m_fullScreenButton->setText(m_fullScreen ? tr("Exit full screen") : tr("Full screen"));
+		m_fullScreenButton->setIcon(style()->standardIcon(m_fullScreen ? QStyle::SP_TitleBarNormalButton
+																	   : QStyle::SP_TitleBarMaxButton));
+		m_fullScreenButton->setToolTip(m_fullScreen ? tr("Exit full screen (Esc).")
+													: tr("Watch this stream full screen (F11)."));
+		m_fullScreenButton->setChecked(m_fullScreen);
 	}
 	updateAudioVolumeLabel();
 

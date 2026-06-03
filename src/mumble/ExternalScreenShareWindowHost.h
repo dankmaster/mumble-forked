@@ -8,6 +8,7 @@
 
 #include "ScreenShareManager.h"
 
+#include <QtCore/QPoint>
 #include <QtCore/QPointer>
 #include <QtCore/QString>
 #include <QtWidgets/QWidget>
@@ -15,6 +16,7 @@
 class QCloseEvent;
 class QEvent;
 class QFrame;
+class QKeyEvent;
 class QLabel;
 class QResizeEvent;
 class QSlider;
@@ -47,17 +49,28 @@ signals:
 protected:
 	void changeEvent(QEvent *event) override;
 	void closeEvent(QCloseEvent *event) override;
+	void keyPressEvent(QKeyEvent *event) override;
 	void resizeEvent(QResizeEvent *event) override;
 
 private slots:
 	void handleAudioButton();
 	void handleAudioVolumeChanged(int volumePercent);
+	void handleCursorPoll();
+	void handleFullScreenButton();
 	void handlePauseButton();
 	void pollForExternalWindow();
 	void retryApplyExternalAudioControls();
 
 private:
 	void applyExternalAudioControls(bool allowRetry);
+	void setFullScreen(bool fullScreen);
+	void enterFullScreen();
+	void leaveFullScreen();
+	void ensureOverlayBar();
+	void positionOverlayBar();
+	void revealOverlay();
+	void hideOverlay();
+	void raiseOverlayAboveVideo();
 	QString ownerLabel() const;
 	QString windowTitle() const;
 	void applyTheme();
@@ -70,8 +83,11 @@ private:
 
 	ScreenShareSession m_session;
 	QVBoxLayout *m_layout       = nullptr;
+	QVBoxLayout *m_rootLayout   = nullptr;
 	QFrame *m_rootFrame         = nullptr;
 	QFrame *m_headerFrame       = nullptr;
+	QWidget *m_overlayBar       = nullptr;
+	QVBoxLayout *m_overlayLayout = nullptr;
 	QFrame *m_videoFrame        = nullptr;
 	QWidget *m_videoSurface     = nullptr;
 	QLabel *m_titleLabel        = nullptr;
@@ -81,10 +97,14 @@ private:
 	QLabel *m_audioVolumeLabel  = nullptr;
 	QToolButton *m_pauseButton  = nullptr;
 	QToolButton *m_audioButton  = nullptr;
+	QToolButton *m_fullScreenButton = nullptr;
 	QToolButton *m_stopButton   = nullptr;
 	QSlider *m_audioVolumeSlider = nullptr;
 	QTimer *m_embedPollTimer    = nullptr;
 	QTimer *m_audioControlTimer = nullptr;
+	QTimer *m_cursorPollTimer   = nullptr;
+	QPoint m_lastCursorPos;
+	qint64 m_overlayActivityMs  = 0;
 	qint64 m_processID          = 0;
 	quintptr m_externalWindowID = 0;
 	int m_audioControlAttempts  = 0;
@@ -92,6 +112,7 @@ private:
 	bool m_audioMuted           = false;
 	bool m_applyingTheme        = false;
 	bool m_closingFromManager   = false;
+	bool m_fullScreen           = false;
 	bool m_paused               = false;
 };
 
