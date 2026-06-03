@@ -7437,6 +7437,334 @@
 		refs.body.appendChild(content);
 	}
 
+	// ---- Screen-share picker (kind "screenShare") ----
+	// Selection is tracked client-side (keyed by channel) so it survives the dialog
+	// re-renders that thumbnail refreshes trigger, and is sent to C++ in the
+	// "screenShare.start" action payload.
+	let screenShareSelection = null;
+
+	function screenShareState(dialog) {
+		return (dialog && dialog.screenShare) || {};
+	}
+
+	function screenShareFindSource(state, sourceId) {
+		const id = String(sourceId || "");
+		let found = null;
+		(state.sources || []).forEach(function(section) {
+			((section && section.items) || []).forEach(function(item) {
+				if (!found && item && String(item.id || "") === id) {
+					found = item;
+				}
+			});
+		});
+		return found;
+	}
+
+	function screenShareFirstSourceId(state) {
+		let first = "";
+		(state.sources || []).some(function(section) {
+			return ((section && section.items) || []).some(function(item) {
+				if (item && item.id) {
+					first = String(item.id);
+					return true;
+				}
+				return false;
+			});
+		});
+		return first;
+	}
+
+	function screenShareEnsureSelection(state) {
+		const channelId = state.channelId == null ? -1 : state.channelId;
+		if (!screenShareSelection || screenShareSelection.channelId !== channelId) {
+			screenShareSelection = {
+				channelId: channelId,
+				sourceId: String(state.selectedSourceId || screenShareFirstSourceId(state) || ""),
+				resolution: String(state.resolutionDefault || ""),
+				frameRate: Number(state.frameRateDefault) || 0,
+				audio: String(state.audioDefault || ""),
+				audioTouched: false
+			};
+		} else if (screenShareSelection.sourceId && !screenShareFindSource(state, screenShareSelection.sourceId)) {
+			// The previously selected source disappeared (e.g. a window was closed).
+			screenShareSelection.sourceId = String(state.selectedSourceId || screenShareFirstSourceId(state) || "");
+			screenShareSelection.audioTouched = false;
+		}
+		return screenShareSelection;
+	}
+
+	function screenShareApplyAutoAudio(state) {
+		if (!screenShareSelection || screenShareSelection.audioTouched) {
+			return;
+		}
+		const source = screenShareFindSource(state, screenShareSelection.sourceId);
+		if (source && source.audioAuto && Number(source.processId) > 0) {
+			const candidate = "process:" + String(source.processId);
+			const exists = (state.audioOptions || []).some(function(option) {
+				return option && String(option.value) === candidate;
+			});
+			screenShareSelection.audio = exists ? candidate : String(state.audioDefault || "");
+		} else {
+			screenShareSelection.audio = String(state.audioDefault || "");
+		}
+	}
+
+	function screenShareDialogActionPayload(dialog) {
+		const state = screenShareState(dialog);
+		const selection = screenShareEnsureSelection(state);
+		return {
+			channelId: state.channelId == null ? -1 : state.channelId,
+			sourceId: selection.sourceId || "",
+			resolution: selection.resolution || "",
+			frameRate: Number(selection.frameRate) || 0,
+			audio: selection.audio || ""
+		};
+	}
+
+	function syncScreenShareStartButton() {
+		if (!refs.actions) {
+			return;
+		}
+		const button = refs.actions.querySelector("[data-screen-share-start]");
+		if (button) {
+			button.disabled = !(screenShareSelection && screenShareSelection.sourceId);
+		}
+	}
+
+	function screenShareSourceIconSvg(item) {
+		if (String(item && item.id || "").indexOf("window:") === 0) {
+			return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"4\" width=\"18\" height=\"16\" rx=\"2\"></rect><path d=\"M3 8h18\"></path></svg>";
+		}
+		return "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"4\" width=\"18\" height=\"13\" rx=\"2\"></rect><path d=\"M8 20h8\"></path></svg>";
+	}
+
+	function screenShareBuildSelect(options, value, onChange) {
+		const select = document.createElement("select");
+		select.className = "screenshare-select";
+		(options || []).forEach(function(option) {
+			const node = document.createElement("option");
+			node.value = String(option.value);
+			node.textContent = option.label || String(option.value);
+			if (String(option.value) === String(value)) {
+				node.selected = true;
+			}
+			select.appendChild(node);
+		});
+		select.value = String(value);
+		select.addEventListener("change", function() {
+			onChange(select.value);
+		});
+		return select;
+	}
+
+	function screenShareField(label, control) {
+		const field = document.createElement("div");
+		field.className = "screenshare-field" + (label ? "" : " is-labelless");
+		if (label) {
+			const text = document.createElement("span");
+			text.className = "screenshare-field-label";
+			text.textContent = label;
+			field.appendChild(text);
+		}
+		field.appendChild(control);
+		return field;
+	}
+
+	function renderScreenShareDialog(dialog) {
+		const state = screenShareState(dialog);
+		const selection = screenShareEnsureSelection(state);
+		screenShareApplyAutoAudio(state);
+
+		const layout = document.createElement("div");
+		layout.className = "screenshare-dialog";
+
+		const video = document.createElement("section");
+		video.className = "screenshare-panel screenshare-video";
+		const videoHeading = document.createElement("h3");
+		videoHeading.className = "screenshare-panel-title";
+		videoHeading.textContent = "Video";
+		video.appendChild(videoHeading);
+
+		const sourceList = document.createElement("div");
+		sourceList.className = "screenshare-source-list";
+		(state.sources || []).forEach(function(section) {
+			const sectionLabel = String((section && section.section) || "");
+			if (sectionLabel) {
+				const label = document.createElement("div");
+				label.className = "screenshare-source-section";
+				label.textContent = sectionLabel;
+				sourceList.appendChild(label);
+			}
+			const items = (section && section.items) || [];
+			if (!items.length) {
+				const empty = document.createElement("div");
+				empty.className = "screenshare-source-empty";
+				empty.textContent = String((section && section.emptyText) || "Nothing available");
+				sourceList.appendChild(empty);
+				return;
+			}
+			items.forEach(function(item) {
+				const row = document.createElement("button");
+				row.type = "button";
+				row.className = "screenshare-source"
+					+ (String(item.id || "") === selection.sourceId ? " is-selected" : "");
+				row.dataset.sourceId = String(item.id || "");
+				const thumb = document.createElement("span");
+				thumb.className = "screenshare-source-thumb";
+				if (item.thumbnail) {
+					const img = document.createElement("img");
+					img.src = String(item.thumbnail);
+					img.alt = "";
+					thumb.appendChild(img);
+				} else {
+					thumb.classList.add("is-placeholder");
+					thumb.innerHTML = screenShareSourceIconSvg(item);
+				}
+				const copy = document.createElement("span");
+				copy.className = "screenshare-source-copy";
+				const title = document.createElement("span");
+				title.className = "screenshare-source-title";
+				title.textContent = String(item.title || "");
+				copy.appendChild(title);
+				const detail = String(item.detail || "");
+				if (detail) {
+					const sub = document.createElement("span");
+					sub.className = "screenshare-source-detail";
+					sub.textContent = detail;
+					copy.appendChild(sub);
+				}
+				row.appendChild(thumb);
+				row.appendChild(copy);
+				row.addEventListener("click", function() {
+					if (selection.sourceId === String(item.id || "")) {
+						return;
+					}
+					selection.sourceId = String(item.id || "");
+					selection.audioTouched = false;
+					renderModernDialog();
+				});
+				sourceList.appendChild(row);
+			});
+		});
+		video.appendChild(sourceList);
+		layout.appendChild(video);
+
+		const side = document.createElement("div");
+		side.className = "screenshare-side";
+
+		const quality = document.createElement("section");
+		quality.className = "screenshare-panel screenshare-quality";
+		const qualityHeading = document.createElement("h3");
+		qualityHeading.className = "screenshare-panel-title";
+		qualityHeading.textContent = "Quality";
+		quality.appendChild(qualityHeading);
+		quality.appendChild(screenShareField("Resolution",
+			screenShareBuildSelect(state.resolutionOptions, selection.resolution, function(value) {
+				selection.resolution = value;
+			})));
+		quality.appendChild(screenShareField("Frame rate",
+			screenShareBuildSelect(state.frameRateOptions, selection.frameRate, function(value) {
+				selection.frameRate = Number(value) || 0;
+			})));
+		side.appendChild(quality);
+
+		const audio = document.createElement("section");
+		audio.className = "screenshare-panel screenshare-audio";
+		const audioHeading = document.createElement("h3");
+		audioHeading.className = "screenshare-panel-title";
+		audioHeading.textContent = "Audio";
+		audio.appendChild(audioHeading);
+		audio.appendChild(screenShareField("",
+			screenShareBuildSelect(state.audioOptions, selection.audio, function(value) {
+				selection.audio = value;
+				selection.audioTouched = true;
+			})));
+		const note = String(state.audioNote || "");
+		if (note) {
+			const noteEl = document.createElement("p");
+			noteEl.className = "screenshare-audio-note";
+			noteEl.textContent = note;
+			audio.appendChild(noteEl);
+		}
+		side.appendChild(audio);
+
+		layout.appendChild(side);
+		refs.body.appendChild(layout);
+	}
+
+	// ---- Image viewer (kind "imageViewer") ----
+	let imageViewerState = null;
+
+	function renderImageViewerDialog(dialog) {
+		const data = (dialog && dialog.imageViewer) || {};
+		const src = String(data.src || "");
+		if (!imageViewerState || imageViewerState.src !== src) {
+			imageViewerState = { src: src, scale: 1, x: 0, y: 0, dragging: false,
+				startX: 0, startY: 0, originX: 0, originY: 0 };
+		}
+		const state = imageViewerState;
+
+		const stage = document.createElement("div");
+		stage.className = "image-viewer";
+		const img = document.createElement("img");
+		img.className = "image-viewer-img";
+		img.src = src;
+		img.alt = "";
+		img.draggable = false;
+		const apply = function() {
+			img.style.transform = "translate(" + state.x + "px, " + state.y + "px) scale(" + state.scale + ")";
+		};
+		apply();
+		stage.appendChild(img);
+
+		stage.addEventListener("wheel", function(event) {
+			event.preventDefault();
+			const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+			state.scale = Math.max(0.1, Math.min(8, state.scale * factor));
+			apply();
+		}, { passive: false });
+		stage.addEventListener("pointerdown", function(event) {
+			state.dragging = true;
+			state.startX = event.clientX;
+			state.startY = event.clientY;
+			state.originX = state.x;
+			state.originY = state.y;
+			if (typeof stage.setPointerCapture === "function") {
+				stage.setPointerCapture(event.pointerId);
+			}
+			stage.classList.add("is-grabbing");
+		});
+		stage.addEventListener("pointermove", function(event) {
+			if (!state.dragging) {
+				return;
+			}
+			state.x = state.originX + (event.clientX - state.startX);
+			state.y = state.originY + (event.clientY - state.startY);
+			apply();
+		});
+		const endDrag = function() {
+			state.dragging = false;
+			stage.classList.remove("is-grabbing");
+		};
+		stage.addEventListener("pointerup", endDrag);
+		stage.addEventListener("pointercancel", endDrag);
+		stage.addEventListener("dblclick", function() {
+			state.scale = 1;
+			state.x = 0;
+			state.y = 0;
+			apply();
+		});
+
+		refs.body.appendChild(stage);
+	}
+
+	function modernDialogActionPayload(dialog, action) {
+		if (dialog && dialog.kind === "screenShare" && String(action && action.id || "") === "screenShare.start") {
+			return screenShareDialogActionPayload(dialog);
+		}
+		return {};
+	}
+
 	function renderModernDialogActions(dialog) {
 		(dialog.actions || []).forEach(function(action) {
 			const button = document.createElement("button");
@@ -7446,11 +7774,15 @@
 				+ (dialog.primaryActionId === action.id ? " is-primary" : "");
 			button.disabled = action.enabled === false;
 			button.textContent = action.label || action.id || "Action";
+			if (dialog && dialog.kind === "screenShare" && String(action.id || "") === "screenShare.start") {
+				button.dataset.screenShareStart = "true";
+			}
 			button.addEventListener("click", function() {
-				invokeModernDialogAction(action.id || "", {});
+				invokeModernDialogAction(action.id || "", modernDialogActionPayload(dialog, action));
 			});
 			refs.actions.appendChild(button);
 		});
+		syncScreenShareStartButton();
 	}
 
 	function modernDialogRenderKey(dialog) {
@@ -7536,6 +7868,10 @@
 			renderConnectDialog(dialog);
 		} else if (dialog.kind === "settings") {
 			renderSettingsDialog(dialog);
+		} else if (dialog.kind === "screenShare") {
+			renderScreenShareDialog(dialog);
+		} else if (dialog.kind === "imageViewer") {
+			renderImageViewerDialog(dialog);
 		} else {
 			renderGenericDialog(dialog);
 		}

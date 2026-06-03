@@ -4028,6 +4028,115 @@
 		return changed;
 	}
 
+	// Talk-state class tokens applied by talkStateClass(). Kept in sync with it so
+	// the surgical updater below can strip the previous state before applying the
+	// next one without disturbing unrelated classes.
+	const talkStateClassTokens = ["is-talking", "is-talk-talking", "is-talk-whispering",
+		"is-talk-shouting", "is-talk-muted"];
+
+	function applyTalkClassTokens(element, person) {
+		if (!element || !element.classList) {
+			return;
+		}
+		talkStateClassTokens.forEach(function(token) {
+			element.classList.remove(token);
+		});
+		const tokens = talkStateClass(person).trim();
+		if (tokens) {
+			tokens.split(/\s+/).forEach(function(token) {
+				element.classList.add(token);
+			});
+		}
+	}
+
+	function refreshClassicUserIcon(container, person) {
+		if (!container) {
+			return;
+		}
+		const icon = container.querySelector("img.classic-user-icon");
+		if (!icon || icon.parentNode !== container) {
+			return;
+		}
+		const nextSrc = classicStateIconUrl(person);
+		if (icon.getAttribute("src") !== nextSrc) {
+			icon.setAttribute("src", nextSrc);
+		}
+	}
+
+	function findParticipantBySession(snapshot, session) {
+		const lists = [snapshot.voicePresence, snapshot.participants];
+		(snapshot.voiceRooms || []).forEach(function(room) {
+			lists.push(room && room.participants);
+		});
+		for (let listIndex = 0; listIndex < lists.length; listIndex += 1) {
+			const list = lists[listIndex] || [];
+			for (let personIndex = 0; personIndex < list.length; personIndex += 1) {
+				if (participantSessionMatches(list[personIndex], session)) {
+					return list[personIndex];
+				}
+			}
+		}
+		return null;
+	}
+
+	// Surgically patch the talk-state visuals (rail row + header stack) for a single
+	// participant instead of rebuilding the entire voice room list. Returns true when
+	// at least one rendered node was found and updated; callers fall back to a full
+	// presence render otherwise (e.g. membership changed and rows must be rebuilt).
+	function applyTalkStateDom(snapshot, state, session) {
+		const sessionStr = String(session || "");
+		if (!sessionStr) {
+			return false;
+		}
+
+		const person = findParticipantBySession(snapshot, session);
+		const talkPerson = person || { talkState: String(state && state.talkState || "passive") };
+		const selector = "[data-session=\"" + sessionStr + "\"]";
+		let matched = false;
+
+		if (refs.voiceRoomList) {
+			refs.voiceRoomList.querySelectorAll(selector).forEach(function(node) {
+				if (!node.classList || !node.classList.contains("presence-row")) {
+					return;
+				}
+				applyTalkClassTokens(node, talkPerson);
+				const avatar = node.querySelector(".presence-avatar");
+				if (avatar) {
+					applyTalkClassTokens(avatar, talkPerson);
+					refreshClassicUserIcon(avatar, talkPerson);
+				}
+				const dot = node.querySelector(".presence-dot");
+				if (dot) {
+					applyTalkClassTokens(dot, talkPerson);
+				}
+				if (person) {
+					node.title = presenceRowTitle(person);
+					const statuses = node.querySelector(".presence-statuses");
+					if (statuses) {
+						renderPresenceStatuses(statuses, person.statuses || []);
+					}
+				}
+				matched = true;
+			});
+		}
+
+		if (refs.voicePresenceStack) {
+			refs.voicePresenceStack.querySelectorAll(selector).forEach(function(node) {
+				if (!node.classList || !node.classList.contains("stack-avatar")) {
+					return;
+				}
+				applyTalkClassTokens(node, talkPerson);
+				refreshClassicUserIcon(node, talkPerson);
+				if (person) {
+					node.title = [person.label || "", person.talkLabel || ""].filter(Boolean).join(" | ");
+				}
+				matched = true;
+			});
+		}
+
+		return matched;
+	}
+
 	function syncParticipantTalkState(state) {
 		const session = String(state && state.session || "");
 		if (!session) {
@@ -4042,7 +4151,11 @@
 		});
 
 		if (changed) {
-			renderPresencePatch(snapshot);
+			// Fast path: toggle talk visuals in place. Only rebuild the whole presence
+			// rail when the participant has no rendered row yet (membership changed).
+			if (!applyTalkStateDom(snapshot, state, session)) {
+				renderPresencePatch(snapshot);
+			}
 		}
 	}
 
@@ -4233,6 +4346,30 @@
 
 		const banner = primaryBannerState(app || {});
 		const scopeText = String(scope && scope.banner || "");
+
+		// Fast path: while an update downloads, only the progress percentage ticks
+		// (every ~500ms) while the banner identity (phase/title/detail, captured by
+		// its signature) stays constant. Patch the progress bar in place instead of
+		// tearing down and rebuilding the whole banner DOM, which would flicker and
+		// shift surrounding layout on every tick.
+		if (banner && banner.isUpdate && banner.progressVisible && !banner.progressIndeterminate
+				&& !refs.scopeBanner.classList.contains("hidden")
+				&& refs.scopeBanner.classList.contains("is-update")
+				&& String(refs.scopeBanner.dataset.updateBannerSignature || "") === String(banner.signature || "")
+				&& refs.scopeBanner.classList.contains("is-collapsed") === !!updateBannerIsCollapsed(banner.signature)) {
+			const progressEl = refs.scopeBanner.querySelector(".connection-banner-progress");
+			const track = refs.scopeBanner.querySelector(".connection-banner-progress-track");
+			const bar = refs.scopeBanner.querySelector(".connection-banner-progress-bar");
+			const label = refs.scopeBanner.querySelector(".connection-banner-progress-label");
+			if (progressEl && !progressEl.classList.contains("is-indeterminate") && track && bar && label) {
+				const percent = Math.round(banner.progressPercent);
+				track.setAttribute("aria-valuenow", String(percent));
+				bar.style.width = String(banner.progressPercent) + "%";
+				label.textContent = banner.progressLabel || (String(percent) + "%");
+				return;
+			}
+		}
+
 		refs.scopeBanner.replaceChildren();
 		refs.scopeBanner.className = "banner connection-banner";
 		if (!banner && !scopeText) {
@@ -8887,6 +9024,90 @@
 		return wrapper;
 	}
 
+	function buildRoomRootLabel(options) {
+		const rootLabel = document.createElement("div");
+		rootLabel.className = "rail-root-label";
+		rootLabel.textContent = options.rootLabel;
+		rootLabel.dataset.dropTarget = "root";
+		rootLabel.dataset.scopeToken = options.rootToken || "";
+		if (options.joinable && options.rootToken) {
+			rootLabel.addEventListener("dragenter", handleRoomDragEnter);
+			rootLabel.addEventListener("dragover", handleRoomDragOver);
+			rootLabel.addEventListener("dragleave", clearRoomDropTarget);
+			rootLabel.addEventListener("drop", function(event) {
+				clearRoomDropTarget(event);
+				if (!dragState || dragState.kind !== "room" || !dragState.scopeToken) {
+					return;
+				}
+
+				event.preventDefault();
+				notifyBridge("moveChannelToChannel", dragState.scopeToken, options.rootToken, "inside");
+			});
+		}
+		return rootLabel;
+	}
+
+	// Captures everything buildRoomRow() reads, so two renders with an identical
+	// signature are guaranteed to produce identical DOM and the existing row can be
+	// reused untouched. voicePresence only feeds the row when it backs a joined
+	// room's participant list, so it is only folded in then.
+	function roomRowSignature(room, joinable, options) {
+		const token = String(room && room.token || "");
+		const usesVoicePresence = !!joinable && !!(room && room.joined)
+			&& !((room && room.participants && room.participants.length));
+		return JSON.stringify({
+			room: room,
+			joinable: !!joinable,
+			joining: joinable ? (token === pendingVoiceJoinToken()) : false,
+			presence: usesVoicePresence ? (options.voicePresence || []) : null
+		});
+	}
+
+	// Per-node reconcile bookkeeping ({ key, signature }), kept off the DOM so large
+	// signature strings never bloat element attributes.
+	const reconcileRowState = new WeakMap();
+
+	// Keyed list reconcile: reuse the existing DOM node when a row's key and render
+	// signature are unchanged (so unrelated rows never flicker and keep focus/hover/
+	// drag/scroll state), rebuild only changed rows, and move nodes to match the new
+	// order instead of tearing down and recreating the whole list.
+	function reconcileKeyedRows(container, rows) {
+		const existingByKey = new Map();
+		Array.prototype.forEach.call(container.children, function(child) {
+			const state = reconcileRowState.get(child);
+			if (state && state.key) {
+				existingByKey.set(state.key, child);
+			}
+		});
+
+		const usedKeys = new Set();
+		let cursor = null;
+		rows.forEach(function(row) {
+			usedKeys.add(row.key);
+			let node = existingByKey.get(row.key);
+			const state = node ? reconcileRowState.get(node) : null;
+			if (!node || !state || state.signature !== row.signature) {
+				node = row.build();
+				reconcileRowState.set(node, { key: row.key, signature: row.signature });
+			}
+			const reference = cursor ? cursor.nextSibling : container.firstChild;
+			if (reference !== node) {
+				container.insertBefore(node, reference);
+			}
+			cursor = node;
+		});
+
+		let child = container.firstChild;
+		while (child) {
+			const next = child.nextSibling;
+			const state = reconcileRowState.get(child);
+			if (!state || !state.key || !usedKeys.has(state.key)) {
+				container.removeChild(child);
+			}
+			child = next;
+		}
+	}
+
 	function renderRoomList(container, rooms, options) {
 		const roomSection = container.closest(".room-card-block");
 		const roomList = rooms || [];
@@ -8896,49 +9117,44 @@
 			roomSection.classList.toggle("hidden", !!options.hideWhenEmpty && !hasRooms);
 		}
 
-		const fragment = document.createDocumentFragment();
-
 		if (!hasRooms) {
 			if (options.hideWhenEmpty) {
-				replaceChildrenWith(container, fragment);
+				replaceChildrenWith(container, document.createDocumentFragment());
 				return;
 			}
 
 			const empty = document.createElement("div");
 			empty.className = "rail-empty";
 			empty.textContent = options.emptyText || "Waiting for room state.";
-			fragment.appendChild(empty);
-			replaceChildrenWith(container, fragment);
+			replaceChildrenWith(container, empty);
 			return;
 		}
 
+		const rows = [];
 		if (options.rootLabel) {
-			const rootLabel = document.createElement("div");
-			rootLabel.className = "rail-root-label";
-			rootLabel.textContent = options.rootLabel;
-			rootLabel.dataset.dropTarget = "root";
-			rootLabel.dataset.scopeToken = options.rootToken || "";
-			if (options.joinable && options.rootToken) {
-				rootLabel.addEventListener("dragenter", handleRoomDragEnter);
-				rootLabel.addEventListener("dragover", handleRoomDragOver);
-				rootLabel.addEventListener("dragleave", clearRoomDropTarget);
-				rootLabel.addEventListener("drop", function(event) {
-					clearRoomDropTarget(event);
-					if (!dragState || dragState.kind !== "room" || !dragState.scopeToken) {
-						return;
-					}
-
-					event.preventDefault();
-					notifyBridge("moveChannelToChannel", dragState.scopeToken, options.rootToken, "inside");
-				});
-			}
-			fragment.appendChild(rootLabel);
+			rows.push({
+				key: "__root",
+				signature: JSON.stringify({
+					label: options.rootLabel || "",
+					token: options.rootToken || "",
+					joinable: !!options.joinable
+				}),
+				build: function() {
+					return buildRoomRootLabel(options);
+				}
+			});
 		}
-
-		roomList.forEach(function(room) {
-			fragment.appendChild(buildRoomRow(room, options.joinable, options.voicePresence));
+		roomList.forEach(function(room, index) {
+			const token = String(room && room.token || "");
+			rows.push({
+				key: "room:" + (token || ("index:" + index)),
+				signature: roomRowSignature(room, options.joinable, options),
+				build: function() {
+					return buildRoomRow(room, options.joinable, options.voicePresence);
+				}
+			});
 		});
-		replaceChildrenWith(container, fragment);
+		reconcileKeyedRows(container, rows);
 	}
 
 	function mergeParticipantPatchList(previousList, nextList) {
@@ -8996,6 +9212,43 @@
 			}
 			return merged;
 		});
+	}
+
+	function modernPatchIsAppOnly(patch) {
+		return !!patch
+			&& patch.app && typeof patch.app === "object"
+			&& !Array.isArray(patch.textRooms)
+			&& !Array.isArray(patch.voiceRooms)
+			&& !Array.isArray(patch.participants)
+			&& !Array.isArray(patch.voicePresence)
+			&& !Object.prototype.hasOwnProperty.call(patch, "voicePresenceChannelId")
+			&& !patch.activeScope;
+	}
+
+	// Lightweight render for patches that only carry app-level state (e.g. the
+	// update-download banner ticking). Refreshes app-dependent chrome without
+	// rebuilding the room lists or re-running the active-scope/message render,
+	// which would otherwise reload and visibly jolt the chat on every tick.
+	function renderAppChromePatch(snapshot) {
+		const app = snapshot.app || {};
+		const scope = snapshot.activeScope || {};
+		syncMockupShellChrome(app);
+		refs.connectButton.disabled = !app.canConnect;
+		refs.disconnectButton.disabled = !appCanCancelConnection(app);
+		refs.muteButton.classList.toggle("is-active", !!app.selfMuted);
+		refs.deafButton.classList.toggle("is-active", !!app.selfDeafened);
+		renderMenus(resolvedAppMenus(app));
+		refs.settingsButton.setAttribute("aria-expanded", appMenuOpen ? "true" : "false");
+		renderSelfCard(app);
+		if (appMenuOpen) {
+			renderAppMenu(snapshot);
+		}
+		if (selfMenuOpen && !nativeSelfMenuOpen()) {
+			renderSelfMenu(snapshot);
+		}
+		renderDirectMessages(snapshot);
+		renderStonksChatHeader(snapshot);
+		renderConnectionOrScopeBanner(app, scope);
 	}
 
 	function renderRoomsPatch(snapshot) {
@@ -24645,6 +24898,10 @@
 				if (patch.app && typeof patch.app === "object") {
 					snapshot.app = Object.assign({}, snapshot.app || {}, patch.app);
 				}
+				if (modernPatchIsAppOnly(patch)) {
+					renderAppChromePatch(snapshot);
+					return;
+				}
 				if (Array.isArray(patch.textRooms)) {
 					snapshot.textRooms = mergeRoomPatchList(snapshot.textRooms, patch.textRooms);
 				}
@@ -26205,7 +26462,113 @@
 	}
 	/* MUMBLE_MODERN_AUTOMATION_END */
 
+	// Themed HTML tooltips for the shell. Lazily converts native `title` attributes to
+	// `data-tooltip` on first hover (which suppresses the OS/Chromium tooltip) and
+	// renders a single themed layer instead, so hovers match the modern theme.
+	function setupModernTooltips() {
+		const tooltip = document.createElement("div");
+		tooltip.className = "modern-tooltip hidden";
+		tooltip.setAttribute("role", "tooltip");
+		tooltip.setAttribute("aria-hidden", "true");
+		document.body.appendChild(tooltip);
+
+		let activeTarget = null;
+		let showTimer = 0;
+
+		function hideTooltip() {
+			if (showTimer) {
+				window.clearTimeout(showTimer);
+				showTimer = 0;
+			}
+			activeTarget = null;
+			tooltip.classList.add("hidden");
+			tooltip.setAttribute("aria-hidden", "true");
+		}
+
+		function positionTooltip(target) {
+			tooltip.classList.remove("hidden");
+			const rect = target.getBoundingClientRect();
+			const tipRect = tooltip.getBoundingClientRect();
+			const gap = 8;
+			let top = rect.bottom + gap;
+			let placement = "below";
+			if (top + tipRect.height > window.innerHeight - 4) {
+				top = rect.top - gap - tipRect.height;
+				placement = "above";
+			}
+			if (top < 4) {
+				top = rect.bottom + gap;
+				placement = "below";
+			}
+			let left = rect.left + (rect.width - tipRect.width) / 2;
+			left = Math.max(6, Math.min(left, window.innerWidth - tipRect.width - 6));
+			tooltip.style.left = Math.round(left) + "px";
+			tooltip.style.top = Math.round(top) + "px";
+			tooltip.dataset.placement = placement;
+		}
+
+		function tooltipTextFor(element) {
+			if (element.dataset && element.dataset.tooltip) {
+				return element.dataset.tooltip;
+			}
+			const title = element.getAttribute ? element.getAttribute("title") : "";
+			if (title) {
+				element.dataset.tooltip = title;
+				element.removeAttribute("title");
+				if (!element.getAttribute("aria-label")) {
+					element.setAttribute("aria-label", title);
+				}
+				return title;
+			}
+			return "";
+		}
+
+		document.addEventListener("mouseover", function(event) {
+			const target = event.target && event.target.closest
+				? event.target.closest("[title], [data-tooltip]")
+				: null;
+			if (!target) {
+				return;
+			}
+			const text = tooltipTextFor(target);
+			if (!text) {
+				return;
+			}
+			if (target === activeTarget) {
+				return;
+			}
+			if (showTimer) {
+				window.clearTimeout(showTimer);
+			}
+			activeTarget = target;
+			showTimer = window.setTimeout(function() {
+				showTimer = 0;
+				if (activeTarget === target && document.contains(target)) {
+					tooltip.textContent = text;
+					tooltip.setAttribute("aria-hidden", "false");
+					positionTooltip(target);
+				}
+			}, 350);
+		}, true);
+
+		document.addEventListener("mouseout", function(event) {
+			if (!activeTarget) {
+				return;
+			}
+			const to = event.relatedTarget;
+			if (to && (to === activeTarget || (activeTarget.contains && activeTarget.contains(to)))) {
+				return;
+			}
+			hideTooltip();
+		}, true);
+
+		document.addEventListener("mousedown", hideTooltip, true);
+		document.addEventListener("wheel", hideTooltip, { capture: true, passive: true });
+		window.addEventListener("blur", hideTooltip);
+	}
+
 	function wireActions() {
+		setupModernTooltips();
 		document.addEventListener("click", handleAnchorActivation, true);
 		document.addEventListener("pointermove", function(event) {
 			syncMenuPeekState(event.clientX, event.clientY);

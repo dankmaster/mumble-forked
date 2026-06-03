@@ -19517,6 +19517,17 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 		return true;
 	}
 
+	if (dialogID == QLatin1String("screenShareStatus")) {
+		if (actionID == QLatin1String("screenShareStatus.stop")) {
+			const QString streamID = fieldValues.value(QStringLiteral("screenShareStatus.streamId")).toString();
+			if (!streamID.isEmpty() && m_screenShareManager) {
+				m_screenShareManager->requestStopShare(streamID);
+				publishModernShellRoomStatePatch();
+			}
+		}
+		return true;
+	}
+
 	if (dialogID == QLatin1String("sslCertificateWarning")
 		|| dialogID == QLatin1String("sslCertificateDetails")) {
 		if (actionID == QLatin1String("viewSslCertificateDetails")) {
@@ -20840,6 +20851,10 @@ void MainWindow::handleModernDialogAction(const QString &dialogID, const QString
 	}
 
 	if (dialogID == QLatin1String("stonks") && handleModernStonksDialogAction(actionID, payload)) {
+		return;
+	}
+
+	if (dialogID == QLatin1String("screenShare") && handleModernScreenShareDialogAction(actionID, payload)) {
 		return;
 	}
 
@@ -22549,27 +22564,18 @@ QVariantList MainWindow::buildModernShellChannelParticipantPatchStates(const Cha
 	}
 
 	const ClientUser *selfUser = ClientUser::get(Global::get().uiSession);
+	// Keep the participant list stable: pin self first, then preserve the channel's
+	// join order (the qlUsers insertion order). stable_sort leaves equal elements in
+	// their original order, so talk activity never reshuffles the list.
 	const auto sortUsers      = [selfUser](QList< const ClientUser * > &users) {
-        std::sort(users.begin(), users.end(), [selfUser](const ClientUser *lhs, const ClientUser *rhs) {
+        std::stable_sort(users.begin(), users.end(), [selfUser](const ClientUser *lhs, const ClientUser *rhs) {
 			if (lhs == selfUser || rhs == selfUser) {
 				return lhs == selfUser;
 			}
 			if (!lhs || !rhs) {
 				return lhs != nullptr;
 			}
-			const bool lhsActive = lhs->tsState != Settings::Passive;
-			const bool rhsActive = rhs->tsState != Settings::Passive;
-			if (lhsActive != rhsActive) {
-				return lhsActive;
-			}
-
-			const QString lhsName = lhs->qsName.toCaseFolded();
-			const QString rhsName = rhs->qsName.toCaseFolded();
-			if (lhsName != rhsName) {
-				return lhsName < rhsName;
-			}
-
-			return lhs->uiSession < rhs->uiSession;
+			return false;
 		});
 	};
 
@@ -24926,11 +24932,8 @@ bool MainWindow::handleModernShellScopeAction(const QString &scopeToken, const Q
 		if (m_screenShareManager) {
 			const QString streamID = screenShareStreamForChannel(channel);
 			if (normalizedActionID == QLatin1String("screenShareStart")) {
-				ScreenShareStartOptions options;
-				if (chooseScreenShareStartOptions(channel, &options)) {
-					m_screenShareManager->requestStartChannelShare(static_cast< unsigned int >(channel->iId), options);
-					handled = true;
-				}
+				openModernScreenShareDialog(channel);
+				handled = true;
 			} else if (!streamID.isEmpty()) {
 				if (normalizedActionID == QLatin1String("screenShareStop")) {
 					m_screenShareManager->requestStopShare(streamID);
@@ -36753,10 +36756,67 @@ void MainWindow::openImageDialog(const QImage &image) {
 		return;
 	}
 
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell()) {
+		openModernImageViewerDialog(image);
+		return;
+	}
+#endif
+
 	const QPixmap pixmap = QPixmap::fromImage(image);
 	ResponsiveImageDialog dialog(pixmap, this);
 	dialog.exec();
 }
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+void MainWindow::openModernImageViewerDialog(const QImage &image) {
+	if (image.isNull()) {
+		return;
+	}
+
+	const bool usePng = image.hasAlphaChannel();
+	QByteArray bytes;
+	QBuffer buffer(&bytes);
+	if (!buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, usePng ? "PNG" : "JPEG", 90) || bytes.isEmpty()) {
+		return;
+	}
+	const QString dataUri = QStringLiteral("data:%1;base64,%2")
+								.arg(usePng ? QStringLiteral("image/png") : QStringLiteral("image/jpeg"),
+									 QString::fromLatin1(bytes.toBase64()));
+
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("imageViewer"), QStringLiteral("imageViewer"), tr("Image"), QString(), QVariantList(),
+		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QStringLiteral("accent"), true) },
+		QStringLiteral("close"), QSize(900, 680));
+	dialog.insert(QStringLiteral("tone"), QStringLiteral("wide"));
+	QVariantMap imageState;
+	imageState.insert(QStringLiteral("src"), dataUri);
+	imageState.insert(QStringLiteral("width"), image.width());
+	imageState.insert(QStringLiteral("height"), image.height());
+	dialog.insert(QStringLiteral("imageViewer"), imageState);
+	openModernGenericDialog(dialog);
+}
+
+void MainWindow::openModernScreenShareStatusDialog(const QString &streamID, const QString &sourceLabel,
+												   const QString &qualityLabel, const QString &audioLabel) {
+	const QVariantList fields {
+		modernHiddenField(QStringLiteral("screenShareStatus.streamId"), streamID),
+		modernReadonlyField(tr("Source"), sourceLabel),
+		modernReadonlyField(tr("Quality"), qualityLabel),
+		modernReadonlyField(tr("Audio"), audioLabel)
+	};
+	QVariantMap dialog = modernDialogDto(
+		QStringLiteral("screenShareStatus"), QStringLiteral("confirm"), tr("Screen share is live"),
+		tr("You are currently sharing your screen to this channel."),
+		QVariantList { modernDialogSection(tr("Details"), fields) },
+		QVariantList { modernDialogAction(QStringLiteral("close"), tr("Close"), true, QString(), true),
+					   modernDialogAction(QStringLiteral("screenShareStatus.stop"), tr("Stop sharing"), true,
+										  QStringLiteral("danger"), true) },
+		QStringLiteral("close"), QSize(520, 360));
+	dialog.insert(QStringLiteral("tone"), QStringLiteral("accent"));
+	openModernGenericDialog(dialog);
+}
+#endif
 
 void MainWindow::openImageDialog(LogTextBrowser *browser, const QTextCursor &cursor) {
 	m_selectedLogImage = imageFromLogBrowser(browser, cursor);
@@ -38176,10 +38236,374 @@ bool MainWindow::chooseScreenShareStartOptions(Channel *channel, ScreenShareStar
 	return true;
 }
 
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+// Capture a small still thumbnail (data-URI JPEG) for a screen-share source so the
+// modern picker shows real previews instead of generic icons. Captured once when the
+// dialog opens; intentionally not refreshed on a timer to avoid main-thread capture
+// thrash and dialog re-render churn (see [[never-freeze-ui]]).
+QString MainWindow::screenShareSourceThumbnail(const QString &sourceId) {
+	QPixmap pixmap;
+	const QList< QScreen * > screens = QGuiApplication::screens();
+	if (sourceId == QLatin1String("primary-monitor")) {
+		if (QScreen *screen = QGuiApplication::primaryScreen()) {
+			pixmap = screen->grabWindow(0);
+		}
+	} else if (sourceId.startsWith(QLatin1String("monitor:"))) {
+		bool ok       = false;
+		const int idx = sourceId.mid(QStringLiteral("monitor:").size()).toInt(&ok);
+		if (ok && idx >= 0 && idx < screens.size() && screens.at(idx)) {
+			pixmap = screens.at(idx)->grabWindow(0);
+		}
+	}
+#ifdef Q_OS_WIN
+	else if (sourceId.startsWith(QLatin1String("window:"))) {
+		bool ok                  = false;
+		const qulonglong rawHwnd = sourceId.mid(QStringLiteral("window:").size()).toULongLong(&ok);
+		if (ok && rawHwnd != 0) {
+			if (QScreen *screen = QGuiApplication::primaryScreen()) {
+				pixmap = screen->grabWindow(static_cast< WId >(rawHwnd));
+			}
+		}
+	}
+#endif
+	if (pixmap.isNull()) {
+		return QString();
+	}
+
+	const QImage image = pixmap.toImage().scaled(220, 140, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+	if (image.isNull()) {
+		return QString();
+	}
+	QByteArray bytes;
+	QBuffer buffer(&bytes);
+	if (!buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, "JPEG", 70)) {
+		return QString();
+	}
+	return QStringLiteral("data:image/jpeg;base64,") + QString::fromLatin1(bytes.toBase64());
+}
+
+QVariantMap MainWindow::buildModernScreenShareState(Channel *channel) {
+	QVariantMap state;
+	state.insert(QStringLiteral("channelName"), channel ? channel->qsName : QString());
+	state.insert(QStringLiteral("channelId"), channel ? static_cast< int >(channel->iId) : -1);
+
+	// --- Video sources: Screens + (Windows on Win) ---
+	QVariantList sources;
+	QVariantList screenItems;
+	const QList< QScreen * > screens = QGuiApplication::screens();
+	for (int i = 0; i < screens.size(); ++i) {
+		const QScreen *screen = screens.at(i);
+		const QRect geometry  = screen ? screen->geometry() : QRect();
+		QStringList detailParts;
+		if (screen && !screen->name().isEmpty()) {
+			detailParts << screen->name();
+		}
+		if (geometry.isValid()) {
+			detailParts << tr("%1x%2").arg(geometry.width()).arg(geometry.height());
+		}
+		if (screen && screen == QGuiApplication::primaryScreen()) {
+			detailParts << tr("Primary display");
+		}
+		QVariantMap item;
+		const QString monitorId = QStringLiteral("monitor:%1").arg(i);
+		item.insert(QStringLiteral("id"), monitorId);
+		item.insert(QStringLiteral("title"), tr("Screen %1").arg(i + 1));
+		item.insert(QStringLiteral("detail"), detailParts.join(QStringLiteral(" - ")));
+		item.insert(QStringLiteral("processId"), 0);
+		item.insert(QStringLiteral("audioAuto"), false);
+		item.insert(QStringLiteral("thumbnail"), screenShareSourceThumbnail(monitorId));
+		screenItems.push_back(item);
+	}
+	if (screenItems.isEmpty()) {
+		QVariantMap item;
+		item.insert(QStringLiteral("id"), QStringLiteral("primary-monitor"));
+		item.insert(QStringLiteral("title"), tr("Primary screen"));
+		item.insert(QStringLiteral("detail"), QString());
+		item.insert(QStringLiteral("processId"), 0);
+		item.insert(QStringLiteral("audioAuto"), false);
+		screenItems.push_back(item);
+	}
+	{
+		QVariantMap section;
+		section.insert(QStringLiteral("section"), tr("Screens"));
+		section.insert(QStringLiteral("items"), screenItems);
+		sources.push_back(section);
+	}
+
+#ifdef Q_OS_WIN
+	const QList< ScreenShareWindowSource > windowSources = screenShareWindowSources();
+	QVariantList windowItems;
+	// Cap how many window grabs we do up front to keep dialog open responsive.
+	constexpr int maxWindowThumbnails = 16;
+	int windowThumbnailCount          = 0;
+	for (const ScreenShareWindowSource &windowSource : windowSources) {
+		QString appLabel = screenShareReadableAppName(windowSource.processName);
+		if (appLabel.isEmpty()) {
+			appLabel = screenShareCompactText(windowSource.title, 42);
+		}
+		const QString titleDetail = windowSource.title.compare(appLabel, Qt::CaseInsensitive) == 0
+										? QString()
+										: screenShareCompactText(windowSource.title, 64);
+		const QString windowId =
+			QStringLiteral("window:%1").arg(static_cast< qulonglong >(windowSource.handle));
+		QVariantMap item;
+		item.insert(QStringLiteral("id"), windowId);
+		item.insert(QStringLiteral("title"), appLabel);
+		item.insert(QStringLiteral("detail"), titleDetail);
+		item.insert(QStringLiteral("processId"), static_cast< qulonglong >(windowSource.processID));
+		item.insert(QStringLiteral("audioAuto"), windowSource.processID > 0);
+		if (windowThumbnailCount < maxWindowThumbnails) {
+			item.insert(QStringLiteral("thumbnail"), screenShareSourceThumbnail(windowId));
+			windowThumbnailCount += 1;
+		}
+		windowItems.push_back(item);
+	}
+	{
+		QVariantMap section;
+		section.insert(QStringLiteral("section"), tr("Open windows"));
+		section.insert(QStringLiteral("items"), windowItems);
+		section.insert(QStringLiteral("emptyText"), tr("No shareable app windows are open"));
+		sources.push_back(section);
+	}
+#endif
+	state.insert(QStringLiteral("sources"), sources);
+	state.insert(QStringLiteral("selectedSourceId"),
+				 screenItems.isEmpty() ? QString() : screenItems.first().toMap().value(QStringLiteral("id")).toString());
+
+	// --- Quality limits (mirror the classic picker) ---
+	const ScreenShareHelperClient::CapabilitySnapshot capabilities =
+		m_screenShareManager ? m_screenShareManager->helperClient().capabilities()
+							 : ScreenShareHelperClient::CapabilitySnapshot();
+	auto qualityLimit = [](const unsigned int advertised, const unsigned int fallback, const unsigned int hardMax) {
+		return Mumble::ScreenShare::sanitizeLimit(advertised, fallback, hardMax);
+	};
+	const unsigned int maxWidth = std::min(
+		qualityLimit(Global::get().uiScreenShareMaxWidth, Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH,
+					 Mumble::ScreenShare::HARD_MAX_WIDTH),
+		qualityLimit(capabilities.maxWidth, Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH,
+					 Mumble::ScreenShare::HARD_MAX_WIDTH));
+	const unsigned int maxHeight = std::min(
+		qualityLimit(Global::get().uiScreenShareMaxHeight, Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT,
+					 Mumble::ScreenShare::HARD_MAX_HEIGHT),
+		qualityLimit(capabilities.maxHeight, Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT,
+					 Mumble::ScreenShare::HARD_MAX_HEIGHT));
+	const unsigned int maxFps = std::min(
+		qualityLimit(Global::get().uiScreenShareMaxFps, Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_FPS,
+					 Mumble::ScreenShare::HARD_MAX_FPS),
+		qualityLimit(capabilities.maxFps, Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_FPS,
+					 Mumble::ScreenShare::HARD_MAX_FPS));
+
+	QVariantList resolutionOptions;
+	auto addResolution = [&](const unsigned int width, const unsigned int height) {
+		if (width > maxWidth || height > maxHeight) {
+			return;
+		}
+		QVariantMap option;
+		option.insert(QStringLiteral("value"), QStringLiteral("%1x%2").arg(width).arg(height));
+		option.insert(QStringLiteral("label"), tr("%1p (%2x%3)").arg(height).arg(width).arg(height));
+		resolutionOptions.push_back(option);
+	};
+	addResolution(1280, 720);
+	addResolution(1920, 1080);
+	addResolution(2560, 1440);
+	if (resolutionOptions.isEmpty()) {
+		const unsigned int fallbackWidth  = std::min(maxWidth, Mumble::ScreenShare::DEFAULT_MAX_WIDTH);
+		const unsigned int fallbackHeight = std::min(maxHeight, Mumble::ScreenShare::DEFAULT_MAX_HEIGHT);
+		QVariantMap option;
+		option.insert(QStringLiteral("value"), QStringLiteral("%1x%2").arg(fallbackWidth).arg(fallbackHeight));
+		option.insert(QStringLiteral("label"), tr("Best available (%1x%2)").arg(fallbackWidth).arg(fallbackHeight));
+		resolutionOptions.push_back(option);
+	}
+	state.insert(QStringLiteral("resolutionOptions"), resolutionOptions);
+	const QString preferredResolution =
+		QStringLiteral("%1x%2").arg(Mumble::ScreenShare::DEFAULT_MAX_WIDTH).arg(Mumble::ScreenShare::DEFAULT_MAX_HEIGHT);
+	bool hasPreferredResolution = false;
+	for (const QVariant &option : resolutionOptions) {
+		if (option.toMap().value(QStringLiteral("value")).toString() == preferredResolution) {
+			hasPreferredResolution = true;
+			break;
+		}
+	}
+	state.insert(QStringLiteral("resolutionDefault"),
+				 hasPreferredResolution
+					 ? preferredResolution
+					 : (resolutionOptions.isEmpty()
+							? QString()
+							: resolutionOptions.first().toMap().value(QStringLiteral("value")).toString()));
+
+	QVariantList frameRateOptions;
+	auto addFrameRate = [&](const unsigned int fps) {
+		if (fps > maxFps) {
+			return;
+		}
+		QVariantMap option;
+		option.insert(QStringLiteral("value"), static_cast< int >(fps));
+		option.insert(QStringLiteral("label"), tr("%1 FPS").arg(fps));
+		frameRateOptions.push_back(option);
+	};
+	addFrameRate(30);
+	addFrameRate(60);
+	if (frameRateOptions.isEmpty()) {
+		const unsigned int fallbackFps = qMax(1U, std::min(maxFps, Mumble::ScreenShare::DEFAULT_MAX_FPS));
+		QVariantMap option;
+		option.insert(QStringLiteral("value"), static_cast< int >(fallbackFps));
+		option.insert(QStringLiteral("label"), tr("%1 FPS").arg(fallbackFps));
+		frameRateOptions.push_back(option);
+	}
+	state.insert(QStringLiteral("frameRateOptions"), frameRateOptions);
+	const int preferredFps = static_cast< int >(Mumble::ScreenShare::DEFAULT_MAX_FPS);
+	bool hasPreferredFps    = false;
+	for (const QVariant &option : frameRateOptions) {
+		if (option.toMap().value(QStringLiteral("value")).toInt() == preferredFps) {
+			hasPreferredFps = true;
+			break;
+		}
+	}
+	state.insert(QStringLiteral("frameRateDefault"),
+				 hasPreferredFps ? preferredFps
+								 : (frameRateOptions.isEmpty()
+										? 0
+										: frameRateOptions.first().toMap().value(QStringLiteral("value")).toInt()));
+
+	// --- Audio options (mirror the classic picker) ---
+	QVariantList audioOptions;
+	auto addAudio = [&](const QString &value, const QString &optionLabel) {
+		QVariantMap option;
+		option.insert(QStringLiteral("value"), value);
+		option.insert(QStringLiteral("label"), optionLabel);
+		audioOptions.push_back(option);
+	};
+	addAudio(QString(), tr("No audio"));
+	addAudio(QStringLiteral("default-loopback"), tr("System audio (excluding Mumble)"));
+#ifdef Q_OS_WIN
+	const QList< ScreenShareAudioSource > renderAudioSources = screenShareRenderAudioSources();
+	for (const ScreenShareAudioSource &audioSource : renderAudioSources) {
+		const QString audioLabel = audioSource.isDefault
+									   ? tr("Output: %1 (default, excluding Mumble)").arg(audioSource.label)
+									   : tr("Output: %1 (excluding Mumble)").arg(audioSource.label);
+		addAudio(audioSource.sourceID, audioLabel);
+	}
+	QSet< quint64 > addedProcessAudioSources;
+	for (const ScreenShareWindowSource &windowSource : windowSources) {
+		if (windowSource.processID == 0 || addedProcessAudioSources.contains(windowSource.processID)) {
+			continue;
+		}
+		addedProcessAudioSources.insert(windowSource.processID);
+		QString appLabel = screenShareReadableAppName(windowSource.processName);
+		if (appLabel.isEmpty()) {
+			appLabel = screenShareCompactText(windowSource.title, 42);
+		}
+		addAudio(QStringLiteral("process:%1").arg(static_cast< quint64 >(windowSource.processID)),
+				 tr("App: %1").arg(appLabel));
+	}
+#endif
+	state.insert(QStringLiteral("audioOptions"), audioOptions);
+	state.insert(QStringLiteral("audioDefault"), QString());
+	state.insert(QStringLiteral("audioNote"),
+				 tr("System and output-device audio exclude this Mumble client to avoid voice feedback."));
+
+	return state;
+}
+
+QVariantMap MainWindow::buildModernScreenShareDialogDto(Channel *channel) {
+	const QString channelName = channel ? channel->qsName : tr("this channel");
+	QVariantMap dialog        = modernDialogDto(
+        QStringLiteral("screenShare"), QStringLiteral("screenShare"), tr("Start screen share"),
+        tr("Share to %1").arg(channelName), QVariantList(),
+        QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
+					   modernDialogAction(QStringLiteral("screenShare.start"), tr("Start sharing"), true,
+                                          QStringLiteral("accent"), true) },
+        QStringLiteral("screenShare.start"), QSize(720, 600));
+	dialog.insert(QStringLiteral("tone"), QStringLiteral("wide"));
+	dialog.insert(QStringLiteral("screenShare"), buildModernScreenShareState(channel));
+	return dialog;
+}
+#endif
+
+void MainWindow::openModernScreenShareDialog(Channel *channel) {
+	if (!channel || !m_screenShareManager) {
+		return;
+	}
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (usesModernShell()) {
+		openModernGenericDialog(buildModernScreenShareDialogDto(channel));
+		return;
+	}
+#endif
+
+	ScreenShareStartOptions options;
+	if (chooseScreenShareStartOptions(channel, &options)) {
+		m_screenShareManager->requestStartChannelShare(static_cast< unsigned int >(channel->iId), options);
+	}
+}
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+bool MainWindow::handleModernScreenShareDialogAction(const QString &actionID, const QVariantMap &payload) {
+	if (!m_modernDialogController) {
+		return false;
+	}
+
+	if (actionID == QLatin1String("cancel") || actionID == QLatin1String("close")) {
+		publishModernDialogState(m_modernDialogController->close(QStringLiteral("screenShare")));
+		return true;
+	}
+
+	if (actionID != QLatin1String("screenShare.start")) {
+		return false;
+	}
+
+	const QString sourceID = payload.value(QStringLiteral("sourceId")).toString().trimmed();
+	Channel *channel       = nullptr;
+	if (payload.contains(QStringLiteral("channelId"))) {
+		bool ok       = false;
+		const int cid = payload.value(QStringLiteral("channelId")).toInt(&ok);
+		if (ok && cid >= 0) {
+			channel = Channel::get(static_cast< unsigned int >(cid));
+		}
+	}
+
+	publishModernDialogState(m_modernDialogController->close(QStringLiteral("screenShare")));
+
+	if (sourceID.isEmpty() || !channel || !m_screenShareManager) {
+		return true;
+	}
+
+	ScreenShareStartOptions options;
+	options.captureSourceID  = sourceID;
+	const QStringList resolutionParts =
+		payload.value(QStringLiteral("resolution")).toString().split(QLatin1Char('x'), Qt::SkipEmptyParts);
+	if (resolutionParts.size() == 2) {
+		options.requestedWidth  = resolutionParts.at(0).toUInt();
+		options.requestedHeight = resolutionParts.at(1).toUInt();
+	}
+	options.requestedFps   = static_cast< unsigned int >(qMax(0, payload.value(QStringLiteral("frameRate")).toInt()));
+	options.qualityProfile = QStringLiteral("auto");
+	options.audioSourceID  = payload.value(QStringLiteral("audio")).toString().trimmed();
+	options.captureAudio   = !options.audioSourceID.isEmpty();
+
+	m_screenShareManager->requestStartChannelShare(static_cast< unsigned int >(channel->iId), options);
+	publishModernShellRoomStatePatch();
+	return true;
+}
+#endif
+
 bool MainWindow::openScreenShareWindowOrStatus(const QString &streamID) {
 	if (streamID.isEmpty() || !m_screenShareManager) {
 		return false;
 	}
+
+	// In the modern shell, surface screen-share problems as a themed toast instead of a
+	// native QMessageBox popup; the classic layout keeps the message box.
+	auto notifyScreenShareIssue = [this](const QString &message) {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+		if (usesModernShell()) {
+			publishModernToast(QStringLiteral("error"), tr("Screen share"), message);
+			return;
+		}
+#endif
+		QMessageBox::warning(this, tr("Screen share"), message);
+	};
 
 	const ScreenShareSession session = m_screenShareManager->sessions().value(streamID);
 	const bool selfPublishing =
@@ -38241,6 +38665,12 @@ bool MainWindow::openScreenShareWindowOrStatus(const QString &streamID) {
 			(session.width > 0 && session.height > 0 && session.fps > 0)
 				? tr("%1x%2 @ %3 FPS").arg(session.width).arg(session.height).arg(session.fps)
 				: tr("auto");
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+		if (usesModernShell()) {
+			openModernScreenShareStatusDialog(streamID, sourceLabel, qualityLabel, audioLabel);
+			return true;
+		}
+#endif
 		box.setInformativeText(tr("Source: %1\nQuality: %2\nAudio: %3").arg(sourceLabel, qualityLabel, audioLabel));
 		QPushButton *stopButton = box.addButton(tr("Stop sharing"), QMessageBox::DestructiveRole);
 		box.addButton(QMessageBox::Ok);
@@ -38255,8 +38685,7 @@ bool MainWindow::openScreenShareWindowOrStatus(const QString &streamID) {
 	bool startedViewing = false;
 	if (!m_screenShareManager->isViewingSession(streamID)) {
 		if (!m_screenShareManager->canViewSession(streamID)) {
-			QMessageBox::warning(this, tr("Screen share"),
-								 tr("The screen-share window could not be opened right now."));
+			notifyScreenShareIssue(tr("The screen-share window could not be opened right now."));
 			return false;
 		}
 
@@ -38292,11 +38721,9 @@ bool MainWindow::openScreenShareWindowOrStatus(const QString &streamID) {
 				return true;
 			}
 
-			QMessageBox::warning(this, tr("Screen share"),
-								 tr("The screen-share viewer stopped before a video window was available."));
+			notifyScreenShareIssue(tr("The screen-share viewer stopped before a video window was available."));
 		} else {
-			QMessageBox::warning(this, tr("Screen share"),
-								 tr("The screen-share window could not be opened right now."));
+			notifyScreenShareIssue(tr("The screen-share window could not be opened right now."));
 		}
 	}
 	return opened;
@@ -38308,12 +38735,9 @@ void MainWindow::startChannelScreenShare() {
 		return;
 	}
 
-	ScreenShareStartOptions options;
-	if (!chooseScreenShareStartOptions(c, &options)) {
-		return;
-	}
-
-	m_screenShareManager->requestStartChannelShare(static_cast< unsigned int >(c->iId), options);
+	// Modern shell opens the themed picker asynchronously; the classic layout keeps the
+	// synchronous Qt dialog (openModernScreenShareDialog falls back to it when needed).
+	openModernScreenShareDialog(c);
 }
 
 void MainWindow::stopChannelScreenShare() {

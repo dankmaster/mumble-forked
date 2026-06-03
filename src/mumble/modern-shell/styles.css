@@ -8896,6 +8896,226 @@ body.context-menu-host.submenu-flyout-left .context-menu-submenu-panel {
 	max-height: min(760px, calc(100vh - 36px));
 }
 
+.modern-dialog.is-screenShare {
+	width: min(760px, calc(100vw - 36px));
+	max-height: min(640px, calc(100vh - 36px));
+	border-radius: 14px;
+}
+
+.screenshare-dialog {
+	display: grid;
+	grid-template-columns: minmax(0, 1.6fr) minmax(220px, 1fr);
+	gap: 16px;
+	min-height: 0;
+}
+
+.screenshare-panel {
+	background: var(--shell-panel-soft);
+	border: 1px solid var(--surface-border-subtle);
+	border-radius: var(--radius-inner, 12px);
+	padding: 12px;
+	min-height: 0;
+}
+
+.screenshare-video {
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+}
+
+.screenshare-panel-title {
+	margin: 0 0 10px;
+	font-size: 12px;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--text-faint);
+}
+
+.screenshare-source-list {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	overflow-y: auto;
+	min-height: 0;
+}
+
+.screenshare-source-section {
+	padding: 8px 4px 4px;
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--text-faint);
+}
+
+.screenshare-source-section:first-child {
+	padding-top: 0;
+}
+
+.screenshare-source-empty {
+	padding: 8px;
+	font-size: 12px;
+	color: var(--text-muted);
+}
+
+.screenshare-source {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	text-align: left;
+	padding: 7px;
+	border: 1px solid transparent;
+	border-radius: 10px;
+	background: transparent;
+	color: var(--text-main);
+	cursor: pointer;
+	transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.screenshare-source:hover {
+	background: var(--control-hover-bg);
+}
+
+.screenshare-source.is-selected {
+	background: var(--accent-soft);
+	border-color: var(--accent-border);
+	color: var(--text-strong);
+}
+
+.screenshare-source-thumb {
+	flex: 0 0 auto;
+	width: 56px;
+	height: 36px;
+	border-radius: 7px;
+	overflow: hidden;
+	display: grid;
+	place-items: center;
+	background: var(--shell-rail, rgba(0, 0, 0, 0.2));
+	border: 1px solid var(--surface-border-subtle);
+}
+
+.screenshare-source-thumb img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.screenshare-source-thumb.is-placeholder svg {
+	width: 18px;
+	height: 18px;
+	fill: none;
+	stroke: var(--text-faint);
+	stroke-width: 1.6;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.screenshare-source-copy {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.screenshare-source-title {
+	font-size: 13px;
+	font-weight: 600;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.screenshare-source-detail {
+	font-size: 11px;
+	color: var(--text-muted);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.screenshare-side {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	min-height: 0;
+}
+
+.screenshare-field {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.screenshare-field + .screenshare-field {
+	margin-top: 10px;
+}
+
+.screenshare-field-label {
+	font-size: 12px;
+	color: var(--text-muted);
+}
+
+.screenshare-audio-note {
+	margin: 10px 0 0;
+	font-size: 11px;
+	line-height: 1.4;
+	color: var(--text-faint);
+}
+
+.modern-dialog.is-imageViewer {
+	width: min(940px, calc(100vw - 36px));
+	max-height: min(720px, calc(100vh - 36px));
+	border-radius: 14px;
+}
+
+.image-viewer {
+	position: relative;
+	display: grid;
+	place-items: center;
+	width: 100%;
+	height: 100%;
+	min-height: 0;
+	overflow: hidden;
+	border-radius: var(--radius-inner, 12px);
+	background: var(--window-backdrop-bg, rgba(0, 0, 0, 0.35));
+	cursor: grab;
+	touch-action: none;
+}
+
+.image-viewer.is-grabbing {
+	cursor: grabbing;
+}
+
+.image-viewer-img {
+	max-width: 100%;
+	max-height: 100%;
+	user-select: none;
+	-webkit-user-drag: none;
+	transform-origin: center center;
+	will-change: transform;
+}
+
+.modern-tooltip {
+	position: fixed;
+	z-index: 9999;
+	max-width: 280px;
+	padding: 6px 9px;
+	border-radius: 8px;
+	background: var(--popup-bg);
+	color: var(--text-strong);
+	border: 1px solid var(--surface-border);
+	box-shadow: var(--shadow-pop);
+	font-size: 12px;
+	line-height: 1.35;
+	white-space: normal;
+	pointer-events: none;
+}
+
+.modern-tooltip.hidden {
+	display: none;
+}
+
 .modern-dialog.is-update,
 .modern-dialog.dialog-id-feedback,
 .modern-dialog.dialog-id-feedbackResult {

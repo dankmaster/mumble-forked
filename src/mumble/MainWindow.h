@@ -492,6 +492,11 @@ public:
 	QImage imageFromLogBrowser(const LogTextBrowser *browser, const QTextCursor &cursor) const;
 	void openImageDialog(const QImage &image);
 	void openImageDialog(LogTextBrowser *browser, const QTextCursor &cursor);
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	void openModernImageViewerDialog(const QImage &image);
+	void openModernScreenShareStatusDialog(const QString &streamID, const QString &sourceLabel,
+										   const QString &qualityLabel, const QString &audioLabel);
+#endif
 	QString registerPersistentChatInlineDataImageSource(const QString &source);
 	QUrl persistentChatInlineDataImageOpenUrl(const QString &token) const;
 	QUrl persistentChatInlineDataImageResourceUrl(const QString &token) const;
@@ -1156,6 +1161,13 @@ public slots:
 	void stopWatchingChannelScreenShare();
 	void openChannelScreenShareWindow();
 	bool chooseScreenShareStartOptions(Channel *channel, ScreenShareStartOptions *options);
+	void openModernScreenShareDialog(Channel *channel);
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	QVariantMap buildModernScreenShareState(Channel *channel);
+	QVariantMap buildModernScreenShareDialogDto(Channel *channel);
+	bool handleModernScreenShareDialogAction(const QString &actionID, const QVariantMap &payload);
+	QString screenShareSourceThumbnail(const QString &sourceId);
+#endif
 	bool openScreenShareWindowOrStatus(const QString &streamID);
 	void on_qaAudioReset_triggered();
 	void on_qaAudioMute_triggered();
