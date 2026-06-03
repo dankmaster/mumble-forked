@@ -6,18 +6,136 @@
 #include "UserInformation.h"
 
 #include "Audio.h"
+#include "ClientUser.h"
 #include "HostAddress.h"
+#include "MainWindow.h"
 #include "ProtoUtils.h"
 #include "QtUtils.h"
 #include "ServerHandler.h"
 #include "ViewCert.h"
 #include "Global.h"
 
+#include <QtCore/QBuffer>
+#include <QtCore/QIODevice>
+#include <QtGui/QImageReader>
+#include <QtGui/QPainter>
+#include <QtGui/QPixmap>
+#include <QtWidgets/QGroupBox>
+#include <QtWidgets/QHBoxLayout>
+#include <QtWidgets/QLabel>
+#include <QtWidgets/QVBoxLayout>
 
-UserInformation::UserInformation(const MumbleProto::UserStats &msg, QWidget *p) : QDialog(p) {
+namespace {
+	constexpr int UserInformationAvatarSize = 96;
+
+	QString userInformationInitials(const QString &name) {
+		QStringList parts = name.simplified().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+	if (parts.isEmpty()) {
+		return QStringLiteral("?");
+	}
+	if (parts.size() == 1) {
+		return parts.first().left(1).toUpper();
+	}
+	return (parts.first().left(1) + parts.at(1).left(1)).toUpper();
+	}
+
+	int userInformationHue(const QString &name) {
+		uint hash = 0;
+		for (const QChar character : name) {
+			hash = (hash * 33U) + character.unicode();
+		}
+		return static_cast< int >(hash % 360U);
+	}
+
+	QPixmap userInformationFallbackAvatarPixmap(const QString &name, const QSize &size) {
+		const QSize effectiveSize = size.isValid() ? size : QSize(UserInformationAvatarSize, UserInformationAvatarSize);
+		QPixmap pixmap(effectiveSize);
+		pixmap.fill(Qt::transparent);
+
+		const QString displayName = name.trimmed().isEmpty() ? QStringLiteral("?") : name.trimmed();
+		const int hue             = userInformationHue(displayName);
+		const QColor background   = QColor::fromHsl(hue, 92, 74);
+		const QColor foreground   = QColor::fromHsl(hue, 96, 222);
+
+		QPainter painter(&pixmap);
+		painter.setRenderHint(QPainter::Antialiasing, true);
+		const QRectF avatarRect(1.0, 1.0, effectiveSize.width() - 2.0, effectiveSize.height() - 2.0);
+		painter.setPen(QPen(QColor(255, 255, 255, 80), 1.0));
+		painter.setBrush(background);
+		painter.drawEllipse(avatarRect);
+
+		QFont avatarFont;
+		avatarFont.setBold(true);
+		avatarFont.setPixelSize(qMax(18, effectiveSize.height() / 3));
+		painter.setFont(avatarFont);
+		painter.setPen(foreground);
+		painter.drawText(avatarRect, Qt::AlignCenter, userInformationInitials(displayName));
+		return pixmap;
+	}
+
+	QPixmap userInformationAvatarPixmap(ClientUser *user, const QSize &size) {
+		if (!user || user->qbaTexture.isEmpty()) {
+			return QPixmap();
+		}
+
+		QBuffer buffer(&user->qbaTexture);
+		if (!buffer.open(QIODevice::ReadOnly)) {
+			return QPixmap();
+		}
+
+		QImageReader reader(&buffer, user->qbaTextureFormat);
+		QImage image = reader.read();
+		if (image.isNull()) {
+			return QPixmap();
+		}
+
+		image = image.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+		QPixmap pixmap(size);
+		pixmap.fill(Qt::transparent);
+
+		QPainter painter(&pixmap);
+		painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+		const QPoint topLeft((size.width() - image.width()) / 2, (size.height() - image.height()) / 2);
+		painter.drawImage(topLeft, image);
+		return pixmap;
+	}
+}
+
+UserInformation::UserInformation(const MumbleProto::UserStats &msg, QWidget *p)
+	: QDialog(p), qlAvatar(nullptr), qlAvatarName(nullptr), qlAvatarSession(nullptr) {
 	setupUi(this);
 
 	uiSession = msg.session();
+
+	QGroupBox *profileGroup       = new QGroupBox(tr("Profile"), this);
+	QHBoxLayout *profileLayout    = new QHBoxLayout(profileGroup);
+	QVBoxLayout *profileTextLayout = new QVBoxLayout();
+	qlAvatar                      = new QLabel(profileGroup);
+	qlAvatar->setAccessibleName(tr("Avatar"));
+	qlAvatar->setAlignment(Qt::AlignCenter);
+	qlAvatar->setFixedSize(UserInformationAvatarSize, UserInformationAvatarSize);
+
+	qlAvatarName = new QLabel(profileGroup);
+	qlAvatarName->setTextInteractionFlags(Qt::TextSelectableByMouse);
+	QFont avatarNameFont = qlAvatarName->font();
+	avatarNameFont.setBold(true);
+	if (avatarNameFont.pointSize() > 0) {
+		avatarNameFont.setPointSize(avatarNameFont.pointSize() + 2);
+	} else {
+		avatarNameFont.setPixelSize(qMax(12, avatarNameFont.pixelSize() + 2));
+	}
+	qlAvatarName->setFont(avatarNameFont);
+
+	qlAvatarSession = new QLabel(profileGroup);
+	qlAvatarSession->setTextInteractionFlags(Qt::TextSelectableByMouse);
+
+	profileTextLayout->addStretch(1);
+	profileTextLayout->addWidget(qlAvatarName);
+	profileTextLayout->addWidget(qlAvatarSession);
+	profileTextLayout->addStretch(1);
+	profileLayout->addWidget(qlAvatar, 0, Qt::AlignTop);
+	profileLayout->addLayout(profileTextLayout, 1);
+	verticalLayout->insertWidget(0, profileGroup);
 
 	qtTimer = new QTimer(this);
 	connect(qtTimer, SIGNAL(timeout()), this, SLOT(tick()));
@@ -93,8 +211,14 @@ void UserInformation::update(const MumbleProto::UserStats &msg) {
 	bool showcon = false;
 
 	ClientUser *cu = ClientUser::get(uiSession);
-	if (cu)
+	if (cu) {
 		setWindowTitle(cu->qsName);
+		qlAvatarName->setText(cu->qsName);
+	} else {
+		qlAvatarName->setText(tr("Session %1").arg(uiSession));
+	}
+	qlAvatarSession->setText(tr("Session %1").arg(uiSession));
+	refreshAvatar();
 
 	if (msg.certificates_size() > 0) {
 		showcon = true;
@@ -265,4 +389,20 @@ void UserInformation::update(const MumbleProto::UserStats &msg) {
 	qgbPing->updateAccessibleText();
 	qgbUDP->updateAccessibleText();
 	qgbBandwidth->updateAccessibleText();
+}
+
+void UserInformation::refreshAvatar() {
+	ClientUser *cu = ClientUser::get(uiSession);
+	if (cu && Global::get().mw) {
+		Global::get().mw->ensureUserTextureAvailable(cu, MainWindow::UserTextureRequestReason::UserInformation);
+	}
+
+	const QSize avatarSize(UserInformationAvatarSize, UserInformationAvatarSize);
+	QPixmap avatar = userInformationAvatarPixmap(cu, avatarSize);
+	if (avatar.isNull()) {
+		avatar = userInformationFallbackAvatarPixmap(cu ? cu->qsName : tr("Session %1").arg(uiSession), avatarSize);
+	}
+
+	qlAvatar->setPixmap(avatar);
+	qlAvatar->setToolTip(cu ? tr("%1's avatar").arg(cu->qsName) : tr("User avatar"));
 }

@@ -14,6 +14,7 @@
 #include <QtCore/QObject>
 #include <QtCore/QSet>
 #include <QtCore/QString>
+#include <QtCore/QTimer>
 
 struct ScreenShareSession {
 	QString streamID;
@@ -111,6 +112,8 @@ private:
 	void startLocalViewSession(const ScreenShareSession &session);
 	void stopLocalPublishSession(const QString &streamID);
 	void stopLocalViewSession(const QString &streamID);
+	void updateExternalRuntimeWatchdog();
+	void checkExternalRuntimeLiveness();
 	void setExternalViewAudioMuted(const QString &streamID, bool muted);
 	void setExternalViewPaused(const QString &streamID, bool paused);
 	void logRemoteViewAvailability(const ScreenShareSession &session);
@@ -122,10 +125,13 @@ private:
 	QSet< QString > m_activeViewSessions;
 	QHash< QString, qint64 > m_externalPublishProcessIDs;
 	QHash< QString, qint64 > m_externalViewProcessIDs;
+	QHash< QString, int > m_externalPublishRestartAttempts;
+	QHash< QString, int > m_externalViewRestartAttempts;
 	QHash< QString, ExternalScreenShareWindowHost * > m_externalViewWindows;
 	QSet< QString > m_externalViewAudioMuted;
 	QSet< QString > m_pausedExternalViewSessions;
 	QSet< QString > m_announcedViewableSessions;
+	QTimer m_externalRuntimeWatchdogTimer;
 	mutable QString m_lastLoggedAvailabilityContext;
 	mutable QString m_lastLoggedAvailabilityReason;
 };

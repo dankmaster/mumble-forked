@@ -21,6 +21,8 @@
 	let bridgeLoadPromise = null;
 	let lastRenderedMessageCount = 0;
 	let lastRenderedTailKey = "";
+	let lastRenderedTimelineIdentitySignature = "";
+	let lastRenderedTimelineSignature = "";
 	let lastScopeToken = "";
 	let openMenuId = null;
 	let openMenuPinned = false;
@@ -854,7 +856,7 @@
 			return false;
 		}
 
-		const action = target.closest(".room-action-button, .room-share-action");
+		const action = target.closest(".room-action-button, .room-share-action-button");
 		return !!action && row.contains(action);
 	}
 
@@ -2939,10 +2941,10 @@
 				primaryActionId: "applyAvatar",
 				sections: [walkthroughSection("Avatar", [
 					walkthroughReadonly("User", member ? "Kira" : "You"),
-					walkthroughField("avatar.path", "Image file", "pathPicker", "", {
+					walkthroughField("avatar.path", "Image file or URL", "pathPicker", "", {
 						browseActionId: "browseAvatar",
 						browseLabel: "Browse",
-						hint: "Choose a PNG or JPEG image to upload as a server avatar."
+						hint: "Choose a PNG or JPEG image, or paste a direct http(s) image URL."
 					})
 				])],
 				actions: [cancel, walkthroughDialogAction("applyAvatar", "Apply avatar", { tone: "accent" })]
@@ -3091,10 +3093,10 @@
 				primaryActionId: "applyAvatar",
 				sections: [walkthroughSection("Avatar", [
 					walkthroughReadonly("User", "You"),
-					walkthroughField("avatar.path", "Image file", "pathPicker", "", {
+					walkthroughField("avatar.path", "Image file or URL", "pathPicker", "", {
 						browseActionId: "browseAvatar",
 						browseLabel: "Browse",
-						hint: "Choose a PNG or JPEG image to upload as your server avatar."
+						hint: "Choose a PNG or JPEG image, or paste a direct http(s) image URL."
 					})
 				])],
 				actions: [cancel, walkthroughDialogAction("applyAvatar", "Apply avatar", { tone: "accent" })]
@@ -3831,6 +3833,8 @@
 		}
 		cancelActiveMessageChunkRender("scope-loading");
 		pendingMessageUpdatePatches = [];
+		lastRenderedTimelineIdentitySignature = "";
+		lastRenderedTimelineSignature = "";
 		if (messageListHasRenderedTimeline()) {
 			refs.messageList.classList.remove("is-chat-loading");
 			refs.messageList.classList.add("is-chat-transitioning");
@@ -5703,21 +5707,6 @@
 		}
 	}
 
-	function compactScreenShareActionLabel(label) {
-		switch (String(label || "").toLowerCase()) {
-			case "share screen":
-				return "Share";
-			case "watch share":
-				return "Watch";
-			case "open share window":
-				return "Open";
-			case "manage share":
-				return "Manage";
-			default:
-				return label || "Share";
-		}
-	}
-
 	function renderScreenShareButtonContent(label, status) {
 		refs.screenShareButton.innerHTML = "<svg class=\"screen-share-button-icon\" viewBox=\"0 0 24 24\" aria-hidden=\"true\" width=\"15\" height=\"15\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"3\" y=\"4\" width=\"18\" height=\"12\" rx=\"2\"></rect><path d=\"M8 20h8\"></path><path d=\"M12 16v4\"></path></svg><span class=\"screen-share-button-label\"></span><span class=\"screen-share-button-status\"></span>";
 		const labelEl = refs.screenShareButton.querySelector(".screen-share-button-label");
@@ -6348,11 +6337,13 @@
 
 	function directMessageTimelineMessages(conversation) {
 		const peerSession = directMessageSessionValue(conversation);
+		const app = getSnapshot().app || {};
 		return (conversation && Array.isArray(conversation.messages) ? conversation.messages : []).map(function(entry, index) {
 			const messageId = entry.messageId || entry.localId || entry.id || (peerSession + "-" + index);
 			const own = !!entry.own || String(entry.direction || "").toLowerCase() === "outgoing";
 			const bodyHtml = String(entry.messageHtml || "").trim()
 				|| escapedMultilineText(entry.plainText || "");
+			const avatarUrl = entry.avatarUrl || (own ? (app.selfAvatarUrl || "") : (conversation.avatarUrl || ""));
 			return {
 				messageId: "dm-" + String(messageId),
 				threadId: "dm-" + String(peerSession || "conversation"),
@@ -6362,6 +6353,7 @@
 				timeLabel: formatDirectMessageTime(entry.createdAtMs),
 				bodyText: entry.plainText || "",
 				bodyHtml: bodyHtml,
+				avatarUrl: avatarUrl,
 				own: own,
 				system: false,
 				canReply: false,
@@ -6961,7 +6953,10 @@
 
 		const avatar = document.createElement("span");
 		avatar.className = "direct-message-message-avatar avatar";
-		styleAvatar(avatar, entry.actorName || (own ? "You" : conversation.label), own, own ? "" : conversation.avatarUrl || "");
+		const app = getSnapshot().app || {};
+		const avatarUrl = entry.avatarUrl || (own ? (app.selfAvatarUrl || "") : (conversation.avatarUrl || ""));
+		styleAvatar(avatar, entry.actorName || (own ? "You" : conversation.label), own,
+			avatarUrl);
 
 		const body = document.createElement("div");
 		body.className = "direct-message-message-body";
@@ -8229,6 +8224,7 @@
 	function presenceRowTitle(person) {
 		const parts = [];
 		const detailLabels = [];
+		const localVolume = participantLocalVolumeBadge(person);
 
 		if (person && person.subtitle) {
 			parts.push(person.subtitle);
@@ -8248,11 +8244,38 @@
 			}
 		});
 
+		if (localVolume && detailLabels.indexOf(localVolume.detailLabel) === -1) {
+			detailLabels.push(localVolume.detailLabel);
+		}
+
 		if (detailLabels.length) {
 			parts.push(detailLabels.join(", "));
 		}
 
 		return parts.join(" | ");
+	}
+
+	function participantLocalVolumeBadge(person) {
+		const volume = (person && person.localVolume && typeof person.localVolume === "object")
+			? person.localVolume
+			: {};
+		const dbValue = Object.prototype.hasOwnProperty.call(volume, "db")
+			? Number(volume.db)
+			: Number(person && person.localVolumeDb);
+		if (!Number.isFinite(dbValue) || Math.round(dbValue) === 0 || volume.visible === false) {
+			return null;
+		}
+
+		const roundedDb = Math.round(dbValue);
+		const fallbackCompact = (roundedDb > 0 ? "+" : "") + String(roundedDb);
+		const compactLabel = String(volume.compactLabel || fallbackCompact);
+		const displayCompact = /\bdb$/i.test(compactLabel.trim()) ? compactLabel : compactLabel + " dB";
+		const label = String(volume.label || displayCompact);
+		return {
+			label: label,
+			compactLabel: displayCompact,
+			detailLabel: "Local volume adjustment: " + label
+		};
 	}
 
 	function renderVoicePresenceStack(people) {
@@ -8445,6 +8468,7 @@
 		(people || []).forEach(function(person) {
 			const entry = document.createElement("div");
 			entry.className = "presence-entry";
+			const localVolume = participantLocalVolumeBadge(person);
 
 			const row = document.createElement("button");
 			row.type = "button";
@@ -8452,6 +8476,7 @@
 				+ (person.isSelf ? " is-self" : "")
 				+ (person.entryKind === "listener" ? " is-listener" : "")
 				+ talkStateClass(person);
+			row.classList.toggle("has-local-volume", !!localVolume);
 			row.dataset.session = person.session ? String(person.session) : "";
 			row.dataset.participantKey = participantStateKey(person);
 			row.dataset.entryKind = String(person.entryKind || "user");
@@ -8478,9 +8503,16 @@
 
 			const label = document.createElement("span");
 			label.className = "presence-copy";
-			label.innerHTML = "<span class=\"presence-heading\"><span class=\"presence-name\"></span><span class=\"presence-statuses hidden\"></span></span><span class=\"presence-subtitle\"></span>";
+			label.innerHTML = "<span class=\"presence-heading\"><span class=\"presence-name\"></span><span class=\"presence-local-volume hidden\"></span><span class=\"presence-statuses hidden\"></span></span><span class=\"presence-subtitle\"></span>";
 			label.querySelector(".presence-name").classList.add("member-name");
 			label.querySelector(".presence-name").textContent = person.label || "Unknown";
+			const volumeBadge = label.querySelector(".presence-local-volume");
+			if (localVolume) {
+				volumeBadge.textContent = localVolume.compactLabel;
+				volumeBadge.title = localVolume.detailLabel;
+				volumeBadge.setAttribute("aria-label", localVolume.detailLabel);
+				volumeBadge.classList.remove("hidden");
+			}
 			renderPresenceStatuses(label.querySelector(".presence-statuses"), person.statuses || []);
 			label.querySelector(".presence-subtitle").textContent = person.subtitle || "";
 			label.querySelector(".presence-subtitle").classList.toggle("hidden", !(person.subtitle || ""));
@@ -8670,11 +8702,11 @@
 			meta.appendChild(shareBadge);
 		}
 
-		if (joinable) {
+		if (joinable && !room.joined) {
 			const joinButton = document.createElement("button");
 			joinButton.type = "button";
 			joinButton.className = "mini-action room-join room-join-action" + (joining ? " is-loading" : "");
-			joinButton.textContent = room.joined ? "Live" : (joining ? "Joining" : "Join");
+			joinButton.textContent = joining ? "Joining" : "Join";
 			joinButton.disabled = !canJoinRoom;
 			joinButton.addEventListener("pointerdown", function(event) {
 				if (event.button !== undefined && event.button !== 0) {
@@ -8700,11 +8732,12 @@
 		if (joinable && room.joined && screenShareVisible(screenShare) && screenShare.primaryActionId) {
 			const shareActionButton = document.createElement("button");
 			shareActionButton.type = "button";
-			shareActionButton.className = "mini-action room-share-action"
+			shareActionButton.className = "room-action-button room-share-action-button"
 				+ (screenShare.primaryTone ? " is-" + screenShare.primaryTone : "");
-			shareActionButton.textContent = compactScreenShareActionLabel(screenShare.primaryLabel);
 			shareActionButton.disabled = screenShare.primaryEnabled === false;
 			shareActionButton.title = screenShare.primaryHint || screenShare.primaryLabel || "Screen share";
+			shareActionButton.setAttribute("aria-label", screenShare.primaryLabel || "Screen share");
+			shareActionButton.innerHTML = themedActionPanelIconSvg("screen");
 			shareActionButton.addEventListener("pointerdown", function(event) {
 				if ((event.button !== undefined && event.button !== 0) || event.isPrimary === false) {
 					return;
@@ -16291,6 +16324,31 @@
 		return value;
 	}
 
+	function timelineRenderSignature(messages, timelineMode, emptyCopy) {
+		const normalizedMessages = (messages || []).map(function(message) {
+			const state = {};
+			Object.keys(message || {}).sort().forEach(function(key) {
+				if (key !== "renderIndex") {
+					state[key] = stableRenderValue(message[key]);
+				}
+			});
+			return state;
+		});
+		return JSON.stringify({
+			mode: timelineMode || "normal",
+			emptyCopy: String(emptyCopy || ""),
+			messages: normalizedMessages
+		});
+	}
+
+	function timelineIdentitySignature(messages, timelineMode, emptyCopy) {
+		return JSON.stringify({
+			mode: timelineMode || "normal",
+			emptyCopy: String(emptyCopy || ""),
+			keys: (messages || []).map(messageKey)
+		});
+	}
+
 	function messageNonFooterRenderSignature(message) {
 		const omittedKeys = {
 			canDelete: true,
@@ -16830,6 +16888,8 @@
 			beginScopeLoading(scopeToken, { force: true });
 			lastRenderedMessageCount = 0;
 			lastRenderedTailKey = "";
+			lastRenderedTimelineIdentitySignature = "";
+			lastRenderedTimelineSignature = "";
 			return;
 		}
 		if (pendingScopeLoadingBlocksRender(scopeToken, renderOptions)) {
@@ -16866,6 +16926,8 @@
 		if (!directConversation
 			&& (scope.serverLogRevision || Object.prototype.hasOwnProperty.call(scope, "serverLogHtml"))) {
 			cancelActiveMessageChunkRender("server-log");
+			lastRenderedTimelineIdentitySignature = "";
+			lastRenderedTimelineSignature = "";
 			const serverLogRevision = String(scope.serverLogRevision || "");
 			if (Object.prototype.hasOwnProperty.call(scope, "serverLogHtml")) {
 				cachedServerLogElement = document.createElement("div");
@@ -16909,12 +16971,44 @@
 		const shouldAtomicReplaceTimeline = scopeChanged
 			|| (lastRenderedMessageCount === 0 && messages.length >= messageRenderLoadingThreshold)
 			|| (timelineMode === "linkDense" && messages.length >= messageRenderLoadingThreshold);
+		const nextTimelineIdentitySignature = timelineIdentitySignature(messages, timelineMode, emptyCopy);
+		const nextTimelineSignature = timelineRenderSignature(messages, timelineMode, emptyCopy);
 		const finishRender = function() {
 			lastRenderedMessageCount = messages.length;
 			lastRenderedTailKey = latestTailKey;
+			lastRenderedTimelineIdentitySignature = nextTimelineIdentitySignature;
+			lastRenderedTimelineSignature = nextTimelineSignature;
 			lastScopeToken = scopeToken;
 			syncMessageSearchState();
 		};
+		const contentUnchanged = lastRenderedTimelineSignature
+			&& nextTimelineSignature === lastRenderedTimelineSignature;
+		const snapshotIdentityUnchanged = !!renderOptions.snapshotRender
+			&& lastRenderedTimelineIdentitySignature
+			&& nextTimelineIdentitySignature === lastRenderedTimelineIdentitySignature;
+
+		if (!renderOptions.forceSync && !scopeChanged && !activeMessageChunkRender
+				&& !pendingMessageUpdatePatches.length && (contentUnchanged || snapshotIdentityUnchanged)
+				&& messageListHasRenderedTimeline()
+				&& !refs.messageList.classList.contains("is-chat-loading")) {
+			lastRenderedMessageCount = messages.length;
+			lastRenderedTailKey = latestTailKey;
+			lastRenderedTimelineIdentitySignature = nextTimelineIdentitySignature;
+			if (contentUnchanged) {
+				lastRenderedTimelineSignature = nextTimelineSignature;
+			}
+			lastScopeToken = scopeToken;
+			syncMessageSearchState();
+			(messages || []).forEach(function(message) {
+				if (message && message.previewStub && !message.preview) {
+					queuePreviewHydration(message.messageId);
+				}
+			});
+			schedulePreviewHydrationFlush();
+			requestAnimationFrame(syncScrollState);
+			traceModernUi("messages unchanged", monotonicNow());
+			return;
+		}
 
 		if (renderOptions.forceSync) {
 			renderTimeline(messages, emptyCopy, freshTailCount);
@@ -21286,6 +21380,43 @@
 		container.appendChild(wrap);
 	}
 
+	function appendModernDialogProfile(container, field) {
+		const value = field && field.value && typeof field.value === "object" && !Array.isArray(field.value)
+			? field.value
+			: {};
+		const name = String(value.name || value.label || field.label || "");
+		const subtitle = String(value.subtitle || "");
+		const fieldClass = field && field.id
+			? " field-id-" + String(field.id).replace(/[^a-z0-9_-]/gi, "-")
+			: "";
+		const presentationClass = field && field.presentation
+			? " is-" + String(field.presentation).replace(/[^a-z0-9_-]/gi, "-")
+			: "";
+		const row = document.createElement("div");
+		row.className = "modern-dialog-profile" + fieldClass + presentationClass;
+
+		const avatar = document.createElement("span");
+		avatar.className = "modern-dialog-profile-avatar avatar";
+		styleAvatar(avatar, name || "User", !!value.isSelf, String(value.avatarUrl || ""));
+		avatar.setAttribute("aria-label", name ? name + " avatar" : "User avatar");
+		row.appendChild(avatar);
+
+		const copy = document.createElement("span");
+		copy.className = "modern-dialog-profile-copy";
+		const title = document.createElement("span");
+		title.className = "modern-dialog-profile-name";
+		title.textContent = name || "User";
+		copy.appendChild(title);
+		if (subtitle) {
+			const meta = document.createElement("span");
+			meta.className = "modern-dialog-profile-meta";
+			meta.textContent = subtitle;
+			copy.appendChild(meta);
+		}
+		row.appendChild(copy);
+		container.appendChild(row);
+	}
+
 	function appendModernDialogField(container, field, errors) {
 		const type = String(field && field.type || "text");
 		if (type === "hidden") {
@@ -21308,6 +21439,10 @@
 		}
 		if (type === "shortcutEditor") {
 			appendModernShortcutEditor(container, field, errors);
+			return;
+		}
+		if (type === "profile") {
+			appendModernDialogProfile(container, field);
 			return;
 		}
 
@@ -24249,7 +24384,7 @@
 		renderScreenShareHeader(scope, scope.screenShare || null);
 		renderScreenShareCard(scope, scope.screenShare || null);
 		renderNote(app, scope, snapshot.messages || []);
-		renderMessages(snapshot, { resolvePendingScopeLoading: true });
+		renderMessages(snapshot, { resolvePendingScopeLoading: true, snapshotRender: true });
 		renderSelfCard(app);
 		syncAmbientState(snapshot);
 		if (appMenuOpen) {
@@ -24329,6 +24464,7 @@
 		if (!incoming.length) {
 			return true;
 		}
+		const scope = snapshot.activeScope || {};
 
 		const previousMessages = Array.isArray(snapshot.messages) ? snapshot.messages.slice() : [];
 		const nextMessages = previousMessages.slice();
@@ -24396,6 +24532,13 @@
 
 		lastRenderedMessageCount = snapshot.messages.length;
 		lastRenderedTailKey = latestTailMessageKey(snapshot.messages);
+		const timelineMode = String(snapshot.timelineMode || scope.timelineMode || "").trim() === "linkDense"
+			? "linkDense"
+			: "normal";
+		lastRenderedTimelineIdentitySignature =
+			timelineIdentitySignature(snapshot.messages, timelineMode, scope.emptyCopy || "");
+		lastRenderedTimelineSignature =
+			timelineRenderSignature(snapshot.messages, timelineMode, scope.emptyCopy || "");
 		lastScopeToken = String((snapshot.activeScope || {}).scopeToken || lastScopeToken);
 		return true;
 	}
@@ -24437,6 +24580,14 @@
 			syncMessageSearchState();
 		}
 		lastRenderedTailKey = latestTailMessageKey(snapshot.messages);
+		const timelineMode = String(snapshot.timelineMode || (snapshot.activeScope || {}).timelineMode || "").trim()
+				=== "linkDense"
+			? "linkDense"
+			: "normal";
+		lastRenderedTimelineIdentitySignature =
+			timelineIdentitySignature(snapshot.messages, timelineMode, (snapshot.activeScope || {}).emptyCopy || "");
+		lastRenderedTimelineSignature =
+			timelineRenderSignature(snapshot.messages, timelineMode, (snapshot.activeScope || {}).emptyCopy || "");
 		return true;
 	}
 

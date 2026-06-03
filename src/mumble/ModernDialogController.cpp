@@ -272,10 +272,10 @@ QVariantMap ModernDialogController::openChangeAvatar(const unsigned int session,
 	QVariantList fields {
 		hiddenItem(QStringLiteral("session"), session),
 		readonlyItem(QObject::tr("User"), displayName),
-		pathPickerItem(QStringLiteral("avatar.path"), QObject::tr("Image file"),
+		pathPickerItem(QStringLiteral("avatar.path"), QObject::tr("Image file or URL"),
 					   fieldValues.value(QStringLiteral("avatar.path")).toString(),
 					   QStringLiteral("browseAvatarImage"), QObject::tr("Browse")),
-		noteItem(QObject::tr("Choose a PNG or JPEG image to upload as your server avatar."))
+		noteItem(QObject::tr("Choose a PNG or JPEG image from this device, or paste a direct http(s) image URL."))
 	};
 
 	QVariantMap dialog;
@@ -287,7 +287,7 @@ QVariantMap ModernDialogController::openChangeAvatar(const unsigned int session,
 	dialog.insert(QStringLiteral("actions"),
 				  QVariantList { dialogActionItem(QStringLiteral("cancel"), QObject::tr("Cancel"), QString(), true),
 								 dialogActionItem(QStringLiteral("confirmChangeAvatar"), QObject::tr("Apply avatar"),
-												  QStringLiteral("accent"), true) });
+												  QStringLiteral("accent"), false) });
 	dialog.insert(QStringLiteral("primaryActionId"), QStringLiteral("confirmChangeAvatar"));
 	dialog.insert(QStringLiteral("width"), 680);
 	dialog.insert(QStringLiteral("height"), 440);

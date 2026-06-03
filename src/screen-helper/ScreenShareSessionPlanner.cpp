@@ -55,6 +55,23 @@ unsigned int limitFromPayload(const QJsonObject &payload, const char *key, const
 	return Mumble::ScreenShare::sanitizeLimit(nonNegativePayloadValue(payload, key), fallback, hardMax);
 }
 
+QString positiveIntegerStringFromPayload(const QJsonObject &payload, const char *key) {
+	const QJsonValue value = payload.value(QLatin1String(key));
+	bool ok               = false;
+	qulonglong number     = 0;
+	if (value.isString()) {
+		number = value.toString().trimmed().toULongLong(&ok);
+	} else if (value.isDouble()) {
+		const double rawNumber = value.toDouble();
+		if (rawNumber > 0) {
+			number = static_cast< qulonglong >(rawNumber);
+			ok     = number > 0;
+		}
+	}
+
+	return ok && number > 0 ? QString::number(number) : QString();
+}
+
 QString codecBackendToken(const QString &backendID, const MumbleProto::ScreenShareCodec codec) {
 	const QString codecToken = Mumble::ScreenShare::codecToConfigToken(codec);
 	if (codecToken.isEmpty()) {
@@ -390,6 +407,7 @@ ScreenShareSessionPlanner::Plan buildPlan(const QJsonObject &payload,
 	const bool captureAudio = payload.value(QStringLiteral("capture_audio")).toBool(false);
 	const QString audioSourceID =
 		captureAudio ? payload.value(QStringLiteral("audio_source_id")).toString().trimmed() : QString();
+	const QString publisherProcessID = positiveIntegerStringFromPayload(payload, "publisher_process_id");
 
 	const bool preferHardware              = payload.value(QStringLiteral("prefer_hardware_encoding")).toBool(true);
 	const QList< EncoderBackend > backends = probeEncoderBackends();
@@ -467,6 +485,9 @@ ScreenShareSessionPlanner::Plan buildPlan(const QJsonObject &payload,
 	planPayload.insert(QStringLiteral("capture_source_id"), captureSourceID);
 	planPayload.insert(QStringLiteral("capture_audio"), captureAudio);
 	planPayload.insert(QStringLiteral("audio_source_id"), audioSourceID);
+	if (!publisherProcessID.isEmpty()) {
+		planPayload.insert(QStringLiteral("publisher_process_id"), publisherProcessID);
+	}
 	planPayload.insert(QStringLiteral("adaptive_degradation_order"), QStringLiteral("fps-then-resolution"));
 	planPayload.insert(QStringLiteral("prefer_hardware_encoding"), preferHardware);
 	planPayload.insert(QStringLiteral("planned_encoder_backend"),

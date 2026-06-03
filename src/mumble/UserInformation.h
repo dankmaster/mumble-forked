@@ -15,6 +15,7 @@ class UserStats;
 }
 
 class QTimer;
+class QLabel;
 
 class UserInformation : public QDialog, Ui::UserInformation {
 private:
@@ -24,6 +25,9 @@ protected:
 	bool bRequested;
 	unsigned int uiSession;
 	QTimer *qtTimer;
+	QLabel *qlAvatar;
+	QLabel *qlAvatarName;
+	QLabel *qlAvatarSession;
 	QList< QSslCertificate > qlCerts;
 	static QString secsToString(unsigned int secs);
 	QFont qfCertificateFont;
@@ -34,6 +38,7 @@ protected slots:
 public:
 	UserInformation(const MumbleProto::UserStats &msg, QWidget *p = nullptr);
 	void update(const MumbleProto::UserStats &msg);
+	void refreshAvatar();
 	unsigned int session() const;
 };
 

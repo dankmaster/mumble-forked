@@ -772,7 +772,7 @@ void TestModernDialogControllers::dialogControllerBuildsChangeAvatar() {
 	QCOMPARE(fields.at(1).toMap().value(QStringLiteral("value")).toString(), QStringLiteral("Demo User"));
 	const QVariantMap pathField = fields.at(2).toMap();
 	QCOMPARE(pathField.value(QStringLiteral("id")).toString(), QStringLiteral("avatar.path"));
-	QCOMPARE(pathField.value(QStringLiteral("label")).toString(), QStringLiteral("Image file"));
+	QCOMPARE(pathField.value(QStringLiteral("label")).toString(), QStringLiteral("Image file or URL"));
 	QCOMPARE(pathField.value(QStringLiteral("type")).toString(), QStringLiteral("pathPicker"));
 	QCOMPARE(pathField.value(QStringLiteral("value")).toString(), QStringLiteral("C:/tmp/avatar.png"));
 	QCOMPARE(pathField.value(QStringLiteral("browseActionId")).toString(), QStringLiteral("browseAvatarImage"));
@@ -785,7 +785,7 @@ void TestModernDialogControllers::dialogControllerBuildsChangeAvatar() {
 	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("id")).toString(),
 			 QStringLiteral("confirmChangeAvatar"));
 	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("tone")).toString(), QStringLiteral("accent"));
-	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("closesDialog")).toBool(), true);
+	QCOMPARE(actions.at(1).toMap().value(QStringLiteral("closesDialog")).toBool(), false);
 
 	controller.updateField(QStringLiteral("changeAvatar:7"), QStringLiteral("avatar.path"),
 						   QStringLiteral("C:/tmp/new-avatar.jpg"));
@@ -798,8 +798,8 @@ void TestModernDialogControllers::dialogControllerBuildsChangeAvatar() {
 	QCOMPARE(result.genericAction->fieldValues.value(QStringLiteral("session")).toUInt(), 7U);
 	QCOMPARE(result.genericAction->fieldValues.value(QStringLiteral("avatar.path")).toString(),
 			 QStringLiteral("C:/tmp/new-avatar.jpg"));
-	QCOMPARE(result.closeDialog, true);
-	QCOMPARE(controller.state().value(QStringLiteral("open")).toBool(), false);
+	QCOMPARE(result.closeDialog, false);
+	QCOMPARE(controller.state().value(QStringLiteral("open")).toBool(), true);
 }
 
 void TestModernDialogControllers::dialogControllerBuildsMigrationNotice() {

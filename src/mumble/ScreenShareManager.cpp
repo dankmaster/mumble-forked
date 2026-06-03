@@ -26,6 +26,9 @@
 #include <QtCore/QStringList>
 
 namespace {
+constexpr int kExternalRuntimeWatchdogIntervalMsec = 3000;
+constexpr int kExternalRuntimeRestartLimit         = 2;
+
 bool envFlagEnabled(const char *name) {
 	const QString value = qEnvironmentVariable(name).trimmed().toLower();
 	return value == QLatin1String("1") || value == QLatin1String("true") || value == QLatin1String("yes")
@@ -225,6 +228,10 @@ ScreenShareManager::ScreenShareManager(QObject *parent) : QObject(parent) {
 	m_helperClient = new ScreenShareHelperClient(this);
 	connect(m_helperClient, &ScreenShareHelperClient::capabilitiesChanged, this,
 			[this]() { logLocalShareAvailabilityDiagnostic(QStringLiteral("helper-capabilities")); });
+	m_externalRuntimeWatchdogTimer.setInterval(kExternalRuntimeWatchdogIntervalMsec);
+	m_externalRuntimeWatchdogTimer.setSingleShot(false);
+	connect(&m_externalRuntimeWatchdogTimer, &QTimer::timeout, this,
+			&ScreenShareManager::checkExternalRuntimeLiveness);
 }
 
 ScreenShareHelperClient::CapabilitySnapshot ScreenShareManager::detectAdvertisedCapabilities() {
@@ -398,6 +405,8 @@ bool ScreenShareManager::focusOrReopenDetachedWindow(const QString &streamID) {
 
 		m_activePublishSessions.remove(streamID);
 		m_externalPublishProcessIDs.remove(streamID);
+		updateExternalRuntimeWatchdog();
+		emit sessionUpdated(streamID);
 		return false;
 	}
 	if (m_pausedExternalViewSessions.contains(streamID)) {
@@ -415,6 +424,8 @@ bool ScreenShareManager::focusOrReopenDetachedWindow(const QString &streamID) {
 
 		m_activeViewSessions.remove(streamID);
 		m_externalViewProcessIDs.remove(streamID);
+		updateExternalRuntimeWatchdog();
+		emit sessionUpdated(streamID);
 		return false;
 	}
 
@@ -608,10 +619,13 @@ void ScreenShareManager::resetState() {
 	m_activeViewSessions.clear();
 	m_externalPublishProcessIDs.clear();
 	m_externalViewProcessIDs.clear();
+	m_externalPublishRestartAttempts.clear();
+	m_externalViewRestartAttempts.clear();
 	m_announcedViewableSessions.clear();
 	m_sessions.clear();
 	m_lastLoggedAvailabilityContext.clear();
 	m_lastLoggedAvailabilityReason.clear();
+	updateExternalRuntimeWatchdog();
 }
 
 ScreenShareSession ScreenShareManager::sessionFromState(const MumbleProto::ScreenShareState &msg) const {
@@ -800,6 +814,7 @@ bool ScreenShareManager::restartExternalViewSession(const ScreenShareSession &se
 		m_pausedExternalViewSessions.remove(session.streamID);
 		m_externalViewProcessIDs.insert(session.streamID, processID);
 		showExternalViewWindow(session, processID);
+		updateExternalRuntimeWatchdog();
 		if (Global::get().l) {
 			Global::get().l->log(Log::Information,
 								 tr("Using the external screen-share runtime for %1.")
@@ -860,6 +875,7 @@ void ScreenShareManager::startLocalPublishSession(const ScreenShareSession &sess
 	if (m_helperClient->startPublish(session, &errorMessage, &processID)) {
 		m_activePublishSessions.insert(session.streamID);
 		m_externalPublishProcessIDs.insert(session.streamID, processID);
+		updateExternalRuntimeWatchdog();
 		if (Global::get().l) {
 			Global::get().l->log(
 				Log::Information,
@@ -891,6 +907,7 @@ void ScreenShareManager::startLocalViewSession(const ScreenShareSession &session
 		m_activeViewSessions.insert(session.streamID);
 		m_externalViewProcessIDs.insert(session.streamID, processID);
 		showExternalViewWindow(session, processID);
+		updateExternalRuntimeWatchdog();
 		if (Global::get().l) {
 			Global::get().l->log(
 				Log::Information,
@@ -911,6 +928,8 @@ void ScreenShareManager::stopLocalPublishSession(const QString &streamID) {
 		m_helperClient->stopPublish(streamID);
 	}
 	m_externalPublishProcessIDs.remove(streamID);
+	m_externalPublishRestartAttempts.remove(streamID);
+	updateExternalRuntimeWatchdog();
 }
 
 void ScreenShareManager::stopLocalViewSession(const QString &streamID) {
@@ -930,6 +949,107 @@ void ScreenShareManager::stopLocalViewSession(const QString &streamID) {
 		m_helperClient->stopView(streamID);
 	}
 	m_externalViewProcessIDs.remove(streamID);
+	m_externalViewRestartAttempts.remove(streamID);
+	updateExternalRuntimeWatchdog();
+}
+
+void ScreenShareManager::updateExternalRuntimeWatchdog() {
+	if (m_activePublishSessions.isEmpty() && m_activeViewSessions.isEmpty()) {
+		m_externalRuntimeWatchdogTimer.stop();
+		return;
+	}
+
+	if (!m_externalRuntimeWatchdogTimer.isActive()) {
+		m_externalRuntimeWatchdogTimer.start();
+	}
+}
+
+void ScreenShareManager::checkExternalRuntimeLiveness() {
+	const QSet< QString > activePublishSessions = m_activePublishSessions;
+	for (const QString &streamID : activePublishSessions) {
+		const qint64 processID = m_externalPublishProcessIDs.value(streamID, 0);
+		if (externalProcessIsRunning(processID)) {
+			continue;
+		}
+
+		m_activePublishSessions.remove(streamID);
+		m_externalPublishProcessIDs.remove(streamID);
+		m_helperClient->stopPublish(streamID);
+
+		const int restartAttempt = m_externalPublishRestartAttempts.value(streamID, 0) + 1;
+		m_externalPublishRestartAttempts.insert(streamID, restartAttempt);
+		const auto sessionIt = m_sessions.constFind(streamID);
+		const bool canRestart = sessionIt != m_sessions.cend() && restartAttempt <= kExternalRuntimeRestartLimit
+								&& canPublishSession(sessionIt.value());
+
+		if (Global::get().l) {
+			if (canRestart) {
+				Global::get().l->log(Log::Warning,
+									 tr("Screen-share publisher runtime for %1 exited unexpectedly; restarting "
+										"(%2/%3).")
+										 .arg(streamID.toHtmlEscaped(), QString::number(restartAttempt),
+											  QString::number(kExternalRuntimeRestartLimit)));
+			} else {
+				Global::get().l->log(Log::Warning,
+									 tr("Screen-share publisher runtime for %1 exited unexpectedly; ending the "
+										"share.")
+										 .arg(streamID.toHtmlEscaped()));
+			}
+		}
+
+		if (canRestart) {
+			startLocalPublishSession(sessionIt.value());
+		} else {
+			requestStopShare(streamID);
+		}
+
+		emit sessionUpdated(streamID);
+	}
+
+	const QSet< QString > activeViewSessions = m_activeViewSessions;
+	for (const QString &streamID : activeViewSessions) {
+		const qint64 processID = m_externalViewProcessIDs.value(streamID, 0);
+		if (externalProcessIsRunning(processID)) {
+			continue;
+		}
+
+		m_activeViewSessions.remove(streamID);
+		m_externalViewProcessIDs.remove(streamID);
+		m_helperClient->stopView(streamID);
+
+		const int restartAttempt = m_externalViewRestartAttempts.value(streamID, 0) + 1;
+		m_externalViewRestartAttempts.insert(streamID, restartAttempt);
+		const auto sessionIt = m_sessions.constFind(streamID);
+		const bool canRestart = sessionIt != m_sessions.cend() && restartAttempt <= kExternalRuntimeRestartLimit
+								&& canViewSession(sessionIt.value());
+
+		if (Global::get().l) {
+			if (canRestart) {
+				Global::get().l->log(Log::Warning,
+									 tr("Screen-share viewer runtime for %1 exited unexpectedly; restarting "
+										"(%2/%3).")
+										 .arg(streamID.toHtmlEscaped(), QString::number(restartAttempt),
+											  QString::number(kExternalRuntimeRestartLimit)));
+			} else {
+				Global::get().l->log(Log::Warning,
+									 tr("Screen-share viewer runtime for %1 exited unexpectedly; closing the "
+										"viewer.")
+										 .arg(streamID.toHtmlEscaped()));
+			}
+		}
+
+		if (canRestart) {
+			if (!restartExternalViewSession(sessionIt.value())) {
+				stopLocalViewSession(streamID);
+			}
+		} else {
+			stopLocalViewSession(streamID);
+		}
+
+		emit sessionUpdated(streamID);
+	}
+
+	updateExternalRuntimeWatchdog();
 }
 
 void ScreenShareManager::setExternalViewAudioMuted(const QString &streamID, const bool muted) {
@@ -965,6 +1085,7 @@ void ScreenShareManager::setExternalViewPaused(const QString &streamID, const bo
 			m_helperClient->stopView(streamID);
 		}
 		m_externalViewProcessIDs.remove(streamID);
+		updateExternalRuntimeWatchdog();
 		if (host) {
 			host->setProcessID(0);
 			host->setPaused(true);

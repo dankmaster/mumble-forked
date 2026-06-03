@@ -268,7 +268,14 @@ public:
 	};
 
 	enum class RoomCreateType : unsigned char { Voice, Text };
-	enum class UserTextureRequestReason : unsigned char { UserState, Navigator, ModernShell, PersistentChat, Overlay };
+	enum class UserTextureRequestReason : unsigned char {
+		UserState,
+		Navigator,
+		ModernShell,
+		PersistentChat,
+		UserInformation,
+		Overlay
+	};
 
 	bool ensureUserTextureAvailable(ClientUser *user, UserTextureRequestReason reason);
 	bool ensureUserCommentAvailable(ClientUser *user);
@@ -1018,6 +1025,8 @@ protected:
 	void openModernUserCommentResetDialog(ClientUser *user);
 	void openModernUserTextureChangeDialog(ClientUser *user, const QVariantMap &fieldValues = QVariantMap(),
 										   const QVariantMap &errors = QVariantMap());
+	void requestModernUserTextureFromUrl(unsigned int session, const QUrl &url, const QVariantMap &fieldValues,
+										 int redirectCount = 0);
 	void openModernUserTextureResetDialog(ClientUser *user);
 	void openModernUserInformationRequestDialog(ClientUser *user);
 	void openModernUserInformationDialog(const MumbleProto::UserStats &msg);

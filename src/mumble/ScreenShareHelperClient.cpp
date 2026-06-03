@@ -461,6 +461,7 @@ QJsonObject ScreenShareHelperClient::payloadFromSession(const ScreenShareSession
 	payload.insert(QStringLiteral("capture_source_id"), session.captureSourceID);
 	payload.insert(QStringLiteral("capture_audio"), session.captureAudio);
 	payload.insert(QStringLiteral("audio_source_id"), session.captureAudio ? session.audioSourceID : QString());
+	payload.insert(QStringLiteral("publisher_process_id"), QString::number(QCoreApplication::applicationPid()));
 	payload.insert(QStringLiteral("min_bitrate_kbps"), static_cast< int >(session.minBitrateKbps));
 	payload.insert(QStringLiteral("max_bitrate_kbps"), static_cast< int >(session.maxBitrateKbps));
 	payload.insert(QStringLiteral("codec_preference"),
