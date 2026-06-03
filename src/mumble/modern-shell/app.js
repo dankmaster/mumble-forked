@@ -15136,8 +15136,9 @@
 		const metadata = previewXPostMetadata(preview);
 		const handle = previewXPostHandle(preview);
 		const displayName = previewXPostDisplayName(preview, handle, sourceLabel);
+		const isUnavailable = !!metadata.xUnavailable;
 		const shell = document.createElement("div");
-		shell.className = "preview-card-x-shell";
+		shell.className = "preview-card-x-shell" + (isUnavailable ? " is-x-unavailable" : "");
 		appendXReplyContext(shell, preview);
 
 		const header = document.createElement("div");
@@ -15230,34 +15231,36 @@
 
 		const footer = document.createElement("div");
 		footer.className = "preview-card-x-footer";
-		const metrics = document.createElement("div");
-		metrics.className = "preview-card-x-metrics";
-		const repostCount = Number(metadata.xRepostCount || 0) + Number(metadata.xQuoteCount || 0);
-		[
-			{ token: "reply", label: "Reply", mark: "○", count: metadata.xReplyCount },
-			{ token: "repost", label: "Repost", mark: "↻", count: repostCount },
-			{ token: "like", label: "Like", mark: "♡", count: metadata.xLikeCount },
-			{ token: "views", label: "Views", mark: "▥", count: metadata.xViewCount },
-			{ token: "bookmark", label: "Bookmark", mark: "□", count: metadata.xBookmarkCount },
-			{ token: "share", label: "Share", mark: "↗" }
-		].forEach(function(item) {
-			const metric = document.createElement("span");
-			metric.className = "preview-card-x-metric preview-card-x-metric-" + item.token;
-			metric.setAttribute("aria-label", item.label);
-			const mark = document.createElement("span");
-			mark.className = "preview-card-x-metric-mark";
-			mark.textContent = item.mark;
-			metric.appendChild(mark);
-			const count = previewXCompactCount(item.count);
-			if (count) {
-				const countNode = document.createElement("span");
-				countNode.className = "preview-card-x-metric-count";
-				countNode.textContent = count;
-				metric.appendChild(countNode);
-			}
-			metrics.appendChild(metric);
-		});
-		footer.appendChild(metrics);
+		if (!isUnavailable) {
+			const metrics = document.createElement("div");
+			metrics.className = "preview-card-x-metrics";
+			const repostCount = Number(metadata.xRepostCount || 0) + Number(metadata.xQuoteCount || 0);
+			[
+				{ token: "reply", label: "Reply", mark: "○", count: metadata.xReplyCount },
+				{ token: "repost", label: "Repost", mark: "↻", count: repostCount },
+				{ token: "like", label: "Like", mark: "♡", count: metadata.xLikeCount },
+				{ token: "views", label: "Views", mark: "▥", count: metadata.xViewCount },
+				{ token: "bookmark", label: "Bookmark", mark: "□", count: metadata.xBookmarkCount },
+				{ token: "share", label: "Share", mark: "↗" }
+			].forEach(function(item) {
+				const metric = document.createElement("span");
+				metric.className = "preview-card-x-metric preview-card-x-metric-" + item.token;
+				metric.setAttribute("aria-label", item.label);
+				const mark = document.createElement("span");
+				mark.className = "preview-card-x-metric-mark";
+				mark.textContent = item.mark;
+				metric.appendChild(mark);
+				const count = previewXCompactCount(item.count);
+				if (count) {
+					const countNode = document.createElement("span");
+					countNode.className = "preview-card-x-metric-count";
+					countNode.textContent = count;
+					metric.appendChild(countNode);
+				}
+				metrics.appendChild(metric);
+			});
+			footer.appendChild(metrics);
+		}
 		const action = document.createElement("span");
 		action.className = "preview-card-x-action";
 		action.textContent = (preview && preview.openLabel) || "Open on X";

@@ -6603,6 +6603,15 @@ textarea:focus-visible {
 	color: #1d9bf0;
 }
 
+.preview-card-x-shell.is-x-unavailable > .preview-card-x-footer {
+	justify-content: flex-end;
+}
+
+.preview-card-x-shell.is-x-unavailable .preview-card-x-description {
+	-webkit-line-clamp: 3;
+	color: #8b98a5;
+}
+
 .preview-card.is-instagram-post {
 	border-color: #262626;
 	background: #000;

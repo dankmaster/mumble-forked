@@ -8301,6 +8301,78 @@ QUrl xPostOEmbedUrl(const QUrl &postUrl) {
 	return url;
 }
 
+// Faithful port of V8's Number.prototype.toString(radix) for finite, non-negative
+// values (DoubleToRadixCString). The X syndication token is produced by running this
+// in the browser, so the output must match V8 bit-for-bit to be accepted.
+QString jsDoubleToRadixString(double value, int radix) {
+	static const char chars[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+	if (!std::isfinite(value) || value < 0.0) {
+		return QString();
+	}
+
+	static const int kBufferSize = 2200;
+	char buffer[kBufferSize];
+	int integerCursor  = kBufferSize / 2;
+	int fractionCursor = integerCursor;
+
+	double integer  = std::floor(value);
+	double fraction = value - integer;
+	double delta    = 0.5 * (std::nextafter(value, std::numeric_limits< double >::infinity()) - value);
+	delta           = std::max(std::nextafter(0.0, 1.0), delta);
+	if (fraction >= delta) {
+		buffer[fractionCursor++] = '.';
+		do {
+			fraction *= radix;
+			delta *= radix;
+			int digit                = static_cast< int >(fraction);
+			buffer[fractionCursor++] = chars[digit];
+			fraction -= digit;
+			if (fraction > 0.5 || (fraction == 0.5 && (digit & 1))) {
+				if (fraction + delta > 1.0) {
+					while (true) {
+						fractionCursor--;
+						if (fractionCursor == kBufferSize / 2) {
+							integer += 1;
+							break;
+						}
+						char c        = buffer[fractionCursor];
+						int prevDigit = c > '9' ? (c - 'a' + 10) : (c - '0');
+						if (prevDigit + 1 < radix) {
+							buffer[fractionCursor++] = chars[prevDigit + 1];
+							break;
+						}
+					}
+					break;
+				}
+			}
+		} while (fraction >= delta);
+	}
+
+	do {
+		double remainder         = std::fmod(integer, radix);
+		buffer[--integerCursor]  = chars[static_cast< int >(remainder)];
+		integer                  = (integer - remainder) / radix;
+	} while (integer > 0.0);
+
+	return QString::fromLatin1(buffer + integerCursor, fractionCursor - integerCursor);
+}
+
+// X's syndication endpoint derives the request token from the status id with the same
+// expression its embed script uses: ((id / 1e15) * Math.PI).toString(36) with every
+// "0" and the decimal point stripped. A static token is only honoured by some CDN
+// edges, so newer/uncached posts intermittently 404 without this.
+QString xPostSyndicationToken(const QString &statusId) {
+	bool ok          = false;
+	const double id  = statusId.trimmed().toDouble(&ok);
+	if (!ok || !(id > 0.0)) {
+		return QStringLiteral("x");
+	}
+	QString token = jsDoubleToRadixString((id / 1e15) * 3.141592653589793, 36);
+	token.remove(QLatin1Char('.'));
+	token.remove(QLatin1Char('0'));
+	return token.isEmpty() ? QStringLiteral("x") : token;
+}
+
 QUrl xPostSyndicationUrl(const QString &statusId) {
 	if (statusId.trimmed().isEmpty()) {
 		return QUrl();
@@ -8309,7 +8381,7 @@ QUrl xPostSyndicationUrl(const QString &statusId) {
 	QUrl url(QStringLiteral("https://cdn.syndication.twimg.com/tweet-result"));
 	QUrlQuery query;
 	query.addQueryItem(QStringLiteral("id"), statusId.trimmed());
-	query.addQueryItem(QStringLiteral("token"), QStringLiteral("x"));
+	query.addQueryItem(QStringLiteral("token"), xPostSyndicationToken(statusId));
 	query.addQueryItem(QStringLiteral("lang"), QStringLiteral("en"));
 	url.setQuery(query);
 	return url;
@@ -31915,9 +31987,10 @@ bool MainWindow::requestPersistentChatXPostPreview(const QString &previewKey, co
 	QNetworkReply *reply = Global::get().nam->get(request);
 	applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
 	connect(reply, &QNetworkReply::finished, this, [this, reply, previewKey, previewUrl]() {
-		const QByteArray data     = reply->readAll();
-		const bool success        = reply->error() == QNetworkReply::NoError;
-		const QString failureText = previewFailureText(reply);
+		const QByteArray data = reply->readAll();
+		const bool success    = reply->error() == QNetworkReply::NoError;
+		const int httpStatus =
+			reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 		reply->deleteLater();
 
 		auto previewIt = m_persistentChatPreviews.find(previewKey);
@@ -32082,11 +32155,20 @@ bool MainWindow::requestPersistentChatXPostPreview(const QString &previewKey, co
 		if (previewIt->subtitle.trimmed().isEmpty()) {
 			previewIt->subtitle = tr("X");
 		}
-		if (!success && previewIt->description.trimmed().isEmpty()) {
-			previewIt->description = failureText;
-		}
-		if (success && !parsedSyndication && previewIt->description.trimmed().isEmpty()) {
-			previewIt->description = tr("Post metadata unavailable");
+		if (!parsedSyndication) {
+			// Genuine failure: the post is deleted/protected/age-gated, or the syndication
+			// endpoint was unreachable. Present a clean, on-brand "unavailable" card instead
+			// of leaking a raw transport error or rendering an empty metrics row.
+			const bool postGone = httpStatus == 404 || httpStatus == 403 || httpStatus == 410;
+			previewIt->description =
+				postGone ? tr("This post isn't available") : tr("This post couldn't be loaded");
+			QVariantMap metadata = previewIt->metadata;
+			metadata.insert(QStringLiteral("provider"), QStringLiteral("x"));
+			metadata.insert(QStringLiteral("xUnavailable"), true);
+			if (!fallbackHandle.isEmpty()) {
+				metadata.insert(QStringLiteral("xHandle"), fallbackHandle);
+			}
+			previewIt->metadata = metadata;
 		}
 
 		previewIt->siteSnapshotRequested = false;
