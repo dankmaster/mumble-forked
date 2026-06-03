@@ -1165,14 +1165,59 @@ GStreamerCaptureSelection selectGStreamerCaptureSource(const QJsonObject &plan) 
 	return selection;
 }
 
-bool appendWasapiLoopbackProcessProperties(QStringList *properties, const qulonglong processID) {
+qulonglong wasapiLoopbackProcessIDFromValue(const QJsonValue &value) {
+	bool ok           = false;
+	qulonglong number = 0;
+	if (value.isString()) {
+		number = value.toString().trimmed().toULongLong(&ok);
+	} else if (value.isDouble()) {
+		const double rawNumber = value.toDouble();
+		if (rawNumber > 0) {
+			number = static_cast< qulonglong >(rawNumber);
+			ok     = number > 0;
+		}
+	}
+
+	if (!ok || number == 0 || number > std::numeric_limits< quint32 >::max()) {
+		return 0;
+	}
+
+	return number;
+}
+
+qulonglong publisherProcessIDFromPlan(const QJsonObject &plan) {
+	return wasapiLoopbackProcessIDFromValue(plan.value(QStringLiteral("publisher_process_id")));
+}
+
+bool appendWasapiLoopbackProcessProperties(QStringList *properties, const qulonglong processID,
+										   const QString &loopbackMode) {
 	if (!properties || processID == 0 || processID > std::numeric_limits< quint32 >::max()) {
 		return false;
 	}
 
-	properties->append(QStringLiteral("loopback-mode=include-process-tree"));
+	properties->append(QStringLiteral("loopback-mode=%1").arg(loopbackMode));
 	properties->append(QStringLiteral("loopback-target-pid=%1").arg(processID));
 	return true;
+}
+
+bool appendWasapiLoopbackIncludeProcessProperties(QStringList *properties, const qulonglong processID) {
+	return appendWasapiLoopbackProcessProperties(properties, processID, QStringLiteral("include-process-tree"));
+}
+
+bool appendWasapiLoopbackExcludeProcessProperties(QStringList *properties, const qulonglong processID) {
+	return appendWasapiLoopbackProcessProperties(properties, processID, QStringLiteral("exclude-process-tree"));
+}
+
+void appendWasapiLoopbackPublisherExclusionProperties(QStringList *properties, const QJsonObject &plan,
+													  QStringList *warnings) {
+	if (appendWasapiLoopbackExcludeProcessProperties(properties, publisherProcessIDFromPlan(plan))) {
+		return;
+	}
+
+	if (warnings) {
+		warnings->append(QStringLiteral("System audio was requested, but the Mumble client process could not be "
+										"excluded from loopback capture."));
+	}
 }
 
 QStringList selectWasapiLoopbackSourceProperties(const QJsonObject &plan, QStringList *warnings) {
@@ -1184,6 +1229,7 @@ QStringList selectWasapiLoopbackSourceProperties(const QJsonObject &plan, QStrin
 	const QString normalizedSourceID = sourceID.toLower();
 	if (normalizedSourceID.isEmpty() || normalizedSourceID == QLatin1String("default-loopback")
 		|| normalizedSourceID == QLatin1String("system") || normalizedSourceID == QLatin1String("system:default")) {
+		appendWasapiLoopbackPublisherExclusionProperties(&properties, plan, warnings);
 		return properties;
 	}
 
@@ -1194,19 +1240,21 @@ QStringList selectWasapiLoopbackSourceProperties(const QJsonObject &plan, QStrin
 		} else if (warnings) {
 			warnings->append(QStringLiteral("Audio device capture was requested without a device ID; using default output."));
 		}
+		appendWasapiLoopbackPublisherExclusionProperties(&properties, plan, warnings);
 		return properties;
 	}
 
 	if (normalizedSourceID.startsWith(QLatin1String("process:"))) {
 		bool ok = false;
 		const qulonglong processID = normalizedSourceID.mid(QStringLiteral("process:").size()).toULongLong(&ok);
-		if (ok && appendWasapiLoopbackProcessProperties(&properties, processID)) {
+		if (ok && appendWasapiLoopbackIncludeProcessProperties(&properties, processID)) {
 			return properties;
 		}
 		if (warnings) {
 			warnings->append(QStringLiteral("Process audio capture source '%1' is invalid; using default output.")
 								 .arg(sourceID));
 		}
+		appendWasapiLoopbackPublisherExclusionProperties(&properties, plan, warnings);
 		return properties;
 	}
 
@@ -1217,7 +1265,7 @@ QStringList selectWasapiLoopbackSourceProperties(const QJsonObject &plan, QStrin
 		if (ok && windowHandle != 0 && IsWindow(reinterpret_cast< HWND >(windowHandle))) {
 			DWORD processID = 0;
 			GetWindowThreadProcessId(reinterpret_cast< HWND >(windowHandle), &processID);
-			if (appendWasapiLoopbackProcessProperties(&properties, processID)) {
+			if (appendWasapiLoopbackIncludeProcessProperties(&properties, processID)) {
 				return properties;
 			}
 		}
@@ -1226,12 +1274,14 @@ QStringList selectWasapiLoopbackSourceProperties(const QJsonObject &plan, QStrin
 			warnings->append(QStringLiteral("Window audio capture source '%1' is invalid; using default output.")
 								 .arg(sourceID));
 		}
+		appendWasapiLoopbackPublisherExclusionProperties(&properties, plan, warnings);
 		return properties;
 	}
 
 	if (warnings) {
 		warnings->append(QStringLiteral("Unsupported audio capture source '%1'; using default output.").arg(sourceID));
 	}
+	appendWasapiLoopbackPublisherExclusionProperties(&properties, plan, warnings);
 	return properties;
 }
 
@@ -1261,7 +1311,7 @@ GStreamerEncoderSelection selectGStreamerEncoder(const ScreenShareExternalProces
 	const int maxBitrateKbps =
 		qBound(bitrateKbps, plan.value(QStringLiteral("max_bitrate_kbps")).toInt(qMax(6000, bitrateKbps)), 50000);
 	const int fps     = qMax(1, plan.value(QStringLiteral("fps")).toInt(30));
-	const int gopSize = qMax(fps, fps * 2);
+	const int gopSize = fps;
 
 	auto appendCommonH264Properties = [&](QStringList *properties) {
 		properties->append(QStringLiteral("bitrate=%1").arg(bitrateKbps));
@@ -1446,8 +1496,8 @@ ScreenShareExternalProcess::LaunchResult
 	arguments << encoder.encoderElement;
 	arguments.append(encoder.properties);
 	arguments << QStringLiteral("!") << QStringLiteral("h264parse") << QStringLiteral("config-interval=-1")
-			  << QStringLiteral("!") << QStringLiteral("queue") << QStringLiteral("leaky=downstream")
-			  << QStringLiteral("max-size-buffers=2") << QStringLiteral("!") << QStringLiteral("sink.");
+			  << QStringLiteral("!") << QStringLiteral("queue") << QStringLiteral("max-size-buffers=8")
+			  << QStringLiteral("!") << QStringLiteral("sink.");
 
 	if (captureAudio) {
 		if (support.gstWasapi2SrcAvailable && support.gstAudioConvertAvailable
@@ -1537,7 +1587,7 @@ ScreenShareExternalProcess::LaunchResult
 	}
 	const bool receiveRawPads = expectAudio;
 	arguments << QStringLiteral("src.") << QStringLiteral("!") << QStringLiteral("queue")
-			  << QStringLiteral("leaky=downstream") << QStringLiteral("max-size-buffers=4") << QStringLiteral("!");
+			  << QStringLiteral("max-size-buffers=8") << QStringLiteral("!");
 	if (forceH264Session && !receiveRawPads) {
 		arguments << QStringLiteral("video/x-h264;application/x-rtp,media=video,encoding-name=H264")
 				  << QStringLiteral("!");

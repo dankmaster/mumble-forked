@@ -7469,9 +7469,9 @@ textarea:focus-visible {
 .rail-row-meta {
 	display: inline-flex;
 	align-items: center;
-	gap: 4px;
+	gap: 3px;
 	margin-left: auto;
-	min-width: 36px;
+	min-width: 0;
 	min-height: 24px;
 	justify-content: flex-end;
 }
@@ -7546,6 +7546,35 @@ textarea:focus-visible {
 
 .room-share-action {
 	min-width: 44px;
+}
+
+.room-share-action-button {
+	width: 22px;
+	height: 20px;
+	background: rgba(var(--accent-rgb), 0.12);
+	color: var(--accent);
+	opacity: 0.88;
+}
+
+.room-share-action-button svg {
+	width: 13px;
+	height: 13px;
+	fill: none;
+	stroke: currentColor;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+	stroke-width: 2;
+}
+
+.room-share-action-button:hover,
+.room-share-action-button:focus-visible {
+	background: rgba(var(--accent-rgb), 0.18);
+	color: var(--selected-text);
+}
+
+.room-share-action-button:disabled {
+	cursor: default;
+	opacity: 0.42;
 }
 
 .presence-list {
@@ -7704,6 +7733,28 @@ textarea:focus-visible {
 	flex: 0 0 auto;
 	align-items: center;
 	gap: 4px;
+}
+
+.presence-local-volume {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	min-height: 15px;
+	max-width: 52px;
+	padding: 0 5px;
+	border: 1px solid rgba(var(--info-rgb), 0.24);
+	border-radius: 999px;
+	background: rgba(var(--info-rgb), 0.13);
+	color: rgb(var(--info-rgb));
+	font-size: 8.5px;
+	font-variant-numeric: tabular-nums;
+	font-weight: 850;
+	letter-spacing: 0;
+	line-height: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .presence-status {
@@ -10078,6 +10129,62 @@ body[data-density="spacious"] .modern-dialog-section {
 	align-items: center;
 	gap: 8px 12px;
 	color: var(--text-main);
+	font-size: 12px;
+}
+
+.modern-dialog-profile {
+	display: grid;
+	grid-template-columns: 68px minmax(0, 1fr);
+	align-items: center;
+	gap: 12px;
+	min-height: 76px;
+	padding: 8px 0 12px;
+	color: var(--text-main);
+}
+
+.modern-dialog-profile-avatar {
+	display: grid;
+	width: 64px;
+	height: 64px;
+	place-items: center;
+	border: 1px solid var(--surface-border-subtle);
+	border-radius: 50%;
+	background: hsl(var(--avatar-hue, 208), 34%, 28%);
+	color: hsl(var(--avatar-hue, 208), 72%, 78%);
+	background-position: center;
+	background-repeat: no-repeat;
+	background-size: cover;
+	font-size: 22px;
+	font-weight: 800;
+	line-height: 1;
+}
+
+.modern-dialog-profile-avatar.has-image {
+	background-color: rgba(255, 255, 255, 0.06);
+	color: transparent;
+}
+
+.modern-dialog-profile-copy {
+	display: grid;
+	min-width: 0;
+	gap: 4px;
+}
+
+.modern-dialog-profile-name,
+.modern-dialog-profile-meta {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.modern-dialog-profile-name {
+	color: var(--text-strong);
+	font-size: 17px;
+	font-weight: 750;
+}
+
+.modern-dialog-profile-meta {
+	color: var(--text-muted);
 	font-size: 12px;
 }
 

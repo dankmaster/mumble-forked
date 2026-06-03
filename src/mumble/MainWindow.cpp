@@ -98,6 +98,7 @@
 #include "ViewCert.h"
 #include "VoiceRecorderDialog.h"
 #include "VoiceRecorder.h"
+#include "VolumeAdjustment.h"
 #include "VolumeAdjustmentController.h"
 #include "Global.h"
 
@@ -117,6 +118,7 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
+#include <QtCore/QEventLoop>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonArray>
@@ -997,6 +999,38 @@ QVariantList modernShellParticipantStatuses(const ClientUser *user) {
 	}
 
 	return statuses;
+}
+
+QVariantMap modernShellLocalVolumeAdjustmentState(const ClientUser *user, const bool isChannelListener,
+												  const Channel *parentChannel) {
+	QVariantMap state;
+	if (!user) {
+		return state;
+	}
+
+	float volumeAdjustment = 1.0f;
+	if (isChannelListener) {
+		if (parentChannel && user->uiSession == Global::get().uiSession && Global::get().channelListenerManager) {
+			volumeAdjustment =
+				Global::get()
+					.channelListenerManager->getListenerVolumeAdjustment(user->uiSession, parentChannel->iId)
+					.factor;
+		}
+	} else {
+		volumeAdjustment = user->getLocalVolumeAdjustments();
+	}
+
+	const int localVolumeDecibel = VolumeAdjustment::toIntegerDBAdjustment(volumeAdjustment);
+	const QString compactLabel =
+		QStringLiteral("%1%2").arg(localVolumeDecibel > 0 ? QStringLiteral("+") : QString()).arg(localVolumeDecibel);
+
+	state.insert(QStringLiteral("db"), localVolumeDecibel);
+	state.insert(QStringLiteral("factor"), static_cast< double >(volumeAdjustment));
+	state.insert(QStringLiteral("label"), QObject::tr("%1 dB").arg(compactLabel));
+	state.insert(QStringLiteral("compactLabel"), compactLabel);
+	state.insert(QStringLiteral("visible"),
+				 Global::get().s.bShowVolumeAdjustments && std::abs(localVolumeDecibel) > 0);
+	return state;
 }
 
 bool parseModernShellScopeToken(const QString &token, int &scopeValue, unsigned int &scopeID) {
@@ -9673,6 +9707,192 @@ void applyPreviewReplyGuards(QNetworkReply *reply, qint64 maxBytes, bool abortOn
 	}
 }
 
+constexpr int USER_AVATAR_MAX_IMAGE_DIMENSION    = 1024;
+constexpr int USER_AVATAR_MAX_REDIRECTS          = 5;
+constexpr qint64 USER_AVATAR_REMOTE_MAX_BYTES    = 4 * 1024 * 1024;
+
+QString userAvatarImageUnreadableText() {
+	return QCoreApplication::translate("MainWindow", "Choose a readable PNG or JPEG image.");
+}
+
+QString userAvatarImageUnrecognizedText() {
+	return QCoreApplication::translate("MainWindow", "Image format not recognized.");
+}
+
+QString userAvatarImageTooLargeText() {
+	return QCoreApplication::translate("MainWindow", "Choose an image no larger than 1024 x 1024 pixels.");
+}
+
+QString userAvatarUrlInvalidText() {
+	return QCoreApplication::translate(
+		"MainWindow", "Enter a direct public http(s) image URL, or choose a local PNG or JPEG image.");
+}
+
+QString userAvatarRemoteFetchFailureText(const QNetworkReply *reply) {
+	const QString abortReason = previewAbortReason(reply);
+	if (abortReason == QLatin1String("timeout")) {
+		return QCoreApplication::translate("MainWindow", "Avatar image download timed out.");
+	}
+	if (abortReason == QLatin1String("too_large")) {
+		return QCoreApplication::translate("MainWindow", "Choose an avatar image smaller than 4 MB.");
+	}
+
+	return QCoreApplication::translate("MainWindow", "Could not download an image from that URL.");
+}
+
+QUrl userAvatarRemoteUrlFromInput(const QString &input) {
+	const QString trimmed = input.trimmed();
+	if (trimmed.isEmpty()) {
+		return QUrl();
+	}
+
+	QUrl url = QUrl::fromEncoded(trimmed.toUtf8(), QUrl::TolerantMode);
+	QString scheme = url.scheme().toLower();
+	if (scheme.isEmpty()) {
+		url    = QUrl::fromUserInput(trimmed);
+		scheme = url.scheme().toLower();
+	}
+	if (scheme != QLatin1String("http") && scheme != QLatin1String("https")) {
+		return QUrl();
+	}
+	url.setFragment(QString());
+	return url;
+}
+
+QPair< QByteArray, QImage > imageFileChoiceFromBytes(const QByteArray &bytes, QString *error = nullptr) {
+	QPair< QByteArray, QImage > result;
+	if (bytes.isEmpty()) {
+		if (error) {
+			*error = userAvatarImageUnreadableText();
+		}
+		return result;
+	}
+
+	QByteArray format;
+	if (!RichTextImage::isValidImage(bytes, format)) {
+		if (error) {
+			*error = userAvatarImageUnrecognizedText();
+		}
+		return result;
+	}
+
+	QBuffer buffer;
+	buffer.setData(bytes);
+	buffer.open(QIODevice::ReadOnly);
+	QImageReader reader;
+	reader.setAutoDetectImageFormat(false);
+	reader.setFormat(format);
+	reader.setDevice(&buffer);
+	const QImage image = reader.read();
+	if (image.isNull()) {
+		if (error) {
+			*error = userAvatarImageUnrecognizedText();
+		}
+		return result;
+	}
+
+	result.first  = bytes;
+	result.second = image;
+	return result;
+}
+
+QPair< QByteArray, QImage > userAvatarImageFromChoice(const QPair< QByteArray, QImage > &choice,
+													 QString *error = nullptr) {
+	QPair< QByteArray, QImage > result = choice;
+	if (result.first.isEmpty()) {
+		return result;
+	}
+	if (result.second.height() > USER_AVATAR_MAX_IMAGE_DIMENSION
+		|| result.second.width() > USER_AVATAR_MAX_IMAGE_DIMENSION) {
+		if (error) {
+			*error = userAvatarImageTooLargeText();
+		}
+		return {};
+	}
+	return result;
+}
+
+QPair< QByteArray, QImage > userAvatarImageFromBytes(const QByteArray &bytes, QString *error = nullptr) {
+	return userAvatarImageFromChoice(imageFileChoiceFromBytes(bytes, error), error);
+}
+
+QPair< QByteArray, QImage > imageFileChoiceFromLocalPath(const QString &path, QString *error = nullptr) {
+	QFile file(path);
+	if (path.isEmpty() || !file.open(QIODevice::ReadOnly)) {
+		if (error) {
+			*error = userAvatarImageUnreadableText();
+		}
+		return {};
+	}
+
+	const QByteArray bytes = file.readAll();
+	file.close();
+	return imageFileChoiceFromBytes(bytes, error);
+}
+
+QPair< QByteArray, QImage > userAvatarImageFromLocalPath(const QString &path, QString *error = nullptr) {
+	return userAvatarImageFromChoice(imageFileChoiceFromLocalPath(path, error), error);
+}
+
+QPair< QByteArray, QImage > imageFileChoiceFromRemoteUrlBlocking(const QUrl &url, QString *error = nullptr,
+																int redirectCount = 0) {
+	if (redirectCount > USER_AVATAR_MAX_REDIRECTS) {
+		if (error) {
+			*error = QCoreApplication::translate("MainWindow", "Avatar image URL redirected too many times.");
+		}
+		return {};
+	}
+	if (!isSafePreviewTarget(url)) {
+		if (error) {
+			*error = userAvatarUrlInvalidText();
+		}
+		return {};
+	}
+	if (!Global::get().nam) {
+		if (error) {
+			*error = QCoreApplication::translate("MainWindow", "Network access is not available.");
+		}
+		return {};
+	}
+
+	QNetworkRequest request(url);
+	preparePreviewImageRequest(request);
+	QNetworkReply *reply = Global::get().nam->get(request);
+	applyPreviewReplyGuards(reply, USER_AVATAR_REMOTE_MAX_BYTES);
+
+	QEventLoop loop;
+	QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+	if (!reply->isFinished()) {
+		loop.exec(QEventLoop::ExcludeUserInputEvents);
+	}
+
+	const QVariant redirectTarget = reply->attribute(QNetworkRequest::RedirectionTargetAttribute);
+	const bool success            = reply->error() == QNetworkReply::NoError;
+	const QUrl replyUrl           = reply->url();
+	const QByteArray bytes        = success ? reply->readAll() : QByteArray();
+	const QString failureText     = success ? QString() : userAvatarRemoteFetchFailureText(reply);
+	reply->deleteLater();
+
+	if (success && redirectTarget.isValid()) {
+		const QUrl redirectUrl = replyUrl.resolved(redirectTarget.toUrl());
+		return imageFileChoiceFromRemoteUrlBlocking(redirectUrl, error, redirectCount + 1);
+	}
+	if (!success) {
+		if (error) {
+			*error = failureText;
+		}
+		return {};
+	}
+	if (bytes.size() > USER_AVATAR_REMOTE_MAX_BYTES) {
+		if (error) {
+			*error = QCoreApplication::translate("MainWindow", "Choose an avatar image smaller than 4 MB.");
+		}
+		return {};
+	}
+
+	return imageFileChoiceFromBytes(bytes, error);
+}
+
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 class PreviewSnapshotUrlInterceptor final : public QWebEngineUrlRequestInterceptor {
 public:
@@ -11859,6 +12079,11 @@ std::optional< PersistentChatReplyReference >
 }
 } // namespace
 
+namespace {
+	QVariantMap modernProfileField(const QString &id, const QString &name, const QString &subtitle,
+								   const QString &avatarUrl, bool isSelf);
+}
+
 MessageBoxEvent::MessageBoxEvent(QString m) : QEvent(static_cast< QEvent::Type >(MB_QEVENT)) {
 	msg = m;
 }
@@ -12366,6 +12591,10 @@ void MainWindow::refreshUserTextureViews(ClientUser *user) {
 		return;
 	}
 
+	if (UserInformation *informationDialog = qmUserInformations.value(user->uiSession)) {
+		informationDialog->refreshAvatar();
+	}
+
 	if (pmModel) {
 		const QVector< int > avatarRoles{ Qt::DecorationRole, UserModel::NavigatorAvatarImageRole };
 		const QModelIndex idx = pmModel->index(user);
@@ -12386,6 +12615,15 @@ void MainWindow::refreshUserTextureViews(ClientUser *user) {
 	}
 
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	const QString userInformationDialogID = QStringLiteral("userInformation:%1").arg(user->uiSession);
+	if (usesModernShell() && m_modernDialogController
+		&& m_modernDialogController->activeDialogID() == userInformationDialogID) {
+		const QVariantMap profile = modernProfileField(
+			QStringLiteral("identity.profile"), user->qsName, tr("Session %1").arg(user->uiSession),
+			modernShellAvatarDataUrl(user, 96), user->uiSession == Global::get().uiSession);
+		publishModernDialogState(m_modernDialogController->updateField(
+			userInformationDialogID, QStringLiteral("identity.profile"), profile.value(QStringLiteral("value"))));
+	}
 	clearModernShellMessageDtoCache("avatar");
 	publishModernShellRoomStatePatch();
 	queueModernShellSnapshotSync();
@@ -14501,6 +14739,16 @@ namespace {
 	QVariantMap modernReadonlyField(const QString &label, const QVariant &value, const QString &id = QString()) {
 		QVariantMap field = modernDialogField(id, label, QStringLiteral("readonly"), value, false);
 		return field;
+	}
+
+	QVariantMap modernProfileField(const QString &id, const QString &name, const QString &subtitle,
+								   const QString &avatarUrl, const bool isSelf) {
+		QVariantMap profile;
+		profile.insert(QStringLiteral("name"), name);
+		profile.insert(QStringLiteral("subtitle"), subtitle);
+		profile.insert(QStringLiteral("avatarUrl"), avatarUrl);
+		profile.insert(QStringLiteral("isSelf"), isSelf);
+		return modernDialogField(id, QString(), QStringLiteral("profile"), profile, false);
 	}
 
 	QVariantMap modernHiddenField(const QString &id, const QVariant &value) {
@@ -18915,6 +19163,87 @@ void MainWindow::openModernUserTextureChangeDialog(ClientUser *user, const QVari
 		m_modernDialogController->openChangeAvatar(user->uiSession, user->qsName, fieldValues, errors));
 }
 
+void MainWindow::requestModernUserTextureFromUrl(const unsigned int session, const QUrl &url,
+												 const QVariantMap &fieldValues, const int redirectCount) {
+	const QString dialogID = QStringLiteral("changeAvatar:%1").arg(session);
+	const auto reportError = [this, session, dialogID, fieldValues](const QString &message) {
+		ClientUser *user = ClientUser::get(session);
+		if (!user) {
+			return;
+		}
+
+		if (m_modernDialogController && m_modernDialogController->activeDialogID() == dialogID) {
+			QVariantMap errors;
+			errors.insert(QStringLiteral("avatar.path"), message);
+			openModernUserTextureChangeDialog(user, fieldValues, errors);
+		} else {
+			publishModernToast(QStringLiteral("error"), tr("Avatar"), message);
+		}
+	};
+
+	if (redirectCount > USER_AVATAR_MAX_REDIRECTS) {
+		reportError(tr("Avatar image URL redirected too many times."));
+		return;
+	}
+	if (!isSafePreviewTarget(url)) {
+		reportError(userAvatarUrlInvalidText());
+		return;
+	}
+	if (!Global::get().nam) {
+		reportError(tr("Network access is not available."));
+		return;
+	}
+
+	QNetworkRequest request(url);
+	preparePreviewImageRequest(request);
+	QNetworkReply *reply = Global::get().nam->get(request);
+	applyPreviewReplyGuards(reply, USER_AVATAR_REMOTE_MAX_BYTES);
+
+	connect(reply, &QNetworkReply::finished, this,
+			[this, reply, session, fieldValues, redirectCount, reportError]() mutable {
+				const QVariant redirectTarget = reply->attribute(QNetworkRequest::RedirectionTargetAttribute);
+				const bool success            = reply->error() == QNetworkReply::NoError;
+				const QUrl replyUrl           = reply->url();
+				const QByteArray bytes        = success ? reply->readAll() : QByteArray();
+				const QString failureText     = success ? QString() : userAvatarRemoteFetchFailureText(reply);
+				reply->deleteLater();
+
+				if (success && redirectTarget.isValid()) {
+					requestModernUserTextureFromUrl(session, replyUrl.resolved(redirectTarget.toUrl()), fieldValues,
+													redirectCount + 1);
+					return;
+				}
+				if (!success) {
+					reportError(failureText);
+					return;
+				}
+				if (bytes.size() > USER_AVATAR_REMOTE_MAX_BYTES) {
+					reportError(tr("Choose an avatar image smaller than 4 MB."));
+					return;
+				}
+
+				QString error;
+				const QPair< QByteArray, QImage > choice = userAvatarImageFromBytes(bytes, &error);
+				if (choice.first.isEmpty()) {
+					reportError(error);
+					return;
+				}
+
+				if (!Global::get().sh) {
+					reportError(tr("Connect to a server before saving."));
+					return;
+				}
+
+				Global::get().sh->setUserTexture(session, choice.first);
+				publishModernToast(QStringLiteral("success"), tr("Avatar"), tr("Avatar saved."));
+
+				const QString dialogID = QStringLiteral("changeAvatar:%1").arg(session);
+				if (m_modernDialogController && m_modernDialogController->activeDialogID() == dialogID) {
+					publishModernDialogState(m_modernDialogController->close(dialogID));
+				}
+			});
+}
+
 void MainWindow::openModernUserTextureResetDialog(ClientUser *user) {
 	if (!user) {
 		return;
@@ -18948,9 +19277,11 @@ void MainWindow::openModernUserInformationRequestDialog(ClientUser *user) {
 void MainWindow::openModernUserInformationDialog(const MumbleProto::UserStats &msg) {
 	ClientUser *user = ClientUser::get(msg.session());
 	const QString userName = user ? user->qsName : tr("Session %1").arg(msg.session());
+	const bool isSelf      = user && user->uiSession == Global::get().uiSession;
 
 	QVariantList identityFields {
-		modernReadonlyField(tr("User"), userName),
+		modernProfileField(QStringLiteral("identity.profile"), userName, tr("Session %1").arg(msg.session()),
+						   modernShellAvatarDataUrl(user, 96), isSelf),
 		modernReadonlyField(tr("Session"), msg.session()),
 		modernReadonlyField(tr("Opus"), msg.has_opus() ? (msg.opus() ? tr("Supported") : tr("Not supported"))
 														: tr("Not reported"))
@@ -19948,9 +20279,11 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 		QVariantMap values = fieldValues;
 		if (actionID == QLatin1String("browseAvatarImage")) {
 			const QString currentPath = values.value(QStringLiteral("avatar.path")).toString().trimmed();
+			const QString initialPath = currentPath.isEmpty() || userAvatarRemoteUrlFromInput(currentPath).isValid()
+											? getImagePath()
+											: QDir::fromNativeSeparators(currentPath);
 			const QString path =
-				QFileDialog::getOpenFileName(this, tr("Choose image file"),
-											 currentPath.isEmpty() ? getImagePath() : currentPath,
+				QFileDialog::getOpenFileName(this, tr("Choose image file"), initialPath,
 											 tr("Images (*.png *.jpg *.jpeg)"));
 			if (!path.isNull()) {
 				values.insert(QStringLiteral("avatar.path"), QDir::toNativeSeparators(path));
@@ -19961,46 +20294,41 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 
 		if (actionID == QLatin1String("confirmChangeAvatar")) {
 			QVariantMap errors;
-			const QString path =
-				QDir::fromNativeSeparators(values.value(QStringLiteral("avatar.path")).toString().trimmed());
-			QFile file(path);
-			if (path.isEmpty() || !file.open(QIODevice::ReadOnly)) {
-				errors.insert(QStringLiteral("avatar.path"), tr("Choose a readable PNG or JPEG image."));
+			const QString input = values.value(QStringLiteral("avatar.path")).toString().trimmed();
+			const QUrl remoteUrl = userAvatarRemoteUrlFromInput(input);
+			if (remoteUrl.isValid()) {
+				if (!isSafePreviewTarget(remoteUrl)) {
+					errors.insert(QStringLiteral("avatar.path"), userAvatarUrlInvalidText());
+					openModernUserTextureChangeDialog(user, values, errors);
+					return true;
+				}
+
+				publishModernToast(QStringLiteral("info"), tr("Avatar"), tr("Downloading avatar image..."), QString(),
+								   QString(), 2500);
+				requestModernUserTextureFromUrl(user->uiSession, remoteUrl, values);
+				return true;
+			}
+
+			QString error;
+			const QString path = QDir::fromNativeSeparators(input);
+			const QPair< QByteArray, QImage > choice = userAvatarImageFromLocalPath(path, &error);
+			if (choice.first.isEmpty()) {
+				errors.insert(QStringLiteral("avatar.path"), error);
 				openModernUserTextureChangeDialog(user, values, errors);
 				return true;
 			}
 
-			QByteArray bytes = file.readAll();
-			file.close();
-
-			QByteArray format;
-			if (!RichTextImage::isValidImage(bytes, format)) {
-				errors.insert(QStringLiteral("avatar.path"), tr("Image format not recognized."));
-				openModernUserTextureChangeDialog(user, values, errors);
-				return true;
-			}
-
-			QBuffer buffer(&bytes);
-			buffer.open(QIODevice::ReadOnly);
-			QImageReader reader;
-			reader.setAutoDetectImageFormat(false);
-			reader.setFormat(format);
-			reader.setDevice(&buffer);
-			const QImage image = reader.read();
-			if (image.isNull()) {
-				errors.insert(QStringLiteral("avatar.path"), tr("Image format not recognized."));
-				openModernUserTextureChangeDialog(user, values, errors);
-				return true;
-			}
-			if (image.height() > 1024 || image.width() > 1024) {
-				errors.insert(QStringLiteral("avatar.path"), tr("Choose an image no larger than 1024 x 1024 pixels."));
+			if (!Global::get().sh) {
+				errors.insert(QStringLiteral("avatar.path"), tr("Connect to a server before saving."));
 				openModernUserTextureChangeDialog(user, values, errors);
 				return true;
 			}
 
 			updateImagePath(path);
-			if (Global::get().sh) {
-				Global::get().sh->setUserTexture(user->uiSession, bytes);
+			Global::get().sh->setUserTexture(user->uiSession, choice.first);
+			publishModernToast(QStringLiteral("success"), tr("Avatar"), tr("Avatar saved."));
+			if (m_modernDialogController) {
+				publishModernDialogState(m_modernDialogController->close(dialogID));
 			}
 			return true;
 		}
@@ -22127,6 +22455,7 @@ QVariantMap MainWindow::buildModernShellParticipantPatchState(const ClientUser *
 	participant.insert(QStringLiteral("talking"), user->tsState != Settings::Passive);
 	participant.insert(QStringLiteral("badges"), modernShellParticipantBadges(user, selfUser));
 	participant.insert(QStringLiteral("statuses"), modernShellParticipantStatuses(user));
+	participant.insert(QStringLiteral("localVolume"), modernShellLocalVolumeAdjustmentState(user, false, nullptr));
 	participant.insert(QStringLiteral("canMessage"),
 					   connected && user != selfUser && canSendToPersistentChatTarget(target, false));
 	participant.insert(QStringLiteral("canJoin"), connected && user != selfUser && selfChannel && user->cChannel
@@ -22190,6 +22519,7 @@ QVariantMap MainWindow::buildModernShellListenerPatchState(const ClientUser *use
 		statuses.push_back(status);
 	}
 	participant.insert(QStringLiteral("statuses"), statuses);
+	participant.insert(QStringLiteral("localVolume"), modernShellLocalVolumeAdjustmentState(user, true, channel));
 	participant.insert(QStringLiteral("canMessage"), false);
 	participant.insert(QStringLiteral("canJoin"), false);
 	const QPointer< ClientUser > previousUser = cuContextUser;
@@ -23335,6 +23665,7 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 		participant.insert(QStringLiteral("talking"), user->tsState != Settings::Passive);
 		participant.insert(QStringLiteral("badges"), modernShellParticipantBadges(user, selfUser));
 		participant.insert(QStringLiteral("statuses"), modernShellParticipantStatuses(user));
+		participant.insert(QStringLiteral("localVolume"), modernShellLocalVolumeAdjustmentState(user, false, nullptr));
 		participant.insert(QStringLiteral("canMessage"),
 						   connected && user != selfUser && canSendToPersistentChatTarget(participantTarget, false));
 		participant.insert(QStringLiteral("canJoin"), connected && user != selfUser && selfVoiceChannel
@@ -23385,6 +23716,7 @@ QVariantMap MainWindow::buildModernShellSnapshot() {
 			statuses.push_back(status);
 		}
 		participant.insert(QStringLiteral("statuses"), statuses);
+		participant.insert(QStringLiteral("localVolume"), modernShellLocalVolumeAdjustmentState(user, true, channel));
 		participant.insert(QStringLiteral("canMessage"), false);
 		participant.insert(QStringLiteral("canJoin"), false);
 		if (includeActions) {
@@ -23845,6 +24177,7 @@ QVariantMap MainWindow::buildModernShellDirectMessageEntryState(const ModernDire
 	state.insert(QStringLiteral("peerSession"), static_cast< qulonglong >(entry.peerSession));
 	state.insert(QStringLiteral("actorSession"), static_cast< qulonglong >(entry.actorSession));
 	state.insert(QStringLiteral("actorName"), entry.actorName);
+	state.insert(QStringLiteral("avatarUrl"), modernShellAvatarDataUrl(ClientUser::get(entry.actorSession), 40));
 	state.insert(QStringLiteral("own"), entry.outgoing);
 	state.insert(QStringLiteral("direction"), entry.outgoing ? QStringLiteral("outgoing") : QStringLiteral("incoming"));
 	state.insert(QStringLiteral("messageHtml"), entry.messageHtml);
@@ -37707,14 +38040,15 @@ bool MainWindow::chooseScreenShareStartOptions(Channel *channel, ScreenShareStar
 	audioCombo->setAccessibleName(tr("Audio"));
 	audioCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
 	audioCombo->addItem(tr("No audio"), QString());
-	audioCombo->addItem(tr("System audio"), QStringLiteral("default-loopback"));
+	audioCombo->addItem(tr("System audio (excluding Mumble)"), QStringLiteral("default-loopback"));
 #ifdef Q_OS_WIN
 	const QList< ScreenShareAudioSource > renderAudioSources = screenShareRenderAudioSources();
 	if (!renderAudioSources.isEmpty()) {
 		audioCombo->insertSeparator(audioCombo->count());
 		for (const ScreenShareAudioSource &audioSource : renderAudioSources) {
-			const QString audioLabel = audioSource.isDefault ? tr("Output: %1 (default)").arg(audioSource.label)
-															 : tr("Output: %1").arg(audioSource.label);
+			const QString audioLabel = audioSource.isDefault
+										   ? tr("Output: %1 (default, excluding Mumble)").arg(audioSource.label)
+										   : tr("Output: %1 (excluding Mumble)").arg(audioSource.label);
 			audioCombo->addItem(audioLabel, audioSource.sourceID);
 		}
 	}
@@ -37739,6 +38073,12 @@ bool MainWindow::chooseScreenShareStartOptions(Channel *channel, ScreenShareStar
 	}
 #endif
 	audioLayout->addWidget(audioCombo);
+	QLabel *audioSafetyNote =
+		new QLabel(tr("System and output-device audio exclude this Mumble client to avoid voice feedback."),
+				   audioGroup);
+	audioSafetyNote->setWordWrap(true);
+	audioSafetyNote->setTextFormat(Qt::PlainText);
+	audioLayout->addWidget(audioSafetyNote);
 	audioLayout->addStretch(1);
 	sideLayout->addWidget(audioGroup);
 	sideLayout->addStretch(1);
@@ -37757,6 +38097,7 @@ bool MainWindow::chooseScreenShareStartOptions(Channel *channel, ScreenShareStar
 
 		const quint64 processID = sourceList->currentItem()->data(ScreenSharePickerProcessIDRole).toULongLong();
 		if (processID == 0) {
+			setAudioComboIndex(0);
 			return;
 		}
 
@@ -37819,6 +38160,8 @@ bool MainWindow::chooseScreenShareStartOptions(Channel *channel, ScreenShareStar
 	const QListWidgetItem *selectedSource = sourceList->currentItem();
 	options->captureSourceID =
 		selectedSource ? selectedSource->data(ScreenSharePickerSourceIDRole).toString().trimmed() : QString();
+	const quint64 selectedProcessID =
+		selectedSource ? selectedSource->data(ScreenSharePickerProcessIDRole).toULongLong() : 0;
 	const QSize requestedSize = resolutionCombo->currentData().toSize();
 	const int requestedFps    = qMax(0, frameRateCombo->currentData().toInt());
 	options->requestedWidth   = requestedSize.width() > 0 ? static_cast< unsigned int >(requestedSize.width()) : 0;
@@ -37826,6 +38169,9 @@ bool MainWindow::chooseScreenShareStartOptions(Channel *channel, ScreenShareStar
 	options->requestedFps     = static_cast< unsigned int >(requestedFps);
 	options->qualityProfile   = QStringLiteral("auto");
 	options->audioSourceID    = audioCombo->currentData().toString().trimmed();
+	if (audioFollowsSelectedApp && selectedProcessID > 0) {
+		options->audioSourceID = QStringLiteral("process:%1").arg(selectedProcessID);
+	}
 	options->captureAudio     = !options->audioSourceID.isEmpty();
 	return true;
 }
@@ -37846,10 +38192,51 @@ bool MainWindow::openScreenShareWindowOrStatus(const QString &streamID) {
 		box.setText(tr("Your screen share is live."));
 		const QString sourceLabel =
 			session.captureSourceID.trimmed().isEmpty() ? tr("default source") : session.captureSourceID.trimmed();
-		const QString audioLabel =
-			!session.captureAudio
-				? tr("off")
-				: (session.audioSourceID.trimmed().isEmpty() ? tr("system") : session.audioSourceID.trimmed());
+		auto audioStatusLabel = [this](const ScreenShareSession &shareSession) {
+			if (!shareSession.captureAudio) {
+				return tr("off");
+			}
+
+			const QString audioSource = shareSession.audioSourceID.trimmed();
+			const QString normalized  = audioSource.toLower();
+			if (normalized.isEmpty() || normalized == QLatin1String("default-loopback")
+				|| normalized == QLatin1String("system") || normalized == QLatin1String("system:default")) {
+				return tr("system (Mumble excluded)");
+			}
+			if (normalized.startsWith(QLatin1String("device:"))) {
+				return tr("output device (Mumble excluded)");
+			}
+#ifdef Q_OS_WIN
+			if (normalized.startsWith(QLatin1String("process:"))) {
+				bool ok                 = false;
+				const qulonglong rawPID = normalized.mid(QStringLiteral("process:").size()).toULongLong(&ok);
+				if (ok && rawPID > 0 && rawPID <= std::numeric_limits< DWORD >::max()) {
+					const QString appName =
+						screenShareReadableAppName(screenShareProcessName(static_cast< DWORD >(rawPID)));
+					if (!appName.isEmpty()) {
+						return tr("%1 app audio").arg(appName);
+					}
+					return tr("app audio (process %1)").arg(rawPID);
+				}
+				return tr("app audio");
+			}
+			if (normalized.startsWith(QLatin1String("window:"))) {
+				bool ok                    = false;
+				const qulonglong rawHandle = normalized.mid(QStringLiteral("window:").size()).toULongLong(&ok);
+				if (ok && rawHandle != 0 && IsWindow(reinterpret_cast< HWND >(rawHandle))) {
+					const ScreenShareWindowSource windowSource =
+						screenShareWindowSourceFromHandle(reinterpret_cast< HWND >(rawHandle));
+					const QString appName = screenShareReadableAppName(windowSource.processName);
+					if (!appName.isEmpty()) {
+						return tr("%1 app audio").arg(appName);
+					}
+				}
+				return tr("window app audio");
+			}
+#endif
+			return audioSource.isEmpty() ? tr("system (Mumble excluded)") : audioSource;
+		};
+		const QString audioLabel = audioStatusLabel(session);
 		const QString qualityLabel =
 			(session.width > 0 && session.height > 0 && session.fps > 0)
 				? tr("%1x%2 @ %3 FPS").arg(session.width).arg(session.height).arg(session.fps)
@@ -40990,48 +41377,39 @@ void MainWindow::context_triggered() {
 QPair< QByteArray, QImage > MainWindow::openImageFile() {
 	QPair< QByteArray, QImage > retval;
 
-	QString fname =
-		QFileDialog::getOpenFileName(this, tr("Choose image file"), getImagePath(), tr("Images (*.png *.jpg *.jpeg)"));
+	const QUrl selectedUrl = QFileDialog::getOpenFileUrl(
+		this, tr("Choose image file"), QUrl::fromLocalFile(getImagePath()), tr("Images (*.png *.jpg *.jpeg)"),
+		nullptr, QFileDialog::Options(),
+		QStringList { QStringLiteral("file"), QStringLiteral("http"), QStringLiteral("https") });
 
-	if (fname.isNull())
+	if (selectedUrl.isEmpty())
 		return retval;
 
-	QFile f(fname);
-	if (!f.open(QIODevice::ReadOnly)) {
-		QMessageBox::warning(this, tr("Failed to load image"), tr("Could not open file for reading."));
-		return retval;
-	}
+	QString error;
+	if (selectedUrl.isLocalFile()) {
+		const QString fname = selectedUrl.toLocalFile();
+		retval              = imageFileChoiceFromLocalPath(fname, &error);
+		if (retval.first.isEmpty()) {
+			QMessageBox::warning(this, tr("Failed to load image"), error);
+			return {};
+		}
 
-	updateImagePath(fname);
-
-	QByteArray qba = f.readAll();
-	f.close();
-
-	QBuffer qb(&qba);
-	qb.open(QIODevice::ReadOnly);
-
-	QImageReader qir;
-	qir.setAutoDetectImageFormat(false);
-
-	QByteArray fmt;
-	if (!RichTextImage::isValidImage(qba, fmt)) {
-		QMessageBox::warning(this, tr("Failed to load image"), tr("Image format not recognized."));
+		updateImagePath(fname);
 		return retval;
 	}
 
-	qir.setFormat(fmt);
-	qir.setDevice(&qb);
+	if (selectedUrl.scheme() == QLatin1String("http") || selectedUrl.scheme() == QLatin1String("https")) {
+		retval = imageFileChoiceFromRemoteUrlBlocking(selectedUrl, &error);
+		if (retval.first.isEmpty()) {
+			QMessageBox::warning(this, tr("Failed to load image"), error);
+			return {};
+		}
 
-	QImage img = qir.read();
-	if (img.isNull()) {
-		QMessageBox::warning(this, tr("Failed to load image"), tr("Image format not recognized."));
 		return retval;
 	}
 
-	retval.first  = qba;
-	retval.second = img;
-
-	return retval;
+	QMessageBox::warning(this, tr("Failed to load image"), userAvatarUrlInvalidText());
+	return {};
 }
 
 void MainWindow::logChangeNotPermanent(const QString &actionName, ClientUser *const p) const {
@@ -41279,8 +41657,11 @@ void MainWindow::changeServerTexture() {
 
 	const QImage &img = choice.second;
 
-	if ((img.height() <= 1024) && (img.width() <= 1024))
+	if ((img.height() <= USER_AVATAR_MAX_IMAGE_DIMENSION) && (img.width() <= USER_AVATAR_MAX_IMAGE_DIMENSION)) {
 		Global::get().sh->setUserTexture(Global::get().uiSession, choice.first);
+	} else {
+		QMessageBox::warning(this, tr("Failed to load image"), userAvatarImageTooLargeText());
+	}
 }
 
 void MainWindow::removeServerTexture() {
