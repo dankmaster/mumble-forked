@@ -127,12 +127,6 @@ const SettingsKey SSL_CIPHERS_KEY                   = { "ssl_ciphers" };
 const SettingsKey ENABLE_LINK_PREVIEWS_KEY          = { "enable_link_previews" };
 const SettingsKey SCREEN_SHARE_DIAGNOSTICS_KEY      = { "screen_share_diagnostics" };
 
-// ASIO
-const SettingsKey ASIO_ENABLE_KEY     = { "enable_asio" };
-const SettingsKey ASIO_CLASS_KEY      = { "asio_class" };
-const SettingsKey ASIO_MICROPHONE_KEY = { "asio_microphone" };
-const SettingsKey ASIO_SPEAKER_KEY    = { "asio_speaker" };
-
 // WASAPI
 const SettingsKey WASAPI_INPUT_KEY  = { "wasapi_input" };
 const SettingsKey WASAPI_OUTPUT_KEY = { "wasapi_output" };
@@ -308,9 +302,6 @@ const SettingsKey OVERLAY_WIN_HELPER_ENABLE_x86_KEY            = { "enable_win_o
 const SettingsKey OVERLAY_WIN_HELPER_ENABLE_x64_KEY            = { "enable_win_overlay_helper_x64" };
 const SettingsKey OVERLAY_WIN_HELPER_RESTART_COOLDOWN_TIME_KEY = { "win_overlay_helper_restart_cooldown_time" };
 
-// LCD
-const SettingsKey LCD_USERVIEW_MIN_COLUMN_WIDTH_KEY = { "lcd_userview_min_column_width" };
-const SettingsKey LCD_USERVIEW_SPLITTER_WIDTH_KEY   = { "lcd_userview_splitter_width" };
 
 // Shortcuts
 const SettingsKey ENABLE_GLOBAL_SHORTCUTS_KEY              = { "enable_global_shortcuts" };

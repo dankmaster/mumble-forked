@@ -67,7 +67,6 @@ option(plugin-debug "Build Mumble with debug output for plugin developers." OFF)
 option(plugin-callback-debug "Build Mumble with debug output for plugin callbacks inside of Mumble." OFF)
 
 if(WIN32)
-	option(asio "Build support for ASIO audio input." OFF)
 	option(wasapi "Build support for WASAPI." ON)
 	option(xboxinput "Build support for global shortcuts from Xbox controllers via the XInput DLL." ON)
 	option(gkey "Build support for Logitech G-Keys. Note: This feature does not require any build-time dependencies, and requires Logitech Gaming Software to be installed to have any effect at runtime." ON)
@@ -95,7 +94,6 @@ elseif(UNIX)
 endif()
 
 if(NOT APPLE)
-	option(g15 "Include support for the G15 keyboard (and compatible devices)." OFF)
 endif()
 
 if(WIN32 OR APPLE)
@@ -222,9 +220,6 @@ set(MUMBLE_SOURCES
 	"GlobalShortcutTypes.h"
 	"JSONSerialization.cpp"
 	"JSONSerialization.h"
-	"LCD.cpp"
-	"LCD.h"
-	"LCD.ui"
 	"LegacyPlugin.cpp"
 	"LegacyPlugin.h"
 	"ListenerVolumeSlider.cpp"
@@ -567,7 +562,7 @@ add_library(mumble_client_object_lib OBJECT ${MUMBLE_SOURCES})
 target_link_libraries(mumble_client_object_lib PUBLIC smallft)
 
 if(WIN32)
-	# The Windows client pulls in a large, macro-heavy source set (WinSDK, ASIO, G15, overlay).
+	# The Windows client pulls in a large, macro-heavy source set (WinSDK, overlay).
 	# Building it outside of unity mode avoids batch-sensitive MSVC failures on the preview runner image.
 	set_target_properties(mumble_client_object_lib PROPERTIES UNITY_BUILD OFF)
 endif()
@@ -1320,32 +1315,6 @@ if(gkey)
 	target_compile_definitions(mumble_client_object_lib PUBLIC "USE_GKEY")
 endif()
 
-if(g15)
-	if(WIN32 OR APPLE)
-		target_sources(mumble_client_object_lib
-			PRIVATE
-				"G15LCDEngine_helper.cpp"
-				"G15LCDEngine_helper.h"
-		)
-	target_include_directories(mumble_client_object_lib PUBLIC "${CMAKE_SOURCE_DIR}/helpers")
-	add_dependencies(mumble g15-helper)
-	else()
-		find_library(LIB_G15DAEMON_CLIENT "g15daemon_client")
-		if(LIB_G15DAEMON_CLIENT-NOTFOUND)
-			message(FATAL_ERROR "G15 library not found!")
-		endif()
-
-		target_sources(mumble_client_object_lib
-			PRIVATE
-				"G15LCDEngine_unix.cpp"
-				"G15LCDEngine_unix.h"
-		)
-
-		target_compile_definitions(mumble_client_object_lib PUBLIC "USE_G15")
-		target_link_libraries(mumble_client_object_lib PUBLIC ${LIB_G15DAEMON_CLIENT})
-	endif()
-endif()
-
 if(zeroconf)
 	if(NOT APPLE)
 		find_pkg(avahi-compat-libdns_sd QUIET)
@@ -1388,27 +1357,6 @@ if(alsa)
 
 	target_compile_definitions(mumble_client_object_lib PUBLIC "USE_ALSA")
 	target_link_libraries(mumble_client_object_lib PUBLIC ALSA::ALSA)
-endif()
-
-if(asio)
-	if(NOT ASIO_DIR)
-		set(ASIO_DIR "${3RDPARTY_DIR}/asio")
-	endif()
-
-	target_sources(mumble_client_object_lib
-		PRIVATE
-			"ASIOInput.cpp"
-			"ASIOInput.h"
-			"ASIOInput.ui"
-	)
-
-	target_compile_definitions(mumble_client_object_lib PUBLIC "USE_ASIO")
-	target_include_directories(mumble_client_object_lib
-		SYSTEM PUBLIC
-			"${ASIO_DIR}/common"
-			"${ASIO_DIR}/host"
-			"${ASIO_DIR}/host/pc"
-	)
 endif()
 
 if(coreaudio)
@@ -1586,12 +1534,6 @@ if(packaging AND WIN32 AND NOT modern-layout-webengine)
 	if(plugins)
 		list(APPEND installer_vars
 			"--plugins"
-		)
-	endif()
-
-	if(g15)
-		list(APPEND installer_vars
-			"--g15"
 		)
 	endif()
 

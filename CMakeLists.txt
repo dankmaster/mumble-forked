@@ -199,10 +199,6 @@ else()
 	add_library(utfcpp ALIAS utf8cpp::utf8cpp)
 endif()
 
-if(g15 AND WIN32)
-	add_subdirectory("helpers/g15helper")
-endif()
-
 if(APPLE AND MUMBLE_TARGET_ARCH MATCHES "arm.*")
 	# mach_override doesn't support ARM
 	# https://github.com/rentzsch/mach_override/issues/6

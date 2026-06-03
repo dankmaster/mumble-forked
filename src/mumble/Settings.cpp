@@ -1041,11 +1041,6 @@ void Settings::legacyLoad(const QString &path) {
 	LOAD(iJitterBufferSize, "net/jitterbuffer");
 	LOAD(iFramesPerPacket, "net/framesperpacket");
 
-	LOAD(bASIOEnable, "asio/enable");
-	LOAD(qsASIOclass, "asio/class");
-	LOAD(qlASIOmic, "asio/mic");
-	LOAD(qlASIOspeaker, "asio/speaker");
-
 	LOAD(qsWASAPIInput, "wasapi/input");
 	LOAD(qsWASAPIOutput, "wasapi/output");
 	LOAD(qsWASAPIRole, "wasapi/role");
@@ -1219,10 +1214,6 @@ void Settings::legacyLoad(const QString &path) {
 	LOAD(bOverlayWinHelperX86Enable, "overlay_win/helper/x86/enable");
 	LOAD(bOverlayWinHelperX64Enable, "overlay_win/helper/x64/enable");
 
-	// LCD
-	LOAD(iLCDUserViewMinColWidth, "lcd/userview/mincolwidth");
-	LOAD(iLCDUserViewSplitterWidth, "lcd/userview/splitterwidth");
-
 	QByteArray qba = qvariant_cast< QByteArray >(settings_ptr->value(QLatin1String("net/certificate")));
 	if (!qba.isEmpty())
 		kpCertificate = CertWizard::importCert(qba);
@@ -1275,12 +1266,6 @@ void Settings::legacyLoad(const QString &path) {
 		LOAD(qmMessageSounds[it.key()], "logsound");
 	}
 	settings_ptr->endArray();
-
-	settings_ptr->beginGroup(QLatin1String("lcd/devices"));
-	for (const QString &d : settings_ptr->childKeys()) {
-		qmLCDDevices.insert(d, settings_ptr->value(d, true).toBool());
-	}
-	settings_ptr->endGroup();
 
 	// Plugins
 	settings_ptr->beginGroup(QLatin1String("plugins"));

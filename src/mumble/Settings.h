@@ -323,11 +323,6 @@ struct Settings {
 	int iPortAudioInput        = -1; // default device
 	int iPortAudioOutput       = -1; // default device
 
-	bool bASIOEnable                = true;
-	QString qsASIOclass             = {};
-	QList< QVariant > qlASIOmic     = {};
-	QList< QVariant > qlASIOspeaker = {};
-
 	QString qsCoreAudioInput  = {};
 	QString qsCoreAudioOutput = {};
 
@@ -373,10 +368,6 @@ struct Settings {
 	int iOverlayWinHelperRestartCooldownMsec = 10000;
 	bool bOverlayWinHelperX86Enable          = true;
 	bool bOverlayWinHelperX64Enable          = true;
-
-	int iLCDUserViewMinColWidth        = 50;
-	int iLCDUserViewSplitterWidth      = 2;
-	QMap< QString, bool > qmLCDDevices = {};
 
 	bool bShortcutEnable             = true;
 	bool bSuppressMacEventTapWarning = false;

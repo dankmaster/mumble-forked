@@ -29,7 +29,6 @@ class Log;
 class PluginManager;
 class QSettings;
 class Overlay;
-class LCD;
 class Zeroconf;
 class OverlayClient;
 class DeveloperConsole;
@@ -66,7 +65,6 @@ public:
 #ifdef USE_OVERLAY
 	Overlay *o;
 #endif
-	LCD *lcd;
 	Zeroconf *zeroconf;
 	QNetworkAccessManager *nam;
 	DeveloperConsole *c;

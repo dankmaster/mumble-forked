@@ -158,10 +158,6 @@ void to_json(nlohmann::json &j, const Settings &settings) {
 		j["messages"]["sounds"] = settings.qmMessageSounds;
 	}
 
-	if (settings.qmLCDDevices != defaultValues.qmLCDDevices) {
-		j["lcd"]["devices"] = settings.qmLCDDevices;
-	}
-
 	if (settings.qhPluginSettings != defaultValues.qhPluginSettings) {
 		j["plugins"] = settings.qhPluginSettings;
 	}
@@ -244,10 +240,6 @@ void from_json(const nlohmann::json &j, Settings &settings) {
 	}
 	if (json.contains("messages") && json.at("messages").contains("sounds")) {
 		settings.qmMessageSounds = json.at("messages").at("sounds");
-	}
-
-	if (json.contains("lcd") && json.at("lcd").contains("devices")) {
-		settings.qmLCDDevices = json.at("lcd").at("devices");
 	}
 
 	if (json.contains("plugins")) {

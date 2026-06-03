@@ -9,7 +9,6 @@
 #include "Channel.h"
 #include "ClientUser.h"
 #include "Database.h"
-#include "LCD.h"
 #include "Log.h"
 #include "MainWindow.h"
 #include "MumbleConstants.h"
@@ -2124,7 +2123,6 @@ void UserModel::updateOverlay() const {
 #ifdef USE_OVERLAY
 	Global::get().o->updateOverlay();
 #endif
-	Global::get().lcd->updateUserView();
 }
 
 

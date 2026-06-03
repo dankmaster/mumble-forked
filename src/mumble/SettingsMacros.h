@@ -116,10 +116,6 @@
 
 
 #define AUDIO_BACKEND_SETTINGS                                        \
-	PROCESS(audio_backend, ASIO_ENABLE_KEY, bASIOEnable)              \
-	PROCESS(audio_backend, ASIO_CLASS_KEY, qsASIOclass)               \
-	PROCESS(audio_backend, ASIO_MICROPHONE_KEY, qlASIOmic)            \
-	PROCESS(audio_backend, ASIO_SPEAKER_KEY, qlASIOspeaker)           \
 	PROCESS(audio_backend, WASAPI_INPUT_KEY, qsWASAPIInput)           \
 	PROCESS(audio_backend, WASAPI_OUTPUT_KEY, qsWASAPIOutput)         \
 	PROCESS(audio_backend, WASAPI_ROLE_KEY, qsWASAPIRole)             \
@@ -282,11 +278,6 @@
 	PROCESS(win_overlay, OVERLAY_WIN_HELPER_RESTART_COOLDOWN_TIME_KEY, iOverlayWinHelperRestartCooldownMsec)
 
 
-#define LCD_SETTINGS                                                         \
-	PROCESS(lcd, LCD_USERVIEW_MIN_COLUMN_WIDTH_KEY, iLCDUserViewMinColWidth) \
-	PROCESS(lcd, LCD_USERVIEW_SPLITTER_WIDTH_KEY, iLCDUserViewSplitterWidth)
-
-
 #define SHORTCUTS_SETTINGS                                                                    \
 	PROCESS(shortcuts, ENABLE_GLOBAL_SHORTCUTS_KEY, bShortcutEnable)                          \
 	PROCESS(shortcuts, SUPPRESS_MACOS_EVENT_TAPPING_WARNING_KEY, bSuppressMacEventTapWarning) \
@@ -383,7 +374,6 @@
 	RECORDING_SETTINGS         \
 	HIDDEN_SETTINGS            \
 	WIN_OVERLAY_SETTINGS       \
-	LCD_SETTINGS               \
 	SHORTCUTS_SETTINGS         \
 	SEARCH_SETTINGS
 
@@ -429,8 +419,6 @@
 	HIDDEN_SETTINGS                                      \
 	INTERMEDIATE_OPERATION                               \
 	WIN_OVERLAY_SETTINGS                                 \
-	INTERMEDIATE_OPERATION                               \
-	LCD_SETTINGS                                         \
 	INTERMEDIATE_OPERATION                               \
 	SHORTCUTS_SETTINGS                                   \
 	INTERMEDIATE_OPERATION                               \

@@ -15,7 +15,6 @@
 #ifdef Q_OS_WIN
 #	include "GlobalShortcut_win.h"
 #endif
-#include "LCD.h"
 #include "Log.h"
 #include "Logger.h"
 #include "MainWindow.h"
@@ -856,8 +855,6 @@ int main(int argc, char **argv) {
 	Global::get().o->setActive(Global::get().s.os.bEnable);
 #endif
 
-	Global::get().lcd = new LCD();
-
 	// Process any waiting events before initializing our MainWindow.
 	// The mumble:// URL support for Mac OS X happens through AppleEvents,
 	// so we need to loop a little before we begin.
@@ -899,7 +896,7 @@ int main(int argc, char **argv) {
 
 #ifdef Q_OS_WIN
 	// Set mumble_mw_hwnd in os_win.cpp.
-	// Used in ASIOInput and GlobalShortcut_win by APIs that require a HWND.
+	// Used in GlobalShortcut_win by APIs that require a HWND.
 	mumble_mw_hwnd = reinterpret_cast< HWND >(Global::get().mw->winId());
 #endif
 
@@ -1045,7 +1042,6 @@ int main(int argc, char **argv) {
 	sh.reset();
 
 	delete Global::get().nam;
-	delete Global::get().lcd;
 
 	delete Global::get().db;
 	delete Global::get().l;
