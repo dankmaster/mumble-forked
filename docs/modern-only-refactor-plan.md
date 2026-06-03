@@ -130,6 +130,40 @@ The whole plan branches on one product question:
     force-push to the shared `master`).
   - Remaining order: (1) ASIO page, (2) Overlay removal. `ConfigDialog` retirement waits
     on the deferred Plugins page.
+
+### Overlay removal — full map (execute in a fresh session; it's large)
+LCD + ASIO are CUT and committed on branch `modern-only/cut-lcd-asio` (`858c01f34`).
+Overlay is mapped but NOT yet removed — it's bigger than LCD+ASIO combined and would break
+the build if left half-done, so do it as its own focused pass. Surface to remove:
+
+- **Client files to delete (25):** all `src/mumble/Overlay*` —
+  `Overlay.{cpp,h,ui}`, `OverlayClient.*`, `OverlayConfig.*`, `OverlayEditor.{cpp,h,ui}`,
+  `OverlayEditorScene.*`, `OverlayPositionableItem.*`, `OverlayText.*`, `OverlayUser.*`,
+  `OverlayUserGroup.*`, `OverlayUtils.h`, `Overlay_macx.mm`, `Overlay_unix.cpp`,
+  `Overlay_win.{cpp,h}`.
+- **`USE_OVERLAY` guard sites (11 files):** `CMakeLists.txt`, `ConfigDialog.cpp`,
+  `Global.cpp`, `Global.h` (the `Overlay *o;` member + fwd decl), `GlobalShortcut_macx.mm`,
+  `main.cpp` (create `new Overlay()` ~853 + `delete Global::get().o` ~1057), `MainWindow.cpp`
+  (~12649 `if (Global::get().o) …`), `MainWindow.h`, `Messages.cpp`, `os_macx.mm`,
+  `UserModel.cpp` (the now-only line left in `updateOverlay()` — the whole method can go).
+- **Settings:** `OverlaySettings` struct in `Settings.h` (~lines 107–188) + `OverlaySettings os`
+  member (~366) + its `operator==/!=`; `OVERLAY_SETTINGS` + `WIN_OVERLAY_SETTINGS` macros and
+  `PROCESS_ALL_OVERLAY_SETTINGS(_WITH_INTERMEDIATE_OPERATION)` in `SettingsMacros.h` (and the
+  `WIN_OVERLAY_SETTINGS` entries in the two aggregate lists); all overlay keys in
+  `SettingsKeys.h`; the overlay `LOAD(...)` block in `Settings.cpp`; the `os` (de)serialization
+  in `JSONSerialization.cpp` (`j["overlay"]` ~166/249-250 and `to_json/from_json(OverlaySettings)`
+  ~292-303). NOTE: `OverlaySettings` is referenced by `Overlay.h`/config too — delete together.
+- **`OverlayConfig` registrar** (`ConfigRegistrar(6000)`) lives in `OverlayConfig.cpp` (deleted) —
+  removes the last-but-one classic config page leak.
+- **Separate subprojects to delete + de-register in root `CMakeLists.txt`:** dirs `overlay/`,
+  `overlay_gl/`, `overlay_winx64/`, `macx/osax/`; root options `overlay` (~124) and
+  `overlay-xcompile` (~126); the `if(overlay) add_subdirectory(...)` block (~209-220) and the
+  ARM-mac `set(overlay OFF …)` block (~204-207). Check `src/mumble/CMakeLists.txt` for
+  `Overlay*` source entries + any overlay helper copy/install steps + `--overlay` installer args.
+- **Translations:** overlay strings drop out via `lupdate` (don't hand-edit `.ts`).
+- Verify: configure + `cmake --build build-shared-webengine --target mumble` links clean; app
+  starts; no `Global::get().o` / `USE_OVERLAY` / `OverlaySettings` references remain
+  (`grep -rn "Overlay\|USE_OVERLAY\|\.o\b" src/mumble`).
 - Pattern for adding a page (per `ModernSettingsController`): add to `pages()`, add an
   `if (m_activePage == ...)` branch in `sectionsForActivePage()`, handle each field id in
   `updateField()`, handle any buttons in `invokeAction()`, map incoming names in
