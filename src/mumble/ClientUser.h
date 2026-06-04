@@ -10,7 +10,6 @@
 #include <QtCore/QReadWriteLock>
 
 #include "Settings.h"
-#include "Timer.h"
 #include "User.h"
 
 class ClientUser : public QObject, public User {
@@ -25,7 +24,6 @@ protected:
 
 public:
 	Settings::TalkState tsState;
-	Timer tLastTalkStateChange;
 	bool bLocalIgnore;
 	bool bLocalIgnoreTTS;
 	bool bLocalMute;
@@ -51,22 +49,12 @@ public:
 	std::optional< bool > getRemoteSpeechCleanupOverride() const;
 	void setRemoteSpeechCleanupOverride(std::optional< bool > enabled);
 
-	/**
-	 * Determines whether a user is active or not
-	 * A user is active when it is currently speaking or when the user has
-	 * spoken within Settings::uiActiveTime amount of seconds.
-	 */
-	bool isActive();
-
 	static QHash< unsigned int, ClientUser * > c_qmUsers;
 	static QReadWriteLock c_qrwlUsers;
 
 	static QList< ClientUser * > c_qlTalking;
 	static QReadWriteLock c_qrwlTalking;
 	static QList< ClientUser * > getTalking();
-	static QList< ClientUser * > getActive();
-
-	static void sortUsersOverlay(QList< ClientUser * > &list);
 
 	static ClientUser *get(unsigned int);
 	static bool isValid(unsigned int);
@@ -75,8 +63,6 @@ public:
 	static void remove(unsigned int);
 	static void remove(ClientUser *);
 
-protected:
-	static bool lessThanOverlay(const ClientUser *, const ClientUser *);
 public slots:
 	void setTalking(Settings::TalkState ts);
 	void setMute(bool mute);

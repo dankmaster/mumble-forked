@@ -157,26 +157,6 @@
 	PROCESS(Log::MsgType, ChannelListeningRemove, "ChannelListeningRemove") \
 	PROCESS(Log::MsgType, PluginMessage, "PluginMessage")
 
-#define OVERLAY_PRESETS_VALUES                                               \
-	PROCESS(OverlaySettings::OverlayPresets, AvatarAndName, "AvatarAndName") \
-	PROCESS(OverlaySettings::OverlayPresets, LargeSquareAvatar, "LargeSquareAvatar")
-
-#define OVERLAY_SHOW_VALUES                                           \
-	PROCESS(OverlaySettings::OverlayShow, Talking, "Talking")         \
-	PROCESS(OverlaySettings::OverlayShow, Active, "Active")           \
-	PROCESS(OverlaySettings::OverlayShow, HomeChannel, "HomeChannel") \
-	PROCESS(OverlaySettings::OverlayShow, LinkedChannels, "LinkedChannels")
-
-#define OVERLAY_SORT_VALUES                                             \
-	PROCESS(OverlaySettings::OverlaySort, Alphabetical, "Alphabetical") \
-	PROCESS(OverlaySettings::OverlaySort, LastStateChange, "LastStateChange")
-
-#define OVERLAY_EXCLUSION_MODE_VALUES                                                             \
-	PROCESS(OverlaySettings::OverlayExclusionMode, LauncherFilterExclusionMode, "LauncherFilter") \
-	PROCESS(OverlaySettings::OverlayExclusionMode, WhitelistExclusionMode, "Whitelist")           \
-	PROCESS(OverlaySettings::OverlayExclusionMode, BlacklistExclusionMode, "Blacklist")
-
-
 #define PROCESS_ALL_ENUMS                              \
 	BEFORE_CODE(Settings::AudioTransmit)               \
 	AUDIO_TRANSMIT_VALUES                              \
@@ -246,18 +226,6 @@
 	AFTER_CODE                                         \
 	BEFORE_CODE(Log::MsgType)                          \
 	LOG_MSG_TYPE_VALUES                                \
-	AFTER_CODE                                         \
-	BEFORE_CODE(OverlaySettings::OverlayPresets)       \
-	OVERLAY_PRESETS_VALUES                             \
-	AFTER_CODE                                         \
-	BEFORE_CODE(OverlaySettings::OverlayShow)          \
-	OVERLAY_SHOW_VALUES                                \
-	AFTER_CODE                                         \
-	BEFORE_CODE(OverlaySettings::OverlaySort)          \
-	OVERLAY_SORT_VALUES                                \
-	AFTER_CODE                                         \
-	BEFORE_CODE(OverlaySettings::OverlayExclusionMode) \
-	OVERLAY_EXCLUSION_MODE_VALUES                      \
 	AFTER_CODE
 
 
@@ -297,10 +265,6 @@ PROCESS_ALL_ENUMS
 #undef AFTER_CODE
 #undef BEFORE_CODE
 #undef PROCESS_ALL_ENUMS
-#undef OVERLAY_EXCLUSION_MODE_VALUES
-#undef OVERLAY_SORT_VALUES
-#undef OVERLAY_SHOW_VALUES
-#undef OVERLAY_PRESETS_VALUES
 #undef LOG_MSG_TYPE_VALUES
 #undef SEARCH_CHANNEL_ACTION_VALUES
 #undef SEARCH_USER_ACTION_VALUES

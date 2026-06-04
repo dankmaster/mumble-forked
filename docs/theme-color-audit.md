@@ -164,36 +164,6 @@ Reason:
 - This matches the design requirement to preserve the transmission meter
   gradient.
 
-### Overlay and editor tooling
-
-- `src/mumble/Overlay.cpp`
-- `src/mumble/OverlayClient.cpp`
-- `src/mumble/OverlayConfig.cpp`
-- `src/mumble/OverlayEditorScene.cpp`
-- `src/mumble/OverlayPositionableItem.cpp`
-- `src/mumble/OverlayText.cpp`
-- `src/mumble/OverlayUserGroup.cpp`
-- `src/tests/OverlayTest.cpp`
-
-Reason:
-
-- These colors belong to overlay rendering, editor handles, instructional text,
-  checker/guide visuals, alpha buffers, or test fixtures rather than the main
-  application theme surfaces.
-
-### User-configurable or utility visuals
-
-- `src/mumble/Settings.cpp`
-- `src/mumble/Settings.h`
-- `src/mumble/TalkingUI.cpp`
-- `src/mumble/TalkingUIEntry.cpp`
-- `src/mumble/LookConfig.cpp`
-
-Reason:
-
-- These colors are user-configurable overlay/talking UI defaults, preview
-  swatches, or transparent utility buffers.
-
 ### Other intentional exceptions
 
 - `src/mumble/ManualPlugin.cpp`

@@ -16,7 +16,7 @@ The fork keeps the normal Mumble foundation:
 - encrypted client/server sessions
 - channels, ACLs, groups, comments, and registration
 - classic Qt client UI and classic server administration paths
-- local recording controls, shortcuts, overlay/plugin infrastructure, and positional-audio plugin support
+- local recording controls, shortcuts, plugin infrastructure, and positional-audio plugin support
 - cross-platform CMake build structure and the upstream documentation tree
 
 ## Modern Client Shell

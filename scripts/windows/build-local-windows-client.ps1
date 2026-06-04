@@ -615,11 +615,6 @@ function Invoke-SharedWindowsPackaging {
 	Copy-FileIfExists -Source (Join-Path $BuildRoot "onnxruntime.dll") -Destination (Join-Path $stageRoot "onnxruntime.dll")
 	Copy-FileIfExists -Source (Join-Path $BuildRoot "mumble-updater.exe") -Destination (Join-Path $stageRoot "mumble-updater.exe")
 	Copy-FileIfExists -Source (Join-Path $BuildRoot "mumble-screen-helper.exe") -Destination (Join-Path $stageRoot "mumble-screen-helper.exe")
-	Copy-FileIfExists -Source (Join-Path $BuildRoot "mumble_ol.dll") -Destination (Join-Path $stageRoot "mumble_ol.dll")
-	Copy-FileIfExists -Source (Join-Path $BuildRoot "mumble_ol_helper.exe") -Destination (Join-Path $stageRoot "mumble_ol_helper.exe")
-	Copy-FileIfExists -Source (Join-Path $BuildRoot "mumble_ol_helper_x64.exe") -Destination (Join-Path $stageRoot "mumble_ol_helper_x64.exe")
-	Copy-FileIfExists -Source (Join-Path $BuildRoot "mumble_ol_x64.dll") -Destination (Join-Path $stageRoot "mumble_ol_x64.dll")
-
 	$stageExe = Join-Path $stageRoot "mumble.exe"
 	if (-not (Test-Path -LiteralPath $stageExe)) {
 		throw "Staged payload is missing mumble.exe at '$stageExe'."
@@ -698,9 +693,6 @@ function Invoke-SharedWindowsPackaging {
 		$installerArgs += "--all-languages"
 	}
 
-	if (Test-Path -LiteralPath (Join-Path $BuildRoot "mumble_ol.dll")) {
-		$installerArgs += "--overlay"
-	}
 	if (Test-Path -LiteralPath (Join-Path $BuildRoot "rnnoise.dll")) {
 		$installerArgs += "--rnnoise"
 	}
@@ -1391,7 +1383,6 @@ try {
 	if ($AllInstallerLanguages) {
 		$env:CMAKE_OPTIONS = "$($env:CMAKE_OPTIONS) -Dwindows-installer-all-languages=ON"
 	}
-	$env:MUMBLE_ENABLE_WINDOWS_OVERLAY_XCOMPILE = "ON"
 	$env:MUMBLE_SKIP_DATABASE_SETUP = "ON"
 	$env:MUMBLE_BUILD_NUMBER = $BuildNumber
 	if ($UseBundledSpdlog) {

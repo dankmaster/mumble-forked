@@ -322,14 +322,6 @@ set(MUMBLE_SOURCES
 	"SpeechCleanupProcessor.h"
 	"SvgIcon.cpp"
 	"SvgIcon.h"
-	"TalkingUI.cpp"
-	"TalkingUI.h"
-	"TalkingUIContainer.cpp"
-	"TalkingUIContainer.h"
-	"TalkingUIEntry.cpp"
-	"TalkingUIEntry.h"
-	"TalkingUISelection.cpp"
-	"TalkingUISelection.h"
 	"TextMessage.cpp"
 	"TextMessage.h"
 	"TextMessage.ui"
@@ -559,7 +551,7 @@ add_library(mumble_client_object_lib OBJECT ${MUMBLE_SOURCES})
 target_link_libraries(mumble_client_object_lib PUBLIC smallft)
 
 if(WIN32)
-	# The Windows client pulls in a large, macro-heavy source set (WinSDK, overlay).
+	# The Windows client pulls in a large, macro-heavy source set (WinSDK).
 	# Building it outside of unity mode avoids batch-sensitive MSVC failures on the preview runner image.
 	set_target_properties(mumble_client_object_lib PROPERTIES UNITY_BUILD OFF)
 endif()
@@ -841,8 +833,6 @@ if(WIN32)
 		"WinGUIDs.cpp"
 		"os_early_win.cpp"
 		"os_win.cpp"
-
-		"${CMAKE_SOURCE_DIR}/overlay/ods.cpp"
 	)
 
 	# WinGUIDs.cpp includes initguid.h which causes a macro definition in guiddef.h to be
@@ -1238,56 +1228,6 @@ elseif(bundle-qt-translations)
 	message(WARNING "Can't bundle Qt translations if translations are disabled!")
 endif()
 
-if(overlay)
-	target_sources(mumble_client_object_lib
-		PRIVATE
-			"Overlay.cpp"
-			"Overlay.h"
-			"Overlay.ui"
-			"OverlayClient.cpp"
-			"OverlayClient.h"
-			"OverlayConfig.cpp"
-			"OverlayConfig.h"
-			"OverlayEditor.cpp"
-			"OverlayEditor.h"
-			"OverlayEditor.ui"
-			"OverlayEditorScene.cpp"
-			"OverlayEditorScene.h"
-			"OverlayPositionableItem.cpp"
-			"OverlayPositionableItem.h"
-			"OverlayText.cpp"
-			"OverlayText.h"
-			"OverlayUser.cpp"
-			"OverlayUser.h"
-			"OverlayUserGroup.cpp"
-			"OverlayUserGroup.h"
-			"PathListWidget.cpp"
-			"PathListWidget.h"
-	)
-
-	if(WIN32)
-		target_sources(mumble_client_object_lib
-			PRIVATE
-				"Overlay_win.cpp"
-				"Overlay_win.h"
-		)
-
-		add_dependencies(mumble overlay)
-	else()
-		if(APPLE)
-			target_sources(mumble_client_object_lib PRIVATE "Overlay_macx.mm")
-		else()
-			target_sources(mumble_client_object_lib PRIVATE "Overlay_unix.cpp")
-		endif()
-
-                if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm|aarch64")
-			add_dependencies(mumble overlay_gl)
-		endif()
-	endif()
-
-	target_compile_definitions(mumble_client_object_lib PUBLIC "USE_OVERLAY")
-endif()
-
 if(plugins)
 	add_dependencies(mumble plugins)
 endif()
@@ -1458,7 +1398,6 @@ if(${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.16.0")
 			"GlobalShortcut_macx.mm"
 			"os_macx.mm"
 			"TextToSpeech_macx.mm"
-			"Overlay_macx.mm"
 			"CoreAudio.mm"
 			PROPERTIES
 				SKIP_UNITY_BUILD_INCLUSION TRUE
@@ -1522,12 +1461,6 @@ if(packaging AND WIN32 AND NOT modern-layout-webengine)
 		"--vc-redist-required" "${VC_REDIST_VERSION}"
 	)
 
-	if(overlay)
-		list(APPEND installer_vars
-			"--overlay"
-		)
-	endif()
-
 	if(plugins)
 		list(APPEND installer_vars
 			"--plugins"
@@ -1559,14 +1492,6 @@ if(packaging AND WIN32 AND NOT modern-layout-webengine)
 		DESTINATION
 			${CMAKE_BINARY_DIR}/installer/client
 	)
-
-	if (TARGET mumble_overlay_xcompile)
-		# Compilation of the xcompiled overlay binaries is handled by means of an external project
-		# We make the mumble target depend on the custom target created by ExternalProject_Add
-		# to ensure that the external project is built before the mumble target, ensuring that
-		# the POST_BUILD command below will find these binaries.
-		add_dependencies(mumble mumble_overlay_xcompile)
-	endif()
 
 	add_custom_command(TARGET mumble
 		POST_BUILD

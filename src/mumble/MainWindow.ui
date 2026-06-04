@@ -1031,17 +1031,6 @@ the channel's context menu.</string>
     <string>Listen to this channel without joining it</string>
    </property>
   </action>
-  <action name="qaTalkingUIToggle">
-   <property name="checkable">
-    <bool>true</bool>
-   </property>
-   <property name="text">
-    <string>Talking &amp;UI</string>
-   </property>
-   <property name="toolTip">
-    <string>Toggles the visibility of the TalkingUI.</string>
-   </property>
-  </action>
   <action name="qaUserJoin">
    <property name="text">
     <string>&amp;Join User's Channel</string>

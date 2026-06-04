@@ -12,9 +12,6 @@
 #include "Log.h"
 #include "MainWindow.h"
 #include "MumbleConstants.h"
-#ifdef USE_OVERLAY
-#	include "Overlay.h"
-#endif
 #include "ChannelListenerManager.h"
 #include "ServerHandler.h"
 #include "Usage.h"
@@ -1141,8 +1138,6 @@ void UserModel::recheckLinks() {
 	if (!clientUser)
 		return;
 
-	bool bChanged = false;
-
 	Channel *home = clientUser->cChannel;
 
 	QSet< Channel * > all = home->allLinks();
@@ -1161,10 +1156,7 @@ void UserModel::recheckLinks() {
 	for (Channel *c : changed) {
 		QModelIndex idx = index(c);
 		emit dataChanged(idx, idx);
-		bChanged = true;
 	}
-	if (bChanged)
-		updateOverlay();
 }
 
 ClientUser *UserModel::addUser(unsigned int id, const QString &name) {
@@ -1196,8 +1188,6 @@ ClientUser *UserModel::addUser(unsigned int id, const QString &name) {
 		citem->iUsers++;
 		citem = citem->parent;
 	}
-
-	updateOverlay();
 
 	emit userAdded(p->uiSession);
 
@@ -1233,8 +1223,6 @@ void UserModel::removeUser(ClientUser *p) {
 
 	if (Global::get().s.ceExpand == Settings::ChannelsWithUsers)
 		collapseEmpty(c);
-
-	updateOverlay();
 
 	emit userRemoved(p->uiSession);
 
@@ -1273,7 +1261,6 @@ void UserModel::moveUser(ClientUser *p, Channel *np) {
 
 	emit userMoved(p->uiSession, previousChannelID, np->iId);
 
-	updateOverlay();
 }
 
 void UserModel::renameUser(ClientUser *p, const QString &name) {
@@ -1284,7 +1271,6 @@ void UserModel::renameUser(ClientUser *p, const QString &name) {
 	ModelItem *item = ModelItem::c_qhUsers.value(p);
 	moveItem(pi, pi, item);
 
-	updateOverlay();
 }
 
 void UserModel::setUserId(ClientUser *p, int id) {
@@ -1523,7 +1509,6 @@ void UserModel::addChannelListener(ClientUser *p, Channel *c) {
 		citem = citem->parent;
 	}
 
-	updateOverlay();
 }
 
 void UserModel::removeChannelListener(const ClientUser *p, const Channel *c) {
@@ -1624,8 +1609,6 @@ void UserModel::removeChannelListener(ModelItem *item, ModelItem *citem) {
 
 	if (Global::get().s.ceExpand == Settings::ChannelsWithUsers)
 		collapseEmpty(c);
-
-	updateOverlay();
 
 	delete item;
 }
@@ -1737,7 +1720,6 @@ void UserModel::removeAll() {
 
 	qsLinked.clear();
 
-	updateOverlay();
 }
 
 ClientUser *UserModel::getUser(const QModelIndex &idx) const {
@@ -1847,7 +1829,6 @@ void UserModel::userTalkingStateChanged() {
 	const QModelIndex idx = index(user);
 	emit dataChanged(idx, idx, QVector< int > { Qt::DecorationRole, UserModel::NavigatorTalkStateRole });
 
-	updateOverlay();
 }
 
 void UserModel::userStateChanged() {
@@ -1859,7 +1840,6 @@ void UserModel::userStateChanged() {
 	const QModelIndex idx = index(user);
 	emit dataChanged(idx, idx);
 
-	updateOverlay();
 }
 
 void UserModel::on_channelListenerLocalVolumeAdjustmentChanged(unsigned int channelID, float oldValue, float newValue) {
@@ -1880,7 +1860,6 @@ void UserModel::forceVisualUpdate(Channel *c) {
 		Global::get().mw->qtvUsers->viewport()->update();
 	}
 
-	updateOverlay();
 }
 
 Qt::DropActions UserModel::supportedDropActions() const {
@@ -2118,13 +2097,6 @@ bool UserModel::dropMimeData(const QMimeData *md, Qt::DropAction, int row, int c
 	return true;
 #undef NAMECMPCHANNEL
 }
-
-void UserModel::updateOverlay() const {
-#ifdef USE_OVERLAY
-	Global::get().o->updateOverlay();
-#endif
-}
-
 
 QString UserModel::createDisplayString(const ClientUser &user, bool isChannelListener, const Channel *parentChannel) {
 	// Get the configured volume adjustment. Depending on whether

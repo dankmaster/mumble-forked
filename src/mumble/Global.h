@@ -28,11 +28,8 @@ class Database;
 class Log;
 class PluginManager;
 class QSettings;
-class Overlay;
 class Zeroconf;
-class OverlayClient;
 class DeveloperConsole;
-class TalkingUI;
 class TrayIcon;
 
 class QNetworkAccessManager;
@@ -62,13 +59,9 @@ public:
 	Log *l;
 	/// A pointer to the PluginManager that is used in this session
 	PluginManager *pluginManager;
-#ifdef USE_OVERLAY
-	Overlay *o;
-#endif
 	Zeroconf *zeroconf;
 	QNetworkAccessManager *nam;
 	DeveloperConsole *c;
-	TalkingUI *talkingUI;
 	int iPushToTalk;
 	Timer tDoublePush;
 	quint64 uiDoublePush;
@@ -83,9 +76,6 @@ public:
 	bool bPosTest;
 	bool bInAudioWizard;
 	bool inConfigUI;
-#ifdef USE_OVERLAY
-	OverlayClient *ocIntercept;
-#endif
 	int iAudioPathTime;
 	/// A unique ID for the current user. It is being assigned by the server right
 	/// after connecting to it. An ID of 0 indicates that the user currently isn't

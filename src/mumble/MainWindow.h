@@ -160,14 +160,10 @@ public:
 
 	GlobalShortcut *gsPushTalk, *gsResetAudio, *gsMuteSelf, *gsDeafSelf;
 	GlobalShortcut *gsUnlink, *gsPushMute, *gsJoinChannel;
-#ifdef USE_OVERLAY
-	GlobalShortcut *gsToggleOverlay;
-#endif
 	GlobalShortcut *gsMinimal, *gsVolumeUp, *gsVolumeDown, *gsWhisper, *gsLinkChannel, *gsListenChannel;
 	GlobalShortcut *gsCycleTransmitMode, *gsToggleMainWindowVisibility, *gsTransmitModePushToTalk,
 		*gsTransmitModeContinuous, *gsTransmitModeVAD;
 	GlobalShortcut *gsSendTextMessage, *gsSendClipboardTextMessage;
-	GlobalShortcut *gsToggleTalkingUI;
 	GlobalShortcut *gsToggleSearch;
 	GlobalShortcut *gsServerConnect, *gsServerDisconnect, *gsServerInformation, *gsServerTokens;
 	GlobalShortcut *gsServerUserList, *gsServerBanList;
@@ -274,8 +270,7 @@ public:
 		Navigator,
 		ModernShell,
 		PersistentChat,
-		UserInformation,
-		Overlay
+		UserInformation
 	};
 
 	bool ensureUserTextureAvailable(ClientUser *user, UserTextureRequestReason reason);
@@ -1244,7 +1239,6 @@ public slots:
 	void on_gsTransmitModeVAD_triggered(bool, QVariant);
 	void on_gsSendTextMessage_triggered(bool, QVariant);
 	void on_gsSendClipboardTextMessage_triggered(bool, QVariant);
-	void on_gsToggleTalkingUI_triggered(bool, QVariant);
 	void on_gsToggleSearch_triggered(bool, QVariant);
 	void on_gsServerConnect_triggered(bool, QVariant);
 	void on_gsServerDisconnect_triggered(bool, QVariant);
@@ -1274,7 +1268,6 @@ public slots:
 	void on_gsAdaptivePush_triggered(bool, QVariant);
 
 	void on_Reconnect_timeout();
-	void on_qaTalkingUIToggle_triggered();
 	void voiceRecorderDialog_finished(int);
 	void qtvUserCurrentChanged(const QModelIndex &, const QModelIndex &);
 	void serverConnected();

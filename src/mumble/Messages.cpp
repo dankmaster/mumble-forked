@@ -25,16 +25,12 @@
 #include "MainWindow.h"
 #include "MumbleConstants.h"
 #include "GlobalShortcut.h"
-#ifdef USE_OVERLAY
-#	include "Overlay.h"
-#endif
 #include "ChannelListenerManager.h"
 #include "PluginManager.h"
 #include "ProtoUtils.h"
 #include "ScreenShare.h"
 #include "ScreenShareManager.h"
 #include "ServerHandler.h"
-#include "TalkingUI.h"
 #include "User.h"
 #include "UserEdit.h"
 #include "UserInformation.h"
@@ -747,8 +743,6 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 			pDst = pmModel->addUser(msg.session(), u8(msg.name()));
 		}
 
-		connect(pDst, &ClientUser::talkingStateChanged, Global::get().talkingUI, &TalkingUI::on_talkingStateChanged);
-		connect(pDst, &ClientUser::muteDeafStateChanged, Global::get().talkingUI, &TalkingUI::on_muteDeafStateChanged);
 		appendUserStateTrace(QStringLiteral("connected-signals"));
 
 		if (channel && channel != pDst->cChannel) {
@@ -1322,8 +1316,6 @@ void MainWindow::msgUserRemove(const MumbleProto::UserRemove &msg) {
 		}
 	}
 
-	QMetaObject::invokeMethod(Global::get().talkingUI, "on_clientDisconnected", Qt::QueuedConnection,
-							  Q_ARG(unsigned int, pDst->uiSession));
 	if (Global::get().mw->m_searchDialog) {
 		QMetaObject::invokeMethod(Global::get().mw->m_searchDialog, "on_clientDisconnected", Qt::QueuedConnection,
 								  Q_ARG(unsigned int, pDst->uiSession));

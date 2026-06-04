@@ -253,10 +253,7 @@ ConfigDialog::ConfigDialog(QWidget *p) : QDialog(p) {
 	}
 
 	if (!Global::get().s.qbaConfigGeometry.isEmpty()) {
-#ifdef USE_OVERLAY
-		if (!Global::get().ocIntercept)
-#endif
-			restoreGeometry(Global::get().s.qbaConfigGeometry);
+		restoreGeometry(Global::get().s.qbaConfigGeometry);
 	}
 
 	updateTabOrder();
@@ -493,10 +490,7 @@ void ConfigDialog::apply() {
 void ConfigDialog::accept() {
 	apply();
 
-#ifdef USE_OVERLAY
-	if (!Global::get().ocIntercept)
-#endif
-		Global::get().s.qbaConfigGeometry = saveGeometry();
+	Global::get().s.qbaConfigGeometry = saveGeometry();
 
 	// Save settings to disk
 	Global::get().s.save();

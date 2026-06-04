@@ -15,29 +15,6 @@ if(NOT BUILD_RELEASE_DATE)
 	endif()
 endif()
 
-if(overlay)
-	if(UNIX AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm|aarch64")
-		delayed_configure_files(
-			TARGET overlay_gl
-			FILES
-				"${CMAKE_CURRENT_SOURCE_DIR}/run_scripts/mumble-overlay.in=${CMAKE_CURRENT_BINARY_DIR}/mumble-overlay"
-			PASSTHROUGH_VARIABLES
-				MUMBLE_BUILD_YEAR
-				MUMBLE_INSTALL_ABS_LIBDIR
-			VARIABLES
-				"MUMBLE_OVERLAY_BINARY_BASENAME=$<TARGET_FILE_BASE_NAME:overlay_gl>"
-				PYTHON_INTERPRETER Python::Interpreter
-			@ONLY
-		)
-
-		# install overlay script
-		install(PROGRAMS "${CMAKE_CURRENT_BINARY_DIR}/mumble-overlay" DESTINATION "${MUMBLE_INSTALL_SCRIPTDIR}")
-
-		# install overlay man-files
-		install(FILES "man_files/mumble-overlay.1" DESTINATION "${MUMBLE_INSTALL_MANDIR}" COMPONENT doc)
-	endif()
-endif()
-
 if(client AND UNIX AND NOT APPLE)
 	delayed_configure_files(
 		TARGET mumble

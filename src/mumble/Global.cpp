@@ -98,7 +98,6 @@ Global::Global(const QString &qsConfigPath) {
 	pluginManager   = nullptr;
 	nam             = nullptr;
 	c               = nullptr;
-	talkingUI       = nullptr;
 	uiSession       = 0;
 	uiDoublePush    = 1000000;
 	iPushToTalk     = 0;
@@ -147,11 +146,6 @@ Global::Global(const QString &qsConfigPath) {
 	zeroconf = nullptr;
 	l        = nullptr;
 
-#ifdef USE_OVERLAY
-	ocIntercept = nullptr;
-	o           = nullptr;
-#endif
-
 	bHappyEaster = false;
 
 	bQuit            = false;
@@ -176,8 +170,6 @@ Global::Global(const QString &qsConfigPath) {
 
 	if (!qdBasePath.exists(QLatin1String("Plugins")))
 		qdBasePath.mkpath(QLatin1String("Plugins"));
-	if (!qdBasePath.exists(QLatin1String("Overlay")))
-		qdBasePath.mkpath(QLatin1String("Overlay"));
 	if (!qdBasePath.exists(QLatin1String("Themes")))
 		qdBasePath.mkpath(QLatin1String("Themes"));
 }

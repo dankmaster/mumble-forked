@@ -30,9 +30,6 @@ When cloning the repo, the source tree should look something like this:
 ├── installer
 ├── macx
 ├── man
-├── overlay
-├── overlay_gl
-├── overlay_winx64
 ├── plugins
 ├── samples
 ├── screenshots
@@ -63,11 +60,8 @@ documentation. The more extended user documentation is available on our website.
 Windows installer. If you want to tinker with that, you have to know that we are using [WixSharp](https://github.com/oleg-shilo/wixsharp) for managing
 it.
 
-`macx` contains some macOS specific files (mostly overlay-related and scripts used for release mangement), whereas `man` contains the man entries
+`macx` contains some macOS specific files and scripts used for release mangement, whereas `man` contains the man entries
 (used on Windows) for the Mumble client and server.
-
-The `overlay*` directories contain the implementation for the Mumble overlay for the various platforms. We will not go into detail for those here, as
-they aren't really part of the main Mumble source (I mean they are, but yet they aren't).
 
 If you are into plugin development or you want to mess with existing plugins, the `plugins` directory is where you want to look. It contains the
 available bundled plugin sources and the plugin headers needed to create new ones. For further documentation on that,

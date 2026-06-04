@@ -237,7 +237,6 @@ public slots:
 	void on_channelListenerLocalVolumeAdjustmentChanged(unsigned int channelID, float oldValue, float newValue);
 	void ensureSelfVisible();
 	void recheckLinks();
-	void updateOverlay() const;
 	void forceVisualUpdate(Channel *c = nullptr);
 signals:
 	/// A signal emitted whenever a user is added to the model.

@@ -162,10 +162,6 @@ void to_json(nlohmann::json &j, const Settings &settings) {
 		j["plugins"] = settings.qhPluginSettings;
 	}
 
-	if (settings.os != defaultValues.os) {
-		j["overlay"] = settings.os;
-	}
-
 	j[SettingsKeys::CERTIFICATE_KEY] = CertWizard::exportCert(settings.kpCertificate);
 
 	// Save whether Mumble has quit regularly (in contrast to having crashed). This flag is set right before saving the
@@ -246,10 +242,6 @@ void from_json(const nlohmann::json &j, Settings &settings) {
 		settings.qhPluginSettings = json.at("plugins");
 	}
 
-	if (json.contains("overlay")) {
-		settings.os = json.at("overlay");
-	}
-
 	if (json.contains(static_cast< const char * >(SettingsKeys::CERTIFICATE_KEY))) {
 		settings.kpCertificate = CertWizard::importCert(json.at(SettingsKeys::CERTIFICATE_KEY));
 	}
@@ -288,24 +280,6 @@ void from_json(const nlohmann::json &j, Settings &settings) {
 		settings.remoteSpeechCleanupEnabled = false;
 	}
 }
-
-void to_json(nlohmann::json &j, const OverlaySettings &settings) {
-#define PROCESS(category, key, variable) save(j, SettingsKeys::key, settings.variable);
-
-	PROCESS_ALL_OVERLAY_SETTINGS
-
-#undef PROCESS
-}
-
-void from_json(const nlohmann::json &j, OverlaySettings &settings) {
-#define PROCESS(category, key, variable) load(j, SettingsKeys::key, settings.variable, settings.variable, true);
-
-	PROCESS_ALL_OVERLAY_SETTINGS
-
-#undef PROCESS
-}
-
-
 
 void to_json(nlohmann::json &j, const QString &string) {
 	j = string.toStdString();

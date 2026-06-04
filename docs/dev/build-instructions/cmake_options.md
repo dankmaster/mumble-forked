@@ -19,11 +19,6 @@ Build support for ALSA.
 Build benchmarks
 (Default: OFF)
 
-### BUILD_OVERLAY_XCOMPILE
-
-Build an x86 overlay
-(Default: OFF)
-
 ### bundle-qt-translations
 
 Bundle Qt's translations as well
@@ -168,16 +163,6 @@ Build a heavily optimized version, specific to the machine it's being compiled o
 
 Build support for OSS.
 (Default: ON)
-
-### overlay
-
-Build overlay.
-(Default: ${client})
-
-### overlay-xcompile
-
-Build 32 bit overlay library, necessary for the overlay to work with 32 bit processes.
-(Default: ${client})
 
 ### packaging
 

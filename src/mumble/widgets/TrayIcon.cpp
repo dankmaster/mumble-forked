@@ -46,8 +46,6 @@ TrayIcon::TrayIcon() : QSystemTrayIcon(Global::get().mw), m_statusIcon(Global::g
 	m_hideAction = new QAction(tr("Hide"), Global::get().mw);
 	QObject::connect(m_hideAction, &QAction::triggered, this, &TrayIcon::on_hideAction_triggered);
 
-	QObject::connect(Global::get().mw->qaTalkingUIToggle, &QAction::triggered, this, &TrayIcon::updateContextMenu);
-
 	m_contextMenu = new QMenu(Global::get().mw);
 	QObject::connect(m_contextMenu, &QMenu::aboutToShow, this, &TrayIcon::updateContextMenu);
 
@@ -132,7 +130,6 @@ void TrayIcon::updateContextMenu() {
 
 	m_contextMenu->addAction(Global::get().mw->qaAudioMute);
 	m_contextMenu->addAction(Global::get().mw->qaAudioDeaf);
-	m_contextMenu->addAction(Global::get().mw->qaTalkingUIToggle);
 	m_contextMenu->addSeparator();
 	m_contextMenu->addAction(Global::get().mw->qaQuit);
 }

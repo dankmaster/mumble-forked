@@ -30,10 +30,6 @@
 #include "OSInfo.h"
 #include "GlobalShortcut.h"
 #include "GlobalShortcutTypes.h"
-#ifdef USE_OVERLAY
-#	include "Overlay.h"
-#	include "OverlayClient.h"
-#endif
 #include "../SignalCurry.h"
 #include "ChannelListenerManager.h"
 #include "ChatFeature.h"
@@ -81,7 +77,6 @@
 #include "Settings.h"
 #include "SSL.h"
 #include "SvgIcon.h"
-#include "TalkingUI.h"
 #include "TextMessage.h"
 #include "Themes.h"
 #include "Tokens.h"
@@ -12853,11 +12848,6 @@ void MainWindow::refreshUserTextureViews(ClientUser *user) {
 		}
 	}
 
-#ifdef USE_OVERLAY
-	if (Global::get().o) {
-		Global::get().o->updateOverlay();
-	}
-#endif
 }
 
 void MainWindow::clearUserTextureRequest(unsigned int session) {
@@ -13119,16 +13109,6 @@ void MainWindow::createActions() {
 	gsListenChannel->setObjectName(QLatin1String("gsListenChannel"));
 	gsListenChannel->qsToolTip = tr("Toggles listening to the given channel.", "Global Shortcut");
 
-#ifdef USE_OVERLAY
-	gsToggleOverlay =
-		new GlobalShortcut(this, GlobalShortcutType::ToggleOverlay, tr("Toggle Overlay", "Global Shortcut"));
-	gsToggleOverlay->setObjectName(QLatin1String("ToggleOverlay"));
-	gsToggleOverlay->qsToolTip   = tr("Toggle state of in-game overlay.", "Global Shortcut");
-	gsToggleOverlay->qsWhatsThis = tr("This will switch the states of the in-game overlay.", "Global Shortcut");
-
-	connect(gsToggleOverlay, SIGNAL(down(QVariant)), Global::get().o, SLOT(toggleShow()));
-#endif
-
 	gsMinimal =
 		new GlobalShortcut(this, GlobalShortcutType::ToggleMinimalView, tr("Toggle Minimal", "Global Shortcut"));
 	gsMinimal->setObjectName(QLatin1String("ToggleMinimal"));
@@ -13177,11 +13157,6 @@ void MainWindow::createActions() {
 	gsSendClipboardTextMessage->setObjectName(QLatin1String("gsSendClipboardTextMessage"));
 	gsSendClipboardTextMessage->qsWhatsThis =
 		tr("This will send your Clipboard content to the channel you are currently in.", "Global Shortcut");
-
-	gsToggleTalkingUI =
-		new GlobalShortcut(this, GlobalShortcutType::ToggleTalkingUI, tr("Toggle TalkingUI", "Global shortcut"));
-	gsToggleTalkingUI->setObjectName(QLatin1String("gsToggleTalkingUI"));
-	gsToggleTalkingUI->qsWhatsThis = tr("Toggles the visibility of the TalkingUI.", "Global Shortcut");
 
 	gsToggleSearch =
 		new GlobalShortcut(this, GlobalShortcutType::ToggleSearch, tr("Toggle search dialog", "Global Shortcut"));
@@ -21221,9 +21196,6 @@ void MainWindow::applyModernSettings(const Settings &settings, const bool accept
 	}
 	Audio::start();
 
-	if (Global::get().talkingUI) {
-		Global::get().talkingUI->on_settingsChanged();
-	}
 	if (Global::get().s.requireThemeApplication) {
 		Themes::apply();
 		refreshCustomChromeStyles();
@@ -21657,8 +21629,6 @@ ModernShellMenuSerializer::ActionDefinition
 				definition.id = QStringLiteral("configure.minimal");
 			} else if (action == qaFilterToggle) {
 				definition.id = QStringLiteral("configure.filterToggle");
-			} else if (action == qaTalkingUIToggle) {
-				definition.id = QStringLiteral("configure.talkingUi");
 			} else if (action == qaConfigHideFrame) {
 				definition.id = QStringLiteral("configure.hideFrame");
 			}
@@ -36884,13 +36854,6 @@ void MainWindow::closeEvent(QCloseEvent *e) {
 
 	storeState(Global::get().s.bMinimalView);
 
-	if (Global::get().talkingUI && Global::get().talkingUI->isVisible()) {
-		// Save the TalkingUI's position if it is visible
-		// Note that we explicitly don't save the whole geometry as the TalkingUI's size
-		// is a flexible thing that'll adjust automatically anyways.
-		Global::get().s.qpTalkingUI_Position = Global::get().talkingUI->pos();
-	}
-
 	if (m_searchDialog) {
 		// Save position of search dialog
 		Global::get().s.searchDialogPosition = { m_searchDialog->x(), m_searchDialog->y() };
@@ -36909,13 +36872,6 @@ void MainWindow::closeEvent(QCloseEvent *e) {
 }
 
 void MainWindow::hideEvent(QHideEvent *e) {
-#ifdef USE_OVERLAY
-	if (Global::get().ocIntercept) {
-		QMetaObject::invokeMethod(Global::get().ocIntercept, "hideGui", Qt::QueuedConnection);
-		e->ignore();
-		return;
-	}
-#endif
 	QMainWindow::hideEvent(e);
 }
 
@@ -37887,9 +37843,6 @@ static void recreateServerHandler() {
 	Global::get().mw->connect(sh.get(), &ServerHandler::pingRequested, Global::get().mw,
 							  &MainWindow::publishModernShellRoomStatePatch);
 #endif
-
-	QObject::connect(sh.get(), &ServerHandler::disconnected, Global::get().talkingUI,
-					 &TalkingUI::on_serverDisconnected);
 
 	// We have to use direct connections for these here as the PluginManager must be able to access the connection's ID
 	// and in order for that to be possible the (dis)connection process must not proceed in the background.
@@ -40356,9 +40309,6 @@ void MainWindow::on_qmConfig_aboutToShow() {
 	qmConfig->addAction(qaConfigMinimal);
 	qmConfig->addAction(qaFilterToggle);
 
-	qaTalkingUIToggle->setChecked(Global::get().talkingUI && Global::get().talkingUI->isVisible());
-
-	qmConfig->addAction(qaTalkingUIToggle);
 	if (Global::get().s.bMinimalView)
 		qmConfig->addAction(qaConfigHideFrame);
 }
@@ -41643,12 +41593,6 @@ void MainWindow::on_gsSendClipboardTextMessage_triggered(bool down, QVariant) {
 	sendChatbarMessage(QApplication::clipboard()->text());
 }
 
-void MainWindow::on_gsToggleTalkingUI_triggered(bool down, QVariant) {
-	if (down) {
-		qaTalkingUIToggle->trigger();
-	}
-}
-
 void MainWindow::on_gsToggleSearch_triggered(bool down, QVariant) {
 	if (!down) {
 		return;
@@ -42419,17 +42363,6 @@ void MainWindow::highlightWindow() {
 	QApplication::alert(this);
 }
 
-void MainWindow::on_qaTalkingUIToggle_triggered() {
-	if (!Global::get().talkingUI) {
-		qCritical("MainWindow: Attempting to show Talking UI before it has been created!");
-		return;
-	}
-
-	Global::get().talkingUI->setVisible(!Global::get().talkingUI->isVisible());
-
-	Global::get().s.bShowTalkingUI = Global::get().talkingUI->isVisible();
-}
-
 /**
  * This function updates the qteChat bar default text according to
  * the selected user/channel in the users treeview.
@@ -42656,15 +42589,6 @@ void MainWindow::on_qteLog_anchorClicked(const QUrl &url) {
 	}
 
 	if (!handleSpecialContextMenu(url, QCursor::pos(), true)) {
-#if defined(Q_OS_MAC) && defined(USE_OVERLAY)
-		// Clicking a link can cause the user's default browser to pop up while
-		// we're intercepting all events. This can be very confusing (because
-		// the user can't click on anything before they dismiss the overlay
-		// by hitting their toggle hotkey), so let's disallow clicking links
-		// when embedded into the overlay for now.
-		if (Global::get().ocIntercept)
-			return;
-#endif
 		if (url.scheme() != QLatin1String("file") && url.scheme() != QLatin1String("qrc") && !url.isRelative()) {
 			QUrl fallbackUrl;
 			const QUrl externalUrl = preferredExternalUrlForActivatedLink(url, &fallbackUrl);
@@ -43075,7 +42999,6 @@ void MainWindow::openConfigDialogPage(const QString &pageName) {
 
 	Global::get().inConfigUI = true;
 
-	QObject::connect(dlg, &ConfigDialog::settingsAccepted, Global::get().talkingUI, &TalkingUI::on_settingsChanged);
 	QObject::connect(dlg, &ConfigDialog::settingsAccepted, []() {
 		if (Global::get().s.requireThemeApplication) {
 			Themes::apply();

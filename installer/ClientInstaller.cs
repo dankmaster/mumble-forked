@@ -19,7 +19,6 @@ using WixSharp.Bootstrapper;
 using WixSharp.CommonTasks;
 
 public struct Features {
-	public bool overlay;
 	public bool plugins;
 	public bool rnnoise;
 	public bool screenShareHelper;
@@ -152,13 +151,6 @@ public class ClientInstaller : MumbleInstall {
 				binaries.Add("mumble-screen-helper.exe");
 			}
 
-			if (features.overlay) {
-				binaries.Add("mumble_ol.dll");
-				binaries.Add("mumble_ol_helper.exe");
-				binaries.Add("mumble_ol_helper_x64.exe");
-				binaries.Add("mumble_ol_x64.dll");
-			}
-
 		} else if (arch == "x86") {
 			// 32 bit
 			this.Platform = WixSharp.Platform.x86;
@@ -174,11 +166,6 @@ public class ClientInstaller : MumbleInstall {
 
 			if (features.screenShareHelper) {
 				binaries.Add("mumble-screen-helper.exe");
-			}
-
-			if (features.overlay) {
-				binaries.Add("mumble_ol.dll");
-				binaries.Add("mumble_ol_helper.exe");
 			}
 
 		}
@@ -291,10 +278,6 @@ class BuildInstaller
 
 			if (args[i] == "--vc-redist-required") {
 				vcRedistRequired = args[i + 1];
-			}
-
-			if (args[i] == "--overlay") {
-				features.overlay = true;
 			}
 
 			if (args[i] == "--plugins") {

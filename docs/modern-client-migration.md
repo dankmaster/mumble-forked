@@ -49,7 +49,6 @@ legacy classes can be deleted safely.
 - `src/mumble/Log.ui`
 - `src/mumble/LookConfig.ui`
 - `src/mumble/NetworkConfig.ui`
-- `src/mumble/Overlay.ui`
 - `src/mumble/PluginConfig.ui`
 - `src/mumble/SearchDialog.ui`
 
@@ -78,13 +77,12 @@ legacy classes can be deleted safely.
 - `src/mumble/AudioWizard.ui`
 - `src/mumble/Cert.ui`
 
-### Priority 5: Plugin, Overlay, Recorder, And Tool Windows
+### Priority 5: Plugin, Recorder, And Tool Windows
 
 - `src/mumble/AudioStats.ui`
 - `src/mumble/GlobalShortcutButtons.ui`
 - `src/mumble/GlobalShortcutTarget.ui`
 - `src/mumble/ManualPlugin.ui`
-- `src/mumble/OverlayEditor.ui`
 - `src/mumble/PluginInstaller.ui`
 - `src/mumble/PluginUpdater.ui`
 - `src/mumble/PTTButtonWidget.ui`

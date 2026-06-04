@@ -37,11 +37,6 @@ const char *enumToString(StyleType e);
 const char *enumToString(Search::SearchDialog::UserAction e);
 const char *enumToString(Search::SearchDialog::ChannelAction e);
 const char *enumToString(Log::MsgType e);
-const char *enumToString(OverlaySettings::OverlayPresets e);
-const char *enumToString(OverlaySettings::OverlayShow e);
-const char *enumToString(OverlaySettings::OverlaySort e);
-const char *enumToString(OverlaySettings::OverlayExclusionMode e);
-
 namespace details {
 
 void stringToEnum(const std::string &str, Settings::AudioTransmit &e);
@@ -67,11 +62,6 @@ void stringToEnum(const std::string &str, StyleType &e);
 void stringToEnum(const std::string &str, Search::SearchDialog::UserAction &e);
 void stringToEnum(const std::string &str, Search::SearchDialog::ChannelAction &e);
 void stringToEnum(const std::string &str, Log::MsgType &e);
-void stringToEnum(const std::string &str, OverlaySettings::OverlayPresets &e);
-void stringToEnum(const std::string &str, OverlaySettings::OverlayShow &e);
-void stringToEnum(const std::string &str, OverlaySettings::OverlaySort &e);
-void stringToEnum(const std::string &str, OverlaySettings::OverlayExclusionMode &e);
-
 } // namespace details
 
 template< typename T > T stringToEnum(const std::string &str) {

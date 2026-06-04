@@ -1127,32 +1127,6 @@ ViewCert {
   min-height: 600px;
 }
 
-TalkingUI {
-  background-color: #191f26;
-}
-
-TalkingUI > * {
-  background-color: #191f26;
-}
-
-TalkingUI [selected=false] {
-  background-color: #191f26;
-}
-
-TalkingUI [selected=false]:hover {
-  background-color: #252d36;
-}
-
-TalkingUI [selected=true] {
-  background-color: #37546e;
-  border: 1px solid #5c86a8;
-}
-
-TalkingUI > QFrame {
-  border: 1px solid;
-  border-color: #39424d;
-  border-radius: 2px;
-}
 
 QToolBar {
   background-color: transparent;

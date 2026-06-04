@@ -17,9 +17,8 @@ QList< ClientUser * > ClientUser::c_qlTalking;
 QReadWriteLock ClientUser::c_qrwlTalking;
 
 ClientUser::ClientUser(QObject *p)
-	: QObject(p), tsState(Settings::Passive), tLastTalkStateChange(false), bLocalIgnore(false), bLocalIgnoreTTS(false),
-	  bLocalMute(false), volumeMute(false), fPowerMin(0.0f), fPowerMax(0.0f), fAverageAvailable(0.0f), iFrames(0),
-	  iSequence(0) {
+	: QObject(p), tsState(Settings::Passive), bLocalIgnore(false), bLocalIgnoreTTS(false), bLocalMute(false),
+	  volumeMute(false), fPowerMin(0.0f), fPowerMax(0.0f), fAverageAvailable(0.0f), iFrames(0), iSequence(0) {
 }
 
 float ClientUser::getLocalVolumeAdjustments() const {
@@ -51,16 +50,6 @@ ClientUser *ClientUser::get(unsigned int uiSession) {
 QList< ClientUser * > ClientUser::getTalking() {
 	QReadLocker lock(&c_qrwlTalking);
 	return c_qlTalking;
-}
-
-QList< ClientUser * > ClientUser::getActive() {
-	QReadLocker lock(&c_qrwlUsers);
-	QList< ClientUser * > activeUsers;
-	for (ClientUser *cu : c_qmUsers) {
-		if (cu->isActive())
-			activeUsers << cu;
-	}
-	return activeUsers;
 }
 
 bool ClientUser::isValid(unsigned int uiSession) {
@@ -173,7 +162,6 @@ void ClientUser::setTalking(Settings::TalkState ts) {
 		nstate = true;
 
 	tsState = ts;
-	tLastTalkStateChange.restart();
 	emit talkingStateChanged();
 
 	if (nstate && cChannel) {
@@ -267,68 +255,6 @@ void ClientUser::setLocalNickname(const QString &nickname) {
 
 		emit localNicknameChanged();
 	}
-}
-
-bool ClientUser::lessThanOverlay(const ClientUser *first, const ClientUser *second) {
-	if (Global::get().s.os.osSort == OverlaySettings::LastStateChange) {
-		// Talkers above non-talkers
-		if (first->tsState != Settings::Passive && second->tsState == Settings::Passive)
-			return true;
-		if (first->tsState == Settings::Passive && second->tsState != Settings::Passive)
-			return false;
-
-		// Valid time above invalid time (possible when there wasn't a state-change yet)
-		if (first->tLastTalkStateChange.isStarted() && !second->tLastTalkStateChange.isStarted())
-			return true;
-		if (!first->tLastTalkStateChange.isStarted() && second->tLastTalkStateChange.isStarted())
-			return false;
-
-		// If both have a valid time
-		if (first->tLastTalkStateChange.isStarted() && second->tLastTalkStateChange.isStarted()) {
-			// Among talkers, long > short
-			// (if two clients are talking, the client that started first is above the other)
-			if (first->tsState != Settings::Passive && second->tsState != Settings::Passive)
-				return first->tLastTalkStateChange > second->tLastTalkStateChange;
-
-			// Among non-talkers, short -> long
-			// (if two clients are passive, the client that most recently stopped talking is above)
-			if (first->tsState == Settings::Passive && second->tsState == Settings::Passive)
-				return first->tLastTalkStateChange < second->tLastTalkStateChange;
-		}
-
-		// If both times are invalid, fall back to alphabetically (continuing below)
-	}
-
-	if (first->cChannel == second->cChannel || !first->cChannel || !second->cChannel)
-		return lessThan(first, second);
-
-	// When sorting for the overlay always place the local users
-	// channel above the others
-	ClientUser *self = c_qmUsers.value(Global::get().uiSession);
-	if (self) {
-		if (self->cChannel == first->cChannel)
-			return true;
-		else if (self->cChannel == second->cChannel)
-			return false;
-	}
-
-	return Channel::lessThan(first->cChannel, second->cChannel);
-}
-
-void ClientUser::sortUsersOverlay(QList< ClientUser * > &list) {
-	QReadLocker lock(&c_qrwlUsers);
-
-	std::sort(list.begin(), list.end(), ClientUser::lessThanOverlay);
-}
-
-bool ClientUser::isActive() {
-	if (tsState != Settings::Passive)
-		return true;
-
-	if (!tLastTalkStateChange.isStarted())
-		return false;
-
-	return tLastTalkStateChange.elapsed() < std::chrono::seconds(Global::get().s.os.uiActiveTime);
 }
 
 /* From Channel.h

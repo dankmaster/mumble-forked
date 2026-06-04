@@ -954,29 +954,3 @@ AboutDialog QTextEdit {
   border: 1px solid transparent;
   background: transparent;
 }
-
-TalkingUI {
-  background-color: #181825;
-}
-
-TalkingUI > * {
-  background-color: #181825;
-}
-
-TalkingUI [selected="false"] {
-  background-color: #181825;
-}
-
-TalkingUI [selected="false"]:hover {
-  background-color: #313244;
-}
-
-TalkingUI [selected="true"] {
-  background-color: #89b4fa;
-  border: 1px solid #89b4fa;
-}
-
-TalkingUI > QFrame {
-  border: 1px solid #45475a;
-  border-radius: 6px;
-}

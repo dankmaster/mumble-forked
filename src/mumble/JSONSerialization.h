@@ -119,8 +119,6 @@ template<> inline QString from_string< QString >(const std::string &str) {
 
 void to_json(nlohmann::json &j, const Settings &settings);
 void from_json(const nlohmann::json &j, Settings &settings);
-void to_json(nlohmann::json &j, const OverlaySettings &settings);
-void from_json(const nlohmann::json &j, OverlaySettings &settings);
 
 void to_json(nlohmann::json &j, const QString &string);
 void from_json(const nlohmann::json &j, QString &string);

@@ -152,14 +152,6 @@ def getDefaultValueForType(dataType):
         return "EchoCancelOptionID::SPEEX_MULTICHANNEL"
     elif dataType in ["QuitBehavior"]:
         return "QuitBehavior::ALWAYS_QUIT"
-    elif dataType in ["OverlayShow"]:
-        return "OverlaySettings::HomeChannel"
-    elif dataType in ["OverlayShow"]:
-        return "OverlaySettings::HomeChannel"
-    elif dataType in ["OverlaySort"]:
-        return "OverlaySettings::LastStateChange"
-    elif dataType in ["OverlayExclusionMode"]:
-        return "OverlaySettings::BlacklistExclusionMode"
     elif dataType in ["Qt::Alignment"]:
         return "Qt::AlignJustify | Qt::AlignBaseline"
     elif dataType in ["WindowLayout"]:
@@ -236,11 +228,7 @@ def generateTestBody(settingsFields, settingsClassName, excludeFields = []):
     for fieldName in settingsFields:
         if fieldName in excludeFields:
             continue
-        if settingsFields[fieldName] == "OverlaySettings":
-            for overlayField in structs["OverlaySettings"]:
-                contents += "\t\tsettings." + fieldName + "." + overlayField + " = "\
-                        + getDefaultValueForType(structs["OverlaySettings"][overlayField]) + ";"
-        elif settingsFields[fieldName] == "bool":
+        if settingsFields[fieldName] == "bool":
             # For boolean values, we simply use the inverse of whatever the default is
             contents += "\t\tsettings." + fieldName + " = !settings." + fieldName + ";\n"
         else:

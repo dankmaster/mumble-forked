@@ -4,9 +4,6 @@
 // Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
 #include "MainWindow.h"
-#ifdef USE_OVERLAY
-#	include "Overlay.h"
-#endif
 #include "Utils.h"
 #include "Global.h"
 

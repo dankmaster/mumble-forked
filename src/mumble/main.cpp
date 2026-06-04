@@ -3,9 +3,6 @@
 // that can be found in the LICENSE file at the root of the
 // Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
-#ifdef USE_OVERLAY
-#	include "Overlay.h"
-#endif
 #include "AudioInput.h"
 #include "AudioOutput.h"
 #include "AudioWizard.h"
@@ -42,7 +39,6 @@
 #include "QtWidgetUtils.h"
 #include "SSL.h"
 #include "SocketRPC.h"
-#include "TalkingUI.h"
 #include "Themes.h"
 #include "Translations.h"
 #include "UserLockFile.h"
@@ -255,51 +251,6 @@ void prepareLogForShutdown() {
 	}
 
 	log::restoreQtMessageHandler();
-}
-
-QPoint getTalkingUIPosition() {
-	QPoint talkingUIPos = QPoint(0, 0);
-	if (Global::get().s.qpTalkingUI_Position != Settings::UNSPECIFIED_POSITION
-		&& Mumble::QtUtils::positionIsOnScreen(Global::get().s.qpTalkingUI_Position)) {
-		// Restore last position
-		talkingUIPos = Global::get().s.qpTalkingUI_Position;
-	} else {
-		// Place the TalkingUI next to the MainWindow by default
-		const QPoint mainWindowPos = Global::get().mw->pos();
-		const int horizontalBuffer = 10;
-		const QPoint defaultPos =
-			QPoint(mainWindowPos.x() + Global::get().mw->size().width() + horizontalBuffer, mainWindowPos.y());
-
-		if (Mumble::QtUtils::positionIsOnScreen(defaultPos)) {
-			talkingUIPos = defaultPos;
-		}
-	}
-
-	// We have to ask the TalkingUI to adjust its size in order to get a proper
-	// size from it (instead of a random default one).
-	Global::get().talkingUI->adjustSize();
-	const QSize talkingUISize = Global::get().talkingUI->size();
-
-	// The screen should always be found at this point as we have chosen to pos to be on a screen
-	const QScreen *screen  = Mumble::QtUtils::screenAt(talkingUIPos);
-	const QRect screenGeom = screen ? screen->availableGeometry() : QRect(0, 0, 0, 0);
-
-	// Check whether the TalkingUI fits on the screen in x-direction
-	if (!Mumble::QtUtils::positionIsOnScreen(talkingUIPos + QPoint(talkingUISize.width(), 0))) {
-		int overlap = talkingUIPos.x() + talkingUISize.width() - screenGeom.x() - screenGeom.width();
-
-		// Correct the x coordinate but don't move it below 0
-		talkingUIPos.setX(std::max(talkingUIPos.x() - overlap, 0));
-	}
-	// Check whether the TalkingUI fits on the screen in y-direction
-	if (!Mumble::QtUtils::positionIsOnScreen(talkingUIPos + QPoint(0, talkingUISize.height()))) {
-		int overlap = talkingUIPos.y() + talkingUISize.height() - screenGeom.y() - screenGeom.height();
-
-		// Correct the x coordinate but don't move it below 0
-		talkingUIPos.setY(std::max(talkingUIPos.x() - overlap, 0));
-	}
-
-	return talkingUIPos;
 }
 
 #ifdef Q_OS_WIN
@@ -850,11 +801,6 @@ int main(int argc, char **argv) {
 	Global::get().pluginManager = new PluginManager();
 	Global::get().pluginManager->rescanPlugins();
 
-#ifdef USE_OVERLAY
-	Global::get().o = new Overlay();
-	Global::get().o->setActive(Global::get().s.os.bEnable);
-#endif
-
 	// Process any waiting events before initializing our MainWindow.
 	// The mumble:// URL support for Mac OS X happens through AppleEvents,
 	// so we need to loop a little before we begin.
@@ -865,25 +811,6 @@ int main(int argc, char **argv) {
 	if (!options.startHiddenInTray) {
 		Global::get().mw->showRaiseWindow();
 	}
-
-	Global::get().talkingUI = new TalkingUI();
-
-	// Set TalkingUI's position
-	Global::get().talkingUI->move(getTalkingUIPosition());
-
-	// By setting the TalkingUI's position **before** making it visible tends to more reliably include the
-	// window's frame to be included in the positioning calculation on X11 (at least using KDE Plasma)
-	Global::get().talkingUI->setVisible(Global::get().s.bShowTalkingUI);
-
-	QObject::connect(Global::get().mw, &MainWindow::userAddedChannelListener, Global::get().talkingUI,
-					 &TalkingUI::on_channelListenerAdded);
-	QObject::connect(Global::get().mw, &MainWindow::userRemovedChannelListener, Global::get().talkingUI,
-					 &TalkingUI::on_channelListenerRemoved);
-	QObject::connect(Global::get().channelListenerManager.get(), &ChannelListenerManager::localVolumeAdjustmentsChanged,
-					 Global::get().talkingUI, &TalkingUI::on_channelListenerLocalVolumeAdjustmentChanged);
-
-	QObject::connect(Global::get().mw, &MainWindow::serverSynchronized, Global::get().talkingUI,
-					 &TalkingUI::on_serverSynchronized);
 
 	// Initialize logger
 	// Log::log() needs the MainWindow to already exist. Thus creating the Log instance
@@ -1029,7 +956,6 @@ int main(int argc, char **argv) {
 
 	delete srpc;
 
-	delete Global::get().talkingUI;
 	// Delete the MainWindow before the ServerHandler gets reset in order to allow all callbacks
 	// trggered by this deletion to still access the ServerHandler (atm all these callbacks are in PluginManager.cpp)
 	delete Global::get().mw;
@@ -1051,10 +977,6 @@ int main(int argc, char **argv) {
 
 #ifdef USE_ZEROCONF
 	delete Global::get().zeroconf;
-#endif
-
-#ifdef USE_OVERLAY
-	delete Global::get().o;
 #endif
 
 	delete Global::get().c;

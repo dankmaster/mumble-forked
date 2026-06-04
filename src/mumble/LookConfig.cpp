@@ -13,7 +13,6 @@
 #include "UserModel.h"
 #include "Global.h"
 
-#include <QColorDialog>
 #include <QDesktopServices>
 #include <QSystemTrayIcon>
 #include <QtCore/QFileSystemWatcher>
@@ -91,9 +90,6 @@ LookConfig::LookConfig(Settings &st) : ConfigWidget(st) {
 #endif
 
 	connect(qrbLCustom, SIGNAL(toggled(bool)), qcbLockLayout, SLOT(setEnabled(bool)));
-	connect(qbClearBackgroundColor, &QPushButton::clicked, this, &LookConfig::talkinguiBackgroundCleared);
-	connect(qbBackgroundColor, &QPushButton::clicked, this, &LookConfig::qbBackgroundColor_clicked);
-
 	connect(qlLAutoTheme, &ClickableLabel::clicked, this, [this]() { qrbAutoStyle->setChecked(true); });
 	connect(qlLDarkTheme, &ClickableLabel::clicked, this, [this]() { qrbDarkStyle->setChecked(true); });
 	connect(qlLLightTheme, &ClickableLabel::clicked, this, [this]() { qrbLightStyle->setChecked(true); });
@@ -135,27 +131,6 @@ LookConfig::LookConfig(Settings &st) : ConfigWidget(st) {
 
 QString LookConfig::title() const {
 	return tr("User Interface");
-}
-
-void LookConfig::qbBackgroundColor_clicked() {
-	QColor color = QColorDialog::getColor(Qt::white, this, tr("Choose a Color"));
-	if (color.isValid()) {
-		talkinguiBackgroundSet(color);
-	}
-}
-
-void LookConfig::talkinguiBackgroundSet(QColor color) {
-	selectedBackgroundColor = color;
-	QString style           = QString("background-color: %1;").arg(color.name());
-	qccolorPreview->setStyleSheet(style);
-	swBackgroundColor->setCurrentIndex(0);
-	qlBackgroundColor->setBuddy(qbClearBackgroundColor);
-}
-
-void LookConfig::talkinguiBackgroundCleared() {
-	selectedBackgroundColor = std::nullopt;
-	swBackgroundColor->setCurrentIndex(1);
-	qlBackgroundColor->setBuddy(qbBackgroundColor);
 }
 
 const QString &LookConfig::getName() const {
@@ -313,24 +288,6 @@ void LookConfig::load(const Settings &r) {
 	const std::optional< ThemeInfo::StyleInfo > configuredDarkStyle = Themes::getThemeStyle(r, true);
 	setActiveThemes(configuredStyle, configuredDarkStyle);
 
-	loadCheckBox(qcbUsersAlwaysVisible, r.talkingUI_UsersAlwaysVisible);
-	loadCheckBox(qcbLocalUserVisible, r.bTalkingUI_LocalUserStaysVisible);
-	loadCheckBox(qcbAbbreviateChannelNames, r.bTalkingUI_AbbreviateChannelNames);
-	loadCheckBox(qcbAbbreviateCurrentChannel, r.bTalkingUI_AbbreviateCurrentChannel);
-	loadCheckBox(qcbShowLocalListeners, r.bTalkingUI_ShowLocalListeners);
-	qsbRelFontSize->setValue(r.iTalkingUI_RelativeFontSize);
-	qsbSilentUserLifetime->setValue(r.iTalkingUI_SilentUserLifeTime);
-	qsbChannelHierarchyDepth->setValue(r.iTalkingUI_ChannelHierarchyDepth);
-	qsbMaxNameLength->setValue(r.iTalkingUI_MaxChannelNameLength);
-	qsbPrefixCharCount->setValue(r.iTalkingUI_PrefixCharCount);
-	qsbPostfixCharCount->setValue(r.iTalkingUI_PostfixCharCount);
-	qleAbbreviationReplacement->setText(r.qsTalkingUI_AbbreviationReplacement);
-	if (r.talkingUI_BackgroundColor.has_value()) {
-		talkinguiBackgroundSet(*r.talkingUI_BackgroundColor);
-	} else {
-		talkinguiBackgroundCleared();
-	}
-
 	qleChannelSeparator->setText(r.qsHierarchyChannelSeparator);
 
 	loadComboBox(qcbSearchUserAction, static_cast< int >(r.searchUserAction));
@@ -419,20 +376,6 @@ void LookConfig::save() const {
 		s.requireThemeApplication |= Themes::setConfiguredDarkStyle(s, darkThemeData.value< ThemeInfo::StyleInfo >());
 	}
 
-	s.talkingUI_UsersAlwaysVisible        = qcbUsersAlwaysVisible->isChecked();
-	s.bTalkingUI_LocalUserStaysVisible    = qcbLocalUserVisible->isChecked();
-	s.bTalkingUI_AbbreviateChannelNames   = qcbAbbreviateChannelNames->isChecked();
-	s.bTalkingUI_AbbreviateCurrentChannel = qcbAbbreviateCurrentChannel->isChecked();
-	s.bTalkingUI_ShowLocalListeners       = qcbShowLocalListeners->isChecked();
-	s.iTalkingUI_RelativeFontSize         = qsbRelFontSize->value();
-	s.iTalkingUI_SilentUserLifeTime       = qsbSilentUserLifetime->value();
-	s.iTalkingUI_ChannelHierarchyDepth    = qsbChannelHierarchyDepth->value();
-	s.iTalkingUI_MaxChannelNameLength     = qsbMaxNameLength->value();
-	s.iTalkingUI_PrefixCharCount          = qsbPrefixCharCount->value();
-	s.iTalkingUI_PostfixCharCount         = qsbPostfixCharCount->value();
-	s.qsTalkingUI_AbbreviationReplacement = qleAbbreviationReplacement->text();
-	s.talkingUI_BackgroundColor           = selectedBackgroundColor;
-
 	s.qsHierarchyChannelSeparator = qleChannelSeparator->text();
 
 	s.searchUserAction = static_cast< Search::SearchDialog::UserAction >(qcbSearchUserAction->currentData().toInt());
@@ -491,25 +434,4 @@ void LookConfig::themeDirectoryChanged() {
 		toOptionalStyle(qcbDarkTheme->itemData(qcbDarkTheme->currentIndex()));
 
 	setActiveThemes(configuredStyle, configuredDarkStyle);
-}
-
-void LookConfig::on_qcbAbbreviateChannelNames_stateChanged(int state) {
-	bool abbreviateNames = (state == Qt::Checked) || (state == Qt::PartiallyChecked);
-
-	// Only enable the abbreviation related settings if abbreviation is actually enabled
-	qcbAbbreviateCurrentChannel->setEnabled(abbreviateNames);
-	qsbChannelHierarchyDepth->setEnabled(abbreviateNames);
-	qsbMaxNameLength->setEnabled(abbreviateNames);
-	qsbPrefixCharCount->setEnabled(abbreviateNames);
-	qsbPostfixCharCount->setEnabled(abbreviateNames);
-	qleAbbreviationReplacement->setEnabled(abbreviateNames);
-}
-
-void LookConfig::on_qcbUsersAlwaysVisible_stateChanged(int state) {
-	bool usersAlwaysVisible = state == Qt::Checked;
-
-	// Only enable the local user visibility setting when all users are not always visible
-	qcbLocalUserVisible->setEnabled(!usersAlwaysVisible);
-	// Only enable the user visibility timeout settings when all users are not always visible
-	qsbSilentUserLifetime->setEnabled(!usersAlwaysVisible);
 }
