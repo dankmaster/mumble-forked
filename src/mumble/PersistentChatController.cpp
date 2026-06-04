@@ -297,7 +297,6 @@ void PersistentChatController::handleMessage(const MumbleProto::ChatMessage &mes
 	const PersistentChatScopeKey key = scopeKeyFromMessage(message);
 	PersistentChatStore::ScopeState &state = m_store.ensureScope(key);
 	const bool inserted = PersistentChatStore::mergeMessage(state.snapshot.messages, message);
-	state.snapshot.initialLoaded = true;
 	state.snapshot.oldestLoadedMessageId = PersistentChatStore::oldestMessageID(state.snapshot.messages);
 	setUnreadFromMessages(state);
 
@@ -343,7 +342,7 @@ bool PersistentChatController::startInitialLoad(PersistentChatStore::ScopeState 
 
 	state.initialRequestInFlight      = true;
 	state.snapshot.loadingState =
-		state.snapshot.messages.isEmpty() ? PersistentChatLoadingState::Initial : PersistentChatLoadingState::Refreshing;
+		state.snapshot.initialLoaded ? PersistentChatLoadingState::Refreshing : PersistentChatLoadingState::Initial;
 	m_gateway->requestInitialPage(state.snapshot.key.scope, state.snapshot.key.scopeID);
 	return true;
 }

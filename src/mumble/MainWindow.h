@@ -469,7 +469,8 @@ public:
 	void setCachedPersistentChatUnreadCount(MumbleProto::ChatScope scope, unsigned int scopeID,
 											unsigned int lastReadMessageID, std::size_t unreadCount);
 	std::size_t totalCachedPersistentChatUnreadCount() const;
-	bool navigateToPersistentChatScope(MumbleProto::ChatScope scope, unsigned int scopeID, bool forceReload = false);
+	bool navigateToPersistentChatScope(MumbleProto::ChatScope scope, unsigned int scopeID, bool forceReload = false,
+									   bool useVoiceTree = false);
 	ChanACL::Permissions channelPermissions(Channel *channel, bool requestPermissions = true) const;
 	bool canEditChannelACL(Channel *channel) const;
 	bool canCreateVoiceRoom(Channel *channel) const;
@@ -505,8 +506,13 @@ public:
 	QString registerPersistentChatInlineDataImageSource(const QString &source);
 	QUrl persistentChatInlineDataImageOpenUrl(const QString &token) const;
 	QUrl persistentChatInlineDataImageResourceUrl(const QString &token) const;
+	QImage persistentChatInlineDataImagePreviewForSource(const QString &source);
+	QString persistentChatInlineDataImageThumbnailSourceForToken(const QString &token, const QImage &previewImage);
 	QImage persistentChatInlineDataImageFromSource(const QString &source) const;
 	QImage persistentChatInlineDataImageFromUrl(const QUrl &url) const;
+	void warmupPersistentChatInlineDataImages(const MumbleProto::ChatMessage &message);
+	void queuePersistentChatInlineDataImageWarmup(const QString &source, const QString &messageKey = QString());
+	void flushPersistentChatInlineDataImageWarmups();
 	void setPersistentChatContentMode(bool showServerLog, bool preserveScrollPosition = false,
 									  bool showComposer = false);
 	void renderLegacyActivityView(bool preserveScrollPosition = false);
@@ -578,6 +584,7 @@ public:
 	void publishModernShellMessagesPatch(const QString &kind, const QVariantList &messages, bool scrollToBottom,
 										  const QString &timelineMode = QString());
 	void publishModernShellMessageUpdatePatch(const MumbleProto::ChatMessage &message);
+	void publishPersistentChatInlineDataImageUpdate(const QString &token);
 	void publishModernShellActiveScopePatch(const QString &kind);
 	void publishModernShellRoomStatePatch();
 	void publishModernShellServerLogPatch(int position, int charsRemoved, int charsAdded);
@@ -622,6 +629,7 @@ public:
 	bool sendModernDirectMessage(unsigned int session, const QString &message);
 	void publishModernDirectMessagesPatch();
 	bool handleModernShellScopeSelection(const QString &scopeToken);
+	bool handleModernShellScopeRailSelection(const QString &scopeToken, const QString &railKind);
 	bool handleModernShellVoiceJoin(const QString &scopeToken);
 	bool handleModernShellScopeAction(const QString &scopeToken, const QString &actionId);
 	bool handleModernShellScopeActionValueChanged(const QString &scopeToken, const QString &actionId, int value,
@@ -706,6 +714,7 @@ public:
 	void publishModernShellMessagesPatch(const QString &kind, const QVariantList &messages, bool scrollToBottom,
 										  const QString &timelineMode = QString());
 	void publishModernShellMessageUpdatePatch(const MumbleProto::ChatMessage &message);
+	void publishPersistentChatInlineDataImageUpdate(const QString &token);
 	void publishModernShellActiveScopePatch(const QString &kind);
 	void publishModernShellRoomStatePatch();
 	void clearModernShellMessageDtoCache(const char *reason);
@@ -866,6 +875,11 @@ protected:
 	QHash< quint64, PendingChatEmbedAssist > m_pendingChatEmbedAssists;
 	QHash< QString, quint64 > m_pendingChatEmbedAssistByKey;
 	QHash< QString, QString > m_persistentChatInlineDataImageSources;
+	QHash< QString, QImage > m_persistentChatInlineDataImagePreviewCache;
+	QHash< QString, QString > m_persistentChatInlineDataImageThumbnailSourceCache;
+	QHash< QString, QString > m_persistentChatInlineDataImageWarmupSources;
+	QHash< QString, QSet< QString > > m_persistentChatInlineDataImageWarmupMessageKeys;
+	QHash< QString, quint64 > m_persistentChatActiveInlineDataImageWarmups;
 	QHash< QString, PendingFeedbackSubmission > m_pendingFeedbackSubmissions;
 	QSet< QString > m_persistentChatLiveMessageKeys;
 	QHash< QString, unsigned int > m_persistentChatLastReadByScope;
@@ -882,12 +896,17 @@ protected:
 	QTimer *m_persistentChatResizeRenderTimer             = nullptr;
 	QTimer *m_persistentChatScrollIdleTimer               = nullptr;
 	QTimer *m_persistentChatPreviewRequestTimer           = nullptr;
+	QTimer *m_persistentChatInlineDataImageWarmupTimer     = nullptr;
 	QTimer *m_userPresenceRefreshTimer                    = nullptr;
 	int m_pendingPersistentChatViewportWidth              = -1;
 	int m_lastPersistentChatViewportWidth                 = -1;
 	int m_persistentChatBottomLockRendersRemaining        = 0;
 	bool m_persistentChatPreviewRefreshPending            = false;
-	QSet< QString > m_persistentChatQueuedPreviewRequests;
+	QStringList m_persistentChatQueuedPreviewRequests;
+	QSet< QString > m_persistentChatQueuedPreviewRequestKeys;
+	QStringList m_persistentChatQueuedInlineDataImageWarmups;
+	QSet< QString > m_persistentChatQueuedInlineDataImageWarmupKeys;
+	quint64 m_persistentChatInlineDataImageWarmupGeneration = 1;
 	QSet< QString > m_pendingPersistentChatInstagramMetadataRequests;
 	bool m_persistentChatRestoreAnchorPending             = false;
 	bool m_persistentChatLogStickToBottom                 = true;

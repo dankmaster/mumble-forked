@@ -106,7 +106,7 @@ by default. To preview a draft manifest locally, set
 
 The MSI remains the canonical installer and recovery path. See
 [windows-update-packages.md](windows-update-packages.md) for the package format,
-manifest fields, updater handoff, and fallback behavior.
+manifest fields, updater handoff, runtime validation, and fallback behavior.
 
 ## Notes
 

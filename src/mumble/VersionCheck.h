@@ -46,6 +46,7 @@ public slots:
 public:
 	VersionCheck(bool autocheck, QObject *parent = nullptr, bool focus = false, bool emitResultsOnly = false);
 	static QString updateModeForInfo(const QJsonObject &info);
+	static QString expectedUpdateSha256ForInfo(const QJsonObject &info);
 	static bool canInstallUpdate(const QJsonObject &info);
 	static void installUpdateFromInfo(const QJsonObject &info, QWidget *parent = nullptr);
 	static void downloadUpdateFromInfo(const QJsonObject &info, QWidget *parent, bool showProgress,
@@ -59,7 +60,8 @@ public:
 	static bool canLaunchPreparedUpdate(const QString &updatePath, const QString &updateMode = QString());
 	static bool launchPreparedUpdate(const QString &updatePath, const QString &updateMode = QString(),
 									 bool passive = true, bool restartAfterInstall = true,
-									 const QString &fallbackInstallerPath = QString());
+									 const QString &fallbackInstallerPath = QString(),
+									 const QString &expectedUpdateSha256 = QString());
 };
 
 #endif

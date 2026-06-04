@@ -7777,6 +7777,14 @@
 
 		const stage = document.createElement("div");
 		stage.className = "image-viewer";
+
+		const dragFrame = document.createElement("div");
+		dragFrame.className = "image-viewer-drag-frame";
+		const dragGrip = document.createElement("span");
+		dragGrip.className = "image-viewer-drag-grip";
+		dragFrame.appendChild(dragGrip);
+		stage.appendChild(dragFrame);
+
 		const closeButton = document.createElement("button");
 		closeButton.type = "button";
 		closeButton.className = "icon-button image-viewer-dialog-close";
@@ -7809,6 +7817,10 @@
 		}, { passive: false });
 		stage.addEventListener("pointerdown", function(event) {
 			if (event.target && typeof event.target.closest === "function" && event.target.closest("button")) {
+				return;
+			}
+			if (event.target && typeof event.target.closest === "function"
+					&& event.target.closest(".image-viewer-drag-frame")) {
 				return;
 			}
 			state.dragging = true;

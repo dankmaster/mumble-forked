@@ -127,6 +127,29 @@ QString sslErrorsSummary(const QList< QSslError > &errors) {
 
 	return summaries.join(QLatin1String(" | "));
 }
+
+MumbleProto::Version buildClientVersionMessage() {
+	MumbleProto::Version mpv;
+	const QString advertisedRelease = Global::get().s.qsAdvertisedReleaseOverride.trimmed().isEmpty()
+										  ? Version::getRelease()
+										  : Global::get().s.qsAdvertisedReleaseOverride.trimmed();
+	mpv.set_release(u8(advertisedRelease));
+	MumbleProto::setVersion(mpv, Version::get());
+	mpv.set_supports_persistent_chat(true);
+	Mumble::ChatFeatures::addSupportedFeatures(mpv);
+	Mumble::ForkFeatures::addSupportedFeatures(mpv);
+	ScreenShareHelperClient::applyAdvertisedCapabilities(mpv);
+
+	const QString advertisedOS        = Global::get().s.qsAdvertisedOSOverride.trimmed();
+	const QString advertisedOSVersion = Global::get().s.qsAdvertisedOSVersionOverride.trimmed();
+	const bool overrideOSIdentity     = !advertisedOS.isEmpty() || !advertisedOSVersion.isEmpty();
+	if (overrideOSIdentity || !Global::get().s.bHideOS) {
+		mpv.set_os(u8(advertisedOS.isEmpty() ? OSInfo::getOS() : advertisedOS));
+		mpv.set_os_version(u8(advertisedOSVersion.isEmpty() ? OSInfo::getOSDisplayableVersion() : advertisedOSVersion));
+	}
+
+	return mpv;
+}
 } // namespace
 
 ServerHandlerMessageEvent::ServerHandlerMessageEvent(const QByteArray &msg, Mumble::Protocol::TCPMessageType type,
@@ -430,6 +453,14 @@ void ServerHandler::sendProtoMessage(const ::google::protobuf::Message &msg, Mum
 
 		connection->sendMessage(msg, type, qba);
 	}
+}
+
+void ServerHandler::sendVersion() {
+	if (!isConnected()) {
+		return;
+	}
+
+	sendMessage(buildClientVersionMessage());
 }
 
 bool ServerHandler::isConnected() const {
@@ -906,26 +937,7 @@ void ServerHandler::serverConnectionConnected() {
 
 	changeState(ServerHandlerState::ConnectionEstablished);
 
-	MumbleProto::Version mpv;
-	const QString advertisedRelease = Global::get().s.qsAdvertisedReleaseOverride.trimmed().isEmpty()
-										  ? Version::getRelease()
-										  : Global::get().s.qsAdvertisedReleaseOverride.trimmed();
-	mpv.set_release(u8(advertisedRelease));
-	MumbleProto::setVersion(mpv, Version::get());
-	mpv.set_supports_persistent_chat(true);
-	Mumble::ChatFeatures::addSupportedFeatures(mpv);
-	Mumble::ForkFeatures::addSupportedFeatures(mpv);
-	ScreenShareHelperClient::applyAdvertisedCapabilities(mpv);
-
-	const QString advertisedOS        = Global::get().s.qsAdvertisedOSOverride.trimmed();
-	const QString advertisedOSVersion = Global::get().s.qsAdvertisedOSVersionOverride.trimmed();
-	const bool overrideOSIdentity     = !advertisedOS.isEmpty() || !advertisedOSVersion.isEmpty();
-	if (overrideOSIdentity || !Global::get().s.bHideOS) {
-		mpv.set_os(u8(advertisedOS.isEmpty() ? OSInfo::getOS() : advertisedOS));
-		mpv.set_os_version(u8(advertisedOSVersion.isEmpty() ? OSInfo::getOSDisplayableVersion() : advertisedOSVersion));
-	}
-
-	sendMessage(mpv);
+	sendVersion();
 
 	MumbleProto::Authenticate mpa;
 	mpa.set_username(u8(qsUserName));

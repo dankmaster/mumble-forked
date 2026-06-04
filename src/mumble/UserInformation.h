@@ -6,6 +6,7 @@
 #ifndef MUMBLE_MUMBLE_USERINFORMATION_H_
 #define MUMBLE_MUMBLE_USERINFORMATION_H_
 
+#include <QtGui/QImage>
 #include <QtNetwork/QSslCertificate>
 
 #include "ui_UserInformation.h"
@@ -28,12 +29,14 @@ protected:
 	QLabel *qlAvatar;
 	QLabel *qlAvatarName;
 	QLabel *qlAvatarSession;
+	QImage qimgAvatar;
 	QList< QSslCertificate > qlCerts;
 	static QString secsToString(unsigned int secs);
 	QFont qfCertificateFont;
 protected slots:
 	void tick();
 	void on_qpbCertificate_clicked();
+	void openAvatarViewer();
 
 public:
 	UserInformation(const MumbleProto::UserStats &msg, QWidget *p = nullptr);

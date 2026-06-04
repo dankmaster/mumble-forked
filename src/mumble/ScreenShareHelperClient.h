@@ -25,6 +25,7 @@ private:
 public:
 	struct CapabilitySnapshot {
 		bool supportsSignaling       = true;
+		bool probeComplete           = false;
 		bool helperAvailable         = false;
 		bool captureSupported        = false;
 		bool viewSupported           = false;
@@ -53,6 +54,8 @@ public:
 
 	explicit ScreenShareHelperClient(QObject *parent = nullptr);
 
+	static CapabilitySnapshot initialCapabilitySnapshot();
+	static CapabilitySnapshot advertisedCapabilities();
 	static CapabilitySnapshot detectLocalCapabilities();
 	static void applyAdvertisedCapabilities(MumbleProto::Version &msg);
 
@@ -80,8 +83,10 @@ private:
 	static QJsonObject sendRequest(Mumble::ScreenShare::IPC::Command command, const QJsonObject &payload,
 								   const QString &helperExecutable, QString *errorMessage, bool launchIfNeeded = true);
 	static bool ensureHelperRunning(const QString &helperExecutable, QString *errorMessage = nullptr);
+	static void cacheAdvertisedCapabilities(const CapabilitySnapshot &snapshot);
 
 	CapabilitySnapshot m_capabilities;
+	bool m_capabilityRefreshInProgress = false;
 };
 
 #endif // MUMBLE_MUMBLE_SCREENSHAREHELPERCLIENT_H_

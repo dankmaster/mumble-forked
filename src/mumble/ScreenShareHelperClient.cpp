@@ -15,19 +15,28 @@
 #include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QFileInfo>
+#include <QtCore/QFutureWatcher>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonParseError>
+#include <QtCore/QMutex>
+#include <QtCore/QMutexLocker>
 #include <QtCore/QProcess>
 #include <QtCore/QProcessEnvironment>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QThread>
+#include <QtCore/QTimer>
+#include <QtConcurrent>
 #include <QtNetwork/QLocalSocket>
 
 namespace {
 constexpr int HELPER_CONNECT_TIMEOUT_MSEC = 1000;
 constexpr int HELPER_REQUEST_TIMEOUT_MSEC = 45000;
 constexpr int HELPER_START_TIMEOUT_MSEC   = 20000;
+
+QMutex g_cachedCapabilitiesMutex;
+ScreenShareHelperClient::CapabilitySnapshot g_cachedCapabilities;
+bool g_haveCachedCapabilities = false;
 
 QString helperSocketBaseName() {
 	const QString explicitName = QProcessEnvironment::systemEnvironment().value(
@@ -177,10 +186,76 @@ qint64 activeProcessIDFromReply(const QJsonObject &reply) {
 		value.isString() ? value.toString().toLongLong(&ok) : static_cast< qint64 >(value.toDouble(0));
 	return ok || processID > 0 ? processID : 0;
 }
+
+QJsonObject runCapabilityProbeProcess(const QString &helperExecutable, QString *errorMessage) {
+	qInfo().noquote()
+		<< QStringLiteral("ScreenShareHelperClient: probing capabilities executable=%1 mode=process")
+			   .arg(helperExecutable);
+
+	QProcess process;
+	process.setProcessChannelMode(QProcess::SeparateChannels);
+	process.start(helperExecutable, { QStringLiteral("--print-capabilities-json") });
+	if (!process.waitForStarted(HELPER_CONNECT_TIMEOUT_MSEC)) {
+		if (errorMessage) {
+			*errorMessage = QStringLiteral("Failed to start helper capability probe: %1").arg(process.errorString());
+		}
+		return {};
+	}
+
+	if (!process.waitForFinished(HELPER_REQUEST_TIMEOUT_MSEC)) {
+		process.kill();
+		process.waitForFinished(500);
+		if (errorMessage) {
+			*errorMessage = QStringLiteral("Timed out waiting for helper capability probe.");
+		}
+		return {};
+	}
+
+	const QByteArray stdoutBytes = process.readAllStandardOutput().trimmed();
+	const QByteArray stderrBytes = process.readAllStandardError().trimmed();
+	if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+		if (errorMessage) {
+			const QString detail =
+				QString::fromUtf8(stderrBytes.isEmpty() ? stdoutBytes.left(512) : stderrBytes.left(512)).trimmed();
+			*errorMessage = detail.isEmpty()
+								? QStringLiteral("Helper capability probe exited with code %1.").arg(process.exitCode())
+								: detail;
+		}
+		return {};
+	}
+
+	QByteArray jsonReply = stdoutBytes;
+	const QList< QByteArray > lines = stdoutBytes.split('\n');
+	for (const QByteArray &line : lines) {
+		const QByteArray candidate = line.trimmed();
+		if (candidate.startsWith('{') && candidate.endsWith('}')) {
+			jsonReply = candidate;
+			break;
+		}
+	}
+	if (jsonReply.isEmpty()) {
+		if (errorMessage) {
+			*errorMessage = QStringLiteral("Helper capability probe returned an empty reply.");
+		}
+		return {};
+	}
+
+	QJsonParseError parseError;
+	const QJsonDocument replyDoc = QJsonDocument::fromJson(jsonReply, &parseError);
+	if (parseError.error != QJsonParseError::NoError || !replyDoc.isObject()) {
+		if (errorMessage) {
+			*errorMessage = QStringLiteral("Malformed helper capability probe reply.");
+		}
+		return {};
+	}
+
+	return replyDoc.object();
+}
 } // namespace
 
 ScreenShareHelperClient::ScreenShareHelperClient(QObject *parent)
-	: QObject(parent), m_capabilities(detectLocalCapabilities()) {
+	: QObject(parent), m_capabilities(advertisedCapabilities()) {
+	QTimer::singleShot(0, this, &ScreenShareHelperClient::refreshCapabilities);
 }
 
 QString ScreenShareHelperClient::defaultHelperExecutablePath() {
@@ -226,39 +301,66 @@ QStringList ScreenShareHelperClient::helperLaunchArguments() {
 	return arguments;
 }
 
-ScreenShareHelperClient::CapabilitySnapshot ScreenShareHelperClient::detectLocalCapabilities() {
+ScreenShareHelperClient::CapabilitySnapshot ScreenShareHelperClient::initialCapabilitySnapshot() {
 	CapabilitySnapshot snapshot;
 	snapshot.helperExecutable = defaultHelperExecutablePath();
 
 	const QFileInfo helperInfo(snapshot.helperExecutable);
 	snapshot.helperAvailable = helperInfo.exists() && helperInfo.isFile() && helperInfo.isExecutable();
+	snapshot.probeComplete   = !snapshot.helperAvailable;
+	return snapshot;
+}
+
+ScreenShareHelperClient::CapabilitySnapshot ScreenShareHelperClient::advertisedCapabilities() {
+	QMutexLocker locker(&g_cachedCapabilitiesMutex);
+	if (g_haveCachedCapabilities) {
+		return g_cachedCapabilities;
+	}
+
+	locker.unlock();
+	return initialCapabilitySnapshot();
+}
+
+ScreenShareHelperClient::CapabilitySnapshot ScreenShareHelperClient::detectLocalCapabilities() {
+	CapabilitySnapshot snapshot = initialCapabilitySnapshot();
+	snapshot.probeComplete      = true;
 	if (!snapshot.helperAvailable) {
+		cacheAdvertisedCapabilities(snapshot);
 		return snapshot;
 	}
 
 	QString errorMessage;
-	const QJsonObject reply = sendRequest(Mumble::ScreenShare::IPC::Command::QueryCapabilities, QJsonObject(),
-										  snapshot.helperExecutable, &errorMessage, true);
+	const QJsonObject reply = runCapabilityProbeProcess(snapshot.helperExecutable, &errorMessage);
 	if (reply.isEmpty()) {
 		qWarning().noquote() << QStringLiteral("ScreenShareHelperClient: capability probe failed for %1: %2")
 									.arg(snapshot.helperExecutable, errorMessage);
+		cacheAdvertisedCapabilities(snapshot);
 		return snapshot;
 	}
 	if (!Mumble::ScreenShare::IPC::replySucceeded(reply, &errorMessage)) {
 		qWarning().noquote()
 			<< QStringLiteral("ScreenShareHelperClient: helper rejected capability probe: %1").arg(errorMessage);
+		cacheAdvertisedCapabilities(snapshot);
 		return snapshot;
 	}
 
 	snapshot = capabilitySnapshotFromPayload(reply.value(QStringLiteral("payload")).toObject(), snapshot.helperExecutable);
+	snapshot.probeComplete = true;
 	qInfo().noquote() << QStringLiteral(
 							 "ScreenShareHelperClient: capability probe succeeded executable=%1 capture_supported=%2 "
-							 "view_supported=%3 gstreamer=%4 livekit_publish=%5 livekit_view=%6 runtime_transports=[%7]")
-							 .arg(snapshot.helperExecutable, boolToken(snapshot.captureSupported),
-								  boolToken(snapshot.viewSupported), boolToken(snapshot.gstreamerAvailable),
-								  boolToken(snapshot.gstreamerLiveKitPublishAvailable),
-								  boolToken(snapshot.gstreamerLiveKitViewAvailable),
-								  intListToken(snapshot.runtimeRelayTransports));
+							 "view_supported=%3 gstreamer=%4 livekit_publish=%5 livekit_view=%6 max=%7x%8@%9 "
+							 "runtime_transports=[%10]")
+							 .arg(snapshot.helperExecutable)
+							 .arg(boolToken(snapshot.captureSupported))
+							 .arg(boolToken(snapshot.viewSupported))
+							 .arg(boolToken(snapshot.gstreamerAvailable))
+							 .arg(boolToken(snapshot.gstreamerLiveKitPublishAvailable))
+							 .arg(boolToken(snapshot.gstreamerLiveKitViewAvailable))
+							 .arg(snapshot.maxWidth)
+							 .arg(snapshot.maxHeight)
+							 .arg(snapshot.maxFps)
+							 .arg(intListToken(snapshot.runtimeRelayTransports));
+	cacheAdvertisedCapabilities(snapshot);
 	return snapshot;
 }
 
@@ -471,7 +573,7 @@ QJsonObject ScreenShareHelperClient::payloadFromSession(const ScreenShareSession
 }
 
 void ScreenShareHelperClient::applyAdvertisedCapabilities(MumbleProto::Version &msg) {
-	CapabilitySnapshot snapshot = detectLocalCapabilities();
+	const CapabilitySnapshot snapshot = advertisedCapabilities();
 
 	msg.set_supports_screen_share_signaling(snapshot.supportsSignaling);
 	msg.set_supports_screen_share_capture(snapshot.captureSupported);
@@ -567,8 +669,28 @@ bool ScreenShareHelperClient::stopView(const QString &streamID, QString *errorMe
 }
 
 void ScreenShareHelperClient::refreshCapabilities() {
-	m_capabilities = detectLocalCapabilities();
-	emit capabilitiesChanged();
+	if (m_capabilityRefreshInProgress) {
+		return;
+	}
+
+	m_capabilityRefreshInProgress = true;
+	auto *watcher = new QFutureWatcher< CapabilitySnapshot >(this);
+	connect(watcher, &QFutureWatcher< CapabilitySnapshot >::finished, this, [this, watcher]() {
+		const CapabilitySnapshot snapshot = watcher->result();
+		watcher->deleteLater();
+
+		m_capabilityRefreshInProgress = false;
+		m_capabilities                = snapshot;
+		cacheAdvertisedCapabilities(snapshot);
+		emit capabilitiesChanged();
+	});
+	watcher->setFuture(QtConcurrent::run([]() { return ScreenShareHelperClient::detectLocalCapabilities(); }));
+}
+
+void ScreenShareHelperClient::cacheAdvertisedCapabilities(const CapabilitySnapshot &snapshot) {
+	QMutexLocker locker(&g_cachedCapabilitiesMutex);
+	g_cachedCapabilities     = snapshot;
+	g_haveCachedCapabilities = true;
 }
 
 void ScreenShareHelperClient::logReplyWarnings(const QJsonObject &reply, Mumble::ScreenShare::IPC::Command command,

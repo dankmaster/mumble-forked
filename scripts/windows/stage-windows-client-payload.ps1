@@ -140,6 +140,7 @@ Copy-FileIfExists -Source (Join-Path $buildRootPath "mumble_ol_x64.dll") -Destin
 Copy-FileIfExists -Source (Join-Path $buildRootPath "mumble_ol_helper.exe") -Destination (Join-Path $stageRootPath "mumble_ol_helper.exe")
 Copy-FileIfExists -Source (Join-Path $buildRootPath "mumble_ol_helper_x64.exe") -Destination (Join-Path $stageRootPath "mumble_ol_helper_x64.exe")
 Copy-FileIfExists -Source (Join-Path $buildRootPath "speexdsp.dll") -Destination (Join-Path $stageRootPath "speexdsp.dll")
+Copy-FileIfExists -Source (Join-Path $buildRootPath "zlib1.dll") -Destination (Join-Path $stageRootPath "zlib1.dll")
 Copy-FileIfExists -Source (Join-Path $buildRootPath "rnnoise.dll") -Destination (Join-Path $stageRootPath "rnnoise.dll")
 Copy-FileIfExists -Source (Join-Path $buildRootPath "deepfilter.dll") -Destination (Join-Path $stageRootPath "deepfilter.dll")
 Copy-FileIfExists -Source (Join-Path $buildRootPath "onnxruntime.dll") -Destination (Join-Path $stageRootPath "onnxruntime.dll")

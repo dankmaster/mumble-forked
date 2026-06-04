@@ -19,6 +19,7 @@
 
 	let modernBridge = null;
 	let bridgeLoadPromise = null;
+	let bridgeRetryCount = 0;
 	let lastRenderedMessageCount = 0;
 	let lastRenderedTailKey = "";
 	let lastRenderedTimelineIdentitySignature = "";
@@ -44,6 +45,16 @@
 	let openReactionPickerMessageId = null;
 	let reactionPickerScrollClosePausedUntil = 0;
 	let keepMessageListPinnedToBottom = true;
+	// Whether we intend to stay glued to the bottom (true) or the user has
+	// deliberately scrolled up to read history (false). This intent survives
+	// arbitrarily slow content growth: lazily hydrated embeds and network-backed
+	// previews (Amazon/Instagram cards, images) keep growing the timeline for
+	// seconds after we first pin. A fixed time window proved too short — when it
+	// expired mid-growth, syncScrollState latched keepMessageListPinnedToBottom
+	// to false and stranded the view on a stale, mid-history offset. Anchoring the
+	// pin to intent instead of a timer keeps us on the true tail until the user
+	// actually scrolls up (detected across every input device via scrollTop).
+	let stickyBottomIntent = true;
 	let pendingBottomPinFrames = 0;
 	let pendingBottomPinHandle = 0;
 	let messageListScrollSyncFrame = 0;
@@ -66,6 +77,9 @@
 	let motdExpansionTouched = false;
 	let conversationMotdHiddenForHistory = false;
 	let messageListMutationObserver = null;
+	let messageListResizeObserver = null;
+	let messageListResizeObservedElements = new Set();
+	let messageListLayoutSettleToken = 0;
 	let dragState = null;
 	let imageViewerDragState = null;
 	let imageViewerDragFrame = 0;
@@ -82,6 +96,9 @@
 	let lastScreenShareActionRequest = { token: "", actionId: "", time: 0 };
 	let pendingVoiceJoin = null;
 	let pendingVoiceJoinTimer = 0;
+	let pendingRailSelection = null;
+	let pendingRailSelectionTimer = 0;
+	let pendingOptimisticScope = null;
 	let messageRenderGeneration = 0;
 	let activeMessageChunkRender = null;
 	let pendingMessageUpdatePatches = [];
@@ -92,6 +109,10 @@
 	let previewHydrationScrollIdleTimer = 0;
 	let previewHydrationPausedUntil = 0;
 	let messageListScrollActiveUntil = 0;
+	let messageListProgrammaticScrollUntil = 0;
+	let messageListUserScrollIntentUntil = 0;
+	let messageListTouchStartY = 0;
+	let lastMessageListScrollTop = 0;
 	let messageListEnterTimer = 0;
 	let pendingPreviewHydrationIds = new Set();
 	let requestedPreviewHydrationIds = new Set();
@@ -154,6 +175,9 @@
 	const voiceJoinInputDedupeMs = 180;
 	const screenShareActionDedupeMs = 180;
 	const voiceJoinFeedbackMs = 3200;
+	const railSelectionFeedbackMs = 2800;
+	const bridgeRetryDelayMs = 50;
+	const bridgeRetryLimit = 160;
 	const scopeLoadingFallbackMs = 2800;
 	const directMessageWindowViewportMarginPx = 10;
 	const directMessageDockSnapZonePx = 110;
@@ -167,6 +191,11 @@
 	const previewHydrationTimelineSettleMs = 650;
 	const previewHydrationViewportMarginPx = 220;
 	const previewHydrationBatchSize = 3;
+	const messageListLayoutSettleFrames = 3;
+	const messageListLayoutSettleMaxFrames = 10;
+	const messageListProgrammaticScrollGraceMs = 180;
+	const messageListUserScrollIntentMs = 900;
+	const messageListScrollbarHitSlopPx = 18;
 	const stonksVisibleRefreshMs = 5 * 60 * 1000;
 	const stonksEmptyStateRefreshMs = 15 * 1000;
 	const stonksPopularQuoteStaleMs = 5 * 60 * 1000;
@@ -797,6 +826,66 @@
 		syncPendingVoiceJoinRows();
 	}
 
+	function clearPendingRailSelectionTimer() {
+		if (!pendingRailSelectionTimer) {
+			return;
+		}
+
+		clearTimeout(pendingRailSelectionTimer);
+		pendingRailSelectionTimer = 0;
+	}
+
+	function clearPendingRailSelectionState() {
+		pendingRailSelection = null;
+		clearPendingRailSelectionTimer();
+	}
+
+	function clearPendingRailSelectionFeedback() {
+		clearPendingRailSelectionState();
+		renderRailSelectionPatch(getSnapshot());
+	}
+
+	function beginRailSelectionFeedback(scopeToken, railKind) {
+		const token = String(scopeToken || "");
+		const normalizedRailKind = normalizeRailSelectionKind(railKind);
+		if (!token || !normalizedRailKind) {
+			return;
+		}
+
+		pendingRailSelection = {
+			scopeToken: token,
+			railKind: normalizedRailKind,
+			expiresAt: monotonicNow() + railSelectionFeedbackMs
+		};
+		clearPendingRailSelectionTimer();
+		pendingRailSelectionTimer = setTimeout(function() {
+			clearPendingRailSelectionState();
+			renderRailSelectionPatch(getSnapshot());
+		}, railSelectionFeedbackMs);
+		renderRailSelectionPatch(getSnapshot());
+	}
+
+	function pendingRailSelectionForRender(snapshot) {
+		if (!pendingRailSelection || !pendingRailSelection.scopeToken) {
+			return null;
+		}
+
+		if (monotonicNow() > pendingRailSelection.expiresAt) {
+			clearPendingRailSelectionState();
+			return null;
+		}
+
+		const scope = (snapshot && snapshot.activeScope) || {};
+		const confirmedToken = String(scope.scopeToken || "");
+		const confirmedKind = activeRailSelectionKind(snapshot || {});
+		if (confirmedToken === pendingRailSelection.scopeToken && confirmedKind === pendingRailSelection.railKind) {
+			clearPendingRailSelectionState();
+			return null;
+		}
+
+		return pendingRailSelection;
+	}
+
 	function reconcilePendingVoiceJoin(snapshot) {
 		const token = pendingVoiceJoinToken();
 		if (!token) {
@@ -829,7 +918,9 @@
 		pendingVoiceJoinTimer = setTimeout(function() {
 			clearPendingVoiceJoinFeedback();
 		}, voiceJoinFeedbackMs);
-		beginScopeLoading(token, { force: true });
+		beginScopeLoading(token, { force: true, railKind: "voice", forceIndicator: true });
+		beginRailSelectionFeedback(token, "voice");
+		beginOptimisticScopePresentation(token, "voice");
 		syncPendingVoiceJoinRows();
 	}
 
@@ -906,6 +997,7 @@
 		beginVoiceJoinFeedback(token);
 		if (!notifyBridge("joinVoiceChannel", token)) {
 			clearPendingVoiceJoinFeedback();
+			clearPendingRailSelectionFeedback();
 			clearChatLoadingIndicator();
 			scheduleSnapshotRender();
 			return false;
@@ -1500,7 +1592,7 @@
 		if (methodName === "joinParticipant") {
 			return selectMockupParticipantRoom(bridgeArgs[0]);
 		}
-		if (methodName === "joinVoiceChannel" || methodName === "selectScope") {
+		if (methodName === "joinVoiceChannel" || methodName === "selectScope" || methodName === "selectScopeFromRail") {
 			return selectMockupScope(bridgeArgs[0]);
 		}
 		if (methodName === "markRead" || methodName === "markDirectMessageRead") {
@@ -1692,7 +1784,28 @@
 	}
 
 	async function ensureBridge() {
-		if (!window.qt || !window.qt.webChannelTransport) {
+		function bridgeTransportAvailable() {
+			return !!(window.qt && window.qt.webChannelTransport);
+		}
+
+		function logBridgeStartupError(label, error) {
+			const detail = error && (error.stack || error.message) ? (error.stack || error.message) : String(error || "");
+			console.warn(label + (detail ? ": " + detail : ""));
+		}
+
+		if (!bridgeTransportAvailable() && mockupBridgeFallbackEnabled()) {
+			return;
+		}
+
+		while (!bridgeTransportAvailable() && bridgeRetryCount < bridgeRetryLimit) {
+			bridgeRetryCount += 1;
+			await new Promise(function(resolve) {
+				window.setTimeout(resolve, bridgeRetryDelayMs);
+			});
+		}
+
+		if (!bridgeTransportAvailable()) {
+			console.warn("Modern bridge transport was unavailable after retrying.");
 			return;
 		}
 
@@ -1704,39 +1817,51 @@
 			return new Promise(function(resolve) {
 				try {
 					new QWebChannel(qt.webChannelTransport, function(channel) {
-						modernBridge = channel.objects.modernBridge || null;
-						if (modernBridge) {
-							if (modernBridge.snapshotChanged && typeof modernBridge.snapshotChanged.connect === "function") {
-								modernBridge.snapshotChanged.connect(syncSnapshot);
+						try {
+							modernBridge = channel.objects.modernBridge || null;
+							if (modernBridge) {
+								bridgeRetryCount = 0;
+								if (modernBridge.snapshotChanged && typeof modernBridge.snapshotChanged.connect === "function") {
+									modernBridge.snapshotChanged.connect(syncSnapshot);
+								}
+								if (modernBridge.modernPatchChanged
+										&& typeof modernBridge.modernPatchChanged.connect === "function") {
+									modernBridge.modernPatchChanged.connect(syncSnapshotPatch);
+								}
+								if (modernBridge.participantTalkStateChanged
+										&& typeof modernBridge.participantTalkStateChanged.connect === "function") {
+									modernBridge.participantTalkStateChanged.connect(syncParticipantTalkState);
+								}
+								if (modernBridge.modernDialogStateChanged
+										&& typeof modernBridge.modernDialogStateChanged.connect === "function") {
+									modernBridge.modernDialogStateChanged.connect(syncModernDialogState);
+								}
+								if (modernBridge.financeQuoteResultReady
+										&& typeof modernBridge.financeQuoteResultReady.connect === "function") {
+									modernBridge.financeQuoteResultReady.connect(handleStonksQuoteLookupResult);
+								}
+								if (modernBridge.toastRequested
+										&& typeof modernBridge.toastRequested.connect === "function") {
+									modernBridge.toastRequested.connect(showToast);
+								}
+								syncModernDialogState(modernBridge.modernDialogState || { open: false });
+								notifyBridge("ready");
+								try {
+									syncSnapshot();
+								} catch (error) {
+									logBridgeStartupError("Modern bridge initial snapshot failed", error);
+								}
+							} else {
+								console.warn("Modern bridge object was unavailable after QWebChannel binding.");
 							}
-							if (modernBridge.modernPatchChanged
-									&& typeof modernBridge.modernPatchChanged.connect === "function") {
-								modernBridge.modernPatchChanged.connect(syncSnapshotPatch);
-							}
-							if (modernBridge.participantTalkStateChanged
-									&& typeof modernBridge.participantTalkStateChanged.connect === "function") {
-								modernBridge.participantTalkStateChanged.connect(syncParticipantTalkState);
-							}
-							if (modernBridge.modernDialogStateChanged
-									&& typeof modernBridge.modernDialogStateChanged.connect === "function") {
-								modernBridge.modernDialogStateChanged.connect(syncModernDialogState);
-							}
-							if (modernBridge.financeQuoteResultReady
-									&& typeof modernBridge.financeQuoteResultReady.connect === "function") {
-								modernBridge.financeQuoteResultReady.connect(handleStonksQuoteLookupResult);
-							}
-							if (modernBridge.toastRequested
-									&& typeof modernBridge.toastRequested.connect === "function") {
-								modernBridge.toastRequested.connect(showToast);
-							}
-							syncModernDialogState(modernBridge.modernDialogState || { open: false });
-							notifyBridge("ready");
-							syncSnapshot();
+						} catch (error) {
+							logBridgeStartupError("Modern bridge binding failed", error);
+						} finally {
+							resolve();
 						}
-						resolve();
 					});
 				} catch (error) {
-					console.warn("Modern bridge initialization failed:", error);
+					logBridgeStartupError("Modern bridge initialization failed", error);
 					resolve();
 				}
 			});
@@ -3624,6 +3749,51 @@
 		return monotonicNow() < messageListScrollActiveUntil;
 	}
 
+	function markMessageListProgrammaticScroll() {
+		messageListProgrammaticScrollUntil = monotonicNow() + messageListProgrammaticScrollGraceMs;
+	}
+
+	function messageListProgrammaticScrollActive() {
+		return monotonicNow() < messageListProgrammaticScrollUntil;
+	}
+
+	function setMessageListScrollTop(top) {
+		if (!refs.messageList) {
+			return;
+		}
+
+		markMessageListProgrammaticScroll();
+		refs.messageList.scrollTop = Math.max(0, Number(top) || 0);
+		lastMessageListScrollTop = Math.max(0, refs.messageList.scrollTop);
+	}
+
+	function setMessageListScrollToBottomNow() {
+		if (!refs.messageList) {
+			return;
+		}
+
+		markMessageListProgrammaticScroll();
+		refs.messageList.scrollTop = Math.max(0, refs.messageList.scrollHeight);
+		// Force the scroll container to resolve layout before the reveal frame.
+		refs.messageList.getBoundingClientRect();
+		refs.messageList.scrollTop = Math.max(0, refs.messageList.scrollHeight);
+		lastMessageListScrollTop = Math.max(0, refs.messageList.scrollTop);
+	}
+
+	function noteUserMessageListScrollIntent() {
+		if (messageListProgrammaticScrollActive()) {
+			return;
+		}
+
+		messageListUserScrollIntentUntil = monotonicNow() + messageListUserScrollIntentMs;
+		cancelMessageListBottomPinning();
+		keepMessageListPinnedToBottom = false;
+	}
+
+	function messageListHasUserScrollIntent() {
+		return monotonicNow() < messageListUserScrollIntentUntil;
+	}
+
 	function previewHydrationPaused() {
 		return monotonicNow() < previewHydrationPausedUntil;
 	}
@@ -3827,15 +3997,17 @@
 		return indicator;
 	}
 
-	function showChatLoadingIndicator() {
+	function showChatLoadingIndicator(options) {
 		if (!refs.messageList) {
 			return;
 		}
+		const forceIndicator = !!(options && options.forceIndicator);
 		cancelActiveMessageChunkRender("scope-loading");
+		cancelMessageListLayoutSettling();
 		pendingMessageUpdatePatches = [];
 		lastRenderedTimelineIdentitySignature = "";
 		lastRenderedTimelineSignature = "";
-		if (messageListHasRenderedTimeline()) {
+		if (!forceIndicator && messageListHasRenderedTimeline()) {
 			refs.messageList.classList.remove("is-chat-loading");
 			refs.messageList.classList.add("is-chat-transitioning");
 			return;
@@ -3864,8 +4036,10 @@
 	function clearChatLoadingIndicator() {
 		clearPendingScopeLoadingTimer();
 		pendingScopeLoading = null;
+		pendingOptimisticScope = null;
+		cancelMessageListLayoutSettling();
 		if (refs.messageList) {
-			refs.messageList.classList.remove("is-chat-loading", "is-chat-transitioning");
+			refs.messageList.classList.remove("is-chat-loading", "is-chat-transitioning", "is-layout-settling");
 		}
 	}
 
@@ -3908,14 +4082,76 @@
 			return false;
 		}
 
-		pendingScopeLoading = { scopeToken: token };
-		showChatLoadingIndicator();
+		pendingScopeLoading = {
+			scopeToken: token,
+			railKind: normalizeRailSelectionKind(options && options.railKind),
+			forceIndicator: !!(options && options.forceIndicator)
+		};
+		showChatLoadingIndicator({ forceIndicator: pendingScopeLoading.forceIndicator });
 		if (useFallback) {
 			scheduleScopeLoadingFallback();
 		} else {
 			clearPendingScopeLoadingTimer();
 		}
 		return true;
+	}
+
+	function scopeLoadingOptionsForRender(scopeToken, scope) {
+		const token = String(scopeToken || "");
+		return {
+			force: true,
+			railKind: normalizeRailSelectionKind(scope && (scope.railSelection || scope.railKind || scope.roomType)),
+			forceIndicator: !!(pendingScopeLoading && pendingScopeLoading.scopeToken === token
+				&& pendingScopeLoading.forceIndicator)
+		};
+	}
+
+	function activeScopeRailKind(scope) {
+		if (!scope || typeof scope !== "object") {
+			return "";
+		}
+		return normalizeRailSelectionKind(scope.railSelection || scope.railKind || scope.roomType);
+	}
+
+	function confirmedPendingOptimisticScope(scope) {
+		if (!pendingOptimisticScope || !scope || typeof scope !== "object") {
+			return false;
+		}
+
+		const token = String(scope.scopeToken || "");
+		if (!token || token !== pendingOptimisticScope.scopeToken) {
+			return false;
+		}
+
+		const expectedRailKind = normalizeRailSelectionKind(pendingOptimisticScope.railKind);
+		const incomingRailKind = activeScopeRailKind(scope);
+		return (!expectedRailKind || !incomingRailKind || incomingRailKind === expectedRailKind)
+			&& !scopeHistoryLoading(scope);
+	}
+
+	function clearPendingOptimisticScopeIfConfirmed(scope) {
+		if (confirmedPendingOptimisticScope(scope)) {
+			pendingOptimisticScope = null;
+		}
+	}
+
+	function pendingOptimisticScopeForRender(snapshot) {
+		if (!pendingOptimisticScope || !pendingOptimisticScope.scopeToken) {
+			return null;
+		}
+
+		if (monotonicNow() > pendingOptimisticScope.expiresAt) {
+			pendingOptimisticScope = null;
+			return null;
+		}
+
+		const scope = snapshot && snapshot.activeScope;
+		if (confirmedPendingOptimisticScope(scope)) {
+			pendingOptimisticScope = null;
+			return null;
+		}
+
+		return pendingOptimisticScope.activeScope || null;
 	}
 
 	function pendingScopeLoadingBlocksRender(scopeToken, renderOptions) {
@@ -3934,7 +4170,7 @@
 			return false;
 		}
 
-		showChatLoadingIndicator();
+		showChatLoadingIndicator({ forceIndicator: !!pendingScopeLoading.forceIndicator });
 		return true;
 	}
 
@@ -3954,16 +4190,41 @@
 		return !scope.serverLogRevision && !Object.prototype.hasOwnProperty.call(scope, "serverLogHtml");
 	}
 
-	function selectRoomScope(scopeToken) {
+	function normalizeRailSelectionKind(value) {
+		const kind = String(value || "").trim().toLowerCase();
+		return kind === "voice" || kind === "text" ? kind : "";
+	}
+
+	function selectRoomScope(scopeToken, railKind) {
 		const token = String(scopeToken || "");
 		if (!token) {
 			return;
 		}
 
-		const canSelectScope = modernBridge && typeof modernBridge.selectScope === "function";
-		const showingLoading = canSelectScope ? beginScopeLoading(token) : false;
-		if (!notifyBridge("selectScope", token) && showingLoading) {
+		const normalizedRailKind = normalizeRailSelectionKind(railKind);
+		const snapshot = getSnapshot();
+		const activeToken = String((snapshot.activeScope || {}).scopeToken || "");
+		const scopeTokenChanged = token !== activeToken;
+		const canSelectScope = modernBridge
+			&& (typeof modernBridge.selectScopeFromRail === "function" || typeof modernBridge.selectScope === "function");
+		const railKindChanged = !!normalizedRailKind && normalizedRailKind !== activeRailSelectionKind(snapshot);
+		// Same room, different rail: keep the current timeline while native confirms only the rail owner.
+		const showingLoading = canSelectScope
+			&& scopeTokenChanged
+			? beginScopeLoading(token, { force: railKindChanged, railKind: normalizedRailKind, forceIndicator: true })
+			: false;
+		if (canSelectScope && normalizedRailKind && (showingLoading || railKindChanged)) {
+			beginRailSelectionFeedback(token, normalizedRailKind);
+			if (scopeTokenChanged) {
+				beginOptimisticScopePresentation(token, normalizedRailKind);
+			}
+		}
+		const handled = normalizedRailKind && modernBridge && typeof modernBridge.selectScopeFromRail === "function"
+			? notifyBridge("selectScopeFromRail", token, normalizedRailKind)
+			: notifyBridge("selectScope", token);
+		if (!handled && (showingLoading || railKindChanged)) {
 			clearChatLoadingIndicator();
+			clearPendingRailSelectionFeedback();
 			scheduleSnapshotRender();
 		}
 	}
@@ -5959,11 +6220,74 @@
 		});
 	}
 
-	function findRoomState(snapshot, scopeToken) {
+	function findRoomState(snapshot, scopeToken, railKind) {
 		const token = String(scopeToken || "");
-		return (snapshot.voiceRooms || []).concat(snapshot.textRooms || []).find(function(room) {
+		const normalizedRailKind = normalizeRailSelectionKind(railKind);
+		const rooms = normalizedRailKind === "voice"
+			? (snapshot.voiceRooms || [])
+			: (normalizedRailKind === "text"
+				? (snapshot.textRooms || [])
+				: (snapshot.voiceRooms || []).concat(snapshot.textRooms || []));
+		return rooms.find(function(room) {
 			return String(room.token || "") === token;
 		}) || null;
+	}
+
+	function optimisticScopeFromRoom(room, scopeToken, railKind) {
+		const normalizedRailKind = normalizeRailSelectionKind(railKind);
+		const label = String(room && room.label || "").trim() || "Room";
+		const description = String((room && (room.description || room.topic || room.pathLabel)) || "").trim();
+		const kindLabel = String(room && room.kindLabel || "").trim()
+			|| (normalizedRailKind === "voice" ? "Voice room" : "Text room");
+		return {
+			scopeToken: String(scopeToken || ""),
+			label: label,
+			description: description,
+			kindLabel: kindLabel,
+			roomType: normalizedRailKind,
+			railSelection: normalizedRailKind,
+			meta: [],
+			screenShare: room && room.screenShare ? room.screenShare : { visible: false },
+			canLoadOlder: false,
+			canMarkRead: false,
+			canSend: false,
+			canAttachImages: false,
+			loading: true,
+			loadingState: "initial",
+			composerPlaceholder: "Write in " + label + "...",
+			composerHint: "Loading room history."
+		};
+	}
+
+	function beginOptimisticScopePresentation(scopeToken, railKind) {
+		const token = String(scopeToken || "");
+		const normalizedRailKind = normalizeRailSelectionKind(railKind);
+		if (!token || !normalizedRailKind) {
+			return false;
+		}
+
+		const snapshot = getSnapshot();
+		const room = findRoomState(snapshot, token, normalizedRailKind);
+		if (!room) {
+			return false;
+		}
+
+		const activeScope = optimisticScopeFromRoom(room, token, normalizedRailKind);
+		pendingOptimisticScope = {
+			scopeToken: token,
+			railKind: normalizedRailKind,
+			activeScope: activeScope,
+			expiresAt: monotonicNow() + scopeLoadingFallbackMs
+		};
+		snapshot.activeScope = activeScope;
+		snapshot.messages = [];
+		snapshot.timelineMode = "normal";
+		cachedServerLogElement = null;
+		cachedServerLogRevision = "";
+		lastRenderedTimelineIdentitySignature = "";
+		lastRenderedTimelineSignature = "";
+		renderActiveScopePatch(snapshot);
+		return true;
 	}
 
 	function participantStateKey(person) {
@@ -8744,6 +9068,8 @@
 			return !!item && String(item.kind || "action") !== "separator";
 		});
 		const canJoinRoom = joinable && room.canJoin !== false && !room.joined && !joining;
+		const visuallyJoined = joinable && !!room.joined;
+		const currentVoiceMirror = !joinable && !!room.joined;
 		const subtitleText = joinable
 			? roomTopic
 			: ((room.selected || unreadCount > 0 || roomKind === "activity" || roomKind === "direct message")
@@ -8774,7 +9100,8 @@
 		button.className = "rail-row room-node"
 			+ (room.selected ? " is-selected" : "")
 			+ (room.selected ? " is-active" : "")
-			+ (room.joined ? " is-joined" : "")
+			+ (visuallyJoined ? " is-joined" : "")
+			+ (currentVoiceMirror ? " is-current-voice" : "")
 			+ (joining ? " is-joining" : "")
 			+ (isRootRoom ? " is-root-room" : "");
 		button.classList.toggle("has-subtitle", !!subtitleText);
@@ -8946,7 +9273,7 @@
 				stopRoomActionEvent(event);
 				return;
 			}
-			selectRoomScope(room.token);
+			selectRoomScope(room.token, joinable ? "voice" : "text");
 			dismissCompactRailAfterAction();
 		});
 		button.addEventListener("keydown", function(event) {
@@ -8954,7 +9281,7 @@
 				return;
 			}
 			event.preventDefault();
-			selectRoomScope(room.token);
+			selectRoomScope(room.token, joinable ? "voice" : "text");
 			dismissCompactRailAfterAction();
 		});
 		button.addEventListener("dblclick", function(event) {
@@ -9274,6 +9601,9 @@
 		}
 
 		reconcilePendingVoiceJoin(snapshot);
+		const selection = effectiveRailSelection(snapshot);
+		syncRoomSelectionState(textRooms, selection.scopeToken, "text", selection.railKind);
+		syncRoomSelectionState(voiceRooms, selection.scopeToken, "voice", selection.railKind);
 		renderRoomList(refs.voiceRoomList, voiceRooms, {
 			joinable: true,
 			voicePresence: voicePresence,
@@ -9296,6 +9626,8 @@
 		const headerPresence = voicePresence.length ? voicePresence : (snapshot.participants || []);
 		renderVoicePresenceStack(headerPresence);
 		reconcilePendingVoiceJoin(snapshot);
+		const selection = effectiveRailSelection(snapshot);
+		syncRoomSelectionState(snapshot.voiceRooms, selection.scopeToken, "voice", selection.railKind);
 		renderRoomList(refs.voiceRoomList, snapshot.voiceRooms || [], {
 			joinable: true,
 			voicePresence: voicePresence,
@@ -9305,26 +9637,90 @@
 		scheduleRailLayoutSync();
 	}
 
-	function syncRoomSelectionState(rooms, scopeToken) {
+	function activeRailSelectionKind(snapshot) {
+		const scope = (snapshot && snapshot.activeScope) || {};
+		const explicitKind = normalizeRailSelectionKind(scope.railSelection || scope.railKind || scope.roomType);
+		if (explicitKind) {
+			return explicitKind;
+		}
+
+		const scopeToken = String(scope.scopeToken || "");
+		if (!scopeToken) {
+			return "";
+		}
+		const textSelected = (snapshot.textRooms || []).some(function(room) {
+			return room && room.selected && String(room.token || "") === scopeToken;
+		});
+		const voiceSelected = (snapshot.voiceRooms || []).some(function(room) {
+			return room && room.selected && String(room.token || "") === scopeToken;
+		});
+		if (voiceSelected && !textSelected) {
+			return "voice";
+		}
+		if (textSelected && !voiceSelected) {
+			return "text";
+		}
+		return "";
+	}
+
+	function effectiveRailSelection(snapshot) {
+		const pendingSelection = pendingRailSelectionForRender(snapshot || {});
+		if (pendingSelection) {
+			return {
+				scopeToken: String(pendingSelection.scopeToken || ""),
+				railKind: normalizeRailSelectionKind(pendingSelection.railKind)
+			};
+		}
+
+		const scope = (snapshot && snapshot.activeScope) || {};
+		return {
+			scopeToken: String(scope.scopeToken || ""),
+			railKind: activeRailSelectionKind(snapshot || {})
+		};
+	}
+
+	function railSelectionMatches(scopeToken, activeRailKind, rowToken, rowKind) {
+		if (!scopeToken || String(rowToken || "") !== scopeToken) {
+			return false;
+		}
+		const normalizedRowKind = normalizeRailSelectionKind(rowKind);
+		return !activeRailKind || !normalizedRowKind || normalizedRowKind === activeRailKind;
+	}
+
+	function syncRoomSelectionState(rooms, scopeToken, roomKind, activeRailKind) {
 		(rooms || []).forEach(function(room) {
 			if (room) {
-				room.selected = String(room.token || "") === scopeToken;
+				room.selected = railSelectionMatches(scopeToken, activeRailKind, room.token, roomKind);
 			}
 		});
 	}
 
 	function renderRailSelectionPatch(snapshot) {
-		const scopeToken = String(snapshot && snapshot.activeScope && snapshot.activeScope.scopeToken || "");
-		syncRoomSelectionState(snapshot.textRooms, scopeToken);
-		syncRoomSelectionState(snapshot.voiceRooms, scopeToken);
+		const selection = effectiveRailSelection(snapshot || {});
+		const scopeToken = selection.scopeToken;
+		const activeRailKind = selection.railKind;
+		syncRoomSelectionState(snapshot.textRooms, scopeToken, "text", activeRailKind);
+		syncRoomSelectionState(snapshot.voiceRooms, scopeToken, "voice", activeRailKind);
 		refs.utilityScroll.querySelectorAll(".rail-row").forEach(function(row) {
-			row.classList.toggle("is-selected", !!scopeToken && String(row.dataset.scopeToken || "") === scopeToken);
+			const selected = railSelectionMatches(scopeToken, activeRailKind,
+				row.dataset.scopeToken || "", row.dataset.roomType || "");
+			row.classList.toggle("is-selected", selected);
+			row.classList.toggle("is-active", selected);
+			const wrapper = row.closest(".rail-row-wrapper");
+			if (wrapper) {
+				wrapper.setAttribute("aria-selected", selected ? "true" : "false");
+			}
 		});
 		trackActiveRailTokenForReveal(activeRailToken());
 		scheduleRailLayoutSync();
 	}
 
 	function renderActiveScopePatch(snapshot) {
+		const optimisticScope = pendingOptimisticScopeForRender(snapshot);
+		if (optimisticScope) {
+			snapshot.activeScope = optimisticScope;
+			snapshot.messages = [];
+		}
 		const app = snapshot.app || {};
 		const scope = snapshot.activeScope || {};
 		const directConversation = activeDirectMessageConversation(snapshot);
@@ -9351,7 +9747,7 @@
 		syncAmbientState(snapshot);
 		syncComposerHeight();
 		if (shouldShowScopeLoading(scope, snapshot.messages || [])) {
-			beginScopeLoading(scope.scopeToken, { force: true });
+			beginScopeLoading(scope.scopeToken, scopeLoadingOptionsForRender(scope.scopeToken, scope));
 		}
 		if (directConversation) {
 			renderMessages(snapshot, { resolvePendingScopeLoading: true });
@@ -10823,11 +11219,11 @@
 	function syncPreviewEmbedFrameSize(iframe) {
 		const size = previewEmbedIframeSize(iframe);
 		if (!size) {
-			return;
+			return false;
 		}
 		const sizeKey = String(size.width) + "x" + String(size.height);
 		if (iframe.dataset.previewEmbedSize === sizeKey) {
-			return;
+			return false;
 		}
 		iframe.dataset.previewEmbedSize = sizeKey;
 		iframe.width = String(size.width);
@@ -10837,11 +11233,18 @@
 		if (previewIsYouTubeIframe(iframe)) {
 			invokeYouTubeIframePlayer(iframe, "setSize", [size.width, size.height]);
 		}
+		return true;
 	}
 
 	function syncPreviewEmbedFrameSizes() {
 		previewEmbedFrameSizeSyncFrame = 0;
-		document.querySelectorAll(".preview-card-embed-frame").forEach(syncPreviewEmbedFrameSize);
+		let changed = false;
+		document.querySelectorAll(".preview-card-embed-frame").forEach(function(iframe) {
+			changed = syncPreviewEmbedFrameSize(iframe) || changed;
+		});
+		if (changed) {
+			refreshMessageListPinning(3);
+		}
 	}
 
 	function schedulePreviewEmbedFrameSizeSync() {
@@ -15410,10 +15813,22 @@
 		return media;
 	}
 
-	function appendPreviewLoadingSkeleton(card, preview, hostLabel, sourceLabel) {
+	function appendPreviewLoadingSkeleton(card, preview, hostLabel, sourceLabel, options) {
 		const media = document.createElement("div");
-		media.className = "preview-card-media preview-card-loading-media";
-		media.appendChild(createModernSkeleton("block", "is-preview-media"));
+		const isEmbed = !!(options && options.reserveEmbedSpace);
+		const kindToken = previewClassToken(options && options.embedKind);
+		media.className = "preview-card-media preview-card-loading-media"
+			+ (isEmbed ? " preview-card-embed-media preview-card-loading-embed-media" : "")
+			+ (isEmbed && kindToken ? " preview-card-" + kindToken + "-embed-media" : "");
+		if (isEmbed) {
+			const frameWrap = document.createElement("div");
+			frameWrap.className = "preview-card-embed-frame-wrap preview-card-loading-embed-frame-wrap"
+				+ (kindToken ? " preview-card-" + kindToken + "-frame-wrap" : "");
+			frameWrap.appendChild(createModernSkeleton("block", "is-preview-media"));
+			media.appendChild(frameWrap);
+		} else {
+			media.appendChild(createModernSkeleton("block", "is-preview-media"));
+		}
 		card.appendChild(media);
 
 		const copy = document.createElement("div");
@@ -15449,9 +15864,13 @@
 		const embedUrl = String(preview.embedUrl || "").trim();
 		const embedKind = String(preview.embedKind || "").trim().toLowerCase();
 		const embedAspect = String(preview.embedAspect || "").trim().toLowerCase();
+		const previewKind = String(preview.kind || preview.mediaKind || "").trim().toLowerCase();
 		const hasPlayableMedia = !!mediaUrl;
 		const hasEmbedMedia = !!embedUrl;
-		const isVideoMedia = hasPlayableMedia && (preview.kind === "video" || /^video\//i.test(mediaMime));
+		const loadingEmbedMedia = preview.loading && hasEmbedMedia;
+		const isKnownVideoPreview = previewKind === "video";
+		const loadingVideoMedia = preview.loading && !hasEmbedMedia && isKnownVideoPreview;
+		const isVideoMedia = hasPlayableMedia && (isKnownVideoPreview || /^video\//i.test(mediaMime));
 		const isGifMedia = hasPlayableMedia && (preview.kind === "gif" || mediaMime === "image/gif");
 		const imageMediaItems = previewImageMediaItems(preview, mediaUrl, mediaMime);
 		const hostLabel = previewHostLabel(preview.url);
@@ -15476,7 +15895,8 @@
 		const isTwitch = previewIsTwitch(preview, hostLabel);
 		const isSocialPost = !isXPost && !isInstagramPost && !hasEmbedMedia && previewIsSocialPost(preview, hostLabel);
 		const hasImageCarousel = imageMediaItems.length > 1 && !isVideoMedia && !isGifMedia;
-		const hasInteractiveMedia = hasPlayableMedia || hasEmbedMedia || hasImageCarousel || hasSteamGallery || hasGameStoreGallery;
+		const hasInteractiveMedia = hasPlayableMedia || hasEmbedMedia || loadingVideoMedia
+			|| hasImageCarousel || hasSteamGallery || hasGameStoreGallery;
 		const cardUsesDiv = hasInteractiveMedia || isSteam || isGitHub || isGameStore || !!richProviderSpec;
 		const isImagePreview = !isVideoMedia && !isGifMedia
 			&& (preview.kind === "image" || /^image\//i.test(mediaMime))
@@ -15504,7 +15924,7 @@
 		card.className = "preview-card"
 			+ (hasThumbnail ? " has-thumbnail" : "")
 			+ (hasInteractiveMedia ? " has-media" : "")
-			+ ((isVideoMedia || hasEmbedMedia) ? " is-video" : "")
+			+ ((isVideoMedia || hasEmbedMedia || loadingVideoMedia) ? " is-video" : "")
 			+ (isGifMedia ? " is-gif" : "")
 			+ (preview.loading ? " is-loading" : "")
 			+ (preview.failed ? " is-failed" : "")
@@ -15558,7 +15978,10 @@
 		}
 
 		if (preview.loading) {
-			appendPreviewLoadingSkeleton(card, preview, hostLabel, sourceLabel);
+			appendPreviewLoadingSkeleton(card, preview, hostLabel, sourceLabel, {
+				embedKind: embedKind,
+				reserveEmbedSpace: loadingEmbedMedia
+			});
 			return card;
 		}
 
@@ -16244,6 +16667,7 @@
 		const startedAt = activeMessageChunkRender.startedAt || monotonicNow();
 		activeMessageChunkRender = null;
 		messageRenderGeneration += 1;
+		cancelMessageListLayoutSettling();
 		traceModernUi("messages chunk cancel " + (reason || "render"), startedAt);
 	}
 
@@ -16267,6 +16691,78 @@
 				refs.messageList.classList.remove("is-chat-entering");
 			}
 		}, 220);
+	}
+
+	function setMessageListLayoutSettling(active) {
+		const settling = !!active;
+		if (refs.messageList) {
+			refs.messageList.classList.toggle("is-layout-settling", settling);
+		}
+		if (refs.appShell) {
+			refs.appShell.classList.toggle("chat-is-settling", settling);
+		}
+	}
+
+	function cancelMessageListLayoutSettling() {
+		messageListLayoutSettleToken += 1;
+		setMessageListLayoutSettling(false);
+	}
+
+	function beginMessageListLayoutSettling() {
+		messageListLayoutSettleToken += 1;
+		setMessageListLayoutSettling(true);
+		return messageListLayoutSettleToken;
+	}
+
+	function applySettledMessageListScroll(renderState) {
+		if (!refs.messageList) {
+			return;
+		}
+
+		if (renderState && renderState.shouldStickToBottom) {
+			keepMessageListPinnedToBottom = true;
+			unreadDetachedMessages = 0;
+			setMessageListScrollToBottomNow();
+			syncScrollState();
+			return;
+		}
+
+		if (renderState && renderState.detachedBeforeRender) {
+			setMessageListScrollTop(
+				refs.messageList.scrollHeight - refs.messageList.clientHeight - renderState.distanceFromBottom);
+		}
+		syncScrollState();
+	}
+
+	function revealMessageListAfterLayoutSettle(token, renderState, onSettled) {
+		let framesRemaining = messageListLayoutSettleFrames;
+		let attempts = 0;
+		schedulePreviewEmbedFrameSizeSync();
+
+		const settleFrame = function() {
+			if (token !== messageListLayoutSettleToken || !refs.messageList) {
+				return;
+			}
+
+			applySettledMessageListScroll(renderState);
+			attempts += 1;
+			const metrics = messageListMetrics();
+			framesRemaining -= 1;
+			if ((framesRemaining > 0 || (renderState && renderState.shouldStickToBottom && !metrics.nearBottom))
+					&& attempts < messageListLayoutSettleMaxFrames) {
+				requestAnimationFrame(settleFrame);
+				return;
+			}
+
+			refs.messageList.classList.remove("is-chat-transitioning");
+			setMessageListLayoutSettling(false);
+			markTimelineEntered();
+			if (typeof onSettled === "function") {
+				onSettled();
+			}
+		};
+
+		requestAnimationFrame(settleFrame);
 	}
 
 	function renderTimeline(messages, emptyCopy, freshTailCount) {
@@ -16310,13 +16806,13 @@
 			if (complete) {
 				scheduleMessageListBottomPin(4);
 			} else {
-				refs.messageList.scrollTop = Math.max(0, refs.messageList.scrollHeight - refs.messageList.clientHeight);
+				setMessageListScrollTop(refs.messageList.scrollHeight - refs.messageList.clientHeight);
 			}
 			return;
 		}
 
 		if (renderState.detachedBeforeRender) {
-			refs.messageList.scrollTop = Math.max(0,
+			setMessageListScrollTop(
 				refs.messageList.scrollHeight - refs.messageList.clientHeight - renderState.distanceFromBottom);
 		}
 		if (complete) {
@@ -16326,6 +16822,7 @@
 
 	function renderTimelineChunked(messages, emptyCopy, freshTailCount, renderState) {
 		cancelActiveMessageChunkRender("restart");
+		cancelMessageListLayoutSettling();
 		const startedAt = monotonicNow();
 		const generation = messageRenderGeneration + 1;
 		const linkDenseMode = renderState && renderState.timelineMode === "linkDense";
@@ -16435,23 +16932,34 @@
 				}
 
 				activeMessageChunkRender = null;
+				let layoutSettleToken = 0;
 				if (atomicReplace) {
-					refs.messageList.classList.remove("is-chat-loading", "is-chat-transitioning");
+					refs.messageList.classList.remove("is-chat-loading");
+					refs.messageList.classList.add("is-chat-transitioning");
+					layoutSettleToken = beginMessageListLayoutSettling();
 					replaceChildrenWith(refs.messageList, renderState.fragment);
-					markTimelineEntered();
+					observeMessageListLayoutTargets();
+					schedulePreviewEmbedFrameSizeSync();
 				}
 				applyPendingMessageUpdatePatches(false);
 				applyTimelineRenderScrollState(renderState, true);
-				if (typeof renderState.onComplete === "function") {
-					renderState.onComplete();
+				const finishChunkRender = function() {
+					if (typeof renderState.onComplete === "function") {
+						renderState.onComplete();
+					}
+					if (renderState.deferPreviewHydrationMs) {
+						previewHydrationPausedUntil = Math.max(
+							previewHydrationPausedUntil,
+							monotonicNow() + Math.max(0, Number(renderState.deferPreviewHydrationMs) || 0));
+					}
+					schedulePreviewHydrationFlush();
+					traceModernUi("messages chunk complete", startedAt);
+				};
+				if (layoutSettleToken) {
+					revealMessageListAfterLayoutSettle(layoutSettleToken, renderState, finishChunkRender);
+					return;
 				}
-				if (renderState.deferPreviewHydrationMs) {
-					previewHydrationPausedUntil = Math.max(
-						previewHydrationPausedUntil,
-						monotonicNow() + Math.max(0, Number(renderState.deferPreviewHydrationMs) || 0));
-				}
-				schedulePreviewHydrationFlush();
-				traceModernUi("messages chunk complete", startedAt);
+				finishChunkRender();
 			};
 
 			renderState.nextGroupIndex = 0;
@@ -16651,6 +17159,13 @@
 			return false;
 		}
 
+		const metricsBefore = messageListMetrics();
+		const preserveDistanceFromBottom = !metricsBefore.nearBottom;
+		if (preserveDistanceFromBottom) {
+			cancelMessageListBottomPinning();
+			keepMessageListPinnedToBottom = false;
+		}
+
 		const previousFooter = directChildWithClass(element, "bubble-footer");
 		const nextFooter = renderMessageFooter(message);
 		if (previousFooter && nextFooter) {
@@ -16663,7 +17178,13 @@
 			return true;
 		}
 
-		requestAnimationFrame(syncScrollState);
+		requestAnimationFrame(function() {
+			if (preserveDistanceFromBottom) {
+				restoreMessageListDistanceFromBottom(metricsBefore.distanceFromBottom);
+				return;
+			}
+			syncScrollState();
+		});
 		return true;
 	}
 
@@ -16673,9 +17194,22 @@
 			return false;
 		}
 
+		const metricsBefore = messageListMetrics();
+		const preserveDistanceFromBottom = !metricsBefore.nearBottom;
+		if (preserveDistanceFromBottom) {
+			cancelMessageListBottomPinning();
+			keepMessageListPinnedToBottom = false;
+		}
+
 		const replacement = message.system ? renderSystemMessage(message) : renderMessageBubble(message);
 		element.replaceWith(replacement);
-		requestAnimationFrame(syncScrollState);
+		requestAnimationFrame(function() {
+			if (preserveDistanceFromBottom) {
+				restoreMessageListDistanceFromBottom(metricsBefore.distanceFromBottom);
+				return;
+			}
+			syncScrollState();
+		});
 		return true;
 	}
 
@@ -16750,6 +17284,12 @@
 		};
 	}
 
+	function restoreMessageListDistanceFromBottom(distanceFromBottom) {
+		setMessageListScrollTop(
+			refs.messageList.scrollHeight - refs.messageList.clientHeight - Math.max(0, distanceFromBottom || 0));
+		syncScrollState();
+	}
+
 	function syncJumpLatestButton(metrics) {
 		const state = metrics || messageListMetrics();
 		const shouldShow = state.maxScrollTop > 0 && !state.nearBottom;
@@ -16765,7 +17305,19 @@
 			unreadDetachedMessages = 0;
 		}
 
-		keepMessageListPinnedToBottom = metrics.nearBottom || metrics.maxScrollTop <= 0;
+		if (metrics.nearBottom || metrics.maxScrollTop <= 0) {
+			keepMessageListPinnedToBottom = true;
+			stickyBottomIntent = true;
+		} else if (stickyBottomIntent) {
+			// Off-bottom while we still intend to follow the tail — this only
+			// happens because lazily hydrated embeds/images grew the timeline
+			// after we pinned, not because the user scrolled up (that clears the
+			// intent below). Re-snap to the true tail instead of latching detached.
+			keepMessageListPinnedToBottom = true;
+			scheduleMessageListBottomPin(2);
+		} else {
+			keepMessageListPinnedToBottom = false;
+		}
 
 		refs.appShell.classList.toggle("chat-has-overflow", metrics.maxScrollTop > 0);
 		refs.appShell.classList.toggle("chat-is-scrolled", metrics.scrollTop > 8);
@@ -16785,7 +17337,21 @@
 		});
 	}
 
+	function cancelMessageListBottomPinning() {
+		// Only the deliberate "preserve the user's detached reading position"
+		// paths cancel pinning, so drop the follow-the-tail intent with it.
+		stickyBottomIntent = false;
+		pendingBottomPinFrames = 0;
+		if (pendingBottomPinHandle) {
+			cancelAnimationFrame(pendingBottomPinHandle);
+			pendingBottomPinHandle = 0;
+		}
+	}
+
 	function scheduleMessageListBottomPin(frameCount) {
+		// Scheduling a pin re-asserts the intent to follow the tail, so embeds and
+		// images that grow the timeline later keep us snapped to the bottom.
+		stickyBottomIntent = true;
 		pendingBottomPinFrames = Math.max(pendingBottomPinFrames, Math.max(1, Number(frameCount) || 1));
 		if (pendingBottomPinHandle) {
 			return;
@@ -16813,7 +17379,8 @@
 	}
 
 	function refreshMessageListPinning(frameCount) {
-		if (keepMessageListPinnedToBottom) {
+		if (keepMessageListPinnedToBottom || stickyBottomIntent) {
+			keepMessageListPinnedToBottom = true;
 			scheduleMessageListBottomPin(frameCount || 2);
 			return;
 		}
@@ -16821,12 +17388,123 @@
 		requestAnimationFrame(syncScrollState);
 	}
 
+	function observeMessageListLayoutTargets() {
+		if (!refs.messageList || typeof ResizeObserver !== "function") {
+			return;
+		}
+
+		if (!messageListResizeObserver) {
+			messageListResizeObserver = new ResizeObserver(function() {
+				refreshMessageListPinning(3);
+			});
+		}
+
+		const nextObserved = new Set();
+		for (let index = 0; index < refs.messageList.children.length; index += 1) {
+			const child = refs.messageList.children[index];
+			if (child && child.nodeType === Node.ELEMENT_NODE) {
+				nextObserved.add(child);
+			}
+		}
+		refs.messageList.querySelectorAll(".preview-card, .preview-card-media, .mumble-inline-image-placeholder").forEach(function(element) {
+			nextObserved.add(element);
+		});
+
+		messageListResizeObservedElements.forEach(function(element) {
+			if (!nextObserved.has(element)) {
+				messageListResizeObserver.unobserve(element);
+			}
+		});
+		nextObserved.forEach(function(element) {
+			if (!messageListResizeObservedElements.has(element)) {
+				messageListResizeObserver.observe(element);
+			}
+		});
+		messageListResizeObservedElements = nextObserved;
+	}
+
+	function messageListHasOverflow() {
+		return !!refs.messageList && refs.messageList.scrollHeight > refs.messageList.clientHeight + 1;
+	}
+
+	function messageListPointerHitsScrollbar(event) {
+		if (!refs.messageList || !event || typeof event.clientX !== "number" || typeof event.clientY !== "number"
+				|| !messageListHasOverflow()) {
+			return false;
+		}
+
+		const rect = refs.messageList.getBoundingClientRect();
+		if (event.clientY < rect.top || event.clientY > rect.bottom) {
+			return false;
+		}
+
+		const measuredScrollbarWidth = Math.max(0, refs.messageList.offsetWidth - refs.messageList.clientWidth);
+		const hitWidth = Math.max(messageListScrollbarHitSlopPx, measuredScrollbarWidth);
+		const direction = window.getComputedStyle(refs.messageList).direction;
+		if (direction === "rtl") {
+			return event.clientX <= rect.left + hitWidth;
+		}
+		return event.clientX >= rect.right - hitWidth;
+	}
+
+	function handleMessageListScrollPointerStart(event) {
+		if (messageListPointerHitsScrollbar(event)) {
+			noteUserMessageListScrollIntent();
+		}
+	}
+
+	function handleMessageListTouchStart(event) {
+		const touch = event && event.touches && event.touches.length ? event.touches[0] : null;
+		messageListTouchStartY = touch ? touch.clientY : 0;
+	}
+
+	function handleMessageListTouchMove(event) {
+		const touch = event && event.touches && event.touches.length ? event.touches[0] : null;
+		if (!touch || !messageListTouchStartY || Math.abs(touch.clientY - messageListTouchStartY) < 6) {
+			return;
+		}
+
+		noteUserMessageListScrollIntent();
+	}
+
+	function handleMessageListScrollKeyDown(event) {
+		const key = String(event && event.key || "");
+		if (key === "ArrowUp" || key === "PageUp" || key === "Home" || (key === " " && event.shiftKey)) {
+			noteUserMessageListScrollIntent();
+		}
+	}
+
+	function handleMessageListScrollEvent() {
+		const previousScrollTop = lastMessageListScrollTop;
+		const currentScrollTop = refs.messageList ? Math.max(0, refs.messageList.scrollTop) : 0;
+		lastMessageListScrollTop = currentScrollTop;
+
+		if (!messageListProgrammaticScrollActive()) {
+			const metrics = messageListMetrics();
+			if (!metrics.nearBottom
+					&& (messageListHasUserScrollIntent() || currentScrollTop < previousScrollTop - 2)) {
+				noteUserMessageListScrollIntent();
+			}
+		}
+
+		noteMessageListScrollActivity();
+		const shouldCloseReactionPicker =
+			openReactionPickerMessageId !== null && !shouldKeepReactionPickerOpenOnScroll();
+		if (shouldCloseReactionPicker) {
+			setOpenReactionPickerMessageId(null);
+			reactionPickerScrollClosePausedUntil = 0;
+		}
+		scheduleMessageListScrollStateSync();
+	}
+
 	function ensureMessageListObservers() {
 		if (messageListMutationObserver || typeof MutationObserver !== "function") {
+			observeMessageListLayoutTargets();
 			return;
 		}
 
 		messageListMutationObserver = new MutationObserver(function() {
+			observeMessageListLayoutTargets();
 			refreshMessageListPinning(2);
 		});
 		messageListMutationObserver.observe(refs.messageList, {
@@ -16834,20 +17512,22 @@
 			subtree: true,
 			characterData: true
 		});
+		observeMessageListLayoutTargets();
 	}
 
 	function scrollMessageListToBottom(behavior) {
 		unreadDetachedMessages = 0;
 		const targetTop = Math.max(0, refs.messageList.scrollHeight - refs.messageList.clientHeight);
-		refs.messageList.scrollTop = targetTop;
+		setMessageListScrollToBottomNow();
 		if (typeof refs.messageList.scrollTo === "function") {
 			try {
+				markMessageListProgrammaticScroll();
 				refs.messageList.scrollTo({
 					top: targetTop,
 					behavior: behavior || "smooth"
 				});
 			} catch (error) {
-				refs.messageList.scrollTop = targetTop;
+				setMessageListScrollTop(targetTop);
 			}
 		}
 		requestAnimationFrame(syncScrollState);
@@ -17039,8 +17719,7 @@
 				return;
 			}
 
-			refs.messageList.scrollTop = Math.max(0,
-				refs.messageList.scrollHeight - refs.messageList.clientHeight - distanceFromBottom);
+			setMessageListScrollTop(refs.messageList.scrollHeight - refs.messageList.clientHeight - distanceFromBottom);
 			syncScrollState();
 		});
 		lastRenderedMessageCount = 0;
@@ -17143,7 +17822,7 @@
 			? "linkDense"
 			: "normal";
 		if (shouldShowScopeLoading(scope, messages) && !renderOptions.resolvePendingScopeLoading) {
-			beginScopeLoading(scopeToken, { force: true });
+			beginScopeLoading(scopeToken, scopeLoadingOptionsForRender(scopeToken, scope));
 			lastRenderedMessageCount = 0;
 			lastRenderedTailKey = "";
 			lastRenderedTimelineIdentitySignature = "";
@@ -17212,7 +17891,7 @@
 				}
 
 				if (detachedBeforeRender) {
-					refs.messageList.scrollTop = Math.max(0,
+					setMessageListScrollTop(
 						refs.messageList.scrollHeight - refs.messageList.clientHeight - distanceFromBottom);
 				}
 				syncScrollState();
@@ -17224,8 +17903,17 @@
 			return;
 		}
 
-		const shouldStickToBottom = (scope.scrollToBottom !== false)
-			&& (scopeChanged || (!detachedBeforeRender && messages.length >= lastRenderedMessageCount));
+		const forceScrollToBottom = renderOptions.forceScrollToBottom === true;
+		const shouldPreserveDetachedPosition = !forceScrollToBottom
+			&& scope.scrollToBottom === false
+			&& !scopeChanged
+			&& lastRenderedMessageCount > 0
+			&& detachedBeforeRender
+			&& !keepMessageListPinnedToBottom
+			&& !stickyBottomIntent;
+		const shouldStickToBottom = forceScrollToBottom || (!shouldPreserveDetachedPosition
+			&& (scopeChanged || lastRenderedMessageCount === 0
+				|| (!detachedBeforeRender && messages.length >= lastRenderedMessageCount)));
 		const shouldAtomicReplaceTimeline = scopeChanged
 			|| (lastRenderedMessageCount === 0 && messages.length >= messageRenderLoadingThreshold)
 			|| (timelineMode === "linkDense" && messages.length >= messageRenderLoadingThreshold);
@@ -17269,21 +17957,32 @@
 		}
 
 		if (renderOptions.forceSync) {
+			const renderState = {
+				detachedBeforeRender: detachedBeforeRender,
+				distanceFromBottom: distanceFromBottom,
+				shouldStickToBottom: shouldStickToBottom
+			};
+			const layoutSettleToken = shouldAtomicReplaceTimeline ? beginMessageListLayoutSettling() : 0;
 			renderTimeline(messages, emptyCopy, freshTailCount);
+			if (layoutSettleToken) {
+				observeMessageListLayoutTargets();
+				schedulePreviewEmbedFrameSizeSync();
+			}
 			requestAnimationFrame(function() {
 				if (shouldStickToBottom) {
 					keepMessageListPinnedToBottom = true;
 					scheduleMessageListBottomPin(4);
-					return;
-				}
-
-				if (detachedBeforeRender) {
-					refs.messageList.scrollTop = Math.max(0,
+				} else if (detachedBeforeRender) {
+					setMessageListScrollTop(
 						refs.messageList.scrollHeight - refs.messageList.clientHeight - distanceFromBottom);
 				}
+				if (layoutSettleToken) {
+					revealMessageListAfterLayoutSettle(layoutSettleToken, renderState, finishRender);
+					return;
+				}
 				syncScrollState();
+				finishRender();
 			});
-			finishRender();
 			return;
 		}
 
@@ -24592,6 +25291,13 @@
 	}
 
 	function render(snapshot) {
+		const optimisticScope = pendingOptimisticScopeForRender(snapshot);
+		if (optimisticScope) {
+			snapshot = Object.assign({}, snapshot || {}, {
+				activeScope: optimisticScope,
+				messages: []
+			});
+		}
 		const app = snapshot.app || {};
 		const scope = snapshot.activeScope || {};
 		const textRooms = visibleTextRooms(snapshot.textRooms);
@@ -24621,6 +25327,9 @@
 		refs.settingsButton.setAttribute("aria-expanded", appMenuOpen ? "true" : "false");
 
 		reconcilePendingVoiceJoin(snapshot);
+		const selection = effectiveRailSelection(snapshot);
+		syncRoomSelectionState(textRooms, selection.scopeToken, "text", selection.railKind);
+		syncRoomSelectionState(voiceRooms, selection.scopeToken, "voice", selection.railKind);
 		renderRoomList(refs.voiceRoomList, voiceRooms, {
 			joinable: true,
 			voicePresence: voicePresence,
@@ -24708,9 +25417,54 @@
 		if (!patch || !patch.activeScope || typeof patch.activeScope !== "object") {
 			return false;
 		}
+		if (activeScopePatchConflictsWithPendingSelection(patch)) {
+			return false;
+		}
 
 		snapshot.activeScope = Object.assign({}, patch.activeScope);
+		clearPendingOptimisticScopeIfConfirmed(snapshot.activeScope);
 		return true;
+	}
+
+	function activeScopePatchToken(patch) {
+		if (!patch || typeof patch !== "object") {
+			return "";
+		}
+
+		const activeScope = patch.activeScope && typeof patch.activeScope === "object" ? patch.activeScope : null;
+		if (activeScope && Object.prototype.hasOwnProperty.call(activeScope, "scopeToken")) {
+			return String(activeScope.scopeToken || "");
+		}
+		return String(patch.scopeToken || "");
+	}
+
+	function activeScopePatchRailKind(patch) {
+		const activeScope = patch && patch.activeScope && typeof patch.activeScope === "object"
+			? patch.activeScope
+			: null;
+		if (!activeScope) {
+			return "";
+		}
+		return normalizeRailSelectionKind(activeScope.railSelection || activeScope.railKind || activeScope.roomType);
+	}
+
+	function activeScopePatchConflictsWithPendingSelection(patch) {
+		if (!pendingScopeLoading || !pendingScopeLoading.scopeToken) {
+			return false;
+		}
+
+		const expectedToken = String(pendingScopeLoading.scopeToken || "");
+		const incomingToken = activeScopePatchToken(patch);
+		if (!expectedToken || !incomingToken) {
+			return false;
+		}
+		if (incomingToken !== expectedToken) {
+			return true;
+		}
+
+		const expectedRailKind = normalizeRailSelectionKind(pendingScopeLoading.railKind);
+		const incomingRailKind = activeScopePatchRailKind(patch);
+		return !!expectedRailKind && !!incomingRailKind && incomingRailKind !== expectedRailKind;
 	}
 
 	function applyMessagesAppendPatch(snapshot, patch) {
@@ -24783,8 +25537,7 @@
 				return;
 			}
 
-			refs.messageList.scrollTop = Math.max(0,
-				refs.messageList.scrollHeight - refs.messageList.clientHeight - distanceFromBottom);
+			setMessageListScrollTop(refs.messageList.scrollHeight - refs.messageList.clientHeight - distanceFromBottom);
 			syncScrollState();
 		});
 
@@ -24856,8 +25609,14 @@
 		replaceActiveScopeFromPatch(snapshot, patch);
 		snapshot.messages = Array.isArray(patch.messages) ? patch.messages : [];
 		snapshot.timelineMode = String(patch.timelineMode || "").trim() === "linkDense" ? "linkDense" : "normal";
+		if (snapshot.activeScope && Object.prototype.hasOwnProperty.call(patch, "scrollToBottom")) {
+			snapshot.activeScope.scrollToBottom = patch.scrollToBottom !== false;
+		}
 		clearPreviewHydrationState();
-		renderMessages(snapshot, { resolvePendingScopeLoading: true });
+		renderMessages(snapshot, {
+			resolvePendingScopeLoading: true,
+			forceScrollToBottom: patch.scrollToBottom !== false
+		});
 		renderActiveScopePatch(snapshot);
 		return true;
 	}
@@ -24871,10 +25630,18 @@
 			}
 
 			const snapshot = getSnapshot();
+			const activeScopeConflict = activeScopePatchConflictsWithPendingSelection(patch);
 			if (kind !== "messages.append" && kind !== "messages.update"
 					&& kind !== "messages.reset" && kind !== "serverLog.append"
 					&& kind !== "serverLog.reset") {
 				replaceActiveScopeFromPatch(snapshot, patch);
+			}
+
+			if (activeScopeConflict && (
+					kind === "messages.append" || kind === "messages.update" || kind === "messages.reset"
+					|| kind === "serverLog.append" || kind === "serverLog.reset")) {
+				renderRailSelectionPatch(snapshot);
+				return;
 			}
 
 			if (kind === "messages.append") {
@@ -24926,6 +25693,10 @@
 				renderVoicePresenceStack((snapshot.voicePresence || []).length
 					? (snapshot.voicePresence || [])
 					: (snapshot.participants || []));
+				if (activeScopeConflict) {
+					renderRailSelectionPatch(snapshot);
+					return;
+				}
 				renderActiveScopePatch(snapshot);
 				return;
 			}
@@ -24938,6 +25709,10 @@
 				return;
 			}
 			if (kind === "activeScope.update" || kind === "serverLog.update") {
+				if (activeScopeConflict) {
+					renderRailSelectionPatch(snapshot);
+					return;
+				}
 				renderActiveScopePatch(snapshot);
 				if (kind === "serverLog.update") {
 					renderMessages(snapshot, { resolvePendingScopeLoading: true });
@@ -25574,7 +26349,7 @@
 				label: "Open chat",
 				enabled: !!roomToken,
 				action: function() {
-					selectRoomScope(roomToken);
+					selectRoomScope(roomToken, isVoiceRoom ? "voice" : "text");
 				}
 			}
 		];
@@ -25585,7 +26360,7 @@
 				label: "Join room",
 				enabled: roomRow && roomRow.dataset.canJoin === "true",
 				action: function() {
-					notifyBridge("joinVoiceChannel", roomToken);
+					requestVoiceJoin(roomToken);
 				}
 			});
 		}
@@ -25786,7 +26561,7 @@
 		}
 
 		if (roomRow) {
-			const room = findRoomState(snapshot, roomRow.dataset.scopeToken);
+			const room = findRoomState(snapshot, roomRow.dataset.scopeToken, roomRow.dataset.roomType);
 			return buildRoomContextMenuItems(snapshot, room, roomRow);
 		}
 
@@ -26929,6 +27704,11 @@
 			}
 			refreshMessageListPinning(2);
 		}, true);
+		refs.messageList.addEventListener("pointerdown", handleMessageListScrollPointerStart, true);
+		refs.messageList.addEventListener("mousedown", handleMessageListScrollPointerStart, true);
+		refs.messageList.addEventListener("touchstart", handleMessageListTouchStart, { passive: true });
+		refs.messageList.addEventListener("touchmove", handleMessageListTouchMove, { passive: true });
+		refs.messageList.addEventListener("keydown", handleMessageListScrollKeyDown);
 		refs.utilityRail.addEventListener("load", function(event) {
 			if (!event.target || event.target.tagName !== "IMG") {
 				return;
@@ -26945,7 +27725,12 @@
 			}
 			syncRailOverflowState();
 		});
-		refs.messageList.addEventListener("wheel", function() {
+		refs.messageList.addEventListener("wheel", function(event) {
+			if (event && event.deltaY < 0) {
+				// User is deliberately scrolling up to read history — drop the
+				// follow-the-tail intent so we stop snapping them back to bottom.
+				noteUserMessageListScrollIntent();
+			}
 			if (contextMenuState) {
 				hideContextMenu();
 			}
@@ -26954,28 +27739,24 @@
 			}
 		}, { passive: true });
 		refs.messageList.addEventListener("click", handleMessageImageActivation);
-		refs.messageList.addEventListener("scroll", function() {
-			noteMessageListScrollActivity();
-			const shouldCloseReactionPicker =
-				openReactionPickerMessageId !== null && !shouldKeepReactionPickerOpenOnScroll();
-			if (shouldCloseReactionPicker) {
-				setOpenReactionPickerMessageId(null);
-				reactionPickerScrollClosePausedUntil = 0;
-			}
-			scheduleMessageListScrollStateSync();
-		});
+		refs.messageList.addEventListener("scroll", handleMessageListScrollEvent);
 	}
 
 	async function boot() {
-		wireActions();
-		ensureMessageListObservers();
-		ensureFooterAlignmentObservers();
-		syncCompactRailState(true);
-		syncComposerHeight();
-		await ensureBridge();
-		syncSnapshot();
-		syncWalkthroughUiFromQuery();
-		syncWalkthroughDialogFromQuery();
+		try {
+			await ensureBridge();
+			wireActions();
+			ensureMessageListObservers();
+			ensureFooterAlignmentObservers();
+			syncCompactRailState(true);
+			syncComposerHeight();
+			syncSnapshot();
+			syncWalkthroughUiFromQuery();
+			syncWalkthroughDialogFromQuery();
+		} catch (error) {
+			const detail = error && (error.stack || error.message) ? (error.stack || error.message) : String(error || "");
+			console.warn("Modern shell bootstrap failed" + (detail ? ": " + detail : ""));
+		}
 	}
 
 	boot();

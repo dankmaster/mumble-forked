@@ -14,6 +14,7 @@
 #include "ServerHandler.h"
 #include "ViewCert.h"
 #include "Global.h"
+#include "widgets/ClickableLabel.h"
 
 #include <QtCore/QBuffer>
 #include <QtCore/QIODevice>
@@ -73,18 +74,23 @@ namespace {
 		return pixmap;
 	}
 
-	QPixmap userInformationAvatarPixmap(ClientUser *user, const QSize &size) {
+	QImage userInformationAvatarImage(ClientUser *user) {
 		if (!user || user->qbaTexture.isEmpty()) {
-			return QPixmap();
+			return QImage();
 		}
 
 		QBuffer buffer(&user->qbaTexture);
 		if (!buffer.open(QIODevice::ReadOnly)) {
-			return QPixmap();
+			return QImage();
 		}
 
 		QImageReader reader(&buffer, user->qbaTextureFormat);
-		QImage image = reader.read();
+		reader.setAutoTransform(true);
+		return reader.read();
+	}
+
+	QPixmap userInformationAvatarPixmap(const QImage &avatarImage, const QSize &size) {
+		QImage image = avatarImage;
 		if (image.isNull()) {
 			return QPixmap();
 		}
@@ -110,10 +116,12 @@ UserInformation::UserInformation(const MumbleProto::UserStats &msg, QWidget *p)
 	QGroupBox *profileGroup       = new QGroupBox(tr("Profile"), this);
 	QHBoxLayout *profileLayout    = new QHBoxLayout(profileGroup);
 	QVBoxLayout *profileTextLayout = new QVBoxLayout();
-	qlAvatar                      = new QLabel(profileGroup);
+	auto *avatarLabel             = new ClickableLabel(profileGroup);
+	qlAvatar                      = avatarLabel;
 	qlAvatar->setAccessibleName(tr("Avatar"));
 	qlAvatar->setAlignment(Qt::AlignCenter);
 	qlAvatar->setFixedSize(UserInformationAvatarSize, UserInformationAvatarSize);
+	connect(avatarLabel, &ClickableLabel::clicked, this, &UserInformation::openAvatarViewer);
 
 	qlAvatarName = new QLabel(profileGroup);
 	qlAvatarName->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -178,6 +186,14 @@ void UserInformation::on_qpbCertificate_clicked() {
 	vc->setWindowModality(Qt::WindowModal);
 	vc->setAttribute(Qt::WA_DeleteOnClose, true);
 	vc->show();
+}
+
+void UserInformation::openAvatarViewer() {
+	if (qimgAvatar.isNull() || !Global::get().mw) {
+		return;
+	}
+
+	Global::get().mw->openImageDialog(qimgAvatar);
 }
 
 QString UserInformation::secsToString(unsigned int secs) {
@@ -398,11 +414,19 @@ void UserInformation::refreshAvatar() {
 	}
 
 	const QSize avatarSize(UserInformationAvatarSize, UserInformationAvatarSize);
-	QPixmap avatar = userInformationAvatarPixmap(cu, avatarSize);
+	qimgAvatar     = userInformationAvatarImage(cu);
+	QPixmap avatar = userInformationAvatarPixmap(qimgAvatar, avatarSize);
 	if (avatar.isNull()) {
 		avatar = userInformationFallbackAvatarPixmap(cu ? cu->qsName : tr("Session %1").arg(uiSession), avatarSize);
 	}
 
 	qlAvatar->setPixmap(avatar);
-	qlAvatar->setToolTip(cu ? tr("%1's avatar").arg(cu->qsName) : tr("User avatar"));
+	qlAvatar->setCursor(qimgAvatar.isNull() ? Qt::ArrowCursor : Qt::PointingHandCursor);
+	qlAvatar->setAccessibleDescription(qimgAvatar.isNull() ? QString() : tr("Click to open avatar image preview."));
+	if (qimgAvatar.isNull()) {
+		qlAvatar->setToolTip(cu ? tr("%1's avatar").arg(cu->qsName) : tr("User avatar"));
+	} else {
+		qlAvatar->setToolTip(cu ? tr("%1's avatar. Click to open image preview.").arg(cu->qsName)
+								: tr("User avatar. Click to open image preview."));
+	}
 }

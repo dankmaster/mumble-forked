@@ -543,7 +543,8 @@ QString updaterUiThemeArgument() {
 }
 
 QStringList bundledUpdaterArguments(const QString &updatePath, const QString &updateDirPath, const bool passive,
-									const QString &updateMode, const QString &fallbackInstallerPath = QString()) {
+									const QString &updateMode, const QString &fallbackInstallerPath = QString(),
+									const QString &expectedUpdateSha256 = QString()) {
 	const QString appPath = QCoreApplication::applicationFilePath();
 	const QString appDir  = QFileInfo(appPath).absolutePath();
 	const QDir updateDir(updateDirPath);
@@ -569,11 +570,43 @@ QStringList bundledUpdaterArguments(const QString &updatePath, const QString &up
 	if (mode == QLatin1String("package") && canUsePreparedInstallerFallback(fallbackInstallerPath)) {
 		arguments << QStringLiteral("--installer") << QDir::toNativeSeparators(fallbackInstallerPath);
 	}
+	if (mode == QLatin1String("package") && !expectedUpdateSha256.trimmed().isEmpty()) {
+		arguments << QStringLiteral("--package-sha256") << expectedUpdateSha256.trimmed().toLower();
+	}
 	const QString uiTheme = updaterUiThemeArgument();
 	if (!uiTheme.isEmpty()) {
 		arguments << QStringLiteral("--ui-theme") << uiTheme;
 	}
 	return arguments;
+}
+
+bool copyReplacing(const QString &sourcePath, const QString &targetPath) {
+	if (!QFileInfo::exists(sourcePath)) {
+		return true;
+	}
+	if (QFile::exists(targetPath) && !QFile::remove(targetPath)) {
+		return false;
+	}
+	return QFile::copy(sourcePath, targetPath);
+}
+
+bool copyBundledUpdaterRuntime(const QString &appDirPath, const QString &updateDirPath) {
+	const QDir appDir(appDirPath);
+	const QDir updateDir(updateDirPath);
+	const QStringList dependencies {
+		QStringLiteral("zlib1.dll"),
+	};
+
+	for (const QString &dependency : dependencies) {
+		const QString sourcePath = appDir.filePath(dependency);
+		if (!QFileInfo::exists(sourcePath)) {
+			continue;
+		}
+		if (!copyReplacing(sourcePath, updateDir.filePath(dependency))) {
+			return false;
+		}
+	}
+	return true;
 }
 
 QStringList msiexecUpdateArguments(const QString &installerPath, const bool passive) {
@@ -584,19 +617,18 @@ QStringList msiexecUpdateArguments(const QString &installerPath, const bool pass
 	return arguments;
 }
 
-bool launchBundledUpdater(const QString &updatePath, const bool passive, const QString &updateMode,
-						  const QString &fallbackInstallerPath) {
+QString prepareBundledUpdaterCopy(const QString &updateDirPath) {
 #ifdef Q_OS_WIN
-	QDir updateDir(Global::get().qdBasePath.filePath(QStringLiteral("Updates")));
+	QDir updateDir(updateDirPath);
 	if (!updateDir.exists() && !QDir().mkpath(updateDir.absolutePath())) {
-		return false;
+		return {};
 	}
 
 	const QString updaterSourcePath =
 		QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("mumble-updater.exe"));
 	const QFileInfo updaterSource(updaterSourcePath);
 	if (!updaterSource.isFile() || !updaterSource.isReadable()) {
-		return false;
+		return {};
 	}
 
 	const QString updaterTargetPath =
@@ -604,20 +636,41 @@ bool launchBundledUpdater(const QString &updatePath, const bool passive, const Q
 							   .arg(QCoreApplication::applicationPid())
 							   .arg(QDateTime::currentMSecsSinceEpoch()));
 	if (QFile::exists(updaterTargetPath) && !QFile::remove(updaterTargetPath)) {
-		return false;
+		return {};
 	}
 	if (!QFile::copy(updaterSourcePath, updaterTargetPath)) {
+		return {};
+	}
+	if (!copyBundledUpdaterRuntime(QCoreApplication::applicationDirPath(), updateDir.absolutePath())) {
+		QFile::remove(updaterTargetPath);
+		return {};
+	}
+	return updaterTargetPath;
+#else
+	Q_UNUSED(updateDirPath);
+	return {};
+#endif
+}
+
+bool launchBundledUpdater(const QString &updatePath, const bool passive, const QString &updateMode,
+						  const QString &fallbackInstallerPath, const QString &expectedUpdateSha256) {
+#ifdef Q_OS_WIN
+	QDir updateDir(Global::get().qdBasePath.filePath(QStringLiteral("Updates")));
+	const QString updaterTargetPath = prepareBundledUpdaterCopy(updateDir.absolutePath());
+	if (updaterTargetPath.isEmpty()) {
 		return false;
 	}
 
 	const QStringList arguments =
-		bundledUpdaterArguments(updatePath, updateDir.absolutePath(), passive, updateMode, fallbackInstallerPath);
+		bundledUpdaterArguments(updatePath, updateDir.absolutePath(), passive, updateMode, fallbackInstallerPath,
+								expectedUpdateSha256);
 	return QProcess::startDetached(updaterTargetPath, arguments, updateDir.absolutePath());
 #else
 	Q_UNUSED(updatePath);
 	Q_UNUSED(passive);
 	Q_UNUSED(updateMode);
 	Q_UNUSED(fallbackInstallerPath);
+	Q_UNUSED(expectedUpdateSha256);
 	return false;
 #endif
 }
@@ -693,6 +746,7 @@ private:
 	QCryptographicHash m_hash { QCryptographicHash::Sha256 };
 	QProgressDialog *m_progress = nullptr;
 	QNetworkReply *m_reply      = nullptr;
+	QProcess *m_prepareProcess = nullptr;
 	QString m_pendingFailure;
 	bool m_showProgress = true;
 	bool m_cancelled    = false;
@@ -862,7 +916,7 @@ private:
 	void finishDownloadedAsset() {
 		if (m_downloadingFallbackInstaller) {
 			m_fallbackInstallerPath = m_targetPath;
-			finishReady();
+			preparePackageOrFinish();
 			return;
 		}
 
@@ -880,7 +934,57 @@ private:
 			return;
 		}
 
-		finishReady();
+		preparePackageOrFinish();
+	}
+
+	void preparePackageOrFinish() {
+		if (m_updateMode != QLatin1String("package")) {
+			finishReady();
+			return;
+		}
+
+		QDir updateDir(Global::get().qdBasePath.filePath(QStringLiteral("Updates")));
+		const QString updaterPath = prepareBundledUpdaterCopy(updateDir.absolutePath());
+		if (updaterPath.isEmpty()) {
+			showFailure(VersionCheck::tr("Mumble could not prepare the bundled updater."));
+			return;
+		}
+
+		if (m_progress) {
+			m_progress->setLabelText(VersionCheck::tr("Preparing update package..."));
+			m_progress->setRange(0, 0);
+		}
+
+		const QString packagePath = m_primaryUpdatePath.isEmpty() ? m_targetPath : m_primaryUpdatePath;
+		QStringList arguments = bundledUpdaterArguments(packagePath, updateDir.absolutePath(), true, m_updateMode,
+														m_fallbackInstallerPath, packageExpectedSha256(m_info));
+		arguments << QStringLiteral("--prepare") << QStringLiteral("--no-ui");
+
+		m_prepareProcess = new QProcess(this);
+		m_prepareProcess->setProgram(updaterPath);
+		m_prepareProcess->setArguments(arguments);
+		m_prepareProcess->setWorkingDirectory(updateDir.absolutePath());
+		connect(m_prepareProcess, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
+			if (m_prepareProcess) {
+				m_prepareProcess->deleteLater();
+				m_prepareProcess = nullptr;
+			}
+			showFailure(VersionCheck::tr("Mumble could not start the update prepare step."));
+		});
+		connect(m_prepareProcess, qOverload< int, QProcess::ExitStatus >(&QProcess::finished), this,
+				[this](const int exitCode, const QProcess::ExitStatus exitStatus) {
+					QProcess *process = m_prepareProcess;
+					m_prepareProcess = nullptr;
+					if (process) {
+						process->deleteLater();
+					}
+					if (exitStatus == QProcess::NormalExit && exitCode == 0) {
+						finishReady();
+						return;
+					}
+					showFailure(VersionCheck::tr("Mumble could not prepare the update package."));
+				});
+		m_prepareProcess->start();
 	}
 
 	void finishReady() {
@@ -952,7 +1056,9 @@ private:
 			Global::get().mw->prepareUpdateResumeState();
 		}
 		if (!VersionCheck::launchPreparedUpdate(m_primaryUpdatePath.isEmpty() ? m_targetPath : m_primaryUpdatePath,
-												m_updateMode, true, true, m_fallbackInstallerPath)) {
+												m_updateMode, true, true, m_fallbackInstallerPath,
+												m_updateMode == QLatin1String("package") ? packageExpectedSha256(m_info)
+																						 : QString())) {
 			if (Global::get().mw) {
 				Global::get().mw->clearPendingUpdateResumeState();
 			}
@@ -974,6 +1080,10 @@ VersionCheck::VersionCheck(bool autocheck, QObject *parent, bool, bool emitResul
 
 QString VersionCheck::updateModeForInfo(const QJsonObject &info) {
 	return selectedUpdateMode(info);
+}
+
+QString VersionCheck::expectedUpdateSha256ForInfo(const QJsonObject &info) {
+	return selectedExpectedSha256(info);
 }
 
 bool VersionCheck::canInstallUpdate(const QJsonObject &info) {
@@ -1107,7 +1217,9 @@ QJsonObject VersionCheck::describeUpdateHandoff(const QJsonObject &info, const Q
 	result.insert(QStringLiteral("bundledUpdaterWorkingDir"), QDir::toNativeSeparators(updateDir.absolutePath()));
 	result.insert(QStringLiteral("bundledUpdaterArguments"),
 				  stringListJsonArray(bundledUpdaterArguments(dryRunUpdatePath, updateDir.absolutePath(), true,
-															  selectedMode, fallbackInstallerPath)));
+															  selectedMode, fallbackInstallerPath,
+															  selectedMode == QLatin1String("package") ? packageSha256
+																										: QString())));
 	result.insert(QStringLiteral("directMsiexecProgram"), QStringLiteral("msiexec.exe"));
 	result.insert(QStringLiteral("directMsiexecArguments"),
 				  selectedMode == QLatin1String("installer")
@@ -1151,7 +1263,8 @@ bool VersionCheck::canLaunchPreparedUpdate(const QString &updatePath, const QStr
 }
 
 bool VersionCheck::launchPreparedUpdate(const QString &updatePath, const QString &updateMode, const bool passive,
-										const bool restartAfterInstall, const QString &fallbackInstallerPath) {
+										const bool restartAfterInstall, const QString &fallbackInstallerPath,
+										const QString &expectedUpdateSha256) {
 #ifdef Q_OS_WIN
 	const QString mode = updateModeFromPath(updatePath, updateMode);
 	if (!canLaunchPreparedUpdate(updatePath, mode)) {
@@ -1159,7 +1272,7 @@ bool VersionCheck::launchPreparedUpdate(const QString &updatePath, const QString
 	}
 
 	if (restartAfterInstall) {
-		return launchBundledUpdater(updatePath, passive, mode, fallbackInstallerPath);
+		return launchBundledUpdater(updatePath, passive, mode, fallbackInstallerPath, expectedUpdateSha256);
 	}
 
 	if (mode == QLatin1String("package")) {
@@ -1174,6 +1287,7 @@ bool VersionCheck::launchPreparedUpdate(const QString &updatePath, const QString
 	Q_UNUSED(passive);
 	Q_UNUSED(restartAfterInstall);
 	Q_UNUSED(fallbackInstallerPath);
+	Q_UNUSED(expectedUpdateSha256);
 	return false;
 #endif
 }

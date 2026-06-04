@@ -247,7 +247,7 @@ ModernShellHost::ModernShellHost(QWidget *parent) : QWidget(parent) {
 	m_page->setWebChannel(m_channel);
 	m_bootTimeoutTimer = new QTimer(this);
 	m_bootTimeoutTimer->setSingleShot(true);
-	m_bootTimeoutTimer->setInterval(8000);
+	m_bootTimeoutTimer->setInterval(15000);
 
 	m_view->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, true);
 	m_view->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessFileUrls, false);

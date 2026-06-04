@@ -178,6 +178,7 @@ private slots:
 	void restoresCachedScopeSnapshots();
 	void forceReloadSendsInitialRequestWhileInitialLoadIsInFlight();
 	void warmupScopesRequestsBatchAndCachesResponses();
+	void liveMessagesDoNotSatisfyInitialHistoryLoad();
 	void keepsInactivePendingHistoryForCache();
 	void mergesOlderHistoryAndReadState();
 	void appliesEmbedUpdatesToCachedMessages();
@@ -266,6 +267,42 @@ void TestPersistentChatController::warmupScopesRequestsBatchAndCachesResponses()
 	QCOMPARE(g_initialRequestCount, 0);
 	QCOMPARE(snapshot.messages.size(), 1);
 	QCOMPARE(snapshot.messages.front().message_id(), 10U);
+
+	resetGatewayRequestState();
+}
+
+void TestPersistentChatController::liveMessagesDoNotSatisfyInitialHistoryLoad() {
+	resetGatewayRequestState();
+	g_gatewayReady = true;
+
+	PersistentChatGateway gateway;
+	PersistentChatController controller;
+	controller.setGateway(&gateway);
+
+	gateway.handleIncomingMessage(makeMessage(90, 9000, MumbleProto::TextChannel, 99));
+	controller.setActiveScope(PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 99), false);
+
+	PersistentChatScopeStateSnapshot snapshot = controller.activeSnapshot();
+	QCOMPARE(g_initialRequestCount, 1);
+	QCOMPARE(g_lastInitialRequestScope, MumbleProto::TextChannel);
+	QCOMPARE(g_lastInitialRequestScopeID, 99U);
+	QVERIFY(!snapshot.initialLoaded);
+	QCOMPARE(snapshot.loadingState, PersistentChatLoadingState::Initial);
+	QCOMPARE(snapshot.messages.size(), 1);
+	QCOMPARE(snapshot.messages.front().message_id(), 90U);
+
+	gateway.handleIncomingHistory(
+		makeHistory(MumbleProto::TextChannel, 99,
+					{ makeMessage(88, 8800, MumbleProto::TextChannel, 99),
+					  makeMessage(89, 8900, MumbleProto::TextChannel, 99) },
+					89, 88, false));
+
+	snapshot = controller.activeSnapshot();
+	QVERIFY(snapshot.initialLoaded);
+	QCOMPARE(snapshot.loadingState, PersistentChatLoadingState::Idle);
+	QCOMPARE(snapshot.messages.size(), 3);
+	QCOMPARE(snapshot.messages.front().message_id(), 88U);
+	QCOMPARE(snapshot.messages.back().message_id(), 90U);
 
 	resetGatewayRequestState();
 }

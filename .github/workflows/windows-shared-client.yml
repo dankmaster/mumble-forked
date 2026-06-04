@@ -146,6 +146,7 @@ jobs:
             -RequireClient `
             -RequireScreenHelper `
             -RequireSpeechCleanup `
+            -RequireUpdaterRuntime `
             -RequireGStreamerRuntime `
             -ArtifactListPath .\build-shared-webengine\windows-binary-artifacts.txt
 

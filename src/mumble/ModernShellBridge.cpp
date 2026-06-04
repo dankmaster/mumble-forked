@@ -168,6 +168,10 @@ void ModernShellBridge::selectScope(const QString &scopeToken) {
 	emit scopeSelectionRequested(scopeToken.trimmed());
 }
 
+void ModernShellBridge::selectScopeFromRail(const QString &scopeToken, const QString &railKind) {
+	emit scopeRailSelectionRequested(scopeToken.trimmed(), railKind.trimmed());
+}
+
 void ModernShellBridge::joinVoiceChannel(const QString &scopeToken) {
 	emit voiceJoinRequested(scopeToken.trimmed());
 }

@@ -139,6 +139,7 @@ jobs:
             -RequireClient `
             -RequireScreenHelper `
             -RequireSpeechCleanup `
+            -RequireUpdaterRuntime `
             -RequireGStreamerRuntime `
             -RequireClientInstaller `
             -RequireEnglishOnlyInstallers `
@@ -273,6 +274,7 @@ jobs:
             -Version $projectVersion `
             -Build ([int]$buildNumber) `
             -Commit $currentCommit `
+            -RequireUpdaterRuntime `
             -RequireGStreamerRuntime `
             -Validate
           $packageHash = Get-FileHash -LiteralPath $packagePath -Algorithm SHA256

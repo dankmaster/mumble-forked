@@ -158,6 +158,7 @@ public:
 
 	void sendProtoMessage(const ::google::protobuf::Message &msg, Mumble::Protocol::TCPMessageType type);
 	void sendMessage(const unsigned char *data, int len, bool force = false);
+	void sendVersion();
 
 	/// @returns Whether this handler is currently connected to a server.
 	bool isConnected() const;

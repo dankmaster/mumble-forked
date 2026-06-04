@@ -28,13 +28,18 @@ the package updater reports failure. Older clients ignore the package fields and
 continue to use the MSI through the preserved top-level fields.
 
 `mumble-updater.exe` supports both `--installer <msi>` and
-`--package <mumble-update>`. Package mode waits for Mumble to exit, verifies the
-inner package manifest and file hashes, backs up replaced files, copies the full
-payload into the app directory, verifies the result, and restarts `mumble.exe`.
-If the app directory is not writable, the copied updater relaunches itself with
-`runas`. When package mode was launched with a verified `--installer` fallback,
-package failure runs the MSI fallback; user cancellation is kept distinct from
-failure and does not trigger the MSI fallback.
+`--package <mumble-update>`. Package mode now has a native prepare/commit split.
+After Mumble downloads and verifies the outer package SHA-256, it launches the
+copied updater with `--prepare --no-ui`; that prepare pass reads the inner
+manifest, plans changed files, extracts and verifies only changed payload files
+into a staged directory, and writes a prepared sidecar. When the user chooses
+install/restart, the updater waits for Mumble to exit, commits the prepared
+changed files with backups, records an installed manifest for the app directory,
+and restarts `mumble.exe`. If the app directory is not writable, the copied
+updater relaunches itself with `runas`. When package mode was launched with a
+verified `--installer` fallback, package failure runs the MSI fallback; user
+cancellation is kept distinct from failure and does not trigger the MSI
+fallback.
 
 ## Goals
 
@@ -214,16 +219,18 @@ Proposed package-mode flow:
 
 1. Parse package arguments and log paths.
 2. Wait for the parent Mumble process to exit.
-3. Extract the archive into a temporary directory under the update working
-   directory.
-4. Read the internal package manifest.
-5. Verify every listed file exists, has the expected size, and matches SHA-256.
+3. Prepare mode reads the internal package manifest and compares it with the
+   installed manifest or current app files while Mumble is still running.
+4. Prepare mode extracts and verifies changed payload files into
+   `prepared-packages/<package-sha256>/`.
+5. Commit mode validates the prepared sidecar against the package SHA-256 and
+   requested app path.
 6. Detect whether the app directory is writable.
 7. If elevation is required, relaunch the copied updater with `runas` and the
    same package arguments.
-8. Create a backup manifest for files that will be replaced.
-9. Copy payload files into the app directory.
-10. Verify copied files.
+8. Create backups only for files that will be replaced.
+9. Copy changed staged payload files into the app directory.
+10. Verify copied file sizes and record the installed manifest.
 11. Restart `mumble.exe`.
 12. Leave logs and rollback data in the update directory.
 
@@ -394,8 +401,9 @@ Acceptance checks:
 
 Acceptance checks:
 
-- CI fails if the package is missing `mumble.exe`, `mumble-updater.exe`, Qt
-  runtime files, or optional runtime files expected by the staged payload.
+- CI fails if the package is missing `mumble.exe`, `mumble-updater.exe`,
+  `zlib1.dll` for the copied updater, Qt runtime files, or optional runtime
+  files expected by the staged payload.
 - Local dev update can apply a package to an isolated writable app directory.
 - Package and MSI paths both remain visible in automation diagnostics.
 

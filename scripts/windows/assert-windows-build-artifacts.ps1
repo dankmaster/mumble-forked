@@ -10,6 +10,7 @@ param(
 	[switch]$RequireClientInstaller,
 	[switch]$RequireServerInstaller,
 	[switch]$RequireEnglishOnlyInstallers,
+	[switch]$RequireUpdaterRuntime,
 	[switch]$RequireSpeechCleanup,
 	[switch]$RequireGStreamerRuntime
 )
@@ -153,6 +154,34 @@ function Assert-SpeechCleanupPayload {
 	Write-Host "$Label speech-cleanup payload verified."
 }
 
+function Assert-UpdaterRuntimePayload {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$Label,
+
+		[Parameter(Mandatory = $true)]
+		[string]$Root
+	)
+
+	$requiredRelativePaths = @(
+		"zlib1.dll"
+	)
+
+	$missing = New-Object System.Collections.Generic.List[string]
+	foreach ($relativePath in $requiredRelativePaths) {
+		$fullPath = Join-Path $Root $relativePath
+		if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+			$missing.Add($relativePath)
+		}
+	}
+
+	if ($missing.Count -gt 0) {
+		throw "$Label is missing required updater runtime files: $($missing -join ', ')."
+	}
+
+	Write-Host "$Label updater runtime payload verified."
+}
+
 function Assert-GStreamerPayload {
 	param(
 		[Parameter(Mandatory = $true)]
@@ -273,6 +302,9 @@ foreach ($verifiedPath in Assert-BinarySet -Label "Build root '$buildRootPath'" 
 if ($RequireSpeechCleanup) {
 	Assert-SpeechCleanupPayload -Label "Build root '$buildRootPath'" -Root $buildRootPath
 }
+if ($RequireUpdaterRuntime) {
+	Assert-UpdaterRuntimePayload -Label "Build root '$buildRootPath'" -Root $buildRootPath
+}
 if ($RequireGStreamerRuntime -and -not $RequireStage) {
 	Assert-GStreamerPayload -Label "Build root '$buildRootPath'" -Root $buildRootPath
 }
@@ -314,6 +346,9 @@ if ($RequireStage) {
 	}
 	if ($RequireSpeechCleanup) {
 		Assert-SpeechCleanupPayload -Label "Stage root '$stageRootPath'" -Root $stageRootPath
+	}
+	if ($RequireUpdaterRuntime) {
+		Assert-UpdaterRuntimePayload -Label "Stage root '$stageRootPath'" -Root $stageRootPath
 	}
 	if ($RequireGStreamerRuntime) {
 		Assert-GStreamerPayload -Label "Stage root '$stageRootPath'" -Root $stageRootPath

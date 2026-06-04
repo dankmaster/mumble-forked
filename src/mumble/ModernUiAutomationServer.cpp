@@ -3400,14 +3400,23 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		if (scopeToken.isEmpty()) {
 			return errorResponse(tr("Missing scopeToken."));
 		}
+		const QString railKind = request.value(QStringLiteral("railKind")).toString().trimmed();
 
 		if (async) {
-			scheduleAction([scopeToken](MainWindow *window) { window->handleModernShellScopeSelection(scopeToken); });
+			scheduleAction([scopeToken, railKind](MainWindow *window) {
+				if (railKind.isEmpty()) {
+					window->handleModernShellScopeSelection(scopeToken);
+				} else {
+					window->handleModernShellScopeRailSelection(scopeToken, railKind);
+				}
+			});
 			return asyncResponse();
 		}
 
 		QVariantMap response = okResponse();
-		response.insert(QStringLiteral("handled"), m_mainWindow->handleModernShellScopeSelection(scopeToken));
+		response.insert(QStringLiteral("handled"),
+						railKind.isEmpty() ? m_mainWindow->handleModernShellScopeSelection(scopeToken)
+										   : m_mainWindow->handleModernShellScopeRailSelection(scopeToken, railKind));
 		return response;
 	}
 

@@ -235,7 +235,7 @@ ScreenShareManager::ScreenShareManager(QObject *parent) : QObject(parent) {
 }
 
 ScreenShareHelperClient::CapabilitySnapshot ScreenShareManager::detectAdvertisedCapabilities() {
-	return ScreenShareHelperClient::detectLocalCapabilities();
+	return ScreenShareHelperClient::advertisedCapabilities();
 }
 
 ScreenShareHelperClient &ScreenShareManager::helperClient() {
@@ -314,6 +314,9 @@ QString ScreenShareManager::localShareUnavailableReason() const {
 	}
 	if (!Mumble::ScreenShare::isValidRelayUrl(Global::get().qsScreenShareRelayUrl)) {
 		return tr("This server has no valid screen-share relay endpoint configured.");
+	}
+	if (!capabilities.probeComplete) {
+		return tr("Checking the local screen-share runtime.");
 	}
 	if (!capabilities.captureSupported) {
 		return tr("No supported local capture source is available.");

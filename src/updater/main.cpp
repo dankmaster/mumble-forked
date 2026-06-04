@@ -9,23 +9,44 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <cwctype>
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <iomanip>
+#include <limits>
+#include <map>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
+
+#include <wincrypt.h>
+#include <zlib.h>
+
+#include <nlohmann/json.hpp>
 
 namespace {
 
 constexpr DWORD ParentExitTimeoutMsec = 180000;
 constexpr DWORD RestartRequired       = 3010;
 constexpr DWORD InstallerUserExit     = 1602;
+constexpr std::uint16_t ZipMethodStore = 0;
+constexpr std::uint16_t ZipMethodDeflate = 8;
+constexpr std::size_t ZipReadBufferSize = 1024 * 1024;
+constexpr std::uint32_t ZipLocalFileHeaderSignature = 0x04034b50;
+constexpr std::uint32_t ZipCentralDirectorySignature = 0x02014b50;
+constexpr std::uint32_t ZipEndOfCentralDirectorySignature = 0x06054b50;
+constexpr std::uint32_t Zip64Marker32 = 0xffffffffu;
+constexpr std::uint16_t Zip64Marker16 = 0xffffu;
+
+using json = nlohmann::json;
 
 bool updateSucceeded(const DWORD exitCode) {
 	return exitCode == 0 || exitCode == RestartRequired;
@@ -44,10 +65,12 @@ struct Options {
 	std::wstring updaterLogPath;
 	std::wstring msiLogPath;
 	std::wstring uiTheme;
+	std::wstring packageSha256;
 	bool passive = true;
 	bool noRelaunch = false;
 	bool elevatedRetry = false;
 	bool noUi = false;
+	bool prepareOnly = false;
 };
 
 void postUiStatus(const std::wstring &message);
@@ -188,6 +211,8 @@ bool parseArguments(int argc, wchar_t **argv, Options &options) {
 			options.msiLogPath = nextValue();
 		} else if (arg == L"--ui-theme") {
 			options.uiTheme = nextValue();
+		} else if (arg == L"--package-sha256") {
+			options.packageSha256 = nextValue();
 		} else if (arg == L"--passive") {
 			options.passive = true;
 		} else if (arg == L"--no-passive") {
@@ -198,6 +223,8 @@ bool parseArguments(int argc, wchar_t **argv, Options &options) {
 			options.elevatedRetry = true;
 		} else if (arg == L"--no-ui") {
 			options.noUi = true;
+		} else if (arg == L"--prepare") {
+			options.prepareOnly = true;
 		}
 	}
 
@@ -325,6 +352,9 @@ std::wstring packageUpdaterArguments(const Options &options, const bool elevated
 	}
 	if (!options.uiTheme.empty()) {
 		arguments += L" --ui-theme " + quoteArgument(options.uiTheme);
+	}
+	if (!options.packageSha256.empty()) {
+		arguments += L" --package-sha256 " + quoteArgument(options.packageSha256);
 	}
 	if (!options.passive) {
 		arguments += L" --no-passive";
@@ -676,7 +706,888 @@ DWORD runPowerShellPackageApply(const Options &options, const std::filesystem::p
 	return 0;
 }
 
+std::wstring wideFromUtf8(const std::string &value) {
+	if (value.empty()) {
+		return {};
+	}
+
+	int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast< int >(value.size()),
+									nullptr, 0);
+	if (length <= 0) {
+		length = MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast< int >(value.size()), nullptr, 0);
+	}
+	if (length <= 0) {
+		return {};
+	}
+
+	std::wstring result(static_cast< std::size_t >(length), L'\0');
+	MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast< int >(value.size()), result.data(), length);
+	return result;
+}
+
+std::string lowerAscii(std::string value) {
+	std::transform(value.begin(), value.end(), value.begin(), [](const unsigned char ch) {
+		return static_cast< char >(std::tolower(ch));
+	});
+	return value;
+}
+
+std::string lowerSha256(const std::wstring &value) {
+	std::string result = utf8FromWide(value);
+	result.erase(std::remove_if(result.begin(), result.end(), [](const unsigned char ch) { return std::isspace(ch); }),
+				 result.end());
+	return lowerAscii(result);
+}
+
+std::wstring lowerWide(std::wstring value) {
+	std::transform(value.begin(), value.end(), value.begin(), [](const wchar_t ch) {
+		return static_cast< wchar_t >(std::towlower(ch));
+	});
+	return value;
+}
+
+bool pathStartsWithRoot(const std::filesystem::path &path, const std::filesystem::path &root) {
+	std::wstring pathText = lowerWide(std::filesystem::absolute(path).wstring());
+	std::wstring rootText = lowerWide(std::filesystem::absolute(root).wstring());
+	if (!rootText.empty() && rootText.back() != L'\\' && rootText.back() != L'/') {
+		rootText.push_back(L'\\');
+	}
+	if (!pathText.empty() && pathText.back() != L'\\' && pathText.back() != L'/') {
+		pathText.push_back(L'\\');
+	}
+	return pathText.rfind(rootText, 0) == 0;
+}
+
+bool isSafePackageRelativePath(const std::string &relativePath) {
+	if (relativePath.empty() || relativePath.front() == '/' || relativePath.front() == '\\') {
+		return false;
+	}
+	if (relativePath.find(':') != std::string::npos) {
+		return false;
+	}
+
+	std::size_t start = 0;
+	while (start <= relativePath.size()) {
+		const std::size_t end = relativePath.find('/', start);
+		const std::string part = relativePath.substr(start, end == std::string::npos ? std::string::npos : end - start);
+		if (part == "..") {
+			return false;
+		}
+		if (end == std::string::npos) {
+			break;
+		}
+		start = end + 1;
+	}
+	return true;
+}
+
+std::filesystem::path resolvePackagePathUnderRoot(const std::filesystem::path &root, const std::string &relativePath) {
+	if (!isSafePackageRelativePath(relativePath)) {
+		throw std::runtime_error("Unsafe package path: " + relativePath);
+	}
+
+	std::filesystem::path result = root;
+	std::size_t start = 0;
+	while (start <= relativePath.size()) {
+		const std::size_t end = relativePath.find('/', start);
+		const std::string part = relativePath.substr(start, end == std::string::npos ? std::string::npos : end - start);
+		if (!part.empty() && part != ".") {
+			result /= wideFromUtf8(part);
+		}
+		if (end == std::string::npos) {
+			break;
+		}
+		start = end + 1;
+	}
+
+	if (!pathStartsWithRoot(result, root)) {
+		throw std::runtime_error("Package path escapes its root: " + relativePath);
+	}
+	return result;
+}
+
+std::wstring pathWithSuffix(const std::filesystem::path &path, const std::wstring &suffix) {
+	return path.wstring() + suffix;
+}
+
+std::string hexFromBytes(const BYTE *bytes, const DWORD length) {
+	std::ostringstream stream;
+	stream << std::hex << std::setfill('0');
+	for (DWORD index = 0; index < length; ++index) {
+		stream << std::setw(2) << static_cast< int >(bytes[index]);
+	}
+	return stream.str();
+}
+
+class Sha256Hasher {
+public:
+	Sha256Hasher() {
+		if (!CryptAcquireContextW(&m_provider, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT)) {
+			throw std::runtime_error("Unable to acquire SHA256 crypto provider.");
+		}
+		if (!CryptCreateHash(m_provider, CALG_SHA_256, 0, 0, &m_hash)) {
+			CryptReleaseContext(m_provider, 0);
+			m_provider = 0;
+			throw std::runtime_error("Unable to create SHA256 hash.");
+		}
+	}
+
+	~Sha256Hasher() {
+		if (m_hash) {
+			CryptDestroyHash(m_hash);
+		}
+		if (m_provider) {
+			CryptReleaseContext(m_provider, 0);
+		}
+	}
+
+	void add(const char *data, const std::size_t size) {
+		if (size == 0) {
+			return;
+		}
+		if (size > std::numeric_limits< DWORD >::max()) {
+			throw std::runtime_error("SHA256 input chunk is too large.");
+		}
+		if (!CryptHashData(m_hash, reinterpret_cast< const BYTE * >(data), static_cast< DWORD >(size), 0)) {
+			throw std::runtime_error("Unable to update SHA256 hash.");
+		}
+	}
+
+	std::string finishHex() {
+		BYTE hash[32] {};
+		DWORD hashLength = static_cast< DWORD >(sizeof(hash));
+		if (!CryptGetHashParam(m_hash, HP_HASHVAL, hash, &hashLength, 0)) {
+			throw std::runtime_error("Unable to finish SHA256 hash.");
+		}
+		return hexFromBytes(hash, hashLength);
+	}
+
+private:
+	HCRYPTPROV m_provider = 0;
+	HCRYPTHASH m_hash = 0;
+};
+
+std::string fileSha256(const std::filesystem::path &path) {
+	std::ifstream stream(path, std::ios::binary);
+	if (!stream) {
+		throw std::runtime_error("Unable to open file for SHA256: " + utf8FromWide(path.wstring()));
+	}
+
+	Sha256Hasher hasher;
+	std::vector< char > buffer(ZipReadBufferSize);
+	while (stream) {
+		stream.read(buffer.data(), static_cast< std::streamsize >(buffer.size()));
+		const std::streamsize read = stream.gcount();
+		if (read > 0) {
+			hasher.add(buffer.data(), static_cast< std::size_t >(read));
+		}
+	}
+	return hasher.finishHex();
+}
+
+std::uint16_t readLe16(const char *data) {
+	const auto *bytes = reinterpret_cast< const unsigned char * >(data);
+	return static_cast< std::uint16_t >(bytes[0] | (bytes[1] << 8));
+}
+
+std::uint32_t readLe32(const char *data) {
+	const auto *bytes = reinterpret_cast< const unsigned char * >(data);
+	return static_cast< std::uint32_t >(bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24));
+}
+
+struct ZipEntry {
+	std::string name;
+	std::uint16_t flags = 0;
+	std::uint16_t method = 0;
+	std::uint32_t crc32 = 0;
+	std::uint64_t compressedSize = 0;
+	std::uint64_t uncompressedSize = 0;
+	std::uint64_t localHeaderOffset = 0;
+};
+
+std::unordered_map< std::string, ZipEntry > readZipDirectory(const std::filesystem::path &packagePath) {
+	std::ifstream stream(packagePath, std::ios::binary);
+	if (!stream) {
+		throw std::runtime_error("Unable to open update package.");
+	}
+
+	stream.seekg(0, std::ios::end);
+	const std::uint64_t fileSize = static_cast< std::uint64_t >(stream.tellg());
+	const std::uint64_t tailSize = std::min< std::uint64_t >(fileSize, 22 + 65535);
+	stream.seekg(static_cast< std::streamoff >(fileSize - tailSize), std::ios::beg);
+
+	std::vector< char > tail(static_cast< std::size_t >(tailSize));
+	stream.read(tail.data(), static_cast< std::streamsize >(tail.size()));
+	if (static_cast< std::size_t >(stream.gcount()) != tail.size()) {
+		throw std::runtime_error("Unable to read update package directory.");
+	}
+	if (tail.size() < 22) {
+		throw std::runtime_error("Update package is too small to be a ZIP archive.");
+	}
+
+	std::size_t eocdOffset = std::string::npos;
+	for (std::size_t offset = tail.size() >= 22 ? tail.size() - 22 : 0; offset != std::string::npos; --offset) {
+		if (readLe32(tail.data() + offset) == ZipEndOfCentralDirectorySignature) {
+			const std::uint16_t commentLength = readLe16(tail.data() + offset + 20);
+			if (offset + 22 + commentLength == tail.size()) {
+				eocdOffset = offset;
+				break;
+			}
+		}
+		if (offset == 0) {
+			break;
+		}
+	}
+	if (eocdOffset == std::string::npos) {
+		throw std::runtime_error("Update package is not a supported ZIP archive.");
+	}
+
+	const std::uint16_t entryCountDisk = readLe16(tail.data() + eocdOffset + 8);
+	const std::uint16_t entryCount = readLe16(tail.data() + eocdOffset + 10);
+	const std::uint32_t centralDirectorySize32 = readLe32(tail.data() + eocdOffset + 12);
+	const std::uint32_t centralDirectoryOffset32 = readLe32(tail.data() + eocdOffset + 16);
+	if (entryCountDisk == Zip64Marker16 || entryCount == Zip64Marker16 || centralDirectorySize32 == Zip64Marker32
+		|| centralDirectoryOffset32 == Zip64Marker32) {
+		throw std::runtime_error("Zip64 update packages are not supported by this updater yet.");
+	}
+
+	std::vector< char > directory(centralDirectorySize32);
+	stream.seekg(static_cast< std::streamoff >(centralDirectoryOffset32), std::ios::beg);
+	stream.read(directory.data(), static_cast< std::streamsize >(directory.size()));
+	if (static_cast< std::size_t >(stream.gcount()) != directory.size()) {
+		throw std::runtime_error("Unable to read update package central directory.");
+	}
+
+	std::unordered_map< std::string, ZipEntry > entries;
+	std::size_t offset = 0;
+	for (std::uint16_t index = 0; index < entryCount; ++index) {
+		if (offset + 46 > directory.size()
+			|| readLe32(directory.data() + offset) != ZipCentralDirectorySignature) {
+			throw std::runtime_error("Update package central directory is corrupt.");
+		}
+
+		ZipEntry entry;
+		entry.flags = readLe16(directory.data() + offset + 8);
+		entry.method = readLe16(directory.data() + offset + 10);
+		entry.crc32 = readLe32(directory.data() + offset + 16);
+		const std::uint32_t compressedSize32 = readLe32(directory.data() + offset + 20);
+		const std::uint32_t uncompressedSize32 = readLe32(directory.data() + offset + 24);
+		const std::uint16_t nameLength = readLe16(directory.data() + offset + 28);
+		const std::uint16_t extraLength = readLe16(directory.data() + offset + 30);
+		const std::uint16_t commentLength = readLe16(directory.data() + offset + 32);
+		const std::uint32_t localHeaderOffset32 = readLe32(directory.data() + offset + 42);
+		if (compressedSize32 == Zip64Marker32 || uncompressedSize32 == Zip64Marker32
+			|| localHeaderOffset32 == Zip64Marker32) {
+			throw std::runtime_error("Zip64 update package entries are not supported by this updater yet.");
+		}
+		if ((entry.flags & 0x1) != 0) {
+			throw std::runtime_error("Encrypted update package entries are not supported.");
+		}
+
+		const std::size_t nameOffset = offset + 46;
+		const std::size_t nextOffset = nameOffset + nameLength + extraLength + commentLength;
+		if (nextOffset > directory.size()) {
+			throw std::runtime_error("Update package central directory entry is truncated.");
+		}
+
+		entry.name.assign(directory.data() + nameOffset, directory.data() + nameOffset + nameLength);
+		std::replace(entry.name.begin(), entry.name.end(), '\\', '/');
+		entry.compressedSize = compressedSize32;
+		entry.uncompressedSize = uncompressedSize32;
+		entry.localHeaderOffset = localHeaderOffset32;
+
+		if (!entry.name.empty() && entry.name.back() != '/') {
+			entries.emplace(entry.name, entry);
+		}
+		offset = nextOffset;
+	}
+	return entries;
+}
+
+void readZipEntryPayload(const std::filesystem::path &packagePath, const ZipEntry &entry,
+						 const std::function< void(const char *, std::size_t) > &writeChunk) {
+	std::ifstream stream(packagePath, std::ios::binary);
+	if (!stream) {
+		throw std::runtime_error("Unable to open update package for extraction.");
+	}
+
+	char localHeader[30] {};
+	stream.seekg(static_cast< std::streamoff >(entry.localHeaderOffset), std::ios::beg);
+	stream.read(localHeader, sizeof(localHeader));
+	if (stream.gcount() != sizeof(localHeader) || readLe32(localHeader) != ZipLocalFileHeaderSignature) {
+		throw std::runtime_error("Update package local file header is corrupt.");
+	}
+
+	const std::uint16_t nameLength = readLe16(localHeader + 26);
+	const std::uint16_t extraLength = readLe16(localHeader + 28);
+	stream.seekg(static_cast< std::streamoff >(entry.localHeaderOffset + 30 + nameLength + extraLength), std::ios::beg);
+
+	std::vector< char > input(ZipReadBufferSize);
+	std::vector< char > output(ZipReadBufferSize);
+	std::uint64_t compressedRemaining = entry.compressedSize;
+	std::uint64_t uncompressedWritten = 0;
+
+	if (entry.method == ZipMethodStore) {
+		while (compressedRemaining > 0) {
+			const std::size_t chunkSize =
+				static_cast< std::size_t >(std::min< std::uint64_t >(compressedRemaining, input.size()));
+			stream.read(input.data(), static_cast< std::streamsize >(chunkSize));
+			if (static_cast< std::size_t >(stream.gcount()) != chunkSize) {
+				throw std::runtime_error("Stored update package entry is truncated.");
+			}
+			writeChunk(input.data(), chunkSize);
+			compressedRemaining -= chunkSize;
+			uncompressedWritten += chunkSize;
+		}
+	} else if (entry.method == ZipMethodDeflate) {
+		z_stream zstream {};
+		if (inflateInit2(&zstream, -MAX_WBITS) != Z_OK) {
+			throw std::runtime_error("Unable to initialize ZIP deflate stream.");
+		}
+
+		bool finished = false;
+		try {
+			while (!finished) {
+				if (zstream.avail_in == 0 && compressedRemaining > 0) {
+					const std::size_t chunkSize =
+						static_cast< std::size_t >(std::min< std::uint64_t >(compressedRemaining, input.size()));
+					stream.read(input.data(), static_cast< std::streamsize >(chunkSize));
+					if (static_cast< std::size_t >(stream.gcount()) != chunkSize) {
+						throw std::runtime_error("Deflated update package entry is truncated.");
+					}
+					compressedRemaining -= chunkSize;
+					zstream.next_in = reinterpret_cast< Bytef * >(input.data());
+					zstream.avail_in = static_cast< uInt >(chunkSize);
+				}
+
+				zstream.next_out = reinterpret_cast< Bytef * >(output.data());
+				zstream.avail_out = static_cast< uInt >(output.size());
+				const int result = inflate(&zstream, Z_NO_FLUSH);
+				if (result != Z_OK && result != Z_STREAM_END) {
+					throw std::runtime_error("Unable to inflate update package entry.");
+				}
+
+				const std::size_t produced = output.size() - zstream.avail_out;
+				if (produced > 0) {
+					writeChunk(output.data(), produced);
+					uncompressedWritten += produced;
+				}
+				finished = result == Z_STREAM_END;
+
+				if (compressedRemaining == 0 && zstream.avail_in == 0 && !finished) {
+					throw std::runtime_error("Deflated update package entry ended before the stream completed.");
+				}
+			}
+		} catch (...) {
+			inflateEnd(&zstream);
+			throw;
+		}
+		inflateEnd(&zstream);
+	} else {
+		throw std::runtime_error("Unsupported ZIP compression method in update package.");
+	}
+
+	if (uncompressedWritten != entry.uncompressedSize) {
+		throw std::runtime_error("Update package entry size mismatch after extraction.");
+	}
+}
+
+std::string readZipEntryText(const std::filesystem::path &packagePath, const ZipEntry &entry) {
+	std::string contents;
+	contents.reserve(static_cast< std::size_t >(std::min< std::uint64_t >(entry.uncompressedSize, 1024 * 1024)));
+	readZipEntryPayload(packagePath, entry, [&contents](const char *data, const std::size_t size) {
+		contents.append(data, data + size);
+	});
+	return contents;
+}
+
+void extractZipEntryToFile(const Options &options, const std::filesystem::path &packagePath, const ZipEntry &entry,
+						   const std::filesystem::path &target, const std::string &expectedSha256,
+						   const std::uint64_t expectedSize) {
+	std::error_code error;
+	std::filesystem::create_directories(target.parent_path(), error);
+	if (error) {
+		throw std::runtime_error("Unable to create staged package directory.");
+	}
+
+	std::ofstream output(target, std::ios::binary | std::ios::trunc);
+	if (!output) {
+		throw std::runtime_error("Unable to create staged package file: " + utf8FromWide(target.wstring()));
+	}
+
+	Sha256Hasher hasher;
+	std::uint64_t written = 0;
+	readZipEntryPayload(packagePath, entry, [&](const char *data, const std::size_t size) {
+		output.write(data, static_cast< std::streamsize >(size));
+		if (!output) {
+			throw std::runtime_error("Unable to write staged package file.");
+		}
+		hasher.add(data, size);
+		written += size;
+	});
+	output.close();
+	if (!output) {
+		throw std::runtime_error("Unable to finish staged package file.");
+	}
+
+	if (written != expectedSize) {
+		std::filesystem::remove(target, error);
+		throw std::runtime_error("Staged package file size mismatch.");
+	}
+	const std::string actualSha256 = hasher.finishHex();
+	if (actualSha256 != expectedSha256) {
+		std::filesystem::remove(target, error);
+		throw std::runtime_error("Staged package file SHA256 mismatch.");
+	}
+	appendLog(options, L"Staged " + wideFromUtf8(entry.name) + L'.');
+}
+
+struct PackageFile {
+	std::string path;
+	std::uint64_t size = 0;
+	std::string sha256;
+	bool changed = true;
+};
+
+struct PackagePlan {
+	std::string packageIdentity;
+	std::filesystem::path packagePath;
+	std::filesystem::path appPath;
+	std::filesystem::path appDir;
+	std::filesystem::path updateRoot;
+	std::filesystem::path stageRoot;
+	std::filesystem::path sidecarPath;
+	std::vector< PackageFile > files;
+	std::vector< PackageFile > changedFiles;
+};
+
+std::string appDirManifestKey(const std::filesystem::path &appDir) {
+	const std::wstring text = lowerWide(std::filesystem::absolute(appDir).wstring());
+	std::uint64_t hash = 14695981039346656037ull;
+	for (const wchar_t ch : text) {
+		hash ^= static_cast< std::uint64_t >(ch);
+		hash *= 1099511628211ull;
+	}
+	std::ostringstream stream;
+	stream << std::hex << std::setw(16) << std::setfill('0') << hash;
+	return stream.str();
+}
+
+std::filesystem::path installedManifestPath(const PackagePlan &plan) {
+	return plan.updateRoot / L"installed-manifests" / (wideFromUtf8(appDirManifestKey(plan.appDir)) + L".json");
+}
+
+std::string fallbackPackageIdentity(const std::filesystem::path &packagePath) {
+	std::error_code error;
+	const std::uintmax_t size = std::filesystem::file_size(packagePath, error);
+	std::string identity = utf8FromWide(packagePath.filename().wstring());
+	identity += "-";
+	identity += std::to_string(error ? 0 : size);
+	std::replace_if(identity.begin(), identity.end(), [](const char ch) {
+		return !std::isalnum(static_cast< unsigned char >(ch)) && ch != '-' && ch != '_';
+	}, '-');
+	return identity;
+}
+
+PackagePlan makePackagePlan(const Options &options) {
+	PackagePlan plan;
+	plan.packageIdentity = lowerSha256(options.packageSha256);
+	if (plan.packageIdentity.empty()) {
+		plan.packageIdentity = fallbackPackageIdentity(options.packagePath);
+	}
+	plan.packagePath = std::filesystem::path(options.packagePath);
+	plan.appPath = std::filesystem::path(options.appPath);
+	plan.appDir = plan.appPath.parent_path();
+	plan.updateRoot = packageWorkRoot(options);
+	plan.stageRoot = plan.updateRoot / L"prepared-packages" / wideFromUtf8(plan.packageIdentity);
+	plan.sidecarPath = std::filesystem::path(pathWithSuffix(plan.packagePath, L".prepared.json"));
+	return plan;
+}
+
+std::unordered_map< std::string, std::string > loadInstalledHashes(const PackagePlan &plan) {
+	std::unordered_map< std::string, std::string > hashes;
+	const std::filesystem::path manifestPath = installedManifestPath(plan);
+	if (!fileExists(manifestPath.wstring())) {
+		return hashes;
+	}
+
+	try {
+		std::ifstream stream(manifestPath, std::ios::binary);
+		const json manifest = json::parse(stream);
+		for (const json &file : manifest.value("files", json::array())) {
+			const std::string path = file.value("path", "");
+			const std::string sha256 = lowerAscii(file.value("sha256", ""));
+			if (!path.empty() && !sha256.empty()) {
+				hashes[path] = sha256;
+			}
+		}
+	} catch (...) {
+		hashes.clear();
+	}
+	return hashes;
+}
+
+std::uint64_t fileSizeOrMissing(const std::filesystem::path &path, bool &exists) {
+	std::error_code error;
+	const std::uintmax_t size = std::filesystem::file_size(path, error);
+	exists = !error;
+	return exists ? static_cast< std::uint64_t >(size) : 0;
+}
+
+std::vector< PackageFile > parsePackageManifest(const std::string &manifestText) {
+	const json manifest = json::parse(manifestText);
+	if (manifest.value("format", "") != "mumble-update-v1") {
+		throw std::runtime_error("Unsupported update package format.");
+	}
+	if (manifest.value("applyMode", "") != "replace-staged-payload") {
+		throw std::runtime_error("Unsupported update package apply mode.");
+	}
+	const int minUpdaterVersion = manifest.value("minUpdaterVersion", -1);
+	if (minUpdaterVersion > 2) {
+		throw std::runtime_error("Update package requires a newer updater.");
+	}
+
+	std::vector< PackageFile > files;
+	bool hasMumble = false;
+	bool hasUpdater = false;
+	for (const json &entry : manifest.value("files", json::array())) {
+		PackageFile file;
+		file.path = entry.value("path", "");
+		std::replace(file.path.begin(), file.path.end(), '\\', '/');
+		file.size = entry.value("size", static_cast< std::uint64_t >(0));
+		file.sha256 = lowerAscii(entry.value("sha256", ""));
+		if (!isSafePackageRelativePath(file.path) || file.sha256.empty()) {
+			throw std::runtime_error("Update package manifest contains an invalid file entry.");
+		}
+		hasMumble = hasMumble || file.path == "mumble.exe";
+		hasUpdater = hasUpdater || file.path == "mumble-updater.exe";
+		files.push_back(std::move(file));
+	}
+	if (files.empty()) {
+		throw std::runtime_error("Update package manifest does not list any files.");
+	}
+	if (!hasMumble || !hasUpdater) {
+		throw std::runtime_error("Update package is missing required Mumble executables.");
+	}
+	return files;
+}
+
+void writeJsonFile(const std::filesystem::path &path, const json &document) {
+	std::error_code error;
+	std::filesystem::create_directories(path.parent_path(), error);
+	if (error) {
+		throw std::runtime_error("Unable to create JSON output directory.");
+	}
+
+	const std::filesystem::path tempPath(pathWithSuffix(path, L".tmp"));
+	{
+		std::ofstream stream(tempPath, std::ios::binary | std::ios::trunc);
+		if (!stream) {
+			throw std::runtime_error("Unable to write JSON output file.");
+		}
+		stream << document.dump(2);
+		stream << '\n';
+	}
+	std::filesystem::rename(tempPath, path, error);
+	if (error) {
+		std::filesystem::remove(path, error);
+		std::filesystem::rename(tempPath, path, error);
+	}
+	if (error) {
+		throw std::runtime_error("Unable to commit JSON output file.");
+	}
+}
+
+void writePreparedSidecar(const PackagePlan &plan) {
+	json files = json::array();
+	json changedFiles = json::array();
+	for (const PackageFile &file : plan.files) {
+		json entry {
+			{ "path", file.path },
+			{ "size", file.size },
+			{ "sha256", file.sha256 },
+			{ "changed", file.changed },
+		};
+		files.push_back(entry);
+		if (file.changed) {
+			changedFiles.push_back(entry);
+		}
+	}
+
+	writeJsonFile(plan.sidecarPath, json {
+									{ "schema", 1 },
+									{ "packageIdentity", plan.packageIdentity },
+									{ "packagePath", utf8FromWide(plan.packagePath.wstring()) },
+									{ "appPath", utf8FromWide(plan.appPath.wstring()) },
+									{ "stageRoot", utf8FromWide(plan.stageRoot.wstring()) },
+									{ "files", files },
+									{ "changedFiles", changedFiles },
+								});
+}
+
+PackagePlan loadPreparedSidecar(const Options &options) {
+	PackagePlan plan = makePackagePlan(options);
+	std::ifstream stream(plan.sidecarPath, std::ios::binary);
+	if (!stream) {
+		throw std::runtime_error("Prepared update sidecar is missing.");
+	}
+	const json sidecar = json::parse(stream);
+	const std::string identity = lowerAscii(sidecar.value("packageIdentity", ""));
+	if (!plan.packageIdentity.empty() && identity != plan.packageIdentity) {
+		throw std::runtime_error("Prepared update identity does not match the requested package.");
+	}
+	const std::wstring sidecarPackagePath = wideFromUtf8(sidecar.value("packagePath", ""));
+	if (!sidecarPackagePath.empty()
+		&& lowerWide(std::filesystem::absolute(sidecarPackagePath).wstring())
+			   != lowerWide(std::filesystem::absolute(plan.packagePath).wstring())) {
+		throw std::runtime_error("Prepared update package path does not match the requested package.");
+	}
+	const std::wstring sidecarAppPath = wideFromUtf8(sidecar.value("appPath", ""));
+	if (!sidecarAppPath.empty()
+		&& lowerWide(std::filesystem::absolute(sidecarAppPath).wstring())
+			   != lowerWide(std::filesystem::absolute(plan.appPath).wstring())) {
+		throw std::runtime_error("Prepared update app path does not match the requested app.");
+	}
+
+	const std::wstring stageRoot = wideFromUtf8(sidecar.value("stageRoot", ""));
+	if (!stageRoot.empty()) {
+		plan.stageRoot = std::filesystem::path(stageRoot);
+	}
+	if (!pathStartsWithRoot(plan.stageRoot, plan.updateRoot / L"prepared-packages")) {
+		throw std::runtime_error("Prepared update stage root is outside the update directory.");
+	}
+
+	for (const json &entry : sidecar.value("files", json::array())) {
+		PackageFile file;
+		file.path = entry.value("path", "");
+		file.size = entry.value("size", static_cast< std::uint64_t >(0));
+		file.sha256 = lowerAscii(entry.value("sha256", ""));
+		file.changed = entry.value("changed", true);
+		if (!isSafePackageRelativePath(file.path) || file.sha256.empty()) {
+			throw std::runtime_error("Prepared update sidecar contains an invalid file entry.");
+		}
+		if (file.changed) {
+			plan.changedFiles.push_back(file);
+		}
+		plan.files.push_back(std::move(file));
+	}
+	if (plan.files.empty()) {
+		throw std::runtime_error("Prepared update sidecar does not list any files.");
+	}
+	return plan;
+}
+
+void writeInstalledManifest(const PackagePlan &plan) {
+	json files = json::array();
+	for (const PackageFile &file : plan.files) {
+		files.push_back(json {
+			{ "path", file.path },
+			{ "size", file.size },
+			{ "sha256", file.sha256 },
+		});
+	}
+
+	writeJsonFile(installedManifestPath(plan), json {
+											  { "schema", 1 },
+											  { "appPath", utf8FromWide(plan.appPath.wstring()) },
+											  { "appDir", utf8FromWide(plan.appDir.wstring()) },
+											  { "packageIdentity", plan.packageIdentity },
+											  { "files", files },
+										  });
+}
+
+DWORD prepareNativePackageUpdate(const Options &options) {
+	try {
+		PackagePlan plan = makePackagePlan(options);
+		appendLog(options, L"Preparing update package.");
+		postUiProgress(-1, true);
+
+		const auto zipEntries = readZipDirectory(plan.packagePath);
+		const auto manifestIt = zipEntries.find("manifest.json");
+		if (manifestIt == zipEntries.end()) {
+			throw std::runtime_error("Update package is missing manifest.json.");
+		}
+		plan.files = parsePackageManifest(readZipEntryText(plan.packagePath, manifestIt->second));
+
+		std::error_code error;
+		if (std::filesystem::exists(plan.stageRoot, error)) {
+			std::filesystem::remove_all(plan.stageRoot, error);
+			if (error) {
+				throw std::runtime_error("Unable to remove stale prepared package directory.");
+			}
+		}
+		std::filesystem::create_directories(plan.stageRoot / L"payload", error);
+		if (error) {
+			throw std::runtime_error("Unable to create prepared package directory.");
+		}
+
+		const std::unordered_map< std::string, std::string > installedHashes = loadInstalledHashes(plan);
+		int progress = 0;
+		int totalProgress = 1;
+		const auto progressLog = [&](const std::wstring &message) {
+			++progress;
+			appendLog(options, L"Progress " + std::to_wstring(progress) + L"/" + std::to_wstring(totalProgress)
+								   + L": " + message);
+		};
+
+		for (PackageFile &file : plan.files) {
+			appendLog(options, L"Planning file " + wideFromUtf8(file.path) + L'.');
+			const auto target = resolvePackagePathUnderRoot(plan.appDir, file.path);
+			bool targetExists = false;
+			const std::uint64_t targetSize = fileSizeOrMissing(target, targetExists);
+			file.changed = true;
+			const auto installedIt = installedHashes.find(file.path);
+			if (targetExists && targetSize == file.size && installedIt != installedHashes.end()
+				&& installedIt->second == file.sha256) {
+				file.changed = false;
+			} else if (targetExists && targetSize == file.size) {
+				file.changed = fileSha256(target) != file.sha256;
+			}
+			if (file.changed) {
+				plan.changedFiles.push_back(file);
+			}
+		}
+
+		progress = 0;
+		totalProgress = static_cast< int >(plan.changedFiles.size() + 1);
+		for (const PackageFile &file : plan.changedFiles) {
+			progressLog(L"Staging file " + wideFromUtf8(file.path));
+			const std::string zipName = "payload/" + file.path;
+			const auto entryIt = zipEntries.find(zipName);
+			if (entryIt == zipEntries.end()) {
+				throw std::runtime_error("Update package payload is missing " + file.path + ".");
+			}
+			const auto stagedPath = resolvePackagePathUnderRoot(plan.stageRoot / L"payload", file.path);
+			extractZipEntryToFile(options, plan.packagePath, entryIt->second, stagedPath, file.sha256, file.size);
+		}
+
+		writePreparedSidecar(plan);
+		progressLog(L"Prepared update package");
+		appendLog(options, L"Prepared update package with " + std::to_wstring(plan.changedFiles.size()) + L" changed files.");
+		postUiProgress(100, false);
+		return 0;
+	} catch (const std::exception &exception) {
+		appendLog(options, L"Package prepare failed. " + wideFromUtf8(exception.what()));
+		return 1;
+	}
+}
+
+struct BackupEntry {
+	std::filesystem::path target;
+	std::filesystem::path backup;
+	bool existed = false;
+};
+
+DWORD commitNativePackageUpdate(const Options &options) {
+	try {
+		PackagePlan plan;
+		try {
+			plan = loadPreparedSidecar(options);
+		} catch (const std::exception &exception) {
+			appendLog(options, L"Prepared package is unavailable; preparing during install. "
+								   + wideFromUtf8(exception.what()));
+			const DWORD prepareExitCode = prepareNativePackageUpdate(options);
+			if (prepareExitCode != 0) {
+				return prepareExitCode;
+			}
+			plan = loadPreparedSidecar(options);
+		}
+
+		appendLog(options, L"Committing prepared update package.");
+		const std::wstring backupName =
+			L"package-backup-" + std::to_wstring(GetTickCount64()) + L"-" + std::to_wstring(GetCurrentProcessId());
+		const std::filesystem::path backupRoot = plan.updateRoot / backupName;
+		std::vector< BackupEntry > backups;
+		std::error_code error;
+		std::filesystem::create_directories(backupRoot, error);
+		if (error) {
+			throw std::runtime_error("Unable to create package backup directory.");
+		}
+
+		int progress = 0;
+		const int totalProgress = static_cast< int >(std::max< std::size_t >(1, plan.changedFiles.size()) + 2);
+		const auto progressLog = [&](const std::wstring &message) {
+			++progress;
+			appendLog(options, L"Progress " + std::to_wstring(progress) + L"/" + std::to_wstring(totalProgress)
+								   + L": " + message);
+		};
+
+		try {
+			for (const PackageFile &file : plan.changedFiles) {
+				progressLog(L"Installing file " + wideFromUtf8(file.path));
+				const auto source = resolvePackagePathUnderRoot(plan.stageRoot / L"payload", file.path);
+				const auto target = resolvePackagePathUnderRoot(plan.appDir, file.path);
+				bool sourceExists = false;
+				const std::uint64_t sourceSize = fileSizeOrMissing(source, sourceExists);
+				if (!sourceExists || sourceSize != file.size || fileSha256(source) != file.sha256) {
+					throw std::runtime_error("Prepared payload file is missing or invalid: " + file.path);
+				}
+
+				std::filesystem::create_directories(target.parent_path(), error);
+				if (error) {
+					throw std::runtime_error("Unable to create target directory for " + file.path);
+				}
+
+				BackupEntry backup;
+				backup.target = target;
+				backup.backup = resolvePackagePathUnderRoot(backupRoot, file.path);
+				backup.existed = fileExists(target.wstring());
+				if (backup.existed) {
+					std::filesystem::create_directories(backup.backup.parent_path(), error);
+					if (error) {
+						throw std::runtime_error("Unable to create backup directory for " + file.path);
+					}
+					std::filesystem::copy_file(target, backup.backup, std::filesystem::copy_options::overwrite_existing,
+											   error);
+					if (error) {
+						throw std::runtime_error("Unable to back up " + file.path);
+					}
+				}
+				backups.push_back(backup);
+
+				std::filesystem::copy_file(source, target, std::filesystem::copy_options::overwrite_existing, error);
+				if (error) {
+					throw std::runtime_error("Unable to install " + file.path);
+				}
+
+				bool targetExists = false;
+				const std::uint64_t targetSize = fileSizeOrMissing(target, targetExists);
+				if (!targetExists || targetSize != file.size) {
+					throw std::runtime_error("Installed file size mismatch for " + file.path);
+				}
+			}
+		} catch (...) {
+			appendLog(options, L"Package apply failed; restoring backup.");
+			for (auto it = backups.rbegin(); it != backups.rend(); ++it) {
+				if (it->existed) {
+					std::filesystem::copy_file(it->backup, it->target, std::filesystem::copy_options::overwrite_existing,
+											   error);
+				} else {
+					std::filesystem::remove(it->target, error);
+				}
+			}
+			throw;
+		}
+
+		writeInstalledManifest(plan);
+		progressLog(L"Recorded installed package manifest");
+		std::filesystem::remove_all(plan.stageRoot, error);
+		std::filesystem::remove(plan.sidecarPath, error);
+		progressLog(L"Update package applied successfully");
+		appendLog(options, L"Update package applied successfully.");
+		postUiProgress(100, false);
+		return 0;
+	} catch (const std::exception &exception) {
+		appendLog(options, L"Package apply failed. " + wideFromUtf8(exception.what()));
+		return 1;
+	}
+}
+
 DWORD runPackageUpdate(const Options &options) {
+	if (options.prepareOnly) {
+		return prepareNativePackageUpdate(options);
+	}
+
 	const std::filesystem::path appDir = parentPath(options.appPath);
 	if (appDir.empty()) {
 		appendLog(options, L"Unable to resolve Mumble app directory.");
@@ -691,17 +1602,7 @@ DWORD runPackageUpdate(const Options &options) {
 		return relaunchElevatedForPackage(options);
 	}
 
-	const std::filesystem::path workRoot = packageWorkRoot(options);
-	const std::filesystem::path scriptPath =
-		workRoot / (L"mumble-apply-update-" + std::to_wstring(GetCurrentProcessId()) + L".ps1");
-	if (!writePackageApplyScript(options, scriptPath)) {
-		return 2;
-	}
-
-	const DWORD exitCode = runPowerShellPackageApply(options, scriptPath);
-	std::error_code error;
-	std::filesystem::remove(scriptPath, error);
-	return exitCode;
+	return commitNativePackageUpdate(options);
 }
 
 bool relaunchMumble(const Options &options) {
@@ -1730,9 +2631,17 @@ void postUiProgress(const int percent, const bool indeterminate) {
 DWORD runUpdate(const Options &options) {
 	appendLog(options, L"MumbleUpdater started.");
 	postUiProgress(-1, true);
-	waitForParent(options);
 
 	const bool packageMode = !options.packagePath.empty();
+	if (packageMode && options.prepareOnly) {
+		appendLog(options, L"Preparing update package.");
+		const DWORD prepareExitCode = runPackageUpdate(options);
+		appendLog(options, L"MumbleUpdater finished.");
+		return prepareExitCode;
+	}
+
+	waitForParent(options);
+
 	appendLog(options, packageMode ? L"Applying update package." : L"Running Windows Installer.");
 	DWORD updateExitCode = packageMode ? runPackageUpdate(options) : runInstaller(options);
 	bool installerRan = !packageMode;
@@ -1752,6 +2661,11 @@ DWORD runUpdate(const Options &options) {
 
 	if (installerRan && !options.noRelaunch && updateSucceeded(updateExitCode)) {
 		appendLog(options, L"Windows Installer completed; preparing to restart Mumble.");
+		postUiProgress(100, false);
+		Sleep(800);
+		relaunchMumble(options);
+	} else if (packageMode && !options.noRelaunch && updateSucceeded(updateExitCode)) {
+		appendLog(options, L"Package update completed; preparing to restart Mumble.");
 		postUiProgress(100, false);
 		Sleep(800);
 		relaunchMumble(options);

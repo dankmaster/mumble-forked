@@ -240,9 +240,9 @@ screen_share_enabled=false
 screen_share_recording_enabled=false
 screen_share_helper_required=true
 screen_share_codec_preferences="h264 av1 vp9 vp8"
-screen_share_max_width=2560
-screen_share_max_height=1440
-screen_share_max_fps=60
+screen_share_max_width=3840
+screen_share_max_height=2160
+screen_share_max_fps=144
 screen_share_relay_url="wss://relay.example.com/mumble-screen"
 screen_share_diagnostics_logging=false
 ```

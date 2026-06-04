@@ -31,6 +31,7 @@ public:
 
 	Q_INVOKABLE void ready();
 	Q_INVOKABLE void selectScope(const QString &scopeToken);
+	Q_INVOKABLE void selectScopeFromRail(const QString &scopeToken, const QString &railKind);
 	Q_INVOKABLE void joinVoiceChannel(const QString &scopeToken);
 	Q_INVOKABLE void invokeScopeAction(const QString &scopeToken, const QString &actionId);
 	Q_INVOKABLE void scopeActionValueChanged(const QString &scopeToken, const QString &actionId, int value, bool final);
@@ -93,6 +94,7 @@ signals:
 	void participantTalkStateChanged(const QVariantMap &state);
 	void modernDialogStateChanged(const QVariantMap &state);
 	void scopeSelectionRequested(const QString &scopeToken);
+	void scopeRailSelectionRequested(const QString &scopeToken, const QString &railKind);
 	void voiceJoinRequested(const QString &scopeToken);
 	void scopeActionRequested(const QString &scopeToken, const QString &actionId);
 	void scopeActionValueChangedRequested(const QString &scopeToken, const QString &actionId, int value, bool final);

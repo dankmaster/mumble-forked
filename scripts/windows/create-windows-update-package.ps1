@@ -24,6 +24,8 @@ Param(
 
 	[string] $ManifestOutPath = "",
 
+	[switch] $RequireUpdaterRuntime,
+
 	[switch] $RequireGStreamerRuntime,
 
 	[switch] $Validate
@@ -107,6 +109,11 @@ function Test-PackageArchive {
 		}
 
 		$required = @('mumble.exe', 'mumble-updater.exe')
+		if ($RequireUpdaterRuntime) {
+			$required += @(
+				'zlib1.dll'
+			)
+		}
 		if ($RequireGStreamerRuntime) {
 			$required += @(
 				'gstreamer/bin/gst-launch-1.0.exe',
@@ -195,6 +202,10 @@ if (-not (Test-Path -LiteralPath (Join-Path $stageRootResolved 'mumble.exe') -Pa
 
 if (-not (Test-Path -LiteralPath (Join-Path $stageRootResolved 'mumble-updater.exe') -PathType Leaf)) {
 	throw "StageRoot is missing mumble-updater.exe: $stageRootResolved"
+}
+
+if ($RequireUpdaterRuntime -and -not (Test-Path -LiteralPath (Join-Path $stageRootResolved 'zlib1.dll') -PathType Leaf)) {
+	throw "StageRoot is missing updater runtime file zlib1.dll: $stageRootResolved"
 }
 
 if ($RequireGStreamerRuntime) {
