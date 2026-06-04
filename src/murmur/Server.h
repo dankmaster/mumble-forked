@@ -361,6 +361,14 @@ public:
 	QHash< int, QString > qhUserNameCache;
 	QHash< Mumble::QtUtils::CaseInsensitiveQString, int > qhUserIDCache;
 
+	struct ChatHistoryLatestPageCacheEntry {
+		std::vector< ::mumble::server::db::DBChatMessage > messages;
+		bool hasOlderMessages = false;
+		quint64 lastAccessSerial = 0;
+	};
+	QHash< unsigned int, ChatHistoryLatestPageCacheEntry > qhChatHistoryLatestPageCache;
+	quint64 uiChatHistoryLatestPageCacheAccessSerial = 0;
+
 	struct ScreenShareStream {
 		QString qsStreamID;
 		unsigned int uiOwnerSession = 0;
@@ -481,6 +489,11 @@ public:
 	void sendTextChannelSync(ServerUser *uSource);
 	void sendChatHistoryResponseForRequest(ServerUser *uSource, const MumbleProto::ChatHistoryRequest &msg,
 										   bool silentPermissionDenied = false, unsigned int limitCap = 100);
+	std::vector< ::mumble::server::db::DBChatMessage >
+		latestChatHistoryMessagesForThread(unsigned int threadID, unsigned int amount);
+	void rememberLatestChatHistoryMessage(const ::mumble::server::db::DBChatMessage &message);
+	void invalidateChatHistoryCache(unsigned int threadID);
+	void pruneChatHistoryLatestPageCache(unsigned int preserveThreadID = 0);
 	bool feedbackGitHubConfigured() const;
 	void sendFeedbackReportState(unsigned int session, const QString &clientReportID,
 								 MumbleProto::FeedbackReportKind kind, bool accepted,

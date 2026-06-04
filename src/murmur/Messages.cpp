@@ -94,6 +94,9 @@ constexpr std::size_t MAX_CHAT_HISTORY_LEGACY_MIRROR_BYTES = 64 * 1024;
 constexpr std::size_t MAX_CHAT_HISTORY_RESPONSE_BYTES      = 2 * 1024 * 1024;
 constexpr int MAX_CHAT_HISTORY_WARMUP_SCOPES               = 20;
 constexpr unsigned int MAX_CHAT_HISTORY_WARMUP_MESSAGES_PER_SCOPE = 20;
+constexpr int MAX_CHAT_HISTORY_SERVER_CACHED_THREADS              = 128;
+constexpr unsigned int CHAT_HISTORY_SERVER_CACHE_PAGE_MESSAGES    = 50;
+constexpr unsigned int CHAT_HISTORY_SERVER_CACHE_STORED_MESSAGES  = CHAT_HISTORY_SERVER_CACHE_PAGE_MESSAGES + 1;
 constexpr int MAX_STONKS_LEDGER_POSITIONS                  = 64;
 constexpr unsigned int MAX_STONKS_LEDGER_SNAPSHOTS         = 50;
 constexpr qint64 FEEDBACK_REPORT_RATE_LIMIT_MS             = 5 * 60 * 1000;
@@ -2736,6 +2739,7 @@ void Server::persistAndBroadcastChatMessage(ServerUser *uSource, const QString &
 		m_dbWrapper.setChatMessageEmbeds(iServerNum, storedMessage.messageID, initialEmbeds);
 		storedMessage.embeds = initialEmbeds;
 	}
+	rememberLatestChatHistoryMessage(storedMessage);
 
 	const auto resolvedAuthorName = [this](const ::msdb::DBChatMessage &message) -> std::optional< std::string > {
 		if (message.authorName && !message.authorName->empty()) {
@@ -2936,6 +2940,7 @@ void Server::persistAndBroadcastServerChatMessage(const QString &bodyText, Mumbl
 		m_dbWrapper.setChatMessageEmbeds(iServerNum, storedMessage.messageID, initialEmbeds);
 		storedMessage.embeds = initialEmbeds;
 	}
+	rememberLatestChatHistoryMessage(storedMessage);
 
 	const auto resolvedReactionActorName = [this](unsigned int actorUserID) -> std::optional< std::string > {
 		const std::optional< std::string > connectedName = connectedUserNameForPersistentID(qhUsers, actorUserID);
@@ -3065,6 +3070,7 @@ void Server::applyChatEmbedFetchResult(unsigned int threadID, unsigned int messa
 	qhPendingChatEmbedAssists.remove(assistKey);
 
 	m_dbWrapper.setChatMessageEmbeds(iServerNum, messageID, embeds);
+	invalidateChatHistoryCache(message->threadID);
 
 	Channel *permissionChannel = qhChannels.value(permissionChannelID);
 	if (!permissionChannel) {
@@ -5772,6 +5778,7 @@ void Server::msgChatMessageDelete(ServerUser *uSource, MumbleProto::ChatMessageD
 	if (!deletedMessage) {
 		return;
 	}
+	invalidateChatHistoryCache(deletedMessage->threadID);
 
 	const auto resolvedAuthorName = [this](const ::msdb::DBChatMessage &storedMessage) -> std::optional< std::string > {
 		if (storedMessage.authorName && !storedMessage.authorName->empty()) {
@@ -5815,6 +5822,89 @@ void Server::msgChatMessageDelete(ServerUser *uSource, MumbleProto::ChatMessageD
 		if (clientSupportsChatFeature(currentUser, MumbleProto::ChatFeatureMessageDelete)) {
 			sendMessage(currentUser, protoMessage);
 		}
+	}
+}
+
+std::vector<::msdb::DBChatMessage > Server::latestChatHistoryMessagesForThread(unsigned int threadID,
+																			   unsigned int amount) {
+	if (amount == 0) {
+		return {};
+	}
+
+	auto cachedIt = qhChatHistoryLatestPageCache.find(threadID);
+	if (cachedIt != qhChatHistoryLatestPageCache.end()) {
+		cachedIt->lastAccessSerial = ++uiChatHistoryLatestPageCacheAccessSerial;
+		if (amount <= cachedIt->messages.size()) {
+			return std::vector<::msdb::DBChatMessage >(
+				cachedIt->messages.end() - static_cast< std::ptrdiff_t >(amount), cachedIt->messages.end());
+		}
+		if (!cachedIt->hasOlderMessages) {
+			return cachedIt->messages;
+		}
+	}
+
+	const unsigned int cacheFetchAmount = CHAT_HISTORY_SERVER_CACHE_STORED_MESSAGES + 1;
+	std::vector<::msdb::DBChatMessage > fetchedMessages =
+		m_dbWrapper.getChatMessages(iServerNum, threadID, 0, static_cast< int >(cacheFetchAmount));
+	ChatHistoryLatestPageCacheEntry entry;
+	entry.hasOlderMessages = fetchedMessages.size() > CHAT_HISTORY_SERVER_CACHE_STORED_MESSAGES;
+	if (entry.hasOlderMessages) {
+		fetchedMessages.erase(fetchedMessages.begin(),
+							  fetchedMessages.begin()
+								  + static_cast< std::ptrdiff_t >(fetchedMessages.size()
+																  - CHAT_HISTORY_SERVER_CACHE_STORED_MESSAGES));
+	}
+	entry.messages = fetchedMessages;
+	entry.lastAccessSerial = ++uiChatHistoryLatestPageCacheAccessSerial;
+	qhChatHistoryLatestPageCache.insert(threadID, entry);
+	pruneChatHistoryLatestPageCache(threadID);
+
+	const ChatHistoryLatestPageCacheEntry &storedEntry = qhChatHistoryLatestPageCache[threadID];
+	if (amount <= storedEntry.messages.size()) {
+		return std::vector<::msdb::DBChatMessage >(
+			storedEntry.messages.end() - static_cast< std::ptrdiff_t >(amount), storedEntry.messages.end());
+	}
+	if (!storedEntry.hasOlderMessages) {
+		return storedEntry.messages;
+	}
+
+	return m_dbWrapper.getChatMessages(iServerNum, threadID, 0, static_cast< int >(amount));
+}
+
+void Server::rememberLatestChatHistoryMessage(const ::msdb::DBChatMessage &message) {
+	auto cachedIt = qhChatHistoryLatestPageCache.find(message.threadID);
+	if (cachedIt == qhChatHistoryLatestPageCache.end()) {
+		return;
+	}
+
+	cachedIt->messages.push_back(message);
+	cachedIt->lastAccessSerial = ++uiChatHistoryLatestPageCacheAccessSerial;
+	while (cachedIt->messages.size() > CHAT_HISTORY_SERVER_CACHE_STORED_MESSAGES) {
+		cachedIt->messages.erase(cachedIt->messages.begin());
+		cachedIt->hasOlderMessages = true;
+	}
+}
+
+void Server::invalidateChatHistoryCache(unsigned int threadID) {
+	qhChatHistoryLatestPageCache.remove(threadID);
+}
+
+void Server::pruneChatHistoryLatestPageCache(unsigned int preserveThreadID) {
+	while (qhChatHistoryLatestPageCache.size() > MAX_CHAT_HISTORY_SERVER_CACHED_THREADS) {
+		auto evictionIt = qhChatHistoryLatestPageCache.end();
+		for (auto it = qhChatHistoryLatestPageCache.begin(); it != qhChatHistoryLatestPageCache.end(); ++it) {
+			if (it.key() == preserveThreadID && qhChatHistoryLatestPageCache.size() > 1) {
+				continue;
+			}
+			if (evictionIt == qhChatHistoryLatestPageCache.end()
+				|| it->lastAccessSerial < evictionIt->lastAccessSerial) {
+				evictionIt = it;
+			}
+		}
+		if (evictionIt == qhChatHistoryLatestPageCache.end()) {
+			break;
+		}
+		qhChatHistoryLatestPageCache.erase(evictionIt);
 	}
 }
 
@@ -6071,12 +6161,17 @@ void Server::sendChatHistoryResponseForRequest(ServerUser *uSource, const Mumble
 
 	response.set_thread_id(thread->threadID);
 
+	const bool canUseLatestPageCache = !beforeMessageID && startOffset == 0
+									   && effectiveAccess.visibleAfter
+											  == std::chrono::system_clock::time_point();
 	std::vector<::msdb::DBChatMessage > messages =
-		beforeMessageID
-			? m_dbWrapper.getChatMessagesBefore(iServerNum, thread->threadID, beforeMessageID.value(), limit + 1,
-												 effectiveAccess.visibleAfter)
-			: m_dbWrapper.getChatMessages(iServerNum, thread->threadID, startOffset,
-										   static_cast< int >(limit + 1), effectiveAccess.visibleAfter);
+		canUseLatestPageCache
+			? latestChatHistoryMessagesForThread(thread->threadID, limit + 1)
+			: (beforeMessageID
+				   ? m_dbWrapper.getChatMessagesBefore(iServerNum, thread->threadID, beforeMessageID.value(),
+														limit + 1, effectiveAccess.visibleAfter)
+				   : m_dbWrapper.getChatMessages(iServerNum, thread->threadID, startOffset,
+												 static_cast< int >(limit + 1), effectiveAccess.visibleAfter));
 	if (messages.size() > limit) {
 		messages.erase(messages.begin());
 		response.set_has_more(true);
@@ -7482,6 +7577,9 @@ void Server::msgChatReactionToggle(ServerUser *uSource, MumbleProto::ChatReactio
 	message = m_dbWrapper.getChatMessage(iServerNum, msg.message_id());
 	if (!message) {
 		return;
+	}
+	if (reactionChanged) {
+		invalidateChatHistoryCache(message->threadID);
 	}
 
 	QSet< ServerUser * > persistentRecipients;
