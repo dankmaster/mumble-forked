@@ -14,17 +14,6 @@ fi
 
 make_build_env_available "7z"
 
-rm -rf "${GITHUB_WORKSPACE}/3rdparty/asio"
-download_file "https://dl.mumble.info/build/extra/asio_sdk.zip" "asio_sdk.zip"
-extract_with_progress "asio_sdk.zip" "${GITHUB_WORKSPACE}/3rdparty/asio"
-
-rm -rf "${GITHUB_WORKSPACE}/3rdparty/g15"
-rm -rf "g15_sdk"
-download_file "https://dl.mumble.info/build/extra/g15_sdk.zip" "g15_sdk.zip"
-extract_with_progress "g15_sdk.zip" "g15_sdk"
-mv "g15_sdk/LCDSDK" "${GITHUB_WORKSPACE}/3rdparty/g15"
-rm -rf "g15_sdk"
-
 rm -rf "C:/WixSharp"
 download_file "https://github.com/oleg-shilo/wixsharp/releases/download/v1.19.0.0/WixSharp.1.19.0.0.7z" "WixSharp.7z"
 extract_with_progress "WixSharp.7z" "C:/WixSharp"

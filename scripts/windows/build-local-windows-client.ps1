@@ -615,7 +615,6 @@ function Invoke-SharedWindowsPackaging {
 	Copy-FileIfExists -Source (Join-Path $BuildRoot "onnxruntime.dll") -Destination (Join-Path $stageRoot "onnxruntime.dll")
 	Copy-FileIfExists -Source (Join-Path $BuildRoot "mumble-updater.exe") -Destination (Join-Path $stageRoot "mumble-updater.exe")
 	Copy-FileIfExists -Source (Join-Path $BuildRoot "mumble-screen-helper.exe") -Destination (Join-Path $stageRoot "mumble-screen-helper.exe")
-	Copy-FileIfExists -Source (Join-Path $BuildRoot "mumble-g15-helper.exe") -Destination (Join-Path $stageRoot "mumble-g15-helper.exe")
 	Copy-FileIfExists -Source (Join-Path $BuildRoot "mumble_ol.dll") -Destination (Join-Path $stageRoot "mumble_ol.dll")
 	Copy-FileIfExists -Source (Join-Path $BuildRoot "mumble_ol_helper.exe") -Destination (Join-Path $stageRoot "mumble_ol_helper.exe")
 	Copy-FileIfExists -Source (Join-Path $BuildRoot "mumble_ol_helper_x64.exe") -Destination (Join-Path $stageRoot "mumble_ol_helper_x64.exe")
@@ -701,9 +700,6 @@ function Invoke-SharedWindowsPackaging {
 
 	if (Test-Path -LiteralPath (Join-Path $BuildRoot "mumble_ol.dll")) {
 		$installerArgs += "--overlay"
-	}
-	if (Test-Path -LiteralPath (Join-Path $BuildRoot "mumble-g15-helper.exe")) {
-		$installerArgs += "--g15"
 	}
 	if (Test-Path -LiteralPath (Join-Path $BuildRoot "rnnoise.dll")) {
 		$installerArgs += "--rnnoise"

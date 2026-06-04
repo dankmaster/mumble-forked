@@ -151,7 +151,6 @@ runs:
           build\**\mumble.pdb
           build\**\mumble-screen-helper.exe
           build\**\mumble-screen-helper.pdb
-          build\**\mumble-g15*.*
           build\**\mumble_ol*.exe
           build\**\mumble_ol*.pdb
           build\**\mumble-server.exe

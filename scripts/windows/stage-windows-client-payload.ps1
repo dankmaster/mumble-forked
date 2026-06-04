@@ -134,7 +134,6 @@ Copy-FileIfExists -Source (Join-Path $buildRootPath "mumble.exe") -Destination (
 Copy-FileIfExists -Source (Join-Path $buildRootPath "mumble-server.exe") -Destination (Join-Path $stageRootPath "mumble-server.exe")
 Copy-FileIfExists -Source (Join-Path $buildRootPath "mumble-updater.exe") -Destination (Join-Path $stageRootPath "mumble-updater.exe")
 Copy-FileIfExists -Source (Join-Path $buildRootPath "mumble-screen-helper.exe") -Destination (Join-Path $stageRootPath "mumble-screen-helper.exe")
-Copy-FileIfExists -Source (Join-Path $buildRootPath "mumble-g15-helper.exe") -Destination (Join-Path $stageRootPath "mumble-g15-helper.exe")
 Copy-FileIfExists -Source (Join-Path $buildRootPath "mumble_ol.dll") -Destination (Join-Path $stageRootPath "mumble_ol.dll")
 Copy-FileIfExists -Source (Join-Path $buildRootPath "mumble_ol_x64.dll") -Destination (Join-Path $stageRootPath "mumble_ol_x64.dll")
 Copy-FileIfExists -Source (Join-Path $buildRootPath "mumble_ol_helper.exe") -Destination (Join-Path $stageRootPath "mumble_ol_helper.exe")

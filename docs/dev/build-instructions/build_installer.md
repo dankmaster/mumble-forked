@@ -25,5 +25,5 @@ If you intentionally need a different Windows installer upgrade relationship, ov
 cmake -S . -B build -Dpackaging=ON -DBUILD_NUMBER=3 -DMUMBLE_WINDOWS_INSTALLER_VERSION=1.0.3
 ```
 
-Note that the installers expect some components to be built. For example, the client installer expects the `g15` component to be built too. Without it packaging will fail on the missing expected file.
+The Windows client installer can also be built from a staged payload root. In that mode it packages the files present in the stage and only adds optional feature payloads, such as overlay or screen-share helper binaries, when the build produced them.
 

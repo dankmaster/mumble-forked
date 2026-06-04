@@ -21,7 +21,6 @@ using WixSharp.CommonTasks;
 public struct Features {
 	public bool overlay;
 	public bool plugins;
-	public bool g15;
 	public bool rnnoise;
 	public bool screenShareHelper;
 }
@@ -160,9 +159,6 @@ public class ClientInstaller : MumbleInstall {
 				binaries.Add("mumble_ol_x64.dll");
 			}
 
-			if (features.g15) {
-				binaries.Add("mumble-g15-helper.exe");
-			}
 		} else if (arch == "x86") {
 			// 32 bit
 			this.Platform = WixSharp.Platform.x86;
@@ -185,9 +181,6 @@ public class ClientInstaller : MumbleInstall {
 				binaries.Add("mumble_ol_helper.exe");
 			}
 
-			if (features.g15) {
-				binaries.Add("mumble-g15-helper.exe");
-			}
 		}
 
 		var normalizedArtifactVersion = new Version(artifactVersion);
@@ -298,10 +291,6 @@ class BuildInstaller
 
 			if (args[i] == "--vc-redist-required") {
 				vcRedistRequired = args[i + 1];
-			}
-
-			if (args[i] == "--g15") {
-				features.g15 = true;
 			}
 
 			if (args[i] == "--overlay") {

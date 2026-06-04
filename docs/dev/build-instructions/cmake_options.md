@@ -14,11 +14,6 @@ An example would be `cmake -Dtests=ON ..`.
 Build support for ALSA.
 (Default: ON)
 
-### asio
-
-Build support for ASIO audio input.
-(Default: OFF)
-
 ### benchmarks
 
 Build benchmarks
@@ -133,16 +128,6 @@ Whether or not to enable the PostgreSQL database backend
 
 Whether or not to enable the SQLite database backend
 (Default: ON)
-
-### g15
-
-Include support for the G15 keyboard (and compatible devices).
-(Default: OFF)
-
-### g15-emulator
-
-Build the g15helper executable in emulator mode. This will cause an emulated G15 window to appear on screen. Allows the use of Mumble's G15 support without owning the physical hardware.
-(Default: OFF)
 
 ### gkey
 

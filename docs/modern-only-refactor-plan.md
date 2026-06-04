@@ -32,7 +32,7 @@ The whole plan branches on one product question:
 - **Layout swap:** `MainWindow::applyShellLayout()` swaps the central widget between `activateModernShell()` and `activateLegacyShell()`. Only one is visible at a time. (`MainWindow.cpp` ~12850.)
 - **Shared source-of-truth (keep):** `pmModel` (`UserModel`) is fed by the protocol; both the classic tree and the modern snapshot read from it.
 - **Double-maintenance (target):** the classic server-log `QTextDocument` (`qteLog`) is built and mirrored to the web via `QTextDocument::contentsChange → serverLog.append` patch (`MainWindow.cpp` ~13177).
-- **Modern settings coverage is partial:** `modernSettingsPageSupported()` (`MainWindow.cpp` ~14656) lists covered pages: Network, ScreenShare, AudioInput/Output, Shortcuts/KeyBindings, Look/UI, Messages&Sounds, About. **Uncovered pages still open the classic `ConfigDialog`** even in modern mode (Overlay, Plugins, LCD, PositionalAudio, Cert, …) — see `openConfigDialogPage()` (~42154).
+- **Modern settings coverage is partial:** `modernSettingsPageSupported()` (`MainWindow.cpp` ~14656) lists covered pages: Network, ScreenShare, AudioInput/Output, Shortcuts/KeyBindings, Look/UI, Messages&Sounds, About. **The remaining uncovered `ConfigDialog` pages are Overlay and Plugins** — see `openConfigDialogPage()` (~42154).
 - **Connect** already routes modern in modern mode (`openServerConnectDialog` → `openModernConnectDialog`, ~41869); classic `ConnectDialog` is fallback.
 - **Build configs:** `build/` = classic (modern-layout OFF), `build-shared-webengine/` = modern (`MUMBLE_HAS_MODERN_LAYOUT` ON, set in `src/mumble/CMakeLists.txt` ~792 under `if(modern-layout-webengine)`).
 
@@ -42,14 +42,14 @@ The whole plan branches on one product question:
 - `pmModel` / `UserModel`, protocol message handling, `ServerHandler`, audio, `GlobalShortcut`, `Log` core.
 
 ### Migrate to modern (no modern equivalent yet — they launch classic QtWidgets in modern today)
-- `ConfigDialog` settings pages not in `modernSettingsPageSupported`: **Overlay, Plugins, LCD, PositionalAudio, Cert**.
+- `ConfigDialog` settings pages not in `modernSettingsPageSupported`: **Overlay, Plugins**.
 - Standalone classic dialogs: `ServerInformation`, `Tokens`, `BanEditor`, `UserEdit` / `UserLocalNicknameDialog`, `SearchDialog`, `AudioWizard`, `OverlayEditor`, plugin installer/updater.
 
 ### Already modern (classic = fallback only; delete classic when layout is dropped)
 - Connect, Settings (covered pages), VoiceRecorder, ACL editor, image viewer, screen-share picker/status, TextMessage, create/delete-room & drag confirms, SSL dialogs, feedback.
 
 ### Independent legacy features (orthogonal to layout — delete on a separate product call)
-- In-game **Overlay**, **TalkingUI** floating window, **LCD**, **PositionalAudioViewer**. Do NOT bundle these into the layout removal; decide per-feature.
+- In-game **Overlay** and **TalkingUI** floating window. Do NOT bundle these into the layout removal; decide per-feature. LCD and PositionalAudioViewer have already been cut.
 
 ### `.ui` forms likely deletable once classic layout + ConfigDialog go (39 total today)
 `MainWindow.ui`, `ConnectDialog*.ui`, `ConfigDialog.ui`, `AudioInput/Output.ui`, `NetworkConfig.ui`, `LookConfig.ui`, `PluginConfig.ui`, `GlobalShortcut*.ui`, `Cert.ui`, `Log.ui`, `ServerInformation.ui`, `Tokens.ui`, `UserEdit.ui`, `UserInformation.ui`, `SearchDialog.ui`, `BanEditor.ui`, `ACLEditor.ui`, … (confirm each has a modern replacement before deleting).
@@ -93,12 +93,9 @@ The whole plan branches on one product question:
     fonts/colors/fps, per-element show/hide.
   - `PluginConfig` (5000) — medium: plugin list, enable/config, positional-audio
     permissions, install/update.
-  - `LCDConfig` (5900) — small: device list + brightness/contrast (G15-class hardware).
-  - `ASIOConfig` (2002, **Windows-only**) — niche pro-audio device config.
-- **Sequencing tension with Phase 5:** Overlay and LCD are *also* on the Phase 5 removal
-  list (independent legacy features). Building full modern pages for features we may
-  delete is wasted work — resolve the modernize-vs-cut call (below) before implementing
-  those two.
+- **Sequencing tension with Phase 5:** Overlay is *also* on the Phase 5 removal
+  list (an independent legacy feature). Building a full modern page for a feature we may
+  delete is wasted work — resolve the modernize-vs-cut call before implementing it.
 - **DECISIONS 2026-06-03 (updated):**
   - **LCD → CUT (final, 2026-06-03).** Reversed the earlier "modernize" call: LCD is
     scrapped entirely (G15 hardware is dead; user confirmed). Removed `LCD.*`,
@@ -120,16 +117,20 @@ The whole plan branches on one product question:
     modern Plugins page yet, and do **not** touch the plugin subsystem (it powers
     positional audio). This means `ConfigDialog` **cannot be fully retired** until Plugins
     is handled later.
-  - **ASIO → modernize.** `asio` is ON in `build-shared-webengine`, so `ASIOConfig` really
-    does leak the classic dialog; needs a modern page (guard it behind the `asio` option).
+  - **ASIO/G15 pipeline leftovers → CLEANED 2026-06-04.** CI/dependency bootstrap, signing,
+    local staging, and installer feature parsing no longer download ASIO/G15 SDKs or look
+    for `mumble-g15-helper.exe` / `--g15` after the feature cut.
+  - **PositionalAudioViewer → CUT 2026-06-04.** Removed the Developer menu dialog and its
+    three Qt Widget files while keeping positional audio, ManualPlugin, and plugin manager
+    behavior intact.
   - **Overlay → CUT ENTIRELY.** Remove the in-game Overlay feature (`Overlay*.cpp/.h`,
     `OverlayConfig`, `OverlayEditor*`, `Overlay*.ui`, settings members, menu/API hooks,
     CMake entries).
   - **Phase 0 commit:** the ChatPerfTrace gating was swept into pushed commit `79b508e75`
     (by a parallel Sonnet 4.6 session) whose message documents it. Left as-is (no
     force-push to the shared `master`).
-  - Remaining order: (1) ASIO page, (2) Overlay removal. `ConfigDialog` retirement waits
-    on the deferred Plugins page.
+  - Remaining order: (1) Overlay removal, (2) Plugins page/decision. `ConfigDialog`
+    retirement waits on the deferred Plugins page.
 
 ### Overlay removal — full map (execute in a fresh session; it's large)
 LCD + ASIO are CUT and committed on branch `modern-only/cut-lcd-asio` (`858c01f34`).
@@ -191,7 +192,7 @@ the build if left half-done, so do it as its own focused pass. Surface to remove
 - Verify: app starts straight into modern; no dead refs; both old build flags still configure.
 
 ### Phase 5 — Prune independent legacy features (product-gated)
-- Per separate decision: remove Overlay / TalkingUI / LCD / PositionalAudioViewer and their `.ui`/code/settings.
+- Per separate decision: remove Overlay / TalkingUI and their `.ui`/code/settings.
 
 ### Phase 6 — Final cleanup
 - Remove the `modern-layout-webengine` build option (always on) and the `MUMBLE_HAS_MODERN_LAYOUT` guards; delete now-unreferenced `.ui` forms, `.cpp/.h`, and prune their entries from `CMakeLists.txt`.

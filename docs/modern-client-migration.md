@@ -43,11 +43,9 @@ legacy classes can be deleted safely.
 
 ### Priority 1: Settings Pages
 
-- `src/mumble/ASIOInput.ui`
 - `src/mumble/AudioInput.ui`
 - `src/mumble/AudioOutput.ui`
 - `src/mumble/GlobalShortcut.ui`
-- `src/mumble/LCD.ui`
 - `src/mumble/Log.ui`
 - `src/mumble/LookConfig.ui`
 - `src/mumble/NetworkConfig.ui`
@@ -89,7 +87,6 @@ legacy classes can be deleted safely.
 - `src/mumble/OverlayEditor.ui`
 - `src/mumble/PluginInstaller.ui`
 - `src/mumble/PluginUpdater.ui`
-- `src/mumble/PositionalAudioViewer.ui`
 - `src/mumble/PTTButtonWidget.ui`
 - `src/mumble/VoiceRecorderDialog.ui`
 

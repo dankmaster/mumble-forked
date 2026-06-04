@@ -58,7 +58,6 @@ class ScreenShareManager;
 struct ScreenShareStartOptions;
 class UserInformation;
 class VoiceRecorderDialog;
-class PositionalAudioViewer;
 class PTTButtonWidget;
 struct PersistentChatPreviewSpec;
 class PersistentChatGateway;
@@ -780,8 +779,6 @@ protected:
 	QSet< unsigned int > m_inFlightUserCommentSessions;
 	QHash< unsigned int, QByteArray > m_requestedUserCommentHashBySession;
 
-	std::unique_ptr< PositionalAudioViewer > m_paViewer;
-
 	PTTButtonWidget *qwPTTButtonWidget;
 
 	MUComboBox *qcbTransmitMode;
@@ -1214,7 +1211,6 @@ public slots:
 	void on_qaConfigCert_triggered();
 	void on_qaAudioWizard_triggered();
 	void on_qaDeveloperConsole_triggered();
-	void on_qaPositionalAudioViewer_triggered();
 	void on_qaHelpWhatsThis_triggered();
 	void on_qaHelpAbout_triggered();
 	void on_qaHelpAboutQt_triggered();

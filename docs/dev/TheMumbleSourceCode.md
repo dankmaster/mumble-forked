@@ -25,7 +25,6 @@ When cloning the repo, the source tree should look something like this:
 │   ├── additional-readmes
 │   ├── dev
 │   └── media
-├── g15helper
 ├── helpers
 ├── icons
 ├── installer
@@ -58,7 +57,7 @@ issue (or extend the build system), you can probably ignore this directory.
 Obviously you are already aware of the `docs` directory (you are reading this file, which lives in there). It contains mostly development related
 documentation. The more extended user documentation is available on our website. The most relevant documentation for you is probably within the `dev` (development) subdirectory.
 
-`g15helper` and `helper` will generally not concern you. We could probably find a better place for these, but at the moment they are where they are…
+`helpers` will generally not concern you. We could probably find a better place for these, but at the moment they are where they are…
 
 `icons` is pretty much what you would expect, given its name. The same can be said about `installer` which contains all files related to building our
 Windows installer. If you want to tinker with that, you have to know that we are using [WixSharp](https://github.com/oleg-shilo/wixsharp) for managing
