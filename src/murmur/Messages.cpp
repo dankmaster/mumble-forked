@@ -122,6 +122,21 @@ void constrainChatHistoryResponseSize(MumbleProto::ChatHistoryResponse &response
 	}
 }
 
+MumbleProto::ChatHistoryResponse emptyChatHistoryResponseForRequest(ServerUser *uSource,
+																	const MumbleProto::ChatHistoryRequest &request) {
+	const MumbleProto::ChatScope scope = request.has_scope() ? request.scope() : MumbleProto::Channel;
+	const unsigned int scopeID =
+		request.has_scope_id() ? request.scope_id() : (uSource->cChannel ? uSource->cChannel->iId : Mumble::ROOT_CHANNEL_ID);
+
+	MumbleProto::ChatHistoryResponse response;
+	response.set_scope(scope);
+	response.set_scope_id(scopeID);
+	response.set_start_offset(request.has_start_offset() ? request.start_offset() : 0);
+	response.set_has_more(false);
+	response.set_has_older(false);
+	return response;
+}
+
 bool isValidGitHubPathComponent(const QString &value) {
 	static const QRegularExpression pattern(QLatin1String("^[A-Za-z0-9_.-]+$"));
 	return pattern.match(value.trimmed()).hasMatch();
@@ -6219,7 +6234,11 @@ void Server::msgChatHistoryRequest(ServerUser *uSource, MumbleProto::ChatHistory
 	MSG_SETUP(ServerUser::Authenticated);
 	QMutexLocker qml(&qmCache);
 
-	RATELIMIT(uSource);
+	if (uSource->leakyBucket.ratelimit(1)) {
+		// History is request/response from the UI. A silent throttle leaves clients stuck in loading.
+		sendMessage(uSource, emptyChatHistoryResponseForRequest(uSource, msg));
+		return;
+	}
 
 	if (!clientSupportsPersistentChat(uSource)) {
 		sendPersistentChatUnsupported(uSource);
@@ -6235,7 +6254,34 @@ void Server::msgChatHistoryWarmupRequest(ServerUser *uSource, MumbleProto::ChatH
 	MSG_SETUP(ServerUser::Authenticated);
 	QMutexLocker qml(&qmCache);
 
-	RATELIMIT(uSource);
+	if (uSource->leakyBucket.ratelimit(1)) {
+		QSet< QString > seenScopes;
+		int warmedScopes = 0;
+		for (int i = 0; i < msg.requests_size() && warmedScopes < MAX_CHAT_HISTORY_WARMUP_SCOPES; ++i) {
+			MumbleProto::ChatHistoryRequest request = msg.requests(i);
+			const MumbleProto::ChatScope scope      = request.has_scope() ? request.scope() : MumbleProto::Channel;
+			const unsigned int scopeID =
+				request.has_scope_id() ? request.scope_id()
+									   : (uSource->cChannel ? uSource->cChannel->iId : Mumble::ROOT_CHANNEL_ID);
+			if (scope != MumbleProto::Channel && scope != MumbleProto::TextChannel && scope != MumbleProto::Private) {
+				continue;
+			}
+
+			const QString scopeKey = QString::fromLatin1("%1:%2").arg(static_cast< int >(scope)).arg(scopeID);
+			if (seenScopes.contains(scopeKey)) {
+				continue;
+			}
+			seenScopes.insert(scopeKey);
+
+			request.set_scope(scope);
+			request.set_scope_id(scopeID);
+			request.set_start_offset(0);
+			request.clear_before_message_id();
+			sendMessage(uSource, emptyChatHistoryResponseForRequest(uSource, request));
+			++warmedScopes;
+		}
+		return;
+	}
 
 	if (!clientSupportsPersistentChat(uSource)
 		|| !clientSupportsChatFeature(uSource, MumbleProto::ChatFeatureHistoryWarmup)) {
