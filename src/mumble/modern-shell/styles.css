@@ -9073,9 +9073,36 @@ body.context-menu-host.submenu-flyout-left .context-menu-submenu-panel {
 }
 
 .modern-dialog.is-imageViewer {
-	width: min(940px, calc(100vw - 36px));
-	max-height: min(720px, calc(100vh - 36px));
-	border-radius: 14px;
+	grid-template-rows: minmax(0, 1fr);
+	width: min(760px, calc(100vw - 28px));
+	height: min(560px, calc(100vh - 28px));
+	max-height: min(560px, calc(100vh - 28px));
+	border-radius: 8px;
+	background: transparent;
+	box-shadow: none;
+}
+
+.modern-dialog.is-imageViewer::after {
+	content: "";
+	position: absolute;
+	right: 7px;
+	bottom: 7px;
+	width: 12px;
+	height: 12px;
+	border-right: 1px solid color-mix(in srgb, var(--text-strong) 44%, transparent);
+	border-bottom: 1px solid color-mix(in srgb, var(--text-strong) 44%, transparent);
+	opacity: 0.68;
+	pointer-events: none;
+}
+
+.modern-dialog.is-imageViewer .modern-dialog-header,
+.modern-dialog.is-imageViewer .modern-dialog-actions {
+	display: none;
+}
+
+.modern-dialog.is-imageViewer .modern-dialog-body {
+	padding: 0;
+	overflow: hidden;
 }
 
 .image-viewer {
@@ -9086,8 +9113,9 @@ body.context-menu-host.submenu-flyout-left .context-menu-submenu-panel {
 	height: 100%;
 	min-height: 0;
 	overflow: hidden;
-	border-radius: var(--radius-inner, 12px);
-	background: var(--window-backdrop-bg, rgba(0, 0, 0, 0.35));
+	border: 1px solid color-mix(in srgb, var(--surface-border) 82%, transparent);
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--shell-strip) 92%, black);
 	cursor: grab;
 	touch-action: none;
 }
@@ -9103,6 +9131,24 @@ body.context-menu-host.submenu-flyout-left .context-menu-submenu-panel {
 	-webkit-user-drag: none;
 	transform-origin: center center;
 	will-change: transform;
+}
+
+.image-viewer-dialog-close {
+	position: absolute;
+	z-index: 2;
+	top: 6px;
+	right: 6px;
+	width: 28px;
+	height: 28px;
+	border-color: color-mix(in srgb, var(--surface-border) 72%, transparent);
+	background: color-mix(in srgb, var(--shell-panel) 84%, transparent);
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+	opacity: 0.78;
+}
+
+.image-viewer-dialog-close:hover,
+.image-viewer-dialog-close:focus-visible {
+	opacity: 1;
 }
 
 .modern-tooltip {

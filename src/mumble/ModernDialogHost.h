@@ -9,12 +9,15 @@
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 
 #include <QtCore/QPoint>
+#include <QtCore/QRect>
 #include <QtCore/QVariantMap>
 #include <QtWebEngineCore/QWebEnginePage>
 #include <QtWidgets/QDialog>
 
 class ModernShellBridge;
 class ModernShellPage;
+class QMoveEvent;
+class QResizeEvent;
 class QTimer;
 class QVBoxLayout;
 class QWebChannel;
@@ -40,6 +43,8 @@ signals:
 protected:
 	void closeEvent(QCloseEvent *event) override;
 	bool eventFilter(QObject *watched, QEvent *event) override;
+	void moveEvent(QMoveEvent *event) override;
+	void resizeEvent(QResizeEvent *event) override;
 
 private slots:
 	void handleLoadFinished(bool ok);
@@ -54,6 +59,14 @@ private:
 	void applyAutomationOffscreenFlags();
 	void showForAutomationCapture();
 	void queueDialogStateRepublish();
+	bool isImageViewerDialog() const;
+	void rememberImageViewerGeometry();
+	Qt::Edges resizeEdgesAtGlobalPoint(const QPoint &globalPosition) const;
+	void updateResizeCursor(const QPoint &globalPosition);
+	void clearResizeCursor();
+	void beginManualResize(const QPoint &globalPosition, Qt::Edges edges);
+	void trackManualResize(const QPoint &globalPosition);
+	void finishManualResize(bool commitGeometry);
 	bool shouldStartWindowDrag(const QPoint &viewPosition) const;
 
 	QVBoxLayout *m_layout = nullptr;
@@ -66,8 +79,13 @@ private:
 	bool m_started = false;
 	bool m_open = false;
 	bool m_manualDragActive = false;
+	bool m_manualResizeActive = false;
+	bool m_resizeCursorActive = false;
 	int m_stateRepublishRemaining = 0;
 	QPoint m_manualDragOffset;
+	QPoint m_manualResizeStartGlobalPosition;
+	QRect m_manualResizeStartGeometry;
+	Qt::Edges m_manualResizeEdges;
 	QString m_currentDialogID;
 };
 

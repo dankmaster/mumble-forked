@@ -401,6 +401,9 @@ public:
 	std::optional< QString > persistentChatPreviewKey(const MumbleProto::ChatMessage &message) const;
 	PersistentChatPreviewSpec persistentChatPreviewSpec(const QString &previewKey) const;
 	QString persistentChatScopeLabel(MumbleProto::ChatScope scope, unsigned int scopeID) const;
+	void rememberPersistentChatPreviewInputs(const MumbleProto::ChatMessage &message);
+	void warmupPersistentChatPreviews(const MumbleProto::ChatMessage &message);
+	void warmupPersistentChatPreviews(const MumbleProto::ChatHistoryResponse &response);
 	void queuePersistentChatPreviewRequest(const QString &previewKey);
 	void flushPersistentChatPreviewRequests();
 	void ensurePersistentChatPreview(const QString &previewKey);
@@ -586,6 +589,7 @@ public:
 										 const ClientUser *messageUser, int avatarSize);
 	QString modernShellMessageDtoCacheKey(const MumbleProto::ChatMessage &message, const PersistentChatTarget &target,
 										  bool canReply, bool canReact, bool canDeleteMessages) const;
+	QVariantMap modernShellPreviewStateForKey(const QString &previewKey) const;
 	QVariantMap buildModernShellCachedMessageState(const MumbleProto::ChatMessage &message,
 												   const PersistentChatTarget &target, bool canReply, bool canReact,
 												   bool canDeleteMessages,
@@ -857,6 +861,7 @@ protected:
 	QHash< unsigned int, unsigned int > m_userIdleSeconds;
 	std::vector< MumbleProto::ChatMessage > m_persistentChatMessages;
 	QHash< QString, PersistentChatPreview > m_persistentChatPreviews;
+	QHash< QString, MumbleProto::ChatEmbedRef > m_persistentChatEmbedPreviewRefs;
 	QHash< unsigned int, PersistentChatAssetDownload > m_persistentChatAssetDownloads;
 	QHash< quint64, PendingChatEmbedAssist > m_pendingChatEmbedAssists;
 	QHash< QString, quint64 > m_pendingChatEmbedAssistByKey;

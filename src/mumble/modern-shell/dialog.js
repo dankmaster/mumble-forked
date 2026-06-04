@@ -128,6 +128,36 @@
 		return (parts[0].slice(0, 1) + parts[1].slice(0, 1)).toUpperCase();
 	}
 
+	function hueForLabel(label, own) {
+		if (own) {
+			return 173;
+		}
+
+		let hash = 0;
+		const source = String(label || "");
+		for (let index = 0; index < source.length; index += 1) {
+			hash = ((hash << 5) - hash) + source.charCodeAt(index);
+			hash |= 0;
+		}
+
+		return Math.abs(hash) % 360;
+	}
+
+	function styleAvatar(element, label, own, avatarUrl) {
+		const hue = hueForLabel(label, own);
+		element.style.setProperty("--avatar-hue", String(hue));
+		if (avatarUrl) {
+			element.classList.add("has-image");
+			element.style.backgroundImage = "url(\"" + String(avatarUrl).replace(/"/g, "%22") + "\")";
+			element.textContent = "";
+			return;
+		}
+
+		element.classList.remove("has-image");
+		element.style.backgroundImage = "";
+		element.textContent = initialsFor(label);
+	}
+
 	function readFileAsDataUrl(file) {
 		return new Promise(function(resolve, reject) {
 			const reader = new FileReader();
@@ -4285,6 +4315,43 @@
 		container.appendChild(wrap);
 	}
 
+	function appendModernDialogProfile(container, field) {
+		const value = field && field.value && typeof field.value === "object" && !Array.isArray(field.value)
+			? field.value
+			: {};
+		const name = String(value.name || value.label || field.label || "");
+		const subtitle = String(value.subtitle || "");
+		const fieldClass = field && field.id
+			? " field-id-" + String(field.id).replace(/[^a-z0-9_-]/gi, "-")
+			: "";
+		const presentationClass = field && field.presentation
+			? " is-" + String(field.presentation).replace(/[^a-z0-9_-]/gi, "-")
+			: "";
+		const row = document.createElement("div");
+		row.className = "modern-dialog-profile" + fieldClass + presentationClass;
+
+		const avatar = document.createElement("span");
+		avatar.className = "modern-dialog-profile-avatar avatar";
+		styleAvatar(avatar, name || "User", !!value.isSelf, String(value.avatarUrl || ""));
+		avatar.setAttribute("aria-label", name ? name + " avatar" : "User avatar");
+		row.appendChild(avatar);
+
+		const copy = document.createElement("span");
+		copy.className = "modern-dialog-profile-copy";
+		const title = document.createElement("span");
+		title.className = "modern-dialog-profile-name";
+		title.textContent = name || "User";
+		copy.appendChild(title);
+		if (subtitle) {
+			const meta = document.createElement("span");
+			meta.className = "modern-dialog-profile-meta";
+			meta.textContent = subtitle;
+			copy.appendChild(meta);
+		}
+		row.appendChild(copy);
+		container.appendChild(row);
+	}
+
 	function appendModernDialogField(container, field, errors) {
 		const type = String(field && field.type || "text");
 		if (type === "hidden") {
@@ -4307,6 +4374,10 @@
 		}
 		if (type === "shortcutEditor") {
 			appendModernShortcutEditor(container, field, errors);
+			return;
+		}
+		if (type === "profile") {
+			appendModernDialogProfile(container, field);
 			return;
 		}
 
@@ -7706,6 +7777,19 @@
 
 		const stage = document.createElement("div");
 		stage.className = "image-viewer";
+		const closeButton = document.createElement("button");
+		closeButton.type = "button";
+		closeButton.className = "icon-button image-viewer-dialog-close";
+		closeButton.title = "Close image";
+		closeButton.setAttribute("aria-label", "Close image");
+		closeButton.innerHTML = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M8 8l8 8\"></path><path d=\"M16 8l-8 8\"></path></svg>";
+		closeButton.addEventListener("click", function(event) {
+			event.preventDefault();
+			event.stopPropagation();
+			closeModernDialog();
+		});
+		stage.appendChild(closeButton);
+
 		const img = document.createElement("img");
 		img.className = "image-viewer-img";
 		img.src = src;
@@ -7724,6 +7808,9 @@
 			apply();
 		}, { passive: false });
 		stage.addEventListener("pointerdown", function(event) {
+			if (event.target && typeof event.target.closest === "function" && event.target.closest("button")) {
+				return;
+			}
 			state.dragging = true;
 			state.startX = event.clientX;
 			state.startY = event.clientY;

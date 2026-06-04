@@ -21815,7 +21815,19 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 	messageState.insert(QStringLiteral("reactions"), reactions);
 
 	if (!deletedMessage) {
-		if (previewKey && fastFirstPaint) {
+		if (previewKey) {
+			if (fastFirstPaint && !m_persistentChatPreviews.contains(*previewKey)) {
+				restorePersistentChatPreviewDiskCache(*previewKey);
+			}
+			if (!fastFirstPaint || m_persistentChatPreviews.contains(*previewKey)) {
+				ensurePersistentChatPreview(*previewKey);
+				const QVariantMap previewState = modernShellPreviewStateForKey(*previewKey);
+				if (!previewState.isEmpty()) {
+					messageState.insert(QStringLiteral("preview"), previewState);
+				}
+			}
+		}
+		if (previewKey && fastFirstPaint && !messageState.contains(QStringLiteral("preview"))) {
 			const auto previewUrlStringFromKey = [](const QString &key) {
 				const auto decodedPayload = [&key](const QString &prefix) {
 					return QUrl::fromPercentEncoding(key.mid(prefix.size()).toUtf8());
@@ -21846,79 +21858,6 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 			previewStub.insert(QStringLiteral("singleUrl"), persistentChatSourceTextIsSinglePreviewableUrl(bodyText));
 			previewStub.insert(QStringLiteral("loadingLabel"), tr("Load preview"));
 			messageState.insert(QStringLiteral("previewStub"), previewStub);
-		} else if (previewKey) {
-			ensurePersistentChatPreview(*previewKey);
-			if (const auto it = m_persistentChatPreviews.constFind(*previewKey);
-				it != m_persistentChatPreviews.cend()) {
-				const PersistentChatPreview &preview = it.value();
-				QVariantMap previewState;
-				QString previewKind = previewKey->startsWith(QLatin1String("image:")) ? QStringLiteral("image")
-																				 : QStringLiteral("link");
-				if (!preview.mediaKind.isEmpty()) {
-					previewKind = preview.mediaKind;
-				}
-				previewState.insert(QStringLiteral("kind"), previewKind);
-				previewState.insert(QStringLiteral("url"), preview.canonicalUrl);
-				previewState.insert(QStringLiteral("title"), preview.title);
-				previewState.insert(QStringLiteral("subtitle"), preview.subtitle);
-				previewState.insert(QStringLiteral("description"), preview.description);
-				previewState.insert(QStringLiteral("openLabel"), preview.openLabel);
-				previewState.insert(QStringLiteral("loading"), !preview.metadataFinished || !preview.thumbnailFinished);
-				previewState.insert(QStringLiteral("failed"), preview.failed);
-				previewState.insert(QStringLiteral("thumbnailUrl"),
-									persistentChatInlineDataImageThumbnailSource(preview.thumbnailImage));
-				if (!preview.metadata.isEmpty()) {
-					previewState.insert(QStringLiteral("metadata"), preview.metadata);
-				}
-				if (!preview.mediaDataUrl.isEmpty()) {
-					previewState.insert(QStringLiteral("mediaUrl"), preview.mediaDataUrl);
-					previewState.insert(QStringLiteral("mediaMime"), preview.mediaMime);
-					previewState.insert(QStringLiteral("mediaKind"), preview.mediaKind);
-					previewState.insert(QStringLiteral("autoplay"), preview.autoplay);
-					if (!preview.mediaAudioDataUrl.isEmpty()) {
-						previewState.insert(QStringLiteral("mediaAudioUrl"), preview.mediaAudioDataUrl);
-						previewState.insert(QStringLiteral("mediaAudioMime"), preview.mediaAudioMime);
-					}
-				}
-				if (!preview.mediaItems.empty()) {
-					QVariantList mediaItems;
-					for (const PersistentChatPreviewMediaItem &item : preview.mediaItems) {
-						if (item.url.trimmed().isEmpty()) {
-							continue;
-						}
-						QVariantMap itemState;
-						itemState.insert(QStringLiteral("url"), item.url);
-						itemState.insert(QStringLiteral("mime"), item.mime);
-						itemState.insert(QStringLiteral("kind"), item.kind);
-						mediaItems.push_back(itemState);
-					}
-					if (!mediaItems.isEmpty()) {
-						previewState.insert(QStringLiteral("mediaItems"), mediaItems);
-					}
-				}
-				std::optional< PersistentChatPreviewEmbedTarget > embedTarget;
-				if (previewKey->startsWith(QLatin1String("youtube:"))) {
-					const QString youtubePayload = previewKey->mid(QStringLiteral("youtube:").size());
-					const std::optional< YouTubePreviewTarget > youtubeTarget =
-						youtubePreviewTargetFromKeyPayload(youtubePayload);
-					if (youtubeTarget) {
-						embedTarget = PersistentChatPreviewEmbedTarget {
-							QStringLiteral("youtube"),
-							youtubeEmbedUrl(*youtubeTarget),
-							youtubeTarget->shorts ? QStringLiteral("short") : QStringLiteral("wide")
-						};
-					}
-				} else if (preview.mediaDataUrl.trimmed().isEmpty() && preview.mediaItems.empty()) {
-					embedTarget = previewEmbedTargetForUrl(QUrl(preview.canonicalUrl));
-				}
-				if (embedTarget) {
-					previewState.insert(QStringLiteral("embedKind"), embedTarget->kind);
-					previewState.insert(QStringLiteral("embedUrl"),
-										embedTarget->url.toString(QUrl::FullyEncoded));
-					previewState.insert(QStringLiteral("embedAspect"), embedTarget->aspect);
-				}
-				messageState.insert(QStringLiteral("preview"), previewState);
-			}
 		}
 	}
 
@@ -21996,6 +21935,79 @@ QString MainWindow::modernShellMessageDtoCacheKey(const MumbleProto::ChatMessage
 		.arg(static_cast< qulonglong >(message.message_id()))
 		.arg(static_cast< qulonglong >(message.created_at()))
 		.arg(contextKey);
+}
+
+QVariantMap MainWindow::modernShellPreviewStateForKey(const QString &previewKey) const {
+	const auto it = m_persistentChatPreviews.constFind(previewKey);
+	if (it == m_persistentChatPreviews.cend()) {
+		return QVariantMap();
+	}
+
+	const PersistentChatPreview &preview = it.value();
+	QVariantMap previewState;
+	QString previewKind = previewKey.startsWith(QLatin1String("image:")) ? QStringLiteral("image") : QStringLiteral("link");
+	if (!preview.mediaKind.isEmpty()) {
+		previewKind = preview.mediaKind;
+	}
+	previewState.insert(QStringLiteral("kind"), previewKind);
+	previewState.insert(QStringLiteral("url"), preview.canonicalUrl);
+	previewState.insert(QStringLiteral("title"), preview.title);
+	previewState.insert(QStringLiteral("subtitle"), preview.subtitle);
+	previewState.insert(QStringLiteral("description"), preview.description);
+	previewState.insert(QStringLiteral("openLabel"), preview.openLabel);
+	previewState.insert(QStringLiteral("loading"), !preview.metadataFinished || !preview.thumbnailFinished);
+	previewState.insert(QStringLiteral("failed"), preview.failed);
+	previewState.insert(QStringLiteral("thumbnailUrl"),
+						persistentChatInlineDataImageThumbnailSource(preview.thumbnailImage));
+	if (!preview.metadata.isEmpty()) {
+		previewState.insert(QStringLiteral("metadata"), preview.metadata);
+	}
+	if (!preview.mediaDataUrl.isEmpty()) {
+		previewState.insert(QStringLiteral("mediaUrl"), preview.mediaDataUrl);
+		previewState.insert(QStringLiteral("mediaMime"), preview.mediaMime);
+		previewState.insert(QStringLiteral("mediaKind"), preview.mediaKind);
+		previewState.insert(QStringLiteral("autoplay"), preview.autoplay);
+		if (!preview.mediaAudioDataUrl.isEmpty()) {
+			previewState.insert(QStringLiteral("mediaAudioUrl"), preview.mediaAudioDataUrl);
+			previewState.insert(QStringLiteral("mediaAudioMime"), preview.mediaAudioMime);
+		}
+	}
+	if (!preview.mediaItems.empty()) {
+		QVariantList mediaItems;
+		for (const PersistentChatPreviewMediaItem &item : preview.mediaItems) {
+			if (item.url.trimmed().isEmpty()) {
+				continue;
+			}
+			QVariantMap itemState;
+			itemState.insert(QStringLiteral("url"), item.url);
+			itemState.insert(QStringLiteral("mime"), item.mime);
+			itemState.insert(QStringLiteral("kind"), item.kind);
+			mediaItems.push_back(itemState);
+		}
+		if (!mediaItems.isEmpty()) {
+			previewState.insert(QStringLiteral("mediaItems"), mediaItems);
+		}
+	}
+
+	std::optional< PersistentChatPreviewEmbedTarget > embedTarget;
+	if (previewKey.startsWith(QLatin1String("youtube:"))) {
+		const QString youtubePayload = previewKey.mid(QStringLiteral("youtube:").size());
+		const std::optional< YouTubePreviewTarget > youtubeTarget = youtubePreviewTargetFromKeyPayload(youtubePayload);
+		if (youtubeTarget) {
+			embedTarget = PersistentChatPreviewEmbedTarget { QStringLiteral("youtube"), youtubeEmbedUrl(*youtubeTarget),
+															 youtubeTarget->shorts ? QStringLiteral("short")
+																				   : QStringLiteral("wide") };
+		}
+	} else if (preview.mediaDataUrl.trimmed().isEmpty() && preview.mediaItems.empty()) {
+		embedTarget = previewEmbedTargetForUrl(QUrl(preview.canonicalUrl));
+	}
+	if (embedTarget) {
+		previewState.insert(QStringLiteral("embedKind"), embedTarget->kind);
+		previewState.insert(QStringLiteral("embedUrl"), embedTarget->url.toString(QUrl::FullyEncoded));
+		previewState.insert(QStringLiteral("embedAspect"), embedTarget->aspect);
+	}
+
+	return previewState;
 }
 
 QVariantMap MainWindow::buildModernShellCachedMessageState(const MumbleProto::ChatMessage &message,
@@ -30881,6 +30893,41 @@ std::optional< QString > MainWindow::persistentChatPreviewKey(const MumbleProto:
 	return std::nullopt;
 }
 
+void MainWindow::rememberPersistentChatPreviewInputs(const MumbleProto::ChatMessage &message) {
+	for (int i = 0; i < message.embeds_size(); ++i) {
+		const MumbleProto::ChatEmbedRef &embed = message.embeds(i);
+		if (!embed.has_canonical_url()) {
+			continue;
+		}
+
+		const QString canonicalUrl = u8(embed.canonical_url()).trimmed();
+		if (canonicalUrl.isEmpty()) {
+			continue;
+		}
+
+		const QString previewKey =
+			QString::fromLatin1("embed:%1").arg(QString::fromUtf8(QUrl::toPercentEncoding(canonicalUrl)));
+		m_persistentChatEmbedPreviewRefs.insert(previewKey, embed);
+	}
+}
+
+void MainWindow::warmupPersistentChatPreviews(const MumbleProto::ChatMessage &message) {
+	rememberPersistentChatPreviewInputs(message);
+	if (message.has_deleted_at() && message.deleted_at() > 0) {
+		return;
+	}
+
+	if (const std::optional< QString > previewKey = persistentChatPreviewKey(message); previewKey) {
+		queuePersistentChatPreviewRequest(*previewKey);
+	}
+}
+
+void MainWindow::warmupPersistentChatPreviews(const MumbleProto::ChatHistoryResponse &response) {
+	for (int i = 0; i < response.messages_size(); ++i) {
+		warmupPersistentChatPreviews(response.messages(i));
+	}
+}
+
 QString MainWindow::persistentChatMessageIdentityKey(const MumbleProto::ChatMessage &message) const {
 	return QString::fromLatin1("%1:%2").arg(message.thread_id()).arg(message.message_id());
 }
@@ -33419,6 +33466,10 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		const std::optional< PersistentChatPreviewProviderInfo > provider = previewProviderInfo(previewUrl);
 
 		std::optional< MumbleProto::ChatEmbedRef > embed;
+		if (const auto cachedEmbedIt = m_persistentChatEmbedPreviewRefs.constFind(previewKey);
+			cachedEmbedIt != m_persistentChatEmbedPreviewRefs.cend()) {
+			embed = cachedEmbedIt.value();
+		}
 		for (const MumbleProto::ChatMessage &message : m_persistentChatMessages) {
 			for (int i = 0; i < message.embeds_size(); ++i) {
 				const MumbleProto::ChatEmbedRef &currentEmbed = message.embeds(i);
@@ -35411,6 +35462,7 @@ void MainWindow::handlePersistentChatMessage(const MumbleProto::ChatMessage &msg
 		appendModernPersistentDirectMessage(msg, true);
 		return;
 	}
+	warmupPersistentChatPreviews(msg);
 	if (usesModernShell() && stonksLedgerFeatureSupported() && Global::get().bStonksEnabled) {
 		const MumbleProto::ChatScope scope = msg.has_scope() ? msg.scope() : MumbleProto::Channel;
 		const unsigned int scopeID         = msg.has_scope_id() ? msg.scope_id() : 0;
@@ -35447,6 +35499,7 @@ void MainWindow::handlePersistentChatHistory(const MumbleProto::ChatHistoryRespo
 		mergeModernDirectMessageHistory(msg);
 		return;
 	}
+	warmupPersistentChatPreviews(msg);
 #endif
 	syncPersistentChatGatewayHandler();
 	m_persistentChatGateway->handleIncomingHistory(msg);
@@ -35492,6 +35545,24 @@ void MainWindow::handlePersistentChatEmbedState(const MumbleProto::ChatEmbedStat
 	const MumbleProto::ChatScope scope = msg.has_scope() ? msg.scope() : MumbleProto::Channel;
 	const unsigned int scopeID         = msg.has_scope_id() ? msg.scope_id() : 0;
 	const bool activeScopeMatches      = m_persistentChatController->activeScopeMatches(scope, scopeID);
+	QStringList embedPreviewKeys;
+	for (const MumbleProto::ChatEmbedRef &embed : msg.embeds()) {
+		if (!embed.has_canonical_url()) {
+			continue;
+		}
+
+		const QString canonicalUrl = u8(embed.canonical_url()).trimmed();
+		if (canonicalUrl.isEmpty()) {
+			continue;
+		}
+
+		const QString previewKey =
+			QString::fromLatin1("embed:%1").arg(QString::fromUtf8(QUrl::toPercentEncoding(canonicalUrl)));
+		m_persistentChatEmbedPreviewRefs.insert(previewKey, embed);
+		if (!embedPreviewKeys.contains(previewKey)) {
+			embedPreviewKeys.push_back(previewKey);
+		}
+	}
 
 	QString oldPreviewKey;
 	if (activeScopeMatches) {
@@ -35533,8 +35604,15 @@ void MainWindow::handlePersistentChatEmbedState(const MumbleProto::ChatEmbedStat
 		m_persistentChatPreviews.remove(newPreviewKey);
 		ensurePersistentChatPreview(newPreviewKey);
 	}
+	if (!activeScopeMatches) {
+		for (const QString &previewKey : std::as_const(embedPreviewKeys)) {
+			m_persistentChatPreviews.remove(previewKey);
+			queuePersistentChatPreviewRequest(previewKey);
+		}
+		return;
+	}
 
-	if (!activeScopeMatches || !m_persistentChatHistory) {
+	if (!m_persistentChatHistory) {
 		return;
 	}
 
@@ -41433,6 +41511,7 @@ void MainWindow::serverConnected() {
 	m_userIdleSeconds.clear();
 	m_pendingUserInformationSessions.clear();
 	m_persistentChatPreviews.clear();
+	m_persistentChatEmbedPreviewRefs.clear();
 	m_persistentChatAssetDownloads.clear();
 	m_pendingFeedbackSubmissions.clear();
 	m_persistentChatLiveMessageKeys.clear();
@@ -41525,6 +41604,7 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	m_userIdleSeconds.clear();
 	m_pendingUserInformationSessions.clear();
 	m_persistentChatPreviews.clear();
+	m_persistentChatEmbedPreviewRefs.clear();
 	m_persistentChatAssetDownloads.clear();
 	m_pendingFeedbackSubmissions.clear();
 	m_persistentChatLiveMessageKeys.clear();
