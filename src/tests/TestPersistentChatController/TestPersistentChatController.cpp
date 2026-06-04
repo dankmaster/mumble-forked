@@ -177,6 +177,7 @@ class TestPersistentChatController : public QObject {
 private slots:
 	void restoresCachedScopeSnapshots();
 	void forceReloadSendsInitialRequestWhileInitialLoadIsInFlight();
+	void warmupScopesSkipsActiveScope();
 	void warmupScopesRequestsBatchAndCachesResponses();
 	void liveMessagesDoNotSatisfyInitialHistoryLoad();
 	void keepsInactivePendingHistoryForCache();
@@ -234,6 +235,30 @@ void TestPersistentChatController::forceReloadSendsInitialRequestWhileInitialLoa
 
 	controller.setActiveScope(PersistentChatScopeKey::fromScope(MumbleProto::Channel, 7), true);
 	QCOMPARE(g_initialRequestCount, 2);
+
+	resetGatewayRequestState();
+}
+
+void TestPersistentChatController::warmupScopesSkipsActiveScope() {
+	resetGatewayRequestState();
+	g_gatewayReady = false;
+
+	PersistentChatGateway gateway;
+	PersistentChatController controller;
+	controller.setGateway(&gateway);
+
+	controller.setActiveScope(PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 11), false);
+	QCOMPARE(g_initialRequestCount, 0);
+
+	g_gatewayReady = true;
+	controller.warmupScopes({ PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 11),
+							  PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 22) });
+
+	QCOMPARE(g_initialRequestCount, 0);
+	QCOMPARE(g_warmupRequestCount, 1);
+	QCOMPARE(g_lastWarmupScopes.size(), 1);
+	QCOMPARE(g_lastWarmupScopes.at(0).first, MumbleProto::TextChannel);
+	QCOMPARE(g_lastWarmupScopes.at(0).second, 22U);
 
 	resetGatewayRequestState();
 }

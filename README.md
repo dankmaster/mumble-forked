@@ -134,9 +134,9 @@ chat_preview_client_assist_thumbnail_max_bytes=524288
 
 screen_share_enabled=false
 screen_share_relay_url="wss://relay.example.com/mumble-screen"
-screen_share_max_width=1920
-screen_share_max_height=1080
-screen_share_max_fps=60
+screen_share_max_width=2560
+screen_share_max_height=1440
+screen_share_max_fps=144
 ```
 
 Persistent chat media storage is documented in

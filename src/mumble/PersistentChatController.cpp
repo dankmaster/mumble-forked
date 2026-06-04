@@ -100,6 +100,7 @@ void PersistentChatController::warmupScopes(const QList< PersistentChatScopeKey 
 	QList< QPair< MumbleProto::ChatScope, unsigned int > > requests;
 	QList< PersistentChatScopeKey > requestedKeys;
 	QSet< QString > seen;
+	const QString activeCacheKey = m_activeScope.valid ? m_activeScope.cacheKey() : QString();
 	for (const PersistentChatScopeKey &key : keys) {
 		if (!key.valid || key.scope == MumbleProto::Aggregate || key.scope == MumbleProto::Private
 			|| key.scope == MumbleProto::ServerGlobal) {
@@ -107,6 +108,9 @@ void PersistentChatController::warmupScopes(const QList< PersistentChatScopeKey 
 		}
 
 		const QString cacheKey = key.cacheKey();
+		if (!activeCacheKey.isEmpty() && cacheKey == activeCacheKey) {
+			continue;
+		}
 		if (seen.contains(cacheKey)) {
 			continue;
 		}

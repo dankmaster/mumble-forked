@@ -1873,9 +1873,14 @@ QImage persistentChatAvatarTexture(const ClientUser *user, int avatarSize) {
 	QBuffer buffer(&mutableUser->qbaTexture);
 	buffer.open(QIODevice::ReadOnly);
 	QImageReader reader(&buffer, mutableUser->qbaTextureFormat);
-	QSize scaledSize = reader.size();
-	scaledSize.scale(avatarSize, avatarSize, Qt::KeepAspectRatio);
-	reader.setScaledSize(scaledSize);
+	reader.setAutoTransform(true);
+	if (avatarSize > 0) {
+		QSize scaledSize = reader.size();
+		if (scaledSize.isValid()) {
+			scaledSize.scale(avatarSize, avatarSize, Qt::KeepAspectRatio);
+			reader.setScaledSize(scaledSize);
+		}
+	}
 	return reader.read();
 }
 
@@ -12276,7 +12281,9 @@ std::optional< PersistentChatReplyReference >
 
 namespace {
 	QVariantMap modernProfileField(const QString &id, const QString &name, const QString &subtitle,
-								   const QString &avatarUrl, bool isSelf);
+								   const QString &avatarUrl, bool isSelf,
+								   const QString &avatarActionID    = QString(),
+								   const QString &avatarActionLabel = QString());
 }
 
 MessageBoxEvent::MessageBoxEvent(QString m) : QEvent(static_cast< QEvent::Type >(MB_QEVENT)) {
@@ -12818,9 +12825,12 @@ void MainWindow::refreshUserTextureViews(ClientUser *user) {
 	const QString userInformationDialogID = QStringLiteral("userInformation:%1").arg(user->uiSession);
 	if (usesModernShell() && m_modernDialogController
 		&& m_modernDialogController->activeDialogID() == userInformationDialogID) {
+		const QString avatarUrl = modernShellAvatarDataUrl(user, 96);
 		const QVariantMap profile = modernProfileField(
 			QStringLiteral("identity.profile"), user->qsName, tr("Session %1").arg(user->uiSession),
-			modernShellAvatarDataUrl(user, 96), user->uiSession == Global::get().uiSession);
+			avatarUrl, user->uiSession == Global::get().uiSession,
+			avatarUrl.isEmpty() ? QString() : QStringLiteral("identity.openAvatar"),
+			avatarUrl.isEmpty() ? QString() : tr("Open avatar image preview"));
 		publishModernDialogState(m_modernDialogController->updateField(
 			userInformationDialogID, QStringLiteral("identity.profile"), profile.value(QStringLiteral("value"))));
 	}
@@ -14951,12 +14961,19 @@ namespace {
 	}
 
 	QVariantMap modernProfileField(const QString &id, const QString &name, const QString &subtitle,
-								   const QString &avatarUrl, const bool isSelf) {
+								   const QString &avatarUrl, const bool isSelf,
+								   const QString &avatarActionID, const QString &avatarActionLabel) {
 		QVariantMap profile;
 		profile.insert(QStringLiteral("name"), name);
 		profile.insert(QStringLiteral("subtitle"), subtitle);
 		profile.insert(QStringLiteral("avatarUrl"), avatarUrl);
 		profile.insert(QStringLiteral("isSelf"), isSelf);
+		if (!avatarActionID.isEmpty()) {
+			profile.insert(QStringLiteral("avatarActionId"), avatarActionID);
+			if (!avatarActionLabel.isEmpty()) {
+				profile.insert(QStringLiteral("avatarActionLabel"), avatarActionLabel);
+			}
+		}
 		return modernDialogField(id, QString(), QStringLiteral("profile"), profile, false);
 	}
 
@@ -19487,10 +19504,13 @@ void MainWindow::openModernUserInformationDialog(const MumbleProto::UserStats &m
 	ClientUser *user = ClientUser::get(msg.session());
 	const QString userName = user ? user->qsName : tr("Session %1").arg(msg.session());
 	const bool isSelf      = user && user->uiSession == Global::get().uiSession;
+	const QString avatarUrl = modernShellAvatarDataUrl(user, 96);
 
 	QVariantList identityFields {
 		modernProfileField(QStringLiteral("identity.profile"), userName, tr("Session %1").arg(msg.session()),
-						   modernShellAvatarDataUrl(user, 96), isSelf),
+						   avatarUrl, isSelf,
+						   avatarUrl.isEmpty() ? QString() : QStringLiteral("identity.openAvatar"),
+						   avatarUrl.isEmpty() ? QString() : tr("Open avatar image preview")),
 		modernReadonlyField(tr("Session"), msg.session()),
 		modernReadonlyField(tr("Opus"), msg.has_opus() ? (msg.opus() ? tr("Supported") : tr("Not supported"))
 														: tr("Not reported"))
@@ -20997,6 +21017,20 @@ void MainWindow::handleModernDialogFieldUpdate(const QString &dialogID, const QS
 void MainWindow::handleModernDialogAction(const QString &dialogID, const QString &actionID,
 										  const QVariantMap &payload) {
 	if (!m_modernDialogController) {
+		return;
+	}
+
+	if (dialogID.startsWith(QLatin1String("userInformation:")) && actionID == QLatin1String("identity.openAvatar")) {
+		bool ok                    = false;
+		const unsigned int session = dialogID.mid(QStringLiteral("userInformation:").size()).toUInt(&ok);
+		ClientUser *user           = ok ? ClientUser::get(session) : nullptr;
+		const QImage avatar        = persistentChatAvatarTexture(user, 0);
+		if (avatar.isNull()) {
+			publishModernToast(QStringLiteral("warning"), tr("Avatar"), tr("Avatar image is not available yet."));
+			return;
+		}
+
+		openImageDialog(avatar);
 		return;
 	}
 
@@ -27064,6 +27098,13 @@ void MainWindow::syncPersistentChatGatewayHandler() {
 QList< PersistentChatScopeKey > MainWindow::persistentChatWarmupScopes() const {
 	QList< PersistentChatScopeKey > scopes;
 	QSet< QString > seen;
+	QString activeScopeCacheKey;
+	const PersistentChatTarget activeTarget = currentPersistentChatTarget();
+	if (activeTarget.valid && !activeTarget.serverLog && !activeTarget.directMessage && !activeTarget.legacyTextPath
+		&& (activeTarget.scope == MumbleProto::TextChannel || activeTarget.scope == MumbleProto::Channel)) {
+		activeScopeCacheKey = PersistentChatScopeKey::fromScope(activeTarget.scope, activeTarget.scopeID).cacheKey();
+	}
+
 	const auto appendScope = [&](MumbleProto::ChatScope scope, unsigned int scopeID) {
 		if (scopes.size() >= PersistentChatWarmupMaxScopes) {
 			return;
@@ -27071,6 +27112,9 @@ QList< PersistentChatScopeKey > MainWindow::persistentChatWarmupScopes() const {
 
 		const PersistentChatScopeKey key = PersistentChatScopeKey::fromScope(scope, scopeID);
 		const QString cacheKey           = key.cacheKey();
+		if (!activeScopeCacheKey.isEmpty() && cacheKey == activeScopeCacheKey) {
+			return;
+		}
 		if (seen.contains(cacheKey)) {
 			return;
 		}
@@ -27078,12 +27122,6 @@ QList< PersistentChatScopeKey > MainWindow::persistentChatWarmupScopes() const {
 		seen.insert(cacheKey);
 		scopes.push_back(key);
 	};
-
-	const PersistentChatTarget activeTarget = currentPersistentChatTarget();
-	if (activeTarget.valid && !activeTarget.serverLog && !activeTarget.directMessage && !activeTarget.legacyTextPath
-		&& (activeTarget.scope == MumbleProto::TextChannel || activeTarget.scope == MumbleProto::Channel)) {
-		appendScope(activeTarget.scope, activeTarget.scopeID);
-	}
 
 	if (const Channel *voiceChannel = currentVoiceChannel()) {
 		appendScope(MumbleProto::Channel, voiceChannel->iId);
@@ -39195,21 +39233,41 @@ QVariantMap MainWindow::buildModernScreenShareState(Channel *channel) {
 	auto qualityLimit = [](const unsigned int advertised, const unsigned int fallback, const unsigned int hardMax) {
 		return Mumble::ScreenShare::sanitizeLimit(advertised, fallback, hardMax);
 	};
-	const unsigned int maxWidth = std::min(
+	const unsigned int serverMaxWidth =
 		qualityLimit(Global::get().uiScreenShareMaxWidth, Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH,
-					 Mumble::ScreenShare::HARD_MAX_WIDTH),
-		qualityLimit(capabilities.maxWidth, Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH,
-					 Mumble::ScreenShare::HARD_MAX_WIDTH));
-	const unsigned int maxHeight = std::min(
+					 Mumble::ScreenShare::HARD_MAX_WIDTH);
+	const unsigned int serverMaxHeight =
 		qualityLimit(Global::get().uiScreenShareMaxHeight, Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT,
-					 Mumble::ScreenShare::HARD_MAX_HEIGHT),
-		qualityLimit(capabilities.maxHeight, Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT,
-					 Mumble::ScreenShare::HARD_MAX_HEIGHT));
-	const unsigned int maxFps = std::min(
+					 Mumble::ScreenShare::HARD_MAX_HEIGHT);
+	const unsigned int serverMaxFps =
 		qualityLimit(Global::get().uiScreenShareMaxFps, Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_FPS,
-					 Mumble::ScreenShare::HARD_MAX_FPS),
+					 Mumble::ScreenShare::HARD_MAX_FPS);
+	const unsigned int helperMaxWidth =
+		qualityLimit(capabilities.maxWidth, Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH,
+					 Mumble::ScreenShare::HARD_MAX_WIDTH);
+	const unsigned int helperMaxHeight =
+		qualityLimit(capabilities.maxHeight, Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT,
+					 Mumble::ScreenShare::HARD_MAX_HEIGHT);
+	const unsigned int helperMaxFps =
 		qualityLimit(capabilities.maxFps, Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_FPS,
-					 Mumble::ScreenShare::HARD_MAX_FPS));
+					 Mumble::ScreenShare::HARD_MAX_FPS);
+	const unsigned int maxWidth  = std::min(serverMaxWidth, helperMaxWidth);
+	const unsigned int maxHeight = std::min(serverMaxHeight, helperMaxHeight);
+	const unsigned int maxFps    = std::min(serverMaxFps, helperMaxFps);
+
+	QStringList qualityNotes;
+	auto appendQualityLimitNote = [&](const QString &limitOwner, const unsigned int width, const unsigned int height,
+									  const unsigned int fps) {
+		if (width < Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_WIDTH
+			|| height < Mumble::ScreenShare::PUBLISHER_QUALITY_MAX_HEIGHT || fps < 60) {
+			qualityNotes << tr("%1 limit: %2x%3@%4").arg(limitOwner).arg(width).arg(height).arg(fps);
+		}
+	};
+	appendQualityLimitNote(tr("Server"), serverMaxWidth, serverMaxHeight, serverMaxFps);
+	appendQualityLimitNote(tr("Helper"), helperMaxWidth, helperMaxHeight, helperMaxFps);
+	if (!qualityNotes.isEmpty()) {
+		state.insert(QStringLiteral("qualityNote"), qualityNotes.join(QStringLiteral(" / ")));
+	}
 
 	QVariantList resolutionOptions;
 	auto addResolution = [&](const unsigned int width, const unsigned int height) {

@@ -4330,10 +4330,24 @@
 		const row = document.createElement("div");
 		row.className = "modern-dialog-profile" + fieldClass + presentationClass;
 
-		const avatar = document.createElement("span");
-		avatar.className = "modern-dialog-profile-avatar avatar";
+		const avatarActionId = String(value.avatarActionId || "");
+		const avatarActionLabel = String(value.avatarActionLabel || "Open avatar image preview");
+		const avatar = document.createElement(avatarActionId ? "button" : "span");
+		if (avatarActionId) {
+			avatar.type = "button";
+		}
+		avatar.className = "modern-dialog-profile-avatar avatar" + (avatarActionId ? " is-clickable" : "");
 		styleAvatar(avatar, name || "User", !!value.isSelf, String(value.avatarUrl || ""));
-		avatar.setAttribute("aria-label", name ? name + " avatar" : "User avatar");
+		avatar.setAttribute("aria-label", avatarActionId
+			? (name ? name + " avatar. " + avatarActionLabel : avatarActionLabel)
+			: (name ? name + " avatar" : "User avatar"));
+		if (avatarActionId) {
+			avatar.title = avatarActionLabel;
+			avatar.addEventListener("click", function(event) {
+				event.preventDefault();
+				invokeModernDialogAction(avatarActionId, { fieldId: field && field.id ? String(field.id) : "" });
+			});
+		}
 		row.appendChild(avatar);
 
 		const copy = document.createElement("span");
@@ -7737,6 +7751,13 @@
 			screenShareBuildSelect(state.frameRateOptions, selection.frameRate, function(value) {
 				selection.frameRate = Number(value) || 0;
 			})));
+		const qualityNote = String(state.qualityNote || "");
+		if (qualityNote) {
+			const noteEl = document.createElement("p");
+			noteEl.className = "screenshare-quality-note";
+			noteEl.textContent = qualityNote;
+			quality.appendChild(noteEl);
+		}
 		side.appendChild(quality);
 
 		const audio = document.createElement("section");

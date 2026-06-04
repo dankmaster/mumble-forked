@@ -8988,6 +8988,13 @@ body.context-menu-host.submenu-flyout-left .context-menu-submenu-panel {
 	color: var(--text-faint);
 }
 
+.screenshare-quality-note {
+	margin: 8px 0 0;
+	font-size: 11px;
+	line-height: 1.35;
+	color: var(--text-muted);
+}
+
 .screenshare-source-list {
 	display: flex;
 	flex-direction: column;
@@ -10527,6 +10534,29 @@ body[data-density="spacious"] .modern-dialog-section {
 .modern-dialog-profile-avatar.has-image {
 	background-color: rgba(255, 255, 255, 0.06);
 	color: transparent;
+}
+
+button.modern-dialog-profile-avatar {
+	appearance: none;
+	-webkit-appearance: none;
+	padding: 0;
+	font: inherit;
+}
+
+.modern-dialog-profile-avatar.is-clickable {
+	cursor: pointer;
+	transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+
+.modern-dialog-profile-avatar.is-clickable:hover {
+	border-color: rgba(var(--accent-rgb), 0.48);
+	box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.12);
+	transform: translateY(-1px);
+}
+
+.modern-dialog-profile-avatar.is-clickable:focus-visible {
+	outline: 2px solid rgba(var(--accent-rgb), 0.62);
+	outline-offset: 3px;
 }
 
 .modern-dialog-profile-copy {
