@@ -9,6 +9,7 @@
 
 namespace {
 constexpr unsigned int INITIAL_HISTORY_PAGE_SIZE = 20;
+constexpr unsigned int WARMUP_HISTORY_PAGE_SIZE  = 20;
 constexpr unsigned int OLDER_HISTORY_PAGE_SIZE   = 20;
 }
 
@@ -33,6 +34,16 @@ void PersistentChatGateway::requestInitialPage(MumbleProto::ChatScope scope, uns
 	}
 
 	m_serverHandler->requestChatHistory(scope, scopeID, 0, INITIAL_HISTORY_PAGE_SIZE, std::nullopt);
+}
+
+bool PersistentChatGateway::requestWarmupPages(
+	const QList< QPair< MumbleProto::ChatScope, unsigned int > > &scopes, unsigned int limitPerScope) {
+	if (!isReady() || scopes.isEmpty()) {
+		return false;
+	}
+
+	return m_serverHandler->requestChatHistoryWarmup(scopes,
+													 limitPerScope == 0 ? WARMUP_HISTORY_PAGE_SIZE : limitPerScope);
 }
 
 void PersistentChatGateway::requestOlder(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int beforeMessageID) {

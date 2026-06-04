@@ -25,6 +25,7 @@ public:
 
 	void setActiveScope(const PersistentChatScopeKey &key, bool forceReload);
 	void clearActiveScope();
+	void warmupScopes(const QList< PersistentChatScopeKey > &keys);
 
 	PersistentChatScopeKey activeScope() const;
 	bool hasActiveScope() const;
@@ -50,7 +51,7 @@ private slots:
 
 private:
 	void setUnreadFromMessages(PersistentChatStore::ScopeState &state);
-	void startInitialLoad(PersistentChatStore::ScopeState &state, bool forceReload);
+	bool startInitialLoad(PersistentChatStore::ScopeState &state, bool forceReload);
 
 	QPointer< PersistentChatGateway > m_gateway;
 	PersistentChatStore m_store;

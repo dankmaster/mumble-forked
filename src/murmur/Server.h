@@ -479,6 +479,8 @@ public:
 	bool isTextAllowed(QString &str, bool &changed);
 	void sendPersistentChatUnsupported(ServerUser *uSource);
 	void sendTextChannelSync(ServerUser *uSource);
+	void sendChatHistoryResponseForRequest(ServerUser *uSource, const MumbleProto::ChatHistoryRequest &msg,
+										   bool silentPermissionDenied = false, unsigned int limitCap = 100);
 	bool feedbackGitHubConfigured() const;
 	void sendFeedbackReportState(unsigned int session, const QString &clientReportID,
 								 MumbleProto::FeedbackReportKind kind, bool accepted,

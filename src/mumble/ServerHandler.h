@@ -20,8 +20,10 @@
 #endif
 
 #include <QtCore/QEvent>
+#include <QtCore/QList>
 #include <QtCore/QMutex>
 #include <QtCore/QObject>
+#include <QtCore/QPair>
 #include <QtCore/QStringList>
 #include <QtCore/QThread>
 #include <QtCore/QTimer>
@@ -205,6 +207,8 @@ public:
 	void requestChatHistory(MumbleProto::ChatScope scope, unsigned int scopeID = 0, unsigned int startOffset = 0,
 							unsigned int limit = 50,
 							std::optional< unsigned int > beforeMessageID = std::nullopt);
+	bool requestChatHistoryWarmup(const QList< QPair< MumbleProto::ChatScope, unsigned int > > &scopes,
+								  unsigned int limitPerScope = 20);
 	void updateChatReadState(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int lastReadMessageID);
 	void sendWatchTogetherSync(const MumbleProto::WatchTogetherSync &sync);
 	void setUserComment(unsigned int uiSession, const QString &comment);

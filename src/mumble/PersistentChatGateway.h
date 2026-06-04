@@ -9,6 +9,8 @@
 #include "Mumble.pb.h"
 
 #include <QtCore/QObject>
+#include <QtCore/QList>
+#include <QtCore/QPair>
 #include <QtCore/QPointer>
 
 #include <optional>
@@ -28,6 +30,8 @@ public:
 	bool isReady() const;
 
 	void requestInitialPage(MumbleProto::ChatScope scope, unsigned int scopeID);
+	bool requestWarmupPages(const QList< QPair< MumbleProto::ChatScope, unsigned int > > &scopes,
+							unsigned int limitPerScope);
 	void requestOlder(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int beforeMessageID);
 	void send(MumbleProto::ChatScope scope, unsigned int scopeID, const QString &body,
 			  MumbleProto::ChatBodyFormat bodyFormat = MumbleProto::ChatBodyFormatPlainText,

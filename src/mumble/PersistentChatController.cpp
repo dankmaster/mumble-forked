@@ -5,7 +5,11 @@
 
 #include "PersistentChatController.h"
 
+#include <QtCore/QSet>
+
 namespace {
+	constexpr unsigned int WARMUP_HISTORY_PAGE_SIZE = 20;
+
 	PersistentChatScopeKey scopeKeyFromMessage(const MumbleProto::ChatMessage &message) {
 		const MumbleProto::ChatScope scope = message.has_scope() ? message.scope() : MumbleProto::Channel;
 		const unsigned int scopeID         = message.has_scope_id() ? message.scope_id() : 0;
@@ -73,16 +77,6 @@ void PersistentChatController::setActiveScope(const PersistentChatScopeKey &key,
 		return;
 	}
 
-	if (m_activeScope.valid && m_activeScope.cacheKey() != key.cacheKey()) {
-		PersistentChatStore::ScopeState &previousState = m_store.ensureScope(m_activeScope);
-		if (previousState.initialRequestInFlight || previousState.olderRequestInFlight) {
-			previousState.dropPendingHistoryResponses = true;
-			previousState.initialRequestInFlight      = false;
-			previousState.olderRequestInFlight        = false;
-			previousState.snapshot.loadingState       = PersistentChatLoadingState::Idle;
-		}
-	}
-
 	m_activeScope = key;
 	PersistentChatStore::ScopeState &state = m_store.ensureScope(key);
 	startInitialLoad(state, forceReload);
@@ -96,6 +90,45 @@ void PersistentChatController::clearActiveScope() {
 
 	m_activeScope = PersistentChatScopeKey();
 	emit activeSnapshotChanged();
+}
+
+void PersistentChatController::warmupScopes(const QList< PersistentChatScopeKey > &keys) {
+	if (keys.isEmpty() || !m_gateway || !m_gateway->isReady()) {
+		return;
+	}
+
+	QList< QPair< MumbleProto::ChatScope, unsigned int > > requests;
+	QList< PersistentChatScopeKey > requestedKeys;
+	QSet< QString > seen;
+	for (const PersistentChatScopeKey &key : keys) {
+		if (!key.valid || key.scope == MumbleProto::Aggregate || key.scope == MumbleProto::Private
+			|| key.scope == MumbleProto::ServerGlobal) {
+			continue;
+		}
+
+		const QString cacheKey = key.cacheKey();
+		if (seen.contains(cacheKey)) {
+			continue;
+		}
+		seen.insert(cacheKey);
+
+		PersistentChatStore::ScopeState &state = m_store.ensureScope(key);
+		if (state.snapshot.initialLoaded || state.initialRequestInFlight || state.olderRequestInFlight) {
+			continue;
+		}
+
+		requests.push_back(qMakePair(key.scope, key.scopeID));
+		requestedKeys.push_back(key);
+	}
+
+	if (!requests.isEmpty() && m_gateway->requestWarmupPages(requests, WARMUP_HISTORY_PAGE_SIZE)) {
+		for (const PersistentChatScopeKey &key : requestedKeys) {
+			PersistentChatStore::ScopeState &state = m_store.ensureScope(key);
+			state.initialRequestInFlight           = true;
+			state.snapshot.loadingState = state.snapshot.messages.isEmpty() ? PersistentChatLoadingState::Initial
+																		   : PersistentChatLoadingState::Refreshing;
+		}
+	}
 }
 
 PersistentChatScopeKey PersistentChatController::activeScope() const {
@@ -139,7 +172,6 @@ bool PersistentChatController::requestOlderForActiveScope() {
 
 	state.olderRequestInFlight      = true;
 	state.snapshot.loadingState     = PersistentChatLoadingState::Older;
-	state.dropPendingHistoryResponses = false;
 	m_gateway->requestOlder(m_activeScope.scope, m_activeScope.scopeID, state.snapshot.oldestLoadedMessageId);
 	emit activeSnapshotChanged();
 	return true;
@@ -225,14 +257,6 @@ bool PersistentChatController::applyReactionState(const MumbleProto::ChatReactio
 void PersistentChatController::handleHistoryResponse(const MumbleProto::ChatHistoryResponse &response) {
 	const PersistentChatScopeKey key = scopeKeyFromHistory(response);
 	PersistentChatStore::ScopeState &state = m_store.ensureScope(key);
-	if (state.dropPendingHistoryResponses) {
-		state.dropPendingHistoryResponses = false;
-		state.initialRequestInFlight      = false;
-		state.olderRequestInFlight        = false;
-		state.snapshot.loadingState       = PersistentChatLoadingState::Idle;
-		return;
-	}
-
 	const bool loadingOlder           = state.olderRequestInFlight;
 	state.initialRequestInFlight      = false;
 	state.olderRequestInFlight        = false;
@@ -306,20 +330,20 @@ void PersistentChatController::setUnreadFromMessages(PersistentChatStore::ScopeS
 		PersistentChatStore::unreadMessagesAfter(state.snapshot.messages, state.snapshot.lastReadMessageId));
 }
 
-void PersistentChatController::startInitialLoad(PersistentChatStore::ScopeState &state, bool forceReload) {
+bool PersistentChatController::startInitialLoad(PersistentChatStore::ScopeState &state, bool forceReload) {
 	if (!m_gateway || !m_gateway->isReady() || state.olderRequestInFlight
 		|| (!forceReload && state.initialRequestInFlight)) {
-		return;
+		return false;
 	}
 
 	if (!forceReload && state.snapshot.initialLoaded) {
 		state.snapshot.loadingState = PersistentChatLoadingState::Idle;
-		return;
+		return false;
 	}
 
-	state.dropPendingHistoryResponses = false;
 	state.initialRequestInFlight      = true;
 	state.snapshot.loadingState =
 		state.snapshot.messages.isEmpty() ? PersistentChatLoadingState::Initial : PersistentChatLoadingState::Refreshing;
 	m_gateway->requestInitialPage(state.snapshot.key.scope, state.snapshot.key.scopeID);
+	return true;
 }

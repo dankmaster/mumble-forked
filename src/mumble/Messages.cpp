@@ -391,6 +391,7 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 
 	Global::get().sh->setServerSynchronized(true);
 	updateChatBar();
+	warmupPersistentChatHistory();
 	if (hiddenLegacyUserModelSafeMode) {
 		queueModernShellSnapshotSync();
 	}
@@ -1973,6 +1974,9 @@ void MainWindow::msgChatMessageDelete(const MumbleProto::ChatMessageDelete &) {
 }
 
 void MainWindow::msgChatHistoryRequest(const MumbleProto::ChatHistoryRequest &) {
+}
+
+void MainWindow::msgChatHistoryWarmupRequest(const MumbleProto::ChatHistoryWarmupRequest &) {
 }
 
 void MainWindow::msgChatHistoryResponse(const MumbleProto::ChatHistoryResponse &msg) {

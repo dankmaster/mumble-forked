@@ -16,7 +16,6 @@ public:
 		PersistentChatScopeStateSnapshot snapshot;
 		bool initialRequestInFlight          = false;
 		bool olderRequestInFlight            = false;
-		bool dropPendingHistoryResponses     = false;
 	};
 
 	void clear();

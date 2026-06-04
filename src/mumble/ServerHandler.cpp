@@ -1328,6 +1328,35 @@ void ServerHandler::requestChatHistory(MumbleProto::ChatScope scope, unsigned in
 	sendMessage(request);
 }
 
+bool ServerHandler::requestChatHistoryWarmup(
+	const QList< QPair< MumbleProto::ChatScope, unsigned int > > &scopes, unsigned int limitPerScope) {
+	if (!serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeaturePersistentHistory)
+		|| !serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureHistoryWarmup) || scopes.isEmpty()) {
+		return false;
+	}
+
+	MumbleProto::ChatHistoryWarmupRequest warmup;
+	for (const QPair< MumbleProto::ChatScope, unsigned int > &scope : scopes) {
+		if (scope.first == MumbleProto::TextChannel
+			&& !serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureTextChannels)) {
+			continue;
+		}
+
+		MumbleProto::ChatHistoryRequest *request = warmup.add_requests();
+		request->set_scope(scope.first);
+		request->set_scope_id(scope.second);
+		request->set_start_offset(0);
+		request->set_limit(limitPerScope);
+	}
+
+	if (warmup.requests_size() == 0) {
+		return false;
+	}
+
+	sendMessage(warmup);
+	return true;
+}
+
 void ServerHandler::updateChatReadState(MumbleProto::ChatScope scope, unsigned int scopeID,
 										unsigned int lastReadMessageID) {
 	if (!serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeatureReadState)) {

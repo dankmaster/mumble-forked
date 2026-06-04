@@ -263,6 +263,8 @@ constexpr int ScreenSharePickerAudioAutoRole        = Qt::UserRole + 612;
 constexpr int LocalServerLogScope                   = -1;
 constexpr int LocalDirectMessageScope               = -2;
 constexpr int PersistentChatBottomInsetHeight       = 18;
+constexpr int PersistentChatWarmupMaxScopes         = 20;
+constexpr int ModernDirectMessageWarmupMaxScopes    = 20;
 constexpr int ModernShellSnapshotActiveCoalesceMs   = 100;
 constexpr int ModernShellSnapshotInactiveCoalesceMs = 350;
 constexpr int ModernShellPatchCoalesceMs            = 16;
@@ -21764,7 +21766,8 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 	messageState.insert(QStringLiteral("createdAtMs"), static_cast< qulonglong >(message.created_at()));
 	messageState.insert(QStringLiteral("actor"), actorLabel);
 	messageState.insert(QStringLiteral("actorKey"), actorIdentityKey);
-	messageState.insert(QStringLiteral("avatarUrl"), modernShellAvatarDataUrl(messageUser, 40));
+	messageState.insert(QStringLiteral("avatarUrl"),
+						modernShellActorAvatarDataUrl(message, actorIdentityKey, messageUser, 40));
 	messageState.insert(
 		QStringLiteral("timeLabel"),
 		persistentChatTimestampLabel(
@@ -24785,6 +24788,166 @@ void MainWindow::requestModernDirectMessageHistory(const unsigned int session) {
 	publishModernDirectMessagesPatch();
 }
 
+QString MainWindow::modernShellAvatarDataUrlForTextureHash(const QByteArray &textureHash, const int avatarSize) {
+	if (textureHash.isEmpty() || !Global::get().db) {
+		return QString();
+	}
+
+	const QByteArray texture = Global::get().db->blob(textureHash);
+	if (texture.isEmpty()) {
+		return QString();
+	}
+
+	ClientUser avatarUser;
+	avatarUser.qbaTextureHash = textureHash;
+	avatarUser.qbaTexture     = texture;
+	if (!normalizeUserTextureForDisplay(&avatarUser)) {
+		return QString();
+	}
+
+	return modernShellAvatarDataUrl(&avatarUser, avatarSize);
+}
+
+QString MainWindow::modernShellActorAvatarDataUrl(const MumbleProto::ChatMessage &message,
+												 const QString &actorIdentityKey,
+												 const ClientUser *messageUser,
+												 const int avatarSize) {
+	const bool cacheableActor = !actorIdentityKey.isEmpty() && actorIdentityKey != QLatin1String("unknown");
+	QString avatarUrl        = modernShellAvatarDataUrl(messageUser, avatarSize);
+	if (avatarUrl.isEmpty() && message.has_actor_texture_hash()) {
+		avatarUrl = modernShellAvatarDataUrlForTextureHash(blob(message.actor_texture_hash()), avatarSize);
+	}
+
+	if (!avatarUrl.isEmpty()) {
+		if (cacheableActor) {
+			m_modernShellActorAvatarDataUrls.insert(actorIdentityKey, avatarUrl);
+		}
+		return avatarUrl;
+	}
+
+	if (!cacheableActor) {
+		return QString();
+	}
+
+	if (messageUser && messageUser->qbaTextureHash.isEmpty()) {
+		m_modernShellActorAvatarDataUrls.remove(actorIdentityKey);
+		return QString();
+	}
+
+	return m_modernShellActorAvatarDataUrls.value(actorIdentityKey);
+}
+
+void MainWindow::warmupModernDirectMessageHistory() {
+	if (!m_persistentChatGateway || !Global::get().sh || !Global::get().sh->isRunning() || Global::get().uiSession == 0
+		|| !Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures,
+															 MumbleProto::ChatFeatureDirectMessages)
+		|| !Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures,
+															 MumbleProto::ChatFeatureHistoryWarmup)) {
+		return;
+	}
+
+	QList< unsigned int > sessions = m_modernDirectMessageConversations.keys();
+	std::sort(sessions.begin(), sessions.end(), [this](const unsigned int lhs, const unsigned int rhs) {
+		const auto leftIt  = m_modernDirectMessageConversations.constFind(lhs);
+		const auto rightIt = m_modernDirectMessageConversations.constFind(rhs);
+		const bool leftOpen =
+			leftIt != m_modernDirectMessageConversations.cend() && leftIt.value().open;
+		const bool rightOpen =
+			rightIt != m_modernDirectMessageConversations.cend() && rightIt.value().open;
+		if (leftOpen != rightOpen) {
+			return leftOpen;
+		}
+
+		const unsigned int leftUnread =
+			leftIt != m_modernDirectMessageConversations.cend() ? leftIt.value().unreadCount : 0;
+		const unsigned int rightUnread =
+			rightIt != m_modernDirectMessageConversations.cend() ? rightIt.value().unreadCount : 0;
+		if (leftUnread != rightUnread) {
+			return leftUnread > rightUnread;
+		}
+
+		const qint64 leftActivity =
+			leftIt != m_modernDirectMessageConversations.cend() ? leftIt.value().lastActivityAtMs : 0;
+		const qint64 rightActivity =
+			rightIt != m_modernDirectMessageConversations.cend() ? rightIt.value().lastActivityAtMs : 0;
+		if (leftActivity != rightActivity) {
+			return leftActivity > rightActivity;
+		}
+
+		return lhs < rhs;
+	});
+
+	QList< QPair< MumbleProto::ChatScope, unsigned int > > requests;
+	QList< unsigned int > requestedSessions;
+	QSet< unsigned int > seenSessions;
+	QSet< unsigned int > seenPeerUserIDs;
+	const auto appendSession = [&](const unsigned int session) {
+		if (requests.size() >= ModernDirectMessageWarmupMaxScopes || session == 0 || seenSessions.contains(session)) {
+			return;
+		}
+		seenSessions.insert(session);
+
+		ClientUser *peer = ClientUser::get(session);
+		if (!peer || !modernDirectMessagePersistentHistoryAvailable(peer)) {
+			return;
+		}
+
+		const auto conversationIt = m_modernDirectMessageConversations.constFind(session);
+		if (conversationIt != m_modernDirectMessageConversations.cend()
+			&& (conversationIt.value().historyLoading || conversationIt.value().historyLoaded)) {
+			return;
+		}
+
+		const std::optional< unsigned int > peerUserID = persistentUserIDForClientUser(peer);
+		if (!peerUserID || seenPeerUserIDs.contains(peerUserID.value())) {
+			return;
+		}
+		seenPeerUserIDs.insert(peerUserID.value());
+
+		requests.push_back(qMakePair(MumbleProto::Private, peerUserID.value()));
+		requestedSessions.push_back(session);
+	};
+
+	const PersistentChatTarget activeTarget = currentPersistentChatTarget();
+	if (activeTarget.directMessage && activeTarget.user) {
+		appendSession(activeTarget.user->uiSession);
+	}
+	for (const unsigned int session : sessions) {
+		appendSession(session);
+	}
+
+	if (requests.isEmpty()) {
+		return;
+	}
+
+	syncPersistentChatGatewayHandler();
+	if (!m_persistentChatGateway->requestWarmupPages(requests, 20)) {
+		return;
+	}
+
+	bool changed = false;
+	for (const unsigned int session : std::as_const(requestedSessions)) {
+		ClientUser *peer = ClientUser::get(session);
+		if (!peer) {
+			continue;
+		}
+
+		ModernDirectMessageConversation &conversation = m_modernDirectMessageConversations[session];
+		conversation.peerSession       = session;
+		conversation.peerUserID        = persistentUserIDForClientUser(peer).value_or(conversation.peerUserID);
+		conversation.label             = peer->qsName;
+		conversation.subtitle          = peer->cChannel ? tr("In %1").arg(peer->cChannel->qsName) : tr("No active channel");
+		conversation.persistentHistory = true;
+		conversation.historyLoading    = true;
+		conversation.historyError.clear();
+		changed = true;
+	}
+
+	if (changed) {
+		publishModernDirectMessagesPatch();
+	}
+}
+
 bool MainWindow::sendModernDirectMessage(const unsigned int session, const QString &message) {
 	if (session == 0 || session == Global::get().uiSession || !Global::get().sh || !Global::get().sh->isRunning()) {
 		publishModernToast(QStringLiteral("error"), tr("Direct message"),
@@ -26685,6 +26848,100 @@ void MainWindow::syncPersistentChatGatewayHandler() {
 	}
 
 	m_persistentChatGateway->setServerHandler(Global::get().sh.get());
+}
+
+QList< PersistentChatScopeKey > MainWindow::persistentChatWarmupScopes() const {
+	QList< PersistentChatScopeKey > scopes;
+	QSet< QString > seen;
+	const auto appendScope = [&](MumbleProto::ChatScope scope, unsigned int scopeID) {
+		if (scopes.size() >= PersistentChatWarmupMaxScopes) {
+			return;
+		}
+
+		const PersistentChatScopeKey key = PersistentChatScopeKey::fromScope(scope, scopeID);
+		const QString cacheKey           = key.cacheKey();
+		if (seen.contains(cacheKey)) {
+			return;
+		}
+
+		seen.insert(cacheKey);
+		scopes.push_back(key);
+	};
+
+	const PersistentChatTarget activeTarget = currentPersistentChatTarget();
+	if (activeTarget.valid && !activeTarget.serverLog && !activeTarget.directMessage && !activeTarget.legacyTextPath
+		&& (activeTarget.scope == MumbleProto::TextChannel || activeTarget.scope == MumbleProto::Channel)) {
+		appendScope(activeTarget.scope, activeTarget.scopeID);
+	}
+
+	if (const Channel *voiceChannel = currentVoiceChannel()) {
+		appendScope(MumbleProto::Channel, voiceChannel->iId);
+	}
+	if (const Channel *selectedChannel = selectedVoiceTreeChannel()) {
+		appendScope(MumbleProto::Channel, selectedChannel->iId);
+	}
+
+	if (m_persistentTextChannels.contains(m_defaultPersistentTextChannelID)) {
+		appendScope(MumbleProto::TextChannel, m_defaultPersistentTextChannelID);
+	}
+
+	QList< PersistentTextChannel > textChannels = m_persistentTextChannels.values();
+	std::sort(textChannels.begin(), textChannels.end(), [](const PersistentTextChannel &lhs,
+														  const PersistentTextChannel &rhs) {
+		if (lhs.position != rhs.position) {
+			return lhs.position < rhs.position;
+		}
+		if (lhs.name != rhs.name) {
+			return lhs.name.localeAwareCompare(rhs.name) < 0;
+		}
+
+		return lhs.textChannelID < rhs.textChannelID;
+	});
+	for (const PersistentTextChannel &textChannel : textChannels) {
+		appendScope(MumbleProto::TextChannel, textChannel.textChannelID);
+	}
+
+	QList< Channel * > channels = Channel::c_qhChannels.values();
+	std::sort(channels.begin(), channels.end(), [](const Channel *lhs, const Channel *rhs) {
+		if (lhs == rhs) {
+			return false;
+		}
+		if (!lhs || !rhs) {
+			return lhs != nullptr;
+		}
+		if (lhs->iId == Mumble::ROOT_CHANNEL_ID || rhs->iId == Mumble::ROOT_CHANNEL_ID) {
+			return lhs->iId == Mumble::ROOT_CHANNEL_ID;
+		}
+		const QString lhsPath = lhs->getPath();
+		const QString rhsPath = rhs->getPath();
+		if (lhsPath != rhsPath) {
+			return lhsPath.localeAwareCompare(rhsPath) < 0;
+		}
+
+		return lhs->iId < rhs->iId;
+	});
+	for (const Channel *channel : channels) {
+		if (channel) {
+			appendScope(MumbleProto::Channel, channel->iId);
+		}
+	}
+
+	return scopes;
+}
+
+void MainWindow::warmupPersistentChatHistory() {
+	if (!m_persistentChatController || !m_persistentChatGateway || !Global::get().sh || !Global::get().sh->isRunning()
+		|| Global::get().uiSession == 0 || !hasPersistentChatCapabilities() || modernShellMinimalSnapshotEnabled()
+		|| !Mumble::ChatFeatures::serverAllowsClientFeature(Global::get().qlSupportedChatFeatures,
+															 MumbleProto::ChatFeatureHistoryWarmup)) {
+		return;
+	}
+
+	syncPersistentChatGatewayHandler();
+	m_persistentChatController->warmupScopes(persistentChatWarmupScopes());
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	warmupModernDirectMessageHistory();
+#endif
 }
 
 void MainWindow::refreshCustomChromeStyles() {
@@ -28744,6 +29001,7 @@ void MainWindow::markPersistentChatAvailable(bool refreshUi) {
 	}
 
 	m_hasPersistentChatSupport = true;
+	warmupPersistentChatHistory();
 	if (!refreshUi) {
 		return;
 	}
@@ -29022,6 +29280,7 @@ void MainWindow::handlePersistentTextChannelSync(const MumbleProto::TextChannelS
 	}
 	updatePersistentTextChannelControls();
 	updateChatBar();
+	warmupPersistentChatHistory();
 	applyPendingUpdateResumeState();
 }
 
@@ -41179,6 +41438,7 @@ void MainWindow::serverConnected() {
 	m_persistentChatLiveMessageKeys.clear();
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	clearModernShellMessageDtoCache("connect");
+	m_modernShellActorAvatarDataUrls.clear();
 	m_stonksState.clear();
 	m_stonksSelectedPeriod = QStringLiteral("30d");
 	m_stonksSelectedUserID.reset();
@@ -41272,6 +41532,7 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	m_persistentChatUnreadByScope.clear();
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	clearModernShellMessageDtoCache("disconnect");
+	m_modernShellActorAvatarDataUrls.clear();
 	m_stonksState.clear();
 	m_stonksSelectedPeriod = QStringLiteral("30d");
 	m_stonksSelectedUserID.reset();

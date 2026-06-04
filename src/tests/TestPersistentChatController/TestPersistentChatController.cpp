@@ -12,14 +12,22 @@
 namespace {
 	bool g_gatewayReady                          = false;
 	int g_initialRequestCount                    = 0;
+	int g_warmupRequestCount                     = 0;
+	bool g_warmupRequestSucceeds                 = true;
 	MumbleProto::ChatScope g_lastInitialRequestScope = MumbleProto::Channel;
 	unsigned int g_lastInitialRequestScopeID     = 0;
+	QList< QPair< MumbleProto::ChatScope, unsigned int > > g_lastWarmupScopes;
+	unsigned int g_lastWarmupLimit = 0;
 
 	void resetGatewayRequestState() {
 		g_gatewayReady              = false;
 		g_initialRequestCount       = 0;
+		g_warmupRequestCount        = 0;
+		g_warmupRequestSucceeds     = true;
 		g_lastInitialRequestScope   = MumbleProto::Channel;
 		g_lastInitialRequestScopeID = 0;
+		g_lastWarmupScopes.clear();
+		g_lastWarmupLimit = 0;
 	}
 }
 
@@ -41,6 +49,18 @@ void PersistentChatGateway::requestInitialPage(MumbleProto::ChatScope scope, uns
 	++g_initialRequestCount;
 	g_lastInitialRequestScope   = scope;
 	g_lastInitialRequestScopeID = scopeID;
+}
+
+bool PersistentChatGateway::requestWarmupPages(
+	const QList< QPair< MumbleProto::ChatScope, unsigned int > > &scopes, unsigned int limitPerScope) {
+	if (!g_warmupRequestSucceeds) {
+		return false;
+	}
+
+	++g_warmupRequestCount;
+	g_lastWarmupScopes = scopes;
+	g_lastWarmupLimit  = limitPerScope;
+	return true;
 }
 
 void PersistentChatGateway::requestOlder(MumbleProto::ChatScope, unsigned int, unsigned int) {
@@ -157,6 +177,8 @@ class TestPersistentChatController : public QObject {
 private slots:
 	void restoresCachedScopeSnapshots();
 	void forceReloadSendsInitialRequestWhileInitialLoadIsInFlight();
+	void warmupScopesRequestsBatchAndCachesResponses();
+	void keepsInactivePendingHistoryForCache();
 	void mergesOlderHistoryAndReadState();
 	void appliesEmbedUpdatesToCachedMessages();
 	void preservesReplyMetadataFromHistory();
@@ -211,6 +233,63 @@ void TestPersistentChatController::forceReloadSendsInitialRequestWhileInitialLoa
 
 	controller.setActiveScope(PersistentChatScopeKey::fromScope(MumbleProto::Channel, 7), true);
 	QCOMPARE(g_initialRequestCount, 2);
+
+	resetGatewayRequestState();
+}
+
+void TestPersistentChatController::warmupScopesRequestsBatchAndCachesResponses() {
+	resetGatewayRequestState();
+	g_gatewayReady = true;
+
+	PersistentChatGateway gateway;
+	PersistentChatController controller;
+	controller.setGateway(&gateway);
+
+	controller.warmupScopes({ PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 11),
+							  PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 22),
+							  PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 11) });
+
+	QCOMPARE(g_initialRequestCount, 0);
+	QCOMPARE(g_warmupRequestCount, 1);
+	QCOMPARE(g_lastWarmupLimit, 20U);
+	QCOMPARE(g_lastWarmupScopes.size(), 2);
+	QCOMPARE(g_lastWarmupScopes.at(0).first, MumbleProto::TextChannel);
+	QCOMPARE(g_lastWarmupScopes.at(0).second, 11U);
+	QCOMPARE(g_lastWarmupScopes.at(1).first, MumbleProto::TextChannel);
+	QCOMPARE(g_lastWarmupScopes.at(1).second, 22U);
+
+	gateway.handleIncomingHistory(
+		makeHistory(MumbleProto::TextChannel, 11, { makeMessage(10, 1000, MumbleProto::TextChannel, 11) }, 0, 10, false));
+
+	controller.setActiveScope(PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 11), false);
+	const PersistentChatScopeStateSnapshot snapshot = controller.activeSnapshot();
+	QCOMPARE(g_initialRequestCount, 0);
+	QCOMPARE(snapshot.messages.size(), 1);
+	QCOMPARE(snapshot.messages.front().message_id(), 10U);
+
+	resetGatewayRequestState();
+}
+
+void TestPersistentChatController::keepsInactivePendingHistoryForCache() {
+	resetGatewayRequestState();
+	g_gatewayReady = true;
+
+	PersistentChatGateway gateway;
+	PersistentChatController controller;
+	controller.setGateway(&gateway);
+
+	controller.setActiveScope(PersistentChatScopeKey::fromScope(MumbleProto::Channel, 7), false);
+	controller.setActiveScope(PersistentChatScopeKey::fromScope(MumbleProto::Channel, 8), false);
+	QCOMPARE(g_initialRequestCount, 2);
+
+	gateway.handleIncomingHistory(
+		makeHistory(MumbleProto::Channel, 7, { makeMessage(70, 7000, MumbleProto::Channel, 7) }, 0, 70, false));
+	controller.setActiveScope(PersistentChatScopeKey::fromScope(MumbleProto::Channel, 7), false);
+
+	const PersistentChatScopeStateSnapshot snapshot = controller.activeSnapshot();
+	QCOMPARE(g_initialRequestCount, 2);
+	QCOMPARE(snapshot.messages.size(), 1);
+	QCOMPARE(snapshot.messages.front().message_id(), 70U);
 
 	resetGatewayRequestState();
 }

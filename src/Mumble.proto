@@ -20,6 +20,8 @@ enum ChatFeature {
 	ChatFeatureHistoryGrants = 7;
 	ChatFeatureTextChannels = 8;
 	ChatFeatureDirectMessages = 9;
+	ChatFeatureHistoryWarmup = 10;
+	ChatFeatureActorAvatars = 11;
 }
 
 enum ForkFeature {
@@ -872,6 +874,8 @@ message ChatMessage {
 	repeated ChatReactionAggregate reactions = 17;
 	optional string reply_actor_name = 18;
 	optional string reply_snippet = 19;
+	// SHA1 hash of the actor's registered avatar, when known.
+	optional bytes actor_texture_hash = 20;
 }
 
 // Sent by the client to delete a persistent chat message from history.
@@ -889,6 +893,12 @@ message ChatHistoryRequest {
 	optional uint32 start_offset = 3 [default = 0];
 	optional uint32 limit = 4 [default = 50];
 	optional uint32 before_message_id = 5;
+}
+
+// Sent by the client to ask the server for recent history in multiple scopes.
+// Servers must cap both the number of scopes and per-scope limit.
+message ChatHistoryWarmupRequest {
+	repeated ChatHistoryRequest requests = 1;
 }
 
 // Sent by the server to return a paginated chunk of chat history.

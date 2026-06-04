@@ -243,6 +243,8 @@ public:
 	void refreshServerNavigatorMotdHeight();
 	void refreshPersistentChatStyles();
 	void syncPersistentChatGatewayHandler();
+	void warmupPersistentChatHistory();
+	QList< PersistentChatScopeKey > persistentChatWarmupScopes() const;
 
 	struct PersistentChatTarget {
 		bool valid                   = false;
@@ -579,6 +581,9 @@ public:
 	void clearModernShellMessageDtoCache(const char *reason);
 	void evictModernShellMessageDtoCacheForMessage(const MumbleProto::ChatMessage &message);
 	void publishModernShellPreviewUpdateForKey(const QString &previewKey);
+	QString modernShellAvatarDataUrlForTextureHash(const QByteArray &textureHash, int avatarSize);
+	QString modernShellActorAvatarDataUrl(const MumbleProto::ChatMessage &message, const QString &actorIdentityKey,
+										 const ClientUser *messageUser, int avatarSize);
 	QString modernShellMessageDtoCacheKey(const MumbleProto::ChatMessage &message, const PersistentChatTarget &target,
 										  bool canReply, bool canReact, bool canDeleteMessages) const;
 	QVariantMap buildModernShellCachedMessageState(const MumbleProto::ChatMessage &message,
@@ -609,6 +614,7 @@ public:
 	bool mergeModernDirectMessageHistory(const MumbleProto::ChatHistoryResponse &response);
 	bool setModernDirectMessageMode(unsigned int session, const QString &mode);
 	void requestModernDirectMessageHistory(unsigned int session);
+	void warmupModernDirectMessageHistory();
 	bool sendModernDirectMessage(unsigned int session, const QString &message);
 	void publishModernDirectMessagesPatch();
 	bool handleModernShellScopeSelection(const QString &scopeToken);
@@ -929,6 +935,7 @@ protected:
 	quint64 m_modernShellMessagePatchGeneration            = 0;
 	quint64 m_modernShellMessageDtoContextRevision         = 1;
 	QHash< QString, QVariantMap > m_modernShellMessageDtoCache;
+	QHash< QString, QString > m_modernShellActorAvatarDataUrls;
 	QHash< unsigned int, ModernDirectMessageConversation > m_modernDirectMessageConversations;
 	quint64 m_modernDirectMessageLocalID = 0;
 	bool m_modernDirectMessageTrayOpenProbe = false;
