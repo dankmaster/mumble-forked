@@ -14365,8 +14365,6 @@ void MainWindow::setupPersistentChatDock() {
 			previousLoadingState != PersistentChatLoadingState::Idle
 			&& snapshot.loadingState == PersistentChatLoadingState::Idle;
 		const bool messageCountChanged = m_persistentChatMessages.size() != previousMessageCount;
-		const bool waitingForInitialHistory = snapshot.loadingState == PersistentChatLoadingState::Initial
-											  && !snapshot.initialLoaded;
 		const bool preserveScrollPosition = m_persistentChatRestoreAnchorPending || (!switchingScope && !wasAtBottom);
 		const bool scrollToBottom =
 			switchingScope || wasAtBottom || snapshot.loadingState == PersistentChatLoadingState::Initial;
@@ -14390,6 +14388,8 @@ void MainWindow::setupPersistentChatDock() {
 				   || (previousMessageCount == 0 && !m_persistentChatMessages.empty())) {
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 			if (modernShellVisible) {
+				const bool waitingForInitialHistory = snapshot.loadingState == PersistentChatLoadingState::Initial
+													  && !snapshot.initialLoaded;
 				if (waitingForInitialHistory) {
 					++m_modernShellMessagePatchGeneration;
 					publishModernShellActiveScopePatch(QStringLiteral("activeScope.update"));
