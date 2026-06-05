@@ -1422,7 +1422,7 @@ textarea:focus-visible {
 	padding: 4px 14px 14px 20px;
 	scroll-padding-bottom: calc(var(--footer-row-height) + var(--jump-latest-edge-gap));
 	scrollbar-width: auto;
-	scrollbar-color: rgba(var(--info-rgb), 0.72) var(--surface-glint-medium);
+	scrollbar-color: var(--scrollbar-thumb) var(--surface-glint-medium);
 	background: var(--shell-bg);
 	transition: box-shadow 180ms ease, opacity 140ms ease;
 	contain: paint;
@@ -1455,8 +1455,8 @@ textarea:focus-visible {
 	background:
 		linear-gradient(100deg,
 			transparent 0%,
-			rgba(var(--info-rgb), 0.055) 42%,
-			rgba(var(--accent-rgb), 0.075) 50%,
+			rgba(var(--accent-rgb), 0.045) 42%,
+			rgba(var(--accent-rgb), 0.085) 50%,
 			transparent 62%);
 	background-size: 220% 100%;
 	animation: chat-layout-settle-sheen 820ms ease-in-out infinite;
@@ -1515,7 +1515,7 @@ textarea:focus-visible {
 .rail-list::-webkit-scrollbar-thumb,
 .utility-scroll::-webkit-scrollbar-thumb,
 .composer-bar textarea::-webkit-scrollbar-thumb {
-	background: linear-gradient(180deg, rgba(var(--info-rgb), 0.62), rgba(var(--accent-rgb), 0.48));
+	background: var(--scrollbar-thumb);
 	border: 2px solid transparent;
 	border-radius: 999px;
 	background-clip: padding-box;
@@ -1526,7 +1526,7 @@ textarea:focus-visible {
 .rail-list::-webkit-scrollbar-thumb:hover,
 .utility-scroll::-webkit-scrollbar-thumb:hover,
 .composer-bar textarea::-webkit-scrollbar-thumb:hover {
-	background: linear-gradient(180deg, rgba(var(--info-rgb), 0.74), rgba(var(--accent-rgb), 0.6));
+	background: var(--scrollbar-thumb-hover);
 	background-clip: padding-box;
 }
 
@@ -1881,15 +1881,15 @@ textarea:focus-visible {
 
 .message-bubble.is-own .preview-card,
 .message-cluster.is-own .preview-card {
-	border-color: rgba(216, 240, 236, 0.12);
+	border-color: var(--chat-accent-border);
 	background:
 		linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02)),
-		rgba(7, 28, 31, 0.22);
+		color-mix(in srgb, var(--reply-bg) 72%, var(--shell-strip) 28%);
 }
 
 .preview-card:hover,
 .preview-card:focus-visible {
-	border-color: rgba(var(--info-rgb), 0.32);
+	border-color: var(--chat-accent-border);
 	background:
 		linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
 		rgba(255, 255, 255, 0.04);
@@ -1900,10 +1900,10 @@ textarea:focus-visible {
 .message-bubble.is-own .preview-card:focus-visible,
 .message-cluster.is-own .preview-card:hover,
 .message-cluster.is-own .preview-card:focus-visible {
-	border-color: rgba(136, 211, 194, 0.34);
+	border-color: color-mix(in srgb, var(--accent) 48%, var(--surface-border) 52%);
 	background:
 		linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03)),
-		rgba(255, 255, 255, 0.05);
+		color-mix(in srgb, var(--reply-bg) 76%, var(--shell-highlight) 24%);
 }
 
 .preview-card.is-twitch {
@@ -2639,8 +2639,8 @@ textarea:focus-visible {
 
 .message-bubble.is-own .preview-card-badge,
 .message-cluster.is-own .preview-card-badge {
-	background: rgba(216, 240, 236, 0.10);
-	color: rgba(216, 240, 236, 0.78);
+	background: color-mix(in srgb, var(--accent) 13%, transparent);
+	color: var(--chat-accent-muted);
 }
 
 .preview-card-title {
@@ -2743,7 +2743,7 @@ textarea:focus-visible {
 }
 
 .preview-card-action {
-	color: rgb(var(--info-rgb));
+	color: var(--accent-strong);
 	font-size: 11px;
 	font-weight: 600;
 }
@@ -2754,10 +2754,10 @@ textarea:focus-visible {
 	justify-content: center;
 	min-height: 26px;
 	padding: 0 10px;
-	border: 1px solid rgba(var(--info-rgb), 0.28);
+	border: 1px solid var(--accent-border);
 	border-radius: 6px;
-	background: rgba(var(--info-rgb), 0.10);
-	color: rgb(var(--info-rgb));
+	background: var(--accent-soft);
+	color: var(--accent-strong);
 	cursor: pointer;
 	font: inherit;
 	line-height: 1;
@@ -2765,8 +2765,8 @@ textarea:focus-visible {
 
 .preview-card-open-button:hover,
 .preview-card-open-button:focus-visible {
-	border-color: rgba(var(--info-rgb), 0.52);
-	background: rgba(var(--info-rgb), 0.18);
+	border-color: color-mix(in srgb, var(--accent) 54%, var(--surface-border) 46%);
+	background: color-mix(in srgb, var(--accent-soft) 72%, var(--surface-glint-soft) 28%);
 	outline: none;
 }
 
@@ -6553,8 +6553,8 @@ textarea:focus-visible {
 
 .message-bubble.is-own .preview-card-x-badge,
 .message-cluster.is-own .preview-card-x-badge {
-	background: rgba(216, 240, 236, 0.12);
-	color: rgba(216, 240, 236, 0.82);
+	background: color-mix(in srgb, var(--accent) 13%, transparent);
+	color: var(--chat-accent-muted);
 }
 
 .preview-card-x-media {
@@ -6909,7 +6909,7 @@ textarea:focus-visible {
 
 .reaction-chip:hover,
 .reaction-chip:focus-visible {
-	border-color: rgba(var(--info-rgb), 0.34);
+	border-color: var(--accent-border);
 }
 
 .reaction-chip-emoji {

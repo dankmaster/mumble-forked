@@ -9174,8 +9174,8 @@ bool isTransientRemotePreviewMediaDataUrl(const QString &mediaDataUrl) {
 bool remoteMp4BytesLookUnsupportedForInlinePlayback(const QByteArray &bytes) {
 	const QByteArray header = bytes.left(1024 * 1024).toLower();
 	return header.contains("vp09") || header.contains("vp9") || header.contains("vp08") || header.contains("vp8")
-		   || header.contains("av01") || header.contains("hvc1") || header.contains("hev1")
-		   || header.contains("dvh1") || header.contains("dvhe");
+		   || header.contains("av01") || header.contains("hvc1") || header.contains("hev1") || header.contains("dvh1")
+		   || header.contains("dvhe");
 }
 
 bool remotePlayableMediaBytesLookValid(const QByteArray &bytes, const QString &mime) {
@@ -14810,6 +14810,55 @@ void MainWindow::activateModernShell() {
 
 					if (!url.isEmpty()) {
 						on_qteLog_anchorClicked(url);
+					}
+				});
+		connect(m_modernShellHost->bridge(), &ModernShellBridge::providerSessionRequested, this,
+				[this](const QString &href) {
+					QUrl providerUrl(href.trimmed());
+					if (!providerUrl.isValid()) {
+						providerUrl = QUrl::fromUserInput(href.trimmed());
+					}
+					if (!isInstagramPreviewUrl(providerUrl)) {
+						return;
+					}
+
+					const std::optional< InstagramPreviewTarget > providerTarget =
+						instagramPreviewTargetFromUrl(providerUrl);
+					QStringList previewKeys;
+					for (auto it = m_persistentChatPreviews.constBegin(); it != m_persistentChatPreviews.constEnd();
+						 ++it) {
+						const PersistentChatPreview &preview = it.value();
+						if (!preview.mediaDataUrl.trimmed().isEmpty() && preview.mediaKind == QLatin1String("video")) {
+							continue;
+						}
+						const QUrl previewUrl(preview.canonicalUrl);
+						if (!isInstagramPreviewUrl(previewUrl)) {
+							continue;
+						}
+						const std::optional< InstagramPreviewTarget > previewTarget =
+							instagramPreviewTargetFromUrl(previewUrl);
+						if (providerTarget && previewTarget) {
+							if (providerTarget->canonicalUrl != previewTarget->canonicalUrl) {
+								continue;
+							}
+						} else if (canonicalInstagramPreviewUrl(providerUrl) != canonicalInstagramPreviewUrl(previewUrl)) {
+							continue;
+						}
+						previewKeys.push_back(it.key());
+					}
+
+					for (const QString &previewKey : std::as_const(previewKeys)) {
+						auto it = m_persistentChatPreviews.find(previewKey);
+						if (it == m_persistentChatPreviews.end()) {
+							continue;
+						}
+						it->siteSnapshotRequested = false;
+						it->siteSnapshotFinished  = false;
+						it->remoteMediaRequested  = false;
+						it->remoteMediaFinished   = false;
+						it->failed                = false;
+						ensurePersistentChatPreviewSiteSnapshot(previewKey);
+						publishPersistentChatPreviewUpdate(previewKey);
 					}
 				});
 		connect(m_modernShellHost->bridge(), &ModernShellBridge::appActionRequested, this,
@@ -32006,7 +32055,7 @@ bool MainWindow::requestPersistentChatRemotePlayableMediaCache(const QString &pr
 
 				const QString resolvedMime = playableMediaMimeForUrl(normalizedMediaUrl, replyMime.isEmpty() ? mime : replyMime);
 				const bool mediaBytesLookValid = success && remotePlayableMediaBytesLookValid(data, resolvedMime);
-				bool appliedMedia = false;
+				bool appliedMedia              = false;
 				if (mediaBytesLookValid) {
 					const QString dataUrl = playableMediaDataUrl(resolvedMime, data);
 					if (!dataUrl.isEmpty()) {

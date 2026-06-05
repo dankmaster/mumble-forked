@@ -181,7 +181,8 @@ public:
 	GlobalShortcut *gsCycleListenerAttenuationMode, *gsListenerAttenuationUp, *gsListenerAttenuationDown;
 	GlobalShortcut *gsAdaptivePush;
 
-	DockTitleBar *dtbLogDockTitle, *dtbChatDockTitle;
+	DockTitleBar *dtbLogDockTitle  = nullptr;
+	DockTitleBar *dtbChatDockTitle = nullptr;
 
 	ACLEditor *aclEdit;
 	BanEditor *banEdit;

@@ -11,32 +11,32 @@
 #include "Global.h"
 #include "ServerHandler.h"
 
-#include <QtCore/QByteArray>
-#include <QtCore/QDateTime>
-#include <QtCore/QFile>
-#include <QtCore/QMimeData>
-#include <QtCore/QUrl>
-#include <QtGui/QClipboard>
-#include <QtGui/QImage>
-#include <QtGui/QImageReader>
-#include <QtGui/QPixmap>
-#include <QtNetwork/QNetworkAccessManager>
-#include <QtNetwork/QNetworkReply>
-#include <QtNetwork/QNetworkRequest>
-#include <QtWidgets/QApplication>
+#	include <QtCore/QByteArray>
+#	include <QtCore/QDateTime>
+#	include <QtCore/QFile>
+#	include <QtCore/QMimeData>
+#	include <QtCore/QUrl>
+#	include <QtGui/QClipboard>
+#	include <QtGui/QImage>
+#	include <QtGui/QImageReader>
+#	include <QtGui/QPixmap>
+#	include <QtNetwork/QNetworkAccessManager>
+#	include <QtNetwork/QNetworkReply>
+#	include <QtNetwork/QNetworkRequest>
+#	include <QtWidgets/QApplication>
 
-#include <cmath>
+#	include <cmath>
 
 namespace {
-	constexpr qint64 PREVIEW_BRIDGE_FETCH_MAX_TEXT_BYTES   = 1024 * 1024;
-	constexpr qint64 PREVIEW_BRIDGE_FETCH_MAX_BINARY_BYTES = 8 * 1024 * 1024;
-	const QByteArray PREVIEW_MEDIA_USER_AGENT =
-		QByteArrayLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-						  "(KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36");
-	const QByteArray PREVIEW_MEDIA_ACCEPT_LANGUAGE = QByteArrayLiteral("en-US,en;q=0.9");
+constexpr qint64 PREVIEW_BRIDGE_FETCH_MAX_TEXT_BYTES   = 1024 * 1024;
+constexpr qint64 PREVIEW_BRIDGE_FETCH_MAX_BINARY_BYTES = 8 * 1024 * 1024;
+const QByteArray PREVIEW_MEDIA_USER_AGENT =
+	QByteArrayLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+					  "(KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36");
+const QByteArray PREVIEW_MEDIA_ACCEPT_LANGUAGE = QByteArrayLiteral("en-US,en;q=0.9");
 
-	int audioMeterPercent(const float normalizedLevel) {
-		return qBound(0, static_cast< int >(std::lround(normalizedLevel * 100.0f)), 100);
+int audioMeterPercent(const float normalizedLevel) {
+	return qBound(0, static_cast< int >(std::lround(normalizedLevel * 100.0f)), 100);
 	}
 
 	bool hostEqualsOrEndsWith(const QString &host, const QString &domain) {
@@ -466,7 +466,7 @@ void ModernShellBridge::fetchPreviewMedia(const QString &requestId, const QStrin
 		const bool wantsText            = reply->property("mumblePreviewMediaWantsText").toBool();
 		const qint64 maxBytes           = reply->property("mumblePreviewMediaMaxBytes").toLongLong();
 		const bool tooLarge             = reply->property("mumblePreviewMediaTooLarge").toBool();
-		const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).isValid()
+		const int status                = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).isValid()
 							   ? reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt()
 							   : 0;
 		const QUrl finalUrl     = reply->url();

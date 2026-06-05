@@ -306,6 +306,7 @@ QVariantMap customAccentTokens(const QString &color, const int strength) {
 	tokens.insert(QStringLiteral("--theme-accent-custom-rgb"), rgbString(accent));
 	tokens.insert(QStringLiteral("--theme-accent-custom-soft"), rgbaString(accent, softAlpha));
 	tokens.insert(QStringLiteral("--theme-accent-custom-border"), rgbaString(accent, borderAlpha));
+	tokens.insert(QStringLiteral("--theme-accent-custom-glow"), rgbaString(accent, glowAlpha));
 	tokens.insert(QStringLiteral("--body-bg-glow"), rgbaString(accent, glowAlpha));
 	return tokens;
 }
