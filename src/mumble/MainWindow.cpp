@@ -9173,9 +9173,10 @@ bool isTransientRemotePreviewMediaDataUrl(const QString &mediaDataUrl) {
 
 bool remoteMp4BytesLookUnsupportedForInlinePlayback(const QByteArray &bytes) {
 	const QByteArray header = bytes.left(1024 * 1024).toLower();
-	return header.contains("vp09") || header.contains("vp9") || header.contains("vp08") || header.contains("vp8")
-		   || header.contains("av01") || header.contains("hvc1") || header.contains("hev1") || header.contains("dvh1")
-		   || header.contains("dvhe");
+	// These are MP4 sample-entry fourccs. Avoid bare "vp9"/"vp8" text because it can appear in payload
+	// bytes while the actual video track is still H.264.
+	return header.contains("vp09") || header.contains("vp08") || header.contains("av01") || header.contains("hvc1")
+		   || header.contains("hev1") || header.contains("dvh1") || header.contains("dvhe");
 }
 
 bool remotePlayableMediaBytesLookValid(const QByteArray &bytes, const QString &mime) {
