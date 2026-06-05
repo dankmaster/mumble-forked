@@ -2,16 +2,20 @@
 
 Status snapshot: 2026-06-05.
 
-This fork now supports two practical relay execution modes:
+This fork now supports one production relay execution mode, plus legacy helper
+code paths that are no longer server-configurable:
 
-1. `direct-runtime`
-   Use `file://`, `rtmp://`, or `rtmps://` relay URLs. The helper executes
-   `ffmpeg` or `ffplay` directly.
+1. `gstreamer-livekit-runtime`
+   Use `https://` or `wss://` relay URLs. The helper launches
+   `gst-launch-1.0` with LiveKit WebRTC elements. The Windows publish path
+   prefers D3D11 screen capture and H.264 hardware encoding.
 
-2. `gstreamer-livekit-runtime`
-   Use `http://`, `https://`, `ws://`, or `wss://` relay URLs. The helper
-   launches `gst-launch-1.0` with LiveKit WebRTC elements. The Windows publish
-   path prefers D3D11 screen capture and H.264 hardware encoding.
+2. `rtmps` relay URLs
+   `rtmps://` remains accepted for TLS-protected RTMP-style relay endpoints.
+
+Server-supplied `file://`, `http://`, `ws://`, and `rtmp://` relay URLs are
+rejected by the client. Local file recording must be configured by the client
+in a future client-local setting, not via a server-controlled relay URL.
 
 ### Recommended Production Shape
 

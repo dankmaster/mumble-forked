@@ -191,6 +191,13 @@ bool ScreenShareHelperServer::start(const QString &socketBaseName, QString *erro
 	QFile::remove(socketName);
 #endif
 
+	// SECURITY: restrict the local socket / named pipe to the current user account. Without this the
+	// default DACL can let other accounts on the machine connect and drive the helper (start screen
+	// capture, point it at a relay). UserAccessOption sets a user-only DACL on Windows and user-only
+	// permissions on the socket file on Unix. (Peer authentication between same-user processes is a
+	// separate, deferred hardening item - see SECURITY-FIXES.md.)
+	m_server->setSocketOptions(QLocalServer::UserAccessOption);
+
 	if (!m_server->listen(socketName)) {
 		if (errorMessage) {
 			*errorMessage = m_server->errorString();
@@ -229,7 +236,9 @@ void ScreenShareHelperServer::handleSocketReadyRead() {
 	}
 
 	const QByteArray rawRequest = buffer.left(newlineIndex).trimmed();
-	buffer.clear();
+	// Consume only the framed request line; preserve any trailing bytes instead of discarding the
+	// whole buffer, so a fragmented or pipelined send is not silently truncated.
+	buffer.remove(0, newlineIndex + 1);
 
 	QJsonObject reply;
 	if (rawRequest.isEmpty()) {

@@ -5406,48 +5406,9 @@
 			return;
 		}
 
-		fetch(stonksYahooChartUrl(symbol), { cache: "no-store" })
-			.then(function(response) {
-				if (!response.ok) {
-					throw new Error("Yahoo returned " + response.status);
-				}
-				return response.json();
-			})
-			.then(function(payload) {
-				const chart = payload && payload.chart || {};
-				if (chart.error) {
-					throw new Error(chart.error.description || "Yahoo Finance returned an error.");
-				}
-				const result = chart.result && chart.result[0];
-				const meta = result && result.meta || {};
-				const quoteSymbol = normalizeStonksSymbol(meta.symbol || symbol);
-				const price = Number(meta.regularMarketPrice);
-				if (!quoteSymbol || !Number.isFinite(price) || price <= 0) {
-					throw new Error("Yahoo did not return a usable price.");
-				}
-				const quoteTime = Number(meta.regularMarketTime || 0);
-				stonksQuoteSuggestions = [stonksNormalizePosition({
-					symbol: quoteSymbol,
-					quantity: 0,
-					price: price,
-					marketValue: 0,
-					currency: meta.currency || stonksDraftCurrency || "USD",
-					displayName: meta.shortName || meta.longName || quoteSymbol,
-					providerId: "yahoo-finance",
-					providerSymbol: quoteSymbol,
-					exchange: meta.fullExchangeName || meta.exchangeName || "",
-					quoteTime: Number.isFinite(quoteTime) ? quoteTime : 0,
-					quoteSourceUrl: stonksYahooQuoteUrl(quoteSymbol),
-					quoteConfidence: 1.0
-				}, stonksDraftCurrency)];
-			})
-			.catch(function(error) {
-				stonksQuoteSearchError = error && error.message ? error.message : "Quote lookup failed.";
-			})
-			.finally(function() {
-				stonksQuoteSearchBusy = false;
-				renderModernDialog();
-			});
+		stonksQuoteSearchBusy = false;
+		stonksQuoteSearchError = "Quote bridge unavailable.";
+		renderModernDialog();
 	}
 
 	function appendStonksStatus(parent, stonks) {

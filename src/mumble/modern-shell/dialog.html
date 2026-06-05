@@ -2,6 +2,8 @@
 <html lang="en" data-theme="dark" data-accent="auto" class="dialog-host-page">
 <head>
 	<meta charset="utf-8">
+	<!-- SECURITY: see index.html. Script execution and direct network egress are intentionally tight. -->
+	<meta http-equiv="Content-Security-Policy" content="default-src 'self' qrc:; script-src 'self' qrc:; style-src 'self' qrc: 'unsafe-inline'; img-src 'self' qrc: https: data: blob:; media-src 'self' qrc: https: data: blob:; font-src 'self' qrc: data:; frame-src https:; connect-src 'self' qrc:; object-src 'none'; base-uri 'none'; form-action 'none'">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Mumble Dialog</title>
 	<link rel="stylesheet" href="./theme-tokens.css">

@@ -85,30 +85,45 @@ jobs:
           if [[ "${#source_files[@]}" -eq 0 ]]; then
             echo "No changed C/C++/CUDA files need clang-format checks."
             echo "has_source_changes=false" >> "$GITHUB_OUTPUT"
-            echo "include_regex=^$" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           printf 'Changed source file: %s\n' "${source_files[@]}"
-          include_regex="$( python3 - "${source_files[@]}" <<'PY'
-          import re
-          import sys
-
-          print(r"^\./(" + "|".join(re.escape(path) for path in sys.argv[1:]) + r")$")
-          PY
-          )"
+          source_file_list="${RUNNER_TEMP}/changed-format-files.txt"
+          printf '%s\n' "${source_files[@]}" > "$source_file_list"
 
           echo "has_source_changes=true" >> "$GITHUB_OUTPUT"
-          echo "include_regex=$include_regex" >> "$GITHUB_OUTPUT"
+          echo "source_file_list=$source_file_list" >> "$GITHUB_OUTPUT"
 
       - name: Check code formatting
         if: steps.changed-format-files.outputs.has_source_changes == 'true'
-        uses: jidicula/clang-format-action@v4.16.0
-        with:
-          clang-format-version: '10'
-          check-path: '.'
-          exclude-regex: '(\.git/.*|3rdparty/.*|build/.*|.*proto$)'
-          include-regex: ${{ steps.changed-format-files.outputs.include_regex }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 -m pip install --user clang-format==10.0.1
+
+          mapfile -t source_files < "${{ steps.changed-format-files.outputs.source_file_list }}"
+          readarray -t clang_tools < <(python3 - <<'PY'
+          import clang_format
+          import os
+
+          bin_dir = os.path.join(os.path.dirname(clang_format.__file__), "data", "bin")
+          print(os.path.join(bin_dir, "git-clang-format"))
+          print(os.path.join(bin_dir, "clang-format"))
+          PY
+          )
+          git_clang_format="${clang_tools[0]}"
+          clang_format="${clang_tools[1]}"
+
+          # Check only the lines changed by this PR. Several legacy files touched by fork features are
+          # not fully clang-format-clean, and whole-file checks would force unrelated formatting churn.
+          format_output="$(python3 "$git_clang_format" --binary "$clang_format" --diff FETCH_HEAD -- "${source_files[@]}")"
+          printf '%s\n' "$format_output"
+          if grep -q '^diff --git ' <<< "$format_output"; then
+            printf '%s\n' "$format_output" > "$GITHUB_WORKSPACE/failing-files.txt"
+            exit 1
+          fi
 
   fetch_build_number:
     name: fetch-build-number

@@ -11,6 +11,8 @@
 #include <QtCore/QUrl>
 #include <QtWebEngineCore/QWebEnginePage>
 
+class QWebEngineProfile;
+
 class ModernShellPage : public QWebEnginePage {
 private:
 	Q_OBJECT
@@ -18,6 +20,7 @@ private:
 
 public:
 	explicit ModernShellPage(QObject *parent = nullptr);
+	explicit ModernShellPage(QWebEngineProfile *profile, QObject *parent = nullptr);
 
 signals:
 	void externalNavigationRequested(const QUrl &url);

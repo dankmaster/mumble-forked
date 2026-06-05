@@ -22,6 +22,7 @@ class ModernShellPage;
 class QTimer;
 class QVBoxLayout;
 class QWebChannel;
+class QWebEngineProfile;
 class QWebEngineUrlRequestInterceptor;
 class QWebEngineView;
 
@@ -35,6 +36,7 @@ public:
 
 	bool start(QString *errorMessage = nullptr);
 	ModernShellBridge *bridge() const;
+	QWebEngineProfile *webProfile() const;
 	void publishHostViewportMetrics(const QSize &viewportSize = QSize(), bool openRail = false);
 	void runAutomationScript(const QString &script);
 	QVariant runAutomationScriptResult(const QString &script, int timeoutMilliseconds = 3000);
@@ -61,13 +63,16 @@ private:
 	void invokeNativeContextMenuAction(const QString &token, int actionIndex);
 	void closeNativeContextMenu();
 	ModernContextMenuHost *ensureNativeContextMenuHost();
+	void openProviderSession(const QString &href);
 
 	QVBoxLayout *m_layout = nullptr;
 	QWebEngineView *m_view = nullptr;
+	QWebEngineProfile *m_profile                          = nullptr;
 	ModernShellPage *m_page = nullptr;
 	QWebChannel *m_channel = nullptr;
 	ModernShellBridge *m_bridge = nullptr;
 	QWebEngineUrlRequestInterceptor *m_requestInterceptor = nullptr;
+	QPointer< QWebEngineView > m_providerSessionView;
 	QTimer *m_bootTimeoutTimer = nullptr;
 	QPointer< ModernContextMenuHost > m_nativeContextMenu;
 	QVariantMap m_lastNativeContextMenuRequest;

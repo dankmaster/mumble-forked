@@ -121,6 +121,28 @@ namespace {
 			   || hostEqualsOrEndsWith(host, QStringLiteral("facebook.com"));
 	}
 
+	bool isTrustedProviderSessionUrl(const QUrl &url) {
+		if (url.scheme().toLower() != QLatin1String("https")) {
+			return false;
+		}
+
+		const QString host = url.host().trimmed().toLower();
+		return isYouTubeEmbedDocumentHost(host) || isPreviewEmbedPlayerHost(host)
+			   || hostEqualsOrEndsWith(host, QStringLiteral("google.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("googleusercontent.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("gstatic.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("fbcdn.net"));
+	}
+
+	bool isModernShellInitiatedRequest(const QWebEngineUrlRequestInfo &info) {
+		const QUrl initiator = info.initiator();
+		if (!initiator.isValid() || initiator.isEmpty()) {
+			return false;
+		}
+
+		return initiator.scheme().toLower() == QLatin1String("qrc");
+	}
+
 	QByteArray previewMediaRefererForHost(const QString &host) {
 		if (hostEqualsOrEndsWith(host, QStringLiteral("cdninstagram.com"))) {
 			return QByteArrayLiteral("https://www.instagram.com/");
@@ -157,11 +179,13 @@ namespace {
 
 		void interceptRequest(QWebEngineUrlRequestInfo &info) override {
 			const QUrl url = info.requestUrl();
+			const QWebEngineUrlRequestInfo::ResourceType resourceType = info.resourceType();
+			const bool shellInitiatedRequest                          = isModernShellInitiatedRequest(info);
+
 			if (url.scheme().toLower() != QLatin1String("https")) {
 				return;
 			}
 
-			const QWebEngineUrlRequestInfo::ResourceType resourceType = info.resourceType();
 			if (isYouTubeEmbedDocumentHost(url.host())) {
 				if (resourceType == QWebEngineUrlRequestInfo::ResourceTypeSubFrame
 					|| resourceType == QWebEngineUrlRequestInfo::ResourceTypeMainFrame) {
@@ -178,6 +202,23 @@ namespace {
 			}
 
 			if (!isPreviewMediaCdnHost(url.host())) {
+				// SECURITY: this host is on none of the media/embed allowlists. Block the request
+				// types that are usable for data exfiltration (XHR/fetch, beacons, CSP reports)
+				// and WebSockets when they originate from the qrc shell document. Requests initiated
+				// by approved iframe players are deliberately left untouched so embeds can load their
+				// own API/CDN/WebSocket dependencies without being mistaken for shell egress.
+				if (shellInitiatedRequest) {
+					switch (resourceType) {
+						case QWebEngineUrlRequestInfo::ResourceTypeXhr:
+						case QWebEngineUrlRequestInfo::ResourceTypePing:
+						case QWebEngineUrlRequestInfo::ResourceTypeCspReport:
+						case QWebEngineUrlRequestInfo::ResourceTypeWebSocket:
+							info.block(true);
+							break;
+						default:
+							break;
+					}
+				}
 				return;
 			}
 
@@ -234,12 +275,18 @@ ModernShellHost::ModernShellHost(QWidget *parent) : QWidget(parent) {
 	m_view->setContextMenuPolicy(Qt::NoContextMenu);
 	m_view->installEventFilter(this);
 
-	m_page = new ModernShellPage(m_view);
+	m_profile = new QWebEngineProfile(QStringLiteral("MumbleModernShell"), this);
+	m_profile->setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies);
+	m_profile->setHttpCacheType(QWebEngineProfile::DiskHttpCache);
+	m_profile->setPersistentStoragePath(Global::get().qdBasePath.filePath(QStringLiteral("modern-shell-web-profile")));
+	m_profile->setCachePath(Global::get().qdBasePath.filePath(QStringLiteral("modern-shell-web-cache")));
+	m_profile->setHttpUserAgent(QString::fromLatin1(PREVIEW_MEDIA_USER_AGENT));
+	m_profile->setHttpAcceptLanguage(QString::fromLatin1(PREVIEW_MEDIA_ACCEPT_LANGUAGE));
+
+	m_page = new ModernShellPage(m_profile, m_view);
 	m_view->setPage(m_page);
-	m_requestInterceptor = new PreviewMediaUrlInterceptor(this);
-	if (m_page->profile()) {
-		m_page->profile()->setUrlRequestInterceptor(m_requestInterceptor);
-	}
+	m_requestInterceptor = new PreviewMediaUrlInterceptor(m_profile);
+	m_profile->setUrlRequestInterceptor(m_requestInterceptor);
 
 	m_channel = new QWebChannel(this);
 	m_bridge  = new ModernShellBridge(this);
@@ -256,6 +303,7 @@ ModernShellHost::ModernShellHost(QWidget *parent) : QWidget(parent) {
 	connect(m_view, &QWebEngineView::loadFinished, this, &ModernShellHost::handleLoadFinished);
 	connect(m_page, &QWebEnginePage::renderProcessTerminated, this, &ModernShellHost::handleRenderProcessTerminated);
 	connect(m_bridge, &ModernShellBridge::bootReady, this, &ModernShellHost::handleBridgeBootReady);
+	connect(m_bridge, &ModernShellBridge::providerSessionRequested, this, &ModernShellHost::openProviderSession);
 	connect(m_bridge, &ModernShellBridge::nativeContextMenuRequested, this, &ModernShellHost::showNativeContextMenu);
 	connect(m_bridge, &ModernShellBridge::nativeContextMenuCloseRequested, this, &ModernShellHost::closeNativeContextMenu);
 	connect(m_bootTimeoutTimer, &QTimer::timeout, this, &ModernShellHost::handleBootTimeout);
@@ -302,6 +350,10 @@ bool ModernShellHost::start(QString *errorMessage) {
 									  .arg(url.toString())
 									  .arg(m_bootTimeoutTimer->interval()));
 	return true;
+}
+
+QWebEngineProfile *ModernShellHost::webProfile() const {
+	return m_profile;
 }
 
 ModernShellBridge *ModernShellHost::bridge() const {
@@ -384,6 +436,41 @@ void ModernShellHost::closeNativeContextMenu() {
 	}
 
 	m_nativeContextMenu->close();
+}
+
+void ModernShellHost::openProviderSession(const QString &href) {
+	QUrl url(href.trimmed());
+	if (!url.isValid()) {
+		url = QUrl::fromUserInput(href.trimmed());
+	}
+	if (url.isEmpty() || !isTrustedProviderSessionUrl(url) || !m_profile) {
+		if (Global::get().l) {
+			Global::get().l->log(
+				Log::Warning,
+				tr("Modern layout ignored an untrusted provider-session URL: %1.").arg(href.toHtmlEscaped()));
+		}
+		return;
+	}
+
+	if (!m_providerSessionView) {
+		m_providerSessionView = new QWebEngineView(this);
+		m_providerSessionView->setAttribute(Qt::WA_DeleteOnClose, true);
+		m_providerSessionView->setWindowFlag(Qt::Window, true);
+		m_providerSessionView->setWindowTitle(tr("Preview provider session"));
+		m_providerSessionView->resize(1120, 780);
+
+		QWebEnginePage *sessionPage = new QWebEnginePage(m_profile, m_providerSessionView);
+		sessionPage->setAudioMuted(false);
+		m_providerSessionView->setPage(sessionPage);
+		m_providerSessionView->settings()->setAttribute(QWebEngineSettings::PlaybackRequiresUserGesture, false);
+
+		connect(m_providerSessionView, &QObject::destroyed, this, [this]() { m_providerSessionView = nullptr; });
+	}
+
+	m_providerSessionView->load(url);
+	m_providerSessionView->show();
+	m_providerSessionView->raise();
+	m_providerSessionView->activateWindow();
 }
 
 ModernContextMenuHost *ModernShellHost::ensureNativeContextMenuHost() {

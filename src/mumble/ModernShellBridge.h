@@ -73,6 +73,8 @@ public:
 	Q_INVOKABLE void openImagePicker();
 	Q_INVOKABLE void attachImageData(const QString &dataUrl);
 	Q_INVOKABLE void activateLink(const QString &href);
+	Q_INVOKABLE void openProviderSession(const QString &href);
+	Q_INVOKABLE void fetchPreviewMedia(const QString &requestId, const QString &url, const QString &responseType);
 	Q_INVOKABLE void invokeAppAction(const QString &actionId);
 	Q_INVOKABLE void invokeAppActionPayload(const QString &actionId, const QVariantMap &payload);
 	Q_INVOKABLE void toggleLayout();
@@ -131,6 +133,8 @@ signals:
 	void imagePickerRequested();
 	void imageDataAttachmentRequested(const QString &dataUrl);
 	void linkActivationRequested(const QString &href);
+	void providerSessionRequested(const QString &href);
+	void previewMediaFetchResultReady(const QVariantMap &result);
 	void appActionRequested(const QString &actionId);
 	void appActionPayloadRequested(const QString &actionId, const QVariantMap &payload);
 	void layoutToggleRequested();

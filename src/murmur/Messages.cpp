@@ -6466,6 +6466,9 @@ void Server::msgStonksAction(ServerUser *uSource, MumbleProto::StonksAction &msg
 	MSG_SETUP(ServerUser::Authenticated);
 	QMutexLocker qml(&qmCache);
 
+	// SECURITY: ledger mutations write to the database and broadcast state; throttle to limit spam.
+	RATELIMIT(uSource);
+
 	const QString period = normalizedStonksLedgerPeriod(msg.has_period() ? u8(msg.period()) : QString());
 	const auto sendState = [&](const QString &status = QString(), const QString &error = QString(),
 							   std::optional< unsigned int > requestedUserID = std::nullopt) {
@@ -6975,6 +6978,11 @@ void Server::msgChatAssetUploadInit(ServerUser *uSource, MumbleProto::ChatAssetU
 	MSG_SETUP(ServerUser::Authenticated);
 	QMutexLocker qml(&qmCache);
 
+	// SECURITY: throttle how fast a client can open new upload sessions to bound asset-upload spam.
+	// Per-chunk limiting is intentionally avoided so it does not stall large legitimate uploads;
+	// chunk volume is bounded by the declared byte size and the server-wide asset quota instead.
+	RATELIMIT(uSource);
+
 	if (!clientSupportsChatFeature(uSource, MumbleProto::ChatFeatureAttachments)) {
 		sendPersistentChatUnsupported(uSource);
 		return;
@@ -7134,6 +7142,10 @@ void Server::msgChatAssetUploadCommit(ServerUser *uSource, MumbleProto::ChatAsse
 
 	MSG_SETUP(ServerUser::Authenticated);
 	QMutexLocker qml(&qmCache);
+
+	// SECURITY: commit is CPU-heavy (full-file SHA-256 plus image re-encode/sanitization), so
+	// throttle it to keep a client from forcing repeated expensive commits.
+	RATELIMIT(uSource);
 
 	if (!clientSupportsChatFeature(uSource, MumbleProto::ChatFeatureAttachments)) {
 		sendPersistentChatUnsupported(uSource);
