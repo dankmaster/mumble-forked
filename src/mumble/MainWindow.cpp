@@ -26769,6 +26769,10 @@ bool MainWindow::handleModernShellAppActionPayload(const QString &actionId, cons
 
 	return false;
 }
+#else
+void MainWindow::appendModernServerLogEntry(const QString &html) {
+	Q_UNUSED(html);
+}
 #endif
 
 bool MainWindow::hasPendingUpdateResumeState() const {
