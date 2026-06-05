@@ -122,6 +122,7 @@ QJsonObject makeSelfTestPayload(const QString &streamID, const QString &relayUrl
 	payload.insert(QStringLiteral("scope_id"), 1);
 	payload.insert(QStringLiteral("relay_url"), relayUrl);
 	payload.insert(QStringLiteral("relay_room_id"), relayRoomID);
+	payload.insert(QStringLiteral("internal_self_test"), true);
 	payload.insert(QStringLiteral("relay_transport"), static_cast< int >(MumbleProto::ScreenShareRelayTransportDirect));
 	payload.insert(QStringLiteral("relay_transport_token"), QStringLiteral("direct"));
 	payload.insert(QStringLiteral("relay_role"), static_cast< int >(relayRole));

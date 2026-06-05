@@ -1602,6 +1602,9 @@ try {
 					Write-Host $capabilityProbe.StdErr.TrimEnd()
 				}
 				if ($capabilityProbe.ExitCode -ne 0) {
+					if (-not [string]::IsNullOrWhiteSpace($capabilityProbe.StdOut)) {
+						Write-Host $capabilityProbe.StdOut.TrimEnd()
+					}
 					throw "Helper capability probe failed with exit code $($capabilityProbe.ExitCode)."
 				}
 				$capabilitiesJson = $capabilityProbe.StdOut
@@ -1674,6 +1677,9 @@ try {
 					Write-Host $selfTestProbe.StdErr.TrimEnd()
 				}
 				if ($selfTestProbe.ExitCode -ne 0) {
+					if (-not [string]::IsNullOrWhiteSpace($selfTestProbe.StdOut)) {
+						Write-Host $selfTestProbe.StdOut.TrimEnd()
+					}
 					throw "Helper self-test failed with exit code $($selfTestProbe.ExitCode)."
 				}
 				$selfTestJson = $selfTestProbe.StdOut

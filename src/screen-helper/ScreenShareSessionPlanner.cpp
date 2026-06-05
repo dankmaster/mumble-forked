@@ -14,6 +14,7 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonValue>
 #include <QtCore/QStringList>
+#include <QtCore/QUrl>
 
 namespace {
 struct EncoderBackend {
@@ -29,8 +30,21 @@ QString streamIDFromPayload(const QJsonObject &payload) {
 	return payload.value(QStringLiteral("stream_id")).toString().trimmed();
 }
 
+QString normalizePayloadRelayUrl(const QJsonObject &payload) {
+	const QString relayUrl = payload.value(QStringLiteral("relay_url")).toString();
+	const QString normalized = Mumble::ScreenShare::normalizeRelayUrl(relayUrl);
+	if (!normalized.isEmpty() || !payload.value(QStringLiteral("internal_self_test")).toBool(false)) {
+		return normalized;
+	}
+
+	const QUrl url(relayUrl.trimmed());
+	return url.isValid() && !url.isRelative() && url.scheme().compare(QLatin1String("file"), Qt::CaseInsensitive) == 0
+			   ? url.toString(QUrl::NormalizePathSegments)
+			   : QString();
+}
+
 QString relayUrlFromPayload(const QJsonObject &payload) {
-	return Mumble::ScreenShare::normalizeRelayUrl(payload.value(QStringLiteral("relay_url")).toString());
+	return normalizePayloadRelayUrl(payload);
 }
 
 QString relayRoomFromPayload(const QJsonObject &payload) {
@@ -455,6 +469,9 @@ ScreenShareSessionPlanner::Plan buildPlan(const QJsonObject &payload,
 	planPayload.insert(QStringLiteral("relay_url"), relayUrl);
 	planPayload.insert(QStringLiteral("relay_scheme"), relayScheme);
 	planPayload.insert(QStringLiteral("relay_room_id"), relayRoomID);
+	if (payload.value(QStringLiteral("internal_self_test")).toBool(false)) {
+		planPayload.insert(QStringLiteral("internal_self_test"), true);
+	}
 	planPayload.insert(QStringLiteral("relay_token"), relayContract.relayToken);
 	planPayload.insert(QStringLiteral("relay_token_present"), !relayContract.relayToken.isEmpty());
 	planPayload.insert(QStringLiteral("relay_session_id"), relayContract.relaySessionID);

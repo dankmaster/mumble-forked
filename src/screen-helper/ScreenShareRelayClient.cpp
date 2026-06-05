@@ -75,6 +75,20 @@ namespace {
 		return schemes;
 	}
 
+	QString normalizePayloadRelayUrl(const QJsonObject &payload) {
+		const QString relayUrl = payload.value(QStringLiteral("relay_url")).toString();
+		const QString normalized = Mumble::ScreenShare::normalizeRelayUrl(relayUrl);
+		if (!normalized.isEmpty() || !payload.value(QStringLiteral("internal_self_test")).toBool(false)) {
+			return normalized;
+		}
+
+		const QUrl url(relayUrl.trimmed());
+		return url.isValid() && !url.isRelative()
+					   && url.scheme().compare(QLatin1String("file"), Qt::CaseInsensitive) == 0
+				   ? url.toString(QUrl::NormalizePathSegments)
+				   : QString();
+	}
+
 	ScreenShareRelayClient::Contract buildContract(const QJsonObject &payload, const bool publish) {
 		ScreenShareRelayClient::Contract contract;
 		contract.publishSupported = true;
@@ -83,7 +97,7 @@ namespace {
 			relayRoleFromPayload(payload, publish ? MumbleProto::ScreenShareRelayRolePublisher
 												 : MumbleProto::ScreenShareRelayRoleViewer);
 
-		const QString relayUrl = Mumble::ScreenShare::normalizeRelayUrl(payload.value(QStringLiteral("relay_url")).toString());
+		const QString relayUrl = normalizePayloadRelayUrl(payload);
 		if (relayUrl.isEmpty()) {
 			contract.errorMessage = QStringLiteral("Missing or invalid relay_url.");
 			return contract;
@@ -94,7 +108,9 @@ namespace {
 		contract.relayToken          = payload.value(QStringLiteral("relay_token")).toString().trimmed();
 		contract.relaySessionID      = payload.value(QStringLiteral("relay_session_id")).toString().trimmed();
 		contract.relayTokenExpiresAt = parseUInt64(payload.value(QStringLiteral("relay_token_expires_at")));
-		contract.relayTransport      = Mumble::ScreenShare::relayTransportFromUrl(relayUrl);
+		contract.relayTransport      = QUrl(relayUrl).scheme().compare(QLatin1String("file"), Qt::CaseInsensitive) == 0
+										   ? MumbleProto::ScreenShareRelayTransportDirect
+										   : Mumble::ScreenShare::relayTransportFromUrl(relayUrl);
 		contract.requiresSignaling   = Mumble::ScreenShare::relayTransportRequiresSignaling(contract.relayTransport);
 		contract.contractMode =
 			contract.requiresSignaling ? QStringLiteral("webrtc-signaling-contract")

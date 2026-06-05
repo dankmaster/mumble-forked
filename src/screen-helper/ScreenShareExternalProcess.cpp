@@ -418,11 +418,24 @@ QStringList candidateBackendOrder(const ScreenShareExternalProcess::RuntimeSuppo
 	return candidates;
 }
 
+QString normalizePlanRelayUrl(const QJsonObject &plan) {
+	const QString relayUrl = plan.value(QStringLiteral("relay_url")).toString();
+	const QString normalized = Mumble::ScreenShare::normalizeRelayUrl(relayUrl);
+	if (!normalized.isEmpty() || !plan.value(QStringLiteral("internal_self_test")).toBool(false)) {
+		return normalized;
+	}
+
+	const QUrl url(relayUrl.trimmed());
+	return url.isValid() && !url.isRelative() && url.scheme().compare(QLatin1String("file"), Qt::CaseInsensitive) == 0
+			   ? url.toString(QUrl::NormalizePathSegments)
+			   : QString();
+}
+
 RelayEndpoint materializeRelayEndpoint(const QJsonObject &plan,
 									   const ScreenShareExternalProcess::RuntimeSupport &support) {
 	RelayEndpoint endpoint;
 
-	const QString relayUrl = Mumble::ScreenShare::normalizeRelayUrl(plan.value(QStringLiteral("relay_url")).toString());
+	const QString relayUrl = normalizePlanRelayUrl(plan);
 	if (relayUrl.isEmpty()) {
 		endpoint.errorMessage = QStringLiteral("Missing or invalid relay_url.");
 		return endpoint;
