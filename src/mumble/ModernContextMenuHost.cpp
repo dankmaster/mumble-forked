@@ -263,6 +263,12 @@ bool ModernContextMenuHost::showMenu(const QString &token, const QVariantList &i
 	return true;
 }
 
+bool ModernContextMenuHost::showMenuAtGlobalPosition(const QString &token, const QVariantList &items,
+													 const QPoint &globalAnchor, const QString &openSubmenuLabel,
+													 const QVariantMap &uiTweaks) {
+	return showMenu(token, items, globalAnchor, openSubmenuLabel, uiTweaks);
+}
+
 void ModernContextMenuHost::closeEvent(QCloseEvent *event) {
 	removeDismissFilter();
 	const QString token = m_token;

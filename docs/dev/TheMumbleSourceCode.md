@@ -38,6 +38,7 @@ When cloning the repo, the source tree should look something like this:
 │   ├── crypto
 │   ├── mumble
 │   ├── murmur
+│   ├── screen-helper
 │   └── tests
 └── themes
     └── Default
@@ -72,8 +73,9 @@ mainly occupied by various scripts used throughout various tasks surrounding Mum
 default configuration file for the Mumble server.
 
 Your main focus should lie on the `src` directory as this is where the bulk of Mumble's source code is living. Directly in `src/` are shared sources
-that are used by the Mumble client as well as by the server that live in `src/mumble` and `src/murmur` respectively. The remaining directories within
-`src` should be somewhat self-explanatory.
+that are used by the Mumble client as well as by the server that live in `src/mumble` and `src/murmur` respectively. This fork also carries
+`src/screen-helper` for the external screen-share helper process and `src/mumble/modern-shell` for the WebEngine Modern client shell. The remaining
+directories within `src` should be somewhat self-explanatory.
 
 The `themes` directory contains all built-in themes that are currently shipped with Mumble. At this point there is only one theme available: the
 `Default` theme (note that it contains the Lite and the Dark theme variant). If you want to customize any kind of icons within Mumble, this is the
@@ -104,6 +106,8 @@ as your changes would likely be overwritten by said service.
 - `MainWindow.cpp`: This can be pretty much be considered the heart of the Mumble client. It is responsible for managing the main Mumble UI and also
   for coordinating all sorts of events that are received and sent. If you are tracing down some functionality, chances are high that the `MainWindow`
   class is involved in it in one way or another.
+- `modern-shell/`: This fork's WebEngine Modern shell HTML/CSS/JavaScript. It is driven through `ModernShellHost`, `ModernShellBridge`, and
+  controller/state DTOs in the native client.
 - `UserModel.cpp`: This class is responsible for managing the in-memory representation of the channel and user tree. All user and channel objects on
   the client are created here.
 - `Messages.cpp`: This class implements all Protobuf message handling that is performed on the client-side. Technically all these functions belong to

@@ -151,6 +151,18 @@ void Themes::setTheme(QString &themeQss, QStringList &skinPaths) {
 }
 
 bool Themes::apply() {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	QStringList skinPaths;
+	skinPaths << QLatin1String(":/themes/Default");
+	QDir::setSearchPaths(QLatin1String("skin"), skinPaths);
+	qApp->setStyleSheet(getDefaultStylesheet());
+
+	if (Global::get().mw) {
+		Global::get().mw->refreshTextDocumentStylesheets();
+	}
+	applyUiThemeNativeTitleBars();
+	return true;
+#else
 	const bool result = applyConfigured();
 	if (!result) {
 		applyFallback();
@@ -161,6 +173,7 @@ bool Themes::apply() {
 	}
 	applyUiThemeNativeTitleBars();
 	return result;
+#endif
 }
 
 bool Themes::detectSystemDarkTheme() {

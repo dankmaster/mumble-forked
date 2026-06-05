@@ -2,7 +2,8 @@
 
 Date: 2026-03-30
 
-For the ongoing checklist used when adding or reviewing theme work, see
+This is a historical audit from the March 2026 theme-token pass. For the
+current checklist used when adding or reviewing theme work, see
 `docs/theme-coverage-guide.md`.
 
 ## Scope

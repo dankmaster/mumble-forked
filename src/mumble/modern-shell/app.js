@@ -19017,6 +19017,9 @@
 		const swatch = document.createElement("span");
 		swatch.className = "modern-dialog-choice-swatch";
 		const value = String(option && option.value || "").toLowerCase();
+		const optionSwatch = option && option.swatch && typeof option.swatch === "object"
+			? option.swatch
+			: null;
 		const themeColors = {
 			dark: ["#20262f", "#5ec8b0"],
 			light: ["#eff3f7", "#5ec8b0"],
@@ -19032,9 +19035,12 @@
 			blue: ["#21344a", "#73b7ff"],
 			violet: ["#302a4a", "#b59cff"],
 			amber: ["#3d3321", "#f2c76f"],
-			rose: ["#432833", "#ff8aa0"]
+			rose: ["#432833", "#ff8aa0"],
+			custom: ["#2b3340", "#5ec8b0"]
 		};
-		const colors = presentation === "accentGrid"
+		const colors = optionSwatch
+			? [optionSwatch.bg || optionSwatch.background || "#2b3340", optionSwatch.accent || "#5ec8b0"]
+			: presentation === "accentGrid"
 			? (value === "auto" ? modernDialogAutoAccentSwatchColors() : accentColors[value])
 			: themeColors[value];
 		if (colors) {
@@ -22659,6 +22665,22 @@
 			input = document.createElement("textarea");
 			input.value = field.value == null ? "" : String(field.value);
 			input.rows = Math.max(2, Number(field.rows) || 4);
+		} else if (type === "color") {
+			const picker = document.createElement("div");
+			picker.className = "modern-dialog-color-picker";
+			input = document.createElement("input");
+			input.type = "color";
+			input.value = /^#[0-9a-f]{6}$/i.test(String(field.value || "")) ? String(field.value) : "#5ec8b0";
+			const value = document.createElement("span");
+			value.className = "modern-dialog-color-value";
+			const syncValue = function() {
+				value.textContent = input.value.toUpperCase();
+			};
+			input.addEventListener("input", syncValue);
+			syncValue();
+			picker.appendChild(input);
+			picker.appendChild(value);
+			row.appendChild(picker);
 		} else if (type === "pathPicker") {
 			const picker = document.createElement("div");
 			picker.className = "modern-dialog-path-picker";
@@ -22791,7 +22813,7 @@
 			}
 		}
 
-		if (input && type !== "range" && type !== "pathPicker" && type !== "imagePicker") {
+		if (input && type !== "range" && type !== "color" && type !== "pathPicker" && type !== "imagePicker") {
 			row.appendChild(input);
 		}
 		if (input) {

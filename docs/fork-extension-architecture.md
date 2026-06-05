@@ -4,7 +4,11 @@ This fork keeps product experiments behind explicit protocol features instead
 of inferring support from release strings or UI shape. Each fork feature has a
 minimum protocol revision and a fallback policy in `ForkFeature.cpp`.
 
-## Current First-Pass Scope
+Status snapshot: 2026-06-05.
+
+Current fork extension protocol revision: `3`.
+
+## Current Feature Scope
 
 - `ForkFeatureServerLinkPreviewProxy`: server-side link-preview fetching,
   thumbnail sanitizing/downscaling, direct GIF/WebM media caching, cache
@@ -19,10 +23,14 @@ minimum protocol revision and a fallback policy in `ForkFeature.cpp`.
   joiners, diagnostics, viewer counts, and thumbnails.
 - `ForkFeatureVirtualizedChatPresentation`: a client presentation contract for
   high-volume chat timelines and media cards.
+- `ForkFeatureStonksLedger`: server-backed social finance portfolio state,
+  follows, leaderboard state, feed preferences, and Modern Stonks presentation.
+- `ForkFeatureInAppFeedback`: client feedback reports that Murmur can forward
+  to an administrator-configured GitHub target.
 
-Drawing overlays are intentionally left out of the first pass. They are useful
-for collaboration, but they add high-rate input, moderation, and permission
-questions that do not help the current chat/media performance work.
+Drawing overlays are not part of the current fork direction. The old in-game
+overlay and TalkingUI paths have been cut; future collaborative annotation
+would need a new product decision and a separate permission model.
 
 ## Link Previews
 
@@ -60,8 +68,10 @@ YouTube.
 
 ## Screen-Share Presence
 
-The existing screen-share relay/token model remains the right core. The borrowed
-idea is better state presentation: late join reannounce, explicit viewer-ready
+The current screen-share relay/token model remains the right core. The active
+implementation already carries signaling, server policy, helper IPC, and
+GStreamer/LiveKit-capability plumbing. The next value is better state
+presentation and verification: late join reannounce, explicit viewer-ready
 state, diagnostics, stats, and eventually thumbnail assets.
 
 ## Chat Performance

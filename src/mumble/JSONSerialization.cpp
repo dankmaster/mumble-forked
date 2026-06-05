@@ -117,13 +117,7 @@ void to_json(nlohmann::json &j, const Settings &settings) {
 	j[SettingsKeys::SETTINGS_VERSION_KEY] = 1;
 
 	const Settings defaultValues;
-	Settings serializableSettings        = settings;
-	bool forceLegacyWindowLayoutFallback = serializableSettings.modernLayoutPolicy == Settings::ModernLayoutForced
-										   || serializableSettings.wlWindowLayout == Settings::LayoutModern;
-
-	if (serializableSettings.wlWindowLayout == Settings::LayoutModern) {
-		serializableSettings.wlWindowLayout = Settings::LayoutHybrid;
-	}
+	const Settings &serializableSettings = settings;
 
 #define PROCESS(category, key, variable)                                      \
 	if (serializableSettings.variable != defaultValues.variable) {            \
@@ -133,10 +127,6 @@ void to_json(nlohmann::json &j, const Settings &settings) {
 	PROCESS_ALL_SETTINGS
 
 #undef PROCESS
-
-	if (forceLegacyWindowLayoutFallback) {
-		save(j, "ui", SettingsKeys::WINDOW_LAYOUT_KEY, serializableSettings.wlWindowLayout);
-	}
 
 	if (settings.qlShortcuts != defaultValues.qlShortcuts) {
 		// We only remove server specific shortcuts since they are saved in the DB.
@@ -189,24 +179,6 @@ void migrateSettings(nlohmann::json &json, int settingsVersion) {
 	if (json.contains("play_transmit_cue")
 		&& (!json.contains(static_cast< const char * >(SettingsKeys::TRANSMIT_CUE_WHEN_PTT_KEY)))) {
 		json[SettingsKeys::TRANSMIT_CUE_WHEN_PTT_KEY] = json.at("play_transmit_cue").get< bool >();
-	}
-
-	constexpr const char *uiCategory         = "ui";
-	constexpr const char *forkCategory       = "dank_mumble";
-	constexpr const char *modernLayoutString = "Modern";
-	if (json.contains(uiCategory) && json.at(uiCategory).is_object()) {
-		nlohmann::json &ui          = json[uiCategory];
-		const char *windowLayoutKey = static_cast< const char * >(SettingsKeys::WINDOW_LAYOUT_KEY);
-		if (ui.contains(windowLayoutKey) && ui.at(windowLayoutKey).is_string()
-			&& ui.at(windowLayoutKey).get< std::string >() == modernLayoutString) {
-			ui[windowLayoutKey] = enumToString(Settings::LayoutHybrid);
-
-			if (!json.contains(forkCategory) || !json.at(forkCategory).is_object()) {
-				json[forkCategory] = nlohmann::json::object();
-			}
-			json[forkCategory][SettingsKeys::MODERN_LAYOUT_POLICY_KEY] = enumToString(Settings::ModernLayoutForced);
-			qWarning("Migrated incompatible Modern window layout setting to fork-specific modern layout policy");
-		}
 	}
 
 	(void) settingsVersion;

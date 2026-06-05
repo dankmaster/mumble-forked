@@ -8,7 +8,9 @@ This fork uses two GitHub workflow paths for Windows client coverage:
 - Static Windows runner: `windows-2025-vs2026`
 - Purpose: required PR/build validation for the static Windows client/server lane
 
-The heavier shared/WebEngine client lane is kept separate:
+The heavier shared/WebEngine client lane is kept separate from the normal PR
+gate, but it is the canonical fork client payload because it includes the
+Modern/WebEngine shell:
 
 - Workflow: `Windows Shared Client Installer`
 - File: [windows-shared-client.yml](../.github/workflows/windows-shared-client.yml)
@@ -44,7 +46,7 @@ There is also a small human-facing installer workflow for this fork:
   dependency archive itself needs to be rebuilt and republished.
 - Use `mumble-forked MSI Release` when you want a simple stable download link
   for this fork. It uses the shared/WebEngine lane so the installer includes
-  the current Modern/WebEngine functionality, then publishes the MSI to a normal
+  the current modern-only client shell direction, then publishes the MSI to a normal
   GitHub Release instead of a short-lived Actions artifact.
 
 ## How to run the shared client workflow

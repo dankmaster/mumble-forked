@@ -1,6 +1,6 @@
 # Theme Coverage Guide
 
-Date: 2026-05-30
+Date: 2026-06-05
 
 Use this guide whenever a settings theme, Modern shell theme, or accent change
 touches visible UI. The goal is that changing a theme in settings recolors the
@@ -11,17 +11,23 @@ the original change.
 
 Mumble currently has two related theme systems:
 
-- Classic Qt theme selection uses `Settings::{styleType, themeName,
+- Native Qt theme selection uses `Settings::{styleType, themeName,
   themeStyleName, themeDarkName, themeDarkStyleName}`. `Themes::apply()` loads
   `themes/<theme>/<style>.qss` and sets the application stylesheet.
 - Runtime Qt styling reads `activeUiThemeTokens()` from `src/mumble/UiTheme.cpp`.
   This is the token bridge for custom C++ painting, runtime palettes, injected
   QSS, text documents, and native title-bar colors.
 - Modern shell settings use `Settings::qsModernShellTheme`,
-  `qsModernShellAccent`, `qsModernShellDensity`, and `qsModernShellRailSide`.
+  `qsModernShellAccent`, `qsModernShellCustomAccent`,
+  `iModernShellCustomAccentStrength`, `qsModernShellDensity`, and
+  `qsModernShellRailSide`.
   `MainWindow.cpp` and `ModernSettingsController.cpp` serialize those settings
   as `uiTweaks`; `modern-shell/app.js` and `modern-shell/dialog.js` apply them
   to `document.documentElement.dataset.theme` and CSS custom properties.
+- Modern custom themes use `.css` files in the bundled app `ModernThemes`
+  folder and the profile `ModernThemes` folder. They currently load CSS custom
+  properties only and enter the same
+  `uiTweaks.themeTokens` preview path. See `docs/modern-custom-themes.md`.
 
 Changing only one layer is not enough. A complete theme pass checks Qt/QSS,
 runtime C++ painting, native window chrome, and Modern shell CSS.
@@ -33,9 +39,9 @@ runtime C++ painting, native window chrome, and Modern shell CSS.
 - Add or adjust Modern shell CSS variables in
   `src/mumble/modern-shell/styles.css` under `:root` and the matching
   `:root[data-theme="..."]` block.
-- If a Modern shell theme option is added or renamed, update every allow-list:
-  `ModernSettingsController.cpp`, `MainWindow.cpp`, `modern-shell/app.js`, and
-  `modern-shell/dialog.js`.
+- If a built-in Modern shell theme option is added or renamed, update the
+  Modern theme registry in `ModernTheme.*`, the CSS supported-theme token, and
+  any hardcoded swatches in `modern-shell/app.js` / `dialog.js`.
 - If a Qt theme/style is added or renamed, update the QSS files under
   `themes/` and make sure `activeUiThemeTokens()` can resolve it if any C++
   runtime surface needs tokens for that theme.
@@ -56,10 +62,10 @@ When touching Qt-side theming, check these surfaces:
 - Persistent chat: history viewport, log fallback view, message groups,
   sender/time labels, system rows, search matches, link preview cards, image
   preview widgets, composer, reply bar, attach/send controls, and separators.
-- Dialogs still backed by Qt widgets: Connect, Config, Search, Certificate,
-  Audio Wizard, Audio Stats, Ban/ACL/Tokens/User dialogs, Plugin Updater,
-  Responsive Image dialog, PTT button window, Talking UI, and any fallback
-  prompt that can still open outside the Modern shell.
+- Dialogs or fallback surfaces still backed by Qt widgets: plugin settings,
+  plugin install/update, Search, Certificate Wizard edge cases, Voice Recorder,
+  Responsive Image dialog, PTT button window, and any explicit native escape
+  hatch that can still open outside the Modern shell.
 - Native or platform-adjacent UI: Windows title-bar color, native modal
   container backgrounds, tray-related popups where applicable, and WebEngine
   view background colors before content loads.
@@ -100,8 +106,9 @@ in review notes when they appear in an audit:
 
 - Audio VU meters, VAD bands, and charts that rely on red/yellow/green
   semantics.
-- Overlay editor handles, checker/guide visuals, alpha buffers, and overlay
-  user-configurable colors.
+- Screen-share guide/focus overlays, capture diagnostics, alpha buffers, and
+  other functional helper visuals where the color communicates capture state
+  rather than application chrome.
 - Transparent render buffers such as `Qt::transparent`.
 - User-selected colors, avatar/generated identity colors, provider logos, and
   embedded content colors.
@@ -123,7 +130,9 @@ in review notes when they appear in an audit:
   the settings dialog and the main shell preview the same theme.
 - When overriding a Modern shell accent in JS, update `--accent`,
   `--accent-rgb`, `--accent-soft`, and `--accent-border` together. Alpha colors
-  should derive from `--accent-rgb`.
+  should derive from `--accent-rgb`. Custom accent settings do this by emitting
+  `--theme-accent-custom*` tokens from C++ and then letting the normal accent
+  application path activate them.
 - Do not leave "default dark" CSS literals in shared selectors after adding a
   light or non-default theme. Move the literal into `:root` or a semantic
   custom property.
@@ -154,8 +163,8 @@ At minimum, verify:
 
 - Modern shell `dark`, `light`, and one non-default theme such as `mocha`,
   `nord`, or `gruvbox`.
-- The classic Qt configured light and dark styles if the change touches Qt
-  widgets or shared dialogs.
+- Native Qt light and dark styles if the change touches Qt widgets or shared
+  fallback dialogs.
 - Main shell, Modern settings, connect dialog, context/self/app menus, a link
   preview card, image preview/dialog, text room with real chat, and voice-room
   navigator state.

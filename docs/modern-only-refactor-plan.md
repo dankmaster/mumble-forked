@@ -11,29 +11,26 @@
 - Reduced double-maintenance (notably the classic server-log `QTextDocument` mirror).
 - Net: smaller binary/surface, fewer `usesModernShell()` branches (~100 collapse to one path), lower per-state-change cost.
 
-## Decision gate — RESOLVED 2026-06-03: MODERN-ONLY
-**Decision: modern-only. No vanilla-server fallback requirement.** Force the modern
-layout as the single UI, delete the classic Qt Widgets layout, and replace the
-WebEngine-boot-failure case with a minimal error screen (not a full classic UI). All of
-Phases 1–4 + 6 are in scope. The original question is kept below for context.
-
-The whole plan branches on one product question:
-
-**Q: Must the client still connect to *vanilla* Mumble servers (and degrade gracefully if the WebEngine shell fails to boot)?**
-
-- Modern layout currently auto-activates only on **fork-compatible servers** ("Fork features detected"); vanilla servers show "Standard server" and fall back to classic. Classic is also the fallback when `m_modernShellRuntimeDisabled` (WebEngine boot failure). See `MainWindow::effectiveWindowLayout()` (`src/mumble/MainWindow.cpp`, ~line 12755).
-- **If NO (closed fork ecosystem, modern is mandatory):** set `modernLayoutPolicy = ModernLayoutForced` as the only path and delete classic layout entirely (Phases 1–4 + 6). Keep a minimal "WebEngine failed to start" error screen instead of falling back to a full classic UI.
-- **If YES (vanilla support required):** keep the classic layout as a real fallback, but still do Phases 1 and 3 (they remove QtWidgets *leaking into modern* without losing the fallback). Defer Phase 4.
-
-> Recommendation: confirm with product owner. Everything below assumes **modern-only** unless a phase is marked "vanilla-safe".
+## Decision Gate
+**Decision: modern-only fork desktop client.** Force the modern layout as the
+single visible UI for the forked desktop client, delete the classic Qt Widgets
+layout, and replace the WebEngine-boot-failure case with a minimal error screen
+(not a full classic UI). This does not remove the requirement that the forked
+server accepts ordinary upstream/native Mumble clients for baseline voice,
+channel, ACL, registration/certificate, and basic text behavior. All of Phases
+1–4 + 6 are in scope. The current `master` documentation should state this
+product direction plainly. The remaining question is how aggressively to delete
+the leftover Qt Widgets client scaffolding while non-WebEngine and migration
+builds still exist.
 
 ## Current architecture (verified facts + entry points)
 - **Transport is a bridge, not direct integration.** `ModernShellHost` creates a `QWebChannel`, registers `modernBridge` (`ModernShellBridge`), and pushes state as `QVariantMap` snapshots/patches (QVariant→JSON→JS) plus `runJavaScript`. The shell runs in a **separate QtWebEngine (Chromium) render process**. See `src/mumble/ModernShellHost.cpp` (~244-247, 316+).
-- **Layout swap:** `MainWindow::applyShellLayout()` swaps the central widget between `activateModernShell()` and `activateLegacyShell()`. Only one is visible at a time. (`MainWindow.cpp` ~12850.)
-- **Shared source-of-truth (keep):** `pmModel` (`UserModel`) is fed by the protocol; both the classic tree and the modern snapshot read from it.
-- **Double-maintenance (target):** the classic server-log `QTextDocument` (`qteLog`) is built and mirrored to the web via `QTextDocument::contentsChange → serverLog.append` patch (`MainWindow.cpp` ~13177).
-- **Modern settings coverage is partial:** `modernSettingsPageSupported()` (`MainWindow.cpp` ~14656) lists covered pages: Network, ScreenShare, AudioInput/Output, Shortcuts/KeyBindings, Look/UI, Messages&Sounds, About. **The remaining uncovered `ConfigDialog` page is Plugins** — see `openConfigDialogPage()` (~42154).
-- **Connect** already routes modern in modern mode (`openServerConnectDialog` → `openModernConnectDialog`, ~41869); classic `ConnectDialog` is fallback.
+- **Layout policy:** in `MUMBLE_HAS_MODERN_LAYOUT` builds, `effectiveWindowLayout()` resolves to `LayoutModern` and `applyShellLayout()` activates the Modern shell. Non-WebEngine Qt Widgets client builds still keep `activateLegacyShell()` as temporary scaffolding.
+- **WebEngine failure:** Modern boot failure now shows a minimal failure notice instead of falling back to a full classic client layout.
+- **Shared source-of-truth (keep):** `pmModel` (`UserModel`) is fed by the protocol; modern snapshots read from it, and minimal-snapshot/safe-mode paths avoid unnecessary hidden Qt tree churn.
+- **Server log direction:** the Modern server log now has a separate `LogDocument` fed by `Log::serverLogEntryAppended` / `appendModernServerLogEntry`; `qteLog` should remain only for Qt Widgets/non-WebEngine client fallback.
+- **Modern settings coverage is partial but broad:** `modernSettingsPageSupported()` covers Network, ScreenShare, AudioInput/Output, Shortcuts/KeyBindings, Look/Appearance, UI, Messages&Sounds, and About. **The remaining uncovered `ConfigDialog` page is Plugins** — see `openConfigDialogPage()`.
+- **Connect** routes modern in modern mode (`openServerConnectDialog` → `openModernConnectDialog`); classic `ConnectDialog` is fallback for Qt Widgets/non-WebEngine client paths.
 - **Build configs:** `build/` = classic (modern-layout OFF), `build-shared-webengine/` = modern (`MUMBLE_HAS_MODERN_LAYOUT` ON, set in `src/mumble/CMakeLists.txt` ~792 under `if(modern-layout-webengine)`).
 
 ## Inventory — keep / migrate / delete
@@ -43,15 +40,22 @@ The whole plan branches on one product question:
 
 ### Migrate to modern (no modern equivalent yet — they launch classic QtWidgets in modern today)
 - `ConfigDialog` settings pages not in `modernSettingsPageSupported`: **Plugins**.
-- Standalone classic dialogs: `ServerInformation`, `Tokens`, `BanEditor`, `UserEdit` / `UserLocalNicknameDialog`, `SearchDialog`, `AudioWizard`, plugin installer/updater.
+- Remaining standalone Qt Widgets/native dialog surfaces to decide or modernize: `SearchDialog`,
+  `VoiceRecorderDialog`, `CertWizard` edge cases, plugin installer/updater, and
+  any rare text-message fallback that cannot infer a Modern composer target.
 
 ### Already modern (classic = fallback only; delete classic when layout is dropped)
-- Connect, Settings (covered pages), VoiceRecorder, ACL editor, image viewer, screen-share picker/status, TextMessage, create/delete-room & drag confirms, SSL dialogs, feedback.
+- Connect, Settings (covered pages), Server Information, Tokens, Registered
+  Users, Ban List, User Information, local nickname, user/self comments, reset
+  confirmations, kick/ban, About, About Qt, Audio Stats, ACL editor, image
+  viewer, screen-share picker/status, TextMessage/common message prompts,
+  create/delete-room & drag confirms, SSL dialogs, feedback, crash/update
+  handoff, and direct-message tray.
 
 ### Independent legacy features (orthogonal to layout — delete on a separate product call)
 - In-game **Overlay**, **TalkingUI**, LCD, and PositionalAudioViewer have already been cut.
 
-### `.ui` forms likely deletable once classic layout + ConfigDialog go (39 total today)
+### `.ui` forms likely deletable once classic layout + ConfigDialog go (34 total today)
 `MainWindow.ui`, `ConnectDialog*.ui`, `ConfigDialog.ui`, `AudioInput/Output.ui`, `NetworkConfig.ui`, `LookConfig.ui`, `PluginConfig.ui`, `GlobalShortcut*.ui`, `Cert.ui`, `Log.ui`, `ServerInformation.ui`, `Tokens.ui`, `UserEdit.ui`, `UserInformation.ui`, `SearchDialog.ui`, `BanEditor.ui`, `ACLEditor.ui`, … (confirm each has a modern replacement before deleting).
 
 ## Phased plan (each phase independently buildable + shippable)
@@ -79,7 +83,7 @@ The whole plan branches on one product question:
   can be compared. (Requires running against a real server — do this before Phase 3.)
 - Note guardrails: **never-freeze** (route high-frequency updates through patches/in-place DOM, not full snapshots/rebuilds), keep `node --check` green on `app.js`/`dialog.js`, and keep `TestModernDialogControllers` + `ModernUiAutomationServer` flows passing.
 
-### Phase 1 — Complete modern settings, retire `ConfigDialog` (vanilla-safe)
+### Phase 1 — Complete modern settings, retire `ConfigDialog`
 - **Scope corrected 2026-06-03 after verification.** The classic settings pages are
   registered as `ConfigWidget`s (grep `ConfigRegistrar`): AudioInput(1000),
   AudioOutput(1010), GlobalShortcut(1200), Look(1100), Network(1300), ScreenShare(1310),
@@ -133,31 +137,56 @@ The whole plan branches on one product question:
 ### Completed legacy cuts
 - Overlay/TalkingUI cut: done 2026-06-04; verify with a configure/build plus residual search
   excluding intentional words such as screen-share overlay bars and theme token `overlay0`.
+- Theme cleanup candidates found during Modern custom-theme work:
+  - `LookConfig.cpp` / `LookConfig.ui` still expose classic QSS theme selection
+    and the old `Open Themes Directory` flow.
+  - `Themes.cpp`, `ThemeInfo.cpp`, `themes/*.qss`, and
+    `Settings::{styleType, themeName, themeStyleName, themeDarkName,
+    themeDarkStyleName}` still back the classic theme model.
+  - `activeUiThemeTokens()` now accepts custom Modern tokens and custom accent
+    overlays, but built-in native token unification still needs a Modern
+    registry instead of QSS-era hardcoded presets.
+  - Bundled Modern example themes now stage from
+    `src/mumble/modern-shell/themes/` into `ModernThemes`; keep this path if
+    classic `themes/` is deleted.
 - Pattern for adding a page (per `ModernSettingsController`): add to `pages()`, add an
   `if (m_activePage == ...)` branch in `sectionsForActivePage()`, handle each field id in
   `updateField()`, handle any buttons in `invokeAction()`, map incoming names in
   `setActivePage()`, and add the names to `modernSettingsPageSupported()` in
   `MainWindow.cpp`. Field helpers: `boolField`/`selectField`/`numberField`/`rangeField`/
   `fieldItem`/`actionField`/`noteField`/`hintedField`/`advancedField`/`advancedSection`.
-- Once every page is covered (or its feature cut), remove the classic fallback branch in
+- Once every page is covered (or its feature cut), remove the Qt Widgets scaffold branch in
   `openConfigDialogPage()` (modern path only), then delete `ConfigDialog` + the migrated
   sub-config `.ui`/`.cpp`/`.h`.
 - Verify: every settings entry point opens the modern dialog; settings persist + apply (`applyModernSettings`).
 
 ### Phase 2 — Modernize or drop remaining classic dialogs
-- For each of `ServerInformation`, `Tokens`, `BanEditor`, `UserEdit`/`UserLocalNicknameDialog`, `SearchDialog`, `AudioWizard`: build a modern dialog (`modernDialogDto` + bespoke renderer or generic fields, wired via `handleModernGenericDialogAction`) OR cut the feature if unused.
+- For each remaining surface (`SearchDialog`, `VoiceRecorderDialog`,
+  `CertWizard` edge cases, plugin installer/updater, plugin settings, and rare
+  text-message fallback prompts): build a modern dialog (`modernDialogDto` +
+  bespoke renderer or generic fields, wired via `handleModernGenericDialogAction`)
+  OR keep it as an explicit native dialog escape hatch with docs saying why.
 - Verify each entry point (mostly via modern context-menu/app-menu actions) opens the modern equivalent.
 
-### Phase 3 — Cut the classic server-log QTextDocument mirror (vanilla-safe-ish)
-- Feed the modern server log directly from the `Log` source instead of building `qteLog`'s `QTextDocument` and mirroring it via `contentsChange`.
-- Remove the `qteLog` build/mirror path in modern mode; keep classic `qteLog` only if classic layout is retained.
-- Verify: server log renders/append/scroll correctly in modern; re-measure vs Phase 0 baseline (expect reduced main-thread + serialization cost).
+### Phase 3 — Cut the classic server-log QTextDocument mirror
+- Status: direct Modern log document and append signal are in place in the
+  current worktree/master direction.
+- Finish pruning any remaining WebEngine dependency on `qteLog`'s
+  `contentsChange` mirror; keep classic `qteLog` only for Qt Widgets/non-WebEngine
+  client fallback.
+- Verify: server log renders/append/scroll correctly in Modern; re-measure vs
+  Phase 0 baseline if the baseline was captured.
 
 ### Phase 4 — Remove classic layout scaffolding (modern-only only)
-- Delete `activateLegacyShell()` and the classic central view (`qtvUsers` tree, `qdwLog`/`qdwChat` docks, `MainWindow.ui` central), the Hybrid/Custom layout code, and collapse `effectiveWindowLayout()` to always-modern.
-- Remove the ~100 `usesModernShell()` branches (they become unconditional modern).
-- Replace WebEngine-boot-failure fallback with a minimal error UI (no full classic UI).
-- Verify: app starts straight into modern; no dead refs; both old build flags still configure.
+- WebEngine-enabled builds now collapse to Modern in `effectiveWindowLayout()`;
+  keep pushing the simplification inward.
+- Delete or quarantine `activateLegacyShell()` and the classic central view
+  (`qtvUsers` tree, `qdwLog`/`qdwChat` docks, `MainWindow.ui` central) once
+  Qt Widgets/non-WebEngine client build expectations are decided.
+- Remove remaining `usesModernShell()` branches that now only distinguish
+  modern from dead layout paths.
+- Verify: app starts straight into Modern; no dead refs; both intended build
+  flags still configure.
 
 ### Phase 5 — Prune independent legacy features (product-gated)
 - Overlay / TalkingUI are already removed. Remaining candidates need a separate product call.
@@ -184,6 +213,11 @@ The whole plan branches on one product question:
 - WebEngine is a separate process; "direct integration" isn't an option — optimize the bridge (patches over full snapshots), don't try to remove it.
 
 ## First actions for the new session
-1. Get the decision-gate answer (modern-only vs keep-vanilla).
-2. Take the Phase 0 baseline measurement.
-3. Start Phase 1 (modern settings coverage) — it's vanilla-safe and removes the biggest QtWidgets leak (`ConfigDialog`).
+1. Treat modern-only as resolved master direction.
+2. Verify current direct server-log path with a live Modern session.
+3. Decide Plugins settings: modernize, explicitly keep as a native dialog escape hatch,
+   or defer with a visible migration note.
+4. Continue Phase 2 on Search / Voice Recorder / Certificate / plugin installer
+   surfaces.
+5. After those are handled, prune remaining classic layout scaffolding and
+   stale `.ui` files in focused commits.

@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>A community-focused Mumble fork with persistent rooms, rich media previews, a modern client shell, screen-share experiments, and small-server release tooling.</strong>
+  <strong>A community-focused Mumble fork with persistent rooms, rich media previews, a modern-only client direction, screen-share experiments, and small-server release tooling.</strong>
 </p>
 
 <p align="center">
@@ -34,6 +34,12 @@ This fork is not an official Mumble release. It is an experimental,
 server-specific build for one group of friends running a private community
 server. The goal is to keep the core Mumble voice experience intact while
 adding features that make that server feel more modern and easier to live in.
+The intended fork desktop client path is now the WebEngine Modern shell;
+classic Qt Widgets UI remains only as migration scaffolding or narrow fallback
+surface while the remaining workflows are modernized. The server is not
+modern-only: `mumble-server` must still let ordinary upstream/native Mumble
+clients connect for voice and basic text behavior, with fork features gated per
+client capability.
 
 If you want the official stable Mumble project, start at
 [mumble.info](https://www.mumble.info/) or
@@ -60,11 +66,11 @@ community feature set on top. The long-form inventory lives in
 
 | Area | Status | Highlights |
 | --- | --- | --- |
-| Upstream Mumble baseline | Retained | Low-latency Opus voice, channels, ACLs, certificates, shortcuts, plugins, server tooling, and the classic Qt client/server paths. |
-| Persistent chat | Active fork feature | Stored history for voice-room chats, dedicated text rooms, optional server-global chat, read state, unread counts, pagination, replies, deletion, and reactions. |
+| Upstream Mumble baseline | Retained | Low-latency Opus voice, channels, ACLs, certificates, shortcuts, plugins, server tooling, and ordinary upstream/native client interoperability where practical. |
+| Persistent chat | Active fork feature | Stored history for voice-room chats, dedicated text rooms, optional server-global chat, direct-message history when supported, read state, unread counts, pagination, replies, deletion, and reactions. |
 | Rich media chat | Active fork feature | Chunked authenticated uploads, image/video/document/binary asset storage, preview thumbnails, inline media rendering, and quota controls. |
 | Link preview cards | Active fork feature | Provider-aware cards for playable YouTube/video previews, social posts, GitHub, Steam, finance links, product/listing pages, news, maps, weather, transit, game stores, and direct media. |
-| Modern client shell | Active fork feature | WebEngine-based chat/navigator shell with persistent rooms, compact message controls, rich cards, room-aware composer state, theme/density variants, Modern dialogs, and a classic fallback path. |
+| Modern client shell | Active fork direction | WebEngine-based chat/navigator shell with persistent rooms, compact message controls, rich cards, direct-message tray, room-aware composer state, theme/density variants, Modern dialogs, and modern-only layout policy. |
 | Finance and stonks | Active server feature | Cashtag extraction, Yahoo Finance quote cards with chart data, provider links, and a scoped `#stonks` room with scores, leaderboards, and follows. |
 | Watch together | Protocol/server foundation | Capability-gated room media-session messages for synchronized direct media or YouTube playback; client UI is still a future layer. |
 | Screen sharing | Experimental | Capability-gated signaling, server policy/configuration, external helper process, GStreamer LiveKit publish/view, and diagnostic logging. |
@@ -75,7 +81,9 @@ community feature set on top. The long-form inventory lives in
 ## Repository Map
 
 - [`src/`](src/) contains the client, server, protocol, helper, and test code.
+- [`docs/status-and-roadmap.md`](docs/status-and-roadmap.md) summarizes the current fork state and near-term direction.
 - [`docs/fork-features.md`](docs/fork-features.md) lists the fork-specific feature surface.
+- [`docs/modern-custom-themes.md`](docs/modern-custom-themes.md) explains how to install, create, test, and share Modern shell themes.
 - [`docs/fork-extension-architecture.md`](docs/fork-extension-architecture.md) covers the feature-gating model for fork experiments.
 - [`docs/chat-architecture.md`](docs/chat-architecture.md) describes the fork-specific persistent chat direction.
 - [`docs/rich-chat-server.md`](docs/rich-chat-server.md) covers server-side rich chat storage and configuration.
@@ -83,6 +91,28 @@ community feature set on top. The long-form inventory lives in
 - [`docs/screen-sharing-relay-deployment.md`](docs/screen-sharing-relay-deployment.md) covers relay deployment notes.
 - [`docs/dev/build-instructions/README.md`](docs/dev/build-instructions/README.md) is the upstream build documentation.
 - [`docs/windows-builds.md`](docs/windows-builds.md) captures this fork's tracked Windows build notes.
+
+## Getting Started
+
+For most users, the easiest path is the latest `mumble-forked` Windows MSI from
+this fork's GitHub releases. Install it, connect to your server as usual, and
+use **Settings > Appearance** to pick a built-in Modern theme, density, accent,
+or a custom theme file.
+
+If you are running a server for the fork features:
+
+1. Start from the sample [`mumble-server.ini`](auxiliary_files/mumble-server.ini).
+2. Enable only the fork features you intend to operate, such as persistent chat,
+   rich chat assets, previews, or screen-share relay settings.
+3. Keep ordinary Mumble compatibility in mind. Fork features are
+   capability-gated, so upstream/native clients should still be able to connect
+   for baseline voice and basic text.
+4. Read [`docs/status-and-roadmap.md`](docs/status-and-roadmap.md) before
+   depending on experimental features such as screen sharing or speech cleanup.
+
+If you are hacking on the client, build the shared/WebEngine lane and keep the
+Modern shell as the product surface. Classic Qt Widgets UI is migration
+scaffolding in this fork, not the direction for new user-facing work.
 
 ## Building
 
@@ -112,6 +142,24 @@ Useful optional features in this tree include:
 
 Windows-specific notes for the tracked build flow are in
 [`docs/windows-builds.md`](docs/windows-builds.md).
+
+## Modding And Themes
+
+The supported end-user modding surface today is the Modern shell theme system.
+Custom themes are CSS-token files, not arbitrary JavaScript or unrestricted CSS.
+That keeps theme preview fast, makes native-window color bridging predictable,
+and avoids turning themes into a plugin permission model.
+
+Quick theme flow:
+
+1. Open **Settings > Appearance > Custom themes > Open folder**.
+2. Copy a `.css` token theme into the opened `ModernThemes` folder.
+3. Reopen Settings or switch away/back to refresh the theme grid.
+4. Pick the custom theme and optionally combine it with a built-in or custom
+   accent.
+
+The full guide, including a minimal theme template and the supported token
+contract, lives in [`docs/modern-custom-themes.md`](docs/modern-custom-themes.md).
 
 ## Server Configuration
 
@@ -151,8 +199,13 @@ Mumble clients and servers wherever possible.
 
 Fork-specific features are capability-gated. A forked client connected to an
 older server should keep voice and basic text chat working, while features such
-as persistent rich chat or screen-share controls may be hidden or disabled.
-Stock Mumble clients are not expected to receive full fork feature parity.
+as persistent rich chat, persistent direct messages, stonks, or screen-share
+controls may be hidden or disabled. Ordinary upstream/native clients connected
+to the forked server should still get baseline voice, channel, ACL,
+registration, certificate, and basic text behavior where practical. They are
+not expected to receive full fork feature parity. Modern-only layout is the fork
+desktop client direction, not a reason to remove server-side compatibility paths
+for ordinary Mumble peers.
 
 ## Contributing
 
@@ -168,6 +221,7 @@ Useful starting points:
 - [Introduction to the Mumble source code](docs/dev/TheMumbleSourceCode.md)
 - [Plugin documentation](docs/dev/plugins/README.md)
 - [Build documentation](docs/dev/build-instructions/README.md)
+- [Modern custom themes](docs/modern-custom-themes.md)
 - [Fork chat architecture](docs/chat-architecture.md)
 - [Fork screen-share architecture](docs/screen-sharing-architecture.md)
 

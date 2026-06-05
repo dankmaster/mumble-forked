@@ -10061,6 +10061,41 @@ body[data-density="spacious"].dialog-host .modern-dialog-body {
 	background: var(--choice-swatch-accent, var(--accent));
 }
 
+.modern-dialog-color-picker {
+	display: grid;
+	grid-template-columns: 42px minmax(0, auto);
+	align-items: center;
+	justify-content: end;
+	gap: 9px;
+	min-width: 0;
+}
+
+.modern-dialog-color-picker input[type="color"] {
+	width: 42px;
+	min-width: 42px;
+	height: 33px;
+	min-height: 33px;
+	padding: 2px;
+	border: 1px solid var(--surface-border-subtle);
+	border-radius: 8px;
+	background: var(--shell-highlight);
+	color-scheme: var(--control-color-scheme);
+	cursor: pointer;
+}
+
+.modern-dialog-color-picker input[type="color"]:disabled {
+	opacity: 0.42;
+	cursor: default;
+}
+
+.modern-dialog-color-value {
+	min-width: 7ch;
+	color: var(--text-muted);
+	font-size: 11px;
+	font-weight: 650;
+	text-align: right;
+}
+
 .modern-settings-status {
 	display: flex;
 	align-items: center;
@@ -16076,7 +16111,7 @@ body[data-rail-side="left"] .direct-message-dock {
 }
 
 .mockup-shell .stonks-chat-header-track {
-	--stonks-marquee-gap: 42px;
+	--stonks-marquee-gap: 12px;
 	display: inline-flex;
 	align-items: center;
 	gap: var(--stonks-marquee-gap);
@@ -16090,7 +16125,7 @@ body[data-rail-side="left"] .direct-message-dock {
 	display: inline-flex;
 	align-items: center;
 	flex: 0 0 auto;
-	gap: 12px;
+	gap: var(--stonks-marquee-gap);
 	min-width: max-content;
 	white-space: nowrap;
 }

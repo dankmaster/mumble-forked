@@ -1793,7 +1793,7 @@ void MainWindow::msgPermissionQuery(const MumbleProto::PermissionQuery &msg) {
 	const PersistentChatTarget activeChatTarget = currentPersistentChatTarget();
 	const bool activeChatTargetMatchesPermissionChannel =
 		activeChatTarget.valid && !activeChatTarget.serverLog && !activeChatTarget.directMessage
-		&& !activeChatTarget.legacyTextPath && activeChatTarget.channel
+		&& !activeChatTarget.ephemeralTextPath && activeChatTarget.channel
 		&& activeChatTarget.channel->iId == msg.channel_id();
 	const ChanACL::Permissions previousActiveChatPermissions =
 		activeChatTargetMatchesPermissionChannel

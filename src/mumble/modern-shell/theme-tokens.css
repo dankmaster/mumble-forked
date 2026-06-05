@@ -9,7 +9,7 @@
 
 :root {
 	--theme-supported-themes: dark light engine mocha macchiato frappe latte nord gruvbox;
-	--theme-supported-accents: auto teal blue violet amber rose;
+	--theme-supported-accents: auto teal blue violet amber rose custom;
 	--theme-accent-teal: #5ec8b0;
 	--theme-accent-teal-rgb: 94, 200, 176;
 	--theme-accent-teal-soft: rgba(94, 200, 176, 0.16);

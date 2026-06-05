@@ -9,8 +9,32 @@
 #include "Log.h"
 #include "MainWindow.h"
 #include "Global.h"
+#include "ServerHandler.h"
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+#	include "ModernContextMenuHost.h"
+#endif
 
 #include <QApplication>
+#include <QCursor>
+#include <QVariantMap>
+
+#include <utility>
+
+namespace {
+	QString trayPlainActionText(QString text) {
+		const QChar ampersandPlaceholder(0xE000);
+		const QString placeholder(1, ampersandPlaceholder);
+		text.replace(QStringLiteral("&&"), placeholder);
+		text.remove(QLatin1Char('&'));
+		text.replace(placeholder, QStringLiteral("&"));
+		return text.trimmed();
+	}
+
+	bool trayMainWindowVisible() {
+		return Global::get().mw && Global::get().mw->isVisible() && !Global::get().mw->isMinimized();
+	}
+}
 
 TrayIcon::TrayIcon() : QSystemTrayIcon(Global::get().mw), m_statusIcon(Global::get().mw->qiIcon) {
 	setIcon(m_statusIcon);
@@ -47,14 +71,29 @@ TrayIcon::TrayIcon() : QSystemTrayIcon(Global::get().mw), m_statusIcon(Global::g
 	QObject::connect(m_hideAction, &QAction::triggered, this, &TrayIcon::on_hideAction_triggered);
 
 	m_contextMenu = new QMenu(Global::get().mw);
-	QObject::connect(m_contextMenu, &QMenu::aboutToShow, this, &TrayIcon::updateContextMenu);
+	QObject::connect(m_contextMenu, &QMenu::aboutToShow, this, &TrayIcon::updateNativeContextMenu);
 
 	// Some window managers hate it when a tray icon sets an empty context menu...
-	updateContextMenu();
+	updateNativeContextMenu();
 
+#if defined(MUMBLE_HAS_MODERN_LAYOUT) && !defined(Q_OS_MAC)
+	if (!shouldUseModernContextMenu()) {
+		setContextMenu(m_contextMenu);
+	}
+#else
 	setContextMenu(m_contextMenu);
+#endif
 
 	show();
+}
+
+TrayIcon::~TrayIcon() {
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	if (m_modernContextMenu) {
+		delete m_modernContextMenu.data();
+		m_modernContextMenu.clear();
+	}
+#endif
 }
 
 void TrayIcon::on_icon_update() {
@@ -110,16 +149,22 @@ void TrayIcon::on_icon_clicked(QSystemTrayIcon::ActivationReason reason) {
 			break;
 		case QSystemTrayIcon::Unknown:
 		case QSystemTrayIcon::Context:
+#if defined(MUMBLE_HAS_MODERN_LAYOUT) && !defined(Q_OS_MAC)
+			if (shouldUseModernContextMenu()) {
+				showModernContextMenu();
+			}
+#endif
+			break;
 		case QSystemTrayIcon::DoubleClick:
 		case QSystemTrayIcon::MiddleClick:
 			break;
 	}
 }
 
-void TrayIcon::updateContextMenu() {
+void TrayIcon::updateNativeContextMenu() {
 	m_contextMenu->clear();
 
-	if (Global::get().mw->isVisible() && !Global::get().mw->isMinimized()) {
+	if (trayMainWindowVisible()) {
 		m_hideAction->setEnabled(QSystemTrayIcon::isSystemTrayAvailable());
 		m_contextMenu->addAction(m_hideAction);
 	} else {
@@ -134,8 +179,218 @@ void TrayIcon::updateContextMenu() {
 	m_contextMenu->addAction(Global::get().mw->qaQuit);
 }
 
+void TrayIcon::showNativeFallbackMenu() {
+	if (!m_contextMenu) {
+		return;
+	}
+
+	updateNativeContextMenu();
+	m_contextMenu->popup(QCursor::pos());
+}
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+bool TrayIcon::shouldUseModernContextMenu() const {
+#	if defined(Q_OS_MAC)
+	return false;
+#	else
+	return Global::get().mw && Global::get().mw->usesModernShell();
+#	endif
+}
+
+ModernContextMenuHost *TrayIcon::ensureModernContextMenuHost() {
+	if (m_modernContextMenu) {
+		return m_modernContextMenu.data();
+	}
+
+	ModernContextMenuHost *host = new ModernContextMenuHost();
+	host->setObjectName(QStringLiteral("modernTrayContextMenu"));
+	m_modernContextMenu = host;
+
+	QObject::connect(host, &ModernContextMenuHost::actionRequested, this,
+					 [this](const QString &token, const int actionIndex) {
+						 if (token != m_modernContextMenuToken || actionIndex < 0
+							 || actionIndex >= m_modernContextMenuHandlers.size()) {
+							 return;
+						 }
+
+						 const std::function< void() > handler = m_modernContextMenuHandlers.at(actionIndex);
+						 if (handler) {
+							 handler();
+						 }
+					 });
+
+	QObject::connect(host, &ModernContextMenuHost::popupClosed, this, [this](const QString &token) {
+		if (token == m_modernContextMenuToken) {
+			clearModernContextMenuState();
+		}
+	});
+
+	QObject::connect(host, &ModernContextMenuHost::hostFailed, this, [this](const QString &reason) {
+		Q_UNUSED(reason);
+		const bool shouldFallback = !m_modernContextMenuToken.isEmpty();
+		clearModernContextMenuState();
+		if (m_modernContextMenu) {
+			ModernContextMenuHost *host = m_modernContextMenu.data();
+			m_modernContextMenu.clear();
+			host->deleteLater();
+		}
+		if (shouldFallback) {
+			showNativeFallbackMenu();
+		}
+	});
+
+	return host;
+}
+
+bool TrayIcon::showModernContextMenu() {
+	ModernContextMenuHost *host = ensureModernContextMenuHost();
+	if (!host) {
+		showNativeFallbackMenu();
+		return false;
+	}
+
+	const QVariantList items = buildModernContextMenuItems();
+	if (items.isEmpty()) {
+		showNativeFallbackMenu();
+		return false;
+	}
+
+	m_modernContextMenuToken = QStringLiteral("tray:%1").arg(++m_modernContextMenuSerial);
+	const QString token = m_modernContextMenuToken;
+	const bool shown =
+		host->showMenuAtGlobalPosition(token, items, QCursor::pos(), QString(), Global::get().mw->modernTrayMenuUiTweaks());
+	if (!shown) {
+		if (m_modernContextMenuToken == token) {
+			clearModernContextMenuState();
+			showNativeFallbackMenu();
+		}
+		return false;
+	}
+
+	return true;
+}
+
+QVariantList TrayIcon::buildModernContextMenuItems() {
+	QVariantList items;
+	m_modernContextMenuHandlers.clear();
+
+	MainWindow *mw = Global::get().mw;
+	if (!mw) {
+		return items;
+	}
+
+	mw->on_qmServer_aboutToShow();
+	mw->on_qmSelf_aboutToShow();
+	mw->on_qmConfig_aboutToShow();
+
+	const QVariantMap profileHeader = mw->modernTrayProfileHeaderState();
+	if (!profileHeader.isEmpty()) {
+		items.push_back(profileHeader);
+	}
+
+	if (trayMainWindowVisible()) {
+		appendModernTrayAction(items, QStringLiteral("window.hide"), tr("Hide"),
+							   QSystemTrayIcon::isSystemTrayAvailable(), false, QStringLiteral("eye-off"),
+							   QString(), [this]() { on_hideAction_triggered(); });
+	} else {
+		appendModernTrayAction(items, QStringLiteral("window.show"), tr("Show"), true, false,
+							   QStringLiteral("log-in"), QString(), [this]() { on_showAction_triggered(); });
+	}
+
+	appendModernTraySeparator(items);
+
+	appendModernTrayAction(items, QStringLiteral("self.toggleMute"), tr("Mute Self"),
+						   mw->qaAudioMute ? mw->qaAudioMute->isEnabled() : true, Global::get().s.bMute,
+						   QStringLiteral("mic"), QString(), [mw]() {
+							   if (mw) {
+								   mw->handleModernShellAppAction(QStringLiteral("self.toggleMute"));
+							   }
+						   });
+	appendModernTrayAction(items, QStringLiteral("self.toggleDeaf"), tr("Deafen Self"),
+						   mw->qaAudioDeaf ? mw->qaAudioDeaf->isEnabled() : true, Global::get().s.bDeaf,
+						   QStringLiteral("headphones"), QString(), [mw]() {
+							   if (mw) {
+								   mw->handleModernShellAppAction(QStringLiteral("self.toggleDeaf"));
+							   }
+						   });
+
+	appendModernTraySeparator(items);
+
+	const bool connected = Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning();
+	if (connected) {
+		appendModernTrayAction(items, QStringLiteral("server.disconnect"), tr("Disconnect"),
+							   mw->qaServerDisconnect ? mw->qaServerDisconnect->isEnabled() : true, false,
+							   QStringLiteral("log-out"), QStringLiteral("danger"), [mw]() {
+								   if (mw) {
+									   mw->handleModernShellAppAction(QStringLiteral("server.disconnect"));
+								   }
+							   });
+	} else {
+		appendModernTrayAction(items, QStringLiteral("server.connect"), tr("Connect"),
+							   mw->qaServerConnect ? mw->qaServerConnect->isEnabled() : true, false,
+							   QStringLiteral("log-in"), QString(), [mw]() {
+								   if (mw) {
+									   mw->handleModernShellAppAction(QStringLiteral("server.connect"));
+								   }
+							   });
+	}
+
+	appendModernTrayAction(items, QStringLiteral("configure.settings"), tr("Settings"), true, false,
+						   QStringLiteral("settings"), QString(), [mw]() {
+							   if (mw) {
+								   mw->handleModernShellAppAction(QStringLiteral("configure.settings"));
+							   }
+						   });
+
+	appendModernTraySeparator(items);
+
+	QString quitLabel = mw->qaQuit ? trayPlainActionText(mw->qaQuit->text()) : QString();
+	if (quitLabel.isEmpty()) {
+		quitLabel = tr("Quit Mumble");
+	}
+	appendModernTrayAction(items, QStringLiteral("server.quit"), quitLabel,
+						   mw->qaQuit ? mw->qaQuit->isEnabled() : true, false, QStringLiteral("log-out"),
+						   QStringLiteral("danger"), [mw]() {
+							   if (mw) {
+								   mw->handleModernShellAppAction(QStringLiteral("server.quit"));
+							   }
+						   });
+
+	return items;
+}
+
+void TrayIcon::clearModernContextMenuState() {
+	m_modernContextMenuToken.clear();
+	m_modernContextMenuHandlers.clear();
+}
+
+void TrayIcon::appendModernTraySeparator(QVariantList &items) const {
+	QVariantMap separator;
+	separator.insert(QStringLiteral("kind"), QStringLiteral("separator"));
+	items.push_back(separator);
+}
+
+void TrayIcon::appendModernTrayAction(QVariantList &items, const QString &id, const QString &label, const bool enabled,
+									  const bool checked, const QString &icon, const QString &tone,
+									  std::function< void() > handler) {
+	QVariantMap item;
+	item.insert(QStringLiteral("kind"), QStringLiteral("action"));
+	item.insert(QStringLiteral("id"), id);
+	item.insert(QStringLiteral("label"), label);
+	item.insert(QStringLiteral("enabled"), enabled);
+	item.insert(QStringLiteral("checked"), checked);
+	item.insert(QStringLiteral("icon"), icon);
+	if (!tone.isEmpty()) {
+		item.insert(QStringLiteral("tone"), tone);
+	}
+	item.insert(QStringLiteral("actionIndex"), m_modernContextMenuHandlers.size());
+	m_modernContextMenuHandlers.push_back(std::move(handler));
+	items.push_back(item);
+}
+#endif
+
 void TrayIcon::on_toggleShowHide() {
-	if (Global::get().mw->isVisible() && !Global::get().mw->isMinimized()) {
+	if (trayMainWindowVisible()) {
 		on_hideAction_triggered();
 	} else {
 		on_showAction_triggered();
@@ -144,7 +399,7 @@ void TrayIcon::on_toggleShowHide() {
 
 void TrayIcon::on_showAction_triggered() {
 	Global::get().mw->showRaiseWindow();
-	updateContextMenu();
+	updateNativeContextMenu();
 }
 
 void TrayIcon::on_hideAction_triggered() {
@@ -170,7 +425,7 @@ void TrayIcon::on_hideAction_triggered() {
 	Global::get().mw->setWindowState(Global::get().mw->windowState() | Qt::WindowMinimized);
 #endif
 
-	updateContextMenu();
+	updateNativeContextMenu();
 }
 
 void TrayIcon::on_windowMinimized() {

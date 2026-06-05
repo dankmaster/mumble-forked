@@ -6,7 +6,8 @@ This document covers the server-side requirements for persistent rich chat media
 
 This build supports:
 
-- persistent structured chat bodies for channel, text-channel, and optional server-global scopes
+- persistent structured chat bodies for channel, text-channel, optional
+  server-global, and private/direct-message scopes
 - authenticated asset upload initialization, chunked upload, commit, and ranged download over the existing Mumble control channel
 - server-side asset metadata persistence in the database
 - server-side object storage on local disk
@@ -15,6 +16,9 @@ This build supports:
 - server-authoritative URL preview metadata and bitmap thumbnails, with one
   capable client allowed to assist before Murmur falls back to its own public
   HTTPS fetch path
+- direct-message history when `ChatFeatureDirectMessages` is advertised and
+  both participants have registered user identities
+- actor avatar hashes for richer Modern chat presentation
 - per-message attachment count limits
 - MIME allowlisting and asset-size / storage-quota enforcement
 - background cleanup of abandoned temporary upload files
@@ -88,6 +92,8 @@ These values mean:
 - 25 MiB max per asset
 - 2 GiB per-server stored asset quota
 - 4 attachments per message
+- URL previews stay off until explicitly enabled; when enabled, client assist is
+  the default first attempt and Murmur remains authoritative
 
 ## Storage Layout
 

@@ -1,208 +1,167 @@
 # Screen Sharing Architecture
 
+Status snapshot: 2026-06-05.
+
+Screen sharing is an experimental fork feature. The control plane is wired into
+Mumble/Murmur, and the media path is intentionally kept outside the normal voice
+transport.
+
 ## Goal
 
-Build a fork-specific screen sharing system for Mumble with the following direction:
+Build a fork-specific screen sharing system with:
 
-1. Live desktop or window sharing
-2. Discord-like perceived quality
-3. Voice chat remains on the existing Mumble transport
-4. Recording is optional and comes after live viewing works
+1. live desktop or window sharing
+2. Discord-like perceived quality on the private community server
+3. ordinary Mumble voice remaining on the existing Opus transport
+4. optional recording only after live viewing is reliable
 
-This should be treated as a client + server feature set, not as a Murmur-only patch.
+## Current Status
 
-## Feasibility Summary
+Implemented or wired today:
 
-Short version:
+- `Version` capability advertisement for signaling, capture, viewing, codecs,
+  dimensions, and FPS
+- `ServerConfig` policy advertisement for enablement, recording policy, helper
+  requirement, codec preferences, relay URL, maximum dimensions/FPS, and relay
+  settings
+- fork feature gate for richer screen-share presence
+- `ScreenShareCreate`, `ScreenShareState`, `ScreenShareOffer`,
+  `ScreenShareAnswer`, `ScreenShareIceCandidate`, and `ScreenShareStop`
+  protocol messages
+- Murmur state and policy handling for active sessions and relay-token metadata
+- client-side `ScreenShareManager`
+- external `mumble-screen-helper`
+- local helper IPC over `QLocalSocket`
+- helper capability probing and self-test hooks
+- Windows capture/runtime probing for GStreamer D3D11 LiveKit, Windows Graphics
+  Capture, D3D11 Desktop Duplication, `gdigrab`, and test-pattern capture
+- Linux helper probing for X11/ffmpeg capture, test-pattern capture, and
+  PipeWire runtime diagnostics
+- GStreamer/LiveKit publish and view capability checks where the runtime is
+  packaged
+- Modern shell picker/status/toast integration and native fallback dialogs for
+  narrow non-modern paths
 
-- reliable Discord-style screen sharing is not realistic on the current Mumble media transport
-- it is realistic on this server only if media is moved to a separate screen-share transport and relay
-- the current server looks fine for signaling and a small-group relay, but uplink capacity still has to be measured before promising higher resolutions or many viewers
+Not promised yet:
 
-## Why This Needs A Fork
+- production-grade screen-share reliability
+- multi-platform parity
+- recording
+- multi-stream mosaic
+- stock upstream client viewing support
 
-Current Mumble transport is still fundamentally voice-oriented:
+## Why Video Is Not On Mumble Voice Transport
+
+Current Mumble transport is voice-oriented:
 
 - UDP messages are only `Audio` and `Ping`
 - UDP packet size is capped at `1024` bytes
 - the primary real-time payload is Opus audio
-- `PluginDataTransmission` is a TCP relay intended for plugins, not media streaming
+- `PluginDataTransmission` is a TCP relay intended for plugins, not media
+  streaming
 
-In this codebase, plugin relay payloads are capped at `1000` bytes and rate-limited on the server. That makes them useful for control messages, but not for video frames.
-
-Because of that, Discord-class screen sharing is not a matter of adding a widget or a server toggle. It needs:
-
-- new client capture and encode paths
-- new signaling messages
-- a real media transport for video
-- new viewer UI
-- ACL and moderation rules for starting and viewing streams
+Plugin relay payloads are capped and rate-limited on the server. They are
+useful for control messages, but not for video frames. The fork therefore uses
+Mumble only for auth, policy, presence, and signaling.
 
 ## Compatibility Direction
 
-Backward compatibility must be explicit:
+Backward compatibility is explicit:
 
-- old clients on new servers must keep voice and text working normally
-- new clients on old servers must keep voice and text working normally
-- screen sharing itself is a fork feature and may degrade to unavailable, but it must not break the base session
+- new client + new server: screen share may be available when server policy and
+  helper/runtime capabilities allow it
+- new client + old server: voice and chat work; screen-share UI is hidden or
+  disabled and screen-share messages are not sent
+- old client + new server: ordinary voice and text behavior continue; the server
+  does not push screen-share messages to unsupported clients
+- old client + old server: unchanged
 
-Compatibility matrix:
+Unsupported peers are not expected to watch streams. They should simply keep
+working as normal Mumble peers.
 
-- `new client <-> new server`: full screen-share feature set
-- `new client <-> old server`: hide or disable screen-share UI and never send screen-share messages
-- `old client <-> new server`: keep core voice and text behavior unchanged and never push screen-share messages to that client
-- `old client <-> old server`: unchanged
+## Architecture
 
-Important constraint:
+The implementation is split into three planes:
 
-- backward compatibility does not mean stock clients can watch the new screen-share stream
-- it means unsupported peers remain fully usable for normal Mumble behavior
+- `Mumble/Murmur control plane`: auth, ACL, channel membership, stream
+  permissions, session state, relay metadata, and compatibility gating
+- `Client-side screen helper`: capture, encode/decode, external runtime launch,
+  local diagnostics, self-test, and viewer/publisher process supervision
+- `External media relay`: LiveKit/WebRTC fanout, congestion control, NAT
+  traversal support, and optional future recording tap
 
-## Capability Negotiation Direction
+The main client communicates with the helper through a narrow IPC command
+surface:
 
-Do not assume unknown TCP message types are safe to spray at older peers.
+- query capabilities
+- list sources
+- start/stop publish
+- start/stop view
+- self-test
 
-Preferred compatibility strategy:
+## Media Runtime
 
-- advertise support using added optional fields on existing protobuf messages that old peers already parse, such as `Version` and `ServerConfig`
-- only send new screen-share-specific message types after both client and server have explicitly advertised support
-- track support per session, not just per server version
+The helper prefers proven external media runtimes instead of embedding a custom
+SFU or video stack in Murmur.
 
-That gives a safe rollout path because unknown fields inside known protobuf messages are discarded by older peers, while brand-new message types stay gated until both sides opt in.
+Current runtime shape:
 
-## Non-Goals
-
-Do not pursue these paths:
-
-- tunneling video through existing Mumble audio UDP packets
-- tunneling video through `PluginDataTransmission`
-- tunneling video through `TextMessage`
-- server-side transcoding in the MVP
-- server-side recording in the MVP
-
-Those approaches will be brittle, inefficient, and far below the quality target.
-
-## Recommended Architecture
-
-Preferred direction:
-
-- keep Murmur responsible for auth, presence, channels, and control-plane permissions
-- add a separate screen-share media service for the actual video path
-- let forked clients use new signaling messages to negotiate screen-share sessions
-- use SFU-style fanout for viewers instead of having Murmur duplicate media itself
-
-Suggested pieces:
-
-- `Murmur`: auth, ACL, channel membership, stream permissions, stream metadata
-- `Screen relay service`: LiveKit/WebRTC SFU for low-latency video fanout
-- `TURN/STUN`: connectivity support for NAT traversal
-- `Forked client`: GStreamer helper with screen capture, hardware H.264 encode
-  when available, decode/render for viewers
-
-## Reliability Direction
-
-Reliable on this server:
-
-- control-plane signaling
-- auth and permission checks
-- small-room screen sharing if media is handled by a proper relay
-
-Not reliable on this server:
-
-- relaying Discord-style screen video through stock Mumble transport
-- scaling one shared stream to many viewers by abusing TCP plugin messages
-
-Practical expectation for a first target:
-
-- keep `720p30` H.264 as the safe default picker choice
-- use client-side bitrate adaptation and FPS-before-resolution degradation
-- expose `720p`, `1080p`, and `1440p` at `30 FPS` or `60 FPS` when the server
-  and local runtime advertise those limits
-- assume bandwidth scales with viewers when using a relay, even if server CPU stays moderate
-
-## Protocol Direction
-
-Use Mumble only for signaling and policy.
-
-Capability gating comes first.
-
-Add new fork-specific protocol messages for control, for example:
-
-- `ScreenShareCreate`
-- `ScreenShareState`
-- `ScreenShareOffer`
-- `ScreenShareAnswer`
-- `ScreenShareIceCandidate`
-- `ScreenShareStop`
-
-These messages should describe:
-
-- who is sharing
-- which channel or sessions may view
-- what codec or quality profile is requested
-- how the client connects to the relay
-
-Do not send encoded video payloads inside these messages.
-Do not send these messages at all until both sides have advertised screen-share support.
-
-## Client Direction
-
-The client work is substantial and platform-specific:
-
-- screen or window picker
-- start/stop share controls
-- capture pipeline
-- encoder selection and quality presets
-- viewer surface in the main UI
-- mute/deafen and screen-share interaction rules
-
-Recommended MVP:
-
-1. Start one screen share in a channel
-2. Watch from forked clients only
-3. No recording
-4. No multi-stream mosaic
-5. No upstream compatibility promise for this feature
+- WebRTC relay sessions are represented by `ScreenShareRelayTransportWebRTC`
+- direct/test transports remain useful for diagnostics and local verification
+- H.264 is the practical first codec, with AV1, VP9, and VP8 advertised when the
+  helper runtime can actually execute them
+- default quality is `1280x720` at `30 FPS`; picker/server limits can expose
+  up to `2560x1440` at `144 FPS`, while capture hard caps go to `3840x2160` at
+  `144 FPS`
+- bitrate is selected from codec, resolution, FPS, and quality profile, then
+  clamped by policy
 
 ## Server Direction
 
-Murmur changes should stay narrow:
+Murmur stays narrow:
 
-- validate whether a user may start a share
-- expose stream state to other clients
-- tear down shares when users disconnect or switch context
-- optionally mint short-lived relay tokens
+- validate whether a user may start or view a share
+- expose stream state to supporting clients
+- tear down shares when users disconnect or lose context
+- mint short-lived relay metadata/tokens when LiveKit credentials are
+  configured
+- advertise policy through `ServerConfig`
 
-The relay service should handle:
+Murmur should not duplicate encoded video or transcode media.
 
-- video transport
-- viewer fanout
-- congestion control
-- bitrate adaptation
+## Client Direction
+
+The Modern shell should remain the main UX:
+
+- start/stop share from the current room
+- themed source/quality picker
+- visible stream state in room context
+- watch/focus/reopen controls
+- clear helper/runtime diagnostics
+- toast-based failure reporting for Modern users
+
+The native dialog path can remain as a narrow fallback while non-modern builds
+still exist.
 
 ## Recording Direction
 
-If recording is desired later, add it after live sharing works.
+Recording remains deferred. If it lands, prefer relay-side recording or a helper
+subscriber that writes asynchronously. It should not sit on the critical live
+publish/view path.
 
-Preferred direction:
+## Verification Needed Before Calling It Stable
 
-- have the relay subscribe to the screen-share stream and write a file asynchronously
-- keep recording off the critical path for the first release
+Before screen sharing becomes a production feature, verify:
 
-That avoids making the live path depend on muxing or disk I/O.
+- real Windows publish/view sessions using the packaged GStreamer LiveKit
+  runtime
+- helper crash and restart behavior
+- publisher disconnect, viewer disconnect, channel move, and permission loss
+- `720p30`, `1080p30`, and one high-FPS/high-resolution path on the target
+  machine
+- relay TLS/TURN/firewall behavior for real users
+- failure messages in the Modern UI and diagnostics logs
 
-## First Implementation Slice
-
-Recommended first coding slice:
-
-1. Add protocol messages for screen-share signaling only
-2. Add Murmur session and ACL handling for a single active share per channel
-3. Add a minimal relay service stub and client negotiation flow
-4. Add a client UI entry point for start/stop share
-5. Prove end-to-end `720p30` for one sharer and one viewer
-
-## Branching
-
-Suggested working branch for this feature:
-
-- `feature/screen-recording`
+See [`screen-sharing-implementation-plan.md`](screen-sharing-implementation-plan.md)
+for the phase ledger and [`screen-sharing-relay-deployment.md`](screen-sharing-relay-deployment.md)
+for relay deployment notes.

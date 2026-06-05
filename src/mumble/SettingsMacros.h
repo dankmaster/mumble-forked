@@ -186,6 +186,8 @@
 	PROCESS(ui, MODERN_SHELL_CLASSIC_USER_ICONS_KEY, bModernShellClassicUserIcons)         \
 	PROCESS(ui, MODERN_SHELL_RAIL_SIDE_KEY, qsModernShellRailSide)                        \
 	PROCESS(ui, MODERN_SHELL_ACCENT_KEY, qsModernShellAccent)                             \
+	PROCESS(ui, MODERN_SHELL_CUSTOM_ACCENT_KEY, qsModernShellCustomAccent)                 \
+	PROCESS(ui, MODERN_SHELL_CUSTOM_ACCENT_STRENGTH_KEY, iModernShellCustomAccentStrength) \
 	PROCESS(ui, MODERN_SHELL_TICKER_BANNER_ENABLED_KEY, bModernShellTickerBannerEnabled)  \
 	PROCESS(ui, MODERN_SHELL_TICKER_ALWAYS_SCROLL_KEY, bModernShellTickerBannerAlwaysScroll) \
 	PROCESS(ui, CONFIG_GEOMETRY_KEY, qbaConfigGeometry)                                   \

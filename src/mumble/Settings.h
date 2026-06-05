@@ -299,6 +299,14 @@ struct Settings {
 
 	QString qsLanguage = {};
 
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	StyleType styleType = StyleType::Auto;
+	/// Classic QSS theme settings are ignored by the modern-only client.
+	QString themeName;
+	QString themeStyleName;
+	QString themeDarkName;
+	QString themeDarkStyleName;
+#else
 	StyleType styleType = StyleType::Auto;
 	/// Name of the theme to use. @see Themes
 	QString themeName = QStringLiteral("Mumble");
@@ -308,6 +316,7 @@ struct Settings {
 	QString themeDarkName = QStringLiteral("Mumble");
 	/// Name of the style to use from theme. @see Themes
 	QString themeDarkStyleName = QStringLiteral("Dark");
+#endif
 
 	QByteArray qbaMainWindowGeometry          = {};
 	QByteArray qbaMainWindowState             = {};
@@ -325,11 +334,13 @@ struct Settings {
 	bool bModernShellClassicUserIcons         = false;
 	QString qsModernShellRailSide             = QStringLiteral("right");
 	QString qsModernShellAccent               = QStringLiteral("auto");
+	QString qsModernShellCustomAccent         = QStringLiteral("#5ec8b0");
+	int iModernShellCustomAccentStrength      = 50;
 	bool bModernShellTickerBannerEnabled      = true;
 	bool bModernShellTickerBannerAlwaysScroll = false;
 	QByteArray qbaConfigGeometry              = {};
 	QByteArray qbaImagePreviewGeometry        = {};
-	WindowLayout wlWindowLayout               = LayoutHybrid;
+	WindowLayout wlWindowLayout               = LayoutModern;
 	ModernLayoutPolicy modernLayoutPolicy     = ModernLayoutForced;
 	ChannelExpand ceExpand                    = ChannelsWithUsers;
 	ChannelDrag ceChannelDrag                 = Ask;
@@ -340,7 +351,7 @@ struct Settings {
 	QuitBehavior quitBehavior                 = QuitBehavior::ALWAYS_ASK;
 	bool bEnableDeveloperMenu                 = false;
 	bool bLockLayout                          = false;
-	bool bAutoSwitchModernOnCompatibleServers = true;
+	bool bAutoSwitchModernOnCompatibleServers = false;
 	bool bHideInTray                          = false;
 	bool bStateInTray                         = true;
 	bool bUsage                               = false;

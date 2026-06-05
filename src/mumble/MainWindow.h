@@ -144,6 +144,8 @@ private:
 	Q_DISABLE_COPY(MainWindow)
 public:
 	bool isServerLogViewVisible() const;
+	bool shouldMirrorServerLogToNativeWidget() const;
+	void setServerLogMaximumBlockCount(int maxBlocks);
 	UserModel *pmModel;
 	QMenu *qmUser;
 	QMenu *qmChannel;
@@ -219,8 +221,13 @@ public:
 	bool usesModernShell() const;
 	void refreshShellLayout();
 	void applyShellLayout();
+#if !defined(MUMBLE_HAS_MODERN_LAYOUT)
 	void activateLegacyShell();
+#endif
 	void activateModernShell();
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	void showModernShellFailureNotice(const QString &reason);
+#endif
 	void queueModernShellSnapshotSync();
 	void queueModernShellSnapshotSyncImmediate();
 	void queueModernShellSnapshotSyncInternal(bool immediate);
@@ -244,7 +251,7 @@ public:
 	struct PersistentChatTarget {
 		bool valid                   = false;
 		bool directMessage           = false;
-		bool legacyTextPath          = false;
+		bool ephemeralTextPath          = false;
 		bool readOnly                = false;
 		bool serverLog               = false;
 		ClientUser *user             = nullptr;
@@ -378,7 +385,7 @@ public:
 	void storeState(bool minimalView);
 
 	bool hasPersistentChatCapabilities() const;
-	PersistentChatTarget legacyChatTarget() const;
+	PersistentChatTarget ephemeralChatTarget() const;
 	PersistentChatTarget currentPersistentChatTarget() const;
 	void refreshPersistentChatView(bool forceReload = false);
 	void requestOlderPersistentChatHistory();
@@ -509,7 +516,7 @@ public:
 	void flushPersistentChatInlineDataImageWarmups();
 	void setPersistentChatContentMode(bool showServerLog, bool preserveScrollPosition = false,
 									  bool showComposer = false);
-	void renderLegacyActivityView(bool preserveScrollPosition = false);
+	void renderEphemeralLogView(bool preserveScrollPosition = false);
 	void renderServerLogView(bool preserveScrollPosition = false);
 	void flushPersistentChatRender();
 	void renderPersistentChatViewImmediately(const QString &statusMessage = QString(), bool scrollToBottom = true,
@@ -581,7 +588,9 @@ public:
 	void publishPersistentChatInlineDataImageUpdate(const QString &token);
 	void publishModernShellActiveScopePatch(const QString &kind);
 	void publishModernShellRoomStatePatch();
-	void publishModernShellServerLogPatch(int position, int charsRemoved, int charsAdded);
+	QString modernServerLogHtml() const;
+	void publishModernShellServerLogUpdate(const PersistentChatTarget &target);
+	void publishModernShellServerLogReset(const PersistentChatTarget &target);
 	void clearModernShellMessageDtoCache(const char *reason);
 	void evictModernShellMessageDtoCacheForMessage(const MumbleProto::ChatMessage &message);
 	void publishModernShellPreviewUpdateForKey(const QString &previewKey);
@@ -647,6 +656,8 @@ public:
 									  const QString &placement);
 	bool handleModernShellAppAction(const QString &actionId);
 	bool handleModernShellAppActionPayload(const QString &actionId, const QVariantMap &payload);
+	QVariantMap modernTrayMenuUiTweaks() const;
+	QVariantMap modernTrayProfileHeaderState() const;
 	void publishModernToast(const QString &kind, const QString &title, const QString &message,
 							const QString &actionID = QString(), const QString &actionLabel = QString(),
 							int timeoutMs = 4500);
@@ -820,7 +831,6 @@ protected:
 	QLabel *m_serverNavigatorFooterPresence                    = nullptr;
 	QPointer< QWidget > m_serverNavigatorUserMenuPopup;
 	QWidget *m_persistentChatContainer                             = nullptr;
-	QWidget *m_logSurface                                          = nullptr;
 	QWidget *m_persistentChatComposerInputRow                      = nullptr;
 	QFrame *m_persistentChatHeaderFrame                            = nullptr;
 	QLabel *m_persistentChatHeaderEyebrow                          = nullptr;
@@ -910,6 +920,7 @@ protected:
 	qint64 m_modernShellLastSnapshotSyncMs        = 0;
 	quint64 m_modernShellServerLogRevision        = 1;
 	quint64 m_modernShellServerLogHtmlRevision    = 0;
+	LogDocument *m_modernServerLogDocument        = nullptr;
 	QJsonObject m_updateResumeState;
 	bool m_updateResumePending                 = false;
 	bool m_updateResumeConnectAttempted        = false;
@@ -975,7 +986,6 @@ protected:
 	bool m_shellLayoutInitialized              = false;
 	Settings::WindowLayout m_activeShellLayout = Settings::LayoutModern;
 	bool m_modernLayoutCompatibleServer        = false;
-	bool m_modernShellRuntimeDisabled          = false;
 	bool m_nativeWindowMoveResizeActive        = false;
 
 	std::stack< unsigned int > m_previousChannels;
@@ -1124,6 +1134,7 @@ protected:
 	void autocompleteUsername();
 
 public slots:
+	void appendModernServerLogEntry(const QString &html);
 	void on_qmServer_aboutToShow();
 	void on_qaServerConnect_triggered(bool autoconnect = false);
 	void on_qaServerDisconnect_triggered();

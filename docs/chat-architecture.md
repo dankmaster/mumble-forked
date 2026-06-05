@@ -1,228 +1,226 @@
 # Chat Architecture
 
+Status snapshot: 2026-06-05.
+
+This document describes the fork-specific chat system as it exists today. It is
+a client + server subsystem, not an overload of Mumble's transient
+`TextMessage` path.
+
 ## Goal
 
-Build a fork-specific chat system for Mumble with the following rollout:
+The fork chat goal is to make rooms feel persistent and media-capable while
+keeping ordinary Mumble voice behavior intact:
 
-1. Persistent channel chat history
-2. Optional server-global chat thread
-3. Text-only first
-4. Link previews / richer embeds
-5. Attachments / richer media improvements
-
-This should be treated as a client + server feature set, not as a server-only patch.
+1. stored voice-room and text-room history
+2. optional server-global chat
+3. direct messages with persistent history when the server and identities allow
+   it
+4. rich link previews and typed media assets
+5. capability-gated fallback for unsupported clients and servers
 
 ## Why This Needs A Fork
 
-Current Mumble text chat is routed as a transient `TextMessage` with only:
+Upstream Mumble text chat is routed as a transient `TextMessage` with only:
 
 - sender session
 - target sessions
 - target channels / trees
 - message body
 
-There is no first-class concept of:
+The fork adds first-class concepts that need protocol messages, server storage,
+and Modern client UI:
 
 - chat threads
-- message IDs
-- history
+- stable message IDs
+- history pagination
 - read state
-- attachments
+- replies
+- deletion
+- reactions
+- typed attachments
 - structured embeds
-
-Those concepts need new protocol messages, new server storage, and new client UI.
-
-## Product Direction
-
-Introduce a new chat subsystem with explicit scopes:
-
-- `private`
-- `channel`
-- `server_global`
-
-The server-global chat is not a broadcast hack. It is just a thread with a different scope.
+- direct-message history
 
 ## Compatibility Direction
 
-Preferred direction:
+Fork chat is negotiated explicitly:
 
-- New forked clients talk to new forked servers using new chat messages.
-- Existing Mumble voice behavior should keep working.
-- Legacy `TextMessage` should remain functional for basic interoperability where practical.
+- new forked clients and servers use the `Chat*` protocol messages
+- old clients and servers keep voice and basic text chat behavior where
+  practical
+- unsupported fork messages are not sent to clients that have not advertised
+  support
+- ordinary upstream/native clients can still connect to the forked server for
+  baseline Mumble behavior
+- those clients are not expected to render full persistent rich chat
 
-Non-goal:
+The transient `TextMessage` path still exists for basic interoperability and for
+private non-persistent direct-message mode, but it is not the primary wire
+format for persistent rooms.
 
-- Full feature parity for persistent chat on stock upstream clients.
+## Protocol Surface
+
+Fine-grained support is advertised through `ChatFeature` values in
+`Version` and `ServerConfig`.
+
+Current feature bits:
+
+- `ChatFeaturePersistentHistory`
+- `ChatFeatureHistoryPagination`
+- `ChatFeatureReadState`
+- `ChatFeatureReactions`
+- `ChatFeatureMessageDelete`
+- `ChatFeatureAttachments`
+- `ChatFeatureEmbeds`
+- `ChatFeatureHistoryGrants`
+- `ChatFeatureTextChannels`
+- `ChatFeatureDirectMessages`
+- `ChatFeatureHistoryWarmup`
+- `ChatFeatureActorAvatars`
+
+Current protocol messages include:
+
+- `ChatSend`
+- `ChatMessage`
+- `ChatMessageDelete`
+- `ChatHistoryRequest`
+- `ChatHistoryWarmupRequest`
+- `ChatHistoryResponse`
+- `ChatReadStateUpdate`
+- `ChatHistoryGrantSync`
+- `ChatAssetUploadInit`
+- `ChatAssetUploadChunk`
+- `ChatAssetUploadCommit`
+- `ChatAssetState`
+- `ChatAssetRequest`
+- `ChatAssetChunk`
+- `ChatEmbedState`
+- `ChatEmbedAssistRequest`
+- `ChatEmbedAssistResult`
+- `ChatReactionToggle`
+- `ChatReactionState`
+- `TextChannelSync`
+
+## Scope Model
+
+Current chat scopes are:
+
+- `Channel`: persistent history for a voice room
+- `TextChannel`: persistent history for a dedicated text room
+- `ServerGlobal`: optional server-global persistent thread, gated by
+  `persistentglobalchat`
+- `Private`: direct-message history when both endpoint support and registered
+  identities are available
+- `Aggregate`: client presentation scope for combined readable activity; not a
+  normal send target
+
+Private/direct-message behavior is intentionally dual-mode in the Modern
+client. When the server advertises `ChatFeatureDirectMessages` and both users
+have registered identities, the client can request persistent private history.
+Otherwise the Modern direct-message tray uses private non-persistent
+`TextMessage` transport and keeps it separate from room chat.
 
 ## Server Model
 
-Initial schema direction:
+The server stores persistent chat in first-class tables. The important current
+tables include:
 
 - `chat_threads`
 - `chat_messages`
 - `chat_read_state`
-
-Possible future tables:
-
-- `chat_attachments`
+- `chat_message_reactions`
+- `chat_history_grants`
+- `chat_assets`
+- `chat_message_attachments`
 - `chat_message_embeds`
-- `chat_moderation_events`
+- `text_channels`
 
-Suggested minimum fields:
-
-### `chat_threads`
-
-- `thread_id`
-- `server_id`
-- `scope`
-- `scope_key` canonical scope identifier
-- `created_by_user_id`
-- `created_at`
-- `updated_at`
-
-Examples for `scope_key`:
+Thread scope keys are canonicalized by scope. Examples:
 
 - `channel:42`
+- `text-channel:7`
 - `global`
-- `users:12:98`
+- `private:12:98`
 
-### `chat_messages`
+History visibility follows channel permissions for room/text scopes. Private
+threads are visible only to the registered users that form the private scope.
 
-- `message_id`
-- `thread_id`
-- `author_user_id` nullable for system messages
-- `author_session` nullable
-- `body_markdown` or `body_text`
-- `body_html` nullable
-- `created_at`
-- `edited_at` nullable
-- `deleted_at` nullable
+## Rich Media Model
 
-### `chat_read_state`
+Attachments and preview assets are stored by Murmur and transferred over the
+authenticated Mumble control connection. The current media path supports:
 
-- `thread_id`
-- `user_id`
-- `last_read_message_id`
-- `updated_at`
+- upload initialization, chunk upload, commit, and ranged download
+- per-message attachment count limits
+- per-asset and total-storage quota controls
+- local filesystem object storage under a per-server root
+- temporary upload cleanup for abandoned incoming files
+- image normalization, EXIF orientation handling, and metadata stripping
+- server-generated preview derivatives for uploaded images
+- preview-cache assets for selected remote URL media
+- MIME allowlisting for images, videos, documents, and binary downloads
 
-## Protocol Direction
+See [`rich-chat-server.md`](rich-chat-server.md) for operations and rollout
+details.
 
-Do not overload the current `TextMessage` message for persistence and history sync.
+## Embed / Preview Model
 
-Add new protocol messages for fork-specific chat, e.g.:
+The preview system is server-authoritative and optionally client-assisted:
 
-- `ChatSend`
-- `ChatMessage`
-- `ChatHistoryRequest`
-- `ChatHistoryResponse`
-- `ChatThreadState`
-- `ChatReadStateUpdate`
+- Murmur creates pending embed rows for supported URLs.
+- Murmur may lease one public HTTPS preview attempt to one capable client.
+- The assisting client returns bounded metadata and thumbnail bytes.
+- Murmur sanitizes thumbnail bytes, stores assets, persists metadata, and
+  broadcasts `ChatEmbedState`.
+- If no usable assist result arrives, Murmur falls back to its own bounded
+  public HTTPS fetch path when preview fetching is enabled.
 
-Legacy `TextMessage` can remain for compatibility, but should not be the primary wire format for the new system.
+Safety rules remain server-owned:
 
-## Client Direction
+- block localhost and private-network preview targets
+- re-check blocked-address policy after redirects
+- cap response body, redirect count, content type, and thumbnail size
+- avoid direct third-party thumbnail loads when a server-stored thumbnail is
+  available
 
-Initial client UI should include:
+## Client Model
 
-- a thread view for the active channel
-- a server-global thread view when enabled
-- basic history loading
-- unread state
-- send box for plain text / markdown-backed text
+The Modern shell is the primary chat UI. It presents:
 
-Defer until later:
+- room and text-channel navigation
+- persistent timeline rendering
+- server log as a Modern timeline scope
+- replies, deletion, reactions, and unread/read state
+- media cards and inline attachment rendering
+- direct-message tray with private and persistent-history modes
+- history warmup for active rooms/direct-message conversations
+- room-aware composer and attachment controls
 
-- rich embeds
-- attachment upload UX
-- inline media galleries
-- moderation tools beyond basic deletion / hide
-
-## ACL Direction
-
-History visibility must follow channel visibility rules.
-
-Initial rules:
-
-- channel thread history is visible only if the user can currently access the channel
-- server-global thread is controlled by a new server option
-- private threads are visible only to participants
-
-Open question:
-
-- whether channel history should be visible retroactively if a user gains access later
-
-Recommendation:
-
-- yes, unless a future retention or moderation policy says otherwise
+The current direction is to keep high-volume updates patch-based and avoid full
+snapshot rebuilds on hot paths.
 
 ## Retention Direction
 
-Start simple:
+Current behavior is simple:
 
-- persistent by default
-- no automatic expiry in MVP
+- persistent messages are retained by default
+- no automatic expiry is promised yet
+- abandoned upload temp files are cleaned up
 
-Future server settings:
+Future retention work should add:
 
-- retention days per scope
-- maximum messages per thread
-- maximum total attachment storage
+- preview-cache pruning
+- quota-aware asset cleanup
+- optional retention windows by scope
+- moderation-friendly deletion/audit policy
 
-## Embed / Preview Direction
+## Remaining Work
 
-Phase 2 supports link previews through a hybrid path.
+The chat stack is active, but not finished. The next useful improvements are:
 
-Recommendation:
-
-- client-assisted preview fetch first, with Murmur remaining authoritative
-
-Reason:
-
-- keeps expensive metadata/thumbnail work off Murmur when a capable client is
-  available
-- keeps SSRF checks, thumbnail sanitizing, asset quota enforcement, persistence,
-  and `ChatEmbedState` broadcasts on the server
-- preserves a server-side fallback when no client can assist or the assist result
-  does not arrive in time
-
-## Media Direction
-
-Current Mumble already supports HTML and inline data URL images in text rendering, but that is not the same as a structured media system.
-
-For the new system:
-
-- start with text only
-- then add typed attachments
-- then add preview cards
-
-## MVP
-
-MVP for first implementation:
-
-1. DB tables for thread/message/read state
-2. New protocol messages for send + history fetch
-3. Server support for persistent channel thread history
-4. Client UI for one persistent channel thread
-5. Optional server-global thread
-
-## First Implementation Slice
-
-Recommended first coding slice:
-
-1. Add server DB tables and migrations
-2. Add protocol definitions for new chat messages
-3. Add server handlers for send + history fetch
-4. Add minimal client model for chat threads/messages
-5. Add basic chat panel for current-channel history
-
-## Branching
-
-Current working branch for this fork should be based on `v1.6.870`, not on upstream moving `master`.
-
-Suggested long-lived branches:
-
-- `dank/main`
-- `feature/chat-foundation`
-- `feature/chat-global-thread`
-- `feature/chat-previews`
-- `feature/chat-attachments`
+1. long-horizon preview-cache retention and quota-aware pruning
+2. video poster extraction and document preview derivatives
+3. stricter fetch-worker isolation and richer SSRF hardening
+4. more complete persistent direct-message UX and test coverage
+5. richer moderation/admin tooling for history grants, deletion, and text-room
+   management

@@ -246,6 +246,8 @@ set(MUMBLE_SOURCES
 	"ModernSettingsController.h"
 	"ModernShellMenuSerializer.cpp"
 	"ModernShellMenuSerializer.h"
+	"ModernTheme.cpp"
+	"ModernTheme.h"
 	"MumbleApplication.cpp"
 	"MumbleApplication.h"
 	"NetworkConfig.cpp"
@@ -611,6 +613,14 @@ target_compile_definitions(mumble_client_object_lib
 
 set_target_properties(mumble PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
+set(MUMBLE_MODERN_THEME_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/modern-shell/themes")
+add_custom_command(TARGET mumble POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E copy_directory
+		"${MUMBLE_MODERN_THEME_SOURCE_DIR}"
+		"$<TARGET_FILE_DIR:mumble>/ModernThemes"
+	COMMENT "Copying bundled Modern theme examples"
+)
+
 set_target_properties(mumble_client_object_lib
 	PROPERTIES
 		AUTOMOC ON
@@ -634,6 +644,12 @@ else()
 		install(TARGETS mumble BUNDLE DESTINATION "${MUMBLE_INSTALL_EXECUTABLEDIR}" COMPONENT mumble_client)
 	endif()
 endif()
+
+install(DIRECTORY "${MUMBLE_MODERN_THEME_SOURCE_DIR}/"
+	DESTINATION "${MUMBLE_INSTALL_EXECUTABLEDIR}/ModernThemes"
+	COMPONENT mumble_client
+	FILES_MATCHING PATTERN "*.css"
+)
 
 # This is used to invalidate the saved widget state if a change in the source is detected.
 get_numerical_file_hash("${CMAKE_CURRENT_SOURCE_DIR}/MainWindow.ui" MAINWINDOW_UI_HASH)

@@ -891,6 +891,13 @@ void Settings::legacyLoad(const QString &path) {
 	LOAD(qsLanguage, "ui/language");
 	LOAD(themeName, "ui/theme");
 	LOAD(themeStyleName, "ui/themestyle");
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	styleType          = StyleType::Auto;
+	themeName.clear();
+	themeStyleName.clear();
+	themeDarkName.clear();
+	themeDarkStyleName.clear();
+#endif
 	LOADENUM(ceExpand, "ui/expand");
 	LOADENUM(ceChannelDrag, "ui/drag");
 	LOADENUM(ceUserDrag, "ui/userdrag");
@@ -906,6 +913,10 @@ void Settings::legacyLoad(const QString &path) {
 	LOAD(qbaMinimalViewState, "ui/minimalviewstate");
 	LOAD(qbaConfigGeometry, "ui/ConfigGeometry");
 	LOADENUM(wlWindowLayout, "ui/WindowLayout");
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	wlWindowLayout = LayoutModern;
+	bLockLayout    = false;
+#endif
 	LOAD(bModernShellMotdExpanded, "ui/modernShellMotdExpanded");
 	LOAD(qsModernShellMotdDismissedSignature, "ui/modernShellMotdDismissedSignature");
 	LOAD(qsModernShellMotdLastSeenSignature, "ui/modernShellMotdLastSeenSignature");
@@ -914,6 +925,8 @@ void Settings::legacyLoad(const QString &path) {
 	LOAD(bModernShellClassicUserIcons, "ui/modernShellClassicUserIcons");
 	LOAD(qsModernShellRailSide, "ui/modernShellRailSide");
 	LOAD(qsModernShellAccent, "ui/modernShellAccent");
+	LOAD(qsModernShellCustomAccent, "ui/modernShellCustomAccent");
+	LOAD(iModernShellCustomAccentStrength, "ui/modernShellCustomAccentStrength");
 	LOAD(bModernShellTickerBannerEnabled, "ui/modernShellTickerBannerEnabled");
 	LOAD(bModernShellTickerBannerAlwaysScroll, "ui/modernShellTickerAlwaysScroll");
 	LOAD(qsUsername, "ui/username");

@@ -129,7 +129,7 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 
 	QCOMPARE(controller.activePage(), QStringLiteral("network"));
 	QCOMPARE(controller.draft().modernLayoutPolicy, Settings::ModernLayoutForced);
-	QCOMPARE(controller.draft().wlWindowLayout, Settings::LayoutHybrid);
+	QCOMPARE(controller.draft().wlWindowLayout, Settings::LayoutModern);
 
 	QVariantMap state = controller.state();
 	QCOMPARE(state.value(QStringLiteral("id")).toString(), QStringLiteral("settings"));
@@ -259,13 +259,29 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QCOMPARE(uiTweaks.value(QStringLiteral("accentDetails")).toMap().value(QStringLiteral("id")).toString(),
 			 QStringLiteral("rose"));
 
+	tweakController.updateField(QStringLiteral("look.modernAccent"), QStringLiteral("custom"));
+	tweakController.updateField(QStringLiteral("look.modernCustomAccent"), QStringLiteral("#aabbcc"));
+	tweakController.updateField(QStringLiteral("look.modernCustomAccentStrength"), 75);
+	const QVariantMap customUiTweaks = tweakController.state().value(QStringLiteral("uiTweaks")).toMap();
+	const QVariantMap customAccentField =
+		findSettingsFieldById(tweakController.state().value(QStringLiteral("sections")).toList(),
+							  QStringLiteral("look.modernCustomAccent"));
+	const QVariantMap customAccentTokens = customUiTweaks.value(QStringLiteral("themeTokens")).toMap();
+	QCOMPARE(customUiTweaks.value(QStringLiteral("accent")).toString(), QStringLiteral("custom"));
+	QCOMPARE(customUiTweaks.value(QStringLiteral("accentDetails")).toMap().value(QStringLiteral("color")).toString(),
+			 QStringLiteral("#aabbcc"));
+	QCOMPARE(customUiTweaks.value(QStringLiteral("accentDetails")).toMap().value(QStringLiteral("strength")).toInt(),
+			 75);
+	QCOMPARE(customAccentField.value(QStringLiteral("type")).toString(), QStringLiteral("color"));
+	QCOMPARE(customAccentTokens.value(QStringLiteral("--theme-accent-custom")).toString(), QStringLiteral("#aabbcc"));
+
 	controller.updateField(QStringLiteral("network.autoReconnect"), true);
 	controller.updateField(QStringLiteral("network.reconnectToLastChannel"), true);
 	ModernSettingsController::ActionResult result = controller.invokeAction(QStringLiteral("ok"), QVariantMap());
 
 	QVERIFY(result.settingsToApply.has_value());
 	QCOMPARE(result.settingsToApply->modernLayoutPolicy, Settings::ModernLayoutForced);
-	QCOMPARE(result.settingsToApply->wlWindowLayout, Settings::LayoutHybrid);
+	QCOMPARE(result.settingsToApply->wlWindowLayout, Settings::LayoutModern);
 	QCOMPARE(result.settingsToApply->bReconnect, true);
 	QCOMPARE(result.settingsToApply->bReconnectToLastChannel, true);
 	QCOMPARE(result.accepted, true);

@@ -1,17 +1,21 @@
 # Stonks Live Server Update
 
-This runbook covers the first live deploy that includes the stonks database
+This runbook covers a live deploy that includes the current stonks database
 tables. It assumes the server is updated by replacing the `mumble-server`
 binary and then letting the normal Murmur database migration run at startup.
 
 ## What Changes
 
-The server database schema moves to version `19`.
+The server database schema is currently version `22`.
 
-The migration creates two new tables:
+The current stonks ledger schema includes:
 
 - `stonks_scores`
 - `stonks_follows`
+- `stonks_feed_preferences`
+- `stonks_pinned_tickers`
+- `stonks_snapshots`
+- `stonks_snapshot_positions`
 
 No manual SQL migration is required for a normal update. The server creates
 and migrates these tables during startup through the existing database
@@ -55,7 +59,7 @@ bash scripts/migrate-murmur-db.sh \
   --service mumble-server \
   --user mumble-server \
   --db /var/lib/mumble-server/mumble-server.sqlite \
-  --expected-version 19
+  --expected-version 22
 ```
 
 If the full binary deploy is being done manually, the equivalent low-level
@@ -90,7 +94,7 @@ sudo journalctl -u "$SERVICE" -n 80 --no-pager
 
 If the service is not managed by systemd, use the equivalent stop/start command
 for that host. The important part is that the database backup happens before
-the first startup with the schema `19` binary.
+the first startup with the schema `22` binary.
 
 ## Dank-Server Deploy
 
@@ -131,8 +135,8 @@ If the server should deploy a specific published commit instead of local
 
 ## Verify After Startup
 
-On the server, verify that the schema reached version `19` and that both
-stonks tables exist:
+On the server, verify that the schema reached version `22` and that the stonks
+tables exist:
 
 ```bash
 bash scripts/check-stonks-db.sh /path/to/mumble-server.sqlite
@@ -146,16 +150,27 @@ sqlite3 mumble-server.sqlite \
   "SELECT meta_value FROM meta WHERE meta_key = 'schema_version';
    SELECT name FROM sqlite_master
    WHERE type = 'table'
-     AND name IN ('stonks_scores', 'stonks_follows')
+     AND name IN (
+       'stonks_scores',
+       'stonks_follows',
+       'stonks_feed_preferences',
+       'stonks_pinned_tickers',
+       'stonks_snapshots',
+       'stonks_snapshot_positions'
+     )
    ORDER BY name;"
 ```
 
 Expected output:
 
 ```text
-19
+22
+stonks_feed_preferences
 stonks_follows
+stonks_pinned_tickers
 stonks_scores
+stonks_snapshot_positions
+stonks_snapshots
 ```
 
 If the database file name differs, use the database path configured in the
@@ -188,16 +203,16 @@ persist across reconnects and server restarts.
 
 ## Rollback
 
-Treat schema `19` as a forward database change. If the new binary must be
+Treat schema `22` as a forward database change. If the new binary must be
 rolled back, restore the pre-migration database backup too. Do not run an older
-server binary against the already-migrated schema `19` database unless that
-older binary also knows schema `19`.
+server binary against the already-migrated schema `22` database unless that
+older binary also knows schema `22`.
 
 Rollback outline:
 
 1. Stop the dev instance.
 2. Restore `mumble-server.sqlite*` from the timestamped backup created before
-   the schema `19` startup.
+   the schema `22` startup.
 3. Deploy or restore the previous `mumble-server` binary.
 4. Start the instance again.
 5. Check `stdout.log` and confirm the old binary accepts the restored database.

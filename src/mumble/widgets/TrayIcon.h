@@ -9,15 +9,24 @@
 #include <functional>
 
 #include <QAction>
+#include <QPointer>
+#include <QString>
 #include <QTimer>
+#include <QVariantList>
+#include <QVector>
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QSystemTrayIcon>
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+class ModernContextMenuHost;
+#endif
 
 class TrayIcon : public QSystemTrayIcon {
 	Q_OBJECT
 
 public:
 	TrayIcon();
+	~TrayIcon() override;
 
 public slots:
 	void on_hideAction_triggered();
@@ -41,7 +50,25 @@ private:
 	QAction *m_hideAction    = nullptr;
 	QTimer *m_highlightTimer = nullptr;
 
-	void updateContextMenu();
+	void updateNativeContextMenu();
+	void showNativeFallbackMenu();
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	bool shouldUseModernContextMenu() const;
+	ModernContextMenuHost *ensureModernContextMenuHost();
+	bool showModernContextMenu();
+	QVariantList buildModernContextMenuItems();
+	void clearModernContextMenuState();
+	void appendModernTraySeparator(QVariantList &items) const;
+	void appendModernTrayAction(QVariantList &items, const QString &id, const QString &label, bool enabled,
+								bool checked, const QString &icon, const QString &tone,
+								std::function< void() > handler);
+
+	QPointer< ModernContextMenuHost > m_modernContextMenu;
+	QString m_modernContextMenuToken;
+	QVector< std::function< void() > > m_modernContextMenuHandlers;
+	quint64 m_modernContextMenuSerial = 0;
+#endif
 
 private slots:
 	void on_icon_clicked(QSystemTrayIcon::ActivationReason reason);

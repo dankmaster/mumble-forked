@@ -2,7 +2,7 @@
 	"use strict";
 
 	const fallbackThemes = ["dark", "light", "engine", "mocha", "macchiato", "frappe", "latte", "nord", "gruvbox"];
-	const fallbackAccents = ["auto", "teal", "blue", "violet", "amber", "rose"];
+	const fallbackAccents = ["auto", "teal", "blue", "violet", "amber", "rose", "custom"];
 	let allowedThemes = fallbackThemes.slice();
 	let allowedAccents = fallbackAccents.slice();
 	const allowedDensities = ["compact", "comfortable", "spacious"];

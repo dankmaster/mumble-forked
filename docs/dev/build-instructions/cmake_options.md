@@ -59,6 +59,11 @@ Build the included version of Speex instead of looking for one on the system.
 Use the bundled utf8cpp version instead of looking for one on the system
 (Default: ON)
 
+### chat-perf-trace
+
+Include the developer chat performance tracer (mumble::chatperf).
+(Default: ${MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT})
+
 ### client
 
 Build the client (Mumble)
@@ -99,9 +104,19 @@ Enable DBus support/interface
 Prints extended information during the search for the needed dependencies
 (Default: OFF)
 
+### deepfilternet
+
+Use DeepFilterNet for machine learning speech cleanup.
+(Default: OFF)
+
 ### display-install-paths
 
 Print out base install paths during project configuration
+(Default: OFF)
+
+### dtln
+
+Use DTLN for machine learning speech cleanup.
 (Default: OFF)
 
 ### elevation
@@ -146,8 +161,23 @@ Enables link-time optimizations for release builds
 
 ### manual-plugin
 
-Include the built-in \"manual\
-(Default: positional audio plugin." ON)
+Include the built-in "manual" positional audio plugin.
+(Default: ON)
+
+### modern-layout-automation
+
+Include the Modern UI automation server and JavaScript automation hooks.
+(Default: ${MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT})
+
+### modern-layout-mockups
+
+Include Modern shell mockup and walkthrough functionality.
+(Default: ${MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT})
+
+### modern-layout-webengine
+
+Enable the Qt WebEngine-based relay runtime.
+(Default: OFF)
 
 ### online-tests
 
@@ -288,6 +318,16 @@ All warnings are treated as errors.
 
 Build support for WASAPI.
 (Default: ON)
+
+### webrtc-aec
+
+Expose WebRTC AEC as an experimental echo cancellation option.
+(Default: OFF)
+
+### windows-installer-all-languages
+
+Build Windows installers with all translated MSI transforms instead of the default English-only MSI.
+(Default: OFF)
 
 ### xboxinput
 

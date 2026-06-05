@@ -51,6 +51,9 @@ public:
 	bool prewarm();
 	bool showMenu(const QString &token, const QVariantList &items, const QPoint &globalAnchor,
 				  const QString &openSubmenuLabel = QString(), const QVariantMap &uiTweaks = QVariantMap());
+	bool showMenuAtGlobalPosition(const QString &token, const QVariantList &items, const QPoint &globalAnchor,
+								  const QString &openSubmenuLabel = QString(),
+								  const QVariantMap &uiTweaks = QVariantMap());
 
 signals:
 	void actionRequested(const QString &token, int actionIndex);

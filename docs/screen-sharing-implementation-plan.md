@@ -1,551 +1,244 @@
 # Screen Sharing Implementation Plan
 
-## Status
+Status snapshot: 2026-06-05.
 
-Planning only.
+This document is the execution ledger for the screen-sharing feature described
+in [`screen-sharing-architecture.md`](screen-sharing-architecture.md). The
+feature is no longer planning-only, but it is still experimental and should not
+be described as production-ready.
 
-This document turns the high-level architecture in `docs/screen-sharing-architecture.md` into an execution plan for this fork.
+## Current Product Definition
 
-## Hard Constraints From The Current Codebase
+The intended MVP is still:
 
-These constraints should drive every implementation choice:
+1. a forked client can start one live screen share in its current channel
+2. other forked clients in that channel can view it
+3. old clients still connect, talk, and chat normally
+4. old servers still accept the new client, but screen share UI stays disabled
+5. no recording in MVP
+6. no server-side transcoding in MVP
+7. no stock-upstream client compatibility for viewing the stream
 
-1. The existing real-time transport is voice-centric.
-2. UDP only carries `Audio` and `Ping`.
-3. Mumble UDP packets are capped at `1024` bytes.
-4. `PluginDataTransmission` is payload-capped and rate-limited.
-5. The current fork already uses feature advertisement in `Version` for persistent chat.
-6. The current fork already uses `ServerConfig` for server-side feature and policy flags.
-7. There is no existing video transport or WebRTC stack in this repository.
-8. The Linux client already has PipeWire runtime plumbing for audio, but not screen sharing.
+First stable quality target: `720p30`.
 
-Implication:
-
-- do not attempt to build Discord-like screen sharing on top of the existing Mumble audio transport
-- do not attempt to repurpose plugin messages for media
-- do use the existing fork pattern for per-client capability advertisement and per-server runtime policy
-
-## Product Definition
-
-Feature name:
-
-- `Screen Share`
-
-MVP definition:
-
-1. A forked client can start one live screen share in its current channel.
-2. Other forked clients in that channel can view it.
-3. Old clients still connect, talk, and chat normally.
-4. Old servers still accept the new client, but screen share UI stays disabled.
-5. No recording in MVP.
-6. No server-side transcoding in MVP.
-7. No stock-upstream client compatibility for viewing the stream.
-
-First quality target:
-
-- `720p30` stable
-
-Expanded publisher picker targets:
-
-- `720p`, `1080p`, and `1440p` at `30 FPS` or `60 FPS` when uplink, helper
-  packaging, and client encode performance are proven
+Expanded picker/runtime targets are `720p`, `1080p`, and `1440p` at practical
+FPS values up to the advertised server/helper cap, currently `144 FPS`.
 
 ## Compatibility Contract
 
-This is mandatory:
-
-- `new client <-> new server`: screen share available
-- `new client <-> old server`: voice and chat work, screen share hidden or disabled
-- `old client <-> new server`: voice and chat work, old client is never sent screen-share traffic
-- `old client <-> old server`: unchanged
-
-This fork should treat screen share as capability-gated, not version-assumed.
-
-## Architecture Decision
-
-### Chosen Direction
-
-Split the feature into three planes:
-
-1. `Mumble/Murmur control plane`
-2. `Client-side screen helper`
-3. `External media relay`
-
-Responsibilities:
-
-- `Murmur`: auth, ACL, channel membership, stream permissions, session state, relay token minting, compatibility gating
-- `Mumble client`: UI, capability advertisement, stream session management, helper lifecycle
-- `Screen helper`: capture, encode, decode, WebRTC/media stack, local rendering bridge
-- `Relay`: fanout, congestion control, NAT traversal support, optional later recording tap
-
-### Rejected Directions
-
-- video over existing Mumble UDP
-- video over `PluginDataTransmission`
-- custom in-tree SFU inside Murmur
-- server-side transcoding for MVP
-- requiring all clients to upgrade in lockstep
-
-## Media Stack Decision
-
-### What We Know
-
-This repository does not currently include:
-
-- WebRTC
-- libdatachannel
-- FFmpeg integration
-- GStreamer integration for video
-- H.264 or VPx encode/decode integration
-
-### Recommended Implementation Shape
-
-Do not embed a full media stack directly into the existing Mumble client process in the first pass.
-
-Preferred shape:
-
-- add a separate `mumble-screen-helper` executable in this repo
-- launch it from the client using `QProcess`
-- communicate with it over local IPC using `QLocalSocket` or loopback HTTP/WebSocket
-
-Why:
-
-- keeps the Mumble GUI process smaller and easier to debug
-- isolates capture and codec crashes from the main client
-- avoids forcing the current client architecture to absorb a large media subsystem immediately
-- makes platform-specific capture backends easier to compartmentalize
-
-### Mandatory Spike
-
-Before building the full helper, complete a media-stack spike and lock one helper implementation approach:
-
-Candidates:
-
-- `GStreamer + WebRTC` helper
-- `native capture + external WebRTC library` helper
-- `platform-native capture + custom RTP/WebRTC transport` helper
-
-Recommendation:
-
-- optimize for fastest path to first-pixel on one platform, not for theoretical elegance
-
-Exit criteria for the spike:
-
-- capture one screen
-- encode and publish one stream
-- subscribe and render one viewer
-- hold `720p30` for at least 10 minutes on a test channel
-
-## Protocol Plan
-
-### Capability Advertisement
-
-Follow the chat feature pattern already present in this fork.
-
-Extend `Version` with new optional capability fields, for example:
-
-- `supports_screen_share_signaling`
-- `supports_screen_share_capture`
-- `supports_screen_share_view`
-
-Rules:
-
-- clients advertise these in `Version`
-- Murmur stores them per session
-- no screen-share-specific TCP messages are sent until both sides opt in
-
-### Server Policy Advertisement
-
-Extend `ServerConfig` with runtime policy fields, for example:
-
-- `screen_share_enabled`
-- `screen_share_recording_enabled`
-- `screen_share_max_resolution`
-- `screen_share_max_fps`
-- `screen_share_helper_required`
-
-Rules:
-
-- old clients ignore unknown fields
-- new clients disable the feature if fields are absent or false
-
-### New TCP Messages
-
-Append new messages after the existing custom chat messages.
-
-Recommended message set:
-
-1. `ScreenShareCreate`
-2. `ScreenShareState`
-3. `ScreenShareOffer`
-4. `ScreenShareAnswer`
-5. `ScreenShareIceCandidate`
-6. `ScreenShareStop`
-
-Suggested responsibilities:
-
-- `ScreenShareCreate`: publisher requests a new share
-- `ScreenShareState`: server broadcasts current active share state
-- `ScreenShareOffer`: opaque signaling blob from publisher or viewer
-- `ScreenShareAnswer`: opaque signaling blob response
-- `ScreenShareIceCandidate`: trickle ICE or equivalent candidate relay
-- `ScreenShareStop`: explicit teardown
-
-Do not place encoded media payloads in these messages.
-
-### Message Fields
-
-Use stable identifiers from the beginning:
-
-- `stream_id`
-- `owner_session`
-- `scope`
-- `scope_id`
-- `viewer_session` where needed
-- `relay_room_id`
-- `relay_token`
-- `sdp` or opaque offer/answer blob
-- `candidate` or opaque connectivity blob
-- `created_at`
-- `state`
-
-## Murmur Plan
-
-### MVP Server Behavior
-
-Murmur should manage live state in memory only for MVP.
-
-No DB schema changes are required for basic live screen sharing if we do not persist share history or recording metadata.
-
-### Server Rules
-
-Initial rules:
-
-- one active stream per user
-- one active stream per channel for MVP
-- only users in the channel can watch the stream
-- if the owner disconnects, moves channel, or loses permission, the share stops
-- if the server disables screen sharing, all new create attempts are denied
-
-### Murmur Files To Touch
-
-- `src/Mumble.proto`
-- `src/MumbleProtocol.h`
-- `src/murmur/ServerUserInfo.h`
-- `src/murmur/Server.h`
-- `src/murmur/Server.cpp`
-- `src/murmur/Messages.cpp`
-- `src/murmur/Meta.h`
-- `src/murmur/Meta.cpp`
-
-### Murmur Data To Add
-
-Per-user session flags:
-
-- supports signaling
-- supports capture
-- supports viewing
-
-Per-server config:
-
-- screen share enabled
-- recording enabled later
-- relay base URL
-- relay shared secret or token issuer config
-- max resolution
-- max fps
-
-Per-channel runtime state:
-
-- active stream ID
-- owner session
-- relay room ID
-- creation timestamp
-- viewer count optional
-
-### Murmur Integration Steps
-
-1. Parse and store client support flags from `Version`.
-2. Advertise server policy through `ServerConfig`.
-3. Add handlers for the new screen-share messages.
-4. Validate ACL and channel membership on every control message.
-5. Mint short-lived relay tokens for authorized publishers and viewers.
-6. Broadcast `ScreenShareState` only to clients that advertised support.
-7. Tear down share state on disconnect, kick, or channel change.
-
-## Client Plan
-
-### Runtime Model
-
-Add a dedicated screen-share manager on the client side rather than folding all behavior into `MainWindow`.
-
-Recommended new client classes:
-
-- `ScreenShareManager`
-- `ScreenShareSession`
-- `ScreenShareCapabilityState`
-- `ScreenShareViewerController`
-- `ScreenShareHelperClient`
-
-### Client Files To Touch
-
-Core protocol and runtime:
-
-- `src/Mumble.proto`
-- `src/MumbleProtocol.h`
-- `src/mumble/ServerHandler.h`
-- `src/mumble/ServerHandler.cpp`
-- `src/mumble/Messages.cpp`
-- `src/mumble/Global.h`
-- `src/mumble/Global.cpp`
-
-UI and user flow:
-
-- `src/mumble/MainWindow.h`
-- `src/mumble/MainWindow.cpp`
-- `src/mumble/MainWindow.ui`
-
-Settings and configuration:
-
-- `src/mumble/Settings.h`
-- `src/mumble/Settings.cpp`
-- `src/mumble/SettingsKeys.h`
-- `src/mumble/NetworkConfig.ui`
-- `src/mumble/NetworkConfig.cpp`
-
-New files:
-
-- `src/mumble/ScreenShareManager.h`
-- `src/mumble/ScreenShareManager.cpp`
-- `src/mumble/ScreenShareHelperClient.h`
-- `src/mumble/ScreenShareHelperClient.cpp`
-- `src/mumble/ScreenShareWidget.h`
-- `src/mumble/ScreenShareWidget.cpp`
-
-### Client UI Flow
-
-MVP UI:
-
-1. User sees `Start Screen Share` only when connected to a supporting server.
-2. Clicking it opens a simple source picker.
-3. Client requests share creation from Murmur.
-4. On approval, client launches or attaches to the helper.
-5. Helper publishes to the relay.
-6. Other supporting clients see `Watch Screen Share`.
-7. Viewer launches helper-backed viewing surface.
-8. On stop or disconnect, UI tears down immediately.
-
-### UI Scope Decisions
-
-Recommended MVP UI:
-
-- start or stop action in the main window
-- one viewer surface at a time
-- viewer surface may be a separate helper-owned window in MVP if in-app embedding slows the project down
-
-Deferred:
-
-- multiple simultaneous viewer panes
-- picture-in-picture
-- stream thumbnails in channel list
-- moderator takeover tools
-
-## Helper Plan
-
-### Repository Shape
-
-Add a new target in this repo:
-
-- `src/screen-helper/`
-
-Recommended helper components:
-
-- capture backend abstraction
-- encoder abstraction
-- relay session client
-- local IPC server
-- local viewer window or frame bridge
-
-### Local IPC Contract
-
-Prefer a narrow command surface:
-
-- `list_sources`
-- `start_publish`
-- `stop_publish`
-- `start_view`
-- `stop_view`
-- `get_state`
-
-Return structured JSON or protobuf messages over local IPC.
-
-### Capture Backends
-
-Target backends:
-
-- Linux: PipeWire plus portal flow first
-- Windows: modern Windows capture API first
-- macOS: ScreenCaptureKit
-
-Recommendation:
-
-- implement Linux first because the current repo already carries PipeWire runtime integration patterns
-- implement Windows second
-- implement macOS third unless your actual user mix says otherwise
-
-## Relay Plan
-
-### Relay Direction
-
-Do not write a custom SFU in this fork for MVP.
-
-Use an external relay that already handles:
-
-- WebRTC-style fanout
-- congestion control
-- ICE/TURN support
-- room and participant concepts
-
-Murmur should authenticate users to the relay by issuing short-lived publish or subscribe credentials.
-
-### Deployment Shape
-
-Recommended deploy units:
-
-- existing `mumble-server.service`
-- new `mumble-screen-relay.service`
-- optional TURN service
-
-### Relay API Contract
-
-Murmur should need only a minimal integration surface:
-
-- create or authorize room access for `channel:<id>`
-- mint publish token for owner
-- mint subscribe token for viewers
-- revoke or expire token on stop
-
-## Phase Plan
+This remains mandatory:
+
+- new client + new server: screen share may be available when policy and helper
+  runtime allow it
+- new client + old server: voice and chat work, screen share hidden or disabled
+- old client + new server: voice and chat work, old client is never sent
+  screen-share traffic
+- old client + old server: unchanged
+
+Screen share is capability-gated, not version-assumed.
+
+## Implemented Foundation
+
+Protocol and policy:
+
+- `Version` advertises screen-share signaling, capture, viewing, codecs, maximum
+  width/height, and FPS
+- `ServerConfig` advertises enablement, recording policy, helper requirement,
+  codec preferences, relay URL, maximum width/height/FPS, and supported fork
+  features
+- protocol messages exist for create, state, offer, answer, ICE candidate, and
+  stop
+- fork feature gate exists for richer screen-share session presence
+
+Murmur:
+
+- stores per-session support flags from `Version`
+- sends server policy through `ServerConfig`
+- applies runtime config updates for screen-share keys
+- carries active session state and relay metadata
+- can use LiveKit-compatible relay API key/secret settings for token-style
+  relay handoff
+
+Client:
+
+- `ScreenShareManager` owns client session state, helper coordination, view
+  focus/reopen behavior, external runtime watchdogs, and diagnostics
+- Modern shell exposes picker/status/toast flows
+- native fallback dialogs remain for narrow non-modern paths while those builds
+  exist
+- local settings include screen-share auto-open and diagnostics controls
+
+Helper:
+
+- `src/screen-helper/` builds `mumble-screen-helper`
+- local IPC is JSON over `QLocalSocket`
+- helper supports capability query, source listing, publish/view start, stop,
+  and self-test
+- helper runtime probing covers GStreamer, FFmpeg, LiveKit, encoder/decoder
+  availability, and capture backends
+- packaged Windows shared/WebEngine payloads can stage GStreamer under
+  `gstreamer\`
+
+## Current Runtime Shape
+
+Windows probing:
+
+- GStreamer D3D11 LiveKit capture
+- Windows Graphics Capture with D3D11
+- D3D11 Desktop Duplication
+- `gdigrab`
+- lavfi/test-pattern capture
+
+Linux probing:
+
+- X11/ffmpeg capture
+- lavfi/test-pattern capture
+- PipeWire runtime detection for diagnostics
+
+Relay/media:
+
+- WebRTC relay transport is the main intended runtime path
+- direct/file-style runtime remains useful for self-tests and diagnostics
+- H.264 is the first practical codec; AV1, VP9, and VP8 are advertised only when
+  the helper runtime can execute them
+
+## Phase Ledger
 
 ### Phase 0: Decision Spikes
 
-Deliverables:
+Status: mostly complete.
 
-- helper media-stack decision
-- relay product decision
-- local IPC decision
-- first bandwidth and latency baseline for this server
+Done:
 
-Exit criteria:
+- selected separate helper process instead of embedding media in the GUI process
+- selected external relay/SFU direction instead of custom Murmur media fanout
+- selected local IPC between client and helper
+- kept Mumble as auth/control plane only
 
-- written ADRs or notes
-- one-platform loopback proof of concept
+Still useful:
+
+- record current real-server bandwidth and latency baselines before promising
+  higher resolutions or many viewers
 
 ### Phase 1: Capability And Policy Plumbing
 
-Deliverables:
+Status: implemented.
+
+Done:
 
 - `Version` capability flags
 - `ServerConfig` screen-share flags
 - per-session support tracking on Murmur
 - client-side feature gating
+- server config keys and runtime update path
 
-Exit criteria:
+Verification still needed:
 
-- compatibility matrix works without media
-- unsupported combinations show no broken behavior
+- compatibility matrix against old clients/servers in a release-like build
 
 ### Phase 2: Murmur Live Session State
 
-Deliverables:
+Status: implemented enough for experimental use.
 
-- in-memory active-share registry
-- create and stop handlers
-- ACL and channel membership checks
-- state broadcasts
+Done:
 
-Exit criteria:
+- in-memory active-share/session state
+- create/state/stop-style protocol flow
+- relay metadata in state messages
+- teardown hooks for disconnect and invalid state
 
-- server can represent one active share per channel
-- teardown works on disconnect and channel moves
+Still needed:
+
+- more live-session tests for channel moves, permission loss, duplicate shares,
+  and late joiners
 
 ### Phase 3: Helper Skeleton
 
-Deliverables:
+Status: implemented.
 
-- helper target builds
-- local IPC works
-- Mumble launches and supervises helper
-- source listing and dummy start or stop path works
+Done:
 
-Exit criteria:
+- helper target
+- local IPC
+- capability query
+- source listing
+- start/stop publish and view commands
+- self-test payload path
+- diagnostics logging
 
-- GUI can talk to helper reliably
+Still needed:
+
+- broader automated coverage for IPC error cases and helper restart behavior
 
 ### Phase 4: First Media Path
 
-Deliverables:
+Status: active experimental path.
 
-- one-platform capture backend
-- publish to relay
-- subscribe from second client
-- helper viewer window
+Done:
 
-Exit criteria:
+- GStreamer/LiveKit capability detection
+- helper session planner for publish/view
+- Windows and Linux runtime probing
+- packaged Windows runtime staging checks in shared/WebEngine release paths
 
-- first successful end-to-end share in a real channel
+Still needed:
+
+- prove real publish/view with two forked clients on the target server
+- document observed quality/latency for `720p30`, `1080p30`, and one high-FPS
+  path
+- verify helper fallback behavior when GStreamer or capture backends are missing
 
 ### Phase 5: Mumble UX Integration
 
-Deliverables:
+Status: partially implemented.
 
-- start or stop share action
-- watch action
-- visible stream state in channel context
-- better error reporting and teardown
+Done:
 
-Exit criteria:
+- Modern picker/status path
+- quality and audio options
+- watch/focus/reopen behavior
+- toast-based error surfacing in Modern shell
+- diagnostics setting
 
-- user can reliably start and watch a share without using debug tools
+Still needed:
+
+- polish late-join presentation and viewer-ready state
+- better room-list stream state presentation
+- clearer recovery actions after helper/runtime failures
 
 ### Phase 6: Cross-Platform Expansion
 
-Deliverables:
+Status: not complete.
 
-- second platform support
-- packaging updates
-- codec and hardware acceleration policy
+Current state:
 
-Exit criteria:
+- Windows is the practical primary target because shared/WebEngine packages can
+  stage the GStreamer runtime
+- Linux has probing and X11/test-pattern paths
+- macOS is not an active screen-share target yet
 
-- at least Linux plus Windows are supported, if those are your primary users
+Still needed:
+
+- decide which non-Windows target matters for the private server population
+- package and verify that target intentionally
 
 ### Phase 7: Recording
 
-Deliverables:
+Status: deferred.
 
-- relay-side or helper-side recording flow
-- recording policy flags in `ServerConfig`
-- storage path and retention behavior
-
-Exit criteria:
-
-- recording does not degrade live share quality
+Recording should wait until live publish/view is stable. Preferred future shape:
+relay-side recording or helper-side subscription that writes asynchronously.
 
 ## Testing Plan
 
-### Compatibility Matrix
-
-Test all four combinations:
+Compatibility:
 
 1. new client + new server
 2. new client + old server
 3. old client + new server
 4. old client + old server
 
-### Session Scenarios
-
-Test:
+Session scenarios:
 
 - start share
 - join viewer late
@@ -556,80 +249,44 @@ Test:
 - viewer changes channel
 - permission revoked mid-session
 - server restart
-- helper crash
+- helper crash/restart
 
-### Quality Scenarios
+Quality scenarios:
 
-Test:
-
-- 720p30 stability
-- 720p60, 1080p30, 1080p60, 1440p30, and 1440p60 negotiation
+- `720p30` stability
+- `720p60`
+- `1080p30`
+- `1080p60`
+- `1440p30`
 - multi-viewer fanout
-- packet loss
 - temporary relay loss
-- helper restart recovery
 
-### Regression Areas
-
-Watch closely:
+Regression areas:
 
 - standard voice path
 - standard text and persistent chat
 - channel move behavior
 - reconnect logic
-- CPU usage on the client
+- CPU/GPU use on the client
 - server memory growth
 
-## Deployment Plan
+## Deployment Readiness Checklist
 
-### Server Readiness Checklist
+Before calling this production-ready:
 
-Before promising production use:
-
-- measure actual uplink throughput
+- measure actual relay/server uplink throughput
 - measure packet loss to typical clients
-- verify relay TLS
-- confirm TURN need for your real user population
-- define firewall rules for relay ports
+- verify relay TLS and TURN need
+- confirm firewall rules for relay ports
+- verify packaged helper reports GStreamer LiveKit publish/view capability
+- verify diagnostics logs are sufficient when publish/view fails
 
-### Config Additions
+## Immediate Next Work
 
-Plan to add new `mumble-server.ini` keys such as:
-
-- `screen_share_enabled`
-- `screen_share_relay_url`
-- `screen_share_token_secret`
-- `screen_share_max_resolution`
-- `screen_share_max_fps`
-
-## Risks
-
-Main risks:
-
-- helper media-stack choice causing packaging drag
-- cross-platform capture differences
-- NAT traversal complexity
-- viewer embedding complexity
-- codec licensing or packaging constraints
-- uplink bottlenecks on multi-viewer sessions
-
-## Recommended Order Of Work
-
-If we start implementing now, the most pragmatic order is:
-
-1. capability and policy plumbing
-2. Murmur live session state
-3. helper skeleton plus local IPC
-4. one-platform end-to-end media spike
-5. UI polish
-6. second platform
-7. recording
-
-## Immediate Next Branches
-
-Recommended sub-branches from `feature/screen-recording`:
-
-- `feature/screen-share-capabilities`
-- `feature/screen-share-server-state`
-- `feature/screen-share-helper-skeleton`
-- `feature/screen-share-linux-spike`
+1. Run a live two-client Windows publish/view pass against the target server.
+2. Capture diagnostics and screenshots for a successful `720p30` share.
+3. Exercise helper failure cases: no GStreamer, capture backend missing, relay
+   token expired, helper killed mid-session.
+4. Add or update automated checks for helper IPC and packaged-runtime validation.
+5. Only after that, decide whether screen share graduates from experimental to
+   active fork feature.

@@ -1,12 +1,15 @@
 # Fork Feature Inventory
 
-Status snapshot: 2026-05-26.
+Status snapshot: 2026-06-05.
 
 This document describes the fork-specific surface area in this repository. It
 is not an official Mumble roadmap, and several features are intentionally scoped
-to this community fork. Core Mumble compatibility remains a design constraint:
-unsupported fork features should degrade without breaking normal voice and basic
-text chat.
+to this community fork. The intended fork client path is now modern-only, but
+core Mumble compatibility remains a protocol constraint: unsupported fork
+features should degrade without breaking normal voice and basic text chat.
+
+For the short current-state handoff, see
+[`status-and-roadmap.md`](status-and-roadmap.md).
 
 ## Upstream Baseline Retained
 
@@ -15,28 +18,35 @@ The fork keeps the normal Mumble foundation:
 - low-latency Opus voice chat
 - encrypted client/server sessions
 - channels, ACLs, groups, comments, and registration
-- classic Qt client UI and classic server administration paths
+- server administration paths
 - local recording controls, shortcuts, plugin infrastructure, and positional-audio plugin support
 - cross-platform CMake build structure and the upstream documentation tree
 
 ## Modern Client Shell
 
-The modern shell is an optional WebEngine-based client surface built around the
-persistent-chat work. It keeps the classic client available as a fallback.
+The Modern shell is the visible fork client path. It is a WebEngine-based client
+surface built around persistent chat, rich media, direct messages, and modern
+dialogs. Classic Qt Widgets UI remains as migration scaffolding and for narrow
+surfaces that have not yet been fully replaced.
 
 Current capabilities:
 
 - persistent chat as the primary center pane
+- direct-message tray with private in-memory mode and persistent-history mode
+  when the server and registered users support it
 - room-aware composer state and send controls
 - dedicated voice-room and text-room navigation
 - server MOTD/sidebar presentation
+- direct server-log rendering for the Modern timeline path
 - compact message controls for reply/delete actions
 - rich media and provider-specific preview cards
 - playable YouTube/video preview controls when the provider and WebEngine surface support inline playback
 - image, GIF, video, product, Steam/game-store, social posts including X/Twitter, GitHub, finance, forum, article, map, place, traffic, and weather card layouts
 - local disk preview cache with selective session refresh for richer providers
 - theme, accent, density, dialog, and context-menu polish for the Modern shell
-- feedback and crash-report handoff flows that avoid publishing private local context by default
+- update banners, feedback, and crash-report handoff flows that avoid publishing private local context by default
+- minimal Modern-shell failure notice instead of falling back to a full classic
+  client layout in WebEngine-enabled builds
 
 Tracked public screenshot assets:
 
@@ -60,12 +70,17 @@ Current capabilities:
 - voice-channel chat history
 - dedicated text channels / text rooms
 - optional server-global chat thread through `persistentglobalchat`
+- private/direct-message history when `ChatFeatureDirectMessages` is advertised
+  and both users have registered identities
+- private non-persistent direct-message mode for the normal transient text path
 - ACL-filtered aggregate readable-history views
 - history pagination / "load older"
+- history warmup for active rooms and direct messages
 - read state and unread state
 - message replies with actor/snippet metadata
 - message deletion with a dedicated ACL permission
 - reactions and reaction aggregates
+- actor avatar hashes for richer Modern timeline presentation
 - history grants for controlled access
 - server-to-client feature negotiation through advertised chat features
 - fallback behavior for clients or servers that do not advertise support
@@ -80,6 +95,7 @@ Primary protocol and storage features include:
 - `ChatDelete`
 - `ChatReactionToggle`
 - `ChatReactionState`
+- `ChatHistoryWarmupRequest`
 - `TextChannelSync`
 - `chat_threads`
 - `chat_messages`
@@ -166,6 +182,7 @@ Current fork feature gates include:
 - virtualized chat presentation contracts
 - server-backed Stonks ledger state
 - client-assisted, server-authoritative link previews
+- in-app feedback handoff to an administrator-configured GitHub target
 
 See [`fork-extension-architecture.md`](fork-extension-architecture.md).
 
@@ -197,8 +214,10 @@ Current capabilities:
 - a `#stonks` room command handler scoped to that text channel
 - server-backed portfolio ledger with versioned position history, privacy-filtered state, and leaderboard windows
 - manual score commands as a legacy fallback, plus follows and user summary commands
-- server database tables for scores, follows, portfolio history, and saved positions
+- server database tables for scores, follows, feed preferences, pinned tickers,
+  portfolio history, and saved positions
 - Modern Stonks panel for overview, portfolio ledger, leaderboard, following, and admin config
+- optional social announcements in the configured Stonks text channel
 
 Typical commands:
 
@@ -229,6 +248,11 @@ Current capabilities:
 - external `mumble-screen-helper` process
 - helper IPC and runtime diagnostics
 - GStreamer-first LiveKit WebRTC helper runtime for screen-share publish/view
+- Windows helper probing for GStreamer D3D11 LiveKit capture, Windows Graphics
+  Capture, D3D11 Desktop Duplication, `gdigrab`, and test-pattern capture
+- Linux helper probing for X11/ffmpeg capture, test-pattern capture, and
+  PipeWire runtime diagnostics
+- helper self-test and local runtime verification hooks for packaged builds
 - shared/WebEngine and `mumble-forked` Windows release payloads stage the
   bundled GStreamer runtime under `gstreamer\` for installed clients
 - LiveKit-compatible relay-token path when API key/secret are configured
@@ -271,7 +295,8 @@ offline corpus comparison and packaged-model smoke coverage.
 ## Windows Builds And Fork Releases
 
 The fork keeps separate lanes for normal PR validation and the heavier
-shared/WebEngine Windows client payload.
+shared/WebEngine Windows client payload. The shared/WebEngine lane is the
+canonical fork client lane because it carries the Modern shell.
 
 Current build/release features:
 
@@ -306,6 +331,20 @@ Current controls:
 - `Connect to the last server on startup` is a client-side network setting; update
   restarts also use a one-shot client resume snapshot when the user accepts the update
 
+## Legacy Cuts
+
+The fork has intentionally removed several older or unused client/runtime
+features from the product direction:
+
+- ASIO input path
+- G15/LCD support
+- PositionalAudioViewer developer window
+- in-game overlay subprojects and launcher paths
+- TalkingUI and related overlay-facing settings
+
+Positional audio itself, the plugin manager, and the manual plugin remain in
+scope.
+
 ## Compatibility Notes
 
 Fork-only behavior should be capability-gated:
@@ -313,13 +352,23 @@ Fork-only behavior should be capability-gated:
 - new client + new server: fork features may activate
 - new client + old server: voice and basic text chat should continue, while fork features stay hidden or disabled
 - old client + new server: normal Mumble behavior should continue, and unsupported fork messages should not be sent
-- stock clients are not expected to receive full persistent rich chat or screen-share parity
+- ordinary upstream/native clients should still connect to the forked server for
+  baseline voice, channel, ACL, registration/certificate, and basic text
+  behavior
+- those clients are not expected to receive full persistent rich chat or screen-share parity
+- WebEngine-enabled fork clients use the Modern shell as the visible layout;
+  classic layout is not a user-facing compatibility promise
 
 ## Known Gaps
 
 The feature set is still moving. Current known gaps include:
 
+- remaining Qt Widgets/native dialog surfaces such as plugin settings, plugin
+  install/update, Search, Voice Recorder, and selected certificate flows need a
+  final modernize-or-keep decision
 - no full production promise for screen sharing
+- screen-share publish/view needs more live validation across the target Windows
+  runtime before it should be called stable
 - no video transcoding or poster extraction for uploaded video assets
 - no document preview rendering
 - no long-horizon preview-cache pruning policy

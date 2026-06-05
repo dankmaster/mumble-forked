@@ -1,5 +1,7 @@
 ## Screen-Share Relay Deployment
 
+Status snapshot: 2026-06-05.
+
 This fork now supports two practical relay execution modes:
 
 1. `direct-runtime`

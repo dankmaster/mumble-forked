@@ -90,6 +90,15 @@ LookConfig::LookConfig(Settings &st) : ConfigWidget(st) {
 #endif
 
 	connect(qrbLCustom, SIGNAL(toggled(bool)), qcbLockLayout, SLOT(setEnabled(bool)));
+
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	const QList< QWidget * > classicThemeControls {
+		qliThemeStyle, qgbStylePicker, qliLightTheme, qcbLightTheme, qliDarkTheme, qcbDarkTheme, qpbThemesDirectory
+	};
+	for (QWidget *widget : classicThemeControls) {
+		widget->hide();
+	}
+#else
 	connect(qlLAutoTheme, &ClickableLabel::clicked, this, [this]() { qrbAutoStyle->setChecked(true); });
 	connect(qlLDarkTheme, &ClickableLabel::clicked, this, [this]() { qrbDarkStyle->setChecked(true); });
 	connect(qlLLightTheme, &ClickableLabel::clicked, this, [this]() { qrbLightStyle->setChecked(true); });
@@ -114,6 +123,7 @@ LookConfig::LookConfig(Settings &st) : ConfigWidget(st) {
 		connect(qpbThemesDirectory, &QPushButton::clicked, this,
 				[userThemeDirectoryUrl]() { QDesktopServices::openUrl(userThemeDirectoryUrl); });
 	}
+#endif
 
 #define ADD_SEARCH_USERACTION(name)                                                                      \
 	qcbSearchUserAction->addItem(Search::SearchDialog::toString(Search::SearchDialog::UserAction::name), \
@@ -169,19 +179,23 @@ void LookConfig::setActiveThemes(const std::optional< ThemeInfo::StyleInfo > con
 
 void LookConfig::updateLayoutPolicyControls(const Settings &settings) {
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	const bool forcedModernLayout                  = settings.modernLayoutPolicy == Settings::ModernLayoutForced;
 	const QString forcedModernText                 = tr("Modern layout is required by this build.");
 	QList< QAbstractButton * > legacyLayoutButtons = { qrbLClassic, qrbLStacked, qrbLHybrid, qrbLCustom };
+	Q_UNUSED(settings);
 
 	for (QAbstractButton *button : legacyLayoutButtons) {
-		button->setEnabled(!forcedModernLayout);
-		button->setToolTip(forcedModernLayout ? forcedModernText : QString());
+		button->setVisible(false);
+		button->setEnabled(false);
+		button->setToolTip(forcedModernText);
 	}
 
-	qcbAutoSwitchModernOnCompatibleServers->setEnabled(!forcedModernLayout);
-	qcbAutoSwitchModernOnCompatibleServers->setToolTip(forcedModernLayout ? forcedModernText : QString());
-	qrbLModern->setEnabled(true);
-	qrbLModern->setToolTip(forcedModernLayout ? forcedModernText : QString());
+	qcbLockLayout->setVisible(false);
+	qcbAutoSwitchModernOnCompatibleServers->setEnabled(false);
+	qcbAutoSwitchModernOnCompatibleServers->setVisible(false);
+	qcbAutoSwitchModernOnCompatibleServers->setToolTip(forcedModernText);
+	qrbLModern->setChecked(true);
+	qrbLModern->setEnabled(false);
+	qrbLModern->setToolTip(forcedModernText);
 #else
 	(void) settings;
 #endif
@@ -209,7 +223,7 @@ void LookConfig::load(const Settings &r) {
 
 	const Settings::WindowLayout effectiveLayout =
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
-		r.modernLayoutPolicy == Settings::ModernLayoutForced ? Settings::LayoutModern : r.wlWindowLayout;
+		Settings::LayoutModern;
 #else
 		r.wlWindowLayout == Settings::LayoutModern ? Settings::LayoutHybrid : r.wlWindowLayout;
 #endif
@@ -218,7 +232,9 @@ void LookConfig::load(const Settings &r) {
 	loadComboBox(qcbChannelDrag, 0);
 	loadComboBox(qcbUserDrag, 0);
 
+#if !defined(MUMBLE_HAS_MODERN_LAYOUT)
 	setStyleType(r.styleType);
+#endif
 	// Load Layout checkbox state
 	switch (effectiveLayout) {
 		case Settings::LayoutClassic:
@@ -260,7 +276,11 @@ void LookConfig::load(const Settings &r) {
 	loadComboBox(qcbQuitBehavior, static_cast< int >(r.quitBehavior));
 
 	loadCheckBox(qcbEnableDeveloperMenu, r.bEnableDeveloperMenu);
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	loadCheckBox(qcbLockLayout, false);
+#else
 	loadCheckBox(qcbLockLayout, (r.wlWindowLayout == Settings::LayoutCustom) && r.bLockLayout);
+#endif
 	loadCheckBox(qcbHideTray, r.bHideInTray);
 	loadCheckBox(qcbStateInTray, r.bStateInTray);
 	loadCheckBox(qcbShowVolumeAdjustments, r.bShowVolumeAdjustments);
@@ -269,7 +289,11 @@ void LookConfig::load(const Settings &r) {
 	loadCheckBox(qcbShowTransmitModeComboBox, r.bShowTransmitModeComboBox);
 	loadCheckBox(qcbHighContrast, r.bHighContrast);
 	loadCheckBox(qcbChatBarUseSelection, r.bChatBarUseSelection);
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	loadCheckBox(qcbAutoSwitchModernOnCompatibleServers, false);
+#else
 	loadCheckBox(qcbAutoSwitchModernOnCompatibleServers, r.bAutoSwitchModernOnCompatibleServers);
+#endif
 	loadCheckBox(qcbFilterHidesEmptyChannels, r.bFilterHidesEmptyChannels);
 	bool loadedPresenceIdleTimeout = false;
 	for (int i = 0; i < qcbPresenceIdleTimeout->count(); ++i) {
@@ -283,10 +307,12 @@ void LookConfig::load(const Settings &r) {
 		loadComboBox(qcbPresenceIdleTimeout, 1);
 	}
 
+#if !defined(MUMBLE_HAS_MODERN_LAYOUT)
 	reloadThemes();
 	const std::optional< ThemeInfo::StyleInfo > configuredStyle     = Themes::getThemeStyle(r, false);
 	const std::optional< ThemeInfo::StyleInfo > configuredDarkStyle = Themes::getThemeStyle(r, true);
 	setActiveThemes(configuredStyle, configuredDarkStyle);
+#endif
 
 	qleChannelSeparator->setText(r.qsHierarchyChannelSeparator);
 
@@ -307,24 +333,19 @@ void LookConfig::save() const {
 
 	// Save Layout radioboxes state
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	if (s.modernLayoutPolicy == Settings::ModernLayoutForced) {
-		s.wlWindowLayout = Settings::LayoutHybrid;
-	} else
-#endif
-		if (qrbLClassic->isChecked()) {
+	s.modernLayoutPolicy = Settings::ModernLayoutForced;
+	s.wlWindowLayout     = Settings::LayoutModern;
+#else
+	if (qrbLClassic->isChecked()) {
 		s.wlWindowLayout = Settings::LayoutClassic;
 	} else if (qrbLStacked->isChecked()) {
 		s.wlWindowLayout = Settings::LayoutStacked;
 	} else if (qrbLHybrid->isChecked()) {
 		s.wlWindowLayout = Settings::LayoutHybrid;
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	} else if (qrbLModern->isChecked()) {
-		s.modernLayoutPolicy = Settings::ModernLayoutForced;
-		s.wlWindowLayout     = Settings::LayoutHybrid;
-#endif
 	} else {
 		s.wlWindowLayout = Settings::LayoutCustom;
 	}
+#endif
 
 	s.ceExpand      = static_cast< Settings::ChannelExpand >(qcbExpand->currentIndex());
 	s.ceChannelDrag = static_cast< Settings::ChannelDrag >(qcbChannelDrag->currentIndex());
@@ -338,7 +359,12 @@ void LookConfig::save() const {
 	s.aotbAlwaysOnTop           = static_cast< Settings::AlwaysOnTopBehaviour >(qcbAlwaysOnTop->currentIndex());
 	s.quitBehavior              = static_cast< QuitBehavior >(qcbQuitBehavior->currentIndex());
 	s.bEnableDeveloperMenu      = qcbEnableDeveloperMenu->isChecked();
-	s.bLockLayout               = qcbLockLayout->isChecked();
+	s.bLockLayout =
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+		false;
+#else
+		qcbLockLayout->isChecked();
+#endif
 	s.bHideInTray               = qcbHideTray->isChecked();
 	s.bStateInTray              = qcbStateInTray->isChecked();
 	s.bShowVolumeAdjustments    = qcbShowVolumeAdjustments->isChecked();
@@ -349,13 +375,14 @@ void LookConfig::save() const {
 	s.bChatBarUseSelection      = qcbChatBarUseSelection->isChecked();
 	s.bAutoSwitchModernOnCompatibleServers =
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
-		qcbAutoSwitchModernOnCompatibleServers->isChecked();
+		false;
 #else
 		m_loadedAutoSwitchModernOnCompatibleServers;
 #endif
 	s.iPresenceIdleTimeoutMinutes = qcbPresenceIdleTimeout->currentData().toInt();
 	s.bFilterHidesEmptyChannels   = qcbFilterHidesEmptyChannels->isChecked();
 
+#if !defined(MUMBLE_HAS_MODERN_LAYOUT)
 	StyleType styleType = getStyleType();
 	if (s.styleType != styleType) {
 		s.requireThemeApplication = true;
@@ -375,6 +402,7 @@ void LookConfig::save() const {
 	} else {
 		s.requireThemeApplication |= Themes::setConfiguredDarkStyle(s, darkThemeData.value< ThemeInfo::StyleInfo >());
 	}
+#endif
 
 	s.qsHierarchyChannelSeparator = qleChannelSeparator->text();
 

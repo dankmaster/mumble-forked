@@ -1,5 +1,7 @@
 # Murmur Database Migration
 
+Status snapshot: 2026-06-05.
+
 This runbook covers offline database migration for Murmur servers. It is meant
 for operators who want to update a database before or during a server binary
 upgrade without starting the full voice server.
@@ -9,7 +11,7 @@ upgrade without starting the full voice server.
 The migration uses the same C++ database migration path as normal
 `mumble-server` startup. That means it supports every schema version that the
 current binary supports. At the time of writing, the server migrates schema
-versions `6` through `19` to the latest schema.
+versions `6` through `22` to the latest schema.
 
 Older schema versions are intentionally rejected by the server migration layer
 and need an intermediate upgrade first.

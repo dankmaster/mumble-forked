@@ -1,45 +1,56 @@
 # Modern Client Migration
 
-This branch starts the real migration away from the legacy Qt Widgets client UI. The first pass makes the WebEngine
-Modern shell the default visible client path and begins moving normal user workflows into bridge-driven modern panels.
-Native operating-system pickers and internal Qt helpers may remain while the user-facing workflows are migrated.
+Status snapshot: 2026-06-05.
 
-## Step 1 Scope
+The fork is migrating away from the legacy Qt Widgets client layout. In the
+current master state, the WebEngine Modern shell is the intended visible client
+path. Native operating-system pickers and selected internal Qt helpers may
+remain while user-facing workflows are migrated or intentionally kept as narrow
+escape hatches.
 
-- Modern layout is forced for the client shell on this branch.
-- Classic layout switching is removed from the visible Modern shell UX.
-- The non-WebEngine/client fallback remains as temporary migration scaffolding.
+## Current Scope
+
+- Modern layout is forced for the forked client shell in the current master state.
+- Classic layout switching is removed from the visible Modern shell UX and the
+  Modern settings page says so explicitly.
+- WebEngine boot failure now shows a minimal failure notice instead of falling
+  back to a full classic client layout in WebEngine-enabled builds.
+- The non-WebEngine Qt Widgets path remains temporary build and migration
+  scaffolding.
 - Connect, saved-server editing, selected settings pages, failed-connection prompts, and common action dialogs now have
   Modern shell DTO/controller paths.
 - The Modern settings dialog now splits audio into input and output pages with the high-impact legacy controls carried
   across: backend/device selection, exclusive mode, transmit/VAD timing, compression, echo/noise cleanup, cue files,
   idle behavior, playback, attenuation, positional audio, loopback, and remote speech cleanup.
+- Modern settings pages currently cover Audio Input, Audio Output, Appearance,
+  User Interface, Messages & Sounds, Key Bindings, Network, Screen Sharing, and
+  About.
 - Modern shell routes for Audio Wizard, ACL, and server/admin dialogs no longer silently fall back to legacy Widgets.
   Audio Wizard opens the modern audio input page. Server Information, Tokens, Registered Users, Ban List, ACL data,
   Create Room, User Information, local nickname, self comment, user comment, reset confirmations, kick/ban, About,
   About Qt, and Audio Stats now publish real Modern dialog DTOs instead of migration notices.
 - A broader legacy-dialog guard now protects Modern shell action fallback, global-shortcut openers, and server-response
-  handlers. Remaining captured placeholders are limited to Certificate Wizard, server settings editing, Search,
-  Voice Recorder, chat-history grant, and rare text-message fallback cases where the Modern composer cannot infer a
-  target.
-- Server builds are not part of this migration pass.
+  handlers. Remaining Qt Widgets/native dialog surfaces include Plugin settings/install/update, Search, Voice Recorder,
+  Certificate Wizard edge cases, and rare text-message fallback cases where the Modern composer cannot infer a target.
+- Modern server log rendering now has its own document/append path instead of
+  depending on the classic log widget as the WebEngine source of truth.
+- Server builds and ordinary upstream/native client compatibility are not part
+  of this migration pass; keep the server's baseline Mumble protocol behavior
+  intact while the fork desktop client becomes modern-only.
 
 ## Bridge And Controller Surface
 
 - `ModernShellBridge` publishes dialog state and accepts dialog field/action calls from the WebEngine shell.
 - `ModernDialogController` owns the active modal state and dispatches connect, settings, and failed-connection actions.
 - `ModernConnectController` builds saved-server DTOs and validates connect/save/remove actions.
-- `ModernSettingsController` builds initial Look, Network, Screen Share, Audio input, and Audio output settings pages
-  and always forces the Modern layout fields in its draft.
+- `ModernSettingsController` builds the active Modern settings pages and always
+  forces the Modern layout fields in its draft.
 
 ## Remaining `.ui` Inventory
 
-The repository currently contains 39 `.ui` files. This pass starts replacement of `ConnectDialog.ui`,
-`ConnectDialogEdit.ui`, `ConfigDialog.ui`, `LookConfig.ui`, `NetworkConfig.ui`, `AudioInput.ui`, `AudioOutput.ui`,
-`ServerInformation.ui`, `Tokens.ui`, `UserEdit.ui`, `BanEditor.ui`, `ACLEditor.ui`, `UserInformation.ui`,
-`UserLocalNicknameDialog.ui`, `RichTextEditor.ui`, `AudioStats.ui`, `widgets/BanDialog.ui`, and
-`widgets/FailedConnectionDialog.ui` through Modern shell routes. The inventory keeps all files visible until their
-legacy classes can be deleted safely.
+The repository currently contains 34 `.ui` files under `src/mumble`. Several
+already have Modern shell routes, but the files remain until their legacy
+classes can be deleted safely.
 
 ### Priority 1: Settings Pages
 
@@ -93,3 +104,14 @@ legacy classes can be deleted safely.
 - `src/mumble/MainWindow.ui`
 - `src/mumble/ConfigDialog.ui`
 - Legacy dock, menu, splitter, and user-tree glue that only exists to host the classic shell.
+
+## Already Cut From This Direction
+
+- ASIO
+- G15/LCD
+- PositionalAudioViewer
+- in-game overlay
+- TalkingUI
+
+Positional audio, plugin infrastructure, and the manual plugin are still in
+scope.

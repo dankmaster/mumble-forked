@@ -209,13 +209,13 @@ Only the labels should vary:
 
 ## Updater Apply Flow
 
-`mumble-updater.exe` should grow a second mode beside `--installer`:
+`mumble-updater.exe` has a second mode beside `--installer`:
 
 ```text
 mumble-updater.exe --package <path> --app <path> --working-dir <dir> --parent-pid <pid> ...
 ```
 
-Proposed package-mode flow:
+Current package-mode flow:
 
 1. Parse package arguments and log paths.
 2. Wait for the parent Mumble process to exit.
@@ -298,7 +298,7 @@ layout, so it is a good local proving ground for this phase.
 
 ## Release Workflow Changes
 
-The `mumble-forked MSI Release` workflow should add a package step after the
+The `mumble-forked MSI Release` workflow includes a package step after the
 shared payload has been staged and validated:
 
 1. Read `build-shared-webengine/shared-webengine-stage`.
@@ -330,15 +330,22 @@ includes installer metadata. Older clients ignore the package fields and
 continue to use the MSI through the preserved `installerUrl` and top-level
 `sha256`.
 
-## Implementation Phases
+## Implementation Phase Ledger
+
+The package path is implemented enough to be the preferred fork update mode.
+Keep this section as a ledger for what exists and what still needs hardening.
 
 ### Phase 0: MSI UX Baseline
+
+Status: complete.
 
 Keep the current banner-based MSI updater as the user-visible baseline. It gives
 users clear progress and clear install/restart actions while the package work is
 being built.
 
 ### Phase 1: Package Artifact And Manifest
+
+Status: complete for `mumble-forked` releases.
 
 - Add a script that creates `.mumble-update` from
   `shared-webengine-stage`.
@@ -355,6 +362,8 @@ Acceptance checks:
 - Existing clients still install via MSI.
 
 ### Phase 2: Client Package Detection And Download
+
+Status: implemented.
 
 - Add package field parsing to `VersionCheck`.
 - Prefer package mode when all package fields validate.
@@ -373,6 +382,8 @@ Acceptance checks:
 - Package handoff passes the verified MSI fallback to `mumble-updater.exe`.
 
 ### Phase 3: Updater Package Mode
+
+Status: implemented with MSI fallback.
 
 - Add `--package` mode to `mumble-updater.exe`.
 - Add archive extraction and internal manifest verification.
@@ -393,6 +404,8 @@ Acceptance checks:
 
 ### Phase 4: Local And Automated Verification
 
+Status: active hardening area.
+
 - Add a local package smoke path for the synced dev client.
 - Add CI validation that builds a package and verifies its manifest.
 - Add updater dry-run or test helper coverage for package argument parsing and
@@ -409,6 +422,8 @@ Acceptance checks:
 
 ### Phase 5: Signing And Versioned Layout
 
+Status: future work.
+
 - Add code signing for MSI, updater, and package assets when certificates are
   available.
 - Add manifest/package signatures, or signed release metadata, so SHA-256 is not
@@ -417,12 +432,11 @@ Acceptance checks:
   cleaner rollback.
 - Consider delta packages only after the full package flow is stable.
 
-## Open Decisions
+## Remaining Decisions
 
-- Package extension: `.mumble-update` is descriptive, but `.mumblepkg` is shorter.
-- Elevation UX: use `ShellExecuteExW(..., "runas", ...)` from the copied updater,
-  or always let the client perform the elevation handoff before quitting.
-- Package trust: whether the first internal version is SHA-256 only like the MSI
-  path, or whether package mode should wait for signing.
+- Package trust: the current internal version uses SHA-256 integrity like the
+  MSI path; signing is still the long-term trust boundary.
 - Production layout: whether to keep the v1 in-place replacement path long-term,
   or move to versioned app directories for more atomic updates.
+- Delta packages: still deferred until the full package flow is boring and
+  bandwidth pressure is real.
