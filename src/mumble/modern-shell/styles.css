@@ -1422,7 +1422,7 @@ textarea:focus-visible {
 	padding: 4px 14px 14px 20px;
 	scroll-padding-bottom: calc(var(--footer-row-height) + var(--jump-latest-edge-gap));
 	scrollbar-width: auto;
-	scrollbar-color: rgba(var(--info-rgb), 0.72) var(--surface-glint-medium);
+	scrollbar-color: var(--scrollbar-thumb) var(--surface-glint-medium);
 	background: var(--shell-bg);
 	transition: box-shadow 180ms ease, opacity 140ms ease;
 	contain: paint;
@@ -1455,8 +1455,8 @@ textarea:focus-visible {
 	background:
 		linear-gradient(100deg,
 			transparent 0%,
-			rgba(var(--info-rgb), 0.055) 42%,
-			rgba(var(--accent-rgb), 0.075) 50%,
+			rgba(var(--accent-rgb), 0.045) 42%,
+			rgba(var(--accent-rgb), 0.085) 50%,
 			transparent 62%);
 	background-size: 220% 100%;
 	animation: chat-layout-settle-sheen 820ms ease-in-out infinite;
@@ -1515,7 +1515,7 @@ textarea:focus-visible {
 .rail-list::-webkit-scrollbar-thumb,
 .utility-scroll::-webkit-scrollbar-thumb,
 .composer-bar textarea::-webkit-scrollbar-thumb {
-	background: linear-gradient(180deg, rgba(var(--info-rgb), 0.62), rgba(var(--accent-rgb), 0.48));
+	background: var(--scrollbar-thumb);
 	border: 2px solid transparent;
 	border-radius: 999px;
 	background-clip: padding-box;
@@ -1526,7 +1526,7 @@ textarea:focus-visible {
 .rail-list::-webkit-scrollbar-thumb:hover,
 .utility-scroll::-webkit-scrollbar-thumb:hover,
 .composer-bar textarea::-webkit-scrollbar-thumb:hover {
-	background: linear-gradient(180deg, rgba(var(--info-rgb), 0.74), rgba(var(--accent-rgb), 0.6));
+	background: var(--scrollbar-thumb-hover);
 	background-clip: padding-box;
 }
 
@@ -1881,15 +1881,15 @@ textarea:focus-visible {
 
 .message-bubble.is-own .preview-card,
 .message-cluster.is-own .preview-card {
-	border-color: rgba(216, 240, 236, 0.12);
+	border-color: var(--chat-accent-border);
 	background:
 		linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02)),
-		rgba(7, 28, 31, 0.22);
+		color-mix(in srgb, var(--reply-bg) 72%, var(--shell-strip) 28%);
 }
 
 .preview-card:hover,
 .preview-card:focus-visible {
-	border-color: rgba(var(--info-rgb), 0.32);
+	border-color: var(--chat-accent-border);
 	background:
 		linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
 		rgba(255, 255, 255, 0.04);
@@ -1900,10 +1900,10 @@ textarea:focus-visible {
 .message-bubble.is-own .preview-card:focus-visible,
 .message-cluster.is-own .preview-card:hover,
 .message-cluster.is-own .preview-card:focus-visible {
-	border-color: rgba(136, 211, 194, 0.34);
+	border-color: color-mix(in srgb, var(--accent) 48%, var(--surface-border) 52%);
 	background:
 		linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03)),
-		rgba(255, 255, 255, 0.05);
+		color-mix(in srgb, var(--reply-bg) 76%, var(--shell-highlight) 24%);
 }
 
 .preview-card.is-twitch {
@@ -2154,6 +2154,44 @@ textarea:focus-visible {
 	z-index: 1;
 }
 
+.preview-card-provider-session-button {
+	align-items: center;
+	background: rgba(15, 23, 42, 0.88);
+	border: 1px solid rgba(255, 255, 255, 0.16);
+	border-radius: 999px;
+	color: #fff;
+	cursor: pointer;
+	display: inline-flex;
+	font-size: 11px;
+	font-weight: 800;
+	height: 28px;
+	justify-content: center;
+	line-height: 1;
+	padding: 0 11px;
+	white-space: nowrap;
+}
+
+.preview-card-provider-session-button:hover,
+.preview-card-provider-session-button:focus-visible {
+	background: rgba(30, 41, 59, 0.96);
+	border-color: rgba(255, 255, 255, 0.32);
+	outline: none;
+}
+
+.preview-card-image-unavailable {
+	align-items: center;
+	color: rgba(255, 255, 255, 0.74);
+	display: flex;
+	font-size: 12px;
+	font-weight: 800;
+	height: 100%;
+	justify-content: center;
+	min-height: inherit;
+	padding: 24px;
+	text-align: center;
+	width: 100%;
+}
+
 .preview-card-media-placeholder {
 	flex-direction: column;
 	gap: 8px;
@@ -2311,11 +2349,21 @@ textarea:focus-visible {
 	isolation: isolate;
 }
 
+.preview-card-media-controls.has-provider-session {
+	grid-template-columns: auto auto minmax(72px, 1fr) auto minmax(56px, 104px) auto auto;
+	grid-template-areas: "play time seek mute volume verify size";
+}
+
 .preview-card-media-controls.is-size-only {
 	grid-template-columns: auto;
 	grid-template-areas: "size";
 	justify-content: end;
 	min-height: 38px;
+}
+
+.preview-card-media-controls.is-size-only.has-provider-session {
+	grid-template-columns: auto auto;
+	grid-template-areas: "verify size";
 }
 
 .preview-card-media-button {
@@ -2376,6 +2424,12 @@ textarea:focus-visible {
 	grid-area: size;
 	justify-content: center;
 	justify-self: end;
+}
+
+.preview-card-provider-session-control {
+	grid-area: verify;
+	height: 24px;
+	padding: 0 9px;
 }
 
 .preview-card-media-size:empty::before {
@@ -2585,8 +2639,8 @@ textarea:focus-visible {
 
 .message-bubble.is-own .preview-card-badge,
 .message-cluster.is-own .preview-card-badge {
-	background: rgba(216, 240, 236, 0.10);
-	color: rgba(216, 240, 236, 0.78);
+	background: color-mix(in srgb, var(--accent) 13%, transparent);
+	color: var(--chat-accent-muted);
 }
 
 .preview-card-title {
@@ -2689,7 +2743,7 @@ textarea:focus-visible {
 }
 
 .preview-card-action {
-	color: rgb(var(--info-rgb));
+	color: var(--accent-strong);
 	font-size: 11px;
 	font-weight: 600;
 }
@@ -2700,10 +2754,10 @@ textarea:focus-visible {
 	justify-content: center;
 	min-height: 26px;
 	padding: 0 10px;
-	border: 1px solid rgba(var(--info-rgb), 0.28);
+	border: 1px solid var(--accent-border);
 	border-radius: 6px;
-	background: rgba(var(--info-rgb), 0.10);
-	color: rgb(var(--info-rgb));
+	background: var(--accent-soft);
+	color: var(--accent-strong);
 	cursor: pointer;
 	font: inherit;
 	line-height: 1;
@@ -2711,8 +2765,8 @@ textarea:focus-visible {
 
 .preview-card-open-button:hover,
 .preview-card-open-button:focus-visible {
-	border-color: rgba(var(--info-rgb), 0.52);
-	background: rgba(var(--info-rgb), 0.18);
+	border-color: color-mix(in srgb, var(--accent) 54%, var(--surface-border) 46%);
+	background: color-mix(in srgb, var(--accent-soft) 72%, var(--surface-glint-soft) 28%);
 	outline: none;
 }
 
@@ -6499,8 +6553,8 @@ textarea:focus-visible {
 
 .message-bubble.is-own .preview-card-x-badge,
 .message-cluster.is-own .preview-card-x-badge {
-	background: rgba(216, 240, 236, 0.12);
-	color: rgba(216, 240, 236, 0.82);
+	background: color-mix(in srgb, var(--accent) 13%, transparent);
+	color: var(--chat-accent-muted);
 }
 
 .preview-card-x-media {
@@ -6680,11 +6734,26 @@ textarea:focus-visible {
 	overflow: hidden;
 }
 
+.preview-card.is-instagram-reel .preview-card-instagram-media.preview-card-media {
+	aspect-ratio: 9 / 16;
+	height: auto;
+	margin-left: auto;
+	margin-right: auto;
+	max-width: var(--preview-card-short-width);
+	min-height: 0;
+	width: min(100%, var(--preview-card-short-width));
+}
+
 .preview-card.is-instagram-post .preview-card-instagram-media .preview-card-video,
 .preview-card.is-instagram-post .preview-card-instagram-image {
 	background: #000;
 	object-fit: contain;
 	object-position: center;
+}
+
+.preview-card.is-instagram-reel .preview-card-instagram-media .preview-card-video,
+.preview-card.is-instagram-reel .preview-card-instagram-image {
+	object-fit: cover;
 }
 
 .preview-card.is-instagram-post .preview-card-instagram-media .preview-card-inline-image {
@@ -6713,6 +6782,14 @@ textarea:focus-visible {
 		linear-gradient(#000, #000) padding-box,
 		linear-gradient(135deg, #feda75, #fa7e1e 30%, #d62976 58%, #962fbf 78%, #4f5bd5) border-box;
 	border: 2px solid transparent;
+}
+
+.preview-card-instagram-avatar.has-image {
+	background-color: #050505;
+	background-position: center;
+	background-repeat: no-repeat;
+	background-size: contain;
+	border-color: rgba(255, 255, 255, 0.18);
 }
 
 .preview-card-instagram-badge {
@@ -6832,7 +6909,7 @@ textarea:focus-visible {
 
 .reaction-chip:hover,
 .reaction-chip:focus-visible {
-	border-color: rgba(var(--info-rgb), 0.34);
+	border-color: var(--accent-border);
 }
 
 .reaction-chip-emoji {

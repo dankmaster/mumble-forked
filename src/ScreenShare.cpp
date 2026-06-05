@@ -52,10 +52,9 @@ namespace ScreenShare {
 	}
 
 	QList< int > webRtcRelayCodecPreferenceList() {
-		return { static_cast< int >(MumbleProto::ScreenShareCodecH264),
-				 static_cast< int >(MumbleProto::ScreenShareCodecAV1),
-				 static_cast< int >(MumbleProto::ScreenShareCodecVP9),
-				 static_cast< int >(MumbleProto::ScreenShareCodecVP8) };
+		// The WebRTC relay currently uses the same codec preference order as the default path. Kept as
+		// a distinct entry point so the two can diverge later without touching call sites.
+		return defaultCodecPreferenceList();
 	}
 
 	QList< int > sanitizeCodecList(const QList< int > &codecs) {
@@ -234,9 +233,21 @@ namespace ScreenShare {
 		return relayTransport == MumbleProto::ScreenShareRelayTransportWebRTC;
 	}
 
+	bool relayUrlContainsGstTokenMetacharacter(const QString &value) {
+		for (const QChar ch : value) {
+			if (ch.isSpace() || ch == QLatin1Char('!') || ch == QLatin1Char('\\') || ch.unicode() < 0x20) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	QString normalizeRelayUrl(const QString &relayUrl) {
 		const QString trimmed = relayUrl.trimmed();
 		if (trimmed.isEmpty()) {
+			return QString();
+		}
+		if (relayUrlContainsGstTokenMetacharacter(trimmed)) {
 			return QString();
 		}
 
@@ -246,29 +257,33 @@ namespace ScreenShare {
 		}
 
 		const QString scheme = url.scheme().trimmed().toLower();
-		if (scheme == QLatin1String("file")) {
-			if (!url.isLocalFile()) {
-				return QString();
-			}
-
-			const QString localPath = url.toLocalFile().trimmed();
-			if (localPath.isEmpty() || !QDir::isAbsolutePath(localPath)) {
-				return QString();
-			}
-
-			return QUrl::fromLocalFile(localPath).toString();
-		}
-
+		// SECURITY: the relay URL is supplied by the server. A "file://" relay would make the helper
+		// write the captured screen recording to a server-chosen path on the user's disk (arbitrary
+		// file write driven by a malicious/compromised server). Local file recording, if ever needed,
+		// must be a client-configured directory rather than a server-trusted URL, so file:// (and any
+		// other local scheme with an empty host) is rejected here.
 		if (url.host().trimmed().isEmpty()) {
 			return QString();
 		}
 
-		if (scheme != QLatin1String("wss") && scheme != QLatin1String("ws") && scheme != QLatin1String("https")
-			&& scheme != QLatin1String("http") && scheme != QLatin1String("rtmp") && scheme != QLatin1String("rtmps")) {
+		// SECURITY: require transport security. Plaintext schemes (ws/http/rtmp) leave the screen
+		// stream open to interception/MitM, so only the TLS-protected variants are accepted.
+		if (scheme != QLatin1String("wss") && scheme != QLatin1String("https") && scheme != QLatin1String("rtmps")) {
 			return QString();
 		}
 
-		return url.toString(QUrl::NormalizePathSegments);
+		const QString normalized = url.toString(QUrl::NormalizePathSegments);
+
+		// SECURITY: the relay URL is later interpolated into gst-launch pipeline tokens (e.g.
+		// "signaller::ws-url=<url>"). gst-launch treats whitespace and '!' as element separators and
+		// '\' as an escape, so a URL carrying those raw characters could inject extra pipeline
+		// elements. Check both the raw input and the normalized QUrl string because QUrl may
+		// normalize some user-visible characters before formatting.
+		if (relayUrlContainsGstTokenMetacharacter(normalized)) {
+			return QString();
+		}
+
+		return normalized;
 	}
 
 	bool isValidRelayUrl(const QString &relayUrl) { return !normalizeRelayUrl(relayUrl).isEmpty(); }

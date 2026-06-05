@@ -274,6 +274,8 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 			 75);
 	QCOMPARE(customAccentField.value(QStringLiteral("type")).toString(), QStringLiteral("color"));
 	QCOMPARE(customAccentTokens.value(QStringLiteral("--theme-accent-custom")).toString(), QStringLiteral("#aabbcc"));
+	QCOMPARE(customAccentTokens.value(QStringLiteral("--theme-accent-custom-glow")).toString(),
+			 QStringLiteral("rgba(170, 187, 204, 0.136)"));
 
 	controller.updateField(QStringLiteral("network.autoReconnect"), true);
 	controller.updateField(QStringLiteral("network.reconnectToLastChannel"), true);

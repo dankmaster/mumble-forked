@@ -11,6 +11,7 @@
 	const accentPalette = {};
 	let lastAppliedTweaks = null;
 	let lastAppliedThemeTokenNames = [];
+	let lastAppliedAccentOverrideTokenNames = [];
 
 	function normalizedToken(value, fallback, allowed) {
 		const token = String(value || "").trim().toLowerCase();
@@ -93,7 +94,8 @@
 			accent: color,
 			rgb: rgb,
 			soft: computedCssVariable(root, prefix + "-soft") || ("rgba(" + rgb + ", 0.16)"),
-			border: computedCssVariable(root, prefix + "-border") || ("rgba(" + rgb + ", 0.42)")
+			border: computedCssVariable(root, prefix + "-border") || ("rgba(" + rgb + ", 0.42)"),
+			glow: computedCssVariable(root, prefix + "-glow") || ("rgba(" + rgb + ", 0.09)")
 		};
 	}
 
@@ -111,23 +113,57 @@
 		});
 	}
 
-	function applyAccent(root, accent) {
-		refreshAccentPalette(root);
-		const palette = accent === "auto" ? null : accentPalette[accent];
-		if (palette) {
-			root.style.setProperty("--accent", palette.accent);
-			root.style.setProperty("--accent-rgb", palette.rgb);
-			root.style.setProperty("--accent-soft", palette.soft);
-			root.style.setProperty("--accent-border", palette.border);
-			root.style.setProperty("--on-accent", contrastTextForAccent(palette.accent));
+	function clearAccentOverride(root) {
+		if (!root || !root.style) {
 			return;
 		}
+		lastAppliedAccentOverrideTokenNames.forEach(function(name) {
+			root.style.removeProperty(name);
+		});
+		lastAppliedAccentOverrideTokenNames = [];
+	}
 
-		root.style.removeProperty("--accent");
-		root.style.removeProperty("--accent-rgb");
-		root.style.removeProperty("--accent-soft");
-		root.style.removeProperty("--accent-border");
-		root.style.removeProperty("--on-accent");
+	function setAccentOverrideTokens(root, tokens) {
+		Object.keys(tokens).forEach(function(name) {
+			root.style.setProperty(name, tokens[name]);
+			lastAppliedAccentOverrideTokenNames.push(name);
+		});
+	}
+
+	function accentOverrideTokens(palette) {
+		const selectedText = "color-mix(in srgb, var(--text-strong) 88%, var(--accent) 12%)";
+		return {
+			"--accent": palette.accent,
+			"--accent-rgb": palette.rgb,
+			"--accent-soft": palette.soft,
+			"--accent-border": palette.border,
+			"--accent-strong": "color-mix(in srgb, var(--accent) 78%, var(--text-strong) 22%)",
+			"--accent-ink": "color-mix(in srgb, var(--accent) 72%, var(--text-strong) 28%)",
+			"--body-bg-glow": palette.glow,
+			"--chat-accent-surface": "color-mix(in srgb, var(--shell-panel-soft) 74%, var(--accent) 26%)",
+			"--chat-accent-surface-strong": "color-mix(in srgb, var(--shell-panel-soft) 66%, var(--accent) 34%)",
+			"--chat-accent-text": selectedText,
+			"--chat-accent-muted": "color-mix(in srgb, var(--text-muted) 84%, var(--accent) 16%)",
+			"--chat-accent-border": "color-mix(in srgb, var(--accent) 34%, var(--surface-border) 66%)",
+			"--reply-bg": "var(--chat-accent-surface)",
+			"--reply-text": "var(--chat-accent-text)",
+			"--selected-bg": palette.soft,
+			"--selected-text": selectedText,
+			"--settings-selected-text": selectedText,
+			"--scrollbar-thumb": "rgba(" + palette.rgb + ", 0.30)",
+			"--scrollbar-thumb-hover": "rgba(" + palette.rgb + ", 0.46)",
+			"--on-accent": contrastTextForAccent(palette.accent)
+		};
+	}
+
+	function applyAccent(root, accent) {
+		refreshAccentPalette(root);
+		clearAccentOverride(root);
+		const palette = accent === "auto" ? null : accentPalette[accent];
+		if (palette) {
+			setAccentOverrideTokens(root, accentOverrideTokens(palette));
+			return;
+		}
 	}
 
 	function safeCssVariableName(name) {
@@ -161,6 +197,7 @@
 			return;
 		}
 
+		clearAccentOverride(root);
 		lastAppliedThemeTokenNames.forEach(function(name) {
 			root.style.removeProperty(name);
 		});

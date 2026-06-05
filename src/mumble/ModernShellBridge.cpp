@@ -11,20 +11,59 @@
 #include "Global.h"
 #include "ServerHandler.h"
 
-#include <QtCore/QDateTime>
-#include <QtCore/QFile>
-#include <QtCore/QMimeData>
-#include <QtGui/QClipboard>
-#include <QtGui/QImage>
-#include <QtGui/QImageReader>
-#include <QtGui/QPixmap>
-#include <QtWidgets/QApplication>
+#	include <QtCore/QByteArray>
+#	include <QtCore/QDateTime>
+#	include <QtCore/QFile>
+#	include <QtCore/QMimeData>
+#	include <QtCore/QUrl>
+#	include <QtGui/QClipboard>
+#	include <QtGui/QImage>
+#	include <QtGui/QImageReader>
+#	include <QtGui/QPixmap>
+#	include <QtNetwork/QNetworkAccessManager>
+#	include <QtNetwork/QNetworkReply>
+#	include <QtNetwork/QNetworkRequest>
+#	include <QtWidgets/QApplication>
 
-#include <cmath>
+#	include <cmath>
 
 namespace {
-	int audioMeterPercent(const float normalizedLevel) {
-		return qBound(0, static_cast< int >(std::lround(normalizedLevel * 100.0f)), 100);
+constexpr qint64 PREVIEW_BRIDGE_FETCH_MAX_TEXT_BYTES   = 1024 * 1024;
+constexpr qint64 PREVIEW_BRIDGE_FETCH_MAX_BINARY_BYTES = 8 * 1024 * 1024;
+const QByteArray PREVIEW_MEDIA_USER_AGENT =
+	QByteArrayLiteral("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+					  "(KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36");
+const QByteArray PREVIEW_MEDIA_ACCEPT_LANGUAGE = QByteArrayLiteral("en-US,en;q=0.9");
+
+int audioMeterPercent(const float normalizedLevel) {
+	return qBound(0, static_cast< int >(std::lround(normalizedLevel * 100.0f)), 100);
+	}
+
+	bool hostEqualsOrEndsWith(const QString &host, const QString &domain) {
+		const QString normalizedHost   = host.trimmed().toLower();
+		const QString normalizedDomain = domain.trimmed().toLower();
+		return normalizedHost == normalizedDomain || normalizedHost.endsWith(QStringLiteral(".") + normalizedDomain);
+	}
+
+	bool isTrustedPreviewMediaFetchUrl(const QUrl &url) {
+		if (!url.isValid() || url.scheme().toLower() != QLatin1String("https") || !url.userName().isEmpty()
+			|| !url.password().isEmpty()) {
+			return false;
+		}
+
+		const QString host = url.host().trimmed().toLower();
+		const QString path = url.path().trimmed().toLower();
+		return hostEqualsOrEndsWith(host, QStringLiteral("steamstatic.com"))
+			   && path.startsWith(QLatin1String("/store_trailers/"));
+	}
+
+	QVariantMap previewMediaFetchFailure(const QString &requestId, const QString &error, int status = 0) {
+		QVariantMap result;
+		result.insert(QStringLiteral("requestId"), requestId);
+		result.insert(QStringLiteral("ok"), false);
+		result.insert(QStringLiteral("status"), status);
+		result.insert(QStringLiteral("error"), error);
+		return result;
 	}
 
 	void appendModernShellConnectTrace(const QString &message) {
@@ -371,6 +410,97 @@ void ModernShellBridge::activateLink(const QString &href) {
 	}
 
 	emit linkActivationRequested(trimmedHref);
+}
+
+void ModernShellBridge::openProviderSession(const QString &href) {
+	const QString trimmedHref = href.trimmed();
+	if (trimmedHref.isEmpty()) {
+		return;
+	}
+
+	emit providerSessionRequested(trimmedHref);
+}
+
+void ModernShellBridge::fetchPreviewMedia(const QString &requestId, const QString &url, const QString &responseType) {
+	const QString trimmedRequestID = requestId.trimmed();
+	const QUrl requestUrl(url.trimmed());
+	if (trimmedRequestID.isEmpty()) {
+		return;
+	}
+	if (!isTrustedPreviewMediaFetchUrl(requestUrl)) {
+		emit previewMediaFetchResultReady(
+			previewMediaFetchFailure(trimmedRequestID, QStringLiteral("URL not allowed")));
+		return;
+	}
+	if (!Global::get().nam) {
+		emit previewMediaFetchResultReady(
+			previewMediaFetchFailure(trimmedRequestID, QStringLiteral("Network manager unavailable")));
+		return;
+	}
+
+	const QString normalizedResponseType = responseType.trimmed().toLower();
+	const bool wantsText                 = normalizedResponseType == QLatin1String("text");
+	const qint64 maxBytes = wantsText ? PREVIEW_BRIDGE_FETCH_MAX_TEXT_BYTES : PREVIEW_BRIDGE_FETCH_MAX_BINARY_BYTES;
+
+	QNetworkRequest request(requestUrl);
+	request.setRawHeader(QByteArrayLiteral("User-Agent"), PREVIEW_MEDIA_USER_AGENT);
+	request.setRawHeader(QByteArrayLiteral("Accept-Language"), PREVIEW_MEDIA_ACCEPT_LANGUAGE);
+	request.setRawHeader(QByteArrayLiteral("Accept"),
+						 wantsText ? QByteArrayLiteral("application/vnd.apple.mpegurl,text/plain;q=0.9,*/*;q=0.5")
+								   : QByteArrayLiteral("video/mp4,audio/mp4,application/octet-stream,*/*;q=0.5"));
+	request.setRawHeader(QByteArrayLiteral("Referer"), QByteArrayLiteral("https://store.steampowered.com/"));
+	request.setRawHeader(QByteArrayLiteral("Origin"), QByteArrayLiteral("https://store.steampowered.com"));
+
+	QNetworkReply *reply = Global::get().nam->get(request);
+	reply->setProperty("mumblePreviewMediaRequestId", trimmedRequestID);
+	reply->setProperty("mumblePreviewMediaWantsText", wantsText);
+	reply->setProperty("mumblePreviewMediaMaxBytes", maxBytes);
+	connect(reply, &QNetworkReply::downloadProgress, reply, [reply, maxBytes](qint64 received, qint64) {
+		if (received > maxBytes && !reply->property("mumblePreviewMediaTooLarge").toBool()) {
+			reply->setProperty("mumblePreviewMediaTooLarge", true);
+			reply->abort();
+		}
+	});
+	connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+		const QString finishedRequestID = reply->property("mumblePreviewMediaRequestId").toString();
+		const bool wantsText            = reply->property("mumblePreviewMediaWantsText").toBool();
+		const qint64 maxBytes           = reply->property("mumblePreviewMediaMaxBytes").toLongLong();
+		const bool tooLarge             = reply->property("mumblePreviewMediaTooLarge").toBool();
+		const int status                = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).isValid()
+							   ? reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt()
+							   : 0;
+		const QUrl finalUrl     = reply->url();
+		const QByteArray data   = tooLarge ? QByteArray() : reply->readAll();
+		const QString errorText = reply->errorString();
+		const QString contentType =
+			reply->header(QNetworkRequest::ContentTypeHeader).toString().section(QLatin1Char(';'), 0, 0);
+		const bool success = !tooLarge && reply->error() == QNetworkReply::NoError
+							 && isTrustedPreviewMediaFetchUrl(finalUrl) && data.size() <= maxBytes;
+		reply->deleteLater();
+
+		if (!success) {
+			emit previewMediaFetchResultReady(
+				previewMediaFetchFailure(finishedRequestID,
+										 tooLarge ? QStringLiteral("Response too large")
+												  : (errorText.isEmpty() ? QStringLiteral("Fetch failed") : errorText),
+										 status));
+			return;
+		}
+
+		QVariantMap result;
+		result.insert(QStringLiteral("requestId"), finishedRequestID);
+		result.insert(QStringLiteral("ok"), true);
+		result.insert(QStringLiteral("status"), status);
+		result.insert(QStringLiteral("url"), finalUrl.toString(QUrl::FullyEncoded));
+		result.insert(QStringLiteral("byteLength"), data.size());
+		result.insert(QStringLiteral("contentType"), contentType);
+		if (wantsText) {
+			result.insert(QStringLiteral("text"), QString::fromUtf8(data));
+		} else {
+			result.insert(QStringLiteral("dataBase64"), QString::fromLatin1(data.toBase64()));
+		}
+		emit previewMediaFetchResultReady(result);
+	});
 }
 
 void ModernShellBridge::invokeAppAction(const QString &actionId) {

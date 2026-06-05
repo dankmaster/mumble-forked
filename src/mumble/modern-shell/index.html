@@ -2,6 +2,9 @@
 <html lang="en" data-theme="dark" data-accent="auto">
 <head>
 	<meta charset="utf-8">
+	<!-- SECURITY: script-src stays strict so message HTML cannot execute inline handlers/scripts.
+	     Network egress is deliberately kept behind native bridges or browser media/frame loads. -->
+	<meta http-equiv="Content-Security-Policy" content="default-src 'self' qrc:; script-src 'self' qrc: https://www.youtube.com; style-src 'self' qrc: 'unsafe-inline'; img-src 'self' qrc: https: data: blob:; media-src 'self' qrc: https: data: blob:; font-src 'self' qrc: data:; frame-src https:; connect-src 'self' qrc:; object-src 'none'; base-uri 'none'; form-action 'none'">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<title>Mumble Modern Shell</title>
 	<link rel="stylesheet" href="./theme-tokens.css">

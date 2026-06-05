@@ -4581,7 +4581,7 @@ struct RichPreviewProviderInfo {
 };
 
 constexpr int RICH_PREVIEW_METADATA_VERSION = 10;
-constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 3;
+constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 7;
 
 bool isDirectImageUrl(const QUrl &url) {
 	if (!url.isValid()) {
@@ -9159,6 +9159,25 @@ bool shouldCacheRemotePlayableMediaForPreview(const QUrl &previewUrl, const QUrl
 	return playableMediaMimeForUrl(normalizedMediaUrl, suggestedMime).startsWith(QLatin1String("video/"));
 }
 
+bool isTransientRemotePreviewMediaDataUrl(const QString &mediaDataUrl) {
+	const QUrl url(mediaDataUrl.trimmed());
+	if (!url.isValid() || url.scheme().toLower() != QLatin1String("https")) {
+		return false;
+	}
+
+	const QString host = normalizedPreviewHost(url.host());
+	return hostEqualsOrEndsWith(host, QStringLiteral("cdninstagram.com"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("fbcdn.net"))
+		   || hostEqualsOrEndsWith(host, QStringLiteral("fbsbx.com"));
+}
+
+bool remoteMp4BytesLookUnsupportedForInlinePlayback(const QByteArray &bytes) {
+	const QByteArray header = bytes.left(1024 * 1024).toLower();
+	return header.contains("vp09") || header.contains("vp9") || header.contains("vp08") || header.contains("vp8")
+		   || header.contains("av01") || header.contains("hvc1") || header.contains("hev1") || header.contains("dvh1")
+		   || header.contains("dvhe");
+}
+
 bool remotePlayableMediaBytesLookValid(const QByteArray &bytes, const QString &mime) {
 	if (bytes.isEmpty()) {
 		return false;
@@ -9166,6 +9185,9 @@ bool remotePlayableMediaBytesLookValid(const QByteArray &bytes, const QString &m
 
 	const QString normalizedMime = normalizedPlayableMediaMime(mime);
 	if (normalizedMime == QLatin1String("video/mp4")) {
+		if (remoteMp4BytesLookUnsupportedForInlinePlayback(bytes)) {
+			return false;
+		}
 		const QByteArray prefix = bytes.left(64);
 		return prefix.contains("ftyp") || prefix.contains("moov") || prefix.contains("mdat");
 	}
@@ -10915,7 +10937,7 @@ QString previewSnapshotMediaProbeScript() {
     if (instagramMediaLooksAudioOnly(url)) {
       return true;
     }
-    return /(?:bytestart|byteend|range|hevc|h265|hdr|av01)/i.test(`${value} ${info.tag} ${info.vencodeTag}`);
+    return /(?:bytestart|byteend|range|hevc|h265|hvc1|hev1|hdr|av01|vp09|vp9|vp08|vp8)/i.test(`${value} ${info.tag} ${info.vencodeTag}`);
   };
   const mimeForUrl = (url, fallback) => {
     const hinted = String(fallback || '').split(';')[0].trim().toLowerCase();
@@ -11077,8 +11099,7 @@ QString previewSnapshotMediaProbeScript() {
       } catch (e) {}
     });
   };
-)JS")
-		   + QString::fromLatin1(R"JS(
+)JS") + QString::fromLatin1(R"JS(
 
   try {
     document.querySelectorAll('video').forEach((video) => {
@@ -11255,6 +11276,80 @@ QString previewSnapshotMediaProbeScript() {
       .sort((a, b) => b.score - a.score);
     return primary[0] || fallback[0] || null;
   };
+  const instagramAvatarUrl = () => {
+    if (!instagramVideoPage) {
+      return '';
+    }
+    const srcFromSrcset = (srcset) => {
+      const parts = String(srcset || '').split(',').map((part) => part.trim()).filter(Boolean);
+      if (!parts.length) {
+        return '';
+      }
+      return parts[parts.length - 1].split(/\s+/)[0] || '';
+    };
+    const avatarCandidates = [];
+    try {
+      document.querySelectorAll('img').forEach((image) => {
+        const rawUrl = image.currentSrc || image.src || image.getAttribute('src') || srcFromSrcset(image.getAttribute('srcset'));
+        const url = cleanUrl(rawUrl);
+        if (!/^https:\/\//i.test(url) || !imageMimeForUrl(url, '')) {
+          return;
+        }
+        let parsed;
+        try {
+          parsed = new URL(url);
+        } catch (e) {
+          return;
+        }
+        if (!instagramMediaHost(parsed.hostname)) {
+          return;
+        }
+
+        const rect = image.getBoundingClientRect();
+        const visibleWidth = Math.max(0, rect.width);
+        const visibleHeight = Math.max(0, rect.height);
+        const visibleArea = visibleWidth * visibleHeight;
+        const naturalWidth = Math.max(0, image.naturalWidth || 0);
+        const naturalHeight = Math.max(0, image.naturalHeight || 0);
+        const naturalArea = naturalWidth * naturalHeight;
+        const squareRatio = Math.max(visibleWidth || naturalWidth || 1, visibleHeight || naturalHeight || 1)
+          / Math.max(1, Math.min(visibleWidth || naturalWidth || 1, visibleHeight || naturalHeight || 1));
+        const textSignals = [
+          image.alt || '',
+          image.getAttribute('aria-label') || '',
+          image.className && typeof image.className === 'string' ? image.className : ''
+        ].join(' ');
+        const urlSignals = parsed.pathname + ' ' + parsed.search;
+        let score = 0;
+        if (/profile|avatar|user|picture/i.test(textSignals)) {
+          score += 24000;
+        }
+        if (/\/t51\.2885-19\//i.test(parsed.pathname) || /s(?:150|320)x(?:150|320)/i.test(urlSignals)) {
+          score += 32000;
+        }
+        if (squareRatio <= 1.35) {
+          score += 6000;
+        }
+        if (visibleWidth >= 18 && visibleHeight >= 18 && visibleWidth <= 128 && visibleHeight <= 128) {
+          score += 9000;
+        }
+        if (visibleArea > 0) {
+          score += Math.min(5000, visibleArea);
+        }
+        if ((visibleWidth > 180 || visibleHeight > 180) && !/profile|avatar|picture/i.test(textSignals)) {
+          score -= 20000;
+        }
+        if (naturalArea > 320000 && !/profile|avatar|picture|t51\.2885-19/i.test(textSignals + ' ' + urlSignals)) {
+          score -= 22000;
+        }
+        if (score > 0) {
+          avatarCandidates.push({ url, score });
+        }
+      });
+    } catch (e) {}
+    avatarCandidates.sort((a, b) => b.score - a.score);
+    return avatarCandidates[0] ? avatarCandidates[0].url : '';
+  };
   const instagramPoster = instagramVideoPosterItem();
   if (instagramPoster && candidates[0] && /^video\//i.test(candidates[0].mime || '')) {
     result.posterUrl = instagramPoster.url;
@@ -11268,13 +11363,17 @@ QString previewSnapshotMediaProbeScript() {
       .filter((item) => item.instagramPrimary && item.viewportArea >= 4096)
       .sort((a, b) => a.order - b.order);
     const mediaItems = uniqueImageItems(carouselSource.length > 1 ? carouselSource : fallbackSource).slice(0, 10);
-    if (mediaItems.length > 1) {
+    if (mediaItems.length > 0) {
       result.items = mediaItems;
     }
   }
   if (candidates[0] && audioCandidates[0]) {
     result.audioUrl = audioCandidates[0].url;
     result.audioMime = audioCandidates[0].mime;
+  }
+  const avatarUrl = instagramAvatarUrl();
+  if (avatarUrl) {
+    result.instagramAvatarUrl = avatarUrl;
   }
   return result;
 })();
@@ -11283,11 +11382,13 @@ QString previewSnapshotMediaProbeScript() {
 
 class PersistentChatPreviewSnapshotRenderer final : public QObject {
 public:
-	using ResultCallback = std::function< void(const QString &, const QImage &, bool, const QString &, const QString &,
-											   const QString &, const QString &, const QVariantList &, const QString &,
-											   const QString &) >;
+	using ResultCallback =
+		std::function< void(const QString &, const QImage &, bool, const QString &, const QString &, const QString &,
+							const QString &, const QVariantList &, const QString &, const QString &, const QString &) >;
 
-	explicit PersistentChatPreviewSnapshotRenderer(QObject *parent = nullptr) : QObject(parent) {
+	explicit PersistentChatPreviewSnapshotRenderer(QWebEngineProfile *sharedProfile = nullptr,
+												   QObject *parent                  = nullptr)
+		: QObject(parent), m_sharedProfile(sharedProfile) {
 		m_timeoutTimer = new QTimer(this);
 		m_timeoutTimer->setSingleShot(true);
 		m_timeoutTimer->setInterval(15000);
@@ -11297,6 +11398,14 @@ public:
 		m_settleTimer->setSingleShot(true);
 		m_settleTimer->setInterval(1200);
 		QObject::connect(m_settleTimer, &QTimer::timeout, this, [this]() { captureCurrentView(); });
+		if (m_sharedProfile) {
+			QObject::connect(m_sharedProfile, &QObject::destroyed, this, [this]() {
+				m_sharedProfile = nullptr;
+				if (m_view) {
+					recreateView();
+				}
+			});
+		}
 	}
 
 	~PersistentChatPreviewSnapshotRenderer() override {
@@ -11315,6 +11424,24 @@ public:
 	}
 
 	void setResultCallback(ResultCallback callback) { m_resultCallback = std::move(callback); }
+
+	void setSharedProfile(QWebEngineProfile *sharedProfile) {
+		if (m_sharedProfile == sharedProfile) {
+			return;
+		}
+		m_sharedProfile = sharedProfile;
+		if (m_sharedProfile) {
+			QObject::connect(m_sharedProfile, &QObject::destroyed, this, [this]() {
+				m_sharedProfile = nullptr;
+				if (m_view) {
+					recreateView();
+				}
+			});
+		}
+		if (m_view && !m_busy) {
+			recreateView();
+		}
+	}
 
 	void requestSnapshot(const QString &previewKey, const QUrl &url) {
 		if (previewKey.trimmed().isEmpty() || !isSafePreviewTarget(url)) {
@@ -11341,23 +11468,27 @@ private:
 
 	static constexpr int kViewportWidth         = 960;
 	static constexpr int kViewportHeight        = 720;
-	static constexpr int kCaptureRetryDelayMsec = 250;
-	static constexpr int kMaxCaptureAttempts    = 4;
+	static constexpr int kCaptureRetryDelayMsec = 500;
+	static constexpr int kMaxCaptureAttempts    = 12;
 
 	void ensureView() {
 		if (m_view) {
 			return;
 		}
 
-		m_profile = new QWebEngineProfile(this);
-		m_profile->setPersistentCookiesPolicy(QWebEngineProfile::NoPersistentCookies);
-		m_profile->setPersistentPermissionsPolicy(QWebEngineProfile::PersistentPermissionsPolicy::StoreInMemory);
-		m_profile->setHttpCacheType(QWebEngineProfile::MemoryHttpCache);
-		m_profile->setHttpUserAgent(QString::fromLatin1(s_previewBrowserUserAgent));
-		m_profile->setHttpAcceptLanguage(QString::fromLatin1(s_previewAcceptLanguageHeader));
+		QWebEngineProfile *profile = m_sharedProfile.data();
+		if (!profile) {
+			m_profile = new QWebEngineProfile(this);
+			m_profile->setPersistentCookiesPolicy(QWebEngineProfile::NoPersistentCookies);
+			m_profile->setPersistentPermissionsPolicy(QWebEngineProfile::PersistentPermissionsPolicy::StoreInMemory);
+			m_profile->setHttpCacheType(QWebEngineProfile::MemoryHttpCache);
+			m_profile->setHttpUserAgent(QString::fromLatin1(s_previewBrowserUserAgent));
+			m_profile->setHttpAcceptLanguage(QString::fromLatin1(s_previewAcceptLanguageHeader));
 
-		m_interceptor = new PreviewSnapshotUrlInterceptor(m_profile);
-		m_profile->setUrlRequestInterceptor(m_interceptor);
+			m_interceptor = new PreviewSnapshotUrlInterceptor(m_profile);
+			m_profile->setUrlRequestInterceptor(m_interceptor);
+			profile = m_profile;
+		}
 
 		m_view = new QWebEngineView();
 		m_view->setAttribute(Qt::WA_ShowWithoutActivating, true);
@@ -11369,7 +11500,7 @@ private:
 		m_view->resize(kViewportWidth, kViewportHeight);
 		m_view->move(-32000, -32000);
 
-		m_page = new QWebEnginePage(m_profile, m_view);
+		m_page = new QWebEnginePage(profile, m_view);
 		m_page->setAudioMuted(true);
 		m_page->setBackgroundColor(Qt::white);
 		QWebEngineScript consentSuppressionScript;
@@ -11482,9 +11613,15 @@ private:
 										  media.value(QStringLiteral("posterUrl")).toString().trimmed();
 									  const QString posterMime =
 										  media.value(QStringLiteral("posterMime")).toString().trimmed();
-									  if (!mediaUrl.isEmpty() && mediaMime.startsWith(QLatin1String("video/"))
-										  && mediaAudioUrl.isEmpty()
-										  && isSocialPreviewMediaProbeUrl(m_current.url)
+									  const QString avatarUrl =
+										  media.value(QStringLiteral("instagramAvatarUrl")).toString().trimmed();
+									  const bool socialProbe      = isSocialPreviewMediaProbeUrl(m_current.url);
+									  const bool socialVideoProbe = isInstagramReelPreviewUrl(m_current.url)
+																	|| isFacebookReelPreviewUrl(m_current.url);
+									  const bool videoMedia = mediaMime.startsWith(QLatin1String("video/"));
+									  if (socialProbe
+										  && (mediaUrl.isEmpty() || (socialVideoProbe && !videoMedia)
+											  || (videoMedia && mediaAudioUrl.isEmpty()))
 										  && m_captureAttempts + 1 < kMaxCaptureAttempts) {
 										  ++m_captureAttempts;
 										  m_settleTimer->start(kCaptureRetryDelayMsec);
@@ -11494,12 +11631,12 @@ private:
 									  const QImage image      = pixmap.toImage();
 									  if (!image.isNull() && image.width() > 1 && image.height() > 1) {
 										  finishCurrent(true, image, mediaUrl, mediaMime, mediaAudioUrl, mediaAudioMime,
-														mediaItems, posterUrl, posterMime);
+														mediaItems, posterUrl, posterMime, avatarUrl);
 										  return;
 									  }
 									  if (!mediaUrl.isEmpty()) {
 										  finishCurrent(true, QImage(), mediaUrl, mediaMime, mediaAudioUrl,
-														mediaAudioMime, mediaItems, posterUrl, posterMime);
+														mediaAudioMime, mediaItems, posterUrl, posterMime, avatarUrl);
 										  return;
 									  }
 
@@ -11517,7 +11654,8 @@ private:
 	void finishCurrent(bool success, const QImage &image, const QString &mediaUrl = QString(),
 					   const QString &mediaMime = QString(), const QString &mediaAudioUrl = QString(),
 					   const QString &mediaAudioMime = QString(), const QVariantList &mediaItems = QVariantList(),
-					   const QString &posterUrl = QString(), const QString &posterMime = QString()) {
+					   const QString &posterUrl = QString(), const QString &posterMime = QString(),
+					   const QString &avatarUrl = QString()) {
 		if (!m_busy) {
 			return;
 		}
@@ -11538,7 +11676,7 @@ private:
 
 		if (m_resultCallback) {
 			m_resultCallback(previewKey, image, success, mediaUrl, mediaMime, mediaAudioUrl, mediaAudioMime, mediaItems,
-							 posterUrl, posterMime);
+							 posterUrl, posterMime, avatarUrl);
 		}
 
 		QTimer::singleShot(0, this, [this]() { startNextIfIdle(); });
@@ -11550,6 +11688,7 @@ private:
 	Request m_current;
 	QTimer *m_timeoutTimer                       = nullptr;
 	QTimer *m_settleTimer                        = nullptr;
+	QPointer< QWebEngineProfile > m_sharedProfile;
 	QWebEngineProfile *m_profile                 = nullptr;
 	PreviewSnapshotUrlInterceptor *m_interceptor = nullptr;
 	QWebEngineView *m_view                       = nullptr;
@@ -14671,6 +14810,55 @@ void MainWindow::activateModernShell() {
 
 					if (!url.isEmpty()) {
 						on_qteLog_anchorClicked(url);
+					}
+				});
+		connect(m_modernShellHost->bridge(), &ModernShellBridge::providerSessionRequested, this,
+				[this](const QString &href) {
+					QUrl providerUrl(href.trimmed());
+					if (!providerUrl.isValid()) {
+						providerUrl = QUrl::fromUserInput(href.trimmed());
+					}
+					if (!isInstagramPreviewUrl(providerUrl)) {
+						return;
+					}
+
+					const std::optional< InstagramPreviewTarget > providerTarget =
+						instagramPreviewTargetFromUrl(providerUrl);
+					QStringList previewKeys;
+					for (auto it = m_persistentChatPreviews.constBegin(); it != m_persistentChatPreviews.constEnd();
+						 ++it) {
+						const PersistentChatPreview &preview = it.value();
+						if (!preview.mediaDataUrl.trimmed().isEmpty() && preview.mediaKind == QLatin1String("video")) {
+							continue;
+						}
+						const QUrl previewUrl(preview.canonicalUrl);
+						if (!isInstagramPreviewUrl(previewUrl)) {
+							continue;
+						}
+						const std::optional< InstagramPreviewTarget > previewTarget =
+							instagramPreviewTargetFromUrl(previewUrl);
+						if (providerTarget && previewTarget) {
+							if (providerTarget->canonicalUrl != previewTarget->canonicalUrl) {
+								continue;
+							}
+						} else if (canonicalInstagramPreviewUrl(providerUrl) != canonicalInstagramPreviewUrl(previewUrl)) {
+							continue;
+						}
+						previewKeys.push_back(it.key());
+					}
+
+					for (const QString &previewKey : std::as_const(previewKeys)) {
+						auto it = m_persistentChatPreviews.find(previewKey);
+						if (it == m_persistentChatPreviews.end()) {
+							continue;
+						}
+						it->siteSnapshotRequested = false;
+						it->siteSnapshotFinished  = false;
+						it->remoteMediaRequested  = false;
+						it->remoteMediaFinished   = false;
+						it->failed                = false;
+						ensurePersistentChatPreviewSiteSnapshot(previewKey);
+						publishPersistentChatPreviewUpdate(previewKey);
 					}
 				});
 		connect(m_modernShellHost->bridge(), &ModernShellBridge::appActionRequested, this,
@@ -22113,7 +22301,8 @@ QVariantMap MainWindow::modernShellPreviewStateForKey(const QString &previewKey)
 															 youtubeTarget->shorts ? QStringLiteral("short")
 																				   : QStringLiteral("wide") };
 		}
-	} else if (preview.mediaDataUrl.trimmed().isEmpty() && preview.mediaItems.empty()) {
+	} else if (isInstagramPreviewUrl(QUrl(preview.canonicalUrl))
+			   || (preview.mediaDataUrl.trimmed().isEmpty() && preview.mediaItems.empty())) {
 		embedTarget = previewEmbedTargetForUrl(QUrl(preview.canonicalUrl));
 	}
 	if (embedTarget) {
@@ -24793,7 +24982,10 @@ void MainWindow::appendModernDirectMessage(const unsigned int peerSession, const
 	entry.peerSession  = peerSession;
 	entry.actorSession = outgoing ? Global::get().uiSession : peerSession;
 	entry.actorName    = outgoing ? tr("You") : conversation.label;
-	entry.messageHtml  = messageHtml;
+	// SECURITY: direct-message bodies are rendered via innerHTML in the WebEngine shell, so they
+	// must be routed through the same sanitizer the channel chat uses (Log::validHtml round-trip)
+	// before they ever reach the page. Never hand raw sender-controlled HTML to the shell.
+	entry.messageHtml  = persistentChatContentHtml(messageHtml);
 	entry.plainText    = QTextDocumentFragment::fromHtml(messageHtml).toPlainText();
 	if (entry.plainText.trimmed().isEmpty()) {
 		entry.plainText = messageHtml;
@@ -24854,7 +25046,10 @@ bool MainWindow::appendModernPersistentDirectMessage(const MumbleProto::ChatMess
 	const std::optional< unsigned int > selfUserID = persistentUserIDForClientUser(self);
 	const bool outgoing = selfUserID && message.has_actor_user_id() && message.actor_user_id() == selfUserID.value();
 
-	QString messageHtml = message.has_message() ? u8(message.message()) : QString();
+	// SECURITY: message.message() is sender-controlled HTML and is rendered via innerHTML in the
+	// WebEngine shell. Route it through the same sanitizer as channel chat (Log::validHtml) before
+	// it can reach the page. The body_text branch below is already escaped, so it is left as-is.
+	QString messageHtml = message.has_message() ? persistentChatContentHtml(u8(message.message())) : QString();
 	if (messageHtml.trimmed().isEmpty() && message.has_body_text()) {
 		messageHtml = u8(message.body_text()).toHtmlEscaped().replace(QLatin1Char('\n'), QStringLiteral("<br>"));
 	}
@@ -31380,6 +31575,11 @@ bool MainWindow::restorePersistentChatPreviewDiskCache(const QString &previewKey
 		mumble::chatperf::recordValue("chat.preview.disk_cache.miss", 1);
 		return false;
 	}
+	if ((isInstagramPreviewUrl(cachedUrl) || isFacebookPreviewUrl(cachedUrl))
+		&& isTransientRemotePreviewMediaDataUrl(cached->mediaDataUrl)) {
+		mumble::chatperf::recordValue("chat.preview.disk_cache.miss", 1);
+		return false;
+	}
 
 	PersistentChatPreview preview;
 	preview.canonicalUrl         = cached->canonicalUrl;
@@ -31854,7 +32054,9 @@ bool MainWindow::requestPersistentChatRemotePlayableMediaCache(const QString &pr
 				previewIt->remoteMediaFinished  = true;
 
 				const QString resolvedMime = playableMediaMimeForUrl(normalizedMediaUrl, replyMime.isEmpty() ? mime : replyMime);
-				if (success && remotePlayableMediaBytesLookValid(data, resolvedMime)) {
+				const bool mediaBytesLookValid = success && remotePlayableMediaBytesLookValid(data, resolvedMime);
+				bool appliedMedia              = false;
+				if (mediaBytesLookValid) {
 					const QString dataUrl = playableMediaDataUrl(resolvedMime, data);
 					if (!dataUrl.isEmpty()) {
 						previewIt->mediaDataUrl = dataUrl;
@@ -31874,6 +32076,7 @@ bool MainWindow::requestPersistentChatRemotePlayableMediaCache(const QString &pr
 																? tr("Image preview")
 																: tr("Video preview"));
 						}
+						appliedMedia = true;
 
 						const bool mediaHasOwnAudio =
 							resolvedMime == QLatin1String("video/mp4") && mp4BytesLikelyHaveAudioTrack(data);
@@ -31933,6 +32136,13 @@ bool MainWindow::requestPersistentChatRemotePlayableMediaCache(const QString &pr
 							previewIt->mediaAudioDataUrl.clear();
 							previewIt->mediaAudioMime.clear();
 						}
+					}
+				}
+				if (!appliedMedia && (!success || mediaBytesLookValid)) {
+					const bool appliedRemoteMedia =
+						applyPersistentChatRemotePlayableMedia(*previewIt, normalizedMediaUrl, mime);
+					if (appliedRemoteMedia) {
+						applyPersistentChatRemoteAudioMedia(*previewIt, audioUrl, suggestedAudioMime);
 					}
 				}
 
@@ -34419,16 +34629,19 @@ void MainWindow::ensurePersistentChatPreviewSiteSnapshot(const QString &previewK
 	PersistentChatPreviewSnapshotRenderer *renderer =
 		static_cast< PersistentChatPreviewSnapshotRenderer * >(m_persistentChatPreviewSnapshotRenderer);
 	if (!renderer) {
-		renderer                                = new PersistentChatPreviewSnapshotRenderer(this);
+		renderer = new PersistentChatPreviewSnapshotRenderer(
+			usesModernShell() && m_modernShellHost ? m_modernShellHost->webProfile() : nullptr, this);
 		m_persistentChatPreviewSnapshotRenderer = renderer;
 		renderer->setResultCallback([this](const QString &key, const QImage &image, bool success,
 										   const QString &mediaUrl, const QString &mediaMime,
 										   const QString &mediaAudioUrl, const QString &mediaAudioMime,
 										   const QVariantList &mediaItems, const QString &posterUrl,
-										   const QString &posterMime) {
+										   const QString &posterMime, const QString &avatarUrl) {
 			handlePersistentChatPreviewSiteSnapshotResult(key, image, success, mediaUrl, mediaMime, mediaAudioUrl,
-														  mediaAudioMime, mediaItems, posterUrl, posterMime);
+														  mediaAudioMime, mediaItems, posterUrl, posterMime, avatarUrl);
 		});
+	} else if (usesModernShell() && m_modernShellHost) {
+		renderer->setSharedProfile(m_modernShellHost->webProfile());
 	}
 
 	preview.siteSnapshotRequested = true;
@@ -34438,12 +34651,10 @@ void MainWindow::ensurePersistentChatPreviewSiteSnapshot(const QString &previewK
 
 void MainWindow::handlePersistentChatPreviewSiteSnapshotResult(const QString &previewKey, const QImage &image,
 															   bool success, const QString &mediaUrl,
-															   const QString &mediaMime,
-															   const QString &mediaAudioUrl,
+															   const QString &mediaMime, const QString &mediaAudioUrl,
 															   const QString &mediaAudioMime,
-															   const QVariantList &mediaItems,
-															   const QString &posterUrl,
-															   const QString &posterMime) {
+															   const QVariantList &mediaItems, const QString &posterUrl,
+															   const QString &posterMime, const QString &avatarUrl) {
 	auto it = m_persistentChatPreviews.find(previewKey);
 	if (it == m_persistentChatPreviews.end()) {
 		return;
@@ -34451,6 +34662,7 @@ void MainWindow::handlePersistentChatPreviewSiteSnapshotResult(const QString &pr
 
 	const QUrl probedMediaUrl(mediaUrl);
 	const QUrl probedAudioUrl(mediaAudioUrl);
+	const QUrl probedAvatarUrl(avatarUrl);
 	const QUrl previewUrl(it->canonicalUrl);
 	std::vector< PersistentChatPreviewMediaItem > parsedMediaItems;
 	QSet< QString > seenMediaItemUrls;
@@ -34481,6 +34693,15 @@ void MainWindow::handlePersistentChatPreviewSiteSnapshotResult(const QString &pr
 	}
 	if (!parsedMediaItems.empty()) {
 		it->mediaItems = parsedMediaItems;
+	}
+	if (isInstagramPreviewUrl(previewUrl) && probedAvatarUrl.isValid()
+		&& probedAvatarUrl.scheme().toLower() == QLatin1String("https") && isSafePreviewTarget(probedAvatarUrl)) {
+		const QString avatarHost = normalizedPreviewHost(probedAvatarUrl.host());
+		if (hostEqualsOrEndsWith(avatarHost, QStringLiteral("cdninstagram.com"))
+			|| hostEqualsOrEndsWith(avatarHost, QStringLiteral("fbcdn.net"))
+			|| hostEqualsOrEndsWith(avatarHost, QStringLiteral("fbsbx.com"))) {
+			it->metadata.insert(QStringLiteral("instagramAvatarUrl"), probedAvatarUrl.toString(QUrl::FullyEncoded));
+		}
 	}
 
 	const QString probedMediaMime =

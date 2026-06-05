@@ -143,6 +143,8 @@
 	let stonksQuoteSearchRequestId = "";
 	let stonksPopularQuoteCache = {};
 	let stonksPopularQuoteRequests = {};
+	let previewMediaFetchSequence = 0;
+	let previewMediaFetchRequests = {};
 	let stonksVisibleRefreshTimer = 0;
 	let stonksTickerScrollFrame = 0;
 	let stonksTickerRenderSignature = "";
@@ -371,6 +373,86 @@
 			return true;
 		}
 		return true;
+	}
+
+	function previewInlineNetworkFetchEnabled() {
+		const bodySetting = document.body
+			? String(document.body.dataset.inlinePreviewNetworkFetch || "").trim().toLowerCase()
+			: "";
+		if (bodySetting === "false" || bodySetting === "0" || bodySetting === "off") {
+			return false;
+		}
+		if (bodySetting === "true" || bodySetting === "1" || bodySetting === "on") {
+			return true;
+		}
+		return window.mumbleInlinePreviewNetworkFetch === true;
+	}
+
+	function previewBridgeMediaFetchEnabled() {
+		return !!(modernBridge && typeof modernBridge.fetchPreviewMedia === "function");
+	}
+
+	function base64ToArrayBuffer(value) {
+		const binary = window.atob(String(value || ""));
+		const bytes = new Uint8Array(binary.length);
+		for (let index = 0; index < binary.length; index += 1) {
+			bytes[index] = binary.charCodeAt(index);
+		}
+		return bytes.buffer;
+	}
+
+	function handlePreviewMediaFetchResult(result) {
+		const requestId = String(result && result.requestId || "");
+		const request = previewMediaFetchRequests[requestId];
+		if (!request) {
+			return;
+		}
+		delete previewMediaFetchRequests[requestId];
+		window.clearTimeout(request.timeout);
+		if (!result || !result.ok) {
+			request.reject(new Error(String(result && result.error || "Preview media fetch failed")));
+			return;
+		}
+		if (request.responseType === "arraybuffer") {
+			try {
+				request.resolve(base64ToArrayBuffer(result.dataBase64 || ""));
+			} catch (error) {
+				request.reject(error);
+			}
+			return;
+		}
+		request.resolve(String(result.text || ""));
+	}
+
+	function bridgeFetchPreviewMedia(url, responseType) {
+		if (!previewBridgeMediaFetchEnabled()) {
+			return Promise.reject(new Error("Native preview media fetch unavailable"));
+		}
+		const requestId = "preview-media-" + Date.now() + "-" + (++previewMediaFetchSequence);
+		const normalizedResponseType = responseType === "arraybuffer" ? "arraybuffer" : "text";
+		return new Promise(function(resolve, reject) {
+			previewMediaFetchRequests[requestId] = {
+				resolve: resolve,
+				reject: reject,
+				responseType: normalizedResponseType,
+				timeout: window.setTimeout(function() {
+					const request = previewMediaFetchRequests[requestId];
+					if (!request) {
+						return;
+					}
+					delete previewMediaFetchRequests[requestId];
+					request.reject(new Error("Preview media fetch timed out"));
+				}, 15000)
+			};
+			if (!notifyBridge("fetchPreviewMedia", requestId, String(url || ""), normalizedResponseType)) {
+				const request = previewMediaFetchRequests[requestId];
+				if (request) {
+					delete previewMediaFetchRequests[requestId];
+					window.clearTimeout(request.timeout);
+					request.reject(new Error("Native preview media fetch failed to start"));
+				}
+			}
+		});
 	}
 
 	function viewportMatchesCompactRail() {
@@ -1839,6 +1921,10 @@
 								if (modernBridge.financeQuoteResultReady
 										&& typeof modernBridge.financeQuoteResultReady.connect === "function") {
 									modernBridge.financeQuoteResultReady.connect(handleStonksQuoteLookupResult);
+								}
+								if (modernBridge.previewMediaFetchResultReady
+										&& typeof modernBridge.previewMediaFetchResultReady.connect === "function") {
+									modernBridge.previewMediaFetchResultReady.connect(handlePreviewMediaFetchResult);
 								}
 								if (modernBridge.toastRequested
 										&& typeof modernBridge.toastRequested.connect === "function") {
@@ -11332,6 +11418,63 @@
 		return openLabel || fallbackText || "Open in browser";
 	}
 
+	function previewProviderSessionUrl(preview, fallbackUrl) {
+		const candidates = [
+			String((preview && preview.url) || "").trim(),
+			String(fallbackUrl || "").trim()
+		];
+		for (let index = 0; index < candidates.length; index += 1) {
+			const candidate = candidates[index];
+			if (!candidate) {
+				continue;
+			}
+			const url = previewUrlObject(candidate);
+			const host = normalizedPreviewHost(url ? url.hostname : "");
+			if (host === "youtube.com" || host === "youtube-nocookie.com"
+					|| host === "instagram.com" || host === "instagr.am"
+					|| host === "vimeo.com" || host === "tiktok.com"
+					|| host === "facebook.com" || host === "dailymotion.com"
+					|| host === "spotify.com" || host === "soundcloud.com"
+					|| host === "streamable.com") {
+				return candidate;
+			}
+		}
+		return "";
+	}
+
+	function appendPreviewProviderSessionButton(container, preview, className, label, fallbackUrl) {
+		const sessionUrl = previewProviderSessionUrl(preview, fallbackUrl);
+		if (!container || !sessionUrl) {
+			return null;
+		}
+		const button = document.createElement("button");
+		button.className = className || "preview-card-provider-session-button";
+		button.type = "button";
+		button.textContent = label || "Verify";
+		button.title = "Open provider session";
+		button.setAttribute("aria-label", "Open provider session");
+		button.addEventListener("click", function(event) {
+			event.preventDefault();
+			event.stopPropagation();
+			hideContextMenu();
+			hideSelfMenu();
+			notifyBridge("openProviderSession", sessionUrl);
+		});
+		container.appendChild(button);
+		return button;
+	}
+
+	function showPreviewImageUnavailable(media, label) {
+		if (!media || media.querySelector(".preview-card-image-unavailable")) {
+			return;
+		}
+		media.classList.add("is-image-unavailable");
+		const note = document.createElement("div");
+		note.className = "preview-card-image-unavailable";
+		note.textContent = label || "Preview unavailable";
+		media.appendChild(note);
+	}
+
 	function youtubePlayerStateIsPlaying(playerState) {
 		return playerState === 1 || playerState === 3;
 	}
@@ -11524,12 +11667,11 @@
 	function appendPreviewEmbedControls(card, media, iframe, embedKind) {
 		const isYouTube = embedKind === "youtube" && previewIsYouTubeIframe(iframe);
 		if (isYouTube) {
-			appendYouTubeEmbedMediaControls(card, media, iframe);
-			return;
+			return appendYouTubeEmbedMediaControls(card, media, iframe);
 		}
 		const isTikTok = embedKind === "tiktok" && previewIsTikTokIframe(iframe);
 		if (isTikTok) {
-			return;
+			return null;
 		}
 		const controls = appendPreviewMediaControlSurface(card, media, {
 			className: "preview-card-embed-controls is-size-only",
@@ -11542,6 +11684,7 @@
 		if (controls) {
 			syncPreviewMediaControlState(controls, { playEnabled: false, seekEnabled: false, volumeEnabled: false });
 		}
+		return controls;
 	}
 
 	function previewClassToken(value) {
@@ -11593,7 +11736,14 @@
 		iframe.allowFullscreen = true;
 		frameWrap.appendChild(iframe);
 		media.appendChild(frameWrap);
-		appendPreviewEmbedControls(card, media, iframe, embedKind);
+		const controls = appendPreviewEmbedControls(card, media, iframe, embedKind);
+		if (controls) {
+			const sessionButton = appendPreviewProviderSessionButton(controls, preview,
+				"preview-card-provider-session-button preview-card-provider-session-control", "Verify", embedUrl);
+			if (sessionButton) {
+				controls.classList.add("has-provider-session");
+			}
+		}
 		card.appendChild(media);
 		schedulePreviewEmbedFrameSizeSync();
 		return media;
@@ -12152,11 +12302,26 @@
 	}
 
 	function steamHlsFetchText(url) {
+		if (previewBridgeMediaFetchEnabled()) {
+			return bridgeFetchPreviewMedia(url, "text");
+		}
 		return fetch(url, { mode: "cors", credentials: "omit" }).then(function(response) {
 			if (!response.ok) {
 				throw new Error("HTTP " + String(response.status));
 			}
 			return response.text();
+		});
+	}
+
+	function steamHlsFetchArrayBuffer(url) {
+		if (previewBridgeMediaFetchEnabled()) {
+			return bridgeFetchPreviewMedia(url, "arraybuffer");
+		}
+		return fetch(url, { mode: "cors", credentials: "omit" }).then(function(response) {
+			if (!response.ok) {
+				throw new Error("HTTP " + String(response.status));
+			}
+			return response.arrayBuffer();
 		});
 	}
 
@@ -12280,12 +12445,7 @@
 		const urls = (playlist.initUrl ? [playlist.initUrl] : []).concat(playlist.segments || []);
 		return urls.reduce(function(chain, url) {
 			return chain.then(function() {
-				return fetch(url, { mode: "cors", credentials: "omit" });
-			}).then(function(response) {
-				if (!response.ok) {
-					throw new Error("HTTP " + String(response.status));
-				}
-				return response.arrayBuffer();
+				return steamHlsFetchArrayBuffer(url);
 			}).then(function(buffer) {
 				return steamHlsAppendBuffer(sourceBuffer, buffer);
 			});
@@ -12295,7 +12455,7 @@
 	function createSteamHlsPlayableMedia(card, preview, item, extraClass) {
 		const media = document.createElement("div");
 		media.className = "preview-card-media preview-card-playback" + (extraClass ? " " + extraClass : "");
-		if (!previewInlineMediaEnabled()) {
+		if (!previewInlineMediaEnabled() || (!previewInlineNetworkFetchEnabled() && !previewBridgeMediaFetchEnabled())) {
 			appendPreviewPlaybackFallback(media, preview, previewStaticPlaybackText(preview, "Open in browser"));
 			return media;
 		}
@@ -15100,8 +15260,10 @@
 		const handle = previewInstagramHandle(preview);
 		const displayName = previewInstagramDisplayName(preview, handle);
 		const caption = previewInstagramCaption(preview, descriptionText);
+		const mediaKind = String(metadata.instagramMediaKind || "").trim().toLowerCase();
 		const shell = document.createElement("div");
 		shell.className = "preview-card-instagram-shell";
+		const localThumbnailUrl = String((preview && preview.thumbnailUrl) || "").trim();
 
 		if (mediaState.hasPlayableMedia && (mediaState.isVideoMedia || mediaState.isGifMedia)) {
 			shell.appendChild(createPreviewPlayableMedia(card, preview, mediaState.mediaUrl, mediaState.mediaMime,
@@ -15113,7 +15275,7 @@
 			const imageItem = mediaState.imageMediaItems && mediaState.imageMediaItems.length
 				? mediaState.imageMediaItems[0]
 				: null;
-			const imageUrl = imageItem ? imageItem.url : String(preview.thumbnailUrl || "").trim();
+			const imageUrl = imageItem ? imageItem.url : (mediaKind === "reel" ? localThumbnailUrl : "");
 			if (imageUrl) {
 				const media = document.createElement("div");
 				media.className = "preview-card-media preview-card-image-preview-media preview-card-instagram-media";
@@ -15122,7 +15284,16 @@
 				image.loading = "lazy";
 				image.src = imageUrl;
 				image.alt = preview.title || handle || "Instagram preview";
+				image.addEventListener("error", function() {
+					image.remove();
+					showPreviewImageUnavailable(media, "Verify on Instagram");
+				});
 				media.appendChild(image);
+				shell.appendChild(media);
+			} else if (mediaState.hasEmbedMedia) {
+				const media = document.createElement("div");
+				media.className = "preview-card-media preview-card-image-preview-media preview-card-instagram-media";
+				showPreviewImageUnavailable(media, "Verify on Instagram");
 				shell.appendChild(media);
 			}
 		}
@@ -15178,6 +15349,8 @@
 
 		const footer = document.createElement("div");
 		footer.className = "preview-card-x-footer preview-card-instagram-footer";
+		appendPreviewProviderSessionButton(footer, preview, "preview-card-provider-session-button", "Verify",
+			mediaState.embedUrl);
 		const action = document.createElement("span");
 		action.className = "preview-card-x-action preview-card-instagram-action";
 		action.textContent = (preview && preview.openLabel) || "Open on Instagram";
@@ -15892,12 +16065,18 @@
 		const isGitHub = previewIsGitHub(preview, hostLabel);
 		const isXPost = previewIsXPost(preview, hostLabel);
 		const isInstagramPost = !isXPost && previewIsInstagramPost(preview, hostLabel);
+		const instagramMediaKind = isInstagramPost
+			? String((preview.metadata && preview.metadata.instagramMediaKind) || "").trim().toLowerCase()
+			: "";
+		const isInstagramReel = isInstagramPost && instagramMediaKind === "reel";
 		const isTwitch = previewIsTwitch(preview, hostLabel);
 		const isSocialPost = !isXPost && !isInstagramPost && !hasEmbedMedia && previewIsSocialPost(preview, hostLabel);
 		const hasImageCarousel = imageMediaItems.length > 1 && !isVideoMedia && !isGifMedia;
+		const hasInstagramMedia = isInstagramPost
+			&& (hasPlayableMedia || hasEmbedMedia || imageMediaItems.length > 0 || !!preview.thumbnailUrl);
 		const hasInteractiveMedia = hasPlayableMedia || hasEmbedMedia || loadingVideoMedia
-			|| hasImageCarousel || hasSteamGallery || hasGameStoreGallery;
-		const cardUsesDiv = hasInteractiveMedia || isSteam || isGitHub || isGameStore || !!richProviderSpec;
+			|| hasImageCarousel || hasSteamGallery || hasGameStoreGallery || hasInstagramMedia;
+		const cardUsesDiv = hasInteractiveMedia || isInstagramPost || isSteam || isGitHub || isGameStore || !!richProviderSpec;
 		const isImagePreview = !isVideoMedia && !isGifMedia
 			&& (preview.kind === "image" || /^image\//i.test(mediaMime))
 			&& (!!mediaUrl || !!preview.thumbnailUrl || hasImageCarousel);
@@ -15942,6 +16121,7 @@
 			+ (isGitHub ? " is-github" : "")
 			+ (isXPost ? " is-x-post" : "")
 			+ (isInstagramPost ? " is-instagram-post is-x-post" : "")
+			+ (isInstagramReel ? " is-instagram-reel" : "")
 			+ (isTwitch ? " is-twitch" : "")
 			+ (isSocialPost ? " is-social-post is-x-post" : "")
 			+ (hasEmbedMedia ? " is-embed" : "")
@@ -16024,7 +16204,11 @@
 				isVideoMedia: isVideoMedia,
 				isGifMedia: isGifMedia,
 				videoInlineSupported: videoInlineSupported,
-				imageMediaItems: imageMediaItems
+				imageMediaItems: imageMediaItems,
+				hasEmbedMedia: hasEmbedMedia,
+				embedUrl: embedUrl,
+				embedAspect: embedAspect,
+				embedKind: embedKind
 			});
 			return card;
 		}
@@ -16038,7 +16222,11 @@
 				isVideoMedia: isVideoMedia,
 				isGifMedia: isGifMedia,
 				videoInlineSupported: videoInlineSupported,
-				imageMediaItems: imageMediaItems
+				imageMediaItems: imageMediaItems,
+				hasEmbedMedia: hasEmbedMedia,
+				embedUrl: embedUrl,
+				embedAspect: embedAspect,
+				embedKind: embedKind
 			});
 			return card;
 		}
@@ -23515,48 +23703,9 @@
 			return;
 		}
 
-		fetch(stonksYahooChartUrl(symbol), { cache: "no-store" })
-			.then(function(response) {
-				if (!response.ok) {
-					throw new Error("Yahoo returned " + response.status);
-				}
-				return response.json();
-			})
-			.then(function(payload) {
-				const chart = payload && payload.chart || {};
-				if (chart.error) {
-					throw new Error(chart.error.description || "Yahoo Finance returned an error.");
-				}
-				const result = chart.result && chart.result[0];
-				const meta = result && result.meta || {};
-				const quoteSymbol = normalizeStonksSymbol(meta.symbol || symbol);
-				const price = Number(meta.regularMarketPrice);
-				if (!quoteSymbol || !Number.isFinite(price) || price <= 0) {
-					throw new Error("Yahoo did not return a usable price.");
-				}
-				const quoteTime = Number(meta.regularMarketTime || 0);
-				stonksQuoteSuggestions = [stonksNormalizePosition({
-					symbol: quoteSymbol,
-					quantity: 0,
-					price: price,
-					marketValue: 0,
-					currency: meta.currency || stonksDraftCurrency || "USD",
-					displayName: meta.shortName || meta.longName || quoteSymbol,
-					providerId: "yahoo-finance",
-					providerSymbol: quoteSymbol,
-					exchange: meta.fullExchangeName || meta.exchangeName || "",
-					quoteTime: Number.isFinite(quoteTime) ? quoteTime : 0,
-					quoteSourceUrl: stonksYahooQuoteUrl(quoteSymbol),
-					quoteConfidence: 1.0
-				}, stonksDraftCurrency)];
-			})
-			.catch(function(error) {
-				stonksQuoteSearchError = error && error.message ? error.message : "Quote lookup failed.";
-			})
-			.finally(function() {
-				stonksQuoteSearchBusy = false;
-				renderModernDialog();
-			});
+		stonksQuoteSearchBusy = false;
+		stonksQuoteSearchError = "Quote bridge unavailable.";
+		renderModernDialog();
 	}
 
 	function appendStonksStatus(parent, stonks) {

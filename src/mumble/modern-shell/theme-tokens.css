@@ -47,6 +47,11 @@
 	--accent-ink: color-mix(in srgb, var(--accent) 72%, var(--text-strong));
 	--accent-soft: rgba(94, 200, 176, 0.16);
 	--accent-border: rgba(94, 200, 176, 0.42);
+	--chat-accent-surface: color-mix(in srgb, var(--shell-panel-soft) 74%, var(--accent) 26%);
+	--chat-accent-surface-strong: color-mix(in srgb, var(--shell-panel-soft) 66%, var(--accent) 34%);
+	--chat-accent-text: color-mix(in srgb, var(--text-strong) 88%, var(--accent) 12%);
+	--chat-accent-muted: color-mix(in srgb, var(--text-muted) 84%, var(--accent) 16%);
+	--chat-accent-border: color-mix(in srgb, var(--accent) 34%, var(--surface-border) 66%);
 	--body-bg-glow: rgba(94, 200, 176, 0.09);
 	--body-bg-top: #161a21;
 	--body-bg-bottom: #12161c;
@@ -56,9 +61,9 @@
 	--select-option-text: #d7dce5;
 	--select-option-hover-bg: #26343d;
 	--select-option-hover-text: #eef7f4;
-	--settings-selected-text: #d9f5ef;
-	--reply-bg: #2a5d60;
-	--reply-text: #d8f0ec;
+	--settings-selected-text: var(--chat-accent-text);
+	--reply-bg: var(--chat-accent-surface);
+	--reply-text: var(--chat-accent-text);
 	--incoming-bg: #353c48;
 	--incoming-text: #cfd5de;
 	--chip-bg: #262d38;
@@ -111,7 +116,7 @@
 	--self-card-bg-solid: #1c222b;
 	--self-card-hover-bg: rgba(255, 255, 255, 0.03);
 	--selected-bg: rgba(var(--accent-rgb), 0.16);
-	--selected-text: #cceee7;
+	--selected-text: var(--chat-accent-text);
 	--on-accent: #081210;
 	--shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.03), 0 10px 26px -16px rgba(0, 0, 0, 0.6);
 	--shadow-pop: 0 18px 48px -12px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);

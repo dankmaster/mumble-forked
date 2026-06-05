@@ -23,6 +23,8 @@ private slots:
 	void negotiatesWebRtcRelayWithLegacyFallback();
 	void recommendsVp8Bitrate();
 	void exposesPublisherQualityCeiling();
+	void normalizesSecureRelayUrls();
+	void rejectsUnsafeRelayUrls();
 };
 
 void TestScreenShare::parsesAndFormatsVp8CodecPreferences() {
@@ -59,9 +61,9 @@ void TestScreenShare::negotiatesWebRtcRelayWithLegacyFallback() {
 		Mumble::ScreenShare::selectPreferredCodec(webRtcPreferences, { codecValue(MumbleProto::ScreenShareCodecVP8),
 																	   codecValue(MumbleProto::ScreenShareCodecH264) }),
 		MumbleProto::ScreenShareCodecH264);
-	QCOMPARE(Mumble::ScreenShare::selectPreferredCodec(webRtcPreferences,
-													   { codecValue(MumbleProto::ScreenShareCodecVP8) }),
-			 MumbleProto::ScreenShareCodecVP8);
+	QCOMPARE(
+		Mumble::ScreenShare::selectPreferredCodec(webRtcPreferences, { codecValue(MumbleProto::ScreenShareCodecVP8) }),
+		MumbleProto::ScreenShareCodecVP8);
 	QCOMPARE(
 		Mumble::ScreenShare::selectPreferredCodec(webRtcPreferences, { codecValue(MumbleProto::ScreenShareCodecH264),
 																	   codecValue(MumbleProto::ScreenShareCodecAV1) }),
@@ -96,6 +98,31 @@ void TestScreenShare::exposesPublisherQualityCeiling() {
 	QVERIFY(Mumble::ScreenShare::PUBLISHER_CAPTURE_MAX_WIDTH <= Mumble::ScreenShare::HARD_MAX_WIDTH);
 	QVERIFY(Mumble::ScreenShare::PUBLISHER_CAPTURE_MAX_HEIGHT <= Mumble::ScreenShare::HARD_MAX_HEIGHT);
 	QVERIFY(Mumble::ScreenShare::PUBLISHER_CAPTURE_MAX_FPS <= Mumble::ScreenShare::HARD_MAX_FPS);
+}
+
+void TestScreenShare::normalizesSecureRelayUrls() {
+	QCOMPARE(Mumble::ScreenShare::normalizeRelayUrl(QStringLiteral(" wss://relay.example.com/mumble/../room ")),
+			 QStringLiteral("wss://relay.example.com/room"));
+	QCOMPARE(Mumble::ScreenShare::normalizeRelayUrl(QStringLiteral("https://relay.example.com/mumble-screen")),
+			 QStringLiteral("https://relay.example.com/mumble-screen"));
+	QCOMPARE(Mumble::ScreenShare::normalizeRelayUrl(QStringLiteral("rtmps://relay.example.com/live/stream")),
+			 QStringLiteral("rtmps://relay.example.com/live/stream"));
+}
+
+void TestScreenShare::rejectsUnsafeRelayUrls() {
+	const QStringList rejected{
+		QStringLiteral("file:///tmp/mumble-screen.mp4"),
+		QStringLiteral("ws://relay.example.com/mumble-screen"),
+		QStringLiteral("http://relay.example.com/mumble-screen"),
+		QStringLiteral("rtmp://relay.example.com/live/stream"),
+		QStringLiteral("wss:///missing-host"),
+		QStringLiteral("wss://relay.example.com/mumble screen"),
+		QStringLiteral("wss://relay.example.com/mumble!fakesink"),
+		QStringLiteral("wss://relay.example.com/mumble\\fakesink"),
+	};
+	for (const QString &url : rejected) {
+		QVERIFY2(Mumble::ScreenShare::normalizeRelayUrl(url).isEmpty(), qPrintable(url));
+	}
 }
 
 QTEST_MAIN(TestScreenShare)

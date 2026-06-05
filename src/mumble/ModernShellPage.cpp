@@ -9,6 +9,7 @@
 
 #include <QtCore/QTimer>
 #include <QtGui/QDesktopServices>
+#	include <QtWebEngineCore/QWebEngineProfile>
 
 namespace {
 	bool isLocalModernShellResource(const QUrl &url) {
@@ -48,6 +49,9 @@ namespace {
 } // namespace
 
 ModernShellPage::ModernShellPage(QObject *parent) : QWebEnginePage(parent) {
+}
+
+ModernShellPage::ModernShellPage(QWebEngineProfile *profile, QObject *parent) : QWebEnginePage(profile, parent) {
 }
 
 bool ModernShellPage::acceptNavigationRequest(const QUrl &url, const NavigationType type, const bool isMainFrame) {
