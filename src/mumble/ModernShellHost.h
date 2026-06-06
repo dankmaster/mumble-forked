@@ -19,6 +19,7 @@
 class ModernShellBridge;
 class ModernContextMenuHost;
 class ModernShellPage;
+class QTcpServer;
 class QTimer;
 class QVBoxLayout;
 class QWebChannel;
@@ -50,6 +51,7 @@ signals:
 	void imageUrlsDropped(const QList< QUrl > &urls);
 
 private slots:
+	void handleLocalShellConnection();
 	void handleLoadFinished(bool ok);
 	void handleRenderProcessTerminated(QWebEnginePage::RenderProcessTerminationStatus status, int exitCode);
 	void handleBridgeBootReady();
@@ -63,15 +65,19 @@ private:
 	void invokeNativeContextMenuAction(const QString &token, int actionIndex);
 	void closeNativeContextMenu();
 	ModernContextMenuHost *ensureNativeContextMenuHost();
+	bool ensureLocalShellServer();
 	void openProviderSession(const QString &href);
 
 	QVBoxLayout *m_layout = nullptr;
 	QWebEngineView *m_view = nullptr;
+	QTcpServer *m_shellServer = nullptr;
+	quint16 m_shellServerPort = 0;
 	QWebEngineProfile *m_profile                          = nullptr;
 	ModernShellPage *m_page = nullptr;
 	QWebChannel *m_channel = nullptr;
 	ModernShellBridge *m_bridge = nullptr;
 	QWebEngineUrlRequestInterceptor *m_requestInterceptor = nullptr;
+	QUrl m_shellUrl;
 	QPointer< QWebEngineView > m_providerSessionView;
 	QTimer *m_bootTimeoutTimer = nullptr;
 	QPointer< ModernContextMenuHost > m_nativeContextMenu;

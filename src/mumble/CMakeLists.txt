@@ -107,6 +107,7 @@ endif()
 find_pkg(Qt6
 	COMPONENTS
 		Concurrent
+		Network
 		Sql
 		Svg
 		Widgets
@@ -785,6 +786,7 @@ target_link_libraries(mumble_client_object_lib
 		shared
 		utfcpp
 		Qt6::Concurrent
+		Qt6::Network
 		Qt6::Sql
 		Qt6::Svg
 		Qt6::Widgets

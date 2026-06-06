@@ -3630,9 +3630,20 @@ bool isValidTwitchClipSlug(const QString &slug) {
 	return s_clipPattern.match(slug).hasMatch();
 }
 
+bool isValidTwitchCollectionId(const QString &collectionId) {
+	static const QRegularExpression s_collectionPattern(
+		QRegularExpression::anchoredPattern(QLatin1String("[A-Za-z0-9_-]{4,128}")));
+	return s_collectionPattern.match(collectionId).hasMatch();
+}
+
+bool isTwitchEmbedHost(QString host) {
+	host = normalizedPreviewHost(host);
+	return host == QLatin1String("player.twitch.tv");
+}
+
 bool isTwitchHost(QString host) {
 	host = normalizedPreviewHost(host);
-	return host == QLatin1String("twitch.tv") || host == QLatin1String("clips.twitch.tv");
+	return host == QLatin1String("twitch.tv") || host == QLatin1String("clips.twitch.tv") || isTwitchEmbedHost(host);
 }
 
 bool isReservedTwitchPathSegment(QString segment) {
@@ -3660,6 +3671,8 @@ QUrl canonicalTwitchUrl(const QUrl &sourceUrl, const TwitchPreviewTarget &target
 		canonicalUrl = QUrl(QStringLiteral("https://www.twitch.tv/%1/clip/%2").arg(target.channel, target.id));
 	} else if (target.kind == QLatin1String("video")) {
 		canonicalUrl = QUrl(QStringLiteral("https://www.twitch.tv/videos/%1").arg(target.id));
+	} else if (target.kind == QLatin1String("collection")) {
+		canonicalUrl = QUrl(QStringLiteral("https://www.twitch.tv/collections/%1").arg(target.id));
 	} else {
 		canonicalUrl = QUrl(QStringLiteral("https://www.twitch.tv/%1").arg(target.channel));
 	}
@@ -3686,13 +3699,70 @@ std::optional< TwitchPreviewTarget > twitchPreviewTargetFromUrl(const QUrl &url)
 
 	const QString host         = normalizedPreviewHost(url.host());
 	const QStringList segments = decodedUrlPathSegments(url);
+
+	if (host == QLatin1String("player.twitch.tv")) {
+		const QUrlQuery query(url);
+		const QString channel = query.queryItemValue(QStringLiteral("channel")).trimmed();
+		if (isValidTwitchChannelName(channel) && !isReservedTwitchPathSegment(channel)) {
+			TwitchPreviewTarget target;
+			target.kind         = QStringLiteral("channel");
+			target.channel      = channel;
+			target.canonicalUrl = canonicalTwitchUrl(url, target);
+			return target;
+		}
+
+		QString videoId = query.queryItemValue(QStringLiteral("video")).trimmed();
+		if (videoId.startsWith(QLatin1Char('v'), Qt::CaseInsensitive)) {
+			videoId.remove(0, 1);
+		}
+		if (isValidTwitchVideoId(videoId)) {
+			TwitchPreviewTarget target;
+			target.kind         = QStringLiteral("video");
+			target.id           = videoId;
+			target.canonicalUrl = canonicalTwitchUrl(url, target);
+			return target;
+		}
+
+		const QString collectionId = query.queryItemValue(QStringLiteral("collection")).trimmed();
+		if (isValidTwitchCollectionId(collectionId)) {
+			TwitchPreviewTarget target;
+			target.kind         = QStringLiteral("collection");
+			target.id           = collectionId;
+			target.canonicalUrl = canonicalTwitchUrl(url, target);
+			return target;
+		}
+
+		return std::nullopt;
+	}
+
 	if (host == QLatin1String("clips.twitch.tv")) {
-		if (segments.isEmpty() || !isValidTwitchClipSlug(segments.front())) {
+		QString clipSlug;
+		QString clipChannel;
+		if (!segments.isEmpty() && segments.front().compare(QLatin1String("embed"), Qt::CaseInsensitive) == 0) {
+			QString clipQueryValue = QUrlQuery(url).queryItemValue(QStringLiteral("clip")).trimmed();
+			const QStringList clipParts =
+				clipQueryValue.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+			if (clipParts.size() >= 2 && isValidTwitchChannelName(clipParts.front())
+				&& isValidTwitchClipSlug(clipParts.back())) {
+				clipChannel = clipParts.front();
+				clipSlug    = clipParts.back();
+			} else {
+				clipSlug = clipQueryValue;
+			}
+		} else if (segments.size() >= 2 && isValidTwitchChannelName(segments.front())
+				   && isValidTwitchClipSlug(segments.at(1))) {
+			clipChannel = segments.front();
+			clipSlug    = segments.at(1);
+		} else if (!segments.isEmpty()) {
+			clipSlug = segments.front();
+		}
+		if (!isValidTwitchClipSlug(clipSlug)) {
 			return std::nullopt;
 		}
 		TwitchPreviewTarget target;
 		target.kind         = QStringLiteral("clip");
-		target.id           = segments.front();
+		target.channel      = clipChannel;
+		target.id           = clipSlug;
 		target.canonicalUrl = canonicalTwitchUrl(url, target);
 		return target;
 	}
@@ -3708,6 +3778,29 @@ std::optional< TwitchPreviewTarget > twitchPreviewTargetFromUrl(const QUrl &url)
 		}
 		TwitchPreviewTarget target;
 		target.kind         = QStringLiteral("video");
+		target.id           = segments.at(1);
+		target.canonicalUrl = canonicalTwitchUrl(url, target);
+		return target;
+	}
+
+	if (firstSegment.compare(QLatin1String("clip"), Qt::CaseInsensitive) == 0) {
+		if (segments.size() < 2 || !isValidTwitchClipSlug(segments.at(1))) {
+			return std::nullopt;
+		}
+		TwitchPreviewTarget target;
+		target.kind         = QStringLiteral("clip");
+		target.id           = segments.at(1);
+		target.canonicalUrl = canonicalTwitchUrl(url, target);
+		return target;
+	}
+
+	if (firstSegment.compare(QLatin1String("collection"), Qt::CaseInsensitive) == 0
+		|| firstSegment.compare(QLatin1String("collections"), Qt::CaseInsensitive) == 0) {
+		if (segments.size() < 2 || !isValidTwitchCollectionId(segments.at(1))) {
+			return std::nullopt;
+		}
+		TwitchPreviewTarget target;
+		target.kind         = QStringLiteral("collection");
 		target.id           = segments.at(1);
 		target.canonicalUrl = canonicalTwitchUrl(url, target);
 		return target;
@@ -3769,20 +3862,202 @@ QString twitchPreviewKeyForUrl(const QUrl &url) {
 
 QString twitchFallbackTitle(const TwitchPreviewTarget &target) {
 	if (target.kind == QLatin1String("clip")) {
-		return QObject::tr("Twitch clip");
+		return target.channel.isEmpty() ? QObject::tr("Twitch clip")
+										: QObject::tr("%1 Twitch clip").arg(target.channel);
 	}
 	if (target.kind == QLatin1String("video")) {
 		return QObject::tr("Twitch video");
+	}
+	if (target.kind == QLatin1String("collection")) {
+		return QObject::tr("Twitch collection");
 	}
 	return target.channel.isEmpty() ? QObject::tr("Twitch channel")
 									: QObject::tr("%1 on Twitch").arg(target.channel);
 }
 
 QString twitchFallbackSubtitle(const TwitchPreviewTarget &target) {
+	if (target.kind == QLatin1String("clip")) {
+		return QObject::tr("Twitch clip");
+	}
+	if (target.kind == QLatin1String("video")) {
+		return QObject::tr("Twitch VOD");
+	}
+	if (target.kind == QLatin1String("collection")) {
+		return QObject::tr("Twitch collection");
+	}
 	if (!target.channel.isEmpty() && target.kind != QLatin1String("channel")) {
 		return QObject::tr("Twitch by %1").arg(target.channel);
 	}
-	return QObject::tr("Twitch");
+	return QObject::tr("Twitch channel");
+}
+
+QString twitchPreviewBadge(const TwitchPreviewTarget &target) {
+	if (target.kind == QLatin1String("clip")) {
+		return QObject::tr("Clip");
+	}
+	if (target.kind == QLatin1String("video")) {
+		return QObject::tr("VOD");
+	}
+	if (target.kind == QLatin1String("collection")) {
+		return QObject::tr("Collection");
+	}
+	return QObject::tr("Channel");
+}
+
+QString twitchFallbackDescription(const TwitchPreviewTarget &target) {
+	if (target.kind == QLatin1String("clip")) {
+		return QObject::tr("Twitch clip playback may require opening a Twitch session for mature content, login gates, or unavailable clips.");
+	}
+	if (target.kind == QLatin1String("video")) {
+		return QObject::tr("Twitch VOD playback may require opening a Twitch session for mature content, login gates, or expired videos.");
+	}
+	if (target.kind == QLatin1String("collection")) {
+		return QObject::tr("Twitch collection playback may require opening a Twitch session if a video is gated or unavailable.");
+	}
+	return QObject::tr("Twitch channel playback uses the live/offline player and may require opening a Twitch session for mature content or offline pages.");
+}
+
+bool isGenericTwitchPreviewText(QString text) {
+	text = text.trimmed().toLower();
+	return text.isEmpty() || text == QLatin1String("twitch")
+		   || text.contains(QLatin1String("twitch is the world's leading video platform"));
+}
+
+bool twitchTitleLooksRerun(QString title) {
+	title = title.trimmed().toLower();
+	return title.startsWith(QLatin1String("rerun")) || title.startsWith(QLatin1String("[rerun]"))
+		   || title.contains(QLatin1String(" rerun:")) || title.contains(QLatin1String(" rerun -"));
+}
+
+QString twitchWebClientIdFromHtml(const QString &html) {
+	static const QRegularExpression s_clientIdPattern(
+		QLatin1String(R"(clientId\s*=\s*["']([A-Za-z0-9]+)["'])"));
+	const QRegularExpressionMatch match = s_clientIdPattern.match(html);
+	return match.hasMatch() ? match.captured(1).trimmed() : QString();
+}
+
+QString twitchDurationLabel(const qint64 totalSeconds) {
+	if (totalSeconds <= 0) {
+		return QString();
+	}
+
+	const qint64 hours   = totalSeconds / 3600;
+	const qint64 minutes = (totalSeconds % 3600) / 60;
+	const qint64 seconds = totalSeconds % 60;
+	if (hours > 0) {
+		return QObject::tr("%1h %2m").arg(hours).arg(minutes);
+	}
+	if (minutes > 0) {
+		return QObject::tr("%1m %2s").arg(minutes).arg(seconds);
+	}
+	return QObject::tr("%1s").arg(seconds);
+}
+
+QString twitchDateLabel(const QString &isoDate) {
+	const QDateTime date = QDateTime::fromString(isoDate, Qt::ISODate);
+	if (!date.isValid()) {
+		return QString();
+	}
+
+	const qint64 secondsAgo = date.toUTC().secsTo(QDateTime::currentDateTimeUtc());
+	if (secondsAgo >= 0) {
+		const qint64 days = secondsAgo / 86400;
+		if (days == 1) {
+			return QObject::tr("1 day ago");
+		}
+		if (days > 1 && days < 30) {
+			return QObject::tr("%1 days ago").arg(days);
+		}
+	}
+
+	return QLocale::system().toString(date.toLocalTime(), QLocale::ShortFormat);
+}
+
+QJsonObject twitchFirstConnectionNode(const QJsonObject &connection) {
+	const QJsonArray edges = connection.value(QStringLiteral("edges")).toArray();
+	for (const QJsonValue &edgeValue : edges) {
+		const QJsonObject node = edgeValue.toObject().value(QStringLiteral("node")).toObject();
+		if (!node.isEmpty()) {
+			return node;
+		}
+	}
+	return QJsonObject();
+}
+
+QString twitchStatusDisclaimer() {
+	return QObject::tr("Twitch may ask you to confirm mature content, log in, or open a Twitch session before playback.");
+}
+
+QString twitchEmbedStartTime(const QUrl &url) {
+	const QUrlQuery query(url);
+	for (const QString &key : { QStringLiteral("time"), QStringLiteral("t") }) {
+		const QString value = query.queryItemValue(key).trimmed();
+		if (!value.isEmpty()) {
+			return value;
+		}
+	}
+
+	const QString fragment = url.fragment(QUrl::FullyDecoded).trimmed();
+	if (fragment.isEmpty()) {
+		return QString();
+	}
+
+	const QUrlQuery fragmentQuery(fragment);
+	for (const QString &key : { QStringLiteral("time"), QStringLiteral("t") }) {
+		const QString value = fragmentQuery.queryItemValue(key).trimmed();
+		if (!value.isEmpty()) {
+			return value;
+		}
+	}
+
+	if (fragment.startsWith(QLatin1String("time="), Qt::CaseInsensitive)) {
+		return fragment.mid(QStringLiteral("time=").size()).trimmed();
+	}
+	if (fragment.startsWith(QLatin1String("t="), Qt::CaseInsensitive)) {
+		return fragment.mid(QStringLiteral("t=").size()).trimmed();
+	}
+	return fragment;
+}
+
+QUrl twitchEmbedUrl(const TwitchPreviewTarget &target) {
+	QUrl embedUrl;
+	QUrlQuery query;
+	query.addQueryItem(QStringLiteral("parent"), QStringLiteral("127.0.0.1"));
+	query.addQueryItem(QStringLiteral("parent"), QStringLiteral("localhost"));
+	query.addQueryItem(QStringLiteral("autoplay"), QStringLiteral("false"));
+	query.addQueryItem(QStringLiteral("muted"), QStringLiteral("false"));
+
+	if (target.kind == QLatin1String("clip")) {
+		if (target.id.isEmpty()) {
+			return QUrl();
+		}
+		embedUrl = QUrl(QStringLiteral("https://clips.twitch.tv/embed"));
+		query.addQueryItem(QStringLiteral("clip"), target.id);
+	} else {
+		embedUrl = QUrl(QStringLiteral("https://player.twitch.tv/"));
+		if (target.kind == QLatin1String("video")) {
+			if (target.id.isEmpty()) {
+				return QUrl();
+			}
+			query.addQueryItem(QStringLiteral("video"), QStringLiteral("v%1").arg(target.id));
+			const QString startTime = twitchEmbedStartTime(target.canonicalUrl);
+			if (!startTime.isEmpty()) {
+				query.addQueryItem(QStringLiteral("time"), startTime);
+			}
+		} else if (target.kind == QLatin1String("collection")) {
+			if (target.id.isEmpty()) {
+				return QUrl();
+			}
+			query.addQueryItem(QStringLiteral("collection"), target.id);
+		} else if (!target.channel.isEmpty()) {
+			query.addQueryItem(QStringLiteral("channel"), target.channel);
+		} else {
+			return QUrl();
+		}
+	}
+
+	embedUrl.setQuery(query);
+	return embedUrl;
 }
 
 struct PersistentChatPreviewEmbedTarget {
@@ -4084,6 +4359,13 @@ std::optional< PersistentChatPreviewEmbedTarget > previewEmbedTargetForUrl(const
 		return PersistentChatPreviewEmbedTarget { QStringLiteral("youtube"), youtubeEmbedUrl(*youtubeTarget),
 												  youtubeTarget->shorts ? QStringLiteral("short")
 																		: QStringLiteral("wide") };
+	}
+
+	if (const std::optional< TwitchPreviewTarget > twitchTarget = twitchPreviewTargetFromUrl(url); twitchTarget) {
+		const QUrl embedUrl = twitchEmbedUrl(*twitchTarget);
+		if (embedUrl.isValid()) {
+			return PersistentChatPreviewEmbedTarget { QStringLiteral("twitch"), embedUrl, QStringLiteral("twitch") };
+		}
 	}
 
 	if (const std::optional< QString > shortcode = streamableShortcodeFromUrl(url); shortcode) {
@@ -4582,6 +4864,7 @@ struct RichPreviewProviderInfo {
 
 constexpr int RICH_PREVIEW_METADATA_VERSION = 10;
 constexpr int INSTAGRAM_PREVIEW_METADATA_VERSION = 7;
+constexpr int TWITCH_PREVIEW_METADATA_VERSION = 2;
 
 bool isDirectImageUrl(const QUrl &url) {
 	if (!url.isValid()) {
@@ -13159,11 +13442,11 @@ MainWindow::MainWindow(QWidget *p)
 	QObject::connect(this, &MainWindow::disconnectedFromServer, m_screenShareManager.get(),
 					 &ScreenShareManager::resetState);
 	QObject::connect(m_screenShareManager.get(), &ScreenShareManager::sessionUpdated, this,
-					 &MainWindow::queueModernShellSnapshotSync);
+					 [this](const QString &) { publishModernShellRoomStatePatch(); });
 	QObject::connect(m_screenShareManager.get(), &ScreenShareManager::sessionStopped, this,
-					 &MainWindow::queueModernShellSnapshotSync);
+					 [this](const QString &) { publishModernShellRoomStatePatch(); });
 	QObject::connect(&m_screenShareManager->helperClient(), &ScreenShareHelperClient::capabilitiesChanged, this,
-					 &MainWindow::queueModernShellSnapshotSync);
+					 [this]() { publishModernShellRoomStatePatch(); });
 	QObject::connect(&m_screenShareManager->helperClient(), &ScreenShareHelperClient::capabilitiesChanged, this, []() {
 		if (Global::get().sh && Global::get().sh->isConnected()) {
 			Global::get().sh->sendVersion();
@@ -22576,17 +22859,19 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 	}
 
 	QVariantMap messageState;
+	const qint64 createdAtMs = message.has_created_at()
+								   ? static_cast< qint64 >(message.created_at()) * 1000
+								   : QDateTime::currentMSecsSinceEpoch();
 	messageState.insert(QStringLiteral("messageId"), static_cast< qulonglong >(message.message_id()));
 	messageState.insert(QStringLiteral("threadId"), static_cast< qulonglong >(message.thread_id()));
-	messageState.insert(QStringLiteral("createdAtMs"), static_cast< qulonglong >(message.created_at()));
+	messageState.insert(QStringLiteral("createdAtMs"), static_cast< qulonglong >(createdAtMs));
 	messageState.insert(QStringLiteral("actor"), actorLabel);
 	messageState.insert(QStringLiteral("actorKey"), actorIdentityKey);
 	messageState.insert(QStringLiteral("avatarUrl"),
 						modernShellActorAvatarDataUrl(message, actorIdentityKey, messageUser, 40));
 	messageState.insert(
 		QStringLiteral("timeLabel"),
-		persistentChatTimestampLabel(
-			QDateTime::fromMSecsSinceEpoch(static_cast< qint64 >(message.created_at())).toLocalTime()));
+		persistentChatTimestampLabel(QDateTime::fromMSecsSinceEpoch(createdAtMs).toLocalTime()));
 	messageState.insert(QStringLiteral("scopeLabel"),
 						target.scope == MumbleProto::Aggregate
 							? persistentChatScopeLabel(message.has_scope() ? message.scope() : MumbleProto::Channel,
@@ -22833,6 +23118,16 @@ QVariantMap MainWindow::modernShellPreviewStateForKey(const QString &previewKey)
 															 youtubeTarget->shorts ? QStringLiteral("short")
 																				   : QStringLiteral("wide") };
 		}
+	} else if (previewKey.startsWith(QLatin1String("twitch:"))) {
+		const QString suggestedEmbedUrl =
+			preview.metadata.value(QStringLiteral("twitchSuggestedEmbedUrl")).toString().trimmed();
+		const QUrl suggestedEmbed(suggestedEmbedUrl);
+		if (suggestedEmbed.isValid()) {
+			embedTarget =
+				PersistentChatPreviewEmbedTarget { QStringLiteral("twitch"), suggestedEmbed, QStringLiteral("twitch") };
+		} else {
+			embedTarget = previewEmbedTargetForUrl(QUrl(preview.canonicalUrl));
+		}
 	} else if (isInstagramPreviewUrl(QUrl(preview.canonicalUrl))
 			   || (preview.mediaDataUrl.trimmed().isEmpty() && preview.mediaItems.empty())) {
 		embedTarget = previewEmbedTargetForUrl(QUrl(preview.canonicalUrl));
@@ -22841,6 +23136,9 @@ QVariantMap MainWindow::modernShellPreviewStateForKey(const QString &previewKey)
 		previewState.insert(QStringLiteral("embedKind"), embedTarget->kind);
 		previewState.insert(QStringLiteral("embedUrl"), embedTarget->url.toString(QUrl::FullyEncoded));
 		previewState.insert(QStringLiteral("embedAspect"), embedTarget->aspect);
+		if (embedTarget->kind == QLatin1String("twitch")) {
+			previewState.insert(QStringLiteral("previewSize"), QStringLiteral("large"));
+		}
 	}
 
 	return previewState;
@@ -32102,6 +32400,12 @@ bool MainWindow::restorePersistentChatPreviewDiskCache(const QString &previewKey
 		mumble::chatperf::recordValue("chat.preview.disk_cache.miss", 1);
 		return false;
 	}
+	if (isTwitchHost(cachedUrl.host())
+		&& cached->metadata.value(QStringLiteral("twitchMetadataVersion")).toInt()
+			   != TWITCH_PREVIEW_METADATA_VERSION) {
+		mumble::chatperf::recordValue("chat.preview.disk_cache.miss", 1);
+		return false;
+	}
 	if ((isInstagramReelPreviewUrl(cachedUrl) || isFacebookReelPreviewUrl(cachedUrl))
 		&& cached->mediaDataUrl.trimmed().isEmpty()) {
 		mumble::chatperf::recordValue("chat.preview.disk_cache.miss", 1);
@@ -34339,9 +34643,17 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 	};
 
 	if (restorePersistentChatPreviewDiskCache(previewKey)) {
+		bool restoredPreviewNeedsRefresh = false;
 		auto restoredIt = m_persistentChatPreviews.find(previewKey);
 		if (restoredIt != m_persistentChatPreviews.end()) {
 			const QUrl restoredPreviewUrl(restoredIt->canonicalUrl);
+			static QSet< QString > s_twitchSessionRefreshes;
+			if (previewKey.startsWith(QLatin1String("twitch:"))
+				&& !s_twitchSessionRefreshes.contains(previewKey)
+				&& restoredIt->metadata.value(QStringLiteral("twitchLiveState")).toString().trimmed().isEmpty()) {
+				s_twitchSessionRefreshes.insert(previewKey);
+				restoredPreviewNeedsRefresh = true;
+			}
 			static QSet< QString > s_xPostSessionRefreshes;
 			if (isXPostUrl(restoredPreviewUrl) && !s_xPostSessionRefreshes.contains(previewKey)) {
 				s_xPostSessionRefreshes.insert(previewKey);
@@ -34414,8 +34726,12 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 				requestPersistentChatRichProviderPreview(previewKey, restoredPreviewUrl);
 			}
 		}
-		renderIfVisible();
-		return;
+		if (restoredPreviewNeedsRefresh) {
+			m_persistentChatPreviews.remove(previewKey);
+		} else {
+			renderIfVisible();
+			return;
+		}
 	}
 
 	PersistentChatPreview preview;
@@ -34660,14 +34976,21 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 		metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("twitch"));
 		metadata.insert(QStringLiteral("previewKind"), QStringLiteral("video"));
 		metadata.insert(QStringLiteral("providerName"), tr("Twitch"));
+		metadata.insert(QStringLiteral("twitchMetadataVersion"), TWITCH_PREVIEW_METADATA_VERSION);
 		metadata.insert(QStringLiteral("twitchKind"), twitchTarget->kind);
+		metadata.insert(QStringLiteral("twitchBadge"), twitchPreviewBadge(*twitchTarget));
+		metadata.insert(QStringLiteral("twitchPlaybackNote"), twitchFallbackDescription(*twitchTarget));
 		if (!twitchTarget->channel.isEmpty()) {
 			metadata.insert(QStringLiteral("twitchChannel"), twitchTarget->channel);
 		}
 		if (!twitchTarget->id.isEmpty()) {
-			metadata.insert(twitchTarget->kind == QLatin1String("clip") ? QStringLiteral("twitchClipSlug")
-																		 : QStringLiteral("twitchVideoId"),
-							twitchTarget->id);
+			QString idKey = QStringLiteral("twitchVideoId");
+			if (twitchTarget->kind == QLatin1String("clip")) {
+				idKey = QStringLiteral("twitchClipSlug");
+			} else if (twitchTarget->kind == QLatin1String("collection")) {
+				idKey = QStringLiteral("twitchCollectionId");
+			}
+			metadata.insert(idKey, twitchTarget->id);
 		}
 		preview.metadata = metadata;
 		m_persistentChatPreviews.insert(previewKey, preview);
@@ -34694,12 +35017,14 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			it->metadataFinished = true;
 			bool thumbnailRequested = false;
 
+			QString twitchClientId;
 			if ((success || allowPartialHtml) && previewContentTypeLooksHtml(contentType)) {
 				const qint64 maxPageBytes = previewMaxPageBytesForUrl(twitchTarget.canonicalUrl);
 				const QByteArray htmlBytes =
 					data.size() > maxPageBytes ? data.left(maxPageBytes) : data;
 				const QString html                       = decodedPreviewHtml(htmlBytes, contentType);
 				const QHash< QString, QString > metaTags = extractMetaTags(html);
+				twitchClientId                           = twitchWebClientIdFromHtml(html);
 				const QString title                      = metaTags.value(
 					QLatin1String("og:title"), metaTags.value(QLatin1String("twitter:title"), extractHtmlTitle(html)));
 				const QString description = metaTags.value(
@@ -34707,10 +35032,15 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 					metaTags.value(QLatin1String("twitter:description"), metaTags.value(QLatin1String("description"))));
 				const QString siteName = metaTags.value(QLatin1String("og:site_name"), tr("Twitch")).trimmed();
 
-				it->title       = title.trimmed().isEmpty() ? twitchFallbackTitle(twitchTarget)
-															: trimmedPreviewText(title, 280);
-				it->subtitle    = siteName.isEmpty() ? twitchFallbackSubtitle(twitchTarget) : siteName;
-				it->description = description.trimmed();
+				const QString cleanTitle       = trimmedPreviewText(title, 280);
+				const QString cleanDescription = description.trimmed();
+				it->title = isGenericTwitchPreviewText(cleanTitle) ? twitchFallbackTitle(twitchTarget) : cleanTitle;
+				it->subtitle = siteName.isEmpty() || isGenericTwitchPreviewText(siteName)
+								   ? twitchFallbackSubtitle(twitchTarget)
+								   : siteName;
+				it->description = isGenericTwitchPreviewText(cleanDescription)
+									  ? twitchFallbackDescription(twitchTarget)
+									  : cleanDescription;
 
 				const QString imageUrlString = previewImageMetaTag(metaTags);
 				const QUrl imageUrl          = twitchTarget.canonicalUrl.resolved(QUrl(imageUrlString));
@@ -34721,7 +35051,8 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 					QNetworkReply *imageReply = Global::get().nam->get(imageRequest);
 					applyPreviewReplyGuards(imageReply, PREVIEW_MAX_IMAGE_BYTES);
 					connect(imageReply, &QNetworkReply::finished, this,
-							[this, imageReply, previewKey, renderIfVisible]() {
+							[this, imageReply, previewKey, twitchImageUrl = imageUrl.toString(QUrl::FullyEncoded),
+							 renderIfVisible]() {
 						const QByteArray imageData = imageReply->readAll();
 						const bool imageSuccess    = imageReply->error() == QNetworkReply::NoError;
 						const QString failureText  = previewFailureText(imageReply);
@@ -34733,6 +35064,12 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 						}
 
 						it->thumbnailFinished = true;
+						const QString preferredThumbnail =
+							it->metadata.value(QStringLiteral("twitchThumbnailUrl")).toString().trimmed();
+						if (!preferredThumbnail.isEmpty() && preferredThumbnail != twitchImageUrl) {
+							renderIfVisible();
+							return;
+						}
 						if (imageSuccess) {
 							const QImage image = decodePersistentChatThumbnailImage(imageData);
 							if (!image.isNull()) {
@@ -34757,9 +35094,294 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			if (it->subtitle.isEmpty() || it->subtitle == tr("Fetching title and thumbnail")) {
 				it->subtitle = twitchFallbackSubtitle(twitchTarget);
 			}
-			if ((!success && !allowPartialHtml) && it->description.isEmpty()) {
-				it->description = failureText;
-				it->failed      = true;
+			if (it->description.isEmpty()) {
+				it->description = twitchFallbackDescription(twitchTarget);
+			}
+			if (!success && !allowPartialHtml) {
+				QVariantMap metadata = it->metadata;
+				if (!failureText.isEmpty()) {
+					metadata.insert(QStringLiteral("twitchMetadataFailure"), failureText);
+				}
+				it->metadata = metadata;
+				it->failed   = false;
+			}
+			if (twitchTarget.kind == QLatin1String("channel") && !twitchTarget.channel.isEmpty()) {
+				const QString graphqlClientId =
+					twitchClientId.isEmpty() ? QStringLiteral("kimne78kx3ncx6brgo4mv6wki5h1ko") : twitchClientId;
+				QNetworkRequest graphqlRequest(QUrl(QStringLiteral("https://gql.twitch.tv/gql")));
+				preparePreviewRequest(graphqlRequest);
+				graphqlRequest.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+				graphqlRequest.setRawHeader(QByteArrayLiteral("Client-ID"), graphqlClientId.toUtf8());
+				graphqlRequest.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json"));
+
+				QJsonObject variables;
+				variables.insert(QStringLiteral("login"), twitchTarget.channel);
+
+				QJsonObject body;
+				body.insert(QStringLiteral("operationName"), QStringLiteral("ChannelRichPreview"));
+				body.insert(QStringLiteral("variables"), variables);
+				body.insert(QStringLiteral("query"), QStringLiteral(R"(query ChannelRichPreview($login: String!) {
+  user(login: $login) {
+    id
+    login
+    displayName
+    description
+    profileImageURL(width: 300)
+    stream {
+      id
+      title
+      type
+      viewersCount
+      game { name }
+      previewImageURL(width: 640, height: 360)
+    }
+    lastBroadcast {
+      id
+      title
+      game { name }
+    }
+    videos(first: 1, sort: TIME) {
+      edges {
+        node {
+          id
+          title
+          createdAt
+          lengthSeconds
+          previewThumbnailURL(width: 640, height: 360)
+          game { name }
+        }
+      }
+    }
+    clips(first: 1) {
+      edges {
+        node {
+          id
+          slug
+          title
+          createdAt
+          durationSeconds
+          thumbnailURL(width: 640, height: 360)
+          game { name }
+        }
+      }
+    }
+  }
+})"));
+
+				QNetworkReply *graphqlReply =
+					Global::get().nam->post(graphqlRequest, QJsonDocument(body).toJson(QJsonDocument::Compact));
+				applyPreviewReplyGuards(graphqlReply, PREVIEW_MAX_PAGE_BYTES);
+				connect(graphqlReply, &QNetworkReply::finished, this,
+						[this, graphqlReply, previewKey, twitchTarget, renderIfVisible]() {
+					const QByteArray response = graphqlReply->readAll();
+					const bool success        = graphqlReply->error() == QNetworkReply::NoError;
+					const QString failureText = previewFailureText(graphqlReply);
+					graphqlReply->deleteLater();
+
+					auto it = m_persistentChatPreviews.find(previewKey);
+					if (it == m_persistentChatPreviews.end()) {
+						return;
+					}
+
+					if (!success) {
+						QVariantMap metadata = it->metadata;
+						if (!failureText.isEmpty()) {
+							metadata.insert(QStringLiteral("twitchStateFailure"), failureText);
+						}
+						it->metadata = metadata;
+						renderIfVisible();
+						return;
+					}
+
+					QJsonParseError error;
+					const QJsonDocument document = QJsonDocument::fromJson(response, &error);
+					if (error.error != QJsonParseError::NoError || !document.isObject()) {
+						QVariantMap metadata = it->metadata;
+						metadata.insert(QStringLiteral("twitchStateFailure"), tr("Could not read Twitch channel state."));
+						it->metadata = metadata;
+						renderIfVisible();
+						return;
+					}
+
+					const QJsonObject user =
+						document.object().value(QStringLiteral("data")).toObject().value(QStringLiteral("user")).toObject();
+					if (user.isEmpty()) {
+						QVariantMap metadata = it->metadata;
+						metadata.insert(QStringLiteral("twitchLiveState"), QStringLiteral("unavailable"));
+						metadata.insert(QStringLiteral("twitchBadge"), tr("Unavailable"));
+						it->title       = tr("%1 on Twitch").arg(twitchTarget.channel);
+						it->subtitle    = tr("Twitch channel");
+						it->description = tr("This Twitch channel could not be loaded. ") + twitchStatusDisclaimer();
+						it->metadata    = metadata;
+						renderIfVisible();
+						return;
+					}
+
+					const QString displayName =
+						user.value(QStringLiteral("displayName")).toString(twitchTarget.channel).trimmed();
+					const QString channelName = displayName.isEmpty() ? twitchTarget.channel : displayName;
+					const QJsonValue streamValue = user.value(QStringLiteral("stream"));
+					QVariantMap metadata         = it->metadata;
+					metadata.insert(QStringLiteral("twitchDisplayName"), channelName);
+					metadata.insert(QStringLiteral("twitchDisclaimer"), twitchStatusDisclaimer());
+
+					QString thumbnailUrl;
+					const auto setSuggestedEmbed = [&metadata](const TwitchPreviewTarget &target) {
+						const QUrl embedUrl = twitchEmbedUrl(target);
+						if (embedUrl.isValid()) {
+							metadata.insert(QStringLiteral("twitchSuggestedEmbedUrl"),
+											embedUrl.toString(QUrl::FullyEncoded));
+						}
+					};
+
+					if (streamValue.isObject()) {
+						const QJsonObject stream = streamValue.toObject();
+						const QString streamTitle = stream.value(QStringLiteral("title")).toString().trimmed();
+						const QString streamType  = stream.value(QStringLiteral("type")).toString().trimmed().toLower();
+						const bool streamIsRerun  = streamType == QLatin1String("rerun") || twitchTitleLooksRerun(streamTitle);
+						const QString gameName =
+							stream.value(QStringLiteral("game")).toObject().value(QStringLiteral("name")).toString().trimmed();
+						const int viewers = stream.value(QStringLiteral("viewersCount")).toInt();
+						thumbnailUrl      = stream.value(QStringLiteral("previewImageURL")).toString().trimmed();
+
+						metadata.insert(QStringLiteral("twitchLiveState"),
+										streamIsRerun ? QStringLiteral("rerun") : QStringLiteral("live"));
+						metadata.insert(QStringLiteral("twitchBadge"), streamIsRerun ? tr("Rerun") : tr("Live"));
+						metadata.insert(QStringLiteral("twitchEmbedMode"),
+										streamIsRerun ? QStringLiteral("rerun") : QStringLiteral("live"));
+						if (!streamType.isEmpty()) {
+							metadata.insert(QStringLiteral("twitchStreamType"), streamType);
+						}
+						it->title    = streamTitle.isEmpty() ? tr("%1 is live on Twitch").arg(channelName) : streamTitle;
+						it->subtitle = streamIsRerun ? tr("Twitch channel - Rerun") : tr("Twitch channel - Live");
+						QStringList details;
+						if (streamIsRerun) {
+							details.push_back(tr("Rerun"));
+						}
+						if (!gameName.isEmpty()) {
+							details.push_back(gameName);
+							metadata.insert(QStringLiteral("twitchGame"), gameName);
+						}
+						if (viewers > 0) {
+							details.push_back(tr("%1 viewers").arg(QLocale().toString(viewers)));
+							metadata.insert(QStringLiteral("twitchViewerCount"), viewers);
+						}
+						details.push_back(twitchStatusDisclaimer());
+						it->description = details.join(QStringLiteral(" - "));
+						setSuggestedEmbed(twitchTarget);
+					} else {
+						const QJsonObject video =
+							twitchFirstConnectionNode(user.value(QStringLiteral("videos")).toObject());
+						const QJsonObject clip =
+							twitchFirstConnectionNode(user.value(QStringLiteral("clips")).toObject());
+						metadata.insert(QStringLiteral("twitchLiveState"), QStringLiteral("offline"));
+						metadata.insert(QStringLiteral("twitchBadge"), tr("Offline"));
+						it->title    = tr("%1 is offline").arg(channelName);
+						it->subtitle = tr("Twitch channel - Offline");
+
+						if (!video.isEmpty()) {
+							const QString videoId = video.value(QStringLiteral("id")).toString().trimmed();
+							const QString videoTitle = video.value(QStringLiteral("title")).toString().trimmed();
+							const QString gameName =
+								video.value(QStringLiteral("game")).toObject().value(QStringLiteral("name")).toString().trimmed();
+							const QString createdLabel = twitchDateLabel(video.value(QStringLiteral("createdAt")).toString());
+							const QString durationLabel =
+								twitchDurationLabel(static_cast< qint64 >(video.value(QStringLiteral("lengthSeconds")).toDouble()));
+							thumbnailUrl = video.value(QStringLiteral("previewThumbnailURL")).toString().trimmed();
+							metadata.insert(QStringLiteral("twitchEmbedMode"), QStringLiteral("latest-vod"));
+							metadata.insert(QStringLiteral("twitchSuggestedVideoId"), videoId);
+							if (!gameName.isEmpty()) {
+								metadata.insert(QStringLiteral("twitchGame"), gameName);
+							}
+							TwitchPreviewTarget videoTarget;
+							videoTarget.kind         = QStringLiteral("video");
+							videoTarget.id           = videoId;
+							videoTarget.canonicalUrl = canonicalTwitchUrl(QUrl(QStringLiteral("https://www.twitch.tv/videos/%1").arg(videoId)), videoTarget);
+							setSuggestedEmbed(videoTarget);
+
+							QStringList details;
+							details.push_back(tr("Offline"));
+							details.push_back(videoTitle.isEmpty() ? tr("showing latest Twitch VOD")
+																   : tr("showing latest VOD: %1").arg(videoTitle));
+							if (!createdLabel.isEmpty()) {
+								details.push_back(createdLabel);
+							}
+							if (!durationLabel.isEmpty()) {
+								details.push_back(durationLabel);
+							}
+							details.push_back(twitchStatusDisclaimer());
+							it->description = details.join(QStringLiteral(" - "));
+						} else if (!clip.isEmpty()) {
+							const QString clipSlug = clip.value(QStringLiteral("slug")).toString().trimmed();
+							const QString clipTitle = clip.value(QStringLiteral("title")).toString().trimmed();
+							const QString createdLabel = twitchDateLabel(clip.value(QStringLiteral("createdAt")).toString());
+							const QString durationLabel =
+								twitchDurationLabel(static_cast< qint64 >(clip.value(QStringLiteral("durationSeconds")).toDouble()));
+							thumbnailUrl = clip.value(QStringLiteral("thumbnailURL")).toString().trimmed();
+							metadata.insert(QStringLiteral("twitchEmbedMode"), QStringLiteral("clip"));
+							metadata.insert(QStringLiteral("twitchSuggestedClipSlug"), clipSlug);
+							TwitchPreviewTarget clipTarget;
+							clipTarget.kind         = QStringLiteral("clip");
+							clipTarget.channel      = twitchTarget.channel;
+							clipTarget.id           = clipSlug;
+							clipTarget.canonicalUrl = canonicalTwitchUrl(QUrl(QStringLiteral("https://www.twitch.tv/%1/clip/%2").arg(twitchTarget.channel, clipSlug)), clipTarget);
+							setSuggestedEmbed(clipTarget);
+
+							QStringList details;
+							details.push_back(tr("Offline"));
+							details.push_back(clipTitle.isEmpty() ? tr("showing a Twitch clip")
+																  : tr("showing clip: %1").arg(clipTitle));
+							if (!createdLabel.isEmpty()) {
+								details.push_back(createdLabel);
+							}
+							if (!durationLabel.isEmpty()) {
+								details.push_back(durationLabel);
+							}
+							details.push_back(twitchStatusDisclaimer());
+							it->description = details.join(QStringLiteral(" - "));
+						} else {
+							metadata.insert(QStringLiteral("twitchEmbedMode"), QStringLiteral("offline-channel"));
+							it->description = tr("Offline. No recent Twitch VOD or clip was found. ") + twitchStatusDisclaimer();
+							setSuggestedEmbed(twitchTarget);
+						}
+					}
+
+					const QUrl thumbnailQUrl(thumbnailUrl);
+					if (!thumbnailUrl.isEmpty() && thumbnailQUrl.isValid() && isSafePreviewTarget(thumbnailQUrl)) {
+						metadata.insert(QStringLiteral("twitchThumbnailUrl"),
+										thumbnailQUrl.toString(QUrl::FullyEncoded));
+					}
+					it->metadata = metadata;
+
+					if (!thumbnailUrl.isEmpty() && thumbnailQUrl.isValid() && isSafePreviewTarget(thumbnailQUrl)) {
+						QNetworkRequest imageRequest(thumbnailQUrl);
+						preparePreviewImageRequest(imageRequest);
+						QNetworkReply *imageReply = Global::get().nam->get(imageRequest);
+						applyPreviewReplyGuards(imageReply, PREVIEW_MAX_IMAGE_BYTES);
+						connect(imageReply, &QNetworkReply::finished, this,
+								[this, imageReply, previewKey, renderIfVisible]() {
+							const QByteArray imageData = imageReply->readAll();
+							const bool imageSuccess    = imageReply->error() == QNetworkReply::NoError;
+							imageReply->deleteLater();
+
+							auto it = m_persistentChatPreviews.find(previewKey);
+							if (it == m_persistentChatPreviews.end()) {
+								return;
+							}
+
+							if (imageSuccess) {
+								const QImage image = decodePersistentChatThumbnailImage(imageData);
+								if (!image.isNull()) {
+									it->thumbnailImage = persistentChatThumbnailImage(image);
+									it->failed         = false;
+								}
+							}
+							renderIfVisible();
+						});
+					}
+
+					renderIfVisible();
+				});
 			}
 			if (!thumbnailRequested) {
 				it->thumbnailFinished = true;

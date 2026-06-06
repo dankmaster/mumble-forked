@@ -277,10 +277,20 @@
 			return;
 		}
 
+		function webChannelScriptUrl() {
+			const protocol = String((window.location && window.location.protocol) || "");
+			const hostname = String((window.location && window.location.hostname) || "").toLowerCase();
+			if ((protocol === "http:" || protocol === "https:")
+					&& (hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1")) {
+				return "/qtwebchannel/qwebchannel.js";
+			}
+			return "qrc:///qtwebchannel/qwebchannel.js";
+		}
+
 		if (!bridgeLoadPromise) {
 			bridgeLoadPromise = new Promise(function(resolve) {
 				const script = document.createElement("script");
-				script.src = "qrc:///qtwebchannel/qwebchannel.js";
+				script.src = webChannelScriptUrl();
 				script.async = true;
 				script.onload = function() {
 					bindBridge().then(resolve);

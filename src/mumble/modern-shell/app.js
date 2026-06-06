@@ -1958,10 +1958,20 @@
 			return;
 		}
 
+		function webChannelScriptUrl() {
+			const protocol = String((window.location && window.location.protocol) || "");
+			const hostname = String((window.location && window.location.hostname) || "").toLowerCase();
+			if ((protocol === "http:" || protocol === "https:")
+					&& (hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1")) {
+				return "/qtwebchannel/qwebchannel.js";
+			}
+			return "qrc:///qtwebchannel/qwebchannel.js";
+		}
+
 		if (!bridgeLoadPromise) {
 			bridgeLoadPromise = new Promise(function(resolve) {
 				const script = document.createElement("script");
-				script.src = "qrc:///qtwebchannel/qwebchannel.js";
+				script.src = webChannelScriptUrl();
 				script.async = true;
 				script.onload = function() {
 					bindBridge().then(resolve);
@@ -4221,6 +4231,32 @@
 		}
 	}
 
+	function syncPendingOptimisticScopeScreenShare(scope) {
+		if (!pendingOptimisticScope || !pendingOptimisticScope.activeScope
+				|| !scope || typeof scope !== "object") {
+			return;
+		}
+
+		const token = String(scope.scopeToken || "");
+		if (!token || token !== pendingOptimisticScope.scopeToken) {
+			return;
+		}
+
+		const expectedRailKind = normalizeRailSelectionKind(pendingOptimisticScope.railKind);
+		const incomingRailKind = activeScopeRailKind(scope);
+		if (expectedRailKind && incomingRailKind && incomingRailKind !== expectedRailKind) {
+			return;
+		}
+
+		if (!Object.prototype.hasOwnProperty.call(scope, "screenShare")) {
+			return;
+		}
+
+		pendingOptimisticScope.activeScope = Object.assign({}, pendingOptimisticScope.activeScope, {
+			screenShare: scope.screenShare || { visible: false }
+		});
+	}
+
 	function pendingOptimisticScopeForRender(snapshot) {
 		if (!pendingOptimisticScope || !pendingOptimisticScope.scopeToken) {
 			return null;
@@ -4237,6 +4273,7 @@
 			return null;
 		}
 
+		syncPendingOptimisticScopeScreenShare(scope);
 		return pendingOptimisticScope.activeScope || null;
 	}
 
@@ -10345,6 +10382,13 @@
 		if (description) {
 			return description;
 		}
+		if (previewIsTwitch(preview, "")) {
+			const metadata = (preview && preview.metadata) || {};
+			const twitchNote = String(metadata.twitchPlaybackNote || "").trim();
+			if (twitchNote) {
+				return twitchNote;
+			}
+		}
 		if (preview && preview.loading) {
 			return "Loading preview...";
 		}
@@ -10355,6 +10399,13 @@
 	}
 
 	function previewBadgeText(preview, sourceLabel, hostLabel) {
+		if (previewIsTwitch(preview, hostLabel)) {
+			const metadata = (preview && preview.metadata) || {};
+			const twitchBadge = String(metadata.twitchBadge || "").trim();
+			if (twitchBadge) {
+				return twitchBadge;
+			}
+		}
 		if (hostLabel && hostLabel.toLowerCase() !== sourceLabel.toLowerCase()) {
 			return hostLabel;
 		}
@@ -11435,11 +11486,19 @@
 					|| host === "vimeo.com" || host === "tiktok.com"
 					|| host === "facebook.com" || host === "dailymotion.com"
 					|| host === "spotify.com" || host === "soundcloud.com"
-					|| host === "streamable.com") {
+					|| host === "streamable.com" || host === "twitch.tv"
+					|| host === "clips.twitch.tv" || host === "player.twitch.tv") {
 				return candidate;
 			}
 		}
 		return "";
+	}
+
+	function previewProviderSessionLabel(preview, fallbackLabel) {
+		if (previewIsTwitch(preview, "")) {
+			return "Open Twitch";
+		}
+		return fallbackLabel || "Verify";
 	}
 
 	function appendPreviewProviderSessionButton(container, preview, className, label, fallbackUrl) {
@@ -11450,7 +11509,7 @@
 		const button = document.createElement("button");
 		button.className = className || "preview-card-provider-session-button";
 		button.type = "button";
-		button.textContent = label || "Verify";
+		button.textContent = previewProviderSessionLabel(preview, label);
 		button.title = "Open provider session";
 		button.setAttribute("aria-label", "Open provider session");
 		button.addEventListener("click", function(event) {
@@ -11462,6 +11521,162 @@
 		});
 		container.appendChild(button);
 		return button;
+	}
+
+	function twitchEmbedStatusOverlayLabel(metadata) {
+		const state = String((metadata && metadata.twitchLiveState) || "").trim().toLowerCase();
+		const mode = String((metadata && metadata.twitchEmbedMode) || "").trim().toLowerCase();
+		if (state === "rerun" || mode === "rerun") {
+			return "Rerun";
+		}
+		if (state === "offline" && mode === "latest-vod") {
+			return "Offline - Latest VOD";
+		}
+		if (state === "offline" && mode === "clip") {
+			return "Offline - Clip";
+		}
+		if (state === "offline") {
+			return "Offline";
+		}
+		if (state === "unavailable") {
+			return "Unavailable";
+		}
+		return "";
+	}
+
+	function appendTwitchEmbedStatusOverlay(frameWrap, preview) {
+		const metadata = (preview && preview.metadata) || {};
+		const label = twitchEmbedStatusOverlayLabel(metadata);
+		if (!frameWrap || !label) {
+			return null;
+		}
+
+		frameWrap.classList.add("has-twitch-status-overlay");
+		const overlay = document.createElement("div");
+		overlay.className = "preview-card-twitch-status-overlay";
+		if (preview.thumbnailUrl) {
+			const image = document.createElement("img");
+			image.className = "preview-card-twitch-status-image";
+			image.loading = "lazy";
+			image.src = preview.thumbnailUrl;
+			image.alt = "";
+			overlay.appendChild(image);
+		}
+		const veil = document.createElement("div");
+		veil.className = "preview-card-twitch-status-veil";
+		overlay.appendChild(veil);
+
+		const copy = document.createElement("div");
+		copy.className = "preview-card-twitch-status-copy";
+		const badge = document.createElement("span");
+		badge.className = "preview-card-twitch-status-badge";
+		badge.textContent = label;
+		copy.appendChild(badge);
+
+		const title = document.createElement("span");
+		title.className = "preview-card-twitch-status-title";
+		title.textContent = preview.title || "Twitch";
+		copy.appendChild(title);
+
+		const note = document.createElement("span");
+		note.className = "preview-card-twitch-status-note";
+		note.textContent = String(metadata.twitchDisclaimer || metadata.twitchPlaybackNote || "")
+			|| "Open Twitch if playback asks for confirmation.";
+		copy.appendChild(note);
+		overlay.appendChild(copy);
+		frameWrap.appendChild(overlay);
+		return overlay;
+	}
+
+	function twitchEmbedPosterBadge(metadata) {
+		const statusLabel = twitchEmbedStatusOverlayLabel(metadata);
+		if (statusLabel) {
+			return statusLabel;
+		}
+		const state = String((metadata && metadata.twitchLiveState) || "").trim().toLowerCase();
+		if (state === "live" || state === "rerun") {
+			return "Live";
+		}
+		return "Twitch";
+	}
+
+	function twitchEmbedPosterNote(metadata) {
+		return String((metadata && (metadata.twitchDisclaimer || metadata.twitchPlaybackNote)) || "").trim()
+			|| "Twitch may ask you to confirm audience settings before playback.";
+	}
+
+	function twitchActivatedEmbedUrl(embedUrl) {
+		try {
+			const url = new URL(String(embedUrl || ""), window.location.href);
+			url.searchParams.set("autoplay", "true");
+			url.searchParams.set("muted", "false");
+			return url.toString();
+		} catch (error) {
+			return embedUrl;
+		}
+	}
+
+	function appendTwitchEmbedPoster(frameWrap, preview, activate) {
+		if (!frameWrap || typeof activate !== "function") {
+			return null;
+		}
+
+		const metadata = (preview && preview.metadata) || {};
+		const poster = document.createElement("button");
+		poster.type = "button";
+		poster.className = "preview-card-twitch-play-poster";
+		poster.title = "Play Twitch preview";
+		poster.setAttribute("aria-label", "Play Twitch preview");
+
+		if (preview.thumbnailUrl) {
+			const image = document.createElement("img");
+			image.className = "preview-card-twitch-poster-image";
+			image.loading = "lazy";
+			image.src = preview.thumbnailUrl;
+			image.alt = "";
+			poster.appendChild(image);
+		}
+
+		const veil = document.createElement("span");
+		veil.className = "preview-card-twitch-poster-veil";
+		poster.appendChild(veil);
+
+		const copy = document.createElement("span");
+		copy.className = "preview-card-twitch-poster-copy";
+		const badge = document.createElement("span");
+		badge.className = "preview-card-twitch-poster-badge";
+		if (String((metadata && metadata.twitchLiveState) || "").trim().toLowerCase() === "live") {
+			badge.classList.add("is-live");
+		}
+		badge.textContent = twitchEmbedPosterBadge(metadata);
+		copy.appendChild(badge);
+
+		const title = document.createElement("span");
+		title.className = "preview-card-twitch-poster-title";
+		title.textContent = preview.title || preview.subtitle || "Twitch";
+		copy.appendChild(title);
+
+		const note = document.createElement("span");
+		note.className = "preview-card-twitch-poster-note";
+		note.textContent = twitchEmbedPosterNote(metadata);
+		copy.appendChild(note);
+		poster.appendChild(copy);
+
+		const play = document.createElement("span");
+		play.className = "preview-card-twitch-poster-play";
+		play.setAttribute("aria-hidden", "true");
+		play.innerHTML = "<svg viewBox=\"0 0 24 24\"><path d=\"M8 5v14l11-7z\"></path></svg>";
+		poster.appendChild(play);
+
+		poster.addEventListener("click", function(event) {
+			event.preventDefault();
+			event.stopPropagation();
+			activate();
+		});
+
+		frameWrap.classList.add("is-twitch-pending");
+		frameWrap.appendChild(poster);
+		return poster;
 	}
 
 	function showPreviewImageUnavailable(media, label) {
@@ -11695,6 +11910,31 @@
 			.replace(/^-+|-+$/g, "");
 	}
 
+	function normalizedPreviewEmbedUrl(embedUrl, embedKind) {
+		if (embedKind === "youtube") {
+			return normalizeYouTubeEmbedUrlForApi(embedUrl);
+		}
+		if (embedKind === "tiktok") {
+			return normalizeTikTokEmbedUrlForNativeControls(embedUrl);
+		}
+		return embedUrl;
+	}
+
+	function createPreviewEmbedIframe(preview, embedUrl, embedKind, kindToken) {
+		const iframe = document.createElement("iframe");
+		iframe.className = "preview-card-embed-frame preview-card-" + kindToken + "-frame";
+		iframe.src = normalizedPreviewEmbedUrl(embedUrl, embedKind);
+		iframe.title = preview.title || preview.subtitle || "Embedded preview";
+		iframe.loading = "lazy";
+		if (embedKind === "youtube") {
+			iframe.setAttribute("enablejsapi", "true");
+		}
+		iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; gyroscope; picture-in-picture";
+		iframe.referrerPolicy = "strict-origin-when-cross-origin";
+		iframe.allowFullscreen = true;
+		return iframe;
+	}
+
 	function appendEmbedPreview(card, preview, embedUrl, embedAspect, embedKind) {
 		const kindToken = previewClassToken(embedKind) || "generic";
 		const media = document.createElement("div");
@@ -11717,24 +11957,37 @@
 					event.preventDefault();
 					playButton.click();
 				}
+			} else if (embedKind === "twitch") {
+				const playPoster = media.querySelector(".preview-card-twitch-play-poster");
+				if (playPoster) {
+					event.preventDefault();
+					playPoster.click();
+				}
 			}
 		});
 
 		const frameWrap = document.createElement("div");
 		frameWrap.className = "preview-card-embed-frame-wrap preview-card-" + kindToken + "-frame-wrap";
-		const iframe = document.createElement("iframe");
-		iframe.className = "preview-card-embed-frame preview-card-" + kindToken + "-frame";
-		iframe.src = embedKind === "youtube" ? normalizeYouTubeEmbedUrlForApi(embedUrl)
-			: (embedKind === "tiktok" ? normalizeTikTokEmbedUrlForNativeControls(embedUrl) : embedUrl);
-		iframe.title = preview.title || preview.subtitle || "Embedded preview";
-		iframe.loading = "lazy";
-		if (embedKind === "youtube") {
-			iframe.setAttribute("enablejsapi", "true");
+		let iframe = null;
+		if (embedKind === "twitch") {
+			appendTwitchEmbedPoster(frameWrap, preview, function() {
+				if (iframe) {
+					return;
+				}
+				frameWrap.classList.remove("is-twitch-pending");
+				frameWrap.classList.add("is-twitch-activated");
+				iframe = createPreviewEmbedIframe(preview, twitchActivatedEmbedUrl(embedUrl), embedKind, kindToken);
+				frameWrap.appendChild(iframe);
+				const poster = frameWrap.querySelector(".preview-card-twitch-play-poster");
+				if (poster) {
+					poster.remove();
+				}
+				schedulePreviewEmbedFrameSizeSync();
+			});
+		} else {
+			iframe = createPreviewEmbedIframe(preview, embedUrl, embedKind, kindToken);
+			frameWrap.appendChild(iframe);
 		}
-		iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; gyroscope; picture-in-picture";
-		iframe.referrerPolicy = "strict-origin-when-cross-origin";
-		iframe.allowFullscreen = true;
-		frameWrap.appendChild(iframe);
 		media.appendChild(frameWrap);
 		const controls = appendPreviewEmbedControls(card, media, iframe, embedKind);
 		if (controls) {
@@ -12026,7 +12279,7 @@
 		}
 		const url = previewUrlObject(preview && preview.url);
 		const host = normalizedPreviewHost(url ? url.hostname : hostLabel);
-		return host === "twitch.tv" || host === "clips.twitch.tv";
+		return host === "twitch.tv" || host === "clips.twitch.tv" || host === "player.twitch.tv";
 	}
 
 	function previewIsXPost(preview, hostLabel) {

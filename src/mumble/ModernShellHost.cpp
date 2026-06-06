@@ -17,6 +17,7 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QEventLoop>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QMimeData>
 #include <QtCore/QPoint>
@@ -28,6 +29,9 @@
 #include <QtGui/QDropEvent>
 #include <QtGui/QPixmap>
 #include <QtGui/QImageReader>
+#include <QtNetwork/QHostAddress>
+#include <QtNetwork/QTcpServer>
+#include <QtNetwork/QTcpSocket>
 #include <QtWidgets/QVBoxLayout>
 #include <QtWebChannel/QWebChannel>
 #include <QtWebEngineCore/QWebEnginePage>
@@ -46,6 +50,8 @@ namespace {
 	const QByteArray PREVIEW_MEDIA_ACCEPT =
 		QByteArrayLiteral("video/webm,video/mp4,video/*;q=0.9,audio/*;q=0.8,image/avif,image/webp,image/*,*/*;q=0.5");
 	const QByteArray YOUTUBE_EMBED_REFERER = QByteArrayLiteral("https://www.mumble.info/");
+
+	void appendModernShellConnectTrace(const QString &message);
 
 	void addModernUiTweaksQuery(QUrl &url, const QVariantMap &uiTweaks) {
 		if (uiTweaks.isEmpty()) {
@@ -69,8 +75,16 @@ namespace {
 		url.setQuery(query);
 	}
 
-	QUrl modernShellUrl() {
-		QUrl url(QStringLiteral("qrc:/modern-shell/index.html"));
+	QUrl modernShellUrl(const quint16 localShellPort) {
+		QUrl url;
+		if (localShellPort > 0) {
+			url.setScheme(QStringLiteral("http"));
+			url.setHost(QStringLiteral("127.0.0.1"));
+			url.setPort(localShellPort);
+			url.setPath(QStringLiteral("/modern-shell/index.html"));
+		} else {
+			url = QUrl(QStringLiteral("qrc:/modern-shell/index.html"));
+		}
 		QVariantMap uiTweaks;
 		uiTweaks.insert(QStringLiteral("theme"), Global::get().s.qsModernShellTheme);
 		uiTweaks.insert(QStringLiteral("accent"), Global::get().s.qsModernShellAccent);
@@ -82,6 +96,133 @@ namespace {
 		uiTweaks.insert(QStringLiteral("railSide"), Global::get().s.qsModernShellRailSide);
 		addModernUiTweaksQuery(url, uiTweaks);
 		return url;
+	}
+
+	QByteArray modernShellMimeTypeForResource(const QString &resourcePath) {
+		const QString suffix = QFileInfo(resourcePath).suffix().toLower();
+		if (suffix == QLatin1String("html")) {
+			return QByteArrayLiteral("text/html; charset=utf-8");
+		}
+		if (suffix == QLatin1String("js")) {
+			return QByteArrayLiteral("application/javascript; charset=utf-8");
+		}
+		if (suffix == QLatin1String("css")) {
+			return QByteArrayLiteral("text/css; charset=utf-8");
+		}
+		if (suffix == QLatin1String("svg")) {
+			return QByteArrayLiteral("image/svg+xml");
+		}
+		if (suffix == QLatin1String("png")) {
+			return QByteArrayLiteral("image/png");
+		}
+		if (suffix == QLatin1String("json")) {
+			return QByteArrayLiteral("application/json; charset=utf-8");
+		}
+		if (suffix == QLatin1String("ico")) {
+			return QByteArrayLiteral("image/x-icon");
+		}
+		if (suffix == QLatin1String("woff2")) {
+			return QByteArrayLiteral("font/woff2");
+		}
+		return QByteArrayLiteral("application/octet-stream");
+	}
+
+	QString modernShellResourcePathForHttpPath(QString path) {
+		if (path.isEmpty() || path == QLatin1String("/")) {
+			path = QStringLiteral("/modern-shell/index.html");
+		}
+		if (path == QLatin1String("/qtwebchannel/qwebchannel.js")) {
+			return QStringLiteral(":/qtwebchannel/qwebchannel.js");
+		}
+		if (!path.startsWith(QLatin1String("/modern-shell/"))) {
+			return QString();
+		}
+
+		QString assetPath = path.mid(QStringLiteral("/modern-shell/").size());
+		if (assetPath.isEmpty()) {
+			assetPath = QStringLiteral("index.html");
+		}
+		if (assetPath.contains(QLatin1String("..")) || assetPath.contains(QLatin1Char('\\'))) {
+			return QString();
+		}
+		return QStringLiteral(":/modern-shell/%1").arg(assetPath);
+	}
+
+	void writeModernShellHttpResponse(QTcpSocket *socket, const int statusCode, const QByteArray &reason,
+									  const QByteArray &body = QByteArray(),
+									  const QByteArray &contentType = QByteArrayLiteral("text/plain; charset=utf-8"),
+									  const bool headOnly = false) {
+		if (!socket) {
+			return;
+		}
+
+		QByteArray response = QByteArrayLiteral("HTTP/1.1 ") + QByteArray::number(statusCode) + QByteArrayLiteral(" ")
+							  + reason + QByteArrayLiteral("\r\n");
+		response += QByteArrayLiteral("Connection: close\r\n");
+		response += QByteArrayLiteral("Cache-Control: no-store\r\n");
+		response += QByteArrayLiteral("X-Content-Type-Options: nosniff\r\n");
+		if (!contentType.isEmpty()) {
+			response += QByteArrayLiteral("Content-Type: ") + contentType + QByteArrayLiteral("\r\n");
+		}
+		response += QByteArrayLiteral("Content-Length: ") + QByteArray::number(body.size()) + QByteArrayLiteral("\r\n");
+		response += QByteArrayLiteral("\r\n");
+		if (!headOnly) {
+			response += body;
+		}
+		appendModernShellConnectTrace(QStringLiteral("ModernShellHost::localHttp response status=%1 bytes=%2 head=%3")
+										  .arg(statusCode)
+										  .arg(body.size())
+										  .arg(headOnly ? 1 : 0));
+		socket->write(response);
+		socket->disconnectFromHost();
+	}
+
+	void serveModernShellHttpRequest(QTcpSocket *socket, const QByteArray &request) {
+		const int headerEnd             = request.indexOf(QByteArrayLiteral("\r\n\r\n"));
+		const QByteArray headerBytes    = headerEnd >= 0 ? request.left(headerEnd) : request;
+		const QList< QByteArray > lines = headerBytes.split('\n');
+		const QByteArray requestLine    = lines.value(0).trimmed();
+		const QList< QByteArray > parts = requestLine.split(' ');
+		if (parts.size() < 2) {
+			writeModernShellHttpResponse(socket, 400, QByteArrayLiteral("Bad Request"), QByteArrayLiteral("Bad Request"));
+			return;
+		}
+
+		const QByteArray method = parts.at(0).trimmed().toUpper();
+		if (method != QByteArrayLiteral("GET") && method != QByteArrayLiteral("HEAD")) {
+			writeModernShellHttpResponse(socket, 405, QByteArrayLiteral("Method Not Allowed"),
+										 QByteArrayLiteral("Method Not Allowed"));
+			return;
+		}
+
+		const QByteArray requestTarget = parts.at(1);
+		const QUrl requestUrl          = QUrl::fromEncoded(requestTarget);
+		QString requestPath            = requestUrl.path();
+		if (requestPath.isEmpty() && requestTarget.startsWith('/')) {
+			const int queryStart     = requestTarget.indexOf('?');
+			const QByteArray pathBytes = queryStart >= 0 ? requestTarget.left(queryStart) : requestTarget;
+			requestPath              = QUrl::fromPercentEncoding(pathBytes);
+		}
+
+		const QString resourcePath = modernShellResourcePathForHttpPath(requestPath);
+		appendModernShellConnectTrace(QStringLiteral("ModernShellHost::localHttp request target=%1 path=%2 resource=%3")
+										  .arg(QString::fromUtf8(requestTarget.left(180)))
+										  .arg(requestPath)
+										  .arg(resourcePath));
+		if (resourcePath.isEmpty()) {
+			writeModernShellHttpResponse(socket, 404, QByteArrayLiteral("Not Found"), QByteArrayLiteral("Not Found"));
+			return;
+		}
+
+		QFile file(resourcePath);
+		if (!file.open(QIODevice::ReadOnly)) {
+			writeModernShellHttpResponse(socket, 404, QByteArrayLiteral("Not Found"), QByteArrayLiteral("Not Found"));
+			return;
+		}
+
+		const QByteArray body = file.readAll();
+		writeModernShellHttpResponse(socket, 200, QByteArrayLiteral("OK"), body,
+									 modernShellMimeTypeForResource(resourcePath), method == QByteArrayLiteral("HEAD"));
 	}
 
 	bool hostEqualsOrEndsWith(const QString &host, const QString &domain) {
@@ -108,6 +249,10 @@ namespace {
 			   || hostEqualsOrEndsWith(host, QStringLiteral("youtube-nocookie.com"));
 	}
 
+	bool isTwitchEmbedDocumentHost(const QString &host) {
+		return hostEqualsOrEndsWith(host, QStringLiteral("twitch.tv"));
+	}
+
 	bool isPreviewEmbedPlayerHost(const QString &host) {
 		return hostEqualsOrEndsWith(host, QStringLiteral("tiktok.com"))
 			   || hostEqualsOrEndsWith(host, QStringLiteral("instagram.com"))
@@ -118,7 +263,8 @@ namespace {
 			   || hostEqualsOrEndsWith(host, QStringLiteral("spotifycdn.com"))
 			   || hostEqualsOrEndsWith(host, QStringLiteral("soundcloud.com"))
 			   || hostEqualsOrEndsWith(host, QStringLiteral("streamable.com"))
-			   || hostEqualsOrEndsWith(host, QStringLiteral("facebook.com"));
+			   || hostEqualsOrEndsWith(host, QStringLiteral("facebook.com"))
+			   || isTwitchEmbedDocumentHost(host);
 	}
 
 	bool isTrustedProviderSessionUrl(const QUrl &url) {
@@ -140,7 +286,17 @@ namespace {
 			return false;
 		}
 
-		return initiator.scheme().toLower() == QLatin1String("qrc");
+		const QString scheme = initiator.scheme().toLower();
+		if (scheme == QLatin1String("qrc")) {
+			return true;
+		}
+		if (scheme != QLatin1String("http") && scheme != QLatin1String("https")) {
+			return false;
+		}
+
+		const QString host = initiator.host().trimmed().toLower();
+		return host == QLatin1String("127.0.0.1") || host == QLatin1String("localhost")
+			   || host == QLatin1String("::1");
 	}
 
 	QByteArray previewMediaRefererForHost(const QString &host) {
@@ -193,6 +349,11 @@ namespace {
 					return;
 				}
 				return;
+			}
+
+			if (isTwitchEmbedDocumentHost(url.host())) {
+				// Keep WebEngine's localhost Referer intact so Twitch can match the iframe
+				// against its required parent= query value.
 			}
 
 			if (isPreviewEmbedPlayerHost(url.host())) {
@@ -275,6 +436,9 @@ ModernShellHost::ModernShellHost(QWidget *parent) : QWidget(parent) {
 	m_view->setContextMenuPolicy(Qt::NoContextMenu);
 	m_view->installEventFilter(this);
 
+	m_shellServer = new QTcpServer(this);
+	connect(m_shellServer, &QTcpServer::newConnection, this, &ModernShellHost::handleLocalShellConnection);
+
 	m_profile = new QWebEngineProfile(QStringLiteral("MumbleModernShell"), this);
 	m_profile->setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies);
 	m_profile->setHttpCacheType(QWebEngineProfile::DiskHttpCache);
@@ -333,7 +497,11 @@ bool ModernShellHost::start(QString *errorMessage) {
 		return false;
 	}
 
-	const QUrl url = modernShellUrl();
+	if (!ensureLocalShellServer()) {
+		appendModernShellConnectTrace(QStringLiteral("ModernShellHost::start local-shell-server-unavailable"));
+	}
+
+	const QUrl url = modernShellUrl(m_shellServer && m_shellServer->isListening() ? m_shellServerPort : 0);
 	if (!url.isValid() || url.isEmpty()) {
 		if (errorMessage) {
 			*errorMessage = QStringLiteral("Modern shell URL is invalid.");
@@ -342,6 +510,7 @@ bool ModernShellHost::start(QString *errorMessage) {
 		return false;
 	}
 
+	m_shellUrl = url;
 	m_view->load(url);
 	m_started = true;
 	m_bootReady = false;
@@ -350,6 +519,56 @@ bool ModernShellHost::start(QString *errorMessage) {
 									  .arg(url.toString())
 									  .arg(m_bootTimeoutTimer->interval()));
 	return true;
+}
+
+bool ModernShellHost::ensureLocalShellServer() {
+	if (!m_shellServer) {
+		return false;
+	}
+	if (m_shellServer->isListening()) {
+		return true;
+	}
+
+	if (!m_shellServer->listen(QHostAddress(QStringLiteral("127.0.0.1")), 0)) {
+		appendModernShellConnectTrace(QStringLiteral("ModernShellHost::ensureLocalShellServer failed=%1")
+										  .arg(m_shellServer->errorString()));
+		return false;
+	}
+
+	m_shellServerPort = m_shellServer->serverPort();
+	appendModernShellConnectTrace(QStringLiteral("ModernShellHost::ensureLocalShellServer port=%1")
+									  .arg(m_shellServerPort));
+	return true;
+}
+
+void ModernShellHost::handleLocalShellConnection() {
+	if (!m_shellServer) {
+		return;
+	}
+
+	while (QTcpSocket *socket = m_shellServer->nextPendingConnection()) {
+		socket->setParent(this);
+		appendModernShellConnectTrace(QStringLiteral("ModernShellHost::localHttp connection peer=%1:%2 available=%3")
+										  .arg(socket->peerAddress().toString())
+										  .arg(socket->peerPort())
+										  .arg(socket->bytesAvailable()));
+		const auto processSocketRead = [socket]() {
+			QByteArray request = socket->property("modernShellRequestBuffer").toByteArray();
+			request.append(socket->readAll());
+			if (!request.contains(QByteArrayLiteral("\r\n\r\n"))) {
+				socket->setProperty("modernShellRequestBuffer", request);
+				return;
+			}
+
+			socket->setProperty("modernShellRequestBuffer", QByteArray());
+			serveModernShellHttpRequest(socket, request);
+		};
+		connect(socket, &QTcpSocket::readyRead, this, processSocketRead);
+		connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
+		if (socket->bytesAvailable() > 0) {
+			processSocketRead();
+		}
+	}
 }
 
 QWebEngineProfile *ModernShellHost::webProfile() const {
@@ -642,6 +861,14 @@ bool ModernShellHost::eventFilter(QObject *watched, QEvent *event) {
 void ModernShellHost::handleLoadFinished(const bool ok) {
 	appendModernShellConnectTrace(QStringLiteral("ModernShellHost::handleLoadFinished ok=%1").arg(ok ? 1 : 0));
 	if (ok) {
+		return;
+	}
+
+	const QUrl currentUrl = m_shellUrl.isValid() ? m_shellUrl : (m_view ? m_view->url() : QUrl());
+	if (currentUrl.scheme().toLower() == QLatin1String("http")
+		&& currentUrl.host().trimmed().toLower() == QLatin1String("127.0.0.1")) {
+		appendModernShellConnectTrace(QStringLiteral("ModernShellHost::handleLoadFinished tolerated-local-http url=%1")
+										  .arg(currentUrl.toString()));
 		return;
 	}
 

@@ -14,12 +14,21 @@
 namespace {
 	bool isLocalModernShellResource(const QUrl &url) {
 		const QString scheme = url.scheme().trimmed().toLower();
-		if (scheme != QLatin1String("qrc")) {
-			return false;
+		const QString path   = url.path();
+		if (scheme == QLatin1String("qrc")) {
+			return path.startsWith(QStringLiteral("/modern-shell")) || path.startsWith(QStringLiteral("/qtwebchannel/"));
 		}
 
-		const QString path = url.path();
-		return path.startsWith(QStringLiteral("/modern-shell")) || path.startsWith(QStringLiteral("/qtwebchannel/"));
+		if (scheme == QLatin1String("http")) {
+			const QString host = url.host().trimmed().toLower();
+			if (host == QLatin1String("127.0.0.1") || host == QLatin1String("localhost")
+				|| host == QLatin1String("::1")) {
+				return path.startsWith(QStringLiteral("/modern-shell"))
+					   || path.startsWith(QStringLiteral("/qtwebchannel/"));
+			}
+		}
+
+		return false;
 	}
 
 	bool hostEqualsOrEndsWith(const QString &host, const QString &domain) {
@@ -44,7 +53,8 @@ namespace {
 			   || hostEqualsOrEndsWith(host, QStringLiteral("spotify.com"))
 			   || hostEqualsOrEndsWith(host, QStringLiteral("soundcloud.com"))
 			   || hostEqualsOrEndsWith(host, QStringLiteral("streamable.com"))
-			   || hostEqualsOrEndsWith(host, QStringLiteral("facebook.com"));
+			   || hostEqualsOrEndsWith(host, QStringLiteral("facebook.com"))
+			   || hostEqualsOrEndsWith(host, QStringLiteral("twitch.tv"));
 	}
 } // namespace
 
