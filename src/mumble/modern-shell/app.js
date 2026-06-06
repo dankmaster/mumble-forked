@@ -12866,6 +12866,7 @@
 		{ provider: "yahoo-finance", kind: "finance", label: "Yahoo Finance", mark: "YF", hostSuffixes: ["finance.yahoo.com"] },
 		{ provider: "tradera", kind: "marketplaceListing", label: "Tradera", mark: "T", hostSuffixes: ["tradera.com"] },
 		{ provider: "blocket", kind: "marketplaceListing", label: "Blocket", mark: "B", hostSuffixes: ["blocket.se"] },
+		{ provider: "bytbil", kind: "vehicleListing", label: "Bytbil", mark: "BB", hostSuffixes: ["bytbil.com"] },
 		{ provider: "flashback", kind: "forum", label: "Flashback", mark: "FB", hostSuffixes: ["flashback.org"] },
 		{ provider: "sweclockers", kind: "article", label: "SweClockers", mark: "SC", hostSuffixes: ["sweclockers.com"] },
 		{ provider: "existenz", kind: "linkDigest", label: "Existenz", mark: "E", hostSuffixes: ["existenz.se"] },
@@ -13684,13 +13685,14 @@
 		return previewSpecItems(preview, "productSpecs");
 	}
 
-	function appendSwedishSpecGrid(parent, specs, className) {
+	function appendSwedishSpecGrid(parent, specs, className, limit) {
 		if (!Array.isArray(specs) || !specs.length) {
 			return;
 		}
+		const maxItems = Number.isFinite(Number(limit)) && Number(limit) > 0 ? Number(limit) : 10;
 		const grid = document.createElement("div");
 		grid.className = className || "preview-card-sv-spec-grid";
-		specs.slice(0, 10).forEach(function(spec) {
+		specs.slice(0, maxItems).forEach(function(spec) {
 			const item = document.createElement("div");
 			item.className = "preview-card-sv-spec";
 			const label = document.createElement("span");
@@ -13704,6 +13706,200 @@
 			grid.appendChild(item);
 		});
 		parent.appendChild(grid);
+	}
+
+	function previewVehicleSpecs(preview) {
+		const metadata = (preview && preview.metadata) || {};
+		const specs = [];
+		const seenLabels = Object.create(null);
+		const handledSourceLabels = Object.create(null);
+		const add = function(label, value, sourceLabels) {
+			const cleanLabel = String(label || "").trim();
+			const cleanValue = String(value || "").trim();
+			const key = cleanLabel.toLowerCase();
+			if (!cleanLabel || !cleanValue || seenLabels[key]) {
+				return;
+			}
+			seenLabels[key] = true;
+			(Array.isArray(sourceLabels) ? sourceLabels : [cleanLabel]).forEach(function(sourceLabel) {
+				const sourceKey = String(sourceLabel || "").trim().toLowerCase();
+				if (sourceKey) {
+					handledSourceLabels[sourceKey] = true;
+				}
+			});
+			specs.push({ label: cleanLabel, value: cleanValue });
+		};
+
+		add("\u00c5r", metadata.vehicleYear, ["\u00c5rsmodell", "Fordons\u00e5r"]);
+		add("Miltal", metadata.vehicleMileage);
+		add("Drivmedel", metadata.vehicleFuel);
+		add("V\u00e4xell\u00e5da", metadata.vehicleTransmission);
+		add("Drivhjul", metadata.vehicleDrivetrain);
+		add("Typ", metadata.vehicleBody, ["Fordonstyp", "Kaross"]);
+		add("Regnr", metadata.vehicleRegNo, ["Registreringsnummer"]);
+		add("F\u00e4rg", metadata.vehicleColor);
+		add("R\u00e4ckvidd", metadata.vehicleRange, ["R\u00e4ckvidd (WLTP)"]);
+		add("F\u00f6rbrukning", metadata.vehicleConsumption, ["Blandad k\u00f6rning"]);
+		add("Motor", metadata.vehicleEngine, ["Motorvolym", "Motorstorlek"]);
+		add("Effekt", metadata.vehiclePower, ["Motoreffekt"]);
+		add("S\u00e4ten", metadata.vehicleSeats, ["Antal s\u00e4ten"]);
+		add("Vikt", metadata.vehicleTotalWeight, ["Totalvikt", "Skattevikt"]);
+		add("L\u00e4ngd", metadata.vehicleLength);
+		add("B\u00e4ddar", metadata.vehicleBeds, ["Antal b\u00e4ddar", "Sovplatser"]);
+
+		previewSpecItems(preview, "vehicleSpecs").forEach(function(spec) {
+			const sourceKey = String((spec && spec.label) || "").trim().toLowerCase();
+			if (!handledSourceLabels[sourceKey]) {
+				add(spec.label, spec.value);
+			}
+		});
+		return specs;
+	}
+
+	function previewVehicleHighlights(preview) {
+		const metadata = (preview && preview.metadata) || {};
+		const highlights = [];
+		const seen = Object.create(null);
+		previewMetadataList(metadata, "vehicleHighlights").forEach(function(item) {
+			const text = String((item && (item.title || item.label || item.value)) || item || "").trim();
+			const key = text.toLowerCase();
+			if (text && !seen[key]) {
+				seen[key] = true;
+				highlights.push(text);
+			}
+		});
+		return highlights.slice(0, 8);
+	}
+
+	function appendBytbilVehiclePreview(card, preview, spec, hostLabel, descriptionText) {
+		const metadata = (preview && preview.metadata) || {};
+		const title = previewMetadataString(metadata, ["vehicleTitle", "listingTitle"])
+			|| previewProviderTitle(preview, spec)
+			|| "Bytbil vehicle";
+		const price = previewMetadataString(metadata, ["vehiclePrice", "listingPrice", "productPrice"]);
+		const exVat = previewMetadataString(metadata, ["vehiclePriceExVat"]);
+		const dealer = previewMetadataString(metadata, ["vehicleDealer"]);
+		const location = previewMetadataString(metadata, ["vehicleLocation", "listingLocation"]);
+		const kind = previewMetadataString(metadata, ["vehicleKind"]) || "Fordon";
+		const listingId = previewMetadataString(metadata, ["vehicleListingId", "listingId"])
+			|| previewLastNumericPathSegment(preview, 5, 14);
+		const warning = previewMetadataString(metadata, ["vehicleWarning"]);
+		const specs = previewVehicleSpecs(preview);
+		const highlights = previewVehicleHighlights(preview);
+		const imageItems = previewImageMediaItems(preview, "", "");
+
+		const shell = document.createElement("div");
+		shell.className = "preview-card-vehicle-shell";
+
+		if (imageItems.length > 1) {
+			const media = appendPreviewImageCarousel(shell, preview, imageItems, "preview-card-vehicle-gallery");
+			const count = document.createElement("span");
+			count.className = "preview-card-vehicle-image-count";
+			count.textContent = String(imageItems.length) + " bilder";
+			media.appendChild(count);
+		} else if (imageItems.length === 1) {
+			const media = document.createElement("div");
+			media.className = "preview-card-vehicle-media";
+			const image = document.createElement("img");
+			image.className = "preview-card-vehicle-image";
+			image.loading = "lazy";
+			image.src = imageItems[0].url;
+			image.alt = title;
+			media.appendChild(image);
+			shell.appendChild(media);
+		}
+
+		const body = document.createElement("div");
+		body.className = "preview-card-vehicle-body";
+
+		const top = document.createElement("div");
+		top.className = "preview-card-vehicle-top";
+		const identity = document.createElement("div");
+		identity.className = "preview-card-sv-identity";
+		const mark = document.createElement("span");
+		mark.className = "preview-card-sv-mark";
+		mark.textContent = "BB";
+		identity.appendChild(mark);
+		const source = document.createElement("span");
+		source.className = "preview-card-sv-source";
+		source.textContent = "Bytbil";
+		identity.appendChild(source);
+		top.appendChild(identity);
+		const badge = document.createElement("span");
+		badge.className = "preview-card-sv-badge";
+		badge.textContent = kind;
+		top.appendChild(badge);
+		body.appendChild(top);
+
+		const titleNode = document.createElement("div");
+		titleNode.className = "preview-card-vehicle-title";
+		titleNode.textContent = title;
+		body.appendChild(titleNode);
+
+		if (price || exVat) {
+			const priceRow = document.createElement("div");
+			priceRow.className = "preview-card-vehicle-price-row";
+			if (price) {
+				const priceNode = document.createElement("div");
+				priceNode.className = "preview-card-vehicle-price";
+				priceNode.textContent = price;
+				priceRow.appendChild(priceNode);
+			}
+			if (exVat) {
+				const vatNode = document.createElement("div");
+				vatNode.className = "preview-card-vehicle-vat";
+				vatNode.textContent = exVat;
+				priceRow.appendChild(vatNode);
+			}
+			body.appendChild(priceRow);
+		}
+
+		const dealerLine = [dealer, location].filter(Boolean).join(" / ");
+		if (dealerLine) {
+			const dealerNode = document.createElement("div");
+			dealerNode.className = "preview-card-vehicle-dealer";
+			dealerNode.textContent = dealerLine;
+			body.appendChild(dealerNode);
+		}
+
+		if (warning) {
+			const warningNode = document.createElement("div");
+			warningNode.className = "preview-card-vehicle-warning";
+			warningNode.textContent = warning;
+			body.appendChild(warningNode);
+		}
+
+		appendSwedishSpecGrid(body, specs, "preview-card-vehicle-spec-grid", 12);
+
+		if (highlights.length) {
+			const chips = document.createElement("div");
+			chips.className = "preview-card-vehicle-chips";
+			highlights.forEach(function(value) {
+				appendSwedishPreviewChip(chips, value);
+			});
+			body.appendChild(chips);
+		}
+
+		const footer = document.createElement("div");
+		footer.className = "preview-card-sv-footer";
+		const host = document.createElement("span");
+		host.className = "preview-card-sv-host";
+		host.textContent = hostLabel || "bytbil.com";
+		footer.appendChild(host);
+		const idNode = document.createElement("span");
+		idNode.className = "preview-card-sv-host";
+		idNode.textContent = listingId ? "#" + listingId : "";
+		if (listingId) {
+			footer.appendChild(idNode);
+		}
+		const action = document.createElement("span");
+		action.className = "preview-card-sv-action";
+		action.textContent = (preview && preview.openLabel) || "Open on Bytbil";
+		footer.appendChild(action);
+		body.appendChild(footer);
+
+		shell.appendChild(body);
+		card.appendChild(shell);
 	}
 
 	function appendBlocketListingPreview(card, preview, spec, hostLabel, descriptionText) {
@@ -13804,7 +14000,7 @@
 
 	function previewProviderTitle(preview, spec) {
 		const metadata = (preview && preview.metadata) || {};
-		return previewMetadataString(metadata, ["listingTitle", "productTitle", "articleTitle", "audioTitle"])
+		return previewMetadataString(metadata, ["vehicleTitle", "listingTitle", "productTitle", "articleTitle", "audioTitle"])
 			|| String((preview && preview.title) || "").trim()
 			|| (spec && spec.label)
 			|| "Link preview";
@@ -13812,12 +14008,18 @@
 
 	function previewProviderDescription(preview, descriptionText) {
 		const metadata = (preview && preview.metadata) || {};
-		return previewMetadataString(metadata, ["listingDescription", "productDescription", "articleDescription", "audioDescription"])
+		return previewMetadataString(metadata, [
+			"vehicleDescription",
+			"listingDescription",
+			"productDescription",
+			"articleDescription",
+			"audioDescription"
+		])
 			|| String(descriptionText || "").trim();
 	}
 
 	function previewProviderPrice(metadata) {
-		return previewMetadataString(metadata, ["listingPrice", "productPrice", "realEstatePrice"]);
+		return previewMetadataString(metadata, ["vehiclePrice", "listingPrice", "productPrice", "realEstatePrice"]);
 	}
 
 	function previewProviderChips(preview, spec, descriptionText) {
@@ -14900,6 +15102,10 @@
 			appendAmazonProductPreview(card, preview, spec, hostLabel);
 			return true;
 		}
+		if (spec.provider === "bytbil" || spec.kind === "vehicleListing") {
+			appendBytbilVehiclePreview(card, preview, spec, hostLabel, descriptionText);
+			return true;
+		}
 		if (spec.kind === "product" || spec.kind === "systembolagetProduct") {
 			appendSwedishProductPreview(card, preview, spec, hostLabel, descriptionText);
 			return true;
@@ -15879,6 +16085,15 @@
 		metadataImages.forEach(function(item) {
 			addItem(item && item.url, item && item.mime, item && item.kind);
 		});
+		const vehicleImages = (preview && preview.metadata && Array.isArray(preview.metadata.vehicleImages))
+			? preview.metadata.vehicleImages
+			: [];
+		vehicleImages.forEach(function(item) {
+			addItem(item && item.url, item && item.mime, item && item.kind);
+		});
+		if (!vehicleImages.length && preview && preview.metadata) {
+			addItem(preview.metadata.vehicleImage, "image/jpeg", "image");
+		}
 		const productImages = (preview && preview.metadata && Array.isArray(preview.metadata.productImages))
 			? preview.metadata.productImages
 			: [];

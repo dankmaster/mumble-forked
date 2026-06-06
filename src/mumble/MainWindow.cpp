@@ -4899,6 +4899,8 @@ std::vector< RichPreviewProviderInfo > richPreviewProviderInfos() {
 		  QObject::tr("Open on Tradera"), QObject::tr("Tradera listing"), { QStringLiteral("tradera.com") } },
 		{ QStringLiteral("blocket"), QStringLiteral("marketplaceListing"), QObject::tr("Blocket"),
 		  QObject::tr("Open on Blocket"), QObject::tr("Blocket listing"), { QStringLiteral("blocket.se") } },
+		{ QStringLiteral("bytbil"), QStringLiteral("vehicleListing"), QObject::tr("Bytbil"),
+		  QObject::tr("Open on Bytbil"), QObject::tr("Bytbil vehicle"), { QStringLiteral("bytbil.com") } },
 		{ QStringLiteral("flashback"), QStringLiteral("forum"), QObject::tr("Flashback"),
 		  QObject::tr("Open on Flashback"), QObject::tr("Flashback thread"), { QStringLiteral("flashback.org") } },
 		{ QStringLiteral("sweclockers"), QStringLiteral("article"), QObject::tr("SweClockers"),
@@ -4974,6 +4976,32 @@ std::vector< RichPreviewProviderInfo > richPreviewProviderInfos() {
 	};
 }
 
+bool isBytbilVehicleDetailUrl(const QUrl &url) {
+	if (!hostEqualsOrEndsWith(normalizedPreviewHost(url.host()), QStringLiteral("bytbil.com"))) {
+		return false;
+	}
+
+	static const QStringList s_vehiclePrefixes {
+		QStringLiteral("personbil-"), QStringLiteral("transportbil-"), QStringLiteral("mc-"),
+		QStringLiteral("motorcykel-"), QStringLiteral("moped-"), QStringLiteral("snoskoter-"),
+		QStringLiteral("snöskoter-"), QStringLiteral("atv-"), QStringLiteral("fyrhjuling-"),
+		QStringLiteral("husbil-"), QStringLiteral("husvagn-"), QStringLiteral("slap-"), QStringLiteral("släp-")
+	};
+	static const QRegularExpression s_listingIdSuffix(QLatin1String("-[0-9]{5,14}$"));
+	for (const QString &segment : decodedUrlPathSegments(url)) {
+		const QString lower = segment.trimmed().toLower();
+		if (!s_listingIdSuffix.match(lower).hasMatch()) {
+			continue;
+		}
+		for (const QString &prefix : s_vehiclePrefixes) {
+			if (lower.startsWith(prefix)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 std::optional< RichPreviewProviderInfo > richPreviewProviderForUrl(const QUrl &url) {
 	const QString host = normalizedPreviewHost(url.host());
 	if (host.isEmpty()) {
@@ -4993,6 +5021,9 @@ std::optional< RichPreviewProviderInfo > richPreviewProviderForUrl(const QUrl &u
 
 		for (const QString &suffix : provider.hostSuffixes) {
 			if (hostEqualsOrEndsWith(host, suffix)) {
+				if (provider.key == QLatin1String("bytbil") && !isBytbilVehicleDetailUrl(url)) {
+					continue;
+				}
 				if (provider.key == QLatin1String("sweclockers")
 					&& decodedUrlPathSegments(url).contains(QStringLiteral("forum"))) {
 					provider.kind          = QStringLiteral("forum");
@@ -6303,6 +6334,450 @@ QVariantList previewImageItemsFromUrl(const QUrl &baseUrl, const QString &rawUrl
 	QSet< QString > seenUrls;
 	appendPreviewImageItem(items, seenUrls, baseUrl, rawUrl, mime);
 	return items;
+}
+
+QString bytbilCleanValue(QString value) {
+	value = decodedPreviewText(value).simplified();
+	const QString lower = value.toLower();
+	if (lower.isEmpty() || lower == QLatin1String("-") || lower == QStringLiteral("uppgift saknas")
+		|| lower == QStringLiteral("saknas")) {
+		return QString();
+	}
+	return value;
+}
+
+QString bytbilVehicleTitleFromHtml(const QString &html, const QString &fallbackTitle) {
+	QString title = firstHtmlClassText(html, QStringLiteral("vehicle-detail-title"));
+	if (title.isEmpty()) {
+		title = fallbackTitle.trimmed();
+	}
+	title.remove(QRegularExpression(QLatin1String("\\s*(?:[-|]\\s*)?Bytbil(?:\\.com)?\\s*$"),
+									QRegularExpression::CaseInsensitiveOption));
+	title.remove(QRegularExpression(QLatin1String("\\s*\\([A-Z0-9]{5,8}\\)\\s*$"),
+									QRegularExpression::CaseInsensitiveOption));
+	return title.simplified();
+}
+
+QString bytbilVehiclePriceFromHtml(const QString &html, const QString &title, const QString &description) {
+	QString price = bytbilCleanValue(firstHtmlClassText(html, QStringLiteral("car-price-details")));
+	if (price.isEmpty()) {
+		price = previewPriceTextFromText(title, description);
+	}
+	return price.simplified();
+}
+
+QString bytbilVehiclePriceExVatFromHtml(const QString &html) {
+	return bytbilCleanValue(firstHtmlClassText(html, QStringLiteral("price-excluding-vat")));
+}
+
+QString bytbilListingIdFromUrl(const QUrl &url) {
+	static const QRegularExpression s_idSuffix(QLatin1String("-([0-9]{5,14})$"));
+	QString id;
+	for (const QString &segment : decodedUrlPathSegments(url)) {
+		const QRegularExpressionMatch match = s_idSuffix.match(segment.trimmed());
+		if (match.hasMatch()) {
+			id = match.captured(1);
+		}
+	}
+	return id;
+}
+
+QString bytbilVehicleKindFromUrl(const QUrl &url) {
+	for (const QString &segment : decodedUrlPathSegments(url)) {
+		const QString lower = segment.trimmed().toLower();
+		if (lower.startsWith(QLatin1String("personbil-"))) {
+			return QStringLiteral("Personbil");
+		}
+		if (lower.startsWith(QLatin1String("transportbil-"))) {
+			return QStringLiteral("Transportbil");
+		}
+		if (lower.startsWith(QLatin1String("mc-")) || lower.startsWith(QLatin1String("motorcykel-"))) {
+			return QStringLiteral("MC");
+		}
+		if (lower.startsWith(QLatin1String("moped-"))) {
+			return QStringLiteral("Moped");
+		}
+		if (lower.startsWith(QLatin1String("husbil-"))) {
+			return QStringLiteral("Husbil");
+		}
+		if (lower.startsWith(QLatin1String("husvagn-"))) {
+			return QStringLiteral("Husvagn");
+		}
+		if (lower.startsWith(QLatin1String("atv-")) || lower.startsWith(QStringLiteral("fyrhjuling-"))) {
+			return QStringLiteral("ATV");
+		}
+		if (lower.startsWith(QLatin1String("snoskoter-")) || lower.startsWith(QStringLiteral("snöskoter-"))) {
+			return QStringLiteral("Snöskoter");
+		}
+		if (lower.startsWith(QLatin1String("slap-")) || lower.startsWith(QStringLiteral("släp-"))) {
+			return QStringLiteral("Släp");
+		}
+	}
+	return QStringLiteral("Fordon");
+}
+
+QVariantList bytbilVehicleSpecItemsFromHtml(const QString &html) {
+	QVariantList items;
+	QSet< QString > seenLabels;
+
+	static const QRegularExpression s_definitionPattern(
+		QLatin1String("<dt[^>]*>([\\s\\S]{0,500}?)</dt>\\s*<dd[^>]*>([\\s\\S]{0,800}?)</dd>"),
+		QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator definitionIt = s_definitionPattern.globalMatch(html);
+	while (definitionIt.hasNext() && items.size() < 24) {
+		const QRegularExpressionMatch match = definitionIt.next();
+		const QString value                 = bytbilCleanValue(match.captured(2));
+		if (!value.isEmpty()) {
+			appendPreviewSpecItem(items, seenLabels, match.captured(1), value);
+		}
+	}
+
+	static const QStringList s_additionalLabels {
+		QStringLiteral("Fordonsår"),      QStringLiteral("I trafik"),
+		QStringLiteral("Utsläppsklass"),  QStringLiteral("Motorstorlek"),
+		QStringLiteral("Motorvolym"),     QStringLiteral("Motoreffekt"),
+		QStringLiteral("Topphastighet"),  QStringLiteral("Antal säten"),
+		QStringLiteral("Skattevikt"),     QStringLiteral("Tjänstevikt"),
+		QStringLiteral("Totalvikt"),      QStringLiteral("Längd"),
+		QStringLiteral("Bredd"),          QStringLiteral("Höjd"),
+		QStringLiteral("Räckvidd (WLTP)"), QStringLiteral("Räckvidd"),
+		QStringLiteral("Förbrukning"),    QStringLiteral("Koldioxidutsläpp"),
+		QStringLiteral("Planlösning"),    QStringLiteral("Antal bäddar"),
+		QStringLiteral("Sovplatser"),     QStringLiteral("Färdplatser")
+	};
+	static const QRegularExpression s_additionalPattern(
+		QLatin1String("<div\\b(?=[^>]*\\bclass\\s*=\\s*['\"][^'\"]*\\btext-gray\\b[^'\"]*['\"])[^>]*>([\\s\\S]{0,500}?)</div>\\s*<div\\b(?=[^>]*\\bclass\\s*=\\s*['\"][^'\"]*\\buk-text-bold\\b[^'\"]*['\"])[^>]*>([\\s\\S]{0,900}?)</div>"),
+		QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator additionalIt = s_additionalPattern.globalMatch(html);
+	while (additionalIt.hasNext() && items.size() < 32) {
+		const QRegularExpressionMatch match = additionalIt.next();
+		const QString label                 = decodedPreviewText(match.captured(1)).simplified();
+		const QString value                 = bytbilCleanValue(match.captured(2));
+		if (!label.isEmpty() && !value.isEmpty() && s_additionalLabels.contains(label, Qt::CaseInsensitive)) {
+			appendPreviewSpecItem(items, seenLabels, label, value);
+		}
+	}
+
+	return items;
+}
+
+QString bytbilSpecValue(const QVariantList &specs, const QStringList &labels) {
+	for (const QVariant &value : specs) {
+		const QVariantMap item = value.toMap();
+		const QString label    = item.value(QStringLiteral("label")).toString().trimmed();
+		if (label.isEmpty()) {
+			continue;
+		}
+		for (const QString &wanted : labels) {
+			if (label.compare(wanted, Qt::CaseInsensitive) == 0) {
+				return item.value(QStringLiteral("value")).toString().trimmed();
+			}
+		}
+	}
+	return QString();
+}
+
+QStringList bytbilVehicleEquipmentFromHtml(const QString &html) {
+	QStringList equipment;
+	static const QRegularExpression s_equipmentBlockPattern(
+		QLatin1String("<ul\\b(?=[^>]*\\bclass\\s*=\\s*['\"][^'\"]*\\bequipment-list\\b[^'\"]*['\"])[^>]*>([\\s\\S]{0,40000}?)</ul>"),
+		QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch blockMatch = s_equipmentBlockPattern.match(html);
+	if (!blockMatch.hasMatch()) {
+		return equipment;
+	}
+
+	static const QRegularExpression s_itemPattern(QLatin1String("<li\\b[^>]*>([\\s\\S]{0,1200}?)</li>"),
+												  QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator itemIt = s_itemPattern.globalMatch(blockMatch.captured(1));
+	while (itemIt.hasNext() && equipment.size() < 96) {
+		const QString item = plainTextFromHtml(itemIt.next().captured(1)).simplified();
+		const QString lower = item.toLower();
+		if (item.isEmpty() || lower.contains(QLatin1String("mail:")) || lower.contains(QLatin1String("ring oss"))
+			|| lower.contains(QLatin1String("@"))) {
+			continue;
+		}
+		if (!equipment.contains(item, Qt::CaseInsensitive)) {
+			equipment.push_back(item);
+		}
+	}
+	return equipment;
+}
+
+QVariantList bytbilVehicleHighlightsFromHtml(const QString &html) {
+	const QStringList equipment = bytbilVehicleEquipmentFromHtml(html);
+	QVariantList highlights;
+	const auto appendHighlight = [&highlights](const QString &value) {
+		const QString text = value.trimmed();
+		if (text.isEmpty()) {
+			return;
+		}
+		for (const QVariant &existing : highlights) {
+			if (existing.toString().compare(text, Qt::CaseInsensitive) == 0) {
+				return;
+			}
+		}
+		highlights.push_back(text);
+	};
+
+	static const QStringList s_priorityTokens {
+		QStringLiteral("night vision"), QStringLiteral("7-sits"),    QStringLiteral("7 sits"),
+		QStringLiteral("bose"),         QStringLiteral("dragkrok"),  QStringLiteral("luftfjädring"),
+		QStringLiteral("matrix"),       QStringLiteral("fyrhjulsstyrning"),
+		QStringLiteral("360"),          QStringLiteral("panorama"),  QStringLiteral("skinn"),
+		QStringLiteral("autopilot"),    QStringLiteral("carplay"),   QStringLiteral("backkamera"),
+		QStringLiteral("värmare"),      QStringLiteral("webasto"),   QStringLiteral("quickshifter"),
+		QStringLiteral("väsk"),         QStringLiteral("bädd"),      QStringLiteral("solcell"),
+		QStringLiteral("alde")
+	};
+	for (const QString &item : equipment) {
+		const QString lower = item.toLower();
+		for (const QString &token : s_priorityTokens) {
+			if (lower.contains(token)) {
+				appendHighlight(item);
+				break;
+			}
+		}
+		if (highlights.size() >= 8) {
+			return highlights;
+		}
+	}
+	for (const QString &item : equipment) {
+		appendHighlight(item);
+		if (highlights.size() >= 6) {
+			break;
+		}
+	}
+	return highlights;
+}
+
+int bytbilImageVariantScore(const QString &rawUrl) {
+	const QString lower = rawUrl.toLower();
+	if (lower.contains(QLatin1String("legacy-largest"))) {
+		return 1200;
+	}
+	if (lower.contains(QLatin1String("legacy-main"))) {
+		return 1000;
+	}
+	if (lower.contains(QLatin1String("legacy-standard"))) {
+		return 800;
+	}
+	if (lower.contains(QLatin1String("legacy-list"))) {
+		return 600;
+	}
+
+	static const QRegularExpression s_widthPattern(QLatin1String("(?:width|w)=([0-9]{2,5})"),
+												   QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = s_widthPattern.match(lower);
+	if (match.hasMatch()) {
+		bool ok         = false;
+		const int width = match.captured(1).toInt(&ok);
+		return ok ? width : 0;
+	}
+	return 0;
+}
+
+QString bytbilImageKey(QString rawUrl) {
+	rawUrl = decodedPreviewText(rawUrl).trimmed();
+	rawUrl.replace(QLatin1String("\\/"), QLatin1String("/"));
+	const QUrl parsed(rawUrl);
+	if (!parsed.isValid()) {
+		return rawUrl.toLower();
+	}
+	QUrl keyUrl = parsed;
+	keyUrl.setQuery(QString());
+	keyUrl.setFragment(QString());
+	return keyUrl.toString(QUrl::FullyEncoded).toLower();
+}
+
+QVariantList bytbilVehicleImageItemsFromHtml(const QUrl &url, const QString &html,
+											 const QHash< QString, QString > &metaTags) {
+	QVariantList items;
+	QHash< QString, QString > bestUrls;
+	QHash< QString, int > bestScores;
+	QStringList order;
+
+	const auto addCandidate = [&bestUrls, &bestScores, &order](QString rawUrl) {
+		rawUrl = decodedPreviewText(rawUrl).trimmed();
+		rawUrl.replace(QLatin1String("\\/"), QLatin1String("/"));
+		if (rawUrl.startsWith(QLatin1String("//"))) {
+			rawUrl.prepend(QStringLiteral("https:"));
+		}
+		if (rawUrl.isEmpty()) {
+			return;
+		}
+
+		const QString key = bytbilImageKey(rawUrl);
+		if (key.isEmpty()) {
+			return;
+		}
+		const int score = bytbilImageVariantScore(rawUrl);
+		if (!bestUrls.contains(key)) {
+			order.push_back(key);
+			bestUrls.insert(key, rawUrl);
+			bestScores.insert(key, score);
+			return;
+		}
+		if (score > bestScores.value(key)) {
+			bestUrls.insert(key, rawUrl);
+			bestScores.insert(key, score);
+		}
+	};
+
+	QString normalizedHtml = html;
+	normalizedHtml.replace(QLatin1String("\\/"), QLatin1String("/"));
+	static const QRegularExpression s_bytbilImagePattern(QLatin1String("https://pro\\.bbcdn\\.io/[^\"'<>\\s)]+"),
+														 QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatchIterator imageIt = s_bytbilImagePattern.globalMatch(normalizedHtml);
+	while (imageIt.hasNext() && order.size() < 80) {
+		addCandidate(imageIt.next().captured(0));
+	}
+
+	addCandidate(previewMetaValue(metaTags,
+								  QStringList { QStringLiteral("og:image"), QStringLiteral("og:image:url"),
+												QStringLiteral("og:image:secure_url"),
+												QStringLiteral("twitter:image") }));
+
+	QSet< QString > seenUrls;
+	for (const QString &key : order) {
+		appendPreviewImageItem(items, seenUrls, url, bestUrls.value(key), QStringLiteral("image/jpeg"));
+		if (items.size() >= 12) {
+			break;
+		}
+	}
+	return items;
+}
+
+QPair< QString, QString > bytbilDealerLocationFromDescription(QString description) {
+	description = decodedPreviewText(description).simplified();
+	if (description.isEmpty()) {
+		return {};
+	}
+
+	const QRegularExpression exactPattern(QStringLiteral("\\bhos\\s+(.+)\\s+i\\s+([^\\.]+)\\.\\s+Hos\\s+Bytbil"),
+										  QRegularExpression::CaseInsensitiveOption);
+	QRegularExpressionMatch match = exactPattern.match(description);
+	if (!match.hasMatch()) {
+		const QRegularExpression fallbackPattern(QStringLiteral("\\bhos\\s+(.+)\\s+i\\s+([^\\.]+)\\."),
+												 QRegularExpression::CaseInsensitiveOption);
+		match = fallbackPattern.match(description);
+	}
+	if (!match.hasMatch()) {
+		return {};
+	}
+	return { match.captured(1).trimmed(), match.captured(2).trimmed() };
+}
+
+QVariantMap bytbilVehicleMetadata(const QUrl &url, const QString &title, const QString &description,
+								  const QString &html,
+								  const QHash< QString, QString > &metaTags) {
+	QVariantMap metadata;
+	metadata.insert(QStringLiteral("provider"), QStringLiteral("bytbil"));
+	metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("bytbil"));
+	metadata.insert(QStringLiteral("previewKind"), QStringLiteral("vehicleListing"));
+	metadata.insert(QStringLiteral("swedishPreviewKind"), QStringLiteral("vehicleListing"));
+	metadata.insert(QStringLiteral("providerName"), QStringLiteral("Bytbil"));
+	metadata.insert(QStringLiteral("vehicleProvider"), QStringLiteral("Bytbil"));
+	if (!html.trimmed().isEmpty() || !metaTags.isEmpty()) {
+		metadata.insert(QStringLiteral("richPreviewMetadataVersion"), RICH_PREVIEW_METADATA_VERSION);
+	}
+
+	const QVariantList specs       = bytbilVehicleSpecItemsFromHtml(html);
+	const QString vehicleTitle     = bytbilVehicleTitleFromHtml(html, title);
+	const QString vehiclePrice     = bytbilVehiclePriceFromHtml(html, title, description);
+	const QString vehiclePriceExVat = bytbilVehiclePriceExVatFromHtml(html);
+	const QPair< QString, QString > dealerLocation = bytbilDealerLocationFromDescription(description);
+	const QVariantList images      = bytbilVehicleImageItemsFromHtml(url, html, metaTags);
+	const QVariantList highlights  = bytbilVehicleHighlightsFromHtml(html);
+
+	insertPreviewMetadataValue(metadata, QStringLiteral("listingId"), bytbilListingIdFromUrl(url));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleListingId"), bytbilListingIdFromUrl(url));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleKind"), bytbilVehicleKindFromUrl(url));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleTitle"), vehicleTitle);
+	insertPreviewMetadataValue(metadata, QStringLiteral("listingTitle"), vehicleTitle);
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehiclePrice"), vehiclePrice);
+	insertPreviewMetadataValue(metadata, QStringLiteral("listingPrice"), vehiclePrice);
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehiclePriceExVat"), vehiclePriceExVat);
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleDescription"), description);
+	insertPreviewMetadataValue(metadata, QStringLiteral("listingDescription"), description);
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleDealer"), dealerLocation.first);
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleLocation"), dealerLocation.second);
+	insertPreviewMetadataValue(metadata, QStringLiteral("listingLocation"), dealerLocation.second);
+
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleYear"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Årsmodell"),
+																	QStringLiteral("Fordonsår") }));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleMileage"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Miltal") }));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleFuel"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Drivmedel") }));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleTransmission"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Växellåda") }));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleDrivetrain"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Drivhjul") }));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleBody"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Fordonstyp"),
+																	QStringLiteral("Kaross") }));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleColor"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Färg") }));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleRegNo"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Regnr"),
+																	QStringLiteral("Registreringsnummer") }));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleSeats"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Antal säten") }));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleRange"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Räckvidd (WLTP)"),
+																	QStringLiteral("Räckvidd") }));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleConsumption"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Förbrukning"),
+																	QStringLiteral("Blandad körning") }));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleEngine"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Motorvolym"),
+																	QStringLiteral("Motorstorlek") }));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleMotorType"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Motortyp") }));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehiclePower"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Motoreffekt"),
+																	QStringLiteral("Effekt") }));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleTotalWeight"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Totalvikt"),
+																	QStringLiteral("Skattevikt") }));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleLength"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Längd") }));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleWidth"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Bredd") }));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleHeight"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Höjd") }));
+	insertPreviewMetadataValue(metadata, QStringLiteral("vehicleBeds"),
+							   bytbilSpecValue(specs, QStringList { QStringLiteral("Antal bäddar"),
+																	QStringLiteral("Sovplatser") }));
+
+	if (!specs.isEmpty()) {
+		metadata.insert(QStringLiteral("vehicleSpecs"), specs);
+		metadata.insert(QStringLiteral("listingSpecs"), specs);
+	}
+	if (!highlights.isEmpty()) {
+		metadata.insert(QStringLiteral("vehicleHighlights"), highlights);
+	}
+	if (!images.isEmpty()) {
+		metadata.insert(QStringLiteral("vehicleImages"), images);
+		metadata.insert(QStringLiteral("listingImages"), images);
+		const QString firstImage = images.first().toMap().value(QStringLiteral("url")).toString();
+		insertPreviewMetadataValue(metadata, QStringLiteral("vehicleImage"), firstImage);
+	}
+
+	const QString warningText =
+		QString(url.toString() + QLatin1Char(' ') + title + QLatin1Char(' ') + description + QLatin1Char(' ')
+				+ dealerLocation.first + QLatin1Char(' ') + plainTextFromHtml(html.left(120000)))
+			.toLower();
+	if (warningText.contains(QStringLiteral("körförbud"))) {
+		insertPreviewMetadataValue(metadata, QStringLiteral("vehicleWarning"), QStringLiteral("Kontrollera körförbud"));
+	} else if (warningText.contains(QStringLiteral("auktion"))
+			   || dealerLocation.first.contains(QLatin1String("auction"), Qt::CaseInsensitive)) {
+		insertPreviewMetadataValue(metadata, QStringLiteral("vehicleWarning"), QStringLiteral("Auktion"));
+	}
+
+	return metadata;
 }
 
 QVariantList previewImageItemsFromJsonLdValue(const QUrl &baseUrl, const QJsonValue &value, int maxItems = 12) {
@@ -7873,6 +8348,10 @@ QVariantMap swedishPreviewMetadata(const QUrl &url, const QString &title, const 
 			metadata.insert(QStringLiteral("listingImages"), images);
 		}
 		return metadata;
+	}
+
+	if (provider && provider->key == QLatin1String("bytbil")) {
+		return bytbilVehicleMetadata(url, title, description, html, metaTags);
 	}
 
 	if (isFlashbackPreviewUrl(url)) {
@@ -11399,52 +11878,36 @@ public:
 		m_settleTimer->setSingleShot(true);
 		m_settleTimer->setInterval(1200);
 		QObject::connect(m_settleTimer, &QTimer::timeout, this, [this]() { captureCurrentView(); });
-		if (m_sharedProfile) {
-			QObject::connect(m_sharedProfile, &QObject::destroyed, this, [this]() {
-				m_sharedProfile = nullptr;
-				if (m_view) {
-					recreateView();
-				}
-			});
-		}
+		connectSharedProfileDestroyed();
 	}
 
 	~PersistentChatPreviewSnapshotRenderer() override {
-		if (m_view) {
-			m_view->hide();
-			m_view->close();
-			delete m_view;
-			m_view = nullptr;
-			m_page = nullptr;
-		}
-		if (m_profile) {
-			delete m_profile;
-			m_profile     = nullptr;
-			m_interceptor = nullptr;
-		}
+		shutdown();
 	}
 
 	void setResultCallback(ResultCallback callback) { m_resultCallback = std::move(callback); }
 
 	void setSharedProfile(QWebEngineProfile *sharedProfile) {
+		if (m_shuttingDown) {
+			return;
+		}
 		if (m_sharedProfile == sharedProfile) {
 			return;
 		}
-		m_sharedProfile = sharedProfile;
 		if (m_sharedProfile) {
-			QObject::connect(m_sharedProfile, &QObject::destroyed, this, [this]() {
-				m_sharedProfile = nullptr;
-				if (m_view) {
-					recreateView();
-				}
-			});
+			QObject::disconnect(m_sharedProfile, nullptr, this, nullptr);
 		}
+		m_sharedProfile = sharedProfile;
+		connectSharedProfileDestroyed();
 		if (m_view && !m_busy) {
 			recreateView();
 		}
 	}
 
 	void requestSnapshot(const QString &previewKey, const QUrl &url) {
+		if (m_shuttingDown) {
+			return;
+		}
 		if (previewKey.trimmed().isEmpty() || !isSafePreviewTarget(url)) {
 			return;
 		}
@@ -11461,6 +11924,30 @@ public:
 		startNextIfIdle();
 	}
 
+	void shutdown() {
+		if (m_shuttingDown) {
+			return;
+		}
+
+		m_shuttingDown = true;
+		m_queue.clear();
+		m_queuedPreviewKeys.clear();
+		m_current = Request();
+		m_busy    = false;
+		m_resultCallback = ResultCallback();
+		if (m_timeoutTimer) {
+			m_timeoutTimer->stop();
+		}
+		if (m_settleTimer) {
+			m_settleTimer->stop();
+		}
+		if (m_sharedProfile) {
+			QObject::disconnect(m_sharedProfile, nullptr, this, nullptr);
+			m_sharedProfile = nullptr;
+		}
+		destroyView(false);
+	}
+
 private:
 	struct Request {
 		QString previewKey;
@@ -11472,8 +11959,25 @@ private:
 	static constexpr int kCaptureRetryDelayMsec = 500;
 	static constexpr int kMaxCaptureAttempts    = 12;
 
+	void connectSharedProfileDestroyed() {
+		if (!m_sharedProfile) {
+			return;
+		}
+
+		QObject::connect(m_sharedProfile, &QObject::destroyed, this, [this]() {
+			if (m_shuttingDown) {
+				return;
+			}
+			m_sharedProfile = nullptr;
+			if (m_busy) {
+				finishCurrent(false, QImage());
+			}
+			destroyView(false);
+		});
+	}
+
 	void ensureView() {
-		if (m_view) {
+		if (m_shuttingDown || m_view) {
 			return;
 		}
 
@@ -11518,7 +12022,7 @@ private:
 		m_view->settings()->setAttribute(QWebEngineSettings::ErrorPageEnabled, false);
 
 		QObject::connect(m_view, &QWebEngineView::loadFinished, this, [this](bool ok) {
-			if (!m_busy) {
+			if (m_shuttingDown || !m_busy) {
 				return;
 			}
 			if (!ok) {
@@ -11529,47 +12033,69 @@ private:
 			m_captureAttempts = 0;
 			m_page->runJavaScript(previewSnapshotPreparationScript(),
 								  [this](const QVariant &) {
-									  if (m_busy) {
+									  if (!m_shuttingDown && m_busy) {
 										  m_settleTimer->start();
 									  }
 								  });
 		});
 		QObject::connect(m_view, &QWebEngineView::renderProcessTerminated, this,
 						 [this](QWebEnginePage::RenderProcessTerminationStatus, int) {
-							 recreateView();
+							 if (m_shuttingDown) {
+								 return;
+							 }
 							 finishCurrent(false, QImage());
+							 destroyView(false);
+							 QTimer::singleShot(0, this, [this]() {
+								 if (!m_shuttingDown) {
+									 ensureView();
+									 startNextIfIdle();
+								 }
+							 });
 						 });
 		QObject::connect(m_page, &QWebEnginePage::contentsSizeChanged, this, [this](const QSizeF &) {
-			if (m_busy && !m_page->isLoading()) {
+			if (!m_shuttingDown && m_busy && m_page && !m_page->isLoading()) {
 				m_settleTimer->start();
 			}
 		});
 	}
 
 	void recreateView() {
-		if (!m_view) {
-			return;
-		}
+		destroyView(true);
+	}
 
-		m_view->hide();
-		m_view->close();
-		delete m_view;
-		m_view = nullptr;
-		m_page = nullptr;
+	void destroyView(bool recreateAfterDestroy) {
+		if (m_view) {
+			QObject::disconnect(m_view, nullptr, this, nullptr);
+			if (m_page) {
+				QObject::disconnect(m_page, nullptr, this, nullptr);
+				m_page->triggerAction(QWebEnginePage::Stop);
+			}
+			m_view->hide();
+			m_view->close();
+			delete m_view;
+			m_view = nullptr;
+			m_page = nullptr;
+		}
 		if (m_profile) {
+			m_profile->setUrlRequestInterceptor(nullptr);
 			delete m_profile;
 			m_profile     = nullptr;
 			m_interceptor = nullptr;
 		}
-		ensureView();
+		if (recreateAfterDestroy && !m_shuttingDown) {
+			ensureView();
+		}
 	}
 
 	void startNextIfIdle() {
-		if (m_busy || m_queue.isEmpty()) {
+		if (m_shuttingDown || m_busy || m_queue.isEmpty()) {
 			return;
 		}
 
 		ensureView();
+		if (!m_view || !m_page) {
+			return;
+		}
 
 		m_busy    = true;
 		m_current = m_queue.takeFirst();
@@ -11586,18 +12112,18 @@ private:
 	}
 
 	void captureCurrentView() {
-		if (!m_busy || !m_view) {
+		if (m_shuttingDown || !m_busy || !m_view || !m_page) {
 			return;
 		}
 
 		m_page->runJavaScript(previewSnapshotPreparationScript(),
 							  [this](const QVariant &) {
-								  if (!m_busy || !m_view) {
+								  if (m_shuttingDown || !m_busy || !m_view || !m_page) {
 									  return;
 								  }
 
 								  m_page->runJavaScript(previewSnapshotMediaProbeScript(), [this](const QVariant &mediaResult) {
-									  if (!m_busy || !m_view) {
+									  if (m_shuttingDown || !m_busy || !m_view || !m_page) {
 										  return;
 									  }
 
@@ -11657,7 +12183,7 @@ private:
 					   const QString &mediaAudioMime = QString(), const QVariantList &mediaItems = QVariantList(),
 					   const QString &posterUrl = QString(), const QString &posterMime = QString(),
 					   const QString &avatarUrl = QString()) {
-		if (!m_busy) {
+		if (m_shuttingDown || !m_busy) {
 			return;
 		}
 
@@ -11680,7 +12206,11 @@ private:
 							 posterUrl, posterMime, avatarUrl);
 		}
 
-		QTimer::singleShot(0, this, [this]() { startNextIfIdle(); });
+		QTimer::singleShot(0, this, [this]() {
+			if (!m_shuttingDown) {
+				startNextIfIdle();
+			}
+		});
 	}
 
 	ResultCallback m_resultCallback;
@@ -11694,6 +12224,7 @@ private:
 	PreviewSnapshotUrlInterceptor *m_interceptor = nullptr;
 	QWebEngineView *m_view                       = nullptr;
 	QWebEnginePage *m_page                       = nullptr;
+	bool m_shuttingDown                          = false;
 	bool m_busy                                  = false;
 	int m_captureAttempts                        = 0;
 };
@@ -31985,8 +32516,8 @@ bool MainWindow::applyPersistentChatRemoteAudioMedia(PersistentChatPreview &prev
 void MainWindow::applyPersistentChatListingMediaItems(PersistentChatPreview &preview) {
 	std::vector< PersistentChatPreviewMediaItem > listingItems;
 	QSet< QString > seenListingImages;
-	for (const QString &imageKey : { QStringLiteral("listingImages"), QStringLiteral("productImages"),
-									 QStringLiteral("articleImages") }) {
+	for (const QString &imageKey : { QStringLiteral("listingImages"), QStringLiteral("vehicleImages"),
+									 QStringLiteral("productImages"), QStringLiteral("articleImages") }) {
 		const QVariantList images = preview.metadata.value(imageKey).toList();
 		for (const QVariant &value : images) {
 			const QVariantMap itemMap = value.toMap();
@@ -32399,6 +32930,16 @@ bool MainWindow::requestPersistentChatRichProviderPreview(const QString &preview
 			if (!listingDescription.isEmpty()) {
 				previewIt->description = listingDescription;
 			}
+		} else if (previewIt->metadata.value(QStringLiteral("provider")).toString() == QLatin1String("bytbil")) {
+			const QString vehicleTitle = previewIt->metadata.value(QStringLiteral("vehicleTitle")).toString().trimmed();
+			const QString vehicleDescription =
+				previewIt->metadata.value(QStringLiteral("vehicleDescription")).toString().trimmed();
+			if (!vehicleTitle.isEmpty()) {
+				previewIt->title = vehicleTitle;
+			}
+			if (!vehicleDescription.isEmpty()) {
+				previewIt->description = vehicleDescription;
+			}
 		} else {
 			const QString productTitle =
 				previewIt->metadata.value(QStringLiteral("productTitle")).toString().trimmed();
@@ -32424,12 +32965,16 @@ bool MainWindow::requestPersistentChatRichProviderPreview(const QString &preview
 		applyPersistentChatListingMediaItems(*previewIt);
 		previewIt->failed = false;
 
-		const QString selectedImageUrlString =
-			imageUrlString.isEmpty()
-				? (!previewIt->metadata.value(QStringLiteral("productImage")).toString().trimmed().isEmpty()
-					   ? previewIt->metadata.value(QStringLiteral("productImage")).toString().trimmed()
-					   : previewIt->metadata.value(QStringLiteral("articleImage")).toString().trimmed())
-				: imageUrlString;
+		QString selectedImageUrlString = imageUrlString.trimmed();
+		if (selectedImageUrlString.isEmpty()) {
+			selectedImageUrlString = previewIt->metadata.value(QStringLiteral("vehicleImage")).toString().trimmed();
+		}
+		if (selectedImageUrlString.isEmpty()) {
+			selectedImageUrlString = previewIt->metadata.value(QStringLiteral("productImage")).toString().trimmed();
+		}
+		if (selectedImageUrlString.isEmpty()) {
+			selectedImageUrlString = previewIt->metadata.value(QStringLiteral("articleImage")).toString().trimmed();
+		}
 		if (!selectedImageUrlString.isEmpty()) {
 			const QUrl imageUrl = previewPageUrl.resolved(QUrl(selectedImageUrlString));
 			if (isSafePreviewTarget(imageUrl)) {
@@ -33860,6 +34405,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 			if (richProvider
 				&& (richProvider->kind == QLatin1String("product")
 					|| richProvider->kind == QLatin1String("systembolagetProduct")
+					|| richProvider->kind == QLatin1String("vehicleListing")
 					|| richProvider->kind == QLatin1String("marketplaceListing"))
 				&& !s_richProductSessionRefreshes.contains(previewKey)) {
 				s_richProductSessionRefreshes.insert(previewKey);
@@ -33933,15 +34479,23 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 
 		preview.metadata = previewMetadataWithSwedishData(preview.metadata, previewUrl, preview.title,
 														  preview.description);
+		const QString vehicleTitle = preview.metadata.value(QStringLiteral("vehicleTitle")).toString().trimmed();
+		const QString vehicleDescription =
+			preview.metadata.value(QStringLiteral("vehicleDescription")).toString().trimmed();
 		const QString productTitle = preview.metadata.value(QStringLiteral("productTitle")).toString().trimmed();
 		const QString productDescription =
 			preview.metadata.value(QStringLiteral("productDescription")).toString().trimmed();
-		if (!productTitle.isEmpty()) {
+		if (!vehicleTitle.isEmpty()) {
+			preview.title = vehicleTitle;
+		} else if (!productTitle.isEmpty()) {
 			preview.title = productTitle;
 		}
-		if (!productDescription.isEmpty()) {
+		if (!vehicleDescription.isEmpty()) {
+			preview.description = vehicleDescription;
+		} else if (!productDescription.isEmpty()) {
 			preview.description = productDescription;
-		} else if (!productTitle.isEmpty() && previewDescriptionIsPlaceholder(preview.description)) {
+		} else if ((!vehicleTitle.isEmpty() || !productTitle.isEmpty())
+				   && previewDescriptionIsPlaceholder(preview.description)) {
 			preview.description.clear();
 		}
 		const QString flashbackPostId = flashbackPostIdFromUrl(previewUrl);
@@ -34433,6 +34987,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 				}
 				const bool hasStructuredFallback =
 					it->metadata.contains(QStringLiteral("productTitle"))
+					|| it->metadata.contains(QStringLiteral("vehicleTitle"))
 					|| it->metadata.contains(QStringLiteral("listingTitle"))
 					|| it->metadata.contains(QStringLiteral("articleTitle"));
 				if (hasStructuredFallback) {
@@ -34484,21 +35039,29 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 					it->openLabel    = tr("Open in thread");
 				}
 			}
+			const QString vehicleTitle = it->metadata.value(QStringLiteral("vehicleTitle")).toString().trimmed();
 			const QString productTitle = it->metadata.value(QStringLiteral("productTitle")).toString().trimmed();
-			if (!productTitle.isEmpty()) {
+			if (!vehicleTitle.isEmpty()) {
+				it->title = vehicleTitle;
+			} else if (!productTitle.isEmpty()) {
 				it->title = productTitle;
 			}
+			const QString vehicleDescription =
+				it->metadata.value(QStringLiteral("vehicleDescription")).toString().trimmed();
 			const QString productDescription =
 				it->metadata.value(QStringLiteral("productDescription")).toString().trimmed();
 			const QString articleTitle = it->metadata.value(QStringLiteral("articleTitle")).toString().trimmed();
-			if (productTitle.isEmpty() && !articleTitle.isEmpty()) {
+			if (vehicleTitle.isEmpty() && productTitle.isEmpty() && !articleTitle.isEmpty()) {
 				it->title = articleTitle;
 			}
 			const QString articleDescription =
 				it->metadata.value(QStringLiteral("articleDescription")).toString().trimmed();
-			if (!productDescription.isEmpty()) {
+			if (!vehicleDescription.isEmpty()) {
+				it->description = vehicleDescription;
+			} else if (!productDescription.isEmpty()) {
 				it->description = productDescription;
-			} else if (!productTitle.isEmpty() && previewDescriptionIsPlaceholder(it->description)) {
+			} else if ((!vehicleTitle.isEmpty() || !productTitle.isEmpty())
+					   && previewDescriptionIsPlaceholder(it->description)) {
 				it->description.clear();
 			} else if (!articleDescription.isEmpty()) {
 				it->description = articleDescription;
@@ -34509,12 +35072,16 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 				applyPersistentChatRemotePlayableMedia(*it, mediaUrl, playableMediaMeta->mime);
 			}
 
-			const QString selectedImageUrlString =
-				imageUrlString.isEmpty()
-					? (!it->metadata.value(QStringLiteral("productImage")).toString().trimmed().isEmpty()
-						   ? it->metadata.value(QStringLiteral("productImage")).toString().trimmed()
-						   : it->metadata.value(QStringLiteral("articleImage")).toString().trimmed())
-					: imageUrlString;
+			QString selectedImageUrlString = imageUrlString.trimmed();
+			if (selectedImageUrlString.isEmpty()) {
+				selectedImageUrlString = it->metadata.value(QStringLiteral("vehicleImage")).toString().trimmed();
+			}
+			if (selectedImageUrlString.isEmpty()) {
+				selectedImageUrlString = it->metadata.value(QStringLiteral("productImage")).toString().trimmed();
+			}
+			if (selectedImageUrlString.isEmpty()) {
+				selectedImageUrlString = it->metadata.value(QStringLiteral("articleImage")).toString().trimmed();
+			}
 			if (selectedImageUrlString.isEmpty()) {
 				it->thumbnailFinished = true;
 				ensurePersistentChatPreviewSiteSnapshot(previewKey);
@@ -36930,6 +37497,8 @@ void MainWindow::setShowDockTitleBars(bool doShow) {
 
 MainWindow::~MainWindow() {
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	delete m_persistentChatPreviewSnapshotRenderer;
+	m_persistentChatPreviewSnapshotRenderer = nullptr;
 	stopModernConnectServerPing();
 #endif
 	delete qwPTTButtonWidget;
