@@ -134,18 +134,26 @@ namespace {
 	QSize modernImageViewerDefaultSize(const QVariantMap &state, const QSize &minimumSize, const QWidget *dialog) {
 		const QScreen *screen = modernDialogScreenForWidget(dialog);
 		const QRect bounds    = screen ? screen->availableGeometry() : QRect();
-		const QSize fallback(640, 420);
+		const QSize fallback(900, 640);
+		const int horizontalMargin = bounds.width() >= 1200 ? 96 : 32;
+		const int verticalMargin   = bounds.height() >= 800 ? 96 : 32;
 		const int maxWidth =
-			bounds.isValid() ? qMax(minimumSize.width(), qMin(760, bounds.width() - 32)) : fallback.width();
+			bounds.isValid() ? qMax(minimumSize.width(), qMin(1440, bounds.width() - horizontalMargin))
+							 : fallback.width();
 		const int maxHeight =
-			bounds.isValid() ? qMax(minimumSize.height(), qMin(560, bounds.height() - 32)) : fallback.height();
+			bounds.isValid() ? qMax(minimumSize.height(), qMin(960, bounds.height() - verticalMargin))
+							 : fallback.height();
 		const QSize maxSize(maxWidth, maxHeight);
+		const QSize viewerPadding(32, 58);
+		const QSize maxImageArea(qMax(1, maxSize.width() - viewerPadding.width()),
+								 qMax(1, maxSize.height() - viewerPadding.height()));
 
 		const QVariantMap image = state.value(QStringLiteral("imageViewer")).toMap();
 		const QSize imageSize(image.value(QStringLiteral("width")).toInt(),
 							  image.value(QStringLiteral("height")).toInt());
 		if (imageSize.isValid() && !imageSize.isEmpty()) {
-			return imageSize.scaled(maxSize, Qt::KeepAspectRatio).expandedTo(minimumSize);
+			const QSize fittedImage = imageSize.scaled(maxImageArea, Qt::KeepAspectRatio);
+			return (fittedImage + viewerPadding).boundedTo(maxSize).expandedTo(minimumSize);
 		}
 
 		return fallback.boundedTo(maxSize).expandedTo(minimumSize);
@@ -154,7 +162,7 @@ namespace {
 } // namespace
 
 ModernDialogHost::ModernDialogHost(ModernShellBridge *bridge, QWidget *parent)
-	: QDialog(parent), m_bridge(bridge) {
+	: QDialog(parent), m_bridge(bridge), m_owner(parent) {
 	setAttribute(Qt::WA_DeleteOnClose, false);
 	setAttribute(Qt::WA_TranslucentBackground, true);
 	setAttribute(Qt::WA_NoSystemBackground, true);
@@ -233,11 +241,12 @@ bool ModernDialogHost::showDialogState(const QVariantMap &state, QString *errorM
 	}
 
 	const QString nextDialogID = state.value(QStringLiteral("id")).toString();
-	const bool shouldPresent   = !m_open || !isVisible() || m_currentDialogID != nextDialogID;
+	const bool shouldPresent   = !m_open || !isVisible() || isMinimized() || m_currentDialogID != nextDialogID;
 	m_open                    = true;
 	m_currentDialogID         = nextDialogID;
 	const QString title = state.value(QStringLiteral("title")).toString().trimmed();
 	setWindowTitle(title.isEmpty() ? tr("Mumble") : title);
+	applyWindowRoleForDialog(state);
 	applyDialogGeometry(state);
 	applyWindowChrome(state);
 
@@ -245,6 +254,9 @@ bool ModernDialogHost::showDialogState(const QVariantMap &state, QString *errorM
 		if (automationOffscreenModeEnabled()) {
 			showForAutomationCapture();
 		} else {
+			if (isMinimized()) {
+				setWindowState(windowState() & ~Qt::WindowMinimized);
+			}
 			show();
 			raise();
 			activateWindow();
@@ -365,6 +377,21 @@ bool ModernDialogHost::eventFilter(QObject *watched, QEvent *event) {
 		return QDialog::eventFilter(watched, event);
 	}
 
+	const QPoint viewPosition = m_view->mapFromGlobal(mouseEvent->globalPosition().toPoint());
+	if (shouldStartWindowDrag(viewPosition)) {
+		if (QWindow *window = windowHandle()) {
+			if (window->startSystemMove()) {
+				event->accept();
+				return true;
+			}
+		}
+
+		m_manualDragActive = true;
+		m_manualDragOffset = mouseEvent->globalPosition().toPoint() - frameGeometry().topLeft();
+		event->accept();
+		return true;
+	}
+
 	if (isImageViewerDialog()) {
 		const Qt::Edges resizeEdges = resizeEdgesAtGlobalPoint(mouseEvent->globalPosition().toPoint());
 		if (resizeEdges != Qt::Edges()) {
@@ -381,22 +408,7 @@ bool ModernDialogHost::eventFilter(QObject *watched, QEvent *event) {
 		}
 	}
 
-	const QPoint viewPosition = m_view->mapFromGlobal(mouseEvent->globalPosition().toPoint());
-	if (!shouldStartWindowDrag(viewPosition)) {
-		return QDialog::eventFilter(watched, event);
-	}
-
-	if (QWindow *window = windowHandle()) {
-		if (window->startSystemMove()) {
-			event->accept();
-			return true;
-		}
-	}
-
-	m_manualDragActive = true;
-	m_manualDragOffset = mouseEvent->globalPosition().toPoint() - frameGeometry().topLeft();
-	event->accept();
-	return true;
+	return QDialog::eventFilter(watched, event);
 }
 
 void ModernDialogHost::moveEvent(QMoveEvent *event) {
@@ -449,7 +461,7 @@ void ModernDialogHost::applyDialogGeometry(const QVariantMap &state) {
 	} else if (kind == QLatin1String("confirm")) {
 		minimumSize = QSize(420, 220);
 	} else if (kind == QLatin1String("imageViewer")) {
-		minimumSize = QSize(260, 180);
+		minimumSize = QSize(320, 240);
 		desiredSize = modernImageViewerDefaultSize(state, minimumSize, this);
 	}
 
@@ -460,12 +472,23 @@ void ModernDialogHost::applyDialogGeometry(const QVariantMap &state) {
 	}
 
 	setMinimumSize(minimumSize);
+	const QSize targetSize = desiredSize.expandedTo(minimumSize);
 	if (kind == QLatin1String("imageViewer") && !Global::get().s.qbaImagePreviewGeometry.isEmpty()
 		&& restoreGeometry(Global::get().s.qbaImagePreviewGeometry)) {
+		const bool restoredTooSmallForImage =
+			size().width() < static_cast< int >(targetSize.width() * 0.85)
+			|| size().height() < static_cast< int >(targetSize.height() * 0.85);
+		if (restoredTooSmallForImage) {
+			resize(targetSize);
+			if (automationOffscreenModeEnabled()) {
+				move(-32000, -32000);
+			} else {
+				centerModernDialogWindow(this);
+			}
+		}
 		return;
 	}
 
-	const QSize targetSize = desiredSize.expandedTo(minimumSize);
 	if (size() != targetSize) {
 		resize(targetSize);
 	}
@@ -478,6 +501,36 @@ void ModernDialogHost::applyDialogGeometry(const QVariantMap &state) {
 
 bool ModernDialogHost::isImageViewerDialog() const {
 	return m_lastDialogState.value(QStringLiteral("kind")).toString() == QLatin1String("imageViewer");
+}
+
+void ModernDialogHost::applyWindowRoleForDialog(const QVariantMap &state) {
+	const bool independentWindowRole =
+		state.value(QStringLiteral("kind")).toString() == QLatin1String("imageViewer")
+		&& !automationOffscreenModeEnabled();
+	if (independentWindowRole == m_independentWindowRole) {
+		return;
+	}
+
+	const bool wasVisible = isVisible();
+	if (independentWindowRole) {
+		setParent(nullptr, Qt::Window | Qt::FramelessWindowHint | Qt::WindowSystemMenuHint
+							   | Qt::WindowMinimizeButtonHint | Qt::WindowCloseButtonHint);
+	} else {
+		setParent(m_owner.data(), Qt::Dialog | Qt::FramelessWindowHint);
+	}
+
+	setAttribute(Qt::WA_DeleteOnClose, false);
+	setAttribute(Qt::WA_TranslucentBackground, true);
+	setAttribute(Qt::WA_NoSystemBackground, true);
+	setWindowModality(Qt::NonModal);
+	setAutoFillBackground(false);
+	m_independentWindowRole = independentWindowRole;
+	if (automationOffscreenModeEnabled()) {
+		applyAutomationOffscreenFlags();
+	}
+	if (wasVisible) {
+		hide();
+	}
 }
 
 void ModernDialogHost::rememberImageViewerGeometry() {
@@ -499,7 +552,12 @@ Qt::Edges ModernDialogHost::resizeEdgesAtGlobalPoint(const QPoint &globalPositio
 		return Qt::Edges();
 	}
 
-	const int resizeMargin = 12;
+	const QPoint viewPosition = m_view ? m_view->mapFromGlobal(globalPosition) : QPoint(-1, -1);
+	if (viewPosition.y() >= 0 && viewPosition.y() <= 34) {
+		return Qt::Edges();
+	}
+
+	const int resizeMargin = 14;
 	Qt::Edges edges;
 	if (globalPosition.x() <= bounds.left() + resizeMargin) {
 		edges |= Qt::LeftEdge;
@@ -695,7 +753,7 @@ bool ModernDialogHost::shouldStartWindowDrag(const QPoint &viewPosition) const {
 	const QString kind = m_lastDialogState.value(QStringLiteral("kind")).toString();
 	if (kind == QLatin1String("imageViewer")) {
 		const int dragHeight = 34;
-		const int trailingInteractiveWidth = 44;
+		const int trailingInteractiveWidth = 80;
 		return viewPosition.y() <= dragHeight && viewPosition.x() < (m_view->width() - trailingInteractiveWidth);
 	}
 

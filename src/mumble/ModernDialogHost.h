@@ -9,6 +9,7 @@
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 
 #include <QtCore/QPoint>
+#include <QtCore/QPointer>
 #include <QtCore/QRect>
 #include <QtCore/QVariantMap>
 #include <QtWebEngineCore/QWebEnginePage>
@@ -55,6 +56,7 @@ private:
 	bool start(QString *errorMessage = nullptr);
 	void applyDialogGeometry(const QVariantMap &state);
 	void applyWindowChrome(const QVariantMap &state);
+	void applyWindowRoleForDialog(const QVariantMap &state);
 	bool automationOffscreenModeEnabled() const;
 	void applyAutomationOffscreenFlags();
 	void showForAutomationCapture();
@@ -75,12 +77,14 @@ private:
 	QWebChannel *m_channel = nullptr;
 	QTimer *m_stateRepublishTimer = nullptr;
 	ModernShellBridge *m_bridge = nullptr;
+	QPointer< QWidget > m_owner;
 	QVariantMap m_lastDialogState;
 	bool m_started = false;
 	bool m_open = false;
 	bool m_manualDragActive = false;
 	bool m_manualResizeActive = false;
 	bool m_resizeCursorActive = false;
+	bool m_independentWindowRole = false;
 	int m_stateRepublishRemaining = 0;
 	QPoint m_manualDragOffset;
 	QPoint m_manualResizeStartGlobalPosition;

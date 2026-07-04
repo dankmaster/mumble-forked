@@ -7779,6 +7779,14 @@
 
 	// ---- Image viewer (kind "imageViewer") ----
 	let imageViewerState = null;
+	let imageViewerResizeObserver = null;
+
+	function disconnectImageViewerResizeObserver() {
+		if (imageViewerResizeObserver && typeof imageViewerResizeObserver.disconnect === "function") {
+			imageViewerResizeObserver.disconnect();
+		}
+		imageViewerResizeObserver = null;
+	}
 
 	function renderImageViewerDialog(dialog) {
 		const data = (dialog && dialog.imageViewer) || {};
@@ -7791,6 +7799,7 @@
 
 		const stage = document.createElement("div");
 		stage.className = "image-viewer";
+		disconnectImageViewerResizeObserver();
 
 		const dragFrame = document.createElement("div");
 		dragFrame.className = "image-viewer-drag-frame";
@@ -7799,9 +7808,25 @@
 		dragFrame.appendChild(dragGrip);
 		stage.appendChild(dragFrame);
 
+		const windowControls = document.createElement("div");
+		windowControls.className = "image-viewer-window-controls";
+
+		const minimizeButton = document.createElement("button");
+		minimizeButton.type = "button";
+		minimizeButton.className = "icon-button image-viewer-dialog-button image-viewer-dialog-minimize";
+		minimizeButton.title = "Minimize image";
+		minimizeButton.setAttribute("aria-label", "Minimize image");
+		minimizeButton.innerHTML = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M6 12h12\"></path></svg>";
+		minimizeButton.addEventListener("click", function(event) {
+			event.preventDefault();
+			event.stopPropagation();
+			invokeModernDialogAction("imageViewer.minimize", {});
+		});
+		windowControls.appendChild(minimizeButton);
+
 		const closeButton = document.createElement("button");
 		closeButton.type = "button";
-		closeButton.className = "icon-button image-viewer-dialog-close";
+		closeButton.className = "icon-button image-viewer-dialog-button image-viewer-dialog-close";
 		closeButton.title = "Close image";
 		closeButton.setAttribute("aria-label", "Close image");
 		closeButton.innerHTML = "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M8 8l8 8\"></path><path d=\"M16 8l-8 8\"></path></svg>";
@@ -7810,24 +7835,75 @@
 			event.stopPropagation();
 			closeModernDialog();
 		});
-		stage.appendChild(closeButton);
+		windowControls.appendChild(closeButton);
+		stage.appendChild(windowControls);
 
 		const img = document.createElement("img");
 		img.className = "image-viewer-img";
 		img.src = src;
 		img.alt = "";
 		img.draggable = false;
+		const clampScale = function(value) {
+			return Math.max(0.25, Math.min(10, value));
+		};
+		const stageViewportSize = function() {
+			const style = window.getComputedStyle ? window.getComputedStyle(stage) : null;
+			const paddingLeft = style ? parseFloat(style.paddingLeft) || 0 : 0;
+			const paddingRight = style ? parseFloat(style.paddingRight) || 0 : 0;
+			const paddingTop = style ? parseFloat(style.paddingTop) || 0 : 0;
+			const paddingBottom = style ? parseFloat(style.paddingBottom) || 0 : 0;
+			return {
+				width: Math.max(1, stage.clientWidth - paddingLeft - paddingRight),
+				height: Math.max(1, stage.clientHeight - paddingTop - paddingBottom)
+			};
+		};
+		const clampPan = function() {
+			if (!img.offsetWidth || !img.offsetHeight) {
+				return;
+			}
+			const viewport = stageViewportSize();
+			const overflowX = Math.max(0, (img.offsetWidth * state.scale - viewport.width) / 2);
+			const overflowY = Math.max(0, (img.offsetHeight * state.scale - viewport.height) / 2);
+			state.x = overflowX > 0 ? Math.max(-overflowX, Math.min(overflowX, state.x)) : 0;
+			state.y = overflowY > 0 ? Math.max(-overflowY, Math.min(overflowY, state.y)) : 0;
+		};
 		const apply = function() {
+			state.scale = clampScale(state.scale);
+			clampPan();
 			img.style.transform = "translate(" + state.x + "px, " + state.y + "px) scale(" + state.scale + ")";
+		};
+		const zoomAt = function(clientX, clientY, factor) {
+			if (!img.offsetWidth || !img.offsetHeight || !isFinite(factor) || factor <= 0) {
+				return;
+			}
+			const previousScale = state.scale;
+			const nextScale = clampScale(previousScale * factor);
+			if (Math.abs(nextScale - previousScale) < 0.001) {
+				return;
+			}
+			const stageRect = stage.getBoundingClientRect();
+			const anchorX = clientX - stageRect.left;
+			const anchorY = clientY - stageRect.top;
+			const imageCenterX = img.offsetLeft + (img.offsetWidth / 2);
+			const imageCenterY = img.offsetTop + (img.offsetHeight / 2);
+			const ratio = nextScale / previousScale;
+			state.x = ((anchorX - imageCenterX) * (1 - ratio)) + (state.x * ratio);
+			state.y = ((anchorY - imageCenterY) * (1 - ratio)) + (state.y * ratio);
+			state.scale = nextScale;
+			apply();
 		};
 		apply();
 		stage.appendChild(img);
 
 		stage.addEventListener("wheel", function(event) {
+			const target = event.target && typeof event.target.closest === "function" ? event.target : null;
+			if (target && target.closest(".image-viewer-window-controls, .image-viewer-drag-frame")) {
+				return;
+			}
 			event.preventDefault();
-			const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
-			state.scale = Math.max(0.1, Math.min(8, state.scale * factor));
-			apply();
+			const unit = event.deltaMode === 1 ? 18 : (event.deltaMode === 2 ? stage.clientHeight : 1);
+			const delta = Math.max(-900, Math.min(900, event.deltaY * unit));
+			zoomAt(event.clientX, event.clientY, Math.pow(1.0018, -delta));
 		}, { passive: false });
 		stage.addEventListener("pointerdown", function(event) {
 			if (event.target && typeof event.target.closest === "function" && event.target.closest("button")) {
@@ -7867,6 +7943,14 @@
 			state.y = 0;
 			apply();
 		});
+		img.addEventListener("load", apply);
+		if (img.complete) {
+			window.setTimeout(apply, 0);
+		}
+		if (typeof ResizeObserver === "function") {
+			imageViewerResizeObserver = new ResizeObserver(apply);
+			imageViewerResizeObserver.observe(stage);
+		}
 
 		refs.body.appendChild(stage);
 	}
@@ -7951,6 +8035,7 @@
 		if (!open) {
 			refs.body.innerHTML = "";
 			refs.actions.innerHTML = "";
+			disconnectImageViewerResizeObserver();
 			modernDialogRenderedOpen = false;
 			modernDialogLastRenderKey = "";
 			modernSettingsScrollPositions = {};
@@ -7974,6 +8059,9 @@
 		refs.subtitle.textContent = dialog.subtitle || "";
 		refs.body.innerHTML = "";
 		refs.actions.innerHTML = "";
+		if (dialog.kind !== "imageViewer") {
+			disconnectImageViewerResizeObserver();
+		}
 
 		if (dialog.kind === "stonks") {
 			renderStonksDialog(dialog);

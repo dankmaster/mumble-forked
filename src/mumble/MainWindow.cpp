@@ -20667,6 +20667,10 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 		return true;
 	}
 
+	if (dialogID == QLatin1String("imageViewer") && actionID == QLatin1String("imageViewer.minimize")) {
+		return true;
+	}
+
 	if (dialogID == QLatin1String("muteCueNotice")) {
 		if (actionID == QLatin1String("disableMuteCue")) {
 			Global::get().s.bTxMuteCue = false;
@@ -22017,6 +22021,12 @@ void MainWindow::handleModernDialogAction(const QString &dialogID, const QString
 	}
 
 	if (dialogID == QLatin1String("screenShare") && handleModernScreenShareDialogAction(actionID, payload)) {
+		return;
+	}
+
+	if (dialogID == QLatin1String("imageViewer") && actionID == QLatin1String("imageViewer.minimize")
+		&& m_modernDialogHost) {
+		m_modernDialogHost->showMinimized();
 		return;
 	}
 
