@@ -1091,12 +1091,10 @@ bool VersionCheck::canInstallUpdate(const QJsonObject &info) {
 }
 
 void VersionCheck::installUpdateFromInfo(const QJsonObject &info, QWidget *parent) {
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	if (Global::get().mw && Global::get().mw->startModernForkUpdateDownload(info)) {
 		Q_UNUSED(parent);
 		return;
 	}
-#endif
 
 	if (!canInstallUpdate(info)) {
 		const QUrl installerUrl = installerDownloadUrl(info);
@@ -1117,13 +1115,11 @@ void VersionCheck::downloadUpdateFromInfo(const QJsonObject &info, QWidget *pare
 										  std::function< void(const QString &) > failureCallback,
 										  std::function< void() > cancelledCallback,
 										  std::function< void(qint64, qint64) > progressCallback) {
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	const bool wouldUseNativeUi = showProgress || !readyCallback || !failureCallback;
 	if (wouldUseNativeUi && Global::get().mw && Global::get().mw->startModernForkUpdateDownload(info)) {
 		Q_UNUSED(parent);
 		return;
 	}
-#endif
 
 	ForkUpdateInstaller *installer = new ForkUpdateInstaller(info, parent, showProgress, std::move(readyCallback),
 															 std::move(failureCallback), std::move(cancelledCallback),
@@ -1389,20 +1385,16 @@ void VersionCheck::finishWithInfo(const QJsonObject &info) {
 		return;
 	}
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	if (Global::get().mw && Global::get().mw->handleModernVersionCheckResult(info, updateAvailable, m_autocheck)) {
 		deleteLater();
 		return;
 	}
-#endif
 
 	if (updateAvailable) {
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 		if (Global::get().mw && Global::get().mw->notifyForkUpdateAvailable(info, m_autocheck)) {
 			deleteLater();
 			return;
 		}
-#endif
 
 		const QUrl installerUrl = installerDownloadUrl(info);
 		const QUrl releaseUrl   = jsonUrl(info, QStringLiteral("releaseUrl"));
@@ -1474,12 +1466,10 @@ void VersionCheck::finishWithFailure(const QString &message) {
 		return;
 	}
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	if (Global::get().mw && Global::get().mw->handleModernVersionCheckFailure(message, m_autocheck)) {
 		deleteLater();
 		return;
 	}
-#endif
 
 	if (!m_autocheck && Global::get().mw) {
 		Global::get().mw->msgBox(message);

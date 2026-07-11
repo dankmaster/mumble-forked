@@ -114,7 +114,6 @@ void configureBundledQtWebEnginePaths(const QString &applicationFilePath) {
 	}
 }
 
-#	if defined(MUMBLE_HAS_MODERN_LAYOUT)
 bool environmentBoolean(const char *name, const bool defaultValue) {
 	if (!qEnvironmentVariableIsSet(name)) {
 		return defaultValue;
@@ -182,7 +181,6 @@ void configureQtWebEngineGraphicsWorkarounds() {
 		qputenv("QTWEBENGINE_CHROMIUM_FLAGS", chromiumFlags);
 	}
 }
-#	endif
 #endif
 } // namespace
 
@@ -433,9 +431,7 @@ int main(int argc, char **argv) {
 #if defined(Q_OS_WIN)
 	SetDllDirectory(L"");
 	configureBundledQtWebEnginePaths(QString::fromLocal8Bit(argv[0]));
-#	if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	configureQtWebEngineGraphicsWorkarounds();
-#	endif
 #else
 #	ifndef Q_OS_MAC
 	EnvUtils::setenv(QLatin1String("AVAHI_COMPAT_NOWARN"), QLatin1String("1"));
@@ -871,9 +867,7 @@ int main(int argc, char **argv) {
 		}
 	}
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	Global::get().mw->queueModernStartupSetup(showModernAudioSetup, showModernCertificateSetup);
-#endif
 
 	if (CertService::validate(Global::get().s.kpCertificate)
 		&& QDateTime::currentDateTime().daysTo(Global::get().s.kpCertificate.first.first().expiryDate()) < 14)

@@ -58,7 +58,6 @@ class PersistentChatGateway;
 class PersistentChatController;
 class PersistentChatHistoryModel;
 class PersistentChatHistoryDelegate;
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 class ModernDialogController;
 class ModernDialogHost;
 class ModernPttToolHost;
@@ -67,7 +66,6 @@ class ModernShellHost;
 class ModernUiAutomationServer;
 #	endif
 struct ModernConnectPingState;
-#endif
 class QAction;
 class QObject;
 class QFrame;
@@ -126,11 +124,9 @@ public:
 
 class MainWindow : public QMainWindow, public Ui::MainWindow {
 	friend class UserModel;
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 	friend class ModernUiAutomationServer;
 #	endif
-#endif
 
 private:
 	Q_OBJECT
@@ -139,12 +135,10 @@ public:
 	bool isServerLogViewVisible() const;
 	bool shouldMirrorServerLogToNativeWidget() const;
 	void setServerLogMaximumBlockCount(int maxBlocks);
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	void queueModernStartupSetup(bool showAudioSetup, bool showCertificateSetup);
 	void openModernPluginUpdateDialog(const QVariantList &updates);
 #ifdef USE_MANUAL_PLUGIN
 	void openModernManualPluginDialog(const QVariantMap &values = QVariantMap());
-#endif
 #endif
 	UserModel *pmModel;
 	QMenu *qmUser;
@@ -210,17 +204,10 @@ public:
 	QPair< QByteArray, QImage > openImageFile();
 	void setupPersistentChatDock();
 	void setupServerNavigator();
-	Settings::WindowLayout effectiveWindowLayout() const;
-	bool usesModernShell() const;
 	void refreshShellLayout();
 	void applyShellLayout();
-#if !defined(MUMBLE_HAS_MODERN_LAYOUT)
-	void activateLegacyShell();
-#endif
 	void activateModernShell();
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	void showModernShellFailureNotice(const QString &reason);
-#endif
 	void queueModernShellSnapshotSync();
 	void queueModernShellSnapshotSyncImmediate();
 	void queueModernShellSnapshotSyncInternal(bool immediate);
@@ -338,7 +325,6 @@ public:
 		bool preserveScrollPosition = false;
 	};
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	struct ModernDirectMessageEntry {
 		quint64 localID = 0;
 		unsigned int peerSession  = 0;
@@ -372,7 +358,6 @@ public:
 	};
 
 	enum class ModernShellMessageBuildMode : unsigned char { Full, FastFirstPaint };
-#endif
 
 	void loadState(bool minimalView);
 	void storeState(bool minimalView);
@@ -490,11 +475,9 @@ public:
 	QImage imageFromLogBrowser(const LogTextBrowser *browser, const QTextCursor &cursor) const;
 	void openImageDialog(const QImage &image);
 	void openImageDialog(LogTextBrowser *browser, const QTextCursor &cursor);
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	void openModernImageViewerDialog(const QImage &image);
 	void openModernScreenShareStatusDialog(const QString &streamID, const QString &sourceLabel,
 										   const QString &qualityLabel, const QString &audioLabel);
-#endif
 	QString registerPersistentChatInlineDataImageSource(const QString &source);
 	QUrl persistentChatInlineDataImageOpenUrl(const QString &token) const;
 	QUrl persistentChatInlineDataImageResourceUrl(const QString &token) const;
@@ -548,7 +531,6 @@ public:
 	bool tryConnectFromUpdateResumeState();
 	void loadPendingUpdateResumeState();
 	void applyPendingUpdateResumeState();
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	QVariantMap buildModernShellSnapshot();
 	QVariantMap buildModernShellMessageState(const MumbleProto::ChatMessage &message,
 											 const PersistentChatTarget &target, bool canReply, bool canReact,
@@ -705,16 +687,6 @@ public:
 	bool triggerModernShellSerializedAction(const ModernShellMenuSerializer::ActionRegistry &registry,
 											const QString &actionId, ClientUser *contextUser = nullptr,
 											Channel *contextChannel = nullptr);
-#else
-	QVariantList buildModernShellMessageStates(const PersistentChatTarget &target, std::size_t beginIndex = 0);
-	void publishModernShellMessagesPatch(const QString &kind, const QVariantList &messages, bool scrollToBottom,
-										  const QString &timelineMode = QString());
-	void publishModernShellMessageUpdatePatch(const MumbleProto::ChatMessage &message);
-	void publishPersistentChatInlineDataImageUpdate(const QString &token);
-	void publishModernShellActiveScopePatch(const QString &kind);
-	void publishModernShellRoomStatePatch();
-	void clearModernShellMessageDtoCache(const char *reason);
-#endif
 	void triggerContextAction(const QString &actionData, ClientUser *user, Channel *channel);
 	bool sendChatbarTextToCurrentTarget(QString msg, bool plainText, bool clearNativeComposer);
 	void updateChatBar(bool forcePersistentChatReload = false, bool queueModernShellSnapshot = true);
@@ -913,7 +885,6 @@ protected:
 	bool m_updateResumeVoiceChannelApplied     = false;
 	bool m_updateResumeChatScopeApplied        = false;
 	bool m_updateResumeTextChannelSyncObserved = false;
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	ModernShellHost *m_modernShellHost                     = nullptr;
 	std::unique_ptr< ModernDialogController > m_modernDialogController;
 	std::unique_ptr< ModernDialogHost > m_modernDialogHost;
@@ -967,9 +938,6 @@ protected:
 	bool m_modernShellSnapshotPendingAfterNativeMoveResize = false;
 	QHash< int, QString > m_modernAclRegisteredUserNames;
 	bool m_modernAclUserListRequestPending = false;
-#else
-	quint64 m_modernShellMessagePatchGeneration = 0;
-#endif
 	bool m_shellLayoutInitialized              = false;
 	Settings::WindowLayout m_activeShellLayout = Settings::LayoutModern;
 	bool m_modernLayoutCompatibleServer        = false;
@@ -984,7 +952,6 @@ protected:
 	void handleModernShellBootFailure(const QString &reason);
 	void connectToServer(const QString &host, unsigned short port, const QString &username, const QString &password,
 						 const QString &serverName, const QString &desiredChannel = QString());
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	void publishModernDialogState(const QVariantMap &state);
 	void openModernConnectDialog();
 	void openModernSettingsDialog(const QString &pageName = QString());
@@ -1088,7 +1055,6 @@ protected:
 	void openNextModernStartupDialog();
 	bool beginModernShortcutCapture(int rowIndex);
 	void cancelModernShortcutCapture();
-#endif
 	void setupGui();
 	void updateWindowTitle();
 	/// updateToolbar updates the state of the toolbar depending on the current
@@ -1184,12 +1150,10 @@ public slots:
 	void openChannelScreenShareWindow();
 	bool chooseScreenShareStartOptions(Channel *channel, ScreenShareStartOptions *options);
 	void openModernScreenShareDialog(Channel *channel);
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	QVariantMap buildModernScreenShareState(Channel *channel);
 	QVariantMap buildModernScreenShareDialogDto(Channel *channel);
 	bool handleModernScreenShareDialogAction(const QString &actionID, const QVariantMap &payload);
 	QString screenShareSourceThumbnail(const QString &sourceId);
-#endif
 	bool openScreenShareWindowOrStatus(const QString &streamID);
 	void on_qaAudioReset_triggered();
 	void on_qaAudioMute_triggered();

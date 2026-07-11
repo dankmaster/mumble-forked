@@ -299,24 +299,12 @@ struct Settings {
 
 	QString qsLanguage = {};
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	StyleType styleType = StyleType::Auto;
 	/// Classic QSS theme settings are ignored by the modern-only client.
 	QString themeName;
 	QString themeStyleName;
 	QString themeDarkName;
 	QString themeDarkStyleName;
-#else
-	StyleType styleType = StyleType::Auto;
-	/// Name of the theme to use. @see Themes
-	QString themeName = QStringLiteral("Mumble");
-	/// Name of the style to use from theme. @see Themes
-	QString themeStyleName = QStringLiteral("Lite");
-	/// Name of the theme to use. @see Themes
-	QString themeDarkName = QStringLiteral("Mumble");
-	/// Name of the style to use from theme. @see Themes
-	QString themeDarkStyleName = QStringLiteral("Dark");
-#endif
 
 	QByteArray qbaMainWindowGeometry          = {};
 	QByteArray qbaMainWindowState             = {};

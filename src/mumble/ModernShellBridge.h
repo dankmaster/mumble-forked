@@ -6,7 +6,6 @@
 #ifndef MUMBLE_MUMBLE_MODERNSHELLBRIDGE_H_
 #define MUMBLE_MUMBLE_MODERNSHELLBRIDGE_H_
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 
 #include <QtCore/QObject>
 #include <QtCore/QString>
@@ -154,6 +153,5 @@ private:
 	QVariantMap m_modernDialogState;
 };
 
-#endif // defined(MUMBLE_HAS_MODERN_LAYOUT)
 
 #endif // MUMBLE_MUMBLE_MODERNSHELLBRIDGE_H_

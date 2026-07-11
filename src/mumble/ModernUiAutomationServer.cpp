@@ -4762,7 +4762,7 @@ QVariantMap ModernUiAutomationServer::buildSnapshotResponse() const {
 					m_mainWindow && m_mainWindow->m_modernDialogController
 						? m_mainWindow->m_modernDialogController->state()
 						: QVariantMap { { QStringLiteral("open"), false } });
-	response.insert(QStringLiteral("usesModernShell"), m_mainWindow && m_mainWindow->usesModernShell());
+	response.insert(QStringLiteral("usesModernShell"), m_mainWindow && true);
 	response.insert(QStringLiteral("listening"), isListening());
 	response.insert(QStringLiteral("port"), port());
 	return response;

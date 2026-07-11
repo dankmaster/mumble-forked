@@ -5,7 +5,6 @@
 
 #include "ModernContextMenuHost.h"
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 
 #include "ModernShellPage.h"
 
@@ -529,5 +528,3 @@ QPoint ModernContextMenuHost::clampedPopupPosition(const QPoint &globalAnchor, c
 	y = qMax(available.top(), y);
 	return QPoint(x, y);
 }
-
-#endif // defined(MUMBLE_HAS_MODERN_LAYOUT)

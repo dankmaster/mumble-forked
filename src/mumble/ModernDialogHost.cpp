@@ -5,7 +5,6 @@
 
 #include "ModernDialogHost.h"
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 
 #include "Global.h"
 #include "ModernShellBridge.h"
@@ -794,5 +793,3 @@ void ModernDialogHost::republishDialogState() {
 		m_stateRepublishTimer->start(125);
 	}
 }
-
-#endif // defined(MUMBLE_HAS_MODERN_LAYOUT)

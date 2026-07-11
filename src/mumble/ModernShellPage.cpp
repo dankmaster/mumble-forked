@@ -5,7 +5,6 @@
 
 #include "ModernShellPage.h"
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 
 #include <QtCore/QTimer>
 #include <QtGui/QDesktopServices>
@@ -105,5 +104,3 @@ void ModernShellPage::javaScriptConsoleMessage(const JavaScriptConsoleMessageLev
 					QString::number(lineNumber),
 					message);
 }
-
-#endif // defined(MUMBLE_HAS_MODERN_LAYOUT)

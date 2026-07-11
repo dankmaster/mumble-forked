@@ -6,7 +6,6 @@
 #ifndef MUMBLE_MUMBLE_MODERNCONTEXTMENUHOST_H_
 #define MUMBLE_MUMBLE_MODERNCONTEXTMENUHOST_H_
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 
 #include <QtCore/QPoint>
 #include <QtCore/QObject>
@@ -98,6 +97,5 @@ private:
 	bool m_dismissFilterInstalled = false;
 };
 
-#endif // defined(MUMBLE_HAS_MODERN_LAYOUT)
 
 #endif // MUMBLE_MUMBLE_MODERNCONTEXTMENUHOST_H_

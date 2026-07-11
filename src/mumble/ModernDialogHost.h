@@ -6,7 +6,6 @@
 #ifndef MUMBLE_MUMBLE_MODERNDIALOGHOST_H_
 #define MUMBLE_MUMBLE_MODERNDIALOGHOST_H_
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 
 #include <QtCore/QPoint>
 #include <QtCore/QPointer>
@@ -95,6 +94,5 @@ private:
 	QString m_currentDialogID;
 };
 
-#endif // defined(MUMBLE_HAS_MODERN_LAYOUT)
 
 #endif // MUMBLE_MUMBLE_MODERNDIALOGHOST_H_

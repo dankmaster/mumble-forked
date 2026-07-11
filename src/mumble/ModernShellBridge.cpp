@@ -5,7 +5,6 @@
 
 #include "ModernShellBridge.h"
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 
 #include "AudioInput.h"
 #include "Global.h"
@@ -580,5 +579,3 @@ void ModernShellBridge::publishToast(const QVariantMap &toast) {
 
 	emit toastRequested(toast);
 }
-
-#endif // defined(MUMBLE_HAS_MODERN_LAYOUT)

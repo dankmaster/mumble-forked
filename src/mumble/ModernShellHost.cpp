@@ -5,7 +5,6 @@
 
 #include "ModernShellHost.h"
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 
 #include "Global.h"
 #include "Log.h"
@@ -913,5 +912,3 @@ void ModernShellHost::handleBootTimeout() {
 	m_started = false;
 	emit bootFailed(tr("The modern layout did not finish initializing its local bridge."));
 }
-
-#endif // defined(MUMBLE_HAS_MODERN_LAYOUT)

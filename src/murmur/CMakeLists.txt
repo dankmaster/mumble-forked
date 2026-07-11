@@ -288,41 +288,6 @@ endif()
 
 install(TARGETS mumble-server RUNTIME DESTINATION "${MUMBLE_INSTALL_EXECUTABLEDIR}" COMPONENT mumble_server)
 
-if(packaging AND NOT modern-layout-webengine)
-	if(WIN32)
-		if(translations AND windows-installer-all-languages)
-			list(APPEND installer_vars "--all-languages")
-		endif()
-
-		list(APPEND installer_vars
-			"--version" ${PROJECT_VERSION}
-			"--arch" ${MUMBLE_TARGET_ARCH}
-			"--vc-redist-required" "${VC_REDIST_VERSION}"
-		)
-
-		if(skip-msi-rebuild)
-			list(APPEND installer_vars
-				"--skip-msi-rebuild"
-			)
-		endif()
-
-		file(COPY
-			${CMAKE_SOURCE_DIR}/installer/MumbleInstall.cs
-			${CMAKE_SOURCE_DIR}/installer/ServerInstaller.cs
-			DESTINATION
-				${CMAKE_BINARY_DIR}/installer/server
-		)
-
-		add_custom_command(TARGET mumble-server
-			POST_BUILD
-			COMMAND cscs.exe -cd MumbleInstall.cs 
-			COMMAND cscs.exe ServerInstaller.cs ${installer_vars}
-			WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/installer/server
-		)
-	endif()
-endif()
-
-
 # Compile and link against database implementation
 add_subdirectory(database)
 

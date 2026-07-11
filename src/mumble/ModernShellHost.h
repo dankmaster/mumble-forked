@@ -6,7 +6,6 @@
 #ifndef MUMBLE_MUMBLE_MODERNSHELLHOST_H_
 #define MUMBLE_MUMBLE_MODERNSHELLHOST_H_
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 
 #include <QtCore/QUrl>
 #include <QtCore/QSize>
@@ -86,6 +85,5 @@ private:
 	bool m_bootReady = false;
 };
 
-#endif // defined(MUMBLE_HAS_MODERN_LAYOUT)
 
 #endif // MUMBLE_MUMBLE_MODERNSHELLHOST_H_

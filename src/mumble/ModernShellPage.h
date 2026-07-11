@@ -6,7 +6,6 @@
 #ifndef MUMBLE_MUMBLE_MODERNSHELLPAGE_H_
 #define MUMBLE_MUMBLE_MODERNSHELLPAGE_H_
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 
 #include <QtCore/QUrl>
 #include <QtWebEngineCore/QWebEnginePage>
@@ -31,6 +30,5 @@ protected:
 								  const QString &sourceID) override;
 };
 
-#endif // defined(MUMBLE_HAS_MODERN_LAYOUT)
 
 #endif // MUMBLE_MUMBLE_MODERNSHELLPAGE_H_

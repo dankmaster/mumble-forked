@@ -75,7 +75,6 @@ case "$os" in
 			VCPKG_TARGET_TRIPLET="$VCPKG_TARGET_TRIPLET-windows-static-md"
 		elif [[ "$build_type" == "shared" ]]; then
 			VCPKG_TARGET_TRIPLET="$VCPKG_TARGET_TRIPLET-windows"
-			ADDITIONAL_CMAKE_OPTIONS="$ADDITIONAL_CMAKE_OPTIONS -Dmodern-layout-webengine=ON"
 		fi
 		;;
 	"macos")

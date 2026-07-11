@@ -26,10 +26,6 @@ option(bundled-rnnoise "Build the included version of RNNoise instead of looking
 option(dtln "Use DTLN for machine learning speech cleanup." OFF)
 option(deepfilternet "Use DeepFilterNet for machine learning speech cleanup." OFF)
 option(webrtc-aec "Expose WebRTC AEC as an experimental echo cancellation option." OFF)
-option(modern-layout-webengine "Enable the Qt WebEngine-based relay runtime." ON)
-if(NOT modern-layout-webengine)
-	message(FATAL_ERROR "The fork desktop client is Modern-only; modern-layout-webengine cannot be disabled.")
-endif()
 set(MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT ON)
 if(packaging AND "$ENV{GITHUB_ACTIONS}" STREQUAL "true")
 	set(MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT OFF)
@@ -117,25 +113,23 @@ find_pkg(Qt6
 	REQUIRED
 )
 
-if(modern-layout-webengine)
-	find_pkg(Qt6
-		COMPONENTS
-			WebChannel
-			WebEngineWidgets
-		REQUIRED
-	)
+find_pkg(Qt6
+	COMPONENTS
+		WebChannel
+		WebEngineWidgets
+	REQUIRED
+)
 
-	if(TARGET Qt6::WebEngineCore)
-		get_target_property(MUMBLE_QT_WEBENGINE_ENABLED_PRIVATE_FEATURES Qt6::WebEngineCore QT_ENABLED_PRIVATE_FEATURES)
-		if(MUMBLE_QT_WEBENGINE_ENABLED_PRIVATE_FEATURES
-			AND webengine_proprietary_codecs IN_LIST MUMBLE_QT_WEBENGINE_ENABLED_PRIVATE_FEATURES)
-			set(MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS 1)
-		else()
-			set(MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS 0)
-		endif()
+if(TARGET Qt6::WebEngineCore)
+	get_target_property(MUMBLE_QT_WEBENGINE_ENABLED_PRIVATE_FEATURES Qt6::WebEngineCore QT_ENABLED_PRIVATE_FEATURES)
+	if(MUMBLE_QT_WEBENGINE_ENABLED_PRIVATE_FEATURES
+		AND webengine_proprietary_codecs IN_LIST MUMBLE_QT_WEBENGINE_ENABLED_PRIVATE_FEATURES)
+		set(MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS 1)
 	else()
 		set(MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS 0)
 	endif()
+else()
+	set(MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS 0)
 endif()
 
 set(MUMBLE_SOURCES
@@ -363,8 +357,7 @@ set(MUMBLE_SOURCES
 	"${CMAKE_SOURCE_DIR}/themes/CatppuccinTheme.qrc"
 )
 
-if(modern-layout-webengine)
-	list(APPEND MUMBLE_SOURCES
+list(APPEND MUMBLE_SOURCES
 		"ModernShellBridge.cpp"
 		"ModernShellBridge.h"
 		"ModernContextMenuHost.cpp"
@@ -466,7 +459,6 @@ if(modern-layout-webengine)
 		@ONLY
 	)
 	list(APPEND MUMBLE_SOURCES "${MUMBLE_MODERN_SHELL_BUILD_FLAGS_QRC}")
-endif()
 
 add_library(smallft STATIC "${3RDPARTY_DIR}/smallft/smallft.cpp")
 target_include_directories(smallft PUBLIC "${3RDPARTY_DIR}/smallft")
@@ -722,29 +714,26 @@ target_link_libraries(mumble_client_object_lib
 		Qt6::Widgets
 )
 
-if(modern-layout-webengine)
-	target_compile_definitions(mumble_client_object_lib
-		PUBLIC
-			MUMBLE_HAS_MODERN_LAYOUT
-			MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS=${MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS}
-	)
-	if(modern-layout-automation)
-		target_compile_definitions(mumble_client_object_lib PUBLIC MUMBLE_HAS_MODERN_UI_AUTOMATION)
-	endif()
-	if(modern-layout-mockups)
-		target_compile_definitions(mumble_client_object_lib PUBLIC MUMBLE_HAS_MODERN_UI_MOCKUPS)
-	endif()
-	target_link_libraries(mumble_client_object_lib
-		PUBLIC
-			Qt6::WebChannel
-			Qt6::WebEngineWidgets
-	)
-	target_link_libraries(mumble
-		PRIVATE
-			Qt6::WebChannel
-			Qt6::WebEngineWidgets
-	)
+target_compile_definitions(mumble_client_object_lib
+	PUBLIC
+		MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS=${MUMBLE_QT_WEBENGINE_PROPRIETARY_CODECS}
+)
+if(modern-layout-automation)
+	target_compile_definitions(mumble_client_object_lib PUBLIC MUMBLE_HAS_MODERN_UI_AUTOMATION)
 endif()
+if(modern-layout-mockups)
+	target_compile_definitions(mumble_client_object_lib PUBLIC MUMBLE_HAS_MODERN_UI_MOCKUPS)
+endif()
+target_link_libraries(mumble_client_object_lib
+	PUBLIC
+		Qt6::WebChannel
+		Qt6::WebEngineWidgets
+)
+target_link_libraries(mumble
+	PRIVATE
+		Qt6::WebChannel
+		Qt6::WebEngineWidgets
+)
 
 if(chat-perf-trace)
 	target_compile_definitions(mumble_client_object_lib PUBLIC MUMBLE_HAS_CHAT_PERF_TRACE)
@@ -1394,56 +1383,3 @@ endif()
 target_include_directories(${TARGET_NAME} INTERFACE
   $<BUILD_INTERFACE:${AUTOGEN_INCLUDE_DIR}>
 )
-
-if(packaging AND WIN32 AND NOT modern-layout-webengine)
-	if(translations AND windows-installer-all-languages)
-		list(APPEND installer_vars "--all-languages")
-	endif()
-
-
-	list(APPEND installer_vars
-		"--version" ${PROJECT_VERSION}
-		"--installer-version" "${MUMBLE_WINDOWS_INSTALLER_VERSION}"
-		"--arch" "${MUMBLE_TARGET_ARCH}"
-		"--vc-redist-required" "${VC_REDIST_VERSION}"
-	)
-
-	if(plugins)
-		list(APPEND installer_vars
-			"--plugins"
-		)
-	endif()
-
-	if(rnnoise)
-		list(APPEND installer_vars
-			"--rnnoise"
-		)
-	endif()
-
-	if(screen-helper)
-		list(APPEND installer_vars
-			"--screen-share-helper"
-		)
-	endif()
-
-	if(skip-msi-rebuild)
-		message(STATUS "Skip MSI rebuild")
-		list(APPEND installer_vars
-			"--skip-msi-rebuild"
-		)
-	endif()
-
-	file(COPY
-		${CMAKE_SOURCE_DIR}/installer/MumbleInstall.cs
-		${CMAKE_SOURCE_DIR}/installer/ClientInstaller.cs
-		DESTINATION
-			${CMAKE_BINARY_DIR}/installer/client
-	)
-
-	add_custom_command(TARGET mumble
-		POST_BUILD
-		COMMAND cscs.exe -cd MumbleInstall.cs
-		COMMAND cscs.exe ClientInstaller.cs ${installer_vars}
-		WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/installer/client
-	)
-endif()

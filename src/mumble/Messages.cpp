@@ -209,9 +209,7 @@ void MainWindow::msgAuthenticate(const MumbleProto::Authenticate &) {
 ///
 /// @param msg The message object containing information about the ban list
 void MainWindow::msgBanList(const MumbleProto::BanList &msg) {
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	openModernServerBanListDialog(msg);
-#endif
 }
 
 /// This message is being received whenever the server rejects the connection of this client.
@@ -256,7 +254,7 @@ void MainWindow::msgReject(const MumbleProto::Reject &msg) {
 void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 	const ClientUser *user = ClientUser::get(msg.session());
 	const bool hiddenLegacyUserModelSafeMode =
-		qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && usesModernShell();
+		qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && true;
 	const bool traceServerSync = qEnvironmentVariableIntValue("MUMBLE_CONNECT_TRACE") != 0;
 	const auto appendServerSyncTrace = [traceServerSync, session = msg.session()](const QString &phase) {
 		if (!traceServerSync) {
@@ -529,7 +527,7 @@ void MainWindow::msgServerConfig(const MumbleProto::ServerConfig &msg) {
 	if (modernLayoutCompatibleAdvertised) {
 		m_modernLayoutCompatibleServer = true;
 	}
-	if (modernLayoutCompatibleAdvertised && effectiveWindowLayout() != m_activeShellLayout) {
+	if (modernLayoutCompatibleAdvertised && Settings::LayoutModern != m_activeShellLayout) {
 		refreshShellLayout();
 	}
 	if (persistentGlobalChanged) {
@@ -675,7 +673,7 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 	ClientUser *pDst  = ClientUser::get(msg.session());
 	Channel *channel  = nullptr;
 	const bool hiddenLegacyUserModelSafeMode =
-		qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && usesModernShell();
+		qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && true;
 	const bool traceUserState = qEnvironmentVariableIntValue("MUMBLE_CONNECT_TRACE") != 0;
 	const auto appendUserStateTrace = [traceUserState, session = msg.session()](const QString &phase) {
 		if (!traceUserState) {
@@ -692,7 +690,7 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 			   << " UserState session=" << session << QLatin1Char(' ') << phase << Qt::endl;
 	};
 	appendUserStateTrace(QStringLiteral("enter"));
-	const bool modernShellConversationListActive = usesModernShell() && !hiddenLegacyUserModelSafeMode;
+	const bool modernShellConversationListActive = true && !hiddenLegacyUserModelSafeMode;
 	bool createdUser                             = false;
 	bool renamedUser                             = false;
 	bool movedChannels                           = false;
@@ -1262,7 +1260,7 @@ void MainWindow::msgUserRemove(const MumbleProto::UserRemove &msg) {
 	ACTOR_INIT;
 	SELF_INIT;
 	const bool hiddenLegacyUserModelSafeMode =
-		qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && usesModernShell();
+		qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && true;
 
 	QString reason = u8(msg.reason()).toHtmlEscaped();
 
@@ -1305,7 +1303,7 @@ void MainWindow::msgUserRemove(const MumbleProto::UserRemove &msg) {
 			queueModernShellSnapshotSync();
 		} else {
 			pmModel->removeUser(pDst);
-			if (usesModernShell()) {
+			if (true) {
 				rebuildPersistentChatChannelList();
 				updateMenuPermissions();
 			}
@@ -1324,7 +1322,7 @@ void MainWindow::msgChannelState(const MumbleProto::ChannelState &msg) {
 	Channel *c = Channel::get(msg.channel_id());
 	Channel *p = msg.has_parent() ? Channel::get(msg.parent()) : nullptr;
 	const bool hiddenLegacyChannelModelSafeMode =
-		qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && usesModernShell();
+		qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && true;
 
 	if (!c) {
 		// Addresses channel does not exist so create it
@@ -1487,7 +1485,7 @@ void MainWindow::msgChannelRemove(const MumbleProto::ChannelRemove &msg) {
 	if (c && (c->iId != 0)) {
 		c->clearFilterMode();
 		const bool hiddenLegacyChannelModelSafeMode =
-			qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && usesModernShell();
+			qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && true;
 
 		if (hiddenLegacyChannelModelSafeMode) {
 			if (channelSubtreeHasUsers(c)) {
@@ -1559,11 +1557,9 @@ void MainWindow::msgTextMessage(const MumbleProto::TextMessage &msg) {
 						 tr("%1: %2").arg(prefixMessage).arg(u8(msg.message())), tr("Message from %1").arg(plainName),
 						 false, overrideTTS, pSrc ? pSrc->bLocalIgnoreTTS : false);
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	if (usesModernShell() && privateMessage && pSrc) {
+	if (true && privateMessage && pSrc) {
 		appendModernDirectMessage(pSrc->uiSession, u8(msg.message()), false);
 	}
-#endif
 }
 
 /// This message is being received when the server informs the client about the access control list (ACL) for
@@ -1571,9 +1567,7 @@ void MainWindow::msgTextMessage(const MumbleProto::TextMessage &msg) {
 ///
 /// @param msg The message object holding the ACL and further details
 void MainWindow::msgACL(const MumbleProto::ACL &msg) {
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	openModernAclDialog(msg);
-#endif
 }
 
 /// This message is being received when the server informs the local client about user information. This message will
@@ -1581,11 +1575,9 @@ void MainWindow::msgACL(const MumbleProto::ACL &msg) {
 ///
 /// @param msg The message object with the respective information
 void MainWindow::msgQueryUsers(const MumbleProto::QueryUsers &msg) {
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	if (handleModernAclQueryUsers(msg)) {
 		return;
 	}
-#endif
 }
 
 /// Pings are a method to check the server-client connection. This implementation does nothing.
@@ -1709,12 +1701,10 @@ void MainWindow::msgVersion(const MumbleProto::Version &msg) {
 ///
 /// @param msg The message object containing the user list
 void MainWindow::msgUserList(const MumbleProto::UserList &msg) {
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	if (handleModernAclUserList(msg)) {
 		return;
 	}
 	openModernServerUserListDialog(msg);
-#endif
 }
 
 /// This message is only sent by the client in order to register/clear whisper targets. Therefore
@@ -1728,7 +1718,7 @@ void MainWindow::msgVoiceTarget(const MumbleProto::VoiceTarget &) {
 /// @param msg The message object containing the respective information
 void MainWindow::msgPermissionQuery(const MumbleProto::PermissionQuery &msg) {
 	const bool hiddenLegacyChannelModelSafeMode =
-		qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && usesModernShell();
+		qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && true;
 	Channel *current = nullptr;
 	if (!hiddenLegacyChannelModelSafeMode && pmModel && qtvUsers) {
 		current = pmModel->getChannel(qtvUsers->currentIndex());
@@ -1799,7 +1789,7 @@ void MainWindow::msgUserStats(const MumbleProto::UserStats &msg) {
 		}
 
 		const bool hiddenLegacyUserModelSafeMode =
-			qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && usesModernShell();
+			qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && true;
 		if (!hiddenLegacyUserModelSafeMode && idleSeconds != previousIdleSeconds && pmModel) {
 			if (ClientUser *user = ClientUser::get(msg.session()); user) {
 				const QModelIndex idx = pmModel->index(user);
@@ -1820,9 +1810,7 @@ void MainWindow::msgUserStats(const MumbleProto::UserStats &msg) {
 		return;
 	}
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	openModernUserInformationDialog(msg);
-#endif
 }
 
 /// This message is only ever sent by the client in order to request binary data that otherwise
@@ -2046,11 +2034,7 @@ void MainWindow::msgStonksAction(const MumbleProto::StonksAction &) {
 }
 
 void MainWindow::msgStonksState(const MumbleProto::StonksState &msg) {
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	handleStonksState(msg);
-#else
-	Q_UNUSED(msg);
-#endif
 }
 
 void MainWindow::msgFeedbackReport(const MumbleProto::FeedbackReport &) {

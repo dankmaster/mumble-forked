@@ -11,9 +11,7 @@
 #include "Global.h"
 #include "ServerHandler.h"
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 #	include "ModernContextMenuHost.h"
-#endif
 
 #include <QApplication>
 #include <QCursor>
@@ -76,7 +74,7 @@ TrayIcon::TrayIcon() : QSystemTrayIcon(Global::get().mw), m_statusIcon(Global::g
 	// Some window managers hate it when a tray icon sets an empty context menu...
 	updateNativeContextMenu();
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT) && !defined(Q_OS_MAC)
+#if !defined(Q_OS_MAC)
 	if (!shouldUseModernContextMenu()) {
 		setContextMenu(m_contextMenu);
 	}
@@ -88,12 +86,10 @@ TrayIcon::TrayIcon() : QSystemTrayIcon(Global::get().mw), m_statusIcon(Global::g
 }
 
 TrayIcon::~TrayIcon() {
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 	if (m_modernContextMenu) {
 		delete m_modernContextMenu.data();
 		m_modernContextMenu.clear();
 	}
-#endif
 }
 
 void TrayIcon::on_icon_update() {
@@ -149,7 +145,7 @@ void TrayIcon::on_icon_clicked(QSystemTrayIcon::ActivationReason reason) {
 			break;
 		case QSystemTrayIcon::Unknown:
 		case QSystemTrayIcon::Context:
-#if defined(MUMBLE_HAS_MODERN_LAYOUT) && !defined(Q_OS_MAC)
+#if !defined(Q_OS_MAC)
 			if (shouldUseModernContextMenu()) {
 				showModernContextMenu();
 			}
@@ -188,12 +184,11 @@ void TrayIcon::showNativeFallbackMenu() {
 	m_contextMenu->popup(QCursor::pos());
 }
 
-#if defined(MUMBLE_HAS_MODERN_LAYOUT)
 bool TrayIcon::shouldUseModernContextMenu() const {
 #	if defined(Q_OS_MAC)
 	return false;
 #	else
-	return Global::get().mw && Global::get().mw->usesModernShell();
+	return Global::get().mw && true;
 #	endif
 }
 
@@ -387,7 +382,6 @@ void TrayIcon::appendModernTrayAction(QVariantList &items, const QString &id, co
 	m_modernContextMenuHandlers.push_back(std::move(handler));
 	items.push_back(item);
 }
-#endif
 
 void TrayIcon::on_toggleShowHide() {
 	if (trayMainWindowVisible()) {
