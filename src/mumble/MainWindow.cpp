@@ -31222,7 +31222,7 @@ void MainWindow::createRoom(RoomCreateType preferredType, Channel *preferredVoic
 	nameEdit->setPlaceholderText(tr("general"));
 	formLayout->addRow(tr("Name"), nameEdit);
 
-	RichTextEditor *descriptionEdit = new RichTextEditor(&dialog);
+	QTextEdit *descriptionEdit = new QTextEdit(&dialog);
 	descriptionEdit->setMinimumHeight(116);
 	descriptionEdit->setText(QString());
 	formLayout->addRow(tr("Topic"), descriptionEdit);
@@ -31358,7 +31358,7 @@ void MainWindow::createRoom(RoomCreateType preferredType, Channel *preferredVoic
 	}
 
 	const QString name        = nameEdit->text().trimmed();
-	const QString description = descriptionEdit->text().trimmed();
+	const QString description = descriptionEdit->toHtml().trimmed();
 	if (currentType() == RoomCreateType::Voice) {
 		Channel *parent = Channel::get(voiceParentCombo->currentData().toUInt());
 		if (!parent || !Global::get().sh || !Global::get().sh->isRunning()) {

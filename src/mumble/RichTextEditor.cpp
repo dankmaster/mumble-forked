@@ -22,6 +22,8 @@
 #	include <shlobj.h>
 #endif
 
+#if 0 // Removed classic rich-text editor widgets; Modern dialogs own editing.
+
 RichTextHtmlEdit::RichTextHtmlEdit(QWidget *p) : QTextEdit(p) {
 	m_document = new LogDocument(this);
 	m_document->setDefaultStyleSheet(qApp->styleSheet());
@@ -442,6 +444,8 @@ bool RichTextEditor::eventFilter(QObject *obj, QEvent *evt) {
 	}
 	return false;
 }
+
+#endif
 
 bool RichTextImage::isValidImage(const QByteArray &ba, QByteArray &fmt) {
 	QBuffer qb;

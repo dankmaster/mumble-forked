@@ -9,6 +9,7 @@
 #include "SpeechCleanup.h"
 
 #include <QDebug>
+#include <QIODevice>
 
 
 template< typename T, bool isEnum > struct SaveValueConverter {

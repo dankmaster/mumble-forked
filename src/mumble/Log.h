@@ -15,65 +15,15 @@
 #include <QtGui/QTextCursor>
 #include <QtGui/QTextDocument>
 
-#include "ConfigWidget.h"
-#include "ui_Log.h"
-
 #ifndef USE_NO_TTS
 class TextToSpeech;
 #endif
-
-class LogConfig : public ConfigWidget, public Ui::LogConfig {
-private:
-	Q_OBJECT
-	Q_DISABLE_COPY(LogConfig)
-
-	QTreeWidgetItem *allMessagesItem;
-
-protected:
-	void updateSelectAllButtons();
-
-public:
-	/// The unique name of this ConfigWidget
-	static const QString name;
-	enum Column {
-		ColMessage,
-		ColConsole,
-		ColNotification,
-		ColHighlight,
-		ColTTS,
-		ColMessageLimit,
-		ColStaticSound,
-		ColStaticSoundPath
-	};
-	LogConfig(Settings &st);
-	QString title() const Q_DECL_OVERRIDE;
-	const QString &getName() const Q_DECL_OVERRIDE;
-	QIcon icon() const Q_DECL_OVERRIDE;
-public slots:
-	void accept() const Q_DECL_OVERRIDE;
-	void save() const Q_DECL_OVERRIDE;
-	void load(const Settings &) Q_DECL_OVERRIDE;
-
-	void on_qtwMessages_itemChanged(QTreeWidgetItem *, int);
-	void on_qtwMessages_itemClicked(QTreeWidgetItem *, int);
-	void on_qtwMessages_itemDoubleClicked(QTreeWidgetItem *, int);
-	void browseForAudioFile();
-
-	void on_qsNotificationVolume_valueChanged(int value);
-	void on_qsCueVolume_valueChanged(int value);
-	void on_qsTTSVolume_valueChanged(int value);
-	void on_qsbNotificationVolume_valueChanged(int value);
-	void on_qsbCueVolume_valueChanged(int value);
-	void on_qsbTTSVolume_valueChanged(int value);
-};
 
 class ClientUser;
 class Channel;
 class LogMessage;
 
 class Log : public QObject {
-	friend class LogConfig;
-
 private:
 	Q_OBJECT
 	Q_DISABLE_COPY(Log)

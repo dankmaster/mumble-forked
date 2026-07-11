@@ -8,21 +8,14 @@
 
 #include <QtCore/QThread>
 #include <QtCore/QtGlobal>
-#include <QtWidgets/QStyledItemDelegate>
-#include <QtWidgets/QToolButton>
+#include <QtCore/QCoreApplication>
 
 #include "Channel.h"
-#include "ConfigWidget.h"
-#include "MUComboBox.h"
 #include "Settings.h"
 #include "Timer.h"
 
-#include "ui_GlobalShortcut.h"
-#include "ui_GlobalShortcutTarget.h"
-
 class GlobalShortcut : public QObject {
 	friend class GlobalShortcutEngine;
-	friend class GlobalShortcutConfig;
 
 private:
 	Q_OBJECT
@@ -45,6 +38,22 @@ public:
 
 	bool active() const { return !qlActive.isEmpty(); }
 };
+
+enum ShortcutTargetTypes {
+	SHORTCUT_TARGET_ROOT              = -1,
+	SHORTCUT_TARGET_PARENT            = -2,
+	SHORTCUT_TARGET_CURRENT           = -3,
+	SHORTCUT_TARGET_SUBCHANNEL        = -4,
+	SHORTCUT_TARGET_PARENT_SUBCHANNEL = -12
+};
+
+class ShortcutTargetWidget final {
+	Q_DECLARE_TR_FUNCTIONS(ShortcutTargetWidget)
+public:
+	static QString targetString(const ShortcutTarget &target);
+};
+
+#if 0 // Removed classic shortcut editor widgets; Modern Settings owns editing.
 
 /**
  * Combo box widget used to define the kind of action a shortcut triggers. Then
@@ -216,6 +225,7 @@ public slots:
 	void on_qpbOpenAccessibilityPrefs_clicked();
 	void on_qpbSkipWarning_clicked();
 };
+#endif
 
 struct ShortcutKey {
 	Shortcut s;

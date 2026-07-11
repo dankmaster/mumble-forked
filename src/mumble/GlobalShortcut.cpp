@@ -15,7 +15,6 @@
 #include "ServerHandler.h"
 #include "widgets/EventFilters.h"
 #include "Global.h"
-#include "GlobalShortcutButtons.h"
 
 #include <QtCore/QProcess>
 #include <QtCore/QSortFilterProxyModel>
@@ -30,6 +29,11 @@
 
 #include <cassert>
 #include <chrono>
+
+GlobalShortcutEngine *GlobalShortcutEngine::engine = nullptr;
+static const QString UPARROW = QString::fromUtf8("\xE2\x86\x91 ");
+
+#if 0 // Removed classic shortcut editor widgets; Modern Settings owns editing.
 
 const QString GlobalShortcutConfig::name = QLatin1String("GlobalShortcutConfig");
 
@@ -420,6 +424,8 @@ void TextEditWidget::setCurrentString(const QString &str) {
 	m_lineEdit->setText(str);
 }
 
+#endif
+
 /**
  * This function returns a textual representation of the given shortcut target st.
  */
@@ -479,6 +485,8 @@ QString ShortcutTargetWidget::targetString(const ShortcutTarget &st) {
 	}
 	return tr("Empty");
 }
+
+#if 0 // Removed classic shortcut editor widgets; Modern Settings owns editing.
 
 ShortcutTarget ShortcutTargetWidget::target() const {
 	return stTarget;
@@ -900,6 +908,8 @@ void GlobalShortcutConfig::accept() const {
 	GlobalShortcutEngine::engine->setEnabled(Global::get().s.bShortcutEnable);
 }
 
+
+#endif
 
 GlobalShortcutEngine::GlobalShortcutEngine(QObject *p) : QThread(p) {
 	bNeedRemap = true;

@@ -34,6 +34,8 @@
 #include <QtGui/QTextDocumentFragment>
 #include <QtNetwork/QNetworkReply>
 
+#if 0 // Removed classic log settings widgets; Modern Settings owns editing.
+
 const QString LogConfig::name = QLatin1String("LogConfig");
 
 static ConfigWidget *LogConfigDialogNew(Settings &st) {
@@ -410,6 +412,7 @@ void LogConfig::on_qsbTTSVolume_valueChanged(int value) {
 	qsTTSVolume->setValue(value);
 }
 
+#endif
 
 QMutex Log::qmDeferredLogs;
 QVector< LogMessage > Log::qvDeferredLogs;
