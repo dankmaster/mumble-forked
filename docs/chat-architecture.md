@@ -142,6 +142,21 @@ Thread scope keys are canonicalized by scope. Examples:
 - `global`
 - `private:12:98`
 
+### Read-only administrative history API
+
+The fork's ICE `Server` interface exposes bounded, read-only history methods
+for trusted administrative tooling:
+
+- `getPersistentChatThreads(offset, limit)` returns conversations ordered by
+  most recent activity
+- `getPersistentChatMessages(threadId, beforeMessageId, limit)` returns a
+  chronological page, with `beforeMessageId = 0` selecting the latest page
+
+Both methods require the ICE read secret, cap pages at 200 records, and omit
+deleted message bodies. They are intended for an authenticated admin surface;
+they do not replace client-side history permissions or the normal chat wire
+protocol.
+
 History visibility follows channel permissions for room/text scopes. Private
 threads are visible only to the registered users that form the private scope.
 

@@ -104,6 +104,102 @@ module MumbleServer
 		string text;
 	};
 
+	/** A persistent chat thread exposed to read-only administrative clients. */
+	struct PersistentChatThread {
+		int id;
+		/** ChatThreadScope encoded as Channel=0, ServerGlobal=1, Private=2, TextChannel=3. */
+		int scope;
+		string scopeKey;
+		string displayName;
+		int messageCount;
+		/** Registered creator ID, or -1 when unavailable. */
+		int createdByUserId;
+		/** UNIX timestamps in seconds. */
+		long createdAt;
+		long updatedAt;
+	};
+
+	struct PersistentChatAttachment {
+		int assetId;
+		string filename;
+		string mime;
+		long byteSize;
+		int kind;
+		int width;
+		int height;
+		long durationMs;
+		bool inlineSafe;
+	};
+
+	struct PersistentChatEmbed {
+		string canonicalUrl;
+		string title;
+		string description;
+		string siteName;
+		int status;
+	};
+
+	struct PersistentChatReaction {
+		string emoji;
+		int count;
+	};
+
+	sequence<PersistentChatAttachment> PersistentChatAttachmentList;
+	sequence<PersistentChatEmbed> PersistentChatEmbedList;
+	sequence<PersistentChatReaction> PersistentChatReactionList;
+
+	/** A stored persistent chat message. Deleted messages are not returned. */
+	struct PersistentChatMessage {
+		int id;
+		int threadId;
+		int replyToMessageId;
+		int authorUserId;
+		int authorSession;
+		string authorName;
+		string bodyText;
+		int bodyFormat;
+		long createdAt;
+		long editedAt;
+		int attachmentCount;
+		int embedCount;
+		int reactionCount;
+		PersistentChatAttachmentList attachments;
+		PersistentChatEmbedList embeds;
+		PersistentChatReactionList reactions;
+	};
+
+	struct PersistentChatAdminCapabilities {
+		int protocolVersion;
+		int maxPageSize;
+		bool history;
+		bool search;
+		bool richMetadata;
+		bool privateThreadsExposed;
+	};
+
+	struct PersistentChatSearchQuery {
+		string text;
+		string author;
+		/** -1 for all public scopes, otherwise 0, 1, or 3. */
+		int scope;
+		long createdAfter;
+		long createdBefore;
+		int offset;
+		int limit;
+	};
+
+	struct PersistentChatStats {
+		int threadCount;
+		int messageCount;
+		int voiceThreadCount;
+		int globalThreadCount;
+		int textThreadCount;
+		long latestMessageAt;
+	};
+
+	sequence<PersistentChatThread> PersistentChatThreadList;
+	sequence<PersistentChatMessage> PersistentChatMessageList;
+
 	/** A channel.
 	 **/
 	struct Channel {
@@ -552,6 +648,25 @@ module MumbleServer
 		 * @return Number of entries in log
 		 */
 		idempotent int getLogLen() throws InvalidSecretException, ReadOnlyModeException;
+
+		/** Fetch persistent chat threads ordered by most recent activity.
+		 * @param offset Zero-based result offset.
+		 * @param limit Number of threads to return (1-200).
+		 */
+		idempotent PersistentChatThreadList getPersistentChatThreads(int offset, int limit) throws InvalidSecretException, InvalidInputDataException;
+
+		/** Fetch one page of stored messages in chronological order.
+		 * @param threadId Persistent thread ID.
+		 * @param beforeMessageId Return messages older than this ID, or 0 for the latest page.
+		 * @param limit Number of messages to return (1-200).
+		 */
+		idempotent PersistentChatMessageList getPersistentChatMessages(int threadId, int beforeMessageId, int limit) throws InvalidSecretException, InvalidInputDataException;
+
+		idempotent PersistentChatAdminCapabilities getPersistentChatAdminCapabilities() throws InvalidSecretException;
+
+		idempotent PersistentChatMessageList searchPersistentChatMessages(PersistentChatSearchQuery query) throws InvalidSecretException, InvalidInputDataException;
+
+		idempotent PersistentChatStats getPersistentChatStats() throws InvalidSecretException;
 
 		/** Fetch all users. This returns all currently connected users on the server.
 		 * @return List of connected users.

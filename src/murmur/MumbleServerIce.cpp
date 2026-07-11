@@ -35,6 +35,7 @@
 #include <cassert>
 #include <chrono>
 #include <limits>
+#include <map>
 #include <sstream>
 
 using namespace std;
@@ -104,6 +105,97 @@ static std::string iceBase64(const std::string &s) {
 static void logToLog(const ::mumble::server::db::DBLogEntry &entry, ::MumbleServer::LogEntry &le) {
 	le.timestamp = static_cast< Ice::Int >(mumble::server::db::toEpochSeconds(entry.timestamp));
 	le.txt       = iceString(entry.message);
+}
+
+static std::string persistentChatThreadDisplayName(::Server *server,
+										const ::mumble::server::db::DBChatThread &source) {
+	using Scope = ::mumble::server::db::ChatThreadScope;
+	if (source.scope == Scope::ServerGlobal) {
+		return "Server global";
+	}
+
+	const std::size_t separator = source.scopeKey.find(':');
+	if (separator == std::string::npos) {
+		return iceString(source.scopeKey);
+	}
+	unsigned int scopeID = 0;
+	try {
+		scopeID = static_cast< unsigned int >(std::stoul(source.scopeKey.substr(separator + 1)));
+	} catch (...) {
+		return iceString(source.scopeKey);
+	}
+
+	if (source.scope == Scope::Channel && server) {
+		const ::Channel *channel = server->qhChannels.value(scopeID);
+		return channel ? iceString(channel->qsName) : "Deleted voice room #" + std::to_string(scopeID);
+	}
+	if (source.scope == Scope::TextChannel && server) {
+		const auto textChannel = server->m_dbWrapper.getTextChannel(server->iServerNum, scopeID);
+		return textChannel ? iceString(textChannel->name) : "Deleted text room #" + std::to_string(scopeID);
+	}
+	return iceString(source.scopeKey);
+}
+
+static void persistentChatThreadToIce(::Server *server, const ::mumble::server::db::DBChatThread &source,
+									  ::MumbleServer::PersistentChatThread &target) {
+	target.id              = static_cast< Ice::Int >(source.threadID);
+	target.scope           = static_cast< Ice::Int >(source.scope);
+	target.scopeKey        = iceString(source.scopeKey);
+	target.displayName     = persistentChatThreadDisplayName(server, source);
+	target.messageCount    = static_cast< Ice::Int >(
+		server->m_dbWrapper.getChatMessages(server->iServerNum, source.threadID).size());
+	target.createdByUserId = source.createdByUserID ? static_cast< Ice::Int >(*source.createdByUserID) : -1;
+	target.createdAt       = static_cast< Ice::Long >(mumble::server::db::toEpochSeconds(source.createdAt));
+	target.updatedAt       = static_cast< Ice::Long >(mumble::server::db::toEpochSeconds(source.updatedAt));
+}
+
+static void persistentChatMessageToIce(const ::mumble::server::db::DBChatMessage &source,
+									   ::MumbleServer::PersistentChatMessage &target) {
+	target.id               = static_cast< Ice::Int >(source.messageID);
+	target.threadId         = static_cast< Ice::Int >(source.threadID);
+	target.replyToMessageId = source.replyToMessageID ? static_cast< Ice::Int >(*source.replyToMessageID) : -1;
+	target.authorUserId     = source.authorUserID ? static_cast< Ice::Int >(*source.authorUserID) : -1;
+	target.authorSession    = source.authorSession ? static_cast< Ice::Int >(*source.authorSession) : -1;
+	target.authorName       = source.authorName ? iceString(*source.authorName) : std::string();
+	target.bodyText         = iceString(source.bodyText);
+	target.bodyFormat       = static_cast< Ice::Int >(source.bodyFormat);
+	target.createdAt        = static_cast< Ice::Long >(mumble::server::db::toEpochSeconds(source.createdAt));
+	target.editedAt         = static_cast< Ice::Long >(mumble::server::db::toEpochSeconds(source.editedAt));
+	target.attachmentCount  = static_cast< Ice::Int >(source.attachments.size());
+	target.embedCount       = static_cast< Ice::Int >(source.embeds.size());
+	target.reactionCount    = static_cast< Ice::Int >(source.reactions.size());
+	for (const auto &attachment : source.attachments) {
+		::MumbleServer::PersistentChatAttachment item;
+		item.assetId    = static_cast< Ice::Int >(attachment.assetID);
+		item.filename   = iceString(attachment.filename);
+		item.mime       = iceString(attachment.mime);
+		item.byteSize   = static_cast< Ice::Long >(attachment.byteSize);
+		item.kind       = static_cast< Ice::Int >(attachment.kind);
+		item.width      = static_cast< Ice::Int >(attachment.width);
+		item.height     = static_cast< Ice::Int >(attachment.height);
+		item.durationMs = static_cast< Ice::Long >(attachment.durationMs);
+		item.inlineSafe = attachment.inlineSafe;
+		target.attachments.push_back(std::move(item));
+	}
+	for (const auto &embed : source.embeds) {
+		::MumbleServer::PersistentChatEmbed item;
+		item.canonicalUrl = iceString(embed.canonicalUrl);
+		item.title        = iceString(embed.title);
+		item.description  = iceString(embed.description);
+		item.siteName     = iceString(embed.siteName);
+		item.status       = static_cast< Ice::Int >(embed.status);
+		target.embeds.push_back(std::move(item));
+	}
+	std::map< std::string, int > reactionCounts;
+	for (const auto &reaction : source.reactions) {
+		++reactionCounts[reaction.emoji];
+	}
+	for (const auto &[emoji, count] : reactionCounts) {
+		::MumbleServer::PersistentChatReaction item;
+		item.emoji = iceString(emoji);
+		item.count = count;
+		target.reactions.push_back(std::move(item));
+	}
 }
 
 static void userToUser(const ::User *p, ::MumbleServer::User &mp) {
@@ -1194,6 +1286,198 @@ static void impl_Server_getLogLen(const ::MumbleServer::AMD_Server_getLogLenPtr 
 
 	std::size_t len = server->m_dbWrapper.getLogSize(static_cast< unsigned int >(server_id));
 	cb->ice_response(static_cast< Ice::Int >(len));
+
+	ICE_IMPL_END
+}
+
+#define ACCESS_Server_getPersistentChatThreads_READ
+static void impl_Server_getPersistentChatThreads(
+	const ::MumbleServer::AMD_Server_getPersistentChatThreadsPtr cb, int server_id, ::Ice::Int offset,
+	::Ice::Int limit) {
+	ICE_IMPL_BEGIN
+
+	NEED_SERVER_EXISTS;
+	if (offset < 0 || limit < 1 || limit > 200) {
+		cb->ice_exception(InvalidInputDataException());
+		return;
+	}
+
+	::MumbleServer::PersistentChatThreadList result;
+	const std::vector< mumble::server::db::DBChatThread > threads =
+		server->m_dbWrapper.getChatThreads(static_cast< unsigned int >(server_id));
+	result.reserve(static_cast< std::size_t >(limit));
+	int publicOffset = 0;
+	for (const mumble::server::db::DBChatThread &thread : threads) {
+		if (thread.scope == mumble::server::db::ChatThreadScope::Private) {
+			continue;
+		}
+		if (publicOffset++ < offset) {
+			continue;
+		}
+		::MumbleServer::PersistentChatThread item;
+		persistentChatThreadToIce(server, thread, item);
+		result.push_back(std::move(item));
+		if (result.size() >= static_cast< std::size_t >(limit)) {
+			break;
+		}
+	}
+	cb->ice_response(result);
+
+	ICE_IMPL_END
+}
+
+#define ACCESS_Server_getPersistentChatMessages_READ
+static void impl_Server_getPersistentChatMessages(
+	const ::MumbleServer::AMD_Server_getPersistentChatMessagesPtr cb, int server_id, ::Ice::Int thread_id,
+	::Ice::Int before_message_id, ::Ice::Int limit) {
+	ICE_IMPL_BEGIN
+
+	NEED_SERVER_EXISTS;
+	if (thread_id < 1 || before_message_id < 0 || limit < 1 || limit > 200) {
+		cb->ice_exception(InvalidInputDataException());
+		return;
+	}
+	const mumble::server::db::DBChatThread thread =
+		server->m_dbWrapper.getChatThread(static_cast< unsigned int >(server_id), static_cast< unsigned int >(thread_id));
+	if (thread.scope == mumble::server::db::ChatThreadScope::Private) {
+		cb->ice_exception(InvalidInputDataException());
+		return;
+	}
+
+	std::vector< mumble::server::db::DBChatMessage > messages;
+	if (before_message_id == 0) {
+		messages = server->m_dbWrapper.getChatMessages(static_cast< unsigned int >(server_id),
+			static_cast< unsigned int >(thread_id), 0, static_cast< int >(limit));
+	} else {
+		messages = server->m_dbWrapper.getChatMessagesBefore(
+			static_cast< unsigned int >(server_id), static_cast< unsigned int >(thread_id),
+			static_cast< unsigned int >(before_message_id), static_cast< unsigned int >(limit));
+	}
+
+	::MumbleServer::PersistentChatMessageList result;
+	result.reserve(messages.size());
+	for (const mumble::server::db::DBChatMessage &message : messages) {
+		::MumbleServer::PersistentChatMessage item;
+		persistentChatMessageToIce(message, item);
+		result.push_back(std::move(item));
+	}
+	cb->ice_response(result);
+
+	ICE_IMPL_END
+}
+
+#define ACCESS_Server_getPersistentChatAdminCapabilities_READ
+static void impl_Server_getPersistentChatAdminCapabilities(
+	const ::MumbleServer::AMD_Server_getPersistentChatAdminCapabilitiesPtr cb, int server_id) {
+	ICE_IMPL_BEGIN
+
+	NEED_SERVER_EXISTS;
+	::MumbleServer::PersistentChatAdminCapabilities capabilities;
+	capabilities.protocolVersion       = 1;
+	capabilities.maxPageSize           = 200;
+	capabilities.history               = true;
+	capabilities.search                = true;
+	capabilities.richMetadata          = true;
+	capabilities.privateThreadsExposed = false;
+	cb->ice_response(capabilities);
+
+	ICE_IMPL_END
+}
+
+#define ACCESS_Server_searchPersistentChatMessages_READ
+static void impl_Server_searchPersistentChatMessages(
+	const ::MumbleServer::AMD_Server_searchPersistentChatMessagesPtr cb, int server_id,
+	const ::MumbleServer::PersistentChatSearchQuery &query) {
+	ICE_IMPL_BEGIN
+
+	NEED_SERVER_EXISTS;
+	if (query.text.size() > 200 || query.author.size() > 100 || query.offset < 0 || query.offset > 10000
+		|| query.limit < 1 || query.limit > 200 || (query.scope != -1 && query.scope != 0 && query.scope != 1
+			&& query.scope != 3)
+		|| query.createdAfter < 0 || query.createdBefore < 0
+		|| (query.createdAfter && query.createdBefore && query.createdAfter > query.createdBefore)) {
+		cb->ice_exception(InvalidInputDataException());
+		return;
+	}
+
+	const QString textNeedle   = QString::fromStdString(query.text).toCaseFolded();
+	const QString authorNeedle = QString::fromStdString(query.author).toCaseFolded();
+	std::vector< mumble::server::db::DBChatMessage > matches;
+	std::size_t scanned = 0;
+	constexpr std::size_t maxScannedMessages = 10000;
+	const auto threads = server->m_dbWrapper.getChatThreads(static_cast< unsigned int >(server_id));
+	for (const auto &thread : threads) {
+		if (thread.scope == mumble::server::db::ChatThreadScope::Private
+			|| (query.scope != -1 && static_cast< int >(thread.scope) != query.scope)) {
+			continue;
+		}
+		const auto messages = server->m_dbWrapper.getChatMessages(static_cast< unsigned int >(server_id), thread.threadID);
+		for (const auto &message : messages) {
+			if (++scanned > maxScannedMessages) {
+				break;
+			}
+			const Ice::Long createdAt =
+				static_cast< Ice::Long >(mumble::server::db::toEpochSeconds(message.createdAt));
+			if ((query.createdAfter && createdAt < query.createdAfter)
+				|| (query.createdBefore && createdAt > query.createdBefore)) {
+				continue;
+			}
+			const QString body = QString::fromStdString(message.bodyText).toCaseFolded();
+			const QString author = QString::fromStdString(message.authorName.value_or("")).toCaseFolded();
+			if ((!textNeedle.isEmpty() && !body.contains(textNeedle))
+				|| (!authorNeedle.isEmpty() && !author.contains(authorNeedle))) {
+				continue;
+			}
+			matches.push_back(message);
+		}
+		if (scanned > maxScannedMessages) {
+			break;
+		}
+	}
+
+	std::sort(matches.begin(), matches.end(), [](const auto &left, const auto &right) {
+		if (left.createdAt != right.createdAt) {
+			return left.createdAt > right.createdAt;
+		}
+		return left.messageID > right.messageID;
+	});
+	::MumbleServer::PersistentChatMessageList result;
+	for (std::size_t index = static_cast< std::size_t >(query.offset);
+		 index < matches.size() && result.size() < static_cast< std::size_t >(query.limit); ++index) {
+		::MumbleServer::PersistentChatMessage item;
+		persistentChatMessageToIce(matches[index], item);
+		result.push_back(std::move(item));
+	}
+	cb->ice_response(result);
+
+	ICE_IMPL_END
+}
+
+#define ACCESS_Server_getPersistentChatStats_READ
+static void impl_Server_getPersistentChatStats(const ::MumbleServer::AMD_Server_getPersistentChatStatsPtr cb,
+											 int server_id) {
+	ICE_IMPL_BEGIN
+
+	NEED_SERVER_EXISTS;
+	::MumbleServer::PersistentChatStats stats;
+	stats.threadCount = stats.messageCount = stats.voiceThreadCount = stats.globalThreadCount = stats.textThreadCount = 0;
+	stats.latestMessageAt = 0;
+	for (const auto &thread : server->m_dbWrapper.getChatThreads(static_cast< unsigned int >(server_id))) {
+		if (thread.scope == mumble::server::db::ChatThreadScope::Private) {
+			continue;
+		}
+		++stats.threadCount;
+		if (thread.scope == mumble::server::db::ChatThreadScope::Channel) ++stats.voiceThreadCount;
+		if (thread.scope == mumble::server::db::ChatThreadScope::ServerGlobal) ++stats.globalThreadCount;
+		if (thread.scope == mumble::server::db::ChatThreadScope::TextChannel) ++stats.textThreadCount;
+		const auto messages = server->m_dbWrapper.getChatMessages(static_cast< unsigned int >(server_id), thread.threadID);
+		stats.messageCount += static_cast< Ice::Int >(messages.size());
+		if (!messages.empty()) {
+			stats.latestMessageAt = std::max(stats.latestMessageAt,
+				static_cast< Ice::Long >(mumble::server::db::toEpochSeconds(messages.back().createdAt)));
+		}
+	}
+	cb->ice_response(stats);
 
 	ICE_IMPL_END
 }
@@ -2429,6 +2713,11 @@ static void impl_Meta_setAssumedDatabaseState(const ::MumbleServer::AMD_Meta_set
 #undef ACCESS_Server_getAllConf_READ
 #undef ACCESS_Server_getLog_READ
 #undef ACCESS_Server_getLogLen_READ
+#undef ACCESS_Server_getPersistentChatThreads_READ
+#undef ACCESS_Server_getPersistentChatMessages_READ
+#undef ACCESS_Server_getPersistentChatAdminCapabilities_READ
+#undef ACCESS_Server_searchPersistentChatMessages_READ
+#undef ACCESS_Server_getPersistentChatStats_READ
 #undef ACCESS_Server_getUsers_READ
 #undef ACCESS_Server_getChannels_READ
 #undef ACCESS_Server_getTree_READ

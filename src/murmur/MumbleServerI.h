@@ -46,6 +46,23 @@ public:
 
 	virtual void getLogLen_async(const ::MumbleServer::AMD_Server_getLogLenPtr &, const Ice::Current &);
 
+	virtual void getPersistentChatThreads_async(
+		const ::MumbleServer::AMD_Server_getPersistentChatThreadsPtr &, ::Ice::Int, ::Ice::Int, const Ice::Current &);
+
+	virtual void getPersistentChatMessages_async(
+		const ::MumbleServer::AMD_Server_getPersistentChatMessagesPtr &, ::Ice::Int, ::Ice::Int, ::Ice::Int,
+		const Ice::Current &);
+
+	virtual void getPersistentChatAdminCapabilities_async(
+		const ::MumbleServer::AMD_Server_getPersistentChatAdminCapabilitiesPtr &, const Ice::Current &);
+
+	virtual void searchPersistentChatMessages_async(
+		const ::MumbleServer::AMD_Server_searchPersistentChatMessagesPtr &,
+		const ::MumbleServer::PersistentChatSearchQuery &, const Ice::Current &);
+
+	virtual void getPersistentChatStats_async(
+		const ::MumbleServer::AMD_Server_getPersistentChatStatsPtr &, const Ice::Current &);
+
 	virtual void getUsers_async(const ::MumbleServer::AMD_Server_getUsersPtr &, const Ice::Current &);
 
 	virtual void getChannels_async(const ::MumbleServer::AMD_Server_getChannelsPtr &, const Ice::Current &);
