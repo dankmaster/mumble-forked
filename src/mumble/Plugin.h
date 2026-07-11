@@ -118,7 +118,6 @@ typedef std::shared_ptr< const Plugin > const_plugin_ptr_t;
 /// libraries.
 class Plugin : public QObject {
 	friend class PluginManager;
-	friend class PluginConfig;
 
 private:
 	Q_OBJECT

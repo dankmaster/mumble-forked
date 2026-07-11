@@ -15,7 +15,7 @@
 #include <QtGui/QTextCursor>
 #include <QtGui/QTextDocument>
 
-#include "ConfigDialog.h"
+#include "ConfigWidget.h"
 #include "ui_Log.h"
 
 #ifndef USE_NO_TTS
@@ -142,6 +142,7 @@ public:
 	QString msgName(MsgType t) const;
 	void setIgnore(MsgType t, int ignore = 1 << 30);
 	void clearIgnore();
+	void applySettings();
 	static QString validHtml(const QString &html, QTextCursor *tc = nullptr);
 	static QString imageToImg(const QByteArray &format, const QByteArray &image);
 	static QString imageToImg(QImage img, int maxSize = 0);

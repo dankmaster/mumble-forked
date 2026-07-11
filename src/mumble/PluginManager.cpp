@@ -22,7 +22,8 @@
 
 #include "API.h"
 #include "Log.h"
-#include "PluginInstaller.h"
+#include "MainWindow.h"
+#include "PluginInstallService.h"
 #include "PluginUpdater.h"
 #include "ProcessResolver.h"
 #include "ServerHandler.h"
@@ -75,7 +76,7 @@ PluginManager::PluginManager(QSet< QString > *additionalSearchPaths, QObject *p)
 		QString::fromLatin1("%1/plugins").arg(MumbleApplication::instance()->applicationVersionRootPath()));
 
 	// Path to where the plugin installer will write plugins
-	pluginPaths.push_back(PluginInstaller::getInstallDir());
+	pluginPaths.push_back(PluginInstallService::installDirectory());
 
 	for (const QString &currentPath : pluginPaths) {
 		// Transform currentPath to an absolute, canonical path and only then add it to m_pluginSearchPaths in order
@@ -393,6 +394,28 @@ void PluginManager::checkForPluginUpdates() {
 	m_updater.checkForUpdates();
 }
 
+QVariantList PluginManager::availablePluginUpdates() {
+	QVariantList result;
+	for (const UpdateEntry &entry : m_updater.availableUpdates()) {
+		QVariantMap item;
+		item.insert(QStringLiteral("id"), static_cast< qulonglong >(entry.pluginID));
+		item.insert(QStringLiteral("url"), entry.updateURL.toString());
+		item.insert(QStringLiteral("fileName"), entry.fileName);
+		const const_plugin_ptr_t plugin = getPlugin(entry.pluginID);
+		item.insert(QStringLiteral("name"), plugin ? plugin->getName() : entry.fileName);
+		result.push_back(item);
+	}
+	return result;
+}
+
+void PluginManager::updatePlugins(const QSet< plugin_id_t > &pluginIDs) {
+	m_updater.updateSelected(pluginIDs);
+}
+
+void PluginManager::interruptPluginUpdates() {
+	m_updater.interrupt();
+}
+
 bool PluginManager::fetchPositionalData() {
 	if (Global::get().bPosTest) {
 		// This is for testing-purposes only so the "fetched" position doesn't have any real meaning
@@ -606,6 +629,18 @@ void PluginManager::allowKeyboardMonitoringFor(plugin_id_t pluginID, bool allow)
 	if (plugin) {
 		plugin->allowKeyboardMonitoring(allow);
 	}
+}
+
+bool PluginManager::showConfigDialogFor(plugin_id_t pluginID, QWidget *parent) const {
+	QReadLocker lock(&m_pluginCollectionLock);
+	const plugin_ptr_t plugin = m_pluginHashMap.value(pluginID);
+	return plugin && plugin->showConfigDialog(parent);
+}
+
+bool PluginManager::showAboutDialogFor(plugin_id_t pluginID, QWidget *parent) const {
+	QReadLocker lock(&m_pluginCollectionLock);
+	const plugin_ptr_t plugin = m_pluginHashMap.value(pluginID);
+	return plugin && plugin->showAboutDialog(parent);
 }
 
 bool PluginManager::pluginExists(plugin_id_t pluginID) const {
@@ -984,8 +1019,8 @@ void PluginManager::on_syncPositionalData() {
 void PluginManager::on_updatesAvailable() {
 	if (Global::get().s.bPluginAutoUpdate) {
 		m_updater.update();
-	} else {
-		m_updater.promptAndUpdate();
+	} else if (Global::get().mw) {
+		Global::get().mw->openModernPluginUpdateDialog(availablePluginUpdates());
 	}
 }
 

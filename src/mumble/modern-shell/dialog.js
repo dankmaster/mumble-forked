@@ -14,8 +14,10 @@
 	}
 
 	let modernBridge = null;
+	let modernDialogHost = null;
 	let bridgeLoadPromise = null;
 	let modernDialogState = null;
+	let modernDialogLastSourceStateSignature;
 	let modernDialogRenderedOpen = false;
 	let modernDialogAdvancedPages = {};
 	let modernDialogPendingFieldUpdates = {};
@@ -221,6 +223,27 @@
 		}
 	}
 
+	function acknowledgeModernDialogState(state) {
+		if (!modernDialogHost || typeof modernDialogHost.acknowledgeDialogState !== "function") {
+			return;
+		}
+
+		try {
+			modernDialogHost.acknowledgeDialogState(String(state && state.id || ""));
+		} catch (error) {
+			console.warn("Modern dialog host acknowledgement failed:", error);
+		}
+	}
+
+	function modernDialogSourceStateSignature(state) {
+		try {
+			const signature = JSON.stringify(state || null);
+			return typeof signature === "string" ? signature : null;
+		} catch (error) {
+			return null;
+		}
+	}
+
 	function scheduleBridgeRetry() {
 		if (modernBridge || bridgeRetryTimer || bridgeRetryCount >= bridgeRetryLimit) {
 			return;
@@ -243,6 +266,7 @@
 				try {
 					new QWebChannel(qt.webChannelTransport, function(channel) {
 						modernBridge = channel.objects.modernBridge || null;
+						modernDialogHost = channel.objects.modernDialogHost || null;
 						if (modernBridge) {
 							bridgeRetryCount = 0;
 							if (modernBridge.modernDialogStateChanged
@@ -453,6 +477,13 @@
 	}
 
 	function syncModernDialogState(state) {
+		const sourceState = state || null;
+		const sourceStateSignature = modernDialogSourceStateSignature(sourceState);
+		if (sourceStateSignature !== null
+				&& sourceStateSignature === modernDialogLastSourceStateSignature) {
+			acknowledgeModernDialogState(sourceState);
+			return;
+		}
 		if (state && state.open) {
 			applyModernUiTweaks(resolvedModernDialogUiTweaks(state));
 		}
@@ -467,6 +498,8 @@
 		}
 		modernDialogState = applyPendingModernDialogFieldValues(state || null);
 		renderModernDialog();
+		modernDialogLastSourceStateSignature = sourceStateSignature;
+		acknowledgeModernDialogState(sourceState);
 	}
 
 	function modernDialogFocusableElements() {
@@ -4382,6 +4415,202 @@
 		container.appendChild(row);
 	}
 
+	function appendModernPluginEditor(container, field) {
+		const wrap = document.createElement("div");
+		wrap.className = "modern-plugin-editor";
+		wrap.dataset.modernDialogFieldId = String(field && field.id || "plugins.entries");
+		const disabled = field && field.enabled === false;
+		const rows = Array.isArray(field && field.rows) ? field.rows : [];
+
+		const toolbar = document.createElement("div");
+		toolbar.className = "modern-plugin-toolbar";
+		[["plugins.install", "Install plugin", "is-accent"], ["plugins.rescan", "Rescan", ""],
+			["plugins.checkUpdates", "Check for updates", ""]].forEach(function(spec) {
+			const button = document.createElement("button");
+			button.type = "button";
+			button.className = "chip-button " + spec[2];
+			button.textContent = spec[1];
+			button.disabled = disabled;
+			button.addEventListener("click", function(event) {
+				event.preventDefault();
+				invokeModernDialogAction(spec[0], {});
+			});
+			toolbar.appendChild(button);
+		});
+		wrap.appendChild(toolbar);
+
+		if (!rows.length) {
+			const empty = document.createElement("p");
+			empty.className = "modern-plugin-empty";
+			empty.textContent = "No plugins were found.";
+			wrap.appendChild(empty);
+		}
+
+		const list = document.createElement("div");
+		list.className = "modern-plugin-list";
+		rows.forEach(function(plugin) {
+			const pluginId = Number(plugin && plugin.id) || 0;
+			const item = document.createElement("article");
+			item.className = "modern-plugin-row" + (plugin && plugin.loaded ? " is-loaded" : "");
+			const header = document.createElement("div");
+			header.className = "modern-plugin-header";
+			const copy = document.createElement("div");
+			copy.className = "modern-plugin-copy";
+			const title = document.createElement("strong");
+			title.textContent = String(plugin && plugin.name || "Plugin");
+			const meta = document.createElement("span");
+			meta.textContent = "Version " + String(plugin && plugin.version || "Unknown")
+				+ " · " + (plugin && plugin.loaded ? "Loaded" : "Not loaded");
+			copy.appendChild(title);
+			copy.appendChild(meta);
+			header.appendChild(copy);
+			const status = document.createElement("span");
+			status.className = "modern-plugin-status" + (plugin && plugin.enabled ? " is-enabled" : "");
+			status.textContent = plugin && plugin.enabled ? "Enabled" : "Disabled";
+			header.appendChild(status);
+			item.appendChild(header);
+
+			if (plugin && plugin.description) {
+				const description = document.createElement("p");
+				description.className = "modern-plugin-description";
+				description.textContent = String(plugin.description);
+				item.appendChild(description);
+			}
+
+			const permissions = document.createElement("div");
+			permissions.className = "modern-plugin-permissions";
+			[["enabled", "Enabled", !!(plugin && plugin.enabled), true],
+				["positional", "Positional audio", !!(plugin && plugin.positionalEnabled), !!(plugin && plugin.positionalAvailable)],
+				["keyboard", "Keyboard monitoring", !!(plugin && plugin.keyboardMonitoringAllowed), true]]
+				.forEach(function(spec) {
+					const label = document.createElement("label");
+					const checkbox = document.createElement("input");
+					checkbox.type = "checkbox";
+					checkbox.checked = spec[2];
+					checkbox.disabled = disabled || !spec[3];
+					checkbox.addEventListener("change", function() {
+						invokeModernDialogAction("plugins.toggle", {
+							pluginId: pluginId, property: spec[0], value: checkbox.checked
+						});
+					});
+					label.appendChild(checkbox);
+					label.appendChild(document.createTextNode(spec[1]));
+					permissions.appendChild(label);
+				});
+			item.appendChild(permissions);
+
+			const controls = document.createElement("div");
+			controls.className = "modern-plugin-controls";
+			[["plugins.configure", "Configure", !!(plugin && plugin.canConfigure)],
+				["plugins.about", "About", !!(plugin && plugin.canShowAbout)],
+				["plugins.unload", "Unload", !(plugin && plugin.builtIn)]].forEach(function(spec) {
+				const button = document.createElement("button");
+				button.type = "button";
+				button.className = "chip-button" + (spec[0] === "plugins.unload" ? " is-danger" : "");
+				button.textContent = spec[1];
+				button.disabled = disabled || !spec[2];
+				button.addEventListener("click", function(event) {
+					event.preventDefault();
+					invokeModernDialogAction(spec[0], { pluginId: pluginId });
+				});
+				controls.appendChild(button);
+			});
+			item.appendChild(controls);
+
+			if (plugin && plugin.path) {
+				const path = document.createElement("code");
+				path.className = "modern-plugin-path";
+				path.textContent = String(plugin.path);
+				item.appendChild(path);
+			}
+			list.appendChild(item);
+		});
+		wrap.appendChild(list);
+		container.appendChild(wrap);
+	}
+
+	function appendModernMessageEventEditor(container, field) {
+		const wrap = document.createElement("div");
+		wrap.className = "modern-message-event-editor";
+		wrap.dataset.modernDialogFieldId = String(field && field.id || "messages.events");
+		const disabled = field && field.enabled === false;
+		const rows = Array.isArray(field && field.rows) ? field.rows : [];
+		rows.forEach(function(message) {
+			const messageType = Number(message && message.type) || 0;
+			const item = document.createElement("article");
+			item.className = "modern-message-event-row";
+			const title = document.createElement("strong");
+			title.textContent = String(message && message.name || "Event");
+			item.appendChild(title);
+
+			const toggles = document.createElement("div");
+			toggles.className = "modern-message-event-toggles";
+			[["console", "Log", !!message.console], ["notification", "Notification", !!message.notification],
+				["highlight", "Highlight", !!message.highlight], ["tts", "TTS", !!message.tts],
+				["limit", "Limit", !!message.limit], ["sound", "Sound", !!message.sound]].forEach(function(spec) {
+				const label = document.createElement("label");
+				const checkbox = document.createElement("input");
+				checkbox.type = "checkbox";
+				checkbox.checked = spec[2];
+				checkbox.disabled = disabled;
+				checkbox.addEventListener("change", function() {
+					invokeModernDialogAction("messages.toggleEvent", {
+						messageType: messageType, property: spec[0], value: checkbox.checked
+					});
+				});
+				label.appendChild(checkbox);
+				label.appendChild(document.createTextNode(spec[1]));
+				toggles.appendChild(label);
+			});
+			item.appendChild(toggles);
+
+			const sound = document.createElement("div");
+			sound.className = "modern-message-event-sound";
+			const path = document.createElement("code");
+			path.textContent = String(message && message.soundPath || "No sound selected");
+			sound.appendChild(path);
+			[["messages.chooseEventSound", "Choose"], ["messages.previewEventSound", "Preview"]]
+				.forEach(function(spec) {
+					const button = document.createElement("button");
+					button.type = "button";
+					button.className = "chip-button";
+					button.textContent = spec[1];
+					button.disabled = disabled || (spec[0] === "messages.previewEventSound" && !message.soundPath);
+					button.addEventListener("click", function(event) {
+						event.preventDefault();
+						invokeModernDialogAction(spec[0], {
+							messageType: messageType, soundPath: String(message && message.soundPath || "")
+						});
+					});
+					sound.appendChild(button);
+				});
+			item.appendChild(sound);
+			wrap.appendChild(item);
+		});
+		container.appendChild(wrap);
+	}
+
+	function appendModernManualPositionPreview(container, field) {
+		const value = field && field.value && typeof field.value === "object" ? field.value : {};
+		const x = Number(value["manual.x"]) || 0;
+		const z = Number(value["manual.z"]) || 0;
+		const azimuth = Number(value["manual.azimuth"]) || 0;
+		const preview = document.createElement("div");
+		preview.className = "modern-manual-position-preview";
+		preview.dataset.modernDialogFieldId = String(field && field.id || "manual.preview");
+		const grid = document.createElement("div");
+		grid.className = "modern-manual-position-grid";
+		const marker = document.createElement("div");
+		marker.className = "modern-manual-position-marker";
+		marker.style.transform = "translate(-50%, -50%) rotate(" + azimuth + "deg)";
+		grid.appendChild(marker);
+		preview.appendChild(grid);
+		const label = document.createElement("span");
+		label.textContent = "X " + x.toFixed(2) + " · Z " + z.toFixed(2) + " · " + azimuth.toFixed(0) + "°";
+		preview.appendChild(label);
+		container.appendChild(preview);
+	}
+
 	function appendModernDialogField(container, field, errors) {
 		const type = String(field && field.type || "text");
 		if (type === "hidden") {
@@ -4404,6 +4633,18 @@
 		}
 		if (type === "shortcutEditor") {
 			appendModernShortcutEditor(container, field, errors);
+			return;
+		}
+		if (type === "pluginEditor") {
+			appendModernPluginEditor(container, field);
+			return;
+		}
+		if (type === "messageEventEditor") {
+			appendModernMessageEventEditor(container, field);
+			return;
+		}
+		if (type === "manualPositionPreview") {
+			appendModernManualPositionPreview(container, field);
 			return;
 		}
 		if (type === "profile") {
@@ -7780,12 +8021,18 @@
 	// ---- Image viewer (kind "imageViewer") ----
 	let imageViewerState = null;
 	let imageViewerResizeObserver = null;
+	let imageViewerRenderCleanup = null;
 
 	function disconnectImageViewerResizeObserver() {
 		if (imageViewerResizeObserver && typeof imageViewerResizeObserver.disconnect === "function") {
 			imageViewerResizeObserver.disconnect();
 		}
 		imageViewerResizeObserver = null;
+		if (typeof imageViewerRenderCleanup === "function") {
+			const cleanup = imageViewerRenderCleanup;
+			imageViewerRenderCleanup = null;
+			cleanup();
+		}
 	}
 
 	function renderImageViewerDialog(dialog) {
@@ -7796,10 +8043,20 @@
 				startX: 0, startY: 0, originX: 0, originY: 0 };
 		}
 		const state = imageViewerState;
+		state.dragging = false;
 
 		const stage = document.createElement("div");
 		stage.className = "image-viewer";
 		disconnectImageViewerResizeObserver();
+		let renderActive = true;
+		let animationFrame = 0;
+		imageViewerRenderCleanup = function() {
+			renderActive = false;
+			if (animationFrame && typeof window.cancelAnimationFrame === "function") {
+				window.cancelAnimationFrame(animationFrame);
+			}
+			animationFrame = 0;
+		};
 
 		const dragFrame = document.createElement("div");
 		dragFrame.className = "image-viewer-drag-frame";
@@ -7846,34 +8103,77 @@
 		const clampScale = function(value) {
 			return Math.max(0.25, Math.min(10, value));
 		};
-		const stageViewportSize = function() {
+		const geometry = {
+			ready: false,
+			viewportWidth: 1,
+			viewportHeight: 1,
+			stageLeft: 0,
+			stageTop: 0,
+			stageHeight: 1,
+			imageWidth: 0,
+			imageHeight: 0,
+			imageCenterX: 0,
+			imageCenterY: 0
+		};
+		const measureGeometry = function() {
+			if (!renderActive || !refs.body || !refs.body.contains(stage)) {
+				return false;
+			}
 			const style = window.getComputedStyle ? window.getComputedStyle(stage) : null;
 			const paddingLeft = style ? parseFloat(style.paddingLeft) || 0 : 0;
 			const paddingRight = style ? parseFloat(style.paddingRight) || 0 : 0;
 			const paddingTop = style ? parseFloat(style.paddingTop) || 0 : 0;
 			const paddingBottom = style ? parseFloat(style.paddingBottom) || 0 : 0;
-			return {
-				width: Math.max(1, stage.clientWidth - paddingLeft - paddingRight),
-				height: Math.max(1, stage.clientHeight - paddingTop - paddingBottom)
-			};
+			const stageRect = stage.getBoundingClientRect();
+			geometry.viewportWidth = Math.max(1, stage.clientWidth - paddingLeft - paddingRight);
+			geometry.viewportHeight = Math.max(1, stage.clientHeight - paddingTop - paddingBottom);
+			geometry.stageLeft = stageRect.left;
+			geometry.stageTop = stageRect.top;
+			geometry.stageHeight = Math.max(1, stage.clientHeight);
+			geometry.imageWidth = img.offsetWidth;
+			geometry.imageHeight = img.offsetHeight;
+			geometry.imageCenterX = img.offsetLeft + (geometry.imageWidth / 2);
+			geometry.imageCenterY = img.offsetTop + (geometry.imageHeight / 2);
+			geometry.ready = geometry.imageWidth > 0 && geometry.imageHeight > 0;
+			return geometry.ready;
 		};
 		const clampPan = function() {
-			if (!img.offsetWidth || !img.offsetHeight) {
+			if (!geometry.ready) {
 				return;
 			}
-			const viewport = stageViewportSize();
-			const overflowX = Math.max(0, (img.offsetWidth * state.scale - viewport.width) / 2);
-			const overflowY = Math.max(0, (img.offsetHeight * state.scale - viewport.height) / 2);
+			const overflowX = Math.max(0,
+				(geometry.imageWidth * state.scale - geometry.viewportWidth) / 2);
+			const overflowY = Math.max(0,
+				(geometry.imageHeight * state.scale - geometry.viewportHeight) / 2);
 			state.x = overflowX > 0 ? Math.max(-overflowX, Math.min(overflowX, state.x)) : 0;
 			state.y = overflowY > 0 ? Math.max(-overflowY, Math.min(overflowY, state.y)) : 0;
 		};
 		const apply = function() {
+			animationFrame = 0;
+			if (!renderActive) {
+				return;
+			}
 			state.scale = clampScale(state.scale);
 			clampPan();
 			img.style.transform = "translate(" + state.x + "px, " + state.y + "px) scale(" + state.scale + ")";
 		};
+		const scheduleApply = function() {
+			if (!renderActive || animationFrame) {
+				return;
+			}
+			if (typeof window.requestAnimationFrame === "function") {
+				animationFrame = window.requestAnimationFrame(apply);
+				return;
+			}
+			apply();
+		};
+		const refreshGeometry = function() {
+			const ready = measureGeometry();
+			scheduleApply();
+			return ready;
+		};
 		const zoomAt = function(clientX, clientY, factor) {
-			if (!img.offsetWidth || !img.offsetHeight || !isFinite(factor) || factor <= 0) {
+			if ((!geometry.ready && !refreshGeometry()) || !isFinite(factor) || factor <= 0) {
 				return;
 			}
 			const previousScale = state.scale;
@@ -7881,18 +8181,15 @@
 			if (Math.abs(nextScale - previousScale) < 0.001) {
 				return;
 			}
-			const stageRect = stage.getBoundingClientRect();
-			const anchorX = clientX - stageRect.left;
-			const anchorY = clientY - stageRect.top;
-			const imageCenterX = img.offsetLeft + (img.offsetWidth / 2);
-			const imageCenterY = img.offsetTop + (img.offsetHeight / 2);
+			const anchorX = clientX - geometry.stageLeft;
+			const anchorY = clientY - geometry.stageTop;
 			const ratio = nextScale / previousScale;
-			state.x = ((anchorX - imageCenterX) * (1 - ratio)) + (state.x * ratio);
-			state.y = ((anchorY - imageCenterY) * (1 - ratio)) + (state.y * ratio);
+			state.x = ((anchorX - geometry.imageCenterX) * (1 - ratio)) + (state.x * ratio);
+			state.y = ((anchorY - geometry.imageCenterY) * (1 - ratio)) + (state.y * ratio);
 			state.scale = nextScale;
-			apply();
+			clampPan();
+			scheduleApply();
 		};
-		apply();
 		stage.appendChild(img);
 
 		stage.addEventListener("wheel", function(event) {
@@ -7901,7 +8198,10 @@
 				return;
 			}
 			event.preventDefault();
-			const unit = event.deltaMode === 1 ? 18 : (event.deltaMode === 2 ? stage.clientHeight : 1);
+			if (!geometry.ready) {
+				refreshGeometry();
+			}
+			const unit = event.deltaMode === 1 ? 18 : (event.deltaMode === 2 ? geometry.stageHeight : 1);
 			const delta = Math.max(-900, Math.min(900, event.deltaY * unit));
 			zoomAt(event.clientX, event.clientY, Math.pow(1.0018, -delta));
 		}, { passive: false });
@@ -7929,7 +8229,8 @@
 			}
 			state.x = state.originX + (event.clientX - state.startX);
 			state.y = state.originY + (event.clientY - state.startY);
-			apply();
+			clampPan();
+			scheduleApply();
 		});
 		const endDrag = function() {
 			state.dragging = false;
@@ -7941,18 +8242,20 @@
 			state.scale = 1;
 			state.x = 0;
 			state.y = 0;
-			apply();
+			scheduleApply();
 		});
-		img.addEventListener("load", apply);
+		img.addEventListener("load", refreshGeometry);
 		if (img.complete) {
-			window.setTimeout(apply, 0);
-		}
-		if (typeof ResizeObserver === "function") {
-			imageViewerResizeObserver = new ResizeObserver(apply);
-			imageViewerResizeObserver.observe(stage);
+			window.setTimeout(refreshGeometry, 0);
 		}
 
 		refs.body.appendChild(stage);
+		if (typeof ResizeObserver === "function") {
+			imageViewerResizeObserver = new ResizeObserver(refreshGeometry);
+			imageViewerResizeObserver.observe(stage);
+			imageViewerResizeObserver.observe(img);
+		}
+		refreshGeometry();
 	}
 
 	function modernDialogActionPayload(dialog, action) {

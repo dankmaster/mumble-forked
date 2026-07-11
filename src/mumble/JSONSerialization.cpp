@@ -4,7 +4,7 @@
 // Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
 #include "JSONSerialization.h"
-#include "Cert.h"
+#include "CertService.h"
 #include "SettingsMacros.h"
 #include "SpeechCleanup.h"
 
@@ -152,7 +152,7 @@ void to_json(nlohmann::json &j, const Settings &settings) {
 		j["plugins"] = settings.qhPluginSettings;
 	}
 
-	j[SettingsKeys::CERTIFICATE_KEY] = CertWizard::exportCert(settings.kpCertificate);
+	j[SettingsKeys::CERTIFICATE_KEY] = CertService::exportPkcs12(settings.kpCertificate);
 
 	// Save whether Mumble has quit regularly (in contrast to having crashed). This flag is set right before saving the
 	// settings because Mumble is shut down (regularly). In contrast, when saving the settings because the user has made
@@ -215,7 +215,7 @@ void from_json(const nlohmann::json &j, Settings &settings) {
 	}
 
 	if (json.contains(static_cast< const char * >(SettingsKeys::CERTIFICATE_KEY))) {
-		settings.kpCertificate = CertWizard::importCert(json.at(SettingsKeys::CERTIFICATE_KEY));
+		settings.kpCertificate = CertService::importPkcs12(json.at(SettingsKeys::CERTIFICATE_KEY));
 	}
 
 	if (json.contains(static_cast< const char * >(SettingsKeys::MUMBLE_QUIT_NORMALLY_KEY))) {

@@ -20,6 +20,8 @@ public:
 		bool closeDialog  = false;
 		std::optional< Settings > settingsToApply;
 		bool accepted = false;
+		QString externalActionID;
+		QVariantMap externalActionPayload;
 	};
 
 	void open(const Settings &settings, const QString &pageName = QString());

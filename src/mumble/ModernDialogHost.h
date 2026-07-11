@@ -36,6 +36,7 @@ public:
 	bool showDialogState(const QVariantMap &state, QString *errorMessage = nullptr);
 	void hideDialog();
 	QVariant runAutomationScriptResult(const QString &script, int timeoutMilliseconds = 3000);
+	Q_INVOKABLE void acknowledgeDialogState(const QString &dialogID);
 
 signals:
 	void nativeCloseRequested(const QString &dialogID);
@@ -81,6 +82,7 @@ private:
 	QVariantMap m_lastDialogState;
 	bool m_started = false;
 	bool m_open = false;
+	bool m_dialogBridgeReady = false;
 	bool m_manualDragActive = false;
 	bool m_manualResizeActive = false;
 	bool m_resizeCursorActive = false;

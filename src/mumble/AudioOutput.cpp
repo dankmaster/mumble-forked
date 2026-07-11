@@ -871,7 +871,7 @@ bool AudioOutput::mix(void *outbuff, unsigned int frameCount) {
 	}
 
 #ifdef USE_MANUAL_PLUGIN
-	Manual::setSpeakerPositions(positions);
+	ManualPlugin_setSpeakerPositions(positions);
 #endif
 
 	// Return whether data has been written to the outbuff

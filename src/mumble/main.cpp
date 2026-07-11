@@ -5,8 +5,7 @@
 
 #include "AudioInput.h"
 #include "AudioOutput.h"
-#include "AudioWizard.h"
-#include "Cert.h"
+#include "CertService.h"
 #include "Database.h"
 #include "DeveloperConsole.h"
 #ifdef Q_OS_WIN
@@ -34,7 +33,7 @@
 #include "License.h"
 #include "MumbleApplication.h"
 #include "NetworkConfig.h"
-#include "PluginInstaller.h"
+#include "PluginInstallService.h"
 #include "PluginManager.h"
 #include "QtWidgetUtils.h"
 #include "SSL.h"
@@ -550,7 +549,7 @@ int main(int argc, char **argv) {
 #endif
 	}
 	if (options.hyperlink) {
-		if (PluginInstaller::canBePluginFile(QFileInfo(QString::fromStdString(*options.hyperlink)))) {
+		if (PluginInstallService::canBePluginFile(QFileInfo(QString::fromStdString(*options.hyperlink)))) {
 			pluginsToBeInstalled << QString::fromStdString(*options.hyperlink);
 		} else {
 			if (!options.rpcMode) {
@@ -760,8 +759,8 @@ int main(int argc, char **argv) {
 	if (!pluginsToBeInstalled.isEmpty()) {
 		for (const QString &currentPlugin : pluginsToBeInstalled) {
 			try {
-				PluginInstaller installer(currentPlugin);
-				installer.exec();
+				PluginInstallService installer(currentPlugin);
+				installer.install(false);
 			} catch (const PluginInstallException &e) {
 				qCritical() << qUtf8Printable(e.getMessage());
 			}
@@ -841,40 +840,46 @@ int main(int argc, char **argv) {
 
 	a.setQuitOnLastWindowClosed(false);
 
-	if (!Global::get().s.audioWizardShown) {
-		auto wizard = std::make_unique< AudioWizard >(Global::get().mw);
-		wizard->exec();
+	const bool showModernAudioSetup = !Global::get().s.audioWizardShown;
+	Global::get().s.audioWizardShown = true;
 
-		Global::get().s.audioWizardShown = true;
-	}
-
-	if (!CertWizard::validateCert(Global::get().s.kpCertificate)) {
+	bool showModernCertificateSetup = false;
+	if (!CertService::validate(Global::get().s.kpCertificate)) {
 		QFile qf(qdCert.absoluteFilePath(QLatin1String("MumbleAutomaticCertificateBackup.p12")));
 		if (qf.open(QIODevice::ReadOnly | QIODevice::Unbuffered)) {
-			Settings::KeyPair kp = CertWizard::importCert(qf.readAll());
+			Settings::KeyPair kp = CertService::importPkcs12(qf.readAll());
 			qf.close();
-			if (CertWizard::validateCert(kp))
+			if (CertService::validate(kp))
 				Global::get().s.kpCertificate = kp;
 		}
-		if (!CertWizard::validateCert(Global::get().s.kpCertificate)) {
-			CertWizard *cw = new CertWizard(Global::get().mw);
-			cw->exec();
-			delete cw;
+		if (!CertService::validate(Global::get().s.kpCertificate)) {
+			showModernCertificateSetup    = true;
+			Global::get().s.kpCertificate = CertService::generate();
+			if (CertService::validate(Global::get().s.kpCertificate)
+				&& qf.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Unbuffered)) {
+				qf.write(CertService::exportPkcs12(Global::get().s.kpCertificate));
+				qf.close();
+			}
 
-			if (!CertWizard::validateCert(Global::get().s.kpCertificate)) {
-				Global::get().s.kpCertificate = CertWizard::generateNewCert();
+			if (!CertService::validate(Global::get().s.kpCertificate)) {
+				Global::get().s.kpCertificate = CertService::generate();
 				if (qf.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Unbuffered)) {
-					qf.write(CertWizard::exportCert(Global::get().s.kpCertificate));
+					qf.write(CertService::exportPkcs12(Global::get().s.kpCertificate));
 					qf.close();
 				}
 			}
 		}
 	}
 
-	if (QDateTime::currentDateTime().daysTo(Global::get().s.kpCertificate.first.first().expiryDate()) < 14)
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	Global::get().mw->queueModernStartupSetup(showModernAudioSetup, showModernCertificateSetup);
+#endif
+
+	if (CertService::validate(Global::get().s.kpCertificate)
+		&& QDateTime::currentDateTime().daysTo(Global::get().s.kpCertificate.first.first().expiryDate()) < 14)
 		Global::get().l->log(
 			Log::Warning,
-			CertWizard::tr("<b>Certificate Expiry:</b> Your certificate is about to expire. You need to renew it, "
+			MainWindow::tr("<b>Certificate Expiry:</b> Your certificate is about to expire. You need to renew it, "
 						   "or you will no longer be able to connect to servers you are registered on."));
 
 #ifdef QT_NO_DEBUG

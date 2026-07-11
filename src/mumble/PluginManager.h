@@ -118,6 +118,9 @@ public:
 	const_plugin_ptr_t getPlugin(plugin_id_t pluginID) const;
 	/// Checks whether there are any updates for the plugins and if there are it invokes the PluginUpdater.
 	void checkForPluginUpdates();
+	QVariantList availablePluginUpdates();
+	void updatePlugins(const QSet< plugin_id_t > &pluginIDs);
+	void interruptPluginUpdates();
 	/// Fetches positional data from the activePositionalDataPlugin if there is one set. This function will update the
 	/// positionalData field
 	///
@@ -166,6 +169,9 @@ public:
 	/// @param pluginID The ID of the plugin to access
 	/// @param allow Whether to allow the monitoring or not
 	void allowKeyboardMonitoringFor(plugin_id_t pluginID, bool allow) const;
+	/// Opens UI supplied by the plugin itself. These are explicit native plugin-owned escape hatches.
+	bool showConfigDialogFor(plugin_id_t pluginID, QWidget *parent) const;
+	bool showAboutDialogFor(plugin_id_t pluginID, QWidget *parent) const;
 	/// Checks whether a plugin with the given ID exists.
 	///
 	/// @param pluginID The ID to check

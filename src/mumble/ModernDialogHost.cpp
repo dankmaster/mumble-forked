@@ -197,6 +197,7 @@ ModernDialogHost::ModernDialogHost(ModernShellBridge *bridge, QWidget *parent)
 	if (m_bridge) {
 		m_channel->registerObject(QStringLiteral("modernBridge"), m_bridge);
 	}
+	m_channel->registerObject(QStringLiteral("modernDialogHost"), this);
 	m_page->setWebChannel(m_channel);
 
 	m_view->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, true);
@@ -207,6 +208,9 @@ ModernDialogHost::ModernDialogHost(ModernShellBridge *bridge, QWidget *parent)
 	m_stateRepublishTimer->setSingleShot(true);
 	m_stateRepublishTimer->setInterval(75);
 
+	connect(m_view, &QWebEngineView::loadStarted, this, [this]() {
+		m_dialogBridgeReady = false;
+	});
 	connect(m_view, &QWebEngineView::loadFinished, this, &ModernDialogHost::handleLoadFinished);
 	connect(m_page, &QWebEnginePage::renderProcessTerminated, this,
 			&ModernDialogHost::handleRenderProcessTerminated);
@@ -299,6 +303,18 @@ QVariant ModernDialogHost::runAutomationScriptResult(const QString &script, cons
 	timeout.start(qBound(50, timeoutMilliseconds, 10000));
 	loop.exec();
 	return finished ? result : QVariant();
+}
+
+void ModernDialogHost::acknowledgeDialogState(const QString &dialogID) {
+	if (!m_open || dialogID != m_currentDialogID) {
+		return;
+	}
+
+	m_dialogBridgeReady = true;
+	m_stateRepublishRemaining = 0;
+	if (m_stateRepublishTimer) {
+		m_stateRepublishTimer->stop();
+	}
 }
 
 void ModernDialogHost::closeEvent(QCloseEvent *event) {
@@ -442,6 +458,7 @@ bool ModernDialogHost::start(QString *errorMessage) {
 		return false;
 	}
 
+	m_dialogBridgeReady = false;
 	m_view->load(url);
 	m_started = true;
 	return true;
@@ -723,6 +740,7 @@ void ModernDialogHost::handleLoadFinished(const bool ok) {
 	}
 
 	m_started = false;
+	m_dialogBridgeReady = false;
 	emit hostFailed(tr("The modern dialog window failed to load its local web assets."));
 }
 
@@ -730,11 +748,12 @@ void ModernDialogHost::handleRenderProcessTerminated(const QWebEnginePage::Rende
 													 const int exitCode) {
 	Q_UNUSED(status);
 	m_started = false;
+	m_dialogBridgeReady = false;
 	emit hostFailed(tr("The modern dialog renderer stopped unexpectedly with exit code %1.").arg(exitCode));
 }
 
 void ModernDialogHost::queueDialogStateRepublish() {
-	if (!m_open || !m_bridge || !m_stateRepublishTimer || m_lastDialogState.isEmpty()) {
+	if (m_dialogBridgeReady || !m_open || !m_bridge || !m_stateRepublishTimer || m_lastDialogState.isEmpty()) {
 		return;
 	}
 

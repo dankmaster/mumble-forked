@@ -6,7 +6,7 @@
 #ifndef MUMBLE_MUMBLE_GLOBALSHORTCUT_UNIX_H_
 #define MUMBLE_MUMBLE_GLOBALSHORTCUT_UNIX_H_
 
-#include "ConfigDialog.h"
+#include "ConfigWidget.h"
 #include "Global.h"
 #include "GlobalShortcut.h"
 

@@ -17102,6 +17102,183 @@ body[data-rail-side="right"] .mockup-shell.is-compact-layout.rail-is-collapsed .
 	}
 }
 
+.modern-plugin-editor {
+	display: grid;
+	gap: 14px;
+	min-width: 0;
+}
+
+.modern-plugin-toolbar,
+.modern-plugin-controls,
+.modern-plugin-permissions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.modern-plugin-list {
+	display: grid;
+	gap: 10px;
+}
+
+.modern-plugin-row {
+	display: grid;
+	gap: 10px;
+	padding: 14px;
+	border: 1px solid var(--line);
+	border-radius: 14px;
+	background: color-mix(in srgb, var(--surface-raised) 82%, transparent);
+}
+
+.modern-plugin-header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.modern-plugin-copy {
+	display: grid;
+	gap: 3px;
+}
+
+.modern-plugin-copy span,
+.modern-plugin-description,
+.modern-plugin-path,
+.modern-plugin-empty {
+	color: var(--text-muted);
+	font-size: 12px;
+}
+
+.modern-plugin-description {
+	margin: 0;
+	line-height: 1.5;
+}
+
+.modern-plugin-status {
+	padding: 4px 8px;
+	border-radius: 999px;
+	background: var(--surface-soft);
+	color: var(--text-muted);
+	font-size: 11px;
+	font-weight: 700;
+}
+
+.modern-plugin-status.is-enabled {
+	background: color-mix(in srgb, var(--success) 16%, transparent);
+	color: var(--success);
+}
+
+.modern-plugin-permissions label {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+}
+
+.modern-plugin-path {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.modern-message-event-editor {
+	display: grid;
+	gap: 9px;
+}
+
+.modern-message-event-row {
+	display: grid;
+	gap: 9px;
+	padding: 12px;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--surface-raised) 78%, transparent);
+}
+
+.modern-message-event-toggles,
+.modern-message-event-sound {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.modern-message-event-toggles label {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	font-size: 12px;
+}
+
+.modern-message-event-sound code {
+	min-width: 0;
+	max-width: 100%;
+	margin-right: auto;
+	overflow: hidden;
+	color: var(--text-muted);
+	font-size: 11px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.modern-manual-position-preview {
+	display: grid;
+	justify-items: center;
+	gap: 8px;
+}
+
+.modern-manual-position-grid {
+	position: relative;
+	width: min(100%, 360px);
+	aspect-ratio: 1;
+	border: 1px solid var(--line);
+	border-radius: 16px;
+	background:
+		linear-gradient(var(--line) 1px, transparent 1px),
+		linear-gradient(90deg, var(--line) 1px, transparent 1px),
+		color-mix(in srgb, var(--surface-raised) 82%, transparent);
+	background-position: center;
+	background-size: 10% 10%;
+}
+
+.modern-manual-position-grid::before,
+.modern-manual-position-grid::after {
+	position: absolute;
+	content: "";
+	background: color-mix(in srgb, var(--text-muted) 55%, transparent);
+}
+
+.modern-manual-position-grid::before {
+	left: 50%;
+	top: 0;
+	width: 1px;
+	height: 100%;
+}
+
+.modern-manual-position-grid::after {
+	left: 0;
+	top: 50%;
+	width: 100%;
+	height: 1px;
+}
+
+.modern-manual-position-marker {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	width: 20px;
+	height: 28px;
+	clip-path: polygon(50% 0, 100% 100%, 50% 74%, 0 100%);
+	background: var(--accent);
+	transform-origin: 50% 50%;
+}
+
+.modern-manual-position-preview > span {
+	color: var(--text-muted);
+	font-size: 12px;
+}
+
 @media (prefers-reduced-motion: reduce) {
 	.modern-skeleton {
 		animation: none;

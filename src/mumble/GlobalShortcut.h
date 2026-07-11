@@ -12,8 +12,9 @@
 #include <QtWidgets/QToolButton>
 
 #include "Channel.h"
-#include "ConfigDialog.h"
+#include "ConfigWidget.h"
 #include "MUComboBox.h"
+#include "Settings.h"
 #include "Timer.h"
 
 #include "ui_GlobalShortcut.h"

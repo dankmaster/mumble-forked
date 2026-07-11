@@ -10,29 +10,11 @@ class QNetworkReply;
 class QNetworkRequest;
 class QUrl;
 
-#include "ConfigDialog.h"
-#include "ui_NetworkConfig.h"
-
-class NetworkConfig : public ConfigWidget, Ui::NetworkConfig {
-private:
-	Q_OBJECT
-	Q_DISABLE_COPY(NetworkConfig)
+class NetworkConfig final {
 public:
-	/// The unique name of this ConfigWidget
-	static const QString name;
-	NetworkConfig(Settings &st);
-	virtual QString title() const Q_DECL_OVERRIDE;
-	virtual const QString &getName() const Q_DECL_OVERRIDE;
-	virtual QIcon icon() const Q_DECL_OVERRIDE;
 	static void SetupProxy();
 	static bool TcpModeEnabled();
 	static bool ApplyStartWithPCRegistration(bool enabled);
-public slots:
-	void accept() const Q_DECL_OVERRIDE;
-	void save() const Q_DECL_OVERRIDE;
-	void load(const Settings &r) Q_DECL_OVERRIDE;
-
-	void on_qcbType_currentIndexChanged(int v);
 };
 
 namespace Network {

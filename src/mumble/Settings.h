@@ -27,7 +27,7 @@
 #include "MumbleConstants.h"
 #include "QuitBehavior.h"
 #include "SSL.h"
-#include "SearchDialog.h"
+#include "SearchTypes.h"
 
 #include <nlohmann/json_fwd.hpp>
 

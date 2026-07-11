@@ -22,6 +22,7 @@
 #include <QtWidgets/QMainWindow>
 
 #include "ACL.h"
+#include "ConnectionFailTypes.h"
 #include "CustomElements.h"
 #include "Log.h"
 #include "MUComboBox.h"
@@ -30,9 +31,9 @@
 #include "MumbleProtocol.h"
 #include "PersistentChatState.h"
 #include "QtUtils.h"
+#include "Settings.h"
 #include "UnresolvedServerAddress.h"
 #include "Usage.h"
-#include "UserLocalNicknameDialog.h"
 
 #include <memory>
 #include <optional>
@@ -44,21 +45,14 @@
 #define MB_QEVENT (QEvent::User + 939)
 #define OU_QEVENT (QEvent::User + 940)
 
-class ACLEditor;
-class BanEditor;
-class UserEdit;
 class ServerHandler;
 class GlobalShortcut;
 class TextToSpeech;
 class UserModel;
-class Tokens;
 class Channel;
 class ClientUser;
 class ScreenShareManager;
 struct ScreenShareStartOptions;
-class UserInformation;
-class VoiceRecorderDialog;
-class PTTButtonWidget;
 struct PersistentChatPreviewSpec;
 class PersistentChatGateway;
 class PersistentChatController;
@@ -67,6 +61,7 @@ class PersistentChatHistoryDelegate;
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
 class ModernDialogController;
 class ModernDialogHost;
+class ModernPttToolHost;
 class ModernShellHost;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 class ModernUiAutomationServer;
@@ -101,10 +96,8 @@ class PersistentChatListWidget;
 class UserLocalVolumeSlider;
 
 struct ShortcutTarget;
-struct ConnectDetails;
 struct FavoriteServer;
 struct UnresolvedServerAddress;
-enum class ConnectionFailType;
 
 struct ContextMenuTarget {
 	ClientUser *user = nullptr;
@@ -146,6 +139,13 @@ public:
 	bool isServerLogViewVisible() const;
 	bool shouldMirrorServerLogToNativeWidget() const;
 	void setServerLogMaximumBlockCount(int maxBlocks);
+#if defined(MUMBLE_HAS_MODERN_LAYOUT)
+	void queueModernStartupSetup(bool showAudioSetup, bool showCertificateSetup);
+	void openModernPluginUpdateDialog(const QVariantList &updates);
+#ifdef USE_MANUAL_PLUGIN
+	void openModernManualPluginDialog(const QVariantMap &values = QVariantMap());
+#endif
+#endif
 	UserModel *pmModel;
 	QMenu *qmUser;
 	QMenu *qmChannel;
@@ -155,7 +155,6 @@ public:
 		qiIconMuteSuppressed;
 	QIcon qiTalkingOn, qiTalkingWhisper, qiTalkingShout, qiTalkingOff;
 	QIcon m_iconInformation;
-	std::unordered_map< unsigned int, qt_unique_ptr< UserLocalNicknameDialog > > qmUserNicknameTracker;
 
 	/// "Action" for when there are no actions available
 	QAction *qaEmpty;
@@ -183,13 +182,6 @@ public:
 
 	DockTitleBar *dtbLogDockTitle  = nullptr;
 	DockTitleBar *dtbChatDockTitle = nullptr;
-
-	ACLEditor *aclEdit;
-	BanEditor *banEdit;
-	UserEdit *userEdit;
-	Tokens *tokenEdit;
-
-	VoiceRecorderDialog *voiceRecorderDialog;
 
 	MumbleProto::Reject_RejectType rtLast;
 	bool bRetryServer;
@@ -772,7 +764,6 @@ protected:
 	/// if a new VoiceTarget is needed. It will be used as the helper
 	/// number in qmTargetUse.
 	int iTargetCounter;
-	QMap< unsigned int, UserInformation * > qmUserInformations;
 	QSet< unsigned int > m_pendingUserInformationSessions;
 	QTimer *m_userTextureRequestTimer = nullptr;
 	QSet< unsigned int > m_queuedUserTextureSessions;
@@ -784,8 +775,6 @@ protected:
 	QSet< unsigned int > m_inFlightUserCommentSessions;
 	QHash< unsigned int, QByteArray > m_requestedUserCommentHashBySession;
 
-	PTTButtonWidget *qwPTTButtonWidget;
-
 	MUComboBox *qcbTransmitMode;
 	QAction *qaTransmitMode;
 	QAction *qaTransmitModeSeparator;
@@ -796,8 +785,6 @@ protected:
 	QAction *qaChannelScreenShareWatch        = nullptr;
 	QAction *qaChannelScreenShareStopWatching = nullptr;
 	QAction *qaChannelScreenShareOpenWindow   = nullptr;
-
-	Search::SearchDialog *m_searchDialog = nullptr;
 
 	qt_unique_ptr< MenuLabel > m_localVolumeLabel;
 	qt_unique_ptr< UserLocalVolumeSlider > m_userLocalVolumeSlider;
@@ -930,6 +917,8 @@ protected:
 	ModernShellHost *m_modernShellHost                     = nullptr;
 	std::unique_ptr< ModernDialogController > m_modernDialogController;
 	std::unique_ptr< ModernDialogHost > m_modernDialogHost;
+	ModernPttToolHost *m_modernPttToolHost = nullptr;
+	QStringList m_modernStartupDialogQueue;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 	std::unique_ptr< ModernUiAutomationServer > m_modernUiAutomationServer;
 #	endif
@@ -976,7 +965,6 @@ protected:
 	QHash< QString, QVariantMap > m_modernShellCoalescedPresencePatches;
 	QStringList m_modernShellCoalescedPresenceOrder;
 	bool m_modernShellSnapshotPendingAfterNativeMoveResize = false;
-	bool m_pendingClassicAclDialog                         = false;
 	QHash< int, QString > m_modernAclRegisteredUserNames;
 	bool m_modernAclUserListRequestPending = false;
 #else
@@ -1097,6 +1085,7 @@ protected:
 	void connectFromModernDialog(const QString &host, unsigned short port, const QString &username,
 								 const QString &password);
 	void applyModernSettings(const Settings &settings, bool accepted);
+	void openNextModernStartupDialog();
 	bool beginModernShortcutCapture(int rowIndex);
 	void cancelModernShortcutCapture();
 #endif
@@ -1278,7 +1267,6 @@ public slots:
 	void on_gsAdaptivePush_triggered(bool, QVariant);
 
 	void on_Reconnect_timeout();
-	void voiceRecorderDialog_finished(int);
 	void qtvUserCurrentChanged(const QModelIndex &, const QModelIndex &);
 	void serverConnected();
 	void serverDisconnected(QAbstractSocket::SocketError, QString reason);
@@ -1294,7 +1282,6 @@ public slots:
 	/// or priority speaker flag changes for the gui user
 	void userStateChanged();
 	void on_channelStateChanged(Channel *channel, bool forceUpdateTree);
-	void destroyUserInformation();
 	void sendChatbarMessage(QString msg);
 	void sendChatbarText(QString msg, bool plainText = false);
 	void pttReleased();

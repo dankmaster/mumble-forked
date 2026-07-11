@@ -128,6 +128,7 @@
 	let modernDialogReturnFocus = null;
 	let modernDialogSelectState = null;
 	let detachedModernDialogUiTweaks = null;
+	let detachedModernDialogLastSourceStateSignature;
 	let modernDialogLastRenderKey = "";
 	let stonksActiveTab = "market";
 	let stonksFocusIndex = 0;
@@ -18044,15 +18045,72 @@
 		requestAnimationFrame(syncScrollState);
 	}
 
-	function observeMessageListLayoutTargets() {
+	const messageListNestedLayoutTargetSelector =
+		".preview-card, .preview-card-media, .mumble-inline-image-placeholder";
+
+	function ensureMessageListResizeObserver() {
 		if (!refs.messageList || typeof ResizeObserver !== "function") {
-			return;
+			return false;
 		}
 
 		if (!messageListResizeObserver) {
 			messageListResizeObserver = new ResizeObserver(function() {
 				refreshMessageListPinning(3);
 			});
+		}
+		return true;
+	}
+
+	function observeMessageListLayoutTarget(element) {
+		if (!element || messageListResizeObservedElements.has(element)) {
+			return;
+		}
+
+		messageListResizeObserver.observe(element);
+		messageListResizeObservedElements.add(element);
+	}
+
+	function unobserveMessageListLayoutTarget(element) {
+		if (!element || !messageListResizeObservedElements.has(element)) {
+			return;
+		}
+
+		messageListResizeObserver.unobserve(element);
+		messageListResizeObservedElements.delete(element);
+	}
+
+	function observeMessageListLayoutTargetSubtree(node) {
+		if (!ensureMessageListResizeObserver() || !node || node.nodeType !== Node.ELEMENT_NODE) {
+			return;
+		}
+
+		const element = node;
+		if (element.parentElement === refs.messageList
+				|| (refs.messageList.contains(element) && element.matches(messageListNestedLayoutTargetSelector))) {
+			observeMessageListLayoutTarget(element);
+		}
+		element.querySelectorAll(messageListNestedLayoutTargetSelector).forEach(function(descendant) {
+			if (refs.messageList.contains(descendant)) {
+				observeMessageListLayoutTarget(descendant);
+			}
+		});
+	}
+
+	function unobserveMessageListLayoutTargetSubtree(node) {
+		if (!messageListResizeObserver || !node || node.nodeType !== Node.ELEMENT_NODE) {
+			return;
+		}
+
+		const element = node;
+		unobserveMessageListLayoutTarget(element);
+		element.querySelectorAll(messageListNestedLayoutTargetSelector).forEach(function(descendant) {
+			unobserveMessageListLayoutTarget(descendant);
+		});
+	}
+
+	function observeMessageListLayoutTargets() {
+		if (!ensureMessageListResizeObserver()) {
+			return;
 		}
 
 		const nextObserved = new Set();
@@ -18062,21 +18120,18 @@
 				nextObserved.add(child);
 			}
 		}
-		refs.messageList.querySelectorAll(".preview-card, .preview-card-media, .mumble-inline-image-placeholder").forEach(function(element) {
+		refs.messageList.querySelectorAll(messageListNestedLayoutTargetSelector).forEach(function(element) {
 			nextObserved.add(element);
 		});
 
 		messageListResizeObservedElements.forEach(function(element) {
 			if (!nextObserved.has(element)) {
-				messageListResizeObserver.unobserve(element);
+				unobserveMessageListLayoutTarget(element);
 			}
 		});
 		nextObserved.forEach(function(element) {
-			if (!messageListResizeObservedElements.has(element)) {
-				messageListResizeObserver.observe(element);
-			}
+			observeMessageListLayoutTarget(element);
 		});
-		messageListResizeObservedElements = nextObserved;
 	}
 
 	function messageListHasOverflow() {
@@ -18159,14 +18214,18 @@
 			return;
 		}
 
-		messageListMutationObserver = new MutationObserver(function() {
-			observeMessageListLayoutTargets();
+		messageListMutationObserver = new MutationObserver(function(mutations) {
+			mutations.forEach(function(mutation) {
+				mutation.removedNodes.forEach(unobserveMessageListLayoutTargetSubtree);
+				mutation.addedNodes.forEach(observeMessageListLayoutTargetSubtree);
+			});
 			refreshMessageListPinning(2);
 		});
 		messageListMutationObserver.observe(refs.messageList, {
+			// Text-driven height changes are covered by the ResizeObserver on each
+			// top-level timeline row, so observing every character mutation is redundant.
 			childList: true,
-			subtree: true,
-			characterData: true
+			subtree: true
 		});
 		observeMessageListLayoutTargets();
 	}
@@ -19196,9 +19255,25 @@
 		return state;
 	}
 
+	function modernDialogSourceStateSignature(state) {
+		try {
+			const signature = JSON.stringify(state || null);
+			return typeof signature === "string" ? signature : null;
+		} catch (error) {
+			return null;
+		}
+	}
+
 	function syncModernDialogState(state) {
 		const detachedDialogHost = state && state.open
 			&& String(state.host || "") === "window";
+		const detachedSourceStateSignature = detachedDialogHost
+			? modernDialogSourceStateSignature(state)
+			: null;
+		if (detachedSourceStateSignature !== null
+				&& detachedSourceStateSignature === detachedModernDialogLastSourceStateSignature) {
+			return;
+		}
 		detachedModernDialogUiTweaks = detachedDialogHost && state.uiTweaks
 			? state.uiTweaks
 			: null;
@@ -19208,8 +19283,10 @@
 			modernDialogLocalFieldValues = {};
 			renderModernDialog();
 			syncAmbientState(getSnapshot());
+			detachedModernDialogLastSourceStateSignature = detachedSourceStateSignature;
 			return;
 		}
+		detachedModernDialogLastSourceStateSignature = undefined;
 
 		if (state && state.open) {
 			rememberFocusedModernDialogFieldValue();
@@ -25995,7 +26072,7 @@
 			hideWhenEmpty: !(app.canManageTextChannels || app.canCreateTextRoom)
 		});
 		renderDirectMessages(snapshot);
-		renderNote(app, snapshot.activeScope || {}, snapshot.messages || []);
+		renderNote(app, scope, snapshot.messages || []);
 		trackActiveRailTokenForReveal(activeRailToken());
 
 		renderVoicePresenceStack(headerPresence);
@@ -26003,7 +26080,6 @@
 		renderStonksChatHeader(snapshot);
 		renderScreenShareHeader(scope, scope.screenShare || null);
 		renderScreenShareCard(scope, scope.screenShare || null);
-		renderNote(app, scope, snapshot.messages || []);
 		renderMessages(snapshot, { resolvePendingScopeLoading: true, snapshotRender: true });
 		renderSelfCard(app);
 		syncAmbientState(snapshot);

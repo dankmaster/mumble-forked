@@ -7,16 +7,11 @@
 /// Further details on what exactly is contained in the "message objects" that are parameters to all functions
 /// in this file, can be found in the src/Mumble.proto file.
 
-#include "ACLEditor.h"
 #include "About.h"
 #include "AudioInput.h"
-#include "AudioStats.h"
-#include "AudioWizard.h"
-#include "BanEditor.h"
 #include "Channel.h"
 #include "ChatFeature.h"
 #include "ChatPerfTrace.h"
-#include "ConnectDialog.h"
 #include "Connection.h"
 #include "Database.h"
 #include "FeedbackReport.h"
@@ -32,8 +27,6 @@
 #include "ScreenShareManager.h"
 #include "ServerHandler.h"
 #include "User.h"
-#include "UserEdit.h"
-#include "UserInformation.h"
 #include "UserModel.h"
 #include "Utils.h"
 #include "VersionCheck.h"
@@ -217,19 +210,8 @@ void MainWindow::msgAuthenticate(const MumbleProto::Authenticate &) {
 /// @param msg The message object containing information about the ban list
 void MainWindow::msgBanList(const MumbleProto::BanList &msg) {
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	if (usesModernShell()) {
-		openModernServerBanListDialog(msg);
-		return;
-	}
+	openModernServerBanListDialog(msg);
 #endif
-
-	if (banEdit) {
-		banEdit->reject();
-		delete banEdit;
-		banEdit = nullptr;
-	}
-	banEdit = new BanEditor(msg, this);
-	banEdit->show();
 }
 
 /// This message is being received whenever the server rejects the connection of this client.
@@ -1316,11 +1298,6 @@ void MainWindow::msgUserRemove(const MumbleProto::UserRemove &msg) {
 		}
 	}
 
-	if (Global::get().mw->m_searchDialog) {
-		QMetaObject::invokeMethod(Global::get().mw->m_searchDialog, "on_clientDisconnected", Qt::QueuedConnection,
-								  Q_ARG(unsigned int, pDst->uiSession));
-	}
-
 	if (pDst != pSelf) {
 		clearUserTextureRequest(pDst->uiSession);
 		if (hiddenLegacyUserModelSafeMode) {
@@ -1512,11 +1489,6 @@ void MainWindow::msgChannelRemove(const MumbleProto::ChannelRemove &msg) {
 		const bool hiddenLegacyChannelModelSafeMode =
 			qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && usesModernShell();
 
-		if (Global::get().mw->m_searchDialog) {
-			QMetaObject::invokeMethod(Global::get().mw->m_searchDialog, "on_channelRemoved", Qt::QueuedConnection,
-									  Q_ARG(unsigned int, c->iId));
-		}
-
 		if (hiddenLegacyChannelModelSafeMode) {
 			if (channelSubtreeHasUsers(c)) {
 				Global::get().l->log(Log::CriticalError,
@@ -1600,24 +1572,8 @@ void MainWindow::msgTextMessage(const MumbleProto::TextMessage &msg) {
 /// @param msg The message object holding the ACL and further details
 void MainWindow::msgACL(const MumbleProto::ACL &msg) {
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	if (usesModernShell()) {
-		if (!m_pendingClassicAclDialog) {
-			openModernAclDialog(msg);
-			return;
-		}
-		m_pendingClassicAclDialog = false;
-	}
+	openModernAclDialog(msg);
 #endif
-
-	if (aclEdit) {
-		aclEdit->reject();
-		delete aclEdit;
-		aclEdit = nullptr;
-	}
-	if (Channel::get(msg.channel_id())) {
-		aclEdit = new ACLEditor(msg.channel_id(), msg, this);
-		aclEdit->show();
-	}
 }
 
 /// This message is being received when the server informs the local client about user information. This message will
@@ -1630,8 +1586,6 @@ void MainWindow::msgQueryUsers(const MumbleProto::QueryUsers &msg) {
 		return;
 	}
 #endif
-	if (aclEdit)
-		aclEdit->returnQuery(msg);
 }
 
 /// Pings are a method to check the server-client connection. This implementation does nothing.
@@ -1759,19 +1713,8 @@ void MainWindow::msgUserList(const MumbleProto::UserList &msg) {
 	if (handleModernAclUserList(msg)) {
 		return;
 	}
-	if (usesModernShell()) {
-		openModernServerUserListDialog(msg);
-		return;
-	}
+	openModernServerUserListDialog(msg);
 #endif
-
-	if (userEdit) {
-		userEdit->reject();
-		delete userEdit;
-		userEdit = nullptr;
-	}
-	userEdit = new UserEdit(msg, this);
-	userEdit->show();
 }
 
 /// This message is only sent by the client in order to register/clear whisper targets. Therefore
@@ -1869,13 +1812,6 @@ void MainWindow::msgUserStats(const MumbleProto::UserStats &msg) {
 		}
 	}
 
-	UserInformation *ui = qmUserInformations.value(msg.session());
-	if (ui) {
-		m_pendingUserInformationSessions.remove(msg.session());
-		ui->update(msg);
-		return;
-	}
-
 	if (msg.stats_only()) {
 		return;
 	}
@@ -1885,18 +1821,8 @@ void MainWindow::msgUserStats(const MumbleProto::UserStats &msg) {
 	}
 
 #if defined(MUMBLE_HAS_MODERN_LAYOUT)
-	if (usesModernShell()) {
-		openModernUserInformationDialog(msg);
-		return;
-	}
+	openModernUserInformationDialog(msg);
 #endif
-
-	ui = new UserInformation(msg, this);
-	ui->setAttribute(Qt::WA_DeleteOnClose, true);
-	connect(ui, SIGNAL(destroyed()), this, SLOT(destroyUserInformation()));
-
-	qmUserInformations.insert(msg.session(), ui);
-	ui->show();
 }
 
 /// This message is only ever sent by the client in order to request binary data that otherwise

@@ -5,9 +5,8 @@
 
 #include "PluginUpdater.h"
 #include "Log.h"
-#include "PluginInstaller.h"
+#include "PluginInstallService.h"
 #include "PluginManager.h"
-#include "UiTheme.h"
 #include "Global.h"
 
 #include <QNetworkRequest>
@@ -16,16 +15,12 @@
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QHashIterator>
-#include <QtCore/QSignalBlocker>
-#include <QtWidgets/QCheckBox>
-#include <QtWidgets/QLabel>
 
 #include <algorithm>
 #include <utility>
 
-PluginUpdater::PluginUpdater(QWidget *parent)
-	: QDialog(parent), m_wasInterrupted(false), m_dataMutex(), m_pluginsToUpdate(), m_networkManager(),
-	  m_pluginUpdateWidgets() {
+PluginUpdater::PluginUpdater(QObject *parent)
+	: QObject(parent), m_wasInterrupted(false), m_dataMutex(), m_pluginsToUpdate(), m_networkManager() {
 	QObject::connect(&m_networkManager, &QNetworkAccessManager::finished, this, &PluginUpdater::on_updateDownloaded);
 }
 
@@ -64,58 +59,6 @@ void PluginUpdater::checkForUpdates() {
 	});
 }
 
-void PluginUpdater::promptAndUpdate() {
-	setupUi(this);
-	populateUI();
-
-	setWindowIcon(QIcon(QLatin1String("skin:mumble.svg")));
-
-	if (const std::optional< UiThemeTokens > tokens = activeUiThemeTokens(); tokens) {
-		setAttribute(Qt::WA_StyledBackground, true);
-		setStyleSheet(QString::fromLatin1(
-						  "QDialog#PluginUpdater {"
-						  " background-color: %1;"
-						  " color: %2;"
-						  "}"
-						  "QFrame#line,"
-						  "QFrame#line_2 {"
-						  " background-color: %3;"
-						  " color: %3;"
-						  " border: none;"
-						  " max-height: 1px;"
-						  " min-height: 1px;"
-						  "}"
-						  "QScrollArea,"
-						  "QWidget#qwContent {"
-						  " background-color: %1;"
-						  " color: %2;"
-						  " border: none;"
-						  "}"
-						  "QLabel {"
-						  " color: %2;"
-						  "}"
-						  "QCheckBox {"
-						  " color: %2;"
-						  "}"
-						  "QDialogButtonBox { dialogbuttonbox-buttons-have-icons: 0; }")
-						  .arg(uiThemeQssColor(tokens->base), uiThemeQssColor(tokens->text),
-							   uiThemeQssColor(tokens->surface1)));
-	}
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-	// checkStateChanged was introduced in Qt 6.7
-	QObject::connect(qcbSelectAll, &QCheckBox::checkStateChanged, this, &PluginUpdater::on_selectAll);
-#else
-	QObject::connect(qcbSelectAll, &QCheckBox::stateChanged, this, &PluginUpdater::on_selectAll);
-#endif
-
-	QObject::connect(this, &QDialog::finished, this, &PluginUpdater::on_finished);
-
-	if (exec() == QDialog::Accepted) {
-		update();
-	}
-}
-
 void PluginUpdater::update() {
 	QMutexLocker l(&m_dataMutex);
 
@@ -128,154 +71,25 @@ void PluginUpdater::update() {
 	}
 }
 
-void PluginUpdater::populateUI() {
-	clearUI();
-
-	QMutexLocker l(&m_dataMutex);
-	for (int i = 0; i < m_pluginsToUpdate.size(); i++) {
-		UpdateEntry currentEntry = m_pluginsToUpdate[i];
-		plugin_id_t pluginID     = currentEntry.pluginID;
-
-		const_plugin_ptr_t plugin = Global::get().pluginManager->getPlugin(pluginID);
-
-		if (!plugin) {
-			continue;
-		}
-
-		QCheckBox *checkBox = new QCheckBox(qwContent);
-		checkBox->setText(plugin->getName());
-		checkBox->setToolTip(plugin->getDescription());
-
-		checkBox->setProperty("pluginID", pluginID);
-
-		QLabel *urlLabel = new QLabel(qwContent);
-		urlLabel->setText(currentEntry.updateURL.toString());
-		urlLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-
-		UpdateWidgetPair pair = { checkBox, urlLabel };
-		m_pluginUpdateWidgets << pair;
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-		// checkStateChanged was introduced in Qt 6.7
-		QObject::connect(checkBox, &QCheckBox::checkStateChanged, this, &PluginUpdater::on_singleSelectionChanged);
-#else
-		QObject::connect(checkBox, &QCheckBox::stateChanged, this, &PluginUpdater::on_singleSelectionChanged);
-#endif
-	}
-
-	// sort the plugins alphabetically
-	std::sort(m_pluginUpdateWidgets.begin(), m_pluginUpdateWidgets.end(),
-			  [](const UpdateWidgetPair &first, const UpdateWidgetPair &second) {
-				  return first.pluginCheckBox->text().compare(second.pluginCheckBox->text(), Qt::CaseInsensitive) < 0;
-			  });
-
-	// add the widgets to the layout
-	for (int i = 0; i < m_pluginUpdateWidgets.size(); i++) {
-		UpdateWidgetPair &currentPair = m_pluginUpdateWidgets[i];
-
-		static_cast< QFormLayout * >(qwContent->layout())->addRow(currentPair.pluginCheckBox, currentPair.urlLabel);
-	}
+QVector< UpdateEntry > PluginUpdater::availableUpdates() {
+	QMutexLocker lock(&m_dataMutex);
+	return m_pluginsToUpdate;
 }
 
-void PluginUpdater::clearUI() {
-	// There are always as many checkboxes as there are labels
-	for (int i = 0; i < m_pluginUpdateWidgets.size(); i++) {
-		UpdateWidgetPair &currentPair = m_pluginUpdateWidgets[i];
-
-		qwContent->layout()->removeWidget(currentPair.pluginCheckBox);
-		qwContent->layout()->removeWidget(currentPair.urlLabel);
-
-		delete currentPair.pluginCheckBox;
-		delete currentPair.urlLabel;
+void PluginUpdater::updateSelected(const QSet< plugin_id_t > &pluginIDs) {
+	{
+		QMutexLocker lock(&m_dataMutex);
+		m_pluginsToUpdate.erase(
+			std::remove_if(m_pluginsToUpdate.begin(), m_pluginsToUpdate.end(), [&pluginIDs](const UpdateEntry &entry) {
+				return !pluginIDs.contains(entry.pluginID);
+			}),
+			m_pluginsToUpdate.end());
 	}
-}
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-void PluginUpdater::on_selectAll(Qt::CheckState checkState) {
-#else
-void PluginUpdater::on_selectAll(int checkState) {
-#endif
-	// failsafe for partially selected state (shouldn't happen though)
-	if (checkState == Qt::PartiallyChecked) {
-		checkState = Qt::Unchecked;
-	}
-
-	// Select or deselect all plugins
-	for (int i = 0; i < m_pluginUpdateWidgets.size(); i++) {
-		UpdateWidgetPair &currentPair = m_pluginUpdateWidgets[i];
-
-		currentPair.pluginCheckBox->setCheckState(static_cast< Qt::CheckState >(checkState));
-	}
-}
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-void PluginUpdater::on_singleSelectionChanged(Qt::CheckState checkState) {
-#else
-void PluginUpdater::on_singleSelectionChanged(int checkState) {
-#endif
-	bool isChecked = checkState == Qt::Checked;
-
-	// Block signals for the selectAll checkBox in order to not trigger its
-	// check-logic when changing its check-state here
-	const QSignalBlocker blocker(qcbSelectAll);
-
-	if (!isChecked) {
-		// If even a single item is unchecked, the selectAll checkbox has to be unchecked
-		qcbSelectAll->setCheckState(Qt::Unchecked);
+	if (pluginIDs.isEmpty()) {
+		emit updateInterrupted();
 		return;
 	}
-
-	// iterate through all checkboxes to see whether we have to toggle the selectAll checkbox
-	for (int i = 0; i < m_pluginUpdateWidgets.size(); i++) {
-		const UpdateWidgetPair &currentPair = m_pluginUpdateWidgets[i];
-
-		if (!currentPair.pluginCheckBox->isChecked()) {
-			// One unchecked checkBox is enough to know that the selectAll
-			// CheckBox can't be checked, so we can abort at this point
-			return;
-		}
-	}
-
-	qcbSelectAll->setCheckState(Qt::Checked);
-}
-
-void PluginUpdater::on_finished(int result) {
-	if (result == QDialog::Accepted) {
-		if (qcbSelectAll->isChecked()) {
-			// all plugins shall be updated, so we don't have to check them individually
-			return;
-		}
-
-		QMutexLocker l(&m_dataMutex);
-
-		// The user wants to update the selected plugins only
-		// remove the plugins that shouldn't be updated from m_pluginsToUpdate
-		auto it = m_pluginsToUpdate.begin();
-		while (it != m_pluginsToUpdate.end()) {
-			plugin_id_t id = it->pluginID;
-
-			// find the corresponding checkbox
-			bool updateCurrent = false;
-			for (int k = 0; k < m_pluginUpdateWidgets.size(); k++) {
-				QCheckBox *checkBox = m_pluginUpdateWidgets[k].pluginCheckBox;
-				QVariant idVariant  = checkBox->property("pluginID");
-
-				if (idVariant.isValid() && static_cast< plugin_id_t >(idVariant.toInt()) == id) {
-					updateCurrent = checkBox->isChecked();
-					break;
-				}
-			}
-
-			if (!updateCurrent) {
-				// remove this entry from the update-vector
-				it = m_pluginsToUpdate.erase(it);
-			} else {
-				it++;
-			}
-		}
-	} else {
-		// Nothing to do as the user doesn't want to update anyways
-	}
+	update();
 }
 
 void PluginUpdater::interrupt() {
@@ -409,9 +223,8 @@ void PluginUpdater::on_updateDownloaded(QNetworkReply *reply) {
 			// installer can really unload the plugin in order to overwrite it.
 			plugin.reset();
 
-			// Launch installer
-			PluginInstaller installer(QFileInfo(file.fileName()));
-			installer.install();
+			PluginInstallService installer(file.fileName());
+			installer.install(true);
 
 			Log::logOrDefer(Log::Information, tr("Successfully updated plugin \"%1\"").arg(pluginName));
 

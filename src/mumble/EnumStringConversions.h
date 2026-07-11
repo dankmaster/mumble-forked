@@ -9,7 +9,7 @@
 
 #include "EchoCancelOption.h"
 #include "Log.h"
-#include "SearchDialog.h"
+#include "SearchTypes.h"
 #include "Settings.h"
 
 #include <type_traits>

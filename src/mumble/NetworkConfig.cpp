@@ -5,29 +5,16 @@
 
 #include "NetworkConfig.h"
 
-#include "MainWindow.h"
 #include "OSInfo.h"
-#include "PersistentChatMediaCache.h"
 #include "Version.h"
 #include "Global.h"
 
 #include <QCoreApplication>
 #include <QDir>
-#include <QMessageBox>
-#include <QPushButton>
 #include <QSettings>
-#include <QSignalBlocker>
 #include <QtNetwork/QHostAddress>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkProxy>
-
-const QString NetworkConfig::name = QLatin1String("NetworkConfig");
-
-static ConfigWidget *NetworkConfigNew(Settings &st) {
-	return new NetworkConfig(st);
-}
-
-static ConfigRegistrar registrarNetworkConfig(1300, NetworkConfigNew);
 
 namespace {
 
@@ -40,111 +27,6 @@ QString startWithPCCommand() {
 }
 
 } // namespace
-
-NetworkConfig::NetworkConfig(Settings &st) : ConfigWidget(st) {
-	setupUi(this);
-
-#ifndef Q_OS_WIN
-	qcbStartWithPC->hide();
-#endif
-
-	qleAdvertisedRelease->setPlaceholderText(Version::getRelease());
-	qleAdvertisedOS->setPlaceholderText(OSInfo::getOS());
-	qleAdvertisedOSVersion->setPlaceholderText(OSInfo::getOSDisplayableVersion());
-	qcbScreenShareDiagnostics->hide();
-	connect(qpbClearPersistentChatMediaCache, &QPushButton::clicked, this, [this]() {
-		const quint64 previousSize = PersistentChatMediaCache::sizeBytes();
-		const bool cleared         = PersistentChatMediaCache::clear();
-		if (cleared) {
-			QMessageBox::information(this, tr("Local media cache cleared"),
-									 tr("Removed %1 of cached chat preview media from this profile.")
-										 .arg(PersistentChatMediaCache::formattedSize(previousSize)));
-		} else {
-			QMessageBox::warning(this, tr("Unable to clear cache"),
-								 tr("Mumble could not clear the local chat media cache."));
-		}
-	});
-}
-
-QString NetworkConfig::title() const {
-	return tr("Network");
-}
-
-const QString &NetworkConfig::getName() const {
-	return NetworkConfig::name;
-}
-
-QIcon NetworkConfig::icon() const {
-	return QIcon(QLatin1String("skin:config_network.png"));
-}
-
-void NetworkConfig::load(const Settings &r) {
-	loadCheckBox(qcbTcpMode, s.bTCPCompat);
-	loadCheckBox(qcbQoS, s.bQoS);
-	loadCheckBox(qcbAutoReconnect, s.bReconnect);
-	loadCheckBox(qcbAutoConnect, s.bAutoConnect);
-	loadCheckBox(qcbReconnectLastChannel, s.bReconnectToLastChannel);
-	loadCheckBox(qcbStartWithPC, r.bStartWithPC);
-	loadCheckBox(qcbDisablePublicList, s.bDisablePublicList);
-	loadCheckBox(qcbSuppressIdentity, s.bSuppressIdentity);
-	loadCheckBox(qcbLinkPreviews, s.bEnableLinkPreviews);
-	loadComboBox(qcbType, s.ptProxyType);
-
-	qleHostname->setText(r.qsProxyHost);
-
-	if (r.usProxyPort > 0) {
-		QString port;
-		port.setNum(r.usProxyPort);
-		qlePort->setText(port);
-	} else
-		qlePort->setText(QString());
-
-	qleUsername->setText(r.qsProxyUsername);
-	qlePassword->setText(r.qsProxyPassword);
-
-	loadCheckBox(qcbHideOS, s.bHideOS);
-	qleAdvertisedRelease->setText(r.qsAdvertisedReleaseOverride);
-	qleAdvertisedOS->setText(r.qsAdvertisedOSOverride);
-	qleAdvertisedOSVersion->setText(r.qsAdvertisedOSVersionOverride);
-
-	const QSignalBlocker blocker(qcbAutoUpdate);
-	loadCheckBox(qcbAutoUpdate, r.bUpdateCheck);
-	loadCheckBox(qcbPluginUpdateCheck, r.bPluginCheck);
-	loadCheckBox(qcbPluginAutoUpdate, r.bPluginAutoUpdate);
-	loadCheckBox(qcbUsage, r.bUsage);
-
-	qcbUsage->setChecked(false);
-	qcbUsage->setEnabled(false);
-	qcbDisablePublicList->setChecked(true);
-	qcbDisablePublicList->setEnabled(false);
-}
-
-void NetworkConfig::save() const {
-	s.bTCPCompat         = qcbTcpMode->isChecked();
-	s.bQoS               = qcbQoS->isChecked();
-	s.bReconnect              = qcbAutoReconnect->isChecked();
-	s.bAutoConnect            = qcbAutoConnect->isChecked();
-	s.bReconnectToLastChannel = qcbReconnectLastChannel->isChecked();
-	s.bStartWithPC            = qcbStartWithPC->isChecked();
-	s.bDisablePublicList      = true;
-	s.bSuppressIdentity       = qcbSuppressIdentity->isChecked();
-	s.bEnableLinkPreviews     = qcbLinkPreviews->isChecked();
-	s.bHideOS                 = qcbHideOS->isChecked();
-	s.qsAdvertisedReleaseOverride   = qleAdvertisedRelease->text().trimmed();
-	s.qsAdvertisedOSOverride        = qleAdvertisedOS->text().trimmed();
-	s.qsAdvertisedOSVersionOverride = qleAdvertisedOSVersion->text().trimmed();
-
-	s.ptProxyType     = static_cast< Settings::ProxyType >(qcbType->currentIndex());
-	s.qsProxyHost     = qleHostname->text();
-	s.usProxyPort     = qlePort->text().toUShort();
-	s.qsProxyUsername = qleUsername->text();
-	s.qsProxyPassword = qlePassword->text();
-
-	s.bUpdateCheck      = qcbAutoUpdate->isChecked();
-	s.bPluginCheck      = qcbPluginUpdateCheck->isChecked();
-	s.bPluginAutoUpdate = qcbPluginAutoUpdate->isChecked();
-	s.bUsage            = false;
-}
 
 static QNetworkProxy::ProxyType local_to_qt_proxy(Settings::ProxyType pt) {
 	switch (pt) {
@@ -203,23 +85,6 @@ bool NetworkConfig::TcpModeEnabled() {
 	 */
 
 	return Global::get().s.ptProxyType != Settings::NoProxy || Global::get().s.bTCPCompat;
-}
-
-void NetworkConfig::accept() const {
-	NetworkConfig::SetupProxy();
-	NetworkConfig::ApplyStartWithPCRegistration(Global::get().s.bStartWithPC);
-}
-
-void NetworkConfig::on_qcbType_currentIndexChanged(int v) {
-	Settings::ProxyType pt = static_cast< Settings::ProxyType >(v);
-
-	qleHostname->setEnabled(pt != Settings::NoProxy);
-	qlePort->setEnabled(pt != Settings::NoProxy);
-	qleUsername->setEnabled(pt != Settings::NoProxy);
-	qlePassword->setEnabled(pt != Settings::NoProxy);
-	qcbTcpMode->setEnabled(pt == Settings::NoProxy);
-
-	s.ptProxyType = pt;
 }
 
 QNetworkReply *Network::get(const QUrl &url) {

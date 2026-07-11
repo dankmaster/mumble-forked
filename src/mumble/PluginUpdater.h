@@ -8,23 +8,17 @@
 
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QObject>
 #include <QString>
 #include <QtCore/QMutex>
 #include <QtCore/QUrl>
 #include <QtCore/QVector>
+#include <QtCore/QSet>
 
 #include <atomic>
 #include <limits>
 
 #include "Plugin.h"
-#include "ui_PluginUpdater.h"
-
-/// A helper struct to store a pair of a CheckBox and a label corresponding to
-/// a single plugin.
-struct UpdateWidgetPair {
-	QCheckBox *pluginCheckBox;
-	QLabel *urlLabel;
-};
 
 /// A helper struct to store a pair of a plugin ID  and an URL corresponding to
 /// the same plugin.
@@ -41,7 +35,7 @@ struct UpdateEntry {
 
 /// A class designed for managing plugin updates. At the same time this also represents
 /// a Dialog that can be used to prompt the user whether certain updates should be updated.
-class PluginUpdater : public QDialog, public Ui::PluginUpdater {
+class PluginUpdater : public QObject {
 private:
 	Q_OBJECT
 	Q_DISABLE_COPY(PluginUpdater)
@@ -57,19 +51,11 @@ protected:
 	QVector< UpdateEntry > m_pluginsToUpdate;
 	/// The NetworkManager used to perform the downloading of plugins.
 	QNetworkAccessManager m_networkManager;
-	/// A vector of the UI elements created for the individual plugins (in form of UpdateWidgetPairs).
-	/// NOTE: This vector may only be accessed from the UI thread this dialog is living in!
-	QVector< UpdateWidgetPair > m_pluginUpdateWidgets;
-
-	/// Populates the UI with plugins that have been found to have an update available (through a call
-	/// to checkForUpdates()).
-	void populateUI();
-
 public:
 	/// Constructor
 	///
 	/// @param parent A pointer to the QWidget parent of this object
-	PluginUpdater(QWidget *parent = nullptr);
+	PluginUpdater(QObject *parent = nullptr);
 	/// Destructor
 	~PluginUpdater();
 
@@ -80,28 +66,11 @@ public:
 	/// in a non-blocking fashion (in another thread). Once all plugins have been checked and if there
 	/// are updates available, the updatesAvailable signal is emitted.
 	void checkForUpdates();
-	/// Launches a Dialog that asks the user which of the plugins an update has been found for, shall be
-	/// updated. If the user has selected at least selected one plugin and has accepted the dialog, this
-	/// function will automatically call update().
-	void promptAndUpdate();
 	/// Starts the update process of the plugins. This is done asynchronously.
 	void update();
+	QVector< UpdateEntry > availableUpdates();
+	void updateSelected(const QSet< plugin_id_t > &pluginIDs);
 public slots:
-	/// Clears the UI from the widgets created for the individual plugins.
-	void clearUI();
-#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
-	/// Slot triggered if the user changes the state of the selectAll CheckBox.
-	void on_selectAll(Qt::CheckState checkState);
-	/// Slot triggered if the user toggles the CheckBox for any individual plugin.
-	void on_singleSelectionChanged(Qt::CheckState checkState);
-#else
-	/// Slot triggered if the user changes the state of the selectAll CheckBox.
-	void on_selectAll(int checkState);
-	/// Slot triggered if the user toggles the CheckBox for any individual plugin.
-	void on_singleSelectionChanged(int checkState);
-#endif
-	/// Slot triggered when the dialog is being closed.
-	void on_finished(int result);
 	/// Slot that can be triggered to ask for the update process to be interrupted.
 	void interrupt();
 protected slots:

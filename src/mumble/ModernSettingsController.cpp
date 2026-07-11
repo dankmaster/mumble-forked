@@ -12,13 +12,17 @@
 #include "GlobalShortcut.h"
 #include "Database.h"
 #include "Global.h"
+#include "Log.h"
 #include "ModernShellMenuSerializer.h"
 #include "ModernTheme.h"
 #include "PersistentChatMediaCache.h"
+#include "Plugin.h"
+#include "PluginManager.h"
 #include "SpeechCleanup.h"
 #include "Version.h"
 
 #include <QtCore/QDebug>
+#include <QtCore/QCryptographicHash>
 #include <QtCore/QHash>
 #include <QtCore/QMap>
 #include <QtCore/QObject>
@@ -1534,6 +1538,157 @@ namespace {
 		}
 		return fields;
 	}
+
+	QString pluginSettingsKey(const QString &path) {
+		return QString::fromLatin1(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Sha1).toHex());
+	}
+
+	PluginSetting pluginDraftSetting(const Settings &settings, const const_plugin_ptr_t &plugin) {
+		const QString path = plugin ? plugin->getFilePath() : QString();
+		const QString key  = pluginSettingsKey(path);
+		if (settings.qhPluginSettings.contains(key)) {
+			return settings.qhPluginSettings.value(key);
+		}
+
+		PluginSetting setting;
+		setting.path                    = path;
+		setting.enabled                 = plugin && plugin->isLoaded();
+		setting.positionalDataEnabled   = plugin && plugin->isPositionalDataEnabled();
+		setting.allowKeyboardMonitoring = plugin && plugin->isKeyboardMonitoringAllowed();
+		return setting;
+	}
+
+	QVariantMap pluginEditorField(const Settings &settings) {
+		QVariantMap field = fieldItem(QStringLiteral("plugins.entries"), QObject::tr("Installed plugins"),
+									  QStringLiteral("pluginEditor"), QVariant());
+		QVariantList rows;
+		if (Global::get().pluginManager) {
+			const QVector< const_plugin_ptr_t > plugins = Global::get().pluginManager->getPlugins(true);
+			for (const const_plugin_ptr_t &plugin : plugins) {
+				if (!plugin) {
+					continue;
+				}
+
+				const PluginSetting setting = pluginDraftSetting(settings, plugin);
+				const uint32_t features      = plugin->getFeatures();
+				QVariantMap row;
+				row.insert(QStringLiteral("id"), static_cast< qulonglong >(plugin->getID()));
+				row.insert(QStringLiteral("name"), plugin->getName());
+				row.insert(QStringLiteral("description"), plugin->getDescription());
+				row.insert(QStringLiteral("version"),
+						   plugin->getVersion() == MUMBLE_VERSION_UNKNOWN ? QObject::tr("Unknown")
+																 : static_cast< QString >(plugin->getVersion()));
+				row.insert(QStringLiteral("path"), plugin->getFilePath());
+				row.insert(QStringLiteral("loaded"), plugin->isLoaded());
+				row.insert(QStringLiteral("enabled"), setting.enabled);
+				row.insert(QStringLiteral("positionalAvailable"),
+						   (features & MUMBLE_FEATURE_POSITIONAL) != 0);
+				row.insert(QStringLiteral("positionalEnabled"), setting.positionalDataEnabled);
+				row.insert(QStringLiteral("keyboardMonitoringAllowed"), setting.allowKeyboardMonitoring);
+				row.insert(QStringLiteral("canConfigure"), plugin->providesConfigDialog());
+				row.insert(QStringLiteral("canShowAbout"), plugin->providesAboutDialog());
+				row.insert(QStringLiteral("builtIn"), plugin->isBuiltInPlugin());
+				rows.push_back(row);
+			}
+		}
+		field.insert(QStringLiteral("rows"), rows);
+		field.insert(QStringLiteral("enabled"), true);
+		return field;
+	}
+
+	bool updatePluginDraft(Settings &settings, const QVariantMap &payload) {
+		if (!Global::get().pluginManager) {
+			return false;
+		}
+		const plugin_id_t pluginID =
+			static_cast< plugin_id_t >(payload.value(QStringLiteral("pluginId")).toULongLong());
+		const const_plugin_ptr_t plugin = Global::get().pluginManager->getPlugin(pluginID);
+		if (!plugin) {
+			return false;
+		}
+
+		PluginSetting setting = pluginDraftSetting(settings, plugin);
+		const QString property = payload.value(QStringLiteral("property")).toString();
+		const bool value       = payload.value(QStringLiteral("value")).toBool();
+		if (property == QLatin1String("enabled")) {
+			setting.enabled = value;
+		} else if (property == QLatin1String("positional")) {
+			if ((plugin->getFeatures() & MUMBLE_FEATURE_POSITIONAL) == 0) {
+				return false;
+			}
+			setting.positionalDataEnabled = value;
+		} else if (property == QLatin1String("keyboard")) {
+			setting.allowKeyboardMonitoring = value;
+		} else {
+			return false;
+		}
+
+		settings.qhPluginSettings.insert(pluginSettingsKey(plugin->getFilePath()), setting);
+		return true;
+	}
+
+	QVariantMap messageEventEditorField(const Settings &settings) {
+		QVariantMap field = fieldItem(QStringLiteral("messages.events"), QObject::tr("Event behavior"),
+									  QStringLiteral("messageEventEditor"), QVariant());
+		QVariantList rows;
+		for (int index = Log::firstMsgType; index <= Log::lastMsgType; ++index) {
+			const Log::MsgType type = Log::msgOrder[index];
+			const quint32 flags     = settings.qmMessages.value(type);
+			QVariantMap row;
+			row.insert(QStringLiteral("type"), static_cast< int >(type));
+			row.insert(QStringLiteral("name"),
+					   Global::get().l ? Global::get().l->msgName(type) : QObject::tr("Event %1").arg(index + 1));
+			row.insert(QStringLiteral("console"), (flags & Settings::LogConsole) != 0);
+			row.insert(QStringLiteral("notification"), (flags & Settings::LogBalloon) != 0);
+			row.insert(QStringLiteral("highlight"), (flags & Settings::LogHighlight) != 0);
+			row.insert(QStringLiteral("tts"), (flags & Settings::LogTTS) != 0);
+			row.insert(QStringLiteral("limit"), (flags & Settings::LogMessageLimit) != 0);
+			row.insert(QStringLiteral("sound"), (flags & Settings::LogSoundfile) != 0);
+			row.insert(QStringLiteral("soundPath"), settings.qmMessageSounds.value(type));
+			rows.push_back(row);
+		}
+		field.insert(QStringLiteral("rows"), rows);
+		field.insert(QStringLiteral("enabled"), true);
+		return field;
+	}
+
+	bool updateMessageEventDraft(Settings &settings, const QVariantMap &payload) {
+		const int type = payload.value(QStringLiteral("messageType"), -1).toInt();
+		if (type < Log::firstMsgType || type > Log::PluginMessage) {
+			return false;
+		}
+		const QString property = payload.value(QStringLiteral("property")).toString();
+		quint32 flag = Settings::LogNone;
+		if (property == QLatin1String("console")) {
+			flag = Settings::LogConsole;
+		} else if (property == QLatin1String("notification")) {
+			flag = Settings::LogBalloon;
+		} else if (property == QLatin1String("highlight")) {
+			flag = Settings::LogHighlight;
+		} else if (property == QLatin1String("tts")) {
+			flag = Settings::LogTTS;
+		} else if (property == QLatin1String("limit")) {
+			flag = Settings::LogMessageLimit;
+		} else if (property == QLatin1String("sound")) {
+			flag = Settings::LogSoundfile;
+		} else {
+			return false;
+		}
+
+		quint32 flags = settings.qmMessages.value(type);
+		if (payload.value(QStringLiteral("value")).toBool()) {
+			flags |= flag;
+			if (flag == Settings::LogTTS) {
+				flags &= ~Settings::LogSoundfile;
+			} else if (flag == Settings::LogSoundfile) {
+				flags &= ~Settings::LogTTS;
+			}
+		} else {
+			flags &= ~flag;
+		}
+		settings.qmMessages.insert(type, flags);
+		return true;
+	}
 } // namespace
 
 void ModernSettingsController::open(const Settings &settings, const QString &pageName) {
@@ -1833,6 +1988,38 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 	} else if (id == QLatin1String("keys.enableXboxInput")) {
 		m_draft.bEnableXboxInput = value.toBool();
 		refreshShortcutRestartFlag();
+	} else if (id == QLatin1String("plugins.transmitPosition")) {
+		m_draft.bTransmitPosition = value.toBool();
+	} else if (id == QLatin1String("messages.ttsEnabled")) {
+		m_draft.bTTS = value.toBool();
+	} else if (id == QLatin1String("messages.ttsVolume")) {
+		m_draft.iTTSVolume = qBound(0, value.toInt(), 100);
+	} else if (id == QLatin1String("messages.ttsThreshold")) {
+		m_draft.iTTSThreshold = qBound(0, value.toInt(), 10000);
+	} else if (id == QLatin1String("messages.ttsReadOwn")) {
+		m_draft.bTTSMessageReadBack = value.toBool();
+	} else if (id == QLatin1String("messages.ttsNoScope")) {
+		m_draft.bTTSNoScope = value.toBool();
+	} else if (id == QLatin1String("messages.ttsNoAuthor")) {
+		m_draft.bTTSNoAuthor = value.toBool();
+	} else if (id == QLatin1String("messages.ttsLanguage")) {
+		m_draft.qsTTSLanguage = value.toString().trimmed();
+	} else if (id == QLatin1String("messages.notificationVolume")) {
+		m_draft.notificationVolume = floatFromPercent(value);
+	} else if (id == QLatin1String("messages.cueVolume")) {
+		m_draft.cueVolume = floatFromPercent(value);
+	} else if (id == QLatin1String("messages.limitThreshold")) {
+		m_draft.iMessageLimitUserThreshold = qBound(0, value.toInt(), 10000);
+	} else if (id == QLatin1String("messages.clock24Hour")) {
+		m_draft.bLog24HourClock = value.toBool();
+	} else if (id == QLatin1String("messages.whisperFriends")) {
+		m_draft.bWhisperFriends = value.toBool();
+	} else if (id.startsWith(QLatin1String("messages.sound."))) {
+		bool ok = false;
+		const int type = id.mid(QStringLiteral("messages.sound.").size()).toInt(&ok);
+		if (ok) {
+			m_draft.qmMessageSounds.insert(type, value.toString());
+		}
 	}
 
 	forceModernLayout();
@@ -1858,6 +2045,28 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 		m_draft = m_original;
 		m_shortcutCaptureIndex = -1;
 		forceModernLayout();
+		return result;
+	}
+
+	if (action == QLatin1String("plugins.toggle")) {
+		result.stateChanged = updatePluginDraft(m_draft, payload);
+		return result;
+	}
+
+	if (action == QLatin1String("messages.toggleEvent")) {
+		result.stateChanged = updateMessageEventDraft(m_draft, payload);
+		return result;
+	}
+
+	if (action.startsWith(QLatin1String("messages."))) {
+		result.externalActionID      = action;
+		result.externalActionPayload = payload;
+		return result;
+	}
+
+	if (action.startsWith(QLatin1String("plugins."))) {
+		result.externalActionID      = action;
+		result.externalActionPayload = payload;
 		return result;
 	}
 
@@ -2120,6 +2329,7 @@ QVariantList ModernSettingsController::pages() const {
 						  page(QStringLiteral("keys"), QObject::tr("Key Bindings")),
 						  page(QStringLiteral("network"), QObject::tr("Network")),
 						  page(QStringLiteral("screenShare"), QObject::tr("Screen Sharing")),
+						  page(QStringLiteral("plugins"), QObject::tr("Plugins")),
 						  page(QStringLiteral("about"), QObject::tr("About")) };
 }
 
@@ -2167,10 +2377,36 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 	if (m_activePage == QLatin1String("messages")) {
 		return QVariantList {
 			sectionItem(QObject::tr("Messages"), QVariantList {
-											 boolField(QStringLiteral("network.linkPreviews"),
-													   QObject::tr("Enable link previews"),
-													   m_draft.bEnableLinkPreviews) }),
+										 boolField(QStringLiteral("network.linkPreviews"),
+												   QObject::tr("Enable link previews"),
+												   m_draft.bEnableLinkPreviews),
+										 boolField(QStringLiteral("messages.clock24Hour"), QObject::tr("Use 24-hour timestamps"),
+												   m_draft.bLog24HourClock),
+										 boolField(QStringLiteral("messages.whisperFriends"),
+												   QObject::tr("Treat friends as whisper targets"), m_draft.bWhisperFriends),
+										 numberField(QStringLiteral("messages.limitThreshold"),
+													 QObject::tr("Message-limit user threshold"),
+													 m_draft.iMessageLimitUserThreshold, 0, 10000) }),
+			sectionItem(QObject::tr("Text to speech"), QVariantList {
+				boolField(QStringLiteral("messages.ttsEnabled"), QObject::tr("Enable text to speech"), m_draft.bTTS),
+				rangeField(QStringLiteral("messages.ttsVolume"), QObject::tr("TTS volume"), m_draft.iTTSVolume,
+						   0, 100, 1, QStringLiteral("%")),
+				numberField(QStringLiteral("messages.ttsThreshold"), QObject::tr("Maximum spoken message length"),
+							m_draft.iTTSThreshold, 0, 10000),
+				boolField(QStringLiteral("messages.ttsReadOwn"), QObject::tr("Read back my own messages"),
+						  m_draft.bTTSMessageReadBack),
+				boolField(QStringLiteral("messages.ttsNoScope"), QObject::tr("Omit message scope"), m_draft.bTTSNoScope),
+				boolField(QStringLiteral("messages.ttsNoAuthor"), QObject::tr("Omit message author"), m_draft.bTTSNoAuthor),
+				fieldItem(QStringLiteral("messages.ttsLanguage"), QObject::tr("TTS language (BCP47)"),
+						  QStringLiteral("text"), m_draft.qsTTSLanguage) }),
 			sectionItem(QObject::tr("Sounds"), QVariantList {
+										   rangeField(QStringLiteral("messages.notificationVolume"),
+													  QObject::tr("Notification volume"),
+													  percentFromFloat(m_draft.notificationVolume), 0, 100, 1,
+													  QStringLiteral("%")),
+										   rangeField(QStringLiteral("messages.cueVolume"), QObject::tr("Cue volume"),
+													  percentFromFloat(m_draft.cueVolume), 0, 100, 1,
+													  QStringLiteral("%")),
 										   boolField(QStringLiteral("audio.cuePtt"),
 													 QObject::tr("Play transmit cue for push-to-talk"),
 													 m_draft.audioCueEnabledPTT),
@@ -2188,7 +2424,8 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 													 m_draft.bTxMuteCue),
 										   fieldItem(QStringLiteral("audio.muteCuePath"),
 													 QObject::tr("Mute cue file"),
-													 QStringLiteral("text"), m_draft.qsTxMuteCue) })
+													 QStringLiteral("text"), m_draft.qsTxMuteCue) }),
+			sectionItem(QObject::tr("Per-event behavior"), QVariantList { messageEventEditorField(m_draft) })
 		};
 	}
 
@@ -2228,6 +2465,17 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 														 QObject::tr("Qt details"),
 														 QObject::tr("Open About Qt"),
 														 QStringLiteral("about.openQt")) })
+		};
+	}
+
+	if (m_activePage == QLatin1String("plugins")) {
+		return QVariantList {
+			sectionItem(QObject::tr("Positional audio"), QVariantList {
+				boolField(QStringLiteral("plugins.transmitPosition"),
+						  QObject::tr("Transmit positional information to the server"),
+						  m_draft.bTransmitPosition),
+				noteField(QObject::tr("Each plugin can additionally be granted positional-audio and keyboard-monitoring permissions below.")) }),
+			sectionItem(QObject::tr("Plugin manager"), QVariantList { pluginEditorField(m_draft) })
 		};
 	}
 
@@ -2731,11 +2979,13 @@ void ModernSettingsController::setActivePage(const QString &pageID) {
 		m_activePage = QStringLiteral("audioInput");
 	} else if (normalized == QLatin1String("AudioOutput")) {
 		m_activePage = QStringLiteral("audioOutput");
+	} else if (normalized == QLatin1String("PluginConfig")) {
+		m_activePage = QStringLiteral("plugins");
 	} else if (normalized == QLatin1String("network") || normalized == QLatin1String("screenShare")
 			   || normalized == QLatin1String("audioInput") || normalized == QLatin1String("audioOutput")
 			   || normalized == QLatin1String("look") || normalized == QLatin1String("ui")
 			   || normalized == QLatin1String("messages") || normalized == QLatin1String("keys")
-			   || normalized == QLatin1String("about")) {
+			   || normalized == QLatin1String("plugins") || normalized == QLatin1String("about")) {
 		m_activePage = normalized;
 	} else if (normalized == QLatin1String("appearance")) {
 		m_activePage = QStringLiteral("look");

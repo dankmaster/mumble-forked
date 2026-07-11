@@ -14,7 +14,7 @@
 
 #include "AudioInput.h"
 #include "AudioOutput.h"
-#include "Cert.h"
+#include "CertService.h"
 #include "ChatFeature.h"
 #include "Connection.h"
 #include "Database.h"
@@ -542,7 +542,7 @@ void ServerHandler::run() {
 		qtsSock                 = new QSslSocket(this);
 		qtsSock->setPeerVerifyName(qhHostnames[saTargetServer]);
 
-		if (!Global::get().s.bSuppressIdentity && CertWizard::validateCert(Global::get().s.kpCertificate)) {
+		if (!Global::get().s.bSuppressIdentity && CertService::validate(Global::get().s.kpCertificate)) {
 			qtsSock->setPrivateKey(Global::get().s.kpCertificate.second);
 			qtsSock->setLocalCertificate(Global::get().s.kpCertificate.first.at(0));
 			QSslConfiguration config       = qtsSock->sslConfiguration();

@@ -5,7 +5,7 @@
 
 #include "ModernUiAutomationServer.h"
 
-#include "Cert.h"
+#include "CertService.h"
 #include "ClientUser.h"
 #include "FeedbackDialog.h"
 #include "FeedbackReport.h"
@@ -2426,7 +2426,7 @@ namespace {
 	}
 
 	QString automationCertificateFingerprint(const Settings::KeyPair &keyPair) {
-		if (!CertWizard::validateCert(keyPair)) {
+		if (!CertService::validate(keyPair)) {
 			return QString();
 		}
 
@@ -2438,12 +2438,12 @@ namespace {
 		const Settings::KeyPair original = Global::get().s.kpCertificate;
 
 		QVariantMap result;
-		result.insert(QStringLiteral("originalValid"), CertWizard::validateCert(original));
+		result.insert(QStringLiteral("originalValid"), CertService::validate(original));
 		result.insert(QStringLiteral("originalFingerprint"), automationCertificateFingerprint(original));
 		result.insert(QStringLiteral("profileMutated"), false);
 
-		const Settings::KeyPair generated = CertWizard::generateNewCert(name, email);
-		const bool generatedValid         = CertWizard::validateCert(generated);
+		const Settings::KeyPair generated = CertService::generate(name, email);
+		const bool generatedValid         = CertService::validate(generated);
 		const QString generatedFingerprint = automationCertificateFingerprint(generated);
 		result.insert(QStringLiteral("generatedValid"), generatedValid);
 		result.insert(QStringLiteral("generatedFingerprint"), generatedFingerprint);
@@ -2452,7 +2452,7 @@ namespace {
 			return result;
 		}
 
-		QByteArray exported = CertWizard::exportCert(generated);
+		QByteArray exported = CertService::exportPkcs12(generated);
 		result.insert(QStringLiteral("exportBytes"), exported.size());
 		if (exported.isEmpty()) {
 			result.insert(QStringLiteral("error"), QObject::tr("Certificate export returned no bytes."));
@@ -2494,23 +2494,23 @@ namespace {
 		}
 		const QByteArray importBytes = importFile.readAll();
 		importFile.close();
-		const Settings::KeyPair imported = CertWizard::importCert(importBytes, QString());
+		const Settings::KeyPair imported = CertService::importPkcs12(importBytes, QString());
 		const QString importedFingerprint = automationCertificateFingerprint(imported);
-		result.insert(QStringLiteral("importedValid"), CertWizard::validateCert(imported));
+		result.insert(QStringLiteral("importedValid"), CertService::validate(imported));
 		result.insert(QStringLiteral("importedFingerprint"), importedFingerprint);
 		result.insert(QStringLiteral("importMatchesGenerated"), importedFingerprint == generatedFingerprint);
 
 		const Settings::KeyPair secondGenerated =
-			CertWizard::generateNewCert(QStringLiteral("Mumble Modern Certificate Probe 2"), QString());
+			CertService::generate(QStringLiteral("Mumble Modern Certificate Probe 2"), QString());
 		const QString secondFingerprint = automationCertificateFingerprint(secondGenerated);
-		result.insert(QStringLiteral("secondGeneratedValid"), CertWizard::validateCert(secondGenerated));
+		result.insert(QStringLiteral("secondGeneratedValid"), CertService::validate(secondGenerated));
 		result.insert(QStringLiteral("secondGeneratedFingerprint"), secondFingerprint);
 		result.insert(QStringLiteral("secondDiffersFromFirst"),
 					  !secondFingerprint.isEmpty() && secondFingerprint != generatedFingerprint);
 
 		const Settings::KeyPair invalidImport =
-			CertWizard::importCert(QByteArray("not a pkcs12 certificate"), QString());
-		result.insert(QStringLiteral("invalidImportRejected"), !CertWizard::validateCert(invalidImport));
+			CertService::importPkcs12(QByteArray("not a pkcs12 certificate"), QString());
+		result.insert(QStringLiteral("invalidImportRejected"), !CertService::validate(invalidImport));
 		result.insert(QStringLiteral("restoredFingerprint"), automationCertificateFingerprint(Global::get().s.kpCertificate));
 		result.insert(QStringLiteral("originalUnchanged"),
 					  automationCertificateFingerprint(Global::get().s.kpCertificate)

@@ -380,6 +380,13 @@ ModernDialogController::ActionResult ModernDialogController::invokeAction(const 
 		result.closeDialog                                          = settingsResult.closeDialog;
 		result.settingsToApply                                      = settingsResult.settingsToApply;
 		result.settingsAccepted                                     = settingsResult.accepted;
+		if (!settingsResult.externalActionID.isEmpty()) {
+			ActionResult::GenericAction action;
+			action.dialogID = QStringLiteral("settings");
+			action.actionID = settingsResult.externalActionID;
+			action.payload  = settingsResult.externalActionPayload;
+			result.genericAction = action;
+		}
 	} else if (dialogID == QLatin1String("failedConnection")) {
 		result = invokeFailedConnectionAction(actionID);
 	} else if (dialogID == m_genericDialog.value(QStringLiteral("id")).toString()) {

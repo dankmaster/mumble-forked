@@ -16,7 +16,9 @@
 #include <QtCore/QStandardPaths>
 #include <QtSql/QSqlError>
 #include <QtSql/QSqlQuery>
+#include <QtWidgets/QAbstractButton>
 #include <QtWidgets/QMessageBox>
+#include <QtWidgets/QPushButton>
 
 static void logSQLError(const QSqlQuery &query) {
 	const QSqlError error(query.lastQuery());

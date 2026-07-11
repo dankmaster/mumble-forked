@@ -5,7 +5,7 @@
 
 #include "Settings.h"
 #include "AudioInput.h"
-#include "Cert.h"
+#include "CertService.h"
 #include "EnumStringConversions.h"
 #include "EnvUtils.h"
 #include "JSONSerialization.h"
@@ -990,7 +990,7 @@ void Settings::legacyLoad(const QString &path) {
 
 	QByteArray qba = qvariant_cast< QByteArray >(settings_ptr->value(QLatin1String("net/certificate")));
 	if (!qba.isEmpty())
-		kpCertificate = CertWizard::importCert(qba);
+		kpCertificate = CertService::importPkcs12(qba);
 
 	LOAD(bShortcutEnable, "shortcut/enable");
 	LOAD(bSuppressMacEventTapWarning, "shortcut/mac/suppresswarning");

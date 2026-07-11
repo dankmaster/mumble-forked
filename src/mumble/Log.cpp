@@ -598,6 +598,14 @@ void Log::clearIgnore() {
 	qmIgnore.clear();
 }
 
+void Log::applySettings() {
+#ifndef USE_NO_TTS
+	if (tts) {
+		tts->setVolume(Global::get().s.iTTSVolume);
+	}
+#endif
+}
+
 QString Log::imageToImg(const QByteArray &format, const QByteArray &image) {
 	QString fmt = QLatin1String(format);
 
