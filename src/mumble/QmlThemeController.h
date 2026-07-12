@@ -26,6 +26,7 @@ class QmlThemeController final : public QObject {
 	Q_PROPERTY(int shellRadius READ shellRadius NOTIFY themeChanged)
 	Q_PROPERTY(int innerRadius READ innerRadius NOTIFY themeChanged)
 	Q_PROPERTY(int spacing READ spacing NOTIFY themeChanged)
+	Q_PROPERTY(bool compact READ compact NOTIFY densityChanged)
 
 public:
 	explicit QmlThemeController(QObject *parent = nullptr);
@@ -47,13 +48,16 @@ public:
 	int shellRadius() const { return m_shellRadius; }
 	int innerRadius() const { return m_innerRadius; }
 	int spacing() const { return m_spacing; }
+	bool compact() const { return m_compact; }
 
 	Q_INVOKABLE void refresh();
 	void applyTokens(const UiThemeTokens &tokens, const Mumble::ModernTheme::ThemeMetrics &metrics = {},
 					 const QColor &shellBackground = {});
+	bool applyVisualGateAppearance(const QString &theme, const QString &layout);
 
 signals:
 	void themeChanged();
+	void densityChanged();
 
 protected:
 	bool eventFilter(QObject *watched, QEvent *event) override;
@@ -76,6 +80,7 @@ private:
 	int m_shellRadius = 16;
 	int m_innerRadius = 11;
 	int m_spacing = 12;
+	bool m_compact = false;
 };
 
 #endif

@@ -121,13 +121,14 @@ QVariantList ModernShellMenuSerializer::normalize(const QVariantList &items) {
 }
 
 QVariantList ModernShellMenuSerializer::serializeMenu(const QMenu *menu, const Resolver &resolver,
-													  ActionRegistry *registry) {
-	QVariantList items;
-	if (!menu) {
-		return items;
-	}
+												  ActionRegistry *registry) {
+	return menu ? serializeActions(menu->actions(), resolver, registry) : QVariantList();
+}
 
-	for (QAction *action : menu->actions()) {
+QVariantList ModernShellMenuSerializer::serializeActions(const QList< QAction * > &actions, const Resolver &resolver,
+													 ActionRegistry *registry) {
+	QVariantList items;
+	for (QAction *action : actions) {
 		if (!action) {
 			continue;
 		}

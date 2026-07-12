@@ -22,10 +22,12 @@ class MediaSessionBackend;
 class ParticipantModel;
 enum class PttSafetyReason;
 class PttSafetyController;
+class QEvent;
 class QmlSelectionState;
 class QmlPerformanceMonitor;
 class QmlImagePipeline;
 class QmlThemeController;
+class QmlWindowStateController;
 class QQmlApplicationEngine;
 class QQuickWindow;
 class RoomModel;
@@ -64,6 +66,9 @@ public:
 signals:
 	void closeRequested();
 
+protected:
+	bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
 	void releasePttForSafety(PttSafetyReason reason);
 
@@ -86,6 +91,7 @@ private:
 	std::shared_ptr< QmlImagePipeline > m_imagePipeline;
 	std::unique_ptr< ComposerController > m_composerController;
 	std::unique_ptr< QmlThemeController > m_themeController;
+	std::unique_ptr< QmlWindowStateController > m_windowStateController;
 };
 
 #endif // MUMBLE_MUMBLE_QMLSHELLHOST_H_

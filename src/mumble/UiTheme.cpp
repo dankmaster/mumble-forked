@@ -423,3 +423,7 @@ std::optional< UiThemeTokens > activeUiThemeTokens() {
 
 	return modernBuiltInUiThemeTokens(Global::get().s.qsModernShellTheme);
 }
+
+UiThemeTokens uiThemeTokensForThemeId(const QString &themeId) {
+	return modernBuiltInUiThemeTokens(themeId);
+}

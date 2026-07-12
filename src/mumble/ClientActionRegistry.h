@@ -10,6 +10,20 @@
 
 class QAction;
 
+class ClientActionList final : public QObject {
+	Q_OBJECT
+public:
+	explicit ClientActionList(QObject *parent = nullptr);
+	void addAction(QAction *action);
+	QAction *addSeparator();
+	void removeAction(QAction *action);
+	void clear();
+	QList< QAction * > actions() const;
+
+private:
+	QList< QAction * > m_actions;
+};
+
 class ClientActionRegistry final : public QObject {
 	Q_OBJECT
 

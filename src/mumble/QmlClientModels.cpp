@@ -410,6 +410,15 @@ void ParticipantModel::replaceParticipantStates(const QVariantList &participants
 	synchronizeRows(rows);
 }
 
+void ParticipantModel::upsertParticipantState(const QVariantMap &participant) {
+	const QVariantMap row = participantRow(participant);
+	if (!row.isEmpty()) upsertRow(row);
+}
+
+void ParticipantModel::removeParticipant(const QString &sessionId) {
+	removeRow(sessionId.trimmed());
+}
+
 void ParticipantModel::updatePresence(const QString &sessionId, const QString &talkState, const QString &talkLabel,
 							  const QString &talkTone, const bool talking, const bool isSelf,
 							  const QVariantList &badges, const QVariantList &statuses) {
@@ -683,6 +692,7 @@ void ActionModel::refresh() {
 			row.insert(QStringLiteral("checkable"), state.value(QStringLiteral("checkable")));
 			row.insert(QStringLiteral("checked"), state.value(QStringLiteral("checked")));
 			row.insert(QStringLiteral("shortcut"), state.value(QStringLiteral("shortcut")));
+			row.insert(QStringLiteral("shortcutPortableText"), state.value(QStringLiteral("shortcutPortableText")));
 			row.insert(QStringLiteral("menuRole"), state.value(QStringLiteral("menuRole")));
 			row.insert(QStringLiteral("toolTip"), state.value(QStringLiteral("toolTip")));
 			row.insert(QStringLiteral("visible"), state.value(QStringLiteral("visible"), true));

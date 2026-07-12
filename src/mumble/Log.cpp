@@ -26,10 +26,12 @@
 #include <type_traits>
 
 #include <QSignalBlocker>
+#include <QtCore/QCoreApplication>
 #include <QtCore/QMutexLocker>
 #include <QtCore/QRegularExpression>
 #include <QtGui/QImageWriter>
 #include <QtGui/QScreen>
+#include <QtGui/QGuiApplication>
 #include <QtGui/QTextBlock>
 #include <QtGui/QTextDocumentFragment>
 #include <QtNetwork/QNetworkReply>
@@ -122,7 +124,12 @@ const char *Log::msgNames[] = { QT_TRANSLATE_NOOP("Log", "Debug"),
 								QT_TRANSLATE_NOOP("Log", "Plugin message") };
 
 QString Log::msgName(MsgType t) const {
-	return tr(msgNames[t]);
+	return translatedMessageName(t);
+}
+
+QString Log::translatedMessageName(const MsgType type) {
+	if (type < DebugInfo || type > PluginMessage) return QString();
+	return QCoreApplication::translate("Log", msgNames[type]);
 }
 
 const char *Log::colorClasses[] = { "time", "server", "privilege", "source", "target" };
@@ -299,7 +306,8 @@ QString Log::imageToImg(QImage img, int maxSize) {
 QString Log::validHtml(const QString &html, QTextCursor *tc) {
 	LogDocument qtd;
 
-	QRectF qr = Mumble::Screen::screenFromWidget(*Global::get().mw)->availableGeometry();
+	const QScreen *primaryScreen = QGuiApplication::primaryScreen();
+	const QRectF qr = primaryScreen ? QRectF(primaryScreen->availableGeometry()) : QRectF(0, 0, 1920, 1080);
 	qtd.setTextWidth(qr.width() / 2);
 	qtd.setDefaultStyleSheet(qApp->styleSheet());
 

@@ -68,6 +68,7 @@ struct UiThemeWindowChrome {
 };
 
 std::optional< UiThemeTokens > activeUiThemeTokens();
+UiThemeTokens uiThemeTokensForThemeId(const QString &themeId);
 QColor uiThemeColorWithAlpha(const QColor &color, qreal alpha);
 QString uiThemeQssColor(const QColor &color);
 bool uiThemePaletteIsDark(const QPalette &palette);

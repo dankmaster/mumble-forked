@@ -11,6 +11,7 @@ class TestQmlThemeController : public QObject {
 private slots:
 	void appliesBuiltInTokenMappingIdempotently();
 	void appliesCustomManifestMetrics();
+	void appliesVisualGateAppearance();
 };
 
 namespace {
@@ -68,6 +69,20 @@ void TestQmlThemeController::appliesCustomManifestMetrics() {
 	QCOMPARE(controller.shellRadius(), 23);
 	QCOMPARE(controller.innerRadius(), 9);
 	QCOMPARE(controller.spacing(), 7);
+}
+
+void TestQmlThemeController::appliesVisualGateAppearance() {
+	QmlThemeController controller;
+	QSignalSpy densityChanged(&controller, &QmlThemeController::densityChanged);
+	QVERIFY(controller.applyVisualGateAppearance(QStringLiteral("light"), QStringLiteral("compact")));
+	QVERIFY(controller.compact());
+	QCOMPARE(controller.spacing(), 8);
+	QCOMPARE(controller.shellBackground(), QColor(QStringLiteral("#f7f9fc")));
+	QCOMPARE(densityChanged.count(), 1);
+	QVERIFY(controller.applyVisualGateAppearance(QStringLiteral("dark"), QStringLiteral("regular")));
+	QVERIFY(!controller.compact());
+	QCOMPARE(controller.spacing(), 12);
+	QVERIFY(!controller.applyVisualGateAppearance(QStringLiteral("unknown"), QStringLiteral("regular")));
 }
 
 QTEST_APPLESS_MAIN(TestQmlThemeController)

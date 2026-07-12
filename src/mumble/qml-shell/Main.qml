@@ -4,10 +4,11 @@ import QtQuick.Layouts
 import Mumble.Theme 1.0
 
 ApplicationWindow {
-    id: root
+	id: root
+	onClosing: close => close.accepted = false
     property bool pttToolVisible: false
     property var pttToolPopup: null
-    visible: true
+    visible: false
     width: 1280
     height: 820
     minimumWidth: 760
@@ -16,6 +17,28 @@ ApplicationWindow {
     color: Theme.strip
 	property real performanceChatScrollStartY: 0
 	property real performanceChatScrollTargetY: 0
+
+	Instantiator {
+		model: actionModel
+		delegate: Shortcut {
+			required property string stableId
+			required property var payload
+			sequence: payload.shortcutPortableText || ""
+			enabled: payload.enabled && payload.visible && sequence.length > 0
+			context: Qt.ApplicationShortcut
+			onActivated: actionModel.trigger(stableId)
+		}
+	}
+
+	Shortcut {
+		sequence: "F6"
+		context: Qt.ApplicationShortcut
+		onActivated: {
+			const next = root.contentItem.nextItemInFocusChain(true)
+			if (next)
+				next.forceActiveFocus(Qt.TabFocusReason)
+		}
+	}
 
     function createScreenShareView(backend) {
         return screenShareViewComponent.createObject(null, { "backend": backend })

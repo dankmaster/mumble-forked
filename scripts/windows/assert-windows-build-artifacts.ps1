@@ -228,6 +228,38 @@ function Assert-GStreamerPayload {
 	Write-Host "$Label GStreamer runtime payload verified."
 }
 
+function Assert-QmlRuntimeManifest {
+	param(
+		[Parameter(Mandatory = $true)][string]$Label,
+		[Parameter(Mandatory = $true)][string]$Root
+	)
+	$manifestPath = Join-Path $Root "runtime-manifest.json"
+	if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+		throw "$Label is missing runtime-manifest.json."
+	}
+	$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+	if ($manifest.schema_version -ne 1 -or @($manifest.files).Count -eq 0) {
+		throw "$Label has an invalid or empty runtime manifest."
+	}
+	$manifestPaths = @($manifest.files | ForEach-Object { [string]$_.path })
+	foreach ($requiredPattern in @("mumble.exe", "Qt6Quick.dll", "Qt6Qml.dll", "Qt6WebEngineQuick.dll", "*/QtQuick/Dialogs/qmldir")) {
+		if (-not ($manifestPaths | Where-Object { $_ -like $requiredPattern } | Select-Object -First 1)) {
+			throw "$Label runtime manifest is missing '$requiredPattern'."
+		}
+	}
+	foreach ($entry in $manifest.files) {
+		$filePath = Join-Path $Root ([string]$entry.path).Replace('/', '\')
+		if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
+			throw "$Label runtime manifest references a missing file: '$($entry.path)'."
+		}
+		$actualHash = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
+		if ($actualHash -ne [string]$entry.sha256) {
+			throw "$Label runtime manifest hash mismatch for '$($entry.path)'."
+		}
+	}
+	Write-Host "$Label QML runtime manifest verified."
+}
+
 function Get-ArtifactPaths {
 	param(
 		[Parameter(Mandatory = $true)]
@@ -341,6 +373,7 @@ if ($RequireStage) {
 	}
 
 	$stageRootPath = Resolve-ExistingPath -Path $StageRoot
+	Assert-QmlRuntimeManifest -Label "Stage root '$stageRootPath'" -Root $stageRootPath
 	foreach ($verifiedPath in Assert-BinarySet -Label "Stage root '$stageRootPath'" -Root $stageRootPath -BinaryNames $requiredBinaryNames) {
 		$allArtifacts.Add($verifiedPath)
 	}

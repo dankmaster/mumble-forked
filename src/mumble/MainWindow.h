@@ -20,13 +20,8 @@
 #include <QtCore/QtGlobal>
 #include <QtGui/QImage>
 #include <QtNetwork/QAbstractSocket>
-#include <QtWidgets/QMainWindow>
+#include <QtCore/QObject>
 #include <QtWidgets/QApplication>
-#include <QtWidgets/QHBoxLayout>
-#include <QtWidgets/QLabel>
-#include <QtWidgets/QMenu>
-#include <QtWidgets/QMenuBar>
-#include <QtWidgets/QVBoxLayout>
 
 #include "ACL.h"
 #include "ConnectionFailTypes.h"
@@ -58,6 +53,7 @@ class UserModel;
 class Channel;
 class ClientUser;
 class ClientActionRegistry;
+class ClientActionList;
 class ScreenShareManager;
 struct ScreenShareStartOptions;
 struct PersistentChatPreviewSpec;
@@ -73,8 +69,6 @@ struct ModernConnectPingState;
 class QAction;
 class QObject;
 class QFrame;
-class QLabel;
-class QMenu;
 class QModelIndex;
 class QTimer;
 class QHostAddress;
@@ -123,7 +117,7 @@ public:
 	OpenURLEvent(QUrl url);
 };
 
-class MainWindow : public QMainWindow {
+class MainWindow : public QObject {
 	friend class UserModel;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 	friend class ModernUiAutomationServer;
@@ -133,6 +127,21 @@ private:
 	Q_OBJECT
 	Q_DISABLE_COPY(MainWindow)
 public:
+	void show();
+	void hide();
+	void raise();
+	void activateWindow();
+	void close();
+	bool isActiveWindow() const;
+	bool isVisible() const;
+	bool isMinimized() const;
+	QFont font() const;
+	WId winId() const;
+	Qt::WindowStates windowState() const;
+	void setWindowState(Qt::WindowStates state);
+	Qt::WindowFlags windowFlags() const;
+	void setWindowFlags(Qt::WindowFlags flags);
+	void setWindowTitle(const QString &title);
 	bool isServerLogViewVisible() const;
 	bool shouldMirrorServerLogToNativeWidget() const;
 	void setServerLogMaximumBlockCount(int maxBlocks);
@@ -147,15 +156,11 @@ public:
 	void openModernManualPluginDialog(const QVariantMap &values = QVariantMap());
 #endif
 	UserModel *pmModel;
-	QMenu *qmUser;
-	QMenu *qmChannel;
-	QMenu *qmListener;
-	QMenu *qmDeveloper;
-	QMenu *qmConfig = nullptr, *qmHelp = nullptr, *qmServer = nullptr, *qmSelf = nullptr;
-	QMenuBar *menubar = nullptr;
-	QWidget *dockWidgetContents = nullptr;
-	QHBoxLayout *horizontalLayout = nullptr;
-	QLabel *label = nullptr;
+	ClientActionList *qmUser;
+	ClientActionList *qmChannel;
+	ClientActionList *qmListener;
+	ClientActionList *qmDeveloper;
+	ClientActionList *qmConfig = nullptr, *qmHelp = nullptr, *qmServer = nullptr, *qmSelf = nullptr;
 	QAction *qaQuit = nullptr, *qaServerConnect = nullptr, *qaServerDisconnect = nullptr;
 	QAction *qaServerAddToFavorites = nullptr, *qaServerBanList = nullptr, *qaServerInformation = nullptr;
 	QAction *qaUserKick = nullptr, *qaUserMute = nullptr, *qaUserBan = nullptr, *qaUserDeaf = nullptr;
@@ -655,6 +660,7 @@ public:
 									   const MumbleProto::ChatMessage &message);
 	bool sendModernShellMessage(const QString &message);
 	void publishModernShellTalkState(const ClientUser *user);
+	void publishQmlParticipantState(const ClientUser *user);
 	void publishModernShellTalkStateForIndex(const QModelIndex &index);
 	void startModernConnectServerPing(const QList< FavoriteServer > &favorites,
 									  const QMap< UnresolvedServerAddress, unsigned int > &pingCache);
@@ -678,7 +684,7 @@ public:
 		Scope,
 		Listener
 	};
-	QVariantList serializeModernShellMenu(QMenu *menu, ModernShellMenuContext context,
+	QVariantList serializeModernShellMenu(ClientActionList *menu, ModernShellMenuContext context,
 										  ModernShellMenuSerializer::ActionRegistry *registry = nullptr) const;
 	QVariantList buildModernShellConfigureMenuItems() const;
 	QVariantList buildModernShellAppMenus() const;
@@ -705,7 +711,7 @@ public:
 	void clearUserCommentRequests();
 
 #ifdef Q_OS_WIN
-	bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) Q_DECL_OVERRIDE;
+	bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result);
 	unsigned int uiNewHardware;
 #endif
 protected:
@@ -758,54 +764,9 @@ protected:
 	QAction *qaChannelScreenShareStopWatching = nullptr;
 	QAction *qaChannelScreenShareOpenWindow   = nullptr;
 
-	qt_unique_ptr< MenuLabel > m_localVolumeLabel;
-	qt_unique_ptr< UserLocalVolumeSlider > m_userLocalVolumeSlider;
 	qt_unique_ptr< ListenerVolumeController > m_listenerVolumeController;
-	qt_unique_ptr< ListenerVolumeSlider > m_listenerVolumeSlider;
-	QWidget *m_serverNavigatorContainer                        = nullptr;
-	QFrame *m_serverNavigatorHeaderFrame                       = nullptr;
-	QFrame *m_serverNavigatorContentFrame                      = nullptr;
-	QFrame *m_serverNavigatorFooterFrame                       = nullptr;
-	QLabel *m_serverNavigatorEyebrow                           = nullptr;
-	QLabel *m_serverNavigatorTitle                             = nullptr;
-	QLabel *m_serverNavigatorSubtitle                          = nullptr;
-	QLabel *m_serverNavigatorVoiceSectionEyebrow               = nullptr;
-	QLabel *m_serverNavigatorVoiceSectionSubtitle              = nullptr;
-	QFrame *m_serverNavigatorTextChannelsFrame                 = nullptr;
-	QFrame *m_serverNavigatorTextChannelsDivider               = nullptr;
-	QLabel *m_serverNavigatorTextChannelsEyebrow               = nullptr;
-	QLabel *m_serverNavigatorTextChannelsTitle                 = nullptr;
-	QLabel *m_serverNavigatorTextChannelsSubtitle              = nullptr;
-	QToolButton *m_serverNavigatorServerSettingsButton         = nullptr;
-	QToolButton *m_serverNavigatorCreateTextChannelButton      = nullptr;
-	QFrame *m_serverNavigatorTextChannelsMotdFrame             = nullptr;
-	QLabel *m_serverNavigatorTextChannelsMotdTitle             = nullptr;
-	QLabel *m_serverNavigatorTextChannelsMotdBody              = nullptr;
-	QToolButton *m_serverNavigatorTextChannelsMotdToggleButton = nullptr;
-	QLabel *m_serverNavigatorFooter                            = nullptr;
-	QLabel *m_serverNavigatorFooterAvatar                      = nullptr;
-	QLabel *m_serverNavigatorFooterName                        = nullptr;
-	QLabel *m_serverNavigatorFooterPresence                    = nullptr;
-	QWidget *m_persistentChatContainer                             = nullptr;
-	QFrame *m_persistentChatHeaderFrame                            = nullptr;
-	QLabel *m_persistentChatHeaderEyebrow                          = nullptr;
-	QLabel *m_persistentChatHeaderTitle                            = nullptr;
-	QLabel *m_persistentChatHeaderContext                          = nullptr;
-	QLabel *m_persistentChatHeaderSubtitle                         = nullptr;
-	QWidget *m_persistentChatSidebarContainer                      = nullptr;
-	QLabel *m_persistentChatSidebarEyebrow                         = nullptr;
-	QLabel *m_persistentChatSidebarSubtitle                        = nullptr;
-	QLabel *m_persistentChatSidebarFooter                          = nullptr;
-	QWidget *m_persistentChatChannelToolbar                        = nullptr;
-	QFrame *m_persistentChatDivider                                = nullptr;
 	PersistentChatGateway *m_persistentChatGateway                 = nullptr;
 	PersistentChatController *m_persistentChatController           = nullptr;
-	QFrame *m_persistentChatReplyFrame                             = nullptr;
-	QLabel *m_persistentChatReplyLabel                             = nullptr;
-	QLabel *m_persistentChatReplySnippet                           = nullptr;
-	QToolButton *m_persistentChatReplyCancelButton                 = nullptr;
-	QToolButton *m_persistentChatAttachButton                      = nullptr;
-	QToolButton *m_persistentChatSendButton                        = nullptr;
 	QString m_persistentChatWelcomeText;
 	bool m_persistentChatMotdExpanded        = false;
 	bool m_hasPersistentChatSupport          = false;
@@ -930,7 +891,6 @@ protected:
 	std::stack< unsigned int > m_previousChannels;
 	std::optional< unsigned int > m_movedBackFromChannel;
 
-	static constexpr int stateVersion(bool modernShell);
 
 	void createActions();
 	void initializeBaseActions();
@@ -1058,13 +1018,10 @@ protected:
 	void findDesiredChannel();
 	void setupView(bool toggle_minimize = true);
 	bool eventFilter(QObject *watched, QEvent *event) Q_DECL_OVERRIDE;
-	void closeEvent(QCloseEvent *e) Q_DECL_OVERRIDE;
-	void hideEvent(QHideEvent *e) Q_DECL_OVERRIDE;
-	void showEvent(QShowEvent *e) Q_DECL_OVERRIDE;
-	void changeEvent(QEvent *e) Q_DECL_OVERRIDE;
-	void keyPressEvent(QKeyEvent *e) Q_DECL_OVERRIDE;
+	void closeEvent(QCloseEvent *e);
+	void hideEvent(QHideEvent *e);
+	void showEvent(QShowEvent *e);
 
-	QMenu *createPopupMenu() Q_DECL_OVERRIDE;
 
 	bool handleSpecialContextMenu(const QUrl &url, const QPoint &pos_, bool focus = false);
 	Channel *getContextMenuChannel();
@@ -1285,7 +1242,7 @@ signals:
 	void windowActivated();
 
 public:
-	MainWindow(QWidget *parent);
+	MainWindow(QObject *parent);
 	~MainWindow() Q_DECL_OVERRIDE;
 	std::optional< unsigned int > userIdleSeconds(unsigned int session) const;
 	bool isUserIdle(unsigned int session) const;

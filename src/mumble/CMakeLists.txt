@@ -183,6 +183,7 @@ set(MUMBLE_SOURCES
 	"ScreenShareViewBackend.h"
 	"ScreenShareVideoItem.cpp"
 	"ScreenShareVideoItem.h"
+	"ScreenShareOperationTracker.h"
 	"Global.cpp"
 	"Global.h"
 	"GlobalShortcut.cpp"
@@ -352,6 +353,10 @@ set(MUMBLE_SOURCES
 
 list(APPEND MUMBLE_SOURCES
 	"QmlClientModels.cpp"
+	"QmlAccessibilitySnapshot.cpp"
+	"QmlAccessibilitySnapshot.h"
+	"QmlVisualFixtureController.cpp"
+	"QmlVisualFixtureController.h"
 	"QmlPerformanceMonitor.cpp"
 	"QmlClientModels.h"
 	"QmlShellHost.cpp"
@@ -360,6 +365,8 @@ list(APPEND MUMBLE_SOURCES
 	"QmlImageProvider.h"
 	"QmlThemeController.cpp"
 	"QmlThemeController.h"
+	"QmlWindowStateController.cpp"
+	"QmlWindowStateController.h"
 )
 
 if(modern-layout-automation)

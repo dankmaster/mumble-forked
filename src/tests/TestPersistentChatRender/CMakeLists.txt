@@ -19,3 +19,4 @@ target_compile_options(
 )
 
 add_test(NAME TestPersistentChatRender COMMAND $<TARGET_FILE:TestPersistentChatRender>)
+configure_client_test_runtime(TestPersistentChatRender TestPersistentChatRender)

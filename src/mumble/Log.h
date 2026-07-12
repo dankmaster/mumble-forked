@@ -70,6 +70,7 @@ public:
 	// Display order in settingsscreen, allows to insert new events without breaking config-compatibility with older
 	// versions.
 	static const MsgType msgOrder[];
+	static QString translatedMessageName(MsgType type);
 
 protected:
 	/// Mutex for qvDeferredLogs

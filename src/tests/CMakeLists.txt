@@ -6,6 +6,11 @@
 include(project-utils)
 
 find_pkg(Qt6 COMPONENTS Test REQUIRED)
+if(client)
+	# Shared-Qt GUI tests need the imported offscreen platform target in the
+	# parent directory so every client-test subdirectory can resolve it.
+	find_pkg(Qt6 COMPONENTS Gui REQUIRED)
+endif()
 
 option(online-tests "Whether or not tests that need a working internet connection should be included" OFF)
 option(test-lto "Whether to use LTO when building test cases" ${lto})
@@ -28,7 +33,9 @@ function(configure_client_test_runtime TEST_NAME TARGET_NAME)
 		${TEST_NAME}
 		PROPERTIES
 			WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
-			ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+			ENVIRONMENT
+				"QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>"
+			ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 	)
 endfunction()
 
@@ -50,10 +57,12 @@ if(client)
 	add_subdirectory("TestModernTheme")
 	add_subdirectory("TestQmlClientModels")
 	add_subdirectory("TestQmlImageProvider")
+	add_subdirectory("TestQmlAccessibilitySnapshot")
 	add_subdirectory("TestComposerController")
 	add_subdirectory("TestQmlQuickComponents")
 	add_subdirectory("TestQmlThemeController")
 	add_subdirectory("TestQmlPerformanceMonitor")
+	add_subdirectory("TestQmlWindowStateController")
 	add_subdirectory("TestPluginUpdatePreparation")
 	add_subdirectory("TestXMLTools")
 	if(NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "FreeBSD")

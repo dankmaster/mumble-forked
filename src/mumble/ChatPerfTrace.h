@@ -6,6 +6,34 @@
 #ifndef MUMBLE_MUMBLE_CHATPERFTRACE_H_
 #define MUMBLE_MUMBLE_CHATPERFTRACE_H_
 
+namespace mumble {
+namespace chatperf {
+	// Small always-on correctness monitor. Production tracing may be compiled out, but tests and
+	// debug gates still need to detect accidental full frontend bootstraps after synchronization.
+	class FullBootstrapMonitor {
+	public:
+		void enterSteadyState() { m_steadyState = true; }
+		void leaveSteadyState() { m_steadyState = false; }
+		bool recordBootstrap() {
+			if (!m_steadyState) return false;
+			++m_steadyStateViolations;
+			return true;
+		}
+		bool isSteadyState() const { return m_steadyState; }
+		unsigned int steadyStateViolations() const { return m_steadyStateViolations; }
+
+	private:
+		bool m_steadyState = false;
+		unsigned int m_steadyStateViolations = 0;
+	};
+
+	inline FullBootstrapMonitor &fullBootstrapMonitor() {
+		static FullBootstrapMonitor monitor;
+		return monitor;
+	}
+} // namespace chatperf
+} // namespace mumble
+
 // The chat performance tracer is a developer-only facility. It is compiled into
 // local dev clients (CMake option `chat-perf-trace`, defined as
 // MUMBLE_HAS_CHAT_PERF_TRACE) but deliberately kept out of GitHub/CI packaging

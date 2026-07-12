@@ -1,7 +1,7 @@
 // Copyright The Mumble Developers. All rights reserved.
 
 #include "QmlClientModels.h"
-
+#include "ChatPerfTrace.h"
 #include <QtTest/QSignalSpy>
 #include <QtTest/QtTest>
 
@@ -20,6 +20,8 @@ private slots:
 	void chatTimelineAppliesDirectIncrementalMessages();
 	void chatTimelinePreservesTypedAttachments();
 	void participantPresenceUpdatesOnlyTypedRoles();
+	void participantUpsertsAndRemovalsStayResetFree();
+	void steadyStateRejectsFullBootstrap();
 	void duplicateStableIdsAreCoalesced();
 	void activeScopeAppliesTypedState();
 	void sessionPropertiesOnlyNotifyOnChanges();
@@ -375,6 +377,36 @@ void TestQmlClientModels::participantPresenceUpdatesOnlyTypedRoles() {
 	model.updatePresence(QStringLiteral("99"), QStringLiteral("talking"), QString(), QString(), true, false, {}, {});
 	QCOMPARE(model.rowCount(), 1);
 	QCOMPARE(changedSpy.count(), 1);
+}
+
+void TestQmlClientModels::participantUpsertsAndRemovalsStayResetFree() {
+	ParticipantModel model;
+	QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
+	QSignalSpy insertSpy(&model, &QAbstractItemModel::rowsInserted);
+	QSignalSpy changedSpy(&model, &QAbstractItemModel::dataChanged);
+	QSignalSpy removeSpy(&model, &QAbstractItemModel::rowsRemoved);
+	model.upsertParticipantState({ { QStringLiteral("session"), 7 },
+		{ QStringLiteral("name"), QStringLiteral("Alice") },
+		{ QStringLiteral("talkState"), QStringLiteral("passive") } });
+	model.upsertParticipantState({ { QStringLiteral("session"), 7 },
+		{ QStringLiteral("name"), QStringLiteral("Alice 2") },
+		{ QStringLiteral("talkState"), QStringLiteral("talking") } });
+	model.removeParticipant(QStringLiteral("7"));
+	QCOMPARE(insertSpy.count(), 1);
+	QCOMPARE(changedSpy.count(), 1);
+	QCOMPARE(removeSpy.count(), 1);
+	QCOMPARE(resetSpy.count(), 0);
+}
+
+void TestQmlClientModels::steadyStateRejectsFullBootstrap() {
+	mumble::chatperf::FullBootstrapMonitor monitor;
+	QVERIFY(!monitor.recordBootstrap());
+	monitor.enterSteadyState();
+	QVERIFY(monitor.recordBootstrap());
+	QCOMPARE(monitor.steadyStateViolations(), 1U);
+	monitor.leaveSteadyState();
+	QVERIFY(!monitor.recordBootstrap());
+	QCOMPARE(monitor.steadyStateViolations(), 1U);
 }
 
 void TestQmlClientModels::duplicateStableIdsAreCoalesced() {

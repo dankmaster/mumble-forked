@@ -9,9 +9,12 @@
 #include "QmlPerformanceMonitor.h"
 #include "QmlImageProvider.h"
 #include "QmlThemeController.h"
+#include "QmlWindowStateController.h"
 #include "ScreenShareVideoItem.h"
+#include "Global.h"
 
 #include <QtCore/QDir>
+#include <QtCore/QEvent>
 #include <QtCore/QFileInfo>
 #include <QtCore/QUrl>
 #include <QtGui/QImage>
@@ -39,7 +42,8 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_performanceMonitor(std::make_unique< QmlPerformanceMonitor >(this)),
 	  m_imagePipeline(std::make_shared< QmlImagePipeline >()),
 	  m_composerController(std::make_unique< ComposerController >(m_imagePipeline, this)),
-	  m_themeController(std::make_unique< QmlThemeController >(this)) {
+	  m_themeController(std::make_unique< QmlThemeController >(this)),
+	  m_windowStateController(std::make_unique< QmlWindowStateController >(this)) {
 	m_selectionState->bindModels(m_roomModel.get(), m_participantModel.get());
 	connect(m_activeScopeController.get(), &ActiveScopeController::canSendChanged, this, [this]() {
 		m_composerController->setCanSend(m_activeScopeController->canSend());
@@ -48,6 +52,7 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 
 QmlShellHost::~QmlShellHost() {
 	releasePttForSafety(PttSafetyReason::HostDestroyed);
+	m_windowStateController->flush();
 	m_engine.reset();
 	m_window = nullptr;
 }
@@ -115,11 +120,11 @@ bool QmlShellHost::start(QString *error) {
 		m_engine.reset();
 		return false;
 	}
+	m_windowStateController->attach(m_window, Global::get().s.qbaModernMainWindowGeometry);
+	connect(m_windowStateController.get(), &QmlWindowStateController::encodedStateChanged, this,
+			[](const QByteArray &state) { Global::get().s.qbaModernMainWindowGeometry = state; });
+	m_window->installEventFilter(this);
 	m_performanceMonitor->installInputObserver(m_window);
-	connect(m_window, &QQuickWindow::closing, this, [this](QQuickCloseEvent *) {
-		releasePttForSafety(PttSafetyReason::WindowClosing);
-		emit closeRequested();
-	});
 	connect(m_window, &QQuickWindow::sceneGraphError, this,
 			[this](QQuickWindow::SceneGraphError, const QString &) {
 				releasePttForSafety(PttSafetyReason::SceneGraphError);
@@ -142,6 +147,15 @@ bool QmlShellHost::start(QString *error) {
 		if (state != Qt::ApplicationActive) releasePttForSafety(PttSafetyReason::ApplicationDeactivated);
 	});
 	return true;
+}
+
+bool QmlShellHost::eventFilter(QObject *watched, QEvent *event) {
+	if (watched == m_window && event && event->type() == QEvent::Close) {
+		releasePttForSafety(PttSafetyReason::WindowClosing);
+		emit closeRequested();
+		return true;
+	}
+	return QObject::eventFilter(watched, event);
 }
 
 void QmlShellHost::releasePttForSafety(const PttSafetyReason reason) {

@@ -13,8 +13,10 @@
 #include "MainWindow.h"
 #include "ModernDialogController.h"
 #include "QmlClientModels.h"
+#include "QmlAccessibilitySnapshot.h"
 #include "QmlPerformanceMonitor.h"
 #include "QmlShellHost.h"
+#include "QmlVisualFixtureController.h"
 #include "MumbleConstants.h"
 #include "Net.h"
 #include "OSInfo.h"
@@ -3395,6 +3397,8 @@ ModernUiAutomationServer::ModernUiAutomationServer(MainWindow *mainWindow, QObje
 	: QObject(parent), m_mainWindow(mainWindow) {
 }
 
+ModernUiAutomationServer::~ModernUiAutomationServer() = default;
+
 bool ModernUiAutomationServer::start(QString *errorMessage) {
 	if (m_server && m_server->isListening()) {
 		return true;
@@ -3435,6 +3439,16 @@ bool ModernUiAutomationServer::start(QString *errorMessage) {
 
 bool ModernUiAutomationServer::isListening() const {
 	return m_server && m_server->isListening();
+}
+
+QmlVisualFixtureController *ModernUiAutomationServer::visualFixtureController() {
+	QmlShellHost *host = m_mainWindow ? m_mainWindow->qmlShellHost() : nullptr;
+	if (!m_visualFixtureController) {
+		m_visualFixtureController = std::make_unique< QmlVisualFixtureController >(host);
+	} else {
+		m_visualFixtureController->setHost(host);
+	}
+	return m_visualFixtureController.get();
 }
 
 quint16 ModernUiAutomationServer::port() const {
@@ -3593,12 +3607,57 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		return response;
 	}
 
+	if (command == QLatin1String("qmlVisualGateCapabilities")) {
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("capabilities"), visualFixtureController()->capabilities());
+		return response;
+	}
+
+	if (command == QLatin1String("setQmlVisualGateState")) {
+		QString fixtureError;
+		const QVariantMap applied = visualFixtureController()->apply(request, &fixtureError);
+		if (applied.isEmpty()) return errorResponse(fixtureError);
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("applied"), applied);
+		return response;
+	}
+
+	if (command == QLatin1String("qmlAccessibilitySnapshot")) {
+		QmlVisualFixtureController *fixture = visualFixtureController();
+		bool parsedGeneration = false;
+		const qulonglong requestedGeneration =
+			unsignedLongLongValue(request.value(QStringLiteral("generation")), &parsedGeneration);
+		if (!parsedGeneration || requestedGeneration == 0 || requestedGeneration != fixture->generation()) {
+			return errorResponse(tr("The requested visual fixture generation is stale or invalid."));
+		}
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->window()) return errorResponse(tr("The Qt Quick frontend is not active."));
+		const QVariantMap snapshot = QmlAccessibilitySnapshot::serialize(host->window());
+		if (!snapshot.value(QStringLiteral("ok")).toBool()) {
+			return errorResponse(snapshot.value(QStringLiteral("error")).toString());
+		}
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("generation"), requestedGeneration);
+		response.insert(QStringLiteral("snapshot"), snapshot.value(QStringLiteral("tree")));
+		response.insert(QStringLiteral("nodeCount"), snapshot.value(QStringLiteral("nodeCount")));
+		response.insert(QStringLiteral("truncated"), snapshot.value(QStringLiteral("truncated")));
+		return response;
+	}
+
 	if (command == QLatin1String("captureQml")) {
 		if (!m_mainWindow->m_qmlShellHost || !m_mainWindow->m_qmlShellHost->window()) {
 			return errorResponse(tr("The Qt Quick frontend is not active."));
 		}
 		const QString path = request.value(QStringLiteral("path")).toString().trimmed();
 		if (path.isEmpty()) return errorResponse(tr("Missing capture path."));
+		bool parsedGeneration = false;
+		const qulonglong requestedGeneration =
+			unsignedLongLongValue(request.value(QStringLiteral("generation")), &parsedGeneration);
+		if (request.contains(QStringLiteral("generation"))
+			&& (!parsedGeneration || requestedGeneration == 0
+				|| requestedGeneration != visualFixtureController()->generation())) {
+			return errorResponse(tr("The requested visual fixture generation is stale or invalid."));
+		}
 		QString captureError;
 		if (!m_mainWindow->m_qmlShellHost->captureWindow(path, &captureError)) {
 			return errorResponse(captureError);
@@ -3606,6 +3665,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		QVariantMap response = okResponse();
 		response.insert(QStringLiteral("path"), QFileInfo(path).absoluteFilePath());
 		response.insert(QStringLiteral("frontend"), QStringLiteral("qml"));
+		if (parsedGeneration) response.insert(QStringLiteral("generation"), requestedGeneration);
 		return response;
 	}
 

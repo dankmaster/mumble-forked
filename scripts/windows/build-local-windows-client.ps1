@@ -535,6 +535,7 @@ function Assert-SharedWebEngineDeployment {
 		@{ Description = "Qt OpenSSL TLS backend"; Filter = "qopensslbackend.dll"; Directory = $false },
 		@{ Description = "Qt Quick Controls QML plugin"; Filter = "qtquickcontrols2plugin.dll"; Directory = $false },
 		@{ Description = "Qt Quick Layouts QML plugin"; Filter = "qquicklayoutsplugin.dll"; Directory = $false },
+		@{ Description = "Qt Quick Dialogs QML plugin"; Filter = "*quickdialogs*plugin.dll"; Directory = $false },
 		@{ Description = "Qt WebEngineQuick QML plugin"; Filter = "qtwebenginequickplugin.dll"; Directory = $false },
 		@{ Description = "Qt Quick runtime"; Filter = "Qt6Quick.dll"; Directory = $false },
 		@{ Description = "Qt QML runtime"; Filter = "Qt6Qml.dll"; Directory = $false },
@@ -557,13 +558,48 @@ function Assert-SharedWebEngineDeployment {
 	if ($missing.Count -gt 0) {
 		throw "Shared WebEngine staging is missing required deployed runtime content after windeployqt: $($missing -join ', ')."
 	}
+	$quickDialogsModule = Join-Path $StageRoot "qml\QtQuick\Dialogs\qmldir"
+	if (-not (Test-Path -LiteralPath $quickDialogsModule -PathType Leaf)) {
+		throw "Shared QML staging is missing the QtQuick.Dialogs module manifest: '$quickDialogsModule'."
+	}
 
 	$forbiddenRuntime = @(
 		@("Qt6QuickWidgets.dll", "Qt6WebEngineWidgets.dll") |
-			Where-Object { Test-Path -LiteralPath (Join-Path $StageRoot $_) }
+			Where-Object { Get-ChildItem -LiteralPath $StageRoot -Recurse -File -Filter $_ -ErrorAction SilentlyContinue }
 	)
 	if ($forbiddenRuntime.Count -gt 0) {
 		throw "Shared QML staging contains forbidden widget-container runtime DLLs: $($forbiddenRuntime -join ', ')."
+	}
+	$legacyProductAssets = @(Get-ChildItem -LiteralPath $StageRoot -Recurse -File -ErrorAction SilentlyContinue |
+		Where-Object { $_.Name -in @("app.js", "dialog.js", "styles.css", "index.html") -and
+			$_.FullName -match "(?i)modern[-_]shell" })
+	if ($legacyProductAssets.Count -gt 0) {
+		throw "Shared QML staging contains legacy HTML/CSS/JavaScript product-shell assets: $($legacyProductAssets.FullName -join ', ')."
+	}
+}
+
+function Write-SharedRuntimeManifest {
+	param(
+		[Parameter(Mandatory = $true)]
+		[string]$StageRoot
+	)
+
+	$resolvedRoot = (Resolve-Path -LiteralPath $StageRoot).Path.TrimEnd('\')
+	$manifestPath = Join-Path $resolvedRoot "runtime-manifest.json"
+	$files = @(Get-ChildItem -LiteralPath $resolvedRoot -Recurse -File |
+		Where-Object { $_.FullName -ne $manifestPath } |
+		Sort-Object FullName |
+		ForEach-Object {
+			[ordered]@{
+				path = $_.FullName.Substring($resolvedRoot.Length + 1).Replace('\', '/')
+				size = $_.Length
+				sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+			}
+		})
+	[ordered]@{ schema_version = 1; files = $files } |
+		ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+	if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf) -or (Get-Item -LiteralPath $manifestPath).Length -eq 0) {
+		throw "Failed to create the staged runtime manifest."
 	}
 }
 
@@ -667,6 +703,7 @@ function Invoke-SharedWindowsPackaging {
 	Copy-SharedQtOpenSslBackend -StageRoot $stageRoot -EnvironmentRoot $env:MUMBLE_ENVIRONMENT_DIR -Triplet $env:MUMBLE_VCPKG_TRIPLET
 	Write-SharedQtConf -StageRoot $stageRoot
 	Assert-SharedWebEngineDeployment -StageRoot $stageRoot
+	Write-SharedRuntimeManifest -StageRoot $stageRoot
 
 	if ($SkipInstaller) {
 		Write-Host "Skipping shared WebEngine installer generation. The staged payload at '$stageRoot' is ready for validation."

@@ -5,7 +5,6 @@
 
 #include "MainWindow.h"
 #include <QtWidgets/QHBoxLayout>
-#include <QtWidgets/QMenuBar>
 
 #include "ACL.h"
 #include "AudioInput.h"
@@ -231,43 +230,6 @@ struct ModernAutoConnectTarget {
 	QString password;
 	QString serverName;
 };
-
-QWidget *createModernShellFailureNotice(QWidget *parent, const QString &reason) {
-	QWidget *notice = new QWidget(parent);
-	notice->setObjectName(QLatin1String("modernShellFailureNotice"));
-	notice->setAttribute(Qt::WA_StyledBackground, true);
-
-	QVBoxLayout *layout = new QVBoxLayout(notice);
-	layout->setContentsMargins(32, 32, 32, 32);
-	layout->setSpacing(12);
-	layout->addStretch(1);
-
-	QLabel *title = new QLabel(QObject::tr("Modern shell failed to start"), notice);
-	title->setObjectName(QLatin1String("qlModernShellFailureTitle"));
-	QFont titleFont = title->font();
-	titleFont.setBold(true);
-	titleFont.setPointSizeF(titleFont.pointSizeF() + 3.0);
-	title->setFont(titleFont);
-	title->setAlignment(Qt::AlignCenter);
-	title->setTextFormat(Qt::PlainText);
-	layout->addWidget(title);
-
-	const QString trimmedReason = reason.trimmed();
-	const QString bodyText =
-		trimmedReason.isEmpty()
-			? QObject::tr("The Modern shell is the only visible client shell in this build.")
-			: QObject::tr("The Modern shell is the only visible client shell in this build.\n\n%1").arg(trimmedReason);
-	QLabel *body = new QLabel(bodyText, notice);
-	body->setObjectName(QLatin1String("qlModernShellFailureBody"));
-	body->setAlignment(Qt::AlignCenter);
-	body->setWordWrap(true);
-	body->setTextFormat(Qt::PlainText);
-	body->setTextInteractionFlags(Qt::TextSelectableByMouse);
-	layout->addWidget(body);
-	layout->addStretch(1);
-
-	return notice;
-}
 
 namespace {
 constexpr int PersistentChatScopeRole               = Qt::UserRole;
@@ -1455,106 +1417,6 @@ QString roomPopulationLabel(int count) {
 	return count == 1 ? QObject::tr("1 person here") : QObject::tr("%1 people here").arg(count);
 }
 
-[[maybe_unused]] QSize persistentChatMeasuredItemHint(QWidget *widget, int itemWidth) {
-	if (!widget) {
-		return QSize(std::max(0, itemWidth), 1);
-	}
-
-	const int measuredWidth = std::max(0, itemWidth);
-	widget->ensurePolished();
-	widget->setFixedWidth(measuredWidth);
-	if (QLayout *layout = widget->layout()) {
-		layout->activate();
-	}
-	widget->updateGeometry();
-	widget->adjustSize();
-
-	const QVariant explicitHeight = widget->property("persistentChatItemHeight");
-	int measuredHeight            = explicitHeight.isValid() ? explicitHeight.toInt() : widget->sizeHint().height();
-	if (QLayout *layout = widget->layout()) {
-		measuredHeight = std::max(measuredHeight, layout->sizeHint().height());
-	}
-
-	measuredHeight = std::max(measuredHeight, widget->minimumSizeHint().height());
-	return QSize(measuredWidth, std::max(1, measuredHeight));
-}
-
-QWidget *createPersistentChatStateWidget(const QString &eyebrow, const QString &title, const QString &body,
-										 const QStringList &hints, QWidget *parent, int minimumHeight) {
-	QWidget *widget = new QWidget(parent);
-	widget->setAttribute(Qt::WA_StyledBackground, true);
-	widget->setProperty("persistentChatItemHeight", std::max(180, minimumHeight));
-
-	QVBoxLayout *layout = new QVBoxLayout(widget);
-	layout->setContentsMargins(20, 12, 20, 12);
-	layout->setSpacing(0);
-	layout->addStretch(1);
-
-	QFrame *card = new QFrame(widget);
-	card->setObjectName(QLatin1String("qfPersistentChatBanner"));
-	card->setAttribute(Qt::WA_StyledBackground, true);
-	card->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
-	card->setMaximumWidth(440);
-
-	QVBoxLayout *cardLayout = new QVBoxLayout(card);
-	cardLayout->setContentsMargins(18, 18, 18, 18);
-	cardLayout->setSpacing(8);
-
-	QLabel *eyebrowLabel = new QLabel(eyebrow, card);
-	eyebrowLabel->setObjectName(QLatin1String("qlPersistentChatBannerEyebrow"));
-	eyebrowLabel->setTextFormat(Qt::PlainText);
-	QFont eyebrowFont = eyebrowLabel->font();
-	eyebrowFont.setCapitalization(QFont::AllUppercase);
-	eyebrowFont.setBold(true);
-	eyebrowFont.setPointSizeF(std::max(eyebrowFont.pointSizeF() - 1.0, 8.0));
-	eyebrowLabel->setFont(eyebrowFont);
-
-	QLabel *titleLabel = new QLabel(title, card);
-	titleLabel->setObjectName(QLatin1String("qlPersistentChatBannerTitle"));
-	titleLabel->setTextFormat(Qt::PlainText);
-	titleLabel->setWordWrap(true);
-	QFont titleFont = titleLabel->font();
-	titleFont.setBold(true);
-	titleFont.setPointSizeF(titleFont.pointSizeF() + 2.0);
-	titleLabel->setFont(titleFont);
-
-	QLabel *bodyLabel = new QLabel(body, card);
-	bodyLabel->setObjectName(QLatin1String("qlPersistentChatBannerBody"));
-	bodyLabel->setTextFormat(Qt::PlainText);
-	bodyLabel->setWordWrap(true);
-	bodyLabel->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-
-	cardLayout->addWidget(eyebrowLabel);
-	cardLayout->addWidget(titleLabel);
-	cardLayout->addWidget(bodyLabel);
-
-	if (!hints.isEmpty()) {
-		QWidget *hintRow = new QWidget(card);
-		hintRow->setObjectName(QLatin1String("qwPersistentChatBannerHints"));
-		QHBoxLayout *hintLayout = new QHBoxLayout(hintRow);
-		hintLayout->setContentsMargins(0, 4, 0, 0);
-		hintLayout->setSpacing(6);
-		hintLayout->addStretch(1);
-		for (const QString &hint : hints) {
-			if (hint.trimmed().isEmpty()) {
-				continue;
-			}
-
-			QLabel *hintLabel = new QLabel(hint, hintRow);
-			hintLabel->setObjectName(QLatin1String("qlPersistentChatBannerHint"));
-			hintLabel->setAttribute(Qt::WA_StyledBackground, true);
-			hintLabel->setTextFormat(Qt::PlainText);
-			hintLayout->addWidget(hintLabel);
-		}
-		hintLayout->addStretch(1);
-		cardLayout->addWidget(hintRow);
-	}
-
-	layout->addWidget(card, 0, Qt::AlignHCenter);
-	layout->addStretch(1);
-	return widget;
-}
-
 QImage persistentChatAvatarTexture(const ClientUser *user, int avatarSize) {
 	if (!user) {
 		return QImage();
@@ -1794,12 +1656,6 @@ ChromePaletteColors buildChromePalette(const QPalette &palette) {
 	const QString countLabel = QLocale().toString(std::max(0, count));
 	return count == 1 ? QObject::tr("%1 person here").arg(countLabel) : QObject::tr("%1 people here").arg(countLabel);
 }
-
-#ifdef Q_OS_WIN
-void applyNativeTitleBarTheme(QWidget *widget) {
-	applyUiThemeNativeTitleBar(widget);
-}
-#endif
 
 bool samePersistentChatActor(const MumbleProto::ChatMessage &lhs, const MumbleProto::ChatMessage &rhs) {
 	if (lhs.has_actor_user_id() || rhs.has_actor_user_id()) {
@@ -10946,17 +10802,10 @@ OpenURLEvent::OpenURLEvent(QUrl u) : QEvent(static_cast< QEvent::Type >(OU_QEVEN
 	url = u;
 }
 
-MainWindow::MainWindow(QWidget *p)
-	: QMainWindow(p), m_localVolumeLabel(make_qt_unique< MenuLabel >(tr("Local Volume Adjustment:"), this)),
-	  m_userLocalVolumeSlider(make_qt_unique< UserLocalVolumeSlider >(this)),
-	  m_listenerVolumeController(make_qt_unique< ListenerVolumeController >(this)),
-	  m_listenerVolumeSlider(make_qt_unique< ListenerVolumeSlider >(*m_listenerVolumeController, this)) {
+MainWindow::MainWindow(QObject *p)
+	: QObject(p), m_listenerVolumeController(make_qt_unique< ListenerVolumeController >(this)) {
 #if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
-	if (qEnvironmentVariableIsSet("MUMBLE_MODERN_AUTOMATION_OFFSCREEN")) {
-		setAttribute(Qt::WA_ShowWithoutActivating, true);
-		setWindowFlag(Qt::WindowDoesNotAcceptFocus, true);
-		move(-32000, -32000);
-	}
+	Q_UNUSED(qEnvironmentVariableIsSet("MUMBLE_MODERN_AUTOMATION_OFFSCREEN"))
 #endif
 
 	SvgIcon::addSvgPixmapsToIcon(qiIconMuteSelf, QLatin1String("skin:muted_self.svg"));
@@ -10987,7 +10836,6 @@ MainWindow::MainWindow(QWidget *p)
 
 	// Set the icon on the MainWindow directly. This fixes the icon not
 	// being set on the MainWindow in certain environments (Ex: GTK+).
-	setWindowIcon(qiIcon);
 #endif
 
 #ifdef Q_OS_WIN
@@ -11018,7 +10866,14 @@ MainWindow::MainWindow(QWidget *p)
 	m_userCommentRequestTimer->setObjectName(QLatin1String("UserCommentRequest"));
 	connect(m_userCommentRequestTimer, &QTimer::timeout, this, &MainWindow::flushUserCommentRequests);
 
-	qmUser = qmChannel = qmListener = qmDeveloper = nullptr;
+	qmUser      = new ClientActionList(this);
+	qmChannel   = new ClientActionList(this);
+	qmListener  = new ClientActionList(this);
+	qmDeveloper = new ClientActionList(this);
+	qmConfig    = new ClientActionList(this);
+	qmHelp      = new ClientActionList(this);
+	qmServer    = new ClientActionList(this);
+	qmSelf      = new ClientActionList(this);
 
 	qaEmpty = new QAction(tr("No action available..."), this);
 	qaEmpty->setEnabled(false);
@@ -11082,10 +10937,6 @@ MainWindow::MainWindow(QWidget *p)
 	QObject::connect(qaServerAddToFavorites, &QAction::triggered, this, &MainWindow::addServerAsFavorite);
 
 	QObject::connect(this, &MainWindow::transmissionModeChanged, this, &MainWindow::updateTransmitModeComboBox);
-
-	// Explicitly add actions to mainwindow so their shortcuts are available
-	// if only the main window is visible (e.g. Global::get(). minimal mode)
-	addActions(findChildren< QAction * >());
 
 	setOnTop(Global::get().s.aotbAlwaysOnTop == Settings::OnTopAlways
 			 || (Global::get().s.bMinimalView && Global::get().s.aotbAlwaysOnTop == Settings::OnTopInMinimal)
@@ -11471,7 +11322,6 @@ void MainWindow::refreshUserTextureViews(ClientUser *user) {
 	}
 	clearModernShellMessageDtoCache("avatar");
 	scheduleQmlRoomStateUpdate();
-	scheduleQmlShellStateSync();
 
 }
 
@@ -11561,15 +11411,6 @@ void MainWindow::clearUserCommentRequests() {
 	m_queuedUserCommentSessions.clear();
 	m_inFlightUserCommentSessions.clear();
 	m_requestedUserCommentHashBySession.clear();
-}
-
-// Loading a state that was stored by a different version of Qt can lead to a crash.
-// Modern-only state uses an explicit revision instead of the removed widget-form hash.
-constexpr int MainWindow::stateVersion(const bool modernShell) {
-	constexpr int kRuntimeLegacyShellStateVersion = 0x20260407;
-	constexpr int kRuntimeModernShellStateVersion = 0x20260418;
-	return QT_VERSION
-		   ^ (modernShell ? kRuntimeModernShellStateVersion : kRuntimeLegacyShellStateVersion);
 }
 
 bool MainWindow::shouldMirrorServerLogToNativeWidget() const {
@@ -11771,9 +11612,21 @@ void MainWindow::applyShellLayout() {
 
 		QString qmlError;
 		if (m_qmlShellHost->start(&qmlError)) {
+			setOnTop(Global::get().s.aotbAlwaysOnTop == Settings::OnTopAlways
+					 || (Global::get().s.bMinimalView
+						 && Global::get().s.aotbAlwaysOnTop == Settings::OnTopInMinimal)
+					 || (!Global::get().s.bMinimalView
+						 && Global::get().s.aotbAlwaysOnTop == Settings::OnTopInNormal));
 			ensureModernUiAutomationServer();
+			connect(m_qmlShellHost->window(), &QWindow::visibilityChanged, this,
+					[this](const QWindow::Visibility visibility) {
+						if (visibility == QWindow::Minimized) emit windowMinimized();
+					});
+			connect(m_qmlShellHost->window(), &QWindow::activeChanged, this, [this]() {
+				if (m_qmlShellHost && m_qmlShellHost->window() && m_qmlShellHost->window()->isActive())
+					emit windowActivated();
+			});
 			QTimer::singleShot(0, this, [this]() { syncQmlShellState(); });
-			hide();
 			m_qmlShellHost->showRaise();
 			m_activeShellLayout      = targetLayout;
 			m_shellLayoutInitialized = true;
@@ -11782,11 +11635,8 @@ void MainWindow::applyShellLayout() {
 		qWarning("Qt Quick shell failed to start: %s", qPrintable(qmlError));
 	}
 
-	auto *failureLabel = new QLabel(tr("The Qt Quick interface could not start. Please inspect the client log."), this);
-	failureLabel->setAlignment(Qt::AlignCenter);
-	failureLabel->setWordWrap(true);
-	setCentralWidget(failureLabel);
-	show();
+	qCritical("The Qt Quick interface could not start. Please inspect the client log.");
+	QMetaObject::invokeMethod(qApp, &QCoreApplication::quit, Qt::QueuedConnection);
 	m_activeShellLayout = targetLayout;
 	m_shellLayoutInitialized = true;
 }
@@ -12099,7 +11949,6 @@ void MainWindow::createActions() {
 
 void MainWindow::setupGui() {
 	updateWindowTitle();
-	setAcceptDrops(true);
 
 	m_modernServerLogDocument = new LogDocument(this);
 	m_modernServerLogDocument->setDocumentMargin(0);
@@ -12139,20 +11988,15 @@ void MainWindow::setupGui() {
 							 && std::all_of(roles.cbegin(), roles.cend(), [](const int role) {
 									return role == Qt::DecorationRole || role == UserModel::NavigatorTalkStateRole;
 						  });
-						 if (talkStateOnly) {
-							 for (int row = topLeft.row(); row <= bottomRight.row(); ++row) {
-								 publishModernShellTalkStateForIndex(topLeft.sibling(row, 0));
+						 for (int row = topLeft.row(); row <= bottomRight.row(); ++row) {
+							 const QModelIndex index = topLeft.sibling(row, 0);
+							 if (talkStateOnly) {
+								 publishModernShellTalkStateForIndex(index);
+							 } else if (ClientUser *user = pmModel->getUser(index)) {
+								 publishQmlParticipantState(user);
 							 }
-							 return;
 						 }
-						 scheduleQmlRoomStateUpdate();
 					 });
-	QObject::connect(pmModel, &QAbstractItemModel::rowsInserted, this,
-					 [this]() { scheduleQmlRoomStateUpdate(); });
-	QObject::connect(pmModel, &QAbstractItemModel::rowsRemoved, this,
-					 [this]() { scheduleQmlRoomStateUpdate(); });
-	QObject::connect(pmModel, &QAbstractItemModel::rowsMoved, this,
-					 [this]() { scheduleQmlRoomStateUpdate(); });
 	QObject::connect(pmModel, &QAbstractItemModel::modelReset, this,
 					 [this]() { scheduleQmlShellStateSyncImmediate(); });
 	QObject::connect(pmModel, &QAbstractItemModel::layoutChanged, this,
@@ -12169,13 +12013,16 @@ void MainWindow::setupGui() {
 				publishModernShellTalkState(guardedUser);
 			}
 		});
-		scheduleQmlRoomStateUpdate();
+		publishQmlParticipantState(user);
 	});
 	QObject::connect(pmModel, &UserModel::userRemoved, this,
-					 [this](unsigned int) { scheduleQmlRoomStateUpdate(); });
+					 [this](unsigned int session) {
+						 if (m_qmlShellHost)
+							 m_qmlShellHost->participantModel()->removeParticipant(QString::number(session));
+					 });
 	QObject::connect(pmModel, &UserModel::userMoved, this,
-					 [this](unsigned int, const std::optional< unsigned int > &, unsigned int) {
-						 scheduleQmlRoomStateUpdate();
+					 [this](unsigned int session, const std::optional< unsigned int > &, unsigned int) {
+						 if (ClientUser *user = ClientUser::get(session)) publishQmlParticipantState(user);
 					 });
 	QObject::connect(pmModel, &UserModel::channelAdded, this,
 					 [this](unsigned int) { scheduleQmlRoomStateUpdate(); });
@@ -14655,7 +14502,6 @@ void MainWindow::handleStonksState(const MumbleProto::StonksState &state) {
 		&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
 		openModernGenericDialog(buildModernStonksDialog());
 	}
-	scheduleQmlShellStateSync();
 }
 
 bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const QVariantMap &payload) {
@@ -14664,7 +14510,6 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 		Global::get().s.bModernShellTickerBannerAlwaysScroll =
 			payload.value(QStringLiteral("tickerBannerAlwaysScroll")).toBool();
 		Global::get().s.save();
-		scheduleQmlShellStateSync();
 		if (true && m_modernDialogController
 			&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
 			openModernGenericDialog(buildModernStonksDialog());
@@ -14675,7 +14520,6 @@ bool MainWindow::handleModernStonksDialogAction(const QString &actionID, const Q
 		Global::get().s.bModernShellTickerBannerEnabled =
 			payload.value(QStringLiteral("tickerBannerEnabled"), true).toBool();
 		Global::get().s.save();
-		scheduleQmlShellStateSync();
 		if (true && m_modernDialogController
 			&& m_modernDialogController->activeDialogID() == QLatin1String("stonks")) {
 			openModernGenericDialog(buildModernStonksDialog());
@@ -16999,7 +16843,7 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 		const int messageType = payload.value(QStringLiteral("messageType"), -1).toInt();
 		if (actionID == QLatin1String("messages.chooseEventSound")) {
 			const QString path = QFileDialog::getOpenFileName(
-				this, tr("Choose notification sound"), payload.value(QStringLiteral("soundPath")).toString(),
+				nullptr, tr("Choose notification sound"), payload.value(QStringLiteral("soundPath")).toString(),
 				tr("Audio files (*.wav *.ogg *.flac *.mp3);;All files (*)"));
 			if (!path.isEmpty() && messageType >= 0 && m_modernDialogController) {
 				m_modernDialogController->updateField(
@@ -17031,7 +16875,7 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 		const const_plugin_ptr_t plugin = Global::get().pluginManager->getPlugin(pluginID);
 		if (actionID == QLatin1String("plugins.install")) {
 			const QString path = QFileDialog::getOpenFileName(
-				this, tr("Install plugin"), QDir::homePath(),
+				nullptr, tr("Install plugin"), QDir::homePath(),
 				tr("Mumble plugins (*.mumble_plugin *.dll *.so *.dylib);;All files (*)"));
 			if (path.isEmpty()) {
 				return true;
@@ -17224,7 +17068,7 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 		QVariantMap values = fieldValues;
 		if (actionID == QLatin1String("browseCertificateImport")) {
 			const QString path = QFileDialog::getOpenFileName(
-				this, tr("Select file to import certificate from"),
+				nullptr, tr("Select file to import certificate from"),
 				values.value(QStringLiteral("cert.importPath")).toString(),
 				QLatin1String("PKCS12 (*.p12 *.pfx *.pkcs12);;All (*)"));
 			if (!path.isNull()) {
@@ -17240,7 +17084,7 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 						  + QLatin1String("/mumble-certificate.p12");
 			}
 			QString path = QFileDialog::getSaveFileName(
-				this, tr("Select file to export certificate to"), initial,
+				nullptr, tr("Select file to export certificate to"), initial,
 				QLatin1String("PKCS12 (*.p12 *.pfx *.pkcs12);;All (*)"));
 			if (!path.isNull()) {
 				QFileInfo info(path);
@@ -17374,7 +17218,7 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 		QVariantMap values = fieldValues;
 		if (actionID == QLatin1String("browseRecordingDirectory")) {
 			const QString path = QFileDialog::getExistingDirectory(
-				this, tr("Select target directory"),
+				nullptr, tr("Select target directory"),
 				values.value(QStringLiteral("recording.path"), Global::get().s.qsRecordingPath).toString(),
 				QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
 			if (!path.isEmpty()) {
@@ -17672,7 +17516,8 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 			Global::get().qsServerMonogram    = monogram;
 			Global::get().qbaServerImage      = *serverImage;
 			Global::get().sh->sendMessage(config);
-			scheduleQmlShellStateSync();
+			if (m_qmlShellHost) m_qmlShellHost->sessionController()->setServerName(displayName);
+			scheduleQmlRoomStateUpdate();
 			publishModernToast(QStringLiteral("success"), tr("Server settings"), tr("Server settings saved."));
 		} else {
 			publishModernToast(QStringLiteral("error"), tr("Server settings"),
@@ -17887,7 +17732,7 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 											? getImagePath()
 											: QDir::fromNativeSeparators(currentPath);
 			const QString path =
-				QFileDialog::getOpenFileName(this, tr("Choose image file"), initialPath,
+				QFileDialog::getOpenFileName(nullptr, tr("Choose image file"), initialPath,
 											 tr("Images (*.png *.jpg *.jpeg)"));
 			if (!path.isNull()) {
 				values.insert(QStringLiteral("avatar.path"), QDir::toNativeSeparators(path));
@@ -18645,7 +18490,11 @@ void MainWindow::applyModernSettings(const Settings &settings, const bool accept
 	updateTransmitModeComboBox(Global::get().s.atTransmit);
 	updateUserModel();
 	emit talkingStatusChanged();
-	scheduleQmlShellStateSync();
+	scheduleQmlRoomStateUpdate();
+	if (m_qmlShellHost) {
+		m_qmlShellHost->sessionController()->setSelfMuted(Global::get().s.bMute);
+		m_qmlShellHost->sessionController()->setSelfDeafened(Global::get().s.bDeaf);
+	}
 
 	if (accepted) {
 		if (Global::get().sh && Global::get().sh->hasSynchronized()) {
@@ -18739,6 +18588,13 @@ void MainWindow::publishModernShellTalkState(const ClientUser *user) {
 	mumble::chatperf::recordValue("qml.participant.presence.direct", 1);
 }
 
+void MainWindow::publishQmlParticipantState(const ClientUser *user) {
+	if (!user || !m_qmlShellHost) return;
+	m_qmlShellHost->participantModel()->upsertParticipantState(
+		buildQmlParticipantState(user, user->cChannel, nullptr, 40, true));
+	mumble::chatperf::recordValue("qml.participant.upsert.direct", 1);
+}
+
 void MainWindow::publishModernShellTalkStateForIndex(const QModelIndex &index) {
 	if (!pmModel || !index.isValid()) {
 		return;
@@ -18779,14 +18635,14 @@ void MainWindow::endNativeWindowMoveOrResize() {
 	appendModernShellConnectTrace(QStringLiteral("nativeWindowMoveResize end"));
 	if (m_qmlStatePendingAfterNativeMoveResize) {
 		m_qmlStatePendingAfterNativeMoveResize = false;
-		scheduleQmlShellStateSync();
+		scheduleQmlRoomStateUpdate();
 	}
 }
 
-QVariantList MainWindow::serializeModernShellMenu(QMenu *menu, const ModernShellMenuContext context,
+QVariantList MainWindow::serializeModernShellMenu(ClientActionList *menu, const ModernShellMenuContext context,
 												  ModernShellMenuSerializer::ActionRegistry *registry) const {
-	return ModernShellMenuSerializer::serializeMenu(
-		menu,
+	return ModernShellMenuSerializer::serializeActions(
+		menu ? menu->actions() : QList< QAction * >(),
 		[this, context](const QAction *action) {
 			return modernShellActionDefinition(context, const_cast< QAction * >(action));
 		},
@@ -18875,7 +18731,7 @@ QVariantList MainWindow::buildModernShellAppMenus() const {
 ModernShellMenuSerializer::ActionDefinition
 	MainWindow::modernShellActionDefinition(const ModernShellMenuContext context, QAction *action) const {
 	ModernShellMenuSerializer::ActionDefinition definition;
-	if (!action || action->menu()) {
+	if (!action) {
 		return definition;
 	}
 
@@ -18989,8 +18845,6 @@ ModernShellMenuSerializer::ActionDefinition
 				definition.id = QStringLiteral("ignoreMessages");
 			} else if (action == qaUserLocalIgnoreTTS) {
 				definition.id = QStringLiteral("ignoreTts");
-			} else if (action == m_userLocalVolumeSlider.get()) {
-				definition.id = QStringLiteral("localVolume");
 			} else if (action == qaUserLocalNickname) {
 				definition.id = QStringLiteral("localNickname");
 			} else if (action == qaSelfComment) {
@@ -19093,9 +18947,7 @@ ModernShellMenuSerializer::ActionDefinition
 			}
 			break;
 		case ModernShellMenuContext::Listener:
-			if (action == m_listenerVolumeSlider.get()) {
-				definition.id = QStringLiteral("listenerVolume");
-			} else if (action == qaChannelListen) {
+			if (action == qaChannelListen) {
 				definition.id = QStringLiteral("listen");
 			}
 			break;
@@ -20314,7 +20166,6 @@ QVariantMap MainWindow::buildQmlRoomState() {
 		on_qmServer_aboutToShow();
 		on_qmSelf_aboutToShow();
 		on_qmConfig_aboutToShow();
-		qmHelp->ensurePolished();
 		appMenus = buildModernShellAppMenus();
 	}
 	appState.insert(QStringLiteral("menus"), appMenus);
@@ -22617,7 +22468,7 @@ bool MainWindow::startModernForkUpdateDownload() {
 	setModernUpdateBannerState(banner);
 
 	VersionCheck::downloadUpdateFromInfo(
-		m_modernVersionCheckInfo, this, false,
+		m_modernVersionCheckInfo, nullptr, false,
 		[this, updateMode](const QString &installerPath) {
 			m_modernUpdateDownloadInProgress = false;
 			m_modernPreparedUpdateInstallerPath = installerPath;
@@ -22844,7 +22695,7 @@ bool MainWindow::handleModernShellAppActionPayload(const QString &actionId, cons
 		if (!comment.isEmpty() && Global::get().db) {
 			Global::get().db->setBlob(selfUser->qbaCommentHash, comment.toUtf8());
 		}
-		scheduleQmlShellStateSync();
+		publishQmlParticipantState(selfUser);
 		publishModernToast(QStringLiteral("success"), tr("Self comment"), tr("Comment saved."));
 		return true;
 	}
@@ -22906,7 +22757,9 @@ bool MainWindow::handleModernShellAppActionPayload(const QString &actionId, cons
 		}
 
 		Global::get().sh->sendMessage(config);
-		scheduleQmlShellStateSync();
+		if (m_qmlShellHost) {
+			m_qmlShellHost->sessionController()->setServerName(Global::get().qsServerDisplayName);
+		}
 		publishModernToast(QStringLiteral("success"), tr("Server identity"), tr("Server identity saved."));
 		return true;
 	}
@@ -22954,7 +22807,7 @@ bool MainWindow::handleModernShellAppActionPayload(const QString &actionId, cons
 				payload.value(QStringLiteral("tickerBannerEnabled")).toBool();
 		}
 		Global::get().s.save();
-		scheduleQmlShellStateSync();
+		if (m_qmlShellHost) m_qmlShellHost->themeController()->refresh();
 		publishModernToast(QStringLiteral("success"), tr("Tweaks"), tr("Tweaks saved."));
 		return true;
 	}
@@ -23500,42 +23353,22 @@ void MainWindow::setPersistentChatWelcomeText(const QString &message) {
 }
 
 void MainWindow::updatePersistentChatWelcome() {
-	if (!true || !m_persistentChatHeaderFrame) {
-		return;
-	}
-	if (modernShellMinimalSnapshotEnabled()) {
-		return;
-	}
-
-	updatePersistentChatChrome(currentPersistentChatTarget());
+	publishQmlActiveScopeState();
 }
 
 void MainWindow::setPersistentChatReplyTarget(const std::optional< MumbleProto::ChatMessage > &message) {
-	if (!m_persistentChatReplyFrame || !m_persistentChatReplyLabel || !m_persistentChatReplySnippet) {
-		m_pendingPersistentChatReply = message;
-		return;
-	}
-
 	if (!message) {
 		clearPersistentChatReplyTarget(true);
 		return;
 	}
 
 	m_pendingPersistentChatReply = message;
-	m_persistentChatReplyLabel->setText(tr("Replying to %1").arg(persistentChatActorLabel(*message).toHtmlEscaped()));
-	m_persistentChatReplySnippet->setText(
-		persistentChatMessageTextSnippet(persistentChatMessageSourceText(*message)).toHtmlEscaped());
-	m_persistentChatReplyFrame->show();
 	updateChatBar(false, false);
 	publishQmlActiveScopeState();
 }
 
 void MainWindow::clearPersistentChatReplyTarget(bool refreshChatBar) {
 	m_pendingPersistentChatReply.reset();
-
-	if (m_persistentChatReplyFrame) {
-		m_persistentChatReplyFrame->hide();
-	}
 
 	if (refreshChatBar) {
 		updateChatBar(false, false);
@@ -23588,7 +23421,7 @@ QString MainWindow::persistentChatScopeLabel(MumbleProto::ChatScope scope, unsig
 
 void MainWindow::rebuildPersistentChatChannelList() {
 	// The room rail is owned by QML and reads the typed room/selection models directly.
-	scheduleQmlShellStateSync();
+	scheduleQmlRoomStateUpdate();
 }
 
 void MainWindow::handlePersistentTextChannelSync(const MumbleProto::TextChannelSync &msg) {
@@ -23613,12 +23446,12 @@ void MainWindow::handlePersistentTextChannelSync(const MumbleProto::TextChannelS
 		m_persistentTextChannels.insert(textChannel.textChannelID, textChannel);
 	}
 
-	if (true && stonksLedgerFeatureSupported() && Global::get().bStonksEnabled) {
+	if (stonksLedgerFeatureSupported() && Global::get().bStonksEnabled) {
 		requestStonksState(m_stonksSelectedPeriod);
 	}
 
 	if (hiddenNativePersistentChatSafeMode) {
-		scheduleQmlShellStateSync();
+		scheduleQmlRoomStateUpdate();
 		updateChatBar();
 		applyPendingUpdateResumeState();
 		return;
@@ -23647,7 +23480,7 @@ void MainWindow::handlePersistentTextChannelSync(const MumbleProto::TextChannelS
 			}
 		}
 
-		if (true && preferredTextChannelID != 0) {
+		if (preferredTextChannelID != 0) {
 			navigateToPersistentChatScope(MumbleProto::TextChannel, preferredTextChannelID);
 		}
 	}
@@ -23663,7 +23496,7 @@ void MainWindow::setPersistentChatTargetUsesVoiceTree(bool useVoiceTree) {
 	}
 
 	m_persistentChatTargetUsesVoiceTree = useVoiceTree;
-	scheduleQmlShellStateSync();
+	publishQmlActiveScopeState();
 }
 
 Channel *MainWindow::currentVoiceChannel() const {
@@ -23701,6 +23534,44 @@ std::optional< unsigned int > MainWindow::selectedModernVoiceChannel() const {
 
 QmlShellHost *MainWindow::qmlShellHost() const {
 	return m_qmlShellHost.get();
+}
+
+void MainWindow::show() { if (m_qmlShellHost) m_qmlShellHost->showRaise(); }
+void MainWindow::hide() { if (m_qmlShellHost && m_qmlShellHost->window()) m_qmlShellHost->window()->hide(); }
+void MainWindow::raise() { if (m_qmlShellHost && m_qmlShellHost->window()) m_qmlShellHost->window()->raise(); }
+void MainWindow::activateWindow() {
+	if (m_qmlShellHost && m_qmlShellHost->window()) m_qmlShellHost->window()->requestActivate();
+}
+void MainWindow::close() {
+	QCloseEvent event;
+	closeEvent(&event);
+}
+bool MainWindow::isActiveWindow() const {
+	return m_qmlShellHost && m_qmlShellHost->window() && m_qmlShellHost->window()->isActive();
+}
+bool MainWindow::isVisible() const {
+	return m_qmlShellHost && m_qmlShellHost->window() && m_qmlShellHost->window()->isVisible();
+}
+bool MainWindow::isMinimized() const { return windowState().testFlag(Qt::WindowMinimized); }
+QFont MainWindow::font() const { return qApp ? qApp->font() : QFont(); }
+WId MainWindow::winId() const {
+	return m_qmlShellHost && m_qmlShellHost->window() ? m_qmlShellHost->window()->winId() : WId();
+}
+Qt::WindowStates MainWindow::windowState() const {
+	return m_qmlShellHost && m_qmlShellHost->window() ? m_qmlShellHost->window()->windowStates()
+												 : Qt::WindowNoState;
+}
+void MainWindow::setWindowState(const Qt::WindowStates state) {
+	if (m_qmlShellHost && m_qmlShellHost->window()) m_qmlShellHost->window()->setWindowStates(state);
+}
+Qt::WindowFlags MainWindow::windowFlags() const {
+	return m_qmlShellHost && m_qmlShellHost->window() ? m_qmlShellHost->window()->flags() : Qt::WindowFlags();
+}
+void MainWindow::setWindowFlags(const Qt::WindowFlags flags) {
+	if (m_qmlShellHost && m_qmlShellHost->window()) m_qmlShellHost->window()->setFlags(flags);
+}
+void MainWindow::setWindowTitle(const QString &title) {
+	if (m_qmlShellHost && m_qmlShellHost->window()) m_qmlShellHost->window()->setTitle(title);
 }
 
 void MainWindow::selectModernUserSession(const unsigned int session) {
@@ -23816,6 +23687,11 @@ void MainWindow::syncQmlShellState() {
 	if (!m_qmlShellHost || !m_qmlShellHost->window()) {
 		return;
 	}
+	if (mumble::chatperf::fullBootstrapMonitor().recordBootstrap()) {
+		mumble::chatperf::recordValue("qml.full_bootstrap.steady_state_violation", 1);
+		qWarning("QML full bootstrap requested during steady state");
+	}
+	mumble::chatperf::recordValue("qml.full_bootstrap", 1);
 
 	const bool connected = Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning();
 	QString host;
@@ -23956,13 +23832,7 @@ bool MainWindow::isUserIdle(unsigned int session) const {
 }
 
 bool MainWindow::isServerNavigatorCompactHeight() const {
-	if (!m_serverNavigatorContentFrame) {
-		return false;
-	}
-
-	const QRect contentRect = m_serverNavigatorContentFrame->contentsRect();
-	return (contentRect.height() > 0 && contentRect.height() < 560)
-		   || (contentRect.width() > 0 && contentRect.width() < 272);
+	return false;
 }
 
 
@@ -27136,11 +27006,7 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 					return;
 				}
 
-				if (true) {
-					guardedThis->publishModernShellPreviewUpdateForKey(previewKey);
-				} else {
-					guardedThis->scheduleQmlShellStateSync();
-				}
+				guardedThis->publishModernShellPreviewUpdateForKey(previewKey);
 				guardedThis->updatePersistentChatPreviewViewIfVisible(previewKey);
 			},
 			Qt::QueuedConnection);
@@ -28306,11 +28172,7 @@ void MainWindow::ensurePersistentChatPreviewSiteSnapshot(const QString &previewK
 }
 void MainWindow::publishPersistentChatPreviewUpdate(const QString &previewKey) {
 	storePersistentChatPreviewDiskCache(previewKey);
-	if (true) {
-		publishModernShellPreviewUpdateForKey(previewKey);
-	} else {
-		scheduleQmlShellStateSync();
-	}
+	publishModernShellPreviewUpdateForKey(previewKey);
 	updatePersistentChatPreviewViewIfVisible(previewKey);
 }
 
@@ -28362,7 +28224,7 @@ QString MainWindow::persistentChatPreviewHtml(const QString &previewKey, int ava
 		placeholderColor = uiThemeColorWithAlpha(tokens->surface1, 0.7);
 	} else {
 		const ChromePaletteColors chrome =
-			buildChromePalette(m_persistentChatContainer ? m_persistentChatContainer->palette() : palette());
+			buildChromePalette(qApp->palette());
 		cardBackground   = chrome.elevatedCardColor;
 		borderColor      = chrome.dividerColor;
 		accentColor      = chrome.accentColor;
@@ -28983,11 +28845,7 @@ void MainWindow::renderPersistentChatViewImmediately(const QString &statusMessag
 		--m_persistentChatBottomLockRendersRemaining;
 	}
 
-	if (true) {
-		publishQmlActiveScopeState();
-	} else {
-		scheduleQmlShellStateSync();
-	}
+	publishQmlActiveScopeState();
 }
 
 bool MainWindow::canMarkPersistentChatRead(bool willScrollToBottom) const {
@@ -29263,7 +29121,7 @@ void MainWindow::togglePreferredModernShellLayout() {
 	Global::get().s.modernLayoutPolicy = Settings::ModernLayoutForced;
 	Global::get().s.wlWindowLayout     = Settings::LayoutModern;
 	Global::get().s.save();
-	scheduleQmlShellStateSync();
+	if (m_qmlShellHost) m_qmlShellHost->themeController()->refresh();
 }
 
 void MainWindow::openPersistentChatImagePicker() {
@@ -29272,7 +29130,7 @@ void MainWindow::openPersistentChatImagePicker() {
 		return;
 	}
 
-	QFileDialog dialog(this, tr("Attach image"));
+	QFileDialog dialog(nullptr, tr("Attach image"));
 	dialog.setFileMode(QFileDialog::ExistingFiles);
 	dialog.setNameFilter(tr("Images (*.png *.jpg *.jpeg *.gif *.webp)"));
 	const QString picturesLocation = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
@@ -29784,84 +29642,23 @@ void MainWindow::closeEvent(QCloseEvent *e) {
 
 	Global::get().bQuit = true;
 
-	QMainWindow::closeEvent(e);
+	e->accept();
 
 	qApp->exit(restartOnQuit ? MUMBLE_EXIT_CODE_RESTART : 0);
 }
 
 void MainWindow::hideEvent(QHideEvent *e) {
-	QMainWindow::hideEvent(e);
+	Q_UNUSED(e)
 }
 
 void MainWindow::showEvent(QShowEvent *e) {
-	QMainWindow::showEvent(e);
-#ifdef Q_OS_WIN
-	applyNativeTitleBarTheme(this);
-#endif
-}
-
-void MainWindow::changeEvent(QEvent *e) {
-	// Parse minimize event
-	if (e->type() == QEvent::WindowStateChange) {
-		// This code block is not triggered on (X)Wayland due to a Qt bug we can do nothing about (QTBUG-74310)
-		QWindowStateChangeEvent *windowStateEvent = static_cast< QWindowStateChangeEvent * >(e);
-		if (windowStateEvent) {
-			bool wasMinimizedState = (windowStateEvent->oldState() & Qt::WindowMinimized);
-			bool isMinimizedState  = (windowState() & Qt::WindowMinimized);
-			if (!wasMinimizedState && isMinimizedState) {
-				emit windowMinimized();
-			}
-			return;
-		}
-	}
-
-	// The window has just received focus after being in the background
-	if (e->type() == QEvent::ActivationChange) {
-		if (isActiveWindow()) {
-			emit windowActivated();
-		}
-		return;
-	}
-
-	if (e->type() == QEvent::ThemeChange) {
-		Themes::apply();
-		refreshCustomChromeStyles();
-		if (m_qmlShellHost) {
-			m_qmlShellHost->themeController()->refresh();
-		}
-	}
-
-	QWidget::changeEvent(e);
+	Q_UNUSED(e)
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
-	if (event && watched
-		&& (watched == m_serverNavigatorContentFrame || watched == m_serverNavigatorTextChannelsMotdFrame
-			|| watched == m_serverNavigatorTextChannelsMotdBody)
-		&& (event->type() == QEvent::Resize || event->type() == QEvent::Show
-			|| event->type() == QEvent::LayoutRequest)) {
-		return QObject::eventFilter(watched, event);
-	}
-
-	return QMainWindow::eventFilter(watched, event);
-}
-
-void MainWindow::keyPressEvent(QKeyEvent *e) {
-	if (e->key() == Qt::Key_F1 && e->modifiers() == Qt::NoModifier) {
-		on_qaHelpFeedback_triggered();
-		e->accept();
-		return;
-	}
-
-	// Pressing F6 switches between the main
-	// window's main widgets, making it easier
-	// to navigate Mumble's MainWindow with only
-	// a keyboard.
-	if (e->key() == Qt::Key_F6) {
-		focusNextMainWidget();
-	} else {
-		QMainWindow::keyPressEvent(e);
-	}
+	Q_UNUSED(watched)
+	Q_UNUSED(event)
+	return QObject::eventFilter(watched, event);
 }
 
 /// focusNextMainWidget switches the focus to the next main
@@ -29905,10 +29702,6 @@ void MainWindow::updateTransmitModeComboBox(Settings::AudioTransmit newMode) {
 			qcbTransmitMode->setCurrentIndex(2);
 			return;
 	}
-}
-
-QMenu *MainWindow::createPopupMenu() {
-	return nullptr;
 }
 
 Channel *MainWindow::getContextMenuChannel() {
@@ -30004,7 +29797,7 @@ bool MainWindow::handleSpecialContextMenu(const QUrl &url, const QPoint &pos_, b
 				scheduleQmlRoomStateUpdate();
 			} else {
 				qpContextPosition = QPoint();
-				qmUser->exec(pos_, nullptr);
+				Q_UNUSED(pos_)
 			}
 		}
 		cuContextUser.clear();
@@ -30028,7 +29821,7 @@ bool MainWindow::handleSpecialContextMenu(const QUrl &url, const QPoint &pos_, b
 				scheduleQmlRoomStateUpdate();
 			} else {
 				qpContextPosition = QPoint();
-				qmChannel->exec(pos_, nullptr);
+				Q_UNUSED(pos_)
 			}
 		}
 		cContextChannel.clear();
@@ -30314,7 +30107,7 @@ void MainWindow::saveImageAs() {
 	QString defaultFname =
 		QString::fromLatin1("Mumble-%1.jpg").arg(now.toString(QString::fromLatin1("yyyy-MM-dd-HHmmss")));
 
-	QString fname = QFileDialog::getSaveFileName(this, tr("Save Image File"), getImagePath(defaultFname),
+	QString fname = QFileDialog::getSaveFileName(nullptr, tr("Save Image File"), getImagePath(defaultFname),
 												 tr("Images (*.png *.jpg *.jpeg)"));
 	if (fname.isNull()) {
 		return;
@@ -30682,7 +30475,7 @@ void MainWindow::findDesiredChannel() {
 		}
 	}
 	if (hiddenNativeUserModelSafeMode) {
-		scheduleQmlShellStateSync();
+		scheduleQmlRoomStateUpdate();
 	}
 	updateMenuPermissions();
 }
@@ -30700,51 +30493,11 @@ void MainWindow::setOnTop(bool top) {
 }
 
 void MainWindow::loadState(const bool minimalView) {
-	const bool modernShell = true;
-	if (minimalView) {
-		const QByteArray &geometry =
-			modernShell ? Global::get().s.qbaModernMinimalViewGeometry : Global::get().s.qbaMinimalViewGeometry;
-		if (!geometry.isNull()) {
-			restoreGeometry(geometry);
-		}
-		const QByteArray &state =
-			modernShell ? Global::get().s.qbaModernMinimalViewState : Global::get().s.qbaMinimalViewState;
-		if (!state.isNull()) {
-			restoreState(state, stateVersion(modernShell));
-		}
-	} else {
-		const QByteArray &geometry =
-			modernShell ? Global::get().s.qbaModernMainWindowGeometry : Global::get().s.qbaMainWindowGeometry;
-		if (!geometry.isNull()) {
-			restoreGeometry(geometry);
-		}
-		const QByteArray &state =
-			modernShell ? Global::get().s.qbaModernMainWindowState : Global::get().s.qbaMainWindowState;
-		if (!state.isNull()) {
-			restoreState(state, stateVersion(modernShell));
-		}
-	}
+	Q_UNUSED(minimalView)
 }
 
 void MainWindow::storeState(const bool minimalView) {
-	const bool modernShell = true;
-	if (minimalView) {
-		if (modernShell) {
-			Global::get().s.qbaModernMinimalViewGeometry = saveGeometry();
-			Global::get().s.qbaModernMinimalViewState    = saveState(stateVersion(true));
-		} else {
-			Global::get().s.qbaMinimalViewGeometry = saveGeometry();
-			Global::get().s.qbaMinimalViewState    = saveState(stateVersion(false));
-		}
-	} else {
-		if (modernShell) {
-			Global::get().s.qbaModernMainWindowGeometry = saveGeometry();
-			Global::get().s.qbaModernMainWindowState    = saveState(stateVersion(true));
-		} else {
-			Global::get().s.qbaMainWindowGeometry = saveGeometry();
-			Global::get().s.qbaMainWindowState    = saveState(stateVersion(false));
-		}
-	}
+	Q_UNUSED(minimalView)
 }
 
 void MainWindow::setupView(bool toggle_minimize) {
@@ -30983,10 +30736,6 @@ void MainWindow::qmUser_aboutToShow() {
 
 	if (p && !isSelf) {
 		qmUser->addSeparator();
-		qmUser->addAction(m_localVolumeLabel.get());
-		m_userLocalVolumeSlider->setUser(p->uiSession);
-		qmUser->addAction(m_userLocalVolumeSlider.get());
-		qmUser->addSeparator();
 	}
 
 	qmUser->addAction(qaUserLocalNickname);
@@ -31040,10 +30789,6 @@ void MainWindow::qmUser_aboutToShow() {
 #ifndef Q_OS_MAC
 	if (Global::get().s.bMinimalView) {
 		qmUser->addSeparator();
-		qmUser->addMenu(qmServer);
-		qmUser->addMenu(qmSelf);
-		qmUser->addMenu(qmConfig);
-		qmUser->addMenu(qmHelp);
 	}
 #endif
 
@@ -31117,14 +30862,6 @@ void MainWindow::qmListener_aboutToShow() {
 	qmListener->clear();
 
 	if (self) {
-		qmListener->addAction(m_localVolumeLabel.get());
-		Channel *channel = getContextMenuChannel();
-		if (channel) {
-			m_listenerVolumeSlider->setListenedChannel(*channel);
-			qmListener->addAction(m_listenerVolumeSlider.get());
-			qmListener->addSeparator();
-		}
-
 		if (cContextChannel) {
 			qmListener->addAction(qaChannelListen);
 			qaChannelListen->setChecked(
@@ -31592,12 +31329,8 @@ bool MainWindow::openScreenShareWindowOrStatus(const QString &streamID) {
 		if (m_screenShareManager->isViewingSession(streamID)) {
 			if (m_screenShareManager->hasRunningExternalRuntime(streamID)) {
 				const QString message = tr("The video window will open when media starts.");
-				if (true) {
-					publishModernToast(QStringLiteral("info"), tr("Screen-share viewer is connecting"), message,
-									   QString(), QString(), 8000);
-				} else {
-					statusBar()->showMessage(tr("Screen-share viewer is connecting. %1").arg(message), 8000);
-				}
+				publishModernToast(QStringLiteral("info"), tr("Screen-share viewer is connecting"), message,
+								   QString(), QString(), 8000);
 				return true;
 			}
 
@@ -32118,10 +31851,6 @@ void MainWindow::qmChannel_aboutToShow() {
 #ifndef Q_OS_MAC
 	if (Global::get().s.bMinimalView) {
 		qmChannel->addSeparator();
-		qmChannel->addMenu(qmServer);
-		qmChannel->addMenu(qmSelf);
-		qmChannel->addMenu(qmConfig);
-		qmChannel->addMenu(qmHelp);
 	}
 #endif
 
@@ -32488,7 +32217,7 @@ void MainWindow::userStateChanged() {
 }
 
 void MainWindow::on_channelStateChanged(Channel *, bool) {
-	scheduleQmlShellStateSync();
+	scheduleQmlRoomStateUpdate();
 }
 
 void MainWindow::on_qaAudioReset_triggered() {
@@ -32531,10 +32260,11 @@ void MainWindow::on_qaAudioMute_triggered() {
 	updateAudioToolTips();
 	emit talkingStatusChanged();
 	clearModernShellMessageDtoCache("self-mute");
-	if (true) {
-		scheduleQmlRoomStateUpdate();
-	} else {
-		scheduleQmlShellStateSync();
+	if (m_qmlShellHost) {
+		ClientSessionController *session = m_qmlShellHost->sessionController();
+		session->setSelfMuted(Global::get().s.bMute);
+		session->setSelfDeafened(Global::get().s.bDeaf);
+		if (ClientUser *self = ClientUser::get(Global::get().uiSession)) publishModernShellTalkState(self);
 	}
 }
 
@@ -32582,10 +32312,11 @@ void MainWindow::on_qaAudioDeaf_triggered() {
 	updateAudioToolTips();
 	emit talkingStatusChanged();
 	clearModernShellMessageDtoCache("self-deaf");
-	if (true) {
-		scheduleQmlRoomStateUpdate();
-	} else {
-		scheduleQmlShellStateSync();
+	if (m_qmlShellHost) {
+		ClientSessionController *session = m_qmlShellHost->sessionController();
+		session->setSelfMuted(Global::get().s.bMute);
+		session->setSelfDeafened(Global::get().s.bDeaf);
+		if (ClientUser *self = ClientUser::get(Global::get().uiSession)) publishModernShellTalkState(self);
 	}
 }
 
@@ -33320,7 +33051,7 @@ void MainWindow::onResetAudio() {
 }
 
 void MainWindow::viewCertificate(bool) {
-	ViewCert vc(Global::get().sh->qscCert, this);
+	ViewCert vc(Global::get().sh->qscCert, nullptr);
 	vc.exec();
 }
 
@@ -33329,6 +33060,7 @@ void MainWindow::viewCertificate(bool) {
  * connection to the server is established but before the server Sync is complete.
  */
 void MainWindow::serverConnected() {
+	mumble::chatperf::fullBootstrapMonitor().leaveSteadyState();
 	m_reconnectSoundBlocker.reset();
 
 	Global::get().uiSession                  = 0;
@@ -33451,6 +33183,7 @@ void MainWindow::serverConnected() {
 }
 
 void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString reason) {
+	mumble::chatperf::fullBootstrapMonitor().leaveSteadyState();
 	const bool hiddenNativeNavigatorSafeMode = modernShellMinimalSnapshotEnabled();
 	appendModernShellConnectTrace(QStringLiteral("serverDisconnected enter err=%1 minimal=%2 reason=%3")
 									  .arg(static_cast< int >(err))
@@ -33692,9 +33425,11 @@ void MainWindow::showRaiseWindow() {
 	}
 #if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 	if (qEnvironmentVariableIsSet("MUMBLE_MODERN_AUTOMATION_OFFSCREEN")) {
-		setAttribute(Qt::WA_ShowWithoutActivating, true);
-		move(-32000, -32000);
-		show();
+		if (m_qmlShellHost && m_qmlShellHost->window()) {
+			m_qmlShellHost->window()->setFlag(Qt::WindowDoesNotAcceptFocus, true);
+			m_qmlShellHost->window()->setPosition(-32000, -32000);
+			m_qmlShellHost->window()->show();
+		}
 		return;
 	}
 #endif
@@ -33709,7 +33444,7 @@ void MainWindow::showRaiseWindow() {
 }
 
 void MainWindow::highlightWindow() {
-	QApplication::alert(this);
+	activateWindow();
 }
 
 /**
@@ -33734,11 +33469,12 @@ void MainWindow::on_persistentChatScopeChanged(int) {
 }
 
 void MainWindow::updateChatBar(bool forcePersistentChatReload, bool scheduleQmlStateSync) {
+	Q_UNUSED(scheduleQmlStateSync)
 	appendModernShellConnectTrace(QStringLiteral("updateChatBar enter force=%1 session=%2")
 									  .arg(forcePersistentChatReload ? 1 : 0)
 									  .arg(Global::get().uiSession));
 	if (modernShellMinimalSnapshotEnabled() && true) {
-		scheduleQmlShellStateSync();
+		publishQmlActiveScopeState();
 		appendModernShellConnectTrace(QStringLiteral("updateChatBar minimal-return"));
 		return;
 	}
@@ -33796,11 +33532,7 @@ void MainWindow::updateChatBar(bool forcePersistentChatReload, bool scheduleQmlS
 	}
 
 	updateMenuPermissions();
-	if (scheduleQmlStateSync) {
-		scheduleQmlShellStateSync();
-	} else if (true) {
-		publishQmlActiveScopeState();
-	}
+	publishQmlActiveScopeState();
 }
 
 void MainWindow::customEvent(QEvent *evt) {
@@ -33907,10 +33639,9 @@ void MainWindow::openServerConnectDialog(bool autoconnect) {
 
 	// Wait for this window to be mapped before opening the dialog, otherwise
 	// Wayland compositors may not recognize the parent-child relationship.
-	if (!windowHandle() || !windowHandle()->isExposed()) {
-		// Ensure windowHandle() is non-null by forcing native window creation
-		setAttribute(Qt::WA_NativeWindow);
-		windowHandle()->installEventFilter(
+	QQuickWindow *quickWindow = m_qmlShellHost ? m_qmlShellHost->window() : nullptr;
+	if (!quickWindow || !quickWindow->isExposed()) {
+		if (quickWindow) quickWindow->installEventFilter(
 			new ExposeEventFilter(this, [this, autoconnect]() { openServerConnectDialog(autoconnect); }));
 		return;
 	}

@@ -10,7 +10,10 @@
 #include <QtCore/QString>
 #include <QtCore/QVariantMap>
 
+#include <memory>
+
 class MainWindow;
+class QmlVisualFixtureController;
 class QEvent;
 class QTcpServer;
 class QTcpSocket;
@@ -19,6 +22,7 @@ class QWidget;
 class ModernUiAutomationServer : public QObject {
 public:
 	explicit ModernUiAutomationServer(MainWindow *mainWindow, QObject *parent = nullptr);
+	~ModernUiAutomationServer() override;
 
 	bool start(QString *errorMessage = nullptr);
 	bool isListening() const;
@@ -34,6 +38,7 @@ private:
 	QVariantMap buildStateResponse() const;
 	void writeResponse(QTcpSocket *socket, const QVariantMap &response) const;
 	bool authorizeRequest(const QVariantMap &request, QVariantMap &response) const;
+	QmlVisualFixtureController *visualFixtureController();
 	bool automationOffscreenModeEnabled() const;
 	void installAutomationOffscreenFilter();
 	void prepareTopLevelWidgetForAutomation(QWidget *widget) const;
@@ -41,6 +46,7 @@ private:
 	MainWindow *m_mainWindow = nullptr;
 	QTcpServer *m_server     = nullptr;
 	QString m_token;
+	std::unique_ptr< QmlVisualFixtureController > m_visualFixtureController;
 	bool m_offscreenFilterInstalled = false;
 };
 

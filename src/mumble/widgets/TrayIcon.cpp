@@ -67,7 +67,7 @@ TrayIcon::TrayIcon() : QSystemTrayIcon(Global::get().mw), m_statusIcon(Global::g
 	m_hideAction = new QAction(tr("Hide"), Global::get().mw);
 	QObject::connect(m_hideAction, &QAction::triggered, this, &TrayIcon::on_hideAction_triggered);
 
-	m_contextMenu = new QMenu(Global::get().mw);
+	m_contextMenu = new QMenu(nullptr);
 	QObject::connect(m_contextMenu, &QMenu::aboutToShow, this, &TrayIcon::updateNativeContextMenu);
 
 	// Some window managers hate it when a tray icon sets an empty context menu...

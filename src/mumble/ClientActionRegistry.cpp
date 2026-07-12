@@ -5,6 +5,20 @@
 
 #include <QtGui/QAction>
 
+ClientActionList::ClientActionList(QObject *parent) : QObject(parent) {}
+void ClientActionList::addAction(QAction *action) {
+	if (action && !m_actions.contains(action)) m_actions.push_back(action);
+}
+QAction *ClientActionList::addSeparator() {
+	QAction *separator = new QAction(this);
+	separator->setSeparator(true);
+	m_actions.push_back(separator);
+	return separator;
+}
+void ClientActionList::removeAction(QAction *action) { m_actions.removeAll(action); }
+void ClientActionList::clear() { m_actions.clear(); }
+QList< QAction * > ClientActionList::actions() const { return m_actions; }
+
 ClientActionRegistry::ClientActionRegistry(QObject *parent) : QObject(parent) {
 }
 
@@ -38,6 +52,8 @@ QVariantList ClientActionRegistry::stateSnapshot() const {
 		state.insert(QStringLiteral("checked"), entry->isChecked());
 		state.insert(QStringLiteral("checkable"), entry->isCheckable());
 		state.insert(QStringLiteral("shortcut"), entry->shortcut().toString(QKeySequence::NativeText));
+		state.insert(QStringLiteral("shortcutPortableText"),
+					 entry->shortcut().toString(QKeySequence::PortableText));
 		state.insert(QStringLiteral("menuRole"), static_cast< int >(entry->menuRole()));
 		state.insert(QStringLiteral("toolTip"), entry->toolTip());
 		state.insert(QStringLiteral("visible"), entry->isVisible());

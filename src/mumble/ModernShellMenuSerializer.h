@@ -46,6 +46,8 @@ public:
 	static QVariantList normalize(const QVariantList &items);
 	static QVariantList serializeMenu(const QMenu *menu, const Resolver &resolver,
 									  ActionRegistry *registry = nullptr);
+	static QVariantList serializeActions(const QList< QAction * > &actions, const Resolver &resolver,
+										 ActionRegistry *registry = nullptr);
 };
 
 #endif // MUMBLE_MUMBLE_MODERNSHELLMENUSERIALIZER_H_

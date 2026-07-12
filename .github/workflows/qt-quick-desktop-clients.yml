@@ -101,36 +101,70 @@ jobs:
           test -x stage-linux/bin/mumble
           test -x stage-linux/bin/mumble-screen-helper
           test -f stage-linux/bin/ModernThemes/catppuccin-nord.mumble-theme.json
+          mkdir -p stage-linux/lib stage-linux/qml stage-linux/plugins stage-linux/libexec stage-linux/resources
+          ldd stage-linux/bin/mumble | awk -v prefix="$QT_PREFIX/" '$3 ~ "^" prefix { print $3 }' | sort -u |
+            while read -r library; do cp -L "$library" "stage-linux/lib/$(basename "$library")"; done
+          for module in QtQml QtQuick QtWebEngine; do
+            test -d "$QT_PREFIX/qml/$module"
+            cp -a "$QT_PREFIX/qml/$module" stage-linux/qml/
+          done
+          for plugin in platforms imageformats iconengines networkinformation tls; do
+            if [[ -d "$QT_PREFIX/plugins/$plugin" ]]; then cp -a "$QT_PREFIX/plugins/$plugin" stage-linux/plugins/; fi
+          done
+          find stage-linux/plugins stage-linux/qml -type f -name '*.so' -print0 | xargs -0 -r ldd |
+            awk -v prefix="$QT_PREFIX/" '$3 ~ "^" prefix { print $3 }' | sort -u |
+            while read -r library; do cp -L "$library" "stage-linux/lib/$(basename "$library")"; done
+          webengine_process="$(find "$QT_PREFIX" -type f -name QtWebEngineProcess -print -quit)"
+          test -x "$webengine_process"
+          cp -L "$webengine_process" stage-linux/libexec/QtWebEngineProcess
+          find "$QT_PREFIX/resources" -maxdepth 1 -type f \( -name 'icudtl.dat' -o -name 'qtwebengine_resources*.pak' \) \
+            -exec cp -L {} stage-linux/resources/ \;
+          cp -a "$QT_PREFIX/translations/qtwebengine_locales" stage-linux/resources/
+          test -f stage-linux/qml/QtQuick/Dialogs/qmldir
+          test -f stage-linux/qml/QtQuick/Controls/qmldir
+          test -f stage-linux/qml/QtWebEngine/qmldir
+          (cd stage-linux && find . -type f ! -name runtime-manifest.sha256 -print0 | sort -z | xargs -0 sha256sum) > stage-linux/runtime-manifest.sha256
+          test -s stage-linux/runtime-manifest.sha256
 
       - name: Smoke Qt Quick imports and runtime
         shell: bash
         run: |
           set -euxo pipefail
-          export LD_LIBRARY_PATH="$QT_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-          export QML2_IMPORT_PATH="$QT_PREFIX/qml${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/stage-linux/lib"
+          export QML2_IMPORT_PATH="$GITHUB_WORKSPACE/stage-linux/qml"
+          export QT_PLUGIN_PATH="$GITHUB_WORKSPACE/stage-linux/plugins"
           log="$RUNNER_TEMP/mumble-qml-smoke.log"
           config="$RUNNER_TEMP/mumble-qml-smoke.json"
-          set +e
-          timeout 15s stage-linux/bin/mumble --multiple --config "$config" >"$log" 2>&1
-          status=$?
-          set -e
+          stage-linux/bin/mumble --multiple --config "$config" >"$log" 2>&1 &
+          pid=$!
+          cleanup() { kill -TERM "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for _ in $(seq 1 15); do
+            kill -0 "$pid"
+            if pgrep -f 'QtWebEngineProcess' >/dev/null; then
+              cat "$log"
+              echo "Chromium renderer started before explicit media activation" >&2
+              exit 1
+            fi
+            sleep 1
+          done
           cat "$log"
-          if [[ "$status" -ne 124 ]]; then
-            echo "Qt Quick client did not remain alive for the smoke window (status $status)" >&2
-            exit 1
-          fi
           if grep -Eiq 'QQmlApplicationEngine failed|module ".*" is not installed|is not a type|Qt Quick shell could not load|failed to create.*QML' "$log"; then
             echo "Qt Quick import/runtime failure detected" >&2
             exit 1
           fi
+          cleanup
+          trap - EXIT
 
       - name: Validate staged Linux runtime
         shell: bash
         run: |
           set -euxo pipefail
-          export LD_LIBRARY_PATH="$QT_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/stage-linux/lib"
           ldd stage-linux/bin/mumble | tee stage-linux/runtime-dependencies.txt
           ! grep -q 'not found' stage-linux/runtime-dependencies.txt
+          readelf -d stage-linux/bin/mumble | tee stage-linux/direct-runtime-dependencies.txt
+          ! grep -Eq 'WebEngineWidgets|WebChannel|QuickWidgets' stage-linux/direct-runtime-dependencies.txt
           tar -C stage-linux -czf mumble-linux-qt-quick-staged-runtime.tar.gz .
           tar -tzf mumble-linux-qt-quick-staged-runtime.tar.gz >/dev/null
           test -s mumble-linux-qt-quick-staged-runtime.tar.gz
@@ -254,6 +288,11 @@ jobs:
               echo "Qt Quick client exited during smoke (status ${status:-0})" >&2
               exit 1
             fi
+            if pgrep -f 'QtWebEngineProcess' >/dev/null; then
+              cat "$log"
+              echo "Chromium renderer started before explicit media activation" >&2
+              exit 1
+            fi
             sleep 1
           done
           cat "$log"
@@ -271,8 +310,13 @@ jobs:
           app="$GITHUB_WORKSPACE/stage-macos/Mumble.app"
           otool -L "$app/Contents/MacOS/Mumble" | tee stage-macos/runtime-dependencies.txt
           ! grep -E '/(build|Users/runner/work)/' stage-macos/runtime-dependencies.txt
+          ! grep -Eq 'WebEngineWidgets|WebChannel|QuickWidgets' stage-macos/runtime-dependencies.txt
+          ! find "$app" -type d \( -name 'QtWebEngineWidgets.framework' -o -name 'QtQuickWidgets.framework' \) -print -quit | grep -q .
+          test -f "$(find "$app/Contents/Resources/qml/QtQuick/Dialogs" -name qmldir -print -quit)"
           codesign --force --deep --sign - "$app"
           codesign --verify --deep --strict "$app"
+          (cd "$app" && find . -type f -print0 | sort -z | xargs -0 shasum -a 256) > stage-macos/runtime-manifest.sha256
+          test -s stage-macos/runtime-manifest.sha256
           ditto -c -k --sequesterRsrc --keepParent "$app" mumble-macos-qt-quick-client.zip
           unzip -t mumble-macos-qt-quick-client.zip >/dev/null
           test -s mumble-macos-qt-quick-client.zip
@@ -285,3 +329,4 @@ jobs:
           path: |
             mumble-macos-qt-quick-client.zip
             stage-macos/runtime-dependencies.txt
+            stage-macos/runtime-manifest.sha256

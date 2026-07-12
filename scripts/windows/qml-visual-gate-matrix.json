@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "cases": [
+    { "id": "desktop-light-connected", "width": 1440, "height": 900, "device_pixel_ratio": 1.0, "theme": "light", "layout": "regular", "state": "connected" },
+    { "id": "desktop-dark-connected", "width": 1440, "height": 900, "device_pixel_ratio": 1.0, "theme": "dark", "layout": "regular", "state": "connected" },
+    { "id": "hidpi-dark-connected", "width": 1280, "height": 800, "device_pixel_ratio": 1.5, "theme": "dark", "layout": "regular", "state": "connected" },
+    { "id": "compact-light-connected", "width": 900, "height": 700, "device_pixel_ratio": 1.0, "theme": "light", "layout": "compact", "state": "connected" },
+    { "id": "compact-dark-connected", "width": 900, "height": 700, "device_pixel_ratio": 1.0, "theme": "dark", "layout": "compact", "state": "connected" },
+    { "id": "desktop-light-empty", "width": 1280, "height": 800, "device_pixel_ratio": 1.0, "theme": "light", "layout": "regular", "state": "empty" },
+    { "id": "desktop-dark-empty", "width": 1280, "height": 800, "device_pixel_ratio": 1.0, "theme": "dark", "layout": "regular", "state": "empty" },
+    { "id": "desktop-light-loading", "width": 1280, "height": 800, "device_pixel_ratio": 1.0, "theme": "light", "layout": "regular", "state": "loading" },
+    { "id": "desktop-dark-loading", "width": 1280, "height": 800, "device_pixel_ratio": 1.0, "theme": "dark", "layout": "regular", "state": "loading" },
+    { "id": "desktop-light-error", "width": 1280, "height": 800, "device_pixel_ratio": 1.0, "theme": "light", "layout": "regular", "state": "error" },
+    { "id": "desktop-dark-error", "width": 1280, "height": 800, "device_pixel_ratio": 1.0, "theme": "dark", "layout": "regular", "state": "error" }
+  ]
+}

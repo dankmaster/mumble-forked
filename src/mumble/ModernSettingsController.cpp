@@ -169,9 +169,11 @@ namespace {
 			{ QStringLiteral("look.alwaysOnTop"),
 			  QObject::tr("Keep the Mumble window above other windows in the selected layout modes.") },
 			{ QStringLiteral("look.modernTheme"),
-			  QObject::tr("Choose the Modern shell color theme sent to the embedded client UI.") },
+			  QObject::tr("Choose the color theme used by the native Qt Quick client.") },
+			{ QStringLiteral("look.modernThemesDirectory"),
+			  QObject::tr("Open the folder where custom Modern theme manifests are stored.") },
 			{ QStringLiteral("look.modernDensity"),
-			  QObject::tr("Adjust spacing density for Modern shell lists, controls, and panels.") },
+			  QObject::tr("Adjust spacing density for Qt Quick lists, controls, and panels.") },
 			{ QStringLiteral("look.modernClassicUserIcons"),
 			  QObject::tr("Use the original Mumble user icons in room lists instead of avatar bubbles.") },
 			{ QStringLiteral("look.modernRailSide"),
@@ -239,6 +241,31 @@ namespace {
 			  QObject::tr("Override the operating-system name Mumble reports to servers for compatibility testing.") },
 			{ QStringLiteral("network.advertisedOSVersion"),
 			  QObject::tr("Override the operating-system version Mumble reports to servers for compatibility testing.") },
+			{ QStringLiteral("messages.clock24Hour"),
+			  QObject::tr("Display message timestamps using a 24-hour clock.") },
+			{ QStringLiteral("messages.whisperFriends"),
+			  QObject::tr("Treat messages from friends as whispers for notification and speech rules.") },
+			{ QStringLiteral("messages.limitThreshold"),
+			  QObject::tr("Limit high-volume message events when the connected server reaches this user count.") },
+			{ QStringLiteral("messages.ttsEnabled"),
+			  QObject::tr("Read enabled message events aloud using text to speech.") },
+			{ QStringLiteral("messages.ttsVolume"), QObject::tr("Set text-to-speech playback volume.") },
+			{ QStringLiteral("messages.ttsThreshold"),
+			  QObject::tr("Do not speak messages longer than this number of characters.") },
+			{ QStringLiteral("messages.ttsReadOwn"),
+			  QObject::tr("Read your own sent messages back through text to speech.") },
+			{ QStringLiteral("messages.ttsNoScope"),
+			  QObject::tr("Omit the room or conversation name from spoken messages.") },
+			{ QStringLiteral("messages.ttsNoAuthor"),
+			  QObject::tr("Omit the sender name from spoken messages.") },
+			{ QStringLiteral("messages.ttsLanguage"),
+			  QObject::tr("Choose the BCP 47 language tag used by the speech engine.") },
+			{ QStringLiteral("messages.notificationVolume"),
+			  QObject::tr("Set the playback volume for per-event notification sounds.") },
+			{ QStringLiteral("messages.cueVolume"),
+			  QObject::tr("Set the playback volume for transmit and mute cue sounds.") },
+			{ QStringLiteral("messages.events"),
+			  QObject::tr("Choose logging, notification, highlight, speech, limiting, and sound behavior for each event.") },
 			{ QStringLiteral("screenShare.autoOpenCurrentRoom"),
 			  QObject::tr("Open screen shares automatically when they are posted in your current voice room.") },
 			{ QStringLiteral("screenShare.diagnostics"),
@@ -1636,8 +1663,9 @@ namespace {
 			const quint32 flags     = settings.qmMessages.value(type);
 			QVariantMap row;
 			row.insert(QStringLiteral("type"), static_cast< int >(type));
+			const QString eventName = Log::translatedMessageName(type);
 			row.insert(QStringLiteral("name"),
-					   Global::get().l ? Global::get().l->msgName(type) : QObject::tr("Event %1").arg(index + 1));
+					   eventName.isEmpty() ? QObject::tr("Event %1").arg(index + 1) : eventName);
 			row.insert(QStringLiteral("console"), (flags & Settings::LogConsole) != 0);
 			row.insert(QStringLiteral("notification"), (flags & Settings::LogBalloon) != 0);
 			row.insert(QStringLiteral("highlight"), (flags & Settings::LogHighlight) != 0);

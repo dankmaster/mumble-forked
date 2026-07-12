@@ -65,6 +65,28 @@ void QmlThemeController::applyTokens(const UiThemeTokens &tokens,
 	emit themeChanged();
 }
 
+bool QmlThemeController::applyVisualGateAppearance(const QString &theme, const QString &layout) {
+	const QString normalizedTheme = theme.trimmed().toLower();
+	const QString normalizedLayout = layout.trimmed().toLower();
+	if ((normalizedTheme != QLatin1String("light") && normalizedTheme != QLatin1String("dark"))
+		|| (normalizedLayout != QLatin1String("regular") && normalizedLayout != QLatin1String("compact"))) {
+		return false;
+	}
+	const bool nextCompact = normalizedLayout == QLatin1String("compact");
+	Mumble::ModernTheme::ThemeMetrics metrics;
+	if (nextCompact) {
+		metrics.shellRadius = 12;
+		metrics.innerRadius = 8;
+		metrics.spacing = 8;
+	}
+	applyTokens(uiThemeTokensForThemeId(normalizedTheme), metrics);
+	if (m_compact != nextCompact) {
+		m_compact = nextCompact;
+		emit densityChanged();
+	}
+	return true;
+}
+
 bool QmlThemeController::eventFilter(QObject *watched, QEvent *event) {
 	if (watched == QCoreApplication::instance() && event
 		&& (event->type() == QEvent::ApplicationPaletteChange || event->type() == QEvent::ThemeChange)) {

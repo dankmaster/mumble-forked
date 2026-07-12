@@ -303,9 +303,7 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 		QString str = u8(msg.welcome_text());
 		setPersistentChatWelcomeText(str);
 	}
-	if (hiddenLegacyUserModelSafeMode) {
-		scheduleQmlShellStateSync();
-	} else {
+	if (!hiddenLegacyUserModelSafeMode) {
 		pmModel->ensureSelfVisible();
 		pmModel->recheckLinks();
 	}
@@ -369,10 +367,16 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 
 
 	Global::get().sh->setServerSynchronized(true);
+	if (hiddenLegacyUserModelSafeMode) {
+		if (m_modernShellSyncTimer) m_modernShellSyncTimer->stop();
+		syncQmlShellState();
+	}
+	mumble::chatperf::fullBootstrapMonitor().enterSteadyState();
 	updateChatBar();
 	warmupPersistentChatHistory();
 	if (hiddenLegacyUserModelSafeMode) {
-		scheduleQmlShellStateSync();
+		scheduleQmlRoomStateUpdate();
+		publishQmlActiveScopeState();
 	}
 	appendServerSyncTrace(QStringLiteral("exit"));
 
@@ -541,7 +545,8 @@ void MainWindow::msgServerConfig(const MumbleProto::ServerConfig &msg) {
 			refreshPersistentChatView(true);
 		}
 	}
-	scheduleQmlShellStateSync();
+	scheduleQmlRoomStateUpdate();
+	publishQmlActiveScopeState();
 }
 
 /// This message is being received when the server denied the permission to perform a requested action. This function
@@ -605,8 +610,7 @@ void MainWindow::msgPermissionDenied(const MumbleProto::PermissionDenied &msg) {
 				Global::get().s.qmMessages[Log::PermissionDenied] = oflags;
 				Global::get().s.bDeaf                             = bold;
 				Global::get().s.bTTS                              = bold2;
-				Global::get().mw->setWindowIcon(QIcon(QString::fromUtf8(Global::get().ccHappyEaster)));
-				Global::get().mw->setStyleSheet(QString::fromUtf8(Global::get().ccHappyEaster + 82));
+				qApp->setWindowIcon(QIcon(QString::fromUtf8(Global::get().ccHappyEaster)));
 				qWarning() << "Happy Easter";
 			}
 		} break;
@@ -1229,7 +1233,7 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 	appendUserStateTrace(QStringLiteral("post-comment"));
 
 	if (hiddenLegacyUserModelSafeMode) {
-		scheduleQmlShellStateSync();
+		publishQmlParticipantState(pDst);
 	} else if (modernShellConversationListActive) {
 		const PersistentChatTarget activeTarget = currentPersistentChatTarget();
 		const bool activeDirectMessageAffected =
@@ -1242,11 +1246,11 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 		if (rebuildConversationList || movedChannels || activeDirectMessageAffected) {
 			updateMenuPermissions();
 			if (!rebuildConversationList) {
-				scheduleQmlShellStateSync();
+				publishQmlParticipantState(pDst);
 			}
 		}
 		if (textureChanged || commentChanged) {
-			scheduleQmlShellStateSync();
+			publishQmlParticipantState(pDst);
 		}
 	}
 	appendUserStateTrace(QStringLiteral("exit"));
@@ -1302,8 +1306,10 @@ void MainWindow::msgUserRemove(const MumbleProto::UserRemove &msg) {
 	if (pDst != pSelf) {
 		clearUserTextureRequest(pDst->uiSession);
 		if (hiddenLegacyUserModelSafeMode) {
+			if (m_qmlShellHost) {
+				m_qmlShellHost->participantModel()->removeParticipant(QString::number(pDst->uiSession));
+			}
 			removeClientUserWithoutModel(pDst);
-			scheduleQmlShellStateSync();
 		} else {
 			pmModel->removeUser(pDst);
 			if (true) {
@@ -1503,7 +1509,7 @@ void MainWindow::msgChannelRemove(const MumbleProto::ChannelRemove &msg) {
 			}
 
 			removeChannelSubtreeWithoutModel(c);
-			scheduleQmlShellStateSync();
+			scheduleQmlRoomStateUpdate();
 			return;
 		}
 
@@ -1626,7 +1632,7 @@ void MainWindow::msgContextAction(const MumbleProto::ContextAction &) {
 void MainWindow::msgContextActionModify(const MumbleProto::ContextActionModify &msg) {
 	if (msg.has_operation() && msg.operation() == MumbleProto::ContextActionModify_Operation_Remove) {
 		removeContextAction(msg);
-		scheduleQmlShellStateSync();
+		updateMenuPermissions();
 		return;
 	}
 
@@ -1643,7 +1649,7 @@ void MainWindow::msgContextActionModify(const MumbleProto::ContextActionModify &
 		qlUserActions.append(a);
 	if (ctx & MumbleProto::ContextActionModify_Context_Channel)
 		qlChannelActions.append(a);
-	scheduleQmlShellStateSync();
+	updateMenuPermissions();
 }
 
 /// Helper method for removing a context action.
@@ -1794,7 +1800,7 @@ void MainWindow::msgUserStats(const MumbleProto::UserStats &msg) {
 				}
 			}
 		} else if (hiddenLegacyUserModelSafeMode && idleSeconds != previousIdleSeconds) {
-			scheduleQmlShellStateSync();
+			if (ClientUser *user = ClientUser::get(msg.session())) publishQmlParticipantState(user);
 		}
 	}
 

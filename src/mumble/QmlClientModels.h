@@ -223,6 +223,8 @@ public:
 	void updatePresence(const QString &sessionId, const QString &talkState, const QString &talkLabel,
 						const QString &talkTone, bool talking, bool isSelf, const QVariantList &badges,
 						const QVariantList &statuses);
+	void upsertParticipantState(const QVariantMap &participant);
+	void removeParticipant(const QString &sessionId);
 	void replaceParticipantStates(const QVariantList &participants);
 
 private:
