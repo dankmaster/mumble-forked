@@ -27,6 +27,7 @@
 #include "GlobalShortcutTypes.h"
 #include "../SignalCurry.h"
 #include "ChannelListenerManager.h"
+#include "ClientActionRegistry.h"
 #include "ChatFeature.h"
 #include "ChatPerfTrace.h"
 #include "HostAddress.h"
@@ -13345,6 +13346,11 @@ MainWindow::MainWindow(QWidget *p)
 
 	createActions();
 	setupUi(this);
+	m_clientActionRegistry = std::make_unique< ClientActionRegistry >(this);
+	const QList< QAction * > clientActions = findChildren< QAction * >(QString(), Qt::FindDirectChildrenOnly);
+	for (QAction *action : clientActions) {
+		m_clientActionRegistry->adopt(action);
+	}
 	qaServerSettings = new QAction(tr("Server Settings..."), this);
 	qaServerSettings->setToolTip(tr("Change server settings for connected clients"));
 	qaServerSettings->setWhatsThis(tr("This opens server settings that are applied live and saved on the server."));

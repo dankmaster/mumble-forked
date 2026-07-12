@@ -197,6 +197,8 @@ set(MUMBLE_SOURCES
 	"ListenerVolumeSlider.h"
 	"Log.cpp"
 	"Log.h"
+	"ClientActionRegistry.cpp"
+	"ClientActionRegistry.h"
 	"MainWindow.cpp"
 	"MainWindow.h"
 	"MainWindowUi.h"

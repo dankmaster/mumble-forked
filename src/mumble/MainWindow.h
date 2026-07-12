@@ -51,6 +51,7 @@ class TextToSpeech;
 class UserModel;
 class Channel;
 class ClientUser;
+class ClientActionRegistry;
 class ScreenShareManager;
 struct ScreenShareStartOptions;
 struct PersistentChatPreviewSpec;
@@ -196,6 +197,7 @@ public:
 	/// Cached copy of the image currently targeted by the log/persistent-chat image actions.
 	QImage m_selectedLogImage;
 	std::unique_ptr< ScreenShareManager > m_screenShareManager;
+	std::unique_ptr< ClientActionRegistry > m_clientActionRegistry;
 
 	QPointer< Channel > cContextChannel;
 	QPointer< ClientUser > cuContextUser;
