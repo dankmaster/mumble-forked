@@ -558,8 +558,10 @@ function Assert-SharedWebEngineDeployment {
 		throw "Shared WebEngine staging is missing required deployed runtime content after windeployqt: $($missing -join ', ')."
 	}
 
-	$forbiddenRuntime = @("Qt6QuickWidgets.dll", "Qt6WebEngineWidgets.dll") |
-		Where-Object { Test-Path -LiteralPath (Join-Path $StageRoot $_) }
+	$forbiddenRuntime = @(
+		@("Qt6QuickWidgets.dll", "Qt6WebEngineWidgets.dll") |
+			Where-Object { Test-Path -LiteralPath (Join-Path $StageRoot $_) }
+	)
 	if ($forbiddenRuntime.Count -gt 0) {
 		throw "Shared QML staging contains forbidden widget-container runtime DLLs: $($forbiddenRuntime -join ', ')."
 	}
