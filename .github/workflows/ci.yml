@@ -166,7 +166,10 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          echo "MUMBLE_BUILD_CLIENT=ON" >> "$GITHUB_ENV"
+          # Qt WebEngine does not support static builds. The native Qt Quick
+          # desktop client is gated by windows-shared-client.yml; this static
+          # lane remains the Windows server/package gate.
+          echo "MUMBLE_BUILD_CLIENT=OFF" >> "$GITHUB_ENV"
           echo "MUMBLE_BUILD_SERVER=ON" >> "$GITHUB_ENV"
           echo "MUMBLE_ENABLE_WINDOWS_PACKAGING=ON" >> "$GITHUB_ENV"
           echo "CMAKE_OPTIONS=${CMAKE_OPTIONS} -Dtests=OFF -Dmodern-layout-automation=OFF -Dmodern-layout-mockups=OFF" >> "$GITHUB_ENV"
@@ -183,76 +186,39 @@ jobs:
           os: windows-2025-vs2026
           arch: x86_64
 
-      - id: setup-windows-optional-runtimes
-        uses: ./.github/actions/setup-windows-optional-runtimes
-        with:
-          onnxruntime-version: ${{ env.ONNXRUNTIME_VERSION }}
-          rnnoise-model-release-tag: build-env-2025-11-webengine-codecs
-          install-rust: 'true'
-          install-ffmpeg: 'true'
-
       - name: Build
         run: ./.github/workflows/build.sh "windows-2025-vs2026" "static" "x86_64"
         shell: bash
         env:
           MUMBLE_BUILD_NUMBER: ${{ needs.fetch_build_number.outputs.build_number }}
 
-      - name: Stage Windows Client Payload
-        shell: powershell
-        run: |
-          .\scripts\windows\stage-windows-client-payload.ps1 `
-            -BuildRoot .\build `
-            -BuildType $env:BUILD_TYPE `
-            -StageRoot .\build\windows-client-payload
-
-      - name: Verify Windows Screen-Share Helper Runtime
-        shell: powershell
-        run: |
-          .\scripts\windows\build-local-windows-client.ps1 `
-            -BuildNumber "${{ needs.fetch_build_number.outputs.build_number }}" `
-            -SkipConfigure `
-            -SkipBuild `
-            -VerifyHelperRuntime
-
-      - name: Validate Windows Client/Server Binary Set
+      - name: Validate Windows Server Binary Set
         shell: powershell
         run: |
           .\scripts\windows\assert-windows-build-artifacts.ps1 `
             -BuildRoot .\build `
-            -StageRoot .\build\windows-client-payload `
-            -RequireStage `
-            -RequireClient `
             -RequireServer `
-            -RequireScreenHelper `
-            -RequireSpeechCleanup `
             -ArtifactListPath .\build\windows-binary-artifacts.txt
 
-      - name: Validate Windows Installers
+      - name: Validate Windows Server Installer
         shell: powershell
         run: |
           .\scripts\windows\assert-windows-build-artifacts.ps1 `
             -BuildRoot .\build `
-            -RequireClientInstaller `
             -RequireServerInstaller `
             -RequireEnglishOnlyInstallers `
             -ArtifactListPath .\build\windows-installer-artifacts.txt
 
-      - name: Publish Windows Client/Server Artifacts
+      - name: Publish Windows Server Artifacts
         if: ${{ github.event_name != 'pull_request' }}
         uses: actions/upload-artifact@v6
         with:
-          name: 'Mumble-windows-client-server'
+          name: 'Mumble-windows-server'
           compression-level: 0
           path: |
-            build/windows-client-payload/**
             build/windows-binary-artifacts.txt
             build/windows-installer-artifacts.txt
-            build/windows-screen-share-capabilities.json
-            build/windows-screen-share-helper.log
-            build/windows-screen-share-self-test.json
-            build/installer/client/*client*.msi
             build/installer/server/*server*.msi
-            build/installer/client/*_client-*.exe
             build/installer/server/*_server-*.exe
 
       - if: ${{ github.event_name != 'pull_request' && steps.restore-build-env-cache.outputs.cache-hit != 'true' }}
@@ -260,18 +226,6 @@ jobs:
         with:
           path: '${{ env.MUMBLE_ENVIRONMENT_DIR }}'
           key: ${{ env.MUMBLE_ENVIRONMENT_VERSION }}
-
-      - if: ${{ github.event_name != 'pull_request' && steps.setup-windows-optional-runtimes.outputs.onnxruntime-cache-hit != 'true' }}
-        uses: actions/cache/save@v5
-        with:
-          path: .cache/onnxruntime/win-x64-${{ env.ONNXRUNTIME_VERSION }}
-          key: onnxruntime-${{ runner.os }}-x64-${{ env.ONNXRUNTIME_VERSION }}
-
-      - if: ${{ github.event_name != 'pull_request' && steps.setup-windows-optional-runtimes.outputs.rnnoise-model-cache-hit != 'true' }}
-        uses: actions/cache/save@v5
-        with:
-          path: ${{ steps.setup-windows-optional-runtimes.outputs.rnnoise-model-cache-path }}
-          key: ${{ steps.setup-windows-optional-runtimes.outputs.rnnoise-model-cache-key }}
 
   linux-server:
     name: linux-server
