@@ -23,6 +23,11 @@ private:
 	Q_DISABLE_COPY(ScreenShareHelperClient)
 
 public:
+	struct NativeFrameTransport {
+		QString sharedMemoryKey;
+		quint64 generation = 0;
+		bool feedAvailable = false;
+	};
 	struct CapabilitySnapshot {
 		bool supportsSignaling       = true;
 		bool probeComplete           = false;
@@ -62,7 +67,8 @@ public:
 	const CapabilitySnapshot &capabilities() const;
 	bool startPublish(const ScreenShareSession &session, QString *errorMessage = nullptr, qint64 *processID = nullptr);
 	bool stopPublish(const QString &streamID, QString *errorMessage = nullptr);
-	bool startView(const ScreenShareSession &session, QString *errorMessage = nullptr, qint64 *processID = nullptr);
+	bool startView(const ScreenShareSession &session, QString *errorMessage = nullptr, qint64 *processID = nullptr,
+				   NativeFrameTransport *frameTransport = nullptr);
 	bool stopView(const QString &streamID, QString *errorMessage = nullptr);
 
 public slots:

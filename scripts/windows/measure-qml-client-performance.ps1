@@ -196,6 +196,9 @@ function Test-OptionalAutomationWorkload {
 	param([int]$Port, [string]$Token, [string]$Command)
 	try {
 		$response = Invoke-QmlAutomationCommand -Port $Port -Token $Token -Request @{ command = $Command; async = $false }
+		if (-not ($response.PSObject.Properties.Name -contains "frameSampleDelta") -or [int]$response.frameSampleDelta -le 0) {
+			throw "Automation workload '$Command' returned no rendered frame sample delta."
+		}
 		return [pscustomobject]@{ measured = $true; response = $response; reason = $null }
 	} catch {
 		return [pscustomobject]@{ measured = $false; response = $null; reason = $_.Exception.Message }

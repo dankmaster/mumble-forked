@@ -24,7 +24,9 @@
 #include <QtCore/QCoreApplication>
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDir>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QEvent>
+#include <QtCore/QEventLoop>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonDocument>
@@ -38,6 +40,7 @@
 #include <QtGui/QClipboard>
 #include <QtNetwork/QHostAddress>
 #include <QtNetwork/QTcpServer>
+#include <QtQuick/QQuickWindow>
 #include <QtNetwork/QTcpSocket>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QWidget>
@@ -3270,6 +3273,122 @@ namespace {
 		return {};
 	}
 
+	QVariantMap runChatScrollPerformanceWorkload(QmlShellHost *host) {
+		if (!host || !host->window() || !host->performanceMonitor() || !host->chatModel()) {
+			return errorResponse(QObject::tr("The Qt Quick chat workload is unavailable."));
+		}
+		QQuickWindow *window = host->window();
+		ChatTimelineModel *chat = host->chatModel();
+		QmlPerformanceMonitor *monitor = host->performanceMonitor();
+		if (chat->rowCount() < 20) {
+			return errorResponse(QObject::tr("The chat-scroll workload requires at least 20 rendered messages."));
+		}
+		if (!window->isExposed() || window->width() <= 0 || window->height() <= 0) {
+			return errorResponse(QObject::tr("The Qt Quick window is not exposed for chat scrolling."));
+		}
+		const int beforeFrames = monitor->snapshot().value(QStringLiteral("frameSampleCount")).toInt();
+		QVariant started;
+		if (!QMetaObject::invokeMethod(window, "runPerformanceChatScrollWorkload", Q_RETURN_ARG(QVariant, started))) {
+			return errorResponse(QObject::tr("The Qt Quick root does not expose the chat-scroll workload."));
+		}
+		const QVariantMap startState = started.toMap();
+		if (!startState.value(QStringLiteral("started")).toBool()) {
+			return errorResponse(startState.value(QStringLiteral("reason"),
+											 QObject::tr("The chat timeline is not scrollable.")).toString());
+		}
+
+		QElapsedTimer elapsed;
+		elapsed.start();
+		QVariantMap scrollState;
+		int afterFrames = beforeFrames;
+		do {
+			window->update();
+			QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+			QVariant state;
+			if (QMetaObject::invokeMethod(window, "performanceChatScrollState", Q_RETURN_ARG(QVariant, state))) {
+				scrollState = state.toMap();
+			}
+			afterFrames = monitor->snapshot().value(QStringLiteral("frameSampleCount")).toInt();
+			if (scrollState.value(QStringLiteral("moved")).toBool() && afterFrames > beforeFrames) break;
+		} while (elapsed.elapsed() < 2000);
+		if (!scrollState.value(QStringLiteral("moved")).toBool() || afterFrames <= beforeFrames) {
+			return errorResponse(QObject::tr("Chat flick produced no typed scroll movement with a rendered frame."));
+		}
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("workload"), QStringLiteral("chat-scroll"));
+		response.insert(QStringLiteral("messageCount"), chat->rowCount());
+		response.insert(QStringLiteral("scroll"), scrollState);
+		response.insert(QStringLiteral("frameSamplesBefore"), beforeFrames);
+		response.insert(QStringLiteral("frameSamplesAfter"), afterFrames);
+		response.insert(QStringLiteral("frameSampleDelta"), afterFrames - beforeFrames);
+		response.insert(QStringLiteral("elapsedMs"), elapsed.elapsed());
+		return response;
+	}
+
+	QVariantMap runTalkStatePerformanceWorkload(QmlShellHost *host) {
+		if (!host || !host->window() || !host->performanceMonitor() || !host->participantModel()) {
+			return errorResponse(QObject::tr("The Qt Quick talk-state workload is unavailable."));
+		}
+		QQuickWindow *window = host->window();
+		ParticipantModel *participants = host->participantModel();
+		QmlPerformanceMonitor *monitor = host->performanceMonitor();
+		ClientUser *user = nullptr;
+		for (int row = 0; row < participants->rowCount(); ++row) {
+			bool validSession = false;
+			const unsigned int session = participants->get(row).value(QStringLiteral("id")).toString().toUInt(&validSession);
+			if (validSession && session != 0) {
+				user = ClientUser::get(session);
+				if (user) break;
+			}
+		}
+		if (!user) return errorResponse(QObject::tr("The talk-state workload requires a connected participant."));
+		if (!window->isExposed()) return errorResponse(QObject::tr("The Qt Quick window is not exposed for talk state."));
+
+		const int beforeFrames = monitor->snapshot().value(QStringLiteral("frameSampleCount")).toInt();
+		const Settings::TalkState originalState = user->tsState;
+		const Settings::TalkState workloadState = originalState == Settings::Talking ? Settings::Passive : Settings::Talking;
+		const QString sessionId = QString::number(static_cast< qulonglong >(user->uiSession));
+		const auto participantRowForSession = [participants, &sessionId]() {
+			for (int row = 0; row < participants->rowCount(); ++row) {
+				if (participants->get(row).value(QStringLiteral("id")).toString() == sessionId) return row;
+			}
+			return -1;
+		};
+		const int participantRow = participantRowForSession();
+		if (participantRow < 0) return errorResponse(QObject::tr("The talk-state participant disappeared."));
+		const QString beforeTalkState = participants->get(participantRow).value(QStringLiteral("status")).toString();
+		user->setTalking(workloadState);
+		QElapsedTimer elapsed;
+		elapsed.start();
+		QString afterTalkState;
+		int afterFrames = beforeFrames;
+		do {
+			window->update();
+			QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+			const int currentRow = participantRowForSession();
+			if (currentRow >= 0) afterTalkState = participants->get(currentRow).value(QStringLiteral("status")).toString();
+			afterFrames = monitor->snapshot().value(QStringLiteral("frameSampleCount")).toInt();
+			if (!afterTalkState.isEmpty() && afterTalkState != beforeTalkState && afterFrames > beforeFrames) break;
+		} while (elapsed.elapsed() < 2000);
+		user->setTalking(originalState);
+		window->update();
+		QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+		if (afterTalkState.isEmpty() || afterTalkState == beforeTalkState || afterFrames <= beforeFrames) {
+			return errorResponse(QObject::tr("Talk-state transition produced no typed participant change with a rendered frame."));
+		}
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("workload"), QStringLiteral("talk-state"));
+		response.insert(QStringLiteral("session"), user->uiSession);
+		response.insert(QStringLiteral("talkStateBefore"), beforeTalkState);
+		response.insert(QStringLiteral("talkStateAfter"), afterTalkState);
+		response.insert(QStringLiteral("restored"), user->tsState == originalState);
+		response.insert(QStringLiteral("frameSamplesBefore"), beforeFrames);
+		response.insert(QStringLiteral("frameSamplesAfter"), afterFrames);
+		response.insert(QStringLiteral("frameSampleDelta"), afterFrames - beforeFrames);
+		response.insert(QStringLiteral("elapsedMs"), elapsed.elapsed());
+		return response;
+	}
+
 } // namespace
 
 ModernUiAutomationServer::ModernUiAutomationServer(MainWindow *mainWindow, QObject *parent)
@@ -3451,6 +3570,10 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			monitor->reset();
 		} else if (command == QLatin1String("qmlPerformanceBegin")) {
 			monitor->beginFrameSampling();
+		} else if (command == QLatin1String("qmlPerformanceChatScrollWorkload")) {
+			return runChatScrollPerformanceWorkload(host);
+		} else if (command == QLatin1String("qmlPerformanceTalkStateWorkload")) {
+			return runTalkStatePerformanceWorkload(host);
 		} else if (command == QLatin1String("qmlPerformanceEnd")) {
 			monitor->endFrameSampling();
 		} else if (command == QLatin1String("qmlPerformanceMarkInput")) {

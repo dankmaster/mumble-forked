@@ -4,12 +4,14 @@
 #define MUMBLE_MUMBLE_SCREENSHAREVIEWBACKEND_H_
 
 #include "ScreenShareManager.h"
-
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
 #include <QtGui/QWindow>
+#include <QtGui/QImage>
 
 class QTimer;
+class QThread;
+class ScreenShareNativeFrameReader;
 
 class ScreenShareViewBackend final : public QObject {
 	Q_OBJECT
@@ -23,6 +25,11 @@ class ScreenShareViewBackend final : public QObject {
 	Q_PROPERTY(int audioVolume READ audioVolume WRITE setAudioVolume NOTIFY audioVolumeChanged)
 	Q_PROPERTY(qint64 processId READ processId WRITE setProcessId NOTIFY processIdChanged)
 	Q_PROPERTY(QWindow *videoWindow READ videoWindow NOTIFY videoWindowChanged)
+	Q_PROPERTY(QString renderTransport READ renderTransport NOTIFY nativeFrameActiveChanged)
+	Q_PROPERTY(bool nativeFrameTransportAvailable READ nativeFrameTransportAvailable CONSTANT)
+	Q_PROPERTY(QString nativeFrameTransportBlocker READ nativeFrameTransportBlocker CONSTANT)
+	Q_PROPERTY(bool nativeFrameActive READ nativeFrameActive NOTIFY nativeFrameActiveChanged)
+	Q_PROPERTY(QImage currentFrame READ currentFrame NOTIFY frameChanged)
 
 public:
 	explicit ScreenShareViewBackend(const ScreenShareSession &session, QObject *parent = nullptr);
@@ -38,9 +45,15 @@ public:
 	int audioVolume() const;
 	qint64 processId() const;
 	QWindow *videoWindow() const;
+	QString renderTransport() const;
+	bool nativeFrameTransportAvailable() const;
+	QString nativeFrameTransportBlocker() const;
+	bool nativeFrameActive() const;
+	QImage currentFrame() const;
 
 	void updateSession(const ScreenShareSession &session);
 	void setProcessId(qint64 processId);
+	void setNativeFrameTransport(const QString &sharedMemoryKey, quint64 generation);
 	Q_INVOKABLE void setPaused(bool paused);
 	Q_INVOKABLE void setAudioMuted(bool muted);
 	Q_INVOKABLE void setAudioVolume(int percent);
@@ -55,6 +68,8 @@ signals:
 	void audioVolumeChanged();
 	void processIdChanged();
 	void videoWindowChanged();
+	void nativeFrameActiveChanged();
+	void frameChanged();
 	void pauseToggled(const QString &streamId, bool paused);
 	void audioMuteToggled(const QString &streamId, bool muted);
 	void stopRequested(const QString &streamId);
@@ -79,6 +94,10 @@ private:
 	bool m_audioMuted = false;
 	int m_audioVolume = 100;
 	int m_audioRetryAttempts = 0;
+	QImage m_currentFrame;
+	QThread *m_frameThread = nullptr;
+	ScreenShareNativeFrameReader *m_frameReader = nullptr;
+	bool m_nativeFrameActive = false;
 };
 
 #endif

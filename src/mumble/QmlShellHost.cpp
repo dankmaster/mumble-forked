@@ -9,6 +9,7 @@
 #include "QmlPerformanceMonitor.h"
 #include "QmlImageProvider.h"
 #include "QmlThemeController.h"
+#include "ScreenShareVideoItem.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
@@ -58,6 +59,9 @@ bool QmlShellHost::start(QString *error) {
 	static const int themeType = qmlRegisterSingletonType(QUrl(QStringLiteral("qrc:/qml-shell/Theme.qml")),
 														 "Mumble.Theme", 1, 0, "Theme");
 	Q_UNUSED(themeType)
+	static const int screenShareVideoType =
+		qmlRegisterType< ScreenShareVideoItem >("Mumble.ScreenShare", 1, 0, "ScreenShareVideoItem");
+	Q_UNUSED(screenShareVideoType)
 	QQuickStyle::setStyle(QStringLiteral("Basic"));
 	m_engine = std::make_unique< QQmlApplicationEngine >();
 	m_engine->addImageProvider(QStringLiteral("mumble"), new QmlAsyncImageProvider(m_imagePipeline));
@@ -120,6 +124,10 @@ bool QmlShellHost::start(QString *error) {
 			[this](QQuickWindow::SceneGraphError, const QString &) {
 				releasePttForSafety(PttSafetyReason::SceneGraphError);
 			});
+	connect(m_window, &QQuickWindow::beforeRendering, m_performanceMonitor.get(),
+			&QmlPerformanceMonitor::markFrameRenderingStarted, Qt::DirectConnection);
+	connect(m_window, &QQuickWindow::afterRendering, m_performanceMonitor.get(),
+			&QmlPerformanceMonitor::markFrameRenderingFinished, Qt::DirectConnection);
 	connect(m_window, &QQuickWindow::frameSwapped, m_performanceMonitor.get(),
 			&QmlPerformanceMonitor::markFramePresented, Qt::QueuedConnection);
 	connect(m_window, &QWindow::visibilityChanged, this, [this](QWindow::Visibility visibility) {

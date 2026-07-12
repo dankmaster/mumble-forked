@@ -14,10 +14,43 @@ ApplicationWindow {
     minimumHeight: 520
     title: clientSession.serverName
     color: Theme.strip
+	property real performanceChatScrollStartY: 0
+	property real performanceChatScrollTargetY: 0
 
     function createScreenShareView(backend) {
         return screenShareViewComponent.createObject(null, { "backend": backend })
     }
+
+	function runPerformanceChatScrollWorkload() {
+		const minimumY = timeline.originY
+		const maximumY = Math.max(minimumY, timeline.originY + timeline.contentHeight - timeline.height)
+		if (timeline.count < 20 || maximumY - minimumY < 8)
+			return { "started": false, "reason": qsTr("The chat timeline is not scrollable."),
+				"count": timeline.count, "contentHeight": timeline.contentHeight, "viewportHeight": timeline.height }
+		performanceChatScrollStartY = timeline.contentY
+		performanceChatScrollTargetY = Math.abs(performanceChatScrollStartY - minimumY) > 8 ? minimumY : maximumY
+		timelineScrollWorkload.stop()
+		timelineScrollWorkload.from = performanceChatScrollStartY
+		timelineScrollWorkload.to = performanceChatScrollTargetY
+		timelineScrollWorkload.start()
+		return { "started": true, "beforeY": performanceChatScrollStartY,
+			"targetY": performanceChatScrollTargetY, "count": timeline.count }
+	}
+
+	function performanceChatScrollState() {
+		return { "beforeY": performanceChatScrollStartY, "currentY": timeline.contentY,
+			"targetY": performanceChatScrollTargetY,
+			"moved": Math.abs(timeline.contentY - performanceChatScrollStartY) > 1,
+			"running": timelineScrollWorkload.running }
+	}
+
+	NumberAnimation {
+		id: timelineScrollWorkload
+		target: timeline
+		property: "contentY"
+		duration: 450
+		easing.type: Easing.InOutQuad
+	}
 
     Component {
         id: screenShareViewComponent

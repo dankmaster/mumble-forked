@@ -181,6 +181,8 @@ set(MUMBLE_SOURCES
 	"EnumStringConversions.h"
 	"ScreenShareViewBackend.cpp"
 	"ScreenShareViewBackend.h"
+	"ScreenShareVideoItem.cpp"
+	"ScreenShareVideoItem.h"
 	"Global.cpp"
 	"Global.h"
 	"GlobalShortcut.cpp"

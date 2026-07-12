@@ -11,7 +11,7 @@ private slots:
 	void correlatesInputWithVisualCompletion();
 	void reportsOnlyStallsAboveThreshold();
 	void resetClearsAutomationSnapshot();
-	void acceptsQueuedFramePresentationFromHost();
+	void recordsRenderThreadFrameDuration();
 	void computesInputPercentiles();
 	void observesRealInputAndBoundsPendingQueue();
 };
@@ -19,11 +19,8 @@ private slots:
 void TestQmlPerformanceMonitor::computesFramePercentiles() {
 	QmlPerformanceMonitor monitor;
 	monitor.beginFrameSampling();
-	qint64 timestampNs = 0;
-	monitor.recordFrameAt(timestampNs);
 	for (int sample = 1; sample <= 100; ++sample) {
-		timestampNs += static_cast< qint64 >(sample) * 1000000;
-		monitor.recordFrameAt(timestampNs);
+		monitor.recordFrameDuration(sample);
 	}
 	QCOMPARE(monitor.snapshot().value(QStringLiteral("frameSampleCount")).toInt(), 100);
 	QCOMPARE(monitor.p95FrameMs(), 95.0);
@@ -58,8 +55,7 @@ void TestQmlPerformanceMonitor::reportsOnlyStallsAboveThreshold() {
 void TestQmlPerformanceMonitor::resetClearsAutomationSnapshot() {
 	QmlPerformanceMonitor monitor;
 	monitor.beginFrameSampling();
-	monitor.recordFrameAt(0);
-	monitor.recordFrameAt(17000000);
+	monitor.recordFrameDuration(17.0);
 	monitor.recordInputAt(QStringLiteral("send"), 0);
 	monitor.recordVisualAt(QStringLiteral("send"), 20000000);
 	monitor.recordHeartbeatAt(0);
@@ -72,12 +68,14 @@ void TestQmlPerformanceMonitor::resetClearsAutomationSnapshot() {
 	QCOMPARE(snapshot.value(QStringLiteral("uiStallCount")).toInt(), 0);
 }
 
-void TestQmlPerformanceMonitor::acceptsQueuedFramePresentationFromHost() {
+void TestQmlPerformanceMonitor::recordsRenderThreadFrameDuration() {
 	QmlPerformanceMonitor monitor;
 	monitor.beginFrameSampling();
-	QVERIFY(QMetaObject::invokeMethod(&monitor, "markFramePresented", Qt::QueuedConnection));
-	QVERIFY(QMetaObject::invokeMethod(&monitor, "markFramePresented", Qt::QueuedConnection));
+	monitor.markFrameRenderingStarted();
+	QTest::qSleep(2);
+	monitor.markFrameRenderingFinished();
 	QTRY_COMPARE(monitor.snapshot().value(QStringLiteral("frameSampleCount")).toInt(), 1);
+	QVERIFY(monitor.p95FrameMs() >= 2.0);
 }
 
 void TestQmlPerformanceMonitor::computesInputPercentiles() {

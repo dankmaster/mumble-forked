@@ -18,7 +18,8 @@
 namespace Mumble {
 namespace ScreenShare {
 namespace IPC {
-	constexpr int PROTOCOL_VERSION = 1;
+	constexpr int PROTOCOL_VERSION = 2;
+	constexpr int MINIMUM_PROTOCOL_VERSION = 1;
 
 	enum class Command { QueryCapabilities, StartPublish, StopPublish, StartView, StopView };
 

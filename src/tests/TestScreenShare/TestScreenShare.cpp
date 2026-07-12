@@ -4,8 +4,13 @@
 // Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
 #include <QtTest>
+#include <QtCore/QUuid>
+#include <QtCore/QSharedMemory>
+
+#include <limits>
 
 #include "ScreenShare.h"
+#include "ScreenShareFrameTransport.h"
 #include "ScreenShareViewBackend.h"
 
 namespace {
@@ -27,6 +32,9 @@ private slots:
 	void normalizesSecureRelayUrls();
 	void rejectsUnsafeRelayUrls();
 	void qmlViewBackendPublishesLifecycleState();
+	void qmlViewBackendReportsExternalWindowTransportHonestly();
+	void nativeFrameTransportIsBoundedAndTracksDrops();
+	void qmlViewBackendConsumesNativeFramesOffThread();
 };
 
 void TestScreenShare::qmlViewBackendPublishesLifecycleState() {
@@ -51,6 +59,80 @@ void TestScreenShare::qmlViewBackendPublishesLifecycleState() {
 	QCOMPARE(pauseSpy.count(), 1);
 	QCOMPARE(muteSpy.count(), 1);
 	QCOMPARE(stopSpy.count(), 1);
+}
+
+void TestScreenShare::qmlViewBackendReportsExternalWindowTransportHonestly() {
+	ScreenShareSession session;
+	ScreenShareViewBackend backend(session);
+
+	QCOMPARE(backend.renderTransport(), QStringLiteral("external-process-window"));
+	QVERIFY(backend.nativeFrameTransportAvailable());
+	QVERIFY(!backend.nativeFrameTransportBlocker().isEmpty());
+	QVERIFY(backend.nativeFrameTransportBlocker().contains(QStringLiteral("appsink adapter")));
+	QVERIFY(backend.nativeFrameTransportBlocker().contains(QStringLiteral("decoded frames")));
+}
+
+void TestScreenShare::nativeFrameTransportIsBoundedAndTracksDrops() {
+	const QString key = QStringLiteral("mumble-frame-test-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+	Mumble::ScreenShare::FrameTransport producer;
+	Mumble::ScreenShare::FrameTransport consumer;
+	QVERIFY(producer.create(key, 64));
+	QVERIFY(consumer.attach(key));
+	Mumble::ScreenShare::NativeFrame frame;
+	frame.generation = 4;
+	frame.width = 2;
+	frame.height = 2;
+	frame.stride = 8;
+	frame.bgra = QByteArray(16, '\x7f');
+	frame.sequence = 1;
+	QVERIFY(producer.publish(frame));
+	Mumble::ScreenShare::NativeFrame received;
+	QVERIFY(consumer.readLatest(&received));
+	QCOMPARE(received.sequence, 1ULL);
+	frame.sequence = 4;
+	QVERIFY(producer.publish(frame));
+	QVERIFY(consumer.readLatest(&received));
+	QCOMPARE(consumer.droppedFrames(), 2ULL);
+	frame.generation = 5;
+	frame.sequence = 1;
+	frame.stride = 8;
+	QVERIFY(producer.publish(frame));
+	QVERIFY(consumer.readLatest(&received));
+	QCOMPARE(received.generation, 5ULL);
+	frame.stride = std::numeric_limits< quint32 >::max();
+	QVERIFY(!producer.publish(frame));
+	QCOMPARE(producer.droppedFrames(), 1ULL);
+	producer.detach();
+	QVERIFY(!producer.publish(frame));
+
+	const QString malformedKey = key + QStringLiteral("-malformed");
+	QSharedMemory malformed(malformedKey);
+	QVERIFY(malformed.create(64));
+	Mumble::ScreenShare::FrameTransport rejected;
+	QVERIFY(!rejected.attach(malformedKey));
+}
+
+void TestScreenShare::qmlViewBackendConsumesNativeFramesOffThread() {
+	const QString key = QStringLiteral("mumble-frame-backend-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+	Mumble::ScreenShare::FrameTransport producer;
+	QVERIFY(producer.create(key, 64));
+	ScreenShareSession session;
+	ScreenShareViewBackend backend(session);
+	backend.setNativeFrameTransport(key, 9);
+	QTRY_VERIFY(backend.nativeFrameActive());
+	Mumble::ScreenShare::NativeFrame frame;
+	frame.generation = 9;
+	frame.width = 2;
+	frame.height = 2;
+	frame.stride = 8;
+	frame.sequence = 1;
+	frame.bgra = QByteArray(16, '\xff');
+	QVERIFY(producer.publish(frame));
+	QTRY_VERIFY(!backend.currentFrame().isNull());
+	QCOMPARE(backend.currentFrame().size(), QSize(2, 2));
+	QCOMPARE(backend.renderTransport(), QStringLiteral("native-shared-memory-bgra"));
+	backend.setNativeFrameTransport({}, 0);
+	QTRY_VERIFY(!backend.nativeFrameActive());
 }
 
 void TestScreenShare::parsesAndFormatsVp8CodecPreferences() {

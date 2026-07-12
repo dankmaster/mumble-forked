@@ -99,6 +99,38 @@ surface:
 - start/stop view
 - self-test
 
+### Qt Quick rendering boundary
+
+The current viewer is not a native Qt Quick video pipeline. The helper starts
+`ffplay` (or a GStreamer-owned viewer process), returns only its process ID, and
+the Windows client discovers that process's top-level `HWND`. The QML
+`WindowContainer` therefore embeds a foreign native window. It does not receive
+decoded frames and must not be described as a `QQuickItem`, scene-graph texture,
+or `QVideoSink` implementation.
+
+Local helper IPC version 2 now includes an MVP bounded BGRA shared-memory ring
+with generation, dimensions, stride, sequence and timestamp metadata. The client
+polls and copies it off the GUI thread and renders immutable frames through a
+dedicated scene-graph texture item. A deterministic helper test producer can be
+enabled with `MUMBLE_SCREENSHARE_NATIVE_FRAME_TEST_PATTERN=1` to exercise the
+complete process boundary.
+
+The remaining production blocker is the decoder feed adapter: current ffplay
+and GStreamer viewer processes still own their decoded surfaces and do not push
+frames into the v2 ring. Production native rendering requires either an appsink
+adapter for decoded CPU frames or a later negotiated GPU transport that provides:
+
+- a bounded decoded-frame stream with pixel format, dimensions, stride,
+  timestamp and generation metadata; or
+- shareable GPU textures plus platform handles, synchronization fences and
+  device-loss recovery.
+
+The MVP ring already provides fixed bounds, sequence-gap drop accounting,
+generation resets and deterministic detach. The external-window renderer remains
+an explicitly allowlisted development/platform fallback until the production
+appsink adapter is connected; wrapping it in QML is still not considered native
+rendering.
+
 ## Media Runtime
 
 The helper prefers proven external media runtimes instead of embedding a custom

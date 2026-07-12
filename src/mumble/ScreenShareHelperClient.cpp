@@ -634,10 +634,11 @@ bool ScreenShareHelperClient::stopPublish(const QString &streamID, QString *erro
 }
 
 bool ScreenShareHelperClient::startView(const ScreenShareSession &session, QString *errorMessage,
-										qint64 *processID) {
+										qint64 *processID, NativeFrameTransport *frameTransport) {
 	if (processID) {
 		*processID = 0;
 	}
+	if (frameTransport) *frameTransport = {};
 	QString localError;
 	const QJsonObject reply = sendRequest(Mumble::ScreenShare::IPC::Command::StartView, payloadFromSession(session),
 										  m_capabilities.helperExecutable, &localError, true);
@@ -654,6 +655,12 @@ bool ScreenShareHelperClient::startView(const ScreenShareSession &session, QStri
 
 	if (processID) {
 		*processID = activeProcessIDFromReply(reply);
+	}
+	if (frameTransport) {
+		const QJsonObject payload = reply.value(QStringLiteral("payload")).toObject();
+		frameTransport->sharedMemoryKey = payload.value(QStringLiteral("native_frame_shared_memory_key")).toString();
+		frameTransport->generation = payload.value(QStringLiteral("native_frame_generation")).toVariant().toULongLong();
+		frameTransport->feedAvailable = payload.value(QStringLiteral("native_frame_feed_available")).toBool();
 	}
 	qInfo().noquote()
 		<< QStringLiteral("ScreenShareHelperClient: start-view stream=%1 accepted").arg(session.streamID);

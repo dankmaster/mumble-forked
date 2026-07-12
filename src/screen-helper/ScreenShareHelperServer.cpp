@@ -8,6 +8,7 @@
 #include "ScreenShare.h"
 #include "ScreenShareExternalProcess.h"
 #include "ScreenShareIPC.h"
+#include "ScreenShareFrameTransport.h"
 #include "ScreenShareRelayClient.h"
 #include "ScreenShareSessionPlanner.h"
 
@@ -24,6 +25,7 @@
 #include <QtCore/QStandardPaths>
 #include <QtCore/QThread>
 #include <QtCore/QUrl>
+#include <QtCore/QUuid>
 #include <QtNetwork/QLocalSocket>
 
 namespace {
@@ -281,7 +283,9 @@ void ScreenShareHelperServer::handleIdleTimeout() {
 }
 
 QJsonObject ScreenShareHelperServer::dispatchRequest(const QJsonObject &request) {
-	if (request.value(QStringLiteral("version")).toInt() != Mumble::ScreenShare::IPC::PROTOCOL_VERSION) {
+	const int version = request.value(QStringLiteral("version")).toInt();
+	if (version < Mumble::ScreenShare::IPC::MINIMUM_PROTOCOL_VERSION
+		|| version > Mumble::ScreenShare::IPC::PROTOCOL_VERSION) {
 		return Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("Unsupported protocol version."));
 	}
 
@@ -340,6 +344,11 @@ QJsonObject ScreenShareHelperServer::capabilityPayload() const {
 	payload.insert(QStringLiteral("drm_playback_supported"), false);
 	payload.insert(QStringLiteral("drm_systems"), stringListToJson(m_capabilities.drmSystems));
 	payload.insert(QStringLiteral("queue_budget_frames"), static_cast< int >(m_capabilities.queueBudgetFrames));
+	payload.insert(QStringLiteral("native_frame_transport_version"), 2);
+	payload.insert(QStringLiteral("native_frame_transport"), QStringLiteral("shared-memory-bgra-ring"));
+	payload.insert(QStringLiteral("native_frame_slot_count"),
+				   static_cast< int >(Mumble::ScreenShare::FrameTransport::SlotCount));
+	payload.insert(QStringLiteral("native_frame_production_feed_available"), false);
 	payload.insert(QStringLiteral("status"), m_capabilities.statusMessage);
 	payload.insert(QStringLiteral("mode"), QStringLiteral("external-process"));
 	payload.insert(QStringLiteral("encoder_backends"), ScreenShareSessionPlanner::advertisedEncoderBackends());
@@ -543,6 +552,43 @@ QJsonObject ScreenShareHelperServer::handleStartView(const QJsonObject &payload)
 	session.payload.insert(QStringLiteral("actual_bitrate_kbps"),
 						   session.payload.value(QStringLiteral("bitrate_kbps")).toInt());
 	session.payload.insert(QStringLiteral("dropped_frames"), 0);
+	// The ffmpeg/GStreamer appsink adapter remains isolated from this transport MVP. This deterministic
+	// producer exercises the complete helper IPC/shared-memory/QSG path without pretending the external
+	// renderer already exports decoded frames.
+	if (qEnvironmentVariableIntValue("MUMBLE_SCREENSHARE_NATIVE_FRAME_TEST_PATTERN") == 1) {
+		const QString key = QStringLiteral("mumble-screen-frame-%1")
+							.arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+		session.nativeFrameTransport = std::make_shared< Mumble::ScreenShare::FrameTransport >();
+		if (session.nativeFrameTransport->create(key, 320U * 180U * 4U)) {
+			const quint64 generation = static_cast< quint64 >(QDateTime::currentMSecsSinceEpoch());
+			session.payload.insert(QStringLiteral("native_frame_shared_memory_key"), key);
+			session.payload.insert(QStringLiteral("native_frame_generation"), QString::number(generation));
+			session.payload.insert(QStringLiteral("native_frame_feed_available"), true);
+			session.nativeFrameTimer = new QTimer(this);
+			auto transport = session.nativeFrameTransport;
+			auto sequence = std::make_shared< quint64 >(0);
+			connect(session.nativeFrameTimer, &QTimer::timeout, this, [transport, sequence, generation]() {
+				Mumble::ScreenShare::NativeFrame frame;
+				frame.generation = generation;
+				frame.sequence = ++*sequence;
+				frame.timestampUsec = QDateTime::currentMSecsSinceEpoch() * 1000;
+				frame.width = 320;
+				frame.height = 180;
+				frame.stride = frame.width * 4;
+				frame.bgra.resize(static_cast< qsizetype >(frame.stride) * frame.height);
+				for (qsizetype pixel = 0; pixel < frame.bgra.size(); pixel += 4) {
+					frame.bgra[pixel] = static_cast< char >((*sequence * 3) & 0xff);
+					frame.bgra[pixel + 1] = static_cast< char >((pixel / 4) & 0xff);
+					frame.bgra[pixel + 2] = static_cast< char >((*sequence * 7) & 0xff);
+					frame.bgra[pixel + 3] = static_cast< char >(0xff);
+				}
+				transport->publish(frame);
+			});
+			session.nativeFrameTimer->start(33);
+		}
+	}
+	if (!session.payload.contains(QStringLiteral("native_frame_feed_available")))
+		session.payload.insert(QStringLiteral("native_frame_feed_available"), false);
 	session.payload.insert(QStringLiteral("adaptive_downgrade_reason"), QString());
 	appendWarnings(&session.payload, launch.warnings);
 	logSessionPlanSummary(session.payload, QStringLiteral("view"), QStringLiteral("started"));
@@ -589,6 +635,10 @@ void ScreenShareHelperServer::stopSession(QHash< QString, ManagedSession > &sess
 	}
 
 	const ManagedSession session = sessions.take(streamID);
+	if (session.nativeFrameTimer) {
+		session.nativeFrameTimer->stop();
+		session.nativeFrameTimer->deleteLater();
+	}
 	if (session.process) {
 		ScreenShareExternalProcess::stop(session.process);
 	}
@@ -659,7 +709,11 @@ void ScreenShareHelperServer::attachProcessLogging(const QString &streamID, cons
 			[this, streamID, publish, label, process](const int exitCode, const QProcess::ExitStatus exitStatus) {
 				QHash< QString, ManagedSession > &sessionMap = publish ? m_publishSessions : m_viewSessions;
 				if (sessionMap.contains(streamID) && sessionMap.value(streamID).process == process) {
-					sessionMap.remove(streamID);
+					const ManagedSession finishedSession = sessionMap.take(streamID);
+					if (finishedSession.nativeFrameTimer) {
+						finishedSession.nativeFrameTimer->stop();
+						finishedSession.nativeFrameTimer->deleteLater();
+					}
 				}
 
 				const QString output = QString::fromUtf8(process->readAll()).trimmed();

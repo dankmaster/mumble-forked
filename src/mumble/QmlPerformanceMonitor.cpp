@@ -19,9 +19,9 @@ QmlPerformanceMonitor::QmlPerformanceMonitor(QObject *parent) : QObject(parent) 
 	m_heartbeat.start();
 }
 
-double QmlPerformanceMonitor::p95FrameMs() const { return percentile(m_frameIntervalsMs, 0.95); }
-double QmlPerformanceMonitor::p99FrameMs() const { return percentile(m_frameIntervalsMs, 0.99); }
-bool QmlPerformanceMonitor::frameSampling() const { return m_frameSampling; }
+double QmlPerformanceMonitor::p95FrameMs() const { return percentile(m_frameDurationsMs, 0.95); }
+double QmlPerformanceMonitor::p99FrameMs() const { return percentile(m_frameDurationsMs, 0.99); }
+bool QmlPerformanceMonitor::frameSampling() const { return m_frameSampling.load(); }
 double QmlPerformanceMonitor::lastInputLatencyMs() const { return m_lastInputLatencyMs; }
 double QmlPerformanceMonitor::maxInputLatencyMs() const { return m_maxInputLatencyMs; }
 double QmlPerformanceMonitor::p95InputLatencyMs() const { return percentile(m_inputLatenciesMs, 0.95); }
@@ -30,14 +30,14 @@ int QmlPerformanceMonitor::uiStallCount() const { return m_uiStallCount; }
 double QmlPerformanceMonitor::maxUiStallMs() const { return m_maxUiStallMs; }
 
 QVariantMap QmlPerformanceMonitor::snapshot() const {
-	const bool hasFrameSamples = !m_frameIntervalsMs.isEmpty();
+	const bool hasFrameSamples = !m_frameDurationsMs.isEmpty();
 	const bool hasInputSamples = !m_inputLatenciesMs.isEmpty();
 	const QVariantMap gates { { QStringLiteral("frameP95Passed"), hasFrameSamples && p95FrameMs() <= 16.7 },
 						 { QStringLiteral("frameP99Passed"), hasFrameSamples && p99FrameMs() <= 33.3 },
 						 { QStringLiteral("inputP95Passed"), hasInputSamples && p95InputLatencyMs() <= 50.0 },
 						 { QStringLiteral("noUiStallsPassed"), m_uiStallCount == 0 } };
-	return { { QStringLiteral("frameSampling"), m_frameSampling },
-			 { QStringLiteral("frameSampleCount"), m_frameIntervalsMs.size() },
+	return { { QStringLiteral("frameSampling"), m_frameSampling.load() },
+			 { QStringLiteral("frameSampleCount"), m_frameDurationsMs.size() },
 			 { QStringLiteral("p95FrameMs"), p95FrameMs() }, { QStringLiteral("p99FrameMs"), p99FrameMs() },
 			 { QStringLiteral("inputSampleCount"), m_inputLatenciesMs.size() },
 			 { QStringLiteral("lastInputLatencyMs"), m_lastInputLatencyMs },
@@ -53,24 +53,35 @@ QVariantMap QmlPerformanceMonitor::snapshot() const {
 			 { QStringLiteral("gates"), gates } };
 }
 
+void QmlPerformanceMonitor::markFrameRenderingStarted() {
+	if (!m_frameSampling.load()) return;
+	m_frameRenderingStartedNs.store(nowNs());
+}
+
+void QmlPerformanceMonitor::markFrameRenderingFinished() {
+	if (!m_frameSampling.load()) return;
+	const qint64 startedNs = m_frameRenderingStartedNs.exchange(-1);
+	const qint64 finishedNs = nowNs();
+	if (startedNs < 0 || finishedNs <= startedNs) return;
+	const double durationMs = (finishedNs - startedNs) / 1000000.0;
+	QMetaObject::invokeMethod(this, [this, durationMs]() { recordFrameDuration(durationMs); }, Qt::QueuedConnection);
+}
+
 void QmlPerformanceMonitor::markFramePresented() {
 	const qint64 timestampNs = nowNs();
 	const QQueue< QString > pending = m_pendingInputOrder;
 	for (const QString &operationId : pending) recordVisualAt(operationId, timestampNs);
-	recordFrameAt(timestampNs);
 }
 
 void QmlPerformanceMonitor::beginFrameSampling() {
-	if (m_frameSampling) return;
-	m_frameSampling = true;
-	m_lastFrameNs = -1;
+	if (m_frameSampling.exchange(true)) return;
+	m_frameRenderingStartedNs.store(-1);
 	emit frameSamplingChanged();
 }
 
 void QmlPerformanceMonitor::endFrameSampling() {
-	if (!m_frameSampling) return;
-	m_frameSampling = false;
-	m_lastFrameNs = -1;
+	if (!m_frameSampling.exchange(false)) return;
+	m_frameRenderingStartedNs.store(-1);
 	emit frameSamplingChanged();
 }
 
@@ -93,11 +104,10 @@ void QmlPerformanceMonitor::installInputObserver(QObject *target) {
 }
 
 void QmlPerformanceMonitor::reset() {
-	m_lastFrameNs = -1;
-	const bool wasSampling = m_frameSampling;
-	m_frameSampling = false;
+	m_frameRenderingStartedNs.store(-1);
+	const bool wasSampling = m_frameSampling.exchange(false);
 	m_lastHeartbeatNs = -1;
-	m_frameIntervalsMs.clear();
+	m_frameDurationsMs.clear();
 	m_inputLatenciesMs.clear();
 	m_pendingInputs.clear();
 	m_pendingInputOrder.clear();
@@ -109,13 +119,10 @@ void QmlPerformanceMonitor::reset() {
 	emit metricsChanged();
 }
 
-void QmlPerformanceMonitor::recordFrameAt(const qint64 timestampNs) {
-	if (!m_frameSampling) return;
-	if (m_lastFrameNs >= 0 && timestampNs > m_lastFrameNs) {
-		appendBounded(m_frameIntervalsMs, (timestampNs - m_lastFrameNs) / 1000000.0);
-		emit metricsChanged();
-	}
-	m_lastFrameNs = timestampNs;
+void QmlPerformanceMonitor::recordFrameDuration(const double durationMs) {
+	if (!m_frameSampling.load() || durationMs < 0.0) return;
+	appendBounded(m_frameDurationsMs, durationMs);
+	emit metricsChanged();
 }
 
 void QmlPerformanceMonitor::recordHeartbeatAt(const qint64 timestampNs) {

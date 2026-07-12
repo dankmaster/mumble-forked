@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Mumble.Theme 1.0
+import Mumble.ScreenShare 1.0
 
 Window {
     id: root
@@ -38,11 +39,16 @@ Window {
             border.color: Theme.divider
             radius: Theme.innerRadius
             clip: true
+            ScreenShareVideoItem {
+                anchors.fill: parent
+                backend: root.backend
+                visible: backend.nativeFrameActive && !backend.paused
+            }
             WindowContainer {
                 anchors.fill: parent
                 anchors.margins: 1
                 window: backend.videoWindow
-                visible: window !== null && !backend.paused
+                visible: !backend.nativeFrameActive && window !== null && !backend.paused
             }
             Label {
                 anchors.centerIn: parent
@@ -50,7 +56,7 @@ Window {
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.Wrap
                 color: Theme.textMuted
-                visible: backend.videoWindow === null || backend.paused
+                visible: (!backend.nativeFrameActive && backend.videoWindow === null) || backend.paused
                 text: backend.paused ? qsTr("Paused locally\n\nResume returns to the live edge.") : backend.status
             }
         }

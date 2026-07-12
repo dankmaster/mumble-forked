@@ -10,6 +10,8 @@
 #include <QVariantMap>
 #include <QVector>
 
+#include <atomic>
+
 class QEvent;
 
 class QmlPerformanceMonitor final : public QObject {
@@ -39,6 +41,8 @@ public:
 	double maxUiStallMs() const;
 	QVariantMap snapshot() const;
 
+	void markFrameRenderingStarted();
+	void markFrameRenderingFinished();
 	Q_INVOKABLE void markFramePresented();
 	Q_INVOKABLE void beginFrameSampling();
 	Q_INVOKABLE void endFrameSampling();
@@ -48,7 +52,7 @@ public:
 	Q_INVOKABLE void reset();
 
 	// Deterministic hooks used by tests and non-QML automation adapters.
-	void recordFrameAt(qint64 timestampNs);
+	void recordFrameDuration(double durationMs);
 	void recordHeartbeatAt(qint64 timestampNs);
 	void recordInputAt(const QString &operationId, qint64 timestampNs);
 	void recordVisualAt(const QString &operationId, qint64 timestampNs);
@@ -67,10 +71,10 @@ private:
 
 	QElapsedTimer m_clock;
 	QTimer m_heartbeat;
-	qint64 m_lastFrameNs = -1;
-	bool m_frameSampling = false;
+	std::atomic< qint64 > m_frameRenderingStartedNs = -1;
+	std::atomic< bool > m_frameSampling = false;
 	qint64 m_lastHeartbeatNs = -1;
-	QVector< double > m_frameIntervalsMs;
+	QVector< double > m_frameDurationsMs;
 	QVector< double > m_inputLatenciesMs;
 	QHash< QString, qint64 > m_pendingInputs;
 	QQueue< QString > m_pendingInputOrder;

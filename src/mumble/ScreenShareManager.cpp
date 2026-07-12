@@ -805,12 +805,15 @@ bool ScreenShareManager::shouldAutoViewSession(const ScreenShareSession &session
 bool ScreenShareManager::restartExternalViewSession(const ScreenShareSession &session) {
 	QString errorMessage;
 	qint64 processID = 0;
+	ScreenShareHelperClient::NativeFrameTransport frameTransport;
 
-	if (m_helperClient->startView(session, &errorMessage, &processID)) {
+	if (m_helperClient->startView(session, &errorMessage, &processID, &frameTransport)) {
 		m_activeViewSessions.insert(session.streamID);
 		m_pausedExternalViewSessions.remove(session.streamID);
 		m_externalViewProcessIDs.insert(session.streamID, processID);
 		showExternalViewWindow(session, processID);
+		if (ScreenShareViewBackend *backend = m_viewBackends.value(session.streamID); backend && frameTransport.feedAvailable)
+			backend->setNativeFrameTransport(frameTransport.sharedMemoryKey, frameTransport.generation);
 		updateExternalRuntimeWatchdog();
 		if (Global::get().l) {
 			Global::get().l->log(Log::Information,
@@ -891,10 +894,13 @@ void ScreenShareManager::startLocalViewSession(const ScreenShareSession &session
 
 	QString errorMessage;
 	qint64 processID = 0;
-	if (m_helperClient->startView(session, &errorMessage, &processID)) {
+	ScreenShareHelperClient::NativeFrameTransport frameTransport;
+	if (m_helperClient->startView(session, &errorMessage, &processID, &frameTransport)) {
 		m_activeViewSessions.insert(session.streamID);
 		m_externalViewProcessIDs.insert(session.streamID, processID);
 		showExternalViewWindow(session, processID);
+		if (ScreenShareViewBackend *backend = m_viewBackends.value(session.streamID); backend && frameTransport.feedAvailable)
+			backend->setNativeFrameTransport(frameTransport.sharedMemoryKey, frameTransport.generation);
 		updateExternalRuntimeWatchdog();
 		if (Global::get().l) {
 			Global::get().l->log(

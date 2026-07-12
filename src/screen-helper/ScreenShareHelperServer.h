@@ -14,8 +14,11 @@
 #include <QtCore/QTimer>
 #include <QtNetwork/QLocalServer>
 
+#include <memory>
+
 class QLocalSocket;
 class QProcess;
+namespace Mumble::ScreenShare { class FrameTransport; }
 
 class ScreenShareHelperServer : public QObject {
 private:
@@ -34,6 +37,8 @@ public:
 	struct ManagedSession {
 		QJsonObject payload;
 		QProcess *process = nullptr;
+		QTimer *nativeFrameTimer = nullptr;
+		std::shared_ptr< Mumble::ScreenShare::FrameTransport > nativeFrameTransport;
 	};
 
 private slots:

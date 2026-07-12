@@ -1,11 +1,45 @@
 // Copyright The Mumble Developers. All rights reserved.
 
 #include "ScreenShareViewBackend.h"
+#include "ScreenShareFrameTransport.h"
 
+#include <QtCore/QThread>
 #include <QtCore/QTimer>
 #include <QtGui/QWindow>
 
 #include <algorithm>
+
+class ScreenShareNativeFrameReader final : public QObject {
+	Q_OBJECT
+public:
+	explicit ScreenShareNativeFrameReader(QObject *parent = nullptr) : QObject(parent), m_timer(new QTimer(this)) {
+		m_timer->setInterval(16);
+		connect(m_timer, &QTimer::timeout, this, &ScreenShareNativeFrameReader::poll);
+	}
+public slots:
+	void configure(const QString &key, const quint64 generation) {
+		m_timer->stop();
+		m_transport.detach();
+		m_generation = generation;
+		const bool active = !key.trimmed().isEmpty() && m_transport.attach(key);
+		if (active) m_timer->start();
+		emit activeChanged(active);
+	}
+	void poll() {
+		Mumble::ScreenShare::NativeFrame frame;
+		if (!m_transport.readLatest(&frame) || frame.generation != m_generation) return;
+		const QImage wrapped(reinterpret_cast< const uchar * >(frame.bgra.constData()), static_cast< int >(frame.width),
+						 static_cast< int >(frame.height), static_cast< qsizetype >(frame.stride), QImage::Format_ARGB32);
+		if (!wrapped.isNull()) emit frameReady(wrapped.copy(), frame.sequence, frame.timestampUsec);
+	}
+signals:
+	void activeChanged(bool active);
+	void frameReady(const QImage &frame, quint64 sequence, qint64 timestampUsec);
+private:
+	QTimer *m_timer;
+	Mumble::ScreenShare::FrameTransport m_transport;
+	quint64 m_generation = 0;
+};
 
 #ifdef Q_OS_WIN
 #	include "win.h"
@@ -104,9 +138,35 @@ ScreenShareViewBackend::ScreenShareViewBackend(const ScreenShareSession &session
 	m_audioRetryTimer = new QTimer(this);
 	m_audioRetryTimer->setInterval(500);
 	connect(m_audioRetryTimer, &QTimer::timeout, this, &ScreenShareViewBackend::retryAudioControls);
+	m_frameThread = new QThread(this);
+	m_frameReader = new ScreenShareNativeFrameReader();
+	m_frameReader->moveToThread(m_frameThread);
+	connect(m_frameThread, &QThread::finished, m_frameReader, &QObject::deleteLater);
+	connect(m_frameReader, &ScreenShareNativeFrameReader::activeChanged, this, [this](const bool active) {
+		if (m_nativeFrameActive == active) return;
+		m_nativeFrameActive = active;
+		emit nativeFrameActiveChanged();
+		setStatus(active ? tr("Connecting to the native Qt Quick video surface...")
+						 : tr("The native frame transport is unavailable; using the external viewer fallback."));
+	});
+	connect(m_frameReader, &ScreenShareNativeFrameReader::frameReady, this,
+			[this](const QImage &frame, quint64, qint64) {
+				m_currentFrame = frame;
+				emit frameChanged();
+				setStatus(tr("Live via native Qt Quick frame transport."));
+			});
+	m_frameThread->start();
 }
 
-ScreenShareViewBackend::~ScreenShareViewBackend() { clearVideoWindow(); }
+ScreenShareViewBackend::~ScreenShareViewBackend() {
+	clearVideoWindow();
+	if (m_frameReader && m_frameThread && m_frameThread->isRunning()) {
+		QMetaObject::invokeMethod(m_frameReader, "configure", Qt::BlockingQueuedConnection,
+							  Q_ARG(QString, QString()), Q_ARG(quint64, 0));
+		m_frameThread->quit();
+		m_frameThread->wait();
+	}
+}
 QString ScreenShareViewBackend::streamId() const { return m_session.streamID; }
 QString ScreenShareViewBackend::title() const { return tr("Live screen share"); }
 QString ScreenShareViewBackend::detail() const {
@@ -119,6 +179,23 @@ bool ScreenShareViewBackend::audioAvailable() const { return m_session.captureAu
 int ScreenShareViewBackend::audioVolume() const { return m_audioVolume; }
 qint64 ScreenShareViewBackend::processId() const { return m_processId; }
 QWindow *ScreenShareViewBackend::videoWindow() const { return m_videoWindow; }
+QString ScreenShareViewBackend::renderTransport() const {
+	return nativeFrameActive() ? QStringLiteral("native-shared-memory-bgra") : QStringLiteral("external-process-window");
+}
+bool ScreenShareViewBackend::nativeFrameTransportAvailable() const { return true; }
+QString ScreenShareViewBackend::nativeFrameTransportBlocker() const {
+	return tr("Native BGRA shared-memory transport and Qt Quick rendering are available, but the production "
+			  "ffmpeg/GStreamer decoder appsink adapter does not yet publish decoded frames into that transport.");
+}
+bool ScreenShareViewBackend::nativeFrameActive() const { return m_nativeFrameActive; }
+QImage ScreenShareViewBackend::currentFrame() const { return m_currentFrame; }
+
+void ScreenShareViewBackend::setNativeFrameTransport(const QString &sharedMemoryKey, const quint64 generation) {
+	m_currentFrame = {};
+	emit frameChanged();
+	QMetaObject::invokeMethod(m_frameReader, "configure", Qt::QueuedConnection, Q_ARG(QString, sharedMemoryKey),
+						  Q_ARG(quint64, generation));
+}
 
 void ScreenShareViewBackend::updateSession(const ScreenShareSession &session) {
 	m_session = session;
@@ -191,6 +268,7 @@ void ScreenShareViewBackend::retryAudioControls() {
 	if (applyAudioControls() || ++m_audioRetryAttempts >= 40) m_audioRetryTimer->stop();
 }
 
+
 bool ScreenShareViewBackend::applyAudioControls() {
 #ifdef Q_OS_WIN
 	if (!audioAvailable() || m_processId <= 0) return true;
@@ -212,3 +290,5 @@ void ScreenShareViewBackend::setStatus(const QString &status) {
 	m_status = status;
 	emit statusChanged();
 }
+
+#include "ScreenShareViewBackend.moc"
