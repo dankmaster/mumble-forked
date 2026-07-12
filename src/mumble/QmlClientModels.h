@@ -6,6 +6,7 @@
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QObject>
+#include <QtCore/QStringList>
 #include <QtCore/QVariantList>
 
 class ClientActionRegistry;
@@ -138,6 +139,7 @@ signals:
 private:
 	int indexOf(const QString &stableId) const;
 	QVariantList m_rows;
+	QStringList m_rowIds;
 };
 
 class RoomModel final : public StableListModel {

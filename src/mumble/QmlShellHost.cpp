@@ -18,14 +18,15 @@
 
 QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent)
 	: QObject(parent), m_actionRegistry(actionRegistry),
-	  m_sessionController(std::make_unique< ClientSessionController >()),
-	  m_activeScopeController(std::make_unique< ActiveScopeController >()),
-	  m_commandController(std::make_unique< UiCommandController >()), m_roomModel(std::make_unique< RoomModel >()),
-	  m_participantModel(std::make_unique< ParticipantModel >()),
-	  m_chatModel(std::make_unique< ChatTimelineModel >()),
-	  m_operationModel(std::make_unique< AsyncOperationModel >()),
-	  m_actionModel(std::make_unique< ActionModel >(actionRegistry)),
-	  m_selectionState(std::make_unique< QmlSelectionState >()) {
+	  m_sessionController(std::make_unique< ClientSessionController >(this)),
+	  m_activeScopeController(std::make_unique< ActiveScopeController >(this)),
+	  m_commandController(std::make_unique< UiCommandController >(this)),
+	  m_roomModel(std::make_unique< RoomModel >(this)),
+	  m_participantModel(std::make_unique< ParticipantModel >(this)),
+	  m_chatModel(std::make_unique< ChatTimelineModel >(this)),
+	  m_operationModel(std::make_unique< AsyncOperationModel >(this)),
+	  m_actionModel(std::make_unique< ActionModel >(actionRegistry, this)),
+	  m_selectionState(std::make_unique< QmlSelectionState >(this)) {
 }
 
 QmlShellHost::~QmlShellHost() {
@@ -43,6 +44,17 @@ bool QmlShellHost::start(QString *error) {
 	Q_UNUSED(themeType)
 	QQuickStyle::setStyle(QStringLiteral("Basic"));
 	m_engine = std::make_unique< QQmlApplicationEngine >();
+	for (QObject *object : { static_cast< QObject * >(m_sessionController.get()),
+						  static_cast< QObject * >(m_activeScopeController.get()),
+						  static_cast< QObject * >(m_commandController.get()),
+						  static_cast< QObject * >(m_roomModel.get()),
+						  static_cast< QObject * >(m_participantModel.get()),
+						  static_cast< QObject * >(m_chatModel.get()),
+						  static_cast< QObject * >(m_operationModel.get()),
+						  static_cast< QObject * >(m_actionModel.get()),
+						  static_cast< QObject * >(m_selectionState.get()) }) {
+		QQmlEngine::setObjectOwnership(object, QQmlEngine::CppOwnership);
+	}
 	QQmlContext *context = m_engine->rootContext();
 	context->setContextProperty(QStringLiteral("clientSession"), m_sessionController.get());
 	context->setContextProperty(QStringLiteral("activeScope"), m_activeScopeController.get());

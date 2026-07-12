@@ -11,6 +11,7 @@ class TestQmlClientModels : public QObject {
 private slots:
 	void stableRowsUpdateWithoutReset();
 	void synchronizeRowsUsesIncrementalSignals();
+	void stableIdsRemainIndependentFromSourceMaps();
 	void activeScopeAppliesTypedState();
 	void sessionPropertiesOnlyNotifyOnChanges();
 	void commandsRejectEmptyStableIds();
@@ -91,6 +92,21 @@ void TestQmlClientModels::synchronizeRowsUsesIncrementalSignals() {
 	QCOMPARE(changedSpy.count(), 1);
 	QCOMPARE(removeSpy.count(), 1);
 	QCOMPARE(resetSpy.count(), 0);
+}
+
+void TestQmlClientModels::stableIdsRemainIndependentFromSourceMaps() {
+	RoomModel model;
+	QVariantMap source { { QStringLiteral("id"), QStringLiteral("voice:1") },
+						 { QStringLiteral("title"), QStringLiteral("Lobby") } };
+	model.synchronizeRows({ source });
+	source.insert(QStringLiteral("id"), QStringLiteral("mutated"));
+	source.insert(QStringLiteral("title"), QStringLiteral("Mutated"));
+
+	model.upsertRow({ { QStringLiteral("id"), QStringLiteral("voice:1") },
+						  { QStringLiteral("title"), QStringLiteral("Landing") } });
+	QCOMPARE(model.rowCount(), 1);
+	QCOMPARE(model.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("voice:1"));
+	QCOMPARE(model.get(0).value(QStringLiteral("title")).toString(), QStringLiteral("Landing"));
 }
 
 void TestQmlClientModels::sessionPropertiesOnlyNotifyOnChanges() {
