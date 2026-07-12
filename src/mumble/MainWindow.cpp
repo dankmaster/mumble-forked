@@ -31790,18 +31790,7 @@ void MainWindow::editPersistentTextChannel(const unsigned int textChannelID) {
 		return;
 	}
 
-	if (true) {
-		openModernEditTextRoomDialog(textChannelID);
-		return;
-	}
-
-	PersistentTextChannel updated = *textChannelIt;
-	if (!promptForPersistentTextChannel(updated, false)) {
-		return;
-	}
-
-	Global::get().sh->upsertTextChannel(updated.textChannelID, updated.name, updated.description, updated.aclChannelID,
-										updated.position, false);
+	openModernEditTextRoomDialog(textChannelID);
 }
 
 void MainWindow::removePersistentTextChannel() {
@@ -31823,21 +31812,7 @@ void MainWindow::removePersistentTextChannel(const unsigned int textChannelID) {
 		return;
 	}
 
-	if (true) {
-		openModernDeleteTextRoomDialog(textChannelID);
-		return;
-	}
-
-	const int result =
-		QMessageBox::question(this, tr("Delete text room"),
-							  tr("Delete text room #%1? Existing history will no longer be visible in this room.")
-								  .arg(textChannelIt->name.toHtmlEscaped()),
-							  QMessageBox::Yes, QMessageBox::No);
-	if (result != QMessageBox::Yes) {
-		return;
-	}
-
-	Global::get().sh->removeTextChannel(textChannelID);
+	openModernDeleteTextRoomDialog(textChannelID);
 }
 
 void MainWindow::editPersistentTextChannelACL() {
@@ -42368,32 +42343,15 @@ void MainWindow::handleFeedbackReportState(const MumbleProto::FeedbackReportStat
 
 	if (msg.accepted()) {
 		const QUrl issueUrl(msg.has_issue_url() ? u8(msg.issue_url()) : QString());
-		if (submission.fromModernShell && true) {
-			if (issueUrl.isValid()) {
-				submission.fallbackUrl = issueUrl;
-			}
-			openModernFeedbackResultDialog(
-				submission, tr("Feedback submitted"),
-				msg.has_issue_number()
-					? tr("GitHub issue #%1 was created.").arg(msg.issue_number())
-					: tr("The GitHub issue was created."),
-				tr("The connected server accepted and forwarded the report."),
-				QStringLiteral("openFeedbackFallbackGitHub"), tr("Open issue"));
-			return;
-		}
-		QMessageBox box(QMessageBox::Information, tr("Feedback submitted"),
-						msg.has_issue_number()
-							? tr("GitHub issue #%1 was created.").arg(msg.issue_number())
-							: tr("The GitHub issue was created."),
-						QMessageBox::Ok, this);
-		QPushButton *openButton = nullptr;
 		if (issueUrl.isValid()) {
-			openButton = box.addButton(tr("Open issue"), QMessageBox::ActionRole);
+			submission.fallbackUrl = issueUrl;
 		}
-		box.exec();
-		if (openButton && box.clickedButton() == openButton) {
-			QDesktopServices::openUrl(issueUrl);
-		}
+		openModernFeedbackResultDialog(
+			submission, tr("Feedback submitted"),
+			msg.has_issue_number() ? tr("GitHub issue #%1 was created.").arg(msg.issue_number())
+								   : tr("The GitHub issue was created."),
+			tr("The connected server accepted and forwarded the report."),
+			QStringLiteral("openFeedbackFallbackGitHub"), tr("Open issue"));
 		return;
 	}
 
@@ -42402,36 +42360,16 @@ void MainWindow::handleFeedbackReportState(const MumbleProto::FeedbackReportStat
 			? u8(msg.error()).trimmed()
 			: tr("The server could not create the GitHub issue.");
 	if (submission.issueBody.isEmpty()) {
-		QMessageBox::warning(this, tr("Feedback not submitted"), error);
-		return;
-	}
-	if (submission.fromModernShell && true) {
 		openModernFeedbackResultDialog(submission, tr("Feedback not submitted"),
-									   tr("The connected server could not create the GitHub issue."), error);
+								   tr("The connected server could not create the GitHub issue."), error);
 		return;
 	}
 	showFeedbackFallback(submission, error);
 }
 
 void MainWindow::showFeedbackFallback(const PendingFeedbackSubmission &submission, const QString &error) {
-	if (true) {
-		openModernFeedbackResultDialog(submission, tr("Feedback fallback ready"),
-									   tr("The connected server cannot submit this report."), error);
-		return;
-	}
-	QMessageBox box(QMessageBox::Warning, tr("Feedback not submitted"),
-					tr("%1\n\nYou can still copy the report or open a prefilled GitHub issue.").arg(error),
-					QMessageBox::Close, this);
-	QPushButton *copyButton = box.addButton(tr("Copy report"), QMessageBox::ActionRole);
-	QPushButton *openButton = box.addButton(tr("Open GitHub"), QMessageBox::ActionRole);
-	box.exec();
-
-	if (box.clickedButton() == copyButton) {
-		QApplication::clipboard()->setText(
-			tr("Title: %1\n\n%2").arg(submission.issueTitle, submission.issueBody));
-	} else if (box.clickedButton() == openButton) {
-		QDesktopServices::openUrl(submission.fallbackUrl);
-	}
+	openModernFeedbackResultDialog(submission, tr("Feedback fallback ready"),
+								   tr("The connected server cannot submit this report."), error);
 }
 
 void MainWindow::on_qaHelpFeedback_triggered() {
@@ -43946,66 +43884,15 @@ void MainWindow::openSelfCommentDialog() {
 }
 
 void MainWindow::changeServerTexture() {
-	if (true) {
-		openModernUserTextureChangeDialog(ClientUser::get(Global::get().uiSession));
-		return;
-	}
-
-	QPair< QByteArray, QImage > choice = openImageFile();
-	if (choice.first.isEmpty())
-		return;
-
-	const QImage &img = choice.second;
-
-	if ((img.height() <= USER_AVATAR_MAX_IMAGE_DIMENSION) && (img.width() <= USER_AVATAR_MAX_IMAGE_DIMENSION)) {
-		Global::get().sh->setUserTexture(Global::get().uiSession, choice.first);
-	} else {
-		QMessageBox::warning(this, tr("Failed to load image"), userAvatarImageTooLargeText());
-	}
+	openModernUserTextureChangeDialog(ClientUser::get(Global::get().uiSession));
 }
 
 void MainWindow::removeServerTexture() {
-	if (true) {
-		openModernUserTextureResetDialog(ClientUser::get(Global::get().uiSession));
-		return;
-	}
-
-	Global::get().sh->setUserTexture(Global::get().uiSession, QByteArray());
+	openModernUserTextureResetDialog(ClientUser::get(Global::get().uiSession));
 }
 
 void MainWindow::selfRegister() {
-	if (handleModernShellLegacyDialogAction(QStringLiteral("self.register"))) {
-		return;
-	}
-
-	ClientUser *p = ClientUser::get(Global::get().uiSession);
-	if (!p)
-		return;
-	if (p->iId >= 0) {
-		Global::get().l->log(Log::PermissionDenied, tr("You are already registered on this server."));
-		return;
-	}
-	if (p->qsHash.isEmpty()) {
-		Global::get().l->log(Log::PermissionDenied, tr("You need a certificate to perform this operation."));
-		return;
-	}
-	if (!(Global::get().pPermissions & (ChanACL::SelfRegister | ChanACL::Write))) {
-		Global::get().l->log(Log::PermissionDenied,
-							 tr("The server is not allowing self-registration for this account."));
-		return;
-	}
-
-	QMessageBox::StandardButton result;
-	result =
-		QMessageBox::question(this, tr("Register yourself as %1").arg(p->qsName),
-							  tr("<p>You are about to register yourself on this server. This action cannot be undone, "
-								 "and your username cannot be changed once this is done. You will forever be known as "
-								 "'%1' on this server.</p><p>Are you sure you want to register yourself?</p>")
-								  .arg(p->qsName.toHtmlEscaped()),
-							  QMessageBox::Yes | QMessageBox::No);
-
-	if (result == QMessageBox::Yes)
-		Global::get().sh->registerUser(p->uiSession);
+	handleModernShellLegacyDialogAction(QStringLiteral("self.register"));
 }
 
 void MainWindow::openAudioStatsDialog() {
