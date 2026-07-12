@@ -101,6 +101,17 @@ QVariant StableListModel::data(const QModelIndex &index, int role) const {
 		case AvatarUrlRole: return row.value(QStringLiteral("avatarUrl"));
 		case EnabledRole: return row.value(QStringLiteral("enabled"), true);
 		case CheckedRole: return row.value(QStringLiteral("checked"));
+		case TimestampRole: return row.value(QStringLiteral("timestamp"));
+		case ReplyActorRole: return row.value(QStringLiteral("replyActor"));
+		case ReplySnippetRole: return row.value(QStringLiteral("replySnippet"));
+		case ReactionsRole: return row.value(QStringLiteral("reactions"));
+		case PreviewRole: return row.value(QStringLiteral("preview"));
+		case OwnRole: return row.value(QStringLiteral("own"));
+		case DeletedRole: return row.value(QStringLiteral("deleted"));
+		case CanReplyRole: return row.value(QStringLiteral("canReply"));
+		case CanReactRole: return row.value(QStringLiteral("canReact"));
+		case CanDeleteRole: return row.value(QStringLiteral("canDelete"));
+		case ScopeTokenRole: return row.value(QStringLiteral("scopeToken"));
 		default: return {};
 	}
 }
@@ -109,7 +120,11 @@ QHash< int, QByteArray > StableListModel::roleNames() const {
 	return { { StableIdRole, "stableId" }, { TitleRole, "title" }, { SubtitleRole, "subtitle" },
 			 { KindRole, "kind" }, { SelectedRole, "selected" }, { StatusRole, "status" },
 			 { PayloadRole, "payload" }, { DepthRole, "depth" }, { UnreadCountRole, "unreadCount" },
-			 { AvatarUrlRole, "avatarUrl" }, { EnabledRole, "enabled" }, { CheckedRole, "checked" } };
+			 { AvatarUrlRole, "avatarUrl" }, { EnabledRole, "enabled" }, { CheckedRole, "checked" },
+			 { TimestampRole, "timestamp" }, { ReplyActorRole, "replyActor" },
+			 { ReplySnippetRole, "replySnippet" }, { ReactionsRole, "reactions" }, { PreviewRole, "preview" },
+			 { OwnRole, "own" }, { DeletedRole, "deleted" }, { CanReplyRole, "canReply" },
+			 { CanReactRole, "canReact" }, { CanDeleteRole, "canDelete" }, { ScopeTokenRole, "scopeToken" } };
 }
 
 QVariantMap StableListModel::get(int row) const {
@@ -129,8 +144,14 @@ void StableListModel::replaceRows(const QVariantList &rows) {
 	for (const QVariant &entry : rows) {
 		QVariantMap row = entry.toMap();
 		row.detach();
-		m_rows.push_back(row);
-		m_rowIds.push_back(row.value(QStringLiteral("id")).toString());
+		const QString stableId = row.value(QStringLiteral("id")).toString();
+		const int existing = m_rowIds.indexOf(stableId);
+		if (existing >= 0) {
+			m_rows[existing] = row;
+		} else {
+			m_rows.push_back(row);
+			m_rowIds.push_back(stableId);
+		}
 	}
 	endResetModel();
 	emit countChanged();
@@ -146,8 +167,13 @@ void StableListModel::synchronizeRows(const QVariantList &rows) {
 		row.detach();
 		const QString stableId = row.value(QStringLiteral("id")).toString();
 		if (!stableId.isEmpty()) {
-			validRows.push_back(row);
-			validIds.push_back(stableId);
+			const int duplicateIndex = validIds.indexOf(stableId);
+			if (duplicateIndex >= 0) {
+				validRows[duplicateIndex] = row;
+			} else {
+				validRows.push_back(row);
+				validIds.push_back(stableId);
+			}
 		}
 	}
 

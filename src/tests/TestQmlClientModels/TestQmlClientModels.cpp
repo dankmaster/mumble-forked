@@ -12,6 +12,8 @@ private slots:
 	void stableRowsUpdateWithoutReset();
 	void synchronizeRowsUsesIncrementalSignals();
 	void stableIdsRemainIndependentFromSourceMaps();
+	void messageRolesExposeStructuredState();
+	void duplicateStableIdsAreCoalesced();
 	void activeScopeAppliesTypedState();
 	void sessionPropertiesOnlyNotifyOnChanges();
 	void commandsRejectEmptyStableIds();
@@ -107,6 +109,50 @@ void TestQmlClientModels::stableIdsRemainIndependentFromSourceMaps() {
 	QCOMPARE(model.rowCount(), 1);
 	QCOMPARE(model.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("voice:1"));
 	QCOMPARE(model.get(0).value(QStringLiteral("title")).toString(), QStringLiteral("Landing"));
+}
+
+void TestQmlClientModels::messageRolesExposeStructuredState() {
+	ChatTimelineModel model;
+	model.upsertRow({ { QStringLiteral("id"), QStringLiteral("message:7") },
+						  { QStringLiteral("title"), QStringLiteral("Alice") },
+						  { QStringLiteral("subtitle"), QStringLiteral("Hello") },
+						  { QStringLiteral("timestamp"), QStringLiteral("12:30") },
+						  { QStringLiteral("replyActor"), QStringLiteral("Bob") },
+						  { QStringLiteral("replySnippet"), QStringLiteral("Earlier") },
+						  { QStringLiteral("reactions"), QVariantList { QVariantMap {
+							  { QStringLiteral("emoji"), QStringLiteral("+") }, { QStringLiteral("count"), 2 } } } },
+						  { QStringLiteral("preview"), QVariantMap {
+							  { QStringLiteral("title"), QStringLiteral("Example") } } },
+						  { QStringLiteral("canReply"), true } });
+
+	const QHash< int, QByteArray > roles = model.roleNames();
+	const auto roleForName = [&roles](const QByteArray &name) {
+		for (auto it = roles.cbegin(); it != roles.cend(); ++it) {
+			if (it.value() == name) return it.key();
+		}
+		return -1;
+	};
+	const QModelIndex row = model.index(0, 0);
+	QCOMPARE(model.data(row, roleForName("timestamp")).toString(), QStringLiteral("12:30"));
+	QCOMPARE(model.data(row, roleForName("replyActor")).toString(), QStringLiteral("Bob"));
+	QCOMPARE(model.data(row, roleForName("reactions")).toList().size(), 1);
+	QCOMPARE(model.data(row, roleForName("preview")).toMap().value(QStringLiteral("title")).toString(),
+			 QStringLiteral("Example"));
+	QVERIFY(model.data(row, roleForName("canReply")).toBool());
+}
+
+void TestQmlClientModels::duplicateStableIdsAreCoalesced() {
+	RoomModel model;
+	model.synchronizeRows({ QVariantMap { { QStringLiteral("id"), QStringLiteral("voice:0:0") },
+										 { QStringLiteral("title"), QStringLiteral("Root voice") } },
+						 QVariantMap { { QStringLiteral("id"), QStringLiteral("voice:0:0") },
+										 { QStringLiteral("title"), QStringLiteral("Root replacement") } } });
+	QCOMPARE(model.rowCount(), 1);
+	QCOMPARE(model.get(0).value(QStringLiteral("title")).toString(), QStringLiteral("Root replacement"));
+
+	model.synchronizeRows({ QVariantMap { { QStringLiteral("id"), QStringLiteral("voice:0:0") } },
+						 QVariantMap { { QStringLiteral("id"), QStringLiteral("text:0:0") } } });
+	QCOMPARE(model.rowCount(), 2);
 }
 
 void TestQmlClientModels::sessionPropertiesOnlyNotifyOnChanges() {

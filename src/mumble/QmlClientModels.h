@@ -118,7 +118,18 @@ public:
 		UnreadCountRole,
 		AvatarUrlRole,
 		EnabledRole,
-		CheckedRole
+		CheckedRole,
+		TimestampRole,
+		ReplyActorRole,
+		ReplySnippetRole,
+		ReactionsRole,
+		PreviewRole,
+		OwnRole,
+		DeletedRole,
+		CanReplyRole,
+		CanReactRole,
+		CanDeleteRole,
+		ScopeTokenRole
 	};
 
 	explicit StableListModel(QObject *parent = nullptr);

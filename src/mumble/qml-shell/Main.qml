@@ -86,19 +86,133 @@ ApplicationWindow {
                     bottomMargin: 20
                     reuseItems: true
                     delegate: Rectangle {
+                        required property string stableId
                         required property string title
                         required property string subtitle
+                        required property string status
+                        required property string avatarUrl
+                        required property string timestamp
+                        required property string replyActor
+                        required property string replySnippet
+                        required property var reactions
+                        required property var preview
+                        required property bool own
+                        required property bool deleted
                         width: Math.min(timeline.width - 56, 680)
-                        height: messageColumn.implicitHeight + 24
+                        height: messageRow.implicitHeight + 24
                         radius: Theme.innerRadius
-                        color: Theme.panel
-                        Column {
-                            id: messageColumn
+                        color: own ? Theme.selected : Theme.panel
+                        RowLayout {
+                            id: messageRow
                             anchors.fill: parent
                             anchors.margins: 12
-                            spacing: 5
-                            Label { text: title || "System"; color: Theme.accent; font.bold: true; font.pixelSize: 11 }
-                            Label { width: parent.width; text: subtitle; color: Theme.textMain; wrapMode: Text.Wrap; font.pixelSize: 12 }
+                            spacing: 10
+                            Rectangle {
+                                Layout.preferredWidth: 36
+                                Layout.preferredHeight: 36
+                                Layout.alignment: Qt.AlignTop
+                                radius: 18
+                                color: Theme.strip
+                                clip: true
+                                Image {
+                                    id: avatarImage
+                                    anchors.fill: parent
+                                    source: avatarUrl
+                                    asynchronous: true
+                                    fillMode: Image.PreserveAspectCrop
+                                    visible: avatarImage.status === Image.Ready
+                                }
+                                Label {
+                                    anchors.centerIn: parent
+                                    visible: avatarUrl.length === 0
+                                    text: (title || "S").slice(0, 1).toUpperCase()
+                                    color: Theme.textStrong
+                                    font.bold: true
+                                }
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 5
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+                                    Label { text: title || qsTr("System"); color: Theme.accent; font.bold: true; font.pixelSize: 11 }
+                                    Label { text: timestamp; color: Theme.textMuted; font.pixelSize: 9; visible: timestamp.length > 0 }
+                                    Item { Layout.fillWidth: true }
+                                    Label { text: status; color: Theme.textMuted; font.pixelSize: 9; visible: status.length > 0 }
+                                }
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: replyColumn.implicitHeight + 12
+                                    visible: replyActor.length > 0 || replySnippet.length > 0
+                                    radius: 6
+                                    color: Theme.strip
+                                    Column {
+                                        id: replyColumn
+                                        anchors.fill: parent
+                                        anchors.margins: 6
+                                        Label { text: replyActor; color: Theme.accent; font.pixelSize: 9; font.bold: true }
+                                        Label { width: parent.width; text: replySnippet; color: Theme.textMuted; font.pixelSize: 10; elide: Text.ElideRight }
+                                    }
+                                }
+                                Label {
+                                    Layout.fillWidth: true
+                                    text: deleted ? qsTr("Message deleted") : subtitle
+                                    color: deleted ? Theme.textMuted : Theme.textMain
+                                    wrapMode: Text.Wrap
+                                    font.pixelSize: 12
+                                    font.italic: deleted
+                                }
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: previewContent.implicitHeight + 16
+                                    visible: preview && ((preview.title || "").length > 0
+                                                         || (preview.url || "").length > 0)
+                                    radius: 8
+                                    color: Theme.strip
+                                    RowLayout {
+                                        id: previewContent
+                                        anchors.fill: parent
+                                        anchors.margins: 8
+                                        spacing: 10
+                                        Image {
+                                            Layout.preferredWidth: 72
+                                            Layout.preferredHeight: 54
+                                            source: preview ? (preview.thumbnailUrl || "") : ""
+                                            asynchronous: true
+                                            fillMode: Image.PreserveAspectCrop
+                                            visible: source.toString().length > 0
+                                        }
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            Label { Layout.fillWidth: true; text: preview ? (preview.title || preview.host || qsTr("Link preview")) : ""; color: Theme.textStrong; font.bold: true; elide: Text.ElideRight }
+                                            Label { Layout.fillWidth: true; text: preview ? (preview.description || preview.url || "") : ""; color: Theme.textMuted; font.pixelSize: 10; elide: Text.ElideRight }
+                                        }
+                                    }
+                                }
+                                Flow {
+                                    Layout.fillWidth: true
+                                    spacing: 5
+                                    visible: reactions && reactions.length > 0
+                                    Repeater {
+                                        model: reactions || []
+                                        delegate: Rectangle {
+                                            required property var modelData
+                                            width: reactionLabel.implicitWidth + 12
+                                            height: 24
+                                            radius: 12
+                                            color: modelData.selfReacted ? Theme.selected : Theme.strip
+                                            Label {
+                                                id: reactionLabel
+                                                anchors.centerIn: parent
+                                                text: (modelData.emoji || "") + " " + (modelData.count || 0)
+                                                color: Theme.textMain
+                                                font.pixelSize: 10
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     Label {
@@ -188,6 +302,7 @@ ApplicationWindow {
                         rightMargin: 10
                         delegate: Rectangle {
                             required property string stableId
+                            required property string scopeToken
                             required property string title
                             required property string subtitle
                             required property string kind
@@ -230,8 +345,8 @@ ApplicationWindow {
                                 id: roomMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
-                                onClicked: uiCommands.selectScope(stableId)
-                                onDoubleClicked: if (kind === "voice") uiCommands.joinVoiceChannel(stableId)
+                                onClicked: uiCommands.selectScope(scopeToken)
+                                onDoubleClicked: if (kind === "voice") uiCommands.joinVoiceChannel(scopeToken)
                             }
                         }
                     }

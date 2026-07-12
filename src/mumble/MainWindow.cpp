@@ -30724,7 +30724,9 @@ void MainWindow::syncQmlShellState() {
 		for (const QVariant &entry : source) {
 			const QVariantMap room = entry.toMap();
 			QVariantMap row;
-			row.insert(QStringLiteral("id"), room.value(QStringLiteral("token")));
+			const QString scopeToken = room.value(QStringLiteral("token")).toString();
+			row.insert(QStringLiteral("id"), QStringLiteral("%1:%2").arg(kind, scopeToken));
+			row.insert(QStringLiteral("scopeToken"), scopeToken);
 			row.insert(QStringLiteral("title"), room.value(QStringLiteral("label")));
 			row.insert(QStringLiteral("subtitle"),
 					   room.value(QStringLiteral("topic"), room.value(QStringLiteral("description"))));
@@ -30776,10 +30778,23 @@ void MainWindow::syncQmlShellState() {
 			messageID = message.value(QStringLiteral("messageKey")).toString();
 		}
 		row.insert(QStringLiteral("id"), messageID);
-		row.insert(QStringLiteral("title"), message.value(QStringLiteral("actorLabel")));
+		row.insert(QStringLiteral("title"),
+				   message.value(QStringLiteral("actor"), message.value(QStringLiteral("actorLabel"))));
 		row.insert(QStringLiteral("subtitle"), message.value(QStringLiteral("bodyText")));
 		row.insert(QStringLiteral("kind"), QStringLiteral("message"));
 		row.insert(QStringLiteral("status"), message.value(QStringLiteral("deliveryState")));
+		row.insert(QStringLiteral("avatarUrl"), message.value(QStringLiteral("avatarUrl")));
+		row.insert(QStringLiteral("timestamp"), message.value(QStringLiteral("timeLabel")));
+		row.insert(QStringLiteral("replyActor"), message.value(QStringLiteral("replyActor")));
+		row.insert(QStringLiteral("replySnippet"), message.value(QStringLiteral("replySnippet")));
+		row.insert(QStringLiteral("reactions"), message.value(QStringLiteral("reactions")));
+		row.insert(QStringLiteral("preview"),
+				   message.value(QStringLiteral("preview"), message.value(QStringLiteral("previewStub"))));
+		row.insert(QStringLiteral("own"), message.value(QStringLiteral("own")));
+		row.insert(QStringLiteral("deleted"), message.value(QStringLiteral("deleted")));
+		row.insert(QStringLiteral("canReply"), message.value(QStringLiteral("canReply")));
+		row.insert(QStringLiteral("canReact"), message.value(QStringLiteral("canReact")));
+		row.insert(QStringLiteral("canDelete"), message.value(QStringLiteral("canDelete")));
 		row.insert(QStringLiteral("source"), message);
 		messageRows.push_back(row);
 	}
@@ -30791,7 +30806,9 @@ void MainWindow::applyQmlShellPatch(const QString &kind, const QVariantMap &patc
 
 	const auto roomRow = [](const QVariantMap &room, const QString &roomKind) {
 		QVariantMap row;
-		row.insert(QStringLiteral("id"), room.value(QStringLiteral("token")));
+		const QString scopeToken = room.value(QStringLiteral("token")).toString();
+		row.insert(QStringLiteral("id"), QStringLiteral("%1:%2").arg(roomKind, scopeToken));
+		row.insert(QStringLiteral("scopeToken"), scopeToken);
 		row.insert(QStringLiteral("title"), room.value(QStringLiteral("label")));
 		row.insert(QStringLiteral("subtitle"),
 				   room.value(QStringLiteral("topic"), room.value(QStringLiteral("description"))));
@@ -30820,11 +30837,23 @@ void MainWindow::applyQmlShellPatch(const QString &kind, const QVariantMap &patc
 		QString messageID = message.value(QStringLiteral("messageId")).toString();
 		if (messageID.isEmpty()) messageID = message.value(QStringLiteral("messageKey")).toString();
 		row.insert(QStringLiteral("id"), messageID);
-		row.insert(QStringLiteral("title"), message.value(QStringLiteral("actorLabel")));
+		row.insert(QStringLiteral("title"),
+				   message.value(QStringLiteral("actor"), message.value(QStringLiteral("actorLabel"))));
 		row.insert(QStringLiteral("subtitle"), message.value(QStringLiteral("bodyText")));
 		row.insert(QStringLiteral("kind"), QStringLiteral("message"));
 		row.insert(QStringLiteral("status"), message.value(QStringLiteral("deliveryState")));
 		row.insert(QStringLiteral("avatarUrl"), message.value(QStringLiteral("avatarUrl")));
+		row.insert(QStringLiteral("timestamp"), message.value(QStringLiteral("timeLabel")));
+		row.insert(QStringLiteral("replyActor"), message.value(QStringLiteral("replyActor")));
+		row.insert(QStringLiteral("replySnippet"), message.value(QStringLiteral("replySnippet")));
+		row.insert(QStringLiteral("reactions"), message.value(QStringLiteral("reactions")));
+		row.insert(QStringLiteral("preview"),
+				   message.value(QStringLiteral("preview"), message.value(QStringLiteral("previewStub"))));
+		row.insert(QStringLiteral("own"), message.value(QStringLiteral("own")));
+		row.insert(QStringLiteral("deleted"), message.value(QStringLiteral("deleted")));
+		row.insert(QStringLiteral("canReply"), message.value(QStringLiteral("canReply")));
+		row.insert(QStringLiteral("canReact"), message.value(QStringLiteral("canReact")));
+		row.insert(QStringLiteral("canDelete"), message.value(QStringLiteral("canDelete")));
 		row.insert(QStringLiteral("source"), message);
 		return row;
 	};
