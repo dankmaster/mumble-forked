@@ -41901,32 +41901,8 @@ void MainWindow::userStateChanged() {
 	}
 }
 
-void MainWindow::on_channelStateChanged(Channel *channel, bool forceUpdateTree) {
-	if (modernShellMinimalSnapshotEnabled() && true) {
-		queueModernShellSnapshotSync();
-		return;
-	}
-
-	const bool changedTreeSelection = channel == pmModel->getChannel(qtvUsers->currentIndex());
-	if (true) {
-		const PersistentChatTarget target = currentPersistentChatTarget();
-		const bool changedActiveVoiceRoom = channel && target.valid && !target.serverLog && !target.directMessage
-											&& target.scope == MumbleProto::Channel && target.scopeID == channel->iId;
-		if (changedTreeSelection) {
-			updateChatBar(false, false);
-		}
-		if (changedTreeSelection || changedActiveVoiceRoom) {
-			publishModernShellRoomStatePatch();
-		}
-	} else if (changedTreeSelection) {
-		updateChatBar();
-	}
-
-	if (forceUpdateTree) {
-		pmModel->forceVisualUpdate();
-	}
-
-	updateServerNavigatorChrome();
+void MainWindow::on_channelStateChanged(Channel *, bool) {
+	queueModernShellSnapshotSync();
 }
 
 void MainWindow::on_qaAudioReset_triggered() {
@@ -43324,28 +43300,8 @@ void MainWindow::highlightWindow() {
  * the selected user/channel in the users treeview.
  */
 void MainWindow::qtvUserCurrentChanged(const QModelIndex &, const QModelIndex &) {
-	if (modernShellMinimalSnapshotEnabled() && true) {
-		setPersistentChatTargetUsesVoiceTree(false);
-		queueModernShellSnapshotSync();
-		return;
-	}
-
-	bool useVoiceTree = false;
-	if (hasPersistentChatCapabilities() && pmModel) {
-		const QModelIndex currentIndex = qtvUsers ? qtvUsers->currentIndex() : QModelIndex();
-		const bool treeOwnsChatTarget =
-			m_persistentChatTargetUsesVoiceTree
-			|| (qtvUsers && (qtvUsers->hasFocus() || (qtvUsers->viewport() && qtvUsers->viewport()->hasFocus())));
-		if (treeOwnsChatTarget && currentIndex.isValid()) {
-			useVoiceTree = pmModel->getChannel(currentIndex) != nullptr;
-			if (!useVoiceTree && m_persistentChatTargetUsesVoiceTree && pmModel->getUser(currentIndex)) {
-				useVoiceTree = true;
-			}
-		}
-	}
-	setPersistentChatTargetUsesVoiceTree(useVoiceTree);
-	updateChatBar();
-	updateServerNavigatorChrome();
+	setPersistentChatTargetUsesVoiceTree(false);
+	queueModernShellSnapshotSync();
 }
 
 void MainWindow::on_persistentChatScopeChanged(int) {
