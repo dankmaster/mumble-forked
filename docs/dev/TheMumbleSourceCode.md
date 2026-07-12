@@ -74,7 +74,7 @@ default configuration file for the Mumble server.
 
 Your main focus should lie on the `src` directory as this is where the bulk of Mumble's source code is living. Directly in `src/` are shared sources
 that are used by the Mumble client as well as by the server that live in `src/mumble` and `src/murmur` respectively. This fork also carries
-`src/screen-helper` for the external screen-share helper process and `src/mumble/modern-shell` for the WebEngine Modern client shell. The remaining
+`src/screen-helper` for the external screen-share helper process and `src/mumble/qml-shell` for the native Qt Quick client. The remaining
 directories within `src` should be somewhat self-explanatory.
 
 The `themes` directory contains all built-in themes that are currently shipped with Mumble. At this point there is only one theme available: the
@@ -103,11 +103,10 @@ as your changes would likely be overwritten by said service.
 - `main.cpp`: This contains the main entry point into the client (the "main" function) in which all command-line arguments are processed and a bunch
   of objects are instantiated and prepared for further use. The main purpose (as far as most developers are concerned) is the instantiation of the
   `MumbleApplication` which mostly is just a `QApplication`. That means that from this point on the program is mainly event-driven.
-- `MainWindow.cpp`: This can be pretty much be considered the heart of the Mumble client. It is responsible for managing the main Mumble UI and also
-  for coordinating all sorts of events that are received and sent. If you are tracing down some functionality, chances are high that the `MainWindow`
-  class is involved in it in one way or another.
-- `modern-shell/`: This fork's WebEngine Modern shell HTML/CSS/JavaScript. It is driven through `ModernShellHost`, `ModernShellBridge`, and
-  controller/state DTOs in the native client.
+- `MainWindow.cpp`: This remains a transitional event-coordination facade for protocol, audio, plugin, and product controllers. New product state
+  belongs in typed controllers and `QAbstractItemModel` implementations rather than visible or hidden widgets.
+- `qml-shell/`: This fork's native Qt Quick product UI. `QmlShellHost` creates the direct `QQuickWindow` and exposes typed C++ controllers/models.
+  WebEngineQuick is lazy and isolated to explicit provider playback; it is not the application shell and carries no app bridge.
 - `UserModel.cpp`: This class is responsible for managing the in-memory representation of the channel and user tree. All user and channel objects on
   the client are created here.
 - `Messages.cpp`: This class implements all Protobuf message handling that is performed on the client-side. Technically all these functions belong to
@@ -124,12 +123,8 @@ as your changes would likely be overwritten by said service.
   Mumble.
 - `Global.cpp`: The `Global` class is a singleton accessed via `Global::get()` and it holds a variety of shared data used throughout the client.
 
-For many UI elements, we use `.ui` files which are XML-files that describe the UI elements in a way that is understood by
-[Qt Designer](https://doc.qt.io/qt-5/qtdesigner-manual.html). With this tool, you can edit the elements in a WYSIWYG fashion (at least for the most
-part). In any case, it is a great tool, when you are trying to figure out what will happen once you click a certain button in a given UI element. Just
-open the element in Qt Designer, check the button's name and search for that in the corresponding `.cpp` implementation. Note that we are using
-implicit signal-connecting which is based on a special naming scheme of slots in a given UI class (e.g. `on_xy_actived` where `xy` is the name of the
-corresponding UI element).
+The fork desktop product UI has no `.ui` files under `src/mumble`. Build product surfaces as QML components backed by typed C++ state. Qt Widgets is
+kept only for the documented operating-system and third-party-plugin allowlist.
 
 When creating or changing existing UI elements, always consider the [accessibility checklist](/docs/dev/Accessibility.md).
 

@@ -26,8 +26,9 @@ The fork keeps the normal Mumble foundation:
 
 The Modern shell is the visible fork client path. It is a native Qt Quick client
 surface built around persistent chat, rich media, direct messages, and modern
-dialogs. Classic Qt Widgets UI remains as migration scaffolding and for narrow
-surfaces that have not yet been fully replaced.
+dialogs. No classic Qt Widgets product layout or hidden compatibility view is
+created. Qt Widgets remains linked only for documented operating-system and
+third-party-plugin surfaces.
 
 Current capabilities:
 
@@ -45,8 +46,7 @@ Current capabilities:
 - local disk preview cache with selective session refresh for richer providers
 - theme, accent, density, dialog, and context-menu polish for the Modern shell
 - update banners, feedback, and crash-report handoff flows that avoid publishing private local context by default
-- minimal Modern-shell failure notice instead of falling back to a full classic
-  client layout in WebEngine-enabled builds
+- a minimal Qt Quick startup failure notice instead of a classic client fallback
 
 Tracked public screenshot assets:
 
@@ -300,7 +300,7 @@ canonical fork client lane because it carries the Modern shell.
 
 Current build/release features:
 
-- static Windows client/server validation in `CI`
+- static Windows server validation in `CI`
 - Linux server build and one practical Linux `ctest` lane in `CI`
 - separate `Windows Shared Client Installer` workflow for the WebEngine payload
 - reusable `Windows Shared Build Environment` workflow/archive

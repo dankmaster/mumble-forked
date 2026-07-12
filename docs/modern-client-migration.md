@@ -34,23 +34,18 @@ The migration does not change the Mumble protocol, fork feature protocol,
 plugin ABI, certificate format, plugin settings format, or compatibility with
 ordinary Mumble clients and servers.
 
-## Remaining Stabilization Work
+## Source Cutover Complete
 
-The old WebEngine frontend sources and bridge classes are no longer part of the
-desktop client target. Some source files remain in the tree as deletion debt
-until their cross-platform replacement and packaging gates are green.
+The HTML/CSS/JavaScript product shell, WebChannel bridge, snapshot/hydration
+transport, WebEngine widget hosts, classic layout, and Mumble-owned widget
+dialogs have been removed. WebEngine references are limited to the isolated
+Qt Quick provider player. The static Windows client lane is retired because
+Qt WebEngine is a required shared dependency for that player.
 
-Remaining cleanup is tracked by `scripts/windows/verify-modern-only.ps1`:
-
-- delete unreachable classic widget code and pointer aliases from
-  `MainWindow`;
-- remove the old HTML/CSS/JS shell, WebChannel serialization, snapshot and
-  hydration bridge, and WebEngine widget hosts;
-- retain WebEngine references only in the Qt Quick media allowlist;
-- finish native QML screen-share presentation and watch-together protocol
-  synchronization;
-- complete accessibility, screenshot, performance, installer-upgrade, Linux,
-  and macOS gates.
+Release validation is split across the shared Windows client/installer lane and
+the Qt Quick Linux/macOS desktop workflow. Performance, connected-state,
+accessibility, screenshot, and installer-upgrade evidence is produced by the
+typed automation and packaging gates rather than by a fallback frontend.
 
 Run the inventory locally with:
 
@@ -58,5 +53,4 @@ Run the inventory locally with:
 .\scripts\windows\verify-modern-only.ps1
 ```
 
-`-Strict` intentionally stays red until every remaining stabilization item is
-removed.
+`-Strict` is the source-level release gate and must remain green.

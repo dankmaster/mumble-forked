@@ -110,9 +110,9 @@ If you are running a server for the fork features:
 4. Read [`docs/status-and-roadmap.md`](docs/status-and-roadmap.md) before
    depending on experimental features such as screen sharing or speech cleanup.
 
-If you are hacking on the client, build the shared/WebEngine lane and keep the
-Modern shell as the product surface. Classic Qt Widgets UI is migration
-scaffolding in this fork, not the direction for new user-facing work.
+If you are hacking on the client, build the shared Qt Quick/WebEngineQuick lane.
+The native QML shell is the only product surface; Qt Widgets is restricted to
+the documented operating-system and third-party-plugin allowlist.
 
 ## Building
 

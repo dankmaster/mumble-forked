@@ -14,8 +14,8 @@ product direction is now modern-only:
 
 - the native Qt Quick Modern shell is the visible client shell for the forked client
 - classic layout switching is no longer a product path for that client
-- Qt Widgets remains only for narrow operating-system and plugin-owned surfaces
-  while unreachable compatibility code is removed
+- Qt Widgets remains only for narrow operating-system and plugin-owned surfaces;
+  no hidden compatibility view is part of the product client
 - server compatibility for upstream/native Mumble clients remains a product
   requirement: ordinary voice, channel membership, ACLs, registration,
   certificates, and basic text should keep working where practical
@@ -60,16 +60,15 @@ The main feature surface today is:
 The next work should make the modern-only stance true in the code, not just in
 the UI:
 
-- finish deleting unreachable classic widget and Web-shell source after the
-  Qt Quick cross-platform and packaging gates are green
+- keep the removed classic widget and Web-shell source out of every desktop
+  build and package
 - keep WebEngine lazy and isolated to explicit interactive provider playback;
   it must not carry application state or use WebChannel
 - keep server-side native-client compatibility boring and explicit: do not
   remove baseline `Version`, session/channel, ACL, registration/certificate, or
   transient `TextMessage` behavior just because the fork desktop client is
   modern-only
-- keep server-log rendering on a direct typed-model path instead of rebuilding
-  and mirroring the classic `QTextDocument` path
+- keep server-log rendering on a direct typed-model path
 - keep direct messages honest: persistent DM history is supported only when the
   server advertises it and both users have registered identities; otherwise the
   Modern tray uses private non-persistent text-message mode

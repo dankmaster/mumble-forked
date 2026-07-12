@@ -1,16 +1,17 @@
 # Windows Client Builds
 
-This fork uses two GitHub workflow paths for Windows client coverage:
+This fork separates the static Windows server gate from the shared Qt Quick
+desktop-client gate:
 
 - Workflow: `CI`
 - File: [ci.yml](../.github/workflows/ci.yml)
 - Trigger: push, pull request, and manual dispatch
 - Static Windows runner: `windows-2025-vs2026`
-- Purpose: required PR/build validation for the static Windows client/server lane
+- Purpose: required PR/build validation for the static Windows server lane
 
-The heavier shared/WebEngine client lane is kept separate from the normal PR
-gate, but it is the canonical fork client payload because it includes the
-Modern/WebEngine shell:
+The shared Qt Quick client lane is the canonical fork desktop payload. It links
+Qt Widgets for the native allowlist and uses lazy WebEngineQuick only for
+explicit provider playback:
 
 - Workflow: `Windows Shared Client Installer`
 - File: [windows-shared-client.yml](../.github/workflows/windows-shared-client.yml)
@@ -38,7 +39,7 @@ There is also a small human-facing installer workflow for this fork:
 
 ## Recommended use
 
-- Use `CI` for the normal pull-request gate and static Windows artifact validation.
+- Use `CI` for the normal pull-request gate and static Windows server artifact validation.
 - Use `Windows Shared Client Installer` when you need the shared/WebEngine payload
   under `build-shared-webengine\shared-webengine-stage` or downloadable Windows
   shared client artifacts.
