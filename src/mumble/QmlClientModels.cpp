@@ -271,6 +271,33 @@ void StableListModel::clear() {
 	emit countChanged();
 }
 
+void ParticipantModel::updatePresence(const QString &sessionId, const QString &talkState, const QString &talkLabel,
+							  const QString &talkTone, const bool talking, const bool isSelf,
+							  const QVariantList &badges, const QVariantList &statuses) {
+	const QString id = sessionId.trimmed();
+	if (id.isEmpty()) return;
+
+	for (int rowIndex = 0; rowIndex < rowCount(); ++rowIndex) {
+		QVariantMap row = get(rowIndex);
+		if (row.value(QStringLiteral("id")).toString() != id) continue;
+		const QVariantMap previousRow = row;
+
+		row.insert(QStringLiteral("status"), talkState);
+		QVariantMap source = row.value(QStringLiteral("source")).toMap();
+		source.insert(QStringLiteral("talkState"), talkState);
+		source.insert(QStringLiteral("talkLabel"), talkLabel);
+		source.insert(QStringLiteral("talkTone"), talkTone);
+		source.insert(QStringLiteral("talking"), talking);
+		source.insert(QStringLiteral("isSelf"), isSelf);
+		source.insert(QStringLiteral("badges"), badges);
+		source.insert(QStringLiteral("statuses"), statuses);
+		row.insert(QStringLiteral("source"), source);
+		if (row == previousRow) return;
+		upsertRow(row);
+		return;
+	}
+}
+
 void AsyncOperationModel::startOperation(const QString &operationId, const QString &title, const QString &subtitle,
 										 const bool cancellable) {
 	QVariantMap payload { { QStringLiteral("progress"), -1 }, { QStringLiteral("indeterminate"), true },

@@ -13,6 +13,7 @@ private slots:
 	void synchronizeRowsUsesIncrementalSignals();
 	void stableIdsRemainIndependentFromSourceMaps();
 	void messageRolesExposeStructuredState();
+	void participantPresenceUpdatesOnlyTypedRoles();
 	void duplicateStableIdsAreCoalesced();
 	void activeScopeAppliesTypedState();
 	void sessionPropertiesOnlyNotifyOnChanges();
@@ -146,6 +147,42 @@ void TestQmlClientModels::messageRolesExposeStructuredState() {
 	QCOMPARE(model.data(row, roleForName("preview")).toMap().value(QStringLiteral("title")).toString(),
 			 QStringLiteral("Example"));
 	QVERIFY(model.data(row, roleForName("canReply")).toBool());
+}
+
+void TestQmlClientModels::participantPresenceUpdatesOnlyTypedRoles() {
+	ParticipantModel model;
+	QSignalSpy changedSpy(&model, &QAbstractItemModel::dataChanged);
+	model.upsertRow({ { QStringLiteral("id"), QStringLiteral("7") },
+					  { QStringLiteral("title"), QStringLiteral("Alice") },
+					  { QStringLiteral("avatarUrl"), QStringLiteral("image://avatars/7") },
+					  { QStringLiteral("status"), QStringLiteral("passive") },
+					  { QStringLiteral("source"), QVariantMap {
+							{ QStringLiteral("session"), 7 }, { QStringLiteral("label"), QStringLiteral("Alice") },
+							{ QStringLiteral("talkState"), QStringLiteral("passive") } } } });
+	changedSpy.clear();
+
+	const QVariantList badges { QStringLiteral("Priority speaker") };
+	const QVariantList statuses { QVariantMap { { QStringLiteral("id"), QStringLiteral("talking") } } };
+	model.updatePresence(QStringLiteral(" 7 "), QStringLiteral("talking"), QStringLiteral("Talking"),
+						 QStringLiteral("success"), true, false, badges, statuses);
+	QCOMPARE(changedSpy.count(), 1);
+	const QVariantMap row = model.get(0);
+	QCOMPARE(row.value(QStringLiteral("title")).toString(), QStringLiteral("Alice"));
+	QCOMPARE(row.value(QStringLiteral("avatarUrl")).toString(), QStringLiteral("image://avatars/7"));
+	QCOMPARE(row.value(QStringLiteral("status")).toString(), QStringLiteral("talking"));
+	const QVariantMap source = row.value(QStringLiteral("source")).toMap();
+	QCOMPARE(source.value(QStringLiteral("label")).toString(), QStringLiteral("Alice"));
+	QCOMPARE(source.value(QStringLiteral("talkLabel")).toString(), QStringLiteral("Talking"));
+	QCOMPARE(source.value(QStringLiteral("talkTone")).toString(), QStringLiteral("success"));
+	QVERIFY(source.value(QStringLiteral("talking")).toBool());
+	QCOMPARE(source.value(QStringLiteral("badges")).toList(), badges);
+	model.updatePresence(QStringLiteral("7"), QStringLiteral("talking"), QStringLiteral("Talking"),
+						 QStringLiteral("success"), true, false, badges, statuses);
+	QCOMPARE(changedSpy.count(), 1);
+
+	model.updatePresence(QStringLiteral("99"), QStringLiteral("talking"), QString(), QString(), true, false, {}, {});
+	QCOMPARE(model.rowCount(), 1);
+	QCOMPARE(changedSpy.count(), 1);
 }
 
 void TestQmlClientModels::duplicateStableIdsAreCoalesced() {

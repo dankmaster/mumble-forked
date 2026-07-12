@@ -174,6 +174,9 @@ class ParticipantModel final : public StableListModel {
 	Q_OBJECT
 public:
 	using StableListModel::StableListModel;
+	void updatePresence(const QString &sessionId, const QString &talkState, const QString &talkLabel,
+						const QString &talkTone, bool talking, bool isSelf, const QVariantList &badges,
+						const QVariantList &statuses);
 };
 
 class ChatTimelineModel final : public StableListModel {

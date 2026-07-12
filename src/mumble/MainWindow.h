@@ -22,12 +22,10 @@
 #include <QtNetwork/QAbstractSocket>
 #include <QtWidgets/QMainWindow>
 #include <QtWidgets/QApplication>
-#include <QtWidgets/QDockWidget>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QMenuBar>
-#include <QtWidgets/QToolBar>
 #include <QtWidgets/QVBoxLayout>
 
 #include "ACL.h"
@@ -43,7 +41,6 @@
 #include "Settings.h"
 #include "UnresolvedServerAddress.h"
 #include "Usage.h"
-#include "UserView.h"
 
 #include <memory>
 #include <optional>
@@ -220,8 +217,6 @@ public:
 	GlobalShortcut *gsCycleListenerAttenuationMode, *gsListenerAttenuationUp, *gsListenerAttenuationDown;
 	GlobalShortcut *gsAdaptivePush;
 
-	DockTitleBar *dtbLogDockTitle  = nullptr;
-	DockTitleBar *dtbChatDockTitle = nullptr;
 
 	MumbleProto::Reject_RejectType rtLast;
 	bool bRetryServer;
@@ -244,7 +239,6 @@ public:
 	void recheckTTS();
 	void msgBox(QString msg);
 	void setOnTop(bool top);
-	void setShowDockTitleBars(bool doShow);
 	void updateAudioToolTips();
 	void updateUserModel();
 	void focusNextMainWidget();
@@ -963,8 +957,6 @@ protected:
 	QTimer *m_modernShellPatchCoalesceTimer                = nullptr;
 	bool m_modernShellRoomStatePatchPending               = false;
 	QVariantMap m_modernShellCoalescedRoomPatch;
-	QHash< QString, QVariantMap > m_modernShellCoalescedPresencePatches;
-	QStringList m_modernShellCoalescedPresenceOrder;
 	bool m_modernShellSnapshotPendingAfterNativeMoveResize = false;
 	QHash< int, QString > m_modernAclRegisteredUserNames;
 	bool m_modernAclUserListRequestPending = false;

@@ -4,12 +4,8 @@
 // Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
 #include "MainWindow.h"
-#include "UserView.h"
-
-#include <QtWidgets/QDockWidget>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QMenuBar>
-#include <QtWidgets/QToolBar>
 
 #include "ACL.h"
 #include "About.h"
@@ -2103,301 +2099,6 @@ ChromePaletteColors buildChromePalette(const QPalette &palette) {
 	return count == 1 ? QObject::tr("%1 person here").arg(countLabel) : QObject::tr("%1 people here").arg(countLabel);
 }
 
-QModelIndex resolveTreeViewportIndex(const QTreeView *view, const QPoint &viewportPos) {
-	if (!view || !view->viewport() || !view->model() || viewportPos.y() < 0
-		|| viewportPos.y() >= view->viewport()->height()) {
-		return QModelIndex();
-	}
-
-	QModelIndex idx = view->indexAt(viewportPos);
-	if (idx.isValid()) {
-		return idx;
-	}
-
-	const int viewportWidth = view->viewport()->width();
-	if (viewportWidth <= 0) {
-		return QModelIndex();
-	}
-
-	const int probeXs[] = { qBound(0, viewportPos.x(), viewportWidth - 1),
-							qBound(0, viewportWidth / 2, viewportWidth - 1),
-							qBound(0, viewportWidth - 12, viewportWidth - 1), qBound(0, 12, viewportWidth - 1) };
-	for (const int probeX : probeXs) {
-		idx = view->indexAt(QPoint(probeX, viewportPos.y()));
-		if (idx.isValid()) {
-			return idx;
-		}
-	}
-
-	for (int probeX = 4; probeX < viewportWidth; probeX += 24) {
-		idx = view->indexAt(QPoint(probeX, viewportPos.y()));
-		if (idx.isValid()) {
-			return idx;
-		}
-	}
-
-	return QModelIndex();
-}
-
-class PersistentChatScopeListDelegate : public QStyledItemDelegate {
-public:
-	explicit PersistentChatScopeListDelegate(QObject *parent = nullptr) : QStyledItemDelegate(parent) {}
-
-	QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const Q_DECL_OVERRIDE {
-		QSize hint = QStyledItemDelegate::sizeHint(option, index);
-		if (!index.isValid()) {
-			return hint;
-		}
-
-		return QSize(hint.width(), std::max(hint.height(), QFontMetrics(option.font).height() + 10));
-	}
-
-	void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const Q_DECL_OVERRIDE {
-		if (!index.isValid()) {
-			return;
-		}
-
-		QStyleOptionViewItem opt(option);
-		initStyleOption(&opt, index);
-
-		const QPalette effectivePalette = opt.widget ? opt.widget->palette() : opt.palette;
-		const bool selected             = opt.state.testFlag(QStyle::State_Selected);
-		const bool hovered              = opt.state.testFlag(QStyle::State_MouseOver);
-		const QString label             = index.data(PersistentChatLabelRole).toString().isEmpty()
-								  ? opt.text
-								  : index.data(PersistentChatLabelRole).toString();
-		const qulonglong unreadCount = index.data(PersistentChatUnreadRole).toULongLong();
-		const int scopeValue         = index.data(PersistentChatScopeRole).toInt();
-		const bool utilityRow =
-			scopeValue == LocalServerLogScope || scopeValue == static_cast< int >(MumbleProto::ServerGlobal);
-		const bool textChannelRow   = scopeValue == static_cast< int >(MumbleProto::TextChannel);
-		const bool directMessageRow = scopeValue == LocalDirectMessageScope;
-		const bool voiceChannelRow  = scopeValue == static_cast< int >(MumbleProto::Channel);
-		static const QIcon s_voiceRoomIcon(QLatin1String("skin:priority_speaker.svg"));
-
-		QString chipText = QStringLiteral("#");
-		switch (scopeValue) {
-			case LocalServerLogScope:
-				chipText = QObject::tr("LOG");
-				break;
-			case LocalDirectMessageScope:
-				chipText = QObject::tr("DM");
-				break;
-			case static_cast< int >(MumbleProto::ServerGlobal):
-				chipText = QObject::tr("ALL");
-				break;
-			case static_cast< int >(MumbleProto::Channel):
-				chipText = QObject::tr("VC");
-				break;
-			case static_cast< int >(MumbleProto::TextChannel):
-				chipText = QObject::tr("TXT");
-				break;
-			default:
-				break;
-		}
-
-		if (const std::optional< UiThemeTokens > tokens = activeUiThemeTokens(); tokens) {
-			QColor backgroundColor(Qt::transparent);
-			if (selected) {
-				backgroundColor = alphaColor(tokens->surface1, 0.42);
-			} else if (hovered) {
-				backgroundColor = alphaColor(tokens->surface1, 0.24);
-			}
-			const QColor textColor =
-				selected ? tokens->textPrimary
-						 : ((hovered || unreadCount > 0 || utilityRow || voiceChannelRow || directMessageRow)
-								? tokens->textPrimary
-								: tokens->textSecondary);
-			const QColor secondaryTextColor = selected ? textColor : tokens->textMuted;
-			const QColor unreadFillColor    = tokens->accentSubtle;
-			const QColor unreadTextColor    = tokens->accent;
-			const QColor chipFillColor      = scopeValue == LocalServerLogScope
-											 ? alphaColor(tokens->yellow, 0.82)
-											 : (scopeValue == static_cast< int >(MumbleProto::ServerGlobal)
-													? alphaColor(tokens->accent, 0.18)
-													: (textChannelRow ? (selected ? alphaColor(tokens->accent, 0.18)
-																				  : alphaColor(tokens->surface1, 0.62))
-																	  : QColor(Qt::transparent)));
-			const QColor chipTextColor =
-				scopeValue == LocalServerLogScope || scopeValue == static_cast< int >(MumbleProto::ServerGlobal)
-					? tokens->crust
-					: (textChannelRow ? (selected ? tokens->accent : tokens->textMuted) : secondaryTextColor);
-			const QColor voiceIconColor = selected ? tokens->accent : secondaryTextColor;
-
-			QRect rowRect = option.rect.adjusted(4, 1, -4, -1);
-			painter->save();
-			painter->setRenderHint(QPainter::Antialiasing, true);
-			if (rowRect.isValid() && backgroundColor.alpha() > 0) {
-				painter->setPen(Qt::NoPen);
-				painter->setBrush(backgroundColor);
-				painter->drawRoundedRect(rowRect, 8.0f, 8.0f);
-			}
-			if (selected && rowRect.isValid()) {
-				const QRect accentRect(rowRect.left(), rowRect.top() + 3, 3, rowRect.height() - 6);
-				painter->setPen(Qt::NoPen);
-				painter->setBrush(tokens->accent);
-				painter->drawRoundedRect(accentRect, 1.5f, 1.5f);
-			}
-
-			QFont chipFont(opt.font);
-			chipFont.setBold(true);
-			chipFont.setPointSizeF(std::max(chipFont.pointSizeF() - 1.0, 8.0));
-			const QFontMetrics chipMetrics(chipFont);
-
-			int x = rowRect.left() + 8;
-			if (voiceChannelRow) {
-				const QRect iconRect(x, rowRect.center().y() - 6, 12, 12);
-				painter->drawPixmap(iconRect.topLeft(),
-									tintedIconPixmap(s_voiceRoomIcon, iconRect.size(), voiceIconColor));
-				x = iconRect.right() + 8;
-			} else {
-				const int chipWidth = std::max(20, chipMetrics.horizontalAdvance(chipText) + 10);
-				const QRect chipRect(x, rowRect.center().y() - 9, chipWidth, 18);
-				if (chipFillColor.alpha() > 0) {
-					painter->setPen(Qt::NoPen);
-					painter->setBrush(chipFillColor);
-					painter->drawRoundedRect(chipRect, 4.0f, 4.0f);
-				}
-				painter->setPen(chipTextColor);
-				painter->setFont(chipFont);
-				painter->drawText(chipRect, Qt::AlignCenter, chipText);
-				x = chipRect.right() + 8;
-			}
-
-			int textRight = rowRect.right() - 8;
-			if (unreadCount > 0) {
-				const QString unreadText = QString::number(unreadCount);
-				const int unreadWidth    = chipMetrics.horizontalAdvance(unreadText) + 12;
-				const QRect unreadRect(textRight - unreadWidth, rowRect.center().y() - 9, unreadWidth, 18);
-				painter->setPen(Qt::NoPen);
-				painter->setBrush(unreadFillColor);
-				painter->drawRoundedRect(unreadRect, 10.0f, 10.0f);
-				painter->setPen(unreadTextColor);
-				painter->drawText(unreadRect, Qt::AlignCenter, unreadText);
-				textRight = unreadRect.left() - 6;
-			}
-
-			const QRect textRect(x, rowRect.top(), std::max(18, textRight - x), rowRect.height());
-			QFont titleFont(opt.font);
-			titleFont.setBold(selected || utilityRow || unreadCount > 0);
-			painter->setFont(titleFont);
-			painter->setPen(textChannelRow && !selected && !hovered && unreadCount == 0 ? tokens->textSecondary
-																						: textColor);
-			painter->drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft,
-							  QFontMetrics(titleFont).elidedText(label.simplified(), Qt::ElideRight, textRect.width()));
-			painter->restore();
-			return;
-		}
-
-		const ChromePaletteColors chrome = buildChromePalette(effectivePalette);
-
-		const QColor utilityRowColor =
-			mixColors(effectivePalette.color(QPalette::Window), chrome.textColor, chrome.darkTheme ? 0.10 : 0.04);
-		const QColor channelRowColor =
-			mixColors(effectivePalette.color(QPalette::Window), chrome.textColor, chrome.darkTheme ? 0.04 : 0.02);
-		const QColor channelHoverColor = mixColors(channelRowColor, chrome.textColor, chrome.darkTheme ? 0.03 : 0.02);
-		const QColor utilityOutlineColor =
-			mixColors(chrome.borderColor, chrome.textColor, chrome.darkTheme ? 0.12 : 0.05);
-		const QColor rowFillColor =
-			selected
-				? (utilityRow ? mixColors(utilityRowColor, chrome.selectedColor, chrome.darkTheme ? 0.22 : 0.14)
-							  : mixColors(channelRowColor, chrome.accentColor, chrome.darkTheme ? 0.10 : 0.06))
-				: (hovered ? (utilityRow ? mixColors(utilityRowColor, chrome.textColor, chrome.darkTheme ? 0.04 : 0.03)
-										 : channelHoverColor)
-						   : (utilityRow ? utilityRowColor : QColor(Qt::transparent)));
-		const QColor rowOutlineColor =
-			selected ? mixColors(chrome.borderColor, chrome.accentColor, chrome.darkTheme ? 0.30 : 0.14)
-					 : (utilityRow ? utilityOutlineColor : QColor(Qt::transparent));
-		const QColor textColor =
-			selected ? chrome.textColor
-					 : ((textChannelRow || voiceChannelRow) && unreadCount == 0
-							? mixColors(chrome.textColor, chrome.panelColor, chrome.darkTheme ? 0.10 : 0.05)
-							: chrome.textColor);
-		const QColor mutedTextColor =
-			selected ? chrome.textColor
-					 : ((textChannelRow || voiceChannelRow)
-							? mixColors(chrome.textColor, chrome.panelColor, chrome.darkTheme ? 0.18 : 0.10)
-							: chrome.mutedTextColor);
-		const QColor chipFillColor =
-			selected
-				? (textChannelRow ? mixColors(chrome.selectedColor, chrome.panelColor, chrome.darkTheme ? 0.22 : 0.14)
-								  : mixColors(chrome.selectedColor, chrome.textColor, chrome.darkTheme ? 0.08 : 0.05))
-				: (utilityRow
-					   ? mixColors(utilityRowColor, chrome.textColor, chrome.darkTheme ? 0.12 : 0.06)
-					   : (textChannelRow ? mixColors(channelRowColor, chrome.textColor, chrome.darkTheme ? 0.16 : 0.08)
-										 : QColor(Qt::transparent)));
-		const QColor chipTextColor = textChannelRow ? (selected ? chrome.selectedTextColor : mutedTextColor)
-													: (selected ? chrome.textColor : mutedTextColor);
-		const QColor unreadFillColor =
-			selected ? mixColors(chrome.selectedColor, chrome.selectedTextColor, chrome.darkTheme ? 0.16 : 0.10)
-					 : mixColors(chrome.selectedColor, utilityRow ? utilityRowColor : channelRowColor,
-								 chrome.darkTheme ? 0.44 : 0.28);
-		const QColor unreadTextColor = selected ? chrome.selectedTextColor : chrome.textColor;
-		const QColor voiceIconColor  = selected ? chrome.accentColor : mutedTextColor;
-
-		QRect rowRect = option.rect.adjusted(4, 1, -4, -1);
-		painter->save();
-		painter->setRenderHint(QPainter::Antialiasing, true);
-		if (rowRect.isValid() && (selected || hovered || utilityRow)) {
-			painter->setPen(rowOutlineColor.alpha() == 0 ? Qt::NoPen : QPen(rowOutlineColor, 1.0));
-			painter->setBrush(rowFillColor);
-			painter->drawRoundedRect(rowRect, 10.0f, 10.0f);
-		}
-		if (selected && rowRect.isValid()) {
-			const QRect accentRect(rowRect.left(), rowRect.top() + 3, 3, rowRect.height() - 6);
-			painter->setPen(Qt::NoPen);
-			painter->setBrush(chrome.accentColor);
-			painter->drawRoundedRect(accentRect, 1.5f, 1.5f);
-		}
-
-		QFont chipFont(opt.font);
-		chipFont.setBold(true);
-		chipFont.setPointSizeF(std::max(chipFont.pointSizeF() - 1.0, 8.0));
-		const QFontMetrics chipMetrics(chipFont);
-
-		int x = rowRect.left() + 8;
-		if (voiceChannelRow) {
-			const QRect iconRect(x, rowRect.center().y() - 6, 12, 12);
-			painter->drawPixmap(iconRect.topLeft(), tintedIconPixmap(s_voiceRoomIcon, iconRect.size(), voiceIconColor));
-			x = iconRect.right() + 8;
-		} else {
-			const int chipWidth = std::max(20, chipMetrics.horizontalAdvance(chipText) + 10);
-			const QRect chipRect(x, rowRect.center().y() - 9, chipWidth, 18);
-			if (chipFillColor.alpha() > 0) {
-				painter->setPen(Qt::NoPen);
-				painter->setBrush(chipFillColor);
-				painter->drawRoundedRect(chipRect, 4.0f, 4.0f);
-			}
-			painter->setPen(chipTextColor);
-			painter->setFont(chipFont);
-			painter->drawText(chipRect, Qt::AlignCenter, chipText);
-			x = chipRect.right() + 8;
-		}
-
-		int textRight = rowRect.right() - 8;
-		if (unreadCount > 0) {
-			const QString unreadText = QString::number(unreadCount);
-			const int unreadWidth    = chipMetrics.horizontalAdvance(unreadText) + 12;
-			const QRect unreadRect(textRight - unreadWidth, rowRect.center().y() - 9, unreadWidth, 18);
-			painter->setPen(Qt::NoPen);
-			painter->setBrush(unreadFillColor);
-			painter->drawRoundedRect(unreadRect, 9.0f, 9.0f);
-			painter->setPen(unreadTextColor);
-			painter->drawText(unreadRect, Qt::AlignCenter, unreadText);
-			textRight = unreadRect.left() - 6;
-		}
-
-		const QRect textRect(x, rowRect.top(), std::max(18, textRight - x), rowRect.height());
-		QFont titleFont(opt.font);
-		titleFont.setBold(selected || utilityRow || unreadCount > 0);
-		painter->setFont(titleFont);
-		painter->setPen(textColor);
-		painter->drawText(textRect, Qt::AlignVCenter | Qt::AlignLeft,
-						  QFontMetrics(titleFont).elidedText(label.simplified(), Qt::ElideRight, textRect.width()));
-		painter->restore();
-	}
-};
-
 #ifdef Q_OS_WIN
 void applyNativeTitleBarTheme(QWidget *widget) {
 	applyUiThemeNativeTitleBar(widget);
@@ -3292,43 +2993,6 @@ QString trimTrailingUrlPunctuation(QString url) {
 	}
 
 	return url;
-}
-
-int countVisibleUserTreeRows(const QTreeView *tree, const QModelIndex &parent = QModelIndex()) {
-	if (!tree || !tree->model()) {
-		return 0;
-	}
-
-	int visibleRows                 = 0;
-	const QAbstractItemModel *model = tree->model();
-	const int rowCount              = model->rowCount(parent);
-	for (int row = 0; row < rowCount; ++row) {
-		if (tree->isRowHidden(row, parent)) {
-			continue;
-		}
-
-		const QModelIndex index = model->index(row, 0, parent);
-		if (!index.isValid()) {
-			continue;
-		}
-
-		++visibleRows;
-		if (tree->isExpanded(index)) {
-			visibleRows += countVisibleUserTreeRows(tree, index);
-		}
-	}
-
-	return visibleRows;
-}
-
-void setDockSplitterHandleWidth(QWidget *root, int width) {
-	if (!root) {
-		return;
-	}
-
-	for (QSplitter *splitter : root->findChildren< QSplitter * >()) {
-		splitter->setHandleWidth(width);
-	}
 }
 
 QString normalizedYouTubeHost(QString host) {
@@ -19254,21 +18918,13 @@ void MainWindow::publishModernShellTalkState(const ClientUser *user) {
 		return;
 	}
 
-	QVariantMap state;
-	state.insert(QStringLiteral("session"), static_cast< qulonglong >(user->uiSession));
-	state.insert(QStringLiteral("participantKey"),
-				 QStringLiteral("user:%1").arg(static_cast< qulonglong >(user->uiSession)));
-	state.insert(QStringLiteral("isSelf"), user->uiSession == Global::get().uiSession);
-	state.insert(QStringLiteral("talkState"), modernShellTalkStateKey(user));
-	state.insert(QStringLiteral("talkLabel"), modernShellTalkStateLabel(user));
-	state.insert(QStringLiteral("talkTone"), modernShellTalkStateTone(user));
-	state.insert(QStringLiteral("talking"), modernShellEffectiveTalkState(user) != Settings::Passive);
-	state.insert(QStringLiteral("badges"),
-				 modernShellParticipantBadges(user, ClientUser::get(Global::get().uiSession)));
-	state.insert(QStringLiteral("statuses"), modernShellParticipantStatuses(user));
-	QVariantMap patch;
-	patch.insert(QStringLiteral("state"), state);
-	publishModernShellPatch(QStringLiteral("presence.update"), patch);
+	m_qmlShellHost->participantModel()->updatePresence(
+		QString::number(static_cast< qulonglong >(user->uiSession)), modernShellTalkStateKey(user),
+		modernShellTalkStateLabel(user), modernShellTalkStateTone(user),
+		modernShellEffectiveTalkState(user) != Settings::Passive, user->uiSession == Global::get().uiSession,
+		modernShellParticipantBadges(user, ClientUser::get(Global::get().uiSession)),
+		modernShellParticipantStatuses(user));
+	mumble::chatperf::recordValue("qml.participant.presence.direct", 1);
 }
 
 void MainWindow::publishModernShellTalkStateForIndex(const QModelIndex &index) {
@@ -21233,8 +20889,7 @@ void MainWindow::publishModernShellPatchNow(const QString &kind, QVariantMap pat
 }
 
 void MainWindow::flushModernShellCoalescedPatches() {
-	if (!m_modernShellRoomStatePatchPending && m_modernShellCoalescedRoomPatch.isEmpty()
-		&& m_modernShellCoalescedPresencePatches.isEmpty()) {
+	if (!m_modernShellRoomStatePatchPending && m_modernShellCoalescedRoomPatch.isEmpty()) {
 		return;
 	}
 	if (m_modernShellPatchCoalesceTimer && m_modernShellPatchCoalesceTimer->isActive()) {
@@ -21243,12 +20898,8 @@ void MainWindow::flushModernShellCoalescedPatches() {
 
 	QVariantMap roomPatch = m_modernShellCoalescedRoomPatch;
 	const bool buildRoomPatch = m_modernShellRoomStatePatchPending;
-	const QStringList presenceOrder = m_modernShellCoalescedPresenceOrder;
-	QHash< QString, QVariantMap > presencePatches = m_modernShellCoalescedPresencePatches;
 	m_modernShellRoomStatePatchPending = false;
 	m_modernShellCoalescedRoomPatch.clear();
-	m_modernShellCoalescedPresencePatches.clear();
-	m_modernShellCoalescedPresenceOrder.clear();
 
 	if (buildRoomPatch) {
 		const qint64 startedAtMs = QDateTime::currentMSecsSinceEpoch();
@@ -21271,14 +20922,6 @@ void MainWindow::flushModernShellCoalescedPatches() {
 		publishModernShellPatchNow(roomKind, roomPatch);
 	}
 
-	mumble::chatperf::recordValue("modern.patch_coalescer.flush.presence", presencePatches.size());
-	for (const QString &presenceKey : presenceOrder) {
-		const auto patchIt = presencePatches.constFind(presenceKey);
-		if (patchIt == presencePatches.cend()) {
-			continue;
-		}
-		publishModernShellPatchNow(QStringLiteral("presence.update"), patchIt.value());
-	}
 }
 
 void MainWindow::queueModernShellCoalescedPatch(const QString &kind, QVariantMap patch) {
@@ -21294,36 +20937,21 @@ void MainWindow::queueModernShellCoalescedPatch(const QString &kind, QVariantMap
 	if (kind == QLatin1String("rooms.update")) {
 		m_modernShellCoalescedRoomPatch = patch;
 		mumble::chatperf::recordValue("modern.patch_coalescer.queue.rooms", 1);
-	} else if (kind == QLatin1String("presence.update")) {
-		const QVariantMap state = patch.value(QStringLiteral("state")).toMap();
-		QString presenceKey =
-			QString::fromLatin1("%1:%2")
-				.arg(state.value(QStringLiteral("participantKey")).toString())
-				.arg(state.value(QStringLiteral("session")).toString());
-		if (presenceKey == QLatin1String(":")) {
-			presenceKey = QStringLiteral("__generic");
-		}
-		if (!m_modernShellCoalescedPresencePatches.contains(presenceKey)) {
-			m_modernShellCoalescedPresenceOrder.push_back(presenceKey);
-		}
-		m_modernShellCoalescedPresencePatches.insert(presenceKey, patch);
-		mumble::chatperf::recordValue("modern.patch_coalescer.queue.presence", 1);
 	} else {
 		publishModernShellPatchNow(kind, patch);
 		return;
 	}
 
-	appendModernShellConnectTrace(QStringLiteral("publishModernShellPatch coalesced kind=%1 rooms=%2 presence=%3")
+	appendModernShellConnectTrace(QStringLiteral("publishModernShellPatch coalesced kind=%1 rooms=%2")
 									  .arg(kind)
-									  .arg(m_modernShellCoalescedRoomPatch.isEmpty() ? 0 : 1)
-									  .arg(m_modernShellCoalescedPresencePatches.size()));
+									  .arg(m_modernShellCoalescedRoomPatch.isEmpty() ? 0 : 1));
 	if (!m_modernShellPatchCoalesceTimer->isActive()) {
 		m_modernShellPatchCoalesceTimer->start(ModernShellPatchCoalesceMs);
 	}
 }
 
 void MainWindow::publishModernShellPatch(const QString &kind, QVariantMap patch) {
-	if (kind == QLatin1String("rooms.update") || kind == QLatin1String("presence.update")) {
+	if (kind == QLatin1String("rooms.update")) {
 		queueModernShellCoalescedPatch(kind, patch);
 		return;
 	}
@@ -25782,12 +25410,6 @@ void MainWindow::applyQmlShellPatch(const QString &kind, const QVariantMap &patc
 				session->setUpdateBanner(app.value(QStringLiteral("updateBanner")).toMap());
 			}
 		}
-		return;
-	}
-
-	if (kind == QLatin1String("presence.update")) {
-		const QVariantMap state = patch.value(QStringLiteral("state")).toMap();
-		if (!state.isEmpty()) m_qmlShellHost->participantModel()->upsertRow(participantRow(state));
 		return;
 	}
 
@@ -32142,10 +31764,6 @@ void MainWindow::updateFavoriteButton() {
 
 // Sets whether or not to show the title bars on the MainWindow's
 // dock widgets.
-void MainWindow::setShowDockTitleBars(bool doShow) {
-	Q_UNUSED(doShow);
-}
-
 MainWindow::~MainWindow() {
 	stopModernConnectServerPing();
 	delete pmModel;

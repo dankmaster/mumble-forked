@@ -64,7 +64,6 @@ public:
 
 class UserModel : public QAbstractItemModel {
 	friend struct ModelItem;
-	friend class UserView;
 
 private:
 	Q_OBJECT

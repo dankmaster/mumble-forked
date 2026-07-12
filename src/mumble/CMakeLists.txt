@@ -293,8 +293,6 @@ set(MUMBLE_SOURCES
 	"UserLocalVolumeSlider.h"
 	"UserModel.cpp"
 	"UserModel.h"
-	"UserView.cpp"
-	"UserView.h"
 	"VersionCheck.cpp"
 	"VersionCheck.h"
 	"ViewCert.cpp"
