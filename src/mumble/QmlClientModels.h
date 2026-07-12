@@ -188,10 +188,12 @@ public:
 signals:
 	void countChanged();
 
+protected:
+	int indexOf(const QString &stableId) const;
+
 private:
 	static QVariant valueForRole(const QVariantMap &row, int role);
 	static QList< int > changedRoles(const QVariantMap &before, const QVariantMap &after);
-	int indexOf(const QString &stableId) const;
 	void rebuildRowIndex();
 	QVariantList m_rows;
 	QStringList m_rowIds;
@@ -229,8 +231,11 @@ private:
 class ChatTimelineModel final : public StableListModel {
 	Q_OBJECT
 public:
+	enum class MessageMutation { Ignored, Inserted, Updated, Unchanged };
 	using StableListModel::StableListModel;
+	MessageMutation applyMessage(const QVariantMap &message);
 	bool upsertMessage(const QVariantMap &message);
+	bool removeMessage(const QString &messageId);
 	int appendMessages(const QVariantList &messages);
 	void replaceMessages(const QVariantList &messages);
 

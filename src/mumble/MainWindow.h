@@ -564,7 +564,7 @@ public:
 															   bool includeAvatar);
 	QVariantMap buildQmlRoomState();
 	void flushQmlRoomStateUpdates();
-	void publishQmlChatMessage(const MumbleProto::ChatMessage &message, bool appended = false);
+	void publishQmlChatMessage(const MumbleProto::ChatMessage &message);
 	void publishPersistentChatInlineDataImageUpdate(const QString &token);
 	void publishQmlActiveScopeState();
 	void scheduleQmlRoomStateUpdate();

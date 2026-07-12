@@ -20622,7 +20622,7 @@ void MainWindow::flushQmlRoomStateUpdates() {
 								  .arg(QDateTime::currentMSecsSinceEpoch() - startedAtMs));
 }
 
-void MainWindow::publishQmlChatMessage(const MumbleProto::ChatMessage &message, const bool appended) {
+void MainWindow::publishQmlChatMessage(const MumbleProto::ChatMessage &message) {
 	const PersistentChatTarget target = currentPersistentChatTarget();
 	if (target.serverLog || target.directMessage) {
 		return;
@@ -20636,9 +20636,14 @@ void MainWindow::publishQmlChatMessage(const MumbleProto::ChatMessage &message, 
 	const bool canDeleteMessages  = canDeletePersistentChatMessages(target, true);
 	const QVariantMap state =
 		buildModernShellCachedMessageState(message, target, canReply, canReact, canDeleteMessages);
-	if (m_qmlShellHost && m_qmlShellHost->chatModel()->upsertMessage(state)) {
-		mumble::chatperf::recordValue(appended ? "qml.chat.append.direct" : "qml.chat.update.direct", 1);
-	}
+	if (!m_qmlShellHost) return;
+	const ChatTimelineModel::MessageMutation mutation = m_qmlShellHost->chatModel()->applyMessage(state);
+	if (mutation == ChatTimelineModel::MessageMutation::Inserted)
+		mumble::chatperf::recordValue("qml.chat.append.direct", 1);
+	else if (mutation == ChatTimelineModel::MessageMutation::Updated)
+		mumble::chatperf::recordValue("qml.chat.update.direct", 1);
+	else if (mutation == ChatTimelineModel::MessageMutation::Unchanged)
+		mumble::chatperf::recordValue("qml.chat.unchanged.direct", 1);
 }
 
 void MainWindow::publishQmlActiveScopeState() {
@@ -29163,7 +29168,7 @@ void MainWindow::handlePersistentChatMessage(const MumbleProto::ChatMessage &msg
 		return;
 	}
 
-	clearModernShellMessageDtoCache("message");
+	evictModernShellMessageDtoCacheForMessage(msg);
 	if ((msg.has_scope() ? msg.scope() : MumbleProto::Channel) == MumbleProto::Private) {
 		appendModernPersistentDirectMessage(msg, true);
 		return;
@@ -29196,7 +29201,9 @@ void MainWindow::handlePersistentChatMessage(const MumbleProto::ChatMessage &msg
 	const unsigned int scopeId         = msg.has_scope_id() ? msg.scope_id() : 0;
 	if (target.valid && !target.serverLog && !target.directMessage && target.scope == scope
 		&& target.scopeID == scopeId) {
-		publishQmlChatMessage(msg, true);
+		// Deletions remain stable tombstone rows so ListView anchoring and conversation context are
+		// preserved; buildModernShellCachedMessageState publishes the typed deleted role.
+		publishQmlChatMessage(msg);
 	}
 }
 
@@ -29287,7 +29294,6 @@ void MainWindow::handlePersistentChatEmbedState(const MumbleProto::ChatEmbedStat
 		return;
 	}
 
-	clearModernShellMessageDtoCache("embed");
 	MumbleProto::ChatMessage *updatedLocalMessage = nullptr;
 	QString newPreviewKey;
 	if (activeScopeMatches) {
@@ -29320,6 +29326,7 @@ void MainWindow::handlePersistentChatEmbedState(const MumbleProto::ChatEmbedStat
 	}
 
 	if (updatedLocalMessage) {
+		evictModernShellMessageDtoCacheForMessage(*updatedLocalMessage);
 		publishQmlChatMessage(*updatedLocalMessage);
 	}
 
@@ -29339,7 +29346,6 @@ void MainWindow::handlePersistentChatReactionState(const MumbleProto::ChatReacti
 		return;
 	}
 
-	clearModernShellMessageDtoCache("reaction");
 	if (activeScopeMatches) {
 		if (MumbleProto::ChatMessage *updatedLocalMessage =
 				findPersistentChatMessage(m_persistentChatMessages, msg.thread_id(), msg.message_id())) {
@@ -29347,6 +29353,7 @@ void MainWindow::handlePersistentChatReactionState(const MumbleProto::ChatReacti
 			for (const MumbleProto::ChatReactionAggregate &reaction : msg.reactions()) {
 				*updatedLocalMessage->add_reactions() = reaction;
 			}
+			evictModernShellMessageDtoCacheForMessage(*updatedLocalMessage);
 			publishQmlChatMessage(*updatedLocalMessage);
 		}
 	}

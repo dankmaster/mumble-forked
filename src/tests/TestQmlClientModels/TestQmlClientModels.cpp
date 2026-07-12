@@ -268,22 +268,40 @@ void TestQmlClientModels::chatTimelineAppliesDirectIncrementalMessages() {
 	QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
 	QSignalSpy insertSpy(&model, &QAbstractItemModel::rowsInserted);
 	QSignalSpy changedSpy(&model, &QAbstractItemModel::dataChanged);
+	QSignalSpy removeSpy(&model, &QAbstractItemModel::rowsRemoved);
 
-	QVERIFY(model.upsertMessage({ { QStringLiteral("messageId"), 41 },
+	QCOMPARE(model.applyMessage({ { QStringLiteral("messageId"), 41 },
 								 { QStringLiteral("actor"), QStringLiteral("Alice") },
-								 { QStringLiteral("bodyText"), QStringLiteral("First") } }));
+								 { QStringLiteral("bodyText"), QStringLiteral("First") } }),
+			 ChatTimelineModel::MessageMutation::Inserted);
 	QCOMPARE(insertSpy.count(), 1);
 	QCOMPARE(resetSpy.count(), 0);
 	QCOMPARE(model.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("41"));
 
-	QVERIFY(model.upsertMessage({ { QStringLiteral("messageId"), 41 },
+	QCOMPARE(model.applyMessage({ { QStringLiteral("messageId"), 41 },
 								 { QStringLiteral("actor"), QStringLiteral("Alice") },
 								 { QStringLiteral("bodyText"), QStringLiteral("Edited") },
-								 { QStringLiteral("deliveryState"), QStringLiteral("delivered") } }));
+								 { QStringLiteral("deliveryState"), QStringLiteral("delivered") } }),
+			 ChatTimelineModel::MessageMutation::Updated);
 	QCOMPARE(model.rowCount(), 1);
 	QCOMPARE(changedSpy.count(), 1);
+	QCOMPARE(changedSpy.first().at(0).toModelIndex().row(), 0);
+	QCOMPARE(changedSpy.first().at(1).toModelIndex().row(), 0);
 	QCOMPARE(resetSpy.count(), 0);
+	QCOMPARE(model.applyMessage({ { QStringLiteral("messageId"), 41 },
+								 { QStringLiteral("actor"), QStringLiteral("Alice") },
+								 { QStringLiteral("bodyText"), QStringLiteral("Edited") },
+								 { QStringLiteral("deliveryState"), QStringLiteral("delivered") } }),
+			 ChatTimelineModel::MessageMutation::Unchanged);
+	QCOMPARE(changedSpy.count(), 1);
 	QCOMPARE(model.get(0).value(QStringLiteral("subtitle")).toString(), QStringLiteral("Edited"));
+	QCOMPARE(model.applyMessage({ { QStringLiteral("messageId"), 41 },
+								 { QStringLiteral("actor"), QStringLiteral("Alice") },
+								 { QStringLiteral("deleted"), true } }),
+			 ChatTimelineModel::MessageMutation::Updated);
+	QCOMPARE(model.rowCount(), 1);
+	QVERIFY(model.get(0).value(QStringLiteral("deleted")).toBool());
+	QCOMPARE(changedSpy.count(), 2);
 
 	const int appended = model.appendMessages(
 		{ QVariantMap { { QStringLiteral("messageId"), 42 }, { QStringLiteral("bodyText"), QStringLiteral("Second") } },
@@ -291,6 +309,14 @@ void TestQmlClientModels::chatTimelineAppliesDirectIncrementalMessages() {
 	QCOMPARE(appended, 1);
 	QCOMPARE(model.rowCount(), 2);
 	QCOMPARE(insertSpy.count(), 2);
+	QCOMPARE(resetSpy.count(), 0);
+	QVERIFY(model.removeMessage(QStringLiteral("41")));
+	QCOMPARE(removeSpy.count(), 1);
+	QCOMPARE(removeSpy.first().at(1).toInt(), 0);
+	QCOMPARE(removeSpy.first().at(2).toInt(), 0);
+	QCOMPARE(model.rowCount(), 1);
+	QVERIFY(!model.removeMessage(QStringLiteral("missing")));
+	QCOMPARE(removeSpy.count(), 1);
 	QCOMPARE(resetSpy.count(), 0);
 }
 

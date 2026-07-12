@@ -465,10 +465,30 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message) {
 			 { QStringLiteral("source"), message } };
 }
 
-bool ChatTimelineModel::upsertMessage(const QVariantMap &message) {
+ChatTimelineModel::MessageMutation ChatTimelineModel::applyMessage(const QVariantMap &message) {
 	const QVariantMap row = messageRow(message);
-	if (row.isEmpty()) return false;
+	if (row.isEmpty()) return MessageMutation::Ignored;
+	const QString id = row.value(QStringLiteral("id")).toString();
+	const int rowIndex = indexOf(id);
+	if (rowIndex >= 0) {
+		const QVariantMap current = get(rowIndex);
+		if (current == row) return MessageMutation::Unchanged;
+		upsertRow(row);
+		return MessageMutation::Updated;
+	}
 	upsertRow(row);
+	return MessageMutation::Inserted;
+}
+
+bool ChatTimelineModel::upsertMessage(const QVariantMap &message) {
+	return applyMessage(message) != MessageMutation::Ignored;
+}
+
+bool ChatTimelineModel::removeMessage(const QString &messageId) {
+	const QString id = messageId.trimmed();
+	if (id.isEmpty()) return false;
+	if (indexOf(id) < 0) return false;
+	removeRow(id);
 	return true;
 }
 
