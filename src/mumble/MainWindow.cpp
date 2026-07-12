@@ -30665,6 +30665,15 @@ void MainWindow::syncQmlShellState() {
 	session->setSelfMuted(appState.value(QStringLiteral("selfMuted")).toBool());
 	session->setSelfDeafened(appState.value(QStringLiteral("selfDeafened")).toBool());
 
+	QmlSelectionState *selection = m_qmlShellHost->selectionState();
+	selection->setScopeToken(m_modernSelectionState.scopeToken);
+	selection->setSelectedUserSession(m_modernSelectionState.selectedUserSession
+										 ? QVariant::fromValue(*m_modernSelectionState.selectedUserSession)
+										 : QVariant());
+	selection->setSelectedVoiceChannelId(m_modernSelectionState.selectedVoiceChannelID
+											 ? QVariant::fromValue(*m_modernSelectionState.selectedVoiceChannelID)
+											 : QVariant());
+
 	QVariantList roomRows;
 	const auto appendRooms = [&roomRows](const QVariantList &source, const QString &kind) {
 		for (const QVariant &entry : source) {
@@ -30684,7 +30693,7 @@ void MainWindow::syncQmlShellState() {
 	};
 	appendRooms(snapshot.value(QStringLiteral("voiceRooms")).toList(), QStringLiteral("voice"));
 	appendRooms(snapshot.value(QStringLiteral("textRooms")).toList(), QStringLiteral("text"));
-	m_qmlShellHost->roomModel()->replaceRows(roomRows);
+	m_qmlShellHost->roomModel()->synchronizeRows(roomRows);
 
 	QVariantList participantRows;
 	for (const QVariant &entry : snapshot.value(QStringLiteral("participants")).toList()) {
@@ -30698,7 +30707,7 @@ void MainWindow::syncQmlShellState() {
 		row.insert(QStringLiteral("source"), participant);
 		participantRows.push_back(row);
 	}
-	m_qmlShellHost->participantModel()->replaceRows(participantRows);
+	m_qmlShellHost->participantModel()->synchronizeRows(participantRows);
 
 	QVariantList messageRows;
 	for (const QVariant &entry : snapshot.value(QStringLiteral("messages")).toList()) {
@@ -30716,7 +30725,7 @@ void MainWindow::syncQmlShellState() {
 		row.insert(QStringLiteral("source"), message);
 		messageRows.push_back(row);
 	}
-	m_qmlShellHost->chatModel()->replaceRows(messageRows);
+	m_qmlShellHost->chatModel()->synchronizeRows(messageRows);
 }
 
 void MainWindow::focusPersistentChatVoiceChannel(Channel *channel) {

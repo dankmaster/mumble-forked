@@ -8,6 +8,8 @@
 #include <QtCore/QObject>
 #include <QtCore/QVariantList>
 
+class ClientActionRegistry;
+
 class ClientSessionController final : public QObject {
 	Q_OBJECT
 	Q_PROPERTY(QString serverName READ serverName WRITE setServerName NOTIFY serverNameChanged)
@@ -73,6 +75,7 @@ public:
 	Q_INVOKABLE QVariantMap get(int row) const;
 
 	void replaceRows(const QVariantList &rows);
+	void synchronizeRows(const QVariantList &rows);
 	void upsertRow(const QVariantMap &row);
 	void removeRow(const QString &stableId);
 	void clear();
@@ -107,6 +110,44 @@ class AsyncOperationModel final : public StableListModel {
 	Q_OBJECT
 public:
 	using StableListModel::StableListModel;
+};
+
+class ActionModel final : public StableListModel {
+	Q_OBJECT
+
+public:
+	explicit ActionModel(ClientActionRegistry *registry, QObject *parent = nullptr);
+	Q_INVOKABLE bool trigger(const QString &actionId);
+
+private:
+	void refresh();
+	ClientActionRegistry *m_registry = nullptr;
+};
+
+class QmlSelectionState final : public QObject {
+	Q_OBJECT
+	Q_PROPERTY(QString scopeToken READ scopeToken WRITE setScopeToken NOTIFY scopeTokenChanged)
+	Q_PROPERTY(QVariant selectedUserSession READ selectedUserSession WRITE setSelectedUserSession NOTIFY selectedUserSessionChanged)
+	Q_PROPERTY(QVariant selectedVoiceChannelId READ selectedVoiceChannelId WRITE setSelectedVoiceChannelId NOTIFY selectedVoiceChannelIdChanged)
+
+public:
+	explicit QmlSelectionState(QObject *parent = nullptr);
+	QString scopeToken() const;
+	QVariant selectedUserSession() const;
+	QVariant selectedVoiceChannelId() const;
+	void setScopeToken(const QString &value);
+	void setSelectedUserSession(const QVariant &value);
+	void setSelectedVoiceChannelId(const QVariant &value);
+
+signals:
+	void scopeTokenChanged();
+	void selectedUserSessionChanged();
+	void selectedVoiceChannelIdChanged();
+
+private:
+	QString m_scopeToken;
+	QVariant m_selectedUserSession;
+	QVariant m_selectedVoiceChannelId;
 };
 
 class UiCommandController final : public QObject {

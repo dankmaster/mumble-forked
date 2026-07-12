@@ -15,6 +15,7 @@ void ClientActionRegistry::adopt(QAction *action) {
 	const QString id = action->objectName();
 	m_actions.insert(id, action);
 	connect(action, &QAction::changed, this, [this, id]() { emit actionStateChanged(id); });
+	emit actionStateChanged(id);
 }
 
 QAction *ClientActionRegistry::action(const QString &id) const {

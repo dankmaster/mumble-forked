@@ -10,10 +10,12 @@
 #include <memory>
 
 class AsyncOperationModel;
+class ActionModel;
 class ChatTimelineModel;
 class ClientActionRegistry;
 class ClientSessionController;
 class ParticipantModel;
+class QmlSelectionState;
 class QQmlApplicationEngine;
 class QQuickWindow;
 class RoomModel;
@@ -35,6 +37,8 @@ public:
 	ParticipantModel *participantModel() const;
 	ChatTimelineModel *chatModel() const;
 	AsyncOperationModel *operationModel() const;
+	ActionModel *actionModel() const;
+	QmlSelectionState *selectionState() const;
 
 signals:
 	void closeRequested();
@@ -49,6 +53,8 @@ private:
 	std::unique_ptr< ParticipantModel > m_participantModel;
 	std::unique_ptr< ChatTimelineModel > m_chatModel;
 	std::unique_ptr< AsyncOperationModel > m_operationModel;
+	std::unique_ptr< ActionModel > m_actionModel;
+	std::unique_ptr< QmlSelectionState > m_selectionState;
 };
 
 #endif // MUMBLE_MUMBLE_QMLSHELLHOST_H_

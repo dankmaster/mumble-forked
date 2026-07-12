@@ -3,7 +3,10 @@
 
 #include "QmlClientModels.h"
 
+#include "ClientActionRegistry.h"
+
 #include <QtCore/QString>
+#include <QtGui/QAction>
 
 ClientSessionController::ClientSessionController(QObject *parent) : QObject(parent) {
 }
@@ -83,6 +86,51 @@ void StableListModel::replaceRows(const QVariantList &rows) {
 	emit countChanged();
 }
 
+void StableListModel::synchronizeRows(const QVariantList &rows) {
+	QVariantList validRows;
+	validRows.reserve(rows.size());
+	for (const QVariant &row : rows) {
+		if (!row.toMap().value(QStringLiteral("id")).toString().isEmpty()) {
+			validRows.push_back(row);
+		}
+	}
+
+	const int oldCount = m_rows.size();
+	for (int targetIndex = 0; targetIndex < validRows.size(); ++targetIndex) {
+		const QVariantMap targetRow = validRows.at(targetIndex).toMap();
+		const QString targetId = targetRow.value(QStringLiteral("id")).toString();
+
+		int existingIndex = indexOf(targetId);
+		if (existingIndex < 0) {
+			beginInsertRows(QModelIndex(), targetIndex, targetIndex);
+			m_rows.insert(targetIndex, targetRow);
+			endInsertRows();
+			existingIndex = targetIndex;
+		} else if (existingIndex != targetIndex) {
+			const int destination = existingIndex < targetIndex ? targetIndex + 1 : targetIndex;
+			beginMoveRows(QModelIndex(), existingIndex, existingIndex, QModelIndex(), destination);
+			m_rows.move(existingIndex, targetIndex);
+			endMoveRows();
+			existingIndex = targetIndex;
+		}
+
+		if (m_rows.at(existingIndex).toMap() != targetRow) {
+			m_rows[existingIndex] = targetRow;
+			emit dataChanged(index(existingIndex), index(existingIndex));
+		}
+	}
+
+	while (m_rows.size() > validRows.size()) {
+		const int last = m_rows.size() - 1;
+		beginRemoveRows(QModelIndex(), last, last);
+		m_rows.removeAt(last);
+		endRemoveRows();
+	}
+	if (oldCount != m_rows.size()) {
+		emit countChanged();
+	}
+}
+
 void StableListModel::upsertRow(const QVariantMap &row) {
 	const QString stableId = row.value(QStringLiteral("id")).toString();
 	if (stableId.isEmpty()) {
@@ -139,3 +187,62 @@ void UiCommandController::invokeAction(const QString &actionId) {
 }
 void UiCommandController::toggleSelfMute() { emit selfMuteToggleRequested(); }
 void UiCommandController::toggleSelfDeaf() { emit selfDeafToggleRequested(); }
+
+ActionModel::ActionModel(ClientActionRegistry *registry, QObject *parent)
+	: StableListModel(parent), m_registry(registry) {
+	if (m_registry) {
+		connect(m_registry, &ClientActionRegistry::actionStateChanged, this, [this](const QString &) { refresh(); });
+	}
+	refresh();
+}
+
+void ActionModel::refresh() {
+	QVariantList rows;
+	if (m_registry) {
+		for (const QVariant &entry : m_registry->stateSnapshot()) {
+			const QVariantMap state = entry.toMap();
+			QVariantMap row;
+			row.insert(QStringLiteral("id"), state.value(QStringLiteral("id")));
+			row.insert(QStringLiteral("title"), state.value(QStringLiteral("text")));
+			row.insert(QStringLiteral("kind"), QStringLiteral("action"));
+			row.insert(QStringLiteral("status"), state.value(QStringLiteral("checked")).toBool()
+												? QStringLiteral("checked") : QString());
+			row.insert(QStringLiteral("enabled"), state.value(QStringLiteral("enabled")));
+			row.insert(QStringLiteral("checkable"), state.value(QStringLiteral("checkable")));
+			row.insert(QStringLiteral("source"), state);
+			rows.push_back(row);
+		}
+	}
+	synchronizeRows(rows);
+}
+
+bool ActionModel::trigger(const QString &actionId) {
+	QAction *action = m_registry ? m_registry->action(actionId) : nullptr;
+	if (!action || !action->isEnabled()) {
+		return false;
+	}
+	action->trigger();
+	return true;
+}
+
+QmlSelectionState::QmlSelectionState(QObject *parent) : QObject(parent) {
+}
+
+QString QmlSelectionState::scopeToken() const { return m_scopeToken; }
+QVariant QmlSelectionState::selectedUserSession() const { return m_selectedUserSession; }
+QVariant QmlSelectionState::selectedVoiceChannelId() const { return m_selectedVoiceChannelId; }
+void QmlSelectionState::setScopeToken(const QString &value) {
+	if (m_scopeToken == value) return;
+	m_scopeToken = value;
+	emit scopeTokenChanged();
+}
+void QmlSelectionState::setSelectedUserSession(const QVariant &value) {
+	if (m_selectedUserSession == value) return;
+	m_selectedUserSession = value;
+	emit selectedUserSessionChanged();
+}
+void QmlSelectionState::setSelectedVoiceChannelId(const QVariant &value) {
+	if (m_selectedVoiceChannelId == value) return;
+	m_selectedVoiceChannelId = value;
+	emit selectedVoiceChannelIdChanged();
+}

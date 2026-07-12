@@ -19,7 +19,9 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_commandController(std::make_unique< UiCommandController >()), m_roomModel(std::make_unique< RoomModel >()),
 	  m_participantModel(std::make_unique< ParticipantModel >()),
 	  m_chatModel(std::make_unique< ChatTimelineModel >()),
-	  m_operationModel(std::make_unique< AsyncOperationModel >()) {
+	  m_operationModel(std::make_unique< AsyncOperationModel >()),
+	  m_actionModel(std::make_unique< ActionModel >(actionRegistry)),
+	  m_selectionState(std::make_unique< QmlSelectionState >()) {
 }
 
 QmlShellHost::~QmlShellHost() = default;
@@ -40,6 +42,8 @@ bool QmlShellHost::start(QString *error) {
 	context->setContextProperty(QStringLiteral("participantModel"), m_participantModel.get());
 	context->setContextProperty(QStringLiteral("chatModel"), m_chatModel.get());
 	context->setContextProperty(QStringLiteral("operationModel"), m_operationModel.get());
+	context->setContextProperty(QStringLiteral("actionModel"), m_actionModel.get());
+	context->setContextProperty(QStringLiteral("selectionState"), m_selectionState.get());
 	context->setContextProperty(QStringLiteral("clientActions"), m_actionRegistry);
 
 	const QUrl rootUrl(QStringLiteral("qrc:/qml-shell/Main.qml"));
@@ -77,3 +81,5 @@ RoomModel *QmlShellHost::roomModel() const { return m_roomModel.get(); }
 ParticipantModel *QmlShellHost::participantModel() const { return m_participantModel.get(); }
 ChatTimelineModel *QmlShellHost::chatModel() const { return m_chatModel.get(); }
 AsyncOperationModel *QmlShellHost::operationModel() const { return m_operationModel.get(); }
+ActionModel *QmlShellHost::actionModel() const { return m_actionModel.get(); }
+QmlSelectionState *QmlShellHost::selectionState() const { return m_selectionState.get(); }

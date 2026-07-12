@@ -10,6 +10,7 @@ class TestQmlClientModels : public QObject {
 
 private slots:
 	void stableRowsUpdateWithoutReset();
+	void synchronizeRowsUsesIncrementalSignals();
 	void sessionPropertiesOnlyNotifyOnChanges();
 	void commandsRejectEmptyStableIds();
 };
@@ -36,6 +37,32 @@ void TestQmlClientModels::stableRowsUpdateWithoutReset() {
 	model.removeRow(QStringLiteral("voice:1"));
 	QCOMPARE(model.rowCount(), 0);
 	QCOMPARE(removeSpy.count(), 1);
+}
+
+void TestQmlClientModels::synchronizeRowsUsesIncrementalSignals() {
+	RoomModel model;
+	QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
+	QSignalSpy insertSpy(&model, &QAbstractItemModel::rowsInserted);
+	QSignalSpy moveSpy(&model, &QAbstractItemModel::rowsMoved);
+	QSignalSpy changedSpy(&model, &QAbstractItemModel::dataChanged);
+	QSignalSpy removeSpy(&model, &QAbstractItemModel::rowsRemoved);
+
+	model.synchronizeRows({ QVariantMap { { QStringLiteral("id"), QStringLiteral("voice:1") },
+										 { QStringLiteral("title"), QStringLiteral("Lobby") } },
+						 QVariantMap { { QStringLiteral("id"), QStringLiteral("voice:2") },
+										 { QStringLiteral("title"), QStringLiteral("Games") } } });
+	QCOMPARE(model.rowCount(), 2);
+	QCOMPARE(insertSpy.count(), 2);
+
+	model.synchronizeRows({ QVariantMap { { QStringLiteral("id"), QStringLiteral("voice:2") },
+										 { QStringLiteral("title"), QStringLiteral("Gaming") } } });
+	QCOMPARE(model.rowCount(), 1);
+	QCOMPARE(model.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("voice:2"));
+	QCOMPARE(model.get(0).value(QStringLiteral("title")).toString(), QStringLiteral("Gaming"));
+	QCOMPARE(moveSpy.count(), 1);
+	QCOMPARE(changedSpy.count(), 1);
+	QCOMPARE(removeSpy.count(), 1);
+	QCOMPARE(resetSpy.count(), 0);
 }
 
 void TestQmlClientModels::sessionPropertiesOnlyNotifyOnChanges() {
