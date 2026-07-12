@@ -151,6 +151,7 @@ public:
 	void openModernPluginUpdateDialog(const QVariantList &updates);
 	std::optional< unsigned int > selectedModernUserSession() const;
 	std::optional< unsigned int > selectedModernVoiceChannel() const;
+	QmlShellHost *qmlShellHost() const;
 	void selectModernUserSession(unsigned int session);
 	void selectModernVoiceChannel(unsigned int channelID);
 #ifdef USE_MANUAL_PLUGIN
@@ -244,14 +245,14 @@ public:
 	void focusNextMainWidget();
 	void refreshShellLayout();
 	void applyShellLayout();
-	void queueModernShellSnapshotSync();
-	void queueModernShellSnapshotSyncImmediate();
-	void queueModernShellSnapshotSyncInternal(bool immediate);
-	void syncModernShellSnapshot();
+	void scheduleQmlShellStateSync();
+	void scheduleQmlShellStateSyncImmediate();
+	void scheduleQmlShellStateSyncInternal(bool immediate);
+	void runQmlShellStateSync();
 	void syncQmlShellState();
 	void syncQmlSelectionState();
 	void applyQmlRoomState(const QVariantMap &state);
-	void applyQmlShellPatch(const QString &kind, const QVariantMap &patch);
+	void applyQmlDirectMessagesState(const QVariantMap &state);
 	void ensureModernUiAutomationServer();
 	void beginNativeWindowMoveOrResize();
 	void endNativeWindowMoveOrResize();
@@ -560,7 +561,6 @@ public:
 	bool tryConnectFromUpdateResumeState();
 	void loadPendingUpdateResumeState();
 	void applyPendingUpdateResumeState();
-	QVariantMap buildModernShellSnapshot();
 	QVariantMap buildModernShellMessageState(const MumbleProto::ChatMessage &message,
 											 const PersistentChatTarget &target, bool canReply, bool canReact,
 											 bool canDeleteMessages,
@@ -580,8 +580,6 @@ public:
 	QVariantList buildModernShellChannelParticipantPatchStates(const Channel *channel, int avatarSize,
 															   bool includeAvatar);
 	QVariantMap buildModernShellRoomStatePatch();
-	void publishModernShellPatch(const QString &kind, QVariantMap patch);
-	void publishModernShellPatchNow(const QString &kind, QVariantMap patch);
 	void flushModernShellCoalescedPatches();
 	void publishModernShellMessagesPatch(const QString &kind, const QVariantList &messages, bool scrollToBottom,
 										  const QString &timelineMode = QString());
@@ -628,7 +626,7 @@ public:
 	void requestModernDirectMessageHistory(unsigned int session);
 	void warmupModernDirectMessageHistory();
 	bool sendModernDirectMessage(unsigned int session, const QString &message);
-	void publishModernDirectMessagesPatch();
+	void publishQmlDirectMessagesState();
 	bool handleModernShellScopeSelection(const QString &scopeToken);
 	bool handleModernShellScopeRailSelection(const QString &scopeToken, const QString &railKind);
 	bool handleModernShellVoiceJoin(const QString &scopeToken);
@@ -715,7 +713,7 @@ public:
 											Channel *contextChannel = nullptr);
 	void triggerContextAction(const QString &actionData, ClientUser *user, Channel *channel);
 	bool sendChatbarTextToCurrentTarget(QString msg, bool plainText, bool clearNativeComposer);
-	void updateChatBar(bool forcePersistentChatReload = false, bool queueModernShellSnapshot = true);
+	void updateChatBar(bool forcePersistentChatReload = false, bool scheduleQmlStateSync = true);
 	void openTextMessageDialog(ClientUser *p);
 	void openUserLocalNicknameDialog(const ClientUser &p);
 	void queueUserTextureRequest(ClientUser *user, const QByteArray &expectedHash);
@@ -901,7 +899,7 @@ protected:
 	std::optional< MumbleProto::ChatMessage > m_pendingPersistentChatReply;
 	QTimer *m_modernShellSyncTimer                = nullptr;
 	QTimer *m_nativeWindowMoveResizeRecoveryTimer = nullptr;
-	qint64 m_modernShellLastSnapshotSyncMs        = 0;
+	qint64 m_lastQmlStateSyncMs        = 0;
 	quint64 m_modernShellServerLogRevision        = 1;
 	quint64 m_modernShellServerLogHtmlRevision    = 0;
 	LogDocument *m_modernServerLogDocument        = nullptr;
@@ -956,7 +954,7 @@ protected:
 	bool m_modernShellPreviewHydrationLinkDense = false;
 	QTimer *m_modernShellPatchCoalesceTimer                = nullptr;
 	bool m_modernShellRoomStatePatchPending               = false;
-	bool m_modernShellSnapshotPendingAfterNativeMoveResize = false;
+	bool m_qmlStatePendingAfterNativeMoveResize = false;
 	QHash< int, QString > m_modernAclRegisteredUserNames;
 	bool m_modernAclUserListRequestPending = false;
 	bool m_shellLayoutInitialized              = false;

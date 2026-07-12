@@ -305,7 +305,7 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 		setPersistentChatWelcomeText(str);
 	}
 	if (hiddenLegacyUserModelSafeMode) {
-		queueModernShellSnapshotSync();
+		scheduleQmlShellStateSync();
 	} else {
 		pmModel->ensureSelfVisible();
 		pmModel->recheckLinks();
@@ -373,7 +373,7 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 	updateChatBar();
 	warmupPersistentChatHistory();
 	if (hiddenLegacyUserModelSafeMode) {
-		queueModernShellSnapshotSync();
+		scheduleQmlShellStateSync();
 	}
 	appendServerSyncTrace(QStringLiteral("exit"));
 
@@ -542,7 +542,7 @@ void MainWindow::msgServerConfig(const MumbleProto::ServerConfig &msg) {
 			refreshPersistentChatView(true);
 		}
 	}
-	queueModernShellSnapshotSync();
+	scheduleQmlShellStateSync();
 }
 
 /// This message is being received when the server denied the permission to perform a requested action. This function
@@ -1230,7 +1230,7 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 	appendUserStateTrace(QStringLiteral("post-comment"));
 
 	if (hiddenLegacyUserModelSafeMode) {
-		queueModernShellSnapshotSync();
+		scheduleQmlShellStateSync();
 	} else if (modernShellConversationListActive) {
 		const PersistentChatTarget activeTarget = currentPersistentChatTarget();
 		const bool activeDirectMessageAffected =
@@ -1243,11 +1243,11 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 		if (rebuildConversationList || movedChannels || activeDirectMessageAffected) {
 			updateMenuPermissions();
 			if (!rebuildConversationList) {
-				queueModernShellSnapshotSync();
+				scheduleQmlShellStateSync();
 			}
 		}
 		if (textureChanged || commentChanged) {
-			queueModernShellSnapshotSync();
+			scheduleQmlShellStateSync();
 		}
 	}
 	appendUserStateTrace(QStringLiteral("exit"));
@@ -1304,7 +1304,7 @@ void MainWindow::msgUserRemove(const MumbleProto::UserRemove &msg) {
 		clearUserTextureRequest(pDst->uiSession);
 		if (hiddenLegacyUserModelSafeMode) {
 			removeClientUserWithoutModel(pDst);
-			queueModernShellSnapshotSync();
+			scheduleQmlShellStateSync();
 		} else {
 			pmModel->removeUser(pDst);
 			if (true) {
@@ -1504,7 +1504,7 @@ void MainWindow::msgChannelRemove(const MumbleProto::ChannelRemove &msg) {
 			}
 
 			removeChannelSubtreeWithoutModel(c);
-			queueModernShellSnapshotSync();
+			scheduleQmlShellStateSync();
 			return;
 		}
 
@@ -1627,7 +1627,7 @@ void MainWindow::msgContextAction(const MumbleProto::ContextAction &) {
 void MainWindow::msgContextActionModify(const MumbleProto::ContextActionModify &msg) {
 	if (msg.has_operation() && msg.operation() == MumbleProto::ContextActionModify_Operation_Remove) {
 		removeContextAction(msg);
-		queueModernShellSnapshotSync();
+		scheduleQmlShellStateSync();
 		return;
 	}
 
@@ -1644,7 +1644,7 @@ void MainWindow::msgContextActionModify(const MumbleProto::ContextActionModify &
 		qlUserActions.append(a);
 	if (ctx & MumbleProto::ContextActionModify_Context_Channel)
 		qlChannelActions.append(a);
-	queueModernShellSnapshotSync();
+	scheduleQmlShellStateSync();
 }
 
 /// Helper method for removing a context action.
@@ -1796,7 +1796,7 @@ void MainWindow::msgUserStats(const MumbleProto::UserStats &msg) {
 				}
 			}
 		} else if (hiddenLegacyUserModelSafeMode && idleSeconds != previousIdleSeconds) {
-			queueModernShellSnapshotSync();
+			scheduleQmlShellStateSync();
 		}
 	}
 

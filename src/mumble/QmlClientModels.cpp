@@ -18,6 +18,8 @@ bool ClientSessionController::connected() const { return m_connected; }
 bool ClientSessionController::selfMuted() const { return m_selfMuted; }
 bool ClientSessionController::selfDeafened() const { return m_selfDeafened; }
 QVariantMap ClientSessionController::updateBanner() const { return m_updateBanner; }
+QString ClientSessionController::motdHtml() const { return m_motdHtml; }
+QString ClientSessionController::motdSummary() const { return m_motdSummary; }
 
 #define SET_VALUE(member, signalName) \
 	if (member == value) { \
@@ -35,6 +37,8 @@ void ClientSessionController::setConnected(bool value) { SET_VALUE(m_connected, 
 void ClientSessionController::setSelfMuted(bool value) { SET_VALUE(m_selfMuted, selfMutedChanged); }
 void ClientSessionController::setSelfDeafened(bool value) { SET_VALUE(m_selfDeafened, selfDeafenedChanged); }
 void ClientSessionController::setUpdateBanner(const QVariantMap &value) { SET_VALUE(m_updateBanner, updateBannerChanged); }
+void ClientSessionController::setMotdHtml(const QString &value) { SET_VALUE(m_motdHtml, motdHtmlChanged); }
+void ClientSessionController::setMotdSummary(const QString &value) { SET_VALUE(m_motdSummary, motdSummaryChanged); }
 
 #undef SET_VALUE
 
@@ -278,9 +282,11 @@ QVariantMap RoomModel::roomRow(const QVariantMap &room, const QString &kind) {
 			 { QStringLiteral("scopeToken"), scopeToken },
 			 { QStringLiteral("title"), room.value(QStringLiteral("label")) },
 			 { QStringLiteral("subtitle"),
-			   room.value(QStringLiteral("topic"), room.value(QStringLiteral("description"))) },
+			   room.value(QStringLiteral("topic"),
+						  room.value(QStringLiteral("description"), room.value(QStringLiteral("subtitle")))) },
 			 { QStringLiteral("kind"), kind },
-			 { QStringLiteral("selected"), room.value(QStringLiteral("selected")) },
+			 { QStringLiteral("selected"),
+			   room.value(QStringLiteral("selected"), room.value(QStringLiteral("open"))) },
 			 { QStringLiteral("status"),
 			   room.value(QStringLiteral("joined")).toBool() ? QStringLiteral("joined") : QString() },
 			 { QStringLiteral("depth"), room.value(QStringLiteral("depth")) },
@@ -289,16 +295,28 @@ QVariantMap RoomModel::roomRow(const QVariantMap &room, const QString &kind) {
 }
 
 void RoomModel::replaceRoomStates(const QVariantList &voiceRooms, const QVariantList &textRooms) {
+	m_voiceRoomStates = voiceRooms;
+	m_textRoomStates = textRooms;
+	synchronizeAllRows();
+}
+
+void RoomModel::replaceDirectMessageStates(const QVariantList &conversations) {
+	m_directMessageStates = conversations;
+	synchronizeAllRows();
+}
+
+void RoomModel::synchronizeAllRows() {
 	QVariantList rows;
-	rows.reserve(voiceRooms.size() + textRooms.size());
+	rows.reserve(m_voiceRoomStates.size() + m_textRoomStates.size() + m_directMessageStates.size());
 	const auto append = [&rows](const QVariantList &rooms, const QString &kind) {
 		for (const QVariant &entry : rooms) {
 			const QVariantMap row = roomRow(entry.toMap(), kind);
 			if (!row.isEmpty()) rows.push_back(row);
 		}
 	};
-	append(voiceRooms, QStringLiteral("voice"));
-	append(textRooms, QStringLiteral("text"));
+	append(m_voiceRoomStates, QStringLiteral("voice"));
+	append(m_textRoomStates, QStringLiteral("text"));
+	append(m_directMessageStates, QStringLiteral("direct"));
 	synchronizeRows(rows);
 }
 
@@ -352,14 +370,18 @@ void ParticipantModel::updatePresence(const QString &sessionId, const QString &t
 }
 
 QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message) {
-	QString messageId = message.value(QStringLiteral("messageId")).toString().trimmed();
+	const QVariant messageIdValue = message.value(QStringLiteral("messageId"));
+	QString messageId = messageIdValue.toULongLong() > 0 ? messageIdValue.toString().trimmed() : QString();
 	if (messageId.isEmpty()) messageId = message.value(QStringLiteral("messageKey")).toString().trimmed();
+	if (messageId.isEmpty()) messageId = message.value(QStringLiteral("id")).toString().trimmed();
 	if (messageId.isEmpty()) return {};
 
 	return { { QStringLiteral("id"), messageId },
-			 { QStringLiteral("title"),
-			   message.value(QStringLiteral("actor"), message.value(QStringLiteral("actorLabel"))) },
-			 { QStringLiteral("subtitle"), message.value(QStringLiteral("bodyText")) },
+			 { QStringLiteral("title"), message.value(QStringLiteral("actor"),
+												 message.value(QStringLiteral("actorLabel"),
+															   message.value(QStringLiteral("actorName")))) },
+			 { QStringLiteral("subtitle"),
+			   message.value(QStringLiteral("bodyText"), message.value(QStringLiteral("plainText"))) },
 			 { QStringLiteral("kind"), QStringLiteral("message") },
 			 { QStringLiteral("status"), message.value(QStringLiteral("deliveryState")) },
 			 { QStringLiteral("avatarUrl"), message.value(QStringLiteral("avatarUrl")) },

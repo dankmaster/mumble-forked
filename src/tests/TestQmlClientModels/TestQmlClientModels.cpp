@@ -132,6 +132,23 @@ void TestQmlClientModels::roomAndParticipantStatesStayIncremental() {
 	QCOMPARE(roomInsertSpy.count(), 2);
 	QCOMPARE(roomChangedSpy.count(), 1);
 	QCOMPARE(roomResetSpy.count(), 0);
+	rooms.replaceDirectMessageStates(
+		{ QVariantMap { { QStringLiteral("token"), QStringLiteral("dm:7") },
+						{ QStringLiteral("session"), 7 }, { QStringLiteral("label"), QStringLiteral("Alice") },
+						{ QStringLiteral("subtitle"), QStringLiteral("Direct message") },
+						{ QStringLiteral("unreadCount"), 2 } } });
+	QCOMPARE(rooms.rowCount(), 3);
+	QCOMPARE(rooms.get(2).value(QStringLiteral("id")).toString(), QStringLiteral("direct:dm:7"));
+	QCOMPARE(rooms.get(2).value(QStringLiteral("kind")).toString(), QStringLiteral("direct"));
+	QCOMPARE(roomResetSpy.count(), 0);
+	rooms.replaceDirectMessageStates(
+		{ QVariantMap { { QStringLiteral("token"), QStringLiteral("dm:7") },
+						{ QStringLiteral("session"), 7 }, { QStringLiteral("label"), QStringLiteral("Alice") },
+						{ QStringLiteral("subtitle"), QStringLiteral("Direct message") },
+						{ QStringLiteral("unreadCount"), 0 }, { QStringLiteral("open"), true } } });
+	QCOMPARE(rooms.rowCount(), 3);
+	QVERIFY(rooms.get(2).value(QStringLiteral("selected")).toBool());
+	QCOMPARE(roomResetSpy.count(), 0);
 
 	ParticipantModel participants;
 	QSignalSpy participantResetSpy(&participants, &QAbstractItemModel::modelReset);
@@ -166,9 +183,9 @@ void TestQmlClientModels::stableIdsRemainIndependentFromSourceMaps() {
 void TestQmlClientModels::messageRolesExposeStructuredState() {
 	ChatTimelineModel model;
 	model.upsertMessage({ { QStringLiteral("messageKey"), QStringLiteral("message:7") },
-						  { QStringLiteral("title"), QStringLiteral("Alice") },
-						  { QStringLiteral("subtitle"), QStringLiteral("Hello") },
-						  { QStringLiteral("timestamp"), QStringLiteral("12:30") },
+						  { QStringLiteral("actor"), QStringLiteral("Alice") },
+						  { QStringLiteral("bodyText"), QStringLiteral("Hello") },
+						  { QStringLiteral("timeLabel"), QStringLiteral("12:30") },
 						  { QStringLiteral("replyActor"), QStringLiteral("Bob") },
 						  { QStringLiteral("replySnippet"), QStringLiteral("Earlier") },
 						  { QStringLiteral("reactions"), QVariantList { QVariantMap {
@@ -277,11 +294,18 @@ void TestQmlClientModels::duplicateStableIdsAreCoalesced() {
 void TestQmlClientModels::sessionPropertiesOnlyNotifyOnChanges() {
 	ClientSessionController session;
 	QSignalSpy spy(&session, &ClientSessionController::connectedChanged);
+	QSignalSpy motdSpy(&session, &ClientSessionController::motdHtmlChanged);
 	session.setConnected(false);
 	QCOMPARE(spy.count(), 0);
 	session.setConnected(true);
 	QCOMPARE(spy.count(), 1);
 	QVERIFY(session.connected());
+	session.setMotdHtml(QStringLiteral("<p>Welcome</p>"));
+	session.setMotdHtml(QStringLiteral("<p>Welcome</p>"));
+	session.setMotdSummary(QStringLiteral("Welcome"));
+	QCOMPARE(motdSpy.count(), 1);
+	QCOMPARE(session.motdHtml(), QStringLiteral("<p>Welcome</p>"));
+	QCOMPARE(session.motdSummary(), QStringLiteral("Welcome"));
 }
 
 void TestQmlClientModels::sessionPublishesTypedUpdateBanner() {

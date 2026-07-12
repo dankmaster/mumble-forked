@@ -21,6 +21,8 @@ class ClientSessionController final : public QObject {
 	Q_PROPERTY(bool selfMuted READ selfMuted WRITE setSelfMuted NOTIFY selfMutedChanged)
 	Q_PROPERTY(bool selfDeafened READ selfDeafened WRITE setSelfDeafened NOTIFY selfDeafenedChanged)
 	Q_PROPERTY(QVariantMap updateBanner READ updateBanner WRITE setUpdateBanner NOTIFY updateBannerChanged)
+	Q_PROPERTY(QString motdHtml READ motdHtml WRITE setMotdHtml NOTIFY motdHtmlChanged)
+	Q_PROPERTY(QString motdSummary READ motdSummary WRITE setMotdSummary NOTIFY motdSummaryChanged)
 
 public:
 	explicit ClientSessionController(QObject *parent = nullptr);
@@ -32,6 +34,8 @@ public:
 	bool selfMuted() const;
 	bool selfDeafened() const;
 	QVariantMap updateBanner() const;
+	QString motdHtml() const;
+	QString motdSummary() const;
 
 	void setServerName(const QString &value);
 	void setConnectionLabel(const QString &value);
@@ -40,6 +44,8 @@ public:
 	void setSelfMuted(bool value);
 	void setSelfDeafened(bool value);
 	void setUpdateBanner(const QVariantMap &value);
+	void setMotdHtml(const QString &value);
+	void setMotdSummary(const QString &value);
 
 signals:
 	void serverNameChanged();
@@ -49,6 +55,8 @@ signals:
 	void selfMutedChanged();
 	void selfDeafenedChanged();
 	void updateBannerChanged();
+	void motdHtmlChanged();
+	void motdSummaryChanged();
 
 private:
 	QString m_serverName = QStringLiteral("Mumble");
@@ -58,6 +66,8 @@ private:
 	bool m_selfMuted = false;
 	bool m_selfDeafened = false;
 	QVariantMap m_updateBanner;
+	QString m_motdHtml;
+	QString m_motdSummary;
 };
 
 class ActiveScopeController final : public QObject {
@@ -169,9 +179,14 @@ class RoomModel final : public StableListModel {
 public:
 	using StableListModel::StableListModel;
 	void replaceRoomStates(const QVariantList &voiceRooms, const QVariantList &textRooms);
+	void replaceDirectMessageStates(const QVariantList &conversations);
 
 private:
 	static QVariantMap roomRow(const QVariantMap &room, const QString &kind);
+	void synchronizeAllRows();
+	QVariantList m_voiceRoomStates;
+	QVariantList m_textRoomStates;
+	QVariantList m_directMessageStates;
 };
 
 class ParticipantModel final : public StableListModel {

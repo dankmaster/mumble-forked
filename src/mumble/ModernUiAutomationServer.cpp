@@ -2784,14 +2784,13 @@ namespace {
 		state.insert(QStringLiteral("lastSeenSignature"),
 					 Global::get().s.qsModernShellMotdLastSeenSignature);
 
-		if (window) {
-			const QVariantMap snapshot = window->buildModernShellSnapshot();
-			const QVariantMap app = snapshot.value(QStringLiteral("app")).toMap();
-			const QString motdHtml = app.value(QStringLiteral("motdHtml")).toString();
+		if (window && window->qmlShellHost()) {
+			ClientSessionController *session = window->qmlShellHost()->sessionController();
+			const QString motdHtml = session->motdHtml();
 			const QString signature = automationMotdContentSignature(motdHtml);
 			state.insert(QStringLiteral("motdHtmlPresent"), !motdHtml.trimmed().isEmpty());
 			state.insert(QStringLiteral("motdSignature"), signature);
-			state.insert(QStringLiteral("motdSummary"), app.value(QStringLiteral("motdSummary")).toString());
+			state.insert(QStringLiteral("motdSummary"), session->motdSummary());
 		}
 
 		return state;
@@ -2804,7 +2803,7 @@ namespace {
 		Global::get().s.qsModernShellMotdLastSeenSignature = lastSeenSignature;
 		Global::get().s.save();
 		if (window) {
-			window->queueModernShellSnapshotSyncImmediate();
+			window->scheduleQmlShellStateSyncImmediate();
 		}
 	}
 
@@ -3923,7 +3922,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 
 		const auto applyProbe = [state](MainWindow *window) {
 			window->m_stonksState = state;
-			window->queueModernShellSnapshotSyncImmediate();
+			window->scheduleQmlShellStateSyncImmediate();
 		};
 
 		if (async) {
@@ -3938,7 +3937,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 	if (command == QLatin1String("clearStonksProbe")) {
 		const auto clearProbe = [](MainWindow *window) {
 			window->m_stonksState.clear();
-			window->queueModernShellSnapshotSyncImmediate();
+			window->scheduleQmlShellStateSyncImmediate();
 		};
 
 		if (async) {
@@ -3959,7 +3958,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 
 		const auto applyProbe = [state](MainWindow *window) {
 			window->m_modernConnectionStateProbe = state;
-			window->queueModernShellSnapshotSyncImmediate();
+			window->scheduleQmlShellStateSyncImmediate();
 		};
 
 		if (async) {
@@ -3976,7 +3975,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 	if (command == QLatin1String("clearConnectionStateProbe")) {
 		const auto clearProbe = [](MainWindow *window) {
 			window->m_modernConnectionStateProbe.clear();
-			window->queueModernShellSnapshotSyncImmediate();
+			window->scheduleQmlShellStateSyncImmediate();
 		};
 
 		if (async) {
@@ -3998,7 +3997,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 
 		const auto applyProbe = [state](MainWindow *window) {
 			window->m_modernScreenShareStateProbe = state;
-			window->queueModernShellSnapshotSyncImmediate();
+			window->scheduleQmlShellStateSyncImmediate();
 		};
 
 		if (async) {
@@ -4016,7 +4015,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 	if (command == QLatin1String("clearScreenShareProbe")) {
 		const auto clearProbe = [](MainWindow *window) {
 			window->m_modernScreenShareStateProbe.clear();
-			window->queueModernShellSnapshotSyncImmediate();
+			window->scheduleQmlShellStateSyncImmediate();
 		};
 
 		if (async) {
@@ -4041,7 +4040,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 
 		const auto applyProbe = [messages](MainWindow *window) {
 			window->m_modernRichPreviewProbeMessages = messages;
-			window->queueModernShellSnapshotSyncImmediate();
+			window->scheduleQmlShellStateSyncImmediate();
 		};
 
 		if (async) {
@@ -4058,7 +4057,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 	if (command == QLatin1String("clearRichPreviewProbe")) {
 		const auto clearProbe = [](MainWindow *window) {
 			window->m_modernRichPreviewProbeMessages.clear();
-			window->queueModernShellSnapshotSyncImmediate();
+			window->scheduleQmlShellStateSyncImmediate();
 		};
 
 		if (async) {
@@ -4074,7 +4073,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		const QVariantList messages = automationMessageDeliveryProbeMessages();
 		const auto applyProbe = [messages](MainWindow *window) {
 			window->m_modernMessageDeliveryProbeMessages = messages;
-			window->queueModernShellSnapshotSyncImmediate();
+			window->scheduleQmlShellStateSyncImmediate();
 		};
 
 		if (async) {
@@ -4091,7 +4090,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 	if (command == QLatin1String("clearMessageDeliveryProbe")) {
 		const auto clearProbe = [](MainWindow *window) {
 			window->m_modernMessageDeliveryProbeMessages.clear();
-			window->queueModernShellSnapshotSyncImmediate();
+			window->scheduleQmlShellStateSyncImmediate();
 		};
 
 		if (async) {
@@ -4186,9 +4185,9 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 										   ? QStringLiteral("-1:0")
 										   : QStringLiteral("-2:%1").arg(static_cast< qulonglong >(session));
 			const bool selected = window->handleModernShellScopeSelection(scopeToken);
-			window->publishModernDirectMessagesPatch();
+			window->publishQmlDirectMessagesState();
 			window->publishModernShellActiveScopeState();
-			window->queueModernShellSnapshotSyncImmediate();
+			window->scheduleQmlShellStateSyncImmediate();
 			return selected;
 		};
 
@@ -4239,8 +4238,8 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			}
 
 			window->handleModernShellScopeSelection(QStringLiteral("-1:0"));
-			window->publishModernDirectMessagesPatch();
-			window->queueModernShellSnapshotSyncImmediate();
+			window->publishQmlDirectMessagesState();
+			window->scheduleQmlShellStateSyncImmediate();
 		};
 
 		if (async) {
