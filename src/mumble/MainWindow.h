@@ -517,7 +517,6 @@ public:
 	bool canManagePersistentTextChannels() const;
 	bool canEditPersistentTextChannelACL(const PersistentTextChannel &textChannel) const;
 	std::optional< PersistentTextChannel > selectedPersistentTextChannel() const;
-	bool promptForPersistentTextChannel(PersistentTextChannel &textChannel, bool isNew);
 	void openServerSettingsDialog();
 	void createPersistentTextChannel();
 	void editPersistentTextChannel();
