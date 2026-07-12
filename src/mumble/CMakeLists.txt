@@ -226,6 +226,7 @@ set(MUMBLE_SOURCES
 	"PluginManifest.cpp"
 	"PluginManifest.h"
 	"PluginUpdater.cpp"
+	"PluginUpdatePreparation.cpp"
 	"PluginUpdater.h"
 	"PositionalData.cpp"
 	"PositionalData.h"
@@ -351,6 +352,8 @@ list(APPEND MUMBLE_SOURCES
 	"QmlClientModels.h"
 	"QmlShellHost.cpp"
 	"QmlShellHost.h"
+	"QmlImageProvider.cpp"
+	"QmlImageProvider.h"
 	"QmlThemeController.cpp"
 	"QmlThemeController.h"
 )
@@ -471,8 +474,15 @@ else()
 	endif()
 endif()
 
+if(APPLE)
+	set(MUMBLE_MODERN_THEME_INSTALL_DIR
+		"${MUMBLE_INSTALL_EXECUTABLEDIR}/Mumble.app/Contents/MacOS/ModernThemes")
+else()
+	set(MUMBLE_MODERN_THEME_INSTALL_DIR "${MUMBLE_INSTALL_EXECUTABLEDIR}/ModernThemes")
+endif()
+
 install(DIRECTORY "${MUMBLE_MODERN_THEME_SOURCE_DIR}/"
-	DESTINATION "${MUMBLE_INSTALL_EXECUTABLEDIR}/ModernThemes"
+	DESTINATION "${MUMBLE_MODERN_THEME_INSTALL_DIR}"
 	COMPONENT mumble_client
 	FILES_MATCHING PATTERN "*.mumble-theme.json"
 )

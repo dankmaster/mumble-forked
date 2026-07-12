@@ -1,0 +1,287 @@
+name: Qt Quick Desktop Clients
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: qt-quick-desktop-clients-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  BUILD_TYPE: Release
+  CMAKE_OPTIONS: -Dtests=OFF -Dsymbols=ON -Ddisplay-install-paths=ON -Dtest-lto=OFF
+  QT_VERSION: 6.9.1
+  AQTINSTALL_VERSION: 3.1.21
+
+jobs:
+  linux-qt-quick-client:
+    name: linux-qt-quick-client
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Initialize submodules with retry
+        shell: bash
+        run: bash "$GITHUB_WORKSPACE/.github/workflows/update_submodules_with_retry.sh"
+
+      - name: Set shared Linux environment
+        shell: bash
+        run: $GITHUB_WORKSPACE/.github/workflows/set_environment_variables.sh "ubuntu-24.04" "shared" "x86_64" "${{ github.workspace }}"
+
+      - name: Install non-Qt Linux dependencies
+        uses: ./.github/actions/install-dependencies
+        with:
+          type: shared
+          os: ubuntu-24.04
+          arch: x86_64
+
+      - name: Restore official Qt cache
+        id: qt-cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.ci/Qt
+          key: official-qt-linux-${{ env.QT_VERSION }}-webengine-webchannel-v2
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install official Qt
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 -m pip install --disable-pip-version-check "aqtinstall==$AQTINSTALL_VERSION"
+          qt_root="$GITHUB_WORKSPACE/.ci/Qt"
+          if ! find "$qt_root" -path '*/lib/cmake/Qt6/Qt6Config.cmake' -print -quit | grep -q .; then
+            # QtSvg and QtTools are base-package archives. WebChannel is fetched
+            # only because the official QtWebEngine binary is linked against it;
+            # the Mumble client itself does not use the module or an app bridge.
+            python3 -m aqt install-qt linux desktop "$QT_VERSION" linux_gcc_64 \
+              --outputdir "$qt_root" -m qtwebengine qtwebchannel
+          fi
+          qt6_config="$(find "$qt_root" -path '*/lib/cmake/Qt6/Qt6Config.cmake' -print -quit)"
+          test -f "$qt6_config"
+          qt_prefix="$(cd "$(dirname "$qt6_config")/../../.." && pwd)"
+          test -x "$qt_prefix/bin/qmlimportscanner"
+          echo "Qt6_DIR=$(dirname "$qt6_config")" >> "$GITHUB_ENV"
+          echo "QT_PREFIX=$qt_prefix" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$qt_prefix${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}" >> "$GITHUB_ENV"
+          echo "$qt_prefix/bin" >> "$GITHUB_PATH"
+
+      - name: Select Qt Quick client components
+        shell: bash
+        run: |
+          set -euxo pipefail
+          echo "MUMBLE_BUILD_CLIENT=ON" >> "$GITHUB_ENV"
+          echo "MUMBLE_BUILD_SERVER=OFF" >> "$GITHUB_ENV"
+          echo "CMAKE_OPTIONS=${CMAKE_OPTIONS} -Dbenchmarks=OFF" >> "$GITHUB_ENV"
+
+      - name: Build shared Qt Quick client
+        shell: bash
+        env:
+          MUMBLE_BUILD_NUMBER: 0
+        run: ./.github/workflows/build.sh "ubuntu-24.04" "shared" "x86_64"
+
+      - name: Stage client runtime
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --install build --prefix "$GITHUB_WORKSPACE/stage-linux" --component mumble_client
+          test -x stage-linux/bin/mumble
+          test -x stage-linux/bin/mumble-screen-helper
+          test -f stage-linux/bin/ModernThemes/catppuccin-nord.mumble-theme.json
+
+      - name: Smoke Qt Quick imports and runtime
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export LD_LIBRARY_PATH="$QT_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export QML2_IMPORT_PATH="$QT_PREFIX/qml${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
+          log="$RUNNER_TEMP/mumble-qml-smoke.log"
+          config="$RUNNER_TEMP/mumble-qml-smoke.json"
+          set +e
+          timeout 15s stage-linux/bin/mumble --multiple --config "$config" >"$log" 2>&1
+          status=$?
+          set -e
+          cat "$log"
+          if [[ "$status" -ne 124 ]]; then
+            echo "Qt Quick client did not remain alive for the smoke window (status $status)" >&2
+            exit 1
+          fi
+          if grep -Eiq 'QQmlApplicationEngine failed|module ".*" is not installed|is not a type|Qt Quick shell could not load|failed to create.*QML' "$log"; then
+            echo "Qt Quick import/runtime failure detected" >&2
+            exit 1
+          fi
+
+      - name: Validate staged Linux runtime
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export LD_LIBRARY_PATH="$QT_PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          ldd stage-linux/bin/mumble | tee stage-linux/runtime-dependencies.txt
+          ! grep -q 'not found' stage-linux/runtime-dependencies.txt
+          tar -C stage-linux -czf mumble-linux-qt-quick-staged-runtime.tar.gz .
+          tar -tzf mumble-linux-qt-quick-staged-runtime.tar.gz >/dev/null
+          test -s mumble-linux-qt-quick-staged-runtime.tar.gz
+
+      - name: Upload staged Linux runtime
+        uses: actions/upload-artifact@v6
+        with:
+          name: Mumble-linux-qt-quick-staged-runtime
+          compression-level: 0
+          path: |
+            mumble-linux-qt-quick-staged-runtime.tar.gz
+            stage-linux/runtime-dependencies.txt
+
+  macos-qt-quick-client:
+    name: macos-qt-quick-client
+    runs-on: macos-15-intel
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Initialize submodules with retry
+        shell: bash
+        run: bash "$GITHUB_WORKSPACE/.github/workflows/update_submodules_with_retry.sh"
+
+      - name: Set shared macOS environment
+        shell: bash
+        run: $GITHUB_WORKSPACE/.github/workflows/set_environment_variables.sh "macos-15-intel" "shared" "x86_64" "${{ github.workspace }}"
+
+      - name: Install non-Qt macOS dependencies
+        uses: ./.github/actions/install-dependencies
+        with:
+          type: shared
+          os: macos-15-intel
+          arch: x86_64
+
+      - name: Restore official Qt cache
+        id: qt-cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.ci/Qt
+          key: official-qt-macos-${{ env.QT_VERSION }}-webengine-webchannel-v2
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install official Qt
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 -m pip install --disable-pip-version-check "aqtinstall==$AQTINSTALL_VERSION"
+          qt_root="$GITHUB_WORKSPACE/.ci/Qt"
+          if ! find "$qt_root" -path '*/lib/cmake/Qt6/Qt6Config.cmake' -print -quit | grep -q .; then
+            # QtSvg and QtTools are base-package archives. WebChannel is fetched
+            # only because the official QtWebEngine binary is linked against it;
+            # the Mumble client itself does not use the module or an app bridge.
+            python3 -m aqt install-qt mac desktop "$QT_VERSION" clang_64 \
+              --outputdir "$qt_root" -m qtwebengine qtwebchannel
+          fi
+          qt6_config="$(find "$qt_root" -path '*/lib/cmake/Qt6/Qt6Config.cmake' -print -quit)"
+          test -f "$qt6_config"
+          qt_prefix="$(cd "$(dirname "$qt6_config")/../../.." && pwd)"
+          test -x "$qt_prefix/bin/macdeployqt"
+          test -x "$qt_prefix/bin/qmlimportscanner"
+          echo "Qt6_DIR=$(dirname "$qt6_config")" >> "$GITHUB_ENV"
+          echo "QT_PREFIX=$qt_prefix" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$qt_prefix${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}" >> "$GITHUB_ENV"
+          echo "$qt_prefix/bin" >> "$GITHUB_PATH"
+
+      - name: Select Qt Quick client components
+        shell: bash
+        run: |
+          set -euxo pipefail
+          echo "MUMBLE_BUILD_CLIENT=ON" >> "$GITHUB_ENV"
+          echo "MUMBLE_BUILD_SERVER=OFF" >> "$GITHUB_ENV"
+          echo "CMAKE_OPTIONS=${CMAKE_OPTIONS} -Dbenchmarks=OFF" >> "$GITHUB_ENV"
+
+      - name: Build shared Qt Quick client
+        shell: bash
+        env:
+          MUMBLE_BUILD_NUMBER: 0
+        run: ./.github/workflows/build.sh "macos-15-intel" "shared" "x86_64"
+
+      - name: Stage and deploy app bundle
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmake --install build --prefix "$GITHUB_WORKSPACE/stage-macos" --component mumble_client
+          app="$GITHUB_WORKSPACE/stage-macos/Mumble.app"
+          test -x "$app/Contents/MacOS/Mumble"
+          test -f "$app/Contents/MacOS/ModernThemes/catppuccin-nord.mumble-theme.json"
+          plutil -lint "$app/Contents/Info.plist"
+          "$QT_PREFIX/bin/macdeployqt" "$app" -qmldir="$GITHUB_WORKSPACE/src/mumble/qml-shell" -always-overwrite -verbose=2
+          test -x "$(find "$app" -type f -name QtWebEngineProcess -print -quit)"
+          find "$app/Contents/Resources/qml" -path '*/QtQuick*' -print -quit | grep -q .
+          find "$app/Contents/Resources/qml" -path '*/QtWebEngine*' -print -quit | grep -q .
+
+      - name: Smoke deployed Qt Quick runtime
+        shell: bash
+        run: |
+          set -euxo pipefail
+          app="$GITHUB_WORKSPACE/stage-macos/Mumble.app"
+          log="$RUNNER_TEMP/mumble-qml-smoke.log"
+          config="$RUNNER_TEMP/mumble-qml-smoke.json"
+          "$app/Contents/MacOS/Mumble" --multiple --config "$config" >"$log" 2>&1 &
+          pid=$!
+          cleanup() {
+            if kill -0 "$pid" 2>/dev/null; then
+              kill -TERM "$pid" 2>/dev/null || true
+              wait "$pid" 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+          for _ in $(seq 1 15); do
+            if ! kill -0 "$pid" 2>/dev/null; then
+              wait "$pid" || status=$?
+              cat "$log"
+              echo "Qt Quick client exited during smoke (status ${status:-0})" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          cat "$log"
+          if grep -Eiq 'QQmlApplicationEngine failed|module ".*" is not installed|is not a type|Qt Quick shell could not load|failed to create.*QML' "$log"; then
+            echo "Qt Quick import/runtime failure detected" >&2
+            exit 1
+          fi
+          cleanup
+          trap - EXIT
+
+      - name: Validate app bundle artifact
+        shell: bash
+        run: |
+          set -euxo pipefail
+          app="$GITHUB_WORKSPACE/stage-macos/Mumble.app"
+          otool -L "$app/Contents/MacOS/Mumble" | tee stage-macos/runtime-dependencies.txt
+          ! grep -E '/(build|Users/runner/work)/' stage-macos/runtime-dependencies.txt
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --strict "$app"
+          ditto -c -k --sequesterRsrc --keepParent "$app" mumble-macos-qt-quick-client.zip
+          unzip -t mumble-macos-qt-quick-client.zip >/dev/null
+          test -s mumble-macos-qt-quick-client.zip
+
+      - name: Upload macOS Qt Quick client
+        uses: actions/upload-artifact@v6
+        with:
+          name: Mumble-macos-qt-quick-client
+          compression-level: 0
+          path: |
+            mumble-macos-qt-quick-client.zip
+            stage-macos/runtime-dependencies.txt
