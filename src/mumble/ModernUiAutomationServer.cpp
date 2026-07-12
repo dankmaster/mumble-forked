@@ -3539,27 +3539,6 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		return response;
 	}
 
-	if (command == QLatin1String("runMotdUiProbe")) {
-		if (!m_mainWindow->m_modernShellHost) {
-			return errorResponse(tr("Modern shell host is not available."));
-		}
-		const QString action = request.value(QStringLiteral("action")).toString().trimmed();
-		const QString signature = request.value(QStringLiteral("signature")).toString().trimmed();
-		if (action.isEmpty()) {
-			return errorResponse(tr("Missing MOTD action."));
-		}
-
-		const QVariantList args { action, signature };
-		const QString script =
-			QStringLiteral("(function(){"
-						   "if(!window.__mumbleModernMotdProbeAction){return {handled:false,reason:'missing-helper'};}"
-						   "return window.__mumbleModernMotdProbeAction.apply(null,%1);"
-						   "})()")
-				.arg(QString::fromUtf8(QJsonDocument::fromVariant(args).toJson(QJsonDocument::Compact)));
-		QVariantMap response = okResponse();
-		response.insert(QStringLiteral("result"), m_mainWindow->m_modernShellHost->runAutomationScriptResult(script));
-		return response;
-	}
 
 	if (command == QLatin1String("invokeScopeAction")) {
 		const QString scopeToken = request.value(QStringLiteral("scopeToken")).toString().trimmed();
@@ -3648,288 +3627,38 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		return okResponse();
 	}
 
-	if (command == QLatin1String("setHostViewport")) {
-		const int width  = request.value(QStringLiteral("width")).toInt();
-		const int height = request.value(QStringLiteral("height")).toInt();
-		const bool railOpen = request.value(QStringLiteral("railOpen")).toBool();
-		if (width <= 0 || height <= 0) {
-			return errorResponse(tr("Missing width or height."));
-		}
-
-		if (async) {
-			scheduleAction([width, height, railOpen](MainWindow *window) {
-				if (window->m_modernShellHost) {
-					window->m_modernShellHost->publishHostViewportMetrics(QSize(width, height), railOpen);
-				}
-			});
-			return asyncResponse();
-		}
-
-		if (m_mainWindow->m_modernShellHost) {
-			m_mainWindow->m_modernShellHost->publishHostViewportMetrics(QSize(width, height), railOpen);
-		}
-		return okResponse();
-	}
-
-	if (command == QLatin1String("openMenuProbe")) {
-		const QString variant = request.value(QStringLiteral("variant")).toString().trimmed();
-		const bool knownVariant = variant == QLatin1String("app") || variant == QLatin1String("self")
-								  || variant == QLatin1String("room") || variant == QLatin1String("member")
-								  || variant == QLatin1String("message") || variant == QLatin1String("textRoom")
-								  || variant == QLatin1String("textroom")
-								  || variant == QLatin1String("textRoomReal")
-								  || variant == QLatin1String("textroomreal") || variant == QLatin1String("chat")
-								  || variant == QLatin1String("background") || variant == QLatin1String("chatbackground");
-		if (!knownVariant) {
-			return errorResponse(tr("Unknown menu probe '%1'.").arg(variant));
-		}
-
-		const auto openProbe = [variant](MainWindow *window) {
-			if (!window->m_modernShellHost) {
-				return;
-			}
-			window->m_modernShellHost->clearLastNativeContextMenuRequest();
-			window->m_modernShellHost->runAutomationScript(
-				QStringLiteral("if(window.__mumbleModernOpenMenuProbe){"
-							   "window.__mumbleModernOpenMenuProbe('%1');"
-							   "}")
-					.arg(variant));
-		};
-
-		if (async) {
-			scheduleAction(openProbe);
-			return asyncResponse();
-		}
-
-		openProbe(m_mainWindow);
-		return okResponse();
-	}
-
-	if (command == QLatin1String("lastNativeContextMenu")) {
-		QVariantMap response = okResponse();
-		response.insert(QStringLiteral("request"),
-						m_mainWindow->m_modernShellHost ? m_mainWindow->m_modernShellHost->lastNativeContextMenuRequest()
-														: QVariantMap());
-		return response;
-	}
-
-	if (command == QLatin1String("visibleMenuLabels")) {
-		const QString variant = request.value(QStringLiteral("variant")).toString().trimmed();
-		if (!m_mainWindow->m_modernShellHost) {
-			return errorResponse(tr("Modern shell host is not available."));
-		}
-
-		const QVariantList args { variant };
-		const QString script =
-			QStringLiteral("(function(){"
-						   "if(!window.__mumbleModernVisibleMenuLabels){return [];}"
-						   "return window.__mumbleModernVisibleMenuLabels.apply(null,%1);"
-						   "})()")
-				.arg(QString::fromUtf8(QJsonDocument::fromVariant(args).toJson(QJsonDocument::Compact)));
-		QVariantMap response = okResponse();
-		response.insert(QStringLiteral("labels"), m_mainWindow->m_modernShellHost->runAutomationScriptResult(script));
-		return response;
-	}
-
-	if (command == QLatin1String("invokeLastNativeContextMenuAction")) {
-		if (!m_mainWindow->m_modernShellHost) {
-			return errorResponse(tr("Modern shell host is not available."));
-		}
-
-		const QVariantMap menuRequest = m_mainWindow->m_modernShellHost->lastNativeContextMenuRequest();
-		QString token = request.value(QStringLiteral("menuToken")).toString().trimmed();
-		if (token.isEmpty()) {
-			token = menuRequest.value(QStringLiteral("token")).toString().trimmed();
-		}
-		if (token.isEmpty()) {
-			return errorResponse(tr("No native context menu token is available."));
-		}
-
-		bool parsedIndex = false;
-		int actionIndex  = request.value(QStringLiteral("actionIndex")).toInt(&parsedIndex);
-		const QString label = request.value(QStringLiteral("label")).toString().trimmed();
-		if (!label.isEmpty()) {
-			if (!findNativeContextActionIndexByLabel(menuRequest.value(QStringLiteral("items")).toList(), label,
-													&actionIndex)) {
-				return errorResponse(tr("Native context menu action '%1' was not found.").arg(label));
-			}
-			parsedIndex = true;
-		}
-		if (!parsedIndex || actionIndex < 0) {
-			return errorResponse(tr("Missing native context menu action index."));
-		}
-
-		const QVariantList args { token, actionIndex };
-		const QString script =
-			QStringLiteral("(function(){"
-						   "if(!window.__mumbleModernInvokeNativeContextMenuAction){return false;}"
-						   "return !!window.__mumbleModernInvokeNativeContextMenuAction.apply(null,%1);"
-						   "})()")
-				.arg(QString::fromUtf8(QJsonDocument::fromVariant(args).toJson(QJsonDocument::Compact)));
-		QVariantMap response = okResponse();
-		response.insert(QStringLiteral("label"), label);
-		response.insert(QStringLiteral("actionIndex"), actionIndex);
-		response.insert(QStringLiteral("invoked"), m_mainWindow->m_modernShellHost->runAutomationScriptResult(script).toBool());
-		if (request.value(QStringLiteral("close"), true).toBool()) {
-			m_mainWindow->m_modernShellHost->closeNativeContextMenuForAutomation();
-		}
-		return response;
-	}
-
-	if (command == QLatin1String("closeNativeContextMenu")) {
-		if (m_mainWindow->m_modernShellHost) {
-			m_mainWindow->m_modernShellHost->closeNativeContextMenuForAutomation();
-		}
-		return okResponse();
-	}
-
-	if (command == QLatin1String("modernShellActionState")) {
-		if (!m_mainWindow->m_modernShellHost) {
-			return errorResponse(tr("Modern shell host is not available."));
-		}
-
-		const QString script =
-			QStringLiteral("(function(){"
-						   "if(!window.__mumbleModernAutomationActionState){return {};}"
-						   "return window.__mumbleModernAutomationActionState();"
-						   "})()");
-		QVariantMap response = okResponse();
-		response.insert(QStringLiteral("state"), m_mainWindow->m_modernShellHost->runAutomationScriptResult(script));
-		return response;
-	}
-
-	if (command == QLatin1String("resetModernShellActionState")) {
-		if (!m_mainWindow->m_modernShellHost) {
-			return errorResponse(tr("Modern shell host is not available."));
-		}
-
-		const QVariantMap options {
-			{ QStringLiteral("clearComposer"), request.value(QStringLiteral("clearComposer"), true).toBool() }
-		};
-		const QVariantList args { options };
-		const QString script =
-			QStringLiteral("(function(){"
-						   "if(!window.__mumbleModernResetAutomationActionState){return {};}"
-						   "return window.__mumbleModernResetAutomationActionState.apply(null,%1);"
-						   "})()")
-				.arg(QString::fromUtf8(QJsonDocument::fromVariant(args).toJson(QJsonDocument::Compact)));
-		QVariantMap response = okResponse();
-		response.insert(QStringLiteral("state"), m_mainWindow->m_modernShellHost->runAutomationScriptResult(script));
-		return response;
-	}
 
 	if (command == QLatin1String("modernDialogFieldState")) {
-		if (!m_mainWindow->m_modernDialogHost && !m_mainWindow->m_modernShellHost) {
-			return errorResponse(tr("Modern dialog host is not available."));
-		}
-
 		const QString fieldID = request.value(QStringLiteral("fieldId")).toString().trimmed();
-		if (fieldID.isEmpty()) {
-			return errorResponse(tr("Missing fieldId."));
-		}
-
-		const QVariantList args { fieldID };
-		const QString script =
-			QStringLiteral("(function(){"
-						   "if(!window.__mumbleModernDialogFieldState){return {};}"
-						   "return window.__mumbleModernDialogFieldState.apply(null,%1);"
-						   "})()")
-				.arg(QString::fromUtf8(QJsonDocument::fromVariant(args).toJson(QJsonDocument::Compact)));
-		QVariantMap response = okResponse();
-		QVariant fieldState;
-		if (m_mainWindow->m_modernDialogHost) {
-			fieldState = m_mainWindow->m_modernDialogHost->runAutomationScriptResult(script);
-		}
-		if (!fieldState.toMap().value(QStringLiteral("exists")).toBool() && m_mainWindow->m_modernShellHost) {
-			fieldState = m_mainWindow->m_modernShellHost->runAutomationScriptResult(script);
-		}
-		if (!fieldState.toMap().value(QStringLiteral("exists")).toBool() && m_mainWindow->m_modernDialogController) {
-			const QVariantMap state = m_mainWindow->m_modernDialogController->state();
-			if (state.value(QStringLiteral("open")).toBool()) {
-				m_mainWindow->publishModernDialogState(state);
+		const QVariantMap state = m_mainWindow->m_modernDialogController ? m_mainWindow->m_modernDialogController->state() : QVariantMap();
+		QVariantMap fieldState;
+		for (const QVariant &sectionValue : state.value(QStringLiteral("sections")).toList()) {
+			for (const QVariant &fieldValue : sectionValue.toMap().value(QStringLiteral("fields")).toList()) {
+				const QVariantMap field = fieldValue.toMap();
+				if (field.value(QStringLiteral("id")).toString() == fieldID) { fieldState = field; break; }
 			}
 		}
-		response.insert(QStringLiteral("field"), fieldState);
-		return response;
+		fieldState.insert(QStringLiteral("exists"), !fieldState.isEmpty());
+		QVariantMap response = okResponse(); response.insert(QStringLiteral("field"), fieldState); return response;
 	}
 
 	if (command == QLatin1String("modernDialogDomState")) {
-		if (!m_mainWindow->m_modernDialogHost && !m_mainWindow->m_modernShellHost) {
-			return errorResponse(tr("Modern dialog host is not available."));
-		}
-
-		const QString script =
-			QStringLiteral("(function(){"
-						   "function text(node){return node ? String(node.textContent || '').trim() : '';}"
-						   "var dialog=document.getElementById('modern-dialog');"
-						   "var body=document.getElementById('modern-dialog-body');"
-						   "var root=dialog || document.body;"
-						   "var tab=root ? root.querySelector('.stonks-tab.is-selected,[role=\"tab\"][aria-selected=\"true\"],.modern-dialog-tab.is-selected,.modern-tab.is-selected') : null;"
-						   "return {"
-						   "exists:!!dialog,"
-						   "ready:!!(dialog && body),"
-						   "className:dialog ? String(dialog.className || '') : '',"
-						   "title:text(document.getElementById('modern-dialog-title')),"
-						   "eyebrow:text(document.getElementById('modern-dialog-eyebrow')),"
-						   "subtitle:text(document.getElementById('modern-dialog-subtitle')),"
-						   "activeTab:text(tab),"
-						   "bodyText:body ? String(body.innerText || body.textContent || '').trim() : ''"
-						   "};"
-						   "})()");
-		QVariantMap response = okResponse();
-		QVariant domState;
-		if (m_mainWindow->m_modernDialogHost) {
-			domState = m_mainWindow->m_modernDialogHost->runAutomationScriptResult(script);
-		}
-		if (!domState.toMap().value(QStringLiteral("exists")).toBool() && m_mainWindow->m_modernShellHost) {
-			domState = m_mainWindow->m_modernShellHost->runAutomationScriptResult(script);
-		}
-		if (!domState.toMap().value(QStringLiteral("exists")).toBool() && m_mainWindow->m_modernDialogController) {
-			const QVariantMap state = m_mainWindow->m_modernDialogController->state();
-			if (state.value(QStringLiteral("open")).toBool()) {
-				m_mainWindow->publishModernDialogState(state);
-			}
-		}
-		response.insert(QStringLiteral("state"), domState);
-		return response;
+		const QVariantMap state = m_mainWindow->m_modernDialogController ? m_mainWindow->m_modernDialogController->state() : QVariantMap();
+		QVariantMap result; result.insert(QStringLiteral("exists"), state.value(QStringLiteral("open")));
+		result.insert(QStringLiteral("ready"), state.value(QStringLiteral("open")));
+		result.insert(QStringLiteral("title"), state.value(QStringLiteral("title")));
+		result.insert(QStringLiteral("eyebrow"), state.value(QStringLiteral("eyebrow")));
+		result.insert(QStringLiteral("subtitle"), state.value(QStringLiteral("subtitle")));
+		result.insert(QStringLiteral("state"), state);
+		QVariantMap response = okResponse(); response.insert(QStringLiteral("state"), result); return response;
 	}
 
 	if (command == QLatin1String("setModernDialogFieldValue")) {
-		if (!m_mainWindow->m_modernDialogHost && !m_mainWindow->m_modernShellHost) {
-			return errorResponse(tr("Modern dialog host is not available."));
-		}
-
 		const QString fieldID = request.value(QStringLiteral("fieldId")).toString().trimmed();
-		if (fieldID.isEmpty()) {
-			return errorResponse(tr("Missing fieldId."));
-		}
-
-		const QVariantMap options {
-			{ QStringLiteral("focus"), request.value(QStringLiteral("focus"), true).toBool() }
-		};
-		const QVariantList args { fieldID, request.value(QStringLiteral("value")), options };
-		const QString script =
-			QStringLiteral("(function(){"
-						   "if(!window.__mumbleModernSetDialogFieldValue){return {};}"
-						   "return window.__mumbleModernSetDialogFieldValue.apply(null,%1);"
-						   "})()")
-				.arg(QString::fromUtf8(QJsonDocument::fromVariant(args).toJson(QJsonDocument::Compact)));
-		QVariantMap response = okResponse();
-		QVariant fieldState;
-		if (m_mainWindow->m_modernDialogHost) {
-			fieldState = m_mainWindow->m_modernDialogHost->runAutomationScriptResult(script);
-		}
-		if (!fieldState.toMap().value(QStringLiteral("exists")).toBool() && m_mainWindow->m_modernShellHost) {
-			fieldState = m_mainWindow->m_modernShellHost->runAutomationScriptResult(script);
-		}
-		if (!fieldState.toMap().value(QStringLiteral("exists")).toBool() && m_mainWindow->m_modernDialogController) {
-			const QVariantMap state = m_mainWindow->m_modernDialogController->state();
-			if (state.value(QStringLiteral("open")).toBool()) {
-				m_mainWindow->publishModernDialogState(state);
-			}
-		}
-		response.insert(QStringLiteral("field"), fieldState);
-		return response;
+		if (fieldID.isEmpty() || !m_mainWindow->m_modernDialogController) return errorResponse(tr("Dialog field is not available."));
+		const QVariantMap state = m_mainWindow->m_modernDialogController->state();
+		m_mainWindow->handleModernDialogFieldUpdate(state.value(QStringLiteral("id")).toString(), fieldID, request.value(QStringLiteral("value")));
+		QVariantMap response = okResponse(); response.insert(QStringLiteral("fieldId"), fieldID); return response;
 	}
 
 	if (command == QLatin1String("setClipboardText")) {

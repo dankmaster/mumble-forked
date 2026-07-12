@@ -68,9 +68,7 @@ class PersistentChatController;
 class PersistentChatHistoryModel;
 class PersistentChatHistoryDelegate;
 class ModernDialogController;
-class ModernDialogHost;
 class ModernPttToolHost;
-class ModernShellHost;
 class QmlShellHost;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 class ModernUiAutomationServer;
@@ -258,8 +256,6 @@ public:
 	void focusNextMainWidget();
 	void refreshShellLayout();
 	void applyShellLayout();
-	void activateModernShell();
-	void showModernShellFailureNotice(const QString &reason);
 	void queueModernShellSnapshotSync();
 	void queueModernShellSnapshotSyncImmediate();
 	void queueModernShellSnapshotSyncInternal(bool immediate);
@@ -631,9 +627,6 @@ public:
 	QString modernShellMessageTimelineMode(std::size_t beginIndex) const;
 	void handleModernShellPreviewHydrationRequest(const QString &scopeToken, const QVariantList &messageIds,
 												  bool highPriority);
-	void handleModernShellFinanceQuoteLookupRequest(const QString &requestID, const QString &symbol);
-	void handleModernShellFinanceChartLookupRequest(const QString &requestID, const QString &symbol,
-													const QString &range, const QString &interval);
 	void flushModernShellPreviewHydrationQueue();
 	QVariantMap buildModernShellDirectMessagesState() const;
 	QVariantMap buildModernShellDirectMessageConversationState(const ModernDirectMessageConversation &conversation,
@@ -936,10 +929,8 @@ protected:
 	bool m_updateResumeVoiceChannelApplied     = false;
 	bool m_updateResumeChatScopeApplied        = false;
 	bool m_updateResumeTextChannelSyncObserved = false;
-	ModernShellHost *m_modernShellHost                     = nullptr;
 	std::unique_ptr< QmlShellHost > m_qmlShellHost;
 	std::unique_ptr< ModernDialogController > m_modernDialogController;
-	std::unique_ptr< ModernDialogHost > m_modernDialogHost;
 	ModernPttToolHost *m_modernPttToolHost = nullptr;
 	QStringList m_modernStartupDialogQueue;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
@@ -1003,7 +994,6 @@ protected:
 
 	void createActions();
 	void initializeBaseActions();
-	void handleModernShellBootFailure(const QString &reason);
 	void connectToServer(const QString &host, unsigned short port, const QString &username, const QString &password,
 						 const QString &serverName, const QString &desiredChannel = QString());
 	void publishModernDialogState(const QVariantMap &state);

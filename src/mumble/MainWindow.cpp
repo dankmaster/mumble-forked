@@ -44,12 +44,10 @@
 #endif
 #include "ModernTheme.h"
 #	include "ModernDialogController.h"
-#	include "ModernDialogHost.h"
 #	include "ModernPttToolHost.h"
-#	include "ModernShellBridge.h"
-#	include "ModernShellHost.h"
 #	include "QmlClientModels.h"
 #	include "QmlShellHost.h"
+#	include <QtQuick/QQuickWindow>
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 #		include "ModernUiAutomationServer.h"
 #	endif
@@ -14002,12 +14000,12 @@ void MainWindow::applyShellLayout() {
 		qWarning("Qt Quick shell failed to start: %s", qPrintable(qmlError));
 	}
 
-	activateModernShell();
-	if (!m_modernShellHost || centralWidget() != m_modernShellHost) {
-		return;
-	}
-
-	m_activeShellLayout      = targetLayout;
+	auto *failureLabel = new QLabel(tr("The Qt Quick interface could not start. Please inspect the client log."), this);
+	failureLabel->setAlignment(Qt::AlignCenter);
+	failureLabel->setWordWrap(true);
+	setCentralWidget(failureLabel);
+	show();
+	m_activeShellLayout = targetLayout;
 	m_shellLayoutInitialized = true;
 }
 
@@ -14456,279 +14454,7 @@ void MainWindow::setupGui() {
 
 
 
-void MainWindow::activateModernShell() {
-	const int modernShellHostPresent = m_modernShellHost ? 1 : 0;
-	appendModernShellConnectTrace(QStringLiteral("activateModernShell enter host=%1 container=%2 chatContainer=%3")
-									  .arg(modernShellHostPresent)
-									  .arg(m_serverNavigatorContainer ? 1 : 0)
-									  .arg(m_persistentChatContainer ? 1 : 0));
-	if (!m_modernShellHost) {
-		m_modernShellHost = new ModernShellHost(this);
-		appendModernShellConnectTrace(QStringLiteral("activateModernShell created-host"));
-		connect(m_modernShellHost, &ModernShellHost::bootFailed, this, &MainWindow::handleModernShellBootFailure);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::scopeSelectionRequested, this,
-				&MainWindow::handleModernShellScopeSelection);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::scopeRailSelectionRequested, this,
-				&MainWindow::handleModernShellScopeRailSelection);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::voiceJoinRequested, this,
-				&MainWindow::handleModernShellVoiceJoin);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::scopeActionRequested, this,
-				&MainWindow::handleModernShellScopeAction);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::scopeActionValueChangedRequested, this,
-				&MainWindow::handleModernShellScopeActionValueChanged);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::messageSendRequested, this,
-				&MainWindow::sendModernShellMessage);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::replyStartRequested, this,
-				&MainWindow::handleModernShellReplyStart);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::replyCancelRequested, this,
-				&MainWindow::handleModernShellReplyCancel);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::reactionToggleRequested, this,
-				&MainWindow::handleModernShellReactionToggle);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::messageDeleteRequested, this,
-				&MainWindow::handleModernShellMessageDelete);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::messageDeliveryRetryRequested, this,
-				[this](const QString &messageKey) {
-					Q_UNUSED(messageKey);
-					publishModernToast(QStringLiteral("info"), tr("Message delivery"),
-									   tr("Retry requested for this message."));
-				});
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::participantMessageRequested, this,
-				&MainWindow::handleModernShellParticipantMessage);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::directMessageOpenRequested, this,
-				&MainWindow::handleModernShellDirectMessageOpen);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::directMessageCloseRequested, this,
-				&MainWindow::handleModernShellDirectMessageClose);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::directMessageMarkReadRequested, this,
-				&MainWindow::handleModernShellDirectMessageMarkRead);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::directMessageSendRequested, this,
-				&MainWindow::handleModernShellDirectMessageSend);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::directMessageModeChangeRequested, this,
-				&MainWindow::handleModernShellDirectMessageModeChange);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::participantJoinRequested, this,
-				&MainWindow::handleModernShellParticipantJoin);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::participantMoveRequested, this,
-				&MainWindow::handleModernShellParticipantMove);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::participantActionRequested, this,
-				&MainWindow::handleModernShellParticipantAction);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::participantActionValueChangedRequested, this,
-				&MainWindow::handleModernShellParticipantActionValueChanged);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::channelMoveRequested, this,
-				&MainWindow::handleModernShellChannelMove);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::olderHistoryRequested, this,
-				&MainWindow::requestOlderPersistentChatHistory);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::markReadRequested, this,
-				[this]() { markPersistentChatRead(false); });
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::selfMuteToggleRequested, this,
-				[this]() { setAudioMute(!Global::get().s.bMute); });
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::selfDeafToggleRequested, this,
-				[this]() { setAudioDeaf(!Global::get().s.bDeaf); });
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::connectDialogRequested, this,
-				[this]() { openModernConnectDialog(); });
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::disconnectRequested, this,
-				&MainWindow::on_qaServerDisconnect_triggered);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::settingsRequested, this,
-				[this]() { openModernSettingsDialog(); });
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::modernDialogOpenRequested, this,
-				&MainWindow::handleModernDialogOpen);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::modernDialogCloseRequested, this,
-				&MainWindow::handleModernDialogClose);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::modernDialogFieldUpdateRequested, this,
-				&MainWindow::handleModernDialogFieldUpdate);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::modernDialogActionRequested, this,
-				&MainWindow::handleModernDialogAction);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::clipboardImageAttachmentRequested, this,
-				[this]() { attachPersistentChatClipboardImage(); });
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::imagePickerRequested, this,
-				&MainWindow::openPersistentChatImagePicker);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::imageDataAttachmentRequested, this,
-				[this](const QString &dataUrl) { attachPersistentChatImageData(dataUrl); });
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::linkActivationRequested, this,
-				[this](const QString &href) {
-					QUrl url(href);
-					if (!url.isValid()) {
-						url = QUrl::fromUserInput(href);
-					}
 
-					if (!url.isEmpty()) {
-						on_qteLog_anchorClicked(url);
-					}
-				});
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::providerSessionRequested, this,
-				[this](const QString &href) {
-					QUrl providerUrl(href.trimmed());
-					if (!providerUrl.isValid()) {
-						providerUrl = QUrl::fromUserInput(href.trimmed());
-					}
-					if (!isInstagramPreviewUrl(providerUrl)) {
-						return;
-					}
-
-					const std::optional< InstagramPreviewTarget > providerTarget =
-						instagramPreviewTargetFromUrl(providerUrl);
-					QStringList previewKeys;
-					for (auto it = m_persistentChatPreviews.constBegin(); it != m_persistentChatPreviews.constEnd();
-						 ++it) {
-						const PersistentChatPreview &preview = it.value();
-						if (!preview.mediaDataUrl.trimmed().isEmpty() && preview.mediaKind == QLatin1String("video")) {
-							continue;
-						}
-						const QUrl previewUrl(preview.canonicalUrl);
-						if (!isInstagramPreviewUrl(previewUrl)) {
-							continue;
-						}
-						const std::optional< InstagramPreviewTarget > previewTarget =
-							instagramPreviewTargetFromUrl(previewUrl);
-						if (providerTarget && previewTarget) {
-							if (providerTarget->canonicalUrl != previewTarget->canonicalUrl) {
-								continue;
-							}
-						} else if (canonicalInstagramPreviewUrl(providerUrl) != canonicalInstagramPreviewUrl(previewUrl)) {
-							continue;
-						}
-						previewKeys.push_back(it.key());
-					}
-
-					for (const QString &previewKey : std::as_const(previewKeys)) {
-						auto it = m_persistentChatPreviews.find(previewKey);
-						if (it == m_persistentChatPreviews.end()) {
-							continue;
-						}
-						it->siteSnapshotRequested = false;
-						it->siteSnapshotFinished  = false;
-						it->remoteMediaRequested  = false;
-						it->remoteMediaFinished   = false;
-						it->failed                = false;
-						ensurePersistentChatPreviewSiteSnapshot(previewKey);
-						publishPersistentChatPreviewUpdate(previewKey);
-					}
-				});
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::appActionRequested, this,
-				&MainWindow::handleModernShellAppAction);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::appActionPayloadRequested, this,
-				&MainWindow::handleModernShellAppActionPayload);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::layoutToggleRequested, this,
-				&MainWindow::togglePreferredModernShellLayout);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::messagePreviewHydrationRequested, this,
-				&MainWindow::handleModernShellPreviewHydrationRequest);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::financeQuoteLookupRequested, this,
-				&MainWindow::handleModernShellFinanceQuoteLookupRequest);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::financeChartLookupRequested, this,
-				&MainWindow::handleModernShellFinanceChartLookupRequest);
-		connect(m_modernShellHost->bridge(), &ModernShellBridge::bootReady, this, [this]() {
-			m_modernShellServerLogHtmlRevision = 0;
-			queueModernShellSnapshotSync();
-		});
-		connect(m_modernShellHost, &ModernShellHost::imageDropped, this, &MainWindow::attachPersistentChatImage);
-		connect(m_modernShellHost, &ModernShellHost::imageUrlsDropped, this, &MainWindow::attachPersistentChatImages);
-		QString modernShellError;
-		if (!m_modernShellHost->start(&modernShellError)) {
-			appendModernShellConnectTrace(
-				QStringLiteral("activateModernShell start-failed error=%1").arg(modernShellError));
-			if (!modernShellError.trimmed().isEmpty()) {
-				msgBox(modernShellError);
-			}
-			m_modernShellHost->deleteLater();
-			m_modernShellHost = nullptr;
-			showModernShellFailureNotice(modernShellError);
-			return;
-		}
-		appendModernShellConnectTrace(QStringLiteral("activateModernShell start-ok"));
-		ensureModernUiAutomationServer();
-	}
-
-	if (centralWidget() != m_modernShellHost) {
-		QPointer< QWidget > previousCentral = centralWidget();
-		if (previousCentral && previousCentral != m_modernShellHost) {
-			if (takeCentralWidget() == previousCentral) {
-				previousCentral->hide();
-				previousCentral->setParent(this);
-			}
-		}
-		setCentralWidget(m_modernShellHost);
-		appendModernShellConnectTrace(
-			QStringLiteral("activateModernShell set-central-widget prev=%1").arg(previousCentral ? 1 : 0));
-	}
-	if (m_modernShellHost) {
-		m_modernShellHost->show();
-		appendModernShellConnectTrace(QStringLiteral("activateModernShell host-show"));
-	}
-
-	if (m_persistentChatContainer && qdwChat->widget() != m_persistentChatContainer) {
-		if (QWidget *currentChatWidget = qdwChat->widget()) {
-			currentChatWidget->hide();
-			currentChatWidget->setParent(nullptr);
-		}
-		if (m_persistentChatComposerInputRow) {
-			if (QHBoxLayout *composerInputLayout =
-					qobject_cast< QHBoxLayout * >(m_persistentChatComposerInputRow->layout())) {
-				if (composerInputLayout->indexOf(qteChat) < 0) {
-					composerInputLayout->addWidget(qteChat, 1);
-				}
-			}
-		}
-		qdwChat->setWidget(m_persistentChatContainer);
-	}
-	if (m_persistentChatContainer) {
-		m_persistentChatContainer->show();
-	}
-
-	if (!dtbChatDockTitle) {
-		dtbChatDockTitle = new DockTitleBar();
-		qdwChat->setTitleBarWidget(dtbChatDockTitle);
-		dtbChatDockTitle->setMinimumHeight(0);
-		dtbChatDockTitle->setMaximumHeight(0);
-		qdwChat->installEventFilter(dtbChatDockTitle);
-	}
-
-	qdwChat->setWindowTitle(tr("Conversation"));
-	rebuildPersistentChatChannelList();
-	appendModernShellConnectTrace(QStringLiteral("activateModernShell rebuilt-channel-list"));
-	if (!modernShellMinimalSnapshotEnabled()) {
-		QPointer< MainWindow > guardedThis(this);
-		QMetaObject::invokeMethod(
-			this,
-			[guardedThis]() {
-				if (!guardedThis || !true) {
-					return;
-				}
-
-				guardedThis->updateChatBar();
-			},
-			Qt::QueuedConnection);
-	}
-	queueModernShellSnapshotSync();
-	appendModernShellConnectTrace(QStringLiteral("activateModernShell exit"));
-}
-
-void MainWindow::showModernShellFailureNotice(const QString &reason) {
-	QWidget *notice = createModernShellFailureNotice(this, reason);
-	if (QWidget *previousCentral = centralWidget()) {
-		if (takeCentralWidget() == previousCentral) {
-			previousCentral->hide();
-			previousCentral->setParent(this);
-		}
-	}
-	setCentralWidget(notice);
-	notice->show();
-}
-
-void MainWindow::handleModernShellBootFailure(const QString &reason) {
-	appendModernShellConnectTrace(QStringLiteral("handleModernShellBootFailure reason=%1").arg(reason));
-	showModernShellFailureNotice(reason);
-	if (m_modernDialogHost) {
-		m_modernDialogHost->hideDialog();
-		m_modernDialogHost.reset();
-	}
-	if (m_modernShellHost) {
-		m_modernShellHost->hide();
-		m_modernShellHost->deleteLater();
-		m_modernShellHost = nullptr;
-	}
-
-	if (!reason.trimmed().isEmpty()) {
-		msgBox(reason);
-	}
-}
 
 namespace {
 	bool modernSettingsPageSupported(const QString &pageName) {
@@ -16405,82 +16131,13 @@ namespace {
 		return dto;
 	}
 
-	bool modernDialogWindowHostEnabled() {
-		if (!qEnvironmentVariableIsSet("MUMBLE_MODERN_DIALOG_WINDOW_HOST")) {
-			return true;
-		}
-
-		return qEnvironmentVariableIntValue("MUMBLE_MODERN_DIALOG_WINDOW_HOST") != 0;
-	}
 } // namespace
 
 void MainWindow::publishModernDialogState(const QVariantMap &state) {
-	if (m_qmlShellHost) {
-		m_qmlShellHost->dialogController()->applyState(state);
-		if (!state.value(QStringLiteral("open")).toBool() && !m_modernStartupDialogQueue.isEmpty()) {
-			QTimer::singleShot(0, this, &MainWindow::openNextModernStartupDialog);
-		}
-		return;
-	}
-
-	if (!m_modernShellHost && true) {
-		applyShellLayout();
-	}
-
-	if (!m_modernShellHost || !m_modernShellHost->bridge()) {
-		return;
-	}
-
-	const bool useWindowDialogHost = modernDialogWindowHostEnabled();
-	if (useWindowDialogHost && state.value(QStringLiteral("open")).toBool() && !m_modernDialogHost) {
-		m_modernDialogHost = std::make_unique< ModernDialogHost >(m_modernShellHost->bridge(), this);
-		connect(m_modernDialogHost.get(), &ModernDialogHost::nativeCloseRequested, this,
-				&MainWindow::handleModernDialogClose);
-		connect(m_modernDialogHost.get(), &ModernDialogHost::hostFailed, this, [this](const QString &reason) {
-			if (!reason.trimmed().isEmpty()) {
-				msgBox(reason);
-			}
-		});
-	}
-
-	QVariantMap publishedState = state;
-	if (useWindowDialogHost && publishedState.value(QStringLiteral("open")).toBool()) {
-		publishedState.insert(QStringLiteral("host"), QStringLiteral("window"));
-	}
-	if (publishedState.value(QStringLiteral("open")).toBool()) {
-		const QVariantMap currentUiTweaks = modernShellUiTweaksDto(Global::get().s);
-		if (!publishedState.contains(QStringLiteral("uiTweaks"))) {
-			publishedState.insert(QStringLiteral("uiTweaks"), currentUiTweaks);
-		} else if (publishedState.value(QStringLiteral("kind")).toString() != QLatin1String("settings")
-				   && currentUiTweaks.contains(QStringLiteral("themeTokens"))) {
-			QVariantMap dialogUiTweaks = publishedState.value(QStringLiteral("uiTweaks")).toMap();
-			dialogUiTweaks.insert(QStringLiteral("theme"), currentUiTweaks.value(QStringLiteral("theme")));
-			dialogUiTweaks.insert(QStringLiteral("themeSource"), currentUiTweaks.value(QStringLiteral("themeSource")));
-			dialogUiTweaks.insert(QStringLiteral("themeId"), currentUiTweaks.value(QStringLiteral("themeId")));
-			dialogUiTweaks.insert(QStringLiteral("themeTokens"), currentUiTweaks.value(QStringLiteral("themeTokens")));
-			publishedState.insert(QStringLiteral("uiTweaks"), dialogUiTweaks);
-		}
-	}
-
-	m_modernShellHost->bridge()->publishModernDialogState(publishedState);
-
-	if (!useWindowDialogHost) {
-		if (m_modernDialogHost) {
-			m_modernDialogHost->hideDialog();
-		}
-		if (!publishedState.value(QStringLiteral("open")).toBool() && !m_modernStartupDialogQueue.isEmpty()) {
-			QTimer::singleShot(0, this, &MainWindow::openNextModernStartupDialog);
-		}
-		return;
-	}
-
-	if (m_modernDialogHost) {
-		QString errorMessage;
-		if (!m_modernDialogHost->showDialogState(publishedState, &errorMessage) && !errorMessage.trimmed().isEmpty()) {
-			msgBox(errorMessage);
-		}
-	}
-	if (!publishedState.value(QStringLiteral("open")).toBool() && !m_modernStartupDialogQueue.isEmpty()) {
+	if (!m_qmlShellHost) applyShellLayout();
+	if (!m_qmlShellHost) return;
+	m_qmlShellHost->dialogController()->applyState(state);
+	if (!state.value(QStringLiteral("open")).toBool() && !m_modernStartupDialogQueue.isEmpty()) {
 		QTimer::singleShot(0, this, &MainWindow::openNextModernStartupDialog);
 	}
 }
@@ -17113,276 +16770,6 @@ bool MainWindow::openModernSslHandshakeFailureDialog(const QString &reason) {
 	return true;
 }
 
-void MainWindow::handleModernShellFinanceQuoteLookupRequest(const QString &requestID, const QString &symbol) {
-	QVariantMap result;
-	result.insert(QStringLiteral("requestId"), requestID);
-	result.insert(QStringLiteral("query"), symbol);
-
-	const auto publishResult = [this](const QVariantMap &payload) {
-		if (m_modernShellHost && m_modernShellHost->bridge()) {
-			m_modernShellHost->bridge()->publishFinanceQuoteResult(payload);
-		}
-	};
-
-	const QString normalizedSymbol = Mumble::Finance::normalizeTickerSymbol(symbol);
-	if (requestID.trimmed().isEmpty() || normalizedSymbol.isEmpty()) {
-		result.insert(QStringLiteral("ok"), false);
-		result.insert(QStringLiteral("error"), tr("Enter a valid ticker symbol."));
-		publishResult(result);
-		return;
-	}
-
-	if (!Global::get().nam) {
-		result.insert(QStringLiteral("ok"), false);
-		result.insert(QStringLiteral("error"), tr("Quote lookup is not available right now."));
-		publishResult(result);
-		return;
-	}
-
-	auto symbolCandidates = std::make_shared< QList< QString > >(
-		Mumble::Finance::yahooFinanceSymbolCandidates(normalizedSymbol));
-	if (symbolCandidates->isEmpty()) {
-		result.insert(QStringLiteral("ok"), false);
-		result.insert(QStringLiteral("error"), tr("Enter a valid ticker symbol."));
-		publishResult(result);
-		return;
-	}
-
-	auto lastError  = std::make_shared< QString >();
-	auto fetchQuote = std::make_shared< std::function< void(int) > >();
-	*fetchQuote    = [this, requestID, symbol, normalizedSymbol, symbolCandidates, lastError, fetchQuote,
-					  publishResult](int symbolIndex) {
-		if (symbolIndex < 0 || symbolIndex >= symbolCandidates->size()) {
-			QVariantMap result;
-			result.insert(QStringLiteral("requestId"), requestID);
-			result.insert(QStringLiteral("query"), symbol);
-			result.insert(QStringLiteral("ok"), false);
-			result.insert(QStringLiteral("error"),
-						  lastError->trimmed().isEmpty() ? tr("Yahoo did not return a usable price.")
-														 : lastError->trimmed());
-			publishResult(result);
-			return;
-		}
-
-		const QUrl chartURL = Mumble::Finance::yahooFinanceChartUrl(symbolCandidates->at(symbolIndex),
-																	QStringLiteral("5d"), QStringLiteral("1d"));
-		if (!chartURL.isValid() || !isSafePreviewTarget(chartURL)) {
-			*lastError = tr("Quote provider URL was rejected.");
-			(*fetchQuote)(symbolIndex + 1);
-			return;
-		}
-
-		QNetworkRequest request(chartURL);
-		preparePreviewRequest(request);
-		request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
-		QNetworkReply *reply = Global::get().nam->get(request);
-		applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
-		connect(reply, &QNetworkReply::finished, this,
-				[this, reply, requestID, symbol, normalizedSymbol, symbolIndex, symbolCandidates, lastError, fetchQuote,
-				 publishResult]() {
-					QVariantMap result;
-					result.insert(QStringLiteral("requestId"), requestID);
-					result.insert(QStringLiteral("query"), symbol);
-
-					const QByteArray data     = reply->readAll();
-					const bool success        = reply->error() == QNetworkReply::NoError;
-					const QString networkError = reply->errorString();
-					reply->deleteLater();
-
-					if (!success || data.isEmpty()) {
-						*lastError = networkError.trimmed().isEmpty() ? tr("Quote lookup failed.") : networkError;
-						(*fetchQuote)(symbolIndex + 1);
-						return;
-					}
-
-					QString parseError;
-					const std::optional< Mumble::Finance::YahooChartQuote > quote =
-						Mumble::Finance::parseYahooChartQuote(data, &parseError);
-					if (!quote || !quote->hasRegularMarketPrice || !std::isfinite(quote->regularMarketPrice)
-						|| quote->regularMarketPrice <= 0.0) {
-						*lastError =
-							parseError.trimmed().isEmpty() ? tr("Yahoo did not return a usable price.") : parseError;
-						(*fetchQuote)(symbolIndex + 1);
-						return;
-					}
-
-					const QString quoteSymbol = Mumble::Finance::normalizeTickerSymbol(
-						quote->symbol.trimmed().isEmpty() ? normalizedSymbol : quote->symbol);
-					const QUrl sourceURL = Mumble::Finance::yahooFinanceQuoteUrl(quoteSymbol);
-					result.insert(QStringLiteral("ok"), true);
-					result.insert(QStringLiteral("providerId"), QStringLiteral("yahoo-finance"));
-					result.insert(QStringLiteral("symbol"), quoteSymbol.isEmpty() ? normalizedSymbol : quoteSymbol);
-					result.insert(QStringLiteral("providerSymbol"), quoteSymbol.isEmpty() ? normalizedSymbol : quoteSymbol);
-					result.insert(QStringLiteral("displayName"),
-								  !quote->shortName.trimmed().isEmpty() ? quote->shortName.trimmed()
-																		 : quote->longName.trimmed());
-					result.insert(QStringLiteral("exchange"),
-								  !quote->fullExchangeName.trimmed().isEmpty() ? quote->fullExchangeName.trimmed()
-																				: quote->exchangeName.trimmed());
-					result.insert(QStringLiteral("price"), quote->regularMarketPrice);
-					result.insert(QStringLiteral("currency"),
-								  quote->currency.trimmed().isEmpty() ? QStringLiteral("USD") : quote->currency.trimmed());
-					result.insert(QStringLiteral("priceHint"), quote->priceHint);
-					if (quote->hasPreviousClose && std::abs(quote->previousClose) > 0.0000001) {
-						const double change        = quote->regularMarketPrice - quote->previousClose;
-						const double changePercent = (change / quote->previousClose) * 100.0;
-						result.insert(QStringLiteral("previousClose"), quote->previousClose);
-						result.insert(QStringLiteral("change"), change);
-						result.insert(QStringLiteral("changePercent"), changePercent);
-					}
-					result.insert(QStringLiteral("quoteTime"), QVariant::fromValue< qulonglong >(
-																  quote->regularMarketTime > 0
-																	  ? static_cast< qulonglong >(quote->regularMarketTime)
-																	  : 0ULL));
-					result.insert(QStringLiteral("quoteSourceUrl"),
-								  sourceURL.isValid() ? sourceURL.toString(QUrl::FullyEncoded) : QString());
-					result.insert(QStringLiteral("quoteConfidence"), 1.0);
-					result.insert(QStringLiteral("chartPoints"), financeChartPointDtos(quote->points));
-
-					publishResult(result);
-				});
-	};
-
-	(*fetchQuote)(0);
-}
-
-void MainWindow::handleModernShellFinanceChartLookupRequest(const QString &requestID, const QString &symbol,
-															const QString &range, const QString &interval) {
-	QVariantMap result;
-	result.insert(QStringLiteral("requestId"), requestID);
-	result.insert(QStringLiteral("query"), symbol);
-	result.insert(QStringLiteral("range"), range);
-	result.insert(QStringLiteral("interval"), interval);
-
-	const auto publishResult = [this](const QVariantMap &payload) {
-		if (m_modernShellHost && m_modernShellHost->bridge()) {
-			m_modernShellHost->bridge()->publishFinanceChartResult(payload);
-		}
-	};
-
-	const QString normalizedSymbol = Mumble::Finance::normalizeTickerSymbol(symbol);
-	const QString normalizedRange = range.trimmed().toLower();
-	const QString normalizedInterval = interval.trimmed().toLower();
-	if (requestID.trimmed().isEmpty() || normalizedSymbol.isEmpty()) {
-		result.insert(QStringLiteral("ok"), false);
-		result.insert(QStringLiteral("error"), tr("Enter a valid ticker symbol."));
-		publishResult(result);
-		return;
-	}
-	if (!modernFinanceChartWindowAllowed(normalizedRange, normalizedInterval)) {
-		result.insert(QStringLiteral("ok"), false);
-		result.insert(QStringLiteral("error"), tr("Unsupported chart range."));
-		publishResult(result);
-		return;
-	}
-	if (!Global::get().nam) {
-		result.insert(QStringLiteral("ok"), false);
-		result.insert(QStringLiteral("error"), tr("Chart lookup is not available right now."));
-		publishResult(result);
-		return;
-	}
-
-	auto symbolCandidates = std::make_shared< QList< QString > >(
-		Mumble::Finance::yahooFinanceSymbolCandidates(normalizedSymbol));
-	if (symbolCandidates->isEmpty()) {
-		result.insert(QStringLiteral("ok"), false);
-		result.insert(QStringLiteral("error"), tr("Enter a valid ticker symbol."));
-		publishResult(result);
-		return;
-	}
-
-	auto lastError = std::make_shared< QString >();
-	auto fetchChart = std::make_shared< std::function< void(int) > >();
-	*fetchChart = [this, requestID, symbol, normalizedSymbol, normalizedRange, normalizedInterval, symbolCandidates,
-				   lastError, fetchChart, publishResult](int symbolIndex) {
-		if (symbolIndex < 0 || symbolIndex >= symbolCandidates->size()) {
-			QVariantMap result;
-			result.insert(QStringLiteral("requestId"), requestID);
-			result.insert(QStringLiteral("query"), symbol);
-			result.insert(QStringLiteral("range"), normalizedRange);
-			result.insert(QStringLiteral("interval"), normalizedInterval);
-			result.insert(QStringLiteral("ok"), false);
-			result.insert(QStringLiteral("error"),
-						  lastError->trimmed().isEmpty() ? tr("Yahoo did not return usable chart data.")
-														 : lastError->trimmed());
-			publishResult(result);
-			return;
-		}
-
-		const QUrl chartURL = Mumble::Finance::yahooFinanceChartUrl(symbolCandidates->at(symbolIndex),
-																	normalizedRange, normalizedInterval);
-		if (!chartURL.isValid() || !isSafePreviewTarget(chartURL)) {
-			*lastError = tr("Chart provider URL was rejected.");
-			(*fetchChart)(symbolIndex + 1);
-			return;
-		}
-
-		QNetworkRequest request(chartURL);
-		preparePreviewRequest(request);
-		request.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("application/json,text/plain;q=0.9,*/*;q=0.5"));
-		QNetworkReply *reply = Global::get().nam->get(request);
-		applyPreviewReplyGuards(reply, PREVIEW_MAX_PAGE_BYTES, false);
-		connect(reply, &QNetworkReply::finished, this,
-				[this, reply, requestID, symbol, normalizedSymbol, normalizedRange, normalizedInterval, symbolIndex,
-				 symbolCandidates, lastError, fetchChart, publishResult]() {
-					QVariantMap result;
-					result.insert(QStringLiteral("requestId"), requestID);
-					result.insert(QStringLiteral("query"), symbol);
-					result.insert(QStringLiteral("range"), normalizedRange);
-					result.insert(QStringLiteral("interval"), normalizedInterval);
-
-					const QByteArray data     = reply->readAll();
-					const bool success        = reply->error() == QNetworkReply::NoError;
-					const QString networkError = reply->errorString();
-					reply->deleteLater();
-
-					if (!success || data.isEmpty()) {
-						*lastError = networkError.trimmed().isEmpty() ? tr("Chart lookup failed.") : networkError;
-						(*fetchChart)(symbolIndex + 1);
-						return;
-					}
-
-					QString parseError;
-					const std::optional< Mumble::Finance::YahooChartQuote > quote =
-						Mumble::Finance::parseYahooChartQuote(data, &parseError);
-					if (!quote) {
-						*lastError =
-							parseError.trimmed().isEmpty() ? tr("Yahoo did not return usable chart data.") : parseError;
-						(*fetchChart)(symbolIndex + 1);
-						return;
-					}
-
-					const QVariantList chartPoints = financeChartPointDtos(quote->points);
-					if (chartPoints.isEmpty()) {
-						*lastError = tr("Yahoo did not return usable chart points.");
-						(*fetchChart)(symbolIndex + 1);
-						return;
-					}
-
-					const QString quoteSymbol = Mumble::Finance::normalizeTickerSymbol(
-						quote->symbol.trimmed().isEmpty() ? normalizedSymbol : quote->symbol);
-					const QUrl sourceURL = Mumble::Finance::yahooFinanceQuoteUrl(quoteSymbol);
-					result.insert(QStringLiteral("ok"), true);
-					result.insert(QStringLiteral("providerId"), QStringLiteral("yahoo-finance"));
-					result.insert(QStringLiteral("symbol"), quoteSymbol.isEmpty() ? normalizedSymbol : quoteSymbol);
-					result.insert(QStringLiteral("providerSymbol"), quoteSymbol.isEmpty() ? normalizedSymbol : quoteSymbol);
-					result.insert(QStringLiteral("displayName"),
-								  !quote->shortName.trimmed().isEmpty() ? quote->shortName.trimmed()
-																		 : quote->longName.trimmed());
-					result.insert(QStringLiteral("exchange"),
-								  !quote->fullExchangeName.trimmed().isEmpty() ? quote->fullExchangeName.trimmed()
-																				: quote->exchangeName.trimmed());
-					result.insert(QStringLiteral("currency"),
-								  quote->currency.trimmed().isEmpty() ? QStringLiteral("USD") : quote->currency.trimmed());
-					result.insert(QStringLiteral("quoteSourceUrl"),
-								  sourceURL.isValid() ? sourceURL.toString(QUrl::FullyEncoded) : QString());
-					result.insert(QStringLiteral("chartPoints"), chartPoints);
-					publishResult(result);
-				});
-	};
-
-	(*fetchChart)(0);
-}
 
 QVariantMap MainWindow::buildModernStonksDialog() const {
 	QVariantMap state = m_stonksState;
@@ -21023,7 +20410,7 @@ bool MainWindow::handleModernShellLegacyDialogAction(const QString &actionID, Cl
 }
 
 bool MainWindow::openModernFailedConnectionDialog(const ConnectDetails &details, const ConnectionFailType type) {
-	if (!true || !m_modernShellHost) {
+	if (!m_qmlShellHost) {
 		return false;
 	}
 
@@ -21217,11 +20604,6 @@ void MainWindow::handleModernDialogAction(const QString &dialogID, const QString
 		return;
 	}
 
-	if (dialogID == QLatin1String("imageViewer") && actionID == QLatin1String("imageViewer.minimize")
-		&& m_modernDialogHost) {
-		m_modernDialogHost->showMinimized();
-		return;
-	}
 
 	const ModernDialogController::ActionResult result =
 		m_modernDialogController->invokeAction(dialogID, actionID, payload);
@@ -21430,10 +20812,10 @@ void MainWindow::queueModernShellSnapshotSyncImmediate() {
 }
 
 void MainWindow::queueModernShellSnapshotSyncInternal(bool immediate) {
-	if (!m_modernShellSyncTimer || !m_modernShellHost) {
+	if (!m_modernShellSyncTimer || !m_qmlShellHost) {
 		appendModernShellConnectTrace(QStringLiteral("queueModernShellSnapshotSync skipped timer=%1 host=%2")
 										  .arg(m_modernShellSyncTimer ? 1 : 0)
-										  .arg(m_modernShellHost ? 1 : 0));
+										  .arg(m_qmlShellHost ? 1 : 0));
 		return;
 	}
 	if (modernShellStaticModeEnabled()) {
@@ -21483,40 +20865,13 @@ void MainWindow::queueModernShellSnapshotSyncInternal(bool immediate) {
 void MainWindow::syncModernShellSnapshot() {
 	if (m_qmlShellHost && m_qmlShellHost->window()) {
 		syncQmlShellState();
+		m_modernShellLastSnapshotSyncMs = QDateTime::currentMSecsSinceEpoch();
 		return;
 	}
-	if (!m_modernShellHost || !m_modernShellHost->bridge()) {
-		appendModernShellConnectTrace(QStringLiteral("syncModernShellSnapshot skipped host=%1 bridge=%2")
-										  .arg(m_modernShellHost ? 1 : 0)
-										  .arg((m_modernShellHost && m_modernShellHost->bridge()) ? 1 : 0));
-		return;
-	}
-
-	if (m_nativeWindowMoveResizeActive) {
-		m_modernShellSnapshotPendingAfterNativeMoveResize = true;
-		appendModernShellConnectTrace(QStringLiteral("syncModernShellSnapshot deferred-window-move"));
-		return;
-	}
-
-	appendModernShellConnectTrace(QStringLiteral("syncModernShellSnapshot enter"));
-	flushModernShellCoalescedPatches();
-	m_modernShellServerLogHtmlRevision = 0;
-	const QVariantMap snapshot    = buildModernShellSnapshot();
-	const QVariantList textRooms  = snapshot.value(QStringLiteral("textRooms")).toList();
-	const QVariantList voiceRooms = snapshot.value(QStringLiteral("voiceRooms")).toList();
-	const QVariantList messages   = snapshot.value(QStringLiteral("messages")).toList();
-	appendModernShellConnectTrace(QStringLiteral("syncModernShellSnapshot built text=%1 voice=%2 messages=%3")
-									  .arg(textRooms.size())
-									  .arg(voiceRooms.size())
-									  .arg(messages.size()));
-	appendModernShellConnectTrace(QStringLiteral("syncModernShellSnapshot before-setSnapshot"));
-	m_modernShellHost->bridge()->setSnapshot(snapshot);
-	m_modernShellLastSnapshotSyncMs = QDateTime::currentMSecsSinceEpoch();
-	appendModernShellConnectTrace(QStringLiteral("syncModernShellSnapshot after-setSnapshot"));
 }
 
 void MainWindow::publishModernShellTalkState(const ClientUser *user) {
-	if (!user || !m_modernShellHost || !m_modernShellHost->bridge()) {
+	if (!user || !m_qmlShellHost) {
 		return;
 	}
 
@@ -23495,22 +22850,7 @@ void MainWindow::appendModernServerLogEntry(const QString &html) {
 void MainWindow::publishModernShellPatchNow(const QString &kind, QVariantMap patch) {
 	if (m_qmlShellHost && m_qmlShellHost->window()) {
 		applyQmlShellPatch(kind, patch);
-		return;
 	}
-	if (!m_modernShellHost || !m_modernShellHost->bridge() || modernShellStaticModeEnabled()
-		|| modernShellMinimalSnapshotEnabled()) {
-		return;
-	}
-
-	if (!patch.contains(QStringLiteral("kind"))) {
-		patch.insert(QStringLiteral("kind"), kind);
-	}
-	if (!patch.contains(QStringLiteral("revision"))) {
-		patch.insert(QStringLiteral("revision"), static_cast< qulonglong >(++m_modernShellPatchRevision));
-	}
-	appendModernShellConnectTrace(QStringLiteral("publishModernShellPatch kind=%1 revision=%2")
-									  .arg(kind, patch.value(QStringLiteral("revision")).toString()));
-	m_modernShellHost->bridge()->publishModernShellPatch(patch);
 }
 
 void MainWindow::flushModernShellCoalescedPatches() {
@@ -23656,10 +22996,7 @@ void MainWindow::publishModernShellMessageUpdatePatch(const MumbleProto::ChatMes
 
 void MainWindow::publishModernShellActiveScopePatch(const QString &kind) {
 	const bool qmlActive = m_qmlShellHost && m_qmlShellHost->window();
-	if (!qmlActive && (!m_modernShellHost || !m_modernShellHost->bridge() || modernShellStaticModeEnabled()
-						 || modernShellMinimalSnapshotEnabled())) {
-		return;
-	}
+	if (!qmlActive) return;
 
 	QVariantMap patch;
 	patch.insert(QStringLiteral("activeScope"), buildModernShellActiveScopeState(currentPersistentChatTarget()));
@@ -23668,10 +23005,7 @@ void MainWindow::publishModernShellActiveScopePatch(const QString &kind) {
 
 void MainWindow::publishModernShellRoomStatePatch() {
 	const bool qmlActive = m_qmlShellHost && m_qmlShellHost->window();
-	if (!qmlActive && (!m_modernShellHost || !m_modernShellHost->bridge() || modernShellStaticModeEnabled()
-						 || modernShellMinimalSnapshotEnabled())) {
-		return;
-	}
+	if (!qmlActive) return;
 
 	if (!m_modernShellPatchCoalesceTimer) {
 		const qint64 startedAtMs = QDateTime::currentMSecsSinceEpoch();
@@ -25420,10 +24754,7 @@ bool MainWindow::sendModernDirectMessage(const unsigned int session, const QStri
 }
 
 void MainWindow::publishModernDirectMessagesPatch() {
-	if (!m_modernShellHost || !m_modernShellHost->bridge() || modernShellStaticModeEnabled()
-		|| modernShellMinimalSnapshotEnabled()) {
-		return;
-	}
+	if (!m_qmlShellHost || !m_qmlShellHost->window()) return;
 
 	QVariantMap app;
 	app.insert(QStringLiteral("directMessages"), buildModernShellDirectMessagesState());
@@ -26320,25 +25651,24 @@ bool MainWindow::handleModernShellAppAction(const QString &actionId) {
 
 void MainWindow::publishModernToast(const QString &kind, const QString &title, const QString &message,
 									const QString &actionID, const QString &actionLabel, const int timeoutMs) {
-	if (!m_modernShellHost || !m_modernShellHost->bridge()) {
-		return;
-	}
-
-	QVariantMap toast;
+	if (!m_qmlShellHost) return;
+	QVariantMap payload;
 	const QString normalizedKind = kind.trimmed().isEmpty() ? QStringLiteral("info") : kind.trimmed().toLower();
-	toast.insert(QStringLiteral("id"),
-				 QStringLiteral("%1-%2").arg(normalizedKind).arg(QDateTime::currentMSecsSinceEpoch()));
-	toast.insert(QStringLiteral("kind"), normalizedKind);
-	toast.insert(QStringLiteral("title"), title);
-	toast.insert(QStringLiteral("message"), message);
-	toast.insert(QStringLiteral("timeoutMs"), timeoutMs > 0 ? timeoutMs : 4500);
-	if (!actionID.trimmed().isEmpty()) {
-		toast.insert(QStringLiteral("actionId"), actionID.trimmed());
-	}
-	if (!actionLabel.trimmed().isEmpty()) {
-		toast.insert(QStringLiteral("actionLabel"), actionLabel.trimmed());
-	}
-	m_modernShellHost->bridge()->publishToast(toast);
+	const QString toastID = QStringLiteral("toast:%1").arg(++m_modernShellPatchRevision);
+	payload.insert(QStringLiteral("tone"), normalizedKind);
+	payload.insert(QStringLiteral("actionId"), actionID.trimmed());
+	payload.insert(QStringLiteral("actionLabel"), actionLabel.trimmed());
+	QVariantMap row;
+	row.insert(QStringLiteral("stableId"), toastID);
+	row.insert(QStringLiteral("title"), title);
+	row.insert(QStringLiteral("subtitle"), message);
+	row.insert(QStringLiteral("status"), normalizedKind == QLatin1String("danger") ? QStringLiteral("failed")
+																		   : QStringLiteral("succeeded"));
+	row.insert(QStringLiteral("payload"), payload);
+	m_qmlShellHost->operationModel()->upsertRow(row);
+	QTimer::singleShot(timeoutMs > 0 ? timeoutMs : 4500, this, [this, toastID]() {
+		if (m_qmlShellHost) m_qmlShellHost->operationModel()->removeRow(toastID);
+	});
 }
 
 void MainWindow::setModernUpdateBannerState(const QVariantMap &state) {
@@ -26354,9 +25684,7 @@ void MainWindow::clearModernUpdateBannerState() {
 }
 
 void MainWindow::publishModernUpdateBannerState() {
-	if (!true || !m_modernShellHost || !m_modernShellHost->bridge()) {
-		return;
-	}
+	if (!m_qmlShellHost) return;
 
 	QVariantMap app;
 	app.insert(QStringLiteral("updateBanner"), m_modernUpdateBannerState);
@@ -28919,7 +28247,7 @@ MainWindow::PersistentChatTarget MainWindow::currentPersistentChatTarget() const
 }
 
 bool MainWindow::isServerLogViewVisible() const {
-	if (true && m_modernShellHost && m_modernShellHost->isVisible()) {
+	if (m_qmlShellHost && m_qmlShellHost->window() && m_qmlShellHost->window()->isVisible()) {
 		const PersistentChatTarget target = currentPersistentChatTarget();
 		if (target.serverLog || target.ephemeralTextPath) {
 			return true;
@@ -32844,8 +32172,7 @@ void MainWindow::ensurePersistentChatPreviewSiteSnapshot(const QString &previewK
 	PersistentChatPreviewSnapshotRenderer *renderer =
 		static_cast< PersistentChatPreviewSnapshotRenderer * >(m_persistentChatPreviewSnapshotRenderer);
 	if (!renderer) {
-		renderer = new PersistentChatPreviewSnapshotRenderer(
-			true && m_modernShellHost ? m_modernShellHost->webProfile() : nullptr, this);
+		renderer = new PersistentChatPreviewSnapshotRenderer(nullptr, this);
 		m_persistentChatPreviewSnapshotRenderer = renderer;
 		renderer->setResultCallback([this](const QString &key, const QImage &image, bool success,
 										   const QString &mediaUrl, const QString &mediaMime,
@@ -32855,8 +32182,6 @@ void MainWindow::ensurePersistentChatPreviewSiteSnapshot(const QString &previewK
 			handlePersistentChatPreviewSiteSnapshotResult(key, image, success, mediaUrl, mediaMime, mediaAudioUrl,
 														  mediaAudioMime, mediaItems, posterUrl, posterMime, avatarUrl);
 		});
-	} else if (true && m_modernShellHost) {
-		renderer->setSharedProfile(m_modernShellHost->webProfile());
 	}
 
 	preview.siteSnapshotRequested = true;
@@ -33247,7 +32572,7 @@ void MainWindow::updatePersistentChatPreviewViewIfVisible(const QString &preview
 
 void MainWindow::renderPersistentChatView(const QString &statusMessage, bool scrollToBottom,
 										  bool preserveScrollPosition) {
-	if (true && m_modernShellHost && centralWidget() == m_modernShellHost) {
+	if (m_qmlShellHost && m_qmlShellHost->window()) {
 		m_pendingPersistentChatRender.reset();
 		m_persistentChatRenderQueued = false;
 		return;
@@ -33744,7 +33069,8 @@ void MainWindow::renderPersistentChatViewImmediately(const QString &statusMessag
 }
 
 bool MainWindow::canMarkPersistentChatRead(bool willScrollToBottom) const {
-	const bool modernShellVisible = true && m_modernShellHost && m_modernShellHost->isVisible();
+	const bool modernShellVisible = m_qmlShellHost && m_qmlShellHost->window()
+								&& m_qmlShellHost->window()->isVisible();
 	const PersistentChatTarget target = currentPersistentChatTarget();
 	return m_visiblePersistentChatScope && *m_visiblePersistentChatScope != MumbleProto::Aggregate
 		   && canViewPersistentChatHistory(target, false)
