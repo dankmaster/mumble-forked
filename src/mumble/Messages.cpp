@@ -1721,12 +1721,9 @@ void MainWindow::msgVoiceTarget(const MumbleProto::VoiceTarget &) {
 ///
 /// @param msg The message object containing the respective information
 void MainWindow::msgPermissionQuery(const MumbleProto::PermissionQuery &msg) {
-	const bool hiddenLegacyChannelModelSafeMode =
-		qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && true;
-	Channel *current = nullptr;
-	if (!hiddenLegacyChannelModelSafeMode && pmModel && qtvUsers) {
-		current = pmModel->getChannel(qtvUsers->currentIndex());
-	}
+	Channel *current = m_modernSelectionState.selectedVoiceChannelID
+						   ? Channel::get(*m_modernSelectionState.selectedVoiceChannelID)
+						   : nullptr;
 	const PersistentChatTarget activeChatTarget = currentPersistentChatTarget();
 	const bool activeChatTargetMatchesPermissionChannel =
 		activeChatTarget.valid && !activeChatTarget.serverLog && !activeChatTarget.directMessage
@@ -1754,11 +1751,8 @@ void MainWindow::msgPermissionQuery(const MumbleProto::PermissionQuery &msg) {
 		c->uiPermissions = msg.permissions();
 		if (c->iId == 0)
 			Global::get().pPermissions = static_cast< ChanACL::Permissions >(c->uiPermissions);
-		if (!hiddenLegacyChannelModelSafeMode && c == current) {
-			updateMenuPermissions();
-		} else if (hiddenLegacyChannelModelSafeMode) {
-			queueModernShellSnapshotSync();
-		}
+		if (c == current) updateMenuPermissions();
+		publishModernShellRoomStatePatch();
 		if (activeChatTargetMatchesPermissionChannel && activeChatTarget.channel == c
 			&& previousActiveChatPermissions != static_cast< ChanACL::Permissions >(c->uiPermissions)) {
 			refreshPersistentChatView(true);

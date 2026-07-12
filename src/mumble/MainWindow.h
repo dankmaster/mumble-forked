@@ -166,11 +166,6 @@ public:
 	QMenu *qmDeveloper;
 	QMenu *qmConfig = nullptr, *qmHelp = nullptr, *qmServer = nullptr, *qmSelf = nullptr;
 	QMenuBar *menubar = nullptr;
-	UserView *qtvUsers = nullptr;
-	QDockWidget *qdwLog = nullptr, *qdwChat = nullptr, *qdwMinimalViewNote = nullptr;
-	LogTextBrowser *qteLog = nullptr;
-	ChatbarTextEdit *qteChat = nullptr;
-	QToolBar *qtIconToolbar = nullptr;
 	QWidget *dockWidgetContents = nullptr;
 	QHBoxLayout *horizontalLayout = nullptr;
 	QLabel *label = nullptr;
@@ -1127,7 +1122,6 @@ protected:
 	ContextMenuTarget getContextMenuTargets();
 	QString screenShareStreamForChannel(const Channel *channel) const;
 
-	void autocompleteUsername();
 
 public slots:
 	void appendModernServerLogEntry(const QString &html);
@@ -1217,13 +1211,7 @@ public slots:
 	void on_qaHelpFeedback_triggered();
 	void on_qaHelpVersionCheck_triggered();
 	void on_qaQuit_triggered();
-	void on_qteChat_tabPressed();
-	void on_qteChat_backtabPressed();
-	void on_qteChat_ctrlSpacePressed();
 	void on_persistentChatScopeChanged(int index);
-	void on_qteLog_customContextMenuRequested(const QPoint &pos);
-	void on_qteLog_anchorClicked(const QUrl &);
-	void on_qteLog_highlighted(const QUrl &link);
 	void on_PushToTalk_triggered(bool, QVariant);
 	void on_PushToMute_triggered(bool, QVariant);
 	void on_VolumeUp_triggered(bool, QVariant);

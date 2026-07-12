@@ -26723,10 +26723,6 @@ void MainWindow::refreshCustomChromeStyles() {
 void MainWindow::refreshTextDocumentStylesheets() {
 	const QString stylesheet = qApp->styleSheet();
 
-	if (shouldMirrorServerLogToNativeWidget() && qteLog && qteLog->document()) {
-		qteLog->document()->setDefaultStyleSheet(stylesheet);
-	}
-
 	if (m_modernServerLogDocument) {
 		m_modernServerLogDocument->setDefaultStyleSheet(stylesheet);
 		if (++m_modernShellServerLogRevision == 0) {
@@ -26741,9 +26737,6 @@ void MainWindow::refreshTextDocumentStylesheets() {
 		}
 	}
 
-	if (qteChat && qteChat->document()) {
-		qteChat->document()->setDefaultStyleSheet(stylesheet);
-	}
 }
 
 void MainWindow::setPersistentChatWelcomeText(const QString &message) {
@@ -28253,13 +28246,10 @@ bool MainWindow::isServerLogViewVisible() const {
 		}
 		return m_persistentChatLogPanel && m_persistentChatLogPanel->isVisible();
 	}
-	return (qdwLog && qdwLog->isVisible()) || (m_persistentChatLogPanel && m_persistentChatLogPanel->isVisible());
+	return false;
 }
 
 void MainWindow::setServerLogMaximumBlockCount(int maxBlocks) {
-	if (shouldMirrorServerLogToNativeWidget() && qteLog && qteLog->document()) {
-		qteLog->document()->setMaximumBlockCount(maxBlocks);
-	}
 	if (m_modernServerLogDocument) {
 		m_modernServerLogDocument->setMaximumBlockCount(maxBlocks);
 	}
@@ -33071,11 +33061,12 @@ bool MainWindow::canMarkPersistentChatRead(bool willScrollToBottom) const {
 	const bool modernShellVisible = m_qmlShellHost && m_qmlShellHost->window()
 								&& m_qmlShellHost->window()->isVisible();
 	const PersistentChatTarget target = currentPersistentChatTarget();
+	const bool qmlWindowActive = modernShellVisible && m_qmlShellHost->window()->isActive();
 	return m_visiblePersistentChatScope && *m_visiblePersistentChatScope != MumbleProto::Aggregate
 		   && canViewPersistentChatHistory(target, false)
-		   && !m_persistentChatMessages.empty() && Global::get().sh && Global::get().sh->isRunning() && isActiveWindow()
-		   && m_persistentChatHistory && (modernShellVisible || qdwChat->isVisible())
-		   && (modernShellVisible || willScrollToBottom
+		   && !m_persistentChatMessages.empty() && Global::get().sh && Global::get().sh->isRunning()
+		   && (qmlWindowActive || isActiveWindow())
+		   && (modernShellVisible || (m_persistentChatHistory && willScrollToBottom)
 			   || (m_persistentChatHistoryModel
 				   && m_persistentChatHistory->isRowVisible(m_persistentChatHistoryModel->lastMessageGroupRowId())));
 }
@@ -33252,28 +33243,11 @@ void MainWindow::requestOlderPersistentChatHistory() {
 }
 
 void MainWindow::attachPersistentChatImages(const QList< QUrl > &urls) {
-	if (!Global::get().bAllowHTML || urls.isEmpty()) {
-		return;
+	for (const QUrl &url : urls) {
+		if (!url.isLocalFile()) continue;
+		const QImage image(url.toLocalFile());
+		if (!image.isNull()) attachPersistentChatImage(image);
 	}
-
-	if (true) {
-		for (const QUrl &url : urls) {
-			if (!url.isLocalFile()) {
-				continue;
-			}
-
-			const QImage image(url.toLocalFile());
-			if (!image.isNull()) {
-				attachPersistentChatImage(image);
-			}
-		}
-		return;
-	}
-
-	if (!qteChat || !qteChat->isEnabled()) {
-		return;
-	}
-	qteChat->sendImagesFromUrls(urls);
 }
 
 bool MainWindow::attachPersistentChatClipboardImage() {
@@ -33782,10 +33756,6 @@ bool MainWindow::deletePersistentChatMessage(unsigned int messageID) {
 }
 
 void MainWindow::syncPersistentChatInputState(bool baseEnabled) {
-	if (!qteChat) {
-		return;
-	}
-
 	const PersistentChatTarget target = currentPersistentChatTarget();
 	bool enableInput                  = baseEnabled && target.valid && !target.readOnly;
 	if (target.valid && !target.readOnly
@@ -33793,8 +33763,8 @@ void MainWindow::syncPersistentChatInputState(bool baseEnabled) {
 			|| target.scope == MumbleProto::Channel || target.scope == MumbleProto::ServerGlobal)) {
 		enableInput = canSendToPersistentChatTarget(target, true);
 	}
-	qteChat->setEnabled(enableInput);
-	updatePersistentChatSendButton();
+	Q_UNUSED(enableInput);
+	publishModernShellActiveScopePatch(QStringLiteral("activeScope.update"));
 }
 
 QList< QListWidgetItem * > MainWindow::persistentChatChannelListSelectedItems() const {
@@ -33852,471 +33822,32 @@ const QListWidgetItem *MainWindow::persistentChatChannelListCurrentItem() const 
 	return const_cast< MainWindow * >(this)->persistentChatChannelListCurrentItem();
 }
 
-void MainWindow::updatePersistentChatChrome(const PersistentChatTarget &target) {
-	if (!true) {
-		return;
-	}
-	if (modernShellMinimalSnapshotEnabled()) {
-		return;
-	}
-
-	const bool showConversationList = hasPersistentChatCapabilities();
-	const bool showMotd             = !m_persistentChatWelcomeText.trimmed().isEmpty();
-	const bool compactRoomHeader =
-		target.valid && !target.serverLog && !target.directMessage && !target.ephemeralTextPath
-		&& (target.scope == MumbleProto::TextChannel || target.scope == MumbleProto::Channel);
-	const bool compactRailSections             = compactRoomHeader;
-	const bool nativeConversationChromeVisible = qdwChat && qdwChat->isVisible();
-	const bool nativeNavigatorChromeVisible    = m_serverNavigatorContainer && m_serverNavigatorContainer->isVisible();
-
-	if (QVBoxLayout *headerLayout = qobject_cast< QVBoxLayout * >(
-			m_persistentChatHeaderFrame ? m_persistentChatHeaderFrame->layout() : nullptr)) {
-		headerLayout->setContentsMargins(7, 0, 7, compactRoomHeader ? 0 : 1);
-		headerLayout->setSpacing(compactRoomHeader ? 0 : 1);
-	}
-
-	if (m_persistentChatHeaderEyebrow) {
-		QString eyebrow = tr("Text");
-		if (target.serverLog) {
-			eyebrow = tr("Activity");
-		} else if (target.directMessage) {
-			eyebrow = tr("Direct");
-		} else if (target.scope == MumbleProto::Aggregate || target.scope == MumbleProto::ServerGlobal) {
-			eyebrow = tr("Retired");
-		} else if (target.scope == MumbleProto::TextChannel) {
-			eyebrow = tr("Room");
-		}
-		m_persistentChatHeaderEyebrow->setText(eyebrow);
-		if (nativeConversationChromeVisible) {
-			m_persistentChatHeaderEyebrow->setVisible(!compactRoomHeader);
-		}
-	}
-
-	if (m_persistentChatHeaderTitle) {
-		m_persistentChatHeaderTitle->setText(target.valid ? target.label : tr("Chat"));
-	}
-
-	if (m_persistentChatHeaderContext) {
-		m_persistentChatHeaderContext->clear();
-		if (nativeConversationChromeVisible) {
-			m_persistentChatHeaderContext->setVisible(false);
-		}
-	}
-
-	QString subtitle;
-	if (Global::get().uiSession == 0) {
-		subtitle = tr("Join a server to chat.");
-	} else if (!target.valid) {
-		subtitle = target.label;
-	} else if (target.serverLog) {
-		subtitle = tr("Connection, notices, and diagnostics.");
-	} else if (target.ephemeralTextPath) {
-		subtitle = tr("Non-persistent room chat.");
-	} else if (target.directMessage) {
-		subtitle = tr("Non-persistent direct chat.");
-	} else if (target.scope == MumbleProto::Aggregate) {
-		subtitle = !target.statusMessage.trimmed().isEmpty()
-					   ? target.statusMessage
-					   : tr("Combined activity is retired in the new text room list.");
-	} else if (target.scope == MumbleProto::ServerGlobal) {
-		if (!target.description.trimmed().isEmpty()) {
-			subtitle = target.description;
-		} else if (const ClientUser *self = ClientUser::get(Global::get().uiSession); self && self->cChannel) {
-			subtitle = tr("Server-wide chat from %1.").arg(persistentTextAclChannelLabel(self->cChannel));
-		} else {
-			subtitle = tr("Server-wide chat is retired in the new text room list.");
-		}
-	} else if (target.scope == MumbleProto::TextChannel && target.channel) {
-		subtitle = QString();
-	} else if (target.scope == MumbleProto::Channel && target.channel) {
-		subtitle = QString();
-	} else if (!target.statusMessage.trimmed().isEmpty()) {
-		subtitle = target.statusMessage;
-	} else if (!target.description.trimmed().isEmpty()) {
-		subtitle = target.description;
-	} else {
-		subtitle = tr("Persistent chat with shared history and read state.");
-	}
-
-	if (m_persistentChatHeaderSubtitle) {
-		m_persistentChatHeaderSubtitle->setText(subtitle);
-		if (nativeConversationChromeVisible) {
-			m_persistentChatHeaderSubtitle->setVisible(!subtitle.trimmed().isEmpty());
-		}
-	}
-	if (m_persistentChatHeaderFrame && nativeConversationChromeVisible) {
-		m_persistentChatHeaderFrame->setVisible(!compactRoomHeader);
-	}
-	if (nativeNavigatorChromeVisible && m_serverNavigatorTextChannelsMotdFrame && m_serverNavigatorTextChannelsMotdTitle
-		&& m_serverNavigatorTextChannelsMotdBody && m_serverNavigatorTextChannelsMotdToggleButton) {
-		m_serverNavigatorTextChannelsMotdFrame->setVisible(showMotd);
-		if (showMotd) {
-			m_serverNavigatorTextChannelsMotdTitle->setText(tr("MOTD"));
-			m_serverNavigatorTextChannelsMotdBody->setVisible(true);
-			static const int motdRefreshDelaysMs[] = { 0, 150, 600, 1800, 4500 };
-			Q_UNUSED(motdRefreshDelaysMs);
-		} else {
-			m_serverNavigatorTextChannelsMotdToggleButton->hide();
-		}
-	}
-
-	if (m_serverNavigatorVoiceSectionEyebrow) {
-		m_serverNavigatorVoiceSectionEyebrow->setText(tr("Rooms"));
-		if (nativeNavigatorChromeVisible) {
-			m_serverNavigatorVoiceSectionEyebrow->setVisible(!compactRailSections);
-		}
-	}
-	if (m_serverNavigatorVoiceSectionSubtitle) {
-		if (nativeNavigatorChromeVisible) {
-			m_serverNavigatorVoiceSectionSubtitle->setVisible(false);
-		}
-		m_serverNavigatorVoiceSectionSubtitle->setText(tr("Voice rooms, people, and text rooms"));
-	}
-	if (m_serverNavigatorTextChannelsEyebrow) {
-		if (nativeNavigatorChromeVisible) {
-			m_serverNavigatorTextChannelsEyebrow->setVisible(showConversationList && !compactRailSections);
-		}
-		m_serverNavigatorTextChannelsEyebrow->setText(tr("Text"));
-	}
-	if (m_serverNavigatorTextChannelsTitle) {
-		if (nativeNavigatorChromeVisible) {
-			m_serverNavigatorTextChannelsTitle->setVisible(false);
-		}
-		m_serverNavigatorTextChannelsTitle->setText(tr("Text rooms"));
-	}
-	if (m_serverNavigatorTextChannelsSubtitle) {
-		const bool showCreateHint =
-			showConversationList && canManagePersistentTextChannels() && m_persistentTextChannels.isEmpty();
-		if (nativeNavigatorChromeVisible) {
-			m_serverNavigatorTextChannelsSubtitle->setVisible(showCreateHint);
-		}
-		m_serverNavigatorTextChannelsSubtitle->setText(showCreateHint ? tr("Right-click to create a text room")
-																	  : tr("Named text rooms and voice room chat"));
-	}
-	if (m_persistentChatChannelList && nativeNavigatorChromeVisible) {
-		m_persistentChatChannelList->setVisible(showConversationList);
-	}
-	if (m_serverNavigatorTextChannelsFrame && nativeNavigatorChromeVisible) {
-		m_serverNavigatorTextChannelsFrame->setVisible(showConversationList);
-		if (m_serverNavigatorTextChannelsDivider) {
-			m_serverNavigatorTextChannelsDivider->setVisible(false);
-		}
-	}
-
-}
-
 void MainWindow::updateWindowTitle() {
-	QString title;
-	if (Global::get().s.bMinimalView) {
-		title = tr("Mumble - Minimal View");
-	} else {
-		title = tr("Mumble");
-	}
-
+	QString title = tr("Mumble");
 	if (!Global::get().windowTitlePostfix.isEmpty()) {
 		title += QString::fromLatin1(" | %1").arg(Global::get().windowTitlePostfix);
 	}
 
 	setWindowTitle(title);
+	if (m_qmlShellHost && m_qmlShellHost->window()) {
+		m_qmlShellHost->window()->setTitle(title);
+	}
 }
 
 void MainWindow::updateServerNavigatorChrome() {
-	if (!true) {
-		return;
-	}
-	if (modernShellMinimalSnapshotEnabled()) {
-		return;
-	}
-
-	if (!m_serverNavigatorHeaderFrame || !m_serverNavigatorTitle || !m_serverNavigatorSubtitle
-		|| !m_serverNavigatorFooter || !m_serverNavigatorFooterFrame || !m_serverNavigatorFooterPresenceButton
-		|| !m_serverNavigatorFooterAvatar || !m_serverNavigatorFooterName || !m_serverNavigatorFooterPresence) {
-		return;
-	}
-
-	if (Global::get().uiSession == 0 || !Global::get().sh) {
-		m_serverNavigatorEyebrow->setText(tr("Voice"));
-		m_serverNavigatorTitle->setText(tr("Join a server"));
-		m_serverNavigatorSubtitle->setText(tr("Rooms, people, and live state"));
-		m_serverNavigatorFooterPresenceButton->hide();
-		m_serverNavigatorFooter->setTextFormat(Qt::PlainText);
-		m_serverNavigatorFooter->setText(tr("Disconnected\nOpen Server"));
-		m_serverNavigatorFooter->setVisible(true);
-		m_serverNavigatorHeaderFrame->setVisible(true);
-		m_serverNavigatorFooterFrame->setVisible(true);
-		closeServerNavigatorUserMenu();
-		return;
-	}
-
-	const PersistentChatTarget chatTarget = currentPersistentChatTarget();
-	const bool compactRoomShell =
-		hasPersistentChatCapabilities() && chatTarget.valid && !chatTarget.serverLog && !chatTarget.directMessage
-		&& !chatTarget.ephemeralTextPath
-		&& (chatTarget.scope == MumbleProto::TextChannel || chatTarget.scope == MumbleProto::Channel);
-	QString host;
-	QString username;
-	QString password;
-	unsigned short port = 0;
-	Global::get().sh->getConnectionInfo(host, port, username, password);
-
-	const QString serverLabel = port == 0 || port == DEFAULT_MUMBLE_PORT ? host : tr("%1:%2").arg(host).arg(port);
-
-	const ClientUser *selfUser = ClientUser::get(Global::get().uiSession);
-	QString eyebrow            = tr("Voice");
-	QString title              = serverLabel;
-	QString subtitle           = serverLabel;
-	QString footer             = tr("Connected\n%1").arg(serverLabel);
-	bool showCompactFooter     = false;
-
-	if (hasPersistentChatCapabilities() && chatTarget.valid && !chatTarget.ephemeralTextPath) {
-		eyebrow = tr("Live context");
-		title   = chatTarget.label;
-		if (chatTarget.serverLog) {
-			eyebrow  = tr("Activity");
-			subtitle = tr("Server log and client diagnostics");
-		} else if (chatTarget.directMessage && chatTarget.user) {
-			eyebrow  = tr("Direct");
-			subtitle = tr("With %1").arg(chatTarget.user->qsName);
-		} else if (chatTarget.scope == MumbleProto::Aggregate) {
-			eyebrow  = tr("Retired");
-			subtitle = tr("Combined activity is retired");
-		} else if (chatTarget.scope == MumbleProto::ServerGlobal) {
-			eyebrow = tr("Retired");
-			if (const ClientUser *self = ClientUser::get(Global::get().uiSession); self && self->cChannel) {
-				subtitle = tr("Server-wide chat from %1").arg(persistentTextAclChannelLabel(self->cChannel));
-			} else {
-				subtitle = tr("Server-wide chat");
-			}
-		} else if (chatTarget.scope == MumbleProto::TextChannel && chatTarget.channel) {
-			eyebrow  = tr("Room");
-			subtitle = tr("Visible like %1").arg(persistentTextAclChannelLabel(chatTarget.channel));
-		} else if (chatTarget.scope == MumbleProto::Channel && chatTarget.channel) {
-			eyebrow  = tr("Voice");
-			subtitle = tr("History for %1").arg(persistentTextAclChannelLabel(chatTarget.channel));
-		} else if (!chatTarget.description.trimmed().isEmpty()) {
-			subtitle = chatTarget.description;
-		}
-	} else if (ClientUser *self = ClientUser::get(Global::get().uiSession); self && self->cChannel) {
-		eyebrow  = tr("Current room");
-		title    = self->cChannel->qsName;
-		subtitle = roomPopulationLabel(self->cChannel->qlUsers.count());
-	} else {
-		footer = tr("Connected to %1").arg(serverLabel);
-	}
-
-	if (selfUser) {
-		const bool idle            = isUserIdle(selfUser->uiSession);
-		const QString presenceText = Global::get().s.bDeaf
-										 ? tr("Deafened")
-										 : (Global::get().s.bMute ? tr("Muted") : (idle ? tr("Away") : tr("Online")));
-		QColor avatarBackground  = palette().color(QPalette::Highlight);
-		QColor avatarText        = palette().color(QPalette::HighlightedText);
-		QColor nameColor         = palette().color(QPalette::Text);
-		QColor presenceColor     = palette().color(QPalette::Mid);
-		QColor presenceRingColor = palette().color(QPalette::Window);
-		if (const std::optional< UiThemeTokens > tokens = activeUiThemeTokens(); tokens) {
-			avatarBackground  = alphaColor(tokens->accent, 0.34);
-			avatarText        = tokens->text;
-			nameColor         = tokens->text;
-			presenceRingColor = tokens->mantle;
-			presenceColor     = Global::get().s.bDeaf
-								? mixColors(tokens->rosewater, tokens->red, 0.48)
-								: (Global::get().s.bMute ? mixColors(tokens->peach, tokens->yellow, 0.36)
-														 : (idle ? mixColors(tokens->yellow, tokens->text, 0.22)
-																 : mixColors(tokens->green, tokens->text, 0.12)));
-		} else if (m_serverNavigatorContentFrame) {
-			presenceRingColor = m_serverNavigatorContentFrame->palette().color(QPalette::Window);
-			if (idle && !Global::get().s.bMute && !Global::get().s.bDeaf) {
-				presenceColor = QColor(207, 155, 65);
-			}
-		}
-
-		const QString selfName = selfUser->qsName.trimmed().isEmpty() ? tr("You") : selfUser->qsName.trimmed();
-		const QString initial  = selfName.left(1).toUpper();
-		m_serverNavigatorFooterAvatar->setPixmap(
-			serverNavigatorSelfAvatarPixmap(initial, m_serverNavigatorFooterAvatar->size(), avatarBackground,
-											avatarText, presenceColor, presenceRingColor));
-		m_serverNavigatorFooterName->setText(selfName);
-		m_serverNavigatorFooterPresence->setText(presenceText);
-		m_serverNavigatorFooterName->setStyleSheet(
-			QString::fromLatin1("color:%1;").arg(nameColor.name(QColor::HexArgb)));
-		m_serverNavigatorFooterPresence->setStyleSheet(
-			QString::fromLatin1("color:%1;").arg(presenceColor.name(QColor::HexArgb)));
-		showCompactFooter = true;
-	}
-
-	m_serverNavigatorHeaderFrame->setVisible(!compactRoomShell);
-	m_serverNavigatorEyebrow->setText(eyebrow);
-	m_serverNavigatorTitle->setText(title);
-	m_serverNavigatorSubtitle->setText(subtitle);
-	m_serverNavigatorFooterPresenceButton->setVisible(showCompactFooter);
-	m_serverNavigatorFooter->setTextFormat(Qt::PlainText);
-	m_serverNavigatorFooter->setText(footer);
-	m_serverNavigatorFooter->setVisible(!showCompactFooter && !footer.isEmpty());
-	m_serverNavigatorFooterFrame->setVisible(showCompactFooter || !footer.isEmpty());
-	if (!showCompactFooter) {
-		closeServerNavigatorUserMenu();
-	} else {
-		syncServerNavigatorUserMenu();
-	}
+	// The QML shell derives navigator chrome directly from the typed models.
 }
 
 void MainWindow::syncServerNavigatorUserMenu() {
-	if (!m_serverNavigatorFooterPresenceButton) {
-		return;
-	}
-
-	if (!m_serverNavigatorUserMenuPopup) {
-		auto *popup = new ServerNavigatorUserMenuPopup(this);
-		popup->hide();
-		m_serverNavigatorUserMenuPopup = popup;
-
-		connect(popup->presenceButton(ServerNavigatorPresenceState::Online), &QPushButton::clicked, this, [this]() {
-			closeServerNavigatorUserMenu();
-			AudioInputPtr ai = Global::get().ai;
-			if (ai) {
-				// Mirror the existing global-shortcut behavior so an explicit
-				// "Online" choice can return the local client from idle.
-				if (ai->activityState == AudioInput::ActivityStateIdle) {
-					ai->activityState = AudioInput::ActivityStateReturnedFromIdle;
-				}
-				ai->tIdle.restart();
-			}
-			if (Global::get().s.bDeaf) {
-				setAudioDeaf(false);
-			}
-			if (Global::get().s.bMute) {
-				setAudioMute(false);
-			}
-		});
-		connect(popup->presenceButton(ServerNavigatorPresenceState::Away), &QPushButton::clicked, this, [popup]() {
-			if (QPushButton *button = popup->presenceButton(ServerNavigatorPresenceState::Away)) {
-				QToolTip::showText(button->mapToGlobal(QPoint(button->width() / 2, button->height())),
-								   QObject::tr("Away is shown automatically when you are idle."), button);
-			}
-		});
-		connect(popup->presenceButton(ServerNavigatorPresenceState::Muted), &QPushButton::clicked, this, [this]() {
-			closeServerNavigatorUserMenu();
-			if (Global::get().s.bDeaf) {
-				setAudioDeaf(false);
-			}
-			if (!Global::get().s.bMute) {
-				setAudioMute(true);
-			}
-		});
-		connect(popup->presenceButton(ServerNavigatorPresenceState::Deafened), &QPushButton::clicked, this, [this]() {
-			closeServerNavigatorUserMenu();
-			if (!Global::get().s.bDeaf) {
-				setAudioDeaf(true);
-			}
-		});
-		connect(popup->muteButton(), &QPushButton::clicked, this, [this]() {
-			closeServerNavigatorUserMenu();
-			if (qaAudioMute) {
-				qaAudioMute->trigger();
-			}
-		});
-		connect(popup->deafButton(), &QPushButton::clicked, this, [this]() {
-			closeServerNavigatorUserMenu();
-			if (qaAudioDeaf) {
-				qaAudioDeaf->trigger();
-			}
-		});
-		connect(popup->settingsButton(), &QPushButton::clicked, this, [this]() {
-			closeServerNavigatorUserMenu();
-			if (qaConfigDialog) {
-				qaConfigDialog->trigger();
-			}
-		});
-		connect(popup->disconnectButton(), &QPushButton::clicked, this, [this]() {
-			closeServerNavigatorUserMenu();
-			if (qaServerDisconnect && qaServerDisconnect->isEnabled()) {
-				qaServerDisconnect->trigger();
-			} else if (Global::get().uiSession != 0 && Global::get().sh) {
-				disconnectFromServer();
-			}
-		});
-	}
-
-	const ClientUser *selfUser = ClientUser::get(Global::get().uiSession);
-	auto *popup                = static_cast< ServerNavigatorUserMenuPopup * >(m_serverNavigatorUserMenuPopup.data());
-	if (!popup || !selfUser || !m_serverNavigatorFooterPresenceButton->isVisible()) {
-		closeServerNavigatorUserMenu();
-		return;
-	}
-
-	const bool idle = isUserIdle(selfUser->uiSession);
-	ServerNavigatorPresenceDisplay display;
-	display.currentState = Global::get().s.bDeaf
-							   ? ServerNavigatorPresenceState::Deafened
-							   : (Global::get().s.bMute ? ServerNavigatorPresenceState::Muted
-														: (idle ? ServerNavigatorPresenceState::Away
-																: ServerNavigatorPresenceState::Online));
-	display.name                  = selfUser->qsName.trimmed().isEmpty() ? tr("You") : selfUser->qsName.trimmed();
-	display.label                 = serverNavigatorPresenceStateLabel(display.currentState);
-	display.textColor             = palette().color(QPalette::Text);
-	display.mutedTextColor        = palette().color(QPalette::Mid);
-	display.avatarBackgroundColor = palette().color(QPalette::Highlight);
-	display.avatarTextColor       = palette().color(QPalette::HighlightedText);
-	display.presenceColor         = palette().color(QPalette::Highlight);
-	display.onlineColor           = QColor(74, 186, 122);
-	display.awayColor             = QColor(239, 159, 39);
-	display.mutedStateColor       = QColor(219, 156, 64);
-	display.deafenedColor         = QColor(226, 75, 74);
-	display.presenceRingColor     = palette().color(QPalette::Window);
-	display.panelColor            = palette().color(QPalette::Window);
-	display.borderColor           = alphaColor(palette().color(QPalette::Mid), 0.38);
-	display.hoverColor            = alphaColor(palette().color(QPalette::Highlight), 0.10);
-	display.selectedColor         = alphaColor(palette().color(QPalette::Highlight), 0.14);
-	display.dividerColor          = alphaColor(palette().color(QPalette::Mid), 0.28);
-	display.dangerColor           = QColor(214, 92, 92);
-	if (const std::optional< UiThemeTokens > tokens = activeUiThemeTokens(); tokens) {
-		display.textColor             = tokens->text;
-		display.mutedTextColor        = tokens->textMuted;
-		display.avatarBackgroundColor = alphaColor(tokens->accent, 0.34);
-		display.avatarTextColor       = tokens->text;
-		display.onlineColor           = mixColors(tokens->green, tokens->text, 0.12);
-		display.awayColor             = mixColors(tokens->yellow, tokens->text, 0.22);
-		display.mutedStateColor       = mixColors(tokens->peach, tokens->yellow, 0.36);
-		display.deafenedColor         = mixColors(tokens->rosewater, tokens->red, 0.48);
-		display.presenceRingColor     = tokens->mantle;
-		display.panelColor            = alphaColor(tokens->surface0, 0.985);
-		display.borderColor           = tokens->surface1;
-		display.hoverColor            = alphaColor(tokens->surface1, 0.64);
-		display.dividerColor          = tokens->surface1;
-		display.dangerColor           = mixColors(tokens->red, tokens->rosewater, 0.20);
-		display.presenceColor         = serverNavigatorPresenceStateColor(display, display.currentState);
-		display.selectedColor         = alphaColor(display.presenceColor, 0.20);
-	} else if (idle && !Global::get().s.bMute && !Global::get().s.bDeaf) {
-		display.awayColor     = QColor(207, 155, 65);
-		display.presenceColor = display.awayColor;
-		display.selectedColor = alphaColor(display.presenceColor, 0.16);
-	} else {
-		display.presenceColor = serverNavigatorPresenceStateColor(display, display.currentState);
-	}
-
-	popup->sync(display, qaAudioMute && qaAudioMute->isChecked(), qaAudioDeaf && qaAudioDeaf->isChecked(),
-				qaConfigDialog != nullptr, Global::get().uiSession != 0 && Global::get().sh);
-	if (popup->isVisible()) {
-		positionServerNavigatorUserMenu();
-	}
+	// The profile menu is owned by the QML scene.
 }
 
 void MainWindow::positionServerNavigatorUserMenu() {
-	auto *popup = static_cast< ServerNavigatorUserMenuPopup * >(m_serverNavigatorUserMenuPopup.data());
-	if (!popup || !m_serverNavigatorFooterPresenceButton || !m_serverNavigatorFooterPresenceButton->isVisible()) {
-		return;
-	}
+	// QML positions its popup relative to the profile control.
+}
 
-	popup->adjustSize();
-	const QPoint anchorTopLeft = m_serverNavigatorFooterPresenceButton->mapTo(this, QPoint(0, 0));
-	const QRect anchorRect(anchorTopLeft, m_serverNavigatorFooterPresenceButton->size());
-	const int x           = qBound(8, anchorRect.right() - popup->width() + 22, width() - popup->width() - 8);
-	const int y           = qMax(8, anchorRect.top() - popup->height() + 10);
-	const int arrowCenter = qBound(20, anchorRect.right() - x - 18, popup->width() - 20);
-	popup->setArrowCenterX(arrowCenter);
-	popup->move(x, y);
-	popup->raise();
+void MainWindow::updatePersistentChatChrome(const PersistentChatTarget &target) {
+	Q_UNUSED(target);
 }
 
 void MainWindow::toggleServerNavigatorUserMenu() {
@@ -34349,43 +33880,10 @@ void MainWindow::closeServerNavigatorUserMenu() {
 }
 
 void MainWindow::updateToolbar() {
-	if (!qtIconToolbar) {
-		return;
-	}
-
-	const bool layoutIsCustom = Settings::LayoutModern == Settings::LayoutCustom;
-	qtIconToolbar->setMovable(layoutIsCustom && !Global::get().s.bLockLayout);
-
-	// Avoid detaching the toolbar during startup. Qt serializes toolbar-area
-	// topology into saveState(), and mutating a restored custom toolbar layout
-	// here can produce a state blob that later crashes in
-	// QToolBarAreaLayoutInfo::sizeHint().
-	const Qt::ToolBarArea currentArea = toolBarArea(qtIconToolbar);
-	if (layoutIsCustom) {
-		if (currentArea == Qt::NoToolBarArea) {
-			addToolBar(Qt::TopToolBarArea, qtIconToolbar);
-		}
-		return;
-	}
-
-	if (currentArea != Qt::TopToolBarArea) {
-		addToolBar(Qt::TopToolBarArea, qtIconToolbar);
-	}
 }
 
 void MainWindow::updatePersistentChatSendButton() {
-	if (!qteChat) {
-		return;
-	}
-
-	const bool hasUserText =
-		qteChat->isEnabled() && !qteChat->isShowingDefaultText() && !qteChat->toPlainText().trimmed().isEmpty();
-	if (m_persistentChatSendButton) {
-		m_persistentChatSendButton->setEnabled(hasUserText);
-	}
-	if (m_persistentChatAttachButton) {
-		m_persistentChatAttachButton->setEnabled(qteChat->isEnabled() && Global::get().bAllowHTML);
-	}
+	publishModernShellActiveScopePatch(QStringLiteral("activeScope.update"));
 }
 
 void MainWindow::updateFavoriteButton() {
@@ -34402,23 +33900,14 @@ void MainWindow::updateFavoriteButton() {
 // Sets whether or not to show the title bars on the MainWindow's
 // dock widgets.
 void MainWindow::setShowDockTitleBars(bool doShow) {
-	if (dtbLogDockTitle) {
-		dtbLogDockTitle->setEnabled(doShow);
-	}
-	if (dtbChatDockTitle) {
-		dtbChatDockTitle->setEnabled(doShow);
-	}
+	Q_UNUSED(doShow);
 }
 
 MainWindow::~MainWindow() {
 	delete m_persistentChatPreviewSnapshotRenderer;
 	m_persistentChatPreviewSnapshotRenderer = nullptr;
 	stopModernConnectServerPing();
-	if (qdwLog) {
-		delete qdwLog->titleBarWidget();
-	}
 	delete pmModel;
-	delete qtvUsers;
 	delete Channel::get(Mumble::ROOT_CHANNEL_ID);
 }
 
@@ -34609,30 +34098,8 @@ void MainWindow::keyPressEvent(QKeyEvent *e) {
 /// switches between major elements of an application.
 /// This behavior is for example seen in Windows's (File) Explorer.
 ///
-/// The main widgets are qteLog (the log view), the persistent chat controls
-/// and qtvUsers (users tree view).
 void MainWindow::focusNextMainWidget() {
-	QWidget *mainFocusWidgets[] = {
-		qteLog, m_persistentChatChannelList, m_persistentChatHistory, qteChat, qtvUsers,
-	};
-	const int numMainFocusWidgets = sizeof(mainFocusWidgets) / sizeof(mainFocusWidgets[0]);
-
-	int currentMainFocusWidgetIndex = -1;
-
-	QWidget *w = focusWidget();
-	for (int i = 0; i < numMainFocusWidgets; i++) {
-		QWidget *mainFocusWidget = mainFocusWidgets[i];
-		if (mainFocusWidget && (w == mainFocusWidget || mainFocusWidget->isAncestorOf(w))) {
-			currentMainFocusWidgetIndex = i;
-			break;
-		}
-	}
-
-	Q_ASSERT(currentMainFocusWidgetIndex != -1);
-
-	int nextMainFocusWidgetIndex = (currentMainFocusWidgetIndex + 1) % numMainFocusWidgets;
-	QWidget *nextMainFocusWidget = mainFocusWidgets[nextMainFocusWidgetIndex];
-	nextMainFocusWidget->setFocus();
+	if (m_qmlShellHost) m_qmlShellHost->showRaise();
 }
 
 void MainWindow::updateAudioToolTips() {
@@ -34761,7 +34228,7 @@ bool MainWindow::handleSpecialContextMenu(const QUrl &url, const QPoint &pos_, b
 				if (cuContextUser->cChannel) {
 					m_modernSelectionState.selectedVoiceChannelID = cuContextUser->cChannel->iId;
 				}
-				qteChat->setFocus();
+				publishModernShellRoomStatePatch();
 			} else {
 				qpContextPosition = QPoint();
 				qmUser->exec(pos_, nullptr);
@@ -34783,7 +34250,7 @@ bool MainWindow::handleSpecialContextMenu(const QUrl &url, const QPoint &pos_, b
 			if (focus) {
 				m_modernSelectionState.selectedUserSession.reset();
 				m_modernSelectionState.selectedVoiceChannelID = cContextChannel->iId;
-				qteChat->setFocus();
+				publishModernShellRoomStatePatch();
 			} else {
 				qpContextPosition = QPoint();
 				qmChannel->exec(pos_, nullptr);
@@ -34840,7 +34307,7 @@ void MainWindow::showLogContextMenu(LogTextBrowser *browser, const QPoint &mpos)
 		}
 	}
 
-	if (browser == qteLog || browser == m_persistentChatLogView) {
+	if (browser == m_persistentChatLogView) {
 		menu->addSeparator();
 		menu->addAction(tr("Clear"), browser, SLOT(clear(void)));
 	}
@@ -34848,17 +34315,6 @@ void MainWindow::showLogContextMenu(LogTextBrowser *browser, const QPoint &mpos)
 	delete menu;
 }
 
-void MainWindow::on_qteLog_customContextMenuRequested(const QPoint &mpos) {
-	LogTextBrowser *browser = qobject_cast< LogTextBrowser * >(sender());
-	if (!browser && !true) {
-		browser = qteLog;
-	}
-	if (!browser) {
-		return;
-	}
-
-	showLogContextMenu(browser, mpos);
-}
 
 QImage MainWindow::imageFromLogBrowser(const LogTextBrowser *browser, const QTextCursor &cursor) const {
 	if (!browser || cursor.isNull() || !cursor.charFormat().isImageFormat()) {
@@ -37238,9 +36694,7 @@ bool MainWindow::sendChatbarTextToCurrentTarget(QString qsText, const bool plain
 			m_pendingPersistentChatReply ? std::optional< unsigned int >(m_pendingPersistentChatReply->message_id())
 										 : std::nullopt);
 		setPersistentChatReplyTarget(std::nullopt);
-		if (clearNativeComposer && qteChat) {
-			qteChat->clear();
-		}
+		Q_UNUSED(clearNativeComposer);
 		return true;
 	}
 
@@ -37262,9 +36716,7 @@ bool MainWindow::sendChatbarTextToCurrentTarget(QString qsText, const bool plain
 
 	sendChatbarMessage(qsText);
 
-	if (clearNativeComposer && qteChat) {
-		qteChat->clear();
-	}
+	Q_UNUSED(clearNativeComposer);
 	return true;
 }
 
@@ -37330,47 +36782,6 @@ void MainWindow::sendChatbarMessage(QString qsMessage) {
 										  : std::nullopt);
 	}
 	setPersistentChatReplyTarget(std::nullopt);
-}
-
-/// Handles Backtab/Shift-Tab for qteChat, which allows
-/// users to move focus to the previous widget in
-/// MainWindow.
-void MainWindow::on_qteChat_backtabPressed() {
-	focusPreviousChild();
-}
-
-void MainWindow::on_qteChat_ctrlSpacePressed() {
-	autocompleteUsername();
-}
-
-void MainWindow::on_qteChat_tabPressed() {
-	// Only autocomplete the username, if the user entered text starts with a "@".
-	// Otherwise TAB should be reserved for accessible keyboard navigation.
-	QString currentText = qteChat->toPlainText();
-	if (currentText.startsWith("@")) {
-		currentText.remove(0, 1);
-
-		qteChat->clear();
-		QTextCursor tc = qteChat->textCursor();
-		tc.insertText(currentText);
-		qteChat->setTextCursor(tc);
-
-		autocompleteUsername();
-		return;
-	}
-
-	focusNextMainWidget();
-}
-
-void MainWindow::autocompleteUsername() {
-	unsigned int res = qteChat->completeAtCursor();
-	if (res == 0) {
-		return;
-	}
-	m_modernSelectionState.selectedUserSession = res;
-	if (ClientUser *user = ClientUser::get(res); user && user->cChannel) {
-		m_modernSelectionState.selectedVoiceChannelID = user->cChannel->iId;
-	}
 }
 
 void MainWindow::on_qmConfig_aboutToShow() {
@@ -37596,7 +37007,7 @@ void MainWindow::on_qaChannelHide_triggered() {
 	Channel *c = getContextMenuChannel();
 
 	if (c) {
-		UserModel *um = static_cast< UserModel * >(qtvUsers->model());
+		UserModel *um = pmModel;
 		if (qaChannelHide->isChecked()) {
 			c->setFilterMode(ChannelFilterMode::HIDE);
 		} else {
@@ -37610,7 +37021,7 @@ void MainWindow::on_qaChannelPin_triggered() {
 	Channel *c = getContextMenuChannel();
 
 	if (c) {
-		UserModel *um = static_cast< UserModel * >(qtvUsers->model());
+		UserModel *um = pmModel;
 		if (qaChannelPin->isChecked()) {
 			c->setFilterMode(ChannelFilterMode::PIN);
 		} else {
@@ -37874,13 +37285,6 @@ void MainWindow::on_qaAudioReset_triggered() {
 
 void MainWindow::on_qaFilterToggle_triggered() {
 	Global::get().s.bFilterActive = qaFilterToggle->isChecked();
-	if (qtvUsers) {
-		if (!Global::get().s.bFilterActive) {
-			qtvUsers->setAccessibleName(tr("Channels and users"));
-		} else {
-			qtvUsers->setAccessibleName(tr("Filtered channels and users"));
-		}
-	}
 	updateUserModel();
 }
 
@@ -38747,9 +38151,6 @@ void MainWindow::serverConnected() {
 	}
 	root->uiPermissions = 0;
 
-	if (!hiddenNativeNavigatorSafeMode && qtvUsers) {
-		qtvUsers->setRowHidden(0, QModelIndex(), false);
-	}
 
 	Global::get().bAllowHTML                       = true;
 	Global::get().bPersistentGlobalChatEnabled     = false;
@@ -38832,9 +38233,6 @@ void MainWindow::serverConnected() {
 	TaskList::addToRecentList(Global::get().s.qsLastServer, uname, host, port);
 #endif
 
-	if (qdwMinimalViewNote) {
-		qdwMinimalViewNote->hide();
-	}
 	queueModernShellSnapshotSync();
 }
 
@@ -38878,9 +38276,6 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	qaServerInformation->setEnabled(false);
 	qaServerBanList->setEnabled(false);
 	m_modernSelectionState = ModernSelectionState {};
-	if (qteChat) {
-		qteChat->setEnabled(false);
-	}
 	m_defaultPersistentTextChannelID = 0;
 	m_persistentTextChannels.clear();
 	m_userIdleSeconds.clear();
@@ -38976,9 +38371,6 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 		appendModernShellConnectTrace(QStringLiteral("serverDisconnected safe-clear-finished"));
 	} else {
 		pmModel->removeAll();
-		if (qtvUsers) {
-			qtvUsers->setRowHidden(0, QModelIndex(), true);
-		}
 	}
 
 	// Update QActions and menus
@@ -39056,9 +38448,6 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	}
 	AudioInput::setMaxBandwidth(-1);
 
-	if (Global::get().s.bMinimalView) {
-		qdwMinimalViewNote->show();
-	}
 
 	emit disconnectedFromServer();
 }
@@ -39108,8 +38497,7 @@ void MainWindow::highlightWindow() {
 }
 
 /**
- * This function updates the qteChat bar default text according to
- * the selected user/channel in the users treeview.
+ * Updates the active QML composer state for the selected conversation.
  */
 void MainWindow::on_persistentChatScopeChanged(int) {
 	setPersistentChatTargetUsesVoiceTree(false);
@@ -39140,10 +38528,9 @@ void MainWindow::updateChatBar(bool forcePersistentChatReload, bool queueModernS
 	}
 
 	const PersistentChatTarget target = currentPersistentChatTarget();
-	auto setNativeComposerPlaceholder = [this](const QString &text, bool force = false) {
-		if (qteChat) {
-			qteChat->setDefaultText(text, force);
-		}
+	auto setNativeComposerPlaceholder = [](const QString &text, bool force = false) {
+		Q_UNUSED(text);
+		Q_UNUSED(force);
 	};
 	updatePersistentChatChrome(target);
 	updatePersistentChatScopeSelectorLabels();
@@ -39268,78 +38655,6 @@ void MainWindow::customEvent(QEvent *evt) {
 }
 
 
-void MainWindow::on_qteLog_anchorClicked(const QUrl &url) {
-	if (url.scheme() == QLatin1String("mumble-chat") && url.host() == QLatin1String("load-older")) {
-		requestOlderPersistentChatHistory();
-		return;
-	}
-
-	const QString encodedUrl = QString::fromLatin1(url.toEncoded());
-	if (encodedUrl.startsWith(QLatin1String("data:image/"), Qt::CaseInsensitive)) {
-		m_selectedLogImage = persistentChatInlineDataImageFromSource(encodedUrl);
-		if (!m_selectedLogImage.isNull()) {
-			openImageDialog(m_selectedLogImage);
-			return;
-		}
-	}
-
-	if (url.scheme() == QLatin1String("mumble-chat") && url.host() == QLatin1String("inline-data-image")) {
-		m_selectedLogImage = persistentChatInlineDataImageFromUrl(url);
-		if (!m_selectedLogImage.isNull()) {
-			openImageDialog(m_selectedLogImage);
-			return;
-		}
-	}
-
-	if (url.scheme() == QLatin1String("mumble-chat") && url.host() == QLatin1String("preview-image")) {
-		const QString previewKey = QUrl::fromPercentEncoding(url.path().mid(1).toUtf8());
-		const auto previewIt     = m_persistentChatPreviews.constFind(previewKey);
-		if (previewIt != m_persistentChatPreviews.cend() && !previewIt->thumbnailImage.isNull()) {
-			openImageDialog(previewIt->thumbnailImage);
-			return;
-		}
-	}
-
-	if (url.scheme() == QLatin1String("mumble-chat") && url.host() == QLatin1String("scope")) {
-		const QStringList pathParts = url.path().split(QLatin1Char('/'), Qt::SkipEmptyParts);
-		if (pathParts.size() == 2 && pathParts.front() == QLatin1String("text")) {
-			bool ok                    = false;
-			const unsigned int scopeID = pathParts.back().toUInt(&ok);
-			if (ok && navigateToPersistentChatScope(MumbleProto::TextChannel, scopeID)) {
-				return;
-			}
-		}
-	}
-
-	if (!handleSpecialContextMenu(url, QCursor::pos(), true)) {
-		if (url.scheme() != QLatin1String("file") && url.scheme() != QLatin1String("qrc") && !url.isRelative()) {
-			QUrl fallbackUrl;
-			const QUrl externalUrl = preferredExternalUrlForActivatedLink(url, &fallbackUrl);
-			const bool hasFallback = fallbackUrl.isValid() && fallbackUrl != externalUrl;
-			// Let the current click/paint work finish before we hand the URL to the OS.
-			QTimer::singleShot(0, this, [externalUrl, fallbackUrl, hasFallback]() {
-				if (!QDesktopServices::openUrl(externalUrl) && hasFallback) {
-					QDesktopServices::openUrl(fallbackUrl);
-				}
-			});
-		}
-	}
-}
-
-void MainWindow::on_qteLog_highlighted(const QUrl &url) {
-	if (url.scheme() == QString::fromLatin1("clientid") || url.scheme() == QString::fromLatin1("channelid")
-		|| url.scheme() == QString::fromLatin1("mumble-chat") || url.scheme() == QString::fromLatin1("data"))
-		return;
-
-	if (!url.isValid())
-		QToolTip::hideText();
-	else {
-		if (isActiveWindow()) {
-			LogTextBrowser *browser = qobject_cast< LogTextBrowser * >(sender());
-			QToolTip::showText(QCursor::pos(), url.toString(), browser ? browser : qteLog, QRect());
-		}
-	}
-}
 
 void MainWindow::context_triggered() {
 	QAction *a = qobject_cast< QAction * >(sender());
