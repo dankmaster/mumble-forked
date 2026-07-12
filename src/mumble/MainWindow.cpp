@@ -13337,11 +13337,12 @@ MainWindow::MainWindow(QWidget *p)
 	m_userCommentRequestTimer->setObjectName(QLatin1String("UserCommentRequest"));
 	connect(m_userCommentRequestTimer, &QTimer::timeout, this, &MainWindow::flushUserCommentRequests);
 
-	qmUser     = new QMenu(tr("&User"), this);
-	qmChannel  = new QMenu(tr("&Channel"), this);
-	qmListener = new QMenu(tr("&Listener"), this);
+	const bool qmlShellRequested = qEnvironmentVariableIntValue("MUMBLE_QML_SHELL") > 0;
+	qmUser     = qmlShellRequested ? nullptr : new QMenu(tr("&User"), this);
+	qmChannel  = qmlShellRequested ? nullptr : new QMenu(tr("&Channel"), this);
+	qmListener = qmlShellRequested ? nullptr : new QMenu(tr("&Listener"), this);
 
-	qmDeveloper = new QMenu(tr("&Developer"), this);
+	qmDeveloper = qmlShellRequested ? nullptr : new QMenu(tr("&Developer"), this);
 
 	qaEmpty = new QAction(tr("No action available..."), this);
 	qaEmpty->setEnabled(false);
@@ -13387,12 +13388,15 @@ MainWindow::MainWindow(QWidget *p)
 	connect(qaChannelScreenShareStopWatching, &QAction::triggered, this, &MainWindow::stopWatchingChannelScreenShare);
 	connect(qaChannelScreenShareOpenWindow, &QAction::triggered, this, &MainWindow::openChannelScreenShareWindow);
 	setupGui();
-	connect(qmUser, SIGNAL(aboutToShow()), this, SLOT(qmUser_aboutToShow()));
-	connect(qmChannel, SIGNAL(aboutToShow()), this, SLOT(qmChannel_aboutToShow()));
-	connect(qmListener, SIGNAL(aboutToShow()), this, SLOT(qmListener_aboutToShow()));
-	connect(qteChat, SIGNAL(entered(QString)), this, SLOT(sendChatbarText(QString)));
-	connect(qteChat, &ChatbarTextEdit::ctrlEnterPressed, [this](const QString &msg) { sendChatbarText(msg, true); });
-	connect(qteChat, SIGNAL(pastedImage(QString)), this, SLOT(sendChatbarMessage(QString)));
+	if (!qmlShellRequested) {
+		connect(qmUser, SIGNAL(aboutToShow()), this, SLOT(qmUser_aboutToShow()));
+		connect(qmChannel, SIGNAL(aboutToShow()), this, SLOT(qmChannel_aboutToShow()));
+		connect(qmListener, SIGNAL(aboutToShow()), this, SLOT(qmListener_aboutToShow()));
+		connect(qteChat, SIGNAL(entered(QString)), this, SLOT(sendChatbarText(QString)));
+		connect(qteChat, &ChatbarTextEdit::ctrlEnterPressed,
+				[this](const QString &msg) { sendChatbarText(msg, true); });
+		connect(qteChat, SIGNAL(pastedImage(QString)), this, SLOT(sendChatbarMessage(QString)));
+	}
 #ifdef Q_OS_MACOS
 	// Use default preferences icon in the macOS menu bar
 	qaConfigDialog->setIconVisibleInMenu(false);
@@ -13406,13 +13410,15 @@ MainWindow::MainWindow(QWidget *p)
 	// if only the main window is visible (e.g. Global::get(). minimal mode)
 	addActions(findChildren< QAction * >());
 
-	on_qmServer_aboutToShow();
+	if (!qmlShellRequested) on_qmServer_aboutToShow();
 	on_qmSelf_aboutToShow();
-	qmChannel_aboutToShow();
-	qmUser_aboutToShow();
-	on_qmConfig_aboutToShow();
+	if (!qmlShellRequested) {
+		qmChannel_aboutToShow();
+		qmUser_aboutToShow();
+		on_qmConfig_aboutToShow();
+	}
 
-	qmDeveloper->addAction(qaDeveloperConsole);
+	if (qmDeveloper) qmDeveloper->addAction(qaDeveloperConsole);
 
 	setOnTop(Global::get().s.aotbAlwaysOnTop == Settings::OnTopAlways
 			 || (Global::get().s.bMinimalView && Global::get().s.aotbAlwaysOnTop == Settings::OnTopInMinimal)
@@ -14266,9 +14272,12 @@ void MainWindow::createActions() {
 }
 
 void MainWindow::setupGui() {
+	const bool qmlShellRequested = qEnvironmentVariableIntValue("MUMBLE_QML_SHELL") > 0;
 	updateWindowTitle();
-	setupServerNavigator();
-	setCentralWidget(m_serverNavigatorContainer);
+	if (!qmlShellRequested) {
+		setupServerNavigator();
+		setCentralWidget(m_serverNavigatorContainer);
+	}
 	setAcceptDrops(true);
 
 #ifdef Q_OS_MAC
@@ -14301,7 +14310,7 @@ void MainWindow::setupGui() {
 	pmModel = new UserModel(this);
 	// The compatibility navigator still observes the model until its remaining
 	// paint/update hooks are removed. Selection and targeting no longer read it.
-	qtvUsers->setModel(pmModel);
+	if (qtvUsers) qtvUsers->setModel(pmModel);
 
 	QObject::connect(this, &MainWindow::userAddedChannelListener, pmModel, &UserModel::addChannelListener);
 	QObject::connect(
@@ -14396,18 +14405,20 @@ void MainWindow::setupGui() {
 	connect(gsUnlink, SIGNAL(down(QVariant)), qaAudioUnlink, SLOT(trigger()));
 	connect(gsMinimal, SIGNAL(down(QVariant)), qaConfigMinimal, SLOT(trigger()));
 
-	dtbChatDockTitle = new DockTitleBar();
-	qdwChat->setTitleBarWidget(dtbChatDockTitle);
-	dtbChatDockTitle->setMinimumHeight(0);
-	dtbChatDockTitle->setMaximumHeight(0);
-	qdwChat->installEventFilter(dtbChatDockTitle);
-	setupPersistentChatDock();
-	refreshTextDocumentStylesheets();
-	qteChat->setDefaultText(tr("<center>Not connected</center>"), true);
-	qteChat->setEnabled(false);
+	if (!qmlShellRequested) {
+		dtbChatDockTitle = new DockTitleBar();
+		qdwChat->setTitleBarWidget(dtbChatDockTitle);
+		dtbChatDockTitle->setMinimumHeight(0);
+		dtbChatDockTitle->setMaximumHeight(0);
+		qdwChat->installEventFilter(dtbChatDockTitle);
+		setupPersistentChatDock();
+		refreshTextDocumentStylesheets();
+		qteChat->setDefaultText(tr("<center>Not connected</center>"), true);
+		qteChat->setEnabled(false);
 
-	QWidget *dummyTitlebar = new QWidget(qdwMinimalViewNote);
-	qdwMinimalViewNote->setTitleBarWidget(dummyTitlebar);
+		QWidget *dummyTitlebar = new QWidget(qdwMinimalViewNote);
+		qdwMinimalViewNote->setTitleBarWidget(dummyTitlebar);
+	}
 
 	m_modernShellSyncTimer = new QTimer(this);
 	m_modernShellSyncTimer->setSingleShot(true);
@@ -14432,6 +14443,10 @@ void MainWindow::setupGui() {
 	});
 
 	applyShellLayout();
+	if (qmlShellRequested) {
+		queueModernShellSnapshotSync();
+		return;
+	}
 	setShowDockTitleBars((Settings::LayoutModern == Settings::LayoutCustom) && !Global::get().s.bLockLayout);
 
 #ifdef Q_OS_MAC
@@ -23899,13 +23914,17 @@ QVariantMap MainWindow::buildModernShellParticipantPatchState(const ClientUser *
 	const QPointer< Channel > previousChannel = cContextChannel;
 	const QPoint previousContextPosition      = qpContextPosition;
 
-	cuContextUser     = const_cast< ClientUser * >(user);
-	cContextChannel   = user->cChannel;
-	qpContextPosition = QPoint();
-	qmUser_aboutToShow();
-	participant.insert(QStringLiteral("actions"),
-					   connected ? serializeModernShellMenu(qmUser, ModernShellMenuContext::Participant)
+	if (qmUser) {
+		cuContextUser     = const_cast< ClientUser * >(user);
+		cContextChannel   = user->cChannel;
+		qpContextPosition = QPoint();
+		qmUser_aboutToShow();
+		participant.insert(QStringLiteral("actions"),
+						   connected ? serializeModernShellMenu(qmUser, ModernShellMenuContext::Participant)
 								 : QVariantList());
+	} else {
+		participant.insert(QStringLiteral("actions"), QVariantList());
+	}
 
 	cuContextUser     = previousUser;
 	cContextChannel   = previousChannel;
@@ -24087,12 +24106,14 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 							modernShellScopeToken(static_cast< int >(MumbleProto::Channel), rootVoiceChannel->iId));
 		}
 	}
-	on_qmServer_aboutToShow();
-	on_qmSelf_aboutToShow();
-	on_qmConfig_aboutToShow();
-	qmHelp->ensurePolished();
-
-	QVariantList appMenus = buildModernShellAppMenus();
+	QVariantList appMenus;
+	if (qmServer && qmSelf && qmConfig && qmHelp) {
+		on_qmServer_aboutToShow();
+		on_qmSelf_aboutToShow();
+		on_qmConfig_aboutToShow();
+		qmHelp->ensurePolished();
+		appMenus = buildModernShellAppMenus();
+	}
 	appState.insert(QStringLiteral("menus"), appMenus);
 
 	const bool selfIdle = connected && selfUser && isUserIdle(selfUser->uiSession);
@@ -24157,7 +24178,7 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 	};
 	const auto buildChannelActions = [this](Channel *channel, bool voiceRoomContext) {
 		QVariantList actions;
-		if (!channel) {
+		if (!channel || !qmChannel) {
 			return actions;
 		}
 
@@ -42186,10 +42207,12 @@ void MainWindow::on_qaAudioReset_triggered() {
 
 void MainWindow::on_qaFilterToggle_triggered() {
 	Global::get().s.bFilterActive = qaFilterToggle->isChecked();
-	if (!Global::get().s.bFilterActive) {
-		qtvUsers->setAccessibleName(tr("Channels and users"));
-	} else {
-		qtvUsers->setAccessibleName(tr("Filtered channels and users"));
+	if (qtvUsers) {
+		if (!Global::get().s.bFilterActive) {
+			qtvUsers->setAccessibleName(tr("Channels and users"));
+		} else {
+			qtvUsers->setAccessibleName(tr("Filtered channels and users"));
+		}
 	}
 	updateUserModel();
 }
@@ -43106,7 +43129,7 @@ void MainWindow::serverConnected() {
 	Global::get().pPermissions               = ChanACL::None;
 	clearUserTextureRequests();
 	clearUserCommentRequests();
-	const bool hiddenNativeNavigatorSafeMode = modernShellMinimalSnapshotEnabled() && true;
+	const bool hiddenNativeNavigatorSafeMode = modernShellMinimalSnapshotEnabled();
 
 #ifdef Q_OS_MAC
 	// Suppress AppNap while we're connected to a server.
@@ -43136,7 +43159,7 @@ void MainWindow::serverConnected() {
 	}
 	root->uiPermissions = 0;
 
-	if (!hiddenNativeNavigatorSafeMode) {
+	if (!hiddenNativeNavigatorSafeMode && qtvUsers) {
 		qtvUsers->setRowHidden(0, QModelIndex(), false);
 	}
 
@@ -43209,22 +43232,26 @@ void MainWindow::serverConnected() {
 	}
 
 	// Update QActions and menus
-	on_qmServer_aboutToShow();
-	on_qmSelf_aboutToShow();
-	qmChannel_aboutToShow();
-	qmUser_aboutToShow();
-	on_qmConfig_aboutToShow();
+	if (qmServer && qmSelf && qmChannel && qmUser && qmConfig) {
+		on_qmServer_aboutToShow();
+		on_qmSelf_aboutToShow();
+		qmChannel_aboutToShow();
+		qmUser_aboutToShow();
+		on_qmConfig_aboutToShow();
+	}
 
 #ifdef Q_OS_WIN
 	TaskList::addToRecentList(Global::get().s.qsLastServer, uname, host, port);
 #endif
 
-	qdwMinimalViewNote->hide();
+	if (qdwMinimalViewNote) {
+		qdwMinimalViewNote->hide();
+	}
 	queueModernShellSnapshotSync();
 }
 
 void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString reason) {
-	const bool hiddenNativeNavigatorSafeMode = modernShellMinimalSnapshotEnabled() && true;
+	const bool hiddenNativeNavigatorSafeMode = modernShellMinimalSnapshotEnabled();
 	appendModernShellConnectTrace(QStringLiteral("serverDisconnected enter err=%1 minimal=%2 reason=%3")
 									  .arg(static_cast< int >(err))
 									  .arg(hiddenNativeNavigatorSafeMode ? 1 : 0)
@@ -43263,7 +43290,9 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	qaServerInformation->setEnabled(false);
 	qaServerBanList->setEnabled(false);
 	m_modernSelectionState = ModernSelectionState {};
-	qteChat->setEnabled(false);
+	if (qteChat) {
+		qteChat->setEnabled(false);
+	}
 	m_defaultPersistentTextChannelID = 0;
 	m_persistentTextChannels.clear();
 	m_userIdleSeconds.clear();
@@ -43359,17 +43388,21 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 		appendModernShellConnectTrace(QStringLiteral("serverDisconnected safe-clear-finished"));
 	} else {
 		pmModel->removeAll();
-		qtvUsers->setRowHidden(0, QModelIndex(), true);
+		if (qtvUsers) {
+			qtvUsers->setRowHidden(0, QModelIndex(), true);
+		}
 	}
 
 	// Update QActions and menus
-	on_qmServer_aboutToShow();
-	on_qmSelf_aboutToShow();
-	if (!hiddenNativeNavigatorSafeMode) {
-		qmChannel_aboutToShow();
-		qmUser_aboutToShow();
+	if (qmServer && qmSelf && qmConfig) {
+		on_qmServer_aboutToShow();
+		on_qmSelf_aboutToShow();
+		if (!hiddenNativeNavigatorSafeMode && qmChannel && qmUser) {
+			qmChannel_aboutToShow();
+			qmUser_aboutToShow();
+		}
+		on_qmConfig_aboutToShow();
 	}
-	on_qmConfig_aboutToShow();
 
 	// We can't record without a server anyway, so we disable the functionality here
 	enableRecording(false);
@@ -43391,7 +43424,7 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 													  Global::get().sh->qlErrors)) {
 				AudioInput::setMaxBandwidth(-1);
 
-				if (Global::get().s.bMinimalView) {
+				if (Global::get().s.bMinimalView && qdwMinimalViewNote) {
 					qdwMinimalViewNote->show();
 				}
 
@@ -43450,7 +43483,7 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 		if (openModernSslHandshakeFailureDialog(reason)) {
 			AudioInput::setMaxBandwidth(-1);
 
-			if (Global::get().s.bMinimalView) {
+			if (Global::get().s.bMinimalView && qdwMinimalViewNote) {
 				qdwMinimalViewNote->show();
 			}
 
@@ -43603,6 +43636,11 @@ void MainWindow::updateChatBar(bool forcePersistentChatReload, bool queueModernS
 	}
 
 	const PersistentChatTarget target = currentPersistentChatTarget();
+	auto setNativeComposerPlaceholder = [this](const QString &text, bool force = false) {
+		if (qteChat) {
+			qteChat->setDefaultText(text, force);
+		}
+	};
 	updatePersistentChatChrome(target);
 	updatePersistentChatScopeSelectorLabels();
 	updatePersistentTextChannelControls();
@@ -43611,42 +43649,42 @@ void MainWindow::updateChatBar(bool forcePersistentChatReload, bool queueModernS
 			m_persistentChatController->clearActiveScope();
 		}
 		clearPersistentChatReplyTarget(false);
-		qteChat->setDefaultText(tr("<div>Read-only activity</div>"), true);
+		setNativeComposerPlaceholder(tr("<div>Read-only activity</div>"), true);
 		renderServerLogView(true);
 	} else if (Global::get().uiSession == 0 || !target.valid) {
-		qteChat->setDefaultText(tr("<div>Connect to chat</div>"), true);
+		setNativeComposerPlaceholder(tr("<div>Connect to chat</div>"), true);
 		clearPersistentChatView(tr("Connect to a server to load conversations and history."),
 								tr("Start a conversation"),
 								{ tr("Open Server to connect"), tr("Room chat and history appear here") });
 	} else if (target.ephemeralTextPath && target.directMessage && target.user) {
-		qteChat->setDefaultText(tr("<div>Write to %1...</div>").arg(target.user->qsName.toHtmlEscaped()));
+		setNativeComposerPlaceholder(tr("<div>Write to %1...</div>").arg(target.user->qsName.toHtmlEscaped()));
 		refreshPersistentChatView(forcePersistentChatReload);
 	} else if (target.ephemeralTextPath && target.channel) {
-		qteChat->setDefaultText(tr("<div>Write in %1...</div>").arg(target.channel->qsName.toHtmlEscaped()));
+		setNativeComposerPlaceholder(tr("<div>Write in %1...</div>").arg(target.channel->qsName.toHtmlEscaped()));
 		refreshPersistentChatView(forcePersistentChatReload);
 	} else if (target.directMessage && target.user) {
-		qteChat->setDefaultText(tr("<div>Write to %1...</div>").arg(target.user->qsName.toHtmlEscaped()));
+		setNativeComposerPlaceholder(tr("<div>Write to %1...</div>").arg(target.user->qsName.toHtmlEscaped()));
 		clearPersistentChatView(tr("Direct messages use the non-persistent text-message transport on this server."),
 								tr("Direct messages"), { tr("History is not available for this conversation") });
 	} else if (target.scope == MumbleProto::ServerGlobal && !Global::get().bPersistentGlobalChatEnabled) {
-		qteChat->setDefaultText(tr("<div>Server-wide chat is unavailable</div>"), true);
+		setNativeComposerPlaceholder(tr("<div>Server-wide chat is unavailable</div>"), true);
 		clearPersistentChatView(
 			target.statusMessage.isEmpty() ? tr("Server-wide chat is unavailable on this server.")
 										   : target.statusMessage,
 			tr("Server-wide chat is unavailable"), { tr("Choose a text room or voice room chat instead") });
 	} else if (target.readOnly) {
-		qteChat->setDefaultText(
+		setNativeComposerPlaceholder(
 			tr("<div>Choose a conversation to write in</div><div><small>This conversation is read-only</small></div>"),
 			true);
 		refreshPersistentChatView(forcePersistentChatReload);
 	} else if (target.scope == MumbleProto::TextChannel) {
-		qteChat->setDefaultText(tr("<div>Write in %1...</div>").arg(target.label.toHtmlEscaped()), true);
+		setNativeComposerPlaceholder(tr("<div>Write in %1...</div>").arg(target.label.toHtmlEscaped()), true);
 		refreshPersistentChatView(forcePersistentChatReload);
 	} else if (target.channel) {
-		qteChat->setDefaultText(tr("<div>Write in %1...</div>").arg(target.channel->qsName.toHtmlEscaped()));
+		setNativeComposerPlaceholder(tr("<div>Write in %1...</div>").arg(target.channel->qsName.toHtmlEscaped()));
 		refreshPersistentChatView(forcePersistentChatReload);
 	} else {
-		qteChat->setDefaultText(tr("<div>Write...</div>"), true);
+		setNativeComposerPlaceholder(tr("<div>Write...</div>"), true);
 		refreshPersistentChatView(forcePersistentChatReload);
 	}
 

@@ -1012,11 +1012,11 @@ ModelItem *UserModel::moveItem(ModelItem *oldparent, ModelItem *newparent, Model
 	// Check whether the moved item is currently selected and if so, store it as a persistent
 	// model index in active. Also clear the selection as we're going to mess with the active
 	// item.
-	QTreeView *v             = Global::get().mw->qtvUsers;
-	QItemSelectionModel *sel = v->selectionModel();
+	QTreeView *v = Global::get().mw ? Global::get().mw->qtvUsers : nullptr;
+	QItemSelectionModel *sel = v ? v->selectionModel() : nullptr;
 	QPersistentModelIndex active;
 	QModelIndex oindex = createIndex(oldrow, 0, oldItem);
-	if (sel->isSelected(oindex) || (oindex == v->currentIndex())) {
+	if (sel && (sel->isSelected(oindex) || (oindex == v->currentIndex()))) {
 		active = index(oldItem);
 		v->clearSelection();
 		v->setCurrentIndex(QModelIndex());
@@ -1024,7 +1024,7 @@ ModelItem *UserModel::moveItem(ModelItem *oldparent, ModelItem *newparent, Model
 
 	// Check whether the oldItem is currently expanded in order to restore the same
 	// state once we have moved it.
-	bool expanded = v->isExpanded(index(oldItem));
+	const bool expanded = v && v->isExpanded(index(oldItem));
 
 	if (newparent == oldparent) {
 		// If the moving happens within the same parent, we have to watch out that we use the correct
@@ -1082,7 +1082,7 @@ ModelItem *UserModel::moveItem(ModelItem *oldparent, ModelItem *newparent, Model
 	oldItem->wipe();
 	delete oldItem;
 
-	if (active.isValid()) {
+	if (sel && active.isValid()) {
 		// If the moved item has been previously selected, we restore that selection to now be the
 		// new item using the "active" model index which has been updated to now point to the new
 		// item.
@@ -1090,7 +1090,7 @@ ModelItem *UserModel::moveItem(ModelItem *oldparent, ModelItem *newparent, Model
 		v->setCurrentIndex(active);
 	}
 
-	if (expanded) {
+	if (v && expanded) {
 		// If the old item (or rather the parent it has been living in) has been expanded,
 		// restore that state for the new item.
 		v->expand(index(newItem));
@@ -1100,6 +1100,11 @@ ModelItem *UserModel::moveItem(ModelItem *oldparent, ModelItem *newparent, Model
 }
 
 void UserModel::expandAll(Channel *c) {
+	QTreeView *view = Global::get().mw ? Global::get().mw->qtvUsers : nullptr;
+	if (!view) {
+		return;
+	}
+
 	QStack< Channel * > chans;
 
 	while (c) {
@@ -1108,15 +1113,20 @@ void UserModel::expandAll(Channel *c) {
 	}
 	while (!chans.isEmpty()) {
 		c = chans.pop();
-		Global::get().mw->qtvUsers->setExpanded(index(c), true);
+		view->setExpanded(index(c), true);
 	}
 }
 
 void UserModel::collapseEmpty(Channel *c) {
+	QTreeView *view = Global::get().mw ? Global::get().mw->qtvUsers : nullptr;
+	if (!view) {
+		return;
+	}
+
 	while (c) {
 		ModelItem *mi = ModelItem::c_qhChannels.value(c);
 		if (mi->iUsers == 0)
-			Global::get().mw->qtvUsers->setExpanded(index(c), false);
+			view->setExpanded(index(c), false);
 		else
 			break;
 		c = c->cParent;
@@ -1124,10 +1134,11 @@ void UserModel::collapseEmpty(Channel *c) {
 }
 
 void UserModel::ensureSelfVisible() {
-	if (!Global::get().uiSession)
+	QTreeView *view = Global::get().mw ? Global::get().mw->qtvUsers : nullptr;
+	if (!Global::get().uiSession || !view)
 		return;
 
-	Global::get().mw->qtvUsers->scrollTo(index(ClientUser::get(Global::get().uiSession)));
+	view->scrollTo(index(ClientUser::get(Global::get().uiSession)));
 }
 
 void UserModel::recheckLinks() {
@@ -1483,8 +1494,9 @@ Channel *UserModel::addChannel(unsigned int id, Channel *p, const QString &name)
 	citem->qlChildren.insert(row, item);
 	endInsertRows();
 
-	if (Global::get().s.ceExpand == Settings::AllChannels)
-		Global::get().mw->qtvUsers->setExpanded(index(item), true);
+	QTreeView *view = Global::get().mw ? Global::get().mw->qtvUsers : nullptr;
+	if (view && Global::get().s.ceExpand == Settings::AllChannels)
+		view->setExpanded(index(item), true);
 
 
 	emit channelAdded(c->iId);

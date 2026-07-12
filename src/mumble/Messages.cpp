@@ -355,13 +355,15 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 	appendServerSyncTrace(QStringLiteral("post-audio-update"));
 
 	// Update QActions and menus
-	on_qmServer_aboutToShow();
-	on_qmSelf_aboutToShow();
-	if (!hiddenLegacyUserModelSafeMode) {
-		qmChannel_aboutToShow();
-		qmUser_aboutToShow();
+	if (qmServer && qmSelf && qmConfig) {
+		on_qmServer_aboutToShow();
+		on_qmSelf_aboutToShow();
+		if (!hiddenLegacyUserModelSafeMode && qmChannel && qmUser) {
+			qmChannel_aboutToShow();
+			qmUser_aboutToShow();
+		}
+		on_qmConfig_aboutToShow();
 	}
-	on_qmConfig_aboutToShow();
 	appendServerSyncTrace(QStringLiteral("post-menu-update"));
 
 

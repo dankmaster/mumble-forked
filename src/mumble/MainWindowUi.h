@@ -91,21 +91,21 @@ public:
     QAction *qaUserLocalIgnoreTTS;
     QAction *qaSearch;
     QAction *qaMoveBack;
-    UserView *qtvUsers;
-    QMenuBar *menubar;
-    QMenu *qmConfig;
-    QMenu *qmHelp;
-    QMenu *qmServer;
-    QMenu *qmSelf;
-    QDockWidget *qdwLog;
-    LogTextBrowser *qteLog;
-    QDockWidget *qdwChat;
-    ChatbarTextEdit *qteChat;
-    QToolBar *qtIconToolbar;
-    QDockWidget *qdwMinimalViewNote;
-    QWidget *dockWidgetContents;
-    QHBoxLayout *horizontalLayout;
-    QLabel *label;
+    UserView *qtvUsers = nullptr;
+    QMenuBar *menubar = nullptr;
+    QMenu *qmConfig = nullptr;
+    QMenu *qmHelp = nullptr;
+    QMenu *qmServer = nullptr;
+    QMenu *qmSelf = nullptr;
+    QDockWidget *qdwLog = nullptr;
+    LogTextBrowser *qteLog = nullptr;
+    QDockWidget *qdwChat = nullptr;
+    ChatbarTextEdit *qteChat = nullptr;
+    QToolBar *qtIconToolbar = nullptr;
+    QDockWidget *qdwMinimalViewNote = nullptr;
+    QWidget *dockWidgetContents = nullptr;
+    QHBoxLayout *horizontalLayout = nullptr;
+    QLabel *label = nullptr;
 
     void setupUi(QMainWindow *MainWindow)
     {
@@ -329,6 +329,11 @@ public:
         QIcon icon11;
         icon11.addFile(QString::fromUtf8("skin:arrow_left.svg"), QSize(), QIcon::Mode::Normal, QIcon::State::Off);
         qaMoveBack->setIcon(icon11);
+        if (qEnvironmentVariableIntValue("MUMBLE_QML_SHELL") > 0) {
+            retranslateUi(MainWindow);
+            QMetaObject::connectSlotsByName(MainWindow);
+            return;
+        }
         qtvUsers = new UserView(MainWindow);
         qtvUsers->setObjectName("qtvUsers");
         qtvUsers->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -866,6 +871,8 @@ public:
 #if QT_CONFIG(tooltip)
         qaMoveBack->setToolTip(QCoreApplication::translate("MainWindow", "Moves you back to the previous channel", nullptr));
 #endif // QT_CONFIG(tooltip)
+        if (qEnvironmentVariableIntValue("MUMBLE_QML_SHELL") > 0)
+            return;
         qmConfig->setTitle(QCoreApplication::translate("MainWindow", "C&onfigure", nullptr));
         qmHelp->setTitle(QCoreApplication::translate("MainWindow", "&Help", nullptr));
         qmServer->setTitle(QCoreApplication::translate("MainWindow", "S&erver", nullptr));
