@@ -271,6 +271,59 @@ void StableListModel::clear() {
 	emit countChanged();
 }
 
+QVariantMap RoomModel::roomRow(const QVariantMap &room, const QString &kind) {
+	const QString scopeToken = room.value(QStringLiteral("token")).toString().trimmed();
+	if (scopeToken.isEmpty()) return {};
+	return { { QStringLiteral("id"), QStringLiteral("%1:%2").arg(kind, scopeToken) },
+			 { QStringLiteral("scopeToken"), scopeToken },
+			 { QStringLiteral("title"), room.value(QStringLiteral("label")) },
+			 { QStringLiteral("subtitle"),
+			   room.value(QStringLiteral("topic"), room.value(QStringLiteral("description"))) },
+			 { QStringLiteral("kind"), kind },
+			 { QStringLiteral("selected"), room.value(QStringLiteral("selected")) },
+			 { QStringLiteral("status"),
+			   room.value(QStringLiteral("joined")).toBool() ? QStringLiteral("joined") : QString() },
+			 { QStringLiteral("depth"), room.value(QStringLiteral("depth")) },
+			 { QStringLiteral("unreadCount"), room.value(QStringLiteral("unreadCount")) },
+			 { QStringLiteral("source"), room } };
+}
+
+void RoomModel::replaceRoomStates(const QVariantList &voiceRooms, const QVariantList &textRooms) {
+	QVariantList rows;
+	rows.reserve(voiceRooms.size() + textRooms.size());
+	const auto append = [&rows](const QVariantList &rooms, const QString &kind) {
+		for (const QVariant &entry : rooms) {
+			const QVariantMap row = roomRow(entry.toMap(), kind);
+			if (!row.isEmpty()) rows.push_back(row);
+		}
+	};
+	append(voiceRooms, QStringLiteral("voice"));
+	append(textRooms, QStringLiteral("text"));
+	synchronizeRows(rows);
+}
+
+QVariantMap ParticipantModel::participantRow(const QVariantMap &participant) {
+	const QString sessionId = participant.value(QStringLiteral("session")).toString().trimmed();
+	if (sessionId.isEmpty()) return {};
+	return { { QStringLiteral("id"), sessionId },
+			 { QStringLiteral("title"), participant.value(QStringLiteral("name")) },
+			 { QStringLiteral("subtitle"), participant.value(QStringLiteral("statusLabel")) },
+			 { QStringLiteral("kind"), QStringLiteral("participant") },
+			 { QStringLiteral("status"), participant.value(QStringLiteral("talkState")) },
+			 { QStringLiteral("avatarUrl"), participant.value(QStringLiteral("avatarUrl")) },
+			 { QStringLiteral("source"), participant } };
+}
+
+void ParticipantModel::replaceParticipantStates(const QVariantList &participants) {
+	QVariantList rows;
+	rows.reserve(participants.size());
+	for (const QVariant &entry : participants) {
+		const QVariantMap row = participantRow(entry.toMap());
+		if (!row.isEmpty()) rows.push_back(row);
+	}
+	synchronizeRows(rows);
+}
+
 void ParticipantModel::updatePresence(const QString &sessionId, const QString &talkState, const QString &talkLabel,
 							  const QString &talkTone, const bool talking, const bool isSelf,
 							  const QVariantList &badges, const QVariantList &statuses) {

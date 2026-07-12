@@ -250,6 +250,7 @@ public:
 	void syncModernShellSnapshot();
 	void syncQmlShellState();
 	void syncQmlSelectionState();
+	void applyQmlRoomState(const QVariantMap &state);
 	void applyQmlShellPatch(const QString &kind, const QVariantMap &patch);
 	void ensureModernUiAutomationServer();
 	void beginNativeWindowMoveOrResize();
@@ -581,13 +582,12 @@ public:
 	QVariantMap buildModernShellRoomStatePatch();
 	void publishModernShellPatch(const QString &kind, QVariantMap patch);
 	void publishModernShellPatchNow(const QString &kind, QVariantMap patch);
-	void queueModernShellCoalescedPatch(const QString &kind, QVariantMap patch);
 	void flushModernShellCoalescedPatches();
 	void publishModernShellMessagesPatch(const QString &kind, const QVariantList &messages, bool scrollToBottom,
 										  const QString &timelineMode = QString());
 	void publishQmlChatMessage(const MumbleProto::ChatMessage &message, bool appended = false);
 	void publishPersistentChatInlineDataImageUpdate(const QString &token);
-	void publishModernShellActiveScopePatch(const QString &kind);
+	void publishModernShellActiveScopeState();
 	void publishModernShellRoomStatePatch();
 	QString modernServerLogHtml() const;
 	void publishModernShellServerLogUpdate(const PersistentChatTarget &target);
@@ -956,7 +956,6 @@ protected:
 	bool m_modernShellPreviewHydrationLinkDense = false;
 	QTimer *m_modernShellPatchCoalesceTimer                = nullptr;
 	bool m_modernShellRoomStatePatchPending               = false;
-	QVariantMap m_modernShellCoalescedRoomPatch;
 	bool m_modernShellSnapshotPendingAfterNativeMoveResize = false;
 	QHash< int, QString > m_modernAclRegisteredUserNames;
 	bool m_modernAclUserListRequestPending = false;

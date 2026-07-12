@@ -31,7 +31,7 @@ private:
 	void handleNewConnection();
 	void handleReadyRead(QTcpSocket *socket);
 	QVariantMap handleRequest(const QVariantMap &request);
-	QVariantMap buildSnapshotResponse() const;
+	QVariantMap buildStateResponse() const;
 	void writeResponse(QTcpSocket *socket, const QVariantMap &response) const;
 	bool authorizeRequest(const QVariantMap &request, QVariantMap &response) const;
 	bool automationOffscreenModeEnabled() const;

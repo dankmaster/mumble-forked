@@ -168,6 +168,10 @@ class RoomModel final : public StableListModel {
 	Q_OBJECT
 public:
 	using StableListModel::StableListModel;
+	void replaceRoomStates(const QVariantList &voiceRooms, const QVariantList &textRooms);
+
+private:
+	static QVariantMap roomRow(const QVariantMap &room, const QString &kind);
 };
 
 class ParticipantModel final : public StableListModel {
@@ -177,6 +181,10 @@ public:
 	void updatePresence(const QString &sessionId, const QString &talkState, const QString &talkLabel,
 						const QString &talkTone, bool talking, bool isSelf, const QVariantList &badges,
 						const QVariantList &statuses);
+	void replaceParticipantStates(const QVariantList &participants);
+
+private:
+	static QVariantMap participantRow(const QVariantMap &participant);
 };
 
 class ChatTimelineModel final : public StableListModel {

@@ -11,6 +11,7 @@ class TestQmlClientModels : public QObject {
 private slots:
 	void stableRowsUpdateWithoutReset();
 	void synchronizeRowsUsesIncrementalSignals();
+	void roomAndParticipantStatesStayIncremental();
 	void stableIdsRemainIndependentFromSourceMaps();
 	void messageRolesExposeStructuredState();
 	void chatTimelineAppliesDirectIncrementalMessages();
@@ -104,6 +105,47 @@ void TestQmlClientModels::synchronizeRowsUsesIncrementalSignals() {
 	QCOMPARE(changedSpy.count(), 1);
 	QCOMPARE(removeSpy.count(), 1);
 	QCOMPARE(resetSpy.count(), 0);
+}
+
+void TestQmlClientModels::roomAndParticipantStatesStayIncremental() {
+	RoomModel rooms;
+	QSignalSpy roomResetSpy(&rooms, &QAbstractItemModel::modelReset);
+	QSignalSpy roomInsertSpy(&rooms, &QAbstractItemModel::rowsInserted);
+	QSignalSpy roomChangedSpy(&rooms, &QAbstractItemModel::dataChanged);
+	rooms.replaceRoomStates(
+		{ QVariantMap { { QStringLiteral("token"), QStringLiteral("channel:1") },
+						{ QStringLiteral("label"), QStringLiteral("Lobby") },
+						{ QStringLiteral("joined"), true } } },
+		{ QVariantMap { { QStringLiteral("token"), QStringLiteral("text:2") },
+						{ QStringLiteral("label"), QStringLiteral("General") } } });
+	QCOMPARE(rooms.rowCount(), 2);
+	QCOMPARE(roomInsertSpy.count(), 2);
+	QCOMPARE(roomResetSpy.count(), 0);
+
+	rooms.replaceRoomStates(
+		{ QVariantMap { { QStringLiteral("token"), QStringLiteral("channel:1") },
+						{ QStringLiteral("label"), QStringLiteral("Lobby") },
+						{ QStringLiteral("joined"), true }, { QStringLiteral("unreadCount"), 3 } } },
+		{ QVariantMap { { QStringLiteral("token"), QStringLiteral("text:2") },
+						{ QStringLiteral("label"), QStringLiteral("General") } } });
+	QCOMPARE(rooms.rowCount(), 2);
+	QCOMPARE(roomInsertSpy.count(), 2);
+	QCOMPARE(roomChangedSpy.count(), 1);
+	QCOMPARE(roomResetSpy.count(), 0);
+
+	ParticipantModel participants;
+	QSignalSpy participantResetSpy(&participants, &QAbstractItemModel::modelReset);
+	QSignalSpy participantChangedSpy(&participants, &QAbstractItemModel::dataChanged);
+	const QVariantList initialParticipants { QVariantMap { { QStringLiteral("session"), 7 },
+														{ QStringLiteral("name"), QStringLiteral("Alice") },
+														{ QStringLiteral("talkState"), QStringLiteral("passive") } } };
+	participants.replaceParticipantStates(initialParticipants);
+	participants.replaceParticipantStates(
+		{ QVariantMap { { QStringLiteral("session"), 7 }, { QStringLiteral("name"), QStringLiteral("Alice") },
+						{ QStringLiteral("talkState"), QStringLiteral("talking") } } });
+	QCOMPARE(participants.rowCount(), 1);
+	QCOMPARE(participantChangedSpy.count(), 1);
+	QCOMPARE(participantResetSpy.count(), 0);
 }
 
 void TestQmlClientModels::stableIdsRemainIndependentFromSourceMaps() {

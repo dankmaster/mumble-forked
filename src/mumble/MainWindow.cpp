@@ -20484,7 +20484,6 @@ QVariantMap MainWindow::buildModernShellRoomStatePatch() {
 					Global::get().s.qsModernShellMotdDismissedSignature);
 	appState.insert(QStringLiteral("motdLastSeenSignature"),
 					Global::get().s.qsModernShellMotdLastSeenSignature);
-	appState.insert(QStringLiteral("updateBanner"), m_modernUpdateBannerState);
 	if (connected) {
 		if (const Channel *rootVoiceChannel = Channel::get(Mumble::ROOT_CHANNEL_ID)) {
 			appState.insert(QStringLiteral("voiceRootLabel"), QString());
@@ -20889,73 +20888,27 @@ void MainWindow::publishModernShellPatchNow(const QString &kind, QVariantMap pat
 }
 
 void MainWindow::flushModernShellCoalescedPatches() {
-	if (!m_modernShellRoomStatePatchPending && m_modernShellCoalescedRoomPatch.isEmpty()) {
+	if (!m_modernShellRoomStatePatchPending) {
 		return;
 	}
 	if (m_modernShellPatchCoalesceTimer && m_modernShellPatchCoalesceTimer->isActive()) {
 		m_modernShellPatchCoalesceTimer->stop();
 	}
 
-	QVariantMap roomPatch = m_modernShellCoalescedRoomPatch;
-	const bool buildRoomPatch = m_modernShellRoomStatePatchPending;
 	m_modernShellRoomStatePatchPending = false;
-	m_modernShellCoalescedRoomPatch.clear();
-
-	if (buildRoomPatch) {
-		const qint64 startedAtMs = QDateTime::currentMSecsSinceEpoch();
-		roomPatch                = buildModernShellRoomStatePatch();
-		roomPatch.insert(QStringLiteral("activeScope"), buildModernShellActiveScopeState(currentPersistentChatTarget()));
-		appendModernShellConnectTrace(QStringLiteral("flushModernShellCoalescedPatches built rooms text=%1 voice=%2 "
-													 "participants=%3 ms=%4")
-										  .arg(roomPatch.value(QStringLiteral("textRooms")).toList().size())
-										  .arg(roomPatch.value(QStringLiteral("voiceRooms")).toList().size())
-										  .arg(roomPatch.value(QStringLiteral("participants")).toList().size())
-										  .arg(QDateTime::currentMSecsSinceEpoch() - startedAtMs));
-	}
-
-	if (!roomPatch.isEmpty()) {
-		mumble::chatperf::recordValue("modern.patch_coalescer.flush.rooms", 1);
-		QString roomKind = roomPatch.value(QStringLiteral("kind")).toString();
-		if (roomKind.isEmpty()) {
-			roomKind = QStringLiteral("rooms.update");
-		}
-		publishModernShellPatchNow(roomKind, roomPatch);
-	}
-
-}
-
-void MainWindow::queueModernShellCoalescedPatch(const QString &kind, QVariantMap patch) {
-	if (!m_modernShellPatchCoalesceTimer) {
-		publishModernShellPatchNow(kind, patch);
-		return;
-	}
-
-	if (!patch.contains(QStringLiteral("kind"))) {
-		patch.insert(QStringLiteral("kind"), kind);
-	}
-
-	if (kind == QLatin1String("rooms.update")) {
-		m_modernShellCoalescedRoomPatch = patch;
-		mumble::chatperf::recordValue("modern.patch_coalescer.queue.rooms", 1);
-	} else {
-		publishModernShellPatchNow(kind, patch);
-		return;
-	}
-
-	appendModernShellConnectTrace(QStringLiteral("publishModernShellPatch coalesced kind=%1 rooms=%2")
-									  .arg(kind)
-									  .arg(m_modernShellCoalescedRoomPatch.isEmpty() ? 0 : 1));
-	if (!m_modernShellPatchCoalesceTimer->isActive()) {
-		m_modernShellPatchCoalesceTimer->start(ModernShellPatchCoalesceMs);
-	}
+	const qint64 startedAtMs = QDateTime::currentMSecsSinceEpoch();
+	const QVariantMap roomState = buildModernShellRoomStatePatch();
+	applyQmlRoomState(roomState);
+	mumble::chatperf::recordValue("qml.rooms.flush.direct", 1);
+	appendModernShellConnectTrace(QStringLiteral("flushModernShellCoalescedPatches applied rooms text=%1 voice=%2 "
+										 "participants=%3 ms=%4")
+								  .arg(roomState.value(QStringLiteral("textRooms")).toList().size())
+								  .arg(roomState.value(QStringLiteral("voiceRooms")).toList().size())
+								  .arg(roomState.value(QStringLiteral("participants")).toList().size())
+								  .arg(QDateTime::currentMSecsSinceEpoch() - startedAtMs));
 }
 
 void MainWindow::publishModernShellPatch(const QString &kind, QVariantMap patch) {
-	if (kind == QLatin1String("rooms.update")) {
-		queueModernShellCoalescedPatch(kind, patch);
-		return;
-	}
-
 	if (kind == QLatin1String("serverLog.update") || kind == QLatin1String("serverLog.reset")) {
 		flushModernShellCoalescedPatches();
 	}
@@ -21002,13 +20955,12 @@ void MainWindow::publishQmlChatMessage(const MumbleProto::ChatMessage &message, 
 	}
 }
 
-void MainWindow::publishModernShellActiveScopePatch(const QString &kind) {
+void MainWindow::publishModernShellActiveScopeState() {
 	const bool qmlActive = m_qmlShellHost && m_qmlShellHost->window();
 	if (!qmlActive) return;
 
-	QVariantMap patch;
-	patch.insert(QStringLiteral("activeScope"), buildModernShellActiveScopeState(currentPersistentChatTarget()));
-	publishModernShellPatch(kind, patch);
+	m_qmlShellHost->activeScopeController()->applyState(
+		buildModernShellActiveScopeState(currentPersistentChatTarget()));
 }
 
 void MainWindow::publishModernShellRoomStatePatch() {
@@ -21017,15 +20969,14 @@ void MainWindow::publishModernShellRoomStatePatch() {
 
 	if (!m_modernShellPatchCoalesceTimer) {
 		const qint64 startedAtMs = QDateTime::currentMSecsSinceEpoch();
-		QVariantMap patch        = buildModernShellRoomStatePatch();
-		patch.insert(QStringLiteral("activeScope"), buildModernShellActiveScopeState(currentPersistentChatTarget()));
+		const QVariantMap roomState = buildModernShellRoomStatePatch();
 		appendModernShellConnectTrace(
 			QStringLiteral("publishModernShellRoomStatePatch built text=%1 voice=%2 participants=%3 ms=%4")
-				.arg(patch.value(QStringLiteral("textRooms")).toList().size())
-				.arg(patch.value(QStringLiteral("voiceRooms")).toList().size())
-				.arg(patch.value(QStringLiteral("participants")).toList().size())
+				.arg(roomState.value(QStringLiteral("textRooms")).toList().size())
+				.arg(roomState.value(QStringLiteral("voiceRooms")).toList().size())
+				.arg(roomState.value(QStringLiteral("participants")).toList().size())
 				.arg(QDateTime::currentMSecsSinceEpoch() - startedAtMs));
-		publishModernShellPatchNow(QStringLiteral("rooms.update"), patch);
+		applyQmlRoomState(roomState);
 		return;
 	}
 
@@ -22763,12 +22714,7 @@ bool MainWindow::sendModernDirectMessage(const unsigned int session, const QStri
 
 void MainWindow::publishModernDirectMessagesPatch() {
 	if (!m_qmlShellHost || !m_qmlShellHost->window()) return;
-
-	QVariantMap app;
-	app.insert(QStringLiteral("directMessages"), buildModernShellDirectMessagesState());
-	QVariantMap patch;
-	patch.insert(QStringLiteral("app"), app);
-	publishModernShellPatch(QStringLiteral("rooms.update"), patch);
+	publishModernShellRoomStatePatch();
 }
 
 bool MainWindow::handleModernShellScopeSelection(const QString &scopeToken) {
@@ -23693,12 +23639,7 @@ void MainWindow::clearModernUpdateBannerState() {
 
 void MainWindow::publishModernUpdateBannerState() {
 	if (!m_qmlShellHost) return;
-
-	QVariantMap app;
-	app.insert(QStringLiteral("updateBanner"), m_modernUpdateBannerState);
-	QVariantMap patch;
-	patch.insert(QStringLiteral("app"), app);
-	publishModernShellPatchNow(QStringLiteral("rooms.update"), patch);
+	m_qmlShellHost->sessionController()->setUpdateBanner(m_modernUpdateBannerState);
 }
 
 void MainWindow::showModernForkUpdateAvailableBanner(const QJsonObject &info) {
@@ -24784,7 +24725,7 @@ void MainWindow::setPersistentChatReplyTarget(const std::optional< MumbleProto::
 		persistentChatMessageTextSnippet(persistentChatMessageSourceText(*message)).toHtmlEscaped());
 	m_persistentChatReplyFrame->show();
 	updateChatBar(false, false);
-	publishModernShellActiveScopePatch(QStringLiteral("activeScope.update"));
+	publishModernShellActiveScopeState();
 }
 
 void MainWindow::clearPersistentChatReplyTarget(bool refreshChatBar) {
@@ -24797,7 +24738,7 @@ void MainWindow::clearPersistentChatReplyTarget(bool refreshChatBar) {
 	if (refreshChatBar) {
 		updateChatBar(false, false);
 	}
-	publishModernShellActiveScopePatch(QStringLiteral("activeScope.update"));
+	publishModernShellActiveScopeState();
 }
 
 void MainWindow::markPersistentChatAvailable(bool refreshUi) {
@@ -25185,6 +25126,42 @@ void MainWindow::syncQmlSelectionState() {
 											: QVariant());
 }
 
+void MainWindow::applyQmlRoomState(const QVariantMap &state) {
+	if (!m_qmlShellHost || !m_qmlShellHost->window()) return;
+
+	m_qmlShellHost->activeScopeController()->applyState(
+		buildModernShellActiveScopeState(currentPersistentChatTarget()));
+	m_qmlShellHost->roomModel()->replaceRoomStates(state.value(QStringLiteral("voiceRooms")).toList(),
+												  state.value(QStringLiteral("textRooms")).toList());
+	m_qmlShellHost->participantModel()->replaceParticipantStates(
+		state.value(QStringLiteral("participants")).toList());
+
+	const QVariantMap app = state.value(QStringLiteral("app")).toMap();
+	if (app.isEmpty()) return;
+	ClientSessionController *session = m_qmlShellHost->sessionController();
+	const bool connected = Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning();
+	session->setConnected(connected);
+	if (connected) {
+		QString serverName = Global::get().qsServerDisplayName.trimmed();
+		if (serverName.isEmpty()) {
+			if (const Channel *rootChannel = Channel::get(Mumble::ROOT_CHANNEL_ID);
+				rootChannel && rootChannel->qsName != tr("Root")) {
+				serverName = rootChannel->qsName.trimmed();
+			}
+		}
+		if (serverName.isEmpty()) serverName = Global::get().s.qsLastServer.trimmed();
+		if (!serverName.isEmpty()) session->setServerName(serverName);
+	}
+	session->setSelfName(app.value(QStringLiteral("selfName"), session->selfName()).toString());
+	session->setConnectionLabel(
+		app.value(QStringLiteral("selfStatusLabel"), session->connectionLabel()).toString());
+	session->setSelfMuted(app.value(QStringLiteral("selfMuted"), session->selfMuted()).toBool());
+	session->setSelfDeafened(app.value(QStringLiteral("selfDeafened"), session->selfDeafened()).toBool());
+	if (app.contains(QStringLiteral("updateBanner"))) {
+		session->setUpdateBanner(app.value(QStringLiteral("updateBanner")).toMap());
+	}
+}
+
 void MainWindow::syncQmlShellState() {
 	if (!m_qmlShellHost || !m_qmlShellHost->window()) {
 		return;
@@ -25225,45 +25202,7 @@ void MainWindow::syncQmlShellState() {
 													m_modernSelectionState.scopeToken).toString();
 	syncQmlSelectionState();
 
-	QVariantList roomRows;
-	const auto appendRooms = [&roomRows](const QVariantList &source, const QString &kind) {
-		for (const QVariant &entry : source) {
-			const QVariantMap room = entry.toMap();
-			QVariantMap row;
-			const QString scopeToken = room.value(QStringLiteral("token")).toString();
-			row.insert(QStringLiteral("id"), QStringLiteral("%1:%2").arg(kind, scopeToken));
-			row.insert(QStringLiteral("scopeToken"), scopeToken);
-			row.insert(QStringLiteral("title"), room.value(QStringLiteral("label")));
-			row.insert(QStringLiteral("subtitle"),
-					   room.value(QStringLiteral("topic"), room.value(QStringLiteral("description"))));
-			row.insert(QStringLiteral("kind"), kind);
-			row.insert(QStringLiteral("selected"), room.value(QStringLiteral("selected")));
-			row.insert(QStringLiteral("depth"), room.value(QStringLiteral("depth")));
-			row.insert(QStringLiteral("unreadCount"), room.value(QStringLiteral("unreadCount")));
-			row.insert(QStringLiteral("status"), room.value(QStringLiteral("joined")).toBool()
-												? QStringLiteral("joined") : QString());
-			row.insert(QStringLiteral("source"), room);
-			roomRows.push_back(row);
-		}
-	};
-	appendRooms(roomState.value(QStringLiteral("voiceRooms")).toList(), QStringLiteral("voice"));
-	appendRooms(roomState.value(QStringLiteral("textRooms")).toList(), QStringLiteral("text"));
-	m_qmlShellHost->roomModel()->synchronizeRows(roomRows);
-
-	QVariantList participantRows;
-	for (const QVariant &entry : roomState.value(QStringLiteral("participants")).toList()) {
-		const QVariantMap participant = entry.toMap();
-		QVariantMap row;
-		row.insert(QStringLiteral("id"), participant.value(QStringLiteral("session")).toString());
-		row.insert(QStringLiteral("title"), participant.value(QStringLiteral("name")));
-		row.insert(QStringLiteral("subtitle"), participant.value(QStringLiteral("statusLabel")));
-		row.insert(QStringLiteral("kind"), QStringLiteral("participant"));
-		row.insert(QStringLiteral("status"), participant.value(QStringLiteral("talkState")));
-		row.insert(QStringLiteral("avatarUrl"), participant.value(QStringLiteral("avatarUrl")));
-		row.insert(QStringLiteral("source"), participant);
-		participantRows.push_back(row);
-	}
-	m_qmlShellHost->participantModel()->synchronizeRows(participantRows);
+	applyQmlRoomState(roomState);
 
 	QVariantList messages;
 	if (!m_modernRichPreviewProbeMessages.isEmpty()) {
@@ -25280,85 +25219,11 @@ void MainWindow::syncQmlShellState() {
 
 void MainWindow::applyQmlShellPatch(const QString &kind, const QVariantMap &patch) {
 	if (!m_qmlShellHost || !m_qmlShellHost->window()) return;
-
-	const auto roomRow = [](const QVariantMap &room, const QString &roomKind) {
-		QVariantMap row;
-		const QString scopeToken = room.value(QStringLiteral("token")).toString();
-		row.insert(QStringLiteral("id"), QStringLiteral("%1:%2").arg(roomKind, scopeToken));
-		row.insert(QStringLiteral("scopeToken"), scopeToken);
-		row.insert(QStringLiteral("title"), room.value(QStringLiteral("label")));
-		row.insert(QStringLiteral("subtitle"),
-				   room.value(QStringLiteral("topic"), room.value(QStringLiteral("description"))));
-		row.insert(QStringLiteral("kind"), roomKind);
-		row.insert(QStringLiteral("selected"), room.value(QStringLiteral("selected")));
-		row.insert(QStringLiteral("status"),
-				   room.value(QStringLiteral("joined")).toBool() ? QStringLiteral("joined") : QString());
-		row.insert(QStringLiteral("depth"), room.value(QStringLiteral("depth")));
-		row.insert(QStringLiteral("unreadCount"), room.value(QStringLiteral("unreadCount")));
-		row.insert(QStringLiteral("source"), room);
-		return row;
-	};
-	const auto participantRow = [](const QVariantMap &participant) {
-		QVariantMap row;
-		row.insert(QStringLiteral("id"), participant.value(QStringLiteral("session")).toString());
-		row.insert(QStringLiteral("title"), participant.value(QStringLiteral("name")));
-		row.insert(QStringLiteral("subtitle"), participant.value(QStringLiteral("statusLabel")));
-		row.insert(QStringLiteral("kind"), QStringLiteral("participant"));
-		row.insert(QStringLiteral("status"), participant.value(QStringLiteral("talkState")));
-		row.insert(QStringLiteral("avatarUrl"), participant.value(QStringLiteral("avatarUrl")));
-		row.insert(QStringLiteral("source"), participant);
-		return row;
-	};
+	Q_UNUSED(kind)
 	if (patch.contains(QStringLiteral("activeScope"))) {
 		const QVariantMap state = patch.value(QStringLiteral("activeScope")).toMap();
 		m_qmlShellHost->activeScopeController()->applyState(state);
 	}
-
-	if (kind == QLatin1String("rooms.update")) {
-		QVariantList rooms;
-		for (const QVariant &entry : patch.value(QStringLiteral("voiceRooms")).toList()) {
-			rooms.push_back(roomRow(entry.toMap(), QStringLiteral("voice")));
-		}
-		for (const QVariant &entry : patch.value(QStringLiteral("textRooms")).toList()) {
-			rooms.push_back(roomRow(entry.toMap(), QStringLiteral("text")));
-		}
-		m_qmlShellHost->roomModel()->synchronizeRows(rooms);
-
-		QVariantList participants;
-		for (const QVariant &entry : patch.value(QStringLiteral("participants")).toList()) {
-			participants.push_back(participantRow(entry.toMap()));
-		}
-		m_qmlShellHost->participantModel()->synchronizeRows(participants);
-
-		const QVariantMap app = patch.value(QStringLiteral("app")).toMap();
-		if (!app.isEmpty()) {
-			ClientSessionController *session = m_qmlShellHost->sessionController();
-			const bool connected = Global::get().uiSession != 0 && Global::get().sh
-								   && Global::get().sh->isRunning();
-			session->setConnected(connected);
-			if (connected) {
-				QString serverName = Global::get().qsServerDisplayName.trimmed();
-				if (serverName.isEmpty()) {
-					if (const Channel *rootChannel = Channel::get(Mumble::ROOT_CHANNEL_ID);
-						rootChannel && rootChannel->qsName != tr("Root")) {
-						serverName = rootChannel->qsName.trimmed();
-					}
-				}
-				if (serverName.isEmpty()) serverName = Global::get().s.qsLastServer.trimmed();
-				if (!serverName.isEmpty()) session->setServerName(serverName);
-			}
-			session->setSelfName(app.value(QStringLiteral("selfName"), session->selfName()).toString());
-			session->setConnectionLabel(
-				app.value(QStringLiteral("selfStatusLabel"), session->connectionLabel()).toString());
-			session->setSelfMuted(app.value(QStringLiteral("selfMuted"), session->selfMuted()).toBool());
-			session->setSelfDeafened(app.value(QStringLiteral("selfDeafened"), session->selfDeafened()).toBool());
-			if (app.contains(QStringLiteral("updateBanner"))) {
-				session->setUpdateBanner(app.value(QStringLiteral("updateBanner")).toMap());
-			}
-		}
-		return;
-	}
-
 }
 
 void MainWindow::focusPersistentChatVoiceChannel(Channel *channel) {
@@ -30845,7 +30710,7 @@ void MainWindow::renderPersistentChatViewImmediately(const QString &statusMessag
 	}
 
 	if (true) {
-		publishModernShellActiveScopePatch(QStringLiteral("activeScope.update"));
+		publishModernShellActiveScopeState();
 	} else {
 		queueModernShellSnapshotSync();
 	}
@@ -30889,7 +30754,7 @@ bool MainWindow::markPersistentChatRead(bool rerender, bool willScrollToBottom) 
 	if (rerender) {
 		renderPersistentChatView(QString(), true, false);
 	}
-	publishModernShellActiveScopePatch(QStringLiteral("activeScope.update"));
+	publishModernShellActiveScopeState();
 	publishModernShellRoomStatePatch();
 	return true;
 }
@@ -31566,7 +31431,7 @@ void MainWindow::syncPersistentChatInputState(bool baseEnabled) {
 		enableInput = canSendToPersistentChatTarget(target, true);
 	}
 	Q_UNUSED(enableInput);
-	publishModernShellActiveScopePatch(QStringLiteral("activeScope.update"));
+	publishModernShellActiveScopeState();
 }
 
 QList< QListWidgetItem * > MainWindow::persistentChatChannelListSelectedItems() const {
@@ -31685,7 +31550,7 @@ void MainWindow::updateToolbar() {
 }
 
 void MainWindow::updatePersistentChatSendButton() {
-	publishModernShellActiveScopePatch(QStringLiteral("activeScope.update"));
+	publishModernShellActiveScopeState();
 }
 
 void MainWindow::updateFavoriteButton() {
@@ -34529,7 +34394,7 @@ bool MainWindow::sendModernShellMessage(const QString &message) {
 	appendModernShellConnectTrace(QStringLiteral("sendModernShellMessage enter chars=%1").arg(message.size()));
 	const bool sent = sendChatbarTextToCurrentTarget(message, false, false);
 	if (sent) {
-		publishModernShellActiveScopePatch(QStringLiteral("activeScope.update"));
+		publishModernShellActiveScopeState();
 	}
 	return sent;
 }
@@ -35030,7 +34895,7 @@ void MainWindow::updateMenuPermissions() {
 	}
 	syncPersistentChatInputState(chatBarEnabled);
 	if (true) {
-		publishModernShellActiveScopePatch(QStringLiteral("activeScope.update"));
+		publishModernShellActiveScopeState();
 	}
 }
 
@@ -36379,7 +36244,7 @@ void MainWindow::updateChatBar(bool forcePersistentChatReload, bool queueModernS
 	if (queueModernShellSnapshot) {
 		queueModernShellSnapshotSync();
 	} else if (true) {
-		publishModernShellActiveScopePatch(QStringLiteral("activeScope.update"));
+		publishModernShellActiveScopeState();
 	}
 }
 

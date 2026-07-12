@@ -3376,7 +3376,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 	}
 
 	if (command == QLatin1String("snapshot")) {
-		return buildSnapshotResponse();
+		return buildStateResponse();
 	}
 
 	if (command == QLatin1String("captureQml")) {
@@ -4187,7 +4187,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 										   : QStringLiteral("-2:%1").arg(static_cast< qulonglong >(session));
 			const bool selected = window->handleModernShellScopeSelection(scopeToken);
 			window->publishModernDirectMessagesPatch();
-			window->publishModernShellActiveScopePatch(QStringLiteral("activeScope.update"));
+			window->publishModernShellActiveScopeState();
 			window->queueModernShellSnapshotSyncImmediate();
 			return selected;
 		};
@@ -4549,19 +4549,74 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 	return errorResponse(tr("Unknown automation command '%1'.").arg(command));
 }
 
-QVariantMap ModernUiAutomationServer::buildSnapshotResponse() const {
+QVariantMap ModernUiAutomationServer::buildStateResponse() const {
 	QVariantMap response = okResponse();
-	const bool qmlActive = m_mainWindow && m_mainWindow->m_qmlShellHost
-						   && m_mainWindow->m_qmlShellHost->window();
-	response.insert(QStringLiteral("snapshot"),
-				   qmlActive ? m_mainWindow->m_qmlShellHost->stateSnapshot()
-							 : (m_mainWindow ? m_mainWindow->buildModernShellSnapshot() : QVariantMap()));
+	QmlShellHost *host = m_mainWindow ? m_mainWindow->m_qmlShellHost.get() : nullptr;
+	QVariantMap state;
+	if (host) {
+		ClientSessionController *session = host->sessionController();
+		UiCommandController *commands = host->commandController();
+		ActiveScopeController *scope = host->activeScopeController();
+		QmlSelectionState *selection = host->selectionState();
+		state.insert(QStringLiteral("app"),
+					 QVariantMap { { QStringLiteral("serverTitle"), session->serverName() },
+								   { QStringLiteral("selfName"), session->selfName() },
+								   { QStringLiteral("selfStatusLabel"), session->connectionLabel() },
+								   { QStringLiteral("selfMuted"), session->selfMuted() },
+								   { QStringLiteral("selfDeafened"), session->selfDeafened() },
+								   { QStringLiteral("connected"), session->connected() },
+								   { QStringLiteral("updateBanner"), session->updateBanner() },
+								   { QStringLiteral("pttPressed"), commands->pttPressed() } });
+		state.insert(QStringLiteral("activeScope"),
+					 QVariantMap { { QStringLiteral("scopeToken"), scope->scopeToken() },
+								   { QStringLiteral("label"), scope->label() },
+								   { QStringLiteral("description"), scope->description() },
+								   { QStringLiteral("kindLabel"), scope->kindLabel() },
+								   { QStringLiteral("composerPlaceholder"), scope->composerPlaceholder() },
+								   { QStringLiteral("composerHint"), scope->composerHint() },
+								   { QStringLiteral("canSend"), scope->canSend() } });
+		state.insert(QStringLiteral("selection"),
+					 QVariantMap { { QStringLiteral("scopeToken"), selection->scopeToken() },
+								   { QStringLiteral("selectedUserSession"), selection->selectedUserSession() },
+								   { QStringLiteral("selectedVoiceChannelId"), selection->selectedVoiceChannelId() } });
+
+		QVariantList voiceRooms;
+		QVariantList textRooms;
+		RoomModel *rooms = host->roomModel();
+		for (int row = 0; row < rooms->rowCount(); ++row) {
+			const QVariantMap modelRow = rooms->get(row);
+			QVariantMap item = modelRow.value(QStringLiteral("source")).toMap();
+			if (item.isEmpty()) item = modelRow;
+			if (!item.contains(QStringLiteral("token"))) item.insert(QStringLiteral("token"), modelRow.value(QStringLiteral("id")));
+			(modelRow.value(QStringLiteral("kind")).toString() == QLatin1String("voice") ? voiceRooms : textRooms)
+				.push_back(item);
+		}
+		state.insert(QStringLiteral("voiceRooms"), voiceRooms);
+		state.insert(QStringLiteral("textRooms"), textRooms);
+
+		const auto modelRows = [](StableListModel *model, const bool unwrapSource) {
+			QVariantList rows;
+			for (int row = 0; row < model->rowCount(); ++row) {
+				const QVariantMap modelRow = model->get(row);
+				const QVariantMap source = unwrapSource ? modelRow.value(QStringLiteral("source")).toMap() : QVariantMap();
+				rows.push_back(source.isEmpty() ? modelRow : source);
+			}
+			return rows;
+		};
+		state.insert(QStringLiteral("participants"), modelRows(host->participantModel(), true));
+		state.insert(QStringLiteral("messages"), modelRows(host->chatModel(), true));
+		state.insert(QStringLiteral("actions"), modelRows(host->actionModel(), false));
+		state.insert(QStringLiteral("dialog"), host->dialogController()->state());
+	}
+	// Keep the wire key and command ID stable for existing automation clients;
+	// the payload is now composed directly from typed QML controllers and models.
+	response.insert(QStringLiteral("snapshot"), state);
 	response.insert(QStringLiteral("modernDialog"),
 					m_mainWindow && m_mainWindow->m_modernDialogController
 						? m_mainWindow->m_modernDialogController->state()
 						: QVariantMap { { QStringLiteral("open"), false } });
 	response.insert(QStringLiteral("usesModernShell"), m_mainWindow && true);
-	response.insert(QStringLiteral("frontend"), qmlActive ? QStringLiteral("qml") : QStringLiteral("web"));
+	response.insert(QStringLiteral("frontend"), QStringLiteral("qml"));
 	response.insert(QStringLiteral("listening"), isListening());
 	response.insert(QStringLiteral("port"), port());
 	return response;

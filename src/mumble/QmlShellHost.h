@@ -46,7 +46,6 @@ public:
 	DialogStateController *dialogController() const;
 	MediaSessionBackend *mediaSession() const;
 	QmlSelectionState *selectionState() const;
-	QVariantMap stateSnapshot() const;
 	bool captureWindow(const QString &path, QString *error = nullptr) const;
 	void showPttTool(bool visible);
 
