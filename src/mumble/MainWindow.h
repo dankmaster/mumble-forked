@@ -1190,9 +1190,6 @@ public slots:
 	void on_qteChat_backtabPressed();
 	void on_qteChat_ctrlSpacePressed();
 	void on_persistentChatScopeChanged(int index);
-	Q_INVOKABLE void on_qtvUsers_customContextMenuRequested(const QPoint &mpos,
-															bool usePositionForGettingContext = true);
-	void showUsersContextMenu(const QPoint &mpos, bool usePositionForGettingContext = true);
 	void on_qteLog_customContextMenuRequested(const QPoint &pos);
 	void on_qteLog_anchorClicked(const QUrl &);
 	void on_qteLog_highlighted(const QUrl &link);
@@ -1242,7 +1239,6 @@ public slots:
 	void on_gsAdaptivePush_triggered(bool, QVariant);
 
 	void on_Reconnect_timeout();
-	void qtvUserCurrentChanged(const QModelIndex &, const QModelIndex &);
 	void serverConnected();
 	void serverDisconnected(QAbstractSocket::SocketError, QString reason);
 	void resolverError(QAbstractSocket::SocketError, QString reason);

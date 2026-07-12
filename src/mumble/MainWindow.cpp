@@ -14250,10 +14250,9 @@ void MainWindow::setupGui() {
 	setServerLogMaximumBlockCount(Global::get().s.iMaxLogBlocks);
 
 	pmModel = new UserModel(this);
+	// The compatibility navigator still observes the model until its remaining
+	// paint/update hooks are removed. Selection and targeting no longer read it.
 	qtvUsers->setModel(pmModel);
-	qtvUsers->setRowHidden(0, QModelIndex(), true);
-	qtvUsers->ensurePolished();
-	updateServerNavigatorChrome();
 
 	QObject::connect(this, &MainWindow::userAddedChannelListener, pmModel, &UserModel::addChannelListener);
 	QObject::connect(
@@ -14396,9 +14395,6 @@ void MainWindow::setupGui() {
 	setWindowOpacity(0.0f);
 	show();
 #endif
-
-	connect(qtvUsers->selectionModel(), SIGNAL(currentChanged(const QModelIndex &, const QModelIndex &)),
-			SLOT(qtvUserCurrentChanged(const QModelIndex &, const QModelIndex &)));
 
 	// QtCreator and uic.exe do not allow adding arbitrary widgets
 	// such as a MUComboBox to a QToolbar, even though they are supported.
@@ -14795,8 +14791,6 @@ void MainWindow::setupServerNavigator() {
 
 		updateServerNavigatorChrome();
 	});
-	connect(qtvUsers, &QWidget::customContextMenuRequested, this,
-			[this](const QPoint &position) { on_qtvUsers_customContextMenuRequested(position); });
 	m_serverNavigatorContentFrame->installEventFilter(this);
 	m_serverNavigatorTextChannelsMotdFrame->installEventFilter(this);
 	m_serverNavigatorTextChannelsMotdBody->installEventFilter(this);
@@ -31498,17 +31492,11 @@ void MainWindow::showPersistentTextChannelContextMenu(const QPoint &position) {
 	const QPoint globalPosition = m_persistentChatChannelList->viewport()->mapToGlobal(position);
 
 	auto selectVoiceTreeChannel = [this](Channel *channel) {
-		if (!channel || !pmModel || !qtvUsers) {
+		if (!channel) {
 			return;
 		}
-
-		const QModelIndex channelIndex = pmModel->index(channel);
-		if (!channelIndex.isValid()) {
-			return;
-		}
-
-		qtvUsers->setCurrentIndex(channelIndex);
-		qtvUsers->scrollTo(channelIndex);
+		m_modernSelectionState.selectedUserSession.reset();
+		m_modernSelectionState.selectedVoiceChannelID = channel->iId;
 		rebuildPersistentChatChannelList();
 		updateServerNavigatorChrome();
 	};
@@ -38478,7 +38466,10 @@ bool MainWindow::handleSpecialContextMenu(const QUrl &url, const QPoint &pos_, b
 		}
 		if (ok && cuContextUser) {
 			if (focus) {
-				qtvUsers->setCurrentIndex(pmModel->index(cuContextUser.data()));
+				m_modernSelectionState.selectedUserSession = cuContextUser->uiSession;
+				if (cuContextUser->cChannel) {
+					m_modernSelectionState.selectedVoiceChannelID = cuContextUser->cChannel->iId;
+				}
 				qteChat->setFocus();
 			} else {
 				qpContextPosition = QPoint();
@@ -38499,7 +38490,8 @@ bool MainWindow::handleSpecialContextMenu(const QUrl &url, const QPoint &pos_, b
 		ok                         = ok && sh && (qbaServerDigest == sh->qbaDigest);
 		if (ok) {
 			if (focus) {
-				qtvUsers->setCurrentIndex(pmModel->index(cContextChannel.data()));
+				m_modernSelectionState.selectedUserSession.reset();
+				m_modernSelectionState.selectedVoiceChannelID = cContextChannel->iId;
 				qteChat->setFocus();
 			} else {
 				qpContextPosition = QPoint();
@@ -38511,69 +38503,6 @@ bool MainWindow::handleSpecialContextMenu(const QUrl &url, const QPoint &pos_, b
 		return false;
 	}
 	return true;
-}
-
-void MainWindow::showUsersContextMenu(const QPoint &mpos, bool usePositionForGettingContext) {
-	QModelIndex idx;
-	if (usePositionForGettingContext) {
-		idx = resolveTreeViewportIndex(qtvUsers, mpos);
-		if (!idx.isValid()) {
-			return;
-		}
-		qtvUsers->setCurrentIndex(idx);
-	} else {
-		idx = qtvUsers->currentIndex();
-		if (!idx.isValid()) {
-			return;
-		}
-	}
-
-	ClientUser *p    = pmModel->getUser(idx);
-	Channel *channel = pmModel->getChannel(idx);
-
-	qpContextPosition = qtvUsers->visualRect(idx).center();
-	if (pmModel->isChannelListener(idx)) {
-		// Have a separate context menu for listeners
-		QModelIndex parent = idx.parent();
-
-		if (parent.isValid()) {
-			// Find the channel in which the action was triggered and set it
-			// in order to be able to obtain it in the action itself
-			cContextChannel = pmModel->getChannel(parent);
-		}
-		cuContextUser.clear();
-		qmListener->exec(qtvUsers->viewport()->mapToGlobal(mpos), nullptr);
-		cuContextUser.clear();
-		cContextChannel.clear();
-	} else {
-		if (p) {
-			cuContextUser.clear();
-			if (!usePositionForGettingContext) {
-				cuContextUser = p;
-			}
-
-			qmUser->exec(qtvUsers->viewport()->mapToGlobal(mpos), nullptr);
-			cuContextUser.clear();
-		} else {
-			cContextChannel.clear();
-
-			if (!usePositionForGettingContext && channel) {
-				cContextChannel = channel;
-			}
-
-			qmChannel->exec(qtvUsers->viewport()->mapToGlobal(mpos), nullptr);
-			cContextChannel.clear();
-		}
-	}
-	qpContextPosition = QPoint();
-}
-
-void MainWindow::on_qtvUsers_customContextMenuRequested(const QPoint &mpos, bool usePositionForGettingContext) {
-	if (!qtvUsers || !qtvUsers->viewport()) {
-		return;
-	}
-
-	showUsersContextMenu(qtvUsers->viewport()->mapFrom(qtvUsers, mpos), usePositionForGettingContext);
 }
 
 void MainWindow::showLogContextMenu(LogTextBrowser *browser, const QPoint &mpos) {
@@ -39294,11 +39223,13 @@ void MainWindow::findDesiredChannel() {
 		if (chan != ClientUser::get(Global::get().uiSession)->cChannel) {
 			Global::get().sh->joinChannel(Global::get().uiSession, chan->iId);
 		}
-		if (!hiddenNativeUserModelSafeMode) {
-			qtvUsers->setCurrentIndex(pmModel->index(chan));
+		m_modernSelectionState.selectedUserSession.reset();
+		m_modernSelectionState.selectedVoiceChannelID = chan->iId;
+	} else if (Global::get().uiSession) {
+		if (ClientUser *self = ClientUser::get(Global::get().uiSession); self && self->cChannel) {
+			m_modernSelectionState.selectedUserSession.reset();
+			m_modernSelectionState.selectedVoiceChannelID = self->cChannel->iId;
 		}
-	} else if (Global::get().uiSession && !hiddenNativeUserModelSafeMode) {
-		qtvUsers->setCurrentIndex(pmModel->index(ClientUser::get(Global::get().uiSession)->cChannel));
 	}
 	if (hiddenNativeUserModelSafeMode) {
 		queueModernShellSnapshotSync();
@@ -41387,7 +41318,10 @@ void MainWindow::autocompleteUsername() {
 	if (res == 0) {
 		return;
 	}
-	qtvUsers->setCurrentIndex(pmModel->index(ClientUser::get(res)));
+	m_modernSelectionState.selectedUserSession = res;
+	if (ClientUser *user = ClientUser::get(res); user && user->cChannel) {
+		m_modernSelectionState.selectedVoiceChannelID = user->cChannel->iId;
+	}
 }
 
 void MainWindow::on_qmConfig_aboutToShow() {
@@ -42989,9 +42923,7 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	qaServerAddToFavorites->setEnabled(false);
 	qaServerInformation->setEnabled(false);
 	qaServerBanList->setEnabled(false);
-	if (!hiddenNativeNavigatorSafeMode) {
-		qtvUsers->setCurrentIndex(QModelIndex());
-	}
+	m_modernSelectionState = ModernSelectionState {};
 	qteChat->setEnabled(false);
 	m_defaultPersistentTextChannelID = 0;
 	m_persistentTextChannels.clear();
@@ -43299,11 +43231,6 @@ void MainWindow::highlightWindow() {
  * This function updates the qteChat bar default text according to
  * the selected user/channel in the users treeview.
  */
-void MainWindow::qtvUserCurrentChanged(const QModelIndex &, const QModelIndex &) {
-	setPersistentChatTargetUsesVoiceTree(false);
-	queueModernShellSnapshotSync();
-}
-
 void MainWindow::on_persistentChatScopeChanged(int) {
 	setPersistentChatTargetUsesVoiceTree(false);
 	updateServerNavigatorChrome();
@@ -43531,10 +43458,8 @@ void MainWindow::on_qteLog_highlighted(const QUrl &url) {
 
 void MainWindow::context_triggered() {
 	QAction *a = qobject_cast< QAction * >(sender());
-
-	Channel *c    = pmModel->getChannel(qtvUsers->currentIndex());
-	ClientUser *p = pmModel->getUser(qtvUsers->currentIndex());
-	triggerContextAction(a ? a->data().toString() : QString(), p, c);
+	const ContextMenuTarget target = getContextMenuTargets();
+	triggerContextAction(a ? a->data().toString() : QString(), target.user, target.channel);
 }
 
 /**
