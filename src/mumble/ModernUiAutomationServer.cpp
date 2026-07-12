@@ -3415,6 +3415,22 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		return okResponse();
 	}
 
+	if (command == QLatin1String("openQmlMediaSession")) {
+		if (!m_mainWindow->m_qmlShellHost || !m_mainWindow->m_qmlShellHost->window()) {
+			return errorResponse(tr("The Qt Quick frontend is not active."));
+		}
+		const bool opened = m_mainWindow->m_qmlShellHost->mediaSession()->open(
+			QUrl(request.value(QStringLiteral("url")).toString()),
+			request.value(QStringLiteral("provider")).toString(),
+			request.value(QStringLiteral("sessionId")).toString());
+		return opened ? okResponse() : errorResponse(m_mainWindow->m_qmlShellHost->mediaSession()->error());
+	}
+
+	if (command == QLatin1String("closeQmlMediaSession")) {
+		if (m_mainWindow->m_qmlShellHost) m_mainWindow->m_qmlShellHost->mediaSession()->close();
+		return okResponse();
+	}
+
 	const bool async = request.value(QStringLiteral("async"), true).toBool();
 	const auto scheduleAction = [this](auto action) {
 		QPointer< MainWindow > guardedWindow(m_mainWindow);

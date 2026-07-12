@@ -8,6 +8,7 @@
 #include <QtCore/QObject>
 #include <QtCore/QStringList>
 #include <QtCore/QVariantList>
+#include <QtCore/QUrl>
 
 class ClientActionRegistry;
 
@@ -243,6 +244,55 @@ signals:
 
 private:
 	QVariantMap m_state;
+};
+
+class MediaSessionBackend final : public QObject {
+	Q_OBJECT
+	Q_PROPERTY(bool active READ active NOTIFY stateChanged)
+	Q_PROPERTY(QUrl url READ url NOTIFY stateChanged)
+	Q_PROPERTY(QString provider READ provider NOTIFY stateChanged)
+	Q_PROPERTY(QString sessionId READ sessionId NOTIFY stateChanged)
+	Q_PROPERTY(QString state READ state NOTIFY stateChanged)
+	Q_PROPERTY(double position READ position NOTIFY stateChanged)
+	Q_PROPERTY(double duration READ duration NOTIFY stateChanged)
+	Q_PROPERTY(QString error READ error NOTIFY stateChanged)
+	Q_PROPERTY(qulonglong syncGeneration READ syncGeneration NOTIFY stateChanged)
+
+public:
+	explicit MediaSessionBackend(QObject *parent = nullptr);
+	bool active() const;
+	QUrl url() const;
+	QString provider() const;
+	QString sessionId() const;
+	QString state() const;
+	double position() const;
+	double duration() const;
+	QString error() const;
+	qulonglong syncGeneration() const;
+	Q_INVOKABLE bool open(const QUrl &url, const QString &provider, const QString &sessionId);
+	Q_INVOKABLE void close();
+	Q_INVOKABLE void play();
+	Q_INVOKABLE void pause();
+	Q_INVOKABLE void seek(double seconds);
+	Q_INVOKABLE void reportPlaybackState(double position, double duration, bool paused);
+	Q_INVOKABLE void reportError(const QString &message);
+
+signals:
+	void stateChanged();
+	void playRequested();
+	void pauseRequested();
+	void seekRequested(double seconds);
+
+private:
+	bool m_active = false;
+	QUrl m_url;
+	QString m_provider;
+	QString m_sessionId;
+	QString m_state = QStringLiteral("idle");
+	double m_position = 0.0;
+	double m_duration = 0.0;
+	QString m_error;
+	qulonglong m_syncGeneration = 0;
 };
 
 class QmlSelectionState final : public QObject {

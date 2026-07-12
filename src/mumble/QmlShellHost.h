@@ -17,6 +17,7 @@ class ChatTimelineModel;
 class ClientActionRegistry;
 class ClientSessionController;
 class DialogStateController;
+class MediaSessionBackend;
 class ParticipantModel;
 class QmlSelectionState;
 class QQmlApplicationEngine;
@@ -43,6 +44,7 @@ public:
 	AsyncOperationModel *operationModel() const;
 	ActionModel *actionModel() const;
 	DialogStateController *dialogController() const;
+	MediaSessionBackend *mediaSession() const;
 	QmlSelectionState *selectionState() const;
 	QVariantMap stateSnapshot() const;
 	bool captureWindow(const QString &path, QString *error = nullptr) const;
@@ -64,6 +66,7 @@ private:
 	std::unique_ptr< AsyncOperationModel > m_operationModel;
 	std::unique_ptr< ActionModel > m_actionModel;
 	std::unique_ptr< DialogStateController > m_dialogController;
+	std::unique_ptr< MediaSessionBackend > m_mediaSession;
 	std::unique_ptr< QmlSelectionState > m_selectionState;
 };
 

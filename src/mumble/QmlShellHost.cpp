@@ -27,6 +27,7 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_operationModel(std::make_unique< AsyncOperationModel >(this)),
 	  m_actionModel(std::make_unique< ActionModel >(actionRegistry, this)),
 	  m_dialogController(std::make_unique< DialogStateController >(this)),
+	  m_mediaSession(std::make_unique< MediaSessionBackend >(this)),
 	  m_selectionState(std::make_unique< QmlSelectionState >(this)) {
 }
 
@@ -54,6 +55,7 @@ bool QmlShellHost::start(QString *error) {
 						  static_cast< QObject * >(m_operationModel.get()),
 						  static_cast< QObject * >(m_actionModel.get()),
 						  static_cast< QObject * >(m_dialogController.get()),
+						  static_cast< QObject * >(m_mediaSession.get()),
 						  static_cast< QObject * >(m_selectionState.get()) }) {
 		QQmlEngine::setObjectOwnership(object, QQmlEngine::CppOwnership);
 	}
@@ -67,6 +69,7 @@ bool QmlShellHost::start(QString *error) {
 	context->setContextProperty(QStringLiteral("operationModel"), m_operationModel.get());
 	context->setContextProperty(QStringLiteral("actionModel"), m_actionModel.get());
 	context->setContextProperty(QStringLiteral("dialogState"), m_dialogController.get());
+	context->setContextProperty(QStringLiteral("mediaSession"), m_mediaSession.get());
 	context->setContextProperty(QStringLiteral("selectionState"), m_selectionState.get());
 	context->setContextProperty(QStringLiteral("clientActions"), m_actionRegistry);
 
@@ -113,6 +116,7 @@ ChatTimelineModel *QmlShellHost::chatModel() const { return m_chatModel.get(); }
 AsyncOperationModel *QmlShellHost::operationModel() const { return m_operationModel.get(); }
 ActionModel *QmlShellHost::actionModel() const { return m_actionModel.get(); }
 DialogStateController *QmlShellHost::dialogController() const { return m_dialogController.get(); }
+MediaSessionBackend *QmlShellHost::mediaSession() const { return m_mediaSession.get(); }
 QmlSelectionState *QmlShellHost::selectionState() const { return m_selectionState.get(); }
 
 QVariantMap QmlShellHost::stateSnapshot() const {

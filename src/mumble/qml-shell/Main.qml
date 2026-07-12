@@ -31,6 +31,7 @@ ApplicationWindow {
     }
 
     QmlDialog { }
+    MediaSessionWindow { }
 
     Column {
         anchors.top: parent.top
@@ -248,6 +249,7 @@ ApplicationWindow {
                                     Label { text: status; color: Theme.textMuted; font.pixelSize: 9; visible: status.length > 0 }
                                 }
                                 Rectangle {
+                                    id: previewCard
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: replyColumn.implicitHeight + 12
                                     visible: replyActor.length > 0 || replySnippet.length > 0
@@ -294,6 +296,12 @@ ApplicationWindow {
                                             Label { Layout.fillWidth: true; text: preview ? (preview.title || preview.host || qsTr("Link preview")) : ""; color: Theme.textStrong; font.bold: true; elide: Text.ElideRight }
                                             Label { Layout.fillWidth: true; text: preview ? (preview.description || preview.url || "") : ""; color: Theme.textMuted; font.pixelSize: 10; elide: Text.ElideRight }
                                         }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: mediaSession.open(preview.url || preview.href || "",
+                                                                     preview.provider || "provider", stableId)
                                     }
                                 }
                                 Flow {

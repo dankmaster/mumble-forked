@@ -20,6 +20,7 @@ private slots:
 	void pttStateIsIdempotentAndReleases();
 	void dialogStateRoutesTypedRequests();
 	void asyncOperationsExposeProgressAndCancellation();
+	void mediaSessionValidatesAndPublishesTypedState();
 };
 
 void TestQmlClientModels::stableRowsUpdateWithoutReset() {
@@ -270,6 +271,25 @@ void TestQmlClientModels::asyncOperationsExposeProgressAndCancellation() {
 	QCOMPARE(finished.value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
 	QCOMPARE(finished.value(QStringLiteral("subtitle")).toString(), QStringLiteral("Offline"));
 	QVERIFY(!finished.value(QStringLiteral("payload")).toMap().value(QStringLiteral("cancellable")).toBool());
+}
+
+void TestQmlClientModels::mediaSessionValidatesAndPublishesTypedState() {
+	MediaSessionBackend media;
+	QSignalSpy playSpy(&media, &MediaSessionBackend::playRequested);
+	QVERIFY(!media.open(QUrl(QStringLiteral("http://example.com/video")), QStringLiteral("direct"),
+						QStringLiteral("room:1")));
+	QCOMPARE(media.state(), QStringLiteral("error"));
+	QVERIFY(media.open(QUrl(QStringLiteral("https://example.com/video")), QStringLiteral("direct"),
+					   QStringLiteral("room:1")));
+	QVERIFY(media.active());
+	media.play();
+	QCOMPARE(playSpy.count(), 1);
+	media.reportPlaybackState(12.5, 90.0, false);
+	QCOMPARE(media.state(), QStringLiteral("playing"));
+	QCOMPARE(media.position(), 12.5);
+	media.close();
+	QVERIFY(!media.active());
+	QCOMPARE(media.state(), QStringLiteral("idle"));
 }
 
 QTEST_GUILESS_MAIN(TestQmlClientModels)

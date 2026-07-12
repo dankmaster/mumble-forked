@@ -456,6 +456,79 @@ void DialogStateController::requestClose() {
 	emit closeRequested(dialogId());
 }
 
+MediaSessionBackend::MediaSessionBackend(QObject *parent) : QObject(parent) {
+}
+
+bool MediaSessionBackend::active() const { return m_active; }
+QUrl MediaSessionBackend::url() const { return m_url; }
+QString MediaSessionBackend::provider() const { return m_provider; }
+QString MediaSessionBackend::sessionId() const { return m_sessionId; }
+QString MediaSessionBackend::state() const { return m_state; }
+double MediaSessionBackend::position() const { return m_position; }
+double MediaSessionBackend::duration() const { return m_duration; }
+QString MediaSessionBackend::error() const { return m_error; }
+qulonglong MediaSessionBackend::syncGeneration() const { return m_syncGeneration; }
+
+bool MediaSessionBackend::open(const QUrl &url, const QString &provider, const QString &sessionId) {
+	const QUrl normalized = url.adjusted(QUrl::NormalizePathSegments | QUrl::StripTrailingSlash);
+	if (!normalized.isValid() || normalized.scheme() != QLatin1String("https") || normalized.host().isEmpty()) {
+		reportError(tr("Only secure HTTPS media URLs can be opened."));
+		return false;
+	}
+	m_active = true;
+	m_url = normalized;
+	m_provider = provider.trimmed();
+	m_sessionId = sessionId.trimmed();
+	m_state = QStringLiteral("loading");
+	m_position = 0.0;
+	m_duration = 0.0;
+	m_error.clear();
+	++m_syncGeneration;
+	emit stateChanged();
+	return true;
+}
+
+void MediaSessionBackend::close() {
+	if (!m_active && m_state == QLatin1String("idle")) return;
+	m_active = false;
+	m_url = {};
+	m_provider.clear();
+	m_sessionId.clear();
+	m_state = QStringLiteral("idle");
+	m_position = 0.0;
+	m_duration = 0.0;
+	m_error.clear();
+	++m_syncGeneration;
+	emit stateChanged();
+}
+
+void MediaSessionBackend::play() {
+	if (m_active) emit playRequested();
+}
+
+void MediaSessionBackend::pause() {
+	if (m_active) emit pauseRequested();
+}
+
+void MediaSessionBackend::seek(const double seconds) {
+	if (m_active && qIsFinite(seconds) && seconds >= 0.0) emit seekRequested(seconds);
+}
+
+void MediaSessionBackend::reportPlaybackState(const double position, const double duration, const bool paused) {
+	if (!m_active) return;
+	m_position = qIsFinite(position) ? qMax(0.0, position) : 0.0;
+	m_duration = qIsFinite(duration) ? qMax(0.0, duration) : 0.0;
+	m_state = paused ? QStringLiteral("paused") : QStringLiteral("playing");
+	m_error.clear();
+	emit stateChanged();
+}
+
+void MediaSessionBackend::reportError(const QString &message) {
+	m_state = QStringLiteral("error");
+	m_error = message.trimmed().isEmpty() ? tr("Media playback failed.") : message.trimmed();
+	emit stateChanged();
+}
+
 QmlSelectionState::QmlSelectionState(QObject *parent) : QObject(parent) {
 }
 

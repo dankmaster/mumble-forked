@@ -9,5 +9,6 @@
     <file alias="MessageEventEditor.qml">qml-shell/MessageEventEditor.qml</file>
     <file alias="ShortcutEditor.qml">qml-shell/ShortcutEditor.qml</file>
     <file alias="AclEditor.qml">qml-shell/AclEditor.qml</file>
+    <file alias="MediaSessionWindow.qml">qml-shell/MediaSessionWindow.qml</file>
   </qresource>
 </RCC>
