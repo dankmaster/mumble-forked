@@ -28,7 +28,11 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_selectionState(std::make_unique< QmlSelectionState >()) {
 }
 
-QmlShellHost::~QmlShellHost() = default;
+QmlShellHost::~QmlShellHost() {
+	m_commandController->releasePtt();
+	m_engine.reset();
+	m_window = nullptr;
+}
 
 bool QmlShellHost::start(QString *error) {
 	if (m_window) {
@@ -69,6 +73,11 @@ bool QmlShellHost::start(QString *error) {
 		return false;
 	}
 	connect(m_window, &QQuickWindow::closing, this, [this](QQuickCloseEvent *) { emit closeRequested(); });
+	connect(m_window, &QQuickWindow::sceneGraphError, this,
+			[this](QQuickWindow::SceneGraphError, const QString &) { m_commandController->releasePtt(); });
+	connect(m_window, &QWindow::visibilityChanged, this, [this](QWindow::Visibility visibility) {
+		if (visibility == QWindow::Hidden || visibility == QWindow::Minimized) m_commandController->releasePtt();
+	});
 	return true;
 }
 
@@ -99,6 +108,7 @@ QVariantMap QmlShellHost::stateSnapshot() const {
 	app.insert(QStringLiteral("selfMuted"), m_sessionController->selfMuted());
 	app.insert(QStringLiteral("selfDeafened"), m_sessionController->selfDeafened());
 	app.insert(QStringLiteral("connected"), m_sessionController->connected());
+	app.insert(QStringLiteral("pttPressed"), m_commandController->pttPressed());
 	snapshot.insert(QStringLiteral("app"), app);
 
 	QVariantMap activeScope;
@@ -167,4 +177,10 @@ bool QmlShellHost::captureWindow(const QString &path, QString *error) const {
 		return false;
 	}
 	return true;
+}
+
+void QmlShellHost::showPttTool(const bool visible) {
+	if (!m_window || !m_engine) return;
+	if (!visible) m_commandController->releasePtt();
+	m_window->setProperty("pttToolVisible", visible);
 }

@@ -5,6 +5,8 @@ import Mumble.Theme 1.0
 
 ApplicationWindow {
     id: root
+    property bool pttToolVisible: false
+    property var pttToolPopup: null
     visible: true
     width: 1280
     height: 820
@@ -12,6 +14,21 @@ ApplicationWindow {
     minimumHeight: 520
     title: clientSession.serverName
     color: Theme.strip
+
+    onPttToolVisibleChanged: {
+        if (pttToolVisible) {
+            if (!pttToolPopup)
+                pttToolPopup = pttToolComponent.createObject(root.contentItem)
+            pttToolPopup.open()
+        } else if (!pttToolVisible && pttToolPopup) {
+            pttToolPopup.close()
+        }
+    }
+
+    Component {
+        id: pttToolComponent
+        PttTool { }
+    }
 
     Rectangle {
         anchors.fill: parent

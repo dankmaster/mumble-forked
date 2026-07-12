@@ -204,6 +204,7 @@ private:
 
 class UiCommandController final : public QObject {
 	Q_OBJECT
+	Q_PROPERTY(bool pttPressed READ pttPressed NOTIFY pttPressedChanged)
 
 public:
 	explicit UiCommandController(QObject *parent = nullptr);
@@ -214,6 +215,9 @@ public:
 	Q_INVOKABLE void invokeAction(const QString &actionId);
 	Q_INVOKABLE void toggleSelfMute();
 	Q_INVOKABLE void toggleSelfDeaf();
+	Q_INVOKABLE void setPttPressed(bool pressed);
+	Q_INVOKABLE void releasePtt();
+	bool pttPressed() const;
 
 signals:
 	void scopeSelectionRequested(const QString &scopeToken);
@@ -222,6 +226,11 @@ signals:
 	void actionRequested(const QString &actionId);
 	void selfMuteToggleRequested();
 	void selfDeafToggleRequested();
+	void pttPressedChanged();
+	void pttStateRequested(bool pressed);
+
+private:
+	bool m_pttPressed = false;
 };
 
 #endif // MUMBLE_MUMBLE_QMLCLIENTMODELS_H_

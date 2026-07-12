@@ -14,6 +14,7 @@ private slots:
 	void activeScopeAppliesTypedState();
 	void sessionPropertiesOnlyNotifyOnChanges();
 	void commandsRejectEmptyStableIds();
+	void pttStateIsIdempotentAndReleases();
 };
 
 void TestQmlClientModels::stableRowsUpdateWithoutReset() {
@@ -114,6 +115,23 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	commands.invokeAction(QStringLiteral(" qaAudioMute "));
 	QCOMPARE(scopeSpy.takeFirst().at(0).toString(), QStringLiteral("channel:42"));
 	QCOMPARE(actionSpy.takeFirst().at(0).toString(), QStringLiteral("qaAudioMute"));
+}
+
+void TestQmlClientModels::pttStateIsIdempotentAndReleases() {
+	UiCommandController commands;
+	QSignalSpy stateSpy(&commands, &UiCommandController::pttStateRequested);
+	commands.setPttPressed(true);
+	commands.setPttPressed(true);
+	QVERIFY(commands.pttPressed());
+	QCOMPARE(stateSpy.count(), 1);
+	QCOMPARE(stateSpy.takeFirst().at(0).toBool(), true);
+
+	commands.releasePtt();
+	QVERIFY(!commands.pttPressed());
+	QCOMPARE(stateSpy.count(), 1);
+	QCOMPARE(stateSpy.takeFirst().at(0).toBool(), false);
+	commands.releasePtt();
+	QCOMPARE(stateSpy.count(), 0);
 }
 
 QTEST_GUILESS_MAIN(TestQmlClientModels)

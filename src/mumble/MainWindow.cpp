@@ -14010,6 +14010,8 @@ void MainWindow::applyShellLayout() {
 			});
 			connect(commands, &UiCommandController::selfMuteToggleRequested, qaAudioMute, &QAction::trigger);
 			connect(commands, &UiCommandController::selfDeafToggleRequested, qaAudioDeaf, &QAction::trigger);
+			connect(commands, &UiCommandController::pttStateRequested, this,
+					[this](const bool pressed) { on_PushToTalk_triggered(pressed, QVariant()); });
 			connect(m_qmlShellHost.get(), &QmlShellHost::closeRequested, this, &MainWindow::close);
 		}
 
@@ -39707,7 +39709,13 @@ void MainWindow::setupView(bool toggle_minimize) {
 
 	// If activated show the PTT window
 	if (Global::get().s.bShowPTTButtonWindow && Global::get().s.atTransmit == Settings::PushToTalk) {
-		if (m_modernPttToolHost) {
+		if (m_qmlShellHost && m_qmlShellHost->window()) {
+			m_qmlShellHost->showPttTool(true);
+			if (m_modernPttToolHost) {
+				m_modernPttToolHost->deleteLater();
+				m_modernPttToolHost = nullptr;
+			}
+		} else if (m_modernPttToolHost) {
 			m_modernPttToolHost->show();
 		} else {
 			m_modernPttToolHost = new ModernPttToolHost();
@@ -39716,6 +39724,7 @@ void MainWindow::setupView(bool toggle_minimize) {
 			m_modernPttToolHost->show();
 		}
 	} else {
+		if (m_qmlShellHost) m_qmlShellHost->showPttTool(false);
 		if (m_modernPttToolHost) {
 			m_modernPttToolHost->deleteLater();
 			m_modernPttToolHost = nullptr;

@@ -44,6 +44,7 @@ public:
 	QmlSelectionState *selectionState() const;
 	QVariantMap stateSnapshot() const;
 	bool captureWindow(const QString &path, QString *error = nullptr) const;
+	void showPttTool(bool visible);
 
 signals:
 	void closeRequested();

@@ -233,6 +233,14 @@ void UiCommandController::invokeAction(const QString &actionId) {
 }
 void UiCommandController::toggleSelfMute() { emit selfMuteToggleRequested(); }
 void UiCommandController::toggleSelfDeaf() { emit selfDeafToggleRequested(); }
+bool UiCommandController::pttPressed() const { return m_pttPressed; }
+void UiCommandController::setPttPressed(const bool pressed) {
+	if (m_pttPressed == pressed) return;
+	m_pttPressed = pressed;
+	emit pttPressedChanged();
+	emit pttStateRequested(pressed);
+}
+void UiCommandController::releasePtt() { setPttPressed(false); }
 
 ActionModel::ActionModel(ClientActionRegistry *registry, QObject *parent)
 	: StableListModel(parent), m_registry(registry) {

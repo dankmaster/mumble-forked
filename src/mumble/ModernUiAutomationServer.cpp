@@ -15,6 +15,7 @@
 #include "ModernDialogController.h"
 #include "ModernDialogHost.h"
 #include "ModernShellHost.h"
+#include "QmlClientModels.h"
 #include "QmlShellHost.h"
 #include "MumbleConstants.h"
 #include "Net.h"
@@ -3395,6 +3396,23 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		response.insert(QStringLiteral("path"), QFileInfo(path).absoluteFilePath());
 		response.insert(QStringLiteral("frontend"), QStringLiteral("qml"));
 		return response;
+	}
+
+	if (command == QLatin1String("setQmlPttTool")) {
+		if (!m_mainWindow->m_qmlShellHost || !m_mainWindow->m_qmlShellHost->window()) {
+			return errorResponse(tr("The Qt Quick frontend is not active."));
+		}
+		m_mainWindow->m_qmlShellHost->showPttTool(request.value(QStringLiteral("visible")).toBool());
+		return okResponse();
+	}
+
+	if (command == QLatin1String("setQmlPttPressed")) {
+		if (!m_mainWindow->m_qmlShellHost || !m_mainWindow->m_qmlShellHost->window()) {
+			return errorResponse(tr("The Qt Quick frontend is not active."));
+		}
+		m_mainWindow->m_qmlShellHost->commandController()->setPttPressed(
+			request.value(QStringLiteral("pressed")).toBool());
+		return okResponse();
 	}
 
 	const bool async = request.value(QStringLiteral("async"), true).toBool();
