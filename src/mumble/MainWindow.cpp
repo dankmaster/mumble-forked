@@ -15411,10 +15411,6 @@ void MainWindow::activateModernShell() {
 									  .arg(modernShellHostPresent)
 									  .arg(m_serverNavigatorContainer ? 1 : 0)
 									  .arg(m_persistentChatContainer ? 1 : 0));
-	if (!m_serverNavigatorContainer) {
-		setupServerNavigator();
-		appendModernShellConnectTrace(QStringLiteral("activateModernShell setupServerNavigator"));
-	}
 	if (!m_persistentChatContainer) {
 		setupPersistentChatDock();
 		appendModernShellConnectTrace(QStringLiteral("activateModernShell setupPersistentChatDock"));
@@ -15611,8 +15607,6 @@ void MainWindow::activateModernShell() {
 
 	if (centralWidget() != m_modernShellHost) {
 		QPointer< QWidget > previousCentral = centralWidget();
-		QPointer< QWidget > navigatorGuard(m_serverNavigatorContainer);
-		QPointer< QTreeView > treeGuard(qtvUsers);
 		if (previousCentral && previousCentral != m_modernShellHost) {
 			if (takeCentralWidget() == previousCentral) {
 				previousCentral->hide();
@@ -15620,17 +15614,12 @@ void MainWindow::activateModernShell() {
 			}
 		}
 		setCentralWidget(m_modernShellHost);
-		appendModernShellConnectTrace(QStringLiteral("activateModernShell set-central-widget prev=%1 nav=%2 tree=%3")
-										  .arg(previousCentral ? 1 : 0)
-										  .arg(navigatorGuard ? 1 : 0)
-										  .arg(treeGuard ? 1 : 0));
+		appendModernShellConnectTrace(
+			QStringLiteral("activateModernShell set-central-widget prev=%1").arg(previousCentral ? 1 : 0));
 	}
 	if (m_modernShellHost) {
 		m_modernShellHost->show();
 		appendModernShellConnectTrace(QStringLiteral("activateModernShell host-show"));
-	}
-	if (m_serverNavigatorContainer) {
-		m_serverNavigatorContainer->hide();
 	}
 
 	if (m_persistentChatContainer && qdwChat->widget() != m_persistentChatContainer) {
