@@ -377,6 +377,7 @@ class QmlSelectionState final : public QObject {
 
 public:
 	explicit QmlSelectionState(QObject *parent = nullptr);
+	void bindModels(RoomModel *rooms, ParticipantModel *participants);
 	QString scopeToken() const;
 	QVariant selectedUserSession() const;
 	QVariant selectedVoiceChannelId() const;
@@ -390,6 +391,12 @@ signals:
 	void selectedVoiceChannelIdChanged();
 
 private:
+	void validate();
+	bool hasScopeToken(const QString &scopeToken) const;
+	bool hasVoiceChannelId(const QString &channelId) const;
+	bool hasParticipantSession(const QString &sessionId) const;
+	RoomModel *m_rooms = nullptr;
+	ParticipantModel *m_participants = nullptr;
 	QString m_scopeToken;
 	QVariant m_selectedUserSession;
 	QVariant m_selectedVoiceChannelId;

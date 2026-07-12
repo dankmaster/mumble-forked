@@ -877,21 +877,86 @@ void MediaSessionBackend::applyRemoteState(const QUrl &url, const QString &provi
 QmlSelectionState::QmlSelectionState(QObject *parent) : QObject(parent) {
 }
 
+void QmlSelectionState::bindModels(RoomModel *rooms, ParticipantModel *participants) {
+	if (m_rooms == rooms && m_participants == participants) return;
+	if (m_rooms) disconnect(m_rooms, nullptr, this, nullptr);
+	if (m_participants) disconnect(m_participants, nullptr, this, nullptr);
+	m_rooms = rooms;
+	m_participants = participants;
+	const auto connectValidation = [this](QAbstractItemModel *model) {
+		if (!model) return;
+		connect(model, &QAbstractItemModel::rowsRemoved, this, &QmlSelectionState::validate);
+		connect(model, &QAbstractItemModel::modelReset, this, &QmlSelectionState::validate);
+	};
+	connectValidation(m_rooms);
+	connectValidation(m_participants);
+	validate();
+}
+
 QString QmlSelectionState::scopeToken() const { return m_scopeToken; }
 QVariant QmlSelectionState::selectedUserSession() const { return m_selectedUserSession; }
 QVariant QmlSelectionState::selectedVoiceChannelId() const { return m_selectedVoiceChannelId; }
 void QmlSelectionState::setScopeToken(const QString &value) {
-	if (m_scopeToken == value) return;
-	m_scopeToken = value;
+	const QString normalized = value.trimmed();
+	const QString accepted = !m_rooms || normalized.isEmpty() || hasScopeToken(normalized) ? normalized : QString();
+	if (m_scopeToken == accepted) return;
+	m_scopeToken = accepted;
 	emit scopeTokenChanged();
 }
 void QmlSelectionState::setSelectedUserSession(const QVariant &value) {
-	if (m_selectedUserSession == value) return;
-	m_selectedUserSession = value;
+	bool valid = false;
+	const qulonglong session = value.toULongLong(&valid);
+	const QString stableId = valid && session > 0 ? QString::number(session) : QString();
+	const QVariant accepted = !stableId.isEmpty() && (!m_participants || hasParticipantSession(stableId))
+							  ? QVariant::fromValue(session)
+							  : QVariant();
+	if (m_selectedUserSession == accepted) return;
+	m_selectedUserSession = accepted;
 	emit selectedUserSessionChanged();
 }
 void QmlSelectionState::setSelectedVoiceChannelId(const QVariant &value) {
-	if (m_selectedVoiceChannelId == value) return;
-	m_selectedVoiceChannelId = value;
+	bool valid = false;
+	const qulonglong channelId = value.toULongLong(&valid);
+	const QString stableId = valid ? QString::number(channelId) : QString();
+	const QVariant accepted = valid && (!m_rooms || hasVoiceChannelId(stableId)) ? QVariant::fromValue(channelId)
+																						 : QVariant();
+	if (m_selectedVoiceChannelId == accepted) return;
+	m_selectedVoiceChannelId = accepted;
 	emit selectedVoiceChannelIdChanged();
+}
+
+void QmlSelectionState::validate() {
+	if (!m_scopeToken.isEmpty() && !hasScopeToken(m_scopeToken)) setScopeToken({});
+	if (m_selectedUserSession.isValid()
+		&& !hasParticipantSession(QString::number(m_selectedUserSession.toULongLong())))
+		setSelectedUserSession({});
+	if (m_selectedVoiceChannelId.isValid()
+		&& !hasVoiceChannelId(QString::number(m_selectedVoiceChannelId.toULongLong())))
+		setSelectedVoiceChannelId({});
+}
+
+bool QmlSelectionState::hasScopeToken(const QString &scopeToken) const {
+	if (!m_rooms) return true;
+	for (int row = 0; row < m_rooms->rowCount(); ++row)
+		if (m_rooms->get(row).value(QStringLiteral("scopeToken")).toString() == scopeToken) return true;
+	return false;
+}
+
+bool QmlSelectionState::hasVoiceChannelId(const QString &channelId) const {
+	if (!m_rooms) return true;
+	const QString scopeToken = QStringLiteral("channel:%1").arg(channelId);
+	for (int row = 0; row < m_rooms->rowCount(); ++row) {
+		const QVariantMap room = m_rooms->get(row);
+		if (room.value(QStringLiteral("kind")).toString() == QLatin1String("voice")
+			&& room.value(QStringLiteral("scopeToken")).toString() == scopeToken)
+			return true;
+	}
+	return false;
+}
+
+bool QmlSelectionState::hasParticipantSession(const QString &sessionId) const {
+	if (!m_participants) return true;
+	for (int row = 0; row < m_participants->rowCount(); ++row)
+		if (m_participants->get(row).value(QStringLiteral("id")).toString() == sessionId) return true;
+	return false;
 }

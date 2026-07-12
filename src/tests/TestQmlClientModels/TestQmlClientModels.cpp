@@ -38,6 +38,8 @@ private slots:
 	void mediaSessionProviderAllowlist();
 	void mediaSessionNavigationAndErrorLifecycle();
 	void selectionStateOnlyNotifiesForRealChanges();
+	void selectionStateInvalidatesRemovedStableIds();
+	void selectionStateRejectsUnknownIdsAndSurvivesResync();
 	void invalidRowsAndCommandsAreIgnored();
 };
 
@@ -680,6 +682,64 @@ void TestQmlClientModels::selectionStateOnlyNotifiesForRealChanges() {
 	QCOMPARE(selection.scopeToken(), QStringLiteral("channel:42"));
 	QCOMPARE(selection.selectedUserSession().toInt(), 7);
 	QCOMPARE(selection.selectedVoiceChannelId().toInt(), 42);
+}
+
+void TestQmlClientModels::selectionStateInvalidatesRemovedStableIds() {
+	RoomModel rooms;
+	ParticipantModel participants;
+	rooms.replaceRoomStates(
+		{ QVariantMap{ { QStringLiteral("token"), QStringLiteral("channel:42") },
+						 { QStringLiteral("label"), QStringLiteral("Lobby") } } },
+		{});
+	participants.replaceParticipantStates(
+		{ QVariantMap{ { QStringLiteral("session"), 7 }, { QStringLiteral("name"), QStringLiteral("Alice") } } });
+	QmlSelectionState selection;
+	selection.bindModels(&rooms, &participants);
+	selection.setScopeToken(QStringLiteral("channel:42"));
+	selection.setSelectedVoiceChannelId(42);
+	selection.setSelectedUserSession(7);
+
+	participants.replaceParticipantStates({});
+	QVERIFY(!selection.selectedUserSession().isValid());
+	QCOMPARE(selection.scopeToken(), QStringLiteral("channel:42"));
+	QCOMPARE(selection.selectedVoiceChannelId().toULongLong(), 42ULL);
+
+	rooms.replaceRoomStates({}, {});
+	QVERIFY(selection.scopeToken().isEmpty());
+	QVERIFY(!selection.selectedVoiceChannelId().isValid());
+}
+
+void TestQmlClientModels::selectionStateRejectsUnknownIdsAndSurvivesResync() {
+	RoomModel rooms;
+	ParticipantModel participants;
+	rooms.replaceRoomStates(
+		{ QVariantMap{ { QStringLiteral("token"), QStringLiteral("channel:3") },
+						 { QStringLiteral("label"), QStringLiteral("One") } } },
+		{});
+	participants.replaceParticipantStates(
+		{ QVariantMap{ { QStringLiteral("session"), 9 }, { QStringLiteral("name"), QStringLiteral("Bob") } } });
+	QmlSelectionState selection;
+	selection.bindModels(&rooms, &participants);
+	selection.setScopeToken(QStringLiteral("channel:404"));
+	selection.setSelectedVoiceChannelId(404);
+	selection.setSelectedUserSession(404);
+	QVERIFY(selection.scopeToken().isEmpty());
+	QVERIFY(!selection.selectedVoiceChannelId().isValid());
+	QVERIFY(!selection.selectedUserSession().isValid());
+
+	selection.setScopeToken(QStringLiteral("channel:3"));
+	selection.setSelectedVoiceChannelId(3);
+	selection.setSelectedUserSession(9);
+	rooms.replaceRoomStates(
+		{ QVariantMap{ { QStringLiteral("token"), QStringLiteral("channel:3") },
+						 { QStringLiteral("label"), QStringLiteral("Renamed") } } },
+		{});
+	participants.replaceParticipantStates(
+		{ QVariantMap{ { QStringLiteral("session"), QStringLiteral("9") },
+						 { QStringLiteral("name"), QStringLiteral("Renamed Bob") } } });
+	QCOMPARE(selection.scopeToken(), QStringLiteral("channel:3"));
+	QCOMPARE(selection.selectedVoiceChannelId().toULongLong(), 3ULL);
+	QCOMPARE(selection.selectedUserSession().toULongLong(), 9ULL);
 }
 
 void TestQmlClientModels::invalidRowsAndCommandsAreIgnored() {

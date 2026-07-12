@@ -39,6 +39,7 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_imagePipeline(std::make_shared< QmlImagePipeline >()),
 	  m_composerController(std::make_unique< ComposerController >(m_imagePipeline, this)),
 	  m_themeController(std::make_unique< QmlThemeController >(this)) {
+	m_selectionState->bindModels(m_roomModel.get(), m_participantModel.get());
 	connect(m_activeScopeController.get(), &ActiveScopeController::canSendChanged, this, [this]() {
 		m_composerController->setCanSend(m_activeScopeController->canSend());
 	});
