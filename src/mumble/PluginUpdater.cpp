@@ -7,76 +7,125 @@
 #include "Log.h"
 #include "PluginInstallService.h"
 #include "PluginManager.h"
+#include "PluginUpdatePreparation.h"
 #include "Global.h"
 
-#include <QNetworkRequest>
 #include <QtConcurrent>
+#include <QNetworkRequest>
 #include <QtCore/QByteArray>
-#include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QHashIterator>
+#include <QtCore/QFutureWatcher>
+#include <QtCore/QMetaEnum>
+#include <QtCore/QTimer>
 
 #include <algorithm>
+#include <functional>
+#include <optional>
 #include <utility>
 
+namespace {
+constexpr qsizetype MaximumPluginDownloadBytes = 160 * 1024 * 1024;
+struct PreparedUpdate {
+	PluginUpdateFileResult downloaded;
+	std::optional< PluginInstallService::PreparedPackage > package;
+};
+}
+
+void PluginUpdater::trackDownload(QNetworkReply *reply, const plugin_id_t pluginID) {
+	if (!reply) return;
+	m_downloadBuffers.insert(reply, {});
+	connect(reply, &QIODevice::readyRead, this, [this, reply]() {
+		if (m_wasInterrupted.load() || m_oversizedDownloads.contains(reply)) {
+			reply->abort();
+			return;
+		}
+		QByteArray &buffer = m_downloadBuffers[reply];
+		while (reply->bytesAvailable() > 0) {
+			const qint64 remaining = MaximumPluginDownloadBytes - buffer.size();
+			if (remaining <= 0) {
+				m_oversizedDownloads.insert(reply);
+				reply->abort();
+				return;
+			}
+			const QByteArray chunk = reply->read(qMin< qint64 >(1024 * 1024, remaining + 1));
+			if (chunk.isEmpty()) break;
+			buffer.append(chunk);
+			if (buffer.size() > MaximumPluginDownloadBytes) {
+				m_oversizedDownloads.insert(reply);
+				reply->abort();
+				return;
+			}
+		}
+	});
+	connect(reply, &QNetworkReply::downloadProgress, this,
+			[this, reply, pluginID](const qint64 received, const qint64 total) {
+				if (total > MaximumPluginDownloadBytes || received > MaximumPluginDownloadBytes) {
+					m_oversizedDownloads.insert(reply);
+					reply->abort();
+				}
+				emit updateProgress(static_cast< qulonglong >(pluginID), received, total);
+			});
+}
+
 PluginUpdater::PluginUpdater(QObject *parent)
-	: QObject(parent), m_wasInterrupted(false), m_dataMutex(), m_pluginsToUpdate(), m_networkManager() {
+	: QObject(parent), m_wasInterrupted(false), m_cancelToken(std::make_shared< std::atomic< bool > >(false)),
+	  m_dataMutex(), m_pluginsToUpdate(), m_networkManager() {
 	QObject::connect(&m_networkManager, &QNetworkAccessManager::finished, this, &PluginUpdater::on_updateDownloaded);
 }
 
 PluginUpdater::~PluginUpdater() {
 	m_wasInterrupted.store(true);
+	m_cancelToken->store(true);
 }
 
 void PluginUpdater::checkForUpdates() {
 	m_wasInterrupted.store(false);
+	m_cancelToken->store(false);
 	{
 		QMutexLocker lock(&m_dataMutex);
 		m_pluginsToUpdate.clear();
 	}
-	// Dispatch a thread in which each plugin can check for updates
-	std::ignore = QtConcurrent::run([this]() {
-		QMutexLocker lock(&m_dataMutex);
-
-		const QVector< const_plugin_ptr_t > plugins = Global::get().pluginManager->getPlugins();
-
-		for (int i = 0; i < plugins.size(); i++) {
-			const_plugin_ptr_t plugin = plugins[i];
-
-			if (plugin->hasUpdate()) {
-				QUrl updateURL = plugin->getUpdateDownloadURL();
-
-				if (updateURL.isValid() && !updateURL.isEmpty() && !updateURL.fileName().isEmpty()) {
-					m_pluginsToUpdate.append(UpdateEntry(plugin->getID(), updateURL, updateURL.fileName()));
-				}
-			}
-
-			// if the update has been asked to be interrupted, exit here
-			if (m_wasInterrupted.load()) {
-				emit updateInterrupted();
-				return;
+	// Plugin ABI calls must stay on PluginUpdater/PluginManager's owner thread. Process one plugin per
+	// event-loop turn so cancellation and UI updates can be handled between third-party calls.
+	const QVector< const_plugin_ptr_t > plugins = Global::get().pluginManager->getPlugins();
+	auto next = std::make_shared< std::function< void(int) > >();
+	*next = [this, plugins, next](const int index) {
+		if (m_wasInterrupted.load()) {
+			emit updateInterrupted();
+			*next = {};
+			return;
+		}
+		if (index >= plugins.size()) {
+			if (!availableUpdates().isEmpty()) emit updatesAvailable();
+			*next = {};
+			return;
+		}
+		const const_plugin_ptr_t &plugin = plugins.at(index);
+		if (plugin && plugin->hasUpdate()) {
+			const QUrl updateURL = plugin->getUpdateDownloadURL();
+			if (updateURL.isValid() && !updateURL.isEmpty() && !updateURL.fileName().isEmpty()) {
+				QMutexLocker lock(&m_dataMutex);
+				m_pluginsToUpdate.append(UpdateEntry(plugin->getID(), updateURL, updateURL.fileName()));
 			}
 		}
-
-		if (!m_pluginsToUpdate.isEmpty()) {
-			emit updatesAvailable();
-		}
-	});
+		QTimer::singleShot(0, this, [next, index]() { (*next)(index + 1); });
+	};
+	QTimer::singleShot(0, this, [next]() { (*next)(0); });
 }
 
 void PluginUpdater::update() {
 	QMutexLocker l(&m_dataMutex);
 	m_wasInterrupted.store(false);
+	m_cancelToken->store(false);
 
 	for (int i = 0; i < m_pluginsToUpdate.size(); i++) {
 		UpdateEntry currentEntry = m_pluginsToUpdate[i];
 
 		QNetworkReply *reply = m_networkManager.get(QNetworkRequest(currentEntry.updateURL));
 		emit updateStarted(static_cast< qulonglong >(currentEntry.pluginID), currentEntry.fileName);
-		QObject::connect(reply, &QNetworkReply::downloadProgress, this,
-					 [this, pluginID = currentEntry.pluginID](const qint64 received, const qint64 total) {
-						 emit updateProgress(static_cast< qulonglong >(pluginID), received, total);
-					 });
+		trackDownload(reply, currentEntry.pluginID);
 	}
 }
 
@@ -105,6 +154,7 @@ void PluginUpdater::interrupt() {
 	if (m_wasInterrupted.exchange(true)) {
 		return;
 	}
+	m_cancelToken->store(true);
 	for (QNetworkReply *reply : m_networkManager.findChildren< QNetworkReply * >()) {
 		reply->abort();
 	}
@@ -115,7 +165,7 @@ void PluginUpdater::finishEntry(const UpdateEntry &entry, const bool success, co
 								const QString &message) {
 	emit updateResult(static_cast< qulonglong >(entry.pluginID), success, errorCode, message);
 	QMutexLocker lock(&m_dataMutex);
-	if (m_pluginsToUpdate.isEmpty()) {
+	if (m_pluginsToUpdate.isEmpty() && m_pendingPreparations == 0) {
 		emit updatingFinished();
 	}
 }
@@ -124,6 +174,14 @@ void PluginUpdater::on_updateDownloaded(QNetworkReply *reply) {
 	if (reply) {
 		// Schedule reply for deletion
 		reply->deleteLater();
+		QByteArray content = m_downloadBuffers.take(reply);
+		bool oversized = m_oversizedDownloads.remove(reply);
+		if (!oversized && reply->bytesAvailable() > 0) {
+			const qint64 remaining = MaximumPluginDownloadBytes - content.size();
+			const QByteArray tail = reply->read(qMax< qint64 >(0, remaining) + 1);
+			content.append(tail);
+			oversized = content.size() > MaximumPluginDownloadBytes;
+		}
 
 		// Find the ID of the plugin this update is for by comparing the URLs
 		UpdateEntry entry;
@@ -151,6 +209,12 @@ void PluginUpdater::on_updateDownloaded(QNetworkReply *reply) {
 
 		if (m_wasInterrupted.load()) {
 			finishEntry(entry, false, QStringLiteral("cancelled"), tr("Update cancelled"));
+			return;
+		}
+		if (oversized) {
+			finishEntry(entry, false, QStringLiteral("download-too-large"),
+						tr("The plugin update exceeds the %1 MiB download limit")
+							.arg(MaximumPluginDownloadBytes / (1024 * 1024)));
 			return;
 		}
 
@@ -210,11 +274,8 @@ void PluginUpdater::on_updateDownloaded(QNetworkReply *reply) {
 			}
 
 			// Post a new request for the file to the new URL
-			QNetworkReply *redirectedReply = m_networkManager.get(QNetworkRequest(redirectedUrl));
-			QObject::connect(redirectedReply, &QNetworkReply::downloadProgress, this,
-						 [this, pluginID = entry.pluginID](const qint64 received, const qint64 total) {
-							 emit updateProgress(static_cast< qulonglong >(pluginID), received, total);
-						 });
+		QNetworkReply *redirectedReply = m_networkManager.get(QNetworkRequest(redirectedUrl));
+			trackDownload(redirectedReply, entry.pluginID);
 
 			return;
 		}
@@ -233,8 +294,6 @@ void PluginUpdater::on_updateDownloaded(QNetworkReply *reply) {
 		}
 
 		// Reply seems fine -> write file to disk and fire installer
-		QByteArray content = reply->readAll();
-
 		// Write the content to a file in the temp-dir
 		if (content.isEmpty()) {
 			qWarning() << "PluginUpdater: Update for" << plugin->getName() << "from" << reply->url().toString()
@@ -243,43 +302,102 @@ void PluginUpdater::on_updateDownloaded(QNetworkReply *reply) {
 			return;
 		}
 
-		QFile file(QDir::temp().filePath(entry.fileName));
-		if (!file.open(QIODevice::WriteOnly)) {
-			qWarning() << "PluginUpdater: Can't open" << file.fileName() << "for writing!";
-			finishEntry(entry, false, QStringLiteral("temporary-file-error"),
-						tr("The temporary update file could not be opened"));
-			return;
-		}
+		const QString pluginName = plugin->getName();
+		const bool requireLoaded = plugin->isLoaded();
+		const QString installDirectory = PluginInstallService::installDirectory();
+		plugin.reset();
+		++m_pendingPreparations;
+		auto *writeWatcher = new QFutureWatcher< PreparedUpdate >(this);
+		connect(writeWatcher, &QFutureWatcherBase::finished, this,
+				[this, writeWatcher, entry, pluginName, requireLoaded]() {
+			const PreparedUpdate result = writeWatcher->result();
+			writeWatcher->deleteLater();
+			if (!result.downloaded.errorCode.isEmpty() || !result.package) {
+				--m_pendingPreparations;
+				if (!result.downloaded.path.isEmpty()) QFile::remove(result.downloaded.path);
+				finishEntry(entry, false, result.downloaded.errorCode, result.downloaded.message);
+				return;
+			}
+			const QString temporaryPath = result.downloaded.path;
+			if (m_wasInterrupted.load()) {
+				--m_pendingPreparations;
+				QFile::remove(temporaryPath);
+				finishEntry(entry, false, QStringLiteral("cancelled"), tr("Update cancelled"));
+				return;
+			}
 
-		if (file.write(content) != content.size()) {
-			file.close();
-			finishEntry(entry, false, QStringLiteral("temporary-file-error"),
-						tr("The downloaded update could not be written"));
-			return;
-		}
-		file.close();
-
-		bool installed = false;
-		QString installError;
-		try {
-			const QString pluginName = plugin->getName();
-			// We have to release the plugin handle here by resetting the smart-pointer in order to make sure the
-			// installer can really unload the plugin in order to overwrite it.
-			plugin.reset();
-
-			PluginInstallService installer(file.fileName());
-			installer.install(true);
-
-			Log::logOrDefer(Log::Information, tr("Successfully updated plugin \"%1\"").arg(pluginName));
-
-			// Make sure Mumble won't use the old version of the plugin
-			Global::get().pluginManager->rescanPlugins();
-			installed = true;
-		} catch (const PluginInstallException &e) {
-			Log::logOrDefer(Log::CriticalError, e.getMessage());
-			installError = e.getMessage();
-		}
-		finishEntry(entry, installed, installed ? QString() : QStringLiteral("install-error"),
-					installed ? tr("Plugin updated successfully") : installError);
+			PluginInstallService::PreparedPackage package = *result.package;
+			try {
+				// ABI validation and unload remain strictly on PluginManager's owner thread.
+				PluginInstallService inspector(package);
+				for (const const_plugin_ptr_t &existing : Global::get().pluginManager->getPlugins()) {
+					if (existing && QFileInfo(existing->getFilePath()).absoluteFilePath()
+								== QFileInfo(package.destinationPath).absoluteFilePath()) {
+						Global::get().pluginManager->clearPlugin(existing->getID());
+						break;
+					}
+				}
+			} catch (const PluginInstallException &exception) {
+				--m_pendingPreparations;
+				QFile::remove(temporaryPath);
+				finishEntry(entry, false, QStringLiteral("install-error"), exception.getMessage());
+				return;
+			}
+			auto *commitWatcher = new QFutureWatcher< PluginFileCommitResult >(this);
+			connect(commitWatcher, &QFutureWatcherBase::finished, this,
+					[this, commitWatcher, entry, pluginName, requireLoaded, temporaryPath,
+					 destinationPath = package.destinationPath]() {
+						const PluginFileCommitResult committed = commitWatcher->result();
+						commitWatcher->deleteLater();
+						QFile::remove(temporaryPath);
+						if (!committed.success) {
+							--m_pendingPreparations;
+							Global::get().pluginManager->rescanPlugins();
+							finishEntry(entry, false, committed.errorCode, committed.message);
+							return;
+						}
+						Global::get().pluginManager->rescanPlugins();
+						bool loaded = false;
+						for (const const_plugin_ptr_t &candidate : Global::get().pluginManager->getPlugins())
+							if (candidate && candidate->isValid() && (!requireLoaded || candidate->isLoaded())
+								&& QFileInfo(candidate->getFilePath()).absoluteFilePath()
+										== QFileInfo(destinationPath).absoluteFilePath()) loaded = true;
+						auto *finishWatcher = new QFutureWatcher< bool >(this);
+						connect(finishWatcher, &QFutureWatcherBase::finished, this,
+								[this, finishWatcher, entry, pluginName, loaded]() {
+									const bool fileResult = finishWatcher->result();
+									finishWatcher->deleteLater();
+									--m_pendingPreparations;
+									if (!loaded) Global::get().pluginManager->rescanPlugins();
+									if (loaded && fileResult)
+										Log::logOrDefer(Log::Information, tr("Successfully updated plugin \"%1\"").arg(pluginName));
+									finishEntry(entry, loaded && fileResult,
+												loaded ? QStringLiteral("finalize-error") : QStringLiteral("load-error"),
+												loaded ? tr("Plugin updated successfully") : tr("The updated plugin failed to load; the previous file was restored"));
+								});
+						finishWatcher->setFuture(QtConcurrent::run([committed, loaded]() {
+							return loaded ? finalizePluginFileCommit(committed) : rollbackPluginFileCommit(committed);
+						}));
+					});
+			const auto cancelToken = m_cancelToken;
+			commitWatcher->setFuture(QtConcurrent::run([package, cancelToken]() {
+				return commitPreparedPluginFile(package.sourcePath, package.destinationPath, true, cancelToken.get(), {},
+												package.sha256);
+			}));
+		});
+		const auto cancelToken = m_cancelToken;
+		writeWatcher->setFuture(QtConcurrent::run([content = std::move(content), fileName = entry.fileName,
+												 installDirectory, cancelToken]() {
+			PreparedUpdate result;
+			result.downloaded = preparePluginUpdateFile(content, fileName, cancelToken.get());
+			if (!result.downloaded.errorCode.isEmpty()) return result;
+			try {
+				result.package = PluginInstallService::prepare(result.downloaded.path, installDirectory, cancelToken.get());
+			} catch (const PluginInstallException &exception) {
+				result.downloaded.errorCode = QStringLiteral("package-error");
+				result.downloaded.message = exception.getMessage();
+			}
+			return result;
+		}));
 	}
 }

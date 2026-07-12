@@ -8,6 +8,8 @@
 
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QByteArray>
+#include <QHash>
 #include <QObject>
 #include <QString>
 #include <QtCore/QMutex>
@@ -17,6 +19,7 @@
 
 #include <atomic>
 #include <limits>
+#include <memory>
 
 #include "Plugin.h"
 
@@ -44,6 +47,7 @@ protected:
 	/// An atomic flag indicating whether the plugin update has been interrupted. It is used
 	/// to exit some loops in different threads before they are done.
 	std::atomic< bool > m_wasInterrupted;
+	std::shared_ptr< std::atomic< bool > > m_cancelToken;
 	/// A mutex for m_pluginsToUpdate.
 	QMutex m_dataMutex;
 	/// A vector holding plugins that can be updated by storing a pluginID and the download URL
@@ -51,6 +55,9 @@ protected:
 	QVector< UpdateEntry > m_pluginsToUpdate;
 	/// The NetworkManager used to perform the downloading of plugins.
 	QNetworkAccessManager m_networkManager;
+	QHash< QNetworkReply *, QByteArray > m_downloadBuffers;
+	QSet< QNetworkReply * > m_oversizedDownloads;
+	int m_pendingPreparations = 0;
 public:
 	/// Constructor
 	///
@@ -79,6 +86,7 @@ protected slots:
 
 private:
 	void finishEntry(const UpdateEntry &entry, bool success, const QString &errorCode, const QString &message);
+	void trackDownload(QNetworkReply *reply, plugin_id_t pluginID);
 
 signals:
 	/// This signal is emitted once it has been determined that there are plugin updates available.

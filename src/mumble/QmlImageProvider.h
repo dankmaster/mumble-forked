@@ -21,6 +21,7 @@ public:
 
 	explicit QmlImagePipeline(Limits limits = {});
 	QString registerEncoded(const QByteArray &bytes, const QByteArray &mimeType, const QString &stableKey);
+	QString registerDataUrl(const QString &dataUrl, const QString &stableKey);
 	QString registerLocalFile(const QString &path, const QString &stableKey);
 	void invalidate(const QString &stableKey);
 	void clear();
@@ -35,6 +36,7 @@ private:
 		QByteArray bytes;
 		QByteArray mimeType;
 		QString path;
+		bool dataUrl = false;
 		quint64 generation = 0;
 	};
 	struct CacheEntry { QImage image; qint64 bytes = 0; };

@@ -49,6 +49,7 @@ Dialog {
                     }
                 }
                 ToolButton {
+                    objectName: "dialogCloseButton"
                     text: "×"
                     font.pixelSize: 20
                     Accessible.name: qsTr("Close dialog")
@@ -143,9 +144,12 @@ Dialog {
                                         required property var modelData
                                         width: sectionColumn.width
                                         property var field: modelData
-                                        property bool conditionVisible: !field.visibleWhen
-                                            || (field.visibleWhen.values || []).indexOf(
-                                                String(dialogState.fieldValue(field.visibleWhen.fieldId))) >= 0
+                                        property bool conditionVisible: {
+                                            dialogState.revision
+                                            return !field.visibleWhen
+                                                || (field.visibleWhen.values || []).indexOf(
+                                                    String(dialogState.fieldValue(field.visibleWhen.fieldId))) >= 0
+                                        }
                                         visible: conditionVisible
                                         active: conditionVisible
                                         height: conditionVisible ? ((item ? item.implicitHeight : 0)
@@ -176,11 +180,15 @@ Dialog {
                                         }
                                         Label {
                                             id: fieldErrorLabel
+                                            objectName: "dialogFieldError_" + fieldLoader.field.id
                                             anchors.left: parent.left
                                             anchors.right: parent.right
                                             anchors.top: fieldLoader.item ? fieldLoader.item.bottom : parent.top
                                             anchors.topMargin: 4
-                                            text: dialogState.fieldError(fieldLoader.field.id)
+                                            text: {
+                                                dialogState.revision
+                                                return dialogState.fieldError(fieldLoader.field.id)
+                                            }
                                             visible: text.length > 0
                                             color: "#f87171"
                                             font.pixelSize: 10
@@ -208,6 +216,7 @@ Dialog {
                     model: dialogState.actions
                     delegate: ModernButton {
                         required property var modelData
+                        objectName: "dialogAction_" + modelData.id
                         text: modelData.label || modelData.text || modelData.id
                         enabled: modelData.enabled === undefined || modelData.enabled
                         onClicked: {

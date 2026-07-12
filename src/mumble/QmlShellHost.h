@@ -14,6 +14,7 @@ class AsyncOperationModel;
 class ActionModel;
 class ActiveScopeController;
 class ChatTimelineModel;
+class ComposerController;
 class ClientActionRegistry;
 class ClientSessionController;
 class DialogStateController;
@@ -46,6 +47,7 @@ public:
 	RoomModel *roomModel() const;
 	ParticipantModel *participantModel() const;
 	ChatTimelineModel *chatModel() const;
+	ComposerController *composerController() const;
 	AsyncOperationModel *operationModel() const;
 	ActionModel *actionModel() const;
 	DialogStateController *dialogController() const;
@@ -82,6 +84,7 @@ private:
 	std::unique_ptr< QmlSelectionState > m_selectionState;
 	std::unique_ptr< QmlPerformanceMonitor > m_performanceMonitor;
 	std::shared_ptr< QmlImagePipeline > m_imagePipeline;
+	std::unique_ptr< ComposerController > m_composerController;
 	std::unique_ptr< QmlThemeController > m_themeController;
 };
 

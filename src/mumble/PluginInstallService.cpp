@@ -10,24 +10,34 @@
 
 #include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QCryptographicHash>
 #include <QtCore/QLibrary>
 
 #include <Poco/Exception.h>
 #include <Poco/FileStream.h>
-#include <Poco/StreamCopier.h>
 #include <Poco/Zip/ZipArchive.h>
 #include <Poco/Zip/ZipStream.h>
 
 #include <fstream>
+#include <array>
 
 namespace {
+	constexpr Poco::UInt64 MaxManifestBytes = 1024 * 1024;
+	constexpr qint64 MaxArchiveBytes = 160LL * 1024 * 1024;
+	constexpr Poco::UInt64 MaxPluginCompressedBytes = 128ULL * 1024 * 1024;
+	constexpr Poco::UInt64 MaxPluginExtractedBytes = 256ULL * 1024 * 1024;
 	QString versionLabel(const mumble_version_t version) {
 		return version == MUMBLE_VERSION_UNKNOWN ? QObject::tr("Unknown") : static_cast< QString >(version);
 	}
 }
 
-PluginInstallService::PluginInstallService(const QString &filePath) : m_archive(filePath) {
-	inspect();
+PluginInstallService::PluginInstallService(const QString &filePath)
+	: PluginInstallService(prepare(filePath, installDirectory())) {}
+
+PluginInstallService::PluginInstallService(PreparedPackage prepared)
+	: m_archive(prepared.sourcePath), m_source(prepared.sourcePath), m_destination(prepared.destinationPath),
+	  m_tempDirectory(std::move(prepared.temporaryDirectory)), m_copySource(true) {
+	inspectPrepared();
 }
 
 PluginInstallException::PluginInstallException(const QString &message) : m_message(message) {
@@ -53,26 +63,35 @@ QString PluginInstallService::installDirectory() {
 	return Global::get().qdBasePath.absoluteFilePath(QStringLiteral("Plugins"));
 }
 
-void PluginInstallService::inspect() {
-	if (!canBePluginFile(m_archive)) {
+PluginInstallService::PreparedPackage PluginInstallService::prepare(const QString &filePath,
+													 const QString &destinationDirectory,
+													 const std::atomic< bool > *cancelled) {
+	const QFileInfo archiveInfo(filePath);
+	if (!canBePluginFile(archiveInfo)) {
 		throw PluginInstallException(QObject::tr("The file \"%1\" is not a valid plugin file!")
-									 .arg(m_archive.fileName()));
+									 .arg(archiveInfo.fileName()));
 	}
-
-	if (QLibrary::isLibrary(m_archive.fileName())) {
-		m_source     = m_archive;
-		m_copySource = true;
+	if (archiveInfo.size() > MaxArchiveBytes)
+		throw PluginInstallException(QObject::tr("The plugin package exceeds the archive size limit."));
+	if (cancelled && cancelled->load()) throw PluginInstallException(QObject::tr("Plugin installation cancelled."));
+	PreparedPackage prepared;
+	if (QLibrary::isLibrary(archiveInfo.fileName())) {
+		prepared.sourcePath = archiveInfo.absoluteFilePath();
 	} else {
-		if (!m_tempDirectory.isValid()) {
+		prepared.temporaryDirectory = std::make_shared< QTemporaryDir >();
+		if (!prepared.temporaryDirectory->isValid()) {
 			throw PluginInstallException(QObject::tr("Unable to create a temporary plugin inspection directory."));
 		}
 		try {
-			Poco::FileInputStream zipInput(m_archive.filePath().toStdString());
+			Poco::FileInputStream zipInput(archiveInfo.filePath().toStdString());
 			Poco::Zip::ZipArchive archive(zipInput);
 			const auto manifestIt = archive.findHeader("manifest.xml");
 			if (manifestIt == archive.headerEnd()) {
 				throw PluginInstallException(QObject::tr("Unable to locate the plugin manifest (manifest.xml)"));
 			}
+			if (manifestIt->second.getUncompressedSize() > MaxManifestBytes
+				|| manifestIt->second.getCompressedSize() > MaxManifestBytes)
+				throw PluginInstallException(QObject::tr("The plugin manifest is too large."));
 
 			zipInput.clear();
 			Poco::Zip::ZipInputStream manifestStream(zipInput, manifestIt->second);
@@ -95,15 +114,31 @@ void PluginInstallService::inspect() {
 				throw PluginInstallException(QObject::tr("Unable to locate plugin library specified in manifest (\"%1\")")
 											 .arg(QString::fromStdString(pluginPath)));
 			}
+			if (pluginIt->second.getCompressedSize() > MaxPluginCompressedBytes
+				|| pluginIt->second.getUncompressedSize() > MaxPluginExtractedBytes)
+				throw PluginInstallException(QObject::tr("The plugin package exceeds the extraction size limit."));
 
-			const QString extractedPath =
-				QDir(m_tempDirectory.path()).absoluteFilePath(QFileInfo(QString::fromStdString(pluginPath)).fileName());
+			const QString extractedPath = QDir(prepared.temporaryDirectory->path())
+										  .absoluteFilePath(QFileInfo(QString::fromStdString(pluginPath)).fileName());
 			zipInput.clear();
 			Poco::Zip::ZipInputStream pluginStream(zipInput, pluginIt->second);
 			std::ofstream output(Mumble::QtUtils::qstring_to_path(extractedPath), std::ios::out | std::ios::binary);
-			Poco::StreamCopier::copyStream(pluginStream, output);
+			std::array< char, 1024 * 1024 > buffer;
+			Poco::UInt64 extractedBytes = 0;
+			while (pluginStream.good()) {
+				if (cancelled && cancelled->load())
+					throw PluginInstallException(QObject::tr("Plugin installation cancelled."));
+				pluginStream.read(buffer.data(), static_cast< std::streamsize >(buffer.size()));
+				const std::streamsize count = pluginStream.gcount();
+				if (count <= 0) break;
+				extractedBytes += static_cast< Poco::UInt64 >(count);
+				if (extractedBytes > MaxPluginExtractedBytes)
+					throw PluginInstallException(QObject::tr("The plugin package exceeds the extraction size limit."));
+				output.write(buffer.data(), count);
+				if (!output.good()) throw PluginInstallException(QObject::tr("Unable to write the extracted plugin."));
+			}
 			output.close();
-			m_source = QFileInfo(extractedPath);
+			prepared.sourcePath = extractedPath;
 		} catch (const PluginInstallException &) {
 			throw;
 		} catch (const Poco::Exception &exception) {
@@ -111,7 +146,23 @@ void PluginInstallService::inspect() {
 				QObject::tr("Failed to process zip archive: %1").arg(QString::fromStdString(exception.message())));
 		}
 	}
+	if (cancelled && cancelled->load()) throw PluginInstallException(QObject::tr("Plugin installation cancelled."));
+	QFile source(prepared.sourcePath);
+	if (!source.open(QIODevice::ReadOnly))
+		throw PluginInstallException(QObject::tr("Unable to read the prepared plugin file."));
+	QCryptographicHash hash(QCryptographicHash::Sha256);
+	while (!source.atEnd()) {
+		if (cancelled && cancelled->load()) throw PluginInstallException(QObject::tr("Plugin installation cancelled."));
+		hash.addData(source.read(1024 * 1024));
+	}
+	prepared.sha256 = hash.result();
+	if (!QDir(destinationDirectory).exists() && !QDir().mkpath(destinationDirectory))
+		throw PluginInstallException(QObject::tr("Unable to create plugin directory \"%1\"").arg(destinationDirectory));
+	prepared.destinationPath = QDir(destinationDirectory).absoluteFilePath(QFileInfo(prepared.sourcePath).fileName());
+	return prepared;
+}
 
+void PluginInstallService::inspectPrepared() {
 	try {
 		m_plugin.reset(Plugin::createNew< Plugin >(m_source.absoluteFilePath()));
 	} catch (const PluginError &) {
@@ -119,12 +170,6 @@ void PluginInstallService::inspect() {
 									 .arg(m_source.fileName()));
 	}
 
-	QDir installDir(installDirectory());
-	if (!installDir.exists() && !QDir().mkpath(installDir.absolutePath())) {
-		throw PluginInstallException(QObject::tr("Unable to create plugin directory \"%1\"")
-									 .arg(installDir.absolutePath()));
-	}
-	m_destination = QFileInfo(installDir.absoluteFilePath(m_source.fileName()));
 	m_inspection.name            = m_plugin->getName();
 	m_inspection.version         = versionLabel(m_plugin->getVersion());
 	m_inspection.apiVersion      = versionLabel(m_plugin->getAPIVersion());

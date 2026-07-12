@@ -12,6 +12,7 @@
 #include <QtCore/QTemporaryDir>
 
 #include <memory>
+#include <atomic>
 
 class PluginInstallException : public QException {
 public:
@@ -35,8 +36,15 @@ public:
 		QString existingVersion;
 		bool overwriteRequired = false;
 	};
+	struct PreparedPackage {
+		QString sourcePath;
+		QString destinationPath;
+		QByteArray sha256;
+		std::shared_ptr< QTemporaryDir > temporaryDirectory;
+	};
 
 	explicit PluginInstallService(const QString &filePath);
+	explicit PluginInstallService(PreparedPackage prepared);
 	~PluginInstallService();
 
 	const Inspection &inspection() const;
@@ -44,17 +52,19 @@ public:
 
 	static bool canBePluginFile(const QFileInfo &fileInfo) noexcept;
 	static QString installDirectory();
+	static PreparedPackage prepare(const QString &filePath, const QString &destinationDirectory,
+								   const std::atomic< bool > *cancelled = nullptr);
 
 private:
 	QFileInfo m_archive;
 	QFileInfo m_source;
 	QFileInfo m_destination;
-	QTemporaryDir m_tempDirectory;
+	std::shared_ptr< QTemporaryDir > m_tempDirectory;
 	std::unique_ptr< Plugin > m_plugin;
 	Inspection m_inspection;
 	bool m_copySource = false;
 
-	void inspect();
+	void inspectPrepared();
 };
 
 #endif // MUMBLE_MUMBLE_PLUGININSTALLSERVICE_H_

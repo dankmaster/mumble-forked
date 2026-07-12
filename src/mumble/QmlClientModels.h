@@ -171,7 +171,8 @@ public:
 		CheckableRole,
 		MenuRoleRole,
 		ToolTipRole,
-		VisibleRole
+		VisibleRole,
+		AttachmentsRole
 	};
 
 	explicit StableListModel(QObject *parent = nullptr);
@@ -282,6 +283,7 @@ class DialogStateController final : public QObject {
 	Q_PROPERTY(QVariantList sections READ sections NOTIFY stateChanged)
 	Q_PROPERTY(QVariantList actions READ actions NOTIFY stateChanged)
 	Q_PROPERTY(QVariantMap state READ state NOTIFY stateChanged)
+	Q_PROPERTY(qulonglong revision READ revision NOTIFY stateChanged)
 
 public:
 	explicit DialogStateController(QObject *parent = nullptr);
@@ -295,6 +297,7 @@ public:
 	QVariantList sections() const;
 	QVariantList actions() const;
 	QVariantMap state() const;
+	qulonglong revision() const;
 	Q_INVOKABLE QVariant fieldValue(const QString &fieldId) const;
 	Q_INVOKABLE QString fieldError(const QString &fieldId) const;
 	void applyState(const QVariantMap &state);
@@ -311,6 +314,7 @@ signals:
 
 private:
 	QVariantMap m_state;
+	qulonglong m_revision = 0;
 };
 
 class MediaSessionBackend final : public QObject {

@@ -4,6 +4,7 @@
 #include "QmlShellHost.h"
 
 #include "ClientActionRegistry.h"
+#include "ComposerController.h"
 #include "QmlClientModels.h"
 #include "QmlPerformanceMonitor.h"
 #include "QmlImageProvider.h"
@@ -36,7 +37,11 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_selectionState(std::make_unique< QmlSelectionState >(this)),
 	  m_performanceMonitor(std::make_unique< QmlPerformanceMonitor >(this)),
 	  m_imagePipeline(std::make_shared< QmlImagePipeline >()),
+	  m_composerController(std::make_unique< ComposerController >(m_imagePipeline, this)),
 	  m_themeController(std::make_unique< QmlThemeController >(this)) {
+	connect(m_activeScopeController.get(), &ActiveScopeController::canSendChanged, this, [this]() {
+		m_composerController->setCanSend(m_activeScopeController->canSend());
+	});
 }
 
 QmlShellHost::~QmlShellHost() {
@@ -61,6 +66,7 @@ bool QmlShellHost::start(QString *error) {
 						  static_cast< QObject * >(m_roomModel.get()),
 						  static_cast< QObject * >(m_participantModel.get()),
 						  static_cast< QObject * >(m_chatModel.get()),
+						  static_cast< QObject * >(m_composerController.get()),
 						  static_cast< QObject * >(m_operationModel.get()),
 						  static_cast< QObject * >(m_actionModel.get()),
 						  static_cast< QObject * >(m_dialogController.get()),
@@ -77,6 +83,7 @@ bool QmlShellHost::start(QString *error) {
 	context->setContextProperty(QStringLiteral("roomModel"), m_roomModel.get());
 	context->setContextProperty(QStringLiteral("participantModel"), m_participantModel.get());
 	context->setContextProperty(QStringLiteral("chatModel"), m_chatModel.get());
+	context->setContextProperty(QStringLiteral("composer"), m_composerController.get());
 	context->setContextProperty(QStringLiteral("operationModel"), m_operationModel.get());
 	context->setContextProperty(QStringLiteral("actionModel"), m_actionModel.get());
 	context->setContextProperty(QStringLiteral("dialogState"), m_dialogController.get());
@@ -146,6 +153,7 @@ UiCommandController *QmlShellHost::commandController() const { return m_commandC
 RoomModel *QmlShellHost::roomModel() const { return m_roomModel.get(); }
 ParticipantModel *QmlShellHost::participantModel() const { return m_participantModel.get(); }
 ChatTimelineModel *QmlShellHost::chatModel() const { return m_chatModel.get(); }
+ComposerController *QmlShellHost::composerController() const { return m_composerController.get(); }
 AsyncOperationModel *QmlShellHost::operationModel() const { return m_operationModel.get(); }
 ActionModel *QmlShellHost::actionModel() const { return m_actionModel.get(); }
 DialogStateController *QmlShellHost::dialogController() const { return m_dialogController.get(); }

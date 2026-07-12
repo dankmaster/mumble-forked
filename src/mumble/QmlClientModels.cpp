@@ -145,6 +145,7 @@ QVariant StableListModel::valueForRole(const QVariantMap &row, const int role) {
 		case MenuRoleRole: return row.value(QStringLiteral("menuRole"));
 		case ToolTipRole: return row.value(QStringLiteral("toolTip"));
 		case VisibleRole: return row.value(QStringLiteral("visible"), true);
+		case AttachmentsRole: return row.value(QStringLiteral("attachments"));
 		default: return {};
 	}
 }
@@ -159,7 +160,7 @@ QHash< int, QByteArray > StableListModel::roleNames() const {
 			 { OwnRole, "own" }, { DeletedRole, "deleted" }, { CanReplyRole, "canReply" },
 			 { CanReactRole, "canReact" }, { CanDeleteRole, "canDelete" }, { ScopeTokenRole, "scopeToken" },
 			 { ShortcutRole, "shortcut" }, { CheckableRole, "checkable" }, { MenuRoleRole, "menuRole" },
-			 { ToolTipRole, "toolTip" }, { VisibleRole, "visible" } };
+			 { ToolTipRole, "toolTip" }, { VisibleRole, "visible" }, { AttachmentsRole, "attachments" } };
 }
 
 QVariantMap StableListModel::get(int row) const {
@@ -173,7 +174,7 @@ int StableListModel::indexOf(const QString &stableId) const {
 QList< int > StableListModel::changedRoles(const QVariantMap &before, const QVariantMap &after) {
 	if (before == after) return {};
 	QList< int > roles { PayloadRole };
-	for (int role = StableIdRole; role <= VisibleRole; ++role) {
+	for (int role = StableIdRole; role <= AttachmentsRole; ++role) {
 		if (role != PayloadRole && valueForRole(before, role) != valueForRole(after, role)) roles.push_back(role);
 	}
 	return roles;
@@ -458,6 +459,7 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message) {
 			 { QStringLiteral("reactions"), message.value(QStringLiteral("reactions")) },
 			 { QStringLiteral("preview"),
 			   message.value(QStringLiteral("preview"), message.value(QStringLiteral("previewStub"))) },
+			 { QStringLiteral("attachments"), message.value(QStringLiteral("attachments")) },
 			 { QStringLiteral("own"), message.value(QStringLiteral("own")) },
 			 { QStringLiteral("deleted"), message.value(QStringLiteral("deleted")) },
 			 { QStringLiteral("canReply"), message.value(QStringLiteral("canReply")) },
@@ -713,6 +715,7 @@ QVariantList DialogStateController::pages() const { return m_state.value(QString
 QVariantList DialogStateController::sections() const { return m_state.value(QStringLiteral("sections")).toList(); }
 QVariantList DialogStateController::actions() const { return m_state.value(QStringLiteral("actions")).toList(); }
 QVariantMap DialogStateController::state() const { return m_state; }
+qulonglong DialogStateController::revision() const { return m_revision; }
 QVariant DialogStateController::fieldValue(const QString &fieldId) const {
 	for (const QVariant &sectionValue : sections()) {
 		for (const QVariant &fieldValue : sectionValue.toMap().value(QStringLiteral("fields")).toList()) {
@@ -730,6 +733,7 @@ void DialogStateController::applyState(const QVariantMap &state) {
 	if (m_state == state) return;
 	m_state = state;
 	m_state.detach();
+	++m_revision;
 	emit stateChanged();
 }
 

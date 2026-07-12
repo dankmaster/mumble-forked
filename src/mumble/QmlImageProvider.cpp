@@ -8,6 +8,7 @@
 #include <QtCore/QFuture>
 #include <QtCore/QFutureWatcher>
 #include <QtCore/QPointer>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
 #include <QtGui/QImageReader>
@@ -68,8 +69,18 @@ QString QmlImagePipeline::registerEncoded(const QByteArray &bytes, const QByteAr
 	QMutexLocker locker(&m_mutex);
 	Source &source = m_sources[key];
 	if (source.bytes == bytes && source.mimeType == mime && source.path.isEmpty()) return makeUrl(key, source.generation);
-	source = Source{ bytes, mime, {}, source.generation + 1 };
+	source = Source{ bytes, mime, {}, false, source.generation + 1 };
 	return makeUrl(key, source.generation);
+}
+
+QString QmlImagePipeline::registerDataUrl(const QString &dataUrl, const QString &stableKey) {
+	if (stableKey.trimmed().isEmpty() || dataUrl.size() > (m_limits.maxEncodedBytes * 2)) return {};
+	static const QRegularExpression expression(QStringLiteral("^data:(image/(?:png|jpeg|jpg|webp|gif));base64,([A-Za-z0-9+/=\\r\\n]+)$"), QRegularExpression::CaseInsensitiveOption);
+	const QRegularExpressionMatch match = expression.match(dataUrl.trimmed()); if (!match.hasMatch()) return {};
+	const QByteArray mime = match.captured(1).toLatin1().toLower(); const QString key = normalizedKey(stableKey);
+	QMutexLocker locker(&m_mutex); Source &source = m_sources[key]; const QByteArray encoded = match.captured(2).toLatin1();
+	if (source.bytes == encoded && source.mimeType == mime && source.dataUrl) return makeUrl(key, source.generation);
+	source = Source{ encoded, mime, {}, true, source.generation + 1 }; return makeUrl(key, source.generation);
 }
 
 QString QmlImagePipeline::registerLocalFile(const QString &path, const QString &stableKey) {
@@ -83,7 +94,7 @@ QString QmlImagePipeline::registerLocalFile(const QString &path, const QString &
 	Source &source = m_sources[key];
 	const QString canonical = info.canonicalFilePath();
 	if (source.path == canonical && source.bytes.isEmpty()) return makeUrl(key, source.generation);
-	source = Source{ {}, QByteArrayLiteral("image/") + format, canonical, source.generation + 1 };
+	source = Source{ {}, QByteArrayLiteral("image/") + format, canonical, false, source.generation + 1 };
 	return makeUrl(key, source.generation);
 }
 
@@ -143,6 +154,7 @@ QImage QmlImagePipeline::load(const QString &providerId, const QSize &requestedS
 	}
 	if (cancelled && cancelled->load()) return {};
 	QByteArray bytes = source.bytes;
+	if (source.dataUrl) bytes = QByteArray::fromBase64(bytes, QByteArray::AbortOnBase64DecodingErrors);
 	if (!source.path.isEmpty()) { QFile file(source.path); if (!file.open(QFile::ReadOnly)) return {}; bytes = file.read(m_limits.maxEncodedBytes + 1); }
 	if (bytes.isEmpty() || bytes.size() > m_limits.maxEncodedBytes) return {};
 	QBuffer buffer(&bytes); buffer.open(QIODevice::ReadOnly); QImageReader reader(&buffer);

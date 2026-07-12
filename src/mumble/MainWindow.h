@@ -36,12 +36,14 @@
 #include "Mumble.pb.h"
 #include "MumbleProtocol.h"
 #include "PersistentChatState.h"
+#include "PluginInstallService.h"
 #include "QtUtils.h"
 #include "Settings.h"
 #include "UnresolvedServerAddress.h"
 #include "Usage.h"
 
 #include <memory>
+#include <atomic>
 #include <optional>
 #include <stack>
 #include <vector>
@@ -879,6 +881,8 @@ protected:
 	bool m_updateResumeChatScopeApplied        = false;
 	bool m_updateResumeTextChannelSyncObserved = false;
 	std::unique_ptr< QmlShellHost > m_qmlShellHost;
+	QHash< QString, PluginInstallService::PreparedPackage > m_pendingPluginInstalls;
+	QHash< QString, std::shared_ptr< std::atomic< bool > > > m_pluginInstallCancellation;
 	std::unique_ptr< ModernDialogController > m_modernDialogController;
 	QStringList m_modernStartupDialogQueue;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
@@ -1028,6 +1032,9 @@ protected:
 								const QString &placement, bool confirmIfNeeded);
 	bool handleModernGenericDialogAction(const QString &dialogID, const QString &actionID,
 										 const QVariantMap &fieldValues, const QVariantMap &payload);
+	void beginAsyncPluginInstall(const QString &path);
+	void commitAsyncPluginInstall(const QString &operationID, PluginInstallService::PreparedPackage package,
+								 bool allowOverwrite);
 	bool handleModernFeedbackDialogAction(const QString &dialogID, const QString &actionID,
 										  const QVariantMap &fieldValues);
 	bool tryModernAutoConnectLastServer();

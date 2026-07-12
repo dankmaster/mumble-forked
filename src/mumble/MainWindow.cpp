@@ -28,6 +28,7 @@
 #include "../SignalCurry.h"
 #include "ChannelListenerManager.h"
 #include "ClientActionRegistry.h"
+#include "ComposerController.h"
 #include "ChatFeature.h"
 #include "ChatPerfTrace.h"
 #include "HostAddress.h"
@@ -54,6 +55,7 @@
 #include "PersistentChatMediaCache.h"
 #include "PersistentChatRender.h"
 #include "PluginInstallService.h"
+#include "PluginUpdatePreparation.h"
 #include "PluginManager.h"
 #include "ProtoUtils.h"
 #include "QtWidgetUtils.h"
@@ -11617,6 +11619,56 @@ void MainWindow::applyShellLayout() {
 					});
 			connect(commands, &UiCommandController::messageSendRequested, this,
 					[this](const QString &message) { sendModernShellMessage(message); });
+			ComposerController *composer = m_qmlShellHost->composerController();
+			connect(composer, &ComposerController::sendFailed, this,
+					[this](const QString &message) { publishModernToast(QStringLiteral("error"), tr("Send failed"), message); });
+			connect(composer, &ComposerController::sendRequested, this,
+					[this, composer](const QString &text, const QStringList &localPaths) {
+						if (localPaths.isEmpty()) {
+							composer->finishSend(sendModernShellMessage(text));
+							return;
+						}
+
+						const PersistentChatTarget target = currentPersistentChatTarget();
+						const std::shared_ptr< QmlImagePipeline > pipeline = m_qmlShellHost->imagePipeline();
+						const int maximumLength = static_cast< int >(Global::get().uiImageLength);
+						QPointer< MainWindow > guardedThis(this);
+						QPointer< ComposerController > guardedComposer(composer);
+						QThreadPool::globalInstance()->start(
+							[guardedThis, guardedComposer, pipeline, target, text, localPaths, maximumLength]() {
+								QStringList encodedImages;
+								for (const QString &path : localPaths) {
+									const QFileInfo info(path);
+									const QString stableKey = QStringLiteral("draft-send:%1:%2:%3")
+														.arg(info.canonicalFilePath())
+														.arg(info.size())
+														.arg(info.lastModified().toMSecsSinceEpoch());
+									const QString providerUrl = pipeline->registerLocalFile(info.absoluteFilePath(), stableKey);
+									const QUrl parsed(providerUrl);
+									const QString providerId = parsed.path().mid(1) + QStringLiteral("?") + parsed.query();
+									const QImage image = pipeline->loadForTest(providerId);
+									if (image.isNull()) continue;
+									const QString encoded = Log::imageToImg(image, maximumLength);
+									if (!encoded.isEmpty()) encodedImages.push_back(encoded);
+								}
+								QMetaObject::invokeMethod(guardedThis, [guardedThis, guardedComposer, target, text,
+																	 encodedImages, expectedCount = localPaths.size()]() {
+									if (!guardedThis || !guardedComposer) return;
+									const PersistentChatTarget current = guardedThis->currentPersistentChatTarget();
+									const bool sameTarget = current.valid == target.valid
+										&& current.directMessage == target.directMessage && current.serverLog == target.serverLog
+										&& current.scope == target.scope && current.scopeID == target.scopeID;
+									if (!sameTarget || encodedImages.size() != expectedCount) {
+										guardedComposer->finishSend(false, guardedThis->tr("One or more attachments could not be prepared."));
+										return;
+									}
+									QString body = text.trimmed().toHtmlEscaped().replace(QLatin1Char('\n'), QStringLiteral("<br>"));
+									if (!body.isEmpty() && !encodedImages.isEmpty()) body += QStringLiteral("<br>");
+									body += encodedImages.join(QStringLiteral("<br>"));
+									guardedComposer->finishSend(guardedThis->sendModernShellMessage(body));
+								}, Qt::QueuedConnection);
+							});
+					});
 			connect(commands, &UiCommandController::pendingReplyCancelRequested, this,
 					&MainWindow::handleModernShellReplyCancel);
 			connect(commands, &UiCommandController::attachmentChooseRequested, this,
@@ -11681,10 +11733,12 @@ void MainWindow::applyShellLayout() {
 					&MainWindow::handleModernDialogFieldUpdate);
 			connect(dialog, &DialogStateController::actionRequested, this, &MainWindow::handleModernDialogAction);
 			AsyncOperationModel *operations = m_qmlShellHost->operationModel();
-			connect(operations, &AsyncOperationModel::cancellationRequested, this, [](const QString &operationID) {
+			connect(operations, &AsyncOperationModel::cancellationRequested, this, [this](const QString &operationID) {
 				if (operationID.startsWith(QLatin1String("plugin-update:")) && Global::get().pluginManager) {
 					Global::get().pluginManager->interruptPluginUpdates();
 				}
+				if (const auto it = m_pluginInstallCancellation.constFind(operationID);
+					it != m_pluginInstallCancellation.cend()) it.value()->store(true);
 			});
 			if (Global::get().pluginManager) {
 				connect(Global::get().pluginManager, &PluginManager::pluginUpdateStarted, this,
@@ -16755,25 +16809,132 @@ bool MainWindow::handleModernFeedbackDialogAction(const QString &dialogID, const
 	return true;
 }
 
+void MainWindow::beginAsyncPluginInstall(const QString &path) {
+	if (!m_qmlShellHost || path.trimmed().isEmpty()) return;
+	const QString operationID = QStringLiteral("plugin-install:%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+	const auto cancelToken = std::make_shared< std::atomic< bool > >(false);
+	m_pluginInstallCancellation.insert(operationID, cancelToken);
+	AsyncOperationModel *operations = m_qmlShellHost->operationModel();
+	operations->startOperation(operationID, tr("Preparing plugin"), tr("Validating and extracting the package"), true);
+	const QString destinationDirectory = PluginInstallService::installDirectory();
+	using PrepareResult = std::pair< std::optional< PluginInstallService::PreparedPackage >, QString >;
+	auto *watcher = new QFutureWatcher< PrepareResult >(this);
+	connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher, operationID]() {
+		const auto [prepared, error] = watcher->result();
+		watcher->deleteLater();
+		if (!m_qmlShellHost) return;
+		if (!prepared) {
+			const bool cancelled = m_pluginInstallCancellation.value(operationID)
+				&& m_pluginInstallCancellation.value(operationID)->load();
+			m_pluginInstallCancellation.remove(operationID);
+			m_qmlShellHost->operationModel()->finishOperation(operationID, false,
+				cancelled ? QStringLiteral("cancelled") : QStringLiteral("package-error"), error);
+			return;
+		}
+		try {
+			PluginInstallService inspector(*prepared);
+			const PluginInstallService::Inspection inspection = inspector.inspection();
+			if (inspection.overwriteRequired) {
+				m_pendingPluginInstalls.insert(operationID, *prepared);
+				openModernGenericDialog(modernDialogDto(
+					QStringLiteral("pluginInstallConfirm"), QStringLiteral("confirm"), tr("Replace plugin"),
+					tr("Review the plugin package before replacing the installed version."),
+					QVariantList { modernDialogSection(tr("Plugin"), QVariantList {
+						modernHiddenField(QStringLiteral("plugins.installOperationId"), operationID),
+						modernReadonlyField(tr("New plugin"), QStringLiteral("%1 %2").arg(inspection.name, inspection.version)),
+						modernReadonlyField(tr("Current plugin"), inspection.existingName.isEmpty()
+							? inspection.destinationPath : QStringLiteral("%1 %2").arg(inspection.existingName, inspection.existingVersion)),
+						modernReadonlyField(tr("Author"), inspection.author),
+						modernReadonlyField(tr("API version"), inspection.apiVersion),
+						modernReadonlyField(tr("Destination"), inspection.destinationPath) }) },
+					QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true),
+						modernDialogAction(QStringLiteral("plugins.confirmInstall"), tr("Replace plugin"), true,
+										  QStringLiteral("danger"), true) }, QStringLiteral("plugins.confirmInstall")));
+				return;
+			}
+		} catch (const PluginInstallException &exception) {
+			m_pluginInstallCancellation.remove(operationID);
+			m_qmlShellHost->operationModel()->finishOperation(operationID, false, QStringLiteral("abi-error"), exception.getMessage());
+			return;
+		}
+		commitAsyncPluginInstall(operationID, *prepared, false);
+	});
+	watcher->setFuture(QtConcurrent::run([path, destinationDirectory, cancelToken]() -> PrepareResult {
+		try {
+			return { PluginInstallService::prepare(path, destinationDirectory, cancelToken.get()), QString() };
+		} catch (const PluginInstallException &exception) {
+			return { std::nullopt, exception.getMessage() };
+		}
+	}));
+}
+
+void MainWindow::commitAsyncPluginInstall(const QString &operationID,
+									  PluginInstallService::PreparedPackage package, const bool allowOverwrite) {
+	if (!m_qmlShellHost || !Global::get().pluginManager) return;
+	const auto cancelToken = m_pluginInstallCancellation.value(operationID,
+		std::make_shared< std::atomic< bool > >(false));
+	for (const const_plugin_ptr_t &existing : Global::get().pluginManager->getPlugins()) {
+		if (existing && QFileInfo(existing->getFilePath()).absoluteFilePath()
+						== QFileInfo(package.destinationPath).absoluteFilePath()) {
+			Global::get().pluginManager->clearPlugin(existing->getID());
+			break;
+		}
+	}
+	auto *watcher = new QFutureWatcher< PluginFileCommitResult >(this);
+	connect(watcher, &QFutureWatcherBase::finished, this,
+			[this, watcher, operationID, destinationPath = package.destinationPath]() {
+		const PluginFileCommitResult result = watcher->result();
+		watcher->deleteLater();
+		if (!m_qmlShellHost) return;
+		if (!result.success) {
+			Global::get().pluginManager->rescanPlugins();
+			m_pluginInstallCancellation.remove(operationID);
+			m_qmlShellHost->operationModel()->finishOperation(operationID, false, result.errorCode, result.message);
+			return;
+		}
+		Global::get().pluginManager->rescanPlugins();
+		bool loaded = false;
+		for (const const_plugin_ptr_t &candidate : Global::get().pluginManager->getPlugins())
+			if (candidate && QFileInfo(candidate->getFilePath()).absoluteFilePath()
+						== QFileInfo(destinationPath).absoluteFilePath()) loaded = true;
+		auto *finishWatcher = new QFutureWatcher< bool >(this);
+		connect(finishWatcher, &QFutureWatcherBase::finished, this,
+				[this, finishWatcher, operationID, loaded]() {
+					const bool completed = finishWatcher->result();
+					finishWatcher->deleteLater();
+					m_pluginInstallCancellation.remove(operationID);
+					if (!loaded) Global::get().pluginManager->rescanPlugins();
+					m_qmlShellHost->operationModel()->finishOperation(
+						operationID, loaded && completed,
+						loaded ? (completed ? QString() : QStringLiteral("finalize-error")) : QStringLiteral("load-error"),
+						loaded && completed ? tr("Plugin installed successfully")
+											: tr("The plugin failed to load; the previous file was restored"));
+					openModernSettingsDialog(QStringLiteral("plugins"));
+				});
+		finishWatcher->setFuture(QtConcurrent::run([result, loaded]() {
+			return loaded ? finalizePluginFileCommit(result) : rollbackPluginFileCommit(result);
+		}));
+	});
+	watcher->setFuture(QtConcurrent::run([package, allowOverwrite, cancelToken]() {
+		return commitPreparedPluginFile(package.sourcePath, package.destinationPath, allowOverwrite, cancelToken.get(), {},
+										package.sha256);
+	}));
+}
+
 bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const QString &actionID,
 												 const QVariantMap &fieldValues, const QVariantMap &payload) {
 	if (dialogID == QLatin1String("pluginInstallConfirm")) {
 		if (actionID != QLatin1String("plugins.confirmInstall")) {
+			const QString operationID = fieldValues.value(QStringLiteral("plugins.installOperationId")).toString();
+			m_pendingPluginInstalls.remove(operationID);
+			m_pluginInstallCancellation.remove(operationID);
+			if (m_qmlShellHost) m_qmlShellHost->operationModel()->finishOperation(
+				operationID, false, QStringLiteral("cancelled"), tr("Plugin installation cancelled"));
 			return true;
 		}
-		try {
-			PluginInstallService service(fieldValues.value(QStringLiteral("plugins.installPath")).toString());
-			if (!service.install(true)) {
-				publishModernToast(QStringLiteral("warning"), tr("Plugins"), tr("The plugin was not installed."));
-			} else {
-				Global::get().pluginManager->rescanPlugins();
-				publishModernToast(QStringLiteral("success"), tr("Plugins"),
-									   tr("The plugin was installed successfully."));
-			}
-		} catch (const PluginInstallException &exception) {
-			publishModernToast(QStringLiteral("error"), tr("Plugin installation"), exception.getMessage());
-		}
-		openModernSettingsDialog(QStringLiteral("plugins"));
+		const QString operationID = fieldValues.value(QStringLiteral("plugins.installOperationId")).toString();
+		if (m_pendingPluginInstalls.contains(operationID))
+			commitAsyncPluginInstall(operationID, m_pendingPluginInstalls.take(operationID), true);
 		return true;
 	}
 
@@ -16872,40 +17033,7 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 			if (path.isEmpty()) {
 				return true;
 			}
-			try {
-				PluginInstallService service(path);
-				const PluginInstallService::Inspection inspection = service.inspection();
-				if (inspection.overwriteRequired) {
-					openModernGenericDialog(modernDialogDto(
-						QStringLiteral("pluginInstallConfirm"), QStringLiteral("confirm"), tr("Replace plugin"),
-						tr("Review the plugin package before replacing the installed version."),
-						QVariantList { modernDialogSection(tr("Plugin"), QVariantList {
-							modernHiddenField(QStringLiteral("plugins.installPath"), path),
-							modernReadonlyField(tr("New plugin"), QStringLiteral("%1 %2").arg(inspection.name, inspection.version)),
-							modernReadonlyField(tr("Current plugin"),
-								inspection.existingName.isEmpty()
-									? inspection.destinationPath
-									: QStringLiteral("%1 %2").arg(inspection.existingName, inspection.existingVersion)),
-							modernReadonlyField(tr("Author"), inspection.author),
-							modernReadonlyField(tr("API version"), inspection.apiVersion),
-							modernReadonlyField(tr("Destination"), inspection.destinationPath) }) },
-						QVariantList { modernDialogAction(QStringLiteral("cancel"), tr("Cancel"), true, QString(), true),
-							modernDialogAction(QStringLiteral("plugins.confirmInstall"), tr("Replace plugin"), true,
-											  QStringLiteral("danger"), true) },
-						QStringLiteral("plugins.confirmInstall"), QSize(640, 460)));
-					return true;
-				}
-				if (service.install(false)) {
-					Global::get().pluginManager->rescanPlugins();
-					publishModernToast(QStringLiteral("success"), tr("Plugins"),
-									   tr("The plugin was installed successfully."));
-				} else {
-					publishModernToast(QStringLiteral("warning"), tr("Plugins"),
-									   tr("The plugin was not installed."));
-				}
-			} catch (const PluginInstallException &exception) {
-				publishModernToast(QStringLiteral("error"), tr("Plugin installation"), exception.getMessage());
-			}
+			beginAsyncPluginInstall(path);
 			return true;
 		}
 		if (actionID == QLatin1String("plugins.rescan")) {
@@ -19031,6 +19159,7 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 
 	QString bodyText = systemMessage ? *systemText : (deletedMessage ? QString() : persistentChatMessageSourceText(message));
 	QString bodyHtml;
+	QVariantList structuredAttachments;
 	if (systemMessage) {
 		bodyHtml = systemText->toHtmlEscaped();
 	} else if (deletedMessage) {
@@ -19038,8 +19167,20 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 	} else {
 		const QString messageKey = persistentChatMessageIdentityKey(message);
 		const auto buildModernInlineDataImageReplacement =
-			[this, fastFirstPaint, messageKey](const QString &source, const QString &altText,
+			[this, fastFirstPaint, messageKey, &structuredAttachments](const QString &source, const QString &altText,
 											   const PersistentChatInlineDataImageInfo &info) {
+				if (m_qmlShellHost) {
+					const QString attachmentID = QStringLiteral("%1:inline:%2").arg(messageKey).arg(structuredAttachments.size());
+					const QString providerUrl = m_qmlShellHost->imagePipeline()->registerDataUrl(source, attachmentID);
+					if (!providerUrl.isEmpty()) {
+						structuredAttachments.push_back(
+							QVariantMap{ { QStringLiteral("id"), attachmentID },
+										 { QStringLiteral("kind"), QStringLiteral("image") },
+										 { QStringLiteral("thumbnailUrl"), providerUrl },
+										 { QStringLiteral("url"), providerUrl },
+										 { QStringLiteral("alt"), altText } });
+					}
+				}
 				const QString token    = registerPersistentChatInlineDataImageSource(source);
 				const QString openHref = persistentChatInlineDataImageOpenUrl(token).toString(QUrl::FullyEncoded);
 				if (fastFirstPaint) {
@@ -19116,6 +19257,7 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 							: QString());
 	messageState.insert(QStringLiteral("bodyText"), bodyText);
 	messageState.insert(QStringLiteral("bodyHtml"), bodyHtml);
+	messageState.insert(QStringLiteral("attachments"), structuredAttachments);
 	messageState.insert(QStringLiteral("own"), ownMessage);
 	messageState.insert(QStringLiteral("system"), systemMessage);
 	messageState.insert(QStringLiteral("deleted"), deletedMessage);
@@ -23621,6 +23763,17 @@ void MainWindow::applyQmlRoomState(const QVariantMap &state) {
 												  state.value(QStringLiteral("textRooms")).toList());
 	m_qmlShellHost->participantModel()->replaceParticipantStates(
 		state.value(QStringLiteral("participants")).toList());
+	QStringList autocompleteParticipants;
+	for (const QVariant &entry : state.value(QStringLiteral("participants")).toList()) {
+		const QVariantMap participant = entry.toMap();
+		const QString name = participant.value(QStringLiteral("title"), participant.value(QStringLiteral("name")))
+							 .toString().trimmed();
+		if (!name.isEmpty() && !autocompleteParticipants.contains(name, Qt::CaseInsensitive))
+			autocompleteParticipants.push_back(name);
+	}
+	m_qmlShellHost->composerController()->setAutocompleteSources(
+		autocompleteParticipants,
+		{ QStringLiteral("help"), QStringLiteral("mute"), QStringLiteral("deafen"), QStringLiteral("join") });
 
 	const QVariantMap app = state.value(QStringLiteral("app")).toMap();
 	if (app.isEmpty()) return;
@@ -28997,26 +29150,11 @@ void MainWindow::requestOlderPersistentChatHistory() {
 }
 
 void MainWindow::attachPersistentChatImages(const QList< QUrl > &urls) {
-	for (const QUrl &url : urls) {
-		if (!url.isLocalFile()) continue;
-		if (!m_qmlShellHost) continue;
-		const QFileInfo info(url.toLocalFile());
-		const QString stableKey = QStringLiteral("attachment:%1:%2:%3")
-			.arg(info.canonicalFilePath()).arg(info.size()).arg(info.lastModified().toMSecsSinceEpoch());
-		const std::shared_ptr< QmlImagePipeline > pipeline = m_qmlShellHost->imagePipeline();
-		const QString providerUrl = pipeline->registerLocalFile(info.absoluteFilePath(), stableKey);
-		if (providerUrl.isEmpty()) continue;
-		const QUrl parsed(providerUrl);
-		const QString providerId = parsed.path().mid(1) + QStringLiteral("?") + parsed.query();
-		QPointer< MainWindow > guardedThis(this);
-		QThreadPool::globalInstance()->start([guardedThis, pipeline, providerId]() {
-			const QImage image = pipeline->loadForTest(providerId);
-			if (!guardedThis || image.isNull()) return;
-			QMetaObject::invokeMethod(guardedThis, [guardedThis, image]() {
-				if (guardedThis) guardedThis->attachPersistentChatImage(image);
-			}, Qt::QueuedConnection);
-		});
-	}
+	if (!m_qmlShellHost) return;
+	QVariantList values;
+	values.reserve(urls.size());
+	for (const QUrl &url : urls) values.push_back(url);
+	m_qmlShellHost->composerController()->addUrls(values);
 }
 
 bool MainWindow::attachPersistentChatClipboardImage() {

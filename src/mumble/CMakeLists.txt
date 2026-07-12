@@ -196,6 +196,8 @@ set(MUMBLE_SOURCES
 	"Log.h"
 	"ClientActionRegistry.cpp"
 	"ClientActionRegistry.h"
+	"ComposerController.cpp"
+	"ComposerController.h"
 	"MainWindow.cpp"
 	"MainWindow.h"
 	"Markdown.cpp"

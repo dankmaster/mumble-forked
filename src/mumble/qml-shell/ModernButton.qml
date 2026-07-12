@@ -4,6 +4,8 @@ import Mumble.Theme 1.0
 
 Button {
     id: control
+    Accessible.role: Accessible.Button
+    Accessible.name: text
     implicitHeight: 34
     leftPadding: 14
     rightPadding: 14

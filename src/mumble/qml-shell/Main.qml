@@ -236,6 +236,7 @@ ApplicationWindow {
                         required property string replySnippet
                         required property var reactions
                         required property var preview
+                        required property var attachments
                         required property var source
                         required property bool own
                         required property bool deleted
@@ -340,6 +341,30 @@ ApplicationWindow {
                                     font.pixelSize: 12
                                     font.italic: deleted
                                 }
+                                Flow {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+                                    visible: attachments && attachments.length > 0
+                                    Repeater {
+                                        model: attachments || []
+                                        delegate: Rectangle {
+                                            required property var modelData
+                                            width: Math.min(attachmentImage.implicitWidth > 0 ? attachmentImage.implicitWidth : 180, 320)
+                                            height: Math.min(attachmentImage.implicitHeight > 0 ? attachmentImage.implicitHeight : 120, 240)
+                                            radius: 8
+                                            color: Theme.strip
+                                            clip: true
+                                            Image {
+                                                id: attachmentImage
+                                                anchors.fill: parent
+                                                source: modelData.thumbnailUrl || modelData.url || ""
+                                                asynchronous: true
+                                                cache: false
+                                                fillMode: Image.PreserveAspectFit
+                                            }
+                                        }
+                                    }
+                                }
                                 Rectangle {
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: previewContent.implicitHeight + 16
@@ -428,7 +453,7 @@ ApplicationWindow {
 
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: activeScope.hasPendingReply ? 112 : 76
+                    Layout.preferredHeight: (activeScope.hasPendingReply ? 112 : 76) + (composer.attachments.count > 0 ? 58 : 0) + (composer.autocompleteItems.length > 0 ? 34 : 0)
                     color: Theme.strip
                     border.color: Theme.divider
                     RowLayout {
@@ -447,6 +472,10 @@ ApplicationWindow {
                             radius: Theme.innerRadius
                             color: Theme.panel
                             border.color: Theme.divider
+                            DropArea {
+                                anchors.fill: parent
+                                onDropped: drop => { if (drop.hasUrls) composer.addUrls(drop.urls) }
+                            }
                             ColumnLayout {
                                 anchors.fill: parent
                                 anchors.margins: 5
@@ -468,22 +497,63 @@ ApplicationWindow {
                                         onClicked: uiCommands.cancelPendingReply()
                                     }
                                 }
+                                ListView {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: composer.attachments.count > 0 ? 52 : 0
+                                    visible: composer.attachments.count > 0
+                                    orientation: ListView.Horizontal
+                                    spacing: 6
+                                    model: composer.attachments
+                                    delegate: Rectangle {
+                                        required property string stableId
+                                        required property string thumbnailUrl
+                                        required property string fileName
+                                        required property string status
+										required property real progress
+										required property string error
+                                        width: 150; height: 48; radius: 7; color: Theme.strip; border.color: Theme.divider
+                                        RowLayout { anchors.fill: parent; anchors.margins: 4
+                                            Image { Layout.preferredWidth: 38; Layout.preferredHeight: 38; source: thumbnailUrl; asynchronous: true; cache: false; fillMode: Image.PreserveAspectCrop }
+											ColumnLayout {
+												Layout.fillWidth: true
+												Label { Layout.fillWidth: true; text: fileName; color: Theme.textMain; elide: Text.ElideMiddle; font.pixelSize: 9 }
+												Label { Layout.fillWidth: true; visible: status !== "ready"; text: error || status; color: status === "failed" ? Theme.danger : Theme.textMuted; elide: Text.ElideRight; font.pixelSize: 8 }
+											}
+											ToolButton { visible: status === "failed"; text: "↻"; onClicked: composer.retryAttachment(stableId); Accessible.name: qsTr("Retry %1").arg(fileName) }
+                                            ToolButton { text: "×"; onClicked: composer.removeAttachment(stableId); Accessible.name: qsTr("Remove %1").arg(fileName) }
+                                        }
+                                    }
+                                }
+                                ListView {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: composer.autocompleteItems.length > 0 ? 30 : 0
+                                    visible: composer.autocompleteItems.length > 0
+                                    orientation: ListView.Horizontal
+                                    spacing: 4
+                                    model: composer.autocompleteItems
+                                    delegate: ToolButton {
+                                        required property var modelData
+                                        text: modelData.label || ""
+                                        onClicked: composer.complete(modelData.value || "")
+                                    }
+                                }
                             TextArea {
-                                id: composer
+                                id: composerInput
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
+                                text: composer.text
+                                onTextChanged: if (composer.text !== text) composer.text = text
                                 placeholderText: activeScope.composerPlaceholder.length > 0
                                                  ? activeScope.composerPlaceholder
                                                  : qsTr("Connect to send messages")
-                                enabled: activeScope.canSend
+                                enabled: composer.canSend && !composer.sending
                                 color: Theme.textMain
                                 placeholderTextColor: Theme.textMuted
                                 background: null
                                 wrapMode: TextEdit.Wrap
                                 Keys.onReturnPressed: event => {
-                                    if (!(event.modifiers & Qt.ShiftModifier) && text.trim().length > 0) {
-                                        uiCommands.sendMessage(text)
-                                        text = ""
+                                    if (!(event.modifiers & Qt.ShiftModifier) && (text.trim().length > 0 || composer.attachments.count > 0)) {
+                                        composer.send()
                                         event.accepted = true
                                     }
                                 }
@@ -492,8 +562,8 @@ ApplicationWindow {
                         }
                         ModernButton {
                             text: "Send"
-                            enabled: activeScope.canSend && composer.text.trim().length > 0
-                            onClicked: { uiCommands.sendMessage(composer.text); composer.text = "" }
+                            enabled: composer.canSend && !composer.sending && (composer.text.trim().length > 0 || composer.attachments.count > 0)
+                            onClicked: composer.send()
                         }
                     }
                 }
