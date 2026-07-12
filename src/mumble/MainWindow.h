@@ -276,10 +276,6 @@ public:
 	void toggleServerNavigatorUserMenu();
 	void closeServerNavigatorUserMenu();
 	void refreshCustomChromeStyles();
-	void refreshServerNavigatorStyles();
-	void refreshServerNavigatorSectionHeights();
-	void refreshServerNavigatorMotdHeight();
-	void refreshPersistentChatStyles();
 	void syncPersistentChatGatewayHandler();
 	void warmupPersistentChatHistory();
 	QList< PersistentChatScopeKey > persistentChatWarmupScopes() const;
@@ -490,7 +486,6 @@ public:
 	void updatePersistentChatPreviewViewIfVisible(const QString &previewKey);
 	void setPersistentChatTargetUsesVoiceTree(bool useVoiceTree);
 	bool isServerNavigatorCompactHeight() const;
-	void updateServerNavigatorVoiceTreeHeight();
 	void updatePersistentChatChannelListHeight();
 	void rebuildPersistentChatChannelList();
 	void handlePersistentTextChannelSync(const MumbleProto::TextChannelSync &msg);
