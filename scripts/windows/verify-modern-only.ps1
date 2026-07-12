@@ -28,7 +28,10 @@ $checks = [ordered]@{
 	legacy_web_hosts = Find-Matches @('-n', 'ModernShellHost|ModernShellBridge|ModernDialogHost|ModernContextMenuHost|ModernPttToolHost', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h')
 	webchannel = Find-Matches @('-n', 'QWebChannel|Qt6::WebChannel', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h', '--glob', 'CMakeLists.txt')
 	webengine_widgets = Find-Matches @('-n', 'QWebEngineView|QtWebEngineWidgets|Qt6::WebEngineWidgets', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h', '--glob', 'CMakeLists.txt')
-	qml_media_outside_allowlist = Find-Matches @('-n', 'WebEngineView|WebEngineProfile', 'src/mumble/qml-shell', '--glob', '*.qml', '--glob', '!MediaSessionWindow.qml')
+	webengine_quick_outside_media_allowlist = Find-Matches @('-n', 'QtWebEngine|WebEngineView|WebEngineProfile', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h', '--glob', '*.qml', '--glob', '!MediaSessionWindow.qml', '--glob', '!main.cpp')
+	legacy_snapshot_bridge = Find-Matches @('-n', 'buildModernShellSnapshot|queueModernShellSnapshot|ModernShellSnapshotSync|modernShellSnapshot', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h')
+	legacy_patch_bridge_symbols = Find-Matches @('-n', 'buildModernShellRoomStatePatch|publishModernShellMessagesPatch|publishModernShellRoomStatePatch|m_modernShell[A-Za-z0-9_]*Patch', 'src/mumble/MainWindow.cpp', 'src/mumble/MainWindow.h')
+	hidden_product_widget_construction = Find-Matches @('-n', 'new (UserView|LogTextBrowser|ChatbarTextEdit|PersistentChatMessageGroupWidget|ResponsiveImageDialog|RichTextEditor)', 'src/mumble', '--glob', '*.cpp')
 	legacy_web_product_resources = @(Get-ChildItem (Join-Path $repoRoot 'src\mumble\modern-shell') -File -ErrorAction SilentlyContinue |
 		Where-Object { $_.Extension -in @('.html', '.css', '.js') } |
 		ForEach-Object FullName)

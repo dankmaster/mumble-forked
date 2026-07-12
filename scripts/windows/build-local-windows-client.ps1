@@ -403,7 +403,13 @@ function Copy-SharedEnvironmentRuntime {
 	# The shared WebEngine lane is a portable local payload. Mirror the shared
 	# environment runtime DLL set so Qt/WebEngine and Mumble's shared third-party
 	# dependencies resolve without depending on a developer PATH.
-	Get-ChildItem -LiteralPath $environmentBin -File -Filter "*.dll" | ForEach-Object {
+	$excludedRuntimeDlls = @(
+		"Qt6QuickWidgets.dll",
+		"Qt6WebEngineWidgets.dll"
+	)
+	Get-ChildItem -LiteralPath $environmentBin -File -Filter "*.dll" |
+		Where-Object { $_.Name -notin $excludedRuntimeDlls } |
+		ForEach-Object {
 		Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $StageRoot $_.Name) -Force
 	}
 }
@@ -526,7 +532,13 @@ function Assert-SharedWebEngineDeployment {
 		@{ Description = "Qt WebEngine ICU payload"; Filter = "icudtl.dat"; Directory = $false },
 		@{ Description = "Qt WebEngine resource pack"; Filter = "qtwebengine_resources*.pak"; Directory = $false },
 		@{ Description = "Qt WebEngine locale payload"; Filter = "qtwebengine_locales"; Directory = $true },
-		@{ Description = "Qt OpenSSL TLS backend"; Filter = "qopensslbackend.dll"; Directory = $false }
+		@{ Description = "Qt OpenSSL TLS backend"; Filter = "qopensslbackend.dll"; Directory = $false },
+		@{ Description = "Qt Quick Controls QML plugin"; Filter = "qtquickcontrols2plugin.dll"; Directory = $false },
+		@{ Description = "Qt Quick Layouts QML plugin"; Filter = "qquicklayoutsplugin.dll"; Directory = $false },
+		@{ Description = "Qt WebEngineQuick QML plugin"; Filter = "qtwebenginequickplugin.dll"; Directory = $false },
+		@{ Description = "Qt Quick runtime"; Filter = "Qt6Quick.dll"; Directory = $false },
+		@{ Description = "Qt QML runtime"; Filter = "Qt6Qml.dll"; Directory = $false },
+		@{ Description = "Qt WebEngineQuick runtime"; Filter = "Qt6WebEngineQuick.dll"; Directory = $false }
 	)
 
 	$missing = New-Object System.Collections.Generic.List[string]
@@ -544,6 +556,12 @@ function Assert-SharedWebEngineDeployment {
 
 	if ($missing.Count -gt 0) {
 		throw "Shared WebEngine staging is missing required deployed runtime content after windeployqt: $($missing -join ', ')."
+	}
+
+	$forbiddenRuntime = @("Qt6QuickWidgets.dll", "Qt6WebEngineWidgets.dll") |
+		Where-Object { Test-Path -LiteralPath (Join-Path $StageRoot $_) }
+	if ($forbiddenRuntime.Count -gt 0) {
+		throw "Shared QML staging contains forbidden widget-container runtime DLLs: $($forbiddenRuntime -join ', ')."
 	}
 }
 
