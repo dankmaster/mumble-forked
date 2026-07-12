@@ -53,6 +53,8 @@ ApplicationWindow {
                 radius: Theme.innerRadius
                 color: Theme.panel
                 border.color: status === "failed" ? "#ef4444" : Theme.divider
+                Accessible.role: Accessible.AlertMessage
+                Accessible.name: title + (subtitle.length > 0 ? ": " + subtitle : "")
                 ColumnLayout {
                     id: operationContent
                     anchors.fill: parent
@@ -64,7 +66,14 @@ ApplicationWindow {
                         ModernButton {
                             visible: status === "running" && !!payload.cancellable
                             text: qsTr("Cancel")
+                            Accessible.name: qsTr("Cancel %1").arg(title)
                             onClicked: operationModel.cancel(stableId)
+                        }
+                        ModernButton {
+                            visible: status !== "running"
+                            text: qsTr("Dismiss")
+                            Accessible.name: qsTr("Dismiss %1").arg(title)
+                            onClicked: operationModel.dismiss(stableId)
                         }
                     }
                     Label { Layout.fillWidth: true; text: subtitle; color: Theme.textMuted; wrapMode: Text.Wrap }
@@ -427,6 +436,11 @@ ApplicationWindow {
                             height: subtitle.length > 0 ? 48 : 38
                             radius: 8
                             color: selected ? Theme.selected : roomMouse.containsMouse ? Theme.panel : "transparent"
+                            activeFocusOnTab: true
+                            Accessible.role: Accessible.ListItem
+                            Accessible.name: title
+                            Accessible.description: subtitle
+                            Accessible.selected: selected
                             Column {
                                 anchors.left: parent.left
                                 anchors.right: parent.right
@@ -462,6 +476,21 @@ ApplicationWindow {
                                 onClicked: uiCommands.selectScope(scopeToken)
                                 onDoubleClicked: if (kind === "voice") uiCommands.joinVoiceChannel(scopeToken)
                             }
+                            Keys.onReturnPressed: event => {
+                                uiCommands.selectScope(scopeToken)
+                                event.accepted = true
+                            }
+                            Keys.onEnterPressed: event => {
+                                uiCommands.selectScope(scopeToken)
+                                event.accepted = true
+                            }
+                            Keys.onSpacePressed: event => {
+                                if (kind === "voice")
+                                    uiCommands.joinVoiceChannel(scopeToken)
+                                else
+                                    uiCommands.selectScope(scopeToken)
+                                event.accepted = true
+                            }
                         }
                     }
                     Label {
@@ -496,6 +525,12 @@ ApplicationWindow {
                                    && String(selectionState.selectedUserSession) === stableId
                                    ? Theme.selected
                                    : participantMouse.containsMouse ? Theme.panel : "transparent"
+                            activeFocusOnTab: true
+                            Accessible.role: Accessible.ListItem
+                            Accessible.name: title
+                            Accessible.description: subtitle
+                            Accessible.selected: selectionState.selectedUserSession !== undefined
+                                                 && String(selectionState.selectedUserSession) === stableId
                             Rectangle {
                                 id: presenceDot
                                 anchors.left: parent.left
@@ -519,6 +554,18 @@ ApplicationWindow {
                                 hoverEnabled: true
                                 onClicked: uiCommands.selectParticipant(stableId)
                                 onDoubleClicked: uiCommands.openDirectMessage(stableId)
+                            }
+                            Keys.onReturnPressed: event => {
+                                uiCommands.selectParticipant(stableId)
+                                event.accepted = true
+                            }
+                            Keys.onEnterPressed: event => {
+                                uiCommands.selectParticipant(stableId)
+                                event.accepted = true
+                            }
+                            Keys.onSpacePressed: event => {
+                                uiCommands.openDirectMessage(stableId)
+                                event.accepted = true
                             }
                         }
                     }

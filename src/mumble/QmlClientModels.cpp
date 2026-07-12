@@ -334,6 +334,19 @@ void AsyncOperationModel::cancel(const QString &operationId) {
 	if (!id.isEmpty()) emit cancellationRequested(id);
 }
 
+void AsyncOperationModel::dismiss(const QString &operationId) {
+	const QString id = operationId.trimmed();
+	if (id.isEmpty()) return;
+
+	for (int index = 0; index < rowCount(); ++index) {
+		const QVariantMap row = get(index);
+		if (row.value(QStringLiteral("id")).toString() != id) continue;
+		if (row.value(QStringLiteral("status")).toString() == QLatin1String("running")) return;
+		removeRow(id);
+		return;
+	}
+}
+
 UiCommandController::UiCommandController(QObject *parent) : QObject(parent) {
 }
 

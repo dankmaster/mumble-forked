@@ -20,7 +20,10 @@ private slots:
 	void pttStateIsIdempotentAndReleases();
 	void dialogStateRoutesTypedRequests();
 	void asyncOperationsExposeProgressAndCancellation();
+	void asyncOperationsClampProgressAndInterruptByPrefix();
 	void mediaSessionValidatesAndPublishesTypedState();
+	void selectionStateOnlyNotifiesForRealChanges();
+	void invalidRowsAndCommandsAreIgnored();
 };
 
 void TestQmlClientModels::stableRowsUpdateWithoutReset() {
@@ -271,6 +274,78 @@ void TestQmlClientModels::asyncOperationsExposeProgressAndCancellation() {
 	QCOMPARE(finished.value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
 	QCOMPARE(finished.value(QStringLiteral("subtitle")).toString(), QStringLiteral("Offline"));
 	QVERIFY(!finished.value(QStringLiteral("payload")).toMap().value(QStringLiteral("cancellable")).toBool());
+
+	operations.dismiss(QStringLiteral(" plugin-update:7 "));
+	QCOMPARE(operations.rowCount(), 0);
+
+	operations.startOperation(QStringLiteral("plugin-update:8"), QStringLiteral("Another plugin"),
+							  QStringLiteral("Downloading"), true);
+	operations.dismiss(QStringLiteral("plugin-update:8"));
+	QCOMPARE(operations.rowCount(), 1);
+}
+
+void TestQmlClientModels::asyncOperationsClampProgressAndInterruptByPrefix() {
+	AsyncOperationModel operations;
+	operations.startOperation(QStringLiteral("plugin-update:one"), QStringLiteral("One"), QString(), true);
+	operations.startOperation(QStringLiteral("plugin-update:two"), QStringLiteral("Two"), QString(), true);
+	operations.startOperation(QStringLiteral("download:one"), QStringLiteral("Download"), QString(), true);
+
+	operations.updateProgress(QStringLiteral("plugin-update:one"), 125, 100);
+	QCOMPARE(operations.get(0).value(QStringLiteral("payload")).toMap().value(QStringLiteral("progress")).toInt(),
+			 100);
+	operations.updateProgress(QStringLiteral("plugin-update:two"), 5, 0);
+	const QVariantMap indeterminate = operations.get(1).value(QStringLiteral("payload")).toMap();
+	QCOMPARE(indeterminate.value(QStringLiteral("progress")).toInt(), -1);
+	QVERIFY(indeterminate.value(QStringLiteral("indeterminate")).toBool());
+
+	operations.interruptOperations(QStringLiteral("plugin-update:"));
+	QCOMPARE(operations.get(0).value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
+	QCOMPARE(operations.get(1).value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
+	QCOMPARE(operations.get(2).value(QStringLiteral("status")).toString(), QStringLiteral("running"));
+}
+
+void TestQmlClientModels::selectionStateOnlyNotifiesForRealChanges() {
+	QmlSelectionState selection;
+	QSignalSpy scopeSpy(&selection, &QmlSelectionState::scopeTokenChanged);
+	QSignalSpy userSpy(&selection, &QmlSelectionState::selectedUserSessionChanged);
+	QSignalSpy channelSpy(&selection, &QmlSelectionState::selectedVoiceChannelIdChanged);
+
+	selection.setScopeToken(QStringLiteral("channel:42"));
+	selection.setSelectedUserSession(7);
+	selection.setSelectedVoiceChannelId(42);
+	selection.setScopeToken(QStringLiteral("channel:42"));
+	selection.setSelectedUserSession(7);
+	selection.setSelectedVoiceChannelId(42);
+
+	QCOMPARE(scopeSpy.count(), 1);
+	QCOMPARE(userSpy.count(), 1);
+	QCOMPARE(channelSpy.count(), 1);
+	QCOMPARE(selection.scopeToken(), QStringLiteral("channel:42"));
+	QCOMPARE(selection.selectedUserSession().toInt(), 7);
+	QCOMPARE(selection.selectedVoiceChannelId().toInt(), 42);
+}
+
+void TestQmlClientModels::invalidRowsAndCommandsAreIgnored() {
+	RoomModel model;
+	QSignalSpy insertSpy(&model, &QAbstractItemModel::rowsInserted);
+	QSignalSpy countSpy(&model, &StableListModel::countChanged);
+	model.upsertRow({ { QStringLiteral("title"), QStringLiteral("Missing ID") } });
+	model.synchronizeRows({ QVariantMap { { QStringLiteral("id"), QString() } }, QVariantMap {} });
+	QCOMPARE(model.rowCount(), 0);
+	QCOMPARE(insertSpy.count(), 0);
+	QCOMPARE(countSpy.count(), 0);
+
+	UiCommandController commands;
+	QSignalSpy joinSpy(&commands, &UiCommandController::voiceJoinRequested);
+	QSignalSpy messageSpy(&commands, &UiCommandController::messageSendRequested);
+	commands.joinVoiceChannel(QStringLiteral("  "));
+	commands.sendMessage(QStringLiteral("  "));
+	QCOMPARE(joinSpy.count(), 0);
+	QCOMPARE(messageSpy.count(), 0);
+	commands.joinVoiceChannel(QStringLiteral(" channel:42 "));
+	commands.sendMessage(QStringLiteral(" hello "));
+	QCOMPARE(joinSpy.takeFirst().at(0).toString(), QStringLiteral("channel:42"));
+	QCOMPARE(messageSpy.takeFirst().at(0).toString(), QStringLiteral(" hello "));
 }
 
 void TestQmlClientModels::mediaSessionValidatesAndPublishesTypedState() {

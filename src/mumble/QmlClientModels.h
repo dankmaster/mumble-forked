@@ -186,6 +186,7 @@ public:
 	void finishOperation(const QString &operationId, bool success, const QString &errorCode, const QString &message);
 	void interruptOperations(const QString &prefix);
 	Q_INVOKABLE void cancel(const QString &operationId);
+	Q_INVOKABLE void dismiss(const QString &operationId);
 
 signals:
 	void cancellationRequested(const QString &operationId);
