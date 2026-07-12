@@ -26,6 +26,7 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_chatModel(std::make_unique< ChatTimelineModel >(this)),
 	  m_operationModel(std::make_unique< AsyncOperationModel >(this)),
 	  m_actionModel(std::make_unique< ActionModel >(actionRegistry, this)),
+	  m_dialogController(std::make_unique< DialogStateController >(this)),
 	  m_selectionState(std::make_unique< QmlSelectionState >(this)) {
 }
 
@@ -52,6 +53,7 @@ bool QmlShellHost::start(QString *error) {
 						  static_cast< QObject * >(m_chatModel.get()),
 						  static_cast< QObject * >(m_operationModel.get()),
 						  static_cast< QObject * >(m_actionModel.get()),
+						  static_cast< QObject * >(m_dialogController.get()),
 						  static_cast< QObject * >(m_selectionState.get()) }) {
 		QQmlEngine::setObjectOwnership(object, QQmlEngine::CppOwnership);
 	}
@@ -64,6 +66,7 @@ bool QmlShellHost::start(QString *error) {
 	context->setContextProperty(QStringLiteral("chatModel"), m_chatModel.get());
 	context->setContextProperty(QStringLiteral("operationModel"), m_operationModel.get());
 	context->setContextProperty(QStringLiteral("actionModel"), m_actionModel.get());
+	context->setContextProperty(QStringLiteral("dialogState"), m_dialogController.get());
 	context->setContextProperty(QStringLiteral("selectionState"), m_selectionState.get());
 	context->setContextProperty(QStringLiteral("clientActions"), m_actionRegistry);
 
@@ -109,6 +112,7 @@ ParticipantModel *QmlShellHost::participantModel() const { return m_participantM
 ChatTimelineModel *QmlShellHost::chatModel() const { return m_chatModel.get(); }
 AsyncOperationModel *QmlShellHost::operationModel() const { return m_operationModel.get(); }
 ActionModel *QmlShellHost::actionModel() const { return m_actionModel.get(); }
+DialogStateController *QmlShellHost::dialogController() const { return m_dialogController.get(); }
 QmlSelectionState *QmlShellHost::selectionState() const { return m_selectionState.get(); }
 
 QVariantMap QmlShellHost::stateSnapshot() const {
@@ -177,6 +181,7 @@ QVariantMap QmlShellHost::stateSnapshot() const {
 		actions.push_back(m_actionModel->get(row));
 	}
 	snapshot.insert(QStringLiteral("actions"), actions);
+	snapshot.insert(QStringLiteral("dialog"), m_dialogController->state());
 	return snapshot;
 }
 

@@ -194,6 +194,47 @@ private:
 	ClientActionRegistry *m_registry = nullptr;
 };
 
+class DialogStateController final : public QObject {
+	Q_OBJECT
+	Q_PROPERTY(bool open READ open NOTIFY stateChanged)
+	Q_PROPERTY(QString dialogId READ dialogId NOTIFY stateChanged)
+	Q_PROPERTY(QString kind READ kind NOTIFY stateChanged)
+	Q_PROPERTY(QString title READ title NOTIFY stateChanged)
+	Q_PROPERTY(QString subtitle READ subtitle NOTIFY stateChanged)
+	Q_PROPERTY(QString activePage READ activePage NOTIFY stateChanged)
+	Q_PROPERTY(QVariantList pages READ pages NOTIFY stateChanged)
+	Q_PROPERTY(QVariantList sections READ sections NOTIFY stateChanged)
+	Q_PROPERTY(QVariantList actions READ actions NOTIFY stateChanged)
+	Q_PROPERTY(QVariantMap state READ state NOTIFY stateChanged)
+
+public:
+	explicit DialogStateController(QObject *parent = nullptr);
+	bool open() const;
+	QString dialogId() const;
+	QString kind() const;
+	QString title() const;
+	QString subtitle() const;
+	QString activePage() const;
+	QVariantList pages() const;
+	QVariantList sections() const;
+	QVariantList actions() const;
+	QVariantMap state() const;
+	void applyState(const QVariantMap &state);
+
+	Q_INVOKABLE void updateField(const QString &fieldId, const QVariant &value);
+	Q_INVOKABLE void invokeAction(const QString &actionId, const QVariantMap &payload = {});
+	Q_INVOKABLE void requestClose();
+
+signals:
+	void stateChanged();
+	void fieldUpdateRequested(const QString &dialogId, const QString &fieldId, const QVariant &value);
+	void actionRequested(const QString &dialogId, const QString &actionId, const QVariantMap &payload);
+	void closeRequested(const QString &dialogId);
+
+private:
+	QVariantMap m_state;
+};
+
 class QmlSelectionState final : public QObject {
 	Q_OBJECT
 	Q_PROPERTY(QString scopeToken READ scopeToken WRITE setScopeToken NOTIFY scopeTokenChanged)

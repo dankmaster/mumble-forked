@@ -14029,6 +14029,11 @@ void MainWindow::applyShellLayout() {
 			connect(commands, &UiCommandController::selfDeafToggleRequested, qaAudioDeaf, &QAction::trigger);
 			connect(commands, &UiCommandController::pttStateRequested, this,
 					[this](const bool pressed) { on_PushToTalk_triggered(pressed, QVariant()); });
+			DialogStateController *dialog = m_qmlShellHost->dialogController();
+			connect(dialog, &DialogStateController::closeRequested, this, &MainWindow::handleModernDialogClose);
+			connect(dialog, &DialogStateController::fieldUpdateRequested, this,
+					&MainWindow::handleModernDialogFieldUpdate);
+			connect(dialog, &DialogStateController::actionRequested, this, &MainWindow::handleModernDialogAction);
 			connect(m_qmlShellHost.get(), &QmlShellHost::closeRequested, this, &MainWindow::close);
 		}
 
@@ -17437,6 +17442,14 @@ namespace {
 } // namespace
 
 void MainWindow::publishModernDialogState(const QVariantMap &state) {
+	if (m_qmlShellHost && qEnvironmentVariableIntValue("MUMBLE_QML_SHELL") > 0) {
+		m_qmlShellHost->dialogController()->applyState(state);
+		if (!state.value(QStringLiteral("open")).toBool() && !m_modernStartupDialogQueue.isEmpty()) {
+			QTimer::singleShot(0, this, &MainWindow::openNextModernStartupDialog);
+		}
+		return;
+	}
+
 	if (!m_modernShellHost && true) {
 		applyShellLayout();
 	}

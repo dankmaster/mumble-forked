@@ -343,6 +343,42 @@ bool ActionModel::trigger(const QString &actionId) {
 	return true;
 }
 
+DialogStateController::DialogStateController(QObject *parent) : QObject(parent) {
+}
+
+bool DialogStateController::open() const { return m_state.value(QStringLiteral("open")).toBool(); }
+QString DialogStateController::dialogId() const { return m_state.value(QStringLiteral("id")).toString(); }
+QString DialogStateController::kind() const { return m_state.value(QStringLiteral("kind")).toString(); }
+QString DialogStateController::title() const { return m_state.value(QStringLiteral("title")).toString(); }
+QString DialogStateController::subtitle() const { return m_state.value(QStringLiteral("subtitle")).toString(); }
+QString DialogStateController::activePage() const { return m_state.value(QStringLiteral("activePage")).toString(); }
+QVariantList DialogStateController::pages() const { return m_state.value(QStringLiteral("pages")).toList(); }
+QVariantList DialogStateController::sections() const { return m_state.value(QStringLiteral("sections")).toList(); }
+QVariantList DialogStateController::actions() const { return m_state.value(QStringLiteral("actions")).toList(); }
+QVariantMap DialogStateController::state() const { return m_state; }
+
+void DialogStateController::applyState(const QVariantMap &state) {
+	if (m_state == state) return;
+	m_state = state;
+	m_state.detach();
+	emit stateChanged();
+}
+
+void DialogStateController::updateField(const QString &fieldId, const QVariant &value) {
+	if (!open() || dialogId().isEmpty() || fieldId.trimmed().isEmpty()) return;
+	emit fieldUpdateRequested(dialogId(), fieldId.trimmed(), value);
+}
+
+void DialogStateController::invokeAction(const QString &actionId, const QVariantMap &payload) {
+	if (!open() || dialogId().isEmpty() || actionId.trimmed().isEmpty()) return;
+	emit actionRequested(dialogId(), actionId.trimmed(), payload);
+}
+
+void DialogStateController::requestClose() {
+	if (!open() || dialogId().isEmpty()) return;
+	emit closeRequested(dialogId());
+}
+
 QmlSelectionState::QmlSelectionState(QObject *parent) : QObject(parent) {
 }
 

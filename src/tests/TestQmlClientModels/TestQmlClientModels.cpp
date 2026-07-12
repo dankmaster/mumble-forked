@@ -18,6 +18,7 @@ private slots:
 	void sessionPropertiesOnlyNotifyOnChanges();
 	void commandsRejectEmptyStableIds();
 	void pttStateIsIdempotentAndReleases();
+	void dialogStateRoutesTypedRequests();
 };
 
 void TestQmlClientModels::stableRowsUpdateWithoutReset() {
@@ -204,6 +205,38 @@ void TestQmlClientModels::pttStateIsIdempotentAndReleases() {
 	QCOMPARE(stateSpy.takeFirst().at(0).toBool(), false);
 	commands.releasePtt();
 	QCOMPARE(stateSpy.count(), 0);
+}
+
+void TestQmlClientModels::dialogStateRoutesTypedRequests() {
+	DialogStateController dialog;
+	QSignalSpy stateSpy(&dialog, &DialogStateController::stateChanged);
+	QSignalSpy fieldSpy(&dialog, &DialogStateController::fieldUpdateRequested);
+	QSignalSpy actionSpy(&dialog, &DialogStateController::actionRequested);
+	QSignalSpy closeSpy(&dialog, &DialogStateController::closeRequested);
+
+	dialog.updateField(QStringLiteral("audio.input"), 1);
+	dialog.invokeAction(QStringLiteral("ok"));
+	dialog.requestClose();
+	QCOMPARE(fieldSpy.count(), 0);
+	QCOMPARE(actionSpy.count(), 0);
+	QCOMPARE(closeSpy.count(), 0);
+
+	dialog.applyState({ { QStringLiteral("open"), true }, { QStringLiteral("id"), QStringLiteral("settings") },
+						{ QStringLiteral("kind"), QStringLiteral("settings") },
+						{ QStringLiteral("title"), QStringLiteral("Settings") },
+						{ QStringLiteral("sections"), QVariantList {} } });
+	QCOMPARE(stateSpy.count(), 1);
+	QVERIFY(dialog.open());
+	QCOMPARE(dialog.dialogId(), QStringLiteral("settings"));
+
+	dialog.updateField(QStringLiteral(" audio.input "), 2);
+	QCOMPARE(fieldSpy.count(), 1);
+	QCOMPARE(fieldSpy.takeFirst().at(0).toString(), QStringLiteral("settings"));
+	dialog.invokeAction(QStringLiteral(" selectPage "), { { QStringLiteral("pageId"), QStringLiteral("plugins") } });
+	QCOMPARE(actionSpy.count(), 1);
+	QCOMPARE(actionSpy.takeFirst().at(1).toString(), QStringLiteral("selectPage"));
+	dialog.requestClose();
+	QCOMPARE(closeSpy.count(), 1);
 }
 
 QTEST_GUILESS_MAIN(TestQmlClientModels)

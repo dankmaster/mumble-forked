@@ -30,6 +30,8 @@ ApplicationWindow {
         PttTool { }
     }
 
+    QmlDialog { }
+
     Rectangle {
         anchors.fill: parent
         anchors.margins: 8
