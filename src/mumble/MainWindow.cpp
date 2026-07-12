@@ -13349,30 +13349,30 @@ MainWindow::MainWindow(QWidget *p)
 
 	createActions();
 	setupUi(this);
-	m_clientActionRegistry = std::make_unique< ClientActionRegistry >(this);
-	const QList< QAction * > clientActions = findChildren< QAction * >(QString(), Qt::FindDirectChildrenOnly);
-	for (QAction *action : clientActions) {
-		m_clientActionRegistry->adopt(action);
-	}
 	qaServerSettings = new QAction(tr("Server Settings..."), this);
+	qaServerSettings->setObjectName(QStringLiteral("qaServerSettings"));
 	qaServerSettings->setToolTip(tr("Change server settings for connected clients"));
 	qaServerSettings->setWhatsThis(tr("This opens server settings that are applied live and saved on the server."));
 	connect(qaServerSettings, &QAction::triggered, this, &MainWindow::on_qaServerSettings_triggered);
 	qaServerOpenStonks = new QAction(tr("Open Stonks"), this);
+	qaServerOpenStonks->setObjectName(QStringLiteral("qaServerOpenStonks"));
 	qaServerOpenStonks->setToolTip(tr("Open the Stonks portfolio panel"));
 	qaServerOpenStonks->setWhatsThis(tr("This opens the server-backed Stonks portfolio and leaderboard."));
 	connect(qaServerOpenStonks, &QAction::triggered, this, &MainWindow::openModernStonksDialog);
 	qaCreateTextRoom = new QAction(tr("Create Room..."), this);
+	qaCreateTextRoom->setObjectName(QStringLiteral("qaCreateTextRoom"));
 	qaCreateTextRoom->setToolTip(tr("Create a voice room or persistent text room on this server"));
 	qaCreateTextRoom->setWhatsThis(tr("This creates a voice room or named text room and saves it on the server."));
 	connect(qaCreateTextRoom, &QAction::triggered, this, &MainWindow::on_qaCreateTextRoom_triggered);
 	qaUserRemoteSpeechCleanup = new QAction(tr("Remote Speech Cleanup"), this);
+	qaUserRemoteSpeechCleanup->setObjectName(QStringLiteral("qaUserRemoteSpeechCleanup"));
 	qaUserRemoteSpeechCleanup->setCheckable(true);
 	qaUserRemoteSpeechCleanup->setToolTip(tr("Clean up this user's incoming speech locally"));
 	qaUserRemoteSpeechCleanup->setWhatsThis(
 		tr("Enable or disable receive-side speech cleanup for this user on this client only."));
 	connect(qaUserRemoteSpeechCleanup, &QAction::triggered, this, &MainWindow::triggerUserRemoteSpeechCleanup);
 	qaUserGrantChatHistory = new QAction(tr("Grant Chat History..."), this);
+	qaUserGrantChatHistory->setObjectName(QStringLiteral("qaUserGrantChatHistory"));
 	qaUserGrantChatHistory->setToolTip(tr("Grant or revoke this registered user's persistent chat history window"));
 	qaUserGrantChatHistory->setWhatsThis(
 		tr("Administrators can grant a registered user access to persistent chat history from a chosen point in time."));
@@ -13382,11 +13382,21 @@ MainWindow::MainWindow(QWidget *p)
 	qaChannelScreenShareWatch        = new QAction(tr("Open Screen Share Window"), this);
 	qaChannelScreenShareStopWatching = new QAction(tr("Stop Watching Screen Share"), this);
 	qaChannelScreenShareOpenWindow   = new QAction(tr("Open Screen Share Window"), this);
+	qaChannelScreenShareStart->setObjectName(QStringLiteral("qaChannelScreenShareStart"));
+	qaChannelScreenShareStop->setObjectName(QStringLiteral("qaChannelScreenShareStop"));
+	qaChannelScreenShareWatch->setObjectName(QStringLiteral("qaChannelScreenShareWatch"));
+	qaChannelScreenShareStopWatching->setObjectName(QStringLiteral("qaChannelScreenShareStopWatching"));
+	qaChannelScreenShareOpenWindow->setObjectName(QStringLiteral("qaChannelScreenShareOpenWindow"));
 	connect(qaChannelScreenShareStart, &QAction::triggered, this, &MainWindow::startChannelScreenShare);
 	connect(qaChannelScreenShareStop, &QAction::triggered, this, &MainWindow::stopChannelScreenShare);
 	connect(qaChannelScreenShareWatch, &QAction::triggered, this, &MainWindow::watchChannelScreenShare);
 	connect(qaChannelScreenShareStopWatching, &QAction::triggered, this, &MainWindow::stopWatchingChannelScreenShare);
 	connect(qaChannelScreenShareOpenWindow, &QAction::triggered, this, &MainWindow::openChannelScreenShareWindow);
+	m_clientActionRegistry = std::make_unique< ClientActionRegistry >(this);
+	const QList< QAction * > clientActions = findChildren< QAction * >(QString(), Qt::FindDirectChildrenOnly);
+	for (QAction *action : clientActions) {
+		m_clientActionRegistry->adopt(action);
+	}
 	setupGui();
 	if (!qmlShellRequested) {
 		connect(qmUser, SIGNAL(aboutToShow()), this, SLOT(qmUser_aboutToShow()));
@@ -38437,7 +38447,9 @@ MainWindow::~MainWindow() {
 	m_persistentChatPreviewSnapshotRenderer = nullptr;
 	stopModernConnectServerPing();
 	delete m_modernPttToolHost;
-	delete qdwLog->titleBarWidget();
+	if (qdwLog) {
+		delete qdwLog->titleBarWidget();
+	}
 	delete pmModel;
 	delete qtvUsers;
 	delete Channel::get(Mumble::ROOT_CHANNEL_ID);

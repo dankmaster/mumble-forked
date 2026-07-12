@@ -48,10 +48,15 @@ ApplicationWindow {
                 spacing: 0
 
                 Rectangle {
+                    id: shellHeader
                     Layout.fillWidth: true
                     Layout.preferredHeight: 76
                     color: Theme.panel
                     border.color: Theme.divider
+                    function isShellAction(actionId) {
+                        return ["qaServerConnect", "qaServerDisconnect", "qaConfigDialog", "qaConfigCert",
+                                "qaRecording", "qaAudioStats", "qaHelpVersionCheck", "qaQuit"].indexOf(actionId) >= 0
+                    }
                     Column {
                         anchors.left: parent.left
                         anchors.leftMargin: 20
@@ -69,6 +74,51 @@ ApplicationWindow {
                             font.pixelSize: 12
                             elide: Text.ElideRight
                             width: Math.max(0, root.width - 390)
+                        }
+                    }
+                    ToolButton {
+                        id: appMenuButton
+                        anchors.right: parent.right
+                        anchors.rightMargin: 16
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "⋯"
+                        font.pixelSize: 22
+                        Accessible.name: qsTr("Application menu")
+                        onClicked: appMenuPopup.open()
+                    }
+                    Popup {
+                        id: appMenuPopup
+                        x: parent.width - width - 12
+                        y: appMenuButton.y + appMenuButton.height
+                        width: 260
+                        padding: 8
+                        modal: false
+                        focus: true
+                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+                        background: Rectangle {
+                            color: Theme.panel
+                            border.color: Theme.divider
+                            radius: Theme.innerRadius
+                        }
+                        contentItem: Column {
+                            Repeater {
+                                model: actionModel
+                                delegate: ItemDelegate {
+                                    required property string stableId
+                                    required property string title
+                                    required property var payload
+                                    width: appMenuPopup.availableWidth
+                                    height: shellHeader.isShellAction(stableId) && payload.visible ? 38 : 0
+                                    opacity: height > 0 ? 1 : 0
+                                    enabled: height > 0 && payload.enabled
+                                    text: (payload.checked ? "✓  " : "") + title
+                                          + (payload.shortcut.length > 0 ? "    " + payload.shortcut : "")
+                                    onClicked: {
+                                        actionModel.trigger(stableId)
+                                        appMenuPopup.close()
+                                    }
+                                }
+                            }
                         }
                     }
                 }

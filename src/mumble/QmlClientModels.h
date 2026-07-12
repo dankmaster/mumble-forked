@@ -129,7 +129,12 @@ public:
 		CanReplyRole,
 		CanReactRole,
 		CanDeleteRole,
-		ScopeTokenRole
+		ScopeTokenRole,
+		ShortcutRole,
+		CheckableRole,
+		MenuRoleRole,
+		ToolTipRole,
+		VisibleRole
 	};
 
 	explicit StableListModel(QObject *parent = nullptr);

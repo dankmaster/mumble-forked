@@ -171,6 +171,12 @@ QVariantMap QmlShellHost::stateSnapshot() const {
 		messages.push_back(state.isEmpty() ? modelRow : state);
 	}
 	snapshot.insert(QStringLiteral("messages"), messages);
+
+	QVariantList actions;
+	for (int row = 0; row < m_actionModel->rowCount(); ++row) {
+		actions.push_back(m_actionModel->get(row));
+	}
+	snapshot.insert(QStringLiteral("actions"), actions);
 	return snapshot;
 }
 

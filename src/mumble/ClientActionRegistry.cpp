@@ -37,6 +37,11 @@ QVariantList ClientActionRegistry::stateSnapshot() const {
 		state.insert(QStringLiteral("enabled"), entry->isEnabled());
 		state.insert(QStringLiteral("checked"), entry->isChecked());
 		state.insert(QStringLiteral("checkable"), entry->isCheckable());
+		state.insert(QStringLiteral("shortcut"), entry->shortcut().toString(QKeySequence::NativeText));
+		state.insert(QStringLiteral("menuRole"), static_cast< int >(entry->menuRole()));
+		state.insert(QStringLiteral("toolTip"), entry->toolTip());
+		state.insert(QStringLiteral("visible"), entry->isVisible());
+		state.insert(QStringLiteral("iconAvailable"), !entry->icon().isNull());
 		result.push_back(state);
 	}
 	return result;

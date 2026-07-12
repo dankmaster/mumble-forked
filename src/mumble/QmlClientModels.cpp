@@ -112,6 +112,11 @@ QVariant StableListModel::data(const QModelIndex &index, int role) const {
 		case CanReactRole: return row.value(QStringLiteral("canReact"));
 		case CanDeleteRole: return row.value(QStringLiteral("canDelete"));
 		case ScopeTokenRole: return row.value(QStringLiteral("scopeToken"));
+		case ShortcutRole: return row.value(QStringLiteral("shortcut"));
+		case CheckableRole: return row.value(QStringLiteral("checkable"));
+		case MenuRoleRole: return row.value(QStringLiteral("menuRole"));
+		case ToolTipRole: return row.value(QStringLiteral("toolTip"));
+		case VisibleRole: return row.value(QStringLiteral("visible"), true);
 		default: return {};
 	}
 }
@@ -124,7 +129,9 @@ QHash< int, QByteArray > StableListModel::roleNames() const {
 			 { TimestampRole, "timestamp" }, { ReplyActorRole, "replyActor" },
 			 { ReplySnippetRole, "replySnippet" }, { ReactionsRole, "reactions" }, { PreviewRole, "preview" },
 			 { OwnRole, "own" }, { DeletedRole, "deleted" }, { CanReplyRole, "canReply" },
-			 { CanReactRole, "canReact" }, { CanDeleteRole, "canDelete" }, { ScopeTokenRole, "scopeToken" } };
+			 { CanReactRole, "canReact" }, { CanDeleteRole, "canDelete" }, { ScopeTokenRole, "scopeToken" },
+			 { ShortcutRole, "shortcut" }, { CheckableRole, "checkable" }, { MenuRoleRole, "menuRole" },
+			 { ToolTipRole, "toolTip" }, { VisibleRole, "visible" } };
 }
 
 QVariantMap StableListModel::get(int row) const {
@@ -315,6 +322,11 @@ void ActionModel::refresh() {
 												? QStringLiteral("checked") : QString());
 			row.insert(QStringLiteral("enabled"), state.value(QStringLiteral("enabled")));
 			row.insert(QStringLiteral("checkable"), state.value(QStringLiteral("checkable")));
+			row.insert(QStringLiteral("checked"), state.value(QStringLiteral("checked")));
+			row.insert(QStringLiteral("shortcut"), state.value(QStringLiteral("shortcut")));
+			row.insert(QStringLiteral("menuRole"), state.value(QStringLiteral("menuRole")));
+			row.insert(QStringLiteral("toolTip"), state.value(QStringLiteral("toolTip")));
+			row.insert(QStringLiteral("visible"), state.value(QStringLiteral("visible"), true));
 			row.insert(QStringLiteral("source"), state);
 			rows.push_back(row);
 		}
