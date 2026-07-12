@@ -26389,6 +26389,15 @@ bool MainWindow::handleModernShellScopeSelection(const QString &scopeToken) {
 		return false;
 	}
 
+	m_modernSelectionState.scopeToken = scopeToken.trimmed();
+	m_modernSelectionState.scopeValue = scopeValue;
+	m_modernSelectionState.scopeID    = scopeID;
+	m_modernSelectionState.selectedUserSession =
+		scopeValue == LocalDirectMessageScope ? std::optional< unsigned int >(scopeID) : std::nullopt;
+	if (scopeValue == static_cast< int >(MumbleProto::Channel)) {
+		m_modernSelectionState.selectedVoiceChannelID = scopeID;
+	}
+
 	if (scopeValue == LocalServerLogScope) {
 		++m_modernShellMessagePatchGeneration;
 		setPersistentChatTargetUsesVoiceTree(false);
@@ -26442,6 +26451,11 @@ bool MainWindow::handleModernShellScopeRailSelection(const QString &scopeToken, 
 	}
 
 	if (scopeValue == static_cast< int >(MumbleProto::Channel)) {
+		m_modernSelectionState.scopeToken             = scopeToken.trimmed();
+		m_modernSelectionState.scopeValue             = scopeValue;
+		m_modernSelectionState.scopeID                = scopeID;
+		m_modernSelectionState.selectedUserSession.reset();
+		m_modernSelectionState.selectedVoiceChannelID = scopeID;
 		const QString normalizedRailKind = railKind.trimmed().toLower();
 		if (normalizedRailKind == QLatin1String("voice") || normalizedRailKind == QLatin1String("text")) {
 			return navigateToPersistentChatScope(MumbleProto::Channel, scopeID, false,
@@ -26464,6 +26478,11 @@ bool MainWindow::handleModernShellVoiceJoin(const QString &scopeToken) {
 	if (!channel) {
 		return false;
 	}
+	m_modernSelectionState.scopeToken             = scopeToken.trimmed();
+	m_modernSelectionState.scopeValue             = scopeValue;
+	m_modernSelectionState.scopeID                = scopeID;
+	m_modernSelectionState.selectedUserSession.reset();
+	m_modernSelectionState.selectedVoiceChannelID = scopeID;
 
 	if (Global::get().sh && Global::get().uiSession != 0) {
 		if (const Channel *currentChannel = currentVoiceChannel(); currentChannel && currentChannel->iId == channel->iId) {
@@ -30583,37 +30602,23 @@ Channel *MainWindow::currentVoiceChannel() const {
 }
 
 Channel *MainWindow::selectedVoiceTreeChannel() const {
-	if (!pmModel) {
-		return currentVoiceChannel();
-	}
-
-	Channel *selectedChannel = pmModel->getSelectedChannel();
-	if (!selectedChannel && qtvUsers) {
-		const QModelIndex currentIndex = qtvUsers->currentIndex();
-		selectedChannel                = pmModel->getChannel(currentIndex);
-		if (!selectedChannel) {
-			if (ClientUser *selectedUser = pmModel->getUser(currentIndex); selectedUser) {
-				selectedChannel = selectedUser->cChannel;
-			}
+	if (m_modernSelectionState.selectedVoiceChannelID) {
+		if (Channel *selectedChannel = Channel::get(*m_modernSelectionState.selectedVoiceChannelID)) {
+			return selectedChannel;
 		}
 	}
-	if (!selectedChannel) {
-		selectedChannel = currentVoiceChannel();
-	}
-
-	return selectedChannel;
+	return currentVoiceChannel();
 }
 
 void MainWindow::focusPersistentChatVoiceChannel(Channel *channel) {
-	if (!channel || !pmModel || !qtvUsers) {
+	if (!channel) {
 		return;
 	}
-
-	const QModelIndex channelIndex = pmModel->index(channel);
-	if (channelIndex.isValid()) {
-		qtvUsers->setCurrentIndex(channelIndex);
-		qtvUsers->scrollTo(channelIndex);
-	}
+	m_modernSelectionState.scopeToken             = modernShellScopeToken(MumbleProto::Channel, channel->iId);
+	m_modernSelectionState.scopeValue             = static_cast< int >(MumbleProto::Channel);
+	m_modernSelectionState.scopeID                = channel->iId;
+	m_modernSelectionState.selectedUserSession.reset();
+	m_modernSelectionState.selectedVoiceChannelID = channel->iId;
 
 	setPersistentChatTargetUsesVoiceTree(true);
 	rebuildPersistentChatChannelList();

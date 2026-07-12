@@ -102,6 +102,14 @@ struct ContextMenuTarget {
 	Channel *channel = nullptr;
 };
 
+struct ModernSelectionState {
+	QString scopeToken;
+	int scopeValue = 0;
+	unsigned int scopeID = 0;
+	std::optional< unsigned int > selectedUserSession;
+	std::optional< unsigned int > selectedVoiceChannelID;
+};
+
 struct PendingFeedbackSubmission {
 	MumbleProto::FeedbackReportKind kind = MumbleProto::FeedbackReportBug;
 	QString issueTitle;
@@ -927,6 +935,7 @@ protected:
 	bool m_modernDirectMessageTrayOpenProbe = false;
 	QTimer *m_modernShellPreviewHydrationTimer             = nullptr;
 	QString m_modernShellPreviewHydrationScopeToken;
+	ModernSelectionState m_modernSelectionState;
 	QList< qulonglong > m_modernShellPreviewHydrationQueue;
 	QSet< qulonglong > m_modernShellPreviewHydrationQueuedIds;
 	bool m_modernShellPreviewHydrationLinkDense = false;
