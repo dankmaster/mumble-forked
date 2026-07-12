@@ -128,6 +128,7 @@ QVariantMap QmlShellHost::stateSnapshot() const {
 	app.insert(QStringLiteral("selfMuted"), m_sessionController->selfMuted());
 	app.insert(QStringLiteral("selfDeafened"), m_sessionController->selfDeafened());
 	app.insert(QStringLiteral("connected"), m_sessionController->connected());
+	app.insert(QStringLiteral("updateBanner"), m_sessionController->updateBanner());
 	app.insert(QStringLiteral("pttPressed"), m_commandController->pttPressed());
 	snapshot.insert(QStringLiteral("app"), app);
 

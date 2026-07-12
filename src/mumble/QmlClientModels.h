@@ -20,6 +20,7 @@ class ClientSessionController final : public QObject {
 	Q_PROPERTY(bool connected READ connected WRITE setConnected NOTIFY connectedChanged)
 	Q_PROPERTY(bool selfMuted READ selfMuted WRITE setSelfMuted NOTIFY selfMutedChanged)
 	Q_PROPERTY(bool selfDeafened READ selfDeafened WRITE setSelfDeafened NOTIFY selfDeafenedChanged)
+	Q_PROPERTY(QVariantMap updateBanner READ updateBanner WRITE setUpdateBanner NOTIFY updateBannerChanged)
 
 public:
 	explicit ClientSessionController(QObject *parent = nullptr);
@@ -30,6 +31,7 @@ public:
 	bool connected() const;
 	bool selfMuted() const;
 	bool selfDeafened() const;
+	QVariantMap updateBanner() const;
 
 	void setServerName(const QString &value);
 	void setConnectionLabel(const QString &value);
@@ -37,6 +39,7 @@ public:
 	void setConnected(bool value);
 	void setSelfMuted(bool value);
 	void setSelfDeafened(bool value);
+	void setUpdateBanner(const QVariantMap &value);
 
 signals:
 	void serverNameChanged();
@@ -45,6 +48,7 @@ signals:
 	void connectedChanged();
 	void selfMutedChanged();
 	void selfDeafenedChanged();
+	void updateBannerChanged();
 
 private:
 	QString m_serverName = QStringLiteral("Mumble");
@@ -53,6 +57,7 @@ private:
 	bool m_connected = false;
 	bool m_selfMuted = false;
 	bool m_selfDeafened = false;
+	QVariantMap m_updateBanner;
 };
 
 class ActiveScopeController final : public QObject {

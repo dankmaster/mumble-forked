@@ -189,6 +189,12 @@ ApplicationWindow {
                     }
                 }
 
+                UpdateBanner {
+                    Layout.fillWidth: true
+                    state: clientSession.updateBanner
+                    onActionRequested: actionId => uiCommands.invokeAction(actionId)
+                }
+
                 ListView {
                     id: timeline
                     Layout.fillWidth: true

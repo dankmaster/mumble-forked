@@ -16,6 +16,7 @@ private slots:
 	void duplicateStableIdsAreCoalesced();
 	void activeScopeAppliesTypedState();
 	void sessionPropertiesOnlyNotifyOnChanges();
+	void sessionPublishesTypedUpdateBanner();
 	void commandsRejectEmptyStableIds();
 	void pttStateIsIdempotentAndReleases();
 	void dialogStateRoutesTypedRequests();
@@ -169,6 +170,23 @@ void TestQmlClientModels::sessionPropertiesOnlyNotifyOnChanges() {
 	session.setConnected(true);
 	QCOMPARE(spy.count(), 1);
 	QVERIFY(session.connected());
+}
+
+void TestQmlClientModels::sessionPublishesTypedUpdateBanner() {
+	ClientSessionController session;
+	QSignalSpy spy(&session, &ClientSessionController::updateBannerChanged);
+	const QVariantMap banner { { QStringLiteral("visible"), true },
+							 { QStringLiteral("phase"), QStringLiteral("downloading") },
+							 { QStringLiteral("title"), QStringLiteral("Downloading update") },
+							 { QStringLiteral("progressPercent"), 42 } };
+	session.setUpdateBanner(banner);
+	QCOMPARE(spy.count(), 1);
+	QCOMPARE(session.updateBanner(), banner);
+	session.setUpdateBanner(banner);
+	QCOMPARE(spy.count(), 1);
+	session.setUpdateBanner({});
+	QCOMPARE(spy.count(), 2);
+	QVERIFY(session.updateBanner().isEmpty());
 }
 
 void TestQmlClientModels::commandsRejectEmptyStableIds() {

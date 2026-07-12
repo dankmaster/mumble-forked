@@ -17,6 +17,7 @@ QString ClientSessionController::selfName() const { return m_selfName; }
 bool ClientSessionController::connected() const { return m_connected; }
 bool ClientSessionController::selfMuted() const { return m_selfMuted; }
 bool ClientSessionController::selfDeafened() const { return m_selfDeafened; }
+QVariantMap ClientSessionController::updateBanner() const { return m_updateBanner; }
 
 #define SET_VALUE(member, signalName) \
 	if (member == value) { \
@@ -33,6 +34,7 @@ void ClientSessionController::setSelfName(const QString &value) { SET_VALUE(m_se
 void ClientSessionController::setConnected(bool value) { SET_VALUE(m_connected, connectedChanged); }
 void ClientSessionController::setSelfMuted(bool value) { SET_VALUE(m_selfMuted, selfMutedChanged); }
 void ClientSessionController::setSelfDeafened(bool value) { SET_VALUE(m_selfDeafened, selfDeafenedChanged); }
+void ClientSessionController::setUpdateBanner(const QVariantMap &value) { SET_VALUE(m_updateBanner, updateBannerChanged); }
 
 #undef SET_VALUE
 
