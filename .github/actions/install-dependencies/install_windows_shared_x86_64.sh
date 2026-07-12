@@ -55,7 +55,6 @@ shared_environment_has_webengine_runtime() {
 
 	[[ -f "$MUMBLE_ENVIRONMENT_DIR/vcpkg.exe" ]] \
 		&& [[ -f "$MUMBLE_ENVIRONMENT_DIR/scripts/buildsystems/vcpkg.cmake" ]] \
-		&& [[ -d "$triplet_dir/share/Qt6WebChannel" ]] \
 		&& [[ -d "$triplet_dir/share/Qt6WebEngineWidgets" ]] \
 		&& [[ -f "$webengine_targets_file" ]] \
 		&& shared_environment_has_webengine_required_features "$webengine_targets_file" \
@@ -86,7 +85,7 @@ if have_archive_extractor; then
 fi
 
 if ! shared_environment_has_webengine_runtime; then
-	require_shared_environment_bootstrap_allowed "Shared Windows WebEngine environment is missing required WebEngine/WebChannel/proprietary-codec runtime content."
+	require_shared_environment_bootstrap_allowed "Shared Windows WebEngine environment is missing required WebEngine/proprietary-codec runtime content."
 	ensure_build_env_repo_checkout
 	ensure_vcpkg_bootstrapped
 	install_mumble_vcpkg_dependencies "x64-windows"

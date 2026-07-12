@@ -299,7 +299,6 @@ function Assert-EnvironmentLooksReady {
 
 	if ($BuildType -eq "shared") {
 		$requiredPaths += @(
-			(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6WebChannel"),
 			(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6WebEngineCore\Qt6WebEngineCoreTargets.cmake"),
 			(Join-Path $EnvironmentDir "installed\$Triplet\share\Qt6WebEngineWidgets"),
 			(Join-Path $EnvironmentDir "installed\$Triplet\tools\Qt6\bin\windeployqt.exe"),

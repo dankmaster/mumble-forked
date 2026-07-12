@@ -24,9 +24,14 @@ $checks = [ordered]@{
 	mainwindow_ui = @((Test-Path (Join-Path $repoRoot 'src\mumble\MainWindowUi.h')) | Where-Object { $_ })
 	modern_layout_guards = Find-Matches @('-n', 'MUMBLE_HAS_MODERN_LAYOUT|modern-layout-webengine|activateLegacyShell', 'src', '.github', 'scripts/windows', '--glob', '!*.ts', '--glob', '!verify-modern-only.ps1')
 	classic_mainwindow_views = Find-Matches @('-n', 'qtvUsers|qdwLog|qdwChat|qteLog|qteChat|qtIconToolbar', 'src/mumble/MainWindow.cpp', 'src/mumble/MainWindow.h')
+	compatibility_widgets = Find-Matches @('-n', 'QQuickWidget|ChatbarTextEdit|class UserView|QDockWidget|QToolBar', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h')
 	legacy_web_hosts = Find-Matches @('-n', 'ModernShellHost|ModernShellBridge|ModernDialogHost|ModernContextMenuHost|ModernPttToolHost', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h')
 	webchannel = Find-Matches @('-n', 'QWebChannel|Qt6::WebChannel', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h', '--glob', 'CMakeLists.txt')
+	webengine_widgets = Find-Matches @('-n', 'QWebEngineView|QtWebEngineWidgets|Qt6::WebEngineWidgets', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h', '--glob', 'CMakeLists.txt')
 	qml_media_outside_allowlist = Find-Matches @('-n', 'WebEngineView|WebEngineProfile', 'src/mumble/qml-shell', '--glob', '*.qml', '--glob', '!MediaSessionWindow.qml')
+	legacy_web_product_resources = @(Get-ChildItem (Join-Path $repoRoot 'src\mumble\modern-shell') -File -ErrorAction SilentlyContinue |
+		Where-Object { $_.Extension -in @('.html', '.css', '.js') } |
+		ForEach-Object FullName)
 	widget_prompts = Find-Matches @('-n', 'QMessageBox|QInputDialog|QProgressDialog', 'src/mumble', '--glob', '*.cpp')
 }
 

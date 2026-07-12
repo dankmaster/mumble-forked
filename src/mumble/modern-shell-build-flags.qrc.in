@@ -1,7 +1,0 @@
-<RCC>
-    <qresource prefix="/modern-shell">
-        <file alias="build-flags.js">modern-shell-build-flags.js</file>
-        <file alias="app.js">modern-shell-app.js</file>
-        <file alias="dialog.js">modern-shell-dialog.js</file>
-    </qresource>
-</RCC>
