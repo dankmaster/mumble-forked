@@ -23,6 +23,7 @@ enum class PttSafetyReason;
 class PttSafetyController;
 class QmlSelectionState;
 class QmlPerformanceMonitor;
+class QmlThemeController;
 class QQmlApplicationEngine;
 class QQuickWindow;
 class RoomModel;
@@ -50,6 +51,7 @@ public:
 	MediaSessionBackend *mediaSession() const;
 	QmlSelectionState *selectionState() const;
 	QmlPerformanceMonitor *performanceMonitor() const;
+	QmlThemeController *themeController() const;
 	bool captureWindow(const QString &path, QString *error = nullptr) const;
 	void showPttTool(bool visible);
 	QObject *createScreenShareView(QObject *backend);
@@ -77,6 +79,7 @@ private:
 	std::unique_ptr< MediaSessionBackend > m_mediaSession;
 	std::unique_ptr< QmlSelectionState > m_selectionState;
 	std::unique_ptr< QmlPerformanceMonitor > m_performanceMonitor;
+	std::unique_ptr< QmlThemeController > m_themeController;
 };
 
 #endif // MUMBLE_MUMBLE_QMLSHELLHOST_H_

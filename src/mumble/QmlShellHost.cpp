@@ -6,6 +6,7 @@
 #include "ClientActionRegistry.h"
 #include "QmlClientModels.h"
 #include "QmlPerformanceMonitor.h"
+#include "QmlThemeController.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
@@ -32,7 +33,8 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_dialogController(std::make_unique< DialogStateController >(this)),
 	  m_mediaSession(std::make_unique< MediaSessionBackend >(this)),
 	  m_selectionState(std::make_unique< QmlSelectionState >(this)),
-	  m_performanceMonitor(std::make_unique< QmlPerformanceMonitor >(this)) {
+	  m_performanceMonitor(std::make_unique< QmlPerformanceMonitor >(this)),
+	  m_themeController(std::make_unique< QmlThemeController >(this)) {
 }
 
 QmlShellHost::~QmlShellHost() {
@@ -61,7 +63,8 @@ bool QmlShellHost::start(QString *error) {
 						  static_cast< QObject * >(m_dialogController.get()),
 						  static_cast< QObject * >(m_mediaSession.get()),
 						  static_cast< QObject * >(m_selectionState.get()),
-						  static_cast< QObject * >(m_performanceMonitor.get()) }) {
+						  static_cast< QObject * >(m_performanceMonitor.get()),
+						  static_cast< QObject * >(m_themeController.get()) }) {
 		QQmlEngine::setObjectOwnership(object, QQmlEngine::CppOwnership);
 	}
 	QQmlContext *context = m_engine->rootContext();
@@ -78,6 +81,7 @@ bool QmlShellHost::start(QString *error) {
 	context->setContextProperty(QStringLiteral("selectionState"), m_selectionState.get());
 	context->setContextProperty(QStringLiteral("qmlPerformance"), m_performanceMonitor.get());
 	context->setContextProperty(QStringLiteral("clientActions"), m_actionRegistry);
+	context->setContextProperty(QStringLiteral("uiTheme"), m_themeController.get());
 
 	const QUrl rootUrl(QStringLiteral("qrc:/qml-shell/Main.qml"));
 	m_engine->load(rootUrl);
@@ -145,6 +149,7 @@ DialogStateController *QmlShellHost::dialogController() const { return m_dialogC
 MediaSessionBackend *QmlShellHost::mediaSession() const { return m_mediaSession.get(); }
 QmlSelectionState *QmlShellHost::selectionState() const { return m_selectionState.get(); }
 QmlPerformanceMonitor *QmlShellHost::performanceMonitor() const { return m_performanceMonitor.get(); }
+QmlThemeController *QmlShellHost::themeController() const { return m_themeController.get(); }
 
 bool QmlShellHost::captureWindow(const QString &path, QString *error) const {
 	if (!m_window) {

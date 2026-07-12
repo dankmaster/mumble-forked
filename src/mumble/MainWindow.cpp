@@ -41,6 +41,7 @@
 #	include "ModernDialogController.h"
 #	include "QmlClientModels.h"
 #	include "QmlShellHost.h"
+#	include "QmlThemeController.h"
 #	include <QtQuick/QQuickWindow>
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 #		include "ModernUiAutomationServer.h"
@@ -95,7 +96,6 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
-#include <QtCore/QEventLoop>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QFutureWatcher>
@@ -10182,65 +10182,6 @@ QPair< QByteArray, QImage > userAvatarImageFromLocalPath(const QString &path, QS
 	return userAvatarImageFromChoice(imageFileChoiceFromLocalPath(path, error), error);
 }
 
-QPair< QByteArray, QImage > imageFileChoiceFromRemoteUrlBlocking(const QUrl &url, QString *error = nullptr,
-																int redirectCount = 0) {
-	if (redirectCount > USER_AVATAR_MAX_REDIRECTS) {
-		if (error) {
-			*error = QCoreApplication::translate("MainWindow", "Avatar image URL redirected too many times.");
-		}
-		return {};
-	}
-	if (!isSafePreviewTarget(url)) {
-		if (error) {
-			*error = userAvatarUrlInvalidText();
-		}
-		return {};
-	}
-	if (!Global::get().nam) {
-		if (error) {
-			*error = QCoreApplication::translate("MainWindow", "Network access is not available.");
-		}
-		return {};
-	}
-
-	QNetworkRequest request(url);
-	preparePreviewImageRequest(request);
-	QNetworkReply *reply = Global::get().nam->get(request);
-	applyPreviewReplyGuards(reply, USER_AVATAR_REMOTE_MAX_BYTES);
-
-	QEventLoop loop;
-	QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-	if (!reply->isFinished()) {
-		loop.exec(QEventLoop::ExcludeUserInputEvents);
-	}
-
-	const QVariant redirectTarget = reply->attribute(QNetworkRequest::RedirectionTargetAttribute);
-	const bool success            = reply->error() == QNetworkReply::NoError;
-	const QUrl replyUrl           = reply->url();
-	const QByteArray bytes        = success ? reply->readAll() : QByteArray();
-	const QString failureText     = success ? QString() : userAvatarRemoteFetchFailureText(reply);
-	reply->deleteLater();
-
-	if (success && redirectTarget.isValid()) {
-		const QUrl redirectUrl = replyUrl.resolved(redirectTarget.toUrl());
-		return imageFileChoiceFromRemoteUrlBlocking(redirectUrl, error, redirectCount + 1);
-	}
-	if (!success) {
-		if (error) {
-			*error = failureText;
-		}
-		return {};
-	}
-	if (bytes.size() > USER_AVATAR_REMOTE_MAX_BYTES) {
-		if (error) {
-			*error = QCoreApplication::translate("MainWindow", "Choose an avatar image smaller than 4 MB.");
-		}
-		return {};
-	}
-
-	return imageFileChoiceFromBytes(bytes, error);
-}
-
 QImage persistentChatThumbnailImage(const QImage &image) {
 	if (image.isNull()) {
 		return QImage();
@@ -18557,6 +18498,9 @@ void MainWindow::applyModernSettings(const Settings &settings, const bool accept
 	if (Global::get().s.requireThemeApplication) {
 		Themes::apply();
 		refreshCustomChromeStyles();
+	}
+	if (m_qmlShellHost) {
+		m_qmlShellHost->themeController()->refresh();
 	}
 
 	setupView(false);
@@ -29702,6 +29646,9 @@ void MainWindow::changeEvent(QEvent *e) {
 	if (e->type() == QEvent::ThemeChange) {
 		Themes::apply();
 		refreshCustomChromeStyles();
+		if (m_qmlShellHost) {
+			m_qmlShellHost->themeController()->refresh();
+		}
 	}
 
 	QWidget::changeEvent(e);

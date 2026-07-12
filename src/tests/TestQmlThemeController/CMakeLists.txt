@@ -1,0 +1,5 @@
+add_executable(TestQmlThemeController TestQmlThemeController.cpp)
+set_target_properties(TestQmlThemeController PROPERTIES AUTOMOC ON)
+target_link_libraries(TestQmlThemeController PRIVATE mumble_client_object_lib shared Qt6::Test)
+add_test(NAME TestQmlThemeController COMMAND $<TARGET_FILE:TestQmlThemeController>)
+configure_client_test_runtime(TestQmlThemeController TestQmlThemeController)

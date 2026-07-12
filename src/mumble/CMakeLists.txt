@@ -351,6 +351,8 @@ list(APPEND MUMBLE_SOURCES
 	"QmlClientModels.h"
 	"QmlShellHost.cpp"
 	"QmlShellHost.h"
+	"QmlThemeController.cpp"
+	"QmlThemeController.h"
 )
 
 if(modern-layout-automation)
