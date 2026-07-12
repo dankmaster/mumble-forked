@@ -22,11 +22,8 @@
 
 #include <QtCore/QBuffer>
 #include <QtCore/QMimeData>
-#include <QtCore/QStack>
 #include <QtGui/QImageReader>
 #include <QtWidgets/QMessageBox>
-#include <QtWidgets/QToolTip>
-#include <QtWidgets/QWhatsThis>
 
 namespace {
 	QString navigatorInitials(const QString &name) {
@@ -453,14 +450,14 @@ QString UserModel::stringIndex(const QModelIndex &idx) const {
 }
 
 QModelIndex UserModel::getSelectedIndex() const {
-	QTreeView *v = Global::get().mw->qtvUsers;
-	if (v) {
-		QItemSelectionModel *sel = v->selectionModel();
-
-		return sel->currentIndex();
+	if (!Global::get().mw) return {};
+	if (const auto session = Global::get().mw->selectedModernUserSession()) {
+		return index(ClientUser::get(*session));
 	}
-
-	return QModelIndex();
+	if (const auto channelID = Global::get().mw->selectedModernVoiceChannel()) {
+		return index(Channel::get(*channelID));
+	}
+	return {};
 }
 
 QVariant UserModel::data(const QModelIndex &idx, int role) const {
@@ -1012,20 +1009,6 @@ ModelItem *UserModel::moveItem(ModelItem *oldparent, ModelItem *newparent, Model
 	// Check whether the moved item is currently selected and if so, store it as a persistent
 	// model index in active. Also clear the selection as we're going to mess with the active
 	// item.
-	QTreeView *v = Global::get().mw ? Global::get().mw->qtvUsers : nullptr;
-	QItemSelectionModel *sel = v ? v->selectionModel() : nullptr;
-	QPersistentModelIndex active;
-	QModelIndex oindex = createIndex(oldrow, 0, oldItem);
-	if (sel && (sel->isSelected(oindex) || (oindex == v->currentIndex()))) {
-		active = index(oldItem);
-		v->clearSelection();
-		v->setCurrentIndex(QModelIndex());
-	}
-
-	// Check whether the oldItem is currently expanded in order to restore the same
-	// state once we have moved it.
-	const bool expanded = v && v->isExpanded(index(oldItem));
-
 	if (newparent == oldparent) {
 		// If the moving happens within the same parent, we have to watch out that we use the correct
 		// row indices for our operation here.
@@ -1082,63 +1065,18 @@ ModelItem *UserModel::moveItem(ModelItem *oldparent, ModelItem *newparent, Model
 	oldItem->wipe();
 	delete oldItem;
 
-	if (sel && active.isValid()) {
-		// If the moved item has been previously selected, we restore that selection to now be the
-		// new item using the "active" model index which has been updated to now point to the new
-		// item.
-		sel->select(active, QItemSelectionModel::SelectCurrent);
-		v->setCurrentIndex(active);
-	}
-
-	if (v && expanded) {
-		// If the old item (or rather the parent it has been living in) has been expanded,
-		// restore that state for the new item.
-		v->expand(index(newItem));
-	}
-
 	return newItem;
 }
 
 void UserModel::expandAll(Channel *c) {
-	QTreeView *view = Global::get().mw ? Global::get().mw->qtvUsers : nullptr;
-	if (!view) {
-		return;
-	}
-
-	QStack< Channel * > chans;
-
-	while (c) {
-		chans.push(c);
-		c = c->cParent;
-	}
-	while (!chans.isEmpty()) {
-		c = chans.pop();
-		view->setExpanded(index(c), true);
-	}
+	Q_UNUSED(c)
 }
 
 void UserModel::collapseEmpty(Channel *c) {
-	QTreeView *view = Global::get().mw ? Global::get().mw->qtvUsers : nullptr;
-	if (!view) {
-		return;
-	}
-
-	while (c) {
-		ModelItem *mi = ModelItem::c_qhChannels.value(c);
-		if (mi->iUsers == 0)
-			view->setExpanded(index(c), false);
-		else
-			break;
-		c = c->cParent;
-	}
+	Q_UNUSED(c)
 }
 
 void UserModel::ensureSelfVisible() {
-	QTreeView *view = Global::get().mw ? Global::get().mw->qtvUsers : nullptr;
-	if (!Global::get().uiSession || !view)
-		return;
-
-	view->scrollTo(index(ClientUser::get(Global::get().uiSession)));
 }
 
 void UserModel::recheckLinks() {
@@ -1319,13 +1257,9 @@ void UserModel::setComment(ClientUser *cu, const QString &comment) {
 			if (cu->uiSession == uiSessionComment) {
 				uiSessionComment   = 0;
 				item->bCommentSeen = false;
-				if (bClicked) {
-					QRect r = Global::get().mw->qtvUsers->visualRect(index(cu));
-					QWhatsThis::showText(Global::get().mw->qtvUsers->viewport()->mapToGlobal(r.bottomRight()),
-										 data(index(cu, 0), Qt::ToolTipRole).toString(), Global::get().mw->qtvUsers);
-				} else {
-					QToolTip::showText(QCursor::pos(), data(index(cu, 0), Qt::ToolTipRole).toString(),
-									   Global::get().mw->qtvUsers);
+				if (Global::get().mw) {
+					Global::get().mw->cuContextUser = cu;
+					QTimer::singleShot(0, Global::get().mw, SLOT(on_qaUserCommentView_triggered()));
 				}
 			} else if (cu->uiSession == ~uiSessionComment) {
 				uiSessionComment = 0;
@@ -1385,14 +1319,7 @@ void UserModel::setComment(Channel *c, const QString &comment) {
 			if (c->iId == static_cast< unsigned int >(iChannelDescription)) {
 				iChannelDescription = -1;
 				item->bCommentSeen  = false;
-				if (bClicked) {
-					QRect r = Global::get().mw->qtvUsers->visualRect(index(c));
-					QWhatsThis::showText(Global::get().mw->qtvUsers->viewport()->mapToGlobal(r.bottomRight()),
-										 data(index(c, 0), Qt::ToolTipRole).toString(), Global::get().mw->qtvUsers);
-				} else {
-					QToolTip::showText(QCursor::pos(), data(index(c, 0), Qt::ToolTipRole).toString(),
-									   Global::get().mw->qtvUsers);
-				}
+				// Channel descriptions are part of the typed room state consumed by QML.
 			} else {
 				item->bCommentSeen = Global::get().db->seenComment(item->hash(), c->qbaDescHash);
 				newstate           = item->bCommentSeen ? 2 : 1;
@@ -1494,11 +1421,6 @@ Channel *UserModel::addChannel(unsigned int id, Channel *p, const QString &name)
 	citem->qlChildren.insert(row, item);
 	endInsertRows();
 
-	QTreeView *view = Global::get().mw ? Global::get().mw->qtvUsers : nullptr;
-	if (view && Global::get().s.ceExpand == Settings::AllChannels)
-		view->setExpanded(index(item), true);
-
-
 	emit channelAdded(c->iId);
 
 	return c;
@@ -1576,10 +1498,7 @@ void UserModel::setSelectedChannelListener(unsigned int userSession, unsigned in
 		return;
 	}
 
-	QTreeView *v = Global::get().mw->qtvUsers;
-	if (v) {
-		v->setCurrentIndex(idx);
-	}
+	if (Global::get().mw) Global::get().mw->selectModernUserSession(userSession);
 }
 
 void UserModel::removeChannelListener(ModelItem *item, ModelItem *citem) {
@@ -1767,10 +1686,7 @@ void UserModel::setSelectedUser(unsigned int session) {
 		return;
 	}
 
-	QTreeView *v = Global::get().mw->qtvUsers;
-	if (v) {
-		v->setCurrentIndex(idx);
-	}
+	if (Global::get().mw) Global::get().mw->selectModernUserSession(session);
 }
 
 Channel *UserModel::getChannel(const QModelIndex &idx) const {
@@ -1811,10 +1727,7 @@ void UserModel::setSelectedChannel(unsigned int id) {
 		return;
 	}
 
-	QTreeView *v = Global::get().mw->qtvUsers;
-	if (v) {
-		v->setCurrentIndex(idx);
-	}
+	if (Global::get().mw) Global::get().mw->selectModernVoiceChannel(id);
 }
 
 Channel *UserModel::getSubChannel(Channel *p, int idx) const {
@@ -1868,8 +1781,6 @@ void UserModel::forceVisualUpdate(Channel *c) {
 		if (idx.isValid()) {
 			emit dataChanged(idx, idx);
 		}
-	} else if (Global::get().mw && Global::get().mw->qtvUsers) {
-		Global::get().mw->qtvUsers->viewport()->update();
 	}
 
 }

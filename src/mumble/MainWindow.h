@@ -147,6 +147,10 @@ public:
 	void setServerLogMaximumBlockCount(int maxBlocks);
 	void queueModernStartupSetup(bool showAudioSetup, bool showCertificateSetup);
 	void openModernPluginUpdateDialog(const QVariantList &updates);
+	std::optional< unsigned int > selectedModernUserSession() const;
+	std::optional< unsigned int > selectedModernVoiceChannel() const;
+	void selectModernUserSession(unsigned int session);
+	void selectModernVoiceChannel(unsigned int channelID);
 #ifdef USE_MANUAL_PLUGIN
 	void openModernManualPluginDialog(const QVariantMap &values = QVariantMap());
 #endif
@@ -224,6 +228,7 @@ public:
 	void queueModernShellSnapshotSyncInternal(bool immediate);
 	void syncModernShellSnapshot();
 	void syncQmlShellState();
+	void syncQmlSelectionState();
 	void applyQmlShellPatch(const QString &kind, const QVariantMap &patch);
 	void ensureModernUiAutomationServer();
 	void beginNativeWindowMoveOrResize();

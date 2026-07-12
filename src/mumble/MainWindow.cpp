@@ -26499,6 +26499,7 @@ bool MainWindow::handleModernShellScopeSelection(const QString &scopeToken) {
 	if (scopeValue == static_cast< int >(MumbleProto::Channel)) {
 		m_modernSelectionState.selectedVoiceChannelID = scopeID;
 	}
+	syncQmlSelectionState();
 
 	if (scopeValue == LocalServerLogScope) {
 		++m_modernShellMessagePatchGeneration;
@@ -26558,6 +26559,7 @@ bool MainWindow::handleModernShellScopeRailSelection(const QString &scopeToken, 
 		m_modernSelectionState.scopeID                = scopeID;
 		m_modernSelectionState.selectedUserSession.reset();
 		m_modernSelectionState.selectedVoiceChannelID = scopeID;
+		syncQmlSelectionState();
 		const QString normalizedRailKind = railKind.trimmed().toLower();
 		if (normalizedRailKind == QLatin1String("voice") || normalizedRailKind == QLatin1String("text")) {
 			return navigateToPersistentChatScope(MumbleProto::Channel, scopeID, false,
@@ -26585,6 +26587,7 @@ bool MainWindow::handleModernShellVoiceJoin(const QString &scopeToken) {
 	m_modernSelectionState.scopeID                = scopeID;
 	m_modernSelectionState.selectedUserSession.reset();
 	m_modernSelectionState.selectedVoiceChannelID = scopeID;
+	syncQmlSelectionState();
 
 	if (Global::get().sh && Global::get().uiSession != 0) {
 		if (const Channel *currentChannel = currentVoiceChannel(); currentChannel && currentChannel->iId == channel->iId) {
@@ -30712,17 +30715,32 @@ Channel *MainWindow::selectedVoiceTreeChannel() const {
 	return currentVoiceChannel();
 }
 
+std::optional< unsigned int > MainWindow::selectedModernUserSession() const {
+	return m_modernSelectionState.selectedUserSession;
+}
+
+std::optional< unsigned int > MainWindow::selectedModernVoiceChannel() const {
+	return m_modernSelectionState.selectedVoiceChannelID;
+}
+
+void MainWindow::selectModernUserSession(const unsigned int session) {
+	handleModernShellParticipantSelection(session, false);
+}
+
+void MainWindow::selectModernVoiceChannel(const unsigned int channelID) {
+	if (!Channel::get(channelID)) return;
+	m_modernSelectionState.selectedUserSession.reset();
+	m_modernSelectionState.selectedVoiceChannelID = channelID;
+	syncQmlSelectionState();
+}
+
 bool MainWindow::handleModernShellParticipantSelection(const unsigned int session, const bool openConversation) {
 	ClientUser *user = ClientUser::get(session);
 	if (!user) return false;
 
 	m_modernSelectionState.selectedUserSession = session;
 	if (user->cChannel) m_modernSelectionState.selectedVoiceChannelID = user->cChannel->iId;
-	if (m_qmlShellHost) {
-		m_qmlShellHost->selectionState()->setSelectedUserSession(session);
-		m_qmlShellHost->selectionState()->setSelectedVoiceChannelId(
-			user->cChannel ? QVariant::fromValue(user->cChannel->iId) : QVariant());
-	}
+	syncQmlSelectionState();
 	return !openConversation || openModernDirectMessage(session, true);
 }
 
@@ -30741,6 +30759,18 @@ void MainWindow::ensureModernUiAutomationServer() {
 		m_modernUiAutomationServer.reset();
 	}
 #endif
+}
+
+void MainWindow::syncQmlSelectionState() {
+	if (!m_qmlShellHost) return;
+	QmlSelectionState *selection = m_qmlShellHost->selectionState();
+	selection->setScopeToken(m_modernSelectionState.scopeToken);
+	selection->setSelectedUserSession(m_modernSelectionState.selectedUserSession
+										 ? QVariant::fromValue(*m_modernSelectionState.selectedUserSession)
+										 : QVariant());
+	selection->setSelectedVoiceChannelId(m_modernSelectionState.selectedVoiceChannelID
+											? QVariant::fromValue(*m_modernSelectionState.selectedVoiceChannelID)
+											: QVariant());
 }
 
 void MainWindow::syncQmlShellState() {
@@ -30778,15 +30808,9 @@ void MainWindow::syncQmlShellState() {
 	const QVariantMap activeScopeState = buildModernShellActiveScopeState(target);
 	m_qmlShellHost->activeScopeController()->applyState(activeScopeState);
 
-	QmlSelectionState *selection = m_qmlShellHost->selectionState();
-	selection->setScopeToken(activeScopeState.value(QStringLiteral("scopeToken"),
-														  m_modernSelectionState.scopeToken).toString());
-	selection->setSelectedUserSession(m_modernSelectionState.selectedUserSession
-										 ? QVariant::fromValue(*m_modernSelectionState.selectedUserSession)
-										 : QVariant());
-	selection->setSelectedVoiceChannelId(m_modernSelectionState.selectedVoiceChannelID
-											 ? QVariant::fromValue(*m_modernSelectionState.selectedVoiceChannelID)
-											 : QVariant());
+	m_modernSelectionState.scopeToken = activeScopeState.value(QStringLiteral("scopeToken"),
+													m_modernSelectionState.scopeToken).toString();
+	syncQmlSelectionState();
 
 	QVariantList roomRows;
 	const auto appendRooms = [&roomRows](const QVariantList &source, const QString &kind) {
@@ -30930,7 +30954,6 @@ void MainWindow::applyQmlShellPatch(const QString &kind, const QVariantMap &patc
 	if (patch.contains(QStringLiteral("activeScope"))) {
 		const QVariantMap state = patch.value(QStringLiteral("activeScope")).toMap();
 		m_qmlShellHost->activeScopeController()->applyState(state);
-		m_qmlShellHost->selectionState()->setScopeToken(state.value(QStringLiteral("scopeToken")).toString());
 	}
 
 	if (kind == QLatin1String("rooms.update")) {
