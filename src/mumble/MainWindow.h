@@ -256,8 +256,6 @@ public:
 	void updateAudioToolTips();
 	void updateUserModel();
 	void focusNextMainWidget();
-	void setupPersistentChatDock();
-	void setupServerNavigator();
 	void refreshShellLayout();
 	void applyShellLayout();
 	void activateModernShell();
