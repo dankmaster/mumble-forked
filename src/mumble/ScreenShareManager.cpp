@@ -9,6 +9,9 @@
 #include "MainWindow.h"
 #include "QmlShellHost.h"
 #include "ScreenShareViewBackend.h"
+
+#include <QtConcurrent/QtConcurrentRun>
+#include <QtCore/QFutureWatcher>
 #include "Global.h"
 #include "Log.h"
 #ifdef Q_OS_WIN
@@ -227,6 +230,8 @@ QualityBitratePolicy bitratePolicyForProfile(const QString &profile) {
 } // namespace
 
 ScreenShareManager::ScreenShareManager(QObject *parent) : QObject(parent) {
+	m_helperOperationPool.setMaxThreadCount(1);
+	m_helperOperationPool.setExpiryTimeout(-1);
 	m_helperClient = new ScreenShareHelperClient(this);
 	connect(m_helperClient, &ScreenShareHelperClient::capabilitiesChanged, this,
 			[this]() { logLocalShareAvailabilityDiagnostic(QStringLiteral("helper-capabilities")); });
@@ -576,6 +581,7 @@ void ScreenShareManager::requestStopShare(const QString &streamID) {
 	if (!Global::get().sh || streamID.isEmpty()) {
 		return;
 	}
+	stopLocalPublishSession(streamID);
 
 	MumbleProto::ScreenShareStop msg;
 	msg.set_stream_id(u8(streamID));
@@ -591,11 +597,16 @@ bool ScreenShareManager::hasSession(const QString &streamID) const {
 }
 
 void ScreenShareManager::resetState() {
-	for (const QString &streamID : m_activePublishSessions) {
-		m_helperClient->stopPublish(streamID);
-	}
-	for (const QString &streamID : m_activeViewSessions) {
-		m_helperClient->stopView(streamID);
+	QSet< QString > helperStreamIDs = m_helperOperationTracker.streamIDs();
+	helperStreamIDs.unite(m_activePublishSessions);
+	helperStreamIDs.unite(m_activeViewSessions);
+	for (const QString &streamID : helperStreamIDs) {
+		ScreenShareSession operationSession;
+		operationSession.streamID = streamID;
+		scheduleHelperOperation(HelperOperationKind::StopPublish, operationSession,
+								nextHelperOperationGeneration(streamID));
+		scheduleHelperOperation(HelperOperationKind::StopView, operationSession,
+								nextHelperOperationGeneration(streamID));
 	}
 	QmlShellHost *qmlHost = Global::get().mw ? Global::get().mw->qmlShellHost() : nullptr;
 	for (QObject *view : m_qmlViewWindows.values()) {
@@ -802,34 +813,87 @@ bool ScreenShareManager::shouldAutoViewSession(const ScreenShareSession &session
 	return Global::get().s.bScreenShareAutoOpenCurrentRoom;
 }
 
-bool ScreenShareManager::restartExternalViewSession(const ScreenShareSession &session) {
-	QString errorMessage;
-	qint64 processID = 0;
-	ScreenShareHelperClient::NativeFrameTransport frameTransport;
+quint64 ScreenShareManager::nextHelperOperationGeneration(const QString &streamID) {
+	return m_helperOperationTracker.begin(streamID);
+}
 
-	if (m_helperClient->startView(session, &errorMessage, &processID, &frameTransport)) {
-		m_activeViewSessions.insert(session.streamID);
-		m_pausedExternalViewSessions.remove(session.streamID);
-		m_externalViewProcessIDs.insert(session.streamID, processID);
-		showExternalViewWindow(session, processID);
-		if (ScreenShareViewBackend *backend = m_viewBackends.value(session.streamID); backend && frameTransport.feedAvailable)
-			backend->setNativeFrameTransport(frameTransport.sharedMemoryKey, frameTransport.generation);
-		updateExternalRuntimeWatchdog();
-		if (Global::get().l) {
-			Global::get().l->log(Log::Information,
-								 tr("Using the external screen-share runtime for %1.")
-									 .arg(session.streamID.toHtmlEscaped()));
+void ScreenShareManager::scheduleHelperOperation(const HelperOperationKind kind, const ScreenShareSession &session,
+													 const quint64 generation) {
+	auto *watcher = new QFutureWatcher< HelperOperationResult >(this);
+	connect(watcher, &QFutureWatcher< HelperOperationResult >::finished, this, [this, watcher, session]() {
+		const HelperOperationResult result = watcher->result();
+		watcher->deleteLater();
+		applyHelperOperationResult(result, session);
+	});
+	watcher->setFuture(QtConcurrent::run(&m_helperOperationPool, [kind, session, generation]() {
+		HelperOperationResult result;
+		result.kind = kind;
+		result.streamID = session.streamID;
+		result.generation = generation;
+		ScreenShareHelperClient helper;
+		switch (kind) {
+			case HelperOperationKind::StartPublish:
+				result.success = helper.startPublish(session, &result.error, &result.processID);
+				break;
+			case HelperOperationKind::StartView:
+				result.success = helper.startView(session, &result.error, &result.processID, &result.frameTransport);
+				break;
+			case HelperOperationKind::StopPublish:
+				result.success = helper.stopPublish(session.streamID, &result.error);
+				break;
+			case HelperOperationKind::StopView:
+				result.success = helper.stopView(session.streamID, &result.error);
+				break;
 		}
-		return true;
+		return result;
+	}));
+}
+
+void ScreenShareManager::applyHelperOperationResult(const HelperOperationResult &result,
+													  const ScreenShareSession &session) {
+	if (!m_helperOperationTracker.isCurrent(result.streamID, result.generation)) return;
+	if (result.kind == HelperOperationKind::StopPublish || result.kind == HelperOperationKind::StopView) return;
+	if (!m_sessions.contains(result.streamID)) return;
+
+	if (result.kind == HelperOperationKind::StartPublish) {
+		if (result.success) {
+			m_activePublishSessions.insert(result.streamID);
+			m_externalPublishProcessIDs.insert(result.streamID, result.processID);
+			updateExternalRuntimeWatchdog();
+		} else {
+			requestStopShare(result.streamID);
+		}
+		emit sessionUpdated(result.streamID);
+		return;
 	}
 
-	if (Global::get().l) {
-		Global::get().l->log(Log::Warning, tr("Unable to start screen-share viewer for %1: %2")
-											   .arg(session.streamID.toHtmlEscaped(),
-													errorMessage.isEmpty() ? tr("unknown error")
-																		   : errorMessage.toHtmlEscaped()));
+	ScreenShareViewBackend *backend = m_viewBackends.value(result.streamID);
+	if (!result.success) {
+		if (backend) backend->setOperationState(QStringLiteral("error"), result.error, false);
+		emit sessionUpdated(result.streamID);
+		return;
 	}
-	return false;
+	m_activeViewSessions.insert(result.streamID);
+	m_pausedExternalViewSessions.remove(result.streamID);
+	m_externalViewProcessIDs.insert(result.streamID, result.processID);
+	showExternalViewWindow(session, result.processID);
+	backend = m_viewBackends.value(result.streamID);
+	if (backend) {
+		if (result.frameTransport.feedAvailable)
+			backend->setNativeFrameTransport(result.frameTransport.sharedMemoryKey, result.frameTransport.generation);
+		backend->setOperationState(QStringLiteral("ready"), {}, false);
+	}
+	updateExternalRuntimeWatchdog();
+	emit sessionUpdated(result.streamID);
+}
+
+bool ScreenShareManager::restartExternalViewSession(const ScreenShareSession &session) {
+	showExternalViewWindow(session, 0);
+	if (ScreenShareViewBackend *backend = m_viewBackends.value(session.streamID))
+		backend->setOperationState(QStringLiteral("loading"), {}, true);
+	scheduleHelperOperation(HelperOperationKind::StartView, session,
+							nextHelperOperationGeneration(session.streamID));
+	return true;
 }
 
 void ScreenShareManager::showExternalViewWindow(const ScreenShareSession &session, const qint64 processID) {
@@ -861,25 +925,8 @@ void ScreenShareManager::startLocalPublishSession(const ScreenShareSession &sess
 		return;
 	}
 
-	QString errorMessage;
-	qint64 processID = 0;
-	if (m_helperClient->startPublish(session, &errorMessage, &processID)) {
-		m_activePublishSessions.insert(session.streamID);
-		m_externalPublishProcessIDs.insert(session.streamID, processID);
-		updateExternalRuntimeWatchdog();
-		if (Global::get().l) {
-			Global::get().l->log(
-				Log::Information,
-				tr("Using the external screen-share runtime for %1.").arg(session.streamID.toHtmlEscaped()));
-		}
-		return;
-	}
-
-	if (Global::get().l) {
-		Global::get().l->log(Log::Warning, tr("Unable to start local screen-share helper for %1: %2")
-											   .arg(session.streamID.toHtmlEscaped(), errorMessage.toHtmlEscaped()));
-	}
-	requestStopShare(session.streamID);
+	scheduleHelperOperation(HelperOperationKind::StartPublish, session,
+							nextHelperOperationGeneration(session.streamID));
 }
 
 void ScreenShareManager::startLocalViewSession(const ScreenShareSession &session) {
@@ -892,35 +939,15 @@ void ScreenShareManager::startLocalViewSession(const ScreenShareSession &session
 		return;
 	}
 
-	QString errorMessage;
-	qint64 processID = 0;
-	ScreenShareHelperClient::NativeFrameTransport frameTransport;
-	if (m_helperClient->startView(session, &errorMessage, &processID, &frameTransport)) {
-		m_activeViewSessions.insert(session.streamID);
-		m_externalViewProcessIDs.insert(session.streamID, processID);
-		showExternalViewWindow(session, processID);
-		if (ScreenShareViewBackend *backend = m_viewBackends.value(session.streamID); backend && frameTransport.feedAvailable)
-			backend->setNativeFrameTransport(frameTransport.sharedMemoryKey, frameTransport.generation);
-		updateExternalRuntimeWatchdog();
-		if (Global::get().l) {
-			Global::get().l->log(
-				Log::Information,
-				tr("Using the external screen-share runtime for %1.").arg(session.streamID.toHtmlEscaped()));
-		}
-		return;
-	}
-
-	if (Global::get().l) {
-		Global::get().l->log(Log::Warning, tr("Unable to start screen-share viewer for %1: %2")
-											   .arg(session.streamID.toHtmlEscaped(), errorMessage.toHtmlEscaped()));
-	}
+	restartExternalViewSession(session);
 }
 
 void ScreenShareManager::stopLocalPublishSession(const QString &streamID) {
-	if (m_activePublishSessions.remove(streamID)) {
-		m_externalPublishProcessIDs.remove(streamID);
-		m_helperClient->stopPublish(streamID);
-	}
+	ScreenShareSession operationSession;
+	operationSession.streamID = streamID;
+	scheduleHelperOperation(HelperOperationKind::StopPublish, operationSession,
+							nextHelperOperationGeneration(streamID));
+	m_activePublishSessions.remove(streamID);
 	m_externalPublishProcessIDs.remove(streamID);
 	m_externalPublishRestartAttempts.remove(streamID);
 	updateExternalRuntimeWatchdog();
@@ -935,10 +962,11 @@ void ScreenShareManager::stopLocalViewSession(const QString &streamID) {
 	m_externalViewAudioMuted.remove(streamID);
 	m_pausedExternalViewSessions.remove(streamID);
 
-	if (m_activeViewSessions.remove(streamID)) {
-		m_externalViewProcessIDs.remove(streamID);
-		m_helperClient->stopView(streamID);
-	}
+	ScreenShareSession operationSession;
+	operationSession.streamID = streamID;
+	scheduleHelperOperation(HelperOperationKind::StopView, operationSession,
+							nextHelperOperationGeneration(streamID));
+	m_activeViewSessions.remove(streamID);
 	m_externalViewProcessIDs.remove(streamID);
 	m_externalViewRestartAttempts.remove(streamID);
 	updateExternalRuntimeWatchdog();
@@ -965,7 +993,10 @@ void ScreenShareManager::checkExternalRuntimeLiveness() {
 
 		m_activePublishSessions.remove(streamID);
 		m_externalPublishProcessIDs.remove(streamID);
-		m_helperClient->stopPublish(streamID);
+		ScreenShareSession stopSession;
+		stopSession.streamID = streamID;
+		scheduleHelperOperation(HelperOperationKind::StopPublish, stopSession,
+								nextHelperOperationGeneration(streamID));
 
 		const int restartAttempt = m_externalPublishRestartAttempts.value(streamID, 0) + 1;
 		m_externalPublishRestartAttempts.insert(streamID, restartAttempt);
@@ -1006,7 +1037,10 @@ void ScreenShareManager::checkExternalRuntimeLiveness() {
 
 		m_activeViewSessions.remove(streamID);
 		m_externalViewProcessIDs.remove(streamID);
-		m_helperClient->stopView(streamID);
+		ScreenShareSession stopSession;
+		stopSession.streamID = streamID;
+		scheduleHelperOperation(HelperOperationKind::StopView, stopSession,
+								nextHelperOperationGeneration(streamID));
 
 		const int restartAttempt = m_externalViewRestartAttempts.value(streamID, 0) + 1;
 		m_externalViewRestartAttempts.insert(streamID, restartAttempt);
@@ -1070,7 +1104,10 @@ void ScreenShareManager::setExternalViewPaused(const QString &streamID, const bo
 	if (paused) {
 		m_pausedExternalViewSessions.insert(streamID);
 		if (m_activeViewSessions.remove(streamID)) {
-			m_helperClient->stopView(streamID);
+			ScreenShareSession stopSession;
+			stopSession.streamID = streamID;
+			scheduleHelperOperation(HelperOperationKind::StopView, stopSession,
+									nextHelperOperationGeneration(streamID));
 		}
 		m_externalViewProcessIDs.remove(streamID);
 		updateExternalRuntimeWatchdog();

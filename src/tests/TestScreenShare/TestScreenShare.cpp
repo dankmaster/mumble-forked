@@ -12,6 +12,7 @@
 #include "ScreenShare.h"
 #include "ScreenShareFrameTransport.h"
 #include "ScreenShareViewBackend.h"
+#include "ScreenShareOperationTracker.h"
 
 namespace {
 int codecValue(const MumbleProto::ScreenShareCodec codec) {
@@ -35,6 +36,9 @@ private slots:
 	void qmlViewBackendReportsExternalWindowTransportHonestly();
 	void nativeFrameTransportIsBoundedAndTracksDrops();
 	void qmlViewBackendConsumesNativeFramesOffThread();
+	void rawBgraAssemblerKeepsFrameBoundariesAndDropsBacklog();
+	void nativeFrameDecoderArgumentsKeepStdoutBinaryAndBounded();
+	void helperOperationGenerationsRejectStaleAndCancelledResults();
 };
 
 void TestScreenShare::qmlViewBackendPublishesLifecycleState() {
@@ -46,6 +50,7 @@ void TestScreenShare::qmlViewBackendPublishesLifecycleState() {
 	QSignalSpy pauseSpy(&backend, &ScreenShareViewBackend::pauseToggled);
 	QSignalSpy muteSpy(&backend, &ScreenShareViewBackend::audioMuteToggled);
 	QSignalSpy stopSpy(&backend, &ScreenShareViewBackend::stopRequested);
+	QSignalSpy operationSpy(&backend, &ScreenShareViewBackend::operationStateChanged);
 
 	QCOMPARE(backend.streamId(), QStringLiteral("stream:7"));
 	QVERIFY(backend.audioAvailable());
@@ -53,12 +58,16 @@ void TestScreenShare::qmlViewBackendPublishesLifecycleState() {
 	backend.setAudioMuted(true);
 	backend.setAudioVolume(125);
 	backend.requestStop();
+	backend.setOperationState(QStringLiteral("loading"), {}, true);
 	QVERIFY(backend.paused());
 	QVERIFY(backend.audioMuted());
 	QCOMPARE(backend.audioVolume(), 100);
 	QCOMPARE(pauseSpy.count(), 1);
 	QCOMPARE(muteSpy.count(), 1);
 	QCOMPARE(stopSpy.count(), 1);
+	QCOMPARE(operationSpy.count(), 1);
+	QCOMPARE(backend.operationStatus(), QStringLiteral("loading"));
+	QVERIFY(backend.operationCancellable());
 }
 
 void TestScreenShare::qmlViewBackendReportsExternalWindowTransportHonestly() {
@@ -67,9 +76,7 @@ void TestScreenShare::qmlViewBackendReportsExternalWindowTransportHonestly() {
 
 	QCOMPARE(backend.renderTransport(), QStringLiteral("external-process-window"));
 	QVERIFY(backend.nativeFrameTransportAvailable());
-	QVERIFY(!backend.nativeFrameTransportBlocker().isEmpty());
-	QVERIFY(backend.nativeFrameTransportBlocker().contains(QStringLiteral("appsink adapter")));
-	QVERIFY(backend.nativeFrameTransportBlocker().contains(QStringLiteral("decoded frames")));
+	QVERIFY(backend.nativeFrameTransportBlocker().isEmpty());
 }
 
 void TestScreenShare::nativeFrameTransportIsBoundedAndTracksDrops() {
@@ -133,6 +140,55 @@ void TestScreenShare::qmlViewBackendConsumesNativeFramesOffThread() {
 	QCOMPARE(backend.renderTransport(), QStringLiteral("native-shared-memory-bgra"));
 	backend.setNativeFrameTransport({}, 0);
 	QTRY_VERIFY(!backend.nativeFrameActive());
+}
+
+void TestScreenShare::rawBgraAssemblerKeepsFrameBoundariesAndDropsBacklog() {
+	Mumble::ScreenShare::RawBgraFrameAssembler assembler(8, 2);
+	QCOMPARE(assembler.push(QByteArray("abcd", 4)).size(), 0);
+	const QList< QByteArray > completed = assembler.push(QByteArray("efghijkl", 8));
+	QCOMPARE(completed.size(), 1);
+	QCOMPARE(completed.first(), QByteArray("abcdefgh", 8));
+	QCOMPARE(assembler.bufferedBytes(), 4);
+
+	const QByteArray burst("mnopqrstuvwx0123456789AB", 24);
+	const QList< QByteArray > bounded = assembler.push(burst);
+	QCOMPARE(bounded.size(), 2);
+	QCOMPARE(assembler.droppedFrames(), 1ULL);
+	QVERIFY(assembler.bufferedBytes() < 8);
+	const QByteArray veryLargeBurst(1024 * 1024 + 3, '\x55');
+	assembler.push(veryLargeBurst);
+	QVERIFY(assembler.bufferedBytes() <= (2 * 8 + 7));
+	QVERIFY(assembler.droppedFrames() > 1000);
+	QCOMPARE(Mumble::ScreenShare::IPC::MINIMUM_PROTOCOL_VERSION, 1);
+	QCOMPARE(Mumble::ScreenShare::IPC::PROTOCOL_VERSION, 2);
+	QCOMPARE(Mumble::ScreenShare::IPC::makeRequest(Mumble::ScreenShare::IPC::Command::StartView, {}, 1)
+				 .value(QStringLiteral("version")).toInt(), 1);
+}
+
+void TestScreenShare::nativeFrameDecoderArgumentsKeepStdoutBinaryAndBounded() {
+	const QStringList ffmpeg = Mumble::ScreenShare::ffmpegRawBgraOutputArguments(1280, 720);
+	QVERIFY(ffmpeg.contains(QStringLiteral("rawvideo")));
+	QVERIFY(ffmpeg.contains(QStringLiteral("bgra")));
+	QCOMPARE(ffmpeg.last(), QStringLiteral("pipe:1"));
+	QVERIFY(ffmpeg.join(QLatin1Char(' ')).contains(QStringLiteral("scale=1280:720")));
+
+	const QStringList gstreamer = Mumble::ScreenShare::gstreamerRawBgraSinkArguments(640, 360);
+	QVERIFY(gstreamer.contains(QStringLiteral("fdsink")));
+	QVERIFY(gstreamer.contains(QStringLiteral("fd=1")));
+	QVERIFY(gstreamer.join(QLatin1Char(' ')).contains(QStringLiteral("format=BGRA,width=640,height=360")));
+	QVERIFY(Mumble::ScreenShare::ffmpegRawBgraOutputArguments(0, 720).isEmpty());
+}
+
+void TestScreenShare::helperOperationGenerationsRejectStaleAndCancelledResults() {
+	ScreenShareOperationTracker tracker;
+	const quint64 first = tracker.begin(QStringLiteral("stream:1"));
+	QVERIFY(tracker.isCurrent(QStringLiteral("stream:1"), first));
+	const quint64 replacement = tracker.begin(QStringLiteral("stream:1"));
+	QVERIFY(!tracker.isCurrent(QStringLiteral("stream:1"), first));
+	QVERIFY(tracker.isCurrent(QStringLiteral("stream:1"), replacement));
+	const quint64 cancelled = tracker.invalidate(QStringLiteral("stream:1"));
+	QVERIFY(!tracker.isCurrent(QStringLiteral("stream:1"), replacement));
+	QVERIFY(tracker.isCurrent(QStringLiteral("stream:1"), cancelled));
 }
 
 void TestScreenShare::parsesAndFormatsVp8CodecPreferences() {

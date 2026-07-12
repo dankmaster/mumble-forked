@@ -6,6 +6,8 @@
 #include <QtCore/QByteArray>
 #include <QtCore/QSharedMemory>
 #include <QtCore/QString>
+#include <QtCore/QStringList>
+#include <QtCore/QList>
 
 namespace Mumble::ScreenShare {
 
@@ -43,6 +45,22 @@ private:
 	quint64 m_droppedFrames = 0;
 	quint64 m_generation = 0;
 };
+
+class RawBgraFrameAssembler final {
+public:
+	explicit RawBgraFrameAssembler(qsizetype frameBytes, int maximumBufferedFrames = 2);
+	QList< QByteArray > push(const QByteArray &bytes);
+	quint64 droppedFrames() const;
+	qsizetype bufferedBytes() const;
+private:
+	qsizetype m_frameBytes;
+	int m_maximumBufferedFrames;
+	QByteArray m_buffer;
+	quint64 m_droppedFrames = 0;
+};
+
+QStringList ffmpegRawBgraOutputArguments(quint32 width, quint32 height);
+QStringList gstreamerRawBgraSinkArguments(quint32 width, quint32 height, bool inputAlreadyDecoded = false);
 
 } // namespace Mumble::ScreenShare
 

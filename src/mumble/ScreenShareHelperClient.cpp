@@ -424,7 +424,7 @@ bool ScreenShareHelperClient::ensureHelperRunning(const QString &helperExecutabl
 
 QJsonObject ScreenShareHelperClient::sendRequest(Mumble::ScreenShare::IPC::Command command, const QJsonObject &payload,
 												 const QString &helperExecutable, QString *errorMessage,
-												 const bool launchIfNeeded) {
+												 const bool launchIfNeeded, const int protocolVersion) {
 	const QString socketPath = helperSocketPath();
 	const QString streamID   = payload.value(QStringLiteral("stream_id")).toString().trimmed();
 	qInfo().noquote()
@@ -475,7 +475,7 @@ QJsonObject ScreenShareHelperClient::sendRequest(Mumble::ScreenShare::IPC::Comma
 	}
 
 	const QByteArray requestData =
-		QJsonDocument(Mumble::ScreenShare::IPC::makeRequest(command, payload)).toJson(QJsonDocument::Compact)
+		QJsonDocument(Mumble::ScreenShare::IPC::makeRequest(command, payload, protocolVersion)).toJson(QJsonDocument::Compact)
 		+ QByteArray(1, '\n');
 	const int requestTimeoutMsec = helperRequestTimeoutMsec(command);
 	if (socket.write(requestData) < 0) {
@@ -640,9 +640,29 @@ bool ScreenShareHelperClient::startView(const ScreenShareSession &session, QStri
 	}
 	if (frameTransport) *frameTransport = {};
 	QString localError;
-	const QJsonObject reply = sendRequest(Mumble::ScreenShare::IPC::Command::StartView, payloadFromSession(session),
+	QJsonObject viewPayload = payloadFromSession(session);
+	viewPayload.insert(QStringLiteral("native_frame_requested"), true);
+	QJsonObject reply = sendRequest(Mumble::ScreenShare::IPC::Command::StartView, viewPayload,
 										  m_capabilities.helperExecutable, &localError, true);
-	const bool started = !reply.isEmpty() && Mumble::ScreenShare::IPC::replySucceeded(reply, &localError);
+	bool started = !reply.isEmpty() && Mumble::ScreenShare::IPC::replySucceeded(reply, &localError);
+	if (!started) {
+		viewPayload.insert(QStringLiteral("native_frame_requested"), false);
+		QString fallbackError;
+		QJsonObject fallbackReply = sendRequest(Mumble::ScreenShare::IPC::Command::StartView, viewPayload,
+													m_capabilities.helperExecutable, &fallbackError, true);
+		if (fallbackReply.isEmpty() || !Mumble::ScreenShare::IPC::replySucceeded(fallbackReply, &fallbackError)) {
+			fallbackReply = sendRequest(Mumble::ScreenShare::IPC::Command::StartView, viewPayload,
+											  m_capabilities.helperExecutable, &fallbackError, true,
+											  Mumble::ScreenShare::IPC::MINIMUM_PROTOCOL_VERSION);
+		}
+		if (!fallbackReply.isEmpty() && Mumble::ScreenShare::IPC::replySucceeded(fallbackReply, &fallbackError)) {
+			reply = std::move(fallbackReply);
+			started = true;
+			localError.clear();
+		} else if (!fallbackError.isEmpty()) {
+			localError = fallbackError;
+		}
+	}
 	if (!started) {
 		if (errorMessage) {
 			*errorMessage = localError;

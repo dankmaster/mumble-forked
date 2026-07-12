@@ -184,11 +184,21 @@ QString ScreenShareViewBackend::renderTransport() const {
 }
 bool ScreenShareViewBackend::nativeFrameTransportAvailable() const { return true; }
 QString ScreenShareViewBackend::nativeFrameTransportBlocker() const {
-	return tr("Native BGRA shared-memory transport and Qt Quick rendering are available, but the production "
-			  "ffmpeg/GStreamer decoder appsink adapter does not yet publish decoded frames into that transport.");
+	return {};
 }
 bool ScreenShareViewBackend::nativeFrameActive() const { return m_nativeFrameActive; }
 QImage ScreenShareViewBackend::currentFrame() const { return m_currentFrame; }
+QString ScreenShareViewBackend::operationStatus() const { return m_operationStatus; }
+QString ScreenShareViewBackend::operationError() const { return m_operationError; }
+bool ScreenShareViewBackend::operationCancellable() const { return m_operationCancellable; }
+
+void ScreenShareViewBackend::setOperationState(const QString &status, const QString &error, const bool cancellable) {
+	if (m_operationStatus == status && m_operationError == error && m_operationCancellable == cancellable) return;
+	m_operationStatus = status;
+	m_operationError = error;
+	m_operationCancellable = cancellable;
+	emit operationStateChanged();
+}
 
 void ScreenShareViewBackend::setNativeFrameTransport(const QString &sharedMemoryKey, const quint64 generation) {
 	m_currentFrame = {};

@@ -99,6 +99,9 @@ public:
 		QStringList warnings;
 		qint64 processID = 0;
 		QProcess *process = nullptr;
+		bool nativeFrameFeed = false;
+		quint32 nativeFrameWidth = 0;
+		quint32 nativeFrameHeight = 0;
 	};
 
 	static RuntimeSupport probeRuntimeSupport(bool refresh = false);

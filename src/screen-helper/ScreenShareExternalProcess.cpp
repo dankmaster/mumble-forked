@@ -7,6 +7,7 @@
 
 #include "ScreenShare.h"
 #include "ScreenShareIPC.h"
+#include "ScreenShareFrameTransport.h"
 #include "ScreenShareWindowFollowPipeline.h"
 #include "ScreenShareWindowsNativeCapture.h"
 
@@ -44,7 +45,8 @@ struct RelayEndpoint {
 };
 
 ScreenShareExternalProcess::LaunchResult startProcess(const QString &program, const QStringList &arguments,
-													  QObject *parent, const QString &executionMode);
+												  QObject *parent, const QString &executionMode,
+												  bool binaryStandardOutput = false);
 
 QString readMergedProcessOutput(QProcess &process) {
 	return QString::fromUtf8(process.readAll());
@@ -1553,8 +1555,10 @@ ScreenShareExternalProcess::LaunchResult
 	const QString participantName =
 		QStringLiteral("Mumble viewer %1").arg(plan.value(QStringLiteral("stream_id")).toString());
 
+	const bool nativeFrames = plan.value(QStringLiteral("native_frame_requested")).toBool(false);
 	QStringList arguments;
 	arguments << QStringLiteral("-e");
+	if (nativeFrames) arguments << QStringLiteral("-q");
 	arguments << QStringLiteral("livekitwebrtcsrc") << QStringLiteral("name=src");
 	appendGStreamerLiveKitSignallerArguments(&arguments, plan, wsUrl, identity, participantName);
 	const QString softwareH264Decoder = support.gstAvDecH264Available
@@ -1576,6 +1580,12 @@ ScreenShareExternalProcess::LaunchResult
 		arguments << QStringLiteral("video-codecs=<H264>");
 	}
 	const bool expectAudio = plan.value(QStringLiteral("capture_audio")).toBool(false);
+	const int nativeWidth = qBound(16, plan.value(QStringLiteral("width")).toInt(1280), 3840);
+	const int nativeHeight = qBound(16, plan.value(QStringLiteral("height")).toInt(720), 2160);
+	if (nativeFrames && !support.gstVideoConvertAvailable) {
+		launch.errorMessage = QStringLiteral("GStreamer native frames require videoconvert.");
+		return launch;
+	}
 	if (expectAudio) {
 		arguments << QStringLiteral("audio-codecs=<OPUS>");
 	}
@@ -1590,7 +1600,11 @@ ScreenShareExternalProcess::LaunchResult
 				  << QStringLiteral("!");
 	}
 	QString selectedRenderer;
-	if (receiveRawPads && (useD3D11DecodedSink || useD3D11RawSink)) {
+	if (nativeFrames && support.gstVideoConvertAvailable) {
+		arguments << Mumble::ScreenShare::gstreamerRawBgraSinkArguments(
+			static_cast< quint32 >(nativeWidth), static_cast< quint32 >(nativeHeight), receiveRawPads);
+		selectedRenderer = QStringLiteral("gstreamer-native-bgra-pipe");
+	} else if (receiveRawPads && (useD3D11DecodedSink || useD3D11RawSink)) {
 		arguments << QStringLiteral("videoconvert") << QStringLiteral("!") << QStringLiteral("d3d11videosink")
 				  << QStringLiteral("sync=false");
 		selectedRenderer = QStringLiteral("gstreamer-d3d11videosink-raw-livekit");
@@ -1640,24 +1654,30 @@ ScreenShareExternalProcess::LaunchResult
 				  << QStringLiteral("!") << QStringLiteral("autoaudiosink") << QStringLiteral("sync=false");
 	}
 
-	launch = startProcess(support.gstLaunchPath, arguments, parent, QStringLiteral("gstreamer-livekit-view"));
+	launch = startProcess(support.gstLaunchPath, arguments, parent,
+						 nativeFrames ? QStringLiteral("gstreamer-native-frame-view")
+									  : QStringLiteral("gstreamer-livekit-view"), nativeFrames);
 	if (!launch.started) {
 		return launch;
 	}
 
 	launch.endpointUrl       = wsUrl;
 	launch.selectedRenderer = selectedRenderer;
+	launch.nativeFrameFeed = nativeFrames;
+	launch.nativeFrameWidth = static_cast< quint32 >(nativeWidth);
+	launch.nativeFrameHeight = static_cast< quint32 >(nativeHeight);
 	return launch;
 }
 
 ScreenShareExternalProcess::LaunchResult startProcess(const QString &program, const QStringList &arguments,
-													  QObject *parent, const QString &executionMode) {
+												  QObject *parent, const QString &executionMode,
+												  const bool binaryStandardOutput) {
 	ScreenShareExternalProcess::LaunchResult launch;
 	launch.program       = program;
 	launch.executionMode = executionMode;
 
 	QProcess *process = new QProcess(parent);
-	process->setProcessChannelMode(QProcess::MergedChannels);
+	process->setProcessChannelMode(binaryStandardOutput ? QProcess::SeparateChannels : QProcess::MergedChannels);
 	process->setProcessEnvironment(processEnvironmentForExternalProgram(program));
 	process->start(program, arguments);
 	if (!process->waitForStarted(START_TIMEOUT_MSEC)) {
@@ -1667,7 +1687,8 @@ ScreenShareExternalProcess::LaunchResult startProcess(const QString &program, co
 	}
 
 	if (process->waitForFinished(START_SETTLE_MSEC)) {
-		const QString output = readMergedProcessOutput(*process).trimmed();
+		const QString output = QString::fromUtf8(binaryStandardOutput ? process->readAllStandardError()
+																	 : process->readAll()).trimmed();
 		launch.errorMessage =
 			output.isEmpty() ? QStringLiteral("The external media process exited immediately.") : output;
 		process->deleteLater();
@@ -2104,11 +2125,17 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startPublis
 }
 
 ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startView(const QJsonObject &plan,
-																			   QObject *parent) {
+																								   QObject *parent) {
 	LaunchResult launch;
 	const RuntimeSupport support = probeRuntimeSupport();
 	if (plan.value(QStringLiteral("relay_contract_mode")).toString() == QLatin1String("gstreamer-livekit-runtime")) {
-		return startGStreamerLiveKitView(support, plan, parent);
+		launch = startGStreamerLiveKitView(support, plan, parent);
+		if (launch.started || !plan.value(QStringLiteral("native_frame_requested")).toBool(false)) return launch;
+		QJsonObject fallbackPlan = plan;
+		fallbackPlan.insert(QStringLiteral("native_frame_requested"), false);
+		LaunchResult fallback = startGStreamerLiveKitView(support, fallbackPlan, parent);
+		if (fallback.started) fallback.warnings.append(QStringLiteral("Native frame output failed; using external GStreamer window fallback: %1").arg(launch.errorMessage));
+		return fallback;
 	}
 	if (!plan.value(QStringLiteral("relay_runtime_executable")).toBool(true)) {
 		launch.errorMessage =
@@ -2122,7 +2149,10 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startView(c
 		}
 		return launch;
 	}
-	const bool headlessView = !support.graphicalSessionAvailable || envFlagEnabled("MUMBLE_SCREENSHARE_HEADLESS_VIEW");
+	const bool nativeFrames = plan.value(QStringLiteral("native_frame_requested")).toBool(false)
+		&& !plan.value(QStringLiteral("capture_audio")).toBool(false);
+	const bool headlessView = nativeFrames || !support.graphicalSessionAvailable
+		|| envFlagEnabled("MUMBLE_SCREENSHARE_HEADLESS_VIEW");
 	if (headlessView ? !support.ffmpegAvailable : !support.ffplayAvailable) {
 		launch.errorMessage = headlessView
 								  ? QStringLiteral("ffmpeg is not installed on this host for headless viewer mode.")
@@ -2169,9 +2199,16 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startView(c
 		arguments.append(QStringLiteral("-i"));
 		arguments.append(inputLocation);
 		arguments.append(QStringLiteral("-an"));
-		arguments.append(QStringLiteral("-f"));
-		arguments.append(QStringLiteral("null"));
-		arguments.append(QStringLiteral("-"));
+		if (nativeFrames) {
+			const int width = qBound(16, plan.value(QStringLiteral("width")).toInt(1280), 3840);
+			const int height = qBound(16, plan.value(QStringLiteral("height")).toInt(720), 2160);
+			arguments.append(Mumble::ScreenShare::ffmpegRawBgraOutputArguments(
+				static_cast< quint32 >(width), static_cast< quint32 >(height)));
+		} else {
+			arguments.append(QStringLiteral("-f"));
+			arguments.append(QStringLiteral("null"));
+			arguments.append(QStringLiteral("-"));
+		}
 	} else {
 		arguments.append(QStringLiteral("-hide_banner"));
 		arguments.append(QStringLiteral("-loglevel"));
@@ -2184,14 +2221,30 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startView(c
 		arguments.append(inputLocation);
 	}
 
-	launch = startProcess(program, arguments, parent, executionMode);
+	launch = startProcess(program, arguments, parent,
+						 nativeFrames ? QStringLiteral("ffmpeg-native-frame-view") : executionMode, nativeFrames);
 	if (!launch.started) {
+		if (nativeFrames) {
+			QJsonObject fallbackPlan = plan;
+			fallbackPlan.insert(QStringLiteral("native_frame_requested"), false);
+			LaunchResult fallback = startView(fallbackPlan, parent);
+			if (fallback.started)
+				fallback.warnings.append(QStringLiteral("Native ffmpeg frame output failed; using external window fallback: %1")
+										 .arg(launch.errorMessage));
+			return fallback;
+		}
 		return launch;
 	}
 
 	launch.endpointUrl = endpoint.localFilePath.isEmpty() ? endpoint.endpointUrl
 														  : QUrl::fromLocalFile(endpoint.localFilePath).toString();
 	launch.selectedRenderer = headlessView ? QStringLiteral("ffmpeg-null-view") : QStringLiteral("ffplay");
+	if (nativeFrames) {
+		launch.selectedRenderer = QStringLiteral("ffmpeg-native-bgra-pipe");
+		launch.nativeFrameFeed = true;
+		launch.nativeFrameWidth = static_cast< quint32 >(qBound(16, plan.value(QStringLiteral("width")).toInt(1280), 3840));
+		launch.nativeFrameHeight = static_cast< quint32 >(qBound(16, plan.value(QStringLiteral("height")).toInt(720), 2160));
+	}
 	return launch;
 }
 

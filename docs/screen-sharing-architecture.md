@@ -101,35 +101,31 @@ surface:
 
 ### Qt Quick rendering boundary
 
-The current viewer is not a native Qt Quick video pipeline. The helper starts
-`ffplay` (or a GStreamer-owned viewer process), returns only its process ID, and
-the Windows client discovers that process's top-level `HWND`. The QML
-`WindowContainer` therefore embeds a foreign native window. It does not receive
-decoded frames and must not be described as a `QQuickItem`, scene-graph texture,
-or `QVideoSink` implementation.
-
-Local helper IPC version 2 now includes an MVP bounded BGRA shared-memory ring
+The preferred Windows viewer is a native Qt Quick video pipeline. Local helper
+IPC version 2 includes a bounded BGRA shared-memory ring
 with generation, dimensions, stride, sequence and timestamp metadata. The client
 polls and copies it off the GUI thread and renders immutable frames through a
-dedicated scene-graph texture item. A deterministic helper test producer can be
-enabled with `MUMBLE_SCREENSHARE_NATIVE_FRAME_TEST_PATTERN=1` to exercise the
-complete process boundary.
+dedicated scene-graph texture item. FFmpeg decodes to fixed-size BGRA `rawvideo`
+on a separate stdout channel; GStreamer uses `videoconvert`, `videoscale` and a
+quiet `fdsink` BGRA pipe. Stderr remains diagnostics-only. The helper assembler
+keeps at most two complete frames, drops stale backlog on frame boundaries, and
+publishes sequence gaps through the three-slot ring.
 
-The remaining production blocker is the decoder feed adapter: current ffplay
-and GStreamer viewer processes still own their decoded surfaces and do not push
-frames into the v2 ring. Production native rendering requires either an appsink
-adapter for decoded CPU frames or a later negotiated GPU transport that provides:
+GStreamer keeps its negotiated audio branch while publishing video frames.
+The plain FFmpeg raw-video path is selected only for video-only sessions; shares
+that require audio retain the external renderer until a separate decoded-audio
+sink is available.
 
-- a bounded decoded-frame stream with pixel format, dimensions, stride,
-  timestamp and generation metadata; or
-- shareable GPU textures plus platform handles, synchronization fences and
-  device-loss recovery.
+A deterministic helper test producer can be enabled with
+`MUMBLE_SCREENSHARE_NATIVE_FRAME_TEST_PATTERN=1` to exercise the process boundary
+without a relay. The foreign `ffplay`/GStreamer window is retained only as an
+explicitly allowlisted v1/platform/dev fallback when raw frame startup or shared
+memory allocation fails.
 
 The MVP ring already provides fixed bounds, sequence-gap drop accounting,
-generation resets and deterministic detach. The external-window renderer remains
-an explicitly allowlisted development/platform fallback until the production
-appsink adapter is connected; wrapping it in QML is still not considered native
-rendering.
+generation resets and deterministic detach. A later zero-copy optimization may
+replace CPU BGRA with shareable GPU textures and synchronization fences; it is
+not required for the native Qt Quick cutover.
 
 ## Media Runtime
 

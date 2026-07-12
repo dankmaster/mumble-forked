@@ -8,6 +8,7 @@
 
 #include "Mumble.pb.h"
 #include "ScreenShareHelperClient.h"
+#include "ScreenShareOperationTracker.h"
 
 #include <QtCore/QHash>
 #include <QtCore/QList>
@@ -16,6 +17,7 @@
 #include <QtCore/QSet>
 #include <QtCore/QString>
 #include <QtCore/QTimer>
+#include <QtCore/QThreadPool>
 
 struct ScreenShareSession {
 	QString streamID;
@@ -59,6 +61,16 @@ class ScreenShareViewBackend;
 
 class ScreenShareManager : public QObject {
 private:
+	enum class HelperOperationKind { StartPublish, StartView, StopPublish, StopView };
+	struct HelperOperationResult {
+		HelperOperationKind kind;
+		QString streamID;
+		quint64 generation = 0;
+		bool success = false;
+		QString error;
+		qint64 processID = 0;
+		ScreenShareHelperClient::NativeFrameTransport frameTransport;
+	};
 	Q_OBJECT
 	Q_DISABLE_COPY(ScreenShareManager)
 
@@ -119,6 +131,9 @@ private:
 	void setExternalViewPaused(const QString &streamID, bool paused);
 	void logRemoteViewAvailability(const ScreenShareSession &session);
 	void stopLocalHelperSessions(const QString &streamID);
+	quint64 nextHelperOperationGeneration(const QString &streamID);
+	void scheduleHelperOperation(HelperOperationKind kind, const ScreenShareSession &session, quint64 generation);
+	void applyHelperOperationResult(const HelperOperationResult &result, const ScreenShareSession &session);
 
 	ScreenShareHelperClient *m_helperClient;
 	QHash< QString, ScreenShareSession > m_sessions;
@@ -136,6 +151,8 @@ private:
 	QTimer m_externalRuntimeWatchdogTimer;
 	mutable QString m_lastLoggedAvailabilityContext;
 	mutable QString m_lastLoggedAvailabilityReason;
+	ScreenShareOperationTracker m_helperOperationTracker;
+	QThreadPool m_helperOperationPool;
 };
 
 #endif // MUMBLE_MUMBLE_SCREENSHAREMANAGER_H_

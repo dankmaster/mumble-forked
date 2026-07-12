@@ -30,6 +30,9 @@ class ScreenShareViewBackend final : public QObject {
 	Q_PROPERTY(QString nativeFrameTransportBlocker READ nativeFrameTransportBlocker CONSTANT)
 	Q_PROPERTY(bool nativeFrameActive READ nativeFrameActive NOTIFY nativeFrameActiveChanged)
 	Q_PROPERTY(QImage currentFrame READ currentFrame NOTIFY frameChanged)
+	Q_PROPERTY(QString operationStatus READ operationStatus NOTIFY operationStateChanged)
+	Q_PROPERTY(QString operationError READ operationError NOTIFY operationStateChanged)
+	Q_PROPERTY(bool operationCancellable READ operationCancellable NOTIFY operationStateChanged)
 
 public:
 	explicit ScreenShareViewBackend(const ScreenShareSession &session, QObject *parent = nullptr);
@@ -50,10 +53,14 @@ public:
 	QString nativeFrameTransportBlocker() const;
 	bool nativeFrameActive() const;
 	QImage currentFrame() const;
+	QString operationStatus() const;
+	QString operationError() const;
+	bool operationCancellable() const;
 
 	void updateSession(const ScreenShareSession &session);
 	void setProcessId(qint64 processId);
 	void setNativeFrameTransport(const QString &sharedMemoryKey, quint64 generation);
+	void setOperationState(const QString &status, const QString &error, bool cancellable);
 	Q_INVOKABLE void setPaused(bool paused);
 	Q_INVOKABLE void setAudioMuted(bool muted);
 	Q_INVOKABLE void setAudioVolume(int percent);
@@ -70,6 +77,7 @@ signals:
 	void videoWindowChanged();
 	void nativeFrameActiveChanged();
 	void frameChanged();
+	void operationStateChanged();
 	void pauseToggled(const QString &streamId, bool paused);
 	void audioMuteToggled(const QString &streamId, bool muted);
 	void stopRequested(const QString &streamId);
@@ -98,6 +106,9 @@ private:
 	QThread *m_frameThread = nullptr;
 	ScreenShareNativeFrameReader *m_frameReader = nullptr;
 	bool m_nativeFrameActive = false;
+	QString m_operationStatus = QStringLiteral("idle");
+	QString m_operationError;
+	bool m_operationCancellable = false;
 };
 
 #endif

@@ -30,7 +30,7 @@ namespace IPC {
 	QString sanitizeSocketBaseName(const QString &baseName);
 	QString socketPath(const QString &baseName = socketBaseName());
 
-	QJsonObject makeRequest(Command command, const QJsonObject &payload = {});
+	QJsonObject makeRequest(Command command, const QJsonObject &payload = {}, int protocolVersion = PROTOCOL_VERSION);
 	QJsonObject makeSuccessReply(const QJsonObject &payload = {});
 	QJsonObject makeErrorReply(const QString &errorMessage, const QJsonObject &payload = {});
 	bool replySucceeded(const QJsonObject &reply, QString *errorMessage = nullptr);

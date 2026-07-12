@@ -87,9 +87,9 @@ namespace IPC {
 #endif
 	}
 
-	QJsonObject makeRequest(const Command command, const QJsonObject &payload) {
+	QJsonObject makeRequest(const Command command, const QJsonObject &payload, const int protocolVersion) {
 		QJsonObject request;
-		request.insert(QStringLiteral("version"), PROTOCOL_VERSION);
+		request.insert(QStringLiteral("version"), protocolVersion);
 		request.insert(QStringLiteral("command"), commandName(command));
 		request.insert(QStringLiteral("payload"), payload);
 		return request;

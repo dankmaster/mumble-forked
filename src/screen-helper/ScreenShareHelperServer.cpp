@@ -17,6 +17,7 @@
 #include <QtCore/QDir>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
@@ -27,6 +28,8 @@
 #include <QtCore/QUrl>
 #include <QtCore/QUuid>
 #include <QtNetwork/QLocalSocket>
+
+#include <limits>
 
 namespace {
 constexpr int IDLE_TIMEOUT_MSEC        = 30000;
@@ -296,7 +299,8 @@ QJsonObject ScreenShareHelperServer::dispatchRequest(const QJsonObject &request)
 		return Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("Unknown command."));
 	}
 
-	const QJsonObject payload = request.value(QStringLiteral("payload")).toObject();
+	QJsonObject payload = request.value(QStringLiteral("payload")).toObject();
+	if (version < 2) payload.insert(QStringLiteral("native_frame_requested"), false);
 	switch (*command) {
 		case Mumble::ScreenShare::IPC::Command::QueryCapabilities:
 			return handleQueryCapabilities();
@@ -348,7 +352,7 @@ QJsonObject ScreenShareHelperServer::capabilityPayload() const {
 	payload.insert(QStringLiteral("native_frame_transport"), QStringLiteral("shared-memory-bgra-ring"));
 	payload.insert(QStringLiteral("native_frame_slot_count"),
 				   static_cast< int >(Mumble::ScreenShare::FrameTransport::SlotCount));
-	payload.insert(QStringLiteral("native_frame_production_feed_available"), false);
+	payload.insert(QStringLiteral("native_frame_production_feed_available"), true);
 	payload.insert(QStringLiteral("status"), m_capabilities.statusMessage);
 	payload.insert(QStringLiteral("mode"), QStringLiteral("external-process"));
 	payload.insert(QStringLiteral("encoder_backends"), ScreenShareSessionPlanner::advertisedEncoderBackends());
@@ -552,10 +556,73 @@ QJsonObject ScreenShareHelperServer::handleStartView(const QJsonObject &payload)
 	session.payload.insert(QStringLiteral("actual_bitrate_kbps"),
 						   session.payload.value(QStringLiteral("bitrate_kbps")).toInt());
 	session.payload.insert(QStringLiteral("dropped_frames"), 0);
-	// The ffmpeg/GStreamer appsink adapter remains isolated from this transport MVP. This deterministic
-	// producer exercises the complete helper IPC/shared-memory/QSG path without pretending the external
-	// renderer already exports decoded frames.
-	if (qEnvironmentVariableIntValue("MUMBLE_SCREENSHARE_NATIVE_FRAME_TEST_PATTERN") == 1) {
+	const bool testPattern = qEnvironmentVariableIntValue("MUMBLE_SCREENSHARE_NATIVE_FRAME_TEST_PATTERN") == 1;
+	if (launch.nativeFrameFeed && launch.process && !testPattern) {
+		const quint64 frameBytes64 = static_cast< quint64 >(launch.nativeFrameWidth) * launch.nativeFrameHeight * 4U;
+		if (frameBytes64 > 0 && frameBytes64 <= std::numeric_limits< quint32 >::max()) {
+			const quint32 frameBytes = static_cast< quint32 >(frameBytes64);
+			const QString key = QStringLiteral("mumble-screen-frame-%1")
+								.arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+			session.nativeFrameTransport = std::make_shared< Mumble::ScreenShare::FrameTransport >();
+			if (session.nativeFrameTransport->create(key, frameBytes)) {
+				const quint64 generation = static_cast< quint64 >(QDateTime::currentMSecsSinceEpoch());
+				session.payload.insert(QStringLiteral("native_frame_shared_memory_key"), key);
+				session.payload.insert(QStringLiteral("native_frame_generation"), QString::number(generation));
+				session.payload.insert(QStringLiteral("native_frame_feed_available"), true);
+				auto transport = session.nativeFrameTransport;
+				auto assembler = std::make_shared< Mumble::ScreenShare::RawBgraFrameAssembler >(frameBytes, 2);
+				auto sequence = std::make_shared< quint64 >(0);
+				auto published = std::make_shared< quint64 >(0);
+				const quint32 width = launch.nativeFrameWidth;
+				const quint32 height = launch.nativeFrameHeight;
+				const auto consumeFrames = [process = launch.process, transport, assembler, sequence, published, generation,
+											 width, height]() {
+							const quint64 droppedBefore = assembler->droppedFrames();
+							const QList< QByteArray > frames = assembler->push(process->readAllStandardOutput());
+							*sequence += assembler->droppedFrames() - droppedBefore;
+							for (const QByteArray &bytes : frames) {
+								Mumble::ScreenShare::NativeFrame frame;
+								frame.generation = generation;
+								frame.sequence = ++*sequence;
+								frame.timestampUsec = QDateTime::currentMSecsSinceEpoch() * 1000;
+								frame.width = width;
+								frame.height = height;
+								frame.stride = width * 4U;
+								frame.bgra = bytes;
+								if (transport->publish(frame)) ++*published;
+							}
+					};
+				connect(launch.process, &QProcess::readyReadStandardOutput, this, consumeFrames);
+				consumeFrames();
+				QElapsedTimer firstFrameTimer;
+				firstFrameTimer.start();
+				while (*published == 0 && launch.process->state() != QProcess::NotRunning
+					   && firstFrameTimer.elapsed() < 10000) {
+					launch.process->waitForReadyRead(100);
+					consumeFrames();
+				}
+				if (*published == 0) {
+					ScreenShareExternalProcess::stop(launch.process);
+					return Mumble::ScreenShare::IPC::makeErrorReply(
+						QStringLiteral("The native decoder did not produce a complete BGRA frame during startup."));
+				}
+			} else {
+				ScreenShareExternalProcess::stop(launch.process);
+				return Mumble::ScreenShare::IPC::makeErrorReply(
+					QStringLiteral("Unable to allocate the bounded native frame shared-memory ring."));
+			}
+		} else {
+			ScreenShareExternalProcess::stop(launch.process);
+			return Mumble::ScreenShare::IPC::makeErrorReply(QStringLiteral("Invalid native frame dimensions."));
+		}
+	}
+	// This producer remains test-only; production frames above come from the decoder's bounded raw BGRA pipe.
+	if (testPattern) {
+		if (launch.nativeFrameFeed && launch.process) {
+			const auto drainDecoder = [process = launch.process]() { process->readAllStandardOutput(); };
+			connect(launch.process, &QProcess::readyReadStandardOutput, launch.process, drainDecoder);
+			QTimer::singleShot(0, launch.process, drainDecoder);
+		}
 		const QString key = QStringLiteral("mumble-screen-frame-%1")
 							.arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
 		session.nativeFrameTransport = std::make_shared< Mumble::ScreenShare::FrameTransport >();
@@ -692,12 +759,16 @@ void ScreenShareHelperServer::attachProcessLogging(const QString &streamID, cons
 	}
 
 	QProcess *process = sessions.value(streamID).process;
-	connect(process, &QProcess::readyRead, this, [process, streamID, label]() {
-		const QString output = QString::fromUtf8(process->readAll()).trimmed();
+	const bool binaryStdout = sessions.value(streamID).payload.value(QStringLiteral("native_frame_feed_available")).toBool();
+	if (binaryStdout) process->setReadChannel(QProcess::StandardError);
+	const auto logOutput = [process, streamID, label, binaryStdout]() {
+		const QString output = QString::fromUtf8(binaryStdout ? process->readAllStandardError() : process->readAll()).trimmed();
 		if (!output.isEmpty()) {
 			qInfo().noquote() << QStringLiteral("ScreenShareHelper[%1:%2]: %3").arg(label, streamID, output);
 		}
-	});
+	};
+	if (binaryStdout) connect(process, &QProcess::readyReadStandardError, this, logOutput);
+	else connect(process, &QProcess::readyRead, this, logOutput);
 
 	connect(process, &QProcess::errorOccurred, this, [streamID, label](QProcess::ProcessError error) {
 		qWarning().noquote() << QStringLiteral("ScreenShareHelper[%1:%2]: process error %3")
@@ -716,7 +787,9 @@ void ScreenShareHelperServer::attachProcessLogging(const QString &streamID, cons
 					}
 				}
 
-				const QString output = QString::fromUtf8(process->readAll()).trimmed();
+				const QString output = QString::fromUtf8(process->processChannelMode() == QProcess::SeparateChannels
+																 ? process->readAllStandardError()
+																 : process->readAll()).trimmed();
 				if (!output.isEmpty()) {
 					qInfo().noquote() << QStringLiteral("ScreenShareHelper[%1:%2]: %3").arg(label, streamID, output);
 				}

@@ -501,6 +501,8 @@ ScreenShareSessionPlanner::Plan buildPlan(const QJsonObject &payload,
 					   qualityProfile.isEmpty() ? QStringLiteral("auto") : qualityProfile);
 	planPayload.insert(QStringLiteral("capture_source_id"), captureSourceID);
 	planPayload.insert(QStringLiteral("capture_audio"), captureAudio);
+	planPayload.insert(QStringLiteral("native_frame_requested"),
+					   !publish && payload.value(QStringLiteral("native_frame_requested")).toBool(false));
 	planPayload.insert(QStringLiteral("audio_source_id"), audioSourceID);
 	if (!publisherProcessID.isEmpty()) {
 		planPayload.insert(QStringLiteral("publisher_process_id"), publisherProcessID);

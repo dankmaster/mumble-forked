@@ -87,7 +87,8 @@ private:
 	static void logReplyWarnings(const QJsonObject &reply, Mumble::ScreenShare::IPC::Command command,
 								 const QString &streamID = QString());
 	static QJsonObject sendRequest(Mumble::ScreenShare::IPC::Command command, const QJsonObject &payload,
-								   const QString &helperExecutable, QString *errorMessage, bool launchIfNeeded = true);
+								   const QString &helperExecutable, QString *errorMessage, bool launchIfNeeded = true,
+								   int protocolVersion = Mumble::ScreenShare::IPC::PROTOCOL_VERSION);
 	static bool ensureHelperRunning(const QString &helperExecutable, QString *errorMessage = nullptr);
 	static void cacheAdvertisedCapabilities(const CapabilitySnapshot &snapshot);
 

@@ -144,4 +144,59 @@ bool FrameTransport::readLatest(NativeFrame *frame) {
 QString FrameTransport::key() const { return m_memory.key(); }
 quint64 FrameTransport::droppedFrames() const { return m_droppedFrames; }
 
+RawBgraFrameAssembler::RawBgraFrameAssembler(const qsizetype frameBytes, const int maximumBufferedFrames)
+	: m_frameBytes(frameBytes), m_maximumBufferedFrames(qMax(1, maximumBufferedFrames)) {
+}
+
+QList< QByteArray > RawBgraFrameAssembler::push(const QByteArray &bytes) {
+	QList< QByteArray > frames;
+	if (m_frameBytes <= 0 || bytes.isEmpty()) return frames;
+	if (bytes.size() > std::numeric_limits< qsizetype >::max() - m_buffer.size()) {
+		m_buffer.clear();
+		++m_droppedFrames;
+		return frames;
+	}
+	const qsizetype logicalBytes = m_buffer.size() + bytes.size();
+	const qsizetype completeFrames = logicalBytes / m_frameBytes;
+	qsizetype inputOffset = 0;
+	if (completeFrames > m_maximumBufferedFrames) {
+		const qsizetype dropCount = completeFrames - m_maximumBufferedFrames;
+		qsizetype bytesToDrop = dropCount * m_frameBytes;
+		const qsizetype bufferedDrop = qMin(bytesToDrop, m_buffer.size());
+		m_buffer.remove(0, bufferedDrop);
+		bytesToDrop -= bufferedDrop;
+		inputOffset = qMin(bytesToDrop, bytes.size());
+		m_droppedFrames += static_cast< quint64 >(dropCount);
+	}
+	if (inputOffset < bytes.size()) m_buffer.append(bytes.constData() + inputOffset, bytes.size() - inputOffset);
+	while (m_buffer.size() >= m_frameBytes) {
+		frames.push_back(m_buffer.left(m_frameBytes));
+		m_buffer.remove(0, m_frameBytes);
+	}
+	return frames;
+}
+
+quint64 RawBgraFrameAssembler::droppedFrames() const { return m_droppedFrames; }
+qsizetype RawBgraFrameAssembler::bufferedBytes() const { return m_buffer.size(); }
+
+QStringList ffmpegRawBgraOutputArguments(const quint32 width, const quint32 height) {
+	if (width == 0 || height == 0) return {};
+	return { QStringLiteral("-vf"),
+			 QStringLiteral("scale=%1:%2:flags=fast_bilinear,format=bgra").arg(width).arg(height),
+			 QStringLiteral("-pix_fmt"), QStringLiteral("bgra"), QStringLiteral("-f"), QStringLiteral("rawvideo"),
+			 QStringLiteral("pipe:1") };
+}
+
+QStringList gstreamerRawBgraSinkArguments(const quint32 width, const quint32 height, const bool inputAlreadyDecoded) {
+	if (width == 0 || height == 0) return {};
+	QStringList arguments;
+	if (!inputAlreadyDecoded) arguments << QStringLiteral("decodebin") << QStringLiteral("!");
+	arguments << QStringLiteral("videoconvert") << QStringLiteral("!") << QStringLiteral("videoscale")
+			  << QStringLiteral("!")
+			  << QStringLiteral("video/x-raw,format=BGRA,width=%1,height=%2").arg(width).arg(height)
+			  << QStringLiteral("!") << QStringLiteral("fdsink") << QStringLiteral("fd=1")
+			  << QStringLiteral("sync=false");
+	return arguments;
+}
+
 } // namespace Mumble::ScreenShare
