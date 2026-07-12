@@ -135,6 +135,7 @@ Dialog {
                                             if (type === "select" || type === "combo" || type === "dropdown") return selectField
                                             if (type === "slider" || type === "range" || type === "number" || type === "integer") return numberField
                                             if (type === "action" || type === "button") return actionField
+                                            if (type === "pluginEditor") return pluginEditorField
                                             if (type === "pathPicker" || type === "filePicker" || type === "folderPicker") return pathField
                                             return textField
                                         }
@@ -278,6 +279,10 @@ Dialog {
                 }
             }
         }
+    }
+    Component {
+        id: pluginEditorField
+        PluginEditor { }
     }
     Component {
         id: actionField
