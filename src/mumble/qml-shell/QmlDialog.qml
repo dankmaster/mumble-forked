@@ -136,6 +136,8 @@ Dialog {
                                             if (type === "slider" || type === "range" || type === "number" || type === "integer") return numberField
                                             if (type === "action" || type === "button") return actionField
                                             if (type === "pluginEditor") return pluginEditorField
+                                            if (type === "messageEventEditor") return messageEventEditorField
+                                            if (type === "shortcutEditor") return shortcutEditorField
                                             if (type === "pathPicker" || type === "filePicker" || type === "folderPicker") return pathField
                                             return textField
                                         }
@@ -279,6 +281,14 @@ Dialog {
                 }
             }
         }
+    }
+    Component {
+        id: shortcutEditorField
+        ShortcutEditor { }
+    }
+    Component {
+        id: messageEventEditorField
+        MessageEventEditor { }
     }
     Component {
         id: pluginEditorField

@@ -6,5 +6,7 @@
     <file alias="PttTool.qml">qml-shell/PttTool.qml</file>
     <file alias="QmlDialog.qml">qml-shell/QmlDialog.qml</file>
     <file alias="PluginEditor.qml">qml-shell/PluginEditor.qml</file>
+    <file alias="MessageEventEditor.qml">qml-shell/MessageEventEditor.qml</file>
+    <file alias="ShortcutEditor.qml">qml-shell/ShortcutEditor.qml</file>
   </qresource>
 </RCC>
