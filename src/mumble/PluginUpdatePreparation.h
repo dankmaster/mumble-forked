@@ -3,6 +3,7 @@
 
 #include <QtCore/QByteArray>
 #include <QtCore/QString>
+#include <QtCore/QStringList>
 
 #include <atomic>
 #include <functional>
@@ -32,5 +33,12 @@ PluginFileCommitResult commitPreparedPluginFile(const QString &sourcePath, const
 											const QByteArray &expectedSha256 = {});
 bool finalizePluginFileCommit(const PluginFileCommitResult &commit);
 bool rollbackPluginFileCommit(const PluginFileCommitResult &commit);
+struct PluginTransactionRecoveryResult {
+	int pendingRemoved = 0;
+	int backupsRestored = 0;
+	int backupsRemoved = 0;
+	QStringList errors;
+};
+PluginTransactionRecoveryResult recoverPluginFileTransactions(const QString &directoryPath);
 
 #endif

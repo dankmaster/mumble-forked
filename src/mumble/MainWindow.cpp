@@ -11741,6 +11741,13 @@ void MainWindow::applyShellLayout() {
 					it != m_pluginInstallCancellation.cend()) it.value()->store(true);
 			});
 			if (Global::get().pluginManager) {
+				connect(Global::get().pluginManager, &PluginManager::pluginRescanFinished, this,
+						[this](const bool success) {
+							if (success) openModernSettingsDialog(QStringLiteral("plugins"));
+							publishModernToast(success ? QStringLiteral("success") : QStringLiteral("error"),
+											   tr("Plugins"), success ? tr("Plugin folders rescanned.")
+																   : tr("Plugin rescan failed."));
+						});
 				connect(Global::get().pluginManager, &PluginManager::pluginUpdateStarted, this,
 						[operations](const qulonglong pluginID, const QString &name) {
 							operations->startOperation(QStringLiteral("plugin-update:%1").arg(pluginID), name,
@@ -16887,23 +16894,19 @@ void MainWindow::commitAsyncPluginInstall(const QString &operationID,
 		watcher->deleteLater();
 		if (!m_qmlShellHost) return;
 		if (!result.success) {
-			Global::get().pluginManager->rescanPlugins();
+			Global::get().pluginManager->reloadPluginPath(destinationPath);
 			m_pluginInstallCancellation.remove(operationID);
 			m_qmlShellHost->operationModel()->finishOperation(operationID, false, result.errorCode, result.message);
 			return;
 		}
-		Global::get().pluginManager->rescanPlugins();
-		bool loaded = false;
-		for (const const_plugin_ptr_t &candidate : Global::get().pluginManager->getPlugins())
-			if (candidate && QFileInfo(candidate->getFilePath()).absoluteFilePath()
-						== QFileInfo(destinationPath).absoluteFilePath()) loaded = true;
+		const bool loaded = Global::get().pluginManager->reloadPluginPath(destinationPath);
 		auto *finishWatcher = new QFutureWatcher< bool >(this);
 		connect(finishWatcher, &QFutureWatcherBase::finished, this,
-				[this, finishWatcher, operationID, loaded]() {
+				[this, finishWatcher, operationID, loaded, destinationPath]() {
 					const bool completed = finishWatcher->result();
 					finishWatcher->deleteLater();
 					m_pluginInstallCancellation.remove(operationID);
-					if (!loaded) Global::get().pluginManager->rescanPlugins();
+					if (!loaded) Global::get().pluginManager->reloadPluginPath(destinationPath);
 					m_qmlShellHost->operationModel()->finishOperation(
 						operationID, loaded && completed,
 						loaded ? (completed ? QString() : QStringLiteral("finalize-error")) : QStringLiteral("load-error"),
@@ -17037,8 +17040,8 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 			return true;
 		}
 		if (actionID == QLatin1String("plugins.rescan")) {
-			Global::get().pluginManager->rescanPlugins();
-			publishModernToast(QStringLiteral("success"), tr("Plugins"), tr("Plugin folders rescanned."));
+			Global::get().pluginManager->rescanPluginsAsync();
+			publishModernToast(QStringLiteral("info"), tr("Plugins"), tr("Rescanning plugin folders."));
 			return true;
 		}
 		if (actionID == QLatin1String("plugins.checkUpdates")) {
@@ -17057,7 +17060,7 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 				return true;
 			}
 #endif
-			if (!Global::get().pluginManager->showConfigDialogFor(pluginID, this)) {
+			if (!Global::get().pluginManager->showConfigDialogFor(pluginID, nullptr)) {
 				publishModernToast(QStringLiteral("info"), tr("Plugins"), tr("This plugin has no configuration dialog."));
 			}
 			return true;
@@ -17075,7 +17078,7 @@ bool MainWindow::handleModernGenericDialogAction(const QString &dialogID, const 
 				return true;
 			}
 #endif
-			if (!Global::get().pluginManager->showAboutDialogFor(pluginID, this)) {
+			if (!Global::get().pluginManager->showAboutDialogFor(pluginID, nullptr)) {
 				publishModernToast(QStringLiteral("info"), tr("Plugins"), tr("This plugin has no About dialog."));
 			}
 			return true;
@@ -21540,15 +21543,11 @@ bool MainWindow::handleModernShellScopeSelection(const QString &scopeToken) {
 		return false;
 	}
 
-	m_modernSelectionState.scopeToken = scopeToken.trimmed();
-	m_modernSelectionState.scopeValue = scopeValue;
-	m_modernSelectionState.scopeID    = scopeID;
-	m_modernSelectionState.selectedUserSession =
-		scopeValue == LocalDirectMessageScope ? std::optional< unsigned int >(scopeID) : std::nullopt;
-	if (scopeValue == static_cast< int >(MumbleProto::Channel)) {
-		m_modernSelectionState.selectedVoiceChannelID = scopeID;
-	}
-	syncQmlSelectionState();
+	if (QmlSelectionState *selection = qmlSelectionState())
+		selection->applySelection(scopeToken, scopeValue, scopeID,
+			scopeValue == LocalDirectMessageScope ? QVariant::fromValue(scopeID) : QVariant(),
+			scopeValue == static_cast< int >(MumbleProto::Channel) ? QVariant::fromValue(scopeID)
+																 : selection->selectedVoiceChannelId());
 
 	if (scopeValue == LocalServerLogScope) {
 		++m_qmlMessageGeneration;
@@ -21598,12 +21597,8 @@ bool MainWindow::handleModernShellScopeRailSelection(const QString &scopeToken, 
 	}
 
 	if (scopeValue == static_cast< int >(MumbleProto::Channel)) {
-		m_modernSelectionState.scopeToken             = scopeToken.trimmed();
-		m_modernSelectionState.scopeValue             = scopeValue;
-		m_modernSelectionState.scopeID                = scopeID;
-		m_modernSelectionState.selectedUserSession.reset();
-		m_modernSelectionState.selectedVoiceChannelID = scopeID;
-		syncQmlSelectionState();
+		if (QmlSelectionState *selection = qmlSelectionState())
+			selection->applySelection(scopeToken, scopeValue, scopeID, {}, scopeID);
 		const QString normalizedRailKind = railKind.trimmed().toLower();
 		if (normalizedRailKind == QLatin1String("voice") || normalizedRailKind == QLatin1String("text")) {
 			return navigateToPersistentChatScope(MumbleProto::Channel, scopeID, false,
@@ -21626,12 +21621,8 @@ bool MainWindow::handleModernShellVoiceJoin(const QString &scopeToken) {
 	if (!channel) {
 		return false;
 	}
-	m_modernSelectionState.scopeToken             = scopeToken.trimmed();
-	m_modernSelectionState.scopeValue             = scopeValue;
-	m_modernSelectionState.scopeID                = scopeID;
-	m_modernSelectionState.selectedUserSession.reset();
-	m_modernSelectionState.selectedVoiceChannelID = scopeID;
-	syncQmlSelectionState();
+	if (QmlSelectionState *selection = qmlSelectionState())
+		selection->applySelection(scopeToken, scopeValue, scopeID, {}, scopeID);
 
 	if (Global::get().sh && Global::get().uiSession != 0) {
 		if (const Channel *currentChannel = currentVoiceChannel(); currentChannel && currentChannel->iId == channel->iId) {
@@ -23684,8 +23675,8 @@ Channel *MainWindow::currentVoiceChannel() const {
 }
 
 Channel *MainWindow::selectedVoiceTreeChannel() const {
-	if (m_modernSelectionState.selectedVoiceChannelID) {
-		if (Channel *selectedChannel = Channel::get(*m_modernSelectionState.selectedVoiceChannelID)) {
+	if (const auto selected = selectedModernVoiceChannel()) {
+		if (Channel *selectedChannel = Channel::get(*selected)) {
 			return selectedChannel;
 		}
 	}
@@ -23693,11 +23684,19 @@ Channel *MainWindow::selectedVoiceTreeChannel() const {
 }
 
 std::optional< unsigned int > MainWindow::selectedModernUserSession() const {
-	return m_modernSelectionState.selectedUserSession;
+	QmlSelectionState *selection = qmlSelectionState();
+	bool valid = false;
+	const qulonglong value = selection ? selection->selectedUserSession().toULongLong(&valid) : 0;
+	return valid && value <= std::numeric_limits< unsigned int >::max()
+		? std::make_optional(static_cast< unsigned int >(value)) : std::nullopt;
 }
 
 std::optional< unsigned int > MainWindow::selectedModernVoiceChannel() const {
-	return m_modernSelectionState.selectedVoiceChannelID;
+	QmlSelectionState *selection = qmlSelectionState();
+	bool valid = false;
+	const qulonglong value = selection ? selection->selectedVoiceChannelId().toULongLong(&valid) : 0;
+	return valid && value <= std::numeric_limits< unsigned int >::max()
+		? std::make_optional(static_cast< unsigned int >(value)) : std::nullopt;
 }
 
 QmlShellHost *MainWindow::qmlShellHost() const {
@@ -23710,18 +23709,20 @@ void MainWindow::selectModernUserSession(const unsigned int session) {
 
 void MainWindow::selectModernVoiceChannel(const unsigned int channelID) {
 	if (!Channel::get(channelID)) return;
-	m_modernSelectionState.selectedUserSession.reset();
-	m_modernSelectionState.selectedVoiceChannelID = channelID;
-	syncQmlSelectionState();
+	if (QmlSelectionState *selection = qmlSelectionState()) {
+		selection->setSelectedUserSession({});
+		selection->setSelectedVoiceChannelId(channelID);
+	}
 }
 
 bool MainWindow::handleModernShellParticipantSelection(const unsigned int session, const bool openConversation) {
 	ClientUser *user = ClientUser::get(session);
 	if (!user) return false;
 
-	m_modernSelectionState.selectedUserSession = session;
-	if (user->cChannel) m_modernSelectionState.selectedVoiceChannelID = user->cChannel->iId;
-	syncQmlSelectionState();
+	if (QmlSelectionState *selection = qmlSelectionState()) {
+		selection->setSelectedUserSession(session);
+		if (user->cChannel) selection->setSelectedVoiceChannelId(user->cChannel->iId);
+	}
 	return !openConversation || openModernDirectMessage(session, true);
 }
 
@@ -23742,16 +23743,8 @@ void MainWindow::ensureModernUiAutomationServer() {
 #endif
 }
 
-void MainWindow::syncQmlSelectionState() {
-	if (!m_qmlShellHost) return;
-	QmlSelectionState *selection = m_qmlShellHost->selectionState();
-	selection->setScopeToken(m_modernSelectionState.scopeToken);
-	selection->setSelectedUserSession(m_modernSelectionState.selectedUserSession
-										 ? QVariant::fromValue(*m_modernSelectionState.selectedUserSession)
-										 : QVariant());
-	selection->setSelectedVoiceChannelId(m_modernSelectionState.selectedVoiceChannelID
-											? QVariant::fromValue(*m_modernSelectionState.selectedVoiceChannelID)
-											: QVariant());
+QmlSelectionState *MainWindow::qmlSelectionState() const {
+	return m_qmlShellHost ? m_qmlShellHost->selectionState() : nullptr;
 }
 
 void MainWindow::applyQmlRoomState(const QVariantMap &state) {
@@ -23857,11 +23850,22 @@ void MainWindow::syncQmlShellState() {
 	const QVariantMap activeScopeState = buildQmlActiveScopeState(target);
 	m_qmlShellHost->activeScopeController()->applyState(activeScopeState);
 
-	m_modernSelectionState.scopeToken = activeScopeState.value(QStringLiteral("scopeToken"),
-													m_modernSelectionState.scopeToken).toString();
-	syncQmlSelectionState();
-
+	QmlSelectionState *selection = qmlSelectionState();
+	const QString scopeToken = activeScopeState.value(QStringLiteral("scopeToken"),
+		selection ? selection->scopeToken() : QString()).toString();
+	int scopeValue = -1;
+	unsigned int scopeID = 0;
+	const bool hasScope = parseModernShellScopeToken(scopeToken, scopeValue, scopeID);
+	const QVariant selectedUser = selection ? selection->selectedUserSession() : QVariant();
+	const QVariant selectedVoiceChannel = selection ? selection->selectedVoiceChannelId() : QVariant();
 	applyQmlRoomState(roomState);
+	// The typed selection validates IDs against the room/participant models. Populate those models before
+	// publishing a newly connected scope so a valid bootstrap selection is not rejected as unknown.
+	if (selection) {
+		selection->applySelection(scopeToken, hasScope ? scopeValue : -1,
+			hasScope ? QVariant::fromValue(scopeID) : QVariant(),
+			selectedUser, selectedVoiceChannel);
+	}
 
 	QVariantList messages;
 	if (!m_modernRichPreviewProbeMessages.isEmpty()) {
@@ -23880,11 +23884,10 @@ void MainWindow::focusPersistentChatVoiceChannel(Channel *channel) {
 	if (!channel) {
 		return;
 	}
-	m_modernSelectionState.scopeToken             = modernShellScopeToken(MumbleProto::Channel, channel->iId);
-	m_modernSelectionState.scopeValue             = static_cast< int >(MumbleProto::Channel);
-	m_modernSelectionState.scopeID                = channel->iId;
-	m_modernSelectionState.selectedUserSession.reset();
-	m_modernSelectionState.selectedVoiceChannelID = channel->iId;
+	if (QmlSelectionState *selection = qmlSelectionState()) {
+		selection->applySelection(modernShellScopeToken(MumbleProto::Channel, channel->iId),
+			static_cast< int >(MumbleProto::Channel), channel->iId, {}, channel->iId);
+	}
 
 	setPersistentChatTargetUsesVoiceTree(true);
 	rebuildPersistentChatChannelList();
@@ -24046,10 +24049,14 @@ bool MainWindow::canEditPersistentTextChannelACL(const PersistentTextChannel &te
 }
 
 std::optional< MainWindow::PersistentTextChannel > MainWindow::selectedPersistentTextChannel() const {
-	if (m_modernSelectionState.scopeValue != static_cast< int >(MumbleProto::TextChannel)) {
+	QmlSelectionState *selection = qmlSelectionState();
+	bool valid = false;
+	const qulonglong scopeID = selection ? selection->scopeId().toULongLong(&valid) : 0;
+	if (!selection || selection->scopeValue() != static_cast< int >(MumbleProto::TextChannel)
+		|| !valid || scopeID > std::numeric_limits< unsigned int >::max()) {
 		return std::nullopt;
 	}
-	const auto it = m_persistentTextChannels.constFind(m_modernSelectionState.scopeID);
+	const auto it = m_persistentTextChannels.constFind(static_cast< unsigned int >(scopeID));
 	if (it == m_persistentTextChannels.cend()) {
 		return std::nullopt;
 	}
@@ -24202,12 +24209,10 @@ bool MainWindow::navigateToPersistentChatScope(MumbleProto::ChatScope scope, uns
 	}
 
 	const bool useVoiceTreeTarget = scope == MumbleProto::Channel && useVoiceTree;
-	m_modernSelectionState.scopeToken = modernShellScopeToken(static_cast< int >(scope), scopeID);
-	m_modernSelectionState.scopeValue = static_cast< int >(scope);
-	m_modernSelectionState.scopeID    = scopeID;
-	m_modernSelectionState.selectedUserSession.reset();
-	if (scope == MumbleProto::Channel) {
-		m_modernSelectionState.selectedVoiceChannelID = scopeID;
+	if (QmlSelectionState *selection = qmlSelectionState()) {
+		selection->applySelection(modernShellScopeToken(static_cast< int >(scope), scopeID),
+			static_cast< int >(scope), scopeID, {},
+			scope == MumbleProto::Channel ? QVariant::fromValue(scopeID) : selection->selectedVoiceChannelId());
 	}
 	appendModernShellConnectTrace(QStringLiteral("navigateToPersistentChatScope direct scope=%1 id=%2 force=%3 rail=%4")
 									  .arg(static_cast< int >(scope))
@@ -24239,9 +24244,8 @@ MainWindow::PersistentChatTarget MainWindow::ephemeralChatTarget() const {
 	}
 
 	const ClientUser *self   = ClientUser::get(Global::get().uiSession);
-	ClientUser *selectedUser = m_modernSelectionState.selectedUserSession
-							   ? ClientUser::get(*m_modernSelectionState.selectedUserSession)
-							   : nullptr;
+	const auto selectedUserSession = selectedModernUserSession();
+	ClientUser *selectedUser = selectedUserSession ? ClientUser::get(*selectedUserSession) : nullptr;
 	if (selectedUser && selectedUser->uiSession != Global::get().uiSession) {
 		target.valid          = true;
 		target.directMessage  = true;
@@ -24302,9 +24306,14 @@ MainWindow::PersistentChatTarget MainWindow::currentPersistentChatTarget() const
 	}
 
 	const bool connected = Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning();
-	std::optional< int > selectedScopeValue = m_modernSelectionState.scopeToken.isEmpty()
-		? std::optional< int >() : std::make_optional(m_modernSelectionState.scopeValue);
-	const unsigned int selectedScopeID = m_modernSelectionState.scopeID;
+	QmlSelectionState *selection = qmlSelectionState();
+	std::optional< int > selectedScopeValue = !selection || selection->scopeToken().isEmpty()
+		? std::optional< int >() : std::make_optional(selection->scopeValue());
+	bool selectedScopeIDValid = false;
+	const qulonglong selectedScopeIDValue = selection ? selection->scopeId().toULongLong(&selectedScopeIDValid) : 0;
+	const unsigned int selectedScopeID = selectedScopeIDValid
+		&& selectedScopeIDValue <= std::numeric_limits< unsigned int >::max()
+		? static_cast< unsigned int >(selectedScopeIDValue) : 0;
 
 	if (selectedScopeValue.has_value() && *selectedScopeValue == LocalServerLogScope) {
 		return activityTarget();
@@ -29923,11 +29932,11 @@ ContextMenuTarget MainWindow::getContextMenuTargets() {
 		target.user    = getContextMenuUser();
 		target.channel = getContextMenuChannel();
 
-		if (!target.user && m_modernSelectionState.selectedUserSession) {
-			target.user = ClientUser::get(*m_modernSelectionState.selectedUserSession);
+		if (!target.user) {
+			if (const auto selected = selectedModernUserSession()) target.user = ClientUser::get(*selected);
 		}
-		if (!target.channel && m_modernSelectionState.selectedVoiceChannelID) {
-			target.channel = Channel::get(*m_modernSelectionState.selectedVoiceChannelID);
+		if (!target.channel) {
+			if (const auto selected = selectedModernVoiceChannel()) target.channel = Channel::get(*selected);
 		}
 		if (!target.user && !target.channel) {
 			target.user = ClientUser::get(Global::get().uiSession);
@@ -29988,9 +29997,9 @@ bool MainWindow::handleSpecialContextMenu(const QUrl &url, const QPoint &pos_, b
 		}
 		if (ok && cuContextUser) {
 			if (focus) {
-				m_modernSelectionState.selectedUserSession = cuContextUser->uiSession;
-				if (cuContextUser->cChannel) {
-					m_modernSelectionState.selectedVoiceChannelID = cuContextUser->cChannel->iId;
+				if (QmlSelectionState *selection = qmlSelectionState()) {
+					selection->setSelectedUserSession(cuContextUser->uiSession);
+					if (cuContextUser->cChannel) selection->setSelectedVoiceChannelId(cuContextUser->cChannel->iId);
 				}
 				scheduleQmlRoomStateUpdate();
 			} else {
@@ -30012,8 +30021,10 @@ bool MainWindow::handleSpecialContextMenu(const QUrl &url, const QPoint &pos_, b
 		ok                         = ok && sh && (qbaServerDigest == sh->qbaDigest);
 		if (ok) {
 			if (focus) {
-				m_modernSelectionState.selectedUserSession.reset();
-				m_modernSelectionState.selectedVoiceChannelID = cContextChannel->iId;
+				if (QmlSelectionState *selection = qmlSelectionState()) {
+					selection->setSelectedUserSession({});
+					selection->setSelectedVoiceChannelId(cContextChannel->iId);
+				}
 				scheduleQmlRoomStateUpdate();
 			} else {
 				qpContextPosition = QPoint();
@@ -30658,12 +30669,16 @@ void MainWindow::findDesiredChannel() {
 		if (chan != ClientUser::get(Global::get().uiSession)->cChannel) {
 			Global::get().sh->joinChannel(Global::get().uiSession, chan->iId);
 		}
-		m_modernSelectionState.selectedUserSession.reset();
-		m_modernSelectionState.selectedVoiceChannelID = chan->iId;
+		if (QmlSelectionState *selection = qmlSelectionState()) {
+			selection->setSelectedUserSession({});
+			selection->setSelectedVoiceChannelId(chan->iId);
+		}
 	} else if (Global::get().uiSession) {
 		if (ClientUser *self = ClientUser::get(Global::get().uiSession); self && self->cChannel) {
-			m_modernSelectionState.selectedUserSession.reset();
-			m_modernSelectionState.selectedVoiceChannelID = self->cChannel->iId;
+			if (QmlSelectionState *selection = qmlSelectionState()) {
+				selection->setSelectedUserSession({});
+				selection->setSelectedVoiceChannelId(self->cChannel->iId);
+			}
 		}
 	}
 	if (hiddenNativeUserModelSafeMode) {
@@ -33474,7 +33489,9 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	qaServerAddToFavorites->setEnabled(false);
 	qaServerInformation->setEnabled(false);
 	qaServerBanList->setEnabled(false);
-	m_modernSelectionState = ModernSelectionState {};
+	if (QmlSelectionState *selection = qmlSelectionState()) {
+		selection->applySelection({}, -1, {}, {}, {});
+	}
 	m_defaultPersistentTextChannelID = 0;
 	m_persistentTextChannels.clear();
 	m_userIdleSeconds.clear();

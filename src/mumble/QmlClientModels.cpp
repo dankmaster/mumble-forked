@@ -894,14 +894,48 @@ void QmlSelectionState::bindModels(RoomModel *rooms, ParticipantModel *participa
 }
 
 QString QmlSelectionState::scopeToken() const { return m_scopeToken; }
+int QmlSelectionState::scopeValue() const { return m_scopeValue; }
+QVariant QmlSelectionState::scopeId() const { return m_scopeId; }
 QVariant QmlSelectionState::selectedUserSession() const { return m_selectedUserSession; }
 QVariant QmlSelectionState::selectedVoiceChannelId() const { return m_selectedVoiceChannelId; }
 void QmlSelectionState::setScopeToken(const QString &value) {
 	const QString normalized = value.trimmed();
 	const QString accepted = !m_rooms || normalized.isEmpty() || hasScopeToken(normalized) ? normalized : QString();
-	if (m_scopeToken == accepted) return;
+	if (m_scopeToken == accepted) {
+		if (accepted.isEmpty()) {
+			setScopeValue(-1);
+			setScopeId({});
+		}
+		return;
+	}
 	m_scopeToken = accepted;
 	emit scopeTokenChanged();
+	if (m_scopeToken.isEmpty()) {
+		setScopeValue(-1);
+		setScopeId({});
+	}
+}
+void QmlSelectionState::setScopeValue(const int value) {
+	if (m_scopeValue == value) return;
+	m_scopeValue = value;
+	emit scopeValueChanged();
+}
+void QmlSelectionState::setScopeId(const QVariant &value) {
+	bool valid = false;
+	const qulonglong id = value.toULongLong(&valid);
+	const QVariant accepted = valid ? QVariant::fromValue(id) : QVariant();
+	if (m_scopeId == accepted) return;
+	m_scopeId = accepted;
+	emit scopeIdChanged();
+}
+void QmlSelectionState::applySelection(const QString &scopeToken, const int scopeValue, const QVariant &scopeId,
+									   const QVariant &selectedUserSession,
+									   const QVariant &selectedVoiceChannelId) {
+	setScopeToken(scopeToken);
+	setScopeValue(m_scopeToken.isEmpty() ? -1 : scopeValue);
+	setScopeId(m_scopeToken.isEmpty() ? QVariant() : scopeId);
+	setSelectedUserSession(selectedUserSession);
+	setSelectedVoiceChannelId(selectedVoiceChannelId);
 }
 void QmlSelectionState::setSelectedUserSession(const QVariant &value) {
 	bool valid = false;
@@ -926,7 +960,9 @@ void QmlSelectionState::setSelectedVoiceChannelId(const QVariant &value) {
 }
 
 void QmlSelectionState::validate() {
-	if (!m_scopeToken.isEmpty() && !hasScopeToken(m_scopeToken)) setScopeToken({});
+	if (!m_scopeToken.isEmpty() && !hasScopeToken(m_scopeToken)) {
+		setScopeToken({});
+	}
 	if (m_selectedUserSession.isValid()
 		&& !hasParticipantSession(QString::number(m_selectedUserSession.toULongLong())))
 		setSelectedUserSession({});

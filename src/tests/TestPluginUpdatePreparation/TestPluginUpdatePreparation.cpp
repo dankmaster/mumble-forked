@@ -11,6 +11,7 @@ private slots:
 	void writesUniqueTemporaryPackage();
 	void reportsEmptyAndCancellation();
 	void commitsOverwriteAndPreservesDestinationOnCancel();
+	void recoversAbandonedTransactionsConservatively();
 };
 
 void TestPluginUpdatePreparation::writesUniqueTemporaryPackage() {
@@ -26,6 +27,32 @@ void TestPluginUpdatePreparation::writesUniqueTemporaryPackage() {
 	file.close();
 	QFile::remove(first.path);
 	QFile::remove(second.path);
+}
+
+void TestPluginUpdatePreparation::recoversAbandonedTransactionsConservatively() {
+	QTemporaryDir directory;
+	QVERIFY(directory.isValid());
+	const auto write = [&directory](const QString &name, const QByteArray &bytes) {
+		QFile file(directory.filePath(name));
+		if (!file.open(QIODevice::WriteOnly)) return false;
+		return file.write(bytes) == bytes.size();
+	};
+	QVERIFY(write(QStringLiteral("orphan.dll.pending-token"), QByteArray("pending")));
+	QVERIFY(write(QStringLiteral("restore.dll.backup-token"), QByteArray("old")));
+	QVERIFY(write(QStringLiteral("keep.dll"), QByteArray("new")));
+	QVERIFY(write(QStringLiteral("keep.dll.backup-token"), QByteArray("old")));
+	const PluginTransactionRecoveryResult result = recoverPluginFileTransactions(directory.path());
+	QCOMPARE(result.pendingRemoved, 1);
+	QCOMPARE(result.backupsRestored, 2);
+	QCOMPARE(result.backupsRemoved, 0);
+	QVERIFY(result.errors.isEmpty());
+	QVERIFY(!QFileInfo::exists(directory.filePath(QStringLiteral("orphan.dll.pending-token"))));
+	QFile restored(directory.filePath(QStringLiteral("restore.dll")));
+	QVERIFY(restored.open(QIODevice::ReadOnly));
+	QCOMPARE(restored.readAll(), QByteArray("old"));
+	QFile kept(directory.filePath(QStringLiteral("keep.dll")));
+	QVERIFY(kept.open(QIODevice::ReadOnly));
+	QCOMPARE(kept.readAll(), QByteArray("old"));
 }
 
 void TestPluginUpdatePreparation::commitsOverwriteAndPreservesDestinationOnCancel() {

@@ -303,13 +303,12 @@ void PluginUpdater::on_updateDownloaded(QNetworkReply *reply) {
 		}
 
 		const QString pluginName = plugin->getName();
-		const bool requireLoaded = plugin->isLoaded();
 		const QString installDirectory = PluginInstallService::installDirectory();
 		plugin.reset();
 		++m_pendingPreparations;
 		auto *writeWatcher = new QFutureWatcher< PreparedUpdate >(this);
 		connect(writeWatcher, &QFutureWatcherBase::finished, this,
-				[this, writeWatcher, entry, pluginName, requireLoaded]() {
+				[this, writeWatcher, entry, pluginName]() {
 			const PreparedUpdate result = writeWatcher->result();
 			writeWatcher->deleteLater();
 			if (!result.downloaded.errorCode.isEmpty() || !result.package) {
@@ -345,30 +344,25 @@ void PluginUpdater::on_updateDownloaded(QNetworkReply *reply) {
 			}
 			auto *commitWatcher = new QFutureWatcher< PluginFileCommitResult >(this);
 			connect(commitWatcher, &QFutureWatcherBase::finished, this,
-					[this, commitWatcher, entry, pluginName, requireLoaded, temporaryPath,
+					[this, commitWatcher, entry, pluginName, temporaryPath,
 					 destinationPath = package.destinationPath]() {
 						const PluginFileCommitResult committed = commitWatcher->result();
 						commitWatcher->deleteLater();
 						QFile::remove(temporaryPath);
 						if (!committed.success) {
 							--m_pendingPreparations;
-							Global::get().pluginManager->rescanPlugins();
+							Global::get().pluginManager->reloadPluginPath(destinationPath);
 							finishEntry(entry, false, committed.errorCode, committed.message);
 							return;
 						}
-						Global::get().pluginManager->rescanPlugins();
-						bool loaded = false;
-						for (const const_plugin_ptr_t &candidate : Global::get().pluginManager->getPlugins())
-							if (candidate && candidate->isValid() && (!requireLoaded || candidate->isLoaded())
-								&& QFileInfo(candidate->getFilePath()).absoluteFilePath()
-										== QFileInfo(destinationPath).absoluteFilePath()) loaded = true;
+						const bool loaded = Global::get().pluginManager->reloadPluginPath(destinationPath);
 						auto *finishWatcher = new QFutureWatcher< bool >(this);
 						connect(finishWatcher, &QFutureWatcherBase::finished, this,
-								[this, finishWatcher, entry, pluginName, loaded]() {
+								[this, finishWatcher, entry, pluginName, loaded, destinationPath]() {
 									const bool fileResult = finishWatcher->result();
 									finishWatcher->deleteLater();
 									--m_pendingPreparations;
-									if (!loaded) Global::get().pluginManager->rescanPlugins();
+									if (!loaded) Global::get().pluginManager->reloadPluginPath(destinationPath);
 									if (loaded && fileResult)
 										Log::logOrDefer(Log::Information, tr("Successfully updated plugin \"%1\"").arg(pluginName));
 									finishEntry(entry, loaded && fileResult,

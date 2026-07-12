@@ -44,6 +44,7 @@ class PluginManager : public QObject {
 private:
 	Q_OBJECT
 	Q_DISABLE_COPY(PluginManager)
+	bool m_asyncRescanInProgress = false;
 protected:
 	/// Lock for pluginHashMap. This lock has to be acquired when accessing pluginHashMap
 	mutable QReadWriteLock m_pluginCollectionLock;
@@ -181,6 +182,11 @@ public:
 public slots:
 	/// Rescans the plugin directory and load all plugins from there after having cleared the current plugin list
 	void rescanPlugins();
+	/// Discovers filesystem candidates and performs transaction recovery in a worker. Plugin destruction,
+	/// construction, ABI calls and settings application remain on this object's owner thread, one item per turn.
+	void rescanPluginsAsync();
+	/// Reloads one already-staged path on the owner thread without a full directory scan.
+	bool reloadPluginPath(const QString &path);
 	/// Slot that gets called whenever data from another plugin has been received. This function will then delegate
 	/// this to the respective plugin callback
 	///
@@ -301,6 +307,7 @@ protected slots:
 	void reportPermanentError(mumble_plugin_id_t pluginID);
 
 signals:
+	void pluginRescanFinished(bool success);
 	void pluginUpdateStarted(qulonglong pluginID, const QString &name);
 	void pluginUpdateProgress(qulonglong pluginID, qint64 bytesReceived, qint64 bytesTotal);
 	void pluginUpdateResult(qulonglong pluginID, bool success, const QString &errorCode, const QString &message);

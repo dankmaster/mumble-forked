@@ -1720,9 +1720,8 @@ void MainWindow::msgVoiceTarget(const MumbleProto::VoiceTarget &) {
 ///
 /// @param msg The message object containing the respective information
 void MainWindow::msgPermissionQuery(const MumbleProto::PermissionQuery &msg) {
-	Channel *current = m_modernSelectionState.selectedVoiceChannelID
-						   ? Channel::get(*m_modernSelectionState.selectedVoiceChannelID)
-						   : nullptr;
+	const auto selectedVoiceChannel = selectedModernVoiceChannel();
+	Channel *current = selectedVoiceChannel ? Channel::get(*selectedVoiceChannel) : nullptr;
 	const PersistentChatTarget activeChatTarget = currentPersistentChatTarget();
 	const bool activeChatTargetMatchesPermissionChannel =
 		activeChatTarget.valid && !activeChatTarget.serverLog && !activeChatTarget.directMessage

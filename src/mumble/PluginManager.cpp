@@ -19,12 +19,15 @@
 #include <QTimer>
 #include <QVector>
 #include <QWriteLocker>
+#include <QFutureWatcher>
+#include <QtConcurrent>
 
 #include "API.h"
 #include "Log.h"
 #include "MainWindow.h"
 #include "PluginInstallService.h"
 #include "PluginUpdater.h"
+#include "PluginUpdatePreparation.h"
 #include "ProcessResolver.h"
 #include "ServerHandler.h"
 #include "Global.h"
@@ -37,6 +40,7 @@
 #include <cstdint>
 #include <memory>
 #include <vector>
+#include <utility>
 
 #ifdef Q_OS_WIN
 #	include <tlhelp32.h>
@@ -282,6 +286,11 @@ bool PluginManager::selectActivePositionalDataPlugin() {
 #define LOG_FOUND_LEGACY_PLUGIN(plugin, path) LOG_FOUND(plugin, path, "legacy ")
 #define LOG_FOUND_BUILTIN(plugin) LOG_FOUND(plugin, QString::fromLatin1("<builtin>"), "built-in ")
 void PluginManager::rescanPlugins() {
+	// Startup recovery runs before any plugin library is loaded, so restoring an abandoned backup is safe.
+	for (const QString &searchPath : std::as_const(m_pluginSearchPaths)) {
+		if (QDir(searchPath).absolutePath() == QDir(PluginInstallService::installDirectory()).absolutePath())
+			recoverPluginFileTransactions(searchPath);
+	}
 	clearPlugins();
 
 	{
@@ -390,6 +399,104 @@ void PluginManager::rescanPlugins() {
 		}
 
 		it++;
+	}
+}
+
+void PluginManager::rescanPluginsAsync() {
+	if (m_asyncRescanInProgress) return;
+	m_asyncRescanInProgress = true;
+	const QStringList searchPaths = m_pluginSearchPaths.values();
+	auto *watcher = new QFutureWatcher< QStringList >(this);
+	connect(watcher, &QFutureWatcherBase::finished, this, [this, watcher]() {
+		const QStringList discovered = watcher->result();
+		watcher->deleteLater();
+		struct State { QStringList paths; QVector< plugin_id_t > oldIds; int clearIndex = 0; int createIndex = 0; };
+		auto state = std::make_shared< State >();
+		state->paths = discovered;
+		for (const const_plugin_ptr_t &plugin : getPlugins()) if (plugin) state->oldIds.push_back(plugin->getID());
+		auto step = std::make_shared< std::function< void() > >();
+		*step = [this, state, step]() {
+			if (state->clearIndex < state->oldIds.size()) {
+				clearPlugin(state->oldIds.at(state->clearIndex++));
+				QTimer::singleShot(0, this, *step); return;
+			}
+			if (state->createIndex < state->paths.size()) {
+				const QString path = state->paths.at(state->createIndex++);
+				try {
+					plugin_ptr_t plugin(Plugin::createNew< Plugin >(path));
+					const QString key = QLatin1String(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Sha1).toHex());
+					const PluginSetting setting = Global::get().s.qhPluginSettings.value(key);
+					{ QWriteLocker lock(&m_pluginCollectionLock); m_pluginHashMap.insert(plugin->getID(), plugin); }
+					if (setting.enabled) loadPlugin(plugin->getID());
+					plugin->enablePositionalData(setting.positionalDataEnabled);
+					plugin->allowKeyboardMonitoring(setting.allowKeyboardMonitoring);
+				} catch (const PluginError &error) {
+					try {
+						legacy_plugin_ptr_t legacy(Plugin::createNew< LegacyPlugin >(path));
+						const QString key = QLatin1String(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Sha1).toHex());
+						const PluginSetting setting = Global::get().s.qhPluginSettings.value(key);
+						{ QWriteLocker lock(&m_pluginCollectionLock); m_pluginHashMap.insert(legacy->getID(), legacy); }
+						if (setting.enabled) loadPlugin(legacy->getID());
+						legacy->enablePositionalData(setting.positionalDataEnabled);
+						legacy->allowKeyboardMonitoring(setting.allowKeyboardMonitoring);
+					} catch (const PluginError &) {
+						Log::logOrDefer(Log::Warning, tr("Unable to load plugin candidate %1 (%2)")
+													.arg(path, QString::fromUtf8(error.what())));
+					}
+				}
+				QTimer::singleShot(0, this, *step); return;
+			}
+#ifdef USE_MANUAL_PLUGIN
+			try {
+				std::shared_ptr< ManualPlugin > manual(Plugin::createNew< ManualPlugin >());
+				QWriteLocker lock(&m_pluginCollectionLock);
+				m_pluginHashMap.insert(manual->getID(), manual);
+			} catch (const PluginError &error) {
+				Log::logOrDefer(Log::Warning, tr("Failed at loading manual plugin: %1").arg(QString::fromUtf8(error.what())));
+			}
+#endif
+			*step = {};
+			m_asyncRescanInProgress = false;
+			emit pluginRescanFinished(true);
+		};
+		QTimer::singleShot(0, this, *step);
+	});
+	watcher->setFuture(QtConcurrent::run([searchPaths]() {
+		QStringList paths;
+		for (const QString &searchPath : searchPaths) {
+			for (const QFileInfo &entry : QDir(searchPath).entryInfoList(QDir::Files | QDir::Readable))
+				if (QLibrary::isLibrary(entry.absoluteFilePath())) paths.push_back(entry.absoluteFilePath());
+		}
+		paths.removeDuplicates();
+		return paths;
+	}));
+}
+
+bool PluginManager::reloadPluginPath(const QString &path) {
+	const QString absolutePath = QFileInfo(path).absoluteFilePath();
+	for (const const_plugin_ptr_t &existing : getPlugins()) {
+		if (existing && QFileInfo(existing->getFilePath()).absoluteFilePath() == absolutePath) {
+			clearPlugin(existing->getID());
+			break;
+		}
+	}
+	try {
+		plugin_ptr_t plugin;
+		try {
+			plugin.reset(Plugin::createNew< Plugin >(absolutePath));
+		} catch (const PluginError &) {
+			plugin.reset(Plugin::createNew< LegacyPlugin >(absolutePath));
+		}
+		const QString key = QLatin1String(QCryptographicHash::hash(absolutePath.toUtf8(), QCryptographicHash::Sha1).toHex());
+		const PluginSetting setting = Global::get().s.qhPluginSettings.value(key);
+		{ QWriteLocker lock(&m_pluginCollectionLock); m_pluginHashMap.insert(plugin->getID(), plugin); }
+		const bool loadOk = !setting.enabled || loadPlugin(plugin->getID());
+		plugin->enablePositionalData(setting.positionalDataEnabled);
+		plugin->allowKeyboardMonitoring(setting.allowKeyboardMonitoring);
+		return plugin->isValid() && loadOk && (!setting.enabled || plugin->isLoaded());
+	} catch (const PluginError &error) {
+		Log::logOrDefer(Log::Warning, tr("Unable to reload plugin %1 (%2)").arg(absolutePath, QString::fromUtf8(error.what())));
+		return false;
 	}
 }
 

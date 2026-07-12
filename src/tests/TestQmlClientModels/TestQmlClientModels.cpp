@@ -666,20 +666,22 @@ void TestQmlClientModels::asyncOperationsClampProgressAndInterruptByPrefix() {
 void TestQmlClientModels::selectionStateOnlyNotifiesForRealChanges() {
 	QmlSelectionState selection;
 	QSignalSpy scopeSpy(&selection, &QmlSelectionState::scopeTokenChanged);
+	QSignalSpy scopeValueSpy(&selection, &QmlSelectionState::scopeValueChanged);
+	QSignalSpy scopeIdSpy(&selection, &QmlSelectionState::scopeIdChanged);
 	QSignalSpy userSpy(&selection, &QmlSelectionState::selectedUserSessionChanged);
 	QSignalSpy channelSpy(&selection, &QmlSelectionState::selectedVoiceChannelIdChanged);
 
-	selection.setScopeToken(QStringLiteral("channel:42"));
-	selection.setSelectedUserSession(7);
-	selection.setSelectedVoiceChannelId(42);
-	selection.setScopeToken(QStringLiteral("channel:42"));
-	selection.setSelectedUserSession(7);
-	selection.setSelectedVoiceChannelId(42);
+	selection.applySelection(QStringLiteral("channel:42"), 1, 42, 7, 42);
+	selection.applySelection(QStringLiteral("channel:42"), 1, 42, 7, 42);
 
 	QCOMPARE(scopeSpy.count(), 1);
+	QCOMPARE(scopeValueSpy.count(), 1);
+	QCOMPARE(scopeIdSpy.count(), 1);
 	QCOMPARE(userSpy.count(), 1);
 	QCOMPARE(channelSpy.count(), 1);
 	QCOMPARE(selection.scopeToken(), QStringLiteral("channel:42"));
+	QCOMPARE(selection.scopeValue(), 1);
+	QCOMPARE(selection.scopeId().toULongLong(), 42ULL);
 	QCOMPARE(selection.selectedUserSession().toInt(), 7);
 	QCOMPARE(selection.selectedVoiceChannelId().toInt(), 42);
 }
@@ -695,9 +697,7 @@ void TestQmlClientModels::selectionStateInvalidatesRemovedStableIds() {
 		{ QVariantMap{ { QStringLiteral("session"), 7 }, { QStringLiteral("name"), QStringLiteral("Alice") } } });
 	QmlSelectionState selection;
 	selection.bindModels(&rooms, &participants);
-	selection.setScopeToken(QStringLiteral("channel:42"));
-	selection.setSelectedVoiceChannelId(42);
-	selection.setSelectedUserSession(7);
+	selection.applySelection(QStringLiteral("channel:42"), 1, 42, 7, 42);
 
 	participants.replaceParticipantStates({});
 	QVERIFY(!selection.selectedUserSession().isValid());
@@ -706,6 +706,8 @@ void TestQmlClientModels::selectionStateInvalidatesRemovedStableIds() {
 
 	rooms.replaceRoomStates({}, {});
 	QVERIFY(selection.scopeToken().isEmpty());
+	QCOMPARE(selection.scopeValue(), -1);
+	QVERIFY(!selection.scopeId().isValid());
 	QVERIFY(!selection.selectedVoiceChannelId().isValid());
 }
 

@@ -372,6 +372,8 @@ private:
 class QmlSelectionState final : public QObject {
 	Q_OBJECT
 	Q_PROPERTY(QString scopeToken READ scopeToken WRITE setScopeToken NOTIFY scopeTokenChanged)
+	Q_PROPERTY(int scopeValue READ scopeValue WRITE setScopeValue NOTIFY scopeValueChanged)
+	Q_PROPERTY(QVariant scopeId READ scopeId WRITE setScopeId NOTIFY scopeIdChanged)
 	Q_PROPERTY(QVariant selectedUserSession READ selectedUserSession WRITE setSelectedUserSession NOTIFY selectedUserSessionChanged)
 	Q_PROPERTY(QVariant selectedVoiceChannelId READ selectedVoiceChannelId WRITE setSelectedVoiceChannelId NOTIFY selectedVoiceChannelIdChanged)
 
@@ -379,14 +381,22 @@ public:
 	explicit QmlSelectionState(QObject *parent = nullptr);
 	void bindModels(RoomModel *rooms, ParticipantModel *participants);
 	QString scopeToken() const;
+	int scopeValue() const;
+	QVariant scopeId() const;
 	QVariant selectedUserSession() const;
 	QVariant selectedVoiceChannelId() const;
 	void setScopeToken(const QString &value);
+	void setScopeValue(int value);
+	void setScopeId(const QVariant &value);
+	void applySelection(const QString &scopeToken, int scopeValue, const QVariant &scopeId,
+						const QVariant &selectedUserSession, const QVariant &selectedVoiceChannelId);
 	void setSelectedUserSession(const QVariant &value);
 	void setSelectedVoiceChannelId(const QVariant &value);
 
 signals:
 	void scopeTokenChanged();
+	void scopeValueChanged();
+	void scopeIdChanged();
 	void selectedUserSessionChanged();
 	void selectedVoiceChannelIdChanged();
 
@@ -398,6 +408,8 @@ private:
 	RoomModel *m_rooms = nullptr;
 	ParticipantModel *m_participants = nullptr;
 	QString m_scopeToken;
+	int m_scopeValue = -1;
+	QVariant m_scopeId;
 	QVariant m_selectedUserSession;
 	QVariant m_selectedVoiceChannelId;
 };

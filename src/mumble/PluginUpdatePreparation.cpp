@@ -127,3 +127,32 @@ bool rollbackPluginFileCommit(const PluginFileCommitResult &commit) {
 	if (!QFile::remove(commit.destinationPath)) return false;
 	return commit.backupPath.isEmpty() || QFile::rename(commit.backupPath, commit.destinationPath);
 }
+
+PluginTransactionRecoveryResult recoverPluginFileTransactions(const QString &directoryPath) {
+	PluginTransactionRecoveryResult result;
+	QDir directory(directoryPath);
+	if (!directory.exists()) return result;
+	const QFileInfoList entries = directory.entryInfoList(QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot);
+	for (const QFileInfo &entry : entries) {
+		const QString name = entry.fileName();
+		const int pendingMarker = name.lastIndexOf(QStringLiteral(".pending-"));
+		const int backupMarker = name.lastIndexOf(QStringLiteral(".backup-"));
+		if (pendingMarker > 0) {
+			if (QFile::remove(entry.absoluteFilePath())) ++result.pendingRemoved;
+			else result.errors.push_back(QObject::tr("Unable to remove abandoned staging file %1").arg(name));
+			continue;
+		}
+		if (backupMarker <= 0) continue;
+		const QString destinationPath = directory.absoluteFilePath(name.left(backupMarker));
+		if (QFileInfo::exists(destinationPath) && !QFile::remove(destinationPath)) {
+			result.errors.push_back(QObject::tr("Unable to replace unverified plugin while restoring %1").arg(name));
+			continue;
+		}
+		if (QFile::rename(entry.absoluteFilePath(), destinationPath)) {
+			++result.backupsRestored;
+		} else {
+			result.errors.push_back(QObject::tr("Unable to restore abandoned backup %1").arg(name));
+		}
+	}
+	return result;
+}

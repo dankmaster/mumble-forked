@@ -65,6 +65,7 @@ class PersistentChatGateway;
 class PersistentChatController;
 class ModernDialogController;
 class QmlShellHost;
+class QmlSelectionState;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 class ModernUiAutomationServer;
 #	endif
@@ -100,14 +101,6 @@ struct UnresolvedServerAddress;
 struct ContextMenuTarget {
 	ClientUser *user = nullptr;
 	Channel *channel = nullptr;
-};
-
-struct ModernSelectionState {
-	QString scopeToken;
-	int scopeValue = 0;
-	unsigned int scopeID = 0;
-	std::optional< unsigned int > selectedUserSession;
-	std::optional< unsigned int > selectedVoiceChannelID;
 };
 
 struct PendingFeedbackSubmission {
@@ -246,7 +239,7 @@ public:
 	void scheduleQmlShellStateSyncInternal(bool immediate);
 	void runQmlShellStateSync();
 	void syncQmlShellState();
-	void syncQmlSelectionState();
+	QmlSelectionState *qmlSelectionState() const;
 	void applyQmlRoomState(const QVariantMap &state);
 	void applyQmlDirectMessagesState(const QVariantMap &state);
 	void ensureModernUiAutomationServer();
@@ -921,7 +914,6 @@ protected:
 	bool m_modernDirectMessageTrayOpenProbe = false;
 	QTimer *m_modernShellPreviewHydrationTimer             = nullptr;
 	QString m_modernShellPreviewHydrationScopeToken;
-	ModernSelectionState m_modernSelectionState;
 	QList< qulonglong > m_modernShellPreviewHydrationQueue;
 	QSet< qulonglong > m_modernShellPreviewHydrationQueuedIds;
 	bool m_modernShellPreviewHydrationLinkDense = false;
