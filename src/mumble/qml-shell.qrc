@@ -8,5 +8,6 @@
     <file alias="PluginEditor.qml">qml-shell/PluginEditor.qml</file>
     <file alias="MessageEventEditor.qml">qml-shell/MessageEventEditor.qml</file>
     <file alias="ShortcutEditor.qml">qml-shell/ShortcutEditor.qml</file>
+    <file alias="AclEditor.qml">qml-shell/AclEditor.qml</file>
   </qresource>
 </RCC>

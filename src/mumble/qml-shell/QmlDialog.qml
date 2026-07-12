@@ -138,6 +138,7 @@ Dialog {
                                             if (type === "pluginEditor") return pluginEditorField
                                             if (type === "messageEventEditor") return messageEventEditorField
                                             if (type === "shortcutEditor") return shortcutEditorField
+                                            if (type === "aclEditor") return aclEditorField
                                             if (type === "pathPicker" || type === "filePicker" || type === "folderPicker") return pathField
                                             return textField
                                         }
@@ -281,6 +282,10 @@ Dialog {
                 }
             }
         }
+    }
+    Component {
+        id: aclEditorField
+        AclEditor { }
     }
     Component {
         id: shortcutEditorField
