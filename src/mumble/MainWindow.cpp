@@ -14249,7 +14249,7 @@ void MainWindow::setupGui() {
 	}
 	setServerLogMaximumBlockCount(Global::get().s.iMaxLogBlocks);
 
-	pmModel = new UserModel(qtvUsers);
+	pmModel = new UserModel(this);
 	qtvUsers->setModel(pmModel);
 	qtvUsers->setRowHidden(0, QModelIndex(), true);
 	qtvUsers->ensurePolished();
@@ -31652,10 +31652,6 @@ std::size_t MainWindow::totalCachedPersistentChatUnreadCount() const {
 
 bool MainWindow::navigateToPersistentChatScope(MumbleProto::ChatScope scope, unsigned int scopeID, bool forceReload,
 											   bool useVoiceTree) {
-	if (!true) {
-		return false;
-	}
-
 	if (scope == MumbleProto::TextChannel && !m_persistentTextChannels.contains(scopeID)) {
 		return false;
 	}
@@ -31666,24 +31662,14 @@ bool MainWindow::navigateToPersistentChatScope(MumbleProto::ChatScope scope, uns
 		return false;
 	}
 
-	bool useVoiceTreeTarget = scope == MumbleProto::Channel && useVoiceTree;
-	bool voiceTreeSelectionSynced = false;
-	if (useVoiceTreeTarget && pmModel && qtvUsers) {
-		if (Channel *channel = Channel::get(scopeID)) {
-			const QModelIndex channelIndex = pmModel->index(channel);
-			if (channelIndex.isValid()) {
-				if (QItemSelectionModel *selectionModel = qtvUsers->selectionModel()) {
-					const QSignalBlocker selectionBlocker(selectionModel);
-					qtvUsers->setCurrentIndex(channelIndex);
-				} else {
-					qtvUsers->setCurrentIndex(channelIndex);
-				}
-				qtvUsers->scrollTo(channelIndex);
-				voiceTreeSelectionSynced = true;
-			}
-		}
+	const bool useVoiceTreeTarget = scope == MumbleProto::Channel && useVoiceTree;
+	m_modernSelectionState.scopeToken = modernShellScopeToken(static_cast< int >(scope), scopeID);
+	m_modernSelectionState.scopeValue = static_cast< int >(scope);
+	m_modernSelectionState.scopeID    = scopeID;
+	m_modernSelectionState.selectedUserSession.reset();
+	if (scope == MumbleProto::Channel) {
+		m_modernSelectionState.selectedVoiceChannelID = scopeID;
 	}
-	useVoiceTreeTarget = useVoiceTreeTarget && voiceTreeSelectionSynced;
 	appendModernShellConnectTrace(QStringLiteral("navigateToPersistentChatScope direct scope=%1 id=%2 force=%3 rail=%4")
 									  .arg(static_cast< int >(scope))
 									  .arg(scopeID)
@@ -31718,7 +31704,9 @@ MainWindow::PersistentChatTarget MainWindow::ephemeralChatTarget() const {
 	}
 
 	const ClientUser *self   = ClientUser::get(Global::get().uiSession);
-	ClientUser *selectedUser = pmModel ? pmModel->getSelectedUser() : nullptr;
+	ClientUser *selectedUser = m_modernSelectionState.selectedUserSession
+							   ? ClientUser::get(*m_modernSelectionState.selectedUserSession)
+							   : nullptr;
 	if (selectedUser && selectedUser->uiSession != Global::get().uiSession) {
 		target.valid          = true;
 		target.directMessage  = true;
@@ -38409,8 +38397,9 @@ void MainWindow::updateAudioToolTips() {
 }
 
 void MainWindow::updateUserModel() {
-	UserModel *um = static_cast< UserModel * >(qtvUsers->model());
-	um->forceVisualUpdate();
+	if (pmModel) {
+		pmModel->forceVisualUpdate();
+	}
 }
 
 void MainWindow::updateTransmitModeComboBox(Settings::AudioTransmit newMode) {
@@ -38447,31 +38436,19 @@ ClientUser *MainWindow::getContextMenuUser() {
 
 ContextMenuTarget MainWindow::getContextMenuTargets() {
 	ContextMenuTarget target;
-	const bool hiddenNativeUserModelSafeMode = modernShellMinimalSnapshotEnabled() && true;
-	const bool hasExplicitContext            = cuContextUser || cContextChannel;
 
 	if (Global::get().uiSession != 0) {
 		target.user    = getContextMenuUser();
 		target.channel = getContextMenuChannel();
 
-		if (hiddenNativeUserModelSafeMode) {
-			if (!target.user) {
-				target.user = ClientUser::get(Global::get().uiSession);
-			}
-			if (!target.channel && target.user) {
-				target.channel = target.user->cChannel;
-			}
-		} else if (!hasExplicitContext) {
-			QModelIndex idx;
-
-			if (!qpContextPosition.isNull())
-				idx = qtvUsers->indexAt(qpContextPosition);
-
-			if (!idx.isValid())
-				idx = qtvUsers->currentIndex();
-
-			target.user    = pmModel->getUser(idx);
-			target.channel = pmModel->getChannel(idx);
+		if (!target.user && m_modernSelectionState.selectedUserSession) {
+			target.user = ClientUser::get(*m_modernSelectionState.selectedUserSession);
+		}
+		if (!target.channel && m_modernSelectionState.selectedVoiceChannelID) {
+			target.channel = Channel::get(*m_modernSelectionState.selectedVoiceChannelID);
+		}
+		if (!target.user && !target.channel) {
+			target.user = ClientUser::get(Global::get().uiSession);
 		}
 
 		if (!target.channel && target.user) {
