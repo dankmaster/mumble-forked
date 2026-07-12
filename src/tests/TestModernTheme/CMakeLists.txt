@@ -1,0 +1,5 @@
+add_executable(TestModernTheme TestModernTheme.cpp)
+set_target_properties(TestModernTheme PROPERTIES AUTOMOC ON)
+target_link_libraries(TestModernTheme PRIVATE mumble_client_object_lib shared Qt6::Test)
+add_test(NAME TestModernTheme COMMAND $<TARGET_FILE:TestModernTheme>)
+configure_client_test_runtime(TestModernTheme TestModernTheme)

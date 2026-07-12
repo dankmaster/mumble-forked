@@ -436,8 +436,9 @@ target_compile_definitions(mumble_client_object_lib
 
 set_target_properties(mumble PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
-set(MUMBLE_MODERN_THEME_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/modern-shell/themes")
+set(MUMBLE_MODERN_THEME_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/themes")
 add_custom_command(TARGET mumble POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E remove_directory "$<TARGET_FILE_DIR:mumble>/ModernThemes"
 	COMMAND ${CMAKE_COMMAND} -E copy_directory
 		"${MUMBLE_MODERN_THEME_SOURCE_DIR}"
 		"$<TARGET_FILE_DIR:mumble>/ModernThemes"
@@ -471,7 +472,7 @@ endif()
 install(DIRECTORY "${MUMBLE_MODERN_THEME_SOURCE_DIR}/"
 	DESTINATION "${MUMBLE_INSTALL_EXECUTABLEDIR}/ModernThemes"
 	COMPONENT mumble_client
-	FILES_MATCHING PATTERN "*.css"
+	FILES_MATCHING PATTERN "*.mumble-theme.json"
 )
 
 target_compile_definitions(mumble_client_object_lib

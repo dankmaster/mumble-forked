@@ -11,16 +11,49 @@
 #include <QtCore/QString>
 #include <QtCore/QStringList>
 #include <QtCore/QVariant>
+#include <QtGui/QColor>
 
 #include <optional>
 
 namespace Mumble {
 namespace ModernTheme {
 
+struct ThemePalette {
+	QColor shellBackground;
+	QColor crust;
+	QColor mantle;
+	QColor base;
+	QColor surface0;
+	QColor surface1;
+	QColor surface2;
+	QColor text;
+	QColor subtext0;
+	QColor overlay0;
+	QColor accent;
+	QColor accentHover;
+	QColor accentSubtle;
+	QColor focusAccent;
+	QColor red;
+	QColor green;
+	QColor yellow;
+	QColor peach;
+};
+
+struct ThemeMetrics {
+	int shellRadius = 16;
+	int innerRadius = 11;
+	int spacing     = 12;
+};
+
 struct ThemeDefinition {
 	QString id;
 	QString name;
 	QString sourcePath;
+	QString appearance;
+	int formatVersion = 1;
+	ThemePalette palette;
+	ThemeMetrics metrics;
+	bool legacyCss = false;
 	QVariantMap tokens;
 };
 
@@ -38,6 +71,7 @@ bool ensureUserThemeDirectory(QString *errorMessage = nullptr);
 
 QList< ThemeDefinition > customThemes();
 std::optional< ThemeDefinition > customTheme(const QString &themeID);
+std::optional< ThemeDefinition > loadThemeDefinitionFile(const QString &path, bool allowLegacyCss = false);
 QVariantMap customThemeTokens(const QString &themeID);
 QVariantMap customAccentTokens(const QString &color, int strength);
 QVariantMap themeSwatch(const QVariantMap &tokens);

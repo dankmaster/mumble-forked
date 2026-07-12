@@ -1,0 +1,32 @@
+{
+  "$schema": "https://mumble.info/schemas/modern-theme-v1.schema.json",
+  "formatVersion": 1,
+  "id": "catppuccin-nord",
+  "name": "Catppuccin Nord",
+  "appearance": "dark",
+  "palette": {
+    "shellBackground": "#242933",
+    "crust": "#1f242d",
+    "mantle": "#222832",
+    "base": "#2e3440",
+    "surface0": "#343b49",
+    "surface1": "#3b4252",
+    "surface2": "#1cd8dee9",
+    "text": "#eceff4",
+    "subtext0": "#d8dee9",
+    "overlay0": "#a7b1c1",
+    "accent": "#94e2d5",
+    "accentHover": "#b5f3e8",
+    "accentSubtle": "#2994e2d5",
+    "focusAccent": "#94e2d5",
+    "red": "#bf616a",
+    "green": "#a3be8c",
+    "yellow": "#ebcb8b",
+    "peach": "#d08770"
+  },
+  "metrics": {
+    "shellRadius": 16,
+    "innerRadius": 11,
+    "spacing": 12
+  }
+}

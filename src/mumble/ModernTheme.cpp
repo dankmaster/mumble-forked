@@ -11,6 +11,8 @@
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QCoreApplication>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 #include <QtCore/QMap>
 #include <QtCore/QRegularExpression>
 #include <QtCore/QSet>
@@ -18,7 +20,8 @@
 #include <QtGui/QColor>
 
 namespace {
-	constexpr qint64 kMaxThemeCssBytes = 128 * 1024;
+	constexpr qint64 kMaxThemeFileBytes = 128 * 1024;
+	constexpr int kThemeFormatVersion = 1;
 
 	QString normalizeThemeIdPart(const QString &text) {
 		QString normalized;
@@ -96,8 +99,8 @@ namespace {
 		return tokens;
 	}
 
-	std::optional< Mumble::ModernTheme::ThemeDefinition > loadThemeFile(const QFileInfo &fileInfo) {
-		if (!fileInfo.exists() || !fileInfo.isFile() || fileInfo.size() > kMaxThemeCssBytes) {
+	std::optional< Mumble::ModernTheme::ThemeDefinition > loadLegacyCssThemeFile(const QFileInfo &fileInfo) {
+		if (!fileInfo.exists() || !fileInfo.isFile() || fileInfo.size() > kMaxThemeFileBytes) {
 			return std::nullopt;
 		}
 
@@ -118,28 +121,105 @@ namespace {
 		theme.id                  = customThemeId(configuredID.isEmpty() ? fileInfo.completeBaseName() : configuredID);
 		theme.name                = name.isEmpty() ? fileInfo.completeBaseName() : name;
 		theme.sourcePath          = fileInfo.absoluteFilePath();
+		theme.legacyCss           = true;
 		theme.tokens              = tokens;
 		return theme;
 	}
 
-	QList< QDir > customThemeDirectories() {
-		QList< QDir > directories;
+	QColor requiredColor(const QJsonObject &object, const QString &key, bool &valid) {
+		if (!object.value(key).isString()) {
+			valid = false;
+			return {};
+		}
+		const QColor color(object.value(key).toString());
+		if (!color.isValid()) {
+			valid = false;
+		}
+		return color;
+	}
 
-		if (MumbleApplication *application = qobject_cast< MumbleApplication * >(QCoreApplication::instance())) {
-			const QDir appThemeDirectory(application->applicationVersionRootPath() + QLatin1String("/ModernThemes"));
-			if (appThemeDirectory.exists()) {
-				directories.push_back(appThemeDirectory);
-			}
+	QString cssColor(const QColor &color) {
+		return color.alpha() == 255 ? color.name(QColor::HexRgb) : color.name(QColor::HexArgb);
+	}
+
+	std::optional< Mumble::ModernTheme::ThemeDefinition > loadThemeManifest(const QFileInfo &fileInfo) {
+		if (!fileInfo.exists() || !fileInfo.isFile() || fileInfo.size() > kMaxThemeFileBytes) {
+			return std::nullopt;
+		}
+		QFile file(fileInfo.absoluteFilePath());
+		if (!file.open(QFile::ReadOnly)) {
+			return std::nullopt;
+		}
+		QJsonParseError error;
+		const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
+		if (error.error != QJsonParseError::NoError || !document.isObject()) {
+			return std::nullopt;
+		}
+		const QJsonObject root = document.object();
+		if (root.value(QStringLiteral("formatVersion")).toInt(-1) != kThemeFormatVersion
+			|| !root.value(QStringLiteral("id")).isString() || !root.value(QStringLiteral("name")).isString()
+			|| !root.value(QStringLiteral("palette")).isObject()) {
+			return std::nullopt;
 		}
 
-		if (Global::g_global_struct) {
-			const QDir userDirectory = Mumble::ModernTheme::userThemeDirectory();
-			if (userDirectory.exists()) {
-				directories.push_back(userDirectory);
-			}
+		Mumble::ModernTheme::ThemeDefinition theme;
+		theme.formatVersion = kThemeFormatVersion;
+		theme.id = customThemeId(root.value(QStringLiteral("id")).toString());
+		theme.name = root.value(QStringLiteral("name")).toString().trimmed();
+		theme.appearance = root.value(QStringLiteral("appearance")).toString(QStringLiteral("dark")).toLower();
+		theme.sourcePath = fileInfo.absoluteFilePath();
+		if (theme.name.isEmpty() || (theme.appearance != QStringLiteral("dark") && theme.appearance != QStringLiteral("light"))) {
+			return std::nullopt;
 		}
 
-		return directories;
+		const QJsonObject palette = root.value(QStringLiteral("palette")).toObject();
+		bool valid = true;
+		theme.palette.shellBackground = requiredColor(palette, QStringLiteral("shellBackground"), valid);
+		theme.palette.crust = requiredColor(palette, QStringLiteral("crust"), valid);
+		theme.palette.mantle = requiredColor(palette, QStringLiteral("mantle"), valid);
+		theme.palette.base = requiredColor(palette, QStringLiteral("base"), valid);
+		theme.palette.surface0 = requiredColor(palette, QStringLiteral("surface0"), valid);
+		theme.palette.surface1 = requiredColor(palette, QStringLiteral("surface1"), valid);
+		theme.palette.surface2 = requiredColor(palette, QStringLiteral("surface2"), valid);
+		theme.palette.text = requiredColor(palette, QStringLiteral("text"), valid);
+		theme.palette.subtext0 = requiredColor(palette, QStringLiteral("subtext0"), valid);
+		theme.palette.overlay0 = requiredColor(palette, QStringLiteral("overlay0"), valid);
+		theme.palette.accent = requiredColor(palette, QStringLiteral("accent"), valid);
+		theme.palette.accentHover = requiredColor(palette, QStringLiteral("accentHover"), valid);
+		theme.palette.accentSubtle = requiredColor(palette, QStringLiteral("accentSubtle"), valid);
+		theme.palette.focusAccent = requiredColor(palette, QStringLiteral("focusAccent"), valid);
+		theme.palette.red = requiredColor(palette, QStringLiteral("red"), valid);
+		theme.palette.green = requiredColor(palette, QStringLiteral("green"), valid);
+		theme.palette.yellow = requiredColor(palette, QStringLiteral("yellow"), valid);
+		theme.palette.peach = requiredColor(palette, QStringLiteral("peach"), valid);
+		if (!valid) {
+			return std::nullopt;
+		}
+
+		const QJsonObject metrics = root.value(QStringLiteral("metrics")).toObject();
+		theme.metrics.shellRadius = qBound(0, metrics.value(QStringLiteral("shellRadius")).toInt(16), 64);
+		theme.metrics.innerRadius = qBound(0, metrics.value(QStringLiteral("innerRadius")).toInt(11), 64);
+		theme.metrics.spacing = qBound(0, metrics.value(QStringLiteral("spacing")).toInt(12), 48);
+
+		// Compatibility adapter for existing native settings/preview consumers.
+		theme.tokens.insert(QStringLiteral("--shell-bg"), cssColor(theme.palette.shellBackground));
+		theme.tokens.insert(QStringLiteral("--shell-strip"), cssColor(theme.palette.crust));
+		theme.tokens.insert(QStringLiteral("--shell-rail"), cssColor(theme.palette.mantle));
+		theme.tokens.insert(QStringLiteral("--shell-panel"), cssColor(theme.palette.base));
+		theme.tokens.insert(QStringLiteral("--shell-panel-soft"), cssColor(theme.palette.surface0));
+		theme.tokens.insert(QStringLiteral("--shell-highlight"), cssColor(theme.palette.surface1));
+		theme.tokens.insert(QStringLiteral("--surface-border"), cssColor(theme.palette.surface2));
+		theme.tokens.insert(QStringLiteral("--text-strong"), cssColor(theme.palette.text));
+		theme.tokens.insert(QStringLiteral("--text-main"), cssColor(theme.palette.subtext0));
+		theme.tokens.insert(QStringLiteral("--text-muted"), cssColor(theme.palette.overlay0));
+		theme.tokens.insert(QStringLiteral("--accent"), cssColor(theme.palette.accent));
+		theme.tokens.insert(QStringLiteral("--accent-strong"), cssColor(theme.palette.accentHover));
+		theme.tokens.insert(QStringLiteral("--accent-soft"), cssColor(theme.palette.accentSubtle));
+		theme.tokens.insert(QStringLiteral("--danger"), cssColor(theme.palette.red));
+		theme.tokens.insert(QStringLiteral("--success"), cssColor(theme.palette.green));
+		theme.tokens.insert(QStringLiteral("--warning"), cssColor(theme.palette.yellow));
+		theme.tokens.insert(QStringLiteral("--latency-orange"), cssColor(theme.palette.peach));
+		return theme;
 	}
 
 	QString rgbaString(const QColor &color, const qreal alpha) {
@@ -165,7 +245,7 @@ namespace {
 				return;
 			}
 
-			const QStringList filters { QStringLiteral("*.css") };
+			const QStringList filters { QStringLiteral("*.mumble-theme.json") };
 			for (const QFileInfo &fileInfo : appThemeDirectory.entryInfoList(filters, QDir::Files, QDir::Name)) {
 				const QString destinationPath = userDirectory.absoluteFilePath(fileInfo.fileName());
 				if (!QFileInfo::exists(destinationPath)) {
@@ -263,14 +343,29 @@ bool ensureUserThemeDirectory(QString *errorMessage) {
 
 QList< ThemeDefinition > customThemes() {
 	QMap< QString, ThemeDefinition > themesByID;
-	const QStringList filters { QStringLiteral("*.css") };
-	for (const QDir &directory : customThemeDirectories()) {
-		for (const QFileInfo &fileInfo : directory.entryInfoList(filters, QDir::Files, QDir::Name)) {
-			const std::optional< ThemeDefinition > theme = loadThemeFile(fileInfo);
-			if (theme) {
+	const auto loadManifests = [&themesByID](const QDir &directory) {
+		for (const QFileInfo &fileInfo : directory.entryInfoList(
+				 { QStringLiteral("*.mumble-theme.json") }, QDir::Files, QDir::Name)) {
+			if (const std::optional< ThemeDefinition > theme = loadThemeManifest(fileInfo); theme) {
 				themesByID.insert(theme->id, *theme);
 			}
 		}
+	};
+
+	// Bundled manifests provide defaults. Legacy CSS is accepted only from the user's profile,
+	// and a typed user manifest with the same ID takes final precedence.
+	if (MumbleApplication *application = qobject_cast< MumbleApplication * >(QCoreApplication::instance())) {
+		loadManifests(QDir(application->applicationVersionRootPath() + QLatin1String("/ModernThemes")));
+	}
+	if (Global::g_global_struct) {
+		const QDir userDirectory = userThemeDirectory();
+		for (const QFileInfo &fileInfo : userDirectory.entryInfoList(
+				 { QStringLiteral("*.css") }, QDir::Files, QDir::Name)) {
+			if (const std::optional< ThemeDefinition > theme = loadLegacyCssThemeFile(fileInfo); theme) {
+				themesByID.insert(theme->id, *theme);
+			}
+		}
+		loadManifests(userDirectory);
 	}
 
 	return themesByID.values();
@@ -282,6 +377,17 @@ std::optional< ThemeDefinition > customTheme(const QString &themeID) {
 		if (theme.id == normalized) {
 			return theme;
 		}
+	}
+	return std::nullopt;
+}
+
+std::optional< ThemeDefinition > loadThemeDefinitionFile(const QString &path, const bool allowLegacyCss) {
+	const QFileInfo fileInfo(path);
+	if (fileInfo.fileName().endsWith(QStringLiteral(".mumble-theme.json"), Qt::CaseInsensitive)) {
+		return loadThemeManifest(fileInfo);
+	}
+	if (allowLegacyCss && fileInfo.suffix().compare(QStringLiteral("css"), Qt::CaseInsensitive) == 0) {
+		return loadLegacyCssThemeFile(fileInfo);
 	}
 	return std::nullopt;
 }

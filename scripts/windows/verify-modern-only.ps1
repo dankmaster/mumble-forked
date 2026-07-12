@@ -35,7 +35,7 @@ $checks = [ordered]@{
 	native_product_dialog_fallbacks = Find-Matches @('-n', 'QDialog dialog\(this\)|AboutDialog adAbout|class AboutDialog|new AboutDialog|ServerNavigatorUserMenuPopup', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h')
 	legacy_product_widget_types = Find-Matches @('-n', 'class (PersistentChatListWidget|ExternalScreenShareWindowHost|RichTextEditor|ResponsiveImageDialog)', 'src/mumble', '--glob', '*.h')
 	legacy_mainwindow_product_state = Find-Matches @('-n', 'm_persistentChat(History|Composer|ConversationPanel|LogPanel|ChannelList)', 'src/mumble/MainWindow.cpp', 'src/mumble/MainWindow.h')
-	legacy_web_product_resources = @(Get-ChildItem (Join-Path $repoRoot 'src\mumble\modern-shell') -File -ErrorAction SilentlyContinue |
+	legacy_web_product_resources = @(Get-ChildItem (Join-Path $repoRoot 'src\mumble\modern-shell') -Recurse -File -ErrorAction SilentlyContinue |
 		Where-Object { $_.Extension -in @('.html', '.css', '.js') } |
 		ForEach-Object FullName)
 	widget_prompts = Find-Matches @('-n', 'QMessageBox|QInputDialog|QProgressDialog', 'src/mumble', '--glob', '*.cpp')
@@ -51,3 +51,5 @@ $summary | ConvertTo-Json
 if ($Strict -and ($checks.Values | ForEach-Object { @($_).Count } | Where-Object { $_ -ne 0 })) {
 	exit 1
 }
+
+exit 0
