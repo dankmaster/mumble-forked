@@ -585,7 +585,7 @@ public:
 	void flushModernShellCoalescedPatches();
 	void publishModernShellMessagesPatch(const QString &kind, const QVariantList &messages, bool scrollToBottom,
 										  const QString &timelineMode = QString());
-	void publishModernShellMessageUpdatePatch(const MumbleProto::ChatMessage &message);
+	void publishQmlChatMessage(const MumbleProto::ChatMessage &message, bool appended = false);
 	void publishPersistentChatInlineDataImageUpdate(const QString &token);
 	void publishModernShellActiveScopePatch(const QString &kind);
 	void publishModernShellRoomStatePatch();
