@@ -512,7 +512,7 @@ repair_malformed_qt_package_state() {
 	local triplet="$1"
 	local repaired=1
 
-	for package_name in qtdeclarative qtwebchannel qtwebengine; do
+	for package_name in qtdeclarative qtwebengine; do
 		if qt_source_dir_missing_cmakelists "$package_name" "$triplet"; then
 			clean_qt_package_state "$package_name" "$triplet"
 			repaired=0
@@ -525,7 +525,7 @@ repair_malformed_qt_package_state() {
 report_malformed_qt_package_state() {
 	local triplet="$1"
 
-	for package_name in qtdeclarative qtwebchannel qtwebengine; do
+	for package_name in qtdeclarative qtwebengine; do
 		if qt_source_dir_missing_cmakelists "$package_name" "$triplet"; then
 			local buildtree_dir="$( get_vcpkg_buildtrees_root "$triplet" )/$package_name"
 			local log_candidates=(
@@ -555,7 +555,7 @@ report_qt_build_failure_logs() {
 	local triplet="$1"
 	local buildtrees_root="$( get_vcpkg_buildtrees_root "$triplet" )"
 
-	for package_name in qtdeclarative qtwebchannel qtwebengine; do
+	for package_name in qtdeclarative qtwebengine; do
 		local package_root="$buildtrees_root/$package_name"
 		local log_path=""
 		local log_candidates=(
@@ -628,7 +628,7 @@ install_mumble_vcpkg_dependencies() {
 		seen_dependencies["mdnsresponder"]=1
 	fi
 
-	for shared_dependency in qtwebchannel "qtwebengine[webengine,webchannel,proprietary-codecs]"; do
+	for shared_dependency in "qtwebengine[webengine,proprietary-codecs]"; do
 		if [[ "$triplet" == "x64-windows" && -z "${seen_dependencies[$shared_dependency]:-}" ]]; then
 			dependencies+=( "$shared_dependency" )
 			seen_dependencies["$shared_dependency"]=1

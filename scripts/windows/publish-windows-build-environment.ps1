@@ -324,12 +324,6 @@ function Assert-EnvironmentLooksReady {
 
 		Assert-QtWebEngineFeature `
 			-TargetsText $webengineTargetsText `
-			-EnabledProperty "QT_ENABLED_PUBLIC_FEATURES" `
-			-DisabledProperty "QT_DISABLED_PUBLIC_FEATURES" `
-			-Feature "webengine_webchannel" `
-			-TargetsPath $webengineTargetsPath
-		Assert-QtWebEngineFeature `
-			-TargetsText $webengineTargetsText `
 			-EnabledProperty "QT_ENABLED_PRIVATE_FEATURES" `
 			-DisabledProperty "QT_DISABLED_PRIVATE_FEATURES" `
 			-Feature "webengine_proprietary_codecs" `

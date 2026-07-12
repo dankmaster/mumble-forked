@@ -18,34 +18,24 @@ from pathlib import Path
 targets_file = Path(sys.argv[1])
 text = targets_file.read_text(encoding="utf-8")
 
-enabled_public_match = re.search(r'QT_ENABLED_PUBLIC_FEATURES\s+"([^"]*)"', text)
-disabled_public_match = re.search(r'QT_DISABLED_PUBLIC_FEATURES\s+"([^"]*)"', text)
 enabled_private_match = re.search(r'QT_ENABLED_PRIVATE_FEATURES\s+"([^"]*)"', text)
 disabled_private_match = re.search(r'QT_DISABLED_PRIVATE_FEATURES\s+"([^"]*)"', text)
 
 if (
-    enabled_public_match is None
-    or disabled_public_match is None
-    or enabled_private_match is None
+    enabled_private_match is None
     or disabled_private_match is None
 ):
     raise SystemExit(1)
 
-enabled_public_features = {feature for feature in enabled_public_match.group(1).split(";") if feature}
-disabled_public_features = {feature for feature in disabled_public_match.group(1).split(";") if feature}
 enabled_private_features = {feature for feature in enabled_private_match.group(1).split(";") if feature}
 disabled_private_features = {feature for feature in disabled_private_match.group(1).split(";") if feature}
 
-has_webchannel = (
-    "webengine_webchannel" in enabled_public_features
-    and "webengine_webchannel" not in disabled_public_features
-)
 has_proprietary_codecs = (
     "webengine_proprietary_codecs" in enabled_private_features
     and "webengine_proprietary_codecs" not in disabled_private_features
 )
 
-raise SystemExit(0 if has_webchannel and has_proprietary_codecs else 1)
+raise SystemExit(0 if has_proprietary_codecs else 1)
 PY
 }
 

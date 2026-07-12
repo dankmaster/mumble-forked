@@ -240,8 +240,9 @@ shared Windows CI lane expects:
 Notes:
 
 - For shared/WebEngine environments, the script refuses to publish unless
-  `webengine_webchannel` and `webengine_proprietary_codecs` are enabled in the
-  Qt WebEngine target metadata.
+  `webengine_proprietary_codecs` is enabled in the Qt WebEngine target
+  metadata. WebChannel is no longer an explicit client dependency; vcpkg may
+  still install it transitively when Qt WebEngine requires it.
 - By default the script creates split
   `mumble_env.x64-windows.<commit>.<suffix>.7z.001` style volumes under
   `.tmp\build-env-archives\` using a `1900m` size cap, so the assets fit under
