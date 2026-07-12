@@ -13899,14 +13899,11 @@ void MainWindow::clearUserCommentRequests() {
 }
 
 // Loading a state that was stored by a different version of Qt can lead to a crash.
-// This function calculates the state version based on Qt's version, MainWindow.ui's
-// hash (provided through CMake), and an explicit runtime shell revision.
-// The latter is needed because modern shell structure now changes in MainWindow.cpp
-// too, especially the toolbar/dock topology that restoreState() serializes.
+// Modern-only state uses an explicit revision instead of the removed widget-form hash.
 constexpr int MainWindow::stateVersion(const bool modernShell) {
 	constexpr int kRuntimeLegacyShellStateVersion = 0x20260407;
 	constexpr int kRuntimeModernShellStateVersion = 0x20260418;
-	return MUMBLE_MAINWINDOW_UI_HASH ^ QT_VERSION
+	return QT_VERSION
 		   ^ (modernShell ? kRuntimeModernShellStateVersion : kRuntimeLegacyShellStateVersion);
 }
 
@@ -39659,7 +39656,7 @@ void MainWindow::on_qmServer_aboutToShow() {
 	qmServer->addAction(qaServerSettings);
 #ifndef Q_OS_MACOS
 	// On macOS, the "Quit" action is automatically placed in the application menu
-	// by Qt when the QAction's menuRole is set to QAction::QuitRole (see MainWindow.ui).
+	// by Qt when the QAction's menuRole is set to QAction::QuitRole.
 	// Adding it manually to the "Server" menu would result in duplicate entries.
 	// See GitHub issue #7151: Move the Quit button to the "Mumble" application menu on macOS.
 	qmServer->addSeparator();

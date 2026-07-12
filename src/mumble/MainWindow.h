@@ -40,7 +40,7 @@
 #include <stack>
 #include <vector>
 
-#include "ui_MainWindow.h"
+#include "MainWindowUi.h"
 
 #define MB_QEVENT (QEvent::User + 939)
 #define OU_QEVENT (QEvent::User + 940)
