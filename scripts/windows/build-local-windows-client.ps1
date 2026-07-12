@@ -633,6 +633,7 @@ function Invoke-SharedWindowsPackaging {
 	}
 	$windeployqtArgs += @(
 		"--no-system-dxc-compiler",
+		"--qmldir", (Join-Path $RepoRoot "src\mumble\qml-shell"),
 		"--dir", $stageRoot,
 		$stageExe
 	)

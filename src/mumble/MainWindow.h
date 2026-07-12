@@ -63,6 +63,7 @@ class ModernDialogController;
 class ModernDialogHost;
 class ModernPttToolHost;
 class ModernShellHost;
+class QmlShellHost;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 class ModernUiAutomationServer;
 #	endif
@@ -222,6 +223,7 @@ public:
 	void queueModernShellSnapshotSyncImmediate();
 	void queueModernShellSnapshotSyncInternal(bool immediate);
 	void syncModernShellSnapshot();
+	void syncQmlShellState();
 	void beginNativeWindowMoveOrResize();
 	void endNativeWindowMoveOrResize();
 	void updateServerNavigatorChrome();
@@ -896,6 +898,7 @@ protected:
 	bool m_updateResumeChatScopeApplied        = false;
 	bool m_updateResumeTextChannelSyncObserved = false;
 	ModernShellHost *m_modernShellHost                     = nullptr;
+	std::unique_ptr< QmlShellHost > m_qmlShellHost;
 	std::unique_ptr< ModernDialogController > m_modernDialogController;
 	std::unique_ptr< ModernDialogHost > m_modernDialogHost;
 	ModernPttToolHost *m_modernPttToolHost = nullptr;

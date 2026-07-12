@@ -43,6 +43,8 @@
 #	include "ModernPttToolHost.h"
 #	include "ModernShellBridge.h"
 #	include "ModernShellHost.h"
+#	include "QmlClientModels.h"
+#	include "QmlShellHost.h"
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 #		include "ModernUiAutomationServer.h"
 #	endif
@@ -13980,6 +13982,49 @@ void MainWindow::applyShellLayout() {
 		return;
 	}
 
+	if (qEnvironmentVariableIntValue("MUMBLE_QML_SHELL") > 0) {
+		if (!m_qmlShellHost) {
+			m_qmlShellHost = std::make_unique< QmlShellHost >(m_clientActionRegistry.get(), this);
+			UiCommandController *commands = m_qmlShellHost->commandController();
+			connect(commands, &UiCommandController::scopeSelectionRequested, this, [this](const QString &scopeToken) {
+				int scopeValue = 0;
+				unsigned int scopeID = 0;
+				if (parseModernShellScopeToken(scopeToken, scopeValue, scopeID)) {
+					navigateToPersistentChatScope(static_cast< MumbleProto::ChatScope >(scopeValue), scopeID);
+				}
+			});
+			connect(commands, &UiCommandController::voiceJoinRequested, this, [this](const QString &scopeToken) {
+				int scopeValue = 0;
+				unsigned int scopeID = 0;
+				if (parseModernShellScopeToken(scopeToken, scopeValue, scopeID)
+					&& scopeValue == static_cast< int >(MumbleProto::Channel) && Global::get().sh) {
+					Global::get().sh->joinChannel(Global::get().uiSession, scopeID);
+				}
+			});
+			connect(commands, &UiCommandController::messageSendRequested, this,
+					[this](const QString &message) { sendChatbarText(message); });
+			connect(commands, &UiCommandController::actionRequested, this, [this](const QString &actionID) {
+				if (QAction *action = m_clientActionRegistry->action(actionID); action && action->isEnabled()) {
+					action->trigger();
+				}
+			});
+			connect(commands, &UiCommandController::selfMuteToggleRequested, qaAudioMute, &QAction::trigger);
+			connect(commands, &UiCommandController::selfDeafToggleRequested, qaAudioDeaf, &QAction::trigger);
+			connect(m_qmlShellHost.get(), &QmlShellHost::closeRequested, this, &MainWindow::close);
+		}
+
+		QString qmlError;
+		if (m_qmlShellHost->start(&qmlError)) {
+			QTimer::singleShot(0, this, [this]() { syncQmlShellState(); });
+			hide();
+			m_qmlShellHost->showRaise();
+			m_activeShellLayout      = targetLayout;
+			m_shellLayoutInitialized = true;
+			return;
+		}
+		qWarning("Qt Quick shell failed to start: %s", qPrintable(qmlError));
+	}
+
 	activateModernShell();
 	if (!m_modernShellHost || centralWidget() != m_modernShellHost) {
 		return;
@@ -22436,6 +22481,10 @@ void MainWindow::queueModernShellSnapshotSyncInternal(bool immediate) {
 }
 
 void MainWindow::syncModernShellSnapshot() {
+	if (m_qmlShellHost && m_qmlShellHost->window()) {
+		syncQmlShellState();
+		return;
+	}
 	if (!m_modernShellHost || !m_modernShellHost->bridge()) {
 		appendModernShellConnectTrace(QStringLiteral("syncModernShellSnapshot skipped host=%1 bridge=%2")
 										  .arg(m_modernShellHost ? 1 : 0)
@@ -30597,6 +30646,77 @@ Channel *MainWindow::selectedVoiceTreeChannel() const {
 		}
 	}
 	return currentVoiceChannel();
+}
+
+void MainWindow::syncQmlShellState() {
+	if (!m_qmlShellHost || !m_qmlShellHost->window()) {
+		return;
+	}
+
+	const QVariantMap snapshot = buildModernShellSnapshot();
+	const QVariantMap appState = snapshot.value(QStringLiteral("app")).toMap();
+	ClientSessionController *session = m_qmlShellHost->sessionController();
+	const bool connected = Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning();
+	session->setServerName(appState.value(QStringLiteral("serverTitle"), tr("Mumble")).toString());
+	session->setConnectionLabel(appState.value(QStringLiteral("selfStatusLabel"),
+															 connected ? tr("Connected") : tr("Disconnected")).toString());
+	session->setSelfName(appState.value(QStringLiteral("selfName"), tr("You")).toString());
+	session->setConnected(connected);
+	session->setSelfMuted(appState.value(QStringLiteral("selfMuted")).toBool());
+	session->setSelfDeafened(appState.value(QStringLiteral("selfDeafened")).toBool());
+
+	QVariantList roomRows;
+	const auto appendRooms = [&roomRows](const QVariantList &source, const QString &kind) {
+		for (const QVariant &entry : source) {
+			const QVariantMap room = entry.toMap();
+			QVariantMap row;
+			row.insert(QStringLiteral("id"), room.value(QStringLiteral("token")));
+			row.insert(QStringLiteral("title"), room.value(QStringLiteral("label")));
+			row.insert(QStringLiteral("subtitle"),
+					   room.value(QStringLiteral("topic"), room.value(QStringLiteral("description"))));
+			row.insert(QStringLiteral("kind"), kind);
+			row.insert(QStringLiteral("selected"), room.value(QStringLiteral("selected")));
+			row.insert(QStringLiteral("status"), room.value(QStringLiteral("joined")).toBool()
+												? QStringLiteral("joined") : QString());
+			row.insert(QStringLiteral("source"), room);
+			roomRows.push_back(row);
+		}
+	};
+	appendRooms(snapshot.value(QStringLiteral("voiceRooms")).toList(), QStringLiteral("voice"));
+	appendRooms(snapshot.value(QStringLiteral("textRooms")).toList(), QStringLiteral("text"));
+	m_qmlShellHost->roomModel()->replaceRows(roomRows);
+
+	QVariantList participantRows;
+	for (const QVariant &entry : snapshot.value(QStringLiteral("participants")).toList()) {
+		const QVariantMap participant = entry.toMap();
+		QVariantMap row;
+		row.insert(QStringLiteral("id"), participant.value(QStringLiteral("session")));
+		row.insert(QStringLiteral("title"), participant.value(QStringLiteral("name")));
+		row.insert(QStringLiteral("subtitle"), participant.value(QStringLiteral("statusLabel")));
+		row.insert(QStringLiteral("kind"), QStringLiteral("participant"));
+		row.insert(QStringLiteral("status"), participant.value(QStringLiteral("talkState")));
+		row.insert(QStringLiteral("source"), participant);
+		participantRows.push_back(row);
+	}
+	m_qmlShellHost->participantModel()->replaceRows(participantRows);
+
+	QVariantList messageRows;
+	for (const QVariant &entry : snapshot.value(QStringLiteral("messages")).toList()) {
+		const QVariantMap message = entry.toMap();
+		QVariantMap row;
+		QString messageID = message.value(QStringLiteral("messageId")).toString();
+		if (messageID.isEmpty()) {
+			messageID = message.value(QStringLiteral("messageKey")).toString();
+		}
+		row.insert(QStringLiteral("id"), messageID);
+		row.insert(QStringLiteral("title"), message.value(QStringLiteral("actorLabel")));
+		row.insert(QStringLiteral("subtitle"), message.value(QStringLiteral("bodyText")));
+		row.insert(QStringLiteral("kind"), QStringLiteral("message"));
+		row.insert(QStringLiteral("status"), message.value(QStringLiteral("deliveryState")));
+		row.insert(QStringLiteral("source"), message);
+		messageRows.push_back(row);
+	}
+	m_qmlShellHost->chatModel()->replaceRows(messageRows);
 }
 
 void MainWindow::focusPersistentChatVoiceChannel(Channel *channel) {
@@ -43205,6 +43325,10 @@ void MainWindow::resolverError(QAbstractSocket::SocketError, QString reason) {
 
 void MainWindow::showRaiseWindow() {
 	endNativeWindowMoveOrResize();
+	if (m_qmlShellHost && m_qmlShellHost->window()) {
+		m_qmlShellHost->showRaise();
+		return;
+	}
 #if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 	if (qEnvironmentVariableIsSet("MUMBLE_MODERN_AUTOMATION_OFFSCREEN")) {
 		setAttribute(Qt::WA_ShowWithoutActivating, true);

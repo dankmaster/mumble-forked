@@ -115,6 +115,10 @@ find_pkg(Qt6
 
 find_pkg(Qt6
 	COMPONENTS
+		Qml
+		Quick
+		QuickControls2
+		QuickDialogs2
 		WebChannel
 		WebEngineWidgets
 	REQUIRED
@@ -355,11 +359,16 @@ set(MUMBLE_SOURCES
 	"${SHARED_SOURCE_DIR}/User.h"
 
 	"mumble.qrc"
+	"qml-shell.qrc"
 	"${CMAKE_SOURCE_DIR}/themes/DefaultTheme.qrc"
 	"${CMAKE_SOURCE_DIR}/themes/CatppuccinTheme.qrc"
 )
 
 list(APPEND MUMBLE_SOURCES
+		"QmlClientModels.cpp"
+		"QmlClientModels.h"
+		"QmlShellHost.cpp"
+		"QmlShellHost.h"
 		"ModernShellBridge.cpp"
 		"ModernShellBridge.h"
 		"ModernContextMenuHost.cpp"
@@ -708,6 +717,10 @@ target_link_libraries(mumble_client_object_lib
 		Qt6::Sql
 		Qt6::Svg
 		Qt6::Widgets
+		Qt6::Qml
+		Qt6::Quick
+		Qt6::QuickControls2
+		Qt6::QuickDialogs2
 )
 
 target_compile_definitions(mumble_client_object_lib
