@@ -34,9 +34,9 @@ This fork is not an official Mumble release. It is an experimental,
 server-specific build for one group of friends running a private community
 server. The goal is to keep the core Mumble voice experience intact while
 adding features that make that server feel more modern and easier to live in.
-The intended fork desktop client path is now the WebEngine Modern shell;
-classic Qt Widgets UI remains only as migration scaffolding or narrow fallback
-surface while the remaining workflows are modernized. The server is not
+The intended fork desktop client path is now the native Qt Quick Modern shell.
+Classic Qt Widgets UI is not a product path; Qt Widgets remains only for narrow
+operating-system and plugin-owned surfaces while migration cleanup finishes. The server is not
 modern-only: `mumble-server` must still let ordinary upstream/native Mumble
 clients connect for voice and basic text behavior, with fork features gated per
 client capability.
@@ -70,7 +70,7 @@ community feature set on top. The long-form inventory lives in
 | Persistent chat | Active fork feature | Stored history for voice-room chats, dedicated text rooms, optional server-global chat, direct-message history when supported, read state, unread counts, pagination, replies, deletion, and reactions. |
 | Rich media chat | Active fork feature | Chunked authenticated uploads, image/video/document/binary asset storage, preview thumbnails, inline media rendering, and quota controls. |
 | Link preview cards | Active fork feature | Provider-aware cards for playable YouTube/video previews, social posts, GitHub, Steam, finance links, product/listing pages, news, maps, weather, transit, game stores, and direct media. |
-| Modern client shell | Active fork direction | WebEngine-based chat/navigator shell with persistent rooms, compact message controls, rich cards, direct-message tray, room-aware composer state, theme/density variants, Modern dialogs, and modern-only layout policy. |
+| Modern client shell | Active fork direction | Native Qt Quick chat/navigator shell with typed C++ models, persistent rooms, compact message controls, rich cards, direct-message tray, room-aware composer state, theme/density variants, and Modern dialogs. WebEngine is reserved for explicit interactive media playback. |
 | Finance and stonks | Active server feature | Cashtag extraction, Yahoo Finance quote cards with chart data, provider links, and a scoped `#stonks` room with scores, leaderboards, and follows. |
 | Watch together | Protocol/server foundation | Capability-gated room media-session messages for synchronized direct media or YouTube playback; client UI is still a future layer. |
 | Screen sharing | Experimental | Capability-gated signaling, server policy/configuration, external helper process, GStreamer LiveKit publish/view, and diagnostic logging. |

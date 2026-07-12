@@ -36,10 +36,9 @@ ordinary Mumble clients and servers.
 
 ## Remaining Stabilization Work
 
-The old WebEngine frontend sources and bridge classes are still compiled as a
-temporary cross-platform comparison surface. They are not selected by the
-desktop client. They will be deleted after Linux and macOS QML packaging and
-runtime gates are green.
+The old WebEngine frontend sources and bridge classes are no longer part of the
+desktop client target. Some source files remain in the tree as deletion debt
+until their cross-platform replacement and packaging gates are green.
 
 Remaining cleanup is tracked by `scripts/windows/verify-modern-only.ps1`:
 

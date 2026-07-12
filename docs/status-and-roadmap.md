@@ -1,6 +1,6 @@
 # Current Status And Roadmap
 
-Status snapshot: 2026-06-05.
+Status snapshot: 2026-07-12.
 
 This document is the short public handoff for where the fork stands today and
 what the next product direction is. It describes the intended `master` state,
@@ -12,10 +12,10 @@ This fork is a private-community Mumble build. The goal is still to preserve the
 core voice experience that makes Mumble useful, but the fork desktop client
 product direction is now modern-only:
 
-- the WebEngine Modern shell is the visible client shell for the forked client
+- the native Qt Quick Modern shell is the visible client shell for the forked client
 - classic layout switching is no longer a product path for that client
-- non-WebEngine Qt Widgets UI remains as migration scaffolding and for narrow
-  fallback surfaces while the codebase is cleaned up
+- Qt Widgets remains only for narrow operating-system and plugin-owned surfaces
+  while unreachable compatibility code is removed
 - server compatibility for upstream/native Mumble clients remains a product
   requirement: ordinary voice, channel membership, ACLs, registration,
   certificates, and basic text should keep working where practical
@@ -29,9 +29,9 @@ a change is broadly useful, it should still be considered for upstream first.
 
 The main feature surface today is:
 
-- Modern shell: WebEngine-based navigator, chat timeline, room list, rich cards,
+- Modern shell: Qt Quick navigator, chat timeline, room list, rich cards,
   direct-message tray, themed dialogs, context menus, update banners, feedback,
-  crash handoff, and modern settings for the commonly used pages.
+  crash handoff, and modern settings backed by typed C++ controllers and models.
 - Persistent chat: stored voice-room and text-room history, optional
   server-global chat, private/direct-message protocol support when both peers
   and the server can use it, pagination, read state, replies, deletion,
@@ -60,19 +60,16 @@ The main feature surface today is:
 The next work should make the modern-only stance true in the code, not just in
 the UI:
 
-- finish modern settings by deciding whether the plugin settings page is
-  modernized, kept as a native dialog escape hatch, or intentionally deferred
-- finish or cut remaining classic-dialog surfaces such as Search, Voice
-  Recorder, Certificate Wizard edge cases, plugin installer/updater, and any
-  rare text-message fallback that still opens a widget dialog
-- continue cutting classic layout scaffolding once the remaining user-facing
-  flows have modern equivalents
+- finish deleting unreachable classic widget and Web-shell source after the
+  Qt Quick cross-platform and packaging gates are green
+- keep WebEngine lazy and isolated to explicit interactive provider playback;
+  it must not carry application state or use WebChannel
 - keep server-side native-client compatibility boring and explicit: do not
   remove baseline `Version`, session/channel, ACL, registration/certificate, or
   transient `TextMessage` behavior just because the fork desktop client is
   modern-only
-- keep server-log rendering on a direct modern path instead of rebuilding and
-  mirroring the classic `QTextDocument` path for the WebEngine shell
+- keep server-log rendering on a direct typed-model path instead of rebuilding
+  and mirroring the classic `QTextDocument` path
 - keep direct messages honest: persistent DM history is supported only when the
   server advertises it and both users have registered identities; otherwise the
   Modern tray uses private non-persistent text-message mode
