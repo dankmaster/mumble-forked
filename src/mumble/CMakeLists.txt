@@ -187,8 +187,6 @@ set(MUMBLE_SOURCES
 	"EnumStringConversions.h"
 	"ExternalScreenShareWindowHost.cpp"
 	"ExternalScreenShareWindowHost.h"
-	"FeedbackDialog.cpp"
-	"FeedbackDialog.h"
 	"Global.cpp"
 	"Global.h"
 	"GlobalShortcut.cpp"

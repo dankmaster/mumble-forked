@@ -20,7 +20,6 @@
 #include "Connection.h"
 #include "Database.h"
 #include "DeveloperConsole.h"
-#include "FeedbackDialog.h"
 #include "FeedbackReport.h"
 #include "FinanceQuote.h"
 #include "ForkFeature.h"
@@ -15984,12 +15983,12 @@ namespace {
 		return MumbleProto::FeedbackReportBug;
 	}
 
-	bool feedbackServerCanSubmit(const FeedbackDialog::ServerCapability &capability) {
+	bool feedbackServerCanSubmit(const Mumble::Feedback::ServerCapability &capability) {
 		return capability.connected && capability.supported && capability.enabled && Global::get().sh;
 	}
 
-	FeedbackDialog::ServerCapability currentFeedbackServerCapability() {
-		FeedbackDialog::ServerCapability capability;
+	Mumble::Feedback::ServerCapability currentFeedbackServerCapability() {
+		Mumble::Feedback::ServerCapability capability;
 		capability.connected = Global::get().sh && Global::get().sh->isConnected() && Global::get().sh->hasSynchronized();
 		capability.supported =
 			capability.connected
@@ -16008,7 +16007,7 @@ namespace {
 		return capability;
 	}
 
-	QString feedbackConsoleLogSnippet(const FeedbackDialog::ServerCapability &capability,
+	QString feedbackConsoleLogSnippet(const Mumble::Feedback::ServerCapability &capability,
 									  const qint64 captureStartOffset) {
 		const QFileInfo info(Global::get().qdBasePath.filePath(QStringLiteral("Console.txt")));
 		if (!info.exists() || !info.isFile()) {
@@ -16033,7 +16032,7 @@ namespace {
 		return Mumble::Feedback::redactedDiagnostics(QString::fromUtf8(bytes), capability.maxLogBytes);
 	}
 
-	QString feedbackDiagnosticsText(const FeedbackDialog::ServerCapability &capability,
+	QString feedbackDiagnosticsText(const Mumble::Feedback::ServerCapability &capability,
 									const qint64 captureStartOffset) {
 		QString diagnostics;
 		QTextStream stream(&diagnostics);
@@ -16057,7 +16056,7 @@ namespace {
 			   && !values.value(QStringLiteral("feedback.description")).toString().trimmed().isEmpty();
 	}
 
-	QString feedbackStatusText(const FeedbackDialog::ServerCapability &capability, const bool captureActive,
+	QString feedbackStatusText(const Mumble::Feedback::ServerCapability &capability, const bool captureActive,
 							   const qint64 captureStartOffset, const QString &statusMessage) {
 		if (!statusMessage.trimmed().isEmpty()) {
 			return statusMessage.trimmed();
@@ -16080,8 +16079,8 @@ namespace {
 		return QObject::tr("Ready to submit through the connected server.");
 	}
 
-	FeedbackDialog::PreparedReport feedbackPreparedReportFromValues(
-		const QVariantMap &values, const FeedbackDialog::ServerCapability &capability,
+	Mumble::Feedback::PreparedReport feedbackPreparedReportFromValues(
+		const QVariantMap &values, const Mumble::Feedback::ServerCapability &capability,
 		const qint64 captureStartOffset) {
 		const MumbleProto::FeedbackReportKind kind =
 			feedbackKindFromValue(values.value(QStringLiteral("feedback.kind")));
@@ -16109,10 +16108,10 @@ namespace {
 			values.value(QStringLiteral("feedback.evidence")).toString().trimmed(), capability.maxBodyBytes,
 			QStringLiteral("[pasted evidence truncated]"));
 
-		FeedbackDialog::PreparedReport report;
+		Mumble::Feedback::PreparedReport report;
 		report.issueTitle  = Mumble::Feedback::issueTitle(fields);
 		report.issueBody   = Mumble::Feedback::issueBody(fields, capability.maxBodyBytes, capability.maxLogBytes);
-		report.fallbackUrl = FeedbackDialog::fallbackIssueUrl(report.issueTitle, report.issueBody, fields.kind);
+		report.fallbackUrl = Mumble::Feedback::fallbackIssueUrl(report.issueTitle, report.issueBody, fields.kind);
 
 		report.message.set_kind(fields.kind);
 		report.message.set_title(u8(fields.title));
@@ -16138,7 +16137,7 @@ namespace {
 		return report;
 	}
 
-	PendingFeedbackSubmission pendingSubmissionFromReport(const FeedbackDialog::PreparedReport &report,
+	PendingFeedbackSubmission pendingSubmissionFromReport(const Mumble::Feedback::PreparedReport &report,
 														  const bool fromModernShell) {
 		PendingFeedbackSubmission submission;
 		submission.kind            = report.message.kind();
@@ -19881,7 +19880,7 @@ void MainWindow::openModernFeedbackDialog(const QVariantMap &fieldValues, const 
 		applyShellLayout();
 	}
 
-	const FeedbackDialog::ServerCapability capability = currentFeedbackServerCapability();
+	const Mumble::Feedback::ServerCapability capability = currentFeedbackServerCapability();
 	QVariantMap values = fieldValues;
 	const MumbleProto::FeedbackReportKind kind =
 		feedbackKindFromValue(values.value(QStringLiteral("feedback.kind")));
@@ -20640,8 +20639,8 @@ bool MainWindow::handleModernFeedbackDialogAction(const QString &dialogID, const
 		return true;
 	}
 
-	const FeedbackDialog::ServerCapability capability = currentFeedbackServerCapability();
-	const FeedbackDialog::PreparedReport report =
+	const Mumble::Feedback::ServerCapability capability = currentFeedbackServerCapability();
+	const Mumble::Feedback::PreparedReport report =
 		feedbackPreparedReportFromValues(values, capability, m_modernFeedbackCaptureStartOffset);
 	PendingFeedbackSubmission submission = pendingSubmissionFromReport(report, true);
 	m_modernFeedbackDraftValues          = values;

@@ -7,7 +7,7 @@
 
 #include "CertService.h"
 #include "ClientUser.h"
-#include "FeedbackDialog.h"
+#include "FeedbackReport.h"
 #include "FeedbackReport.h"
 #include "Global.h"
 #include "GlobalShortcut.h"
@@ -2739,7 +2739,7 @@ namespace {
 		const QString issueTitle = Mumble::Feedback::issueTitle(fields);
 		const QString issueBody = Mumble::Feedback::issueBody(fields, Mumble::Feedback::DEFAULT_MAX_BODY_BYTES,
 															   Mumble::Feedback::DEFAULT_MAX_LOG_BYTES);
-		const QUrl fallbackUrl = FeedbackDialog::fallbackIssueUrl(issueTitle, issueBody, fields.kind);
+		const QUrl fallbackUrl = Mumble::Feedback::fallbackIssueUrl(issueTitle, issueBody, fields.kind);
 		const QUrlQuery query(fallbackUrl);
 
 		QVariantMap result;

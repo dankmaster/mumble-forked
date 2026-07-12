@@ -8,6 +8,7 @@
 #include <QtCore/QRegularExpression>
 #include <QtCore/QStringList>
 #include <QtCore/QTextStream>
+#include <QtCore/QUrlQuery>
 
 namespace Mumble {
 namespace Feedback {
@@ -156,6 +157,17 @@ namespace Feedback {
 			}
 		}
 		return result;
+	}
+
+	QUrl fallbackIssueUrl(const QString &title, const QString &body, const MumbleProto::FeedbackReportKind kind) {
+		QUrl url(QStringLiteral("https://github.com/dankmaster/mumble-forked/issues/new"));
+		QUrlQuery query;
+		query.addQueryItem(QStringLiteral("title"), title);
+		query.addQueryItem(QStringLiteral("body"), body);
+		query.addQueryItem(QStringLiteral("labels"),
+						   QStringLiteral("triage,in-app-feedback,%1").arg(kindLabel(kind).toLower()));
+		url.setQuery(query);
+		return url;
 	}
 } // namespace Feedback
 } // namespace Mumble

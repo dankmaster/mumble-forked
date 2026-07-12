@@ -10,6 +10,7 @@
 
 #include <QtCore/QList>
 #include <QtCore/QString>
+#include <QtCore/QUrl>
 
 namespace Mumble {
 namespace Feedback {
@@ -31,6 +32,22 @@ namespace Feedback {
 		QString pastedEvidence;
 	};
 
+	struct ServerCapability {
+		bool connected = false;
+		bool supported = false;
+		bool enabled = false;
+		unsigned int maxLogBytes = DEFAULT_MAX_LOG_BYTES;
+		unsigned int maxBodyBytes = DEFAULT_MAX_BODY_BYTES;
+		QString summary;
+	};
+
+	struct PreparedReport {
+		MumbleProto::FeedbackReport message;
+		QString issueTitle;
+		QString issueBody;
+		QUrl fallbackUrl;
+	};
+
 	QString kindLabel(MumbleProto::FeedbackReportKind kind);
 	QString kindTitlePrefix(MumbleProto::FeedbackReportKind kind);
 	QString issueTitle(const ReportFields &fields);
@@ -39,6 +56,7 @@ namespace Feedback {
 	QString issueBody(const ReportFields &fields, unsigned int maxBodyBytes = DEFAULT_MAX_BODY_BYTES,
 					  unsigned int maxDiagnosticsBytes = DEFAULT_MAX_LOG_BYTES);
 	QStringList splitLabels(const QString &labels);
+	QUrl fallbackIssueUrl(const QString &title, const QString &body, MumbleProto::FeedbackReportKind kind);
 } // namespace Feedback
 } // namespace Mumble
 
