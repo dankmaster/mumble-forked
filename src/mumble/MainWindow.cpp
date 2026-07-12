@@ -4,6 +4,12 @@
 // Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
 #include "MainWindow.h"
+#include "UserView.h"
+
+#include <QtWidgets/QDockWidget>
+#include <QtWidgets/QHBoxLayout>
+#include <QtWidgets/QMenuBar>
+#include <QtWidgets/QToolBar>
 
 #include "ACL.h"
 #include "About.h"
@@ -13337,7 +13343,7 @@ MainWindow::MainWindow(QWidget *p)
 	m_userCommentRequestTimer->setObjectName(QLatin1String("UserCommentRequest"));
 	connect(m_userCommentRequestTimer, &QTimer::timeout, this, &MainWindow::flushUserCommentRequests);
 
-	const bool qmlShellRequested = qEnvironmentVariableIntValue("MUMBLE_QML_SHELL") > 0;
+	const bool qmlShellRequested = true;
 	qmUser     = qmlShellRequested ? nullptr : new QMenu(tr("&User"), this);
 	qmChannel  = qmlShellRequested ? nullptr : new QMenu(tr("&Channel"), this);
 	qmListener = qmlShellRequested ? nullptr : new QMenu(tr("&Listener"), this);
@@ -13348,7 +13354,7 @@ MainWindow::MainWindow(QWidget *p)
 	qaEmpty->setEnabled(false);
 
 	createActions();
-	setupUi(this);
+	initializeBaseActions();
 	qaServerSettings = new QAction(tr("Server Settings..."), this);
 	qaServerSettings->setObjectName(QStringLiteral("qaServerSettings"));
 	qaServerSettings->setToolTip(tr("Change server settings for connected clients"));
@@ -13998,7 +14004,7 @@ void MainWindow::applyShellLayout() {
 		return;
 	}
 
-	if (qEnvironmentVariableIntValue("MUMBLE_QML_SHELL") > 0) {
+	{
 		if (!m_qmlShellHost) {
 			m_qmlShellHost = std::make_unique< QmlShellHost >(m_clientActionRegistry.get(), this);
 			UiCommandController *commands = m_qmlShellHost->commandController();
@@ -14082,6 +14088,85 @@ void MainWindow::applyShellLayout() {
 
 	m_activeShellLayout      = targetLayout;
 	m_shellLayoutInitialized = true;
+}
+
+void MainWindow::initializeBaseActions() {
+	const auto makeAction = [this](const char *id, const QString &text, const bool checkable = false,
+								 const bool enabled = true) {
+		QAction *action = new QAction(text, this);
+		action->setObjectName(QString::fromLatin1(id));
+		action->setCheckable(checkable);
+		action->setEnabled(enabled);
+		return action;
+	};
+	qaQuit = makeAction("qaQuit", tr("Quit")); qaQuit->setMenuRole(QAction::QuitRole);
+	qaServerConnect = makeAction("qaServerConnect", tr("Connect..."));
+	qaServerDisconnect = makeAction("qaServerDisconnect", tr("Disconnect"), false, false);
+	qaServerAddToFavorites = makeAction("qaServerAddToFavorites", tr("Add to Favorites"), false, false);
+	qaServerBanList = makeAction("qaServerBanList", tr("Ban List"), false, false);
+	qaServerInformation = makeAction("qaServerInformation", tr("Server Information"), false, false);
+	qaUserKick = makeAction("qaUserKick", tr("Kick"));
+	qaUserMute = makeAction("qaUserMute", tr("Mute"), true);
+	qaUserBan = makeAction("qaUserBan", tr("Ban"));
+	qaUserDeaf = makeAction("qaUserDeaf", tr("Deafen"), true);
+	qaUserLocalIgnore = makeAction("qaUserLocalIgnore", tr("Ignore"), true);
+	qaUserLocalMute = makeAction("qaUserLocalMute", tr("Local Mute"), true);
+	qaUserTextMessage = makeAction("qaUserTextMessage", tr("Send Message"));
+	qaUserLocalNickname = makeAction("qaUserLocalNickname", tr("Change Local Nickname"));
+	qaChannelAdd = makeAction("qaChannelAdd", tr("Add Channel"));
+	qaChannelRemove = makeAction("qaChannelRemove", tr("Remove Channel"));
+	qaChannelACL = makeAction("qaChannelACL", tr("Edit ACL"));
+	qaChannelLink = makeAction("qaChannelLink", tr("Link Channel"));
+	qaChannelUnlink = makeAction("qaChannelUnlink", tr("Unlink Channel"));
+	qaChannelUnlinkAll = makeAction("qaChannelUnlinkAll", tr("Unlink All"));
+	qaAudioReset = makeAction("qaAudioReset", tr("Reset Audio"));
+	qaAudioMute = makeAction("qaAudioMute", tr("Mute Self"), true);
+	qaAudioDeaf = makeAction("qaAudioDeaf", tr("Deafen Self"), true);
+	qaAudioTTS = makeAction("qaAudioTTS", tr("Text-To-Speech"), true);
+	qaAudioStats = makeAction("qaAudioStats", tr("Audio Statistics"));
+	qaAudioUnlink = makeAction("qaAudioUnlink", tr("Unlink Plugin"));
+	qaConfigDialog = makeAction("qaConfigDialog", tr("Settings...")); qaConfigDialog->setMenuRole(QAction::PreferencesRole);
+	qaFilterToggle = makeAction("qaFilterToggle", tr("Filter"), true);
+	qaAudioWizard = makeAction("qaAudioWizard", tr("Audio Setup"));
+	qaDeveloperConsole = makeAction("qaDeveloperConsole", tr("Developer Console"));
+	qaHelpWhatsThis = makeAction("qaHelpWhatsThis", tr("What's This?"));
+	qaHelpFeedback = makeAction("qaHelpFeedback", tr("Send Feedback"));
+	qaHelpAbout = makeAction("qaHelpAbout", tr("About Mumble"), false, true); qaHelpAbout->setMenuRole(QAction::AboutRole);
+	qaHelpAboutSpeex = makeAction("qaHelpAboutSpeex", tr("About Speex"));
+	qaHelpAboutQt = makeAction("qaHelpAboutQt", tr("About Qt")); qaHelpAboutQt->setMenuRole(QAction::AboutQtRole);
+	qaHelpVersionCheck = makeAction("qaHelpVersionCheck", tr("Check for Updates"));
+	qaChannelSendMessage = makeAction("qaChannelSendMessage", tr("Send Message to Channel"));
+	qaChannelCopyURL = makeAction("qaChannelCopyURL", tr("Copy URL"));
+	qaConfigMinimal = makeAction("qaConfigMinimal", tr("Minimal View"), true);
+	qaConfigHideFrame = makeAction("qaConfigHideFrame", tr("Hide Frame"), true);
+	qaConfigCert = makeAction("qaConfigCert", tr("Certificate..."));
+	qaUserRegister = makeAction("qaUserRegister", tr("Register User"));
+	qaUserFriendAdd = makeAction("qaUserFriendAdd", tr("Add Friend"));
+	qaUserFriendRemove = makeAction("qaUserFriendRemove", tr("Remove Friend"));
+	qaUserFriendUpdate = makeAction("qaUserFriendUpdate", tr("Update Friend"));
+	qaServerUserList = makeAction("qaServerUserList", tr("Registered Users"));
+	qaServerTexture = makeAction("qaServerTexture", tr("Change Avatar"));
+	qaServerTokens = makeAction("qaServerTokens", tr("Access Tokens"));
+	qaServerTextureRemove = makeAction("qaServerTextureRemove", tr("Remove Avatar"));
+	qaUserCommentReset = makeAction("qaUserCommentReset", tr("Reset Comment"));
+	qaUserTextureReset = makeAction("qaUserTextureReset", tr("Remove User Avatar"));
+	qaChannelJoin = makeAction("qaChannelJoin", tr("Join"));
+	qaChannelHide = makeAction("qaChannelHide", tr("Hide When Filtering"));
+	qaChannelPin = makeAction("qaChannelPin", tr("Pin When Filtering"));
+	qaUserCommentView = makeAction("qaUserCommentView", tr("View Comment"));
+	qaUserInformation = makeAction("qaUserInformation", tr("User Information"));
+	qaSelfComment = makeAction("qaSelfComment", tr("Change Comment"));
+	qaSelfRegister = makeAction("qaSelfRegister", tr("Register"));
+	qaUserPrioritySpeaker = makeAction("qaUserPrioritySpeaker", tr("Priority Speaker"), true);
+	qaSelfPrioritySpeaker = makeAction("qaSelfPrioritySpeaker", tr("Priority Speaker"), true);
+	qaRecording = makeAction("qaRecording", tr("Record..."), false, false);
+	qaChannelListen = makeAction("qaChannelListen", tr("Listen To Channel"), true);
+	qaUserJoin = makeAction("qaUserJoin", tr("Join User's Channel"));
+	qaUserMove = makeAction("qaUserMove", tr("Move To Own Channel"));
+	qaUserLocalIgnoreTTS = makeAction("qaUserLocalIgnoreTTS", tr("Disable Text-To-Speech"), true);
+	qaSearch = makeAction("qaSearch", tr("Search...")); qaSearch->setShortcut(QKeySequence::Find);
+	qaMoveBack = makeAction("qaMoveBack", tr("Move Back"), false, false);
+	QMetaObject::connectSlotsByName(this);
 }
 
 void MainWindow::createActions() {
@@ -14312,7 +14397,7 @@ void MainWindow::createActions() {
 }
 
 void MainWindow::setupGui() {
-	const bool qmlShellRequested = qEnvironmentVariableIntValue("MUMBLE_QML_SHELL") > 0;
+	const bool qmlShellRequested = true;
 	updateWindowTitle();
 	if (!qmlShellRequested) {
 		setupServerNavigator();
@@ -17467,7 +17552,7 @@ namespace {
 } // namespace
 
 void MainWindow::publishModernDialogState(const QVariantMap &state) {
-	if (m_qmlShellHost && qEnvironmentVariableIntValue("MUMBLE_QML_SHELL") > 0) {
+	if (m_qmlShellHost) {
 		m_qmlShellHost->dialogController()->applyState(state);
 		if (!state.value(QStringLiteral("open")).toBool() && !m_modernStartupDialogQueue.isEmpty()) {
 			QTimer::singleShot(0, this, &MainWindow::openNextModernStartupDialog);
@@ -27332,7 +27417,14 @@ bool MainWindow::handleModernShellAppAction(const QString &actionId) {
 		publishModernShellRoomStatePatch();
 		return true;
 	}
+	if (m_clientActionRegistry) {
+		if (QAction *action = m_clientActionRegistry->action(actionId); action && action->isEnabled()) {
+			action->trigger();
+			return true;
+		}
+	}
 
+	if (!qmServer || !qmSelf || !qmConfig || !qmHelp) return false;
 	on_qmServer_aboutToShow();
 	on_qmSelf_aboutToShow();
 	on_qmConfig_aboutToShow();

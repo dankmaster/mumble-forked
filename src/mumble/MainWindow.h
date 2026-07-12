@@ -9,6 +9,7 @@
 #include <QtCore/QVariantMap>
 
 #include <QtCore/QHash>
+#include <QtCore/QEvent>
 #include <QtCore/QJsonObject>
 #include <QtCore/QMap>
 #include <QtCore/QPointer>
@@ -20,6 +21,14 @@
 #include <QtGui/QImage>
 #include <QtNetwork/QAbstractSocket>
 #include <QtWidgets/QMainWindow>
+#include <QtWidgets/QApplication>
+#include <QtWidgets/QDockWidget>
+#include <QtWidgets/QHBoxLayout>
+#include <QtWidgets/QLabel>
+#include <QtWidgets/QMenu>
+#include <QtWidgets/QMenuBar>
+#include <QtWidgets/QToolBar>
+#include <QtWidgets/QVBoxLayout>
 
 #include "ACL.h"
 #include "ConnectionFailTypes.h"
@@ -34,13 +43,12 @@
 #include "Settings.h"
 #include "UnresolvedServerAddress.h"
 #include "Usage.h"
+#include "UserView.h"
 
 #include <memory>
 #include <optional>
 #include <stack>
 #include <vector>
-
-#include "MainWindowUi.h"
 
 #define MB_QEVENT (QEvent::User + 939)
 #define OU_QEVENT (QEvent::User + 940)
@@ -132,7 +140,7 @@ public:
 	OpenURLEvent(QUrl url);
 };
 
-class MainWindow : public QMainWindow, public Ui::MainWindow {
+class MainWindow : public QMainWindow {
 	friend class UserModel;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 	friend class ModernUiAutomationServer;
@@ -159,6 +167,38 @@ public:
 	QMenu *qmChannel;
 	QMenu *qmListener;
 	QMenu *qmDeveloper;
+	QMenu *qmConfig = nullptr, *qmHelp = nullptr, *qmServer = nullptr, *qmSelf = nullptr;
+	QMenuBar *menubar = nullptr;
+	UserView *qtvUsers = nullptr;
+	QDockWidget *qdwLog = nullptr, *qdwChat = nullptr, *qdwMinimalViewNote = nullptr;
+	LogTextBrowser *qteLog = nullptr;
+	ChatbarTextEdit *qteChat = nullptr;
+	QToolBar *qtIconToolbar = nullptr;
+	QWidget *dockWidgetContents = nullptr;
+	QHBoxLayout *horizontalLayout = nullptr;
+	QLabel *label = nullptr;
+	QAction *qaQuit = nullptr, *qaServerConnect = nullptr, *qaServerDisconnect = nullptr;
+	QAction *qaServerAddToFavorites = nullptr, *qaServerBanList = nullptr, *qaServerInformation = nullptr;
+	QAction *qaUserKick = nullptr, *qaUserMute = nullptr, *qaUserBan = nullptr, *qaUserDeaf = nullptr;
+	QAction *qaUserLocalIgnore = nullptr, *qaUserLocalMute = nullptr, *qaUserTextMessage = nullptr;
+	QAction *qaUserLocalNickname = nullptr, *qaChannelAdd = nullptr, *qaChannelRemove = nullptr;
+	QAction *qaChannelACL = nullptr, *qaChannelLink = nullptr, *qaChannelUnlink = nullptr;
+	QAction *qaChannelUnlinkAll = nullptr, *qaAudioReset = nullptr, *qaAudioMute = nullptr;
+	QAction *qaAudioDeaf = nullptr, *qaAudioTTS = nullptr, *qaAudioStats = nullptr, *qaAudioUnlink = nullptr;
+	QAction *qaConfigDialog = nullptr, *qaFilterToggle = nullptr, *qaAudioWizard = nullptr;
+	QAction *qaDeveloperConsole = nullptr, *qaHelpWhatsThis = nullptr, *qaHelpFeedback = nullptr;
+	QAction *qaHelpAbout = nullptr, *qaHelpAboutSpeex = nullptr, *qaHelpAboutQt = nullptr;
+	QAction *qaHelpVersionCheck = nullptr, *qaChannelSendMessage = nullptr, *qaChannelCopyURL = nullptr;
+	QAction *qaConfigMinimal = nullptr, *qaConfigHideFrame = nullptr, *qaConfigCert = nullptr;
+	QAction *qaUserRegister = nullptr, *qaUserFriendAdd = nullptr, *qaUserFriendRemove = nullptr;
+	QAction *qaUserFriendUpdate = nullptr, *qaServerUserList = nullptr, *qaServerTexture = nullptr;
+	QAction *qaServerTokens = nullptr, *qaServerTextureRemove = nullptr, *qaUserCommentReset = nullptr;
+	QAction *qaUserTextureReset = nullptr, *qaChannelJoin = nullptr, *qaChannelHide = nullptr;
+	QAction *qaChannelPin = nullptr, *qaUserCommentView = nullptr, *qaUserInformation = nullptr;
+	QAction *qaSelfComment = nullptr, *qaSelfRegister = nullptr, *qaUserPrioritySpeaker = nullptr;
+	QAction *qaSelfPrioritySpeaker = nullptr, *qaRecording = nullptr, *qaChannelListen = nullptr;
+	QAction *qaUserJoin = nullptr, *qaUserMove = nullptr, *qaUserLocalIgnoreTTS = nullptr;
+	QAction *qaSearch = nullptr, *qaMoveBack = nullptr;
 	QIcon qiIcon, qiIconMutePushToMute, qiIconMuteSelf, qiIconMuteServer, qiIconDeafSelf, qiIconDeafServer,
 		qiIconMuteSuppressed;
 	QIcon qiTalkingOn, qiTalkingWhisper, qiTalkingShout, qiTalkingOff;
@@ -971,6 +1011,7 @@ protected:
 	static constexpr int stateVersion(bool modernShell);
 
 	void createActions();
+	void initializeBaseActions();
 	void handleModernShellBootFailure(const QString &reason);
 	void connectToServer(const QString &host, unsigned short port, const QString &username, const QString &password,
 						 const QString &serverName, const QString &desiredChannel = QString());

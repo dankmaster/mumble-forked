@@ -205,7 +205,6 @@ set(MUMBLE_SOURCES
 	"ClientActionRegistry.h"
 	"MainWindow.cpp"
 	"MainWindow.h"
-	"MainWindowUi.h"
 	"Markdown.cpp"
 	"Markdown.h"
 	"MenuLabel.cpp"
