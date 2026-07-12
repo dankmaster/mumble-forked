@@ -183,6 +183,12 @@ class ChatTimelineModel final : public StableListModel {
 	Q_OBJECT
 public:
 	using StableListModel::StableListModel;
+	bool upsertMessage(const QVariantMap &message);
+	int appendMessages(const QVariantList &messages);
+	void replaceMessages(const QVariantList &messages);
+
+private:
+	static QVariantMap messageRow(const QVariantMap &message);
 };
 
 class AsyncOperationModel final : public StableListModel {

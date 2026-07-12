@@ -19566,7 +19566,7 @@ void MainWindow::publishModernShellPreviewUpdateForKey(const QString &previewKey
 		}
 
 		evictModernShellMessageDtoCacheForMessage(message);
-		publishModernShellMessageUpdatePatch(message);
+		publishQmlChatMessage(message);
 	}
 }
 
@@ -19586,7 +19586,7 @@ void MainWindow::publishPersistentChatInlineDataImageUpdate(const QString &token
 		}
 
 		evictModernShellMessageDtoCacheForMessage(message);
-		publishModernShellMessageUpdatePatch(message);
+		publishQmlChatMessage(message);
 	}
 }
 
@@ -19827,7 +19827,7 @@ void MainWindow::handleModernShellPreviewHydrationRequest(const QString &scopeTo
 			if (const MumbleProto::ChatMessage *message =
 					findPersistentChatMessageByID(m_persistentChatMessages, static_cast< unsigned int >(messageID))) {
 				evictModernShellMessageDtoCacheForMessage(*message);
-				publishModernShellMessageUpdatePatch(*message);
+				publishQmlChatMessage(*message);
 				highPriorityConsumed = true;
 				continue;
 			}
@@ -19879,7 +19879,7 @@ void MainWindow::flushModernShellPreviewHydrationQueue() {
 		}
 
 		evictModernShellMessageDtoCacheForMessage(*message);
-		publishModernShellMessageUpdatePatch(*message);
+		publishQmlChatMessage(*message);
 		++processed;
 	}
 
@@ -20956,9 +20956,7 @@ void MainWindow::publishModernShellPatch(const QString &kind, QVariantMap patch)
 		return;
 	}
 
-	if (kind == QLatin1String("messages.append") || kind == QLatin1String("messages.update")
-		|| kind == QLatin1String("messages.reset") || kind == QLatin1String("serverLog.update")
-		|| kind == QLatin1String("serverLog.reset")) {
+	if (kind == QLatin1String("serverLog.update") || kind == QLatin1String("serverLog.reset")) {
 		flushModernShellCoalescedPatches();
 	}
 
@@ -20966,24 +20964,26 @@ void MainWindow::publishModernShellPatch(const QString &kind, QVariantMap patch)
 }
 
 void MainWindow::publishModernShellMessagesPatch(const QString &kind, const QVariantList &messages,
-												 const bool scrollToBottom, const QString &timelineMode) {
-	if (messages.isEmpty() && kind != QLatin1String("messages.reset")) {
+											 const bool scrollToBottom, const QString &timelineMode) {
+	if (!m_qmlShellHost || (messages.isEmpty() && kind != QLatin1String("messages.reset"))) {
 		return;
 	}
 
+	Q_UNUSED(scrollToBottom)
+	flushModernShellCoalescedPatches();
 	const PersistentChatTarget target = currentPersistentChatTarget();
-	QVariantMap patch                = buildModernShellPatchBase(kind, target);
-	patch.insert(QStringLiteral("activeScope"), buildModernShellActiveScopeState(target));
-	patch.insert(QStringLiteral("messages"), messages);
-	patch.insert(QStringLiteral("scrollToBottom"), scrollToBottom);
+	m_qmlShellHost->activeScopeController()->applyState(buildModernShellActiveScopeState(target));
 	if (kind == QLatin1String("messages.reset")) {
-		patch.insert(QStringLiteral("timelineMode"),
-					 timelineMode.isEmpty() ? QStringLiteral("normal") : timelineMode);
+		Q_UNUSED(timelineMode)
+		m_qmlShellHost->chatModel()->replaceMessages(messages);
+		mumble::chatperf::recordValue("qml.chat.hydration.messages", messages.size());
+		return;
 	}
-	publishModernShellPatch(kind, patch);
+	const int applied = m_qmlShellHost->chatModel()->appendMessages(messages);
+	mumble::chatperf::recordValue("qml.chat.append.direct", applied);
 }
 
-void MainWindow::publishModernShellMessageUpdatePatch(const MumbleProto::ChatMessage &message) {
+void MainWindow::publishQmlChatMessage(const MumbleProto::ChatMessage &message, const bool appended) {
 	const PersistentChatTarget target = currentPersistentChatTarget();
 	if (target.serverLog || target.directMessage) {
 		return;
@@ -20995,10 +20995,11 @@ void MainWindow::publishModernShellMessageUpdatePatch(const MumbleProto::ChatMes
 						  && !target.ephemeralTextPath && canSendToPersistentChatTarget(target, true);
 	const bool canReact           = canReply && self && self->iId >= 0;
 	const bool canDeleteMessages  = canDeletePersistentChatMessages(target, true);
-	QVariantMap patch             = buildModernShellPatchBase(QStringLiteral("messages.update"), target);
-	patch.insert(QStringLiteral("message"),
-				 buildModernShellCachedMessageState(message, target, canReply, canReact, canDeleteMessages));
-	publishModernShellPatch(QStringLiteral("messages.update"), patch);
+	const QVariantMap state =
+		buildModernShellCachedMessageState(message, target, canReply, canReact, canDeleteMessages);
+	if (m_qmlShellHost && m_qmlShellHost->chatModel()->upsertMessage(state)) {
+		mumble::chatperf::recordValue(appended ? "qml.chat.append.direct" : "qml.chat.update.direct", 1);
+	}
 }
 
 void MainWindow::publishModernShellActiveScopePatch(const QString &kind) {
@@ -25264,7 +25265,6 @@ void MainWindow::syncQmlShellState() {
 	}
 	m_qmlShellHost->participantModel()->synchronizeRows(participantRows);
 
-	QVariantList messageRows;
 	QVariantList messages;
 	if (!m_modernRichPreviewProbeMessages.isEmpty()) {
 		messages = m_modernRichPreviewProbeMessages;
@@ -25275,35 +25275,7 @@ void MainWindow::syncQmlShellState() {
 		const std::size_t beginIndex = messageCount > 200 ? messageCount - 200 : 0;
 		messages = buildModernShellMessageStates(target, beginIndex, ModernShellMessageBuildMode::FastFirstPaint);
 	}
-	for (const QVariant &entry : messages) {
-		const QVariantMap message = entry.toMap();
-		QVariantMap row;
-		QString messageID = message.value(QStringLiteral("messageId")).toString();
-		if (messageID.isEmpty()) {
-			messageID = message.value(QStringLiteral("messageKey")).toString();
-		}
-		row.insert(QStringLiteral("id"), messageID);
-		row.insert(QStringLiteral("title"),
-				   message.value(QStringLiteral("actor"), message.value(QStringLiteral("actorLabel"))));
-		row.insert(QStringLiteral("subtitle"), message.value(QStringLiteral("bodyText")));
-		row.insert(QStringLiteral("kind"), QStringLiteral("message"));
-		row.insert(QStringLiteral("status"), message.value(QStringLiteral("deliveryState")));
-		row.insert(QStringLiteral("avatarUrl"), message.value(QStringLiteral("avatarUrl")));
-		row.insert(QStringLiteral("timestamp"), message.value(QStringLiteral("timeLabel")));
-		row.insert(QStringLiteral("replyActor"), message.value(QStringLiteral("replyActor")));
-		row.insert(QStringLiteral("replySnippet"), message.value(QStringLiteral("replySnippet")));
-		row.insert(QStringLiteral("reactions"), message.value(QStringLiteral("reactions")));
-		row.insert(QStringLiteral("preview"),
-				   message.value(QStringLiteral("preview"), message.value(QStringLiteral("previewStub"))));
-		row.insert(QStringLiteral("own"), message.value(QStringLiteral("own")));
-		row.insert(QStringLiteral("deleted"), message.value(QStringLiteral("deleted")));
-		row.insert(QStringLiteral("canReply"), message.value(QStringLiteral("canReply")));
-		row.insert(QStringLiteral("canReact"), message.value(QStringLiteral("canReact")));
-		row.insert(QStringLiteral("canDelete"), message.value(QStringLiteral("canDelete")));
-		row.insert(QStringLiteral("source"), message);
-		messageRows.push_back(row);
-	}
-	m_qmlShellHost->chatModel()->synchronizeRows(messageRows);
+	m_qmlShellHost->chatModel()->replaceMessages(messages);
 }
 
 void MainWindow::applyQmlShellPatch(const QString &kind, const QVariantMap &patch) {
@@ -25337,32 +25309,6 @@ void MainWindow::applyQmlShellPatch(const QString &kind, const QVariantMap &patc
 		row.insert(QStringLiteral("source"), participant);
 		return row;
 	};
-	const auto messageRow = [](const QVariantMap &message) {
-		QVariantMap row;
-		QString messageID = message.value(QStringLiteral("messageId")).toString();
-		if (messageID.isEmpty()) messageID = message.value(QStringLiteral("messageKey")).toString();
-		row.insert(QStringLiteral("id"), messageID);
-		row.insert(QStringLiteral("title"),
-				   message.value(QStringLiteral("actor"), message.value(QStringLiteral("actorLabel"))));
-		row.insert(QStringLiteral("subtitle"), message.value(QStringLiteral("bodyText")));
-		row.insert(QStringLiteral("kind"), QStringLiteral("message"));
-		row.insert(QStringLiteral("status"), message.value(QStringLiteral("deliveryState")));
-		row.insert(QStringLiteral("avatarUrl"), message.value(QStringLiteral("avatarUrl")));
-		row.insert(QStringLiteral("timestamp"), message.value(QStringLiteral("timeLabel")));
-		row.insert(QStringLiteral("replyActor"), message.value(QStringLiteral("replyActor")));
-		row.insert(QStringLiteral("replySnippet"), message.value(QStringLiteral("replySnippet")));
-		row.insert(QStringLiteral("reactions"), message.value(QStringLiteral("reactions")));
-		row.insert(QStringLiteral("preview"),
-				   message.value(QStringLiteral("preview"), message.value(QStringLiteral("previewStub"))));
-		row.insert(QStringLiteral("own"), message.value(QStringLiteral("own")));
-		row.insert(QStringLiteral("deleted"), message.value(QStringLiteral("deleted")));
-		row.insert(QStringLiteral("canReply"), message.value(QStringLiteral("canReply")));
-		row.insert(QStringLiteral("canReact"), message.value(QStringLiteral("canReact")));
-		row.insert(QStringLiteral("canDelete"), message.value(QStringLiteral("canDelete")));
-		row.insert(QStringLiteral("source"), message);
-		return row;
-	};
-
 	if (patch.contains(QStringLiteral("activeScope"))) {
 		const QVariantMap state = patch.value(QStringLiteral("activeScope")).toMap();
 		m_qmlShellHost->activeScopeController()->applyState(state);
@@ -25413,23 +25359,6 @@ void MainWindow::applyQmlShellPatch(const QString &kind, const QVariantMap &patc
 		return;
 	}
 
-	if (kind == QLatin1String("messages.update")) {
-		const QVariantMap message = patch.value(QStringLiteral("message")).toMap();
-		if (!message.isEmpty()) m_qmlShellHost->chatModel()->upsertRow(messageRow(message));
-		return;
-	}
-
-	if (kind == QLatin1String("messages.append") || kind == QLatin1String("messages.reset")) {
-		QVariantList messages;
-		for (const QVariant &entry : patch.value(QStringLiteral("messages")).toList()) {
-			messages.push_back(messageRow(entry.toMap()));
-		}
-		if (kind == QLatin1String("messages.reset")) {
-			m_qmlShellHost->chatModel()->synchronizeRows(messages);
-		} else {
-			for (const QVariant &message : messages) m_qmlShellHost->chatModel()->upsertRow(message.toMap());
-		}
-	}
 }
 
 void MainWindow::focusPersistentChatVoiceChannel(Channel *channel) {
@@ -31257,6 +31186,14 @@ void MainWindow::handlePersistentChatMessage(const MumbleProto::ChatMessage &msg
 	}
 	syncPersistentChatGatewayHandler();
 	m_persistentChatGateway->handleIncomingMessage(msg);
+
+	const PersistentChatTarget target = currentPersistentChatTarget();
+	const MumbleProto::ChatScope scope = msg.has_scope() ? msg.scope() : MumbleProto::Channel;
+	const unsigned int scopeId         = msg.has_scope_id() ? msg.scope_id() : 0;
+	if (target.valid && !target.serverLog && !target.directMessage && target.scope == scope
+		&& target.scopeID == scopeId) {
+		publishQmlChatMessage(msg, true);
+	}
 }
 
 void MainWindow::handlePersistentChatHistory(const MumbleProto::ChatHistoryResponse &msg) {
@@ -31396,7 +31333,7 @@ void MainWindow::handlePersistentChatEmbedState(const MumbleProto::ChatEmbedStat
 																msg.thread_id(), previewSpec);
 
 	if (updatedLocalMessage) {
-		publishModernShellMessageUpdatePatch(*updatedLocalMessage);
+		publishQmlChatMessage(*updatedLocalMessage);
 	}
 
 	if (!updatedModelBubble && !updatedVisibleBubble) {
@@ -31442,7 +31379,7 @@ void MainWindow::handlePersistentChatReactionState(const MumbleProto::ChatReacti
 			for (const MumbleProto::ChatReactionAggregate &reaction : msg.reactions()) {
 				*updatedLocalMessage->add_reactions() = reaction;
 			}
-			publishModernShellMessageUpdatePatch(*updatedLocalMessage);
+			publishQmlChatMessage(*updatedLocalMessage);
 		}
 	}
 }

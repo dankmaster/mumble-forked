@@ -30,7 +30,15 @@ ApplicationWindow {
         PttTool { }
     }
 
-    QmlDialog { }
+    QmlDialog { visible: dialogState.open && dialogState.kind !== "imageViewer" }
+    Component {
+        id: imageViewerComponent
+        ImageViewer { controller: dialogState }
+    }
+    Loader {
+        active: dialogState.open && dialogState.kind === "imageViewer"
+        sourceComponent: imageViewerComponent
+    }
     MediaSessionWindow { }
 
     Column {

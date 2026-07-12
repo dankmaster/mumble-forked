@@ -298,6 +298,57 @@ void ParticipantModel::updatePresence(const QString &sessionId, const QString &t
 	}
 }
 
+QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message) {
+	QString messageId = message.value(QStringLiteral("messageId")).toString().trimmed();
+	if (messageId.isEmpty()) messageId = message.value(QStringLiteral("messageKey")).toString().trimmed();
+	if (messageId.isEmpty()) return {};
+
+	return { { QStringLiteral("id"), messageId },
+			 { QStringLiteral("title"),
+			   message.value(QStringLiteral("actor"), message.value(QStringLiteral("actorLabel"))) },
+			 { QStringLiteral("subtitle"), message.value(QStringLiteral("bodyText")) },
+			 { QStringLiteral("kind"), QStringLiteral("message") },
+			 { QStringLiteral("status"), message.value(QStringLiteral("deliveryState")) },
+			 { QStringLiteral("avatarUrl"), message.value(QStringLiteral("avatarUrl")) },
+			 { QStringLiteral("timestamp"), message.value(QStringLiteral("timeLabel")) },
+			 { QStringLiteral("replyActor"), message.value(QStringLiteral("replyActor")) },
+			 { QStringLiteral("replySnippet"), message.value(QStringLiteral("replySnippet")) },
+			 { QStringLiteral("reactions"), message.value(QStringLiteral("reactions")) },
+			 { QStringLiteral("preview"),
+			   message.value(QStringLiteral("preview"), message.value(QStringLiteral("previewStub"))) },
+			 { QStringLiteral("own"), message.value(QStringLiteral("own")) },
+			 { QStringLiteral("deleted"), message.value(QStringLiteral("deleted")) },
+			 { QStringLiteral("canReply"), message.value(QStringLiteral("canReply")) },
+			 { QStringLiteral("canReact"), message.value(QStringLiteral("canReact")) },
+			 { QStringLiteral("canDelete"), message.value(QStringLiteral("canDelete")) },
+			 { QStringLiteral("source"), message } };
+}
+
+bool ChatTimelineModel::upsertMessage(const QVariantMap &message) {
+	const QVariantMap row = messageRow(message);
+	if (row.isEmpty()) return false;
+	upsertRow(row);
+	return true;
+}
+
+int ChatTimelineModel::appendMessages(const QVariantList &messages) {
+	int applied = 0;
+	for (const QVariant &entry : messages) {
+		if (upsertMessage(entry.toMap())) ++applied;
+	}
+	return applied;
+}
+
+void ChatTimelineModel::replaceMessages(const QVariantList &messages) {
+	QVariantList rows;
+	rows.reserve(messages.size());
+	for (const QVariant &entry : messages) {
+		const QVariantMap row = messageRow(entry.toMap());
+		if (!row.isEmpty()) rows.push_back(row);
+	}
+	synchronizeRows(rows);
+}
+
 void AsyncOperationModel::startOperation(const QString &operationId, const QString &title, const QString &subtitle,
 										 const bool cancellable) {
 	QVariantMap payload { { QStringLiteral("progress"), -1 }, { QStringLiteral("indeterminate"), true },

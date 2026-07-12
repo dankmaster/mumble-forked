@@ -13,6 +13,7 @@ private slots:
 	void synchronizeRowsUsesIncrementalSignals();
 	void stableIdsRemainIndependentFromSourceMaps();
 	void messageRolesExposeStructuredState();
+	void chatTimelineAppliesDirectIncrementalMessages();
 	void participantPresenceUpdatesOnlyTypedRoles();
 	void duplicateStableIdsAreCoalesced();
 	void activeScopeAppliesTypedState();
@@ -21,6 +22,7 @@ private slots:
 	void commandsRejectEmptyStableIds();
 	void pttStateIsIdempotentAndReleases();
 	void dialogStateRoutesTypedRequests();
+	void imageViewerStateRemainsStructured();
 	void asyncOperationsExposeProgressAndCancellation();
 	void asyncOperationsClampProgressAndInterruptByPrefix();
 	void mediaSessionValidatesAndPublishesTypedState();
@@ -121,7 +123,7 @@ void TestQmlClientModels::stableIdsRemainIndependentFromSourceMaps() {
 
 void TestQmlClientModels::messageRolesExposeStructuredState() {
 	ChatTimelineModel model;
-	model.upsertRow({ { QStringLiteral("id"), QStringLiteral("message:7") },
+	model.upsertMessage({ { QStringLiteral("messageKey"), QStringLiteral("message:7") },
 						  { QStringLiteral("title"), QStringLiteral("Alice") },
 						  { QStringLiteral("subtitle"), QStringLiteral("Hello") },
 						  { QStringLiteral("timestamp"), QStringLiteral("12:30") },
@@ -147,6 +149,37 @@ void TestQmlClientModels::messageRolesExposeStructuredState() {
 	QCOMPARE(model.data(row, roleForName("preview")).toMap().value(QStringLiteral("title")).toString(),
 			 QStringLiteral("Example"));
 	QVERIFY(model.data(row, roleForName("canReply")).toBool());
+}
+
+void TestQmlClientModels::chatTimelineAppliesDirectIncrementalMessages() {
+	ChatTimelineModel model;
+	QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
+	QSignalSpy insertSpy(&model, &QAbstractItemModel::rowsInserted);
+	QSignalSpy changedSpy(&model, &QAbstractItemModel::dataChanged);
+
+	QVERIFY(model.upsertMessage({ { QStringLiteral("messageId"), 41 },
+								 { QStringLiteral("actor"), QStringLiteral("Alice") },
+								 { QStringLiteral("bodyText"), QStringLiteral("First") } }));
+	QCOMPARE(insertSpy.count(), 1);
+	QCOMPARE(resetSpy.count(), 0);
+	QCOMPARE(model.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("41"));
+
+	QVERIFY(model.upsertMessage({ { QStringLiteral("messageId"), 41 },
+								 { QStringLiteral("actor"), QStringLiteral("Alice") },
+								 { QStringLiteral("bodyText"), QStringLiteral("Edited") },
+								 { QStringLiteral("deliveryState"), QStringLiteral("delivered") } }));
+	QCOMPARE(model.rowCount(), 1);
+	QCOMPARE(changedSpy.count(), 1);
+	QCOMPARE(resetSpy.count(), 0);
+	QCOMPARE(model.get(0).value(QStringLiteral("subtitle")).toString(), QStringLiteral("Edited"));
+
+	const int appended = model.appendMessages(
+		{ QVariantMap { { QStringLiteral("messageId"), 42 }, { QStringLiteral("bodyText"), QStringLiteral("Second") } },
+		  QVariantMap { { QStringLiteral("bodyText"), QStringLiteral("Missing stable ID") } } });
+	QCOMPARE(appended, 1);
+	QCOMPARE(model.rowCount(), 2);
+	QCOMPARE(insertSpy.count(), 2);
+	QCOMPARE(resetSpy.count(), 0);
 }
 
 void TestQmlClientModels::participantPresenceUpdatesOnlyTypedRoles() {
@@ -306,6 +339,23 @@ void TestQmlClientModels::dialogStateRoutesTypedRequests() {
 	QCOMPARE(actionSpy.takeFirst().at(1).toString(), QStringLiteral("selectPage"));
 	dialog.requestClose();
 	QCOMPARE(closeSpy.count(), 1);
+}
+
+void TestQmlClientModels::imageViewerStateRemainsStructured() {
+	DialogStateController dialog;
+	QSignalSpy closeSpy(&dialog, &DialogStateController::closeRequested);
+	const QVariantMap image { { QStringLiteral("src"), QStringLiteral("data:image/png;base64,AA==") },
+							  { QStringLiteral("width"), 1920 }, { QStringLiteral("height"), 1080 } };
+	dialog.applyState({ { QStringLiteral("open"), true }, { QStringLiteral("id"), QStringLiteral("imageViewer") },
+						{ QStringLiteral("kind"), QStringLiteral("imageViewer") },
+						{ QStringLiteral("title"), QStringLiteral("Screenshot") },
+						{ QStringLiteral("imageViewer"), image } });
+
+	QCOMPARE(dialog.kind(), QStringLiteral("imageViewer"));
+	QCOMPARE(dialog.state().value(QStringLiteral("imageViewer")).toMap(), image);
+	dialog.requestClose();
+	QCOMPARE(closeSpy.count(), 1);
+	QCOMPARE(closeSpy.takeFirst().at(0).toString(), QStringLiteral("imageViewer"));
 }
 
 void TestQmlClientModels::asyncOperationsExposeProgressAndCancellation() {
