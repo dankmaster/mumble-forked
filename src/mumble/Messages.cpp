@@ -1752,7 +1752,7 @@ void MainWindow::msgPermissionQuery(const MumbleProto::PermissionQuery &msg) {
 		if (c->iId == 0)
 			Global::get().pPermissions = static_cast< ChanACL::Permissions >(c->uiPermissions);
 		if (c == current) updateMenuPermissions();
-		publishModernShellRoomStatePatch();
+		scheduleQmlRoomStateUpdate();
 		if (activeChatTargetMatchesPermissionChannel && activeChatTarget.channel == c
 			&& previousActiveChatPermissions != static_cast< ChanACL::Permissions >(c->uiPermissions)) {
 			refreshPersistentChatView(true);

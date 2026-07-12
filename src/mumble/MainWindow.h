@@ -30,7 +30,6 @@
 
 #include "ACL.h"
 #include "ConnectionFailTypes.h"
-#include "CustomElements.h"
 #include "Log.h"
 #include "MUComboBox.h"
 #include "ModernShellMenuSerializer.h"
@@ -63,7 +62,6 @@ struct PersistentChatPreviewSpec;
 class PersistentChatGateway;
 class PersistentChatController;
 class PersistentChatHistoryModel;
-class PersistentChatHistoryDelegate;
 class ModernDialogController;
 class QmlShellHost;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
@@ -501,10 +499,7 @@ public:
 	void setDefaultPersistentTextChannel(unsigned int textChannelID);
 	void showPersistentTextChannelContextMenu(const QPoint &position);
 	void updatePersistentTextChannelControls();
-	void showLogContextMenu(LogTextBrowser *browser, const QPoint &position);
-	QImage imageFromLogBrowser(const LogTextBrowser *browser, const QTextCursor &cursor) const;
 	void openImageDialog(const QImage &image);
-	void openImageDialog(LogTextBrowser *browser, const QTextCursor &cursor);
 	void openModernImageViewerDialog(const QImage &image);
 	void openModernScreenShareStatusDialog(const QString &streamID, const QString &sourceLabel,
 										   const QString &qualityLabel, const QString &audioLabel);
@@ -568,25 +563,22 @@ public:
 	QVariantList buildModernShellMessageStates(
 		const PersistentChatTarget &target, std::size_t beginIndex = 0,
 		ModernShellMessageBuildMode buildMode = ModernShellMessageBuildMode::Full);
-	QVariantMap buildModernShellPatchBase(const QString &kind, const PersistentChatTarget &target);
 	QVariantMap buildModernShellVoiceRoomScreenShareState(const Channel *channel) const;
-	QVariantMap buildModernShellActiveScopeState(const PersistentChatTarget &target);
+	QVariantMap buildQmlActiveScopeState(const PersistentChatTarget &target);
 	QVariantMap buildModernShellServerLogActiveScopeState(const PersistentChatTarget &target, bool includeHtml);
-	QVariantMap buildModernShellParticipantPatchState(const ClientUser *user, const Channel *contextChannel,
+	QVariantMap buildQmlParticipantState(const ClientUser *user, const Channel *contextChannel,
 													  const ClientUser *directMessagePeer, int avatarSize,
 													  bool includeAvatar);
-	QVariantMap buildModernShellListenerPatchState(const ClientUser *user, const Channel *channel, int avatarSize,
+	QVariantMap buildQmlListenerState(const ClientUser *user, const Channel *channel, int avatarSize,
 												   bool includeAvatar);
-	QVariantList buildModernShellChannelParticipantPatchStates(const Channel *channel, int avatarSize,
+	QVariantList buildQmlChannelParticipantStates(const Channel *channel, int avatarSize,
 															   bool includeAvatar);
-	QVariantMap buildModernShellRoomStatePatch();
-	void flushModernShellCoalescedPatches();
-	void publishModernShellMessagesPatch(const QString &kind, const QVariantList &messages, bool scrollToBottom,
-										  const QString &timelineMode = QString());
+	QVariantMap buildQmlRoomState();
+	void flushQmlRoomStateUpdates();
 	void publishQmlChatMessage(const MumbleProto::ChatMessage &message, bool appended = false);
 	void publishPersistentChatInlineDataImageUpdate(const QString &token);
-	void publishModernShellActiveScopeState();
-	void publishModernShellRoomStatePatch();
+	void publishQmlActiveScopeState();
+	void scheduleQmlRoomStateUpdate();
 	QString modernServerLogHtml() const;
 	void publishModernShellServerLogUpdate(const PersistentChatTarget &target);
 	void publishModernShellServerLogReset(const PersistentChatTarget &target);
@@ -830,11 +822,9 @@ protected:
 	QWidget *m_persistentChatConversationPanel                     = nullptr;
 	QWidget *m_persistentChatLogPanel                              = nullptr;
 	PersistentChatListWidget *m_persistentChatHistory              = nullptr;
-	LogTextBrowser *m_persistentChatLogView                        = nullptr;
 	PersistentChatGateway *m_persistentChatGateway                 = nullptr;
 	PersistentChatController *m_persistentChatController           = nullptr;
 	PersistentChatHistoryModel *m_persistentChatHistoryModel       = nullptr;
-	PersistentChatHistoryDelegate *m_persistentChatHistoryDelegate = nullptr;
 	QFrame *m_persistentChatComposerFrame                          = nullptr;
 	QFrame *m_persistentChatReplyFrame                             = nullptr;
 	QLabel *m_persistentChatReplyLabel                             = nullptr;
@@ -938,8 +928,8 @@ protected:
 	bool m_modernShortcutCaptureRestoreEnabled = false;
 	bool m_modernShortcutCaptureHasRestore     = false;
 	std::unique_ptr< ModernConnectPingState > m_modernConnectPingState;
-	quint64 m_modernShellPatchRevision                     = 0;
-	quint64 m_modernShellMessagePatchGeneration            = 0;
+	quint64 m_qmlOperationRevision                         = 0;
+	quint64 m_qmlMessageGeneration                         = 0;
 	quint64 m_modernShellMessageDtoContextRevision         = 1;
 	QHash< QString, QVariantMap > m_modernShellMessageDtoCache;
 	QHash< QString, QString > m_modernShellActorAvatarDataUrls;
@@ -952,8 +942,8 @@ protected:
 	QList< qulonglong > m_modernShellPreviewHydrationQueue;
 	QSet< qulonglong > m_modernShellPreviewHydrationQueuedIds;
 	bool m_modernShellPreviewHydrationLinkDense = false;
-	QTimer *m_modernShellPatchCoalesceTimer                = nullptr;
-	bool m_modernShellRoomStatePatchPending               = false;
+	QTimer *m_qmlRoomStateFlushTimer                = nullptr;
+	bool m_qmlRoomStateDirty               = false;
 	bool m_qmlStatePendingAfterNativeMoveResize = false;
 	QHash< int, QString > m_modernAclRegisteredUserNames;
 	bool m_modernAclUserListRequestPending = false;

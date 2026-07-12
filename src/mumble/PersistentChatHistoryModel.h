@@ -6,7 +6,7 @@
 #ifndef MUMBLE_MUMBLE_PERSISTENTCHATHISTORYMODEL_H_
 #define MUMBLE_MUMBLE_PERSISTENTCHATHISTORYMODEL_H_
 
-#include "widgets/PersistentChatMessageGroupWidget.h"
+#include "PersistentChatRenderTypes.h"
 
 #include <QtCore/QAbstractListModel>
 #include <QtCore/QVector>

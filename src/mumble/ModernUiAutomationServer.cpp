@@ -4186,7 +4186,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 										   : QStringLiteral("-2:%1").arg(static_cast< qulonglong >(session));
 			const bool selected = window->handleModernShellScopeSelection(scopeToken);
 			window->publishQmlDirectMessagesState();
-			window->publishModernShellActiveScopeState();
+			window->publishQmlActiveScopeState();
 			window->scheduleQmlShellStateSyncImmediate();
 			return selected;
 		};
