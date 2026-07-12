@@ -37465,24 +37465,7 @@ bool MainWindow::deletePersistentChatMessage(unsigned int messageID) {
 		return false;
 	}
 
-	if (true) {
-		return openModernDeleteMessageDialog(messageID, target, *message);
-	}
-
-	QMessageBox confirm(this);
-	confirm.setIcon(QMessageBox::Warning);
-	confirm.setWindowTitle(tr("Delete message"));
-	confirm.setText(tr("Delete this message from chat history?"));
-	confirm.setInformativeText(tr("The message body, attachments, link previews, and reactions will be removed."));
-	QPushButton *deleteButton = confirm.addButton(tr("Delete"), QMessageBox::DestructiveRole);
-	confirm.addButton(QMessageBox::Cancel);
-	confirm.setDefaultButton(QMessageBox::Cancel);
-	confirm.exec();
-	if (confirm.clickedButton() != deleteButton) {
-		return false;
-	}
-
-	return executePersistentChatMessageDelete(target, *message);
+	return openModernDeleteMessageDialog(messageID, target, *message);
 }
 
 void MainWindow::syncPersistentChatInputState(bool baseEnabled) {
@@ -38895,18 +38878,10 @@ QImage MainWindow::persistentChatInlineDataImageFromUrl(const QUrl &url) const {
 
 void MainWindow::openImageDialog(const QImage &image) {
 	if (image.isNull()) {
-		QMessageBox::warning(this, tr("Error"), tr("Failed to decode image."));
+		publishModernToast(QStringLiteral("error"), tr("Image"), tr("Failed to decode image."));
 		return;
 	}
-
-	if (true) {
-		openModernImageViewerDialog(image);
-		return;
-	}
-
-	const QPixmap pixmap = QPixmap::fromImage(image);
-	ResponsiveImageDialog dialog(pixmap, this);
-	dialog.exec();
+	openModernImageViewerDialog(image);
 }
 
 void MainWindow::openModernImageViewerDialog(const QImage &image) {
@@ -38975,7 +38950,7 @@ void MainWindow::saveImageAs() {
 
 	const QImage img = m_selectedLogImage;
 	if (img.isNull()) {
-		QMessageBox::warning(this, tr("Error"), tr("Failed to decode image."));
+		publishModernToast(QStringLiteral("error"), tr("Image"), tr("Failed to decode image."));
 		return;
 	}
 	bool ok = img.save(fname);
@@ -40676,14 +40651,8 @@ bool MainWindow::openScreenShareWindowOrStatus(const QString &streamID) {
 		return false;
 	}
 
-	// In the modern shell, surface screen-share problems as a themed toast instead of a
-	// native QMessageBox popup; native-only fallbacks keep the message box.
 	auto notifyScreenShareIssue = [this](const QString &message) {
-		if (true) {
-			publishModernToast(QStringLiteral("error"), tr("Screen share"), message);
-			return;
-		}
-		QMessageBox::warning(this, tr("Screen share"), message);
+		publishModernToast(QStringLiteral("error"), tr("Screen share"), message);
 	};
 
 	const ScreenShareSession session = m_screenShareManager->sessions().value(streamID);
@@ -40691,10 +40660,6 @@ bool MainWindow::openScreenShareWindowOrStatus(const QString &streamID) {
 		session.ownerSession == Global::get().uiSession && m_screenShareManager->isPublishingSession(streamID);
 
 	if (selfPublishing) {
-		QMessageBox box(this);
-		box.setIcon(QMessageBox::Information);
-		box.setWindowTitle(tr("Screen share"));
-		box.setText(tr("Your screen share is live."));
 		const QString sourceLabel =
 			session.captureSourceID.trimmed().isEmpty() ? tr("default source") : session.captureSourceID.trimmed();
 		auto audioStatusLabel = [this](const ScreenShareSession &shareSession) {
@@ -40746,18 +40711,7 @@ bool MainWindow::openScreenShareWindowOrStatus(const QString &streamID) {
 			(session.width > 0 && session.height > 0 && session.fps > 0)
 				? tr("%1x%2 @ %3 FPS").arg(session.width).arg(session.height).arg(session.fps)
 				: tr("auto");
-		if (true) {
-			openModernScreenShareStatusDialog(streamID, sourceLabel, qualityLabel, audioLabel);
-			return true;
-		}
-		box.setInformativeText(tr("Source: %1\nQuality: %2\nAudio: %3").arg(sourceLabel, qualityLabel, audioLabel));
-		QPushButton *stopButton = box.addButton(tr("Stop sharing"), QMessageBox::DestructiveRole);
-		box.addButton(QMessageBox::Ok);
-		box.exec();
-		if (box.clickedButton() == stopButton) {
-			m_screenShareManager->requestStopShare(streamID);
-			publishModernShellRoomStatePatch();
-		}
+		openModernScreenShareStatusDialog(streamID, sourceLabel, qualityLabel, audioLabel);
 		return true;
 	}
 
