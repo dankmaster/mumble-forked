@@ -5,6 +5,9 @@
     <file alias="ModernButton.qml">qml-shell/ModernButton.qml</file>
 	<file alias="UpdateBanner.qml">qml-shell/UpdateBanner.qml</file>
 	<file alias="ScreenShareEditor.qml">qml-shell/ScreenShareEditor.qml</file>
+	<file alias="ImageViewer.qml">qml-shell/ImageViewer.qml</file>
+	<file alias="StonksEditor.qml">qml-shell/StonksEditor.qml</file>
+	<file alias="ScreenShareViewWindow.qml">qml-shell/ScreenShareViewWindow.qml</file>
     <file alias="PttTool.qml">qml-shell/PttTool.qml</file>
     <file alias="QmlDialog.qml">qml-shell/QmlDialog.qml</file>
     <file alias="PluginEditor.qml">qml-shell/PluginEditor.qml</file>

@@ -15,6 +15,7 @@ private slots:
 	void stableIdsRemainIndependentFromSourceMaps();
 	void messageRolesExposeStructuredState();
 	void chatTimelineAppliesDirectIncrementalMessages();
+	void chatTimelinePreservesTypedAttachments();
 	void participantPresenceUpdatesOnlyTypedRoles();
 	void duplicateStableIdsAreCoalesced();
 	void activeScopeAppliesTypedState();
@@ -24,6 +25,7 @@ private slots:
 	void pttStateIsIdempotentAndReleases();
 	void dialogStateRoutesTypedRequests();
 	void imageViewerStateRemainsStructured();
+	void stonksStateAndActionsRemainStructured();
 	void asyncOperationsExposeProgressAndCancellation();
 	void asyncOperationsClampProgressAndInterruptByPrefix();
 	void mediaSessionValidatesAndPublishesTypedState();
@@ -59,26 +61,39 @@ void TestQmlClientModels::activeScopeAppliesTypedState() {
 	ActiveScopeController scope;
 	QSignalSpy labelSpy(&scope, &ActiveScopeController::labelChanged);
 	QSignalSpy sendSpy(&scope, &ActiveScopeController::canSendChanged);
+	QSignalSpy replySpy(&scope, &ActiveScopeController::hasPendingReplyChanged);
 	scope.applyState({ { QStringLiteral("scopeToken"), QStringLiteral("channel:42") },
 					   { QStringLiteral("label"), QStringLiteral("Lobby") },
 					   { QStringLiteral("description"), QStringLiteral("General voice room") },
 					   { QStringLiteral("kindLabel"), QStringLiteral("Voice room") },
 					   { QStringLiteral("composerPlaceholder"), QStringLiteral("Write in Lobby...") },
-					   { QStringLiteral("canSend"), true } });
+					   { QStringLiteral("canSend"), true }, { QStringLiteral("hasPendingReply"), true },
+					   { QStringLiteral("replyActor"), QStringLiteral("Alice") },
+					   { QStringLiteral("replySnippet"), QStringLiteral("Hello") },
+					   { QStringLiteral("canAttachImages"), true } });
 	QCOMPARE(scope.scopeToken(), QStringLiteral("channel:42"));
 	QCOMPARE(scope.label(), QStringLiteral("Lobby"));
 	QVERIFY(scope.canSend());
+	QVERIFY(scope.hasPendingReply());
+	QCOMPARE(scope.replyActor(), QStringLiteral("Alice"));
+	QCOMPARE(scope.replySnippet(), QStringLiteral("Hello"));
+	QVERIFY(scope.canAttachImages());
 	QCOMPARE(labelSpy.count(), 1);
 	QCOMPARE(sendSpy.count(), 1);
+	QCOMPARE(replySpy.count(), 1);
 
 	scope.applyState({ { QStringLiteral("scopeToken"), QStringLiteral("channel:42") },
 					   { QStringLiteral("label"), QStringLiteral("Lobby") },
 					   { QStringLiteral("description"), QStringLiteral("General voice room") },
 					   { QStringLiteral("kindLabel"), QStringLiteral("Voice room") },
 					   { QStringLiteral("composerPlaceholder"), QStringLiteral("Write in Lobby...") },
-					   { QStringLiteral("canSend"), true } });
+					   { QStringLiteral("canSend"), true }, { QStringLiteral("hasPendingReply"), true },
+					   { QStringLiteral("replyActor"), QStringLiteral("Alice") },
+					   { QStringLiteral("replySnippet"), QStringLiteral("Hello") },
+					   { QStringLiteral("canAttachImages"), true } });
 	QCOMPARE(labelSpy.count(), 1);
 	QCOMPARE(sendSpy.count(), 1);
+	QCOMPARE(replySpy.count(), 1);
 }
 
 void TestQmlClientModels::synchronizeRowsUsesIncrementalSignals() {
@@ -241,6 +256,22 @@ void TestQmlClientModels::chatTimelineAppliesDirectIncrementalMessages() {
 	QCOMPARE(resetSpy.count(), 0);
 }
 
+void TestQmlClientModels::chatTimelinePreservesTypedAttachments() {
+	ChatTimelineModel model;
+	const QVariantMap attachment { { QStringLiteral("id"), QStringLiteral("asset:1") },
+								   { QStringLiteral("name"), QStringLiteral("image.png") },
+								   { QStringLiteral("mime"), QStringLiteral("image/png") } };
+	QVERIFY(model.upsertMessage({ { QStringLiteral("messageKey"), QStringLiteral("attachment:1") },
+								  { QStringLiteral("actor"), QStringLiteral("Alice") },
+								  { QStringLiteral("attachments"), QVariantList { attachment } } }));
+	QCOMPARE(model.rowCount(), 1);
+	const QVariantMap source = model.get(0).value(QStringLiteral("source")).toMap();
+	QCOMPARE(source.value(QStringLiteral("attachments")).toList().size(), 1);
+	QCOMPARE(source.value(QStringLiteral("attachments")).toList().first().toMap(), attachment);
+	model.removeRow(QStringLiteral("attachment:1"));
+	QCOMPARE(model.rowCount(), 0);
+}
+
 void TestQmlClientModels::participantPresenceUpdatesOnlyTypedRoles() {
 	ParticipantModel model;
 	QSignalSpy changedSpy(&model, &QAbstractItemModel::dataChanged);
@@ -331,22 +362,50 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	QSignalSpy actionSpy(&commands, &UiCommandController::actionRequested);
 	QSignalSpy participantSpy(&commands, &UiCommandController::participantSelectionRequested);
 	QSignalSpy directMessageSpy(&commands, &UiCommandController::directMessageOpenRequested);
+	QSignalSpy replySpy(&commands, &UiCommandController::messageReplyRequested);
+	QSignalSpy retrySpy(&commands, &UiCommandController::messageRetryRequested);
+	QSignalSpy deleteSpy(&commands, &UiCommandController::messageDeleteRequested);
+	QSignalSpy reactionSpy(&commands, &UiCommandController::messageReactionToggleRequested);
+	QSignalSpy cancelReplySpy(&commands, &UiCommandController::pendingReplyCancelRequested);
+	QSignalSpy attachmentSpy(&commands, &UiCommandController::attachmentChooseRequested);
 	commands.selectScope(QStringLiteral("   "));
 	commands.invokeAction(QString());
 	commands.selectParticipant(QStringLiteral("  "));
 	commands.openDirectMessage(QString());
+	commands.replyToMessage(QString());
+	commands.retryMessage(QStringLiteral("  "));
+	commands.deleteMessage(QString());
+	commands.toggleMessageReaction(QStringLiteral("message:1"), QString());
 	QCOMPARE(scopeSpy.count(), 0);
 	QCOMPARE(actionSpy.count(), 0);
 	QCOMPARE(participantSpy.count(), 0);
 	QCOMPARE(directMessageSpy.count(), 0);
+	QCOMPARE(replySpy.count(), 0);
+	QCOMPARE(retrySpy.count(), 0);
+	QCOMPARE(deleteSpy.count(), 0);
+	QCOMPARE(reactionSpy.count(), 0);
 	commands.selectScope(QStringLiteral(" channel:42 "));
 	commands.invokeAction(QStringLiteral(" qaAudioMute "));
 	commands.selectParticipant(QStringLiteral(" 42 "));
 	commands.openDirectMessage(QStringLiteral(" 7 "));
+	commands.replyToMessage(QStringLiteral(" message:1 "));
+	commands.retryMessage(QStringLiteral(" message:2 "));
+	commands.deleteMessage(QStringLiteral(" message:3 "));
+	commands.toggleMessageReaction(QStringLiteral(" message:4 "), QStringLiteral(" 👍 "));
+	commands.cancelPendingReply();
+	commands.chooseAttachment();
 	QCOMPARE(scopeSpy.takeFirst().at(0).toString(), QStringLiteral("channel:42"));
 	QCOMPARE(actionSpy.takeFirst().at(0).toString(), QStringLiteral("qaAudioMute"));
 	QCOMPARE(participantSpy.takeFirst().at(0).toString(), QStringLiteral("42"));
 	QCOMPARE(directMessageSpy.takeFirst().at(0).toString(), QStringLiteral("7"));
+	QCOMPARE(replySpy.takeFirst().at(0).toString(), QStringLiteral("message:1"));
+	QCOMPARE(retrySpy.takeFirst().at(0).toString(), QStringLiteral("message:2"));
+	QCOMPARE(deleteSpy.takeFirst().at(0).toString(), QStringLiteral("message:3"));
+	const QList< QVariant > reaction = reactionSpy.takeFirst();
+	QCOMPARE(reaction.at(0).toString(), QStringLiteral("message:4"));
+	QCOMPARE(reaction.at(1).toString(), QStringLiteral("👍"));
+	QCOMPARE(cancelReplySpy.count(), 1);
+	QCOMPARE(attachmentSpy.count(), 1);
 }
 
 void TestQmlClientModels::pttStateIsIdempotentAndReleases() {
@@ -434,6 +493,30 @@ void TestQmlClientModels::imageViewerStateRemainsStructured() {
 	QCOMPARE(closeSpy.takeFirst().at(0).toString(), QStringLiteral("imageViewer"));
 }
 
+void TestQmlClientModels::stonksStateAndActionsRemainStructured() {
+	DialogStateController dialog;
+	QSignalSpy actionSpy(&dialog, &DialogStateController::actionRequested);
+	const QVariantMap stonks { { QStringLiteral("selectedPeriod"), QStringLiteral("30d") },
+							 { QStringLiteral("periods"), QVariantList { QStringLiteral("7d"), QStringLiteral("30d") } },
+							 { QStringLiteral("feedPreferences"),
+							   QVariantMap { { QStringLiteral("showMine"), true },
+										 { QStringLiteral("showPopular"), false },
+										 { QStringLiteral("showPins"), true } } } };
+	dialog.applyState({ { QStringLiteral("open"), true }, { QStringLiteral("id"), QStringLiteral("stonks") },
+						{ QStringLiteral("kind"), QStringLiteral("stonks") },
+						{ QStringLiteral("title"), QStringLiteral("Stonks") }, { QStringLiteral("stonks"), stonks } });
+
+	QCOMPARE(dialog.kind(), QStringLiteral("stonks"));
+	QCOMPARE(dialog.state().value(QStringLiteral("stonks")).toMap(), stonks);
+	const QVariantMap payload { { QStringLiteral("period"), QStringLiteral("7d") } };
+	dialog.invokeAction(QStringLiteral("selectPeriod"), payload);
+	QCOMPARE(actionSpy.count(), 1);
+	const QList< QVariant > action = actionSpy.takeFirst();
+	QCOMPARE(action.at(0).toString(), QStringLiteral("stonks"));
+	QCOMPARE(action.at(1).toString(), QStringLiteral("selectPeriod"));
+	QCOMPARE(action.at(2).toMap(), payload);
+}
+
 void TestQmlClientModels::asyncOperationsExposeProgressAndCancellation() {
 	AsyncOperationModel operations;
 	QSignalSpy cancelSpy(&operations, &AsyncOperationModel::cancellationRequested);
@@ -519,14 +602,28 @@ void TestQmlClientModels::invalidRowsAndCommandsAreIgnored() {
 	UiCommandController commands;
 	QSignalSpy joinSpy(&commands, &UiCommandController::voiceJoinRequested);
 	QSignalSpy messageSpy(&commands, &UiCommandController::messageSendRequested);
+	QSignalSpy scopeActionSpy(&commands, &UiCommandController::scopeActionRequested);
+	QSignalSpy participantActionSpy(&commands, &UiCommandController::participantActionRequested);
 	commands.joinVoiceChannel(QStringLiteral("  "));
 	commands.sendMessage(QStringLiteral("  "));
+	commands.invokeScopeAction(QString(), QStringLiteral("join"));
+	commands.invokeParticipantAction(QStringLiteral("7"), QString());
 	QCOMPARE(joinSpy.count(), 0);
 	QCOMPARE(messageSpy.count(), 0);
+	QCOMPARE(scopeActionSpy.count(), 0);
+	QCOMPARE(participantActionSpy.count(), 0);
 	commands.joinVoiceChannel(QStringLiteral(" channel:42 "));
 	commands.sendMessage(QStringLiteral(" hello "));
+	commands.invokeScopeAction(QStringLiteral(" channel:42 "), QStringLiteral(" join "));
+	commands.invokeParticipantAction(QStringLiteral(" 7 "), QStringLiteral(" message "));
 	QCOMPARE(joinSpy.takeFirst().at(0).toString(), QStringLiteral("channel:42"));
 	QCOMPARE(messageSpy.takeFirst().at(0).toString(), QStringLiteral(" hello "));
+	const QList< QVariant > scopeAction = scopeActionSpy.takeFirst();
+	QCOMPARE(scopeAction.at(0).toString(), QStringLiteral("channel:42"));
+	QCOMPARE(scopeAction.at(1).toString(), QStringLiteral("join"));
+	const QList< QVariant > participantAction = participantActionSpy.takeFirst();
+	QCOMPARE(participantAction.at(0).toString(), QStringLiteral("7"));
+	QCOMPARE(participantAction.at(1).toString(), QStringLiteral("message"));
 }
 
 void TestQmlClientModels::mediaSessionValidatesAndPublishesTypedState() {

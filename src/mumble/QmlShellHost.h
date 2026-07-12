@@ -20,6 +20,7 @@ class DialogStateController;
 class MediaSessionBackend;
 class ParticipantModel;
 class QmlSelectionState;
+class QmlPerformanceMonitor;
 class QQmlApplicationEngine;
 class QQuickWindow;
 class RoomModel;
@@ -46,8 +47,11 @@ public:
 	DialogStateController *dialogController() const;
 	MediaSessionBackend *mediaSession() const;
 	QmlSelectionState *selectionState() const;
+	QmlPerformanceMonitor *performanceMonitor() const;
 	bool captureWindow(const QString &path, QString *error = nullptr) const;
 	void showPttTool(bool visible);
+	QObject *createScreenShareView(QObject *backend);
+	void closeScreenShareView(QObject *view);
 
 signals:
 	void closeRequested();
@@ -67,6 +71,7 @@ private:
 	std::unique_ptr< DialogStateController > m_dialogController;
 	std::unique_ptr< MediaSessionBackend > m_mediaSession;
 	std::unique_ptr< QmlSelectionState > m_selectionState;
+	std::unique_ptr< QmlPerformanceMonitor > m_performanceMonitor;
 };
 
 #endif // MUMBLE_MUMBLE_QMLSHELLHOST_H_

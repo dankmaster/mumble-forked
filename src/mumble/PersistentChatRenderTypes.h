@@ -11,6 +11,8 @@
 #include <QtGui/QColor>
 #include <QtGui/QImage>
 
+#include <optional>
+
 enum class PersistentChatDisplayMode { Bubble, CompactTranscript };
 
 struct PersistentChatGroupHeaderSpec {
@@ -67,6 +69,45 @@ struct PersistentChatBubbleSpec {
 	QString transcriptActorLabel;
 	QColor transcriptActorColor;
 	QString transcriptTimeLabel;
+};
+
+enum class PersistentChatHistoryRowKind { State, LoadOlder, DateDivider, UnreadDivider, MessageGroup };
+
+struct PersistentChatStateRowSpec {
+	QString eyebrow;
+	QString title;
+	QString body;
+	QStringList hints;
+	int minimumHeight = 220;
+};
+
+struct PersistentChatLoadOlderRowSpec {
+	QString text;
+	bool loading = false;
+	bool enabled = true;
+};
+
+struct PersistentChatTextRowSpec {
+	QString text;
+	PersistentChatDisplayMode displayMode = PersistentChatDisplayMode::Bubble;
+};
+
+struct PersistentChatMessageGroupRowSpec {
+	PersistentChatGroupHeaderSpec header;
+	QString avatarFallbackText;
+	QVector< PersistentChatBubbleSpec > bubbles;
+	unsigned int firstMessageID = 0;
+	unsigned int firstThreadID  = 0;
+};
+
+struct PersistentChatHistoryRow {
+	PersistentChatHistoryRowKind kind = PersistentChatHistoryRowKind::State;
+	QString rowId;
+	QString signature;
+	std::optional< PersistentChatStateRowSpec > state;
+	std::optional< PersistentChatLoadOlderRowSpec > loadOlder;
+	std::optional< PersistentChatTextRowSpec > text;
+	std::optional< PersistentChatMessageGroupRowSpec > messageGroup;
 };
 
 #endif

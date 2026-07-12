@@ -6,6 +6,7 @@
 #include <QtTest>
 
 #include "ScreenShare.h"
+#include "ScreenShareViewBackend.h"
 
 namespace {
 int codecValue(const MumbleProto::ScreenShareCodec codec) {
@@ -25,7 +26,32 @@ private slots:
 	void exposesPublisherQualityCeiling();
 	void normalizesSecureRelayUrls();
 	void rejectsUnsafeRelayUrls();
+	void qmlViewBackendPublishesLifecycleState();
 };
+
+void TestScreenShare::qmlViewBackendPublishesLifecycleState() {
+	ScreenShareSession session;
+	session.streamID = QStringLiteral("stream:7");
+	session.ownerSession = 42;
+	session.captureAudio = true;
+	ScreenShareViewBackend backend(session);
+	QSignalSpy pauseSpy(&backend, &ScreenShareViewBackend::pauseToggled);
+	QSignalSpy muteSpy(&backend, &ScreenShareViewBackend::audioMuteToggled);
+	QSignalSpy stopSpy(&backend, &ScreenShareViewBackend::stopRequested);
+
+	QCOMPARE(backend.streamId(), QStringLiteral("stream:7"));
+	QVERIFY(backend.audioAvailable());
+	backend.setPaused(true);
+	backend.setAudioMuted(true);
+	backend.setAudioVolume(125);
+	backend.requestStop();
+	QVERIFY(backend.paused());
+	QVERIFY(backend.audioMuted());
+	QCOMPARE(backend.audioVolume(), 100);
+	QCOMPARE(pauseSpy.count(), 1);
+	QCOMPARE(muteSpy.count(), 1);
+	QCOMPARE(stopSpy.count(), 1);
+}
 
 void TestScreenShare::parsesAndFormatsVp8CodecPreferences() {
 	const QList< int > codecs =
@@ -125,5 +151,5 @@ void TestScreenShare::rejectsUnsafeRelayUrls() {
 	}
 }
 
-QTEST_MAIN(TestScreenShare)
+QTEST_GUILESS_MAIN(TestScreenShare)
 #include "TestScreenShare.moc"

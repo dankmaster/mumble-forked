@@ -52,6 +52,10 @@ QString ActiveScopeController::kindLabel() const { return m_kindLabel; }
 QString ActiveScopeController::composerPlaceholder() const { return m_composerPlaceholder; }
 QString ActiveScopeController::composerHint() const { return m_composerHint; }
 bool ActiveScopeController::canSend() const { return m_canSend; }
+bool ActiveScopeController::hasPendingReply() const { return m_hasPendingReply; }
+QString ActiveScopeController::replyActor() const { return m_replyActor; }
+QString ActiveScopeController::replySnippet() const { return m_replySnippet; }
+bool ActiveScopeController::canAttachImages() const { return m_canAttachImages; }
 
 #define SET_SCOPE_VALUE(member, signalName) \
 	if (member == value) return; \
@@ -69,6 +73,14 @@ void ActiveScopeController::setComposerHint(const QString &value) {
 	SET_SCOPE_VALUE(m_composerHint, composerHintChanged);
 }
 void ActiveScopeController::setCanSend(bool value) { SET_SCOPE_VALUE(m_canSend, canSendChanged); }
+void ActiveScopeController::setHasPendingReply(bool value) {
+	SET_SCOPE_VALUE(m_hasPendingReply, hasPendingReplyChanged);
+}
+void ActiveScopeController::setReplyActor(const QString &value) { SET_SCOPE_VALUE(m_replyActor, replyActorChanged); }
+void ActiveScopeController::setReplySnippet(const QString &value) { SET_SCOPE_VALUE(m_replySnippet, replySnippetChanged); }
+void ActiveScopeController::setCanAttachImages(bool value) {
+	SET_SCOPE_VALUE(m_canAttachImages, canAttachImagesChanged);
+}
 
 #undef SET_SCOPE_VALUE
 
@@ -80,6 +92,10 @@ void ActiveScopeController::applyState(const QVariantMap &state) {
 	setComposerPlaceholder(state.value(QStringLiteral("composerPlaceholder")).toString());
 	setComposerHint(state.value(QStringLiteral("composerHint")).toString());
 	setCanSend(state.value(QStringLiteral("canSend")).toBool());
+	setHasPendingReply(state.value(QStringLiteral("hasPendingReply")).toBool());
+	setReplyActor(state.value(QStringLiteral("replyActor")).toString());
+	setReplySnippet(state.value(QStringLiteral("replySnippet")).toString());
+	setCanAttachImages(state.value(QStringLiteral("canAttachImages")).toBool());
 }
 
 StableListModel::StableListModel(QObject *parent) : QAbstractListModel(parent) {
@@ -520,8 +536,37 @@ void UiCommandController::openDirectMessage(const QString &sessionId) {
 void UiCommandController::sendMessage(const QString &message) {
 	if (!message.trimmed().isEmpty()) emit messageSendRequested(message);
 }
+void UiCommandController::cancelPendingReply() { emit pendingReplyCancelRequested(); }
+void UiCommandController::chooseAttachment() { emit attachmentChooseRequested(); }
+void UiCommandController::replyToMessage(const QString &messageId) {
+	const QString id = messageId.trimmed();
+	if (!id.isEmpty()) emit messageReplyRequested(id);
+}
+void UiCommandController::retryMessage(const QString &messageId) {
+	const QString id = messageId.trimmed();
+	if (!id.isEmpty()) emit messageRetryRequested(id);
+}
+void UiCommandController::deleteMessage(const QString &messageId) {
+	const QString id = messageId.trimmed();
+	if (!id.isEmpty()) emit messageDeleteRequested(id);
+}
+void UiCommandController::toggleMessageReaction(const QString &messageId, const QString &emoji) {
+	const QString id = messageId.trimmed();
+	const QString reaction = emoji.trimmed();
+	if (!id.isEmpty() && !reaction.isEmpty()) emit messageReactionToggleRequested(id, reaction);
+}
 void UiCommandController::invokeAction(const QString &actionId) {
 	if (!actionId.trimmed().isEmpty()) emit actionRequested(actionId.trimmed());
+}
+void UiCommandController::invokeScopeAction(const QString &scopeToken, const QString &actionId) {
+	const QString scope = scopeToken.trimmed();
+	const QString action = actionId.trimmed();
+	if (!scope.isEmpty() && !action.isEmpty()) emit scopeActionRequested(scope, action);
+}
+void UiCommandController::invokeParticipantAction(const QString &sessionId, const QString &actionId) {
+	const QString session = sessionId.trimmed();
+	const QString action = actionId.trimmed();
+	if (!session.isEmpty() && !action.isEmpty()) emit participantActionRequested(session, action);
 }
 void UiCommandController::toggleSelfMute() { emit selfMuteToggleRequested(); }
 void UiCommandController::toggleSelfDeaf() { emit selfDeafToggleRequested(); }

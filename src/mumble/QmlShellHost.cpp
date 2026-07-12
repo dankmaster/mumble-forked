@@ -5,6 +5,7 @@
 
 #include "ClientActionRegistry.h"
 #include "QmlClientModels.h"
+#include "QmlPerformanceMonitor.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QFileInfo>
@@ -28,7 +29,8 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_actionModel(std::make_unique< ActionModel >(actionRegistry, this)),
 	  m_dialogController(std::make_unique< DialogStateController >(this)),
 	  m_mediaSession(std::make_unique< MediaSessionBackend >(this)),
-	  m_selectionState(std::make_unique< QmlSelectionState >(this)) {
+	  m_selectionState(std::make_unique< QmlSelectionState >(this)),
+	  m_performanceMonitor(std::make_unique< QmlPerformanceMonitor >(this)) {
 }
 
 QmlShellHost::~QmlShellHost() {
@@ -56,7 +58,8 @@ bool QmlShellHost::start(QString *error) {
 						  static_cast< QObject * >(m_actionModel.get()),
 						  static_cast< QObject * >(m_dialogController.get()),
 						  static_cast< QObject * >(m_mediaSession.get()),
-						  static_cast< QObject * >(m_selectionState.get()) }) {
+						  static_cast< QObject * >(m_selectionState.get()),
+						  static_cast< QObject * >(m_performanceMonitor.get()) }) {
 		QQmlEngine::setObjectOwnership(object, QQmlEngine::CppOwnership);
 	}
 	QQmlContext *context = m_engine->rootContext();
@@ -71,6 +74,7 @@ bool QmlShellHost::start(QString *error) {
 	context->setContextProperty(QStringLiteral("dialogState"), m_dialogController.get());
 	context->setContextProperty(QStringLiteral("mediaSession"), m_mediaSession.get());
 	context->setContextProperty(QStringLiteral("selectionState"), m_selectionState.get());
+	context->setContextProperty(QStringLiteral("qmlPerformance"), m_performanceMonitor.get());
 	context->setContextProperty(QStringLiteral("clientActions"), m_actionRegistry);
 
 	const QUrl rootUrl(QStringLiteral("qrc:/qml-shell/Main.qml"));
@@ -93,6 +97,8 @@ bool QmlShellHost::start(QString *error) {
 	connect(m_window, &QQuickWindow::closing, this, [this](QQuickCloseEvent *) { emit closeRequested(); });
 	connect(m_window, &QQuickWindow::sceneGraphError, this,
 			[this](QQuickWindow::SceneGraphError, const QString &) { m_commandController->releasePtt(); });
+	connect(m_window, &QQuickWindow::frameSwapped, m_performanceMonitor.get(),
+			&QmlPerformanceMonitor::markFramePresented, Qt::QueuedConnection);
 	connect(m_window, &QWindow::visibilityChanged, this, [this](QWindow::Visibility visibility) {
 		if (visibility == QWindow::Hidden || visibility == QWindow::Minimized) m_commandController->releasePtt();
 	});
@@ -118,6 +124,7 @@ ActionModel *QmlShellHost::actionModel() const { return m_actionModel.get(); }
 DialogStateController *QmlShellHost::dialogController() const { return m_dialogController.get(); }
 MediaSessionBackend *QmlShellHost::mediaSession() const { return m_mediaSession.get(); }
 QmlSelectionState *QmlShellHost::selectionState() const { return m_selectionState.get(); }
+QmlPerformanceMonitor *QmlShellHost::performanceMonitor() const { return m_performanceMonitor.get(); }
 
 bool QmlShellHost::captureWindow(const QString &path, QString *error) const {
 	if (!m_window) {
@@ -145,4 +152,19 @@ void QmlShellHost::showPttTool(const bool visible) {
 	if (!m_window || !m_engine) return;
 	if (!visible) m_commandController->releasePtt();
 	m_window->setProperty("pttToolVisible", visible);
+}
+
+QObject *QmlShellHost::createScreenShareView(QObject *backend) {
+	if (!m_window || !backend) return nullptr;
+	QQmlEngine::setObjectOwnership(backend, QQmlEngine::CppOwnership);
+	QVariant result;
+	const bool invoked = QMetaObject::invokeMethod(m_window, "createScreenShareView", Q_RETURN_ARG(QVariant, result),
+											  Q_ARG(QVariant, QVariant::fromValue(backend)));
+	return invoked ? result.value< QObject * >() : nullptr;
+}
+
+void QmlShellHost::closeScreenShareView(QObject *view) {
+	if (!view) return;
+	QMetaObject::invokeMethod(view, "close");
+	view->deleteLater();
 }

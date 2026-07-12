@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import Mumble.Theme 1.0
 
@@ -101,8 +102,16 @@ Dialog {
                         sourceComponent: screenShareEditorComponent
                         onLoaded: item.shareState = dialogState.state.screenShare || ({})
                     }
+                    Loader {
+                        width: parent.width - 36
+                        x: 18
+                        active: dialogState.kind === "stonks"
+                        visible: active
+                        sourceComponent: stonksEditorComponent
+                        onLoaded: item.stonks = dialogState.state.stonks || ({})
+                    }
                     Repeater {
-                        visible: dialogState.kind !== "screenShare"
+                        visible: dialogState.kind !== "screenShare" && dialogState.kind !== "stonks"
                         model: dialogState.sections
                         delegate: Rectangle {
                             required property var modelData
@@ -158,6 +167,7 @@ Dialog {
                                             if (type === "aclEditor") return aclEditorField
                                             if (type === "textarea") return textareaField
                                             if (type === "resultList") return resultListField
+                                            if (type === "color") return colorField
                                             if (type === "profile") return profileField
                                             if (type === "imagePicker") return pathField
                                             if (type === "manualPositionPreview") return manualPreviewField
@@ -215,6 +225,7 @@ Dialog {
 
     Component { id: hiddenField; Item { property var field; width: parent ? parent.width : 0; height: 0 } }
     Component { id: screenShareEditorComponent; ScreenShareEditor { } }
+    Component { id: stonksEditorComponent; StonksEditor { } }
     Component {
         id: noteField
         Label {
@@ -381,6 +392,30 @@ Dialog {
         }
     }
     Component {
+        id: colorField
+        RowLayout {
+            id: colorRoot
+            property var field
+            width: parent ? parent.width : 0
+            Label { Layout.fillWidth: true; text: colorRoot.field.label || ""; color: Theme.textMain }
+            Rectangle {
+                Layout.preferredWidth: 38; Layout.preferredHeight: 28; radius: 6
+                color: String(colorRoot.field.value || "#000000")
+                border.color: Theme.divider
+                Accessible.role: Accessible.Button
+                Accessible.name: qsTr("Choose %1").arg(colorRoot.field.label || qsTr("color"))
+                MouseArea { anchors.fill: parent; onClicked: colorDialog.open() }
+            }
+            Label { text: String(colorRoot.field.value || ""); color: Theme.textMuted; font.pixelSize: 10 }
+            ColorDialog {
+                id: colorDialog
+                title: colorRoot.field.label || qsTr("Choose color")
+                selectedColor: String(colorRoot.field.value || "#000000")
+                onAccepted: dialogState.updateField(colorRoot.field.id, selectedColor.toString())
+            }
+        }
+    }
+    Component {
         id: resultListField
         ColumnLayout {
             property var field
@@ -391,9 +426,29 @@ Dialog {
                 delegate: Rectangle {
                     required property var modelData
                     Layout.fillWidth: true; height: 46; radius: 6; color: Theme.strip
-                    Column { anchors.fill: parent; anchors.margins: 7
+                    RowLayout { anchors.fill: parent; anchors.margins: 7
+                      ColumnLayout { Layout.fillWidth: true
                         Label { width: parent.width; text: modelData.label || modelData.title || modelData.name || ""; color: Theme.textMain; elide: Text.ElideRight }
                         Label { width: parent.width; text: modelData.subtitle || modelData.description || ""; color: Theme.textMuted; font.pixelSize: 9; elide: Text.ElideRight }
+                      }
+                      ModernButton {
+                        visible: (modelData.primaryActionId || modelData.primaryAction || "").length > 0
+                        text: modelData.primaryActionLabel || modelData.primaryAction || qsTr("Open")
+                        onClicked: {
+                            const inferred = modelData.type === "user" ? "messageSearchResult" : "selectSearchResult"
+                            dialogState.invokeAction(modelData.primaryActionId || inferred,
+                                                     modelData.payload || { "id": modelData.id, "type": modelData.type })
+                        }
+                      }
+                      ModernButton {
+                        visible: (modelData.secondaryActionId || modelData.secondaryAction || "").length > 0
+                        text: modelData.secondaryActionLabel || modelData.secondaryAction
+                        onClicked: {
+                            const inferred = modelData.type === "channel" ? "joinSearchResult" : "selectSearchResult"
+                            dialogState.invokeAction(modelData.secondaryActionId || inferred,
+                                                     modelData.payload || { "id": modelData.id, "type": modelData.type })
+                        }
+                      }
                     }
                 }
             }

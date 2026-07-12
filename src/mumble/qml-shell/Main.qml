@@ -15,6 +15,15 @@ ApplicationWindow {
     title: clientSession.serverName
     color: Theme.strip
 
+    function createScreenShareView(backend) {
+        return screenShareViewComponent.createObject(null, { "backend": backend })
+    }
+
+    Component {
+        id: screenShareViewComponent
+        ScreenShareViewWindow { }
+    }
+
     onPttToolVisibleChanged: {
         if (pttToolVisible) {
             if (!pttToolPopup)
@@ -127,9 +136,9 @@ ApplicationWindow {
                     Layout.preferredHeight: 76
                     color: Theme.panel
                     border.color: Theme.divider
-                    function isShellAction(actionId) {
-                        return ["qaServerConnect", "qaServerDisconnect", "qaConfigDialog", "qaConfigCert",
-                                "qaRecording", "qaAudioStats", "qaHelpVersionCheck", "qaQuit"].indexOf(actionId) >= 0
+                    function isAppAction(actionId) {
+                        return !actionId.startsWith("qaUser") && !actionId.startsWith("qaChannel")
+                               && actionId !== "qaEmpty" && actionId !== "qaTransmitModeSeparator"
                     }
                     Column {
                         anchors.left: parent.left
@@ -182,7 +191,7 @@ ApplicationWindow {
                                     required property string title
                                     required property var payload
                                     width: appMenuPopup.availableWidth
-                                    height: shellHeader.isShellAction(stableId) && payload.visible ? 38 : 0
+                                    height: shellHeader.isAppAction(stableId) && payload.visible ? 38 : 0
                                     opacity: height > 0 ? 1 : 0
                                     enabled: height > 0 && payload.enabled
                                     text: (payload.checked ? "✓  " : "") + title
@@ -216,6 +225,7 @@ ApplicationWindow {
                     bottomMargin: 20
                     reuseItems: true
                     delegate: Rectangle {
+                        id: messageDelegate
                         required property string stableId
                         required property string title
                         required property string subtitle
@@ -226,8 +236,12 @@ ApplicationWindow {
                         required property string replySnippet
                         required property var reactions
                         required property var preview
+                        required property var source
                         required property bool own
                         required property bool deleted
+                        required property bool canReply
+                        required property bool canReact
+                        required property bool canDelete
                         width: Math.min(timeline.width - 56, 680)
                         height: messageRow.implicitHeight + 24
                         radius: Theme.innerRadius
@@ -270,6 +284,36 @@ ApplicationWindow {
                                     Label { text: timestamp; color: Theme.textMuted; font.pixelSize: 9; visible: timestamp.length > 0 }
                                     Item { Layout.fillWidth: true }
                                     Label { text: status; color: Theme.textMuted; font.pixelSize: 9; visible: status.length > 0 }
+                                    ToolButton {
+                                        visible: messageDelegate.canReply || messageDelegate.canReact
+                                                 || messageDelegate.canDelete || !!messageDelegate.source.deliveryCanRetry
+                                        text: "⋯"
+                                        Accessible.name: qsTr("Message actions")
+                                        onClicked: messageActions.open()
+                                        Menu {
+                                            id: messageActions
+                                            MenuItem {
+                                                text: qsTr("Reply")
+                                                visible: messageDelegate.canReply
+                                                onTriggered: uiCommands.replyToMessage(messageDelegate.stableId)
+                                            }
+                                            MenuItem {
+                                                text: qsTr("Add reaction")
+                                                visible: messageDelegate.canReact
+                                                onTriggered: uiCommands.toggleMessageReaction(messageDelegate.stableId, "👍")
+                                            }
+                                            MenuItem {
+                                                text: qsTr("Retry")
+                                                visible: !!messageDelegate.source.deliveryCanRetry
+                                                onTriggered: uiCommands.retryMessage(messageDelegate.stableId)
+                                            }
+                                            MenuItem {
+                                                text: qsTr("Delete")
+                                                visible: messageDelegate.canDelete
+                                                onTriggered: uiCommands.deleteMessage(messageDelegate.stableId)
+                                            }
+                                        }
+                                    }
                                 }
                                 Rectangle {
                                     id: previewCard
@@ -346,6 +390,13 @@ ApplicationWindow {
                                                 color: Theme.textMain
                                                 font.pixelSize: 10
                                             }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                enabled: messageDelegate.canReact && (modelData.emoji || "").length > 0
+                                                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                                onClicked: uiCommands.toggleMessageReaction(messageDelegate.stableId,
+                                                                                             modelData.emoji)
+                                            }
                                         }
                                     }
                                 }
@@ -362,22 +413,50 @@ ApplicationWindow {
 
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 76
+                    Layout.preferredHeight: activeScope.hasPendingReply ? 112 : 76
                     color: Theme.strip
                     border.color: Theme.divider
                     RowLayout {
                         anchors.fill: parent
                         anchors.margins: 14
+                        ModernButton {
+                            visible: activeScope.canAttachImages
+                            enabled: activeScope.canSend
+                            text: "+"
+                            Accessible.name: qsTr("Attach image")
+                            onClicked: uiCommands.chooseAttachment()
+                        }
                         Rectangle {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             radius: Theme.innerRadius
                             color: Theme.panel
                             border.color: Theme.divider
-                            TextArea {
-                                id: composer
+                            ColumnLayout {
                                 anchors.fill: parent
                                 anchors.margins: 5
+                                spacing: 2
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    visible: activeScope.hasPendingReply
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: qsTr("Replying to %1: %2").arg(activeScope.replyActor)
+                                                .arg(activeScope.replySnippet)
+                                        color: Theme.textMuted
+                                        font.pixelSize: 10
+                                        elide: Text.ElideRight
+                                    }
+                                    ToolButton {
+                                        text: "×"
+                                        Accessible.name: qsTr("Cancel reply")
+                                        onClicked: uiCommands.cancelPendingReply()
+                                    }
+                                }
+                            TextArea {
+                                id: composer
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
                                 placeholderText: activeScope.composerPlaceholder.length > 0
                                                  ? activeScope.composerPlaceholder
                                                  : qsTr("Connect to send messages")
@@ -393,6 +472,7 @@ ApplicationWindow {
                                         event.accepted = true
                                     }
                                 }
+                            }
                             }
                         }
                         ModernButton {
@@ -446,6 +526,7 @@ ApplicationWindow {
                             required property bool selected
                             required property int depth
                             required property int unreadCount
+                            required property var payload
                             width: rooms.width - 20
                             height: subtitle.length > 0 ? 48 : 38
                             radius: 8
@@ -487,8 +568,28 @@ ApplicationWindow {
                                 id: roomMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
-                                onClicked: uiCommands.selectScope(scopeToken)
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                onClicked: mouse => {
+                                    uiCommands.selectScope(scopeToken)
+                                    if (mouse.button === Qt.RightButton)
+                                        roomContextMenu.popup()
+                                }
+                                onPressAndHold: roomContextMenu.popup()
                                 onDoubleClicked: if (kind === "voice") uiCommands.joinVoiceChannel(scopeToken)
+                            }
+                            Menu {
+                                id: roomContextMenu
+                                Repeater {
+                                    model: (payload.source && payload.source.actions) || []
+                                    delegate: MenuItem {
+                                        required property var modelData
+                                        visible: (modelData.kind || "action") === "action"
+                                        height: visible ? implicitHeight : 0
+                                        text: (modelData.checked ? "✓  " : "") + (modelData.label || modelData.id || "")
+                                        enabled: visible && (modelData.enabled === undefined || !!modelData.enabled)
+                                        onTriggered: uiCommands.invokeScopeAction(scopeToken, modelData.id || "")
+                                    }
+                                }
                             }
                             Keys.onReturnPressed: event => {
                                 uiCommands.selectScope(scopeToken)
@@ -532,6 +633,7 @@ ApplicationWindow {
                             required property string title
                             required property string subtitle
                             required property string status
+                            required property var payload
                             width: participants.width - 20
                             height: 42
                             radius: 8
@@ -566,8 +668,28 @@ ApplicationWindow {
                                 id: participantMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
-                                onClicked: uiCommands.selectParticipant(stableId)
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                onClicked: mouse => {
+                                    uiCommands.selectParticipant(stableId)
+                                    if (mouse.button === Qt.RightButton)
+                                        participantContextMenu.popup()
+                                }
+                                onPressAndHold: participantContextMenu.popup()
                                 onDoubleClicked: uiCommands.openDirectMessage(stableId)
+                            }
+                            Menu {
+                                id: participantContextMenu
+                                Repeater {
+                                    model: (payload.source && payload.source.actions) || []
+                                    delegate: MenuItem {
+                                        required property var modelData
+                                        visible: (modelData.kind || "action") === "action"
+                                        height: visible ? implicitHeight : 0
+                                        text: (modelData.checked ? "✓  " : "") + (modelData.label || modelData.id || "")
+                                        enabled: visible && (modelData.enabled === undefined || !!modelData.enabled)
+                                        onTriggered: uiCommands.invokeParticipantAction(stableId, modelData.id || "")
+                                    }
+                                }
                             }
                             Keys.onReturnPressed: event => {
                                 uiCommands.selectParticipant(stableId)

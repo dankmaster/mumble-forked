@@ -3,10 +3,13 @@
 # that can be found in the LICENSE file at the root of the
 # Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
-add_executable(TestScreenShare TestScreenShare.cpp)
+add_executable(TestScreenShare TestScreenShare.cpp ../../mumble/ScreenShareViewBackend.cpp)
 
 set_target_properties(TestScreenShare PROPERTIES AUTOMOC ON)
 
-target_link_libraries(TestScreenShare PRIVATE shared Qt6::Test)
+find_pkg(Qt6 COMPONENTS Gui REQUIRED)
+
+target_include_directories(TestScreenShare PRIVATE ../../mumble)
+target_link_libraries(TestScreenShare PRIVATE shared Qt6::Gui Qt6::Test)
 
 add_test(NAME TestScreenShare COMMAND $<TARGET_FILE:TestScreenShare>)

@@ -79,6 +79,10 @@ class ActiveScopeController final : public QObject {
 	Q_PROPERTY(QString composerPlaceholder READ composerPlaceholder WRITE setComposerPlaceholder NOTIFY composerPlaceholderChanged)
 	Q_PROPERTY(QString composerHint READ composerHint WRITE setComposerHint NOTIFY composerHintChanged)
 	Q_PROPERTY(bool canSend READ canSend WRITE setCanSend NOTIFY canSendChanged)
+	Q_PROPERTY(bool hasPendingReply READ hasPendingReply WRITE setHasPendingReply NOTIFY hasPendingReplyChanged)
+	Q_PROPERTY(QString replyActor READ replyActor WRITE setReplyActor NOTIFY replyActorChanged)
+	Q_PROPERTY(QString replySnippet READ replySnippet WRITE setReplySnippet NOTIFY replySnippetChanged)
+	Q_PROPERTY(bool canAttachImages READ canAttachImages WRITE setCanAttachImages NOTIFY canAttachImagesChanged)
 
 public:
 	explicit ActiveScopeController(QObject *parent = nullptr);
@@ -89,6 +93,10 @@ public:
 	QString composerPlaceholder() const;
 	QString composerHint() const;
 	bool canSend() const;
+	bool hasPendingReply() const;
+	QString replyActor() const;
+	QString replySnippet() const;
+	bool canAttachImages() const;
 	void setScopeToken(const QString &value);
 	void setLabel(const QString &value);
 	void setDescription(const QString &value);
@@ -96,6 +104,10 @@ public:
 	void setComposerPlaceholder(const QString &value);
 	void setComposerHint(const QString &value);
 	void setCanSend(bool value);
+	void setHasPendingReply(bool value);
+	void setReplyActor(const QString &value);
+	void setReplySnippet(const QString &value);
+	void setCanAttachImages(bool value);
 	void applyState(const QVariantMap &state);
 
 signals:
@@ -106,6 +118,10 @@ signals:
 	void composerPlaceholderChanged();
 	void composerHintChanged();
 	void canSendChanged();
+	void hasPendingReplyChanged();
+	void replyActorChanged();
+	void replySnippetChanged();
+	void canAttachImagesChanged();
 
 private:
 	QString m_scopeToken;
@@ -115,6 +131,10 @@ private:
 	QString m_composerPlaceholder;
 	QString m_composerHint;
 	bool m_canSend = false;
+	bool m_hasPendingReply = false;
+	QString m_replyActor;
+	QString m_replySnippet;
+	bool m_canAttachImages = false;
 };
 
 class StableListModel : public QAbstractListModel {
@@ -373,7 +393,15 @@ public:
 	Q_INVOKABLE void selectParticipant(const QString &sessionId);
 	Q_INVOKABLE void openDirectMessage(const QString &sessionId);
 	Q_INVOKABLE void sendMessage(const QString &message);
+	Q_INVOKABLE void cancelPendingReply();
+	Q_INVOKABLE void chooseAttachment();
+	Q_INVOKABLE void replyToMessage(const QString &messageId);
+	Q_INVOKABLE void retryMessage(const QString &messageId);
+	Q_INVOKABLE void deleteMessage(const QString &messageId);
+	Q_INVOKABLE void toggleMessageReaction(const QString &messageId, const QString &emoji);
 	Q_INVOKABLE void invokeAction(const QString &actionId);
+	Q_INVOKABLE void invokeScopeAction(const QString &scopeToken, const QString &actionId);
+	Q_INVOKABLE void invokeParticipantAction(const QString &sessionId, const QString &actionId);
 	Q_INVOKABLE void toggleSelfMute();
 	Q_INVOKABLE void toggleSelfDeaf();
 	Q_INVOKABLE void setPttPressed(bool pressed);
@@ -386,7 +414,15 @@ signals:
 	void participantSelectionRequested(const QString &sessionId);
 	void directMessageOpenRequested(const QString &sessionId);
 	void messageSendRequested(const QString &message);
+	void pendingReplyCancelRequested();
+	void attachmentChooseRequested();
+	void messageReplyRequested(const QString &messageId);
+	void messageRetryRequested(const QString &messageId);
+	void messageDeleteRequested(const QString &messageId);
+	void messageReactionToggleRequested(const QString &messageId, const QString &emoji);
 	void actionRequested(const QString &actionId);
+	void scopeActionRequested(const QString &scopeToken, const QString &actionId);
+	void participantActionRequested(const QString &sessionId, const QString &actionId);
 	void selfMuteToggleRequested();
 	void selfDeafToggleRequested();
 	void pttPressedChanged();

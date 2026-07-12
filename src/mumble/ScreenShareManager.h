@@ -12,6 +12,7 @@
 #include <QtCore/QHash>
 #include <QtCore/QList>
 #include <QtCore/QObject>
+#include <QtCore/QPointer>
 #include <QtCore/QSet>
 #include <QtCore/QString>
 #include <QtCore/QTimer>
@@ -54,7 +55,7 @@ struct ScreenShareStartOptions {
 	QString qualityProfile;
 };
 
-class ExternalScreenShareWindowHost;
+class ScreenShareViewBackend;
 
 class ScreenShareManager : public QObject {
 private:
@@ -127,7 +128,8 @@ private:
 	QHash< QString, qint64 > m_externalViewProcessIDs;
 	QHash< QString, int > m_externalPublishRestartAttempts;
 	QHash< QString, int > m_externalViewRestartAttempts;
-	QHash< QString, ExternalScreenShareWindowHost * > m_externalViewWindows;
+	QHash< QString, ScreenShareViewBackend * > m_viewBackends;
+	QHash< QString, QPointer< QObject > > m_qmlViewWindows;
 	QSet< QString > m_externalViewAudioMuted;
 	QSet< QString > m_pausedExternalViewSessions;
 	QSet< QString > m_announcedViewableSessions;
