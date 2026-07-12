@@ -362,13 +362,26 @@ ApplicationWindow {
                                             Layout.fillWidth: true
                                             Label { Layout.fillWidth: true; text: preview ? (preview.title || preview.host || qsTr("Link preview")) : ""; color: Theme.textStrong; font.bold: true; elide: Text.ElideRight }
                                             Label { Layout.fillWidth: true; text: preview ? (preview.description || preview.url || "") : ""; color: Theme.textMuted; font.pixelSize: 10; elide: Text.ElideRight }
+                                            RowLayout {
+                                                visible: preview && ((preview.url || "").length > 0
+                                                                     || ((preview.embedUrl || "").length > 0
+                                                                         && (preview.embedKind || "").length > 0))
+                                                ModernButton {
+                                                    visible: preview && (preview.url || "").length > 0
+                                                    text: qsTr("Open")
+                                                    onClicked: Qt.openUrlExternally(preview.url)
+                                                }
+                                                ModernButton {
+                                                    visible: preview && (preview.embedUrl || "").length > 0
+                                                             && (preview.embedKind || "").length > 0
+                                                    text: qsTr("Play")
+                                                    onClicked: mediaSession.open(preview.embedUrl,
+                                                                                 preview.embedKind,
+                                                                                 messageDelegate.stableId)
+                                                }
+                                                Item { Layout.fillWidth: true }
+                                            }
                                         }
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: mediaSession.open(preview.url || preview.href || "",
-                                                                     preview.provider || "provider", stableId)
                                     }
                                 }
                                 Flow {

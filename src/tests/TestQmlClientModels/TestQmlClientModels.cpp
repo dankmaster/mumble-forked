@@ -34,6 +34,9 @@ private slots:
 	void asyncOperationsExposeProgressAndCancellation();
 	void asyncOperationsClampProgressAndInterruptByPrefix();
 	void mediaSessionValidatesAndPublishesTypedState();
+	void mediaSessionProviderAllowlist_data();
+	void mediaSessionProviderAllowlist();
+	void mediaSessionNavigationAndErrorLifecycle();
 	void selectionStateOnlyNotifiesForRealChanges();
 	void invalidRowsAndCommandsAreIgnored();
 };
@@ -721,10 +724,10 @@ void TestQmlClientModels::mediaSessionValidatesAndPublishesTypedState() {
 	QSignalSpy playSpy(&media, &MediaSessionBackend::playRequested);
 	QSignalSpy pauseSpy(&media, &MediaSessionBackend::pauseRequested);
 	QSignalSpy seekSpy(&media, &MediaSessionBackend::seekRequested);
-	QVERIFY(!media.open(QUrl(QStringLiteral("http://example.com/video")), QStringLiteral("direct"),
+	QVERIFY(!media.open(QUrl(QStringLiteral("http://www.youtube.com/embed/abc")), QStringLiteral("youtube"),
 						QStringLiteral("room:1")));
 	QCOMPARE(media.state(), QStringLiteral("error"));
-	QVERIFY(media.open(QUrl(QStringLiteral("https://example.com/video")), QStringLiteral("direct"),
+	QVERIFY(media.open(QUrl(QStringLiteral("https://www.youtube.com/embed/abc")), QStringLiteral("youtube"),
 					   QStringLiteral("room:1")));
 	QVERIFY(media.active());
 	media.play();
@@ -732,19 +735,71 @@ void TestQmlClientModels::mediaSessionValidatesAndPublishesTypedState() {
 	media.reportPlaybackState(12.5, 90.0, false);
 	QCOMPARE(media.state(), QStringLiteral("playing"));
 	QCOMPARE(media.position(), 12.5);
-	media.applyRemoteState(QUrl(QStringLiteral("https://example.com/next")), QStringLiteral("direct"),
+	media.applyRemoteState(QUrl(QStringLiteral("https://www.youtube.com/embed/next")), QStringLiteral("youtube"),
 						   QStringLiteral("room:2"), 24.0, true, 42);
 	QCOMPARE(media.sessionId(), QStringLiteral("room:2"));
 	QCOMPARE(media.position(), 24.0);
 	QCOMPARE(media.state(), QStringLiteral("paused"));
 	QCOMPARE(seekSpy.count(), 1);
 	QCOMPARE(pauseSpy.count(), 1);
-	media.applyRemoteState(QUrl(QStringLiteral("https://example.com/stale")), QStringLiteral("direct"),
+	media.applyRemoteState(QUrl(QStringLiteral("https://www.youtube.com/embed/stale")), QStringLiteral("youtube"),
 						   QStringLiteral("stale"), 1.0, false, 41);
 	QCOMPARE(media.sessionId(), QStringLiteral("room:2"));
 	media.close();
 	QVERIFY(!media.active());
 	QCOMPARE(media.state(), QStringLiteral("idle"));
+}
+
+void TestQmlClientModels::mediaSessionProviderAllowlist_data() {
+	QTest::addColumn< QString >("provider");
+	QTest::addColumn< QUrl >("url");
+	QTest::addColumn< bool >("allowed");
+	QTest::newRow("youtube") << QStringLiteral("youtube") << QUrl(QStringLiteral("https://www.youtube.com/embed/a")) << true;
+	QTest::newRow("twitch") << QStringLiteral("twitch") << QUrl(QStringLiteral("https://player.twitch.tv/?video=1")) << true;
+	QTest::newRow("streamable") << QStringLiteral("streamable") << QUrl(QStringLiteral("https://streamable.com/e/a")) << true;
+	QTest::newRow("vimeo") << QStringLiteral("vimeo") << QUrl(QStringLiteral("https://player.vimeo.com/video/1")) << true;
+	QTest::newRow("dailymotion") << QStringLiteral("dailymotion") << QUrl(QStringLiteral("https://geo.dailymotion.com/player.html?video=x")) << true;
+	QTest::newRow("spotify") << QStringLiteral("spotify") << QUrl(QStringLiteral("https://open.spotify.com/embed/track/12345678")) << true;
+	QTest::newRow("facebook") << QStringLiteral("facebook") << QUrl(QStringLiteral("https://www.facebook.com/plugins/video.php")) << true;
+	QTest::newRow("tiktok") << QStringLiteral("tiktok") << QUrl(QStringLiteral("https://www.tiktok.com/player/v1/1")) << true;
+	QTest::newRow("instagram") << QStringLiteral("instagram") << QUrl(QStringLiteral("https://www.instagram.com/p/abc/embed")) << true;
+	QTest::newRow("soundcloud") << QStringLiteral("soundcloud") << QUrl(QStringLiteral("https://w.soundcloud.com/player/")) << true;
+	QTest::newRow("unknown-provider") << QStringLiteral("direct") << QUrl(QStringLiteral("https://www.youtube.com/embed/a")) << false;
+	QTest::newRow("arbitrary-https") << QStringLiteral("youtube") << QUrl(QStringLiteral("https://example.com/embed/a")) << false;
+	QTest::newRow("host-spoof") << QStringLiteral("youtube") << QUrl(QStringLiteral("https://www.youtube.com.evil.test/embed/a")) << false;
+	QTest::newRow("provider-mismatch") << QStringLiteral("vimeo") << QUrl(QStringLiteral("https://www.youtube.com/embed/a")) << false;
+}
+
+void TestQmlClientModels::mediaSessionProviderAllowlist() {
+	QFETCH(QString, provider);
+	QFETCH(QUrl, url);
+	QFETCH(bool, allowed);
+	MediaSessionBackend media;
+	QCOMPARE(media.open(url, provider, QStringLiteral("test")), allowed);
+	QCOMPARE(media.active(), allowed);
+	if (!allowed) {
+		QCOMPARE(media.state(), QStringLiteral("error"));
+		QVERIFY(!media.error().isEmpty());
+	}
+}
+
+void TestQmlClientModels::mediaSessionNavigationAndErrorLifecycle() {
+	MediaSessionBackend media;
+	QVERIFY(media.isNavigationAllowed(QUrl(QStringLiteral("about:blank"))));
+	QVERIFY(media.open(QUrl(QStringLiteral("https://player.vimeo.com/video/1")), QStringLiteral("vimeo"),
+					   QStringLiteral("room")));
+	QVERIFY(media.isNavigationAllowed(QUrl(QStringLiteral("https://player.vimeo.com/video/2"))));
+	QVERIFY(!media.isNavigationAllowed(QUrl(QStringLiteral("https://vimeo.com/2"))));
+	QVERIFY(!media.isNavigationAllowed(QUrl(QStringLiteral("https://player.vimeo.com.evil.test/video/2"))));
+	QVERIFY(!media.isNavigationAllowed(QUrl(QStringLiteral("file:///tmp/video"))));
+	QVERIFY(!media.isNavigationAllowed(QUrl(QStringLiteral("about:srcdoc"))));
+	media.reportError(QStringLiteral("renderer crashed"));
+	QCOMPARE(media.state(), QStringLiteral("error"));
+	QCOMPARE(media.error(), QStringLiteral("renderer crashed"));
+	media.close();
+	QVERIFY(!media.active());
+	QCOMPARE(media.state(), QStringLiteral("idle"));
+	QVERIFY(media.error().isEmpty());
 }
 
 QTEST_GUILESS_MAIN(TestQmlClientModels)

@@ -36,9 +36,9 @@ ApplicationWindow {
                 mediaSession.reportError(qsTr("The media renderer stopped unexpectedly."))
             }
             onNewWindowRequested: function(request) { request.reject() }
+            onFileDialogRequested: function(request) { request.reject() }
             onNavigationRequested: function(request) {
-                const target = request.url
-                if (target.scheme !== "https" && target.scheme !== "about")
+                if (!mediaSession.isNavigationAllowed(request.url))
                     request.action = WebEngineNavigationRequest.IgnoreRequest
             }
             Connections {

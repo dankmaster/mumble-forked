@@ -6,6 +6,7 @@
 #include "ClientActionRegistry.h"
 
 #include <QtCore/QString>
+#include <QtCore/QSet>
 #include <QtGui/QAction>
 
 #include <algorithm>
@@ -750,6 +751,25 @@ void DialogStateController::requestClose() {
 MediaSessionBackend::MediaSessionBackend(QObject *parent) : QObject(parent) {
 }
 
+namespace {
+const QHash< QString, QSet< QString > > &mediaProviderHosts() {
+	static const QHash< QString, QSet< QString > > hosts {
+		{ QStringLiteral("youtube"), { QStringLiteral("www.youtube.com"), QStringLiteral("youtube.com"),
+									 QStringLiteral("www.youtube-nocookie.com"), QStringLiteral("youtube-nocookie.com") } },
+		{ QStringLiteral("twitch"), { QStringLiteral("player.twitch.tv") } },
+		{ QStringLiteral("streamable"), { QStringLiteral("streamable.com") } },
+		{ QStringLiteral("vimeo"), { QStringLiteral("player.vimeo.com") } },
+		{ QStringLiteral("dailymotion"), { QStringLiteral("geo.dailymotion.com") } },
+		{ QStringLiteral("spotify"), { QStringLiteral("open.spotify.com") } },
+		{ QStringLiteral("facebook"), { QStringLiteral("www.facebook.com") } },
+		{ QStringLiteral("tiktok"), { QStringLiteral("www.tiktok.com") } },
+		{ QStringLiteral("instagram"), { QStringLiteral("www.instagram.com") } },
+		{ QStringLiteral("soundcloud"), { QStringLiteral("w.soundcloud.com") } }
+	};
+	return hosts;
+}
+}
+
 bool MediaSessionBackend::active() const { return m_active; }
 QUrl MediaSessionBackend::url() const { return m_url; }
 QString MediaSessionBackend::provider() const { return m_provider; }
@@ -762,13 +782,20 @@ qulonglong MediaSessionBackend::syncGeneration() const { return m_syncGeneration
 
 bool MediaSessionBackend::open(const QUrl &url, const QString &provider, const QString &sessionId) {
 	const QUrl normalized = url.adjusted(QUrl::NormalizePathSegments | QUrl::StripTrailingSlash);
-	if (!normalized.isValid() || normalized.scheme() != QLatin1String("https") || normalized.host().isEmpty()) {
-		reportError(tr("Only secure HTTPS media URLs can be opened."));
+	const QString normalizedProvider = provider.trimmed().toLower();
+	const auto providerHosts = mediaProviderHosts().constFind(normalizedProvider);
+	if (providerHosts == mediaProviderHosts().cend()) {
+		reportError(tr("This media provider is not supported."));
+		return false;
+	}
+	if (!normalized.isValid() || normalized.scheme() != QLatin1String("https")
+		|| !providerHosts->contains(normalized.host().toLower())) {
+		reportError(tr("The media embed URL is not allowed for this provider."));
 		return false;
 	}
 	m_active = true;
 	m_url = normalized;
-	m_provider = provider.trimmed();
+	m_provider = normalizedProvider;
 	m_sessionId = sessionId.trimmed();
 	m_state = QStringLiteral("loading");
 	m_position = 0.0;
@@ -777,6 +804,14 @@ bool MediaSessionBackend::open(const QUrl &url, const QString &provider, const Q
 	++m_syncGeneration;
 	emit stateChanged();
 	return true;
+}
+
+bool MediaSessionBackend::isNavigationAllowed(const QUrl &url) const {
+	if (url == QUrl(QStringLiteral("about:blank"))) return true;
+	if (!m_active) return false;
+	const auto providerHosts = mediaProviderHosts().constFind(m_provider);
+	return providerHosts != mediaProviderHosts().cend() && url.isValid() && url.scheme() == QLatin1String("https")
+		   && providerHosts->contains(url.host().toLower());
 }
 
 void MediaSessionBackend::close() {

@@ -337,6 +337,7 @@ public:
 	QString error() const;
 	qulonglong syncGeneration() const;
 	Q_INVOKABLE bool open(const QUrl &url, const QString &provider, const QString &sessionId);
+	Q_INVOKABLE bool isNavigationAllowed(const QUrl &url) const;
 	Q_INVOKABLE void close();
 	Q_INVOKABLE void play();
 	Q_INVOKABLE void pause();
