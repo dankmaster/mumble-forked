@@ -77,6 +77,9 @@ protected slots:
 	/// Slot triggered once an update for a plugin has been downloaded.
 	void on_updateDownloaded(QNetworkReply *reply);
 
+private:
+	void finishEntry(const UpdateEntry &entry, bool success, const QString &errorCode, const QString &message);
+
 signals:
 	/// This signal is emitted once it has been determined that there are plugin updates available.
 	void updatesAvailable();
@@ -84,6 +87,9 @@ signals:
 	void updatingFinished();
 	/// This signal is emitted every time the update process has been interrupted.
 	void updateInterrupted();
+	void updateStarted(qulonglong pluginID, const QString &fileName);
+	void updateProgress(qulonglong pluginID, qint64 bytesReceived, qint64 bytesTotal);
+	void updateResult(qulonglong pluginID, bool success, const QString &errorCode, const QString &message);
 };
 
 #endif // MUMBLE_MUMBLE_PLUGINUPDATER_H_

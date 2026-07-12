@@ -131,6 +131,15 @@ PluginManager::PluginManager(QSet< QString > *additionalSearchPaths, QObject *p)
 					 &PluginManager::checkForAvailablePositionalDataPlugin);
 
 	QObject::connect(&m_updater, &PluginUpdater::updatesAvailable, this, &PluginManager::on_updatesAvailable);
+	QObject::connect(&m_updater, &PluginUpdater::updateStarted, this,
+					 [this](const qulonglong pluginID, const QString &fileName) {
+						 const const_plugin_ptr_t plugin = getPlugin(static_cast< plugin_id_t >(pluginID));
+						 emit pluginUpdateStarted(pluginID, plugin ? plugin->getName() : fileName);
+					 });
+	QObject::connect(&m_updater, &PluginUpdater::updateProgress, this, &PluginManager::pluginUpdateProgress);
+	QObject::connect(&m_updater, &PluginUpdater::updateResult, this, &PluginManager::pluginUpdateResult);
+	QObject::connect(&m_updater, &PluginUpdater::updatingFinished, this, &PluginManager::pluginUpdatesFinished);
+	QObject::connect(&m_updater, &PluginUpdater::updateInterrupted, this, &PluginManager::pluginUpdatesInterrupted);
 	QObject::connect(this, &PluginManager::keyEvent, this, &PluginManager::on_keyEvent);
 	QObject::connect(this, &PluginManager::pluginLostLink, this, &PluginManager::reportLostLink);
 	QObject::connect(this, &PluginManager::pluginLinked, this, &PluginManager::reportPluginLinked);

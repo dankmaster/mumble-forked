@@ -14034,6 +14034,31 @@ void MainWindow::applyShellLayout() {
 			connect(dialog, &DialogStateController::fieldUpdateRequested, this,
 					&MainWindow::handleModernDialogFieldUpdate);
 			connect(dialog, &DialogStateController::actionRequested, this, &MainWindow::handleModernDialogAction);
+			AsyncOperationModel *operations = m_qmlShellHost->operationModel();
+			connect(operations, &AsyncOperationModel::cancellationRequested, this, [](const QString &operationID) {
+				if (operationID.startsWith(QLatin1String("plugin-update:")) && Global::get().pluginManager) {
+					Global::get().pluginManager->interruptPluginUpdates();
+				}
+			});
+			if (Global::get().pluginManager) {
+				connect(Global::get().pluginManager, &PluginManager::pluginUpdateStarted, this,
+						[operations](const qulonglong pluginID, const QString &name) {
+							operations->startOperation(QStringLiteral("plugin-update:%1").arg(pluginID), name,
+											   tr("Downloading plugin update"), true);
+						});
+				connect(Global::get().pluginManager, &PluginManager::pluginUpdateProgress, this,
+						[operations](const qulonglong pluginID, const qint64 received, const qint64 total) {
+							operations->updateProgress(QStringLiteral("plugin-update:%1").arg(pluginID), received, total);
+						});
+				connect(Global::get().pluginManager, &PluginManager::pluginUpdateResult, this,
+						[operations](const qulonglong pluginID, const bool success, const QString &errorCode,
+									 const QString &message) {
+							operations->finishOperation(QStringLiteral("plugin-update:%1").arg(pluginID), success,
+													errorCode, message);
+						});
+				connect(Global::get().pluginManager, &PluginManager::pluginUpdatesInterrupted, this,
+						[operations]() { operations->interruptOperations(QStringLiteral("plugin-update:")); });
+			}
 			connect(m_qmlShellHost.get(), &QmlShellHost::closeRequested, this, &MainWindow::close);
 		}
 

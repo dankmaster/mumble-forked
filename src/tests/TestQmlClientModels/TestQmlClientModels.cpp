@@ -19,6 +19,7 @@ private slots:
 	void commandsRejectEmptyStableIds();
 	void pttStateIsIdempotentAndReleases();
 	void dialogStateRoutesTypedRequests();
+	void asyncOperationsExposeProgressAndCancellation();
 };
 
 void TestQmlClientModels::stableRowsUpdateWithoutReset() {
@@ -246,6 +247,29 @@ void TestQmlClientModels::dialogStateRoutesTypedRequests() {
 	QCOMPARE(actionSpy.takeFirst().at(1).toString(), QStringLiteral("selectPage"));
 	dialog.requestClose();
 	QCOMPARE(closeSpy.count(), 1);
+}
+
+void TestQmlClientModels::asyncOperationsExposeProgressAndCancellation() {
+	AsyncOperationModel operations;
+	QSignalSpy cancelSpy(&operations, &AsyncOperationModel::cancellationRequested);
+	operations.startOperation(QStringLiteral("plugin-update:7"), QStringLiteral("Example"),
+							  QStringLiteral("Downloading"), true);
+	QCOMPARE(operations.rowCount(), 1);
+	QCOMPARE(operations.get(0).value(QStringLiteral("status")).toString(), QStringLiteral("running"));
+
+	operations.updateProgress(QStringLiteral("plugin-update:7"), 25, 100);
+	QCOMPARE(operations.get(0).value(QStringLiteral("payload")).toMap().value(QStringLiteral("progress")).toInt(),
+			 25);
+	operations.cancel(QStringLiteral(" plugin-update:7 "));
+	QCOMPARE(cancelSpy.count(), 1);
+	QCOMPARE(cancelSpy.takeFirst().at(0).toString(), QStringLiteral("plugin-update:7"));
+
+	operations.finishOperation(QStringLiteral("plugin-update:7"), false, QStringLiteral("network-error"),
+							   QStringLiteral("Offline"));
+	const QVariantMap finished = operations.get(0);
+	QCOMPARE(finished.value(QStringLiteral("status")).toString(), QStringLiteral("failed"));
+	QCOMPARE(finished.value(QStringLiteral("subtitle")).toString(), QStringLiteral("Offline"));
+	QVERIFY(!finished.value(QStringLiteral("payload")).toMap().value(QStringLiteral("cancellable")).toBool());
 }
 
 QTEST_GUILESS_MAIN(TestQmlClientModels)

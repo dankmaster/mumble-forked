@@ -180,6 +180,14 @@ class AsyncOperationModel final : public StableListModel {
 	Q_OBJECT
 public:
 	using StableListModel::StableListModel;
+	void startOperation(const QString &operationId, const QString &title, const QString &subtitle, bool cancellable);
+	void updateProgress(const QString &operationId, qint64 bytesReceived, qint64 bytesTotal);
+	void finishOperation(const QString &operationId, bool success, const QString &errorCode, const QString &message);
+	void interruptOperations(const QString &prefix);
+	Q_INVOKABLE void cancel(const QString &operationId);
+
+signals:
+	void cancellationRequested(const QString &operationId);
 };
 
 class ActionModel final : public StableListModel {

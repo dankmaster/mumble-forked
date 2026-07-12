@@ -32,6 +32,60 @@ ApplicationWindow {
 
     QmlDialog { }
 
+    Column {
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: 20
+        width: Math.min(380, parent.width - 40)
+        spacing: 8
+        z: 40
+        Repeater {
+            model: operationModel
+            delegate: Rectangle {
+                required property string stableId
+                required property string title
+                required property string subtitle
+                required property string status
+                required property var payload
+                width: parent.width
+                height: operationContent.implicitHeight + 24
+                radius: Theme.innerRadius
+                color: Theme.panel
+                border.color: status === "failed" ? "#ef4444" : Theme.divider
+                ColumnLayout {
+                    id: operationContent
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 6
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label { Layout.fillWidth: true; text: title; color: Theme.textStrong; font.bold: true; elide: Text.ElideRight }
+                        ModernButton {
+                            visible: status === "running" && !!payload.cancellable
+                            text: qsTr("Cancel")
+                            onClicked: operationModel.cancel(stableId)
+                        }
+                    }
+                    Label { Layout.fillWidth: true; text: subtitle; color: Theme.textMuted; wrapMode: Text.Wrap }
+                    ProgressBar {
+                        Layout.fillWidth: true
+                        visible: status === "running" || Number(payload.progress) >= 0
+                        indeterminate: !!payload.indeterminate
+                        from: 0
+                        to: 100
+                        value: Number(payload.progress) >= 0 ? Number(payload.progress) : 0
+                    }
+                    Label {
+                        visible: status !== "running"
+                        text: status === "succeeded" ? qsTr("Completed") : qsTr("Failed")
+                        color: status === "succeeded" ? "#34d399" : "#f87171"
+                        font.pixelSize: 10
+                    }
+                }
+            }
+        }
+    }
+
     Rectangle {
         anchors.fill: parent
         anchors.margins: 8

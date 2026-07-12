@@ -29,6 +29,11 @@ PluginUpdater::~PluginUpdater() {
 }
 
 void PluginUpdater::checkForUpdates() {
+	m_wasInterrupted.store(false);
+	{
+		QMutexLocker lock(&m_dataMutex);
+		m_pluginsToUpdate.clear();
+	}
 	// Dispatch a thread in which each plugin can check for updates
 	std::ignore = QtConcurrent::run([this]() {
 		QMutexLocker lock(&m_dataMutex);
@@ -61,13 +66,17 @@ void PluginUpdater::checkForUpdates() {
 
 void PluginUpdater::update() {
 	QMutexLocker l(&m_dataMutex);
+	m_wasInterrupted.store(false);
 
 	for (int i = 0; i < m_pluginsToUpdate.size(); i++) {
 		UpdateEntry currentEntry = m_pluginsToUpdate[i];
 
-		// The network manager will be emit a signal once the request has finished processing.
-		// Thus we can ignore the returned QNetworkReply* here.
-		m_networkManager.get(QNetworkRequest(currentEntry.updateURL));
+		QNetworkReply *reply = m_networkManager.get(QNetworkRequest(currentEntry.updateURL));
+		emit updateStarted(static_cast< qulonglong >(currentEntry.pluginID), currentEntry.fileName);
+		QObject::connect(reply, &QNetworkReply::downloadProgress, this,
+					 [this, pluginID = currentEntry.pluginID](const qint64 received, const qint64 total) {
+						 emit updateProgress(static_cast< qulonglong >(pluginID), received, total);
+					 });
 	}
 }
 
@@ -93,18 +102,28 @@ void PluginUpdater::updateSelected(const QSet< plugin_id_t > &pluginIDs) {
 }
 
 void PluginUpdater::interrupt() {
-	m_wasInterrupted.store(true);
+	if (m_wasInterrupted.exchange(true)) {
+		return;
+	}
+	for (QNetworkReply *reply : m_networkManager.findChildren< QNetworkReply * >()) {
+		reply->abort();
+	}
+	emit updateInterrupted();
+}
+
+void PluginUpdater::finishEntry(const UpdateEntry &entry, const bool success, const QString &errorCode,
+								const QString &message) {
+	emit updateResult(static_cast< qulonglong >(entry.pluginID), success, errorCode, message);
+	QMutexLocker lock(&m_dataMutex);
+	if (m_pluginsToUpdate.isEmpty()) {
+		emit updatingFinished();
+	}
 }
 
 void PluginUpdater::on_updateDownloaded(QNetworkReply *reply) {
 	if (reply) {
 		// Schedule reply for deletion
 		reply->deleteLater();
-
-		if (m_wasInterrupted.load()) {
-			emit updateInterrupted();
-			return;
-		}
 
 		// Find the ID of the plugin this update is for by comparing the URLs
 		UpdateEntry entry;
@@ -130,6 +149,11 @@ void PluginUpdater::on_updateDownloaded(QNetworkReply *reply) {
 			return;
 		}
 
+		if (m_wasInterrupted.load()) {
+			finishEntry(entry, false, QStringLiteral("cancelled"), tr("Update cancelled"));
+			return;
+		}
+
 		// Now get a handle to that plugin
 		const_plugin_ptr_t plugin = Global::get().pluginManager->getPlugin(entry.pluginID);
 
@@ -137,6 +161,7 @@ void PluginUpdater::on_updateDownloaded(QNetworkReply *reply) {
 			// Can't find plugin with given ID
 			qWarning() << "PluginUpdater: Got update for plugin with id" << entry.pluginID
 					   << "but it doesn't seem to exist anymore!";
+			finishEntry(entry, false, QStringLiteral("plugin-missing"), tr("The plugin is no longer installed"));
 			return;
 		}
 
@@ -149,6 +174,7 @@ void PluginUpdater::on_updateDownloaded(QNetworkReply *reply) {
 								.arg(reply->url().toString())
 								.arg(QString::fromLatin1(
 									QMetaEnum::fromType< QNetworkReply::NetworkError >().valueToKey(reply->error()))));
+			finishEntry(entry, false, QStringLiteral("network-error"), reply->errorString());
 			return;
 		}
 
@@ -163,6 +189,8 @@ void PluginUpdater::on_updateDownloaded(QNetworkReply *reply) {
 				Log::logOrDefer(Log::Warning,
 								tr("Update for plugin \"%1\" failed due to too many redirects").arg(plugin->getName()));
 
+				finishEntry(entry, false, QStringLiteral("too-many-redirects"),
+						tr("The update redirected too many times"));
 				return;
 			}
 
@@ -182,7 +210,11 @@ void PluginUpdater::on_updateDownloaded(QNetworkReply *reply) {
 			}
 
 			// Post a new request for the file to the new URL
-			m_networkManager.get(QNetworkRequest(redirectedUrl));
+			QNetworkReply *redirectedReply = m_networkManager.get(QNetworkRequest(redirectedUrl));
+			QObject::connect(redirectedReply, &QNetworkReply::downloadProgress, this,
+						 [this, pluginID = entry.pluginID](const qint64 received, const qint64 total) {
+							 emit updateProgress(static_cast< qulonglong >(pluginID), received, total);
+						 });
 
 			return;
 		}
@@ -195,6 +227,8 @@ void PluginUpdater::on_updateDownloaded(QNetworkReply *reply) {
 								.arg(reply->url().toString())
 								.arg(httpStatusCode));
 
+			finishEntry(entry, false, QStringLiteral("http-error"),
+						tr("The server returned HTTP status %1").arg(httpStatusCode));
 			return;
 		}
 
@@ -205,18 +239,28 @@ void PluginUpdater::on_updateDownloaded(QNetworkReply *reply) {
 		if (content.isEmpty()) {
 			qWarning() << "PluginUpdater: Update for" << plugin->getName() << "from" << reply->url().toString()
 					   << "resulted in no content!";
+			finishEntry(entry, false, QStringLiteral("empty-download"), tr("The downloaded update was empty"));
 			return;
 		}
 
 		QFile file(QDir::temp().filePath(entry.fileName));
 		if (!file.open(QIODevice::WriteOnly)) {
 			qWarning() << "PluginUpdater: Can't open" << file.fileName() << "for writing!";
+			finishEntry(entry, false, QStringLiteral("temporary-file-error"),
+						tr("The temporary update file could not be opened"));
 			return;
 		}
 
-		file.write(content);
+		if (file.write(content) != content.size()) {
+			file.close();
+			finishEntry(entry, false, QStringLiteral("temporary-file-error"),
+						tr("The downloaded update could not be written"));
+			return;
+		}
 		file.close();
 
+		bool installed = false;
+		QString installError;
 		try {
 			const QString pluginName = plugin->getName();
 			// We have to release the plugin handle here by resetting the smart-pointer in order to make sure the
@@ -230,16 +274,12 @@ void PluginUpdater::on_updateDownloaded(QNetworkReply *reply) {
 
 			// Make sure Mumble won't use the old version of the plugin
 			Global::get().pluginManager->rescanPlugins();
+			installed = true;
 		} catch (const PluginInstallException &e) {
 			Log::logOrDefer(Log::CriticalError, e.getMessage());
+			installError = e.getMessage();
 		}
-
-		{
-			QMutexLocker l(&m_dataMutex);
-
-			if (m_pluginsToUpdate.isEmpty()) {
-				emit updatingFinished();
-			}
-		}
+		finishEntry(entry, installed, installed ? QString() : QStringLiteral("install-error"),
+					installed ? tr("Plugin updated successfully") : installError);
 	}
 }

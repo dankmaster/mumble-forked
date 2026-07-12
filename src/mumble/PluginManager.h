@@ -301,6 +301,11 @@ protected slots:
 	void reportPermanentError(mumble_plugin_id_t pluginID);
 
 signals:
+	void pluginUpdateStarted(qulonglong pluginID, const QString &name);
+	void pluginUpdateProgress(qulonglong pluginID, qint64 bytesReceived, qint64 bytesTotal);
+	void pluginUpdateResult(qulonglong pluginID, bool success, const QString &errorCode, const QString &message);
+	void pluginUpdatesFinished();
+	void pluginUpdatesInterrupted();
 	/// A signal emitted if the PluginManager (acting as an event filter) detected
 	/// a QKeyEvent.
 	///

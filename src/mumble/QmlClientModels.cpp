@@ -269,6 +269,71 @@ void StableListModel::clear() {
 	emit countChanged();
 }
 
+void AsyncOperationModel::startOperation(const QString &operationId, const QString &title, const QString &subtitle,
+										 const bool cancellable) {
+	QVariantMap payload { { QStringLiteral("progress"), -1 }, { QStringLiteral("indeterminate"), true },
+						 { QStringLiteral("cancellable"), cancellable }, { QStringLiteral("errorCode"), QString() } };
+	upsertRow({ { QStringLiteral("id"), operationId }, { QStringLiteral("title"), title },
+				{ QStringLiteral("subtitle"), subtitle }, { QStringLiteral("status"), QStringLiteral("running") },
+				{ QStringLiteral("payload"), payload } });
+}
+
+void AsyncOperationModel::updateProgress(const QString &operationId, const qint64 bytesReceived,
+										 const qint64 bytesTotal) {
+	QVariantMap row;
+	for (int index = 0; index < rowCount(); ++index) {
+		if (get(index).value(QStringLiteral("id")).toString() == operationId) {
+			row = get(index);
+			break;
+		}
+	}
+	if (row.isEmpty()) return;
+	QVariantMap payload = row.value(QStringLiteral("payload")).toMap();
+	payload.insert(QStringLiteral("bytesReceived"), bytesReceived);
+	payload.insert(QStringLiteral("bytesTotal"), bytesTotal);
+	payload.insert(QStringLiteral("indeterminate"), bytesTotal <= 0);
+	payload.insert(QStringLiteral("progress"),
+				   bytesTotal > 0 ? qBound(0, static_cast< int >((bytesReceived * 100) / bytesTotal), 100) : -1);
+	row.insert(QStringLiteral("payload"), payload);
+	upsertRow(row);
+}
+
+void AsyncOperationModel::finishOperation(const QString &operationId, const bool success, const QString &errorCode,
+									   const QString &message) {
+	QVariantMap row;
+	for (int index = 0; index < rowCount(); ++index) {
+		if (get(index).value(QStringLiteral("id")).toString() == operationId) {
+			row = get(index);
+			break;
+		}
+	}
+	if (row.isEmpty()) return;
+	QVariantMap payload = row.value(QStringLiteral("payload")).toMap();
+	payload.insert(QStringLiteral("cancellable"), false);
+	payload.insert(QStringLiteral("indeterminate"), false);
+	payload.insert(QStringLiteral("errorCode"), errorCode);
+	if (success) payload.insert(QStringLiteral("progress"), 100);
+	row.insert(QStringLiteral("payload"), payload);
+	row.insert(QStringLiteral("status"), success ? QStringLiteral("succeeded") : QStringLiteral("failed"));
+	row.insert(QStringLiteral("subtitle"), message);
+	upsertRow(row);
+}
+
+void AsyncOperationModel::interruptOperations(const QString &prefix) {
+	for (int index = 0; index < rowCount(); ++index) {
+		const QVariantMap row = get(index);
+		const QString id = row.value(QStringLiteral("id")).toString();
+		if (id.startsWith(prefix) && row.value(QStringLiteral("status")).toString() == QLatin1String("running")) {
+			finishOperation(id, false, QStringLiteral("cancelled"), tr("Operation cancelled"));
+		}
+	}
+}
+
+void AsyncOperationModel::cancel(const QString &operationId) {
+	const QString id = operationId.trimmed();
+	if (!id.isEmpty()) emit cancellationRequested(id);
+}
+
 UiCommandController::UiCommandController(QObject *parent) : QObject(parent) {
 }
 
