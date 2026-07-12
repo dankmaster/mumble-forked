@@ -41400,42 +41400,7 @@ void MainWindow::on_qaUserPrioritySpeaker_triggered() {
 }
 
 void MainWindow::on_qaUserRegister_triggered() {
-	if (handleModernShellLegacyDialogAction(QStringLiteral("register"), getContextMenuUser())) {
-		return;
-	}
-
-	ClientUser *p = getContextMenuUser();
-	if (!p)
-		return;
-
-	unsigned int session = p->uiSession;
-
-	QMessageBox::StandardButton result;
-
-	if (session == Global::get().uiSession)
-		result = QMessageBox::question(
-			this, tr("Register yourself as %1").arg(p->qsName),
-			tr("<p>You are about to register yourself on this server. This action cannot be undone, and your username "
-			   "cannot be changed once this is done. You will forever be known as '%1' on this server.</p><p>Are you "
-			   "sure you want to register yourself?</p>")
-				.arg(p->qsName.toHtmlEscaped()),
-			QMessageBox::Yes | QMessageBox::No);
-	else
-		result = QMessageBox::question(
-			this, tr("Register user %1").arg(p->qsName),
-			tr("<p>You are about to register %1 on the server. This action cannot be undone, the username cannot be "
-			   "changed, and as a registered user, %1 will have access to the server even if you change the server "
-			   "password.</p><p>From this point on, %1 will be authenticated with the certificate currently in "
-			   "use.</p><p>Are you sure you want to register %1?</p>")
-				.arg(p->qsName.toHtmlEscaped()),
-			QMessageBox::Yes | QMessageBox::No);
-
-	if (result == QMessageBox::Yes) {
-		p = ClientUser::get(session);
-		if (!p)
-			return;
-		Global::get().sh->registerUser(p->uiSession);
-	}
+	handleModernShellLegacyDialogAction(QStringLiteral("register"), getContextMenuUser());
 }
 
 void MainWindow::on_qaUserFriendAdd_triggered() {
@@ -41461,29 +41426,7 @@ void MainWindow::on_qaUserFriendRemove_triggered() {
 }
 
 void MainWindow::on_qaUserKick_triggered() {
-	if (handleModernShellLegacyDialogAction(QStringLiteral("kick"), getContextMenuUser())) {
-		return;
-	}
-
-	ClientUser *p = getContextMenuUser();
-	if (!p) {
-		return;
-	}
-
-	unsigned int session = p->uiSession;
-
-	bool ok;
-	QString reason = QInputDialog::getText(this, tr("Kicking user %1").arg(p->qsName), tr("Enter reason"),
-										   QLineEdit::Normal, QString(), &ok);
-
-	p = ClientUser::get(session);
-	if (!p) {
-		return;
-	}
-
-	if (ok) {
-		Global::get().sh->kickUser(p->uiSession, reason);
-	}
+	handleModernShellLegacyDialogAction(QStringLiteral("kick"), getContextMenuUser());
 }
 
 void MainWindow::on_qaUserBan_triggered() {
@@ -41527,45 +41470,11 @@ void MainWindow::on_qaUserCommentView_triggered() {
 }
 
 void MainWindow::on_qaUserCommentReset_triggered() {
-	if (handleModernShellLegacyDialogAction(QStringLiteral("commentReset"), getContextMenuUser())) {
-		return;
-	}
-
-	ClientUser *p = getContextMenuUser();
-
-	if (!p)
-		return;
-
-	unsigned int session = p->uiSession;
-
-	int ret = QMessageBox::question(
-		this, QLatin1String("Mumble"),
-		tr("Are you sure you want to reset the comment of user %1?").arg(p->qsName.toHtmlEscaped()), QMessageBox::Yes,
-		QMessageBox::No);
-	if (ret == QMessageBox::Yes) {
-		Global::get().sh->setUserComment(session, QString());
-	}
+	handleModernShellLegacyDialogAction(QStringLiteral("commentReset"), getContextMenuUser());
 }
 
 void MainWindow::on_qaUserTextureReset_triggered() {
-	if (handleModernShellLegacyDialogAction(QStringLiteral("textureReset"), getContextMenuUser())) {
-		return;
-	}
-
-	ClientUser *p = getContextMenuUser();
-
-	if (!p)
-		return;
-
-	unsigned int session = p->uiSession;
-
-	int ret = QMessageBox::question(
-		this, QLatin1String("Mumble"),
-		tr("Are you sure you want to reset the avatar of user %1?").arg(p->qsName.toHtmlEscaped()), QMessageBox::Yes,
-		QMessageBox::No);
-	if (ret == QMessageBox::Yes) {
-		Global::get().sh->setUserTexture(session, QByteArray());
-	}
+	handleModernShellLegacyDialogAction(QStringLiteral("textureReset"), getContextMenuUser());
 }
 
 void MainWindow::on_qaUserInformation_triggered() {
@@ -42001,29 +41910,7 @@ void MainWindow::on_qaChannelAdd_triggered() {
 }
 
 void MainWindow::on_qaChannelRemove_triggered() {
-	if (handleModernShellLegacyDialogAction(QStringLiteral("remove"), nullptr, getContextMenuChannel())) {
-		return;
-	}
-
-	int ret;
-	Channel *c = getContextMenuChannel();
-	if (!c)
-		return;
-
-	unsigned int id = c->iId;
-
-	ret = QMessageBox::question(
-		this, QLatin1String("Mumble"),
-		tr("Are you sure you want to delete %1 and all its sub-channels?").arg(c->qsName.toHtmlEscaped()),
-		QMessageBox::Yes, QMessageBox::No);
-
-	c = Channel::get(id);
-	if (!c)
-		return;
-
-	if (ret == QMessageBox::Yes) {
-		Global::get().sh->removeChannel(c->iId);
-	}
+	handleModernShellLegacyDialogAction(QStringLiteral("remove"), nullptr, getContextMenuChannel());
 }
 
 void MainWindow::on_qaChannelACL_triggered() {
@@ -44155,11 +44042,7 @@ void MainWindow::openAboutDialog() {
 }
 
 void MainWindow::openAboutQtDialog() {
-	if (handleModernShellLegacyDialogAction(QStringLiteral("help.aboutQt"))) {
-		return;
-	}
-
-	QMessageBox::aboutQt(this, tr("About Qt"));
+	handleModernShellLegacyDialogAction(QStringLiteral("help.aboutQt"));
 }
 
 void MainWindow::versionCheck() {
@@ -44184,34 +44067,18 @@ void MainWindow::showMuteCuePopup() {
 	}
 
 	Global::get().s.muteCueShown = true;
-	if (true) {
-		const QVariantList sections {
-			modernDialogSection(tr("Mute cue"),
-								QVariantList { modernNoteField(tr("That sound was the mute cue. It activates when you "
-																  "speak while muted. Would you like to keep it enabled?")) })
-		};
-		const QVariantList actions {
-			modernDialogAction(QStringLiteral("disableMuteCue"), tr("No"), true, QStringLiteral("danger"), true),
-			modernDialogAction(QStringLiteral("keepMuteCue"), tr("Yes"), true, QStringLiteral("accent"), true)
-		};
-		openModernGenericDialog(modernDialogDto(QStringLiteral("muteCueNotice"), QStringLiteral("warning"),
-												tr("Mute cue"), tr("Voice feedback"),
-												sections, actions, QStringLiteral("keepMuteCue"), QSize(520, 320)));
-		return;
-	}
-	QMessageBox mb(
-		QMessageBox::Warning, QLatin1String("Mumble"),
-		tr("That sound was the mute cue. It activates when you speak while muted. Would you like to keep it enabled?"),
-		QMessageBox::NoButton, this);
-	QPushButton *accept = mb.addButton(tr("Yes"), QMessageBox::YesRole);
-	QPushButton *reject = mb.addButton(tr("No"), QMessageBox::NoRole);
-	mb.setDefaultButton(accept);
-	mb.setEscapeButton(accept);
-	mb.exec();
-
-	if (mb.clickedButton() == reject) {
-		Global::get().s.bTxMuteCue = false;
-	}
+	const QVariantList sections {
+		modernDialogSection(tr("Mute cue"),
+							QVariantList { modernNoteField(tr("That sound was the mute cue. It activates when you "
+														  "speak while muted. Would you like to keep it enabled?")) })
+	};
+	const QVariantList actions {
+		modernDialogAction(QStringLiteral("disableMuteCue"), tr("No"), true, QStringLiteral("danger"), true),
+		modernDialogAction(QStringLiteral("keepMuteCue"), tr("Yes"), true, QStringLiteral("accent"), true)
+	};
+	openModernGenericDialog(modernDialogDto(QStringLiteral("muteCueNotice"), QStringLiteral("warning"),
+										tr("Mute cue"), tr("Voice feedback"), sections, actions,
+										QStringLiteral("keepMuteCue"), QSize(520, 320)));
 }
 
 void MainWindow::showImageDialog() {
