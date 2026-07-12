@@ -57,7 +57,6 @@
 #include <QtCore/QList>
 #include <QtCore/QProcess>
 #include <QtGui/QDesktopServices>
-#include <QtWidgets/QMessageBox>
 #include <QtWidgets/QTextBrowser>
 
 #include <algorithm>
@@ -573,11 +572,7 @@ int main(int argc, char **argv) {
 			counter++;
 		}
 
-#if defined(Q_OS_WIN)
-		QMessageBox::information(nullptr, QObject::tr("Invocation"), infoString);
-#else
 		printf("%s", qUtf8Printable(infoString));
-#endif
 
 		return 0;
 	}
@@ -1047,8 +1042,7 @@ int main(int argc, char **argv) {
 		bool ok = QProcess::startDetached(qApp->applicationFilePath(), arguments);
 #endif
 		if (!ok) {
-			QMessageBox::warning(nullptr, QApplication::tr("Failed to restart mumble"),
-								 QApplication::tr("Mumble failed to restart itself. Please restart it manually."));
+			qWarning() << QApplication::tr("Mumble failed to restart itself. Please restart it manually.");
 			return 1;
 		}
 		return 0;

@@ -10,7 +10,6 @@
 
 #include <QtCore/QDebug>
 #include <QtWidgets/QFileDialog>
-#include <QtWidgets/QMessageBox>
 
 #include <cmath>
 
@@ -212,10 +211,9 @@ QString AudioOutputSample::browseForSndfile(QString defaultpath) {
 	if (!file.isEmpty()) {
 		SoundFile *sf = AudioOutputSample::loadSndfile(file);
 		if (!sf) {
-			QMessageBox::critical(nullptr, tr("Invalid sound file"),
-								  tr("The file '%1' cannot be used by Mumble. Please select a file with a compatible "
-									 "format and encoding.")
-									  .arg(file.toHtmlEscaped()));
+			qWarning().noquote() << tr("The file '%1' cannot be used by Mumble. Please select a file with a compatible "
+										 "format and encoding.")
+									 .arg(file);
 			return QString();
 		}
 		delete sf;

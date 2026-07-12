@@ -15,7 +15,6 @@
 #include <QtGui/QImageReader>
 #include <QtGui/QPainter>
 #include <QtWidgets/QColorDialog>
-#include <QtWidgets/QMessageBox>
 #include <QtWidgets/QToolTip>
 
 #ifdef Q_OS_WIN

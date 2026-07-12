@@ -23,7 +23,6 @@
 #include <QtCore/QBuffer>
 #include <QtCore/QMimeData>
 #include <QtGui/QImageReader>
-#include <QtWidgets/QMessageBox>
 
 namespace {
 	QString navigatorInitials(const QString &name) {
@@ -1848,16 +1847,11 @@ bool UserModel::dropMimeData(const QMimeData *md, Qt::DropAction, int row, int c
 
 	if (!isChannel) {
 		// User dropped somewhere
-		int ret;
 		switch (Global::get().s.ceUserDrag) {
 			case Settings::Ask:
-				ret = QMessageBox::question(Global::get().mw, QLatin1String("Mumble"),
-											tr("Are you sure you want to drag this user?"), QMessageBox::Yes,
-											QMessageBox::No);
-
-				if (ret == QMessageBox::No)
-					return false;
-				break;
+				Global::get().l->log(Log::Information,
+									 tr("User movement requires confirmation in the active client interface."));
+				return false;
 			case Settings::DoNothing:
 				Global::get().l->log(
 					Log::Information,
@@ -1873,16 +1867,11 @@ bool UserModel::dropMimeData(const QMimeData *md, Qt::DropAction, int row, int c
 		Global::get().sh->sendMessage(mpus);
 	} else if (c->iId != static_cast< unsigned int >(iId)) {
 		// Channel dropped somewhere (not on itself)
-		int ret;
 		switch (Global::get().s.ceChannelDrag) {
 			case Settings::Ask:
-				ret = QMessageBox::question(Global::get().mw, QLatin1String("Mumble"),
-											tr("Are you sure you want to drag this channel?"), QMessageBox::Yes,
-											QMessageBox::No);
-
-				if (ret == QMessageBox::No)
-					return false;
-				break;
+				Global::get().l->log(Log::Information,
+									 tr("Channel movement requires confirmation in the active client interface."));
+				return false;
 			case Settings::DoNothing:
 				Global::get().l->log(
 					Log::Information,
@@ -1982,9 +1971,8 @@ bool UserModel::dropMimeData(const QMimeData *md, Qt::DropAction, int row, int c
 					} else {
 						// Not enough space, other channels have to be moved
 						if (static_cast< long long >(pi->channelAt(ilast)->iPosition) + 40 > INT_MAX) {
-							QMessageBox::critical(Global::get().mw, QLatin1String("Mumble"),
-												  tr("Cannot perform this movement automatically, please reset the "
-													 "numeric sorting indicators or adjust it manually."));
+							qWarning() << tr("Cannot perform this movement automatically; reset the numeric sorting "
+												 "indicators or adjust it manually.");
 							return false;
 						}
 						for (int i = row; i <= ilast; i++) {
@@ -2003,9 +1991,8 @@ bool UserModel::dropMimeData(const QMimeData *md, Qt::DropAction, int row, int c
 		}
 
 		if (inewpos > INT_MAX || inewpos < INT_MIN) {
-			QMessageBox::critical(Global::get().mw, QLatin1String("Mumble"),
-								  tr("Cannot perform this movement automatically, please reset the numeric sorting "
-									 "indicators or adjust it manually."));
+			qWarning() << tr("Cannot perform this movement automatically; reset the numeric sorting indicators or "
+								 "adjust it manually.");
 			return false;
 		}
 
