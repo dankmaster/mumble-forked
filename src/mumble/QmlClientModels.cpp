@@ -529,6 +529,21 @@ void MediaSessionBackend::reportError(const QString &message) {
 	emit stateChanged();
 }
 
+void MediaSessionBackend::applyRemoteState(const QUrl &url, const QString &provider, const QString &sessionId,
+										   const double position, const bool paused, const qulonglong generation) {
+	if (generation != 0 && generation < m_syncGeneration) return;
+	const bool sourceChanged = !m_active || m_sessionId != sessionId || m_url != url;
+	if (sourceChanged && !open(url, provider, sessionId)) return;
+	m_syncGeneration = generation == 0 ? m_syncGeneration + 1 : qMax(m_syncGeneration, generation);
+	m_position = qIsFinite(position) ? qMax(0.0, position) : 0.0;
+	m_state = paused ? QStringLiteral("paused") : QStringLiteral("playing");
+	m_error.clear();
+	emit seekRequested(m_position);
+	if (paused) emit pauseRequested();
+	else emit playRequested();
+	emit stateChanged();
+}
+
 QmlSelectionState::QmlSelectionState(QObject *parent) : QObject(parent) {
 }
 

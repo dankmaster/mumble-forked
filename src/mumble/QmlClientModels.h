@@ -276,6 +276,8 @@ public:
 	Q_INVOKABLE void seek(double seconds);
 	Q_INVOKABLE void reportPlaybackState(double position, double duration, bool paused);
 	Q_INVOKABLE void reportError(const QString &message);
+	void applyRemoteState(const QUrl &url, const QString &provider, const QString &sessionId, double position,
+						  bool paused, qulonglong generation);
 
 signals:
 	void stateChanged();

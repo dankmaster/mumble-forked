@@ -22,6 +22,8 @@
 #include "GlobalShortcut.h"
 #include "ChannelListenerManager.h"
 #include "PluginManager.h"
+#include "QmlClientModels.h"
+#include "QmlShellHost.h"
 #include "ProtoUtils.h"
 #include "ScreenShare.h"
 #include "ScreenShareManager.h"
@@ -2026,7 +2028,24 @@ void MainWindow::msgChatReactionState(const MumbleProto::ChatReactionState &msg)
 void MainWindow::msgChatHistoryGrantSync(const MumbleProto::ChatHistoryGrantSync &) {
 }
 
-void MainWindow::msgWatchTogetherSync(const MumbleProto::WatchTogetherSync &) {
+void MainWindow::msgWatchTogetherSync(const MumbleProto::WatchTogetherSync &msg) {
+	if (!m_qmlShellHost || !m_qmlShellHost->window() || !msg.has_session_id()) return;
+
+	MediaSessionBackend *media = m_qmlShellHost->mediaSession();
+	if (!media) return;
+	if (msg.event() == MumbleProto::WatchTogetherEventEnd) {
+		if (media->sessionId() == u8(msg.session_id())) media->close();
+		return;
+	}
+	if (!msg.has_source_url()) return;
+
+	QString provider = QStringLiteral("direct");
+	switch (msg.source_kind()) {
+		case MumbleProto::WatchTogetherSourceYouTube: provider = QStringLiteral("youtube"); break;
+		default: break;
+	}
+	media->applyRemoteState(QUrl(u8(msg.source_url())), provider, u8(msg.session_id()), msg.position_seconds(),
+							msg.paused(), msg.updated_at());
 }
 
 void MainWindow::msgStonksRequest(const MumbleProto::StonksRequest &) {

@@ -276,6 +276,8 @@ void TestQmlClientModels::asyncOperationsExposeProgressAndCancellation() {
 void TestQmlClientModels::mediaSessionValidatesAndPublishesTypedState() {
 	MediaSessionBackend media;
 	QSignalSpy playSpy(&media, &MediaSessionBackend::playRequested);
+	QSignalSpy pauseSpy(&media, &MediaSessionBackend::pauseRequested);
+	QSignalSpy seekSpy(&media, &MediaSessionBackend::seekRequested);
 	QVERIFY(!media.open(QUrl(QStringLiteral("http://example.com/video")), QStringLiteral("direct"),
 						QStringLiteral("room:1")));
 	QCOMPARE(media.state(), QStringLiteral("error"));
@@ -287,6 +289,16 @@ void TestQmlClientModels::mediaSessionValidatesAndPublishesTypedState() {
 	media.reportPlaybackState(12.5, 90.0, false);
 	QCOMPARE(media.state(), QStringLiteral("playing"));
 	QCOMPARE(media.position(), 12.5);
+	media.applyRemoteState(QUrl(QStringLiteral("https://example.com/next")), QStringLiteral("direct"),
+						   QStringLiteral("room:2"), 24.0, true, 42);
+	QCOMPARE(media.sessionId(), QStringLiteral("room:2"));
+	QCOMPARE(media.position(), 24.0);
+	QCOMPARE(media.state(), QStringLiteral("paused"));
+	QCOMPARE(seekSpy.count(), 1);
+	QCOMPARE(pauseSpy.count(), 1);
+	media.applyRemoteState(QUrl(QStringLiteral("https://example.com/stale")), QStringLiteral("direct"),
+						   QStringLiteral("stale"), 1.0, false, 41);
+	QCOMPARE(media.sessionId(), QStringLiteral("room:2"));
 	media.close();
 	QVERIFY(!media.active());
 	QCOMPARE(media.state(), QStringLiteral("idle"));
