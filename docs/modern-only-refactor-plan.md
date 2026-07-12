@@ -1,4 +1,8 @@
-# Modern-Only Refactor Plan (toward 1.0)
+# Archived Web-shell Modern-Only Refactor Plan
+
+> Historical snapshot: this plan describes the retired WebEngine product shell.
+> The active Qt Quick migration and remaining gates are documented in
+> [`modern-client-migration.md`](modern-client-migration.md).
 
 > Handoff plan for a fresh session. Read this top-to-bottom before touching code.
 > The goal is to make the modern web shell the single UI and remove the classic

@@ -1,4 +1,0 @@
-window.__mumbleModernBuildFlags = Object.freeze({
-	automation: @MUMBLE_MODERN_UI_AUTOMATION_JS@,
-	mockups: @MUMBLE_MODERN_UI_MOCKUPS_JS@
-});

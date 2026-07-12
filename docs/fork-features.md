@@ -24,7 +24,7 @@ The fork keeps the normal Mumble foundation:
 
 ## Modern Client Shell
 
-The Modern shell is the visible fork client path. It is a WebEngine-based client
+The Modern shell is the visible fork client path. It is a native Qt Quick client
 surface built around persistent chat, rich media, direct messages, and modern
 dialogs. Classic Qt Widgets UI remains as migration scaffolding and for narrow
 surfaces that have not yet been fully replaced.
@@ -40,7 +40,7 @@ Current capabilities:
 - direct server-log rendering for the Modern timeline path
 - compact message controls for reply/delete actions
 - rich media and provider-specific preview cards
-- playable YouTube/video preview controls when the provider and WebEngine surface support inline playback
+- playable YouTube/video preview controls through a lazy, isolated WebEngineQuick media surface
 - image, GIF, video, product, Steam/game-store, social posts including X/Twitter, GitHub, finance, forum, article, map, place, traffic, and weather card layouts
 - local disk preview cache with selective session refresh for richer providers
 - theme, accent, density, dialog, and context-menu polish for the Modern shell
@@ -356,7 +356,7 @@ Fork-only behavior should be capability-gated:
   baseline voice, channel, ACL, registration/certificate, and basic text
   behavior
 - those clients are not expected to receive full persistent rich chat or screen-share parity
-- WebEngine-enabled fork clients use the Modern shell as the visible layout;
+- fork desktop clients use the Qt Quick Modern shell as the visible layout;
   classic layout is not a user-facing compatibility promise
 
 ## Known Gaps

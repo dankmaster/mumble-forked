@@ -1,6 +1,12 @@
-# Theme Coverage Guide
+# Legacy Web-shell Theme Coverage Guide
 
-Date: 2026-06-05
+Archived: 2026-07-12
+
+This document records the retired HTML/CSS Web-shell theme pipeline. It is not
+the implementation guide for the Qt Quick client. New product UI must use the
+QML design tokens in `src/mumble/qml-shell/Theme.qml`; the remaining CSS-token
+theme importer is compatibility input that must be mapped into typed QML theme
+state before the migration is complete.
 
 Use this guide whenever a settings theme, Modern shell theme, or accent change
 touches visible UI. The goal is that changing a theme in settings recolors the
