@@ -21,13 +21,10 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QMessageBox>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QPalette>
 #include <QProcess>
-#include <QProgressDialog>
-#include <QPushButton>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QStringList>
@@ -683,9 +680,10 @@ public:
 						std::function< void() > cancelledCallback,
 						std::function< void(qint64, qint64) > progressCallback)
 		: QObject(parent ? static_cast< QObject * >(parent) : QCoreApplication::instance())
-		, m_info(info), m_parent(parent), m_updateMode(selectedUpdateMode(info)), m_showProgress(showProgress)
+		, m_info(info), m_updateMode(selectedUpdateMode(info))
 		, m_readyCallback(std::move(readyCallback)), m_failureCallback(std::move(failureCallback))
 		, m_cancelledCallback(std::move(cancelledCallback)), m_progressCallback(std::move(progressCallback)) {
+		Q_UNUSED(showProgress);
 	}
 
 	void start() {
@@ -713,21 +711,6 @@ public:
 			return;
 		}
 
-		if (m_showProgress) {
-			m_progress = new QProgressDialog(VersionCheck::tr("Downloading mumble-forked update..."),
-											 VersionCheck::tr("Cancel"), 0, 0, m_parent);
-			m_progress->setWindowTitle(VersionCheck::tr("Mumble update"));
-			m_progress->setWindowModality(Qt::WindowModal);
-			m_progress->setMinimumDuration(0);
-			connect(m_progress, &QProgressDialog::canceled, this, [this]() {
-				m_cancelled = true;
-				if (m_reply) {
-					m_reply->abort();
-				}
-			});
-			m_progress->show();
-		}
-
 		beginDownload(selectedDownloadUrl(m_info), selectedExpectedSha256(m_info), updateAssetPathForMode(m_info, m_updateMode),
 					  false);
 #endif
@@ -735,7 +718,6 @@ public:
 
 private:
 	QJsonObject m_info;
-	QWidget *m_parent = nullptr;
 	QUrl m_downloadUrl;
 	QString m_expectedSha256;
 	QString m_updateMode;
@@ -744,11 +726,9 @@ private:
 	QString m_fallbackInstallerPath;
 	std::unique_ptr< QSaveFile > m_file;
 	QCryptographicHash m_hash { QCryptographicHash::Sha256 };
-	QProgressDialog *m_progress = nullptr;
 	QNetworkReply *m_reply      = nullptr;
 	QProcess *m_prepareProcess = nullptr;
 	QString m_pendingFailure;
-	bool m_showProgress = true;
 	bool m_cancelled    = false;
 	bool m_downloadingFallbackInstaller = false;
 	int m_redirectCount = 0;
@@ -773,11 +753,6 @@ private:
 			return;
 		}
 
-		if (m_progress && fallbackInstaller) {
-			m_progress->setLabelText(VersionCheck::tr("Downloading verified MSI fallback..."));
-			m_progress->setRange(0, 0);
-		}
-
 		request(m_downloadUrl);
 	}
 
@@ -796,15 +771,6 @@ private:
 		connect(m_reply, &QNetworkReply::downloadProgress, this, [this](qint64 received, qint64 total) {
 			if (m_progressCallback) {
 				m_progressCallback(received, total);
-			}
-			if (!m_progress) {
-				return;
-			}
-			if (total > 0) {
-				m_progress->setRange(0, 1000);
-				m_progress->setValue(static_cast< int >((received * 1000) / total));
-			} else {
-				m_progress->setRange(0, 0);
 			}
 		});
 		connect(m_reply, &QNetworkReply::finished, this, [this]() { replyFinished(); });
@@ -950,11 +916,6 @@ private:
 			return;
 		}
 
-		if (m_progress) {
-			m_progress->setLabelText(VersionCheck::tr("Preparing update package..."));
-			m_progress->setRange(0, 0);
-		}
-
 		const QString packagePath = m_primaryUpdatePath.isEmpty() ? m_targetPath : m_primaryUpdatePath;
 		QStringList arguments = bundledUpdaterArguments(packagePath, updateDir.absolutePath(), true, m_updateMode,
 														m_fallbackInstallerPath, packageExpectedSha256(m_info));
@@ -988,13 +949,10 @@ private:
 	}
 
 	void finishReady() {
-		finishProgress();
 		if (m_readyCallback) {
 			m_readyCallback(m_primaryUpdatePath.isEmpty() ? m_targetPath : m_primaryUpdatePath);
 			deleteLater();
-		} else {
-			promptAndLaunchInstaller();
-		}
+		} else showFailure(VersionCheck::tr("The update frontend did not provide a completion handler."));
 	}
 
 	void cancelDownload() {
@@ -1002,7 +960,6 @@ private:
 			m_file->cancelWriting();
 			m_file.reset();
 		}
-		finishProgress();
 		if (m_cancelledCallback) {
 			m_cancelledCallback();
 		}
@@ -1014,59 +971,11 @@ private:
 			m_file->cancelWriting();
 			m_file.reset();
 		}
-		finishProgress();
 		if (m_failureCallback) {
 			m_failureCallback(message);
 		} else {
-			QMessageBox::warning(m_parent, VersionCheck::tr("Mumble update"), message);
+			qWarning().noquote() << "Mumble update:" << message;
 		}
-		deleteLater();
-	}
-
-	void finishProgress() {
-		if (m_progress) {
-			m_progress->hide();
-			m_progress->deleteLater();
-			m_progress = nullptr;
-		}
-	}
-
-	void promptAndLaunchInstaller() {
-		QMessageBox messageBox(QMessageBox::Question, VersionCheck::tr("Install Mumble update"),
-							   VersionCheck::tr("The update package was downloaded and verified."),
-							   QMessageBox::NoButton, m_parent);
-		const bool hasMsiFallback = m_updateMode == QLatin1String("package")
-									&& canUsePreparedInstallerFallback(m_fallbackInstallerPath);
-		messageBox.setInformativeText(
-			m_updateMode == QLatin1String("package")
-				? (hasMsiFallback
-					   ? VersionCheck::tr("Mumble will close, the updater will apply the package, use the MSI only if the package fails, and Mumble will reopen to restore your server and chat. Continue?")
-					   : VersionCheck::tr("Mumble will close, the updater will apply the package, and Mumble will reopen to restore your server and chat. Continue?"))
-				: VersionCheck::tr("Mumble will close, Windows will run the installer, and Mumble will reopen to restore your server and chat. Continue?"));
-		QPushButton *installButton = messageBox.addButton(VersionCheck::tr("Install update"), QMessageBox::AcceptRole);
-		messageBox.addButton(VersionCheck::tr("Not now"), QMessageBox::RejectRole);
-		messageBox.exec();
-
-		if (messageBox.clickedButton() != installButton) {
-			deleteLater();
-			return;
-		}
-
-		if (Global::get().mw) {
-			Global::get().mw->prepareUpdateResumeState();
-		}
-		if (!VersionCheck::launchPreparedUpdate(m_primaryUpdatePath.isEmpty() ? m_targetPath : m_primaryUpdatePath,
-												m_updateMode, true, true, m_fallbackInstallerPath,
-												m_updateMode == QLatin1String("package") ? packageExpectedSha256(m_info)
-																						 : QString())) {
-			if (Global::get().mw) {
-				Global::get().mw->clearPendingUpdateResumeState();
-			}
-			showFailure(VersionCheck::tr("Mumble could not launch the update package."));
-			return;
-		}
-
-		QTimer::singleShot(0, []() { QCoreApplication::quit(); });
 		deleteLater();
 	}
 };
@@ -1101,13 +1010,13 @@ void VersionCheck::installUpdateFromInfo(const QJsonObject &info, QWidget *paren
 		if (installerUrl.isValid()) {
 			QDesktopServices::openUrl(installerUrl);
 		} else {
-			QMessageBox::warning(parent, tr("Mumble update"),
-								 tr("This update does not include an installer that Mumble can open."));
+			qWarning() << "The update does not include an installer that Mumble can open.";
 		}
 		return;
 	}
 
-	downloadUpdateFromInfo(info, parent, true);
+	qWarning() << "Automatic update installation requires the Modern update controller.";
+	Q_UNUSED(parent);
 }
 
 void VersionCheck::downloadUpdateFromInfo(const QJsonObject &info, QWidget *parent, const bool showProgress,
@@ -1118,6 +1027,10 @@ void VersionCheck::downloadUpdateFromInfo(const QJsonObject &info, QWidget *pare
 	const bool wouldUseNativeUi = showProgress || !readyCallback || !failureCallback;
 	if (wouldUseNativeUi && Global::get().mw && Global::get().mw->startModernForkUpdateDownload(info)) {
 		Q_UNUSED(parent);
+		return;
+	}
+	if (!readyCallback || !failureCallback) {
+		qWarning() << "Update download requires typed completion and failure callbacks.";
 		return;
 	}
 
@@ -1385,76 +1298,7 @@ void VersionCheck::finishWithInfo(const QJsonObject &info) {
 		return;
 	}
 
-	if (Global::get().mw && Global::get().mw->handleModernVersionCheckResult(info, updateAvailable, m_autocheck)) {
-		deleteLater();
-		return;
-	}
-
-	if (updateAvailable) {
-		if (Global::get().mw && Global::get().mw->notifyForkUpdateAvailable(info, m_autocheck)) {
-			deleteLater();
-			return;
-		}
-
-		const QUrl installerUrl = installerDownloadUrl(info);
-		const QUrl releaseUrl   = jsonUrl(info, QStringLiteral("releaseUrl"));
-		const QUrl openUrl      = installerUrl.isValid() ? installerUrl : releaseUrl;
-
-		QMessageBox messageBox(QMessageBox::Information, tr("Mumble update available"),
-							   tr("A new mumble-forked build is available."), QMessageBox::NoButton,
-							   Global::get().mw);
-		messageBox.setTextFormat(Qt::PlainText);
-		messageBox.setInformativeText(
-			tr("%1\n\nCurrent: %2, build %3\nLatest: %4")
-				.arg(announcementText(info))
-				.arg(Version::getRelease())
-				.arg(Version::getPatch(Version::get()))
-				.arg(latestLabel(info)));
-
-		QString details;
-		const QString releaseNotes = releaseNotesText(info);
-		if (!releaseNotes.isEmpty()) {
-			details += tr("Release notes:\n%1\n\n").arg(releaseNotes);
-		}
-		const QString commit = info.value(QStringLiteral("commit")).toString().trimmed();
-		if (!commit.isEmpty()) {
-			details += tr("Commit: %1\n").arg(commit);
-		}
-		const QString sha256 = selectedExpectedSha256(info);
-		if (!sha256.isEmpty()) {
-			details += tr("SHA256: %1\n").arg(sha256);
-		}
-		if (releaseUrl.isValid()) {
-			details += tr("Release: %1\n").arg(releaseUrl.toString());
-		}
-		if (!details.isEmpty()) {
-			messageBox.setDetailedText(details.trimmed());
-		}
-
-		QPushButton *installButton = nullptr;
-		QPushButton *openButton    = nullptr;
-		if (canInstallUpdate(info)) {
-			installButton = messageBox.addButton(tr("Install update"), QMessageBox::AcceptRole);
-			if (openUrl.isValid()) {
-				openButton = messageBox.addButton(tr("Open download"), QMessageBox::ActionRole);
-			}
-		} else if (openUrl.isValid()) {
-			openButton = messageBox.addButton(tr("Open download"), QMessageBox::AcceptRole);
-		}
-		messageBox.addButton(tr("Not now"), QMessageBox::RejectRole);
-		messageBox.exec();
-
-		if (installButton && messageBox.clickedButton() == installButton) {
-			installUpdateFromInfo(info, Global::get().mw);
-		} else if (openButton && messageBox.clickedButton() == openButton) {
-			QDesktopServices::openUrl(openUrl);
-		}
-	} else if (!m_autocheck && Global::get().mw) {
-		Global::get().mw->msgBox(
-			tr("You're on the latest mumble-forked build (%1, build %2).")
-				.arg(Version::getRelease())
-				.arg(Version::getPatch(Version::get())));
-	}
+	if (Global::get().mw) Global::get().mw->handleModernVersionCheckResult(info, updateAvailable, m_autocheck);
 
 	deleteLater();
 }
