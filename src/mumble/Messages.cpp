@@ -7,7 +7,6 @@
 /// Further details on what exactly is contained in the "message objects" that are parameters to all functions
 /// in this file, can be found in the src/Mumble.proto file.
 
-#include "About.h"
 #include "AudioInput.h"
 #include "Channel.h"
 #include "ChatFeature.h"

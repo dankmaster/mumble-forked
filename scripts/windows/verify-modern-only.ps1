@@ -32,6 +32,9 @@ $checks = [ordered]@{
 	legacy_snapshot_bridge = Find-Matches @('-n', 'buildModernShellSnapshot|queueModernShellSnapshot|ModernShellSnapshotSync|modernShellSnapshot', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h')
 	legacy_patch_bridge_symbols = Find-Matches @('-n', 'buildModernShellRoomStatePatch|publishModernShellMessagesPatch|publishModernShellRoomStatePatch|m_modernShell[A-Za-z0-9_]*Patch', 'src/mumble/MainWindow.cpp', 'src/mumble/MainWindow.h')
 	hidden_product_widget_construction = Find-Matches @('-n', 'new (UserView|LogTextBrowser|ChatbarTextEdit|PersistentChatMessageGroupWidget|ResponsiveImageDialog|RichTextEditor)', 'src/mumble', '--glob', '*.cpp')
+	native_product_dialog_fallbacks = Find-Matches @('-n', 'QDialog dialog\(this\)|AboutDialog adAbout|class AboutDialog|new AboutDialog|ServerNavigatorUserMenuPopup', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h')
+	legacy_product_widget_types = Find-Matches @('-n', 'class (PersistentChatListWidget|ExternalScreenShareWindowHost|RichTextEditor|ResponsiveImageDialog)', 'src/mumble', '--glob', '*.h')
+	legacy_mainwindow_product_state = Find-Matches @('-n', 'm_persistentChat(History|Composer|ConversationPanel|LogPanel|ChannelList)', 'src/mumble/MainWindow.cpp', 'src/mumble/MainWindow.h')
 	legacy_web_product_resources = @(Get-ChildItem (Join-Path $repoRoot 'src\mumble\modern-shell') -File -ErrorAction SilentlyContinue |
 		Where-Object { $_.Extension -in @('.html', '.css', '.js') } |
 		ForEach-Object FullName)

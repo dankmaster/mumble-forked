@@ -257,8 +257,6 @@ public:
 	void updateServerNavigatorChrome();
 	void syncServerNavigatorUserMenu();
 	void positionServerNavigatorUserMenu();
-	void toggleServerNavigatorUserMenu();
-	void closeServerNavigatorUserMenu();
 	void refreshCustomChromeStyles();
 	void syncPersistentChatGatewayHandler();
 	void warmupPersistentChatHistory();
@@ -799,11 +797,9 @@ protected:
 	QLabel *m_serverNavigatorTextChannelsMotdBody              = nullptr;
 	QToolButton *m_serverNavigatorTextChannelsMotdToggleButton = nullptr;
 	QLabel *m_serverNavigatorFooter                            = nullptr;
-	QPushButton *m_serverNavigatorFooterPresenceButton         = nullptr;
 	QLabel *m_serverNavigatorFooterAvatar                      = nullptr;
 	QLabel *m_serverNavigatorFooterName                        = nullptr;
 	QLabel *m_serverNavigatorFooterPresence                    = nullptr;
-	QPointer< QWidget > m_serverNavigatorUserMenuPopup;
 	QWidget *m_persistentChatContainer                             = nullptr;
 	QWidget *m_persistentChatComposerInputRow                      = nullptr;
 	QFrame *m_persistentChatHeaderFrame                            = nullptr;
@@ -1156,7 +1152,6 @@ public slots:
 	void watchChannelScreenShare();
 	void stopWatchingChannelScreenShare();
 	void openChannelScreenShareWindow();
-	bool chooseScreenShareStartOptions(Channel *channel, ScreenShareStartOptions *options);
 	void openModernScreenShareDialog(Channel *channel);
 	QVariantMap buildModernScreenShareState(Channel *channel);
 	QVariantMap buildModernScreenShareDialogDto(Channel *channel);

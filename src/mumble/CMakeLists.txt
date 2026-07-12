@@ -136,8 +136,6 @@ else()
 endif()
 
 set(MUMBLE_SOURCES
-	"About.cpp"
-	"About.h"
 	"Accessibility.cpp"
 	"Accessibility.h"
 	"API_v_1_x_x.cpp"
