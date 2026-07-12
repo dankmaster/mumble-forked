@@ -464,12 +464,6 @@ public:
 	bool applyPersistentChatRemoteAudioMedia(PersistentChatPreview &preview, const QUrl &audioUrl,
 											 const QString &suggestedMime = QString());
 	void applyPersistentChatListingMediaItems(PersistentChatPreview &preview);
-	void handlePersistentChatPreviewSiteSnapshotResult(
-		const QString &previewKey, const QImage &image, bool success, const QString &mediaUrl = QString(),
-		const QString &mediaMime = QString(), const QString &mediaAudioUrl = QString(),
-		const QString &mediaAudioMime = QString(), const QVariantList &mediaItems = QVariantList(),
-		const QString &posterUrl = QString(), const QString &posterMime = QString(),
-		const QString &avatarUrl = QString());
 	void publishPersistentChatPreviewUpdate(const QString &previewKey);
 	int persistentChatPreviewContentWidth(int leftPadding) const;
 	QString persistentChatPreviewHtml(const QString &previewKey, int availableWidth) const;
@@ -952,7 +946,6 @@ protected:
 	bool m_modernShortcutCaptureRestoreEnabled = false;
 	bool m_modernShortcutCaptureHasRestore     = false;
 	std::unique_ptr< ModernConnectPingState > m_modernConnectPingState;
-	QObject *m_persistentChatPreviewSnapshotRenderer       = nullptr;
 	quint64 m_modernShellPatchRevision                     = 0;
 	quint64 m_modernShellMessagePatchGeneration            = 0;
 	quint64 m_modernShellMessageDtoContextRevision         = 1;

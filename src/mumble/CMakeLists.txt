@@ -120,7 +120,6 @@ find_pkg(Qt6
 		QuickControls2
 		QuickDialogs2
 		WebEngineQuick
-		WebEngineWidgets
 	REQUIRED
 )
 
@@ -640,12 +639,10 @@ endif()
 target_link_libraries(mumble_client_object_lib
 	PUBLIC
 		Qt6::WebEngineQuick
-		Qt6::WebEngineWidgets
 )
 target_link_libraries(mumble
 	PRIVATE
 		Qt6::WebEngineQuick
-		Qt6::WebEngineWidgets
 )
 
 if(chat-perf-trace)

@@ -55,7 +55,6 @@ shared_environment_has_webengine_runtime() {
 
 	[[ -f "$MUMBLE_ENVIRONMENT_DIR/vcpkg.exe" ]] \
 		&& [[ -f "$MUMBLE_ENVIRONMENT_DIR/scripts/buildsystems/vcpkg.cmake" ]] \
-		&& [[ -d "$triplet_dir/share/Qt6WebEngineWidgets" ]] \
 		&& [[ -f "$webengine_targets_file" ]] \
 		&& shared_environment_has_webengine_required_features "$webengine_targets_file" \
 		&& [[ -f "$triplet_dir/tools/Qt6/bin/windeployqt.exe" ]] \
