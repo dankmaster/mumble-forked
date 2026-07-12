@@ -13343,12 +13343,7 @@ MainWindow::MainWindow(QWidget *p)
 	m_userCommentRequestTimer->setObjectName(QLatin1String("UserCommentRequest"));
 	connect(m_userCommentRequestTimer, &QTimer::timeout, this, &MainWindow::flushUserCommentRequests);
 
-	const bool qmlShellRequested = true;
-	qmUser     = qmlShellRequested ? nullptr : new QMenu(tr("&User"), this);
-	qmChannel  = qmlShellRequested ? nullptr : new QMenu(tr("&Channel"), this);
-	qmListener = qmlShellRequested ? nullptr : new QMenu(tr("&Listener"), this);
-
-	qmDeveloper = qmlShellRequested ? nullptr : new QMenu(tr("&Developer"), this);
+	qmUser = qmChannel = qmListener = qmDeveloper = nullptr;
 
 	qaEmpty = new QAction(tr("No action available..."), this);
 	qaEmpty->setEnabled(false);
@@ -13404,15 +13399,6 @@ MainWindow::MainWindow(QWidget *p)
 		m_clientActionRegistry->adopt(action);
 	}
 	setupGui();
-	if (!qmlShellRequested) {
-		connect(qmUser, SIGNAL(aboutToShow()), this, SLOT(qmUser_aboutToShow()));
-		connect(qmChannel, SIGNAL(aboutToShow()), this, SLOT(qmChannel_aboutToShow()));
-		connect(qmListener, SIGNAL(aboutToShow()), this, SLOT(qmListener_aboutToShow()));
-		connect(qteChat, SIGNAL(entered(QString)), this, SLOT(sendChatbarText(QString)));
-		connect(qteChat, &ChatbarTextEdit::ctrlEnterPressed,
-				[this](const QString &msg) { sendChatbarText(msg, true); });
-		connect(qteChat, SIGNAL(pastedImage(QString)), this, SLOT(sendChatbarMessage(QString)));
-	}
 #ifdef Q_OS_MACOS
 	// Use default preferences icon in the macOS menu bar
 	qaConfigDialog->setIconVisibleInMenu(false);
@@ -13425,16 +13411,6 @@ MainWindow::MainWindow(QWidget *p)
 	// Explicitly add actions to mainwindow so their shortcuts are available
 	// if only the main window is visible (e.g. Global::get(). minimal mode)
 	addActions(findChildren< QAction * >());
-
-	if (!qmlShellRequested) on_qmServer_aboutToShow();
-	on_qmSelf_aboutToShow();
-	if (!qmlShellRequested) {
-		qmChannel_aboutToShow();
-		qmUser_aboutToShow();
-		on_qmConfig_aboutToShow();
-	}
-
-	if (qmDeveloper) qmDeveloper->addAction(qaDeveloperConsole);
 
 	setOnTop(Global::get().s.aotbAlwaysOnTop == Settings::OnTopAlways
 			 || (Global::get().s.bMinimalView && Global::get().s.aotbAlwaysOnTop == Settings::OnTopInMinimal)
@@ -14397,28 +14373,8 @@ void MainWindow::createActions() {
 }
 
 void MainWindow::setupGui() {
-	const bool qmlShellRequested = true;
 	updateWindowTitle();
-	if (!qmlShellRequested) {
-		setupServerNavigator();
-		setCentralWidget(m_serverNavigatorContainer);
-	}
 	setAcceptDrops(true);
-
-#ifdef Q_OS_MAC
-	QMenu *qmWindow = new QMenu(tr("&Window"), this);
-	menubar->insertMenu(qmHelp->menuAction(), qmWindow);
-#	if QT_VERSION >= QT_VERSION_CHECK(6, 4, 0)
-	qmWindow->addAction(tr("Minimize"), QKeySequence(tr("Ctrl+M")), this, &MainWindow::showMinimized);
-#	else
-	qmWindow->addAction(tr("Minimize"), this, SLOT(showMinimized()), QKeySequence(tr("Ctrl+M")));
-#	endif
-
-	qtvUsers->setAttribute(Qt::WA_MacShowFocusRect, false);
-	qteChat->setAttribute(Qt::WA_MacShowFocusRect, false);
-	qteChat->setFrameShape(QFrame::NoFrame);
-	qteLog->setFrameStyle(QFrame::NoFrame);
-#endif
 
 	m_modernServerLogDocument = new LogDocument(this);
 	m_modernServerLogDocument->setDocumentMargin(0);
@@ -14433,9 +14389,6 @@ void MainWindow::setupGui() {
 	setServerLogMaximumBlockCount(Global::get().s.iMaxLogBlocks);
 
 	pmModel = new UserModel(this);
-	// The compatibility navigator still observes the model until its remaining
-	// paint/update hooks are removed. Selection and targeting no longer read it.
-	if (qtvUsers) qtvUsers->setModel(pmModel);
 
 	QObject::connect(this, &MainWindow::userAddedChannelListener, pmModel, &UserModel::addChannelListener);
 	QObject::connect(
@@ -14530,21 +14483,6 @@ void MainWindow::setupGui() {
 	connect(gsUnlink, SIGNAL(down(QVariant)), qaAudioUnlink, SLOT(trigger()));
 	connect(gsMinimal, SIGNAL(down(QVariant)), qaConfigMinimal, SLOT(trigger()));
 
-	if (!qmlShellRequested) {
-		dtbChatDockTitle = new DockTitleBar();
-		qdwChat->setTitleBarWidget(dtbChatDockTitle);
-		dtbChatDockTitle->setMinimumHeight(0);
-		dtbChatDockTitle->setMaximumHeight(0);
-		qdwChat->installEventFilter(dtbChatDockTitle);
-		setupPersistentChatDock();
-		refreshTextDocumentStylesheets();
-		qteChat->setDefaultText(tr("<center>Not connected</center>"), true);
-		qteChat->setEnabled(false);
-
-		QWidget *dummyTitlebar = new QWidget(qdwMinimalViewNote);
-		qdwMinimalViewNote->setTitleBarWidget(dummyTitlebar);
-	}
-
 	m_modernShellSyncTimer = new QTimer(this);
 	m_modernShellSyncTimer->setSingleShot(true);
 	m_modernShellSyncTimer->setTimerType(Qt::PreciseTimer);
@@ -14568,50 +14506,7 @@ void MainWindow::setupGui() {
 	});
 
 	applyShellLayout();
-	if (qmlShellRequested) {
-		queueModernShellSnapshotSync();
-		return;
-	}
-	setShowDockTitleBars((Settings::LayoutModern == Settings::LayoutCustom) && !Global::get().s.bLockLayout);
-
-#ifdef Q_OS_MAC
-	// Workaround for QTBUG-3116 -- using a unified toolbar on Mac OS X
-	// and using restoreGeometry before the window has updated its frameStrut
-	// causes the MainWindow to jump around on screen on launch.  Workaround
-	// is to call show() to update the frameStrut and set the windowOpacity to
-	// 0 to hide any graphical glitches that occur when we add stuff to the
-	// window.
-	setWindowOpacity(0.0f);
-	show();
-#endif
-
-	// QtCreator and uic.exe do not allow adding arbitrary widgets
-	// such as a MUComboBox to a QToolbar, even though they are supported.
-	qcbTransmitMode = new MUComboBox(qtIconToolbar);
-	qcbTransmitMode->setObjectName(QLatin1String("qcbTransmitMode"));
-	qcbTransmitMode->addItem(tr("Continuous"));
-	qcbTransmitMode->addItem(tr("Voice Activity"));
-	qcbTransmitMode->addItem(tr("Push-to-Talk"));
-
-	qaTransmitModeSeparator = qtIconToolbar->insertSeparator(qaConfigDialog);
-	qaTransmitMode          = qtIconToolbar->insertWidget(qaTransmitModeSeparator, qcbTransmitMode);
-
-	connect(qcbTransmitMode, SIGNAL(activated(int)), this, SLOT(qcbTransmitMode_activated(int)));
-
-	updateTransmitModeComboBox(Global::get().s.atTransmit);
-
-#ifdef Q_OS_WIN
-	setupView(false);
-#endif
-
-	loadState(Global::get().s.bMinimalView);
-
-	setupView(false);
 	queueModernShellSnapshotSync();
-
-#ifdef Q_OS_MAC
-	setWindowOpacity(1.0f);
-#endif
 }
 
 void MainWindow::setupServerNavigator() {
