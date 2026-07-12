@@ -123,14 +123,24 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	UiCommandController commands;
 	QSignalSpy scopeSpy(&commands, &UiCommandController::scopeSelectionRequested);
 	QSignalSpy actionSpy(&commands, &UiCommandController::actionRequested);
+	QSignalSpy participantSpy(&commands, &UiCommandController::participantSelectionRequested);
+	QSignalSpy directMessageSpy(&commands, &UiCommandController::directMessageOpenRequested);
 	commands.selectScope(QStringLiteral("   "));
 	commands.invokeAction(QString());
+	commands.selectParticipant(QStringLiteral("  "));
+	commands.openDirectMessage(QString());
 	QCOMPARE(scopeSpy.count(), 0);
 	QCOMPARE(actionSpy.count(), 0);
+	QCOMPARE(participantSpy.count(), 0);
+	QCOMPARE(directMessageSpy.count(), 0);
 	commands.selectScope(QStringLiteral(" channel:42 "));
 	commands.invokeAction(QStringLiteral(" qaAudioMute "));
+	commands.selectParticipant(QStringLiteral(" 42 "));
+	commands.openDirectMessage(QStringLiteral(" 7 "));
 	QCOMPARE(scopeSpy.takeFirst().at(0).toString(), QStringLiteral("channel:42"));
 	QCOMPARE(actionSpy.takeFirst().at(0).toString(), QStringLiteral("qaAudioMute"));
+	QCOMPARE(participantSpy.takeFirst().at(0).toString(), QStringLiteral("42"));
+	QCOMPARE(directMessageSpy.takeFirst().at(0).toString(), QStringLiteral("7"));
 }
 
 void TestQmlClientModels::pttStateIsIdempotentAndReleases() {

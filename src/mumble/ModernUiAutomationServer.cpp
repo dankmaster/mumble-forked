@@ -3471,6 +3471,23 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		return response;
 	}
 
+	if (command == QLatin1String("selectParticipant") || command == QLatin1String("openDirectMessage")) {
+		bool validSession = false;
+		const unsigned int session = request.value(QStringLiteral("sessionId")).toString().toUInt(&validSession);
+		if (!validSession || session == 0) return errorResponse(tr("Missing or invalid sessionId."));
+		const bool openConversation = command == QLatin1String("openDirectMessage");
+		if (async) {
+			scheduleAction([session, openConversation](MainWindow *window) {
+				window->handleModernShellParticipantSelection(session, openConversation);
+			});
+			return asyncResponse();
+		}
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("handled"),
+						m_mainWindow->handleModernShellParticipantSelection(session, openConversation));
+		return response;
+	}
+
 	if (command == QLatin1String("invokeAppAction")) {
 		const QString actionID = request.value(QStringLiteral("actionId")).toString().trimmed();
 		if (actionID.isEmpty()) {

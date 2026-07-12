@@ -245,6 +245,12 @@ void UiCommandController::selectScope(const QString &scopeToken) {
 void UiCommandController::joinVoiceChannel(const QString &scopeToken) {
 	if (!scopeToken.trimmed().isEmpty()) emit voiceJoinRequested(scopeToken.trimmed());
 }
+void UiCommandController::selectParticipant(const QString &sessionId) {
+	if (!sessionId.trimmed().isEmpty()) emit participantSelectionRequested(sessionId.trimmed());
+}
+void UiCommandController::openDirectMessage(const QString &sessionId) {
+	if (!sessionId.trimmed().isEmpty()) emit directMessageOpenRequested(sessionId.trimmed());
+}
 void UiCommandController::sendMessage(const QString &message) {
 	if (!message.trimmed().isEmpty()) emit messageSendRequested(message);
 }

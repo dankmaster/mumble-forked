@@ -621,6 +621,7 @@ public:
 	bool handleModernShellScopeSelection(const QString &scopeToken);
 	bool handleModernShellScopeRailSelection(const QString &scopeToken, const QString &railKind);
 	bool handleModernShellVoiceJoin(const QString &scopeToken);
+	bool handleModernShellParticipantSelection(unsigned int session, bool openConversation);
 	bool handleModernShellScopeAction(const QString &scopeToken, const QString &actionId);
 	bool handleModernShellScopeActionValueChanged(const QString &scopeToken, const QString &actionId, int value,
 												  bool final);

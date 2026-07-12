@@ -13986,23 +13986,24 @@ void MainWindow::applyShellLayout() {
 		if (!m_qmlShellHost) {
 			m_qmlShellHost = std::make_unique< QmlShellHost >(m_clientActionRegistry.get(), this);
 			UiCommandController *commands = m_qmlShellHost->commandController();
-			connect(commands, &UiCommandController::scopeSelectionRequested, this, [this](const QString &scopeToken) {
-				int scopeValue = 0;
-				unsigned int scopeID = 0;
-				if (parseModernShellScopeToken(scopeToken, scopeValue, scopeID)) {
-					navigateToPersistentChatScope(static_cast< MumbleProto::ChatScope >(scopeValue), scopeID);
-				}
-			});
-			connect(commands, &UiCommandController::voiceJoinRequested, this, [this](const QString &scopeToken) {
-				int scopeValue = 0;
-				unsigned int scopeID = 0;
-				if (parseModernShellScopeToken(scopeToken, scopeValue, scopeID)
-					&& scopeValue == static_cast< int >(MumbleProto::Channel) && Global::get().sh) {
-					Global::get().sh->joinChannel(Global::get().uiSession, scopeID);
-				}
-			});
+			connect(commands, &UiCommandController::scopeSelectionRequested, this,
+					[this](const QString &scopeToken) { handleModernShellScopeSelection(scopeToken); });
+			connect(commands, &UiCommandController::voiceJoinRequested, this,
+					[this](const QString &scopeToken) { handleModernShellVoiceJoin(scopeToken); });
+			connect(commands, &UiCommandController::participantSelectionRequested, this,
+					[this](const QString &sessionID) {
+						bool validSession = false;
+						const unsigned int session = sessionID.toUInt(&validSession);
+						if (validSession) handleModernShellParticipantSelection(session, false);
+					});
+			connect(commands, &UiCommandController::directMessageOpenRequested, this,
+					[this](const QString &sessionID) {
+						bool validSession = false;
+						const unsigned int session = sessionID.toUInt(&validSession);
+						if (validSession) handleModernShellParticipantSelection(session, true);
+					});
 			connect(commands, &UiCommandController::messageSendRequested, this,
-					[this](const QString &message) { sendChatbarText(message); });
+					[this](const QString &message) { sendModernShellMessage(message); });
 			connect(commands, &UiCommandController::actionRequested, this, [this](const QString &actionID) {
 				if (QAction *action = m_clientActionRegistry->action(actionID); action && action->isEnabled()) {
 					action->trigger();
@@ -30640,6 +30641,20 @@ Channel *MainWindow::selectedVoiceTreeChannel() const {
 		}
 	}
 	return currentVoiceChannel();
+}
+
+bool MainWindow::handleModernShellParticipantSelection(const unsigned int session, const bool openConversation) {
+	ClientUser *user = ClientUser::get(session);
+	if (!user) return false;
+
+	m_modernSelectionState.selectedUserSession = session;
+	if (user->cChannel) m_modernSelectionState.selectedVoiceChannelID = user->cChannel->iId;
+	if (m_qmlShellHost) {
+		m_qmlShellHost->selectionState()->setSelectedUserSession(session);
+		m_qmlShellHost->selectionState()->setSelectedVoiceChannelId(
+			user->cChannel ? QVariant::fromValue(user->cChannel->iId) : QVariant());
+	}
+	return !openConversation || openModernDirectMessage(session, true);
 }
 
 void MainWindow::ensureModernUiAutomationServer() {

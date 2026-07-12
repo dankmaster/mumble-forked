@@ -132,6 +132,11 @@ QVariantMap QmlShellHost::stateSnapshot() const {
 	activeScope.insert(QStringLiteral("composerHint"), m_activeScopeController->composerHint());
 	activeScope.insert(QStringLiteral("canSend"), m_activeScopeController->canSend());
 	snapshot.insert(QStringLiteral("activeScope"), activeScope);
+	QVariantMap selection;
+	selection.insert(QStringLiteral("scopeToken"), m_selectionState->scopeToken());
+	selection.insert(QStringLiteral("selectedUserSession"), m_selectionState->selectedUserSession());
+	selection.insert(QStringLiteral("selectedVoiceChannelId"), m_selectionState->selectedVoiceChannelId());
+	snapshot.insert(QStringLiteral("selection"), selection);
 
 	QVariantList voiceRooms;
 	QVariantList textRooms;

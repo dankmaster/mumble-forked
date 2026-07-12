@@ -213,6 +213,8 @@ public:
 
 	Q_INVOKABLE void selectScope(const QString &scopeToken);
 	Q_INVOKABLE void joinVoiceChannel(const QString &scopeToken);
+	Q_INVOKABLE void selectParticipant(const QString &sessionId);
+	Q_INVOKABLE void openDirectMessage(const QString &sessionId);
 	Q_INVOKABLE void sendMessage(const QString &message);
 	Q_INVOKABLE void invokeAction(const QString &actionId);
 	Q_INVOKABLE void toggleSelfMute();
@@ -224,6 +226,8 @@ public:
 signals:
 	void scopeSelectionRequested(const QString &scopeToken);
 	void voiceJoinRequested(const QString &scopeToken);
+	void participantSelectionRequested(const QString &sessionId);
+	void directMessageOpenRequested(const QString &sessionId);
 	void messageSendRequested(const QString &message);
 	void actionRequested(const QString &actionId);
 	void selfMuteToggleRequested();

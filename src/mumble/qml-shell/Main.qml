@@ -175,7 +175,7 @@ ApplicationWindow {
                             Label { text: clientSession.connectionLabel; color: clientSession.connected ? Theme.accent : Theme.textMuted; font.pixelSize: 11 }
                         }
                     }
-                    Label { Layout.margins: 18; text: "VOICE ROOMS"; color: Theme.textMuted; font.pixelSize: 10; font.bold: true }
+                    Label { Layout.margins: 18; text: qsTr("ROOMS"); color: Theme.textMuted; font.pixelSize: 10; font.bold: true }
                     ListView {
                         id: rooms
                         Layout.fillWidth: true
@@ -256,12 +256,17 @@ ApplicationWindow {
                         leftMargin: 10
                         rightMargin: 10
                         delegate: Rectangle {
+                            required property string stableId
                             required property string title
                             required property string subtitle
                             required property string status
                             width: participants.width - 20
                             height: 42
-                            color: "transparent"
+                            radius: 8
+                            color: selectionState.selectedUserSession !== undefined
+                                   && String(selectionState.selectedUserSession) === stableId
+                                   ? Theme.selected
+                                   : participantMouse.containsMouse ? Theme.panel : "transparent"
                             Rectangle {
                                 id: presenceDot
                                 anchors.left: parent.left
@@ -278,6 +283,13 @@ ApplicationWindow {
                                 anchors.verticalCenter: parent.verticalCenter
                                 Label { width: parent.width; text: title; color: Theme.textStrong; font.pixelSize: 11; elide: Text.ElideRight }
                                 Label { width: parent.width; text: subtitle; color: Theme.textMuted; font.pixelSize: 9; elide: Text.ElideRight; visible: subtitle.length > 0 }
+                            }
+                            MouseArea {
+                                id: participantMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: uiCommands.selectParticipant(stableId)
+                                onDoubleClicked: uiCommands.openDirectMessage(stableId)
                             }
                         }
                     }
