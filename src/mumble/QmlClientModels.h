@@ -219,6 +219,8 @@ public:
 	QVariantList sections() const;
 	QVariantList actions() const;
 	QVariantMap state() const;
+	Q_INVOKABLE QVariant fieldValue(const QString &fieldId) const;
+	Q_INVOKABLE QString fieldError(const QString &fieldId) const;
 	void applyState(const QVariantMap &state);
 
 	Q_INVOKABLE void updateField(const QString &fieldId, const QVariant &value);

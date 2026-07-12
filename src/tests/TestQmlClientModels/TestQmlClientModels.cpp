@@ -224,10 +224,19 @@ void TestQmlClientModels::dialogStateRoutesTypedRequests() {
 	dialog.applyState({ { QStringLiteral("open"), true }, { QStringLiteral("id"), QStringLiteral("settings") },
 						{ QStringLiteral("kind"), QStringLiteral("settings") },
 						{ QStringLiteral("title"), QStringLiteral("Settings") },
-						{ QStringLiteral("sections"), QVariantList {} } });
+						{ QStringLiteral("sections"),
+						  QVariantList { QVariantMap { { QStringLiteral("fields"),
+												 QVariantList { QVariantMap {
+													 { QStringLiteral("id"), QStringLiteral("audio.input") },
+													 { QStringLiteral("value"), 2 } } } } } } },
+						{ QStringLiteral("errors"),
+						  QVariantMap { { QStringLiteral("audio.input"), QStringLiteral("Choose an input") } } } });
 	QCOMPARE(stateSpy.count(), 1);
 	QVERIFY(dialog.open());
 	QCOMPARE(dialog.dialogId(), QStringLiteral("settings"));
+	QCOMPARE(dialog.fieldValue(QStringLiteral("audio.input")).toInt(), 2);
+	QCOMPARE(dialog.fieldError(QStringLiteral("audio.input")), QStringLiteral("Choose an input"));
+	QVERIFY(!dialog.fieldValue(QStringLiteral("missing")).isValid());
 
 	dialog.updateField(QStringLiteral(" audio.input "), 2);
 	QCOMPARE(fieldSpy.count(), 1);

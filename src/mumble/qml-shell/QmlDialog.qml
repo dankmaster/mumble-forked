@@ -124,6 +124,13 @@ Dialog {
                                         required property var modelData
                                         width: sectionColumn.width
                                         property var field: modelData
+                                        property bool conditionVisible: !field.visibleWhen
+                                            || (field.visibleWhen.values || []).indexOf(
+                                                String(dialogState.fieldValue(field.visibleWhen.fieldId))) >= 0
+                                        visible: conditionVisible
+                                        active: conditionVisible
+                                        height: conditionVisible ? ((item ? item.implicitHeight : 0)
+                                                + (fieldErrorLabel.visible ? fieldErrorLabel.implicitHeight + 4 : 0)) : 0
                                         onLoaded: item.field = field
                                         onFieldChanged: if (item) item.field = field
                                         sourceComponent: {
@@ -139,8 +146,25 @@ Dialog {
                                             if (type === "messageEventEditor") return messageEventEditorField
                                             if (type === "shortcutEditor") return shortcutEditorField
                                             if (type === "aclEditor") return aclEditorField
+                                            if (type === "textarea") return textareaField
+                                            if (type === "resultList") return resultListField
+                                            if (type === "profile") return profileField
+                                            if (type === "imagePicker") return pathField
+                                            if (type === "manualPositionPreview") return manualPreviewField
                                             if (type === "pathPicker" || type === "filePicker" || type === "folderPicker") return pathField
                                             return textField
+                                        }
+                                        Label {
+                                            id: fieldErrorLabel
+                                            anchors.left: parent.left
+                                            anchors.right: parent.right
+                                            anchors.top: fieldLoader.item ? fieldLoader.item.bottom : parent.top
+                                            anchors.topMargin: 4
+                                            text: dialogState.fieldError(fieldLoader.field.id)
+                                            visible: text.length > 0
+                                            color: "#f87171"
+                                            font.pixelSize: 10
+                                            wrapMode: Text.Wrap
                                         }
                                     }
                                 }
@@ -216,18 +240,24 @@ Dialog {
         ColumnLayout {
             id: selectRoot
             property var field
+            function syncCurrentIndex() {
+                Qt.callLater(function() {
+                    const index = selectControl.indexOfValue(field.value)
+                    selectControl.currentIndex = index
+                })
+            }
+            onFieldChanged: syncCurrentIndex()
             width: parent ? parent.width : 0
             Label { text: selectRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 10 }
             ComboBox {
+                id: selectControl
                 Layout.fillWidth: true
                 model: selectRoot.field.options || []
                 textRole: "label"
-                Component.onCompleted: {
-                    for (let index = 0; index < count; ++index) {
-                        if (model[index].value === selectRoot.field.value) { currentIndex = index; break }
-                    }
-                }
-                onActivated: if (currentIndex >= 0) dialogState.updateField(selectRoot.field.id, model[currentIndex].value)
+                valueRole: "value"
+                Component.onCompleted: selectRoot.syncCurrentIndex()
+                onModelChanged: selectRoot.syncCurrentIndex()
+                onActivated: if (currentIndex >= 0) dialogState.updateField(selectRoot.field.id, currentValue)
             }
         }
     }
@@ -280,6 +310,93 @@ Dialog {
                     text: pathRoot.field.browseLabel || qsTr("Browse…")
                     onClicked: dialogState.invokeAction(pathRoot.field.browseActionId, { "fieldId": pathRoot.field.id })
                 }
+            }
+        }
+    }
+    Component {
+        id: manualPreviewField
+        Rectangle {
+            property var field
+            width: parent ? parent.width : 0
+            height: 170
+            implicitHeight: 170
+            color: Theme.strip
+            radius: Theme.innerRadius
+            Canvas {
+                anchors.fill: parent
+                anchors.margins: 12
+                onPaint: {
+                    const ctx = getContext("2d"); ctx.reset();
+                    ctx.strokeStyle = Theme.divider; ctx.lineWidth = 1
+                    ctx.beginPath(); ctx.moveTo(width / 2, 0); ctx.lineTo(width / 2, height)
+                    ctx.moveTo(0, height / 2); ctx.lineTo(width, height / 2); ctx.stroke()
+                    const x = Number(dialogState.fieldValue("manual.x") || 0)
+                    const z = Number(dialogState.fieldValue("manual.z") || 0)
+                    const scale = Math.min(width, height) / 20
+                    ctx.fillStyle = Theme.accent; ctx.beginPath()
+                    ctx.arc(width / 2 + x * scale, height / 2 - z * scale, 7, 0, Math.PI * 2); ctx.fill()
+                }
+                Connections { target: dialogState; function onStateChanged() { parent.requestPaint() } }
+            }
+            Label { anchors.left: parent.left; anchors.top: parent.top; anchors.margins: 8; text: qsTr("Top view · X / Z"); color: Theme.textMuted; font.pixelSize: 9 }
+        }
+    }
+    Component {
+        id: profileField
+        RowLayout {
+            property var field
+            width: parent ? parent.width : 0
+            property var profile: field.value || ({})
+            Rectangle {
+                Layout.preferredWidth: 56; Layout.preferredHeight: 56; radius: 28; color: Theme.strip; clip: true
+                Image { anchors.fill: parent; source: parent.parent.profile.avatarUrl || ""; asynchronous: true; fillMode: Image.PreserveAspectCrop }
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                Label { text: parent.parent.profile.name || ""; color: Theme.textStrong; font.bold: true }
+                Label { Layout.fillWidth: true; text: parent.parent.profile.subtitle || ""; color: Theme.textMuted; elide: Text.ElideRight }
+            }
+            ModernButton {
+                visible: (parent.profile.avatarActionId || "").length > 0
+                text: parent.profile.avatarActionLabel || qsTr("Change avatar")
+                onClicked: dialogState.invokeAction(parent.profile.avatarActionId, {})
+            }
+        }
+    }
+    Component {
+        id: resultListField
+        ColumnLayout {
+            property var field
+            width: parent ? parent.width : 0
+            Label { text: parent.field.label || ""; color: Theme.textStrong; font.bold: true; visible: text.length > 0 }
+            Repeater {
+                model: parent.field.items || parent.field.value || []
+                delegate: Rectangle {
+                    required property var modelData
+                    Layout.fillWidth: true; height: 46; radius: 6; color: Theme.strip
+                    Column { anchors.fill: parent; anchors.margins: 7
+                        Label { width: parent.width; text: modelData.label || modelData.title || modelData.name || ""; color: Theme.textMain; elide: Text.ElideRight }
+                        Label { width: parent.width; text: modelData.subtitle || modelData.description || ""; color: Theme.textMuted; font.pixelSize: 9; elide: Text.ElideRight }
+                    }
+                }
+            }
+            Label { text: parent.field.emptyText || ""; visible: (parent.field.items || []).length === 0; color: Theme.textMuted; wrapMode: Text.Wrap }
+        }
+    }
+    Component {
+        id: textareaField
+        ColumnLayout {
+            id: textareaRoot
+            property var field
+            width: parent ? parent.width : 0
+            Label { text: textareaRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 10 }
+            TextArea {
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.max(90, (textareaRoot.field.rows || 4) * 22)
+                text: String(textareaRoot.field.value ?? "")
+                enabled: textareaRoot.field.enabled === undefined || textareaRoot.field.enabled
+                wrapMode: TextEdit.Wrap
+                onActiveFocusChanged: if (!activeFocus) dialogState.updateField(textareaRoot.field.id, text)
             }
         }
     }

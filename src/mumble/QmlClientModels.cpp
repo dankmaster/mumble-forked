@@ -356,6 +356,18 @@ QVariantList DialogStateController::pages() const { return m_state.value(QString
 QVariantList DialogStateController::sections() const { return m_state.value(QStringLiteral("sections")).toList(); }
 QVariantList DialogStateController::actions() const { return m_state.value(QStringLiteral("actions")).toList(); }
 QVariantMap DialogStateController::state() const { return m_state; }
+QVariant DialogStateController::fieldValue(const QString &fieldId) const {
+	for (const QVariant &sectionValue : sections()) {
+		for (const QVariant &fieldValue : sectionValue.toMap().value(QStringLiteral("fields")).toList()) {
+			const QVariantMap field = fieldValue.toMap();
+			if (field.value(QStringLiteral("id")).toString() == fieldId) return field.value(QStringLiteral("value"));
+		}
+	}
+	return {};
+}
+QString DialogStateController::fieldError(const QString &fieldId) const {
+	return m_state.value(QStringLiteral("errors")).toMap().value(fieldId).toString();
+}
 
 void DialogStateController::applyState(const QVariantMap &state) {
 	if (m_state == state) return;
