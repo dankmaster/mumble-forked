@@ -403,6 +403,16 @@ void TestQmlClientModels::dialogStateRoutesTypedRequests() {
 	dialog.invokeAction(QStringLiteral(" selectPage "), { { QStringLiteral("pageId"), QStringLiteral("plugins") } });
 	QCOMPARE(actionSpy.count(), 1);
 	QCOMPARE(actionSpy.takeFirst().at(1).toString(), QStringLiteral("selectPage"));
+	const QVariantMap screenSharePayload { { QStringLiteral("channelId"), 42 },
+										 { QStringLiteral("sourceId"), QStringLiteral("monitor:0") },
+										 { QStringLiteral("resolution"), QStringLiteral("1920x1080") },
+										 { QStringLiteral("frameRate"), 60 },
+										 { QStringLiteral("audio"), QStringLiteral("default-loopback") } };
+	dialog.invokeAction(QStringLiteral("screenShare.start"), screenSharePayload);
+	QCOMPARE(actionSpy.count(), 1);
+	const QList< QVariant > screenShareAction = actionSpy.takeFirst();
+	QCOMPARE(screenShareAction.at(1).toString(), QStringLiteral("screenShare.start"));
+	QCOMPARE(screenShareAction.at(2).toMap(), screenSharePayload);
 	dialog.requestClose();
 	QCOMPARE(closeSpy.count(), 1);
 }

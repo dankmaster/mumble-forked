@@ -92,7 +92,17 @@ Dialog {
                 Column {
                     width: parent.width
                     spacing: 16
+                    Loader {
+                        id: screenShareLoader
+                        width: parent.width - 36
+                        x: 18
+                        active: dialogState.kind === "screenShare"
+                        visible: active
+                        sourceComponent: screenShareEditorComponent
+                        onLoaded: item.shareState = dialogState.state.screenShare || ({})
+                    }
                     Repeater {
+                        visible: dialogState.kind !== "screenShare"
                         model: dialogState.sections
                         delegate: Rectangle {
                             required property var modelData
@@ -190,7 +200,13 @@ Dialog {
                         required property var modelData
                         text: modelData.label || modelData.text || modelData.id
                         enabled: modelData.enabled === undefined || modelData.enabled
-                        onClicked: dialogState.invokeAction(modelData.id, {})
+                        onClicked: {
+                            const payload = dialogState.kind === "screenShare"
+                                    && screenShareLoader.item
+                                    && modelData.id === "screenShare.start"
+                                ? screenShareLoader.item.actionPayload() : ({})
+                            dialogState.invokeAction(modelData.id, payload)
+                        }
                     }
                 }
             }
@@ -198,6 +214,7 @@ Dialog {
     }
 
     Component { id: hiddenField; Item { property var field; width: parent ? parent.width : 0; height: 0 } }
+    Component { id: screenShareEditorComponent; ScreenShareEditor { } }
     Component {
         id: noteField
         Label {
