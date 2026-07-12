@@ -174,11 +174,9 @@
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QGroupBox>
 #include <QtWidgets/QHBoxLayout>
-#include <QtWidgets/QInputDialog>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QListWidget>
-#include <QtWidgets/QMessageBox>
 #include <QtWidgets/QPlainTextEdit>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QScrollBar>
@@ -38068,45 +38066,9 @@ void MainWindow::closeEvent(QCloseEvent *e) {
 	const bool minimizeDueToConnected = sh && sh->isRunning() && quitBehavior == QuitBehavior::MINIMIZE_WHEN_CONNECTED;
 
 	if (!forceQuit && (alwaysAsk || askDueToConnected)) {
-		if (true) {
-			e->ignore();
-			openModernQuitDialog(true);
-			return;
-		}
-
-		QMessageBox mb(QMessageBox::Warning, QLatin1String("Mumble"),
-					   tr("Are you sure you want to close Mumble? Perhaps you prefer to minimize it instead?"),
-					   QMessageBox::NoButton, this);
-		QCheckBox *qcbRemember   = new QCheckBox(tr("Remember this setting"));
-		QPushButton *qpbClose    = mb.addButton(tr("Close"), QMessageBox::YesRole);
-		QPushButton *qpbMinimize = mb.addButton(tr("Minimize"), QMessageBox::NoRole);
-		QPushButton *qpbCancel   = mb.addButton(tr("Cancel"), QMessageBox::RejectRole);
-		mb.setDefaultButton(qpbClose);
-		mb.setEscapeButton(qpbCancel);
-		mb.setCheckBox(qcbRemember);
-		mb.exec();
-		if (mb.clickedButton() == qpbMinimize) {
-			setWindowState(windowState() | Qt::WindowMinimized);
-			e->ignore();
-
-			// If checkbox is checked and not connected, always minimize
-			// If checkbox is checked and connected, always minimize when connected
-			if (qcbRemember->isChecked() && !(sh && sh->isRunning())) {
-				Global::get().s.quitBehavior = QuitBehavior::ALWAYS_MINIMIZE;
-			} else if (qcbRemember->isChecked()) {
-				Global::get().s.quitBehavior = QuitBehavior::MINIMIZE_WHEN_CONNECTED;
-			}
-
-			return;
-		} else if (mb.clickedButton() == qpbCancel) {
-			e->ignore();
-			return;
-		}
-
-		// If checkbox is checked, quit always
-		if (qcbRemember->isChecked()) {
-			Global::get().s.quitBehavior = QuitBehavior::ALWAYS_QUIT;
-		}
+		e->ignore();
+		openModernQuitDialog(true);
+		return;
 	} else if (!forceQuit && (alwaysMinimize || minimizeDueToConnected)) {
 		setWindowState(windowState() | Qt::WindowMinimized);
 		e->ignore();
@@ -39109,16 +39071,8 @@ void MainWindow::openUrl(const QUrl &url) {
 	Global::get().db->fuzzyMatch(name, user, pw, host, port);
 
 	if (user.isEmpty()) {
-		if (true) {
-			openModernUrlConnectDialog(url, host, port, pw, name, qsDesiredChannel);
-			return;
-		}
-		bool ok;
-		user = QInputDialog::getText(this, tr("Connecting to %1").arg(url.toString()), tr("Enter username"),
-									 QLineEdit::Normal, Global::get().s.qsUsername, &ok);
-		if (!ok || user.isEmpty())
-			return;
-		Global::get().s.qsUsername = user;
+		openModernUrlConnectDialog(url, host, port, pw, name, qsDesiredChannel);
+		return;
 	}
 
 	if (name.isEmpty())
@@ -41840,49 +41794,7 @@ void MainWindow::on_qaHelpAboutQt_triggered() {
 }
 
 void MainWindow::openFeedbackDialog() {
-	if (true) {
-		openModernFeedbackDialog();
-		return;
-	}
-
-	FeedbackDialog::ServerCapability capability;
-	capability.connected = Global::get().sh && Global::get().sh->isConnected() && Global::get().sh->hasSynchronized();
-	capability.supported =
-		capability.connected
-		&& Mumble::ForkFeatures::serverAllowsClientFeature(Global::get().qlSupportedForkFeatures,
-														   MumbleProto::ForkFeatureInAppFeedback);
-	capability.enabled      = Global::get().bFeedbackEnabled;
-	capability.maxLogBytes  = qMax(1u, Global::get().uiFeedbackMaxLogBytes);
-	capability.maxBodyBytes = qMax(1u, Global::get().uiFeedbackMaxBodyBytes);
-	capability.summary =
-		capability.connected
-			? tr("connected=yes; feature=%1; server-submit=%2; max-log-bytes=%3; max-body-bytes=%4")
-				  .arg(capability.supported ? QStringLiteral("yes") : QStringLiteral("no"),
-					   capability.enabled ? QStringLiteral("yes") : QStringLiteral("no"),
-					   QString::number(capability.maxLogBytes), QString::number(capability.maxBodyBytes))
-			: tr("connected=no; feature=no; server-submit=no");
-
-	FeedbackDialog dialog(capability, this);
-	if (dialog.exec() != FeedbackDialog::SubmitReport) {
-		return;
-	}
-
-	const FeedbackDialog::PreparedReport report = dialog.preparedReport();
-	const QString reportID = u8(report.message.client_report_id());
-	PendingFeedbackSubmission submission;
-	submission.kind        = report.message.kind();
-	submission.issueTitle  = report.issueTitle;
-	submission.issueBody   = report.issueBody;
-	submission.fallbackUrl = report.fallbackUrl;
-
-	if (!capability.connected || !capability.supported || !capability.enabled || !Global::get().sh) {
-		showFeedbackFallback(submission, tr("The connected server cannot submit this report."));
-		return;
-	}
-
-	m_pendingFeedbackSubmissions.insert(reportID, submission);
-	Global::get().sh->sendMessage(report.message);
-	QMessageBox::information(this, tr("Feedback submitted"), tr("The report was sent to the connected server."));
+	openModernFeedbackDialog();
 }
 
 void MainWindow::handleFeedbackReportState(const MumbleProto::FeedbackReportState &msg) {
@@ -42853,101 +42765,17 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 			Global::get().l->log(Log::Warning, tr("SSL Verification failed: %1").arg(e.errorString().toHtmlEscaped()));
 		}
 		if (!Global::get().sh->qscCert.isEmpty()) {
-			if (openModernSslCertificateWarningDialog(host, port, Global::get().sh->qscCert,
-													  Global::get().sh->qlErrors)) {
-				AudioInput::setMaxBandwidth(-1);
-
-				if (Global::get().s.bMinimalView && qdwMinimalViewNote) {
-					qdwMinimalViewNote->show();
-				}
-
-				emit disconnectedFromServer();
-				return;
-			}
-			QSslCertificate c = Global::get().sh->qscCert.at(0);
-			QString basereason;
-			QString actual_digest = QString::fromLatin1(c.digest(QCryptographicHash::Sha1).toHex());
-			QString digests_section =
-				tr("<li>Server certificate digest (SHA-1):\t%1</li>").arg(ViewCert::prettifyDigest(actual_digest));
-			QString expected_digest = Global::get().db->getDigest(host, port);
-			if (!expected_digest.isNull()) {
-				basereason =
-					tr("<b>WARNING:</b> The server presented a certificate that was different from the stored one.");
-				digests_section.append(tr("<li>Expected certificate digest (SHA-1):\t%1</li>")
-										   .arg(ViewCert::prettifyDigest(expected_digest)));
-			} else {
-				basereason = tr("Server presented a certificate which failed verification.");
-			}
-			QStringList qsl;
-			for (const QSslError &e : Global::get().sh->qlErrors) {
-				qsl << QString::fromLatin1("<li>%1</li>").arg(e.errorString().toHtmlEscaped());
-			}
-
-			QMessageBox qmb(QMessageBox::Warning, QLatin1String("Mumble"),
-							tr("<p>%1</p><ul>%2</ul><p>The specific errors with this certificate are:</p><ol>%3</ol>"
-							   "<p>Do you wish to accept this certificate anyway?<br />(It will also be stored so you "
-							   "won't be asked this again.)</p>")
-								.arg(basereason)
-								.arg(digests_section)
-								.arg(qsl.join(QString())),
-							QMessageBox::Yes | QMessageBox::No, this);
-
-			qmb.setDefaultButton(QMessageBox::No);
-			qmb.setEscapeButton(QMessageBox::No);
-
-			QPushButton *qp = qmb.addButton(tr("&View Certificate"), QMessageBox::ActionRole);
-			while (true) {
-				int res = qmb.exec();
-
-				if (qmb.clickedButton() == qp) {
-					ViewCert vc(Global::get().sh->qscCert, this);
-					vc.exec();
-					continue;
-				} else if (res == QMessageBox::Yes) {
-					Global::get().db->setDigest(host, port,
-												QString::fromLatin1(c.digest(QCryptographicHash::Sha1).toHex()));
-					qaServerDisconnect->setEnabled(true);
-					on_Reconnect_timeout();
-				}
-				break;
-			}
-		}
-	} else if (err == QAbstractSocket::SslHandshakeFailedError) {
-		if (openModernSslHandshakeFailureDialog(reason)) {
+			openModernSslCertificateWarningDialog(host, port, Global::get().sh->qscCert,
+										  Global::get().sh->qlErrors);
 			AudioInput::setMaxBandwidth(-1);
-
-			if (Global::get().s.bMinimalView && qdwMinimalViewNote) {
-				qdwMinimalViewNote->show();
-			}
-
 			emit disconnectedFromServer();
 			return;
 		}
-		QMessageBox msgBox;
-		msgBox.addButton(QMessageBox::Ok);
-		msgBox.setIcon(QMessageBox::Warning);
-		msgBox.setTextFormat(Qt::RichText);
-		msgBox.setWindowTitle(tr("SSL error"));
-		msgBox.setText(tr("Mumble is unable to establish a secure connection to the server. (\"%1\")").arg(reason));
-		// clang-format off
-		msgBox.setInformativeText(
-			tr("This could be caused by one of the following scenarios:"
-			   "<ul>"
-			       "<li>Your client and the server use different encryption standards. This could be because you are using "
-			       "a very old client or the server you are connecting to is very old. In the first case, you should update "
-			       "your client and in the second case you should contact the server administrator so that they can update "
-				   "their server.</li>"
-				   "<li>Either your client or the server is using an old operating system that doesn't provide up-to-date "
-				   "encryption methods. In this case you should consider updating your OS or contacting the server admin "
-				   "so that they can update theirs.</li>"
-				   "<li>The server you are connecting to isn't actually a Mumble server. Please ensure that the used server "
-				   "address really belongs to a Mumble server and not e.g. to a game server.</li>"
-				   "<li>The port you are connecting to does not belong to a Mumble server but instead is bound to a "
-				   "completely unrelated process on the server-side. Please double-check you have used the correct port.</li>"
-				"</ul>"));
-		// clang-format on
-
-		msgBox.exec();
+	} else if (err == QAbstractSocket::SslHandshakeFailedError) {
+		openModernSslHandshakeFailureDialog(reason);
+		AudioInput::setMaxBandwidth(-1);
+		emit disconnectedFromServer();
+		return;
 	} else {
 		if (!reason.isEmpty()) {
 			Global::get().l->log(Log::ServerDisconnected,
@@ -43280,43 +43108,6 @@ void MainWindow::context_triggered() {
  * Presents a file open dialog, opens the selected picture and returns it.
  * @return Pair consisting of the raw file contents and the image. Uninitialized on error or cancel.
  */
-QPair< QByteArray, QImage > MainWindow::openImageFile() {
-	QPair< QByteArray, QImage > retval;
-
-	const QUrl selectedUrl = QFileDialog::getOpenFileUrl(
-		this, tr("Choose image file"), QUrl::fromLocalFile(getImagePath()), tr("Images (*.png *.jpg *.jpeg)"),
-		nullptr, QFileDialog::Options(),
-		QStringList { QStringLiteral("file"), QStringLiteral("http"), QStringLiteral("https") });
-
-	if (selectedUrl.isEmpty())
-		return retval;
-
-	QString error;
-	if (selectedUrl.isLocalFile()) {
-		const QString fname = selectedUrl.toLocalFile();
-		retval              = imageFileChoiceFromLocalPath(fname, &error);
-		if (retval.first.isEmpty()) {
-			QMessageBox::warning(this, tr("Failed to load image"), error);
-			return {};
-		}
-
-		updateImagePath(fname);
-		return retval;
-	}
-
-	if (selectedUrl.scheme() == QLatin1String("http") || selectedUrl.scheme() == QLatin1String("https")) {
-		retval = imageFileChoiceFromRemoteUrlBlocking(selectedUrl, &error);
-		if (retval.first.isEmpty()) {
-			QMessageBox::warning(this, tr("Failed to load image"), error);
-			return {};
-		}
-
-		return retval;
-	}
-
-	QMessageBox::warning(this, tr("Failed to load image"), userAvatarUrlInvalidText());
-	return {};
-}
 
 void MainWindow::logChangeNotPermanent(const QString &actionName, ClientUser *const p) const {
 	Global::get().l->log(

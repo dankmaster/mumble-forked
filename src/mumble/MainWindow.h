@@ -256,7 +256,6 @@ public:
 	void updateAudioToolTips();
 	void updateUserModel();
 	void focusNextMainWidget();
-	QPair< QByteArray, QImage > openImageFile();
 	void setupPersistentChatDock();
 	void setupServerNavigator();
 	void refreshShellLayout();
