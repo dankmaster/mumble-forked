@@ -53,6 +53,53 @@ private:
 	bool m_selfDeafened = false;
 };
 
+class ActiveScopeController final : public QObject {
+	Q_OBJECT
+	Q_PROPERTY(QString scopeToken READ scopeToken WRITE setScopeToken NOTIFY scopeTokenChanged)
+	Q_PROPERTY(QString label READ label WRITE setLabel NOTIFY labelChanged)
+	Q_PROPERTY(QString description READ description WRITE setDescription NOTIFY descriptionChanged)
+	Q_PROPERTY(QString kindLabel READ kindLabel WRITE setKindLabel NOTIFY kindLabelChanged)
+	Q_PROPERTY(QString composerPlaceholder READ composerPlaceholder WRITE setComposerPlaceholder NOTIFY composerPlaceholderChanged)
+	Q_PROPERTY(QString composerHint READ composerHint WRITE setComposerHint NOTIFY composerHintChanged)
+	Q_PROPERTY(bool canSend READ canSend WRITE setCanSend NOTIFY canSendChanged)
+
+public:
+	explicit ActiveScopeController(QObject *parent = nullptr);
+	QString scopeToken() const;
+	QString label() const;
+	QString description() const;
+	QString kindLabel() const;
+	QString composerPlaceholder() const;
+	QString composerHint() const;
+	bool canSend() const;
+	void setScopeToken(const QString &value);
+	void setLabel(const QString &value);
+	void setDescription(const QString &value);
+	void setKindLabel(const QString &value);
+	void setComposerPlaceholder(const QString &value);
+	void setComposerHint(const QString &value);
+	void setCanSend(bool value);
+	void applyState(const QVariantMap &state);
+
+signals:
+	void scopeTokenChanged();
+	void labelChanged();
+	void descriptionChanged();
+	void kindLabelChanged();
+	void composerPlaceholderChanged();
+	void composerHintChanged();
+	void canSendChanged();
+
+private:
+	QString m_scopeToken;
+	QString m_label;
+	QString m_description;
+	QString m_kindLabel;
+	QString m_composerPlaceholder;
+	QString m_composerHint;
+	bool m_canSend = false;
+};
+
 class StableListModel : public QAbstractListModel {
 	Q_OBJECT
 	Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
@@ -65,7 +112,12 @@ public:
 		KindRole,
 		SelectedRole,
 		StatusRole,
-		PayloadRole
+		PayloadRole,
+		DepthRole,
+		UnreadCountRole,
+		AvatarUrlRole,
+		EnabledRole,
+		CheckedRole
 	};
 
 	explicit StableListModel(QObject *parent = nullptr);

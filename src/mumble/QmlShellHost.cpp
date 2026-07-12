@@ -16,6 +16,7 @@
 QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent)
 	: QObject(parent), m_actionRegistry(actionRegistry),
 	  m_sessionController(std::make_unique< ClientSessionController >()),
+	  m_activeScopeController(std::make_unique< ActiveScopeController >()),
 	  m_commandController(std::make_unique< UiCommandController >()), m_roomModel(std::make_unique< RoomModel >()),
 	  m_participantModel(std::make_unique< ParticipantModel >()),
 	  m_chatModel(std::make_unique< ChatTimelineModel >()),
@@ -37,6 +38,7 @@ bool QmlShellHost::start(QString *error) {
 	m_engine = std::make_unique< QQmlApplicationEngine >();
 	QQmlContext *context = m_engine->rootContext();
 	context->setContextProperty(QStringLiteral("clientSession"), m_sessionController.get());
+	context->setContextProperty(QStringLiteral("activeScope"), m_activeScopeController.get());
 	context->setContextProperty(QStringLiteral("uiCommands"), m_commandController.get());
 	context->setContextProperty(QStringLiteral("roomModel"), m_roomModel.get());
 	context->setContextProperty(QStringLiteral("participantModel"), m_participantModel.get());
@@ -76,6 +78,7 @@ void QmlShellHost::showRaise() {
 
 QQuickWindow *QmlShellHost::window() const { return m_window; }
 ClientSessionController *QmlShellHost::sessionController() const { return m_sessionController.get(); }
+ActiveScopeController *QmlShellHost::activeScopeController() const { return m_activeScopeController.get(); }
 UiCommandController *QmlShellHost::commandController() const { return m_commandController.get(); }
 RoomModel *QmlShellHost::roomModel() const { return m_roomModel.get(); }
 ParticipantModel *QmlShellHost::participantModel() const { return m_participantModel.get(); }

@@ -11,6 +11,7 @@ class TestQmlClientModels : public QObject {
 private slots:
 	void stableRowsUpdateWithoutReset();
 	void synchronizeRowsUsesIncrementalSignals();
+	void activeScopeAppliesTypedState();
 	void sessionPropertiesOnlyNotifyOnChanges();
 	void commandsRejectEmptyStableIds();
 };
@@ -37,6 +38,32 @@ void TestQmlClientModels::stableRowsUpdateWithoutReset() {
 	model.removeRow(QStringLiteral("voice:1"));
 	QCOMPARE(model.rowCount(), 0);
 	QCOMPARE(removeSpy.count(), 1);
+}
+
+void TestQmlClientModels::activeScopeAppliesTypedState() {
+	ActiveScopeController scope;
+	QSignalSpy labelSpy(&scope, &ActiveScopeController::labelChanged);
+	QSignalSpy sendSpy(&scope, &ActiveScopeController::canSendChanged);
+	scope.applyState({ { QStringLiteral("scopeToken"), QStringLiteral("channel:42") },
+					   { QStringLiteral("label"), QStringLiteral("Lobby") },
+					   { QStringLiteral("description"), QStringLiteral("General voice room") },
+					   { QStringLiteral("kindLabel"), QStringLiteral("Voice room") },
+					   { QStringLiteral("composerPlaceholder"), QStringLiteral("Write in Lobby...") },
+					   { QStringLiteral("canSend"), true } });
+	QCOMPARE(scope.scopeToken(), QStringLiteral("channel:42"));
+	QCOMPARE(scope.label(), QStringLiteral("Lobby"));
+	QVERIFY(scope.canSend());
+	QCOMPARE(labelSpy.count(), 1);
+	QCOMPARE(sendSpy.count(), 1);
+
+	scope.applyState({ { QStringLiteral("scopeToken"), QStringLiteral("channel:42") },
+					   { QStringLiteral("label"), QStringLiteral("Lobby") },
+					   { QStringLiteral("description"), QStringLiteral("General voice room") },
+					   { QStringLiteral("kindLabel"), QStringLiteral("Voice room") },
+					   { QStringLiteral("composerPlaceholder"), QStringLiteral("Write in Lobby...") },
+					   { QStringLiteral("canSend"), true } });
+	QCOMPARE(labelSpy.count(), 1);
+	QCOMPARE(sendSpy.count(), 1);
 }
 
 void TestQmlClientModels::synchronizeRowsUsesIncrementalSignals() {
@@ -89,5 +116,5 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	QCOMPARE(actionSpy.takeFirst().at(0).toString(), QStringLiteral("qaAudioMute"));
 }
 
-QTEST_MAIN(TestQmlClientModels)
+QTEST_GUILESS_MAIN(TestQmlClientModels)
 #include "TestQmlClientModels.moc"

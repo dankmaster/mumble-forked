@@ -24487,6 +24487,10 @@ void MainWindow::appendModernServerLogEntry(const QString &html) {
 }
 
 void MainWindow::publishModernShellPatchNow(const QString &kind, QVariantMap patch) {
+	if (m_qmlShellHost && m_qmlShellHost->window()) {
+		applyQmlShellPatch(kind, patch);
+		return;
+	}
 	if (!m_modernShellHost || !m_modernShellHost->bridge() || modernShellStaticModeEnabled()
 		|| modernShellMinimalSnapshotEnabled()) {
 		return;
@@ -24645,8 +24649,9 @@ void MainWindow::publishModernShellMessageUpdatePatch(const MumbleProto::ChatMes
 }
 
 void MainWindow::publishModernShellActiveScopePatch(const QString &kind) {
-	if (!m_modernShellHost || !m_modernShellHost->bridge() || modernShellStaticModeEnabled()
-		|| modernShellMinimalSnapshotEnabled()) {
+	const bool qmlActive = m_qmlShellHost && m_qmlShellHost->window();
+	if (!qmlActive && (!m_modernShellHost || !m_modernShellHost->bridge() || modernShellStaticModeEnabled()
+						 || modernShellMinimalSnapshotEnabled())) {
 		return;
 	}
 
@@ -24656,8 +24661,9 @@ void MainWindow::publishModernShellActiveScopePatch(const QString &kind) {
 }
 
 void MainWindow::publishModernShellRoomStatePatch() {
-	if (!m_modernShellHost || !m_modernShellHost->bridge() || modernShellStaticModeEnabled()
-		|| modernShellMinimalSnapshotEnabled()) {
+	const bool qmlActive = m_qmlShellHost && m_qmlShellHost->window();
+	if (!qmlActive && (!m_modernShellHost || !m_modernShellHost->bridge() || modernShellStaticModeEnabled()
+						 || modernShellMinimalSnapshotEnabled())) {
 		return;
 	}
 
@@ -30653,20 +30659,39 @@ void MainWindow::syncQmlShellState() {
 		return;
 	}
 
-	const QVariantMap snapshot = buildModernShellSnapshot();
-	const QVariantMap appState = snapshot.value(QStringLiteral("app")).toMap();
-	ClientSessionController *session = m_qmlShellHost->sessionController();
 	const bool connected = Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning();
-	session->setServerName(appState.value(QStringLiteral("serverTitle"), tr("Mumble")).toString());
-	session->setConnectionLabel(appState.value(QStringLiteral("selfStatusLabel"),
-															 connected ? tr("Connected") : tr("Disconnected")).toString());
-	session->setSelfName(appState.value(QStringLiteral("selfName"), tr("You")).toString());
+	QString host;
+	QString username;
+	QString password;
+	unsigned short port = 0;
+	if (Global::get().sh) {
+		Global::get().sh->getConnectionInfo(host, port, username, password);
+	}
+	Q_UNUSED(password)
+	QString serverName = Global::get().qsServerDisplayName.trimmed();
+	if (serverName.isEmpty()) serverName = Global::get().s.qsLastServer.trimmed();
+	if (serverName.isEmpty()) serverName = host.trimmed();
+	if (serverName.isEmpty()) serverName = tr("Mumble");
+
+	ClientUser *selfUser = ClientUser::get(Global::get().uiSession);
+	ClientSessionController *session = m_qmlShellHost->sessionController();
+	session->setServerName(connected ? serverName : tr("Mumble"));
+	session->setConnectionLabel(!connected ? tr("Offline")
+											: (Global::get().s.bDeaf ? tr("Deafened")
+																		 : (Global::get().s.bMute ? tr("Muted") : tr("Online"))));
+	session->setSelfName(selfUser ? selfUser->qsName : (!username.trimmed().isEmpty() ? username : tr("You")));
 	session->setConnected(connected);
-	session->setSelfMuted(appState.value(QStringLiteral("selfMuted")).toBool());
-	session->setSelfDeafened(appState.value(QStringLiteral("selfDeafened")).toBool());
+	session->setSelfMuted(Global::get().s.bMute);
+	session->setSelfDeafened(Global::get().s.bDeaf);
+
+	const PersistentChatTarget target = currentPersistentChatTarget();
+	const QVariantMap roomState = buildModernShellRoomStatePatch();
+	const QVariantMap activeScopeState = buildModernShellActiveScopeState(target);
+	m_qmlShellHost->activeScopeController()->applyState(activeScopeState);
 
 	QmlSelectionState *selection = m_qmlShellHost->selectionState();
-	selection->setScopeToken(m_modernSelectionState.scopeToken);
+	selection->setScopeToken(activeScopeState.value(QStringLiteral("scopeToken"),
+														  m_modernSelectionState.scopeToken).toString());
 	selection->setSelectedUserSession(m_modernSelectionState.selectedUserSession
 										 ? QVariant::fromValue(*m_modernSelectionState.selectedUserSession)
 										 : QVariant());
@@ -30685,32 +30710,45 @@ void MainWindow::syncQmlShellState() {
 					   room.value(QStringLiteral("topic"), room.value(QStringLiteral("description"))));
 			row.insert(QStringLiteral("kind"), kind);
 			row.insert(QStringLiteral("selected"), room.value(QStringLiteral("selected")));
+			row.insert(QStringLiteral("depth"), room.value(QStringLiteral("depth")));
+			row.insert(QStringLiteral("unreadCount"), room.value(QStringLiteral("unreadCount")));
 			row.insert(QStringLiteral("status"), room.value(QStringLiteral("joined")).toBool()
 												? QStringLiteral("joined") : QString());
 			row.insert(QStringLiteral("source"), room);
 			roomRows.push_back(row);
 		}
 	};
-	appendRooms(snapshot.value(QStringLiteral("voiceRooms")).toList(), QStringLiteral("voice"));
-	appendRooms(snapshot.value(QStringLiteral("textRooms")).toList(), QStringLiteral("text"));
+	appendRooms(roomState.value(QStringLiteral("voiceRooms")).toList(), QStringLiteral("voice"));
+	appendRooms(roomState.value(QStringLiteral("textRooms")).toList(), QStringLiteral("text"));
 	m_qmlShellHost->roomModel()->synchronizeRows(roomRows);
 
 	QVariantList participantRows;
-	for (const QVariant &entry : snapshot.value(QStringLiteral("participants")).toList()) {
+	for (const QVariant &entry : roomState.value(QStringLiteral("participants")).toList()) {
 		const QVariantMap participant = entry.toMap();
 		QVariantMap row;
-		row.insert(QStringLiteral("id"), participant.value(QStringLiteral("session")));
+		row.insert(QStringLiteral("id"), participant.value(QStringLiteral("session")).toString());
 		row.insert(QStringLiteral("title"), participant.value(QStringLiteral("name")));
 		row.insert(QStringLiteral("subtitle"), participant.value(QStringLiteral("statusLabel")));
 		row.insert(QStringLiteral("kind"), QStringLiteral("participant"));
 		row.insert(QStringLiteral("status"), participant.value(QStringLiteral("talkState")));
+		row.insert(QStringLiteral("avatarUrl"), participant.value(QStringLiteral("avatarUrl")));
 		row.insert(QStringLiteral("source"), participant);
 		participantRows.push_back(row);
 	}
 	m_qmlShellHost->participantModel()->synchronizeRows(participantRows);
 
 	QVariantList messageRows;
-	for (const QVariant &entry : snapshot.value(QStringLiteral("messages")).toList()) {
+	QVariantList messages;
+	if (!m_modernRichPreviewProbeMessages.isEmpty()) {
+		messages = m_modernRichPreviewProbeMessages;
+	} else if (!m_modernMessageDeliveryProbeMessages.isEmpty()) {
+		messages = m_modernMessageDeliveryProbeMessages;
+	} else if (!target.serverLog && !target.directMessage) {
+		const std::size_t messageCount = m_persistentChatMessages.size();
+		const std::size_t beginIndex = messageCount > 200 ? messageCount - 200 : 0;
+		messages = buildModernShellMessageStates(target, beginIndex, ModernShellMessageBuildMode::FastFirstPaint);
+	}
+	for (const QVariant &entry : messages) {
 		const QVariantMap message = entry.toMap();
 		QVariantMap row;
 		QString messageID = message.value(QStringLiteral("messageId")).toString();
@@ -30726,6 +30764,110 @@ void MainWindow::syncQmlShellState() {
 		messageRows.push_back(row);
 	}
 	m_qmlShellHost->chatModel()->synchronizeRows(messageRows);
+}
+
+void MainWindow::applyQmlShellPatch(const QString &kind, const QVariantMap &patch) {
+	if (!m_qmlShellHost || !m_qmlShellHost->window()) return;
+
+	const auto roomRow = [](const QVariantMap &room, const QString &roomKind) {
+		QVariantMap row;
+		row.insert(QStringLiteral("id"), room.value(QStringLiteral("token")));
+		row.insert(QStringLiteral("title"), room.value(QStringLiteral("label")));
+		row.insert(QStringLiteral("subtitle"),
+				   room.value(QStringLiteral("topic"), room.value(QStringLiteral("description"))));
+		row.insert(QStringLiteral("kind"), roomKind);
+		row.insert(QStringLiteral("selected"), room.value(QStringLiteral("selected")));
+		row.insert(QStringLiteral("status"),
+				   room.value(QStringLiteral("joined")).toBool() ? QStringLiteral("joined") : QString());
+		row.insert(QStringLiteral("depth"), room.value(QStringLiteral("depth")));
+		row.insert(QStringLiteral("unreadCount"), room.value(QStringLiteral("unreadCount")));
+		row.insert(QStringLiteral("source"), room);
+		return row;
+	};
+	const auto participantRow = [](const QVariantMap &participant) {
+		QVariantMap row;
+		row.insert(QStringLiteral("id"), participant.value(QStringLiteral("session")).toString());
+		row.insert(QStringLiteral("title"), participant.value(QStringLiteral("name")));
+		row.insert(QStringLiteral("subtitle"), participant.value(QStringLiteral("statusLabel")));
+		row.insert(QStringLiteral("kind"), QStringLiteral("participant"));
+		row.insert(QStringLiteral("status"), participant.value(QStringLiteral("talkState")));
+		row.insert(QStringLiteral("avatarUrl"), participant.value(QStringLiteral("avatarUrl")));
+		row.insert(QStringLiteral("source"), participant);
+		return row;
+	};
+	const auto messageRow = [](const QVariantMap &message) {
+		QVariantMap row;
+		QString messageID = message.value(QStringLiteral("messageId")).toString();
+		if (messageID.isEmpty()) messageID = message.value(QStringLiteral("messageKey")).toString();
+		row.insert(QStringLiteral("id"), messageID);
+		row.insert(QStringLiteral("title"), message.value(QStringLiteral("actorLabel")));
+		row.insert(QStringLiteral("subtitle"), message.value(QStringLiteral("bodyText")));
+		row.insert(QStringLiteral("kind"), QStringLiteral("message"));
+		row.insert(QStringLiteral("status"), message.value(QStringLiteral("deliveryState")));
+		row.insert(QStringLiteral("avatarUrl"), message.value(QStringLiteral("avatarUrl")));
+		row.insert(QStringLiteral("source"), message);
+		return row;
+	};
+
+	if (patch.contains(QStringLiteral("activeScope"))) {
+		const QVariantMap state = patch.value(QStringLiteral("activeScope")).toMap();
+		m_qmlShellHost->activeScopeController()->applyState(state);
+		m_qmlShellHost->selectionState()->setScopeToken(state.value(QStringLiteral("scopeToken")).toString());
+	}
+
+	if (kind == QLatin1String("rooms.update")) {
+		QVariantList rooms;
+		for (const QVariant &entry : patch.value(QStringLiteral("voiceRooms")).toList()) {
+			rooms.push_back(roomRow(entry.toMap(), QStringLiteral("voice")));
+		}
+		for (const QVariant &entry : patch.value(QStringLiteral("textRooms")).toList()) {
+			rooms.push_back(roomRow(entry.toMap(), QStringLiteral("text")));
+		}
+		m_qmlShellHost->roomModel()->synchronizeRows(rooms);
+
+		QVariantList participants;
+		for (const QVariant &entry : patch.value(QStringLiteral("participants")).toList()) {
+			participants.push_back(participantRow(entry.toMap()));
+		}
+		m_qmlShellHost->participantModel()->synchronizeRows(participants);
+
+		const QVariantMap app = patch.value(QStringLiteral("app")).toMap();
+		if (!app.isEmpty()) {
+			ClientSessionController *session = m_qmlShellHost->sessionController();
+			session->setConnected(Global::get().uiSession != 0 && Global::get().sh
+								  && Global::get().sh->isRunning());
+			session->setSelfName(app.value(QStringLiteral("selfName"), session->selfName()).toString());
+			session->setConnectionLabel(
+				app.value(QStringLiteral("selfStatusLabel"), session->connectionLabel()).toString());
+			session->setSelfMuted(app.value(QStringLiteral("selfMuted"), session->selfMuted()).toBool());
+			session->setSelfDeafened(app.value(QStringLiteral("selfDeafened"), session->selfDeafened()).toBool());
+		}
+		return;
+	}
+
+	if (kind == QLatin1String("presence.update")) {
+		const QVariantMap state = patch.value(QStringLiteral("state")).toMap();
+		if (!state.isEmpty()) m_qmlShellHost->participantModel()->upsertRow(participantRow(state));
+		return;
+	}
+
+	if (kind == QLatin1String("messages.update")) {
+		const QVariantMap message = patch.value(QStringLiteral("message")).toMap();
+		if (!message.isEmpty()) m_qmlShellHost->chatModel()->upsertRow(messageRow(message));
+		return;
+	}
+
+	if (kind == QLatin1String("messages.append") || kind == QLatin1String("messages.reset")) {
+		QVariantList messages;
+		for (const QVariant &entry : patch.value(QStringLiteral("messages")).toList()) {
+			messages.push_back(messageRow(entry.toMap()));
+		}
+		if (kind == QLatin1String("messages.reset")) {
+			m_qmlShellHost->chatModel()->synchronizeRows(messages);
+		} else {
+			for (const QVariant &message : messages) m_qmlShellHost->chatModel()->upsertRow(message.toMap());
+		}
+	}
 }
 
 void MainWindow::focusPersistentChatVoiceChannel(Channel *channel) {

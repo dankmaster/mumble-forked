@@ -11,6 +11,7 @@
 
 class AsyncOperationModel;
 class ActionModel;
+class ActiveScopeController;
 class ChatTimelineModel;
 class ClientActionRegistry;
 class ClientSessionController;
@@ -32,6 +33,7 @@ public:
 	void showRaise();
 	QQuickWindow *window() const;
 	ClientSessionController *sessionController() const;
+	ActiveScopeController *activeScopeController() const;
 	UiCommandController *commandController() const;
 	RoomModel *roomModel() const;
 	ParticipantModel *participantModel() const;
@@ -48,6 +50,7 @@ private:
 	std::unique_ptr< QQmlApplicationEngine > m_engine;
 	QPointer< QQuickWindow > m_window;
 	std::unique_ptr< ClientSessionController > m_sessionController;
+	std::unique_ptr< ActiveScopeController > m_activeScopeController;
 	std::unique_ptr< UiCommandController > m_commandController;
 	std::unique_ptr< RoomModel > m_roomModel;
 	std::unique_ptr< ParticipantModel > m_participantModel;

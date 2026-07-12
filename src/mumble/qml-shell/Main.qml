@@ -40,8 +40,19 @@ ApplicationWindow {
                         anchors.leftMargin: 20
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 4
-                        Label { text: clientSession.serverName; color: Theme.textStrong; font.pixelSize: 20; font.bold: true }
-                        Label { text: "Qt Quick native shell preview"; color: Theme.textMuted; font.pixelSize: 12 }
+                        Label {
+                            text: activeScope.label.length > 0 ? activeScope.label : clientSession.serverName
+                            color: Theme.textStrong
+                            font.pixelSize: 20
+                            font.bold: true
+                        }
+                        Label {
+                            text: activeScope.description.length > 0 ? activeScope.description : activeScope.kindLabel
+                            color: Theme.textMuted
+                            font.pixelSize: 12
+                            elide: Text.ElideRight
+                            width: Math.max(0, root.width - 390)
+                        }
                     }
                 }
 
@@ -99,8 +110,10 @@ ApplicationWindow {
                                 id: composer
                                 anchors.fill: parent
                                 anchors.margins: 5
-                                placeholderText: clientSession.connected ? "Write a message" : "Connect to send messages"
-                                enabled: clientSession.connected
+                                placeholderText: activeScope.composerPlaceholder.length > 0
+                                                 ? activeScope.composerPlaceholder
+                                                 : qsTr("Connect to send messages")
+                                enabled: activeScope.canSend
                                 color: Theme.textMain
                                 placeholderTextColor: Theme.textMuted
                                 background: null
@@ -116,7 +129,7 @@ ApplicationWindow {
                         }
                         ModernButton {
                             text: "Send"
-                            enabled: clientSession.connected && composer.text.trim().length > 0
+                            enabled: activeScope.canSend && composer.text.trim().length > 0
                             onClicked: { uiCommands.sendMessage(composer.text); composer.text = "" }
                         }
                     }
@@ -162,6 +175,8 @@ ApplicationWindow {
                             required property string subtitle
                             required property string kind
                             required property bool selected
+                            required property int depth
+                            required property int unreadCount
                             width: rooms.width - 20
                             height: subtitle.length > 0 ? 48 : 38
                             radius: 8
@@ -170,11 +185,29 @@ ApplicationWindow {
                                 anchors.left: parent.left
                                 anchors.right: parent.right
                                 anchors.verticalCenter: parent.verticalCenter
-                                anchors.leftMargin: 10
+                                anchors.leftMargin: 10 + Math.min(depth, 5) * 12
                                 anchors.rightMargin: 10
                                 spacing: 2
                                 Label { width: parent.width; text: title; color: Theme.textStrong; font.bold: true; font.pixelSize: 12; elide: Text.ElideRight }
                                 Label { width: parent.width; visible: subtitle.length > 0; text: subtitle; color: Theme.textMuted; font.pixelSize: 10; elide: Text.ElideRight }
+                            }
+                            Rectangle {
+                                visible: unreadCount > 0
+                                anchors.right: parent.right
+                                anchors.rightMargin: 8
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: Math.max(20, unreadLabel.implicitWidth + 10)
+                                height: 20
+                                radius: 10
+                                color: Theme.accent
+                                Label {
+                                    id: unreadLabel
+                                    anchors.centerIn: parent
+                                    text: unreadCount > 99 ? "99+" : unreadCount
+                                    color: Theme.strip
+                                    font.pixelSize: 9
+                                    font.bold: true
+                                }
                             }
                             MouseArea {
                                 id: roomMouse
@@ -182,6 +215,52 @@ ApplicationWindow {
                                 hoverEnabled: true
                                 onClicked: uiCommands.selectScope(stableId)
                                 onDoubleClicked: if (kind === "voice") uiCommands.joinVoiceChannel(stableId)
+                            }
+                        }
+                    }
+                    Label {
+                        Layout.leftMargin: 18
+                        Layout.topMargin: 10
+                        Layout.bottomMargin: 6
+                        text: qsTr("PARTICIPANTS")
+                        color: Theme.textMuted
+                        font.pixelSize: 10
+                        font.bold: true
+                        visible: participantModel.count > 0
+                    }
+                    ListView {
+                        id: participants
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: visible ? Math.min(contentHeight, 180) : 0
+                        visible: participantModel.count > 0
+                        model: participantModel
+                        clip: true
+                        reuseItems: true
+                        leftMargin: 10
+                        rightMargin: 10
+                        delegate: Rectangle {
+                            required property string title
+                            required property string subtitle
+                            required property string status
+                            width: participants.width - 20
+                            height: 42
+                            color: "transparent"
+                            Rectangle {
+                                id: presenceDot
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 8
+                                height: 8
+                                radius: 4
+                                color: status.length > 0 && status !== "passive" ? Theme.accent : Theme.textMuted
+                            }
+                            Column {
+                                anchors.left: presenceDot.right
+                                anchors.leftMargin: 10
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                Label { width: parent.width; text: title; color: Theme.textStrong; font.pixelSize: 11; elide: Text.ElideRight }
+                                Label { width: parent.width; text: subtitle; color: Theme.textMuted; font.pixelSize: 9; elide: Text.ElideRight; visible: subtitle.length > 0 }
                             }
                         }
                     }
@@ -196,7 +275,7 @@ ApplicationWindow {
                             ColumnLayout {
                                 Layout.fillWidth: true
                                 Label { text: clientSession.selfName; color: Theme.textStrong; font.bold: true }
-                                Label { text: clientSession.connected ? "Online" : "Offline"; color: Theme.textMuted; font.pixelSize: 10 }
+                                Label { text: clientSession.connectionLabel; color: Theme.textMuted; font.pixelSize: 10 }
                             }
                             ModernButton { text: clientSession.selfMuted ? "Unmute" : "Mute"; onClicked: uiCommands.toggleSelfMute() }
                         }

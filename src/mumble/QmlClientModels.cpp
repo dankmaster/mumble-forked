@@ -36,6 +36,46 @@ void ClientSessionController::setSelfDeafened(bool value) { SET_VALUE(m_selfDeaf
 
 #undef SET_VALUE
 
+ActiveScopeController::ActiveScopeController(QObject *parent) : QObject(parent) {
+}
+
+QString ActiveScopeController::scopeToken() const { return m_scopeToken; }
+QString ActiveScopeController::label() const { return m_label; }
+QString ActiveScopeController::description() const { return m_description; }
+QString ActiveScopeController::kindLabel() const { return m_kindLabel; }
+QString ActiveScopeController::composerPlaceholder() const { return m_composerPlaceholder; }
+QString ActiveScopeController::composerHint() const { return m_composerHint; }
+bool ActiveScopeController::canSend() const { return m_canSend; }
+
+#define SET_SCOPE_VALUE(member, signalName) \
+	if (member == value) return; \
+	member = value; \
+	emit signalName()
+
+void ActiveScopeController::setScopeToken(const QString &value) { SET_SCOPE_VALUE(m_scopeToken, scopeTokenChanged); }
+void ActiveScopeController::setLabel(const QString &value) { SET_SCOPE_VALUE(m_label, labelChanged); }
+void ActiveScopeController::setDescription(const QString &value) { SET_SCOPE_VALUE(m_description, descriptionChanged); }
+void ActiveScopeController::setKindLabel(const QString &value) { SET_SCOPE_VALUE(m_kindLabel, kindLabelChanged); }
+void ActiveScopeController::setComposerPlaceholder(const QString &value) {
+	SET_SCOPE_VALUE(m_composerPlaceholder, composerPlaceholderChanged);
+}
+void ActiveScopeController::setComposerHint(const QString &value) {
+	SET_SCOPE_VALUE(m_composerHint, composerHintChanged);
+}
+void ActiveScopeController::setCanSend(bool value) { SET_SCOPE_VALUE(m_canSend, canSendChanged); }
+
+#undef SET_SCOPE_VALUE
+
+void ActiveScopeController::applyState(const QVariantMap &state) {
+	setScopeToken(state.value(QStringLiteral("scopeToken")).toString());
+	setLabel(state.value(QStringLiteral("label")).toString());
+	setDescription(state.value(QStringLiteral("description")).toString());
+	setKindLabel(state.value(QStringLiteral("kindLabel")).toString());
+	setComposerPlaceholder(state.value(QStringLiteral("composerPlaceholder")).toString());
+	setComposerHint(state.value(QStringLiteral("composerHint")).toString());
+	setCanSend(state.value(QStringLiteral("canSend")).toBool());
+}
+
 StableListModel::StableListModel(QObject *parent) : QAbstractListModel(parent) {
 }
 
@@ -56,6 +96,11 @@ QVariant StableListModel::data(const QModelIndex &index, int role) const {
 		case SelectedRole: return row.value(QStringLiteral("selected"));
 		case StatusRole: return row.value(QStringLiteral("status"));
 		case PayloadRole: return row;
+		case DepthRole: return row.value(QStringLiteral("depth"));
+		case UnreadCountRole: return row.value(QStringLiteral("unreadCount"));
+		case AvatarUrlRole: return row.value(QStringLiteral("avatarUrl"));
+		case EnabledRole: return row.value(QStringLiteral("enabled"), true);
+		case CheckedRole: return row.value(QStringLiteral("checked"));
 		default: return {};
 	}
 }
@@ -63,7 +108,8 @@ QVariant StableListModel::data(const QModelIndex &index, int role) const {
 QHash< int, QByteArray > StableListModel::roleNames() const {
 	return { { StableIdRole, "stableId" }, { TitleRole, "title" }, { SubtitleRole, "subtitle" },
 			 { KindRole, "kind" }, { SelectedRole, "selected" }, { StatusRole, "status" },
-			 { PayloadRole, "payload" } };
+			 { PayloadRole, "payload" }, { DepthRole, "depth" }, { UnreadCountRole, "unreadCount" },
+			 { AvatarUrlRole, "avatarUrl" }, { EnabledRole, "enabled" }, { CheckedRole, "checked" } };
 }
 
 QVariantMap StableListModel::get(int row) const {
