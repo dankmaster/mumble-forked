@@ -23,6 +23,7 @@ enum class PttSafetyReason;
 class PttSafetyController;
 class QmlSelectionState;
 class QmlPerformanceMonitor;
+class QmlImagePipeline;
 class QmlThemeController;
 class QQmlApplicationEngine;
 class QQuickWindow;
@@ -51,6 +52,7 @@ public:
 	MediaSessionBackend *mediaSession() const;
 	QmlSelectionState *selectionState() const;
 	QmlPerformanceMonitor *performanceMonitor() const;
+	std::shared_ptr< QmlImagePipeline > imagePipeline() const;
 	QmlThemeController *themeController() const;
 	bool captureWindow(const QString &path, QString *error = nullptr) const;
 	void showPttTool(bool visible);
@@ -79,6 +81,7 @@ private:
 	std::unique_ptr< MediaSessionBackend > m_mediaSession;
 	std::unique_ptr< QmlSelectionState > m_selectionState;
 	std::unique_ptr< QmlPerformanceMonitor > m_performanceMonitor;
+	std::shared_ptr< QmlImagePipeline > m_imagePipeline;
 	std::unique_ptr< QmlThemeController > m_themeController;
 };
 

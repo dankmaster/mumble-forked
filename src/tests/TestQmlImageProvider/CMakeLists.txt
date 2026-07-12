@@ -1,0 +1,7 @@
+add_executable(TestQmlImageProvider TestQmlImageProvider.cpp ../../mumble/QmlImageProvider.cpp)
+set_target_properties(TestQmlImageProvider PROPERTIES AUTOMOC ON)
+find_pkg(Qt6 COMPONENTS Concurrent Gui Quick REQUIRED)
+target_include_directories(TestQmlImageProvider PRIVATE ../../mumble)
+target_link_libraries(TestQmlImageProvider PRIVATE Qt6::Concurrent Qt6::Gui Qt6::Quick Qt6::Test)
+add_test(NAME TestQmlImageProvider COMMAND $<TARGET_FILE:TestQmlImageProvider>)
+configure_client_test_runtime(TestQmlImageProvider TestQmlImageProvider)

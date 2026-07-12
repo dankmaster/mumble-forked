@@ -263,6 +263,8 @@ ApplicationWindow {
                                     anchors.fill: parent
                                     source: avatarUrl
                                     asynchronous: true
+                                    cache: false
+                                    sourceSize: Qt.size(width * Screen.devicePixelRatio, height * Screen.devicePixelRatio)
                                     fillMode: Image.PreserveAspectCrop
                                     visible: avatarImage.status === Image.Ready
                                 }

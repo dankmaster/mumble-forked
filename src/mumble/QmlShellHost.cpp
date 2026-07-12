@@ -6,6 +6,7 @@
 #include "ClientActionRegistry.h"
 #include "QmlClientModels.h"
 #include "QmlPerformanceMonitor.h"
+#include "QmlImageProvider.h"
 #include "QmlThemeController.h"
 
 #include <QtCore/QDir>
@@ -34,6 +35,7 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_mediaSession(std::make_unique< MediaSessionBackend >(this)),
 	  m_selectionState(std::make_unique< QmlSelectionState >(this)),
 	  m_performanceMonitor(std::make_unique< QmlPerformanceMonitor >(this)),
+	  m_imagePipeline(std::make_shared< QmlImagePipeline >()),
 	  m_themeController(std::make_unique< QmlThemeController >(this)) {
 }
 
@@ -52,6 +54,7 @@ bool QmlShellHost::start(QString *error) {
 	Q_UNUSED(themeType)
 	QQuickStyle::setStyle(QStringLiteral("Basic"));
 	m_engine = std::make_unique< QQmlApplicationEngine >();
+	m_engine->addImageProvider(QStringLiteral("mumble"), new QmlAsyncImageProvider(m_imagePipeline));
 	for (QObject *object : { static_cast< QObject * >(m_sessionController.get()),
 						  static_cast< QObject * >(m_activeScopeController.get()),
 						  static_cast< QObject * >(m_commandController.get()),
@@ -149,6 +152,7 @@ DialogStateController *QmlShellHost::dialogController() const { return m_dialogC
 MediaSessionBackend *QmlShellHost::mediaSession() const { return m_mediaSession.get(); }
 QmlSelectionState *QmlShellHost::selectionState() const { return m_selectionState.get(); }
 QmlPerformanceMonitor *QmlShellHost::performanceMonitor() const { return m_performanceMonitor.get(); }
+std::shared_ptr< QmlImagePipeline > QmlShellHost::imagePipeline() const { return m_imagePipeline; }
 QmlThemeController *QmlShellHost::themeController() const { return m_themeController.get(); }
 
 bool QmlShellHost::captureWindow(const QString &path, QString *error) const {

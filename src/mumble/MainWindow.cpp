@@ -41,6 +41,7 @@
 #	include "ModernDialogController.h"
 #	include "QmlClientModels.h"
 #	include "QmlShellHost.h"
+#	include "QmlImageProvider.h"
 #	include "QmlThemeController.h"
 #	include <QtQuick/QQuickWindow>
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
@@ -117,6 +118,7 @@
 #include <QtCore/QSysInfo>
 #include <QtCore/QTextStream>
 #include <QtCore/QTimer>
+#include <QtCore/QThreadPool>
 #include <QtCore/QTime>
 #include <QtCore/QTimeZone>
 #include <QtCore/QUuid>
@@ -1580,18 +1582,23 @@ QImage persistentChatAvatarTexture(const ClientUser *user, int avatarSize) {
 }
 
 [[maybe_unused]] QString modernShellAvatarDataUrl(const ClientUser *user, int avatarSize) {
-	const QImage image = persistentChatAvatarTexture(user, avatarSize);
-	if (image.isNull()) {
+	if (!user || !Global::get().mw || !Global::get().mw->qmlShellHost()) {
 		return QString();
 	}
-
-	QByteArray encodedBytes;
-	QBuffer buffer(&encodedBytes);
-	if (!buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, "PNG") || encodedBytes.isEmpty()) {
+	ClientUser *mutableUser = const_cast< ClientUser * >(user);
+	if (mutableUser->qbaTexture.isEmpty()) {
+		Global::get().mw->ensureUserTextureAvailable(mutableUser, MainWindow::UserTextureRequestReason::ModernShell);
+	}
+	if (mutableUser->qbaTexture.isEmpty()) {
 		return QString();
 	}
-
-	return QString::fromLatin1("data:image/png;base64,%1").arg(QString::fromLatin1(encodedBytes.toBase64()));
+	QByteArray format = mutableUser->qbaTextureFormat.toLower();
+	if (format == "jpg") format = "jpeg";
+	const QByteArray mime = QByteArrayLiteral("image/") + format;
+	const QString stableKey = QStringLiteral("avatar:%1:%2:%3")
+		.arg(user->uiSession).arg(QString::fromLatin1(user->qbaTextureHash.toHex())).arg(avatarSize);
+	return Global::get().mw->qmlShellHost()->imagePipeline()->registerEncoded(
+		mutableUser->qbaTexture, mime, stableKey);
 }
 
 constexpr int ModernServerIdentityImageSize               = 256;
@@ -28992,8 +28999,23 @@ void MainWindow::requestOlderPersistentChatHistory() {
 void MainWindow::attachPersistentChatImages(const QList< QUrl > &urls) {
 	for (const QUrl &url : urls) {
 		if (!url.isLocalFile()) continue;
-		const QImage image(url.toLocalFile());
-		if (!image.isNull()) attachPersistentChatImage(image);
+		if (!m_qmlShellHost) continue;
+		const QFileInfo info(url.toLocalFile());
+		const QString stableKey = QStringLiteral("attachment:%1:%2:%3")
+			.arg(info.canonicalFilePath()).arg(info.size()).arg(info.lastModified().toMSecsSinceEpoch());
+		const std::shared_ptr< QmlImagePipeline > pipeline = m_qmlShellHost->imagePipeline();
+		const QString providerUrl = pipeline->registerLocalFile(info.absoluteFilePath(), stableKey);
+		if (providerUrl.isEmpty()) continue;
+		const QUrl parsed(providerUrl);
+		const QString providerId = parsed.path().mid(1) + QStringLiteral("?") + parsed.query();
+		QPointer< MainWindow > guardedThis(this);
+		QThreadPool::globalInstance()->start([guardedThis, pipeline, providerId]() {
+			const QImage image = pipeline->loadForTest(providerId);
+			if (!guardedThis || image.isNull()) return;
+			QMetaObject::invokeMethod(guardedThis, [guardedThis, image]() {
+				if (guardedThis) guardedThis->attachPersistentChatImage(image);
+			}, Qt::QueuedConnection);
+		});
 	}
 }
 
@@ -29056,13 +29078,24 @@ void MainWindow::attachPersistentChatImage(const QImage &image) {
 		return;
 	}
 
-	const QString processedImage = Log::imageToImg(image, static_cast< int >(Global::get().uiImageLength));
-	if (processedImage.isEmpty()) {
-		Global::get().l->log(Log::Information, tr("Unable to send image: too large."));
-		return;
-	}
-
-	sendChatbarMessage(processedImage);
+	const int maximumLength = static_cast< int >(Global::get().uiImageLength);
+	QPointer< MainWindow > guardedThis(this);
+	QThreadPool::globalInstance()->start([guardedThis, image, maximumLength, target]() {
+		const QString processedImage = Log::imageToImg(image, maximumLength);
+		if (!guardedThis) return;
+		QMetaObject::invokeMethod(guardedThis, [guardedThis, processedImage, target]() {
+			if (!guardedThis) return;
+			const PersistentChatTarget current = guardedThis->currentPersistentChatTarget();
+			const bool sameTarget = current.valid == target.valid && current.directMessage == target.directMessage
+				&& current.serverLog == target.serverLog && current.scope == target.scope && current.scopeID == target.scopeID;
+			if (!sameTarget || !guardedThis->canSendToPersistentChatTarget(current, false)) return;
+			if (processedImage.isEmpty()) {
+				if (Global::get().l) Global::get().l->log(Log::Information, guardedThis->tr("Unable to send image: too large."));
+				return;
+			}
+			guardedThis->sendChatbarMessage(processedImage);
+		}, Qt::QueuedConnection);
+	});
 }
 
 bool MainWindow::attachPersistentChatImageData(const QString &dataUrl) {
@@ -29094,7 +29127,7 @@ void MainWindow::openPersistentChatImagePicker() {
 
 	QFileDialog dialog(this, tr("Attach image"));
 	dialog.setFileMode(QFileDialog::ExistingFiles);
-	dialog.setNameFilter(tr("Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp)"));
+	dialog.setNameFilter(tr("Images (*.png *.jpg *.jpeg *.gif *.webp)"));
 	const QString picturesLocation = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
 	if (!picturesLocation.isEmpty()) {
 		dialog.setDirectory(picturesLocation);

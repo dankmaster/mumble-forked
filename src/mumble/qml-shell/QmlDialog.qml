@@ -377,7 +377,7 @@ Dialog {
             property var profile: field.value || ({})
             Rectangle {
                 Layout.preferredWidth: 56; Layout.preferredHeight: 56; radius: 28; color: Theme.strip; clip: true
-                Image { anchors.fill: parent; source: parent.parent.profile.avatarUrl || ""; asynchronous: true; fillMode: Image.PreserveAspectCrop }
+                Image { anchors.fill: parent; source: parent.parent.profile.avatarUrl || ""; asynchronous: true; cache: false; sourceSize: Qt.size(width * Screen.devicePixelRatio, height * Screen.devicePixelRatio); fillMode: Image.PreserveAspectCrop }
             }
             ColumnLayout {
                 Layout.fillWidth: true
