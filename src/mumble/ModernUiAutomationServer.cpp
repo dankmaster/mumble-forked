@@ -15,6 +15,7 @@
 #include "ModernDialogController.h"
 #include "ModernDialogHost.h"
 #include "ModernShellHost.h"
+#include "QmlShellHost.h"
 #include "MumbleConstants.h"
 #include "Net.h"
 #include "OSInfo.h"
@@ -3380,6 +3381,22 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		return buildSnapshotResponse();
 	}
 
+	if (command == QLatin1String("captureQml")) {
+		if (!m_mainWindow->m_qmlShellHost || !m_mainWindow->m_qmlShellHost->window()) {
+			return errorResponse(tr("The Qt Quick frontend is not active."));
+		}
+		const QString path = request.value(QStringLiteral("path")).toString().trimmed();
+		if (path.isEmpty()) return errorResponse(tr("Missing capture path."));
+		QString captureError;
+		if (!m_mainWindow->m_qmlShellHost->captureWindow(path, &captureError)) {
+			return errorResponse(captureError);
+		}
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("path"), QFileInfo(path).absoluteFilePath());
+		response.insert(QStringLiteral("frontend"), QStringLiteral("qml"));
+		return response;
+	}
+
 	const bool async = request.value(QStringLiteral("async"), true).toBool();
 	const auto scheduleAction = [this](auto action) {
 		QPointer< MainWindow > guardedWindow(m_mainWindow);
@@ -4757,12 +4774,17 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 
 QVariantMap ModernUiAutomationServer::buildSnapshotResponse() const {
 	QVariantMap response = okResponse();
-	response.insert(QStringLiteral("snapshot"), m_mainWindow ? m_mainWindow->buildModernShellSnapshot() : QVariantMap());
+	const bool qmlActive = m_mainWindow && m_mainWindow->m_qmlShellHost
+						   && m_mainWindow->m_qmlShellHost->window();
+	response.insert(QStringLiteral("snapshot"),
+				   qmlActive ? m_mainWindow->m_qmlShellHost->stateSnapshot()
+							 : (m_mainWindow ? m_mainWindow->buildModernShellSnapshot() : QVariantMap()));
 	response.insert(QStringLiteral("modernDialog"),
 					m_mainWindow && m_mainWindow->m_modernDialogController
 						? m_mainWindow->m_modernDialogController->state()
 						: QVariantMap { { QStringLiteral("open"), false } });
 	response.insert(QStringLiteral("usesModernShell"), m_mainWindow && true);
+	response.insert(QStringLiteral("frontend"), qmlActive ? QStringLiteral("qml") : QStringLiteral("web"));
 	response.insert(QStringLiteral("listening"), isListening());
 	response.insert(QStringLiteral("port"), port());
 	return response;

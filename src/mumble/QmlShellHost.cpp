@@ -6,7 +6,10 @@
 #include "ClientActionRegistry.h"
 #include "QmlClientModels.h"
 
+#include <QtCore/QDir>
+#include <QtCore/QFileInfo>
 #include <QtCore/QUrl>
+#include <QtGui/QImage>
 #include <QtQml/QQmlApplicationEngine>
 #include <QtQml/QQmlContext>
 #include <QtQuick/QQuickWindow>
@@ -86,3 +89,82 @@ ChatTimelineModel *QmlShellHost::chatModel() const { return m_chatModel.get(); }
 AsyncOperationModel *QmlShellHost::operationModel() const { return m_operationModel.get(); }
 ActionModel *QmlShellHost::actionModel() const { return m_actionModel.get(); }
 QmlSelectionState *QmlShellHost::selectionState() const { return m_selectionState.get(); }
+
+QVariantMap QmlShellHost::stateSnapshot() const {
+	QVariantMap snapshot;
+	QVariantMap app;
+	app.insert(QStringLiteral("serverTitle"), m_sessionController->serverName());
+	app.insert(QStringLiteral("selfName"), m_sessionController->selfName());
+	app.insert(QStringLiteral("selfStatusLabel"), m_sessionController->connectionLabel());
+	app.insert(QStringLiteral("selfMuted"), m_sessionController->selfMuted());
+	app.insert(QStringLiteral("selfDeafened"), m_sessionController->selfDeafened());
+	app.insert(QStringLiteral("connected"), m_sessionController->connected());
+	snapshot.insert(QStringLiteral("app"), app);
+
+	QVariantMap activeScope;
+	activeScope.insert(QStringLiteral("scopeToken"), m_activeScopeController->scopeToken());
+	activeScope.insert(QStringLiteral("label"), m_activeScopeController->label());
+	activeScope.insert(QStringLiteral("description"), m_activeScopeController->description());
+	activeScope.insert(QStringLiteral("kindLabel"), m_activeScopeController->kindLabel());
+	activeScope.insert(QStringLiteral("composerPlaceholder"), m_activeScopeController->composerPlaceholder());
+	activeScope.insert(QStringLiteral("composerHint"), m_activeScopeController->composerHint());
+	activeScope.insert(QStringLiteral("canSend"), m_activeScopeController->canSend());
+	snapshot.insert(QStringLiteral("activeScope"), activeScope);
+
+	QVariantList voiceRooms;
+	QVariantList textRooms;
+	for (int row = 0; row < m_roomModel->rowCount(); ++row) {
+		const QVariantMap modelRow = m_roomModel->get(row);
+		QVariantMap state = modelRow.value(QStringLiteral("source")).toMap();
+		if (state.isEmpty()) state = modelRow;
+		if (!state.contains(QStringLiteral("token"))) {
+			state.insert(QStringLiteral("token"), modelRow.value(QStringLiteral("id")));
+		}
+		if (modelRow.value(QStringLiteral("kind")).toString() == QLatin1String("voice")) {
+			voiceRooms.push_back(state);
+		} else {
+			textRooms.push_back(state);
+		}
+	}
+	snapshot.insert(QStringLiteral("voiceRooms"), voiceRooms);
+	snapshot.insert(QStringLiteral("textRooms"), textRooms);
+
+	QVariantList participants;
+	for (int row = 0; row < m_participantModel->rowCount(); ++row) {
+		const QVariantMap modelRow = m_participantModel->get(row);
+		const QVariantMap state = modelRow.value(QStringLiteral("source")).toMap();
+		participants.push_back(state.isEmpty() ? modelRow : state);
+	}
+	snapshot.insert(QStringLiteral("participants"), participants);
+
+	QVariantList messages;
+	for (int row = 0; row < m_chatModel->rowCount(); ++row) {
+		const QVariantMap modelRow = m_chatModel->get(row);
+		const QVariantMap state = modelRow.value(QStringLiteral("source")).toMap();
+		messages.push_back(state.isEmpty() ? modelRow : state);
+	}
+	snapshot.insert(QStringLiteral("messages"), messages);
+	return snapshot;
+}
+
+bool QmlShellHost::captureWindow(const QString &path, QString *error) const {
+	if (!m_window) {
+		if (error) *error = tr("The Qt Quick window is not available.");
+		return false;
+	}
+	const QFileInfo fileInfo(path);
+	if (fileInfo.filePath().trimmed().isEmpty()) {
+		if (error) *error = tr("No capture path was provided.");
+		return false;
+	}
+	if (!QDir().mkpath(fileInfo.absolutePath())) {
+		if (error) *error = tr("The capture directory could not be created.");
+		return false;
+	}
+	const QImage image = m_window->grabWindow();
+	if (image.isNull() || !image.save(fileInfo.absoluteFilePath(), "PNG")) {
+		if (error) *error = tr("The Qt Quick window could not be captured.");
+		return false;
+	}
+	return true;
+}

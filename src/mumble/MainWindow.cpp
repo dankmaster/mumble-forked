@@ -14015,6 +14015,7 @@ void MainWindow::applyShellLayout() {
 
 		QString qmlError;
 		if (m_qmlShellHost->start(&qmlError)) {
+			ensureModernUiAutomationServer();
 			QTimer::singleShot(0, this, [this]() { syncQmlShellState(); });
 			hide();
 			m_qmlShellHost->showRaise();
@@ -15626,22 +15627,7 @@ void MainWindow::activateModernShell() {
 			return;
 		}
 		appendModernShellConnectTrace(QStringLiteral("activateModernShell start-ok"));
-#if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
-		if (qEnvironmentVariableIsSet("MUMBLE_MODERN_AUTOMATION_PORT") && !m_modernUiAutomationServer) {
-			m_modernUiAutomationServer = std::make_unique< ModernUiAutomationServer >(this, this);
-			QString automationError;
-			if (m_modernUiAutomationServer->start(&automationError)) {
-				if (m_modernUiAutomationServer->isListening()) {
-					appendModernShellConnectTrace(QStringLiteral("activateModernShell automation-listening port=%1")
-													  .arg(m_modernUiAutomationServer->port()));
-				}
-			} else {
-				appendModernShellConnectTrace(
-					QStringLiteral("activateModernShell automation-failed error=%1").arg(automationError));
-				m_modernUiAutomationServer.reset();
-			}
-		}
-#endif
+		ensureModernUiAutomationServer();
 	}
 
 	if (centralWidget() != m_modernShellHost) {
@@ -30654,6 +30640,23 @@ Channel *MainWindow::selectedVoiceTreeChannel() const {
 	return currentVoiceChannel();
 }
 
+void MainWindow::ensureModernUiAutomationServer() {
+#if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
+	if (!qEnvironmentVariableIsSet("MUMBLE_MODERN_AUTOMATION_PORT") || m_modernUiAutomationServer) return;
+	m_modernUiAutomationServer = std::make_unique< ModernUiAutomationServer >(this, this);
+	QString automationError;
+	if (m_modernUiAutomationServer->start(&automationError)) {
+		if (m_modernUiAutomationServer->isListening()) {
+			appendModernShellConnectTrace(QStringLiteral("modern UI automation listening port=%1")
+										  .arg(m_modernUiAutomationServer->port()));
+		}
+	} else {
+		appendModernShellConnectTrace(QStringLiteral("modern UI automation failed error=%1").arg(automationError));
+		m_modernUiAutomationServer.reset();
+	}
+#endif
+}
+
 void MainWindow::syncQmlShellState() {
 	if (!m_qmlShellHost || !m_qmlShellHost->window()) {
 		return;
@@ -30834,8 +30837,20 @@ void MainWindow::applyQmlShellPatch(const QString &kind, const QVariantMap &patc
 		const QVariantMap app = patch.value(QStringLiteral("app")).toMap();
 		if (!app.isEmpty()) {
 			ClientSessionController *session = m_qmlShellHost->sessionController();
-			session->setConnected(Global::get().uiSession != 0 && Global::get().sh
-								  && Global::get().sh->isRunning());
+			const bool connected = Global::get().uiSession != 0 && Global::get().sh
+								   && Global::get().sh->isRunning();
+			session->setConnected(connected);
+			if (connected) {
+				QString serverName = Global::get().qsServerDisplayName.trimmed();
+				if (serverName.isEmpty()) {
+					if (const Channel *rootChannel = Channel::get(Mumble::ROOT_CHANNEL_ID);
+						rootChannel && rootChannel->qsName != tr("Root")) {
+						serverName = rootChannel->qsName.trimmed();
+					}
+				}
+				if (serverName.isEmpty()) serverName = Global::get().s.qsLastServer.trimmed();
+				if (!serverName.isEmpty()) session->setServerName(serverName);
+			}
 			session->setSelfName(app.value(QStringLiteral("selfName"), session->selfName()).toString());
 			session->setConnectionLabel(
 				app.value(QStringLiteral("selfStatusLabel"), session->connectionLabel()).toString());

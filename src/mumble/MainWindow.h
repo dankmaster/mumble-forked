@@ -225,6 +225,7 @@ public:
 	void syncModernShellSnapshot();
 	void syncQmlShellState();
 	void applyQmlShellPatch(const QString &kind, const QVariantMap &patch);
+	void ensureModernUiAutomationServer();
 	void beginNativeWindowMoveOrResize();
 	void endNativeWindowMoveOrResize();
 	void updateServerNavigatorChrome();

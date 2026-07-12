@@ -6,6 +6,7 @@
 
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
+#include <QtCore/QVariantMap>
 
 #include <memory>
 
@@ -41,6 +42,8 @@ public:
 	AsyncOperationModel *operationModel() const;
 	ActionModel *actionModel() const;
 	QmlSelectionState *selectionState() const;
+	QVariantMap stateSnapshot() const;
+	bool captureWindow(const QString &path, QString *error = nullptr) const;
 
 signals:
 	void closeRequested();
