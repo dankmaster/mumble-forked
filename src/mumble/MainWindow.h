@@ -68,7 +68,6 @@ class PersistentChatController;
 class PersistentChatHistoryModel;
 class PersistentChatHistoryDelegate;
 class ModernDialogController;
-class ModernPttToolHost;
 class QmlShellHost;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 class ModernUiAutomationServer;
@@ -931,7 +930,6 @@ protected:
 	bool m_updateResumeTextChannelSyncObserved = false;
 	std::unique_ptr< QmlShellHost > m_qmlShellHost;
 	std::unique_ptr< ModernDialogController > m_modernDialogController;
-	ModernPttToolHost *m_modernPttToolHost = nullptr;
 	QStringList m_modernStartupDialogQueue;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 	std::unique_ptr< ModernUiAutomationServer > m_modernUiAutomationServer;

@@ -44,7 +44,6 @@
 #endif
 #include "ModernTheme.h"
 #	include "ModernDialogController.h"
-#	include "ModernPttToolHost.h"
 #	include "QmlClientModels.h"
 #	include "QmlShellHost.h"
 #	include <QtQuick/QQuickWindow>
@@ -34415,7 +34414,6 @@ MainWindow::~MainWindow() {
 	delete m_persistentChatPreviewSnapshotRenderer;
 	m_persistentChatPreviewSnapshotRenderer = nullptr;
 	stopModernConnectServerPing();
-	delete m_modernPttToolHost;
 	if (qdwLog) {
 		delete qdwLog->titleBarWidget();
 	}
@@ -34479,11 +34477,6 @@ void MainWindow::closeEvent(QCloseEvent *e) {
 
 	storeState(Global::get().s.bMinimalView);
 
-	if (m_modernPttToolHost) {
-		m_modernPttToolHost->close();
-		m_modernPttToolHost->deleteLater();
-		m_modernPttToolHost = nullptr;
-	}
 	Global::get().bQuit = true;
 
 	QMainWindow::closeEvent(e);
@@ -35593,10 +35586,6 @@ void MainWindow::setupView(bool toggle_minimize) {
 	if (m_qmlShellHost) {
 		m_qmlShellHost->showPttTool(Global::get().s.bShowPTTButtonWindow
 								&& Global::get().s.atTransmit == Settings::PushToTalk);
-	}
-	if (m_modernPttToolHost) {
-		m_modernPttToolHost->deleteLater();
-		m_modernPttToolHost = nullptr;
 	}
 }
 

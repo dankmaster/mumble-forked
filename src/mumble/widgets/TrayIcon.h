@@ -17,7 +17,6 @@
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QSystemTrayIcon>
 
-class ModernContextMenuHost;
 
 class TrayIcon : public QSystemTrayIcon {
 	Q_OBJECT
@@ -51,20 +50,6 @@ private:
 	void updateNativeContextMenu();
 	void showNativeFallbackMenu();
 
-	bool shouldUseModernContextMenu() const;
-	ModernContextMenuHost *ensureModernContextMenuHost();
-	bool showModernContextMenu();
-	QVariantList buildModernContextMenuItems();
-	void clearModernContextMenuState();
-	void appendModernTraySeparator(QVariantList &items) const;
-	void appendModernTrayAction(QVariantList &items, const QString &id, const QString &label, bool enabled,
-								bool checked, const QString &icon, const QString &tone,
-								std::function< void() > handler);
-
-	QPointer< ModernContextMenuHost > m_modernContextMenu;
-	QString m_modernContextMenuToken;
-	QVector< std::function< void() > > m_modernContextMenuHandlers;
-	quint64 m_modernContextMenuSerial = 0;
 
 private slots:
 	void on_icon_clicked(QSystemTrayIcon::ActivationReason reason);

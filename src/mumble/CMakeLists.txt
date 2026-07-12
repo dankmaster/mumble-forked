@@ -119,7 +119,6 @@ find_pkg(Qt6
 		Quick
 		QuickControls2
 		QuickDialogs2
-		WebChannel
 		WebEngineQuick
 		WebEngineWidgets
 	REQUIRED
@@ -363,111 +362,18 @@ set(MUMBLE_SOURCES
 )
 
 list(APPEND MUMBLE_SOURCES
-		"QmlClientModels.cpp"
-		"QmlClientModels.h"
-		"QmlShellHost.cpp"
-		"QmlShellHost.h"
-		"ModernShellBridge.cpp"
-		"ModernShellBridge.h"
-		"ModernContextMenuHost.cpp"
-		"ModernContextMenuHost.h"
-		"ModernDialogHost.cpp"
-		"ModernDialogHost.h"
-		"ModernPttToolHost.cpp"
-		"ModernPttToolHost.h"
-		"ModernShellHost.cpp"
-		"ModernShellHost.h"
-		"ModernShellPage.cpp"
-		"ModernShellPage.h"
-		"modern-shell.qrc"
+	"QmlClientModels.cpp"
+	"QmlClientModels.h"
+	"QmlShellHost.cpp"
+	"QmlShellHost.h"
+)
+
+if(modern-layout-automation)
+	list(APPEND MUMBLE_SOURCES
+		"ModernUiAutomationServer.cpp"
+		"ModernUiAutomationServer.h"
 	)
-
-	if(modern-layout-automation)
-		list(APPEND MUMBLE_SOURCES
-			"ModernUiAutomationServer.cpp"
-			"ModernUiAutomationServer.h"
-		)
-	endif()
-
-	if(modern-layout-automation)
-		set(MUMBLE_MODERN_UI_AUTOMATION_JS "true")
-	else()
-		set(MUMBLE_MODERN_UI_AUTOMATION_JS "false")
-	endif()
-	if(modern-layout-mockups)
-		set(MUMBLE_MODERN_UI_MOCKUPS_JS "true")
-	else()
-		set(MUMBLE_MODERN_UI_MOCKUPS_JS "false")
-	endif()
-	set(MUMBLE_MODERN_SHELL_BUILD_FLAGS_JS "${CMAKE_CURRENT_BINARY_DIR}/modern-shell-build-flags.js")
-	set(MUMBLE_MODERN_SHELL_BUILD_FLAGS_QRC "${CMAKE_CURRENT_BINARY_DIR}/modern-shell-build-flags.qrc")
-	set(MUMBLE_MODERN_SHELL_APP_JS "${CMAKE_CURRENT_BINARY_DIR}/modern-shell-app.js")
-	set(MUMBLE_MODERN_SHELL_DIALOG_JS "${CMAKE_CURRENT_BINARY_DIR}/modern-shell-dialog.js")
-	set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-		"${CMAKE_CURRENT_SOURCE_DIR}/modern-shell/app.js"
-		"${CMAKE_CURRENT_SOURCE_DIR}/modern-shell/dialog.js"
-	)
-
-	file(READ "${CMAKE_CURRENT_SOURCE_DIR}/modern-shell/app.js" MUMBLE_MODERN_SHELL_APP_JS_CONTENT)
-	if(NOT modern-layout-mockups)
-		set(MUMBLE_MODERN_MOCKUPS_STUB [=[
-	/* MUMBLE_MODERN_MOCKUPS_STRIPPED */
-	function handleMockupBridgeCall() {
-		return false;
-	}
-
-	function syncWalkthroughDialogFromQuery() {
-	}
-
-	function syncWalkthroughUiFromQuery() {
-	}
-
-	function fallbackWalkthroughSnapshot() {
-		return null;
-	}
-]=])
-		mumble_strip_marked_shell_block(
-			MUMBLE_MODERN_SHELL_APP_JS_CONTENT
-			"/* MUMBLE_MODERN_MOCKUPS_BEGIN */"
-			"/* MUMBLE_MODERN_MOCKUPS_END */"
-			"${MUMBLE_MODERN_MOCKUPS_STUB}"
-		)
-	endif()
-	if(NOT modern-layout-automation)
-		set(MUMBLE_MODERN_AUTOMATION_STUB [=[
-	/* MUMBLE_MODERN_AUTOMATION_STRIPPED */
-]=])
-		mumble_strip_marked_shell_block(
-			MUMBLE_MODERN_SHELL_APP_JS_CONTENT
-			"/* MUMBLE_MODERN_AUTOMATION_BEGIN */"
-			"/* MUMBLE_MODERN_AUTOMATION_END */"
-			"${MUMBLE_MODERN_AUTOMATION_STUB}"
-		)
-	endif()
-	file(WRITE "${MUMBLE_MODERN_SHELL_APP_JS}" "${MUMBLE_MODERN_SHELL_APP_JS_CONTENT}")
-
-	file(READ "${CMAKE_CURRENT_SOURCE_DIR}/modern-shell/dialog.js" MUMBLE_MODERN_SHELL_DIALOG_JS_CONTENT)
-	if(NOT modern-layout-automation)
-		mumble_strip_marked_shell_block(
-			MUMBLE_MODERN_SHELL_DIALOG_JS_CONTENT
-			"/* MUMBLE_MODERN_AUTOMATION_BEGIN */"
-			"/* MUMBLE_MODERN_AUTOMATION_END */"
-			"${MUMBLE_MODERN_AUTOMATION_STUB}"
-		)
-	endif()
-	file(WRITE "${MUMBLE_MODERN_SHELL_DIALOG_JS}" "${MUMBLE_MODERN_SHELL_DIALOG_JS_CONTENT}")
-
-	configure_file(
-		"${CMAKE_CURRENT_SOURCE_DIR}/modern-shell/build-flags.js.in"
-		"${MUMBLE_MODERN_SHELL_BUILD_FLAGS_JS}"
-		@ONLY
-	)
-	configure_file(
-		"${CMAKE_CURRENT_SOURCE_DIR}/modern-shell-build-flags.qrc.in"
-		"${MUMBLE_MODERN_SHELL_BUILD_FLAGS_QRC}"
-		@ONLY
-	)
-	list(APPEND MUMBLE_SOURCES "${MUMBLE_MODERN_SHELL_BUILD_FLAGS_QRC}")
+endif()
 
 add_library(smallft STATIC "${3RDPARTY_DIR}/smallft/smallft.cpp")
 target_include_directories(smallft PUBLIC "${3RDPARTY_DIR}/smallft")
@@ -733,13 +639,11 @@ if(modern-layout-mockups)
 endif()
 target_link_libraries(mumble_client_object_lib
 	PUBLIC
-		Qt6::WebChannel
 		Qt6::WebEngineQuick
 		Qt6::WebEngineWidgets
 )
 target_link_libraries(mumble
 	PRIVATE
-		Qt6::WebChannel
 		Qt6::WebEngineQuick
 		Qt6::WebEngineWidgets
 )
