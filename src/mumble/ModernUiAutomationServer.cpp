@@ -13,6 +13,7 @@
 #include "MainWindow.h"
 #include "ModernDialogController.h"
 #include "QmlClientModels.h"
+#include "QmlPerformanceMonitor.h"
 #include "QmlShellHost.h"
 #include "MumbleConstants.h"
 #include "Net.h"
@@ -3439,6 +3440,34 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 
 	if (command == QLatin1String("snapshot")) {
 		return buildStateResponse();
+	}
+
+	if (command.startsWith(QLatin1String("qmlPerformance"))) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->performanceMonitor())
+			return errorResponse(tr("The Qt Quick performance monitor is not active."));
+		QmlPerformanceMonitor *monitor = host->performanceMonitor();
+		if (command == QLatin1String("qmlPerformanceReset")) {
+			monitor->reset();
+		} else if (command == QLatin1String("qmlPerformanceBegin")) {
+			monitor->beginFrameSampling();
+		} else if (command == QLatin1String("qmlPerformanceEnd")) {
+			monitor->endFrameSampling();
+		} else if (command == QLatin1String("qmlPerformanceMarkInput")) {
+			QVariantMap response = okResponse();
+			response.insert(QStringLiteral("operationId"),
+							monitor->markInput(request.value(QStringLiteral("operationId")).toString()));
+			return response;
+		} else if (command == QLatin1String("qmlPerformanceMarkVisual")) {
+			const QString operationId = request.value(QStringLiteral("operationId")).toString().trimmed();
+			if (operationId.isEmpty()) return errorResponse(tr("Missing performance scenario operation ID."));
+			monitor->markVisualComplete(operationId);
+		} else if (command != QLatin1String("qmlPerformanceSnapshot")) {
+			return errorResponse(tr("Unknown Qt Quick performance command."));
+		}
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("performance"), monitor->snapshot());
+		return response;
 	}
 
 	if (command == QLatin1String("captureQml")) {

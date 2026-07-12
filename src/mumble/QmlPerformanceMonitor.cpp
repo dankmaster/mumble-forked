@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <QEvent>
 
 namespace {
 constexpr qint64 HeartbeatIntervalMs = 16;
 constexpr double StallThresholdMs = 50.0;
 constexpr qsizetype MaximumSamples = 600;
+constexpr qsizetype MaximumPendingInputs = 64;
 }
 
 QmlPerformanceMonitor::QmlPerformanceMonitor(QObject *parent) : QObject(parent) {
@@ -22,22 +24,41 @@ double QmlPerformanceMonitor::p99FrameMs() const { return percentile(m_frameInte
 bool QmlPerformanceMonitor::frameSampling() const { return m_frameSampling; }
 double QmlPerformanceMonitor::lastInputLatencyMs() const { return m_lastInputLatencyMs; }
 double QmlPerformanceMonitor::maxInputLatencyMs() const { return m_maxInputLatencyMs; }
+double QmlPerformanceMonitor::p95InputLatencyMs() const { return percentile(m_inputLatenciesMs, 0.95); }
+double QmlPerformanceMonitor::p99InputLatencyMs() const { return percentile(m_inputLatenciesMs, 0.99); }
 int QmlPerformanceMonitor::uiStallCount() const { return m_uiStallCount; }
 double QmlPerformanceMonitor::maxUiStallMs() const { return m_maxUiStallMs; }
 
 QVariantMap QmlPerformanceMonitor::snapshot() const {
+	const bool hasFrameSamples = !m_frameIntervalsMs.isEmpty();
+	const bool hasInputSamples = !m_inputLatenciesMs.isEmpty();
+	const QVariantMap gates { { QStringLiteral("frameP95Passed"), hasFrameSamples && p95FrameMs() <= 16.7 },
+						 { QStringLiteral("frameP99Passed"), hasFrameSamples && p99FrameMs() <= 33.3 },
+						 { QStringLiteral("inputP95Passed"), hasInputSamples && p95InputLatencyMs() <= 50.0 },
+						 { QStringLiteral("noUiStallsPassed"), m_uiStallCount == 0 } };
 	return { { QStringLiteral("frameSampling"), m_frameSampling },
 			 { QStringLiteral("frameSampleCount"), m_frameIntervalsMs.size() },
 			 { QStringLiteral("p95FrameMs"), p95FrameMs() }, { QStringLiteral("p99FrameMs"), p99FrameMs() },
 			 { QStringLiteral("inputSampleCount"), m_inputLatenciesMs.size() },
 			 { QStringLiteral("lastInputLatencyMs"), m_lastInputLatencyMs },
 			 { QStringLiteral("maxInputLatencyMs"), m_maxInputLatencyMs },
+			 { QStringLiteral("p95InputLatencyMs"), p95InputLatencyMs() },
+			 { QStringLiteral("p99InputLatencyMs"), p99InputLatencyMs() },
 			 { QStringLiteral("uiStallCount"), m_uiStallCount },
 			 { QStringLiteral("maxUiStallMs"), m_maxUiStallMs },
-			 { QStringLiteral("pendingInputCount"), m_pendingInputs.size() } };
+			 { QStringLiteral("pendingInputCount"), m_pendingInputs.size() },
+			 { QStringLiteral("thresholds"),
+			   QVariantMap { { QStringLiteral("frameP95Ms"), 16.7 }, { QStringLiteral("frameP99Ms"), 33.3 },
+						 { QStringLiteral("inputP95Ms"), 50.0 }, { QStringLiteral("uiStallMs"), 50.0 } } },
+			 { QStringLiteral("gates"), gates } };
 }
 
-void QmlPerformanceMonitor::markFramePresented() { recordFrameAt(nowNs()); }
+void QmlPerformanceMonitor::markFramePresented() {
+	const qint64 timestampNs = nowNs();
+	const QQueue< QString > pending = m_pendingInputOrder;
+	for (const QString &operationId : pending) recordVisualAt(operationId, timestampNs);
+	recordFrameAt(timestampNs);
+}
 
 void QmlPerformanceMonitor::beginFrameSampling() {
 	if (m_frameSampling) return;
@@ -64,6 +85,13 @@ void QmlPerformanceMonitor::markVisualComplete(const QString &operationId) {
 	recordVisualAt(operationId, nowNs());
 }
 
+void QmlPerformanceMonitor::installInputObserver(QObject *target) {
+	if (m_inputTarget == target) return;
+	if (m_inputTarget) m_inputTarget->removeEventFilter(this);
+	m_inputTarget = target;
+	if (m_inputTarget) m_inputTarget->installEventFilter(this);
+}
+
 void QmlPerformanceMonitor::reset() {
 	m_lastFrameNs = -1;
 	const bool wasSampling = m_frameSampling;
@@ -72,6 +100,7 @@ void QmlPerformanceMonitor::reset() {
 	m_frameIntervalsMs.clear();
 	m_inputLatenciesMs.clear();
 	m_pendingInputs.clear();
+	m_pendingInputOrder.clear();
 	m_lastInputLatencyMs = 0.0;
 	m_maxInputLatencyMs = 0.0;
 	m_uiStallCount = 0;
@@ -91,11 +120,12 @@ void QmlPerformanceMonitor::recordFrameAt(const qint64 timestampNs) {
 
 void QmlPerformanceMonitor::recordHeartbeatAt(const qint64 timestampNs) {
 	if (m_lastHeartbeatNs >= 0 && timestampNs > m_lastHeartbeatNs) {
-		const double delayMs = (timestampNs - m_lastHeartbeatNs) / 1000000.0;
-		if (delayMs > StallThresholdMs) {
+		const double intervalMs = (timestampNs - m_lastHeartbeatNs) / 1000000.0;
+		const double stallMs = std::max(0.0, intervalMs - static_cast< double >(HeartbeatIntervalMs));
+		if (stallMs > StallThresholdMs) {
 			++m_uiStallCount;
-			m_maxUiStallMs = std::max(m_maxUiStallMs, delayMs);
-			emit uiStallObserved(delayMs);
+			m_maxUiStallMs = std::max(m_maxUiStallMs, stallMs);
+			emit uiStallObserved(stallMs);
 			emit metricsChanged();
 		}
 	}
@@ -104,7 +134,13 @@ void QmlPerformanceMonitor::recordHeartbeatAt(const qint64 timestampNs) {
 
 void QmlPerformanceMonitor::recordInputAt(const QString &operationId, const qint64 timestampNs) {
 	const QString id = operationId.trimmed();
-	if (!id.isEmpty()) m_pendingInputs.insert(id, timestampNs);
+	if (id.isEmpty()) return;
+	m_pendingInputOrder.removeAll(id);
+	m_pendingInputs.insert(id, timestampNs);
+	m_pendingInputOrder.enqueue(id);
+	while (m_pendingInputOrder.size() > MaximumPendingInputs) {
+		m_pendingInputs.remove(m_pendingInputOrder.dequeue());
+	}
 }
 
 void QmlPerformanceMonitor::recordVisualAt(const QString &operationId, const qint64 timestampNs) {
@@ -113,6 +149,7 @@ void QmlPerformanceMonitor::recordVisualAt(const QString &operationId, const qin
 	if (found == m_pendingInputs.cend() || timestampNs < found.value()) return;
 	const double latencyMs = (timestampNs - found.value()) / 1000000.0;
 	m_pendingInputs.remove(id);
+	m_pendingInputOrder.removeAll(id);
 	appendBounded(m_inputLatenciesMs, latencyMs);
 	m_lastInputLatencyMs = latencyMs;
 	m_maxInputLatencyMs = std::max(m_maxInputLatencyMs, latencyMs);
@@ -134,3 +171,18 @@ void QmlPerformanceMonitor::appendBounded(QVector< double > &values, const doubl
 }
 
 qint64 QmlPerformanceMonitor::nowNs() const { return m_clock.nsecsElapsed(); }
+
+bool QmlPerformanceMonitor::eventFilter(QObject *watched, QEvent *event) {
+	if (watched == m_inputTarget && event) {
+		switch (event->type()) {
+			case QEvent::KeyPress:
+			case QEvent::MouseButtonPress:
+			case QEvent::TouchBegin:
+			case QEvent::Wheel:
+				recordInputAt(QStringLiteral("event:%1").arg(++m_generatedOperationId), nowNs());
+				break;
+			default: break;
+		}
+	}
+	return QObject::eventFilter(watched, event);
+}

@@ -5,6 +5,7 @@
 #define MUMBLE_MUMBLE_QMLCLIENTMODELS_H_
 
 #include <QtCore/QAbstractListModel>
+#include <QtCore/QHash>
 #include <QtCore/QObject>
 #include <QtCore/QStringList>
 #include <QtCore/QVariantList>
@@ -179,7 +180,6 @@ public:
 	QHash< int, QByteArray > roleNames() const override;
 	Q_INVOKABLE QVariantMap get(int row) const;
 
-	void replaceRows(const QVariantList &rows);
 	void synchronizeRows(const QVariantList &rows);
 	void upsertRow(const QVariantMap &row);
 	void removeRow(const QString &stableId);
@@ -189,9 +189,13 @@ signals:
 	void countChanged();
 
 private:
+	static QVariant valueForRole(const QVariantMap &row, int role);
+	static QList< int > changedRoles(const QVariantMap &before, const QVariantMap &after);
 	int indexOf(const QString &stableId) const;
+	void rebuildRowIndex();
 	QVariantList m_rows;
 	QStringList m_rowIds;
+	QHash< QString, int > m_rowIndexById;
 };
 
 class RoomModel final : public StableListModel {
@@ -430,6 +434,24 @@ signals:
 
 private:
 	bool m_pttPressed = false;
+};
+
+enum class PttSafetyReason {
+	WindowClosing,
+	WindowDeactivated,
+	ApplicationDeactivated,
+	WindowHidden,
+	SceneGraphError,
+	HostDestroyed
+};
+
+class PttSafetyController final {
+public:
+	explicit PttSafetyController(UiCommandController *commands);
+	void release(PttSafetyReason reason);
+
+private:
+	UiCommandController *m_commands = nullptr;
 };
 
 #endif // MUMBLE_MUMBLE_QMLCLIENTMODELS_H_

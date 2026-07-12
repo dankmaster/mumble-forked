@@ -4,9 +4,13 @@
 #include <QElapsedTimer>
 #include <QHash>
 #include <QObject>
+#include <QPointer>
+#include <QQueue>
 #include <QTimer>
 #include <QVariantMap>
 #include <QVector>
+
+class QEvent;
 
 class QmlPerformanceMonitor final : public QObject {
 	Q_OBJECT
@@ -15,6 +19,8 @@ class QmlPerformanceMonitor final : public QObject {
 	Q_PROPERTY(bool frameSampling READ frameSampling NOTIFY frameSamplingChanged)
 	Q_PROPERTY(double lastInputLatencyMs READ lastInputLatencyMs NOTIFY metricsChanged)
 	Q_PROPERTY(double maxInputLatencyMs READ maxInputLatencyMs NOTIFY metricsChanged)
+	Q_PROPERTY(double p95InputLatencyMs READ p95InputLatencyMs NOTIFY metricsChanged)
+	Q_PROPERTY(double p99InputLatencyMs READ p99InputLatencyMs NOTIFY metricsChanged)
 	Q_PROPERTY(int uiStallCount READ uiStallCount NOTIFY metricsChanged)
 	Q_PROPERTY(double maxUiStallMs READ maxUiStallMs NOTIFY metricsChanged)
 	Q_PROPERTY(QVariantMap snapshot READ snapshot NOTIFY metricsChanged)
@@ -27,6 +33,8 @@ public:
 	bool frameSampling() const;
 	double lastInputLatencyMs() const;
 	double maxInputLatencyMs() const;
+	double p95InputLatencyMs() const;
+	double p99InputLatencyMs() const;
 	int uiStallCount() const;
 	double maxUiStallMs() const;
 	QVariantMap snapshot() const;
@@ -36,6 +44,7 @@ public:
 	Q_INVOKABLE void endFrameSampling();
 	Q_INVOKABLE QString markInput(const QString &operationId = {});
 	Q_INVOKABLE void markVisualComplete(const QString &operationId);
+	Q_INVOKABLE void installInputObserver(QObject *target);
 	Q_INVOKABLE void reset();
 
 	// Deterministic hooks used by tests and non-QML automation adapters.
@@ -51,6 +60,7 @@ signals:
 	void inputLatencyObserved(const QString &operationId, double durationMs);
 
 private:
+	bool eventFilter(QObject *watched, QEvent *event) override;
 	static double percentile(const QVector< double > &values, double fraction);
 	static void appendBounded(QVector< double > &values, double value);
 	qint64 nowNs() const;
@@ -63,6 +73,8 @@ private:
 	QVector< double > m_frameIntervalsMs;
 	QVector< double > m_inputLatenciesMs;
 	QHash< QString, qint64 > m_pendingInputs;
+	QQueue< QString > m_pendingInputOrder;
+	QPointer< QObject > m_inputTarget;
 	double m_lastInputLatencyMs = 0.0;
 	double m_maxInputLatencyMs = 0.0;
 	int m_uiStallCount = 0;

@@ -19,6 +19,8 @@ class ClientSessionController;
 class DialogStateController;
 class MediaSessionBackend;
 class ParticipantModel;
+enum class PttSafetyReason;
+class PttSafetyController;
 class QmlSelectionState;
 class QmlPerformanceMonitor;
 class QQmlApplicationEngine;
@@ -57,12 +59,15 @@ signals:
 	void closeRequested();
 
 private:
+	void releasePttForSafety(PttSafetyReason reason);
+
 	ClientActionRegistry *m_actionRegistry = nullptr;
 	std::unique_ptr< QQmlApplicationEngine > m_engine;
 	QPointer< QQuickWindow > m_window;
 	std::unique_ptr< ClientSessionController > m_sessionController;
 	std::unique_ptr< ActiveScopeController > m_activeScopeController;
 	std::unique_ptr< UiCommandController > m_commandController;
+	std::unique_ptr< PttSafetyController > m_pttSafetyController;
 	std::unique_ptr< RoomModel > m_roomModel;
 	std::unique_ptr< ParticipantModel > m_participantModel;
 	std::unique_ptr< ChatTimelineModel > m_chatModel;

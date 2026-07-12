@@ -8,6 +8,8 @@
 #include <QtCore/QString>
 #include <QtGui/QAction>
 
+#include <algorithm>
+
 ClientSessionController::ClientSessionController(QObject *parent) : QObject(parent) {
 }
 
@@ -109,7 +111,10 @@ QVariant StableListModel::data(const QModelIndex &index, int role) const {
 	if (!index.isValid() || index.row() < 0 || index.row() >= m_rows.size()) {
 		return {};
 	}
-	const QVariantMap row = m_rows.at(index.row()).toMap();
+	return valueForRole(m_rows.at(index.row()).toMap(), role);
+}
+
+QVariant StableListModel::valueForRole(const QVariantMap &row, const int role) {
 	switch (role) {
 		case StableIdRole: return row.value(QStringLiteral("id"));
 		case TitleRole: return row.value(QStringLiteral("title"));
@@ -161,45 +166,41 @@ QVariantMap StableListModel::get(int row) const {
 }
 
 int StableListModel::indexOf(const QString &stableId) const {
-	return m_rowIds.indexOf(stableId);
+	return m_rowIndexById.value(stableId, -1);
 }
 
-void StableListModel::replaceRows(const QVariantList &rows) {
-	beginResetModel();
-	m_rows.clear();
-	m_rowIds.clear();
-	m_rows.reserve(rows.size());
-	m_rowIds.reserve(rows.size());
-	for (const QVariant &entry : rows) {
-		QVariantMap row = entry.toMap();
-		row.detach();
-		const QString stableId = row.value(QStringLiteral("id")).toString();
-		const int existing = m_rowIds.indexOf(stableId);
-		if (existing >= 0) {
-			m_rows[existing] = row;
-		} else {
-			m_rows.push_back(row);
-			m_rowIds.push_back(stableId);
-		}
+QList< int > StableListModel::changedRoles(const QVariantMap &before, const QVariantMap &after) {
+	if (before == after) return {};
+	QList< int > roles { PayloadRole };
+	for (int role = StableIdRole; role <= VisibleRole; ++role) {
+		if (role != PayloadRole && valueForRole(before, role) != valueForRole(after, role)) roles.push_back(role);
 	}
-	endResetModel();
-	emit countChanged();
+	return roles;
+}
+
+void StableListModel::rebuildRowIndex() {
+	m_rowIndexById.clear();
+	m_rowIndexById.reserve(m_rowIds.size());
+	for (int row = 0; row < m_rowIds.size(); ++row) m_rowIndexById.insert(m_rowIds.at(row), row);
 }
 
 void StableListModel::synchronizeRows(const QVariantList &rows) {
 	QVariantList validRows;
 	QStringList validIds;
+	QHash< QString, int > validIndexById;
 	validRows.reserve(rows.size());
 	validIds.reserve(rows.size());
+	validIndexById.reserve(rows.size());
 	for (const QVariant &entry : rows) {
 		QVariantMap row = entry.toMap();
 		row.detach();
 		const QString stableId = row.value(QStringLiteral("id")).toString();
 		if (!stableId.isEmpty()) {
-			const int duplicateIndex = validIds.indexOf(stableId);
+			const int duplicateIndex = validIndexById.value(stableId, -1);
 			if (duplicateIndex >= 0) {
 				validRows[duplicateIndex] = row;
 			} else {
+				validIndexById.insert(stableId, validRows.size());
 				validRows.push_back(row);
 				validIds.push_back(stableId);
 			}
@@ -207,6 +208,46 @@ void StableListModel::synchronizeRows(const QVariantList &rows) {
 	}
 
 	const int oldCount = m_rows.size();
+	const int sharedCount = std::min(m_rowIds.size(), validIds.size());
+	int commonPrefix = 0;
+	while (commonPrefix < sharedCount && m_rowIds.at(commonPrefix) == validIds.at(commonPrefix)) ++commonPrefix;
+
+	const auto updateRow = [this, &validRows](const int row) {
+		const QVariantMap before = m_rows.at(row).toMap();
+		const QVariantMap after = validRows.at(row).toMap();
+		const QList< int > roles = changedRoles(before, after);
+		if (roles.isEmpty()) return;
+		m_rows[row] = after;
+		emit dataChanged(index(row), index(row), roles);
+	};
+
+	// Same-order synchronization is the steady-state path. Handle append and tail removal in batches
+	// so 10k-message timelines stay linear instead of repeatedly scanning and shifting the model.
+	if (commonPrefix == sharedCount && (commonPrefix == m_rowIds.size() || commonPrefix == validIds.size())) {
+		for (int row = 0; row < commonPrefix; ++row) updateRow(row);
+		if (validIds.size() > m_rowIds.size()) {
+			const int first = m_rowIds.size();
+			const int last = validIds.size() - 1;
+			beginInsertRows(QModelIndex(), first, last);
+			for (int row = first; row <= last; ++row) {
+				m_rows.push_back(validRows.at(row));
+				m_rowIds.push_back(validIds.at(row));
+			}
+			endInsertRows();
+			rebuildRowIndex();
+		} else if (validIds.size() < m_rowIds.size()) {
+			const int first = validIds.size();
+			const int last = m_rowIds.size() - 1;
+			beginRemoveRows(QModelIndex(), first, last);
+			m_rows.remove(first, last - first + 1);
+			m_rowIds.remove(first, last - first + 1);
+			endRemoveRows();
+			rebuildRowIndex();
+		}
+		if (oldCount != m_rows.size()) emit countChanged();
+		return;
+	}
+
 	for (int targetIndex = 0; targetIndex < validRows.size(); ++targetIndex) {
 		const QVariantMap targetRow = validRows.at(targetIndex).toMap();
 		const QString &targetId = validIds.at(targetIndex);
@@ -217,6 +258,7 @@ void StableListModel::synchronizeRows(const QVariantList &rows) {
 			m_rows.insert(targetIndex, targetRow);
 			m_rowIds.insert(targetIndex, targetId);
 			endInsertRows();
+			rebuildRowIndex();
 			existingIndex = targetIndex;
 		} else if (existingIndex != targetIndex) {
 			const int destination = existingIndex < targetIndex ? targetIndex + 1 : targetIndex;
@@ -224,12 +266,14 @@ void StableListModel::synchronizeRows(const QVariantList &rows) {
 			m_rows.move(existingIndex, targetIndex);
 			m_rowIds.move(existingIndex, targetIndex);
 			endMoveRows();
+			rebuildRowIndex();
 			existingIndex = targetIndex;
 		}
 
-		if (m_rows.at(existingIndex).toMap() != targetRow) {
+		const QList< int > roles = changedRoles(m_rows.at(existingIndex).toMap(), targetRow);
+		if (!roles.isEmpty()) {
 			m_rows[existingIndex] = targetRow;
-			emit dataChanged(index(existingIndex), index(existingIndex));
+			emit dataChanged(index(existingIndex), index(existingIndex), roles);
 		}
 	}
 
@@ -239,6 +283,7 @@ void StableListModel::synchronizeRows(const QVariantList &rows) {
 		m_rows.removeAt(last);
 		m_rowIds.removeAt(last);
 		endRemoveRows();
+		rebuildRowIndex();
 	}
 	if (oldCount != m_rows.size()) {
 		emit countChanged();
@@ -254,8 +299,10 @@ void StableListModel::upsertRow(const QVariantMap &row) {
 	if (existing >= 0) {
 		QVariantMap ownedRow = row;
 		ownedRow.detach();
+		const QList< int > roles = changedRoles(m_rows.at(existing).toMap(), ownedRow);
+		if (roles.isEmpty()) return;
 		m_rows[existing] = ownedRow;
-		emit dataChanged(index(existing), index(existing));
+		emit dataChanged(index(existing), index(existing), roles);
 		return;
 	}
 	QVariantMap ownedRow = row;
@@ -264,6 +311,7 @@ void StableListModel::upsertRow(const QVariantMap &row) {
 	beginInsertRows(QModelIndex(), newRow, newRow);
 	m_rows.push_back(ownedRow);
 	m_rowIds.push_back(stableId);
+	m_rowIndexById.insert(stableId, newRow);
 	endInsertRows();
 	emit countChanged();
 }
@@ -277,6 +325,7 @@ void StableListModel::removeRow(const QString &stableId) {
 	m_rows.removeAt(existing);
 	m_rowIds.removeAt(existing);
 	endRemoveRows();
+	rebuildRowIndex();
 	emit countChanged();
 }
 
@@ -284,10 +333,11 @@ void StableListModel::clear() {
 	if (m_rows.isEmpty()) {
 		return;
 	}
-	beginResetModel();
+	beginRemoveRows(QModelIndex(), 0, m_rows.size() - 1);
 	m_rows.clear();
 	m_rowIds.clear();
-	endResetModel();
+	m_rowIndexById.clear();
+	endRemoveRows();
 	emit countChanged();
 }
 
@@ -578,6 +628,14 @@ void UiCommandController::setPttPressed(const bool pressed) {
 	emit pttStateRequested(pressed);
 }
 void UiCommandController::releasePtt() { setPttPressed(false); }
+
+PttSafetyController::PttSafetyController(UiCommandController *commands) : m_commands(commands) {
+}
+
+void PttSafetyController::release(PttSafetyReason reason) {
+	Q_UNUSED(reason)
+	if (m_commands) m_commands->releasePtt();
+}
 
 ActionModel::ActionModel(ClientActionRegistry *registry, QObject *parent)
 	: StableListModel(parent), m_registry(registry) {

@@ -5,12 +5,15 @@
 #include <QtTest/QSignalSpy>
 #include <QtTest/QtTest>
 
+Q_DECLARE_METATYPE(PttSafetyReason)
+
 class TestQmlClientModels : public QObject {
 	Q_OBJECT
 
 private slots:
 	void stableRowsUpdateWithoutReset();
 	void synchronizeRowsUsesIncrementalSignals();
+	void largeSynchronizationsStayResetFree();
 	void roomAndParticipantStatesStayIncremental();
 	void stableIdsRemainIndependentFromSourceMaps();
 	void messageRolesExposeStructuredState();
@@ -23,6 +26,8 @@ private slots:
 	void sessionPublishesTypedUpdateBanner();
 	void commandsRejectEmptyStableIds();
 	void pttStateIsIdempotentAndReleases();
+	void pttSafetyTriggersReleaseExactlyOnce_data();
+	void pttSafetyTriggersReleaseExactlyOnce();
 	void dialogStateRoutesTypedRequests();
 	void imageViewerStateRemainsStructured();
 	void stonksStateAndActionsRemainStructured();
@@ -109,7 +114,7 @@ void TestQmlClientModels::synchronizeRowsUsesIncrementalSignals() {
 						 QVariantMap { { QStringLiteral("id"), QStringLiteral("voice:2") },
 										 { QStringLiteral("title"), QStringLiteral("Games") } } });
 	QCOMPARE(model.rowCount(), 2);
-	QCOMPARE(insertSpy.count(), 2);
+	QCOMPARE(insertSpy.count(), 1);
 
 	model.synchronizeRows({ QVariantMap { { QStringLiteral("id"), QStringLiteral("voice:2") },
 										 { QStringLiteral("title"), QStringLiteral("Gaming") } } });
@@ -118,6 +123,38 @@ void TestQmlClientModels::synchronizeRowsUsesIncrementalSignals() {
 	QCOMPARE(model.get(0).value(QStringLiteral("title")).toString(), QStringLiteral("Gaming"));
 	QCOMPARE(moveSpy.count(), 1);
 	QCOMPARE(changedSpy.count(), 1);
+	QCOMPARE(removeSpy.count(), 1);
+	QCOMPARE(resetSpy.count(), 0);
+}
+
+void TestQmlClientModels::largeSynchronizationsStayResetFree() {
+	ChatTimelineModel model;
+	QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
+	QSignalSpy insertSpy(&model, &QAbstractItemModel::rowsInserted);
+	QSignalSpy changedSpy(&model, &QAbstractItemModel::dataChanged);
+	QVariantList messages;
+	messages.reserve(10000);
+	for (int row = 0; row < 10000; ++row) {
+		messages.push_back(QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("message:%1").arg(row) },
+									 { QStringLiteral("plainText"), QStringLiteral("Body %1").arg(row) } });
+	}
+	model.replaceMessages(messages);
+	QCOMPARE(model.rowCount(), 10000);
+	QCOMPARE(insertSpy.count(), 1);
+	QCOMPARE(resetSpy.count(), 0);
+
+	QVariantMap changed = messages.at(5000).toMap();
+	changed.insert(QStringLiteral("plainText"), QStringLiteral("Updated body"));
+	messages[5000] = changed;
+	model.replaceMessages(messages);
+	QCOMPARE(changedSpy.count(), 1);
+	const QList< int > roles = changedSpy.takeFirst().at(2).value< QList< int > >();
+	QVERIFY(roles.contains(StableListModel::PayloadRole));
+	QVERIFY(roles.contains(StableListModel::SubtitleRole));
+	QCOMPARE(resetSpy.count(), 0);
+
+	QSignalSpy removeSpy(&model, &QAbstractItemModel::rowsRemoved);
+	model.clear();
 	QCOMPARE(removeSpy.count(), 1);
 	QCOMPARE(resetSpy.count(), 0);
 }
@@ -134,7 +171,7 @@ void TestQmlClientModels::roomAndParticipantStatesStayIncremental() {
 		{ QVariantMap { { QStringLiteral("token"), QStringLiteral("text:2") },
 						{ QStringLiteral("label"), QStringLiteral("General") } } });
 	QCOMPARE(rooms.rowCount(), 2);
-	QCOMPARE(roomInsertSpy.count(), 2);
+	QCOMPARE(roomInsertSpy.count(), 1);
 	QCOMPARE(roomResetSpy.count(), 0);
 
 	rooms.replaceRoomStates(
@@ -144,7 +181,7 @@ void TestQmlClientModels::roomAndParticipantStatesStayIncremental() {
 		{ QVariantMap { { QStringLiteral("token"), QStringLiteral("text:2") },
 						{ QStringLiteral("label"), QStringLiteral("General") } } });
 	QCOMPARE(rooms.rowCount(), 2);
-	QCOMPARE(roomInsertSpy.count(), 2);
+	QCOMPARE(roomInsertSpy.count(), 1);
 	QCOMPARE(roomChangedSpy.count(), 1);
 	QCOMPARE(roomResetSpy.count(), 0);
 	rooms.replaceDirectMessageStates(
@@ -155,6 +192,7 @@ void TestQmlClientModels::roomAndParticipantStatesStayIncremental() {
 	QCOMPARE(rooms.rowCount(), 3);
 	QCOMPARE(rooms.get(2).value(QStringLiteral("id")).toString(), QStringLiteral("direct:dm:7"));
 	QCOMPARE(rooms.get(2).value(QStringLiteral("kind")).toString(), QStringLiteral("direct"));
+	QCOMPARE(roomInsertSpy.count(), 2);
 	QCOMPARE(roomResetSpy.count(), 0);
 	rooms.replaceDirectMessageStates(
 		{ QVariantMap { { QStringLiteral("token"), QStringLiteral("dm:7") },
@@ -423,6 +461,32 @@ void TestQmlClientModels::pttStateIsIdempotentAndReleases() {
 	QCOMPARE(stateSpy.takeFirst().at(0).toBool(), false);
 	commands.releasePtt();
 	QCOMPARE(stateSpy.count(), 0);
+}
+
+void TestQmlClientModels::pttSafetyTriggersReleaseExactlyOnce_data() {
+	QTest::addColumn< PttSafetyReason >("reason");
+	QTest::newRow("window-closing") << PttSafetyReason::WindowClosing;
+	QTest::newRow("window-deactivated") << PttSafetyReason::WindowDeactivated;
+	QTest::newRow("application-deactivated") << PttSafetyReason::ApplicationDeactivated;
+	QTest::newRow("window-hidden") << PttSafetyReason::WindowHidden;
+	QTest::newRow("scene-graph-error") << PttSafetyReason::SceneGraphError;
+	QTest::newRow("host-destroyed") << PttSafetyReason::HostDestroyed;
+}
+
+void TestQmlClientModels::pttSafetyTriggersReleaseExactlyOnce() {
+	QFETCH(PttSafetyReason, reason);
+	UiCommandController commands;
+	PttSafetyController safety(&commands);
+	QSignalSpy stateSpy(&commands, &UiCommandController::pttStateRequested);
+
+	commands.setPttPressed(true);
+	safety.release(reason);
+	safety.release(reason);
+
+	QVERIFY(!commands.pttPressed());
+	QCOMPARE(stateSpy.count(), 2);
+	QCOMPARE(stateSpy.at(0).at(0).toBool(), true);
+	QCOMPARE(stateSpy.at(1).at(0).toBool(), false);
 }
 
 void TestQmlClientModels::dialogStateRoutesTypedRequests() {

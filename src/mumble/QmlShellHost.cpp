@@ -11,6 +11,7 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QUrl>
 #include <QtGui/QImage>
+#include <QtGui/QGuiApplication>
 #include <QtQml/QQmlApplicationEngine>
 #include <QtQml/QQmlContext>
 #include <QtQuick/QQuickWindow>
@@ -22,6 +23,7 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_sessionController(std::make_unique< ClientSessionController >(this)),
 	  m_activeScopeController(std::make_unique< ActiveScopeController >(this)),
 	  m_commandController(std::make_unique< UiCommandController >(this)),
+	  m_pttSafetyController(std::make_unique< PttSafetyController >(m_commandController.get())),
 	  m_roomModel(std::make_unique< RoomModel >(this)),
 	  m_participantModel(std::make_unique< ParticipantModel >(this)),
 	  m_chatModel(std::make_unique< ChatTimelineModel >(this)),
@@ -34,7 +36,7 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 }
 
 QmlShellHost::~QmlShellHost() {
-	m_commandController->releasePtt();
+	releasePttForSafety(PttSafetyReason::HostDestroyed);
 	m_engine.reset();
 	m_window = nullptr;
 }
@@ -94,15 +96,33 @@ bool QmlShellHost::start(QString *error) {
 		m_engine.reset();
 		return false;
 	}
-	connect(m_window, &QQuickWindow::closing, this, [this](QQuickCloseEvent *) { emit closeRequested(); });
+	m_performanceMonitor->installInputObserver(m_window);
+	connect(m_window, &QQuickWindow::closing, this, [this](QQuickCloseEvent *) {
+		releasePttForSafety(PttSafetyReason::WindowClosing);
+		emit closeRequested();
+	});
 	connect(m_window, &QQuickWindow::sceneGraphError, this,
-			[this](QQuickWindow::SceneGraphError, const QString &) { m_commandController->releasePtt(); });
+			[this](QQuickWindow::SceneGraphError, const QString &) {
+				releasePttForSafety(PttSafetyReason::SceneGraphError);
+			});
 	connect(m_window, &QQuickWindow::frameSwapped, m_performanceMonitor.get(),
 			&QmlPerformanceMonitor::markFramePresented, Qt::QueuedConnection);
 	connect(m_window, &QWindow::visibilityChanged, this, [this](QWindow::Visibility visibility) {
-		if (visibility == QWindow::Hidden || visibility == QWindow::Minimized) m_commandController->releasePtt();
+		if (visibility == QWindow::Hidden || visibility == QWindow::Minimized) {
+			releasePttForSafety(PttSafetyReason::WindowHidden);
+		}
+	});
+	connect(m_window, &QWindow::activeChanged, this, [this]() {
+		if (m_window && !m_window->isActive()) releasePttForSafety(PttSafetyReason::WindowDeactivated);
+	});
+	connect(qGuiApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState state) {
+		if (state != Qt::ApplicationActive) releasePttForSafety(PttSafetyReason::ApplicationDeactivated);
 	});
 	return true;
+}
+
+void QmlShellHost::releasePttForSafety(const PttSafetyReason reason) {
+	if (m_pttSafetyController) m_pttSafetyController->release(reason);
 }
 
 void QmlShellHost::showRaise() {
@@ -150,7 +170,7 @@ bool QmlShellHost::captureWindow(const QString &path, QString *error) const {
 
 void QmlShellHost::showPttTool(const bool visible) {
 	if (!m_window || !m_engine) return;
-	if (!visible) m_commandController->releasePtt();
+	if (!visible) releasePttForSafety(PttSafetyReason::WindowHidden);
 	m_window->setProperty("pttToolVisible", visible);
 }
 
