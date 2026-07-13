@@ -19,6 +19,15 @@ env:
   CMAKE_OPTIONS: -Dtests=OFF -Dsymbols=ON -Ddisplay-install-paths=ON -Dtest-lto=OFF
   QT_VERSION: 6.9.1
   AQTINSTALL_VERSION: 3.1.21
+  QML_CLIENT_TEST_TARGETS: >-
+    TestModernDialogControllers TestModernShellMenuSerializer TestModernTheme
+    TestQmlClientModels TestQmlImageProvider TestQmlAccessibilitySnapshot
+    TestComposerController TestQmlQuickComponents TestQmlThemeController
+    TestQmlPerformanceMonitor TestQmlWindowStateController
+    TestPluginUpdatePreparation TestSettingsJSONSerialization
+    TestUserModelNavigator
+  QML_CLIENT_TEST_REGEX: >-
+    ^(TestModernDialogControllers|TestModernShellMenuSerializer|TestModernTheme|TestQmlClientModels|TestQmlImageProvider|TestQmlAccessibilitySnapshot|TestComposerController|TestQmlQuickComponents|TestQmlThemeController|TestQmlPerformanceMonitor|TestQmlWindowStateController|TestPluginUpdatePreparation|TestSettingsJSONSerialization|TestUserModelNavigator)$
 
 jobs:
   linux-qt-quick-client:
@@ -92,6 +101,30 @@ jobs:
         env:
           MUMBLE_BUILD_NUMBER: 0
         run: ./.github/workflows/build.sh "ubuntu-24.04" "shared" "x86_64"
+
+      - name: Configure focused Qt Quick client tests
+        shell: bash
+        env:
+          MUMBLE_BUILD_NUMBER: 0
+          MUMBLE_CI_PHASE: configure
+          CMAKE_OPTIONS: >-
+            -Dtests=ON -Dsymbols=ON -Ddisplay-install-paths=ON -Dtest-lto=OFF
+            -Dbenchmarks=OFF -Ddatabase-sqlite-tests=OFF
+            -Ddatabase-mysql-tests=OFF -Ddatabase-postgresql-tests=OFF
+        run: ./.github/workflows/build.sh "ubuntu-24.04" "shared" "x86_64"
+
+      - name: Build focused Qt Quick client tests
+        shell: bash
+        run: cmake --build build --config "$BUILD_TYPE" --target $QML_CLIENT_TEST_TARGETS
+
+      - name: Run focused Qt Quick client tests
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+          QSG_RENDER_LOOP: basic
+          QT_QUICK_CONTROLS_STYLE: Basic
+        run: ctest --test-dir build -C "$BUILD_TYPE" --output-on-failure -R "$QML_CLIENT_TEST_REGEX"
 
       - name: Stage client runtime
         shell: bash
@@ -250,6 +283,30 @@ jobs:
         env:
           MUMBLE_BUILD_NUMBER: 0
         run: ./.github/workflows/build.sh "macos-15-intel" "shared" "x86_64"
+
+      - name: Configure focused Qt Quick client tests
+        shell: bash
+        env:
+          MUMBLE_BUILD_NUMBER: 0
+          MUMBLE_CI_PHASE: configure
+          CMAKE_OPTIONS: >-
+            -Dtests=ON -Dsymbols=ON -Ddisplay-install-paths=ON -Dtest-lto=OFF
+            -Dbenchmarks=OFF -Ddatabase-sqlite-tests=OFF
+            -Ddatabase-mysql-tests=OFF -Ddatabase-postgresql-tests=OFF
+        run: ./.github/workflows/build.sh "macos-15-intel" "shared" "x86_64"
+
+      - name: Build focused Qt Quick client tests
+        shell: bash
+        run: cmake --build build --config "$BUILD_TYPE" --target $QML_CLIENT_TEST_TARGETS
+
+      - name: Run focused Qt Quick client tests
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+          QSG_RENDER_LOOP: basic
+          QT_QUICK_CONTROLS_STYLE: Basic
+        run: ctest --test-dir build -C "$BUILD_TYPE" --output-on-failure -R "$QML_CLIENT_TEST_REGEX"
 
       - name: Stage and deploy app bundle
         shell: bash
