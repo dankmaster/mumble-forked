@@ -70,7 +70,8 @@ function Assert-QmlAccessibilityEvidence {
 	param(
 		[Parameter(Mandatory = $true)]$Snapshot,
 		[Parameter(Mandatory = $true)][string]$CaseId,
-		[Parameter(Mandatory = $true)][string]$State
+		[Parameter(Mandatory = $true)][string]$State,
+		[bool]$NavigationOpen = $false
 	)
 	$nodes = @(Get-QmlAccessibilityNodes $Snapshot)
 	$focused = @($nodes | Where-Object { @($_.states) -contains "focused" })
@@ -86,6 +87,16 @@ function Assert-QmlAccessibilityEvidence {
 	})
 	if ($hidden.Count -ne 0) {
 		throw "Case '$CaseId' accessibility tree exposes $($hidden.Count) invisible or offscreen nodes."
+	}
+	$navigationDialogs = @($nodes | Where-Object {
+		[string]$_.name -eq "Rooms and participants" -and
+		([string]$_.role).Equals("Dialog", [StringComparison]::OrdinalIgnoreCase)
+	})
+	if ($NavigationOpen -and $navigationDialogs.Count -ne 1) {
+		throw "Case '$CaseId' does not expose exactly one open navigation drawer to accessibility."
+	}
+	if (-not $NavigationOpen -and $navigationDialogs.Count -ne 0) {
+		throw "Case '$CaseId' exposes the navigation drawer while it should be closed."
 	}
 	if ($State -eq "connected") {
 		$expectedMessages = @(
@@ -143,6 +154,7 @@ $output = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 $results = [Collections.Generic.List[object]]::new()
 foreach ($case in $selectedCases) {
+	$navigationOpen = ($case.PSObject.Properties.Name -contains "navigation_open") -and [bool]$case.navigation_open
 	$apply = Invoke-Automation @{
 		command = "setQmlVisualGateState"; case_id = [string]$case.id; state = [string]$case.state
 		theme = [string]$case.theme; layout = [string]$case.layout; width = [int]$case.width
@@ -166,19 +178,54 @@ foreach ($case in $selectedCases) {
 	if ([int]$applied.message_count -ne $expectedMessageCount) {
 		throw "Visual case '$($case.id)' exposed $($applied.message_count) timeline messages; expected $expectedMessageCount."
 	}
+	$viewportRequest = @{
+		command = "setHostViewport"; width = [int]$case.width; height = [int]$case.height
+	}
+	if ($case.PSObject.Properties.Name -contains "navigation_open") {
+		$viewportRequest.railOpen = $navigationOpen
+	}
+	$viewport = Invoke-Automation $viewportRequest
+	$viewportDeadline = [DateTime]::UtcNow.AddSeconds(2)
+	while ([bool]$viewport.railOpen -ne $navigationOpen -and [DateTime]::UtcNow -lt $viewportDeadline) {
+		Start-Sleep -Milliseconds 25
+		$viewport = Invoke-Automation @{
+			command = "setHostViewport"; width = [int]$case.width; height = [int]$case.height
+		}
+	}
+	if ([int]$viewport.width -ne [int]$case.width -or [int]$viewport.height -ne [int]$case.height -or
+		[bool]$viewport.railOpen -ne $navigationOpen) {
+		throw "Case '$($case.id)' did not reach the requested compact navigation state."
+	}
 
 	# Focus propagation in Qt Quick is queued behind the fixture update and can
 	# land one or two scene turns later under the software renderer. Poll the
 	# semantic tree, rather than sleeping for a machine-dependent duration.
 	$accessibility = $null
 	$accessibilityDeadline = [DateTime]::UtcNow.AddSeconds(2)
+	$previousAccessibilityJson = ""
+	$stableAccessibilitySamples = 0
 	do {
 		$accessibility = Invoke-Automation @{ command = "qmlAccessibilitySnapshot"; generation = $applied.generation }
 		if (($accessibility.PSObject.Properties.Name -contains "generation") -and
 			[long]$accessibility.generation -eq [long]$applied.generation -and $accessibility.snapshot -and
 			-not [string]::IsNullOrWhiteSpace([string]$accessibility.snapshot.role)) {
 			$focusedNodes = @(Get-QmlAccessibilityNodes $accessibility.snapshot | Where-Object { @($_.states) -contains "focused" })
-			if ($focusedNodes.Count -eq 1) { break }
+			if ($focusedNodes.Count -eq 1) {
+				$currentAccessibilityJson = $accessibility.snapshot | ConvertTo-Json -Depth 50 -Compress
+				if ($currentAccessibilityJson -ceq $previousAccessibilityJson) {
+					++$stableAccessibilitySamples
+				} else {
+					$stableAccessibilitySamples = 0
+					$previousAccessibilityJson = $currentAccessibilityJson
+				}
+				# Require five identical observations across queued scene turns. This
+				# prevents asynchronous ListView delegate incubation from producing a
+				# timing-dependent accessibility baseline.
+				if ($stableAccessibilitySamples -ge 4) { break }
+			} else {
+				$stableAccessibilitySamples = 0
+				$previousAccessibilityJson = ""
+			}
 		}
 		Start-Sleep -Milliseconds 25
 	} while ([DateTime]::UtcNow -lt $accessibilityDeadline)
@@ -186,9 +233,12 @@ foreach ($case in $selectedCases) {
 		[string]::IsNullOrWhiteSpace([string]$accessibility.snapshot.role)) {
 		throw "Case '$($case.id)' returned no accessibility tree."
 	}
+	if ($stableAccessibilitySamples -lt 4) {
+		throw "Case '$($case.id)' accessibility tree did not stabilize across five scene observations."
+	}
 	$accessibilityPath = Join-Path $output "$($case.id).accessibility.json"
 	$accessibility.snapshot | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $accessibilityPath -Encoding utf8NoBOM
-	Assert-QmlAccessibilityEvidence -Snapshot $accessibility.snapshot -CaseId ([string]$case.id) -State ([string]$case.state)
+	Assert-QmlAccessibilityEvidence -Snapshot $accessibility.snapshot -CaseId ([string]$case.id) -State ([string]$case.state) -NavigationOpen $navigationOpen
 
 	$imagePath = Join-Path $output "$($case.id).png"
 	$capture = Invoke-Automation @{ command = "captureQml"; path = $imagePath; generation = $applied.generation }
@@ -205,6 +255,7 @@ foreach ($case in $selectedCases) {
 	}
 	$results.Add([ordered]@{
 		id = [string]$case.id; state = [string]$case.state; theme = [string]$case.theme; layout = [string]$case.layout
+		navigation_open = $navigationOpen
 		logical_width = [int]$case.width; logical_height = [int]$case.height; device_pixel_ratio = [double]$case.device_pixel_ratio
 		image_width = $dimensions.width; image_height = $dimensions.height
 		image_sha256 = Get-QmlVisualFileSha256 $imagePath

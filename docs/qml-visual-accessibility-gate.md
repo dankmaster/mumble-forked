@@ -2,6 +2,8 @@
 
 `scripts/windows/invoke-qml-visual-matrix.ps1` is the full fail-closed Windows matrix runner. It starts one isolated client process per device-pixel-ratio group with `QT_SCALE_FACTOR`, a copied config, and a unique automation port and token. `invoke-qml-visual-gate.ps1` is its attach-mode worker: it verifies the existing `QQuickWindow`'s actual DPR and only runs cases matching that DPR. It never attempts to change DPR at runtime because DPR belongs to screen/process scale state and Qt exposes no truthful window-level setter.
 
+The checked-in matrix also crosses the real responsive breakpoint. It captures a compact 760 px shell with navigation closed and the minimum-width 420 px shell with the navigation drawer open. The open-drawer case must expose exactly one semantic `Rooms and participants` dialog in the accessibility tree.
+
 The screenshot matrix uses Qt Quick's software backend and basic render loop to make captures complete and pixel-deterministic across Windows GPU drivers. This override is scoped to visual-gate child processes; production clients and performance measurements continue to use the normal accelerated renderer.
 
 The automation server must prove that it can set an exact Qt Quick fixture, resize the top-level `QQuickWindow`, override theme, capture the window, and serialize the QML accessibility tree. Every case records state, dimensions, actual DPR, SHA-256 hashes, and accessibility output in `manifest.json`.

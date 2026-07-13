@@ -42,7 +42,7 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 	const int height = request.value(QStringLiteral("height")).toInt();
 	if (caseId.isEmpty() || !QStringList { QStringLiteral("empty"), QStringLiteral("loading"),
 										 QStringLiteral("error"), QStringLiteral("connected") }.contains(state)
-		|| width < 760 || height < 520 || width > 4096 || height > 2160
+		|| width < 420 || height < 520 || width > 4096 || height > 2160
 		|| !QStringList { QStringLiteral("light"), QStringLiteral("dark") }.contains(theme)
 		|| !QStringList { QStringLiteral("regular"), QStringLiteral("compact") }.contains(layout)) {
 		if (error) *error = QStringLiteral("The visual fixture request is invalid or unsupported.");
@@ -154,6 +154,13 @@ void QmlVisualFixtureController::applyState(const QString &state) {
 		session->setConnected(true);
 		session->setServerName(QStringLiteral("Mumble Visual Fixture"));
 		session->setConnectionLabel(QStringLiteral("Connected"));
+		session->setConnectionState(QStringLiteral("connected"));
+		session->setConnectionTone(QStringLiteral("success"));
+		session->setConnectionDetail({});
+		session->setConnectionRetryRemainingMs(0);
+		session->setCanConnect(false);
+		session->setCanCancel(false);
+		session->setSelfStatusLabel(QStringLiteral("Online"));
 		session->setSelfName(QStringLiteral("Demo User"));
 		const QVariantList voiceRooms {
 			QVariantMap { { QStringLiteral("token"), QStringLiteral("1:1") }, { QStringLiteral("label"), QStringLiteral("Lobby") },
@@ -161,7 +168,21 @@ void QmlVisualFixtureController::applyState(const QString &state) {
 			QVariantMap { { QStringLiteral("token"), QStringLiteral("1:2") }, { QStringLiteral("label"), QStringLiteral("Studio") },
 						  { QStringLiteral("depth"), 0 } }
 		};
-		rooms->replaceRoomStates(voiceRooms, {});
+		const QVariantList textRoomActions {
+			QVariantMap { { QStringLiteral("kind"), QStringLiteral("action") },
+						  { QStringLiteral("id"), QStringLiteral("markRead") },
+						  { QStringLiteral("label"), QStringLiteral("Mark read") },
+						  { QStringLiteral("enabled"), true }, { QStringLiteral("visible"), true },
+						  { QStringLiteral("checkable"), false }, { QStringLiteral("checked"), false } }
+		};
+		const QVariantList textRooms {
+			QVariantMap { { QStringLiteral("token"), QStringLiteral("2:1") },
+						  { QStringLiteral("label"), QStringLiteral("#general") },
+						  { QStringLiteral("description"), QStringLiteral("Text room") },
+						  { QStringLiteral("selected"), false }, { QStringLiteral("depth"), 0 },
+						  { QStringLiteral("actions"), textRoomActions } }
+		};
+		rooms->replaceRoomStates(voiceRooms, textRooms);
 		participants->replaceParticipantStates({
 			QVariantMap { { QStringLiteral("session"), QStringLiteral("101") }, { QStringLiteral("name"), QStringLiteral("Demo User") },
 							{ QStringLiteral("statusLabel"), QStringLiteral("Listening") }, { QStringLiteral("talkState"), QStringLiteral("passive") } },
@@ -194,6 +215,14 @@ void QmlVisualFixtureController::applyState(const QString &state) {
 	session->setConnected(false);
 	session->setServerName(QStringLiteral("Mumble"));
 	session->setConnectionLabel(state == QLatin1String("loading") ? QStringLiteral("Connecting…") : QStringLiteral("Disconnected"));
+	session->setConnectionState(state == QLatin1String("loading") ? QStringLiteral("connecting")
+															 : QStringLiteral("disconnected"));
+	session->setConnectionTone(state == QLatin1String("error") ? QStringLiteral("danger") : QStringLiteral("muted"));
+	session->setConnectionDetail({});
+	session->setConnectionRetryRemainingMs(0);
+	session->setCanConnect(state != QLatin1String("loading"));
+	session->setCanCancel(state == QLatin1String("loading"));
+	session->setSelfStatusLabel(QStringLiteral("Offline"));
 	session->setSelfName(QStringLiteral("You"));
 	rooms->replaceRoomStates({}, {});
 	scope->applyState({ { QStringLiteral("label"), state == QLatin1String("empty") ? QStringLiteral("No conversation selected")

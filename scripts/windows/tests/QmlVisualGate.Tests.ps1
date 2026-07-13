@@ -115,6 +115,16 @@ Describe "Qt Quick visual manifest validation" {
 		$groups.Count | Should Be 2
 		@($groups | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum | Should Be @($matrix.cases).Count
 	}
+
+	It "covers the real compact breakpoint with both drawer states" {
+		$matrix = Get-Content -Raw "$PSScriptRoot\..\qml-visual-gate-matrix.json" | ConvertFrom-Json
+		$compact = @($matrix.cases | Where-Object layout -eq "compact")
+		$compact.Count | Should BeGreaterThan 1
+		@($compact | Where-Object { [int]$_.width -lt 900 -and -not [bool]$_.navigation_open }).Count |
+			Should BeGreaterThan 0
+		@($compact | Where-Object { [int]$_.width -eq 420 -and [bool]$_.navigation_open }).Count |
+			Should BeGreaterThan 0
+	}
 }
 
 Describe "Qt Quick visual runner modes" {
@@ -174,6 +184,13 @@ Describe "Qt Quick connected fixture contract" {
 		($worker -match '\$focused\.Count -ne 1') | Should Be $true
 	}
 
+	It "requires the accessibility tree to stabilize across queued scene turns" {
+		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
+		($worker -match 'stableAccessibilitySamples') | Should Be $true
+		($worker -match 'five identical observations') | Should Be $true
+		($worker -match 'did not stabilize across five scene observations') | Should Be $true
+	}
+
 	It "rejects a focused accessibility node without a semantic name" {
 		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
 		($worker -match 'IsNullOrWhiteSpace\(\[string\]\$focused\[0\]\.name\)') | Should Be $true
@@ -185,6 +202,13 @@ Describe "Qt Quick connected fixture contract" {
 		($worker -match '-contains "invisible"') | Should Be $true
 		($worker -match '-contains "offscreen"') | Should Be $true
 		($worker -match '\$hidden\.Count -ne 0') | Should Be $true
+	}
+
+	It "requires semantic drawer evidence for open compact cases" {
+		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
+		($worker -match 'navigation_open') | Should Be $true
+		($worker -match 'Rooms and participants') | Should Be $true
+		($worker -match 'does not expose exactly one open navigation drawer') | Should Be $true
 	}
 
 	It "requires both connected fixture messages in accessibility evidence" {
