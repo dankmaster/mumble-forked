@@ -44,6 +44,10 @@ jobs:
         shell: bash
         run: bash "$GITHUB_WORKSPACE/.github/workflows/update_submodules_with_retry.sh"
 
+      - name: Enforce the Modern-only source contract
+        shell: pwsh
+        run: ./scripts/windows/verify-modern-only.ps1 -Strict
+
       - name: Set shared Linux environment
         shell: bash
         run: $GITHUB_WORKSPACE/.github/workflows/set_environment_variables.sh "ubuntu-24.04" "shared" "x86_64" "${{ github.workspace }}"
@@ -54,6 +58,13 @@ jobs:
           type: shared
           os: ubuntu-24.04
           arch: x86_64
+
+      - name: Install Linux deployment tooling
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes patchelf xauth xvfb
 
       - name: Restore official Qt cache
         id: qt-cache
@@ -94,7 +105,7 @@ jobs:
           set -euxo pipefail
           echo "MUMBLE_BUILD_CLIENT=ON" >> "$GITHUB_ENV"
           echo "MUMBLE_BUILD_SERVER=OFF" >> "$GITHUB_ENV"
-          echo "CMAKE_OPTIONS=${CMAKE_OPTIONS} -Dbenchmarks=OFF" >> "$GITHUB_ENV"
+          echo "CMAKE_OPTIONS=${CMAKE_OPTIONS} -Dbenchmarks=OFF -Dplugins=ON -Dplugin-debug=ON -Dmodern-layout-automation=ON -DMUMBLE_INSTALL_PLUGINDIR=bin/plugins" >> "$GITHUB_ENV"
 
       - name: Build shared Qt Quick client
         shell: bash
@@ -111,6 +122,8 @@ jobs:
             -Dtests=ON -Dsymbols=ON -Ddisplay-install-paths=ON -Dtest-lto=OFF
             -Dbenchmarks=OFF -Ddatabase-sqlite-tests=OFF
             -Ddatabase-mysql-tests=OFF -Ddatabase-postgresql-tests=OFF
+            -Dplugins=ON -Dplugin-debug=ON -Dmodern-layout-automation=ON
+            -DMUMBLE_INSTALL_PLUGINDIR=bin/plugins
         run: ./.github/workflows/build.sh "ubuntu-24.04" "shared" "x86_64"
 
       - name: Build focused Qt Quick client tests
@@ -130,77 +143,258 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          cmake --install build --prefix "$GITHUB_WORKSPACE/stage-linux" --component mumble_client
-          test -x stage-linux/bin/mumble
-          test -x stage-linux/bin/mumble-screen-helper
-          test -f stage-linux/bin/ModernThemes/catppuccin-nord.mumble-theme.json
-          mkdir -p stage-linux/lib stage-linux/qml stage-linux/plugins stage-linux/libexec stage-linux/resources
-          ldd stage-linux/bin/mumble | awk -v prefix="$QT_PREFIX/" '$3 ~ "^" prefix { print $3 }' | sort -u |
-            while read -r library; do cp -L "$library" "stage-linux/lib/$(basename "$library")"; done
-          for module in QtQml QtQuick QtWebEngine; do
-            test -d "$QT_PREFIX/qml/$module"
-            cp -a "$QT_PREFIX/qml/$module" stage-linux/qml/
+          stage_root="$GITHUB_WORKSPACE/stage-linux"
+          rm -rf "$stage_root"
+          cmake --install build --prefix "$stage_root" --component mumble_client
+          test -x "$stage_root/bin/mumble"
+          test -x "$stage_root/bin/mumble-screen-helper"
+          test -f "$stage_root/bin/ModernThemes/catppuccin-nord.mumble-theme.json"
+          test -n "$(find "$stage_root/bin/plugins" -maxdepth 1 -type f -name '*.so' -print -quit)"
+
+          mkdir -p "$stage_root/lib" "$stage_root/qml" "$stage_root/plugins" \
+            "$stage_root/libexec" "$stage_root/resources" "$stage_root/translations"
+          cp -a "$QT_PREFIX/qml/." "$stage_root/qml/"
+          for plugin_group in \
+            platforms platforminputcontexts platformthemes \
+            xcbglintegrations egldeviceintegrations \
+            wayland-decoration-client wayland-graphics-integration-client wayland-shell-integration \
+            imageformats iconengines networkinformation tls sqldrivers styles printsupport; do
+            if [[ -d "$QT_PREFIX/plugins/$plugin_group" ]]; then
+              cp -a "$QT_PREFIX/plugins/$plugin_group" "$stage_root/plugins/"
+            fi
           done
-          for plugin in platforms imageformats iconengines networkinformation tls; do
-            if [[ -d "$QT_PREFIX/plugins/$plugin" ]]; then cp -a "$QT_PREFIX/plugins/$plugin" stage-linux/plugins/; fi
-          done
-          find stage-linux/plugins stage-linux/qml -type f -name '*.so' -print0 | xargs -0 -r ldd |
-            awk -v prefix="$QT_PREFIX/" '$3 ~ "^" prefix { print $3 }' | sort -u |
-            while read -r library; do cp -L "$library" "stage-linux/lib/$(basename "$library")"; done
           webengine_process="$(find "$QT_PREFIX" -type f -name QtWebEngineProcess -print -quit)"
           test -x "$webengine_process"
-          cp -L "$webengine_process" stage-linux/libexec/QtWebEngineProcess
-          find "$QT_PREFIX/resources" -maxdepth 1 -type f \( -name 'icudtl.dat' -o -name 'qtwebengine_resources*.pak' \) \
-            -exec cp -L {} stage-linux/resources/ \;
-          cp -a "$QT_PREFIX/translations/qtwebengine_locales" stage-linux/resources/
-          test -f stage-linux/qml/QtQuick/Dialogs/qmldir
-          test -f stage-linux/qml/QtQuick/Controls/qmldir
-          test -f stage-linux/qml/QtWebEngine/qmldir
-          (cd stage-linux && find . -type f ! -name runtime-manifest.sha256 -print0 | sort -z | xargs -0 sha256sum) > stage-linux/runtime-manifest.sha256
-          test -s stage-linux/runtime-manifest.sha256
+          cp -L "$webengine_process" "$stage_root/libexec/QtWebEngineProcess"
+          find "$QT_PREFIX/resources" -maxdepth 1 -type f \( \
+              -name 'icudtl.dat' -o -name 'qtwebengine_resources*.pak' -o -name 'v8_context_snapshot*.bin' \) \
+            -exec cp -L {} "$stage_root/resources/" \;
+          cp -a "$QT_PREFIX/translations/qtwebengine_locales" "$stage_root/translations/"
 
-      - name: Smoke Qt Quick imports and runtime
-        shell: bash
-        run: |
-          set -euxo pipefail
-          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/stage-linux/lib"
-          export QML2_IMPORT_PATH="$GITHUB_WORKSPACE/stage-linux/qml"
-          export QT_PLUGIN_PATH="$GITHUB_WORKSPACE/stage-linux/plugins"
-          log="$RUNNER_TEMP/mumble-qml-smoke.log"
-          config="$RUNNER_TEMP/mumble-qml-smoke.json"
-          stage-linux/bin/mumble --multiple --config "$config" >"$log" 2>&1 &
-          pid=$!
-          cleanup() { kill -TERM "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; }
-          trap cleanup EXIT
-          for _ in $(seq 1 15); do
-            kill -0 "$pid"
-            if pgrep -f 'QtWebEngineProcess' >/dev/null; then
-              cat "$log"
-              echo "Chromium renderer started before explicit media activation" >&2
-              exit 1
-            fi
-            sleep 1
+          # Resolve the complete Qt closure used by the executable, Qt plugins,
+          # QML plugins and the lazily spawned WebEngine helper. The closure is
+          # computed before RUNPATH rewriting while the official Qt prefix is
+          # still available to ldd.
+          for _ in $(seq 1 12); do
+            mapfile -t qt_dependencies < <(
+              while IFS= read -r candidate; do
+                if file -Lb "$candidate" | grep -q '^ELF '; then
+                  LD_LIBRARY_PATH="$QT_PREFIX/lib:$stage_root/lib:$stage_root/lib/mumble" \
+                    ldd "$candidate" 2>/dev/null || true
+                fi
+              done < <(find "$stage_root" -type f -print)
+              LD_LIBRARY_PATH="$QT_PREFIX/lib:$stage_root/lib:$stage_root/lib/mumble" \
+                ldd "$GITHUB_WORKSPACE/build/mumble" 2>/dev/null || true
+            )
+            mapfile -t qt_dependencies < <(
+              printf '%s\n' "${qt_dependencies[@]}" |
+                awk -v prefix="$QT_PREFIX/" '$3 ~ "^" prefix { print $3 }' | sort -u
+            )
+            copied=0
+            for library in "${qt_dependencies[@]}"; do
+              destination="$stage_root/lib/$(basename "$library")"
+              if [[ ! -e "$destination" ]]; then
+                cp -L "$library" "$destination"
+                copied=1
+              fi
+            done
+            if [[ "$copied" == 0 ]]; then break; fi
           done
-          cat "$log"
-          if grep -Eiq 'QQmlApplicationEngine failed|module ".*" is not installed|is not a type|Qt Quick shell could not load|failed to create.*QML' "$log"; then
-            echo "Qt Quick import/runtime failure detected" >&2
-            exit 1
-          fi
-          cleanup
-          trap - EXIT
+
+          cat > "$stage_root/bin/qt.conf" <<'EOF'
+          [Paths]
+          Prefix=..
+          Binaries=bin
+          Libraries=lib
+          LibraryExecutables=libexec
+          Plugins=plugins
+          QmlImports=qml
+          Qml2Imports=qml
+          Data=.
+          Translations=translations
+          EOF
+          cp "$stage_root/bin/qt.conf" "$stage_root/libexec/qt.conf"
+          cat > "$stage_root/mumble" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          exec "$root/bin/mumble" "$@"
+          EOF
+          chmod +x "$stage_root/mumble"
+
+          # Every deployed ELF resolves the private Qt closure relative to its
+          # own location. No launcher-provided LD_LIBRARY_PATH is required.
+          while IFS= read -r -d '' candidate; do
+            if ! file -Lb "$candidate" | grep -q '^ELF '; then continue; fi
+            candidate_dir="$(dirname "$candidate")"
+            relative_lib="$(realpath --relative-to="$candidate_dir" "$stage_root/lib")"
+            relative_mumble_lib="$(realpath --relative-to="$candidate_dir" "$stage_root/lib/mumble")"
+            patchelf --set-rpath \
+              "\$ORIGIN:\$ORIGIN/$relative_lib:\$ORIGIN/$relative_mumble_lib" "$candidate"
+          done < <(find "$stage_root" -type f -print0)
+
+          test -f "$stage_root/qml/QtQuick/Dialogs/qmldir"
+          test -f "$stage_root/qml/QtQuick/Controls/qmldir"
+          test -f "$stage_root/qml/QtWebEngine/qmldir"
+          test -f "$stage_root/resources/icudtl.dat"
+          test -n "$(find "$stage_root/resources" -maxdepth 1 -name 'qtwebengine_resources*.pak' -print -quit)"
+          test -n "$(find "$stage_root/resources" -maxdepth 1 -name 'v8_context_snapshot*.bin' -print -quit)"
+          test -n "$(find "$stage_root/translations/qtwebengine_locales" -name '*.pak' -print -quit)"
+          (cd "$stage_root" && find . -type f ! -name runtime-manifest.sha256 -print0 | sort -z | xargs -0 sha256sum) \
+            > "$stage_root/runtime-manifest.sha256"
+          test -s "$stage_root/runtime-manifest.sha256"
 
       - name: Validate staged Linux runtime
         shell: bash
         run: |
           set -euxo pipefail
-          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/stage-linux/lib"
-          ldd stage-linux/bin/mumble | tee stage-linux/runtime-dependencies.txt
-          ! grep -q 'not found' stage-linux/runtime-dependencies.txt
-          readelf -d stage-linux/bin/mumble | tee stage-linux/direct-runtime-dependencies.txt
-          ! grep -Eq 'WebEngineWidgets|WebChannel|QuickWidgets' stage-linux/direct-runtime-dependencies.txt
+          stage_root="$GITHUB_WORKSPACE/stage-linux"
+          : > "$stage_root/runtime-dependencies.txt"
+          : > "$stage_root/runtime-runpaths.txt"
+          while IFS= read -r -d '' candidate; do
+            if ! file -Lb "$candidate" | grep -q '^ELF '; then continue; fi
+            echo "== ${candidate#$stage_root/} ==" >> "$stage_root/runtime-dependencies.txt"
+            env -u LD_LIBRARY_PATH -u QML2_IMPORT_PATH -u QML_IMPORT_PATH -u QT_PLUGIN_PATH \
+              ldd "$candidate" >> "$stage_root/runtime-dependencies.txt"
+            echo "== ${candidate#$stage_root/} ==" >> "$stage_root/runtime-runpaths.txt"
+            readelf -d "$candidate" >> "$stage_root/runtime-runpaths.txt"
+          done < <(find "$stage_root" -type f -print0)
+          ! grep -q 'not found' "$stage_root/runtime-dependencies.txt"
+          ! grep -Fq "$QT_PREFIX" "$stage_root/runtime-dependencies.txt"
+          ! grep -Fq "$QT_PREFIX" "$stage_root/runtime-runpaths.txt"
+          ! grep -Fq "$GITHUB_WORKSPACE/build" "$stage_root/runtime-runpaths.txt"
+          while IFS= read -r -d '' link; do
+            target="$(readlink "$link")"
+            [[ "$target" != /* ]]
+            test -e "$link"
+            resolved="$(realpath "$link")"
+            [[ "$resolved" == "$stage_root/"* ]]
+          done < <(find "$stage_root" -type l -print0)
+          readelf -d "$stage_root/bin/mumble" | tee "$stage_root/direct-runtime-dependencies.txt"
+          ! grep -Eq 'WebEngineWidgets|WebChannel|QuickWidgets' "$stage_root/direct-runtime-dependencies.txt"
+          (cd "$stage_root" && find . -type f ! -name runtime-manifest.sha256 -print0 | sort -z | xargs -0 sha256sum) \
+            > "$stage_root/runtime-manifest.sha256"
           tar -C stage-linux -czf mumble-linux-qt-quick-staged-runtime.tar.gz .
           tar -tzf mumble-linux-qt-quick-staged-runtime.tar.gz >/dev/null
           test -s mumble-linux-qt-quick-staged-runtime.tar.gz
+
+      - name: Smoke clean-unpacked Linux artifact and lazy media runtime
+        shell: bash
+        run: |
+          set -euxo pipefail
+          unpack_root="$RUNNER_TEMP/mumble-linux-clean-unpack"
+          rm -rf "$unpack_root"
+          mkdir -p "$unpack_root"
+          tar -xzf mumble-linux-qt-quick-staged-runtime.tar.gz -C "$unpack_root"
+          test -x "$unpack_root/mumble"
+          test -x "$unpack_root/libexec/QtWebEngineProcess"
+          (cd "$unpack_root" && sha256sum --check runtime-manifest.sha256)
+
+          automation_port="$(python3 - <<'PY'
+          import socket
+          with socket.socket() as sock:
+              sock.bind(("127.0.0.1", 0))
+              print(sock.getsockname()[1])
+          PY
+          )"
+          automation_token="qt-quick-linux-artifact-smoke"
+          request_script="$RUNNER_TEMP/mumble-automation-request.py"
+          cat > "$request_script" <<'PY'
+          import json
+          import socket
+          import sys
+          import time
+
+          port = int(sys.argv[1])
+          token = sys.argv[2]
+          request = json.loads(sys.argv[3])
+          request["token"] = token
+          deadline = time.monotonic() + 30
+          while True:
+              try:
+                  with socket.create_connection(("127.0.0.1", port), timeout=2) as sock:
+                      sock.sendall(json.dumps(request, separators=(",", ":")).encode() + b"\n")
+                      response = b""
+                      while not response.endswith(b"\n"):
+                          chunk = sock.recv(65536)
+                          if not chunk:
+                              raise RuntimeError("automation socket closed without a response")
+                          response += chunk
+                  payload = json.loads(response)
+                  if not payload.get("ok"):
+                      raise RuntimeError(payload.get("error", payload))
+                  print(json.dumps(payload, separators=(",", ":")))
+                  break
+              except (ConnectionError, OSError):
+                  if time.monotonic() >= deadline:
+                      raise
+                  time.sleep(0.25)
+          PY
+
+          log="$RUNNER_TEMP/mumble-linux-clean-unpack.log"
+          config="$RUNNER_TEMP/mumble-linux-clean-unpack.json"
+          env -u LD_LIBRARY_PATH -u QML2_IMPORT_PATH -u QML_IMPORT_PATH \
+            -u QT_PLUGIN_PATH -u QT_QPA_PLATFORM -u QT_QPA_PLATFORM_PLUGIN_PATH \
+            -u QTWEBENGINEPROCESS_PATH -u QTWEBENGINE_RESOURCES_PATH -u QTWEBENGINE_LOCALES_PATH \
+            MUMBLE_MODERN_AUTOMATION_PORT="$automation_port" \
+            MUMBLE_MODERN_AUTOMATION_TOKEN="$automation_token" \
+            QML_IMPORT_TRACE=1 QT_QUICK_BACKEND=software QSG_RENDER_LOOP=basic \
+            xvfb-run --auto-servernum --server-args='-screen 0 1280x800x24' \
+            "$unpack_root/mumble" --multiple --config "$config" >"$log" 2>&1 &
+          wrapper_pid=$!
+          app_pid=""
+          cleanup() {
+            status=$?
+            if [[ -n "$app_pid" ]]; then kill -TERM "$app_pid" 2>/dev/null || true; fi
+            kill -TERM "$wrapper_pid" 2>/dev/null || true
+            wait "$wrapper_pid" 2>/dev/null || true
+            if [[ "$status" -ne 0 && -f "$log" ]]; then cat "$log"; fi
+            return "$status"
+          }
+          trap cleanup EXIT
+
+          ping_response="$(python3 "$request_script" "$automation_port" "$automation_token" '{"command":"ping"}')"
+          app_pid="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["pid"])' <<< "$ping_response")"
+          python3 "$request_script" "$automation_port" "$automation_token" '{"command":"qmlReadinessState"}'
+          kill -0 "$app_pid"
+          ! grep -E "$QT_PREFIX|$GITHUB_WORKSPACE/build" "/proc/$app_pid/maps"
+          if pgrep -f -- "$unpack_root/libexec/QtWebEngineProcess" >/dev/null; then
+            cat "$log"
+            echo "Chromium renderer started before explicit media activation" >&2
+            exit 1
+          fi
+          sleep 5
+          kill -0 "$app_pid"
+          grep -F "$unpack_root/qml" "$log"
+          ! grep -F "$QT_PREFIX/qml" "$log"
+          grep -F "$unpack_root/plugins/platforms" "$log"
+          grep -E 'Found plugin .*[/]bin/plugins[/][^" ]+\.so' "$log"
+
+          python3 "$request_script" "$automation_port" "$automation_token" \
+            '{"command":"openQmlMediaSession","url":"https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ","provider":"youtube","sessionId":"linux-ci"}'
+          renderer_pid=""
+          for _ in $(seq 1 30); do
+            renderer_pid="$(pgrep -f -- "$unpack_root/libexec/QtWebEngineProcess" | head -n 1 || true)"
+            if [[ -n "$renderer_pid" ]]; then break; fi
+            kill -0 "$app_pid"
+            sleep 1
+          done
+          test -n "$renderer_pid"
+          ! grep -E "$QT_PREFIX|$GITHUB_WORKSPACE/build" "/proc/$renderer_pid/maps"
+          python3 "$request_script" "$automation_port" "$automation_token" '{"command":"closeQmlMediaSession"}'
+          for _ in $(seq 1 30); do
+            if ! pgrep -f -- "$unpack_root/libexec/QtWebEngineProcess" >/dev/null; then break; fi
+            sleep 1
+          done
+          ! pgrep -f -- "$unpack_root/libexec/QtWebEngineProcess" >/dev/null
+
+          cat "$log"
+          if grep -Eiq 'QQmlApplicationEngine failed|module ".*" is not installed|is not a type|Qt Quick shell could not load|failed to create.*QML|Could not find QtWebEngineProcess|Qt WebEngine resources not found|Failed to load.*\.pak|locale_file_path\.empty' "$log"; then
+            echo "Qt Quick or lazy WebEngine runtime failure detected" >&2
+            exit 1
+          fi
+          cleanup
+          trap - EXIT
 
       - name: Upload staged Linux runtime
         uses: actions/upload-artifact@v6
@@ -210,11 +404,20 @@ jobs:
           path: |
             mumble-linux-qt-quick-staged-runtime.tar.gz
             stage-linux/runtime-dependencies.txt
+            stage-linux/runtime-runpaths.txt
 
   macos-qt-quick-client:
-    name: macos-qt-quick-client
-    runs-on: macos-15-intel
+    name: macos-qt-quick-client (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: x86_64
+          - runner: macos-15
+            arch: arm64
 
     steps:
       - uses: actions/checkout@v6
@@ -227,13 +430,16 @@ jobs:
 
       - name: Set shared macOS environment
         shell: bash
-        run: $GITHUB_WORKSPACE/.github/workflows/set_environment_variables.sh "macos-15-intel" "shared" "x86_64" "${{ github.workspace }}"
+        # The dependency bootstrap currently names its generic Homebrew script
+        # x86_64, but Homebrew itself installs native bottles on each runner.
+        # build.sh receives the real target architecture below.
+        run: $GITHUB_WORKSPACE/.github/workflows/set_environment_variables.sh "${{ matrix.runner }}" "shared" "x86_64" "${{ github.workspace }}"
 
       - name: Install non-Qt macOS dependencies
         uses: ./.github/actions/install-dependencies
         with:
           type: shared
-          os: macos-15-intel
+          os: ${{ matrix.runner }}
           arch: x86_64
 
       - name: Restore official Qt cache
@@ -241,7 +447,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/.ci/Qt
-          key: official-qt-macos-${{ env.QT_VERSION }}-webengine-webchannel-v2
+          key: official-qt-macos-${{ matrix.arch }}-${{ env.QT_VERSION }}-webengine-webchannel-v3
 
       - uses: actions/setup-python@v6
         with:
@@ -265,6 +471,14 @@ jobs:
           qt_prefix="$(cd "$(dirname "$qt6_config")/../../.." && pwd)"
           test -x "$qt_prefix/bin/macdeployqt"
           test -x "$qt_prefix/bin/qmlimportscanner"
+          qt_core="$(find "$qt_prefix/lib/QtCore.framework" -type f -name QtCore -print -quit)"
+          webengine_core="$(find "$qt_prefix/lib/QtWebEngineCore.framework" -type f -name QtWebEngineCore -print -quit)"
+          test -f "$qt_core"
+          test -f "$webengine_core"
+          lipo -archs "$qt_core" | grep -qw x86_64
+          lipo -archs "$qt_core" | grep -qw arm64
+          lipo -archs "$webengine_core" | grep -qw x86_64
+          lipo -archs "$webengine_core" | grep -qw arm64
           echo "Qt6_DIR=$(dirname "$qt6_config")" >> "$GITHUB_ENV"
           echo "QT_PREFIX=$qt_prefix" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$qt_prefix${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}" >> "$GITHUB_ENV"
@@ -276,13 +490,13 @@ jobs:
           set -euxo pipefail
           echo "MUMBLE_BUILD_CLIENT=ON" >> "$GITHUB_ENV"
           echo "MUMBLE_BUILD_SERVER=OFF" >> "$GITHUB_ENV"
-          echo "CMAKE_OPTIONS=${CMAKE_OPTIONS} -Dbenchmarks=OFF" >> "$GITHUB_ENV"
+          echo "CMAKE_OPTIONS=${CMAKE_OPTIONS} -Dbenchmarks=OFF -Dplugins=ON -Dplugin-debug=ON -Dmodern-layout-automation=ON -DMUMBLE_INSTALL_PLUGINDIR=Mumble.app/Contents/Plugins" >> "$GITHUB_ENV"
 
       - name: Build shared Qt Quick client
         shell: bash
         env:
           MUMBLE_BUILD_NUMBER: 0
-        run: ./.github/workflows/build.sh "macos-15-intel" "shared" "x86_64"
+        run: ./.github/workflows/build.sh "${{ matrix.runner }}" "shared" "${{ matrix.arch }}"
 
       - name: Configure focused Qt Quick client tests
         shell: bash
@@ -293,7 +507,9 @@ jobs:
             -Dtests=ON -Dsymbols=ON -Ddisplay-install-paths=ON -Dtest-lto=OFF
             -Dbenchmarks=OFF -Ddatabase-sqlite-tests=OFF
             -Ddatabase-mysql-tests=OFF -Ddatabase-postgresql-tests=OFF
-        run: ./.github/workflows/build.sh "macos-15-intel" "shared" "x86_64"
+            -Dplugins=ON -Dplugin-debug=ON -Dmodern-layout-automation=ON
+            -DMUMBLE_INSTALL_PLUGINDIR=Mumble.app/Contents/Plugins
+        run: ./.github/workflows/build.sh "${{ matrix.runner }}" "shared" "${{ matrix.arch }}"
 
       - name: Build focused Qt Quick client tests
         shell: bash
@@ -312,78 +528,251 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+          rm -rf "$GITHUB_WORKSPACE/stage-macos"
           cmake --install build --prefix "$GITHUB_WORKSPACE/stage-macos" --component mumble_client
           app="$GITHUB_WORKSPACE/stage-macos/Mumble.app"
           test -x "$app/Contents/MacOS/Mumble"
           test -f "$app/Contents/MacOS/ModernThemes/catppuccin-nord.mumble-theme.json"
+          test -n "$(find "$app/Contents/Plugins" -maxdepth 1 -type f -name '*.dylib' -print -quit)"
           plutil -lint "$app/Contents/Info.plist"
-          "$QT_PREFIX/bin/macdeployqt" "$app" -qmldir="$GITHUB_WORKSPACE/src/mumble/qml-shell" -always-overwrite -verbose=2
+          deploy_arguments=(
+            "$app"
+            "-qmldir=$GITHUB_WORKSPACE/src/mumble/qml-shell"
+            -always-overwrite
+            -verbose=2
+          )
+          while IFS= read -r plugin; do
+            deploy_arguments+=("-executable=$plugin")
+          done < <(find "$app/Contents/Plugins" -maxdepth 1 -type f -name '*.dylib' -print)
+          "$QT_PREFIX/bin/macdeployqt" "${deploy_arguments[@]}"
+
+          # macdeployqt owns Qt frameworks and QML imports. Recursively vendor
+          # any remaining Homebrew/shared dependencies and rewrite them to the
+          # bundle Frameworks directory so the zip is not tied to the runner.
+          mkdir -p "$app/Contents/Frameworks"
+          for _ in $(seq 1 12); do
+            copied=0
+            while IFS= read -r candidate; do
+              if ! file -b "$candidate" | grep -q 'Mach-O'; then continue; fi
+              while IFS= read -r dependency; do
+                case "$dependency" in
+                  @*|/System/Library/*|/usr/lib/*|"$app"/*) continue ;;
+                esac
+                if [[ ! -f "$dependency" ]]; then
+                  echo "Missing external dependency '$dependency' required by '$candidate'" >&2
+                  exit 1
+                fi
+                bundled="$app/Contents/Frameworks/$(basename "$dependency")"
+                if [[ ! -e "$bundled" ]]; then
+                  cp -L "$dependency" "$bundled"
+                  chmod u+w "$bundled"
+                  install_name_tool -id "@rpath/$(basename "$dependency")" "$bundled"
+                  copied=1
+                fi
+                chmod u+w "$candidate"
+                install_name_tool -change "$dependency" "@rpath/$(basename "$dependency")" "$candidate"
+              done < <(otool -L "$candidate" | tail -n +2 | awk '{ print $1 }')
+            done < <(find "$app" -type f -print)
+            if [[ "$copied" == 0 ]]; then break; fi
+          done
+
+          while IFS= read -r plugin; do
+            if ! otool -l "$plugin" | grep -A2 LC_RPATH | grep -q '@loader_path/../Frameworks'; then
+              install_name_tool -add_rpath '@loader_path/../Frameworks' "$plugin"
+            fi
+          done < <(find "$app/Contents/Plugins" -maxdepth 1 -type f -name '*.dylib' -print)
+
           test -x "$(find "$app" -type f -name QtWebEngineProcess -print -quit)"
           find "$app/Contents/Resources/qml" -path '*/QtQuick*' -print -quit | grep -q .
           find "$app/Contents/Resources/qml" -path '*/QtWebEngine*' -print -quit | grep -q .
-
-      - name: Smoke deployed Qt Quick runtime
-        shell: bash
-        run: |
-          set -euxo pipefail
-          app="$GITHUB_WORKSPACE/stage-macos/Mumble.app"
-          log="$RUNNER_TEMP/mumble-qml-smoke.log"
-          config="$RUNNER_TEMP/mumble-qml-smoke.json"
-          "$app/Contents/MacOS/Mumble" --multiple --config "$config" >"$log" 2>&1 &
-          pid=$!
-          cleanup() {
-            if kill -0 "$pid" 2>/dev/null; then
-              kill -TERM "$pid" 2>/dev/null || true
-              wait "$pid" 2>/dev/null || true
-            fi
-          }
-          trap cleanup EXIT
-          for _ in $(seq 1 15); do
-            if ! kill -0 "$pid" 2>/dev/null; then
-              wait "$pid" || status=$?
-              cat "$log"
-              echo "Qt Quick client exited during smoke (status ${status:-0})" >&2
-              exit 1
-            fi
-            if pgrep -f 'QtWebEngineProcess' >/dev/null; then
-              cat "$log"
-              echo "Chromium renderer started before explicit media activation" >&2
-              exit 1
-            fi
-            sleep 1
-          done
-          cat "$log"
-          if grep -Eiq 'QQmlApplicationEngine failed|module ".*" is not installed|is not a type|Qt Quick shell could not load|failed to create.*QML' "$log"; then
-            echo "Qt Quick import/runtime failure detected" >&2
-            exit 1
-          fi
-          cleanup
-          trap - EXIT
 
       - name: Validate app bundle artifact
         shell: bash
         run: |
           set -euxo pipefail
           app="$GITHUB_WORKSPACE/stage-macos/Mumble.app"
-          otool -L "$app/Contents/MacOS/Mumble" | tee stage-macos/runtime-dependencies.txt
-          ! grep -E '/(build|Users/runner/work)/' stage-macos/runtime-dependencies.txt
-          ! grep -Eq 'WebEngineWidgets|WebChannel|QuickWidgets' stage-macos/runtime-dependencies.txt
+          : > stage-macos/runtime-dependencies.txt
+          : > stage-macos/runtime-architectures.txt
+          : > stage-macos/runtime-load-commands.txt
+          while IFS= read -r candidate; do
+            if ! file -b "$candidate" | grep -q 'Mach-O'; then continue; fi
+            echo "== ${candidate#$app/} ==" >> stage-macos/runtime-architectures.txt
+            file "$candidate" >> stage-macos/runtime-architectures.txt
+            architectures="$(lipo -archs "$candidate")"
+            grep -qw '${{ matrix.arch }}' <<< "$architectures"
+            echo "== ${candidate#$app/} ==" >> stage-macos/runtime-dependencies.txt
+            otool -L "$candidate" >> stage-macos/runtime-dependencies.txt
+            echo "== ${candidate#$app/} ==" >> stage-macos/runtime-load-commands.txt
+            otool -l "$candidate" >> stage-macos/runtime-load-commands.txt
+            while IFS= read -r dependency; do
+              case "$dependency" in
+                @rpath/*|@loader_path/*|@executable_path/*)
+                  dependency_name="$(basename "$dependency")"
+                  test -n "$(find "$app" -type f -name "$dependency_name" -print -quit)"
+                  ;;
+              esac
+            done < <(otool -L "$candidate" | tail -n +2 | awk '{ print $1 }')
+          done < <(find "$app" -type f -print)
+          ! grep -E "$GITHUB_WORKSPACE|$QT_PREFIX|/opt/homebrew/|/usr/local/(Cellar|opt)/" stage-macos/runtime-dependencies.txt
+          ! grep -E "$GITHUB_WORKSPACE|$QT_PREFIX|/opt/homebrew/|/usr/local/(Cellar|opt)/" stage-macos/runtime-load-commands.txt
+          while IFS= read -r -d '' link; do
+            target="$(readlink "$link")"
+            [[ "$target" != /* ]]
+            test -e "$link"
+            resolved="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$link")"
+            [[ "$resolved" == "$app/"* ]]
+          done < <(find "$app" -type l -print0)
+          otool -L "$app/Contents/MacOS/Mumble" | tee stage-macos/direct-runtime-dependencies.txt
+          otool -l "$app/Contents/MacOS/Mumble" | grep -A2 LC_RPATH | grep -q '@executable_path/../Frameworks'
+          while IFS= read -r plugin; do
+            otool -l "$plugin" | grep -A2 LC_RPATH | grep -q '@loader_path/../Frameworks'
+          done < <(find "$app/Contents/Plugins" -maxdepth 1 -type f -name '*.dylib' -print)
+          ! grep -Eq 'WebEngineWidgets|WebChannel|QuickWidgets' stage-macos/direct-runtime-dependencies.txt
           ! find "$app" -type d \( -name 'QtWebEngineWidgets.framework' -o -name 'QtQuickWidgets.framework' \) -print -quit | grep -q .
           test -f "$(find "$app/Contents/Resources/qml/QtQuick/Dialogs" -name qmldir -print -quit)"
-          codesign --force --deep --sign - "$app"
+          test -f "$(find "$app" -name icudtl.dat -print -quit)"
+          test -f "$(find "$app" -name 'qtwebengine_resources*.pak' -print -quit)"
+          test -f "$(find "$app" -name 'v8_context_snapshot*.bin' -print -quit)"
+          test -f "$(find "$app" -path '*qtwebengine_locales*' -name '*.pak' -print -quit)"
+          webengine_process="$(find "$app" -type f -name QtWebEngineProcess -print -quit)"
+          webengine_entitlements="$(find "$app" -type f -name QtWebEngineProcess.entitlements -print -quit)"
+          test -f "$webengine_entitlements"
+          codesign --force --sign - --entitlements "$webengine_entitlements" "$webengine_process"
+          codesign --force --deep --sign - --preserve-metadata=entitlements "$app"
           codesign --verify --deep --strict "$app"
+          codesign -d --entitlements :- "$webengine_process" > stage-macos/QtWebEngineProcess.entitlements.plist
+          plutil -extract com.apple.security.cs.allow-jit raw -o - \
+            stage-macos/QtWebEngineProcess.entitlements.plist | grep -q true
           (cd "$app" && find . -type f -print0 | sort -z | xargs -0 shasum -a 256) > stage-macos/runtime-manifest.sha256
           test -s stage-macos/runtime-manifest.sha256
           ditto -c -k --sequesterRsrc --keepParent "$app" mumble-macos-qt-quick-client.zip
           unzip -t mumble-macos-qt-quick-client.zip >/dev/null
           test -s mumble-macos-qt-quick-client.zip
 
+      - name: Smoke clean-unpacked macOS artifact and lazy media runtime
+        shell: bash
+        run: |
+          set -euxo pipefail
+          unpack_root="$RUNNER_TEMP/mumble-macos-${{ matrix.arch }}-clean-unpack"
+          rm -rf "$unpack_root"
+          mkdir -p "$unpack_root"
+          ditto -x -k mumble-macos-qt-quick-client.zip "$unpack_root"
+          app="$unpack_root/Mumble.app"
+          executable="$app/Contents/MacOS/Mumble"
+          renderer_path="$(find "$app" -type f -name QtWebEngineProcess -print -quit)"
+          test -x "$executable"
+          test -x "$renderer_path"
+          (cd "$app" && shasum -a 256 --check "$GITHUB_WORKSPACE/stage-macos/runtime-manifest.sha256")
+          codesign --verify --deep --strict "$app"
+
+          automation_port="$(python3 - <<'PY'
+          import socket
+          with socket.socket() as sock:
+              sock.bind(("127.0.0.1", 0))
+              print(sock.getsockname()[1])
+          PY
+          )"
+          automation_token="qt-quick-macos-${{ matrix.arch }}-artifact-smoke"
+          request_script="$RUNNER_TEMP/mumble-automation-request.py"
+          cat > "$request_script" <<'PY'
+          import json
+          import socket
+          import sys
+          import time
+
+          port = int(sys.argv[1])
+          token = sys.argv[2]
+          request = json.loads(sys.argv[3])
+          request["token"] = token
+          deadline = time.monotonic() + 30
+          while True:
+              try:
+                  with socket.create_connection(("127.0.0.1", port), timeout=2) as sock:
+                      sock.sendall(json.dumps(request, separators=(",", ":")).encode() + b"\n")
+                      response = b""
+                      while not response.endswith(b"\n"):
+                          chunk = sock.recv(65536)
+                          if not chunk:
+                              raise RuntimeError("automation socket closed without a response")
+                          response += chunk
+                  payload = json.loads(response)
+                  if not payload.get("ok"):
+                      raise RuntimeError(payload.get("error", payload))
+                  print(json.dumps(payload, separators=(",", ":")))
+                  break
+              except (ConnectionError, OSError):
+                  if time.monotonic() >= deadline:
+                      raise
+                  time.sleep(0.25)
+          PY
+
+          log="$RUNNER_TEMP/mumble-macos-${{ matrix.arch }}-clean-unpack.log"
+          config="$RUNNER_TEMP/mumble-macos-${{ matrix.arch }}-clean-unpack.json"
+          env -u DYLD_FRAMEWORK_PATH -u DYLD_LIBRARY_PATH \
+            -u QML2_IMPORT_PATH -u QML_IMPORT_PATH -u QT_PLUGIN_PATH \
+            -u QTWEBENGINEPROCESS_PATH -u QTWEBENGINE_RESOURCES_PATH -u QTWEBENGINE_LOCALES_PATH \
+            MUMBLE_MODERN_AUTOMATION_PORT="$automation_port" \
+            MUMBLE_MODERN_AUTOMATION_TOKEN="$automation_token" \
+            QML_IMPORT_TRACE=1 QT_QUICK_BACKEND=software QSG_RENDER_LOOP=basic \
+            "$executable" --multiple --config "$config" >"$log" 2>&1 &
+          app_pid=$!
+          cleanup() {
+            status=$?
+            kill -TERM "$app_pid" 2>/dev/null || true
+            wait "$app_pid" 2>/dev/null || true
+            if [[ "$status" -ne 0 && -f "$log" ]]; then cat "$log"; fi
+            return "$status"
+          }
+          trap cleanup EXIT
+
+          python3 "$request_script" "$automation_port" "$automation_token" '{"command":"ping"}'
+          python3 "$request_script" "$automation_port" "$automation_token" '{"command":"qmlReadinessState"}'
+          kill -0 "$app_pid"
+          if pgrep -f -- "$renderer_path" >/dev/null; then
+            cat "$log"
+            echo "Chromium renderer started before explicit media activation" >&2
+            exit 1
+          fi
+          sleep 5
+          kill -0 "$app_pid"
+          grep -F "$app/Contents/Resources/qml" "$log"
+          ! grep -F "$QT_PREFIX" "$log"
+          grep -E 'Found plugin .*[/]Contents/Plugins[/][^" ]+\.dylib' "$log"
+
+          python3 "$request_script" "$automation_port" "$automation_token" \
+            '{"command":"openQmlMediaSession","url":"https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ","provider":"youtube","sessionId":"macos-ci"}'
+          renderer_pid=""
+          for _ in $(seq 1 30); do
+            renderer_pid="$(pgrep -f -- "$renderer_path" | head -n 1 || true)"
+            if [[ -n "$renderer_pid" ]]; then break; fi
+            kill -0 "$app_pid"
+            sleep 1
+          done
+          test -n "$renderer_pid"
+          python3 "$request_script" "$automation_port" "$automation_token" '{"command":"closeQmlMediaSession"}'
+          for _ in $(seq 1 30); do
+            if ! pgrep -f -- "$renderer_path" >/dev/null; then break; fi
+            sleep 1
+          done
+          ! pgrep -f -- "$renderer_path" >/dev/null
+
+          cat "$log"
+          if grep -Eiq 'QQmlApplicationEngine failed|module ".*" is not installed|is not a type|Qt Quick shell could not load|failed to create.*QML|Could not find QtWebEngineProcess|Qt WebEngine resources not found|Failed to load.*\.pak|locale_file_path\.empty' "$log"; then
+            echo "Qt Quick or lazy WebEngine runtime failure detected" >&2
+            exit 1
+          fi
+          cleanup
+          trap - EXIT
+
       - name: Upload macOS Qt Quick client
         uses: actions/upload-artifact@v6
         with:
-          name: Mumble-macos-qt-quick-client
+          name: Mumble-macos-${{ matrix.arch }}-qt-quick-client
           compression-level: 0
           path: |
             mumble-macos-qt-quick-client.zip
             stage-macos/runtime-dependencies.txt
+            stage-macos/runtime-architectures.txt
+            stage-macos/runtime-load-commands.txt
             stage-macos/runtime-manifest.sha256
+            stage-macos/QtWebEngineProcess.entitlements.plist
