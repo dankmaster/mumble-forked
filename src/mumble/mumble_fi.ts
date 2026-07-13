@@ -464,13 +464,6 @@ Please describe what you were doing before the crash.</source>
     </message>
 </context>
 <context>
-    <name>DeveloperConsole</name>
-    <message>
-        <source>Developer Console</source>
-        <translation>Kehittäjäkonsoli</translation>
-    </message>
-</context>
-<context>
     <name>GlobalShortcutEngine</name>
     <message>
         <source>Unknown</source>
@@ -5954,6 +5947,38 @@ Please describe what you were doing before the crash.</source>
         <source>Certificate %1</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Diagnostics are written continuously to the client log.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Client log</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Log file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the log in your default text viewer, or open its folder to inspect rotated logs and other diagnostics.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open log folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open log file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The client log could not be opened.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The diagnostics folder could not be opened.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>MediaSessionBackend</name>
@@ -6224,6 +6249,50 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Unauthorized automation request.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Qt Quick chat fixture host disappeared before restore.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Qt Quick talk fixture host disappeared before restore.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A chat performance fixture is already active.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A talk-state performance fixture is already active.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No chat performance fixture is active.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Qt Quick root does not expose the chat-scroll workload.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Qt Quick root does not expose chat-scroll status.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No talk-state performance fixture is active.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Talking</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Listening</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The measured room selection was not handled.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -12224,42 +12293,6 @@ Server feedback: fallback</source>
     </message>
     <message>
         <source>Media card captured with the requested preview size.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The Qt Quick chat workload is unavailable.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The Qt Quick window is not exposed for chat scrolling.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The Qt Quick root does not expose the chat-scroll workload.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The chat timeline is not scrollable.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Chat flick produced no typed scroll movement with a rendered frame.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The Qt Quick talk-state workload is unavailable.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The Qt Quick window is not exposed for talk state.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The talk-state participant disappeared.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Talk-state transition produced no typed participant change with a rendered frame.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
