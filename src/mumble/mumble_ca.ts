@@ -298,6 +298,25 @@
     </message>
 </context>
 <context>
+    <name>ClientSessionController</name>
+    <message>
+        <source>Show welcome message</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Collapse</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expand</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Dismiss</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>ClientUser</name>
     <message>
         <source>Friend</source>
@@ -349,6 +368,33 @@
     <message>
         <source>Unsupported or oversized image.</source>
         <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ConnectionBanner</name>
+    <message>
+        <source>Connection lost — reconnecting…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connecting to server…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You&apos;re disconnected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic reconnect will retry in %1s.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">Anul·la</translation>
     </message>
 </context>
 <context>
@@ -821,14 +867,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>ROOMS</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>PARTICIPANTS</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Loading older messages…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -854,6 +892,30 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Message composer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rooms and participants</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open rooms and participants</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No room actions available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No text-room actions available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No participant actions available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No conversation actions available</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -5979,6 +6041,30 @@ Please describe what you were doing before the crash.</source>
         <source>The diagnostics folder could not be opened.</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Starting your screen share…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Starting share…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The bundled screen-share runtime is starting.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delivery probe</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Seeded message delivery state for mockup review.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automation-only state; no message will be sent.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>MediaSessionBackend</name>
@@ -6293,6 +6379,84 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>The measured room selection was not handled.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The requested viewport size is outside the supported range.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Qt Quick navigation drawer is unavailable.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing MOTD action.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Qt Quick root does not expose the MOTD automation probe.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown menu probe &apos;%1&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Qt Quick root does not expose the menu automation probe.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MotdPanel</name>
+    <message>
+        <source>Welcome message hidden</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server message of the day</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>New</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The welcome message has changed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server message</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>NavigationRail</name>
+    <message>
+        <source>ROOMS</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PARTICIPANTS</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unmute</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mute</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Profile menu</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rooms and participants</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -12570,6 +12734,10 @@ Server feedback: fallback</source>
         <source>Open</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Settings page</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>QmlShellHost</name>
@@ -12701,6 +12869,10 @@ Server feedback: fallback</source>
     </message>
     <message>
         <source>Screen share %1 ended: %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to confirm screen-share runtime cleanup for %1 after three attempts: %2</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
