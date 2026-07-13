@@ -33,9 +33,10 @@ void appendCodecIf(QList< int > *values, const bool condition, const MumbleProto
 
 bool hasHardwareEncoder(const ScreenShareExternalProcess::RuntimeSupport &support) {
 	return support.h264NvencAvailable || support.h264VaapiAvailable || support.h264MfAvailable
-		   || support.h264QsvAvailable || support.av1NvencAvailable || support.av1VaapiAvailable
+		   || support.h264QsvAvailable || support.h264VideoToolboxAvailable
+		   || support.av1NvencAvailable || support.av1VaapiAvailable
 		   || support.av1MfAvailable || support.av1QsvAvailable || support.gstNvD3D11H264EncoderAvailable
-		   || support.gstMfH264EncoderAvailable;
+		   || support.gstMfH264EncoderAvailable || support.gstVideoToolboxH264EncoderAvailable;
 }
 
 QList< int > executableCodecListForRuntime(const ScreenShareExternalProcess::RuntimeSupport &support) {
@@ -43,7 +44,8 @@ QList< int > executableCodecListForRuntime(const ScreenShareExternalProcess::Run
 	appendCodecIf(&codecs,
 				  support.gstreamerLiveKitPublishAvailable || support.gstreamerLiveKitViewAvailable
 					  || support.h264NvencAvailable || support.h264VaapiAvailable || support.h264MfAvailable
-					  || support.h264QsvAvailable || support.libx264Available,
+					  || support.h264QsvAvailable || support.h264VideoToolboxAvailable
+					  || support.libx264Available,
 				  MumbleProto::ScreenShareCodecH264);
 	appendCodecIf(&codecs,
 				  support.av1NvencAvailable || support.av1VaapiAvailable || support.av1MfAvailable
@@ -205,6 +207,50 @@ ScreenShareMediaSupport::CapabilitySummary ScreenShareMediaSupport::probe() {
 		summary.statusMessage =
 			QStringLiteral("No executable Windows capture path is available. Install an ffmpeg build with ddagrab or "
 						   "gdigrab support, or enable MUMBLE_SCREENSHARE_TEST_PATTERN=1 for verification.");
+	}
+#elif defined(Q_OS_MACOS)
+	const bool screenCaptureKitAvailable = runtimeSupport.macosScreenCaptureKitAvailable;
+	const bool directCaptureAvailable = screenCaptureKitAvailable && runtimeSupport.ffmpegAvailable;
+	const bool liveKitCaptureAvailable = screenCaptureKitAvailable
+		&& runtimeSupport.gstreamerLiveKitPublishAvailable;
+
+	summary.captureSupported = directCaptureAvailable || liveKitCaptureAvailable || testPatternEnabled;
+	summary.viewSupported = runtimeSupport.gstreamerLiveKitViewAvailable || runtimeSupport.ffplayAvailable
+							|| runtimeSupport.ffmpegAvailable;
+	summary.capturePermissionGranted = runtimeSupport.macosScreenCapturePermissionGranted;
+	summary.capturePermissionRequestRequired = screenCaptureKitAvailable
+		&& !runtimeSupport.macosScreenCapturePermissionGranted;
+	appendIf(&summary.captureBackends, liveKitCaptureAvailable,
+			 QStringLiteral("screencapturekit-gstreamer-livekit"));
+	appendIf(&summary.captureBackends, directCaptureAvailable, QStringLiteral("screencapturekit-bgra"));
+	appendIf(&summary.captureBackends, testPatternEnabled && runtimeSupport.lavfiAvailable,
+			 QStringLiteral("lavfi-test-pattern"));
+	summary.captureBackend = testPatternEnabled
+								 ? QStringLiteral("lavfi-test-pattern")
+								 : (liveKitCaptureAvailable
+										? QStringLiteral("screencapturekit-gstreamer-livekit")
+										: (directCaptureAvailable ? QStringLiteral("screencapturekit-bgra")
+																  : QStringLiteral("unavailable")));
+	summary.queueBudgetFrames = 2;
+	if (summary.captureSupported) {
+		if (testPatternEnabled) {
+			summary.statusMessage =
+				QStringLiteral("ffmpeg test-pattern mode is enabled for headless screen-share verification.");
+		} else if (summary.capturePermissionRequestRequired) {
+			summary.statusMessage = QStringLiteral(
+				"ScreenCaptureKit is available. macOS will request Screen Recording permission when sharing starts.");
+		} else if (liveKitCaptureAvailable) {
+			summary.statusMessage = QStringLiteral(
+				"ScreenCaptureKit capture is available for the GStreamer LiveKit relay runtime.");
+		} else {
+			summary.statusMessage = QStringLiteral(
+				"ScreenCaptureKit capture is available for the ffmpeg direct relay runtime.");
+		}
+	} else if (!screenCaptureKitAvailable) {
+		summary.statusMessage = QStringLiteral("ScreenCaptureKit requires macOS 12.3 or newer.");
+	} else {
+		summary.statusMessage = QStringLiteral(
+			"ScreenCaptureKit is available, but no ffmpeg or GStreamer relay encoder runtime was found.");
 	}
 #else
 	summary.captureBackend = QStringLiteral("unsupported");

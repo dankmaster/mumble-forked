@@ -14,6 +14,10 @@
 #include "ScreenShareViewBackend.h"
 #include "ScreenShareOperationTracker.h"
 
+#ifdef MUMBLE_TEST_SCREENCAPTUREKIT
+#	include "ScreenShareMacOSNativeCapture.h"
+#endif
+
 namespace {
 int codecValue(const MumbleProto::ScreenShareCodec codec) {
 	return static_cast< int >(codec);
@@ -39,7 +43,22 @@ private slots:
 	void rawBgraAssemblerKeepsFrameBoundariesAndDropsBacklog();
 	void nativeFrameDecoderArgumentsKeepStdoutBinaryAndBounded();
 	void helperOperationGenerationsRejectStaleAndCancelledResults();
+	void macosScreenCaptureCapabilityProbeIsNonInteractive();
 };
+
+void TestScreenShare::macosScreenCaptureCapabilityProbeIsNonInteractive() {
+#ifdef MUMBLE_TEST_SCREENCAPTUREKIT
+	// probe() uses CGPreflightScreenCaptureAccess only. It must remain safe for
+	// unsigned CI bundles and must never trigger the system permission dialog.
+	const ScreenShareMacOSNativeCapture::Capability capability = ScreenShareMacOSNativeCapture::probe();
+	QCOMPARE(capability.backend, QStringLiteral("screencapturekit-bgra"));
+	QVERIFY(!capability.statusMessage.isEmpty());
+	QCOMPARE(capability.permissionRequestRequired,
+			 capability.runtimeSupported && !capability.permissionGranted);
+#else
+	QSKIP("ScreenCaptureKit capture is only built for the macOS screen helper.");
+#endif
+}
 
 void TestScreenShare::qmlViewBackendPublishesLifecycleState() {
 	ScreenShareSession session;

@@ -230,6 +230,31 @@ QList< EncoderBackend > probeEncoderBackends() {
 			? QStringLiteral("GStreamer LiveKit publisher can use mfh264enc for H.264 hardware encoding.")
 			: QStringLiteral("GStreamer Media Foundation H.264 publisher is unavailable");
 	backends.append(gstMediaFoundation);
+#elif defined(Q_OS_MACOS)
+	EncoderBackend videoToolbox;
+	videoToolbox.backendID   = QStringLiteral("videotoolbox");
+	videoToolbox.displayName = QStringLiteral("VideoToolbox via ffmpeg");
+	if (runtimeSupport.h264VideoToolboxAvailable) {
+		videoToolbox.codecs.append(static_cast< int >(MumbleProto::ScreenShareCodecH264));
+	}
+	videoToolbox.hardware  = true;
+	videoToolbox.available = !videoToolbox.codecs.isEmpty();
+	videoToolbox.detail = videoToolbox.available
+							 ? QStringLiteral("ffmpeg VideoToolbox H.264 hardware encoding is available")
+							 : QStringLiteral("ffmpeg VideoToolbox H.264 encoding is unavailable");
+	backends.append(videoToolbox);
+
+	EncoderBackend gstVideoToolbox;
+	gstVideoToolbox.backendID   = QStringLiteral("gstreamer-videotoolbox");
+	gstVideoToolbox.displayName = QStringLiteral("VideoToolbox via GStreamer");
+	gstVideoToolbox.codecs      = { static_cast< int >(MumbleProto::ScreenShareCodecH264) };
+	gstVideoToolbox.hardware    = true;
+	gstVideoToolbox.available   = runtimeSupport.gstreamerLiveKitPublishAvailable
+		&& runtimeSupport.gstVideoToolboxH264EncoderAvailable;
+	gstVideoToolbox.detail = gstVideoToolbox.available
+								? QStringLiteral("GStreamer LiveKit can encode ScreenCaptureKit frames with vtenc_h264")
+								: QStringLiteral("GStreamer VideoToolbox H.264 publishing is unavailable");
+	backends.append(gstVideoToolbox);
 #endif
 
 	EncoderBackend gstX264;

@@ -21,6 +21,8 @@ public:
 		bool zeroCopySupported         = false;
 		bool roiSupported              = false;
 		bool damageMetadataSupported   = false;
+		bool capturePermissionGranted  = true;
+		bool capturePermissionRequestRequired = false;
 		bool gstreamerAvailable        = false;
 		bool gstreamerLiveKitPublishAvailable = false;
 		bool gstreamerLiveKitViewAvailable    = false;

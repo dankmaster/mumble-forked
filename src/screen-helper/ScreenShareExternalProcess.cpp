@@ -11,6 +11,10 @@
 #include "ScreenShareWindowFollowPipeline.h"
 #include "ScreenShareWindowsNativeCapture.h"
 
+#ifdef MUMBLE_SCREENSHARE_ENABLE_SCREENCAPTUREKIT
+#	include "ScreenShareMacOSNativeCapture.h"
+#endif
+
 #ifdef Q_OS_WIN
 #	include "win.h"
 #endif
@@ -349,7 +353,7 @@ bool anyNvidiaDevicePresent() {
 }
 
 bool hasWindowedViewerSurface() {
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
 	return true;
 #else
 	return !qEnvironmentVariable("DISPLAY").trimmed().isEmpty();
@@ -369,6 +373,9 @@ QStringList candidateBackendOrder(const ScreenShareExternalProcess::RuntimeSuppo
 
 	switch (codec) {
 		case MumbleProto::ScreenShareCodecH264:
+			if (support.h264VideoToolboxAvailable) {
+				appendUnique(QStringLiteral("videotoolbox-h264"));
+			}
 			if (support.h264NvencAvailable) {
 				appendUnique(QStringLiteral("nvenc-h264"));
 			}
@@ -514,11 +521,13 @@ RelayEndpoint materializeRelayEndpoint(const QJsonObject &plan,
 }
 
 bool selectCaptureSource(const ScreenShareExternalProcess::RuntimeSupport &support, QString *captureSource,
-						 QString *errorMessage, QStringList *arguments, const QString &candidateBackend) {
+						 QString *errorMessage, QStringList *arguments, const QString &candidateBackend,
+						 const bool internalSelfTest) {
 	const QString forcedSource = qEnvironmentVariable("MUMBLE_SCREENSHARE_CAPTURE_SOURCE").trimmed().toLower();
 	const QString configuredDisplay =
 		qEnvironmentVariable("MUMBLE_SCREENSHARE_CAPTURE_DISPLAY", qEnvironmentVariable("DISPLAY")).trimmed();
-	const bool useTestPattern = forcedSource == QLatin1String("test-pattern") || forcedSource == QLatin1String("lavfi")
+	const bool useTestPattern = internalSelfTest || forcedSource == QLatin1String("test-pattern")
+								|| forcedSource == QLatin1String("lavfi")
 								|| envFlagEnabled("MUMBLE_SCREENSHARE_TEST_PATTERN");
 	const bool forceD3D11Capture = forcedSource == QLatin1String("d3d11") || forcedSource == QLatin1String("dda")
 								   || forcedSource == QLatin1String("ddagrab")
@@ -628,6 +637,40 @@ bool selectCaptureSource(const ScreenShareExternalProcess::RuntimeSupport &suppo
 	}
 #endif
 
+#ifdef Q_OS_MACOS
+	if (forcedSource.isEmpty() || forcedSource == QLatin1String("native")
+		|| forcedSource == QLatin1String("screencapturekit") || forcedSource == QLatin1String("desktop")
+		|| forcedSource == QLatin1String("screen")) {
+		if (!support.macosScreenCaptureKitAvailable) {
+			if (errorMessage) {
+				*errorMessage = QStringLiteral("ScreenCaptureKit requires macOS 12.3 or newer and is unavailable on this host.");
+			}
+			return false;
+		}
+
+		if (captureSource) {
+			*captureSource = QStringLiteral("screencapturekit-bgra");
+		}
+		if (arguments) {
+			const int width  = qMax(1, arguments->takeFirst().toInt());
+			const int height = qMax(1, arguments->takeFirst().toInt());
+			const int fps    = qMax(1, arguments->takeFirst().toInt());
+			arguments->clear();
+			arguments->append(QStringLiteral("-f"));
+			arguments->append(QStringLiteral("rawvideo"));
+			arguments->append(QStringLiteral("-pixel_format"));
+			arguments->append(QStringLiteral("bgra"));
+			arguments->append(QStringLiteral("-video_size"));
+			arguments->append(QStringLiteral("%1x%2").arg(width).arg(height));
+			arguments->append(QStringLiteral("-framerate"));
+			arguments->append(QString::number(fps));
+			arguments->append(QStringLiteral("-i"));
+			arguments->append(QStringLiteral("pipe:0"));
+		}
+		return true;
+	}
+#endif
+
 	if (forcedSource == QLatin1String("x11") || forcedSource.isEmpty()) {
 		if (!support.x11GrabAvailable) {
 			if (errorMessage) {
@@ -701,6 +744,20 @@ bool appendEncoderArguments(const ScreenShareExternalProcess::RuntimeSupport &su
 
 	switch (codec) {
 		case MumbleProto::ScreenShareCodecH264:
+			if (plannedBackend.contains(QLatin1String("videotoolbox"))
+				&& support.h264VideoToolboxAvailable) {
+				appendRateControl(QStringLiteral("h264_videotoolbox"));
+				arguments->append(QStringLiteral("-realtime"));
+				arguments->append(QStringLiteral("1"));
+				arguments->append(QStringLiteral("-allow_sw"));
+				arguments->append(QStringLiteral("1"));
+				arguments->append(QStringLiteral("-pix_fmt"));
+				arguments->append(QStringLiteral("yuv420p"));
+				if (selectedEncoder) {
+					*selectedEncoder = QStringLiteral("h264_videotoolbox");
+				}
+				return true;
+			}
 			if (plannedBackend.contains(QLatin1String("nvenc")) && support.h264NvencAvailable) {
 				appendRateControl(QStringLiteral("h264_nvenc"));
 				arguments->append(QStringLiteral("-preset"));
@@ -747,7 +804,9 @@ bool appendEncoderArguments(const ScreenShareExternalProcess::RuntimeSupport &su
 				return true;
 			}
 			if (support.libx264Available) {
-				if (warnings && plannedBackend.contains(QLatin1String("nvenc"))) {
+				if (warnings && plannedBackend.contains(QLatin1String("videotoolbox"))) {
+					warnings->append(QStringLiteral("Falling back from VideoToolbox to libx264 on this host."));
+				} else if (warnings && plannedBackend.contains(QLatin1String("nvenc"))) {
 					warnings->append(QStringLiteral("Falling back from NVENC to libx264 on this host."));
 				} else if (warnings && plannedBackend.contains(QLatin1String("vaapi"))) {
 					warnings->append(QStringLiteral("Falling back from VA-API to libx264 on this host."));
@@ -1287,6 +1346,20 @@ GStreamerEncoderSelection selectGStreamerEncoder(const ScreenShareExternalProces
 		properties->append(QStringLiteral("max-bitrate=%1").arg(maxBitrateKbps));
 	};
 
+	if ((plannedBackend.contains(QLatin1String("videotoolbox"))
+		 || plannedBackend.contains(QLatin1String("gstreamer")))
+		&& support.gstVideoToolboxH264EncoderAvailable) {
+		selection.valid           = true;
+		selection.encoderElement  = QStringLiteral("vtenc_h264");
+		selection.selectedEncoder = QStringLiteral("gstreamer-vtenc_h264");
+		selection.rawFormat       = QStringLiteral("NV12");
+		selection.properties.append(QStringLiteral("bitrate=%1").arg(bitrateKbps));
+		selection.properties.append(QStringLiteral("max-keyframe-interval=%1").arg(gopSize));
+		selection.properties.append(QStringLiteral("allow-frame-reordering=false"));
+		selection.properties.append(QStringLiteral("realtime=true"));
+		return selection;
+	}
+
 	if ((plannedBackend.contains(QLatin1String("nvd3d11")) || plannedBackend.contains(QLatin1String("gstreamer")))
 		&& support.gstNvD3D11H264EncoderAvailable) {
 		selection.valid              = true;
@@ -1433,6 +1506,20 @@ ScreenShareExternalProcess::LaunchResult
 						 .arg(fps)
 				  << QStringLiteral("!");
 	} else {
+#ifdef MUMBLE_SCREENSHARE_ENABLE_SCREENCAPTUREKIT
+		arguments << QStringLiteral("fdsrc") << QStringLiteral("fd=0") << QStringLiteral("do-timestamp=true")
+				  << QStringLiteral("!") << QStringLiteral("rawvideoparse") << QStringLiteral("format=bgra")
+				  << QStringLiteral("width=%1").arg(width) << QStringLiteral("height=%1").arg(height)
+				  << QStringLiteral("framerate=%1/1").arg(fps) << QStringLiteral("!")
+				  << QStringLiteral("videoconvert") << QStringLiteral("!") << QStringLiteral("videoscale")
+				  << QStringLiteral("!")
+				  << QStringLiteral("video/x-raw,format=%1,width=%2,height=%3,framerate=%4/1")
+						 .arg(encoder.rawFormat)
+						 .arg(width)
+						 .arg(height)
+						 .arg(fps)
+				  << QStringLiteral("!");
+#else
 		arguments << QStringLiteral("d3d11screencapturesrc")
 				  << QStringLiteral("capture-api=%1").arg(captureSelection.captureApi)
 				  << captureSelection.sourceProperties
@@ -1460,6 +1547,7 @@ ScreenShareExternalProcess::LaunchResult
 							 .arg(fps)
 					  << QStringLiteral("!");
 		}
+#endif
 	}
 
 	arguments << encoder.encoderElement;
@@ -1517,10 +1605,35 @@ ScreenShareExternalProcess::LaunchResult
 		return launch;
 	}
 
+#ifdef MUMBLE_SCREENSHARE_ENABLE_SCREENCAPTUREKIT
+	if (!useTestPattern) {
+		QString captureError;
+		if (!ScreenShareMacOSNativeCapture::start(
+				launch.process, static_cast< unsigned int >(width), static_cast< unsigned int >(height),
+				static_cast< unsigned int >(fps), plan.value(QStringLiteral("capture_source_id")).toString(),
+				&captureError)) {
+			launch.errorMessage = captureError;
+			if (launch.process) {
+				launch.process->terminate();
+				launch.process->waitForFinished(1000);
+				launch.process->deleteLater();
+				launch.process = nullptr;
+			}
+			launch.started = false;
+			return launch;
+		}
+	}
+#endif
+
 	launch.endpointUrl           = wsUrl;
 	launch.selectedEncoder       = encoder.selectedEncoder;
-	launch.selectedCaptureSource = useTestPattern ? QStringLiteral("gstreamer-test-pattern")
-												   : captureSelection.selectedCaptureSource;
+	launch.selectedCaptureSource = useTestPattern
+											   ? QStringLiteral("gstreamer-test-pattern")
+#ifdef MUMBLE_SCREENSHARE_ENABLE_SCREENCAPTUREKIT
+											   : QStringLiteral("screencapturekit-gstreamer-livekit");
+#else
+											   : captureSelection.selectedCaptureSource;
+#endif
 	return launch;
 }
 
@@ -1728,7 +1841,7 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 	support.gstLaunchAvailable  = !support.gstLaunchPath.isEmpty();
 	support.gstInspectAvailable = !support.gstInspectPath.isEmpty();
 	support.gstreamerAvailable  = support.gstLaunchAvailable && support.gstInspectAvailable;
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
 	support.graphicalSessionAvailable = true;
 #else
 	support.graphicalSessionAvailable = !qEnvironmentVariable("DISPLAY").trimmed().isEmpty()
@@ -1743,6 +1856,10 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 	support.windowsGraphicsCaptureFreeThreaded = nativeCapture.freeThreadedFramePoolSupported;
 	support.windowsGraphicsCaptureDirtyRegions = nativeCapture.dirtyRegionMetadataSupported;
 	support.windowsNativeCapturePipelineAvailable = nativeCapture.inProcessCapturePipelinePlanned;
+#elif defined(MUMBLE_SCREENSHARE_ENABLE_SCREENCAPTUREKIT)
+	const ScreenShareMacOSNativeCapture::Capability nativeCapture = ScreenShareMacOSNativeCapture::probe();
+	support.macosScreenCaptureKitAvailable = nativeCapture.runtimeSupported;
+	support.macosScreenCapturePermissionGranted = nativeCapture.permissionGranted;
 #endif
 
 	if (support.ffmpegAvailable) {
@@ -1769,6 +1886,7 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 		support.h264VaapiAvailable     = encoders.contains(QLatin1String("h264_vaapi"));
 		support.h264MfAvailable        = encoders.contains(QLatin1String("h264_mf"));
 		support.h264QsvAvailable       = encoders.contains(QLatin1String("h264_qsv"));
+		support.h264VideoToolboxAvailable = encoders.contains(QLatin1String("h264_videotoolbox"));
 		support.libx264Available       = encoders.contains(QLatin1String("libx264"));
 		support.av1NvencAvailable      = encoders.contains(QLatin1String("av1_nvenc")) && nvidiaDeviceAvailable;
 		support.av1VaapiAvailable      = encoders.contains(QLatin1String("av1_vaapi"));
@@ -1803,7 +1921,12 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 		support.gstX264EncoderAvailable = gstElementAvailable(support.gstInspectPath, QStringLiteral("x264enc"));
 		support.gstOpenH264EncoderAvailable =
 			gstElementAvailable(support.gstInspectPath, QStringLiteral("openh264enc"));
+		support.gstVideoToolboxH264EncoderAvailable =
+			gstElementAvailable(support.gstInspectPath, QStringLiteral("vtenc_h264"));
 		support.gstH264ParseAvailable = gstElementAvailable(support.gstInspectPath, QStringLiteral("h264parse"));
+		support.gstFdSrcAvailable = gstElementAvailable(support.gstInspectPath, QStringLiteral("fdsrc"));
+		support.gstRawVideoParseAvailable =
+			gstElementAvailable(support.gstInspectPath, QStringLiteral("rawvideoparse"));
 		support.gstVideoTestSrcAvailable =
 			gstElementAvailable(support.gstInspectPath, QStringLiteral("videotestsrc"));
 		support.gstVideoConvertAvailable =
@@ -1830,15 +1953,22 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 			gstElementAvailable(support.gstInspectPath, QStringLiteral("openh264dec"));
 
 		const bool gstSystemMemoryH264Available =
-			support.gstD3D11DownloadAvailable && support.gstVideoConvertAvailable
-			&& (support.gstMfH264EncoderAvailable || support.gstX264EncoderAvailable
-				|| support.gstOpenH264EncoderAvailable);
+			support.gstVideoConvertAvailable
+			&& (support.gstX264EncoderAvailable || support.gstOpenH264EncoderAvailable
+				|| support.gstVideoToolboxH264EncoderAvailable)
+#ifdef Q_OS_WIN
+			&& support.gstD3D11DownloadAvailable
+#endif
+			;
 		const bool gstH264EncoderAvailable =
 			support.gstNvD3D11H264EncoderAvailable || gstSystemMemoryH264Available;
 		const bool gstDesktopCaptureAvailable =
 #ifdef Q_OS_WIN
 			support.gstD3D11ScreenCaptureAvailable && support.gstD3D11ConvertAvailable
 				&& support.gstD3D11ScaleAvailable;
+#elif defined(MUMBLE_SCREENSHARE_ENABLE_SCREENCAPTUREKIT)
+			support.macosScreenCaptureKitAvailable && support.gstFdSrcAvailable
+				&& support.gstRawVideoParseAvailable && support.gstVideoConvertAvailable;
 #else
 			support.gstVideoTestSrcAvailable && envFlagEnabled("MUMBLE_SCREENSHARE_TEST_PATTERN");
 #endif
@@ -1875,13 +2005,19 @@ ScreenShareExternalProcess::RuntimeSupport ScreenShareExternalProcess::probeRunt
 		if (!support.gstNvD3D11H264EncoderAvailable && !support.gstD3D11DownloadAvailable) {
 			appendMissingGStreamerElement(&support, QStringLiteral("d3d11download"), false);
 		}
+#elif defined(MUMBLE_SCREENSHARE_ENABLE_SCREENCAPTUREKIT)
+		appendMissingGStreamerElement(&support, QStringLiteral("fdsrc"), support.gstFdSrcAvailable);
+		appendMissingGStreamerElement(&support, QStringLiteral("rawvideoparse"),
+									  support.gstRawVideoParseAvailable);
+		appendMissingGStreamerElement(&support, QStringLiteral("ScreenCaptureKit"),
+									  support.macosScreenCaptureKitAvailable);
 #else
 		appendMissingGStreamerElement(&support, QStringLiteral("videotestsrc"),
 									  support.gstVideoTestSrcAvailable
 										  || !envFlagEnabled("MUMBLE_SCREENSHARE_TEST_PATTERN"));
 #endif
 		if (!gstH264EncoderAvailable) {
-			appendMissingGStreamerElement(&support, QStringLiteral("nvd3d11h264enc|mfh264enc|x264enc|openh264enc"),
+			appendMissingGStreamerElement(&support, QStringLiteral("nvd3d11h264enc|mfh264enc|vtenc_h264|x264enc|openh264enc"),
 										  false);
 		}
 		appendMissingGStreamerElement(&support, QStringLiteral("videoconvert"),
@@ -1923,7 +2059,11 @@ QJsonObject ScreenShareExternalProcess::runtimeSupportToJson(const RuntimeSuppor
 	payload.insert(QStringLiteral("gst_mfh264enc_available"), support.gstMfH264EncoderAvailable);
 	payload.insert(QStringLiteral("gst_x264enc_available"), support.gstX264EncoderAvailable);
 	payload.insert(QStringLiteral("gst_openh264enc_available"), support.gstOpenH264EncoderAvailable);
+	payload.insert(QStringLiteral("gst_videotoolbox_h264enc_available"),
+				   support.gstVideoToolboxH264EncoderAvailable);
 	payload.insert(QStringLiteral("gst_h264parse_available"), support.gstH264ParseAvailable);
+	payload.insert(QStringLiteral("gst_fdsrc_available"), support.gstFdSrcAvailable);
+	payload.insert(QStringLiteral("gst_rawvideoparse_available"), support.gstRawVideoParseAvailable);
 	payload.insert(QStringLiteral("gst_videotestsrc_available"), support.gstVideoTestSrcAvailable);
 	payload.insert(QStringLiteral("gst_videoconvert_available"), support.gstVideoConvertAvailable);
 	payload.insert(QStringLiteral("gst_videoscale_available"), support.gstVideoScaleAvailable);
@@ -1965,10 +2105,14 @@ QJsonObject ScreenShareExternalProcess::runtimeSupportToJson(const RuntimeSuppor
 				   support.windowsGraphicsCaptureDirtyRegions);
 	payload.insert(QStringLiteral("windows_native_capture_pipeline_available"),
 				   support.windowsNativeCapturePipelineAvailable);
+	payload.insert(QStringLiteral("macos_screencapturekit_available"), support.macosScreenCaptureKitAvailable);
+	payload.insert(QStringLiteral("macos_screen_capture_permission_granted"),
+				   support.macosScreenCapturePermissionGranted);
 	payload.insert(QStringLiteral("h264_nvenc_available"), support.h264NvencAvailable);
 	payload.insert(QStringLiteral("h264_vaapi_available"), support.h264VaapiAvailable);
 	payload.insert(QStringLiteral("h264_mf_available"), support.h264MfAvailable);
 	payload.insert(QStringLiteral("h264_qsv_available"), support.h264QsvAvailable);
+	payload.insert(QStringLiteral("h264_videotoolbox_available"), support.h264VideoToolboxAvailable);
 	payload.insert(QStringLiteral("libx264_available"), support.libx264Available);
 	payload.insert(QStringLiteral("av1_nvenc_available"), support.av1NvencAvailable);
 	payload.insert(QStringLiteral("av1_vaapi_available"), support.av1VaapiAvailable);
@@ -2062,7 +2206,8 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startPublis
 		QString captureSource;
 		QString captureError;
 		QStringList inputArguments{ QString::number(width), QString::number(height), QString::number(fps) };
-		if (!selectCaptureSource(support, &captureSource, &captureError, &inputArguments, candidateBackend)) {
+		if (!selectCaptureSource(support, &captureSource, &captureError, &inputArguments, candidateBackend,
+							 plan.value(QStringLiteral("internal_self_test")).toBool(false))) {
 			lastError = captureError;
 			continue;
 		}
@@ -2100,6 +2245,24 @@ ScreenShareExternalProcess::LaunchResult ScreenShareExternalProcess::startPublis
 			}
 			continue;
 		}
+
+#ifdef MUMBLE_SCREENSHARE_ENABLE_SCREENCAPTUREKIT
+		if (captureSource == QLatin1String("screencapturekit-bgra")) {
+			QString nativeCaptureError;
+			if (!ScreenShareMacOSNativeCapture::start(
+					attemptLaunch.process, static_cast< unsigned int >(width), static_cast< unsigned int >(height),
+					static_cast< unsigned int >(fps), plan.value(QStringLiteral("capture_source_id")).toString(),
+					&nativeCaptureError)) {
+				lastError = nativeCaptureError;
+				if (attemptLaunch.process) {
+					attemptLaunch.process->terminate();
+					attemptLaunch.process->waitForFinished(1000);
+					attemptLaunch.process->deleteLater();
+				}
+				continue;
+			}
+		}
+#endif
 
 		launch                       = attemptLaunch;
 		launch.endpointUrl           = endpoint.endpointUrl;

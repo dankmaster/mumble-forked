@@ -322,6 +322,9 @@ QJsonObject ScreenShareHelperServer::capabilityPayload() const {
 	payload.insert(QStringLiteral("supports_signaling"), true);
 	payload.insert(QStringLiteral("helper_available"), true);
 	payload.insert(QStringLiteral("capture_supported"), m_capabilities.captureSupported);
+	payload.insert(QStringLiteral("capture_permission_granted"), m_capabilities.capturePermissionGranted);
+	payload.insert(QStringLiteral("capture_permission_request_required"),
+				   m_capabilities.capturePermissionRequestRequired);
 	payload.insert(QStringLiteral("view_supported"), m_capabilities.viewSupported);
 	payload.insert(QStringLiteral("hardware_encoding_preferred"), m_capabilities.hardwareEncodingPreferred);
 	payload.insert(QStringLiteral("hardware_encode_supported"), m_capabilities.hardwareEncodeSupported);

@@ -12,4 +12,9 @@ find_pkg(Qt6 COMPONENTS Gui REQUIRED)
 target_include_directories(TestScreenShare PRIVATE ../../mumble)
 target_link_libraries(TestScreenShare PRIVATE shared Qt6::Gui Qt6::Test)
 
+if(TARGET mumble-screen-share-macos-capture)
+	target_link_libraries(TestScreenShare PRIVATE mumble-screen-share-macos-capture)
+	target_compile_definitions(TestScreenShare PRIVATE MUMBLE_TEST_SCREENCAPTUREKIT=1)
+endif()
+
 add_test(NAME TestScreenShare COMMAND $<TARGET_FILE:TestScreenShare>)

@@ -38,7 +38,10 @@ public:
 		bool gstMfH264EncoderAvailable        = false;
 		bool gstX264EncoderAvailable          = false;
 		bool gstOpenH264EncoderAvailable      = false;
+		bool gstVideoToolboxH264EncoderAvailable = false;
 		bool gstH264ParseAvailable            = false;
+		bool gstFdSrcAvailable                = false;
+		bool gstRawVideoParseAvailable        = false;
 		bool gstVideoTestSrcAvailable         = false;
 		bool gstVideoConvertAvailable         = false;
 		bool gstVideoScaleAvailable           = false;
@@ -69,10 +72,13 @@ public:
 		bool windowsGraphicsCaptureFreeThreaded     = false;
 		bool windowsGraphicsCaptureDirtyRegions     = false;
 		bool windowsNativeCapturePipelineAvailable  = false;
+		bool macosScreenCaptureKitAvailable          = false;
+		bool macosScreenCapturePermissionGranted     = false;
 		bool h264NvencAvailable        = false;
 		bool h264VaapiAvailable        = false;
 		bool h264MfAvailable           = false;
 		bool h264QsvAvailable          = false;
+		bool h264VideoToolboxAvailable = false;
 		bool libx264Available          = false;
 		bool av1NvencAvailable         = false;
 		bool av1VaapiAvailable         = false;
