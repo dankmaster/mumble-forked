@@ -6,6 +6,7 @@
 
 #include <QtCore/QObject>
 #include <QtCore/QPointer>
+#include <QtCore/QSet>
 #include <QtCore/QVariantMap>
 
 #include <memory>
@@ -74,6 +75,7 @@ protected:
 
 private:
 	void releasePttForSafety(PttSafetyReason reason);
+	void destroyScreenShareViews();
 
 	ClientActionRegistry *m_actionRegistry = nullptr;
 	std::unique_ptr< QQmlApplicationEngine > m_engine;
@@ -95,6 +97,8 @@ private:
 	std::unique_ptr< ComposerController > m_composerController;
 	std::unique_ptr< QmlThemeController > m_themeController;
 	std::unique_ptr< QmlWindowStateController > m_windowStateController;
+	QSet< QObject * > m_screenShareViews;
+	QSet< QObject * > m_closingScreenShareViews;
 	bool m_visualFixtureOverrideActive = false;
 };
 

@@ -68,6 +68,13 @@ void TestScreenShare::qmlViewBackendPublishesLifecycleState() {
 	QCOMPARE(operationSpy.count(), 1);
 	QCOMPARE(backend.operationStatus(), QStringLiteral("loading"));
 	QVERIFY(backend.operationCancellable());
+	backend.setProcessId(77);
+	backend.setProcessId(0);
+	backend.setOperationState(QStringLiteral("error"), QStringLiteral("cleanup failed"), false);
+	QCOMPARE(backend.processId(), 0);
+	QCOMPARE(backend.operationStatus(), QStringLiteral("error"));
+	QCOMPARE(backend.operationError(), QStringLiteral("cleanup failed"));
+	QVERIFY(!backend.operationCancellable());
 }
 
 void TestScreenShare::qmlViewBackendReportsExternalWindowTransportHonestly() {
@@ -189,6 +196,18 @@ void TestScreenShare::helperOperationGenerationsRejectStaleAndCancelledResults()
 	const quint64 cancelled = tracker.invalidate(QStringLiteral("stream:1"));
 	QVERIFY(!tracker.isCurrent(QStringLiteral("stream:1"), replacement));
 	QVERIFY(tracker.isCurrent(QStringLiteral("stream:1"), cancelled));
+	QVERIFY(tracker.finishIfCurrent(QStringLiteral("stream:1"), cancelled));
+	QVERIFY(!tracker.isCurrent(QStringLiteral("stream:1"), cancelled));
+	QVERIFY(tracker.streamIDs().isEmpty());
+
+	ScreenShareOperationTracker publishTracker;
+	ScreenShareOperationTracker viewTracker;
+	const quint64 publishStart = publishTracker.begin(QStringLiteral("stream:shared"));
+	const quint64 viewStop = viewTracker.begin(QStringLiteral("stream:shared"));
+	QVERIFY(publishTracker.isCurrent(QStringLiteral("stream:shared"), publishStart));
+	QVERIFY(viewTracker.isCurrent(QStringLiteral("stream:shared"), viewStop));
+	viewTracker.invalidate(QStringLiteral("stream:shared"));
+	QVERIFY(publishTracker.isCurrent(QStringLiteral("stream:shared"), publishStart));
 }
 
 void TestScreenShare::parsesAndFormatsVp8CodecPreferences() {

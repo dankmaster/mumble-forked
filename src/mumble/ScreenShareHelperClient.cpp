@@ -12,6 +12,7 @@
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QCryptographicHash>
+#include <QtCore/QDeadlineTimer>
 #include <QtCore/QDir>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QFileInfo>
@@ -33,10 +34,48 @@ namespace {
 constexpr int HELPER_CONNECT_TIMEOUT_MSEC = 1000;
 constexpr int HELPER_REQUEST_TIMEOUT_MSEC = 45000;
 constexpr int HELPER_START_TIMEOUT_MSEC   = 20000;
+constexpr qsizetype MAX_HELPER_REPLY_BYTES = 1024 * 1024;
 
 QMutex g_cachedCapabilitiesMutex;
 ScreenShareHelperClient::CapabilitySnapshot g_cachedCapabilities;
 bool g_haveCachedCapabilities = false;
+
+QProcessEnvironment helperRuntimeEnvironment(const QString &helperExecutable) {
+	QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+	const QDir appRoot = QFileInfo(helperExecutable).absoluteDir();
+	const QString gstRoot = appRoot.filePath(QStringLiteral("gstreamer"));
+	const QString gstBin = QDir(gstRoot).filePath(QStringLiteral("bin"));
+	const QString gstPlugins = QDir(gstRoot).filePath(QStringLiteral("lib/gstreamer-1.0"));
+#ifdef Q_OS_WIN
+	const QString executableSuffix = QStringLiteral(".exe");
+#else
+	const QString executableSuffix;
+#endif
+	const QString gstScanner = QDir(gstRoot).filePath(
+		QStringLiteral("libexec/gstreamer-1.0/gst-plugin-scanner") + executableSuffix);
+	const QString gstLaunch = QDir(gstBin).filePath(QStringLiteral("gst-launch-1.0") + executableSuffix);
+	const QString gstInspect = QDir(gstBin).filePath(QStringLiteral("gst-inspect-1.0") + executableSuffix);
+	if (QFileInfo::exists(gstLaunch)) {
+		environment.insert(QStringLiteral("PATH"), gstBin + QDir::listSeparator() + environment.value(QStringLiteral("PATH")));
+		environment.insert(QStringLiteral("MUMBLE_SCREENSHARE_GST_LAUNCH_PATH"), gstLaunch);
+		if (QFileInfo::exists(gstInspect)) {
+			environment.insert(QStringLiteral("MUMBLE_SCREENSHARE_GST_INSPECT_PATH"), gstInspect);
+		}
+		environment.insert(QStringLiteral("GST_PLUGIN_PATH_1_0"), gstPlugins);
+		environment.insert(QStringLiteral("GST_PLUGIN_SYSTEM_PATH_1_0"), gstPlugins);
+		if (QFileInfo::exists(gstScanner)) {
+			environment.insert(QStringLiteral("GST_PLUGIN_SCANNER"), gstScanner);
+			environment.insert(QStringLiteral("GST_PLUGIN_SCANNER_1_0"), gstScanner);
+		}
+		QString stateRoot = Global::get().qdBasePath.absolutePath();
+		if (stateRoot.trimmed().isEmpty()) stateRoot = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+		if (!stateRoot.trimmed().isEmpty()) {
+			QDir().mkpath(stateRoot);
+			environment.insert(QStringLiteral("GST_REGISTRY_1_0"), QDir(stateRoot).filePath(QStringLiteral("gstreamer-registry.bin")));
+		}
+	}
+	return environment;
+}
 
 QString helperSocketBaseName() {
 	const QString explicitName = QProcessEnvironment::systemEnvironment().value(
@@ -194,6 +233,7 @@ QJsonObject runCapabilityProbeProcess(const QString &helperExecutable, QString *
 
 	QProcess process;
 	process.setProcessChannelMode(QProcess::SeparateChannels);
+	process.setProcessEnvironment(helperRuntimeEnvironment(helperExecutable));
 	process.start(helperExecutable, { QStringLiteral("--print-capabilities-json") });
 	if (!process.waitForStarted(HELPER_CONNECT_TIMEOUT_MSEC)) {
 		if (errorMessage) {
@@ -202,7 +242,28 @@ QJsonObject runCapabilityProbeProcess(const QString &helperExecutable, QString *
 		return {};
 	}
 
-	if (!process.waitForFinished(HELPER_REQUEST_TIMEOUT_MSEC)) {
+	QByteArray stdoutBytes;
+	QByteArray stderrBytes;
+	auto drainProcessOutput = [&]() {
+		stdoutBytes.append(process.readAllStandardOutput());
+		stderrBytes.append(process.readAllStandardError());
+		return stdoutBytes.size() <= MAX_HELPER_REPLY_BYTES && stderrBytes.size() <= MAX_HELPER_REPLY_BYTES;
+	};
+	QElapsedTimer deadline;
+	deadline.start();
+	while (process.state() != QProcess::NotRunning && deadline.elapsed() < HELPER_REQUEST_TIMEOUT_MSEC) {
+		const int remaining = HELPER_REQUEST_TIMEOUT_MSEC - static_cast< int >(deadline.elapsed());
+		process.waitForReadyRead(qMin(remaining, 250));
+		if (!drainProcessOutput()) {
+			process.kill();
+			process.waitForFinished(500);
+			if (errorMessage) {
+				*errorMessage = QStringLiteral("Helper capability probe exceeded the reply size limit.");
+			}
+			return {};
+		}
+	}
+	if (process.state() != QProcess::NotRunning) {
 		process.kill();
 		process.waitForFinished(500);
 		if (errorMessage) {
@@ -210,9 +271,14 @@ QJsonObject runCapabilityProbeProcess(const QString &helperExecutable, QString *
 		}
 		return {};
 	}
-
-	const QByteArray stdoutBytes = process.readAllStandardOutput().trimmed();
-	const QByteArray stderrBytes = process.readAllStandardError().trimmed();
+	if (!drainProcessOutput()) {
+		if (errorMessage) {
+			*errorMessage = QStringLiteral("Helper capability probe exceeded the reply size limit.");
+		}
+		return {};
+	}
+	stdoutBytes = stdoutBytes.trimmed();
+	stderrBytes = stderrBytes.trimmed();
 	if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
 		if (errorMessage) {
 			const QString detail =
@@ -410,7 +476,11 @@ bool ScreenShareHelperClient::ensureHelperRunning(const QString &helperExecutabl
 	const QString socketPath = helperSocketPath();
 	qInfo().noquote() << QStringLiteral("ScreenShareHelperClient: launching helper executable %1 with socket %2")
 							 .arg(helperExecutable, socketPath);
-	if (!QProcess::startDetached(helperExecutable, helperLaunchArguments())) {
+	QProcess process;
+	process.setProgram(helperExecutable);
+	process.setArguments(helperLaunchArguments());
+	process.setProcessEnvironment(helperRuntimeEnvironment(helperExecutable));
+	if (!process.startDetached()) {
 		if (errorMessage) {
 			*errorMessage = QStringLiteral("Failed to launch helper executable %1.").arg(helperExecutable);
 		}
@@ -478,6 +548,9 @@ QJsonObject ScreenShareHelperClient::sendRequest(Mumble::ScreenShare::IPC::Comma
 		QJsonDocument(Mumble::ScreenShare::IPC::makeRequest(command, payload, protocolVersion)).toJson(QJsonDocument::Compact)
 		+ QByteArray(1, '\n');
 	const int requestTimeoutMsec = helperRequestTimeoutMsec(command);
+	// Helper discovery and process startup use HELPER_START_TIMEOUT_MSEC above. Once connected, this single
+	// deadline covers both writing the request and receiving its complete newline-terminated reply.
+	QDeadlineTimer requestDeadline(requestTimeoutMsec, Qt::PreciseTimer);
 	if (socket.write(requestData) < 0) {
 		if (errorMessage) {
 			*errorMessage =
@@ -485,7 +558,8 @@ QJsonObject ScreenShareHelperClient::sendRequest(Mumble::ScreenShare::IPC::Comma
 		}
 		return {};
 	}
-	if (!socket.waitForBytesWritten(requestTimeoutMsec)) {
+	const qint64 writeTimeRemaining = requestDeadline.remainingTime();
+	if (writeTimeRemaining <= 0 || !socket.waitForBytesWritten(static_cast< int >(writeTimeRemaining))) {
 		if (errorMessage) {
 			*errorMessage =
 				socketErrorMessage(socket, QStringLiteral("Timed out sending the screen-share helper request."));
@@ -495,7 +569,8 @@ QJsonObject ScreenShareHelperClient::sendRequest(Mumble::ScreenShare::IPC::Comma
 
 	QByteArray replyBytes;
 	while (!replyBytes.contains('\n')) {
-		if (!socket.waitForReadyRead(requestTimeoutMsec)) {
+		const qint64 remaining = requestDeadline.remainingTime();
+		if (remaining <= 0 || !socket.waitForReadyRead(static_cast< int >(remaining))) {
 			if (socket.state() == QLocalSocket::UnconnectedState) {
 				replyBytes.append(socket.readAll());
 				break;
@@ -508,6 +583,18 @@ QJsonObject ScreenShareHelperClient::sendRequest(Mumble::ScreenShare::IPC::Comma
 		}
 
 		replyBytes.append(socket.readAll());
+		if (replyBytes.size() > MAX_HELPER_REPLY_BYTES) {
+			if (errorMessage) {
+				*errorMessage = QStringLiteral("Screen-share helper reply exceeded the size limit.");
+			}
+			return {};
+		}
+	}
+	if (replyBytes.size() > MAX_HELPER_REPLY_BYTES) {
+		if (errorMessage) {
+			*errorMessage = QStringLiteral("Screen-share helper reply exceeded the size limit.");
+		}
+		return {};
 	}
 
 	const qsizetype newlineIndex = replyBytes.indexOf('\n');

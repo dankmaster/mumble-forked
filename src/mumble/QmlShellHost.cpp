@@ -53,6 +53,7 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 QmlShellHost::~QmlShellHost() {
 	releasePttForSafety(PttSafetyReason::HostDestroyed);
 	m_windowStateController->flush();
+	destroyScreenShareViews();
 	m_engine.reset();
 	m_window = nullptr;
 }
@@ -249,11 +250,38 @@ QObject *QmlShellHost::createScreenShareView(QObject *backend) {
 	QVariant result;
 	const bool invoked = QMetaObject::invokeMethod(m_window, "createScreenShareView", Q_RETURN_ARG(QVariant, result),
 											  Q_ARG(QVariant, QVariant::fromValue(backend)));
-	return invoked ? result.value< QObject * >() : nullptr;
+	QObject *view = invoked ? result.value< QObject * >() : nullptr;
+	if (view) {
+		QQmlEngine::setObjectOwnership(view, QQmlEngine::CppOwnership);
+		m_screenShareViews.insert(view);
+		connect(view, &QObject::destroyed, this, [this](QObject *destroyedView) {
+			m_screenShareViews.remove(destroyedView);
+			m_closingScreenShareViews.remove(destroyedView);
+		});
+	}
+	return view;
 }
 
 void QmlShellHost::closeScreenShareView(QObject *view) {
-	if (!view) return;
-	QMetaObject::invokeMethod(view, "close");
+	if (!view || !m_screenShareViews.contains(view) || m_closingScreenShareViews.contains(view)) return;
+	m_closingScreenShareViews.insert(view);
+	if (!QMetaObject::invokeMethod(view, "closeFromHost")) {
+		QMetaObject::invokeMethod(view, "close");
+	}
 	view->deleteLater();
+}
+
+void QmlShellHost::destroyScreenShareViews() {
+	// These windows are C++-owned so QML's garbage collector cannot reclaim a live detached view.
+	// Destroy them synchronously while their engine and QML context are still valid.
+	const QSet< QObject * > views = m_screenShareViews;
+	m_screenShareViews.clear();
+	m_closingScreenShareViews.clear();
+	for (QObject *view : views) {
+		if (!view) continue;
+		if (!QMetaObject::invokeMethod(view, "closeFromHost")) {
+			QMetaObject::invokeMethod(view, "close");
+		}
+		delete view;
+	}
 }

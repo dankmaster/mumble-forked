@@ -16,6 +16,13 @@ public:
 	bool isCurrent(const QString &streamID, const quint64 generation) const {
 		return generation != 0 && m_generations.value(streamID) == generation;
 	}
+	bool finishIfCurrent(const QString &streamID, const quint64 generation) {
+		if (!isCurrent(streamID, generation)) {
+			return false;
+		}
+		m_generations.remove(streamID);
+		return true;
+	}
 	quint64 invalidate(const QString &streamID) { return begin(streamID); }
 	QSet< QString > streamIDs() const { return QSet< QString >(m_generations.keyBegin(), m_generations.keyEnd()); }
 private:

@@ -7,6 +7,8 @@ import Mumble.ScreenShare 1.0
 Window {
     id: root
     required property var backend
+	property bool hostClosing: false
+	property bool closeRequestPending: false
     width: 1100
     height: 720
     minimumWidth: 640
@@ -14,7 +16,25 @@ Window {
     visible: true
     title: qsTr("Mumble Screen Share - %1").arg(backend.detail)
     color: Theme.shellBackground
-    onClosing: close => { close.accepted = false; backend.requestClose() }
+	function closeFromHost() {
+		hostClosing = true
+		closeRequestPending = false
+		close()
+	}
+	onClosing: close => {
+		if (hostClosing) {
+			close.accepted = true
+			return
+		}
+		close.accepted = false
+		if (closeRequestPending)
+			return
+		closeRequestPending = true
+		Qt.callLater(function() {
+			if (!root.hostClosing && root.backend)
+				root.backend.requestClose()
+		})
+	}
 
     ColumnLayout {
         anchors.fill: parent

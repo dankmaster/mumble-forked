@@ -87,7 +87,9 @@ public:
 	QString localShareUnavailableReason() const;
 	bool canViewSession(const QString &streamID) const;
 	bool isPublishingSession(const QString &streamID) const;
+	bool isPublishingSessionPending(const QString &streamID) const;
 	bool isViewingSession(const QString &streamID) const;
+	bool isViewingSessionPending(const QString &streamID) const;
 	bool hasDetachedWindow(const QString &streamID) const;
 	bool hasRunningExternalRuntime(const QString &streamID) const;
 	bool focusOrReopenDetachedWindow(const QString &streamID);
@@ -131,14 +133,20 @@ private:
 	void setExternalViewPaused(const QString &streamID, bool paused);
 	void logRemoteViewAvailability(const ScreenShareSession &session);
 	void stopLocalHelperSessions(const QString &streamID);
-	quint64 nextHelperOperationGeneration(const QString &streamID);
+	void notifyServerShareStopped(const QString &streamID);
+	quint64 nextHelperOperationGeneration(HelperOperationKind kind, const QString &streamID);
 	void scheduleHelperOperation(HelperOperationKind kind, const ScreenShareSession &session, quint64 generation);
-	void applyHelperOperationResult(const HelperOperationResult &result, const ScreenShareSession &session);
+	void applyHelperOperationResult(const HelperOperationResult &result);
 
 	ScreenShareHelperClient *m_helperClient;
 	QHash< QString, ScreenShareSession > m_sessions;
 	QSet< QString > m_activePublishSessions;
+	QSet< QString > m_pendingPublishSessions;
 	QSet< QString > m_activeViewSessions;
+	QSet< QString > m_pendingViewSessions;
+	QSet< QString > m_pendingPublishRestarts;
+	QSet< QString > m_pendingViewRestarts;
+	QSet< QString > m_locallyTerminatedPublishSessions;
 	QHash< QString, qint64 > m_externalPublishProcessIDs;
 	QHash< QString, qint64 > m_externalViewProcessIDs;
 	QHash< QString, int > m_externalPublishRestartAttempts;
@@ -151,7 +159,10 @@ private:
 	QTimer m_externalRuntimeWatchdogTimer;
 	mutable QString m_lastLoggedAvailabilityContext;
 	mutable QString m_lastLoggedAvailabilityReason;
-	ScreenShareOperationTracker m_helperOperationTracker;
+	ScreenShareOperationTracker m_publishOperationTracker;
+	ScreenShareOperationTracker m_viewOperationTracker;
+	QHash< QString, QPair< quint64, int > > m_publishStopRetries;
+	QHash< QString, QPair< quint64, int > > m_viewStopRetries;
 	QThreadPool m_helperOperationPool;
 };
 

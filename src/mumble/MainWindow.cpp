@@ -19679,7 +19679,9 @@ QVariantMap MainWindow::buildModernShellVoiceRoomScreenShareState(const Channel 
 	const QString ownerLabel = owner ? owner->qsName : tr("session %1").arg(QString::number(session.ownerSession));
 	const bool selfOwned     = selfUser && session.ownerSession == selfUser->uiSession;
 	const bool publishing    = selfOwned && m_screenShareManager->isPublishingSession(streamID);
+	const bool publishPending = selfOwned && m_screenShareManager->isPublishingSessionPending(streamID);
 	const bool viewing       = !selfOwned && m_screenShareManager->isViewingSession(streamID);
+	const bool viewPending   = !selfOwned && m_screenShareManager->isViewingSessionPending(streamID);
 	const bool detachedWindowOpen = m_screenShareManager->hasDetachedWindow(streamID);
 	const bool usingFallback      = m_screenShareManager->isUsingFallbackRuntime(streamID);
 	const bool usingNativeGpu     = selfOwned && m_screenShareManager->isUsingNativeGpuRuntime(streamID);
@@ -19688,6 +19690,7 @@ QVariantMap MainWindow::buildModernShellVoiceRoomScreenShareState(const Channel 
 	shareState.insert(QStringLiteral("ownerLabel"), ownerLabel);
 	shareState.insert(QStringLiteral("ownerSession"), static_cast< qulonglong >(session.ownerSession));
 	shareState.insert(QStringLiteral("detachedWindowOpen"), detachedWindowOpen);
+	shareState.insert(QStringLiteral("operationPending"), publishPending || viewPending);
 	shareState.insert(QStringLiteral("usingFallback"), usingFallback);
 	shareState.insert(QStringLiteral("fallbackLabel"), usingFallback ? tr("Using external fallback runtime.") : QString());
 	shareState.insert(QStringLiteral("qualityProfile"), session.qualityProfile);
@@ -19703,30 +19706,39 @@ QVariantMap MainWindow::buildModernShellVoiceRoomScreenShareState(const Channel 
 	if (selfOwned) {
 		shareState.insert(QStringLiteral("mode"),
 						  usingFallback ? QStringLiteral("fallback")
-										: (publishing ? QStringLiteral("publishing") : QStringLiteral("error")));
-		shareState.insert(QStringLiteral("statusLabel"), tr("You are sharing in this room"));
-		shareState.insert(QStringLiteral("statusTone"), usingFallback ? QStringLiteral("warning") : QStringLiteral("success"));
-		setPrimaryAction(QStringLiteral("screenShareOpenWindow"), tr("Manage share"), true,
-						 tr("View your active screen-share status."),
-						 usingFallback ? QStringLiteral("warning") : QStringLiteral("success"));
+										: (publishing ? QStringLiteral("publishing")
+													  : (publishPending ? QStringLiteral("connecting")
+																	: QStringLiteral("error"))));
+		shareState.insert(QStringLiteral("statusLabel"), publishPending
+			? tr("Starting your screen share…") : tr("You are sharing in this room"));
+		shareState.insert(QStringLiteral("statusTone"), publishPending || usingFallback
+			? QStringLiteral("warning") : QStringLiteral("success"));
+		setPrimaryAction(QStringLiteral("screenShareOpenWindow"),
+						 publishPending ? tr("Starting share…") : tr("Manage share"), !publishPending,
+						 publishPending ? tr("The bundled screen-share runtime is starting.")
+										: tr("View your active screen-share status."),
+						 publishPending || usingFallback ? QStringLiteral("warning") : QStringLiteral("success"));
 		overflowActions.push_back(ModernShellMenuSerializer::actionItem(
 			QStringLiteral("screenShareStop"), tr("Stop sharing"), true, false, QStringLiteral("danger")));
-	} else if (viewing) {
+	} else if (viewing || viewPending) {
 		const bool viewerWindowOpen = detachedWindowOpen;
 		shareState.insert(QStringLiteral("mode"),
 						  usingFallback ? QStringLiteral("fallback")
-										: (viewerWindowOpen ? QStringLiteral("viewing")
-															: QStringLiteral("connecting")));
+										: (viewPending ? QStringLiteral("connecting")
+													  : (viewerWindowOpen ? QStringLiteral("viewing")
+																	: QStringLiteral("connecting"))));
 		shareState.insert(QStringLiteral("statusLabel"),
-						  viewerWindowOpen ? tr("Watching %1's share").arg(ownerLabel)
+						  viewerWindowOpen && !viewPending ? tr("Watching %1's share").arg(ownerLabel)
 										   : tr("Connecting to %1's share").arg(ownerLabel));
 		shareState.insert(QStringLiteral("statusTone"),
-						  usingFallback || !viewerWindowOpen ? QStringLiteral("warning") : QStringLiteral("accent"));
+						  usingFallback || viewPending || !viewerWindowOpen
+							  ? QStringLiteral("warning") : QStringLiteral("accent"));
 		setPrimaryAction(QStringLiteral("screenShareOpenWindow"), tr("Open share window"), true,
-						 viewerWindowOpen
+						 viewerWindowOpen && !viewPending
 							 ? QString()
 							 : tr("Open the screen-share window. The viewer may still be waiting for relay media."),
-						 usingFallback || !viewerWindowOpen ? QStringLiteral("warning") : QStringLiteral("accent"));
+						 usingFallback || viewPending || !viewerWindowOpen
+							 ? QStringLiteral("warning") : QStringLiteral("accent"));
 		overflowActions.push_back(ModernShellMenuSerializer::actionItem(QStringLiteral("screenShareStopWatching"),
 																		tr("Stop watching"), true, false));
 	} else {
@@ -31207,36 +31219,46 @@ bool MainWindow::handleModernScreenShareDialogAction(const QString &actionID, co
 		return false;
 	}
 
-	const QString sourceID = payload.value(QStringLiteral("sourceId")).toString().trimmed();
-	Channel *channel       = nullptr;
-	if (payload.contains(QStringLiteral("channelId"))) {
+	const QVariantMap shareState = m_modernDialogController->state().value(QStringLiteral("screenShare")).toMap();
+	QString sourceID = payload.value(QStringLiteral("sourceId")).toString().trimmed();
+	if (sourceID.isEmpty()) {
+		sourceID = shareState.value(QStringLiteral("selectedSourceId")).toString().trimmed();
+	}
+	std::optional< unsigned int > channelID;
+	const QVariant channelValue = payload.contains(QStringLiteral("channelId"))
+		? payload.value(QStringLiteral("channelId"))
+		: shareState.value(QStringLiteral("channelId"));
+	if (channelValue.isValid()) {
 		bool ok       = false;
-		const int cid = payload.value(QStringLiteral("channelId")).toInt(&ok);
+		const int cid = channelValue.toInt(&ok);
 		if (ok && cid >= 0) {
-			channel = Channel::get(static_cast< unsigned int >(cid));
+			channelID = static_cast< unsigned int >(cid);
 		}
 	}
 
 	publishModernDialogState(m_modernDialogController->close(QStringLiteral("screenShare")));
 
-	if (sourceID.isEmpty() || !channel || !m_screenShareManager) {
+	if (sourceID.isEmpty() || !channelID || !m_screenShareManager) {
 		return true;
 	}
 
 	ScreenShareStartOptions options;
 	options.captureSourceID  = sourceID;
-	const QStringList resolutionParts =
-		payload.value(QStringLiteral("resolution")).toString().split(QLatin1Char('x'), Qt::SkipEmptyParts);
+	const QString resolution = payload.value(QStringLiteral("resolution"),
+		shareState.value(QStringLiteral("resolutionDefault"))).toString();
+	const QStringList resolutionParts = resolution.split(QLatin1Char('x'), Qt::SkipEmptyParts);
 	if (resolutionParts.size() == 2) {
 		options.requestedWidth  = resolutionParts.at(0).toUInt();
 		options.requestedHeight = resolutionParts.at(1).toUInt();
 	}
-	options.requestedFps   = static_cast< unsigned int >(qMax(0, payload.value(QStringLiteral("frameRate")).toInt()));
+	options.requestedFps   = static_cast< unsigned int >(qMax(0, payload.value(QStringLiteral("frameRate"),
+		shareState.value(QStringLiteral("frameRateDefault"))).toInt()));
 	options.qualityProfile = QStringLiteral("auto");
-	options.audioSourceID  = payload.value(QStringLiteral("audio")).toString().trimmed();
+	options.audioSourceID  = payload.value(QStringLiteral("audio"),
+		shareState.value(QStringLiteral("audioDefault"))).toString().trimmed();
 	options.captureAudio   = !options.audioSourceID.isEmpty();
 
-	m_screenShareManager->requestStartChannelShare(static_cast< unsigned int >(channel->iId), options);
+	m_screenShareManager->requestStartChannelShare(*channelID, options);
 	scheduleQmlRoomStateUpdate();
 	return true;
 }
