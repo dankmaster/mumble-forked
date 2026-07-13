@@ -1695,6 +1695,65 @@ void Server::syncWatchTogetherStateForUser(ServerUser *user) {
 	}
 }
 
+void Server::removeUserFromWatchTogetherSessions(ServerUser *user, Channel *channel, const QString &reason) {
+	if (!user || !channel) return;
+
+	const auto sendToChannelAudience = [this, channel](const MumbleProto::WatchTogetherSync &message) {
+		QSet< ServerUser * > recipients;
+		for (User *candidate : channel->qlUsers) {
+			if (candidate) recipients.insert(static_cast< ServerUser * >(candidate));
+		}
+		for (const unsigned int session : m_channelListenerManager.getListenersForChannel(channel->iId)) {
+			if (ServerUser *listener = qhUsers.value(session)) recipients.insert(listener);
+		}
+		for (ServerUser *recipient : recipients) {
+			if (Mumble::ForkFeatures::contains(recipient->qlSupportedForkFeatures,
+										 MumbleProto::ForkFeatureWatchTogetherRooms)) {
+				sendMessage(recipient, message);
+			}
+		}
+	};
+
+	QList< QString > sessionsToRemove;
+	for (auto it = qhWatchTogetherSessions.begin(); it != qhWatchTogetherSessions.end(); ++it) {
+		MumbleProto::WatchTogetherSync &stored = it.value();
+		if (!stored.has_scope_id() || stored.scope_id() != static_cast< unsigned int >(channel->iId)) continue;
+
+		QSet< unsigned int > participants;
+		for (const unsigned int participant : stored.participant_sessions()) participants.insert(participant);
+		const bool isHost = stored.has_host_session() && stored.host_session() == user->uiSession;
+		if (!isHost && !participants.remove(user->uiSession)) continue;
+
+		MumbleProto::WatchTogetherSync update = stored;
+		update.set_actor_session(user->uiSession);
+		if (isHost) {
+			update.set_event(MumbleProto::WatchTogetherEventEnd);
+			sessionsToRemove.push_back(it.key());
+		} else {
+			if (!stored.paused() && stored.has_updated_at()) {
+				const qint64 elapsed = qMax< qint64 >(
+					0, QDateTime::currentMSecsSinceEpoch() - static_cast< qint64 >(stored.updated_at()));
+				update.set_position_seconds(stored.position_seconds() + static_cast< double >(elapsed) / 1000.0);
+			}
+			update.set_event(MumbleProto::WatchTogetherEventLeave);
+			update.clear_participant_sessions();
+			QList< unsigned int > orderedParticipants = participants.values();
+			std::sort(orderedParticipants.begin(), orderedParticipants.end());
+			for (const unsigned int participant : orderedParticipants)
+				update.add_participant_sessions(participant);
+		}
+		update.set_updated_at(static_cast< quint64 >(QDateTime::currentMSecsSinceEpoch()));
+		if (!isHost) stored = update;
+		sendToChannelAudience(update);
+		log(QStringLiteral("Watch-together session %1 updated after session %2 left channel %3: %4")
+				.arg(it.key())
+				.arg(user->uiSession)
+				.arg(channel->iId)
+				.arg(reason));
+	}
+	for (const QString &sessionID : sessionsToRemove) qhWatchTogetherSessions.remove(sessionID);
+}
+
 bool Server::stopScreenShare(const QString &streamID, const unsigned int actorSession,
 							 const MumbleProto::ScreenShareLifecycleState state, const QString &reason) {
 	auto it = qhScreenShareStreams.find(streamID);
@@ -2776,6 +2835,7 @@ void Server::connectionClosed(QAbstractSocket::SocketError err, const QString &r
 	}
 
 	Channel *old = u->cChannel;
+	removeUserFromWatchTogetherSessions(u, old, QStringLiteral("user disconnected"));
 
 	{
 		QWriteLocker wl(&qrwlVoiceThread);
@@ -3170,6 +3230,7 @@ void Server::userEnterChannel(User *p, Channel *c, MumbleProto::UserState &mpus)
 						MumbleProto::ScreenShareLifecycleStateStopped,
 						QStringLiteral("Screen-share owner changed channel"));
 	}
+	removeUserFromWatchTogetherSessions(serverUser, old, QStringLiteral("user changed channel"));
 
 	{
 		QWriteLocker wl(&qrwlVoiceThread);

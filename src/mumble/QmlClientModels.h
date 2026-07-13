@@ -423,6 +423,15 @@ private:
 class MediaSessionBackend final : public QObject {
 	Q_OBJECT
 	Q_PROPERTY(bool active READ active NOTIFY stateChanged)
+	Q_PROPERTY(bool sharedAvailable READ sharedAvailable NOTIFY stateChanged)
+	Q_PROPERTY(bool sharedJoined READ sharedJoined NOTIFY stateChanged)
+	Q_PROPERTY(bool sharedHost READ sharedHost NOTIFY stateChanged)
+	Q_PROPERTY(QString sharedTitle READ sharedTitle NOTIFY stateChanged)
+	Q_PROPERTY(QString sharedSessionId READ sharedSessionId NOTIFY stateChanged)
+	Q_PROPERTY(qulonglong sharedScopeId READ sharedScopeId NOTIFY stateChanged)
+	Q_PROPERTY(qulonglong sharedHostSession READ sharedHostSession NOTIFY stateChanged)
+	Q_PROPERTY(int sharedParticipantCount READ sharedParticipantCount NOTIFY stateChanged)
+	Q_PROPERTY(QVariantList sharedParticipantSessions READ sharedParticipantSessions NOTIFY stateChanged)
 	Q_PROPERTY(QUrl url READ url NOTIFY stateChanged)
 	Q_PROPERTY(QString provider READ provider NOTIFY stateChanged)
 	Q_PROPERTY(QString sessionId READ sessionId NOTIFY stateChanged)
@@ -435,6 +444,15 @@ class MediaSessionBackend final : public QObject {
 public:
 	explicit MediaSessionBackend(QObject *parent = nullptr);
 	bool active() const;
+	bool sharedAvailable() const;
+	bool sharedJoined() const;
+	bool sharedHost() const;
+	QString sharedTitle() const;
+	QString sharedSessionId() const;
+	qulonglong sharedScopeId() const;
+	qulonglong sharedHostSession() const;
+	int sharedParticipantCount() const;
+	QVariantList sharedParticipantSessions() const;
 	QUrl url() const;
 	QString provider() const;
 	QString sessionId() const;
@@ -444,6 +462,13 @@ public:
 	QString error() const;
 	qulonglong syncGeneration() const;
 	Q_INVOKABLE bool open(const QUrl &url, const QString &provider, const QString &sessionId);
+	Q_INVOKABLE bool startShared(const QUrl &url, const QString &provider, const QString &title);
+	Q_INVOKABLE void joinShared();
+	Q_INVOKABLE void leaveShared();
+	Q_INVOKABLE void endShared();
+	Q_INVOKABLE void transferSharedHost(const QString &sessionId);
+	Q_INVOKABLE bool reopenSharedPlayer();
+	Q_INVOKABLE void retry();
 	Q_INVOKABLE bool isNavigationAllowed(const QUrl &url) const;
 	Q_INVOKABLE void close();
 	Q_INVOKABLE void play();
@@ -453,15 +478,41 @@ public:
 	Q_INVOKABLE void reportError(const QString &message);
 	void applyRemoteState(const QUrl &url, const QString &provider, const QString &sessionId, double position,
 						  bool paused, qulonglong generation);
+	void applySharedState(const QString &sessionId, const QUrl &url, const QString &provider, const QString &title,
+					  qulonglong scopeId, qulonglong actorSession, qulonglong hostSession,
+					  const QVariantList &participantSessions, const QString &event, double position, bool paused,
+					  qulonglong generation, qulonglong selfSession);
+	void clearSharedState();
 
 signals:
 	void stateChanged();
 	void playRequested();
 	void pauseRequested();
 	void seekRequested(double seconds);
+	void retryRequested();
+	void sharedStartRequested(const QString &sessionId, const QUrl &url, const QString &provider,
+						  const QString &title);
+	void sharedEventRequested(const QString &sessionId, const QString &event, qulonglong targetHostSession);
+	void sharedPlaybackStateRequested(const QString &sessionId, double position, bool paused);
 
 private:
+	bool validateSource(const QUrl &url, const QString &provider, QUrl *normalized, QString *error) const;
+	void closePlayer();
+	void publishSharedPlaybackState(double position, bool paused, bool force);
 	bool m_active = false;
+	bool m_sharedAvailable = false;
+	bool m_sharedJoined = false;
+	bool m_sharedHost = false;
+	QString m_sharedTitle;
+	QString m_sharedSessionId;
+	QUrl m_sharedUrl;
+	QString m_sharedProvider;
+	qulonglong m_sharedScopeId = 0;
+	qulonglong m_sharedHostSession = 0;
+	QVariantList m_sharedParticipantSessions;
+	QString m_pendingExplicitSessionId;
+	QString m_navigationHost;
+	int m_navigationPort = -1;
 	QUrl m_url;
 	QString m_provider;
 	QString m_sessionId;
@@ -470,6 +521,9 @@ private:
 	double m_duration = 0.0;
 	QString m_error;
 	qulonglong m_syncGeneration = 0;
+	qint64 m_lastSharedPublishMs = 0;
+	double m_lastSharedPublishPosition = -1.0;
+	bool m_lastSharedPublishPaused = true;
 };
 
 class QmlSelectionState final : public QObject {

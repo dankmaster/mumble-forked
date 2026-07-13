@@ -11550,6 +11550,67 @@ void MainWindow::applyShellLayout() {
 				connect(Global::get().pluginManager, &PluginManager::pluginUpdatesInterrupted, this,
 						[operations]() { operations->interruptOperations(QStringLiteral("plugin-update:")); });
 			}
+			MediaSessionBackend *mediaSession = m_qmlShellHost->mediaSession();
+			const auto sendWatchTogether = [this, mediaSession](MumbleProto::WatchTogetherEvent event,
+													 const QString &sessionID, const QUrl &sourceURL,
+													 const QString &provider, const QString &title,
+													 const double position, const bool paused,
+													 const qulonglong targetHostSession) {
+				const bool supported = Global::get().sh && Global::get().uiSession != 0
+					&& Mumble::ForkFeatures::serverAllowsClientFeature(
+						Global::get().qlSupportedForkFeatures, MumbleProto::ForkFeatureWatchTogetherRooms);
+				ClientUser *self = supported ? ClientUser::get(Global::get().uiSession) : nullptr;
+				if (!supported || !self || !self->cChannel) {
+					const QString message = supported ? tr("Join a voice room before using Watch Together.")
+													  : tr("This server does not support Watch Together.");
+					mediaSession->clearSharedState();
+					mediaSession->reportError(message);
+					publishModernToast(QStringLiteral("warning"), tr("Watch Together"), message);
+					return;
+				}
+
+				MumbleProto::WatchTogetherSync sync;
+				sync.set_session_id(u8(sessionID));
+				sync.set_scope(MumbleProto::Channel);
+				sync.set_scope_id(self->cChannel->iId);
+				sync.set_event(event);
+				if (!sourceURL.isEmpty()) {
+					sync.set_source_url(u8(sourceURL.toString(QUrl::FullyEncoded)));
+					sync.set_source_kind(provider.compare(QLatin1String("youtube"), Qt::CaseInsensitive) == 0
+									 ? MumbleProto::WatchTogetherSourceYouTube
+									 : MumbleProto::WatchTogetherSourceDirectMedia);
+				}
+				if (!title.trimmed().isEmpty()) sync.set_title(u8(title.trimmed()));
+				if (event == MumbleProto::WatchTogetherEventState
+					|| event == MumbleProto::WatchTogetherEventStart) {
+					sync.set_position_seconds(qMax(0.0, position));
+					sync.set_paused(paused);
+				}
+				if (event == MumbleProto::WatchTogetherEventHostTransfer && targetHostSession != 0)
+					sync.set_host_session(static_cast< unsigned int >(targetHostSession));
+				Global::get().sh->sendWatchTogetherSync(sync);
+			};
+			connect(mediaSession, &MediaSessionBackend::sharedStartRequested, this,
+					[sendWatchTogether](const QString &sessionID, const QUrl &url, const QString &provider,
+										const QString &title) {
+						sendWatchTogether(MumbleProto::WatchTogetherEventStart, sessionID, url, provider, title,
+										  0.0, true, 0);
+					});
+			connect(mediaSession, &MediaSessionBackend::sharedEventRequested, this,
+					[sendWatchTogether](const QString &sessionID, const QString &event,
+										const qulonglong targetHostSession) {
+						MumbleProto::WatchTogetherEvent protocolEvent = MumbleProto::WatchTogetherEventJoin;
+						if (event == QLatin1String("leave")) protocolEvent = MumbleProto::WatchTogetherEventLeave;
+						else if (event == QLatin1String("end")) protocolEvent = MumbleProto::WatchTogetherEventEnd;
+						else if (event == QLatin1String("host-transfer"))
+							protocolEvent = MumbleProto::WatchTogetherEventHostTransfer;
+						sendWatchTogether(protocolEvent, sessionID, {}, {}, {}, 0.0, true, targetHostSession);
+					});
+			connect(mediaSession, &MediaSessionBackend::sharedPlaybackStateRequested, this,
+					[sendWatchTogether](const QString &sessionID, const double position, const bool paused) {
+						sendWatchTogether(MumbleProto::WatchTogetherEventState, sessionID, {}, {}, {}, position,
+										  paused, 0);
+					});
 			connect(m_qmlShellHost.get(), &QmlShellHost::closeRequested, this, &MainWindow::close);
 		}
 
@@ -33254,6 +33315,7 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	Global::get().channelListenerManager->clear();
 	clearUserTextureRequests();
 	clearUserCommentRequests();
+	if (m_qmlShellHost) m_qmlShellHost->mediaSession()->clearSharedState();
 
 	// Reset move-back history
 	qaMoveBack->setEnabled(false);

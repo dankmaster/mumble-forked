@@ -1818,19 +1818,33 @@ void MainWindow::msgWatchTogetherSync(const MumbleProto::WatchTogetherSync &msg)
 
 	MediaSessionBackend *media = m_qmlShellHost->mediaSession();
 	if (!media) return;
-	if (msg.event() == MumbleProto::WatchTogetherEventEnd) {
-		if (media->sessionId() == u8(msg.session_id())) media->close();
-		return;
-	}
-	if (!msg.has_source_url()) return;
 
 	QString provider = QStringLiteral("direct");
 	switch (msg.source_kind()) {
 		case MumbleProto::WatchTogetherSourceYouTube: provider = QStringLiteral("youtube"); break;
 		default: break;
 	}
-	media->applyRemoteState(QUrl(u8(msg.source_url())), provider, u8(msg.session_id()), msg.position_seconds(),
-							msg.paused(), msg.updated_at());
+	QString event = QStringLiteral("state");
+	switch (msg.event()) {
+		case MumbleProto::WatchTogetherEventStart: event = QStringLiteral("start"); break;
+		case MumbleProto::WatchTogetherEventJoin: event = QStringLiteral("join"); break;
+		case MumbleProto::WatchTogetherEventLeave: event = QStringLiteral("leave"); break;
+		case MumbleProto::WatchTogetherEventEnd: event = QStringLiteral("end"); break;
+		case MumbleProto::WatchTogetherEventHostTransfer: event = QStringLiteral("host-transfer"); break;
+		case MumbleProto::WatchTogetherEventState:
+		case MumbleProto::WatchTogetherEventStateRequest:
+		default: break;
+	}
+	QVariantList participants;
+	participants.reserve(msg.participant_sessions_size());
+	for (const unsigned int participant : msg.participant_sessions())
+		participants.push_back(QVariant::fromValue(static_cast< qulonglong >(participant)));
+	media->applySharedState(
+		u8(msg.session_id()), msg.has_source_url() ? QUrl(u8(msg.source_url())) : QUrl(), provider,
+		msg.has_title() ? u8(msg.title()) : QString(), msg.has_scope_id() ? msg.scope_id() : 0,
+		msg.has_actor_session() ? msg.actor_session() : 0, msg.has_host_session() ? msg.host_session() : 0,
+		participants, event, msg.position_seconds(), msg.paused(), msg.has_updated_at() ? msg.updated_at() : 0,
+		Global::get().uiSession);
 }
 
 void MainWindow::msgStonksRequest(const MumbleProto::StonksRequest &) {

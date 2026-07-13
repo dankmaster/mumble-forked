@@ -718,6 +718,15 @@ ApplicationWindow {
 					onLinkRequested: link => Qt.openUrlExternally(link)
 				}
 
+				WatchTogetherBanner {
+					Layout.fillWidth: true
+					Layout.leftMargin: Theme.spacing
+					Layout.rightMargin: Theme.spacing
+					Layout.topMargin: visible ? Math.max(4, Math.round(Theme.spacing / 2)) : 0
+					session: mediaSession
+					participantModel: participantModel
+				}
+
                 ListView {
                     id: timeline
                     Layout.fillWidth: true
@@ -939,13 +948,22 @@ ApplicationWindow {
                                                     onClicked: Qt.openUrlExternally(preview.url)
                                                 }
                                                 ModernButton {
-													visible: !!preview && (preview.embedUrl || "").length > 0
+											visible: !!preview && (preview.embedUrl || "").length > 0
                                                              && (preview.embedKind || "").length > 0
                                                     text: qsTr("Play")
                                                     onClicked: mediaSession.open(preview.embedUrl,
                                                                                  preview.embedKind,
                                                                                  messageDelegate.stableId)
                                                 }
+											ModernButton {
+												visible: !!preview && (preview.embedUrl || "").length > 0
+														 && (preview.embedKind || "").length > 0
+												enabled: !mediaSession.sharedAvailable
+												text: qsTr("Watch together")
+												onClicked: mediaSession.startShared(preview.embedUrl,
+																			 preview.embedKind,
+																			 preview.title || preview.host || qsTr("Shared media"))
+											}
                                                 Item { Layout.fillWidth: true }
                                             }
                                         }

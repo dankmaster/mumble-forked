@@ -43,6 +43,8 @@ private slots:
 	void mediaSessionProviderAllowlist_data();
 	void mediaSessionProviderAllowlist();
 	void mediaSessionNavigationAndErrorLifecycle();
+	void mediaSessionSharedHostLifecycle();
+	void mediaSessionRequiresExplicitJoinForRemoteSessions();
 	void selectionStateOnlyNotifiesForRealChanges();
 	void selectionStateInvalidatesRemovedStableIds();
 	void selectionStateRejectsUnknownIdsAndSurvivesResync();
@@ -1137,7 +1139,8 @@ void TestQmlClientModels::mediaSessionProviderAllowlist_data() {
 	QTest::newRow("tiktok") << QStringLiteral("tiktok") << QUrl(QStringLiteral("https://www.tiktok.com/player/v1/1")) << true;
 	QTest::newRow("instagram") << QStringLiteral("instagram") << QUrl(QStringLiteral("https://www.instagram.com/p/abc/embed")) << true;
 	QTest::newRow("soundcloud") << QStringLiteral("soundcloud") << QUrl(QStringLiteral("https://w.soundcloud.com/player/")) << true;
-	QTest::newRow("unknown-provider") << QStringLiteral("direct") << QUrl(QStringLiteral("https://www.youtube.com/embed/a")) << false;
+	QTest::newRow("direct-media") << QStringLiteral("direct") << QUrl(QStringLiteral("https://cdn.example.com/media/a.mp4")) << true;
+	QTest::newRow("unknown-provider") << QStringLiteral("unknown") << QUrl(QStringLiteral("https://www.youtube.com/embed/a")) << false;
 	QTest::newRow("arbitrary-https") << QStringLiteral("youtube") << QUrl(QStringLiteral("https://example.com/embed/a")) << false;
 	QTest::newRow("host-spoof") << QStringLiteral("youtube") << QUrl(QStringLiteral("https://www.youtube.com.evil.test/embed/a")) << false;
 	QTest::newRow("provider-mismatch") << QStringLiteral("vimeo") << QUrl(QStringLiteral("https://www.youtube.com/embed/a")) << false;
@@ -1158,6 +1161,7 @@ void TestQmlClientModels::mediaSessionProviderAllowlist() {
 
 void TestQmlClientModels::mediaSessionNavigationAndErrorLifecycle() {
 	MediaSessionBackend media;
+	QSignalSpy retrySpy(&media, &MediaSessionBackend::retryRequested);
 	QVERIFY(media.isNavigationAllowed(QUrl(QStringLiteral("about:blank"))));
 	QVERIFY(media.open(QUrl(QStringLiteral("https://player.vimeo.com/video/1")), QStringLiteral("vimeo"),
 					   QStringLiteral("room")));
@@ -1169,10 +1173,74 @@ void TestQmlClientModels::mediaSessionNavigationAndErrorLifecycle() {
 	media.reportError(QStringLiteral("renderer crashed"));
 	QCOMPARE(media.state(), QStringLiteral("error"));
 	QCOMPARE(media.error(), QStringLiteral("renderer crashed"));
+	media.retry();
+	QCOMPARE(retrySpy.count(), 1);
+	QCOMPARE(media.state(), QStringLiteral("loading"));
+	QVERIFY(media.error().isEmpty());
 	media.close();
 	QVERIFY(!media.active());
 	QCOMPARE(media.state(), QStringLiteral("idle"));
 	QVERIFY(media.error().isEmpty());
+}
+
+void TestQmlClientModels::mediaSessionSharedHostLifecycle() {
+	MediaSessionBackend media;
+	QSignalSpy startSpy(&media, &MediaSessionBackend::sharedStartRequested);
+	QSignalSpy eventSpy(&media, &MediaSessionBackend::sharedEventRequested);
+	QSignalSpy stateSpy(&media, &MediaSessionBackend::sharedPlaybackStateRequested);
+	const QUrl url(QStringLiteral("https://www.youtube.com/embed/shared"));
+
+	QVERIFY(media.startShared(url, QStringLiteral("youtube"), QStringLiteral("Shared clip")));
+	QVERIFY(media.sharedAvailable());
+	QVERIFY(!media.active());
+	QCOMPARE(startSpy.count(), 1);
+	const QString sessionId = media.sharedSessionId();
+	QVERIFY(!sessionId.isEmpty());
+
+	media.applySharedState(sessionId, url, QStringLiteral("youtube"), QStringLiteral("Shared clip"), 42, 17, 17,
+							 { 17 }, QStringLiteral("start"), 0.0, true, 100, 17);
+	QVERIFY(media.active());
+	QVERIFY(media.sharedJoined());
+	QVERIFY(media.sharedHost());
+	QCOMPARE(media.sharedParticipantCount(), 1);
+	media.reportPlaybackState(1.25, 90.0, false);
+	QCOMPARE(stateSpy.count(), 1);
+
+	media.endShared();
+	QCOMPARE(eventSpy.count(), 1);
+	QCOMPARE(eventSpy.takeFirst().at(1).toString(), QStringLiteral("end"));
+	QVERIFY(!media.sharedAvailable());
+	QVERIFY(!media.active());
+}
+
+void TestQmlClientModels::mediaSessionRequiresExplicitJoinForRemoteSessions() {
+	MediaSessionBackend media;
+	QSignalSpy eventSpy(&media, &MediaSessionBackend::sharedEventRequested);
+	const QUrl url(QStringLiteral("https://cdn.example.com/media/shared.mp4"));
+	const QString sessionId = QStringLiteral("remote-session");
+
+	media.applySharedState(sessionId, url, QStringLiteral("direct"), QStringLiteral("Remote clip"), 8, 9, 9,
+							 { 9 }, QStringLiteral("start"), 3.0, false, 100, 17);
+	QVERIFY(media.sharedAvailable());
+	QVERIFY(!media.sharedJoined());
+	QVERIFY(!media.active());
+
+	media.joinShared();
+	QCOMPARE(eventSpy.count(), 1);
+	QCOMPARE(eventSpy.at(0).at(1).toString(), QStringLiteral("join"));
+	media.applySharedState(sessionId, url, QStringLiteral("direct"), QStringLiteral("Remote clip"), 8, 17, 9,
+							 { 9, 17 }, QStringLiteral("join"), 3.0, true, 200, 17);
+	QVERIFY(media.sharedJoined());
+	QVERIFY(!media.sharedHost());
+	QVERIFY(media.active());
+	QVERIFY(media.isNavigationAllowed(QUrl(QStringLiteral("https://cdn.example.com/media/next.mp4"))));
+	QVERIFY(!media.isNavigationAllowed(QUrl(QStringLiteral("https://other.example.com/media/next.mp4"))));
+
+	media.leaveShared();
+	QCOMPARE(eventSpy.count(), 2);
+	QCOMPARE(eventSpy.at(1).at(1).toString(), QStringLiteral("leave"));
+	QVERIFY(!media.sharedJoined());
+	QVERIFY(!media.active());
 }
 
 QTEST_GUILESS_MAIN(TestQmlClientModels)

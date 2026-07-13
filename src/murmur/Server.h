@@ -568,6 +568,7 @@ public:
 									   ServerUser *except = nullptr);
 	void syncScreenShareStateForUser(ServerUser *user, Channel *previousChannel = nullptr);
 	void syncWatchTogetherStateForUser(ServerUser *user);
+	void removeUserFromWatchTogetherSessions(ServerUser *user, Channel *channel, const QString &reason);
 	bool stopScreenShare(const QString &streamID, unsigned int actorSession,
 						 MumbleProto::ScreenShareLifecycleState state, const QString &reason);
 

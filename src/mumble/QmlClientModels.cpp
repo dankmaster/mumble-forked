@@ -5,8 +5,10 @@
 
 #include "ClientActionRegistry.h"
 
+#include <QtCore/QDateTime>
 #include <QtCore/QString>
 #include <QtCore/QSet>
+#include <QtCore/QUuid>
 #include <QtGui/QAction>
 
 #include <algorithm>
@@ -1056,6 +1058,15 @@ const QHash< QString, QSet< QString > > &mediaProviderHosts() {
 }
 
 bool MediaSessionBackend::active() const { return m_active; }
+bool MediaSessionBackend::sharedAvailable() const { return m_sharedAvailable; }
+bool MediaSessionBackend::sharedJoined() const { return m_sharedJoined; }
+bool MediaSessionBackend::sharedHost() const { return m_sharedHost; }
+QString MediaSessionBackend::sharedTitle() const { return m_sharedTitle; }
+QString MediaSessionBackend::sharedSessionId() const { return m_sharedSessionId; }
+qulonglong MediaSessionBackend::sharedScopeId() const { return m_sharedScopeId; }
+qulonglong MediaSessionBackend::sharedHostSession() const { return m_sharedHostSession; }
+int MediaSessionBackend::sharedParticipantCount() const { return m_sharedParticipantSessions.size(); }
+QVariantList MediaSessionBackend::sharedParticipantSessions() const { return m_sharedParticipantSessions; }
 QUrl MediaSessionBackend::url() const { return m_url; }
 QString MediaSessionBackend::provider() const { return m_provider; }
 QString MediaSessionBackend::sessionId() const { return m_sessionId; }
@@ -1065,23 +1076,45 @@ double MediaSessionBackend::duration() const { return m_duration; }
 QString MediaSessionBackend::error() const { return m_error; }
 qulonglong MediaSessionBackend::syncGeneration() const { return m_syncGeneration; }
 
-bool MediaSessionBackend::open(const QUrl &url, const QString &provider, const QString &sessionId) {
-	const QUrl normalized = url.adjusted(QUrl::NormalizePathSegments | QUrl::StripTrailingSlash);
+bool MediaSessionBackend::validateSource(const QUrl &url, const QString &provider, QUrl *normalized,
+										 QString *error) const {
+	const QUrl candidate = url.adjusted(QUrl::NormalizePathSegments | QUrl::RemoveFragment);
 	const QString normalizedProvider = provider.trimmed().toLower();
-	const auto providerHosts = mediaProviderHosts().constFind(normalizedProvider);
-	if (providerHosts == mediaProviderHosts().cend()) {
-		reportError(tr("This media provider is not supported."));
+	if (!candidate.isValid() || candidate.scheme() != QLatin1String("https") || candidate.host().isEmpty()) {
+		if (error) *error = tr("Media playback requires a valid HTTPS URL.");
 		return false;
 	}
-	if (!normalized.isValid() || normalized.scheme() != QLatin1String("https")
-		|| !providerHosts->contains(normalized.host().toLower())) {
-		reportError(tr("The media embed URL is not allowed for this provider."));
+
+	if (normalizedProvider != QLatin1String("direct")) {
+		const auto providerHosts = mediaProviderHosts().constFind(normalizedProvider);
+		if (providerHosts == mediaProviderHosts().cend()) {
+			if (error) *error = tr("This media provider is not supported.");
+			return false;
+		}
+		if (!providerHosts->contains(candidate.host().toLower())) {
+			if (error) *error = tr("The media embed URL is not allowed for this provider.");
+			return false;
+		}
+	}
+
+	if (normalized) *normalized = candidate;
+	return true;
+}
+
+bool MediaSessionBackend::open(const QUrl &url, const QString &provider, const QString &sessionId) {
+	QUrl normalized;
+	QString validationError;
+	if (!validateSource(url, provider, &normalized, &validationError)) {
+		reportError(validationError);
 		return false;
 	}
+	const QString normalizedProvider = provider.trimmed().toLower();
 	m_active = true;
 	m_url = normalized;
 	m_provider = normalizedProvider;
 	m_sessionId = sessionId.trimmed();
+	m_navigationHost = normalized.host().toLower();
+	m_navigationPort = normalized.port(443);
 	m_state = QStringLiteral("loading");
 	m_position = 0.0;
 	m_duration = 0.0;
@@ -1091,26 +1124,114 @@ bool MediaSessionBackend::open(const QUrl &url, const QString &provider, const Q
 	return true;
 }
 
+bool MediaSessionBackend::startShared(const QUrl &url, const QString &provider, const QString &title) {
+	QUrl normalized;
+	QString validationError;
+	if (!validateSource(url, provider, &normalized, &validationError)) {
+		reportError(validationError);
+		return false;
+	}
+	if (m_sharedAvailable) {
+		reportError(tr("Leave or end the current watch-together session first."));
+		return false;
+	}
+
+	const QString sessionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+	m_pendingExplicitSessionId = sessionId;
+	m_sharedAvailable = true;
+	m_sharedJoined = false;
+	m_sharedHost = false;
+	m_sharedTitle = title.trimmed();
+	m_sharedSessionId = sessionId;
+	m_sharedUrl = normalized;
+	m_sharedProvider = provider.trimmed().toLower();
+	m_sharedParticipantSessions.clear();
+	m_state = QStringLiteral("starting");
+	m_error.clear();
+	emit stateChanged();
+	emit sharedStartRequested(sessionId, normalized, m_sharedProvider, m_sharedTitle);
+	return true;
+}
+
+void MediaSessionBackend::joinShared() {
+	if (!m_sharedAvailable || m_sharedSessionId.isEmpty() || m_sharedJoined) return;
+	m_pendingExplicitSessionId = m_sharedSessionId;
+	emit sharedEventRequested(m_sharedSessionId, QStringLiteral("join"), 0);
+}
+
+void MediaSessionBackend::leaveShared() {
+	if (!m_sharedAvailable || m_sharedSessionId.isEmpty()) return;
+	if (m_sharedHost) {
+		endShared();
+		return;
+	}
+	if (m_sharedJoined) emit sharedEventRequested(m_sharedSessionId, QStringLiteral("leave"), 0);
+	m_pendingExplicitSessionId.clear();
+	m_sharedJoined = false;
+	closePlayer();
+	emit stateChanged();
+}
+
+void MediaSessionBackend::endShared() {
+	if (!m_sharedAvailable || m_sharedSessionId.isEmpty() || !m_sharedHost) return;
+	emit sharedEventRequested(m_sharedSessionId, QStringLiteral("end"), 0);
+	clearSharedState();
+}
+
+void MediaSessionBackend::transferSharedHost(const QString &sessionId) {
+	bool valid = false;
+	const qulonglong target = sessionId.trimmed().toULongLong(&valid);
+	if (!m_sharedAvailable || !m_sharedHost || !valid || target == 0 || target == m_sharedHostSession) return;
+	emit sharedEventRequested(m_sharedSessionId, QStringLiteral("host-transfer"), target);
+}
+
+bool MediaSessionBackend::reopenSharedPlayer() {
+	if (!m_sharedAvailable || !m_sharedJoined || m_sharedUrl.isEmpty()) return false;
+	return open(m_sharedUrl, m_sharedProvider, m_sharedSessionId);
+}
+
+void MediaSessionBackend::retry() {
+	if (!m_active || m_url.isEmpty()) return;
+	m_state = QStringLiteral("loading");
+	m_error.clear();
+	emit stateChanged();
+	emit retryRequested();
+}
+
 bool MediaSessionBackend::isNavigationAllowed(const QUrl &url) const {
 	if (url == QUrl(QStringLiteral("about:blank"))) return true;
 	if (!m_active) return false;
+	if (m_provider == QLatin1String("direct")) {
+		return url.isValid() && url.scheme() == QLatin1String("https")
+			&& url.host().compare(m_navigationHost, Qt::CaseInsensitive) == 0 && url.port(443) == m_navigationPort;
+	}
 	const auto providerHosts = mediaProviderHosts().constFind(m_provider);
 	return providerHosts != mediaProviderHosts().cend() && url.isValid() && url.scheme() == QLatin1String("https")
 		   && providerHosts->contains(url.host().toLower());
 }
 
-void MediaSessionBackend::close() {
+void MediaSessionBackend::closePlayer() {
 	if (!m_active && m_state == QLatin1String("idle")) return;
 	m_active = false;
 	m_url = {};
 	m_provider.clear();
 	m_sessionId.clear();
+	m_navigationHost.clear();
+	m_navigationPort = -1;
 	m_state = QStringLiteral("idle");
 	m_position = 0.0;
 	m_duration = 0.0;
 	m_error.clear();
 	++m_syncGeneration;
 	emit stateChanged();
+}
+
+void MediaSessionBackend::close() {
+	if (m_sharedJoined) {
+		leaveShared();
+		return;
+	}
+	closePlayer();
 }
 
 void MediaSessionBackend::play() {
@@ -1122,7 +1243,9 @@ void MediaSessionBackend::pause() {
 }
 
 void MediaSessionBackend::seek(const double seconds) {
-	if (m_active && qIsFinite(seconds) && seconds >= 0.0) emit seekRequested(seconds);
+	if (!m_active || !qIsFinite(seconds) || seconds < 0.0) return;
+	emit seekRequested(seconds);
+	publishSharedPlaybackState(seconds, m_state != QLatin1String("playing"), true);
 }
 
 void MediaSessionBackend::reportPlaybackState(const double position, const double duration, const bool paused) {
@@ -1132,6 +1255,7 @@ void MediaSessionBackend::reportPlaybackState(const double position, const doubl
 	m_state = paused ? QStringLiteral("paused") : QStringLiteral("playing");
 	m_error.clear();
 	emit stateChanged();
+	publishSharedPlaybackState(m_position, paused, false);
 }
 
 void MediaSessionBackend::reportError(const QString &message) {
@@ -1152,6 +1276,119 @@ void MediaSessionBackend::applyRemoteState(const QUrl &url, const QString &provi
 	emit seekRequested(m_position);
 	if (paused) emit pauseRequested();
 	else emit playRequested();
+	emit stateChanged();
+}
+
+void MediaSessionBackend::publishSharedPlaybackState(const double position, const bool paused, const bool force) {
+	if (!m_sharedAvailable || !m_sharedJoined || !m_sharedHost || m_sharedSessionId.isEmpty()) return;
+	const qint64 now = QDateTime::currentMSecsSinceEpoch();
+	const bool stateChanged = paused != m_lastSharedPublishPaused;
+	const bool positionChanged = m_lastSharedPublishPosition < 0.0
+		|| qAbs(position - m_lastSharedPublishPosition) >= 0.75;
+	if (!force && !stateChanged && (!positionChanged || now - m_lastSharedPublishMs < 1000)) return;
+	m_lastSharedPublishMs = now;
+	m_lastSharedPublishPosition = position;
+	m_lastSharedPublishPaused = paused;
+	emit sharedPlaybackStateRequested(m_sharedSessionId, position, paused);
+}
+
+void MediaSessionBackend::applySharedState(const QString &sessionId, const QUrl &url, const QString &provider,
+										 const QString &title, const qulonglong scopeId,
+										 const qulonglong actorSession, const qulonglong hostSession,
+										 const QVariantList &participantSessions, const QString &event,
+										 double position, const bool paused, const qulonglong generation,
+										 const qulonglong selfSession) {
+	const QString id = sessionId.trimmed();
+	const QString normalizedEvent = event.trimmed().toLower();
+	if (id.isEmpty()) return;
+	if (normalizedEvent == QLatin1String("end")) {
+		if (m_sharedSessionId == id) clearSharedState();
+		return;
+	}
+
+	QUrl normalizedUrl;
+	QString validationError;
+	if (!validateSource(url, provider, &normalizedUrl, &validationError)) {
+		if (m_sharedSessionId == id) reportError(validationError);
+		return;
+	}
+
+	const bool sameSession = m_sharedSessionId == id;
+	const bool wasJoined = sameSession && m_sharedJoined;
+	const bool explicitlyRequested = m_pendingExplicitSessionId == id;
+	if (!sameSession && m_sharedJoined) closePlayer();
+
+	QVariantList normalizedParticipants;
+	QSet< qulonglong > seenParticipants;
+	for (const QVariant &participant : participantSessions) {
+		bool valid = false;
+		const qulonglong value = participant.toULongLong(&valid);
+		if (!valid || value == 0 || seenParticipants.contains(value)) continue;
+		seenParticipants.insert(value);
+		normalizedParticipants.push_back(QVariant::fromValue(value));
+	}
+	if (hostSession != 0 && !seenParticipants.contains(hostSession)) {
+		seenParticipants.insert(hostSession);
+		normalizedParticipants.push_back(QVariant::fromValue(hostSession));
+	}
+
+	bool joined = selfSession != 0 && seenParticipants.contains(selfSession);
+	if (normalizedEvent == QLatin1String("leave") && actorSession == selfSession) joined = false;
+	if ((normalizedEvent == QLatin1String("start") || normalizedEvent == QLatin1String("join"))
+		&& actorSession == selfSession && explicitlyRequested) {
+		joined = true;
+	}
+
+	m_sharedAvailable = true;
+	m_sharedJoined = joined;
+	m_sharedHost = selfSession != 0 && hostSession == selfSession;
+	m_sharedTitle = title.trimmed();
+	m_sharedSessionId = id;
+	m_sharedUrl = normalizedUrl;
+	m_sharedProvider = provider.trimmed().toLower();
+	m_sharedScopeId = scopeId;
+	m_sharedHostSession = hostSession;
+	m_sharedParticipantSessions = normalizedParticipants;
+	if (explicitlyRequested && joined) m_pendingExplicitSessionId.clear();
+
+	if (!joined) {
+		if (wasJoined) closePlayer();
+		m_state = QStringLiteral("available");
+		m_error.clear();
+		emit stateChanged();
+		return;
+	}
+
+	if (!paused && generation > 0) {
+		const qint64 ageMs = qMax< qint64 >(0, QDateTime::currentMSecsSinceEpoch() - static_cast< qint64 >(generation));
+		position += static_cast< double >(ageMs) / 1000.0;
+	}
+	if (wasJoined || explicitlyRequested) {
+		applyRemoteState(normalizedUrl, m_sharedProvider, id, position, paused, generation);
+	} else {
+		m_state = QStringLiteral("available");
+		emit stateChanged();
+	}
+}
+
+void MediaSessionBackend::clearSharedState() {
+	closePlayer();
+	m_sharedAvailable = false;
+	m_sharedJoined = false;
+	m_sharedHost = false;
+	m_sharedTitle.clear();
+	m_sharedSessionId.clear();
+	m_sharedUrl = {};
+	m_sharedProvider.clear();
+	m_sharedScopeId = 0;
+	m_sharedHostSession = 0;
+	m_sharedParticipantSessions.clear();
+	m_pendingExplicitSessionId.clear();
+	m_lastSharedPublishMs = 0;
+	m_lastSharedPublishPosition = -1.0;
+	m_lastSharedPublishPaused = true;
+	m_state = QStringLiteral("idle");
+	m_error.clear();
 	emit stateChanged();
 }
 

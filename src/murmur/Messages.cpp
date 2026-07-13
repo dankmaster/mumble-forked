@@ -9014,6 +9014,10 @@ void Server::msgWatchTogetherSync(ServerUser *uSource, MumbleProto::WatchTogethe
 	const bool hasStoredSession = qhWatchTogetherSessions.contains(sessionID);
 	MumbleProto::WatchTogetherSync stored =
 		hasStoredSession ? qhWatchTogetherSessions.value(sessionID) : MumbleProto::WatchTogetherSync();
+	if (event == MumbleProto::WatchTogetherEventStart && hasStoredSession) {
+		deny(QStringLiteral("A watch-together session with this ID already exists."));
+		return;
+	}
 	const unsigned int storedHost = stored.has_host_session() ? stored.host_session() : 0;
 	const bool sourceIsHost       = storedHost == 0 || storedHost == uSource->uiSession;
 
@@ -9030,6 +9034,10 @@ void Server::msgWatchTogetherSync(ServerUser *uSource, MumbleProto::WatchTogethe
 	}
 	if (event == MumbleProto::WatchTogetherEventHostTransfer && !msg.has_host_session()) {
 		deny(QStringLiteral("Host transfer requires a target host."));
+		return;
+	}
+	if (event == MumbleProto::WatchTogetherEventLeave && sourceIsHost) {
+		deny(QStringLiteral("The host must end the session or transfer hosting before leaving."));
 		return;
 	}
 
@@ -9062,10 +9070,6 @@ void Server::msgWatchTogetherSync(ServerUser *uSource, MumbleProto::WatchTogethe
 	if (event != MumbleProto::WatchTogetherEventHostTransfer) {
 		msg.set_host_session(storedHost != 0 ? storedHost : uSource->uiSession);
 	}
-	if (!msg.has_updated_at()) {
-		msg.set_updated_at(static_cast< quint64 >(QDateTime::currentMSecsSinceEpoch()));
-	}
-
 	if (event == MumbleProto::WatchTogetherEventHostTransfer) {
 		ServerUser *newHost = qhUsers.value(msg.host_session());
 		if (!newHost || newHost->cChannel != channel
@@ -9075,7 +9079,7 @@ void Server::msgWatchTogetherSync(ServerUser *uSource, MumbleProto::WatchTogethe
 		}
 	}
 
-	if (event == MumbleProto::WatchTogetherEventState && hasStoredSession) {
+	if (hasStoredSession && event != MumbleProto::WatchTogetherEventEnd) {
 		if (!msg.has_source_url() && stored.has_source_url()) {
 			msg.set_source_url(stored.source_url());
 		}
@@ -9085,11 +9089,46 @@ void Server::msgWatchTogetherSync(ServerUser *uSource, MumbleProto::WatchTogethe
 		if (!msg.has_source_kind() && stored.has_source_kind()) {
 			msg.set_source_kind(stored.source_kind());
 		}
+		if (!msg.has_position_seconds() && stored.has_position_seconds()) {
+			msg.set_position_seconds(stored.position_seconds());
+		}
+		if (!msg.has_paused() && stored.has_paused()) {
+			msg.set_paused(stored.paused());
+		}
+		if (!msg.has_playback_rate() && stored.has_playback_rate()) {
+			msg.set_playback_rate(stored.playback_rate());
+		}
+		if (!msg.has_updated_at() && event != MumbleProto::WatchTogetherEventState && stored.has_updated_at()) {
+			msg.set_updated_at(stored.updated_at());
+		}
 	}
+	if (!msg.has_updated_at()) {
+		msg.set_updated_at(static_cast< quint64 >(QDateTime::currentMSecsSinceEpoch()));
+	}
+
+	QSet< unsigned int > participants;
+	if (hasStoredSession) {
+		for (const unsigned int participant : stored.participant_sessions()) participants.insert(participant);
+	}
+	if (event == MumbleProto::WatchTogetherEventStart || event == MumbleProto::WatchTogetherEventJoin) {
+		participants.insert(uSource->uiSession);
+	} else if (event == MumbleProto::WatchTogetherEventLeave) {
+		participants.remove(uSource->uiSession);
+	} else if (event == MumbleProto::WatchTogetherEventHostTransfer) {
+		if (!participants.contains(msg.host_session())) {
+			deny(QStringLiteral("The new host must join the watch-together session first."));
+			return;
+		}
+	}
+	if (msg.has_host_session()) participants.insert(msg.host_session());
+	msg.clear_participant_sessions();
+	QList< unsigned int > orderedParticipants = participants.values();
+	std::sort(orderedParticipants.begin(), orderedParticipants.end());
+	for (const unsigned int participant : orderedParticipants) msg.add_participant_sessions(participant);
 
 	if (event == MumbleProto::WatchTogetherEventEnd) {
 		qhWatchTogetherSessions.remove(sessionID);
-	} else if (event != MumbleProto::WatchTogetherEventJoin && event != MumbleProto::WatchTogetherEventLeave) {
+	} else {
 		qhWatchTogetherSessions.insert(sessionID, msg);
 	}
 

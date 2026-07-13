@@ -11,7 +11,9 @@ ApplicationWindow {
     height: 700
     minimumWidth: 640
     minimumHeight: 420
-    title: qsTr("Media session")
+    title: mediaSession.sharedAvailable && mediaSession.sharedTitle.length > 0
+           ? mediaSession.sharedTitle
+           : qsTr("Media session")
     color: Theme.shellBackground
     onClosing: function(close) {
         close.accepted = true
@@ -25,7 +27,10 @@ ApplicationWindow {
         active: mediaSession.active
         sourceComponent: WebEngineView {
             id: player
-            profile: WebEngineProfile { offTheRecord: true }
+            profile: WebEngineProfile {
+                offTheRecord: true
+                onDownloadRequested: function(download) { download.cancel() }
+            }
             url: mediaSession.url
             settings.playbackRequiresUserGesture: false
             onLoadingChanged: function(request) {
@@ -35,8 +40,19 @@ ApplicationWindow {
             onRenderProcessTerminated: function(status, exitCode) {
                 mediaSession.reportError(qsTr("The media renderer stopped unexpectedly."))
             }
-            onNewWindowRequested: function(request) { request.reject() }
-            onFileDialogRequested: function(request) { request.reject() }
+            // A new-window request fails closed unless openIn() is called.
+            onNewWindowRequested: function(request) {}
+            onFileDialogRequested: function(request) {
+                request.accepted = true
+                request.dialogReject()
+            }
+            onAuthenticationDialogRequested: function(request) {
+                request.accepted = true
+                request.dialogReject()
+            }
+            onPermissionRequested: function(permission) { permission.deny() }
+            onCertificateError: function(error) { error.rejectCertificate() }
+            onContextMenuRequested: function(request) { request.accepted = true }
             onNavigationRequested: function(request) {
                 if (!mediaSession.isNavigationAllowed(request.url))
                     request.action = WebEngineNavigationRequest.IgnoreRequest
@@ -48,6 +64,7 @@ ApplicationWindow {
                 function onSeekRequested(seconds) {
                     player.runJavaScript("(function(){const m=document.querySelector('video,audio');if(m)m.currentTime=" + Number(seconds) + "})()")
                 }
+                function onRetryRequested() { player.reload() }
             }
             Timer {
                 interval: 500
@@ -63,6 +80,40 @@ ApplicationWindow {
     }
 
     Rectangle {
+        anchors.fill: playerLoader
+        visible: mediaSession.error.length > 0
+        color: "#d9161b26"
+        z: 5
+
+        ColumnLayout {
+            anchors.centerIn: parent
+            width: Math.min(parent.width - 48, 520)
+            spacing: 14
+
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Media playback failed")
+                color: Theme.textStrong
+                font.bold: true
+                font.pixelSize: 20
+                horizontalAlignment: Text.AlignHCenter
+            }
+            Label {
+                Layout.fillWidth: true
+                text: mediaSession.error
+                color: Theme.textMuted
+                wrapMode: Text.Wrap
+                horizontalAlignment: Text.AlignHCenter
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignHCenter
+                ModernButton { text: qsTr("Retry"); onClicked: mediaSession.retry() }
+                ModernButton { text: qsTr("Open externally"); onClicked: Qt.openUrlExternally(mediaSession.url) }
+            }
+        }
+    }
+
+    Rectangle {
         id: controls
         anchors.left: parent.left
         anchors.right: parent.right
@@ -73,10 +124,29 @@ ApplicationWindow {
         RowLayout {
             anchors.fill: parent
             anchors.margins: 10
-            ModernButton { text: mediaSession.state === "playing" ? qsTr("Pause") : qsTr("Play"); onClicked: mediaSession.state === "playing" ? mediaSession.pause() : mediaSession.play() }
-            Slider { Layout.fillWidth: true; from: 0; to: Math.max(1, mediaSession.duration); value: mediaSession.position; onMoved: mediaSession.seek(value) }
+            ModernButton {
+                enabled: !mediaSession.sharedAvailable || mediaSession.sharedHost
+                text: mediaSession.state === "playing" ? qsTr("Pause") : qsTr("Play")
+                onClicked: mediaSession.state === "playing" ? mediaSession.pause() : mediaSession.play()
+            }
+            Slider {
+                Layout.fillWidth: true
+                enabled: !mediaSession.sharedAvailable || mediaSession.sharedHost
+                from: 0
+                to: Math.max(1, mediaSession.duration)
+                value: mediaSession.position
+                onMoved: mediaSession.seek(value)
+            }
             Label { text: Math.floor(mediaSession.position) + " / " + Math.floor(mediaSession.duration) + " s"; color: Theme.textMuted }
-            ModernButton { text: qsTr("Close"); onClicked: mediaSession.close() }
+            Label {
+                visible: mediaSession.sharedAvailable
+                text: mediaSession.sharedHost ? qsTr("Hosting") : qsTr("Synchronized")
+                color: mediaSession.sharedHost ? Theme.accent : Theme.textMuted
+            }
+            ModernButton {
+                text: mediaSession.sharedHost ? qsTr("End") : (mediaSession.sharedJoined ? qsTr("Leave") : qsTr("Close"))
+                onClicked: mediaSession.close()
+            }
         }
     }
 }
