@@ -30,30 +30,12 @@ set(MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT ON)
 if(packaging AND "$ENV{GITHUB_ACTIONS}" STREQUAL "true")
 	set(MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT OFF)
 endif()
-option(modern-layout-automation "Include the Modern UI automation server and JavaScript automation hooks." ${MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT})
-option(modern-layout-mockups "Include Modern shell mockup and walkthrough functionality." ${MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT})
+option(modern-layout-automation "Include the frontend-neutral Modern UI automation server." ${MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT})
+option(modern-layout-mockups "Include Qt Quick visual fixtures and walkthrough functionality." ${MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT})
 # Developer-only chat performance tracer. Compiled into local dev clients but kept
 # out of GitHub/CI packaging builds (same default policy as the Modern tooling above).
 # Even when compiled in, it stays dormant until MUMBLE_CHAT_PERF_TRACE is set at runtime.
 option(chat-perf-trace "Include the developer chat performance tracer (mumble::chatperf)." ${MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT})
-
-function(mumble_strip_marked_shell_block content_var begin_marker end_marker replacement)
-	set(content "${${content_var}}")
-	string(FIND "${content}" "${begin_marker}" begin_index)
-	if(begin_index EQUAL -1)
-		message(FATAL_ERROR "Unable to find Modern shell marker '${begin_marker}'")
-	endif()
-	string(FIND "${content}" "${end_marker}" end_index)
-	if(end_index EQUAL -1 OR end_index LESS begin_index)
-		message(FATAL_ERROR "Unable to find Modern shell marker '${end_marker}' after '${begin_marker}'")
-	endif()
-
-	string(LENGTH "${end_marker}" end_marker_length)
-	math(EXPR after_index "${end_index} + ${end_marker_length}")
-	string(SUBSTRING "${content}" 0 ${begin_index} before_block)
-	string(SUBSTRING "${content}" ${after_index} -1 after_block)
-	set(${content_var} "${before_block}${replacement}${after_block}" PARENT_SCOPE)
-endfunction()
 
 option(manual-plugin "Include the built-in \"manual\" positional audio plugin." ON)
 
@@ -171,8 +153,6 @@ set(MUMBLE_SOURCES
 	"Database.h"
 	"DeepFilterNetSpeechCleanup.cpp"
 	"DeepFilterNetSpeechCleanup.h"
-	"ExposeEventFilter.cpp"
-	"ExposeEventFilter.h"
 	"DTLNSpeechCleanup.cpp"
 	"DTLNSpeechCleanup.h"
 	"EchoCancelOption.cpp"
@@ -220,14 +200,19 @@ set(MUMBLE_SOURCES
 	"NetworkConfig.h"
 	"Plugin.cpp"
 	"Plugin.h"
+	"PluginAbiWorker.cpp"
+	"PluginAbiWorker.h"
 	"PluginInstallService.cpp"
 	"PluginInstallService.h"
 	"PluginManager.cpp"
 	"PluginManager.h"
 	"PluginManifest.cpp"
 	"PluginManifest.h"
+	"PluginOperation.cpp"
+	"PluginOperation.h"
 	"PluginUpdater.cpp"
 	"PluginUpdatePreparation.cpp"
+	"PluginUpdatePreparation.h"
 	"PluginUpdater.h"
 	"PositionalData.cpp"
 	"PositionalData.h"
@@ -272,10 +257,6 @@ set(MUMBLE_SOURCES
 	"SvgIcon.cpp"
 	"SvgIcon.h"
 	"TextToSpeech.h"
-	"ThemeInfo.cpp"
-	"ThemeInfo.h"
-	"Themes.cpp"
-	"Themes.h"
 	"UiTheme.cpp"
 	"UiTheme.h"
 	"Translations.cpp"
@@ -320,8 +301,6 @@ set(MUMBLE_SOURCES
 
 	"mumble.qrc"
 	"qml-shell.qrc"
-	"${CMAKE_SOURCE_DIR}/themes/DefaultTheme.qrc"
-	"${CMAKE_SOURCE_DIR}/themes/CatppuccinTheme.qrc"
 )
 
 list(APPEND MUMBLE_SOURCES
@@ -336,6 +315,8 @@ list(APPEND MUMBLE_SOURCES
 	"QmlShellHost.h"
 	"QmlImageProvider.cpp"
 	"QmlImageProvider.h"
+	"QmlMediaProfileFactory.cpp"
+	"QmlMediaProfileFactory.h"
 	"QmlThemeController.cpp"
 	"QmlThemeController.h"
 	"QmlWindowStateController.cpp"
@@ -1012,9 +993,11 @@ if(manual-plugin)
 		PRIVATE
 			"ManualPlugin.cpp"
 			"ManualPlugin.h"
+			"ManualPluginController.cpp"
+			"ManualPluginController.h"
 	)
 
-target_compile_definitions(mumble_client_object_lib PUBLIC "USE_MANUAL_PLUGIN")
+	target_compile_definitions(mumble_client_object_lib PUBLIC "USE_MANUAL_PLUGIN")
 endif()
 
 if(NOT update)

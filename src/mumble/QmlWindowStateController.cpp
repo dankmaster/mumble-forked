@@ -166,11 +166,12 @@ bool QmlWindowStateController::platformUsesCompositorManagedPositioning(const QS
 	return platformName.trimmed().toLower().startsWith(QStringLiteral("wayland"));
 }
 
-void QmlWindowStateController::attach(QWindow *window, const QByteArray &encodedState) {
+void QmlWindowStateController::attach(QWindow *window, const QByteArray &encodedState, const QSize &minimumSize) {
 	if (m_window == window) return;
 	disconnectRuntimeSignals();
 	m_window = window;
 	if (!m_window) return;
+	m_minimumSize = minimumSize.expandedTo(QSize(1, 1));
 	m_compositorManagedPositioning =
 		platformUsesCompositorManagedPositioning(QGuiApplication::platformName());
 
@@ -184,7 +185,7 @@ void QmlWindowStateController::attach(QWindow *window, const QByteArray &encoded
 	initialState.devicePixelRatio = restored ? restored->devicePixelRatio : m_window->devicePixelRatio();
 	const QmlWindowRestorePlan plan = createRestorePlan(
 		initialState, snapshots, m_window->screen() ? m_window->screen()->name() : QString(),
-		m_compositorManagedPositioning);
+		m_compositorManagedPositioning, m_minimumSize);
 	m_normalGeometry = plan.normalGeometry;
 	if (QScreen *targetScreen = runtimeScreenForPlan(plan, snapshots);
 		targetScreen && (m_compositorManagedPositioning || !m_window->screen())) {
@@ -269,7 +270,7 @@ void QmlWindowStateController::reconcileScreenState() {
 	state.normalGeometry = m_normalGeometry.isValid() ? m_normalGeometry : m_window->geometry();
 	const QmlWindowRestorePlan plan = createRestorePlan(
 		state, snapshots, m_window->screen() ? m_window->screen()->name() : QString(),
-		m_compositorManagedPositioning);
+		m_compositorManagedPositioning, m_minimumSize);
 	m_reconcilingScreenState = true;
 	m_normalGeometry = plan.normalGeometry;
 	if (QScreen *targetScreen = runtimeScreenForPlan(plan, snapshots); targetScreen && !m_window->screen()) {

@@ -6,8 +6,9 @@ import Mumble.Theme 1.0
 ApplicationWindow {
 	id: root
 	onClosing: close => close.accepted = false
-    property bool pttToolVisible: false
-    property var pttToolPopup: null
+    property var attachmentViewerPayload: null
+    property var pendingPreviewHydrationIds: ({})
+    property bool pendingPreviewHydrationHighPriority: false
     visible: false
     width: 1280
     height: 820
@@ -21,6 +22,7 @@ ApplicationWindow {
 	property real performanceChatScrollTargetY: 0
 	readonly property bool compactNavigation: width < 900
 	readonly property bool automationNavigationOpen: navigationDrawer.visible
+	readonly property real automationNavigationPosition: navigationDrawer.position
 	readonly property var navigationRoomModel: roomModel
 	readonly property var navigationParticipantModel: participantModel
 	readonly property var navigationSelectionState: selectionState
@@ -32,6 +34,64 @@ ApplicationWindow {
 	property string contextParticipantId: ""
 	property var contextParticipantActions: []
 	property string automationMenuVariant: ""
+
+	function safeRenderImageSource(value) {
+		const source = String(value === undefined || value === null ? "" : value).trim()
+		return /^(image:\/\/mumble\/|qrc:\/)/i.test(source) ? source : ""
+	}
+
+	function openAttachment(attachment, titleOverride) {
+		if (!attachment)
+			return false
+		const source = safeRenderImageSource(attachment.url || attachment.thumbnailUrl || "")
+		if (source.length === 0)
+			return false
+		attachmentViewerPayload = {
+			"url": source,
+			"thumbnailUrl": safeRenderImageSource(attachment.thumbnailUrl || source),
+			"name": String(titleOverride || attachment.name || ""),
+			"alt": String(titleOverride || attachment.alt || attachment.name || qsTr("Image attachment"))
+		}
+		return true
+	}
+
+    function clearPreviewHydrationQueue() {
+        pendingPreviewHydrationIds = ({})
+        pendingPreviewHydrationHighPriority = false
+        previewHydrationTimer.stop()
+    }
+
+    function queuePreviewHydration(messageId, highPriority) {
+        const normalized = String(messageId === undefined || messageId === null ? "" : messageId).trim()
+        if (!/^[1-9][0-9]*$/.test(normalized) || String(activeScope.scopeToken || "").length === 0)
+            return false
+        // Keep protocol uint64 IDs as decimal strings. JavaScript numbers lose
+        // precision above 2^53 and would hydrate a different message.
+        if (normalized.length > 20)
+            return false
+        pendingPreviewHydrationIds[normalized] = normalized
+        pendingPreviewHydrationHighPriority = pendingPreviewHydrationHighPriority || !!highPriority
+        if (!previewHydrationTimer.running)
+            previewHydrationTimer.start()
+        return true
+    }
+
+    function flushPreviewHydrationQueue() {
+        const keys = Object.keys(pendingPreviewHydrationIds)
+        if (keys.length === 0)
+            return
+        const batch = []
+        for (let index = 0; index < keys.length && batch.length < 32; ++index) {
+            const key = keys[index]
+            batch.push(pendingPreviewHydrationIds[key])
+            delete pendingPreviewHydrationIds[key]
+        }
+        const highPriority = pendingPreviewHydrationHighPriority
+        pendingPreviewHydrationHighPriority = false
+        uiCommands.requestPreviewHydration(String(activeScope.scopeToken || ""), batch, highPriority)
+        if (Object.keys(pendingPreviewHydrationIds).length > 0)
+            previewHydrationTimer.start()
+    }
 
 	function normalizedMenuVariant(value) {
 		return String(value === undefined || value === null ? "" : value).trim()
@@ -88,7 +148,10 @@ ApplicationWindow {
 		closeProductMenus()
 		contextScopeToken = String(scopeToken || "")
 		contextScopeKind = String(kind || "")
-		contextScopeActions = actions || []
+		let resolvedActions = actions || []
+		if (resolvedActions.length === 0 && contextScopeToken.length > 0)
+			resolvedActions = uiCommands.requestScopeActions(contextScopeToken, contextScopeKind) || []
+		contextScopeActions = resolvedActions
 		const menu = contextScopeKind === "text" ? textRoomMenuPopup : roomMenuPopup
 		return openMenuAt(menu, anchorPoint)
 	}
@@ -312,24 +375,24 @@ ApplicationWindow {
 		easing.type: Easing.InOutQuad
 	}
 
+    Timer {
+        id: previewHydrationTimer
+        interval: 16
+        repeat: false
+        onTriggered: root.flushPreviewHydrationQueue()
+    }
+
+    Connections {
+        target: activeScope
+		function onScopeTokenChanged() {
+			root.clearPreviewHydrationQueue()
+			timeline.beginScopeChange()
+		}
+    }
+
     Component {
         id: screenShareViewComponent
         ScreenShareViewWindow { }
-    }
-
-    onPttToolVisibleChanged: {
-        if (pttToolVisible) {
-            if (!pttToolPopup)
-                pttToolPopup = pttToolComponent.createObject(root.contentItem)
-            pttToolPopup.open()
-        } else if (!pttToolVisible && pttToolPopup) {
-            pttToolPopup.close()
-        }
-    }
-
-    Component {
-        id: pttToolComponent
-        PttTool { }
     }
 
     QmlDialog { visible: dialogState.open && dialogState.kind !== "imageViewer" }
@@ -341,7 +404,27 @@ ApplicationWindow {
         active: dialogState.open && dialogState.kind === "imageViewer"
         sourceComponent: imageViewerComponent
     }
-    MediaSessionWindow { }
+    Component {
+        id: attachmentViewerComponent
+        AttachmentViewer {
+            attachment: root.attachmentViewerPayload || ({})
+            onClosing: root.attachmentViewerPayload = null
+        }
+    }
+    Loader {
+        active: root.attachmentViewerPayload !== null
+        sourceComponent: attachmentViewerComponent
+    }
+    // Keep the isolated media QML plugin out of the main-shell import graph. The
+    // media window (and therefore Chromium) is resolved only after an explicit
+    // media-session action makes the backend active, and is destroyed again
+    // when that session closes.
+    Loader {
+        id: mediaSessionWindowLoader
+        active: mediaSession.active
+        asynchronous: true
+        source: active ? Qt.resolvedUrl("MediaSessionWindow.qml") : ""
+    }
 
 	Drawer {
 		id: navigationDrawer
@@ -531,12 +614,33 @@ ApplicationWindow {
                 required property string subtitle
 				required property string status
 				required property var payload
+				readonly property bool notification: String(payload.tone || "").length > 0
+				readonly property bool terminal: status === "succeeded" || status === "partial"
+					|| status === "failed" || status === "cancelled"
+				property bool resultDetailsExpanded: false
+				property int resultPageIndex: 0
+				readonly property int resultPageSize: 8
+				readonly property int resultCount: Math.max(0, Number(payload.itemResultCount) || 0)
+				readonly property int resultPageCount: Math.max(1, Math.ceil(resultCount / resultPageSize))
+				readonly property var failedResults: {
+					const revision = Math.max(0, Number(payload.itemResultRevision) || 0)
+					return revision >= 0 ? operationModel.itemResultPage(stableId, 0, 3, true) : []
+				}
+				readonly property var resultPageItems: {
+					const revision = Math.max(0, Number(payload.itemResultRevision) || 0)
+					return resultDetailsExpanded && terminal && revision >= 0
+						? operationModel.itemResultPage(stableId, resultPageIndex * resultPageSize,
+							resultPageSize, false) : []
+				}
+				onResultPageCountChanged: resultPageIndex = Math.min(resultPageIndex, resultPageCount - 1)
 				property Item visualFixtureFocusTarget: dismissOperationButton.visible ? dismissOperationButton : null
                 width: parent.width
                 height: operationContent.implicitHeight + 24
                 radius: Theme.innerRadius
                 color: Theme.panel
-                border.color: status === "failed" ? "#ef4444" : Theme.divider
+                border.color: status === "failed" ? "#ef4444"
+					: status === "partial" ? "#f59e0b"
+					: status === "cancelled" ? Theme.textMuted : Theme.divider
                 Accessible.role: Accessible.AlertMessage
                 Accessible.name: title + (subtitle.length > 0 ? ": " + subtitle : "")
                 ColumnLayout {
@@ -546,7 +650,7 @@ ApplicationWindow {
                     spacing: 6
                     RowLayout {
                         Layout.fillWidth: true
-                        Label { Layout.fillWidth: true; text: title; color: Theme.textStrong; font.bold: true; elide: Text.ElideRight }
+                        Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: title; color: Theme.textStrong; font.bold: true; elide: Text.ElideRight }
                         ModernButton {
                             visible: status === "running" && !!payload.cancellable
                             text: qsTr("Cancel")
@@ -556,7 +660,7 @@ ApplicationWindow {
 						ModernButton {
 							id: dismissOperationButton
 							objectName: "visualFixtureDismissOperation"
-							visible: status !== "running"
+							visible: terminal
                             text: qsTr("Dismiss")
                             Accessible.name: qsTr("Dismiss %1").arg(title)
 							Accessible.focusable: true
@@ -564,19 +668,120 @@ ApplicationWindow {
                             onClicked: operationModel.dismiss(stableId)
                         }
                     }
-                    Label { Layout.fillWidth: true; text: subtitle; color: Theme.textMuted; wrapMode: Text.Wrap }
+                    Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: subtitle; color: Theme.textMuted; wrapMode: Text.Wrap }
+					RowLayout {
+						Layout.fillWidth: true
+						visible: !notification && String(payload.phase || "").length > 0
+						Label {
+							textFormat: Text.PlainText
+							Layout.fillWidth: true
+							text: String(payload.phase || "").replace(/-/g, " ")
+							color: Theme.textMuted
+							font.pixelSize: 10
+							elide: Text.ElideRight
+						}
+						Label {
+							textFormat: Text.PlainText
+							visible: Number(payload.totalItems) > 0
+							text: qsTr("%1 of %2").arg(Number(payload.completedItems) || 0)
+								.arg(Number(payload.totalItems))
+							color: Theme.textMuted
+							font.pixelSize: 10
+						}
+					}
                     ProgressBar {
                         Layout.fillWidth: true
-                        visible: status === "running" || Number(payload.progress) >= 0
+						visible: !notification && (status === "running" || status === "cancelling"
+							|| Number(payload.progress) >= 0
+						)
                         indeterminate: !!payload.indeterminate
                         from: 0
                         to: 100
                         value: Number(payload.progress) >= 0 ? Number(payload.progress) : 0
                     }
+					Label {
+						textFormat: Text.PlainText
+						Layout.fillWidth: true
+						visible: !notification && terminal && (Number(payload.successfulItems) > 0
+							|| Number(payload.failedItems) > 0 || Number(payload.cancelledItems) > 0)
+						text: qsTr("%1 succeeded · %2 failed · %3 cancelled")
+							.arg(Number(payload.successfulItems) || 0)
+							.arg(Math.max(0, Number(payload.failedItems) || 0))
+							.arg(Number(payload.cancelledItems) || 0)
+						color: Theme.textMuted
+						font.pixelSize: 10
+						wrapMode: Text.Wrap
+					}
+					Repeater {
+						model: resultDetailsExpanded ? [] : failedResults
+						delegate: Label {
+							textFormat: Text.PlainText
+							required property var modelData
+							Layout.fillWidth: true
+							text: (modelData.cancelled ? qsTr("Cancelled: ") : qsTr("Failed: "))
+								+ String(modelData.message || modelData.errorCode || modelData.itemId || "")
+							color: modelData.cancelled ? Theme.textMuted : "#f87171"
+							font.pixelSize: 10
+							wrapMode: Text.Wrap
+						}
+					}
+					ModernButton {
+						visible: !notification && terminal && resultCount > 0
+						text: resultDetailsExpanded ? qsTr("Hide item results")
+							: qsTr("Show item results (%1)").arg(resultCount)
+						onClicked: {
+							resultDetailsExpanded = !resultDetailsExpanded
+							if (!resultDetailsExpanded)
+								resultPageIndex = 0
+						}
+					}
+					Repeater {
+						model: resultPageItems
+						delegate: Label {
+							textFormat: Text.PlainText
+							required property var modelData
+							Layout.fillWidth: true
+							text: (modelData.success ? qsTr("Succeeded: ")
+								: modelData.cancelled ? qsTr("Cancelled: ") : qsTr("Failed: "))
+								+ String(modelData.message || modelData.errorCode || modelData.itemId || "")
+							color: modelData.success ? Theme.success
+								: modelData.cancelled ? Theme.textMuted : Theme.danger
+							font.pixelSize: 10
+							wrapMode: Text.Wrap
+						}
+					}
+					RowLayout {
+						Layout.fillWidth: true
+						visible: resultDetailsExpanded && resultPageCount > 1
+						ModernButton {
+							text: qsTr("Previous")
+							enabled: resultPageIndex > 0
+							onClicked: --resultPageIndex
+						}
+						Label {
+							textFormat: Text.PlainText
+							Layout.fillWidth: true
+							text: qsTr("Page %1 of %2").arg(resultPageIndex + 1).arg(resultPageCount)
+							color: Theme.textMuted
+							horizontalAlignment: Text.AlignHCenter
+							font.pixelSize: 10
+						}
+						ModernButton {
+							text: qsTr("Next")
+							enabled: resultPageIndex + 1 < resultPageCount
+							onClicked: ++resultPageIndex
+						}
+					}
                     Label {
-                        visible: status !== "running"
-                        text: status === "succeeded" ? qsTr("Completed") : qsTr("Failed")
-                        color: status === "succeeded" ? "#34d399" : "#f87171"
+						textFormat: Text.PlainText
+						visible: !notification && status !== "running"
+						text: status === "succeeded" ? qsTr("Completed")
+							: status === "partial" ? qsTr("Partially completed")
+							: status === "cancelled" ? qsTr("Cancelled")
+							: status === "cancelling" ? qsTr("Cancelling…") : qsTr("Failed")
+						color: status === "succeeded" ? "#34d399"
+							: status === "partial" ? "#fbbf24"
+							: status === "cancelled" || status === "cancelling" ? Theme.textMuted : "#f87171"
                         font.pixelSize: 10
                     }
                 }
@@ -619,6 +824,7 @@ ApplicationWindow {
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 4
                         Label {
+							textFormat: Text.PlainText
 							width: parent.width
                             text: activeScope.label.length > 0 ? activeScope.label : clientSession.serverName
                             color: Theme.textStrong
@@ -627,6 +833,7 @@ ApplicationWindow {
 							elide: Text.ElideRight
                         }
                         Label {
+							textFormat: Text.PlainText
                             text: activeScope.description.length > 0 ? activeScope.description : activeScope.kindLabel
                             color: Theme.textMuted
                             font.pixelSize: 12
@@ -724,7 +931,7 @@ ApplicationWindow {
 					Layout.rightMargin: Theme.spacing
 					Layout.topMargin: visible ? Math.max(4, Math.round(Theme.spacing / 2)) : 0
 					session: mediaSession
-					participantModel: participantModel
+					participantModel: root.navigationParticipantModel
 				}
 
                 ListView {
@@ -739,6 +946,185 @@ ApplicationWindow {
                     topMargin: 20
                     bottomMargin: 20
                     reuseItems: true
+					property string prependAnchorId: ""
+					property real prependAnchorOffset: 0
+					property bool prependAnchorActive: false
+					property bool restoringPrependAnchor: false
+					property int prependAnchorRetries: 0
+					property bool stickToBottom: true
+					property bool followTailAfterInsert: false
+					property bool restoringBottom: false
+					property bool scopeResetPending: false
+					property real bottomFollowThreshold: 48
+
+					function isNearBottom() {
+						if (count === 0 || atYEnd)
+							return true
+						const maximumY = Math.max(originY, originY + contentHeight - height)
+						return maximumY - contentY <= bottomFollowThreshold
+					}
+
+					function requestBottomFollow() {
+						if (stickToBottom && !prependAnchorActive)
+							bottomFollowTimer.restart()
+					}
+
+					function beginScopeChange() {
+						releasePrependAnchor()
+						bottomFollowTimer.stop()
+						followTailAfterInsert = false
+						stickToBottom = true
+						scopeResetPending = true
+					}
+
+					function firstVisibleMessageDelegate() {
+						const children = contentItem ? contentItem.children : []
+						let candidate = null
+						for (let index = 0; index < children.length; ++index) {
+							const item = children[index]
+							if (!item || item.stableId === undefined || !item.visible
+									|| item.accessibilityPooled === true || item.y + item.height < contentY)
+								continue
+							if (!candidate || item.y < candidate.y)
+								candidate = item
+						}
+						return candidate
+					}
+
+					function capturePrependAnchor() {
+						const item = firstVisibleMessageDelegate()
+						if (!item)
+							return false
+						prependAnchorId = String(item.stableId || "")
+						if (prependAnchorId.length === 0)
+							return false
+						prependAnchorOffset = item.y - contentY
+						prependAnchorRetries = 0
+						prependAnchorActive = true
+						stickToBottom = false
+						return true
+					}
+
+					function releasePrependAnchor() {
+						prependAnchorSettleTimer.stop()
+						prependAnchorActive = false
+						prependAnchorId = ""
+						prependAnchorRetries = 0
+					}
+
+					function restorePrependAnchor() {
+						if (!prependAnchorActive || restoringPrependAnchor)
+							return
+						const row = chatModel.rowForStableId(prependAnchorId)
+						if (row < 0) {
+							releasePrependAnchor()
+							return
+						}
+						let item = itemAtIndex(row)
+						if (!item) {
+							if (++prependAnchorRetries > 8) {
+								releasePrependAnchor()
+								return
+							}
+							positionViewAtIndex(row, ListView.Beginning)
+							Qt.callLater(function() { timeline.restorePrependAnchor() })
+							return
+						}
+						restoringPrependAnchor = true
+						const minimumY = originY
+						const maximumY = Math.max(minimumY, originY + contentHeight - height)
+						contentY = Math.max(minimumY, Math.min(maximumY, item.y - prependAnchorOffset))
+						restoringPrependAnchor = false
+						prependAnchorSettleTimer.restart()
+					}
+
+					onContentHeightChanged: {
+						if (prependAnchorActive && !restoringPrependAnchor)
+							Qt.callLater(function() { timeline.restorePrependAnchor() })
+						else
+							requestBottomFollow()
+					}
+					onMovementStarted: {
+						if (!restoringPrependAnchor && !restoringBottom) {
+							stickToBottom = false
+							releasePrependAnchor()
+						}
+					}
+					onMovementEnded: {
+						if (!restoringBottom) {
+							stickToBottom = isNearBottom()
+							requestBottomFollow()
+						}
+					}
+
+					Timer {
+						id: prependAnchorSettleTimer
+						interval: 1500
+						repeat: false
+						onTriggered: timeline.releasePrependAnchor()
+					}
+
+					Timer {
+						id: bottomFollowTimer
+						interval: 0
+						repeat: false
+						onTriggered: {
+							if (!timeline.stickToBottom || timeline.prependAnchorActive)
+								return
+							timeline.restoringBottom = true
+							timeline.positionViewAtEnd()
+							Qt.callLater(function() {
+								timeline.restoringBottom = false
+								timeline.scopeResetPending = false
+							})
+						}
+					}
+
+					Connections {
+						target: chatModel
+						function onRowsAboutToChange(first, last) {
+							if (!timeline.scopeResetPending && !timeline.stickToBottom
+									&& !timeline.prependAnchorActive)
+								timeline.capturePrependAnchor()
+						}
+						function onDataChanged(topLeft, bottomRight, roles) {
+							if (timeline.prependAnchorActive)
+								Qt.callLater(function() { timeline.restorePrependAnchor() })
+							else
+								timeline.requestBottomFollow()
+						}
+						function onRowsAboutToBeInserted(parentIndex, first, last) {
+							timeline.followTailAfterInsert = false
+							if (timeline.scopeResetPending) {
+								timeline.followTailAfterInsert = true
+							} else if (first === 0 && timeline.count > 0) {
+								timeline.capturePrependAnchor()
+							} else if (first >= timeline.count) {
+								timeline.followTailAfterInsert = timeline.count === 0
+									|| (timeline.stickToBottom && timeline.isNearBottom())
+							}
+						}
+						function onRowsInserted(parentIndex, first, last) {
+							if (first === 0 && timeline.prependAnchorActive)
+								Qt.callLater(function() { timeline.restorePrependAnchor() })
+							else if (timeline.followTailAfterInsert) {
+								timeline.stickToBottom = true
+								timeline.requestBottomFollow()
+							}
+							timeline.followTailAfterInsert = false
+						}
+						function onModelReset() {
+							timeline.releasePrependAnchor()
+							timeline.stickToBottom = true
+							timeline.requestBottomFollow()
+						}
+						function onCountChanged() {
+							if (timeline.count === 0) {
+								timeline.releasePrependAnchor()
+								timeline.stickToBottom = true
+							}
+						}
+					}
 					MouseArea {
 						anchors.fill: parent
 						z: 20
@@ -767,12 +1153,55 @@ ApplicationWindow {
 					delegate: Rectangle {
 						id: messageDelegate
 						function openAutomationActions() {
-							messageActions.open()
+							openMessageActions()
 							return messageActions
 						}
+						function openMessageActions() {
+							messageActions.targetId = stableId
+							messageActions.targetCanReply = canReply
+							messageActions.targetCanReact = canReact
+							messageActions.targetCanDelete = canDelete
+							messageActions.targetCanRetry = !!source.deliveryCanRetry
+							messageActions.open()
+						}
+						function closeMessageActionsForReuse() {
+							if (!messageActions)
+								return
+							if (messageActions.visible)
+								messageActions.close()
+							messageActions.targetId = ""
+						}
 						property bool accessibilityPooled: false
-						ListView.onPooled: accessibilityPooled = true
-						ListView.onReused: accessibilityPooled = false
+						readonly property bool previewNeedsHydration: !!preview
+							&& Object.keys(preview).length > 0
+							&& (preview.state === "loading" || preview.loading === true)
+						readonly property bool inHydrationWindow: !accessibilityPooled
+							&& y + height >= timeline.contentY - timeline.height * 0.5
+							&& y <= timeline.contentY + timeline.height * 1.5
+						readonly property bool inVisibleViewport: !accessibilityPooled
+							&& y + height >= timeline.contentY
+							&& y <= timeline.contentY + timeline.height
+						function requestPreviewHydrationIfNeeded() {
+							if (previewNeedsHydration && inHydrationWindow)
+								root.queuePreviewHydration(stableId, inVisibleViewport)
+						}
+						ListView.onPooled: {
+							closeMessageActionsForReuse()
+							accessibilityPooled = true
+						}
+						ListView.onReused: {
+							closeMessageActionsForReuse()
+							accessibilityPooled = false
+							messagePreviewCard.resetForReuse()
+							Qt.callLater(function() { messageDelegate.requestPreviewHydrationIfNeeded() })
+						}
+						onPreviewNeedsHydrationChanged: requestPreviewHydrationIfNeeded()
+						onInHydrationWindowChanged: requestPreviewHydrationIfNeeded()
+						onStableIdChanged: {
+							closeMessageActionsForReuse()
+							requestPreviewHydrationIfNeeded()
+						}
+						Component.onCompleted: requestPreviewHydrationIfNeeded()
 						visible: !accessibilityPooled
 						Accessible.ignored: accessibilityPooled
                         required property string stableId
@@ -784,6 +1213,7 @@ ApplicationWindow {
                         required property string replyActor
                         required property string replySnippet
                         required property var reactions
+                        required property var bodySegments
                         required property var preview
                         required property var attachments
                         required property var source
@@ -811,7 +1241,7 @@ ApplicationWindow {
                                 Image {
                                     id: avatarImage
                                     anchors.fill: parent
-                                    source: avatarUrl
+                                    source: root.safeRenderImageSource(avatarUrl)
                                     asynchronous: true
                                     cache: false
                                     sourceSize: Qt.size(width * Screen.devicePixelRatio, height * Screen.devicePixelRatio)
@@ -819,6 +1249,7 @@ ApplicationWindow {
                                     visible: avatarImage.status === Image.Ready
                                 }
                                 Label {
+									textFormat: Text.PlainText
                                     anchors.centerIn: parent
                                     visible: avatarUrl.length === 0
                                     text: (title || "S").slice(0, 1).toUpperCase()
@@ -832,37 +1263,43 @@ ApplicationWindow {
                                 RowLayout {
                                     Layout.fillWidth: true
                                     spacing: 8
-                                    Label { text: title || qsTr("System"); color: Theme.accent; font.bold: true; font.pixelSize: 11 }
-                                    Label { text: timestamp; color: Theme.textMuted; font.pixelSize: 9; visible: timestamp.length > 0 }
+                                    Label { textFormat: Text.PlainText; text: title || qsTr("System"); color: Theme.accent; font.bold: true; font.pixelSize: 11 }
+                                    Label { textFormat: Text.PlainText; text: timestamp; color: Theme.textMuted; font.pixelSize: 9; visible: timestamp.length > 0 }
                                     Item { Layout.fillWidth: true }
-                                    Label { text: status; color: Theme.textMuted; font.pixelSize: 9; visible: status.length > 0 }
+                                    Label { textFormat: Text.PlainText; text: status; color: Theme.textMuted; font.pixelSize: 9; visible: status.length > 0 }
                                     ToolButton {
                                         visible: messageDelegate.canReply || messageDelegate.canReact
                                                  || messageDelegate.canDelete || !!messageDelegate.source.deliveryCanRetry
                                         text: "⋯"
                                         Accessible.name: qsTr("Message actions")
-                                        onClicked: messageActions.open()
-                                        ModernMenu {
-                                            id: messageActions
-                                            MenuItem {
-                                                text: qsTr("Reply")
-                                                visible: messageDelegate.canReply
-                                                onTriggered: uiCommands.replyToMessage(messageDelegate.stableId)
-                                            }
-                                            MenuItem {
-                                                text: qsTr("Add reaction")
-                                                visible: messageDelegate.canReact
-                                                onTriggered: uiCommands.toggleMessageReaction(messageDelegate.stableId, "👍")
-                                            }
-                                            MenuItem {
-                                                text: qsTr("Retry")
-                                                visible: !!messageDelegate.source.deliveryCanRetry
-                                                onTriggered: uiCommands.retryMessage(messageDelegate.stableId)
-                                            }
-                                            MenuItem {
-                                                text: qsTr("Delete")
-                                                visible: messageDelegate.canDelete
-                                                onTriggered: uiCommands.deleteMessage(messageDelegate.stableId)
+										onClicked: messageDelegate.openMessageActions()
+										ModernMenu {
+											id: messageActions
+											property string targetId: ""
+											property bool targetCanReply: false
+											property bool targetCanReact: false
+											property bool targetCanDelete: false
+											property bool targetCanRetry: false
+											onClosed: targetId = ""
+											MenuItem {
+												text: qsTr("Reply")
+												visible: messageActions.targetCanReply
+												onTriggered: uiCommands.replyToMessage(messageActions.targetId)
+											}
+											MenuItem {
+												text: qsTr("Add reaction")
+												visible: messageActions.targetCanReact
+												onTriggered: uiCommands.toggleMessageReaction(messageActions.targetId, "👍")
+											}
+											MenuItem {
+												text: qsTr("Retry")
+												visible: messageActions.targetCanRetry
+												onTriggered: uiCommands.retryMessage(messageActions.targetId)
+											}
+											MenuItem {
+												text: qsTr("Delete")
+												visible: messageActions.targetCanDelete
+												onTriggered: uiCommands.deleteMessage(messageActions.targetId)
                                             }
                                         }
                                     }
@@ -878,95 +1315,57 @@ ApplicationWindow {
                                         id: replyColumn
                                         anchors.fill: parent
                                         anchors.margins: 6
-                                        Label { text: replyActor; color: Theme.accent; font.pixelSize: 9; font.bold: true }
-                                        Label { width: parent.width; text: replySnippet; color: Theme.textMuted; font.pixelSize: 10; elide: Text.ElideRight }
+                                        Label { textFormat: Text.PlainText; text: replyActor; color: Theme.accent; font.pixelSize: 9; font.bold: true }
+                                        Label { width: parent.width; textFormat: Text.PlainText; text: replySnippet; color: Theme.textMuted; font.pixelSize: 10; elide: Text.ElideRight }
                                     }
+                                }
+                                RichMessageBody {
+                                    Layout.fillWidth: true
+                                    visible: !messageDelegate.deleted
+                                    segments: messageDelegate.bodySegments || []
+                                    textColor: Theme.textMain
+                                    pixelSize: 12
+                                    onLinkRequested: link => Qt.openUrlExternally(link)
                                 }
                                 Label {
+									textFormat: Text.PlainText
                                     Layout.fillWidth: true
-                                    text: deleted ? qsTr("Message deleted") : subtitle
-                                    color: deleted ? Theme.textMuted : Theme.textMain
+                                    visible: messageDelegate.deleted
+                                    text: qsTr("Message deleted")
+                                    color: Theme.textMuted
                                     wrapMode: Text.Wrap
                                     font.pixelSize: 12
-                                    font.italic: deleted
+                                    font.italic: true
                                 }
-                                Flow {
+                                AttachmentGallery {
                                     Layout.fillWidth: true
-                                    spacing: 8
-									visible: !!attachments && attachments.length > 0
-                                    Repeater {
-                                        model: attachments || []
-                                        delegate: Rectangle {
-                                            required property var modelData
-                                            width: Math.min(attachmentImage.implicitWidth > 0 ? attachmentImage.implicitWidth : 180, 320)
-                                            height: Math.min(attachmentImage.implicitHeight > 0 ? attachmentImage.implicitHeight : 120, 240)
-                                            radius: 8
-                                            color: Theme.strip
-                                            clip: true
-                                            Image {
-                                                id: attachmentImage
-                                                anchors.fill: parent
-                                                source: modelData.thumbnailUrl || modelData.url || ""
-                                                asynchronous: true
-                                                cache: false
-                                                fillMode: Image.PreserveAspectFit
-                                            }
-                                        }
-                                    }
+                                    attachments: messageDelegate.attachments || []
+                                    onAttachmentRequested: attachment => root.openAttachment(attachment)
+                                    onAttachmentRefreshRequested: root.queuePreviewHydration(messageDelegate.stableId, true)
                                 }
-                                Rectangle {
+								RichPreviewCard {
+									id: messagePreviewCard
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: previewContent.implicitHeight + 16
-									visible: !!preview && ((preview.title || "").length > 0
-                                                         || (preview.url || "").length > 0)
-                                    radius: 8
-                                    color: Theme.strip
-                                    RowLayout {
-                                        id: previewContent
-                                        anchors.fill: parent
-                                        anchors.margins: 8
-                                        spacing: 10
-                                        Image {
-                                            Layout.preferredWidth: 72
-                                            Layout.preferredHeight: 54
-                                            source: preview ? (preview.thumbnailUrl || "") : ""
-                                            asynchronous: true
-                                            fillMode: Image.PreserveAspectCrop
-                                            visible: source.toString().length > 0
-                                        }
-                                        ColumnLayout {
-                                            Layout.fillWidth: true
-                                            Label { Layout.fillWidth: true; text: preview ? (preview.title || preview.host || qsTr("Link preview")) : ""; color: Theme.textStrong; font.bold: true; elide: Text.ElideRight }
-                                            Label { Layout.fillWidth: true; text: preview ? (preview.description || preview.url || "") : ""; color: Theme.textMuted; font.pixelSize: 10; elide: Text.ElideRight }
-                                            RowLayout {
-												visible: !!preview && ((preview.url || "").length > 0
-                                                                     || ((preview.embedUrl || "").length > 0
-                                                                         && (preview.embedKind || "").length > 0))
-                                                ModernButton {
-													visible: !!preview && (preview.url || "").length > 0
-                                                    text: qsTr("Open")
-                                                    onClicked: Qt.openUrlExternally(preview.url)
-                                                }
-                                                ModernButton {
-											visible: !!preview && (preview.embedUrl || "").length > 0
-                                                             && (preview.embedKind || "").length > 0
-                                                    text: qsTr("Play")
-                                                    onClicked: mediaSession.open(preview.embedUrl,
-                                                                                 preview.embedKind,
-                                                                                 messageDelegate.stableId)
-                                                }
-											ModernButton {
-												visible: !!preview && (preview.embedUrl || "").length > 0
-														 && (preview.embedKind || "").length > 0
-												enabled: !mediaSession.sharedAvailable
-												text: qsTr("Watch together")
-												onClicked: mediaSession.startShared(preview.embedUrl,
-																			 preview.embedKind,
-																			 preview.title || preview.host || qsTr("Shared media"))
-											}
-                                                Item { Layout.fillWidth: true }
-                                            }
-                                        }
+                                    visible: !!messageDelegate.preview && Object.keys(messageDelegate.preview).length > 0
+                                    preview: messageDelegate.preview || ({})
+									previewIdentity: messageDelegate.stableId + "|" + String(messageDelegate.preview
+										? (messageDelegate.preview.url || messageDelegate.preview.embedUrl
+											|| messageDelegate.preview.mediaUrl || messageDelegate.preview.title || "") : "")
+									renderActive: messageDelegate.inHydrationWindow && !messageDelegate.accessibilityPooled
+									watchTogetherAvailable: !mediaSession.sharedAvailable
+                                    onExternalOpenRequested: url => Qt.openUrlExternally(url)
+                                    onImageOpenRequested: (source, title) => root.openAttachment({
+                                        "url": source, "thumbnailUrl": source, "kind": "image", "alt": title
+                                    }, title)
+									onImageRefreshRequested: root.queuePreviewHydration(messageDelegate.stableId, true)
+									onDirectMediaRequested: (url, mime, audioUrl, audioMime, title) =>
+										mediaSession.openDirect(url, mime, audioUrl, audioMime,
+																messageDelegate.stableId)
+                                    onPlayRequested: (url, provider) => mediaSession.open(url, provider,
+                                                                                         messageDelegate.stableId)
+                                    onWatchTogetherRequested: (url, provider, title) => {
+                                        if (!mediaSession.sharedAvailable)
+                                            mediaSession.startShared(url, provider, title)
                                     }
                                 }
                                 Flow {
@@ -975,26 +1374,32 @@ ApplicationWindow {
 									visible: !!reactions && reactions.length > 0
                                     Repeater {
                                         model: reactions || []
-                                        delegate: Rectangle {
+										delegate: Button {
+											id: reactionButton
                                             required property var modelData
-                                            width: reactionLabel.implicitWidth + 12
-                                            height: 24
-                                            radius: 12
-                                            color: modelData.selfReacted ? Theme.selected : Theme.strip
-                                            Label {
-                                                id: reactionLabel
-                                                anchors.centerIn: parent
-                                                text: (modelData.emoji || "") + " " + (modelData.count || 0)
-                                                color: Theme.textMain
-                                                font.pixelSize: 10
-                                            }
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                enabled: messageDelegate.canReact && (modelData.emoji || "").length > 0
-                                                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                                onClicked: uiCommands.toggleMessageReaction(messageDelegate.stableId,
-                                                                                             modelData.emoji)
-                                            }
+											implicitWidth: contentItem.implicitWidth + 12
+											implicitHeight: 24
+											enabled: messageDelegate.canReact && (modelData.emoji || "").length > 0
+											activeFocusOnTab: true
+											focusPolicy: Qt.StrongFocus
+											Accessible.name: qsTr("%1 reaction, %2").arg(modelData.emoji || "")
+												.arg(modelData.count || 0)
+											background: Rectangle {
+												radius: 12
+												color: reactionButton.modelData.selfReacted ? Theme.selected : Theme.strip
+												border.color: reactionButton.activeFocus ? Theme.focus : Theme.divider
+											}
+											contentItem: Label {
+												textFormat: Text.PlainText
+												text: (reactionButton.modelData.emoji || "") + " "
+													+ (reactionButton.modelData.count || 0)
+												color: Theme.textMain
+												font.pixelSize: 10
+												horizontalAlignment: Text.AlignHCenter
+												verticalAlignment: Text.AlignVCenter
+											}
+											onClicked: uiCommands.toggleMessageReaction(messageDelegate.stableId,
+																			 modelData.emoji)
                                         }
                                     }
                                 }
@@ -1002,6 +1407,7 @@ ApplicationWindow {
                         }
                     }
                     Label {
+						textFormat: Text.PlainText
                         anchors.centerIn: parent
                         visible: chatModel.count === 0
                         text: !clientSession.connected
@@ -1046,6 +1452,7 @@ ApplicationWindow {
                                     Layout.fillWidth: true
                                     visible: activeScope.hasPendingReply
                                     Label {
+										textFormat: Text.PlainText
                                         Layout.fillWidth: true
                                         text: qsTr("Replying to %1: %2").arg(activeScope.replyActor)
                                                 .arg(activeScope.replySnippet)
@@ -1075,11 +1482,11 @@ ApplicationWindow {
 										required property string error
                                         width: 150; height: 48; radius: 7; color: Theme.strip; border.color: Theme.divider
                                         RowLayout { anchors.fill: parent; anchors.margins: 4
-                                            Image { Layout.preferredWidth: 38; Layout.preferredHeight: 38; source: thumbnailUrl; asynchronous: true; cache: false; fillMode: Image.PreserveAspectCrop }
+                                            Image { Layout.preferredWidth: 38; Layout.preferredHeight: 38; source: root.safeRenderImageSource(thumbnailUrl); asynchronous: true; cache: false; fillMode: Image.PreserveAspectCrop }
 											ColumnLayout {
 												Layout.fillWidth: true
-												Label { Layout.fillWidth: true; text: fileName; color: Theme.textMain; elide: Text.ElideMiddle; font.pixelSize: 9 }
-												Label { Layout.fillWidth: true; visible: status !== "ready"; text: error || status; color: status === "failed" ? Theme.danger : Theme.textMuted; elide: Text.ElideRight; font.pixelSize: 8 }
+												Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: fileName; color: Theme.textMain; elide: Text.ElideMiddle; font.pixelSize: 9 }
+												Label { Layout.fillWidth: true; textFormat: Text.PlainText; visible: status !== "ready"; text: error || status; color: status === "failed" ? Theme.danger : Theme.textMuted; elide: Text.ElideRight; font.pixelSize: 8 }
 											}
 											ToolButton { visible: status === "failed"; text: "↻"; onClicked: composer.retryAttachment(stableId); Accessible.name: qsTr("Retry %1").arg(fileName) }
                                             ToolButton { text: "×"; onClicked: composer.removeAttachment(stableId); Accessible.name: qsTr("Remove %1").arg(fileName) }

@@ -410,7 +410,7 @@ AudioInput::AudioInput()
 
 	connect(this, SIGNAL(doDeaf()), Global::get().mw->qaAudioDeaf, SLOT(trigger()), Qt::QueuedConnection);
 	connect(this, SIGNAL(doMute()), Global::get().mw->qaAudioMute, SLOT(trigger()), Qt::QueuedConnection);
-	connect(this, SIGNAL(doMuteCue()), Global::get().mw, SLOT(on_muteCuePopup_triggered()));
+	connect(this, &AudioInput::doMuteCue, Global::get().mw, &MainWindow::showMuteCuePopup);
 }
 
 AudioInput::~AudioInput() {
@@ -1314,7 +1314,7 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 }
 
 static void sendAudioFrame(std::span< const Mumble::Protocol::byte > encodedPacket) {
-	ServerHandlerPtr sh = Global::get().sh;
+	ServerHandlerPtr sh = Global::get().serverHandlerSnapshot();
 	if (sh) {
 		sh->sendMessage(encodedPacket.data(), static_cast< int >(encodedPacket.size()));
 	}
@@ -1374,14 +1374,14 @@ void AudioInput::flushCheck(const QByteArray &frame, bool terminator, std::int32
 		static_cast< std::size_t >(qlFrames[0].size()));
 
 	{
-		ServerHandlerPtr sh = Global::get().sh;
+		ServerHandlerPtr sh = Global::get().serverHandlerSnapshot();
 		if (sh) {
-			VoiceRecorderPtr recorder(sh->recorder);
+			VoiceRecorderPtr recorder(sh->voiceRecorder());
 			if (recorder) {
 				recorder->getRecordUser().addFrame(audioData);
 			}
 
-			m_udpEncoder.setProtocolVersion(sh->m_version);
+			m_udpEncoder.setProtocolVersion(sh->protocolVersion());
 		}
 	}
 

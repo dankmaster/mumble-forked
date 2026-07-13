@@ -232,6 +232,12 @@ void QmlVisualFixtureController::applyState(const QString &state) {
 	if (state == QLatin1String("loading")) {
 		operations->startOperation(QStringLiteral("visual:loading"), QStringLiteral("Connecting"),
 								   QStringLiteral("Loading rooms and participants…"), false);
+		// A real running operation starts indeterminate, which deliberately animates
+		// its ProgressBar. Visual-gate fixtures must instead render the same loading
+		// surface at a stable point in time so repeated screenshots are byte-stable.
+		// This mutation is scoped to the synthetic fixture and does not change how
+		// production operations report or animate unknown progress.
+		operations->updateProgress(QStringLiteral("visual:loading"), 42, 100);
 	} else if (state == QLatin1String("error")) {
 		operations->startOperation(QStringLiteral("visual:error"), QStringLiteral("Connection failed"),
 								   QStringLiteral("The test server could not be reached."), false);

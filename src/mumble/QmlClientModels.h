@@ -5,11 +5,16 @@
 #define MUMBLE_MUMBLE_QMLCLIENTMODELS_H_
 
 #include <QtCore/QAbstractListModel>
+#include <QtCore/QByteArray>
 #include <QtCore/QHash>
 #include <QtCore/QObject>
+#include <QtCore/QSet>
 #include <QtCore/QStringList>
 #include <QtCore/QVariantList>
 #include <QtCore/QUrl>
+
+#include <deque>
+#include <functional>
 
 class ClientActionRegistry;
 
@@ -34,7 +39,7 @@ class ClientSessionController final : public QObject {
 	Q_PROPERTY(bool selfMuted READ selfMuted WRITE setSelfMuted NOTIFY selfMutedChanged)
 	Q_PROPERTY(bool selfDeafened READ selfDeafened WRITE setSelfDeafened NOTIFY selfDeafenedChanged)
 	Q_PROPERTY(QVariantMap updateBanner READ updateBanner WRITE setUpdateBanner NOTIFY updateBannerChanged)
-	Q_PROPERTY(QString motdHtml READ motdHtml WRITE setMotdHtml NOTIFY motdHtmlChanged)
+	Q_PROPERTY(QVariantList motdSegments READ motdSegments NOTIFY motdSegmentsChanged)
 	Q_PROPERTY(QString motdSummary READ motdSummary WRITE setMotdSummary NOTIFY motdSummaryChanged)
 	Q_PROPERTY(bool hasMotd READ hasMotd NOTIFY hasMotdChanged)
 	Q_PROPERTY(bool motdExpanded READ motdExpanded WRITE setMotdExpanded NOTIFY motdExpandedChanged)
@@ -63,6 +68,7 @@ public:
 	bool selfDeafened() const;
 	QVariantMap updateBanner() const;
 	QString motdHtml() const;
+	QVariantList motdSegments() const;
 	QString motdSummary() const;
 	bool hasMotd() const;
 	bool motdExpanded() const;
@@ -110,6 +116,7 @@ signals:
 	void selfDeafenedChanged();
 	void updateBannerChanged();
 	void motdHtmlChanged();
+	void motdSegmentsChanged();
 	void motdSummaryChanged();
 	void hasMotdChanged();
 	void motdExpandedChanged();
@@ -137,6 +144,8 @@ private:
 	bool m_selfDeafened = false;
 	QVariantMap m_updateBanner;
 	QString m_motdHtml;
+	QVariantList m_motdSegments;
+	quint64 m_motdParseGeneration = 0;
 	QString m_motdSummary;
 	bool m_hasMotd = false;
 	bool m_motdExpanded = true;
@@ -257,6 +266,7 @@ public:
 		ReplyActorRole,
 		ReplySnippetRole,
 		ReactionsRole,
+		BodySegmentsRole,
 		PreviewRole,
 		OwnRole,
 		DeletedRole,
@@ -278,6 +288,7 @@ public:
 	QVariant data(const QModelIndex &index, int role) const override;
 	QHash< int, QByteArray > roleNames() const override;
 	Q_INVOKABLE QVariantMap get(int row) const;
+	Q_INVOKABLE int rowForStableId(const QString &stableId) const;
 
 	void synchronizeRows(const QVariantList &rows);
 	void upsertRow(const QVariantMap &row);
@@ -286,6 +297,7 @@ public:
 
 signals:
 	void countChanged();
+	void rowsAboutToChange(int first, int last);
 
 protected:
 	int indexOf(const QString &stableId) const;
@@ -335,16 +347,52 @@ class ChatTimelineModel final : public StableListModel {
 	Q_OBJECT
 public:
 	enum class MessageMutation { Ignored, Inserted, Updated, Unchanged };
-	using StableListModel::StableListModel;
+	explicit ChatTimelineModel(QObject *parent = nullptr);
+	~ChatTimelineModel() override = default;
 	MessageMutation applyMessage(const QVariantMap &message);
 	bool upsertMessage(const QVariantMap &message);
 	bool removeMessage(const QString &messageId);
 	int appendMessages(const QVariantList &messages);
 	void replaceMessages(const QVariantList &messages);
 	QVariantList messages() const;
+	void clear();
 
 private:
-	static QVariantMap messageRow(const QVariantMap &message);
+	struct RichBodyParseRequest {
+		QString messageId;
+		QByteArray cacheKey;
+		QString bodyHtml;
+		QString bodyText;
+	};
+	struct ParsedRichBody {
+		QByteArray cacheKey;
+		QVariantList segments;
+	};
+	struct ReadyRichBody {
+		QString messageId;
+		QByteArray cacheKey;
+		QVariantList segments;
+	};
+
+	QVariantMap messageRow(const QVariantMap &message, QList< RichBodyParseRequest > *requests = nullptr);
+	void forgetRichBodyMessage(const QString &messageId);
+	void scheduleRichBodyParses(const QList< RichBodyParseRequest > &requests);
+	void refillDeferredRichBodyParses();
+	void launchRichBodyParseBatch();
+	void scheduleRichBodyDrain();
+	void drainRichBodyResults();
+
+	QHash< QString, QByteArray > m_expectedRichBodyKeyByMessage;
+	QHash< QByteArray, QSet< QString > > m_richBodyConsumers;
+	QSet< QByteArray > m_inFlightRichBodyKeys;
+	QSet< QByteArray > m_activeRichBodyKeys;
+	QHash< QByteArray, RichBodyParseRequest > m_pendingRichBodyParses;
+	QList< QByteArray > m_pendingRichBodyOrder;
+	QList< QByteArray > m_deferredRichBodyOrder;
+	QSet< QByteArray > m_deferredRichBodyKeys;
+	std::deque< ReadyRichBody > m_readyRichBodies;
+	bool m_richBodyWorkerActive = false;
+	bool m_richBodyDrainScheduled = false;
 };
 
 class AsyncOperationModel final : public StableListModel {
@@ -352,14 +400,38 @@ class AsyncOperationModel final : public StableListModel {
 public:
 	using StableListModel::StableListModel;
 	void startOperation(const QString &operationId, const QString &title, const QString &subtitle, bool cancellable);
+	void startStructuredOperation(const QString &operationId, const QString &kind, const QString &title,
+								  const QString &subtitle, int totalItems, bool cancellable);
 	void updateProgress(const QString &operationId, qint64 bytesReceived, qint64 bytesTotal);
+	bool updateStructuredProgress(const QString &operationId, const QString &phase, int completedItems,
+								 int totalItems, qulonglong currentPluginId, qint64 bytesReceived,
+								 qint64 bytesTotal);
+	bool appendItemResult(const QString &operationId, const QString &itemId, qulonglong pluginId, bool success,
+						  bool cancelled, const QString &errorCode, const QString &message);
+	Q_INVOKABLE QVariantList itemResultPage(const QString &operationId, int offset, int limit,
+										 bool unsuccessfulOnly = false) const;
+	Q_INVOKABLE int itemResultCount(const QString &operationId, bool unsuccessfulOnly = false) const;
 	void finishOperation(const QString &operationId, bool success, const QString &errorCode, const QString &message);
+	bool finishStructuredOperation(const QString &operationId, const QString &status, int successfulItems,
+								 int failedItems, int cancelledItems);
 	void interruptOperations(const QString &prefix);
+	Q_INVOKABLE bool hasOperation(const QString &operationId) const;
 	Q_INVOKABLE void cancel(const QString &operationId);
 	Q_INVOKABLE void dismiss(const QString &operationId);
+	void clear();
 
 signals:
 	void cancellationRequested(const QString &operationId);
+
+private:
+	struct ItemResultStore {
+		QVariantList results;
+		QHash< QString, int > indexByItemId;
+		int unsuccessfulCount = 0;
+		qulonglong revision = 0;
+	};
+
+	QHash< QString, ItemResultStore > m_itemResultsByOperation;
 };
 
 class ActionModel final : public StableListModel {
@@ -433,7 +505,11 @@ class MediaSessionBackend final : public QObject {
 	Q_PROPERTY(int sharedParticipantCount READ sharedParticipantCount NOTIFY stateChanged)
 	Q_PROPERTY(QVariantList sharedParticipantSessions READ sharedParticipantSessions NOTIFY stateChanged)
 	Q_PROPERTY(QUrl url READ url NOTIFY stateChanged)
+	Q_PROPERTY(QUrl audioUrl READ audioUrl NOTIFY stateChanged)
 	Q_PROPERTY(QString provider READ provider NOTIFY stateChanged)
+	Q_PROPERTY(bool playbackControllable READ playbackControllable NOTIFY stateChanged)
+	Q_PROPERTY(QString mediaMime READ mediaMime NOTIFY stateChanged)
+	Q_PROPERTY(QString audioMime READ audioMime NOTIFY stateChanged)
 	Q_PROPERTY(QString sessionId READ sessionId NOTIFY stateChanged)
 	Q_PROPERTY(QString state READ state NOTIFY stateChanged)
 	Q_PROPERTY(double position READ position NOTIFY stateChanged)
@@ -454,7 +530,11 @@ public:
 	int sharedParticipantCount() const;
 	QVariantList sharedParticipantSessions() const;
 	QUrl url() const;
+	QUrl audioUrl() const;
 	QString provider() const;
+	bool playbackControllable() const;
+	QString mediaMime() const;
+	QString audioMime() const;
 	QString sessionId() const;
 	QString state() const;
 	double position() const;
@@ -462,6 +542,8 @@ public:
 	QString error() const;
 	qulonglong syncGeneration() const;
 	Q_INVOKABLE bool open(const QUrl &url, const QString &provider, const QString &sessionId);
+	Q_INVOKABLE bool openDirect(const QUrl &url, const QString &mediaMime, const QUrl &audioUrl,
+								 const QString &audioMime, const QString &sessionId);
 	Q_INVOKABLE bool startShared(const QUrl &url, const QString &provider, const QString &title);
 	Q_INVOKABLE void joinShared();
 	Q_INVOKABLE void leaveShared();
@@ -470,6 +552,7 @@ public:
 	Q_INVOKABLE bool reopenSharedPlayer();
 	Q_INVOKABLE void retry();
 	Q_INVOKABLE bool isNavigationAllowed(const QUrl &url) const;
+	Q_INVOKABLE bool supportsSynchronizedPlayback(const QString &provider) const;
 	Q_INVOKABLE void close();
 	Q_INVOKABLE void play();
 	Q_INVOKABLE void pause();
@@ -490,6 +573,7 @@ signals:
 	void pauseRequested();
 	void seekRequested(double seconds);
 	void retryRequested();
+	void playbackRejected(const QString &message);
 	void sharedStartRequested(const QString &sessionId, const QUrl &url, const QString &provider,
 						  const QString &title);
 	void sharedEventRequested(const QString &sessionId, const QString &event, qulonglong targetHostSession);
@@ -497,6 +581,8 @@ signals:
 
 private:
 	bool validateSource(const QUrl &url, const QString &provider, QUrl *normalized, QString *error) const;
+	bool validateDirectSource(const QUrl &url, const QString &mime, bool audio, QUrl *normalized,
+							  QString *error) const;
 	void closePlayer();
 	void publishSharedPlaybackState(double position, bool paused, bool force);
 	bool m_active = false;
@@ -514,7 +600,10 @@ private:
 	QString m_navigationHost;
 	int m_navigationPort = -1;
 	QUrl m_url;
+	QUrl m_audioUrl;
 	QString m_provider;
+	QString m_mediaMime;
+	QString m_audioMime;
 	QString m_sessionId;
 	QString m_state = QStringLiteral("idle");
 	double m_position = 0.0;
@@ -576,14 +665,21 @@ class UiCommandController final : public QObject {
 	Q_PROPERTY(bool pttPressed READ pttPressed NOTIFY pttPressedChanged)
 
 public:
+	using ScopeActionsProvider = std::function< QVariantList(const QString &, const QString &) >;
+
 	explicit UiCommandController(QObject *parent = nullptr);
 
 	Q_INVOKABLE void selectScope(const QString &scopeToken);
 	Q_INVOKABLE void joinVoiceChannel(const QString &scopeToken);
 	Q_INVOKABLE void selectParticipant(const QString &sessionId);
 	Q_INVOKABLE void openDirectMessage(const QString &sessionId);
+	Q_INVOKABLE void moveParticipant(const QString &sessionId, const QString &targetScopeToken);
+	Q_INVOKABLE void moveScope(const QString &sourceScopeToken, const QString &targetScopeToken,
+						   const QString &placement);
 	Q_INVOKABLE void sendMessage(const QString &message);
 	Q_INVOKABLE void requestOlderMessages();
+	Q_INVOKABLE void requestPreviewHydration(const QString &scopeToken, const QVariantList &messageIds,
+									  bool highPriority = false);
 	Q_INVOKABLE void cancelPendingReply();
 	Q_INVOKABLE void chooseAttachment();
 	Q_INVOKABLE void replyToMessage(const QString &messageId);
@@ -595,6 +691,7 @@ public:
 	Q_INVOKABLE void invokeScopeAction(const QString &scopeToken, const QString &actionId);
 	Q_INVOKABLE void invokeScopeActionValue(const QString &scopeToken, const QString &actionId, int value,
 										bool finalValue);
+	Q_INVOKABLE QVariantList requestScopeActions(const QString &scopeToken, const QString &kind) const;
 	Q_INVOKABLE void invokeParticipantAction(const QString &sessionId, const QString &actionId);
 	Q_INVOKABLE void invokeParticipantActionValue(const QString &sessionId, const QString &actionId, int value,
 											  bool finalValue);
@@ -603,14 +700,19 @@ public:
 	Q_INVOKABLE void setPttPressed(bool pressed);
 	Q_INVOKABLE void releasePtt();
 	bool pttPressed() const;
+	void setScopeActionsProvider(ScopeActionsProvider provider);
 
 signals:
 	void scopeSelectionRequested(const QString &scopeToken);
 	void voiceJoinRequested(const QString &scopeToken);
 	void participantSelectionRequested(const QString &sessionId);
 	void directMessageOpenRequested(const QString &sessionId);
+	void participantMoveRequested(qulonglong sessionId, const QString &targetScopeToken);
+	void scopeMoveRequested(const QString &sourceScopeToken, const QString &targetScopeToken,
+						const QString &placement);
 	void messageSendRequested(const QString &message);
 	void olderMessagesRequested();
+	void previewHydrationRequested(const QString &scopeToken, const QVariantList &messageIds, bool highPriority);
 	void pendingReplyCancelRequested();
 	void attachmentChooseRequested();
 	void messageReplyRequested(const QString &messageId);
@@ -631,6 +733,7 @@ signals:
 
 private:
 	bool m_pttPressed = false;
+	ScopeActionsProvider m_scopeActionsProvider;
 };
 
 enum class PttSafetyReason {

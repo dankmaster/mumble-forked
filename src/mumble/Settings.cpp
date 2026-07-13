@@ -61,6 +61,39 @@ QString migratedJsonPathForLegacySettings(const QString &path) {
 const QPoint Settings::UNSPECIFIED_POSITION =
 	QPoint(std::numeric_limits< int >::min(), std::numeric_limits< int >::max());
 
+void Settings::normalizeModernOnlyFrontendState() {
+	if (aotbAlwaysOnTop == OnTopInNormal) {
+		aotbAlwaysOnTop = OnTopAlways;
+	} else if (aotbAlwaysOnTop == OnTopInMinimal) {
+		aotbAlwaysOnTop = OnTopNever;
+	}
+	wlWindowLayout = LayoutModern;
+	modernLayoutPolicy = ModernLayoutForced;
+	styleType = StyleType::Auto;
+	themeName.clear();
+	themeStyleName.clear();
+	themeDarkName.clear();
+	themeDarkStyleName.clear();
+	bLockLayout = false;
+	bMinimalView = false;
+	bHideFrame = false;
+	bAutoSwitchModernOnCompatibleServers = false;
+	bShowContextMenuInMenuBar = false;
+	bShowTransmitModeComboBox = false;
+	qbaMainWindowGeometry.clear();
+	qbaMainWindowState.clear();
+	qbaMinimalViewGeometry.clear();
+	qbaMinimalViewState.clear();
+	qbaModernMinimalViewGeometry.clear();
+	qbaModernMainWindowState.clear();
+	qbaModernMinimalViewState.clear();
+	qbaConfigGeometry.clear();
+	qbaImagePreviewGeometry.clear();
+	qbaConnectDialogGeometry.clear();
+	qbaConnectDialogHeader.clear();
+	searchDialogPosition = UNSPECIFIED_POSITION;
+}
+
 bool Shortcut::isServerSpecific() const {
 	if (qvData.canConvert< ShortcutTarget >()) {
 		const ShortcutTarget &sc = qvariant_cast< ShortcutTarget >(qvData);
@@ -261,6 +294,8 @@ void Settings::load(const QString &path, bool skipSettingsBackupPrompt) {
 		}
 	}
 
+	normalizeModernOnlyFrontendState();
+
 	// Always reset this flag to false
 	mumbleQuitNormally = false;
 }
@@ -295,6 +330,11 @@ void Settings::load(bool skipSettingsBackupPrompt) {
 		}
 #endif
 	}
+
+	// Every supported profile format remains readable, but removed widget and
+	// layout state must not influence the Qt Quick client or be written back.
+	// The QML window owns its state independently.
+	normalizeModernOnlyFrontendState();
 }
 
 

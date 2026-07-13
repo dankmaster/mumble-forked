@@ -17,6 +17,7 @@ struct Position2D {
 MumblePlugin *ManualPlugin_getMumblePlugin();
 MumblePluginQt *ManualPlugin_getMumblePluginQt();
 QVariantMap ManualPlugin_modernState();
+QVariantList ManualPlugin_modernSpeakers();
 void ManualPlugin_applyModernState(const QVariantMap &state);
 void ManualPlugin_resetModernState();
 void ManualPlugin_setSpeakerPositions(const QHash< unsigned int, Position2D > &positions);

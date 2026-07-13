@@ -196,10 +196,6 @@ namespace {
 			  QObject::tr("Show when users have local volume adjustments applied.") },
 			{ QStringLiteral("look.showNicknamesOnly"),
 			  QObject::tr("Prefer nicknames over full usernames where both are available.") },
-			{ QStringLiteral("look.showContextMenuInMenuBar"),
-			  QObject::tr("Expose context-menu actions through the app menu for keyboard and accessibility workflows.") },
-			{ QStringLiteral("look.showTransmitModeComboBox"),
-			  QObject::tr("Show the transmit-mode selector in the main window controls.") },
 			{ QStringLiteral("look.filterHidesEmptyChannels"),
 			  QObject::tr("Hide empty rooms when a room-list filter is active.") },
 			{ QStringLiteral("look.presenceIdleTimeout"),
@@ -495,11 +491,7 @@ namespace {
 		return QVariantList { optionItem(Settings::OnTopNever, QObject::tr("Never"),
 										 QObject::tr("Use the normal operating-system window stacking order.")),
 							  optionItem(Settings::OnTopAlways, QObject::tr("Always"),
-										 QObject::tr("Keep Mumble above other windows in every layout.")),
-							  optionItem(Settings::OnTopInMinimal, QObject::tr("In minimal view"),
-										 QObject::tr("Keep Mumble on top only while the minimal layout is active.")),
-							  optionItem(Settings::OnTopInNormal, QObject::tr("In normal view"),
-										 QObject::tr("Keep Mumble on top only outside the minimal layout.")) };
+										 QObject::tr("Keep Mumble above other windows.")) };
 	}
 
 	QVariantList quitBehaviorOptions() {
@@ -1570,18 +1562,20 @@ namespace {
 		return QString::fromLatin1(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Sha1).toHex());
 	}
 
-	PluginSetting pluginDraftSetting(const Settings &settings, const const_plugin_ptr_t &plugin) {
-		const QString path = plugin ? plugin->getFilePath() : QString();
+	PluginSetting pluginDraftSetting(const Settings &settings, const PluginDescriptor &plugin) {
+		const QString path = plugin.path;
 		const QString key  = pluginSettingsKey(path);
 		if (settings.qhPluginSettings.contains(key)) {
-			return settings.qhPluginSettings.value(key);
+			PluginSetting setting = settings.qhPluginSettings.value(key);
+			setting.path = path;
+			return setting;
 		}
 
 		PluginSetting setting;
 		setting.path                    = path;
-		setting.enabled                 = plugin && plugin->isLoaded();
-		setting.positionalDataEnabled   = plugin && plugin->isPositionalDataEnabled();
-		setting.allowKeyboardMonitoring = plugin && plugin->isKeyboardMonitoringAllowed();
+		setting.enabled                 = plugin.loaded;
+		setting.positionalDataEnabled   = plugin.positionalDataEnabled;
+		setting.allowKeyboardMonitoring = plugin.keyboardMonitoringAllowed;
 		return setting;
 	}
 
@@ -1590,31 +1584,25 @@ namespace {
 									  QStringLiteral("pluginEditor"), QVariant());
 		QVariantList rows;
 		if (Global::get().pluginManager) {
-			const QVector< const_plugin_ptr_t > plugins = Global::get().pluginManager->getPlugins(true);
-			for (const const_plugin_ptr_t &plugin : plugins) {
-				if (!plugin) {
-					continue;
-				}
-
+			const QVector< PluginDescriptor > plugins = Global::get().pluginManager->pluginDescriptors(true);
+			for (const PluginDescriptor &plugin : plugins) {
 				const PluginSetting setting = pluginDraftSetting(settings, plugin);
-				const uint32_t features      = plugin->getFeatures();
 				QVariantMap row;
-				row.insert(QStringLiteral("id"), static_cast< qulonglong >(plugin->getID()));
-				row.insert(QStringLiteral("name"), plugin->getName());
-				row.insert(QStringLiteral("description"), plugin->getDescription());
-				row.insert(QStringLiteral("version"),
-						   plugin->getVersion() == MUMBLE_VERSION_UNKNOWN ? QObject::tr("Unknown")
-																 : static_cast< QString >(plugin->getVersion()));
-				row.insert(QStringLiteral("path"), plugin->getFilePath());
-				row.insert(QStringLiteral("loaded"), plugin->isLoaded());
+				row.insert(QStringLiteral("id"), static_cast< qulonglong >(plugin.id));
+				row.insert(QStringLiteral("name"), plugin.name);
+				row.insert(QStringLiteral("description"), plugin.description);
+				row.insert(QStringLiteral("version"), plugin.version);
+				row.insert(QStringLiteral("author"), plugin.author);
+				row.insert(QStringLiteral("path"), plugin.path);
+				row.insert(QStringLiteral("loaded"), plugin.loaded);
 				row.insert(QStringLiteral("enabled"), setting.enabled);
 				row.insert(QStringLiteral("positionalAvailable"),
-						   (features & MUMBLE_FEATURE_POSITIONAL) != 0);
+						   (plugin.features & MUMBLE_FEATURE_POSITIONAL) != 0);
 				row.insert(QStringLiteral("positionalEnabled"), setting.positionalDataEnabled);
 				row.insert(QStringLiteral("keyboardMonitoringAllowed"), setting.allowKeyboardMonitoring);
-				row.insert(QStringLiteral("canConfigure"), plugin->providesConfigDialog());
-				row.insert(QStringLiteral("canShowAbout"), plugin->providesAboutDialog());
-				row.insert(QStringLiteral("builtIn"), plugin->isBuiltInPlugin());
+				row.insert(QStringLiteral("canConfigure"), plugin.canConfigure);
+				row.insert(QStringLiteral("canShowAbout"), plugin.canShowAbout);
+				row.insert(QStringLiteral("builtIn"), plugin.builtIn);
 				rows.push_back(row);
 			}
 		}
@@ -1629,18 +1617,18 @@ namespace {
 		}
 		const plugin_id_t pluginID =
 			static_cast< plugin_id_t >(payload.value(QStringLiteral("pluginId")).toULongLong());
-		const const_plugin_ptr_t plugin = Global::get().pluginManager->getPlugin(pluginID);
+		const std::optional< PluginDescriptor > plugin = Global::get().pluginManager->pluginDescriptor(pluginID);
 		if (!plugin) {
 			return false;
 		}
 
-		PluginSetting setting = pluginDraftSetting(settings, plugin);
+		PluginSetting setting = pluginDraftSetting(settings, *plugin);
 		const QString property = payload.value(QStringLiteral("property")).toString();
 		const bool value       = payload.value(QStringLiteral("value")).toBool();
 		if (property == QLatin1String("enabled")) {
 			setting.enabled = value;
 		} else if (property == QLatin1String("positional")) {
-			if ((plugin->getFeatures() & MUMBLE_FEATURE_POSITIONAL) == 0) {
+			if ((plugin->features & MUMBLE_FEATURE_POSITIONAL) == 0) {
 				return false;
 			}
 			setting.positionalDataEnabled = value;
@@ -1650,7 +1638,7 @@ namespace {
 			return false;
 		}
 
-		settings.qhPluginSettings.insert(pluginSettingsKey(plugin->getFilePath()), setting);
+		settings.qhPluginSettings.insert(pluginSettingsKey(plugin->path), setting);
 		return true;
 	}
 
@@ -1751,10 +1739,15 @@ QVariantMap ModernSettingsController::state() const {
 
 void ModernSettingsController::updateField(const QString &fieldID, const QVariant &value) {
 	const QString id = fieldID.trimmed();
-	if (id == QLatin1String("look.quitBehavior")) {
+	if (id == QLatin1String("plugins.runtimeLoaded")) {
+		const QVariantMap runtimeState = value.toMap();
+		reconcilePluginLoadedState(runtimeState.value(QStringLiteral("path")).toString(),
+								 runtimeState.value(QStringLiteral("loaded")).toBool());
+	} else if (id == QLatin1String("look.quitBehavior")) {
 		m_draft.quitBehavior = static_cast< QuitBehavior >(value.toInt());
 	} else if (id == QLatin1String("look.alwaysOnTop")) {
-		m_draft.aotbAlwaysOnTop = static_cast< Settings::AlwaysOnTopBehaviour >(value.toInt());
+		m_draft.aotbAlwaysOnTop = value.toInt() == Settings::OnTopAlways ? Settings::OnTopAlways
+																			  : Settings::OnTopNever;
 	} else if (id == QLatin1String("look.modernTheme")) {
 		m_draft.qsModernShellTheme = normalizedModernShellTheme(value);
 	} else if (id == QLatin1String("look.modernDensity")) {
@@ -1781,10 +1774,6 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		m_draft.bShowVolumeAdjustments = value.toBool();
 	} else if (id == QLatin1String("look.showNicknamesOnly")) {
 		m_draft.bShowNicknamesOnly = value.toBool();
-	} else if (id == QLatin1String("look.showContextMenuInMenuBar")) {
-		m_draft.bShowContextMenuInMenuBar = value.toBool();
-	} else if (id == QLatin1String("look.showTransmitModeComboBox")) {
-		m_draft.bShowTransmitModeComboBox = value.toBool();
 	} else if (id == QLatin1String("look.filterHidesEmptyChannels")) {
 		m_draft.bFilterHidesEmptyChannels = value.toBool();
 	} else if (id == QLatin1String("look.presenceIdleTimeout")) {
@@ -2051,6 +2040,31 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 	}
 
 	forceModernLayout();
+}
+
+bool ModernSettingsController::reconcilePluginLoadedState(const QString &pluginPath, const bool loaded) {
+	const QString path = pluginPath.trimmed();
+	if (path.isEmpty()) {
+		return false;
+	}
+
+	const QString key = pluginSettingsKey(path);
+	PluginSetting runtimeDefaults;
+	runtimeDefaults.path    = path;
+	runtimeDefaults.enabled = loaded;
+	// Runtime reconciliation must stay frontend-neutral and usable before the
+	// global plugin manager exists (for example while restoring Settings state).
+	// Existing permission flags are preserved by the value lookup below; a new
+	// entry intentionally starts from the persisted PluginSetting defaults.
+	const auto reconcile = [&path, &key, &runtimeDefaults, loaded](Settings &settings) {
+		PluginSetting setting = settings.qhPluginSettings.value(key, runtimeDefaults);
+		setting.path           = path;
+		setting.enabled        = loaded;
+		settings.qhPluginSettings.insert(key, setting);
+	};
+	reconcile(m_original);
+	reconcile(m_draft);
+	return true;
 }
 
 ModernSettingsController::ActionResult ModernSettingsController::invokeAction(const QString &actionID,
@@ -2376,12 +2390,9 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 												   boolField(QStringLiteral("look.hideInTray"),
 															 QObject::tr("Hide in tray when minimized"),
 															 m_draft.bHideInTray),
-												   boolField(QStringLiteral("look.stateInTray"),
-															 QObject::tr("Show talking state in tray"),
-															 m_draft.bStateInTray),
-												   advancedField(boolField(QStringLiteral("look.showTransmitModeComboBox"),
-																		   QObject::tr("Show transmit mode control"),
-																		   m_draft.bShowTransmitModeComboBox)) }),
+											   boolField(QStringLiteral("look.stateInTray"),
+														 QObject::tr("Show talking state in tray"),
+														 m_draft.bStateInTray) }),
 			sectionItem(QObject::tr("Room browser and presence"), QVariantList {
 															 boolField(QStringLiteral("look.showVolumeAdjustments"),
 																	   QObject::tr("Show local volume badges"),
@@ -2389,10 +2400,7 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 															 boolField(QStringLiteral("look.showNicknamesOnly"),
 																	   QObject::tr("Show nicknames only"),
 																	   m_draft.bShowNicknamesOnly),
-															 boolField(QStringLiteral("look.showContextMenuInMenuBar"),
-																	   QObject::tr("Expose context menus in the app menu"),
-																	   m_draft.bShowContextMenuInMenuBar),
-															 boolField(QStringLiteral("look.filterHidesEmptyChannels"),
+													 boolField(QStringLiteral("look.filterHidesEmptyChannels"),
 																	   QObject::tr("Filter hides empty rooms"),
 																	   m_draft.bFilterHidesEmptyChannels),
 															 selectField(QStringLiteral("look.presenceIdleTimeout"),

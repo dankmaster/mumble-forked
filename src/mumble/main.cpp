@@ -37,7 +37,6 @@
 #include "QtWidgetUtils.h"
 #include "SSL.h"
 #include "SocketRPC.h"
-#include "Themes.h"
 #include "Translations.h"
 #include "UserLockFile.h"
 #include "Version.h"
@@ -56,6 +55,7 @@
 #include <QtCore/QList>
 #include <QtCore/QProcess>
 #include <QtGui/QDesktopServices>
+#include <QtWebEngineQuick/qtwebenginequickglobal.h>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -401,6 +401,11 @@ int main(int argc, char **argv) {
 #	endif
 #endif
 
+	// WebEngine Quick configures graphics-context sharing here but does not
+	// create a renderer. The isolated player itself remains lazy-loaded after an
+	// explicit media action.
+	QtWebEngineQuick::initialize();
+
 	// Initialize application object.
 	MumbleApplication a(argc, argv);
 	a.setApplicationName(QLatin1String("Mumble"));
@@ -674,8 +679,6 @@ int main(int argc, char **argv) {
 
 	ApplicationThemeObserver applicationThemeObserver;
 
-	Themes::apply();
-
 	QLocale systemLocale = QLocale::system();
 
 #ifdef Q_OS_MAC
@@ -751,7 +754,46 @@ int main(int argc, char **argv) {
 
 	// PluginManager
 	Global::get().pluginManager = new PluginManager();
-	Global::get().pluginManager->rescanPlugins();
+	struct StartupPluginRescanState {
+		QString operationID;
+		bool pending       = false;
+		bool finished      = false;
+		bool success       = false;
+		bool frontendReady = false;
+		bool shuttingDown  = false;
+	};
+	StartupPluginRescanState startupPluginRescan;
+	PluginManager *const startupPluginManager = Global::get().pluginManager;
+	QObject::connect(startupPluginManager, &PluginManager::pluginRescanFinished, startupPluginManager,
+					 [startupPluginManager, &startupPluginRescan](const bool success) {
+						 if (!startupPluginRescan.pending) {
+							 return;
+						 }
+
+						 startupPluginRescan.pending  = false;
+						 startupPluginRescan.finished = true;
+						 startupPluginRescan.success  = success;
+#ifdef QT_NO_DEBUG
+						 if (startupPluginRescan.frontendReady && !startupPluginRescan.shuttingDown
+							 && !Global::get().bQuit && success
+							 && Global::get().s.bPluginCheck) {
+							 startupPluginManager->checkForPluginUpdates();
+						 }
+#else
+						 Q_UNUSED(startupPluginManager);
+#endif
+					 });
+	QObject::connect(&a, &QCoreApplication::aboutToQuit, startupPluginManager,
+					 [startupPluginManager, &startupPluginRescan]() {
+						 startupPluginRescan.shuttingDown = true;
+						 if (startupPluginRescan.pending && !startupPluginRescan.operationID.isEmpty()) {
+							 startupPluginManager->cancelPluginOperation(startupPluginRescan.operationID);
+						 }
+					 });
+	// Discovery and transaction recovery use the file worker. Library construction and lifecycle ABI calls use the
+	// serial plugin worker and publish state back to PluginManager's owner thread through queued signals.
+	startupPluginRescan.pending     = true;
+	startupPluginRescan.operationID = startupPluginManager->rescanPluginsAsync();
 
 	// Process any waiting events before initializing our MainWindow.
 	// The mumble:// URL support for Mac OS X happens through AppleEvents,
@@ -770,6 +812,13 @@ int main(int argc, char **argv) {
 	// point, use Log::logOrDefer()
 	Global::get().l = new Log();
 	Global::get().l->processDeferredLogs();
+	startupPluginRescan.frontendReady = true;
+#ifdef QT_NO_DEBUG
+	if (startupPluginRescan.finished && startupPluginRescan.success && !startupPluginRescan.shuttingDown
+		&& !Global::get().bQuit && Global::get().s.bPluginCheck) {
+		startupPluginManager->checkForPluginUpdates();
+	}
+#endif
 
 	Global::get().trayIcon = new TrayIcon();
 
@@ -847,9 +896,6 @@ int main(int argc, char **argv) {
 #	endif
 	}
 
-	if (Global::get().s.bPluginCheck) {
-		Global::get().pluginManager->checkForPluginUpdates();
-	}
 #else  // QT_NO_DEBUG
 	Global::get().mw->msgBox(MainWindow::tr("Skipping version check in debug mode."));
 #endif // QT_NO_DEBUG
@@ -868,6 +914,10 @@ int main(int argc, char **argv) {
 
 	if (!Global::get().bQuit)
 		res = a.exec();
+	// No asynchronous handoff may publish or start a replacement handler once
+	// the application event loop has returned. The shutdown drain below still
+	// processes queued events for the retiring handler.
+	Global::get().bQuit = true;
 
 	// Indicate that this was a regular shutdown
 	Global::get().s.mumbleQuitNormally = true;
@@ -875,7 +925,7 @@ int main(int argc, char **argv) {
 
 	url.clear();
 
-	ServerHandlerPtr sh = Global::get().sh;
+	ServerHandlerPtr sh = Global::get().serverHandlerSnapshot();
 	if (sh) {
 		if (sh->isRunning()) {
 			url = sh->getServerURL();
@@ -900,6 +950,7 @@ int main(int argc, char **argv) {
 				qFatal("ServerHandler does not exit as expected");
 			}
 		}
+		sh->finalizeThreadResources();
 	}
 
 	prepareLogForShutdown();
@@ -917,10 +968,8 @@ int main(int argc, char **argv) {
 	delete Global::get().mw;
 	Global::get().mw = nullptr; // Make it clear to any destruction code, that MainWindow no longer exists
 
-	Global::get().sh.reset();
-
-	while (sh && sh.use_count() > 1)
-		QThread::yieldCurrentThread();
+	ServerHandlerPtr publishedHandler = Global::get().takeServerHandler();
+	publishedHandler.reset();
 	sh.reset();
 
 	delete Global::get().nam;
@@ -929,7 +978,11 @@ int main(int argc, char **argv) {
 	delete Global::get().l;
 	Global::get().l = nullptr; // Make it clear to any destruction code that Log no longer exists
 
+	if (startupPluginRescan.pending && !startupPluginRescan.operationID.isEmpty()) {
+		startupPluginManager->cancelPluginOperation(startupPluginRescan.operationID);
+	}
 	delete Global::get().pluginManager;
+	Global::get().pluginManager = nullptr;
 
 #ifdef USE_ZEROCONF
 	delete Global::get().zeroconf;

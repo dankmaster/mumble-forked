@@ -29,7 +29,7 @@ ColumnLayout {
             onToggled: { const model = root.cloneModel(); model.inheritAcls = checked; root.publish(model) }
         }
         Item { Layout.fillWidth: true }
-        Label { text: qsTr("Room password"); color: Theme.textMuted; font.pixelSize: 10 }
+            Label { textFormat: Text.PlainText; text: qsTr("Room password"); color: Theme.textMuted; font.pixelSize: 10 }
         TextField {
             text: root.aclModel.password || ""
             echoMode: TextInput.Password
@@ -37,7 +37,7 @@ ColumnLayout {
         }
     }
 
-    Label { text: qsTr("Groups"); color: Theme.textStrong; font.bold: true }
+            Label { textFormat: Text.PlainText; text: qsTr("Groups"); color: Theme.textStrong; font.bold: true }
     Repeater {
         model: root.aclModel.groups || []
         delegate: Rectangle {
@@ -101,7 +101,7 @@ ColumnLayout {
         }
     }
 
-    Label { text: qsTr("Access rules"); color: Theme.textStrong; font.bold: true }
+            Label { textFormat: Text.PlainText; text: qsTr("Access rules"); color: Theme.textStrong; font.bold: true }
     Repeater {
         model: root.aclModel.acls || []
         delegate: Rectangle {
@@ -159,7 +159,7 @@ ColumnLayout {
                         delegate: Row {
                             required property var modelData
                             spacing: 2
-                            Label { text: modelData.label; color: Theme.textMuted; font.pixelSize: 9; anchors.verticalCenter: parent.verticalCenter }
+                        Label { textFormat: Text.PlainText; text: modelData.label; color: Theme.textMuted; font.pixelSize: 9; anchors.verticalCenter: parent.verticalCenter }
                             CheckBox {
                                 text: qsTr("Allow")
                                 checked: root.contains(ruleColumn.parent.modelData.allow, modelData.id)

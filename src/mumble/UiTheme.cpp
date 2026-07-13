@@ -7,7 +7,6 @@
 
 #include "Global.h"
 #include "ModernTheme.h"
-#include "Themes.h"
 
 #include <QtCore/QtGlobal>
 #include <QtCore/QVariant>

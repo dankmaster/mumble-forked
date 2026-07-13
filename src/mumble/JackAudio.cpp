@@ -1131,10 +1131,10 @@ bool JackAudioOutput::process(const jack_nframes_t frames) {
 
 void JackAudioOutput::prepareOutputBuffers(unsigned int frameCount, QList< AudioOutputBuffer * > &qlMix,
 										   QList< AudioOutputBuffer * > &qlDel) {
-	ServerHandlerPtr sh = Global::get().sh;
+	ServerHandlerPtr sh = Global::get().serverHandlerSnapshot();
 	VoiceRecorderPtr recorder;
 	if (sh) {
-		recorder = Global::get().sh->recorder;
+		recorder = sh->voiceRecorder();
 	}
 
 	// Shortcut to base class code when our special case is not needed.

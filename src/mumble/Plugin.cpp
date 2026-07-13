@@ -11,6 +11,7 @@
 #include <QWriteLocker>
 
 #include <cstring>
+#include <exception>
 
 
 // initialize the static ID counter
@@ -48,8 +49,14 @@ Plugin::Plugin(QString path, bool isBuiltIn, QObject *p)
 }
 
 Plugin::~Plugin() {
-	if (isLoaded()) {
-		shutdown();
+	try {
+		if (isLoaded()) {
+			shutdown();
+		}
+	} catch (const std::exception &exception) {
+		qWarning("Plugin shutdown failed during destruction: %s", exception.what());
+	} catch (...) {
+		qWarning("Plugin shutdown failed during destruction with an unknown exception");
 	}
 	if (m_lib.isLoaded()) {
 		m_lib.unload();
@@ -366,19 +373,30 @@ void Plugin::shutdown() {
 		posDataActive = m_positionalDataIsActive;
 	}
 
+	std::exception_ptr firstFailure;
 	if (posDataActive) {
-		shutdownPositionalData();
+		try {
+			shutdownPositionalData();
+		} catch (...) {
+			firstFailure = std::current_exception();
+		}
 	}
 
 	if (m_pluginFnc.shutdown) {
-		m_pluginFnc.shutdown();
+		try {
+			m_pluginFnc.shutdown();
+		} catch (...) {
+			if (!firstFailure) firstFailure = std::current_exception();
+		}
 	}
 
 	{
 		QWriteLocker lock(&m_pluginLock);
 
-		m_pluginIsLoaded = false;
+		m_pluginIsLoaded          = false;
+		m_positionalDataIsActive = false;
 	}
+	if (firstFailure) std::rethrow_exception(firstFailure);
 }
 
 QString Plugin::getName() const {

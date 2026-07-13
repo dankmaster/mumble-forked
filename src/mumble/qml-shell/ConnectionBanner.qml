@@ -107,6 +107,7 @@ Rectangle {
             spacing: 3
 
             Label {
+				textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: root.title
                 color: Theme.textStrong
@@ -115,6 +116,7 @@ Rectangle {
             }
 
             Label {
+				textFormat: Text.PlainText
                 Layout.fillWidth: true
                 visible: text.length > 0
                 text: root.detail

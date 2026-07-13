@@ -6,6 +6,7 @@
 #include "Global.h"
 #include "PluginManager.h"
 #include "PluginManifest.h"
+#include "PluginUpdatePreparation.h"
 #include "QtUtils.h"
 
 #include <QtCore/QDir>
@@ -20,6 +21,7 @@
 
 #include <fstream>
 #include <array>
+#include <exception>
 
 namespace {
 	constexpr Poco::UInt64 MaxManifestBytes = 1024 * 1024;
@@ -64,8 +66,9 @@ QString PluginInstallService::installDirectory() {
 }
 
 PluginInstallService::PreparedPackage PluginInstallService::prepare(const QString &filePath,
-													 const QString &destinationDirectory,
-													 const std::atomic< bool > *cancelled) {
+												 const QString &destinationDirectory,
+												 const std::atomic< bool > *cancelled,
+												 const QString &boundInstalledPath) {
 	const QFileInfo archiveInfo(filePath);
 	if (!canBePluginFile(archiveInfo)) {
 		throw PluginInstallException(QObject::tr("The file \"%1\" is not a valid plugin file!")
@@ -158,7 +161,14 @@ PluginInstallService::PreparedPackage PluginInstallService::prepare(const QStrin
 	prepared.sha256 = hash.result();
 	if (!QDir(destinationDirectory).exists() && !QDir().mkpath(destinationDirectory))
 		throw PluginInstallException(QObject::tr("Unable to create plugin directory \"%1\"").arg(destinationDirectory));
-	prepared.destinationPath = QDir(destinationDirectory).absoluteFilePath(QFileInfo(prepared.sourcePath).fileName());
+	if (boundInstalledPath.trimmed().isEmpty()) {
+		prepared.destinationPath = QDir(destinationDirectory).absoluteFilePath(QFileInfo(prepared.sourcePath).fileName());
+	} else {
+		prepared.destinationPath = boundPluginUpdateDestination(destinationDirectory, boundInstalledPath);
+		if (prepared.destinationPath.isEmpty()) {
+			throw PluginInstallException(QObject::tr("The checked plugin update destination is invalid."));
+		}
+	}
 	return prepared;
 }
 
@@ -170,21 +180,40 @@ void PluginInstallService::inspectPrepared() {
 									 .arg(m_source.fileName()));
 	}
 
-	m_inspection.name            = m_plugin->getName();
-	m_inspection.version         = versionLabel(m_plugin->getVersion());
-	m_inspection.apiVersion      = versionLabel(m_plugin->getAPIVersion());
-	m_inspection.author          = m_plugin->getAuthor();
-	m_inspection.description     = m_plugin->getDescription();
+	try {
+		m_inspection.name        = m_plugin->getName();
+		m_inspection.version     = versionLabel(m_plugin->getVersion());
+		m_inspection.apiVersion  = versionLabel(m_plugin->getAPIVersion());
+		m_inspection.author      = m_plugin->getAuthor();
+		m_inspection.description = m_plugin->getDescription();
+	} catch (const std::exception &exception) {
+		throw PluginInstallException(QObject::tr("Unable to inspect plugin metadata: %1")
+			.arg(QString::fromUtf8(exception.what())));
+	} catch (...) {
+		throw PluginInstallException(QObject::tr("Unable to inspect plugin metadata."));
+	}
 	m_inspection.destinationPath = m_destination.absoluteFilePath();
-	m_inspection.overwriteRequired = m_destination.exists() && m_source.absoluteFilePath() != m_destination.absoluteFilePath();
+	m_inspection.overwriteRequired = m_destination.exists()
+		&& !pluginUpdateDestinationMatchesInstalledPath(m_source.absoluteFilePath(), m_destination.absoluteFilePath());
 
 	if (m_inspection.overwriteRequired && Global::get().pluginManager) {
-		for (const const_plugin_ptr_t &existing : Global::get().pluginManager->getPlugins()) {
-			if (existing && QFileInfo(existing->getFilePath()).absoluteFilePath() == m_destination.absoluteFilePath()) {
-				m_inspection.existingName    = existing->getName();
-				m_inspection.existingVersion = versionLabel(existing->getVersion());
+		for (const PluginDescriptor &existing : Global::get().pluginManager->pluginDescriptors()) {
+			if (pluginUpdateDestinationMatchesInstalledPath(existing.path, m_destination.absoluteFilePath())) {
+				// Preserve the installed descriptor's exact spelling. This keeps Windows' case-sensitive settings key
+				// stable even though filesystem path comparison is case-insensitive.
+				m_destination = QFileInfo(existing.path);
+				m_inspection.destinationPath = m_destination.absoluteFilePath();
+				m_inspection.existingName    = existing.name;
+				m_inspection.existingVersion = existing.version;
 				break;
 			}
+		}
+	}
+	if (m_inspection.overwriteRequired) {
+		bool hashOK = false;
+		m_inspection.existingSha256 = pluginFileSha256(m_destination.absoluteFilePath(), &hashOK);
+		if (!hashOK) {
+			throw PluginInstallException(QObject::tr("Unable to fingerprint the installed plugin before replacement."));
 		}
 	}
 }
@@ -193,7 +222,7 @@ bool PluginInstallService::install(const bool allowOverwrite) {
 	if (!m_plugin) {
 		throw PluginInstallException(QObject::tr("Plugin inspection is no longer valid."));
 	}
-	if (m_source.absoluteFilePath() == m_destination.absoluteFilePath()) {
+	if (pluginUpdateDestinationMatchesInstalledPath(m_source.absoluteFilePath(), m_destination.absoluteFilePath())) {
 		return false;
 	}
 	if (m_destination.exists() && !allowOverwrite) {
@@ -201,9 +230,9 @@ bool PluginInstallService::install(const bool allowOverwrite) {
 	}
 	if (m_destination.exists()) {
 		if (Global::get().pluginManager) {
-			for (const const_plugin_ptr_t &existing : Global::get().pluginManager->getPlugins()) {
-				if (existing && QFileInfo(existing->getFilePath()).absoluteFilePath() == m_destination.absoluteFilePath()) {
-					Global::get().pluginManager->clearPlugin(existing->getID());
+			for (const PluginDescriptor &existing : Global::get().pluginManager->pluginDescriptors()) {
+				if (pluginUpdateDestinationMatchesInstalledPath(existing.path, m_destination.absoluteFilePath())) {
+					Global::get().pluginManager->clearPlugin(existing.id);
 					break;
 				}
 			}

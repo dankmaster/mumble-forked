@@ -39,6 +39,7 @@ Rectangle {
             radius: 17
             color: Theme.selected
             Label {
+				textFormat: Text.PlainText
                 anchors.centerIn: parent
                 text: "▶"
                 color: Theme.accent
@@ -50,6 +51,7 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 2
             Label {
+				textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: session.sharedTitle || qsTr("Shared media session")
                 color: Theme.textStrong
@@ -57,6 +59,7 @@ Rectangle {
                 elide: Text.ElideRight
             }
             Label {
+				textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: session.sharedHost
                       ? qsTr("You are hosting · %1 participant(s)").arg(session.sharedParticipantCount)

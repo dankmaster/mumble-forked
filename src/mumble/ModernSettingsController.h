@@ -28,6 +28,10 @@ public:
 	QVariantMap state() const;
 	void updateField(const QString &fieldID, const QVariant &value);
 	ActionResult invokeAction(const QString &actionID, const QVariantMap &payload);
+	/// Reconciles externally completed plugin load/unload operations with both the current draft and
+	/// its reset baseline. This keeps an already open settings dialog from presenting a state that the
+	/// plugin manager could not actually reach.
+	bool reconcilePluginLoadedState(const QString &pluginPath, bool loaded);
 
 	const Settings &draft() const;
 	QString activePage() const;

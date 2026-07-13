@@ -28,6 +28,7 @@ MenuItem {
 	contentItem: RowLayout {
 		spacing: Math.max(6, Math.round(Theme.spacing / 2))
 		Label {
+			textFormat: Text.PlainText
 			visible: item.checkable
 			text: item.checked ? "✓" : ""
 			color: item.enabled ? Theme.accent : Theme.textMuted
@@ -36,6 +37,7 @@ MenuItem {
 			Accessible.ignored: true
 		}
 		Label {
+			textFormat: Text.PlainText
 			Layout.fillWidth: true
 			text: item.itemKind === "separator" ? "────────────" : item.text
 			color: item.itemKind === "separator" ? Theme.divider
@@ -60,6 +62,7 @@ MenuItem {
 			}
 		}
 		Label {
+			textFormat: Text.PlainText
 			visible: item.itemKind === "slider"
 			text: Math.round(valueSlider.value) + (item.payload.suffix || "")
 			color: Theme.textMuted

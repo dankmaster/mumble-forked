@@ -13,6 +13,7 @@ private slots:
 	void plansNativeWaylandRestoreWithoutAbsolutePosition();
 	void fallsBackAfterMonitorHotplug();
 	void keepsLogicalSizeAcrossDpiChanges();
+	void honorsToolWindowMinimumSize();
 	void recognizesCompositorManagedPlatforms();
 };
 
@@ -103,6 +104,19 @@ void TestQmlWindowStateController::keepsLogicalSizeAcrossDpiChanges() {
 	// QWindow geometry is device-independent. A DPR change must update metadata, not rescale the window.
 	QCOMPARE(plan.normalGeometry, state.normalGeometry);
 	QCOMPARE(plan.targetDevicePixelRatio, 2.0);
+}
+
+void TestQmlWindowStateController::honorsToolWindowMinimumSize() {
+	QmlWindowState state;
+	state.normalGeometry = QRect(120, 80, 280, 180);
+	state.screenName = QStringLiteral("Primary");
+	const QList< QmlScreenSnapshot > screens {
+		{ QStringLiteral("Primary"), QRect(0, 0, 1920, 1080), 1.0 }
+	};
+
+	const QmlWindowRestorePlan plan = QmlWindowStateController::createRestorePlan(
+		state, screens, QStringLiteral("Primary"), false, QSize(240, 140));
+	QCOMPARE(plan.normalGeometry, state.normalGeometry);
 }
 
 void TestQmlWindowStateController::recognizesCompositorManagedPlatforms() {

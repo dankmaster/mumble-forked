@@ -44,8 +44,8 @@ Window {
             Layout.fillWidth: true
             ColumnLayout {
                 Layout.fillWidth: true
-                Label { text: backend.title; color: Theme.textStrong; font.bold: true; font.pixelSize: 15 }
-                Label { text: backend.detail; color: Theme.textMuted }
+                Label { textFormat: Text.PlainText; text: backend.title; color: Theme.textStrong; font.bold: true; font.pixelSize: 15 }
+                Label { textFormat: Text.PlainText; text: backend.detail; color: Theme.textMuted }
             }
             ModernButton { text: backend.paused ? qsTr("Resume live") : qsTr("Pause view"); onClicked: backend.setPaused(!backend.paused) }
             ModernButton { text: backend.audioMuted ? qsTr("Unmute audio") : qsTr("Mute audio"); enabled: backend.audioAvailable; onClicked: backend.setAudioMuted(!backend.audioMuted) }
@@ -71,6 +71,7 @@ Window {
                 visible: !backend.nativeFrameActive && window !== null && !backend.paused
             }
             Label {
+				textFormat: Text.PlainText
                 anchors.centerIn: parent
                 width: parent.width - 48
                 horizontalAlignment: Text.AlignHCenter
@@ -80,6 +81,6 @@ Window {
                 text: backend.paused ? qsTr("Paused locally\n\nResume returns to the live edge.") : backend.status
             }
         }
-        Label { Layout.fillWidth: true; text: backend.status; color: Theme.textMuted; elide: Text.ElideRight }
+        Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: backend.status; color: Theme.textMuted; elide: Text.ElideRight }
     }
 }

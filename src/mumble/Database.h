@@ -26,14 +26,27 @@ private:
 	Q_DISABLE_COPY(Database)
 
 	QSqlDatabase db;
+	bool m_valid = false;
+	bool m_compactOnDestruction = true;
+	bool m_removeConnectionOnDestruction = false;
+	QString m_initializationError;
 	/// This function is called when no database location is configured
 	/// in the config file. It tries to find an existing database file and
 	/// creates a new one if none was found.
 	bool findOrCreateDatabase();
+	void initialize(const QString &dbname, const QString &databaseLocation, bool updateGlobalSettings,
+					bool fatalOnFailure);
 
 public:
 	Database(const QString &dbname);
+	/// Opens a thread-local connection without mutating the global settings.
+	/// This is used by ServerHandler, whose database must be created and
+	/// destroyed on the handler thread. Initialization failures are reported via
+	/// isValid()/initializationError() instead of terminating the process.
+	Database(const QString &dbname, const QString &databaseLocation, bool compactOnDestruction);
 	~Database() Q_DECL_OVERRIDE;
+	bool isValid() const;
+	QString initializationError() const;
 
 	QList< FavoriteServer > getFavorites();
 	void setFavorites(const QList< FavoriteServer > &servers);

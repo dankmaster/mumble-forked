@@ -96,7 +96,7 @@ void Channel::setFilterMode(ChannelFilterMode filterMode) {
 	m_filterMode        = filterMode;
 	ServerHandlerPtr sh = Global::get().sh;
 	if (sh) {
-		Global::get().db->setChannelFilterMode(sh->qbaDigest, iId, m_filterMode);
+		Global::get().db->setChannelFilterMode(sh->serverDigest(), iId, m_filterMode);
 	}
 }
 

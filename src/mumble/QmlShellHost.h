@@ -20,6 +20,7 @@ class ClientActionRegistry;
 class ClientSessionController;
 class DialogStateController;
 class MediaSessionBackend;
+class ManualPluginController;
 class ParticipantModel;
 enum class PttSafetyReason;
 class PttSafetyController;
@@ -27,6 +28,7 @@ class QEvent;
 class QmlSelectionState;
 class QmlPerformanceMonitor;
 class QmlImagePipeline;
+class QmlMediaProfileFactory;
 class QmlThemeController;
 class QmlWindowStateController;
 class QQmlApplicationEngine;
@@ -64,6 +66,10 @@ public:
 	void setVisualFixtureMutationActive(bool active);
 	bool captureWindow(const QString &path, QString *error = nullptr) const;
 	void showPttTool(bool visible);
+#ifdef USE_MANUAL_PLUGIN
+	ManualPluginController *manualPluginController() const;
+	void showManualPluginTool();
+#endif
 	QObject *createScreenShareView(QObject *backend);
 	void closeScreenShareView(QObject *view);
 
@@ -74,6 +80,10 @@ protected:
 	bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
+	bool ensurePttToolWindow();
+#ifdef USE_MANUAL_PLUGIN
+	bool ensureManualPluginWindow();
+#endif
 	void releasePttForSafety(PttSafetyReason reason);
 	void destroyScreenShareViews();
 
@@ -91,12 +101,19 @@ private:
 	std::unique_ptr< ActionModel > m_actionModel;
 	std::unique_ptr< DialogStateController > m_dialogController;
 	std::unique_ptr< MediaSessionBackend > m_mediaSession;
+	std::unique_ptr< QmlMediaProfileFactory > m_mediaProfileFactory;
 	std::unique_ptr< QmlSelectionState > m_selectionState;
 	std::unique_ptr< QmlPerformanceMonitor > m_performanceMonitor;
 	std::shared_ptr< QmlImagePipeline > m_imagePipeline;
 	std::unique_ptr< ComposerController > m_composerController;
 	std::unique_ptr< QmlThemeController > m_themeController;
 	std::unique_ptr< QmlWindowStateController > m_windowStateController;
+	std::unique_ptr< QmlWindowStateController > m_pttWindowStateController;
+	QPointer< QQuickWindow > m_pttToolWindow;
+#ifdef USE_MANUAL_PLUGIN
+	std::unique_ptr< ManualPluginController > m_manualPluginController;
+	QPointer< QQuickWindow > m_manualPluginWindow;
+#endif
 	QSet< QObject * > m_screenShareViews;
 	QSet< QObject * > m_closingScreenShareViews;
 	bool m_visualFixtureOverrideActive = false;

@@ -34,12 +34,14 @@ public:
 		QString destinationPath;
 		QString existingName;
 		QString existingVersion;
+		QByteArray existingSha256;
 		bool overwriteRequired = false;
 	};
 	struct PreparedPackage {
 		QString sourcePath;
 		QString destinationPath;
 		QByteArray sha256;
+		QByteArray expectedDestinationSha256;
 		std::shared_ptr< QTemporaryDir > temporaryDirectory;
 	};
 
@@ -53,7 +55,8 @@ public:
 	static bool canBePluginFile(const QFileInfo &fileInfo) noexcept;
 	static QString installDirectory();
 	static PreparedPackage prepare(const QString &filePath, const QString &destinationDirectory,
-								   const std::atomic< bool > *cancelled = nullptr);
+								   const std::atomic< bool > *cancelled = nullptr,
+								   const QString &boundInstalledPath = {});
 
 private:
 	QFileInfo m_archive;

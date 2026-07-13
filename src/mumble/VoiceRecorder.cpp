@@ -97,10 +97,11 @@ QString VoiceRecorder::expandTemplateVariables(const QString &path, const QStrin
 	QString time(m_recordingStartTime.time().toString(QLatin1String("hh-mm-ss")));
 
 	QString hostname(QLatin1String("Unknown"));
-	if (Global::get().sh && Global::get().uiSession != 0) {
+	const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot();
+	if (serverHandler && Global::get().uiSession != 0) {
 		unsigned short port;
 		QString uname, pw;
-		Global::get().sh->getConnectionInfo(hostname, port, uname, pw);
+		serverHandler->getConnectionInfo(hostname, port, uname, pw);
 	}
 
 	// Create hash which stores the names of the variables with the corresponding values.
@@ -305,7 +306,8 @@ bool VoiceRecorder::ensureFileIsOpenedFor(SF_INFO &soundFileInfo, std::shared_pt
 void VoiceRecorder::run() {
 	Q_ASSERT(!m_recording);
 
-	if (Global::get().sh && Global::get().sh->m_version < Version::fromComponents(1, 2, 3))
+	const ServerHandlerPtr initialServerHandler = Global::get().serverHandlerSnapshot();
+	if (initialServerHandler && initialServerHandler->protocolVersion() < Version::fromComponents(1, 2, 3))
 		return;
 
 	SF_INFO soundFileInfo = createSoundFileInfo();
@@ -318,8 +320,9 @@ void VoiceRecorder::run() {
 		m_sleepLock.lock();
 		m_sleepCondition.wait(&m_sleepLock);
 
+		const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot();
 		if (!m_recording || m_abort
-			|| (Global::get().sh && Global::get().sh->m_version < Version::fromComponents(1, 2, 3))) {
+			|| (serverHandler && serverHandler->protocolVersion() < Version::fromComponents(1, 2, 3))) {
 			m_sleepLock.unlock();
 			break;
 		}

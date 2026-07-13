@@ -27,6 +27,7 @@ TestCase {
     function cleanup() {
         dialogState.open = false;
         tryCompare(loader.item, "visible", false);
+		dialogState.setSpecialState("generic", {});
     }
 
     function test_open_focus_and_close_action() {
@@ -84,5 +85,17 @@ TestCase {
 		compare(colorButton.Accessible.name, "Choose Accent");
 		colorButton.forceActiveFocus();
 		tryCompare(colorButton, "activeFocus", true);
+	}
+
+	function test_special_editor_state_stays_live() {
+		dialogState.setSpecialState("stonks", { "stonks": { "status": "loading-marker" } });
+		const editorLoader = findChild(loader.item.contentItem, "stonksEditorLoader");
+		verify(editorLoader !== null);
+		tryVerify(function() {
+			return editorLoader.item !== null && editorLoader.item.stonks.status === "loading-marker";
+		});
+
+		dialogState.setSpecialState("stonks", { "stonks": { "status": "ready-marker" } });
+		tryVerify(function() { return editorLoader.item.stonks.status === "ready-marker"; });
 	}
 }

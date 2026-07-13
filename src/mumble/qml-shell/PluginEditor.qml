@@ -12,6 +12,7 @@ ColumnLayout {
     RowLayout {
         Layout.fillWidth: true
         Label {
+			textFormat: Text.PlainText
             Layout.fillWidth: true
             text: field.label || qsTr("Installed plugins")
             color: Theme.textStrong
@@ -49,11 +50,12 @@ ColumnLayout {
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: 2
-                        Label { Layout.fillWidth: true; text: modelData.name || qsTr("Unnamed plugin"); color: Theme.textStrong; font.bold: true; elide: Text.ElideRight }
-                        Label { Layout.fillWidth: true; text: modelData.description || modelData.path || ""; color: Theme.textMuted; font.pixelSize: 10; elide: Text.ElideRight }
+                        Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: modelData.name || qsTr("Unnamed plugin"); color: Theme.textStrong; font.bold: true; elide: Text.ElideRight }
+                        Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: modelData.description || modelData.path || ""; color: Theme.textMuted; font.pixelSize: 10; elide: Text.ElideRight }
                     }
-                    Label { text: modelData.version || ""; color: Theme.textMuted; font.pixelSize: 10 }
+                    Label { textFormat: Text.PlainText; text: modelData.version || ""; color: Theme.textMuted; font.pixelSize: 10 }
                     Label {
+						textFormat: Text.PlainText
                         text: modelData.loaded ? qsTr("Loaded") : qsTr("Unloaded")
                         color: modelData.loaded ? Theme.accent : Theme.textMuted
                         font.pixelSize: 10
@@ -83,12 +85,12 @@ ColumnLayout {
                     }
                     ModernButton {
                         text: qsTr("Configure")
-                        visible: !!modelData.canConfigure
+                        visible: !!modelData.loaded && !!modelData.canConfigure
                         onClicked: dialogState.invokeAction("plugins.configure", { "pluginId": modelData.id })
                     }
                     ModernButton {
                         text: qsTr("About")
-                        visible: !!modelData.canShowAbout
+                        visible: !!modelData.loaded && !!modelData.canShowAbout
                         onClicked: dialogState.invokeAction("plugins.about", { "pluginId": modelData.id })
                     }
                     ModernButton {

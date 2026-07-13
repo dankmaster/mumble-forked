@@ -12,10 +12,7 @@
 #include "Log.h"
 #include "MainWindow.h"
 #include "MumbleConstants.h"
-#include "ChannelListenerManager.h"
 #include "ServerHandler.h"
-#include "Usage.h"
-#include "UiTheme.h"
 #include "User.h"
 #include "VolumeAdjustment.h"
 #include "Global.h"
@@ -282,39 +279,9 @@ QString ModelItem::hash() const {
 }
 
 UserModel::UserModel(QObject *p) : QAbstractItemModel(p) {
-	qiTalkingOff      = QIcon(QLatin1String("skin:talking_off.svg"));
-	qiTalkingOn       = QIcon(QLatin1String("skin:talking_on.svg"));
-	qiTalkingMuted    = QIcon(QLatin1String("skin:talking_muted.svg"));
-	qiTalkingShout    = QIcon(QLatin1String("skin:talking_alt.svg"));
-	qiTalkingWhisper  = QIcon(QLatin1String("skin:talking_whisper.svg"));
-	qiPrioritySpeaker = QIcon(QLatin1String("skin:priority_speaker.svg"));
-	qiRecording       = QIcon(QLatin1String("skin:actions/media-record.svg"));
-	qiMutedPushToMute.addFile(QLatin1String("skin:muted_pushtomute.svg"));
-	qiMutedSelf       = QIcon(QLatin1String("skin:muted_self.svg"));
-	qiMutedServer     = QIcon(QLatin1String("skin:muted_server.svg"));
-	qiMutedLocal      = QIcon(QLatin1String("skin:muted_local.svg"));
-	qiIgnoredLocal    = QIcon(QLatin1String("skin:status/text-missing.svg"));
-	qiMutedSuppressed = QIcon(QLatin1String("skin:muted_suppressed.svg"));
-	qiDeafenedSelf    = QIcon(QLatin1String("skin:deafened_self.svg"));
-	qiDeafenedServer  = QIcon(QLatin1String("skin:deafened_server.svg"));
-	qiAuthenticated   = QIcon(QLatin1String("skin:authenticated.svg"));
-	qiChannel         = QIcon(QLatin1String("skin:channel.svg"));
-	qiActiveChannel   = QIcon(QLatin1String("skin:channel_active.svg"));
-	qiLinkedChannel   = QIcon(QLatin1String("skin:channel_linked.svg"));
-	qiFriend          = QIcon(QLatin1String("skin:emblems/emblem-favorite.svg"));
-	qiComment         = QIcon(QLatin1String("skin:comment.svg"));
-	qiCommentSeen     = QIcon(QLatin1String("skin:comment_seen.svg"));
-	qiFilter          = QIcon(QLatin1String("skin:filter.svg"));
-	qiPin             = QIcon(QLatin1String("skin:pin.svg"));
-	qiLock_locked     = QIcon(QLatin1String("skin:lock_locked.svg"));
-	qiLock_unlocked   = QIcon(QLatin1String("skin:lock_unlocked.svg"));
-	qiEar             = QIcon(QLatin1String("skin:ear.svg"));
-
 	ModelItem::bUsersTop = Global::get().s.bUserTop;
 
-	uiSessionComment    = 0;
-	iChannelDescription = -1;
-	bClicked            = false;
+	uiSessionComment = 0;
 
 	miRoot = new ModelItem(Channel::get(Mumble::ROOT_CHANNEL_ID));
 }
@@ -473,60 +440,55 @@ QVariant UserModel::data(const QModelIndex &idx, int role) const {
 		return QVariant();
 	}
 
-	QVariant v = otherRoles(idx, role);
-	if (v.isValid())
-		return v;
-
-	auto userStatusIcons = [&]() {
-		QList< QVariant > icons;
+	auto userStatusIndicators = [&]() {
+		QStringList indicators;
 		if (!p) {
-			return icons;
+			return indicators;
 		}
 
 		if (!p->qbaCommentHash.isEmpty() && !item->isListener)
-			icons << (item->bCommentSeen ? qiCommentSeen : qiComment);
+			indicators << (item->bCommentSeen ? QStringLiteral("comment-seen") : QStringLiteral("comment-new"));
 		if (p->bPrioritySpeaker && !item->isListener)
-			icons << qiPrioritySpeaker;
+			indicators << QStringLiteral("priority-speaker");
 		if (p->bRecording)
-			icons << qiRecording;
+			indicators << QStringLiteral("recording");
 		if (p->bLocalIgnore && !item->isListener)
-			icons << qiIgnoredLocal;
+			indicators << QStringLiteral("text-ignored");
 		if (p->iId >= 0 && !item->isListener)
-			icons << qiAuthenticated;
+			indicators << QStringLiteral("authenticated");
 		if (!p->qsFriendName.isEmpty() && !item->isListener)
-			icons << qiFriend;
+			indicators << QStringLiteral("friend");
 
-		return icons;
+		return indicators;
 	};
 
-	auto channelStatusIcons = [&]() {
-		QList< QVariant > icons;
+	auto channelStatusIndicators = [&]() {
+		QStringList indicators;
 		if (!c) {
-			return icons;
+			return indicators;
 		}
 
 		if (!c->qbaDescHash.isEmpty())
-			icons << (item->bCommentSeen ? qiCommentSeen : qiComment);
+			indicators << (item->bCommentSeen ? QStringLiteral("comment-seen") : QStringLiteral("comment-new"));
 
 		switch (c->m_filterMode) {
 			case ChannelFilterMode::HIDE:
-				icons << qiFilter;
+				indicators << QStringLiteral("filter-hidden");
 				break;
 			case ChannelFilterMode::PIN:
-				icons << qiPin;
+				indicators << QStringLiteral("filter-pinned");
 				break;
 			case ChannelFilterMode::NORMAL:
 				break;
 		}
 
 		if (c->hasEnterRestrictions.load()) {
-			icons << (c->localUserCanEnter.load() ? qiLock_unlocked : qiLock_locked);
+			indicators << (c->localUserCanEnter.load() ? QStringLiteral("restricted-enter-allowed")
+												   : QStringLiteral("restricted-enter-denied"));
 		}
 
-		return icons;
+		return indicators;
 	};
-
-	QList< QVariant > l;
 
 	if (role == UserModel::NavigatorItemKindRole) {
 		if (p) {
@@ -562,8 +524,11 @@ QVariant UserModel::data(const QModelIndex &idx, int role) const {
 	if (role == UserModel::NavigatorAvatarFallbackRole) {
 		return p ? navigatorInitials(p->qsName) : QVariant();
 	}
-	if (role == UserModel::NavigatorStatusIconsRole) {
-		return p ? userStatusIcons() : channelStatusIcons();
+	if (role == UserModel::NavigatorStatusIndicatorsRole) {
+		// Keep the established role ID for controller compatibility, but expose stable semantic
+		// state instead of classic presentation objects. The active frontend decides how each
+		// indicator is rendered.
+		return p ? userStatusIndicators() : channelStatusIndicators();
 	}
 	if (role == UserModel::NavigatorTalkStateRole) {
 		if (!p || item->isListener) {
@@ -610,49 +575,6 @@ QVariant UserModel::data(const QModelIndex &idx, int role) const {
 
 	if (p) {
 		switch (role) {
-			case Qt::DecorationRole:
-				if (idx.column() == 0) {
-					if (item->isListener) {
-						return qiEar;
-					} else {
-						// Select the talking-state symbol to display
-						if (p == pSelf && p->bSelfMute) {
-							// This is a workaround for a bug that can lead to the user having muted him/herself but
-							// the talking icon is stuck at qiTalkingOn for some reason.
-							// Until someone figures out how to fix the root of the problem, we'll have this workaround
-							// to cure the symptoms of the bug.
-							return qiTalkingOff;
-						}
-
-						switch (p->tsState) {
-							case Settings::Talking:
-								return qiTalkingOn;
-							case Settings::MutedTalking:
-								return qiTalkingMuted;
-							case Settings::Whispering:
-								return qiTalkingWhisper;
-							case Settings::Shouting:
-								return qiTalkingShout;
-							case Settings::Passive:
-							default:
-								return qiTalkingOff;
-						}
-					}
-				}
-				break;
-			case Qt::FontRole:
-				if ((idx.column() == 0) && (p->uiSession == Global::get().uiSession)) {
-					QFont f = Global::get().mw->font();
-					f.setBold(!f.bold());
-					f.setItalic(item->isListener);
-					return f;
-				}
-				if (item->isListener) {
-					QFont f = Global::get().mw->font();
-					f.setItalic(true);
-					return f;
-				}
-				break;
 			case Qt::DisplayRole:
 				if (idx.column() == 0) {
 					// Get the channel the user/listener is in
@@ -660,7 +582,7 @@ QVariant UserModel::data(const QModelIndex &idx, int role) const {
 
 					return createDisplayString(*p, item->isListener, parentChannel);
 				}
-				return userStatusIcons();
+				return userStatusIndicators();
 			case Qt::AccessibleTextRole:
 				if (item->isListener) {
 					return tr("Channel Listener");
@@ -676,44 +598,11 @@ QVariant UserModel::data(const QModelIndex &idx, int role) const {
 		}
 	} else {
 		switch (role) {
-			case Qt::DecorationRole:
-				if (idx.column() == 0) {
-					if (Global::get().uiSession && qsLinked.contains(c)) {
-						if (ClientUser::get(Global::get().uiSession)->cChannel == c)
-							return qiActiveChannel;
-						else
-							return qiLinkedChannel;
-					}
-					return qiChannel;
-				}
-				break;
 			case Qt::DisplayRole:
 				if (idx.column() == 0) {
 					return c->qsName;
 				}
-				return channelStatusIcons();
-			case Qt::FontRole:
-				if (Global::get().uiSession) {
-					Channel *home = ClientUser::get(Global::get().uiSession)->cChannel;
-
-					if ((c == home) || qsLinked.contains(c)) {
-						QFont f = Global::get().mw->font();
-						if (qsLinked.count() > 1)
-							f.setItalic(!f.italic());
-						if (c == home)
-							f.setBold(!f.bold());
-						return f;
-					}
-				}
-				break;
-			case Qt::BackgroundRole:
-				if ((c->iId == 0) && Global::get().sh && Global::get().sh->isStrong()) {
-					const std::optional< UiThemeTokens > tokens = activeUiThemeTokens();
-					QColor qc                                   = tokens ? tokens->green : QColor(Qt::green);
-					qc.setAlpha(32);
-					return qc;
-				}
-				break;
+				return channelStatusIndicators();
 			case Qt::AccessibleTextRole:
 				return Mumble::Accessibility::channelToText(c);
 			case Qt::AccessibleDescriptionRole:
@@ -735,204 +624,6 @@ Qt::ItemFlags UserModel::flags(const QModelIndex &idx) const {
 	return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled;
 }
 
-QVariant UserModel::otherRoles(const QModelIndex &idx, int role) const {
-	ModelItem *item = static_cast< ModelItem * >(idx.internalPointer());
-	ClientUser *p   = item->pUser;
-	Channel *c      = item->cChan;
-	int section     = idx.column();
-	bool isUser     = p;
-
-	switch (role) {
-		case Qt::ToolTipRole:
-			const_cast< UserModel * >(this)->uiSessionComment    = 0;
-			const_cast< UserModel * >(this)->iChannelDescription = -1;
-			const_cast< UserModel * >(this)->bClicked            = false;
-			switch (section) {
-				case 0: {
-					if (isUser) {
-						QString qsImage;
-						if (!p->qbaTextureHash.isEmpty()) {
-							if (p->qbaTexture.isEmpty()) {
-								if (Global::get().mw) {
-									Global::get().mw->ensureUserTextureAvailable(
-										p, MainWindow::UserTextureRequestReason::Navigator);
-								}
-							}
-							if (!p->qbaTexture.isEmpty()) {
-								QBuffer qb(&p->qbaTexture);
-								qb.open(QIODevice::ReadOnly);
-								QImageReader qir(&qb, p->qbaTextureFormat);
-								QSize sz = qir.size();
-								if (sz.width() > 0) {
-									qsImage = QString::fromLatin1("<img src=\"data:;base64,");
-									qsImage.append(QString::fromLatin1(p->qbaTexture.toBase64().toPercentEncoding()));
-									if (sz.width() > 128) {
-										int targ = sz.width() / ((sz.width() + 127) / 128);
-										qsImage.append(QString::fromLatin1("\" width=\"%1\" />").arg(targ));
-									} else {
-										qsImage.append(QString::fromLatin1("\" />"));
-									}
-								}
-							}
-						}
-
-						if (p->qbaCommentHash.isEmpty()) {
-							if (!qsImage.isEmpty())
-								return qsImage;
-							else
-								return p->qsName;
-						} else {
-							if (p->qsComment.isEmpty()) {
-								p->qsComment = QString::fromUtf8(Global::get().db->blob(p->qbaCommentHash));
-								if (p->qsComment.isEmpty()) {
-									const_cast< UserModel * >(this)->uiSessionComment = p->uiSession;
-
-									MumbleProto::RequestBlob mprb;
-									mprb.add_session_comment(p->uiSession);
-									Global::get().sh->sendMessage(mprb);
-									return QVariant();
-								}
-							}
-							const_cast< UserModel * >(this)->seenComment(idx);
-							QString base = Log::validHtml(p->qsComment);
-							if (!qsImage.isEmpty())
-								return QString::fromLatin1(
-										   "<table><tr><td valign=\"top\">%1</td><td>%2</td></tr></table>")
-									.arg(qsImage, base);
-							return base;
-						}
-					} else {
-						if (c->qbaDescHash.isEmpty()) {
-							return c->qsName;
-						} else {
-							if (c->qsDesc.isEmpty()) {
-								c->qsDesc = QString::fromUtf8(Global::get().db->blob(c->qbaDescHash));
-								if (c->qsDesc.isEmpty()) {
-									const_cast< UserModel * >(this)->iChannelDescription = static_cast< int >(c->iId);
-
-									MumbleProto::RequestBlob mprb;
-									mprb.add_channel_description(c->iId);
-									Global::get().sh->sendMessage(mprb);
-									return QVariant();
-								}
-							}
-
-							const_cast< UserModel * >(this)->seenComment(idx);
-							return Log::validHtml(c->qsDesc);
-						}
-					}
-				} break;
-				case 1:
-					return isUser ? p->getFlagsString() : QVariant();
-			}
-			break;
-		case Qt::WhatsThisRole:
-			switch (section) {
-				case 0:
-					if (isUser)
-						return QString::fromLatin1("%1"
-												   "<table>"
-												   "<tr><td><img src=\"skin:talking_on.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%2</td></tr>"
-												   "<tr><td><img src=\"skin:talking_alt.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%3</td></tr>"
-												   "<tr><td><img src=\"skin:talking_whisper.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%4</td></tr>"
-												   "<tr><td><img src=\"skin:talking_off.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%5</td></tr>"
-												   "<tr><td><img src=\"skin:talking_muted.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%6</td></tr>"
-												   "<tr><td><img src=\"skin:ear.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%7</td></tr>"
-												   "</table>")
-							.arg(tr("This is a user connected to the server. The icon to the left of the user "
-									"indicates whether or not they are talking:"),
-								 tr("Talking to your channel."), tr("Shouting directly to your channel."),
-								 tr("Whispering directly to you."), tr("Not talking."),
-								 tr("Talking while being muted on your end"),
-								 tr("This is a channel listener. The corresponding user hears everything you say in "
-									"this channel."));
-					else
-						return QString::fromLatin1("%1"
-												   "<table>"
-												   "<tr><td><img src=\"skin:channel_active.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%2</td></tr>"
-												   "<tr><td><img src=\"skin:channel_linked.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%3</td></tr>"
-												   "<tr><td><img src=\"skin:channel.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%4</td></tr>"
-												   "</table>")
-							.arg(tr("This is a channel on the server. The icon indicates the state of the channel:"),
-								 tr("Your current channel."),
-								 tr("A channel that is linked with your channel. Linked channels can talk to each "
-									"other."),
-								 tr("A channel on the server that you are not linked to."));
-				case 1:
-					if (isUser)
-						return QString::fromLatin1("%1"
-												   "<table>"
-												   "<tr><td><img src=\"skin:emblems/emblem-favorite.svg\" height=64 "
-												   "/></td><td valign=\"middle\">%2</td></tr>"
-												   "<tr><td><img src=\"skin:authenticated.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%3</td></tr>"
-												   "<tr><td><img src=\"skin:muted_self.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%4</td></tr>"
-												   "<tr><td><img src=\"skin:muted_server.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%5</td></tr>"
-												   "<tr><td><img src=\"skin:muted_suppressed.svg\" height=64 "
-												   "/></td><td valign=\"middle\">%6</td></tr>"
-												   "<tr><td><img src=\"skin:muted_local.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%7</td></tr>"
-												   "<tr><td><img src=\"skin:muted_pushtomute.svg\" height=64 "
-												   "/></td><td valign=\"middle\">%8</td></tr>"
-												   "<tr><td><img src=\"skin:deafened_self.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%9</td></tr>"
-												   "<tr><td><img src=\"skin:deafened_server.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%10</td></tr>"
-												   "<tr><td><img src=\"skin:comment.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%11</td></tr>"
-												   "<tr><td><img src=\"skin:comment_seen.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%12</td></tr>"
-												   "<tr><td><img src=\"skin:status/text-missing.svg\" height=64 "
-												   "/></td><td valign=\"middle\">%13</td></tr>"
-												   "</table>")
-							.arg(tr("This shows the flags the user has on the server, if any:"),
-								 tr("On your friend list"), tr("Authenticated user"),
-								 tr("Muted (manually muted by self)"), tr("Muted (manually muted by admin)"),
-								 tr("Muted (not allowed to speak in current channel)"),
-								 tr("Muted (muted by you, only on your machine)"), tr("Muted (push-to-mute)"))
-							.arg(tr("Deafened (by self)"), tr("Deafened (by admin)"),
-								 tr("User has a new comment set (click to show)"),
-								 tr("User has a comment set, which you've already seen. (click to show)"),
-								 tr("Ignoring Text Messages"));
-					else
-						return QString::fromLatin1("%1"
-												   "<table>"
-												   "<tr><td><img src=\"skin:comment.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%10</td></tr>"
-												   "<tr><td><img src=\"skin:comment_seen.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%11</td></tr>"
-												   "<tr><td><img src=\"skin:filter.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%12</td></tr>"
-												   "<tr><td><img src=\"skin:pin.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%13</td></tr>"
-												   "<tr><td><img src=\"skin:lock_locked.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%14</td></tr>"
-												   "<tr><td><img src=\"skin:lock_unlocked.svg\" height=64 /></td><td "
-												   "valign=\"middle\">%15</td></tr>"
-												   "</table>")
-							.arg(tr("This shows the flags the channel has, if any:"),
-								 tr("Channel has a new comment set (click to show)"),
-								 tr("Channel has a comment set, which you've already seen. (click to show)"),
-								 tr("Channel will be hidden when filtering is enabled"),
-								 tr("Channel will be pinned when filtering is enabled"),
-								 tr("Channel has access restrictions so that you can't enter it"),
-								 tr("Channel has access restrictions but you can enter nonetheless"));
-			}
-			break;
-	}
-	return QVariant();
-}
 
 QVariant UserModel::headerData(int section, Qt::Orientation orientation, int role) const {
 	if (orientation != Qt::Horizontal)
@@ -1067,17 +758,6 @@ ModelItem *UserModel::moveItem(ModelItem *oldparent, ModelItem *newparent, Model
 	return newItem;
 }
 
-void UserModel::expandAll(Channel *c) {
-	Q_UNUSED(c)
-}
-
-void UserModel::collapseEmpty(Channel *c) {
-	Q_UNUSED(c)
-}
-
-void UserModel::ensureSelfVisible() {
-}
-
 void UserModel::recheckLinks() {
 	if (!Global::get().uiSession)
 		return;
@@ -1103,7 +783,7 @@ void UserModel::recheckLinks() {
 
 	for (Channel *c : changed) {
 		QModelIndex idx = index(c);
-		emit dataChanged(idx, idx);
+		emit dataChanged(idx, idx, QVector< int > { UserModel::NavigatorLinkedLocationRole });
 	}
 }
 
@@ -1169,9 +849,6 @@ void UserModel::removeUser(ClientUser *p) {
 		citem = citem->parent;
 	}
 
-	if (Global::get().s.ceExpand == Settings::ChannelsWithUsers)
-		collapseEmpty(c);
-
 	emit userRemoved(p->uiSession);
 
 	delete p;
@@ -1189,7 +866,6 @@ void UserModel::moveUser(ClientUser *p, Channel *np) {
 	item = moveItem(opi, pi, item);
 
 	if (p->uiSession == Global::get().uiSession) {
-		ensureSelfVisible();
 		recheckLinks();
 	}
 
@@ -1200,11 +876,6 @@ void UserModel::moveUser(ClientUser *p, Channel *np) {
 	while (pi) {
 		pi->iUsers++;
 		pi = pi->parent;
-	}
-
-	if (Global::get().s.ceExpand == Settings::ChannelsWithUsers) {
-		expandAll(np);
-		collapseEmpty(oc);
 	}
 
 	emit userMoved(p->uiSession, previousChannelID, np->iId);
@@ -1314,15 +985,8 @@ void UserModel::setComment(Channel *c, const QString &comment) {
 
 		if (!comment.isEmpty()) {
 			Global::get().db->setBlob(c->qbaDescHash, c->qsDesc.toUtf8());
-
-			if (c->iId == static_cast< unsigned int >(iChannelDescription)) {
-				iChannelDescription = -1;
-				item->bCommentSeen  = false;
-				// Channel descriptions are part of the typed room state consumed by QML.
-			} else {
-				item->bCommentSeen = Global::get().db->seenComment(item->hash(), c->qbaDescHash);
-				newstate           = item->bCommentSeen ? 2 : 1;
-			}
+			item->bCommentSeen = Global::get().db->seenComment(item->hash(), c->qbaDescHash);
+			newstate           = item->bCommentSeen ? 2 : 1;
 		} else {
 			item->bCommentSeen = true;
 		}
@@ -1537,9 +1201,6 @@ void UserModel::removeChannelListener(ModelItem *item, ModelItem *citem) {
 		citem = citem->parent;
 	}
 
-	if (Global::get().s.ceExpand == Settings::ChannelsWithUsers)
-		collapseEmpty(c);
-
 	delete item;
 }
 
@@ -1586,7 +1247,6 @@ bool UserModel::removeChannel(Channel *c, const bool onlyIfUnoccupied) {
 }
 
 void UserModel::moveChannel(Channel *c, Channel *p) {
-	Channel *oc     = c->cParent;
 	ModelItem *opi  = ModelItem::c_qhChannels.value(c->cParent);
 	ModelItem *pi   = ModelItem::c_qhChannels.value(p);
 	ModelItem *item = ModelItem::c_qhChannels.value(c);
@@ -1601,11 +1261,6 @@ void UserModel::moveChannel(Channel *c, Channel *p) {
 		pi = pi->parent;
 	}
 
-	ensureSelfVisible();
-
-	if (Global::get().s.ceExpand == Settings::ChannelsWithUsers) {
-		collapseEmpty(oc);
-	}
 }
 
 void UserModel::linkChannels(Channel *c, QList< Channel * > links) {
@@ -1630,9 +1285,7 @@ void UserModel::unlinkAll(Channel *c) {
 void UserModel::removeAll() {
 	ModelItem *item = miRoot;
 
-	uiSessionComment    = 0;
-	iChannelDescription = -1;
-	bClicked            = false;
+	uiSessionComment = 0;
 
 	// in order to avoid complications, we remove all ChannelListeners first
 	for (ModelItem *i : item->qlChildren) {
@@ -1751,7 +1404,7 @@ void UserModel::userTalkingStateChanged() {
 		return;
 
 	const QModelIndex idx = index(user);
-	emit dataChanged(idx, idx, QVector< int > { Qt::DecorationRole, UserModel::NavigatorTalkStateRole });
+	emit dataChanged(idx, idx, QVector< int > { UserModel::NavigatorTalkStateRole });
 
 }
 
@@ -1772,16 +1425,6 @@ void UserModel::on_channelListenerLocalVolumeAdjustmentChanged(unsigned int chan
 
 	const QModelIndex idx = channelListenerIndex(ClientUser::get(Global::get().uiSession), Channel::get(channelID));
 	emit dataChanged(idx, idx);
-}
-
-void UserModel::forceVisualUpdate(Channel *c) {
-	if (c) {
-		const QModelIndex idx = index(c);
-		if (idx.isValid()) {
-			emit dataChanged(idx, idx);
-		}
-	}
-
 }
 
 Qt::DropActions UserModel::supportedDropActions() const {
@@ -1842,8 +1485,6 @@ bool UserModel::dropMimeData(const QMimeData *md, Qt::DropAction, int row, int c
 
 	if (!c)
 		return false;
-
-	expandAll(c);
 
 	if (!isChannel) {
 		// User dropped somewhere

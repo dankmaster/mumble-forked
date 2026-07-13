@@ -9049,8 +9049,29 @@ void Server::msgWatchTogetherSync(ServerUser *uSource, MumbleProto::WatchTogethe
 		}
 
 		const QUrl sourceUrl(u8(msg.source_url()));
-		if (!sourceUrl.isValid() || sourceUrl.scheme() != QLatin1String("https") || sourceUrl.host().isEmpty()) {
-			deny(QStringLiteral("Watch-together sources must use https URLs."));
+		static const QSet< QString > youtubeHosts {
+			QStringLiteral("youtube.com"), QStringLiteral("www.youtube.com"),
+			QStringLiteral("youtube-nocookie.com"), QStringLiteral("www.youtube-nocookie.com")
+		};
+		static const QSet< QString > providerEmbedHosts {
+			QStringLiteral("youtube.com"), QStringLiteral("www.youtube.com"),
+			QStringLiteral("youtube-nocookie.com"), QStringLiteral("www.youtube-nocookie.com"),
+			QStringLiteral("player.twitch.tv"), QStringLiteral("streamable.com"),
+			QStringLiteral("player.vimeo.com"), QStringLiteral("geo.dailymotion.com"),
+			QStringLiteral("open.spotify.com"), QStringLiteral("www.facebook.com"),
+			QStringLiteral("www.tiktok.com"), QStringLiteral("www.instagram.com"),
+			QStringLiteral("w.soundcloud.com")
+		};
+		const QString sourceHost = sourceUrl.host().toLower();
+		const bool validTransport = sourceUrl.isValid() && sourceUrl.scheme() == QLatin1String("https")
+			&& !sourceHost.isEmpty() && sourceUrl.userInfo().isEmpty()
+			&& (sourceUrl.port(-1) == -1 || sourceUrl.port(-1) == 443);
+		const bool validProvider = msg.source_kind() == MumbleProto::WatchTogetherSourceYouTube
+			? youtubeHosts.contains(sourceHost)
+			: msg.source_kind() == MumbleProto::WatchTogetherSourceDirectMedia
+				&& providerEmbedHosts.contains(sourceHost);
+		if (!validTransport || !validProvider) {
+			deny(QStringLiteral("Watch-together sources must use an approved https provider embed URL."));
 			return;
 		}
 	}

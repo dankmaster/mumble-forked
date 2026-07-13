@@ -11,12 +11,12 @@ ColumnLayout {
 
     RowLayout {
         Layout.fillWidth: true
-        Label { Layout.fillWidth: true; text: field.label || qsTr("Event behavior"); color: Theme.textStrong; font.bold: true }
-        Label { text: qsTr("Log"); color: Theme.textMuted; font.pixelSize: 9 }
-        Label { text: qsTr("Notify"); color: Theme.textMuted; font.pixelSize: 9 }
-        Label { text: qsTr("Highlight"); color: Theme.textMuted; font.pixelSize: 9 }
-        Label { text: qsTr("TTS"); color: Theme.textMuted; font.pixelSize: 9 }
-        Label { text: qsTr("Sound"); color: Theme.textMuted; font.pixelSize: 9 }
+        Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: field.label || qsTr("Event behavior"); color: Theme.textStrong; font.bold: true }
+        Label { textFormat: Text.PlainText; text: qsTr("Log"); color: Theme.textMuted; font.pixelSize: 9 }
+        Label { textFormat: Text.PlainText; text: qsTr("Notify"); color: Theme.textMuted; font.pixelSize: 9 }
+        Label { textFormat: Text.PlainText; text: qsTr("Highlight"); color: Theme.textMuted; font.pixelSize: 9 }
+        Label { textFormat: Text.PlainText; text: qsTr("TTS"); color: Theme.textMuted; font.pixelSize: 9 }
+        Label { textFormat: Text.PlainText; text: qsTr("Sound"); color: Theme.textMuted; font.pixelSize: 9 }
     }
 
     ListView {
@@ -38,7 +38,7 @@ ColumnLayout {
                 anchors.leftMargin: 10
                 anchors.rightMargin: 6
                 spacing: 4
-                Label { Layout.fillWidth: true; text: modelData.name || qsTr("Event"); color: Theme.textMain; elide: Text.ElideRight; font.pixelSize: 10 }
+                Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: modelData.name || qsTr("Event"); color: Theme.textMain; elide: Text.ElideRight; font.pixelSize: 10 }
                 CheckBox { checked: !!modelData.console; onToggled: root.toggle(modelData.type, "console", checked) }
                 CheckBox { checked: !!modelData.notification; onToggled: root.toggle(modelData.type, "notification", checked) }
                 CheckBox { checked: !!modelData.highlight; onToggled: root.toggle(modelData.type, "highlight", checked) }

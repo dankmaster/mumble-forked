@@ -2,9 +2,13 @@
 #define MUMBLE_MUMBLE_COMPOSERCONTROLLER_H_
 
 #include <QtCore/QAbstractListModel>
+#include <QtCore/QHash>
 #include <QtCore/QObject>
+#include <QtCore/QQueue>
+#include <QtCore/QThreadPool>
 #include <QtCore/QUrl>
 
+#include <atomic>
 #include <memory>
 
 class QmlImagePipeline;
@@ -34,6 +38,8 @@ public:
 	bool move(const QString &id, int destination);
 	bool update(const QString &id, const QString &thumbnailUrl, const QString &status, qreal progress,
 				const QString &error);
+	bool resolve(const QString &id, const QUrl &localUrl, const QString &fileName, const QString &thumbnailUrl,
+				 const QString &status, qreal progress, const QString &error);
 	Item item(const QString &id) const;
 	void clear();
 	signals: void countChanged();
@@ -49,6 +55,7 @@ class ComposerController final : public QObject {
 	Q_PROPERTY(QVariantList autocompleteItems READ autocompleteItems NOTIFY autocompleteChanged)
 public:
 	explicit ComposerController(std::shared_ptr< QmlImagePipeline > pipeline, QObject *parent = nullptr);
+	~ComposerController() override;
 	QString text() const { return m_text; }
 	void setText(const QString &text);
 	bool canSend() const { return m_canSend; }
@@ -73,9 +80,38 @@ signals:
 	void sendFailed(const QString &message);
 	void sendRequested(const QString &text, const QStringList &localPaths);
 private:
+	struct ValidationRequest {
+		QString id;
+		QString path;
+		quint64 generation = 0;
+		quint64 sequence = 0;
+		std::shared_ptr< std::atomic_bool > cancelled;
+	};
+	struct ValidationResult {
+		QString canonicalPath;
+		QString fileName;
+		QString thumbnailUrl;
+		bool sourceExists = false;
+	};
+	static constexpr int MaxAttachmentCount = 16;
+	static constexpr int MaxValidationWorkers = 2;
+	void queueValidation(const QString &id, const QString &path, quint64 sequence);
+	void pumpValidationQueue();
+	void finishValidation(const ValidationRequest &request, const ValidationResult &result);
+	void forgetAttachment(const QString &id);
+	void forgetAllAttachments();
 	void updateAutocomplete();
 	std::shared_ptr< QmlImagePipeline > m_pipeline;
+	std::unique_ptr< QThreadPool > m_validationPool;
 	DraftAttachmentModel m_attachments;
+	QQueue< ValidationRequest > m_validationQueue;
+	QHash< QString, quint64 > m_validationGenerations;
+	QHash< QString, std::shared_ptr< std::atomic_bool > > m_validationCancellations;
+	QHash< QString, quint64 > m_attachmentSequences;
+	QHash< QString, QString > m_canonicalPaths;
+	quint64 m_nextValidationGeneration = 0;
+	quint64 m_nextAttachmentSequence = 0;
+	int m_activeValidations = 0;
 	QString m_text;
 	bool m_canSend = false;
 	bool m_sending = false;

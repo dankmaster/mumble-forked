@@ -8,10 +8,14 @@
 #include "QmlClientModels.h"
 #include "QmlPerformanceMonitor.h"
 #include "QmlImageProvider.h"
+#include "QmlMediaProfileFactory.h"
 #include "QmlThemeController.h"
 #include "QmlWindowStateController.h"
 #include "ScreenShareVideoItem.h"
 #include "Global.h"
+#ifdef USE_MANUAL_PLUGIN
+#	include "ManualPluginController.h"
+#endif
 
 #include <QtCore/QDir>
 #include <QtCore/QEvent>
@@ -19,6 +23,7 @@
 #include <QtCore/QUrl>
 #include <QtGui/QImage>
 #include <QtGui/QGuiApplication>
+#include <QtQml/QQmlComponent>
 #include <QtQml/QQmlApplicationEngine>
 #include <QtQml/QQmlContext>
 #include <QtQuick/QQuickWindow>
@@ -38,13 +43,18 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_actionModel(std::make_unique< ActionModel >(actionRegistry, this)),
 	  m_dialogController(std::make_unique< DialogStateController >(this)),
 	  m_mediaSession(std::make_unique< MediaSessionBackend >(this)),
+	  m_mediaProfileFactory(std::make_unique< QmlMediaProfileFactory >(m_mediaSession.get(), this)),
 	  m_selectionState(std::make_unique< QmlSelectionState >(this)),
 	  m_performanceMonitor(std::make_unique< QmlPerformanceMonitor >(this)),
 	  m_imagePipeline(std::make_shared< QmlImagePipeline >()),
 	  m_composerController(std::make_unique< ComposerController >(m_imagePipeline, this)),
 	  m_themeController(std::make_unique< QmlThemeController >(this)),
-	  m_windowStateController(std::make_unique< QmlWindowStateController >(this)) {
+	  m_windowStateController(std::make_unique< QmlWindowStateController >(this)),
+	  m_pttWindowStateController(std::make_unique< QmlWindowStateController >(this)) {
 	m_selectionState->bindModels(m_roomModel.get(), m_participantModel.get());
+#ifdef USE_MANUAL_PLUGIN
+	m_manualPluginController = std::make_unique< ManualPluginController >(this);
+#endif
 	connect(m_activeScopeController.get(), &ActiveScopeController::canSendChanged, this, [this]() {
 		m_composerController->setCanSend(m_activeScopeController->canSend());
 	});
@@ -53,7 +63,12 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 QmlShellHost::~QmlShellHost() {
 	releasePttForSafety(PttSafetyReason::HostDestroyed);
 	m_windowStateController->flush();
+	m_pttWindowStateController->flush();
 	destroyScreenShareViews();
+	delete m_pttToolWindow.data();
+#ifdef USE_MANUAL_PLUGIN
+	delete m_manualPluginWindow.data();
+#endif
 	m_engine.reset();
 	m_window = nullptr;
 }
@@ -82,6 +97,7 @@ bool QmlShellHost::start(QString *error) {
 						  static_cast< QObject * >(m_actionModel.get()),
 						  static_cast< QObject * >(m_dialogController.get()),
 						  static_cast< QObject * >(m_mediaSession.get()),
+						  static_cast< QObject * >(m_mediaProfileFactory.get()),
 						  static_cast< QObject * >(m_selectionState.get()),
 						  static_cast< QObject * >(m_performanceMonitor.get()),
 						  static_cast< QObject * >(m_themeController.get()) }) {
@@ -99,10 +115,15 @@ bool QmlShellHost::start(QString *error) {
 	context->setContextProperty(QStringLiteral("actionModel"), m_actionModel.get());
 	context->setContextProperty(QStringLiteral("dialogState"), m_dialogController.get());
 	context->setContextProperty(QStringLiteral("mediaSession"), m_mediaSession.get());
+	context->setContextProperty(QStringLiteral("mediaProfiles"), m_mediaProfileFactory.get());
 	context->setContextProperty(QStringLiteral("selectionState"), m_selectionState.get());
 	context->setContextProperty(QStringLiteral("qmlPerformance"), m_performanceMonitor.get());
 	context->setContextProperty(QStringLiteral("clientActions"), m_actionRegistry);
 	context->setContextProperty(QStringLiteral("uiTheme"), m_themeController.get());
+#ifdef USE_MANUAL_PLUGIN
+	QQmlEngine::setObjectOwnership(m_manualPluginController.get(), QQmlEngine::CppOwnership);
+	context->setContextProperty(QStringLiteral("manualPlugin"), m_manualPluginController.get());
+#endif
 
 	const QUrl rootUrl(QStringLiteral("qrc:/qml-shell/Main.qml"));
 	m_engine->load(rootUrl);
@@ -121,7 +142,8 @@ bool QmlShellHost::start(QString *error) {
 		m_engine.reset();
 		return false;
 	}
-	m_windowStateController->attach(m_window, Global::get().s.qbaModernMainWindowGeometry);
+	m_windowStateController->attach(m_window, Global::get().s.qbaModernMainWindowGeometry,
+		m_window->minimumSize());
 	connect(m_windowStateController.get(), &QmlWindowStateController::encodedStateChanged, this,
 			[](const QByteArray &state) { Global::get().s.qbaModernMainWindowGeometry = state; });
 	m_window->installEventFilter(this);
@@ -151,6 +173,14 @@ bool QmlShellHost::start(QString *error) {
 }
 
 bool QmlShellHost::eventFilter(QObject *watched, QEvent *event) {
+	if (watched == m_pttToolWindow && event) {
+		switch (event->type()) {
+			case QEvent::Close:
+			case QEvent::Hide:
+			case QEvent::WindowDeactivate: releasePttForSafety(PttSafetyReason::WindowDeactivated); break;
+			default: break;
+		}
+	}
 	if (watched == m_window && event && event->type() == QEvent::Close) {
 		releasePttForSafety(PttSafetyReason::WindowClosing);
 		emit closeRequested();
@@ -238,11 +268,88 @@ bool QmlShellHost::captureWindow(const QString &path, QString *error) const {
 	return true;
 }
 
-void QmlShellHost::showPttTool(const bool visible) {
-	if (!m_window || !m_engine) return;
-	if (!visible) releasePttForSafety(PttSafetyReason::WindowHidden);
-	m_window->setProperty("pttToolVisible", visible);
+bool QmlShellHost::ensurePttToolWindow() {
+	if (m_pttToolWindow) return true;
+	if (!m_window || !m_engine) return false;
+
+	QQmlComponent component(m_engine.get(), QUrl(QStringLiteral("qrc:/qml-shell/PttToolWindow.qml")));
+	if (component.isError()) {
+		qWarning("Unable to load the Qt Quick PTT tool: %s", qPrintable(component.errorString()));
+		return false;
+	}
+	QObject *created = component.create(m_engine->rootContext());
+	QQuickWindow *window = qobject_cast< QQuickWindow * >(created);
+	if (!window) {
+		qWarning("The Qt Quick PTT tool root object is not a QQuickWindow");
+		delete created;
+		return false;
+	}
+	QQmlEngine::setObjectOwnership(window, QQmlEngine::CppOwnership);
+	m_pttToolWindow = window;
+	window->setTransientParent(m_window);
+	window->installEventFilter(this);
+	m_pttWindowStateController->attach(window, Global::get().s.qbaPTTButtonWindowGeometry, QSize(240, 140));
+	connect(m_pttWindowStateController.get(), &QmlWindowStateController::encodedStateChanged, this,
+			[](const QByteArray &state) { Global::get().s.qbaPTTButtonWindowGeometry = state; });
+	connect(window, &QQuickWindow::sceneGraphError, this,
+			[this](QQuickWindow::SceneGraphError, const QString &) {
+				releasePttForSafety(PttSafetyReason::SceneGraphError);
+			});
+	connect(window, &QObject::destroyed, this, [this]() {
+		releasePttForSafety(PttSafetyReason::HostDestroyed);
+		m_pttToolWindow = nullptr;
+	});
+	return true;
 }
+
+void QmlShellHost::showPttTool(const bool visible) {
+	if (!visible) {
+		releasePttForSafety(PttSafetyReason::WindowHidden);
+		if (m_pttToolWindow) m_pttToolWindow->hide();
+		return;
+	}
+	if (!ensurePttToolWindow()) return;
+	m_pttToolWindow->show();
+	m_pttToolWindow->raise();
+	m_pttToolWindow->requestActivate();
+}
+
+#ifdef USE_MANUAL_PLUGIN
+ManualPluginController *QmlShellHost::manualPluginController() const {
+	return m_manualPluginController.get();
+}
+
+bool QmlShellHost::ensureManualPluginWindow() {
+	if (m_manualPluginWindow) return true;
+	if (!m_window || !m_engine || !m_manualPluginController) return false;
+
+	QQmlComponent component(m_engine.get(), QUrl(QStringLiteral("qrc:/qml-shell/ManualPluginWindow.qml")));
+	if (component.isError()) {
+		qWarning("Unable to load the Qt Quick Manual Plugin tool: %s", qPrintable(component.errorString()));
+		return false;
+	}
+	QObject *created = component.create(m_engine->rootContext());
+	QQuickWindow *window = qobject_cast< QQuickWindow * >(created);
+	if (!window) {
+		qWarning("The Qt Quick Manual Plugin tool root object is not a QQuickWindow");
+		delete created;
+		return false;
+	}
+	QQmlEngine::setObjectOwnership(window, QQmlEngine::CppOwnership);
+	m_manualPluginWindow = window;
+	window->setTransientParent(m_window);
+	connect(window, &QObject::destroyed, this, [this]() { m_manualPluginWindow = nullptr; });
+	return true;
+}
+
+void QmlShellHost::showManualPluginTool() {
+	if (!ensureManualPluginWindow()) return;
+	m_manualPluginController->refresh();
+	m_manualPluginWindow->show();
+	m_manualPluginWindow->raise();
+	m_manualPluginWindow->requestActivate();
+}
+#endif
 
 QObject *QmlShellHost::createScreenShareView(QObject *backend) {
 	if (!m_window || !backend) return nullptr;

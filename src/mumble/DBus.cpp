@@ -31,7 +31,8 @@ void MumbleDBus::openUrl(const QString &url, const QDBusMessage &msg) {
 }
 
 void MumbleDBus::getCurrentUrl(const QDBusMessage &msg) {
-	if (!Global::get().sh || !Global::get().sh->isRunning() || !Global::get().uiSession) {
+	const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot();
+	if (!serverHandler || !serverHandler->isRunning() || !Global::get().uiSession) {
 		QDBusConnection::sessionBus().send(msg.createErrorReply(
 			QLatin1String("net.sourceforge.mumble.Error.connection"), QLatin1String("Not connected")));
 		return;
@@ -40,7 +41,7 @@ void MumbleDBus::getCurrentUrl(const QDBusMessage &msg) {
 	unsigned short port;
 	QUrl u;
 
-	Global::get().sh->getConnectionInfo(host, port, user, pw);
+	serverHandler->getConnectionInfo(host, port, user, pw);
 	u.setScheme(QLatin1String("mumble"));
 	u.setHost(host);
 	u.setPort(port);
@@ -67,7 +68,8 @@ void MumbleDBus::getCurrentUrl(const QDBusMessage &msg) {
 }
 
 void MumbleDBus::getTalkingUsers(const QDBusMessage &msg) {
-	if (!Global::get().sh || !Global::get().sh->isRunning() || !Global::get().uiSession) {
+	const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot();
+	if (!serverHandler || !serverHandler->isRunning() || !Global::get().uiSession) {
 		QDBusConnection::sessionBus().send(msg.createErrorReply(
 			QLatin1String("net.sourceforge.mumble.Error.connection"), QLatin1String("Not connected")));
 		return;

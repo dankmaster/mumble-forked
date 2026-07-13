@@ -43,14 +43,16 @@
 	return;
 
 #define VERIFY_PLUGIN_ID(id)                              \
-	if (!Global::get().pluginManager->pluginExists(id)) { \
+	if (!Global::get().pluginManager                        \
+		|| !Global::get().pluginManager->pluginExists(id)) { \
 		EXIT_WITH(MUMBLE_EC_INVALID_PLUGIN_ID);           \
 	}
 
 // Right now there can only be one connection managed by the current ServerHandler
-#define VERIFY_CONNECTION(connection)                                             \
-	if (!Global::get().sh || Global::get().sh->getConnectionID() != connection) { \
-		EXIT_WITH(MUMBLE_EC_CONNECTION_NOT_FOUND);                                \
+#define VERIFY_CONNECTION(connection)                                                        \
+	const ServerHandlerPtr verifiedServerHandler = Global::get().serverHandlerSnapshot();      \
+	if (!verifiedServerHandler || verifiedServerHandler->getConnectionID() != connection) {    \
+		EXIT_WITH(MUMBLE_EC_CONNECTION_NOT_FOUND);                                           \
 	}
 
 // Right now whether or not a connection has finished synchronizing is indicated by Global::get().uiSession. If it is
@@ -214,8 +216,9 @@ void MumbleAPI::getActiveServerConnection_v_1_0_x(mumble_plugin_id_t callerID, m
 
 	VERIFY_PLUGIN_ID(callerID);
 
-	if (Global::get().sh) {
-		*connection = Global::get().sh->getConnectionID();
+	const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot();
+	if (serverHandler) {
+		*connection = serverHandler->getConnectionID();
 
 		EXIT_WITH(MUMBLE_STATUS_OK);
 	} else {
@@ -723,7 +726,7 @@ void MumbleAPI::getServerHash_v_1_0_x(mumble_plugin_id_t callerID, mumble_connec
 	ENSURE_CONNECTION_SYNCHRONIZED(connection);
 
 	// Use hexadecimal representation in order for the String to be properly printable and for it to be C-encodable
-	QByteArray hashHex = Global::get().sh->qbaDigest.toHex();
+	QByteArray hashHex = verifiedServerHandler->serverDigest().toHex();
 	QString strHash    = QString::fromLatin1(hashHex);
 
 	// +1 for NULL terminator
@@ -820,6 +823,9 @@ void MumbleAPI::getUserComment_v_1_0_x(mumble_plugin_id_t callerID, mumble_conne
 	}
 
 	if (user->qsComment.isEmpty() && !user->qbaCommentHash.isEmpty()) {
+		if (!Global::get().db) {
+			EXIT_WITH(MUMBLE_EC_INTERNAL_ERROR);
+		}
 		user->qsComment = QString::fromUtf8(Global::get().db->blob(user->qbaCommentHash));
 
 		if (user->qsComment.isEmpty()) {
@@ -872,6 +878,9 @@ void MumbleAPI::getChannelDescription_v_1_0_x(mumble_plugin_id_t callerID, mumbl
 	}
 
 	if (channel->qsDesc.isEmpty() && !channel->qbaDescHash.isEmpty()) {
+		if (!Global::get().db) {
+			EXIT_WITH(MUMBLE_EC_INTERNAL_ERROR);
+		}
 		channel->qsDesc = QString::fromUtf8(Global::get().db->blob(channel->qbaDescHash));
 
 		if (channel->qsDesc.isEmpty()) {
@@ -936,7 +945,7 @@ void MumbleAPI::requestUserMove_v_1_0_x(mumble_plugin_id_t callerID, mumble_conn
 			passwordList << QString::fromUtf8(password);
 		}
 
-		Global::get().sh->joinChannel(user->uiSession, static_cast< unsigned int >(channel->iId), passwordList);
+		verifiedServerHandler->joinChannel(user->uiSession, static_cast< unsigned int >(channel->iId), passwordList);
 	}
 
 	EXIT_WITH(MUMBLE_STATUS_OK);
@@ -1566,15 +1575,15 @@ void MumbleAPI::sendData_v_1_0_x(mumble_plugin_id_t callerID, mumble_connection_
 	mpdt.set_data(data, dataLength);
 	mpdt.set_dataid(dataID);
 
-	if (Global::get().sh) {
-		if (Global::get().sh->m_version < Version::fromComponents(1, 4, 0)) {
+	if (verifiedServerHandler) {
+		if (verifiedServerHandler->protocolVersion() < Version::fromComponents(1, 4, 0)) {
 			// The sendMessage call relies on the server relaying the message to the respective receiver. This
 			// functionality was added to the server protocol in version 1.4.0, so an older server will not know what to
 			// do with the received message.
 			EXIT_WITH(MUMBLE_EC_OPERATION_UNSUPPORTED_BY_SERVER);
 		}
 
-		Global::get().sh->sendMessage(mpdt);
+		verifiedServerHandler->sendMessage(mpdt);
 
 		EXIT_WITH(MUMBLE_STATUS_OK);
 	} else {
@@ -1598,13 +1607,14 @@ void MumbleAPI::log_v_1_0_x(mumble_plugin_id_t callerID, const char *message,
 	}
 
 	// We verify the plugin manually as we need a handle to it later
-	const_plugin_ptr_t plugin = Global::get().pluginManager->getPlugin(callerID);
+	const std::optional< PluginDescriptor > plugin = Global::get().pluginManager
+		? Global::get().pluginManager->pluginDescriptor(callerID, true) : std::nullopt;
 	if (!plugin) {
 		EXIT_WITH(MUMBLE_EC_INVALID_PLUGIN_ID);
 	}
 
 	QString msg = QString::fromLatin1("<b>%1:</b> %2")
-					  .arg(plugin->getName().toHtmlEscaped())
+					  .arg(plugin->name.toHtmlEscaped())
 					  .arg(QString::fromUtf8(message).toHtmlEscaped());
 
 	// Use static method that handles the case in which the Log object doesn't exist yet

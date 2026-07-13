@@ -11,6 +11,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <algorithm>
 
 #define MUMBLE_ALLOW_DEPRECATED_LEGACY_PLUGIN_API
 #include "../../plugins/mumble_legacy_plugin.h"
@@ -34,6 +35,19 @@ namespace {
 	QMutex stateMutex;
 	ManualState state;
 	QHash< unsigned int, Position2D > speakerPositions;
+
+	QVariantList speakerStateLocked() {
+		QList< unsigned int > sessions = speakerPositions.keys();
+		std::sort(sessions.begin(), sessions.end());
+		QVariantList speakers;
+		speakers.reserve(sessions.size());
+		for (const unsigned int session : sessions) {
+			const Position2D position = speakerPositions.value(session);
+			speakers.push_back(QVariantMap { { QStringLiteral("session"), session },
+				{ QStringLiteral("x"), position.x }, { QStringLiteral("z"), position.y } });
+		}
+		return speakers;
+	}
 
 	void applyOrientation(ManualState &target, const int azimuth, const int elevation) {
 		target.azimuth   = azimuth;
@@ -106,11 +120,7 @@ MumblePluginQt *ManualPlugin_getMumblePluginQt() {
 
 QVariantMap ManualPlugin_modernState() {
 	QMutexLocker lock(&stateMutex);
-	QVariantList speakers;
-	for (auto it = speakerPositions.constBegin(); it != speakerPositions.constEnd(); ++it) {
-		speakers.push_back(QVariantMap { { QStringLiteral("session"), it.key() },
-			{ QStringLiteral("x"), it.value().x }, { QStringLiteral("z"), it.value().y } });
-	}
+	const QVariantList speakers = speakerStateLocked();
 	return QVariantMap { { QStringLiteral("manual.linked"), state.linkable },
 		{ QStringLiteral("manual.active"), state.active },
 		{ QStringLiteral("manual.x"), state.avatarPosition[0] },
@@ -122,6 +132,11 @@ QVariantMap ManualPlugin_modernState() {
 		{ QStringLiteral("manual.identity"), QString::fromStdWString(state.identity) },
 		{ QStringLiteral("manual.staleSeconds"), Global::get().s.manualPlugin_silentUserDisplaytime },
 		{ QStringLiteral("manual.speakers"), speakers } };
+}
+
+QVariantList ManualPlugin_modernSpeakers() {
+	QMutexLocker lock(&stateMutex);
+	return speakerStateLocked();
 }
 
 void ManualPlugin_applyModernState(const QVariantMap &values) {
@@ -142,6 +157,7 @@ void ManualPlugin_applyModernState(const QVariantMap &values) {
 void ManualPlugin_resetModernState() {
 	QMutexLocker lock(&stateMutex);
 	state = ManualState();
+	Global::get().s.manualPlugin_silentUserDisplaytime = 1;
 }
 
 void ManualPlugin_setSpeakerPositions(const QHash< unsigned int, Position2D > &positions) {

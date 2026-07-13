@@ -6,10 +6,10 @@ add_executable(TestQmlClientModels
 
 set_target_properties(TestQmlClientModels PROPERTIES AUTOMOC ON)
 
-find_pkg(Qt6 COMPONENTS Gui REQUIRED)
+find_pkg(Qt6 COMPONENTS Concurrent Gui REQUIRED)
 
 target_include_directories(TestQmlClientModels PRIVATE ../../mumble)
-target_link_libraries(TestQmlClientModels PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+target_link_libraries(TestQmlClientModels PRIVATE Qt6::Concurrent Qt6::Core Qt6::Gui Qt6::Test)
 
 add_test(NAME TestQmlClientModels COMMAND $<TARGET_FILE:TestQmlClientModels>)
 

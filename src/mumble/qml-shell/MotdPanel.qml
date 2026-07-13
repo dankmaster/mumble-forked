@@ -45,6 +45,11 @@ Rectangle {
             actionRequested(normalized, payload || {})
     }
 
+    function safeExternalUrl(value) {
+        const url = String(value === undefined || value === null ? "" : value).trim()
+        return /^(https?:\/\/|mailto:|mumble:\/\/)/i.test(url) ? url : ""
+    }
+
     function focusPrimaryAction() {
         if (actionRepeater.count > 0) {
             const button = actionRepeater.itemAt(0)
@@ -119,6 +124,7 @@ Rectangle {
             spacing: 8
 
             Label {
+				textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: root.dismissed ? qsTr("Welcome message hidden") : qsTr("Server message of the day")
                 color: Theme.textStrong
@@ -127,6 +133,7 @@ Rectangle {
             }
 
             Label {
+				textFormat: Text.PlainText
                 visible: !!root.session && !!root.session.motdChanged
                 text: qsTr("New")
                 color: Theme.accent
@@ -158,21 +165,43 @@ Rectangle {
             ScrollBar.vertical.policy: body.implicitHeight > root.maximumBodyHeight
                                          ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
 
-            Text {
+            Loader {
                 id: body
                 width: parent.width
-                text: root.expanded
-                      ? (root.session ? String(root.session.motdHtml || "") : "")
-                      : (root.session ? String(root.session.motdSummary || "") : "")
-                textFormat: root.expanded ? Text.RichText : Text.PlainText
-                color: Theme.textMain
-                wrapMode: Text.Wrap
-                maximumLineCount: root.expanded ? 2147483647 : 4
-                elide: root.expanded ? Text.ElideNone : Text.ElideRight
-                onLinkActivated: function(link) { root.linkRequested(link) }
-                Accessible.role: Accessible.StaticText
-                Accessible.name: root.session ? String(root.session.motdSummary || qsTr("Server message")) : ""
+                sourceComponent: root.expanded ? expandedBody : summaryBody
             }
+
+			Component {
+				id: expandedBody
+				RichMessageBody {
+					objectName: "motdStructuredBody"
+					width: body.width
+					segments: root.session && root.session.motdSegments
+						? root.session.motdSegments : []
+					textColor: Theme.textMain
+					onLinkRequested: function(link) {
+						const safeLink = root.safeExternalUrl(link)
+						if (safeLink.length > 0)
+							root.linkRequested(safeLink)
+					}
+				}
+			}
+
+			Component {
+				id: summaryBody
+				Label {
+					textFormat: Text.PlainText
+					objectName: "motdSummaryBody"
+					width: body.width
+					text: root.session ? String(root.session.motdSummary || "") : ""
+					color: Theme.textMain
+					wrapMode: Text.Wrap
+					maximumLineCount: 4
+					elide: Text.ElideRight
+					Accessible.role: Accessible.StaticText
+					Accessible.name: text.length > 0 ? text : qsTr("Server message")
+				}
+			}
         }
     }
 }

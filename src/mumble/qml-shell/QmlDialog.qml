@@ -9,6 +9,10 @@ Dialog {
 	readonly property int densityInset: Theme.spacing + 6
 	readonly property int sectionPadding: Theme.spacing + 2
 	readonly property bool compactDialogLayout: width < 640
+	function safeRenderImageSource(value) {
+		const source = String(value === undefined || value === null ? "" : value).trim()
+		return /^(image:\/\/mumble\/|qrc:\/)/i.test(source) ? source : ""
+	}
     parent: Overlay.overlay
     visible: dialogState.open
 	modal: true
@@ -20,6 +24,10 @@ Dialog {
     y: parent ? Math.round((parent.height - height) / 2) : 0
     padding: 0
     closePolicy: Popup.NoAutoClose
+	Shortcut {
+		sequence: StandardKey.Cancel
+		onActivated: dialogState.requestClose()
+	}
 
     background: Rectangle {
         color: Theme.shellBackground
@@ -46,8 +54,9 @@ Dialog {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 3
-                    Label { text: dialogState.title; color: Theme.textStrong; font.pixelSize: 19; font.bold: true }
+                    Label { textFormat: Text.PlainText; text: dialogState.title; color: Theme.textStrong; font.pixelSize: 19; font.bold: true }
                     Label {
+						textFormat: Text.PlainText
                         Layout.fillWidth: true
                         text: dialogState.subtitle
                         visible: text.length > 0
@@ -143,21 +152,43 @@ Dialog {
 					}
                     Loader {
                         id: screenShareLoader
+						objectName: "screenShareEditorLoader"
                         width: parent.width - (dialog.densityInset * 2)
                         x: dialog.densityInset
                         active: dialogState.kind === "screenShare"
                         visible: active
                         sourceComponent: screenShareEditorComponent
-                        onLoaded: item.shareState = dialogState.state.screenShare || ({})
                     }
+					Binding {
+						target: screenShareLoader.item
+						property: "shareState"
+						value: dialogState.state.screenShare || ({})
+						when: screenShareLoader.status === Loader.Ready && screenShareLoader.item !== null
+						restoreMode: Binding.RestoreNone
+					}
+					Connections {
+						target: screenShareLoader.item
+						enabled: screenShareLoader.status === Loader.Ready && screenShareLoader.item !== null
+						function onThumbnailRequested(sourceId) {
+							dialogState.invokeAction("screenShare.thumbnail", { "sourceId": sourceId })
+						}
+					}
                     Loader {
+						id: stonksLoader
+						objectName: "stonksEditorLoader"
                         width: parent.width - (dialog.densityInset * 2)
                         x: dialog.densityInset
                         active: dialogState.kind === "stonks"
                         visible: active
                         sourceComponent: stonksEditorComponent
-                        onLoaded: item.stonks = dialogState.state.stonks || ({})
                     }
+					Binding {
+						target: stonksLoader.item
+						property: "stonks"
+						value: dialogState.state.stonks || ({})
+						when: stonksLoader.status === Loader.Ready && stonksLoader.item !== null
+						restoreMode: Binding.RestoreNone
+					}
                     Repeater {
                         visible: dialogState.kind !== "screenShare" && dialogState.kind !== "stonks"
                         model: dialogState.sections
@@ -177,6 +208,7 @@ Dialog {
                                 anchors.margins: dialog.sectionPadding
                                 spacing: Math.max(6, Theme.spacing - 2)
                                 Label {
+									textFormat: Text.PlainText
                                     width: parent.width
                                     text: modelData.title || ""
                                     visible: text.length > 0
@@ -226,6 +258,7 @@ Dialog {
                                             return textField
                                         }
                                         Label {
+											textFormat: Text.PlainText
                                             id: fieldErrorLabel
                                             objectName: "dialogFieldError_" + fieldLoader.field.id
                                             anchors.left: parent.left
@@ -291,6 +324,7 @@ Dialog {
     Component {
         id: noteField
         Label {
+			textFormat: Text.PlainText
             property var field
             width: parent ? parent.width : 0
             text: field.text || field.label || ""
@@ -304,8 +338,8 @@ Dialog {
             id: readonlyRoot
             property var field
             width: parent ? parent.width : 0
-            Label { text: readonlyRoot.field.label || ""; visible: text.length > 0; color: Theme.textMuted; font.pixelSize: 10 }
-            Label { Layout.fillWidth: true; text: String(readonlyRoot.field.value ?? ""); color: Theme.textMain; wrapMode: Text.Wrap }
+            Label { textFormat: Text.PlainText; text: readonlyRoot.field.label || ""; visible: text.length > 0; color: Theme.textMuted; font.pixelSize: 10 }
+            Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: String(readonlyRoot.field.value ?? ""); color: Theme.textMain; wrapMode: Text.Wrap }
         }
     }
     Component {
@@ -317,6 +351,7 @@ Dialog {
             checked: !!field.value
             enabled: field.enabled === undefined || field.enabled
             contentItem: Label {
+				textFormat: Text.PlainText
                 text: parent.text
                 color: parent.enabled ? Theme.textMain : Theme.textMuted
                 leftPadding: parent.indicator.width + parent.spacing
@@ -338,7 +373,7 @@ Dialog {
             }
             onFieldChanged: syncCurrentIndex()
             width: parent ? parent.width : 0
-            Label { text: selectRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 10 }
+            Label { textFormat: Text.PlainText; text: selectRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 10 }
             ComboBox {
                 id: selectControl
                 Layout.fillWidth: true
@@ -357,7 +392,7 @@ Dialog {
             id: numberRoot
             property var field
             width: parent ? parent.width : 0
-            Label { text: numberRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 10 }
+            Label { textFormat: Text.PlainText; text: numberRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 10 }
             SpinBox {
                 from: numberRoot.field.minimum ?? numberRoot.field.min ?? -100000
                 to: numberRoot.field.maximum ?? numberRoot.field.max ?? 100000
@@ -373,7 +408,7 @@ Dialog {
             id: textRoot
             property var field
             width: parent ? parent.width : 0
-            Label { text: textRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 10 }
+            Label { textFormat: Text.PlainText; text: textRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 10 }
             TextField {
                 Layout.fillWidth: true
                 text: String(textRoot.field.value ?? "")
@@ -389,7 +424,7 @@ Dialog {
             id: pathRoot
             property var field
             width: parent ? parent.width : 0
-            Label { text: pathRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 10 }
+            Label { textFormat: Text.PlainText; text: pathRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 10 }
             RowLayout {
                 TextField {
                     Layout.fillWidth: true
@@ -432,7 +467,7 @@ Dialog {
 					function onStateChanged() { manualPositionCanvas.requestPaint() }
 				}
 			}
-            Label { anchors.left: parent.left; anchors.top: parent.top; anchors.margins: 8; text: qsTr("Top view · X / Z"); color: Theme.textMuted; font.pixelSize: 9 }
+            Label { anchors.left: parent.left; anchors.top: parent.top; anchors.margins: 8; textFormat: Text.PlainText; text: qsTr("Top view · X / Z"); color: Theme.textMuted; font.pixelSize: 9 }
         }
     }
     Component {
@@ -443,12 +478,12 @@ Dialog {
             property var profile: field.value || ({})
             Rectangle {
                 Layout.preferredWidth: 56; Layout.preferredHeight: 56; radius: 28; color: Theme.strip; clip: true
-                Image { anchors.fill: parent; source: parent.parent.profile.avatarUrl || ""; asynchronous: true; cache: false; sourceSize: Qt.size(width * Screen.devicePixelRatio, height * Screen.devicePixelRatio); fillMode: Image.PreserveAspectCrop }
+                Image { anchors.fill: parent; source: dialog.safeRenderImageSource(parent.parent.profile.avatarUrl || ""); asynchronous: true; cache: false; sourceSize: Qt.size(width * Screen.devicePixelRatio, height * Screen.devicePixelRatio); fillMode: Image.PreserveAspectCrop }
             }
             ColumnLayout {
                 Layout.fillWidth: true
-                Label { text: parent.parent.profile.name || ""; color: Theme.textStrong; font.bold: true }
-                Label { Layout.fillWidth: true; text: parent.parent.profile.subtitle || ""; color: Theme.textMuted; elide: Text.ElideRight }
+                Label { textFormat: Text.PlainText; text: parent.parent.profile.name || ""; color: Theme.textStrong; font.bold: true }
+                Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: parent.parent.profile.subtitle || ""; color: Theme.textMuted; elide: Text.ElideRight }
             }
             ModernButton {
                 visible: (parent.profile.avatarActionId || "").length > 0
@@ -463,7 +498,7 @@ Dialog {
 			id: colorRoot
 			property var field: ({})
             width: parent ? parent.width : 0
-            Label { Layout.fillWidth: true; text: colorRoot.field.label || ""; color: Theme.textMain }
+            Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: colorRoot.field.label || ""; color: Theme.textMain }
 			Button {
 				objectName: "dialogColorButton_" + String(colorRoot.field.id || "")
 				Layout.preferredWidth: 38; Layout.preferredHeight: 28
@@ -479,7 +514,7 @@ Dialog {
 				}
 				onClicked: colorDialog.open()
             }
-            Label { text: String(colorRoot.field.value || ""); color: Theme.textMuted; font.pixelSize: 10 }
+            Label { textFormat: Text.PlainText; text: String(colorRoot.field.value || ""); color: Theme.textMuted; font.pixelSize: 10 }
             ColorDialog {
                 id: colorDialog
                 title: colorRoot.field.label || qsTr("Choose color")
@@ -493,7 +528,7 @@ Dialog {
         ColumnLayout {
             property var field
             width: parent ? parent.width : 0
-            Label { text: parent.field.label || ""; color: Theme.textStrong; font.bold: true; visible: text.length > 0 }
+            Label { textFormat: Text.PlainText; text: parent.field.label || ""; color: Theme.textStrong; font.bold: true; visible: text.length > 0 }
             Repeater {
                 model: parent.field.items || parent.field.value || []
                 delegate: Rectangle {
@@ -501,8 +536,8 @@ Dialog {
                     Layout.fillWidth: true; height: 46; radius: 6; color: Theme.strip
                     RowLayout { anchors.fill: parent; anchors.margins: 7
                       ColumnLayout { Layout.fillWidth: true
-                        Label { width: parent.width; text: modelData.label || modelData.title || modelData.name || ""; color: Theme.textMain; elide: Text.ElideRight }
-                        Label { width: parent.width; text: modelData.subtitle || modelData.description || ""; color: Theme.textMuted; font.pixelSize: 9; elide: Text.ElideRight }
+                        Label { width: parent.width; textFormat: Text.PlainText; text: modelData.label || modelData.title || modelData.name || ""; color: Theme.textMain; elide: Text.ElideRight }
+                        Label { width: parent.width; textFormat: Text.PlainText; text: modelData.subtitle || modelData.description || ""; color: Theme.textMuted; font.pixelSize: 9; elide: Text.ElideRight }
                       }
                       ModernButton {
                         visible: (modelData.primaryActionId || modelData.primaryAction || "").length > 0
@@ -525,7 +560,7 @@ Dialog {
                     }
                 }
             }
-            Label { text: parent.field.emptyText || ""; visible: (parent.field.items || []).length === 0; color: Theme.textMuted; wrapMode: Text.Wrap }
+            Label { textFormat: Text.PlainText; text: parent.field.emptyText || ""; visible: (parent.field.items || []).length === 0; color: Theme.textMuted; wrapMode: Text.Wrap }
         }
     }
     Component {
@@ -534,7 +569,7 @@ Dialog {
             id: textareaRoot
             property var field
             width: parent ? parent.width : 0
-            Label { text: textareaRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 10 }
+            Label { textFormat: Text.PlainText; text: textareaRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 10 }
             TextArea {
                 Layout.fillWidth: true
                 Layout.preferredHeight: Math.max(90, (textareaRoot.field.rows || 4) * 22)

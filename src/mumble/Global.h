@@ -9,6 +9,7 @@
 #include <QtCore/QByteArray>
 #include <QtCore/QDir>
 #include <QtCore/QList>
+#include <QtCore/QReadWriteLock>
 
 #include "ACL.h"
 #include "ChannelListenerManager.h"
@@ -48,6 +49,10 @@ public:
 	MainWindow *mw;
 	TrayIcon *trayIcon;
 	Settings s;
+	// The MainWindow owns publication of the active handler. Code that can run
+	// outside the main event-loop thread must obtain a retained snapshot through
+	// serverHandlerSnapshot() rather than copying this object directly. All
+	// publication goes through replace/take so those readers are synchronized.
 	std::shared_ptr< ServerHandler > sh;
 	std::shared_ptr< AudioInput > ai;
 	std::shared_ptr< AudioOutput > ao;
@@ -129,7 +134,12 @@ public:
 	Global(const QString &qsConfigPath = QString());
 	~Global() = default;
 
+	std::shared_ptr< ServerHandler > serverHandlerSnapshot() const;
+	void replaceServerHandler(std::shared_ptr< ServerHandler > handler);
+	std::shared_ptr< ServerHandler > takeServerHandler();
+
 private:
+	mutable QReadWriteLock m_serverHandlerLock;
 	void migrateDataDir(const QDir &toDir);
 };
 

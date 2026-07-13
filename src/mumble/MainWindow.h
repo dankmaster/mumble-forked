@@ -61,18 +61,19 @@ class PersistentChatController;
 class ModernDialogController;
 class QmlShellHost;
 class QmlSelectionState;
+class PluginCancellationGate;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
 class ModernUiAutomationServer;
 #	endif
 struct ModernConnectPingState;
 class QCloseEvent;
-class QHideEvent;
-class QShowEvent;
 class QObject;
 class QFrame;
 class QModelIndex;
 class QTimer;
 class QHostAddress;
+class QNetworkReply;
+class QNetworkRequest;
 class QSslCertificate;
 class QSslError;
 class QToolButton;
@@ -148,9 +149,6 @@ public:
 	QmlShellHost *qmlShellHost() const;
 	void selectModernUserSession(unsigned int session);
 	void selectModernVoiceChannel(unsigned int channelID);
-#ifdef USE_MANUAL_PLUGIN
-	void openModernManualPluginDialog(const QVariantMap &values = QVariantMap());
-#endif
 	UserModel *pmModel;
 	ClientActionList *qmUser;
 	ClientActionList *qmChannel;
@@ -169,7 +167,7 @@ public:
 	QAction *qaDeveloperConsole = nullptr, *qaHelpWhatsThis = nullptr, *qaHelpFeedback = nullptr;
 	QAction *qaHelpAbout = nullptr, *qaHelpAboutSpeex = nullptr, *qaHelpAboutQt = nullptr;
 	QAction *qaHelpVersionCheck = nullptr, *qaChannelSendMessage = nullptr, *qaChannelCopyURL = nullptr;
-	QAction *qaConfigMinimal = nullptr, *qaConfigHideFrame = nullptr, *qaConfigCert = nullptr;
+	QAction *qaConfigMinimal = nullptr, *qaConfigCert = nullptr;
 	QAction *qaUserRegister = nullptr, *qaUserFriendAdd = nullptr, *qaUserFriendRemove = nullptr;
 	QAction *qaUserFriendUpdate = nullptr, *qaServerUserList = nullptr, *qaServerTexture = nullptr;
 	QAction *qaServerTokens = nullptr, *qaServerTextureRemove = nullptr, *qaUserCommentReset = nullptr;
@@ -212,6 +210,20 @@ public:
 	MumbleProto::Reject_RejectType rtLast;
 	bool bRetryServer;
 	QString qsDesiredChannel;
+	struct PendingServerConnection {
+		QString host;
+		unsigned short port = 0;
+		QString username;
+		QString password;
+		QString serverName;
+		QString desiredChannel;
+	};
+	std::optional< PendingServerConnection > m_pendingServerConnection;
+	std::shared_ptr< ServerHandler > m_retiringServerHandler;
+	std::vector< std::shared_ptr< ServerHandler > > m_retiredServerHandlers;
+	bool m_serverHandlerFinalizeScheduled = false;
+	bool m_serverHandlerPruneScheduled    = false;
+	int m_serverHandlerPruneAttempts      = 0;
 
 	bool forceQuit;
 	/// Restart the client after shutdown
@@ -231,7 +243,6 @@ public:
 	void msgBox(QString msg);
 	void setOnTop(bool top);
 	void updateAudioToolTips();
-	void updateUserModel();
 	void focusNextMainWidget();
 	void refreshShellLayout();
 	void applyShellLayout();
@@ -295,6 +306,10 @@ public:
 		QString url;
 		QString mime;
 		QString kind;
+		QString imageProviderUrl;
+		bool imageProviderRequested = false;
+		bool imageProviderFinished  = false;
+		bool imageProviderAnimated  = false;
 	};
 
 	struct PersistentChatPreview {
@@ -308,6 +323,10 @@ public:
 		QString mediaAudioMime;
 		QString mediaMime;
 		QString mediaKind;
+		QString thumbnailProviderUrl;
+		QString thumbnailRequestSource;
+		QString mediaImageProviderUrl;
+		QString mediaImageProviderSource;
 		std::vector< PersistentChatPreviewMediaItem > mediaItems;
 		QVariantMap metadata;
 		QString openLabel;
@@ -320,6 +339,9 @@ public:
 		bool siteSnapshotFinished   = false;
 		bool remoteMediaRequested   = false;
 		bool remoteMediaFinished    = false;
+		bool mediaImageProviderRequested = false;
+		bool mediaImageProviderFinished  = false;
+		bool mediaImageProviderAnimated  = false;
 	};
 
 	struct PersistentChatAssetDownload {
@@ -380,9 +402,6 @@ public:
 
 	enum class ModernShellMessageBuildMode : unsigned char { Full, FastFirstPaint };
 
-	void loadState(bool minimalView);
-	void storeState(bool minimalView);
-
 	bool hasPersistentChatCapabilities() const;
 	PersistentChatTarget ephemeralChatTarget() const;
 	PersistentChatTarget currentPersistentChatTarget() const;
@@ -409,11 +428,15 @@ public:
 	void ensurePersistentChatPreview(const QString &previewKey);
 	void ensurePersistentChatPreviewAssetDownload(unsigned int assetID, const QString &previewKey);
 	void ensurePersistentChatPreviewSiteSnapshot(const QString &previewKey);
-	bool restorePersistentChatPreviewDiskCache(const QString &previewKey);
+	void restorePersistentChatPreviewDiskCache(const QString &previewKey);
+	bool refreshRestoredPersistentChatPreview(const QString &previewKey);
 	void storePersistentChatPreviewDiskCache(const QString &previewKey);
 	void handleChatEmbedAssistRequest(const MumbleProto::ChatEmbedAssistRequest &msg);
 	void requestChatEmbedAssistPage(quint64 leaseID, const QUrl &url, int redirectCount = 0);
 	void requestChatEmbedAssistImage(quint64 leaseID, const QUrl &url, int redirectCount = 0);
+	QNetworkReply *startChatEmbedAssistGet(const QNetworkRequest &request, quint64 leaseID);
+	void cancelChatEmbedAssistNetworkRequests(std::optional< quint64 > leaseID = std::nullopt,
+										 bool invalidateGeneration = false);
 	void finishChatEmbedAssist(quint64 leaseID, const QString &errorCode = QString());
 	void cancelChatEmbedAssistForState(const MumbleProto::ChatEmbedState &msg);
 	bool applyYahooFinanceQuotePreviewFallback(PersistentChatPreview &preview, const QUrl &url) const;
@@ -437,19 +460,30 @@ public:
 													   const QUrl &audioUrl = QUrl(),
 													   const QString &suggestedAudioMime = QString());
 	bool requestPersistentChatPreviewPosterImage(const QString &previewKey, const QUrl &posterUrl,
-												 const QString &suggestedMime = QString());
+												 const QString &suggestedMime = QString(), int redirectCount = 0);
 	bool applyPersistentChatRemotePlayableMedia(PersistentChatPreview &preview, const QUrl &mediaUrl,
 												const QString &suggestedMime = QString());
 	bool applyPersistentChatRemoteAudioMedia(PersistentChatPreview &preview, const QUrl &audioUrl,
 											 const QString &suggestedMime = QString());
 	void applyPersistentChatListingMediaItems(PersistentChatPreview &preview);
+	void ensurePersistentChatPreviewImageProviders(const QString &previewKey);
+	void requestPersistentChatPreviewImageProvider(const QString &previewKey, int mediaItemIndex,
+											 const QString &sourceIdentity, const QUrl &requestUrl,
+											 const QString &suggestedMime = QString(), int redirectCount = 0);
+	void registerPersistentChatPreviewDataImageProvider(const QString &previewKey, int mediaItemIndex,
+												 const QString &sourceIdentity, const QString &mime);
+	void completePersistentChatPreviewImageProvider(const QString &previewKey, int mediaItemIndex,
+												  const QString &sourceIdentity, const QString &providerUrl,
+												  bool animated);
+	QNetworkReply *startPersistentChatPreviewGet(const QNetworkRequest &request, const QString &previewKey);
+	QNetworkReply *startPersistentChatPreviewPost(const QNetworkRequest &request, const QByteArray &body,
+												 const QString &previewKey);
+	void cancelPersistentChatPreviewNetworkRequests(const QString &previewKey = QString());
+	void removePersistentChatPreview(const QString &previewKey);
 	void publishPersistentChatPreviewUpdate(const QString &previewKey);
 	int persistentChatPreviewContentWidth(int leftPadding) const;
 	QString persistentChatPreviewHtml(const QString &previewKey, int availableWidth) const;
-	void updatePersistentChatPreviewViewIfVisible(const QString &previewKey);
 	void setPersistentChatTargetUsesVoiceTree(bool useVoiceTree);
-	bool isServerNavigatorCompactHeight() const;
-	void updatePersistentChatChannelListHeight();
 	void rebuildPersistentChatChannelList();
 	void handlePersistentTextChannelSync(const MumbleProto::TextChannelSync &msg);
 	void updatePersistentChatScopeSelectorLabels();
@@ -482,7 +516,6 @@ public:
 	void editPersistentTextChannelACL(unsigned int textChannelID);
 	void setDefaultPersistentTextChannel();
 	void setDefaultPersistentTextChannel(unsigned int textChannelID);
-	void showPersistentTextChannelContextMenu(const QPoint &position);
 	void updatePersistentTextChannelControls();
 	void openImageDialog(const QImage &image);
 	void openModernImageViewerDialog(const QImage &image);
@@ -491,7 +524,6 @@ public:
 	QString registerPersistentChatInlineDataImageSource(const QString &source);
 	QUrl persistentChatInlineDataImageOpenUrl(const QString &token) const;
 	QUrl persistentChatInlineDataImageResourceUrl(const QString &token) const;
-	QImage persistentChatInlineDataImagePreviewForSource(const QString &source);
 	QString persistentChatInlineDataImageThumbnailSourceForToken(const QString &token, const QImage &previewImage);
 	QImage persistentChatInlineDataImageFromSource(const QString &source) const;
 	QImage persistentChatInlineDataImageFromUrl(const QUrl &url) const;
@@ -547,13 +579,16 @@ public:
 													  const ClientUser *directMessagePeer, int avatarSize,
 													  bool includeAvatar);
 	QVariantMap buildQmlListenerState(const ClientUser *user, const Channel *channel, int avatarSize,
-												   bool includeAvatar);
+											   bool includeAvatar);
+	std::optional< QVariantMap > buildCurrentQmlParticipantState(const ClientUser *user);
 	QVariantList buildQmlChannelParticipantStates(const Channel *channel, int avatarSize,
-															   bool includeAvatar);
+														   bool includeAvatar);
 	QVariantMap buildQmlRoomState();
+	QVariantList buildQmlScopeActions(const QString &scopeToken, const QString &kind);
 	void flushQmlRoomStateUpdates();
 	void publishQmlChatMessage(const MumbleProto::ChatMessage &message);
 	void publishPersistentChatInlineDataImageUpdate(const QString &token);
+	void publishPersistentChatInlineDataImageProviderUpdate(const QString &token);
 	void publishQmlActiveScopeState();
 	void scheduleQmlRoomStateUpdate();
 	void publishModernShellServerLogUpdate(const PersistentChatTarget &target);
@@ -588,7 +623,8 @@ public:
 	bool closeModernDirectMessage(unsigned int session);
 	bool markModernDirectMessageRead(unsigned int session);
 	void appendModernDirectMessage(unsigned int peerSession, const QString &messageHtml, bool outgoing);
-	bool appendModernPersistentDirectMessage(const MumbleProto::ChatMessage &message, bool markReadIfOpen);
+	bool appendModernPersistentDirectMessage(const MumbleProto::ChatMessage &message, bool markReadIfOpen,
+											 bool publishState = true);
 	bool mergeModernDirectMessageHistory(const MumbleProto::ChatHistoryResponse &response);
 	bool setModernDirectMessageMode(unsigned int session, const QString &mode);
 	void requestModernDirectMessageHistory(unsigned int session);
@@ -661,7 +697,6 @@ public:
 	bool writeModernConnectServerPing(const QHostAddress &host, unsigned short port,
 									  Version::full_t protocolVersion,
 									  const Mumble::Protocol::PingData &pingData);
-	void togglePreferredModernShellLayout();
 	enum class ModernShellMenuContext : unsigned char {
 		AppServer,
 		AppSelf,
@@ -765,18 +800,29 @@ protected:
 	QHash< unsigned int, unsigned int > m_userIdleSeconds;
 	std::vector< MumbleProto::ChatMessage > m_persistentChatMessages;
 	QHash< QString, PersistentChatPreview > m_persistentChatPreviews;
+	QHash< QNetworkReply *, QString > m_persistentChatPreviewNetworkReplies;
 	QSet< QString > m_persistentChatPreviewCacheWritesInFlight;
 	QSet< QString > m_persistentChatPreviewCacheWritesPending;
+	QSet< QString > m_persistentChatPreviewCacheReadsInFlight;
+	QSet< QString > m_persistentChatPreviewCacheReadsAttempted;
+	bool m_persistentChatPreviewCacheClearInFlight = false;
 	QHash< QString, MumbleProto::ChatEmbedRef > m_persistentChatEmbedPreviewRefs;
 	QHash< unsigned int, PersistentChatAssetDownload > m_persistentChatAssetDownloads;
 	QHash< quint64, PendingChatEmbedAssist > m_pendingChatEmbedAssists;
 	QHash< QString, quint64 > m_pendingChatEmbedAssistByKey;
+	QHash< QNetworkReply *, quint64 > m_chatEmbedAssistNetworkReplies;
+	quint64 m_chatEmbedAssistGeneration = 1;
 	QHash< QString, QString > m_persistentChatInlineDataImageSources;
 	QHash< QString, QImage > m_persistentChatInlineDataImagePreviewCache;
 	QHash< QString, QString > m_persistentChatInlineDataImageThumbnailSourceCache;
 	QHash< QString, QString > m_persistentChatInlineDataImageWarmupSources;
 	QHash< QString, QSet< QString > > m_persistentChatInlineDataImageWarmupMessageKeys;
+	QHash< QString, qint64 > m_persistentChatQueuedInlineDataImageWarmupCosts;
+	qint64 m_persistentChatQueuedInlineDataImageWarmupBytes = 0;
 	QHash< QString, quint64 > m_persistentChatActiveInlineDataImageWarmups;
+	QHash< QString, QString > m_persistentChatInlineDataImageProviderUrls;
+	QHash< QString, QSet< QString > > m_persistentChatInlineDataImageProviderMessageKeys;
+	QHash< QString, quint64 > m_persistentChatInlineDataImageProviderRequests;
 	QHash< QString, PendingFeedbackSubmission > m_pendingFeedbackSubmissions;
 	QSet< QString > m_persistentChatLiveMessageKeys;
 	QHash< QString, unsigned int > m_persistentChatLastReadByScope;
@@ -813,7 +859,18 @@ protected:
 	bool m_updateResumeTextChannelSyncObserved = false;
 	std::unique_ptr< QmlShellHost > m_qmlShellHost;
 	QHash< QString, PluginInstallService::PreparedPackage > m_pendingPluginInstalls;
-	QHash< QString, std::shared_ptr< std::atomic< bool > > > m_pluginInstallCancellation;
+	QHash< QString, std::shared_ptr< PluginCancellationGate > > m_pluginInstallCancellation;
+	struct PendingPluginLoadedTransition {
+		qulonglong pluginID = 0;
+		QString settingsKey;
+		QString pluginPath;
+		QString pluginName;
+		bool desiredLoaded      = false;
+		bool persistSettings    = false;
+		bool positionalEnabled  = false;
+		bool showSuccessToast   = false;
+	};
+	QHash< QString, PendingPluginLoadedTransition > m_pendingPluginLoadedTransitions;
 	std::unique_ptr< ModernDialogController > m_modernDialogController;
 	QStringList m_modernStartupDialogQueue;
 #	if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION)
@@ -822,6 +879,17 @@ protected:
 	QVariantMap m_stonksState;
 	QVariantMap m_modernConnectionStateProbe;
 	QVariantMap m_modernScreenShareStateProbe;
+	struct PendingScreenShareThumbnailJob {
+		quint64 generation = 0;
+		QString sourceID;
+		std::shared_ptr< std::atomic< bool > > cancellation;
+	};
+	quint64 m_screenSharePickerGeneration = 0;
+	quint64 m_nextScreenShareThumbnailJobID = 0;
+	std::shared_ptr< std::atomic< bool > > m_screenShareDiscoveryCancellation;
+	QHash< quint64, PendingScreenShareThumbnailJob > m_pendingScreenShareThumbnailJobs;
+	QHash< QString, quint64 > m_pendingScreenShareThumbnailJobBySource;
+	bool m_screenSharePickerShuttingDown = false;
 	QVariantList m_modernRichPreviewProbeMessages;
 	QVariantList m_modernMessageDeliveryProbeMessages;
 	QString m_stonksSelectedPeriod;
@@ -873,6 +941,11 @@ protected:
 	void initializeBaseActions();
 	void connectToServer(const QString &host, unsigned short port, const QString &username, const QString &password,
 						 const QString &serverName, const QString &desiredChannel = QString());
+	void beginServerHandlerRecreation();
+	void scheduleServerHandlerRecreation(int delayMs = 0);
+	void finishServerHandlerRecreation();
+	void installPendingServerConnection();
+	void pruneRetiredServerHandlers();
 	void publishModernDialogState(const QVariantMap &state);
 	void openModernConnectDialog();
 	void openModernSettingsDialog(const QString &pageName = QString());
@@ -963,8 +1036,12 @@ protected:
 	bool handleModernGenericDialogAction(const QString &dialogID, const QString &actionID,
 										 const QVariantMap &fieldValues, const QVariantMap &payload);
 	void beginAsyncPluginInstall(const QString &path);
+	bool cancelPendingPluginInstallConfirmation(const QString &operationID);
 	void commitAsyncPluginInstall(const QString &operationID, PluginInstallService::PreparedPackage package,
 								 bool allowOverwrite);
+	void reconcileAsyncPluginLoadedTransition(const QString &operationID, qulonglong pluginID, bool success,
+										   const QString &message);
+	void refreshOpenModernPluginSettings();
 	bool handleModernFeedbackDialogAction(const QString &dialogID, const QString &actionID,
 										  const QVariantMap &fieldValues);
 	bool tryModernAutoConnectLastServer();
@@ -984,10 +1061,6 @@ protected:
 	void updateWindowTitle();
 	/// updateToolbar updates the state of the toolbar depending on the current
 	/// window layout setting.
-	/// If the window layout setting is 'custom', the toolbar is made movable. If the
-	/// window layout is not 'custom', the toolbar is locked in place at the top of
-	/// the MainWindow.
-	void updateToolbar();
 	void updateFavoriteButton();
 	void openFeedbackDialog();
 	void handleFeedbackReportState(const MumbleProto::FeedbackReportState &msg);
@@ -997,8 +1070,6 @@ protected:
 	void setupView(bool toggle_minimize = true);
 	bool eventFilter(QObject *watched, QEvent *event) Q_DECL_OVERRIDE;
 	void closeEvent(QCloseEvent *e);
-	void hideEvent(QHideEvent *e);
-	void showEvent(QShowEvent *e);
 
 
 	bool handleSpecialContextMenu(const QUrl &url, const QPoint &pos_, bool focus = false);
@@ -1010,18 +1081,16 @@ protected:
 
 public slots:
 	void appendModernServerLogEntry(const QString &html);
-	void on_qmServer_aboutToShow();
+	void refreshServerActions();
 	void on_qaServerConnect_triggered(bool autoconnect = false);
 	void on_qaServerDisconnect_triggered();
 	void on_qaServerBanList_triggered();
 	void on_qaServerUserList_triggered();
 	void on_qaServerInformation_triggered();
-	void on_qaServerSettings_triggered();
-	void on_qaCreateTextRoom_triggered();
 	void on_qaServerTexture_triggered();
 	void on_qaServerTextureRemove_triggered();
 	void on_qaServerTokens_triggered();
-	void on_qmSelf_aboutToShow();
+	void refreshSelfActions();
 	void on_qaSelfComment_triggered();
 	void on_qaSelfRegister_triggered();
 	void qmUser_aboutToShow();
@@ -1039,7 +1108,6 @@ public slots:
 	void on_qaUserLocalIgnoreTTS_triggered();
 	void on_qaUserLocalMute_triggered();
 	void triggerUserRemoteSpeechCleanup();
-	void on_qaUserGrantChatHistory_triggered();
 	void on_qaUserLocalNickname_triggered();
 	void on_qaUserTextMessage_triggered();
 	void on_qaUserRegister_triggered();
@@ -1071,7 +1139,10 @@ public slots:
 	QVariantMap buildModernScreenShareState(Channel *channel);
 	QVariantMap buildModernScreenShareDialogDto(Channel *channel);
 	bool handleModernScreenShareDialogAction(const QString &actionID, const QVariantMap &payload);
-	QString screenShareSourceThumbnail(const QString &sourceId);
+	void beginModernScreenShareDiscovery(quint64 generation);
+	void requestModernScreenShareThumbnail(const QString &sourceId, quint64 generation);
+	void finishModernScreenShareThumbnail(quint64 jobID, const QImage &image);
+	void cancelModernScreenSharePickerJobs();
 	bool openScreenShareWindowOrStatus(const QString &streamID);
 	void on_qaAudioReset_triggered();
 	void on_qaAudioMute_triggered();
@@ -1081,8 +1152,7 @@ public slots:
 	void on_qaAudioUnlink_triggered();
 	void on_qaAudioStats_triggered();
 	void on_qaConfigDialog_triggered();
-	void on_qaConfigHideFrame_triggered();
-	void on_qmConfig_aboutToShow();
+	void refreshConfigActions();
 	void on_qaConfigMinimal_triggered();
 	void on_qaConfigCert_triggered();
 	void on_qaAudioWizard_triggered();
@@ -1147,7 +1217,6 @@ public slots:
 	void context_triggered();
 	void updateTarget();
 	void updateMenuPermissions();
-	void on_muteCuePopup_triggered();
 	void showMuteCuePopup();
 	/// Handles state changes like talking mode changes and mute/unmute
 	/// or priority speaker flag changes for the gui user

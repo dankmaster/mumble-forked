@@ -122,6 +122,8 @@ void TestUserModelNavigator::exposesUserFallbackAndTalkState() {
 	QCOMPARE(model->data(userIndex, UserModel::NavigatorTalkStateRole).toInt(),
 			 static_cast< int >(Settings::Talking));
 	QVERIFY(model->data(userIndex, UserModel::NavigatorCurrentLocationRole).toBool());
+	QVERIFY(!model->data(userIndex, Qt::DecorationRole).isValid());
+	QVERIFY(!model->data(userIndex, Qt::WhatsThisRole).isValid());
 }
 
 void TestUserModelNavigator::exposesFriendAndAuthenticatedIndicators() {
@@ -137,12 +139,13 @@ void TestUserModelNavigator::exposesFriendAndAuthenticatedIndicators() {
 	Global::get().uiSession  = self->uiSession;
 
 	const QModelIndex userIndex = model->index(friendUser);
-	const QList< QVariant > statusIcons =
-		model->data(userIndex, UserModel::NavigatorStatusIconsRole).toList();
+	const QStringList statusIndicators =
+		model->data(userIndex, UserModel::NavigatorStatusIndicatorsRole).toStringList();
 
 	QCOMPARE(model->data(userIndex, UserModel::NavigatorTitleRole).toString(),
 			 QStringLiteral("Alice Example (Favorite Alice)"));
-	QCOMPARE(statusIcons.size(), 2);
+	QCOMPARE(statusIndicators, QStringList({ QStringLiteral("authenticated"), QStringLiteral("friend") }));
+	QCOMPARE(UserModel::NavigatorStatusIconsRole, UserModel::NavigatorStatusIndicatorsRole);
 }
 
 void TestUserModelNavigator::exposesLinkedChannelsAndListenerKind() {

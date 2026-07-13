@@ -3,6 +3,18 @@
         <file alias="rec.svg">../../icons/rec.svg</file>
         <file alias="mumble.svg">../../icons/mumble.svg</file>
         <file alias="mumble.icns">../../icons/mumble.icns</file>
+        <!-- Native tray/status surfaces keep their own small, frontend-neutral icon set. -->
+        <file alias="native/deafened_self.svg">../../icons/native/deafened_self.svg</file>
+        <file alias="native/deafened_server.svg">../../icons/native/deafened_server.svg</file>
+        <file alias="native/information.svg">../../icons/native/information.svg</file>
+        <file alias="native/muted_pushtomute.svg">../../icons/native/muted_pushtomute.svg</file>
+        <file alias="native/muted_self.svg">../../icons/native/muted_self.svg</file>
+        <file alias="native/muted_server.svg">../../icons/native/muted_server.svg</file>
+        <file alias="native/muted_suppressed.svg">../../icons/native/muted_suppressed.svg</file>
+        <file alias="native/talking_off.svg">../../icons/native/talking_off.svg</file>
+        <file alias="native/talking_on.svg">../../icons/native/talking_on.svg</file>
+        <file alias="native/talking_shout.svg">../../icons/native/talking_shout.svg</file>
+        <file alias="native/talking_whisper.svg">../../icons/native/talking_whisper.svg</file>
         <file alias="wb_male.oga">../../samples/wb_male.oga</file>
         <file alias="on.ogg">../../samples/on.ogg</file>
         <file alias="off.ogg">../../samples/off.ogg</file>

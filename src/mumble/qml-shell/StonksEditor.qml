@@ -11,7 +11,7 @@ ColumnLayout {
 
     RowLayout {
         Layout.fillWidth: true
-        Label { Layout.fillWidth: true; text: stonks.error || stonks.status || stonks.leaderboardDescription || qsTr("Portfolio overview"); color: stonks.error ? "#f87171" : Theme.textMuted; wrapMode: Text.Wrap }
+        Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: stonks.error || stonks.status || stonks.leaderboardDescription || qsTr("Portfolio overview"); color: stonks.error ? "#f87171" : Theme.textMuted; wrapMode: Text.Wrap }
         ModernButton { visible: !stonks.registered; text: qsTr("Register"); onClicked: dialogState.invokeAction("register", {}) }
         ModernButton { text: qsTr("Refresh"); onClicked: dialogState.invokeAction("refresh", {}) }
     }
@@ -31,7 +31,7 @@ ColumnLayout {
         }
     }
 
-    Label { text: qsTr("Leaderboard"); color: Theme.textStrong; font.bold: true; font.pixelSize: 14 }
+    Label { textFormat: Text.PlainText; text: qsTr("Leaderboard"); color: Theme.textStrong; font.bold: true; font.pixelSize: 14 }
     ListView {
         id: leaderboard
         Layout.fillWidth: true
@@ -49,9 +49,9 @@ ColumnLayout {
             onClicked: dialogState.invokeAction("selectUser", { "userId": modelData.userId })
         }
     }
-    Label { visible: leaderboard.count === 0; text: qsTr("No leaderboard data yet"); color: Theme.textMuted }
+    Label { textFormat: Text.PlainText; visible: leaderboard.count === 0; text: qsTr("No leaderboard data yet"); color: Theme.textMuted }
 
-    Label { text: qsTr("Tickers"); color: Theme.textStrong; font.bold: true; font.pixelSize: 14 }
+    Label { textFormat: Text.PlainText; text: qsTr("Tickers"); color: Theme.textStrong; font.bold: true; font.pixelSize: 14 }
     Flow {
         Layout.fillWidth: true
         spacing: 7
@@ -62,8 +62,8 @@ ColumnLayout {
                 width: tickerRow.implicitWidth + 18; height: 36; radius: 8; color: Theme.strip; border.color: Theme.divider
                 Row {
                     id: tickerRow; anchors.centerIn: parent; spacing: 7
-                    Label { text: modelData.symbol || ""; color: Theme.textStrong; font.bold: true }
-                    Label { text: qsTr("%1 holders").arg(modelData.holderCount || 0); color: Theme.textMuted; font.pixelSize: 9 }
+                    Label { textFormat: Text.PlainText; text: modelData.symbol || ""; color: Theme.textStrong; font.bold: true }
+                    Label { textFormat: Text.PlainText; text: qsTr("%1 holders").arg(modelData.holderCount || 0); color: Theme.textMuted; font.pixelSize: 9 }
                     ToolButton {
                         text: "+"; Accessible.name: qsTr("Pin %1").arg(modelData.symbol || qsTr("ticker"))
                         onClicked: dialogState.invokeAction("setTickerPin", { "symbol": modelData.symbol, "pinned": true })
@@ -73,7 +73,7 @@ ColumnLayout {
         }
     }
 
-    Label { text: qsTr("Feed"); color: Theme.textStrong; font.bold: true; font.pixelSize: 14 }
+    Label { textFormat: Text.PlainText; text: qsTr("Feed"); color: Theme.textStrong; font.bold: true; font.pixelSize: 14 }
     RowLayout {
         id: feedRow
         property var preferences: root.stonks.feedPreferences || ({})

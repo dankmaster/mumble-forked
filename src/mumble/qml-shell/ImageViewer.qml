@@ -11,6 +11,11 @@ Window {
     property real panY: 0
     property bool grabbing: false
 
+    function safeRenderImageSource(value) {
+        const source = String(value === undefined || value === null ? "" : value).trim()
+        return /^(image:\/\/mumble\/|qrc:\/)/i.test(source) ? source : ""
+    }
+
     width: 900
     height: 680
     minimumWidth: 420
@@ -73,6 +78,7 @@ Window {
             border.color: Theme.divider
 
             Label {
+				textFormat: Text.PlainText
                 anchors.left: parent.left
                 anchors.right: windowControls.left
                 anchors.leftMargin: 14
@@ -126,7 +132,7 @@ Window {
                 asynchronous: true
                 cache: false
                 smooth: true
-                source: viewer.imageState.src || ""
+                source: viewer.safeRenderImageSource(viewer.imageState.src || "")
                 width: Math.max(1, Number(viewer.imageState.width || sourceSize.width || 1)) * viewer.fitScale() * viewer.zoom
                 height: Math.max(1, Number(viewer.imageState.height || sourceSize.height || 1)) * viewer.fitScale() * viewer.zoom
                 x: Math.round((stage.width - width) / 2 + viewer.panX)

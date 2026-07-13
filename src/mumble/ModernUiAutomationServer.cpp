@@ -14,6 +14,7 @@
 #include "MainWindow.h"
 #include "ModernDialogController.h"
 #include "QmlClientModels.h"
+#include "QmlImageProvider.h"
 #include "QmlAccessibilitySnapshot.h"
 #include "QmlPerformanceMonitor.h"
 #include "QmlShellHost.h"
@@ -27,6 +28,7 @@
 #include "VersionCheck.h"
 
 #include <QtCore/QCoreApplication>
+#include <QtCore/QBuffer>
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDir>
 #include <QtCore/QEvent>
@@ -42,6 +44,7 @@
 #include <QtCore/QUrl>
 #include <QtCore/QUrlQuery>
 #include <QtGui/QClipboard>
+#include <QtGui/QPainter>
 #include <QtNetwork/QHostAddress>
 #include <QtNetwork/QTcpServer>
 #include <QtQuick/QQuickWindow>
@@ -3040,28 +3043,69 @@ namespace {
 
 	QString automationPreviewImageDataUrl(const QString &title, const QString &subtitle, const QString &accent,
 										  const QString &accent2 = QStringLiteral("#78b7d9")) {
-		const QString safeTitle = title.toHtmlEscaped();
-		const QString safeSubtitle = subtitle.toHtmlEscaped();
-		const QString safeAccent = accent.trimmed().isEmpty() ? QStringLiteral("#51c8b3") : accent.trimmed();
-		const QString safeAccent2 = accent2.trimmed().isEmpty() ? QStringLiteral("#78b7d9") : accent2.trimmed();
-		const QString svg =
-			QStringLiteral(
-				"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"960\" height=\"540\" viewBox=\"0 0 960 540\">"
-				"<defs><linearGradient id=\"g\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"1\">"
-				"<stop offset=\"0\" stop-color=\"%1\"/><stop offset=\"1\" stop-color=\"%2\"/>"
-				"</linearGradient></defs>"
-				"<rect width=\"960\" height=\"540\" fill=\"#101823\"/>"
-				"<rect x=\"32\" y=\"32\" width=\"896\" height=\"476\" rx=\"28\" fill=\"url(#g)\" opacity=\"0.9\"/>"
-				"<circle cx=\"774\" cy=\"128\" r=\"86\" fill=\"#ffffff\" opacity=\"0.14\"/>"
-				"<circle cx=\"166\" cy=\"418\" r=\"118\" fill=\"#000000\" opacity=\"0.18\"/>"
-				"<text x=\"72\" y=\"266\" font-family=\"Segoe UI, Arial, sans-serif\" font-size=\"54\" "
-				"font-weight=\"700\" fill=\"#ffffff\">%3</text>"
-				"<text x=\"76\" y=\"326\" font-family=\"Segoe UI, Arial, sans-serif\" font-size=\"26\" "
-				"fill=\"#dff8ff\" opacity=\"0.92\">%4</text>"
-				"</svg>")
-				.arg(safeAccent, safeAccent2, safeTitle, safeSubtitle);
-		return QStringLiteral("data:image/svg+xml;charset=UTF-8,")
-			   + QString::fromLatin1(QUrl::toPercentEncoding(svg));
+		const QColor startColor(accent.trimmed().isEmpty() ? QStringLiteral("#51c8b3") : accent.trimmed());
+		const QColor endColor(accent2.trimmed().isEmpty() ? QStringLiteral("#78b7d9") : accent2.trimmed());
+		QImage image(QSize(960, 540), QImage::Format_ARGB32_Premultiplied);
+		image.fill(QColor(QStringLiteral("#101823")));
+		QPainter painter(&image);
+		painter.setRenderHint(QPainter::Antialiasing, true);
+		QLinearGradient gradient(QPointF(32, 32), QPointF(928, 508));
+		gradient.setColorAt(0.0, startColor.isValid() ? startColor : QColor(QStringLiteral("#51c8b3")));
+		gradient.setColorAt(1.0, endColor.isValid() ? endColor : QColor(QStringLiteral("#78b7d9")));
+		painter.setPen(Qt::NoPen);
+		painter.setBrush(gradient);
+		painter.drawRoundedRect(QRectF(32, 32, 896, 476), 28, 28);
+		painter.setBrush(QColor(255, 255, 255, 36));
+		painter.drawEllipse(QPointF(774, 128), 86, 86);
+		painter.setBrush(QColor(0, 0, 0, 45));
+		painter.drawEllipse(QPointF(166, 418), 118, 118);
+		painter.setPen(Qt::white);
+		QFont titleFont(QStringLiteral("Segoe UI"), 40, QFont::Bold);
+		painter.setFont(titleFont);
+		painter.drawText(QRectF(72, 190, 816, 90), Qt::AlignLeft | Qt::AlignVCenter, title.left(80));
+		painter.setPen(QColor(QStringLiteral("#dff8ff")));
+		painter.setFont(QFont(QStringLiteral("Segoe UI"), 20));
+		painter.drawText(QRectF(76, 278, 808, 68), Qt::AlignLeft | Qt::AlignVCenter, subtitle.left(120));
+		painter.end();
+
+		QByteArray bytes;
+		QBuffer buffer(&bytes);
+		if (!buffer.open(QIODevice::WriteOnly) || !image.save(&buffer, "PNG")) return {};
+		return QStringLiteral("data:image/png;base64,") + QString::fromLatin1(bytes.toBase64());
+	}
+
+	QVariantList automationRegisterPreviewImages(const QVariantList &messages,
+											 const std::shared_ptr< QmlImagePipeline > &pipeline) {
+		if (!pipeline) return messages;
+		QVariantList result;
+		result.reserve(messages.size());
+		for (int messageIndex = 0; messageIndex < messages.size(); ++messageIndex) {
+			QVariantMap message = messages.at(messageIndex).toMap();
+			QVariantMap preview = message.value(QStringLiteral("preview")).toMap();
+			const QString keyPrefix = QStringLiteral("automation:preview:%1").arg(messageIndex);
+			for (const QString &field : { QStringLiteral("thumbnailUrl"), QStringLiteral("mediaUrl") }) {
+				const QString source = preview.value(field).toString();
+				if (source.startsWith(QLatin1String("data:"), Qt::CaseInsensitive)) {
+					const QString providerUrl = pipeline->registerDataUrl(source, keyPrefix + QLatin1Char(':') + field);
+					if (!providerUrl.isEmpty()) preview.insert(field, providerUrl);
+				}
+			}
+			QVariantList mediaItems = preview.value(QStringLiteral("mediaItems")).toList();
+			for (int itemIndex = 0; itemIndex < mediaItems.size(); ++itemIndex) {
+				QVariantMap item = mediaItems.at(itemIndex).toMap();
+				const QString source = item.value(QStringLiteral("url")).toString();
+				if (source.startsWith(QLatin1String("data:"), Qt::CaseInsensitive)) {
+					const QString providerUrl = pipeline->registerDataUrl(
+						source, keyPrefix + QStringLiteral(":item:%1").arg(itemIndex));
+					if (!providerUrl.isEmpty()) item.insert(QStringLiteral("url"), providerUrl);
+				}
+				mediaItems[itemIndex] = item;
+			}
+			if (!mediaItems.isEmpty()) preview.insert(QStringLiteral("mediaItems"), mediaItems);
+			message.insert(QStringLiteral("preview"), preview);
+			result.push_back(message);
+		}
+		return result;
 	}
 
 	QVariantMap automationRichPreviewMessage(const qulonglong messageID, const QString &actor,
@@ -3231,7 +3275,7 @@ namespace {
 												QObject::tr("Image sent directly in persistent chat."));
 			preview.insert(QStringLiteral("kind"), QStringLiteral("image"));
 			preview.insert(QStringLiteral("mediaUrl"), imageDataUrl);
-			preview.insert(QStringLiteral("mediaMime"), QStringLiteral("image/svg+xml"));
+			preview.insert(QStringLiteral("mediaMime"), QStringLiteral("image/png"));
 			preview.insert(QStringLiteral("openLabel"), QObject::tr("Open image"));
 			automationApplyPreviewSize(preview, size);
 			return QVariantList { automationRichPreviewMessage(messageID + 2, actor, bodyText, preview) };
@@ -3268,7 +3312,7 @@ namespace {
 												QObject::tr("Media card captured with the requested preview size."));
 			preview.insert(QStringLiteral("thumbnailUrl"), cardImageDataUrl);
 			preview.insert(QStringLiteral("mediaUrl"), cardImageDataUrl);
-			preview.insert(QStringLiteral("mediaMime"), QStringLiteral("image/svg+xml"));
+			preview.insert(QStringLiteral("mediaMime"), QStringLiteral("image/png"));
 			preview.insert(QStringLiteral("openLabel"), QObject::tr("Open link"));
 			automationApplyPreviewSize(preview, size);
 			return QVariantList { automationRichPreviewMessage(messageID + 5, actor, bodyText, preview) };
@@ -3740,6 +3784,8 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		response.insert(QStringLiteral("width"), window->width());
 		response.insert(QStringLiteral("height"), window->height());
 		response.insert(QStringLiteral("railOpen"), window->property("automationNavigationOpen").toBool());
+		response.insert(QStringLiteral("railPosition"),
+						window->property("automationNavigationPosition").toDouble());
 		return response;
 	}
 
@@ -4629,7 +4675,9 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		}
 
 		const auto applyProbe = [messages](MainWindow *window) {
-			window->m_modernRichPreviewProbeMessages = messages;
+			QmlShellHost *host = window ? window->qmlShellHost() : nullptr;
+			window->m_modernRichPreviewProbeMessages =
+				automationRegisterPreviewImages(messages, host ? host->imagePipeline() : nullptr);
 			window->scheduleQmlShellStateSyncImmediate();
 		};
 

@@ -409,9 +409,21 @@ private slots:
 		QVERIFY(encoder.getPreEncodedVolumeAdjustment(VolumeAdjustment(std::pow(2.0f, (MAX + 0.5f) / 6.0f))).empty());
 	}
 
-	void test_tcp_message_ids_include_chat_embed_assist() {
+	void test_tcp_message_ids_preserve_native_and_extension_ranges() {
 		using Mumble::Protocol::TCPMessageType;
 
+		// These are the native protocol boundaries. Fork messages must only be
+		// appended after them so ordinary Mumble clients retain their wire IDs.
+		QCOMPARE(static_cast< int >(TCPMessageType::Version), 0);
+		QCOMPARE(static_cast< int >(TCPMessageType::TextMessage), 11);
+		QCOMPARE(static_cast< int >(TCPMessageType::ServerConfig), 24);
+		QCOMPARE(static_cast< int >(TCPMessageType::SuggestConfig), 25);
+		QCOMPARE(static_cast< int >(TCPMessageType::PluginDataTransmission), 26);
+
+		QCOMPARE(static_cast< int >(TCPMessageType::ChatSend), 27);
+		QCOMPARE(static_cast< int >(TCPMessageType::TextChannelSync), 32);
+		QCOMPARE(static_cast< int >(TCPMessageType::ScreenShareCreate), 33);
+		QCOMPARE(static_cast< int >(TCPMessageType::ScreenShareStop), 38);
 		QCOMPARE(static_cast< int >(TCPMessageType::StonksState), 53);
 		QCOMPARE(static_cast< int >(TCPMessageType::ChatEmbedAssistRequest), 54);
 		QCOMPARE(static_cast< int >(TCPMessageType::ChatEmbedAssistResult), 55);

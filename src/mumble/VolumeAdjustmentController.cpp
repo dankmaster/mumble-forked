@@ -77,7 +77,7 @@ void ListenerVolumeController::advanceBackoff() {
 }
 
 void ListenerVolumeController::applyDbAdjustment(const int dbAdjustment, const bool final) {
-	ServerHandlerPtr handler = Global::get().sh;
+	ServerHandlerPtr handler = Global::get().serverHandlerSnapshot();
 	if (!m_channel) {
 		return;
 	}
@@ -85,7 +85,7 @@ void ListenerVolumeController::applyDbAdjustment(const int dbAdjustment, const b
 	const VolumeAdjustment adjustment = VolumeAdjustment::fromDBAdjustment(dbAdjustment);
 	Global::get().channelListenerManager->setListenerVolumeAdjustment(Global::get().uiSession, m_channel->iId,
 																	  adjustment);
-	if (!handler || handler->m_version < Mumble::Protocol::PROTOBUF_INTRODUCTION_VERSION) {
+	if (!handler || handler->protocolVersion() < Mumble::Protocol::PROTOBUF_INTRODUCTION_VERSION) {
 		return;
 	}
 
@@ -113,7 +113,7 @@ void ListenerVolumeController::applyDbAdjustment(const int dbAdjustment, const b
 }
 
 void ListenerVolumeController::sendToServer() {
-	ServerHandlerPtr handler = Global::get().sh;
+	ServerHandlerPtr handler = Global::get().serverHandlerSnapshot();
 	m_resetTimer.start(3000);
 
 	if (!handler || m_cachedChannelID == 0) {

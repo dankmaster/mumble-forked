@@ -10,7 +10,6 @@
 #include <QtCore/QHash>
 #include <QtCore/QObject>
 #include <QtCore/QSet>
-#include <QtGui/QIcon>
 
 #include <optional>
 
@@ -69,21 +68,9 @@ private:
 	Q_OBJECT
 	Q_DISABLE_COPY(UserModel)
 protected:
-	QIcon qiTalkingOn, qiTalkingMuted, qiTalkingWhisper, qiTalkingShout, qiTalkingOff;
-	QIcon qiMutedPushToMute, qiMutedSelf, qiMutedServer, qiMutedLocal, qiIgnoredLocal, qiMutedSuppressed;
-	QIcon qiPrioritySpeaker;
-	QIcon qiRecording;
-	QIcon qiDeafenedSelf, qiDeafenedServer;
-	QIcon qiAuthenticated, qiChannel, qiLinkedChannel, qiActiveChannel;
-	QIcon qiFriend;
-	QIcon qiComment, qiCommentSeen, qiFilter, qiPin;
-	QIcon qiLock_locked, qiLock_unlocked;
-	QIcon qiEar;
 	ModelItem *miRoot;
 	QSet< Channel * > qsLinked;
 	QMap< QString, ClientUser * > qmHashes;
-
-	bool bClicked;
 
 	void recursiveClone(const ModelItem *old, ModelItem *item, QModelIndexList &from, QModelIndexList &to);
 	ModelItem *moveItem(ModelItem *oldparent, ModelItem *newparent, ModelItem *item);
@@ -111,7 +98,9 @@ public:
 		NavigatorLinkedLocationRole,
 		NavigatorAvatarImageRole,
 		NavigatorAvatarFallbackRole,
-		NavigatorStatusIconsRole,
+		NavigatorStatusIndicatorsRole,
+		// Compatibility alias for callers compiled against the transitional navigator API.
+		NavigatorStatusIconsRole = NavigatorStatusIndicatorsRole,
 		NavigatorTalkStateRole,
 		NavigatorIdleRole,
 		NavigatorMutedRole,
@@ -212,13 +201,7 @@ public:
 
 	void removeAll();
 
-	void expandAll(Channel *c);
-	void collapseEmpty(Channel *c);
-
-	QVariant otherRoles(const QModelIndex &idx, int role) const;
-
 	unsigned int uiSessionComment;
-	int iChannelDescription;
 
 
 	/// Creates the display string for the given user/listener
@@ -234,9 +217,7 @@ public slots:
 	/// Invalidates the model data of the ClientUser triggering this slot.
 	void userStateChanged();
 	void on_channelListenerLocalVolumeAdjustmentChanged(unsigned int channelID, float oldValue, float newValue);
-	void ensureSelfVisible();
 	void recheckLinks();
-	void forceVisualUpdate(Channel *c = nullptr);
 signals:
 	/// A signal emitted whenever a user is added to the model.
 	///

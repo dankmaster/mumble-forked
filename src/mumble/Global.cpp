@@ -7,6 +7,8 @@
 
 #include <QtCore/QStandardPaths>
 
+#include <utility>
+
 #ifdef Q_OS_WIN
 #	ifndef NOMINMAX
 #		define NOMINMAX
@@ -22,6 +24,23 @@ Global *Global::g_global_struct;
 
 Global &Global::get() {
 	return *g_global_struct;
+}
+
+std::shared_ptr< ServerHandler > Global::serverHandlerSnapshot() const {
+	QReadLocker lock(&m_serverHandlerLock);
+	return sh;
+}
+
+void Global::replaceServerHandler(std::shared_ptr< ServerHandler > handler) {
+	QWriteLocker lock(&m_serverHandlerLock);
+	sh = std::move(handler);
+}
+
+std::shared_ptr< ServerHandler > Global::takeServerHandler() {
+	QWriteLocker lock(&m_serverHandlerLock);
+	std::shared_ptr< ServerHandler > handler = std::move(sh);
+	sh.reset();
+	return handler;
 }
 
 void Global::migrateDataDir(const QDir &toDir) {
@@ -169,8 +188,6 @@ Global::Global(const QString &qsConfigPath) {
 
 	if (!qdBasePath.exists(QLatin1String("Plugins")))
 		qdBasePath.mkpath(QLatin1String("Plugins"));
-	if (!qdBasePath.exists(QLatin1String("Themes")))
-		qdBasePath.mkpath(QLatin1String("Themes"));
 }
 
 const char Global::ccHappyEaster[] = {

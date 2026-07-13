@@ -11,7 +11,7 @@ ColumnLayout {
 
     RowLayout {
         Layout.fillWidth: true
-        Label { Layout.fillWidth: true; text: field.label || qsTr("Shortcuts"); color: Theme.textStrong; font.bold: true }
+        Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: field.label || qsTr("Shortcuts"); color: Theme.textStrong; font.bold: true }
         ModernButton { text: qsTr("Add shortcut"); enabled: !!field.canCapture; onClicked: dialogState.invokeAction("keys.addShortcut", {}) }
     }
 
@@ -51,11 +51,12 @@ ColumnLayout {
                         onActivated: dialogState.invokeAction("keys.shortcutAction",
                             { "index": modelData.index, "actionIndex": model[currentIndex].value })
                     }
-                    Label { text: modelData.dataLabel || ""; color: Theme.textMuted; font.pixelSize: 10; visible: text.length > 0 }
+                    Label { textFormat: Text.PlainText; text: modelData.dataLabel || ""; color: Theme.textMuted; font.pixelSize: 10; visible: text.length > 0 }
                 }
                 RowLayout {
                     Layout.fillWidth: true
                     Label {
+						textFormat: Text.PlainText
                         Layout.fillWidth: true
                         text: modelData.capturing ? qsTr("Press the shortcut now…")
                                                   : (modelData.inputLabel || qsTr("Not assigned"))

@@ -88,23 +88,60 @@ bool Database::findOrCreateDatabase() {
 }
 
 Database::Database(const QString &dbname) {
+	initialize(dbname, Global::get().s.qsDatabaseLocation, true, true);
+}
+
+Database::Database(const QString &dbname, const QString &databaseLocation, const bool compactOnDestruction)
+	: m_compactOnDestruction(compactOnDestruction), m_removeConnectionOnDestruction(true) {
 	db = QSqlDatabase::addDatabase(QLatin1String("QSQLITE"), dbname);
-	if (!Global::get().s.qsDatabaseLocation.isEmpty()) {
-		QFile configuredLocation(Global::get().s.qsDatabaseLocation);
+	if (databaseLocation.isEmpty() || !QFileInfo::exists(databaseLocation)) {
+		m_initializationError = tr("The configured SQLite database does not exist");
+		return;
+	}
+
+	// The primary UI-thread Database has already performed schema migration and
+	// maintenance before a ServerHandler can be created. A connection-local
+	// worker must only open that exact file: falling back to path discovery or
+	// running VACUUM/migrations here could select a different database or block
+	// the primary connection during every reconnect.
+	db.setDatabaseName(databaseLocation);
+	if (!db.open()) {
+		m_initializationError = tr("Failed to open the SQLite database: %1").arg(db.lastError().text());
+		return;
+	}
+
+	QSqlQuery query(db);
+	execQueryAndLogFailure(query, QLatin1String("PRAGMA synchronous = NORMAL"));
+	m_valid = true;
+}
+
+void Database::initialize(const QString &dbname, const QString &databaseLocation, const bool updateGlobalSettings,
+						  const bool fatalOnFailure) {
+	db = QSqlDatabase::addDatabase(QLatin1String("QSQLITE"), dbname);
+	if (!databaseLocation.isEmpty()) {
+		QFile configuredLocation(databaseLocation);
 		if (configuredLocation.exists()) {
-			db.setDatabaseName(Global::get().s.qsDatabaseLocation);
+			db.setDatabaseName(databaseLocation);
 			db.open();
 		} else {
 			qWarning().noquote() << tr("The configured database file '%1' does not exist; resetting to the default path.")
-									 .arg(Global::get().s.qsDatabaseLocation);
-			Global::get().s.qsDatabaseLocation.clear();
+									 .arg(databaseLocation);
+			if (updateGlobalSettings) {
+				Global::get().s.qsDatabaseLocation.clear();
+			}
 		}
 	}
 	if (!db.isOpen()) {
 		if (findOrCreateDatabase()) {
-			Global::get().s.qsDatabaseLocation = db.databaseName();
+			if (updateGlobalSettings) {
+				Global::get().s.qsDatabaseLocation = db.databaseName();
+			}
 		} else {
-			qFatal("Database: Failed initialization");
+			m_initializationError = tr("Failed to open or create the SQLite database");
+			if (fatalOnFailure) {
+				qFatal("Database: Failed initialization");
+			}
+			return;
 		}
 	}
 
@@ -221,7 +258,9 @@ Database::Database(const QString &dbname) {
 	execQueryAndLogFailure(query, QLatin1String("DELETE FROM `comments` WHERE `seen` < datetime('now', '-1 years')"));
 	execQueryAndLogFailure(query, QLatin1String("DELETE FROM `blobs` WHERE `seen` < datetime('now', '-1 months')"));
 
-	execQueryAndLogFailure(query, QLatin1String("VACUUM"));
+	// Full compaction can take hundreds of milliseconds on a mature profile.
+	// Keep it out of cold-start; the primary connection already compacts during
+	// orderly shutdown, where it cannot delay the first interactive QML frame.
 
 	execQueryAndLogFailure(query, QLatin1String("PRAGMA synchronous = NORMAL"));
 #ifdef Q_OS_WIN
@@ -234,12 +273,30 @@ Database::Database(const QString &dbname) {
 	execQueryAndLogFailure(query, QLatin1String("SELECT sqlite_version()"));
 	while (query.next())
 		qWarning() << "Database SQLite:" << query.value(0).toString();
+	m_valid = true;
 }
 
 Database::~Database() {
-	QSqlQuery query(db);
-	execQueryAndLogFailure(query, QLatin1String("PRAGMA journal_mode = DELETE"));
-	execQueryAndLogFailure(query, QLatin1String("VACUUM"));
+	if (m_valid && m_compactOnDestruction) {
+		QSqlQuery query(db);
+		execQueryAndLogFailure(query, QLatin1String("PRAGMA journal_mode = DELETE"));
+		execQueryAndLogFailure(query, QLatin1String("VACUUM"));
+	}
+
+	if (m_removeConnectionOnDestruction && db.isValid()) {
+		const QString connectionName = db.connectionName();
+		db.close();
+		db = QSqlDatabase();
+		QSqlDatabase::removeDatabase(connectionName);
+	}
+}
+
+bool Database::isValid() const {
+	return m_valid;
+}
+
+QString Database::initializationError() const {
+	return m_initializationError;
 }
 
 QList< FavoriteServer > Database::getFavorites() {

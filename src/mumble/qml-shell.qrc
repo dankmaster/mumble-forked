@@ -13,13 +13,18 @@
 	<file alias="ImageViewer.qml">qml-shell/ImageViewer.qml</file>
 	<file alias="StonksEditor.qml">qml-shell/StonksEditor.qml</file>
 	<file alias="ScreenShareViewWindow.qml">qml-shell/ScreenShareViewWindow.qml</file>
-    <file alias="PttTool.qml">qml-shell/PttTool.qml</file>
+    <file alias="PttToolWindow.qml">qml-shell/PttToolWindow.qml</file>
+    <file alias="ManualPluginWindow.qml">qml-shell/ManualPluginWindow.qml</file>
     <file alias="QmlDialog.qml">qml-shell/QmlDialog.qml</file>
     <file alias="PluginEditor.qml">qml-shell/PluginEditor.qml</file>
     <file alias="MessageEventEditor.qml">qml-shell/MessageEventEditor.qml</file>
     <file alias="ShortcutEditor.qml">qml-shell/ShortcutEditor.qml</file>
     <file alias="AclEditor.qml">qml-shell/AclEditor.qml</file>
     <file alias="MediaSessionWindow.qml">qml-shell/MediaSessionWindow.qml</file>
-    <file alias="WatchTogetherBanner.qml">qml-shell/WatchTogetherBanner.qml</file>
+	<file alias="WatchTogetherBanner.qml">qml-shell/WatchTogetherBanner.qml</file>
+	<file alias="RichMessageBody.qml">qml-shell/RichMessageBody.qml</file>
+	<file alias="AttachmentGallery.qml">qml-shell/AttachmentGallery.qml</file>
+	<file alias="RichPreviewCard.qml">qml-shell/RichPreviewCard.qml</file>
+	<file alias="AttachmentViewer.qml">qml-shell/AttachmentViewer.qml</file>
   </qresource>
 </RCC>

@@ -11,12 +11,12 @@ class FakeDialogState final : public QObject {
 	Q_PROPERTY(bool open READ open WRITE setOpen NOTIFY stateChanged)
 	Q_PROPERTY(QString title READ title CONSTANT)
 	Q_PROPERTY(QString subtitle READ subtitle CONSTANT)
-	Q_PROPERTY(QString kind READ kind CONSTANT)
+	Q_PROPERTY(QString kind READ kind NOTIFY stateChanged)
 	Q_PROPERTY(QString activePage READ activePage NOTIFY stateChanged)
 	Q_PROPERTY(QVariantList pages READ pages CONSTANT)
 	Q_PROPERTY(QVariantList sections READ sections NOTIFY stateChanged)
 	Q_PROPERTY(QVariantList actions READ actions CONSTANT)
-	Q_PROPERTY(QVariantMap state READ state CONSTANT)
+	Q_PROPERTY(QVariantMap state READ state NOTIFY stateChanged)
 	Q_PROPERTY(qulonglong revision READ revision NOTIFY stateChanged)
 	Q_PROPERTY(int closeRequests READ closeRequests NOTIFY closeRequestsChanged)
 	Q_PROPERTY(QString lastAction READ lastAction NOTIFY lastActionChanged)
@@ -44,7 +44,7 @@ public:
 	}
 	QString title() const { return QStringLiteral("Test dialog"); }
 	QString subtitle() const { return QStringLiteral("Qt Quick component test"); }
-	QString kind() const { return QStringLiteral("generic"); }
+	QString kind() const { return m_kind; }
 	QString activePage() const { return m_activePage; }
 	QVariantList pages() const {
 		return { QVariantMap { { QStringLiteral("id"), QStringLiteral("general") },
@@ -67,7 +67,7 @@ public:
 								 { QStringLiteral("label"), QStringLiteral("Cancel") },
 								 { QStringLiteral("enabled"), true } } };
 	}
-	QVariantMap state() const { return {}; }
+	QVariantMap state() const { return m_state; }
 	qulonglong revision() const { return m_revision; }
 	int closeRequests() const { return m_closeRequests; }
 	QString lastAction() const { return m_lastAction; }
@@ -101,6 +101,12 @@ public:
 		++m_revision;
 		emit stateChanged();
 	}
+	Q_INVOKABLE void setSpecialState(const QString &kind, const QVariantMap &state) {
+		m_kind = kind.trimmed().isEmpty() ? QStringLiteral("generic") : kind.trimmed();
+		m_state = state;
+		++m_revision;
+		emit stateChanged();
+	}
 
 signals:
 	void stateChanged();
@@ -113,9 +119,120 @@ private:
 	QString m_lastAction;
 	qulonglong m_revision = 0;
 	QString m_activePage = QStringLiteral("general");
+	QString m_kind = QStringLiteral("generic");
+	QVariantMap m_state;
 	QVariantList m_sections;
 	QVariantMap m_values { { QStringLiteral("name"), QStringLiteral("Alice") } };
 	QVariantMap m_errors;
+};
+
+class FakeUiCommands final : public QObject {
+	Q_OBJECT
+	Q_PROPERTY(bool pttPressed READ pttPressed NOTIFY pttPressedChanged)
+	Q_PROPERTY(int releaseCount READ releaseCount NOTIFY pttPressedChanged)
+
+public:
+	explicit FakeUiCommands(QObject *parent = nullptr) : QObject(parent) {}
+	bool pttPressed() const { return m_pttPressed; }
+	int releaseCount() const { return m_releaseCount; }
+	Q_INVOKABLE void setPttPressed(const bool pressed) {
+		if (m_pttPressed == pressed) return;
+		m_pttPressed = pressed;
+		emit pttPressedChanged();
+	}
+	Q_INVOKABLE void releasePtt() {
+		++m_releaseCount;
+		m_pttPressed = false;
+		emit pttPressedChanged();
+	}
+	Q_INVOKABLE void clearCounts() {
+		m_releaseCount = 0;
+		emit pttPressedChanged();
+	}
+
+signals:
+	void pttPressedChanged();
+
+private:
+	bool m_pttPressed = false;
+	int m_releaseCount = 0;
+};
+
+class FakeManualPluginController final : public QObject {
+	Q_OBJECT
+	Q_PROPERTY(double x MEMBER m_x NOTIFY stateChanged)
+	Q_PROPERTY(double y MEMBER m_y NOTIFY stateChanged)
+	Q_PROPERTY(double z MEMBER m_z NOTIFY stateChanged)
+	Q_PROPERTY(int azimuth MEMBER m_azimuth NOTIFY stateChanged)
+	Q_PROPERTY(int elevation MEMBER m_elevation NOTIFY stateChanged)
+	Q_PROPERTY(QString context MEMBER m_context NOTIFY stateChanged)
+	Q_PROPERTY(QString identity MEMBER m_identity NOTIFY stateChanged)
+	Q_PROPERTY(int staleSeconds MEMBER m_staleSeconds NOTIFY stateChanged)
+	Q_PROPERTY(bool active MEMBER m_active NOTIFY stateChanged)
+	Q_PROPERTY(bool linked MEMBER m_linked NOTIFY stateChanged)
+	Q_PROPERTY(QVariantList speakers MEMBER m_speakers NOTIFY stateChanged)
+	Q_PROPERTY(int refreshCount READ refreshCount NOTIFY countersChanged)
+	Q_PROPERTY(int applyCount READ applyCount NOTIFY countersChanged)
+	Q_PROPERTY(int resetCount READ resetCount NOTIFY countersChanged)
+	Q_PROPERTY(bool speakerUpdatesEnabled READ speakerUpdatesEnabled NOTIFY countersChanged)
+
+public:
+	explicit FakeManualPluginController(QObject *parent = nullptr) : QObject(parent) {
+		m_speakers = { QVariantMap { { QStringLiteral("session"), 42 }, { QStringLiteral("x"), 3.0 },
+										 { QStringLiteral("z"), -2.0 } } };
+	}
+	int refreshCount() const { return m_refreshCount; }
+	int applyCount() const { return m_applyCount; }
+	int resetCount() const { return m_resetCount; }
+	bool speakerUpdatesEnabled() const { return m_speakerUpdatesEnabled; }
+	Q_INVOKABLE void refresh() {
+		++m_refreshCount;
+		emit countersChanged();
+	}
+	Q_INVOKABLE void apply() {
+		++m_applyCount;
+		emit applied();
+		emit countersChanged();
+	}
+	Q_INVOKABLE void setSpeakerUpdatesEnabled(const bool enabled) {
+		if (m_speakerUpdatesEnabled == enabled) return;
+		m_speakerUpdatesEnabled = enabled;
+		emit countersChanged();
+	}
+	Q_INVOKABLE void reset() {
+		++m_resetCount;
+		emit resetCompleted();
+		emit countersChanged();
+	}
+	Q_INVOKABLE void clearCounts() {
+		m_refreshCount = 0;
+		m_applyCount = 0;
+		m_resetCount = 0;
+		emit countersChanged();
+	}
+
+signals:
+	void stateChanged();
+	void countersChanged();
+	void applied();
+	void resetCompleted();
+
+private:
+	double m_x = 1.0;
+	double m_y = 2.0;
+	double m_z = 3.0;
+	int m_azimuth = 45;
+	int m_elevation = 5;
+	QString m_context = QStringLiteral("test-context");
+	QString m_identity = QStringLiteral("test-identity");
+	int m_staleSeconds = 15;
+	bool m_active = true;
+	bool m_linked = true;
+	QVariantList m_speakers;
+	int m_refreshCount = 0;
+	int m_applyCount = 0;
+	int m_resetCount = 0;
+	bool m_speakerUpdatesEnabled = false;
 };
 
 class QmlQuickComponentsSetup final : public QObject {
@@ -129,6 +246,9 @@ public slots:
 		engine->rootContext()->setContextProperty(QStringLiteral("uiTheme"), QVariant::fromValue< QObject * >(nullptr));
 		auto *dialogState = new FakeDialogState(engine);
 		engine->rootContext()->setContextProperty(QStringLiteral("dialogState"), dialogState);
+		engine->rootContext()->setContextProperty(QStringLiteral("uiCommands"), new FakeUiCommands(engine));
+		engine->rootContext()->setContextProperty(QStringLiteral("manualPlugin"),
+											 new FakeManualPluginController(engine));
 	}
 };
 

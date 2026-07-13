@@ -44,7 +44,7 @@ public:
 	explicit QmlWindowStateController(QObject *parent = nullptr);
 	~QmlWindowStateController() override;
 
-	void attach(QWindow *window, const QByteArray &encodedState);
+	void attach(QWindow *window, const QByteArray &encodedState, const QSize &minimumSize = QSize(760, 520));
 	void flush();
 
 	static QByteArray encode(const QmlWindowState &state);
@@ -77,6 +77,7 @@ private:
 	QPointer< QScreen > m_observedScreen;
 	QTimer *m_saveTimer = nullptr;
 	QRect m_normalGeometry;
+	QSize m_minimumSize = QSize(760, 520);
 	QList< QMetaObject::Connection > m_runtimeConnections;
 	QList< QMetaObject::Connection > m_screenConnections;
 	bool m_compositorManagedPositioning = false;

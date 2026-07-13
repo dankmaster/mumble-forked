@@ -24,6 +24,11 @@ TestCase {
         property bool motdDismissed: false
         property bool motdChanged: true
         property string motdHtml: "<p><b>Welcome</b> to the test server.</p>"
+		property var motdSegments: [
+			{ "text": "Welcome", "bold": true },
+			{ "text": " to the test server. " },
+			{ "text": "Open", "href": "https://example.com/welcome" }
+		]
         property string motdSummary: "Welcome to the test server."
         property string motdSignature: "v1:42:abcd"
         property var motdActions: [
@@ -32,7 +37,22 @@ TestCase {
             { "id": "motd.dismiss", "label": "Dismiss", "enabled": true,
               "payload": { "signature": "v1:42:abcd" } }
         ]
+
+		property bool sharedAvailable: true
+		property bool sharedHost: true
+		property bool sharedJoined: true
+		property bool active: true
+		property string sharedTitle: "Release watch session"
+		property int sharedParticipantCount: 2
+		property var sharedParticipantSessions: ["7", "42"]
+		property int sharedHostSession: 7
     }
+
+	ListModel {
+		id: participants
+		ListElement { stableId: "7"; title: "Host" }
+		ListElement { stableId: "42"; title: "Guest" }
+	}
 
     Loader {
         id: connectionLoader
@@ -54,6 +74,15 @@ TestCase {
             { "session": session })
     }
 
+	Loader {
+		id: watchTogetherLoader
+		width: parent.width
+		height: 80
+		Component.onCompleted: setSource(
+			Qt.resolvedUrl("../../../mumble/qml-shell/WatchTogetherBanner.qml"),
+			{ "session": session, "participantModel": participants })
+	}
+
     SignalSpy {
         id: connectionActionSpy
         target: connectionLoader.item
@@ -66,10 +95,20 @@ TestCase {
         signalName: "actionRequested"
     }
 
+    SignalSpy {
+        id: motdLinkSpy
+        target: motdLoader.item
+        signalName: "linkRequested"
+    }
+
     function init() {
-        tryVerify(function() { return connectionLoader.item !== null && motdLoader.item !== null })
+        tryVerify(function() {
+			return connectionLoader.item !== null && motdLoader.item !== null
+				&& watchTogetherLoader.item !== null
+		})
         connectionActionSpy.clear()
         motdActionSpy.clear()
+        motdLinkSpy.clear()
         session.connectionState = "disconnected"
         session.connectionTone = "danger"
         session.connectionRetryRemainingMs = 0
@@ -158,4 +197,31 @@ TestCase {
         compare(result.reason, "unknown-action")
         compare(motdActionSpy.count, 0)
     }
+
+    function test_motd_links_are_allowlisted() {
+        const panel = motdLoader.item
+        compare(panel.safeExternalUrl("file:///C:/Windows/win.ini"), "")
+        compare(panel.safeExternalUrl("javascript:alert(1)"), "")
+        compare(panel.safeExternalUrl("https://example.com/welcome"), "https://example.com/welcome")
+        panel.linkRequested(panel.safeExternalUrl("https://example.com/welcome"))
+        compare(motdLinkSpy.count, 1)
+        compare(motdLinkSpy.signalArguments[0][0].toString(), "https://example.com/welcome")
+    }
+
+	function test_motd_expanded_body_uses_structured_segments() {
+		session.motdExpanded = true
+		tryVerify(function() { return findChild(motdLoader.item, "motdStructuredBody") !== null })
+		const text = findChild(motdLoader.item, "richMessageBodyText")
+		verify(text !== null)
+		verify(text.text.indexOf("Welcome") >= 0)
+		verify(text.text.indexOf("<img") < 0)
+		verify(text.text.indexOf("https://example.com/welcome") >= 0)
+	}
+
+	function test_watch_together_uses_the_supplied_participant_model() {
+		const banner = watchTogetherLoader.item
+		compare(banner.participantModel, participants)
+		compare(banner.participantLabel("42"), "Guest")
+		compare(banner.participantLabel("999"), "Session 999")
+	}
 }

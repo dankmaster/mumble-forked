@@ -477,10 +477,10 @@ bool AudioOutput::mix(void *outbuff, unsigned int frameCount) {
 		const float adjustFactor = std::pow(10.f, -18.f / 20);
 		const float mul          = Global::get().s.fVolume;
 		const unsigned int nchan = iChannels;
-		ServerHandlerPtr sh      = Global::get().sh;
+		ServerHandlerPtr sh      = Global::get().serverHandlerSnapshot();
 		VoiceRecorderPtr recorder;
 		if (sh) {
-			recorder = Global::get().sh->recorder;
+			recorder = sh->voiceRecorder();
 		}
 
 		bool prioritySpeakerActive = false;
@@ -640,7 +640,7 @@ bool AudioOutput::mix(void *outbuff, unsigned int frameCount) {
 
 					const bool receivingViaListener = speech->m_audioContext == Mumble::Protocol::AudioContext::LISTEN;
 
-					if (sh && sh->m_version >= Mumble::Protocol::PROTOBUF_INTRODUCTION_VERSION) {
+					if (sh && sh->protocolVersion() >= Mumble::Protocol::PROTOBUF_INTRODUCTION_VERSION) {
 						// The new protocol supports sending volume adjustments which is used to figure out the correct
 						// volume adjustment for listeners on the server. Thus, we only have to apply that here.
 						volumeAdjustment *= speech->m_suggestedVolumeAdjustment;

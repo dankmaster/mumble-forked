@@ -25,6 +25,12 @@ public slots:
 		if (active) m_timer->start();
 		emit activeChanged(active);
 	}
+	void shutdown() {
+		m_timer->stop();
+		m_transport.detach();
+		m_generation = 0;
+		QThread::currentThread()->quit();
+	}
 	void poll() {
 		Mumble::ScreenShare::NativeFrame frame;
 		if (!m_transport.readLatest(&frame) || frame.generation != m_generation) return;
@@ -138,10 +144,14 @@ ScreenShareViewBackend::ScreenShareViewBackend(const ScreenShareSession &session
 	m_audioRetryTimer = new QTimer(this);
 	m_audioRetryTimer->setInterval(500);
 	connect(m_audioRetryTimer, &QTimer::timeout, this, &ScreenShareViewBackend::retryAudioControls);
-	m_frameThread = new QThread(this);
+	// The frame reader owns a dedicated event loop. It tears itself down
+	// asynchronously so closing a viewer never waits for a 60 Hz worker on the
+	// GUI thread.
+	m_frameThread = new QThread;
 	m_frameReader = new ScreenShareNativeFrameReader();
 	m_frameReader->moveToThread(m_frameThread);
 	connect(m_frameThread, &QThread::finished, m_frameReader, &QObject::deleteLater);
+	connect(m_frameThread, &QThread::finished, m_frameThread, &QObject::deleteLater);
 	connect(m_frameReader, &ScreenShareNativeFrameReader::activeChanged, this, [this](const bool active) {
 		if (m_nativeFrameActive == active) return;
 		m_nativeFrameActive = active;
@@ -161,11 +171,11 @@ ScreenShareViewBackend::ScreenShareViewBackend(const ScreenShareSession &session
 ScreenShareViewBackend::~ScreenShareViewBackend() {
 	clearVideoWindow();
 	if (m_frameReader && m_frameThread && m_frameThread->isRunning()) {
-		QMetaObject::invokeMethod(m_frameReader, "configure", Qt::BlockingQueuedConnection,
-							  Q_ARG(QString, QString()), Q_ARG(quint64, 0));
-		m_frameThread->quit();
-		m_frameThread->wait();
+		disconnect(m_frameReader, nullptr, this, nullptr);
+		QMetaObject::invokeMethod(m_frameReader, "shutdown", Qt::QueuedConnection);
 	}
+	m_frameReader = nullptr;
+	m_frameThread = nullptr;
 }
 QString ScreenShareViewBackend::streamId() const { return m_session.streamID; }
 QString ScreenShareViewBackend::title() const { return tr("Live screen share"); }

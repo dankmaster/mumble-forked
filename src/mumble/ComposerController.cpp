@@ -1,9 +1,15 @@
 #include "ComposerController.h"
 #include "QmlImageProvider.h"
 
+#include <QtConcurrent/QtConcurrentRun>
+#include <QtCore/QDir>
 #include <QtCore/QFileInfo>
+#include <QtCore/QFutureWatcher>
 #include <QtCore/QRegularExpression>
+#include <QtCore/QSet>
 #include <QtCore/QUuid>
+
+#include <utility>
 
 DraftAttachmentModel::DraftAttachmentModel(QObject *parent) : QAbstractListModel(parent) {
 }
@@ -93,6 +99,24 @@ bool DraftAttachmentModel::update(const QString &id, const QString &thumbnailUrl
 	}
 	return false;
 }
+bool DraftAttachmentModel::resolve(const QString &id, const QUrl &localUrl, const QString &fileName,
+								   const QString &thumbnailUrl, const QString &status, const qreal progress,
+								   const QString &error) {
+	for (int row = 0; row < m_items.size(); ++row) {
+		Item &item = m_items[row];
+		if (item.id != id) continue;
+		item.localUrl = localUrl;
+		item.fileName = fileName;
+		item.thumbnailUrl = thumbnailUrl;
+		item.status = status;
+		item.progress = progress;
+		item.error = error;
+		emit dataChanged(index(row), index(row), { LocalUrlRole, FileNameRole, ThumbnailUrlRole,
+													 StatusRole, ProgressRole, ErrorRole });
+		return true;
+	}
+	return false;
+}
 DraftAttachmentModel::Item DraftAttachmentModel::item(const QString &id) const {
 	for (const Item &item : m_items) if (item.id == id) return item;
 	return {};
@@ -100,10 +124,27 @@ DraftAttachmentModel::Item DraftAttachmentModel::item(const QString &id) const {
 void DraftAttachmentModel::clear(){if(m_items.isEmpty())return;beginResetModel();m_items.clear();endResetModel();emit countChanged();}
 
 ComposerController::ComposerController(std::shared_ptr< QmlImagePipeline > pipeline, QObject *parent)
-	: QObject(parent), m_pipeline(std::move(pipeline)), m_attachments(this) {
+	: QObject(parent), m_pipeline(std::move(pipeline)), m_validationPool(std::make_unique< QThreadPool >()),
+	  m_attachments(this) {
+	m_validationPool->setMaxThreadCount(MaxValidationWorkers);
+	m_validationPool->setExpiryTimeout(5000);
+}
+
+ComposerController::~ComposerController() {
+	forgetAllAttachments();
+	m_validationPool->clear();
+	// QFileInfo can remain inside an operating-system metadata call indefinitely
+	// for a disconnected UNC path. The controller and all of its model objects
+	// must still be destructible without blocking the GUI thread. Active jobs only
+	// retain immutable request data and the shared image pipeline, so leaving this
+	// one bounded pool alive is safer than waiting during window teardown.
+	if (!m_validationPool->waitForDone(0)) {
+		(void) m_validationPool.release();
+	}
 }
 
 void ComposerController::setText(const QString &text) {
+	if (m_sending) return;
 	if (m_text == text) return;
 	m_text = text;
 	emit textChanged();
@@ -116,54 +157,193 @@ void ComposerController::setCanSend(const bool value) {
 	emit canSendChanged();
 }
 void ComposerController::addUrls(const QVariantList &urls) {
+	if (m_sending) return;
+	QSet< QString > queuedPaths;
+	int examinedUrlCount = 0;
 	for (const QVariant &value : urls) {
+		if (++examinedUrlCount > MaxAttachmentCount) break;
+		if (m_attachments.rowCount() >= MaxAttachmentCount) break;
 		const QUrl url = value.toUrl();
 		if (!url.isLocalFile()) continue;
-		const QFileInfo info(url.toLocalFile());
-		if (!info.exists() || !info.isFile() || info.size() <= 0) continue;
-		const QString canonicalPath = info.canonicalFilePath();
+		const QString rawPath = url.toLocalFile();
+		if (rawPath.isEmpty()) continue;
+		const QString path = QDir::cleanPath(QDir::fromNativeSeparators(rawPath));
+		const QString comparisonPath =
+#ifdef Q_OS_WIN
+			path.toCaseFolded();
+#else
+			path;
+#endif
+		if (queuedPaths.contains(comparisonPath)) continue;
 		bool duplicate = false;
 		for (const DraftAttachmentModel::Item &existing : m_attachments.items()) {
-			if (QFileInfo(existing.localUrl.toLocalFile()).canonicalFilePath() == canonicalPath) {
+			QString existingPath = QDir::cleanPath(QDir::fromNativeSeparators(existing.localUrl.toLocalFile()));
+#ifdef Q_OS_WIN
+			existingPath = existingPath.toCaseFolded();
+#endif
+			if (existingPath == comparisonPath) {
 				duplicate = true;
 				break;
 			}
 		}
 		if (duplicate) continue;
+		queuedPaths.insert(comparisonPath);
 
 		const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-		const QString key = QStringLiteral("draft:%1:%2:%3")
-							.arg(canonicalPath)
-							.arg(info.size())
-							.arg(info.lastModified().toMSecsSinceEpoch());
-		const QString thumbnail = m_pipeline ? m_pipeline->registerLocalFile(canonicalPath, key) : QString();
+		const QString fileName = path.section(QLatin1Char('/'), -1);
 		DraftAttachmentModel::Item item{ id,
-										 QUrl::fromLocalFile(canonicalPath),
-										 thumbnail,
-										 info.fileName(),
-										 thumbnail.isEmpty() ? QStringLiteral("failed") : QStringLiteral("ready"),
-										 thumbnail.isEmpty() ? 0.0 : 1.0,
-										 thumbnail.isEmpty() ? tr("Unsupported or oversized image.") : QString() };
-		m_attachments.append(std::move(item));
+										 QUrl::fromLocalFile(path),
+										 {},
+										 fileName,
+										 QStringLiteral("loading"),
+										 0.0,
+										 {} };
+		if (!m_attachments.append(std::move(item))) continue;
+		const quint64 sequence = ++m_nextAttachmentSequence;
+		m_attachmentSequences.insert(id, sequence);
+		queueValidation(id, path, sequence);
 	}
 }
-void ComposerController::removeAttachment(const QString &id) { m_attachments.remove(id); }
-void ComposerController::moveAttachment(const QString &id, const int destination) { m_attachments.move(id, destination); }
-void ComposerController::cancelAttachment(const QString &id) { m_attachments.remove(id); }
+void ComposerController::removeAttachment(const QString &id) {
+	if (m_sending) return;
+	forgetAttachment(id);
+	m_attachments.remove(id);
+}
+void ComposerController::moveAttachment(const QString &id, const int destination) {
+	if (m_sending) return;
+	m_attachments.move(id, destination);
+}
+void ComposerController::cancelAttachment(const QString &id) { removeAttachment(id); }
 void ComposerController::retryAttachment(const QString &id) {
+	if (m_sending) return;
 	const DraftAttachmentModel::Item item = m_attachments.item(id);
 	if (item.id.isEmpty() || !item.localUrl.isLocalFile()) return;
-	const QFileInfo info(item.localUrl.toLocalFile());
-	const QString key = QStringLiteral("draft:%1:%2:%3")
-							.arg(info.canonicalFilePath())
-							.arg(info.size())
-							.arg(info.lastModified().toMSecsSinceEpoch());
-	const QString thumbnail = m_pipeline ? m_pipeline->registerLocalFile(info.absoluteFilePath(), key) : QString();
-	m_attachments.update(id, thumbnail, thumbnail.isEmpty() ? QStringLiteral("failed") : QStringLiteral("ready"),
-						 thumbnail.isEmpty() ? 0.0 : 1.0,
-						 thumbnail.isEmpty() ? tr("Unsupported or oversized image.") : QString());
+	const QString path = QDir::cleanPath(QDir::fromNativeSeparators(item.localUrl.toLocalFile()));
+	m_attachments.update(id, {}, QStringLiteral("loading"), 0.0, {});
+	quint64 sequence = m_attachmentSequences.value(id);
+	if (sequence == 0) {
+		sequence = ++m_nextAttachmentSequence;
+		m_attachmentSequences.insert(id, sequence);
+	}
+	queueValidation(id, path, sequence);
+}
+
+void ComposerController::queueValidation(const QString &id, const QString &path, const quint64 sequence) {
+	if (id.isEmpty() || path.isEmpty()) return;
+	if (const auto previous = m_validationCancellations.value(id)) previous->store(true);
+	quint64 generation = ++m_nextValidationGeneration;
+	if (generation == 0) generation = ++m_nextValidationGeneration;
+	const auto cancelled = std::make_shared< std::atomic_bool >(false);
+	m_validationGenerations.insert(id, generation);
+	m_validationCancellations.insert(id, cancelled);
+	for (auto it = m_validationQueue.begin(); it != m_validationQueue.end();) {
+		if (it->id == id) it = m_validationQueue.erase(it);
+		else ++it;
+	}
+	m_validationQueue.enqueue({ id, path, generation, sequence, cancelled });
+	pumpValidationQueue();
+}
+
+void ComposerController::pumpValidationQueue() {
+	while (m_activeValidations < MaxValidationWorkers && !m_validationQueue.isEmpty()) {
+		const ValidationRequest request = m_validationQueue.dequeue();
+		if (m_validationGenerations.value(request.id) != request.generation) continue;
+		++m_activeValidations;
+		const std::shared_ptr< QmlImagePipeline > pipeline = m_pipeline;
+		auto *watcher = new QFutureWatcher< ValidationResult >(this);
+		connect(watcher, &QFutureWatcher< ValidationResult >::finished, this, [this, watcher, request]() {
+			const ValidationResult result = watcher->result();
+			watcher->deleteLater();
+			finishValidation(request, result);
+		});
+		watcher->setFuture(QtConcurrent::run(m_validationPool.get(), [request, pipeline]() {
+			ValidationResult result;
+			if (!request.cancelled || request.cancelled->load()) return result;
+			const QFileInfo info(request.path);
+			if (!request.cancelled->load() && info.exists() && info.isFile() && info.size() > 0) {
+				result.sourceExists = true;
+				result.canonicalPath = info.canonicalFilePath();
+				if (result.canonicalPath.isEmpty()) result.canonicalPath = info.absoluteFilePath();
+				result.fileName = info.fileName();
+				const QString key = QStringLiteral("draft:%1:%2:%3:%4:%5")
+					.arg(request.id)
+					.arg(request.generation)
+					.arg(result.canonicalPath)
+					.arg(info.size())
+					.arg(info.lastModified().toMSecsSinceEpoch());
+				if (!request.cancelled->load() && pipeline) {
+					result.thumbnailUrl = pipeline->registerLocalFile(result.canonicalPath, key);
+				}
+			}
+			return result;
+		}));
+	}
+}
+
+void ComposerController::finishValidation(const ValidationRequest &request, const ValidationResult &result) {
+	if (m_activeValidations > 0) --m_activeValidations;
+	if (m_validationGenerations.value(request.id) == request.generation) {
+		if (!result.sourceExists) {
+			forgetAttachment(request.id);
+			m_attachments.remove(request.id);
+		} else {
+			QString canonicalKey = QDir::cleanPath(QDir::fromNativeSeparators(result.canonicalPath));
+#ifdef Q_OS_WIN
+			canonicalKey = canonicalKey.toCaseFolded();
+#endif
+			QStringList laterDuplicates;
+			bool superseded = false;
+			for (auto it = m_canonicalPaths.cbegin(); it != m_canonicalPaths.cend(); ++it) {
+				if (it.key() == request.id || it.value() != canonicalKey) continue;
+				if (m_attachmentSequences.value(it.key()) < request.sequence) superseded = true;
+				else laterDuplicates.push_back(it.key());
+			}
+			if (superseded) {
+				forgetAttachment(request.id);
+				m_attachments.remove(request.id);
+			} else {
+				for (const QString &duplicateId : laterDuplicates) {
+					forgetAttachment(duplicateId);
+					m_attachments.remove(duplicateId);
+				}
+				m_canonicalPaths.insert(request.id, canonicalKey);
+				m_attachments.resolve(request.id, QUrl::fromLocalFile(result.canonicalPath), result.fileName,
+					result.thumbnailUrl,
+					result.thumbnailUrl.isEmpty() ? QStringLiteral("failed") : QStringLiteral("ready"),
+					result.thumbnailUrl.isEmpty() ? 0.0 : 1.0,
+					result.thumbnailUrl.isEmpty() ? tr("Unsupported or oversized image.") : QString());
+			}
+		}
+	}
+	pumpValidationQueue();
+}
+
+void ComposerController::forgetAttachment(const QString &id) {
+	if (const auto cancelled = m_validationCancellations.value(id)) cancelled->store(true);
+	m_validationGenerations.remove(id);
+	m_validationCancellations.remove(id);
+	m_attachmentSequences.remove(id);
+	m_canonicalPaths.remove(id);
+	for (auto it = m_validationQueue.begin(); it != m_validationQueue.end();) {
+		if (it->id == id) it = m_validationQueue.erase(it);
+		else ++it;
+	}
+}
+
+void ComposerController::forgetAllAttachments() {
+	for (const auto &cancelled : std::as_const(m_validationCancellations)) {
+		if (cancelled) cancelled->store(true);
+	}
+	m_validationGenerations.clear();
+	m_validationCancellations.clear();
+	m_attachmentSequences.clear();
+	m_canonicalPaths.clear();
+	m_validationQueue.clear();
 }
 void ComposerController::send() {
+	for (const DraftAttachmentModel::Item &item : m_attachments.items()) {
+		if (item.status == QLatin1String("loading")) return;
+	}
 	const QStringList paths = m_attachments.localPaths();
 	if (m_sending || !m_canSend || (m_text.trimmed().isEmpty() && paths.isEmpty())) return;
 	m_sending = true;
@@ -177,6 +357,7 @@ void ComposerController::finishSend(const bool success, const QString &error) {
 	emit sendingChanged();
 	if (success) {
 		setText({});
+		forgetAllAttachments();
 		m_attachments.clear();
 	} else if (!error.isEmpty()) {
 		emit sendFailed(error);

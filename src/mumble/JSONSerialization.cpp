@@ -11,6 +11,54 @@
 #include <QDebug>
 #include <QIODevice>
 
+namespace {
+void removeRetiredFrontendSettings(nlohmann::json &json) {
+	if (json.contains("ui") && json.at("ui").is_object()) {
+		auto &ui = json["ui"];
+		const SettingsKey *retiredKeys[] = {
+			&SettingsKeys::THEME_KEY,
+			&SettingsKeys::THEME_STYLE_KEY,
+			&SettingsKeys::THEME_DARK_KEY,
+			&SettingsKeys::THEME_DARK_STYLE_KEY,
+			&SettingsKeys::THEME_METHOD_KEY,
+			&SettingsKeys::LOCK_LAYOUT_KEY,
+			&SettingsKeys::MINIMAL_VIEW_KEY,
+			&SettingsKeys::HIDE_FRAME_KEY,
+			&SettingsKeys::WINDOW_GEOMETRY_KEY,
+			&SettingsKeys::WINDOW_GEOMETRY_MINIMAL_VIEW_KEY,
+			&SettingsKeys::WINDOW_STATE_KEY,
+			&SettingsKeys::WINDOW_STATE_MINIMAL_VIEW_KEY,
+			&SettingsKeys::MODERN_MINIMAL_VIEW_GEOMETRY_KEY,
+			&SettingsKeys::MODERN_WINDOW_STATE_KEY,
+			&SettingsKeys::MODERN_MINIMAL_VIEW_STATE_KEY,
+			&SettingsKeys::CONFIG_GEOMETRY_KEY,
+			&SettingsKeys::IMAGE_PREVIEW_GEOMETRY_KEY,
+			&SettingsKeys::WINDOW_LAYOUT_KEY,
+			&SettingsKeys::AUTO_SWITCH_MODERN_LAYOUT_KEY,
+			&SettingsKeys::CONTEXT_MENU_ENTRIES_IN_MENU_BAR_KEY,
+			&SettingsKeys::CONNECT_DIALOG_GEOMETRY_KEY,
+			&SettingsKeys::CONNECT_DIALOG_HEADER_STATE_KEY,
+			&SettingsKeys::DISPLAY_TRANSMIT_MODE_COMBOBOX_KEY,
+		};
+		for (const SettingsKey *key : retiredKeys) {
+			ui.erase(static_cast< const char * >(*key));
+		}
+		if (ui.empty()) json.erase("ui");
+	}
+	if (json.contains("dank_mumble") && json.at("dank_mumble").is_object()) {
+		auto &forkSettings = json["dank_mumble"];
+		forkSettings.erase(static_cast< const char * >(SettingsKeys::MODERN_LAYOUT_POLICY_KEY));
+		if (forkSettings.empty()) json.erase("dank_mumble");
+	}
+	if (json.contains("search") && json.at("search").is_object()) {
+		auto &search = json["search"];
+		search.erase(static_cast< const char * >(SettingsKeys::SEARCH_WINDOW_POSITION_KEY));
+		if (search.empty()) json.erase("search");
+	}
+}
+
+} // namespace
+
 
 template< typename T, bool isEnum > struct SaveValueConverter {
 	static const T &getValue(const T &value) { return value; }
@@ -128,6 +176,10 @@ void to_json(nlohmann::json &j, const Settings &settings) {
 	PROCESS_ALL_SETTINGS
 
 #undef PROCESS
+
+	// These keys remain readable so older profiles migrate without an error, but
+	// the Qt Quick client must never persist removed widget/layout state again.
+	removeRetiredFrontendSettings(j);
 
 	if (settings.qlShortcuts != defaultValues.qlShortcuts) {
 		// We only remove server specific shortcuts since they are saved in the DB.
@@ -252,6 +304,8 @@ void from_json(const nlohmann::json &j, Settings &settings) {
 	if (!Mumble::SpeechCleanup::isBackendAvailable(settings.remoteSpeechCleanupBackend)) {
 		settings.remoteSpeechCleanupEnabled = false;
 	}
+
+	settings.normalizeModernOnlyFrontendState();
 }
 
 void to_json(nlohmann::json &j, const QString &string) {

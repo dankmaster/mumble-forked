@@ -43,6 +43,7 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 3
             Label {
+				textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: String(root.state.title || qsTr("Update"))
                 color: Theme.textStrong
@@ -50,6 +51,7 @@ Rectangle {
                 elide: Text.ElideRight
             }
             Label {
+				textFormat: Text.PlainText
                 Layout.fillWidth: true
                 visible: text.length > 0
                 text: String(root.state.detail || "")

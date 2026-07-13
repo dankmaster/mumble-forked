@@ -24,12 +24,16 @@
 #include <QtCore/QMutex>
 #include <QtCore/QObject>
 #include <QtCore/QPair>
+#include <QtCore/QReadWriteLock>
 #include <QtCore/QStringList>
 #include <QtCore/QThread>
 #include <QtCore/QTimer>
 #include <QtNetwork/QHostAddress>
+#include <QtNetwork/QSslCertificate>
 #include <QtNetwork/QSslCipher>
+#include <QtNetwork/QSslConfiguration>
 #include <QtNetwork/QSslError>
+#include <QtNetwork/QSslKey>
 
 #define SERVERSEND_EVENT 3501
 
@@ -38,8 +42,10 @@
 #include "ServerAddress.h"
 #include "Timer.h"
 
+#include <atomic>
 #include <memory>
 #include <optional>
+#include <vector>
 
 class Connection;
 class Database;
@@ -71,20 +77,102 @@ enum class ServerHandlerState {
 
 using ConnectionPtr = std::shared_ptr< Connection >;
 
+/// Immutable-by-convention value returned to UI-side consumers. The handler
+/// may replace its TLS state while a connection attempt is being torn down, so
+/// callers must retain this snapshot instead of referencing handler-owned Qt
+/// containers directly.
+struct ServerTlsDetails {
+	QList< QSslError > errors;
+	QList< QSslCertificate > certificates;
+	QSslCipher cipher;
+	QSsl::SslProtocol protocol = QSsl::UnknownProtocol;
+	bool perfectForwardSecrecy = false;
+};
+
+struct ServerPingMetric {
+	quint64 sampleCount = 0;
+	double meanMs       = 0.0;
+	double varianceMs2  = 0.0;
+};
+
+struct ServerPingStats {
+	ServerPingMetric tcp;
+	ServerPingMetric udp;
+};
+
+struct ServerPacketStats {
+	unsigned int good   = 0;
+	unsigned int late   = 0;
+	unsigned int lost   = 0;
+	unsigned int resync = 0;
+};
+
+struct ServerCryptStats {
+	bool available = false;
+	ServerPacketStats local;
+	ServerPacketStats remote;
+};
+
+struct ServerIdentityDetails {
+	QString release;
+	QString os;
+	QString osVersion;
+};
+
 class ServerHandler : public QThread {
 private:
 	Q_OBJECT
 	Q_DISABLE_COPY(ServerHandler)
+	friend class TestServerHandlerState;
 
-	Database *database;
+	std::unique_ptr< Database > database;
+	std::atomic< ConnectionPtr > m_connection;
+	QSslConfiguration m_sslConfiguration;
+	QString m_databaseLocation;
+	QString m_sslCipherString;
+	QPair< QList< QSslCertificate >, QSslKey > m_clientCertificate;
+	bool m_suppressIdentity = false;
+	bool m_qosEnabled = false;
+	std::atomic< Version::full_t > m_version{ Version::UNKNOWN };
+	std::atomic< std::shared_ptr< VoiceRecorder > > m_recorder;
+	std::atomic_bool m_udpEnabled{ true };
+	std::atomic_bool m_strongConnection{ false };
+	std::atomic_bool m_serverSynchronized{ false };
+	mutable QReadWriteLock m_digestLock;
+	QByteArray m_serverDigest;
+	mutable QReadWriteLock m_tlsDetailsLock;
+	ServerTlsDetails m_tlsDetails;
+	mutable QReadWriteLock m_identityDetailsLock;
+	ServerIdentityDetails m_identityDetails;
+	mutable QMutex m_pingStatsLock;
+	boost::accumulators::accumulator_set<
+		double, boost::accumulators::stats< boost::accumulators::tag::mean, boost::accumulators::tag::variance,
+										boost::accumulators::tag::count > >
+		m_tcpPingAccumulator, m_udpPingAccumulator;
+	std::vector< unsigned char > m_udpCryptoBuffer;
 
 	static QMutex nextConnectionIDMutex;
 	static int nextConnectionID;
 
+	bool initializeThreadResources(QString &errorMessage);
+	void releaseThreadResources();
+	void publishConnection(ConnectionPtr connection);
+	ConnectionPtr takeConnection();
+	void setServerDigest(QByteArray digest);
+	void clearTlsDetails();
+	void setTlsVerificationDetails(QList< QSslCertificate > certificates, QList< QSslError > errors);
+	void setTlsSessionDetails(QList< QSslCertificate > certificates, QSslCipher cipher, QSsl::SslProtocol protocol,
+							  bool perfectForwardSecrecy);
+	void clearIdentityDetails();
+	void setUdpEnabled(bool enabled);
+	void setStrongConnection(bool strong);
+	void resetPingStats();
+	void recordTcpPing(double milliseconds);
+	void recordUdpPing(double milliseconds);
 	bool isAborted();
 	void changeState(ServerHandlerState state);
 
-	ServerHandlerState m_state = ServerHandlerState::Idle;
+	std::atomic< ServerHandlerState > m_state{ ServerHandlerState::Idle };
 
 protected:
 	QString qsHostName;
@@ -92,16 +180,10 @@ protected:
 	QString qsPassword;
 	unsigned short usPort;
 	unsigned short usResolvedPort;
-	bool bUdp;
-	bool bStrong;
 	int connectionID;
 	Mumble::Protocol::UDPPingEncoder< Mumble::Protocol::Role::Client > m_udpPingEncoder;
 	Mumble::Protocol::UDPDecoder< Mumble::Protocol::Role::Client > m_udpDecoder;
 	Mumble::Protocol::UDPDecoder< Mumble::Protocol::Role::Client > m_tcpTunnelDecoder;
-
-	/// Flag indicating whether the server we are currently connected to has
-	/// finished synchronizing already.
-	bool serverSynchronized = false;
 
 #ifdef Q_OS_WIN
 	HANDLE hQoS;
@@ -111,7 +193,7 @@ protected:
 	QHostAddress qhaRemote;
 	QHostAddress qhaLocal;
 	QUdpSocket *qusUdp;
-	QMutex qmUdp;
+	mutable QMutex qmUdp;
 
 	void handleVoicePacket(const Mumble::Protocol::AudioData &audioData);
 
@@ -119,35 +201,20 @@ public:
 	Timer tTimestamp;
 	int iInFlightTCPPings;
 	QTimer *tConnectionTimeoutTimer;
-	QList< QSslError > qlErrors;
-	QList< QSslCertificate > qscCert;
-	QSslCipher qscCipher;
-	ConnectionPtr cConnection;
-	QByteArray qbaDigest;
-	std::shared_ptr< VoiceRecorder > recorder;
 	QSslSocket *qtsSock;
 	QList< ServerAddress > qlAddresses;
 	QHash< ServerAddress, QString > qhHostnames;
 	ServerAddress saTargetServer;
 
-	Version::full_t m_version;
-	QString qsRelease;
-	QString qsOS;
-	QString qsOSVersion;
-
-	/**
-	 * A flag indicating whether this connection makes use of PFS or not. Note that this flag only has meaning, if the
-	 * used version of Qt is >= 5.7.
-	 */
-	bool connectionUsesPerfectForwardSecrecy = false;
-
-	boost::accumulators::accumulator_set<
-		double, boost::accumulators::stats< boost::accumulators::tag::mean, boost::accumulators::tag::variance,
-											boost::accumulators::tag::count > >
-		accTCP, accUDP, accClean;
-
 	ServerHandler();
 	~ServerHandler();
+	/// Refreshes settings that are consumed during run() startup. Call only from
+	/// the owner/UI thread while this handler is stopped.
+	void refreshStartConfiguration();
+	/// Releases process-wide resources owned by this handler after run() has
+	/// returned. This is idempotent and allows a replacement handler to be
+	/// installed without waiting for transient shared_ptr readers to disappear.
+	void finalizeThreadResources();
 	void setConnectionInfo(const QString &host, unsigned short port, const QString &username, const QString &pw);
 	void getConnectionInfo(QString &host, unsigned short &port, QString &username, QString &pw) const;
 	bool isStrong() const;
@@ -155,10 +222,25 @@ public:
 	int getConnectionID() const;
 
 	void setProtocolVersion(Version::full_t version);
+	Version::full_t protocolVersion() const;
+	ConnectionPtr connectionSnapshot() const;
+	QByteArray serverDigest() const;
+	ServerTlsDetails tlsDetailsSnapshot() const;
+	ServerPingStats pingStatsSnapshot() const;
+	ServerCryptStats cryptStatsSnapshot() const;
+	ServerIdentityDetails identityDetailsSnapshot() const;
+	void setServerIdentityDetails(QString release, QString os, QString osVersion);
+	ServerHandlerState stateSnapshot() const;
+	bool isUdpEnabled() const;
+	std::shared_ptr< VoiceRecorder > voiceRecorder() const;
+	void setVoiceRecorder(std::shared_ptr< VoiceRecorder > voiceRecorder);
+	std::shared_ptr< VoiceRecorder > takeVoiceRecorder();
+	bool clearVoiceRecorder(const VoiceRecorder *expectedRecorder = nullptr);
 
 	void sendProtoMessage(const ::google::protobuf::Message &msg, Mumble::Protocol::TCPMessageType type);
 	void sendMessage(const unsigned char *data, int len, bool force = false);
 	void sendVersion();
+	void applyCryptSetup(const MumbleProto::CryptSetup &message);
 
 	/// @returns Whether this handler is currently connected to a server.
 	bool isConnected() const;
@@ -228,6 +310,7 @@ public:
 	void disconnect();
 	void run() Q_DECL_OVERRIDE;
 signals:
+	void startupFailed(QString reason);
 	void error(QAbstractSocket::SocketError, QString reason);
 	// This signal is basically the same as disconnected but it will be emitted
 	// *right before* disconnected is emitted. Thus this can be used by slots
@@ -237,7 +320,6 @@ signals:
 	void disconnected(QAbstractSocket::SocketError, QString reason);
 	void connected();
 	void pingRequested();
-	void abortRequested();
 protected slots:
 	void message(Mumble::Protocol::TCPMessageType type, const QByteArray &);
 	void serverConnectionConnected();
@@ -249,7 +331,6 @@ protected slots:
 	void hostnameResolved();
 private slots:
 	void sendPingInternal();
-	void abortConnection();
 public slots:
 	void sendPing();
 };

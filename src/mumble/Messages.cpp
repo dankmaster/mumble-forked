@@ -240,7 +240,6 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 		QString str = u8(msg.welcome_text());
 		setPersistentChatWelcomeText(str);
 	}
-	pmModel->ensureSelfVisible();
 	pmModel->recheckLinks();
 	appendServerSyncTrace(QStringLiteral("post-model-sync"));
 
@@ -266,7 +265,7 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 
 	Global::get().sh->getConnectionInfo(host, port, uname, pw);
 
-	QList< Shortcut > sc = Global::get().db->getShortcuts(Global::get().sh->qbaDigest);
+	QList< Shortcut > sc = Global::get().db->getShortcuts(Global::get().sh->serverDigest());
 	if (!sc.isEmpty()) {
 		Global::get().s.qlShortcuts << sc;
 		GlobalShortcutEngine::engine->bNeedRemap = true;
@@ -290,13 +289,13 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 
 	// Update QActions and menus
 	if (qmServer && qmSelf && qmConfig) {
-		on_qmServer_aboutToShow();
-		on_qmSelf_aboutToShow();
+		refreshServerActions();
+		refreshSelfActions();
 		if (qmChannel && qmUser) {
 			qmChannel_aboutToShow();
 			qmUser_aboutToShow();
 		}
-		on_qmConfig_aboutToShow();
+		refreshConfigActions();
 	}
 	appendServerSyncTrace(QStringLiteral("post-menu-update"));
 
@@ -1208,7 +1207,7 @@ void MainWindow::msgChannelState(const MumbleProto::ChannelState &msg) {
 
 			ServerHandlerPtr sh = Global::get().sh;
 			if (sh) {
-				c->m_filterMode = Global::get().db->getChannelFilterMode(sh->qbaDigest, c->iId);
+				c->m_filterMode = Global::get().db->getChannelFilterMode(sh->serverDigest(), c->iId);
 			}
 
 		} else {
@@ -1385,28 +1384,9 @@ void MainWindow::msgPing(const MumbleProto::Ping &) {
 }
 
 void MainWindow::msgCryptSetup(const MumbleProto::CryptSetup &msg) {
-	ConnectionPtr c = Global::get().sh->cConnection;
-	if (!c)
-		return;
-	if (msg.has_key() && msg.has_client_nonce() && msg.has_server_nonce()) {
-		const std::string &key          = msg.key();
-		const std::string &client_nonce = msg.client_nonce();
-		const std::string &server_nonce = msg.server_nonce();
-		if (!c->csCrypt->setKey(key, client_nonce, server_nonce)) {
-			qWarning("Messages: Cipher resync failed: Invalid key/nonce from the server!");
-		}
-	} else if (msg.has_server_nonce()) {
-		const std::string &server_nonce = msg.server_nonce();
-		if (server_nonce.size() == AES_BLOCK_SIZE) {
-			c->csCrypt->m_statsLocal.resync++;
-			if (!c->csCrypt->setDecryptIV(server_nonce)) {
-				qWarning("Messages: Cipher resync failed: Invalid nonce from the server!");
-			}
-		}
-	} else {
-		MumbleProto::CryptSetup mpcs;
-		mpcs.set_client_nonce(c->csCrypt->getEncryptIV());
-		Global::get().sh->sendMessage(mpcs);
+	const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot();
+	if (serverHandler) {
+		serverHandler->applyCryptSetup(msg);
 	}
 }
 
@@ -1470,7 +1450,7 @@ void MainWindow::removeContextAction(const MumbleProto::ContextActionModify &msg
 ///
 /// @param msg The message object with the respective information
 void MainWindow::msgVersion(const MumbleProto::Version &msg) {
-	Global::get().sh->setProtocolVersion(MumbleProto::getVersion(msg));
+	const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot();
 	if (msg.supported_chat_features_size() > 0
 		|| (msg.has_supports_persistent_chat() && msg.supports_persistent_chat())) {
 		Global::get().qlSupportedChatFeatures = Mumble::ChatFeatures::featuresFromVersion(msg);
@@ -1488,12 +1468,10 @@ void MainWindow::msgVersion(const MumbleProto::Version &msg) {
 		m_modernLayoutCompatibleServer = true;
 	}
 
-	if (msg.has_release())
-		Global::get().sh->qsRelease = u8(msg.release());
-	if (msg.has_os()) {
-		Global::get().sh->qsOS = u8(msg.os());
-		if (msg.has_os_version())
-			Global::get().sh->qsOSVersion = u8(msg.os_version());
+	if (serverHandler) {
+		serverHandler->setServerIdentityDetails(msg.has_release() ? u8(msg.release()) : QString(),
+											msg.has_os() ? u8(msg.os()) : QString(),
+											msg.has_os() && msg.has_os_version() ? u8(msg.os_version()) : QString());
 	}
 }
 
@@ -1786,7 +1764,6 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 		}
 		ensurePersistentChatPreviewSiteSnapshot(previewKey);
 		storePersistentChatPreviewDiskCache(previewKey);
-		updatePersistentChatPreviewViewIfVisible(previewKey);
 	}
 
 	m_persistentChatAssetDownloads.erase(it);

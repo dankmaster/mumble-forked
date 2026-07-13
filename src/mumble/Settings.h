@@ -492,7 +492,6 @@ struct Settings {
 	/// If true settings in this structure require a client restart to apply fully
 	bool requireRestartToApply = false;
 	/// If true settings in this structure require a client redraw
-	bool requireThemeApplication = false;
 	QString settingsLocation     = {};
 	/// A flag indicating whether the current Mumble session has already backed up the settings it was started with,
 	/// before writing new ones.
@@ -511,6 +510,7 @@ struct Settings {
 
 	void load(const QString &path, bool skipSettingsBackupPrompt = false);
 	void load(bool skipSettingsBackupPrompt = false);
+	void normalizeModernOnlyFrontendState();
 
 	void legacyLoad(const QString &path = {});
 

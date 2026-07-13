@@ -175,12 +175,13 @@ void SocketRPCClient::processXml() {
 			}
 			ack = true;
 		} else if (request.nodeName() == QLatin1String("url")) {
-			if (Global::get().sh && Global::get().sh->isRunning() && Global::get().uiSession) {
+			const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot();
+			if (serverHandler && serverHandler->isRunning() && Global::get().uiSession) {
 				QString host, user, pw;
 				unsigned short port;
 				QUrl u;
 
-				Global::get().sh->getConnectionInfo(host, port, user, pw);
+				serverHandler->getConnectionInfo(host, port, user, pw);
 				u.setScheme(QLatin1String("mumble"));
 				u.setHost(host);
 				u.setPort(port);

@@ -17,6 +17,7 @@ private slots:
 	void connectControllerSelectsAndSavesFavorites();
 	void settingsControllerForcesModernAndAppliesDraft();
 	void settingsControllerClampsAudioSetupPayload();
+	void settingsControllerReconcilesPluginRuntimeState();
 	void audioInputVoiceActivityLevelUsesExpectedSignals();
 	void dialogControllerBuildsFailedConnectionReconnect();
 	void dialogControllerDispatchesGenericDialogAction();
@@ -469,6 +470,29 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QVERIFY(qFuzzyCompare(audioInputResult.settingsToApply->fVADmax, 0.70f));
 	QCOMPARE(audioInputResult.accepted, true);
 	QCOMPARE(audioInputResult.closeDialog, true);
+}
+
+void TestModernDialogControllers::settingsControllerReconcilesPluginRuntimeState() {
+	Settings settings;
+	ModernSettingsController controller;
+	controller.open(settings, QStringLiteral("plugins"));
+
+	QVERIFY(!controller.reconcilePluginLoadedState(QString(), true));
+	QVERIFY(controller.reconcilePluginLoadedState(QStringLiteral(" C:/plugins/example.dll "), true));
+	QCOMPARE(controller.draft().qhPluginSettings.size(), 1);
+	PluginSetting setting = controller.draft().qhPluginSettings.constBegin().value();
+	QCOMPARE(setting.path, QStringLiteral("C:/plugins/example.dll"));
+	QVERIFY(setting.enabled);
+
+	controller.updateField(QStringLiteral("plugins.runtimeLoaded"),
+		QVariantMap { { QStringLiteral("path"), QStringLiteral("C:/plugins/example.dll") },
+			{ QStringLiteral("loaded"), false } });
+	setting = controller.draft().qhPluginSettings.constBegin().value();
+	QVERIFY(!setting.enabled);
+
+	controller.invokeAction(QStringLiteral("reset"), QVariantMap());
+	setting = controller.draft().qhPluginSettings.constBegin().value();
+	QVERIFY(!setting.enabled);
 }
 
 void TestModernDialogControllers::settingsControllerClampsAudioSetupPayload() {

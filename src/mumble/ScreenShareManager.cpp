@@ -283,6 +283,7 @@ void ScreenShareManager::logLocalShareAvailabilityDiagnostic(const QString &cont
 	}
 	const QString captureBackends =
 		capabilities.captureBackends.isEmpty() ? QStringLiteral("-") : capabilities.captureBackends.join(QStringLiteral(","));
+	const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot();
 
 	qInfo().noquote()
 		<< QStringLiteral("ScreenShareManager: availability context=%1 connected=%2 enabled=%3 helper_required=%4 "
@@ -291,7 +292,7 @@ void ScreenShareManager::logLocalShareAvailabilityDiagnostic(const QString &cont
 						  "zero_copy=%13 roi=%14 damage=%15 queue_budget=%16 capture_backends=[%17] "
 						  "gstreamer=%18 livekit_publish=%19 livekit_view=%20 reason=%21")
 			   .arg(context.isEmpty() ? QStringLiteral("-") : context,
-					Global::get().sh ? QStringLiteral("true") : QStringLiteral("false"),
+					serverHandler ? QStringLiteral("true") : QStringLiteral("false"),
 					Global::get().bScreenShareEnabled ? QStringLiteral("true") : QStringLiteral("false"),
 					Global::get().bScreenShareHelperRequired ? QStringLiteral("true") : QStringLiteral("false"),
 					capabilities.captureSupported ? QStringLiteral("true") : QStringLiteral("false"),
@@ -319,7 +320,7 @@ bool ScreenShareManager::canRequestLocalShare() const {
 }
 
 QString ScreenShareManager::localShareUnavailableReason() const {
-	if (!Global::get().sh) {
+	if (!Global::get().serverHandlerSnapshot()) {
 		return tr("Connect to a server before starting screen sharing.");
 	}
 
@@ -464,7 +465,8 @@ bool ScreenShareManager::isUsingNativeGpuRuntime(const QString &streamID) const 
 }
 
 void ScreenShareManager::requestStartChannelShare(unsigned int channelID, const ScreenShareStartOptions &options) {
-	if (!Global::get().sh) {
+	const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot();
+	if (!serverHandler) {
 		return;
 	}
 	logLocalShareAvailabilityDiagnostic(QStringLiteral("request-start"));
@@ -565,7 +567,7 @@ void ScreenShareManager::requestStartChannelShare(unsigned int channelID, const 
 	msg.set_requested_max_bitrate_kbps(qMax(bitratePolicy.maxKbps, requestedBitrate));
 	msg.set_prefer_hardware_encoding(true);
 
-	Global::get().sh->sendMessage(msg);
+	serverHandler->sendMessage(msg);
 }
 
 void ScreenShareManager::requestStartViewing(const QString &streamID) {
@@ -613,13 +615,14 @@ void ScreenShareManager::requestStopShare(const QString &streamID) {
 }
 
 void ScreenShareManager::notifyServerShareStopped(const QString &streamID) {
-	if (!Global::get().sh) {
+	const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot();
+	if (!serverHandler) {
 		return;
 	}
 
 	MumbleProto::ScreenShareStop msg;
 	msg.set_stream_id(u8(streamID));
-	Global::get().sh->sendMessage(msg);
+	serverHandler->sendMessage(msg);
 }
 
 const QHash< QString, ScreenShareSession > &ScreenShareManager::sessions() const {
@@ -767,7 +770,7 @@ ScreenShareSession ScreenShareManager::sessionFromState(const MumbleProto::Scree
 
 bool ScreenShareManager::canPublishSession(const ScreenShareSession &session) const {
 	const ScreenShareHelperClient::CapabilitySnapshot &capabilities = m_helperClient->capabilities();
-	if (!Global::get().bScreenShareEnabled || !Global::get().sh) {
+	if (!Global::get().bScreenShareEnabled || !Global::get().serverHandlerSnapshot()) {
 		return false;
 	}
 	if (session.ownerSession != Global::get().uiSession
