@@ -3413,7 +3413,7 @@ bool ModernUiAutomationServer::start(QString *errorMessage) {
 	const uint requestedPort = portText.toUInt(&parsedPort);
 	if (!parsedPort || requestedPort > 65535) {
 		if (errorMessage) {
-			*errorMessage = tr("Invalid MUMBLE_MODERN_AUTOMATION_PORT value '%1'.").arg(portText);
+			*errorMessage = QObject::tr("Invalid MUMBLE_MODERN_AUTOMATION_PORT value '%1'.").arg(portText);
 		}
 		return false;
 	}
@@ -3424,7 +3424,7 @@ bool ModernUiAutomationServer::start(QString *errorMessage) {
 
 	if (!m_server->listen(QHostAddress::LocalHost, static_cast< quint16 >(requestedPort))) {
 		if (errorMessage) {
-			*errorMessage = tr("Unable to start Modern UI automation server on 127.0.0.1:%1: %2")
+			*errorMessage = QObject::tr("Unable to start Modern UI automation server on 127.0.0.1:%1: %2")
 								.arg(requestedPort)
 								.arg(m_server->errorString());
 		}

@@ -26,11 +26,13 @@ struct ChannelListener {
 };
 
 // Make ChannelListener hashable and comparable
-template<> struct std::hash< ChannelListener > {
+namespace std {
+template<> struct hash< ChannelListener > {
 	std::size_t operator()(const ChannelListener &val) const {
-		return std::hash< unsigned int >()(val.userSession) ^ (std::hash< unsigned int >()(val.channelID) << 2);
+		return hash< unsigned int >()(val.userSession) ^ (hash< unsigned int >()(val.channelID) << 2);
 	}
 };
+} // namespace std
 std::size_t qHash(const ChannelListener &listener);
 bool operator==(const ChannelListener &lhs, const ChannelListener &rhs);
 

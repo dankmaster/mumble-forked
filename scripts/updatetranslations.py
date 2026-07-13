@@ -13,7 +13,7 @@
 #
 # Requires Qt "lupdate" binary; check build requirements
 
-import os, glob, logging, sys, subprocess, re
+import os, glob, logging, sys, subprocess, re, tempfile
 import argparse
 from shutil import which
 from typing import Optional
@@ -57,6 +57,38 @@ def ResetCommits(amount):
         exit(1)
 
 
+def VerifyQmlSupport(lupdatebin: str) -> None:
+    """Fail before touching catalogs when lupdate was built without QML parsing."""
+    sentinel = 'Mumble QML extraction probe'
+    with tempfile.TemporaryDirectory(prefix='mumble-lupdate-probe-') as directory:
+        qmlfile = os.path.join(directory, 'Probe.qml')
+        tsfile = os.path.join(directory, 'probe.ts')
+        with open(qmlfile, 'w', encoding='utf-8', newline='\n') as handle:
+            handle.write('import QtQuick\nItem { property string probe: qsTr("%s") }\n' % sentinel)
+
+        result = subprocess.run(
+            [lupdatebin, '-locations', 'none', '-extensions', 'qml', qmlfile, '-ts', tsfile],
+            capture_output=True,
+        )
+        diagnostics = (result.stdout + result.stderr).decode('utf-8', errors='replace')
+        if result.returncode != 0:
+            logging.error('lupdate QML capability probe failed with error code %d', result.returncode)
+            logging.info('diagnostics: %s', diagnostics)
+            exit(result.returncode)
+        if 'missing qml/javascript support' in diagnostics.lower():
+            logging.error('lupdate was built without QML/JavaScript support')
+            exit(1)
+        try:
+            with open(tsfile, 'r', encoding='utf-8') as handle:
+                catalog = handle.read()
+        except OSError as error:
+            logging.error('lupdate did not create its QML capability probe catalog: %s', error)
+            exit(1)
+        if sentinel not in catalog:
+            logging.error('lupdate ignored QML sources; use an official Qt Linguist build with QML support')
+            exit(1)
+
+
 def Update(lupdatebin, tsfile: str, debuglupdate: bool, applyHeuristics = True):
     runArray = [
         lupdatebin
@@ -85,7 +117,7 @@ def Update(lupdatebin, tsfile: str, debuglupdate: bool, applyHeuristics = True):
     if res.returncode != 0:
         logging.error('lupdate failed with error code %d', res.returncode)
         logging.info('stdout: ' + res.stdout.decode("utf-8"))
-        logging.info('stderr: ' + res.stdout.decode("utf-8"))
+        logging.info('stderr: ' + res.stderr.decode("utf-8"))
         exit(res.returncode)
     p = re.compile(r'Found (?P<nsrc>[0-9]+) source text\(s\) \((?P<nnew>[0-9]+) new and (?P<nsame>[0-9]+) already existing\)')
     m = p.search(res.stdout.decode('ascii'))
@@ -112,6 +144,9 @@ if __name__ == '__main__':
     # cd into repository root directory
     os.chdir(os.path.dirname(os.path.abspath(__file__)) + '/..')
     logging.info('Working in directory %s', os.getcwd())
+
+    logging.info('Verifying lupdate QML support…')
+    VerifyQmlSupport(lupdatebin)
 
     tsfiles = glob.glob(os.path.join('src', 'mumble', 'mumble_*.ts'))
     logging.debug('Identified these ts files: %s', tsfiles)

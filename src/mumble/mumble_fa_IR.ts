@@ -2,478 +2,6 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="fa_IR">
 <context>
-    <name>ACLEditor</name>
-    <message>
-        <source>Deny</source>
-        <translation>ردکردن</translation>
-    </message>
-    <message>
-        <source>Allow</source>
-        <translation>اجازه</translation>
-    </message>
-    <message>
-        <source>Allow %1</source>
-        <translation>اجازه %1</translation>
-    </message>
-    <message>
-        <source>Deny %1</source>
-        <translation>ممنوع %1</translation>
-    </message>
-    <message>
-        <source>Mumble - Add channel</source>
-        <translation>Mumble-اضافه کردن کانال</translation>
-    </message>
-    <message>
-        <source>Default server value</source>
-        <translation>مقدار پیش فرض سرور</translation>
-    </message>
-    <message>
-        <source>Failed: Invalid channel</source>
-        <translation>ناموفق: کانال نامعتبر</translation>
-    </message>
-    <message>
-        <source>Mumble - Edit %1</source>
-        <translation>Mumble - ویرایش %1</translation>
-    </message>
-    <message>
-        <source>ID: %1</source>
-        <translation>شناسه: %1</translation>
-    </message>
-    <message>
-        <source>This grants the %1 privilege. If a privilege is both allowed and denied, it is denied.&lt;br /&gt;%2</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channel must have a name</source>
-        <translation>کانال باید نام داشته باشد</translation>
-    </message>
-    <message>
-        <source>This revokes the %1 privilege. If a privilege is both allowed and denied, it is denied.&lt;br /&gt;%2</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Dialog</source>
-        <translation>دیالوگ</translation>
-    </message>
-    <message>
-        <source>Name</source>
-        <translation>نام</translation>
-    </message>
-    <message>
-        <source>Enter the channel name here.</source>
-        <translation>نام کانال را اینجا وارد نمایید.</translation>
-    </message>
-    <message>
-        <source>Description</source>
-        <translation>توضیحات</translation>
-    </message>
-    <message>
-        <source>Password</source>
-        <translation>رمزعبور</translation>
-    </message>
-    <message>
-        <source>Enter the channel password here.</source>
-        <translation>رمز کانال را اینجا وارد نمایید.</translation>
-    </message>
-    <message>
-        <source>Check to create a temporary channel.</source>
-        <translation>بررسی برای ایجاد کانال موقت</translation>
-    </message>
-    <message>
-        <source>Temporary</source>
-        <translation>موقتی</translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Position&lt;/b&gt;&lt;br/&gt;
-This value enables you to change the way Mumble arranges the channels in the tree. A channel with a higher &lt;i&gt;Position&lt;/i&gt; value will always be placed below one with a lower value and the other way around. If the &lt;i&gt;Position&lt;/i&gt; value of two channels is equal they will get sorted alphabetically by their name.</source>
-        <oldsource>&lt;b&gt;Position&lt;/b&gt;&lt;br/&gt;
-This value enables you to change the way mumble arranges the channels in the tree. A channel with a higher &lt;i&gt;Position&lt;/i&gt; value will always be placed below one with a lower value and the other way around. If the &lt;i&gt;Position&lt;/i&gt; value of two channels is equal they will get sorted alphabetically by their name.</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Position</source>
-        <translation>جایگاه</translation>
-    </message>
-    <message>
-        <source>&amp;Groups</source>
-        <translation>&amp;گروه ها</translation>
-    </message>
-    <message>
-        <source>Group</source>
-        <translation>گروه</translation>
-    </message>
-    <message>
-        <source>List of groups</source>
-        <translation>لیست گروه ها</translation>
-    </message>
-    <message>
-        <source>Remove selected group</source>
-        <translation>پاک کردن گروه انتخاب شده</translation>
-    </message>
-    <message>
-        <source>Remove</source>
-        <translation>پاک کردن</translation>
-    </message>
-    <message>
-        <source>Inherit group members from parent</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Inherit</source>
-        <translation>ارث بردن</translation>
-    </message>
-    <message>
-        <source>Make group inheritable to sub-channels</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Inheritable</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Group was inherited from parent channel</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Inherited</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Members</source>
-        <translation>اعضا</translation>
-    </message>
-    <message>
-        <source>Add</source>
-        <translation>اضافه کردن</translation>
-    </message>
-    <message>
-        <source>Add member to group</source>
-        <translation>اضافه کردن عضو به گروه</translation>
-    </message>
-    <message>
-        <source>Remove member from group</source>
-        <translation>حذف عضو از گروه</translation>
-    </message>
-    <message>
-        <source>&amp;ACL</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Active ACLs</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Inherit ACL of parent?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This sets whether or not the ACL up the chain of parent channels are applied to this object. Only those entries that are marked in the parent as &quot;Apply to sub-channels&quot; will be inherited.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Inherit ACLs</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Move entry up</source>
-        <translation>ورودی را به بالا انتقال بده</translation>
-    </message>
-    <message>
-        <source>This moves the entry up in the list. As entries are evaluated in order, this may change the effective permissions of users. You cannot move an entry above an inherited entry, if you really need that you&apos;ll have to duplicate the inherited entry.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Up</source>
-        <translation>&amp;بالا</translation>
-    </message>
-    <message>
-        <source>Move entry down</source>
-        <translation>ورودی را به پایین انتقال بده</translation>
-    </message>
-    <message>
-        <source>This moves the entry down in the list. As entries are evaluated in order, this may change the effective permissions of users.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Down</source>
-        <translation>&amp;پایین</translation>
-    </message>
-    <message>
-        <source>Add new entry</source>
-        <translation>افزودن ورودی جدید</translation>
-    </message>
-    <message>
-        <source>This adds a new entry, initially set with no permissions and applying to all.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Add</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Remove entry</source>
-        <translation>حذف ورودی</translation>
-    </message>
-    <message>
-        <source>This removes the currently selected entry.</source>
-        <translation>این ورودی انتخاب شده فعلی را حذف می‌کند.</translation>
-    </message>
-    <message>
-        <source>&amp;Remove</source>
-        <translation>&amp;حذف</translation>
-    </message>
-    <message>
-        <source>Context</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Entry should apply to this channel.</source>
-        <oldsource>Entry should apply to this channel</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This makes the entry apply to this channel.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Applies to this channel</source>
-        <translation>اضافه کردن به این کانال</translation>
-    </message>
-    <message>
-        <source>Entry should apply to sub-channels.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Add new group</source>
-        <translation>اضافه کردن گروه جدید</translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Add&lt;/b&gt;&lt;br/&gt;
-Add a new group.</source>
-        <translation>&lt;b&gt;اضافه کردن&lt;/b&gt;&lt;br/&gt;
-یک گروه جدید اضافه کن.</translation>
-    </message>
-    <message>
-        <source>Inherited members</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Contains the list of members added to the group by this channel.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Contains a list of members whose group membership will not be inherited from the parent channel.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Contains the list of members inherited by other channels.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Type in the name of a user you wish to add to the group and click Add.</source>
-        <translation>نام کاربری را که می‌خواهید به گروه اضافه کنید تایپ کنید و روی اضافه کردن کلیک کنید.</translation>
-    </message>
-    <message>
-        <source>Type in the name of a user you wish to remove from the group and click Add.</source>
-        <translation>نام کاربری را که می‌خواهید از گروه حذف کنید تایپ کنید و روی اضافه کردن کلیک کنید.</translation>
-    </message>
-    <message>
-        <source>Exclude</source>
-        <translation>محروم کردن</translation>
-    </message>
-    <message>
-        <source>Excluded members</source>
-        <translation>اعضای محروم شده</translation>
-    </message>
-    <message>
-        <source>This makes the entry apply to sub-channels of this channel.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Applies to sub-channels</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Permissions</source>
-        <translation>دسترسی ها</translation>
-    </message>
-    <message>
-        <source>User/Group</source>
-        <translation>عضو/گروه</translation>
-    </message>
-    <message>
-        <source>Group this entry applies to</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>User ID</source>
-        <translation>شناسه کاربر</translation>
-    </message>
-    <message>
-        <source>User this entry applies to</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This controls which user this entry applies to. Just type in the user name and hit enter to query the server for a match.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Properties</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Name&lt;/b&gt;&lt;br /&gt;Enter the channel name in this field. The name has to comply with the restriction imposed by the server you are connected to.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Temporary&lt;/b&gt;&lt;br /&gt;
-When checked the channel created will be marked as temporary. This means when the last player leaves it the channel will be automatically deleted by the server.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Group&lt;/b&gt;&lt;br /&gt;
-These are all the groups currently defined for the channel. To create a new group, just type in the name and press enter.</source>
-        <translation>&lt;b&gt;گروه&lt;/b&gt;&lt;br /&gt;
-این‌ها تمام گروه‌هایی هستند که در حال حاضر برای کانال تعریف شده‌اند. برای ایجاد گروه جدید، نام را وارد کنید و Enter را فشار دهید.</translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Remove&lt;/b&gt;&lt;br /&gt;This removes the currently selected group. If the group was inherited, it will not be removed from the list, but all local information about the group will be cleared.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Inherit&lt;/b&gt;&lt;br /&gt;This inherits all the members in the group from the parent, if the group is marked as &lt;i&gt;Inheritable&lt;/i&gt; in the parent channel.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Inheritable&lt;/b&gt;&lt;br /&gt;This makes this group inheritable to sub-channels. If the group is non-inheritable, sub-channels are still free to create a new group with the same name.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Inherited&lt;/b&gt;&lt;br /&gt;This indicates that the group was inherited from the parent channel. You cannot edit this flag, it&apos;s just for information.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Members&lt;/b&gt;&lt;br /&gt;
-This list contains all members that were added to the group by the current channel. Be aware that this does not include members inherited by higher levels of the channel tree. These can be found in the &lt;i&gt;Inherited members&lt;/i&gt; list. To prevent this list to be inherited by lower level channels uncheck &lt;i&gt;Inheritable&lt;/i&gt; or manually add the members to the &lt;i&gt;Excluded members&lt;/i&gt; list.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Excluded members&lt;/b&gt;&lt;br /&gt;
-Contains a list of members whose group membership will not be inherited from the parent channel.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Inherited members&lt;/b&gt;&lt;br /&gt;
-Contains the list of members inherited by the current channel. Uncheck &lt;i&gt;Inherit&lt;/i&gt; to prevent inheritance from higher level channels.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This controls which group of users this entry applies to.&lt;br /&gt;Note that the group is evaluated in the context of the channel the entry is used in. For example, the default ACL on the Root channel gives &lt;i&gt;Write&lt;/i&gt; permission to the &lt;i&gt;admin&lt;/i&gt; group. This entry, if inherited by a channel, will give a user write privileges if he belongs to the &lt;i&gt;admin&lt;/i&gt; group in that channel, even if he doesn&apos;t belong to the &lt;i&gt;admin&lt;/i&gt; group in the channel where the ACL originated.&lt;br /&gt;If a group name starts with &apos;!&apos;, its membership is negated, and if it starts with &apos;~&apos;, it is evaluated in the channel the ACL was defined in, rather than the channel the ACL is active in.&lt;br /&gt;If a group name starts with &apos;#&apos;, it is interpreted as an access token. Users must have entered whatever follows the &apos;#&apos; in their list of access tokens to match. This can be used for very simple password access to channels for non-authenticated users.&lt;br /&gt;If a group name starts with &apos;$&apos;, it will only match users whose certificate hash matches what follows the &apos;$&apos;.&lt;br /&gt;A few special predefined groups are:&lt;br /&gt;&lt;b&gt;all&lt;/b&gt; - Everyone will match.&lt;br /&gt;&lt;b&gt;auth&lt;/b&gt; - All authenticated users will match.&lt;br /&gt;&lt;b&gt;sub,a,b,c&lt;/b&gt; - User currently in a sub-channel minimum &lt;i&gt;a&lt;/i&gt; common parents, and between &lt;i&gt;b&lt;/i&gt; and &lt;i&gt;c&lt;/i&gt; channels down the chain. See the website for more extensive documentation on this one.&lt;br /&gt;&lt;b&gt;in&lt;/b&gt; - Users currently in the channel will match (convenience for &apos;&lt;i&gt;sub,0,0,0&lt;/i&gt;&apos;).&lt;br /&gt;&lt;b&gt;out&lt;/b&gt; - Users outside the channel will match (convenience for &apos;&lt;i&gt;!sub,0,0,0&lt;/i&gt;&apos;).&lt;br /&gt;Note that an entry applies to either a user or a group, not both.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Password&lt;/b&gt;&lt;br /&gt;This field allows you to easily set and change the password of a channel. It uses Mumble&apos;s access tokens feature in the background. Use ACLs and groups if you need more fine grained and powerful access control.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This shows all the entries active on this channel. Entries inherited from parent channels will be shown in italics.&lt;br /&gt;ACLs are evaluated top to bottom, meaning priority increases as you move down the list.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>ID of the channel.</source>
-        <translation>شناسه کانال.</translation>
-    </message>
-    <message>
-        <source>Maximum Users</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Maximum number of users allowed in the channel</source>
-        <translation>حداکثر تعداد کاربران مجاز در کانال</translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Maximum Users&lt;/b&gt;&lt;br /&gt;
-This value allows you to set the maximum number of users allowed in the channel. If the value is above zero, only that number of users will be allowed to enter the channel. If the value is zero, the maximum number of users in the channel is given by the server&apos;s default limit.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is the sort order for the channel.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Properties</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channel password</source>
-        <translation>رمز عبور کانال</translation>
-    </message>
-    <message>
-        <source>Channel name</source>
-        <translation>نام کانال</translation>
-    </message>
-    <message>
-        <source>Inherited group members</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Inherited channel members</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>List of ACL entries</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channel position</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channel maximum users</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channel description</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Select member to add</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Excluded group members</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Select member to remove</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>List of access control list entries</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Select group</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Selects a group this ACL entry applies to. Selecting a group and selecting a user are mutually exclusive.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Select user</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Selects a user this ACL entry applies to. Selecting a group and selecting a user are mutually exclusive.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>List of available permissions</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
     <name>ALSAAudioInput</name>
     <message>
         <source>Default ALSA Card</source>
@@ -496,215 +24,6 @@ This value allows you to set the maximum number of users allowed in the channel.
     </message>
 </context>
 <context>
-    <name>ALSAEnumerator</name>
-    <message>
-        <source>Getting name (longname) of the sound card failed: %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Getting name of the sound card failed: %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>ASIOConfig</name>
-    <message>
-        <source>%1 (version %2)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>%1 -&gt; %2 samples buffer, with %3 sample resolution (%4 preferred) at %5 Hz</source>
-        <oldsource>%1 -&gt; %2 samples buffer, with %3 sample resolution (%4 preferred) at %5Hz</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>ASIO Initialization failed: %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Failed to instantiate ASIO driver</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>ASIO</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Device selection</source>
-        <translation>انتخاب دستگاه</translation>
-    </message>
-    <message>
-        <source>Device</source>
-        <translation>دستگاه</translation>
-    </message>
-    <message>
-        <source>Device to use for microphone</source>
-        <translation>دستگاهی که برای میکروفن استفاده شود</translation>
-    </message>
-    <message>
-        <source>This chooses what device to query. You still need to actually query the device and select which channels to use.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Query selected device</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This queries the selected device for channels. Be aware that many ASIO drivers are buggy to the extreme, and querying them might cause a crash of either the application or the system.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Query</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Configure selected device</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This configures the selected device. Be aware that many ASIO drivers are buggy to the extreme, and querying them might cause a crash of either the application or the system.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Configure</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Capabilities</source>
-        <translation>توانایی‌ها</translation>
-    </message>
-    <message>
-        <source>Driver name</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Buffer size</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will configure the input channels for ASIO. Make sure you select at least one channel as microphone and speaker. &lt;i&gt;Microphone&lt;/i&gt; should be where your microphone is attached, and &lt;i&gt;Speaker&lt;/i&gt; should be a channel that samples &apos;&lt;i&gt;What you hear&lt;/i&gt;&apos;.&lt;br /&gt;For example, on the Audigy 2 ZS, a good selection for Microphone would be &apos;&lt;i&gt;Mic L&lt;/i&gt;&apos; while Speaker should be &apos;&lt;i&gt;Mix L&lt;/i&gt;&apos; and &apos;&lt;i&gt;Mix R&lt;/i&gt;&apos;.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Configure input channels</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channels</source>
-        <translation>کانال‌ها</translation>
-    </message>
-    <message>
-        <source>Microphone</source>
-        <translation>میکروفُن</translation>
-    </message>
-    <message>
-        <source>&lt;-</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>-&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unused</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Speakers</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>List of microphones</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>List of speakers</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Device list</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Move from unused to microphone list</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Move from microphone to unused list</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>List of unused devices</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Move from unused to speakers list</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Move from speakers to unused list</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>ASIOInput</name>
-    <message>
-        <source>You need to select at least one microphone and one speaker source to use ASIO.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Opening selected ASIO device failed. No input will be done.</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>AboutDialog</name>
-    <message>
-        <source>About Mumble</source>
-        <translation>درباره Mumble</translation>
-    </message>
-    <message>
-        <source>&amp;About Mumble</source>
-        <translation>&amp;درباره Mumble</translation>
-    </message>
-    <message>
-        <source>&amp;License</source>
-        <translation>&amp;مجوزها</translation>
-    </message>
-    <message>
-        <source>A&amp;uthors</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Third-Party Licenses</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>OK</source>
-        <translation>خُب</translation>
-    </message>
-    <message>
-        <source>License agreement</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Authors</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Third-party license agreements</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>For a list of authors, please see &lt;a href=&quot;https://github.com/mumble-voip/mumble/graphs/contributors&quot;&gt;https://github.com/mumble-voip/mumble/graphs/contributors&lt;/a&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>An Open Source, low-latency, high quality voice-chat utility</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
     <name>AccessibleQGroupBox</name>
     <message>
         <source>empty</source>
@@ -712,992 +31,102 @@ This value allows you to set the maximum number of users allowed in the channel.
     </message>
 </context>
 <context>
-    <name>AudioInput</name>
+    <name>AclEditor</name>
     <message>
-        <source>Interface</source>
+        <source>Inherit ACLs from parent room</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>System</source>
+        <source>Room password</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Device</source>
-        <translation type="unfinished">دستگاه</translation>
-    </message>
-    <message>
-        <source>Input device for audio</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This is the input device to use for audio.&lt;/b&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Transmission</source>
-        <translation>انتقال</translation>
-    </message>
-    <message>
-        <source>&amp;Transmit</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>When to transmit your speech</source>
-        <translation>هنگامه انتقال گفتگو</translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This sets when speech should be transmitted.&lt;/b&gt;&lt;br /&gt;&lt;i&gt;Continuous&lt;/i&gt; - All the time&lt;br /&gt;&lt;i&gt;Voice Activity&lt;/i&gt; - When you are speaking clearly.&lt;br /&gt;&lt;i&gt;Push To Talk&lt;/i&gt; - When you hold down the hotkey set under &lt;i&gt;Shortcuts&lt;/i&gt;.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>DoublePush Time</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>If you press the PTT key twice in this time it will get locked.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;DoublePush Time&lt;/b&gt;&lt;br /&gt;If you press the push-to-talk key twice during the configured interval of time it will be locked. Mumble will keep transmitting until you hit the key once more to unlock PTT again.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Reset audio cue to default</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Reset&lt;/b&gt;&lt;br/&gt;Reset the paths for the files to their default.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Browse for on audio file</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Browse for off audio file</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Off</source>
-        <translation>خاموش</translation>
-    </message>
-    <message>
-        <source>On</source>
-        <translation>روشن</translation>
-    </message>
-    <message>
-        <source>Use SNR based speech detection</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Signal to Noise</source>
-        <translation>سیگنال به نویز</translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This sets speech detection to use Amplitude.&lt;/b&gt;&lt;br /&gt;In this mode, the raw strength of the input signal is used to detect speech.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Amplitude</source>
-        <translation>بلندی</translation>
-    </message>
-    <message>
-        <source>Voice &amp;Hold</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>How long to keep transmitting after silence</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Silence Below</source>
-        <translation>سکوتِ زیرِ</translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This sets the trigger values for voice detection.&lt;/b&gt;&lt;br /&gt;Use this together with the Audio Statistics window to manually tune the trigger values for detecting speech. Input values below &quot;Silence Below&quot; always count as silence. Values above &quot;Speech Above&quot; always count as voice. Values in between will count as voice if you&apos;re already talking, but will not trigger a new detection.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Speech Above</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Signal values above this count as voice</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Compression</source>
-        <translation>فشردگی</translation>
-    </message>
-    <message>
-        <source>&amp;Quality</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Quality of compression (peak bandwidth)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This sets the quality of compression.&lt;/b&gt;&lt;br /&gt;This determines how much bandwidth Mumble is allowed to use for outgoing audio.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio per packet</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>How many audio frames to send per packet</source>
-        <translation>چند فریم صوتی در هر بسته ارسال شود</translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This selects how many audio frames should be put in one packet.&lt;/b&gt;&lt;br /&gt;Increasing this will increase the latency of your voice, but will also reduce bandwidth requirements.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio Processing</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Noise suppression</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This sets the amount of noise suppression to apply.&lt;/b&gt;&lt;br /&gt;The higher this value, the more aggressively stationary noise will be suppressed.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Maximum amplification of input sound</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Maximum amplification of input.&lt;/b&gt;&lt;br /&gt;Mumble normalizes the input volume before compressing, and this sets how much it&apos;s allowed to amplify.&lt;br /&gt;The actual level is continually updated based on your current speech pattern, but it will never go above the level specified here.&lt;br /&gt;If the &lt;i&gt;Microphone loudness&lt;/i&gt; level of the audio statistics hover around 100%, you probably want to set this to 2.0 or so, but if, like most people, you are unable to reach 100%, set this to something much higher.&lt;br /&gt;Ideally, set it so &lt;i&gt;Microphone Loudness * Amplification Factor &gt;= 100&lt;/i&gt;, even when you&apos;re speaking really soft.&lt;br /&gt;&lt;br /&gt;Note that there is no harm in setting this to maximum, but Mumble will start picking up other conversations if you leave it to auto-tune to that level.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Current speech detection chance</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enabling this will cancel the echo from your speakers. Mixed has low CPU impact, but only works well if your speakers are equally loud and equidistant from the microphone. Multichannel echo cancellation provides much better echo cancellation, but at a higher CPU cost.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Disabled</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This sets speech detection to use Signal to Noise ratio.&lt;/b&gt;&lt;br /&gt;In this mode, the input is analyzed for something resembling a clear signal, and the clarity of that signal is used to trigger speech detection.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This shows the current speech detection settings.&lt;/b&gt;&lt;br /&gt;You can change the settings from the Settings dialog or from the Audio Wizard.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Signal values below this count as silence</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Maximum bandwidth used for sending audio</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Use Amplitude based speech detection</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This selects how long after a perceived stop in speech transmission should continue.&lt;/b&gt;&lt;br /&gt;Set this higher if your voice breaks up when you speak (seen by a rapidly blinking voice icon next to your name).</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Exclusive mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This opens the device in exclusive mode.&lt;/b&gt;&lt;br /&gt;No other application will be able to use the device.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Exclusive</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>R&amp;eset</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Browse...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>B&amp;rowse...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Preview</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Preview&lt;/b&gt;&lt;br/&gt;Plays the current &lt;i&gt;on&lt;/i&gt; sound followed by the current &lt;i&gt;off&lt;/i&gt; sound.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Displays an always on top window with a push to talk button in it</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Display push to talk window</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Misc</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Gets played when starting to transmit</source>
+        <source>Groups</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Gets played when stopping to transmit</source>
+        <source>Group name</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Hold Time</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Time the microphone stays open after the PTT key is released</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Server maximum network bandwidth is only %1 kbit/s. Audio quality auto-adjusted to %2 kbit/s (%3 ms)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Max. Amplification</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Idle action</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>minutes do</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>nothing</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>deafen</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>mute</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>after</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Echo Cancellation</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The idle action will be reversed upon any key or mouse button input</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Undo Idle action upon activity</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio input</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This is the input method to use for audio.&lt;/b&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enable Opus&apos; low-delay mode when the quality is set to &lt;b&gt;64 kb/s&lt;/b&gt; or higher. </source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>If checked, Mumble will enable Opus&apos; low-delay mode when the quality is set to &lt;b&gt;64 kbit/s&lt;/b&gt; or higher. Low-delay mode decreases latency by &lt;b&gt;~15 milliseconds&lt;/b&gt; in the round trip. This mode may require an higher bitrate to preserve the same quality, in comparison with the music and VOIP modes.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Allow low delay mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Don&apos;t use noise suppression.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Use the noise suppression algorithm provided by Speex.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Use the noise suppression algorithm provided by RNNoise.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Use a combination of Speex and RNNoise to do noise suppression.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Both</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This controls the amount by which Speex will suppress noise.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Speex suppression strength</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mute cue</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Br&amp;owse...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Pre&amp;view</source>
-        <translation type="unfinished"></translation>
+        <source>Inherit</source>
+        <translation type="unfinished">ارث بردن</translation>
     </message>
     <message>
-        <source>Audio cue when using...</source>
+        <source>Inheritable</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Audible audio cue when starting or stopping to transmit using Push To Talk</source>
+        <source>Added user IDs</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;b&gt;This enables transmission audio cues when using Push To Talk.&lt;/b&gt;&lt;br /&gt;Setting this will give you a short audio beep when you start and stop transmitting.</source>
+        <source>Removed user IDs</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Push To Talk</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audible audio cue when starting or stopping to transmit using Voice Activity</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This enables transmission audio cues when using Voice Activity.&lt;/b&gt;&lt;br /&gt;Setting this will give you a short audio beep when you start and stop transmitting.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Voice Activity</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Input backend for audio</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio input system</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio input device</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Transmission mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Push to talk lock threshold</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Switch between push to talk and continuous mode by double tapping in this time frame</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Voice hold Time&lt;/b&gt;&lt;br /&gt;After you release the push-to-talk key Mumble will keep transmitting for the selected amount of time.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Push to talk hold threshold</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Extend push to talk send time after the key is released by this amount of time</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Voice hold time</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Silence below threshold</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This sets the threshold when Mumble will definitively consider a signal silence</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Speech above threshold</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This sets the threshold when Mumble will definitively consider a signal speech</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This sets how much speech is packed into a single network package</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio compression quality</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This sets the target compression bitrate</source>
-        <translation type="unfinished"></translation>
+        <source>Remove</source>
+        <translation type="unfinished">پاک کردن</translation>
     </message>
     <message>
-        <source>Maximum amplification</source>
+        <source>Add group</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Speech is dynamically amplified by at most this amount</source>
+        <source>Access rules</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Noise suppression strength</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Echo cancellation mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Path to audio file</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Path to audio cue file when stopping to speak. Use the &quot;browse&quot; button to open a file dialog.</source>
-        <translation type="unfinished"></translation>
+        <source>Group</source>
+        <translation type="unfinished">گروه</translation>
     </message>
     <message>
-        <source>Idle action time threshold (in minutes)</source>
+        <source>User</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Select what to do when being idle for a configurable amount of time. Default: nothing</source>
+        <source>Username or ID</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Gets played when you are trying to speak while being muted</source>
+        <source>Here</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Path to mute cue file. Use the &quot;browse&quot; button to open a file dialog.</source>
+        <source>Sub-rooms</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Browse for mute cue audio file</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Path to audio cue file when starting to speak. Use the &quot;browse&quot; button to open a file dialog.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Preview the mute cue</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The mute cue is an audio sample which plays when you are trying to speak while being muted</source>
-        <translation type="unfinished"></translation>
+        <source>Allow</source>
+        <translation type="unfinished">اجازه</translation>
     </message>
     <message>
-        <source>Preview both audio cues</source>
-        <translation type="unfinished"></translation>
+        <source>Deny</source>
+        <translation type="unfinished">ردکردن</translation>
     </message>
     <message>
-        <source>&lt;b&gt;This shows peak outgoing bandwidth used.&lt;/b&gt;&lt;br /&gt;This shows the peak amount of bandwidth sent out from your machine. Audio bitrate is the maximum bitrate for the audio data alone. Position is the bitrate used for positional information. Overhead is our framing and the IP packet headers (IP and UDP is 75% of this overhead).</source>
+        <source>Add rule</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
-    <name>AudioInputDialog</name>
+    <name>AsyncOperationModel</name>
     <message>
-        <source>Continuous</source>
+        <source>Operation cancelled</source>
         <translation type="unfinished"></translation>
     </message>
+</context>
+<context>
+    <name>AudioInput</name>
     <message>
-        <source>Voice Activity</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Push To Talk</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio Input</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>%1 ms</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Off</source>
-        <translation type="unfinished">خاموش</translation>
-    </message>
-    <message>
-        <source>%1 s</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>%1 kb/s</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>-%1 dB</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>%1 kbit/s (Audio %2, Position %4, Overhead %3)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Access to the microphone was denied. Please allow Mumble to use the microphone by changing the settings in System Preferences -&gt; Security &amp; Privacy -&gt; Privacy -&gt; Microphone.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Access to the microphone was denied. Please check that your operating system&apos;s microphone settings allow Mumble to use the microphone.</source>
-        <translation type="unfinished">دسترسی به میکروفون رد شد. لطفا بررسی کنید که سیستم عامل شما به Mumble اجازه استفاده از میکروفون را داده است.</translation>
-    </message>
-    <message>
-        <source>Disabled</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Disable echo cancellation.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>milliseconds</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>seconds</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>kilobits per second</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>decibels</source>
+        <source>Server maximum network bandwidth is only %1 kbit/s. Audio quality auto-adjusted to %2 kbit/s (%3 ms)</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
     <name>AudioOutput</name>
     <message>
-        <source>Interface</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>System</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Output method for audio</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Device</source>
-        <translation type="unfinished">دستگاه</translation>
-    </message>
-    <message>
-        <source>Output device for audio</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This is the output device to use for audio.&lt;/b&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Positional Audio</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio Output</source>
-        <translation>خروجی صدا</translation>
-    </message>
-    <message>
-        <source>Default &amp;Jitter Buffer</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Safety margin for jitter buffer</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This sets the minimum safety margin for the jitter buffer.&lt;/b&gt;&lt;br /&gt;All incoming audio is buffered, and the jitter buffer continually tries to push the buffer to the minimum sustainable by your network, so latency can be as low as possible. This sets the minimum buffer size to use. If the start of sentences you hear is very jittery, increase this value.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This sets the minimum distance for sound calculations. The volume of other users&apos; speech will not decrease until they are at least this far away from you.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This sets the maximum distance for sound calculations. When farther away than this, other users&apos; speech volume will not decrease any further.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This enables one of the loopback test modes.&lt;/b&gt;&lt;br /&gt;&lt;i&gt;None&lt;/i&gt; - Loopback disabled&lt;br /&gt;&lt;i&gt;Local&lt;/i&gt; - Emulate a local server.&lt;br /&gt;&lt;i&gt;Server&lt;/i&gt; - Request loopback from server.&lt;br /&gt;Please note than when loopback is enabled, no other users will hear your voice. This setting is not saved on application exit.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Volume</source>
-        <translation>حجم صدا</translation>
-    </message>
-    <message>
-        <source>Volume of incoming speech</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This adjusts the volume of incoming speech.&lt;/b&gt;&lt;br /&gt;Note that if you increase this beyond 100%, audio will be distorted.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Output Delay</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Amount of data to buffer</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The connected &quot;speakers&quot; are actually headphones</source>
-        <oldsource>The connected &quot;speakers&quot; are actually headphones.</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Bloom</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Factor for sound volume increase</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>How much should sound volume increase for sources that are really close?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Checking this indicates that you don&apos;t have speakers connected, just headphones. This is important, as speakers are usually in front of you, while headphones are directly to your left/right.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This sets the amount of data to pre-buffer in the output buffer. Experiment with different values and set it to the lowest which doesn&apos;t cause rapid jitter in the sound.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Headphones</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Minimum Distance</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Maximum Distance</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Minimum Volume</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>What should the volume be at the maximum distance?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Loopback Test</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Delay Variance</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Variance in packet latency</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This sets the packet latency variance for loopback testing.&lt;/b&gt;&lt;br /&gt;Most audio paths contain some variable latency. This allows you to set that variance for loopback mode testing. For example, if you set this to 15ms, this will emulate a network with 20-35ms ping latency or one with 80-95ms latency. Most domestic net connections have a variance of about 5ms.</source>
-        <oldsource>&lt;b&gt;This sets the packet latency variance for loopback testing.&lt;/b&gt;&lt;br /&gt;Most audio paths contain some variable latency. This allows you set that variance for loopback mode testing. For example, if you set this to 15ms, this will emulate a network with 20-35ms ping latency or one with 80-95ms latency. Most domestic net connections have a variance of about 5ms.</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Packet Loss</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Packet loss for loopback mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This sets the packet loss for loopback mode.&lt;/b&gt;&lt;br /&gt;This will be the ratio of packets lost. Unless your outgoing bandwidth is peaked or there&apos;s something wrong with your network connection, this will be 0%</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Loopback</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Desired loopback mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Attenuate applications by...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Attenuation of other applications during speech</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Attenuate volume of other applications during speech&lt;/b&gt;&lt;br /&gt;Mumble supports decreasing the volume of other applications during incoming and/or outgoing speech. This sets the attenuation of other applications if the feature is enabled.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>If checked Mumble lowers the volume of other applications while other users talk</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Attenuate applications while other users talk&lt;/b&gt;&lt;br /&gt;Mumble supports decreasing the volume of other applications during incoming and/or outgoing speech. This makes mumble activate the feature while other users talk to you.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>while other users talk</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>If checked Mumble lowers the volume of other applications while you talk</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Attenuate applications while you talk&lt;/b&gt;&lt;br /&gt;Mumble supports decreasing the volume of other applications during incoming and/or outgoing speech. This makes mumble activate the feature while you talk.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>while you talk</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Exclusive mode, not recommended.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This opens the device in exclusive mode.&lt;/b&gt;&lt;br /&gt;No other application will be able to use the device.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Exclusive</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>If checked Mumble lowers the volume of other users while you talk if you have the &quot;Priority Speaker&quot; status.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>If checked, Mumble will only attenuate applications that are using the same output source as Mumble</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Attenuate only applications using the same output as Mumble&lt;/b&gt;&lt;br /&gt;If checked, applications that use a different output than Mumble will not be attenuated.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Only attenuate applications using the same output device</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>If checked, PulseAudio loopback modules will be attenuated</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Attenuate PulseAudio loopback modules&lt;/b&gt;&lt;br /&gt;If loopback modules are linked to Mumble&apos;s output device/sink, they will also be attenuated.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Attenuate PulseAudio loopback modules</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio output</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This is the output method to use for audio.&lt;/b&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Attenuate other users while talking as Priority Speaker&lt;/b&gt;&lt;br /&gt;Mumble supports decreasing the volume of other users while you talk as the &lt;i&gt;Priority Speaker&lt;/i&gt; to avoid getting disturbed. Checking this checkbox will enable this feature.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Attenuate other users while talking as Priority Speaker</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enable</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Attenuation</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source> %</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source> m</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Positional audio cannot work with mono output devices!</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio output system</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio output device</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Output delay of incoming speech</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Jitter buffer time</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Attenuation percentage</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>During speech, the volume of other applications will be reduced by this amount</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Minimum volume</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Minimum distance</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Maximum distance</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Loopback artificial delay</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Loopback artificial packet loss</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Loopback test mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The loopback test can be used to test your audio configuration. While the loopback test is enabled, others will not be able to hear you.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>at</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>while someone in your channel talks</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>always</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Attenuate listeners by...</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>AudioOutputDialog</name>
-    <message>
-        <source>None</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Local</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Server</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio Output</source>
-        <translation type="unfinished">خروجی صدا</translation>
-    </message>
-    <message>
-        <source>%1 ms</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>%1 %</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Distance at which audio volume from another player starts decreasing</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Distance at which a player&apos;s audio volume has reached its minimum value</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The minimum volume a player&apos;s audio will fade out to with increasing distance. Set to 0% for it to fade into complete silence for a realistic maximum hearing distance.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>If an audio source is close enough, blooming will cause the audio to be played on all speakers more or less regardless of their position (albeit with lower volume)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>milliseconds</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>meters</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -1708,1134 +137,7 @@ This value allows you to set the maximum number of users allowed in the channel.
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Invalid sound file</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>The file &apos;%1&apos; cannot be used by Mumble. Please select a file with a compatible format and encoding.</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>AudioStats</name>
-    <message>
-        <source>&gt;1000 ms</source>
-        <oldsource>&gt;1000ms</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio Statistics</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Input Levels</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Peak microphone level</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Peak power in last frame</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This shows the peak power in the last frame (20 ms), and is the same measurement as you would usually find displayed as &quot;input power&quot;. Please disregard this and look at &lt;b&gt;Microphone power&lt;/b&gt; instead, which is much more steady and disregards outliers.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Peak speaker level</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This shows the peak power of the speakers in the last frame (20 ms). Unless you are using a multi-channel sampling method (such as ASIO) with speaker channels configured, this will be 0. If you have such a setup configured, and this still shows 0 while you&apos;re playing audio from other programs, your setup is not working.</source>
-        <oldsource>This shows the peak power in the last frame (20 ms) of the speakers. Unless you are using a multi-channel sampling method (such as ASIO) with speaker channels configured, this will be 0. If you have such a setup configured, and this still shows 0 while you&apos;re playing audio from other programs, your setup is not working.</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Peak clean level</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This shows the peak power in the last frame (20 ms) after all processing. Ideally, this should be -96 dB when you&apos;re not talking. In reality, a sound studio should see -60 dB, and you should hopefully see somewhere around -20 dB. When you are talking, this should rise to somewhere between -5 and -10 dB.&lt;br /&gt;If you are using echo cancellation, and this rises to more than -15 dB when you&apos;re not talking, your setup is not working, and you&apos;ll annoy other users with echoes.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Signal Analysis</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Microphone power</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>How close the current input level is to ideal</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This shows how close your current input volume is to the ideal. To adjust your microphone level, open whatever program you use to adjust the recording volume, and look at the value here while talking.&lt;br /&gt;&lt;b&gt;Talk loud, as you would when you&apos;re upset over getting fragged by a noob.&lt;/b&gt;&lt;br /&gt;Adjust the volume until this value is close to 100%, but make sure it doesn&apos;t go above. If it does go above, you are likely to get clipping in parts of your speech, which will degrade sound quality.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Signal-To-Noise ratio</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Signal-To-Noise ratio from the microphone</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is the Signal-To-Noise Ratio (SNR) of the microphone in the last frame (20 ms). It shows how much clearer the voice is compared to the noise.&lt;br /&gt;If this value is below 1.0, there&apos;s more noise than voice in the signal, and so quality is reduced.&lt;br /&gt;There is no upper limit to this value, but don&apos;t expect to see much above 40-50 without a sound studio.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Speech Probability</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Probability of speech</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is the probability that the last frame (20 ms) was speech and not environment noise.&lt;br /&gt;Voice activity transmission depends on this being right. The trick with this is that the middle of a sentence is always detected as speech; the problem is the pauses between words and the start of speech. It&apos;s hard to distinguish a sigh from a word starting with &apos;h&apos;.&lt;br /&gt;If this is in bold font, it means Mumble is currently transmitting (if you&apos;re connected).</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Configuration feedback</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Current audio bitrate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Bitrate of last frame</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>DoublePush interval</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Time between last two Push-To-Talk presses</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Speech Detection</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Current speech detection chance</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This shows the current speech detection settings.&lt;/b&gt;&lt;br /&gt;You can change the settings from the Settings dialog or from the Audio Wizard.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Signal and noise power spectrum</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Power spectrum of input signal and noise estimate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This shows the power spectrum of the current input signal (red line) and the current noise estimate (filled blue).&lt;br /&gt;All amplitudes are multiplied by 30 to show the interesting parts (how much more signal than noise is present in each waveband).&lt;br /&gt;This is probably only of interest if you&apos;re trying to fine-tune noise conditions on your microphone. Under good conditions, there should be just a tiny flutter of blue at the bottom. If the blue is more than halfway up on the graph, you have a seriously noisy environment.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Echo Analysis</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Weights of the echo canceller</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This shows the weights of the echo canceller, with time increasing downwards and frequency increasing to the right.&lt;br /&gt;Ideally, this should be black, indicating no echo exists at all. More commonly, you&apos;ll have one or more horizontal stripes of bluish color representing time delayed echo. You should be able to see the weights updated in real time.&lt;br /&gt;Please note that as long as you have nothing to echo off, you won&apos;t see much useful data here. Play some music and things should stabilize. &lt;br /&gt;You can choose to view the real or imaginary parts of the frequency-domain weights, or alternately the computed modulus and phase. The most useful of these will likely be modulus, which is the amplitude of the echo, and shows you how much of the outgoing signal is being removed at that time step. The other viewing modes are mostly useful to people who want to tune the echo cancellation algorithms.&lt;br /&gt;Please note: If the entire image fluctuates massively while in modulus mode, the echo canceller fails to find any correlation whatsoever between the two input sources (speakers and microphone). Either you have a very long delay on the echo, or one of the input sources is configured wrong.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is the audio bitrate of the last compressed frame (20 ms). The peak bitrate can be adjusted in the Settings dialog.</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>AudioWizard</name>
-    <message>
-        <source>Audio Tuning Wizard</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Introduction</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Welcome to the Mumble Audio Wizard</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Finished</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enjoy using Mumble</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Device selection</source>
-        <translation type="unfinished">انتخاب دستگاه</translation>
-    </message>
-    <message>
-        <source>Selecting the input and output device to use with Mumble.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is the device your microphone is connected to.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>System</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Input method for audio</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Device</source>
-        <translation type="unfinished">دستگاه</translation>
-    </message>
-    <message>
-        <source>Input device to use</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Selects which sound card to use for audio input.&lt;/b&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Cancel echo from headset or speakers</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Use echo cancellation</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This enables echo cancellation of outgoing audio, which helps both on speakers and on headsets.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is the device your speakers or headphones are connected to.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Output method for audio</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Output device to use</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Selects which sound card to use for audio Output.&lt;/b&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enable positional audio</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Allows positioning of sound</source>
-        <oldsource>Allows positioning of sound.</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Input Device</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Output Device</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This allows Mumble to use positional audio to place voices.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;p&gt;
-To keep latency to an absolute minimum, it&apos;s important to buffer as little audio as possible on the soundcard. However, many soundcards report that they require a much smaller buffer than what they can actually work with, so the only way to set this value is to try and fail.
-&lt;/p&gt;
-&lt;p&gt;
-You should hear a voice sample. Change the slider below to the lowest value which gives &lt;b&gt;no&lt;/b&gt; interruptions or jitter in the sound. Please note that local echo is disabled during this test.
-&lt;/p&gt;
-</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Amount of data to buffer</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This sets the amount of data to pre-buffer in the output buffer. Experiment with different values and set it to the lowest which doesn&apos;t cause rapid jitter in the sound.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;p&gt;
-Open your sound control panel and go to the recording settings. Make sure the microphone is selected as active input with maximum recording volume. If there&apos;s an option to enable a &quot;Microphone boost&quot; make sure it&apos;s checked.
-&lt;/p&gt;
-&lt;p&gt;
-Speak loudly, as when you are annoyed or excited. Decrease the volume in the sound control panel until the bar below stays as high as possible in the blue and green but &lt;b&gt;not&lt;/b&gt; the red zone while you speak.
-&lt;/p&gt;
-</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Positional Audio</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Adjusting attenuation of positional audio.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Use headphones instead of speakers</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;p&gt;
-Congratulations. You should now be ready to enjoy a richer sound experience with Mumble.
-&lt;/p&gt;
-&lt;p&gt;
-Mumble is under continuous development, and the development team wants to focus on the features that benefit the most users. To this end, Mumble supports submitting anonymous statistics about your configuration to the developers. These statistics are essential for future development, and also make sure the features you use aren&apos;t deprecated.
-&lt;/p&gt;
-</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Use headphones</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This ignores the OS speaker configuration and configures the positioning for headphones instead.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Volume tuning</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Tuning microphone hardware volume to optimal settings.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Now talk softly, as you would when talking late at night and you don&apos;t want to disturb anyone. Adjust the slider below so that the bar moves into green when you talk, but stays blue while you&apos;re silent.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Voice Activity Detection</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Letting Mumble figure out when you&apos;re talking and when you&apos;re silent.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will help Mumble figure out when you are talking. The first step is selecting which data value to use.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Raw amplitude from input</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Signal-To-Noise ratio</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Next you need to adjust the following slider. The first few utterances you say should end up in the green area (definitive speech). While talking, you should stay inside the yellow (might be speech) and when you&apos;re not talking, everything should be in the red (definitively not speech).</source>
-        <oldsource>Next you need to adjust the following two sliders. The first few utterances you say should end up in the green area (definitive speech). While talking, you should stay inside the yellow (might be speech) and when you&apos;re not talking, everything should be in the red (definitively not speech).</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Device tuning</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Changing hardware output delays to their minimum value.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Submit anonymous statistics to the Mumble project</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Push To Talk:</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Quality &amp; Notifications</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Adjust quality and notification settings.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Quality settings</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Low</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Balanced</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Notification settings</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Use Text-To-Speech to read notifications and messages to you.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Disable Text-To-Speech and use sounds instead.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>%1 ms</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enables attenuation of other applications while users talk to you</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Attenuate applications while other users talk</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>High</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Custom</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>You already set a customized quality configuration in Mumble. Select this setting to keep it.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enables attenuation of other applications while users talk to you. This means that as soon someone starts to speak to you in Mumble, the sound of all other applications (like audio players) will get attenuated so you can hear them more clearly.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Apply some high contrast optimizations for visually impaired users</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Use high contrast graphics</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Keep custom Text-To-Speech settings.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;p&gt;
-Open your sound control panel and go to the recording settings. Make sure the microphone is selected as active input with maximum recording volume. If there&apos;s an option to enable a &quot;Microphone boost&quot; make sure it&apos;s checked.
-&lt;/p&gt;
-&lt;p&gt;
-Speak loudly, as when you are annoyed or excited. Decrease the volume in the sound control panel until the bar below stays as high as possible in the striped and the empty but &lt;b&gt;not&lt;/b&gt; the crisscrossed zone while you speak.
-&lt;/p&gt;
-</source>
-        <oldsource>&lt;p&gt;
-Open your sound control panel and go to the recording settings. Make sure the microphone is selected as active input with maximum recording volume. If there&apos;s an option to enable a &quot;Microphone boost&quot; make sure it&apos;s checked.
-&lt;/p&gt;
-&lt;p&gt;
-Speak loudly, as when you are annoyed or excited. Decrease the volume in the sound control panel until the bar below stays as high as possible in the striped and the empty but &lt;b&gt;not&lt;/b&gt; the criss-crossed zone while you speak.
-&lt;/p&gt;
-</oldsource>
-        <comment>For high contrast mode</comment>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Now talk softly, as you would when talking late at night and you don&apos;t want to disturb anyone. Adjust the slider below so that the bar moves into empty zone when you talk, but stays in the striped one while you&apos;re silent.</source>
-        <comment>For high contrast mode</comment>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Next you need to adjust the following slider. The first few utterances you say should end up in the empty area (definitive speech). While talking, you should stay inside the striped (might be speech) and when you&apos;re not talking, everything should be in the crisscrossed (definitively not speech).</source>
-        <comment>For high contrast mode</comment>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>In this configuration Mumble will use a &lt;b&gt;low amount of bandwidth&lt;/b&gt;. This will inevitably result in high latency and poor quality. Choose this only if your connection cannot handle the other settings. (16kbit/s, 60ms per packet)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is the &lt;b&gt;recommended default&lt;/b&gt; configuration. It provides a good balance between quality, latency, and bandwidth usage. (40kbit/s, 20ms per packet)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This configuration is only recommended for use in setups where bandwidth is not an issue, like a LAN. It provides the lowest latency supported by Mumble and &lt;b&gt;high quality&lt;/b&gt;. (72kbit/s, 10ms per packet)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This is the input method to use for audio.&lt;/b&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This is the Output method to use for audio.&lt;/b&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;This is the audio tuning wizard for Mumble. This will help you correctly set the input levels of your sound card, and also set the correct parameters for sound processing in Mumble. &lt;/p&gt;&lt;p&gt;Please be aware that as long as this wizard is active, audio will be looped locally to allow you to listen to it, and no audio will be sent to the server. &lt;/p&gt;&lt;p&gt;Note that you can cancel this wizard at any time without it having an effect on your current audio systems. The settings are only applied once this wizard has been completed.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Mumble supports positional audio for some games, and will position the voice of other users relative to their position in game. Depending on their position, the volume of the voice will be changed between the speakers to simulate the direction and distance the other user is at. Such positioning depends on your speaker configuration being correct in your operating system, so a test is done here. &lt;/p&gt;&lt;p&gt;The graph below shows the position of &lt;span style=&quot; color:#56b4e9;&quot;&gt;you&lt;/span&gt;, the &lt;span style=&quot; color:#d55e00;&quot;&gt;speakers&lt;/span&gt; and a &lt;span style=&quot; color:#009e73;&quot;&gt;moving sound source&lt;/span&gt; as if seen from above. You should hear the audio move between the channels. &lt;/p&gt;&lt;p&gt;You can also use your mouse to position the &lt;span style=&quot; color:#009e73;&quot;&gt;sound source&lt;/span&gt; manually.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Maximum amplification</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>No buttons assigned</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio input system</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio input device</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Select audio output device</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio output system</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio output device</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The Mumble positional audio system enables users to link the relative position of their voice to third party applications such as games.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Output delay for incoming speech</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Maximum amplification of input sound</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Speech is dynamically amplified by at most this amount</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Voice activity detection level</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will set the range in which Mumble will consider a signal speech. Increase value to make voice activation more sensitive.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Push to talk</source>
-        <translation type="unfinished">برای مکالمه فشار دهید</translation>
-    </message>
-    <message>
-        <source>Use the &quot;push to talk shortcut&quot; button to assign a key</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Set push to talk shortcut</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will open a shortcut edit dialog</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Graphical positional audio simulation view</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This visually represents the positional audio that is currently being played</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>BanDialog</name>
-    <message>
-        <source>Banning user</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enter reason</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ban User Certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ban IP</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ban</source>
-        <translation type="unfinished">ممنوع</translation>
-    </message>
-    <message>
-        <source>Cancel</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Banning user %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>BanEditor</name>
-    <message>
-        <source>Mumble - Edit Bans</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Address</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Mask</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Reason</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Start</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>End</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>User</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Hash</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Add</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Update</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Remove</source>
-        <translation type="unfinished">&amp;حذف</translation>
-    </message>
-    <message>
-        <source>Ban List</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Search field</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is the search field. Use it to find bans that have this username set in the username field.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Who are you looking for?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>No nickname</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>IP address</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>No IP address</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Reason for the ban</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>No reason</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ban end date</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ban end date. If you set the same date for start and end, the ban will be permanent (it will not expire).</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Certificate hash</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>No certificate hash</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Banned users</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is a list with banned users.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Use this button if you want to add a new ban.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Use this button if you want to update ban information.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Use this button if you want to remove user from the ban list.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Clear all fields</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This button clears all fields. Use it if you want to add a new ban.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Clear</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message numerus="yes">
-        <source>Ban List - %n Ban(s)</source>
-        <translation type="unfinished">
-            <numerusform></numerusform>
-        </translation>
-    </message>
-    <message>
-        <source>Mask</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Search for banned user</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Username to ban</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>IP address to ban</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ban reason</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ban start date/time</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ban end date/time</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Certificate hash to ban</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>List of banned users</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>CertView</name>
-    <message>
-        <source>Name</source>
-        <translation type="unfinished">نام</translation>
-    </message>
-    <message>
-        <source>Email</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Issuer</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Expiry Date</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>(none)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Self-signed</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>CertWizard</name>
-    <message>
-        <source>Unable to validate email.&lt;br /&gt;Enter a valid (or blank) email to continue.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>There was an error generating your certificate.&lt;br /&gt;Please try again.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Your certificate and key could not be exported to PKCS#12 format. There might be an error in your certificate.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The file could not be opened for writing. Please use another file.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The file&apos;s permissions could not be set. No certificate and key has been written. Please use another file.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The file could not be written successfully. Please use another file.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The file could not be opened for reading. Please use another file.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The file is empty or could not be read. Please use another file.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The file did not contain a valid certificate and key. Please use another file.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Select file to export certificate to</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Select file to import certificate from</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unable to import. Missing password or incompatible file type.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Certificate Expiry:&lt;/b&gt; Your certificate is about to expire. You need to renew it, or you will no longer be able to connect to servers you are registered on.</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>Certificates</name>
-    <message>
-        <source>Certificate Management</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Certificate Authentication</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Authenticating to servers without using passwords</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Current certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is the certificate Mumble currently uses.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Current Certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Create a new certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will create a new certificate.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Import certificate from file</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will import a certificate from file.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Import a certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Export Certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will export a certificate to file.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Export current certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Import Certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>PKCS #12 Certificate import</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;p&gt;Mumble can import certificates stored in PKCS #12 format. This is the format used when exporting a key from Mumble, and also when exporting keys from Firefox, Internet Explorer, Opera etc.&lt;/p&gt;&lt;p&gt;If the file is password protected, you will need the password to import the certificate.&lt;/p&gt;</source>
-        <oldsource>&lt;p&gt;Mumble can import certificates stored in PKCS #12 format. This is the format used when exporting a key from Mumble, and also when exporting keys from FireFox, Internet Explorer, Opera etc.&lt;/p&gt;&lt;p&gt;If the file is password protected, you will need the password to import the certificate.&lt;/p&gt;</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Import from</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Filename to import from</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is the filename you wish to import a certificate from.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Select file to import from</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Open...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Password</source>
-        <translation type="unfinished">رمزعبور</translation>
-    </message>
-    <message>
-        <source>Password for PKCS#12 file</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is the password for the PKCS#12 file containing your certificate.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Certificate to import</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is the certificate you are importing.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Certificate Details</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Replace Certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Replace existing certificate with new certificate?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;p&gt;You already have a certificate stored in Mumble, and you are about to replace it.&lt;/p&gt;
-&lt;p&gt;If you are upgrading to a certificate issued to you by a trusted CA and the email addresses match your current certificate, this is completely safe, and servers you connect to will automatically recognize the strong certificate for your email address.
-&lt;/p&gt;
-&lt;p&gt;If this is not the case, you will no longer be recognized by any server you previously have authenticated with. If you haven&apos;t been registered on any server yet, this is nothing to worry about.
-&lt;/p&gt;
-&lt;p&gt;
-Are you sure you wish to replace your certificate?
-&lt;/p&gt;
-</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is the certificate Mumble currently uses. It will be replaced.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>New certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is the new certificate that will replace the old one.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>New Certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Make a backup of your certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Export to</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Filename to export to</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is the filename you wish to export a certificate to.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Save As...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is the certificate Mumble currently uses. It will be exported.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Generate a new certificate for strong authentication</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;p&gt;Mumble will now generate a strong certificate for authentication to servers.&lt;/p&gt;&lt;p&gt;If you wish, you may provide some additional information to be stored in the certificate, which will be presented to servers when you connect. If you provide a valid email address, you can upgrade to a CA issued email certificate later on, which provides strong identification.&lt;/p&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Name</source>
-        <translation type="unfinished">نام</translation>
-    </message>
-    <message>
-        <source>Email</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Your email address (e.g. johndoe@mumble.info)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is your email address. It is strongly recommended to provide a valid email address, as this will allow you to upgrade to a strong certificate without authentication problems.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Your name (e.g. John Doe)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is your name, and will be filled out in the certificate. This field is entirely optional.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Finish</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Certificate-based authentication is ready for use</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enjoy using Mumble with strong authentication.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Automatic certificate creation</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;p&gt;If you ever lose your current certificate, which will happen if your computer suffers a hardware failure or you reinstall your machine, you will no longer be able to authenticate to any server you are registered on. It is therefore &lt;b&gt;mandatory&lt;/b&gt; that you make a backup of your certificate. We strongly recommend you store this backup on removable storage, such as a USB flash drive.&lt;/p&gt;
-&lt;p&gt;Note that this file will not be encrypted, and if anyone gains access to it, they will be able to impersonate you, so take good care of it.&lt;/p&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Displays current certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Certificate file to import</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Use the &quot;open&quot; button to select a file using a dialog.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Certificate password</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Displays imported certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Displays new certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>File to export certificate to</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Use the &quot;save as&quot; button to select a file using a dialog.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Your name. For example: John Doe</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Your email address. For example: johndoe@mumble.info</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;p&gt;Mumble can use certificates to authenticate with servers. Using certificates avoids passwords, meaning you don&apos;t need to disclose any password to the remote site. It also enables very easy user registration and a client side friends list independent of servers.&lt;/p&gt;&lt;p&gt;While Mumble can work without certificates, the majority of servers will expect you to have one.&lt;/p&gt;&lt;p&gt;Creating a new certificate automatically is sufficient for most use cases. But Mumble also supports certificates representing trust in the users ownership of an email address. These certificates are issued by third parties. For more information see our &lt;a href=&quot;https://www.mumble.info/documentation/user/certificates/&quot;&gt;user certificate documentation&lt;/a&gt;. &lt;/p&gt;</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -2875,10 +177,6 @@ Are you sure you wish to replace your certificate?
     </message>
     <message>
         <source>This represents no privileges.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This represents total access to the channel, including the ability to change group and ACL information. This privilege implies all other privileges.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2985,28 +283,24 @@ Are you sure you wish to replace your certificate?
         <source>Reset User Content</source>
         <translation type="unfinished"></translation>
     </message>
-</context>
-<context>
-    <name>ChatbarTextEdit</name>
     <message>
-        <source>Paste and &amp;Send</source>
-        <oldsource>Paste and send</oldsource>
+        <source>This represents total access to the channel, including the ability to change group and ACL information. This privilege implies most other privileges, but speaking, whispering, and persistent chat history access are controlled separately.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;center&gt;Type chat message here&lt;/center&gt;</source>
+        <source>This represents the permission to delete persistent text messages from this channel&apos;s history.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Unable to send image: too large.</source>
+        <source>This represents the permission to view persistent text message history in this channel.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Unable to send image %1: too large.</source>
+        <source>Delete text messages</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>This server does not allow sending images.</source>
+        <source>View chat history</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -3058,519 +352,121 @@ Are you sure you wish to replace your certificate?
     </message>
 </context>
 <context>
-    <name>ConfigDialog</name>
+    <name>ComposerController</name>
     <message>
-        <source>Accept changes</source>
-        <translation>قبول تغییرات</translation>
-    </message>
-    <message>
-        <source>This button will accept current settings and return to the application.&lt;br /&gt;The settings will be stored to disk when you leave the application.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Reject changes</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This button will reject all changes and return to the application.&lt;br /&gt;The settings will be reset to the previous positions.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Apply changes</source>
-        <translation>اعمال تغییرات</translation>
-    </message>
-    <message>
-        <source>This button will immediately apply all changes.</source>
-        <translation>این کلید به صورت خودکار تمام تغییرات را اعمال می کند.</translation>
-    </message>
-    <message>
-        <source>Undo changes for current page</source>
-        <translation>باز گردادن تغییرات برای این صفحه</translation>
-    </message>
-    <message>
-        <source>This button will revert any changes done on the current page to the most recent applied settings.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Restore defaults for current page</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mumble Configuration</source>
-        <translation>پیکربندی Mumble</translation>
-    </message>
-    <message>
-        <source>Configuration categories</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This button will restore the defaults for the settings on the current page. Other pages will not be changed.&lt;br /&gt;To restore all settings to their defaults, you can press the &quot;Defaults (All)&quot; button.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Restore all defaults</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This button will restore the defaults for all settings.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Defaults (All)</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>ConnectDialog</name>
-    <message>
-        <source>Connecting to %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enter username</source>
-        <translation>نام کاربری خود را وارد کنید</translation>
-    </message>
-    <message>
-        <source>Servername</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unknown</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Users</source>
-        <translation>کاربران</translation>
-    </message>
-    <message>
-        <source>Failed to fetch server list</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mumble Server Connect</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ping</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Remove from Favorites</source>
-        <translation>حذف کردن از علاقه مندی ها</translation>
-    </message>
-    <message>
-        <source>Add custom server</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Copy</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Copy favorite link to clipboard</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Paste</source>
-        <translation>&amp;چسباندن</translation>
-    </message>
-    <message>
-        <source>Paste favorite from clipboard</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Edit...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Add New...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Add to &amp;Favorites</source>
-        <translation>به &amp;علاقه مندی ها اضافه کن</translation>
-    </message>
-    <message>
-        <source>Open &amp;Webpage</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Server list</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Search</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Location</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Filter</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show All</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show Populated</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show Reachable</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>All</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Africa</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Asia</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Europe</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>North America</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Oceania</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>South America</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Consent to the transmission of private data</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;p&gt;To measure the latency (ping) of public servers and determine the number of active users, your IP address must be transmitted to each public server.&lt;/p&gt;&lt;p&gt;Do you consent to the transmission of your IP address? If you answer no, the public server list will be deactivated. However, you can reactivate it at any time in the network settings.&lt;/p&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>C&amp;onnect</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Adding host %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Hostname</source>
-        <translation>نام میزبان</translation>
-    </message>
-    <message>
-        <source>Bonjour name</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Port</source>
-        <translation>پورت</translation>
-    </message>
-    <message>
-        <source>Website</source>
-        <translation>تارنما</translation>
-    </message>
-    <message>
-        <source>Packet loss</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ping (80%)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>%1 ms</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ping (95%)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Bandwidth</source>
-        <translation>پهنای باند</translation>
-    </message>
-    <message>
-        <source>%1 kbit/s</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Version</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>IPv4 address</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>IPv6 address</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is the connection dialog. There are two different ways to connect to a Mumble server. If the server is listed publicly, you can use the server list to find it. If you know the server IP address, you can manually add a new permanent entry to your favorites.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The server list contains your favorites and all publicly listed servers.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>With this search interface you can filter the Mumble servers displayed in the server list.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Search for servername</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Search for location</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Set filter mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Server</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>ConnectDialogEdit</name>
-    <message>
-        <source>Edit Server</source>
-        <translation>ویرایش میزبان</translation>
-    </message>
-    <message>
-        <source>Name of the server</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>A&amp;ddress</source>
-        <translation>&amp;آدرس ها</translation>
-    </message>
-    <message>
-        <source>Internet address of the server.</source>
-        <oldsource>Internet address of the server. </oldsource>
-        <translation>آدرس اینترنتی سرور</translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Address&lt;/b&gt;&lt;br/&gt;
-Internet address of the server. This can be a normal hostname, an IPv4/IPv6 address or a Bonjour service identifier. Bonjour service identifiers have to be prefixed with a &apos;@&apos; to be recognized by Mumble.</source>
-        <oldsource>&lt;b&gt;Address&lt;/b&gt;&lt;/br&gt;
-Internet address of the server. This can be a normal hostname, an ipv4/6 address or a bonjour service identifier. Bonjour service identifiers have to be prefixed with a &apos;@&apos; to be recognized by Mumble.</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Port</source>
-        <translation>&amp;پورت</translation>
-    </message>
-    <message>
-        <source>Port on which the server is listening</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Port&lt;/b&gt;&lt;br/&gt;
-Port on which the server is listening. If the server is identified by a Bonjour service identifier this field will be ignored.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Username</source>
-        <translation>&amp;نام کاربری</translation>
-    </message>
-    <message>
-        <source>Username to send to the server</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Username&lt;/b&gt;&lt;br/&gt;
-Username to send to the server. Be aware that the server can impose restrictions on how a username might look like. Also your username could already be taken by another user.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Label</source>
-        <translation>برچسب</translation>
-    </message>
-    <message>
-        <source>Add Server</source>
-        <translation>اضافه کردن میزبان</translation>
-    </message>
-    <message>
-        <source>You are currently connected to a server.
-Do you want to fill the dialog with the connection data of this server?
-Host: %1 Port: %2</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>You have an URL in your clipboard.
-Do you want to fill the dialog with this data?
-Host: %1 Port: %2</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Password</source>
-        <translation>رمزعبور</translation>
-    </message>
-    <message>
-        <source>Password to send to the server</source>
-        <translation>رمزی که قرار است برای میزبان ارسال شود</translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Password&lt;/b&gt;&lt;br/&gt;
-Password to be sent to the server on connect. This password is needed when connecting as &lt;i&gt;SuperUser&lt;/i&gt; or to a server using password authentication. If not entered here the password will be queried on connect.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show password</source>
-        <translation>رمز را نشان ده</translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Label&lt;/b&gt;&lt;br/&gt;
-Label of the server. This is what the server will be named like in your server list and can be chosen freely.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Local server label</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>127.0.0.1</source>
-        <translation>۱۲۷.۰.۰.۱</translation>
-    </message>
-    <message>
-        <source>64738</source>
-        <translation>۶۴۷۳۸</translation>
-    </message>
-    <message>
-        <source>Your username</source>
-        <translation>نام کاربری شما</translation>
-    </message>
-    <message>
-        <source>Your password</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Fill</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Ignore</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Server IP address</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Server port</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Username</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Label for server</source>
+        <source>Unsupported or oversized image.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
     <name>CrashReporter</name>
     <message>
-        <source>Mumble Crash Report</source>
+        <source>%1 B</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;p&gt;&lt;b&gt;We&apos;re terribly sorry, but it seems Mumble has crashed. Do you want to send a crash report to the Mumble developers?&lt;/b&gt;&lt;/p&gt;&lt;p&gt;The crash report contains a partial copy of Mumble&apos;s memory at the time it crashed, and will help the developers fix the problem.&lt;/p&gt;</source>
+        <source>%1 KiB</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Email address (optional)</source>
+        <source>%1 MiB</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Please describe briefly, in English, what you were doing at the time of the crash</source>
-        <oldsource>Please briefly describe what you were doing at the time of the crash</oldsource>
+        <source>yes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Send Report</source>
+        <source>no</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Don&apos;t send report</source>
+        <source>Crash archived on startup</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Crash upload successful</source>
+        <source>Mumble archived a crash dump on startup after the previous session ended unexpectedly.
+
+Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Thank you for helping make Mumble better!</source>
+        <source>1. What were you doing before Mumble closed?
+2. Did the crash happen again after restart?
+3. If you are comfortable sharing crash data, attach the local `mumble.dmp` from the crash archive folder.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Crash upload failed</source>
+        <source>The client saved `mumble.dmp` and `metadata.txt` in a local crash archive. These files are not uploaded automatically. Attach `mumble.dmp` manually only if you choose to share crash data.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Uploading crash report</source>
+        <source>not included in crash reports; saved last-connection values stay local</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Abort upload</source>
+        <source>Title: %1
+
+%2</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>HTTP error %1: &quot;%2&quot;</source>
+        <source>Crash archived</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Internal error encountered in CrashReporter.cpp: Received network reply does not contain an HTTP status code. Please inform a developer about error code %1</source>
+        <source>Crash data archived</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The dump was saved locally for troubleshooting. Nothing was uploaded.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Local archive</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GitHub drafts omit server address, username, room names, logs, and local paths. Attach the dump manually only if you choose.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy path</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy report</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open GitHub</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>OK</source>
+        <translation type="unfinished">خُب</translation>
+    </message>
+    <message>
+        <source>Sanitized report markdown copied. Server address, username, room names, logs, and local paths are still omitted.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GitHub issue draft opened and sanitized markdown copied. Attach the local dump only if you choose to share crash data.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
     <name>Database</name>
     <message>
-        <source>The database &apos;%1&apos; is read-only. Mumble cannot store server settings (i.e. SSL certificates) until you fix this problem.</source>
-        <oldsource>The database &apos;%1&apos; is read-only. Mumble can not store server settings (ie. SSL certificates) until you fix this problem.</oldsource>
+        <source>The configured database file &apos;%1&apos; does not exist; resetting to the default path.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>The database file &apos;%1&apos; set in the configuration file does not exist. Do you want to create a new database file at this location?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mumble failed to initialize a database in any of the possible locations.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>You can also choose to reset the configured path to its default value.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Create File</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Reset Configured Path</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Quit Without Changes</source>
+        <source>The database &apos;%1&apos; is read-only. Mumble cannot store server settings or certificates.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -3578,284 +474,6 @@ Label of the server. This is what the server will be named like in your server l
     <name>DeveloperConsole</name>
     <message>
         <source>Developer Console</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>DockTitleBar</name>
-    <message>
-        <source>Drag here</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>FailedConnectionDialog</name>
-    <message>
-        <source>Connection failed</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>You connected with an invalid username, please try another one.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The chosen username is already in use, please try another one.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Username</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The chosen username belongs to a registered user on this server.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The provided password is not valid for this user. Please try a different one or use certificate-based authentication by not specifying a password.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The used certificate is not valid for this user. Please use a different certificate or specify a password to use password-based authentication instead.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Password</source>
-        <translation type="unfinished">رمزعبور</translation>
-    </message>
-    <message>
-        <source>Username:</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Password:</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Change certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The provided server password is invalid. Please choose a different one.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Reconnect</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Cancel</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>GlobalShortcut</name>
-    <message>
-        <source>Shortcuts</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>List of configured shortcuts</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Function</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Data</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Shortcut</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Suppress</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Add new shortcut</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will add a new global shortcut</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Add</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Remove selected shortcut</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will permanently remove a selected shortcut.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Remove</source>
-        <translation type="unfinished">&amp;حذف</translation>
-    </message>
-    <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Mumble can currently only use mouse buttons and keyboard modifier keys (Alt, Ctrl, Cmd, etc.) for global shortcuts.&lt;/p&gt;&lt;p&gt;If you want more flexibility, you can enable &lt;span style=&quot; font-style:italic;&quot;&gt;Access for assistive devices&lt;/span&gt; in the system&apos;s Accessibility preferences. However, please note that this change also potentially allows malicious programs to read what is typed on your keyboard.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Open Accessibility Preferences</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Skip</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enable Global Shortcuts</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Additional Shortcut Engines&lt;/b&gt;&lt;br /&gt;This section allows you to configure the use of additional GlobalShortcut engines.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Additional Shortcut Engines</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Enable GKey&lt;/b&gt;.&lt;br /&gt;This setting enables support for the GKey shortcut engine, for &quot;G&quot;-keys found on Logitech keyboards.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enable GKey</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Enable XInput&lt;/b&gt;&lt;br /&gt;This setting enables support for the XInput shortcut engine, for Xbox compatible controllers.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enable XInput</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Enable shortcuts in privileged applications&lt;/b&gt;.&lt;br /&gt;Also known as &quot;UIAccess&quot;. This allows Mumble to receive global shortcut events from programs running at high privilege levels, such as an Admin Command Prompt or older games that run with admin privileges.
-&lt;br /&gt;&lt;br /&gt;
-Without this option enabled, using Mumble&apos;s global shortcuts in privileged applications will not work. This can seem inconsistent: for example, if the Push-to-Talk button is pressed in a non-privileged program, but released in a privileged application, Mumble will not observe that it has been released and you will continue to talk until you press the Push-to-Talk button again.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enable shortcuts in privileged applications</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Mumble&apos;s Global Shortcuts system does currently not work properly in combination with the Wayland protocol. For more information, visit &lt;a href=&quot;https://github.com/mumble-voip/mumble/issues/5257&quot;&gt;&lt;span style=&quot; text-decoration: underline; color:#0057ae;&quot;&gt;https://github.com/mumble-voip/mumble/issues/5257&lt;/span&gt;&lt;/a&gt;.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Configured shortcuts</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Use up and down keys to navigate through your added shortcuts. Use left and right keys to navigate between actions and options for a single shortcut. Entries can be added and deleted with the buttons below.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Add unassigned shortcut</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This adds a new empty entry to the &quot;Configured Shortcut&quot; tree above. The tree will be automatically focused. Assign a key or an action by selecting the entry in the tree above.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This removes the selected entry from the &quot;Configured Shortcut&quot; tree above</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>GlobalShortcutButtons</name>
-    <message>
-        <source>Edit shortcut</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Start capture process</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Starts the capture process: all buttons you press will be added to the tree.&lt;/p&gt;&lt;p&gt;Once all buttons are released, the capture process stops automatically.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Add</source>
-        <translation type="unfinished">اضافه کردن</translation>
-    </message>
-    <message>
-        <source>Remove the currently selected items</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Remove</source>
-        <translation type="unfinished">پاک کردن</translation>
-    </message>
-    <message>
-        <source>List of shortcuts</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Toggling this button will make the application listen for a shortcut. Once the shortcut is entered, the application stops listening for a shortcut. Multiple shortcuts can be assigned to the current action. Navigate to the shortcut list above to review the shortcuts currently assigned to the current action.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This button will remove the selected shortcut for the current action. Note that you will have to select a shortcut from the list above first before this button has any effect.</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>GlobalShortcutConfig</name>
-    <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Mumble can currently only use mouse buttons and keyboard modifier keys (Alt, Ctrl, Cmd, etc.) for global shortcuts.&lt;/p&gt;&lt;p&gt;If you want more flexibility, you can add Mumble as a trusted accessibility program in the Security &amp; Privacy section of your Mac&apos;s System Preferences.&lt;/p&gt;&lt;p&gt;In the Security &amp; Privacy preference pane, change to the Privacy tab. Then choose Accessibility (near the bottom) in the list to the left. Finally, add Mumble to the list of trusted accessibility programs.&lt;/body&gt;&lt;/html&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Shortcuts</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This is the global shortcut key combination.&lt;/b&gt;&lt;br /&gt;Click this field and then press the desired key/button combo to rebind. Double-click to clear.</source>
-        <oldsource>&lt;b&gt;This is the global shortcut key combination.&lt;/b&gt;&lt;br /&gt;Double-click this field and then the desired key/button combo to rebind.</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Suppress keys from other applications</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This hides the button presses from other applications.&lt;/b&gt;&lt;br /&gt;Enabling this will hide the button (or the last button of a multi-button combo) from other applications. Note that not all buttons can be suppressed.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Shortcut action</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Shortcut data</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Shortcut input combinations</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unassigned</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>checked</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>unchecked</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -3874,85 +492,6 @@ Without this option enabled, using Mumble&apos;s global shortcuts in privileged 
     </message>
     <message>
         <source>Keyboard</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>GlobalShortcutTarget</name>
-    <message>
-        <source>Whisper Target</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channel Target</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Restrict to Group</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>If specified, only members of this group will receive the whisper.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>List of users</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Add</source>
-        <translation type="unfinished">اضافه کردن</translation>
-    </message>
-    <message>
-        <source>Remove</source>
-        <translation type="unfinished">پاک کردن</translation>
-    </message>
-    <message>
-        <source>Modifiers</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Do not send positional audio information when using this whisper shortcut.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ignore positional audio</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Shout to Linked channels</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Shout to subchannels</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The whisper will also be transmitted to linked channels.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The whisper will also be sent to the subchannels of the channel target.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Shout/Whisper to:</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Current selection</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>When shouting to channel:</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Shout to linked channels</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channel</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -3979,6 +518,37 @@ Without this option enabled, using Mumble&apos;s global shortcuts in privileged 
     </message>
 </context>
 <context>
+    <name>ImageViewer</name>
+    <message>
+        <source>Image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Minimize image viewer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Close image viewer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image viewer. Use plus and minus to zoom, arrow keys to pan, and zero to fit.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Zoom out</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fit image to window</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Zoom in</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>JackAudioSystem</name>
     <message>
         <source>Hardware Ports</source>
@@ -3994,75 +564,9 @@ Without this option enabled, using Mumble&apos;s global shortcuts in privileged 
     </message>
 </context>
 <context>
-    <name>LCD</name>
+    <name>ListenerVolumeSlider</name>
     <message>
-        <source>Not connected</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>LCDConfig</name>
-    <message>
-        <source>Enable this device</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>LCD</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Devices</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Name</source>
-        <translation type="unfinished">نام</translation>
-    </message>
-    <message>
-        <source>&lt;p&gt;This is the list of available LCD devices on your system.  It lists devices by name, but also includes the size of the display. Mumble supports outputting to several LCD devices at a time.&lt;/p&gt;
-&lt;h3&gt;Size:&lt;/h3&gt;
-&lt;p&gt;
-This field describes the size of an LCD device. The size is given either in pixels (for Graphic LCDs) or in characters (for Character LCDs).&lt;/p&gt;
-&lt;h3&gt;Enabled:&lt;/h3&gt;
-&lt;p&gt;This decides whether Mumble should draw to a particular LCD device.&lt;/p&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Size</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enabled</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Views</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Minimum Column Width</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;p&gt;This option decides the minimum width a column in the User View.&lt;/p&gt;
-&lt;p&gt;If too many people are speaking at once, the User View will split itself into columns. You can use this option to pick a compromise between number of users shown on the LCD, and width of user names.&lt;/p&gt;
-</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This setting decides the width of column splitter.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Splitter Width</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Minimum column width</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Splitter width</source>
+        <source>Listener volume adjustment</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -4239,910 +743,109 @@ This field describes the size of an LCD device. The size is given either in pixe
     </message>
 </context>
 <context>
-    <name>LogConfig</name>
+    <name>Main</name>
     <message>
-        <source>Toggle console for %1 events</source>
+        <source>The chat timeline is not scrollable.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Toggle pop-up notifications for %1 events</source>
+        <source>Cancel</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Toggle Text-To-Speech for %1 events</source>
+        <source>Cancel %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Click here to toggle sound notification for %1 events</source>
+        <source>Dismiss</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Toggle window highlight (if not active) for %1 events</source>
+        <source>Dismiss %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Path to sound file used for sound notifications in the case of %1 events&lt;br /&gt;Single click to play&lt;br /&gt;Double-click to change</source>
+        <source>Completed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Click here to toggle console output for %1 events.&lt;br /&gt;If checked, this option makes Mumble output all %1 events in its message log.</source>
+        <source>Failed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Click here to toggle pop-up notifications for %1 events.&lt;br /&gt;If checked, a notification pop-up will be created by Mumble for every %1 event.</source>
-        <oldsource>Click here to toggle pop-up notifications for %1 events.&lt;br /&gt;If checked, a notification pop-up will be created by mumble for every %1 event.</oldsource>
+        <source>Application menu</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Click here to toggle window highlight for %1 events.&lt;br /&gt;If checked, Mumble&apos;s window will be highlighted for every %1 event, if not active.</source>
+        <source>System</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Path to sound file used for sound notifications in the case of %1 events.&lt;br /&gt;Single click to play&lt;br /&gt;Double-click to change&lt;br /&gt;Ensure that sound notifications for these events are enabled or this field will not have any effect.</source>
+        <source>Message actions</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Click here to toggle Text-To-Speech for %1 events.&lt;br /&gt;If checked, Mumble uses Text-To-Speech to read %1 events out loud to you. Text-To-Speech is also able to read the contents of the event which is not true for sound files. Text-To-Speech and sound files cannot be used at the same time.</source>
-        <oldsource>Click here to toggle sound notification for %1 events.&lt;br /&gt;If checked, Mumble uses a soundfile predefined by you to indicate %1 events. Soundfiles and Text-To-Speech cannot be used at the same time.</oldsource>
+        <source>Reply</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Click here to toggle sound notification for %1 events.&lt;br /&gt;If checked, Mumble uses a sound file predefined by you to indicate %1 events. Sound files and Text-To-Speech cannot be used at the same time.</source>
-        <oldsource>Path to soundfile used for sound notifications in the case of %1 events.&lt;br /&gt;Single click to play&lt;br /&gt;Doubleclick to change&lt;br /&gt;Be sure that sound notifications for these events are enabled or this field will not have any effect.</oldsource>
+        <source>Add reaction</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Messages</source>
+        <source>Retry</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Message</source>
+        <source>Delete</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Console</source>
+        <source>Message deleted</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Notification</source>
+        <source>Link preview</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Text-To-Speech</source>
+        <source>Open</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Soundfile</source>
+        <source>Play</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Path</source>
+        <source>Attach image</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Text To Speech</source>
+        <source>Replying to %1: %2</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Volume of Text-To-Speech Engine</source>
+        <source>Cancel reply</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;b&gt;This is the volume used for the speech synthesis.&lt;/b&gt;</source>
+        <source>Retry %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Length threshold</source>
+        <source>Remove %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Message length threshold for Text-To-Speech Engine</source>
+        <source>Connect to send messages</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;b&gt;This is the length threshold used for the Text-To-Speech Engine.&lt;/b&gt;&lt;br /&gt;Messages longer than this limit will not be read aloud in their full length.</source>
+        <source>ROOMS</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source> Characters</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>If checked you will only hear whispers from users you added to your friend list.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Only accept whispers from friends</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>If enabled text messages you send will be read back to you with TTS</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Read back own messages</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Chat Log</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Maximum chat length</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unlimited</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source> Lines</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Highlight</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>If enabled, TTS will not dictate the message scope.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Omit Message Scope</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>If enabled, TTS will not dictate the message author.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Omit Message Author</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>If checked the time at the beginning of a message will be displayed in the 24-hour format.
-
-The setting only applies for new messages, the already shown ones will retain the previous time format.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Use 24-hour clock</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>How far individual messages are spaced out from one another.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Message margins</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Chat message margins</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Limit</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Misc.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Number of users that will trigger message limiting functionality.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>users on the server.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Limit notifications when there are more than</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Click here to toggle message limiting for all events - If using this option be sure to change the user limit below.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Toggle message limiting behavior for %1 events </source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Click to enable Text-to-Speech</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enable Text-to-Speech</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Click here to toggle limiting for %1 events.&lt;br /&gt;If checked, notifications for this event type will not be played when the user count on the server exceeds the set threshold.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Message Volume</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Volume adjustment for audio cues</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This is the volume adjustment for audio cues.&lt;/b&gt;&lt;br /&gt;A value of 0 dB means no change to the sound sample.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source> dB</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Text-to-Speech volume</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Notification volume adjustment</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Volume adjustment for notification sounds</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This is the volume adjustment for notification sounds.&lt;/b&gt;&lt;br /&gt;A value of 0 dB means no change to the sound sample.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio cue volume adjustment</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source> %</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Notification sound volume adjustment</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Log message types and actions</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Use up and down keys to navigate through the message types. Use left and right keys to navigate between notification possibilities for a single message type.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Set length threshold</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Text to speech volume</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Maximum chat log length</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>User limit for notifications</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Message type</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Log message to console checkbox</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Display pop-up notification for message checkbox</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Highlight window for message checkbox</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Read message using text to speech checkbox</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Limit message notification if user count is high checkbox</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Play sound file for message checkbox</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Path to sound file</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>checked</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>unchecked</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>decibels</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>LookConfig</name>
-    <message>
-        <source>System default</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>None</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Only with users</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>All</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ask</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Do Nothing</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Move</source>
-        <translation type="unfinished">انتقال</translation>
-    </message>
-    <message>
-        <source>User Interface</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This sets which channels to automatically expand. &lt;i&gt;None&lt;/i&gt; and &lt;i&gt;All&lt;/i&gt; will expand no or all channels, while &lt;i&gt;Only with users&lt;/i&gt; will expand and collapse channels as users join and leave them.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>List users above subchannels (requires restart).</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;If set, users will be shown above subchannels in the channel view.&lt;/b&gt;&lt;br /&gt;A restart of Mumble is required to see the change.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Users above Channels</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show number of users in each channel</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show channel user count</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Language</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Language to use (requires restart)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;This sets which language Mumble should use.&lt;/b&gt;&lt;br /&gt;You have to restart Mumble to use the new language.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Look and Feel</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Layout</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Classic</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Stacked</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Hybrid</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Custom</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This changes the behavior when moving channels.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This sets the behavior of channel drags; it can be used to prevent accidental dragging. &lt;i&gt;Move&lt;/i&gt; moves the channel without prompting. &lt;i&gt;Do Nothing&lt;/i&gt; does nothing and prints an error message. &lt;i&gt;Ask&lt;/i&gt; uses a message box to confirm if you really wanted to move the channel.</source>
-        <oldsource>This sets the behavior of channel drags; it can be used to prevent accidental dragging. &lt;i&gt;Move Channel&lt;/i&gt; moves the channel without prompting. &lt;i&gt;Do Nothing&lt;/i&gt; does nothing and prints an error message. &lt;i&gt;Ask&lt;/i&gt; uses a message box to confirm if you really wanted to move the channel.</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Expand</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>When to automatically expand channels</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channel Dragging</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Always On Top</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;If set, minimizing the Mumble main window will cause it to be hidden and accessible only from the tray. Otherwise, it will be minimized as a window normally would.&lt;/b&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Hide in tray when minimized</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Hide the main Mumble window in the tray when it is minimized.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This setting controls when the application will be always on top.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Never</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Always</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>In minimal view</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>In normal view</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Displays talking status in system tray</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show talking status in tray icon</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This setting controls in which situations the application will stay always on top. If you select &lt;i&gt;Never&lt;/i&gt; the application will not stay on top. &lt;i&gt;Always&lt;/i&gt; will always keep the application on top. &lt;i&gt;In minimal view&lt;/i&gt; / &lt;i&gt;In normal view&lt;/i&gt; will only keep the application always on top when minimal view is activated / deactivated.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show context menu in menu bar</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Apply some high contrast optimizations for visually impaired users</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Optimize for high contrast</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Application</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Adds user and channel context menus into the menu bar</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Tray Icon</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channel Tree</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Use selected item as the chat bar target</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Filter automatically hides empty channels</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show transmit mode dropdown in toolbar</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Theme</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Configures which theme the Mumble user interface should be styled with&lt;/b&gt;&lt;br /&gt;Mumble will pick up themes from certain directories and display them in this list. The one you select will be used to customize the visual appearance of Mumble. This includes colors, icons and more.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>User Dragging</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This changes the behavior when moving users.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This sets the behavior of user drags; it can be used to prevent accidental dragging. &lt;i&gt;Move&lt;/i&gt; moves the user without prompting. &lt;i&gt;Do Nothing&lt;/i&gt; does nothing and prints an error message. &lt;i&gt;Ask&lt;/i&gt; uses a message box to confirm if you really wanted to move the user.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Enable Developer menu&lt;/b&gt;&lt;br /&gt;This enables the &quot;Developer&quot;-menu in Mumble. This menu is used for developer-specific features, such as the Developer Console.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enable Developer menu</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>When in custom layout mode, checking this disables rearranging.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Lock layout</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Talking UI</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>A user that is silent for the given amount of seconds will be removed from the Talkin UI.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Remove silent user after</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>If this is checked, the local user (yourself) will always be visible in the TalkingUI (regardless of talking state).</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Always keep local user visible</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>How many characters from the original name to display at the beginning of an abbreviated name.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>String to separate a channel name from its parent&apos;s.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channel separator</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Abbreviated prefix characters</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The names of how many parent channels should be included in the channel&apos;s name when displaying it in the TalkingUI?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>How many characters from the original name to display at the end of an abbreviated name.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Abbreviated postfix characters</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Whether to also allow abbreviating the current channel of a user (instead of only its parent channels).</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Abbreviate current channel name</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channel hierarchy depth</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Abbreviation replacement</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Whether the channel (hierarchy) name should be abbreviated, if it exceeds the specified maximum length.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Abbreviate channel names</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The preferred maximum length of a channel (hierarchy) name in the Talking UI. Note that this is not a hard limit though.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Max. channel name length</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Relative font size to use in the Talking UI in percent.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Rel. font size (%)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>String that gets used instead of the cut-out part of an abbreviated name.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Prefix character count</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Postfix character count</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show the local volume adjustment for each user (if any).</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show volume adjustments</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Whether to show all of the local user&apos;s listeners (ears) in the TalkingUI (and thereby also the channels they are in). </source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show local user&apos;s listeners (ears)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Hide the username for each user if they have a nickname.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show nicknames only</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channel Hierarchy String</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Search</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The action to perform when a user is activated (via double-click or enter) in the search dialog.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Action (User):</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The action to perform when a channel is activated (via double-click or enter) in the search dialog.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Action (Channel):</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Quit Behavior</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This setting controls the behavior of clicking on the X in the top right corner.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This setting controls the behavior when closing Mumble. You can choose between being asked for confirmation, minimize instead if closing or just closing without any additional prompt. Optionally, the first two options can only apply when you are currently connected to a server (in that case, Mumble will quit without asking, when not connected to any server).</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Always Ask</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ask when connected</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Always Minimize</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Minimize when connected</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Always Quit</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source> seconds</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>If this is checked, users will always be visible in the TalkingUI (regardless of talking state).</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Always keep users visible</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channel expand mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>User dragging mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channel dragging mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Always on top mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Quit behavior mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channel separator string</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Maximum channel name length</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Abbreviation replacement characters</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Relative font size (in percent)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Silent user display time (in seconds)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mumble theme</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>User search action mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channel search action mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Clears the TalkingUI background setting.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Clear Background Color</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Clear</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Color that gets used for the background of the talkingUI.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Choose</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Background color that, if set, overrides the theme background color.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Background Color</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Choose a Color</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Dark theme to use to style the user interface</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Configures which theme the Mumble user interface should be styled with when it’s in the Dark theme&lt;/b&gt;&lt;br /&gt;Mumble will pick up themes from certain directories and display them in this list. The one you select will be used to customize the visual appearance of Mumble. This includes colors, icons and more.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Light theme to use to style the user interface</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Dark Theme</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Sets the theme automatically based on the system theme.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Automatic theme based on system theme</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Auto</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Sets the theme to the configured dark theme setting</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Dark</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Sets the theme to the configured light theme setting</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Light Theme</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Light</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Open the themes directory in the systems file manager</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Open Themes Directory</source>
+        <source>PARTICIPANTS</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -5188,16 +891,6 @@ The setting only applies for new messages, the already shown ones will retain th
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Toggle Overlay</source>
-        <comment>Global Shortcut</comment>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Toggle state of in-game overlay.</source>
-        <comment>Global Shortcut</comment>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Toggle Minimal</source>
         <comment>Global Shortcut</comment>
         <translation type="unfinished"></translation>
@@ -5214,18 +907,6 @@ The setting only applies for new messages, the already shown ones will retain th
     </message>
     <message>
         <source>Mumble</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Window</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Minimize</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ctrl+M</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -5268,15 +949,6 @@ The setting only applies for new messages, the already shown ones will retain th
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;center&gt;Not connected&lt;/center&gt;</source>
-        <oldsource>Not connected</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Clear</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Opening URL %1</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5291,14 +963,6 @@ The setting only applies for new messages, the already shown ones will retain th
     <message>
         <source>URL scheme is not &apos;mumble&apos;</source>
         <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Connecting to %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enter username</source>
-        <translation type="unfinished">نام کاربری خود را وارد کنید</translation>
     </message>
     <message>
         <source>Connecting to server %1.</source>
@@ -5317,23 +981,7 @@ The setting only applies for new messages, the already shown ones will retain th
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;p&gt;You are about to register yourself on this server. This action cannot be undone, and your username cannot be changed once this is done. You will forever be known as &apos;%1&apos; on this server.&lt;/p&gt;&lt;p&gt;Are you sure you want to register yourself?&lt;/p&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Register user %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;p&gt;You are about to register %1 on the server. This action cannot be undone, the username cannot be changed, and as a registered user, %1 will have access to the server even if you change the server password.&lt;/p&gt;&lt;p&gt;From this point on, %1 will be authenticated with the certificate currently in use.&lt;/p&gt;&lt;p&gt;Are you sure you want to register %1?&lt;/p&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Kicking user %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>View comment on user %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -5345,29 +993,7 @@ The setting only applies for new messages, the already shown ones will retain th
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;li&gt;Expected certificate digest (SHA-1):	%1&lt;/li&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Server presented a certificate which failed verification.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;p&gt;%1&lt;/p&gt;&lt;ul&gt;%2&lt;/ul&gt;&lt;p&gt;The specific errors with this certificate are:&lt;/p&gt;&lt;ol&gt;%3&lt;/ol&gt;&lt;p&gt;Do you wish to accept this certificate anyway?&lt;br /&gt;(It will also be stored so you won&apos;t be asked this again.)&lt;/p&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Server connection failed.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;center&gt;Type message to channel &apos;%1&apos; here&lt;/center&gt;</source>
-        <oldsource>Type message to channel &apos;%1&apos; here</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;center&gt;Type message to user &apos;%1&apos; here&lt;/center&gt;</source>
-        <oldsource>Type message to user &apos;%1&apos; here</oldsource>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -5375,32 +1001,11 @@ The setting only applies for new messages, the already shown ones will retain th
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Failed to load image</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Could not open file for reading.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Image format not recognized.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&amp;User</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Channel</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Use in conjunction with Whisper to.</source>
-        <comment>Global Shortcut</comment>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will switch the states of the in-game overlay.</source>
         <comment>Global Shortcut</comment>
         <translation type="unfinished"></translation>
     </message>
@@ -5445,23 +1050,7 @@ The setting only applies for new messages, the already shown ones will retain th
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Continuous</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Voice Activity</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Push-to-Talk</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Cancel</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Save Image As...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -5473,10 +1062,6 @@ The setting only applies for new messages, the already shown ones will retain th
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Change your comment</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Transmit Mode set to Voice Activity</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5485,48 +1070,11 @@ The setting only applies for new messages, the already shown ones will retain th
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&amp;View Certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enter reason</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Sending message to %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>To %1: %2</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Message to %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Are you sure you want to reset the comment of user %1?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Are you sure you want to reset the avatar of user %1?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Are you sure you want to delete %1 and all its sub-channels?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Sending message to channel %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Message to tree %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>To %1 (Tree): %2</source>
-        <oldsource>(Tree) %1: %2</oldsource>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -5554,27 +1102,11 @@ The setting only applies for new messages, the already shown ones will retain th
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Restart Mumble?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Some settings will only apply after a restart of Mumble. Restart Mumble now?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>About Qt</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>SSL Verification failed: %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;li&gt;Server certificate digest (SHA-1):	%1&lt;/li&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;WARNING:&lt;/b&gt; The server presented a certificate that was different from the stored one.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -5602,385 +1134,11 @@ The setting only applies for new messages, the already shown ones will retain th
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>C&amp;onfigure</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Help</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Log</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This shows all recent activity. Connecting to servers, errors and information messages all show up here.&lt;br /&gt;To configure exactly which messages show up here, use the &lt;b&gt;Settings&lt;/b&gt; command from the menu.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Quit Mumble</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Closes the program</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Exits the application.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ctrl+Q</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Open the server connection dialog</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Disconnect</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Disconnect from server</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Disconnects you from the server.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show information about the server connection</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will show extended information about the connection to the server.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Mute</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Deafen</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Local Mute</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Send a Text Message</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Sends a text message to another user.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Add new channel</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This adds a new sub-channel to the currently selected channel.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Remove channel</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This removes a channel and all sub-channels.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Edit Groups and ACL for channel</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This opens the Group and ACL dialog for the channel, to control permissions.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Link your channel to another channel</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This is the chatbar&lt;br /&gt;If you enter text here and then press enter the text is sent to the user or channel that was selected. If nothing is selected the message is sent to your current channel.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Chatbar</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Shows a dialog of registered servers, and also allows quick-connect.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Kick user (with reason)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Kick selected user off server. You&apos;ll be asked to specify a reason.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mute user</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mute or unmute user on server. Unmuting a deafened user will also undeafen them.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Kick and ban user (with reason)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Kick and ban selected user from server. You&apos;ll be asked to specify a reason.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Deafen user</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Deafen or undeafen user on server. Deafening a user will also mute them.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mute user locally</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mute or unmute user locally. Use this on other users in the same room.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This links your current channel to the selected channel. If users in a channel have permission to speak in the other channel, users can now hear each other. This is a permanent link, and will last until manually unlinked or the server is restarted. Please see the shortcuts for push-to-link.</source>
-        <oldsource>This links your current channel to the selected channel. If they have permission to speak in the other channel, users can now hear each other. This is a permanent link, and will last until manually unlinked or the server is restarted. Please see the shortcuts for push-to-link.</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Unlink</source>
-        <comment>Channel</comment>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unlink your channel from another channel</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This unlinks your current channel from the selected channel.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unlinks your channel from all linked channels.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This unlinks your current channel (not the selected one) from all linked channels.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Reset</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Reset audio preprocessor</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will reset the audio preprocessor, including noise cancellation, automatic gain and voice activity detection. If something suddenly worsens the audio environment (like dropping the microphone) and it was temporary, use this to avoid having to wait for the preprocessor to readjust.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Mute yourself</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Mute or unmute yourself. When muted, you will not send any data to the server. Unmuting while deafened will also undeafen.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Deafen yourself</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Deafen or undeafen yourself. When deafened, you will not hear anything. Deafening yourself will also mute.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Text-To-Speech</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Toggle Text-To-Speech</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enable or disable the text-to-speech engine. Only messages enabled for TTS in the Configuration dialog will actually be spoken.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Display audio statistics</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Pops up a small dialog with information about your current audio input.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Forcibly unlink plugin</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This forces the current plugin to unlink, which is handy if it is reading completely wrong data.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Configure Mumble</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Allows you to change most settings for Mumble.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Start the audio configuration wizard</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will guide you through the process of configuring your audio hardware.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;What&apos;s This?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enter What&apos;s This? mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Click this to enter &quot;What&apos;s This?&quot; mode. Your cursor will turn into a question mark. Click on any button, menu choice or area to show a description of what it is.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Information about Mumble</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Shows a small dialog with information and license for Mumble.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Information about Speex</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Shows a small dialog with information about Speex.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Information about Qt</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Shows a small dialog with information about Qt.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Check for &amp;Updates</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Check for new version of Mumble</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Connects to the Mumble webpage to check if a new version is available, and notifies you with an appropriate download URL if this is the case.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Sends a text message to all users in a channel.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Configure certificates for strong authentication</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This starts the wizard for creating, importing and exporting certificates for authentication against servers.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Register user on server</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will permanently register the user on the server.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Add &amp;Friend</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Adds a user as your friend.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will add the user as a friend, so you can recognize him on this and other servers.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Remove Friend</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Removes a user from your friends.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will remove a user from your friends list.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Update Friend</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Update name of your friend.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Your friend uses a different name than what is in your database. This will update the name.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Edit registered users list</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This opens the editor for registered users, which allow you to change their name or unregister them.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Add or remove text-based access tokens</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Minimal View</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Toggle minimal window modes</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will toggle minimal mode, where the log window and menu is hidden.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -6033,10 +1191,6 @@ The setting only applies for new messages, the already shown ones will retain th
     </message>
     <message>
         <source>Your account information can not be verified currently. Please try again later</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Welcome message: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -6343,162 +1497,11 @@ The setting only applies for new messages, the already shown ones will retain th
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Toggle showing frame on minimal window</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will toggle whether the minimal window should have a frame for moving and resizing.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Reset the comment of the selected user.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>View comment in editor</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Query server for connection information for user</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>S&amp;erver</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Self</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Unlink Plugins</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Register yourself on the server</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Change your avatar image on this server</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Remove currently defined avatar image.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Icon Toolbar</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Change your own comment</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Copy URL</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Copies a link to this channel to the clipboard.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Locally ignore user&apos;s text chat messages.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Silently drops all text messages from the user.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Edit ban list on server</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This lets you edit the server-side IP ban list.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enable or disable the filtering of select channels.
-By default all empty channels will be filtered.
-You can mark additional channels for filtering from
-the channel&apos;s context menu.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ctrl+F</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Developer</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show the Developer Console</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Shows the Mumble Developer Console, where Mumble&apos;s log output can be inspected.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Connect...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Kick...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Ban...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Add...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Remove...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Edit...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Audio Wizard...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>About &amp;Speex...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Certificate Wizard...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Change &amp;Avatar...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Change Comment...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Server sync protocol violation. No user profile received.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Protocol violation. Server sent remove for occupied channel.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Listen to this channel without joining it</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Listener</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -6534,30 +1537,6 @@ the channel&apos;s context menu.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Toggles the visibility of the TalkingUI.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Joins the channel of this user.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channels and users</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Activity log</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Locally disable Text-To-Speech for this user&apos;s text chat messages.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Silently disables Text-To-Speech for all text messages from the user.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Tree</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6588,38 +1567,8 @@ the channel&apos;s context menu.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Set a local nickname</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Sets a local nickname for another user.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Directory %1 does not exist.
 </source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Toggle TalkingUI</source>
-        <comment>Global shortcut</comment>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Toggles the visibility of the TalkingUI.</source>
-        <comment>Global Shortcut</comment>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Toggle the channel filter (Alt+F)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Alt+F</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Search for a user or channel (Ctrl+F)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -6640,27 +1589,7 @@ the channel&apos;s context menu.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Show the Positional Audio Viewer</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Shows the Positional Audio Viewer. In it the current information used for positional audio can be inspected. Context and identity are also shown.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mumble - Minimal View</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Invalid settings file encountered.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>You are currently in minimal view but not connected to a server. Use the context menu to connect to a server or disable minimal view.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Local Volume Adjustment:</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -6679,18 +1608,6 @@ the channel&apos;s context menu.</source>
     </message>
     <message>
         <source>Server instructed us to use an audio codec different from Opus, which is no longer supported. Disconnecting...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Are you sure you want to close Mumble? Perhaps you prefer to minimize it instead?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Remember this setting</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channel &amp;Filter</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -6893,154 +1810,6 @@ the channel&apos;s context menu.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Enter chat message</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Ban List</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Information</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ig&amp;nore Messages</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Send Message...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Set Ni&amp;ckname...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>L&amp;ink</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>U&amp;nlink All</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>M&amp;ute Self</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>D&amp;eafen Self</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Audio &amp;Statistics</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Settings</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Developer &amp;Console</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Positional &amp;Audio Viewer</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;About</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>About &amp;Qt</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Re&amp;gister...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Registered &amp;Users</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Access Tokens</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Remo&amp;ve Avatar</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Reset Commen&amp;t...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Remo&amp;ve Avatar...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Remove the avatar of the selected user.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Join</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Hide When Filtering</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Pin When Filtering</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Vie&amp;w Comment</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Priority Speaker</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Record...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Listen To Channel</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Talking &amp;UI</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Join User&apos;s Channel</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>M&amp;ove To Own Channel</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Moves this user to your current channel.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Disable Te&amp;xt-To-Speech</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;Search...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Filtered channels and users</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Toggle positional audio</source>
         <comment>Global Shortcut</comment>
         <translation type="unfinished"></translation>
@@ -7051,22 +1820,6 @@ the channel&apos;s context menu.</source>
     </message>
     <message>
         <source>SSL error</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mumble is unable to establish a secure connection to the server. (&quot;%1&quot;)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This could be caused by one of the following scenarios:&lt;ul&gt;&lt;li&gt;Your client and the server use different encryption standards. This could be because you are using a very old client or the server you are connecting to is very old. In the first case, you should update your client and in the second case you should contact the server administrator so that they can update their server.&lt;/li&gt;&lt;li&gt;Either your client or the server is using an old operating system that doesn&apos;t provide up-to-date encryption methods. In this case you should consider updating your OS or contacting the server admin so that they can update theirs.&lt;/li&gt;&lt;li&gt;The server you are connecting to isn&apos;t actually a Mumble server. Please ensure that the used server address really belongs to a Mumble server and not e.g. to a game server.&lt;/li&gt;&lt;li&gt;The port you are connecting to does not belong to a Mumble server but instead is bound to a completely unrelated process on the server-side. Please double-check you have used the correct port.&lt;/li&gt;&lt;/ul&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>M&amp;ove back</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Moves you back to the previous channel</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -7120,50 +1873,463 @@ the channel&apos;s context menu.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Open Image</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Error</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Failed to decode image.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will open the rich text editor to change your comment. Comments are separate for each server. Other users can read your comment by hovering over the comment icon in the user and channel tree.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will open the audio recording dialog.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will open the search dialog. It&apos;s used to find channels and users in the current server.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Add as &amp;Favorite</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Add current server as favorite</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This adds the server you are currently connected to as favorite to the known connections.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Added %1 to favorites.</source>
         <translation type="unfinished"></translation>
     </message>
-</context>
-<context>
-    <name>Manual</name>
     <message>
-        <source>Manual Mumble Positional Audio</source>
+        <source>&lt;b&gt;Certificate Expiry:&lt;/b&gt; Your certificate is about to expire. You need to renew it, or you will no longer be able to connect to servers you are registered on.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a server image smaller than 4 MB.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a readable server image.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a readable image file supported by this Mumble build.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The server image could not be prepared for saving.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose an image file from this device.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a readable PNG or JPEG image.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose an image no larger than 1024 x 1024 pixels.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enter a direct public http(s) image URL, or choose a local PNG or JPEG image.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Avatar image download timed out.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose an avatar image smaller than 4 MB.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not download an image from that URL.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server Settings...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change server settings for connected clients</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This opens server settings that are applied live and saved on the server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Stonks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the Stonks portfolio panel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This opens the server-backed Stonks portfolio and leaderboard.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create Room...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create a voice room or persistent text room on this server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This creates a voice room or named text room and saves it on the server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remote Speech Cleanup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clean up this user&apos;s incoming speech locally</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable or disable receive-side speech cleanup for this user on this client only.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Grant Chat History...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Grant or revoke this registered user&apos;s persistent chat history window</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Administrators can grant a registered user access to persistent chat history from a chosen point in time.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start Screen Share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stop Screen Share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Screen Share Window</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stop Watching Screen Share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Session %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open avatar image preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Send failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>One or more attachments could not be prepared.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugins</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin folders rescanned.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin rescan failed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Downloading plugin update</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Quit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Disconnect</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add to Favorites</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ban List</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server Information</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Kick</source>
+        <translation type="unfinished">بیرون انداختن</translation>
+    </message>
+    <message>
+        <source>Mute</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ban</source>
+        <translation type="unfinished">ممنوع</translation>
+    </message>
+    <message>
+        <source>Deafen</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ignore</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Local Mute</source>
+        <translation type="unfinished">ساکت شده محلی</translation>
+    </message>
+    <message>
+        <source>Send Message</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change Local Nickname</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add Channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove Channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Edit ACL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Link Channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unlink Channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unlink All</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset Audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mute Self</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Deafen Self</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text-To-Speech</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio Statistics</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unlink Plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Settings...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Filter</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio Setup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Developer Console</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>What&apos;s This?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Send Feedback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>About Mumble</source>
+        <translation type="unfinished">درباره Mumble</translation>
+    </message>
+    <message>
+        <source>About Speex</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check for Updates</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Send Message to Channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy URL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Minimal View</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Register User</source>
+        <translation type="unfinished">کاربر ثبت شده</translation>
+    </message>
+    <message>
+        <source>Add Friend</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove Friend</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update Friend</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Registered Users</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change Avatar</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Access Tokens</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove Avatar</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset Comment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove User Avatar</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Join</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hide When Filtering</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pin When Filtering</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>View Comment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>User Information</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change Comment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Register</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Priority Speaker</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Record...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Listen To Channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Join User&apos;s Channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Move To Own Channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Disable Text-To-Speech</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Search...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Move Back</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A local certificate was created automatically. Review or replace it here.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>All plugins are up to date.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin updates</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose the plugin updates to download and install.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Available updates</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Not now</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Position preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manual placement</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Place your positional-audio identity manually.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -7183,14 +2349,6 @@ the channel&apos;s context menu.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>m</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Heading</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Azimuth</source>
         <translation type="unfinished"></translation>
     </message>
@@ -7199,11 +2357,7 @@ the channel&apos;s context menu.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>°</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Meta data</source>
+        <source>Identity</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -7211,102 +2365,147 @@ the channel&apos;s context menu.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Identity</source>
+        <source>Stale user display time</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Set</source>
+        <source>Active</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>State</source>
+        <source>Linked</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Unhinge</source>
+        <source>Reset</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Link</source>
+        <source>Apply</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Activate</source>
+        <source>The certificate could not be verified.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Display</source>
+        <source>Server</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>How long silent user&apos;s positions should stay marked after they have stopped talking (in seconds).</source>
+        <source>Presented digest</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Silent user displaytime:</source>
+        <source>Stored digest</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Graphical positional audio simulation view</source>
+        <source>Error %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>This visually represents the positional audio configuration that is currently being used</source>
+        <source>Subject</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Listener Z coordinate</source>
+        <source>Unknown</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Listener X coordinate</source>
+        <source>Issuer</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Listener Y coordinate</source>
+        <source>Valid from</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Silent user display time (in seconds)</source>
+        <source>Expires</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Listener azimuth (in degrees)</source>
+        <source>Serial number</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Listener elevation (in degrees)</source>
+        <source>Server certificate warning</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Context string</source>
+        <source>The server presented a certificate that differs from the one you trusted before.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Use the &quot;set&quot; button to apply the context string</source>
+        <source>The server certificate could not be verified.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Apply the context string</source>
+        <source>Certificate</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Apply the identity string</source>
+        <source>Verification errors</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Identity string</source>
+        <source>Reject</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Use the &quot;set&quot; button to apply the identity string</source>
+        <source>View details</source>
         <translation type="unfinished"></translation>
     </message>
-</context>
-<context>
-    <name>NetworkConfig</name>
     <message>
-        <source>Network</source>
+        <source>Accept certificate</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Trust</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Changed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unverified</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Errors</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Review the certificate before deciding whether to trust it for this server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>user</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Username</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This mumble:// link did not include a username. Enter the name to use before connecting.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Target room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Complete connection</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enter a username to open this server link.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -7314,92 +2513,127 @@ the channel&apos;s context menu.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Use TCP compatibility mode</source>
-        <oldsource>Use TCP compatability mode</oldsource>
+        <source>Connect</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;b&gt;Enable TCP compatibility mode&lt;/b&gt;.&lt;br /&gt;This will make Mumble use only TCP when communicating with the server. This will increase overhead and cause lost packets to produce noticeable pauses in communication, so this should only be used if you are unable to use the default (which uses UDP for voice and TCP for control).</source>
+        <source>Profile</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Reconnect when disconnected</source>
+        <source>Selected user</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;b&gt;Reconnect when disconnected&lt;/b&gt;.&lt;br /&gt;This will make Mumble try to automatically reconnect after 10 seconds if your server connection fails.</source>
+        <source>Selected room</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Reconnect automatically</source>
+        <source>User</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Proxy</source>
+        <source>Your User Dragging preference is set to ask before moving people between voice rooms.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Type</source>
+        <source>Move user?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Type of proxy to connect through</source>
+        <source>Confirm this voice-room move before it is sent to the server.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Direct connection</source>
+        <source>Move</source>
+        <translation type="unfinished">انتقال</translation>
+    </message>
+    <message>
+        <source>Move user</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>HTTP(S) proxy</source>
+        <source>Target</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>SOCKS5 proxy</source>
+        <source>Room</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Hostname</source>
-        <translation type="unfinished">نام میزبان</translation>
-    </message>
-    <message>
-        <source>Hostname of the proxy</source>
+        <source>Placement</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Force TCP mode</source>
+        <source>Inside</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Enable QoS to prioritize packets</source>
+        <source>Your Channel Dragging preference is set to ask before moving rooms.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>This will enable QoS, which will attempt to prioritize voice packets over other traffic.</source>
+        <source>Move room?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Use Quality of Service</source>
+        <source>Confirm this room move before it is sent to the server.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Don&apos;t send certificate to server and don&apos;t save passwords. (Not saved).</source>
+        <source>Move room</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;b&gt;This will suppress identity information from the client.&lt;/b&gt;&lt;p&gt;The client will not identify itself with a certificate, even if defined, and will not cache passwords for connections. This is primarily a test-option and is not saved.&lt;/p&gt;</source>
+        <source>Cannot move room</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Suppress certificate and password storage</source>
+        <source>This room cannot be moved automatically.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;b&gt;Type of proxy to connect through.&lt;/b&gt;&lt;br /&gt;This makes Mumble connect through a proxy for all outgoing connections. Note: Proxy tunneling forces Mumble into TCP compatibility mode, causing all voice data to be sent via the control channel.</source>
+        <source>Reason</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;b&gt;Hostname of the proxy.&lt;/b&gt;&lt;br /&gt;This field specifies the hostname of the proxy you wish to tunnel network traffic through.</source>
+        <source>Reset the numeric sorting indicators or adjust the room manually.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SSL handshake failed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble is unable to establish a secure connection to the server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This can happen when the client and server support different encryption standards, one side is using an old operating system, the address is not a Mumble server, or the selected port belongs to another service.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading Stonks market data...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stonks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Portfolio, leaderboard, following, and server settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This server has not advertised Stonks portfolio support.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Portfolio cleared</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Host</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -7407,677 +2641,291 @@ the channel&apos;s context menu.</source>
         <translation type="unfinished">پورت</translation>
     </message>
     <message>
-        <source>Port number of the proxy</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Port number of the proxy.&lt;/b&gt;&lt;br /&gt;This field specifies the port number that the proxy expects connections on.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Username</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Username for proxy authentication</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Username for proxy authentication.&lt;/b&gt;&lt;br /&gt;This specifies the username you use for authenticating yourself with the proxy. In case the proxy does not use authentication, or you want to connect anonymously, simply leave this field blank.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Password</source>
-        <translation type="unfinished">رمزعبور</translation>
-    </message>
-    <message>
-        <source>Password for proxy authentication</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Password for proxy authentication.&lt;/b&gt;&lt;br /&gt;This specifies the password you use for authenticating yourself with the proxy. In case the proxy does not use authentication, or you want to connect anonymously, simply leave this field blank.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mumble services</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Check for new releases of Mumble automatically.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will check for new releases of Mumble every time you start the program, and notify you if one is available.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Check for application updates on startup</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Check for new releases of plugins automatically.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This will check for new releases of plugins every time you start the program, and download them automatically.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Submit anonymous statistics.&lt;/b&gt;&lt;br /&gt;Mumble has a small development team, and as such needs to focus its development where it is needed most. By submitting a bit of statistics you help the project determine where to focus development.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Submit anonymous statistics to the Mumble project</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Submit anonymous statistics</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Reconnect to last used server when starting Mumble</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Reconnect to last server on startup</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Privacy</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Prevent OS information being sent to Mumble servers and web servers</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Don&apos;t send OS information to servers&lt;/b&gt;&lt;br/&gt;
-Prevents the client from sending potentially identifying information about the operating system to the Mumble server and web servers.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Do not send OS information to Mumble servers and web servers</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>When toggled this hides the public server list from the connect dialog</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Hide public server list</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Check for plugin updates on startup</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Automatically download and install plugin updates</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Proxy type</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Proxy hostname</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Proxy port</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Proxy username</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Proxy password</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>Overlay</name>
-    <message>
-        <source>Silent</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Talking</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Whisper</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Shout</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Channel</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Failed to create communication with overlay at %2: %1. No overlay will be available.</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>OverlayClient</name>
-    <message>
-        <source>Filter</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Only talking</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Talking and recently active</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>All in current channel</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>All in linked channels</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Always show yourself</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Configure recently active time (%1 seconds)...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Columns</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Sort</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Alphabetically</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Last state change</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Edit...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Reset Zoom</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Configure recently active time</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Amount of seconds users remain active after talking:</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>OverlayConfig</name>
-    <message>
-        <source>To move the users, drag the little red dot.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>To resize the users, mouse wheel over a user.</source>
-        <oldsource>To resize the users, mousewheel over a user.</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>For more options, right click a user.</source>
-        <oldsource>For more options, rightclick a user.</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Launcher Filter</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Overlay</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Choose executable</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Choose application</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Choose path</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Load Overlay Presets</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mumble overlay presets (*.mumblelay)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Save Overlay Presets</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Options</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enable overlay.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Enable Overlay</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This sets whether the overlay is enabled or not. This setting is only checked when applications are started, so make sure Mumble is running and this option is on before you start the application.&lt;br /&gt;Please note that if you start Mumble after starting the application, or if you disable the overlay while the application is running, there is no safe way to restart the overlay without also restarting the application.</source>
-        <oldsource>This sets whether the overlay is enabled or not. This setting is only checked when applications are started, so make sure Mumble is running and this option is on before you start the application.&lt;br /&gt;Please note that if you start the application after starting Mumble, or if you disable the overlay while running, there is no safe way to restart the overlay without also restarting the application.</oldsource>
-        <translation type="unfinished"></translation>
+        <source>Users</source>
+        <translation type="unfinished">کاربران</translation>
     </message>
     <message>
-        <source>Layout</source>
+        <source>Protocol</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Blacklist</source>
+        <source>Release</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Whitelist</source>
+        <source>OS</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Uninstall Overlay</source>
+        <source>Certificate chain</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Overlay Installation</source>
+        <source>%1 certificate(s)</source>
         <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mumble has detected that you do not have the Mumble Overlay installed.
-
-Click the button below to install the overlay.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Install Mumble Overlay</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Overlay Upgrade</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mumble has detected an old version of the overlay support files installed on your computer.
-
-To upgrade these files to their latest versions, click the button below.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Upgrade Mumble Overlay</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Display a frame counter in the overlay</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show FPS counter</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Load an overlay preset from file</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Load…</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Save your overlay settings to file</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Save…</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Set the overlay font.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Set the overlay text color.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Color</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Remove</source>
-        <translation type="unfinished">پاک کردن</translation>
-    </message>
-    <message>
-        <source>Font</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>FPS and Clock Display</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Display a clock in the overlay showing the current local time (system time).</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show Clock</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Overlay Exceptions</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Overlay Exception Mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Allowed launchers</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Add</source>
-        <translation type="unfinished">اضافه کردن</translation>
     </message>
     <message>
-        <source>Allowed programs</source>
+        <source>Codec</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Allowed paths</source>
+        <source>Current audio bandwidth</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Blacklisted programs</source>
+        <source>%1 kBit/s</source>
         <translation type="unfinished"></translation>
     </message>
-</context>
-<context>
-    <name>OverlayEditor</name>
     <message>
-        <source>State</source>
+        <source>Maximum allowed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>User is not talking</source>
+        <source>TCP mode</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Passive</source>
+        <source>TLS</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>User is talking in your channel or a linked channel</source>
+        <source>Cipher</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Talking</source>
+        <source>Perfect forward secrecy</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>User is whispering to you privately</source>
+        <source>UDP encryption</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Private Whisper</source>
+        <source>UDP packets to server</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>User is shouting to your channel</source>
+        <source>good %1, late %2, lost %3, resync %4</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Channel Whisper</source>
+        <source>UDP packets from server</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Zoom</source>
+        <source>Server information</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Zoom Factor</source>
+        <source>Live connection details from the active server session.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Enabled Elements</source>
+        <source>Audio bandwidth</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>User avatar, chosen by each user</source>
+        <source>Audio</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Avatar</source>
+        <source>Access tokens are saved for this server and sent with future reconnects.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>User&apos;s name</source>
+        <source>Token %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Username</source>
+        <source>Access tokens</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Name of user&apos;s channel, if outside your current channel</source>
+        <source>Manage the temporary access tokens for the current server.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Channel</source>
+        <source>Tokens</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Muted or deafened</source>
+        <source>Add token</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Mute state</source>
+        <source>Save tokens</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Bounding box, automatically shrunk to minimum size to contain all visible elements</source>
+        <source>Saved tokens</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Bounding box</source>
+        <source>Scope</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Overlay Editor</source>
+        <source>Current server</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Zoom level</source>
+        <source>Registered users</source>
         <translation type="unfinished"></translation>
     </message>
-</context>
-<context>
-    <name>OverlayEditorScene</name>
     <message>
-        <source>Layout preset</source>
+        <source>Requesting the registered user list from the server.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Large square avatar</source>
+        <source>Status</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Avatar and Name</source>
+        <source>Loading users...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>User Opacity</source>
+        <source>ID %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>%1%</source>
+        <source>last seen %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Object Opacity</source>
+        <source>last room %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Alignment</source>
+        <source>last room ID %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Left</source>
+        <source>The server returned an empty user list.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Center</source>
+        <source>Showing %1 of %2 registered users.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Right</source>
+        <source>Registered accounts on this server.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Top</source>
+        <source>Registered</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Bottom</source>
+        <source>Shown</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Color...</source>
+        <source>Mode</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Font...</source>
+        <source>Read only</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Bounding box</source>
+        <source>Ban list</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Pen width</source>
+        <source>Requesting the ban list from the server.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Padding</source>
+        <source>Loading bans...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Pen color</source>
+        <source>user %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Fill color</source>
+        <source>reason %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Pick pen color</source>
+        <source>since %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Pick fill color</source>
+        <source>duration %1 seconds</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Pick color</source>
+        <source>hash %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Pick font</source>
+        <source>No note</source>
         <translation type="unfinished"></translation>
     </message>
-</context>
-<context>
-    <name>PluginConfig</name>
     <message>
-        <source>Plugins</source>
+        <source>There are no active bans on this server.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Plugin has no configure function.</source>
+        <source>Read-only Modern view of the server ban list.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Plugin has no about function.</source>
+        <source>Bans</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Options</source>
+        <source>Active bans</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Enable plugins and transmit positional information</source>
+        <source>Edit room</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>This allows plugins for supported games to fetch your in-game position and transmit it with each voice packet. This enables other users to hear your voice in-game from the direction your character is in relation to their own.</source>
+        <source>Requesting room details and ACL data for %1.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Link to Game and Transmit Position</source>
+        <source>Loading ACL...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Reloads all plugins</source>
+        <source>Quick create</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>This rescans and reloads plugins. Use this if you just added or changed a plugin to the plugins directory.</source>
+        <source>Create with name and email</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&amp;Reload plugins</source>
+        <source>Import PKCS#12</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Information about plugin</source>
+        <source>Export current certificate</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>This shows a small information message about the plugin.</source>
+        <source>Create</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&amp;About</source>
+        <source>Import</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Show configuration page of plugin</source>
+        <source>Export</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>This shows the configuration page of the plugin, if any.</source>
+        <source>Action</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&amp;Configure</source>
+        <source>Creates a new client certificate using the default local identity.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -8085,174 +2933,3322 @@ To upgrade these files to their latest versions, click the button below.</source
         <translation type="unfinished">نام</translation>
     </message>
     <message>
-        <source>Enable</source>
+        <source>Optional display name stored in the certificate.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>PA</source>
+        <source>Email</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>KeyEvents</source>
+        <source>Optional. Leave blank if you do not want an email address in the certificate.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Install a plugin from a local file</source>
+        <source>Import file</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Install plugin...</source>
+        <source>Browse</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Unload the currently selected plugin. This will remove it from the plugin list for the current session.</source>
+        <source>Import password</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Unload</source>
+        <source>Export file</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>The plugin was installed successfully</source>
+        <source>Manage the client certificate used for account identity and server authentication.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Unable to deactivate all requested features for plugin &quot;%1&quot;</source>
+        <source>Current certificate</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Unable to load plugin &quot;%1&quot;</source>
+        <source>Certificate action</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Whether the positional audio feature of this plugin should be enabled</source>
+        <source>Choose one operation. The form only shows fields needed for that operation.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>This plugin does not provide support for positional audio</source>
+        <source>None</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Whether this plugin has the permission to be listening to all keyboard events that occur while Mumble has focus</source>
+        <source>Installed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Whether this plugin should be enabled</source>
+        <source>Missing</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>List of plugins</source>
+        <source>Search</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Use up and down keys to navigate through plugins. Use left and right keys to navigate between single plugin permissions.</source>
+        <source>Rooms</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Plugin name</source>
+        <source>Case sensitive</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Plugin enabled checkbox</source>
+        <source>Regular expression</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Plugin positional audio permission checkbox</source>
+        <source>Results</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Plugin keyboard event listen permission checkbox</source>
+        <source>Start typing to search users and rooms.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>checked</source>
+        <source>No matching users or rooms.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>unchecked</source>
+        <source>Find users and rooms on the current server.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Not available</source>
+        <source>Mixdown</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Multichannel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Multichannel + transport</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Transport only</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recording</source>
+        <translation type="unfinished">درحال ضبط</translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Elapsed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Target directory</source>
+        <translation type="unfinished">مسیر مقصد</translation>
+    </message>
+    <message>
+        <source>Filename</source>
+        <translation type="unfinished">نام فایل</translation>
+    </message>
+    <message>
+        <source>Format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice recorder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Record the current session from the Modern shell.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recorder</source>
+        <translation type="unfinished">ضبط کننده</translation>
+    </message>
+    <message>
+        <source>Output</source>
+        <translation type="unfinished">خروجی</translation>
+    </message>
+    <message>
+        <source>Refresh</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stop</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You do not have permission to create voice or text rooms here.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Room creation is unavailable for the current selection.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Type</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Topic</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice parent</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice order</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Temporary voice room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max voice users</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text visibility source</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text order</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create a voice room or a persistent text room without leaving Modern layout.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Validation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Needs attention</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Description</source>
+        <translation type="unfinished">توضیحات</translation>
+    </message>
+    <message>
+        <source>Visibility source</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Order</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Configure ACL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Edit text room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update the persistent text room without leaving Modern layout.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete text room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete #%1?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Confirmation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Result</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Existing history will no longer be visible in this room.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Monogram</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Shown when no server image is configured.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Square images work best. The server stores a normalized 256 px PNG.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Welcome text</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Allow HTML</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server-wide chat</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max users</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text message length</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image message length</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enabled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recording allowed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Helper required</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max width</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max height</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max frame rate</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Relay URL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change connected server settings from the Modern layout.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Chat</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Limits</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen sharing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Live input</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current microphone</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Not reported</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>0.0%</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1%</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 ms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Waiting</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 kbit/s</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 dB</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Packets lost</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ping</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Jitter</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio statistics</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Live input, packet, and jitter diagnostics for the selected user.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Input</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Network</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open audio settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Signal</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Version</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 (%2)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copyright</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Website</source>
+        <translation type="unfinished">تارنما</translation>
+    </message>
+    <message>
+        <source>An Open Source, low-latency, high quality voice-chat utility.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>License</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>For the full author list, see https://github.com/mumble-voip/mumble/graphs/contributors.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Third-party licenses</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 bundled license record(s)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Version, license, and project information.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Credits</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open website</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Architecture</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Qt runtime information for this client.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Runtime</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Qt version</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Application platform</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Operating system</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Library paths</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Qt</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Platform</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Checking for updates</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Looking for the newest mumble-forked build.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Installed build</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current version</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current build</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Release channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Contacting the release channel now. This window will update when the check finishes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open releases</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Build</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Latest build</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Published</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Commit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SHA256</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update path</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update package</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Installer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Package</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Package SHA256</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Available update</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Latest release</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No newer mumble-forked build was found.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Release notes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Notes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check again</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Install update</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Download update</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open release</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You&apos;re up to date</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A new mumble-forked build is ready.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This client matches the newest release information.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Latest</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update check failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble could not retrieve the latest mumble-forked release information.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Try again</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect, search, server information, tokens, registered users, and bans.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create rooms, manage ACLs, and work with room-specific actions.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>User information, comments, registration, moderation, and history grants.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mute, deafen, recording, audio statistics, and voice setup.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Client preferences, certificate management, and screen sharing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Help</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>About, Qt runtime details, update checks, and feedback.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Modern layout keeps contextual help inside the client shell.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Modern header</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The header menus expose the actions available in the current view.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Menus</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>6</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Layout</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Modern</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current view</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Diagnostics preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Diagnostics are not included.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Steps to reproduce</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Bug</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Suggestion</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Question</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Title</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pasted evidence</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Include diagnostics</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Submit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Report feedback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Bug reports, suggestions, and questions for this fork.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Report</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Evidence</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Diagnostics</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stop capture</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start capture</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy report</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open GitHub</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server submit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fallback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Included</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Off</source>
+        <translation type="unfinished">خاموش</translation>
+    </message>
+    <message>
+        <source>Max body</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 KiB</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Report size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 bytes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Back</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You are already registered on this server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The server is not allowing self-registration for this account.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This action cannot be undone and your username cannot be changed afterwards.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You will forever be known as this username on the current server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This user is already registered on this server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This user needs a certificate before they can be registered.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You do not have permission to register users on this server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This permanently binds the current certificate for this user to their server account.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The username cannot be changed after registration from this dialog.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>My comment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Requesting your current comment from the server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading comment...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Edit the comment shown on your user profile.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Comment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Kick %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Optionally include a reason that will be sent to the user.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ban %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose what to ban and optionally include a reason.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ban certificate</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ban IP</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current voice room: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current chat view: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>From now</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>5 days back</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>10 days back</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>15 days back</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>30 days back</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom days back</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>All history</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Revoke access</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Grant chat history</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Grant or revoke persistent chat history access for %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Access</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Window</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom days</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Local nickname for %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This nickname is stored locally for your client.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Nickname</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Local nickname</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>User comment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Requesting the comment for %1 from the server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Comment for %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset user comment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset the server-side comment for %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Avatar</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Avatar image URL redirected too many times.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Network access is not available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect to a server before saving.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Avatar saved.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset avatar</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset the server-side avatar for %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>User information</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Requesting user information for %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading user information...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Session</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Opus</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Supported</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Not supported</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificates</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Strong certificate</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Client version</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Client OS</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Address</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>TCP packets</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>UDP packets</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>TCP ping</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>UDP ping</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>TCP deviation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>UDP deviation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connection and client details for %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete %1 and all of its sub-rooms.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unlink room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove the link between %1 and %2.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Linked room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unlink</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unlink all rooms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message numerus="yes">
+        <source>Remove %n permanent room link(s) from %1.</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Linked rooms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unlink all</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Title: %1
+
+%2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Feedback report copied</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The report is ready outside server submit.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The feedback report markdown was copied.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enter a short title.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Describe what happened or what you want changed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Opened the prefilled GitHub issue.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Feedback fallback opened</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server submit is unavailable for this report.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A prefilled GitHub issue was opened in your browser.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Feedback submitted</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The report was sent to the connected server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The server will return the GitHub issue state shortly.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open fallback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preparing plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Validating and extracting the package</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Replace plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Review the plugin package before replacing the installed version.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>New plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Author</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>API version</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Destination</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin installed successfully</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin failed to load; the previous file was restored</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin installation cancelled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select at least one plugin.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Updating plugins</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Selected updates are downloading and will be installed in the background.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You can close this window while the update continues. Results are written to the client log.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel updates</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin updates were cancelled.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Position updated.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose notification sound</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio files (*.wav *.ogg *.flac *.mp3);;All files (*)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Messages &amp; Sounds</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>That sound file could not be played.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin manager is not available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Install plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble plugins (*.mumble_plugin *.dll *.so *.dylib);;All files (*)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rescanning plugin folders.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Checking for plugin updates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>That plugin is no longer available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This plugin has no configuration dialog.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Built-in positional-audio tool</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>About</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The manual placement plugin lets you set a test position, orientation, context, and identity without a game plugin.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This plugin has no About dialog.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unloaded %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to unload %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enter a username before connecting.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select file to import certificate from</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select file to export certificate to</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enter a valid email address or leave it blank.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate generation failed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate created and installed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a readable PKCS#12 file.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The file did not contain a valid certificate and key.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate imported and installed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>There is no valid certificate to export.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a writable export path.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The certificate could not be written.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate exported.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a certificate action.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select target directory</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recording stopped.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to start recording. Not connected to a server.</source>
+        <translation type="unfinished">شروع ضبط ممکن نیست. اتصال با سرور برقرار نیست.</translation>
+    </message>
+    <message>
+        <source>This server is too old to allow recording safely.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>There is already a recorder active for this server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select a recording format.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a target directory.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio output is not available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to start recording: audio output has a 0 Hz sample rate.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recording started.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Review the highlighted ACL issue.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You need Write permission on this room to edit details or ACLs.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A voice room needs a name.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Review the highlighted room detail.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a visibility source whose ACL you can edit.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A text room needs a name.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server settings saved.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Root Write permission is required to edit server settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enter a room name.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You cannot create a voice room there.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You cannot create text rooms on this server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Local Nickname Adjustment...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Downloading avatar image...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a user in the Modern user list to send a direct message.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a room in the Modern room list to send a room message.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1:%2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Avatar image is not available yet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cleared %1 of local chat media cache.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to clear the local chat media cache.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Shortcuts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Shortcut capture is not available on this platform.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to load %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Settings saved.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Settings applied.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen sharing settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server information...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect to a server...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Disconnect...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Access tokens...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Registered users...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ban list...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Access control (ACL)...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server settings...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create room...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stonks...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change avatar...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Configure</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check for updates...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Report feedback...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Quit Mumble...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Edit room...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove room...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Link room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy room URL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Send room message...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>System</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>[message deleted]</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>(edited)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Link preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Offline</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Deafened</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Muted</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Online</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Join this voice room before starting a share.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ready to share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Join this room to share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GStreamer GPU ready</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GPU</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Share screen</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>session %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Using external fallback runtime.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1x%2 @ %3 fps</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fallback runtime</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GStreamer GPU</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Live</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You are sharing in this room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manage share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>View your active screen-share status.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stop sharing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Watching %1&apos;s share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connecting to %1&apos;s share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open share window</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the screen-share window. The viewer may still be waiting for relay media.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stop watching</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This share is not viewable on this client right now.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Join this voice room before watching.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 is sharing in this room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading recent messages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Refreshing messages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading older messages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Conversation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Activity</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Direct message</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retired</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server log, connection status, notices, and diagnostics.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect to a server to load rooms and history.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Direct messages use the non-persistent text-message transport.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Persistent text room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>history kept</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 in voice</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Write a message</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect to chat</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Read-only activity</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Write to %1...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Write in %1...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Persistent room history stays with the selected room.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Replying to %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Direct messages are non-persistent on this server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose another room to reply.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>In %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 loaded messages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 unread</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Read-only</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No room selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This conversation is read-only.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Messages will appear here once the selected room has activity.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Listener</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Away is shown automatically when you are idle.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Edit text room...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Set as default</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Configure ACL...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Go to visibility source</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete text room...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server log, connection status, notices, and client diagnostics.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>#%1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Persistent text channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server log</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>That user is no longer available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose another user before opening persistent direct-message history.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect to a server before using persistent direct-message history.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Persistent chat history is not ready for this connection.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This server does not advertise persistent chat history.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This server does not advertise persistent direct-message history.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Register your user before using persistent direct-message history.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 needs a registered account before persistent direct-message history can be used.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>User %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Offline or unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Direct message unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect to send</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Direct messages with %1 will appear here.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Direct messages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Direct messages can use persistent history or private in-memory mode.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Direct messages use the private text-message transport and stay separate from room chat.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No active channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Persistent DM history enabled.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Private DM mode enabled for this window.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect to a server before sending a direct message.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You do not have permission to message that user.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remind tomorrow</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 Latest: %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Downloading</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Downloading update</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble is downloading and verifying the update. You can keep using the client.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manual update required</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This release does not include a verified Windows update package that Mumble can run automatically.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Dismiss</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Starting download</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update ready to install</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble will close, mumble-updater will apply the package, use the MSI only if the package fails, and then reopen to restore this server and chat.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble will close, mumble-updater will apply the package, and Mumble will reopen to restore this server and chat.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble will close, mumble-updater will run the installer, and Mumble will reopen to restore this server and chat.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Verified</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Install and restart</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Later</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update cancelled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The update download was cancelled.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update package missing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The verified update package is no longer available. Download the update again.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Download</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Installing update</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble is closing now. The updater will finish the install and reopen Mumble when it is done.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Starting updater</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble could not launch the update package.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Self comment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Your user state is not available yet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Comment saved.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server identity</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Root Write permission is required to edit the server identity.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Nothing changed in the server identity payload.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server identity saved.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tweaks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tweaks saved.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect to a server before saving pins.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a valid ticker symbol to pin.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Saving ticker pin...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Removing ticker pin...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect to a server before saving feed preferences.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Saving feed preferences...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Channel %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Combined activity</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>#text-%1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown chat</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Not connected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Non-persistent direct message</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No channel selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Non-persistent room chat</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Shared shell safe mode keeps the modern bootstrap on a reduced snapshot payload.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No current room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No conversation selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This direct conversation is no longer available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Direct messages use the non-persistent text-message transport on this server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text channel is unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This text channel is linked to an unavailable ACL channel.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This channel is unavailable.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This legacy conversation is no longer shown in the text room list.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server-wide chat is unavailable on this server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Nothing to show yet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start a conversation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Server to connect</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Room chat and history appear here</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Direct</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Direct messages are non-persistent on this server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Read-only conversation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose another room to reply</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Messages stay with this room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Yahoo Finance quote</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 on Yahoo Finance</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fetching page metadata</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Yahoo Finance for the latest quote.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Yahoo Finance</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Yahoo Finance</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Instagram</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open link</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reddit video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Video preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reddit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Animated image preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Webhallen</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open in thread</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Free To Play</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Coming soon</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Steam link</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading link preview...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Steam</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Steam</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Post on X</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Post by %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on X</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fetching post metadata</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This post isn&apos;t available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This post couldn&apos;t be loaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Reddit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GitHub</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fetching repository metadata</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on GitHub</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GitHub repository metadata unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic previews are disabled for localhost and private-network targets.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading YouTube Shorts preview...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading YouTube preview...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fetching title and thumbnail</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on YouTube</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>YouTube Short</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>YouTube video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>YouTube Shorts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>YouTube</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>YouTube Shorts by %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>YouTube by %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading Twitch preview...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Twitch</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitch</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not read Twitch channel state.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 on Twitch</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitch channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This Twitch channel could not be loaded. </source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerun</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 is live on Twitch</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitch channel - Rerun</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitch channel - Live</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 viewers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 is offline</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitch channel - Offline</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>showing latest Twitch VOD</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>showing latest VOD: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>showing a Twitch clip</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>showing clip: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Offline. No recent Twitch VOD or clip was found. </source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Google search</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image preview blocked</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Link preview blocked</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Facebook post</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Direct image preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Elgiganten</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fetching Instagram reel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fetching Instagram post</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading preview...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading conversation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fetching recent messages and read state</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Nothing here yet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Combined activity only shows conversations you can currently read.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unread state stays with each room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No accessible messages yet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No messages in %1 yet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start the first message below</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading older messages...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load older messages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>New since last read</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>System event</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reply</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>History is not available for this conversation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server-wide chat is unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a text room or voice room chat instead</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Conversation unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You do not have permission to view this chat history.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>History unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ask a server administrator for View chat history access</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Persistent chat controller is unavailable.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading %1...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to send image: too large.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Attach image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Images (*.png *.jpg *.jpeg *.gif *.webp)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Source</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Quality</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen share is live</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You are currently sharing your screen to this channel.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This certificate is already registered on this server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect with a certificate before registering on this server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1x%2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Primary display</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Primary screen</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screens</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open windows</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No shareable app windows are open</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 limit: %2x%3@%4</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Helper</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>4K / %1p (%2x%3)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1p (%2x%3)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Best available (%1x%2)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 FPS</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>System audio (excluding Mumble)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Output: %1 (default, excluding Mumble)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Output: %1 (excluding Mumble)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>App: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>System and output-device audio exclude this Mumble client to avoid voice feedback.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>this channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start screen share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Share to %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start sharing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>default source</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>off</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>system (Mumble excluded)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>output device (Mumble excluded)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 app audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>app audio (process %1)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>app audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>window app audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1x%2 @ %3 FPS</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>auto</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The screen-share window could not be opened right now.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The video window will open when media starts.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen-share viewer is connecting</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The screen-share viewer stopped before a video window was available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start Screen Share (Unavailable)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GitHub issue #%1 was created.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The GitHub issue was created.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The connected server accepted and forwarded the report.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open issue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The server could not create the GitHub issue.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Feedback not submitted</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The connected server could not create the GitHub issue.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Feedback fallback ready</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The connected server cannot submit this report.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connection ended</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Server to reconnect</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Room history stays with each channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;div&gt;Read-only activity&lt;/div&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;div&gt;Connect to chat&lt;/div&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect to a server to load conversations and history.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;div&gt;Write to %1...&lt;/div&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;div&gt;Write in %1...&lt;/div&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;div&gt;Server-wide chat is unavailable&lt;/div&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;div&gt;Choose a conversation to write in&lt;/div&gt;&lt;div&gt;&lt;small&gt;This conversation is read-only&lt;/small&gt;&lt;/div&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;div&gt;Write...&lt;/div&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mute cue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice feedback</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
-    <name>PluginInstaller</name>
+    <name>MediaSessionBackend</name>
     <message>
-        <source>PluginInstaller</source>
+        <source>This media provider is not supported.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>You are about to install the plugin listed below. Do you wish to proceed?</source>
+        <source>The media embed URL is not allowed for this provider.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Name:&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <source>Media playback failed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MediaSessionWindow</name>
+    <message>
+        <source>Media session</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Version:&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <source>The media renderer stopped unexpectedly.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Author(s):&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <source>Pause</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Description:&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <source>Play</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&amp;No</source>
+        <source>Close</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>MessageEventEditor</name>
+    <message>
+        <source>Event behavior</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&amp;Yes</source>
+        <source>Log</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>The file &quot;%1&quot; is not a valid plugin file!</source>
+        <source>Notify</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Unable to load plugin &quot;%1&quot; - check the plugin interface!</source>
+        <source>Highlight</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Unable to delete old plugin at &quot;%1&quot;</source>
+        <source>TTS</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Unable to copy plugin library from &quot;%1&quot; to &quot;%2&quot;</source>
+        <source>Sound</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Unable to move plugin library to &quot;%1&quot;</source>
+        <source>Event</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ModernUiAutomationServer</name>
+    <message>
+        <source>Invalid JSON request: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Unable to locate the plugin manifest (manifest.xml)</source>
+        <source>Main window is no longer available.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Error while processing manifest: %1</source>
+        <source>Missing automation command.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Unable to find plugin for the current OS (&quot;%1&quot;) and architecture (&quot;%2&quot;)</source>
+        <source>The Qt Quick performance monitor is not active.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Unable to locate plugin library specified in manifest (&quot;%1&quot;) in the bundle</source>
+        <source>Missing performance scenario operation ID.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Overwrite plugin?</source>
+        <source>Unknown Qt Quick performance command.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>The new plugin &quot;%1&quot; (%2) is about to overwrite the already installed plugin &quot;%3&quot; (%4). Do you wish to proceed?</source>
+        <source>The requested visual fixture generation is stale or invalid.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Qt Quick frontend is not active.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing capture path.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin operation probe</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Updated plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Updated</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing scopeToken.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing or invalid sessionId.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing actionId.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing scopeToken or actionId.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing session or actionId.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing dialogId.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Dialog field is not available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clipboard is not available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing dialogId or fieldId.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing dialogId or actionId.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing messageId.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing variant.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown app dialog probe &apos;%1&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Demo User</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing session.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown user dialog probe &apos;%1&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown data state probe &apos;%1&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown Stonks header probe &apos;%1&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown connection-state probe &apos;%1&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown screen-share probe &apos;%1&apos; or missing scope token.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown rich preview probe &apos;%1&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown direct-message probe &apos;%1&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Direct-message session is out of range.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Direct-message probe session is not usable.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Kira Mockup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automation direct-message probe</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown Stonks dialog probe &apos;%1&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing Stonks actionId.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown Stonks action &apos;%1&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble Modern Certificate Probe</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing MOTD expanded state.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automation update failure</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current user</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing failed connection type or port.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Missing message.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown automation command &apos;%1&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unauthorized automation request.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>PluginEditor</name>
+    <message>
+        <source>Installed plugins</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Install…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rescan</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check updates</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unnamed plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unloaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enabled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Positional audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keyboard monitoring</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Configure</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>About</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unload</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -8278,33 +6274,17 @@ To upgrade these files to their latest versions, click the button below.</source
         <source>Non-plugin found in plugin directory: &quot;%1&quot; (%2)</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Unable to load plugin candidate %1 (%2)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to reload plugin %1 (%2)</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>PluginUpdater</name>
-    <message>
-        <source>PluginUpdater</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The following plugins can be updated.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Select all</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Plugin</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Download-URL</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Do you want to update the selected plugins?</source>
-        <translation type="unfinished"></translation>
-    </message>
     <message>
         <source>Unable to download plugin update for &quot;%1&quot; from &quot;%2&quot; (%3)</source>
         <translation type="unfinished"></translation>
@@ -8321,6 +6301,38 @@ To upgrade these files to their latest versions, click the button below.</source
         <source>Successfully updated plugin &quot;%1&quot;</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Update cancelled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin update exceeds the %1 MiB download limit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin is no longer installed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The update redirected too many times</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The server returned HTTP status %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The downloaded update was empty</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin updated successfully</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The updated plugin failed to load; the previous file was restored</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>PortAudioSystem</name>
@@ -8330,57 +6342,13 @@ To upgrade these files to their latest versions, click the button below.</source
     </message>
 </context>
 <context>
-    <name>PositionalAudioViewer</name>
+    <name>PttTool</name>
     <message>
-        <source>Positional Audio Viewer</source>
-        <translation type="unfinished"></translation>
+        <source>Push to talk</source>
+        <translation type="unfinished">برای مکالمه فشار دهید</translation>
     </message>
     <message>
-        <source>Camera direction</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>X</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Y</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Z</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Player position</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Player axis</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Player direction</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Camera axis</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Camera position</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Info</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Context</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Identity</source>
+        <source>Hold to transmit</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -8398,10 +6366,6 @@ To upgrade these files to their latest versions, click the button below.</source
 <context>
     <name>QApplication</name>
     <message>
-        <source>Failed to restart mumble</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Mumble failed to restart itself. Please restart it manually.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8412,14 +6376,6 @@ To upgrade these files to their latest versions, click the button below.</source
 </context>
 <context>
     <name>QObject</name>
-    <message>
-        <source>Talking UI</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Echo cancellation is not supported for the interface combination &quot;%1&quot; (in) and &quot;%2&quot; (out).</source>
-        <translation type="unfinished"></translation>
-    </message>
     <message>
         <source>Local Mute</source>
         <translation type="unfinished">ساکت شده محلی</translation>
@@ -8441,75 +6397,11 @@ To upgrade these files to their latest versions, click the button below.</source
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;p&gt;You&apos;re using a Mumble version that &lt;b&gt;explicitly disabled&lt;/b&gt; update-checks.&lt;/p&gt;&lt;p&gt;This means that the update notification you might receive by using this option will &lt;b&gt;most likely be meaningless&lt;/b&gt; for you.&lt;/p&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Talking (muted)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>All messages</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Toggle console for all events</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Toggle pop-up notifications for all events</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Toggle window highlight (if not active) for all events</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Click here to toggle sound notifications for all events</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Toggle Text-to-Speech for all events</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>RNNoise is not available due to a sample rate mismatch.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Reset all settings?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Do you really want to reset all settings (not only the ones currently visible) to their default value?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Local Nickname Adjustment...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Blocked URL scheme &quot;%1&quot;&lt;/b&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The URL uses a scheme that has been blocked for security reasons.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Blocked URL: &quot;%1&quot;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Default Device</source>
         <translation type="unfinished">دستگاه پیش‌فرض</translation>
     </message>
     <message>
         <source>Access to the microphone was denied. Please allow Mumble to use the microphone by changing the settings in System Preferences -&gt; Security &amp; Privacy -&gt; Privacy -&gt; Microphone.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>If enabled this tries to cancel out echo from the audio stream.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -8546,10 +6438,6 @@ To upgrade these files to their latest versions, click the button below.</source
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Invocation</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>EXPERIMENTAL: Acoustic echo cancellation (Apple).</source>
         <translation type="unfinished"></translation>
     </message>
@@ -8562,28 +6450,11 @@ To upgrade these files to their latest versions, click the button below.</source
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Unfortunately %1 shortcut(s) could not be migrated.
-You can register them again.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Potentially broken settings</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Load backup settings?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>It seems that Mumble did not perform a normal shutdown. If you did not intentionally kill the application, this could mean that the used settings caused a crash. Do you want to load the setting&apos;s backup instead?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The backed-up settings also seem to have been saved without Mumble exiting normally (potentially indicating a crash).</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>If you experience repeated crashes with these settings, you might have to manually delete the settings files at &lt;pre&gt;%1&lt;/pre&gt; and &lt;pre&gt;%2&lt;/pre&gt; in order to reset all settings to their default value.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -8683,183 +6554,6227 @@ You can register them again.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Listening for input</source>
+        <source>EXPERIMENTAL: Echo cancellation (WebRTC)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Add</source>
-        <translation type="unfinished">اضافه کردن</translation>
-    </message>
-    <message>
-        <source>&lt;p&gt;If you&apos;re using Linux this is most likely because you are using a version from your distribution&apos;s package repository that have their own update cycles.&lt;/p&gt;&lt;p&gt;If you want to always have the most recent Mumble version, you should consider using a different method of installation.
-See &lt;a href=&quot;https://github.com/mumble-voip/mumble&quot;&gt;the project repository&lt;/a&gt; for what alternatives there are.&lt;/p&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>ResponsiveImageDialog</name>
-    <message>
-        <source>Image Preview</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>RichTextEditor</name>
-    <message>
-        <source>Failed to load image</source>
+        <source>Uses WebRTC&apos;s acoustic echo canceller on the microphone stream with speaker loopback as the far-end reference. This is only available in builds that include the WebRTC AEC runtime.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Image file too large to embed in document. Please use images smaller than %1 kB.</source>
+        <source>Unavailable</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Message is too long.</source>
+        <source>Talking</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Display</source>
+        <source>Whispering</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Source Text</source>
+        <source>Shouting</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&amp;Bold</source>
+        <source>Talking while muted locally</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Ctrl+B</source>
+        <source>You</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&amp;Italic</source>
+        <source>Muted mic</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Italic</source>
+        <source>Priority</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Ctrl+I</source>
+        <source>Recording</source>
+        <translation type="unfinished">درحال ضبط</translation>
+    </message>
+    <message>
+        <source>Suppressed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Underline</source>
+        <source>Deafened</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Ctrl+U</source>
+        <source>Muted</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Color</source>
+        <source>Friend: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Insert Link</source>
+        <source>Friend</source>
+        <translation type="unfinished">دوست</translation>
+    </message>
+    <message>
+        <source>Authenticated user</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Ctrl+L</source>
+        <source>Priority speaker</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Insert Image</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>RichTextEditorLink</name>
-    <message>
-        <source>Add Link</source>
+        <source>Server deafened</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>URL</source>
+        <source>Server muted</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Text</source>
+        <source>Locally muted</source>
         <translation type="unfinished"></translation>
     </message>
-</context>
-<context>
-    <name>Search::SearchDialog</name>
+    <message>
+        <source>%1 dB</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Away</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Online</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown date</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Today</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Yesterday</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown time</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>1 person here</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 people here</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 person here</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>User %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown user</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Embedded image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Click to open or save.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Embedded %1 image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Large image attachment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image attachment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open image to view or save.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>[Long message preview. Use Copy message for the full text.]</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>System event</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ephemeral room chat.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice room chat for %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 people in %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitch clip</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 Twitch clip</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitch video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitch collection</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitch channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 on Twitch</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitch VOD</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitch by %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clip</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>VOD</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Collection</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitch clip playback may require opening a Twitch session for mature content, login gates, or unavailable clips.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitch VOD playback may require opening a Twitch session for mature content, login gates, or expired videos.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitch collection playback may require opening a Twitch session if a video is gated or unavailable.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitch channel playback uses the live/offline player and may require opening a Twitch session for mature content or offline pages.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1h %2m</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1m %2s</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1s</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>1 day ago</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 days ago</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitch may ask you to confirm mature content, log in, or open a Twitch session before playback.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Windows</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mac</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Linux</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Steam header image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screenshot %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>TikTok</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>TikTok video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on TikTok</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Vimeo</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Vimeo video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Vimeo</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Dailymotion</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Dailymotion video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Dailymotion</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Spotify</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Spotify link</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Spotify</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SoundCloud</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SoundCloud track</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on SoundCloud</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Streamable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Streamable video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Streamable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GIPHY</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GIPHY GIF</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on GIPHY</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Bluesky</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Bluesky post</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Bluesky</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mastodon</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mastodon post</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open post</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Google Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Google Videos</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Google News</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Google Shopping</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Google Books</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Google Search</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Google Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Google Videos</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Google News</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Google Shopping</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Google Books</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Google Search</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tradera</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Tradera</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tradera listing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Blocket</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Blocket</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Blocket listing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Bytbil</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Bytbil</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Bytbil vehicle</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Flashback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Flashback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Flashback thread</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SweClockers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on SweClockers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SweClockers link</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Existenz</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Existenz</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Existenz link</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hemnet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Hemnet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hemnet listing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Booli</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Booli</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Booli listing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Prisjakt</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Prisjakt</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Prisjakt product</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PriceRunner</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on PriceRunner</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PriceRunner product</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GP</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on GP</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GP article</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SVT</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on SVT</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SVT article</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Omni</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Omni</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Omni article</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Aftonbladet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Aftonbladet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Aftonbladet article</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expressen</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Expressen</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expressen article</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>DN</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on DN</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>DN article</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sveriges Radio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Sveriges Radio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sveriges Radio episode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Inet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Inet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Inet product</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Webhallen</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Webhallen</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Webhallen product</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Elgiganten</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Elgiganten</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Elgiganten product</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>POWER</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on POWER</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>POWER product</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Komplett</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Komplett</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Komplett product</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Systembolaget</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Systembolaget</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Systembolaget product</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SMHI</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on SMHI</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SMHI forecast</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Klart</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Klart</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Klart forecast</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Yr</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Yr</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Yr forecast</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hitta</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Hitta</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hitta place</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Eniro</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Eniro</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Eniro place</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Google Maps</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open in Google Maps</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Google Maps place</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SJ</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on SJ</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SJ travel link</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on SL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SL traffic link</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Amazon</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Amazon</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Amazon product</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SweClockers forum thread</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>G2A</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on G2A</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>G2A listing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Kinguin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Kinguin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Kinguin listing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Epic Games Store</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Epic Games Store</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Epic Games Store link</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GOG</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on GOG</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GOG game</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ubisoft Store</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Ubisoft Store</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ubisoft Store link</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>EA</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on EA</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>EA game</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Humble Store</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Humble</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Humble Store game</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fanatical</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Fanatical</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fanatical game</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Green Man Gaming</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Green Man Gaming</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Green Man Gaming game</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>itch.io</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on itch.io</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>itch.io game</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Battle.net</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Battle.net</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Battle.net game</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Xbox Store</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Xbox Store</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Xbox Store game</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>In stock</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Discontinued</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Out of stock</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pre-order</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Steam key</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Steam</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Epic Games</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ubisoft Connect</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>EA app</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Xbox</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PC</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Premium</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Free</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Yahoo Finance</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Yahoo Finance</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Yahoo Finance quote</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Google Finance</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Google Finance</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Google Finance quote</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>X</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on X</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cashtag on X</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Avanza</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Avanza</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Avanza finance link</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Nordnet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Nordnet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Nordnet finance link</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Interactive Brokers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Interactive Brokers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Interactive Brokers finance link</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Google</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GitHub</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on GitHub</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GitHub repository</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Steam</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Steam link</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tenor</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Tenor</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tenor GIF</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Threads</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Threads</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Threads post</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Patreon</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Patreon</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Patreon post</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reddit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Reddit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reddit video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reddit post</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Facebook</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Facebook</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Facebook post</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Instagram</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Instagram</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Instagram post</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitter/X</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Post on X</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Imgur</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Imgur</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Imgur link</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>4chan</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on 4chan</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>4chan post</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>YouTube</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on YouTube</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>YouTube video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitch</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Twitch</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Twitch link</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview request timed out</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview exceeded size limit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fetching page metadata</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Instagram reel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Post by %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reply</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Original message unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>connected=yes; feature=%1; server-submit=%2; max-log-bytes=%3; max-body-bytes=%4</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>connected=no; feature=no; server-submit=no</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Submit will use the GitHub fallback because you are not connected.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Submit will use the GitHub fallback because this server does not advertise in-app feedback.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Submit will use the GitHub fallback because server-side feedback submission is disabled.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Capturing new Console.txt lines for this repro.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Capture stopped. Diagnostics use logs since capture start.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ready to submit through the connected server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1, build %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>build %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Latest release</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Download the newest update when you are ready to install.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Yes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No</source>
+        <translation type="unfinished"></translation>
+    </message>
     <message>
         <source>None</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Status</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A valid certificate is installed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No valid certificate is installed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name</source>
+        <translation type="unfinished">نام</translation>
+    </message>
+    <message>
+        <source>Email</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Issuer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expires</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SHA-1 fingerprint</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Message</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Join</source>
         <translation type="unfinished"></translation>
     </message>
-</context>
-<context>
-    <name>SearchDialog</name>
+    <message>
+        <source>ID %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Group members must be online usernames or numeric user IDs.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The room no longer exists.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Each ACL rule must apply here, to sub rooms, or both.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>User ACL targets must be an online username or a numeric user ID.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Room %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Topic</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Order</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max users</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Edit details, access rules, and groups for %1. Room ID %2.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Edit room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Room details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Access control</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rules and groups</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rules</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Groups</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1w</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1d</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1h</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1m</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 by %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remote Speech Cleanup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect to a server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a saved server or add one.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Edit server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server title</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server address</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Port</source>
+        <translation type="unfinished">پورت</translation>
+    </message>
+    <message>
+        <source>Username</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server password</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Edit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove</source>
+        <translation type="unfinished">پاک کردن</translation>
+    </message>
+    <message>
+        <source>Save</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Saved server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Users: %1/%2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Users: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Users: -</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1/%2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ping: %1 ms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ping: -</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 ms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1:%2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1:%2 / %3</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>username</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enter a server host.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enter a port between 1 and 65535.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enter a username.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Username rejected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Username already in use</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Authentication failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server password rejected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connection failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The server rejected this username. Change it and try reconnecting.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Another connected user is already using this name.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update the username or password, then reconnect.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enter the server password and reconnect.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Review the connection details and try again.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice, text, screen sharing, and room state will leave the current server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Disconnect</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Disconnect from this server?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Confirmation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Quitting will disconnect from the current server and close Mumble.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble will close and stop running.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remember this setting</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Minimize</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Quit Mumble</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Quit Mumble or keep it running in the background?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Are you sure you want to quit Mumble?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The message body, attachments, link previews, and reactions will be removed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Conversation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete message</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete this message from chat history?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>this user</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>User</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image file or URL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Browse</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a PNG or JPEG image from this device, or paste a direct http(s) image URL.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change Avatar</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a new server-side avatar for %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Avatar</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply avatar</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Modern dialog</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Password</source>
+        <translation type="unfinished">رمزعبور</translation>
+    </message>
+    <message>
+        <source>Reconnect details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate wizard</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reconnect</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose whether closing the main window asks, minimizes to tray, or quits the client.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keep the Mumble window above other windows in the selected layout modes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose the color theme used by the native Qt Quick client.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the folder where custom Modern theme manifests are stored.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Adjust spacing density for Qt Quick lists, controls, and panels.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use the original Mumble user icons in room lists instead of avatar bubbles.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose which side of the Modern shell hosts the room rail.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose the Modern shell accent color, or let the active theme decide.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pick the custom Modern shell accent color used when Accent is set to Custom.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Adjust how strongly the custom accent tints selected surfaces, glow, and borders.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show the Stonks ticker banner in the Modern conversation header.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keep the Stonks ticker banner moving even when the current ticker list fits on screen.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hide the taskbar window when Mumble is minimized to the system tray.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reflect your talking, muted, and deafened state in the tray icon.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show when users have local volume adjustments applied.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Prefer nicknames over full usernames where both are available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expose context-menu actions through the app menu for keyboard and accessibility workflows.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show the transmit-mode selector in the main window controls.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hide empty rooms when a room-list filter is active.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Set how long you can be inactive before Mumble marks you idle.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reconnect automatically if the current server connection drops.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Client-side startup setting: connect to your last server automatically when Mumble starts.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ask compatible servers to place you in your last known voice channel when you connect.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start Mumble hidden in the system tray when you sign in to Windows.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use TCP instead of UDP for voice traffic when networks block or degrade UDP.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ask the operating system and network to prioritize Mumble voice packets.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Avoid sending your certificate identity to servers unless it is required.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fetch and show previews for links posted in chat.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove locally cached chat preview images and media for this client profile.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Do not advertise your operating system details to connected servers.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose whether Mumble connects directly or through an HTTP/SOCKS proxy.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hostname or IP address of the proxy server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Network port used by the configured proxy server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Username sent to the proxy when authentication is needed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Password sent to the proxy when authentication is needed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check whether a newer Mumble client build is available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check installed plugins for available updates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Install plugin updates automatically when they are available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Override the release string Mumble reports to servers for compatibility testing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Override the operating-system name Mumble reports to servers for compatibility testing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Override the operating-system version Mumble reports to servers for compatibility testing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Display message timestamps using a 24-hour clock.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Treat messages from friends as whispers for notification and speech rules.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Limit high-volume message events when the connected server reaches this user count.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Read enabled message events aloud using text to speech.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Set text-to-speech playback volume.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Do not speak messages longer than this number of characters.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Read your own sent messages back through text to speech.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Omit the room or conversation name from spoken messages.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Omit the sender name from spoken messages.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose the BCP 47 language tag used by the speech engine.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Set the playback volume for per-event notification sounds.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Set the playback volume for transmit and mute cue sounds.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose logging, notification, highlight, speech, limiting, and sound behavior for each event.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open screen shares automatically when they are posted in your current voice room.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Write extra screen-sharing diagnostics to the profile log folder.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Shows the live signal used by voice activation and the current stop/start thresholds.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select the audio backend used for microphone capture.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select which microphone or capture source Mumble uses.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Let Mumble take exclusive control of the input device when the backend supports it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose whether to transmit continuously, by voice activity, or only while push-to-talk is held.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose how voice activation decides whether the microphone should open.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add an optional post-cleanup gate that rejects low-level or low-confidence voice activation.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Signal level below which voice activation closes the microphone.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Signal level above which voice activation opens the microphone.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>How long voice activation stays open after the signal drops below the stop threshold.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>How quickly a second push-to-talk press toggles lock mode.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>How long transmission continues after releasing push-to-talk.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show a small on-screen push-to-talk button window.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Amount of captured audio bundled into each outgoing voice packet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Target voice bitrate in kilobits per second.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Allow voice bitrate values above the normal compatibility range.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Allow Opus to use lower-latency encoding when the server and settings permit it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Maximum automatic microphone gain Mumble may apply to quiet input.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reduce echo from speakers or shared output paths when supported by the audio backend.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose whether local microphone noise suppression is disabled, classic, neural, or combined.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select the neural noise-suppression engine used for local microphone cleanup.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select the model file or preset used by the local neural cleanup backend.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Path to a custom local neural cleanup model file.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Adjust the strength of classic Speex noise suppression.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play a cue sound when push-to-talk transmission starts or stops.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play a cue sound when voice activation starts or stops transmitting.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sound file played when transmission starts.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sound file played when transmission stops.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play a cue sound when your microphone mute state changes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sound file played for microphone mute cues.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Minutes of inactivity before Mumble performs the selected idle action.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Action Mumble performs when you have been idle for the configured time.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Undo an automatic idle mute or deafen when activity resumes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select the audio backend used for playback.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select which speakers or headset Mumble uses.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Let Mumble take exclusive control of the output device when the backend supports it.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Adjust playback volume for incoming speech.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delay audio playback to compensate for device or routing latency.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Buffer more or less incoming audio to smooth network jitter.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play your own transmitted audio locally or through the server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Simulate packet delay for loopback testing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Simulate packet loss for loopback testing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Lower other applications while other users are talking.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Lower other applications while you are talking.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Volume kept for other applications while attenuation is active.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Lower regular users when a priority speaker talks.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply listener attenuation even outside normal priority-speaker situations.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Volume kept for listeners when listener attenuation is active.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Only attenuate applications using the same output device as Mumble.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Also attenuate loopback audio when same-device attenuation is enabled.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable positional audio from supported games and plugins.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Optimize positional audio rendering for headphones.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Send your positional audio coordinates to the server when available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Distance at which positional audio starts to become quieter.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Distance at which positional audio reaches its minimum volume.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Lowest volume positional audio may fade to at maximum distance.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Widen the perceived spread of positional audio sources.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clean up incoming speech from other users before playback.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select the neural cleanup engine used for incoming speech.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select the model file or preset used for incoming speech cleanup.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Path to a custom neural cleanup model for incoming speech.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Balance cleanup strength against speech naturalness for incoming audio.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable or disable the global shortcut engine without changing configured bindings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add, remove, capture, and rebind global shortcuts in the Modern settings window.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Allow the Windows shortcut engine to work while elevated applications are focused.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Logitech G-key shortcut input.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable XInput controller shortcut input.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the full Mumble About dialog with project, license, and credits.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Qt runtime and licensing information for this client.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Continuous</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Transmit microphone audio continuously while connected.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice Activity</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the microphone automatically when speech is detected.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Push To Talk</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Transmit only while your push-to-talk shortcut is held.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Speech probability</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recommended for most microphones; separates speech from steady background noise.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Speech + volume</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Requires speech probability and volume level to agree before opening the microphone.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Volume level</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fallback for manual tuning; reacts to microphone loudness after cleanup.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Off</source>
+        <translation type="unfinished">خاموش</translation>
+    </message>
+    <message>
+        <source>Preserve the classic voice-activity behavior.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Balanced</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Require voice activity, speech probability, and a small level floor before opening.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Strict</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reject more non-voice audio, with a higher chance of clipping very soft speech.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No proxy</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect directly to servers.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>HTTP proxy</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Route server connections through an HTTP proxy.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SOCKS5 proxy</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Route server connections through a SOCKS5 proxy.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Never</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use the normal operating-system window stacking order.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Always</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keep Mumble above other windows in every layout.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>In minimal view</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keep Mumble on top only while the minimal layout is active.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>In normal view</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keep Mumble on top only outside the minimal layout.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Always ask</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ask what to do every time the main window is closed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ask when connected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ask only when closing Mumble would disconnect from a server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Always minimize</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Send Mumble to the system tray instead of quitting.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Minimize when connected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Minimize while connected, and quit normally when offline.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Always quit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Close the client immediately when the main window is closed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>1 minute</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mark you idle after 1 minute of inactivity.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>5 minutes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mark you idle after 5 minutes of inactivity.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>10 minutes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mark you idle after 10 minutes of inactivity.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>15 minutes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mark you idle after 15 minutes of inactivity.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>30 minutes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mark you idle after 30 minutes of inactivity.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>60 minutes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mark you idle after 60 minutes of inactivity.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Do nothing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Leave your audio state unchanged when you become idle.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Deafen</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Deafen yourself after the idle timer expires.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mute</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mute your microphone after the idle timer expires.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Do not replay your own transmitted voice.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Local</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Replay processed microphone audio locally without a server round trip.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Replay your voice after it travels through the connected server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Leave microphone noise cleanup off.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Light cleanup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use lightweight classic suppression for steady hiss, hum, and fan noise.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Neural cleanup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use the selected neural model for stronger speech cleanup.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Maximum cleanup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Run classic suppression before neural cleanup for difficult background noise.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Light</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Subtle cleanup that keeps incoming speech sounding most natural.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Normal</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Balanced cleanup for everyday voice chat.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Aggressive</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stronger cleanup for noisy incoming audio, with a higher chance of artifacts.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Lightweight neural noise suppression that is a good default for live voice.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Deep-learning denoising with bundled model variants for different training sets.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>DeepFilterNet speech enhancement for stronger cleanup when the backend is available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Smaller local RNNoise model with lower resource use.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load a custom RNNoise model file from the path below.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Built-in RNNoise model bundled with Mumble.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>DTLN model normalized from a larger training set; useful for heavier cleanup.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>DTLN model normalized from a smaller training set; useful for lighter cleanup.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Baseline DTLN model bundled with Mumble.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Lower DeepFilterNet attenuation for fewer voice artifacts.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Moderate DeepFilterNet attenuation for everyday cleanup.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>DeepFilterNet3 low-latency model with less look-ahead than the default model.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Full DeepFilterNet attenuation without the extra post-filter.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Full DeepFilterNet attenuation with extra suppression in very noisy sections.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default DeepFilterNet cleanup profile.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Not available for the selected audio backend/device combination.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current voice input</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio setup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open guided audio setup for microphone level, voice activation, replay, and cleanup tuning.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ready to tune voice input.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Replay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Listen to your microphone through server loopback when connected, or local loopback when offline.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Dark</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mocha</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Macchiato</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Frappe</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Latte</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Nord</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gruvbox</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Compact</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Comfortable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Spacious</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Left</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Right</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Auto</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Teal</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Blue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Violet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Amber</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rose</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>New shortcut</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown shortcut %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Not assigned</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message numerus="yes">
+        <source>%n input(s)</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>%1: %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current selection</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>List of users</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Root</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Parent</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Parent / Subchannel #%1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current / Subchannel #%1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No data</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt; Unknown Channel &gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>On</source>
+        <translation type="unfinished">روشن</translation>
+    </message>
+    <message>
+        <source>Toggle</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Empty</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unassigned</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Selected users</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Parent channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Shortcuts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Configured</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 assigned / %2 total</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No shortcuts are configured yet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message numerus="yes">
+        <source>%n more assigned shortcut(s) are available in the editor.</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Installed plugins</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Event behavior</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Event %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Done</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio Input</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio Output</source>
+        <translation type="unfinished">خروجی صدا</translation>
+    </message>
+    <message>
+        <source>Appearance</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>User Interface</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Messages &amp; Sounds</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Key Bindings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Network</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen Sharing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugins</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>About</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Window behavior</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Close button</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Always on top</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hide in tray when minimized</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show talking state in tray</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show transmit mode control</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Room browser and presence</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show local volume badges</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show nicknames only</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expose context menus in the app menu</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Filter hides empty rooms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Idle presence timeout</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Messages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable link previews</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use 24-hour timestamps</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Treat friends as whisper targets</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Message-limit user threshold</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text to speech</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable text to speech</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>TTS volume</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Maximum spoken message length</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Read back my own messages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Omit message scope</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Omit message author</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>TTS language (BCP47)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sounds</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Notification volume</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cue volume</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play transmit cue for push-to-talk</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play transmit cue for voice activity</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Transmit cue on file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Transmit cue off file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play mute cue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mute cue file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Per-event behavior</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Shortcut controls</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable global shortcuts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Configured shortcuts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Additional shortcut engines</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable shortcuts in privileged applications</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable GKey</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable XInput</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Version</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Architecture</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project, license, and credits</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open About Mumble</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Qt runtime</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Qt version</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Operating system</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Qt details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open About Qt</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Positional audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Transmit positional information to the server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Each plugin can additionally be granted positional-audio and keyboard-monitoring permissions below.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin manager</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Client connection</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reconnect automatically</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect to the last server on startup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reconnect to last known channel within server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start Mumble with Windows</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Force TCP mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use Quality of Service</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Chat media cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Local media cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clear cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current cache: %1. Stored only on this device.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Proxy and privacy</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Proxy type</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Proxy host</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Proxy port</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Proxy username</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Proxy password</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Suppress certificate identity</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hide operating system from servers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Updates and advertised version</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check for client updates</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check for plugin updates</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update plugins automatically</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Advertised release</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Advertised OS</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Advertised OS version</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Behavior</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Auto-open shares in my current voice room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable diagnostics logging</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Capabilities</source>
+        <translation type="unfinished">توانایی‌ها</translation>
+    </message>
+    <message>
+        <source>Quality limits and relay modes are negotiated from the server and the current client runtime.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Input device</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Input system</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use exclusive input mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice activation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Transmit mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Detection method</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use Speech + volume when speech probability opens too easily on non-voice sounds.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Input gate</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Optional extra guard after cleanup; Off keeps the original behavior.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stop transmitting below</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Lower boundary for closing the microphone.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start transmitting above</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Upper boundary for opening the microphone.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice hold</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source> frames</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Push-to-talk</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Double-push lockout</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source> ms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Push-to-talk hold</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show push-to-talk button window</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Compression</source>
+        <translation type="unfinished">فشردگی</translation>
+    </message>
+    <message>
+        <source>Audio per packet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice bitrate</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source> kbit/s</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable experimental high bitrate voice</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Allow Opus low-delay mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio processing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Maximum amplification</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Echo cancellation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Noise suppression</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Neural backend</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Neural model</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom model file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Speex suppression strength</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cues and idle behavior</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Idle after</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source> min</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Idle action</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Undo idle action on activity</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Device</source>
+        <translation type="unfinished">دستگاه</translation>
+    </message>
+    <message>
+        <source>Output system</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Output device</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use exclusive output mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Playback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Incoming speech volume</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Output delay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source> x10 ms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Jitter buffer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source> steps</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loopback mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loopback packet delay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loopback packet loss</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Attenuation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Attenuate external applications while others talk</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Attenuate external applications while I talk</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>External applications volume</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Priority speaker attenuates users</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Always attenuate listeners</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Listener attenuation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Only attenuate the same output device</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Also attenuate loopbacks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable positional audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use headphone mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Transmit my position</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Minimum distance</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source> m</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Maximum distance</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Minimum volume</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Bloom</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remote speech cleanup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clean up incoming speech for all users</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Backend</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Model</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Modern layout</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This fork now uses the Modern layout as the visible client shell. Classic layout switching is disabled.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Tweaks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Theme</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Catppuccin, standard light/dark, and more</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom themes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Density</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use classic user icons</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rail side</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Accent</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom accent</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Accent strength</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show ticker bar</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Always scroll ticker banner</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retry in 12s</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automatic reconnect is scheduled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connecting</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connecting to server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Disconnected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the server browser to reconnect.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ready to share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Share screen</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start screen sharing in this voice room.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You are sharing in this room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open share window</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the active screen-share window.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Live</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Kira Mockup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Kira Mockup is sharing in this room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Watch share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Watch this room&apos;s screen share.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Using helper/browser fallback.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Watching Kira Mockup&apos;s share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the fallback screen-share window.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Demo User</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Register yourself as %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This action cannot be undone and your username cannot be changed afterwards.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You will forever be known as this username on the current server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Register</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Register user %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This permanently binds the current certificate for this user to their server account.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The username cannot be changed after registration from this dialog.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Kick %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Optionally include a reason that will be sent to the user.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reason</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Kick</source>
+        <translation type="unfinished">بیرون انداختن</translation>
+    </message>
+    <message>
+        <source>Ban %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose what to ban and optionally include a reason.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ban certificate</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ban IP</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ban</source>
+        <translation type="unfinished">ممنوع</translation>
+    </message>
+    <message>
+        <source>Reset user comment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset the server-side comment for %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>User comment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Comment for %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Comment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Demo profile comment used for Modern dialog visual review.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset avatar</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset the server-side avatar for %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>User information</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Statistics for %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Identity</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Session</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble 1.7.0 DEV</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Strong certificate</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connection</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>TCP ping</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>42 ms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>UDP ping</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>38 ms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Bandwidth</source>
+        <translation type="unfinished">پهنای باند</translation>
+    </message>
+    <message>
+        <source>72 kbit/s</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Local nickname for %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This nickname is stored locally for your client.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Local nickname</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current voice room: Root</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server-wide chat</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>From now</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>5 days back</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>30 days back</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>All history</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Revoke access</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Grant chat history</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Grant or revoke persistent chat history access for %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Access</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Scope</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Window</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom days</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create a voice room or a persistent text room without leaving Modern layout.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Type</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Demo room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Modern UI review room created from automation probe.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice parent</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice order</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Temporary voice room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max voice users</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text visibility source</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text order</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enter a room name.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Validation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Name required</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>WAV</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>FLAC</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ogg Opus</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mixdown</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Multichannel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Multichannel + transport</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Transport only</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Format</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Elapsed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>18.4 MB</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recording mixdown audio from the current voice session.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Idle</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to start recording. Not connected to a server.</source>
+        <translation type="unfinished">شروع ضبط ممکن نیست. اتصال با سرور برقرار نیست.</translation>
+    </message>
+    <message>
+        <source>Refresh</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pause</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stop</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice recorder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recording is in progress from the Modern shell.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Record the current session from the Modern shell.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recorder</source>
+        <translation type="unfinished">ضبط کننده</translation>
+    </message>
+    <message>
+        <source>Output</source>
+        <translation type="unfinished">خروجی</translation>
+    </message>
+    <message>
+        <source>Target directory</source>
+        <translation type="unfinished">مسیر مقصد</translation>
+    </message>
+    <message>
+        <source>Filename</source>
+        <translation type="unfinished">نام فایل</translation>
+    </message>
+    <message>
+        <source>Current user</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>My comment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Edit the comment shown on your user profile.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Modern profile comment used for UI review.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create with name and email</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Quick create</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import PKCS#12</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export current certificate</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Action</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Design Review</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import password</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Review the certificate details before generating a new identity.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a readable PKCS#12 certificate before importing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manage the client certificate used for account identity and server authentication.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current certificate</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A valid certificate is installed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate action</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose one operation. The form only shows fields needed for that operation.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Installed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enter a valid email address or leave it blank.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a readable PKCS#12 certificate file.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>File</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice level</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Not connected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Microphone idle</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio bandwidth</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Waiting</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Packets lost</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Not reported</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>0.0%</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>0.2%</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect to a server to show live input, packet, and network diagnostics.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No microphone input has been observed yet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio statistics</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio diagnostics are waiting for a server connection.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio diagnostics are waiting for microphone input.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Live input, packet, and jitter diagnostics for the selected user.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Input</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ping</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>28 ms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Jitter</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>2 ms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Codec</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Opus</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset stats</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Signal</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Set up audio input</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a microphone before joining your first voice room.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio input</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>System default</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Test microphone</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Modern certificate setup follows next.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Not now</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Continue</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Automation positional plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Typed plugin administration probe</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin operation result: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manage installed plugins and asynchronous update results.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin probe completed with %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manual positional audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Inspect and reset the manually supplied positional state.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Position</source>
+        <translation type="unfinished">جایگاه</translation>
+    </message>
+    <message>
+        <source>Context</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Active</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A new mumble-forked build is ready.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Available update</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Latest build</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>1.7.1, build 42</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Published</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>May 30, 2026</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Commit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Release</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Installer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SHA256</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Security and Modern shell polish are included in this release.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Installed build</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current version</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current build</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Release channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Release notes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Notes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Modern dialogs now follow the hardened shell mockup and update checks use the in-app flow.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check again</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open releases</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Install update</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Latest</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You&apos;re up to date</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This client matches the newest release information.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>1.7.0, build 0</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No newer mumble-forked build was found.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update check failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble could not retrieve the latest mumble-forked release information.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble failed to retrieve forked update information from GitHub: timeout.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Try again</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Build</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Bug</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Suggestion</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Question</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Report feedback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Bug reports, suggestions, and questions for this fork.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Report</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Title</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update window does not match mockup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Description</source>
+        <translation type="unfinished">توضیحات</translation>
+    </message>
+    <message>
+        <source>The update available flow needs to use the same narrow Modern dialog style as the mockup.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Steps to reproduce</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>1. Open Help.
+2. Choose Check for updates.
+3. Compare the result dialog with the mockup.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Evidence</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pasted evidence</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mockup slide 37 and API capture need to match.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Diagnostics</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Include diagnostics</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Diagnostics preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Client: Mumble 1.7.0
+Qt: packaged runtime
+Server feedback: fallback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start capture</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy report</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open GitHub</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Submit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server submit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fallback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Included</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max body</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>58 KiB</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Feedback fallback opened</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server submit is unavailable for this report.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A prefilled GitHub issue was opened in your browser.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Bug: Update window does not match mockup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Report size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>1420 bytes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server certificate warning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The server certificate could not be verified.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Presented digest</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Subject</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Verification errors</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Error 1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The certificate is self-signed, and untrusted.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reject</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>View details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Accept certificate</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Trust</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unverified</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Errors</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Review the certificate before deciding whether to trust it for this server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Serial number</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Valid from</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SSL error</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble is unable to establish a secure connection to the server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The TLS handshake failed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This can happen when the client and server support different encryption standards, one side is using an old operating system, the address is not a Mumble server, or the selected port belongs to another service.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Move user?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Confirm this voice-room move before it is sent to the server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Move</source>
+        <translation type="unfinished">انتقال</translation>
+    </message>
+    <message>
+        <source>Target room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Your User Dragging preference is set to ask before moving people between voice rooms.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Move user</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Target</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Move room?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Confirm this room move before it is sent to the server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Placement</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Your Channel Dragging preference is set to ask before moving rooms.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Move room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cannot move room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This room cannot be moved automatically.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset the numeric sorting indicators or adjust the room manually.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>About Mumble</source>
+        <translation type="unfinished">درباره Mumble</translation>
+    </message>
+    <message>
+        <source>Version, license, and project information.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Project</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>License</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Links</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Website</source>
+        <translation type="unfinished">تارنما</translation>
+    </message>
+    <message>
+        <source>Fork releases</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open website</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Runtime</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>About Qt</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Qt runtime and licensing details.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Qt</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>WebEngine</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Platform</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Licensing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Qt is available under LGPL/commercial terms.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Qt</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Help</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Modern layout keeps contextual help inside the client shell.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open Server &gt; Connect to choose or edit saved servers.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rooms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use the left navigator for text rooms, voice rooms, and direct messages.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Configure audio, appearance, hotkeys, and certificates.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Feedback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Report bugs or suggestions with optional diagnostics.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open docs</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unlink room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove the link between Lobby and Root.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Lobby</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Linked room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unlink</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unlink all rooms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove 1 permanent room link(s) from Lobby.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Linked rooms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unlink all</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete Lobby and all of its sub-rooms.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Operations</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Edit text room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update the persistent text room without leaving Modern layout.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>ops-briefing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Daily handoff notes, deploy status, and moderation follow-up.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Visibility source</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Configure ACL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete text room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete #ops-briefing?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Result</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Existing history will no longer be visible in this room.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Registered users</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Requesting the registered user list from the server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading users...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Registered accounts on this server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Users</source>
+        <translation type="unfinished">کاربران</translation>
+    </message>
+    <message>
+        <source>The server returned an empty user list.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Registered</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Shown</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Read only</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Demo Admin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>User ID</source>
+        <translation type="unfinished">شناسه کاربر</translation>
+    </message>
+    <message>
+        <source>Last seen</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Online now</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Verified</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Demo Designer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>28 May, 02:00</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ban list</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Requesting the ban list from the server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading bans...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Read-only Modern view of the server ban list.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Bans</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>There are no active bans on this server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Active bans</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>192.0.2.42</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Demo Spammer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Repeated channel spam</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>30 May, 18:00</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>2001:db8::7</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Test Abuse</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Temporary moderation hold</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server information</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current server details and advertised limits.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Uptime</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>3 days, 4 hours</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Limits</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>1 / 100</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>128 kbit/s</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Message length</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>5000 characters</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Write</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Traverse</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enter</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Speak</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mute/deafen</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Kira (#2)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Nova (#7)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manage room details, inherited groups, and explicit access rules.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Main voice lobby.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>ACL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Set</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Requesting room details and ACL data for Root.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading ACL...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Room details and ACL data could not be loaded for Root.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The server did not return ACL data.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to load ACL data.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Relay Ops</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Root / Operations - room name match</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>#relay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text room - 4 matching messages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Relay_Bot</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>User - Root / Operations</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Kira Relay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>User - Root / Lobby</source>
+        <translation type="unfinished"></translation>
+    </message>
     <message>
         <source>Search</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Enter search String...</source>
+        <source>Find users and rooms on the current server.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Options</source>
+        <source>Case sensitive</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Whether to search for users</source>
+        <source>Regular expression</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&amp;Users</source>
+        <source>Results</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Whether the search should be performed case-sensitively</source>
+        <source>No matching users or rooms.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Case-&amp;sensitive</source>
+        <source>Users + rooms</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Options:</source>
+        <source>Invalid regular expression.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Whether the search string should be interpreted as a regular expression</source>
+        <source>Access tokens</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&amp;RegEx</source>
+        <source>Manage the temporary access tokens for the current server.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&amp;Channels</source>
+        <source>Tokens</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Search for:</source>
+        <source>Access tokens are saved for this server and sent with future reconnects.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Whether to search for channels</source>
+        <source>Token 1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Search string</source>
+        <source>Add token</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Search results</source>
+        <source>Save tokens</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Use up and down keys to navigate through the search results.</source>
+        <source>Saved tokens</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Token 2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change connected server settings from the Modern layout.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Chat</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Welcome text</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Welcome to the Modern dev server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Allow HTML</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Text message length</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image message length</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen sharing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enabled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Relay URL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server settings loaded from automation probe.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enter a non-negative bandwidth limit.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enter a valid relay URL.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Review the highlighted server settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rocket Lab USA</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Advanced Micro Devices</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Saab AB</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mockup probe portfolio with live-looking quote metadata.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ericsson B</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Probe leaderboard comparing latest portfolio saves over 30 days.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading Stonks leaderboard and ticker quotes...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Showing cached ticker symbols.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Quote lookup is temporarily unavailable.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Provider timeout.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No Stonks portfolio updates yet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No PnL rankings exist for the selected period yet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stonks is disabled for regular clients.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stonks is disabled on this server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Updated from Modern automation probe data.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stonks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Portfolio, leaderboard, following, and server settings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ledger cleared</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate generation failed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate export returned no bytes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate export directory could not be created.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate export file could not be opened.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate export file could not be written.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate export file could not be read.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keyboard</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mouse</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Raw input / HID</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Privileged applications</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>GKey</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>XInput</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Suppress</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The update available flow should use the same Modern shell dialog style as the mockup.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mockup slide 37 and API capture should match.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Main window is not available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sending...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Not delivered</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This message was delivered normally.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Uploading this voice-room note now.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The network dropped before this message reached the server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open link</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Inline image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Local chat attachment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>X preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Social post media</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview card</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Responsive media state</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>preview-bot</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>YouTube embed preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Embedded video card with playback controls.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mockup previews should feel native in chat</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>dankpreview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A social card with post text, media, metrics, and source chrome.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Designer Notes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keep enough structure to design loading and failure states.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Dank Preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Attached image from chat composer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Inline image attachment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble chat</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image sent directly in persistent chat.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fetching link preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>example.com</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Compact preview card</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expanded preview card</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Media card captured with the requested preview size.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Qt Quick chat workload is unavailable.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The chat-scroll workload requires at least 20 rendered messages.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Qt Quick window is not exposed for chat scrolling.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Qt Quick root does not expose the chat-scroll workload.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The chat timeline is not scrollable.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Chat flick produced no typed scroll movement with a rendered frame.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Qt Quick talk-state workload is unavailable.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The talk-state workload requires a connected participant.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Qt Quick window is not exposed for talk state.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The talk-state participant disappeared.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Talk-state transition produced no typed participant change with a rendered frame.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>In %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No active channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Can you check the reconnect dialog against the mockup?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Yes. The new menus need to match the compact shell chrome.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>I&apos;ll keep this as a focused direct-message thread.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The file &quot;%1&quot; is not a valid plugin file!</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin package exceeds the archive size limit.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin installation cancelled.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to create a temporary plugin inspection directory.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to locate the plugin manifest (manifest.xml)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin manifest is too large.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Error while processing manifest: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to find plugin for the current OS (&quot;%1&quot;) and architecture (&quot;%2&quot;)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to locate plugin library specified in manifest (&quot;%1&quot;)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin package exceeds the extraction size limit.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to write the extracted plugin.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to process zip archive: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to read the prepared plugin file.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to create plugin directory &quot;%1&quot;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to load plugin &quot;%1&quot; - check the plugin interface!</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin inspection is no longer valid.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to delete old plugin at &quot;%1&quot;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to install plugin at &quot;%1&quot;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update cancelled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The downloaded update was empty</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The temporary update file could not be opened</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The downloaded update could not be written</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Installation cancelled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The prepared plugin file is missing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin directory could not be created</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin already exists</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The prepared plugin could not be staged</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The prepared plugin could not be read</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The prepared plugin changed before installation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The installed plugin could not be backed up</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The new plugin could not be activated; the previous file was restored</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The new plugin could not be activated and rollback failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to remove abandoned staging file %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to replace unverified plugin while restoring %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to restore abandoned backup %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>OK</source>
+        <translation type="unfinished">خُب</translation>
+    </message>
+    <message>
+        <source>It seems that Mumble did not perform a normal shutdown. If you did not intentionally kill the application, this could mean that the used settings caused a crash.&lt;br&gt;&lt;br&gt;Do you want to load the settings backup instead?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load backup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keep current</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The backup settings may also be unstable.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The backed-up settings also seem to have been saved without Mumble exiting normally (potentially indicating a crash).&lt;br&gt;&lt;br&gt;If you experience repeated crashes with these settings, you might have to manually delete these settings files:&lt;br&gt;&lt;br&gt;&lt;code&gt;%1&lt;/code&gt;&lt;br&gt;&lt;br&gt;&lt;code&gt;%2&lt;/code&gt;&lt;br&gt;&lt;br&gt;in order to reset all settings to their default value.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Some shortcuts need to be registered again.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unfortunately %1 shortcut(s) could not be migrated.&lt;br&gt;&lt;br&gt;You can register them again in Settings &gt; Key Bindings.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Little model</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom file</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Embedded default</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Norm 500h</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Norm 40h</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Baseline</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gentle</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Low latency</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Maximum</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Maximum + post-filter</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default model</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>RNNoise support is not compiled into this build.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>DTLN support is not compiled into this build.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>DeepFilterNet support is not compiled into this build.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This speech cleanup backend is not available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Getting name (longname) of the sound card failed: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Getting name of the sound card failed: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Invalid MUMBLE_MODERN_AUTOMATION_PORT value &apos;%1&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to start Modern UI automation server on 127.0.0.1:%1: %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>QmlDialog</name>
+    <message>
+        <source>Close dialog</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Browse…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Top view · X / Z</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Change avatar</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>color</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose color</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>QmlShellHost</name>
+    <message>
+        <source>The Qt Quick shell could not load its root window.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Qt Quick shell root object is not a QQuickWindow.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Qt Quick window is not available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No capture path was provided.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The capture directory could not be created.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Qt Quick window could not be captured.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ScreenShareEditor</name>
+    <message>
+        <source>Choose what to share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Share source</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No sources available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resolution</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Frame rate</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ScreenShareManager</name>
+    <message>
+        <source>Connect to a server before starting screen sharing.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen sharing is disabled on this server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This server has no valid screen-share relay endpoint configured.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Checking the local screen-share runtime.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No supported local capture source is available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The local screen-share helper is required but unavailable.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The bundled screen-share runtime is missing WebRTC publishing support.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The bundled screen-share runtime does not support this server&apos;s relay transport.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The bundled screen-share runtime does not advertise an executable video codec.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen sharing is unavailable because the server has no valid relay endpoint configured.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to start screen sharing: no executable video codec is available.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen share %1 is not viewable on this client right now.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen-share publisher runtime for %1 exited unexpectedly; restarting (%2/%3).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen-share publisher runtime for %1 exited unexpectedly; ending the share.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen-share viewer runtime for %1 exited unexpectedly; restarting (%2/%3).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen-share viewer runtime for %1 exited unexpectedly; closing the viewer.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>session %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen share %1 from %2 is available in this channel. Enable auto-open in Settings &gt; Screen Sharing or set MUMBLE_SCREENSHARE_AUTOVIEW=1 to open it automatically.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen share %1 ended: %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ScreenShareViewBackend</name>
+    <message>
+        <source>Waiting for the live viewer to start.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connecting to the native Qt Quick video surface...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The native frame transport is unavailable; using the external viewer fallback.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Live via native Qt Quick frame transport.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Live screen share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Session %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connecting to the GStreamer video surface...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Paused locally. Resume returns to the live edge.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The GStreamer window could not be attached to Qt Quick.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Live via GStreamer.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The GStreamer viewer is running in its platform video window.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ScreenShareViewWindow</name>
+    <message>
+        <source>Mumble Screen Share - %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resume live</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pause view</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unmute audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mute audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stream volume</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stop</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Paused locally
+
+Resume returns to the live edge.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -8895,230 +12810,46 @@ See &lt;a href=&quot;https://github.com/mumble-voip/mumble&quot;&gt;the project 
     </message>
 </context>
 <context>
-    <name>ServerInformation</name>
+    <name>ShortcutEditor</name>
     <message>
-        <source>Server information</source>
+        <source>Shortcuts</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Server Information</source>
+        <source>Add shortcut</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;b&gt;Host:&lt;/b&gt;</source>
+        <source>Press the shortcut now…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Port:&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <source>Not assigned</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Protocol:&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <source>Suppress</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Release:&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <source>Cancel</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;OS:&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <source>Capture</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Audio</source>
+        <source>Clear</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;&lt;span style=&quot; font-weight:600;&quot;&gt;Allowed:&lt;/span&gt;&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Current:&lt;/b&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Codec:&lt;/b&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Connection details</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>UDP (Voice)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Encryption:&lt;/b&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Avg. latency:&lt;/b&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Statistics</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Good</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Late</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Lost</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Resync</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Outgoing</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Incoming</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Voice packets is currently sent over TCP.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>TCP (Control)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;TLS version:&lt;/b&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Cipher suite:&lt;/b&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;forward secrecy&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unknown</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Whether the connection supports perfect forward secrecy (PFS).</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;PFS:&lt;/b&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Yes</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>No</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Users:&lt;/b&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>TCP Parameters</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;View Certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&amp;OK</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>ServerView</name>
-    <message>
-        <source>Favorite</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>LAN</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Public Internet</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>ShortcutActionWidget</name>
-    <message>
-        <source>Unassigned</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>ShortcutDelegate</name>
-    <message>
-        <source>On</source>
-        <translation type="unfinished">روشن</translation>
-    </message>
-    <message>
-        <source>Off</source>
-        <translation type="unfinished">خاموش</translation>
-    </message>
-    <message>
-        <source>Toggle</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unassigned</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>No buttons assigned</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Press to show button combination</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt; Unknown Channel &gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>ShortcutTargetDialog</name>
-    <message>
-        <source>Root</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Parent</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Current</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Subchannel #%1</source>
-        <translation type="unfinished"></translation>
+        <source>Remove</source>
+        <translation type="unfinished">پاک کردن</translation>
     </message>
 </context>
 <context>
     <name>ShortcutTargetWidget</name>
-    <message>
-        <source>...</source>
-        <translation type="unfinished"></translation>
-    </message>
     <message>
         <source>, </source>
         <translation type="unfinished"></translation>
@@ -9154,82 +12885,65 @@ See &lt;a href=&quot;https://github.com/mumble-voip/mumble&quot;&gt;the project 
     </message>
 </context>
 <context>
-    <name>ShortcutToggleWidget</name>
+    <name>StonksEditor</name>
     <message>
-        <source>Off</source>
-        <translation type="unfinished">خاموش</translation>
-    </message>
-    <message>
-        <source>Toggle</source>
+        <source>Portfolio overview</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>On</source>
-        <translation type="unfinished">روشن</translation>
-    </message>
-</context>
-<context>
-    <name>TextMessage</name>
-    <message>
-        <source>Enter text</source>
+        <source>Register</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>If checked the message is recursively sent to all subchannels</source>
+        <source>Refresh</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Send recursively to subchannels</source>
+        <source>Leaderboard</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Message</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>Tokens</name>
-    <message>
-        <source>Empty Token</source>
+        <source>%1. %2   %3%</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Mumble - Access Tokens</source>
+        <source>User</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>List of access tokens on current server</source>
+        <source>No leaderboard data yet</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&lt;b&gt;This is an editable list of access tokens on the connected server.&lt;/b&gt;
-&lt;br /&gt;
-An access token is a text string, which can be used as a password for very simple access management on channels. Mumble will remember the tokens you&apos;ve used and resend them to the server next time you reconnect, so you don&apos;t have to enter these every time.
-</source>
+        <source>Tickers</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Add a token</source>
+        <source>%1 holders</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&amp;Add</source>
+        <source>Pin %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Remove a token</source>
+        <source>ticker</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&amp;Remove</source>
-        <translation type="unfinished">&amp;حذف</translation>
-    </message>
-    <message>
-        <source>Token List</source>
+        <source>Feed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Use the arrow keys to navigate this list of access tokens. The tokens are displayed in plain text.</source>
+        <source>Mine</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Popular</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pinned</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -9245,253 +12959,17 @@ An access token is a text string, which can be used as a password for very simpl
     </message>
 </context>
 <context>
-    <name>UserEdit</name>
+    <name>UpdateBanner</name>
     <message>
-        <source>Registered Users</source>
+        <source>Update</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Remove</source>
-        <translation type="unfinished">پاک کردن</translation>
-    </message>
-    <message>
-        <source>Rename</source>
+        <source>Update progress</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Who are you looking for?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Days</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Weeks</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Months</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Years</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Inactive for</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message numerus="yes">
-        <source>Registered users: %n account(s)</source>
-        <translation type="unfinished">
-            <numerusform></numerusform>
-        </translation>
-    </message>
-    <message>
-        <source>User list</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Search for user</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Set inactivity filter mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Filter for inactivity</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>UserInformation</name>
-    <message>
-        <source>User Information</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Connection Information</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Version</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>OS</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Certificate</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>IP Address</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ping Statistics</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Pings received</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Average ping</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>TCP (Control)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>UDP (Voice)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>UDP Network statistics</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Good</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Late</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Lost</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Resync</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>From Client</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>To Client</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Connection time</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>%1w</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>%1d</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>%1h</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>%1m</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>%1s</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>, </source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>%1 (%2)</source>
-        <oldsource>%1.%2.%3 (%4)</oldsource>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Supported</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Not Supported</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Not Reported</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>%1 online (%2 idle)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>%1 online</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>%1 kbit/s</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Bandwidth</source>
-        <comment>GroupBox</comment>
-        <translation type="unfinished">پهنای باند</translation>
-    </message>
-    <message>
-        <source>Bandwidth</source>
-        <comment>Label</comment>
-        <translation type="unfinished">پهنای باند</translation>
-    </message>
-    <message>
-        <source>Ping deviation</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Warning: The server seems to report a truncated protocol version for this client. (See: &lt;a href=&quot;https://github.com/mumble-voip/mumble/issues/5827/&quot;&gt;Issue #5827&lt;/a&gt;)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Details</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>to client rolling average</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Last X minutes:</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>% lost</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>from client rolling average</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>% late</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Total:</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Last %1 %2:</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>seconds</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>minutes</source>
+        <source>Open</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -9523,21 +13001,9 @@ An access token is a text string, which can be used as a password for very simpl
     </message>
 </context>
 <context>
-    <name>UserLocalNicknameDialog</name>
+    <name>UserLocalVolumeSlider</name>
     <message>
-        <source>Local nickname for other users</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;Adjust the nickname of other users locally&lt;/b&gt;&lt;br /&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>User nickname</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Adjusting local nickname for %1</source>
+        <source>Local volume adjustment</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -9657,18 +13123,6 @@ An access token is a text string, which can be used as a password for very simpl
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Are you sure you want to drag this user?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Are you sure you want to drag this channel?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Cannot perform this movement automatically, please reset the numeric sorting indicators or adjust it manually.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Talking while being muted on your end</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9696,36 +13150,115 @@ An access token is a text string, which can be used as a password for very simpl
         <source>This channel listener belongs to %1</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>User movement requires confirmation in the active client interface.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Channel movement requires confirmation in the active client interface.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cannot perform this movement automatically; reset the numeric sorting indicators or adjust it manually.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>VersionCheck</name>
     <message>
-        <source>Upgrade Mumble</source>
+        <source>The update response was not valid JSON.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>A new version of Mumble has been detected and automatically downloaded. It is recommended that you either upgrade to this version, or downgrade to the latest stable release. Do you want to launch the installer now?</source>
+        <source>Download the newest update when you are ready to install.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Failed to launch snapshot installer.</source>
+        <source>%1, build %2</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Corrupt download of new version detected. Automatically removed.</source>
+        <source>build %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Downloading new snapshot from %1 to %2</source>
+        <source>the latest build</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Failed to write new version to disk.</source>
-        <oldsource>Failed to write new version to disc.</oldsource>
+        <source>This update cannot be installed automatically because the update manifest is missing a trusted update URL or SHA256 checksum.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Mumble failed to retrieve version information from the central server.</source>
+        <source>Mumble could not create the update download folder.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble could not write the update package to %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The update URL is invalid.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble could not finish writing the update package.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The update download failed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The update installer redirected too many times.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble failed to download the update package: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble failed to download the update package (HTTP %1).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The downloaded update package did not match the published SHA256 checksum.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble could not save the verified update package.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble could not prepare the bundled updater.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble could not start the update prepare step.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble could not prepare the update package.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The update frontend did not provide a completion handler.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The forked update URL is invalid.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The forked update request failed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The forked update request redirected too many times.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble failed to retrieve forked update information from GitHub: %1</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -9852,134 +13385,6 @@ An access token is a text string, which can be used as a password for very simpl
     </message>
 </context>
 <context>
-    <name>VoiceRecorderDialog</name>
-    <message>
-        <source>Recorder</source>
-        <translation>ضبط کننده</translation>
-    </message>
-    <message>
-        <source>Control</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>00:00:00</source>
-        <translation type="unfinished">۶۴۷۳۸ {00:00:00?}</translation>
-    </message>
-    <message>
-        <source>&amp;Start</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>S&amp;top</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mode</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Multichannel</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Output</source>
-        <translation>خروجی</translation>
-    </message>
-    <message>
-        <source>Output format</source>
-        <translation>فرمت خروجی</translation>
-    </message>
-    <message>
-        <source>Target directory</source>
-        <translation>مسیر مقصد</translation>
-    </message>
-    <message>
-        <source>Filename</source>
-        <translation>نام فایل</translation>
-    </message>
-    <message>
-        <source>&amp;Browse...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Valid variables are:</source>
-        <translation>متغیرهای معتبر عبارتند از:</translation>
-    </message>
-    <message>
-        <source>Inserts the user&apos;s name</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Inserts the current date</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Inserts the current time</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Inserts the hostname</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Recorder still running</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Closing the recorder without stopping it will discard unwritten audio. Do you really want to close the recorder?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unable to start recording. Not connected to a server.</source>
-        <translation>شروع ضبط ممکن نیست. اتصال با سرور برقرار نیست.</translation>
-    </message>
-    <message>
-        <source>The server you are currently connected to is version 1.2.2 or older. For privacy reasons, recording on servers of versions older than 1.2.3 is not possible.
-Please contact your server administrator for further information.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>There is already a recorder active for this server.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Please select a recording format.</source>
-        <translation>لطفا یک فرمت ضبط انتخاب کنید.</translation>
-    </message>
-    <message>
-        <source>Stopping</source>
-        <translation>توقف</translation>
-    </message>
-    <message>
-        <source>Select target directory</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Downmix</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unable to start recording - the audio output is miconfigured (0Hz sample rate)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Multichannel + Transport (JACK)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Transport (JACK, standalone)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This field contains the directory path to store any voice recordings in. Use the &quot;browse&quot; button to open a file dialog.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This field contains the filename any voice recording is saved as. Various variables can be used to augment the filename. For example %time for the current time.</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
     <name>VolumeSliderWidgetAction</name>
     <message>
         <source>Volume Adjustment</source>
@@ -10002,17 +13407,6 @@ Please contact your server administrator for further information.</source>
     <message>
         <source>Default Device</source>
         <translation>دستگاه پیش‌فرض</translation>
-    </message>
-</context>
-<context>
-    <name>qwPTTButtonWidget</name>
-    <message>
-        <source>Mumble PTT</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Push to talk</source>
-        <translation>برای مکالمه فشار دهید</translation>
     </message>
 </context>
 </TS>

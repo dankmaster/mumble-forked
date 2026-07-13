@@ -11500,7 +11500,7 @@ void MainWindow::applyShellLayout() {
 										&& current.directMessage == target.directMessage && current.serverLog == target.serverLog
 										&& current.scope == target.scope && current.scopeID == target.scopeID;
 									if (!sameTarget || encodedImages.size() != expectedCount) {
-										guardedComposer->finishSend(false, guardedThis->tr("One or more attachments could not be prepared."));
+										guardedComposer->finishSend(false, MainWindow::tr("One or more attachments could not be prepared."));
 										return;
 									}
 									QString body = text.trimmed().toHtmlEscaped().replace(QLatin1Char('\n'), QStringLiteral("<br>"));
@@ -29095,7 +29095,8 @@ void MainWindow::attachPersistentChatImage(const QImage &image) {
 				&& current.serverLog == target.serverLog && current.scope == target.scope && current.scopeID == target.scopeID;
 			if (!sameTarget || !guardedThis->canSendToPersistentChatTarget(current, false)) return;
 			if (processedImage.isEmpty()) {
-				if (Global::get().l) Global::get().l->log(Log::Information, guardedThis->tr("Unable to send image: too large."));
+				if (Global::get().l)
+					Global::get().l->log(Log::Information, MainWindow::tr("Unable to send image: too large."));
 				return;
 			}
 			guardedThis->sendChatbarMessage(processedImage);

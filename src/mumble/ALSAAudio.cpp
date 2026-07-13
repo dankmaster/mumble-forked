@@ -212,7 +212,7 @@ ALSAEnumerator::ALSAEnumerator() {
 		int err;
 		snd_ctl_t *ctl = nullptr;
 		if ((err = snd_card_get_longname(card, &name)) != 0) {
-			Global::get().mw->msgBox(tr("Getting name (longname) of the sound card failed: %1")
+			Global::get().mw->msgBox(QObject::tr("Getting name (longname) of the sound card failed: %1")
 										 .arg(QString::fromUtf8(snd_strerror(err)).toHtmlEscaped()));
 			return;
 		}
@@ -223,7 +223,7 @@ ALSAEnumerator::ALSAEnumerator() {
 
 			char *cname = nullptr;
 			if ((err = snd_card_get_name(card, &cname)) != 0) {
-				Global::get().mw->msgBox(tr("Getting name of the sound card failed: %1")
+				Global::get().mw->msgBox(QObject::tr("Getting name of the sound card failed: %1")
 											 .arg(QString::fromUtf8(snd_strerror(err)).toHtmlEscaped()));
 				return;
 			}
