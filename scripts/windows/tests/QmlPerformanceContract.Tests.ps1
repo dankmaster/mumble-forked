@@ -8,6 +8,24 @@ Describe 'Qt Quick performance automation contract' {
 		$cpp = Get-Content -Raw -LiteralPath $serverCpp
 		$header = Get-Content -Raw -LiteralPath $serverHeader
 		$script = Get-Content -Raw -LiteralPath $measureScript
+		$tokens = $null
+		$parseErrors = $null
+		$scriptAst = [System.Management.Automation.Language.Parser]::ParseFile(
+			$measureScript,
+			[ref]$tokens,
+			[ref]$parseErrors
+		)
+		$parseErrors.Count | Should Be 0
+		$traceAnalysisFunction = $scriptAst.Find(
+			{
+				param($node)
+				$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+					$node.Name -eq 'Get-ChatPerfTraceAnalysis'
+			},
+			$true
+		)
+		$traceAnalysisFunction | Should Not BeNullOrEmpty
+		. ([scriptblock]::Create($traceAnalysisFunction.Extent.Text))
 	}
 
 	It 'uses persistent asynchronous talk-state commands' {
@@ -68,5 +86,31 @@ Describe 'Qt Quick performance automation contract' {
 		$script | Should Match '\^\-\?\\d\+:\\d\+\$'
 		$script | Should Match 'Resolve-QmlRoomScopeToken -Room \$_'
 		$script | Should Not Match 'ForEach-Object \{ \[string\]\$_\.token \}'
+	}
+
+	It 'passes a clean ChatPerfTrace without steady-state full bootstraps' {
+		$analysis = Get-ChatPerfTraceAnalysis -TraceLines @(
+			'[chat-perf][timing] qml.participant.talk_state_update count=40 total_ms=3.000 avg_ms=0.075 max_ms=0.120',
+			'[chat-perf][value] qml.full_bootstrap count=1 total=1 avg=1.00 max=1'
+		)
+
+		$analysis.max_observed_timing_ms | Should Be 0.120
+		$analysis.steady_state_full_bootstrap_line_count | Should Be 0
+		$analysis.steady_state_full_bootstrap_total | Should Be 0
+	}
+
+	It 'fails closed when ChatPerfTrace reports steady-state full bootstraps' {
+		$script | Should Match 'no_steady_state_full_bootstrap_trace = \$null'
+		$script | Should Match 'no_steady_state_full_bootstrap_trace =\s*\$traceAnalysis\.steady_state_full_bootstrap_line_count -eq 0 -and'
+		$analysis = Get-ChatPerfTraceAnalysis -TraceLines @(
+			'[chat-perf][timing] qml.participant.talk_state_update count=40 total_ms=3.000 avg_ms=0.075 max_ms=0.120',
+			'[chat-perf][value] qml.full_bootstrap.steady_state_violation count=2 total=2 avg=1.00 max=1',
+			'[chat-perf][value] qml.full_bootstrap.steady_state_violation count=1 total=1 avg=1.00 max=1'
+		)
+
+		$analysis.steady_state_full_bootstrap_line_count | Should Be 2
+		$analysis.steady_state_full_bootstrap_total | Should Be 3
+		($analysis.steady_state_full_bootstrap_line_count -eq 0 -and
+			$analysis.steady_state_full_bootstrap_total -eq 0) | Should Be $false
 	}
 }

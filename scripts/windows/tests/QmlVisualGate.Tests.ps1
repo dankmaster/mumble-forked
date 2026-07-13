@@ -227,6 +227,20 @@ Describe "Qt Quick connected fixture contract" {
 		($worker -match 'Abs\(\[double\]\$Viewport\.railPosition\s*-\s*\$expectedRailPosition\)') | Should Be $true
 	}
 
+	It "closes stale product menus before resolving a live-context menu probe" {
+		$qml = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\qml-shell\Main.qml"
+		$probe = [regex]::Match(
+			$qml,
+			'function openAutomationMenuProbe\(variant\)\s*\{(?<body>[\s\S]*?)\n\t\treturn \{'
+		)
+		$probe.Success | Should Be $true
+		$body = $probe.Groups['body'].Value
+		$resetIndex = $body.IndexOf('closeProductMenus()')
+		$dispatchIndex = $body.IndexOf('if (normalized === "app")')
+		($resetIndex -ge 0) | Should Be $true
+		($dispatchIndex -gt $resetIndex) | Should Be $true
+	}
+
 	It "requires both connected fixture messages in accessibility evidence" {
 		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
 		($worker -match [regex]::Escape('Welcome to the deterministic visual fixture.')) | Should Be $true

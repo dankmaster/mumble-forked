@@ -34,10 +34,13 @@ $retiredClassicThemeFiles = @(
 	'themes\DefaultTheme.qrc',
 	'themes\CatppuccinTheme.qrc'
 ) | ForEach-Object { Join-Path $repoRoot $_ } | Where-Object { Test-Path -LiteralPath $_ }
-$retiredClassicThemeFiles = @($retiredClassicThemeFiles) + @(
-	Get-ChildItem (Join-Path $repoRoot 'themes') -Recurse -File -ErrorAction SilentlyContinue |
-		ForEach-Object FullName
-)
+$themeRoot = Join-Path $repoRoot 'themes'
+if (Test-Path -LiteralPath $themeRoot -PathType Container) {
+	$retiredClassicThemeFiles = @($retiredClassicThemeFiles) + @(
+		Get-ChildItem -LiteralPath $themeRoot -Recurse -File -ErrorAction SilentlyContinue |
+			ForEach-Object FullName
+	)
+}
 
 $nativeStatusIconAliases = @(
 	'native/deafened_self.svg',
@@ -72,7 +75,10 @@ $checks = [ordered]@{
 	qml_resource_mismatch = $qmlResourceMismatch
 	native_status_icon_resource_mismatch = $nativeStatusIconResourceMismatch
 	qml_rich_text_outside_structured_renderer = Find-Matches @('-n', 'Text\.(?:RichText|StyledText|MarkdownText)|textFormat\s*:\s*Text\.(?:RichText|StyledText|MarkdownText)', 'src/mumble/qml-shell', '--glob', '*.qml', '--glob', '!RichMessageBody.qml')
-	qml_label_autotext_defaults = Find-Matches @('-n', '-U', '--pcre2', '\bLabel\s*\{(?:[ \t]*\r?\n(?![ \t]*textFormat\s*:)|(?![ \t]*\r?\n)(?![^\r\n}]*\btextFormat\s*:))', 'src/mumble/qml-shell', '--glob', '*.qml', '--glob', '!RichMessageBody.qml')
+	# Label defaults to AutoText, which can interpret model/user strings as rich text.
+	# Match complete flat Label blocks and report only blocks with no explicit format.
+	# (QML Label declarations in this module do not own nested object blocks.)
+	qml_label_autotext_defaults = Find-Matches @('-n', '-U', '--pcre2', '\bLabel\s*\{(?:(?!\btextFormat\s*:)[^{}])*\}', 'src/mumble/qml-shell', '--glob', '*.qml', '--glob', '!RichMessageBody.qml')
 	qml_self_model_bindings = Find-Matches @('-n', '--pcre2', '\b([A-Za-z_]\w*Model)\s*:\s*\1\b', 'src/mumble/qml-shell', '--glob', '*.qml')
 	mainwindow_ui = @((Test-Path (Join-Path $repoRoot 'src\mumble\MainWindowUi.h')) | Where-Object { $_ })
 	mainwindow_spurious_autoconnect_slots = Find-Matches @('-n', 'on_(?:qmServer_aboutToShow|qaServerSettings_triggered|qaCreateTextRoom_triggered|qmSelf_aboutToShow|qaUserGrantChatHistory_triggered|qmConfig_aboutToShow|muteCuePopup_triggered)', 'src/mumble/MainWindow.cpp', 'src/mumble/MainWindow.h', 'src/mumble/AudioInput.cpp', 'src/mumble/Messages.cpp')

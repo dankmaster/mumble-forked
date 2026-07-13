@@ -40,6 +40,35 @@ function Get-Percentile {
 	return [double]$sorted[[Math]::Max(0, [Math]::Min($sorted.Count - 1, $index))]
 }
 
+function Get-ChatPerfTraceAnalysis {
+	param([AllowEmptyCollection()][string[]]$TraceLines)
+
+	$maxDurations = @($TraceLines | ForEach-Object {
+		if ($_ -match '\bmax_ms=(?<duration>[0-9.]+)') { [double]$Matches.duration }
+	})
+	$legacySnapshotLines = @($TraceLines | Where-Object { $_ -match '(?i)full[._ -]?snapshot|buildModernShellSnapshot' })
+	$steadyStateBootstrapLines = @($TraceLines | Where-Object {
+		$_ -match '(?i)^\[chat-perf\]\[value\]\s+qml\.full_bootstrap\.steady_state_violation\b'
+	})
+	$steadyStateBootstrapTotal = 0L
+	foreach ($line in $steadyStateBootstrapLines) {
+		if ($line -match '\btotal=(?<count>[0-9]+)\b') {
+			$steadyStateBootstrapTotal += [int64]$Matches.count
+		} else {
+			# A matching counter line without a parseable total must never make the
+			# correctness gate pass silently.
+			++$steadyStateBootstrapTotal
+		}
+	}
+
+	return [pscustomobject]@{
+		max_observed_timing_ms = if ($maxDurations.Count -gt 0) { ($maxDurations | Measure-Object -Maximum).Maximum } else { $null }
+		legacy_full_snapshot_line_count = $legacySnapshotLines.Count
+		steady_state_full_bootstrap_line_count = $steadyStateBootstrapLines.Count
+		steady_state_full_bootstrap_total = $steadyStateBootstrapTotal
+	}
+}
+
 function Get-FreeTcpPort {
 	$listener = [System.Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
 	$listener.Start()
@@ -528,6 +557,7 @@ $gates = [ordered]@{
 	chat_scroll_workload_measured = @($measurements | Where-Object { -not $_.chat_scroll_workload.measured }).Count -eq 0
 	talk_state_workload_measured = @($measurements | Where-Object { -not $_.talk_state_workload.measured }).Count -eq 0
 	no_legacy_full_snapshot_trace = $null
+	no_steady_state_full_bootstrap_trace = $null
 	no_observed_trace_block_over_50_ms = $null
 	startup_20_percent_faster_than_web = $null
 	idle_memory_25_percent_lower_than_web = $null
@@ -536,21 +566,23 @@ $gates = [ordered]@{
 $chatPerf = $null
 if ($traceFile -and (Test-Path -LiteralPath $traceFile)) {
 	$traceLines = @(Get-Content -LiteralPath $traceFile)
-	$maxDurations = @($traceLines | ForEach-Object {
-		if ($_ -match '\bmax_ms=(?<duration>[0-9.]+)') { [double]$Matches.duration }
-	})
-	$maxObservedMilliseconds = if ($maxDurations.Count -gt 0) { ($maxDurations | Measure-Object -Maximum).Maximum } else { $null }
-	$legacySnapshotLines = @($traceLines | Where-Object { $_ -match '(?i)full[._ -]?snapshot|buildModernShellSnapshot' })
+	$traceAnalysis = Get-ChatPerfTraceAnalysis -TraceLines $traceLines
+	$maxObservedMilliseconds = $traceAnalysis.max_observed_timing_ms
 	$chatPerf = [ordered]@{
 		path = $traceFile
 		line_count = $traceLines.Count
 		max_observed_timing_ms = $maxObservedMilliseconds
-		legacy_full_snapshot_line_count = $legacySnapshotLines.Count
+		legacy_full_snapshot_line_count = $traceAnalysis.legacy_full_snapshot_line_count
+		steady_state_full_bootstrap_line_count = $traceAnalysis.steady_state_full_bootstrap_line_count
+		steady_state_full_bootstrap_total = $traceAnalysis.steady_state_full_bootstrap_total
 	}
 	if ($traceLines.Count -eq 0 -or $null -eq $maxObservedMilliseconds) {
 		$notMeasured.Add("chat_perf_trace: trace contained no timing samples")
 	} else {
-		$gates.no_legacy_full_snapshot_trace = $legacySnapshotLines.Count -eq 0
+		$gates.no_legacy_full_snapshot_trace = $traceAnalysis.legacy_full_snapshot_line_count -eq 0
+		$gates.no_steady_state_full_bootstrap_trace =
+			$traceAnalysis.steady_state_full_bootstrap_line_count -eq 0 -and
+			$traceAnalysis.steady_state_full_bootstrap_total -eq 0
 		$gates.no_observed_trace_block_over_50_ms = $maxObservedMilliseconds -le 50.0
 	}
 } elseif ($traceFile) {
