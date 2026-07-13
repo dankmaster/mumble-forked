@@ -15,7 +15,6 @@
 #include <functional>
 
 class QNetworkReply;
-class QWidget;
 
 class VersionCheck : public QObject {
 private:
@@ -48,8 +47,8 @@ public:
 	static QString updateModeForInfo(const QJsonObject &info);
 	static QString expectedUpdateSha256ForInfo(const QJsonObject &info);
 	static bool canInstallUpdate(const QJsonObject &info);
-	static void installUpdateFromInfo(const QJsonObject &info, QWidget *parent = nullptr);
-	static void downloadUpdateFromInfo(const QJsonObject &info, QWidget *parent, bool showProgress,
+	static void installUpdateFromInfo(const QJsonObject &info, QObject *parent = nullptr);
+	static void downloadUpdateFromInfo(const QJsonObject &info, QObject *parent, bool showProgress,
 									   std::function< void(const QString &) > readyCallback = {},
 									   std::function< void(const QString &) > failureCallback = {},
 									   std::function< void() > cancelledCallback = {},

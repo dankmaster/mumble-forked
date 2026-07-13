@@ -38,6 +38,7 @@
 #include <QDateTime>
 #include <QFile>
 #include <QPainter>
+#include <QtCore/QCoreApplication>
 #include <QtCore/QtEndian>
 #include <QtGui/QImageReader>
 #include <QtNetwork/QSslConfiguration>
@@ -428,7 +429,7 @@ void ServerHandler::sendMessage(const unsigned char *data, int len, bool force) 
 		*reinterpret_cast< quint32 * >(&uc[2]) = qToBigEndian(static_cast< quint32 >(len));
 		memcpy(uc + 6, data, static_cast< std::size_t >(len));
 
-		QApplication::postEvent(this,
+		QCoreApplication::postEvent(this,
 								new ServerHandlerMessageEvent(qba, Mumble::Protocol::TCPMessageType::UDPTunnel, true));
 	} else {
 		if (!connection->csCrypt->encrypt(reinterpret_cast< const unsigned char * >(data), crypto.data(),
@@ -445,7 +446,7 @@ void ServerHandler::sendProtoMessage(const ::google::protobuf::Message &msg, Mum
 	if (QThread::currentThread() != thread()) {
 		Connection::messageToNetwork(msg, type, qba);
 		ServerHandlerMessageEvent *shme = new ServerHandlerMessageEvent(qba, type, false);
-		QApplication::postEvent(this, shme);
+		QCoreApplication::postEvent(this, shme);
 	} else {
 		ConnectionPtr connection(cConnection);
 		if (!connection)
@@ -824,7 +825,7 @@ void ServerHandler::message(Mumble::Protocol::TCPMessageType type, const QByteAr
 		}
 	} else {
 		ServerHandlerMessageEvent *shme = new ServerHandlerMessageEvent(qbaMsg, type, false);
-		QApplication::postEvent(Global::get().mw, shme);
+		QCoreApplication::postEvent(Global::get().mw, shme);
 	}
 }
 

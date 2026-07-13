@@ -13,6 +13,11 @@
 
 class ClientActionRegistry;
 
+namespace QmlVisualFixtureMutation {
+	inline constexpr char OverrideProperty[] = "_mumbleVisualFixtureOverride";
+	inline constexpr char WriteProperty[] = "_mumbleVisualFixtureWrite";
+}
+
 class ClientSessionController final : public QObject {
 	Q_OBJECT
 	Q_PROPERTY(QString serverName READ serverName WRITE setServerName NOTIFY serverNameChanged)
@@ -84,6 +89,9 @@ class ActiveScopeController final : public QObject {
 	Q_PROPERTY(QString replyActor READ replyActor WRITE setReplyActor NOTIFY replyActorChanged)
 	Q_PROPERTY(QString replySnippet READ replySnippet WRITE setReplySnippet NOTIFY replySnippetChanged)
 	Q_PROPERTY(bool canAttachImages READ canAttachImages WRITE setCanAttachImages NOTIFY canAttachImagesChanged)
+	Q_PROPERTY(bool canLoadOlder READ canLoadOlder WRITE setCanLoadOlder NOTIFY canLoadOlderChanged)
+	Q_PROPERTY(bool loading READ loading WRITE setLoading NOTIFY loadingChanged)
+	Q_PROPERTY(QString loadingState READ loadingState WRITE setLoadingState NOTIFY loadingStateChanged)
 
 public:
 	explicit ActiveScopeController(QObject *parent = nullptr);
@@ -98,6 +106,9 @@ public:
 	QString replyActor() const;
 	QString replySnippet() const;
 	bool canAttachImages() const;
+	bool canLoadOlder() const;
+	bool loading() const;
+	QString loadingState() const;
 	void setScopeToken(const QString &value);
 	void setLabel(const QString &value);
 	void setDescription(const QString &value);
@@ -109,6 +120,9 @@ public:
 	void setReplyActor(const QString &value);
 	void setReplySnippet(const QString &value);
 	void setCanAttachImages(bool value);
+	void setCanLoadOlder(bool value);
+	void setLoading(bool value);
+	void setLoadingState(const QString &value);
 	void applyState(const QVariantMap &state);
 
 signals:
@@ -123,6 +137,9 @@ signals:
 	void replyActorChanged();
 	void replySnippetChanged();
 	void canAttachImagesChanged();
+	void canLoadOlderChanged();
+	void loadingChanged();
+	void loadingStateChanged();
 
 private:
 	QString m_scopeToken;
@@ -136,6 +153,9 @@ private:
 	QString m_replyActor;
 	QString m_replySnippet;
 	bool m_canAttachImages = false;
+	bool m_canLoadOlder = false;
+	bool m_loading = false;
+	QString m_loadingState;
 };
 
 class StableListModel : public QAbstractListModel {
@@ -172,7 +192,8 @@ public:
 		MenuRoleRole,
 		ToolTipRole,
 		VisibleRole,
-		AttachmentsRole
+		AttachmentsRole,
+		SourceRole
 	};
 
 	explicit StableListModel(QObject *parent = nullptr);
@@ -207,6 +228,7 @@ public:
 	using StableListModel::StableListModel;
 	void replaceRoomStates(const QVariantList &voiceRooms, const QVariantList &textRooms);
 	void replaceDirectMessageStates(const QVariantList &conversations);
+	void selectScope(const QString &scopeToken);
 
 private:
 	static QVariantMap roomRow(const QVariantMap &room, const QString &kind);
@@ -226,6 +248,7 @@ public:
 	void upsertParticipantState(const QVariantMap &participant);
 	void removeParticipant(const QString &sessionId);
 	void replaceParticipantStates(const QVariantList &participants);
+	QVariantList participantStates() const;
 
 private:
 	static QVariantMap participantRow(const QVariantMap &participant);
@@ -241,6 +264,7 @@ public:
 	bool removeMessage(const QString &messageId);
 	int appendMessages(const QVariantList &messages);
 	void replaceMessages(const QVariantList &messages);
+	QVariantList messages() const;
 
 private:
 	static QVariantMap messageRow(const QVariantMap &message);
@@ -428,6 +452,7 @@ public:
 	Q_INVOKABLE void selectParticipant(const QString &sessionId);
 	Q_INVOKABLE void openDirectMessage(const QString &sessionId);
 	Q_INVOKABLE void sendMessage(const QString &message);
+	Q_INVOKABLE void requestOlderMessages();
 	Q_INVOKABLE void cancelPendingReply();
 	Q_INVOKABLE void chooseAttachment();
 	Q_INVOKABLE void replyToMessage(const QString &messageId);
@@ -449,6 +474,7 @@ signals:
 	void participantSelectionRequested(const QString &sessionId);
 	void directMessageOpenRequested(const QString &sessionId);
 	void messageSendRequested(const QString &message);
+	void olderMessagesRequested();
 	void pendingReplyCancelRequested();
 	void attachmentChooseRequested();
 	void messageReplyRequested(const QString &messageId);

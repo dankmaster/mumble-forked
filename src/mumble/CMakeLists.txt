@@ -138,6 +138,8 @@ endif()
 set(MUMBLE_SOURCES
 	"Accessibility.cpp"
 	"Accessibility.h"
+	"ApplicationThemeObserver.cpp"
+	"ApplicationThemeObserver.h"
 	"API_v_1_x_x.cpp"
 	"API.h"
 	"Audio.cpp"
@@ -157,8 +159,6 @@ set(MUMBLE_SOURCES
 	"AudioOutputToken.h"
 	"AudioPreprocessor.cpp"
 	"AudioPreprocessor.h"
-	"AudioStats.cpp"
-	"AudioStats.h"
 	"CertService.cpp"
 	"CertService.h"
 	"ChannelFilterMode.h"
@@ -171,8 +171,8 @@ set(MUMBLE_SOURCES
 	"Database.h"
 	"DeepFilterNetSpeechCleanup.cpp"
 	"DeepFilterNetSpeechCleanup.h"
-	"DeveloperConsole.cpp"
-	"DeveloperConsole.h"
+	"ExposeEventFilter.cpp"
+	"ExposeEventFilter.h"
 	"DTLNSpeechCleanup.cpp"
 	"DTLNSpeechCleanup.h"
 	"EchoCancelOption.cpp"
@@ -193,8 +193,6 @@ set(MUMBLE_SOURCES
 	"JSONSerialization.h"
 	"LegacyPlugin.cpp"
 	"LegacyPlugin.h"
-	"ListenerVolumeSlider.cpp"
-	"ListenerVolumeSlider.h"
 	"Log.cpp"
 	"Log.h"
 	"ClientActionRegistry.cpp"
@@ -205,8 +203,6 @@ set(MUMBLE_SOURCES
 	"MainWindow.h"
 	"Markdown.cpp"
 	"Markdown.h"
-	"MenuLabel.cpp"
-	"MenuLabel.h"
 	"Messages.cpp"
 	"ModernConnectController.cpp"
 	"ModernConnectController.h"
@@ -288,45 +284,22 @@ set(MUMBLE_SOURCES
 	"Usage.h"
 	"UserListModel.cpp"
 	"UserListModel.h"
-	"UserLocalVolumeSlider.cpp"
-	"UserLocalVolumeSlider.h"
 	"UserModel.cpp"
 	"UserModel.h"
 	"VersionCheck.cpp"
 	"VersionCheck.h"
-	"ViewCert.cpp"
-	"ViewCert.h"
 	"VoiceRecorder.cpp"
 	"VoiceRecorder.h"
 	"VolumeAdjustmentController.cpp"
 	"VolumeAdjustmentController.h"
 	"WebRTCAudioEchoCanceller.cpp"
 	"WebRTCAudioEchoCanceller.h"
-	"VolumeSliderWidgetAction.cpp"
-	"VolumeSliderWidgetAction.h"
 	"WebFetch.cpp"
 	"WebFetch.h"
 	"XMLTools.cpp"
 	"XMLTools.h"
 
-	"widgets/AccessibleQGroupBox.cpp"
-	"widgets/AccessibleQGroupBox.h"
-	"widgets/ClickableLabel.h"
-	"widgets/CompletablePage.cpp"
-	"widgets/CompletablePage.h"
-	"widgets/EventFilters.cpp"
-	"widgets/EventFilters.h"
 	"ConnectionFailTypes.h"
-	"widgets/MUComboBox.cpp"
-	"widgets/MUComboBox.h"
-	"widgets/MultiStyleWidgetWrapper.cpp"
-	"widgets/MultiStyleWidgetWrapper.h"
-	"widgets/MultiColumnTreeWidget.cpp"
-	"widgets/MultiColumnTreeWidget.h"
-	"widgets/RichTextItemDelegate.cpp"
-	"widgets/RichTextItemDelegate.h"
-	"widgets/SemanticSlider.cpp"
-	"widgets/SemanticSlider.h"
 	"widgets/TrayIcon.cpp"
 	"widgets/TrayIcon.h"
 
@@ -426,15 +399,6 @@ elseif(APPLE)
 	)
 endif()
 
-add_custom_command(
-	OUTPUT "ApplicationPalette.h"
-	COMMAND Python::Interpreter
-	ARGS ${CMAKE_SOURCE_DIR}/scripts/generate-ApplicationPalette-class.py --template ${CMAKE_CURRENT_SOURCE_DIR}/ApplicationPaletteTemplate.h
-		--output ApplicationPalette.h
-	COMMENT "Generating ApplicationPalette.h"
-	DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/ApplicationPaletteTemplate.h"
-)
-target_sources(mumble PRIVATE "ApplicationPalette.h")
 target_include_directories(mumble PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
 if(bundled-spdlog)

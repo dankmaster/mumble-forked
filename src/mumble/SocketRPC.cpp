@@ -12,6 +12,7 @@
 #include "Global.h"
 
 #include <QtCore/QProcessEnvironment>
+#include <QtCore/QCoreApplication>
 #include <QtCore/QUrlQuery>
 #include <QtNetwork/QLocalServer>
 #include <QtXml/QDomDocument>
@@ -204,7 +205,7 @@ void SocketRPCClient::processXml() {
 				QUrl u = iter.value().toUrl();
 				if (u.isValid() && u.scheme() == QLatin1String("mumble")) {
 					OpenURLEvent *oue = new OpenURLEvent(u);
-					qApp->postEvent(Global::get().mw, oue);
+					QCoreApplication::postEvent(Global::get().mw, oue);
 					ack = true;
 				}
 			} else {

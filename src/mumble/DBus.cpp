@@ -86,22 +86,23 @@ void MumbleDBus::focus() {
 }
 
 void MumbleDBus::setTransmitMode(unsigned int mode, const QDBusMessage &msg) {
+	Settings::AudioTransmit transmitMode;
 	switch (mode) {
 		case 0:
-			Global::get().s.atTransmit = Settings::Continuous;
+			transmitMode = Settings::Continuous;
 			break;
 		case 1:
-			Global::get().s.atTransmit = Settings::VAD;
+			transmitMode = Settings::VAD;
 			break;
 		case 2:
-			Global::get().s.atTransmit = Settings::PushToTalk;
+			transmitMode = Settings::PushToTalk;
 			break;
 		default:
 			QDBusConnection::sessionBus().send(msg.createErrorReply(
 				QLatin1String("net.sourceforge.mumble.Error.transmitMode"), QLatin1String("Invalid transmit mode")));
 			return;
 	}
-	QMetaObject::invokeMethod(Global::get().mw, "updateTransmitModeComboBox", Qt::QueuedConnection);
+	Global::get().mw->setTransmissionMode(transmitMode);
 }
 
 unsigned int MumbleDBus::getTransmitMode() {

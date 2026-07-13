@@ -22,19 +22,14 @@
 
 #include <QByteArray>
 #include <QDataStream>
-#include <QDialog>
 #include <QFileInfo>
-#include <QHBoxLayout>
 #include <QImageReader>
-#include <QLabel>
 #include <QOperatingSystemVersion>
 #include <QProcessEnvironment>
-#include <QPushButton>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QSystemTrayIcon>
-#include <QVBoxLayout>
 
 #include <boost/typeof/typeof.hpp>
 
@@ -53,89 +48,6 @@ constexpr const char *REGISTRY_ID = ":::::REGISTRY:::::";
 #endif
 
 namespace {
-QString modernStartupDialogStyleSheet() {
-	return QStringLiteral(R"(
-QDialog {
-	background: #111820;
-	color: #e8edf4;
-}
-QLabel#StartupEyebrow {
-	color: #7dd3c7;
-	font-size: 11px;
-	font-weight: 700;
-	letter-spacing: 0px;
-	text-transform: uppercase;
-}
-QLabel#StartupHeading {
-	color: #f3f6fb;
-	font-size: 19px;
-	font-weight: 800;
-}
-QLabel#StartupBody {
-	color: #aeb9c7;
-	font-size: 13px;
-	line-height: 1.35;
-}
-QLabel#StartupBody pre {
-	background: #18212b;
-	color: #dfe7f2;
-	border: 1px solid #314152;
-	border-radius: 6px;
-	padding: 6px;
-}
-QPushButton {
-	background: #243140;
-	border: 1px solid #3a4a5e;
-	border-radius: 6px;
-	color: #edf5ff;
-	font-size: 13px;
-	font-weight: 700;
-	min-height: 34px;
-	padding: 0 18px;
-}
-QPushButton:hover {
-	background: #2d3b4b;
-	border-color: #4d647d;
-}
-QPushButton[buttonRole="primary"] {
-	background: #65b9e8;
-	border-color: #78c4ee;
-	color: #07131d;
-}
-QPushButton[buttonRole="danger"] {
-	background: #3a2730;
-	border-color: #ef6f7a;
-	color: #ffdce0;
-}
-)");
-}
-
-QLabel *modernStartupLabel(const QString &objectName, const QString &text, QWidget *parent) {
-	QLabel *label = new QLabel(text, parent);
-	label->setObjectName(objectName);
-	label->setWordWrap(true);
-	label->setTextInteractionFlags(Qt::TextSelectableByMouse);
-	return label;
-}
-
-QPushButton *modernStartupButton(const QString &text, const QString &role, QWidget *parent) {
-	QPushButton *button = new QPushButton(text, parent);
-	button->setProperty("buttonRole", role);
-	button->setCursor(Qt::PointingHandCursor);
-	return button;
-}
-
-QString modernStartupBreakablePath(const QString &path) {
-	QString escaped = path.toHtmlEscaped();
-	const QString breakPoint = QStringLiteral("&#8203;");
-	escaped.replace(QStringLiteral("\\"), QStringLiteral("\\") + breakPoint);
-	escaped.replace(QStringLiteral("/"), QStringLiteral("/") + breakPoint);
-	escaped.replace(QStringLiteral("."), QStringLiteral(".") + breakPoint);
-	escaped.replace(QStringLiteral("_"), QStringLiteral("_") + breakPoint);
-	escaped.replace(QStringLiteral("-"), QStringLiteral("-") + breakPoint);
-	return escaped;
-}
-
 bool isLegacySettingsFilePath(const QString &path) {
 	const QString suffix = QFileInfo(path).suffix().toLower();
 	return suffix == QLatin1String("ini") || suffix == QLatin1String("conf");
@@ -143,74 +55,6 @@ bool isLegacySettingsFilePath(const QString &path) {
 
 QString migratedJsonPathForLegacySettings(const QString &path) {
 	return QFileInfo(path).absoluteDir().filePath(QStringLiteral("mumble_settings.json"));
-}
-
-bool execModernStartupQuestion(const QString &title, const QString &heading, const QString &body,
-							   const QString &acceptText, const QString &rejectText) {
-	QDialog dialog;
-	dialog.setWindowTitle(title);
-	dialog.setModal(true);
-	dialog.setMinimumWidth(520);
-	dialog.setStyleSheet(modernStartupDialogStyleSheet());
-
-	QVBoxLayout *layout = new QVBoxLayout(&dialog);
-	layout->setContentsMargins(22, 18, 22, 18);
-	layout->setSpacing(12);
-	layout->addWidget(modernStartupLabel(QStringLiteral("StartupEyebrow"), title, &dialog));
-	layout->addWidget(modernStartupLabel(QStringLiteral("StartupHeading"), heading, &dialog));
-
-	QLabel *bodyLabel = modernStartupLabel(QStringLiteral("StartupBody"), body, &dialog);
-	bodyLabel->setTextFormat(Qt::RichText);
-	layout->addWidget(bodyLabel);
-
-	QHBoxLayout *buttons = new QHBoxLayout();
-	buttons->setContentsMargins(0, 8, 0, 0);
-	buttons->setSpacing(8);
-	buttons->addStretch();
-
-	QPushButton *rejectButton = modernStartupButton(rejectText, QStringLiteral("secondary"), &dialog);
-	QPushButton *acceptButton = modernStartupButton(acceptText, QStringLiteral("primary"), &dialog);
-	acceptButton->setDefault(true);
-	buttons->addWidget(rejectButton);
-	buttons->addWidget(acceptButton);
-	layout->addLayout(buttons);
-
-	QObject::connect(rejectButton, &QPushButton::clicked, &dialog, &QDialog::reject);
-	QObject::connect(acceptButton, &QPushButton::clicked, &dialog, &QDialog::accept);
-
-	dialog.resize(dialog.minimumWidth(), dialog.sizeHint().height());
-	return dialog.exec() == QDialog::Accepted;
-}
-
-void execModernStartupNotice(const QString &title, const QString &heading, const QString &body) {
-	QDialog dialog;
-	dialog.setWindowTitle(title);
-	dialog.setModal(true);
-	dialog.setMinimumWidth(520);
-	dialog.setStyleSheet(modernStartupDialogStyleSheet());
-
-	QVBoxLayout *layout = new QVBoxLayout(&dialog);
-	layout->setContentsMargins(22, 18, 22, 18);
-	layout->setSpacing(12);
-	layout->addWidget(modernStartupLabel(QStringLiteral("StartupEyebrow"), title, &dialog));
-	layout->addWidget(modernStartupLabel(QStringLiteral("StartupHeading"), heading, &dialog));
-
-	QLabel *bodyLabel = modernStartupLabel(QStringLiteral("StartupBody"), body, &dialog);
-	bodyLabel->setTextFormat(Qt::RichText);
-	layout->addWidget(bodyLabel);
-
-	QHBoxLayout *buttons = new QHBoxLayout();
-	buttons->setContentsMargins(0, 8, 0, 0);
-	buttons->addStretch();
-	QPushButton *okButton = modernStartupButton(QObject::tr("OK"), QStringLiteral("primary"), &dialog);
-	okButton->setDefault(true);
-	buttons->addWidget(okButton);
-	layout->addLayout(buttons);
-
-	QObject::connect(okButton, &QPushButton::clicked, &dialog, &QDialog::accept);
-
-	dialog.resize(dialog.minimumWidth(), dialog.sizeHint().height());
-	dialog.exec();
 }
 } // namespace
 
@@ -389,33 +233,18 @@ void Settings::load(const QString &path, bool skipSettingsBackupPrompt) {
 
 				QFileInfo backupInfo(backupPath);
 				if (backupInfo.exists() && backupInfo.isFile()) {
-					if (execModernStartupQuestion(
-							QObject::tr("Potentially broken settings"), QObject::tr("Load backup settings?"),
-							QObject::tr(
-								"It seems that Mumble did not perform a normal shutdown. If you did not intentionally "
-								"kill the application, this could mean that the used settings caused a crash.<br><br>"
-								"Do you want to load the settings backup instead?"),
-							QObject::tr("Load backup"), QObject::tr("Keep current"))) {
-						// Load the backup instead
-						qWarning() << "Loading backup settings from" << backupPath;
-						load(backupPath, skipSettingsBackupPrompt);
-					}
+					// Prefer the last known-good settings after an unclean shutdown. Settings loading happens before
+					// the frontend is available, so recovery must be deterministic and must not create product UI.
+					qWarning() << "Previous shutdown was unclean; loading backup settings from" << backupPath;
+					load(backupPath, skipSettingsBackupPrompt);
 				}
 			} else {
 				// This is already the backup we are loading
 				const QString settingsPath =
 					path.left(path.size() - static_cast< int >(std::strlen(BACKUP_FILE_EXTENSION)));
-				execModernStartupNotice(
-					QObject::tr("Potentially broken settings"),
-					QObject::tr("The backup settings may also be unstable."),
-					QObject::tr(
-						"The backed-up settings also seem to have been saved without Mumble exiting normally "
-						"(potentially indicating a crash).<br><br>"
-						"If you experience repeated crashes with these settings, you might have to manually delete "
-						"these settings files:<br><br><code>%1</code><br><br><code>%2</code><br><br>"
-						"in order to reset all settings to their "
-						"default value.")
-						.arg(modernStartupBreakablePath(settingsPath), modernStartupBreakablePath(path)));
+				qWarning() << "Backup settings were also saved after an unclean shutdown; repeated crashes may "
+							   "require resetting settings files"
+						   << settingsPath << "and" << path;
 			}
 		}
 	} catch (const nlohmann::json::parse_error &e) {
@@ -1088,12 +917,8 @@ void Settings::legacyLoad(const QString &path) {
 			const QList< Shortcut > migratedShortcuts = GlobalShortcutWin::migrateSettings(shortcuts);
 			if (shortcuts.size() > migratedShortcuts.size()) {
 				const uint32_t num = shortcuts.size() - migratedShortcuts.size();
-				execModernStartupNotice(
-					QObject::tr("Shortcuts migration incomplete"),
-					QObject::tr("Some shortcuts need to be registered again."),
-					QObject::tr("Unfortunately %1 shortcut(s) could not be migrated.<br><br>"
-								"You can register them again in Settings > Key Bindings.")
-						.arg(num));
+				qWarning() << num
+						   << "shortcut(s) could not be migrated and must be registered again in Settings > Key Bindings";
 			}
 
 			shortcuts = migratedShortcuts;

@@ -309,7 +309,6 @@ QString Log::validHtml(const QString &html, QTextCursor *tc) {
 	const QScreen *primaryScreen = QGuiApplication::primaryScreen();
 	const QRectF qr = primaryScreen ? QRectF(primaryScreen->availableGeometry()) : QRectF(0, 0, 1920, 1080);
 	qtd.setTextWidth(qr.width() / 2);
-	qtd.setDefaultStyleSheet(qApp->styleSheet());
 
 	// Call documentLayout on our LogDocument to ensure
 	// it has a layout backing it. With a layout set on

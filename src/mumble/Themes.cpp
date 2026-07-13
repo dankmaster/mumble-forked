@@ -15,6 +15,7 @@
 #endif
 
 #include <QStyleHints>
+#include <QtGui/QPalette>
 
 #include <optional>
 

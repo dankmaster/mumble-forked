@@ -23,7 +23,7 @@ public:
 	void setGateway(PersistentChatGateway *gateway);
 	void reset();
 
-	void setActiveScope(const PersistentChatScopeKey &key, bool forceReload);
+	void setActiveScope(const PersistentChatScopeKey &key, bool forceReload, bool requestHistory = true);
 	void clearActiveScope();
 	void warmupScopes(const QList< PersistentChatScopeKey > &keys);
 

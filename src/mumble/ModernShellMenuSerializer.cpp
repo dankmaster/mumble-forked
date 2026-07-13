@@ -5,11 +5,7 @@
 
 #include "ModernShellMenuSerializer.h"
 
-#include "MenuLabel.h"
-#include "VolumeSliderWidgetAction.h"
-
 #include <QAction>
-#include <QMenu>
 
 QString ModernShellMenuSerializer::normalizedActionLabel(const QString &text) {
 	QString normalized = text;
@@ -120,11 +116,6 @@ QVariantList ModernShellMenuSerializer::normalize(const QVariantList &items) {
 	return normalized;
 }
 
-QVariantList ModernShellMenuSerializer::serializeMenu(const QMenu *menu, const Resolver &resolver,
-												  ActionRegistry *registry) {
-	return menu ? serializeActions(menu->actions(), resolver, registry) : QVariantList();
-}
-
 QVariantList ModernShellMenuSerializer::serializeActions(const QList< QAction * > &actions, const Resolver &resolver,
 													 ActionRegistry *registry) {
 	QVariantList items;
@@ -138,11 +129,6 @@ QVariantList ModernShellMenuSerializer::serializeActions(const QList< QAction * 
 			continue;
 		}
 
-		if (const auto *menuLabel = qobject_cast< const MenuLabel * >(action)) {
-			items.push_back(labelItem(normalizedActionLabel(menuLabel->text())));
-			continue;
-		}
-
 		const ActionDefinition definition = resolver ? resolver(action) : ActionDefinition();
 		if (definition.id.trimmed().isEmpty()) {
 			continue;
@@ -153,17 +139,6 @@ QVariantList ModernShellMenuSerializer::serializeActions(const QList< QAction * 
 			entry.action            = action;
 			entry.contextActionData = definition.contextActionData;
 			registry->insert(definition.id, entry);
-		}
-
-		if (const auto *sliderAction = qobject_cast< const VolumeSliderWidgetAction * >(action)) {
-			const QString label =
-				definition.label.isEmpty() ? sliderAction->sliderAccessibleName() : definition.label;
-			items.push_back(sliderItem(definition.id, label, sliderAction->sliderValue(), sliderAction->sliderMinimum(),
-									   sliderAction->sliderMaximum(), sliderAction->sliderStep(),
-									   sliderAction->sliderSuffix(), sliderAction->sliderFinalOnRelease(),
-									   action->isEnabled(), definition.tone,
-									   definition.hint.isEmpty() ? sliderAction->sliderHint() : definition.hint));
-			continue;
 		}
 
 		const QString label =

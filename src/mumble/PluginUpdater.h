@@ -61,7 +61,7 @@ protected:
 public:
 	/// Constructor
 	///
-	/// @param parent A pointer to the QWidget parent of this object
+	/// @param parent QObject that owns this updater
 	PluginUpdater(QObject *parent = nullptr);
 	/// Destructor
 	~PluginUpdater();

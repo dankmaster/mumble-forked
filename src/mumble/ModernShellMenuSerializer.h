@@ -13,7 +13,6 @@
 #include <functional>
 
 class QAction;
-class QMenu;
 
 class ModernShellMenuSerializer {
 public:
@@ -44,8 +43,6 @@ public:
 								  const QString &suffix, bool finalOnRelease, bool enabled,
 								  const QString &tone = QString(), const QString &hint = QString());
 	static QVariantList normalize(const QVariantList &items);
-	static QVariantList serializeMenu(const QMenu *menu, const Resolver &resolver,
-									  ActionRegistry *registry = nullptr);
 	static QVariantList serializeActions(const QList< QAction * > &actions, const Resolver &resolver,
 										 ActionRegistry *registry = nullptr);
 };

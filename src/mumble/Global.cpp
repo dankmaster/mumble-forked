@@ -97,7 +97,6 @@ Global::Global(const QString &qsConfigPath) {
 	db              = nullptr;
 	pluginManager   = nullptr;
 	nam             = nullptr;
-	c               = nullptr;
 	uiSession       = 0;
 	uiDoublePush    = 1000000;
 	iPushToTalk     = 0;

@@ -10,6 +10,8 @@ private slots:
 	void computesFramePercentiles();
 	void correlatesInputWithVisualCompletion();
 	void reportsOnlyStallsAboveThreshold();
+	void ignoresHeartbeatOutsideMeasuredPhase();
+	void countsPresentedFramesOnlyInsideMeasuredPhase();
 	void resetClearsAutomationSnapshot();
 	void recordsRenderThreadFrameDuration();
 	void computesInputPercentiles();
@@ -43,6 +45,7 @@ void TestQmlPerformanceMonitor::correlatesInputWithVisualCompletion() {
 void TestQmlPerformanceMonitor::reportsOnlyStallsAboveThreshold() {
 	QmlPerformanceMonitor monitor;
 	QSignalSpy stallSpy(&monitor, &QmlPerformanceMonitor::uiStallObserved);
+	monitor.beginFrameSampling();
 	monitor.recordHeartbeatAt(0);
 	monitor.recordHeartbeatAt(66000000);
 	QCOMPARE(stallSpy.count(), 0);
@@ -50,6 +53,34 @@ void TestQmlPerformanceMonitor::reportsOnlyStallsAboveThreshold() {
 	QCOMPARE(stallSpy.count(), 1);
 	QCOMPARE(monitor.uiStallCount(), 1);
 	QVERIFY(monitor.maxUiStallMs() > 50.0);
+}
+
+void TestQmlPerformanceMonitor::ignoresHeartbeatOutsideMeasuredPhase() {
+	QmlPerformanceMonitor monitor;
+	monitor.recordHeartbeatAt(0);
+	monitor.recordHeartbeatAt(500000000);
+	QCOMPARE(monitor.uiStallCount(), 0);
+	monitor.beginFrameSampling();
+	monitor.recordHeartbeatAt(500000000);
+	monitor.recordHeartbeatAt(600000001);
+	QCOMPARE(monitor.uiStallCount(), 1);
+	monitor.endFrameSampling();
+	monitor.recordHeartbeatAt(1000000000);
+	QCOMPARE(monitor.uiStallCount(), 1);
+}
+
+void TestQmlPerformanceMonitor::countsPresentedFramesOnlyInsideMeasuredPhase() {
+	QmlPerformanceMonitor monitor;
+	monitor.markFramePresented();
+	QCOMPARE(monitor.snapshot().value(QStringLiteral("presentedFrameCount")).toInt(), 0);
+	monitor.beginFrameSampling();
+	monitor.markFramePresented();
+	QCOMPARE(monitor.snapshot().value(QStringLiteral("presentedFrameCount")).toInt(), 1);
+	monitor.endFrameSampling();
+	monitor.markFramePresented();
+	QCOMPARE(monitor.snapshot().value(QStringLiteral("presentedFrameCount")).toInt(), 1);
+	monitor.reset();
+	QCOMPARE(monitor.snapshot().value(QStringLiteral("presentedFrameCount")).toInt(), 0);
 }
 
 void TestQmlPerformanceMonitor::resetClearsAutomationSnapshot() {

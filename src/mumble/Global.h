@@ -29,7 +29,6 @@ class Log;
 class PluginManager;
 class QSettings;
 class Zeroconf;
-class DeveloperConsole;
 class TrayIcon;
 
 class QNetworkAccessManager;
@@ -61,7 +60,6 @@ public:
 	PluginManager *pluginManager;
 	Zeroconf *zeroconf;
 	QNetworkAccessManager *nam;
-	DeveloperConsole *c;
 	int iPushToTalk;
 	Timer tDoublePush;
 	quint64 uiDoublePush;

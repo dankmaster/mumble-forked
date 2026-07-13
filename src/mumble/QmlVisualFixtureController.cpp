@@ -9,6 +9,7 @@
 
 #include <QtCore/QEventLoop>
 #include <QtCore/QTimer>
+#include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 
 QmlVisualFixtureController::QmlVisualFixtureController(QmlShellHost *host) : m_host(host) {
@@ -42,20 +43,90 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 	if (caseId.isEmpty() || !QStringList { QStringLiteral("empty"), QStringLiteral("loading"),
 										 QStringLiteral("error"), QStringLiteral("connected") }.contains(state)
 		|| width < 760 || height < 520 || width > 4096 || height > 2160
-		|| !m_host->themeController()->applyVisualGateAppearance(theme, layout)) {
+		|| !QStringList { QStringLiteral("light"), QStringLiteral("dark") }.contains(theme)
+		|| !QStringList { QStringLiteral("regular"), QStringLiteral("compact") }.contains(layout)) {
 		if (error) *error = QStringLiteral("The visual fixture request is invalid or unsupported.");
 		return {};
 	}
 
+	const bool previousFixtureOverride = m_host->visualFixtureOverrideActive();
+	m_host->setVisualFixtureOverrideActive(true);
+	struct FixtureOverrideRollback {
+		QmlShellHost *host;
+		bool previous;
+		bool committed = false;
+		~FixtureOverrideRollback() {
+			if (!committed) host->setVisualFixtureOverrideActive(previous);
+		}
+	} fixtureOverrideRollback { m_host, previousFixtureOverride };
 	QQuickWindow *window = m_host->window();
-	window->setWidth(width);
-	window->setHeight(height);
-	applyState(state);
+	const int expectedMessageCount = state == QLatin1String("connected") ? 2 : 0;
+	{
+		struct MutationScope {
+			QmlShellHost *host;
+			explicit MutationScope(QmlShellHost *value) : host(value) { host->setVisualFixtureMutationActive(true); }
+			~MutationScope() { host->setVisualFixtureMutationActive(false); }
+		} mutationScope(m_host);
+		if (!m_host->themeController()->applyVisualGateAppearance(theme, layout)) {
+			if (error) *error = QStringLiteral("The visual fixture appearance is unsupported.");
+			return {};
+		}
+		window->setWidth(width);
+		window->setHeight(height);
+		applyState(state);
+		if (m_host->chatModel()->rowCount() != expectedMessageCount) {
+			if (error) {
+				*error = QStringLiteral("Visual fixture timeline contains %1 messages immediately after injection; expected %2.")
+						 .arg(m_host->chatModel()->rowCount())
+						 .arg(expectedMessageCount);
+			}
+			return {};
+		}
+	}
+	QVariant focusTarget;
+	window->requestActivate();
+	if (!QMetaObject::invokeMethod(window, "focusVisualFixture", Q_RETURN_ARG(QVariant, focusTarget),
+								  Q_ARG(QVariant, QVariant(state)))) {
+		if (error) *error = QStringLiteral("The visual fixture could not establish a deterministic focus target.");
+		return {};
+	}
+	QQuickItem *requestedFocusItem = qobject_cast< QQuickItem * >(focusTarget.value< QObject * >());
+	const QString requestedFocusName = requestedFocusItem ? requestedFocusItem->objectName().trimmed() : QString();
+	if (!requestedFocusItem || requestedFocusName.isEmpty()) {
+		if (error) *error = QStringLiteral("The visual fixture returned an invalid focus target.");
+		return {};
+	}
 	if (!waitForPresentedFrame(error)) return {};
+	QQuickItem *activeFocusItem = window->activeFocusItem();
+	bool requestedTargetOwnsFocus = false;
+	for (QQuickItem *item = activeFocusItem; item; item = item->parentItem()) {
+		if (item == requestedFocusItem) {
+			requestedTargetOwnsFocus = true;
+			break;
+		}
+	}
+	if (!requestedTargetOwnsFocus) {
+		if (error) {
+			*error = QStringLiteral("The visual fixture focus target '%1' did not receive active focus.")
+					 .arg(requestedFocusName);
+		}
+		return {};
+	}
+	if (m_host->chatModel()->rowCount() != expectedMessageCount) {
+		if (error) {
+			*error = QStringLiteral("Visual fixture timeline was clobbered before presentation: observed %1 messages, expected %2.")
+					 .arg(m_host->chatModel()->rowCount())
+					 .arg(expectedMessageCount);
+		}
+		return {};
+	}
+	fixtureOverrideRollback.committed = true;
 	++m_generation;
 	return { { QStringLiteral("case_id"), caseId }, { QStringLiteral("state"), state },
 			 { QStringLiteral("theme"), theme }, { QStringLiteral("layout"), layout },
 			 { QStringLiteral("width"), window->width() }, { QStringLiteral("height"), window->height() },
+			 { QStringLiteral("message_count"), m_host->chatModel()->rowCount() },
+			 { QStringLiteral("focus_target"), requestedFocusName },
 			 { QStringLiteral("actual_device_pixel_ratio"), actualDevicePixelRatio() },
 			 { QStringLiteral("generation"), m_generation } };
 }
@@ -67,10 +138,12 @@ void QmlVisualFixtureController::applyState(const QString &state) {
 	ParticipantModel *participants = m_host->participantModel();
 	ChatTimelineModel *chat = m_host->chatModel();
 	AsyncOperationModel *operations = m_host->operationModel();
+	DialogStateController *dialog = m_host->dialogController();
 	rooms->replaceDirectMessageStates({});
 	participants->replaceParticipantStates({});
 	chat->replaceMessages({});
 	operations->clear();
+	dialog->applyState({ { QStringLiteral("open"), false } });
 	session->setUpdateBanner({});
 	session->setMotdHtml({});
 	session->setMotdSummary({});
@@ -95,18 +168,26 @@ void QmlVisualFixtureController::applyState(const QString &state) {
 			QVariantMap { { QStringLiteral("session"), QStringLiteral("102") }, { QStringLiteral("name"), QStringLiteral("Alex") },
 							{ QStringLiteral("statusLabel"), QStringLiteral("Talking") }, { QStringLiteral("talkState"), QStringLiteral("talking") } }
 		});
-		chat->replaceMessages({
-			QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("fixture:1") }, { QStringLiteral("actor"), QStringLiteral("Alex") },
-							{ QStringLiteral("bodyText"), QStringLiteral("Welcome to the deterministic visual fixture.") },
-							{ QStringLiteral("timeLabel"), QStringLiteral("10:24") }, { QStringLiteral("canReply"), true } },
-			QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("fixture:2") }, { QStringLiteral("actor"), QStringLiteral("Demo User") },
-							{ QStringLiteral("bodyText"), QStringLiteral("Qt Quick is ready for review.") },
-							{ QStringLiteral("timeLabel"), QStringLiteral("10:25") }, { QStringLiteral("own"), true } }
-		});
+		// Scope changes can synchronously publish the live conversation. Apply the
+		// fixture timeline last so those signal side-effects cannot clear it while
+		// the scoped fixture mutation is active.
 		scope->applyState({ { QStringLiteral("scopeToken"), QStringLiteral("1:1") }, { QStringLiteral("label"), QStringLiteral("Lobby") },
 							{ QStringLiteral("description"), QStringLiteral("Voice room") }, { QStringLiteral("kindLabel"), QStringLiteral("VOICE") },
 							{ QStringLiteral("composerPlaceholder"), QStringLiteral("Message Lobby") }, { QStringLiteral("canSend"), true },
 							{ QStringLiteral("canAttachImages"), true } });
+		const QVariantList fixtureMessages {
+			QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("fixture:1") }, { QStringLiteral("actor"), QStringLiteral("Alex") },
+							{ QStringLiteral("bodyText"), QStringLiteral("Welcome to the deterministic visual fixture.") },
+							{ QStringLiteral("timeLabel"), QStringLiteral("10:24") }, { QStringLiteral("canReply"), true },
+							{ QStringLiteral("preview"), QVariantMap() }, { QStringLiteral("attachments"), QVariantList() },
+							{ QStringLiteral("reactions"), QVariantList() } },
+			QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("fixture:2") }, { QStringLiteral("actor"), QStringLiteral("Demo User") },
+							{ QStringLiteral("bodyText"), QStringLiteral("Qt Quick is ready for review.") },
+							{ QStringLiteral("timeLabel"), QStringLiteral("10:25") }, { QStringLiteral("own"), true },
+							{ QStringLiteral("preview"), QVariantMap() }, { QStringLiteral("attachments"), QVariantList() },
+							{ QStringLiteral("reactions"), QVariantList() } }
+		};
+		chat->replaceMessages(fixtureMessages);
 		return;
 	}
 

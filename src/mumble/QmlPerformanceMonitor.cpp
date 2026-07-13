@@ -38,6 +38,7 @@ QVariantMap QmlPerformanceMonitor::snapshot() const {
 						 { QStringLiteral("noUiStallsPassed"), m_uiStallCount == 0 } };
 	return { { QStringLiteral("frameSampling"), m_frameSampling.load() },
 			 { QStringLiteral("frameSampleCount"), m_frameDurationsMs.size() },
+			 { QStringLiteral("presentedFrameCount"), m_presentedFrameCount },
 			 { QStringLiteral("p95FrameMs"), p95FrameMs() }, { QStringLiteral("p99FrameMs"), p99FrameMs() },
 			 { QStringLiteral("inputSampleCount"), m_inputLatenciesMs.size() },
 			 { QStringLiteral("lastInputLatencyMs"), m_lastInputLatencyMs },
@@ -68,6 +69,7 @@ void QmlPerformanceMonitor::markFrameRenderingFinished() {
 }
 
 void QmlPerformanceMonitor::markFramePresented() {
+	if (m_frameSampling.load()) ++m_presentedFrameCount;
 	const qint64 timestampNs = nowNs();
 	const QQueue< QString > pending = m_pendingInputOrder;
 	for (const QString &operationId : pending) recordVisualAt(operationId, timestampNs);
@@ -76,12 +78,14 @@ void QmlPerformanceMonitor::markFramePresented() {
 void QmlPerformanceMonitor::beginFrameSampling() {
 	if (m_frameSampling.exchange(true)) return;
 	m_frameRenderingStartedNs.store(-1);
+	m_lastHeartbeatNs = -1;
 	emit frameSamplingChanged();
 }
 
 void QmlPerformanceMonitor::endFrameSampling() {
 	if (!m_frameSampling.exchange(false)) return;
 	m_frameRenderingStartedNs.store(-1);
+	m_lastHeartbeatNs = -1;
 	emit frameSamplingChanged();
 }
 
@@ -114,6 +118,7 @@ void QmlPerformanceMonitor::reset() {
 	m_lastInputLatencyMs = 0.0;
 	m_maxInputLatencyMs = 0.0;
 	m_uiStallCount = 0;
+	m_presentedFrameCount = 0;
 	m_maxUiStallMs = 0.0;
 	if (wasSampling) emit frameSamplingChanged();
 	emit metricsChanged();
@@ -126,6 +131,10 @@ void QmlPerformanceMonitor::recordFrameDuration(const double durationMs) {
 }
 
 void QmlPerformanceMonitor::recordHeartbeatAt(const qint64 timestampNs) {
+	if (!m_frameSampling.load()) {
+		m_lastHeartbeatNs = -1;
+		return;
+	}
 	if (m_lastHeartbeatNs >= 0 && timestampNs > m_lastHeartbeatNs) {
 		const double intervalMs = (timestampNs - m_lastHeartbeatNs) / 1000000.0;
 		const double stallMs = std::max(0.0, intervalMs - static_cast< double >(HeartbeatIntervalMs));

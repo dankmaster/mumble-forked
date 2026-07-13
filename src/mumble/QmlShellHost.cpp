@@ -186,6 +186,35 @@ QmlPerformanceMonitor *QmlShellHost::performanceMonitor() const { return m_perfo
 std::shared_ptr< QmlImagePipeline > QmlShellHost::imagePipeline() const { return m_imagePipeline; }
 QmlThemeController *QmlShellHost::themeController() const { return m_themeController.get(); }
 
+void QmlShellHost::setVisualFixtureOverrideActive(const bool active) {
+	m_visualFixtureOverrideActive = active;
+	for (QObject *object : { static_cast< QObject * >(m_sessionController.get()),
+						  static_cast< QObject * >(m_activeScopeController.get()),
+						  static_cast< QObject * >(m_roomModel.get()),
+						  static_cast< QObject * >(m_participantModel.get()),
+						  static_cast< QObject * >(m_chatModel.get()),
+						  static_cast< QObject * >(m_operationModel.get()),
+						  static_cast< QObject * >(m_dialogController.get()),
+						  static_cast< QObject * >(m_themeController.get()) }) {
+		object->setProperty(QmlVisualFixtureMutation::OverrideProperty, active);
+		if (!active) object->setProperty(QmlVisualFixtureMutation::WriteProperty, false);
+	}
+}
+
+void QmlShellHost::setVisualFixtureMutationActive(const bool active) {
+	if (!m_visualFixtureOverrideActive && active) return;
+	for (QObject *object : { static_cast< QObject * >(m_sessionController.get()),
+						  static_cast< QObject * >(m_activeScopeController.get()),
+						  static_cast< QObject * >(m_roomModel.get()),
+						  static_cast< QObject * >(m_participantModel.get()),
+						  static_cast< QObject * >(m_chatModel.get()),
+						  static_cast< QObject * >(m_operationModel.get()),
+						  static_cast< QObject * >(m_dialogController.get()),
+						  static_cast< QObject * >(m_themeController.get()) }) {
+		object->setProperty(QmlVisualFixtureMutation::WriteProperty, active);
+	}
+}
+
 bool QmlShellHost::captureWindow(const QString &path, QString *error) const {
 	if (!m_window) {
 		if (error) *error = tr("The Qt Quick window is not available.");

@@ -45,7 +45,7 @@ QString roleName(const QAccessible::Role role) {
 	return key ? QString::fromLatin1(key) : QStringLiteral("Role%1").arg(static_cast< int >(role));
 }
 
-QVariantList stateNames(const QAccessible::State &state) {
+QVariantList stateNames(const QAccessible::State &state, const QAccessible::Role role) {
 	QVariantList states;
 #define APPEND_ACCESSIBLE_STATE(member) \
 	if (state.member) states.push_back(QStringLiteral(#member))
@@ -62,7 +62,10 @@ QVariantList stateNames(const QAccessible::State &state) {
 	APPEND_ACCESSIBLE_STATE(expandable);
 	APPEND_ACCESSIBLE_STATE(expanded);
 	APPEND_ACCESSIBLE_STATE(extSelectable);
-	APPEND_ACCESSIBLE_STATE(focusable);
+	// Qt Quick may report passive labels as focusable even though they cannot
+	// participate in keyboard navigation. Keep the snapshot semantic so visual
+	// gates do not mistake screen-reader text for an interactive focus target.
+	if (state.focusable && role != QAccessible::StaticText) states.push_back(QStringLiteral("focusable"));
 	APPEND_ACCESSIBLE_STATE(focused);
 	APPEND_ACCESSIBLE_STATE(hasPopup);
 	APPEND_ACCESSIBLE_STATE(hotTracked);
@@ -134,11 +137,12 @@ QVariantMap serializeNode(QAccessibleInterface *interface, const int depth, Trav
 
 	context.visited.insert(identity);
 	++context.nodeCount;
+	const QAccessible::Role role = interface->role();
 	QVariantMap node {
-		{ QStringLiteral("role"), roleName(interface->role()) },
+		{ QStringLiteral("role"), roleName(role) },
 		{ QStringLiteral("name"), boundedString(interface->text(QAccessible::Name), context) },
 		{ QStringLiteral("description"), boundedString(interface->text(QAccessible::Description), context) },
-		{ QStringLiteral("states"), stateNames(interface->state()) },
+		{ QStringLiteral("states"), stateNames(interface->state(), role) },
 		{ QStringLiteral("rect"), rectMap(normalizedRect(interface->rect(), context)) },
 	};
 
@@ -152,18 +156,30 @@ QVariantMap serializeNode(QAccessibleInterface *interface, const int depth, Trav
 	}
 
 	QList< ChildEntry > children;
-	const int exposedChildCount = std::min(interface->childCount(), context.limits.maximumChildrenPerNode);
-	if (interface->childCount() > exposedChildCount) {
-		context.truncated = true;
-		node.insert(QStringLiteral("childrenTruncated"), true);
-	}
-	children.reserve(exposedChildCount);
-	for (int index = 0; index < exposedChildCount; ++index) {
+	children.reserve(std::min(interface->childCount(), context.limits.maximumChildrenPerNode));
+	for (int index = 0; index < interface->childCount(); ++index) {
 		QAccessibleInterface *child = interface->child(index);
 		if (!child || !child->isValid()) {
 			continue;
 		}
-		children.push_back({ child, index, normalizedRect(child->rect(), context), static_cast< int >(child->role()),
+		const QAccessible::State childState = child->state();
+		if (childState.invisible || childState.offscreen) {
+			continue;
+		}
+		// Qt Quick ListView keeps released delegates in its reuse pool. Their
+		// accessibility interfaces can remain valid and claim to be visible even
+		// though they no longer have scene geometry. Never expose these stale,
+		// non-materialized nodes to automation or assistive technology snapshots.
+		const QRect childRect = child->rect();
+		if (childRect.isNull() || childRect.isEmpty()) {
+			continue;
+		}
+		if (children.size() >= context.limits.maximumChildrenPerNode) {
+			context.truncated = true;
+			node.insert(QStringLiteral("childrenTruncated"), true);
+			break;
+		}
+		children.push_back({ child, index, normalizedRect(childRect, context), static_cast< int >(child->role()),
 							 boundedString(child->text(QAccessible::Name), context),
 							 boundedString(child->text(QAccessible::Description), context) });
 	}

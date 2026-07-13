@@ -5,21 +5,9 @@
 
 #include "RichTextEditor.h"
 
-#include "Log.h"
-#include "MainWindow.h"
-#include "XMLTools.h"
-#include "Global.h"
-
-#include <QtCore/QMimeData>
-#include <QtCore/QRegularExpression>
+#include <QtCore/QBuffer>
+#include <QtCore/QIODevice>
 #include <QtGui/QImageReader>
-#include <QtGui/QPainter>
-#include <QtWidgets/QColorDialog>
-#include <QtWidgets/QToolTip>
-
-#ifdef Q_OS_WIN
-#	include <shlobj.h>
-#endif
 
 
 bool RichTextImage::isValidImage(const QByteArray &ba, QByteArray &fmt) {

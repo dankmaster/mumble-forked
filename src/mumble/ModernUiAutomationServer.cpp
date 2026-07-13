@@ -6,6 +6,7 @@
 #include "ModernUiAutomationServer.h"
 
 #include "CertService.h"
+#include "ChatPerfTrace.h"
 #include "ClientUser.h"
 #include "FeedbackReport.h"
 #include "Global.h"
@@ -20,15 +21,14 @@
 #include "MumbleConstants.h"
 #include "Net.h"
 #include "OSInfo.h"
+#include "PersistentChatController.h"
 #include "Version.h"
 #include "VersionCheck.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDir>
-#include <QtCore/QElapsedTimer>
 #include <QtCore/QEvent>
-#include <QtCore/QEventLoop>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonDocument>
@@ -3275,129 +3275,64 @@ namespace {
 		return {};
 	}
 
-	QVariantMap runChatScrollPerformanceWorkload(QmlShellHost *host) {
-		if (!host || !host->window() || !host->performanceMonitor() || !host->chatModel()) {
-			return errorResponse(QObject::tr("The Qt Quick chat workload is unavailable."));
-		}
-		QQuickWindow *window = host->window();
-		ChatTimelineModel *chat = host->chatModel();
-		QmlPerformanceMonitor *monitor = host->performanceMonitor();
-		if (chat->rowCount() < 20) {
-			return errorResponse(QObject::tr("The chat-scroll workload requires at least 20 rendered messages."));
-		}
-		if (!window->isExposed() || window->width() <= 0 || window->height() <= 0) {
-			return errorResponse(QObject::tr("The Qt Quick window is not exposed for chat scrolling."));
-		}
-		const int beforeFrames = monitor->snapshot().value(QStringLiteral("frameSampleCount")).toInt();
-		QVariant started;
-		if (!QMetaObject::invokeMethod(window, "runPerformanceChatScrollWorkload", Q_RETURN_ARG(QVariant, started))) {
-			return errorResponse(QObject::tr("The Qt Quick root does not expose the chat-scroll workload."));
-		}
-		const QVariantMap startState = started.toMap();
-		if (!startState.value(QStringLiteral("started")).toBool()) {
-			return errorResponse(startState.value(QStringLiteral("reason"),
-											 QObject::tr("The chat timeline is not scrollable.")).toString());
-		}
-
-		QElapsedTimer elapsed;
-		elapsed.start();
-		QVariantMap scrollState;
-		int afterFrames = beforeFrames;
-		do {
-			window->update();
-			QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
-			QVariant state;
-			if (QMetaObject::invokeMethod(window, "performanceChatScrollState", Q_RETURN_ARG(QVariant, state))) {
-				scrollState = state.toMap();
-			}
-			afterFrames = monitor->snapshot().value(QStringLiteral("frameSampleCount")).toInt();
-			if (scrollState.value(QStringLiteral("moved")).toBool() && afterFrames > beforeFrames) break;
-		} while (elapsed.elapsed() < 2000);
-		if (!scrollState.value(QStringLiteral("moved")).toBool() || afterFrames <= beforeFrames) {
-			return errorResponse(QObject::tr("Chat flick produced no typed scroll movement with a rendered frame."));
-		}
-		QVariantMap response = okResponse();
-		response.insert(QStringLiteral("workload"), QStringLiteral("chat-scroll"));
-		response.insert(QStringLiteral("messageCount"), chat->rowCount());
-		response.insert(QStringLiteral("scroll"), scrollState);
-		response.insert(QStringLiteral("frameSamplesBefore"), beforeFrames);
-		response.insert(QStringLiteral("frameSamplesAfter"), afterFrames);
-		response.insert(QStringLiteral("frameSampleDelta"), afterFrames - beforeFrames);
-		response.insert(QStringLiteral("elapsedMs"), elapsed.elapsed());
-		return response;
-	}
-
-	QVariantMap runTalkStatePerformanceWorkload(QmlShellHost *host) {
-		if (!host || !host->window() || !host->performanceMonitor() || !host->participantModel()) {
-			return errorResponse(QObject::tr("The Qt Quick talk-state workload is unavailable."));
-		}
-		QQuickWindow *window = host->window();
-		ParticipantModel *participants = host->participantModel();
-		QmlPerformanceMonitor *monitor = host->performanceMonitor();
-		ClientUser *user = nullptr;
-		for (int row = 0; row < participants->rowCount(); ++row) {
-			bool validSession = false;
-			const unsigned int session = participants->get(row).value(QStringLiteral("id")).toString().toUInt(&validSession);
-			if (validSession && session != 0) {
-				user = ClientUser::get(session);
-				if (user) break;
-			}
-		}
-		if (!user) return errorResponse(QObject::tr("The talk-state workload requires a connected participant."));
-		if (!window->isExposed()) return errorResponse(QObject::tr("The Qt Quick window is not exposed for talk state."));
-
-		const int beforeFrames = monitor->snapshot().value(QStringLiteral("frameSampleCount")).toInt();
-		const Settings::TalkState originalState = user->tsState;
-		const Settings::TalkState workloadState = originalState == Settings::Talking ? Settings::Passive : Settings::Talking;
-		const QString sessionId = QString::number(static_cast< qulonglong >(user->uiSession));
-		const auto participantRowForSession = [participants, &sessionId]() {
-			for (int row = 0; row < participants->rowCount(); ++row) {
-				if (participants->get(row).value(QStringLiteral("id")).toString() == sessionId) return row;
-			}
-			return -1;
-		};
-		const int participantRow = participantRowForSession();
-		if (participantRow < 0) return errorResponse(QObject::tr("The talk-state participant disappeared."));
-		const QString beforeTalkState = participants->get(participantRow).value(QStringLiteral("status")).toString();
-		user->setTalking(workloadState);
-		QElapsedTimer elapsed;
-		elapsed.start();
-		QString afterTalkState;
-		int afterFrames = beforeFrames;
-		do {
-			window->update();
-			QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
-			const int currentRow = participantRowForSession();
-			if (currentRow >= 0) afterTalkState = participants->get(currentRow).value(QStringLiteral("status")).toString();
-			afterFrames = monitor->snapshot().value(QStringLiteral("frameSampleCount")).toInt();
-			if (!afterTalkState.isEmpty() && afterTalkState != beforeTalkState && afterFrames > beforeFrames) break;
-		} while (elapsed.elapsed() < 2000);
-		user->setTalking(originalState);
-		window->update();
-		QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
-		if (afterTalkState.isEmpty() || afterTalkState == beforeTalkState || afterFrames <= beforeFrames) {
-			return errorResponse(QObject::tr("Talk-state transition produced no typed participant change with a rendered frame."));
-		}
-		QVariantMap response = okResponse();
-		response.insert(QStringLiteral("workload"), QStringLiteral("talk-state"));
-		response.insert(QStringLiteral("session"), user->uiSession);
-		response.insert(QStringLiteral("talkStateBefore"), beforeTalkState);
-		response.insert(QStringLiteral("talkStateAfter"), afterTalkState);
-		response.insert(QStringLiteral("restored"), user->tsState == originalState);
-		response.insert(QStringLiteral("frameSamplesBefore"), beforeFrames);
-		response.insert(QStringLiteral("frameSamplesAfter"), afterFrames);
-		response.insert(QStringLiteral("frameSampleDelta"), afterFrames - beforeFrames);
-		response.insert(QStringLiteral("elapsedMs"), elapsed.elapsed());
-		return response;
-	}
-
 } // namespace
 
 ModernUiAutomationServer::ModernUiAutomationServer(MainWindow *mainWindow, QObject *parent)
 	: QObject(parent), m_mainWindow(mainWindow) {
 }
 
-ModernUiAutomationServer::~ModernUiAutomationServer() = default;
+ModernUiAutomationServer::~ModernUiAutomationServer() {
+	if (m_chatPerformanceWorkload.active && m_mainWindow) {
+		finalizeChatPerformanceWorkload(m_mainWindow->qmlShellHost());
+	}
+	if (m_talkPerformanceWorkload.active && m_mainWindow) {
+		finalizeTalkPerformanceWorkload(m_mainWindow->qmlShellHost());
+	}
+}
+
+QVariantMap ModernUiAutomationServer::finalizeChatPerformanceWorkload(QmlShellHost *host) {
+	QVariantMap response = okResponse();
+	if (!m_chatPerformanceWorkload.active) {
+		response.insert(QStringLiteral("restored"), true);
+		return response;
+	}
+	if (!host || !host->chatModel()) {
+		response.insert(QStringLiteral("ok"), false);
+		response.insert(QStringLiteral("error"), tr("The Qt Quick chat fixture host disappeared before restore."));
+		return response;
+	}
+	host->setVisualFixtureMutationActive(true);
+	host->chatModel()->replaceMessages(m_chatPerformanceWorkload.liveMessages);
+	host->setVisualFixtureMutationActive(false);
+	host->setVisualFixtureOverrideActive(m_chatPerformanceWorkload.previousFixtureOverride);
+	response.insert(QStringLiteral("restored"), host->chatModel()->messages() == m_chatPerformanceWorkload.liveMessages);
+	response.insert(QStringLiteral("restoredMessageCount"), host->chatModel()->rowCount());
+	m_chatPerformanceWorkload = {};
+	return response;
+}
+
+QVariantMap ModernUiAutomationServer::finalizeTalkPerformanceWorkload(QmlShellHost *host) {
+	QVariantMap response = okResponse();
+	if (!m_talkPerformanceWorkload.active) {
+		response.insert(QStringLiteral("restored"), true);
+		return response;
+	}
+	if (!host || !host->participantModel()) {
+		response.insert(QStringLiteral("ok"), false);
+		response.insert(QStringLiteral("error"), tr("The Qt Quick talk fixture host disappeared before restore."));
+		return response;
+	}
+	host->setVisualFixtureMutationActive(true);
+	host->participantModel()->replaceParticipantStates(m_talkPerformanceWorkload.liveParticipants);
+	host->setVisualFixtureMutationActive(false);
+	host->setVisualFixtureOverrideActive(m_talkPerformanceWorkload.previousFixtureOverride);
+	response.insert(QStringLiteral("restored"),
+					host->participantModel()->participantStates() == m_talkPerformanceWorkload.liveParticipants);
+	response.insert(QStringLiteral("restoredParticipantCount"), host->participantModel()->rowCount());
+	response.insert(QStringLiteral("transitionCount"), m_talkPerformanceWorkload.transitionCount);
+	m_talkPerformanceWorkload = {};
+	return response;
+}
 
 bool ModernUiAutomationServer::start(QString *errorMessage) {
 	if (m_server && m_server->isListening()) {
@@ -3584,16 +3519,151 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			monitor->reset();
 		} else if (command == QLatin1String("qmlPerformanceBegin")) {
 			monitor->beginFrameSampling();
-		} else if (command == QLatin1String("qmlPerformanceChatScrollWorkload")) {
-			return runChatScrollPerformanceWorkload(host);
-		} else if (command == QLatin1String("qmlPerformanceTalkStateWorkload")) {
-			return runTalkStatePerformanceWorkload(host);
+		} else if (command == QLatin1String("qmlPerformanceChatSeedStart")) {
+			if (m_chatPerformanceWorkload.active)
+				return errorResponse(tr("A chat performance fixture is already active."));
+			if (m_talkPerformanceWorkload.active)
+				return errorResponse(tr("A talk-state performance fixture is already active."));
+			ChatTimelineModel *chat = host->chatModel();
+			m_chatPerformanceWorkload.liveMessages = chat->messages();
+			m_chatPerformanceWorkload.previousFixtureOverride = host->visualFixtureOverrideActive();
+			host->setVisualFixtureOverrideActive(true);
+			m_chatPerformanceWorkload.active = true;
+			QVariantList messages;
+			messages.reserve(96);
+			for (int index = 0; index < 96; ++index) {
+				messages.push_back(QVariantMap {
+					{ QStringLiteral("messageKey"), QStringLiteral("qml-perf-message-%1").arg(index) },
+					{ QStringLiteral("actor"), index % 2 ? QStringLiteral("Performance peer") : QStringLiteral("Performance self") },
+					{ QStringLiteral("bodyText"), QStringLiteral("Deterministic chat workload row %1 %2").arg(index).arg(QString(80, QLatin1Char('x'))) },
+					{ QStringLiteral("timeLabel"), QStringLiteral("12:%1").arg(index % 60, 2, 10, QLatin1Char('0')) },
+					{ QStringLiteral("deliveryState"), QStringLiteral("sent") }, { QStringLiteral("own"), index % 2 == 0 }
+				});
+			}
+			host->setVisualFixtureMutationActive(true);
+			chat->replaceMessages(messages);
+			host->setVisualFixtureMutationActive(false);
+			m_chatPerformanceWorkload.presentedFramesBeforeSeed = monitor->snapshot().value(QStringLiteral("presentedFrameCount")).toInt();
+			host->window()->update();
+			QVariantMap response = okResponse();
+			response.insert(QStringLiteral("modelCount"), chat->rowCount());
+			response.insert(QStringLiteral("presentedFramesBefore"), m_chatPerformanceWorkload.presentedFramesBeforeSeed);
+			return response;
+		} else if (command == QLatin1String("qmlPerformanceChatSeedStatus")) {
+			if (!m_chatPerformanceWorkload.active) return errorResponse(tr("No chat performance fixture is active."));
+			QVariant qmlState;
+			const bool invoked = QMetaObject::invokeMethod(host->window(), "performanceChatFixtureState", Q_RETURN_ARG(QVariant, qmlState));
+			const QVariantMap layout = qmlState.toMap();
+			const int frames = monitor->snapshot().value(QStringLiteral("presentedFrameCount")).toInt();
+			QVariantMap response = okResponse();
+			response.insert(QStringLiteral("modelCount"), host->chatModel()->rowCount());
+			response.insert(QStringLiteral("qml"), layout);
+			response.insert(QStringLiteral("presentedFramesBefore"), m_chatPerformanceWorkload.presentedFramesBeforeSeed);
+			response.insert(QStringLiteral("presentedFramesAfter"), frames);
+			response.insert(QStringLiteral("ready"), invoked && host->chatModel()->rowCount() == 96
+									 && layout.value(QStringLiteral("count")).toInt() == 96
+									 && layout.value(QStringLiteral("scrollable")).toBool()
+									 && frames > m_chatPerformanceWorkload.presentedFramesBeforeSeed);
+			return response;
+		} else if (command == QLatin1String("qmlPerformanceChatScrollStart")) {
+			if (!m_chatPerformanceWorkload.active) return errorResponse(tr("No chat performance fixture is active."));
+			QVariant started;
+			if (!QMetaObject::invokeMethod(host->window(), "runPerformanceChatScrollWorkload", Q_RETURN_ARG(QVariant, started)))
+				return errorResponse(tr("The Qt Quick root does not expose the chat-scroll workload."));
+			QVariantMap response = okResponse();
+			response.insert(QStringLiteral("scroll"), started.toMap());
+			return response;
+		} else if (command == QLatin1String("qmlPerformanceChatScrollStatus")) {
+			QVariant state;
+			if (!QMetaObject::invokeMethod(host->window(), "performanceChatScrollState", Q_RETURN_ARG(QVariant, state)))
+				return errorResponse(tr("The Qt Quick root does not expose chat-scroll status."));
+			QVariantMap response = okResponse();
+			response.insert(QStringLiteral("scroll"), state.toMap());
+			response.insert(QStringLiteral("performance"), monitor->snapshot());
+			return response;
+		} else if (command == QLatin1String("qmlPerformanceChatFinalize")) {
+			return finalizeChatPerformanceWorkload(host);
+		} else if (command == QLatin1String("qmlPerformanceTalkStart")) {
+			if (m_talkPerformanceWorkload.active)
+				return errorResponse(tr("A talk-state performance fixture is already active."));
+			if (m_chatPerformanceWorkload.active)
+				return errorResponse(tr("A chat performance fixture is already active."));
+			ParticipantModel *participants = host->participantModel();
+			m_talkPerformanceWorkload.liveParticipants = participants->participantStates();
+			m_talkPerformanceWorkload.previousFixtureOverride = host->visualFixtureOverrideActive();
+			m_talkPerformanceWorkload.sessionId = QStringLiteral("4294967001");
+			m_talkPerformanceWorkload.presentedFramesBefore =
+				monitor->snapshot().value(QStringLiteral("presentedFrameCount")).toInt();
+			host->setVisualFixtureOverrideActive(true);
+			m_talkPerformanceWorkload.active = true;
+			host->setVisualFixtureMutationActive(true);
+			participants->replaceParticipantStates(QVariantList { QVariantMap {
+				{ QStringLiteral("session"), m_talkPerformanceWorkload.sessionId },
+				{ QStringLiteral("name"), QStringLiteral("Performance participant") },
+				{ QStringLiteral("statusLabel"), QStringLiteral("Listening") },
+				{ QStringLiteral("talkState"), QStringLiteral("passive") },
+				{ QStringLiteral("talking"), false }, { QStringLiteral("isSelf"), false },
+				{ QStringLiteral("badges"), QVariantList() }, { QStringLiteral("statuses"), QVariantList() }
+			} });
+			host->setVisualFixtureMutationActive(false);
+			host->window()->update();
+			QVariantMap response = okResponse();
+			response.insert(QStringLiteral("session"), m_talkPerformanceWorkload.sessionId);
+			response.insert(QStringLiteral("presentedFramesBefore"), m_talkPerformanceWorkload.presentedFramesBefore);
+			return response;
+		} else if (command == QLatin1String("qmlPerformanceTalkTransition")) {
+			if (!m_talkPerformanceWorkload.active)
+				return errorResponse(tr("No talk-state performance fixture is active."));
+			m_talkPerformanceWorkload.talking = !m_talkPerformanceWorkload.talking;
+			const bool talking = m_talkPerformanceWorkload.talking;
+			{
+				mumble::chatperf::ScopedDuration trace("qml.participant.talk_state_update");
+				host->participantModel()->updatePresence(
+					m_talkPerformanceWorkload.sessionId,
+					talking ? QStringLiteral("talking") : QStringLiteral("passive"),
+					talking ? tr("Talking") : tr("Listening"),
+					talking ? QStringLiteral("accent") : QString(), talking, false, {}, {});
+			}
+			++m_talkPerformanceWorkload.transitionCount;
+			host->window()->update();
+			QVariantMap response = okResponse();
+			response.insert(QStringLiteral("transitionCount"), m_talkPerformanceWorkload.transitionCount);
+			response.insert(QStringLiteral("talking"), talking);
+			return response;
+		} else if (command == QLatin1String("qmlPerformanceTalkStatus")) {
+			if (!m_talkPerformanceWorkload.active)
+				return errorResponse(tr("No talk-state performance fixture is active."));
+			const int frames = monitor->snapshot().value(QStringLiteral("presentedFrameCount")).toInt();
+			QVariantMap response = okResponse();
+			response.insert(QStringLiteral("transitionCount"), m_talkPerformanceWorkload.transitionCount);
+			response.insert(QStringLiteral("presentedFramesBefore"), m_talkPerformanceWorkload.presentedFramesBefore);
+			response.insert(QStringLiteral("presentedFramesAfter"), frames);
+			response.insert(QStringLiteral("presentedFrameDelta"), frames - m_talkPerformanceWorkload.presentedFramesBefore);
+			response.insert(QStringLiteral("talking"), m_talkPerformanceWorkload.talking);
+			response.insert(QStringLiteral("performance"), monitor->snapshot());
+			return response;
+		} else if (command == QLatin1String("qmlPerformanceTalkFinalize")) {
+			return finalizeTalkPerformanceWorkload(host);
 		} else if (command == QLatin1String("qmlPerformanceEnd")) {
 			monitor->endFrameSampling();
 		} else if (command == QLatin1String("qmlPerformanceMarkInput")) {
 			QVariantMap response = okResponse();
 			response.insert(QStringLiteral("operationId"),
 							monitor->markInput(request.value(QStringLiteral("operationId")).toString()));
+			return response;
+		} else if (command == QLatin1String("qmlPerformanceSelectScope")) {
+			const QString scopeToken = request.value(QStringLiteral("scopeToken")).toString().trimmed();
+			if (scopeToken.isEmpty()) return errorResponse(tr("Missing scopeToken."));
+			const QString operationId = monitor->markInput(request.value(QStringLiteral("operationId")).toString());
+			const bool handled = m_mainWindow->handleModernShellScopeSelection(scopeToken);
+			if (!handled) {
+				monitor->markVisualComplete(operationId);
+				return errorResponse(tr("The measured room selection was not handled."));
+			}
+			QVariantMap response = okResponse();
+			response.insert(QStringLiteral("operationId"), operationId);
+			response.insert(QStringLiteral("handled"), true);
+			response.insert(QStringLiteral("scopeToken"), scopeToken);
 			return response;
 		} else if (command == QLatin1String("qmlPerformanceMarkVisual")) {
 			const QString operationId = request.value(QStringLiteral("operationId")).toString().trimmed();
@@ -4948,14 +5018,31 @@ QVariantMap ModernUiAutomationServer::buildStateResponse() const {
 								   { QStringLiteral("connected"), session->connected() },
 								   { QStringLiteral("updateBanner"), session->updateBanner() },
 								   { QStringLiteral("pttPressed"), commands->pttPressed() } });
-		state.insert(QStringLiteral("activeScope"),
-					 QVariantMap { { QStringLiteral("scopeToken"), scope->scopeToken() },
-								   { QStringLiteral("label"), scope->label() },
-								   { QStringLiteral("description"), scope->description() },
-								   { QStringLiteral("kindLabel"), scope->kindLabel() },
-								   { QStringLiteral("composerPlaceholder"), scope->composerPlaceholder() },
-								   { QStringLiteral("composerHint"), scope->composerHint() },
-								   { QStringLiteral("canSend"), scope->canSend() } });
+		QVariantMap activeScopeState { { QStringLiteral("scopeToken"), scope->scopeToken() },
+									{ QStringLiteral("label"), scope->label() },
+									{ QStringLiteral("description"), scope->description() },
+									{ QStringLiteral("kindLabel"), scope->kindLabel() },
+									{ QStringLiteral("composerPlaceholder"), scope->composerPlaceholder() },
+									{ QStringLiteral("composerHint"), scope->composerHint() },
+									{ QStringLiteral("canSend"), scope->canSend() },
+									{ QStringLiteral("canLoadOlder"), scope->canLoadOlder() },
+									{ QStringLiteral("loading"), scope->loading() },
+									{ QStringLiteral("loadingState"), scope->loadingState() } };
+		if (m_mainWindow && m_mainWindow->m_persistentChatController) {
+			const PersistentChatScopeKey controllerScope = m_mainWindow->m_persistentChatController->activeScope();
+			const PersistentChatScopeStateSnapshot controllerSnapshot =
+				m_mainWindow->m_persistentChatController->activeSnapshot();
+			const MainWindow::PersistentChatTarget target = m_mainWindow->currentPersistentChatTarget();
+			activeScopeState.insert(QStringLiteral("controllerScopeValid"), controllerScope.valid);
+			activeScopeState.insert(QStringLiteral("controllerScope"), static_cast< int >(controllerScope.scope));
+			activeScopeState.insert(QStringLiteral("controllerScopeId"), controllerScope.scopeID);
+			activeScopeState.insert(QStringLiteral("controllerMessageCount"), controllerSnapshot.messages.size());
+			activeScopeState.insert(QStringLiteral("controllerUnreadCount"), controllerSnapshot.unreadCount);
+			activeScopeState.insert(QStringLiteral("controllerInitialLoaded"), controllerSnapshot.initialLoaded);
+			activeScopeState.insert(QStringLiteral("canViewHistory"),
+				m_mainWindow->canViewPersistentChatHistory(target, false));
+		}
+		state.insert(QStringLiteral("activeScope"), activeScopeState);
 		state.insert(QStringLiteral("selection"),
 					 QVariantMap { { QStringLiteral("scopeToken"), selection->scopeToken() },
 								   { QStringLiteral("selectedUserSession"), selection->selectedUserSession() },

@@ -82,6 +82,7 @@ private:
 	double m_lastInputLatencyMs = 0.0;
 	double m_maxInputLatencyMs = 0.0;
 	int m_uiStallCount = 0;
+	int m_presentedFrameCount = 0;
 	double m_maxUiStallMs = 0.0;
 	qulonglong m_generatedOperationId = 0;
 };

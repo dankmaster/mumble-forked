@@ -56,6 +56,8 @@ class TestQmlAccessibilitySnapshot : public QObject {
 private slots:
 	void rejectsMissingRoot();
 	void serializesDeterministicallyAndBoundsStrings();
+	void omitsInvisibleAndOffscreenChildren();
+	void omitsNonMaterializedChildrenWithNullBounds();
 	void normalizesScreenCoordinatesToRootWindow();
 	void guardsCyclesAndBudgets();
 	void queriesWindowAccessibilityWhenAvailable();
@@ -71,7 +73,7 @@ void TestQmlAccessibilitySnapshot::serializesDeterministicallyAndBoundsStrings()
 #if QT_CONFIG(accessibility)
 	TestAccessible root(QStringLiteral("root"), QRect(0, 0, 400, 300), QAccessible::Window);
 	TestAccessible lower(QStringLiteral("lower"), QRect(10, 50, 100, 20));
-	TestAccessible upper(QStringLiteral("name-longer-than-limit"), QRect(10, 10, 100, 20));
+	TestAccessible upper(QStringLiteral("name-longer-than-limit"), QRect(10, 10, 100, 20), QAccessible::PushButton);
 	upper.mutableState().focusable = true;
 	upper.mutableState().focused = true;
 	root.addChild(&lower);
@@ -91,6 +93,51 @@ void TestQmlAccessibilitySnapshot::serializesDeterministicallyAndBoundsStrings()
 	const QVariantList states = children.at(0).toMap().value(QStringLiteral("states")).toList();
 	QVERIFY(states.contains(QStringLiteral("focusable")));
 	QVERIFY(states.contains(QStringLiteral("focused")));
+#else
+	QSKIP("Qt was built without accessibility support.");
+#endif
+}
+
+void TestQmlAccessibilitySnapshot::omitsInvisibleAndOffscreenChildren() {
+#if QT_CONFIG(accessibility)
+	TestAccessible root(QStringLiteral("root"), QRect(0, 0, 400, 300), QAccessible::Window);
+	TestAccessible visible(QStringLiteral("visible"), QRect(10, 10, 100, 20), QAccessible::PushButton);
+	TestAccessible invisible(QStringLiteral("invisible"), QRect(10, 40, 100, 20), QAccessible::PushButton);
+	TestAccessible offscreen(QStringLiteral("offscreen"), QRect(10, 70, 100, 20), QAccessible::PushButton);
+	TestAccessible passiveText(QStringLiteral("passive"), QRect(10, 100, 100, 20));
+	invisible.mutableState().invisible = true;
+	offscreen.mutableState().offscreen = true;
+	passiveText.mutableState().focusable = true;
+	root.addChild(&invisible);
+	root.addChild(&visible);
+	root.addChild(&offscreen);
+	root.addChild(&passiveText);
+
+	const QVariantMap result = QmlAccessibilitySnapshot::serialize(&root);
+	QVERIFY(result.value(QStringLiteral("ok")).toBool());
+	const QVariantList children = result.value(QStringLiteral("tree")).toMap().value(QStringLiteral("children")).toList();
+	QCOMPARE(children.size(), 2);
+	QCOMPARE(children.at(0).toMap().value(QStringLiteral("name")).toString(), QStringLiteral("visible"));
+	QCOMPARE(children.at(1).toMap().value(QStringLiteral("name")).toString(), QStringLiteral("passive"));
+	QVERIFY(!children.at(1).toMap().value(QStringLiteral("states")).toList().contains(QStringLiteral("focusable")));
+#else
+	QSKIP("Qt was built without accessibility support.");
+#endif
+}
+
+void TestQmlAccessibilitySnapshot::omitsNonMaterializedChildrenWithNullBounds() {
+#if QT_CONFIG(accessibility)
+	TestAccessible root(QStringLiteral("root"), QRect(0, 0, 400, 300), QAccessible::Window);
+	TestAccessible materialized(QStringLiteral("materialized"), QRect(10, 10, 100, 20));
+	TestAccessible pooled(QStringLiteral("stale pooled delegate"), QRect());
+	root.addChild(&pooled);
+	root.addChild(&materialized);
+
+	const QVariantMap result = QmlAccessibilitySnapshot::serialize(&root);
+	QVERIFY(result.value(QStringLiteral("ok")).toBool());
+	const QVariantList children = result.value(QStringLiteral("tree")).toMap().value(QStringLiteral("children")).toList();
+	QCOMPARE(children.size(), 1);
+	QCOMPARE(children.front().toMap().value(QStringLiteral("name")).toString(), QStringLiteral("materialized"));
 #else
 	QSKIP("Qt was built without accessibility support.");
 #endif
@@ -125,9 +172,9 @@ void TestQmlAccessibilitySnapshot::normalizesScreenCoordinatesToRootWindow() {
 
 void TestQmlAccessibilitySnapshot::guardsCyclesAndBudgets() {
 #if QT_CONFIG(accessibility)
-	TestAccessible root(QStringLiteral("root"));
-	TestAccessible child(QStringLiteral("child"));
-	TestAccessible extra(QStringLiteral("extra"));
+	TestAccessible root(QStringLiteral("root"), QRect(0, 0, 400, 300));
+	TestAccessible child(QStringLiteral("child"), QRect(10, 10, 100, 20));
+	TestAccessible extra(QStringLiteral("extra"), QRect(10, 40, 100, 20));
 	root.addChild(&child);
 	root.addChild(&extra);
 	child.addCycle(&root);

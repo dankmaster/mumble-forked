@@ -7,7 +7,6 @@
 #include "AudioOutput.h"
 #include "CertService.h"
 #include "Database.h"
-#include "DeveloperConsole.h"
 #ifdef Q_OS_WIN
 #	include "GlobalShortcut_win.h"
 #endif
@@ -24,7 +23,7 @@
 #ifdef USE_VLD
 #	include "vld.h"
 #endif
-#include "ApplicationPalette.h"
+#include "ApplicationThemeObserver.h"
 #include "Channel.h"
 #include "ChannelListenerManager.h"
 #include "ClientUser.h"
@@ -57,16 +56,11 @@
 #include <QtCore/QList>
 #include <QtCore/QProcess>
 #include <QtGui/QDesktopServices>
-#include <QtWidgets/QTextBrowser>
-
-#include <algorithm>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <optional>
 
-#include <spdlog/sinks/dist_sink.h>
-#include <spdlog/sinks/qt_sinks.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 
 #ifdef USE_DBUS
@@ -90,8 +84,6 @@ using namespace mumble;
 
 extern void os_init();
 extern char *os_lang;
-
-using QtLogSink = spdlog::sinks::qt_color_sink_st;
 
 namespace {
 #ifdef Q_OS_WIN
@@ -165,8 +157,8 @@ void appendChromiumFlag(QByteArray &flags, const QByteArray &flag) {
 void configureQtWebEngineGraphicsWorkarounds() {
 	QByteArray chromiumFlags = qgetenv("QTWEBENGINE_CHROMIUM_FLAGS").trimmed();
 
-	// Keep hardware acceleration enabled by default, but avoid Chromium's
-	// zero-copy path that can leave stale tiles in the WebEngine-backed shell.
+	// Keep hardware acceleration enabled by default, but avoid Chromium's zero-copy path that can
+	// leave stale tiles in the isolated provider media player.
 	if (environmentBoolean("MUMBLE_WEBENGINE_DISABLE_ZERO_COPY", true)) {
 		appendChromiumFlag(chromiumFlags, QByteArrayLiteral("--disable-zero-copy"));
 	}
@@ -183,7 +175,7 @@ void configureQtWebEngineGraphicsWorkarounds() {
 #endif
 } // namespace
 
-void initLog(QTextBrowser *textBox = nullptr) {
+void initLog() {
 	// TODO: Ideally we should add a user option, perhaps along with a launch parameter, to set the log level.
 	// However, the messages across the codebase are very inconsistent in terms of right now.
 	// For example, there are a lot of debug messages that should be info instead.
@@ -206,11 +198,6 @@ void initLog(QTextBrowser *textBox = nullptr) {
 		log::addSink(std::make_shared< FileSink >(filePath, maxSize, maxFiles));
 	}
 #endif
-
-	if (textBox) {
-		static constexpr int maxLines = 1000;
-		log::addSink(std::make_shared< QtLogSink >(textBox, maxLines));
-	}
 }
 
 void prepareLogForShutdown() {
@@ -221,29 +208,6 @@ void prepareLogForShutdown() {
 	if (!logger) {
 		log::restoreQtMessageHandler();
 		return;
-	}
-
-	auto &sinks = logger->sinks();
-
-	// Remove Qt sinks because the widgets they write to are going to be deleted soon
-	auto remove_qt_sinks = [](auto &container) {
-		container.erase(
-			std::remove_if(container.begin(), container.end(),
-						   [](const spdlog::sink_ptr &sink) { return std::dynamic_pointer_cast< QtLogSink >(sink); }),
-			container.end());
-	};
-
-	remove_qt_sinks(sinks);
-	for (spdlog::sink_ptr &sink : sinks) {
-		auto st_dist_sink = std::dynamic_pointer_cast< spdlog::sinks::dist_sink_st >(sink);
-		auto mt_dist_sink = std::dynamic_pointer_cast< spdlog::sinks::dist_sink_mt >(sink);
-
-		if (st_dist_sink) {
-			remove_qt_sinks(st_dist_sink->sinks());
-		}
-		if (mt_dist_sink) {
-			remove_qt_sinks(mt_dist_sink->sinks());
-		}
 	}
 
 	log::restoreQtMessageHandler();
@@ -475,9 +439,7 @@ int main(int argc, char **argv) {
 		Global::g_global_struct = new Global();
 	}
 
-	auto logBox = new QTextBrowser();
-	initLog(logBox);
-	Global::get().c = new DeveloperConsole(logBox);
+	initLog();
 
 	os_init();
 
@@ -710,7 +672,7 @@ int main(int argc, char **argv) {
 
 	DeferInit::run_initializers();
 
-	ApplicationPalette applicationPalette;
+	ApplicationThemeObserver applicationThemeObserver;
 
 	Themes::apply();
 
@@ -972,8 +934,6 @@ int main(int argc, char **argv) {
 #ifdef USE_ZEROCONF
 	delete Global::get().zeroconf;
 #endif
-
-	delete Global::get().c;
 
 	DeferInit::run_destroyers();
 

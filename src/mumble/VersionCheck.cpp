@@ -674,12 +674,12 @@ bool launchBundledUpdater(const QString &updatePath, const bool passive, const Q
 
 class ForkUpdateInstaller : public QObject {
 public:
-	ForkUpdateInstaller(const QJsonObject &info, QWidget *parent, bool showProgress,
+	ForkUpdateInstaller(const QJsonObject &info, QObject *parent, bool showProgress,
 						std::function< void(const QString &) > readyCallback,
 						std::function< void(const QString &) > failureCallback,
 						std::function< void() > cancelledCallback,
 						std::function< void(qint64, qint64) > progressCallback)
-		: QObject(parent ? static_cast< QObject * >(parent) : QCoreApplication::instance())
+		: QObject(parent ? parent : QCoreApplication::instance())
 		, m_info(info), m_updateMode(selectedUpdateMode(info))
 		, m_readyCallback(std::move(readyCallback)), m_failureCallback(std::move(failureCallback))
 		, m_cancelledCallback(std::move(cancelledCallback)), m_progressCallback(std::move(progressCallback)) {
@@ -999,7 +999,7 @@ bool VersionCheck::canInstallUpdate(const QJsonObject &info) {
 	return canUsePackageUpdate(info) || canUseInstallerUpdate(info);
 }
 
-void VersionCheck::installUpdateFromInfo(const QJsonObject &info, QWidget *parent) {
+void VersionCheck::installUpdateFromInfo(const QJsonObject &info, QObject *parent) {
 	if (Global::get().mw && Global::get().mw->startModernForkUpdateDownload(info)) {
 		Q_UNUSED(parent);
 		return;
@@ -1019,7 +1019,7 @@ void VersionCheck::installUpdateFromInfo(const QJsonObject &info, QWidget *paren
 	Q_UNUSED(parent);
 }
 
-void VersionCheck::downloadUpdateFromInfo(const QJsonObject &info, QWidget *parent, const bool showProgress,
+void VersionCheck::downloadUpdateFromInfo(const QJsonObject &info, QObject *parent, const bool showProgress,
 										  std::function< void(const QString &) > readyCallback,
 										  std::function< void(const QString &) > failureCallback,
 										  std::function< void() > cancelledCallback,

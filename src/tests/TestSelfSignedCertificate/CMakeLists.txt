@@ -10,3 +10,7 @@ set_target_properties(TestSelfSignedCertificate PROPERTIES AUTOMOC ON)
 target_link_libraries(TestSelfSignedCertificate PRIVATE shared Qt6::Test)
 
 add_test(NAME TestSelfSignedCertificate COMMAND $<TARGET_FILE:TestSelfSignedCertificate>)
+
+if(client)
+	configure_client_test_runtime(TestSelfSignedCertificate TestSelfSignedCertificate)
+endif()

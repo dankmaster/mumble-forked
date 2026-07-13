@@ -176,6 +176,8 @@ class TestPersistentChatController : public QObject {
 
 private slots:
 	void restoresCachedScopeSnapshots();
+	void activeSnapshotChangedPublishesTwoHistoryMessages();
+	void liveScopeWithoutHistoryPermissionPublishesMessages();
 	void forceReloadSendsInitialRequestWhileInitialLoadIsInFlight();
 	void warmupScopesSkipsActiveScope();
 	void warmupScopesRequestsBatchAndCachesResponses();
@@ -187,6 +189,67 @@ private slots:
 	void appliesReactionUpdatesToCachedMessages();
 	void removesDeletedMessageFromCachedSnapshot();
 };
+
+void TestPersistentChatController::activeSnapshotChangedPublishesTwoHistoryMessages() {
+	resetGatewayRequestState();
+	PersistentChatGateway gateway;
+	PersistentChatController controller;
+	controller.setGateway(&gateway);
+	controller.setActiveScope(PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 77), false);
+
+	QSignalSpy changed(&controller, &PersistentChatController::activeSnapshotChanged);
+	QList< PersistentChatScopeStateSnapshot > publishedSnapshots;
+	connect(&controller, &PersistentChatController::activeSnapshotChanged, &controller,
+			[&controller, &publishedSnapshots]() { publishedSnapshots.push_back(controller.activeSnapshot()); });
+
+	gateway.handleIncomingHistory(
+		makeHistory(MumbleProto::TextChannel, 77,
+					{ makeMessage(701, 1000, MumbleProto::TextChannel, 77, QStringLiteral("first live history row")),
+					  makeMessage(702, 1010, MumbleProto::TextChannel, 77, QStringLiteral("second live history row")) },
+					0, 701, false));
+
+	QCOMPARE(changed.count(), 1);
+	QCOMPARE(publishedSnapshots.size(), 1);
+	const PersistentChatScopeStateSnapshot &published = publishedSnapshots.constFirst();
+	QCOMPARE(published.key.scope, MumbleProto::TextChannel);
+	QCOMPARE(published.key.scopeID, 77U);
+	QCOMPARE(published.messages.size(), 2);
+	QCOMPARE(QString::fromStdString(published.messages.at(0).body_text()), QStringLiteral("first live history row"));
+	QCOMPARE(QString::fromStdString(published.messages.at(1).body_text()), QStringLiteral("second live history row"));
+	QCOMPARE(controller.activeSnapshot().messages.size(), 2);
+	resetGatewayRequestState();
+}
+
+void TestPersistentChatController::liveScopeWithoutHistoryPermissionPublishesMessages() {
+	resetGatewayRequestState();
+	g_gatewayReady = true;
+	PersistentChatGateway gateway;
+	PersistentChatController controller;
+	controller.setGateway(&gateway);
+	const PersistentChatScopeKey key = PersistentChatScopeKey::fromScope(MumbleProto::TextChannel, 78);
+
+	QSignalSpy changed(&controller, &PersistentChatController::activeSnapshotChanged);
+	controller.setActiveScope(key, false, false);
+	QCOMPARE(g_initialRequestCount, 0);
+	QVERIFY(controller.hasActiveScope());
+	QVERIFY(controller.activeScopeMatches(MumbleProto::TextChannel, 78));
+	QCOMPARE(controller.activeSnapshot().key.scope, MumbleProto::TextChannel);
+	QCOMPARE(controller.activeSnapshot().key.scopeID, 78U);
+	QCOMPARE(controller.activeSnapshot().messages.size(), 0);
+	QCOMPARE(changed.count(), 1);
+
+	changed.clear();
+	gateway.handleIncomingMessage(
+		makeMessage(781, 2000, MumbleProto::TextChannel, 78, QStringLiteral("live without history permission")));
+	QCOMPARE(g_initialRequestCount, 0);
+	QCOMPARE(changed.count(), 1);
+	const PersistentChatScopeStateSnapshot snapshot = controller.activeSnapshot();
+	QCOMPARE(snapshot.messages.size(), 1);
+	QCOMPARE(snapshot.messages.constFirst().message_id(), 781U);
+	QCOMPARE(QString::fromStdString(snapshot.messages.constFirst().body_text()),
+			 QStringLiteral("live without history permission"));
+	resetGatewayRequestState();
+}
 
 void TestPersistentChatController::restoresCachedScopeSnapshots() {
 	resetGatewayRequestState();

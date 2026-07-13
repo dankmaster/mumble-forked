@@ -31,7 +31,6 @@
 #include "UserModel.h"
 #include "Utils.h"
 #include "VersionCheck.h"
-#include "ViewCert.h"
 #include "crypto/CryptState.h"
 #include "crypto/CryptStateOCB2.h"
 #include "Global.h"
@@ -139,66 +138,6 @@ namespace {
 		return value ? QStringLiteral("true") : QStringLiteral("false");
 	}
 
-	void reparentChannelWithoutModel(Channel *channel, Channel *parent) {
-		if (!channel || !parent || channel->cParent == parent) {
-			return;
-		}
-
-		if (channel->cParent) {
-			channel->cParent->removeChannel(channel);
-		}
-
-		parent->addChannel(channel);
-	}
-
-	bool channelSubtreeHasUsers(const Channel *channel) {
-		if (!channel) {
-			return false;
-		}
-
-		if (!channel->qlUsers.isEmpty()) {
-			return true;
-		}
-
-		for (const Channel *child : channel->qlChannels) {
-			if (channelSubtreeHasUsers(child)) {
-				return true;
-			}
-		}
-
-		return false;
-	}
-
-	void removeChannelSubtreeWithoutModel(Channel *channel) {
-		if (!channel) {
-			return;
-		}
-
-		const QList< Channel * > childChannels = channel->qlChannels;
-		for (Channel *child : childChannels) {
-			removeChannelSubtreeWithoutModel(child);
-		}
-
-		Channel::remove(channel);
-		delete channel;
-	}
-
-	void moveClientUserWithoutModel(ClientUser *user, Channel *channel) {
-		if (!user || !channel || user->cChannel == channel) {
-			return;
-		}
-
-		channel->addClientUser(user);
-	}
-
-	void removeClientUserWithoutModel(ClientUser *user) {
-		if (!user) {
-			return;
-		}
-
-		ClientUser::remove(user);
-		delete user;
-	}
 } // namespace
 
 /// The authenticate message is being used by the client to send the authentication credentials to the server. Therefore
@@ -254,8 +193,6 @@ void MainWindow::msgReject(const MumbleProto::Reject &msg) {
 /// @param msg The message object with the respective information
 void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 	const ClientUser *user = ClientUser::get(msg.session());
-	const bool hiddenLegacyUserModelSafeMode =
-		qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && true;
 	const bool traceServerSync = qEnvironmentVariableIntValue("MUMBLE_CONNECT_TRACE") != 0;
 	const auto appendServerSyncTrace = [traceServerSync, session = msg.session()](const QString &phase) {
 		if (!traceServerSync) {
@@ -303,10 +240,8 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 		QString str = u8(msg.welcome_text());
 		setPersistentChatWelcomeText(str);
 	}
-	if (!hiddenLegacyUserModelSafeMode) {
-		pmModel->ensureSelfVisible();
-		pmModel->recheckLinks();
-	}
+	pmModel->ensureSelfVisible();
+	pmModel->recheckLinks();
 	appendServerSyncTrace(QStringLiteral("post-model-sync"));
 
 	// Reset the mechanism for using and recycling target IDs for setting up
@@ -357,7 +292,7 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 	if (qmServer && qmSelf && qmConfig) {
 		on_qmServer_aboutToShow();
 		on_qmSelf_aboutToShow();
-		if (!hiddenLegacyUserModelSafeMode && qmChannel && qmUser) {
+		if (qmChannel && qmUser) {
 			qmChannel_aboutToShow();
 			qmUser_aboutToShow();
 		}
@@ -367,17 +302,9 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 
 
 	Global::get().sh->setServerSynchronized(true);
-	if (hiddenLegacyUserModelSafeMode) {
-		if (m_modernShellSyncTimer) m_modernShellSyncTimer->stop();
-		syncQmlShellState();
-	}
 	mumble::chatperf::fullBootstrapMonitor().enterSteadyState();
 	updateChatBar();
 	warmupPersistentChatHistory();
-	if (hiddenLegacyUserModelSafeMode) {
-		scheduleQmlRoomStateUpdate();
-		publishQmlActiveScopeState();
-	}
 	appendServerSyncTrace(QStringLiteral("exit"));
 
 	emit serverSynchronized();
@@ -679,8 +606,6 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 	ClientUser *pSelf = ClientUser::get(Global::get().uiSession);
 	ClientUser *pDst  = ClientUser::get(msg.session());
 	Channel *channel  = nullptr;
-	const bool hiddenLegacyUserModelSafeMode =
-		qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && true;
 	const bool traceUserState = qEnvironmentVariableIntValue("MUMBLE_CONNECT_TRACE") != 0;
 	const auto appendUserStateTrace = [traceUserState, session = msg.session()](const QString &phase) {
 		if (!traceUserState) {
@@ -697,7 +622,6 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 			   << " UserState session=" << session << QLatin1Char(' ') << phase << Qt::endl;
 	};
 	appendUserStateTrace(QStringLiteral("enter"));
-	const bool modernShellConversationListActive = true && !hiddenLegacyUserModelSafeMode;
 	bool createdUser                             = false;
 	bool renamedUser                             = false;
 	bool movedChannels                           = false;
@@ -718,35 +642,17 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 		}
 		createdUser = true;
 
-		if (hiddenLegacyUserModelSafeMode) {
-			pDst         = ClientUser::add(msg.session(), nullptr);
-			pDst->qsName = u8(msg.name());
-			appendUserStateTrace(QStringLiteral("created-user"));
-			if (Channel *rootChannel = Channel::get(Mumble::ROOT_CHANNEL_ID); rootChannel && pDst->cChannel != rootChannel) {
-				rootChannel->addClientUser(pDst);
-			}
-			appendUserStateTrace(QStringLiteral("attached-root"));
-		} else {
-			pDst = pmModel->addUser(msg.session(), u8(msg.name()));
-		}
+		pDst = pmModel->addUser(msg.session(), u8(msg.name()));
 
 		appendUserStateTrace(QStringLiteral("connected-signals"));
 
 		if (channel && channel != pDst->cChannel) {
-			if (hiddenLegacyUserModelSafeMode) {
-				moveClientUserWithoutModel(pDst, channel);
-			} else {
-				pmModel->moveUser(pDst, channel);
-			}
+			pmModel->moveUser(pDst, channel);
 		}
 		appendUserStateTrace(QStringLiteral("initial-channel-applied"));
 
 		if (msg.has_hash()) {
-			if (hiddenLegacyUserModelSafeMode) {
-				pDst->qsHash = u8(msg.hash());
-			} else {
-				pmModel->setHash(pDst, u8(msg.hash()));
-			}
+			pmModel->setHash(pDst, u8(msg.hash()));
 		}
 		appendUserStateTrace(QStringLiteral("initial-hash-applied"));
 		appendUserStateTrace(QStringLiteral("created"));
@@ -764,11 +670,7 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 	appendUserStateTrace(QStringLiteral("post-create"));
 
 	if (msg.has_user_id()) {
-		if (hiddenLegacyUserModelSafeMode) {
-			pDst->iId = static_cast< int >(msg.user_id());
-		} else {
-			pmModel->setUserId(pDst, static_cast< int >(msg.user_id()));
-		}
+		pmModel->setUserId(pDst, static_cast< int >(msg.user_id()));
 	}
 	appendUserStateTrace(QStringLiteral("post-user-id"));
 
@@ -776,11 +678,7 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 		Channel *oldChannel = pDst->cChannel;
 		if (channel != oldChannel) {
 			movedChannels = true;
-			if (hiddenLegacyUserModelSafeMode) {
-				moveClientUserWithoutModel(pDst, channel);
-			} else {
-				pmModel->moveUser(pDst, channel);
-			}
+			pmModel->moveUser(pDst, channel);
 
 			if (pSelf) {
 				if (pDst == pSelf) {
@@ -909,11 +807,7 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 	if (msg.has_name()) {
 		QString oldName = pDst->qsName;
 		QString newName = u8(msg.name());
-		if (hiddenLegacyUserModelSafeMode) {
-			pDst->qsName = newName;
-		} else {
-			pmModel->renameUser(pDst, newName);
-		}
+		pmModel->renameUser(pDst, newName);
 		renamedUser = !oldName.isNull() && oldName != newName;
 		if (!oldName.isNull() && oldName != newName) {
 			if (pSrc != pDst) {
@@ -933,11 +827,7 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 	if (!pDst->qsHash.isEmpty()) {
 		const QString &name = Global::get().db->getFriend(pDst->qsHash);
 		if (!name.isEmpty()) {
-			if (hiddenLegacyUserModelSafeMode) {
-				pDst->qsFriendName = name;
-			} else {
-				pmModel->setFriendName(pDst, name);
-			}
+			pmModel->setFriendName(pDst, name);
 		}
 		if (Global::get().db->isLocalMuted(pDst->qsHash))
 			pDst->setLocalMute(true);
@@ -1210,31 +1100,16 @@ void MainWindow::msgUserState(const MumbleProto::UserState &msg) {
 		handleUserTextureBlob(pDst, blob(msg.texture()));
 	}
 	if (msg.has_comment_hash())
-		if (hiddenLegacyUserModelSafeMode) {
-			pDst->qsComment      = QString();
-			pDst->qbaCommentHash = blob(msg.comment_hash());
-		} else {
-			pmModel->setCommentHash(pDst, blob(msg.comment_hash()));
-		}
+		pmModel->setCommentHash(pDst, blob(msg.comment_hash()));
 	if (msg.has_comment()) {
-		if (hiddenLegacyUserModelSafeMode) {
-			pDst->qsComment      = u8(msg.comment());
-			pDst->qbaCommentHash = pDst->qsComment.isEmpty() ? QByteArray() : sha1(pDst->qsComment);
-			if (!pDst->qsComment.isEmpty()) {
-				Global::get().db->setBlob(pDst->qbaCommentHash, pDst->qsComment.toUtf8());
-			}
-		} else {
-			pmModel->setComment(pDst, u8(msg.comment()));
-		}
+		pmModel->setComment(pDst, u8(msg.comment()));
 	}
 	if (commentChanged) {
 		clearUserCommentRequest(pDst->uiSession);
 	}
 	appendUserStateTrace(QStringLiteral("post-comment"));
 
-	if (hiddenLegacyUserModelSafeMode) {
-		publishQmlParticipantState(pDst);
-	} else if (modernShellConversationListActive) {
+	{
 		const PersistentChatTarget activeTarget = currentPersistentChatTarget();
 		const bool activeDirectMessageAffected =
 			activeTarget.directMessage && activeTarget.user && activeTarget.user->uiSession == pDst->uiSession;
@@ -1266,8 +1141,6 @@ void MainWindow::msgUserRemove(const MumbleProto::UserRemove &msg) {
 	VICTIM_INIT;
 	ACTOR_INIT;
 	SELF_INIT;
-	const bool hiddenLegacyUserModelSafeMode =
-		qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && true;
 
 	QString reason = u8(msg.reason()).toHtmlEscaped();
 
@@ -1305,18 +1178,9 @@ void MainWindow::msgUserRemove(const MumbleProto::UserRemove &msg) {
 
 	if (pDst != pSelf) {
 		clearUserTextureRequest(pDst->uiSession);
-		if (hiddenLegacyUserModelSafeMode) {
-			if (m_qmlShellHost) {
-				m_qmlShellHost->participantModel()->removeParticipant(QString::number(pDst->uiSession));
-			}
-			removeClientUserWithoutModel(pDst);
-		} else {
-			pmModel->removeUser(pDst);
-			if (true) {
-				rebuildPersistentChatChannelList();
-				updateMenuPermissions();
-			}
-		}
+		pmModel->removeUser(pDst);
+		rebuildPersistentChatChannelList();
+		updateMenuPermissions();
 	}
 }
 
@@ -1330,20 +1194,11 @@ void MainWindow::msgChannelState(const MumbleProto::ChannelState &msg) {
 
 	Channel *c = Channel::get(msg.channel_id());
 	Channel *p = msg.has_parent() ? Channel::get(msg.parent()) : nullptr;
-	const bool hiddenLegacyChannelModelSafeMode =
-		qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && true;
 
 	if (!c) {
 		// Addresses channel does not exist so create it
 		if (p && msg.has_name()) {
-			if (hiddenLegacyChannelModelSafeMode) {
-				c = Channel::add(msg.channel_id(), u8(msg.name()));
-				if (c) {
-					reparentChannelWithoutModel(c, p);
-				}
-			} else {
-				c = pmModel->addChannel(msg.channel_id(), p, u8(msg.name()));
-			}
+			c = pmModel->addChannel(msg.channel_id(), p, u8(msg.name()));
 			if (!c) {
 				qWarning("Server attempted to create an invalid or duplicate channel");
 				return;
@@ -1373,66 +1228,34 @@ void MainWindow::msgChannelState(const MumbleProto::ChannelState &msg) {
 
 			pp = pp->cParent;
 		}
-		if (hiddenLegacyChannelModelSafeMode) {
-			reparentChannelWithoutModel(c, p);
-		} else {
-			pmModel->moveChannel(c, p);
-		}
+		pmModel->moveChannel(c, p);
 	}
 
 	if (msg.has_name()) {
-		if (hiddenLegacyChannelModelSafeMode) {
-			c->qsName = u8(msg.name());
-		} else {
-			pmModel->renameChannel(c, u8(msg.name()));
-		}
+		pmModel->renameChannel(c, u8(msg.name()));
 	}
 
 	if (msg.has_description_hash()) {
-		if (hiddenLegacyChannelModelSafeMode) {
-			c->qsDesc      = QString();
-			c->qbaDescHash = blob(msg.description_hash());
-		} else {
-			pmModel->setCommentHash(c, blob(msg.description_hash()));
-		}
+		pmModel->setCommentHash(c, blob(msg.description_hash()));
 	}
 	if (msg.has_description()) {
-		if (hiddenLegacyChannelModelSafeMode) {
-			c->qsDesc      = u8(msg.description());
-			c->qbaDescHash = QByteArray();
-		} else {
-			pmModel->setComment(c, u8(msg.description()));
-		}
+		pmModel->setComment(c, u8(msg.description()));
 	}
 
 	if (msg.has_position()) {
-		if (hiddenLegacyChannelModelSafeMode) {
-			c->iPosition = msg.position();
-		} else {
-			pmModel->repositionChannel(c, msg.position());
-		}
+		pmModel->repositionChannel(c, msg.position());
 	}
 
 	if (msg.links_size()) {
 		QList< Channel * > ql;
-		if (hiddenLegacyChannelModelSafeMode) {
-			c->unlink();
-		} else {
-			pmModel->unlinkAll(c);
-		}
+		pmModel->unlinkAll(c);
 		for (int i = 0; i < msg.links_size(); ++i) {
 			Channel *l = Channel::get(msg.links(i));
 			if (l)
 				ql << l;
 		}
 		if (!ql.isEmpty()) {
-			if (hiddenLegacyChannelModelSafeMode) {
-				for (Channel *linkedChannel : ql) {
-					c->link(linkedChannel);
-				}
-			} else {
-				pmModel->linkChannels(c, ql);
-			}
+			pmModel->linkChannels(c, ql);
 		}
 	}
 	if (msg.links_remove_size()) {
@@ -1443,13 +1266,7 @@ void MainWindow::msgChannelState(const MumbleProto::ChannelState &msg) {
 				ql << l;
 		}
 		if (!ql.isEmpty()) {
-			if (hiddenLegacyChannelModelSafeMode) {
-				for (Channel *linkedChannel : ql) {
-					c->unlink(linkedChannel);
-				}
-			} else {
-				pmModel->unlinkChannels(c, ql);
-			}
+			pmModel->unlinkChannels(c, ql);
 		}
 	}
 	if (msg.links_add_size()) {
@@ -1460,13 +1277,7 @@ void MainWindow::msgChannelState(const MumbleProto::ChannelState &msg) {
 				ql << l;
 		}
 		if (!ql.isEmpty()) {
-			if (hiddenLegacyChannelModelSafeMode) {
-				for (Channel *linkedChannel : ql) {
-					c->link(linkedChannel);
-				}
-			} else {
-				pmModel->linkChannels(c, ql);
-			}
+			pmModel->linkChannels(c, ql);
 		}
 	}
 
@@ -1493,26 +1304,6 @@ void MainWindow::msgChannelRemove(const MumbleProto::ChannelRemove &msg) {
 	Channel *c = Channel::get(msg.channel_id());
 	if (c && (c->iId != 0)) {
 		c->clearFilterMode();
-		const bool hiddenLegacyChannelModelSafeMode =
-			qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && true;
-
-		if (hiddenLegacyChannelModelSafeMode) {
-			if (channelSubtreeHasUsers(c)) {
-				Global::get().l->log(Log::CriticalError,
-									 tr("Protocol violation. Server sent remove for occupied channel."));
-				Global::get().sh->disconnect();
-				return;
-			}
-
-			if (c->cParent) {
-				c->cParent->removeChannel(c);
-			}
-
-			removeChannelSubtreeWithoutModel(c);
-			scheduleQmlRoomStateUpdate();
-			return;
-		}
-
 		if (!pmModel->removeChannel(c, true)) {
 			Global::get().l->log(Log::CriticalError,
 								 tr("Protocol violation. Server sent remove for occupied channel."));
@@ -1790,17 +1581,13 @@ void MainWindow::msgUserStats(const MumbleProto::UserStats &msg) {
 			m_userIdleSeconds.remove(msg.session());
 		}
 
-		const bool hiddenLegacyUserModelSafeMode =
-			qEnvironmentVariableIntValue("MUMBLE_MODERN_SHELL_MINIMAL_SNAPSHOT") != 0 && true;
-		if (!hiddenLegacyUserModelSafeMode && idleSeconds != previousIdleSeconds && pmModel) {
+		if (idleSeconds != previousIdleSeconds && pmModel) {
 			if (ClientUser *user = ClientUser::get(msg.session()); user) {
 				const QModelIndex idx = pmModel->index(user);
 				if (idx.isValid()) {
 					emit pmModel->dataChanged(idx, idx);
 				}
 			}
-		} else if (hiddenLegacyUserModelSafeMode && idleSeconds != previousIdleSeconds) {
-			if (ClientUser *user = ClientUser::get(msg.session())) publishQmlParticipantState(user);
 		}
 	}
 

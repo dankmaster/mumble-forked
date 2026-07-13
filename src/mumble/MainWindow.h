@@ -19,14 +19,13 @@
 #include <QtCore/QVariant>
 #include <QtCore/QtGlobal>
 #include <QtGui/QImage>
+#include <QtGui/QAction>
 #include <QtNetwork/QAbstractSocket>
 #include <QtCore/QObject>
-#include <QtWidgets/QApplication>
 
 #include "ACL.h"
 #include "ConnectionFailTypes.h"
 #include "Log.h"
-#include "MUComboBox.h"
 #include "ModernShellMenuSerializer.h"
 #include "Mumble.pb.h"
 #include "MumbleProtocol.h"
@@ -66,7 +65,9 @@ class QmlSelectionState;
 class ModernUiAutomationServer;
 #	endif
 struct ModernConnectPingState;
-class QAction;
+class QCloseEvent;
+class QHideEvent;
+class QShowEvent;
 class QObject;
 class QFrame;
 class QModelIndex;
@@ -74,19 +75,14 @@ class QTimer;
 class QHostAddress;
 class QSslCertificate;
 class QSslError;
-class QPushButton;
 class QToolButton;
 class QUrl;
-class QWidget;
 
 namespace Search {
 class SearchDialog;
 }
 
-class MenuLabel;
 class ListenerVolumeController;
-class ListenerVolumeSlider;
-class UserLocalVolumeSlider;
 
 struct ShortcutTarget;
 struct FavoriteServer;
@@ -254,6 +250,8 @@ public:
 	void syncServerNavigatorUserMenu();
 	void positionServerNavigatorUserMenu();
 	void refreshCustomChromeStyles();
+	void initializePersistentChatBackend();
+	void publishPersistentChatSnapshot();
 	void syncPersistentChatGatewayHandler();
 	void warmupPersistentChatHistory();
 	QList< PersistentChatScopeKey > persistentChatWarmupScopes() const;
@@ -753,7 +751,6 @@ protected:
 	QSet< unsigned int > m_inFlightUserCommentSessions;
 	QHash< unsigned int, QByteArray > m_requestedUserCommentHashBySession;
 
-	MUComboBox *qcbTransmitMode;
 	QAction *qaTransmitMode;
 	QAction *qaTransmitModeSeparator;
 	QAction *qaUserRemoteSpeechCleanup        = nullptr;
@@ -779,6 +776,8 @@ protected:
 	QHash< unsigned int, unsigned int > m_userIdleSeconds;
 	std::vector< MumbleProto::ChatMessage > m_persistentChatMessages;
 	QHash< QString, PersistentChatPreview > m_persistentChatPreviews;
+	QSet< QString > m_persistentChatPreviewCacheWritesInFlight;
+	QSet< QString > m_persistentChatPreviewCacheWritesPending;
 	QHash< QString, MumbleProto::ChatEmbedRef > m_persistentChatEmbedPreviewRefs;
 	QHash< unsigned int, PersistentChatAssetDownload > m_persistentChatAssetDownloads;
 	QHash< quint64, PendingChatEmbedAssist > m_pendingChatEmbedAssists;
@@ -908,6 +907,7 @@ protected:
 	void openModernDisconnectDialog();
 	void openModernQuitDialog(bool allowMinimize);
 	void openModernGenericDialog(const QVariantMap &dialog);
+	void openModernDeveloperConsoleDialog();
 	void openModernServerInformationDialog();
 	void openModernServerTokensDialog(const QStringList &tokens = QStringList(), bool useProvidedTokens = false);
 	void openModernServerUserListLoadingDialog();
@@ -1046,8 +1046,6 @@ public slots:
 	void on_qmSelf_aboutToShow();
 	void on_qaSelfComment_triggered();
 	void on_qaSelfRegister_triggered();
-	void qcbTransmitMode_activated(int index);
-	void updateTransmitModeComboBox(Settings::AudioTransmit newMode);
 	void qmUser_aboutToShow();
 	void qmListener_aboutToShow();
 	void on_qaUserCommentReset_triggered();
@@ -1167,7 +1165,6 @@ public slots:
 	void serverConnected();
 	void serverDisconnected(QAbstractSocket::SocketError, QString reason);
 	void resolverError(QAbstractSocket::SocketError, QString reason);
-	void viewCertificate(bool);
 	void openUrl(const QUrl &url);
 	void context_triggered();
 	void updateTarget();

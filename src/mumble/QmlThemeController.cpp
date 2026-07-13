@@ -1,6 +1,7 @@
 #include "QmlThemeController.h"
 
 #include "Global.h"
+#include "QmlClientModels.h"
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
@@ -13,6 +14,8 @@ QmlThemeController::QmlThemeController(QObject *parent) : QObject(parent) {
 }
 
 void QmlThemeController::refresh() {
+	if (property(QmlVisualFixtureMutation::OverrideProperty).toBool()
+		&& !property(QmlVisualFixtureMutation::WriteProperty).toBool()) return;
 	const std::optional< UiThemeTokens > activeTokens = activeUiThemeTokens();
 	if (!activeTokens) {
 		return;
@@ -32,6 +35,8 @@ void QmlThemeController::refresh() {
 void QmlThemeController::applyTokens(const UiThemeTokens &tokens,
 								  const Mumble::ModernTheme::ThemeMetrics &metrics,
 								  const QColor &shellBackground) {
+	if (property(QmlVisualFixtureMutation::OverrideProperty).toBool()
+		&& !property(QmlVisualFixtureMutation::WriteProperty).toBool()) return;
 	const QColor nextShell = shellBackground.isValid() ? shellBackground : tokens.base;
 	const QColor nextSelected = tokens.accentSubtle.isValid() ? tokens.accentSubtle
 														 : uiThemeColorWithAlpha(tokens.accent, 0.16);

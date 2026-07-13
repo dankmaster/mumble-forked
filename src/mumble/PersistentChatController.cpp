@@ -71,7 +71,8 @@ void PersistentChatController::reset() {
 	emit activeSnapshotChanged();
 }
 
-void PersistentChatController::setActiveScope(const PersistentChatScopeKey &key, bool forceReload) {
+void PersistentChatController::setActiveScope(const PersistentChatScopeKey &key, bool forceReload,
+											  bool requestHistory) {
 	if (!key.valid) {
 		clearActiveScope();
 		return;
@@ -79,7 +80,13 @@ void PersistentChatController::setActiveScope(const PersistentChatScopeKey &key,
 
 	m_activeScope = key;
 	PersistentChatStore::ScopeState &state = m_store.ensureScope(key);
-	startInitialLoad(state, forceReload);
+	if (requestHistory) {
+		startInitialLoad(state, forceReload);
+	} else if (!state.initialRequestInFlight && !state.olderRequestInFlight) {
+		// A room can allow live chat while denying history. Keep the scope active so incoming messages are
+		// published, but do not issue a history request the server would reject.
+		state.snapshot.loadingState = PersistentChatLoadingState::Idle;
+	}
 	emit activeSnapshotChanged();
 }
 

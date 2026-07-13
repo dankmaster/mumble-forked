@@ -11,6 +11,13 @@
 
 #include <algorithm>
 
+namespace {
+	bool acceptsFrontendStateMutation(const QObject *object) {
+		return !object->property(QmlVisualFixtureMutation::OverrideProperty).toBool()
+			|| object->property(QmlVisualFixtureMutation::WriteProperty).toBool();
+	}
+}
+
 ClientSessionController::ClientSessionController(QObject *parent) : QObject(parent) {
 }
 
@@ -25,6 +32,9 @@ QString ClientSessionController::motdHtml() const { return m_motdHtml; }
 QString ClientSessionController::motdSummary() const { return m_motdSummary; }
 
 #define SET_VALUE(member, signalName) \
+	if (!acceptsFrontendStateMutation(this)) { \
+		return; \
+	} \
 	if (member == value) { \
 		return; \
 	} \
@@ -59,8 +69,12 @@ bool ActiveScopeController::hasPendingReply() const { return m_hasPendingReply; 
 QString ActiveScopeController::replyActor() const { return m_replyActor; }
 QString ActiveScopeController::replySnippet() const { return m_replySnippet; }
 bool ActiveScopeController::canAttachImages() const { return m_canAttachImages; }
+bool ActiveScopeController::canLoadOlder() const { return m_canLoadOlder; }
+bool ActiveScopeController::loading() const { return m_loading; }
+QString ActiveScopeController::loadingState() const { return m_loadingState; }
 
 #define SET_SCOPE_VALUE(member, signalName) \
+	if (!acceptsFrontendStateMutation(this)) return; \
 	if (member == value) return; \
 	member = value; \
 	emit signalName()
@@ -84,6 +98,11 @@ void ActiveScopeController::setReplySnippet(const QString &value) { SET_SCOPE_VA
 void ActiveScopeController::setCanAttachImages(bool value) {
 	SET_SCOPE_VALUE(m_canAttachImages, canAttachImagesChanged);
 }
+void ActiveScopeController::setCanLoadOlder(bool value) { SET_SCOPE_VALUE(m_canLoadOlder, canLoadOlderChanged); }
+void ActiveScopeController::setLoading(bool value) { SET_SCOPE_VALUE(m_loading, loadingChanged); }
+void ActiveScopeController::setLoadingState(const QString &value) {
+	SET_SCOPE_VALUE(m_loadingState, loadingStateChanged);
+}
 
 #undef SET_SCOPE_VALUE
 
@@ -99,6 +118,9 @@ void ActiveScopeController::applyState(const QVariantMap &state) {
 	setReplyActor(state.value(QStringLiteral("replyActor")).toString());
 	setReplySnippet(state.value(QStringLiteral("replySnippet")).toString());
 	setCanAttachImages(state.value(QStringLiteral("canAttachImages")).toBool());
+	setCanLoadOlder(state.value(QStringLiteral("canLoadOlder")).toBool());
+	setLoading(state.value(QStringLiteral("loading")).toBool());
+	setLoadingState(state.value(QStringLiteral("loadingState")).toString());
 }
 
 StableListModel::StableListModel(QObject *parent) : QAbstractListModel(parent) {
@@ -146,6 +168,7 @@ QVariant StableListModel::valueForRole(const QVariantMap &row, const int role) {
 		case ToolTipRole: return row.value(QStringLiteral("toolTip"));
 		case VisibleRole: return row.value(QStringLiteral("visible"), true);
 		case AttachmentsRole: return row.value(QStringLiteral("attachments"));
+		case SourceRole: return row.value(QStringLiteral("source"));
 		default: return {};
 	}
 }
@@ -160,7 +183,8 @@ QHash< int, QByteArray > StableListModel::roleNames() const {
 			 { OwnRole, "own" }, { DeletedRole, "deleted" }, { CanReplyRole, "canReply" },
 			 { CanReactRole, "canReact" }, { CanDeleteRole, "canDelete" }, { ScopeTokenRole, "scopeToken" },
 			 { ShortcutRole, "shortcut" }, { CheckableRole, "checkable" }, { MenuRoleRole, "menuRole" },
-			 { ToolTipRole, "toolTip" }, { VisibleRole, "visible" }, { AttachmentsRole, "attachments" } };
+			 { ToolTipRole, "toolTip" }, { VisibleRole, "visible" }, { AttachmentsRole, "attachments" },
+			 { SourceRole, "source" } };
 }
 
 QVariantMap StableListModel::get(int row) const {
@@ -174,7 +198,7 @@ int StableListModel::indexOf(const QString &stableId) const {
 QList< int > StableListModel::changedRoles(const QVariantMap &before, const QVariantMap &after) {
 	if (before == after) return {};
 	QList< int > roles { PayloadRole };
-	for (int role = StableIdRole; role <= AttachmentsRole; ++role) {
+	for (int role = StableIdRole; role <= SourceRole; ++role) {
 		if (role != PayloadRole && valueForRole(before, role) != valueForRole(after, role)) roles.push_back(role);
 	}
 	return roles;
@@ -187,6 +211,7 @@ void StableListModel::rebuildRowIndex() {
 }
 
 void StableListModel::synchronizeRows(const QVariantList &rows) {
+	if (!acceptsFrontendStateMutation(this)) return;
 	QVariantList validRows;
 	QStringList validIds;
 	QHash< QString, int > validIndexById;
@@ -293,6 +318,7 @@ void StableListModel::synchronizeRows(const QVariantList &rows) {
 }
 
 void StableListModel::upsertRow(const QVariantMap &row) {
+	if (!acceptsFrontendStateMutation(this)) return;
 	const QString stableId = row.value(QStringLiteral("id")).toString();
 	if (stableId.isEmpty()) {
 		return;
@@ -319,6 +345,7 @@ void StableListModel::upsertRow(const QVariantMap &row) {
 }
 
 void StableListModel::removeRow(const QString &stableId) {
+	if (!acceptsFrontendStateMutation(this)) return;
 	const int existing = indexOf(stableId);
 	if (existing < 0) {
 		return;
@@ -332,6 +359,7 @@ void StableListModel::removeRow(const QString &stableId) {
 }
 
 void StableListModel::clear() {
+	if (!acceptsFrontendStateMutation(this)) return;
 	if (m_rows.isEmpty()) {
 		return;
 	}
@@ -363,14 +391,38 @@ QVariantMap RoomModel::roomRow(const QVariantMap &room, const QString &kind) {
 }
 
 void RoomModel::replaceRoomStates(const QVariantList &voiceRooms, const QVariantList &textRooms) {
+	if (!acceptsFrontendStateMutation(this)) return;
 	m_voiceRoomStates = voiceRooms;
 	m_textRoomStates = textRooms;
 	synchronizeAllRows();
 }
 
 void RoomModel::replaceDirectMessageStates(const QVariantList &conversations) {
+	if (!acceptsFrontendStateMutation(this)) return;
 	m_directMessageStates = conversations;
 	synchronizeAllRows();
+}
+
+void RoomModel::selectScope(const QString &scopeToken) {
+	if (!acceptsFrontendStateMutation(this)) return;
+	const QString selectedToken = scopeToken.trimmed();
+	bool changed = false;
+	const auto updateStates = [&selectedToken, &changed](QVariantList &states) {
+		for (QVariant &entry : states) {
+			QVariantMap room = entry.toMap();
+			const bool selected = !selectedToken.isEmpty()
+				&& room.value(QStringLiteral("token")).toString() == selectedToken;
+			const bool wasSelected = room.value(QStringLiteral("selected"), room.value(QStringLiteral("open"))).toBool();
+			if (selected == wasSelected && room.contains(QStringLiteral("selected"))) continue;
+			room.insert(QStringLiteral("selected"), selected);
+			entry = room;
+			changed = true;
+		}
+	};
+	updateStates(m_voiceRoomStates);
+	updateStates(m_textRoomStates);
+	updateStates(m_directMessageStates);
+	if (changed) synchronizeAllRows();
 }
 
 void RoomModel::synchronizeAllRows() {
@@ -408,6 +460,13 @@ void ParticipantModel::replaceParticipantStates(const QVariantList &participants
 		if (!row.isEmpty()) rows.push_back(row);
 	}
 	synchronizeRows(rows);
+}
+
+QVariantList ParticipantModel::participantStates() const {
+	QVariantList states;
+	states.reserve(rowCount());
+	for (int row = 0; row < rowCount(); ++row) states.push_back(get(row).value(QStringLiteral("source")));
+	return states;
 }
 
 void ParticipantModel::upsertParticipantState(const QVariantMap &participant) {
@@ -478,6 +537,7 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message) {
 }
 
 ChatTimelineModel::MessageMutation ChatTimelineModel::applyMessage(const QVariantMap &message) {
+	if (!acceptsFrontendStateMutation(this)) return MessageMutation::Ignored;
 	const QVariantMap row = messageRow(message);
 	if (row.isEmpty()) return MessageMutation::Ignored;
 	const QString id = row.value(QStringLiteral("id")).toString();
@@ -520,6 +580,13 @@ void ChatTimelineModel::replaceMessages(const QVariantList &messages) {
 		if (!row.isEmpty()) rows.push_back(row);
 	}
 	synchronizeRows(rows);
+}
+
+QVariantList ChatTimelineModel::messages() const {
+	QVariantList states;
+	states.reserve(rowCount());
+	for (int row = 0; row < rowCount(); ++row) states.push_back(get(row).value(QStringLiteral("source")));
+	return states;
 }
 
 void AsyncOperationModel::startOperation(const QString &operationId, const QString &title, const QString &subtitle,
@@ -618,6 +685,7 @@ void UiCommandController::openDirectMessage(const QString &sessionId) {
 void UiCommandController::sendMessage(const QString &message) {
 	if (!message.trimmed().isEmpty()) emit messageSendRequested(message);
 }
+void UiCommandController::requestOlderMessages() { emit olderMessagesRequested(); }
 void UiCommandController::cancelPendingReply() { emit pendingReplyCancelRequested(); }
 void UiCommandController::chooseAttachment() { emit attachmentChooseRequested(); }
 void UiCommandController::replyToMessage(const QString &messageId) {
@@ -740,6 +808,7 @@ QString DialogStateController::fieldError(const QString &fieldId) const {
 }
 
 void DialogStateController::applyState(const QVariantMap &state) {
+	if (!acceptsFrontendStateMutation(this)) return;
 	if (m_state == state) return;
 	m_state = state;
 	m_state.detach();

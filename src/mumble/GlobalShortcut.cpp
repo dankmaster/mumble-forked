@@ -13,14 +13,7 @@
 #include "MainWindow.h"
 #include "MumbleConstants.h"
 #include "ServerHandler.h"
-#include "widgets/EventFilters.h"
 #include "Global.h"
-
-#include <QtCore/QProcess>
-#include <QtCore/QSortFilterProxyModel>
-#include <QtGui/QHelpEvent>
-#include <QtWidgets/QItemEditorFactory>
-#include <QtWidgets/QToolTip>
 
 #ifdef Q_OS_MAC
 #	include <ApplicationServices/ApplicationServices.h>

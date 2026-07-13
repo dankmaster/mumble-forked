@@ -8,15 +8,10 @@
 
 class QPoint;
 class QScreen;
-class QWidget;
-class QWindow;
 
 namespace Mumble {
 
 namespace Screen {
-	/// Inspired by https://phabricator.kde.org/D22379
-	QWindow *windowFromWidget(const QWidget &widget);
-	QScreen *screenFromWidget(const QWidget &widget);
 	QScreen *screenAt(const QPoint &point);
 } // namespace Screen
 

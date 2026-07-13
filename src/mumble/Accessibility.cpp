@@ -7,28 +7,10 @@
 #include "ChannelFilterMode.h"
 #include "Global.h"
 
-#include <QAbstractButton>
-#include <QAccessible>
-#include <QAccessibleEvent>
 #include <QObject>
-#include <QRegularExpression>
-#include <QWidget>
-
-#include <queue>
 
 namespace Mumble {
 namespace Accessibility {
-
-	QString removeHTMLTags(QString value) { return value.remove(QRegularExpression("<[^>]*>")); }
-
-	void setDescriptionFromLabel(QWidget *widget, const QLabel *label) {
-		widget->setAccessibleDescription(removeHTMLTags(label->text()));
-	}
-
-	void fixWizardButtonLabels(QWizard *wizard) {
-		wizard->button(QWizard::NextButton)->setAccessibleName(QObject::tr("Next"));
-		wizard->button(QWizard::BackButton)->setAccessibleName(QObject::tr("Back"));
-	}
 
 	QString userToText(const ClientUser *user) {
 		if (Global::get().uiSession != 0) {
@@ -141,77 +123,6 @@ namespace Accessibility {
 		}
 
 		return description;
-	}
-
-	void setSliderSemanticValue(SemanticSlider *slider, QString value) {
-		slider->m_semanticValue = value;
-
-		QAccessibleEvent nameEvent(slider, QAccessible::NameChanged);
-		QAccessible::updateAccessibility(&nameEvent);
-	}
-
-	void setSliderSemanticValue(SemanticSlider *slider, SliderMode mode, QString suffix) {
-		QString description = QString("%1 %2");
-
-		switch (mode) {
-			case SliderMode::NONE:
-				description = description.arg("");
-				break;
-			case SliderMode::READ_RELATIVE:
-				description = description.arg(
-					QString::number(slider->value() / static_cast< double >(slider->maximum()), 'f', 2));
-				break;
-			case SliderMode::READ_PERCENT:
-				description = description.arg(
-					static_cast< int32_t >((slider->value() / static_cast< double >(slider->maximum())) * 100));
-				break;
-			case SliderMode::READ_ABSOLUTE:
-				description = description.arg(slider->value());
-				break;
-		}
-		description = description.arg(suffix);
-
-		setSliderSemanticValue(slider, description);
-	}
-
-	QWidget *getFirstFocusableChild(QObject *object) {
-		std::queue< QObject * > search;
-		search.push(object);
-
-		QWidget *selectedWidget = nullptr;
-
-		while (!search.empty()) {
-			QObject *o = search.front();
-			search.pop();
-
-			for (QObject *child : o->children()) {
-				search.push(child);
-			}
-
-			selectedWidget = qobject_cast< QWidget * >(o);
-			if (!selectedWidget) {
-				continue;
-			}
-
-			if (!selectedWidget->isEnabled()) {
-				selectedWidget = nullptr;
-				continue;
-			}
-
-			if (selectedWidget->focusPolicy() == Qt::NoFocus) {
-				selectedWidget = nullptr;
-				continue;
-			}
-
-			if (qobject_cast< QLabel * >(selectedWidget)) {
-				selectedWidget = nullptr;
-				continue;
-			}
-
-			break;
-		}
-
-		return selectedWidget;
 	}
 
 } // namespace Accessibility

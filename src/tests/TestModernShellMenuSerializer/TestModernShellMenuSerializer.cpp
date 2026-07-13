@@ -5,68 +5,65 @@
 
 #include <QtTest>
 
-#include "MenuLabel.h"
 #include "ModernShellMenuSerializer.h"
-#include "VolumeSliderWidgetAction.h"
 
-#include <QtWidgets/QMenu>
+#include <QtGui/QAction>
 
 class TestModernShellMenuSerializer : public QObject {
 	Q_OBJECT
 
 private slots:
-	void serializesActionSeparatorLabelSliderAndDynamicContextAction();
+	void serializesActionsAndDynamicContextActionWithoutWidgets();
+	void buildsTypedLabelAndSliderItems();
 };
 
-void TestModernShellMenuSerializer::serializesActionSeparatorLabelSliderAndDynamicContextAction() {
-	QMenu menu;
-
-	QAction regularAction(QObject::tr("Plain Action"), &menu);
-	QAction dynamicAction(QObject::tr("Dynamic Action"), &menu);
+void TestModernShellMenuSerializer::serializesActionsAndDynamicContextActionWithoutWidgets() {
+	QObject owner;
+	QAction regularAction(QObject::tr("Plain Action"), &owner);
+	QAction separator(&owner);
+	separator.setSeparator(true);
+	QAction dynamicAction(QObject::tr("Dynamic Action"), &owner);
 	dynamicAction.setData(QStringLiteral("dynamic-token"));
-	MenuLabel label(QObject::tr("Local Volume Adjustment:"), &menu);
-	VolumeSliderWidgetAction slider(&menu);
-	slider.setSliderAccessibleName(QObject::tr("Listener volume adjustment"));
-
-	menu.addAction(&regularAction);
-	menu.addSeparator();
-	menu.addAction(&label);
-	menu.addAction(&slider);
-	menu.addAction(&dynamicAction);
 
 	ModernShellMenuSerializer::ActionRegistry registry;
-	const QVariantList items = ModernShellMenuSerializer::serializeMenu(
-		&menu,
-		[&regularAction, &dynamicAction, &slider](const QAction *action) {
+	const QVariantList items = ModernShellMenuSerializer::serializeActions(
+		{ &regularAction, &separator, &dynamicAction },
+		[&regularAction, &dynamicAction](const QAction *action) {
 			ModernShellMenuSerializer::ActionDefinition definition;
 			if (action == &regularAction) {
 				definition.id = QStringLiteral("plainAction");
 			} else if (action == &dynamicAction) {
 				definition.id = ModernShellMenuSerializer::contextActionId(QStringLiteral("channel"), action->data());
 				definition.contextActionData = action->data().toString();
-			} else if (action == &slider) {
-				definition.id = QStringLiteral("listenerVolume");
 			}
 			return definition;
 		},
 		&registry);
 
-	QCOMPARE(items.size(), 5);
+	QCOMPARE(items.size(), 3);
 	QCOMPARE(items.at(0).toMap().value(QStringLiteral("kind")).toString(), QStringLiteral("action"));
 	QCOMPARE(items.at(1).toMap().value(QStringLiteral("kind")).toString(), QStringLiteral("separator"));
-	QCOMPARE(items.at(2).toMap().value(QStringLiteral("kind")).toString(), QStringLiteral("label"));
-	QCOMPARE(items.at(2).toMap().value(QStringLiteral("label")).toString(),
-			 QStringLiteral("Local Volume Adjustment:"));
-	QCOMPARE(items.at(3).toMap().value(QStringLiteral("kind")).toString(), QStringLiteral("slider"));
-	QCOMPARE(items.at(3).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("listenerVolume"));
-	QCOMPARE(items.at(3).toMap().value(QStringLiteral("min")).toInt(), -30);
-	QCOMPARE(items.at(3).toMap().value(QStringLiteral("max")).toInt(), 30);
-	QCOMPARE(items.at(4).toMap().value(QStringLiteral("id")).toString(),
+	QCOMPARE(items.at(2).toMap().value(QStringLiteral("id")).toString(),
 			 QStringLiteral("context:channel:dynamic-token"));
 
 	const auto dynamicRegistryEntry = registry.value(QStringLiteral("context:channel:dynamic-token"));
 	QVERIFY(dynamicRegistryEntry.action == &dynamicAction);
 	QCOMPARE(dynamicRegistryEntry.contextActionData, QStringLiteral("dynamic-token"));
+}
+
+void TestModernShellMenuSerializer::buildsTypedLabelAndSliderItems() {
+	const QVariantMap label = ModernShellMenuSerializer::labelItem(QStringLiteral("Local volume"),
+																   QStringLiteral("Per-user control"));
+	QCOMPARE(label.value(QStringLiteral("kind")).toString(), QStringLiteral("label"));
+	QCOMPARE(label.value(QStringLiteral("hint")).toString(), QStringLiteral("Per-user control"));
+
+	const QVariantMap slider = ModernShellMenuSerializer::sliderItem(
+		QStringLiteral("listenerVolume"), QStringLiteral("Listener volume"), 4, -30, 30, 1,
+		QStringLiteral(" dB"), true, true);
+	QCOMPARE(slider.value(QStringLiteral("kind")).toString(), QStringLiteral("slider"));
+	QCOMPARE(slider.value(QStringLiteral("min")).toInt(), -30);
+	QCOMPARE(slider.value(QStringLiteral("max")).toInt(), 30);
+	QVERIFY(slider.value(QStringLiteral("finalOnRelease")).toBool());
 }
 
 QTEST_MAIN(TestModernShellMenuSerializer)

@@ -58,6 +58,9 @@ public:
 	QmlPerformanceMonitor *performanceMonitor() const;
 	std::shared_ptr< QmlImagePipeline > imagePipeline() const;
 	QmlThemeController *themeController() const;
+	bool visualFixtureOverrideActive() const { return m_visualFixtureOverrideActive; }
+	void setVisualFixtureOverrideActive(bool active);
+	void setVisualFixtureMutationActive(bool active);
 	bool captureWindow(const QString &path, QString *error = nullptr) const;
 	void showPttTool(bool visible);
 	QObject *createScreenShareView(QObject *backend);
@@ -92,6 +95,7 @@ private:
 	std::unique_ptr< ComposerController > m_composerController;
 	std::unique_ptr< QmlThemeController > m_themeController;
 	std::unique_ptr< QmlWindowStateController > m_windowStateController;
+	bool m_visualFixtureOverrideActive = false;
 };
 
 #endif // MUMBLE_MUMBLE_QMLSHELLHOST_H_

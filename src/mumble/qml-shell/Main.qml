@@ -18,6 +18,24 @@ ApplicationWindow {
 	property real performanceChatScrollStartY: 0
 	property real performanceChatScrollTargetY: 0
 
+	function focusVisualFixture(state) {
+		if (state === "connected") {
+			// The deterministic fixture intentionally has no writable live scope,
+			// so its composer is disabled and cannot own accessibility focus.
+			appMenuButton.forceActiveFocus(Qt.OtherFocusReason)
+			return appMenuButton
+		}
+		if (state === "error") {
+			const operation = operationRepeater.itemAt(0)
+			if (operation && operation.visualFixtureFocusTarget) {
+				operation.visualFixtureFocusTarget.forceActiveFocus(Qt.OtherFocusReason)
+				return operation.visualFixtureFocusTarget
+			}
+		}
+		appMenuButton.forceActiveFocus(Qt.OtherFocusReason)
+		return appMenuButton
+	}
+
 	Instantiator {
 		model: actionModel
 		delegate: Shortcut {
@@ -58,6 +76,14 @@ ApplicationWindow {
 		timelineScrollWorkload.start()
 		return { "started": true, "beforeY": performanceChatScrollStartY,
 			"targetY": performanceChatScrollTargetY, "count": timeline.count }
+	}
+
+	function performanceChatFixtureState() {
+		const minimumY = timeline.originY
+		const maximumY = Math.max(minimumY, timeline.originY + timeline.contentHeight - timeline.height)
+		return { "count": timeline.count, "contentHeight": timeline.contentHeight,
+			"viewportHeight": timeline.height, "originY": minimumY, "maximumY": maximumY,
+			"scrollable": timeline.count === 96 && maximumY - minimumY >= 8 }
 	}
 
 	function performanceChatScrollState() {
@@ -113,14 +139,16 @@ ApplicationWindow {
         width: Math.min(380, parent.width - 40)
         spacing: 8
         z: 40
-        Repeater {
-            model: operationModel
-            delegate: Rectangle {
+		Repeater {
+			id: operationRepeater
+			model: operationModel
+			delegate: Rectangle {
                 required property string stableId
                 required property string title
                 required property string subtitle
-                required property string status
-                required property var payload
+				required property string status
+				required property var payload
+				property Item visualFixtureFocusTarget: dismissOperationButton.visible ? dismissOperationButton : null
                 width: parent.width
                 height: operationContent.implicitHeight + 24
                 radius: Theme.innerRadius
@@ -142,10 +170,14 @@ ApplicationWindow {
                             Accessible.name: qsTr("Cancel %1").arg(title)
                             onClicked: operationModel.cancel(stableId)
                         }
-                        ModernButton {
-                            visible: status !== "running"
+						ModernButton {
+							id: dismissOperationButton
+							objectName: "visualFixtureDismissOperation"
+							visible: status !== "running"
                             text: qsTr("Dismiss")
                             Accessible.name: qsTr("Dismiss %1").arg(title)
+							Accessible.focusable: true
+							Accessible.focused: activeFocus
                             onClicked: operationModel.dismiss(stableId)
                         }
                     }
@@ -215,14 +247,17 @@ ApplicationWindow {
                             width: Math.max(0, root.width - 390)
                         }
                     }
-                    ToolButton {
-                        id: appMenuButton
+					ToolButton {
+						id: appMenuButton
+						objectName: "visualFixtureApplicationMenu"
                         anchors.right: parent.right
                         anchors.rightMargin: 16
                         anchors.verticalCenter: parent.verticalCenter
                         text: "⋯"
                         font.pixelSize: 22
                         Accessible.name: qsTr("Application menu")
+						Accessible.focusable: true
+						Accessible.focused: activeFocus
                         onClicked: appMenuPopup.open()
                     }
                     Popup {
@@ -280,8 +315,31 @@ ApplicationWindow {
                     topMargin: 20
                     bottomMargin: 20
                     reuseItems: true
-                    delegate: Rectangle {
-                        id: messageDelegate
+                    headerPositioning: ListView.InlineHeader
+                    header: Item {
+                        width: timeline.width
+                        height: (activeScope.canLoadOlder || activeScope.loadingState === "older") ? 48 : 0
+                        visible: height > 0
+                        ModernButton {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.top: parent.top
+                            anchors.topMargin: 4
+                            enabled: activeScope.canLoadOlder && activeScope.loadingState !== "older"
+                            text: activeScope.loadingState === "older"
+                                  ? qsTr("Loading older messages…")
+                                  : qsTr("Load older messages")
+                            Accessible.name: text
+                            Accessible.description: qsTr("Load messages sent before the currently visible history")
+                            onClicked: uiCommands.requestOlderMessages()
+                        }
+                    }
+					delegate: Rectangle {
+						id: messageDelegate
+						property bool accessibilityPooled: false
+						ListView.onPooled: accessibilityPooled = true
+						ListView.onReused: accessibilityPooled = false
+						visible: !accessibilityPooled
+						Accessible.ignored: accessibilityPooled
                         required property string stableId
                         required property string title
                         required property string subtitle
@@ -502,7 +560,11 @@ ApplicationWindow {
                     Label {
                         anchors.centerIn: parent
                         visible: chatModel.count === 0
-                        text: clientSession.connected ? "Select a room to start chatting" : "Connect to load rooms and messages"
+                        text: !clientSession.connected
+                              ? qsTr("Connect to load rooms and messages")
+                              : (activeScope.canSend
+                                 ? qsTr("No messages in %1 yet.").arg(activeScope.label)
+                                 : qsTr("Select a room to start chatting"))
                         color: Theme.textMuted
                     }
                 }
@@ -593,8 +655,9 @@ ApplicationWindow {
                                         onClicked: composer.complete(modelData.value || "")
                                     }
                                 }
-                            TextArea {
-                                id: composerInput
+							TextArea {
+								id: composerInput
+								objectName: "visualFixtureComposer"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 text: composer.text
@@ -604,7 +667,13 @@ ApplicationWindow {
                                                  : qsTr("Connect to send messages")
                                 enabled: composer.canSend && !composer.sending
                                 color: Theme.textMain
-                                placeholderTextColor: Theme.textMuted
+								placeholderTextColor: Theme.textMuted
+								Accessible.name: activeScope.composerPlaceholder.length > 0
+												 ? activeScope.composerPlaceholder
+												 : qsTr("Message composer")
+								Accessible.description: activeScope.composerHint
+								Accessible.focusable: true
+								Accessible.focused: activeFocus
                                 background: null
                                 wrapMode: TextEdit.Wrap
                                 Keys.onReturnPressed: event => {
