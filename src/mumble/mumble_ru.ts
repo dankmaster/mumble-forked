@@ -24,13 +24,6 @@
     </message>
 </context>
 <context>
-    <name>AccessibleQGroupBox</name>
-    <message>
-        <source>empty</source>
-        <translation>пусто</translation>
-    </message>
-</context>
-<context>
     <name>AclEditor</name>
     <message>
         <source>Inherit ACLs from parent room</source>
@@ -564,13 +557,6 @@ Please describe what you were doing before the crash.</source>
     </message>
 </context>
 <context>
-    <name>ListenerVolumeSlider</name>
-    <message>
-        <source>Listener volume adjustment</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
     <name>Log</name>
     <message>
         <source>Debug</source>
@@ -871,6 +857,10 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Select a room to start chatting</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Message composer</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -5202,10 +5192,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Shared shell safe mode keeps the modern bootstrap on a reduced snapshot payload.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>No current room</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5654,18 +5640,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>You do not have permission to view this chat history.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>History unavailable</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ask a server administrator for View chat history access</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Persistent chat controller is unavailable.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5951,6 +5925,34 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Voice feedback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>DNS %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Email %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Organization</source>
+        <translation type="unfinished">Организация</translation>
+    </message>
+    <message>
+        <source>SHA-1 fingerprint</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SHA-256 fingerprint</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Alternative names</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate %1</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -6476,28 +6478,12 @@ Please describe what you were doing before the crash.</source>
         <translation>Поддержка этой опции только экспериментальная! Этот вариант лучше всего работает при использовании встроенного микрофона и динамика.</translation>
     </message>
     <message>
-        <source>Shortcuts migration incomplete</source>
-        <translation>Перенос ярлыков не завершен</translation>
-    </message>
-    <message>
-        <source>Potentially broken settings</source>
-        <translation>Потенциально сломанные настройки</translation>
-    </message>
-    <message>
-        <source>Load backup settings?</source>
-        <translation>Загрузить резервные настройки?</translation>
-    </message>
-    <message>
         <source>Access to the microphone was denied due to system restrictions. You will not be able to use the microphone in this session.</source>
         <translation>В доступе к микрофону отказано из-за системных ограничений. Вы не сможете использовать микрофон в этом сеансе.</translation>
     </message>
     <message>
         <source>Unknown Version</source>
         <translation>Неизвестная версия</translation>
-    </message>
-    <message>
-        <source>Next</source>
-        <translation>Далее</translation>
     </message>
     <message>
         <source>Back</source>
@@ -12440,38 +12426,6 @@ Server feedback: fallback</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>OK</source>
-        <translation type="unfinished">ОК</translation>
-    </message>
-    <message>
-        <source>It seems that Mumble did not perform a normal shutdown. If you did not intentionally kill the application, this could mean that the used settings caused a crash.&lt;br&gt;&lt;br&gt;Do you want to load the settings backup instead?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Load backup</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Keep current</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The backup settings may also be unstable.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The backed-up settings also seem to have been saved without Mumble exiting normally (potentially indicating a crash).&lt;br&gt;&lt;br&gt;If you experience repeated crashes with these settings, you might have to manually delete these settings files:&lt;br&gt;&lt;br&gt;&lt;code&gt;%1&lt;/code&gt;&lt;br&gt;&lt;br&gt;&lt;code&gt;%2&lt;/code&gt;&lt;br&gt;&lt;br&gt;in order to reset all settings to their default value.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Some shortcuts need to be registered again.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unfortunately %1 shortcut(s) could not be migrated.&lt;br&gt;&lt;br&gt;You can register them again in Settings &gt; Key Bindings.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Little model</source>
         <translation type="unfinished"></translation>
     </message>
@@ -13027,13 +12981,6 @@ Resume returns to the live edge.</source>
     </message>
 </context>
 <context>
-    <name>UserLocalVolumeSlider</name>
-    <message>
-        <source>Local volume adjustment</source>
-        <translation type="unfinished">локальная регулировка громкости</translation>
-    </message>
-</context>
-<context>
     <name>UserModel</name>
     <message>
         <source>This is a user connected to the server. The icon to the left of the user indicates whether or not they are talking:</source>
@@ -13289,93 +13236,6 @@ Resume returns to the live edge.</source>
     </message>
 </context>
 <context>
-    <name>ViewCert</name>
-    <message>
-        <source>Certificate Chain Details</source>
-        <translation>Детали цепочки сертификатов</translation>
-    </message>
-    <message>
-        <source>Certificate chain</source>
-        <translation>Цепочка сертификатов</translation>
-    </message>
-    <message>
-        <source>Certificate details</source>
-        <translation>Информация о сертификате</translation>
-    </message>
-    <message>
-        <source>Common Name</source>
-        <translation>Имя</translation>
-    </message>
-    <message>
-        <source>Organization</source>
-        <translation>Организация</translation>
-    </message>
-    <message>
-        <source>Subunit</source>
-        <translation>Подразделелие</translation>
-    </message>
-    <message>
-        <source>Country</source>
-        <translation>Страна</translation>
-    </message>
-    <message>
-        <source>Locality</source>
-        <translation>Регион</translation>
-    </message>
-    <message>
-        <source>State</source>
-        <translation>Край/Обл</translation>
-    </message>
-    <message>
-        <source>Valid from: %1</source>
-        <translation>Действует с: %1</translation>
-    </message>
-    <message>
-        <source>Valid to: %1</source>
-        <translation>Истекает: %1</translation>
-    </message>
-    <message>
-        <source>Serial: %1</source>
-        <translation>Серийный номер: %1</translation>
-    </message>
-    <message>
-        <source>Public Key: %1 bits %2</source>
-        <translation>Публичный ключ: %1 бит %2</translation>
-    </message>
-    <message>
-        <source>RSA</source>
-        <translation>RSA</translation>
-    </message>
-    <message>
-        <source>DSA</source>
-        <translation>DSA</translation>
-    </message>
-    <message>
-        <source>Digest (SHA-1): %1</source>
-        <translation>Контрольная сумма (SHA-1): %1</translation>
-    </message>
-    <message>
-        <source>Digest (SHA-256): %1</source>
-        <translation>Контрольная сумма (SHA-256): %1</translation>
-    </message>
-    <message>
-        <source>Email: %1</source>
-        <translation>E-mail: %1</translation>
-    </message>
-    <message>
-        <source>DNS: %1</source>
-        <translation>DNS: %1</translation>
-    </message>
-    <message>
-        <source>Issued by:</source>
-        <translation>Кем выдан:</translation>
-    </message>
-    <message>
-        <source>Unit Name</source>
-        <translation>Отдел</translation>
-    </message>
-</context>
-<context>
     <name>VoiceRecorder</name>
     <message>
         <source>Recorder failed to create directory &apos;%1&apos;</source>
@@ -13408,17 +13268,6 @@ Resume returns to the live edge.</source>
     <message>
         <source>.mp3 - Lossy compressed</source>
         <translation>.mp3 – Сжатие с потерями</translation>
-    </message>
-</context>
-<context>
-    <name>VolumeSliderWidgetAction</name>
-    <message>
-        <source>Volume Adjustment</source>
-        <translation>Регулировка громкости</translation>
-    </message>
-    <message>
-        <source>Local volume adjustment</source>
-        <translation>локальная регулировка громкости</translation>
     </message>
 </context>
 <context>

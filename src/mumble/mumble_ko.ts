@@ -24,13 +24,6 @@
     </message>
 </context>
 <context>
-    <name>AccessibleQGroupBox</name>
-    <message>
-        <source>empty</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
     <name>AclEditor</name>
     <message>
         <source>Inherit ACLs from parent room</source>
@@ -564,13 +557,6 @@ Please describe what you were doing before the crash.</source>
     </message>
 </context>
 <context>
-    <name>ListenerVolumeSlider</name>
-    <message>
-        <source>Listener volume adjustment</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
     <name>Log</name>
     <message>
         <source>Debug</source>
@@ -871,6 +857,10 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Select a room to start chatting</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Message composer</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -5200,10 +5190,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Shared shell safe mode keeps the modern bootstrap on a reduced snapshot payload.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>No current room</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5652,18 +5638,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>You do not have permission to view this chat history.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>History unavailable</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ask a server administrator for View chat history access</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Persistent chat controller is unavailable.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5949,6 +5923,34 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Voice feedback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>DNS %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Email %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Organization</source>
+        <translation type="unfinished">조직</translation>
+    </message>
+    <message>
+        <source>SHA-1 fingerprint</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SHA-256 fingerprint</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Alternative names</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate %1</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -6474,27 +6476,11 @@ Please describe what you were doing before the crash.</source>
         <translation>이 옵션에 대한 지원은 실험용입니다! 이 옵션은 내장 마이크와 스피커를 사용할 때 가장 잘 작동합니다.</translation>
     </message>
     <message>
-        <source>Shortcuts migration incomplete</source>
-        <translation>단축키 이동이 완료되지 않음</translation>
-    </message>
-    <message>
-        <source>Potentially broken settings</source>
-        <translation>잠재적으로 손상된 설정</translation>
-    </message>
-    <message>
-        <source>Load backup settings?</source>
-        <translation>백업 설정을 불러오시겠습니까?</translation>
-    </message>
-    <message>
         <source>Access to the microphone was denied due to system restrictions. You will not be able to use the microphone in this session.</source>
         <translation>시스템 제한으로 인해 마이크에 대한 액세스가 거부되었습니다. 이 세션에서는 마이크를 사용할 수 없습니다.</translation>
     </message>
     <message>
         <source>Unknown Version</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Next</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -12434,38 +12420,6 @@ Server feedback: fallback</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>OK</source>
-        <translation type="unfinished">확인</translation>
-    </message>
-    <message>
-        <source>It seems that Mumble did not perform a normal shutdown. If you did not intentionally kill the application, this could mean that the used settings caused a crash.&lt;br&gt;&lt;br&gt;Do you want to load the settings backup instead?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Load backup</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Keep current</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The backup settings may also be unstable.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The backed-up settings also seem to have been saved without Mumble exiting normally (potentially indicating a crash).&lt;br&gt;&lt;br&gt;If you experience repeated crashes with these settings, you might have to manually delete these settings files:&lt;br&gt;&lt;br&gt;&lt;code&gt;%1&lt;/code&gt;&lt;br&gt;&lt;br&gt;&lt;code&gt;%2&lt;/code&gt;&lt;br&gt;&lt;br&gt;in order to reset all settings to their default value.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Some shortcuts need to be registered again.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unfortunately %1 shortcut(s) could not be migrated.&lt;br&gt;&lt;br&gt;You can register them again in Settings &gt; Key Bindings.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Little model</source>
         <translation type="unfinished"></translation>
     </message>
@@ -13021,13 +12975,6 @@ Resume returns to the live edge.</source>
     </message>
 </context>
 <context>
-    <name>UserLocalVolumeSlider</name>
-    <message>
-        <source>Local volume adjustment</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
     <name>UserModel</name>
     <message>
         <source>This is a user connected to the server. The icon to the left of the user indicates whether or not they are talking:</source>
@@ -13283,93 +13230,6 @@ Resume returns to the live edge.</source>
     </message>
 </context>
 <context>
-    <name>ViewCert</name>
-    <message>
-        <source>Certificate Chain Details</source>
-        <translation>인증서 체인 세부 정보</translation>
-    </message>
-    <message>
-        <source>Certificate chain</source>
-        <translation>인증서 체인</translation>
-    </message>
-    <message>
-        <source>Certificate details</source>
-        <translation>인증서 세부 정보</translation>
-    </message>
-    <message>
-        <source>Common Name</source>
-        <translation>일반 이름</translation>
-    </message>
-    <message>
-        <source>Organization</source>
-        <translation>조직</translation>
-    </message>
-    <message>
-        <source>Subunit</source>
-        <translation>소단위</translation>
-    </message>
-    <message>
-        <source>Country</source>
-        <translation>국가</translation>
-    </message>
-    <message>
-        <source>Locality</source>
-        <translation>지역</translation>
-    </message>
-    <message>
-        <source>State</source>
-        <translation>상태</translation>
-    </message>
-    <message>
-        <source>Valid from: %1</source>
-        <translation>유효기간 시작: %1</translation>
-    </message>
-    <message>
-        <source>Valid to: %1</source>
-        <translation>유효기간 종료: %1</translation>
-    </message>
-    <message>
-        <source>Serial: %1</source>
-        <translation>시리얼: %1</translation>
-    </message>
-    <message>
-        <source>Public Key: %1 bits %2</source>
-        <translation>공개 키: %1 bits %2</translation>
-    </message>
-    <message>
-        <source>RSA</source>
-        <translation>RSA</translation>
-    </message>
-    <message>
-        <source>DSA</source>
-        <translation>DSA</translation>
-    </message>
-    <message>
-        <source>Digest (SHA-1): %1</source>
-        <translation>다이제스트 (SHA-1): %1</translation>
-    </message>
-    <message>
-        <source>Digest (SHA-256): %1</source>
-        <translation>다이제스트 (SHA-256): %1</translation>
-    </message>
-    <message>
-        <source>Email: %1</source>
-        <translation>이메일: %1</translation>
-    </message>
-    <message>
-        <source>DNS: %1</source>
-        <translation>DNS: %1</translation>
-    </message>
-    <message>
-        <source>Issued by:</source>
-        <translation>발급자:</translation>
-    </message>
-    <message>
-        <source>Unit Name</source>
-        <translation>부서 이름</translation>
-    </message>
-</context>
-<context>
     <name>VoiceRecorder</name>
     <message>
         <source>Recorder failed to create directory &apos;%1&apos;</source>
@@ -13401,17 +13261,6 @@ Resume returns to the live edge.</source>
     </message>
     <message>
         <source>.mp3 - Lossy compressed</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>VolumeSliderWidgetAction</name>
-    <message>
-        <source>Volume Adjustment</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Local volume adjustment</source>
         <translation type="unfinished"></translation>
     </message>
 </context>

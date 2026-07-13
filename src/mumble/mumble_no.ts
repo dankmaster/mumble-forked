@@ -24,13 +24,6 @@
     </message>
 </context>
 <context>
-    <name>AccessibleQGroupBox</name>
-    <message>
-        <source>empty</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
     <name>AclEditor</name>
     <message>
         <source>Inherit ACLs from parent room</source>
@@ -564,13 +557,6 @@ Please describe what you were doing before the crash.</source>
     </message>
 </context>
 <context>
-    <name>ListenerVolumeSlider</name>
-    <message>
-        <source>Listener volume adjustment</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
     <name>Log</name>
     <message>
         <source>Debug</source>
@@ -871,6 +857,10 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Select a room to start chatting</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Message composer</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -5201,10 +5191,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Shared shell safe mode keeps the modern bootstrap on a reduced snapshot payload.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>No current room</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5653,18 +5639,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>You do not have permission to view this chat history.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>History unavailable</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Ask a server administrator for View chat history access</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Persistent chat controller is unavailable.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5950,6 +5924,34 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Voice feedback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>DNS %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Email %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Organization</source>
+        <translation type="unfinished">Organisasjon</translation>
+    </message>
+    <message>
+        <source>SHA-1 fingerprint</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SHA-256 fingerprint</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Alternative names</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Certificate %1</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -6475,28 +6477,12 @@ Please describe what you were doing before the crash.</source>
         <translation>Støtten for dette er kun eksperimentell. Valget fungerer best ved bruk av innebygd mikrofon og høyttaler.</translation>
     </message>
     <message>
-        <source>Shortcuts migration incomplete</source>
-        <translation type="unfinished">Flytting av snarveier er ufullstendig</translation>
-    </message>
-    <message>
-        <source>Potentially broken settings</source>
-        <translation>Mulig skadede innstillinger</translation>
-    </message>
-    <message>
-        <source>Load backup settings?</source>
-        <translation>Last inn sikkerhetskopi-innstillinger?</translation>
-    </message>
-    <message>
         <source>Access to the microphone was denied due to system restrictions. You will not be able to use the microphone in this session.</source>
         <translation>Tilgang til mikrofon ble ikke innvilget som følge av systembegrensninger. Du vil ikke kunne bruke mikrofonen i denne økten.</translation>
     </message>
     <message>
         <source>Unknown Version</source>
         <translation>Ukjent versjon</translation>
-    </message>
-    <message>
-        <source>Next</source>
-        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Back</source>
@@ -12437,38 +12423,6 @@ Server feedback: fallback</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>OK</source>
-        <translation type="unfinished">OK</translation>
-    </message>
-    <message>
-        <source>It seems that Mumble did not perform a normal shutdown. If you did not intentionally kill the application, this could mean that the used settings caused a crash.&lt;br&gt;&lt;br&gt;Do you want to load the settings backup instead?</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Load backup</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Keep current</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The backup settings may also be unstable.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The backed-up settings also seem to have been saved without Mumble exiting normally (potentially indicating a crash).&lt;br&gt;&lt;br&gt;If you experience repeated crashes with these settings, you might have to manually delete these settings files:&lt;br&gt;&lt;br&gt;&lt;code&gt;%1&lt;/code&gt;&lt;br&gt;&lt;br&gt;&lt;code&gt;%2&lt;/code&gt;&lt;br&gt;&lt;br&gt;in order to reset all settings to their default value.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Some shortcuts need to be registered again.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unfortunately %1 shortcut(s) could not be migrated.&lt;br&gt;&lt;br&gt;You can register them again in Settings &gt; Key Bindings.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Little model</source>
         <translation type="unfinished"></translation>
     </message>
@@ -13024,13 +12978,6 @@ Resume returns to the live edge.</source>
     </message>
 </context>
 <context>
-    <name>UserLocalVolumeSlider</name>
-    <message>
-        <source>Local volume adjustment</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
     <name>UserModel</name>
     <message>
         <source>This is a user connected to the server. The icon to the left of the user indicates whether or not they are talking:</source>
@@ -13286,93 +13233,6 @@ Resume returns to the live edge.</source>
     </message>
 </context>
 <context>
-    <name>ViewCert</name>
-    <message>
-        <source>Certificate Chain Details</source>
-        <translation>Detaljer for sertifikatkjeden</translation>
-    </message>
-    <message>
-        <source>Certificate chain</source>
-        <translation>Sertifikatskjede</translation>
-    </message>
-    <message>
-        <source>Certificate details</source>
-        <translation>Sertifikatsdetaljer</translation>
-    </message>
-    <message>
-        <source>Common Name</source>
-        <translation>Vanlig navn</translation>
-    </message>
-    <message>
-        <source>Organization</source>
-        <translation>Organisasjon</translation>
-    </message>
-    <message>
-        <source>Subunit</source>
-        <translation>Underenhet</translation>
-    </message>
-    <message>
-        <source>Country</source>
-        <translation>Land</translation>
-    </message>
-    <message>
-        <source>Locality</source>
-        <translation>Lokalitet</translation>
-    </message>
-    <message>
-        <source>State</source>
-        <translation>Stat/fylke</translation>
-    </message>
-    <message>
-        <source>Valid from: %1</source>
-        <translation>Gyldig fra: %1</translation>
-    </message>
-    <message>
-        <source>Valid to: %1</source>
-        <translation>Gyldig til: %1</translation>
-    </message>
-    <message>
-        <source>Serial: %1</source>
-        <translation>Serienummer: %1</translation>
-    </message>
-    <message>
-        <source>Public Key: %1 bits %2</source>
-        <translation>Offentlig nøkkel: %1 bit %2</translation>
-    </message>
-    <message>
-        <source>RSA</source>
-        <translation>RSA</translation>
-    </message>
-    <message>
-        <source>DSA</source>
-        <translation>DSA</translation>
-    </message>
-    <message>
-        <source>Digest (SHA-1): %1</source>
-        <translation>Digest (SHA-1): %1</translation>
-    </message>
-    <message>
-        <source>Digest (SHA-256): %1</source>
-        <translation>Digest (SHA-256): %1</translation>
-    </message>
-    <message>
-        <source>Email: %1</source>
-        <translation>E-post: %1</translation>
-    </message>
-    <message>
-        <source>DNS: %1</source>
-        <translation>DNS: %1</translation>
-    </message>
-    <message>
-        <source>Issued by:</source>
-        <translation>Utstedt av:</translation>
-    </message>
-    <message>
-        <source>Unit Name</source>
-        <translation>Enhetsnavn</translation>
-    </message>
-</context>
-<context>
     <name>VoiceRecorder</name>
     <message>
         <source>Recorder failed to create directory &apos;%1&apos;</source>
@@ -13404,17 +13264,6 @@ Resume returns to the live edge.</source>
     </message>
     <message>
         <source>.mp3 - Lossy compressed</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
-    <name>VolumeSliderWidgetAction</name>
-    <message>
-        <source>Volume Adjustment</source>
-        <translation>Lydstyrkejustering</translation>
-    </message>
-    <message>
-        <source>Local volume adjustment</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
