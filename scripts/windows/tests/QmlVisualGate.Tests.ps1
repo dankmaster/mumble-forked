@@ -32,3 +32,20 @@ Describe "Qt Quick visual manifest validation" {
 		@($groups | ForEach-Object { $_.Count } | Measure-Object -Sum).Sum | Should Be @($matrix.cases).Count
 	}
 }
+
+Describe "Qt Quick visual runner modes" {
+	It "keeps baseline gate and candidate capture mutually exclusive" {
+		foreach ($scriptName in @("invoke-qml-visual-gate.ps1", "invoke-qml-visual-matrix.ps1")) {
+			$command = Get-Command "$PSScriptRoot\..\$scriptName"
+			$setNames = @($command.ParameterSets | ForEach-Object { $_.Name })
+			($setNames -contains "Gate") | Should Be $true
+			($setNames -contains "Candidate") | Should Be $true
+			$gate = $command.ParameterSets | Where-Object Name -eq "Gate"
+			$candidate = $command.ParameterSets | Where-Object Name -eq "Candidate"
+			@($gate.Parameters | Where-Object Name -eq "BaselineManifestPath").Count | Should Be 1
+			@($gate.Parameters | Where-Object Name -eq "CandidateOnly").Count | Should Be 0
+			@($candidate.Parameters | Where-Object Name -eq "CandidateOnly").Count | Should Be 1
+			@($candidate.Parameters | Where-Object Name -eq "BaselineManifestPath").Count | Should Be 0
+		}
+	}
+}

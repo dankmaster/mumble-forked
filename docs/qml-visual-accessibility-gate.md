@@ -35,14 +35,24 @@ After reviewing every PNG and accessibility JSON file, baseline replacement is a
 
 No baseline or screenshot directory is created in the repository automatically.
 
-## Required backend hook
+When no reviewed baseline exists yet, generate candidates without claiming a passing gate:
 
-The current automation server exposes `captureQml` and `qmlReadinessState`, but it does not expose deterministic whole-shell state injection, exact top-level sizing/theme control, actual window DPR, or an accessibility-tree snapshot. Therefore the gate intentionally fails at its first capability request today instead of reporting a partial pass.
+```powershell
+.\scripts\windows\invoke-qml-visual-matrix.ps1 `
+  -Executable $executable `
+  -ConfigPath "$env:LOCALAPPDATA\MumbleDevClient\state\mumble_settings.json" `
+  -CandidateOnly `
+  -OutputDirectory .\.tmp\qml-visual-candidates
+```
 
-The remaining frontend-neutral hook consists of three commands:
+Candidate mode is a separate PowerShell parameter set, writes `mode: candidate-only` into manifests, prints a warning, performs no baseline comparison, and cannot be combined with `-BaselineManifestPath`. It is evidence generation, never a green CI gate.
+
+## Frontend-neutral backend hook
+
+The automation server exposes the complete fail-closed hook through three commands:
 
 - `qmlVisualGateCapabilities`: returns `capture`, `state_injection`, `window_resize`, `theme_override`, `accessibility_snapshot`, `supported_states`, and the read-only `actual_device_pixel_ratio` of the active top-level window.
 - `setQmlVisualGateState`: atomically applies `case_id`, `state`, `theme`, `layout`, and logical `width`/`height`, waits for a rendered frame, and returns the exact applied values, read-only `actual_device_pixel_ratio`, and a monotonically increasing `generation`.
 - `qmlAccessibilitySnapshot`: returns a stable semantic tree for the requested generation, starting with a non-empty root `role`.
 
-`captureQml` must also honor the requested generation so a stale frame cannot be accepted. Fixture state must be owned by frontend-neutral controllers/models rather than injected into QML object names. The backend must not add a synthetic DPR setter: process launch owns scale, while automation only reports and verifies the resulting actual DPR. Once these commands exist, the runner needs no QML-internal knowledge.
+`captureQml` honors the requested generation so a stale frame cannot be accepted. Fixture state is owned by frontend-neutral controllers/models rather than injected into QML object names. There is deliberately no synthetic DPR setter: process launch owns scale, while automation only reports and verifies the resulting actual DPR. The runner therefore needs no QML-internal object names or Windows UI Automation access.

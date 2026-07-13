@@ -2,7 +2,8 @@
 param(
 	[Parameter(Mandatory = $true)][string]$Executable,
 	[Parameter(Mandatory = $true)][string]$ConfigPath,
-	[Parameter(Mandatory = $true)][string]$BaselineManifestPath,
+	[Parameter(Mandatory = $true, ParameterSetName = "Gate")][string]$BaselineManifestPath,
+	[Parameter(Mandatory = $true, ParameterSetName = "Candidate")][switch]$CandidateOnly,
 	[string]$MatrixPath = "$PSScriptRoot\qml-visual-gate-matrix.json",
 	[string]$OutputDirectory = ".tmp\qml-visual-matrix",
 	[int]$StartupTimeoutSeconds = 30
@@ -37,7 +38,7 @@ function Wait-AutomationPort {
 $executablePath = (Resolve-Path -LiteralPath $Executable).Path
 $sourceConfig = (Resolve-Path -LiteralPath $ConfigPath).Path
 $matrixFile = (Resolve-Path -LiteralPath $MatrixPath).Path
-$baselineFile = (Resolve-Path -LiteralPath $BaselineManifestPath).Path
+$baselineFile = if ($CandidateOnly) { "" } else { (Resolve-Path -LiteralPath $BaselineManifestPath).Path }
 $matrix = Get-Content -Raw -LiteralPath $matrixFile | ConvertFrom-Json
 $allCases = @($matrix.cases)
 $dprGroups = @($allCases | Group-Object { ([double]$_.device_pixel_ratio).ToString('0.###', [Globalization.CultureInfo]::InvariantCulture) })
@@ -66,9 +67,13 @@ try {
 		$process = Start-Process -FilePath $executablePath -ArgumentList @('--multiple', '--config', $configCopy) -PassThru
 		try {
 			Wait-AutomationPort -Port $port -Process $process -TimeoutSeconds $StartupTimeoutSeconds
-			& "$PSScriptRoot\invoke-qml-visual-gate.ps1" -AutomationPort $port -AutomationToken $token `
-				-MatrixPath $matrixFile -BaselineManifestPath $baselineFile -OutputDirectory $groupDirectory `
-				-ExpectedDevicePixelRatio $dpr
+			$workerArguments = @{
+				AutomationPort = $port; AutomationToken = $token; MatrixPath = $matrixFile
+				OutputDirectory = $groupDirectory; ExpectedDevicePixelRatio = $dpr
+			}
+			if ($CandidateOnly) { $workerArguments.CandidateOnly = $true }
+			else { $workerArguments.BaselineManifestPath = $baselineFile }
+			& "$PSScriptRoot\invoke-qml-visual-gate.ps1" @workerArguments
 			$groupManifest = Get-Content -Raw -LiteralPath (Join-Path $groupDirectory 'manifest.json') | ConvertFrom-Json
 			foreach ($case in @($groupManifest.cases)) {
 				Copy-Item -LiteralPath (Join-Path $groupDirectory "$($case.id).png") -Destination $root -Force
@@ -92,8 +97,13 @@ if ($expectedIds.Count -ne $actualIds.Count -or (Compare-Object $expectedIds $ac
 }
 $manifest = [ordered]@{
 	schema_version = 1; frontend = 'qml'; process_isolation = 'per-dpr'
+	mode = if ($CandidateOnly) { 'candidate-only' } else { 'gate' }
 	matrix_sha256 = Get-QmlVisualFileSha256 $matrixFile; cases = $combinedCases
 }
 $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $root 'manifest.json') -Encoding utf8NoBOM
 Assert-QmlVisualManifest $manifest | Out-Null
-Write-Host "Qt Quick visual matrix passed $($combinedCases.Count) cases across $($dprGroups.Count) isolated client processes."
+if ($CandidateOnly) {
+	Write-Warning "Candidate-only matrix completed with $($combinedCases.Count) cases. This is NOT a passing gate and no baseline was updated."
+} else {
+	Write-Host "Qt Quick visual matrix passed $($combinedCases.Count) cases across $($dprGroups.Count) isolated client processes."
+}

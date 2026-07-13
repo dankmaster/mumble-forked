@@ -3,7 +3,8 @@ param(
 	[Parameter(Mandatory = $true)][int]$AutomationPort,
 	[string]$AutomationToken = "",
 	[string]$MatrixPath = "$PSScriptRoot\qml-visual-gate-matrix.json",
-	[Parameter(Mandatory = $true)][string]$BaselineManifestPath,
+	[Parameter(Mandatory = $true, ParameterSetName = "Gate")][string]$BaselineManifestPath,
+	[Parameter(Mandatory = $true, ParameterSetName = "Candidate")][switch]$CandidateOnly,
 	[string]$OutputDirectory = ".tmp\qml-visual-gate",
 	[Parameter(Mandatory = $true)][double]$ExpectedDevicePixelRatio,
 	[int]$TimeoutMilliseconds = 10000
@@ -72,8 +73,11 @@ $requiredStates = @($selectedCases | ForEach-Object { [string]$_.state } | Sort-
 foreach ($state in $requiredStates) {
 	if ($state -notin $supportedStates) { throw "Required visual state '$state' is not supported. The gate fails closed." }
 }
-$baseline = Get-Content -Raw -LiteralPath (Resolve-Path -LiteralPath $BaselineManifestPath).Path | ConvertFrom-Json
-Assert-QmlVisualManifest $baseline | Out-Null
+$baseline = $null
+if (-not $CandidateOnly) {
+	$baseline = Get-Content -Raw -LiteralPath (Resolve-Path -LiteralPath $BaselineManifestPath).Path | ConvertFrom-Json
+	Assert-QmlVisualManifest $baseline | Out-Null
+}
 
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $output | Out-Null
@@ -126,18 +130,25 @@ foreach ($case in $selectedCases) {
 	})
 }
 
-$manifest = [ordered]@{ schema_version = 1; frontend = "qml"; matrix_sha256 = Get-QmlVisualFileSha256 $MatrixPath; cases = $results }
+$manifest = [ordered]@{
+	schema_version = 1; frontend = "qml"; mode = if ($CandidateOnly) { "candidate-only" } else { "gate" }
+	matrix_sha256 = Get-QmlVisualFileSha256 $MatrixPath; cases = $results
+}
 $manifestPath = Join-Path $output "manifest.json"
 $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
 Assert-QmlVisualManifest $manifest | Out-Null
 
-$baselineById = @{}; foreach ($case in @($baseline.cases)) { $baselineById[[string]$case.id] = $case }
-foreach ($case in $results) {
-	if (-not $baselineById.ContainsKey([string]$case.id)) { throw "Baseline is missing case '$($case.id)'." }
-	$expected = $baselineById[[string]$case.id]
-	if ($case.image_sha256 -ne $expected.image_sha256 -or $case.accessibility_sha256 -ne $expected.accessibility_sha256 -or
-		$case.image_width -ne $expected.image_width -or $case.image_height -ne $expected.image_height) {
-		throw "Visual or accessibility baseline mismatch for '$($case.id)'. Candidate artifacts remain in '$output'."
+if (-not $CandidateOnly) {
+	$baselineById = @{}; foreach ($case in @($baseline.cases)) { $baselineById[[string]$case.id] = $case }
+	foreach ($case in $results) {
+		if (-not $baselineById.ContainsKey([string]$case.id)) { throw "Baseline is missing case '$($case.id)'." }
+		$expected = $baselineById[[string]$case.id]
+		if ($case.image_sha256 -ne $expected.image_sha256 -or $case.accessibility_sha256 -ne $expected.accessibility_sha256 -or
+			$case.image_width -ne $expected.image_width -or $case.image_height -ne $expected.image_height) {
+			throw "Visual or accessibility baseline mismatch for '$($case.id)'. Candidate artifacts remain in '$output'."
+		}
 	}
+	Write-Host "Qt Quick visual gate passed $($results.Count) cases at DPR $actualDevicePixelRatio. Manifest: $manifestPath"
+} else {
+	Write-Warning "Candidate-only capture completed. This is NOT a passing visual gate and no baseline was updated. Manifest: $manifestPath"
 }
-Write-Host "Qt Quick visual gate passed $($results.Count) cases at DPR $actualDevicePixelRatio. Manifest: $manifestPath"
