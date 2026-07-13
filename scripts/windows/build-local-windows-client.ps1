@@ -1434,7 +1434,7 @@ function Test-ObjectHasProperty {
 		[string]$Name
 	)
 
-	return $Object -and $Object.PSObject.Properties.Name -contains $Name
+	return $Object -and @($Object.PSObject.Properties | ForEach-Object Name) -contains $Name
 }
 
 function Get-ObjectBooleanProperty {
@@ -1451,6 +1451,57 @@ function Get-ObjectBooleanProperty {
 	}
 
 	return [bool]$Object.PSObject.Properties[$Name].Value
+}
+
+function Test-UsableH264EncoderCapability {
+	param(
+		[Parameter(Mandatory = $true)]
+		[object]$Capabilities,
+
+		[Parameter(Mandatory = $true)]
+		[object]$RuntimeSupport
+	)
+
+	# Prefer the helper's typed backend inventory. This includes both ffmpeg and
+	# GStreamer encoders and deliberately excludes the non-executable planning
+	# stub. Codec value 1 is the helper protocol's H.264 identifier.
+	if (Test-ObjectHasProperty -Object $Capabilities -Name "encoder_backends") {
+		foreach ($backend in @($Capabilities.encoder_backends)) {
+			if (-not $backend -or -not (Get-ObjectBooleanProperty -Object $backend -Name "available")) {
+				continue
+			}
+			$id = if (Test-ObjectHasProperty -Object $backend -Name "id") {
+				[string]$backend.id
+			} else {
+				""
+			}
+			if ($id -eq "stub") {
+				continue
+			}
+			if (@($backend.codecs | Where-Object { [string]$_ -eq "1" }).Count -gt 0) {
+				return $true
+			}
+		}
+	}
+
+	# Keep compatibility with older helper envelopes that only exposed boolean
+	# runtime fields instead of encoder_backends.
+	foreach ($name in @(
+		"h264_nvenc_available",
+		"h264_mf_available",
+		"h264_qsv_available",
+		"libx264_available",
+		"gst_nvd3d11h264enc_available",
+		"gst_mfh264enc_available",
+		"gst_x264enc_available",
+		"gst_openh264enc_available"
+	)) {
+		if (Get-ObjectBooleanProperty -Object $RuntimeSupport -Name $name) {
+			return $true
+		}
+	}
+
+	return $false
 }
 
 function Get-RepoArtifactPaths {
@@ -1747,9 +1798,7 @@ try {
 				if ($browserAvailabilityReported -and -not $browserAvailable) {
 					throw "Helper runtime probe found no supported browser on this machine."
 				}
-				if (-not ((Get-ObjectBooleanProperty -Object $runtimeSupport -Name "h264_mf_available") -or
-					(Get-ObjectBooleanProperty -Object $runtimeSupport -Name "h264_qsv_available") -or
-					(Get-ObjectBooleanProperty -Object $runtimeSupport -Name "libx264_available"))) {
+				if (-not (Test-UsableH264EncoderCapability -Capabilities $capabilities -RuntimeSupport $runtimeSupport)) {
 					throw "Helper runtime probe found no usable H.264 encoder."
 				}
 				if ($RequireGStreamerRuntime) {
