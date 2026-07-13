@@ -134,7 +134,6 @@ Useful optional features in this tree include:
 -Dclient=ON
 -Dserver=ON
 -Dscreen-helper=ON
--Dmodern-layout-webengine=ON
 -Drnnoise=ON
 -Ddtln=ON
 -Ddeepfilternet=ON

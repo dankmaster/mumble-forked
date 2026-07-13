@@ -174,11 +174,6 @@ Include the Modern UI automation server and JavaScript automation hooks.
 Include Modern shell mockup and walkthrough functionality.
 (Default: ${MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT})
 
-### modern-layout-webengine
-
-Enable the Qt WebEngine-based relay runtime.
-(Default: OFF)
-
 ### online-tests
 
 Whether or not tests that need a working internet connection should be included

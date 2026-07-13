@@ -13,7 +13,6 @@ param(
 	[switch]$InstallFfmpeg,
 	[switch]$EnablePackaging,
 	[switch]$SkipSharedInstaller,
-	[switch]$SharedWebEngine,
 	[switch]$VerifyHelperRuntime,
 	[switch]$RequireGStreamerRuntime,
 	[switch]$SkipConfigure,
@@ -521,7 +520,7 @@ function Assert-NoPendingReboot {
 	}
 }
 
-function Assert-SharedWebEngineDeployment {
+function Assert-QtQuickDesktopDeployment {
 	param(
 		[Parameter(Mandatory = $true)]
 		[string]$StageRoot
@@ -718,7 +717,7 @@ function Invoke-SharedWindowsPackaging {
 	Copy-SharedQtOpenSslBackend -StageRoot $stageRoot -EnvironmentRoot $env:MUMBLE_ENVIRONMENT_DIR -Triplet $env:MUMBLE_VCPKG_TRIPLET
 	Copy-SharedQtQuickDialogsModule -StageRoot $stageRoot -EnvironmentRoot $env:MUMBLE_ENVIRONMENT_DIR -Triplet $env:MUMBLE_VCPKG_TRIPLET
 	Write-SharedQtConf -StageRoot $stageRoot
-	Assert-SharedWebEngineDeployment -StageRoot $stageRoot
+	Assert-QtQuickDesktopDeployment -StageRoot $stageRoot
 	Write-SharedRuntimeManifest -StageRoot $stageRoot
 
 	if ($SkipInstaller) {
@@ -988,52 +987,6 @@ function Assert-CommandAvailable {
 	if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
 		throw "Required command '$Name' was not found in PATH."
 	}
-}
-
-function Test-RemoteEnvironmentArchiveExists {
-	param(
-		[Parameter(Mandatory = $true)]
-		[string]$ArchiveUrl
-	)
-
-	try {
-		$response = Invoke-WebRequest -Method Head -Uri $ArchiveUrl -UseBasicParsing
-		return $response.StatusCode -ge 200 -and $response.StatusCode -lt 400
-	}
-	catch {
-		return $false
-	}
-}
-
-function Assert-RemoteEnvironmentArchiveAvailable {
-	param(
-		[Parameter(Mandatory = $true)]
-		[string]$EnvironmentSource,
-
-		[Parameter(Mandatory = $true)]
-		[string]$EnvironmentVersion,
-
-		[Parameter(Mandatory = $true)]
-		[string]$EnvironmentDir
-	)
-
-	if ((Test-Path -LiteralPath $EnvironmentDir) -and (Get-ChildItem -LiteralPath $EnvironmentDir -Force -ErrorAction SilentlyContinue | Select-Object -First 1)) {
-		return
-	}
-
-	$archiveUrl = "$EnvironmentSource/$EnvironmentVersion.7z"
-	$splitArchiveUrl = "$archiveUrl.001"
-	if ((Test-RemoteEnvironmentArchiveExists -ArchiveUrl $archiveUrl) -or
-		(Test-RemoteEnvironmentArchiveExists -ArchiveUrl $splitArchiveUrl)) {
-		return
-	}
-
-	if ($env:MUMBLE_ALLOW_ENVIRONMENT_BOOTSTRAP -eq "ON") {
-		Write-Warning "The requested build environment archive is not published; falling back to local bootstrap: $archiveUrl"
-		return
-	}
-
-	throw "The requested build environment archive is not published: $archiveUrl"
 }
 
 function Get-ShortSharedEnvironmentPath {
@@ -1418,8 +1371,7 @@ function Get-RepoArtifactPaths {
 $scriptDir = Split-Path -Parent $PSCommandPath
 $repoRoot = (Resolve-Path (Join-Path $scriptDir "..\..")).Path
 $repoRootForBash = To-BashPath $repoRoot
-$buildDirectoryName = if ($SharedWebEngine) { "build-shared-webengine" } else { "build" }
-$buildRoot = Join-Path $repoRoot $buildDirectoryName
+$buildRoot = Join-Path $repoRoot "build-shared-webengine"
 $runnerTemp = Join-Path $repoRoot ".tmp"
 $null = New-Item -ItemType Directory -Force -Path $runnerTemp
 
@@ -1434,12 +1386,9 @@ try {
 	$env:RUNNER_TEMP = To-BashPath $runnerTemp
 	$env:MUMBLE_BUILD_DIR_OVERRIDE = To-BashPath $buildRoot
 	$env:BUILD_TYPE = $BuildType
-	$env:CMAKE_OPTIONS = "-Dtests=OFF -Dsymbols=ON -Ddisplay-install-paths=ON -Dtest-lto=OFF -Dplugins=OFF"
-	if ($SharedWebEngine) {
-		# The current shared zeroc-ice-mumble install is incomplete for consumers, so
-		# keep the shared client bring-up path from configuring murmur's optional Ice RPC.
-		$env:CMAKE_OPTIONS = "$($env:CMAKE_OPTIONS) -Dice=OFF"
-	}
+	# The current shared zeroc-ice-mumble install is incomplete for consumers, so
+	# keep the shared client bring-up path from configuring murmur's optional Ice RPC.
+	$env:CMAKE_OPTIONS = "-Dtests=OFF -Dsymbols=ON -Ddisplay-install-paths=ON -Dtest-lto=OFF -Dplugins=OFF -Dice=OFF"
 	if ($AdditionalCMakeOptions.Count -gt 0) {
 		$env:CMAKE_OPTIONS = "$($env:CMAKE_OPTIONS) $($AdditionalCMakeOptions -join ' ')"
 	}
@@ -1471,41 +1420,26 @@ try {
 			throw "EnvironmentCommit must be specified when EnvironmentRelease is used."
 		}
 
-		$legacyEnvironmentDir = Join-Path $repoRoot "build_env\$EnvironmentRelease-$EnvironmentCommit"
-		$preferredEnvironmentDir = if ($SharedWebEngine) {
-			Join-Path $repoRoot "build_env\$EnvironmentRelease-$EnvironmentCommit-shared"
-		} else {
-			Join-Path $repoRoot "build_env\$EnvironmentRelease-$EnvironmentCommit-static"
-		}
+		$preferredEnvironmentDir = Join-Path $repoRoot "build_env\$EnvironmentRelease-$EnvironmentCommit-shared"
 
 		if ([string]::IsNullOrWhiteSpace($env:MUMBLE_ENVIRONMENT_SOURCE_OVERRIDE)) {
 			$env:MUMBLE_ENVIRONMENT_SOURCE_OVERRIDE = "https://github.com/mumble-voip/vcpkg/releases/download/$EnvironmentRelease"
 		}
 		$env:MUMBLE_ENVIRONMENT_COMMIT_OVERRIDE = $EnvironmentCommit
-		$customEnvironmentDir = $preferredEnvironmentDir
-		if ((-not $SharedWebEngine) -and (-not $InstallDependencies) `
-			-and (-not (Test-Path -LiteralPath $preferredEnvironmentDir)) `
-			-and (Test-Path -LiteralPath $legacyEnvironmentDir)) {
-			$customEnvironmentDir = $legacyEnvironmentDir
-		}
-		if ($SharedWebEngine) {
-			$customEnvironmentDir = Get-ShortSharedEnvironmentPath -TargetPath $customEnvironmentDir
-		}
+		$customEnvironmentDir = Get-ShortSharedEnvironmentPath -TargetPath $preferredEnvironmentDir
 		$env:MUMBLE_ENVIRONMENT_DIR_OVERRIDE = To-BashPath $customEnvironmentDir
 	}
 
 	Ensure-LocalBuildTooling
 	Initialize-LocalOnnxRuntimeRoot -RepoRoot $repoRoot
 	Initialize-RustCargoPath
-	$windowsBuildType = if ($SharedWebEngine) { "shared" } else { "static" }
-	if ($SharedWebEngine -and [string]::IsNullOrWhiteSpace($env:MUMBLE_ALLOW_ENVIRONMENT_BOOTSTRAP)) {
+	$windowsBuildType = "shared"
+	if ([string]::IsNullOrWhiteSpace($env:MUMBLE_ALLOW_ENVIRONMENT_BOOTSTRAP)) {
 		$env:MUMBLE_ALLOW_ENVIRONMENT_BOOTSTRAP = "ON"
 	}
 
-	if ($InstallDependencies -or $SharedWebEngine) {
-		Assert-NoPendingReboot -Context 'the Windows shared build/dependency bootstrap' `
-			-AllowHardPendingReboot:$AllowPendingReboot
-	}
+	Assert-NoPendingReboot -Context 'the Windows shared build/dependency bootstrap' `
+		-AllowHardPendingReboot:$AllowPendingReboot
 
 	Assert-CommandAvailable git
 	Assert-CommandAvailable cmake
@@ -1519,15 +1453,10 @@ try {
 	)
 	Set-EnvironmentVariablesFromFile -FilePath $githubEnvFile
 
-	if ($SharedWebEngine -and -not $InstallDependencies) {
+	if (-not $InstallDependencies) {
 		if (-not (Test-SharedEnvironmentReady -EnvironmentDir $env:MUMBLE_ENVIRONMENT_DIR -Triplet $env:MUMBLE_VCPKG_TRIPLET)) {
-			throw "Shared WebEngine dependencies are not ready under '$env:MUMBLE_ENVIRONMENT_DIR'. Re-run with -SharedWebEngine -InstallDependencies to bootstrap the local x64-windows environment."
+			throw "Shared Qt Quick/WebEngineQuick dependencies are not ready under '$env:MUMBLE_ENVIRONMENT_DIR'. Re-run with -InstallDependencies to bootstrap the local x64-windows environment."
 		}
-	}
-
-	if ($InstallDependencies -and -not $SharedWebEngine) {
-		Assert-RemoteEnvironmentArchiveAvailable -EnvironmentSource $env:MUMBLE_ENVIRONMENT_SOURCE `
-			-EnvironmentVersion $env:MUMBLE_ENVIRONMENT_VERSION -EnvironmentDir $env:MUMBLE_ENVIRONMENT_DIR
 	}
 
 	if ($InstallDependencies) {
@@ -1570,7 +1499,7 @@ try {
 
 	Remove-Item Env:MUMBLE_CI_PHASE -ErrorAction SilentlyContinue
 
-	if ($SharedWebEngine -and $EnablePackaging) {
+	if ($EnablePackaging) {
 		Invoke-SharedWindowsPackaging -RepoRoot $repoRoot -BuildRoot $buildRoot -BuildType $BuildType `
 			-SkipInstaller:$SkipSharedInstaller `
 			-AllInstallerLanguages:$AllInstallerLanguages
@@ -1587,13 +1516,11 @@ try {
 
 		$helperSearchRoots = @()
 		$stagedRuntimeRoots = @()
-		if ($SharedWebEngine) {
-			$stagedHelperRoot = Join-Path $buildRoot "shared-webengine-stage"
-			if (Test-Path -LiteralPath $stagedHelperRoot) {
-				$resolvedStagedHelperRoot = (Resolve-Path -LiteralPath $stagedHelperRoot).Path
-				$stagedRuntimeRoots += $resolvedStagedHelperRoot
-				$helperSearchRoots += $resolvedStagedHelperRoot
-			}
+		$stagedHelperRoot = Join-Path $buildRoot "shared-webengine-stage"
+		if (Test-Path -LiteralPath $stagedHelperRoot) {
+			$resolvedStagedHelperRoot = (Resolve-Path -LiteralPath $stagedHelperRoot).Path
+			$stagedRuntimeRoots += $resolvedStagedHelperRoot
+			$helperSearchRoots += $resolvedStagedHelperRoot
 		}
 		$stagedWindowsPayloadRoot = Join-Path $buildRoot "windows-client-payload"
 		if (Test-Path -LiteralPath $stagedWindowsPayloadRoot) {

@@ -210,16 +210,16 @@ Notes for local use:
   in place.
 - Override the compatibility version only if you explicitly need a different
   upgrade relationship: `-DMUMBLE_WINDOWS_INSTALLER_VERSION=<version>`.
-- The script mirrors the shared workflow's configure/build path when
-  `-SharedWebEngine` is used.
+- The tracked desktop-client wrapper always mirrors the shared Qt
+  Quick/WebEngineQuick workflow. It has no static-client selector.
 - The shared workflow bootstraps the pinned ONNX Runtime archive for DTLN and
   installs Rust so the DeepFilterNet runtime DLL can be built on the Windows
   runner as part of the client artifact build.
 - `-AllowPendingReboot` is an opt-in escape hatch for local use: it downgrades
   hard pending-reboot blockers to warnings for that run instead of aborting.
 - It skips local MySQL setup because that workflow has tests disabled.
-- Static lane artifacts are written into `build\`; shared/WebEngine artifacts
-  are written into `build-shared-webengine\`.
+- Desktop-client artifacts are written into `build-shared-webengine\`. Static
+  server-only CI lanes use their own build paths and do not call this wrapper.
 
 ## Publishing a reusable Windows build environment
 

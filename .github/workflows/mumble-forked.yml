@@ -99,7 +99,6 @@ jobs:
             BuildNumber = "${{ github.run_number }}"
             EnvironmentRelease = "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE }}"
             EnvironmentCommit = "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT }}"
-            SharedWebEngine = $true
             AdditionalCMakeOptions = @(
               '-Dserver=OFF',
               '-Dmodern-layout-automation=OFF',
@@ -122,7 +121,6 @@ jobs:
             -BuildNumber "${{ github.run_number }}" `
             -EnvironmentRelease "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE }}" `
             -EnvironmentCommit "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT }}" `
-            -SharedWebEngine `
             -SkipConfigure `
             -SkipBuild `
             -VerifyHelperRuntime `
