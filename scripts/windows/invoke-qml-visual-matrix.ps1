@@ -47,6 +47,9 @@ $root = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $root | Out-Null
 $saved = @{
 	QT_SCALE_FACTOR = $env:QT_SCALE_FACTOR
+	QT_QUICK_BACKEND = $env:QT_QUICK_BACKEND
+	QSG_RHI_BACKEND = $env:QSG_RHI_BACKEND
+	QSG_RENDER_LOOP = $env:QSG_RENDER_LOOP
 	MUMBLE_MODERN_AUTOMATION_PORT = $env:MUMBLE_MODERN_AUTOMATION_PORT
 	MUMBLE_MODERN_AUTOMATION_TOKEN = $env:MUMBLE_MODERN_AUTOMATION_TOKEN
 }
@@ -62,6 +65,11 @@ try {
 		$port = Get-FreeTcpPort
 		$token = [Guid]::NewGuid().ToString('N')
 		$env:QT_SCALE_FACTOR = $dpr.ToString('0.###', [Globalization.CultureInfo]::InvariantCulture)
+		# Screenshot gates need deterministic complete frames across Windows GPU/driver
+		# combinations. Production and performance runs keep the normal GPU backend.
+		$env:QT_QUICK_BACKEND = 'software'
+		$env:QSG_RHI_BACKEND = 'software'
+		$env:QSG_RENDER_LOOP = 'basic'
 		$env:MUMBLE_MODERN_AUTOMATION_PORT = [string]$port
 		$env:MUMBLE_MODERN_AUTOMATION_TOKEN = $token
 		$process = Start-Process -FilePath $executablePath -ArgumentList @('--multiple', '--config', $configCopy) -PassThru
@@ -86,6 +94,9 @@ try {
 	}
 } finally {
 	$env:QT_SCALE_FACTOR = $saved.QT_SCALE_FACTOR
+	$env:QT_QUICK_BACKEND = $saved.QT_QUICK_BACKEND
+	$env:QSG_RHI_BACKEND = $saved.QSG_RHI_BACKEND
+	$env:QSG_RENDER_LOOP = $saved.QSG_RENDER_LOOP
 	$env:MUMBLE_MODERN_AUTOMATION_PORT = $saved.MUMBLE_MODERN_AUTOMATION_PORT
 	$env:MUMBLE_MODERN_AUTOMATION_TOKEN = $saved.MUMBLE_MODERN_AUTOMATION_TOKEN
 }
@@ -96,7 +107,7 @@ if ($expectedIds.Count -ne $actualIds.Count -or (Compare-Object $expectedIds $ac
 	throw "Per-process DPR runs did not cover the complete visual matrix."
 }
 $manifest = [ordered]@{
-	schema_version = 1; frontend = 'qml'; process_isolation = 'per-dpr'
+	schema_version = 1; frontend = 'qml'; process_isolation = 'per-dpr'; renderer = 'software'
 	mode = if ($CandidateOnly) { 'candidate-only' } else { 'gate' }
 	matrix_sha256 = Get-QmlVisualFileSha256 $matrixFile; cases = $combinedCases
 }

@@ -3,7 +3,7 @@
   "cases": [
     { "id": "desktop-light-connected", "width": 1440, "height": 900, "device_pixel_ratio": 1.0, "theme": "light", "layout": "regular", "state": "connected" },
     { "id": "desktop-dark-connected", "width": 1440, "height": 900, "device_pixel_ratio": 1.0, "theme": "dark", "layout": "regular", "state": "connected" },
-    { "id": "hidpi-dark-connected", "width": 1280, "height": 800, "device_pixel_ratio": 1.5, "theme": "dark", "layout": "regular", "state": "connected" },
+    { "id": "hidpi-dark-connected", "width": 960, "height": 600, "device_pixel_ratio": 1.5, "theme": "dark", "layout": "regular", "state": "connected" },
     { "id": "compact-light-connected", "width": 900, "height": 700, "device_pixel_ratio": 1.0, "theme": "light", "layout": "compact", "state": "connected" },
     { "id": "compact-dark-connected", "width": 900, "height": 700, "device_pixel_ratio": 1.0, "theme": "dark", "layout": "compact", "state": "connected" },
     { "id": "desktop-light-empty", "width": 1280, "height": 800, "device_pixel_ratio": 1.0, "theme": "light", "layout": "regular", "state": "empty" },

@@ -2,9 +2,11 @@
 
 `scripts/windows/invoke-qml-visual-matrix.ps1` is the full fail-closed Windows matrix runner. It starts one isolated client process per device-pixel-ratio group with `QT_SCALE_FACTOR`, a copied config, and a unique automation port and token. `invoke-qml-visual-gate.ps1` is its attach-mode worker: it verifies the existing `QQuickWindow`'s actual DPR and only runs cases matching that DPR. It never attempts to change DPR at runtime because DPR belongs to screen/process scale state and Qt exposes no truthful window-level setter.
 
+The screenshot matrix uses Qt Quick's software backend and basic render loop to make captures complete and pixel-deterministic across Windows GPU drivers. This override is scoped to visual-gate child processes; production clients and performance measurements continue to use the normal accelerated renderer.
+
 The automation server must prove that it can set an exact Qt Quick fixture, resize the top-level `QQuickWindow`, override theme, capture the window, and serialize the QML accessibility tree. Every case records state, dimensions, actual DPR, SHA-256 hashes, and accessibility output in `manifest.json`.
 
-The default matrix covers reference desktop and compact sizes, 1.0 and 1.5 device-pixel ratios, light and dark themes, and empty, loading, error, and connected states. A missing capability, state, capture, accessibility tree, dimension, hash, or baseline case fails the run. CI only compares candidates; it never updates a baseline.
+The default matrix covers reference desktop and compact sizes, 1.0 and 1.5 device-pixel ratios, light and dark themes, and empty, loading, error, and connected states. The HiDPI case uses a 960×600 logical window (1440×900 physical pixels at DPR 1.5) so Windows can honor the exact requested size on common 1080p runners. A missing capability, state, capture, accessibility tree, dimension, hash, or baseline case fails the run. CI only compares candidates; it never updates a baseline.
 
 Run a gate after starting an automation-enabled QML client:
 
