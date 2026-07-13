@@ -1,96 +1,135 @@
 # Current Status And Roadmap
 
-Status snapshot: 2026-07-12.
+Status snapshot: 2026-07-13.
 
-This document is the short public handoff for where the fork stands today and
-what the next product direction is. It describes the intended `master` state,
-not a temporary experiment branch.
+This document is the short public handoff for the fork's current product state.
+It describes the Windows Qt Quick desktop client, not the retired WebEngine or
+classic Qt Widgets clients.
 
 ## Product Stance
 
-This fork is a private-community Mumble build. The goal is still to preserve the
-core voice experience that makes Mumble useful, but the fork desktop client
-product direction is now modern-only:
+This fork is a private-community Mumble build. The Windows desktop client is
+Modern-only:
 
-- the native Qt Quick Modern shell is the visible client shell for the forked client
-- classic layout switching is no longer a product path for that client
-- Qt Widgets remains only for narrow operating-system and plugin-owned surfaces;
-  no hidden compatibility view is part of the product client
-- server compatibility for upstream/native Mumble clients remains a product
-  requirement: ordinary voice, channel membership, ACLs, registration,
-  certificates, and basic text should keep working where practical
-- fork-only features remain capability-gated so unsupported clients and servers
-  keep ordinary voice and basic text behavior
+- all Mumble-owned product UI is rendered by Qt Quick/QML in a direct
+  `QQuickWindow`
+- typed C++ controllers and `QAbstractItemModel` implementations own product
+  state; QML does not consume browser snapshots, JSON patches, or WebChannel
+- no classic layout, hidden compatibility tree, native chat/log dock, or
+  Mumble-owned widget dialog is a product fallback
+- Qt Widgets remains linked only for narrow operating-system integration and
+  plugin-owned Configure/About windows
+- lazy `QtWebEngineQuick` is an explicit media-player exception, not an
+  application shell
+- server compatibility for ordinary Mumble clients remains a requirement for
+  voice, channel membership, ACLs, registration, certificates, and basic text
+- fork-only features remain capability-gated so unsupported peers retain
+  ordinary Mumble behavior
 
-The fork is not trying to become a general replacement for upstream Mumble. When
-a change is broadly useful, it should still be considered for upstream first.
+The fork is not trying to replace upstream Mumble for every use case. Changes
+that are broadly useful should still be considered for upstream first.
 
 ## Current State
 
 The main feature surface today is:
 
-- Modern shell: Qt Quick navigator, chat timeline, room list, rich cards,
-  direct-message tray, themed dialogs, context menus, update banners, feedback,
-  crash handoff, and modern settings backed by typed C++ controllers and models.
-- Persistent chat: stored voice-room and text-room history, optional
-  server-global chat, private/direct-message protocol support when both peers
-  and the server can use it, pagination, read state, replies, deletion,
-  reactions, actor avatars, warmup, and history grants.
-- Rich media: authenticated chunked uploads/downloads, stored assets, image
-  normalization, generated preview derivatives, URL embeds, client-assisted
-  previews, and server-owned thumbnail persistence.
-- Stonks: scoped finance chat behavior, Yahoo quote parsing, provider links,
+- **Windows Qt Quick client:** native room and participant navigation, a virtualized
+  chat timeline and composer, direct-message windows, themed dialogs and
+  menus, Settings, plugins, certificates, recorder, ACL/admin flows, Manual
+  Plugin, PTT tool, updater state, and frontend-neutral UI automation.
+- **Direct state binding:** stable session/channel/scope/message IDs connect
+  QML to typed models. Incremental row changes and role-level updates replace
+  the retired full-shell snapshot and hydration transport.
+- **Persistent chat:** stored voice-room and text-room history, optional
+  server-global chat, capability-gated persistent direct messages, pagination,
+  read state, replies, deletion, reactions, actor avatars, warmup, and history
+  grants.
+- **Rich content:** structured rich text and preview cards, authenticated
+  attachments, normalized images, and an asynchronous image-provider pipeline.
+  Sender-controlled images are constrained by MIME, encoded-size, dimension,
+  decoded-pixel, source-store, and decoded-cache budgets. Remote preview image
+  hydration uses bounded HTTPS fetches, redirect checks, public-address
+  validation, cancellation, and generation-safe cache entries.
+- **Media boundary:** interactive provider playback/watch-together creates an
+  off-the-record `QtWebEngineQuick` view only after explicit user interaction.
+  Navigation is allowlisted; downloads, permissions, authentication prompts,
+  certificate exceptions, popups, and file dialogs fail closed. It has no
+  WebChannel or application-state bridge. Screen-share video uses a native QML
+  scene-graph item instead.
+- **Plugins:** startup discovery, transaction recovery and package preparation
+  run asynchronously. A serial lifecycle worker performs update queries,
+  load/unload, installation, reload and rollback away from the GUI thread,
+  while a lifecycle barrier protects in-flight audio/positional/event callbacks.
+  Configure/About remains plugin-owned native UI. Cancellation, progress,
+  per-item errors, rollback and partial success share stable operation IDs
+  without changing the plugin ABI or settings format.
+- **Screen sharing:** experimental control-plane signaling, helper IPC,
+  capability probing, native QML viewing, and LiveKit/GStreamer integration.
+  The supported client scope in this delivery is Windows capture and viewing;
+  Murmur and the external relay remain deployable on Linux.
+- **Stonks:** scoped finance chat behavior, quote parsing, provider links,
   Modern portfolio/leaderboard/following UI, and server-backed ledger tables.
-- Screen sharing: experimental signaling, server policy, helper IPC, capability
-  probing, Windows/Linux helper runtime paths, GStreamer/LiveKit publish/view
-  support where the runtime is packaged, and diagnostic/self-test hooks.
-- Speech cleanup: RNNoise, DTLN, and DeepFilterNet model plumbing with local
+- **Speech cleanup:** RNNoise, DTLN, and DeepFilterNet model plumbing with local
   benchmark and packaged-runtime smoke paths.
-- Windows distribution: shared/WebEngine payload builds, `mumble-forked` MSI,
-  update package artifacts, manifest-driven in-app update prompts, and MSI
-  fallback for failed package apply.
-- Server compatibility: ordinary upstream/native clients can still connect to
-  the forked server for baseline Mumble behavior, but they do not get the full
-  persistent rich chat, stonks, screen-share, or Modern shell feature surface.
-- Legacy cuts: ASIO, G15/LCD, PositionalAudioViewer, in-game overlay, and
-  TalkingUI have been removed from the fork direction.
+- **Distribution:** shared Windows Qt builds, `mumble-forked` MSI and update
+  packages, manifest-driven in-app update prompts, and MSI fallback after a
+  failed package apply.
+- **Legacy cuts:** ASIO, G15/LCD, PositionalAudioViewer, in-game overlay,
+  TalkingUI, the classic widget client, and the HTML/CSS/JavaScript product
+  shell are outside the fork direction.
+
+## Runtime And Verification Scope
+
+Windows is the first production gate and has the local build, connected-review,
+packaging, installer, automation, screenshot, and performance harnesses. The
+production scope for this delivery is the Windows Qt Quick client plus the Linux
+Murmur/relay deployment. Linux and macOS desktop-client porting, capture,
+shortcuts, packaging, and runtime claims are explicitly outside this delivery.
+
+The 2026-07-13 Windows reference pass includes the strict source inventory,
+controller/component tests, connected room and two-client chat checks, a
+deterministic 11-case screenshot/accessibility matrix, five-run performance
+measurements, staged-runtime validation, and MSI/bootstrapper generation. The
+Linux server lane is configured client-off and screen-helper-off; its native CI
+run is the release authority after changes are pushed.
+
+Screen sharing as a whole remains experimental until real packaged publish/view
+sessions, relay failure recovery, helper restart, and target quality profiles
+are proven for the Windows client against the deployed Linux relay.
 
 ## Near-Term Direction
 
-The next work should make the modern-only stance true in the code, not just in
-the UI:
+The remaining work is release hardening rather than another frontend migration:
 
-- keep the removed classic widget and Web-shell source out of every desktop
-  build and package
-- keep WebEngine lazy and isolated to explicit interactive provider playback;
-  it must not carry application state or use WebChannel
-- keep server-side native-client compatibility boring and explicit: do not
-  remove baseline `Version`, session/channel, ACL, registration/certificate, or
-  transient `TextMessage` behavior just because the fork desktop client is
-  modern-only
-- keep server-log rendering on a direct typed-model path
-- keep direct messages honest: persistent DM history is supported only when the
-  server advertises it and both users have registered identities; otherwise the
-  Modern tray uses private non-persistent text-message mode
-- turn the screen-share path from "experimental but wired" into a verified
-  release feature by proving real publish/view sessions, runtime packaging, and
-  failure recovery on the target Windows client
-- harden rich media with cache retention, preview pruning, derivative coverage,
-  and stricter fetch isolation
-- keep release tooling boring: CI, package manifest validation, updater
-  fallback behavior, and sanitized public screenshots should stay current as
-  features move
+- keep the Modern-only source inventory strict: no `.ui` forms, WebChannel,
+  browser product shell, compatibility widgets, or unallowlisted widget prompts
+- keep WebEngine lazy, off-the-record, isolated to explicit media playback, and
+  absent before the user opens a media session
+- graduate screen sharing only after two-client publish/view, reconnect,
+  helper/renderer failure, relay TLS/TURN, and quality tests are repeatable
+- keep plugin file/network work asynchronous and report slow third-party ABI
+  calls; a misbehaving in-process plugin cannot be made preemptible without a
+  separate plugin process and ABI proxy
+- preserve bounded rich-content fetch/decode caches and extend adversarial
+  media tests as new providers are added
+- preserve the Qt Quick performance gates: no steady-state model resets, no
+  synchronous network/plugin/file work on the UI thread, no UI stalls over
+  50 ms, and no Chromium renderer before media activation
+- keep native-client protocol compatibility and release tooling boring and
+  explicit
 
 ## Documentation Rules
 
 When updating public docs:
 
-- write from current `master` behavior unless a document is clearly labeled as a
-  historical plan
-- call unfinished work "experimental", "deferred", or "migration scaffolding"
-  instead of presenting it as complete
-- verify feature claims against `src/Mumble.proto`, `src/ForkFeature.*`,
-  `src/ChatFeature.*`, `src/mumble/MainWindow.cpp`,
-  `src/mumble/ModernSettingsController.cpp`, `src/murmur/Messages.cpp`, and the
-  relevant helper/runtime files
+- write from current `master` behavior unless a document is clearly labeled as
+  an archived plan
+- distinguish source/build coverage from live Windows and Linux-server
+  verification
+- call screen sharing experimental until its live release matrix is complete
+- verify claims against `src/Mumble.proto`, `src/ForkFeature.*`,
+  `src/ChatFeature.*`, `src/mumble/QmlShellHost.*`,
+  `src/mumble/QmlClientModels.*`, `src/mumble/PluginManager.*`,
+  `src/mumble/QmlImageProvider.*`, the Windows paths in `src/screen-helper/`,
+  and `src/murmur/Messages.cpp`
 - keep public screenshots redacted and sourced from sanitized UI captures

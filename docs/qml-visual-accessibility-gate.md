@@ -10,6 +10,8 @@ The automation server must prove that it can set an exact Qt Quick fixture, resi
 
 The default matrix covers reference desktop and compact sizes, 1.0 and 1.5 device-pixel ratios, light and dark themes, and empty, loading, error, and connected states. The HiDPI case uses a 960×600 logical window (1440×900 physical pixels at DPR 1.5) so Windows can honor the exact requested size on common 1080p runners. A missing capability, state, capture, accessibility tree, dimension, hash, or baseline case fails the run. CI only compares candidates; it never updates a baseline.
 
+The reviewed Windows reference artifacts are tracked in `qml-visual-baseline/`. The Windows shared-client workflow builds a separate automation-enabled client only after publishing the release payload, then compares all matrix cases against that baseline. The shipped client and installer remain automation-disabled.
+
 Run a gate after starting an automation-enabled QML client:
 
 ```powershell

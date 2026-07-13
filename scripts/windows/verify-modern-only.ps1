@@ -19,9 +19,63 @@ function Find-Matches {
 	return @($output)
 }
 
+$qmlResourcePath = Join-Path $repoRoot 'src\mumble\qml-shell.qrc'
+$qmlResource = [xml](Get-Content -LiteralPath $qmlResourcePath -Raw)
+$registeredQmlFiles = @($qmlResource.RCC.qresource.file | ForEach-Object { [string]$_.'#text' } | Sort-Object -Unique)
+$sourceQmlFiles = @(Get-ChildItem (Join-Path $repoRoot 'src\mumble\qml-shell') -File -Filter '*.qml' |
+	ForEach-Object { "qml-shell/$($_.Name)" } | Sort-Object -Unique)
+$qmlResourceMismatch = @(Compare-Object -ReferenceObject $sourceQmlFiles -DifferenceObject $registeredQmlFiles |
+	ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" })
+$retiredClassicThemeFiles = @(
+	'src\mumble\ThemeInfo.cpp',
+	'src\mumble\ThemeInfo.h',
+	'src\mumble\Themes.cpp',
+	'src\mumble\Themes.h',
+	'themes\DefaultTheme.qrc',
+	'themes\CatppuccinTheme.qrc'
+) | ForEach-Object { Join-Path $repoRoot $_ } | Where-Object { Test-Path -LiteralPath $_ }
+$retiredClassicThemeFiles = @($retiredClassicThemeFiles) + @(
+	Get-ChildItem (Join-Path $repoRoot 'themes') -Recurse -File -ErrorAction SilentlyContinue |
+		ForEach-Object FullName
+)
+
+$nativeStatusIconAliases = @(
+	'native/deafened_self.svg',
+	'native/deafened_server.svg',
+	'native/information.svg',
+	'native/muted_pushtomute.svg',
+	'native/muted_self.svg',
+	'native/muted_server.svg',
+	'native/muted_suppressed.svg',
+	'native/talking_off.svg',
+	'native/talking_on.svg',
+	'native/talking_shout.svg',
+	'native/talking_whisper.svg'
+) | Sort-Object
+$mumbleResourcePath = Join-Path $repoRoot 'src\mumble\mumble.qrc'
+$mumbleResource = [xml](Get-Content -LiteralPath $mumbleResourcePath -Raw)
+$nativeStatusIconEntries = @($mumbleResource.RCC.qresource.file | Where-Object { [string]$_.alias -like 'native/*' })
+$registeredNativeStatusIconAliases = @($nativeStatusIconEntries | ForEach-Object { [string]$_.alias } | Sort-Object)
+$nativeStatusIconResourceMismatch = @(
+	Compare-Object -ReferenceObject $nativeStatusIconAliases -DifferenceObject $registeredNativeStatusIconAliases |
+		ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }
+)
+$nativeStatusIconResourceMismatch += @(
+	$nativeStatusIconEntries | ForEach-Object {
+		$sourcePath = Join-Path (Split-Path $mumbleResourcePath -Parent) ([string]$_.'#text')
+		if (-not (Test-Path -LiteralPath $sourcePath)) { $sourcePath }
+	}
+)
+
 $checks = [ordered]@{
 	ui_files = @(Get-ChildItem (Join-Path $repoRoot 'src\mumble') -Recurse -Filter '*.ui' -File | ForEach-Object FullName)
+	qml_resource_mismatch = $qmlResourceMismatch
+	native_status_icon_resource_mismatch = $nativeStatusIconResourceMismatch
+	qml_rich_text_outside_structured_renderer = Find-Matches @('-n', 'Text\.(?:RichText|StyledText|MarkdownText)|textFormat\s*:\s*Text\.(?:RichText|StyledText|MarkdownText)', 'src/mumble/qml-shell', '--glob', '*.qml', '--glob', '!RichMessageBody.qml')
+	qml_label_autotext_defaults = Find-Matches @('-n', '-U', '--pcre2', '\bLabel\s*\{(?:[ \t]*\r?\n(?![ \t]*textFormat\s*:)|(?![ \t]*\r?\n)(?![^\r\n}]*\btextFormat\s*:))', 'src/mumble/qml-shell', '--glob', '*.qml', '--glob', '!RichMessageBody.qml')
+	qml_self_model_bindings = Find-Matches @('-n', '--pcre2', '\b([A-Za-z_]\w*Model)\s*:\s*\1\b', 'src/mumble/qml-shell', '--glob', '*.qml')
 	mainwindow_ui = @((Test-Path (Join-Path $repoRoot 'src\mumble\MainWindowUi.h')) | Where-Object { $_ })
+	mainwindow_spurious_autoconnect_slots = Find-Matches @('-n', 'on_(?:qmServer_aboutToShow|qaServerSettings_triggered|qaCreateTextRoom_triggered|qmSelf_aboutToShow|qaUserGrantChatHistory_triggered|qmConfig_aboutToShow|muteCuePopup_triggered)', 'src/mumble/MainWindow.cpp', 'src/mumble/MainWindow.h', 'src/mumble/AudioInput.cpp', 'src/mumble/Messages.cpp')
 	modern_layout_guards = Find-Matches @('-n', 'MUMBLE_HAS_MODERN_LAYOUT|modern-layout-webengine|activateLegacyShell', 'src', '.github', 'scripts/windows', '--glob', '!*.ts', '--glob', '!verify-modern-only.ps1')
 	classic_mainwindow_views = Find-Matches @('-n', 'qtvUsers|qdwLog|qdwChat|qteLog|qteChat|qtIconToolbar', 'src/mumble/MainWindow.cpp', 'src/mumble/MainWindow.h')
 	mainwindow_widget_facade = Find-Matches @('-n', 'class MainWindow\s*:\s*public QMainWindow|QMainWindow\s*\(|QMainWindow::|QtWidgets/QMainWindow', 'src/mumble/MainWindow.cpp', 'src/mumble/MainWindow.h')
@@ -30,10 +84,14 @@ $checks = [ordered]@{
 	legacy_web_hosts = Find-Matches @('-n', 'ModernShellHost|ModernShellBridge|ModernDialogHost|ModernContextMenuHost|ModernPttToolHost', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h')
 	webchannel = Find-Matches @('-n', 'QWebChannel|Qt6::WebChannel', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h', '--glob', 'CMakeLists.txt')
 	webengine_widgets = Find-Matches @('-n', 'QWebEngineView|QtWebEngineWidgets|Qt6::WebEngineWidgets', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h', '--glob', 'CMakeLists.txt')
-	webengine_quick_outside_media_allowlist = Find-Matches @('-n', 'QtWebEngine|WebEngineView|WebEngineProfile', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h', '--glob', '*.qml', '--glob', '!MediaSessionWindow.qml', '--glob', '!main.cpp')
+	webengine_quick_outside_media_allowlist = Find-Matches @('-n', 'QtWebEngine|WebEngineView|WebEngineProfile', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h', '--glob', '*.qml', '--glob', '!MediaSessionWindow.qml', '--glob', '!QmlMediaProfileFactory.cpp', '--glob', '!QmlMediaProfileFactory.h', '--glob', '!main.cpp')
 	legacy_snapshot_bridge = Find-Matches @('-n', 'buildModernShellSnapshot|queueModernShellSnapshot|ModernShellSnapshotSync|modernShellSnapshot', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h')
 	legacy_patch_bridge_symbols = Find-Matches @('-n', 'buildModernShellRoomStatePatch|publishModernShellMessagesPatch|publishModernShellRoomStatePatch|m_modernShell[A-Za-z0-9_]*Patch', 'src/mumble/MainWindow.cpp', 'src/mumble/MainWindow.h')
+	server_ping_full_frontend_reconcile = Find-Matches @('-n', '-U', '--pcre2', 'pingRequested[\s\S]{0,600}(?:scheduleQmlRoomStateUpdate|scheduleQmlShellStateSync|syncQmlShellState)|(?:scheduleQmlRoomStateUpdate|scheduleQmlShellStateSync|syncQmlShellState)[\s\S]{0,600}pingRequested', 'src/mumble/MainWindow.cpp', 'src/mumble/MainWindow.h', 'src/mumble/ServerHandler.cpp', 'src/mumble/ServerHandler.h')
 	hidden_product_widget_construction = Find-Matches @('-n', 'new (UserView|LogTextBrowser|ChatbarTextEdit|PersistentChatMessageGroupWidget|ResponsiveImageDialog|RichTextEditor)', 'src/mumble', '--glob', '*.cpp')
+	usermodel_classic_presentation = Find-Matches @('-n', 'Qt::(?:DecorationRole|FontRole|BackgroundRole|ToolTipRole|WhatsThisRole)|\bQIcon\b|skin:|\b(?:expandAll|collapseEmpty|ensureSelfVisible|forceVisualUpdate)\b', 'src/mumble/UserModel.cpp', 'src/mumble/UserModel.h')
+	classic_qss_theme_resources = @($retiredClassicThemeFiles) + @(Find-Matches @('-n', '\bThemeInfo\b|\bThemes::|[<"]Themes\.h[>"]|DefaultTheme\.qrc|CatppuccinTheme\.qrc|requireThemeApplication', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h', 'src/tests/TestSettingsJSONSerialization/CMakeLists.txt', '--glob', 'CMakeLists.txt'))
+	classic_skin_resource_refs = Find-Matches @('-n', 'skin:', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h', '--glob', '*.qml', '--glob', '*.qrc', '--glob', 'CMakeLists.txt')
 	legacy_hidden_widget_helpers = Find-Matches @('-n', '\b(?:DeveloperConsole|ApplicationPalette|ClickableLabel|EventFilters)\b|new\s+QTextBrowser\s*\(|new\s+QWidget\s*\(', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h', '--glob', 'CMakeLists.txt')
 	widget_backed_log_sink = Find-Matches @('-n', 'qt_color_sink|QtLogSink|spdlog/sinks/qt_sinks', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h', '--glob', 'CMakeLists.txt')
 	native_product_dialog_fallbacks = Find-Matches @('-n', 'QDialog dialog\(this\)|AboutDialog adAbout|class AboutDialog|new AboutDialog|ServerNavigatorUserMenuPopup', 'src/mumble', '--glob', '*.cpp', '--glob', '*.h')

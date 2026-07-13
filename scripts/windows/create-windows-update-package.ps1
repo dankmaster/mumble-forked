@@ -79,6 +79,143 @@ function Assert-SafePackagePath {
 	}
 }
 
+function Get-RequiredQtQuickPayloadPaths {
+	return @(
+		'mumble.exe',
+		'mumble-updater.exe',
+		'Qt6Core.dll',
+		'Qt6Gui.dll',
+		'Qt6Qml.dll',
+		'Qt6Quick.dll',
+		'Qt6WebEngineCore.dll',
+		'Qt6WebEngineQuick.dll',
+		'QtWebEngineProcess.exe',
+		'platforms/qwindows.dll',
+		'tls/qopensslbackend.dll',
+		'qml/QtQuick/qmldir',
+		'qml/QtQuick/Controls/qmldir',
+		'qml/QtQuick/Layouts/qmldir',
+		'qml/QtQuick/Dialogs/qmldir',
+		'qml/QtWebEngine/qmldir',
+		'qml/QtWebEngine/qtwebenginequickplugin.dll',
+		'resources/icudtl.dat',
+		'resources/qtwebengine_resources.pak',
+		'translations/qtwebengine_locales/en-US.pak',
+		'qt.conf',
+		'direct-runtime-dependencies.txt'
+	)
+}
+
+function Assert-QtQuickPayload {
+	Param(
+		[Parameter(Mandatory = $true)]
+		[string] $Root
+	)
+
+	$requiredPayloadPaths = @(Get-RequiredQtQuickPayloadPaths)
+	foreach ($requiredPath in $requiredPayloadPaths) {
+		if (-not (Test-Path -LiteralPath (Join-Path $Root $requiredPath) -PathType Leaf)) {
+			throw "Qt Quick payload is missing required file: $requiredPath"
+		}
+	}
+
+	$runtimeManifestPath = Join-Path $Root 'runtime-manifest.json'
+	if (-not (Test-Path -LiteralPath $runtimeManifestPath -PathType Leaf)) {
+		throw "Qt Quick payload is missing runtime-manifest.json"
+	}
+	$runtimeManifest = Get-Content -LiteralPath $runtimeManifestPath -Raw | ConvertFrom-Json
+	$runtimeEntries = @($runtimeManifest.files)
+	if ($runtimeManifest.schema_version -ne 1 -or $runtimeEntries.Count -eq 0) {
+		throw "Qt Quick payload has an invalid or empty runtime manifest"
+	}
+
+	$runtimePaths = @($runtimeEntries | ForEach-Object { [string]$_.path })
+	foreach ($runtimePath in $runtimePaths) {
+		Assert-SafePackagePath -RelativePath $runtimePath
+		$runtimePathParts = @($runtimePath -split '/')
+		if ($runtimePath.Contains('\') -or $runtimePathParts -contains '.' -or $runtimePathParts -contains '') {
+			throw "Runtime manifest contains a non-canonical path: $runtimePath"
+		}
+	}
+	$duplicateRuntimePaths = @($runtimePaths |
+		Group-Object { $_.ToLowerInvariant() } |
+		Where-Object Count -gt 1 |
+		ForEach-Object { $_.Group -join ', ' })
+	if ($duplicateRuntimePaths.Count -gt 0) {
+		throw "Runtime manifest contains duplicate paths: $($duplicateRuntimePaths -join '; ')"
+	}
+	$sortedRuntimePaths = @($runtimePaths | Sort-Object)
+	for ($index = 0; $index -lt $runtimePaths.Count; ++$index) {
+		if ($runtimePaths[$index] -cne $sortedRuntimePaths[$index]) {
+			throw "Runtime manifest paths are not in deterministic sorted order"
+		}
+	}
+	foreach ($requiredPath in $requiredPayloadPaths) {
+		if ($runtimePaths -notcontains $requiredPath) {
+			throw "Runtime manifest is missing required file: $requiredPath"
+		}
+	}
+
+	$actualRuntimePaths = @(Get-ChildItem -LiteralPath $Root -Recurse -File |
+		Where-Object { $_.FullName -ne $runtimeManifestPath } |
+		ForEach-Object { Get-RelativePackagePath -Root $Root -Path $_.FullName } |
+		Sort-Object)
+	$runtimePathSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+	$actualRuntimePathSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+	foreach ($runtimePath in $runtimePaths) {
+		[void]$runtimePathSet.Add($runtimePath)
+	}
+	foreach ($actualRuntimePath in $actualRuntimePaths) {
+		[void]$actualRuntimePathSet.Add($actualRuntimePath)
+	}
+	$unlistedRuntimeFiles = @($actualRuntimePaths | Where-Object { -not $runtimePathSet.Contains($_) })
+	$missingRuntimeFiles = @($runtimePaths | Where-Object { -not $actualRuntimePathSet.Contains($_) })
+	if ($unlistedRuntimeFiles.Count -gt 0 -or $missingRuntimeFiles.Count -gt 0) {
+		throw "Runtime manifest does not exactly cover the payload (unlisted: $($unlistedRuntimeFiles -join ', '); missing: $($missingRuntimeFiles -join ', '))"
+	}
+
+	foreach ($entry in $runtimeEntries) {
+		$filePath = Join-Path $Root ([string]$entry.path)
+		$item = Get-Item -LiteralPath $filePath
+		if ([int64]$entry.size -ne [int64]$item.Length) {
+			throw "Runtime manifest size mismatch for $($entry.path)"
+		}
+		$hash = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
+		if ($hash -ne ([string]$entry.sha256).ToLowerInvariant()) {
+			throw "Runtime manifest SHA256 mismatch for $($entry.path)"
+		}
+	}
+
+	$directDependencies = @(Get-Content -LiteralPath (Join-Path $Root 'direct-runtime-dependencies.txt') |
+		ForEach-Object { ([string]$_).Trim() } |
+		Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+	$invalidDirectDependencies = @($directDependencies | Where-Object { $_ -notmatch '^[A-Za-z0-9_.+-]+\.(?:dll|drv|cpl)$' })
+	if ($invalidDirectDependencies.Count -gt 0) {
+		throw "Direct runtime dependency report contains invalid entries: $($invalidDirectDependencies -join ', ')"
+	}
+	foreach ($requiredDirectRuntime in @('Qt6Quick.dll', 'Qt6Qml.dll', 'Qt6WebEngineQuick.dll', 'Qt6WebEngineCore.dll')) {
+		if ($directDependencies -notcontains $requiredDirectRuntime) {
+			throw "Direct runtime dependency report is missing: $requiredDirectRuntime"
+		}
+	}
+	$forbiddenDirectRuntimes = @(
+		'Qt6QuickWidgets.dll',
+		'Qt6WebEngineWidgets.dll',
+		'Qt6WebChannel.dll',
+		'Qt6WebChannelQuick.dll'
+	)
+	$forbiddenDirectImports = @($forbiddenDirectRuntimes | Where-Object { $directDependencies -contains $_ })
+	if ($forbiddenDirectImports.Count -gt 0) {
+		throw "Payload directly imports compatibility or app-bridge runtimes: $($forbiddenDirectImports -join ', ')"
+	}
+	$forbiddenPayloadRuntimes = @(Get-ChildItem -LiteralPath $Root -Recurse -File | Where-Object {
+		$_.Name -in @('Qt6QuickWidgets.dll', 'Qt6WebEngineWidgets.dll')
+	})
+	if ($forbiddenPayloadRuntimes.Count -gt 0) {
+		throw "Payload contains forbidden compatibility runtimes: $($forbiddenPayloadRuntimes.FullName -join ', ')"
+	}
+}
+
 function Test-PackageArchive {
 	Param(
 		[Parameter(Mandatory = $true)]
@@ -108,7 +245,9 @@ function Test-PackageArchive {
 			throw "Unexpected package format '$($manifest.format)'"
 		}
 
-		$required = @('mumble.exe', 'mumble-updater.exe')
+		Assert-QtQuickPayload -Root $payloadRoot
+
+		$required = @(Get-RequiredQtQuickPayloadPaths) + @('runtime-manifest.json')
 		if ($RequireUpdaterRuntime) {
 			$required += @(
 				'zlib1.dll'
@@ -140,7 +279,39 @@ function Test-PackageArchive {
 			}
 		}
 
-		foreach ($entry in $manifest.files) {
+		$packageEntries = @($manifest.files)
+		$packagePaths = @($packageEntries | ForEach-Object { [string]$_.path })
+		$duplicatePackagePaths = @($packagePaths |
+			Group-Object { $_.ToLowerInvariant() } |
+			Where-Object Count -gt 1 |
+			ForEach-Object { $_.Group -join ', ' })
+		if ($duplicatePackagePaths.Count -gt 0) {
+			throw "Package manifest contains duplicate paths: $($duplicatePackagePaths -join '; ')"
+		}
+		$sortedPackagePaths = @($packagePaths | Sort-Object)
+		for ($index = 0; $index -lt $packagePaths.Count; ++$index) {
+			if ($packagePaths[$index] -cne $sortedPackagePaths[$index]) {
+				throw "Package manifest paths are not in deterministic sorted order"
+			}
+		}
+		$actualPackagePaths = @(Get-ChildItem -LiteralPath $payloadRoot -Recurse -File |
+			ForEach-Object { Get-RelativePackagePath -Root $payloadRoot -Path $_.FullName } |
+			Sort-Object)
+		$packagePathSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+		$actualPackagePathSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+		foreach ($packagePath in $packagePaths) {
+			[void]$packagePathSet.Add($packagePath)
+		}
+		foreach ($actualPackagePath in $actualPackagePaths) {
+			[void]$actualPackagePathSet.Add($actualPackagePath)
+		}
+		$unlistedPackageFiles = @($actualPackagePaths | Where-Object { -not $packagePathSet.Contains($_) })
+		$missingPackageFiles = @($packagePaths | Where-Object { -not $actualPackagePathSet.Contains($_) })
+		if ($unlistedPackageFiles.Count -gt 0 -or $missingPackageFiles.Count -gt 0) {
+			throw "Package manifest does not exactly cover payload/ (unlisted: $($unlistedPackageFiles -join ', '); missing: $($missingPackageFiles -join ', '))"
+		}
+
+		foreach ($entry in $packageEntries) {
 			Assert-SafePackagePath -RelativePath $entry.path
 			$filePath = Join-Path $payloadRoot ($entry.path -replace '/', [System.IO.Path]::DirectorySeparatorChar)
 			if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
@@ -203,6 +374,8 @@ if (-not (Test-Path -LiteralPath (Join-Path $stageRootResolved 'mumble.exe') -Pa
 if (-not (Test-Path -LiteralPath (Join-Path $stageRootResolved 'mumble-updater.exe') -PathType Leaf)) {
 	throw "StageRoot is missing mumble-updater.exe: $stageRootResolved"
 }
+
+Assert-QtQuickPayload -Root $stageRootResolved
 
 if ($RequireUpdaterRuntime -and -not (Test-Path -LiteralPath (Join-Path $stageRootResolved 'zlib1.dll') -PathType Leaf)) {
 	throw "StageRoot is missing updater runtime file zlib1.dll: $stageRootResolved"

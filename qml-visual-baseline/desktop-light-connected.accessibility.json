@@ -1,0 +1,577 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Mumble Visual Fixture",
+              "rect": {
+                "height": 19,
+                "width": 274,
+                "x": 1140,
+                "y": 27
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Connected",
+              "rect": {
+                "height": 15,
+                "width": 274,
+                "x": 1140,
+                "y": 49
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "ROOMS",
+              "rect": {
+                "height": 14,
+                "width": 38,
+                "x": 1140,
+                "y": 102
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Lobby",
+                  "rect": {
+                    "height": 16,
+                    "width": 270,
+                    "x": 1142,
+                    "y": 145
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Lobby",
+              "rect": {
+                "height": 38,
+                "width": 290,
+                "x": 1132,
+                "y": 134
+              },
+              "role": "ListItem",
+              "states": [
+                "focusable",
+                "selected"
+              ]
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Studio",
+                  "rect": {
+                    "height": 16,
+                    "width": 270,
+                    "x": 1142,
+                    "y": 185
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "",
+              "name": "Studio",
+              "rect": {
+                "height": 38,
+                "width": 290,
+                "x": 1132,
+                "y": 174
+              },
+              "role": "ListItem",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "#general",
+                  "rect": {
+                    "height": 16,
+                    "width": 270,
+                    "x": 1142,
+                    "y": 222
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Text room",
+                  "rect": {
+                    "height": 14,
+                    "width": 270,
+                    "x": 1142,
+                    "y": 240
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "Text room",
+              "name": "#general",
+              "rect": {
+                "height": 48,
+                "width": 290,
+                "x": 1132,
+                "y": 214
+              },
+              "role": "ListItem",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "PARTICIPANTS",
+              "rect": {
+                "height": 14,
+                "width": 70,
+                "x": 1140,
+                "y": 712
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Demo User",
+                  "rect": {
+                    "height": 15,
+                    "width": 272,
+                    "x": 1150,
+                    "y": 739
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Listening",
+                  "rect": {
+                    "height": 12,
+                    "width": 272,
+                    "x": 1150,
+                    "y": 754
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "Listening",
+              "name": "Demo User",
+              "rect": {
+                "height": 42,
+                "width": 290,
+                "x": 1132,
+                "y": 732
+              },
+              "role": "ListItem",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Alex",
+                  "rect": {
+                    "height": 15,
+                    "width": 272,
+                    "x": 1150,
+                    "y": 781
+                  },
+                  "role": "StaticText",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Talking",
+                  "rect": {
+                    "height": 12,
+                    "width": 272,
+                    "x": 1150,
+                    "y": 796
+                  },
+                  "role": "StaticText",
+                  "states": []
+                }
+              ],
+              "description": "Talking",
+              "name": "Alex",
+              "rect": {
+                "height": 42,
+                "width": 290,
+                "x": 1132,
+                "y": 774
+              },
+              "role": "ListItem",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Profile menu",
+              "rect": {
+                "height": 40,
+                "width": 40,
+                "x": 1350,
+                "y": 834
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Demo User",
+              "rect": {
+                "height": 16,
+                "width": 61,
+                "x": 1134,
+                "y": 837
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Mute",
+              "rect": {
+                "height": 34,
+                "width": 56,
+                "x": 1246,
+                "y": 837
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Online",
+              "rect": {
+                "height": 14,
+                "width": 29,
+                "x": 1134,
+                "y": 858
+              },
+              "role": "StaticText",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Rooms and participants",
+          "rect": {
+            "height": 884,
+            "width": 310,
+            "x": 1122,
+            "y": 8
+          },
+          "role": "Pane",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Lobby",
+          "rect": {
+            "height": 27,
+            "width": 1028,
+            "x": 28,
+            "y": 22
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Application menu",
+          "rect": {
+            "height": 42,
+            "width": 40,
+            "x": 1066,
+            "y": 25
+          },
+          "role": "Button",
+          "states": [
+            "focusable",
+            "focused"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Voice room",
+          "rect": {
+            "height": 16,
+            "width": 1028,
+            "x": 28,
+            "y": 53
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Message actions",
+              "rect": {
+                "height": 40,
+                "width": 40,
+                "x": 664,
+                "y": 116
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "A",
+              "rect": {
+                "height": 16,
+                "width": 8,
+                "x": 62,
+                "y": 126
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Alex",
+              "rect": {
+                "height": 15,
+                "width": 23,
+                "x": 94,
+                "y": 129
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "10:24",
+              "rect": {
+                "height": 12,
+                "width": 22,
+                "x": 125,
+                "y": 130
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Welcome to the deterministic visual fixture.",
+              "rect": {
+                "height": 16,
+                "width": 610,
+                "x": 94,
+                "y": 161
+              },
+              "role": "StaticText",
+              "states": [
+                "readOnly"
+              ]
+            }
+          ],
+          "description": "",
+          "name": "",
+          "rect": {
+            "height": 85,
+            "width": 680,
+            "x": 36,
+            "y": 104
+          },
+          "role": "Client",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Demo User",
+              "rect": {
+                "height": 15,
+                "width": 57,
+                "x": 94,
+                "y": 209
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "10:25",
+              "rect": {
+                "height": 12,
+                "width": 22,
+                "x": 159,
+                "y": 211
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "D",
+              "rect": {
+                "height": 16,
+                "width": 9,
+                "x": 61,
+                "y": 219
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Qt Quick is ready for review.",
+              "rect": {
+                "height": 16,
+                "width": 610,
+                "x": 94,
+                "y": 229
+              },
+              "role": "StaticText",
+              "states": [
+                "readOnly"
+              ]
+            }
+          ],
+          "description": "",
+          "name": "",
+          "rect": {
+            "height": 60,
+            "width": 680,
+            "x": 36,
+            "y": 197
+          },
+          "role": "Client",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Message Lobby",
+          "rect": {
+            "height": 38,
+            "width": 976,
+            "x": 68,
+            "y": 835
+          },
+          "role": "EditableText",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Attach image",
+          "rect": {
+            "height": 34,
+            "width": 36,
+            "x": 22,
+            "y": 837
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Send",
+          "rect": {
+            "height": 34,
+            "width": 54,
+            "x": 1054,
+            "y": 837
+          },
+          "role": "Button",
+          "states": [
+            "disabled"
+          ]
+        }
+      ],
+      "description": "",
+      "name": "",
+      "rect": {
+        "height": 884,
+        "width": 1424,
+        "x": 8,
+        "y": 8
+      },
+      "role": "Client",
+      "states": []
+    }
+  ],
+  "description": "",
+  "name": "Mumble Visual Fixture",
+  "rect": {
+    "height": 900,
+    "width": 1440,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

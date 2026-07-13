@@ -62,7 +62,10 @@ jobs:
           arch: x86_64
 
       - name: Generate compile-command DB
-        run: mkdir build; cd build; cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ..; cd ..; ln -s build/compile_commands.json .
+        run: >-
+          mkdir build; cd build;
+          cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -Dclient=OFF -Dserver=ON -Dtests=OFF -Dscreen-helper=OFF ..;
+          cd ..; ln -s build/compile_commands.json .
         shell: bash
 
       - name: Find changed source files
@@ -255,7 +258,7 @@ jobs:
           set -euxo pipefail
           echo "MUMBLE_BUILD_CLIENT=OFF" >> "$GITHUB_ENV"
           echo "MUMBLE_BUILD_SERVER=ON" >> "$GITHUB_ENV"
-          echo "CMAKE_OPTIONS=${CMAKE_OPTIONS} -Dtests=OFF" >> "$GITHUB_ENV"
+          echo "CMAKE_OPTIONS=${CMAKE_OPTIONS} -Dtests=OFF -Dscreen-helper=OFF" >> "$GITHUB_ENV"
 
       - id: restore-build-env-cache
         uses: actions/cache/restore@v5
@@ -281,6 +284,7 @@ jobs:
           set -euxo pipefail
           test -x build/mumble-server
           test ! -e build/mumble
+          test ! -e build/mumble-screen-helper
 
       - name: Publish Linux Server Artifacts
         if: ${{ github.event_name != 'pull_request' }}
@@ -321,7 +325,7 @@ jobs:
           set -euxo pipefail
           echo "MUMBLE_BUILD_CLIENT=OFF" >> "$GITHUB_ENV"
           echo "MUMBLE_BUILD_SERVER=ON" >> "$GITHUB_ENV"
-          echo "CMAKE_OPTIONS=${CMAKE_OPTIONS} -Ddatabase-mysql-tests=OFF -Ddatabase-postgresql-tests=OFF" >> "$GITHUB_ENV"
+          echo "CMAKE_OPTIONS=${CMAKE_OPTIONS} -Dscreen-helper=OFF -Ddatabase-mysql-tests=OFF -Ddatabase-postgresql-tests=OFF" >> "$GITHUB_ENV"
 
       - uses: ./.github/actions/install-dependencies
         with:
@@ -339,3 +343,11 @@ jobs:
         working-directory: ${{ github.workspace }}/build
         shell: bash
         run: ctest --output-on-failure -C $BUILD_TYPE
+
+      - name: Validate Linux Server Test Binary Set
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -x build/mumble-server
+          test ! -e build/mumble
+          test ! -e build/mumble-screen-helper

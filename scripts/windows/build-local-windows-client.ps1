@@ -3,6 +3,7 @@ param(
 	[string]$BuildNumber = "0",
 	[string]$BuildType = "Release",
 	[string[]]$AdditionalCMakeOptions = @(),
+	[string[]]$BuildTargets = @(),
 	[string]$EnvironmentRelease = "",
 	[string]$EnvironmentCommit = "",
 	[string]$EnvironmentVersionSuffix = "",
@@ -448,6 +449,7 @@ Prefix=.
 Binaries=.
 Plugins=.
 LibraryExecutables=.
+QmlImports=qml
 Qml2Imports=qml
 ArchData=.
 Data=.
@@ -557,9 +559,38 @@ function Assert-QtQuickDesktopDeployment {
 	if ($missing.Count -gt 0) {
 		throw "Shared WebEngine staging is missing required deployed runtime content after windeployqt: $($missing -join ', ')."
 	}
-	$quickDialogsModule = Join-Path $StageRoot "qml\QtQuick\Dialogs\qmldir"
-	if (-not (Test-Path -LiteralPath $quickDialogsModule -PathType Leaf)) {
-		throw "Shared QML staging is missing the QtQuick.Dialogs module manifest: '$quickDialogsModule'."
+
+	# These locations are part of Qt's deployed runtime contract. A recursive
+	# filename match is insufficient because Qt will not discover a module,
+	# platform plugin, locale or WebEngine resource from an arbitrary directory.
+	$requiredRelativePaths = @(
+		"mumble.exe",
+		"mumble-updater.exe",
+		"Qt6Core.dll",
+		"Qt6Gui.dll",
+		"Qt6Qml.dll",
+		"Qt6Quick.dll",
+		"Qt6WebEngineCore.dll",
+		"Qt6WebEngineQuick.dll",
+		"QtWebEngineProcess.exe",
+		"platforms\qwindows.dll",
+		"tls\qopensslbackend.dll",
+		"qml\QtQuick\qmldir",
+		"qml\QtQuick\Controls\qmldir",
+		"qml\QtQuick\Layouts\qmldir",
+		"qml\QtQuick\Dialogs\qmldir",
+		"qml\QtWebEngine\qmldir",
+		"qml\QtWebEngine\qtwebenginequickplugin.dll",
+		"resources\icudtl.dat",
+		"resources\qtwebengine_resources.pak",
+		"translations\qtwebengine_locales\en-US.pak",
+		"qt.conf"
+	)
+	$missingRelativePaths = @($requiredRelativePaths | Where-Object {
+		-not (Test-Path -LiteralPath (Join-Path $StageRoot $_) -PathType Leaf)
+	})
+	if ($missingRelativePaths.Count -gt 0) {
+		throw "Shared QML staging is missing files at required runtime paths: $($missingRelativePaths -join ', ')."
 	}
 
 	$forbiddenRuntime = @(
@@ -574,6 +605,49 @@ function Assert-QtQuickDesktopDeployment {
 			$_.FullName -match "(?i)modern[-_]shell" })
 	if ($legacyProductAssets.Count -gt 0) {
 		throw "Shared QML staging contains legacy HTML/CSS/JavaScript product-shell assets: $($legacyProductAssets.FullName -join ', ')."
+	}
+
+	$stageExe = Join-Path $StageRoot "mumble.exe"
+	$dumpbin = Get-Command dumpbin.exe -ErrorAction SilentlyContinue
+	if (-not $dumpbin) {
+		throw "dumpbin.exe is required to verify the staged Qt Quick client's direct runtime dependencies."
+	}
+	$directDependencyLines = @(& $dumpbin.Source /nologo /dependents $stageExe 2>&1)
+	if ($LASTEXITCODE -ne 0) {
+		throw "dumpbin failed while inspecting the staged Qt Quick client at '$stageExe'."
+	}
+	$directDependencies = @($directDependencyLines |
+		ForEach-Object { ([string]$_).Trim() } |
+		Where-Object { $_ -match '(?i)\.(?:dll|drv|cpl)$' } |
+		Sort-Object -Unique)
+	if ($directDependencies.Count -eq 0) {
+		throw "dumpbin returned no direct runtime dependencies for '$stageExe'."
+	}
+	$directDependencyReport = $directDependencies -join [Environment]::NewLine
+	$directDependencyPath = Join-Path $StageRoot "direct-runtime-dependencies.txt"
+	Set-Content -LiteralPath $directDependencyPath -Value $directDependencyReport -Encoding utf8
+
+	foreach ($requiredDirectRuntime in @("Qt6Quick.dll", "Qt6Qml.dll", "Qt6WebEngineQuick.dll", "Qt6WebEngineCore.dll")) {
+		if ($directDependencyReport -notmatch [regex]::Escape($requiredDirectRuntime)) {
+			throw "The staged client does not directly import required Qt Quick runtime '$requiredDirectRuntime'."
+		}
+	}
+	$forbiddenDirectRuntimes = @(
+		"Qt6QuickWidgets.dll",
+		"Qt6WebEngineWidgets.dll",
+		"Qt6WebChannel.dll",
+		"Qt6WebChannelQuick.dll"
+	)
+	# WebEngineQuick/Core are the explicit isolated media exception. Their DLLs
+	# may be imported by the executable because Qt requires WebEngineQuick to be
+	# initialized before QGuiApplication; the runtime gate separately verifies
+	# that no Chromium renderer process starts before explicit media activation.
+	# Product compatibility widgets and an app-owned WebChannel remain forbidden.
+	$forbiddenDirectImports = @($forbiddenDirectRuntimes | Where-Object {
+		$directDependencyReport -match [regex]::Escape($_)
+	})
+	if ($forbiddenDirectImports.Count -gt 0) {
+		throw "The staged client directly imports compatibility or app-bridge runtimes: $($forbiddenDirectImports -join ', ')."
 	}
 }
 
@@ -1392,6 +1466,15 @@ try {
 	if ($AdditionalCMakeOptions.Count -gt 0) {
 		$env:CMAKE_OPTIONS = "$($env:CMAKE_OPTIONS) $($AdditionalCMakeOptions -join ' ')"
 	}
+	if ($BuildTargets.Count -gt 0) {
+		$invalidBuildTargets = @($BuildTargets | Where-Object { $_ -notmatch '^[A-Za-z0-9_][A-Za-z0-9_.:+-]*$' })
+		if ($invalidBuildTargets.Count -gt 0) {
+			throw "BuildTargets contains invalid CMake target names: $($invalidBuildTargets -join ', ')."
+		}
+		$env:MUMBLE_BUILD_TARGETS = $BuildTargets -join ' '
+	} else {
+		Remove-Item Env:MUMBLE_BUILD_TARGETS -ErrorAction SilentlyContinue
+	}
 	if ($EnablePackaging) {
 		$env:MUMBLE_ENABLE_WINDOWS_PACKAGING = "ON"
 	} else {
@@ -1498,6 +1581,7 @@ try {
 	}
 
 	Remove-Item Env:MUMBLE_CI_PHASE -ErrorAction SilentlyContinue
+	Remove-Item Env:MUMBLE_BUILD_TARGETS -ErrorAction SilentlyContinue
 
 	if ($EnablePackaging) {
 		Invoke-SharedWindowsPackaging -RepoRoot $repoRoot -BuildRoot $buildRoot -BuildType $BuildType `
@@ -1732,6 +1816,8 @@ try {
 	}
 	throw
 } finally {
+	Remove-Item Env:MUMBLE_CI_PHASE -ErrorAction SilentlyContinue
+	Remove-Item Env:MUMBLE_BUILD_TARGETS -ErrorAction SilentlyContinue
 	if (Test-Path -LiteralPath $githubEnvFile) {
 		Remove-Item -LiteralPath $githubEnvFile -Force
 	}

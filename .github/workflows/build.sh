@@ -211,7 +211,23 @@ if [[ "$run_build" == "yes" ]]; then
 
 	trap - ERR
 	set +e
-	cmake --build . --config $BUILD_TYPE --verbose 2>&1 | tee "$build_log"
+	build_command=(cmake --build . --config "$BUILD_TYPE" --verbose)
+	if [[ -n "${MUMBLE_BUILD_TARGETS:-}" ]]; then
+		read -r -a requested_targets <<< "$MUMBLE_BUILD_TARGETS"
+		if [[ "${#requested_targets[@]}" -eq 0 ]]; then
+			echo "::error file=.github/workflows/build.sh,title=Invalid targeted build::MUMBLE_BUILD_TARGETS did not contain a target."
+			exit 1
+		fi
+		for requested_target in "${requested_targets[@]}"; do
+			if [[ ! "$requested_target" =~ ^[A-Za-z0-9_][A-Za-z0-9_.:+-]*$ ]]; then
+				echo "::error file=.github/workflows/build.sh,title=Invalid targeted build::Invalid CMake target '${requested_target}'."
+				exit 1
+			fi
+		done
+		build_command+=(--target "${requested_targets[@]}")
+		echo "::notice title=Targeted CI build::Building ${requested_targets[*]}"
+	fi
+	"${build_command[@]}" 2>&1 | tee "$build_log"
 	build_status=${PIPESTATUS[0]}
 	set -e
 	trap 'exit_code=$?; echo "::error file=.github/workflows/build.sh,line=${LINENO},title=CI build failed::Command \"${BASH_COMMAND}\" exited with status ${exit_code}"; exit "${exit_code}"' ERR

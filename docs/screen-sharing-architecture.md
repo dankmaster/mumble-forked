@@ -1,19 +1,24 @@
 # Screen Sharing Architecture
 
-Status snapshot: 2026-06-05.
+Status snapshot: 2026-07-13.
 
-Screen sharing is an experimental fork feature. The control plane is wired into
-Mumble/Murmur, and the media path is intentionally kept outside the normal voice
-transport.
+Screen sharing is an experimental fork feature. This delivery targets the
+Windows Qt Quick client with Murmur and the external media relay deployed on
+Linux. Linux and macOS desktop clients are outside this delivery and are not
+part of its compatibility or release claims.
 
 ## Goal
 
-Build a fork-specific screen sharing system with:
+The supported product shape is:
 
-1. live desktop or window sharing
-2. Discord-like perceived quality on the private community server
-3. ordinary Mumble voice remaining on the existing Opus transport
-4. optional recording only after live viewing is reliable
+1. a Windows client can share a display, window, or supported application
+   source in its current voice room
+2. other Windows fork clients in that room can view it in the Qt Quick UI
+3. normal Mumble voice remains on the existing Opus transport
+4. Murmur supplies auth, policy, presence, and signaling while an external
+   Linux-hosted relay carries media
+5. old clients and servers retain ordinary voice/text behavior
+6. recording waits until live publish/view is reliable
 
 ## Current Status
 
@@ -24,172 +29,170 @@ Implemented or wired today:
 - `ServerConfig` policy advertisement for enablement, recording policy, helper
   requirement, codec preferences, relay URL, maximum dimensions/FPS, and relay
   settings
-- fork feature gate for richer screen-share presence
-- `ScreenShareCreate`, `ScreenShareState`, `ScreenShareOffer`,
-  `ScreenShareAnswer`, `ScreenShareIceCandidate`, and `ScreenShareStop`
-  protocol messages
-- Murmur state and policy handling for active sessions and relay-token metadata
+- capability-gated `ScreenShareCreate`, `ScreenShareState`,
+  `ScreenShareOffer`, `ScreenShareAnswer`, `ScreenShareIceCandidate`, and
+  `ScreenShareStop` messages
+- Murmur policy/state handling for active sessions and relay-token metadata
 - client-side `ScreenShareManager`
-- external `mumble-screen-helper`
-- local helper IPC over `QLocalSocket`
-- helper capability probing and self-test hooks
-- Windows capture/runtime probing for GStreamer D3D11 LiveKit, Windows Graphics
-  Capture, D3D11 Desktop Duplication, `gdigrab`, and test-pattern capture
-- Linux helper probing for X11/ffmpeg capture, test-pattern capture, and
-  PipeWire runtime diagnostics
-- GStreamer/LiveKit publish and view capability checks where the runtime is
+- external `mumble-screen-helper` with local `QLocalSocket` IPC, capability
+  probing, source listing, start/stop, diagnostics, and self-test hooks
+- GStreamer/LiveKit publish and view planning where the Windows runtime is
   packaged
-- Modern shell picker/status/toast integration and native fallback dialogs for
-  narrow non-modern paths
+- Windows capture/runtime paths for GStreamer D3D11, Windows Graphics Capture,
+  D3D11 Desktop Duplication, FFmpeg `gdigrab`, and test-pattern capture
+- a native Qt Quick decoded-video item backed by bounded shared memory; screen
+  sharing does not use the WebEngine media-player exception
+- QML source picker, status, recovery, and toast flows; there is no classic or
+  native Mumble-owned dialog fallback
+- Linux Murmur/relay deployment with LiveKit-compatible token handoff
 
 Not promised yet:
 
 - production-grade screen-share reliability
-- multi-platform parity
+- Linux or macOS desktop-client support in this delivery
 - recording
 - multi-stream mosaic
-- stock upstream client viewing support
+- stock upstream-client viewing support
 
 ## Why Video Is Not On Mumble Voice Transport
 
-Current Mumble transport is voice-oriented:
+Mumble's real-time transport is voice-oriented. Its normal UDP payload and
+packet sizing are unsuitable for video, and plugin data relay is bounded and
+rate-limited rather than a media transport. The fork therefore uses
+Mumble/Murmur only for authentication, policy, room context, presence, and
+signaling.
 
-- UDP messages are only `Audio` and `Ping`
-- UDP packet size is capped at `1024` bytes
-- the primary real-time payload is Opus audio
-- `PluginDataTransmission` is a TCP relay intended for plugins, not media
-  streaming
+Encoded media travels through the external LiveKit/WebRTC relay path. Murmur
+does not fan out or transcode video frames.
 
-Plugin relay payloads are capped and rate-limited on the server. They are
-useful for control messages, but not for video frames. The fork therefore uses
-Mumble only for auth, policy, presence, and signaling.
+## Compatibility Contract
 
-## Compatibility Direction
-
-Backward compatibility is explicit:
-
-- new client + new server: screen share may be available when server policy and
-  helper/runtime capabilities allow it
-- new client + old server: voice and chat work; screen-share UI is hidden or
-  disabled and screen-share messages are not sent
-- old client + new server: ordinary voice and text behavior continue; the server
-  does not push screen-share messages to unsupported clients
+- new Windows client + new server: screen share is available only when server
+  policy, peer capabilities, helper, capture backend, and relay runtime agree
+- new Windows client + old server: voice and chat continue; screen sharing stays
+  hidden or disabled and no fork message is sent
+- old client + new server: ordinary voice/text continues and unsupported peers
+  are not sent screen-share messages
 - old client + old server: unchanged
 
-Unsupported peers are not expected to watch streams. They should simply keep
-working as normal Mumble peers.
+Unsupported peers are not expected to view streams; they remain normal Mumble
+peers.
 
-## Architecture
+## System Boundary
 
 The implementation is split into three planes:
 
-- `Mumble/Murmur control plane`: auth, ACL, channel membership, stream
-  permissions, session state, relay metadata, and compatibility gating
-- `Client-side screen helper`: capture, encode/decode, external runtime launch,
-  local diagnostics, self-test, and viewer/publisher process supervision
-- `External media relay`: LiveKit/WebRTC fanout, congestion control, NAT
-  traversal support, and optional future recording tap
+- **Windows client/control plane:** Qt Quick UX, `ScreenShareManager`, room and
+  permission state, helper supervision, and native frame presentation
+- **Windows screen helper:** capture, encoder/decoder process launch,
+  diagnostics, self-test, and the bounded decoded-frame channel
+- **Linux server/relay:** Murmur validates room/policy state and supplies relay
+  metadata; LiveKit/WebRTC provides fanout, congestion control, and NAT
+  traversal
 
-The main client communicates with the helper through a narrow IPC command
-surface:
+The main client sends narrow helper commands for capability query, source list,
+publish/view start and stop, and self-test. Product UI remains in QML.
 
-- query capabilities
-- list sources
-- start/stop publish
-- start/stop view
-- self-test
+## Windows Capture And Publish
 
-### Qt Quick rendering boundary
+The helper probes the packaged runtime before advertising a path. Depending on
+the selected source and available elements, publishing can use:
 
-The preferred Windows viewer is a native Qt Quick video pipeline. Local helper
-IPC version 2 includes a bounded BGRA shared-memory ring
-with generation, dimensions, stride, sequence and timestamp metadata. The client
-polls and copies it off the GUI thread and renders immutable frames through a
-dedicated scene-graph texture item. FFmpeg decodes to fixed-size BGRA `rawvideo`
-on a separate stdout channel; GStreamer uses `videoconvert`, `videoscale` and a
-quiet `fdsink` BGRA pipe. Stderr remains diagnostics-only. The helper assembler
-keeps at most two complete frames, drops stale backlog on frame boundaries, and
-publishes sequence gaps through the three-slot ring.
+- GStreamer D3D11 screen capture and conversion
+- Windows Graphics Capture
+- D3D11 Desktop Duplication
+- FFmpeg `gdigrab` fallback
+- an explicit test-pattern diagnostics path
 
-GStreamer keeps its negotiated audio branch while publishing video frames.
-The plain FFmpeg raw-video path is selected only for video-only sessions; shares
-that require audio retain the external renderer until a separate decoded-audio
-sink is available.
+The GStreamer/LiveKit route is the intended release path. H.264 is the first
+practical codec; other codecs are advertised only when the packaged helper
+runtime can execute them. Resolution, FPS, and bitrate are clamped by client,
+helper, and server policy.
 
-A deterministic helper test producer can be enabled with
-`MUMBLE_SCREENSHARE_NATIVE_FRAME_TEST_PATTERN=1` to exercise the process boundary
-without a relay. The foreign `ffplay`/GStreamer window is retained only as an
-explicitly allowlisted v1/platform/dev fallback when raw frame startup or shared
-memory allocation fails.
+Source/window/process-specific audio capture is enabled only when the required
+Windows/GStreamer elements are available. Missing audio support must surface as
+a capability warning rather than silently changing the requested session.
 
-The MVP ring already provides fixed bounds, sequence-gap drop accounting,
-generation resets and deterministic detach. A later zero-copy optimization may
-replace CPU BGRA with shareable GPU textures and synchronization fences; it is
-not required for the native Qt Quick cutover.
+## Native Qt Quick Viewing
 
-## Media Runtime
+Helper IPC version 2 can expose a bounded BGRA shared-memory ring with
+generation, dimensions, stride, sequence, and timestamp metadata. The client
+copies frames off the GUI thread and renders immutable frames through a custom
+Qt Quick scene-graph texture item.
 
-The helper prefers proven external media runtimes instead of embedding a custom
-SFU or video stack in Murmur.
+FFmpeg decodes fixed-size BGRA `rawvideo` on stdout and keeps stderr for
+diagnostics. GStreamer uses `videoconvert`, `videoscale`, and a quiet `fdsink`.
+The helper assembler retains at most two complete frames, discards stale
+backlog only at frame boundaries, and publishes sequence gaps through the
+three-slot ring. Generation changes and detach invalidate stale readers.
 
-Current runtime shape:
+GStreamer keeps its negotiated audio branch while publishing video frames. The
+plain FFmpeg raw-video path is selected only for video-only sessions; sessions
+that require audio retain the explicitly allowlisted external renderer until a
+separate decoded-audio sink exists.
 
-- WebRTC relay sessions are represented by `ScreenShareRelayTransportWebRTC`
-- direct/test transports remain useful for diagnostics and local verification
-- H.264 is the practical first codec, with AV1, VP9, and VP8 advertised when the
-  helper runtime can actually execute them
-- default quality is `1280x720` at `30 FPS`; picker/server limits can expose
-  up to `2560x1440` at `144 FPS`, while capture hard caps go to `3840x2160` at
-  `144 FPS`
-- bitrate is selected from codec, resolution, FPS, and quality profile, then
-  clamped by policy
+`MUMBLE_SCREENSHARE_NATIVE_FRAME_TEST_PATTERN=1` enables a deterministic helper
+producer for process-boundary tests without a relay. A foreign FFplay/GStreamer
+window is retained only as an explicit Windows development/runtime fallback if
+native frame startup or shared-memory allocation fails. It is not a classic
+client UI.
 
-## Server Direction
+A future optimization may replace CPU BGRA with shareable GPU textures and
+synchronization fences. The current correctness contract is fixed bounds,
+sequence-gap accounting, generation-safe reset, and deterministic detach.
 
-Murmur stays narrow:
+## Linux Server And Relay
+
+Murmur remains deliberately narrow on the Linux host:
 
 - validate whether a user may start or view a share
-- expose stream state to supporting clients
-- tear down shares when users disconnect or lose context
-- mint short-lived relay metadata/tokens when LiveKit credentials are
-  configured
+- expose stream state only to capable clients
+- tear down shares on disconnect or invalid room/permission context
+- mint short-lived relay metadata/tokens when LiveKit credentials are configured
 - advertise policy through `ServerConfig`
 
+LiveKit/WebRTC is responsible for media fanout, congestion control, and NAT
+traversal. Relay TLS, TURN, firewall rules, token expiry, and service recovery
+are deployment concerns and must be validated against the real Linux server.
 Murmur should not duplicate encoded video or transcode media.
 
-## Client Direction
+See [`screen-sharing-relay-deployment.md`](screen-sharing-relay-deployment.md)
+for deployment details.
 
-The Modern shell should remain the main UX:
+## Product UX
 
-- start/stop share from the current room
+All Mumble-owned screen-share UI is Qt Quick/QML:
+
+- start/stop from the current room
 - themed source/quality picker
-- visible stream state in room context
-- watch/focus/reopen controls
-- clear helper/runtime diagnostics
-- toast-based failure reporting for Modern users
+- room stream state and watch/focus/reopen actions
+- helper/runtime status and clear recovery errors
+- native QML video presentation
 
-The native dialog path can remain as a narrow fallback while non-modern builds
-still exist.
+Qt Widgets is not a product fallback. OS-owned Windows permission/chooser
+surfaces may remain native because Windows owns them.
 
 ## Recording Direction
 
-Recording remains deferred. If it lands, prefer relay-side recording or a helper
-subscriber that writes asynchronously. It should not sit on the critical live
+Recording remains deferred. If added, prefer relay-side recording or an
+asynchronous helper subscriber. Recording must not sit on the critical live
 publish/view path.
 
-## Verification Needed Before Calling It Stable
+## Verification Required Before Stable
 
-Before screen sharing becomes a production feature, verify:
+- real two-client Windows publish/view using the staged runtime and Linux relay
+- helper crash/restart and renderer/decoder failure recovery
+- publisher/viewer disconnect, room move, permission loss, and reconnect
+- `720p30`, `1080p30`, and one high-FPS/high-resolution profile on the target
+  Windows hardware
+- relay TLS/TURN/firewall/token behavior on the deployed Linux host
+- memory, frame-drop, audio, and UI-thread behavior under sustained sessions
+- clear QML errors and useful helper diagnostics for every failure class
+- Windows staging, MSI, upgrade, and packaged-runtime validation
 
-- real Windows publish/view sessions using the packaged GStreamer LiveKit
-  runtime
-- helper crash and restart behavior
-- publisher disconnect, viewer disconnect, channel move, and permission loss
-- `720p30`, `1080p30`, and one high-FPS/high-resolution path on the target
-  machine
-- relay TLS/TURN/firewall behavior for real users
-- failure messages in the Modern UI and diagnostics logs
+Linux/macOS desktop-client capture, shortcuts, packaging, and runtime validation
+are not gates for this delivery because those clients are explicitly out of
+scope.
 
 See [`screen-sharing-implementation-plan.md`](screen-sharing-implementation-plan.md)
-for the phase ledger and [`screen-sharing-relay-deployment.md`](screen-sharing-relay-deployment.md)
-for relay deployment notes.
+for the execution ledger.

@@ -241,19 +241,125 @@ function Assert-QmlRuntimeManifest {
 	if ($manifest.schema_version -ne 1 -or @($manifest.files).Count -eq 0) {
 		throw "$Label has an invalid or empty runtime manifest."
 	}
-	$manifestPaths = @($manifest.files | ForEach-Object { [string]$_.path })
-	foreach ($requiredPattern in @("mumble.exe", "Qt6Quick.dll", "Qt6Qml.dll", "Qt6WebEngineQuick.dll", "*/QtQuick/Dialogs/qmldir")) {
-		if (-not ($manifestPaths | Where-Object { $_ -like $requiredPattern } | Select-Object -First 1)) {
-			throw "$Label runtime manifest is missing '$requiredPattern'."
+
+	$manifestEntries = @($manifest.files)
+	$manifestPaths = @($manifestEntries | ForEach-Object { [string]$_.path })
+	foreach ($manifestRelativePath in $manifestPaths) {
+		$pathParts = @($manifestRelativePath -split '/')
+		if ([string]::IsNullOrWhiteSpace($manifestRelativePath) `
+			-or [System.IO.Path]::IsPathRooted($manifestRelativePath) `
+			-or $manifestRelativePath.Contains('\') `
+			-or $pathParts -contains '' `
+			-or $pathParts -contains '.' `
+			-or $pathParts -contains '..') {
+			throw "$Label runtime manifest contains an unsafe path: '$manifestRelativePath'."
 		}
 	}
-	foreach ($entry in $manifest.files) {
+
+	$duplicateManifestPaths = @($manifestPaths |
+		Group-Object { $_.ToLowerInvariant() } |
+		Where-Object Count -gt 1 |
+		ForEach-Object { $_.Group -join ', ' })
+	if ($duplicateManifestPaths.Count -gt 0) {
+		throw "$Label runtime manifest contains duplicate paths: $($duplicateManifestPaths -join '; ')."
+	}
+
+	$sortedManifestPaths = @($manifestPaths | Sort-Object)
+	for ($index = 0; $index -lt $manifestPaths.Count; ++$index) {
+		if ($manifestPaths[$index] -cne $sortedManifestPaths[$index]) {
+			throw "$Label runtime manifest paths are not in deterministic sorted order."
+		}
+	}
+
+	$requiredRuntimePaths = @(
+		"mumble.exe",
+		"mumble-updater.exe",
+		"Qt6Core.dll",
+		"Qt6Gui.dll",
+		"Qt6Qml.dll",
+		"Qt6Quick.dll",
+		"Qt6WebEngineCore.dll",
+		"Qt6WebEngineQuick.dll",
+		"QtWebEngineProcess.exe",
+		"platforms/qwindows.dll",
+		"tls/qopensslbackend.dll",
+		"qml/QtQuick/qmldir",
+		"qml/QtQuick/Controls/qmldir",
+		"qml/QtQuick/Layouts/qmldir",
+		"qml/QtQuick/Dialogs/qmldir",
+		"qml/QtWebEngine/qmldir",
+		"qml/QtWebEngine/qtwebenginequickplugin.dll",
+		"resources/icudtl.dat",
+		"resources/qtwebengine_resources.pak",
+		"translations/qtwebengine_locales/en-US.pak",
+		"qt.conf",
+		"direct-runtime-dependencies.txt"
+	)
+	foreach ($requiredRuntimePath in $requiredRuntimePaths) {
+		if ($manifestPaths -notcontains $requiredRuntimePath) {
+			throw "$Label runtime manifest is missing '$requiredRuntimePath'."
+		}
+	}
+
+	$actualRuntimePaths = @(Get-ChildItem -LiteralPath $Root -Recurse -File |
+		Where-Object { $_.FullName -ne $manifestPath } |
+		ForEach-Object { $_.FullName.Substring($Root.TrimEnd('\').Length + 1).Replace('\', '/') } |
+		Sort-Object)
+	$manifestPathSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+	$actualPathSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+	foreach ($path in $manifestPaths) {
+		[void]$manifestPathSet.Add($path)
+	}
+	foreach ($path in $actualRuntimePaths) {
+		[void]$actualPathSet.Add($path)
+	}
+	$missingFromManifest = @($actualRuntimePaths | Where-Object { -not $manifestPathSet.Contains($_) })
+	$missingFromPayload = @($manifestPaths | Where-Object { -not $actualPathSet.Contains($_) })
+	if ($missingFromManifest.Count -gt 0 -or $missingFromPayload.Count -gt 0) {
+		throw "$Label runtime manifest does not exactly cover the staged payload (unlisted: $($missingFromManifest -join ', '); missing: $($missingFromPayload -join ', '))."
+	}
+
+	$directDependencyPath = Join-Path $Root "direct-runtime-dependencies.txt"
+	$directDependencies = @(Get-Content -LiteralPath $directDependencyPath |
+		ForEach-Object { ([string]$_).Trim() } |
+		Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+	$invalidDirectDependencies = @($directDependencies | Where-Object { $_ -notmatch '^[A-Za-z0-9_.+-]+\.(?:dll|drv|cpl)$' })
+	if ($invalidDirectDependencies.Count -gt 0) {
+		throw "$Label direct runtime dependency report contains invalid entries: $($invalidDirectDependencies -join ', ')."
+	}
+	foreach ($requiredDirectRuntime in @("Qt6Quick.dll", "Qt6Qml.dll", "Qt6WebEngineQuick.dll", "Qt6WebEngineCore.dll")) {
+		if ($directDependencies -notcontains $requiredDirectRuntime) {
+			throw "$Label direct runtime dependency report is missing '$requiredDirectRuntime'."
+		}
+	}
+	$forbiddenDirectRuntimes = @(
+		"Qt6QuickWidgets.dll",
+		"Qt6WebEngineWidgets.dll",
+		"Qt6WebChannel.dll",
+		"Qt6WebChannelQuick.dll"
+	)
+	$forbiddenDirectImports = @($forbiddenDirectRuntimes | Where-Object { $directDependencies -contains $_ })
+	if ($forbiddenDirectImports.Count -gt 0) {
+		throw "$Label directly imports compatibility or app-bridge runtimes: $($forbiddenDirectImports -join ', ')."
+	}
+	$forbiddenPayloadRuntimes = @($manifestPaths | Where-Object {
+		[System.IO.Path]::GetFileName($_) -in @("Qt6QuickWidgets.dll", "Qt6WebEngineWidgets.dll")
+	})
+	if ($forbiddenPayloadRuntimes.Count -gt 0) {
+		throw "$Label contains forbidden compatibility runtimes: $($forbiddenPayloadRuntimes -join ', ')."
+	}
+
+	foreach ($entry in $manifestEntries) {
 		$filePath = Join-Path $Root ([string]$entry.path).Replace('/', '\')
 		if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) {
 			throw "$Label runtime manifest references a missing file: '$($entry.path)'."
 		}
+		$actualSize = (Get-Item -LiteralPath $filePath).Length
+		if ([int64]$entry.size -ne [int64]$actualSize) {
+			throw "$Label runtime manifest size mismatch for '$($entry.path)'."
+		}
 		$actualHash = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
-		if ($actualHash -ne [string]$entry.sha256) {
+		if ($actualHash -ne ([string]$entry.sha256).ToLowerInvariant()) {
 			throw "$Label runtime manifest hash mismatch for '$($entry.path)'."
 		}
 	}

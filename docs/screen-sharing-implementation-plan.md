@@ -1,6 +1,6 @@
 # Screen Sharing Implementation Plan
 
-Status snapshot: 2026-06-05.
+Status snapshot: 2026-07-13.
 
 This document is the execution ledger for the screen-sharing feature described
 in [`screen-sharing-architecture.md`](screen-sharing-architecture.md). The
@@ -9,10 +9,10 @@ be described as production-ready.
 
 ## Current Product Definition
 
-The intended MVP is still:
+The Windows-client/Linux-server MVP is:
 
-1. a forked client can start one live screen share in its current channel
-2. other forked clients in that channel can view it
+1. a Windows fork client can start one live screen share in its current channel
+2. other Windows fork clients in that channel can view it
 3. old clients still connect, talk, and chat normally
 4. old servers still accept the new client, but screen share UI stays disabled
 5. no recording in MVP
@@ -28,9 +28,10 @@ FPS values up to the advertised server/helper cap, currently `144 FPS`.
 
 This remains mandatory:
 
-- new client + new server: screen share may be available when policy and helper
-  runtime allow it
-- new client + old server: voice and chat work, screen share hidden or disabled
+- new Windows client + new server: screen share may be available when policy
+  and helper runtime allow it
+- new Windows client + old server: voice and chat work, screen share hidden or
+  disabled
 - old client + new server: voice and chat work, old client is never sent
   screen-share traffic
 - old client + old server: unchanged
@@ -63,9 +64,9 @@ Client:
 
 - `ScreenShareManager` owns client session state, helper coordination, view
   focus/reopen behavior, external runtime watchdogs, and diagnostics
-- Modern shell exposes picker/status/toast flows
-- native fallback dialogs remain for narrow non-modern paths while those builds
-  exist
+- the Qt Quick client exposes picker/status/toast flows and a native scene-graph
+  video item
+- there is no classic or native Mumble-owned dialog fallback
 - local settings include screen-share auto-open and diagnostics controls
 
 Helper:
@@ -76,7 +77,7 @@ Helper:
   and self-test
 - helper runtime probing covers GStreamer, FFmpeg, LiveKit, encoder/decoder
   availability, and capture backends
-- packaged Windows shared/WebEngine payloads can stage GStreamer under
+- packaged Windows shared Qt payloads can stage GStreamer under
   `gstreamer\`
 
 ## Current Runtime Shape
@@ -89,11 +90,11 @@ Windows probing:
 - `gdigrab`
 - lavfi/test-pattern capture
 
-Linux probing:
+Linux server/relay:
 
-- X11/ffmpeg capture
-- lavfi/test-pattern capture
-- PipeWire runtime detection for diagnostics
+- Murmur policy, session state, and LiveKit-compatible token handoff
+- external LiveKit/WebRTC fanout, congestion control, and NAT traversal
+- no client capture or rendering claim in this delivery
 
 Relay/media:
 
@@ -178,8 +179,9 @@ Done:
 
 - GStreamer/LiveKit capability detection
 - helper session planner for publish/view
-- Windows and Linux runtime probing
-- packaged Windows runtime staging checks in shared/WebEngine release paths
+- Windows capture/runtime probing and native-frame viewing
+- Linux Murmur/LiveKit relay integration
+- packaged Windows runtime staging checks in shared Qt release paths
 
 Still needed:
 
@@ -187,18 +189,21 @@ Still needed:
 - document observed quality/latency for `720p30`, `1080p30`, and one high-FPS
   path
 - verify helper fallback behavior when GStreamer or capture backends are missing
+- verify relay TLS/TURN, token expiry, firewall, and service recovery against
+  the deployed Linux host
 
 ### Phase 5: Mumble UX Integration
 
-Status: partially implemented.
+Status: implemented for the current experimental feature surface.
 
 Done:
 
 - Modern picker/status path
 - quality and audio options
 - watch/focus/reopen behavior
-- toast-based error surfacing in Modern shell
+- toast-based error surfacing in the Qt Quick shell
 - diagnostics setting
+- native Qt Quick decoded-frame rendering
 
 Still needed:
 
@@ -206,21 +211,14 @@ Still needed:
 - better room-list stream state presentation
 - clearer recovery actions after helper/runtime failures
 
-### Phase 6: Cross-Platform Expansion
+### Phase 6: Other Desktop Clients
 
-Status: not complete.
+Status: outside this delivery.
 
-Current state:
-
-- Windows is the practical primary target because shared/WebEngine packages can
-  stage the GStreamer runtime
-- Linux has probing and X11/test-pattern paths
-- macOS is not an active screen-share target yet
-
-Still needed:
-
-- decide which non-Windows target matters for the private server population
-- package and verify that target intentionally
+The production scope is the Windows Qt Quick client plus Linux-hosted
+Murmur/relay. Linux and macOS desktop-client capture, shortcuts, rendering,
+packaging, and runtime validation require a separate future plan and are not
+release gates here.
 
 ### Phase 7: Recording
 
@@ -286,7 +284,8 @@ Before calling this production-ready:
 1. Run a live two-client Windows publish/view pass against the target server.
 2. Capture diagnostics and screenshots for a successful `720p30` share.
 3. Exercise helper failure cases: no GStreamer, capture backend missing, relay
-   token expired, helper killed mid-session.
-4. Add or update automated checks for helper IPC and packaged-runtime validation.
-5. Only after that, decide whether screen share graduates from experimental to
-   active fork feature.
+   token expired, helper killed mid-session, and relay service loss.
+4. Validate the Windows packaged runtime/MSI and the Linux Murmur/relay
+   deployment.
+5. Only after that, decide whether screen sharing graduates from experimental
+   to a stable fork feature.

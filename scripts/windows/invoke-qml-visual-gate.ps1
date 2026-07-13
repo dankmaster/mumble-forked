@@ -185,16 +185,28 @@ foreach ($case in $selectedCases) {
 		$viewportRequest.railOpen = $navigationOpen
 	}
 	$viewport = Invoke-Automation $viewportRequest
+	$expectedRailPosition = if ($navigationOpen) { 1.0 } else { 0.0 }
+	function Test-NavigationEndpoint {
+		param($Viewport)
+		return ($Viewport.PSObject.Properties.Name -contains "railPosition") -and
+			[bool]$Viewport.railOpen -eq $navigationOpen -and
+			[Math]::Abs([double]$Viewport.railPosition - $expectedRailPosition) -le 0.001
+	}
 	$viewportDeadline = [DateTime]::UtcNow.AddSeconds(2)
-	while ([bool]$viewport.railOpen -ne $navigationOpen -and [DateTime]::UtcNow -lt $viewportDeadline) {
+	while (-not (Test-NavigationEndpoint $viewport) -and [DateTime]::UtcNow -lt $viewportDeadline) {
 		Start-Sleep -Milliseconds 25
 		$viewport = Invoke-Automation @{
 			command = "setHostViewport"; width = [int]$case.width; height = [int]$case.height
 		}
 	}
 	if ([int]$viewport.width -ne [int]$case.width -or [int]$viewport.height -ne [int]$case.height -or
-		[bool]$viewport.railOpen -ne $navigationOpen) {
-		throw "Case '$($case.id)' did not reach the requested compact navigation state."
+		-not (Test-NavigationEndpoint $viewport)) {
+		$position = if ($viewport.PSObject.Properties.Name -contains "railPosition") {
+			[double]$viewport.railPosition
+		} else { [double]::NaN }
+		throw "Case '$($case.id)' did not reach the requested compact navigation endpoint " +
+			"(open=$navigationOpen, position=$expectedRailPosition); observed open=$([bool]$viewport.railOpen), " +
+			"position=$position."
 	}
 
 	# Focus propagation in Qt Quick is queued behind the fixture update and can

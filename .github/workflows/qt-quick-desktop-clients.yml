@@ -1,10 +1,10 @@
-name: Qt Quick Desktop Clients
+name: Qt Quick Desktop Client Reference (manual only)
 
 on:
-  pull_request:
-  push:
-    branches:
-      - master
+  # Linux and macOS desktop clients are intentionally outside the current
+  # product gate. Keep this workflow as an opt-in reference lane only; the
+  # supported gates are the Windows client and Linux server workflows. A
+  # manual run is diagnostic evidence only, not a support or release gate.
   workflow_dispatch:
 
 concurrency:

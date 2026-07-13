@@ -117,13 +117,33 @@ function Get-QmlSnapshot {
 	return (Invoke-QmlAutomationCommand -Port $Port -Token $Token -Request @{ command = "snapshot" }).snapshot
 }
 
+function Resolve-QmlRoomScopeToken {
+	param([AllowNull()]$Room)
+	if ($null -eq $Room) { return $null }
+
+	# RoomModel's typed scopeToken is authoritative. Older automation snapshots may
+	# expose the same canonical value as token or id, but namespaced row IDs such as
+	# "text:3:0" are model identities and cannot be passed to scope commands.
+	$propertyNames = @("scopeToken", "token", "id")
+	foreach ($propertyName in $propertyNames) {
+		$property = $Room.PSObject.Properties[$propertyName]
+		if ($null -eq $property) { continue }
+		$candidate = [string]$property.Value
+		if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+		$candidate = $candidate.Trim()
+		if ($candidate -match '^-?\d+:\d+$') { return $candidate }
+	}
+	return $null
+}
+
 function Wait-ConnectedRoomState {
 	param([int]$Port, [string]$Token, [int]$TimeoutSeconds)
 	$deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
 	do {
 		$snapshot = Get-QmlSnapshot -Port $Port -Token $Token
 		$rooms = @($snapshot.voiceRooms) + @($snapshot.textRooms)
-		$tokens = @($rooms | ForEach-Object { [string]$_.token } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+		$tokens = @($rooms | ForEach-Object { Resolve-QmlRoomScopeToken -Room $_ } |
+			Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
 		if ([bool]$snapshot.app.connected -and $tokens.Count -ge 2) {
 			return [pscustomobject]@{ snapshot = $snapshot; tokens = $tokens }
 		}
@@ -404,12 +424,44 @@ try {
 
 $startupValues = @($measurements | ForEach-Object { [double]$_.startup_to_window_ms })
 $memoryValues = @($measurements | ForEach-Object { [double]$_.idle_working_set_bytes })
-$frameP95Values = @($measurements | ForEach-Object { [double]$_.performance.p95FrameMs })
-$frameP99Values = @($measurements | ForEach-Object { [double]$_.performance.p99FrameMs })
 $inputP95Values = @($measurements | ForEach-Object { [double]$_.performance.p95InputLatencyMs })
-$stallCounts = @($measurements | ForEach-Object { [int]$_.performance.uiStallCount })
-$frameSampleCounts = @($measurements | ForEach-Object { [int]$_.performance.frameSampleCount })
 $inputSampleCounts = @($measurements | ForEach-Object { [int]$_.performance.inputSampleCount })
+
+# Frame-time acceptance applies independently to room switching, chat scrolling,
+# and talk-state churn. Flattening every phase into one percentile list could let
+# a fast phase hide a slow one, while looking only at room switching would leave
+# the two most animation-heavy workloads ungated. Aggregate five-run medians per
+# phase, then gate the worst phase median.
+$requiredFramePhases = @("room_switch", "chat_scroll", "talk_state")
+$framePhaseSummaries = [ordered]@{}
+foreach ($phaseName in $requiredFramePhases) {
+	$phaseMeasurements = @($measurements | ForEach-Object { $_.performance_phases.$phaseName } |
+		Where-Object { $null -ne $_ })
+	$p95Values = @($phaseMeasurements | ForEach-Object { [double]$_.p95FrameMs })
+	$p99Values = @($phaseMeasurements | ForEach-Object { [double]$_.p99FrameMs })
+	$sampleCounts = @($phaseMeasurements | ForEach-Object { [int]$_.frameSampleCount })
+	$stallCounts = @($phaseMeasurements | ForEach-Object { [int]$_.uiStallCount })
+	$framePhaseSummaries[$phaseName] = [ordered]@{
+		run_count = $phaseMeasurements.Count
+		median_p95_ms = Get-Percentile -Values $p95Values -Percentile 50
+		median_p99_ms = Get-Percentile -Values $p99Values -Percentile 50
+		worst_p95_ms = if ($p95Values.Count -gt 0) { ($p95Values | Measure-Object -Maximum).Maximum } else { $null }
+		worst_p99_ms = if ($p99Values.Count -gt 0) { ($p99Values | Measure-Object -Maximum).Maximum } else { $null }
+		minimum_frame_sample_count = if ($sampleCounts.Count -gt 0) { ($sampleCounts | Measure-Object -Minimum).Minimum } else { 0 }
+		total_ui_stalls_over_50_ms = if ($stallCounts.Count -gt 0) { ($stallCounts | Measure-Object -Sum).Sum } else { 0 }
+	}
+}
+
+$phaseMedianP95Values = @($framePhaseSummaries.Values | ForEach-Object { $_.median_p95_ms } |
+	Where-Object { $null -ne $_ } | ForEach-Object { [double]$_ })
+$phaseMedianP99Values = @($framePhaseSummaries.Values | ForEach-Object { $_.median_p99_ms } |
+	Where-Object { $null -ne $_ } | ForEach-Object { [double]$_ })
+$phaseWorstP95Values = @($framePhaseSummaries.Values | ForEach-Object { $_.worst_p95_ms } |
+	Where-Object { $null -ne $_ } | ForEach-Object { [double]$_ })
+$phaseWorstP99Values = @($framePhaseSummaries.Values | ForEach-Object { $_.worst_p99_ms } |
+	Where-Object { $null -ne $_ } | ForEach-Object { [double]$_ })
+$phaseMinimumSampleCounts = @($framePhaseSummaries.Values | ForEach-Object { [int]$_.minimum_frame_sample_count })
+$phaseStallCounts = @($framePhaseSummaries.Values | ForEach-Object { [int]$_.total_ui_stalls_over_50_ms })
 
 $summary = [ordered]@{
 	runs = $Runs
@@ -418,15 +470,17 @@ $summary = [ordered]@{
 	idle_working_set_median_bytes = Get-Percentile -Values $memoryValues -Percentile 50
 	max_process_count = ($measurements.process_count | Measure-Object -Maximum).Maximum
 	max_chromium_process_count_before_media = ($measurements.chromium_process_count_before_media | Measure-Object -Maximum).Maximum
-	worst_frame_p95_ms = ($frameP95Values | Measure-Object -Maximum).Maximum
-	worst_frame_p99_ms = ($frameP99Values | Measure-Object -Maximum).Maximum
+	worst_frame_p95_ms = ($phaseWorstP95Values | Measure-Object -Maximum).Maximum
+	worst_frame_p99_ms = ($phaseWorstP99Values | Measure-Object -Maximum).Maximum
 	worst_input_to_visual_p95_ms = ($inputP95Values | Measure-Object -Maximum).Maximum
-	median_frame_p95_ms = Get-Percentile -Values $frameP95Values -Percentile 50
-	median_frame_p99_ms = Get-Percentile -Values $frameP99Values -Percentile 50
+	# These are the slowest of the independently aggregated five-run phase medians.
+	median_frame_p95_ms = ($phaseMedianP95Values | Measure-Object -Maximum).Maximum
+	median_frame_p99_ms = ($phaseMedianP99Values | Measure-Object -Maximum).Maximum
 	median_input_to_visual_p95_ms = Get-Percentile -Values $inputP95Values -Percentile 50
-	total_ui_stalls_over_50_ms = ($stallCounts | Measure-Object -Sum).Sum
-	minimum_frame_sample_count = ($frameSampleCounts | Measure-Object -Minimum).Minimum
+	total_ui_stalls_over_50_ms = ($phaseStallCounts | Measure-Object -Sum).Sum
+	minimum_frame_sample_count = ($phaseMinimumSampleCounts | Measure-Object -Minimum).Minimum
 	minimum_input_sample_count = ($inputSampleCounts | Measure-Object -Minimum).Minimum
+	frame_phases = $framePhaseSummaries
 }
 
 foreach ($measurement in $measurements) {
@@ -445,6 +499,15 @@ foreach ($measurement in $measurements) {
 }
 if ($summary.minimum_frame_sample_count -lt $MinimumFrameSamples) {
 	$notMeasured.Add("frame_time: minimum sample count $($summary.minimum_frame_sample_count) is below $MinimumFrameSamples")
+}
+foreach ($phaseName in $requiredFramePhases) {
+	$phaseSummary = $framePhaseSummaries[$phaseName]
+	if ($phaseSummary.run_count -ne $Runs) {
+		$notMeasured.Add("$phaseName frame_time: measured $($phaseSummary.run_count) of $Runs runs")
+	}
+	if ($phaseSummary.minimum_frame_sample_count -lt $MinimumFrameSamples) {
+		$notMeasured.Add("$phaseName frame_time: minimum sample count $($phaseSummary.minimum_frame_sample_count) is below $MinimumFrameSamples")
+	}
 }
 if ($summary.minimum_input_sample_count -lt $MinimumInputSamples) {
 	$notMeasured.Add("input_to_visual: minimum sample count $($summary.minimum_input_sample_count) is below $MinimumInputSamples")

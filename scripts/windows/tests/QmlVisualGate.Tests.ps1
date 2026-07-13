@@ -166,6 +166,12 @@ Describe "Qt Quick visual runner modes" {
 }
 
 Describe "Qt Quick connected fixture contract" {
+	It "freezes the synthetic loading operation at determinate progress" {
+		$controller = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\QmlVisualFixtureController.cpp"
+		($controller -match 'startOperation\(QStringLiteral\("visual:loading"\)') | Should Be $true
+		($controller -match 'updateProgress\(QStringLiteral\("visual:loading"\),\s*42,\s*100\)') | Should Be $true
+	}
+
 	It "requires a runtime-observable timeline count" {
 		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
 		($worker -match 'message_count') | Should Be $true
@@ -209,6 +215,16 @@ Describe "Qt Quick connected fixture contract" {
 		($worker -match 'navigation_open') | Should Be $true
 		($worker -match 'Rooms and participants') | Should Be $true
 		($worker -match 'does not expose exactly one open navigation drawer') | Should Be $true
+	}
+
+	It "waits for the compact drawer position to reach its requested endpoint" {
+		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
+		$server = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\ModernUiAutomationServer.cpp"
+		$qml = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\qml-shell\Main.qml"
+		($qml -match 'automationNavigationPosition:\s*navigationDrawer\.position') | Should Be $true
+		($server -match 'QStringLiteral\("railPosition"\)') | Should Be $true
+		($worker -match 'Test-NavigationEndpoint') | Should Be $true
+		($worker -match 'Abs\(\[double\]\$Viewport\.railPosition\s*-\s*\$expectedRailPosition\)') | Should Be $true
 	}
 
 	It "requires both connected fixture messages in accessibility evidence" {

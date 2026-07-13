@@ -148,6 +148,60 @@ jobs:
             -RequireGStreamerRuntime `
             -ArtifactListPath .\build-shared-webengine\windows-binary-artifacts.txt
 
+      - name: Build and run focused Qt Quick client tests
+        shell: powershell
+        run: |
+          $testTargets = @(
+            'TestComposerController',
+            'TestModernDialogControllers',
+            'TestModernShellMenuSerializer',
+            'TestModernTheme',
+            'TestMumbleProtocol',
+            'TestPersistentChatController',
+            'TestPersistentChatRender',
+            'TestQmlClientModels',
+            'TestQmlImageProvider',
+            'TestQmlMediaProfileFactory',
+            'TestQmlAccessibilitySnapshot',
+            'TestQmlPerformanceMonitor',
+            'TestQmlQuickComponents',
+            'TestQmlThemeController',
+            'TestQmlWindowStateController',
+            'TestPluginAbiWorker',
+            'TestPluginOperation',
+            'TestPluginUpdatePreparation',
+            'TestScreenShare',
+            'TestScreenShareProtocol',
+            'TestScreenShareVideoItem',
+            'TestServerHandlerState',
+            'TestSettingsJSONSerialization',
+            'TestUserModelNavigator',
+            'TestXMLTools'
+          )
+          $additionalCMakeOptions = @(
+            '-Dserver=OFF',
+            '-Dtests=ON',
+            '-Dpackaging=ON',
+            '-Dmodern-layout-automation=OFF',
+            '-Dmodern-layout-mockups=OFF'
+          )
+          if ('${{ github.event_name }}' -eq 'pull_request') {
+            $additionalCMakeOptions += '-Dlto=OFF'
+          }
+
+          .\scripts\windows\build-local-windows-client.ps1 `
+            -BuildNumber "${{ needs.fetch_build_number.outputs.build_number }}" `
+            -EnvironmentRelease "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE }}" `
+            -EnvironmentCommit "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT }}" `
+            -AdditionalCMakeOptions $additionalCMakeOptions `
+            -BuildTargets $testTargets `
+            -UseBundledCli11 `
+            -AllowPendingReboot
+
+          ctest --test-dir .\build-shared-webengine -C $env:BUILD_TYPE `
+            --output-on-failure `
+            -R '^(TestComposerController|TestModernDialogControllers|TestModernShellMenuSerializer|TestModernTheme|TestMumbleProtocol|TestPersistentChatController|TestPersistentChatRender|TestPluginAbiWorker|TestPluginOperation|TestPluginUpdatePreparation|TestQmlAccessibilitySnapshot|TestQmlClientModels|TestQmlImageProvider|TestQmlMediaProfileFactory|TestQmlPerformanceMonitor|TestQmlQuickComponents|TestQmlThemeController|TestQmlWindowStateController|TestScreenShare|TestScreenShareProtocol|TestScreenShareVideoItem|TestServerHandlerState|TestSettingsJSONSerialization|TestUserModelNavigator|TestXMLTools)$'
+
       - name: Verify shared helper runtime
         if: ${{ github.event_name == 'workflow_dispatch' }}
         timeout-minutes: 10
@@ -189,6 +243,45 @@ jobs:
             build-shared-webengine/windows-client-artifacts.txt
             build-shared-webengine/**/mumble*.msi
             build-shared-webengine/**/mumble*.exe
+
+      - name: Validate Qt Quick visual and accessibility matrix
+        shell: powershell
+        run: |
+          $additionalCMakeOptions = @(
+            '-Dserver=OFF',
+            '-Dtests=OFF',
+            '-Dpackaging=OFF',
+            '-Dmodern-layout-automation=ON',
+            '-Dmodern-layout-mockups=OFF'
+          )
+          if ('${{ github.event_name }}' -eq 'pull_request') {
+            $additionalCMakeOptions += '-Dlto=OFF'
+          }
+
+          .\scripts\windows\build-local-windows-client.ps1 `
+            -BuildNumber "${{ needs.fetch_build_number.outputs.build_number }}" `
+            -EnvironmentRelease "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_RELEASE }}" `
+            -EnvironmentCommit "${{ env.MUMBLE_SHARED_WINDOWS_ENVIRONMENT_COMMIT }}" `
+            -AdditionalCMakeOptions $additionalCMakeOptions `
+            -BuildTargets @('mumble') `
+            -SkipSharedInstaller `
+            -UseBundledCli11 `
+            -AllowPendingReboot
+
+          New-Item -ItemType Directory -Force -Path .\.tmp | Out-Null
+          '{}' | Set-Content -LiteralPath .\.tmp\qml-visual-settings.json -Encoding utf8NoBOM
+          $fixtureExecutable = '.\build-shared-webengine\shared-webengine-stage\mumble-visual-fixture.exe'
+          Copy-Item -LiteralPath .\build-shared-webengine\mumble.exe `
+            -Destination $fixtureExecutable -Force
+          try {
+            .\scripts\windows\invoke-qml-visual-matrix.ps1 `
+              -Executable $fixtureExecutable `
+              -ConfigPath .\.tmp\qml-visual-settings.json `
+              -BaselineManifestPath .\qml-visual-baseline\manifest.json `
+              -OutputDirectory .\.tmp\qml-visual-gate
+          } finally {
+            Remove-Item -LiteralPath $fixtureExecutable -Force -ErrorAction SilentlyContinue
+          }
 
       - if: ${{ github.event_name != 'pull_request' && steps.restore-shared-build-env-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v5

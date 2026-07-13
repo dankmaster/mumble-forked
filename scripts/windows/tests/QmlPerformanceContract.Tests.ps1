@@ -46,9 +46,27 @@ Describe 'Qt Quick performance automation contract' {
 		$script | Should Match 'input_to_visual_p95_at_most_50_ms[\s\S]*median_input_to_visual_p95_ms -le 50\.0'
 	}
 
+	It 'gates room switching, chat scrolling, and talk-state frames independently' {
+		$script | Should Match '\$requiredFramePhases = @\("room_switch", "chat_scroll", "talk_state"\)'
+		$script | Should Match '\$framePhaseSummaries\[\$phaseName\]'
+		$script | Should Match 'median_frame_p95_ms = \(\$phaseMedianP95Values \| Measure-Object -Maximum\)\.Maximum'
+		$script | Should Match 'median_frame_p99_ms = \(\$phaseMedianP99Values \| Measure-Object -Maximum\)\.Maximum'
+		$script | Should Match '\$phaseSummary\.run_count -ne \$Runs'
+		$script | Should Match '\$phaseSummary\.minimum_frame_sample_count -lt \$MinimumFrameSamples'
+	}
+
 	It 'warms every measured scope and requires stable controller state before steady-state sampling' {
 		$script | Should Match 'Iterations \$ready\.tokens\.Count'
 		$script | Should Match 'Wait-QmlStateQuiescence'
 		$script | Should Match 'room_warmup_measured'
+	}
+
+	It 'prefers canonical typed room scope tokens and rejects namespaced model row IDs' {
+		$script | Should Match 'function Resolve-QmlRoomScopeToken'
+		$script | Should Match '\$propertyNames = @\("scopeToken", "token", "id"\)'
+		$script | Should Match '\$Room\.PSObject\.Properties\[\$propertyName\]'
+		$script | Should Match '\^\-\?\\d\+:\\d\+\$'
+		$script | Should Match 'Resolve-QmlRoomScopeToken -Room \$_'
+		$script | Should Not Match 'ForEach-Object \{ \[string\]\$_\.token \}'
 	}
 }
