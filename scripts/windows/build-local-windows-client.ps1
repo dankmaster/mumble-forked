@@ -578,6 +578,21 @@ function Assert-SharedWebEngineDeployment {
 	}
 }
 
+function Copy-SharedQtQuickDialogsModule {
+	param(
+		[Parameter(Mandatory = $true)][string]$StageRoot,
+		[Parameter(Mandatory = $true)][string]$EnvironmentRoot,
+		[Parameter(Mandatory = $true)][string]$Triplet
+	)
+	$source = Join-Path $EnvironmentRoot "installed\$Triplet\Qt6\qml\QtQuick\Dialogs"
+	if (-not (Test-Path -LiteralPath (Join-Path $source "qmldir") -PathType Leaf)) {
+		throw "QtQuick.Dialogs is missing from the shared Qt environment: '$source'."
+	}
+	$destination = Join-Path $StageRoot "qml\QtQuick\Dialogs"
+	New-Item -ItemType Directory -Force -Path $destination | Out-Null
+	Copy-Item -Path (Join-Path $source '*') -Destination $destination -Recurse -Force
+}
+
 function Write-SharedRuntimeManifest {
 	param(
 		[Parameter(Mandatory = $true)]
@@ -701,6 +716,7 @@ function Invoke-SharedWindowsPackaging {
 	Copy-SharedEnvironmentRuntime -StageRoot $stageRoot -EnvironmentRoot $env:MUMBLE_ENVIRONMENT_DIR -Triplet $env:MUMBLE_VCPKG_TRIPLET
 	Copy-GStreamerRuntime -StageRoot $stageRoot
 	Copy-SharedQtOpenSslBackend -StageRoot $stageRoot -EnvironmentRoot $env:MUMBLE_ENVIRONMENT_DIR -Triplet $env:MUMBLE_VCPKG_TRIPLET
+	Copy-SharedQtQuickDialogsModule -StageRoot $stageRoot -EnvironmentRoot $env:MUMBLE_ENVIRONMENT_DIR -Triplet $env:MUMBLE_VCPKG_TRIPLET
 	Write-SharedQtConf -StageRoot $stageRoot
 	Assert-SharedWebEngineDeployment -StageRoot $stageRoot
 	Write-SharedRuntimeManifest -StageRoot $stageRoot
