@@ -848,6 +848,30 @@ Please describe what you were doing before the crash.</source>
         <source>PARTICIPANTS</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Loading older messages…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load older messages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load messages sent before the currently visible history</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect to load rooms and messages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No messages in %1 yet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select a room to start chatting</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>MainWindow</name>
@@ -12214,10 +12238,6 @@ Server feedback: fallback</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>The chat-scroll workload requires at least 20 rendered messages.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>The Qt Quick window is not exposed for chat scrolling.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -12235,10 +12255,6 @@ Server feedback: fallback</source>
     </message>
     <message>
         <source>The Qt Quick talk-state workload is unavailable.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The talk-state workload requires a connected participant.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
