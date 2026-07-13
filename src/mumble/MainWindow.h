@@ -249,7 +249,6 @@ public:
 	void updateServerNavigatorChrome();
 	void syncServerNavigatorUserMenu();
 	void positionServerNavigatorUserMenu();
-	void refreshCustomChromeStyles();
 	void initializePersistentChatBackend();
 	void publishPersistentChatSnapshot();
 	void syncPersistentChatGatewayHandler();
@@ -345,12 +344,6 @@ public:
 		QString siteName;
 		QImage thumbnailImage;
 		bool completed = false;
-	};
-
-	struct PersistentChatRenderRequest {
-		QString statusMessage;
-		bool scrollToBottom         = true;
-		bool preserveScrollPosition = false;
 	};
 
 	struct ModernDirectMessageEntry {
@@ -509,9 +502,6 @@ public:
 									  bool showComposer = false);
 	void renderEphemeralLogView(bool preserveScrollPosition = false);
 	void renderServerLogView(bool preserveScrollPosition = false);
-	void flushPersistentChatRender();
-	void renderPersistentChatViewImmediately(const QString &statusMessage = QString(), bool scrollToBottom = true,
-											 bool preserveScrollPosition = false);
 	void renderPersistentChatView(const QString &statusMessage = QString(), bool scrollToBottom = true,
 								  bool preserveScrollPosition = false);
 	bool canMarkPersistentChatRead(bool willScrollToBottom = false) const;
@@ -552,7 +542,7 @@ public:
 		ModernShellMessageBuildMode buildMode = ModernShellMessageBuildMode::Full);
 	QVariantMap buildModernShellVoiceRoomScreenShareState(const Channel *channel) const;
 	QVariantMap buildQmlActiveScopeState(const PersistentChatTarget &target);
-	QVariantMap buildModernShellServerLogActiveScopeState(const PersistentChatTarget &target, bool includeHtml);
+	QVariantMap buildModernShellServerLogActiveScopeState(const PersistentChatTarget &target);
 	QVariantMap buildQmlParticipantState(const ClientUser *user, const Channel *contextChannel,
 													  const ClientUser *directMessagePeer, int avatarSize,
 													  bool includeAvatar);
@@ -566,7 +556,6 @@ public:
 	void publishPersistentChatInlineDataImageUpdate(const QString &token);
 	void publishQmlActiveScopeState();
 	void scheduleQmlRoomStateUpdate();
-	QString modernServerLogHtml() const;
 	void publishModernShellServerLogUpdate(const PersistentChatTarget &target);
 	void publishModernShellServerLogReset(const PersistentChatTarget &target);
 	void clearModernShellMessageDtoCache(const char *reason);
@@ -792,7 +781,6 @@ protected:
 	QSet< QString > m_persistentChatLiveMessageKeys;
 	QHash< QString, unsigned int > m_persistentChatLastReadByScope;
 	QHash< QString, int > m_persistentChatUnreadByScope;
-	std::optional< PersistentChatRenderRequest > m_pendingPersistentChatRender;
 	std::optional< MumbleProto::ChatScope > m_visiblePersistentChatScope;
 	unsigned int m_visiblePersistentChatScopeID           = 0;
 	unsigned int m_visiblePersistentChatLastReadMessageID = 0;
@@ -800,15 +788,9 @@ protected:
 	bool m_visiblePersistentChatHasMore                   = false;
 	PersistentChatLoadingState m_visiblePersistentChatLoadingState = PersistentChatLoadingState::Idle;
 	bool m_persistentChatLoadingOlder                     = false;
-	bool m_persistentChatRenderQueued                     = false;
-	QTimer *m_persistentChatResizeRenderTimer             = nullptr;
-	QTimer *m_persistentChatScrollIdleTimer               = nullptr;
 	QTimer *m_persistentChatPreviewRequestTimer           = nullptr;
 	QTimer *m_persistentChatInlineDataImageWarmupTimer     = nullptr;
 	QTimer *m_userPresenceRefreshTimer                    = nullptr;
-	int m_pendingPersistentChatViewportWidth              = -1;
-	int m_lastPersistentChatViewportWidth                 = -1;
-	int m_persistentChatBottomLockRendersRemaining        = 0;
 	bool m_persistentChatPreviewRefreshPending            = false;
 	QStringList m_persistentChatQueuedPreviewRequests;
 	QSet< QString > m_persistentChatQueuedPreviewRequestKeys;
@@ -816,17 +798,13 @@ protected:
 	QSet< QString > m_persistentChatQueuedInlineDataImageWarmupKeys;
 	quint64 m_persistentChatInlineDataImageWarmupGeneration = 1;
 	QSet< QString > m_pendingPersistentChatInstagramMetadataRequests;
-	bool m_persistentChatRestoreAnchorPending             = false;
-	bool m_persistentChatLogStickToBottom                 = true;
-	QString m_persistentChatPendingAnchorRowId;
-	int m_persistentChatPendingAnchorOffset = 0;
 	std::optional< MumbleProto::ChatMessage > m_pendingPersistentChatReply;
 	QTimer *m_modernShellSyncTimer                = nullptr;
 	QTimer *m_nativeWindowMoveResizeRecoveryTimer = nullptr;
 	qint64 m_lastQmlStateSyncMs        = 0;
-	quint64 m_modernShellServerLogRevision        = 1;
-	quint64 m_modernShellServerLogHtmlRevision    = 0;
-	LogDocument *m_modernServerLogDocument        = nullptr;
+	quint64 m_modernShellServerLogRevision = 1;
+	QVariantList m_modernServerLogEntries;
+	int m_modernServerLogMaximumEntries = 0;
 	QJsonObject m_updateResumeState;
 	bool m_updateResumePending                 = false;
 	bool m_updateResumeConnectAttempted        = false;
@@ -1259,7 +1237,6 @@ public:
 	/// @param actionName  The name of the action that has been executed.
 	/// @param p  The user on which the action was performed.
 	void logChangeNotPermanent(const QString &actionName, ClientUser *const p) const;
-	void refreshTextDocumentStylesheets();
 
 	void openServerConnectDialog(bool autoconnect = false);
 	void disconnectFromServer();

@@ -4,7 +4,6 @@
 // Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
 #include "Themes.h"
-#include "MainWindow.h"
 #include "MumbleApplication.h"
 #include "Settings.h"
 #include "Global.h"
@@ -157,9 +156,6 @@ bool Themes::apply() {
 	QDir::setSearchPaths(QLatin1String("skin"), skinPaths);
 	qApp->setStyleSheet(getDefaultStylesheet());
 
-	if (Global::get().mw) {
-		Global::get().mw->refreshTextDocumentStylesheets();
-	}
 	applyUiThemeNativeTitleBars();
 	return true;
 }
