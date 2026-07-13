@@ -138,9 +138,12 @@ void QmlThemeController::applyProductTokens(UiThemeTokens tokens, Mumble::Modern
 }
 
 QVariantMap QmlThemeController::state() const {
-	const QVariantMap effectiveTokens {
+	QVariantMap effectiveTokens {
 		{ QStringLiteral("shellBackground"), colorStateValue(m_shellBackground) },
 		{ QStringLiteral("panel"), colorStateValue(m_panel) },
+		{ QStringLiteral("surfaceRaised"), colorStateValue(m_surfaceRaised) },
+		{ QStringLiteral("surfaceHover"), colorStateValue(m_surfaceHover) },
+		{ QStringLiteral("surfaceBorder"), colorStateValue(m_surfaceBorder) },
 		{ QStringLiteral("rail"), colorStateValue(m_rail) },
 		{ QStringLiteral("strip"), colorStateValue(m_strip) },
 		{ QStringLiteral("divider"), colorStateValue(m_divider) },
@@ -148,6 +151,8 @@ QVariantMap QmlThemeController::state() const {
 		{ QStringLiteral("textMain"), colorStateValue(m_textMain) },
 		{ QStringLiteral("textMuted"), colorStateValue(m_textMuted) },
 		{ QStringLiteral("accent"), colorStateValue(m_accent) },
+		{ QStringLiteral("accentHover"), colorStateValue(m_accentHover) },
+		{ QStringLiteral("accentSubtle"), colorStateValue(m_accentSubtle) },
 		{ QStringLiteral("selected"), colorStateValue(m_selected) },
 		{ QStringLiteral("danger"), colorStateValue(m_danger) },
 		{ QStringLiteral("success"), colorStateValue(m_success) },
@@ -157,6 +162,16 @@ QVariantMap QmlThemeController::state() const {
 		{ QStringLiteral("innerRadius"), m_innerRadius },
 		{ QStringLiteral("spacing"), m_spacing }
 	};
+	// Keep the established token aliases in the automation DTO while QML consumes
+	// the typed properties above. This lets one visual gate compare both frontends.
+	effectiveTokens.insert(QStringLiteral("--shell-bg"), colorStateValue(m_shellBackground));
+	effectiveTokens.insert(QStringLiteral("--shell-panel"), colorStateValue(m_panel));
+	effectiveTokens.insert(QStringLiteral("--text-strong"), colorStateValue(m_textStrong));
+	effectiveTokens.insert(QStringLiteral("--accent"), colorStateValue(m_accent));
+	effectiveTokens.insert(QStringLiteral("--accent-rgb"),
+		QStringLiteral("%1, %2, %3").arg(m_accent.red()).arg(m_accent.green()).arg(m_accent.blue()));
+	effectiveTokens.insert(QStringLiteral("--surface-border"), colorStateValue(m_surfaceBorder));
+	effectiveTokens.insert(QStringLiteral("--on-accent"), colorStateValue(m_strip));
 	return {
 		{ QStringLiteral("theme"), m_themeId },
 		{ QStringLiteral("themeId"), m_themeId },
@@ -176,11 +191,21 @@ void QmlThemeController::applyTokens(const UiThemeTokens &tokens,
 	if (property(QmlVisualFixtureMutation::OverrideProperty).toBool()
 		&& !property(QmlVisualFixtureMutation::WriteProperty).toBool()) return;
 	const QColor nextShell = shellBackground.isValid() ? shellBackground : tokens.base;
+	const QColor nextSurfaceRaised = tokens.surface0.isValid() ? tokens.surface0
+		: mixColors(tokens.base, tokens.text, 0.06);
+	const QColor nextSurfaceHover = tokens.surface1.isValid() ? tokens.surface1
+		: mixColors(tokens.base, tokens.text, 0.10);
+	const QColor nextSurfaceBorder = tokens.surface2.isValid() ? tokens.surface2 : tokens.border;
+	const QColor nextAccentHover = tokens.accentHover.isValid() ? tokens.accentHover
+		: mixColors(tokens.accent, tokens.text, 0.18);
 	const QColor nextSelected = tokens.accentSubtle.isValid() ? tokens.accentSubtle
-														 : uiThemeColorWithAlpha(tokens.accent, 0.16);
-	const bool changed = m_shellBackground != nextShell || m_panel != tokens.base || m_rail != tokens.mantle
+													 : uiThemeColorWithAlpha(tokens.accent, 0.16);
+	const bool changed = m_shellBackground != nextShell || m_panel != tokens.base
+		|| m_surfaceRaised != nextSurfaceRaised || m_surfaceHover != nextSurfaceHover
+		|| m_surfaceBorder != nextSurfaceBorder || m_rail != tokens.mantle
 		|| m_strip != tokens.crust || m_divider != tokens.border || m_textStrong != tokens.text
 		|| m_textMain != tokens.subtext0 || m_textMuted != tokens.overlay0 || m_accent != tokens.accent
+		|| m_accentHover != nextAccentHover || m_accentSubtle != nextSelected
 		|| m_selected != nextSelected || m_danger != tokens.danger || m_success != tokens.success
 		|| m_warning != tokens.warning || m_focus != tokens.focusAccent || m_shellRadius != metrics.shellRadius
 		|| m_innerRadius != metrics.innerRadius || m_spacing != metrics.spacing;
@@ -190,6 +215,9 @@ void QmlThemeController::applyTokens(const UiThemeTokens &tokens,
 
 	m_shellBackground = nextShell;
 	m_panel = tokens.base;
+	m_surfaceRaised = nextSurfaceRaised;
+	m_surfaceHover = nextSurfaceHover;
+	m_surfaceBorder = nextSurfaceBorder;
 	m_rail = tokens.mantle;
 	m_strip = tokens.crust;
 	m_divider = tokens.border;
@@ -197,6 +225,8 @@ void QmlThemeController::applyTokens(const UiThemeTokens &tokens,
 	m_textMain = tokens.subtext0;
 	m_textMuted = tokens.overlay0;
 	m_accent = tokens.accent;
+	m_accentHover = nextAccentHover;
+	m_accentSubtle = nextSelected;
 	m_selected = nextSelected;
 	m_danger = tokens.danger;
 	m_success = tokens.success;

@@ -18,19 +18,32 @@ Rectangle {
     readonly property bool contentVisible: hasContent && !dismissed
     readonly property string signature: session ? String(session.motdSignature || "") : ""
     readonly property var actions: session && session.motdActions ? session.motdActions : []
+    readonly property bool compactLayout: width < 560
+    readonly property bool actionsWrapped: actionFlow.implicitHeight > Theme.controlHeight + 1
+	readonly property string summary: cleanSummary(session ? session.motdSummary : "")
 
     objectName: "motdPanel"
     visible: surfaceVisible
-    implicitHeight: visible ? panelLayout.implicitHeight + 24 : 0
+    implicitHeight: visible ? panelLayout.implicitHeight + Theme.space3 * 2 : 0
     color: Theme.panel
     radius: Theme.innerRadius
     border.width: 1
     border.color: session && session.motdChanged ? Theme.accent : Theme.divider
-    activeFocusOnTab: visible
+	// This is an informational container. Its real actions participate in the
+	// tab chain; the panel itself must never become an inert stop.
+    activeFocusOnTab: false
 
     Accessible.role: Accessible.Pane
     Accessible.name: dismissed ? qsTr("Welcome message hidden") : qsTr("Server message of the day")
-    Accessible.description: session ? String(session.motdSummary || "") : ""
+    Accessible.description: summary
+
+	function cleanSummary(value) {
+		// QTextDocument uses U+FFFC as a placeholder for embedded objects. It is
+		// useful while parsing rich content, but must never leak into visible or
+		// accessible plain-text summaries.
+		return String(value === undefined || value === null ? "" : value)
+			.replace(/\uFFFC/g, " ").replace(/\s+/g, " ").trim()
+	}
 
     function payloadFor(action) {
         const supplied = action && action.payload ? action.payload : null
@@ -58,7 +71,6 @@ Rectangle {
                 return true
             }
         }
-        forceActiveFocus()
         return false
     }
 
@@ -106,31 +118,46 @@ Rectangle {
                  "dismissedSignature": targetDismissedSignature }
     }
 
-    Keys.onPressed: function(event) {
-        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
-            if (focusPrimaryAction())
-                event.accepted = true
-        }
-    }
-
-    ColumnLayout {
+    GridLayout {
         id: panelLayout
         anchors.fill: parent
-        anchors.margins: 12
-        spacing: 10
+        anchors.margins: Theme.space3
+		columns: root.compactLayout || root.expanded ? 1 : 2
+		columnSpacing: Theme.space2
+		rowSpacing: Theme.space2
 
         RowLayout {
+			Layout.row: 0
+			Layout.column: 0
+			Layout.columnSpan: root.expanded ? panelLayout.columns : 1
             Layout.fillWidth: true
-            spacing: 8
+			Layout.minimumWidth: 0
+            spacing: Theme.space2
 
             Label {
 				textFormat: Text.PlainText
-                Layout.fillWidth: true
-                text: root.dismissed ? qsTr("Welcome message hidden") : qsTr("Server message of the day")
+				text: root.dismissed ? qsTr("Welcome hidden")
+					: root.expanded ? qsTr("Server message of the day") : qsTr("Welcome")
                 color: Theme.textStrong
                 font.bold: true
+				font.pixelSize: Theme.fontLabel
                 elide: Text.ElideRight
             }
+
+			Label {
+				objectName: "motdSummaryBody"
+				Layout.fillWidth: true
+				Layout.minimumWidth: 0
+				visible: root.contentVisible && !root.expanded
+				textFormat: Text.PlainText
+				text: root.summary
+				color: Theme.textMain
+				font.pixelSize: Theme.fontBody
+				maximumLineCount: 1
+				elide: Text.ElideRight
+				Accessible.role: Accessible.StaticText
+				Accessible.name: text.length > 0 ? text : qsTr("Server message")
+			}
 
             Label {
 				textFormat: Text.PlainText
@@ -140,6 +167,55 @@ Rectangle {
                 font.bold: true
                 Accessible.name: qsTr("The welcome message has changed")
             }
+        }
+
+        ScrollView {
+            id: motdScroll
+			Layout.row: 1
+			Layout.column: 0
+			Layout.columnSpan: panelLayout.columns
+            Layout.fillWidth: true
+			Layout.preferredHeight: visible
+				? Math.min(structuredBody.implicitHeight, root.maximumBodyHeight) : 0
+			visible: root.contentVisible && root.expanded
+            clip: true
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+			ScrollBar.vertical.policy: structuredBody.implicitHeight > root.maximumBodyHeight
+                                         ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+
+			RichMessageBody {
+				id: structuredBody
+				objectName: "motdStructuredBody"
+				width: Math.max(1, motdScroll.availableWidth)
+				segments: root.session && root.session.motdSegments
+					? root.session.motdSegments : []
+				textColor: Theme.textMain
+				onLinkRequested: function(link) {
+					const safeLink = root.safeExternalUrl(link)
+					if (safeLink.length > 0)
+						root.linkRequested(safeLink)
+				}
+			}
+        }
+
+		// Keep actions after the summary/body in both visual and accessibility
+		// order. On a normal desktop width the collapsed surface remains a single
+		// compact row; narrow layouts wrap the actions below the summary.
+        Flow {
+            id: actionFlow
+            objectName: "motdActionFlow"
+			Layout.row: root.expanded ? 2 : root.compactLayout ? 1 : 0
+			Layout.column: root.expanded || root.compactLayout ? 0 : 1
+			Layout.columnSpan: root.expanded || root.compactLayout ? panelLayout.columns : 1
+			Layout.fillWidth: root.expanded || root.compactLayout
+            Layout.minimumWidth: 0
+			Layout.preferredWidth: root.expanded || root.compactLayout
+				? panelLayout.width : Math.floor(panelLayout.width * 0.42)
+			Layout.maximumWidth: panelLayout.width
+            Layout.preferredHeight: visible ? implicitHeight : 0
+			Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+            visible: root.actions.length > 0
+            spacing: Theme.space2
 
             Repeater {
                 id: actionRepeater
@@ -147,61 +223,17 @@ Rectangle {
 
                 delegate: ModernButton {
                     required property var modelData
+                    readonly property string fullLabel: String(modelData.label
+                        || modelData.title || qsTr("Open"))
                     objectName: "motdAction_" + String(modelData.id || "")
-                    text: String(modelData.label || modelData.title || qsTr("Open"))
+                    width: Math.max(1, Math.min(implicitWidth, actionFlow.width))
+                    dense: !root.expanded || root.compactLayout
+                    text: fullLabel
                     enabled: modelData.enabled === undefined || !!modelData.enabled
-                    Accessible.name: text
+                    Accessible.name: fullLabel
                     onClicked: root.dispatch(String(modelData.id || ""), root.payloadFor(modelData))
                 }
             }
-        }
-
-        ScrollView {
-            Layout.fillWidth: true
-            Layout.preferredHeight: Math.min(body.implicitHeight, root.maximumBodyHeight)
-            visible: root.contentVisible
-            clip: true
-            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            ScrollBar.vertical.policy: body.implicitHeight > root.maximumBodyHeight
-                                         ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
-
-            Loader {
-                id: body
-                width: parent.width
-                sourceComponent: root.expanded ? expandedBody : summaryBody
-            }
-
-			Component {
-				id: expandedBody
-				RichMessageBody {
-					objectName: "motdStructuredBody"
-					width: body.width
-					segments: root.session && root.session.motdSegments
-						? root.session.motdSegments : []
-					textColor: Theme.textMain
-					onLinkRequested: function(link) {
-						const safeLink = root.safeExternalUrl(link)
-						if (safeLink.length > 0)
-							root.linkRequested(safeLink)
-					}
-				}
-			}
-
-			Component {
-				id: summaryBody
-				Label {
-					textFormat: Text.PlainText
-					objectName: "motdSummaryBody"
-					width: body.width
-					text: root.session ? String(root.session.motdSummary || "") : ""
-					color: Theme.textMain
-					wrapMode: Text.Wrap
-					maximumLineCount: 4
-					elide: Text.ElideRight
-					Accessible.role: Accessible.StaticText
-					Accessible.name: text.length > 0 ? text : qsTr("Server message")
-				}
-			}
         }
     }
 }

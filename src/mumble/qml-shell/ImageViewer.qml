@@ -10,6 +10,14 @@ Window {
     property real panX: 0
     property real panY: 0
     property bool grabbing: false
+	readonly property bool compactLayout: width < 560 || height < 440
+	readonly property string displayTitle: safeText(controller.title, 512) || qsTr("Image")
+
+	function safeText(value, maximum) {
+		if (value === undefined || value === null || typeof value === "object")
+			return ""
+		return String(value).trim().slice(0, maximum || 512)
+	}
 
     function safeRenderImageSource(value) {
         const source = String(value === undefined || value === null ? "" : value).trim()
@@ -23,7 +31,7 @@ Window {
     visible: true
     color: Theme.shellBackground
     flags: Qt.Window | Qt.FramelessWindowHint
-    title: controller.title || qsTr("Image")
+	title: displayTitle
 
     function fitScale() {
         const sourceWidth = Math.max(1, Number(imageState.width || picture.sourceSize.width || 1))
@@ -62,6 +70,11 @@ Window {
         controller.requestClose()
     }
 
+	Shortcut {
+		sequence: "Escape"
+		onActivated: viewer.controller.requestClose()
+	}
+
     Rectangle {
         anchors.fill: parent
         color: Theme.shellBackground
@@ -73,7 +86,7 @@ Window {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            height: 42
+			height: Theme.controlHeight + Theme.space2
             color: Theme.panel
             border.color: Theme.divider
 
@@ -81,12 +94,12 @@ Window {
 				textFormat: Text.PlainText
                 anchors.left: parent.left
                 anchors.right: windowControls.left
-                anchors.leftMargin: 14
-                anchors.rightMargin: 8
+				anchors.leftMargin: Theme.space3
+				anchors.rightMargin: Theme.space2
                 anchors.verticalCenter: parent.verticalCenter
                 text: viewer.title
                 color: Theme.textMuted
-                font.pixelSize: 11
+				font.pixelSize: Theme.fontCaption
                 font.bold: true
                 elide: Text.ElideRight
             }
@@ -101,13 +114,13 @@ Window {
                 anchors.right: parent.right
                 anchors.top: parent.top
                 height: parent.height
-                ToolButton {
-                    width: 42; height: parent.height; text: "−"
+                ModernIconButton {
+					width: titleBar.height; height: parent.height; text: "−"
                     Accessible.name: qsTr("Minimize image viewer")
                     onClicked: viewer.showMinimized()
                 }
-                ToolButton {
-                    width: 42; height: parent.height; text: "×"
+                ModernIconButton {
+					width: titleBar.height; height: parent.height; iconName: "close"
                     Accessible.name: qsTr("Close image viewer")
                     onClicked: viewer.controller.requestClose()
                 }
@@ -116,11 +129,12 @@ Window {
 
         Item {
             id: stage
+			objectName: "imageViewerStage"
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: titleBar.bottom
             anchors.bottom: parent.bottom
-            anchors.margins: 14
+			anchors.margins: viewer.compactLayout ? Theme.space2 : Theme.space3
             clip: true
             focus: true
             activeFocusOnTab: true
@@ -140,6 +154,30 @@ Window {
                 Accessible.name: viewer.title
                 onStatusChanged: if (status === Image.Ready) viewer.resetZoom()
             }
+
+			BusyIndicator {
+				anchors.centerIn: parent
+				running: picture.status === Image.Loading
+				visible: running
+				palette.highlight: Theme.accent
+				Accessible.name: qsTr("Loading %1").arg(viewer.displayTitle)
+			}
+
+			Label {
+				objectName: "imageViewerError"
+				anchors.centerIn: parent
+				width: Math.max(1, parent.width - Theme.space6 * 2)
+				visible: picture.status === Image.Error || picture.source.toString().length === 0
+				text: qsTr("Image unavailable")
+				textFormat: Text.PlainText
+				color: Theme.textMuted
+				font.pixelSize: Theme.fontLabel
+				wrapMode: Text.Wrap
+				horizontalAlignment: Text.AlignHCenter
+				Accessible.role: Accessible.AlertMessage
+				Accessible.name: text
+				Accessible.description: viewer.displayTitle
+			}
 
             MouseArea {
                 id: panArea
@@ -169,28 +207,55 @@ Window {
                 onWheel: event => viewer.zoomBy(event.angleDelta.y >= 0 ? 1.2 : 1 / 1.2)
             }
 
-            Row {
+			Rectangle {
+				id: zoomToolbar
+				objectName: "imageViewerZoomToolbar"
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: parent.bottom
-                anchors.bottomMargin: 10
-                spacing: 4
-                padding: 4
-                ToolButton {
-                    text: "−"; enabled: viewer.zoom > 0.251
-                    Accessible.name: qsTr("Zoom out")
-                    onClicked: viewer.zoomBy(1 / 1.2)
-                }
-                ToolButton {
-                    width: 62; text: Math.round(viewer.zoom * 100) + "%"
-                    Accessible.name: qsTr("Fit image to window")
-                    onClicked: viewer.resetZoom()
-                }
-                ToolButton {
-                    text: "+"; enabled: viewer.zoom < 9.999
-                    Accessible.name: qsTr("Zoom in")
-                    onClicked: viewer.zoomBy(1.2)
-                }
+				anchors.bottomMargin: Theme.space2
+				width: zoomControls.implicitWidth + Theme.space2 * 2
+				height: zoomControls.implicitHeight + Theme.space1 * 2
+				radius: Theme.innerRadius
+				color: Theme.panel
+				border.color: Theme.surfaceBorder
+				Accessible.role: Accessible.ToolBar
+				Accessible.name: qsTr("Image zoom controls")
+
+				Row {
+					id: zoomControls
+					anchors.centerIn: parent
+					spacing: Theme.space1
+					ModernIconButton {
+						objectName: "imageViewerZoomOut"
+						text: "−"; enabled: viewer.zoom > 0.251
+						Accessible.name: qsTr("Zoom out")
+						onClicked: viewer.zoomBy(1 / 1.2)
+					}
+					ModernIconButton {
+						objectName: "imageViewerFit"
+						width: Theme.controlHeight + Theme.space5
+						text: Math.round(viewer.zoom * 100) + "%"
+						Accessible.name: qsTr("Fit image to window")
+						onClicked: viewer.resetZoom()
+					}
+					ModernIconButton {
+						objectName: "imageViewerZoomIn"
+						text: "+"; enabled: viewer.zoom < 9.999
+						Accessible.name: qsTr("Zoom in")
+						onClicked: viewer.zoomBy(1.2)
+					}
+				}
             }
+
+			Rectangle {
+				anchors.fill: parent
+				anchors.margins: Theme.space1
+				visible: stage.activeFocus
+				color: "transparent"
+				radius: Theme.innerRadius
+				border.color: Theme.focus
+				border.width: Theme.focusRingWidth
+			}
 
             Keys.onPressed: event => {
                 const step = event.modifiers & Qt.ShiftModifier ? 80 : 32

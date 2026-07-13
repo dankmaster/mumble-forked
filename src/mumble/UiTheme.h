@@ -12,6 +12,7 @@
 #include <optional>
 
 class QPalette;
+class QWindow;
 class QWidget;
 
 enum class UiThemePreset {
@@ -76,6 +77,8 @@ UiThemeWindowChrome uiThemeWindowChromeForPalette(const QPalette &palette);
 UiThemeWindowChrome uiThemeWindowChromeForActiveTheme(const QPalette &fallbackPalette);
 void applyUiThemeNativeTitleBar(QWidget *widget);
 void applyUiThemeNativeTitleBar(QWidget *widget, const UiThemeWindowChrome &chrome);
+void applyUiThemeNativeTitleBar(QWindow *window);
+void applyUiThemeNativeTitleBar(QWindow *window, const UiThemeWindowChrome &chrome);
 void applyUiThemeNativeTitleBars();
 
 #endif // MUMBLE_MUMBLE_UITHEME_H_

@@ -38,6 +38,8 @@ class ClientSessionController final : public QObject {
 	Q_PROPERTY(bool connected READ connected WRITE setConnected NOTIFY connectedChanged)
 	Q_PROPERTY(bool selfMuted READ selfMuted WRITE setSelfMuted NOTIFY selfMutedChanged)
 	Q_PROPERTY(bool selfDeafened READ selfDeafened WRITE setSelfDeafened NOTIFY selfDeafenedChanged)
+	Q_PROPERTY(QVariantList appMenus READ appMenus WRITE setAppMenus NOTIFY appMenusChanged)
+	Q_PROPERTY(QVariantMap selfMenu READ selfMenu WRITE setSelfMenu NOTIFY selfMenuChanged)
 	Q_PROPERTY(QVariantMap updateBanner READ updateBanner WRITE setUpdateBanner NOTIFY updateBannerChanged)
 	Q_PROPERTY(QVariantList motdSegments READ motdSegments NOTIFY motdSegmentsChanged)
 	Q_PROPERTY(QString motdSummary READ motdSummary WRITE setMotdSummary NOTIFY motdSummaryChanged)
@@ -66,6 +68,8 @@ public:
 	bool connected() const;
 	bool selfMuted() const;
 	bool selfDeafened() const;
+	QVariantList appMenus() const;
+	QVariantMap selfMenu() const;
 	QVariantMap updateBanner() const;
 	QString motdHtml() const;
 	QVariantList motdSegments() const;
@@ -92,6 +96,8 @@ public:
 	void setConnected(bool value);
 	void setSelfMuted(bool value);
 	void setSelfDeafened(bool value);
+	void setAppMenus(const QVariantList &value);
+	void setSelfMenu(const QVariantMap &value);
 	void setUpdateBanner(const QVariantMap &value);
 	void setMotdHtml(const QString &value);
 	void setMotdSummary(const QString &value);
@@ -114,6 +120,8 @@ signals:
 	void connectedChanged();
 	void selfMutedChanged();
 	void selfDeafenedChanged();
+	void appMenusChanged();
+	void selfMenuChanged();
 	void updateBannerChanged();
 	void motdHtmlChanged();
 	void motdSegmentsChanged();
@@ -142,6 +150,8 @@ private:
 	bool m_connected = false;
 	bool m_selfMuted = false;
 	bool m_selfDeafened = false;
+	QVariantList m_appMenus;
+	QVariantMap m_selfMenu;
 	QVariantMap m_updateBanner;
 	QString m_motdHtml;
 	QVariantList m_motdSegments;
@@ -457,8 +467,21 @@ class DialogStateController final : public QObject {
 	Q_PROPERTY(QVariantList pages READ pages NOTIFY stateChanged)
 	Q_PROPERTY(QVariantList sections READ sections NOTIFY stateChanged)
 	Q_PROPERTY(QVariantList actions READ actions NOTIFY stateChanged)
+	Q_PROPERTY(QVariantList favorites READ favorites NOTIFY stateChanged)
+	Q_PROPERTY(int selectedFavoriteIndex READ selectedFavoriteIndex NOTIFY stateChanged)
+	Q_PROPERTY(bool editorOpen READ editorOpen NOTIFY stateChanged)
+	Q_PROPERTY(QString editorTitle READ editorTitle NOTIFY stateChanged)
+	Q_PROPERTY(QString primaryActionId READ primaryActionId NOTIFY stateChanged)
+	Q_PROPERTY(bool loading READ loading NOTIFY stateChanged)
+	Q_PROPERTY(QString loadingScaffold READ loadingScaffold NOTIFY stateChanged)
+	Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY stateChanged)
+	Q_PROPERTY(QString tone READ tone NOTIFY stateChanged)
+	Q_PROPERTY(int preferredWidth READ preferredWidth NOTIFY stateChanged)
+	Q_PROPERTY(int preferredHeight READ preferredHeight NOTIFY stateChanged)
+	Q_PROPERTY(QString initialFocusId READ initialFocusId NOTIFY stateChanged)
 	Q_PROPERTY(QVariantMap state READ state NOTIFY stateChanged)
 	Q_PROPERTY(qulonglong revision READ revision NOTIFY stateChanged)
+	Q_PROPERTY(QVariantMap presentationFieldValues READ presentationFieldValues NOTIFY presentationFieldValuesChanged)
 
 public:
 	explicit DialogStateController(QObject *parent = nullptr);
@@ -471,11 +494,26 @@ public:
 	QVariantList pages() const;
 	QVariantList sections() const;
 	QVariantList actions() const;
+	QVariantList favorites() const;
+	int selectedFavoriteIndex() const;
+	bool editorOpen() const;
+	QString editorTitle() const;
+	QString primaryActionId() const;
+	bool loading() const;
+	QString loadingScaffold() const;
+	QString statusMessage() const;
+	QString tone() const;
+	int preferredWidth() const;
+	int preferredHeight() const;
+	QString initialFocusId() const;
 	QVariantMap state() const;
 	qulonglong revision() const;
+	QVariantMap presentationFieldValues() const;
 	Q_INVOKABLE QVariant fieldValue(const QString &fieldId) const;
+	Q_INVOKABLE QVariant presentationFieldValue(const QString &fieldId) const;
 	Q_INVOKABLE QString fieldError(const QString &fieldId) const;
 	void applyState(const QVariantMap &state);
+	bool updatePresentationFieldValue(const QString &fieldId, const QVariant &value);
 
 	Q_INVOKABLE void updateField(const QString &fieldId, const QVariant &value);
 	Q_INVOKABLE void invokeAction(const QString &actionId, const QVariantMap &payload = {});
@@ -483,12 +521,15 @@ public:
 
 signals:
 	void stateChanged();
+	void presentationFieldValuesChanged();
 	void fieldUpdateRequested(const QString &dialogId, const QString &fieldId, const QVariant &value);
 	void actionRequested(const QString &dialogId, const QString &actionId, const QVariantMap &payload);
 	void closeRequested(const QString &dialogId);
 
 private:
 	QVariantMap m_state;
+	QVariantMap m_presentationFieldValues;
+	QSet< QString > m_presentationFieldIds;
 	qulonglong m_revision = 0;
 };
 
@@ -508,6 +549,7 @@ class MediaSessionBackend final : public QObject {
 	Q_PROPERTY(QUrl audioUrl READ audioUrl NOTIFY stateChanged)
 	Q_PROPERTY(QString provider READ provider NOTIFY stateChanged)
 	Q_PROPERTY(bool playbackControllable READ playbackControllable NOTIFY stateChanged)
+	Q_PROPERTY(bool playbackControlAllowed READ playbackControlAllowed NOTIFY stateChanged)
 	Q_PROPERTY(QString mediaMime READ mediaMime NOTIFY stateChanged)
 	Q_PROPERTY(QString audioMime READ audioMime NOTIFY stateChanged)
 	Q_PROPERTY(QString sessionId READ sessionId NOTIFY stateChanged)
@@ -516,6 +558,9 @@ class MediaSessionBackend final : public QObject {
 	Q_PROPERTY(double duration READ duration NOTIFY stateChanged)
 	Q_PROPERTY(QString error READ error NOTIFY stateChanged)
 	Q_PROPERTY(qulonglong syncGeneration READ syncGeneration NOTIFY stateChanged)
+	Q_PROPERTY(int loadProgress READ loadProgress NOTIFY loadProgressChanged)
+	Q_PROPERTY(int volume READ volume WRITE setVolume NOTIFY volumeChanged)
+	Q_PROPERTY(bool muted READ muted WRITE setMuted NOTIFY mutedChanged)
 
 public:
 	explicit MediaSessionBackend(QObject *parent = nullptr);
@@ -533,6 +578,7 @@ public:
 	QUrl audioUrl() const;
 	QString provider() const;
 	bool playbackControllable() const;
+	bool playbackControlAllowed() const;
 	QString mediaMime() const;
 	QString audioMime() const;
 	QString sessionId() const;
@@ -541,6 +587,9 @@ public:
 	double duration() const;
 	QString error() const;
 	qulonglong syncGeneration() const;
+	int loadProgress() const;
+	int volume() const;
+	bool muted() const;
 	Q_INVOKABLE bool open(const QUrl &url, const QString &provider, const QString &sessionId);
 	Q_INVOKABLE bool openDirect(const QUrl &url, const QString &mediaMime, const QUrl &audioUrl,
 								 const QString &audioMime, const QString &sessionId);
@@ -554,9 +603,14 @@ public:
 	Q_INVOKABLE bool isNavigationAllowed(const QUrl &url) const;
 	Q_INVOKABLE bool supportsSynchronizedPlayback(const QString &provider) const;
 	Q_INVOKABLE void close();
+	Q_INVOKABLE void closePlayer();
 	Q_INVOKABLE void play();
 	Q_INVOKABLE void pause();
 	Q_INVOKABLE void seek(double seconds);
+	Q_INVOKABLE void setVolume(int volume);
+	Q_INVOKABLE void setMuted(bool muted);
+	Q_INVOKABLE void toggleMuted();
+	Q_INVOKABLE void reportLoadProgress(int progress);
 	Q_INVOKABLE void reportPlaybackState(double position, double duration, bool paused);
 	Q_INVOKABLE void reportError(const QString &message);
 	void applyRemoteState(const QUrl &url, const QString &provider, const QString &sessionId, double position,
@@ -569,9 +623,14 @@ public:
 
 signals:
 	void stateChanged();
+	void loadProgressChanged();
+	void volumeChanged();
+	void mutedChanged();
 	void playRequested();
 	void pauseRequested();
 	void seekRequested(double seconds);
+	void volumeRequested(int volume);
+	void mutedRequested(bool muted);
 	void retryRequested();
 	void playbackRejected(const QString &message);
 	void sharedStartRequested(const QString &sessionId, const QUrl &url, const QString &provider,
@@ -583,7 +642,7 @@ private:
 	bool validateSource(const QUrl &url, const QString &provider, QUrl *normalized, QString *error) const;
 	bool validateDirectSource(const QUrl &url, const QString &mime, bool audio, QUrl *normalized,
 							  QString *error) const;
-	void closePlayer();
+	void updateLoadProgress(int progress);
 	void publishSharedPlaybackState(double position, bool paused, bool force);
 	bool m_active = false;
 	bool m_sharedAvailable = false;
@@ -596,6 +655,10 @@ private:
 	qulonglong m_sharedScopeId = 0;
 	qulonglong m_sharedHostSession = 0;
 	QVariantList m_sharedParticipantSessions;
+	bool m_sharedPlayerSuppressed = false;
+	double m_sharedPosition = 0.0;
+	bool m_sharedPaused = true;
+	qulonglong m_sharedGeneration = 0;
 	QString m_pendingExplicitSessionId;
 	QString m_navigationHost;
 	int m_navigationPort = -1;
@@ -610,6 +673,9 @@ private:
 	double m_duration = 0.0;
 	QString m_error;
 	qulonglong m_syncGeneration = 0;
+	int m_loadProgress = 0;
+	int m_volume = 100;
+	bool m_muted = false;
 	qint64 m_lastSharedPublishMs = 0;
 	double m_lastSharedPublishPosition = -1.0;
 	bool m_lastSharedPublishPaused = true;

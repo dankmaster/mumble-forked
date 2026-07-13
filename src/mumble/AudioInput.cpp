@@ -70,6 +70,14 @@ float AudioInput::amplitudeVoiceActivityLevel() const {
 	return std::clamp(1.0f + dPeakCleanMic / 96.0f, 0.0f, 1.0f);
 }
 
+float AudioInput::VoiceActivitySnapshot::amplitudeLevel() const {
+	return std::clamp(1.0f + peakCleanMicDb / 96.0f, 0.0f, 1.0f);
+}
+
+bool AudioInput::VoiceActivitySnapshot::hasProcessedInput() const {
+	return peakCleanMicDb < 0.0f || peakSignalDb < 0.0f || speechProbability > 0.0f || transmitting;
+}
+
 float AudioInput::voiceActivityLevel() const {
 	return voiceActivityLevelFor(Global::get().s.vsVAD, amplitudeVoiceActivityLevel(), fSpeechProb);
 }
@@ -401,6 +409,7 @@ AudioInput::AudioInput()
 
 	iBitrate    = 0;
 	dPeakSignal = dPeakSpeaker = dPeakMic = dPeakCleanMic = 0.0;
+	fSpeechProb = 0.0f;
 
 	if (Global::get().uiSession) {
 		setMaxBandwidth(Global::get().iMaxBandwidth);
@@ -434,7 +443,17 @@ AudioInput::~AudioInput() {
 }
 
 bool AudioInput::isTransmitting() const {
-	return bPreviousVoice;
+	return m_voiceActivityTransmitting.load(std::memory_order_relaxed);
+}
+
+AudioInput::VoiceActivitySnapshot AudioInput::voiceActivitySnapshot() const noexcept {
+	VoiceActivitySnapshot snapshot;
+	snapshot.peakSignalDb = m_voiceActivityPeakSignalDb.load(std::memory_order_relaxed);
+	snapshot.peakCleanMicDb = m_voiceActivityPeakCleanMicDb.load(std::memory_order_relaxed);
+	snapshot.speechProbability = m_voiceActivitySpeechProbability.load(std::memory_order_relaxed);
+	snapshot.bitrate = m_voiceActivityBitrate.load(std::memory_order_relaxed);
+	snapshot.transmitting = m_voiceActivityTransmitting.load(std::memory_order_relaxed);
+	return snapshot;
 }
 
 #define IN_MIXER_FLOAT(channels)                                                                             \
@@ -1019,6 +1038,7 @@ int AudioInput::encodeOpusFrame(short *source, int size, EncodingOutputBuffer &b
 	len = opus_encode(opusState, source, size, &buffer[0], static_cast< opus_int32 >(buffer.size()));
 	const int tenMsFrameCount = (size / iFrameSize);
 	iBitrate                  = (len * 100 * 8) / tenMsFrameCount;
+	m_voiceActivityBitrate.store(std::max(0, iBitrate), std::memory_order_relaxed);
 	return len;
 }
 
@@ -1102,6 +1122,7 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 		sum += static_cast< float >(psSource[i] * psSource[i]);
 	float micLevel = sqrtf(sum / static_cast< float >(iFrameSize));
 	dPeakSignal    = qMax(20.0f * log10f(micLevel / 32768.0f), -96.0f);
+	m_voiceActivityPeakSignalDb.store(dPeakSignal, std::memory_order_relaxed);
 
 	if (bDebugDumpInput) {
 		outMic.write(reinterpret_cast< const char * >(chunk.mic), iFrameSize * sizeof(short));
@@ -1114,9 +1135,11 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 	}
 
 	fSpeechProb = static_cast< float >(m_preprocessor.getSpeechProb()) / 100.0f;
+	m_voiceActivitySpeechProbability.store(fSpeechProb, std::memory_order_relaxed);
 
 	// clean microphone level: peak of filtered signal attenuated by AGC gain
 	dPeakCleanMic = qMax(dPeakSignal - static_cast< float >(gainValue), -96.0f);
+	m_voiceActivityPeakCleanMicDb.store(dPeakCleanMic, std::memory_order_relaxed);
 	const float amplitudeLevel = amplitudeVoiceActivityLevel();
 	float level                = voiceActivityLevelFor(Global::get().s.vsVAD, amplitudeLevel, fSpeechProb);
 
@@ -1166,7 +1189,6 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 		bTalkingWhenMuted = bIsSpeech;
 		bIsSpeech         = false;
 	}
-
 	if (bIsSpeech) {
 		iSilentFrames = 0;
 	} else {
@@ -1223,6 +1245,7 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 
 	if (!bIsSpeech && !bPreviousVoice) {
 		iBitrate = 0;
+		m_voiceActivityBitrate.store(0, std::memory_order_relaxed);
 
 		if (tIdle.elapsed< std::chrono::seconds >().count() > Global::get().s.iIdleTime) {
 			activityState = ActivityStateIdle;
@@ -1295,6 +1318,7 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 		opusBuffer.clear();
 		if (len <= 0) {
 			iBitrate = 0;
+			m_voiceActivityBitrate.store(0, std::memory_order_relaxed);
 			qWarning() << "encodeOpusFrame failed" << iBufferedFrames << iFrameSize << len;
 			iBufferedFrames = 0; // These are lost. Make sure not to mess up our sequence counter next flushCheck.
 			return;
@@ -1306,10 +1330,13 @@ void AudioInput::encodeAudioFrame(AudioChunk chunk) {
 		flushCheck(QByteArray(reinterpret_cast< char * >(&buffer[0]), len), !bIsSpeech, voiceTargetID);
 	}
 
-	if (!bIsSpeech)
+	if (!bIsSpeech) {
 		iBitrate = 0;
+		m_voiceActivityBitrate.store(0, std::memory_order_relaxed);
+	}
 
 	bPreviousVoice = bIsSpeech;
+	m_voiceActivityTransmitting.store(bPreviousVoice, std::memory_order_relaxed);
 	previousPTT    = isPTT;
 }
 

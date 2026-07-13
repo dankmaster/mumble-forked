@@ -161,6 +161,8 @@ QVariantMap ModernConnectController::state() const {
 	dialog.insert(QStringLiteral("title"), QObject::tr("Connect to a server"));
 	dialog.insert(QStringLiteral("subtitle"), QObject::tr("Choose a saved server or add one."));
 	dialog.insert(QStringLiteral("primaryActionId"), QStringLiteral("connect"));
+	dialog.insert(QStringLiteral("width"), 860);
+	dialog.insert(QStringLiteral("height"), 640);
 
 	QVariantList favorites;
 	for (int i = 0; i < m_favorites.size(); ++i) {
@@ -171,6 +173,10 @@ QVariantMap ModernConnectController::state() const {
 	dialog.insert(QStringLiteral("editorOpen"), m_editorOpen);
 	dialog.insert(QStringLiteral("editorTitle"),
 				  m_selectedFavoriteIndex >= 0 ? QObject::tr("Edit server") : QObject::tr("Add server"));
+	dialog.insert(QStringLiteral("initialFocusId"),
+				  m_editorOpen ? QStringLiteral("dialogField_host")
+							   : (!m_favorites.isEmpty() ? QStringLiteral("connectFavoriteList")
+													 : QStringLiteral("connectNewFavoriteButton")));
 
 	QVariantList fields;
 	fields.push_back(fieldItem(QStringLiteral("name"), QObject::tr("Server title"), QStringLiteral("text"), m_name));

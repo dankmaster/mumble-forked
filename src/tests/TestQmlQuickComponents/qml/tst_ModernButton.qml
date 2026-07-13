@@ -29,6 +29,9 @@ TestCase {
     function init() {
         verify(loader.item !== null);
         clickedSpy.clear();
+		loader.item.tone = "neutral";
+		loader.item.highlighted = false;
+		loader.item.checked = false;
         loader.item.forceActiveFocus();
         tryCompare(loader.item, "activeFocus", true);
     }
@@ -39,4 +42,17 @@ TestCase {
         keyClick(Qt.Key_Space);
         compare(clickedSpy.count, 1);
     }
+
+	function test_tone_and_checked_states_use_design_tokens() {
+		loader.item.tone = "danger"
+		verify(loader.item.emphasized)
+		compare(loader.item.toneColor, Theme.danger)
+		tryCompare(loader.item.background, "color", Theme.danger, 500)
+		compare(loader.item.contentItem.color, Theme.contrastText(Theme.danger))
+		loader.item.tone = "neutral"
+		loader.item.checked = true
+		verify(loader.item.emphasized)
+		tryCompare(loader.item.background, "color", Theme.accent, 500)
+		compare(loader.item.contentItem.color, Theme.contrastText(Theme.accent))
+	}
 }

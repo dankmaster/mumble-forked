@@ -34,8 +34,10 @@
 #include <QtCore/QEvent>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
+#include <QtCore/QHash>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+#include <QtCore/QMetaType>
 #include <QtCore/QPointer>
 #include <QtCore/QReadLocker>
 #include <QtCore/QSet>
@@ -47,6 +49,7 @@
 #include <QtGui/QPainter>
 #include <QtNetwork/QHostAddress>
 #include <QtNetwork/QTcpServer>
+#include <QtQuick/QQuickItem>
 #include <QtQuick/QQuickWindow>
 #include <QtNetwork/QTcpSocket>
 #include <QtWidgets/QApplication>
@@ -3074,38 +3077,96 @@ namespace {
 		return QStringLiteral("data:image/png;base64,") + QString::fromLatin1(bytes.toBase64());
 	}
 
+	QVariant automationRegisterPreviewImageValue(const QVariant &value,
+											 const std::shared_ptr< QmlImagePipeline > &pipeline,
+											 const QString &stablePath,
+											 QHash< QString, QString > &registeredDataUrls) {
+		if (value.typeId() == QMetaType::QString) {
+			const QString source = value.toString();
+			if (!source.startsWith(QLatin1String("data:image/"), Qt::CaseInsensitive)) return value;
+			if (registeredDataUrls.contains(source)) return registeredDataUrls.value(source);
+			const QString providerUrl = pipeline ? pipeline->registerDataUrl(source, stablePath) : QString();
+			registeredDataUrls.insert(source, providerUrl);
+			// A fixture must never leak a data URL into product QML, even if registration failed.
+			return providerUrl;
+		}
+
+		if (value.typeId() == QMetaType::QVariantMap) {
+			QVariantMap result;
+			const QVariantMap source = value.toMap();
+			for (auto it = source.cbegin(); it != source.cend(); ++it) {
+				result.insert(it.key(), automationRegisterPreviewImageValue(
+					it.value(), pipeline, stablePath + QLatin1Char(':') + it.key(), registeredDataUrls));
+			}
+			return result;
+		}
+
+		if (value.typeId() == QMetaType::QVariantList) {
+			QVariantList result;
+			const QVariantList source = value.toList();
+			result.reserve(source.size());
+			for (int index = 0; index < source.size(); ++index) {
+				result.push_back(automationRegisterPreviewImageValue(
+					source.at(index), pipeline, stablePath + QStringLiteral(":%1").arg(index), registeredDataUrls));
+			}
+			return result;
+		}
+
+		return value;
+	}
+
 	QVariantList automationRegisterPreviewImages(const QVariantList &messages,
-											 const std::shared_ptr< QmlImagePipeline > &pipeline) {
-		if (!pipeline) return messages;
+											 const std::shared_ptr< QmlImagePipeline > &pipeline,
+											 const QString &variant = QString()) {
+		QHash< QString, QString > registeredDataUrls;
 		QVariantList result;
 		result.reserve(messages.size());
 		for (int messageIndex = 0; messageIndex < messages.size(); ++messageIndex) {
 			QVariantMap message = messages.at(messageIndex).toMap();
-			QVariantMap preview = message.value(QStringLiteral("preview")).toMap();
-			const QString keyPrefix = QStringLiteral("automation:preview:%1").arg(messageIndex);
-			for (const QString &field : { QStringLiteral("thumbnailUrl"), QStringLiteral("mediaUrl") }) {
-				const QString source = preview.value(field).toString();
-				if (source.startsWith(QLatin1String("data:"), Qt::CaseInsensitive)) {
-					const QString providerUrl = pipeline->registerDataUrl(source, keyPrefix + QLatin1Char(':') + field);
-					if (!providerUrl.isEmpty()) preview.insert(field, providerUrl);
-				}
-			}
-			QVariantList mediaItems = preview.value(QStringLiteral("mediaItems")).toList();
-			for (int itemIndex = 0; itemIndex < mediaItems.size(); ++itemIndex) {
-				QVariantMap item = mediaItems.at(itemIndex).toMap();
-				const QString source = item.value(QStringLiteral("url")).toString();
-				if (source.startsWith(QLatin1String("data:"), Qt::CaseInsensitive)) {
-					const QString providerUrl = pipeline->registerDataUrl(
-						source, keyPrefix + QStringLiteral(":item:%1").arg(itemIndex));
-					if (!providerUrl.isEmpty()) item.insert(QStringLiteral("url"), providerUrl);
-				}
-				mediaItems[itemIndex] = item;
-			}
-			if (!mediaItems.isEmpty()) preview.insert(QStringLiteral("mediaItems"), mediaItems);
-			message.insert(QStringLiteral("preview"), preview);
+			const QString keyPrefix = QStringLiteral("automation:rich-preview:%1:%2")
+									  .arg(variant.trimmed().toLower(), QString::number(messageIndex));
+			message.insert(QStringLiteral("preview"),
+				automationRegisterPreviewImageValue(message.value(QStringLiteral("preview")), pipeline,
+					keyPrefix, registeredDataUrls));
 			result.push_back(message);
 		}
 		return result;
+	}
+
+	void automationCollectPreviewImageSources(const QVariant &value, QStringList &providerUrls,
+											 int &dataImageSourceCount) {
+		if (value.typeId() == QMetaType::QString) {
+			const QString source = value.toString().trimmed();
+			if (source.startsWith(QLatin1String("image://mumble/"), Qt::CaseInsensitive)
+				&& !providerUrls.contains(source)) {
+				providerUrls.push_back(source);
+			} else if (source.startsWith(QLatin1String("data:image/"), Qt::CaseInsensitive)) {
+				++dataImageSourceCount;
+			}
+			return;
+		}
+		if (value.typeId() == QMetaType::QVariantMap) {
+			const QVariantMap map = value.toMap();
+			for (auto it = map.cbegin(); it != map.cend(); ++it) {
+				automationCollectPreviewImageSources(it.value(), providerUrls, dataImageSourceCount);
+			}
+			return;
+		}
+		if (value.typeId() == QMetaType::QVariantList) {
+			for (const QVariant &item : value.toList()) {
+				automationCollectPreviewImageSources(item, providerUrls, dataImageSourceCount);
+			}
+		}
+	}
+
+	QVariantMap automationPreviewImageItem(const QString &source, const QString &title) {
+		return QVariantMap { { QStringLiteral("kind"), QStringLiteral("image") },
+			{ QStringLiteral("mime"), QStringLiteral("image/png") },
+			{ QStringLiteral("url"), source }, { QStringLiteral("title"), title } };
+	}
+
+	QVariantMap automationPreviewSpec(const QString &label, const QString &value) {
+		return QVariantMap { { QStringLiteral("label"), label }, { QStringLiteral("value"), value } };
 	}
 
 	QVariantMap automationRichPreviewMessage(const qulonglong messageID, const QString &actor,
@@ -3195,14 +3256,952 @@ namespace {
 
 	void automationApplyPreviewSize(QVariantMap &preview, const QString &size) {
 		const QString normalized = size.trimmed().toLower();
+		if (normalized == QLatin1String("expanded")) {
+			preview.insert(QStringLiteral("previewSize"), QStringLiteral("large"));
+			return;
+		}
 		if (normalized == QLatin1String("compact") || normalized == QLatin1String("large")
 			|| normalized == QLatin1String("default")) {
 			preview.insert(QStringLiteral("previewSize"), normalized);
 		}
 	}
 
+	QVariantMap automationProviderPreview(const QString &url, const QString &title, const QString &subtitle,
+										 const QString &description, const QString &openLabel,
+										 const QVariantMap &metadata, const QVariantList &mediaItems,
+										 const QString &size) {
+		QVariantMap preview = automationRichPreviewBase(url, title, subtitle, description);
+		preview.insert(QStringLiteral("openLabel"), openLabel);
+		preview.insert(QStringLiteral("metadata"), metadata);
+		if (!mediaItems.isEmpty()) {
+			preview.insert(QStringLiteral("mediaItems"), mediaItems);
+			preview.insert(QStringLiteral("thumbnailUrl"),
+				mediaItems.first().toMap().value(QStringLiteral("url")));
+		}
+		automationApplyPreviewSize(preview, size);
+		return preview;
+	}
+
+	QVariantList automationProviderRichPreviewProbeMessages(const QString &variant, const QString &size) {
+		const QString normalized = variant.trimmed().toLower();
+		const QString actor = QStringLiteral("preview-bot");
+		const auto fixtureImage = [](const QString &title, const QString &subtitle, const QString &accent,
+									 const QString &accent2) {
+			return automationPreviewImageDataUrl(title, subtitle, accent, accent2);
+		};
+
+		if (normalized == QLatin1String("finance")) {
+			const QVariantList sparkline {
+				QVariantMap { { QStringLiteral("timestamp"), QVariant::fromValue< qlonglong >(1779753600) },
+					{ QStringLiteral("close"), 435.95 } },
+				QVariantMap { { QStringLiteral("timestamp"), QVariant::fromValue< qlonglong >(1779840000) },
+					{ QStringLiteral("close"), 438.10 } },
+				QVariantMap { { QStringLiteral("timestamp"), QVariant::fromValue< qlonglong >(1779926400) },
+					{ QStringLiteral("close"), 436.82 } },
+				QVariantMap { { QStringLiteral("timestamp"), QVariant::fromValue< qlonglong >(1780012800) },
+					{ QStringLiteral("close"), 442.35 } },
+				QVariantMap { { QStringLiteral("timestamp"), QVariant::fromValue< qlonglong >(1780099200) },
+					{ QStringLiteral("close"), 440.70 } },
+				QVariantMap { { QStringLiteral("timestamp"), QVariant::fromValue< qlonglong >(1780185600) },
+					{ QStringLiteral("close"), 445.18 } },
+				QVariantMap { { QStringLiteral("timestamp"), QVariant::fromValue< qlonglong >(1780272000) },
+					{ QStringLiteral("close"), 448.37 } }
+			};
+			const QVariantMap metadata {
+				{ QStringLiteral("provider"), QStringLiteral("yahoo-finance") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("yahoo-finance") },
+				{ QStringLiteral("providerName"), QStringLiteral("Yahoo Finance") },
+				{ QStringLiteral("tickerSymbol"), QStringLiteral("MSFT") },
+				{ QStringLiteral("financeName"), QStringLiteral("Microsoft Corporation") },
+				{ QStringLiteral("financeExchange"), QStringLiteral("NasdaqGS") },
+				{ QStringLiteral("financeInstrument"), QStringLiteral("EQUITY") },
+				{ QStringLiteral("financeCurrency"), QStringLiteral("USD") },
+				{ QStringLiteral("financePrice"), QStringLiteral("448.37") },
+				{ QStringLiteral("financeDayChange"), QStringLiteral("+5.21") },
+				{ QStringLiteral("financeDayChangePercent"), QStringLiteral("+1.18%") },
+				{ QStringLiteral("financeDayTrend"), QStringLiteral("up") },
+				{ QStringLiteral("statusLabel"), QStringLiteral("1D +1.18%") },
+				{ QStringLiteral("financeRangeLabel"), QStringLiteral("1M") },
+				{ QStringLiteral("financeRangeChange"), QStringLiteral("+12.42") },
+				{ QStringLiteral("financeRangeChangePercent"), QStringLiteral("+2.85%") },
+				{ QStringLiteral("financeRangeTrend"), QStringLiteral("up") },
+				{ QStringLiteral("financeUpdatedAt"), QStringLiteral("2026-05-28T14:20:00Z") },
+				{ QStringLiteral("financeSparkline"), sparkline }
+			};
+			const QString url = QStringLiteral("https://finance.yahoo.com/quote/MSFT");
+			const QVariantMap preview = automationProviderPreview(
+				url, QStringLiteral("Microsoft Corporation (MSFT)"), QStringLiteral("Yahoo Finance"),
+				QStringLiteral("448.37 USD · +5.21 (+1.18%)"), QStringLiteral("Open on Yahoo Finance"),
+				metadata, {}, size);
+			return { automationRichPreviewMessage(4294967396ULL, actor, url, preview) };
+		}
+
+		if (normalized == QLatin1String("product")) {
+			const QString hero = fixtureImage(QStringLiteral("Logitech G Pro X Superlight 2"),
+				QStringLiteral("Inet product fixture"), QStringLiteral("#086f83"), QStringLiteral("#49c5b6"));
+			const QString side = fixtureImage(QStringLiteral("Side view"), QStringLiteral("Product gallery"),
+				QStringLiteral("#283048"), QStringLiteral("#859398"));
+			const QVariantList images { automationPreviewImageItem(hero, QStringLiteral("Product")),
+				automationPreviewImageItem(side, QStringLiteral("Side view")) };
+			const QVariantList specs { automationPreviewSpec(QStringLiteral("DPI"), QStringLiteral("44 000")),
+				automationPreviewSpec(QStringLiteral("Anslutning"), QStringLiteral("LIGHTSPEED / USB-C")),
+				automationPreviewSpec(QStringLiteral("Vikt"), QStringLiteral("60 g")) };
+			const QVariantMap metadata {
+				{ QStringLiteral("provider"), QStringLiteral("inet") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("inet") },
+				{ QStringLiteral("previewKind"), QStringLiteral("product") },
+				{ QStringLiteral("swedishPreviewKind"), QStringLiteral("product") },
+				{ QStringLiteral("providerName"), QStringLiteral("Inet") },
+				{ QStringLiteral("richPreviewMetadataVersion"), 10 },
+				{ QStringLiteral("productProvider"), QStringLiteral("Inet") },
+				{ QStringLiteral("productId"), QStringLiteral("8901234") },
+				{ QStringLiteral("productTitle"), QStringLiteral("Logitech G Pro X Superlight 2") },
+				{ QStringLiteral("productDescription"),
+				  QStringLiteral("Trådlös gamingmus med optisk HERO 2-sensor och låg vikt.") },
+				{ QStringLiteral("productPrice"), QStringLiteral("1 499 kr") },
+				{ QStringLiteral("productAvailability"), QStringLiteral("I lager online") },
+				{ QStringLiteral("productSku"), QStringLiteral("910-006630") },
+				{ QStringLiteral("productRating"), QStringLiteral("4.7/5") },
+				{ QStringLiteral("productReviewCount"), QStringLiteral("128 recensioner") },
+				{ QStringLiteral("productImage"), hero },
+				{ QStringLiteral("productSpecs"), specs },
+				{ QStringLiteral("productImages"), images },
+				{ QStringLiteral("productMedia"), images }
+			};
+			const QString url = QStringLiteral("https://www.inet.se/produkt/8901234");
+			const QVariantMap preview = automationProviderPreview(
+				url, QStringLiteral("Logitech G Pro X Superlight 2"), QStringLiteral("Inet"),
+				QStringLiteral("Trådlös gamingmus · 60 g · LIGHTSPEED"), QStringLiteral("Open on Inet"),
+				metadata, images, size);
+			return { automationRichPreviewMessage(4294967400ULL, actor, url, preview) };
+		}
+
+		if (normalized == QLatin1String("game-store") || normalized == QLatin1String("gamestore")) {
+			const QString hero = fixtureImage(QStringLiteral("Hades II"), QStringLiteral("Steam store fixture"),
+				QStringLiteral("#5b247a"), QStringLiteral("#d17c45"));
+			const QString gameplay = fixtureImage(QStringLiteral("Gameplay"), QStringLiteral("Store gallery"),
+				QStringLiteral("#16222a"), QStringLiteral("#3a6073"));
+			const QVariantList images { automationPreviewImageItem(hero, QStringLiteral("Key art")),
+				automationPreviewImageItem(gameplay, QStringLiteral("Gameplay")) };
+			const QVariantList tags { QStringLiteral("Action Roguelike"), QStringLiteral("Mythology"),
+				QStringLiteral("Singleplayer"), QStringLiteral("Early Access") };
+			const QVariantMap metadata {
+				{ QStringLiteral("provider"), QStringLiteral("game-store") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("game-store") },
+				{ QStringLiteral("previewKind"), QStringLiteral("gameStoreProduct") },
+				{ QStringLiteral("gameStoreProvider"), QStringLiteral("steam") },
+				{ QStringLiteral("gameStoreName"), QStringLiteral("Steam") },
+				{ QStringLiteral("gameStoreProductTitle"), QStringLiteral("Hades II") },
+				{ QStringLiteral("gameStoreDescription"),
+				  QStringLiteral("Battle beyond the Underworld using dark sorcery and Olympian might.") },
+				{ QStringLiteral("gameStorePrice"), QStringLiteral("29,99 €") },
+				{ QStringLiteral("gameStoreOriginalPrice"), QStringLiteral("39,99 €") },
+				{ QStringLiteral("gameStoreDiscount"), QStringLiteral("-25%") },
+				{ QStringLiteral("gameStoreAvailability"), QStringLiteral("In stock") },
+				{ QStringLiteral("gameStoreBrand"), QStringLiteral("Supergiant Games") },
+				{ QStringLiteral("gameStoreSku"), QStringLiteral("1145350") },
+				{ QStringLiteral("gameStoreRating"), QStringLiteral("Overwhelmingly Positive") },
+				{ QStringLiteral("gameStoreReviewCount"), QStringLiteral("58,420") },
+				{ QStringLiteral("gameStorePlatform"), QStringLiteral("Steam") },
+				{ QStringLiteral("gameStoreImage"), hero },
+				{ QStringLiteral("gameStoreTags"), tags },
+				{ QStringLiteral("gameStoreImages"), images },
+				{ QStringLiteral("gameStoreMedia"), images },
+				{ QStringLiteral("gameStoreMediaItems"), images }
+			};
+			const QString url = QStringLiteral("https://store.steampowered.com/app/1145350/Hades_II/");
+			const QVariantMap preview = automationProviderPreview(
+				url, QStringLiteral("Hades II"), QStringLiteral("Steam"),
+				QStringLiteral("Action roguelike · Early Access"), QStringLiteral("Open on Steam"), metadata,
+				images, size);
+			return { automationRichPreviewMessage(4294967401ULL, actor, url, preview) };
+		}
+
+		if (normalized == QLatin1String("marketplace")) {
+			const QString hero = fixtureImage(QStringLiteral("Herman Miller Aeron"),
+				QStringLiteral("Blocket listing fixture"), QStringLiteral("#1b5e20"), QStringLiteral("#66bb6a"));
+			const QString detail = fixtureImage(QStringLiteral("Controls"), QStringLiteral("Listing detail"),
+				QStringLiteral("#37474f"), QStringLiteral("#90a4ae"));
+			const QVariantList images { automationPreviewImageItem(hero, QStringLiteral("Listing")),
+				automationPreviewImageItem(detail, QStringLiteral("Controls")) };
+			const QVariantList specs {
+				automationPreviewSpec(QStringLiteral("Skick"), QStringLiteral("Begagnat – mycket gott")),
+				automationPreviewSpec(QStringLiteral("Färg"), QStringLiteral("Graphite")),
+				automationPreviewSpec(QStringLiteral("Leverans"), QStringLiteral("Hämtas"))
+			};
+			const QVariantMap metadata {
+				{ QStringLiteral("provider"), QStringLiteral("blocket") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("blocket") },
+				{ QStringLiteral("previewKind"), QStringLiteral("marketplaceListing") },
+				{ QStringLiteral("swedishPreviewKind"), QStringLiteral("marketplaceListing") },
+				{ QStringLiteral("providerName"), QStringLiteral("Blocket") },
+				{ QStringLiteral("richPreviewMetadataVersion"), 10 },
+				{ QStringLiteral("marketplaceProvider"), QStringLiteral("blocket") },
+				{ QStringLiteral("listingId"), QStringLiteral("1401234567") },
+				{ QStringLiteral("listingTitle"), QStringLiteral("Herman Miller Aeron, storlek B") },
+				{ QStringLiteral("listingPrice"), QStringLiteral("8 500 kr") },
+				{ QStringLiteral("listingDescription"),
+				  QStringLiteral("Varsamt använd kontorsstol med fullt fungerande reglage.") },
+				{ QStringLiteral("listingLocation"), QStringLiteral("Stockholm") },
+				{ QStringLiteral("listingSpecs"), specs },
+				{ QStringLiteral("listingImages"), images }
+			};
+			const QString url = QStringLiteral("https://www.blocket.se/annons/1401234567");
+			const QVariantMap preview = automationProviderPreview(
+				url, QStringLiteral("Herman Miller Aeron, storlek B"), QStringLiteral("Blocket"),
+				QStringLiteral("8 500 kr · Stockholm"), QStringLiteral("Open on Blocket"), metadata, images, size);
+			return { automationRichPreviewMessage(4294967410ULL, actor, url, preview) };
+		}
+
+		if (normalized == QLatin1String("vehicle")) {
+			const QString front = fixtureImage(QStringLiteral("Volvo EX30"), QStringLiteral("Bytbil exterior"),
+				QStringLiteral("#b59f00"), QStringLiteral("#f2d64b"));
+			const QString interior = fixtureImage(QStringLiteral("Interior"), QStringLiteral("Bytbil gallery"),
+				QStringLiteral("#263238"), QStringLiteral("#78909c"));
+			const QVariantList images { automationPreviewImageItem(front, QStringLiteral("Exterior")),
+				automationPreviewImageItem(interior, QStringLiteral("Interior")) };
+			const QVariantList specs {
+				automationPreviewSpec(QStringLiteral("Årsmodell"), QStringLiteral("2025")),
+				automationPreviewSpec(QStringLiteral("Miltal"), QStringLiteral("1 240 mil")),
+				automationPreviewSpec(QStringLiteral("Drivmedel"), QStringLiteral("El")),
+				automationPreviewSpec(QStringLiteral("Växellåda"), QStringLiteral("Automat")),
+				automationPreviewSpec(QStringLiteral("Räckvidd (WLTP)"), QStringLiteral("450 km"))
+			};
+			const QVariantList highlights { QStringLiteral("Panoramatak"), QStringLiteral("360° kamera"),
+				QStringLiteral("Harman Kardon"), QStringLiteral("Dragkrok") };
+			const QVariantMap metadata {
+				{ QStringLiteral("provider"), QStringLiteral("bytbil") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("bytbil") },
+				{ QStringLiteral("previewKind"), QStringLiteral("vehicleListing") },
+				{ QStringLiteral("swedishPreviewKind"), QStringLiteral("vehicleListing") },
+				{ QStringLiteral("providerName"), QStringLiteral("Bytbil") },
+				{ QStringLiteral("vehicleProvider"), QStringLiteral("Bytbil") },
+				{ QStringLiteral("richPreviewMetadataVersion"), 10 },
+				{ QStringLiteral("listingId"), QStringLiteral("123456789") },
+				{ QStringLiteral("vehicleListingId"), QStringLiteral("123456789") },
+				{ QStringLiteral("vehicleKind"), QStringLiteral("Personbil") },
+				{ QStringLiteral("vehicleTitle"), QStringLiteral("Volvo EX30 Twin Motor Performance Ultra") },
+				{ QStringLiteral("listingTitle"), QStringLiteral("Volvo EX30 Twin Motor Performance Ultra") },
+				{ QStringLiteral("vehiclePrice"), QStringLiteral("529 900 kr") },
+				{ QStringLiteral("listingPrice"), QStringLiteral("529 900 kr") },
+				{ QStringLiteral("vehicleDescription"),
+				  QStringLiteral("Svensksåld elbil med fyrhjulsdrift och panoramatak.") },
+				{ QStringLiteral("listingDescription"),
+				  QStringLiteral("Svensksåld elbil med fyrhjulsdrift och panoramatak.") },
+				{ QStringLiteral("vehicleDealer"), QStringLiteral("Fixture Bil AB") },
+				{ QStringLiteral("vehicleLocation"), QStringLiteral("Göteborg") },
+				{ QStringLiteral("listingLocation"), QStringLiteral("Göteborg") },
+				{ QStringLiteral("vehicleYear"), QStringLiteral("2025") },
+				{ QStringLiteral("vehicleMileage"), QStringLiteral("1 240 mil") },
+				{ QStringLiteral("vehicleFuel"), QStringLiteral("El") },
+				{ QStringLiteral("vehicleTransmission"), QStringLiteral("Automat") },
+				{ QStringLiteral("vehicleDrivetrain"), QStringLiteral("Fyrhjulsdrift") },
+				{ QStringLiteral("vehicleBody"), QStringLiteral("SUV") },
+				{ QStringLiteral("vehicleColor"), QStringLiteral("Moss Yellow") },
+				{ QStringLiteral("vehicleRegNo"), QStringLiteral("ABC12D") },
+				{ QStringLiteral("vehicleSeats"), QStringLiteral("5") },
+				{ QStringLiteral("vehicleRange"), QStringLiteral("450 km") },
+				{ QStringLiteral("vehiclePower"), QStringLiteral("428 hk") },
+				{ QStringLiteral("vehicleSpecs"), specs },
+				{ QStringLiteral("listingSpecs"), specs },
+				{ QStringLiteral("vehicleHighlights"), highlights },
+				{ QStringLiteral("vehicleImages"), images },
+				{ QStringLiteral("listingImages"), images },
+				{ QStringLiteral("vehicleImage"), front }
+			};
+			const QString url = QStringLiteral("https://www.bytbil.com/personbil-volvo-ex30-123456789");
+			const QVariantMap preview = automationProviderPreview(
+				url, QStringLiteral("Volvo EX30 Twin Motor Performance Ultra"), QStringLiteral("Bytbil"),
+				QStringLiteral("529 900 kr · 2025 · 1 240 mil · Göteborg"), QStringLiteral("Open on Bytbil"),
+				metadata, images, size);
+			return { automationRichPreviewMessage(4294967420ULL, actor, url, preview) };
+		}
+
+		if (normalized == QLatin1String("real-estate") || normalized == QLatin1String("realestate")) {
+			const QString exterior = fixtureImage(QStringLiteral("Ljus trea med balkong"),
+				QStringLiteral("Hemnet fixture"), QStringLiteral("#6d4c41"), QStringLiteral("#bcaaa4"));
+			const QString plan = fixtureImage(QStringLiteral("Floor plan"), QStringLiteral("78 m² · 3 rum"),
+				QStringLiteral("#455a64"), QStringLiteral("#cfd8dc"));
+			const QVariantList images { automationPreviewImageItem(exterior, QStringLiteral("Exterior")),
+				automationPreviewImageItem(plan, QStringLiteral("Floor plan")) };
+			const QVariantMap metadata {
+				{ QStringLiteral("provider"), QStringLiteral("hemnet") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("hemnet") },
+				{ QStringLiteral("previewKind"), QStringLiteral("realEstate") },
+				{ QStringLiteral("swedishPreviewKind"), QStringLiteral("realEstate") },
+				{ QStringLiteral("providerName"), QStringLiteral("Hemnet") },
+				{ QStringLiteral("richPreviewMetadataVersion"), 10 },
+				{ QStringLiteral("listingPrice"), QStringLiteral("4 995 000 kr") },
+				{ QStringLiteral("realEstateArea"), QStringLiteral("78 m²") },
+				{ QStringLiteral("realEstateRooms"), QStringLiteral("3 rum") },
+				{ QStringLiteral("realEstateFee"), QStringLiteral("4 218 kr/mån") }
+			};
+			const QString url = QStringLiteral("https://www.hemnet.se/bostad/fixture-12345");
+			const QVariantMap preview = automationProviderPreview(
+				url, QStringLiteral("Ljus trea med balkong · Södermalm"), QStringLiteral("Hemnet"),
+				QStringLiteral("78 m² · 3 rum · våning 4"), QStringLiteral("Open on Hemnet"), metadata,
+				images, size);
+			return { automationRichPreviewMessage(4294967430ULL, actor, url, preview) };
+		}
+
+		if (normalized == QLatin1String("editorial")) {
+			const QString articleImage = fixtureImage(QStringLiteral("Datacenter i Sverige"),
+				QStringLiteral("SVT article fixture"), QStringLiteral("#8b1538"), QStringLiteral("#d94f70"));
+			const QVariantList articleImages {
+				automationPreviewImageItem(articleImage, QStringLiteral("Datacenter illustration"))
+			};
+			const QVariantMap articleMetadata {
+				{ QStringLiteral("provider"), QStringLiteral("svt") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("svt") },
+				{ QStringLiteral("previewKind"), QStringLiteral("article") },
+				{ QStringLiteral("swedishPreviewKind"), QStringLiteral("article") },
+				{ QStringLiteral("providerName"), QStringLiteral("SVT") },
+				{ QStringLiteral("richPreviewMetadataVersion"), 10 },
+				{ QStringLiteral("articlePublisher"), QStringLiteral("SVT") },
+				{ QStringLiteral("articleTitle"),
+				  QStringLiteral("Ny metod minskar energianvändningen i svenska datacenter") },
+				{ QStringLiteral("articleDescription"),
+				  QStringLiteral("Forskare visar hur last kan flyttas utan att svarstider försämras.") },
+				{ QStringLiteral("articleSection"), QStringLiteral("Teknik") },
+				{ QStringLiteral("articlePublishedAt"), QStringLiteral("2026-05-28T09:15:00Z") },
+				{ QStringLiteral("articleModifiedAt"), QStringLiteral("2026-05-28T11:42:00Z") },
+				{ QStringLiteral("articleAuthor"), QStringLiteral("Alex Nilsson") },
+				{ QStringLiteral("articleImage"), articleImage },
+				{ QStringLiteral("articleImages"), articleImages }
+			};
+			const QString articleUrl = QStringLiteral("https://www.svt.se/nyheter/inrikes/datacenter-fixture");
+			const QVariantMap articlePreview = automationProviderPreview(articleUrl,
+				QStringLiteral("Ny metod minskar energianvändningen i svenska datacenter"),
+				QStringLiteral("SVT · Teknik"),
+				QStringLiteral("Forskare visar hur last kan flyttas utan att svarstider försämras."),
+				QStringLiteral("Open on SVT"), articleMetadata, articleImages, size);
+
+			const QVariantMap forumMetadata {
+				{ QStringLiteral("provider"), QStringLiteral("flashback") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("flashback") },
+				{ QStringLiteral("previewKind"), QStringLiteral("forum") },
+				{ QStringLiteral("swedishPreviewKind"), QStringLiteral("forum") },
+				{ QStringLiteral("providerName"), QStringLiteral("Flashback") },
+				{ QStringLiteral("richPreviewMetadataVersion"), 10 },
+				{ QStringLiteral("threadId"), QStringLiteral("4829101") },
+				{ QStringLiteral("forumProvider"), QStringLiteral("Flashback") },
+				{ QStringLiteral("forumThreadId"), QStringLiteral("4829101") },
+				{ QStringLiteral("forumThreadTitle"), QStringLiteral("Qt Quick-prestanda och renderloopar") },
+				{ QStringLiteral("forumLinkKind"), QStringLiteral("post") },
+				{ QStringLiteral("postId"), QStringLiteral("91345012") },
+				{ QStringLiteral("forumLinkedPostId"), QStringLiteral("91345012") },
+				{ QStringLiteral("forumThreadPostUrl"), QStringLiteral("https://www.flashback.org/p91345012") },
+				{ QStringLiteral("forumCategory"), QStringLiteral("Dator och IT") },
+				{ QStringLiteral("forumName"), QStringLiteral("Programmering") },
+				{ QStringLiteral("forumPage"), QStringLiteral("42") },
+				{ QStringLiteral("forumPageCount"), QStringLiteral("87") },
+				{ QStringLiteral("forumPostCount"), QStringLiteral("1294") },
+				{ QStringLiteral("forumPostId"), QStringLiteral("91345012") },
+				{ QStringLiteral("forumPostNumber"), QStringLiteral("#628") },
+				{ QStringLiteral("forumPostAuthor"), QStringLiteral("rendernisse") },
+				{ QStringLiteral("forumPostTime"), QStringLiteral("2026-05-28 13:37") },
+				{ QStringLiteral("forumPostExcerpt"),
+				  QStringLiteral("Frame pacing blev stabilare när täta presence-signaler batchades per render frame.") }
+			};
+			const QString forumUrl = QStringLiteral("https://www.flashback.org/p91345012");
+			const QVariantMap forumPreview = automationProviderPreview(forumUrl,
+				QStringLiteral("Qt Quick-prestanda och renderloopar"),
+				QStringLiteral("Flashback · Dator och IT"),
+				QStringLiteral("Frame pacing blev stabilare när täta presence-signaler batchades per render frame."),
+				QStringLiteral("Open discussion"), forumMetadata, {}, size);
+
+			return { automationRichPreviewMessage(4294967440ULL, actor, articleUrl, articlePreview),
+				automationRichPreviewMessage(4294967441ULL, actor, forumUrl, forumPreview) };
+		}
+
+		if (normalized == QLatin1String("audio")) {
+			const QString artwork = fixtureImage(QStringLiteral("Vetenskapsradion"),
+				QStringLiteral("Sveriges Radio audio fixture"), QStringLiteral("#e65100"), QStringLiteral("#ffb74d"));
+			const QVariantList images { automationPreviewImageItem(artwork, QStringLiteral("Program artwork")) };
+			const QVariantMap metadata {
+				{ QStringLiteral("provider"), QStringLiteral("sverigesradio") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("sverigesradio") },
+				{ QStringLiteral("previewKind"), QStringLiteral("audio") },
+				{ QStringLiteral("swedishPreviewKind"), QStringLiteral("audio") },
+				{ QStringLiteral("providerName"), QStringLiteral("Sveriges Radio") },
+				{ QStringLiteral("richPreviewMetadataVersion"), 10 },
+				{ QStringLiteral("audioProvider"), QStringLiteral("Sveriges Radio") },
+				{ QStringLiteral("audioProgram"), QStringLiteral("Vetenskapsradion") },
+				{ QStringLiteral("articlePublishedAt"), QStringLiteral("2026-05-28T06:00:00Z") }
+			};
+			const QString url = QStringLiteral("https://sverigesradio.se/avsnitt/fixture-vetenskapsradion");
+			const QVariantMap preview = automationProviderPreview(url,
+				QStringLiteral("Så blir framtidens datacenter mer energieffektiva"),
+				QStringLiteral("Vetenskapsradion · Sveriges Radio"),
+				QStringLiteral("Ett samtal om lastbalansering, kylning och mätbar prestanda."),
+				QStringLiteral("Open on Sveriges Radio"), metadata, images, size);
+			return { automationRichPreviewMessage(4294967450ULL, actor, url, preview) };
+		}
+
+		if (normalized == QLatin1String("social-code") || normalized == QLatin1String("socialcode")) {
+			const QString xAvatar = fixtureImage(QStringLiteral("MD"), QStringLiteral("Mumble Design avatar"),
+				QStringLiteral("#111827"), QStringLiteral("#1d9bf0"));
+			const QString xMedia = fixtureImage(QStringLiteral("Stable frame pacing"),
+				QStringLiteral("Qt Quick render timeline"), QStringLiteral("#14171a"), QStringLiteral("#1d9bf0"));
+			const QVariantMap xMetadata {
+				{ QStringLiteral("provider"), QStringLiteral("x") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("x") },
+				{ QStringLiteral("providerName"), QStringLiteral("X") },
+				{ QStringLiteral("xDisplayName"), QStringLiteral("Mumble Design") },
+				{ QStringLiteral("xHandle"), QStringLiteral("@mumbledesign") },
+				{ QStringLiteral("xAvatarUrl"), xAvatar },
+				{ QStringLiteral("xVerified"), true },
+				{ QStringLiteral("xCreatedAt"), QStringLiteral("2026-05-28T18:30:00Z") },
+				{ QStringLiteral("xReplyCount"), 757 },
+				{ QStringLiteral("xRepostCount"), 12000 },
+				{ QStringLiteral("xQuoteCount"), 420 },
+				{ QStringLiteral("xLikeCount"), 362000 },
+				{ QStringLiteral("xViewCount"), 8100000 },
+				{ QStringLiteral("xBookmarkCount"), 9000 },
+				{ QStringLiteral("xStatsFetchedAt"), QStringLiteral("2026-05-28T18:31:00.000Z") },
+				{ QStringLiteral("xReplyContext"),
+				  QVariantList { QVariantMap {
+					  { QStringLiteral("displayName"), QStringLiteral("Qt Quick Notes") },
+					  { QStringLiteral("handle"), QStringLiteral("@quicknotes") },
+					  { QStringLiteral("verified"), true },
+					  { QStringLiteral("createdAt"), QStringLiteral("2026-05-28T17:58:00Z") },
+					  { QStringLiteral("text"), QStringLiteral("Stable IDs make delegate reuse predictable.") },
+					  { QStringLiteral("likeCount"), 2048 } } } },
+				{ QStringLiteral("xQuotedPost"),
+				  QVariantMap { { QStringLiteral("displayName"), QStringLiteral("Designer Notes") },
+					  { QStringLiteral("handle"), QStringLiteral("@designnotes") },
+					  { QStringLiteral("verified"), true },
+					  { QStringLiteral("createdAt"), QStringLiteral("2026-05-27T12:00:00Z") },
+					  { QStringLiteral("text"),
+						QStringLiteral("Keep loading, empty and failure states deliberate.") },
+					  { QStringLiteral("likeCount"), 42000 } } }
+			};
+			const QString xUrl = QStringLiteral("https://x.com/mumbledesign/status/1795880000000000000");
+			const QVariantList xMediaItems { automationPreviewImageItem(xMedia, QStringLiteral("Post media")) };
+			const QVariantMap xPreview = automationProviderPreview(xUrl,
+				QStringLiteral("Mumble Design (@mumbledesign)"), QStringLiteral("X · verified"),
+				QStringLiteral("Frame pacing is a feature: stable IDs, bounded delegates, and no model resets."),
+				QStringLiteral("Open on X"), xMetadata, xMediaItems, size);
+
+			const QString githubAvatar = fixtureImage(QStringLiteral("DM"), QStringLiteral("Repository owner"),
+				QStringLiteral("#24292f"), QStringLiteral("#6e7781"));
+			const QVariantMap githubMetadata {
+				{ QStringLiteral("provider"), QStringLiteral("github") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("github") },
+				{ QStringLiteral("providerName"), QStringLiteral("GitHub") },
+				{ QStringLiteral("githubOwner"), QStringLiteral("dankmaster") },
+				{ QStringLiteral("githubRepo"), QStringLiteral("mumble") },
+				{ QStringLiteral("githubFullName"), QStringLiteral("dankmaster/mumble") },
+				{ QStringLiteral("githubHtmlUrl"), QStringLiteral("https://github.com/dankmaster/mumble") },
+				{ QStringLiteral("githubDescription"),
+				  QStringLiteral("A performance-focused Mumble fork with a native Qt Quick client.") },
+				{ QStringLiteral("githubLanguage"), QStringLiteral("C++") },
+				{ QStringLiteral("githubDefaultBranch"), QStringLiteral("master") },
+				{ QStringLiteral("githubPushedAt"), QStringLiteral("2026-05-28T18:00:00Z") },
+				{ QStringLiteral("githubOwnerLogin"), QStringLiteral("dankmaster") },
+				{ QStringLiteral("githubOwnerAvatarUrl"), githubAvatar },
+				{ QStringLiteral("githubLicense"), QStringLiteral("BSD-3-Clause") },
+				{ QStringLiteral("githubStars"), 4200 },
+				{ QStringLiteral("githubForks"), 318 },
+				{ QStringLiteral("githubOpenIssues"), 27 },
+				{ QStringLiteral("githubTopics"),
+				  QVariantList { QStringLiteral("mumble"), QStringLiteral("qt-quick"),
+					  QStringLiteral("voice-chat"), QStringLiteral("qml") } },
+				{ QStringLiteral("githubLatestReleaseTag"), QStringLiteral("mumble-forked-2026.05") },
+				{ QStringLiteral("githubLatestReleaseName"), QStringLiteral("May client polish") },
+				{ QStringLiteral("githubLatestReleaseUrl"),
+				  QStringLiteral("https://github.com/dankmaster/mumble/releases/tag/mumble-forked-2026.05") },
+				{ QStringLiteral("githubLatestReleasePublishedAt"), QStringLiteral("2026-05-26T20:00:00Z") },
+				{ QStringLiteral("githubLatestReleaseNotes"),
+				  QStringLiteral("Native preview cards, smoother chat and improved accessibility.") },
+				{ QStringLiteral("githubLatestReleaseAssetName"), QStringLiteral("mumble-forked-x64.msi") },
+				{ QStringLiteral("githubLatestReleaseAssetUrl"),
+				  QStringLiteral("https://github.com/dankmaster/mumble/releases/download/mumble-forked-2026.05/mumble-forked-x64.msi") },
+				{ QStringLiteral("githubLatestReleaseAssetCount"), 2 },
+				{ QStringLiteral("githubLatestReleaseDownloadCount"), 18420 }
+			};
+			const QString githubUrl = QStringLiteral("https://github.com/dankmaster/mumble");
+			const QVariantList githubMediaItems {
+				automationPreviewImageItem(githubAvatar, QStringLiteral("Repository owner"))
+			};
+			const QVariantMap githubPreview = automationProviderPreview(githubUrl,
+				QStringLiteral("dankmaster/mumble"), QStringLiteral("GitHub · C++"),
+				QStringLiteral("A performance-focused Mumble fork with a native Qt Quick client."),
+				QStringLiteral("Open on GitHub"), githubMetadata, githubMediaItems, size);
+
+			return { automationRichPreviewMessage(4294967460ULL, actor, xUrl, xPreview),
+				automationRichPreviewMessage(4294967461ULL, actor, githubUrl, githubPreview) };
+		}
+
+		if (normalized == QLatin1String("twitch-live") || normalized == QLatin1String("twitch-offline")
+			|| normalized == QLatin1String("twitch-rerun") || normalized == QLatin1String("twitch-error")
+			|| normalized == QLatin1String("twitch-embed")) {
+			const bool isLive = normalized == QLatin1String("twitch-live");
+			const bool isOffline = normalized == QLatin1String("twitch-offline");
+			const bool isRerun = normalized == QLatin1String("twitch-rerun");
+			const bool isError = normalized == QLatin1String("twitch-error");
+			const bool isEmbed = normalized == QLatin1String("twitch-embed");
+			const QString channel = isEmbed ? QStringLiteral("mumbleclips") : QStringLiteral("mumbledev");
+			const QString url = isEmbed ? QStringLiteral("https://www.twitch.tv/mumbleclips/clip/StableFramePacing")
+										: QStringLiteral("https://www.twitch.tv/mumbledev");
+			const QString thumbnail = fixtureImage(
+				isLive ? QStringLiteral("LIVE · Mumble Dev")
+					   : (isOffline ? QStringLiteral("Latest VOD")
+								: (isRerun ? QStringLiteral("RERUN · UI review")
+										   : (isEmbed ? QStringLiteral("Featured clip")
+														: QStringLiteral("Twitch unavailable")))),
+				isLive ? QStringLiteral("Native Qt Quick client polish")
+					   : (isOffline ? QStringLiteral("Offline · recorded 2 hours ago")
+								: (isRerun ? QStringLiteral("Accessibility and focus pass")
+										   : (isEmbed ? QStringLiteral("Clip · 00:42")
+														: QStringLiteral("Deterministic failure fixture")))),
+				isError ? QStringLiteral("#374151") : QStringLiteral("#6441a5"),
+				isLive ? QStringLiteral("#e91916") : QStringLiteral("#9147ff"));
+			const QString liveState = isLive ? QStringLiteral("live")
+				: (isOffline || isEmbed ? QStringLiteral("offline")
+					: (isRerun ? QStringLiteral("rerun") : QStringLiteral("unavailable")));
+			const QString badge = isLive ? QStringLiteral("Live")
+				: (isOffline ? QStringLiteral("Offline")
+					: (isRerun ? QStringLiteral("Rerun")
+						: (isEmbed ? QStringLiteral("Clip") : QStringLiteral("Unavailable"))));
+			const QString embedMode = isLive ? QStringLiteral("live")
+				: (isOffline ? QStringLiteral("latest-vod")
+					: (isRerun ? QStringLiteral("rerun")
+						: (isEmbed ? QStringLiteral("clip") : QStringLiteral("offline-channel"))));
+			QVariantMap metadata {
+				{ QStringLiteral("provider"), QStringLiteral("twitch") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("twitch") },
+				{ QStringLiteral("previewKind"), QStringLiteral("video") },
+				{ QStringLiteral("providerName"), QStringLiteral("Twitch") },
+				{ QStringLiteral("twitchMetadataVersion"), 3 },
+				{ QStringLiteral("twitchKind"), isEmbed ? QStringLiteral("clip") : QStringLiteral("channel") },
+				{ QStringLiteral("twitchBadge"), badge },
+				{ QStringLiteral("twitchLiveState"), liveState },
+				{ QStringLiteral("twitchDisplayName"), isError ? QStringLiteral("Mumble Dev")
+																		: (isEmbed ? QStringLiteral("Mumble Clips")
+																					   : QStringLiteral("Mumble Dev")) },
+				{ QStringLiteral("twitchChannel"), channel },
+				{ QStringLiteral("twitchEmbedMode"), embedMode },
+				{ QStringLiteral("twitchPlaybackNote"),
+				  isEmbed ? QStringLiteral("Playback opens only after an explicit user action.")
+						  : QStringLiteral("Playback state is reported by Twitch and can be delayed.") },
+				{ QStringLiteral("twitchDisclaimer"),
+				  QStringLiteral("Status is a deterministic style fixture; no Twitch request was made.") },
+				{ QStringLiteral("twitchThumbnailUrl"), thumbnail }
+			};
+			if (isLive || isRerun || isOffline) {
+				metadata.insert(QStringLiteral("twitchGame"), QStringLiteral("Software and Game Development"));
+			}
+			if (isLive) {
+				metadata.insert(QStringLiteral("twitchStreamType"), QStringLiteral("live"));
+				metadata.insert(QStringLiteral("twitchViewerCount"), 1842);
+			} else if (isRerun) {
+				metadata.insert(QStringLiteral("twitchStreamType"), QStringLiteral("rerun"));
+				metadata.insert(QStringLiteral("twitchViewerCount"), 318);
+			} else if (isOffline) {
+				metadata.insert(QStringLiteral("twitchSuggestedVideoId"), QStringLiteral("2489000123"));
+			} else if (isEmbed) {
+				metadata.insert(QStringLiteral("twitchClipSlug"), QStringLiteral("StableFramePacing"));
+				metadata.insert(QStringLiteral("twitchSuggestedClipSlug"), QStringLiteral("StableFramePacing"));
+			} else {
+				metadata.insert(QStringLiteral("twitchStateFailure"),
+					QStringLiteral("Could not read Twitch channel state."));
+				metadata.insert(QStringLiteral("twitchMetadataFailure"),
+					QStringLiteral("Preview metadata was unavailable."));
+			}
+			const QString embedUrl = isEmbed
+				? QStringLiteral("https://clips.twitch.tv/embed?clip=StableFramePacing&parent=localhost")
+				: QStringLiteral("https://player.twitch.tv/?channel=mumbledev&parent=localhost");
+			metadata.insert(QStringLiteral("twitchSuggestedEmbedUrl"), embedUrl);
+			const QVariantList mediaItems = isError ? QVariantList()
+				: QVariantList { automationPreviewImageItem(thumbnail, QStringLiteral("Twitch preview")) };
+			QVariantMap preview = automationProviderPreview(
+				url,
+				isLive ? QStringLiteral("Native Qt Quick client polish")
+					   : (isOffline ? QStringLiteral("Mumble Dev is offline")
+								: (isRerun ? QStringLiteral("Rerun: accessible client walkthrough")
+										   : (isEmbed ? QStringLiteral("Stable frame pacing")
+														: QStringLiteral("Mumble Dev on Twitch")))),
+				QStringLiteral("Twitch · %1").arg(badge),
+				isError ? QStringLiteral("This Twitch channel could not be loaded.")
+						: (isEmbed ? QStringLiteral("Featured clip · 00:42 · explicit playback")
+								   : QStringLiteral("Software and Game Development · %1").arg(badge)),
+				QStringLiteral("Open on Twitch"), metadata, mediaItems, size);
+			if (!isError) {
+				preview.insert(QStringLiteral("embedKind"), QStringLiteral("twitch"));
+				preview.insert(QStringLiteral("embedUrl"), embedUrl);
+				preview.insert(QStringLiteral("embedAspect"), QStringLiteral("wide"));
+			}
+			const qulonglong messageID = isLive ? 4294967490ULL
+				: (isOffline ? 4294967491ULL
+					: (isRerun ? 4294967492ULL : (isError ? 4294967493ULL : 4294967494ULL)));
+			return { automationRichPreviewMessage(messageID, actor, url, preview) };
+		}
+
+		if (normalized == QLatin1String("github-release")
+			|| normalized == QLatin1String("github-release-loading")
+			|| normalized == QLatin1String("github-release-missing")
+			|| normalized == QLatin1String("github-release-assets")) {
+			const bool isLoading = normalized == QLatin1String("github-release-loading");
+			const bool isMissing = normalized == QLatin1String("github-release-missing");
+			const bool isAssets = normalized == QLatin1String("github-release-assets");
+			const QString avatar = fixtureImage(QStringLiteral("DM"), QStringLiteral("Repository owner"),
+				QStringLiteral("#24292f"), QStringLiteral("#6e7781"));
+			QVariantMap metadata {
+				{ QStringLiteral("provider"), QStringLiteral("github") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("github") },
+				{ QStringLiteral("previewKind"), QStringLiteral("github") },
+				{ QStringLiteral("providerName"), QStringLiteral("GitHub") },
+				{ QStringLiteral("githubOwner"), QStringLiteral("dankmaster") },
+				{ QStringLiteral("githubRepo"), QStringLiteral("mumble") },
+				{ QStringLiteral("githubFullName"), QStringLiteral("dankmaster/mumble") },
+				{ QStringLiteral("githubDescription"),
+				  QStringLiteral("A performance-focused Mumble fork with a native Qt Quick client.") },
+				{ QStringLiteral("githubLanguage"), QStringLiteral("C++") },
+				{ QStringLiteral("githubDefaultBranch"), QStringLiteral("master") },
+				{ QStringLiteral("githubPushedAt"), QStringLiteral("2026-05-28T18:00:00Z") },
+				{ QStringLiteral("githubOwnerLogin"), QStringLiteral("dankmaster") },
+				{ QStringLiteral("githubOwnerAvatarUrl"), avatar },
+				{ QStringLiteral("githubLicense"), QStringLiteral("BSD-3-Clause") },
+				{ QStringLiteral("githubStars"), 4200 },
+				{ QStringLiteral("githubForks"), 318 },
+				{ QStringLiteral("githubOpenIssues"), 27 },
+				{ QStringLiteral("githubTopics"),
+				  QVariantList { QStringLiteral("mumble"), QStringLiteral("qt-quick"),
+					  QStringLiteral("voice-chat"), QStringLiteral("qml") } }
+			};
+			if (isLoading) {
+				metadata.insert(QStringLiteral("githubLatestReleaseLoading"), true);
+			} else if (isMissing) {
+				metadata.insert(QStringLiteral("githubLatestReleaseMissing"), true);
+			} else {
+				metadata.insert(QStringLiteral("githubLatestReleaseTag"), QStringLiteral("mumble-forked-2026.05"));
+				metadata.insert(QStringLiteral("githubLatestReleaseName"),
+					isAssets ? QStringLiteral("Windows client artifacts") : QStringLiteral("May client polish"));
+				metadata.insert(QStringLiteral("githubLatestReleaseUrl"),
+					QStringLiteral("https://github.com/dankmaster/mumble/releases/tag/mumble-forked-2026.05"));
+				metadata.insert(QStringLiteral("githubLatestReleasePublishedAt"),
+					QStringLiteral("2026-05-26T20:00:00Z"));
+				metadata.insert(QStringLiteral("githubLatestReleaseNotes"),
+					isAssets
+						? QStringLiteral("Signed MSI, portable package and symbols for the Windows client.")
+						: QStringLiteral("Native provider cards, smoother chat and improved accessibility."));
+				metadata.insert(QStringLiteral("githubLatestReleaseAssetName"),
+					isAssets ? QStringLiteral("mumble-forked-x64.msi") : QStringLiteral("mumble-forked.zip"));
+				metadata.insert(QStringLiteral("githubLatestReleaseAssetUrl"),
+					QStringLiteral("https://github.com/dankmaster/mumble/releases/download/"
+								   "mumble-forked-2026.05/mumble-forked-x64.msi"));
+				metadata.insert(QStringLiteral("githubLatestReleaseAssetCount"), isAssets ? 3 : 2);
+				metadata.insert(QStringLiteral("githubLatestReleaseDownloadCount"), isAssets ? 18420 : 4217);
+				if (isAssets) {
+					metadata.insert(QStringLiteral("githubLatestReleasePrerelease"), true);
+				}
+			}
+			const QString url = QStringLiteral("https://github.com/dankmaster/mumble");
+			const QVariantMap preview = automationProviderPreview(
+				url, QStringLiteral("dankmaster/mumble"), QStringLiteral("GitHub · C++"),
+				isLoading ? QStringLiteral("Checking the latest release…")
+					: (isMissing ? QStringLiteral("No published release was found.")
+							 : (isAssets ? QStringLiteral("3 Windows assets · 18.4K downloads")
+										: QStringLiteral("Latest release: May client polish"))),
+				QStringLiteral("Open on GitHub"), metadata,
+				QVariantList { automationPreviewImageItem(avatar, QStringLiteral("Repository owner")) }, size);
+			const qulonglong messageID = isLoading ? 4294967501ULL
+				: (isMissing ? 4294967502ULL : (isAssets ? 4294967503ULL : 4294967500ULL));
+			return { automationRichPreviewMessage(messageID, actor, url, preview) };
+		}
+
+		if (normalized == QLatin1String("flashback-post")
+			|| normalized == QLatin1String("flashback-context")) {
+			const bool sparse = normalized == QLatin1String("flashback-context");
+			const QString avatar = fixtureImage(QStringLiteral("RN"), QStringLiteral("Flashback avatar fixture"),
+				QStringLiteral("#374151"), QStringLiteral("#6b7280"));
+			QVariantMap metadata {
+				{ QStringLiteral("provider"), QStringLiteral("flashback") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("flashback") },
+				{ QStringLiteral("previewKind"), QStringLiteral("forum") },
+				{ QStringLiteral("swedishPreviewKind"), QStringLiteral("forum") },
+				{ QStringLiteral("providerName"), QStringLiteral("Flashback") },
+				{ QStringLiteral("forumProvider"), QStringLiteral("Flashback") },
+				{ QStringLiteral("forumThreadId"), QStringLiteral("3650123") },
+				{ QStringLiteral("forumThreadTitle"), QStringLiteral("Qt Quick-prestanda och renderloopar") },
+				{ QStringLiteral("forumCategory"), QStringLiteral("Dator och IT") },
+				{ QStringLiteral("forumName"), QStringLiteral("Programmering och utveckling") },
+				{ QStringLiteral("forumPage"), sparse ? QStringLiteral("1") : QStringLiteral("42") },
+				{ QStringLiteral("forumPageCount"), QStringLiteral("42") },
+				{ QStringLiteral("forumPostCount"), sparse ? QStringLiteral("1") : QStringLiteral("628") }
+			};
+			if (sparse) {
+				metadata.insert(QStringLiteral("forumLinkKind"), QStringLiteral("thread"));
+				metadata.insert(QStringLiteral("forumFirstPostId"), QStringLiteral("91200101"));
+				metadata.insert(QStringLiteral("forumFirstPostTime"), QStringLiteral("2026-04-20 09:15"));
+				metadata.insert(QStringLiteral("forumFirstPostNumber"), QStringLiteral("#1"));
+				metadata.insert(QStringLiteral("forumFirstPostAuthor"), QStringLiteral("qmlprofilen"));
+				metadata.insert(QStringLiteral("forumFirstPostAuthorAvatarUrl"), avatar);
+				metadata.insert(QStringLiteral("forumFirstPostAuthorTitle"), QStringLiteral("Medlem"));
+				metadata.insert(QStringLiteral("forumFirstPostAuthorRegistered"), QStringLiteral("2019-02"));
+				metadata.insert(QStringLiteral("forumFirstPostAuthorPosts"), QStringLiteral("843"));
+				metadata.insert(QStringLiteral("forumFirstPostExcerpt"),
+					QStringLiteral("Hur håller ni Qt Quick-listor mjuka när talk-state uppdateras ofta?"));
+			} else {
+				metadata.insert(QStringLiteral("forumLinkKind"), QStringLiteral("post"));
+				metadata.insert(QStringLiteral("forumLinkedPostId"), QStringLiteral("91345012"));
+				metadata.insert(QStringLiteral("forumPostId"), QStringLiteral("91345012"));
+				metadata.insert(QStringLiteral("forumPostNumber"), QStringLiteral("#628"));
+				metadata.insert(QStringLiteral("forumPostAuthor"), QStringLiteral("rendernisse"));
+				metadata.insert(QStringLiteral("forumPostAuthorAvatarUrl"), avatar);
+				metadata.insert(QStringLiteral("forumPostAuthorTitle"), QStringLiteral("Medlem"));
+				metadata.insert(QStringLiteral("forumPostAuthorRegistered"), QStringLiteral("2021-09"));
+				metadata.insert(QStringLiteral("forumPostAuthorPosts"), QStringLiteral("2 418"));
+				metadata.insert(QStringLiteral("forumPostTime"), QStringLiteral("2026-05-28 13:37"));
+				metadata.insert(QStringLiteral("forumPostExcerpt"),
+					QStringLiteral("Frame pacing blev stabilare när täta presence-signaler batchades per render frame."));
+				metadata.insert(QStringLiteral("forumQuoteAuthor"), QStringLiteral("qmlprofilen"));
+				metadata.insert(QStringLiteral("forumQuoteExcerpt"),
+					QStringLiteral("Behåll stabila ID:n och låt aldrig modellen resetta under talk-state."));
+				metadata.insert(QStringLiteral("forumQuotePostUrl"),
+					QStringLiteral("https://www.flashback.org/p91344990"));
+				metadata.insert(QStringLiteral("forumQuotePostId"), QStringLiteral("91344990"));
+				metadata.insert(QStringLiteral("forumQuotePostNumber"), QStringLiteral("#627"));
+			}
+			const QString url = sparse ? QStringLiteral("https://www.flashback.org/t3650123")
+									   : QStringLiteral("https://www.flashback.org/p91345012");
+			const QVariantMap preview = automationProviderPreview(
+				url, QStringLiteral("Qt Quick-prestanda och renderloopar"),
+				QStringLiteral("Flashback · Dator och IT"),
+				sparse ? QStringLiteral("Thread context with intentionally sparse post metadata.")
+						: QStringLiteral("Frame pacing blev stabilare när presence-signaler batchades per render frame."),
+				sparse ? QStringLiteral("Open discussion") : QStringLiteral("Open in thread"), metadata,
+				sparse ? QVariantList() : QVariantList { automationPreviewImageItem(avatar, QStringLiteral("Post author")) },
+				size);
+			return { automationRichPreviewMessage(sparse ? 4294967511ULL : 4294967510ULL, actor, url, preview) };
+		}
+
+		if (normalized == QLatin1String("existenz-digest")
+			|| normalized == QLatin1String("existenz-warning")) {
+			const bool warning = normalized == QLatin1String("existenz-warning");
+			const QString thumbnail = fixtureImage(
+				warning ? QStringLiteral("Content notice") : QStringLiteral("Evening link digest"),
+				warning ? QStringLiteral("Explicit reveal required") : QStringLiteral("Curated technology links"),
+				warning ? QStringLiteral("#512da8") : QStringLiteral("#1f6f8b"),
+				warning ? QStringLiteral("#b39ddb") : QStringLiteral("#7dd3fc"));
+			QVariantMap metadata {
+				{ QStringLiteral("provider"), QStringLiteral("existenz") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("existenz") },
+				{ QStringLiteral("previewKind"), QStringLiteral("linkDigest") },
+				{ QStringLiteral("swedishPreviewKind"), QStringLiteral("linkDigest") },
+				{ QStringLiteral("providerName"), QStringLiteral("Existenz") },
+				{ QStringLiteral("linkDigestTitle"), warning ? QStringLiteral("Sensitive link fixture")
+																	 : QStringLiteral("Evening technology digest") },
+				{ QStringLiteral("linkDigestCaption"),
+				  warning ? QStringLiteral("A harmless generated image verifies the reveal state.")
+						  : QStringLiteral("Native UI, frame pacing and accessible chat surfaces.") },
+				{ QStringLiteral("linkDigestSource"), QStringLiteral("Existenz") },
+				{ QStringLiteral("thumbnailBlur"), warning }
+			};
+			if (warning) {
+				metadata.insert(QStringLiteral("contentWarning"), QStringLiteral("NSFW"));
+			}
+			const QString url = warning ? QStringLiteral("https://existenz.se/out.php?id=fixture-warning")
+										: QStringLiteral("https://existenz.se/out.php?id=fixture-digest");
+			const QVariantList images {
+				automationPreviewImageItem(thumbnail, warning ? QStringLiteral("Sensitive preview fixture")
+																	: QStringLiteral("Link digest"))
+			};
+			const QVariantMap preview = automationProviderPreview(
+				url, warning ? QStringLiteral("Sensitive link fixture") : QStringLiteral("Evening technology digest"),
+				QStringLiteral("Existenz · link digest"),
+				warning ? QStringLiteral("A harmless generated image used to verify explicit reveal behavior.")
+						: QStringLiteral("Native UI, frame pacing and accessible chat surfaces."),
+				QStringLiteral("Open on Existenz"), metadata, images, size);
+			return { automationRichPreviewMessage(warning ? 4294967521ULL : 4294967520ULL, actor, url, preview) };
+		}
+
+		if (normalized == QLatin1String("google-search") || normalized == QLatin1String("google-images")
+			|| normalized == QLatin1String("google-shopping")) {
+			const bool images = normalized == QLatin1String("google-images");
+			const bool shopping = normalized == QLatin1String("google-shopping");
+			const QString mode = images ? QStringLiteral("images")
+								  : (shopping ? QStringLiteral("shopping") : QStringLiteral("search"));
+			const QString modeLabel = images ? QStringLiteral("Google Images")
+										 : (shopping ? QStringLiteral("Google Shopping")
+													 : QStringLiteral("Google Search"));
+			const QString query = shopping ? QStringLiteral("ergonomic keyboard Stockholm")
+									 : QStringLiteral("Qt Quick frame pacing Mumble");
+			const QString url = shopping
+				? QStringLiteral("https://www.google.com/search?q=ergonomic+keyboard+Stockholm&tbm=shop")
+				: (images ? QStringLiteral("https://www.google.com/search?q=Qt+Quick+frame+pacing+Mumble&tbm=isch")
+						  : QStringLiteral("https://www.google.com/search?q=Qt+Quick+frame+pacing+Mumble"));
+			const QVariantMap metadata {
+				{ QStringLiteral("provider"), QStringLiteral("google-search") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("google-search") },
+				{ QStringLiteral("previewKind"), QStringLiteral("search") },
+				{ QStringLiteral("googleSearchQuery"), query },
+				{ QStringLiteral("googleSearchModeLabel"), modeLabel }
+			};
+			const QVariantMap preview = automationProviderPreview(
+				url, modeLabel, QStringLiteral("Google · %1").arg(mode), query,
+				QStringLiteral("Open %1").arg(modeLabel), metadata, {}, size);
+			const qulonglong messageID = images ? 4294967531ULL : (shopping ? 4294967532ULL : 4294967530ULL);
+			return { automationRichPreviewMessage(messageID, actor, url, preview) };
+		}
+
+		if (normalized == QLatin1String("instagram-identity")
+			|| normalized == QLatin1String("instagram-avatar")
+			|| normalized == QLatin1String("instagram-caption")) {
+			const bool avatarOnly = normalized == QLatin1String("instagram-avatar");
+			const bool captionOnly = normalized == QLatin1String("instagram-caption");
+			const QString avatar = fixtureImage(QStringLiteral("MQ"), QStringLiteral("Instagram identity fixture"),
+				QStringLiteral("#833ab4"), QStringLiteral("#fd1d1d"));
+			QVariantMap metadata {
+				{ QStringLiteral("provider"), QStringLiteral("instagram") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("instagram") },
+				{ QStringLiteral("previewKind"), QStringLiteral("instagram") },
+				{ QStringLiteral("providerName"), QStringLiteral("Instagram") },
+				{ QStringLiteral("instagramMetadataVersion"), 2 },
+				{ QStringLiteral("instagramMediaKind"), captionOnly ? QStringLiteral("reel")
+																	   : QStringLiteral("post") }
+			};
+			if (!avatarOnly && !captionOnly) {
+				metadata.insert(QStringLiteral("instagramDisplayName"), QStringLiteral("Mumble Qt Quick"));
+				metadata.insert(QStringLiteral("instagramHandle"), QStringLiteral("@mumblequick"));
+				metadata.insert(QStringLiteral("instagramOwnerUserId"), QStringLiteral("17841460000001234"));
+			}
+			if (captionOnly) {
+				metadata.insert(QStringLiteral("instagramCaption"),
+					QStringLiteral("Stable chat scrolling with bounded delegate reuse."));
+				metadata.insert(QStringLiteral("instagramCreatedAt"), QStringLiteral("2026-05-28T18:30:00Z"));
+				metadata.insert(QStringLiteral("instagramLikeCount"), 18420);
+				metadata.insert(QStringLiteral("instagramCommentCount"), 318);
+			}
+			if (avatarOnly) {
+				metadata.insert(QStringLiteral("instagramAvatarUrl"), avatar);
+			}
+			const QString slug = avatarOnly ? QStringLiteral("AvatarSparse")
+									: (captionOnly ? QStringLiteral("CaptionSparse") : QStringLiteral("IdentitySparse"));
+			const QString url = QStringLiteral("https://www.instagram.com/p/%1/").arg(slug);
+			const QVariantList mediaItems = avatarOnly
+				? QVariantList { automationPreviewImageItem(avatar, QStringLiteral("Instagram avatar")) }
+				: QVariantList();
+			const QVariantMap preview = automationProviderPreview(
+				url,
+				captionOnly ? QStringLiteral("Stable chat scrolling with bounded delegate reuse.")
+							: (avatarOnly ? QStringLiteral("Post by @mumblequick")
+											: QStringLiteral("Native preview cards now share one design language.")),
+				captionOnly ? QStringLiteral("Instagram reel")
+							: (avatarOnly ? QStringLiteral("Instagram")
+										 : QStringLiteral("Mumble Qt Quick · @mumblequick")),
+				captionOnly ? QStringLiteral("Sparse caption without identity or avatar metadata.")
+							: (avatarOnly ? QStringLiteral("Sparse identity with a deterministic avatar.")
+											: QStringLiteral("Identity, caption and activity metadata.")),
+				QStringLiteral("Open on Instagram"), metadata, mediaItems, size);
+			const qulonglong messageID = avatarOnly ? 4294967541ULL
+				: (captionOnly ? 4294967542ULL : 4294967540ULL);
+			return { automationRichPreviewMessage(messageID, actor, url, preview) };
+		}
+
+		if (normalized == QLatin1String("weather")) {
+			const QString forecast = fixtureImage(QStringLiteral("Stockholm 12 °C"),
+				QStringLiteral("Växlande molnighet"), QStringLiteral("#1565c0"), QStringLiteral("#90caf9"));
+			const QVariantList images { automationPreviewImageItem(forecast, QStringLiteral("Forecast")) };
+			const QVariantMap metadata {
+				{ QStringLiteral("provider"), QStringLiteral("smhi") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("smhi") },
+				{ QStringLiteral("previewKind"), QStringLiteral("weather") },
+				{ QStringLiteral("swedishPreviewKind"), QStringLiteral("weather") },
+				{ QStringLiteral("providerName"), QStringLiteral("SMHI") },
+				{ QStringLiteral("richPreviewMetadataVersion"), 10 },
+				{ QStringLiteral("locationLabel"), QStringLiteral("Stockholm") },
+				{ QStringLiteral("statusLabel"),
+				  QStringLiteral("12 °C · växlande molnighet · svag sydvästlig vind") }
+			};
+			const QString url = QStringLiteral("https://www.smhi.se/vader/prognoser/ortsprognoser/stockholm");
+			const QVariantMap preview = automationProviderPreview(url, QStringLiteral("Vädret i Stockholm"),
+				QStringLiteral("SMHI"), QStringLiteral("12 °C · växlande molnighet · svag sydvästlig vind"),
+				QStringLiteral("Open forecast"), metadata, images, size);
+			return { automationRichPreviewMessage(4294967470ULL, actor, url, preview) };
+		}
+
+		if (normalized == QLatin1String("place-traffic") || normalized == QLatin1String("placetraffic")) {
+			const QString placeImage = fixtureImage(QStringLiteral("Slussen"), QStringLiteral("Hitta place fixture"),
+				QStringLiteral("#00695c"), QStringLiteral("#80cbc4"));
+			const QVariantMap placeMetadata {
+				{ QStringLiteral("provider"), QStringLiteral("hitta") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("hitta") },
+				{ QStringLiteral("previewKind"), QStringLiteral("place") },
+				{ QStringLiteral("swedishPreviewKind"), QStringLiteral("place") },
+				{ QStringLiteral("providerName"), QStringLiteral("Hitta") },
+				{ QStringLiteral("richPreviewMetadataVersion"), 10 },
+				{ QStringLiteral("locationLabel"), QStringLiteral("Slussen, Stockholm") },
+				{ QStringLiteral("statusLabel"), QStringLiteral("Torg · kollektivtrafik · öppet område") }
+			};
+			const QString placeUrl = QStringLiteral("https://www.hitta.se/slussen-stockholm");
+			const QVariantList placeMedia {
+				automationPreviewImageItem(placeImage, QStringLiteral("Map preview"))
+			};
+			const QVariantMap placePreview = automationProviderPreview(placeUrl, QStringLiteral("Slussen"),
+				QStringLiteral("Hitta · Stockholm"), QStringLiteral("Torg · kollektivtrafik · öppet område"),
+				QStringLiteral("Open place"), placeMetadata, placeMedia, size);
+
+			const QString trafficImage = fixtureImage(QStringLiteral("Stockholm C → Göteborg C"),
+				QStringLiteral("SJ traffic fixture"), QStringLiteral("#c62828"), QStringLiteral("#ef9a9a"));
+			const QVariantMap trafficMetadata {
+				{ QStringLiteral("provider"), QStringLiteral("sj") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("sj") },
+				{ QStringLiteral("previewKind"), QStringLiteral("traffic") },
+				{ QStringLiteral("swedishPreviewKind"), QStringLiteral("traffic") },
+				{ QStringLiteral("providerName"), QStringLiteral("SJ") },
+				{ QStringLiteral("richPreviewMetadataVersion"), 10 },
+				{ QStringLiteral("locationLabel"), QStringLiteral("Stockholm C → Göteborg C") },
+				{ QStringLiteral("statusLabel"), QStringLiteral("Avgång 17:34 · spår 10 · i tid") }
+			};
+			const QString trafficUrl = QStringLiteral("https://www.sj.se/trafikinformation/fixture");
+			const QVariantList trafficMedia {
+				automationPreviewImageItem(trafficImage, QStringLiteral("Train status"))
+			};
+			const QVariantMap trafficPreview = automationProviderPreview(trafficUrl,
+				QStringLiteral("Stockholm C → Göteborg C"), QStringLiteral("SJ · trafikläge"),
+				QStringLiteral("Avgång 17:34 · spår 10 · i tid"), QStringLiteral("Open traffic status"),
+				trafficMetadata, trafficMedia, size);
+
+			return { automationRichPreviewMessage(4294967471ULL, actor, placeUrl, placePreview),
+				automationRichPreviewMessage(4294967472ULL, actor, trafficUrl, trafficPreview) };
+		}
+
+		if (normalized == QLatin1String("content-warning") || normalized == QLatin1String("contentwarning")) {
+			const QString warningImage = fixtureImage(QStringLiteral("Sensitive preview fixture"),
+				QStringLiteral("Harmless reveal-state test"), QStringLiteral("#512da8"), QStringLiteral("#b39ddb"));
+			const QVariantMap metadata {
+				{ QStringLiteral("provider"), QStringLiteral("existenz") },
+				{ QStringLiteral("previewProvider"), QStringLiteral("existenz") },
+				{ QStringLiteral("previewKind"), QStringLiteral("linkDigest") },
+				{ QStringLiteral("swedishPreviewKind"), QStringLiteral("linkDigest") },
+				{ QStringLiteral("providerName"), QStringLiteral("Existenz") },
+				{ QStringLiteral("richPreviewMetadataVersion"), 10 },
+				{ QStringLiteral("thumbnailBlur"), true },
+				{ QStringLiteral("contentWarning"), QStringLiteral("NSFW") }
+			};
+			const QString url = QStringLiteral("https://existenz.se/out.php?id=fixture");
+			const QVariantList images {
+				automationPreviewImageItem(warningImage, QStringLiteral("Sensitive preview fixture"))
+			};
+			const QVariantMap preview = automationProviderPreview(url, QStringLiteral("Content warning fixture"),
+				QStringLiteral("Existenz · content notice"),
+				QStringLiteral("A harmless generated image used to verify explicit reveal behavior."),
+				QStringLiteral("Open link"), metadata, images, size);
+			return { automationRichPreviewMessage(4294967480ULL, actor, url, preview) };
+		}
+
+		return {};
+	}
+
 	QVariantList automationRichPreviewProbeMessages(const QString &variant, const QString &requestedSize) {
 		const QString normalizedVariant = variant.trimmed().toLower();
+		const QVariantList providerMessages =
+			automationProviderRichPreviewProbeMessages(normalizedVariant, requestedSize);
+		if (!providerMessages.isEmpty()) {
+			return providerMessages;
+		}
 		const QString imageDataUrl =
 			automationPreviewImageDataUrl(QObject::tr("Inline image"), QObject::tr("Local chat attachment"),
 										  QStringLiteral("#43c6ac"), QStringLiteral("#2e86de"));
@@ -3319,6 +4318,137 @@ namespace {
 		}
 
 		return {};
+	}
+
+	QStringList automationRichPreviewMessageIds(const QVariantList &messages) {
+		QStringList ids;
+		ids.reserve(messages.size());
+		for (const QVariant &value : messages) {
+			const QString id = value.toMap().value(QStringLiteral("messageId")).toString().trimmed();
+			if (!id.isEmpty() && !ids.contains(id)) {
+				ids.push_back(id);
+			}
+		}
+		return ids;
+	}
+
+	QList< QQuickItem * > automationQuickItemSubtree(QQuickItem *root) {
+		QList< QQuickItem * > items;
+		if (!root) {
+			return items;
+		}
+
+		QList< QQuickItem * > pending { root };
+		while (!pending.isEmpty()) {
+			QQuickItem *item = pending.takeLast();
+			if (!item) {
+				continue;
+			}
+			items.push_back(item);
+			pending.append(item->childItems());
+		}
+		return items;
+	}
+
+	QObject *automationFindQuickItemByObjectName(QQuickItem *root, const QString &objectName) {
+		for (QQuickItem *candidate : automationQuickItemSubtree(root)) {
+			if (candidate->objectName() == objectName) {
+				return candidate;
+			}
+		}
+		return nullptr;
+	}
+
+	QObject *automationFindRichPreviewCard(QQuickWindow *window, const QString &messageId) {
+		if (!window || messageId.trimmed().isEmpty()) {
+			return nullptr;
+		}
+		const QString prefix = messageId.trimmed() + QLatin1Char('|');
+		// QML delegates are parented through the visual item tree. Their QObject
+		// ownership does not have to descend from QQuickWindow, so QObject::findChildren
+		// misses live, rendered cards after ListView delegate reuse.
+		for (QQuickItem *candidate : automationQuickItemSubtree(window->contentItem())) {
+			const QVariant identityValue = candidate->property("previewIdentity");
+			if (identityValue.isValid() && identityValue.toString().startsWith(prefix)) {
+				return candidate;
+			}
+		}
+		return nullptr;
+	}
+
+	QVariantMap automationRichPreviewCardState(QQuickWindow *window, const QString &messageId) {
+		QVariantMap state;
+		state.insert(QStringLiteral("messageId"), messageId);
+		QObject *card = automationFindRichPreviewCard(window, messageId);
+		state.insert(QStringLiteral("rendered"), card != nullptr);
+		if (!card) {
+			state.insert(QStringLiteral("imageSourceCount"), 0);
+			state.insert(QStringLiteral("imageReadyCount"), 0);
+			state.insert(QStringLiteral("imageLoadingCount"), 0);
+			state.insert(QStringLiteral("imageErrorCount"), 0);
+			return state;
+		}
+
+		state.insert(QStringLiteral("expanded"), card->property("expanded").toBool());
+		state.insert(QStringLiteral("userExpanded"), card->property("userExpanded").toBool());
+		state.insert(QStringLiteral("sensitiveMediaRevealed"),
+			card->property("sensitiveMediaRevealed").toBool());
+		state.insert(QStringLiteral("mediaRequiresReveal"), card->property("mediaRequiresReveal").toBool());
+		state.insert(QStringLiteral("previewState"), card->property("previewState").toString());
+
+		bool focused = false;
+		if (window) {
+			QQuickItem *cardItem = qobject_cast< QQuickItem * >(card);
+			for (QQuickItem *item = window->activeFocusItem(); item; item = item->parentItem()) {
+				if (item == cardItem) {
+					focused = true;
+					break;
+				}
+			}
+		}
+		state.insert(QStringLiteral("focused"), focused);
+
+		int imageSourceCount  = 0;
+		int imageReadyCount   = 0;
+		int imageLoadingCount = 0;
+		int imageErrorCount   = 0;
+		QStringList renderedImageSources;
+		QList< QObject * > imageCandidates;
+		if (QQuickItem *cardItem = qobject_cast< QQuickItem * >(card)) {
+			for (QQuickItem *candidate : automationQuickItemSubtree(cardItem)) {
+				imageCandidates.push_back(candidate);
+			}
+		} else {
+			imageCandidates = card->findChildren< QObject * >();
+		}
+		for (QObject *candidate : imageCandidates) {
+			const QVariant sourceValue = candidate->property("source");
+			if (!sourceValue.isValid()) {
+				continue;
+			}
+			const QString source = sourceValue.toString().trimmed();
+			if (!source.startsWith(QLatin1String("image://mumble/"), Qt::CaseInsensitive)) {
+				continue;
+			}
+			++imageSourceCount;
+			if (!renderedImageSources.contains(source)) {
+				renderedImageSources.push_back(source);
+			}
+			const int status = candidate->property("status").toInt();
+			if (status == 1) {
+				++imageReadyCount;
+			} else if (status == 2) {
+				++imageLoadingCount;
+			} else if (status == 3) {
+				++imageErrorCount;
+			}
+		}
+		state.insert(QStringLiteral("imageSources"), renderedImageSources);
+		state.insert(QStringLiteral("imageSourceCount"), imageSourceCount);
+		state.insert(QStringLiteral("imageReadyCount"), imageReadyCount);
+		state.insert(QStringLiteral("imageLoadingCount"), imageLoadingCount);
+		state.insert(QStringLiteral("imageErrorCount"), imageErrorCount);
+		return state;
 	}
 
 } // namespace
@@ -3794,6 +4924,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			return errorResponse(tr("The Qt Quick frontend is not active."));
 		}
 		const QString path = request.value(QStringLiteral("path")).toString().trimmed();
+		const QString windowId = request.value(QStringLiteral("window"), QStringLiteral("main")).toString().trimmed();
 		if (path.isEmpty()) return errorResponse(tr("Missing capture path."));
 		bool parsedGeneration = false;
 		const qulonglong requestedGeneration =
@@ -3804,12 +4935,13 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			return errorResponse(tr("The requested visual fixture generation is stale or invalid."));
 		}
 		QString captureError;
-		if (!m_mainWindow->m_qmlShellHost->captureWindow(path, &captureError)) {
+		if (!m_mainWindow->m_qmlShellHost->captureWindow(path, &captureError, windowId)) {
 			return errorResponse(captureError);
 		}
 		QVariantMap response = okResponse();
 		response.insert(QStringLiteral("path"), QFileInfo(path).absoluteFilePath());
 		response.insert(QStringLiteral("frontend"), QStringLiteral("qml"));
+		response.insert(QStringLiteral("window"), windowId.isEmpty() ? QStringLiteral("main") : windowId);
 		if (parsedGeneration) response.insert(QStringLiteral("generation"), requestedGeneration);
 		return response;
 	}
@@ -3819,7 +4951,11 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			return errorResponse(tr("The Qt Quick frontend is not active."));
 		}
 		m_mainWindow->m_qmlShellHost->showPttTool(request.value(QStringLiteral("visible")).toBool());
-		return okResponse();
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("visible"), m_mainWindow->m_qmlShellHost->pttToolVisible());
+		response.insert(QStringLiteral("captureReady"),
+			m_mainWindow->m_qmlShellHost->captureWindowReady(QStringLiteral("ptt")));
+		return response;
 	}
 
 	if (command == QLatin1String("setQmlPttPressed")) {
@@ -3829,6 +4965,22 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		m_mainWindow->m_qmlShellHost->commandController()->setPttPressed(
 			request.value(QStringLiteral("pressed")).toBool());
 		return okResponse();
+	}
+
+	if (command == QLatin1String("setQmlManualPluginTool")) {
+#ifdef USE_MANUAL_PLUGIN
+		if (!m_mainWindow->m_qmlShellHost || !m_mainWindow->m_qmlShellHost->window()) {
+			return errorResponse(tr("The Qt Quick frontend is not active."));
+		}
+		m_mainWindow->m_qmlShellHost->showManualPluginTool(request.value(QStringLiteral("visible"), true).toBool());
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("visible"), m_mainWindow->m_qmlShellHost->manualPluginToolVisible());
+		response.insert(QStringLiteral("captureReady"),
+			m_mainWindow->m_qmlShellHost->captureWindowReady(QStringLiteral("manual-plugin")));
+		return response;
+#else
+		return errorResponse(tr("The Manual Plugin is not available in this build."));
+#endif
 	}
 
 	if (command == QLatin1String("openQmlMediaSession")) {
@@ -3860,6 +5012,14 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		response.insert(QStringLiteral("messageCount"), host->chatModel()->rowCount());
 		response.insert(QStringLiteral("dialogOpen"), host->dialogController()->open());
 		response.insert(QStringLiteral("pttPressed"), host->commandController()->pttPressed());
+		response.insert(QStringLiteral("pttToolVisible"), host->pttToolVisible());
+		response.insert(QStringLiteral("mainCaptureReady"), host->captureWindowReady(QStringLiteral("main")));
+		response.insert(QStringLiteral("pttToolCaptureReady"), host->captureWindowReady(QStringLiteral("ptt")));
+#ifdef USE_MANUAL_PLUGIN
+		response.insert(QStringLiteral("manualPluginToolVisible"), host->manualPluginToolVisible());
+		response.insert(QStringLiteral("manualPluginToolCaptureReady"),
+			host->captureWindowReady(QStringLiteral("manual-plugin")));
+#endif
 		response.insert(QStringLiteral("mediaActive"), host->mediaSession()->active());
 		return response;
 	}
@@ -4150,6 +5310,7 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		response.insert(QStringLiteral("variant"), result.value(QStringLiteral("variant"), variant));
 		response.insert(QStringLiteral("open"), result.value(QStringLiteral("open")).toBool());
 		response.insert(QStringLiteral("visible"), result.value(QStringLiteral("visible")).toBool());
+		response.insert(QStringLiteral("labels"), result.value(QStringLiteral("labels")).toList());
 		return response;
 	}
 
@@ -4663,21 +5824,46 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		return okResponse();
 	}
 
-	if (command == QLatin1String("setRichPreviewProbe")) {
+	if (command == QLatin1String("setRichPreviewProbe")
+		|| command == QLatin1String("setQmlRichPreviewProbe")) {
 		const QString variant = request.value(QStringLiteral("variant")).toString().trimmed();
 		const QString size    = request.value(QStringLiteral("size")).toString().trimmed();
 		if (variant.isEmpty()) {
 			return errorResponse(tr("Missing variant."));
 		}
-		const QVariantList messages = automationRichPreviewProbeMessages(variant, size);
+		QVariantList messages = automationRichPreviewProbeMessages(variant, size);
 		if (messages.isEmpty()) {
 			return errorResponse(tr("Unknown rich preview probe '%1'.").arg(variant));
 		}
 
-		const auto applyProbe = [messages](MainWindow *window) {
+		const QString focusedMessageId = request.value(QStringLiteral("focusMessageId")).toString().trimmed();
+		if (!focusedMessageId.isEmpty()) {
+			QVariantList focusedMessages;
+			for (const QVariant &value : messages) {
+				if (value.toMap().value(QStringLiteral("messageId")).toString() == focusedMessageId) {
+					focusedMessages.push_back(value);
+					break;
+				}
+			}
+			if (focusedMessages.isEmpty()) {
+				return errorResponse(tr("Rich preview probe '%1' has no message '%2'.")
+					.arg(variant, focusedMessageId));
+			}
+			messages = focusedMessages;
+		}
+
+		QmlShellHost *host = m_mainWindow ? m_mainWindow->qmlShellHost() : nullptr;
+		if (!host || !host->window() || !host->chatModel() || !host->imagePipeline()) {
+			return errorResponse(tr("The Qt Quick rich preview fixture host is unavailable."));
+		}
+
+		const auto applyProbe = [messages, variant](MainWindow *window) {
 			QmlShellHost *host = window ? window->qmlShellHost() : nullptr;
-			window->m_modernRichPreviewProbeMessages =
-				automationRegisterPreviewImages(messages, host ? host->imagePipeline() : nullptr);
+			if (!window || !host || !host->imagePipeline()) {
+				return;
+			}
+			window->m_modernRichPreviewProbeMessages = automationRegisterPreviewImages(
+				messages, host->imagePipeline(), variant);
 			window->scheduleQmlShellStateSyncImmediate();
 		};
 
@@ -4687,12 +5873,157 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		}
 
 		applyProbe(m_mainWindow);
+		QStringList imageSources;
+		int dataImageSourceCount = 0;
+		automationCollectPreviewImageSources(
+			m_mainWindow->m_modernRichPreviewProbeMessages, imageSources, dataImageSourceCount);
 		QVariantMap response = okResponse();
-		response.insert(QStringLiteral("messageCount"), messages.size());
+		response.insert(QStringLiteral("variant"), variant.trimmed().toLower());
+		const QString normalizedSize = size.compare(QLatin1String("expanded"), Qt::CaseInsensitive) == 0
+			? QStringLiteral("large") : size.trimmed().toLower();
+		response.insert(QStringLiteral("size"), normalizedSize);
+		response.insert(QStringLiteral("messageCount"), m_mainWindow->m_modernRichPreviewProbeMessages.size());
+		response.insert(QStringLiteral("messageIds"),
+			automationRichPreviewMessageIds(m_mainWindow->m_modernRichPreviewProbeMessages));
+		response.insert(QStringLiteral("imageSources"), imageSources);
+		response.insert(QStringLiteral("dataImageSourceCount"), dataImageSourceCount);
+		response.insert(QStringLiteral("ready"), false);
+		if (!focusedMessageId.isEmpty()) {
+			response.insert(QStringLiteral("focusedMessageId"), focusedMessageId);
+		}
 		return response;
 	}
 
-	if (command == QLatin1String("clearRichPreviewProbe")) {
+	if (command == QLatin1String("getQmlRichPreviewProbeState")) {
+		QmlShellHost *host = m_mainWindow ? m_mainWindow->qmlShellHost() : nullptr;
+		if (!host || !host->window() || !host->chatModel() || !host->imagePipeline()) {
+			return errorResponse(tr("The Qt Quick rich preview fixture host is unavailable."));
+		}
+
+		const QVariantList expectedMessages = m_mainWindow->m_modernRichPreviewProbeMessages;
+		const QStringList expectedIds = automationRichPreviewMessageIds(expectedMessages);
+		QSet< QString > liveIds;
+		for (const QVariant &value : host->chatModel()->messages()) {
+			const QString id = value.toMap().value(QStringLiteral("messageId")).toString().trimmed();
+			if (!id.isEmpty()) {
+				liveIds.insert(id);
+			}
+		}
+		bool modelReady = !expectedIds.isEmpty();
+		for (const QString &id : expectedIds) {
+			modelReady = modelReady && liveIds.contains(id);
+		}
+
+		QStringList imageSources;
+		int dataImageSourceCount = 0;
+		automationCollectPreviewImageSources(expectedMessages, imageSources, dataImageSourceCount);
+		int registeredImageSourceCount = 0;
+		for (const QString &source : imageSources) {
+			if (host->imagePipeline()->containsSource(source)) {
+				++registeredImageSourceCount;
+			}
+		}
+
+		QVariantList cardStates;
+		int renderedCardCount = 0;
+		int imageReadyCount = 0;
+		int imageLoadingCount = 0;
+		int imageErrorCount = 0;
+		bool renderedImagesReady = true;
+		for (const QString &id : expectedIds) {
+			const QVariantMap cardState = automationRichPreviewCardState(host->window(), id);
+			cardStates.push_back(cardState);
+			if (cardState.value(QStringLiteral("rendered")).toBool()) {
+				++renderedCardCount;
+			}
+			const int cardImageSources = cardState.value(QStringLiteral("imageSourceCount")).toInt();
+			const int cardImageReady = cardState.value(QStringLiteral("imageReadyCount")).toInt();
+			imageReadyCount += cardImageReady;
+			imageLoadingCount += cardState.value(QStringLiteral("imageLoadingCount")).toInt();
+			imageErrorCount += cardState.value(QStringLiteral("imageErrorCount")).toInt();
+			if (cardImageSources > 0 && cardImageReady == 0) {
+				renderedImagesReady = false;
+			}
+		}
+
+		const bool imagesRegistered = dataImageSourceCount == 0
+			&& registeredImageSourceCount == imageSources.size();
+		const bool ready = modelReady && renderedCardCount == expectedIds.size() && imagesRegistered
+			&& renderedImagesReady && imageLoadingCount == 0 && imageErrorCount == 0;
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("active"), !expectedIds.isEmpty());
+		response.insert(QStringLiteral("ready"), ready);
+		response.insert(QStringLiteral("modelReady"), modelReady);
+		response.insert(QStringLiteral("messageCount"), expectedIds.size());
+		response.insert(QStringLiteral("messageIds"), expectedIds);
+		response.insert(QStringLiteral("renderedCardCount"), renderedCardCount);
+		response.insert(QStringLiteral("cards"), cardStates);
+		response.insert(QStringLiteral("imageSources"), imageSources);
+		response.insert(QStringLiteral("registeredImageSourceCount"), registeredImageSourceCount);
+		response.insert(QStringLiteral("dataImageSourceCount"), dataImageSourceCount);
+		response.insert(QStringLiteral("imageReadyCount"), imageReadyCount);
+		response.insert(QStringLiteral("imageLoadingCount"), imageLoadingCount);
+		response.insert(QStringLiteral("imageErrorCount"), imageErrorCount);
+		return response;
+	}
+
+	if (command == QLatin1String("setQmlRichPreviewProbeCardState")) {
+		QmlShellHost *host = m_mainWindow ? m_mainWindow->qmlShellHost() : nullptr;
+		if (!host || !host->window()) {
+			return errorResponse(tr("The Qt Quick rich preview fixture host is unavailable."));
+		}
+		const QString messageId = request.value(QStringLiteral("messageId")).toString().trimmed();
+		if (messageId.isEmpty()) {
+			return errorResponse(tr("Missing messageId."));
+		}
+		if (!automationRichPreviewMessageIds(m_mainWindow->m_modernRichPreviewProbeMessages).contains(messageId)) {
+			return errorResponse(tr("Message '%1' is not part of the active rich preview probe.").arg(messageId));
+		}
+		QObject *card = automationFindRichPreviewCard(host->window(), messageId);
+		if (!card) {
+			QVariantMap response = okResponse();
+			response.insert(QStringLiteral("ready"), false);
+			response.insert(QStringLiteral("messageId"), messageId);
+			return response;
+		}
+		if (request.contains(QStringLiteral("expanded"))) {
+			card->setProperty("userExpanded", request.value(QStringLiteral("expanded")).toBool());
+		}
+		if (request.contains(QStringLiteral("revealed"))) {
+			card->setProperty("sensitiveMediaRevealed", request.value(QStringLiteral("revealed")).toBool());
+		}
+		if (request.value(QStringLiteral("focus")).toBool()) {
+			QQuickItem *cardItem = qobject_cast< QQuickItem * >(card);
+			auto findFocusTarget = [card, cardItem](const QString &objectName) -> QObject * {
+				if (cardItem) {
+					if (QObject *target = automationFindQuickItemByObjectName(cardItem, objectName)) {
+						return target;
+					}
+				}
+				return card->findChild< QObject * >(objectName);
+			};
+			QObject *focusTarget = findFocusTarget(QStringLiteral("previewOpenButton"));
+			if (card->property("mediaRequiresReveal").toBool()) {
+				QObject *revealTarget = findFocusTarget(QStringLiteral("previewExpandedRevealButton"));
+				if (!revealTarget) {
+					revealTarget = findFocusTarget(QStringLiteral("previewRevealButton"));
+				}
+				if (revealTarget) {
+					focusTarget = revealTarget;
+				}
+			}
+			if (QQuickItem *item = qobject_cast< QQuickItem * >(focusTarget ? focusTarget : card)) {
+				item->forceActiveFocus(Qt::OtherFocusReason);
+			}
+		}
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("ready"), true);
+		response.insert(QStringLiteral("card"), automationRichPreviewCardState(host->window(), messageId));
+		return response;
+	}
+
+	if (command == QLatin1String("clearRichPreviewProbe")
+		|| command == QLatin1String("clearQmlRichPreviewProbe")) {
 		const auto clearProbe = [](MainWindow *window) {
 			window->m_modernRichPreviewProbeMessages.clear();
 			window->scheduleQmlShellStateSyncImmediate();
@@ -5261,6 +6592,8 @@ QVariantMap ModernUiAutomationServer::buildStateResponse() const {
 									 session->motdLastSeenSignature() },
 								   { QStringLiteral("motdChanged"), session->motdChanged() },
 								   { QStringLiteral("motdActions"), session->motdActions() },
+								   { QStringLiteral("menus"), session->appMenus() },
+								   { QStringLiteral("selfMenu"), session->selfMenu() },
 								   { QStringLiteral("pttPressed"), commands->pttPressed() } });
 		QVariantMap activeScopeState { { QStringLiteral("scopeToken"), scope->scopeToken() },
 									{ QStringLiteral("label"), scope->label() },
@@ -5297,9 +6630,23 @@ QVariantMap ModernUiAutomationServer::buildStateResponse() const {
 		RoomModel *rooms = host->roomModel();
 		for (int row = 0; row < rooms->rowCount(); ++row) {
 			const QVariantMap modelRow = rooms->get(row);
+			// RoomModel intentionally keeps only the bounded action payload in its source role. Rebuild the
+			// automation DTO from the typed row instead of treating the internal stable row ID (for example
+			// "voice:4:0") as a protocol scope token. The latter cannot be passed back to selectScope and also
+			// drops the room label/path whenever context actions are present.
 			QVariantMap item = modelRow.value(QStringLiteral("source")).toMap();
-			if (item.isEmpty()) item = modelRow;
-			if (!item.contains(QStringLiteral("token"))) item.insert(QStringLiteral("token"), modelRow.value(QStringLiteral("id")));
+			item.insert(QStringLiteral("token"), modelRow.value(QStringLiteral("scopeToken")));
+			item.insert(QStringLiteral("label"), modelRow.value(QStringLiteral("title")));
+			item.insert(QStringLiteral("description"), modelRow.value(QStringLiteral("subtitle")));
+			item.insert(QStringLiteral("pathLabel"), modelRow.value(QStringLiteral("pathLabel")));
+			item.insert(QStringLiteral("kindLabel"), modelRow.value(QStringLiteral("kindLabel")));
+			item.insert(QStringLiteral("selected"), modelRow.value(QStringLiteral("selected")));
+			item.insert(QStringLiteral("joined"), modelRow.value(QStringLiteral("joined")));
+			item.insert(QStringLiteral("canJoin"), modelRow.value(QStringLiteral("canJoin")));
+			item.insert(QStringLiteral("depth"), modelRow.value(QStringLiteral("depth")));
+			item.insert(QStringLiteral("unreadCount"), modelRow.value(QStringLiteral("unreadCount")));
+			item.insert(QStringLiteral("badges"), modelRow.value(QStringLiteral("badges")));
+			item.insert(QStringLiteral("screenShare"), modelRow.value(QStringLiteral("screenShare")));
 			(modelRow.value(QStringLiteral("kind")).toString() == QLatin1String("voice") ? voiceRooms : textRooms)
 				.push_back(item);
 			// The active-scope controller is the authoritative typed state. Only fall back to the room row
@@ -5331,6 +6678,9 @@ QVariantMap ModernUiAutomationServer::buildStateResponse() const {
 		state.insert(QStringLiteral("themeState"), themeState);
 		// Preserve the established automation wire key while sourcing it from the typed theme controller.
 		state.insert(QStringLiteral("uiTweaks"), themeState);
+		QVariantMap appState = state.value(QStringLiteral("app")).toMap();
+		appState.insert(QStringLiteral("uiTweaks"), themeState);
+		state.insert(QStringLiteral("app"), appState);
 	}
 	// Keep the wire key and command ID stable for existing automation clients;
 	// the payload is now composed directly from typed QML controllers and models.

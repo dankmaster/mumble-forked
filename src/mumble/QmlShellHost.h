@@ -64,11 +64,15 @@ public:
 	bool visualFixtureOverrideActive() const { return m_visualFixtureOverrideActive; }
 	void setVisualFixtureOverrideActive(bool active);
 	void setVisualFixtureMutationActive(bool active);
-	bool captureWindow(const QString &path, QString *error = nullptr) const;
+	bool captureWindow(const QString &path, QString *error = nullptr,
+					   const QString &windowId = QString()) const;
+	bool captureWindowReady(const QString &windowId = QString()) const;
 	void showPttTool(bool visible);
+	bool pttToolVisible() const;
 #ifdef USE_MANUAL_PLUGIN
 	ManualPluginController *manualPluginController() const;
-	void showManualPluginTool();
+	void showManualPluginTool(bool visible = true);
+	bool manualPluginToolVisible() const;
 #endif
 	QObject *createScreenShareView(QObject *backend);
 	void closeScreenShareView(QObject *view);
@@ -80,6 +84,8 @@ protected:
 	bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
+	QQuickWindow *captureTargetWindow(const QString &windowId, QString *error = nullptr) const;
+	void registerCaptureWindow(QQuickWindow *window);
 	bool ensurePttToolWindow();
 #ifdef USE_MANUAL_PLUGIN
 	bool ensureManualPluginWindow();
@@ -116,6 +122,7 @@ private:
 #endif
 	QSet< QObject * > m_screenShareViews;
 	QSet< QObject * > m_closingScreenShareViews;
+	QSet< QQuickWindow * > m_captureReadyWindows;
 	bool m_visualFixtureOverrideActive = false;
 };
 

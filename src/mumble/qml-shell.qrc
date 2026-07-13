@@ -3,7 +3,17 @@
     <file alias="Main.qml">qml-shell/Main.qml</file>
     <file alias="Theme.qml">qml-shell/Theme.qml</file>
     <file alias="ModernButton.qml">qml-shell/ModernButton.qml</file>
+	<file alias="ModernIconButton.qml">qml-shell/ModernIconButton.qml</file>
+	<file alias="ModernIcon.qml">qml-shell/ModernIcon.qml</file>
+	<file alias="ModernTextField.qml">qml-shell/ModernTextField.qml</file>
+	<file alias="ModernCheckBox.qml">qml-shell/ModernCheckBox.qml</file>
+	<file alias="ModernComboBox.qml">qml-shell/ModernComboBox.qml</file>
+	<file alias="ModernSlider.qml">qml-shell/ModernSlider.qml</file>
+	<file alias="ModernTextArea.qml">qml-shell/ModernTextArea.qml</file>
+	<file alias="ModernSpinBox.qml">qml-shell/ModernSpinBox.qml</file>
+	<file alias="AsyncOperationCard.qml">qml-shell/AsyncOperationCard.qml</file>
 	<file alias="ModernMenu.qml">qml-shell/ModernMenu.qml</file>
+	<file alias="SemanticMenu.qml">qml-shell/SemanticMenu.qml</file>
 	<file alias="NavigationRail.qml">qml-shell/NavigationRail.qml</file>
 	<file alias="PayloadMenuItem.qml">qml-shell/PayloadMenuItem.qml</file>
 	<file alias="ConnectionBanner.qml">qml-shell/ConnectionBanner.qml</file>
@@ -13,6 +23,7 @@
 	<file alias="ImageViewer.qml">qml-shell/ImageViewer.qml</file>
 	<file alias="StonksEditor.qml">qml-shell/StonksEditor.qml</file>
 	<file alias="ScreenShareViewWindow.qml">qml-shell/ScreenShareViewWindow.qml</file>
+	<file alias="ScreenShareControls.qml">qml-shell/ScreenShareControls.qml</file>
     <file alias="PttToolWindow.qml">qml-shell/PttToolWindow.qml</file>
     <file alias="ManualPluginWindow.qml">qml-shell/ManualPluginWindow.qml</file>
     <file alias="QmlDialog.qml">qml-shell/QmlDialog.qml</file>
@@ -21,10 +32,13 @@
     <file alias="ShortcutEditor.qml">qml-shell/ShortcutEditor.qml</file>
     <file alias="AclEditor.qml">qml-shell/AclEditor.qml</file>
     <file alias="MediaSessionWindow.qml">qml-shell/MediaSessionWindow.qml</file>
+	<file alias="MediaSessionControls.qml">qml-shell/MediaSessionControls.qml</file>
 	<file alias="WatchTogetherBanner.qml">qml-shell/WatchTogetherBanner.qml</file>
+	<file alias="ChatMessageFrame.qml">qml-shell/ChatMessageFrame.qml</file>
 	<file alias="RichMessageBody.qml">qml-shell/RichMessageBody.qml</file>
 	<file alias="AttachmentGallery.qml">qml-shell/AttachmentGallery.qml</file>
 	<file alias="RichPreviewCard.qml">qml-shell/RichPreviewCard.qml</file>
+	<file alias="ProviderDetails.qml">qml-shell/ProviderDetails.qml</file>
 	<file alias="AttachmentViewer.qml">qml-shell/AttachmentViewer.qml</file>
   </qresource>
 </RCC>

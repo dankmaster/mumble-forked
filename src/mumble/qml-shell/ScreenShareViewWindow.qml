@@ -9,6 +9,7 @@ Window {
     required property var backend
 	property bool hostClosing: false
 	property bool closeRequestPending: false
+	readonly property bool controlsWrapped: screenShareControls.controlsWrapped
     width: 1100
     height: 720
     minimumWidth: 640
@@ -40,18 +41,11 @@ Window {
         anchors.fill: parent
         anchors.margins: 12
         spacing: 10
-        RowLayout {
-            Layout.fillWidth: true
-            ColumnLayout {
-                Layout.fillWidth: true
-                Label { textFormat: Text.PlainText; text: backend.title; color: Theme.textStrong; font.bold: true; font.pixelSize: 15 }
-                Label { textFormat: Text.PlainText; text: backend.detail; color: Theme.textMuted }
-            }
-            ModernButton { text: backend.paused ? qsTr("Resume live") : qsTr("Pause view"); onClicked: backend.setPaused(!backend.paused) }
-            ModernButton { text: backend.audioMuted ? qsTr("Unmute audio") : qsTr("Mute audio"); enabled: backend.audioAvailable; onClicked: backend.setAudioMuted(!backend.audioMuted) }
-            Slider { from: 0; to: 100; value: backend.audioVolume; enabled: backend.audioAvailable; onMoved: backend.setAudioVolume(value); Accessible.name: qsTr("Stream volume") }
-            ModernButton { text: qsTr("Stop"); onClicked: backend.requestStop() }
-        }
+		ScreenShareControls {
+			id: screenShareControls
+			Layout.fillWidth: true
+			backend: root.backend
+		}
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true

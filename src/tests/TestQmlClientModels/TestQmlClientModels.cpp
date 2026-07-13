@@ -20,25 +20,30 @@ private slots:
 	void largeSynchronizationsStayResetFree();
 	void roomAndParticipantStatesStayIncremental();
 	void roomRowsExposeActionsOnlySource();
+	void participantRowsPreserveTypedVoiceStateAndListenerIdentity();
 	void directMessageHistoryMergePublishesOnce();
 	void stableIdsRemainIndependentFromSourceMaps();
 	void messageRolesExposeStructuredState();
 	void chatTimelineAppliesDirectIncrementalMessages();
+	void chatTimelineReplacesDisjointScopesWithoutMixedRows();
 	void chatTimelinePreservesTypedAttachments();
 	void chatTimelineBoundsReactionDelegates();
 	void chatTimelineSanitizesStructuredRichText();
 	void chatTimelineDrainsBoundedRichTextBacklog();
 	void chatTimelineNormalizesPreviewAndAttachments();
+	void chatTimelineNormalizesProviderMetadata();
 	void participantPresenceUpdatesOnlyTypedRoles();
 	void participantUpsertsAndRemovalsStayResetFree();
 	void workloadSourceStateRoundTripsExactly();
 	void steadyStateRejectsFullBootstrap();
+	void pendingBootstrapCompletesBeforeSteadyState();
 	void duplicateStableIdsAreCoalesced();
 	void activeScopeAppliesTypedState();
 	void sessionPropertiesOnlyNotifyOnChanges();
 	void sessionAppliesTypedConnectionState();
 	void sessionDerivesTypedMotdState();
 	void sessionPublishesTypedUpdateBanner();
+	void sessionPublishesSemanticMenus();
 	void commandsRouteTypedAppActions();
 	void commandsRejectEmptyStableIds();
 	void commandsValidateStableMoveIds();
@@ -48,12 +53,14 @@ private slots:
 	void pttSafetyTriggersReleaseExactlyOnce_data();
 	void pttSafetyTriggersReleaseExactlyOnce();
 	void dialogStateRoutesTypedRequests();
+	void dialogPresentationValuesStayBoundedAndTransient();
 	void imageViewerStateRemainsStructured();
 	void stonksStateAndActionsRemainStructured();
 	void asyncOperationsExposeProgressAndCancellation();
 	void asyncOperationsClampProgressAndInterruptByPrefix();
 	void asyncOperationsExposeStructuredPluginResults();
 	void asyncOperationItemResultsAreLosslessAndPaginated();
+	void mediaSessionLocalPlaybackControlsRemainTyped();
 	void mediaSessionValidatesAndPublishesTypedState();
 	void mediaSessionValidatesDirectMedia();
 	void mediaSessionProviderAllowlist_data();
@@ -63,6 +70,7 @@ private slots:
 	void mediaSessionRequiresExplicitJoinForRemoteSessions();
 	void mediaSessionRejectsConflictingPlaybackDuringSharedSession();
 	void selectionStateOnlyNotifiesForRealChanges();
+	void selectionStateAcceptsAuthoritativeSelectionBeforeModelSync();
 	void selectionStateInvalidatesRemovedStableIds();
 	void selectionStateRejectsUnknownIdsAndSurvivesResync();
 	void invalidRowsAndCommandsAreIgnored();
@@ -407,15 +415,24 @@ void TestQmlClientModels::roomAndParticipantStatesStayIncremental() {
 void TestQmlClientModels::roomRowsExposeActionsOnlySource() {
 	RoomModel rooms;
 	const QVariantList actions { QVariantMap { { QStringLiteral("id"), QStringLiteral("join") },
-														 { QStringLiteral("label"), QStringLiteral("Join") } } };
+													 { QStringLiteral("label"), QStringLiteral("Join") } } };
+	const QVariantList badges { QStringLiteral("Pinned") };
+	const QVariantMap screenShare { { QStringLiteral("visible"), true },
+		{ QStringLiteral("mode"), QStringLiteral("publishing") },
+		{ QStringLiteral("badgeLabel"), QStringLiteral("Live") },
+		{ QStringLiteral("primaryActionId"), QStringLiteral("screenShareOpenWindow") } };
 	rooms.replaceRoomStates(
 		{ QVariantMap { { QStringLiteral("token"), QStringLiteral("channel:7") },
 						{ QStringLiteral("label"), QStringLiteral("Lobby") },
+						{ QStringLiteral("pathLabel"), QStringLiteral("Root / Lobby") },
+						{ QStringLiteral("kindLabel"), QStringLiteral("Voice room") },
+						{ QStringLiteral("joined"), false }, { QStringLiteral("canJoin"), true },
+						{ QStringLiteral("badges"), badges },
 						{ QStringLiteral("actions"), actions },
 						{ QStringLiteral("participants"), QVariantList { QVariantMap {
 							{ QStringLiteral("session"), 42 },
 							{ QStringLiteral("avatarUrl"), QStringLiteral("image://mumble/avatar/42") } } } },
-						{ QStringLiteral("screenShare"), QVariantMap { { QStringLiteral("visible"), true } } },
+						{ QStringLiteral("screenShare"), screenShare },
 						{ QStringLiteral("messages"), QVariantList { QStringLiteral("must-not-escape") } },
 						{ QStringLiteral("windows"), QVariantList { QStringLiteral("must-not-escape") } } } },
 		{});
@@ -424,6 +441,14 @@ void TestQmlClientModels::roomRowsExposeActionsOnlySource() {
 	const QVariantMap source = rooms.get(0).value(QStringLiteral("source")).toMap();
 	QCOMPARE(source.size(), 1);
 	QCOMPARE(source.value(QStringLiteral("actions")).toList(), actions);
+	const QVariantMap row = rooms.get(0);
+	QVERIFY(row.value(QStringLiteral("canJoin")).toBool());
+	QVERIFY(!row.value(QStringLiteral("joined")).toBool());
+	QCOMPARE(row.value(QStringLiteral("actions")).toList(), actions);
+	QCOMPARE(row.value(QStringLiteral("badges")).toList(), badges);
+	QCOMPARE(row.value(QStringLiteral("screenShare")).toMap(), screenShare);
+	QCOMPARE(row.value(QStringLiteral("pathLabel")).toString(), QStringLiteral("Root / Lobby"));
+	QCOMPARE(row.value(QStringLiteral("kindLabel")).toString(), QStringLiteral("Voice room"));
 	QVERIFY(!source.contains(QStringLiteral("participants")));
 	QVERIFY(!source.contains(QStringLiteral("screenShare")));
 	QVERIFY(!source.contains(QStringLiteral("messages")));
@@ -436,6 +461,81 @@ void TestQmlClientModels::roomRowsExposeActionsOnlySource() {
 						{ QStringLiteral("windows"), QVariantList { QStringLiteral("hidden") } } } });
 	const QVariantMap directSource = rooms.get(1).value(QStringLiteral("source")).toMap();
 	QVERIFY(directSource.isEmpty());
+}
+
+void TestQmlClientModels::participantRowsPreserveTypedVoiceStateAndListenerIdentity() {
+	ParticipantModel participants;
+	const QVariantList actions { QVariantMap { { QStringLiteral("kind"), QStringLiteral("action") },
+		{ QStringLiteral("id"), QStringLiteral("user.info") },
+		{ QStringLiteral("label"), QStringLiteral("User information") } } };
+	const QVariantList statuses {
+		QVariantMap { { QStringLiteral("kind"), QStringLiteral("selfMuted") },
+			{ QStringLiteral("label"), QStringLiteral("Muted") },
+			{ QStringLiteral("tone"), QStringLiteral("danger") } },
+		QVariantMap { { QStringLiteral("kind"), QStringLiteral("selfDeafened") },
+			{ QStringLiteral("label"), QStringLiteral("Deafened") },
+			{ QStringLiteral("tone"), QStringLiteral("danger") } }
+	};
+	const QVariantMap localVolume { { QStringLiteral("db"), -6 }, { QStringLiteral("factor"), 0.5 },
+		{ QStringLiteral("compactLabel"), QStringLiteral("-6") }, { QStringLiteral("visible"), true } };
+	participants.replaceParticipantStates({
+		QVariantMap { { QStringLiteral("participantKey"), QStringLiteral("user:7") },
+			{ QStringLiteral("session"), 7 }, { QStringLiteral("label"), QStringLiteral("Alice") },
+			{ QStringLiteral("entryKind"), QStringLiteral("user") },
+			{ QStringLiteral("talkState"), QStringLiteral("passive") },
+			{ QStringLiteral("badges"), QVariantList { QStringLiteral("You") } },
+			{ QStringLiteral("statuses"), statuses }, { QStringLiteral("localVolume"), localVolume },
+			{ QStringLiteral("canMessage"), true }, { QStringLiteral("canJoin"), true },
+			{ QStringLiteral("actions"), actions } },
+		QVariantMap { { QStringLiteral("participantKey"), QStringLiteral("listener:1:7") },
+			{ QStringLiteral("session"), 7 }, { QStringLiteral("label"), QStringLiteral("Alice") },
+			{ QStringLiteral("entryKind"), QStringLiteral("listener") },
+			{ QStringLiteral("scopeToken"), QStringLiteral("channel:1") },
+			{ QStringLiteral("talkState"), QStringLiteral("passive") },
+			{ QStringLiteral("badges"), QVariantList { QStringLiteral("Listener") } },
+			{ QStringLiteral("statuses"), QVariantList { QVariantMap {
+				{ QStringLiteral("kind"), QStringLiteral("listener") },
+				{ QStringLiteral("label"), QStringLiteral("Listener") } } } },
+			{ QStringLiteral("localVolume"), localVolume }, { QStringLiteral("actions"), actions } },
+		QVariantMap { { QStringLiteral("participantKey"), QStringLiteral("listener:2:7") },
+			{ QStringLiteral("session"), 7 }, { QStringLiteral("label"), QStringLiteral("Alice") },
+			{ QStringLiteral("entryKind"), QStringLiteral("listener") },
+			{ QStringLiteral("scopeToken"), QStringLiteral("channel:2") },
+			{ QStringLiteral("talkState"), QStringLiteral("passive") } }
+	});
+
+	QCOMPARE(participants.rowCount(), 3);
+	QCOMPARE(participants.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("user:7"));
+	QCOMPARE(participants.get(1).value(QStringLiteral("id")).toString(), QStringLiteral("listener:1:7"));
+	QCOMPARE(participants.get(2).value(QStringLiteral("id")).toString(), QStringLiteral("listener:2:7"));
+	for (int rowIndex = 0; rowIndex < participants.rowCount(); ++rowIndex)
+		QCOMPARE(participants.get(rowIndex).value(QStringLiteral("participantSession")).toString(), QStringLiteral("7"));
+	const QVariantMap user = participants.get(0);
+	QCOMPARE(user.value(QStringLiteral("badges")).toList(), QVariantList { QStringLiteral("You") });
+	QCOMPARE(user.value(QStringLiteral("statuses")).toList(), statuses);
+	QCOMPARE(user.value(QStringLiteral("localVolume")).toMap(), localVolume);
+	QCOMPARE(user.value(QStringLiteral("actions")).toList(), actions);
+	QVERIFY(user.value(QStringLiteral("muted")).toBool());
+	QVERIFY(user.value(QStringLiteral("deafened")).toBool());
+	QVERIFY(participants.get(1).value(QStringLiteral("listener")).toBool());
+
+	QmlSelectionState selection;
+	selection.bindModels(nullptr, &participants);
+	selection.setSelectedUserSession(7);
+	QCOMPARE(selection.selectedUserSession().toULongLong(), 7ULL);
+
+	QSignalSpy changedSpy(&participants, &QAbstractItemModel::dataChanged);
+	participants.updatePresence(QStringLiteral("7"), QStringLiteral("talking"), QStringLiteral("Talking"),
+		QStringLiteral("speaking"), true, false, { QStringLiteral("Talking") }, {});
+	QCOMPARE(changedSpy.count(), 3);
+	for (int rowIndex = 0; rowIndex < participants.rowCount(); ++rowIndex)
+		QCOMPARE(participants.get(rowIndex).value(QStringLiteral("status")).toString(), QStringLiteral("talking"));
+
+	QSignalSpy removedSpy(&participants, &QAbstractItemModel::rowsRemoved);
+	participants.removeParticipant(QStringLiteral("7"));
+	QCOMPARE(participants.rowCount(), 0);
+	QCOMPARE(removedSpy.count(), 3);
+	QVERIFY(!selection.selectedUserSession().isValid());
 }
 
 void TestQmlClientModels::directMessageHistoryMergePublishesOnce() {
@@ -589,6 +689,75 @@ void TestQmlClientModels::chatTimelineAppliesDirectIncrementalMessages() {
 	QVERIFY(!model.removeMessage(QStringLiteral("missing")));
 	QCOMPARE(removeSpy.count(), 1);
 	QCOMPARE(resetSpy.count(), 0);
+}
+
+void TestQmlClientModels::chatTimelineReplacesDisjointScopesWithoutMixedRows() {
+	ChatTimelineModel model;
+	model.replaceMessages({
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("dm:1") },
+					  { QStringLiteral("actor"), QStringLiteral("Kira Mockup") },
+					  { QStringLiteral("bodyText"), QStringLiteral("First direct message") } },
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("dm:2") },
+					  { QStringLiteral("actor"), QStringLiteral("You") },
+					  { QStringLiteral("bodyText"), QStringLiteral("Direct reply") },
+					  { QStringLiteral("own"), true } },
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("dm:3") },
+					  { QStringLiteral("actor"), QStringLiteral("Kira Mockup") },
+					  { QStringLiteral("bodyText"), QStringLiteral("Last direct message") } }
+	});
+	QCOMPARE(model.rowCount(), 3);
+
+	QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
+	QSignalSpy removeSpy(&model, &QAbstractItemModel::rowsRemoved);
+	QSignalSpy insertSpy(&model, &QAbstractItemModel::rowsInserted);
+	QSignalSpy moveSpy(&model, &QAbstractItemModel::rowsMoved);
+	QSignalSpy changedSpy(&model, &QAbstractItemModel::dataChanged);
+
+	const QVariantList deliveryMessages {
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("delivery:1") },
+					  { QStringLiteral("actor"), QStringLiteral("You") },
+					  { QStringLiteral("bodyText"), QStringLiteral("Delivered") },
+					  { QStringLiteral("own"), true } },
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("delivery:2") },
+					  { QStringLiteral("actor"), QStringLiteral("You") },
+					  { QStringLiteral("bodyText"), QStringLiteral("Uploading") },
+					  { QStringLiteral("deliveryState"), QStringLiteral("sending") },
+					  { QStringLiteral("deliveryLabel"), QStringLiteral("Sending...") },
+					  { QStringLiteral("own"), true } },
+		QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("delivery:3") },
+					  { QStringLiteral("actor"), QStringLiteral("You") },
+					  { QStringLiteral("bodyText"), QStringLiteral("Network error") },
+					  { QStringLiteral("deliveryState"), QStringLiteral("failed") },
+					  { QStringLiteral("deliveryLabel"), QStringLiteral("Not delivered") },
+					  { QStringLiteral("deliveryCanRetry"), true },
+					  { QStringLiteral("own"), true } }
+	};
+	model.replaceMessages(deliveryMessages);
+
+	QCOMPARE(resetSpy.count(), 0);
+	QCOMPARE(moveSpy.count(), 0);
+	QCOMPARE(changedSpy.count(), 0);
+	QCOMPARE(removeSpy.count(), 1);
+	QCOMPARE(removeSpy.first().at(1).toInt(), 0);
+	QCOMPARE(removeSpy.first().at(2).toInt(), 2);
+	QCOMPARE(insertSpy.count(), 1);
+	QCOMPARE(insertSpy.first().at(1).toInt(), 0);
+	QCOMPARE(insertSpy.first().at(2).toInt(), 2);
+	QCOMPARE(model.rowCount(), 3);
+
+	const QStringList expectedIds { QStringLiteral("delivery:1"), QStringLiteral("delivery:2"),
+									QStringLiteral("delivery:3") };
+	for (int row = 0; row < model.rowCount(); ++row) {
+		const QVariantMap state = model.get(row);
+		QCOMPARE(state.value(QStringLiteral("id")).toString(), expectedIds.at(row));
+		QCOMPARE(state.value(QStringLiteral("title")).toString(), QStringLiteral("You"));
+		QVERIFY(!state.value(QStringLiteral("subtitle")).toString().contains(QStringLiteral("direct"),
+														 Qt::CaseInsensitive));
+	}
+	QCOMPARE(model.get(1).value(QStringLiteral("source")).toMap()
+			 .value(QStringLiteral("deliveryLabel")).toString(), QStringLiteral("Sending..."));
+	QVERIFY(model.get(2).value(QStringLiteral("source")).toMap()
+				.value(QStringLiteral("deliveryCanRetry")).toBool());
 }
 
 void TestQmlClientModels::chatTimelinePreservesTypedAttachments() {
@@ -779,6 +948,100 @@ void TestQmlClientModels::chatTimelineNormalizesPreviewAndAttachments() {
 	QVERIFY(!boundedMetadata.contains(QStringLiteral("invalid key")));
 	QCOMPARE(boundedMetadata.value(QStringLiteral("xDisplayName")).toString().size(), 4096);
 
+	QVariantList sparkline;
+	QVariantList specs;
+	QVariantList tags;
+	QVariantList replyContext;
+	for (int index = 0; index < 90; ++index) {
+		sparkline.push_back(QVariantMap { { QStringLiteral("close"), 100.0 + index },
+									  { QStringLiteral("timestamp"), 1700000000 + index },
+									  { QStringLiteral("private"), QStringLiteral("drop") } });
+	}
+	sparkline.push_front(std::numeric_limits< double >::quiet_NaN());
+	for (int index = 0; index < 12; ++index) {
+		specs.push_back(QVariantMap { { QStringLiteral("label"), QStringLiteral("Spec %1").arg(index) },
+								  { QStringLiteral("value"), QStringLiteral("Value %1").arg(index) },
+								  { QStringLiteral("rawHtml"), QStringLiteral("<b>drop</b>") } });
+		tags.push_back(QStringLiteral("tag-%1").arg(index));
+	}
+	for (int index = 0; index < 5; ++index) {
+		replyContext.push_back(QVariantMap { { QStringLiteral("id"), QString::number(index) },
+										{ QStringLiteral("displayName"), QStringLiteral("Author %1").arg(index) },
+										{ QStringLiteral("text"), QString(1400, QLatin1Char('t')) },
+										{ QStringLiteral("url"), QStringLiteral("file:///private") },
+										{ QStringLiteral("raw"), QVariantMap { { QStringLiteral("secret"), true } } } });
+	}
+	const QVariantMap structuredMetadata {
+		{ QStringLiteral("provider"), QStringLiteral("fixture") },
+		{ QStringLiteral("financeSparkline"), sparkline },
+		{ QStringLiteral("productSpecs"), specs },
+		{ QStringLiteral("listingSpecs"), specs },
+		{ QStringLiteral("vehicleSpecs"), specs },
+		{ QStringLiteral("gameStoreTags"), tags },
+		{ QStringLiteral("vehicleHighlights"), tags },
+		{ QStringLiteral("githubTopics"), tags },
+		{ QStringLiteral("xQuotedPost"), replyContext.first() },
+		{ QStringLiteral("xReplyContext"), replyContext },
+		{ QStringLiteral("unknownList"), tags },
+		{ QStringLiteral("unknownMap"), QVariantMap { { QStringLiteral("secret"), true } } }
+	};
+	QVERIFY(model.upsertMessage(
+		{ { QStringLiteral("messageKey"), QStringLiteral("preview:1") },
+		  { QStringLiteral("preview"), QVariantMap { { QStringLiteral("metadata"), structuredMetadata } } } }));
+	const QVariantMap structured =
+		model.get(0).value(QStringLiteral("preview")).toMap().value(QStringLiteral("metadata")).toMap();
+	const QVariantList normalizedSparkline = structured.value(QStringLiteral("financeSparkline")).toList();
+	QCOMPARE(normalizedSparkline.size(), 64);
+	QCOMPARE(normalizedSparkline.first().toMap().value(QStringLiteral("close")).toDouble(), 100.0);
+	QVERIFY(!normalizedSparkline.first().toMap().contains(QStringLiteral("private")));
+	for (const QString &key : { QStringLiteral("productSpecs"), QStringLiteral("listingSpecs"),
+			 QStringLiteral("vehicleSpecs") }) {
+		const QVariantList normalizedSpecs = structured.value(key).toList();
+		QCOMPARE(normalizedSpecs.size(), 8);
+		QCOMPARE(normalizedSpecs.first().toMap().size(), 2);
+		QVERIFY(!normalizedSpecs.first().toMap().contains(QStringLiteral("rawHtml")));
+	}
+	for (const QString &key : { QStringLiteral("gameStoreTags"), QStringLiteral("vehicleHighlights"),
+			 QStringLiteral("githubTopics") }) {
+		QCOMPARE(structured.value(key).toList().size(), 8);
+	}
+	const QVariantMap quotedPost = structured.value(QStringLiteral("xQuotedPost")).toMap();
+	QVERIFY(!quotedPost.contains(QStringLiteral("url")));
+	QVERIFY(!quotedPost.contains(QStringLiteral("raw")));
+	QCOMPARE(quotedPost.value(QStringLiteral("text")).toString().size(), 1024);
+	const QVariantList normalizedContext = structured.value(QStringLiteral("xReplyContext")).toList();
+	QCOMPARE(normalizedContext.size(), 3);
+	QCOMPARE(normalizedContext.first().toMap().value(QStringLiteral("id")).toString(), QStringLiteral("2"));
+	QCOMPARE(normalizedContext.last().toMap().value(QStringLiteral("id")).toString(), QStringLiteral("4"));
+	QVERIFY(!structured.contains(QStringLiteral("unknownList")));
+	QVERIFY(!structured.contains(QStringLiteral("unknownMap")));
+
+	QVariantMap noisyProviderMetadata {
+		{ QStringLiteral("provider"), QStringLiteral("marketplace") },
+		{ QStringLiteral("previewKind"), QStringLiteral("vehicleListing") },
+		{ QStringLiteral("contentWarning"), QStringLiteral("Check listing status") },
+		{ QStringLiteral("listingPrice"), QStringLiteral("245 000 kr") },
+		{ QStringLiteral("vehicleYear"), QStringLiteral("2024") },
+		{ QStringLiteral("vehicleMileage"), QStringLiteral("1 200 mil") },
+		{ QStringLiteral("vehicleFuel"), QStringLiteral("Electric") },
+		{ QStringLiteral("vehicleTransmission"), QStringLiteral("Automatic") },
+		{ QStringLiteral("vehicleLocation"), QStringLiteral("Stockholm") }
+	};
+	for (int index = 0; index < 80; ++index)
+		noisyProviderMetadata.insert(QStringLiteral("aaaDiagnostic%1").arg(index, 2, 10, QLatin1Char('0')), index);
+	QVERIFY(model.upsertMessage(
+		{ { QStringLiteral("messageKey"), QStringLiteral("preview:1") },
+		  { QStringLiteral("preview"), QVariantMap { { QStringLiteral("metadata"), noisyProviderMetadata } } } }));
+	const QVariantMap prioritized =
+		model.get(0).value(QStringLiteral("preview")).toMap().value(QStringLiteral("metadata")).toMap();
+	QCOMPARE(prioritized.size(), 32);
+	for (const QString &key : { QStringLiteral("contentWarning"), QStringLiteral("listingPrice"),
+			 QStringLiteral("vehicleYear"), QStringLiteral("vehicleMileage"),
+			 QStringLiteral("vehicleFuel"), QStringLiteral("vehicleTransmission"),
+			 QStringLiteral("vehicleLocation") }) {
+		QVERIFY2(prioritized.contains(key), qPrintable(QStringLiteral("missing prioritized field %1").arg(key)));
+	}
+
 	QVERIFY(model.upsertMessage(
 		{ { QStringLiteral("messageKey"), QStringLiteral("preview:1") },
 		  { QStringLiteral("preview"),
@@ -831,6 +1094,280 @@ void TestQmlClientModels::chatTimelineNormalizesPreviewAndAttachments() {
 	QCOMPARE(firstImageItem.value(QStringLiteral("externalUrl")).toString(),
 			 QStringLiteral("https://cdn.example.com/image-0.jpg"));
 	QCOMPARE(row.value(QStringLiteral("attachments")).toList().size(), 16);
+}
+
+void TestQmlClientModels::chatTimelineNormalizesProviderMetadata() {
+	ChatTimelineModel model;
+	int sequence = 0;
+	const auto withNoise = [](QVariantMap metadata) {
+		for (int index = 0; index < 80; ++index) {
+			metadata.insert(QStringLiteral("diagnostic%1").arg(index, 2, 10, QLatin1Char('0')), index);
+		}
+		return metadata;
+	};
+	const auto normalize = [&](const QVariantMap &metadata,
+							   const QString &url = QStringLiteral("https://example.com/provider")) {
+		const QString messageKey = QStringLiteral("provider:%1").arg(++sequence);
+		if (!model.upsertMessage({ { QStringLiteral("messageKey"), messageKey },
+				{ QStringLiteral("preview"), QVariantMap { { QStringLiteral("url"), url },
+					{ QStringLiteral("metadata"), metadata } } } })) {
+			return QVariantMap {};
+		}
+		return model.get(model.rowCount() - 1)
+			.value(QStringLiteral("preview"))
+			.toMap()
+			.value(QStringLiteral("metadata"))
+			.toMap();
+	};
+
+	const QString twitchEmbedUrl = QStringLiteral("https://player.twitch.tv/?channel=qt_test&parent=localhost");
+	const QVariantMap twitch = normalize(withNoise({
+		{ QStringLiteral("provider"), QStringLiteral("twitch") },
+		{ QStringLiteral("previewProvider"), QStringLiteral("twitch") },
+		{ QStringLiteral("providerName"), QStringLiteral("Twitch") },
+		{ QStringLiteral("previewKind"), QStringLiteral("video") },
+		{ QStringLiteral("twitchKind"), QStringLiteral("channel") },
+		{ QStringLiteral("twitchBadge"), QStringLiteral("Live") },
+		{ QStringLiteral("twitchPlaybackNote"), QString(1800, QLatin1Char('p')) },
+		{ QStringLiteral("twitchChannel"), QStringLiteral("qt_test") },
+		{ QStringLiteral("twitchGame"), QStringLiteral("Qt Quick") },
+		{ QStringLiteral("twitchLiveState"), QStringLiteral("live") },
+		{ QStringLiteral("twitchViewerCount"), 12345 },
+		{ QStringLiteral("twitchDisclaimer"), QStringLiteral("Provider playback notice") },
+		{ QStringLiteral("twitchEmbedMode"), QStringLiteral("live") },
+		{ QStringLiteral("twitchSuggestedEmbedUrl"), twitchEmbedUrl },
+		{ QStringLiteral("twitchSuggestedVideoId"), QStringLiteral("123456") },
+		{ QStringLiteral("twitchThumbnailUrl"), QStringLiteral("https://cdn.example.test/thumb.jpg") }
+	}));
+	QCOMPARE(twitch.size(), 32);
+	for (const QString &key : { QStringLiteral("twitchBadge"), QStringLiteral("twitchChannel"),
+			 QStringLiteral("twitchGame"), QStringLiteral("twitchLiveState"),
+			 QStringLiteral("twitchViewerCount"), QStringLiteral("twitchDisclaimer"),
+			 QStringLiteral("twitchEmbedMode"), QStringLiteral("twitchSuggestedEmbedUrl"),
+			 QStringLiteral("twitchSuggestedVideoId") }) {
+		QVERIFY2(twitch.contains(key), qPrintable(QStringLiteral("missing Twitch field %1").arg(key)));
+	}
+	QCOMPARE(twitch.value(QStringLiteral("twitchPlaybackNote")).toString().size(), 1024);
+	QCOMPARE(twitch.value(QStringLiteral("twitchSuggestedEmbedUrl")).toString(),
+		QUrl(twitchEmbedUrl).toString(QUrl::FullyEncoded));
+	QVERIFY(!twitch.contains(QStringLiteral("twitchThumbnailUrl")));
+
+	QVariantList githubTopics;
+	for (int index = 0; index < 12; ++index) githubTopics.push_back(QStringLiteral("topic-%1").arg(index));
+	const QVariantMap github = normalize(withNoise({
+		{ QStringLiteral("provider"), QStringLiteral("github") },
+		{ QStringLiteral("githubOwner"), QStringLiteral("mumble-voip") },
+		{ QStringLiteral("githubRepo"), QStringLiteral("mumble") },
+		{ QStringLiteral("githubFullName"), QStringLiteral("mumble-voip/mumble") },
+		{ QStringLiteral("githubHtmlUrl"), QStringLiteral("https://github.com/mumble-voip/mumble") },
+		{ QStringLiteral("githubDescription"), QString(1800, QLatin1Char('d')) },
+		{ QStringLiteral("githubLanguage"), QStringLiteral("C++") },
+		{ QStringLiteral("githubDefaultBranch"), QStringLiteral("master") },
+		{ QStringLiteral("githubPushedAt"), QStringLiteral("2026-07-13T18:00:00Z") },
+		{ QStringLiteral("githubOwnerLogin"), QStringLiteral("mumble-voip") },
+		{ QStringLiteral("githubOwnerAvatarUrl"), QStringLiteral("https://avatars.githubusercontent.com/u/1") },
+		{ QStringLiteral("githubLicense"), QStringLiteral("BSD-3-Clause") },
+		{ QStringLiteral("githubStars"), 7300 }, { QStringLiteral("githubForks"), 1200 },
+		{ QStringLiteral("githubOpenIssues"), 540 }, { QStringLiteral("githubArchived"), false },
+		{ QStringLiteral("githubTopics"), githubTopics },
+		{ QStringLiteral("githubLatestReleaseTag"), QStringLiteral("v1.5.0") },
+		{ QStringLiteral("githubLatestReleaseName"), QStringLiteral("Mumble 1.5.0") },
+		{ QStringLiteral("githubLatestReleaseUrl"),
+		  QStringLiteral("https://github.com/mumble-voip/mumble/releases/tag/v1.5.0") },
+		{ QStringLiteral("githubLatestReleasePublishedAt"), QStringLiteral("2026-07-01T12:00:00Z") },
+		{ QStringLiteral("githubLatestReleaseNotes"), QString(2400, QLatin1Char('n')) },
+		{ QStringLiteral("githubLatestReleasePrerelease"), false },
+		{ QStringLiteral("githubLatestReleaseAssetCount"), 4 },
+		{ QStringLiteral("githubLatestReleaseAssetName"), QStringLiteral("mumble-x64.msi") },
+		{ QStringLiteral("githubLatestReleaseAssetUrl"),
+		  QStringLiteral("https://github.com/mumble-voip/mumble/releases/download/v1.5.0/mumble-x64.msi") },
+		{ QStringLiteral("githubLatestReleaseDownloadCount"), 987654 },
+		{ QStringLiteral("githubDangerUrl"), QStringLiteral("javascript:alert(1)") }
+	}));
+	QCOMPARE(github.size(), 32);
+	for (const QString &key : { QStringLiteral("githubFullName"), QStringLiteral("githubDescription"),
+			 QStringLiteral("githubTopics"), QStringLiteral("githubLatestReleaseTag"),
+			 QStringLiteral("githubLatestReleaseName"), QStringLiteral("githubLatestReleaseUrl"),
+			 QStringLiteral("githubLatestReleasePublishedAt"),
+			 QStringLiteral("githubLatestReleaseNotes"),
+			 QStringLiteral("githubLatestReleaseAssetCount"),
+			 QStringLiteral("githubLatestReleaseAssetName"),
+			 QStringLiteral("githubLatestReleaseAssetUrl"),
+			 QStringLiteral("githubLatestReleaseDownloadCount") }) {
+		QVERIFY2(github.contains(key), qPrintable(QStringLiteral("missing GitHub field %1").arg(key)));
+	}
+	QCOMPARE(github.value(QStringLiteral("githubDescription")).toString().size(), 1024);
+	QCOMPARE(github.value(QStringLiteral("githubLatestReleaseNotes")).toString().size(), 1024);
+	QCOMPARE(github.value(QStringLiteral("githubTopics")).toList().size(), 8);
+	QVERIFY(!github.contains(QStringLiteral("githubOwnerAvatarUrl")));
+	QVERIFY(!github.contains(QStringLiteral("githubDangerUrl")));
+
+	QVariantMap forumMetadata {
+		{ QStringLiteral("provider"), QStringLiteral("flashback") },
+		{ QStringLiteral("previewProvider"), QStringLiteral("flashback") },
+		{ QStringLiteral("providerName"), QStringLiteral("Flashback") },
+		{ QStringLiteral("previewKind"), QStringLiteral("forum") },
+		{ QStringLiteral("threadId"), QStringLiteral("123456") },
+		{ QStringLiteral("forumThreadId"), QStringLiteral("123456") },
+		{ QStringLiteral("forumThreadTitle"), QStringLiteral("A bounded forum thread") },
+		{ QStringLiteral("forumLinkKind"), QStringLiteral("post") },
+		{ QStringLiteral("postId"), QStringLiteral("778899") },
+		{ QStringLiteral("forumLinkedPostId"), QStringLiteral("778899") },
+		{ QStringLiteral("forumThreadPostUrl"), QStringLiteral("https://www.flashback.org/t123456p7") },
+		{ QStringLiteral("forumCategory"), QStringLiteral("Datorer") },
+		{ QStringLiteral("forumName"), QStringLiteral("Programmering") },
+		{ QStringLiteral("forumPage"), QStringLiteral("7") },
+		{ QStringLiteral("forumPageCount"), QStringLiteral("42") },
+		{ QStringLiteral("forumPostCount"), QStringLiteral("839") },
+		{ QStringLiteral("forumQuoteAuthor"), QStringLiteral("quoted-user") },
+		{ QStringLiteral("forumQuoteExcerpt"), QString(1600, QLatin1Char('q')) },
+		{ QStringLiteral("forumQuotePostUrl"), QStringLiteral("https://www.flashback.org/sp7654321") },
+		{ QStringLiteral("forumQuotePostId"), QStringLiteral("7654321") },
+		{ QStringLiteral("forumQuotePostNumber"), QStringLiteral("6") },
+		{ QStringLiteral("rawHtml"), QStringLiteral("<script>alert(1)</script>") }
+	};
+	for (const QString &suffix : { QStringLiteral("Id"), QStringLiteral("Time"),
+			 QStringLiteral("Number"), QStringLiteral("Author"), QStringLiteral("AuthorTitle"),
+			 QStringLiteral("AuthorRegistered"), QStringLiteral("AuthorPosts"),
+			 QStringLiteral("Excerpt") }) {
+		const QString value = suffix == QLatin1String("Excerpt") ? QString(1600, QLatin1Char('e'))
+			: QStringLiteral("value-%1").arg(suffix);
+		forumMetadata.insert(QStringLiteral("forumPost%1").arg(suffix), value);
+		forumMetadata.insert(QStringLiteral("forumFirstPost%1").arg(suffix), value);
+	}
+	forumMetadata.insert(QStringLiteral("forumPostAuthorAvatarUrl"),
+		QStringLiteral("image://mumble/forum-avatar?g=1"));
+	forumMetadata.insert(QStringLiteral("forumFirstPostAuthorAvatarUrl"),
+		QStringLiteral("https://www.flashback.org/avatar.jpg"));
+	const QVariantMap forum = normalize(withNoise(forumMetadata));
+	QCOMPARE(forum.size(), 32);
+	QCOMPARE(forum.value(QStringLiteral("forumPostExcerpt")).toString().size(), 1024);
+	QCOMPARE(forum.value(QStringLiteral("forumQuoteExcerpt")).toString().size(), 1024);
+	QCOMPARE(forum.value(QStringLiteral("forumPostAuthorAvatarUrl")).toString(),
+		QStringLiteral("image://mumble/forum-avatar?g=1"));
+	QVERIFY(!forum.contains(QStringLiteral("forumFirstPostExcerpt")));
+	QVERIFY(!forum.contains(QStringLiteral("forumFirstPostAuthorAvatarUrl")));
+	QVERIFY(!forum.contains(QStringLiteral("threadId")));
+	QVERIFY(!forum.contains(QStringLiteral("forumLinkedPostId")));
+	QVERIFY(!forum.contains(QStringLiteral("rawHtml")));
+	QCOMPARE(forum.value(QStringLiteral("forumQuotePostUrl")).toString(),
+		QStringLiteral("https://www.flashback.org/sp7654321"));
+
+	const QVariantMap instagram = normalize(withNoise({
+		{ QStringLiteral("provider"), QStringLiteral("instagram") },
+		{ QStringLiteral("instagramMetadataVersion"), 1 },
+		{ QStringLiteral("instagramMediaKind"), QStringLiteral("reel") },
+		{ QStringLiteral("instagramDisplayName"), QStringLiteral("Qt Project") },
+		{ QStringLiteral("instagramHandle"), QStringLiteral("qtproject") },
+		{ QStringLiteral("instagramCaption"), QString(1800, QLatin1Char('c')) },
+		{ QStringLiteral("instagramCreatedAt"), QStringLiteral("2026-07-13") },
+		{ QStringLiteral("instagramAvatarUrl"), QStringLiteral("https://cdninstagram.com/avatar.jpg") },
+		{ QStringLiteral("instagramOwnerUserId"), QStringLiteral("123456789") },
+		{ QStringLiteral("instagramLikeCount"), 2500 },
+		{ QStringLiteral("instagramCommentCount"), 42 }
+	}));
+	QCOMPARE(instagram.size(), 32);
+	QCOMPARE(instagram.value(QStringLiteral("instagramCaption")).toString().size(), 1024);
+	QCOMPARE(instagram.value(QStringLiteral("instagramDisplayName")).toString(), QStringLiteral("Qt Project"));
+	QCOMPARE(instagram.value(QStringLiteral("instagramLikeCount")).toULongLong(), 2500ULL);
+	QVERIFY(!instagram.contains(QStringLiteral("instagramAvatarUrl")));
+
+	const QVariantMap steam = normalize(withNoise({
+		{ QStringLiteral("provider"), QStringLiteral("steam") },
+		{ QStringLiteral("steamAppId"), QStringLiteral("1234") },
+		{ QStringLiteral("steamReviewSummary"), QStringLiteral("Very Positive") },
+		{ QStringLiteral("steamReviewScore"), 8 },
+		{ QStringLiteral("steamReviewTotal"), 123456 },
+		{ QStringLiteral("steamReviewPositive"), 110000 },
+		{ QStringLiteral("steamReviewNegative"), 13456 },
+		{ QStringLiteral("steamReviewPercent"), 89 },
+		{ QStringLiteral("steamStoreUrl"), QStringLiteral("https://store.steampowered.com/app/1234/") },
+		{ QStringLiteral("steamHeaderImage"), QStringLiteral("https://cdn.example.test/header.jpg") }
+	}));
+	QCOMPARE(steam.size(), 32);
+	for (const QString &key : { QStringLiteral("steamReviewSummary"), QStringLiteral("steamReviewScore"),
+			 QStringLiteral("steamReviewTotal"), QStringLiteral("steamReviewPositive"),
+			 QStringLiteral("steamReviewNegative"), QStringLiteral("steamReviewPercent") }) {
+		QVERIFY2(steam.contains(key), qPrintable(QStringLiteral("missing Steam field %1").arg(key)));
+	}
+	QVERIFY(!steam.contains(QStringLiteral("steamHeaderImage")));
+
+	const QVariantMap vehicle = normalize(withNoise({
+		{ QStringLiteral("provider"), QStringLiteral("bytbil") },
+		{ QStringLiteral("previewKind"), QStringLiteral("vehicleListing") },
+		{ QStringLiteral("vehicleWarning"), QString(600, QLatin1Char('w')) },
+		{ QStringLiteral("vehicleListingId"), QStringLiteral("998877") },
+		{ QStringLiteral("vehicleImage"), QStringLiteral("file:///private/vehicle.jpg") }
+	}));
+	QCOMPARE(vehicle.size(), 32);
+	QCOMPARE(vehicle.value(QStringLiteral("vehicleWarning")).toString().size(), 256);
+	QCOMPARE(vehicle.value(QStringLiteral("vehicleListingId")).toString(), QStringLiteral("998877"));
+	QVERIFY(!vehicle.contains(QStringLiteral("vehicleImage")));
+
+	const QVariantMap linkDigest = normalize(withNoise({
+		{ QStringLiteral("provider"), QStringLiteral("existenz") },
+		{ QStringLiteral("previewProvider"), QStringLiteral("existenz") },
+		{ QStringLiteral("previewKind"), QStringLiteral("linkDigest") },
+		{ QStringLiteral("linkDigestTitle"), QString(800, QLatin1Char('t')) },
+		{ QStringLiteral("linkDigestSource"), QStringLiteral("Existenz") },
+		{ QStringLiteral("linkDigestCaption"), QString(1800, QLatin1Char('l')) },
+		{ QStringLiteral("contentWarning"), QStringLiteral("NSFW") },
+		{ QStringLiteral("thumbnailBlur"), true }
+	}));
+	QCOMPARE(linkDigest.size(), 32);
+	QCOMPARE(linkDigest.value(QStringLiteral("contentWarning")).toString(), QStringLiteral("NSFW"));
+	QVERIFY(linkDigest.value(QStringLiteral("thumbnailBlur")).toBool());
+	QCOMPARE(linkDigest.value(QStringLiteral("linkDigestTitle")).toString().size(), 512);
+	QCOMPARE(linkDigest.value(QStringLiteral("linkDigestCaption")).toString().size(), 1024);
+	QCOMPARE(linkDigest.value(QStringLiteral("linkDigestSource")).toString(), QStringLiteral("Existenz"));
+
+	const QVariantMap google = normalize(withNoise({
+		{ QStringLiteral("provider"), QStringLiteral("google-search") },
+		{ QStringLiteral("previewProvider"), QStringLiteral("google-search") },
+		{ QStringLiteral("previewKind"), QStringLiteral("search") },
+		{ QStringLiteral("googleSearchQuery"), QString(1800, QLatin1Char('g')) },
+		{ QStringLiteral("googleSearchMode"), QStringLiteral("images") },
+		{ QStringLiteral("googleSearchModeLabel"), QStringLiteral("Images") }
+	}), QStringLiteral("https://www.google.com/search?q=qt+quick&tbm=isch"));
+	QCOMPARE(google.size(), 32);
+	QCOMPARE(google.value(QStringLiteral("googleSearchQuery")).toString().size(), 1024);
+	QCOMPARE(google.value(QStringLiteral("googleSearchMode")).toString(), QStringLiteral("images"));
+	QCOMPARE(google.value(QStringLiteral("googleSearchModeLabel")).toString(), QStringLiteral("Images"));
+
+	const QVariantMap sparse = normalize({
+		{ QStringLiteral("githubLatestReleaseNotes"), QStringLiteral("Sparse release") },
+		{ QStringLiteral("githubLatestReleaseUrl"), QStringLiteral("javascript:alert(1)") },
+		{ QStringLiteral("githubLatestReleaseAssetUrl"),
+		  QVariant(QStringLiteral("https://example.com/") + QString(20000, QLatin1Char('a'))) },
+		{ QStringLiteral("githubLatestReleaseLoading"), true },
+		{ QStringLiteral("githubLatestReleaseMissing"), QStringLiteral("true") },
+		{ QStringLiteral("forumFirstPostExcerpt"), QStringLiteral("Sparse first post") },
+		{ QStringLiteral("forumQuotePostUrl"), QStringLiteral("https://www.flashback.org/sp123") },
+		{ QStringLiteral("instagramCaption"), QStringLiteral("Sparse caption") },
+		{ QStringLiteral("instagramAvatarUrl"), QStringLiteral("image://mumble/instagram-avatar?g=2") },
+		{ QStringLiteral("steamReviewTotal"), 7 },
+		{ QStringLiteral("steamReviewPositive"), -1 },
+		{ QStringLiteral("steamReviewPercent"), 101 },
+		{ QStringLiteral("vehicleWarning"), QStringLiteral("Check listing") },
+		{ QStringLiteral("googleSearchQuery"), QStringLiteral("Qt Quick") },
+		{ QStringLiteral("rawHtml"), QStringLiteral("<b>unsafe shape</b>") }
+	});
+	QCOMPARE(sparse.value(QStringLiteral("githubLatestReleaseNotes")).toString(), QStringLiteral("Sparse release"));
+	QVERIFY(!sparse.contains(QStringLiteral("githubLatestReleaseUrl")));
+	QVERIFY(!sparse.contains(QStringLiteral("githubLatestReleaseAssetUrl")));
+	QVERIFY(sparse.value(QStringLiteral("githubLatestReleaseLoading")).toBool());
+	QVERIFY(!sparse.contains(QStringLiteral("githubLatestReleaseMissing")));
+	QCOMPARE(sparse.value(QStringLiteral("forumPostExcerpt")).toString(), QStringLiteral("Sparse first post"));
+	QVERIFY(!sparse.contains(QStringLiteral("forumFirstPostExcerpt")));
+	QCOMPARE(sparse.value(QStringLiteral("instagramCaption")).toString(), QStringLiteral("Sparse caption"));
+	QCOMPARE(sparse.value(QStringLiteral("instagramAvatarUrl")).toString(),
+		QStringLiteral("image://mumble/instagram-avatar?g=2"));
+	QCOMPARE(sparse.value(QStringLiteral("steamReviewTotal")).toULongLong(), 7ULL);
+	QVERIFY(!sparse.contains(QStringLiteral("steamReviewPositive")));
+	QVERIFY(!sparse.contains(QStringLiteral("steamReviewPercent")));
+	QCOMPARE(sparse.value(QStringLiteral("vehicleWarning")).toString(), QStringLiteral("Check listing"));
+	QCOMPARE(sparse.value(QStringLiteral("googleSearchQuery")).toString(), QStringLiteral("Qt Quick"));
+	QVERIFY(!sparse.contains(QStringLiteral("rawHtml")));
 }
 
 void TestQmlClientModels::participantPresenceUpdatesOnlyTypedRoles() {
@@ -903,6 +1440,51 @@ void TestQmlClientModels::steadyStateRejectsFullBootstrap() {
 	monitor.leaveSteadyState();
 	QVERIFY(!monitor.recordBootstrap());
 	QCOMPARE(monitor.steadyStateViolations(), 1U);
+}
+
+void TestQmlClientModels::pendingBootstrapCompletesBeforeSteadyState() {
+	const QString mainWindowPath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	const QString messagesPath = QFINDTESTDATA("../../mumble/Messages.cpp");
+	QVERIFY2(!mainWindowPath.isEmpty(), "MainWindow.cpp test data was not found");
+	QVERIFY2(!messagesPath.isEmpty(), "Messages.cpp test data was not found");
+
+	QFile mainWindowFile(mainWindowPath);
+	QFile messagesFile(messagesPath);
+	QVERIFY(mainWindowFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	QVERIFY(messagesFile.open(QIODevice::ReadOnly | QIODevice::Text));
+	const QString mainWindowSource = QString::fromUtf8(mainWindowFile.readAll());
+	const QString messagesSource = QString::fromUtf8(messagesFile.readAll());
+
+	const qsizetype lifecycleStart =
+		mainWindowSource.indexOf(QStringLiteral("void MainWindow::enterQmlShellSteadyState()"));
+	const qsizetype lifecycleEnd =
+		mainWindowSource.indexOf(QStringLiteral("void MainWindow::publishModernShellTalkState"), lifecycleStart);
+	QVERIFY(lifecycleStart >= 0);
+	QVERIFY(lifecycleEnd > lifecycleStart);
+	const QString lifecycleBody = mainWindowSource.mid(lifecycleStart, lifecycleEnd - lifecycleStart);
+	const qsizetype activeTimerCheck = lifecycleBody.indexOf(QStringLiteral("m_modernShellSyncTimer->isActive()"));
+	const qsizetype stopPendingTimer = lifecycleBody.indexOf(QStringLiteral("m_modernShellSyncTimer->stop()"));
+	const qsizetype completePendingBootstrap = lifecycleBody.indexOf(QStringLiteral("runQmlShellStateSync()"));
+	const qsizetype enterSteadyState = lifecycleBody.indexOf(QStringLiteral("enterSteadyState()"));
+	QVERIFY(activeTimerCheck >= 0);
+	QVERIFY(stopPendingTimer > activeTimerCheck);
+	QVERIFY(completePendingBootstrap > stopPendingTimer);
+	QVERIFY(enterSteadyState > completePendingBootstrap);
+
+	const qsizetype serverSyncStart =
+		messagesSource.indexOf(QStringLiteral("void MainWindow::msgServerSync"));
+	const qsizetype serverSyncEnd =
+		messagesSource.indexOf(QStringLiteral("void MainWindow::msgServerConfig"), serverSyncStart);
+	QVERIFY(serverSyncStart >= 0);
+	QVERIFY(serverSyncEnd > serverSyncStart);
+	const QString serverSyncBody = messagesSource.mid(serverSyncStart, serverSyncEnd - serverSyncStart);
+	const qsizetype synchronized =
+		serverSyncBody.indexOf(QStringLiteral("setServerSynchronized(true)"));
+	const qsizetype lifecycleTransition =
+		serverSyncBody.indexOf(QStringLiteral("enterQmlShellSteadyState()"));
+	QVERIFY(synchronized >= 0);
+	QVERIFY(lifecycleTransition > synchronized);
+	QVERIFY(!serverSyncBody.contains(QStringLiteral("fullBootstrapMonitor().enterSteadyState()")));
 }
 
 void TestQmlClientModels::duplicateStableIdsAreCoalesced() {
@@ -1045,6 +1627,69 @@ void TestQmlClientModels::sessionPublishesTypedUpdateBanner() {
 	QVERIFY(session.updateBanner().isEmpty());
 }
 
+void TestQmlClientModels::sessionPublishesSemanticMenus() {
+	ClientSessionController session;
+	QSignalSpy menusSpy(&session, &ClientSessionController::appMenusChanged);
+	QSignalSpy selfMenuSpy(&session, &ClientSessionController::selfMenuChanged);
+	const QVariantList serverItems {
+		QVariantMap { { QStringLiteral("kind"), QStringLiteral("action") },
+					  { QStringLiteral("id"), QStringLiteral("server.connect") },
+					  { QStringLiteral("label"), QStringLiteral("Connect to a server...") },
+					  { QStringLiteral("enabled"), true } },
+		QVariantMap { { QStringLiteral("kind"), QStringLiteral("separator") } },
+		QVariantMap { { QStringLiteral("kind"), QStringLiteral("action") },
+					  { QStringLiteral("id"), QStringLiteral("server.quit") },
+					  { QStringLiteral("label"), QStringLiteral("Quit Mumble...") },
+					  { QStringLiteral("tone"), QStringLiteral("danger") },
+					  { QStringLiteral("enabled"), true } }
+	};
+	const QVariantList menus {
+		QVariantMap { { QStringLiteral("id"), QStringLiteral("server") },
+					  { QStringLiteral("label"), QStringLiteral("Server") },
+					  { QStringLiteral("items"), serverItems } }
+	};
+	const QVariantMap selfMenu {
+		{ QStringLiteral("name"), QStringLiteral("Alice") },
+		{ QStringLiteral("statusLabel"), QStringLiteral("Muted") },
+		{ QStringLiteral("statusTone"), QStringLiteral("warning") },
+		{ QStringLiteral("presence"),
+		  QVariantList { QVariantMap { { QStringLiteral("kind"), QStringLiteral("action") },
+									 { QStringLiteral("id"), QStringLiteral("self.presence.online") },
+									 { QStringLiteral("label"), QStringLiteral("Online") },
+									 { QStringLiteral("checked"), false },
+									 { QStringLiteral("enabled"), true } } } },
+		{ QStringLiteral("actions"),
+		  QVariantList { QVariantMap { { QStringLiteral("kind"), QStringLiteral("action") },
+									 { QStringLiteral("id"), QStringLiteral("configure.settings") },
+									 { QStringLiteral("label"), QStringLiteral("Settings...") },
+									 { QStringLiteral("enabled"), true } } } }
+	};
+
+	session.applyState({ { QStringLiteral("menus"), menus }, { QStringLiteral("selfMenu"), selfMenu } });
+	QCOMPARE(session.appMenus(), menus);
+	QCOMPARE(session.selfMenu(), selfMenu);
+	QCOMPARE(menusSpy.count(), 1);
+	QCOMPARE(selfMenuSpy.count(), 1);
+
+	// Identical room-state publications must not rebuild either menu.
+	session.applyState({ { QStringLiteral("menus"), menus }, { QStringLiteral("selfMenu"), selfMenu } });
+	QCOMPARE(menusSpy.count(), 1);
+	QCOMPARE(selfMenuSpy.count(), 1);
+
+	QVariantList disabledMenus = menus;
+	QVariantMap serverMenu = disabledMenus.first().toMap();
+	QVariantList disabledItems = serverMenu.value(QStringLiteral("items")).toList();
+	QVariantMap connectItem = disabledItems.first().toMap();
+	connectItem.insert(QStringLiteral("enabled"), false);
+	disabledItems[0] = connectItem;
+	serverMenu.insert(QStringLiteral("items"), disabledItems);
+	disabledMenus[0] = serverMenu;
+	session.setAppMenus(disabledMenus);
+	QCOMPARE(menusSpy.count(), 2);
+	QVERIFY(!session.appMenus().first().toMap().value(QStringLiteral("items")).toList().first().toMap()
+				.value(QStringLiteral("enabled")).toBool());
+}
+
 void TestQmlClientModels::commandsRouteTypedAppActions() {
 	UiCommandController commands;
 	QSignalSpy spy(&commands, &UiCommandController::appActionRequested);
@@ -1177,9 +1822,20 @@ void TestQmlClientModels::commandsValidateStableMoveIds() {
 	commands.moveParticipant(QStringLiteral("7"), QStringLiteral("channel:+1"));
 	commands.moveParticipant(QStringLiteral("4294967296"), QStringLiteral("channel:1"));
 	commands.moveParticipant(QStringLiteral("7"), QStringLiteral("channel:4294967296"));
+	commands.moveParticipant(QStringLiteral("7"), QStringLiteral("1:1"));
+	commands.moveParticipant(QStringLiteral("7"), QStringLiteral("2:1"));
+	commands.moveParticipant(QStringLiteral("7"), QStringLiteral("3:1"));
+	commands.moveParticipant(QStringLiteral("7"), QStringLiteral("4:7"));
+	commands.moveParticipant(QStringLiteral("7"), QStringLiteral("-1:1"));
+	commands.moveParticipant(QStringLiteral("7"), QStringLiteral("-0:1"));
+	commands.moveParticipant(QStringLiteral("7"), QStringLiteral("00:1"));
+	commands.moveParticipant(QStringLiteral("7"), QStringLiteral("0:-1"));
 	commands.moveScope(QStringLiteral("channel:0"), QStringLiteral("channel:2"), QStringLiteral("inside"));
 	commands.moveScope(QStringLiteral("channel:1"), QStringLiteral("channel:2"), QStringLiteral("around"));
 	commands.moveScope(QStringLiteral("channel:1"), QStringLiteral("channel:1"), QStringLiteral("inside"));
+	commands.moveScope(QStringLiteral("3:1"), QStringLiteral("0:2"), QStringLiteral("inside"));
+	commands.moveScope(QStringLiteral("0:1"), QStringLiteral("4:2"), QStringLiteral("inside"));
+	commands.moveScope(QStringLiteral("-1:1"), QStringLiteral("0:2"), QStringLiteral("inside"));
 	QCOMPARE(participantSpy.count(), 0);
 	QCOMPARE(scopeSpy.count(), 0);
 
@@ -1197,6 +1853,18 @@ void TestQmlClientModels::commandsValidateStableMoveIds() {
 	QCOMPARE(scopeSpy.at(0).at(0).toString(), QStringLiteral("channel:7"));
 	QCOMPARE(scopeSpy.at(0).at(1).toString(), QStringLiteral("channel:42"));
 	QCOMPARE(scopeSpy.at(0).at(2).toString(), QStringLiteral("before"));
+
+	commands.moveParticipant(QStringLiteral("9"), QStringLiteral(" 0:0042 "));
+	QCOMPARE(participantSpy.count(), 3);
+	QCOMPARE(participantSpy.at(2).at(0).toULongLong(), 9ULL);
+	QCOMPARE(participantSpy.at(2).at(1).toString(), QStringLiteral("0:42"));
+	commands.moveScope(QStringLiteral(" 0:7 "), QStringLiteral(" 0:42 "), QStringLiteral(" After "));
+	QCOMPARE(scopeSpy.count(), 2);
+	QCOMPARE(scopeSpy.at(1).at(0).toString(), QStringLiteral("0:7"));
+	QCOMPARE(scopeSpy.at(1).at(1).toString(), QStringLiteral("0:42"));
+	QCOMPARE(scopeSpy.at(1).at(2).toString(), QStringLiteral("after"));
+	commands.moveScope(QStringLiteral("0:0"), QStringLiteral("0:42"), QStringLiteral("inside"));
+	QCOMPARE(scopeSpy.count(), 2);
 }
 
 void TestQmlClientModels::pttStateIsIdempotentAndReleases() {
@@ -1245,6 +1913,7 @@ void TestQmlClientModels::pttSafetyTriggersReleaseExactlyOnce() {
 void TestQmlClientModels::dialogStateRoutesTypedRequests() {
 	DialogStateController dialog;
 	QSignalSpy stateSpy(&dialog, &DialogStateController::stateChanged);
+	QSignalSpy presentationSpy(&dialog, &DialogStateController::presentationFieldValuesChanged);
 	QSignalSpy fieldSpy(&dialog, &DialogStateController::fieldUpdateRequested);
 	QSignalSpy actionSpy(&dialog, &DialogStateController::actionRequested);
 	QSignalSpy closeSpy(&dialog, &DialogStateController::closeRequested);
@@ -1259,11 +1928,23 @@ void TestQmlClientModels::dialogStateRoutesTypedRequests() {
 	dialog.applyState({ { QStringLiteral("open"), true }, { QStringLiteral("id"), QStringLiteral("settings") },
 						{ QStringLiteral("kind"), QStringLiteral("settings") },
 						{ QStringLiteral("title"), QStringLiteral("Settings") },
+						{ QStringLiteral("primaryActionId"), QStringLiteral("ok") },
+						{ QStringLiteral("loading"), true },
+						{ QStringLiteral("loadingScaffold"), QStringLiteral("records") },
+						{ QStringLiteral("status"), QVariantMap { { QStringLiteral("message"), QStringLiteral("Loading devices") } } },
+						{ QStringLiteral("tone"), QStringLiteral("warning") },
+						{ QStringLiteral("width"), 720 }, { QStringLiteral("height"), 640 },
+						{ QStringLiteral("initialFocusId"), QStringLiteral("audio.input") },
+						{ QStringLiteral("selectedFavoriteIndex"), 1 },
+						{ QStringLiteral("editorOpen"), true },
+						{ QStringLiteral("editorTitle"), QStringLiteral("Edit server") },
+						{ QStringLiteral("favorites"), QVariantList { QVariantMap { { QStringLiteral("label"), QStringLiteral("Saved") } } } },
 						{ QStringLiteral("sections"),
 						  QVariantList { QVariantMap { { QStringLiteral("fields"),
-												 QVariantList { QVariantMap {
-													 { QStringLiteral("id"), QStringLiteral("audio.input") },
-													 { QStringLiteral("value"), 2 } } } } } } },
+											 QVariantList { QVariantMap {
+												 { QStringLiteral("id"), QStringLiteral("audio.input") },
+												 { QStringLiteral("type"), QStringLiteral("voiceMeter") },
+												 { QStringLiteral("value"), 2 } } } } } } },
 						{ QStringLiteral("errors"),
 						  QVariantMap { { QStringLiteral("audio.input"), QStringLiteral("Choose an input") } } } });
 	QCOMPARE(stateSpy.count(), 1);
@@ -1272,6 +1953,32 @@ void TestQmlClientModels::dialogStateRoutesTypedRequests() {
 	QCOMPARE(dialog.fieldValue(QStringLiteral("audio.input")).toInt(), 2);
 	QCOMPARE(dialog.fieldError(QStringLiteral("audio.input")), QStringLiteral("Choose an input"));
 	QVERIFY(!dialog.fieldValue(QStringLiteral("missing")).isValid());
+	QCOMPARE(dialog.primaryActionId(), QStringLiteral("ok"));
+	QVERIFY(dialog.loading());
+	QCOMPARE(dialog.loadingScaffold(), QStringLiteral("records"));
+	QCOMPARE(dialog.statusMessage(), QStringLiteral("Loading devices"));
+	QCOMPARE(dialog.tone(), QStringLiteral("warning"));
+	QCOMPARE(dialog.preferredWidth(), 720);
+	QCOMPARE(dialog.preferredHeight(), 640);
+	QCOMPARE(dialog.initialFocusId(), QStringLiteral("audio.input"));
+	QCOMPARE(dialog.selectedFavoriteIndex(), 1);
+	QVERIFY(dialog.editorOpen());
+	QCOMPARE(dialog.editorTitle(), QStringLiteral("Edit server"));
+	QCOMPARE(dialog.favorites().size(), 1);
+
+	const QVariantMap telemetry { { QStringLiteral("available"), true },
+		{ QStringLiteral("amplitude"), 73 }, { QStringLiteral("transmitting"), true } };
+	const qulonglong structuralRevision = dialog.revision();
+	QVERIFY(dialog.updatePresentationFieldValue(QStringLiteral("audio.input"), telemetry));
+	QCOMPARE(dialog.fieldValue(QStringLiteral("audio.input")).toInt(), 2);
+	QCOMPARE(dialog.presentationFieldValue(QStringLiteral("audio.input")).toMap(), telemetry);
+	QCOMPARE(dialog.presentationFieldValues().value(QStringLiteral("audio.input")).toMap(), telemetry);
+	QCOMPARE(dialog.revision(), structuralRevision);
+	QCOMPARE(stateSpy.count(), 1);
+	QCOMPARE(presentationSpy.count(), 1);
+	QVERIFY(!dialog.updatePresentationFieldValue(QStringLiteral("audio.input"), telemetry));
+	QVERIFY(!dialog.updatePresentationFieldValue(QStringLiteral("missing"), telemetry));
+	QCOMPARE(presentationSpy.count(), 1);
 
 	dialog.updateField(QStringLiteral(" audio.input "), 2);
 	QCOMPARE(fieldSpy.count(), 1);
@@ -1291,6 +1998,49 @@ void TestQmlClientModels::dialogStateRoutesTypedRequests() {
 	QCOMPARE(screenShareAction.at(2).toMap(), screenSharePayload);
 	dialog.requestClose();
 	QCOMPARE(closeSpy.count(), 1);
+
+	QVariantMap nextDialogState = dialog.state();
+	nextDialogState.insert(QStringLiteral("id"), QStringLiteral("settings-reopened"));
+	dialog.applyState(nextDialogState);
+	QVERIFY(dialog.presentationFieldValues().isEmpty());
+	QCOMPARE(presentationSpy.count(), 2);
+	QVERIFY(dialog.updatePresentationFieldValue(QStringLiteral("audio.input"), telemetry));
+	QCOMPARE(stateSpy.count(), 2);
+	QVariantMap closedState = dialog.state();
+	closedState.insert(QStringLiteral("open"), false);
+	dialog.applyState(closedState);
+	QVERIFY(dialog.presentationFieldValues().isEmpty());
+	QCOMPARE(stateSpy.count(), 3);
+	QCOMPARE(presentationSpy.count(), 4);
+}
+
+void TestQmlClientModels::dialogPresentationValuesStayBoundedAndTransient() {
+	DialogStateController dialog;
+	QVariantList fields;
+	for (int index = 0; index < 40; ++index) {
+		fields.push_back(QVariantMap { { QStringLiteral("id"), QStringLiteral("meter.%1").arg(index) },
+			{ QStringLiteral("type"), QStringLiteral("voiceMeter") },
+			{ QStringLiteral("value"), QVariantMap { { QStringLiteral("amplitude"), 0 } } } });
+	}
+	dialog.applyState({ { QStringLiteral("open"), true }, { QStringLiteral("id"), QStringLiteral("meter-grid") },
+		{ QStringLiteral("sections"), QVariantList { QVariantMap { { QStringLiteral("fields"), fields } } } } });
+	QSignalSpy stateSpy(&dialog, &DialogStateController::stateChanged);
+	QSignalSpy presentationSpy(&dialog, &DialogStateController::presentationFieldValuesChanged);
+	const qulonglong structuralRevision = dialog.revision();
+	for (int index = 0; index < fields.size(); ++index) {
+		QCOMPARE(dialog.updatePresentationFieldValue(QStringLiteral("meter.%1").arg(index), index), index < 32);
+	}
+	QCOMPARE(dialog.presentationFieldValues().size(), 32);
+	QCOMPARE(dialog.revision(), structuralRevision);
+	QCOMPARE(stateSpy.count(), 0);
+	QCOMPARE(presentationSpy.count(), 32);
+
+	QVariantMap replacementState = dialog.state();
+	replacementState.insert(QStringLiteral("id"), QStringLiteral("replacement"));
+	dialog.applyState(replacementState);
+	QVERIFY(dialog.presentationFieldValues().isEmpty());
+	QCOMPARE(stateSpy.count(), 1);
+	QCOMPARE(presentationSpy.count(), 33);
 }
 
 void TestQmlClientModels::imageViewerStateRemainsStructured() {
@@ -1313,25 +2063,81 @@ void TestQmlClientModels::imageViewerStateRemainsStructured() {
 void TestQmlClientModels::stonksStateAndActionsRemainStructured() {
 	DialogStateController dialog;
 	QSignalSpy actionSpy(&dialog, &DialogStateController::actionRequested);
-	const QVariantMap stonks { { QStringLiteral("selectedPeriod"), QStringLiteral("30d") },
-							 { QStringLiteral("periods"), QVariantList { QStringLiteral("7d"), QStringLiteral("30d") } },
-							 { QStringLiteral("feedPreferences"),
-							   QVariantMap { { QStringLiteral("showMine"), true },
-										 { QStringLiteral("showPopular"), false },
-										 { QStringLiteral("showPins"), true } } } };
+	const QVariantMap position { { QStringLiteral("symbol"), QStringLiteral("RKLB") },
+								 { QStringLiteral("quantity"), 42.0 }, { QStringLiteral("price"), 18.42 },
+								 { QStringLiteral("marketValue"), 773.64 },
+								 { QStringLiteral("currency"), QStringLiteral("USD") },
+								 { QStringLiteral("providerId"), QStringLiteral("yahoo") },
+								 { QStringLiteral("providerSymbol"), QStringLiteral("RKLB") },
+								 { QStringLiteral("exchange"), QStringLiteral("Nasdaq") },
+								 { QStringLiteral("quoteTime"), 1779926300ULL },
+								 { QStringLiteral("quoteSourceUrl"), QStringLiteral("https://finance.yahoo.com/quote/RKLB") },
+								 { QStringLiteral("quoteConfidence"), 0.9 } };
+	const QVariantMap snapshot { { QStringLiteral("snapshotId"), 77 }, { QStringLiteral("userId"), 1 },
+								 { QStringLiteral("currency"), QStringLiteral("USD") },
+								 { QStringLiteral("totalValue"), 773.64 },
+								 { QStringLiteral("positions"), QVariantList { position } } };
+	const QVariantMap stonks {
+		{ QStringLiteral("selectedPeriod"), QStringLiteral("30d") },
+		{ QStringLiteral("periods"), QVariantList { QStringLiteral("7d"), QStringLiteral("30d") } },
+		{ QStringLiteral("snapshots"), QVariantList { snapshot } },
+		{ QStringLiteral("leaderboard"),
+		  QVariantList { QVariantMap { { QStringLiteral("rank"), 1 }, { QStringLiteral("userId"), 2 },
+									 { QStringLiteral("userName"), QStringLiteral("Trader") },
+									 { QStringLiteral("returnPercent"), 12.5 } } } },
+		{ QStringLiteral("feedPreferences"),
+		  QVariantMap { { QStringLiteral("showMine"), true }, { QStringLiteral("showPopular"), false },
+						{ QStringLiteral("showPins"), true } } }
+	};
 	dialog.applyState({ { QStringLiteral("open"), true }, { QStringLiteral("id"), QStringLiteral("stonks") },
 						{ QStringLiteral("kind"), QStringLiteral("stonks") },
 						{ QStringLiteral("title"), QStringLiteral("Stonks") }, { QStringLiteral("stonks"), stonks } });
 
 	QCOMPARE(dialog.kind(), QStringLiteral("stonks"));
 	QCOMPARE(dialog.state().value(QStringLiteral("stonks")).toMap(), stonks);
-	const QVariantMap payload { { QStringLiteral("period"), QStringLiteral("7d") } };
-	dialog.invokeAction(QStringLiteral("selectPeriod"), payload);
-	QCOMPARE(actionSpy.count(), 1);
-	const QList< QVariant > action = actionSpy.takeFirst();
-	QCOMPARE(action.at(0).toString(), QStringLiteral("stonks"));
-	QCOMPARE(action.at(1).toString(), QStringLiteral("selectPeriod"));
-	QCOMPARE(action.at(2).toMap(), payload);
+
+	const QVariantList actionCases {
+		QVariantMap { { QStringLiteral("action"), QStringLiteral("selectPeriod") },
+					  { QStringLiteral("payload"), QVariantMap { { QStringLiteral("period"), QStringLiteral("7d") } } } },
+		QVariantMap { { QStringLiteral("action"), QStringLiteral("savePortfolio") },
+					  { QStringLiteral("payload"),
+						QVariantMap { { QStringLiteral("userId"), 1 },
+									  { QStringLiteral("currency"), QStringLiteral("USD") },
+									  { QStringLiteral("note"), QStringLiteral("rebalance") },
+									  { QStringLiteral("positions"), QVariantList { position } } } } },
+		QVariantMap { { QStringLiteral("action"), QStringLiteral("clearPortfolio") },
+					  { QStringLiteral("payload"), QVariantMap { { QStringLiteral("userId"), 1 },
+																 { QStringLiteral("currency"), QStringLiteral("USD") } } } },
+		QVariantMap { { QStringLiteral("action"), QStringLiteral("deleteSnapshot") },
+					  { QStringLiteral("payload"), QVariantMap { { QStringLiteral("userId"), 1 },
+																 { QStringLiteral("snapshotId"), 77 } } } },
+		QVariantMap { { QStringLiteral("action"), QStringLiteral("follow") },
+					  { QStringLiteral("payload"), QVariantMap { { QStringLiteral("userId"), 2 } } } },
+		QVariantMap { { QStringLiteral("action"), QStringLiteral("unfollow") },
+					  { QStringLiteral("payload"), QVariantMap { { QStringLiteral("userName"), QStringLiteral("Trader") } } } },
+		QVariantMap { { QStringLiteral("action"), QStringLiteral("setTickerPin") },
+					  { QStringLiteral("payload"), QVariantMap { { QStringLiteral("symbol"), QStringLiteral("RKLB") },
+																 { QStringLiteral("pinned"), true } } } },
+		QVariantMap { { QStringLiteral("action"), QStringLiteral("setFeedPreferences") },
+					  { QStringLiteral("payload"), QVariantMap { { QStringLiteral("showMine"), true },
+																 { QStringLiteral("showPopular"), false },
+																 { QStringLiteral("showPins"), true } } } },
+		QVariantMap { { QStringLiteral("action"), QStringLiteral("configure") },
+					  { QStringLiteral("payload"), QVariantMap { { QStringLiteral("enabled"), true },
+																 { QStringLiteral("textChannelId"), 7 },
+																 { QStringLiteral("socialAnnouncementsEnabled"), false } } } }
+	};
+	for (const QVariant &actionCaseValue : actionCases) {
+		const QVariantMap actionCase = actionCaseValue.toMap();
+		const QString actionID = actionCase.value(QStringLiteral("action")).toString();
+		const QVariantMap payload = actionCase.value(QStringLiteral("payload")).toMap();
+		dialog.invokeAction(actionID, payload);
+		QCOMPARE(actionSpy.count(), 1);
+		const QList< QVariant > action = actionSpy.takeFirst();
+		QCOMPARE(action.at(0).toString(), QStringLiteral("stonks"));
+		QCOMPARE(action.at(1).toString(), actionID);
+		QCOMPARE(action.at(2).toMap(), payload);
+	}
 }
 
 void TestQmlClientModels::asyncOperationsExposeProgressAndCancellation() {
@@ -1519,22 +2325,55 @@ void TestQmlClientModels::selectionStateOnlyNotifiesForRealChanges() {
 	QCOMPARE(selection.selectedVoiceChannelId().toInt(), 42);
 }
 
+void TestQmlClientModels::selectionStateAcceptsAuthoritativeSelectionBeforeModelSync() {
+	RoomModel rooms;
+	ParticipantModel participants;
+	QmlSelectionState selection;
+	selection.bindModels(&rooms, &participants);
+
+	// Server/controller state can lead its model patch by one event-loop turn.
+	selection.applySelection(QStringLiteral("0:42"), 0, 42, {}, 42);
+	QCOMPARE(selection.scopeToken(), QStringLiteral("0:42"));
+	QCOMPARE(selection.scopeValue(), 0);
+	QCOMPARE(selection.scopeId().toULongLong(), 42ULL);
+	QCOMPARE(selection.selectedVoiceChannelId().toULongLong(), 42ULL);
+
+	// User/QML property writes remain guarded while the row is unknown.
+	selection.setScopeToken(QStringLiteral("0:404"));
+	QVERIFY(selection.scopeToken().isEmpty());
+	selection.applySelection(QStringLiteral("0:42"), 0, 42, {}, 42);
+	selection.setSelectedVoiceChannelId(404);
+	QVERIFY(!selection.selectedVoiceChannelId().isValid());
+	selection.applySelection(QStringLiteral("0:42"), 0, 42, {}, 42);
+
+	rooms.replaceRoomStates(
+		{ QVariantMap { { QStringLiteral("token"), QStringLiteral("0:42") },
+							{ QStringLiteral("label"), QStringLiteral("Landing") } } },
+		{});
+	QCOMPARE(selection.scopeToken(), QStringLiteral("0:42"));
+	QCOMPARE(selection.selectedVoiceChannelId().toULongLong(), 42ULL);
+
+	rooms.replaceRoomStates({}, {});
+	QVERIFY(selection.scopeToken().isEmpty());
+	QVERIFY(!selection.selectedVoiceChannelId().isValid());
+}
+
 void TestQmlClientModels::selectionStateInvalidatesRemovedStableIds() {
 	RoomModel rooms;
 	ParticipantModel participants;
 	rooms.replaceRoomStates(
-		{ QVariantMap{ { QStringLiteral("token"), QStringLiteral("channel:42") },
+		{ QVariantMap{ { QStringLiteral("token"), QStringLiteral("0:42") },
 						 { QStringLiteral("label"), QStringLiteral("Lobby") } } },
 		{});
 	participants.replaceParticipantStates(
 		{ QVariantMap{ { QStringLiteral("session"), 7 }, { QStringLiteral("name"), QStringLiteral("Alice") } } });
 	QmlSelectionState selection;
 	selection.bindModels(&rooms, &participants);
-	selection.applySelection(QStringLiteral("channel:42"), 1, 42, 7, 42);
+	selection.applySelection(QStringLiteral("0:42"), 0, 42, 7, 42);
 
 	participants.replaceParticipantStates({});
 	QVERIFY(!selection.selectedUserSession().isValid());
-	QCOMPARE(selection.scopeToken(), QStringLiteral("channel:42"));
+	QCOMPARE(selection.scopeToken(), QStringLiteral("0:42"));
 	QCOMPARE(selection.selectedVoiceChannelId().toULongLong(), 42ULL);
 
 	rooms.replaceRoomStates({}, {});
@@ -1639,6 +2478,88 @@ void TestQmlClientModels::invalidRowsAndCommandsAreIgnored() {
 	QCOMPARE(participantValueAction.at(1).toString(), QStringLiteral("volume"));
 	QCOMPARE(participantValueAction.at(2).toInt(), 65);
 	QVERIFY(participantValueAction.at(3).toBool());
+}
+
+void TestQmlClientModels::mediaSessionLocalPlaybackControlsRemainTyped() {
+	MediaSessionBackend media;
+	QSignalSpy volumeChangedSpy(&media, &MediaSessionBackend::volumeChanged);
+	QSignalSpy mutedChangedSpy(&media, &MediaSessionBackend::mutedChanged);
+	QSignalSpy volumeRequestedSpy(&media, &MediaSessionBackend::volumeRequested);
+	QSignalSpy mutedRequestedSpy(&media, &MediaSessionBackend::mutedRequested);
+	QSignalSpy progressSpy(&media, &MediaSessionBackend::loadProgressChanged);
+
+	QCOMPARE(media.volume(), 100);
+	QVERIFY(!media.muted());
+	QCOMPARE(media.loadProgress(), 0);
+	media.setVolume(75);
+	media.setVolume(75);
+	QCOMPARE(media.volume(), 75);
+	QCOMPARE(volumeChangedSpy.count(), 1);
+	QCOMPARE(volumeRequestedSpy.count(), 0);
+	media.setVolume(-10);
+	QCOMPARE(media.volume(), 0);
+	media.setVolume(250);
+	QCOMPARE(media.volume(), 100);
+
+	QVERIFY(media.open(QUrl(QStringLiteral("https://www.youtube.com/embed/audio")),
+		QStringLiteral("youtube"), QStringLiteral("local")));
+	QVERIFY(media.playbackControlAllowed());
+	media.reportLoadProgress(42);
+	QCOMPARE(media.loadProgress(), 42);
+	QCOMPARE(progressSpy.count(), 1);
+	media.reportLoadProgress(142);
+	QCOMPARE(media.loadProgress(), 100);
+	media.setVolume(64);
+	QCOMPARE(volumeRequestedSpy.count(), 1);
+	QCOMPARE(volumeRequestedSpy.takeFirst().at(0).toInt(), 64);
+	media.setMuted(true);
+	QCOMPARE(mutedChangedSpy.count(), 1);
+	QCOMPARE(mutedRequestedSpy.count(), 1);
+	QVERIFY(media.muted());
+	media.toggleMuted();
+	QVERIFY(!media.muted());
+	QCOMPARE(mutedRequestedSpy.count(), 2);
+
+	const QUrl sharedUrl(QStringLiteral("https://www.youtube.com/embed/shared-safe-close"));
+	MediaSessionBackend shared;
+	QSignalSpy sharedEventSpy(&shared, &MediaSessionBackend::sharedEventRequested);
+	QSignalSpy sharedPlaySpy(&shared, &MediaSessionBackend::playRequested);
+	QSignalSpy sharedSeekSpy(&shared, &MediaSessionBackend::seekRequested);
+	QVERIFY(shared.startShared(sharedUrl, QStringLiteral("youtube"), QStringLiteral("Release night")));
+	const QString sharedId = shared.sharedSessionId();
+	shared.applySharedState(sharedId, sharedUrl, QStringLiteral("youtube"), QStringLiteral("Release night"),
+		42, 17, 17, { 17 }, QStringLiteral("start"), 8.0, true, 100, 17);
+	QVERIFY(shared.sharedJoined());
+	QVERIFY(shared.sharedHost());
+	QVERIFY(shared.playbackControlAllowed());
+	QVERIFY(shared.active());
+	shared.closePlayer();
+	QVERIFY(!shared.active());
+	QVERIFY(shared.sharedAvailable());
+	QVERIFY(shared.sharedJoined());
+	QCOMPARE(sharedEventSpy.count(), 0);
+	shared.closePlayer();
+	QVERIFY(shared.reopenSharedPlayer());
+	QCOMPARE(shared.position(), 8.0);
+	shared.closePlayer();
+	shared.applySharedState(sharedId, sharedUrl, QStringLiteral("youtube"), QStringLiteral("Release night"),
+		42, 17, 17, { 17 }, QStringLiteral("playback"), 18.0, true, 200, 17);
+	QVERIFY(!shared.active());
+	QVERIFY(shared.reopenSharedPlayer());
+	QVERIFY(shared.active());
+	QCOMPARE(shared.position(), 18.0);
+	QCOMPARE(shared.state(), QStringLiteral("paused"));
+
+	shared.applySharedState(sharedId, sharedUrl, QStringLiteral("youtube"), QStringLiteral("Release night"),
+		42, 9, 9, { 9, 17 }, QStringLiteral("host-transfer"), 19.0, true, 300, 17);
+	QVERIFY(!shared.sharedHost());
+	QVERIFY(!shared.playbackControlAllowed());
+	sharedPlaySpy.clear();
+	sharedSeekSpy.clear();
+	shared.play();
+	shared.seek(12.0);
+	QCOMPARE(sharedPlaySpy.count(), 0);
+	QCOMPARE(sharedSeekSpy.count(), 0);
 }
 
 void TestQmlClientModels::mediaSessionValidatesAndPublishesTypedState() {

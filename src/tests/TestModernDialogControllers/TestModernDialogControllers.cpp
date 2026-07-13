@@ -3,12 +3,32 @@
 // that can be found in the LICENSE file at the root of the
 // Mumble source tree or at <https://www.mumble.info/LICENSE>.
 
+#include <QtCore/QFile>
 #include <QtTest>
 
 #include "AudioInput.h"
 #include "ModernConnectController.h"
 #include "ModernDialogController.h"
 #include "ModernSettingsController.h"
+#include "GlobalShortcut.h"
+
+namespace {
+QString readTestSource(const QString &path) {
+	QFile file(path);
+	if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return {};
+	return QString::fromUtf8(file.readAll());
+}
+
+class TestShortcutEngine final : public GlobalShortcutEngine {
+public:
+	ButtonInfo buttonInfo(const QVariant &) override {
+		ButtonInfo info;
+		info.device = QStringLiteral("Test keyboard");
+		info.name   = QStringLiteral("Test key");
+		return info;
+	}
+};
+} // namespace
 
 class TestModernDialogControllers : public QObject {
 	Q_OBJECT
@@ -16,9 +36,12 @@ class TestModernDialogControllers : public QObject {
 private slots:
 	void connectControllerSelectsAndSavesFavorites();
 	void settingsControllerForcesModernAndAppliesDraft();
+	void settingsControllerEditsShortcutDataAndTargets();
 	void settingsControllerClampsAudioSetupPayload();
 	void settingsControllerReconcilesPluginRuntimeState();
 	void audioInputVoiceActivityLevelUsesExpectedSignals();
+	void audioInputVoiceActivitySnapshotIsBounded();
+	void nativeAutomationBoundariesRemainTypedAndDeterministic();
 	void dialogControllerBuildsFailedConnectionReconnect();
 	void dialogControllerDispatchesGenericDialogAction();
 	void dialogControllerBuildsDisconnectConfirmation();
@@ -49,6 +72,9 @@ void TestModernDialogControllers::connectControllerSelectsAndSavesFavorites() {
 	QCOMPARE(state.value(QStringLiteral("selectedFavoriteIndex")).toInt(), 0);
 	QCOMPARE(state.value(QStringLiteral("editorOpen")).toBool(), false);
 	QCOMPARE(state.value(QStringLiteral("sections")).toList().size(), 0);
+	QCOMPARE(state.value(QStringLiteral("width")).toInt(), 860);
+	QCOMPARE(state.value(QStringLiteral("height")).toInt(), 640);
+	QCOMPARE(state.value(QStringLiteral("initialFocusId")).toString(), QStringLiteral("connectFavoriteList"));
 	const QVariantMap savedFavorite = state.value(QStringLiteral("favorites")).toList().at(0).toMap();
 	QCOMPARE(savedFavorite.value(QStringLiteral("usersLabel")).toString(), QStringLiteral("Users: -"));
 	QCOMPARE(savedFavorite.value(QStringLiteral("pingLabel")).toString(), QStringLiteral("Ping: -"));
@@ -72,6 +98,7 @@ void TestModernDialogControllers::connectControllerSelectsAndSavesFavorites() {
 	QCOMPARE(clearResult.closeDialog, false);
 	QCOMPARE(controller.state().value(QStringLiteral("selectedFavoriteIndex")).toInt(), -1);
 	QCOMPARE(controller.state().value(QStringLiteral("editorOpen")).toBool(), true);
+	QCOMPARE(controller.state().value(QStringLiteral("initialFocusId")).toString(), QStringLiteral("dialogField_host"));
 
 	controller.updateField(QStringLiteral("host"), QStringLiteral("mumble://dev.example.test/lobby"));
 	controller.updateField(QStringLiteral("name"), QStringLiteral("Dev"));
@@ -107,6 +134,8 @@ void TestModernDialogControllers::connectControllerSelectsAndSavesFavorites() {
 	QCOMPARE(connectResult.closeDialog, true);
 
 	controller.open(QList< FavoriteServer >(), settings);
+	QCOMPARE(controller.state().value(QStringLiteral("initialFocusId")).toString(),
+			 QStringLiteral("connectNewFavoriteButton"));
 	controller.updateField(QStringLiteral("host"),
 						   QStringLiteral("mumble://url-user:url-password@url.example.test:64739/root?title=URL"));
 	ModernConnectController::ActionResult urlResult = controller.invokeAction(QStringLiteral("connect"), QVariantMap());
@@ -472,6 +501,139 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 	QCOMPARE(audioInputResult.closeDialog, true);
 }
 
+void TestModernDialogControllers::settingsControllerEditsShortcutDataAndTargets() {
+	QVERIFY(GlobalShortcutEngine::engine == nullptr);
+	GlobalShortcutEngine::engine = new TestShortcutEngine();
+
+	{
+		ShortcutTarget defaultTarget;
+		defaultTarget.bUsers   = false;
+		defaultTarget.iChannel = SHORTCUT_TARGET_CURRENT;
+		GlobalShortcut targetDefinition(nullptr, 501, QStringLiteral("Whisper/Shout"),
+										QVariant::fromValue(defaultTarget));
+		GlobalShortcut toggleDefinition(nullptr, 502, QStringLiteral("Mute Self"), 0);
+		GlobalShortcut textDefinition(nullptr, 503, QStringLiteral("Send Text Message"), QString());
+		GlobalShortcut channelDefinition(nullptr, 504, QStringLiteral("Join Channel"),
+										 QVariant::fromValue(ChannelTarget(Mumble::ROOT_CHANNEL_ID)));
+
+		Settings settings;
+		Shortcut targetShortcut;
+		targetShortcut.iIndex = 501;
+		ShortcutTarget target;
+		target.bUsers         = false;
+		target.iChannel       = SHORTCUT_TARGET_CURRENT;
+		target.qsGroup        = QStringLiteral("admins");
+		target.bChildren      = true;
+		targetShortcut.qvData = QVariant::fromValue(target);
+
+		Shortcut toggleShortcut;
+		toggleShortcut.iIndex = 502;
+		toggleShortcut.qvData = 0;
+		Shortcut textShortcut;
+		textShortcut.iIndex = 503;
+		textShortcut.qvData = QStringLiteral("hello");
+		Shortcut channelShortcut;
+		channelShortcut.iIndex = 504;
+		channelShortcut.qvData = QVariant::fromValue(ChannelTarget(Mumble::ROOT_CHANNEL_ID));
+		settings.qlShortcuts   = { targetShortcut, toggleShortcut, textShortcut, channelShortcut };
+
+		ModernSettingsController controller;
+		controller.open(settings, QStringLiteral("keys"));
+
+		auto shortcutField = [&controller]() {
+			const QVariantList sections = controller.state().value(QStringLiteral("sections")).toList();
+			for (const QVariant &sectionValue : sections) {
+				for (const QVariant &fieldValue : sectionValue.toMap().value(QStringLiteral("fields")).toList()) {
+					const QVariantMap field = fieldValue.toMap();
+					if (field.value(QStringLiteral("id")).toString() == QLatin1String("keys.shortcuts")) {
+						return field;
+					}
+				}
+			}
+			return QVariantMap();
+		};
+
+		const QVariantMap field = shortcutField();
+		QCOMPARE(field.value(QStringLiteral("type")).toString(), QStringLiteral("shortcutEditor"));
+		QCOMPARE(field.value(QStringLiteral("targetModeOptions")).toList().size(), 3);
+		QVERIFY(field.value(QStringLiteral("targetChannelOptions")).toList().size() >= 19);
+		QCOMPARE(field.value(QStringLiteral("toggleOptions")).toList().size(), 3);
+		const QVariantList rows = field.value(QStringLiteral("rows")).toList();
+		QCOMPARE(rows.size(), 4);
+		QCOMPARE(rows.at(0).toMap().value(QStringLiteral("dataType")).toString(), QStringLiteral("target"));
+		QCOMPARE(rows.at(0).toMap().value(QStringLiteral("dataEditable")).toBool(), true);
+		const QVariantMap targetDetail = rows.at(0).toMap().value(QStringLiteral("target")).toMap();
+		QCOMPARE(targetDetail.value(QStringLiteral("mode")).toString(), QStringLiteral("channel"));
+		QCOMPARE(targetDetail.value(QStringLiteral("channelId")).toInt(), SHORTCUT_TARGET_CURRENT);
+		QCOMPARE(targetDetail.value(QStringLiteral("group")).toString(), QStringLiteral("admins"));
+		QCOMPARE(targetDetail.value(QStringLiteral("children")).toBool(), true);
+		QCOMPARE(rows.at(1).toMap().value(QStringLiteral("dataType")).toString(), QStringLiteral("toggle"));
+		QCOMPARE(rows.at(2).toMap().value(QStringLiteral("dataType")).toString(), QStringLiteral("text"));
+		QCOMPARE(rows.at(3).toMap().value(QStringLiteral("dataType")).toString(), QStringLiteral("channel"));
+
+		controller.invokeAction(QStringLiteral("keys.shortcutTarget"),
+								QVariantMap{ { QStringLiteral("index"), 0 },
+											 { QStringLiteral("targetAction"), QStringLiteral("mode") },
+											 { QStringLiteral("mode"), QStringLiteral("users") } });
+		controller.invokeAction(QStringLiteral("keys.shortcutTarget"),
+								QVariantMap{ { QStringLiteral("index"), 0 },
+											 { QStringLiteral("targetAction"), QStringLiteral("addUser") },
+											 { QStringLiteral("hash"), QStringLiteral("hash-alice") } });
+		ShortcutTarget editedTarget = controller.draft().qlShortcuts.at(0).qvData.value< ShortcutTarget >();
+		QCOMPARE(editedTarget.bUsers, true);
+		QCOMPARE(editedTarget.bCurrentSelection, false);
+		QCOMPARE(editedTarget.qlUsers, QStringList{ QStringLiteral("hash-alice") });
+
+		controller.invokeAction(QStringLiteral("keys.shortcutTarget"),
+								QVariantMap{ { QStringLiteral("index"), 0 },
+											 { QStringLiteral("targetAction"), QStringLiteral("removeUser") },
+											 { QStringLiteral("hash"), QStringLiteral("hash-alice") } });
+		controller.invokeAction(QStringLiteral("keys.shortcutTarget"),
+								QVariantMap{ { QStringLiteral("index"), 0 },
+											 { QStringLiteral("targetAction"), QStringLiteral("mode") },
+											 { QStringLiteral("mode"), QStringLiteral("channel") } });
+		controller.invokeAction(QStringLiteral("keys.shortcutTarget"),
+								QVariantMap{ { QStringLiteral("index"), 0 },
+											 { QStringLiteral("targetAction"), QStringLiteral("channel") },
+											 { QStringLiteral("channelId"), SHORTCUT_TARGET_ROOT } });
+		controller.invokeAction(QStringLiteral("keys.shortcutTarget"),
+								QVariantMap{ { QStringLiteral("index"), 0 },
+											 { QStringLiteral("targetAction"), QStringLiteral("group") },
+											 { QStringLiteral("group"), QStringLiteral("moderators") } });
+		for (const QString &flag :
+			 { QStringLiteral("links"), QStringLiteral("children"), QStringLiteral("forceCenter") }) {
+			controller.invokeAction(QStringLiteral("keys.shortcutTarget"),
+									QVariantMap{ { QStringLiteral("index"), 0 },
+												 { QStringLiteral("targetAction"), flag },
+												 { QStringLiteral("enabled"), true } });
+		}
+		editedTarget = controller.draft().qlShortcuts.at(0).qvData.value< ShortcutTarget >();
+		QCOMPARE(editedTarget.bUsers, false);
+		QCOMPARE(editedTarget.iChannel, SHORTCUT_TARGET_ROOT);
+		QCOMPARE(editedTarget.qsGroup, QStringLiteral("moderators"));
+		QCOMPARE(editedTarget.qlUsers.size(), 0);
+		QVERIFY(editedTarget.bLinks);
+		QVERIFY(editedTarget.bChildren);
+		QVERIFY(editedTarget.bForceCenter);
+
+		controller.invokeAction(QStringLiteral("keys.shortcutData"),
+								QVariantMap{ { QStringLiteral("index"), 1 }, { QStringLiteral("value"), 1 } });
+		controller.invokeAction(QStringLiteral("keys.shortcutData"),
+								QVariantMap{ { QStringLiteral("index"), 2 },
+											 { QStringLiteral("value"), QStringLiteral("updated message") } });
+		controller.invokeAction(QStringLiteral("keys.shortcutData"),
+								QVariantMap{ { QStringLiteral("index"), 3 }, { QStringLiteral("value"), 7 } });
+		controller.invokeAction(QStringLiteral("keys.shortcutSuppress"),
+								QVariantMap{ { QStringLiteral("index"), 0 }, { QStringLiteral("suppress"), true } });
+		QCOMPARE(controller.draft().qlShortcuts.at(1).qvData.toInt(), 1);
+		QCOMPARE(controller.draft().qlShortcuts.at(2).qvData.toString(), QStringLiteral("updated message"));
+		QCOMPARE(controller.draft().qlShortcuts.at(3).qvData.value< ChannelTarget >().channelID, 7U);
+		QCOMPARE(controller.draft().qlShortcuts.at(0).bSuppress, true);
+	}
+
+	QVERIFY(GlobalShortcutEngine::engine == nullptr);
+}
+
 void TestModernDialogControllers::settingsControllerReconcilesPluginRuntimeState() {
 	Settings settings;
 	ModernSettingsController controller;
@@ -589,6 +751,87 @@ void TestModernDialogControllers::audioInputVoiceActivityLevelUsesExpectedSignal
 												  release));
 	QVERIFY(AudioInput::inputGateAllowsSpeechFor(Settings::InputGateStrict, true, 0.30f, 0.60f, gateOpen, attack,
 												 release));
+}
+
+void TestModernDialogControllers::audioInputVoiceActivitySnapshotIsBounded() {
+	AudioInput::VoiceActivitySnapshot snapshot;
+	QVERIFY(!snapshot.hasProcessedInput());
+
+	snapshot.peakSignalDb      = -42.0f;
+	snapshot.peakCleanMicDb    = -48.0f;
+	snapshot.speechProbability = 0.75f;
+	snapshot.bitrate           = 64000;
+	snapshot.transmitting      = true;
+	QCOMPARE(snapshot.amplitudeLevel(), 0.5f);
+	QVERIFY(snapshot.hasProcessedInput());
+
+	snapshot.peakCleanMicDb = -120.0f;
+	QCOMPARE(snapshot.amplitudeLevel(), 0.0f);
+	snapshot.peakCleanMicDb = 12.0f;
+	QCOMPARE(snapshot.amplitudeLevel(), 1.0f);
+}
+
+void TestModernDialogControllers::nativeAutomationBoundariesRemainTypedAndDeterministic() {
+	const QString mainWindowPath = QFINDTESTDATA("../../mumble/MainWindow.cpp");
+	const QString audioInputPath = QFINDTESTDATA("../../mumble/AudioInput.h");
+	const QString shellHostPath = QFINDTESTDATA("../../mumble/QmlShellHost.cpp");
+	const QString automationPath = QFINDTESTDATA("../../mumble/ModernUiAutomationServer.cpp");
+	QVERIFY2(!mainWindowPath.isEmpty(), "MainWindow.cpp test data was not found");
+	QVERIFY2(!audioInputPath.isEmpty(), "AudioInput.h test data was not found");
+	QVERIFY2(!shellHostPath.isEmpty(), "QmlShellHost.cpp test data was not found");
+	QVERIFY2(!automationPath.isEmpty(), "ModernUiAutomationServer.cpp test data was not found");
+
+	const QString mainWindowSource = readTestSource(mainWindowPath);
+	const QString audioInputSource = readTestSource(audioInputPath);
+	const QString shellHostSource = readTestSource(shellHostPath);
+	const QString automationSource = readTestSource(automationPath);
+	QVERIFY(!mainWindowSource.isEmpty());
+	QVERIFY(!audioInputSource.isEmpty());
+	QVERIFY(!shellHostSource.isEmpty());
+	QVERIFY(!automationSource.isEmpty());
+
+	QVERIFY(mainWindowSource.contains(QStringLiteral("voiceActivitySnapshot()")));
+	for (const QString &unsafeRead : { QStringLiteral("audioInput->dPeak"),
+								  QStringLiteral("audioInput->fSpeechProb"), QStringLiteral("audioInput->iBitrate"),
+								  QStringLiteral("audioInput->amplitudeVoiceActivityLevel"),
+								  QStringLiteral("audioInput->isTransmitting") }) {
+		QVERIFY2(!mainWindowSource.contains(unsafeRead),
+				 qPrintable(QStringLiteral("Unsafe UI audio read: %1").arg(unsafeRead)));
+	}
+	QVERIFY(audioInputSource.contains(QStringLiteral("std::atomic< float > m_voiceActivityPeakSignalDb")));
+	QVERIFY(audioInputSource.contains(QStringLiteral("std::atomic< float > m_voiceActivityPeakCleanMicDb")));
+	QVERIFY(audioInputSource.contains(QStringLiteral("std::atomic< float > m_voiceActivitySpeechProbability")));
+	QVERIFY(audioInputSource.contains(QStringLiteral("std::atomic< int > m_voiceActivityBitrate")));
+	QVERIFY(audioInputSource.contains(QStringLiteral("std::atomic< bool > m_voiceActivityTransmitting")));
+
+	const qsizetype registrationStart =
+		shellHostSource.indexOf(QStringLiteral("void QmlShellHost::registerCaptureWindow"));
+	const qsizetype readinessStart =
+		shellHostSource.indexOf(QStringLiteral("bool QmlShellHost::captureWindowReady"), registrationStart);
+	const qsizetype captureStart =
+		shellHostSource.indexOf(QStringLiteral("bool QmlShellHost::captureWindow("), readinessStart);
+	const qsizetype captureEnd =
+		shellHostSource.indexOf(QStringLiteral("bool QmlShellHost::ensurePttToolWindow"), captureStart);
+	QVERIFY(registrationStart >= 0);
+	QVERIFY(readinessStart > registrationStart);
+	QVERIFY(captureStart > readinessStart);
+	QVERIFY(captureEnd > captureStart);
+	const QString registrationBody = shellHostSource.mid(registrationStart, readinessStart - registrationStart);
+	const QString captureBody = shellHostSource.mid(captureStart, captureEnd - captureStart);
+	QVERIFY(registrationBody.contains(QStringLiteral("frameSwapped")));
+	QVERIFY(registrationBody.contains(QStringLiteral("isExposed()")));
+	QVERIFY(captureBody.contains(QStringLiteral("captureWindowReady(windowId)")));
+	QVERIFY(!captureBody.contains(QStringLiteral("QEventLoop")));
+	QVERIFY(!captureBody.contains(QStringLiteral("processEvents")));
+
+	const qsizetype stateStart =
+		automationSource.indexOf(QStringLiteral("QVariantMap ModernUiAutomationServer::buildStateResponse"));
+	QVERIFY(stateStart >= 0);
+	const QString stateBody = automationSource.mid(stateStart);
+	QVERIFY(stateBody.contains(QStringLiteral("session->appMenus()")));
+	QVERIFY(stateBody.contains(QStringLiteral("session->selfMenu()")));
+	QVERIFY(automationSource.contains(QStringLiteral("\"mainCaptureReady\"")));
+	QVERIFY(automationSource.contains(QStringLiteral("\"pttToolCaptureReady\"")));
 }
 
 void TestModernDialogControllers::dialogControllerBuildsFailedConnectionReconnect() {

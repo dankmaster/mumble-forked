@@ -15,10 +15,33 @@ ApplicationWindow {
            ? mediaSession.sharedTitle
            : qsTr("Media session")
     color: Theme.shellBackground
+	Component.onCompleted: Qt.callLater(controls.focusInitialControl)
     onClosing: function(close) {
-        close.accepted = true
-        mediaSession.close()
+		// Closing a shared player must never implicitly leave or end the session.
+		// Keep the window alive while the user chooses the intended disposition;
+		// closePlayer() will deactivate this lazy-loaded window afterwards.
+		close.accepted = false
+		controls.requestClose()
     }
+
+	function setFullscreen(enabled) {
+		if (enabled)
+			mediaWindow.showFullScreen()
+		else
+			mediaWindow.showNormal()
+	}
+
+	function applyExitDisposition(disposition) {
+		if (disposition === "end-shared")
+			mediaSession.endShared()
+		else if (disposition === "leave-shared")
+			mediaSession.leaveShared()
+		else {
+			if (mediaSession.sharedHost && mediaSession.state === "playing")
+				mediaSession.pause()
+			mediaSession.closePlayer()
+		}
+	}
 
 	function playerScript(command, value) {
 		const provider = JSON.stringify(String(mediaSession.provider || ""))
@@ -33,6 +56,10 @@ ApplicationWindow {
 				? "if(isYt&&typeof yt.pauseVideo==='function'){yt.pauseVideo();return true;}if(media){media.pause();return true;}return false;"
 				: command === "seek"
 				? "const target=" + numericValue + ";if(isYt&&typeof yt.seekTo==='function'){yt.seekTo(target,true);return true;}if(media){media.currentTime=target;return true;}return false;"
+				: command === "volume"
+				? "const target=Math.max(0,Math.min(100," + numericValue + "));if(isYt&&typeof yt.setVolume==='function'){yt.setVolume(target);return true;}if(media){media.volume=target/100;return true;}return false;"
+				: command === "mute"
+				? "const muted=" + (numericValue > 0 ? "true" : "false") + ";if(isYt){if(muted&&typeof yt.mute==='function')yt.mute();else if(!muted&&typeof yt.unMute==='function')yt.unMute();return true;}if(media){media.muted=muted;return true;}return false;"
 				: "if(isYt){const state=yt.getPlayerState();return {position:Number(yt.getCurrentTime()||0),duration:Number(yt.getDuration()||0),paused:state!==1};}"
 				  + "if(media)return {position:Number(media.currentTime||0),duration:isFinite(media.duration)?Number(media.duration):0,paused:!!media.paused};return null;")
 			+ "})()"
@@ -50,14 +77,33 @@ ApplicationWindow {
 		return /^https:\/\//i.test(value) ? value : ""
 	}
 
+	function withAlpha(color, alpha) {
+		return Qt.rgba(color.r, color.g, color.b, alpha)
+	}
+
 	function applyDesiredPlaybackState() {
 		if (!mediaSession.playbackControllable)
 			return
+		runOnPlayers(playerScript("volume", mediaSession.volume))
+		runOnPlayers(playerScript("mute", mediaSession.muted ? 1 : 0))
 		runOnPlayers(playerScript("seek", mediaSession.position))
 		if (mediaSession.state === "playing")
 			runOnPlayers(playerScript("play", 0))
 		else if (mediaSession.state === "paused")
 			runOnPlayers(playerScript("pause", 0))
+	}
+
+	Shortcut {
+		sequence: "F11"
+		context: Qt.ApplicationShortcut
+		onActivated: mediaWindow.setFullscreen(mediaWindow.visibility !== Window.FullScreen)
+	}
+
+	Shortcut {
+		sequence: "Escape"
+		context: Qt.ApplicationShortcut
+		enabled: mediaWindow.visibility === Window.FullScreen
+		onActivated: mediaWindow.setFullscreen(false)
 	}
 
     Loader {
@@ -69,13 +115,15 @@ ApplicationWindow {
             id: player
 			property int missingStatePolls: 0
 			Accessible.name: qsTr("Media provider playback")
-			profile: mediaProfiles.videoProfile
+            profile: mediaProfiles.videoProfile
             url: mediaSession.url
             settings.playbackRequiresUserGesture: false
+			onLoadProgressChanged: mediaSession.reportLoadProgress(loadProgress)
             onLoadingChanged: function(request) {
                 if (request.status === WebEngineView.LoadFailedStatus)
                     mediaSession.reportError(request.errorString)
 				else if (request.status === WebEngineView.LoadSucceededStatus) {
+					mediaSession.reportLoadProgress(100)
 					missingStatePolls = 0
 					Qt.callLater(mediaWindow.applyDesiredPlaybackState)
 				}
@@ -116,6 +164,12 @@ ApplicationWindow {
                 function onSeekRequested(seconds) {
 					mediaWindow.runOnPlayers(mediaWindow.playerScript("seek", seconds))
                 }
+				function onVolumeRequested(volume) {
+					mediaWindow.runOnPlayers(mediaWindow.playerScript("volume", volume))
+				}
+				function onMutedRequested(muted) {
+					mediaWindow.runOnPlayers(mediaWindow.playerScript("mute", muted ? 1 : 0))
+				}
                 function onRetryRequested() {
                     player.reload()
                     if (audioPlayerLoader.item)
@@ -124,7 +178,8 @@ ApplicationWindow {
             }
             Timer {
                 interval: 500
-                running: true
+				running: mediaSession.active && mediaSession.playbackControllable
+					&& mediaSession.state !== "error"
                 repeat: true
                 onTriggered: player.runJavaScript(mediaWindow.playerScript("state", 0),
                     function(value) {
@@ -200,10 +255,52 @@ ApplicationWindow {
         }
     }
 
+	Rectangle {
+		anchors.fill: playerLoader
+		visible: mediaSession.active && mediaSession.playbackControllable
+			&& mediaSession.state === "loading" && mediaSession.error.length === 0
+		color: mediaWindow.withAlpha(Theme.strip, 0.9)
+		z: 4
+		Accessible.role: Accessible.AlertMessage
+		Accessible.name: qsTr("Loading media")
+		Accessible.description: mediaSession.loadProgress > 0
+			? qsTr("%1 percent loaded").arg(mediaSession.loadProgress) : qsTr("Contacting provider")
+
+		ColumnLayout {
+			anchors.centerIn: parent
+			width: Math.min(parent.width - Theme.space6 - Theme.space4, 420)
+			spacing: Theme.space3
+
+			BusyIndicator {
+				Layout.alignment: Qt.AlignHCenter
+				running: parent.parent.visible
+				palette.highlight: Theme.accent
+			}
+			Label {
+				Layout.fillWidth: true
+				textFormat: Text.PlainText
+				text: qsTr("Loading %1").arg(mediaSession.provider || qsTr("media"))
+				color: Theme.textStrong
+				font.pixelSize: Theme.fontTitle
+				font.weight: Font.DemiBold
+				horizontalAlignment: Text.AlignHCenter
+			}
+			Label {
+				Layout.fillWidth: true
+				textFormat: Text.PlainText
+				text: mediaSession.loadProgress > 0
+					? qsTr("%1% loaded").arg(mediaSession.loadProgress)
+					: qsTr("The isolated provider player is starting…")
+				color: Theme.textMuted
+				horizontalAlignment: Text.AlignHCenter
+			}
+		}
+	}
+
     Rectangle {
         anchors.fill: playerLoader
         visible: mediaSession.error.length > 0 || (mediaSession.active && !mediaSession.playbackControllable)
-        color: "#d9161b26"
+		color: mediaWindow.withAlpha(Theme.shellBackground, 0.85)
         z: 5
 		Accessible.role: Accessible.AlertMessage
 		Accessible.name: qsTr("Media playback failed")
@@ -212,8 +309,8 @@ ApplicationWindow {
 
         ColumnLayout {
             anchors.centerIn: parent
-            width: Math.min(parent.width - 48, 520)
-            spacing: 14
+			width: Math.min(parent.width - Theme.space6 - Theme.space4, 520)
+			spacing: Theme.space3
 
             Label {
 				textFormat: Text.PlainText
@@ -221,7 +318,7 @@ ApplicationWindow {
                 text: qsTr("Media playback failed")
                 color: Theme.textStrong
                 font.bold: true
-                font.pixelSize: 20
+				font.pixelSize: Theme.fontHeading
                 horizontalAlignment: Text.AlignHCenter
             }
             Label {
@@ -235,6 +332,7 @@ ApplicationWindow {
             }
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
+				spacing: Theme.space2
 				ModernButton { visible: mediaSession.playbackControllable; text: qsTr("Retry"); onClicked: mediaSession.retry() }
 				ModernButton {
 					visible: mediaWindow.externalMediaUrl().length > 0
@@ -245,45 +343,16 @@ ApplicationWindow {
         }
     }
 
-    Rectangle {
+    MediaSessionControls {
         id: controls
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        height: 64
-        color: Theme.panel
-        border.color: Theme.divider
-        RowLayout {
-            anchors.fill: parent
-            anchors.margins: 10
-            ModernButton {
-				enabled: mediaSession.playbackControllable
-					&& (!mediaSession.sharedAvailable || mediaSession.sharedHost)
-                text: mediaSession.state === "playing" ? qsTr("Pause") : qsTr("Play")
-                onClicked: mediaSession.state === "playing" ? mediaSession.pause() : mediaSession.play()
-            }
-            Slider {
-                Layout.fillWidth: true
-				enabled: mediaSession.playbackControllable
-					&& (!mediaSession.sharedAvailable || mediaSession.sharedHost)
-                from: 0
-                to: Math.max(1, mediaSession.duration)
-                value: mediaSession.position
-                onMoved: mediaSession.seek(value)
-				Accessible.name: qsTr("Playback position")
-				Accessible.description: qsTr("Seek within the current media")
-            }
-            Label { textFormat: Text.PlainText; text: Math.floor(mediaSession.position) + " / " + Math.floor(mediaSession.duration) + " s"; color: Theme.textMuted }
-            Label {
-				textFormat: Text.PlainText
-                visible: mediaSession.sharedAvailable
-                text: mediaSession.sharedHost ? qsTr("Hosting") : qsTr("Synchronized")
-                color: mediaSession.sharedHost ? Theme.accent : Theme.textMuted
-            }
-            ModernButton {
-                text: mediaSession.sharedHost ? qsTr("End") : (mediaSession.sharedJoined ? qsTr("Leave") : qsTr("Close"))
-                onClicked: mediaSession.close()
-            }
-        }
+		session: mediaSession
+		fullscreen: mediaWindow.visibility === Window.FullScreen
+		externalAvailable: mediaWindow.externalMediaUrl().length > 0
+		onFullscreenRequested: enabled => mediaWindow.setFullscreen(enabled)
+		onExternalRequested: Qt.openUrlExternally(mediaWindow.externalMediaUrl())
+		onExitConfirmed: disposition => mediaWindow.applyExitDisposition(disposition)
     }
 }

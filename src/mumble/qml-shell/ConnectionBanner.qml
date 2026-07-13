@@ -33,6 +33,7 @@ Rectangle {
                                                            && session && session.canCancel ? "server.disconnect" : ""
     readonly property string primaryActionLabel: connectionState === "disconnected" ? qsTr("Connect") : qsTr("Cancel")
     readonly property bool bannerVisible: connectionState.length > 0 && connectionState !== "connected"
+    readonly property bool compactLayout: width < 520
     readonly property color toneColor: tone === "danger" || tone === "error" ? Theme.danger
                                               : tone === "warning" || tone === "retry" || tone === "orange" ? Theme.warning
                                               : tone === "success" ? Theme.success : Theme.textMuted
@@ -102,13 +103,17 @@ Rectangle {
             color: root.toneColor
         }
 
-        ColumnLayout {
+        GridLayout {
             Layout.fillWidth: true
-            spacing: 3
+            columns: root.compactLayout ? 1 : 2
+            columnSpacing: 12
+            rowSpacing: 3
 
             Label {
 				textFormat: Text.PlainText
                 Layout.fillWidth: true
+                Layout.row: 0
+                Layout.column: 0
                 text: root.title
                 color: Theme.textStrong
                 font.bold: true
@@ -118,21 +123,27 @@ Rectangle {
             Label {
 				textFormat: Text.PlainText
                 Layout.fillWidth: true
+                Layout.row: 1
+                Layout.column: 0
                 visible: text.length > 0
                 text: root.detail
                 color: Theme.textMuted
                 wrapMode: Text.Wrap
             }
-        }
 
-        ModernButton {
-            id: primaryButton
-            objectName: "connectionBannerPrimaryAction"
-            visible: root.primaryActionId.length > 0
-            text: root.primaryActionLabel
-            Accessible.name: text
-            Accessible.description: root.detail
-            onClicked: root.requestPrimaryAction()
+            ModernButton {
+                id: primaryButton
+                objectName: "connectionBannerPrimaryAction"
+                Layout.row: root.compactLayout ? 2 : 0
+                Layout.column: root.compactLayout ? 0 : 1
+                Layout.rowSpan: root.compactLayout ? 1 : 2
+                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                visible: root.primaryActionId.length > 0
+                text: root.primaryActionLabel
+                Accessible.name: text
+                Accessible.description: root.detail
+                onClicked: root.requestPrimaryAction()
+            }
         }
     }
 }

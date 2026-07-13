@@ -11,6 +11,7 @@
 #include <QThread>
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <fstream>
 #include <list>
@@ -290,6 +291,19 @@ signals:
 public:
 	typedef enum { ActivityStateIdle, ActivityStateReturnedFromIdle, ActivityStateActive } ActivityState;
 
+	// Race-free cross-thread telemetry for presentation surfaces. Individual fields may
+	// originate from adjacent audio frames; consumers must not treat this as DSP state.
+	struct VoiceActivitySnapshot {
+		float peakSignalDb      = 0.0f;
+		float peakCleanMicDb    = 0.0f;
+		float speechProbability = 0.0f;
+		int bitrate             = 0;
+		bool transmitting       = false;
+
+		float amplitudeLevel() const;
+		bool hasProcessedInput() const;
+	};
+
 	ActivityState activityState;
 
 	bool bResetProcessor;
@@ -330,11 +344,19 @@ public:
 	void run() Q_DECL_OVERRIDE = 0;
 	virtual bool isAlive() const;
 	bool isTransmitting() const;
+	VoiceActivitySnapshot voiceActivitySnapshot() const noexcept;
 
 	void updateUserMuteDeafState(const ClientUser *user);
 
 protected:
 	virtual void onUserMutedChanged();
+
+private:
+	std::atomic< float > m_voiceActivityPeakSignalDb { 0.0f };
+	std::atomic< float > m_voiceActivityPeakCleanMicDb { 0.0f };
+	std::atomic< float > m_voiceActivitySpeechProbability { 0.0f };
+	std::atomic< int > m_voiceActivityBitrate { 0 };
+	std::atomic< bool > m_voiceActivityTransmitting { false };
 
 public slots:
 	void onUserMuteDeafStateChanged();

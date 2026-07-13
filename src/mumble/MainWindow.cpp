@@ -2350,8 +2350,12 @@ QString persistentChatContentHtml(
 }
 
 QString persistentChatPlainTextSummary(const QString &content, int maxLength = 160) {
-	const QString plainText =
-		QTextDocumentFragment::fromHtml(persistentChatContentHtml(content)).toPlainText().simplified();
+	QString plainText = QTextDocumentFragment::fromHtml(persistentChatContentHtml(content)).toPlainText();
+	// Embedded rich-text objects are represented by U+FFFC in QTextDocument's
+	// plain-text projection. A summary has no object renderer, so retain the
+	// surrounding words while removing the otherwise visible placeholder.
+	plainText.replace(QChar::ObjectReplacementCharacter, QLatin1Char(' '));
+	plainText = plainText.simplified();
 	if (plainText.size() <= maxLength) {
 		return plainText;
 	}
@@ -13099,6 +13103,10 @@ void MainWindow::setupGui() {
 	m_modernShellSyncTimer->setSingleShot(true);
 	m_modernShellSyncTimer->setTimerType(Qt::PreciseTimer);
 	connect(m_modernShellSyncTimer, &QTimer::timeout, this, &MainWindow::runQmlShellStateSync);
+	m_modernDialogVoiceMeterTimer = new QTimer(this);
+	m_modernDialogVoiceMeterTimer->setInterval(80);
+	m_modernDialogVoiceMeterTimer->setTimerType(Qt::PreciseTimer);
+	connect(m_modernDialogVoiceMeterTimer, &QTimer::timeout, this, &MainWindow::refreshModernDialogVoiceMeters);
 
 	m_qmlRoomStateFlushTimer = new QTimer(this);
 	m_qmlRoomStateFlushTimer->setSingleShot(true);
@@ -14815,9 +14823,87 @@ void MainWindow::publishModernDialogState(const QVariantMap &state) {
 	if (!m_qmlShellHost) applyShellLayout();
 	if (!m_qmlShellHost) return;
 	m_qmlShellHost->dialogController()->applyState(state);
+	bool hasLiveVoiceMeter = false;
+	for (const QVariant &sectionValue : state.value(QStringLiteral("sections")).toList()) {
+		for (const QVariant &fieldValue : sectionValue.toMap().value(QStringLiteral("fields")).toList()) {
+			const QVariantMap field = fieldValue.toMap();
+			if (field.value(QStringLiteral("type")).toString() == QLatin1String("voiceMeter")
+				&& !field.value(QStringLiteral("staticMeter")).toBool()) {
+				hasLiveVoiceMeter = true;
+				break;
+			}
+		}
+		if (hasLiveVoiceMeter) break;
+	}
+	if (m_modernDialogVoiceMeterTimer) {
+		if (state.value(QStringLiteral("open")).toBool() && hasLiveVoiceMeter) {
+			refreshModernDialogVoiceMeters();
+			if (!m_modernDialogVoiceMeterTimer->isActive()) m_modernDialogVoiceMeterTimer->start();
+		} else {
+			m_modernDialogVoiceMeterTimer->stop();
+		}
+	}
 	if (!state.value(QStringLiteral("open")).toBool() && !m_modernStartupDialogQueue.isEmpty()) {
 		QTimer::singleShot(0, this, &MainWindow::openNextModernStartupDialog);
 	}
+}
+
+void MainWindow::refreshModernDialogVoiceMeters() {
+	if (!m_qmlShellHost) return;
+	DialogStateController *dialog = m_qmlShellHost->dialogController();
+	if (!dialog || !dialog->open()) {
+		if (m_modernDialogVoiceMeterTimer) m_modernDialogVoiceMeterTimer->stop();
+		return;
+	}
+
+	QStringList fieldIDs;
+	for (const QVariant &sectionValue : dialog->sections()) {
+		for (const QVariant &fieldValue : sectionValue.toMap().value(QStringLiteral("fields")).toList()) {
+			const QVariantMap field = fieldValue.toMap();
+			if (field.value(QStringLiteral("type")).toString() != QLatin1String("voiceMeter")
+				|| field.value(QStringLiteral("staticMeter")).toBool()) {
+				continue;
+			}
+			const QString id = field.value(QStringLiteral("id")).toString().trimmed();
+			if (!id.isEmpty()) fieldIDs.push_back(id);
+		}
+	}
+	if (fieldIDs.isEmpty()) {
+		if (m_modernDialogVoiceMeterTimer) m_modernDialogVoiceMeterTimer->stop();
+		return;
+	}
+
+	const AudioInputPtr audioInput = Global::get().ai;
+	const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot();
+	const bool connected = Global::get().uiSession != 0 && serverHandler && serverHandler->isConnected();
+	const AudioInput::VoiceActivitySnapshot voiceActivity =
+		audioInput ? audioInput->voiceActivitySnapshot() : AudioInput::VoiceActivitySnapshot {};
+	const bool transmitting = audioInput && voiceActivity.transmitting;
+	const bool available = audioInput && voiceActivity.hasProcessedInput();
+
+	QVariantMap meter;
+	meter.insert(QStringLiteral("available"), available);
+	meter.insert(QStringLiteral("connected"), connected);
+	meter.insert(QStringLiteral("transmitting"), transmitting);
+	meter.insert(QStringLiteral("loopbackMode"), static_cast< int >(Global::get().s.lmLoopMode));
+	if (audioInput) {
+		const float amplitude = voiceActivity.amplitudeLevel();
+		const float speechProbability = voiceActivity.speechProbability;
+		meter.insert(QStringLiteral("amplitude"), qBound(0, qRound(amplitude * 100.0f), 100));
+		meter.insert(QStringLiteral("signalToNoise"), qBound(0, qRound(speechProbability * 100.0f), 100));
+		meter.insert(QStringLiteral("hybrid"),
+					 qBound(0,
+							qRound(AudioInput::voiceActivityLevelFor(Settings::Hybrid, amplitude, speechProbability)
+								   * 100.0f),
+							100));
+		meter.insert(QStringLiteral("peakCleanMicDb"), static_cast< double >(voiceActivity.peakCleanMicDb));
+	} else {
+		meter.insert(QStringLiteral("amplitude"), 0);
+		meter.insert(QStringLiteral("signalToNoise"), 0);
+		meter.insert(QStringLiteral("hybrid"), 0);
+	}
+
+	for (const QString &fieldID : fieldIDs) dialog->updatePresentationFieldValue(fieldID, meter);
 }
 
 void MainWindow::queueModernStartupSetup(const bool showAudioSetup, const bool showCertificateSetup) {
@@ -16586,18 +16672,18 @@ void MainWindow::openModernAudioStatsDialog() {
 	const AudioInputPtr audioInput = Global::get().ai;
 	const ServerHandlerPtr serverHandler = Global::get().serverHandlerSnapshot();
 	const bool connected = Global::get().uiSession != 0 && serverHandler && serverHandler->isConnected();
-	const bool transmitting = audioInput && audioInput->isTransmitting();
-	const bool hasProcessedInput =
-		audioInput && (audioInput->dPeakCleanMic < 0.0f || audioInput->dPeakSignal < 0.0f
-					   || audioInput->fSpeechProb > 0.0f || transmitting);
+	const AudioInput::VoiceActivitySnapshot voiceActivity =
+		audioInput ? audioInput->voiceActivitySnapshot() : AudioInput::VoiceActivitySnapshot {};
+	const bool transmitting = audioInput && voiceActivity.transmitting;
+	const bool hasProcessedInput = audioInput && voiceActivity.hasProcessedInput();
 
 	QVariantMap meterPayload;
 	meterPayload.insert(QStringLiteral("available"), hasProcessedInput);
 	meterPayload.insert(QStringLiteral("connected"), connected);
 	meterPayload.insert(QStringLiteral("loopbackMode"), static_cast< int >(settings.lmLoopMode));
 	if (audioInput) {
-		const float amplitudeLevel = audioInput->amplitudeVoiceActivityLevel();
-		const float speechProb     = audioInput->fSpeechProb;
+		const float amplitudeLevel = voiceActivity.amplitudeLevel();
+		const float speechProb     = voiceActivity.speechProbability;
 		meterPayload.insert(QStringLiteral("amplitude"), qBound(0, qRound(amplitudeLevel * 100.0f), 100));
 		meterPayload.insert(QStringLiteral("signalToNoise"), qBound(0, qRound(speechProb * 100.0f), 100));
 		meterPayload.insert(QStringLiteral("hybrid"),
@@ -16607,7 +16693,7 @@ void MainWindow::openModernAudioStatsDialog() {
 										  * 100.0f),
 								   100));
 		meterPayload.insert(QStringLiteral("transmitting"), transmitting);
-		meterPayload.insert(QStringLiteral("peakCleanMicDb"), static_cast< double >(audioInput->dPeakCleanMic));
+		meterPayload.insert(QStringLiteral("peakCleanMicDb"), static_cast< double >(voiceActivity.peakCleanMicDb));
 	}
 
 	QVariantMap liveMeter = modernDialogField(QStringLiteral("audio.liveInput"), tr("Live input"),
@@ -16642,10 +16728,10 @@ void MainWindow::openModernAudioStatsDialog() {
 	const QString pingText      = hasPing ? tr("%1 ms").arg(pingMs, 0, 'f', 0) : tr("Waiting");
 	const QString jitterText    = hasPing ? tr("%1 ms").arg(jitterMs, 0, 'f', 1) : tr("Waiting");
 	const QString bandwidthText = audioInput
-									  ? tr("%1 kbit/s").arg(static_cast< double >(audioInput->iBitrate) / 1000.0, 0, 'f', 1)
+									  ? tr("%1 kbit/s").arg(static_cast< double >(voiceActivity.bitrate) / 1000.0, 0, 'f', 1)
 									  : tr("%1 kbit/s").arg(static_cast< double >(Global::get().iAudioBandwidth) / 1000.0, 0, 'f', 1);
 	const QString signalText =
-		hasProcessedInput && audioInput ? tr("%1 dB").arg(static_cast< double >(audioInput->dPeakCleanMic), 0, 'f', 0)
+		hasProcessedInput && audioInput ? tr("%1 dB").arg(static_cast< double >(voiceActivity.peakCleanMicDb), 0, 'f', 0)
 										: tr("Idle");
 	const QString userName =
 		ClientUser::get(Global::get().uiSession) ? ClientUser::get(Global::get().uiSession)->qsName : tr("You");
@@ -20124,6 +20210,19 @@ void MainWindow::runQmlShellStateSync() {
 	}
 }
 
+void MainWindow::enterQmlShellSteadyState() {
+	// serverConnected() schedules a coalesced full bootstrap before ServerSync is
+	// received. Complete that pending lifecycle bootstrap while full snapshots are
+	// still permitted; otherwise its zero-delay timer can fire immediately after
+	// this transition and be reported as steady-state work.
+	if (m_modernShellSyncTimer && m_modernShellSyncTimer->isActive()) {
+		appendModernShellConnectTrace(QStringLiteral("steady-state flush-pending-bootstrap"));
+		m_modernShellSyncTimer->stop();
+		runQmlShellStateSync();
+	}
+	mumble::chatperf::fullBootstrapMonitor().enterSteadyState();
+}
+
 void MainWindow::publishModernShellTalkState(const ClientUser *user) {
 	if (!user || !m_qmlShellHost) {
 		return;
@@ -21897,6 +21996,7 @@ QVariantMap MainWindow::buildQmlRoomState() {
 		item.insert(QStringLiteral("id"), id);
 		item.insert(QStringLiteral("label"), serverNavigatorPresenceStateLabel(state));
 		item.insert(QStringLiteral("enabled"), connected && enabled);
+		item.insert(QStringLiteral("checkable"), true);
 		item.insert(QStringLiteral("checked"), connected && selfPresenceState == state);
 		if (!tone.isEmpty()) {
 			item.insert(QStringLiteral("tone"), tone);
@@ -22027,6 +22127,7 @@ QVariantMap MainWindow::buildQmlRoomState() {
 		room.insert(QStringLiteral("selected"), selected);
 		room.insert(QStringLiteral("joined"), joined);
 		room.insert(QStringLiteral("canJoin"), connected && !joined);
+		room.insert(QStringLiteral("screenShare"), buildModernShellVoiceRoomScreenShareState(channel));
 		room.insert(QStringLiteral("unreadCount"),
 					static_cast< qulonglong >(cachedPersistentChatUnreadCount(MumbleProto::Channel, channel->iId)));
 		room.insert(QStringLiteral("kindLabel"), tr("Voice room"));
@@ -30124,8 +30225,16 @@ void MainWindow::ensurePersistentChatPreview(const QString &previewKey) {
 
 	if (isGoogleSearchUrl(previewUrl)) {
 		const QString searchQuery = googleSearchQuery(previewUrl);
-		preview.title             = googleSearchModeLabel(previewUrl);
+		const QString modeLabel   = googleSearchModeLabel(previewUrl);
+		preview.title             = modeLabel;
 		preview.description       = searchQuery.isEmpty() ? tr("Google search") : searchQuery;
+		QVariantMap metadata      = preview.metadata;
+		metadata.insert(QStringLiteral("provider"), QStringLiteral("google-search"));
+		metadata.insert(QStringLiteral("previewProvider"), QStringLiteral("google-search"));
+		metadata.insert(QStringLiteral("previewKind"), QStringLiteral("search"));
+		insertPreviewMetadataValue(metadata, QStringLiteral("googleSearchQuery"), searchQuery);
+		insertPreviewMetadataValue(metadata, QStringLiteral("googleSearchModeLabel"), modeLabel);
+		preview.metadata          = metadata;
 		preview.metadataFinished  = true;
 		preview.thumbnailFinished = true;
 		preview.failed            = false;

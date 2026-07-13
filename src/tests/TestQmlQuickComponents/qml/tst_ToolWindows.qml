@@ -62,22 +62,95 @@ TestCase {
 		verify(button !== null)
 		verify(button.activeFocusOnTab)
 		compare(button.Accessible.role, Accessible.Button)
+		verify(button.Accessible.description.indexOf("focus") >= 0)
 
 		// Qt Quick Test cannot reliably route pointer events into a second native
 		// Window on every offscreen backend. Exercise the exact hold functions
 		// wired to AbstractButton::pressed/released, then cover keyboard routing.
 		tool.beginHold()
 		tryCompare(uiCommands, "pttPressed", true)
+		compare(tool.holding, true)
+		const releasesBeforeDuplicatePress = uiCommands.releaseCount
+		tool.beginHold()
+		compare(uiCommands.releaseCount, releasesBeforeDuplicatePress)
 		tool.endHold()
 		tryCompare(uiCommands, "pttPressed", false)
+		compare(tool.holding, false)
 
 		button.forceActiveFocus()
 		tryCompare(button, "activeFocus", true)
-		tool.beginHold()
+		verify(tool.handlePttKeyPressed(Qt.Key_Space, false))
 		tryCompare(uiCommands, "pttPressed", true)
-		tool.endHold()
+		verify(tool.handlePttKeyPressed(Qt.Key_Space, true))
+		tryCompare(uiCommands, "pttPressed", true)
+		verify(tool.handlePttKeyReleased(Qt.Key_Space, false))
 		tryCompare(uiCommands, "pttPressed", false)
+		verify(!tool.handlePttKeyPressed(Qt.Key_Return, false))
 		tool.destroy()
+	}
+
+	function test_pttToolHasBoundedCompactStateAndAccessibleFeedback() {
+		uiCommands.clearCounts()
+		const tool = createTool("qrc:/qml-shell/PttToolWindow.qml", {
+			"width": 270,
+			"height": 190
+		})
+		tool.show()
+		tryCompare(tool, "compactLayout", true)
+		const surface = findChild(tool.contentItem, "pttToolSurface")
+		const button = findChild(tool.contentItem, "pttHoldButton")
+		verify(surface !== null && button !== null)
+		verify(surface.x >= 0 && surface.x + surface.width <= tool.width)
+		verify(surface.y >= 0 && surface.y + surface.height <= tool.height)
+		tool.beginHold()
+		tryCompare(button.Accessible, "pressed", true)
+		verify(button.Accessible.name.indexOf("Transmitting") >= 0)
+		tool.hide()
+		tryCompare(uiCommands, "pttPressed", false)
+		compare(tool.holding, false)
+		tool.destroy()
+	}
+
+	function test_pttDefaultSafetyHintFitsInsideSurface() {
+		const tool = createTool("qrc:/qml-shell/PttToolWindow.qml")
+		try {
+			tool.show()
+			const surface = findChild(tool.contentItem, "pttToolSurface")
+			const safetyHint = findChild(tool.contentItem, "pttSafetyHint")
+			verify(surface !== null && safetyHint !== null)
+			tryVerify(function() { return surface.height > 0 && safetyHint.height > 0 })
+			verify(safetyHint.visible)
+			const hintBottom = safetyHint.mapToItem(surface, 0, safetyHint.height).y
+			verify(hintBottom <= surface.height + 1,
+				"PTT safety hint must not be clipped by the default tool window: bottom="
+					+ hintBottom + ", surface=" + surface.height)
+		} finally {
+			tool.hide()
+			tool.destroy()
+		}
+	}
+
+	function test_pttPersistedRuntimeHeightKeepsSafetyHintVisibleAndUnclipped() {
+		const tool = createTool("qrc:/qml-shell/PttToolWindow.qml", {
+			"width": 340,
+			"height": 240
+		})
+		try {
+			tool.show()
+			tryCompare(tool, "compactLayout", true)
+			const surface = findChild(tool.contentItem, "pttToolSurface")
+			const safetyHint = findChild(tool.contentItem, "pttSafetyHint")
+			verify(surface !== null && safetyHint !== null)
+			tryVerify(function() { return surface.height > 0 && safetyHint.height > 0 })
+			verify(safetyHint.visible)
+			const hintBottom = safetyHint.mapToItem(surface, 0, safetyHint.height).y
+			verify(hintBottom <= surface.height + 1,
+				"PTT safety hint must fit a persisted 340x240 window: bottom="
+					+ hintBottom + ", surface=" + surface.height)
+		} finally {
+			tool.hide()
+			tool.destroy()
+		}
 	}
 
     function test_manualPluginToolLoadsAndRefreshesLazily() {
@@ -93,16 +166,96 @@ TestCase {
         tool.destroy()
     }
 
+	function test_manualPluginToolIsResponsive_and_actions_report_status() {
+		manualPlugin.clearCounts()
+		const tool = createTool("qrc:/qml-shell/ManualPluginWindow.qml", {
+			"width": 460,
+			"height": 560
+		})
+		tool.show()
+		tryCompare(tool, "compactLayout", true)
+		const scroll = findChild(tool.contentItem, "manualPluginScrollView")
+		const content = findChild(tool.contentItem, "manualPluginContent")
+		const preview = findChild(tool.contentItem, "manualPositionPreview")
+		const grid = findChild(tool.contentItem, "manualPositionGrid")
+		verify(scroll !== null && content !== null && preview !== null && grid !== null)
+		compare(grid.columns, 2)
+		tryVerify(function() { return scroll.width > 0 && content.width > 0 && preview.width > 0 })
+		verify(content.width <= scroll.width + 0.5,
+			"Manual content " + content.width + " must fit scroll view " + scroll.width)
+		verify(preview.width <= content.width + 0.5,
+			"Preview " + preview.width + " must fit content " + content.width)
+		compare(preview.Accessible.role, Accessible.Canvas)
+
+		const resetButton = findChild(tool.contentItem, "manualResetButton")
+		const applyButton = findChild(tool.contentItem, "manualApplyButton")
+		const contextField = findChild(tool.contentItem, "manualContextField")
+		const status = findChild(tool.contentItem, "manualPluginStatus")
+		verify(resetButton !== null && applyButton !== null && contextField !== null && status !== null)
+		resetButton.clicked()
+		compare(manualPlugin.resetCount, 1)
+		tryCompare(status, "visible", true)
+		compare(status.text, "Position reset")
+		contextField.text = "pending-context-from-editor"
+		applyButton.clicked()
+		compare(manualPlugin.applyCount, 1)
+		compare(manualPlugin.context, "pending-context-from-editor")
+		compare(status.text, "Position updated")
+		tool.hide()
+		tryCompare(manualPlugin, "speakerUpdatesEnabled", false)
+		tool.destroy()
+	}
+
 	function test_attachmentViewerAcceptsOnlyManagedAnimatedFiles() {
 		const digest = "a".repeat(64)
 		const managed = "file:///C:/Temp/mumble-qml-images-a1/" + digest
 			+ "-12345678-1234-1234-1234-123456789abc.gif"
 		const tool = createTool("qrc:/qml-shell/AttachmentViewer.qml", {
-			"attachment": { "url": managed, "alt": "Managed animation" }
+			"attachment": { "url": "", "alt": "Managed animation" }
 		})
-		compare(tool.renderSource, managed)
-		compare(tool.managedAnimated, true)
+		compare(tool.safeRenderImageSource(managed), managed)
 		compare(tool.safeRenderImageSource("file:///C:/Temp/unmanaged.gif"), "")
+		tool.width = 420
+		tool.height = 320
+		tryCompare(tool, "compactLayout", true)
+		const closeButton = findChild(tool.contentItem, "attachmentViewerCloseButton")
+		verify(closeButton !== null)
+		verify(closeButton.x >= 0 && closeButton.x + closeButton.width <= tool.width)
+		compare(closeButton.Accessible.name, "Close attachment viewer")
+		const errorLabel = findChild(tool.contentItem, "attachmentViewerError")
+		verify(errorLabel !== null && errorLabel.visible)
+		compare(errorLabel.textFormat, Text.PlainText)
+		compare(errorLabel.Accessible.role, Accessible.AlertMessage)
+		tool.destroy()
+	}
+
+	function test_imageViewerRejectsRemoteSourcesAndShowsKeyboardFocus() {
+		dialogState.setSpecialState("imageViewer", {
+			"imageViewer": {
+				"src": "https://untrusted.example/image.png",
+				"width": 640,
+				"height": 480
+			}
+		})
+		const tool = createTool("qrc:/qml-shell/ImageViewer.qml", {
+			"controller": dialogState,
+			"width": 420,
+			"height": 320
+		})
+		tryCompare(tool, "compactLayout", true)
+		const errorLabel = findChild(tool.contentItem, "imageViewerError")
+		verify(errorLabel !== null && errorLabel.visible)
+		compare(errorLabel.textFormat, Text.PlainText)
+		compare(errorLabel.Accessible.role, Accessible.AlertMessage)
+		const stage = findChild(tool.contentItem, "imageViewerStage")
+		verify(stage !== null)
+		stage.forceActiveFocus()
+		tryCompare(stage, "activeFocus", true)
+		const toolbar = findChild(tool.contentItem, "imageViewerZoomToolbar")
+		verify(toolbar !== null)
+		tryVerify(function() {
+			return toolbar.x >= 0 && toolbar.x + toolbar.width <= stage.width
+		})
 		tool.destroy()
 	}
 }

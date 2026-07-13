@@ -12,6 +12,7 @@
 #include "QmlThemeController.h"
 #include "QmlWindowStateController.h"
 #include "ScreenShareVideoItem.h"
+#include "UiTheme.h"
 #include "Global.h"
 #ifdef USE_MANUAL_PLUGIN
 #	include "ManualPluginController.h"
@@ -142,6 +143,19 @@ bool QmlShellHost::start(QString *error) {
 		m_engine.reset();
 		return false;
 	}
+	registerCaptureWindow(m_window);
+	applyUiThemeNativeTitleBar(m_window);
+	connect(m_themeController.get(), &QmlThemeController::themeChanged, this, [this]() {
+		const QColor caption = m_themeController->shellBackground();
+		const QColor text = m_themeController->textStrong();
+		const UiThemeWindowChrome chrome { caption, text, m_themeController->surfaceBorder(),
+			text.lightness() > caption.lightness() };
+		applyUiThemeNativeTitleBar(m_window, chrome);
+		applyUiThemeNativeTitleBar(m_pttToolWindow, chrome);
+#ifdef USE_MANUAL_PLUGIN
+		applyUiThemeNativeTitleBar(m_manualPluginWindow, chrome);
+#endif
+	});
 	m_windowStateController->attach(m_window, Global::get().s.qbaModernMainWindowGeometry,
 		m_window->minimumSize());
 	connect(m_windowStateController.get(), &QmlWindowStateController::encodedStateChanged, this,
@@ -246,9 +260,69 @@ void QmlShellHost::setVisualFixtureMutationActive(const bool active) {
 	}
 }
 
-bool QmlShellHost::captureWindow(const QString &path, QString *error) const {
-	if (!m_window) {
-		if (error) *error = tr("The Qt Quick window is not available.");
+QQuickWindow *QmlShellHost::captureTargetWindow(const QString &windowId, QString *error) const {
+	const QString normalizedWindowId = windowId.trimmed().toLower();
+	if (normalizedWindowId == QLatin1String("ptt")) {
+		return m_pttToolWindow;
+	}
+#ifdef USE_MANUAL_PLUGIN
+	if (normalizedWindowId == QLatin1String("manual-plugin")
+		|| normalizedWindowId == QLatin1String("manualplugin")) {
+		return m_manualPluginWindow;
+	}
+#endif
+	if (!normalizedWindowId.isEmpty() && normalizedWindowId != QLatin1String("main")) {
+		if (error) *error = tr("Unknown Qt Quick window '%1'.").arg(windowId);
+		return nullptr;
+	}
+	return m_window;
+}
+
+void QmlShellHost::registerCaptureWindow(QQuickWindow *window) {
+	if (!window) return;
+	m_captureReadyWindows.remove(window);
+	const QPointer< QQuickWindow > guardedWindow(window);
+	connect(window, &QQuickWindow::frameSwapped, this, [this, guardedWindow]() {
+		if (guardedWindow && guardedWindow->isVisible() && guardedWindow->isExposed()) {
+			m_captureReadyWindows.insert(guardedWindow.data());
+		}
+	}, Qt::QueuedConnection);
+	connect(window, &QQuickWindow::sceneGraphInvalidated, this, [this, guardedWindow]() {
+		if (guardedWindow) m_captureReadyWindows.remove(guardedWindow.data());
+	}, Qt::QueuedConnection);
+	connect(window, &QWindow::visibilityChanged, this, [this, guardedWindow](const QWindow::Visibility visibility) {
+		if (!guardedWindow) return;
+		m_captureReadyWindows.remove(guardedWindow.data());
+		if (visibility != QWindow::Hidden && visibility != QWindow::Minimized) guardedWindow->requestUpdate();
+	});
+	connect(window, &QObject::destroyed, this, [this, window]() { m_captureReadyWindows.remove(window); });
+	if (window->isVisible()) window->requestUpdate();
+}
+
+bool QmlShellHost::captureWindowReady(const QString &windowId) const {
+	QQuickWindow *targetWindow = captureTargetWindow(windowId);
+	return targetWindow && targetWindow->isVisible() && targetWindow->isExposed()
+		&& m_captureReadyWindows.contains(targetWindow);
+}
+
+bool QmlShellHost::captureWindow(const QString &path, QString *error, const QString &windowId) const {
+	QQuickWindow *targetWindow = captureTargetWindow(windowId, error);
+
+	if (!targetWindow) {
+		if (error) {
+			const QString normalizedWindowId = windowId.trimmed().toLower();
+			if (error->isEmpty()) *error = normalizedWindowId.isEmpty() || normalizedWindowId == QLatin1String("main")
+				? tr("The Qt Quick window is not available.")
+				: tr("The requested Qt Quick tool window is not visible.");
+		}
+		return false;
+	}
+	if (!targetWindow->isVisible()) {
+		if (error) *error = tr("The requested Qt Quick window is not visible.");
+		return false;
+	}
+	if (!captureWindowReady(windowId)) {
+		if (error) *error = tr("The requested Qt Quick window has not presented its first frame yet; retry capture.");
 		return false;
 	}
 	const QFileInfo fileInfo(path);
@@ -260,7 +334,7 @@ bool QmlShellHost::captureWindow(const QString &path, QString *error) const {
 		if (error) *error = tr("The capture directory could not be created.");
 		return false;
 	}
-	const QImage image = m_window->grabWindow();
+	const QImage image = targetWindow->grabWindow();
 	if (image.isNull() || !image.save(fileInfo.absoluteFilePath(), "PNG")) {
 		if (error) *error = tr("The Qt Quick window could not be captured.");
 		return false;
@@ -287,6 +361,8 @@ bool QmlShellHost::ensurePttToolWindow() {
 	QQmlEngine::setObjectOwnership(window, QQmlEngine::CppOwnership);
 	m_pttToolWindow = window;
 	window->setTransientParent(m_window);
+	registerCaptureWindow(window);
+	applyUiThemeNativeTitleBar(window);
 	window->installEventFilter(this);
 	m_pttWindowStateController->attach(window, Global::get().s.qbaPTTButtonWindowGeometry, QSize(240, 140));
 	connect(m_pttWindowStateController.get(), &QmlWindowStateController::encodedStateChanged, this,
@@ -314,6 +390,10 @@ void QmlShellHost::showPttTool(const bool visible) {
 	m_pttToolWindow->requestActivate();
 }
 
+bool QmlShellHost::pttToolVisible() const {
+	return m_pttToolWindow && m_pttToolWindow->isVisible();
+}
+
 #ifdef USE_MANUAL_PLUGIN
 ManualPluginController *QmlShellHost::manualPluginController() const {
 	return m_manualPluginController.get();
@@ -338,16 +418,26 @@ bool QmlShellHost::ensureManualPluginWindow() {
 	QQmlEngine::setObjectOwnership(window, QQmlEngine::CppOwnership);
 	m_manualPluginWindow = window;
 	window->setTransientParent(m_window);
+	registerCaptureWindow(window);
+	applyUiThemeNativeTitleBar(window);
 	connect(window, &QObject::destroyed, this, [this]() { m_manualPluginWindow = nullptr; });
 	return true;
 }
 
-void QmlShellHost::showManualPluginTool() {
+void QmlShellHost::showManualPluginTool(const bool visible) {
+	if (!visible) {
+		if (m_manualPluginWindow) m_manualPluginWindow->hide();
+		return;
+	}
 	if (!ensureManualPluginWindow()) return;
 	m_manualPluginController->refresh();
 	m_manualPluginWindow->show();
 	m_manualPluginWindow->raise();
 	m_manualPluginWindow->requestActivate();
+}
+
+bool QmlShellHost::manualPluginToolVisible() const {
+	return m_manualPluginWindow && m_manualPluginWindow->isVisible();
 }
 #endif
 

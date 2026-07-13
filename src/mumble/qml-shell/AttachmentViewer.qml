@@ -7,11 +7,15 @@ Window {
     id: viewer
 
     required property var attachment
-    readonly property string sourceUrl: attachment ? (attachment.url || attachment.thumbnailUrl || "") : ""
-    readonly property string displayTitle: attachment ? (attachment.alt || attachment.name || qsTr("Image attachment")) : qsTr("Image attachment")
+	readonly property string sourceUrl: safeText(attachment
+		? (attachment.url || attachment.thumbnailUrl || "") : "", 2048)
+	readonly property string displayTitle: safeText(attachment
+		? (attachment.alt || attachment.name || qsTr("Image attachment")) : "", 512)
+		|| qsTr("Image attachment")
 	readonly property string renderSource: safeRenderImageSource(sourceUrl)
 	readonly property bool managedAnimated: /^file:\/\//i.test(renderSource)
 	readonly property int loadStatus: managedAnimated ? animation.status : picture.status
+	readonly property bool compactLayout: width < 560 || height < 440
 
     function safeRenderImageSource(value) {
         const source = String(value === undefined || value === null ? "" : value).trim()
@@ -30,58 +34,115 @@ Window {
     color: Theme.shellBackground
     title: displayTitle
 
+	Shortcut {
+		sequence: "Escape"
+		onActivated: viewer.close()
+	}
+
     Rectangle {
         anchors.fill: parent
         color: Theme.shellBackground
         border.color: Theme.divider
+		Accessible.role: Accessible.Pane
+		Accessible.name: viewer.displayTitle
 
-        Image {
-            id: picture
+		Rectangle {
+			id: viewerHeader
+			anchors.left: parent.left
+			anchors.right: parent.right
+			anchors.top: parent.top
+			height: Theme.controlHeight + (viewer.compactLayout ? Theme.space3 : Theme.space4)
+			color: Theme.panel
+			border.color: Theme.divider
+
+			Label {
+				anchors.left: parent.left
+				anchors.right: closeButton.left
+				anchors.leftMargin: viewer.compactLayout ? Theme.space3 : Theme.space4
+				anchors.rightMargin: Theme.space2
+				anchors.verticalCenter: parent.verticalCenter
+				textFormat: Text.PlainText
+				text: viewer.displayTitle
+				color: Theme.textStrong
+				font.pixelSize: Theme.fontTitle
+				font.bold: true
+				elide: Text.ElideMiddle
+			}
+
+			ModernIconButton {
+				id: closeButton
+				objectName: "attachmentViewerCloseButton"
+				anchors.right: parent.right
+				anchors.rightMargin: Theme.space2
+				anchors.verticalCenter: parent.verticalCenter
+				iconName: "close"
+				Accessible.name: qsTr("Close attachment viewer")
+				onClicked: viewer.close()
+			}
+		}
+
+		Item {
+			id: imageStage
+			anchors.left: parent.left
+			anchors.right: parent.right
+			anchors.top: viewerHeader.bottom
+			anchors.bottom: parent.bottom
+			clip: true
+
+			Image {
+				id: picture
             anchors.fill: parent
-            anchors.margins: 18
+				anchors.margins: viewer.compactLayout ? Theme.space3 : Theme.space4
 			source: viewer.managedAnimated ? "" : viewer.renderSource
             asynchronous: true
             cache: false
             fillMode: Image.PreserveAspectFit
 			visible: !viewer.managedAnimated
             Accessible.name: viewer.displayTitle
-        }
-
-		AnimatedImage {
-			id: animation
-			anchors.fill: parent
-			anchors.margins: 18
-			source: viewer.managedAnimated ? viewer.renderSource : ""
-			asynchronous: true
-			cache: false
-			fillMode: Image.PreserveAspectFit
-			playing: viewer.visible && status === AnimatedImage.Ready
-			visible: viewer.managedAnimated
-			Accessible.name: viewer.displayTitle
-		}
-
-        BusyIndicator {
-            anchors.centerIn: parent
-			running: viewer.loadStatus === Image.Loading
-            visible: running
-        }
-
-        Label {
-			textFormat: Text.PlainText
-            anchors.centerIn: parent
-			visible: viewer.loadStatus === Image.Error || viewer.renderSource.length === 0
-            text: qsTr("Attachment unavailable")
-            color: Theme.textMuted
-        }
-
-        RowLayout {
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.margins: 12
-            ModernButton {
-                text: qsTr("Close")
-                onClicked: viewer.close()
             }
-        }
+
+			AnimatedImage {
+				id: animation
+				anchors.fill: parent
+				anchors.margins: viewer.compactLayout ? Theme.space3 : Theme.space4
+				source: viewer.managedAnimated ? viewer.renderSource : ""
+				asynchronous: true
+				cache: false
+				fillMode: Image.PreserveAspectFit
+				playing: viewer.visible && status === AnimatedImage.Ready
+				visible: viewer.managedAnimated
+				Accessible.name: viewer.displayTitle
+			}
+
+			BusyIndicator {
+				anchors.centerIn: parent
+				running: viewer.loadStatus === Image.Loading
+				visible: running
+				palette.highlight: Theme.accent
+				Accessible.name: qsTr("Loading %1").arg(viewer.displayTitle)
+			}
+
+			Label {
+				objectName: "attachmentViewerError"
+				textFormat: Text.PlainText
+				anchors.centerIn: parent
+				width: Math.max(1, parent.width - Theme.space6 * 2)
+				visible: viewer.loadStatus === Image.Error || viewer.renderSource.length === 0
+				text: qsTr("Attachment unavailable")
+				color: Theme.textMuted
+				font.pixelSize: Theme.fontLabel
+				horizontalAlignment: Text.AlignHCenter
+				wrapMode: Text.Wrap
+				Accessible.role: Accessible.AlertMessage
+				Accessible.name: text
+				Accessible.description: viewer.displayTitle
+			}
+		}
     }
+
+	function safeText(value, maximum) {
+		if (value === undefined || value === null || typeof value === "object")
+			return ""
+		return String(value).trim().slice(0, maximum || 512)
+	}
 }

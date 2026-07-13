@@ -301,7 +301,7 @@ void MainWindow::msgServerSync(const MumbleProto::ServerSync &msg) {
 
 
 	Global::get().sh->setServerSynchronized(true);
-	mumble::chatperf::fullBootstrapMonitor().enterSteadyState();
+	enterQmlShellSteadyState();
 	updateChatBar();
 	warmupPersistentChatHistory();
 	appendServerSyncTrace(QStringLiteral("exit"));

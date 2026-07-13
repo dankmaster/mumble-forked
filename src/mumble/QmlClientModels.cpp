@@ -26,6 +26,7 @@
 #include <QtGui/QTextFragment>
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <numeric>
 #include <optional>
@@ -39,6 +40,16 @@ namespace {
 	constexpr qsizetype MaxReactionActorCount = 32;
 	constexpr qsizetype MaxReactionEmojiCharacters = 64;
 	constexpr qsizetype MaxReactionActorNameCharacters = 256;
+
+	bool participantHasStatus(const QVariantList &statuses, const QStringList &kinds) {
+		for (const QVariant &entry : statuses) {
+			const QString kind = entry.toMap().value(QStringLiteral("kind")).toString().trimmed();
+			for (const QString &candidate : kinds) {
+				if (kind.compare(candidate, Qt::CaseInsensitive) == 0) return true;
+			}
+		}
+		return false;
+	}
 
 	bool acceptsFrontendStateMutation(const QObject *object) {
 		return !object->property(QmlVisualFixtureMutation::OverrideProperty).toBool()
@@ -294,6 +305,25 @@ namespace {
 			QStringLiteral("^[A-Za-z][A-Za-z0-9_.-]{0,63}$"));
 		constexpr qsizetype MaxMetadataFields = 32;
 		constexpr qsizetype MaxMetadataStringCharacters = 4096;
+		constexpr qsizetype MaxMetadataListEntries = 8;
+		constexpr qsizetype MaxSparklinePoints = 64;
+		constexpr qsizetype MaxSocialContextEntries = 3;
+		constexpr qsizetype MaxStructuredTextCharacters = 1024;
+		constexpr qsizetype MaxMetadataUrlCharacters = 16384;
+		constexpr qulonglong MaxMetadataSafeInteger = 9007199254740991ULL;
+		const auto boundedText = [](const QVariant &field, const qsizetype maximum) {
+			return field.toString().trimmed().left(maximum);
+		};
+		const auto isNumeric = [](const QVariant &field) {
+			switch (field.metaType().id()) {
+				case QMetaType::Int:
+				case QMetaType::UInt:
+				case QMetaType::LongLong:
+				case QMetaType::ULongLong:
+				case QMetaType::Double: return true;
+				default: return false;
+			}
+		};
 		const auto appendScalar = [&](const QString &key, const QVariant &field) {
 			if (normalized.size() >= MaxMetadataFields || consumed.contains(key)
 				|| !safeKey.match(key).hasMatch()) return;
@@ -303,21 +333,469 @@ namespace {
 				case QMetaType::Int:
 				case QMetaType::UInt:
 				case QMetaType::LongLong:
-				case QMetaType::ULongLong:
-				case QMetaType::Double: normalized.insert(key, field); break;
+				case QMetaType::ULongLong: normalized.insert(key, field); break;
+				case QMetaType::Double:
+					if (std::isfinite(field.toDouble())) normalized.insert(key, field);
+					break;
 				case QMetaType::QString:
 					normalized.insert(key, field.toString().left(MaxMetadataStringCharacters));
 					break;
 				default: break;
 			}
 		};
+		const auto appendBoundedText = [&](const QString &key, const qsizetype maximum) {
+			if (consumed.contains(key) || !safeKey.match(key).hasMatch()) return;
+			consumed.insert(key);
+			if (normalized.size() >= MaxMetadataFields || !source.contains(key)) return;
+			const QVariant field = source.value(key);
+			if (field.metaType().id() != QMetaType::QString) return;
+			const QString text = boundedText(field, maximum);
+			if (!text.isEmpty()) normalized.insert(key, text);
+		};
+		const auto appendBoolean = [&](const QString &key) {
+			if (consumed.contains(key) || !safeKey.match(key).hasMatch()) return;
+			consumed.insert(key);
+			if (normalized.size() >= MaxMetadataFields || !source.contains(key)) return;
+			const QVariant field = source.value(key);
+			if (field.metaType().id() == QMetaType::Bool) normalized.insert(key, field.toBool());
+		};
+		const auto boundedUnsignedInteger = [&](const QVariant &field,
+												 const qulonglong maximum) -> std::optional< qulonglong > {
+			qulonglong value = 0;
+			switch (field.metaType().id()) {
+				case QMetaType::Int:
+				case QMetaType::LongLong: {
+					const qlonglong signedValue = field.toLongLong();
+					if (signedValue < 0) return std::nullopt;
+					value = static_cast< qulonglong >(signedValue);
+					break;
+				}
+				case QMetaType::UInt:
+				case QMetaType::ULongLong: value = field.toULongLong(); break;
+				case QMetaType::Double: {
+					const double numericValue = field.toDouble();
+					if (!std::isfinite(numericValue) || numericValue < 0.0
+						|| numericValue > static_cast< double >(maximum)
+						|| std::floor(numericValue) != numericValue) {
+						return std::nullopt;
+					}
+					value = static_cast< qulonglong >(numericValue);
+					break;
+				}
+				default: return std::nullopt;
+			}
+			return value <= maximum ? std::optional< qulonglong >(value) : std::nullopt;
+		};
+		const auto appendUnsignedInteger = [&](const QString &key, const qulonglong maximum) {
+			if (consumed.contains(key) || !safeKey.match(key).hasMatch()) return;
+			consumed.insert(key);
+			if (normalized.size() >= MaxMetadataFields || !source.contains(key)) return;
+			const std::optional< qulonglong > value = boundedUnsignedInteger(source.value(key), maximum);
+			if (value) normalized.insert(key, QVariant::fromValue(*value));
+		};
+		const auto appendWebUrl = [&](const QString &key) {
+			if (consumed.contains(key) || !safeKey.match(key).hasMatch()) return;
+			consumed.insert(key);
+			if (normalized.size() >= MaxMetadataFields || !source.contains(key)) return;
+			const QVariant field = source.value(key);
+			if (field.metaType().id() != QMetaType::QString
+				|| field.toString().trimmed().size() > MaxMetadataUrlCharacters) return;
+			const QString safe = safeExternalUrl(field);
+			const QString scheme = QUrl(safe).scheme().toLower();
+			if (!safe.isEmpty() && (scheme == QLatin1String("http") || scheme == QLatin1String("https"))) {
+				normalized.insert(key, safe);
+			}
+		};
+		const auto appendManagedImage = [&](const QString &key) {
+			if (consumed.contains(key) || !safeKey.match(key).hasMatch()) return;
+			consumed.insert(key);
+			if (normalized.size() >= MaxMetadataFields || !source.contains(key)) return;
+			const QString image = safeImageSource(source.value(key));
+			if (!image.isEmpty()) normalized.insert(key, image);
+		};
+		const auto consumeField = [&](const QString &key) { consumed.insert(key); };
+		const auto appendStringList = [&](const QString &key) {
+			if (normalized.size() >= MaxMetadataFields || !source.contains(key)) return;
+			QVariantList result;
+			for (const QVariant &entry : source.value(key).toList()) {
+				const QString text = boundedText(entry, 256);
+				if (!text.isEmpty() && !result.contains(text)) result.push_back(text);
+				if (result.size() >= MaxMetadataListEntries) break;
+			}
+			consumed.insert(key);
+			if (!result.isEmpty()) normalized.insert(key, result);
+		};
+		const auto appendSpecList = [&](const QString &key) {
+			if (normalized.size() >= MaxMetadataFields || !source.contains(key)) return;
+			QVariantList result;
+			for (const QVariant &entry : source.value(key).toList()) {
+				const QVariantMap item = entry.toMap();
+				const QString label = boundedText(item.value(QStringLiteral("label")), 128);
+				const QString valueText = boundedText(item.value(QStringLiteral("value")), 256);
+				if (!label.isEmpty() && !valueText.isEmpty()) {
+					result.push_back(QVariantMap { { QStringLiteral("label"), label },
+											 { QStringLiteral("value"), valueText } });
+				}
+				if (result.size() >= MaxMetadataListEntries) break;
+			}
+			consumed.insert(key);
+			if (!result.isEmpty()) normalized.insert(key, result);
+		};
+		const auto normalizedSocialPost = [&](const QVariant &entry) {
+			const QVariantMap item = entry.toMap();
+			QVariantMap result;
+			for (const QString &key : { QStringLiteral("id"), QStringLiteral("displayName"),
+					 QStringLiteral("handle"), QStringLiteral("text"), QStringLiteral("verified"),
+					 QStringLiteral("createdAt"), QStringLiteral("replyCount"),
+					 QStringLiteral("likeCount"), QStringLiteral("repostCount"),
+					 QStringLiteral("quoteCount"), QStringLiteral("bookmarkCount"),
+					 QStringLiteral("viewCount") }) {
+				const QVariant field = item.value(key);
+				if (field.metaType().id() == QMetaType::Bool || isNumeric(field)) {
+					result.insert(key, field);
+				} else if (field.metaType().id() == QMetaType::QString) {
+					const QString text = boundedText(field, key == QLatin1String("text")
+						? MaxStructuredTextCharacters : 256);
+					if (!text.isEmpty()) result.insert(key, text);
+				}
+			}
+			return result;
+		};
+		const auto appendTwitchMetadata = [&] {
+			for (const QString &key : { QStringLiteral("twitchKind"), QStringLiteral("twitchBadge"),
+					 QStringLiteral("twitchChannel"), QStringLiteral("twitchVideoId"),
+					 QStringLiteral("twitchClipSlug"), QStringLiteral("twitchCollectionId"),
+					 QStringLiteral("twitchDisplayName"), QStringLiteral("twitchLiveState"),
+					 QStringLiteral("twitchEmbedMode"), QStringLiteral("twitchStreamType"),
+					 QStringLiteral("twitchGame"), QStringLiteral("twitchSuggestedVideoId"),
+					 QStringLiteral("twitchSuggestedClipSlug") }) {
+				appendBoundedText(key, 256);
+			}
+			for (const QString &key : { QStringLiteral("twitchPlaybackNote"),
+					 QStringLiteral("twitchDisclaimer"), QStringLiteral("twitchMetadataFailure"),
+					 QStringLiteral("twitchStateFailure") }) {
+				appendBoundedText(key, MaxStructuredTextCharacters);
+			}
+			appendUnsignedInteger(QStringLiteral("twitchMetadataVersion"), 1000);
+			appendUnsignedInteger(QStringLiteral("twitchViewerCount"), MaxMetadataSafeInteger);
+			appendWebUrl(QStringLiteral("twitchSuggestedEmbedUrl"));
+			// Remote provider images must be registered with QmlImagePipeline before
+			// they can cross this boundary.
+			appendManagedImage(QStringLiteral("twitchThumbnailUrl"));
+		};
+		const auto appendGitHubMetadata = [&] {
+			appendStringList(QStringLiteral("githubTopics"));
+			for (const QString &key : { QStringLiteral("githubOwner"), QStringLiteral("githubRepo"),
+					 QStringLiteral("githubFullName"), QStringLiteral("githubLanguage"),
+					 QStringLiteral("githubDefaultBranch"), QStringLiteral("githubPushedAt"),
+					 QStringLiteral("githubOwnerLogin"), QStringLiteral("githubLicense"),
+					 QStringLiteral("githubLatestReleaseTag"), QStringLiteral("githubLatestReleaseName"),
+					 QStringLiteral("githubLatestReleasePublishedAt"),
+					 QStringLiteral("githubLatestReleaseAssetName") }) {
+				appendBoundedText(key, 256);
+			}
+			appendBoundedText(QStringLiteral("githubDescription"), MaxStructuredTextCharacters);
+			appendBoundedText(QStringLiteral("githubLatestReleaseNotes"), MaxStructuredTextCharacters);
+			for (const QString &key : { QStringLiteral("githubStars"), QStringLiteral("githubForks"),
+					 QStringLiteral("githubOpenIssues"), QStringLiteral("githubLatestReleaseAssetCount"),
+					 QStringLiteral("githubLatestReleaseDownloadCount") }) {
+				appendUnsignedInteger(key, MaxMetadataSafeInteger);
+			}
+			for (const QString &key : { QStringLiteral("githubPrivate"), QStringLiteral("githubArchived"),
+					 QStringLiteral("githubFork"), QStringLiteral("githubLatestReleaseLoading"),
+					 QStringLiteral("githubLatestReleaseMissing"),
+					 QStringLiteral("githubLatestReleasePrerelease") }) {
+				appendBoolean(key);
+			}
+			for (const QString &key : { QStringLiteral("githubHtmlUrl"),
+					 QStringLiteral("githubLatestReleaseUrl"),
+					 QStringLiteral("githubLatestReleaseAssetUrl") }) {
+				appendWebUrl(key);
+			}
+			appendManagedImage(QStringLiteral("githubOwnerAvatarUrl"));
+		};
+		const auto appendForumMetadata = [&] {
+			// The producer mirrors first-post fields for compatibility. Keep one copy
+			// so the 32-field budget is spent on distinct, rendered information.
+			const auto appendPreferredPostText = [&](const QString &suffix, const qsizetype maximum) {
+				const QString primary = QStringLiteral("forumPost%1").arg(suffix);
+				const QString fallback = QStringLiteral("forumFirstPost%1").arg(suffix);
+				if (source.contains(primary)) {
+					appendBoundedText(primary, maximum);
+					consumeField(fallback);
+				} else if (source.contains(fallback) && !consumed.contains(primary)
+						   && !consumed.contains(fallback)) {
+					consumed.insert(primary);
+					consumed.insert(fallback);
+					const QVariant field = source.value(fallback);
+					if (normalized.size() < MaxMetadataFields && field.metaType().id() == QMetaType::QString) {
+						const QString text = boundedText(field, maximum);
+						if (!text.isEmpty()) normalized.insert(primary, text);
+					}
+				}
+			};
+			const auto appendPreferredPostImage = [&](const QString &suffix) {
+				const QString primary = QStringLiteral("forumPost%1").arg(suffix);
+				const QString fallback = QStringLiteral("forumFirstPost%1").arg(suffix);
+				if (source.contains(primary)) {
+					appendManagedImage(primary);
+					consumeField(fallback);
+				} else if (source.contains(fallback) && !consumed.contains(primary)
+						   && !consumed.contains(fallback)) {
+					consumed.insert(primary);
+					consumed.insert(fallback);
+					const QString image = safeImageSource(source.value(fallback));
+					if (normalized.size() < MaxMetadataFields && !image.isEmpty()) {
+						normalized.insert(primary, image);
+					}
+				}
+			};
+
+			for (const QString &key : { QStringLiteral("forumProvider"),
+					 QStringLiteral("forumThreadTitle"), QStringLiteral("forumLinkKind"),
+					 QStringLiteral("forumCategory"), QStringLiteral("forumName"),
+					 QStringLiteral("forumPage"), QStringLiteral("forumPageCount"),
+					 QStringLiteral("forumPostCount") }) {
+				appendBoundedText(key, key == QLatin1String("forumThreadTitle") ? 512 : 256);
+			}
+			if (source.contains(QStringLiteral("forumThreadId"))) {
+				appendBoundedText(QStringLiteral("forumThreadId"), 128);
+				consumeField(QStringLiteral("threadId"));
+			} else {
+				appendBoundedText(QStringLiteral("threadId"), 128);
+			}
+			if (source.contains(QStringLiteral("postId"))) {
+				appendBoundedText(QStringLiteral("postId"), 128);
+				consumeField(QStringLiteral("forumLinkedPostId"));
+			} else {
+				appendBoundedText(QStringLiteral("forumLinkedPostId"), 128);
+			}
+			appendWebUrl(QStringLiteral("forumThreadPostUrl"));
+			for (const QString &suffix : { QStringLiteral("Id"), QStringLiteral("Time"),
+					 QStringLiteral("Number"), QStringLiteral("Author"), QStringLiteral("AuthorTitle"),
+					 QStringLiteral("AuthorRegistered"), QStringLiteral("AuthorPosts") }) {
+				appendPreferredPostText(suffix, 256);
+			}
+			appendPreferredPostText(QStringLiteral("Excerpt"), MaxStructuredTextCharacters);
+			appendPreferredPostImage(QStringLiteral("AuthorAvatarUrl"));
+			appendBoundedText(QStringLiteral("forumQuoteAuthor"), 256);
+			appendBoundedText(QStringLiteral("forumQuoteExcerpt"), MaxStructuredTextCharacters);
+			appendBoundedText(QStringLiteral("forumQuotePostId"), 128);
+			appendBoundedText(QStringLiteral("forumQuotePostNumber"), 64);
+			appendWebUrl(QStringLiteral("forumQuotePostUrl"));
+		};
+		const auto appendInstagramMetadata = [&] {
+			appendUnsignedInteger(QStringLiteral("instagramMetadataVersion"), 1000);
+			appendBoundedText(QStringLiteral("instagramMediaKind"), 64);
+			appendBoundedText(QStringLiteral("instagramDisplayName"), 256);
+			appendBoundedText(QStringLiteral("instagramHandle"), 128);
+			appendBoundedText(QStringLiteral("instagramCaption"), MaxStructuredTextCharacters);
+			appendBoundedText(QStringLiteral("instagramCreatedAt"), 128);
+			appendBoundedText(QStringLiteral("instagramOwnerUserId"), 128);
+			appendUnsignedInteger(QStringLiteral("instagramLikeCount"), MaxMetadataSafeInteger);
+			appendUnsignedInteger(QStringLiteral("instagramCommentCount"), MaxMetadataSafeInteger);
+			appendManagedImage(QStringLiteral("instagramAvatarUrl"));
+		};
+		const auto appendSteamMetadata = [&] {
+			for (const QString &key : { QStringLiteral("steamAppId"), QStringLiteral("steamAppName"),
+					 QStringLiteral("steamDeveloper"), QStringLiteral("steamGenres"),
+					 QStringLiteral("steamReleaseDate"), QStringLiteral("steamPlatforms"),
+					 QStringLiteral("steamPrice"), QStringLiteral("steamOriginalPrice"),
+					 QStringLiteral("steamReviewSummary") }) {
+				appendBoundedText(key, 256);
+			}
+			appendUnsignedInteger(QStringLiteral("steamDiscountPercent"), 100);
+			appendUnsignedInteger(QStringLiteral("steamRecommendationsTotal"), MaxMetadataSafeInteger);
+			appendUnsignedInteger(QStringLiteral("steamMetacriticScore"), 100);
+			appendUnsignedInteger(QStringLiteral("steamReviewScore"), 100);
+			appendUnsignedInteger(QStringLiteral("steamReviewTotal"), MaxMetadataSafeInteger);
+			appendUnsignedInteger(QStringLiteral("steamReviewPositive"), MaxMetadataSafeInteger);
+			appendUnsignedInteger(QStringLiteral("steamReviewNegative"), MaxMetadataSafeInteger);
+			appendUnsignedInteger(QStringLiteral("steamReviewPercent"), 100);
+			appendWebUrl(QStringLiteral("steamStoreUrl"));
+			appendWebUrl(QStringLiteral("steamMetacriticUrl"));
+			appendManagedImage(QStringLiteral("steamHeaderImage"));
+			appendManagedImage(QStringLiteral("steamCapsuleImage"));
+			consumeField(QStringLiteral("steamMediaItems"));
+		};
+		const auto appendVehicleMetadata = [&] {
+			appendBoundedText(QStringLiteral("vehicleWarning"), 256);
+			appendBoundedText(QStringLiteral("vehicleListingId"), 128);
+			appendManagedImage(QStringLiteral("vehicleImage"));
+		};
+		const auto appendGoogleSearchMetadata = [&] {
+			appendBoundedText(QStringLiteral("googleSearchQuery"), MaxStructuredTextCharacters);
+			appendBoundedText(QStringLiteral("googleSearchMode"), 128);
+			appendBoundedText(QStringLiteral("googleSearchModeLabel"), 128);
+		};
+		const auto appendLinkDigestMetadata = [&] {
+			appendBoundedText(QStringLiteral("linkDigestTitle"), 512);
+			appendBoundedText(QStringLiteral("linkDigestSource"), 256);
+			appendBoundedText(QStringLiteral("linkDigestCaption"), MaxStructuredTextCharacters);
+		};
+
+		for (const QString &key : { QStringLiteral("provider"), QStringLiteral("previewProvider"),
+				 QStringLiteral("providerName"), QStringLiteral("previewKind") }) {
+			appendBoundedText(key, 128);
+		}
+		appendBoundedText(QStringLiteral("contentWarning"), 256);
+		appendBoolean(QStringLiteral("thumbnailBlur"));
+
+		const QString provider = source.value(QStringLiteral("provider"),
+										 source.value(QStringLiteral("previewProvider")))
+								 .toString()
+								 .trimmed()
+								 .toLower();
+		const QString previewKind = source.value(QStringLiteral("previewKind")).toString().trimmed();
+		if (provider == QLatin1String("twitch")) appendTwitchMetadata();
+		if (provider == QLatin1String("github")) appendGitHubMetadata();
+		if (provider == QLatin1String("flashback") || previewKind == QLatin1String("forum"))
+			appendForumMetadata();
+		if (provider == QLatin1String("instagram")) appendInstagramMetadata();
+		if (provider == QLatin1String("steam")) appendSteamMetadata();
+		if (provider == QLatin1String("bytbil") || previewKind == QLatin1String("vehicleListing"))
+			appendVehicleMetadata();
+		if (provider == QLatin1String("google-search")) appendGoogleSearchMetadata();
+		if (provider == QLatin1String("existenz") || previewKind == QLatin1String("linkDigest"))
+			appendLinkDigestMetadata();
+
+		// Only the structured fields below cross the frontend boundary. Each one is
+		// shape-normalized and hard-bounded so a provider cannot grow the delegate tree.
+		if (source.contains(QStringLiteral("financeSparkline"))) {
+			QVariantList points;
+			for (const QVariant &entry : source.value(QStringLiteral("financeSparkline")).toList()) {
+				QVariantMap point;
+				if (isNumeric(entry)) {
+					const double close = entry.toDouble();
+					if (std::isfinite(close)) point.insert(QStringLiteral("close"), close);
+				} else {
+					const QVariantMap item = entry.toMap();
+					const QVariant closeValue = item.value(QStringLiteral("close"));
+					if (isNumeric(closeValue) && std::isfinite(closeValue.toDouble())) {
+						point.insert(QStringLiteral("close"), closeValue.toDouble());
+						const QVariant timestamp = item.value(QStringLiteral("timestamp"));
+						if (isNumeric(timestamp)) point.insert(QStringLiteral("timestamp"), timestamp);
+					}
+				}
+				if (!point.isEmpty()) points.push_back(point);
+				if (points.size() >= MaxSparklinePoints) break;
+			}
+			consumed.insert(QStringLiteral("financeSparkline"));
+			if (!points.isEmpty()) normalized.insert(QStringLiteral("financeSparkline"), points);
+		}
+		for (const QString &key : { QStringLiteral("productSpecs"), QStringLiteral("listingSpecs"),
+				 QStringLiteral("vehicleSpecs") }) appendSpecList(key);
+		for (const QString &key : { QStringLiteral("gameStoreTags"), QStringLiteral("vehicleHighlights"),
+				 QStringLiteral("githubTopics") }) appendStringList(key);
+		if (source.contains(QStringLiteral("xQuotedPost")) && normalized.size() < MaxMetadataFields) {
+			const QVariantMap post = normalizedSocialPost(source.value(QStringLiteral("xQuotedPost")));
+			consumed.insert(QStringLiteral("xQuotedPost"));
+			if (!post.isEmpty()) normalized.insert(QStringLiteral("xQuotedPost"), post);
+		}
+		if (source.contains(QStringLiteral("xReplyContext")) && normalized.size() < MaxMetadataFields) {
+			const QVariantList sourceContext = source.value(QStringLiteral("xReplyContext")).toList();
+			QVariantList context;
+			const qsizetype first = std::max< qsizetype >(0, sourceContext.size() - MaxSocialContextEntries);
+			for (qsizetype index = first; index < sourceContext.size(); ++index) {
+				const QVariantMap post = normalizedSocialPost(sourceContext.at(index));
+				if (!post.isEmpty()) context.push_back(post);
+			}
+			consumed.insert(QStringLiteral("xReplyContext"));
+			if (!context.isEmpty()) normalized.insert(QStringLiteral("xReplyContext"), context);
+		}
+		// Sparse cached or test payloads may predate provider identity fields. The
+		// second pass still applies the same typed normalization without allowing a
+		// noisy unrelated provider to take precedence over its own rendered fields.
+		appendTwitchMetadata();
+		appendGitHubMetadata();
+		appendForumMetadata();
+		appendInstagramMetadata();
+		appendSteamMetadata();
+		appendVehicleMetadata();
+		appendGoogleSearchMetadata();
+		appendLinkDigestMetadata();
 		// Preserve the scalar fields rendered by the current card before filling
 		// the bounded diagnostics tail in deterministic key order.
-		for (const QString &key : { QStringLiteral("xDisplayName"), QStringLiteral("xHandle") }) {
+		static const QStringList priorityScalarKeys {
+			QStringLiteral("contentWarning"), QStringLiteral("thumbnailBlur"), QStringLiteral("provider"),
+			QStringLiteral("previewProvider"), QStringLiteral("providerName"), QStringLiteral("previewKind"),
+			QStringLiteral("statusLabel"), QStringLiteral("locationLabel"),
+			QStringLiteral("tickerSymbol"), QStringLiteral("financeName"), QStringLiteral("financePrice"),
+			QStringLiteral("financeCurrency"), QStringLiteral("financeDayChange"),
+			QStringLiteral("financeDayChangePercent"), QStringLiteral("financeDayTrend"),
+			QStringLiteral("financeRangeLabel"), QStringLiteral("financeRangeChange"),
+			QStringLiteral("financeRangeChangePercent"), QStringLiteral("financeRangeTrend"),
+			QStringLiteral("financeExchange"), QStringLiteral("financeInstrument"),
+			QStringLiteral("financeUpdatedAt"),
+			QStringLiteral("productPrice"), QStringLiteral("productOriginalPrice"),
+			QStringLiteral("productDiscount"), QStringLiteral("productAvailability"),
+			QStringLiteral("productDelivery"), QStringLiteral("productRating"),
+			QStringLiteral("productReviewCount"), QStringLiteral("productBrand"),
+			QStringLiteral("productSku"), QStringLiteral("productId"), QStringLiteral("productVolume"),
+			QStringLiteral("productAlcohol"),
+			QStringLiteral("gameStorePrice"), QStringLiteral("gameStoreOriginalPrice"),
+			QStringLiteral("gameStoreDiscount"), QStringLiteral("gameStoreAvailability"),
+			QStringLiteral("gameStoreRating"), QStringLiteral("gameStoreReviewCount"),
+			QStringLiteral("gameStorePlatform"), QStringLiteral("gameStoreBrand"),
+			QStringLiteral("steamPrice"), QStringLiteral("steamOriginalPrice"),
+			QStringLiteral("steamDiscountPercent"), QStringLiteral("steamDeveloper"),
+			QStringLiteral("steamReleaseDate"), QStringLiteral("steamPlatforms"),
+			QStringLiteral("steamGenres"), QStringLiteral("steamReviewSummary"),
+			QStringLiteral("steamReviewPercent"), QStringLiteral("steamRecommendationsTotal"),
+			QStringLiteral("steamMetacriticScore"),
+			QStringLiteral("listingPrice"), QStringLiteral("listingOriginalPrice"),
+			QStringLiteral("listingCondition"), QStringLiteral("listingLocation"),
+			QStringLiteral("listingSaleType"), QStringLiteral("listingEndsAt"),
+			QStringLiteral("listingId"),
+			QStringLiteral("vehiclePrice"), QStringLiteral("vehiclePriceExVat"),
+			QStringLiteral("vehicleKind"), QStringLiteral("vehicleYear"), QStringLiteral("vehicleMileage"),
+			QStringLiteral("vehicleFuel"), QStringLiteral("vehicleTransmission"),
+			QStringLiteral("vehicleDealer"), QStringLiteral("vehicleLocation"),
+			QStringLiteral("realEstatePrice"), QStringLiteral("realEstateArea"),
+			QStringLiteral("realEstateRooms"), QStringLiteral("realEstateFee"),
+			QStringLiteral("articleSection"), QStringLiteral("articleAuthor"),
+			QStringLiteral("articlePublishedAt"), QStringLiteral("articleModifiedAt"),
+			QStringLiteral("articleAccess"), QStringLiteral("articlePremium"),
+			QStringLiteral("articlePublisher"),
+			QStringLiteral("forumProvider"), QStringLiteral("forumThreadId"), QStringLiteral("threadId"),
+			QStringLiteral("forumPostAuthor"), QStringLiteral("forumFirstPostAuthor"),
+			QStringLiteral("forumPostTime"), QStringLiteral("forumFirstPostTime"),
+			QStringLiteral("forumPostCount"), QStringLiteral("forumQuoteAuthor"),
+			QStringLiteral("audioProvider"), QStringLiteral("audioProgram"),
+			QStringLiteral("xDisplayName"), QStringLiteral("xHandle"), QStringLiteral("xVerified"),
+			QStringLiteral("xCreatedAt"), QStringLiteral("xReplyCount"), QStringLiteral("xRepostCount"),
+			QStringLiteral("xQuoteCount"), QStringLiteral("xLikeCount"), QStringLiteral("xViewCount"),
+			QStringLiteral("xBookmarkCount"),
+			QStringLiteral("instagramHandle"), QStringLiteral("instagramLikeCount"),
+			QStringLiteral("instagramCommentCount"), QStringLiteral("instagramMediaKind"),
+			QStringLiteral("instagramCreatedAt"),
+			QStringLiteral("githubRepo"), QStringLiteral("githubStars"), QStringLiteral("githubForks"),
+			QStringLiteral("githubOpenIssues"), QStringLiteral("githubLanguage"),
+			QStringLiteral("githubLicense"), QStringLiteral("githubDefaultBranch"),
+			QStringLiteral("githubPushedAt"), QStringLiteral("githubPrivate"),
+			QStringLiteral("githubArchived"), QStringLiteral("githubFork")
+		};
+		for (const QString &key : priorityScalarKeys) {
 			const auto it = source.constFind(key);
 			if (it != source.cend()) appendScalar(it.key(), it.value());
 		}
 		for (auto it = source.cbegin(); it != source.cend() && normalized.size() < MaxMetadataFields; ++it) {
+			if (consumed.contains(it.key())) continue;
+			if (it.key().endsWith(QLatin1String("Image"), Qt::CaseInsensitive)
+				|| (it.key().endsWith(QLatin1String("Url"), Qt::CaseInsensitive)
+					&& (it.key().contains(QLatin1String("avatar"), Qt::CaseInsensitive)
+						|| it.key().contains(QLatin1String("thumbnail"), Qt::CaseInsensitive)))) {
+				appendManagedImage(it.key());
+				continue;
+			}
+			if (it.key().endsWith(QLatin1String("Url"), Qt::CaseInsensitive)) {
+				appendWebUrl(it.key());
+				continue;
+			}
+			if (it.key().contains(QLatin1String("html"), Qt::CaseInsensitive)) {
+				consumeField(it.key());
+				continue;
+			}
 			appendScalar(it.key(), it.value());
 		}
 		return normalized;
@@ -530,6 +1008,8 @@ QString ClientSessionController::selfName() const { return m_selfName; }
 bool ClientSessionController::connected() const { return m_connected; }
 bool ClientSessionController::selfMuted() const { return m_selfMuted; }
 bool ClientSessionController::selfDeafened() const { return m_selfDeafened; }
+QVariantList ClientSessionController::appMenus() const { return m_appMenus; }
+QVariantMap ClientSessionController::selfMenu() const { return m_selfMenu; }
 QVariantMap ClientSessionController::updateBanner() const { return m_updateBanner; }
 QString ClientSessionController::motdHtml() const { return m_motdHtml; }
 QVariantList ClientSessionController::motdSegments() const { return m_motdSegments; }
@@ -588,6 +1068,8 @@ void ClientSessionController::setSelfName(const QString &value) { SET_VALUE(m_se
 void ClientSessionController::setConnected(bool value) { SET_VALUE(m_connected, connectedChanged); }
 void ClientSessionController::setSelfMuted(bool value) { SET_VALUE(m_selfMuted, selfMutedChanged); }
 void ClientSessionController::setSelfDeafened(bool value) { SET_VALUE(m_selfDeafened, selfDeafenedChanged); }
+void ClientSessionController::setAppMenus(const QVariantList &value) { SET_VALUE(m_appMenus, appMenusChanged); }
+void ClientSessionController::setSelfMenu(const QVariantMap &value) { SET_VALUE(m_selfMenu, selfMenuChanged); }
 void ClientSessionController::setUpdateBanner(const QVariantMap &value) { SET_VALUE(m_updateBanner, updateBannerChanged); }
 void ClientSessionController::setMotdHtml(const QString &value) {
 	const QString bounded = value.left(MaxRichBodyCharacters);
@@ -668,6 +1150,8 @@ void ClientSessionController::applyState(const QVariantMap &state) {
 	if (state.contains(QStringLiteral("selfMuted"))) setSelfMuted(state.value(QStringLiteral("selfMuted")).toBool());
 	if (state.contains(QStringLiteral("selfDeafened")))
 		setSelfDeafened(state.value(QStringLiteral("selfDeafened")).toBool());
+	if (state.contains(QStringLiteral("menus"))) setAppMenus(state.value(QStringLiteral("menus")).toList());
+	if (state.contains(QStringLiteral("selfMenu"))) setSelfMenu(state.value(QStringLiteral("selfMenu")).toMap());
 	if (state.contains(QStringLiteral("updateBanner")))
 		setUpdateBanner(state.value(QStringLiteral("updateBanner")).toMap());
 	if (state.contains(QStringLiteral("motdHtml"))) setMotdHtml(state.value(QStringLiteral("motdHtml")).toString());
@@ -992,17 +1476,21 @@ void StableListModel::synchronizeRows(const QVariantList &rows) {
 		}
 	}
 
-	// Switching between large, mostly unrelated scopes is a replacement, not a
-	// sequence of thousands of individual moves. Keep the operation reset-free
-	// for QML delegates, but perform one remove and one insert so index upkeep is
-	// linear rather than rebuilding the full ID hash after every row.
-	if (std::min(m_rowIds.size(), validIds.size()) >= 128) {
+	// Switching between unrelated scopes is a replacement, not an interleaved
+	// sequence of inserts and removals. The latter temporarily exposes rows from
+	// both conversations to a reused QML ListView and can leave pooled delegates
+	// painted with stale content. Keep the operation reset-free, but remove the
+	// old range before inserting the new one. For large lists, use the same
+	// bounded path when only a small minority of IDs overlap.
+	if (!m_rowIds.isEmpty() && !validIds.isEmpty()) {
 		int overlap = 0;
 		for (const QString &id : validIds) {
 			if (m_rowIndexById.contains(id)) ++overlap;
 		}
 		const int smallerCount = std::min(m_rowIds.size(), validIds.size());
-		if (overlap * 4 <= smallerCount) {
+		const bool disjointScopes = overlap == 0;
+		const bool largeMostlyUnrelated = smallerCount >= 128 && overlap * 4 <= smallerCount;
+		if (disjointScopes || largeMostlyUnrelated) {
 			if (!m_rows.isEmpty()) {
 				beginRemoveRows(QModelIndex(), 0, m_rows.size() - 1);
 				m_rows.clear();
@@ -1123,21 +1611,33 @@ void StableListModel::clear() {
 QVariantMap RoomModel::roomRow(const QVariantMap &room, const QString &kind) {
 	const QString scopeToken = room.value(QStringLiteral("token")).toString().trimmed();
 	if (scopeToken.isEmpty()) return {};
+	const bool joined = room.value(QStringLiteral("joined")).toBool();
+	const bool canJoin = room.contains(QStringLiteral("canJoin"))
+		? room.value(QStringLiteral("canJoin")).toBool()
+		: kind == QLatin1String("voice") && !joined;
+	const QVariantList actions = room.value(QStringLiteral("actions")).toList();
+	const QVariantList badges = room.value(QStringLiteral("badges")).toList();
+	const QVariantMap screenShare = room.value(QStringLiteral("screenShare")).toMap();
 	QVariantMap source;
-	if (room.contains(QStringLiteral("actions"))) {
-		source.insert(QStringLiteral("actions"), room.value(QStringLiteral("actions")).toList());
-	}
+	if (!actions.isEmpty() || room.contains(QStringLiteral("actions")))
+		source.insert(QStringLiteral("actions"), actions);
 	return { { QStringLiteral("id"), QStringLiteral("%1:%2").arg(kind, scopeToken) },
 			 { QStringLiteral("scopeToken"), scopeToken },
 			 { QStringLiteral("title"), room.value(QStringLiteral("label")) },
 			 { QStringLiteral("subtitle"),
 			   room.value(QStringLiteral("topic"),
 						  room.value(QStringLiteral("description"), room.value(QStringLiteral("subtitle")))) },
+			 { QStringLiteral("pathLabel"), room.value(QStringLiteral("pathLabel")) },
+			 { QStringLiteral("kindLabel"), room.value(QStringLiteral("kindLabel")) },
 			 { QStringLiteral("kind"), kind },
 			 { QStringLiteral("selected"),
 			   room.value(QStringLiteral("selected"), room.value(QStringLiteral("open"))) },
-			 { QStringLiteral("status"),
-			   room.value(QStringLiteral("joined")).toBool() ? QStringLiteral("joined") : QString() },
+			 { QStringLiteral("status"), joined ? QStringLiteral("joined") : QString() },
+			 { QStringLiteral("joined"), joined },
+			 { QStringLiteral("canJoin"), canJoin },
+			 { QStringLiteral("screenShare"), screenShare },
+			 { QStringLiteral("badges"), badges },
+			 { QStringLiteral("actions"), actions },
 			 { QStringLiteral("depth"), room.value(QStringLiteral("depth")) },
 			 { QStringLiteral("unreadCount"), room.value(QStringLiteral("unreadCount")) },
 			 { QStringLiteral("source"), source } };
@@ -1196,18 +1696,50 @@ void RoomModel::synchronizeAllRows() {
 QVariantMap ParticipantModel::participantRow(const QVariantMap &participant) {
 	const QString sessionId = participant.value(QStringLiteral("session")).toString().trimmed();
 	if (sessionId.isEmpty()) return {};
+	const QString participantKey = participant.value(QStringLiteral("participantKey")).toString().trimmed();
+	const QString stableId = participantKey.isEmpty() ? sessionId : participantKey;
 	const QVariant title = participant.contains(QStringLiteral("label"))
 		? participant.value(QStringLiteral("label"))
 		: participant.value(QStringLiteral("name"));
 	const QVariant subtitle = participant.contains(QStringLiteral("subtitle"))
 		? participant.value(QStringLiteral("subtitle"))
 		: participant.value(QStringLiteral("statusLabel"));
-	return { { QStringLiteral("id"), sessionId },
+	const QString entryKind = participant.value(QStringLiteral("entryKind"), QStringLiteral("user"))
+							  .toString()
+							  .trimmed()
+							  .toLower();
+	const QVariantList statuses = participant.value(QStringLiteral("statuses")).toList();
+	const bool deafened = participant.value(
+		QStringLiteral("deafened"),
+		participantHasStatus(statuses, { QStringLiteral("serverDeafened"), QStringLiteral("selfDeafened") }))
+						 .toBool();
+	const bool muted = participant.value(
+		QStringLiteral("muted"),
+		participantHasStatus(statuses, { QStringLiteral("serverMuted"), QStringLiteral("selfMuted"),
+										 QStringLiteral("localMuted"), QStringLiteral("suppressed") }))
+					  .toBool();
+	return { { QStringLiteral("id"), stableId },
+			 { QStringLiteral("participantSession"), sessionId },
 			 { QStringLiteral("title"), title },
 			 { QStringLiteral("subtitle"), subtitle },
 			 { QStringLiteral("kind"), QStringLiteral("participant") },
 			 { QStringLiteral("status"), participant.value(QStringLiteral("talkState")) },
 			 { QStringLiteral("avatarUrl"), participant.value(QStringLiteral("avatarUrl")) },
+			 { QStringLiteral("entryKind"), entryKind.isEmpty() ? QStringLiteral("user") : entryKind },
+			 { QStringLiteral("scopeToken"), participant.value(QStringLiteral("scopeToken")) },
+			 { QStringLiteral("isSelf"), participant.value(QStringLiteral("isSelf")) },
+			 { QStringLiteral("talkLabel"), participant.value(QStringLiteral("talkLabel")) },
+			 { QStringLiteral("talkTone"), participant.value(QStringLiteral("talkTone")) },
+			 { QStringLiteral("talking"), participant.value(QStringLiteral("talking")) },
+			 { QStringLiteral("badges"), participant.value(QStringLiteral("badges")).toList() },
+			 { QStringLiteral("statuses"), statuses },
+			 { QStringLiteral("localVolume"), participant.value(QStringLiteral("localVolume")).toMap() },
+			 { QStringLiteral("canMessage"), participant.value(QStringLiteral("canMessage")) },
+			 { QStringLiteral("canJoin"), participant.value(QStringLiteral("canJoin")) },
+			 { QStringLiteral("actions"), participant.value(QStringLiteral("actions")).toList() },
+			 { QStringLiteral("muted"), muted },
+			 { QStringLiteral("deafened"), deafened },
+			 { QStringLiteral("listener"), entryKind == QLatin1String("listener") },
 			 { QStringLiteral("source"), participant } };
 }
 
@@ -1234,7 +1766,15 @@ void ParticipantModel::upsertParticipantState(const QVariantMap &participant) {
 }
 
 void ParticipantModel::removeParticipant(const QString &sessionId) {
-	removeRow(sessionId.trimmed());
+	const QString id = sessionId.trimmed();
+	if (id.isEmpty()) return;
+	for (int rowIndex = rowCount() - 1; rowIndex >= 0; --rowIndex) {
+		const QVariantMap row = get(rowIndex);
+		if (row.value(QStringLiteral("participantSession")).toString() == id
+			|| row.value(QStringLiteral("id")).toString() == id) {
+			removeRow(row.value(QStringLiteral("id")).toString());
+		}
+	}
 }
 
 void ParticipantModel::updatePresence(const QString &sessionId, const QString &talkState, const QString &talkLabel,
@@ -1245,10 +1785,23 @@ void ParticipantModel::updatePresence(const QString &sessionId, const QString &t
 
 	for (int rowIndex = 0; rowIndex < rowCount(); ++rowIndex) {
 		QVariantMap row = get(rowIndex);
-		if (row.value(QStringLiteral("id")).toString() != id) continue;
+		if (row.value(QStringLiteral("participantSession")).toString() != id
+			&& row.value(QStringLiteral("id")).toString() != id)
+			continue;
 		const QVariantMap previousRow = row;
 
 		row.insert(QStringLiteral("status"), talkState);
+		row.insert(QStringLiteral("talkLabel"), talkLabel);
+		row.insert(QStringLiteral("talkTone"), talkTone);
+		row.insert(QStringLiteral("talking"), talking);
+		row.insert(QStringLiteral("isSelf"), isSelf);
+		row.insert(QStringLiteral("badges"), badges);
+		row.insert(QStringLiteral("statuses"), statuses);
+		row.insert(QStringLiteral("deafened"), participantHasStatus(
+			statuses, { QStringLiteral("serverDeafened"), QStringLiteral("selfDeafened") }));
+		row.insert(QStringLiteral("muted"), participantHasStatus(
+			statuses, { QStringLiteral("serverMuted"), QStringLiteral("selfMuted"),
+						QStringLiteral("localMuted"), QStringLiteral("suppressed") }));
 		QVariantMap source = row.value(QStringLiteral("source")).toMap();
 		source.insert(QStringLiteral("talkState"), talkState);
 		source.insert(QStringLiteral("talkLabel"), talkLabel);
@@ -1258,9 +1811,7 @@ void ParticipantModel::updatePresence(const QString &sessionId, const QString &t
 		source.insert(QStringLiteral("badges"), badges);
 		source.insert(QStringLiteral("statuses"), statuses);
 		row.insert(QStringLiteral("source"), source);
-		if (row == previousRow) return;
-		upsertRow(row);
-		return;
+		if (row != previousRow) upsertRow(row);
 	}
 }
 
@@ -1578,6 +2129,7 @@ void ChatTimelineModel::drainRichBodyResults() {
 
 namespace {
 	constexpr int MaxOperationItemResultPageSize = 64;
+	constexpr qsizetype MaxDialogPresentationFieldValueCount = 32;
 	constexpr qulonglong MaxProtocolId = std::numeric_limits< unsigned int >::max();
 
 	void setOperationField(QVariantMap &row, const QString &key, const QVariant &value) {
@@ -1609,10 +2161,45 @@ namespace {
 
 	QString normalizedChannelScopeToken(const QString &value) {
 		const QString token = value.trimmed();
-		if (!token.startsWith(QLatin1String("channel:"))) return {};
+		// The production scope wire format is "<ChatScope enum>:<channel id>". Keep accepting the
+		// early QML prototype's "channel:<id>" spelling for local callers, but never rewrite a real
+		// protocol token into that non-protocol form before it reaches MainWindow.
 		qulonglong channel = 0;
-		return parseProtocolId(token.mid(QStringLiteral("channel:").size()), true, &channel)
-			? QStringLiteral("channel:%1").arg(channel) : QString();
+		if (token.startsWith(QLatin1String("channel:"))) {
+			return parseProtocolId(token.mid(QStringLiteral("channel:").size()), true, &channel)
+				? QStringLiteral("channel:%1").arg(channel) : QString();
+		}
+		const qsizetype separator = token.indexOf(QLatin1Char(':'));
+		if (separator <= 0 || separator != token.lastIndexOf(QLatin1Char(':'))) return {};
+		// Moving users/channels is only meaningful for the protocol's Channel scope (0).
+		// TextChannel, Private/DM and every other chat scope must never reach MainWindow's
+		// channel move handlers merely because they share the "<scope>:<id>" shape.
+		if (token.left(separator) != QLatin1String("0")) return {};
+		return parseProtocolId(token.mid(separator + 1), true, &channel)
+			? QStringLiteral("0:%1").arg(channel) : QString();
+	}
+
+	QSet< QString > dialogPresentationFieldIds(const QVariantMap &state) {
+		QSet< QString > ids;
+		if (!state.value(QStringLiteral("open")).toBool()) return ids;
+		for (const QVariant &sectionValue : state.value(QStringLiteral("sections")).toList()) {
+			for (const QVariant &fieldValue : sectionValue.toMap().value(QStringLiteral("fields")).toList()) {
+				const QVariantMap field = fieldValue.toMap();
+				if (field.value(QStringLiteral("type")).toString() != QLatin1String("voiceMeter")
+					|| field.value(QStringLiteral("staticMeter")).toBool()) {
+					continue;
+				}
+				const QString id = field.value(QStringLiteral("id")).toString().trimmed();
+				if (id.isEmpty()) continue;
+				ids.insert(id);
+				if (ids.size() >= MaxDialogPresentationFieldValueCount) return ids;
+			}
+		}
+		return ids;
+	}
+
+	bool scopeTokenHasRootId(const QString &token) {
+		return token.section(QLatin1Char(':'), -1) == QLatin1String("0");
 	}
 }
 
@@ -1918,7 +2505,7 @@ void UiCommandController::moveScope(const QString &sourceScopeToken, const QStri
 	const QString source = normalizedChannelScopeToken(sourceScopeToken);
 	const QString target = normalizedChannelScopeToken(targetScopeToken);
 	const QString normalizedPlacement = placement.trimmed().toLower();
-	if (source.isEmpty() || source == QLatin1String("channel:0") || target.isEmpty() || source == target
+	if (source.isEmpty() || scopeTokenHasRootId(source) || target.isEmpty() || source == target
 		|| (normalizedPlacement != QLatin1String("before") && normalizedPlacement != QLatin1String("after")
 			&& normalizedPlacement != QLatin1String("inside"))) return;
 	emit scopeMoveRequested(source, target, normalizedPlacement);
@@ -2078,8 +2665,41 @@ QString DialogStateController::activePage() const { return m_state.value(QString
 QVariantList DialogStateController::pages() const { return m_state.value(QStringLiteral("pages")).toList(); }
 QVariantList DialogStateController::sections() const { return m_state.value(QStringLiteral("sections")).toList(); }
 QVariantList DialogStateController::actions() const { return m_state.value(QStringLiteral("actions")).toList(); }
+QVariantList DialogStateController::favorites() const { return m_state.value(QStringLiteral("favorites")).toList(); }
+int DialogStateController::selectedFavoriteIndex() const {
+	return m_state.value(QStringLiteral("selectedFavoriteIndex"), -1).toInt();
+}
+bool DialogStateController::editorOpen() const { return m_state.value(QStringLiteral("editorOpen")).toBool(); }
+QString DialogStateController::editorTitle() const { return m_state.value(QStringLiteral("editorTitle")).toString(); }
+QString DialogStateController::primaryActionId() const {
+	return m_state.value(QStringLiteral("primaryActionId")).toString();
+}
+bool DialogStateController::loading() const { return m_state.value(QStringLiteral("loading")).toBool(); }
+QString DialogStateController::loadingScaffold() const {
+	return m_state.value(QStringLiteral("loadingScaffold")).toString();
+}
+QString DialogStateController::statusMessage() const {
+	const QString explicitMessage = m_state.value(QStringLiteral("statusMessage")).toString().trimmed();
+	if (!explicitMessage.isEmpty()) return explicitMessage;
+	const QVariant status = m_state.value(QStringLiteral("status"));
+	if (status.metaType().id() == QMetaType::QVariantMap) {
+		const QVariantMap statusMap = status.toMap();
+		return statusMap.value(QStringLiteral("message"), statusMap.value(QStringLiteral("label"))).toString();
+	}
+	return status.toString();
+}
+QString DialogStateController::tone() const { return m_state.value(QStringLiteral("tone")).toString(); }
+int DialogStateController::preferredWidth() const { return m_state.value(QStringLiteral("width"), 920).toInt(); }
+int DialogStateController::preferredHeight() const { return m_state.value(QStringLiteral("height"), 700).toInt(); }
+QString DialogStateController::initialFocusId() const {
+	const QString explicitFocus = m_state.value(QStringLiteral("initialFocusId")).toString().trimmed();
+	if (!explicitFocus.isEmpty()) return explicitFocus;
+	const QString defaultFocus = m_state.value(QStringLiteral("defaultFocusId")).toString().trimmed();
+	return defaultFocus.isEmpty() ? primaryActionId() : defaultFocus;
+}
 QVariantMap DialogStateController::state() const { return m_state; }
 qulonglong DialogStateController::revision() const { return m_revision; }
+QVariantMap DialogStateController::presentationFieldValues() const { return m_presentationFieldValues; }
 QVariant DialogStateController::fieldValue(const QString &fieldId) const {
 	for (const QVariant &sectionValue : sections()) {
 		for (const QVariant &fieldValue : sectionValue.toMap().value(QStringLiteral("fields")).toList()) {
@@ -2089,6 +2709,11 @@ QVariant DialogStateController::fieldValue(const QString &fieldId) const {
 	}
 	return {};
 }
+QVariant DialogStateController::presentationFieldValue(const QString &fieldId) const {
+	const QString id = fieldId.trimmed();
+	const auto value = m_presentationFieldValues.constFind(id);
+	return value == m_presentationFieldValues.cend() ? fieldValue(id) : value.value();
+}
 QString DialogStateController::fieldError(const QString &fieldId) const {
 	return m_state.value(QStringLiteral("errors")).toMap().value(fieldId).toString();
 }
@@ -2096,10 +2721,42 @@ QString DialogStateController::fieldError(const QString &fieldId) const {
 void DialogStateController::applyState(const QVariantMap &state) {
 	if (!acceptsFrontendStateMutation(this)) return;
 	if (m_state == state) return;
+	const QString previousDialogId = dialogId();
+	const bool previousOpen = open();
+	const QString nextDialogId = state.value(QStringLiteral("id")).toString();
+	const bool nextOpen = state.value(QStringLiteral("open")).toBool();
+	const QSet< QString > nextPresentationFieldIds = dialogPresentationFieldIds(state);
+	QVariantMap nextPresentationFieldValues;
+	if (previousOpen && nextOpen && previousDialogId == nextDialogId) {
+		for (auto value = m_presentationFieldValues.cbegin(); value != m_presentationFieldValues.cend(); ++value) {
+			if (nextPresentationFieldIds.contains(value.key())) {
+				nextPresentationFieldValues.insert(value.key(), value.value());
+			}
+		}
+	}
+	const bool presentationChanged = nextPresentationFieldValues != m_presentationFieldValues;
 	m_state = state;
 	m_state.detach();
+	m_presentationFieldValues = nextPresentationFieldValues;
+	m_presentationFieldIds = nextPresentationFieldIds;
 	++m_revision;
 	emit stateChanged();
+	if (presentationChanged) emit presentationFieldValuesChanged();
+}
+
+bool DialogStateController::updatePresentationFieldValue(const QString &fieldId, const QVariant &value) {
+	const QString id = fieldId.trimmed();
+	if (id.isEmpty() || !open() || !acceptsFrontendStateMutation(this)) return false;
+	if (!m_presentationFieldIds.contains(id)) return false;
+	const auto existing = m_presentationFieldValues.constFind(id);
+	if (existing != m_presentationFieldValues.cend() && existing.value() == value) return false;
+	if (existing == m_presentationFieldValues.cend()
+		&& m_presentationFieldValues.size() >= MaxDialogPresentationFieldValueCount) {
+		return false;
+	}
+	m_presentationFieldValues.insert(id, value);
+	emit presentationFieldValuesChanged();
+	return true;
 }
 
 void DialogStateController::updateField(const QString &fieldId, const QVariant &value) {
@@ -2179,6 +2836,9 @@ QString MediaSessionBackend::provider() const { return m_provider; }
 bool MediaSessionBackend::playbackControllable() const {
 	return mediaProviderSupportsSynchronizedPlayback(m_provider);
 }
+bool MediaSessionBackend::playbackControlAllowed() const {
+	return playbackControllable() && (!m_sharedAvailable || m_sharedHost);
+}
 QString MediaSessionBackend::mediaMime() const { return m_mediaMime; }
 QString MediaSessionBackend::audioMime() const { return m_audioMime; }
 QString MediaSessionBackend::sessionId() const { return m_sessionId; }
@@ -2187,6 +2847,9 @@ double MediaSessionBackend::position() const { return m_position; }
 double MediaSessionBackend::duration() const { return m_duration; }
 QString MediaSessionBackend::error() const { return m_error; }
 qulonglong MediaSessionBackend::syncGeneration() const { return m_syncGeneration; }
+int MediaSessionBackend::loadProgress() const { return m_loadProgress; }
+int MediaSessionBackend::volume() const { return m_volume; }
+bool MediaSessionBackend::muted() const { return m_muted; }
 
 bool MediaSessionBackend::validateSource(const QUrl &url, const QString &provider, QUrl *normalized,
 										 QString *error) const {
@@ -2248,6 +2911,7 @@ bool MediaSessionBackend::open(const QUrl &url, const QString &provider, const Q
 	m_position = 0.0;
 	m_duration = 0.0;
 	m_error.clear();
+	updateLoadProgress(0);
 	++m_syncGeneration;
 	emit stateChanged();
 	return true;
@@ -2293,6 +2957,7 @@ bool MediaSessionBackend::openDirect(const QUrl &url, const QString &mediaMime, 
 	m_position = 0.0;
 	m_duration = 0.0;
 	m_error.clear();
+	updateLoadProgress(0);
 	++m_syncGeneration;
 	emit stateChanged();
 	return true;
@@ -2325,6 +2990,10 @@ bool MediaSessionBackend::startShared(const QUrl &url, const QString &provider, 
 	m_sharedUrl = normalized;
 	m_sharedProvider = normalizedProvider;
 	m_sharedParticipantSessions.clear();
+	m_sharedPlayerSuppressed = false;
+	m_sharedPosition = 0.0;
+	m_sharedPaused = true;
+	m_sharedGeneration = 0;
 	m_state = QStringLiteral("starting");
 	m_error.clear();
 	emit stateChanged();
@@ -2347,6 +3016,7 @@ void MediaSessionBackend::leaveShared() {
 	if (m_sharedJoined) emit sharedEventRequested(m_sharedSessionId, QStringLiteral("leave"), 0);
 	m_pendingExplicitSessionId.clear();
 	m_sharedJoined = false;
+	m_sharedPlayerSuppressed = false;
 	closePlayer();
 	emit stateChanged();
 }
@@ -2367,13 +3037,20 @@ void MediaSessionBackend::transferSharedHost(const QString &sessionId) {
 
 bool MediaSessionBackend::reopenSharedPlayer() {
 	if (!m_sharedAvailable || !m_sharedJoined || m_sharedUrl.isEmpty()) return false;
-	return open(m_sharedUrl, m_sharedProvider, m_sharedSessionId);
+	m_sharedPlayerSuppressed = false;
+	if (!open(m_sharedUrl, m_sharedProvider, m_sharedSessionId)) return false;
+	m_position = m_sharedPosition;
+	m_state = m_sharedPaused ? QStringLiteral("paused") : QStringLiteral("playing");
+	m_syncGeneration = qMax(m_syncGeneration, m_sharedGeneration);
+	emit stateChanged();
+	return true;
 }
 
 void MediaSessionBackend::retry() {
 	if (!m_active || m_url.isEmpty()) return;
 	m_state = QStringLiteral("loading");
 	m_error.clear();
+	updateLoadProgress(0);
 	emit stateChanged();
 	emit retryRequested();
 }
@@ -2396,7 +3073,19 @@ bool MediaSessionBackend::supportsSynchronizedPlayback(const QString &provider) 
 }
 
 void MediaSessionBackend::closePlayer() {
-	if (!m_active && m_state == QLatin1String("idle")) return;
+	if (!m_active) {
+		if (m_sharedAvailable && m_state != QLatin1String("available")) {
+			m_state = QStringLiteral("available");
+			emit stateChanged();
+		}
+		return;
+	}
+	if (m_sharedAvailable && m_sharedJoined) {
+		m_sharedPlayerSuppressed = true;
+		m_sharedPosition = m_position;
+		m_sharedPaused = m_state != QLatin1String("playing");
+		m_sharedGeneration = qMax(m_sharedGeneration, m_syncGeneration);
+	}
 	m_active = false;
 	m_url = {};
 	m_audioUrl = {};
@@ -2406,10 +3095,11 @@ void MediaSessionBackend::closePlayer() {
 	m_sessionId.clear();
 	m_navigationHost.clear();
 	m_navigationPort = -1;
-	m_state = QStringLiteral("idle");
+	m_state = m_sharedAvailable ? QStringLiteral("available") : QStringLiteral("idle");
 	m_position = 0.0;
 	m_duration = 0.0;
 	m_error.clear();
+	updateLoadProgress(0);
 	++m_syncGeneration;
 	emit stateChanged();
 }
@@ -2423,29 +3113,70 @@ void MediaSessionBackend::close() {
 }
 
 void MediaSessionBackend::play() {
-	if (!m_active || !playbackControllable()) return;
+	if (!m_active || !playbackControlAllowed()) return;
 	m_state = QStringLiteral("playing");
 	m_error.clear();
+	if (m_sharedAvailable && m_sharedJoined) {
+		m_sharedPosition = m_position;
+		m_sharedPaused = false;
+	}
 	emit stateChanged();
 	emit playRequested();
 	publishSharedPlaybackState(m_position, false, true);
 }
 
 void MediaSessionBackend::pause() {
-	if (!m_active || !playbackControllable()) return;
+	if (!m_active || !playbackControlAllowed()) return;
 	m_state = QStringLiteral("paused");
 	m_error.clear();
+	if (m_sharedAvailable && m_sharedJoined) {
+		m_sharedPosition = m_position;
+		m_sharedPaused = true;
+	}
 	emit stateChanged();
 	emit pauseRequested();
 	publishSharedPlaybackState(m_position, true, true);
 }
 
 void MediaSessionBackend::seek(const double seconds) {
-	if (!m_active || !qIsFinite(seconds) || seconds < 0.0) return;
-	m_position = seconds;
+	if (!m_active || !playbackControlAllowed() || !qIsFinite(seconds) || seconds < 0.0) return;
+	m_position = m_duration > 0.0 ? qMin(seconds, m_duration) : seconds;
+	if (m_sharedAvailable && m_sharedJoined) {
+		m_sharedPosition = m_position;
+		m_sharedPaused = m_state != QLatin1String("playing");
+	}
 	emit stateChanged();
-	emit seekRequested(seconds);
-	publishSharedPlaybackState(seconds, m_state != QLatin1String("playing"), true);
+	emit seekRequested(m_position);
+	publishSharedPlaybackState(m_position, m_state != QLatin1String("playing"), true);
+}
+
+void MediaSessionBackend::setVolume(const int volume) {
+	const int normalized = qBound(0, volume, 100);
+	if (m_volume == normalized) return;
+	m_volume = normalized;
+	emit volumeChanged();
+	if (m_active) emit volumeRequested(m_volume);
+}
+
+void MediaSessionBackend::setMuted(const bool muted) {
+	if (m_muted == muted) return;
+	m_muted = muted;
+	emit mutedChanged();
+	if (m_active) emit mutedRequested(m_muted);
+}
+
+void MediaSessionBackend::toggleMuted() { setMuted(!m_muted); }
+
+void MediaSessionBackend::updateLoadProgress(const int progress) {
+	const int normalized = qBound(0, progress, 100);
+	if (m_loadProgress == normalized) return;
+	m_loadProgress = normalized;
+	emit loadProgressChanged();
+}
+
+void MediaSessionBackend::reportLoadProgress(const int progress) {
+	if (!m_active) return;
+	updateLoadProgress(progress);
 }
 
 void MediaSessionBackend::reportPlaybackState(const double position, const double duration, const bool paused) {
@@ -2454,6 +3185,12 @@ void MediaSessionBackend::reportPlaybackState(const double position, const doubl
 	m_duration = qIsFinite(duration) ? qMax(0.0, duration) : 0.0;
 	m_state = paused ? QStringLiteral("paused") : QStringLiteral("playing");
 	m_error.clear();
+	if (m_sharedAvailable && m_sharedJoined) {
+		m_sharedPosition = m_position;
+		m_sharedPaused = paused;
+		m_sharedGeneration = qMax(m_sharedGeneration, m_syncGeneration);
+	}
+	updateLoadProgress(100);
 	emit stateChanged();
 	publishSharedPlaybackState(m_position, paused, false);
 }
@@ -2481,6 +3218,11 @@ void MediaSessionBackend::applyRemoteState(const QUrl &url, const QString &provi
 	m_position = targetPosition;
 	m_state = paused ? QStringLiteral("paused") : QStringLiteral("playing");
 	m_error.clear();
+	if (m_sharedAvailable && m_sharedJoined && sessionId == m_sharedSessionId) {
+		m_sharedPosition = targetPosition;
+		m_sharedPaused = paused;
+		m_sharedGeneration = qMax(m_sharedGeneration, generation);
+	}
 	if (needsSeek) emit seekRequested(m_position);
 	if (playbackTransition) {
 		if (paused) emit pauseRequested();
@@ -2559,7 +3301,11 @@ void MediaSessionBackend::applySharedState(const QString &sessionId, const QUrl 
 	m_sharedScopeId = scopeId;
 	m_sharedHostSession = hostSession;
 	m_sharedParticipantSessions = normalizedParticipants;
-	if (explicitlyRequested && joined) m_pendingExplicitSessionId.clear();
+	if (!sameSession) m_sharedPlayerSuppressed = false;
+	if (explicitlyRequested && joined) {
+		m_pendingExplicitSessionId.clear();
+		m_sharedPlayerSuppressed = false;
+	}
 
 	if (!joined) {
 		if (wasJoined) closePlayer();
@@ -2573,8 +3319,17 @@ void MediaSessionBackend::applySharedState(const QString &sessionId, const QUrl 
 		const qint64 ageMs = qMax< qint64 >(0, QDateTime::currentMSecsSinceEpoch() - static_cast< qint64 >(generation));
 		position += static_cast< double >(ageMs) / 1000.0;
 	}
+	m_sharedPosition = qIsFinite(position) ? qMax(0.0, position) : 0.0;
+	m_sharedPaused = paused;
+	m_sharedGeneration = qMax(m_sharedGeneration, generation);
+	if (m_sharedPlayerSuppressed) {
+		m_state = QStringLiteral("available");
+		m_error.clear();
+		emit stateChanged();
+		return;
+	}
 	if (wasJoined || explicitlyRequested) {
-		applyRemoteState(normalizedUrl, m_sharedProvider, id, position, paused, generation);
+		applyRemoteState(normalizedUrl, m_sharedProvider, id, m_sharedPosition, paused, generation);
 	} else {
 		m_state = QStringLiteral("available");
 		emit stateChanged();
@@ -2593,6 +3348,10 @@ void MediaSessionBackend::clearSharedState() {
 	m_sharedScopeId = 0;
 	m_sharedHostSession = 0;
 	m_sharedParticipantSessions.clear();
+	m_sharedPlayerSuppressed = false;
+	m_sharedPosition = 0.0;
+	m_sharedPaused = true;
+	m_sharedGeneration = 0;
 	m_pendingExplicitSessionId.clear();
 	m_lastSharedPublishMs = 0;
 	m_lastSharedPublishPosition = -1.0;
@@ -2659,11 +3418,33 @@ void QmlSelectionState::setScopeId(const QVariant &value) {
 void QmlSelectionState::applySelection(const QString &scopeToken, const int scopeValue, const QVariant &scopeId,
 									   const QVariant &selectedUserSession,
 									   const QVariant &selectedVoiceChannelId) {
-	setScopeToken(scopeToken);
+	// Backend commands validate protocol IDs before reaching this transactional path. Accept the authoritative
+	// selection even when the corresponding model row is queued for the next incremental synchronization (for
+	// example, the server's default text room arrives immediately before RoomModel is refreshed). Direct QML
+	// property writes still use the validating setters below and cannot select unknown IDs.
+	const QString normalizedScope = scopeToken.trimmed();
+	if (m_scopeToken != normalizedScope) {
+		m_scopeToken = normalizedScope;
+		emit scopeTokenChanged();
+	}
 	setScopeValue(m_scopeToken.isEmpty() ? -1 : scopeValue);
 	setScopeId(m_scopeToken.isEmpty() ? QVariant() : scopeId);
-	setSelectedUserSession(selectedUserSession);
-	setSelectedVoiceChannelId(selectedVoiceChannelId);
+
+	const auto authoritativeId = [](const QVariant &value, const bool requirePositive) {
+		bool valid = false;
+		const qulonglong id = value.toULongLong(&valid);
+		return valid && (!requirePositive || id > 0) ? QVariant::fromValue(id) : QVariant();
+	};
+	const QVariant userSession = authoritativeId(selectedUserSession, true);
+	if (m_selectedUserSession != userSession) {
+		m_selectedUserSession = userSession;
+		emit selectedUserSessionChanged();
+	}
+	const QVariant voiceChannelId = authoritativeId(selectedVoiceChannelId, false);
+	if (m_selectedVoiceChannelId != voiceChannelId) {
+		m_selectedVoiceChannelId = voiceChannelId;
+		emit selectedVoiceChannelIdChanged();
+	}
 }
 void QmlSelectionState::setSelectedUserSession(const QVariant &value) {
 	bool valid = false;
@@ -2708,11 +3489,11 @@ bool QmlSelectionState::hasScopeToken(const QString &scopeToken) const {
 
 bool QmlSelectionState::hasVoiceChannelId(const QString &channelId) const {
 	if (!m_rooms) return true;
-	const QString scopeToken = QStringLiteral("channel:%1").arg(channelId);
 	for (int row = 0; row < m_rooms->rowCount(); ++row) {
 		const QVariantMap room = m_rooms->get(row);
+		const QString scopeToken = room.value(QStringLiteral("scopeToken")).toString();
 		if (room.value(QStringLiteral("kind")).toString() == QLatin1String("voice")
-			&& room.value(QStringLiteral("scopeToken")).toString() == scopeToken)
+			&& scopeToken.section(QLatin1Char(':'), -1) == channelId)
 			return true;
 	}
 	return false;
@@ -2720,7 +3501,9 @@ bool QmlSelectionState::hasVoiceChannelId(const QString &channelId) const {
 
 bool QmlSelectionState::hasParticipantSession(const QString &sessionId) const {
 	if (!m_participants) return true;
-	for (int row = 0; row < m_participants->rowCount(); ++row)
-		if (m_participants->get(row).value(QStringLiteral("id")).toString() == sessionId) return true;
+	for (int row = 0; row < m_participants->rowCount(); ++row) {
+		const QVariantMap participant = m_participants->get(row);
+		if (participant.value(QStringLiteral("participantSession")).toString() == sessionId) return true;
+	}
 	return false;
 }

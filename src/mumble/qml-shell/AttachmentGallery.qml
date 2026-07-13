@@ -8,6 +8,26 @@ Item {
     required property var attachments
     signal attachmentRequested(var attachment)
     signal attachmentRefreshRequested()
+    readonly property bool compactLayout: width < 360
+	readonly property var visibleAttachments: boundedAttachments()
+
+	function safeText(value, maximum) {
+		if (value === undefined || value === null || typeof value === "object")
+			return ""
+		return String(value).trim().slice(0, maximum || 512)
+	}
+
+	function boundedAttachments() {
+		const source = attachments || []
+		const result = []
+		const count = Math.min(16, Math.max(0, Number(source.length) || 0))
+		for (let index = 0; index < count; ++index) {
+			const attachment = source[index]
+			if (attachment && typeof attachment === "object" && !Array.isArray(attachment))
+				result.push(attachment)
+		}
+		return result
+	}
 
     function safeRenderImageSource(value) {
         const source = String(value === undefined || value === null ? "" : value).trim()
@@ -15,38 +35,50 @@ Item {
     }
 
     implicitHeight: gallery.implicitHeight
-    visible: !!attachments && attachments.length > 0
+	visible: visibleAttachments.length > 0
     Accessible.role: Accessible.List
     Accessible.name: qsTr("Message attachments")
+	Accessible.description: qsTr("%1 attachments").arg(visibleAttachments.length)
 
     Flow {
         id: gallery
         anchors.left: parent.left
         anchors.right: parent.right
         height: implicitHeight
-        spacing: 8
+		spacing: Theme.space2
 
         Repeater {
-            model: root.attachments || []
+            model: root.visibleAttachments
             delegate: Rectangle {
                 id: attachmentTile
                 required property var modelData
-                readonly property string sourceUrl: modelData.thumbnailUrl || modelData.url || ""
-                readonly property string label: modelData.alt || modelData.name || qsTr("Image attachment")
+                required property int index
+				readonly property string sourceUrl: root.safeText(
+					modelData.thumbnailUrl || modelData.url || "", 2048)
+				readonly property string label: root.safeText(
+					modelData.alt || modelData.name || qsTr("Image attachment"), 512)
+					|| qsTr("Image attachment")
+				readonly property string stableId: root.safeText(modelData.id, 128)
+					|| String(attachmentTile.index)
                 readonly property real requestedWidth: Number(modelData.width) > 0 ? Number(modelData.width) : 240
                 readonly property real requestedHeight: Number(modelData.height) > 0 ? Number(modelData.height) : 160
+                readonly property real aspectRatio: Math.max(0.2, Math.min(5,
+                    requestedHeight / Math.max(1, requestedWidth)))
 
-                objectName: "attachment_" + (modelData.id || index)
-                width: Math.min(Math.max(requestedWidth, 180), Math.min(320, gallery.width))
-                height: Math.min(Math.max(requestedHeight, 120), 240)
-                radius: 8
+				objectName: "attachment_" + stableId
+                width: Math.max(1, Math.min(Math.max(requestedWidth, 180),
+                    Math.min(320, Math.max(1, gallery.width))))
+                height: Math.min(240, Math.max(root.compactLayout ? 96 : 120,
+                    Math.round(width * aspectRatio)))
+				radius: Theme.innerRadius
                 color: Theme.strip
                 border.color: attachmentAction.activeFocus ? Theme.focus : Theme.divider
+				border.width: attachmentAction.activeFocus ? Theme.focusRingWidth : 1
                 clip: true
                 Image {
                     id: attachmentImage
                     anchors.fill: parent
-                    anchors.margins: 1
+					anchors.margins: attachmentTile.border.width
                     source: root.safeRenderImageSource(attachmentTile.sourceUrl)
                     asynchronous: true
                     cache: false
@@ -61,27 +93,37 @@ Item {
                     anchors.centerIn: parent
                     running: attachmentImage.status === Image.Loading
                     visible: running
+					palette.highlight: Theme.accent
+					Accessible.name: qsTr("Loading %1").arg(attachmentTile.label)
                 }
 
                 Label {
+					objectName: "attachmentError_" + attachmentTile.stableId
 					textFormat: Text.PlainText
                     anchors.centerIn: parent
-                    width: parent.width - 24
-                    visible: attachmentImage.status === Image.Error
+					width: Math.max(1, parent.width - Theme.space3 * 2)
+					visible: attachmentImage.status === Image.Error
+						|| root.safeRenderImageSource(attachmentTile.sourceUrl).length === 0
                     text: qsTr("Attachment unavailable")
                     color: Theme.textMuted
+					font.pixelSize: Theme.fontLabel
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.Wrap
+					Accessible.role: Accessible.AlertMessage
+					Accessible.name: text
+					Accessible.description: attachmentTile.label
                 }
 
                 Button {
                     id: attachmentAction
-                    objectName: "attachmentAction_" + (attachmentTile.modelData.id || index)
+					objectName: "attachmentAction_" + attachmentTile.stableId
                     anchors.fill: parent
                     hoverEnabled: true
                     background: null
                     contentItem: Item {}
                     Accessible.name: attachmentTile.label
+                    Accessible.description: qsTr("Attachment %1 of %2")
+						.arg(attachmentTile.index + 1).arg(root.visibleAttachments.length)
                     onClicked: root.attachmentRequested(attachmentTile.modelData)
                 }
             }

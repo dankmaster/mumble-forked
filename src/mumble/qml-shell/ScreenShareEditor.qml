@@ -205,7 +205,7 @@ ColumnLayout {
         ColumnLayout {
             Layout.fillWidth: true
             Label { textFormat: Text.PlainText; text: qsTr("Resolution"); color: Theme.textMuted; font.pixelSize: 10 }
-			ComboBox {
+			ModernComboBox {
 				id: resolution
 				objectName: "screenShareResolution"
 				Layout.fillWidth: true
@@ -218,7 +218,7 @@ ColumnLayout {
         ColumnLayout {
             Layout.fillWidth: true
             Label { textFormat: Text.PlainText; text: qsTr("Frame rate"); color: Theme.textMuted; font.pixelSize: 10 }
-			ComboBox {
+			ModernComboBox {
 				id: frameRate
 				objectName: "screenShareFrameRate"
 				Layout.fillWidth: true
@@ -231,7 +231,7 @@ ColumnLayout {
         ColumnLayout {
             Layout.fillWidth: true
             Label { textFormat: Text.PlainText; text: qsTr("Audio"); color: Theme.textMuted; font.pixelSize: 10 }
-			ComboBox {
+			ModernComboBox {
 				id: audio
 				objectName: "screenShareAudio"
 				Layout.fillWidth: true

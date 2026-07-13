@@ -29,7 +29,7 @@ TestCase {
 			compare(Number(popupType), 0) // Popup.Item on Qt 6.8+
 		compare(menuLoader.item.modal, false)
 		compare(menuLoader.item.dim, false)
-		compare(menuLoader.item.background.color, Theme.panel)
-		compare(menuLoader.item.background.border.color, Theme.divider)
+		compare(menuLoader.item.background.color, Theme.surfaceRaised)
+		compare(menuLoader.item.background.border.color, Theme.surfaceBorder)
 	}
 }

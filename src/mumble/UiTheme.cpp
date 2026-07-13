@@ -10,7 +10,9 @@
 
 #include <QtCore/QtGlobal>
 #include <QtCore/QVariant>
+#include <QtGui/QGuiApplication>
 #include <QtGui/QPalette>
+#include <QtGui/QWindow>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QWidget>
 
@@ -293,6 +295,47 @@ namespace {
 		const Qt::WindowFlags flags = widget->windowFlags();
 		return !(flags.testFlag(Qt::Popup) || flags.testFlag(Qt::ToolTip) || flags.testFlag(Qt::SplashScreen));
 	}
+
+	bool shouldThemeNativeTitleBar(const QWindow *window) {
+		if (!window || !window->isTopLevel()) {
+			return false;
+		}
+
+		const Qt::WindowFlags flags = window->flags();
+		return !(flags.testFlag(Qt::Popup) || flags.testFlag(Qt::ToolTip) || flags.testFlag(Qt::SplashScreen));
+	}
+
+	void applyUiThemeNativeTitleBar(HWND hwnd, const UiThemeWindowChrome &chrome) {
+		if (!hwnd) {
+			return;
+		}
+
+		static const HMODULE dwmapiModule = GetModuleHandleW(L"dwmapi.dll");
+		if (!dwmapiModule) {
+			return;
+		}
+
+		static const DwmSetWindowAttributeFn setWindowAttribute =
+			reinterpret_cast< DwmSetWindowAttributeFn >(GetProcAddress(dwmapiModule, "DwmSetWindowAttribute"));
+		if (!setWindowAttribute) {
+			return;
+		}
+
+		const BOOL immersiveDarkMode = chrome.dark ? TRUE : FALSE;
+		HRESULT result =
+			setWindowAttribute(hwnd, DwmUseImmersiveDarkModeAttribute, &immersiveDarkMode, sizeof(immersiveDarkMode));
+		if (FAILED(result)) {
+			setWindowAttribute(hwnd, DwmUseImmersiveDarkModeLegacyAttribute, &immersiveDarkMode,
+						   sizeof(immersiveDarkMode));
+		}
+
+		const COLORREF captionColorRef = colorRefFromQColor(chrome.caption);
+		const COLORREF textColorRef    = colorRefFromQColor(chrome.text);
+		const COLORREF borderColorRef  = colorRefFromQColor(chrome.border);
+		setWindowAttribute(hwnd, DwmCaptionColorAttribute, &captionColorRef, sizeof(captionColorRef));
+		setWindowAttribute(hwnd, DwmTextColorAttribute, &textColorRef, sizeof(textColorRef));
+		setWindowAttribute(hwnd, DwmBorderColorAttribute, &borderColorRef, sizeof(borderColorRef));
+	}
 #endif
 }
 
@@ -359,52 +402,57 @@ void applyUiThemeNativeTitleBar(QWidget *widget, const UiThemeWindowChrome &chro
 		return;
 	}
 
-	const HWND hwnd = reinterpret_cast< HWND >(widget->winId());
-	if (!hwnd) {
-		return;
-	}
-
-	static const HMODULE dwmapiModule = GetModuleHandleW(L"dwmapi.dll");
-	if (!dwmapiModule) {
-		return;
-	}
-
-	static const DwmSetWindowAttributeFn setWindowAttribute =
-		reinterpret_cast< DwmSetWindowAttributeFn >(GetProcAddress(dwmapiModule, "DwmSetWindowAttribute"));
-	if (!setWindowAttribute) {
-		return;
-	}
-
 	const UiThemeWindowChrome fallbackChrome =
 		chrome.caption.isValid() && chrome.text.isValid() && chrome.border.isValid()
 			? chrome
 			: uiThemeWindowChromeForPalette(widget->palette());
-	const BOOL immersiveDarkMode = fallbackChrome.dark ? TRUE : FALSE;
-	HRESULT result =
-		setWindowAttribute(hwnd, DwmUseImmersiveDarkModeAttribute, &immersiveDarkMode, sizeof(immersiveDarkMode));
-	if (FAILED(result)) {
-		setWindowAttribute(hwnd, DwmUseImmersiveDarkModeLegacyAttribute, &immersiveDarkMode,
-						   sizeof(immersiveDarkMode));
-	}
-
-	const COLORREF captionColorRef = colorRefFromQColor(fallbackChrome.caption);
-	const COLORREF textColorRef    = colorRefFromQColor(fallbackChrome.text);
-	const COLORREF borderColorRef  = colorRefFromQColor(fallbackChrome.border);
-	setWindowAttribute(hwnd, DwmCaptionColorAttribute, &captionColorRef, sizeof(captionColorRef));
-	setWindowAttribute(hwnd, DwmTextColorAttribute, &textColorRef, sizeof(textColorRef));
-	setWindowAttribute(hwnd, DwmBorderColorAttribute, &borderColorRef, sizeof(borderColorRef));
+	applyUiThemeNativeTitleBar(reinterpret_cast< HWND >(widget->winId()), fallbackChrome);
 #else
 	Q_UNUSED(widget);
 	Q_UNUSED(chrome);
 #endif
 }
 
-void applyUiThemeNativeTitleBars() {
-#ifdef Q_OS_WIN
-	if (!qApp) {
+void applyUiThemeNativeTitleBar(QWindow *window) {
+	if (!window) {
 		return;
 	}
 
+	const QPalette palette = qGuiApp ? qGuiApp->palette() : QPalette();
+	applyUiThemeNativeTitleBar(window, uiThemeWindowChromeForActiveTheme(palette));
+}
+
+void applyUiThemeNativeTitleBar(QWindow *window, const UiThemeWindowChrome &chrome) {
+#ifdef Q_OS_WIN
+	if (!shouldThemeNativeTitleBar(window)) {
+		return;
+	}
+
+	const QPalette palette = qGuiApp ? qGuiApp->palette() : QPalette();
+	const UiThemeWindowChrome fallbackChrome =
+		chrome.caption.isValid() && chrome.text.isValid() && chrome.border.isValid()
+			? chrome
+			: uiThemeWindowChromeForPalette(palette);
+	applyUiThemeNativeTitleBar(reinterpret_cast< HWND >(window->winId()), fallbackChrome);
+#else
+	Q_UNUSED(window);
+	Q_UNUSED(chrome);
+#endif
+}
+
+void applyUiThemeNativeTitleBars() {
+#ifdef Q_OS_WIN
+	if (!qGuiApp) {
+		return;
+	}
+
+	for (QWindow *window : QGuiApplication::topLevelWindows()) {
+		applyUiThemeNativeTitleBar(window);
+	}
+
+	// Some native plugin surfaces can exist before their backing QWindow is
+	// visible in QGuiApplication::topLevelWindows(). Keep the QWidget pass for
+	// those explicitly allowlisted third-party/OS surfaces.
 	for (QWidget *widget : QApplication::topLevelWidgets()) {
 		applyUiThemeNativeTitleBar(widget);
 	}

@@ -21,11 +21,15 @@ namespace {
 		tokens.crust = QColor(QStringLiteral("#101112"));
 		tokens.mantle = QColor(QStringLiteral("#202122"));
 		tokens.base = QColor(QStringLiteral("#303132"));
+		tokens.surface0 = QColor(QStringLiteral("#343536"));
+		tokens.surface1 = QColor(QStringLiteral("#38393a"));
+		tokens.surface2 = QColor(QStringLiteral("#444546"));
 		tokens.border = QColor(QStringLiteral("#404142"));
 		tokens.text = QColor(QStringLiteral("#f0f1f2"));
 		tokens.subtext0 = QColor(QStringLiteral("#d0d1d2"));
 		tokens.overlay0 = QColor(QStringLiteral("#909192"));
 		tokens.accent = QColor(QStringLiteral("#50c0a0"));
+		tokens.accentHover = QColor(QStringLiteral("#70d0b0"));
 		tokens.accentSubtle = QColor(QStringLiteral("#2950c0a0"));
 		tokens.danger = QColor(QStringLiteral("#e06060"));
 		tokens.success = QColor(QStringLiteral("#60d090"));
@@ -42,8 +46,13 @@ void TestQmlThemeController::appliesBuiltInTokenMappingIdempotently() {
 	controller.applyTokens(tokens);
 	QCOMPARE(changed.count(), 1);
 	QCOMPARE(controller.panel(), tokens.base);
+	QCOMPARE(controller.surfaceRaised(), tokens.surface0);
+	QCOMPARE(controller.surfaceHover(), tokens.surface1);
+	QCOMPARE(controller.surfaceBorder(), tokens.surface2);
 	QCOMPARE(controller.rail(), tokens.mantle);
 	QCOMPARE(controller.accent(), tokens.accent);
+	QCOMPARE(controller.accentHover(), tokens.accentHover);
+	QCOMPARE(controller.accentSubtle(), tokens.accentSubtle);
 	QCOMPARE(controller.focus(), tokens.focusAccent);
 	controller.applyTokens(tokens);
 	QCOMPARE(changed.count(), 1);
@@ -102,7 +111,13 @@ void TestQmlThemeController::appliesProductDensityAccentAndTypedState() {
 	QCOMPARE(state.value(QStringLiteral("themeId")).toString(), QStringLiteral("nord"));
 	QCOMPARE(state.value(QStringLiteral("density")).toString(), QStringLiteral("spacious"));
 	QCOMPARE(state.value(QStringLiteral("accent")).toString(), QStringLiteral("rose"));
-	QCOMPARE(state.value(QStringLiteral("effectiveTokens")).toMap().value(QStringLiteral("spacing")).toInt(), 16);
+	const QVariantMap effectiveTokens = state.value(QStringLiteral("effectiveTokens")).toMap();
+	QCOMPARE(effectiveTokens.value(QStringLiteral("spacing")).toInt(), 16);
+	QCOMPARE(effectiveTokens.value(QStringLiteral("surfaceRaised")).toString(),
+		controller.surfaceRaised().name(QColor::HexRgb));
+	QCOMPARE(effectiveTokens.value(QStringLiteral("--accent")).toString(),
+		controller.accent().name(QColor::HexRgb));
+	QVERIFY(!effectiveTokens.value(QStringLiteral("--accent-rgb")).toString().isEmpty());
 
 	QVERIFY(controller.applyProductAppearance(QStringLiteral("dark"), QStringLiteral("compact"),
 		QStringLiteral("custom"), QStringLiteral("#3366cc"), 75));

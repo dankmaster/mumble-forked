@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -15,14 +17,37 @@ Rectangle {
     property bool userExpanded: false
     property int selectedMediaIndex: 0
     property bool imageRefreshQueued: false
+	property bool sensitiveMediaRevealed: false
     readonly property string previewState: preview
         ? (preview.state || (preview.failed ? "error" : preview.loading ? "loading" : "ready")) : ""
+	readonly property string sanitizedDescription: safeText(preview ? preview.description : "", 4096)
+	readonly property string mediaErrorDescription: firstSafeText([
+		preview ? preview.errorDescription : "", preview ? preview.errorMessage : "",
+		preview && typeof preview.error === "string" ? preview.error : "", sanitizedDescription
+	], 1024)
+	readonly property string errorDescription: previewState === "error" ? mediaErrorDescription : ""
     readonly property bool compact: preview && preview.previewSize === "compact" && !userExpanded
     readonly property bool expanded: preview && (preview.previewSize === "large" || userExpanded)
-    readonly property string displayTitle: preview
-        ? (preview.title || preview.host || preview.loadingLabel || qsTr("Link preview")) : ""
-    readonly property string metadataLine: preview
-        ? (preview.subtitle || preview.host || (preview.metadata ? (preview.metadata.xDisplayName || preview.metadata.xHandle || "") : "")) : ""
+    readonly property bool narrowLayout: width < 440
+	readonly property real actionAvailableWidth: Math.max(1, width - Theme.space4 * 2)
+    readonly property bool actionsWrapped: previewActionFlow.implicitHeight > Theme.controlHeight + 1
+	readonly property string displayTitle: safeText(preview
+		? (preview.title || preview.host || preview.loadingLabel || qsTr("Link preview")) : "", 512)
+	readonly property string metadataLine: safeText(preview
+		? (preview.subtitle || preview.host || (preview.metadata
+			? (preview.metadata.xDisplayName || preview.metadata.xHandle || "") : "")) : "", 512)
+	readonly property string providerLabel: safeText(preview ? String(
+		(preview.metadata && (preview.metadata.providerName || preview.metadata.previewProvider))
+		|| preview.providerName || preview.host || preview.embedKind || "") : "", 128)
+	readonly property string safeEmbedUrl: safeProviderEmbedUrl(preview ? preview.embedUrl : "")
+	readonly property string safeEmbedProvider: safeText(preview ? preview.embedKind : "", 64)
+	readonly property string openLabel: safeText(preview ? preview.openLabel : "", 128) || qsTr("Open")
+	readonly property string contentWarning: preview && preview.metadata
+		? safeText(preview.metadata.contentWarning, 512) : ""
+	readonly property bool thumbnailBlur: {
+		const value = preview && preview.metadata ? preview.metadata.thumbnailBlur : false
+		return value === true || value === 1 || String(value).toLowerCase() === "true"
+	}
     readonly property var mediaItems: normalizedMediaItems()
     readonly property var currentMedia: mediaItems.length > 0
         ? mediaItems[Math.max(0, Math.min(selectedMediaIndex, mediaItems.length - 1))] : ({})
@@ -34,6 +59,9 @@ Rectangle {
     readonly property string imageSource: safeRenderImageSource(currentMediaKind === "image" ? currentMediaUrl
         : String(currentMedia.poster || currentMedia.thumbnail || (preview ? preview.thumbnailUrl : "") || ""),
         currentMediaKind === "image" && !!currentMedia.managedAnimated)
+	readonly property bool currentMediaManagedAnimated: currentMediaKind === "image"
+		&& !!currentMedia.managedAnimated && /^file:\/\//i.test(imageSource)
+		&& /\.gif$/i.test(imageSource)
     readonly property bool hasExternalImage: currentMediaKind === "image"
         && imageSource.length === 0 && currentMediaExternalUrl.length > 0
     readonly property bool hasDirectMedia: currentMediaDirectPlayable
@@ -41,9 +69,17 @@ Rectangle {
     readonly property bool hasExternalMedia: !currentMediaDirectPlayable
         && (currentMediaKind === "video" || currentMediaKind === "audio")
         && safeExternalUrl(currentMediaUrl).length > 0
-    readonly property bool hasDetails: !!preview && ((preview.description || "").length > 0
-                                                     || (!!preview.metadata && Object.keys(preview.metadata).length > 0)
-                                                     || mediaItems.length > 1)
+	readonly property bool hasRevealableMedia: imageSource.length > 0 || hasExternalImage
+		|| hasDirectMedia || hasExternalMedia
+	readonly property bool mediaRequiresReveal: hasRevealableMedia && !sensitiveMediaRevealed
+		&& (contentWarning.length > 0 || thumbnailBlur)
+	readonly property bool hasExpandedDescription: previewState === "ready"
+		&& sanitizedDescription.length > 0
+		&& !providerDetails.ownsDescription
+	readonly property bool canExpand: !!preview && preview.previewSize !== "large"
+		&& (providerDetails.canExpand || hasExpandedDescription || hasRevealableMedia
+			|| mediaItems.length > 1)
+	readonly property bool hasDetails: canExpand
 
     signal externalOpenRequested(string url)
     signal imageOpenRequested(string source, string title)
@@ -52,25 +88,40 @@ Rectangle {
     signal playRequested(string url, string provider)
     signal watchTogetherRequested(string url, string provider, string title)
 
-    implicitHeight: content.implicitHeight + 16
-    radius: 8
-    color: Theme.strip
-    border.color: Theme.divider
+	implicitHeight: content.implicitHeight + Theme.space4 * 2
+	radius: Theme.innerRadius
+	color: Theme.surfaceRaised
+	border.color: root.previewState === "error" ? root.withAlpha(Theme.danger, 0.65)
+		: Theme.surfaceBorder
     Accessible.role: Accessible.Grouping
     Accessible.name: displayTitle + (metadataLine.length > 0 ? ": " + metadataLine : "")
-    Accessible.description: previewState === "loading" ? qsTr("Preview loading")
-        : previewState === "error" ? qsTr("Preview unavailable") : (preview.description || "")
+	Accessible.description: previewState === "loading" ? qsTr("Preview loading")
+		: previewState === "error" ? [qsTr("Preview unavailable"), errorDescription]
+			.filter(function(value) { return value.length > 0 }).join(". ")
+		: sanitizedDescription
 
     onPreviewIdentityChanged: resetForReuse()
     onPreviewChanged: {
 		selectedMediaIndex = Math.max(0, Math.min(selectedMediaIndex, Math.max(0, mediaItems.length - 1)))
         imageRefreshQueued = false
     }
+	onContentWarningChanged: sensitiveMediaRevealed = false
+	onThumbnailBlurChanged: sensitiveMediaRevealed = false
+
+	Rectangle {
+		anchors.left: parent.left
+		anchors.top: parent.top
+		anchors.bottom: parent.bottom
+		width: 3
+		radius: root.radius
+		color: root.previewState === "error" ? Theme.danger : Theme.accent
+	}
 
     function resetForReuse() {
         userExpanded = false
         selectedMediaIndex = 0
         imageRefreshQueued = false
+		sensitiveMediaRevealed = false
     }
 
     function requestImageRefresh() {
@@ -81,9 +132,49 @@ Rectangle {
     }
 
     function safeExternalUrl(value) {
-        const url = String(value === undefined || value === null ? "" : value).trim()
+		const url = String(value === undefined || value === null ? "" : value).trim().slice(0, 2048)
         return /^(https?:\/\/|mailto:|mumble:\/\/)/i.test(url) ? url : ""
     }
+
+	function safeProviderEmbedUrl(value) {
+		const url = String(value === undefined || value === null ? "" : value).trim().slice(0, 2048)
+		return /^https:\/\//i.test(url) ? url : ""
+	}
+
+	function safeDirectMediaUrl(value, kind) {
+		const url = String(value === undefined || value === null ? "" : value).trim()
+		if (/^https:\/\//i.test(url))
+			return url.slice(0, 2048)
+		const expectedKind = String(kind || "").toLowerCase()
+		if ((expectedKind === "audio" || expectedKind === "video")
+				&& new RegExp("^data:" + expectedKind + "\/[a-z0-9.+-]+;base64,", "i").test(url))
+			return url
+		return ""
+	}
+
+	function safeText(value, maximum) {
+		if (value === undefined || value === null || typeof value === "object")
+			return ""
+		return String(value).trim().slice(0, maximum || 512)
+	}
+
+	function firstSafeText(values, maximum) {
+		for (let index = 0; index < values.length; ++index) {
+			const text = safeText(values[index], maximum)
+			if (text.length > 0)
+				return text
+		}
+		return ""
+	}
+
+	function withAlpha(color, alpha) {
+		return Qt.rgba(color.r, color.g, color.b, alpha)
+	}
+
+	function actionButtonWidth(implicitButtonWidth) {
+		return Math.max(1, narrowLayout ? actionAvailableWidth
+			: Math.min(implicitButtonWidth, actionAvailableWidth))
+	}
 
     function safeRenderImageSource(value, managedAnimated) {
         const source = String(value === undefined || value === null ? "" : value).trim()
@@ -112,7 +203,7 @@ Rectangle {
     function normalizedMediaItems() {
         if (!preview)
             return []
-        const sourceItems = preview.mediaItems || []
+		const sourceItems = Array.isArray(preview.mediaItems) ? preview.mediaItems : []
         const result = []
         for (let index = 0; index < sourceItems.length && result.length < 16; ++index) {
             const item = sourceItems[index] || {}
@@ -123,37 +214,66 @@ Rectangle {
                 if (renderSource.length > 0 || externalSource.length > 0) {
                     result.push({
                         "kind": "image",
-                        "mime": String(item.mime || ""),
+						"mime": safeText(item.mime, 128),
                         "url": renderSource,
                         "externalUrl": externalSource,
-                        "title": String(item.title || ""),
+						"title": safeText(item.title, 512),
                         "directPlayable": renderSource.length > 0,
                         "managedAnimated": !!item.managedAnimated && /^file:\/\//i.test(renderSource),
                         "thumbnail": safeRenderImageSource(item.thumbnail || ""),
                         "poster": safeRenderImageSource(item.poster || "")
                     })
                 }
-            } else if (String(item.url || "").length > 0) {
-                result.push(item)
+		} else {
+				const kind = mediaKind(item)
+				const playbackUrl = safeDirectMediaUrl(item.url || "", kind)
+				const externalUrl = safeExternalUrl(item.externalUrl || item.url)
+				const directPlayable = item.directPlayable !== false && playbackUrl.length > 0
+				const targetUrl = directPlayable ? playbackUrl : externalUrl
+				if (kind.length > 0 && targetUrl.length > 0) {
+					result.push({
+						"kind": kind,
+						"mime": safeText(item.mime, 128),
+						"url": targetUrl,
+						"externalUrl": externalUrl,
+						"title": safeText(item.title, 512),
+						"directPlayable": directPlayable,
+						"thumbnail": safeRenderImageSource(item.thumbnail || ""),
+						"poster": safeRenderImageSource(item.poster || "")
+					})
+				}
             }
         }
         if (result.length === 0 && (String(preview.mediaUrl || "").length > 0
                                    || safeExternalUrl(preview.mediaExternalUrl || "").length > 0)) {
-            result.push({
-                "url": String(preview.mediaUrl),
-                "externalUrl": safeExternalUrl(preview.mediaExternalUrl || ""),
-                "mime": String(preview.mediaMime || ""),
-                "kind": String(preview.mediaKind || ""),
-                "thumbnail": String(preview.thumbnailUrl || ""),
-                "poster": String(preview.thumbnailUrl || ""),
-                "title": root.displayTitle,
-                "managedAnimated": !!preview.mediaAnimated
-            })
+			const fallbackKind = mediaKind({ "kind": preview.mediaKind, "mime": preview.mediaMime })
+			const playbackUrl = safeDirectMediaUrl(preview.mediaUrl || "", fallbackKind)
+			const externalUrl = safeExternalUrl(preview.mediaExternalUrl
+				|| (playbackUrl.length === 0 ? preview.mediaUrl : ""))
+			const directPlayable = playbackUrl.length > 0
+			const targetUrl = directPlayable ? playbackUrl : externalUrl
+			if (fallbackKind.length > 0 && targetUrl.length > 0) {
+				result.push({
+					"url": targetUrl,
+					"externalUrl": externalUrl,
+					"mime": safeText(preview.mediaMime, 128),
+					"kind": fallbackKind,
+					"thumbnail": safeRenderImageSource(preview.thumbnailUrl || ""),
+					"poster": safeRenderImageSource(preview.thumbnailUrl || ""),
+					"title": root.displayTitle,
+					"directPlayable": directPlayable,
+					"managedAnimated": !!preview.mediaAnimated
+				})
+			}
         }
         return result
     }
 
     function requestCurrentMedia() {
+		if (mediaRequiresReveal) {
+			sensitiveMediaRevealed = true
+			return
+		}
         if (currentMediaKind === "image") {
             if (imageSource.length > 0)
                 imageOpenRequested(imageSource, String(currentMedia.title || displayTitle))
@@ -167,38 +287,38 @@ Rectangle {
         }
         if (!hasDirectMedia)
             return
-        const pairedAudioUrl = currentMediaUrl === String(preview.mediaUrl || "")
-            ? String(preview.mediaAudioUrl || "") : ""
-        const pairedAudioMime = pairedAudioUrl.length > 0 ? String(preview.mediaAudioMime || "") : ""
+		const pairedAudioUrl = currentMediaUrl === safeDirectMediaUrl(preview.mediaUrl || "", currentMediaKind)
+			? safeDirectMediaUrl(preview.mediaAudioUrl || "", "audio") : ""
+		const pairedAudioMime = pairedAudioUrl.length > 0 ? safeText(preview.mediaAudioMime, 128) : ""
         directMediaRequested(currentMediaUrl, String(currentMedia.mime || preview.mediaMime || ""),
                              pairedAudioUrl, pairedAudioMime,
-                             String(currentMedia.title || displayTitle))
+							 safeText(currentMedia.title || displayTitle, 512))
     }
 
     ColumnLayout {
         id: content
         anchors.fill: parent
-        anchors.margins: 8
-        spacing: 8
+		anchors.margins: Theme.space4
+		spacing: Theme.space3
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: 10
+            spacing: Theme.space3
 
             Rectangle {
-                Layout.preferredWidth: root.compact ? 52 : 72
-                Layout.preferredHeight: root.compact ? 52 : 54
+				Layout.preferredWidth: root.compact ? 56 : 92
+				Layout.preferredHeight: root.compact ? 56 : 64
                 visible: root.imageSource.length > 0 || root.previewState !== "ready" || root.hasExternalImage
                          || root.hasDirectMedia || root.hasExternalMedia
-                radius: 6
-                color: Theme.panel
+				radius: Theme.innerRadius
+				color: Theme.panel
                 clip: true
 
                 Image {
                     id: previewImage
 					objectName: "previewCompactImage"
                     anchors.fill: parent
-					source: root.renderActive ? root.imageSource : ""
+					source: root.renderActive && !root.mediaRequiresReveal ? root.imageSource : ""
                     asynchronous: true
                     cache: false
                     sourceSize: Qt.size(Math.min(640, width * Screen.devicePixelRatio),
@@ -209,51 +329,133 @@ Rectangle {
                                          root.requestImageRefresh()
                 }
                 BusyIndicator {
+					objectName: "previewCompactBusyIndicator"
                     anchors.centerIn: parent
                     running: root.previewState === "loading" || previewImage.status === Image.Loading
                     visible: running
+					palette.dark: Theme.accent
+					palette.highlight: Theme.accent
                 }
-                Label {
-					textFormat: Text.PlainText
+                ModernIcon {
                     anchors.centerIn: parent
                     visible: root.previewState === "error" || (root.imageSource.length > 0 && previewImage.status === Image.Error)
-                    text: "!"
+					name: "warning"
                     color: Theme.danger
-                    font.bold: true
-                    font.pixelSize: 18
-                    Accessible.name: qsTr("Preview unavailable")
+					size: Theme.avatarSmall
+					Accessible.ignored: true
                 }
-                Label {
-					textFormat: Text.PlainText
+                ModernIcon {
                     anchors.centerIn: parent
                     visible: (root.hasDirectMedia || root.hasExternalMedia || root.hasExternalImage)
                              && root.imageSource.length === 0
-                    text: root.currentMediaKind === "audio" ? "♪" : root.hasExternalImage ? "↗" : "▶"
+					name: root.hasExternalImage ? "external" : "play"
                     color: Theme.textStrong
-                    font.pixelSize: 20
+					size: Theme.avatarSmall
                 }
                 Button {
+					id: compactMediaAction
+					objectName: "previewCompactMediaButton"
                     anchors.fill: parent
                     hoverEnabled: true
-                    enabled: root.currentMediaKind === "image" ? (previewImage.status === Image.Ready || root.hasExternalImage)
+					enabled: !root.mediaRequiresReveal && (root.currentMediaKind === "image"
+						? (previewImage.status === Image.Ready || root.hasExternalImage)
                              : (root.hasDirectMedia || root.hasExternalMedia)
+					)
                     background: null
                     contentItem: Item {}
                     Accessible.name: root.currentMediaKind === "image" ? qsTr("Open preview image") : qsTr("Play direct media")
                     onClicked: root.requestCurrentMedia()
                 }
+				Rectangle {
+					objectName: "previewCompactMediaFocus"
+					anchors.fill: parent
+					anchors.margins: Theme.space1
+					visible: compactMediaAction.activeFocus
+					color: "transparent"
+					radius: Theme.innerRadius
+					border.color: Theme.focus
+					border.width: Theme.focusRingWidth
+				}
+				Rectangle {
+					anchors.fill: parent
+					visible: root.mediaRequiresReveal && !root.expanded
+					color: Theme.strip
+					radius: parent.radius
+					border.color: Theme.surfaceBorder
+
+					Button {
+						id: compactRevealButton
+						objectName: "previewCompactRevealButton"
+						anchors.fill: parent
+						visible: root.mediaRequiresReveal && !root.expanded
+						hoverEnabled: true
+						background: null
+						contentItem: Label {
+							text: qsTr("Reveal")
+							textFormat: Text.PlainText
+							color: Theme.textStrong
+							font.pixelSize: Theme.fontCaption
+							font.bold: true
+							horizontalAlignment: Text.AlignHCenter
+							verticalAlignment: Text.AlignVCenter
+						}
+						Accessible.name: qsTr("Reveal sensitive preview media")
+						Accessible.description: root.contentWarning.length > 0
+							? root.contentWarning : qsTr("This preview is hidden by default")
+						onClicked: root.sensitiveMediaRevealed = true
+					}
+					Rectangle {
+						objectName: "previewCompactRevealFocus"
+						anchors.fill: parent
+						anchors.margins: Theme.space1
+						visible: compactRevealButton.activeFocus
+						color: "transparent"
+						radius: Theme.innerRadius
+						border.color: Theme.focus
+						border.width: Theme.focusRingWidth
+					}
+				}
             }
 
             ColumnLayout {
                 Layout.fillWidth: true
-                spacing: 3
+				spacing: Theme.space1
+				Rectangle {
+					objectName: "previewProviderChip"
+					Layout.preferredWidth: Math.min(providerText.implicitWidth + Theme.space2 * 2,
+						Math.max(1, parent.width))
+					Layout.maximumWidth: Math.max(1, parent.width)
+					Layout.preferredHeight: Theme.space5
+					visible: root.providerLabel.length > 0
+					radius: height / 2
+					color: Theme.accentSubtle
+					Label {
+						id: providerText
+						objectName: "previewProviderLabel"
+						anchors.fill: parent
+						anchors.leftMargin: Theme.space2
+						anchors.rightMargin: Theme.space2
+						textFormat: Text.PlainText
+						text: root.providerLabel.toUpperCase()
+						color: Theme.accent
+						font.pixelSize: Theme.fontCaption
+						font.bold: true
+						font.letterSpacing: 0.6
+						elide: Text.ElideRight
+						horizontalAlignment: Text.AlignHCenter
+						verticalAlignment: Text.AlignVCenter
+					}
+				}
                 Label {
 					textFormat: Text.PlainText
                     Layout.fillWidth: true
                     text: root.displayTitle
                     color: Theme.textStrong
-                    font.bold: true
-                    elide: Text.ElideRight
+					font.bold: true
+					font.pixelSize: Theme.fontTitle
+					wrapMode: root.narrowLayout ? Text.Wrap : Text.NoWrap
+					maximumLineCount: root.narrowLayout ? 2 : 1
+					elide: Text.ElideRight
                 }
                 Label {
 					textFormat: Text.PlainText
@@ -261,94 +463,186 @@ Rectangle {
                     visible: root.metadataLine.length > 0
                     text: root.metadataLine
                     color: Theme.textMuted
-                    font.pixelSize: 10
-                    elide: Text.ElideRight
+					font.pixelSize: Theme.fontCaption
+					wrapMode: root.narrowLayout ? Text.Wrap : Text.NoWrap
+					maximumLineCount: root.narrowLayout ? 2 : 1
+					elide: Text.ElideRight
                 }
                 Label {
+					objectName: "previewErrorText"
 					textFormat: Text.PlainText
                     Layout.fillWidth: true
-                    visible: root.previewState === "error"
-                    text: qsTr("Preview unavailable. You can still open the original link.")
+					visible: root.previewState === "error"
+						|| (root.imageSource.length > 0 && previewImage.status === Image.Error)
+					text: root.previewState === "error"
+						? (root.errorDescription.length > 0
+							? qsTr("Preview unavailable: %1").arg(root.errorDescription)
+							: qsTr("Preview unavailable. You can still open the original link."))
+						: (root.mediaErrorDescription.length > 0
+							? qsTr("Media unavailable: %1").arg(root.mediaErrorDescription)
+							: qsTr("Media unavailable"))
                     color: Theme.danger
-                    font.pixelSize: 10
+					font.pixelSize: Theme.fontCaption
                     wrapMode: Text.Wrap
+					Accessible.role: Accessible.AlertMessage
+					Accessible.name: root.previewState === "error" ? qsTr("Preview unavailable")
+						: qsTr("Media unavailable")
+					Accessible.description: root.previewState === "error"
+						? root.errorDescription : root.mediaErrorDescription
                 }
                 Label {
 					textFormat: Text.PlainText
                     Layout.fillWidth: true
-                    visible: root.expanded && root.previewState === "ready" && (root.preview.description || "").length > 0
-                    text: root.preview.description || ""
+					visible: root.expanded && root.previewState === "ready"
+						&& root.hasExpandedDescription
+					text: root.sanitizedDescription
                     color: Theme.textMain
-                    font.pixelSize: 10
+					font.pixelSize: Theme.fontCaption
                     wrapMode: Text.Wrap
                 }
             }
         }
 
         Rectangle {
+			id: expandedMediaPanel
+			objectName: "previewExpandedMediaPanel"
             Layout.fillWidth: true
             Layout.preferredHeight: root.expanded && (root.imageSource.length > 0
                                     || root.hasDirectMedia || root.hasExternalMedia || root.hasExternalImage)
-                                    ? Math.min(280, width * 9 / 16) : 0
+									? Math.min(Theme.rowHeight * 6, root.actionAvailableWidth * 9 / 16) : 0
             visible: Layout.preferredHeight > 0
             color: Theme.panel
-            radius: 6
+			radius: Theme.innerRadius
             clip: true
 
-            AnimatedImage {
-                id: expandedImage
-				objectName: "previewExpandedAnimatedImage"
-				readonly property string requestedSource: root.renderActive && root.expanded
-					? root.imageSource : ""
+            Image {
+				id: expandedStaticImage
+				objectName: "previewExpandedStaticImage"
                 anchors.fill: parent
-                anchors.margins: 2
-				source: requestedSource
+				anchors.margins: Theme.space1
+				source: root.renderActive && root.expanded && !root.mediaRequiresReveal
+					&& !root.currentMediaManagedAnimated
+					? root.imageSource : ""
                 asynchronous: true
                 cache: false
-				playing: visible && source.toString().length > 0
                 fillMode: Image.PreserveAspectFit
-                visible: root.imageSource.length > 0 && status === Image.Ready
+				visible: source.toString().length > 0 && status === Image.Ready
                 onStatusChanged: if (status === Image.Error && root.imageSource.length > 0)
                                      root.requestImageRefresh()
             }
+			Loader {
+				id: expandedAnimationLoader
+				objectName: "previewExpandedAnimatedLoader"
+				property int mediaStatus: Image.Null
+				anchors.fill: parent
+				anchors.margins: Theme.space1
+				active: root.renderActive && root.expanded && !root.mediaRequiresReveal
+					&& root.currentMediaManagedAnimated
+				onActiveChanged: mediaStatus = active ? Image.Loading : Image.Null
+				sourceComponent: AnimatedImage {
+					objectName: "previewExpandedAnimatedImage"
+					readonly property string requestedSource: root.imageSource
+					source: requestedSource
+					asynchronous: true
+					cache: false
+					playing: visible && status === Image.Ready
+					fillMode: Image.PreserveAspectFit
+					visible: status === Image.Ready
+					onStatusChanged: {
+						expandedAnimationLoader.mediaStatus = status
+						if (status === Image.Error && root.imageSource.length > 0)
+							root.requestImageRefresh()
+					}
+					Component.onCompleted: expandedAnimationLoader.mediaStatus = status
+				}
+			}
             BusyIndicator {
+				objectName: "previewExpandedBusyIndicator"
                 anchors.centerIn: parent
-                running: expandedImage.status === Image.Loading
+				running: !root.mediaRequiresReveal && (root.currentMediaManagedAnimated
+					? expandedAnimationLoader.mediaStatus === Image.Loading
+					: expandedStaticImage.status === Image.Loading)
                 visible: running
+				palette.dark: Theme.accent
+				palette.highlight: Theme.accent
             }
+			Rectangle {
+				objectName: "previewExpandedMediaScrim"
+				anchors.fill: parent
+				visible: !root.mediaRequiresReveal && (root.hasDirectMedia || root.hasExternalMedia
+					|| root.hasExternalImage || root.mediaItems.length > 1)
+				color: root.withAlpha(Theme.strip, 0.38)
+			}
+			Label {
+				objectName: "previewExpandedError"
+				anchors.centerIn: parent
+				width: Math.max(1, parent.width - Theme.space5 * 2)
+				visible: !root.mediaRequiresReveal && (root.previewState === "error"
+					|| (root.imageSource.length > 0 && (root.currentMediaManagedAnimated
+						? expandedAnimationLoader.mediaStatus === Image.Error
+						: expandedStaticImage.status === Image.Error)))
+				text: root.mediaErrorDescription.length > 0
+					? qsTr("Media unavailable: %1").arg(root.mediaErrorDescription)
+					: qsTr("Media unavailable")
+				textFormat: Text.PlainText
+				color: Theme.danger
+				font.pixelSize: Theme.fontLabel
+				font.bold: true
+				wrapMode: Text.Wrap
+				horizontalAlignment: Text.AlignHCenter
+				Accessible.role: Accessible.AlertMessage
+				Accessible.name: qsTr("Media unavailable")
+				Accessible.description: root.mediaErrorDescription
+			}
             ModernButton {
                 anchors.centerIn: parent
-                visible: root.hasDirectMedia || root.hasExternalMedia || root.hasExternalImage
+				visible: root.previewState !== "error" && !root.mediaRequiresReveal
+					&& (root.hasDirectMedia || root.hasExternalMedia || root.hasExternalImage)
                 text: root.hasExternalImage ? qsTr("Open image") : root.hasExternalMedia ? qsTr("Open media")
                     : root.currentMediaKind === "audio" ? qsTr("Play audio") : qsTr("Play video")
                 onClicked: root.requestCurrentMedia()
             }
             Button {
+				id: expandedMediaAction
+				objectName: "previewExpandedMediaButton"
                 anchors.fill: parent
-                visible: root.currentMediaKind === "image" && expandedImage.status === Image.Ready
+				visible: root.currentMediaKind === "image"
+					&& (root.currentMediaManagedAnimated
+						? expandedAnimationLoader.mediaStatus === Image.Ready
+						: expandedStaticImage.status === Image.Ready)
                 hoverEnabled: true
                 background: null
                 contentItem: Item {}
                 Accessible.name: qsTr("Open preview image")
                 onClicked: root.requestCurrentMedia()
             }
-            ToolButton {
+			Rectangle {
+				objectName: "previewExpandedMediaFocus"
+				anchors.fill: parent
+				anchors.margins: Theme.space1
+				visible: expandedMediaAction.activeFocus
+				color: "transparent"
+				radius: Theme.innerRadius
+				border.color: Theme.focus
+				border.width: Theme.focusRingWidth
+			}
+			ModernIconButton {
                 objectName: "previewPreviousMediaButton"
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
                 visible: root.mediaItems.length > 1
                 enabled: root.selectedMediaIndex > 0
-                text: "‹"
+				iconName: "previous"
                 Accessible.name: qsTr("Previous media")
                 onClicked: --root.selectedMediaIndex
             }
-            ToolButton {
+			ModernIconButton {
                 objectName: "previewNextMediaButton"
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
                 visible: root.mediaItems.length > 1
                 enabled: root.selectedMediaIndex + 1 < root.mediaItems.length
-                text: "›"
+				iconName: "next"
                 Accessible.name: qsTr("Next media")
                 onClicked: ++root.selectedMediaIndex
             }
@@ -356,52 +650,117 @@ Rectangle {
 				textFormat: Text.PlainText
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                anchors.margins: 8
+				anchors.margins: Theme.space2
                 visible: root.mediaItems.length > 1
                 text: qsTr("%1 of %2").arg(root.selectedMediaIndex + 1).arg(root.mediaItems.length)
                 color: Theme.textMuted
-                font.pixelSize: 10
+				font.pixelSize: Theme.fontCaption
             }
+			Rectangle {
+				anchors.fill: parent
+				visible: root.mediaRequiresReveal
+				color: Theme.strip
+				radius: parent.radius
+				border.color: Theme.surfaceBorder
+
+				ColumnLayout {
+					anchors.centerIn: parent
+					width: Math.min(parent.width - Theme.space4 * 2, 360)
+					spacing: Theme.space2
+
+					Label {
+						Layout.fillWidth: true
+						text: root.contentWarning.length > 0 ? root.contentWarning
+							: qsTr("This preview is hidden by default")
+						textFormat: Text.PlainText
+						color: Theme.textStrong
+						font.pixelSize: Theme.fontLabel
+						font.bold: true
+						wrapMode: Text.Wrap
+						horizontalAlignment: Text.AlignHCenter
+					}
+					ModernButton {
+						objectName: "previewExpandedRevealButton"
+						Layout.alignment: Qt.AlignHCenter
+						visible: root.mediaRequiresReveal && root.expanded
+						text: qsTr("Reveal media")
+						tone: "accent"
+						Accessible.description: qsTr("Show this preview until the card is reused")
+						onClicked: root.sensitiveMediaRevealed = true
+					}
+				}
+			}
         }
 
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 6
+		ProviderDetails {
+			id: providerDetails
+			Layout.fillWidth: true
+			metadata: root.preview && root.preview.metadata ? root.preview.metadata : ({})
+			previewKind: root.preview ? String(root.preview.kind || "") : ""
+			providerHint: root.preview ? String(root.preview.embedKind || root.providerLabel || "") : ""
+			previewTitle: root.displayTitle
+			previewSubtitle: root.metadataLine
+			previewDescription: root.sanitizedDescription
+			expanded: root.expanded
+			onExternalOpenRequested: (url) => root.externalOpenRequested(url)
+		}
+
+        Flow {
+			id: previewActionFlow
+			objectName: "previewActionFlow"
+			Layout.fillWidth: false
+			Layout.minimumWidth: root.actionAvailableWidth
+			Layout.preferredWidth: root.actionAvailableWidth
+			Layout.maximumWidth: root.actionAvailableWidth
+			Layout.preferredHeight: visible ? implicitHeight : 0
+			spacing: Theme.space2
             visible: root.previewState !== "loading"
 
             ModernButton {
-                objectName: "previewOpenButton"
+				objectName: "previewOpenButton"
                 visible: root.safeExternalUrl(root.preview.url).length > 0
-                text: root.preview.openLabel || qsTr("Open")
+				text: root.openLabel
+				dense: true
+				width: root.actionButtonWidth(implicitWidth)
+				Accessible.name: root.openLabel
                 onClicked: root.externalOpenRequested(root.safeExternalUrl(root.preview.url))
             }
             ModernButton {
                 objectName: "previewDirectMediaButton"
-                visible: root.hasDirectMedia || root.hasExternalMedia || root.hasExternalImage
+				visible: !root.mediaRequiresReveal
+					&& (root.hasDirectMedia || root.hasExternalMedia || root.hasExternalImage)
                 text: root.hasExternalImage ? qsTr("Open image") : root.hasExternalMedia ? qsTr("Open media")
                     : root.currentMediaKind === "audio" ? qsTr("Play audio") : qsTr("Play video")
+				dense: true
+				width: root.actionButtonWidth(implicitWidth)
                 onClicked: root.requestCurrentMedia()
             }
             ModernButton {
                 objectName: "previewPlayButton"
-                visible: (root.preview.embedUrl || "").length > 0 && (root.preview.embedKind || "").length > 0
+				visible: root.safeEmbedUrl.length > 0 && root.safeEmbedProvider.length > 0
                 text: qsTr("Play")
-                onClicked: root.playRequested(root.preview.embedUrl, root.preview.embedKind)
+				dense: true
+				tone: "accent"
+				width: root.actionButtonWidth(implicitWidth)
+				onClicked: root.playRequested(root.safeEmbedUrl, root.safeEmbedProvider)
             }
             ModernButton {
                 objectName: "previewWatchTogetherButton"
-                visible: (root.preview.embedUrl || "").length > 0 && (root.preview.embedKind || "").length > 0
+				visible: root.safeEmbedUrl.length > 0 && root.safeEmbedProvider.length > 0
                 enabled: root.watchTogetherAvailable
+				dense: true
+				width: root.actionButtonWidth(implicitWidth)
                 text: root.watchTogetherAvailable ? qsTr("Watch together") : qsTr("Session active")
                 Accessible.description: root.watchTogetherAvailable
                     ? qsTr("Start a synchronized media session")
                     : qsTr("End or leave the active media session first")
-                onClicked: root.watchTogetherRequested(root.preview.embedUrl, root.preview.embedKind, root.displayTitle)
+				onClicked: root.watchTogetherRequested(root.safeEmbedUrl, root.safeEmbedProvider, root.displayTitle)
             }
-            Item { Layout.fillWidth: true }
-            ToolButton {
+			ModernButton {
                 objectName: "previewExpandButton"
-                visible: root.hasDetails && root.preview.previewSize !== "large"
+				visible: root.canExpand
+				dense: true
+				width: root.actionButtonWidth(implicitWidth)
                 text: root.userExpanded ? qsTr("Less") : qsTr("More")
                 Accessible.name: root.userExpanded ? qsTr("Collapse preview") : qsTr("Expand preview")
                 onClicked: root.userExpanded = !root.userExpanded

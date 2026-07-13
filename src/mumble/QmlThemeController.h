@@ -12,6 +12,9 @@ class QmlThemeController final : public QObject {
 	Q_OBJECT
 	Q_PROPERTY(QColor shellBackground READ shellBackground NOTIFY themeChanged)
 	Q_PROPERTY(QColor panel READ panel NOTIFY themeChanged)
+	Q_PROPERTY(QColor surfaceRaised READ surfaceRaised NOTIFY themeChanged)
+	Q_PROPERTY(QColor surfaceHover READ surfaceHover NOTIFY themeChanged)
+	Q_PROPERTY(QColor surfaceBorder READ surfaceBorder NOTIFY themeChanged)
 	Q_PROPERTY(QColor rail READ rail NOTIFY themeChanged)
 	Q_PROPERTY(QColor strip READ strip NOTIFY themeChanged)
 	Q_PROPERTY(QColor divider READ divider NOTIFY themeChanged)
@@ -19,6 +22,8 @@ class QmlThemeController final : public QObject {
 	Q_PROPERTY(QColor textMain READ textMain NOTIFY themeChanged)
 	Q_PROPERTY(QColor textMuted READ textMuted NOTIFY themeChanged)
 	Q_PROPERTY(QColor accent READ accent NOTIFY themeChanged)
+	Q_PROPERTY(QColor accentHover READ accentHover NOTIFY themeChanged)
+	Q_PROPERTY(QColor accentSubtle READ accentSubtle NOTIFY themeChanged)
 	Q_PROPERTY(QColor selected READ selected NOTIFY themeChanged)
 	Q_PROPERTY(QColor danger READ danger NOTIFY themeChanged)
 	Q_PROPERTY(QColor success READ success NOTIFY themeChanged)
@@ -40,6 +45,9 @@ public:
 
 	QColor shellBackground() const { return m_shellBackground; }
 	QColor panel() const { return m_panel; }
+	QColor surfaceRaised() const { return m_surfaceRaised; }
+	QColor surfaceHover() const { return m_surfaceHover; }
+	QColor surfaceBorder() const { return m_surfaceBorder; }
 	QColor rail() const { return m_rail; }
 	QColor strip() const { return m_strip; }
 	QColor divider() const { return m_divider; }
@@ -47,6 +55,8 @@ public:
 	QColor textMain() const { return m_textMain; }
 	QColor textMuted() const { return m_textMuted; }
 	QColor accent() const { return m_accent; }
+	QColor accentHover() const { return m_accentHover; }
+	QColor accentSubtle() const { return m_accentSubtle; }
 	QColor selected() const { return m_selected; }
 	QColor danger() const { return m_danger; }
 	QColor success() const { return m_success; }
@@ -85,6 +95,9 @@ private:
 						int customAccentStrength);
 	QColor m_shellBackground = QColor(QStringLiteral("#20262f"));
 	QColor m_panel = QColor(QStringLiteral("#262d38"));
+	QColor m_surfaceRaised = QColor(QStringLiteral("#2e3742"));
+	QColor m_surfaceHover = QColor(QStringLiteral("#384453"));
+	QColor m_surfaceBorder = QColor(QStringLiteral("#384453"));
 	QColor m_rail = QColor(QStringLiteral("#1b2027"));
 	QColor m_strip = QColor(QStringLiteral("#14181f"));
 	QColor m_divider = QColor(QStringLiteral("#1fffffff"));
@@ -92,6 +105,8 @@ private:
 	QColor m_textMain = QColor(QStringLiteral("#c3cbd6"));
 	QColor m_textMuted = QColor(QStringLiteral("#8b94a3"));
 	QColor m_accent = QColor(QStringLiteral("#5ec8b0"));
+	QColor m_accentHover = QColor(QStringLiteral("#82ddca"));
+	QColor m_accentSubtle = QColor(QStringLiteral("#295ec8b0"));
 	QColor m_selected = QColor(QStringLiteral("#295ec8b0"));
 	QColor m_danger = QColor(QStringLiteral("#ef4444"));
 	QColor m_success = QColor(QStringLiteral("#5fd0a3"));

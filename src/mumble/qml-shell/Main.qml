@@ -14,13 +14,33 @@ ApplicationWindow {
     height: 820
     minimumWidth: 420
     minimumHeight: 520
+	palette.window: Theme.shellBackground
+	palette.base: Theme.surfaceRaised
+	palette.alternateBase: Theme.panel
+	palette.button: Theme.surfaceRaised
+	palette.text: Theme.textMain
+	palette.windowText: Theme.textMain
+	palette.buttonText: Theme.textStrong
+	palette.brightText: Theme.textStrong
+	palette.highlight: Theme.accent
+	palette.highlightedText: Theme.strip
+	palette.placeholderText: Theme.textMuted
+	palette.disabled.text: Theme.textMuted
+	palette.disabled.buttonText: Theme.textMuted
     // Keep native automation and assistive technology aware of the active
     // modal even though Qt Quick dialogs live inside the main window.
-    title: dialogState.open && dialogState.title ? dialogState.title : clientSession.serverName
+	title: dialogState.open && dialogState.title ? dialogState.title
+		: clientSession.connected && clientSession.serverName.length > 0
+			? qsTr("%1 — Mumble").arg(clientSession.serverName) : qsTr("Mumble")
     color: Theme.strip
 	property real performanceChatScrollStartY: 0
 	property real performanceChatScrollTargetY: 0
 	readonly property bool compactNavigation: width < 900
+	readonly property bool narrowShell: width < 600
+	readonly property int timelineHorizontalMargin: narrowShell ? Theme.space3
+		: compactNavigation ? Theme.space5 : 28
+	readonly property int timelineVerticalMargin: narrowShell ? Theme.space3 : Theme.space5
+	readonly property int conversationLaneMaximumWidth: 840
 	readonly property bool automationNavigationOpen: navigationDrawer.visible
 	readonly property real automationNavigationPosition: navigationDrawer.position
 	readonly property var navigationRoomModel: roomModel
@@ -33,7 +53,39 @@ ApplicationWindow {
 	property var contextScopeActions: []
 	property string contextParticipantId: ""
 	property var contextParticipantActions: []
+	property string contextParticipantEntryKind: "user"
+	property string contextParticipantScopeToken: ""
 	property string automationMenuVariant: ""
+
+	function messageStartsGroup(row, source, title) {
+		if (row <= 0 || !source || source.system)
+			return true
+		const previous = chatModel.get(row - 1)
+		const previousSource = previous && previous.source ? previous.source : ({})
+		if (previousSource.system)
+			return true
+		const actorKey = String(source.actorKey || title || "")
+		const previousActorKey = String(previousSource.actorKey || (previous ? previous.title : "") || "")
+		if (actorKey !== previousActorKey || !!source.own !== !!previousSource.own)
+			return true
+		const createdAt = Number(source.createdAtMs || 0)
+		const previousCreatedAt = Number(previousSource.createdAtMs || 0)
+		return createdAt > 0 && previousCreatedAt > 0 && createdAt - previousCreatedAt > 300000
+	}
+
+	function preferredOutgoingMessageWidth(segments, startsGroup) {
+		let longestLine = 0
+		for (const segment of (segments || [])) {
+			const text = String(segment && segment.text !== undefined ? segment.text : "")
+			for (const line of text.split(/\r\n|\r|\n/))
+				longestLine = Math.max(longestLine, line.length)
+		}
+		// This only chooses a comfortable bubble width. RichMessageBody remains
+		// responsible for exact text measurement and wrapping.
+		const textEstimate = longestLine * Theme.fontBody * 0.58 + Theme.space4 * 2
+		const headerFloor = startsGroup ? 260 : 176
+		return Math.max(headerFloor, Math.min(520, textEstimate))
+	}
 
 	function safeRenderImageSource(value) {
 		const source = String(value === undefined || value === null ? "" : value).trim()
@@ -97,15 +149,26 @@ ApplicationWindow {
 		return String(value === undefined || value === null ? "" : value).trim()
 	}
 
-	function isAppAction(actionId) {
-		return !actionId.startsWith("qaUser") && !actionId.startsWith("qaChannel")
-			&& actionId !== "qaEmpty" && actionId !== "qaTransmitModeSeparator"
-	}
-
-	function isProfileAction(actionId) {
-		return actionId === "qaAudioMute" || actionId === "qaAudioDeaf"
-			|| actionId === "qaAudioStats" || actionId === "qaServerTexture"
-			|| actionId === "qaServerTextureRemove" || actionId.startsWith("qaSelf")
+	function profileMenuGroups() {
+		const state = clientSession.selfMenu || ({})
+		const groups = []
+		const presence = state.presence || []
+		const actions = state.actions || []
+		if (presence.length > 0) {
+			groups.push({
+				"id": "presence",
+				"label": qsTr("Presence"),
+				"items": presence
+			})
+		}
+		if (actions.length > 0) {
+			groups.push({
+				"id": "profile-actions",
+				"label": qsTr("Account and app"),
+				"items": actions
+			})
+		}
+		return groups
 	}
 
 	function closeProductMenus() {
@@ -156,10 +219,12 @@ ApplicationWindow {
 		return openMenuAt(menu, anchorPoint)
 	}
 
-	function openParticipantMenu(sessionId, actions, anchorPoint) {
+	function openParticipantMenu(sessionId, actions, anchorPoint, entryKind, scopeToken) {
 		closeProductMenus()
 		contextParticipantId = String(sessionId || "")
 		contextParticipantActions = actions || []
+		contextParticipantEntryKind = String(entryKind || "user").toLowerCase()
+		contextParticipantScopeToken = String(scopeToken || "")
 		return openMenuAt(participantMenuPopup, anchorPoint)
 	}
 
@@ -177,6 +242,21 @@ ApplicationWindow {
 		return openMenuAt(chatBackgroundMenuPopup, anchorPoint)
 	}
 
+	function visibleMenuLabels(menu) {
+		const labels = []
+		if (!menu || menu.count === undefined || !menu.itemAt)
+			return labels
+		for (let index = 0; index < menu.count; ++index) {
+			const item = menu.itemAt(index)
+			if (!item || !item.visible || item.height <= 0)
+				continue
+			const label = String(item.text || "").trim()
+			if (label.length > 0)
+				labels.push(label)
+		}
+		return labels
+	}
+
 	function openAutomationMenuProbe(variant) {
 		const inputVariant = normalizedMenuVariant(variant)
 		const alias = inputVariant.toLowerCase()
@@ -191,6 +271,10 @@ ApplicationWindow {
 			normalized = "textRoom"
 		else if (alias === "app" || alias === "room" || alias === "message")
 			normalized = alias
+		// Every probe starts from a clean popup state. A requested live context can
+		// legitimately be absent (for example, a server with no other participants),
+		// and that must not leave the previously probed menu visible in the capture.
+		closeProductMenus()
 		automationMenuVariant = normalized
 		let handled = true
 		let menu = null
@@ -216,9 +300,12 @@ ApplicationWindow {
 				handled = false
 			} else {
 				menu = participantMenuPopup
-				openParticipantMenu(row.stableId || row.id,
+				openParticipantMenu(row.participantSession || (row.source && row.source.session)
+						|| row.stableId || row.id,
 					row.source ? (row.source.actions || []) : [],
-					Qt.point(root.width - menu.width - 24, 250))
+					Qt.point(root.width - menu.width - 24, 250),
+					row.entryKind || (row.source && row.source.entryKind) || "user",
+					row.scopeToken || (row.source && row.source.scopeToken) || "")
 			}
 		} else if (normalized === "chatBackground") {
 			menu = chatBackgroundMenuPopup
@@ -239,7 +326,8 @@ ApplicationWindow {
 			"variant": normalized,
 			"inputVariant": inputVariant,
 			"open": handled && menu !== null && (menu.opened || menu.visible),
-			"visible": handled && menu !== null && menu.visible
+			"visible": handled && menu !== null && menu.visible,
+			"labels": handled ? visibleMenuLabels(menu) : []
 		}
 	}
 
@@ -293,6 +381,10 @@ ApplicationWindow {
 	}
 
 	function focusVisualFixture(state) {
+		if (dialogState.open && productDialog.visible) {
+			productDialog.applyInitialFocus()
+			return root.activeFocusItem
+		}
 		if (state === "connected") {
 			// The deterministic fixture intentionally has no writable live scope,
 			// so its composer is disabled and cannot own accessibility focus.
@@ -300,10 +392,10 @@ ApplicationWindow {
 			return appMenuButton
 		}
 		if (state === "error") {
-			const operation = operationRepeater.itemAt(0)
-			if (operation && operation.visualFixtureFocusTarget) {
-				operation.visualFixtureFocusTarget.forceActiveFocus(Qt.OtherFocusReason)
-				return operation.visualFixtureFocusTarget
+			const operationTarget = operationOverlay.visualFixtureFocusTarget
+			if (operationTarget) {
+				operationTarget.forceActiveFocus(Qt.OtherFocusReason)
+				return operationTarget
 			}
 		}
 		appMenuButton.forceActiveFocus(Qt.OtherFocusReason)
@@ -395,7 +487,7 @@ ApplicationWindow {
         ScreenShareViewWindow { }
     }
 
-    QmlDialog { visible: dialogState.open && dialogState.kind !== "imageViewer" }
+	QmlDialog { id: productDialog }
     Component {
         id: imageViewerComponent
         ImageViewer { controller: dialogState }
@@ -457,36 +549,24 @@ ApplicationWindow {
 			onSelectionCommitted: navigationDrawer.close()
 			onScopeMenuRequested: (scopeToken, kind, actions, anchorPoint) =>
 				root.openScopeMenu(scopeToken, kind, actions, anchorPoint)
-			onParticipantMenuRequested: (sessionId, actions, anchorPoint) =>
-				root.openParticipantMenu(sessionId, actions, anchorPoint)
+			onParticipantMenuRequested: (sessionId, actions, anchorPoint, entryKind, scopeToken) =>
+				root.openParticipantMenu(sessionId, actions, anchorPoint, entryKind, scopeToken)
 			onProfileMenuRequested: anchorPoint => root.openProfileMenu(anchorPoint)
 		}
 	}
 
-	ModernMenu {
+	SemanticMenu {
 		id: profileMenuPopup
 		objectName: "profileMenu"
-		width: 280
-		focus: true
-		closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-		Repeater {
-			model: actionModel
-			delegate: MenuItem {
-				required property string stableId
-				required property string title
-				required property var payload
-				visible: root.isProfileAction(stableId)
-						 && (payload.visible === undefined || !!payload.visible)
-				height: visible ? implicitHeight : 0
-				enabled: visible && (payload.enabled === undefined || !!payload.enabled)
-				checkable: !!payload.checkable
-				checked: !!payload.checked
-				text: title + (payload.shortcut.length > 0 ? "    " + payload.shortcut : "")
-				Accessible.name: title
-				Accessible.description: payload.toolTip || ""
-				onTriggered: actionModel.trigger(stableId)
-			}
-		}
+		width: 292
+		maximumHeight: Math.max(260, root.height - 48)
+		headerTitle: String((clientSession.selfMenu || ({})).name || clientSession.selfName || qsTr("You"))
+		headerSubtitle: String((clientSession.selfMenu || ({})).statusLabel
+			|| clientSession.selfStatusLabel || "")
+		headerTone: String((clientSession.selfMenu || ({})).statusTone || "")
+		groups: root.profileMenuGroups()
+		onActionRequested: (actionId, payload) =>
+			uiCommands.invokeAppAction(actionId, payload && payload.payload ? payload.payload : ({}))
 	}
 
 	ModernMenu {
@@ -554,10 +634,20 @@ ApplicationWindow {
 			delegate: PayloadMenuItem {
 				required property var modelData
 				payload: modelData
-				onActionRequested: actionId =>
-					uiCommands.invokeParticipantAction(root.contextParticipantId, actionId)
-				onValueRequested: (actionId, value, finalValue) =>
-					uiCommands.invokeParticipantActionValue(root.contextParticipantId, actionId, value, finalValue)
+				onActionRequested: actionId => {
+					if (root.contextParticipantEntryKind === "listener")
+						uiCommands.invokeScopeAction(root.contextParticipantScopeToken, actionId)
+					else
+						uiCommands.invokeParticipantAction(root.contextParticipantId, actionId)
+				}
+				onValueRequested: (actionId, value, finalValue) => {
+					if (root.contextParticipantEntryKind === "listener")
+						uiCommands.invokeScopeActionValue(root.contextParticipantScopeToken,
+							actionId, value, finalValue)
+					else
+						uiCommands.invokeParticipantActionValue(root.contextParticipantId,
+							actionId, value, finalValue)
+				}
 			}
 		}
 	}
@@ -598,196 +688,54 @@ ApplicationWindow {
 		}
 	}
 
-    Column {
-        anchors.top: parent.top
-        anchors.right: parent.right
-        anchors.margins: 20
-        width: Math.min(380, parent.width - 40)
-        spacing: 8
-        z: 40
-		Repeater {
-			id: operationRepeater
+	Item {
+		id: operationOverlay
+		objectName: "asyncOperationOverlay"
+		parent: timeline
+		x: Math.max(Theme.space3, timeline.width - width - Theme.space3)
+		y: Theme.space3
+		width: Math.min(380, Math.max(1, timeline.width - Theme.space3 * 2))
+		height: operationList.count > 0
+			? Math.min(Math.max(56, operationList.contentHeight), maximumHeight) : 0
+		readonly property int maximumHeight: Math.max(56, timeline.height - Theme.space3 * 2)
+		readonly property bool productMenuOpen: appMenuPopup.visible || profileMenuPopup.visible
+			|| roomMenuPopup.visible || textRoomMenuPopup.visible
+			|| participantMenuPopup.visible || chatBackgroundMenuPopup.visible
+		readonly property Item firstOperationItem: operationList.count > 0
+			? operationList.itemAtIndex(0) : null
+		readonly property Item visualFixtureFocusTarget: firstOperationItem
+			? firstOperationItem.visualFixtureFocusTarget : null
+		visible: operationList.count > 0 && !productMenuOpen
+		enabled: visible
+		z: 24
+		clip: true
+
+		Behavior on height {
+			NumberAnimation { duration: Theme.motionNormal; easing.type: Easing.OutCubic }
+		}
+
+		ListView {
+			id: operationList
+			objectName: "asyncOperationList"
+			anchors.fill: parent
 			model: operationModel
-			delegate: Rectangle {
-                required property string stableId
-                required property string title
-                required property string subtitle
-				required property string status
-				required property var payload
-				readonly property bool notification: String(payload.tone || "").length > 0
-				readonly property bool terminal: status === "succeeded" || status === "partial"
-					|| status === "failed" || status === "cancelled"
-				property bool resultDetailsExpanded: false
-				property int resultPageIndex: 0
-				readonly property int resultPageSize: 8
-				readonly property int resultCount: Math.max(0, Number(payload.itemResultCount) || 0)
-				readonly property int resultPageCount: Math.max(1, Math.ceil(resultCount / resultPageSize))
-				readonly property var failedResults: {
-					const revision = Math.max(0, Number(payload.itemResultRevision) || 0)
-					return revision >= 0 ? operationModel.itemResultPage(stableId, 0, 3, true) : []
+			spacing: Theme.space2
+			clip: true
+			boundsBehavior: Flickable.StopAtBounds
+			ScrollBar.vertical: ScrollBar { policy: operationList.contentHeight > operationList.height
+				? ScrollBar.AlwaysOn : ScrollBar.AsNeeded }
+			delegate: AsyncOperationCard {
+				width: operationList.width - (operationList.contentHeight > operationList.height ? 10 : 0)
+				maximumHeight: operationOverlay.maximumHeight
+				narrowLayout: root.width < 640
+				itemResultPageProvider: function(operationId, offset, limit, unsuccessfulOnly) {
+					return operationModel.itemResultPage(operationId, offset, limit, unsuccessfulOnly)
 				}
-				readonly property var resultPageItems: {
-					const revision = Math.max(0, Number(payload.itemResultRevision) || 0)
-					return resultDetailsExpanded && terminal && revision >= 0
-						? operationModel.itemResultPage(stableId, resultPageIndex * resultPageSize,
-							resultPageSize, false) : []
-				}
-				onResultPageCountChanged: resultPageIndex = Math.min(resultPageIndex, resultPageCount - 1)
-				property Item visualFixtureFocusTarget: dismissOperationButton.visible ? dismissOperationButton : null
-                width: parent.width
-                height: operationContent.implicitHeight + 24
-                radius: Theme.innerRadius
-                color: Theme.panel
-                border.color: status === "failed" ? "#ef4444"
-					: status === "partial" ? "#f59e0b"
-					: status === "cancelled" ? Theme.textMuted : Theme.divider
-                Accessible.role: Accessible.AlertMessage
-                Accessible.name: title + (subtitle.length > 0 ? ": " + subtitle : "")
-                ColumnLayout {
-                    id: operationContent
-                    anchors.fill: parent
-                    anchors.margins: 12
-                    spacing: 6
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: title; color: Theme.textStrong; font.bold: true; elide: Text.ElideRight }
-                        ModernButton {
-                            visible: status === "running" && !!payload.cancellable
-                            text: qsTr("Cancel")
-                            Accessible.name: qsTr("Cancel %1").arg(title)
-                            onClicked: operationModel.cancel(stableId)
-                        }
-						ModernButton {
-							id: dismissOperationButton
-							objectName: "visualFixtureDismissOperation"
-							visible: terminal
-                            text: qsTr("Dismiss")
-                            Accessible.name: qsTr("Dismiss %1").arg(title)
-							Accessible.focusable: true
-							Accessible.focused: activeFocus
-                            onClicked: operationModel.dismiss(stableId)
-                        }
-                    }
-                    Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: subtitle; color: Theme.textMuted; wrapMode: Text.Wrap }
-					RowLayout {
-						Layout.fillWidth: true
-						visible: !notification && String(payload.phase || "").length > 0
-						Label {
-							textFormat: Text.PlainText
-							Layout.fillWidth: true
-							text: String(payload.phase || "").replace(/-/g, " ")
-							color: Theme.textMuted
-							font.pixelSize: 10
-							elide: Text.ElideRight
-						}
-						Label {
-							textFormat: Text.PlainText
-							visible: Number(payload.totalItems) > 0
-							text: qsTr("%1 of %2").arg(Number(payload.completedItems) || 0)
-								.arg(Number(payload.totalItems))
-							color: Theme.textMuted
-							font.pixelSize: 10
-						}
-					}
-                    ProgressBar {
-                        Layout.fillWidth: true
-						visible: !notification && (status === "running" || status === "cancelling"
-							|| Number(payload.progress) >= 0
-						)
-                        indeterminate: !!payload.indeterminate
-                        from: 0
-                        to: 100
-                        value: Number(payload.progress) >= 0 ? Number(payload.progress) : 0
-                    }
-					Label {
-						textFormat: Text.PlainText
-						Layout.fillWidth: true
-						visible: !notification && terminal && (Number(payload.successfulItems) > 0
-							|| Number(payload.failedItems) > 0 || Number(payload.cancelledItems) > 0)
-						text: qsTr("%1 succeeded · %2 failed · %3 cancelled")
-							.arg(Number(payload.successfulItems) || 0)
-							.arg(Math.max(0, Number(payload.failedItems) || 0))
-							.arg(Number(payload.cancelledItems) || 0)
-						color: Theme.textMuted
-						font.pixelSize: 10
-						wrapMode: Text.Wrap
-					}
-					Repeater {
-						model: resultDetailsExpanded ? [] : failedResults
-						delegate: Label {
-							textFormat: Text.PlainText
-							required property var modelData
-							Layout.fillWidth: true
-							text: (modelData.cancelled ? qsTr("Cancelled: ") : qsTr("Failed: "))
-								+ String(modelData.message || modelData.errorCode || modelData.itemId || "")
-							color: modelData.cancelled ? Theme.textMuted : "#f87171"
-							font.pixelSize: 10
-							wrapMode: Text.Wrap
-						}
-					}
-					ModernButton {
-						visible: !notification && terminal && resultCount > 0
-						text: resultDetailsExpanded ? qsTr("Hide item results")
-							: qsTr("Show item results (%1)").arg(resultCount)
-						onClicked: {
-							resultDetailsExpanded = !resultDetailsExpanded
-							if (!resultDetailsExpanded)
-								resultPageIndex = 0
-						}
-					}
-					Repeater {
-						model: resultPageItems
-						delegate: Label {
-							textFormat: Text.PlainText
-							required property var modelData
-							Layout.fillWidth: true
-							text: (modelData.success ? qsTr("Succeeded: ")
-								: modelData.cancelled ? qsTr("Cancelled: ") : qsTr("Failed: "))
-								+ String(modelData.message || modelData.errorCode || modelData.itemId || "")
-							color: modelData.success ? Theme.success
-								: modelData.cancelled ? Theme.textMuted : Theme.danger
-							font.pixelSize: 10
-							wrapMode: Text.Wrap
-						}
-					}
-					RowLayout {
-						Layout.fillWidth: true
-						visible: resultDetailsExpanded && resultPageCount > 1
-						ModernButton {
-							text: qsTr("Previous")
-							enabled: resultPageIndex > 0
-							onClicked: --resultPageIndex
-						}
-						Label {
-							textFormat: Text.PlainText
-							Layout.fillWidth: true
-							text: qsTr("Page %1 of %2").arg(resultPageIndex + 1).arg(resultPageCount)
-							color: Theme.textMuted
-							horizontalAlignment: Text.AlignHCenter
-							font.pixelSize: 10
-						}
-						ModernButton {
-							text: qsTr("Next")
-							enabled: resultPageIndex + 1 < resultPageCount
-							onClicked: ++resultPageIndex
-						}
-					}
-                    Label {
-						textFormat: Text.PlainText
-						visible: !notification && status !== "running"
-						text: status === "succeeded" ? qsTr("Completed")
-							: status === "partial" ? qsTr("Partially completed")
-							: status === "cancelled" ? qsTr("Cancelled")
-							: status === "cancelling" ? qsTr("Cancelling…") : qsTr("Failed")
-						color: status === "succeeded" ? "#34d399"
-							: status === "partial" ? "#fbbf24"
-							: status === "cancelled" || status === "cancelling" ? Theme.textMuted : "#f87171"
-                        font.pixelSize: 10
-                    }
-                }
-            }
-        }
-    }
+				onCancelRequested: operationId => operationModel.cancel(operationId)
+				onDismissRequested: operationId => operationModel.dismiss(operationId)
+			}
+		}
+	}
 
     Rectangle {
 		id: productSurface
@@ -813,14 +761,14 @@ ApplicationWindow {
                 Rectangle {
                     id: shellHeader
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 76
+					Layout.preferredHeight: root.narrowShell ? 64 : 72
                     color: Theme.panel
                     border.color: Theme.divider
                     Column {
                         anchors.left: parent.left
-                        anchors.leftMargin: 20
+						anchors.leftMargin: root.narrowShell ? Theme.space3 : Theme.space5
 						anchors.right: headerActions.left
-						anchors.rightMargin: 10
+						anchors.rightMargin: Theme.space2
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 4
                         Label {
@@ -828,7 +776,7 @@ ApplicationWindow {
 							width: parent.width
                             text: activeScope.label.length > 0 ? activeScope.label : clientSession.serverName
                             color: Theme.textStrong
-                            font.pixelSize: 20
+                            font.pixelSize: Theme.fontHeading
                             font.bold: true
 							elide: Text.ElideRight
                         }
@@ -836,7 +784,7 @@ ApplicationWindow {
 							textFormat: Text.PlainText
                             text: activeScope.description.length > 0 ? activeScope.description : activeScope.kindLabel
                             color: Theme.textMuted
-                            font.pixelSize: 12
+                            font.pixelSize: Theme.fontLabel
                             elide: Text.ElideRight
 							width: parent.width
                         }
@@ -844,23 +792,40 @@ ApplicationWindow {
 					Row {
 						id: headerActions
 						anchors.right: parent.right
-						anchors.rightMargin: 16
+						anchors.rightMargin: root.narrowShell ? Theme.space2 : Theme.space4
 						anchors.verticalCenter: parent.verticalCenter
 						spacing: 6
-						ToolButton {
+						ModernIconButton {
 							id: navigationToggle
 							objectName: "compactNavigationToggle"
 							visible: root.compactNavigation
-							text: "☰"
-							font.pixelSize: 20
+							iconName: "menu"
 							Accessible.name: qsTr("Open rooms and participants")
 							onClicked: navigationDrawer.open()
 						}
-					ToolButton {
+						ModernButton {
+							readonly property var share: activeScope.screenShare || ({})
+							visible: !!share.visible && String(share.primaryActionId || "").length > 0
+							dense: true
+							text: root.narrowShell ? qsTr("Share")
+								: String(share.primaryLabel || qsTr("Screen share"))
+							tone: String(share.primaryTone || "neutral")
+							enabled: share.primaryEnabled === undefined || !!share.primaryEnabled
+							Accessible.name: String(share.primaryLabel || qsTr("Screen share"))
+							Accessible.description: String(share.primaryHint || "")
+							onClicked: uiCommands.invokeScopeAction(activeScope.scopeToken,
+								String(share.primaryActionId || ""))
+						}
+						ModernIconButton {
+							visible: clientSession.connected
+							iconName: "search"
+							Accessible.name: qsTr("Search users and rooms")
+							onClicked: uiCommands.invokeAction("server.search")
+						}
+					ModernIconButton {
 						id: appMenuButton
 						objectName: "visualFixtureApplicationMenu"
-                        text: "⋯"
-                        font.pixelSize: 22
+						iconName: "more"
                         Accessible.name: qsTr("Application menu")
 						Accessible.focusable: true
 						Accessible.focused: activeFocus
@@ -871,35 +836,31 @@ ApplicationWindow {
 						}
                     }
 					}
-                    ModernMenu {
+                    SemanticMenu {
                         id: appMenuPopup
-                        width: 260
+						objectName: "applicationMenu"
+						width: 292
+						maximumHeight: Math.max(280, root.height - 104)
                         modal: false
                         focus: true
                         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-						Repeater {
-							model: actionModel
-							delegate: MenuItem {
-								required property string stableId
-								required property string title
-								required property var payload
-								visible: root.isAppAction(stableId)
-										 && (payload.visible === undefined || !!payload.visible)
-								height: visible ? implicitHeight : 0
-								enabled: visible && (payload.enabled === undefined || !!payload.enabled)
-								checkable: !!payload.checkable
-								checked: !!payload.checked
-								text: title + (payload.shortcut.length > 0 ? "    " + payload.shortcut : "")
-								Accessible.name: title
-								Accessible.description: payload.toolTip || ""
-								onTriggered: actionModel.trigger(stableId)
-							}
-						}
+						headerTitle: clientSession.connected
+							? qsTr("Connected to %1").arg(clientSession.serverName) : qsTr("Mumble")
+						headerSubtitle: clientSession.connected
+							? qsTr("%1 · %2").arg(clientSession.selfName).arg(clientSession.selfStatusLabel)
+							: qsTr("Choose a server to get started")
+						headerTone: clientSession.connected ? "success" : ""
+						groups: clientSession.appMenus
+						onActionRequested: (actionId, payload) =>
+							uiCommands.invokeAppAction(actionId, payload && payload.payload ? payload.payload : ({}))
                     }
                 }
 
                 UpdateBanner {
                     Layout.fillWidth: true
+					Layout.leftMargin: Theme.spacing
+					Layout.rightMargin: Theme.spacing
+					Layout.topMargin: visible ? Theme.spacing : 0
                     state: clientSession.updateBanner
                     onActionRequested: actionId => uiCommands.invokeAction(actionId)
                 }
@@ -940,11 +901,11 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     model: chatModel
                     clip: true
-                    spacing: 8
-                    leftMargin: 28
-                    rightMargin: 28
-                    topMargin: 20
-                    bottomMargin: 20
+					spacing: 0
+					leftMargin: root.timelineHorizontalMargin
+					rightMargin: root.timelineHorizontalMargin
+					topMargin: root.timelineVerticalMargin
+					bottomMargin: root.timelineVerticalMargin
                     reuseItems: true
 					property string prependAnchorId: ""
 					property real prependAnchorOffset: 0
@@ -1080,6 +1041,24 @@ ApplicationWindow {
 						}
 					}
 
+					ModernButton {
+						id: jumpToLatestButton
+						parent: timeline
+						anchors.horizontalCenter: parent.horizontalCenter
+						anchors.bottom: parent.bottom
+						anchors.bottomMargin: Theme.space3
+						z: 30
+						visible: timeline.count > 0 && !timeline.stickToBottom
+						dense: true
+						tone: "accent"
+						text: qsTr("Jump to latest")
+						Accessible.description: qsTr("Scroll to the newest message")
+						onClicked: {
+							timeline.stickToBottom = true
+							timeline.requestBottomFollow()
+						}
+					}
+
 					Connections {
 						target: chatModel
 						function onRowsAboutToChange(first, last) {
@@ -1125,12 +1104,15 @@ ApplicationWindow {
 							}
 						}
 					}
-					MouseArea {
-						anchors.fill: parent
-						z: 20
+					TapHandler {
 						acceptedButtons: Qt.RightButton
-						onClicked: mouse => root.openChatBackgroundMenu(
-							timeline.mapToItem(null, mouse.x, mouse.y))
+						onTapped: point => {
+							const row = timeline.itemAt(point.position.x + timeline.contentX,
+								point.position.y + timeline.contentY)
+							if (!row || row.stableId === undefined)
+								root.openChatBackgroundMenu(
+									timeline.mapToItem(null, point.position.x, point.position.y))
+						}
 					}
                     headerPositioning: ListView.InlineHeader
                     header: Item {
@@ -1150,8 +1132,9 @@ ApplicationWindow {
                             onClicked: uiCommands.requestOlderMessages()
                         }
                     }
-					delegate: Rectangle {
+					delegate: ChatMessageFrame {
 						id: messageDelegate
+						required property int index
 						function openAutomationActions() {
 							openMessageActions()
 							return messageActions
@@ -1202,10 +1185,8 @@ ApplicationWindow {
 							requestPreviewHydrationIfNeeded()
 						}
 						Component.onCompleted: requestPreviewHydrationIfNeeded()
-						visible: !accessibilityPooled
 						Accessible.ignored: accessibilityPooled
-                        required property string stableId
-                        required property string title
+						required property string title
                         required property string subtitle
                         required property string status
                         required property string avatarUrl
@@ -1217,27 +1198,46 @@ ApplicationWindow {
                         required property var preview
                         required property var attachments
                         required property var source
-                        required property bool own
                         required property bool deleted
                         required property bool canReply
-                        required property bool canReact
-                        required property bool canDelete
-                        width: Math.min(timeline.width - 56, 680)
-                        height: messageRow.implicitHeight + 24
-                        radius: Theme.innerRadius
-                        color: own ? Theme.selected : Theme.panel
+						required property bool canReact
+						required property bool canDelete
+						systemMessage: !!source.system
+							|| (!source.actorKey && avatarUrl.length === 0 && !canReply && !canReact && !own)
+						startsGroup: root.messageStartsGroup(index, source, title)
+						bodyImplicitHeight: messageRow.implicitHeight
+						laneAvailableWidth: Math.max(1, timeline.width
+							- timeline.leftMargin - timeline.rightMargin)
+						laneMaximumWidth: root.conversationLaneMaximumWidth
+						readonly property bool hasPreviewContent: !!preview && Object.keys(preview).length > 0
+						readonly property bool hasAttachmentContent: !!attachments && attachments.length > 0
+						readonly property bool hasReplyContent: replyActor.length > 0 || replySnippet.length > 0
+						readonly property bool hasReactionContent: !!reactions && reactions.length > 0
+						wideContent: hasPreviewContent || hasAttachmentContent || hasReplyContent
+							|| hasReactionContent || hasDeliveryStatus
+						preferredOwnWidth: root.preferredOutgoingMessageWidth(bodySegments, startsGroup)
+						readonly property string deliveryState: String(source.deliveryState || status || "").trim().toLowerCase()
+						readonly property string deliveryLabel: String(source.deliveryLabel || status || "").trim()
+						readonly property bool hasDeliveryStatus: deliveryState === "sending"
+							|| deliveryState === "failed" || deliveryState === "cancelled"
+						width: laneAvailableWidth
+						TapHandler {
+							acceptedButtons: Qt.RightButton
+							onTapped: messageDelegate.openMessageActions()
+						}
                         RowLayout {
-                            id: messageRow
-                            anchors.fill: parent
-                            anchors.margins: 12
-                            spacing: 10
+							id: messageRow
+							anchors.fill: parent
+							spacing: Theme.space2
                             Rectangle {
-                                Layout.preferredWidth: 36
-                                Layout.preferredHeight: 36
+								Layout.preferredWidth: messageDelegate.own || messageDelegate.systemMessage ? 0 : Theme.avatarMedium
+								Layout.preferredHeight: Layout.preferredWidth
                                 Layout.alignment: Qt.AlignTop
-                                radius: 18
+								visible: !messageDelegate.own && !messageDelegate.systemMessage
+								radius: width / 2
                                 color: Theme.strip
                                 clip: true
+								opacity: messageDelegate.startsGroup ? 1 : 0
                                 Image {
                                     id: avatarImage
                                     anchors.fill: parent
@@ -1259,18 +1259,34 @@ ApplicationWindow {
                             }
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                spacing: 5
+                                spacing: Theme.space1
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    spacing: 8
-                                    Label { textFormat: Text.PlainText; text: title || qsTr("System"); color: Theme.accent; font.bold: true; font.pixelSize: 11 }
-                                    Label { textFormat: Text.PlainText; text: timestamp; color: Theme.textMuted; font.pixelSize: 9; visible: timestamp.length > 0 }
-                                    Item { Layout.fillWidth: true }
-                                    Label { textFormat: Text.PlainText; text: status; color: Theme.textMuted; font.pixelSize: 9; visible: status.length > 0 }
-                                    ToolButton {
+                                    spacing: Theme.space2
+									visible: messageDelegate.startsGroup || messageDelegate.systemMessage
+									Label {
+										Layout.fillWidth: true
+										textFormat: Text.PlainText
+										text: title || qsTr("System")
+										color: messageDelegate.systemMessage ? Theme.textMuted : Theme.accent
+										font.bold: true
+										font.pixelSize: Theme.fontCaption
+										elide: Text.ElideRight
+									}
+                                    Label { textFormat: Text.PlainText; text: timestamp; color: Theme.textMuted; font.pixelSize: Theme.fontCaption; visible: timestamp.length > 0 }
+									Label {
+										Layout.maximumWidth: root.narrowShell ? 72 : 120
+										textFormat: Text.PlainText
+										text: status
+										color: Theme.textMuted
+										font.pixelSize: Theme.fontCaption
+										visible: status.length > 0
+										elide: Text.ElideRight
+									}
+									ModernIconButton {
                                         visible: messageDelegate.canReply || messageDelegate.canReact
                                                  || messageDelegate.canDelete || !!messageDelegate.source.deliveryCanRetry
-                                        text: "⋯"
+										iconName: "more"
                                         Accessible.name: qsTr("Message actions")
 										onClicked: messageDelegate.openMessageActions()
 										ModernMenu {
@@ -1307,34 +1323,58 @@ ApplicationWindow {
                                 Rectangle {
                                     id: previewCard
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: replyColumn.implicitHeight + 12
+                                    Layout.preferredHeight: replyColumn.implicitHeight + Theme.space3
                                     visible: replyActor.length > 0 || replySnippet.length > 0
-                                    radius: 6
+                                    radius: Theme.innerRadius
                                     color: Theme.strip
                                     Column {
                                         id: replyColumn
                                         anchors.fill: parent
-                                        anchors.margins: 6
-                                        Label { textFormat: Text.PlainText; text: replyActor; color: Theme.accent; font.pixelSize: 9; font.bold: true }
-                                        Label { width: parent.width; textFormat: Text.PlainText; text: replySnippet; color: Theme.textMuted; font.pixelSize: 10; elide: Text.ElideRight }
+                                        anchors.margins: Theme.space2
+                                        Label { textFormat: Text.PlainText; text: replyActor; color: Theme.accent; font.pixelSize: Theme.fontCaption; font.bold: true }
+                                        Label { width: parent.width; textFormat: Text.PlainText; text: replySnippet; color: Theme.textMuted; font.pixelSize: Theme.fontLabel; elide: Text.ElideRight }
                                     }
                                 }
-                                RichMessageBody {
-                                    Layout.fillWidth: true
-                                    visible: !messageDelegate.deleted
+								RichMessageBody {
+									Layout.fillWidth: true
+									visible: !messageDelegate.deleted
                                     segments: messageDelegate.bodySegments || []
                                     textColor: Theme.textMain
-                                    pixelSize: 12
-                                    onLinkRequested: link => Qt.openUrlExternally(link)
-                                }
-                                Label {
+                                    pixelSize: Theme.fontBody
+									onLinkRequested: link => Qt.openUrlExternally(link)
+								}
+								RowLayout {
+									Layout.fillWidth: true
+									visible: messageDelegate.hasDeliveryStatus
+									spacing: Theme.space2
+									Label {
+										Layout.fillWidth: true
+										textFormat: Text.PlainText
+										text: messageDelegate.deliveryLabel.length > 0
+											? messageDelegate.deliveryLabel
+											: messageDelegate.deliveryState
+										color: messageDelegate.deliveryState === "failed" ? Theme.danger
+											: messageDelegate.deliveryState === "cancelled" ? Theme.textMuted : Theme.warning
+										font.pixelSize: Theme.fontCaption
+										font.weight: Font.Medium
+										Accessible.name: text
+									}
+									ModernButton {
+										visible: !!messageDelegate.source.deliveryCanRetry
+										dense: true
+										tone: "retry"
+										text: String(messageDelegate.source.deliveryRetryLabel || qsTr("Retry"))
+										onClicked: uiCommands.retryMessage(messageDelegate.stableId)
+									}
+								}
+								Label {
 									textFormat: Text.PlainText
                                     Layout.fillWidth: true
                                     visible: messageDelegate.deleted
                                     text: qsTr("Message deleted")
                                     color: Theme.textMuted
                                     wrapMode: Text.Wrap
-                                    font.pixelSize: 12
+                                    font.pixelSize: Theme.fontBody
                                     font.italic: true
                                 }
                                 AttachmentGallery {
@@ -1370,22 +1410,22 @@ ApplicationWindow {
                                 }
                                 Flow {
                                     Layout.fillWidth: true
-                                    spacing: 5
+                                    spacing: Theme.space2
 									visible: !!reactions && reactions.length > 0
                                     Repeater {
                                         model: reactions || []
 										delegate: Button {
 											id: reactionButton
                                             required property var modelData
-											implicitWidth: contentItem.implicitWidth + 12
-											implicitHeight: 24
+											implicitWidth: contentItem.implicitWidth + Theme.space3
+											implicitHeight: Math.max(24, Theme.avatarSmall)
 											enabled: messageDelegate.canReact && (modelData.emoji || "").length > 0
 											activeFocusOnTab: true
 											focusPolicy: Qt.StrongFocus
 											Accessible.name: qsTr("%1 reaction, %2").arg(modelData.emoji || "")
 												.arg(modelData.count || 0)
 											background: Rectangle {
-												radius: 12
+												radius: reactionButton.implicitHeight / 2
 												color: reactionButton.modelData.selfReacted ? Theme.selected : Theme.strip
 												border.color: reactionButton.activeFocus ? Theme.focus : Theme.divider
 											}
@@ -1394,7 +1434,7 @@ ApplicationWindow {
 												text: (reactionButton.modelData.emoji || "") + " "
 													+ (reactionButton.modelData.count || 0)
 												color: Theme.textMain
-												font.pixelSize: 10
+												font.pixelSize: Theme.fontCaption
 												horizontalAlignment: Text.AlignHCenter
 												verticalAlignment: Text.AlignVCenter
 											}
@@ -1406,31 +1446,90 @@ ApplicationWindow {
                             }
                         }
                     }
-                    Label {
-						textFormat: Text.PlainText
-                        anchors.centerIn: parent
-                        visible: chatModel.count === 0
-                        text: !clientSession.connected
-                              ? qsTr("Connect to load rooms and messages")
-                              : (activeScope.canSend
-                                 ? qsTr("No messages in %1 yet.").arg(activeScope.label)
-                                 : qsTr("Select a room to start chatting"))
-                        color: Theme.textMuted
-                    }
+					Rectangle {
+						id: emptyConversationState
+						objectName: "emptyConversationState"
+						anchors.centerIn: parent
+						width: Math.max(1, Math.min(380, timeline.width
+							- root.timelineHorizontalMargin * 2 - Theme.space4 * 2))
+						height: emptyConversationContent.implicitHeight + Theme.space5 * 2
+						visible: chatModel.count === 0
+						radius: Theme.innerRadius
+						color: Theme.surfaceRaised
+						border.color: Theme.surfaceBorder
+						Accessible.role: Accessible.Pane
+						Accessible.name: emptyConversationTitle.text
+						Accessible.description: emptyConversationDetail.text
+
+						Column {
+							id: emptyConversationContent
+							anchors.left: parent.left
+							anchors.right: parent.right
+							anchors.verticalCenter: parent.verticalCenter
+							anchors.leftMargin: Theme.space5
+							anchors.rightMargin: Theme.space5
+							spacing: Theme.space2
+							BusyIndicator {
+								anchors.horizontalCenter: parent.horizontalCenter
+								visible: activeScope.loading
+								running: visible
+								palette.highlight: Theme.accent
+							}
+							Label {
+								id: emptyConversationTitle
+								width: parent.width
+								textFormat: Text.PlainText
+								text: activeScope.loading ? qsTr("Loading conversation")
+									: !clientSession.connected ? qsTr("Connect to Mumble")
+									: activeScope.canSend ? qsTr("This conversation is quiet")
+									: qsTr("Choose a conversation")
+								color: Theme.textStrong
+								font.pixelSize: Theme.fontTitle
+								font.bold: true
+								horizontalAlignment: Text.AlignHCenter
+								wrapMode: Text.Wrap
+							}
+							Label {
+								id: emptyConversationDetail
+								width: parent.width
+								textFormat: Text.PlainText
+								text: activeScope.loading ? qsTr("Messages will appear here when history is ready.")
+									: !clientSession.connected ? qsTr("Open the server browser to load rooms and messages.")
+									: activeScope.canSend ? qsTr("Be the first to write in %1.").arg(activeScope.label)
+									: qsTr("Select a text room, voice room, or direct message to get started.")
+								color: Theme.textMuted
+								font.pixelSize: Theme.fontBody
+								horizontalAlignment: Text.AlignHCenter
+								wrapMode: Text.Wrap
+							}
+						}
+					}
                 }
 
                 Rectangle {
+					id: composerSurface
                     Layout.fillWidth: true
-                    Layout.preferredHeight: (activeScope.hasPendingReply ? 112 : 76) + (composer.attachments.count > 0 ? 58 : 0) + (composer.autocompleteItems.length > 0 ? 34 : 0)
+					Layout.preferredHeight: (activeScope.hasPendingReply ? 98 : 62)
+						+ Math.min(3, Math.max(0, composerInput.lineCount - 1)) * 18
+						+ (composer.attachments.count > 0 ? 58 : 0)
+						+ (composer.autocompleteItems.length > 0 ? 34 : 0)
                     color: Theme.strip
                     border.color: Theme.divider
                     RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 14
-                        ModernButton {
+						anchors.top: parent.top
+						anchors.bottom: parent.bottom
+						anchors.horizontalCenter: parent.horizontalCenter
+						anchors.topMargin: root.narrowShell ? Theme.space2 : 14
+						anchors.bottomMargin: anchors.topMargin
+						width: Math.max(1, Math.min(root.conversationLaneMaximumWidth,
+							parent.width - (root.narrowShell ? Theme.space2 : 14) * 2))
+						spacing: root.narrowShell ? Theme.space2 : Theme.space3
+                        ModernIconButton {
+							objectName: "composerAttachButton"
                             visible: activeScope.canAttachImages
                             enabled: activeScope.canSend
-                            text: "+"
+							dense: root.narrowShell
+							iconName: "attach"
                             Accessible.name: qsTr("Attach image")
                             onClicked: uiCommands.chooseAttachment()
                         }
@@ -1438,8 +1537,10 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             radius: Theme.innerRadius
-                            color: Theme.panel
-                            border.color: Theme.divider
+							color: Theme.panel
+							border.color: composerInput.activeFocus ? Theme.focus : Theme.divider
+							border.width: composerInput.activeFocus ? Theme.focusRingWidth : 1
+							Behavior on border.color { ColorAnimation { duration: Theme.motionFast } }
                             DropArea {
                                 anchors.fill: parent
                                 onDropped: drop => { if (drop.hasUrls) composer.addUrls(drop.urls) }
@@ -1460,13 +1561,15 @@ ApplicationWindow {
                                         font.pixelSize: 10
                                         elide: Text.ElideRight
                                     }
-                                    ToolButton {
-                                        text: "×"
+									ModernIconButton {
+										dense: true
+										iconName: "close"
                                         Accessible.name: qsTr("Cancel reply")
                                         onClicked: uiCommands.cancelPendingReply()
                                     }
                                 }
                                 ListView {
+									id: attachmentStrip
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: composer.attachments.count > 0 ? 52 : 0
                                     visible: composer.attachments.count > 0
@@ -1480,7 +1583,8 @@ ApplicationWindow {
                                         required property string status
 										required property real progress
 										required property string error
-                                        width: 150; height: 48; radius: 7; color: Theme.strip; border.color: Theme.divider
+										width: Math.min(150, Math.max(112, attachmentStrip.width - 4))
+										height: 48; radius: 7; color: Theme.strip; border.color: Theme.divider
                                         RowLayout { anchors.fill: parent; anchors.margins: 4
                                             Image { Layout.preferredWidth: 38; Layout.preferredHeight: 38; source: root.safeRenderImageSource(thumbnailUrl); asynchronous: true; cache: false; fillMode: Image.PreserveAspectCrop }
 											ColumnLayout {
@@ -1488,8 +1592,8 @@ ApplicationWindow {
 												Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: fileName; color: Theme.textMain; elide: Text.ElideMiddle; font.pixelSize: 9 }
 												Label { Layout.fillWidth: true; textFormat: Text.PlainText; visible: status !== "ready"; text: error || status; color: status === "failed" ? Theme.danger : Theme.textMuted; elide: Text.ElideRight; font.pixelSize: 8 }
 											}
-											ToolButton { visible: status === "failed"; text: "↻"; onClicked: composer.retryAttachment(stableId); Accessible.name: qsTr("Retry %1").arg(fileName) }
-                                            ToolButton { text: "×"; onClicked: composer.removeAttachment(stableId); Accessible.name: qsTr("Remove %1").arg(fileName) }
+											ModernIconButton { dense: true; visible: status === "failed"; iconName: "retry"; onClicked: composer.retryAttachment(stableId); Accessible.name: qsTr("Retry %1").arg(fileName) }
+											ModernIconButton { dense: true; iconName: "close"; onClicked: composer.removeAttachment(stableId); Accessible.name: qsTr("Remove %1").arg(fileName) }
                                         }
                                     }
                                 }
@@ -1500,8 +1604,9 @@ ApplicationWindow {
                                     orientation: ListView.Horizontal
                                     spacing: 4
                                     model: composer.autocompleteItems
-                                    delegate: ToolButton {
-                                        required property var modelData
+									delegate: ModernButton {
+										required property var modelData
+										dense: true
                                         text: modelData.label || ""
                                         onClicked: composer.complete(modelData.value || "")
                                     }
@@ -1537,7 +1642,10 @@ ApplicationWindow {
                             }
                         }
                         ModernButton {
-                            text: "Send"
+							objectName: "composerSendButton"
+							tone: "primary"
+							dense: root.narrowShell
+							text: qsTr("Send")
                             enabled: composer.canSend && !composer.sending && (composer.text.trim().length > 0 || composer.attachments.count > 0)
                             onClicked: composer.send()
                         }
@@ -1558,8 +1666,8 @@ ApplicationWindow {
 				onSelectionCommitted: navigationDrawer.close()
 				onScopeMenuRequested: (scopeToken, kind, actions, anchorPoint) =>
 					root.openScopeMenu(scopeToken, kind, actions, anchorPoint)
-				onParticipantMenuRequested: (sessionId, actions, anchorPoint) =>
-					root.openParticipantMenu(sessionId, actions, anchorPoint)
+				onParticipantMenuRequested: (sessionId, actions, anchorPoint, entryKind, scopeToken) =>
+					root.openParticipantMenu(sessionId, actions, anchorPoint, entryKind, scopeToken)
 				onProfileMenuRequested: anchorPoint => root.openProfileMenu(anchorPoint)
             }
         }

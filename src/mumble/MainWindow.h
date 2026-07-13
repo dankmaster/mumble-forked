@@ -250,6 +250,7 @@ public:
 	void scheduleQmlShellStateSyncImmediate();
 	void scheduleQmlShellStateSyncInternal(bool immediate);
 	void runQmlShellStateSync();
+	void enterQmlShellSteadyState();
 	void syncQmlShellState();
 	QmlSelectionState *qmlSelectionState() const;
 	void applyQmlRoomState(const QVariantMap &state);
@@ -846,6 +847,7 @@ protected:
 	QSet< QString > m_pendingPersistentChatInstagramMetadataRequests;
 	std::optional< MumbleProto::ChatMessage > m_pendingPersistentChatReply;
 	QTimer *m_modernShellSyncTimer                = nullptr;
+	QTimer *m_modernDialogVoiceMeterTimer         = nullptr;
 	QTimer *m_nativeWindowMoveResizeRecoveryTimer = nullptr;
 	qint64 m_lastQmlStateSyncMs        = 0;
 	quint64 m_modernShellServerLogRevision = 1;
@@ -947,6 +949,7 @@ protected:
 	void installPendingServerConnection();
 	void pruneRetiredServerHandlers();
 	void publishModernDialogState(const QVariantMap &state);
+	void refreshModernDialogVoiceMeters();
 	void openModernConnectDialog();
 	void openModernSettingsDialog(const QString &pageName = QString());
 	bool openModernFailedConnectionDialog(const ConnectDetails &details, ConnectionFailType type);

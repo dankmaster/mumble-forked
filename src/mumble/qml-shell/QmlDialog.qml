@@ -8,22 +8,149 @@ Dialog {
     id: dialog
 	readonly property int densityInset: Theme.spacing + 6
 	readonly property int sectionPadding: Theme.spacing + 2
-	readonly property bool compactDialogLayout: width < 640
+	readonly property bool compactDialogLayout: width < 760
+	readonly property string dialogTone: String(dialogState.tone || "").toLowerCase()
+	readonly property color dialogToneColor: toneColor(dialogTone)
+	property bool showAdvanced: !!dialogState.state.showAdvanced
+	property string focusedDialogId: ""
+	readonly property bool hasAdvancedContent: {
+		dialogState.revision
+		const sections = dialogState.sections || []
+		for (let sectionIndex = 0; sectionIndex < sections.length; ++sectionIndex) {
+			const section = sections[sectionIndex] || {}
+			if (section.advanced)
+				return true
+			const fields = section.fields || []
+			for (let fieldIndex = 0; fieldIndex < fields.length; ++fieldIndex) {
+				if (fields[fieldIndex] && fields[fieldIndex].advanced)
+					return true
+			}
+		}
+		return false
+	}
+	function toneColor(tone) {
+		const normalized = String(tone || "").toLowerCase()
+		if (normalized === "danger" || normalized === "error") return Theme.danger
+		if (normalized === "warning" || normalized === "retry") return Theme.warning
+		if (normalized === "success") return Theme.success
+		if (normalized === "accent") return Theme.accent
+		return Theme.divider
+	}
+	function normalizedFocusObjectName(value) {
+		const requested = String(value || "").trim()
+		if (requested.length === 0) return ""
+		if (requested.indexOf("dialogField_") === 0 || requested.indexOf("dialogAction_") === 0
+				|| requested.indexOf("connect") === 0)
+			return requested
+		return "dialogField_" + requested
+	}
+	function focusObjectInTree(root, objectName) {
+		if (!root || objectName.length === 0) return null
+		if (String(root.objectName || "") === objectName) return root
+		const children = root.children || []
+		for (let index = 0; index < children.length; ++index) {
+			const match = focusObjectInTree(children[index], objectName)
+			if (match) return match
+		}
+		return null
+	}
+	function metadataFocusId() {
+		const state = dialogState.state || {}
+		let requested = dialogState.initialFocusId || state.initialFocus || state.defaultFocus || ""
+		if (requested && typeof requested === "object")
+			requested = requested.id || requested.fieldId || requested.actionId || ""
+		if (String(requested).length > 0) return normalizedFocusObjectName(requested)
+		const sections = dialogState.sections || []
+		for (let sectionIndex = 0; sectionIndex < sections.length; ++sectionIndex) {
+			const fields = (sections[sectionIndex] || {}).fields || []
+			for (let fieldIndex = 0; fieldIndex < fields.length; ++fieldIndex) {
+				const field = fields[fieldIndex] || {}
+				if (field.initialFocus || field.defaultFocus)
+					return normalizedFocusObjectName(field.id)
+			}
+		}
+		const primary = String(dialogState.primaryActionId || "")
+		return primary.length > 0 ? "dialogAction_" + primary : "dialogCloseButton"
+	}
+	function applyInitialFocus() {
+		if (!visible || !contentItem) return
+		const requested = metadataFocusId()
+		let target = focusObjectInTree(contentItem, requested)
+		if (!target && requested.indexOf("dialogField_") !== 0)
+			target = focusObjectInTree(contentItem, "dialogField_" + requested)
+		if (!target)
+			target = focusObjectInTree(contentItem, "dialogAction_" + String(dialogState.primaryActionId || ""))
+		if (!target)
+			target = focusObjectInTree(contentItem, "dialogCloseButton")
+		if (target && target.enabled !== false && target.visible !== false && target.forceActiveFocus) {
+			target.forceActiveFocus(Qt.TabFocusReason)
+			Qt.callLater(function() { dialog.ensureContentVisible(target) })
+		}
+	}
+	function ensureContentVisible(target) {
+		if (!target || !dialogContentScroll || !dialogContentScroll.contentItem) return
+		const flickable = dialogContentScroll.contentItem
+		const contentRoot = flickable.contentItem || flickable
+		const point = target.mapToItem(contentRoot, 0, 0)
+		const margin = Theme.spacing
+		const top = flickable.contentY
+		const bottom = top + flickable.height
+		if (point.y < top + margin)
+			flickable.contentY = Math.max(0, point.y - margin)
+		else if (point.y + target.height > bottom - margin)
+			flickable.contentY = Math.min(Math.max(0, flickable.contentHeight - flickable.height),
+				point.y + target.height - flickable.height + margin)
+	}
+	function resetContentPosition() {
+		if (dialogContentScroll && dialogContentScroll.contentItem)
+			dialogContentScroll.contentItem.contentY = 0
+	}
 	function safeRenderImageSource(value) {
 		const source = String(value === undefined || value === null ? "" : value).trim()
 		return /^(image:\/\/mumble\/|qrc:\/)/i.test(source) ? source : ""
 	}
+	function syncVisibility() {
+		const shouldBeVisible = dialogState.open && dialogState.kind !== "imageViewer"
+		if (shouldBeVisible && !visible)
+			dialog.open()
+		else if (!shouldBeVisible && visible)
+			dialog.close()
+	}
     parent: Overlay.overlay
-    visible: dialogState.open
 	modal: true
 	focus: true
 	title: dialogState.title
-    width: Math.min(parent ? parent.width - 48 : 920, 1040)
-    height: Math.min(parent ? parent.height - 48 : 700, 760)
+	// Dialog creates a style-owned title bar and button box when these are left
+	// unspecified. Product dialogs render both surfaces below so keep the native
+	// Control scaffolding out of the visual and accessibility trees.
+	header: null
+	footer: null
+    width: Math.min(parent ? Math.max(240, parent.width - 48) : 1040,
+					Math.max(320, Math.min(dialogState.preferredWidth || 920, 1180)))
+    height: Math.min(parent ? Math.max(220, parent.height - 48) : 760,
+					 Math.max(240, Math.min(dialogState.preferredHeight || 700, 860)))
     x: parent ? Math.round((parent.width - width) / 2) : 0
     y: parent ? Math.round((parent.height - height) / 2) : 0
     padding: 0
     closePolicy: Popup.NoAutoClose
+	onOpened: {
+		resetContentPosition()
+		Qt.callLater(applyInitialFocus)
+	}
+	onVisibleChanged: if (visible) Qt.callLater(applyInitialFocus)
+	Component.onCompleted: syncVisibility()
+	Connections {
+		target: dialogState
+		function onStateChanged() {
+			dialog.syncVisibility()
+			const nextId = String(dialogState.state.id || "")
+			if (dialog.focusedDialogId !== nextId) {
+				dialog.focusedDialogId = nextId
+				dialog.showAdvanced = !!dialogState.state.showAdvanced
+			}
+			Qt.callLater(dialog.applyInitialFocus)
+		}
+	}
 	Shortcut {
 		sequence: StandardKey.Cancel
 		onActivated: dialogState.requestClose()
@@ -31,7 +158,8 @@ Dialog {
 
     background: Rectangle {
         color: Theme.shellBackground
-        border.color: Theme.divider
+		border.color: dialog.dialogTone.length > 0 ? dialog.dialogToneColor : Theme.divider
+		border.width: dialog.dialogTone.length > 0 ? 2 : 1
         radius: Theme.shellRadius
     }
 
@@ -42,11 +170,12 @@ Dialog {
 		spacing: 0
 
         Rectangle {
+			id: dialogHeader
             Layout.fillWidth: true
             Layout.preferredHeight: Theme.densityId === "compact" ? 68
                                     : Theme.densityId === "spacious" ? 84 : 76
             color: Theme.panel
-            border.color: Theme.divider
+			border.color: dialog.dialogTone.length > 0 ? dialog.dialogToneColor : Theme.divider
             RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: dialog.densityInset + 2
@@ -54,7 +183,16 @@ Dialog {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 3
-                    Label { textFormat: Text.PlainText; text: dialogState.title; color: Theme.textStrong; font.pixelSize: 19; font.bold: true }
+					Label {
+						objectName: "dialogTitleLabel"
+						textFormat: Text.PlainText
+						text: dialogState.title
+						color: Theme.textStrong
+						font.pixelSize: 19
+						font.bold: true
+						Accessible.role: Accessible.Heading
+						Accessible.name: text
+					}
                     Label {
 						textFormat: Text.PlainText
                         Layout.fillWidth: true
@@ -65,7 +203,17 @@ Dialog {
                         elide: Text.ElideRight
                     }
                 }
-                ToolButton {
+				ModernButton {
+					visible: dialog.hasAdvancedContent
+					dense: true
+					objectName: "dialogAdvancedToggle"
+					text: dialog.showAdvanced ? qsTr("Basic") : qsTr("Advanced")
+					checkable: true
+					checked: dialog.showAdvanced
+					Accessible.name: dialog.showAdvanced ? qsTr("Hide advanced settings") : qsTr("Show advanced settings")
+					onClicked: dialog.showAdvanced = !dialog.showAdvanced
+				}
+                ModernIconButton {
                     objectName: "dialogCloseButton"
                     text: "×"
                     font.pixelSize: 20
@@ -75,6 +223,26 @@ Dialog {
             }
         }
 
+		Rectangle {
+			id: dialogStatusBanner
+			objectName: "dialogStatusBanner"
+			Layout.fillWidth: true
+			Layout.preferredHeight: visible ? statusLabel.implicitHeight + (Theme.spacing * 2) : 0
+			visible: String(dialogState.statusMessage || "").length > 0
+			color: Qt.rgba(dialog.dialogToneColor.r, dialog.dialogToneColor.g, dialog.dialogToneColor.b, 0.12)
+			border.color: dialog.dialogToneColor
+			Label {
+				id: statusLabel
+				objectName: "dialogStatusMessage"
+				anchors.fill: parent
+				anchors.margins: Theme.spacing
+				textFormat: Text.PlainText
+				text: dialogState.statusMessage
+				color: Theme.textMain
+				wrapMode: Text.Wrap
+			}
+		}
+
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -82,44 +250,88 @@ Dialog {
 
             Rectangle {
 				objectName: "dialogPageRail"
-                Layout.preferredWidth: visible ? 190 : 0
+				Layout.preferredWidth: visible ? 200 : 0
                 Layout.fillHeight: true
 				visible: dialogState.pages.length > 0 && !dialog.compactDialogLayout
                 color: Theme.rail
                 border.color: Theme.divider
                 ListView {
+					id: dialogPageList
+					objectName: "dialogPageList"
                     anchors.fill: parent
                     anchors.margins: Math.max(8, Theme.spacing - 2)
                     model: dialogState.pages
                     clip: true
                     spacing: Math.max(2, Math.round(Theme.spacing / 4))
+					activeFocusOnTab: count > 0
+					keyNavigationEnabled: true
+					currentIndex: {
+						dialogState.revision
+						for (let index = 0; index < dialogState.pages.length; ++index) {
+							if (String(dialogState.pages[index].id || "") === String(dialogState.activePage || ""))
+								return index
+						}
+						return count > 0 ? 0 : -1
+					}
+					Accessible.role: Accessible.List
+					Accessible.name: qsTr("Settings pages")
                     delegate: ItemDelegate {
+						id: pageDelegate
                         required property var modelData
+						required property int index
+						objectName: "dialogPage_" + String(modelData.id || index)
                         width: ListView.view.width
                         height: Theme.densityId === "compact" ? 36
                                 : Theme.densityId === "spacious" ? 46 : 40
                         text: modelData.label || modelData.title || modelData.id
                         highlighted: modelData.selected || modelData.id === dialogState.activePage
+						hoverEnabled: true
+						Accessible.role: Accessible.ListItem
+						Accessible.name: text
+						Accessible.selected: highlighted
+						contentItem: Label {
+							textFormat: Text.PlainText
+							text: pageDelegate.text
+							color: Theme.textStrong
+							font.pixelSize: 12
+							font.bold: pageDelegate.highlighted
+							verticalAlignment: Text.AlignVCenter
+							elide: Text.ElideRight
+						}
+						background: Rectangle {
+							color: pageDelegate.highlighted ? Theme.surfaceRaised
+								: pageDelegate.hovered ? Theme.surfaceHover : "transparent"
+							border.color: pageDelegate.activeFocus ? Theme.focus
+								: pageDelegate.highlighted ? Theme.accent : "transparent"
+							border.width: pageDelegate.activeFocus ? Theme.focusRingWidth : 1
+							radius: 6
+						}
                         onClicked: dialogState.invokeAction("selectPage", { "pageId": modelData.id })
+						Keys.onReturnPressed: event => {
+							event.accepted = true
+							dialogState.invokeAction("selectPage", { "pageId": modelData.id })
+						}
                     }
                 }
             }
 
-            ScrollView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                clip: true
-                contentWidth: availableWidth
-                Column {
-                    width: parent.width
-                    spacing: Theme.spacing + 4
-					ComboBox {
+			ColumnLayout {
+				objectName: "dialogBody"
+				Layout.fillWidth: true
+				Layout.fillHeight: true
+				spacing: 0
+				Rectangle {
+					objectName: "dialogCompactPageBar"
+					Layout.fillWidth: true
+					Layout.preferredHeight: visible ? compactPageSelector.implicitHeight + (Theme.spacing * 2) : 0
+					visible: dialog.compactDialogLayout && dialogState.pages.length > 0
+					color: Theme.rail
+					border.color: Theme.divider
+					ModernComboBox {
 						id: compactPageSelector
 						objectName: "dialogCompactPageSelector"
-						width: parent.width - (dialog.densityInset * 2)
-						x: dialog.densityInset
-						visible: dialog.compactDialogLayout && dialogState.pages.length > 0
-						height: visible ? implicitHeight : 0
+						anchors.fill: parent
+						anchors.margins: Theme.spacing
 						model: dialogState.pages
 						textRole: "label"
 						displayText: {
@@ -149,6 +361,163 @@ Dialog {
 								dialogState.invokeAction("selectPage", { "pageId": page.id })
 						}
 						Accessible.name: qsTr("Settings page")
+					}
+				}
+				ScrollView {
+					id: dialogContentScroll
+					objectName: "dialogContentScroll"
+					Layout.fillWidth: true
+					Layout.fillHeight: true
+					clip: true
+					contentWidth: availableWidth
+					ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+					ScrollBar.vertical.policy: ScrollBar.AsNeeded
+					Column {
+						id: dialogContentColumn
+						width: parent.width
+						spacing: Theme.spacing + 4
+					Rectangle {
+						id: loadingScaffold
+						objectName: "dialogLoadingScaffold"
+						width: parent.width - (dialog.densityInset * 2)
+						x: dialog.densityInset
+						height: visible ? loadingColumn.implicitHeight + (dialog.sectionPadding * 2) : 0
+						visible: dialogState.loading
+						color: Theme.panel
+						border.color: Theme.divider
+						radius: Theme.innerRadius
+						Accessible.role: Accessible.Pane
+						Accessible.name: qsTr("Loading %1").arg(dialogState.loadingScaffold || qsTr("content"))
+						ColumnLayout {
+							id: loadingColumn
+							anchors.left: parent.left
+							anchors.right: parent.right
+							anchors.top: parent.top
+							anchors.margins: dialog.sectionPadding
+							spacing: Theme.spacing
+							RowLayout {
+								BusyIndicator { running: loadingScaffold.visible; Layout.preferredWidth: 28; Layout.preferredHeight: 28 }
+								ColumnLayout {
+									Layout.fillWidth: true
+									Label { textFormat: Text.PlainText; text: qsTr("Loading…"); color: Theme.textStrong; font.bold: true }
+									Label {
+										textFormat: Text.PlainText
+										Layout.fillWidth: true
+										text: dialogState.loadingScaffold === "acl" ? qsTr("Retrieving room permissions and user groups")
+											  : dialogState.loadingScaffold === "records" ? qsTr("Retrieving server records")
+											  : qsTr("Preparing content")
+										color: Theme.textMuted
+										font.pixelSize: 11
+									}
+								}
+							}
+							Repeater {
+								model: dialogState.loadingScaffold === "acl" ? 4 : 3
+								delegate: Rectangle {
+									required property int index
+									Layout.fillWidth: true
+									Layout.preferredHeight: dialogState.loadingScaffold === "acl" ? 48 : 38
+									radius: 7
+									color: index % 2 === 0 ? Theme.strip : Theme.rail
+									opacity: 0.72
+								}
+							}
+						}
+					}
+					Rectangle {
+						id: connectSurface
+						objectName: "connectFavoriteSurface"
+						width: parent.width - (dialog.densityInset * 2)
+						x: dialog.densityInset
+						height: visible ? 290 : 0
+						visible: dialogState.kind === "connect" && !dialogState.loading
+						color: Theme.panel
+						border.color: Theme.divider
+						radius: Theme.innerRadius
+						ColumnLayout {
+							anchors.fill: parent
+							anchors.margins: dialog.sectionPadding
+							spacing: Math.max(6, Theme.spacing - 2)
+							RowLayout {
+								Layout.fillWidth: true
+								ColumnLayout {
+									Layout.fillWidth: true
+									spacing: 1
+									Label { textFormat: Text.PlainText; text: qsTr("Saved servers"); color: Theme.textStrong; font.bold: true; font.pixelSize: 13 }
+									Label {
+										textFormat: Text.PlainText
+										text: dialogState.favorites.length === 0 ? qsTr("No saved servers yet")
+											  : qsTr("%n saved server(s)", "", dialogState.favorites.length)
+										color: Theme.textMuted
+										font.pixelSize: 11
+									}
+								}
+								ModernButton {
+									objectName: "connectNewFavoriteButton"
+									text: qsTr("Add server")
+									tone: "accent"
+									onClicked: dialogState.invokeAction("newFavorite", {})
+								}
+							}
+							ListView {
+								id: connectFavoriteList
+								objectName: "connectFavoriteList"
+								Layout.fillWidth: true
+								Layout.fillHeight: true
+								clip: true
+								spacing: 5
+								model: dialogState.favorites
+								currentIndex: dialogState.selectedFavoriteIndex
+								activeFocusOnTab: visible && count > 0
+								Accessible.role: Accessible.List
+								Accessible.name: qsTr("Saved servers")
+								delegate: ItemDelegate {
+									required property var modelData
+									required property int index
+									objectName: "connectFavorite_" + index
+									width: ListView.view.width
+									height: 62
+									highlighted: !!modelData.selected || index === dialogState.selectedFavoriteIndex
+									Accessible.name: String(modelData.label || modelData.host || qsTr("Saved server"))
+									Accessible.description: String(modelData.subtitle || modelData.tooltip || "")
+									contentItem: RowLayout {
+										spacing: Theme.spacing
+										ColumnLayout {
+											Layout.fillWidth: true
+											spacing: 2
+											Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: modelData.label || modelData.host || ""; color: Theme.textStrong; font.bold: true; elide: Text.ElideRight }
+										Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: modelData.subtitle || modelData.tooltip || ""; color: Theme.textMuted; font.pixelSize: 10; elide: Text.ElideRight }
+										}
+										Label { textFormat: Text.PlainText; text: modelData.usersValue || "–"; color: Theme.textMuted; Accessible.name: modelData.usersLabel || "" }
+										Label { textFormat: Text.PlainText; text: modelData.pingValue || "–"; color: Theme.textMuted; Accessible.name: modelData.pingLabel || "" }
+										ModernButton {
+											objectName: "connectFavoriteAction_" + index
+											text: qsTr("Connect")
+											tone: "accent"
+											onClicked: dialogState.invokeAction("connectFavorite", { "index": index })
+										}
+									}
+									onClicked: dialogState.invokeAction("selectFavorite", { "index": index, "edit": false })
+									onDoubleClicked: dialogState.invokeAction("connectFavorite", { "index": index })
+								}
+								Label {
+									textFormat: Text.PlainText
+									anchors.centerIn: parent
+									visible: connectFavoriteList.count === 0
+									text: qsTr("Add a server to get started.")
+									color: Theme.textMuted
+								}
+							}
+							Label {
+								textFormat: Text.PlainText
+								objectName: "connectEditorTitle"
+								Layout.fillWidth: true
+								visible: dialogState.editorOpen
+								text: dialogState.editorTitle
+								color: Theme.accent
+								font.bold: true
+							}
+						}
 					}
                     Loader {
                         id: screenShareLoader
@@ -190,13 +559,17 @@ Dialog {
 						restoreMode: Binding.RestoreNone
 					}
                     Repeater {
-                        visible: dialogState.kind !== "screenShare" && dialogState.kind !== "stonks"
+						visible: dialogState.kind !== "screenShare" && dialogState.kind !== "stonks"
+								 && !dialogState.loading
                         model: dialogState.sections
                         delegate: Rectangle {
                             required property var modelData
+							property bool sectionAdvanced: !!modelData.advanced
+							property bool sectionVisible: !modelData.advanced || dialog.showAdvanced
                             width: parent.width - (dialog.densityInset * 2)
                             x: dialog.densityInset
-                            height: sectionColumn.implicitHeight + (dialog.sectionPadding * 2)
+							height: sectionVisible ? sectionColumn.implicitHeight + (dialog.sectionPadding * 2) : 0
+							visible: sectionVisible
                             color: Theme.panel
                             border.color: Theme.divider
                             radius: Theme.innerRadius
@@ -216,10 +589,19 @@ Dialog {
                                     font.pixelSize: 13
                                     font.bold: true
                                 }
+								Label {
+									textFormat: Text.PlainText
+									width: parent.width
+									text: modelData.subtitle || ""
+									visible: text.length > 0
+									color: Theme.textMuted
+									font.pixelSize: 11
+									wrapMode: Text.Wrap
+								}
                                 Repeater {
                                     model: modelData.fields || []
-                                    delegate: Loader {
-                                        id: fieldLoader
+                                    delegate: Item {
+                                        id: fieldContainer
                                         required property var modelData
                                         width: sectionColumn.width
                                         property var field: modelData
@@ -229,17 +611,27 @@ Dialog {
                                                 || (field.visibleWhen.values || []).indexOf(
                                                     String(dialogState.fieldValue(field.visibleWhen.fieldId))) >= 0
                                         }
-                                        visible: conditionVisible
-                                        active: conditionVisible
-                                        height: conditionVisible ? ((item ? item.implicitHeight : 0)
-                                                + (fieldErrorLabel.visible ? fieldErrorLabel.implicitHeight + 4 : 0)) : 0
-                                        onLoaded: item.field = field
-                                        onFieldChanged: if (item) item.field = field
-                                        sourceComponent: {
+										property bool advancedVisible: sectionColumn.parent.sectionVisible
+																	 && (!field.advanced || dialog.showAdvanced)
+										visible: conditionVisible && advancedVisible
+										height: visible ? fieldLoader.height
+											+ (fieldErrorLabel.visible ? fieldErrorLabel.implicitHeight + Theme.space1 : 0) : 0
+										onFieldChanged: if (fieldLoader.item) fieldLoader.item.field = field
+
+										Loader {
+											id: fieldLoader
+											width: parent.width
+											active: fieldContainer.visible
+											height: active && item ? item.implicitHeight : 0
+											onLoaded: item.field = fieldContainer.field
+											onItemChanged: if (item) item.field = fieldContainer.field
+											sourceComponent: {
+												const field = fieldContainer.field
                                             const type = field.type || "text"
                                             if (type === "hidden") return hiddenField
                                             if (type === "note") return noteField
-                                            if (type === "readonly" || type === "status" || type === "voiceMeter") return readonlyField
+											if (type === "voiceMeter") return voiceMeterField
+											if (type === "readonly" || type === "status") return readonlyField
                                             if (type === "checkbox" || type === "toggle") return checkboxField
                                             if (type === "select" || type === "combo" || type === "dropdown") return selectField
                                             if (type === "slider" || type === "range" || type === "number" || type === "integer") return numberField
@@ -257,21 +649,22 @@ Dialog {
                                             if (type === "pathPicker" || type === "filePicker" || type === "folderPicker") return pathField
                                             return textField
                                         }
+										}
                                         Label {
 											textFormat: Text.PlainText
                                             id: fieldErrorLabel
-                                            objectName: "dialogFieldError_" + fieldLoader.field.id
+											objectName: "dialogFieldError_" + fieldContainer.field.id
                                             anchors.left: parent.left
                                             anchors.right: parent.right
-                                            anchors.top: fieldLoader.item ? fieldLoader.item.bottom : parent.top
-                                            anchors.topMargin: 4
+											anchors.top: fieldLoader.bottom
+                                            anchors.topMargin: Theme.space1
                                             text: {
                                                 dialogState.revision
-                                                return dialogState.fieldError(fieldLoader.field.id)
+												return dialogState.fieldError(fieldContainer.field.id)
                                             }
                                             visible: text.length > 0
-                                            color: "#f87171"
-                                            font.pixelSize: 10
+                                            color: Theme.danger
+                                            font.pixelSize: Theme.fontCaption
                                             wrapMode: Text.Wrap
                                         }
                                     }
@@ -279,11 +672,17 @@ Dialog {
                             }
                         }
                     }
+					Item {
+						objectName: "dialogContentEndPadding"
+						width: 1
+						height: dialog.densityInset
+					}
                 }
             }
         }
+	}
 
-        Rectangle {
+		Rectangle {
 			objectName: "dialogFooter"
             Layout.fillWidth: true
 			Layout.preferredHeight: Math.max(Theme.densityId === "compact" ? 56
@@ -291,6 +690,7 @@ Dialog {
 				footerActions.childrenRect.height + (Theme.spacing * 2))
             color: Theme.strip
             border.color: Theme.divider
+			border.width: 1
 			Flow {
 				id: footerActions
 				x: Theme.spacing
@@ -302,16 +702,29 @@ Dialog {
                     model: dialogState.actions
                     delegate: ModernButton {
                         required property var modelData
+						readonly property bool primaryAction: String(modelData.id || "") === String(dialogState.primaryActionId || "")
                         objectName: "dialogAction_" + modelData.id
                         text: modelData.label || modelData.text || modelData.id
-                        enabled: modelData.enabled === undefined || modelData.enabled
-                        onClicked: {
+						enabled: (!dialogState.loading || modelData.id === "close" || modelData.id === "cancel")
+								 && (modelData.enabled === undefined || modelData.enabled)
+						highlighted: primaryAction
+						tone: String(modelData.tone || (primaryAction ? "accent" : ""))
+						Accessible.description: primaryAction ? qsTr("Primary action") : ""
+						onClicked: {
                             const payload = dialogState.kind === "screenShare"
                                     && screenShareLoader.item
                                     && modelData.id === "screenShare.start"
                                 ? screenShareLoader.item.actionPayload() : ({})
                             dialogState.invokeAction(modelData.id, payload)
                         }
+						Keys.onSpacePressed: event => {
+							event.accepted = true
+							if (enabled) clicked()
+						}
+						Keys.onReturnPressed: event => {
+							event.accepted = true
+							if (enabled) clicked()
+						}
                     }
                 }
             }
@@ -338,25 +751,176 @@ Dialog {
             id: readonlyRoot
             property var field
             width: parent ? parent.width : 0
-            Label { textFormat: Text.PlainText; text: readonlyRoot.field.label || ""; visible: text.length > 0; color: Theme.textMuted; font.pixelSize: 10 }
+			Label { textFormat: Text.PlainText; text: readonlyRoot.field.label || ""; visible: text.length > 0; color: Theme.textMuted; font.pixelSize: 11 }
             Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: String(readonlyRoot.field.value ?? ""); color: Theme.textMain; wrapMode: Text.Wrap }
         }
     }
+	Component {
+		id: voiceMeterField
+		ColumnLayout {
+			id: voiceMeterRoot
+			objectName: "voiceMeter_" + String((field || {}).id || "")
+			property var field: ({})
+			readonly property var meter: {
+				const fieldId = String(field.id || "")
+				const presentationValues = dialogState.presentationFieldValues || ({})
+				const presentationValue = presentationValues[fieldId]
+				const sourceValue = presentationValue !== undefined ? presentationValue : field.value
+				return sourceValue && typeof sourceValue === "object" ? sourceValue : ({
+					"available": Number(sourceValue || 0) > 0,
+					"amplitude": Number(sourceValue || 0),
+					"signalToNoise": Number(sourceValue || 0),
+					"hybrid": Number(sourceValue || 0)
+				})
+			}
+			readonly property int vadSource: Number(field.vadSource || 0)
+			readonly property real meterValue: Math.max(0, Math.min(100,
+				vadSource === 1 ? Number(meter.signalToNoise || 0)
+					: vadSource === 2 ? Number(meter.hybrid || 0) : Number(meter.amplitude || 0)))
+			readonly property int silenceThreshold: Math.max(0, Math.min(100, Number(field.silenceThreshold || 0)))
+			readonly property int speechThreshold: Math.max(silenceThreshold,
+				Math.min(100, Number(field.speechThreshold === undefined ? 100 : field.speechThreshold)))
+			readonly property bool replayActive: Number(field.loopbackMode || meter.loopbackMode || 0) !== 0
+			function setupPayload() {
+				return {
+					"silenceThreshold": silenceThreshold,
+					"speechThreshold": speechThreshold,
+					"vadSource": vadSource,
+					"voiceHold": Number(field.voiceHold || 20),
+					"maxAmplification": Number(field.maxAmplification || 0),
+					"noiseCancelMode": Number(field.noiseCancelMode || 0),
+					"inputGateMode": Number(field.inputGateMode || 0),
+					"speexNoiseStrength": Number(field.speexNoiseStrength || 14)
+				}
+			}
+			width: parent ? parent.width : 0
+			spacing: Math.max(6, Theme.spacing - 3)
+			RowLayout {
+				Layout.fillWidth: true
+				ColumnLayout {
+					Layout.fillWidth: true
+					spacing: 1
+					Label { textFormat: Text.PlainText; text: voiceMeterRoot.field.label || qsTr("Voice input"); color: Theme.textStrong; font.bold: true }
+					Label {
+						textFormat: Text.PlainText
+						Layout.fillWidth: true
+						text: voiceMeterRoot.field.sourceLabel || qsTr("Current microphone")
+						color: Theme.textMuted
+						font.pixelSize: 11
+						elide: Text.ElideRight
+					}
+				}
+				Rectangle {
+					Layout.preferredWidth: 9
+					Layout.preferredHeight: 9
+					radius: 5
+					color: voiceMeterRoot.meter.transmitting ? Theme.success
+						  : voiceMeterRoot.field.active === false ? Theme.textMuted : Theme.accent
+				}
+				Label {
+					textFormat: Text.PlainText
+					text: voiceMeterRoot.meter.transmitting ? qsTr("Transmitting")
+						  : voiceMeterRoot.meter.available === false ? qsTr("Waiting for input") : qsTr("Listening")
+					color: voiceMeterRoot.meter.transmitting ? Theme.success : Theme.textMuted
+					font.pixelSize: 11
+				}
+			}
+			Rectangle {
+				id: voiceMeterTrack
+				objectName: "voiceMeterTrack_" + String(voiceMeterRoot.field.id || "")
+				Layout.fillWidth: true
+				Layout.preferredHeight: 22
+				radius: 7
+				color: Theme.strip
+				border.color: Theme.divider
+				clip: true
+				Accessible.role: Accessible.ProgressBar
+				Accessible.name: voiceMeterRoot.field.label || qsTr("Voice input level")
+				Accessible.description: qsTr("%1 percent").arg(Math.round(voiceMeterRoot.meterValue))
+				Rectangle {
+					id: voiceMeterFill
+					objectName: "voiceMeterFill_" + String(voiceMeterRoot.field.id || "")
+					height: parent.height
+					width: Math.round(parent.width * voiceMeterRoot.meterValue / 100)
+					color: voiceMeterRoot.meter.transmitting ? Theme.success : Theme.accent
+					opacity: voiceMeterRoot.field.active === false ? 0.42 : 0.9
+					Behavior on width {
+						enabled: !voiceMeterRoot.field.staticMeter
+						NumberAnimation { duration: 75; easing.type: Easing.OutCubic }
+					}
+				}
+				Rectangle {
+					x: Math.round(parent.width * voiceMeterRoot.silenceThreshold / 100)
+					width: 2; height: parent.height; color: Theme.warning; opacity: 0.9
+				}
+				Rectangle {
+					x: Math.min(parent.width - width, Math.round(parent.width * voiceMeterRoot.speechThreshold / 100))
+					width: 2; height: parent.height; color: Theme.success; opacity: 0.9
+				}
+			}
+			RowLayout {
+				Layout.fillWidth: true
+				Label { textFormat: Text.PlainText; text: qsTr("Quiet %1%").arg(voiceMeterRoot.silenceThreshold); color: Theme.textMuted; font.pixelSize: 10 }
+				Item { Layout.fillWidth: true }
+				Label {
+					textFormat: Text.PlainText
+					text: voiceMeterRoot.meter.peakCleanMicDb !== undefined
+						  ? qsTr("%1 dB · %2%").arg(Number(voiceMeterRoot.meter.peakCleanMicDb).toFixed(0)).arg(Math.round(voiceMeterRoot.meterValue))
+						  : qsTr("%1%").arg(Math.round(voiceMeterRoot.meterValue))
+					color: Theme.textMain
+					font.pixelSize: 10
+				}
+				Item { Layout.fillWidth: true }
+				Label { textFormat: Text.PlainText; text: qsTr("Voice %1%").arg(voiceMeterRoot.speechThreshold); color: Theme.textMuted; font.pixelSize: 10 }
+			}
+			Label {
+				textFormat: Text.PlainText
+				Layout.fillWidth: true
+				visible: String(voiceMeterRoot.field.calibrationStatusText || "").length > 0
+				text: voiceMeterRoot.field.calibrationStatusText || ""
+				color: Theme.textMuted
+				font.pixelSize: 11
+				wrapMode: Text.Wrap
+			}
+			Flow {
+				Layout.fillWidth: true
+				spacing: Math.max(6, Math.round(Theme.spacing / 2))
+				ModernButton {
+					objectName: "voiceMeterCalibration_" + String(voiceMeterRoot.field.id || "")
+					visible: String(voiceMeterRoot.field.calibrationActionId || "").length > 0
+					text: voiceMeterRoot.field.calibrationLabel || qsTr("Audio setup")
+					ToolTip.visible: hovered && String(voiceMeterRoot.field.calibrationTooltip || "").length > 0
+					ToolTip.text: voiceMeterRoot.field.calibrationTooltip || ""
+					onClicked: dialogState.invokeAction(voiceMeterRoot.field.calibrationActionId,
+														 voiceMeterRoot.setupPayload())
+				}
+				ModernButton {
+					objectName: "voiceMeterReplay_" + String(voiceMeterRoot.field.id || "")
+					visible: String(voiceMeterRoot.field.replayStartActionId || voiceMeterRoot.field.replayStopActionId || "").length > 0
+					text: voiceMeterRoot.replayActive ? qsTr("Stop replay") : (voiceMeterRoot.field.replayLabel || qsTr("Replay"))
+					tone: voiceMeterRoot.replayActive ? "warning" : ""
+					ToolTip.visible: hovered && String(voiceMeterRoot.field.replayTooltip || "").length > 0
+					ToolTip.text: voiceMeterRoot.field.replayTooltip || ""
+					onClicked: {
+						if (voiceMeterRoot.replayActive)
+							dialogState.invokeAction(voiceMeterRoot.field.replayStopActionId, {})
+						else
+							dialogState.invokeAction(voiceMeterRoot.field.replayStartActionId,
+														 { "mode": voiceMeterRoot.meter.connected ? "server" : "local" })
+					}
+				}
+			}
+		}
+	}
     Component {
         id: checkboxField
-        CheckBox {
+		ModernCheckBox {
             property var field
+			objectName: "dialogField_" + String((field || {}).id || "")
             width: parent ? parent.width : 0
             text: field.label || ""
             checked: !!field.value
             enabled: field.enabled === undefined || field.enabled
-            contentItem: Label {
-				textFormat: Text.PlainText
-                text: parent.text
-                color: parent.enabled ? Theme.textMain : Theme.textMuted
-                leftPadding: parent.indicator.width + parent.spacing
-                verticalAlignment: Text.AlignVCenter
-            }
             onToggled: dialogState.updateField(field.id, checked)
         }
     }
@@ -373,9 +937,10 @@ Dialog {
             }
             onFieldChanged: syncCurrentIndex()
             width: parent ? parent.width : 0
-            Label { textFormat: Text.PlainText; text: selectRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 10 }
-            ComboBox {
+			Label { textFormat: Text.PlainText; text: selectRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 11 }
+            ModernComboBox {
                 id: selectControl
+				objectName: "dialogField_" + String((selectRoot.field || {}).id || "")
                 Layout.fillWidth: true
                 model: selectRoot.field.options || []
                 textRole: "label"
@@ -392,8 +957,9 @@ Dialog {
             id: numberRoot
             property var field
             width: parent ? parent.width : 0
-            Label { textFormat: Text.PlainText; text: numberRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 10 }
-            SpinBox {
+			Label { textFormat: Text.PlainText; text: numberRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 11 }
+            ModernSpinBox {
+				objectName: "dialogField_" + String((numberRoot.field || {}).id || "")
                 from: numberRoot.field.minimum ?? numberRoot.field.min ?? -100000
                 to: numberRoot.field.maximum ?? numberRoot.field.max ?? 100000
                 value: Number(numberRoot.field.value || 0)
@@ -408,13 +974,21 @@ Dialog {
             id: textRoot
             property var field
             width: parent ? parent.width : 0
-            Label { textFormat: Text.PlainText; text: textRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 10 }
-            TextField {
+			Label { textFormat: Text.PlainText; text: textRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 11 }
+			ModernTextField {
+				objectName: "dialogField_" + String((textRoot.field || {}).id || "")
                 Layout.fillWidth: true
                 text: String(textRoot.field.value ?? "")
                 enabled: textRoot.field.enabled === undefined || textRoot.field.enabled
+				invalid: {
+					dialogState.revision
+					return dialogState.fieldError(String((textRoot.field || {}).id || "")).length > 0
+				}
                 echoMode: textRoot.field.type === "password" ? TextInput.Password : TextInput.Normal
-                onEditingFinished: dialogState.updateField(textRoot.field.id, text)
+				onEditingFinished: {
+					if (text !== String(textRoot.field.value ?? ""))
+						dialogState.updateField(textRoot.field.id, text)
+				}
             }
         }
     }
@@ -424,12 +998,20 @@ Dialog {
             id: pathRoot
             property var field
             width: parent ? parent.width : 0
-            Label { textFormat: Text.PlainText; text: pathRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 10 }
+			Label { textFormat: Text.PlainText; text: pathRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 11 }
             RowLayout {
-                TextField {
+				ModernTextField {
+					objectName: "dialogField_" + String((pathRoot.field || {}).id || "")
                     Layout.fillWidth: true
                     text: String(pathRoot.field.value ?? "")
-                    onEditingFinished: dialogState.updateField(pathRoot.field.id, text)
+					invalid: {
+						dialogState.revision
+						return dialogState.fieldError(String((pathRoot.field || {}).id || "")).length > 0
+					}
+					onEditingFinished: {
+						if (text !== String(pathRoot.field.value ?? ""))
+							dialogState.updateField(pathRoot.field.id, text)
+					}
                 }
                 ModernButton {
                     text: pathRoot.field.browseLabel || qsTr("Browse…")
@@ -467,7 +1049,7 @@ Dialog {
 					function onStateChanged() { manualPositionCanvas.requestPaint() }
 				}
 			}
-            Label { anchors.left: parent.left; anchors.top: parent.top; anchors.margins: 8; textFormat: Text.PlainText; text: qsTr("Top view · X / Z"); color: Theme.textMuted; font.pixelSize: 9 }
+			Label { anchors.left: parent.left; anchors.top: parent.top; anchors.margins: 8; textFormat: Text.PlainText; text: qsTr("Top view · X / Z"); color: Theme.textMuted; font.pixelSize: 10 }
         }
     }
     Component {
@@ -514,7 +1096,7 @@ Dialog {
 				}
 				onClicked: colorDialog.open()
             }
-            Label { textFormat: Text.PlainText; text: String(colorRoot.field.value || ""); color: Theme.textMuted; font.pixelSize: 10 }
+			Label { textFormat: Text.PlainText; text: String(colorRoot.field.value || ""); color: Theme.textMuted; font.pixelSize: 11 }
             ColorDialog {
                 id: colorDialog
                 title: colorRoot.field.label || qsTr("Choose color")
@@ -526,41 +1108,222 @@ Dialog {
     Component {
         id: resultListField
         ColumnLayout {
-            property var field
+			id: resultRoot
+			objectName: "dialogResultSurface_" + String((field || {}).id || "results")
+			property var field: ({})
+			readonly property var resultItems: field.items || field.value || []
+			readonly property string resultState: String(field.state || field.status || "").toLowerCase()
+			readonly property bool resultsLoading: field.loading === true || resultState === "loading"
+			readonly property string resultsError: {
+				const error = field.errorText || field.errorMessage || field.error
+				if (error !== undefined && error !== null && typeof error !== "object")
+					return String(error)
+				if (error && typeof error === "object")
+					return String(error.message || error.userMessage || "")
+				return resultState === "error" ? String(field.message || qsTr("Unable to load results.")) : ""
+			}
+			readonly property int resultRowHeight: Math.max(46, Number(field.rowHeight || 54))
+			readonly property int maximumListHeight: Math.max(resultRowHeight,
+				Math.min(520, Number(field.maxHeight || field.maximumHeight || 340)))
+			function stableIdFor(item, index) {
+				const candidate = item && item.stableId !== undefined ? item.stableId
+					: item && item.key !== undefined ? item.key
+					: item && item.messageId !== undefined ? item.messageId
+					: item && item.id !== undefined ? item.id : null
+				const prefix = item && item.type ? String(item.type) + ":" : ""
+				return candidate !== null && candidate !== undefined && String(candidate).length > 0
+					? prefix + String(candidate) : "index:" + index
+			}
+			function objectNameToken(value) {
+				return String(value || "item").replace(/[^A-Za-z0-9_.:-]/g, "_")
+			}
+			function actionPayload(item) {
+				return item.payload || { "id": item.id, "type": item.type }
+			}
+			function invokePrimary(item) {
+				if (!item) return
+				if (String(item.primaryActionId || item.primaryAction || "").length === 0) return
+				const inferred = item.type === "user" ? "messageSearchResult" : "selectSearchResult"
+				const actionId = item.primaryActionId || inferred
+				if (String(actionId).length > 0)
+					dialogState.invokeAction(actionId, actionPayload(item))
+			}
             width: parent ? parent.width : 0
-            Label { textFormat: Text.PlainText; text: parent.field.label || ""; color: Theme.textStrong; font.bold: true; visible: text.length > 0 }
-            Repeater {
-                model: parent.field.items || parent.field.value || []
-                delegate: Rectangle {
-                    required property var modelData
-                    Layout.fillWidth: true; height: 46; radius: 6; color: Theme.strip
-                    RowLayout { anchors.fill: parent; anchors.margins: 7
-                      ColumnLayout { Layout.fillWidth: true
-                        Label { width: parent.width; textFormat: Text.PlainText; text: modelData.label || modelData.title || modelData.name || ""; color: Theme.textMain; elide: Text.ElideRight }
-                        Label { width: parent.width; textFormat: Text.PlainText; text: modelData.subtitle || modelData.description || ""; color: Theme.textMuted; font.pixelSize: 9; elide: Text.ElideRight }
-                      }
-                      ModernButton {
-                        visible: (modelData.primaryActionId || modelData.primaryAction || "").length > 0
-                        text: modelData.primaryActionLabel || modelData.primaryAction || qsTr("Open")
-                        onClicked: {
-                            const inferred = modelData.type === "user" ? "messageSearchResult" : "selectSearchResult"
-                            dialogState.invokeAction(modelData.primaryActionId || inferred,
-                                                     modelData.payload || { "id": modelData.id, "type": modelData.type })
-                        }
-                      }
-                      ModernButton {
-                        visible: (modelData.secondaryActionId || modelData.secondaryAction || "").length > 0
-                        text: modelData.secondaryActionLabel || modelData.secondaryAction
-                        onClicked: {
-                            const inferred = modelData.type === "channel" ? "joinSearchResult" : "selectSearchResult"
-                            dialogState.invokeAction(modelData.secondaryActionId || inferred,
-                                                     modelData.payload || { "id": modelData.id, "type": modelData.type })
-                        }
-                      }
-                    }
-                }
-            }
-            Label { textFormat: Text.PlainText; text: parent.field.emptyText || ""; visible: (parent.field.items || []).length === 0; color: Theme.textMuted; wrapMode: Text.Wrap }
+			spacing: Math.max(6, Theme.spacing - 2)
+			Label {
+				textFormat: Text.PlainText
+				text: resultRoot.field.label || ""
+				color: Theme.textStrong
+				font.bold: true
+				visible: text.length > 0
+			}
+			ListView {
+				id: resultList
+				objectName: "dialogResultList_" + String(resultRoot.field.id || "results")
+				Layout.fillWidth: true
+				Layout.preferredHeight: visible ? Math.min(resultRoot.maximumListHeight,
+					Math.max(resultRoot.resultRowHeight,
+						Math.min(count, 6) * resultRoot.resultRowHeight + Math.max(0, Math.min(count, 6) - 1) * spacing)) : 0
+				Layout.maximumHeight: resultRoot.maximumListHeight
+				visible: !resultRoot.resultsLoading && resultRoot.resultsError.length === 0 && count > 0
+				model: resultRoot.resultItems
+				clip: true
+				spacing: Math.max(4, Math.round(Theme.spacing / 2))
+				cacheBuffer: resultRoot.resultRowHeight * 2
+				reuseItems: true
+				boundsBehavior: Flickable.StopAtBounds
+				currentIndex: count > 0 ? 0 : -1
+				activeFocusOnTab: visible
+				keyNavigationEnabled: true
+				keyNavigationWraps: false
+				Accessible.role: Accessible.List
+				Accessible.name: resultRoot.field.label || qsTr("Results")
+				Accessible.description: qsTr("%n result(s)", "", count)
+				function liveDelegateCount() {
+					let live = 0
+					const objects = contentItem ? contentItem.children : []
+					for (let index = 0; index < objects.length; ++index) {
+						if (objects[index].isResultListDelegate)
+							++live
+					}
+					return live
+				}
+				onCountChanged: {
+					if (count === 0) currentIndex = -1
+					else if (currentIndex < 0 || currentIndex >= count) currentIndex = 0
+				}
+				Keys.onPressed: event => {
+					if (event.key === Qt.Key_Home && count > 0) {
+						currentIndex = 0
+						positionViewAtBeginning()
+						event.accepted = true
+					} else if (event.key === Qt.Key_End && count > 0) {
+						currentIndex = count - 1
+						positionViewAtEnd()
+						event.accepted = true
+					} else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+							|| event.key === Qt.Key_Space) && currentIndex >= 0) {
+						resultRoot.invokePrimary(resultRoot.resultItems[currentIndex])
+						event.accepted = true
+					}
+				}
+				delegate: ItemDelegate {
+					id: resultDelegate
+					required property var modelData
+					required property int index
+					property bool isResultListDelegate: true
+					readonly property string stableId: resultRoot.stableIdFor(modelData, index)
+					objectName: "dialogResultItem_" + resultRoot.objectNameToken(resultRoot.field.id)
+							+ "_" + resultRoot.objectNameToken(stableId)
+					width: ListView.view.width
+					height: resultRoot.resultRowHeight
+					hoverEnabled: true
+					highlighted: ListView.isCurrentItem || hovered
+					Accessible.role: Accessible.ListItem
+					Accessible.name: String(modelData.label || modelData.title || modelData.name || stableId)
+					Accessible.description: String(modelData.subtitle || modelData.description || "")
+					Accessible.selected: ListView.isCurrentItem
+					background: Rectangle {
+						radius: 6
+						color: resultDelegate.highlighted ? Theme.surfaceHover : Theme.strip
+						border.color: resultDelegate.highlighted ? Theme.focus : Theme.divider
+						border.width: resultDelegate.highlighted ? Theme.focusRingWidth : 1
+					}
+					contentItem: RowLayout {
+						spacing: Math.max(6, Theme.spacing - 2)
+						ColumnLayout {
+							Layout.fillWidth: true
+							Layout.minimumWidth: 96
+							spacing: 2
+							Label {
+								objectName: "dialogResultTitle_" + resultRoot.objectNameToken(resultRoot.field.id)
+									+ "_" + resultRoot.objectNameToken(resultDelegate.stableId)
+								Layout.fillWidth: true
+								textFormat: Text.PlainText
+								text: modelData.label || modelData.title || modelData.name || ""
+								color: Theme.textMain
+								elide: Text.ElideRight
+							}
+							Label {
+								objectName: "dialogResultSubtitle_" + resultRoot.objectNameToken(resultRoot.field.id)
+									+ "_" + resultRoot.objectNameToken(resultDelegate.stableId)
+								Layout.fillWidth: true
+								textFormat: Text.PlainText
+								text: modelData.subtitle || modelData.description || ""
+								visible: text.length > 0
+								color: Theme.textMuted
+								font.pixelSize: 10
+								elide: Text.ElideRight
+							}
+						}
+						ModernButton {
+							dense: true
+							visible: String(modelData.primaryActionId || modelData.primaryAction || "").length > 0
+							text: modelData.primaryActionLabel || modelData.primaryAction || qsTr("Open")
+							onClicked: resultRoot.invokePrimary(modelData)
+						}
+						ModernButton {
+							dense: true
+							visible: String(modelData.secondaryActionId || modelData.secondaryAction || "").length > 0
+							text: modelData.secondaryActionLabel || modelData.secondaryAction
+							onClicked: {
+								const inferred = modelData.type === "channel" ? "joinSearchResult" : "selectSearchResult"
+								dialogState.invokeAction(modelData.secondaryActionId || inferred,
+									resultRoot.actionPayload(modelData))
+							}
+						}
+					}
+					onClicked: resultList.currentIndex = index
+					onDoubleClicked: resultRoot.invokePrimary(modelData)
+				}
+			}
+			Rectangle {
+				id: resultStatusSurface
+				objectName: resultRoot.resultsLoading ? "dialogResultLoading_" + String(resultRoot.field.id || "results")
+					: resultRoot.resultsError.length > 0 ? "dialogResultError_" + String(resultRoot.field.id || "results")
+					: "dialogResultEmpty_" + String(resultRoot.field.id || "results")
+				Layout.fillWidth: true
+				Layout.preferredHeight: visible ? Math.max(72, resultStatusLayout.implicitHeight + (Theme.spacing * 2)) : 0
+				visible: resultRoot.resultsLoading || resultRoot.resultsError.length > 0 || resultList.count === 0
+				color: Theme.strip
+				border.color: resultRoot.resultsError.length > 0 ? Theme.danger : Theme.divider
+				border.width: 1
+				radius: 6
+				Accessible.role: Accessible.Pane
+				Accessible.name: resultStateLabel.text
+				RowLayout {
+					id: resultStatusLayout
+					anchors.fill: parent
+					anchors.margins: Theme.spacing
+					spacing: Theme.spacing
+					BusyIndicator {
+						visible: resultRoot.resultsLoading
+						running: visible
+						Layout.preferredWidth: 28
+						Layout.preferredHeight: 28
+					}
+					Label {
+						id: resultStateLabel
+						objectName: "dialogResultStatusText_" + String(resultRoot.field.id || "results")
+						Layout.fillWidth: true
+						textFormat: Text.PlainText
+						text: resultRoot.resultsLoading ? String(resultRoot.field.loadingText || qsTr("Loading results…"))
+							: resultRoot.resultsError.length > 0 ? resultRoot.resultsError
+							: String(resultRoot.field.emptyText || qsTr("No results."))
+						color: resultRoot.resultsError.length > 0 ? Theme.danger : Theme.textMuted
+						wrapMode: Text.Wrap
+					}
+					ModernButton {
+						objectName: "dialogResultRetry_" + String(resultRoot.field.id || "results")
+						visible: resultRoot.resultsError.length > 0
+							&& String(resultRoot.field.retryActionId || resultRoot.field.errorActionId || "").length > 0
+						text: resultRoot.field.retryLabel || resultRoot.field.errorActionLabel || qsTr("Retry")
+						tone: "accent"
+						onClicked: dialogState.invokeAction(resultRoot.field.retryActionId || resultRoot.field.errorActionId,
+							{ "fieldId": resultRoot.field.id })
+					}
+				}
+			}
         }
     }
     Component {
@@ -569,14 +1332,18 @@ Dialog {
             id: textareaRoot
             property var field
             width: parent ? parent.width : 0
-            Label { textFormat: Text.PlainText; text: textareaRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 10 }
-            TextArea {
+			Label { textFormat: Text.PlainText; text: textareaRoot.field.label || ""; color: Theme.textMuted; font.pixelSize: 11 }
+            ModernTextArea {
+				objectName: "dialogField_" + String((textareaRoot.field || {}).id || "")
                 Layout.fillWidth: true
                 Layout.preferredHeight: Math.max(90, (textareaRoot.field.rows || 4) * 22)
                 text: String(textareaRoot.field.value ?? "")
                 enabled: textareaRoot.field.enabled === undefined || textareaRoot.field.enabled
                 wrapMode: TextEdit.Wrap
-                onActiveFocusChanged: if (!activeFocus) dialogState.updateField(textareaRoot.field.id, text)
+				onActiveFocusChanged: {
+					if (!activeFocus && text !== String(textareaRoot.field.value ?? ""))
+						dialogState.updateField(textareaRoot.field.id, text)
+				}
             }
         }
     }
@@ -600,6 +1367,7 @@ Dialog {
         id: actionField
         ModernButton {
             property var field
+			objectName: "dialogField_" + String((field || {}).id || "")
             width: parent ? parent.width : implicitWidth
             text: field.buttonLabel || field.label || field.text || field.id
             enabled: field.enabled === undefined || field.enabled

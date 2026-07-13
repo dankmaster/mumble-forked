@@ -163,9 +163,9 @@ void QmlVisualFixtureController::applyState(const QString &state) {
 		session->setSelfStatusLabel(QStringLiteral("Online"));
 		session->setSelfName(QStringLiteral("Demo User"));
 		const QVariantList voiceRooms {
-			QVariantMap { { QStringLiteral("token"), QStringLiteral("1:1") }, { QStringLiteral("label"), QStringLiteral("Lobby") },
+			QVariantMap { { QStringLiteral("token"), QStringLiteral("0:1") }, { QStringLiteral("label"), QStringLiteral("Lobby") },
 						  { QStringLiteral("selected"), true }, { QStringLiteral("joined"), true }, { QStringLiteral("depth"), 0 } },
-			QVariantMap { { QStringLiteral("token"), QStringLiteral("1:2") }, { QStringLiteral("label"), QStringLiteral("Studio") },
+			QVariantMap { { QStringLiteral("token"), QStringLiteral("0:2") }, { QStringLiteral("label"), QStringLiteral("Studio") },
 						  { QStringLiteral("depth"), 0 } }
 		};
 		const QVariantList textRoomActions {
@@ -176,7 +176,7 @@ void QmlVisualFixtureController::applyState(const QString &state) {
 						  { QStringLiteral("checkable"), false }, { QStringLiteral("checked"), false } }
 		};
 		const QVariantList textRooms {
-			QVariantMap { { QStringLiteral("token"), QStringLiteral("2:1") },
+			QVariantMap { { QStringLiteral("token"), QStringLiteral("3:1") },
 						  { QStringLiteral("label"), QStringLiteral("#general") },
 						  { QStringLiteral("description"), QStringLiteral("Text room") },
 						  { QStringLiteral("selected"), false }, { QStringLiteral("depth"), 0 },
@@ -192,7 +192,7 @@ void QmlVisualFixtureController::applyState(const QString &state) {
 		// Scope changes can synchronously publish the live conversation. Apply the
 		// fixture timeline last so those signal side-effects cannot clear it while
 		// the scoped fixture mutation is active.
-		scope->applyState({ { QStringLiteral("scopeToken"), QStringLiteral("1:1") }, { QStringLiteral("label"), QStringLiteral("Lobby") },
+		scope->applyState({ { QStringLiteral("scopeToken"), QStringLiteral("0:1") }, { QStringLiteral("label"), QStringLiteral("Lobby") },
 							{ QStringLiteral("description"), QStringLiteral("Voice room") }, { QStringLiteral("kindLabel"), QStringLiteral("VOICE") },
 							{ QStringLiteral("composerPlaceholder"), QStringLiteral("Message Lobby") }, { QStringLiteral("canSend"), true },
 							{ QStringLiteral("canAttachImages"), true } });
