@@ -42,14 +42,6 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Inherit</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Inheritable</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Added user IDs</source>
         <translation type="unfinished"></translation>
     </message>
@@ -82,14 +74,6 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Here</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Sub-rooms</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Allow</source>
         <translation type="unfinished"></translation>
     </message>
@@ -99,6 +83,227 @@
     </message>
     <message>
         <source>Add rule</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message numerus="yes">
+        <source>%n group(s)</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Access-control groups</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>New group</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Inherited group</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Editable group</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Inherited</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Inherit members</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Available to child rooms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Comma-separated IDs</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No explicit groups for this room.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message numerus="yes">
+        <source>%n rule(s)</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Rule for %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>all users</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Inherited rule</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Editable rule</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Applies to</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This room</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Child rooms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Inherited from parent</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove rule</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Permissions</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No explicit access rules for this room.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>AsyncOperationCard</name>
+    <message>
+        <source>Operation details expanded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Operation details collapsed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">Ezeztatu</translation>
+    </message>
+    <message>
+        <source>Cancel %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Dismiss</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Dismiss %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Collapse</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expand</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Collapse %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expand %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hide operation details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show operation details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 of %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Operation progress</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>In progress</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 percent</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 succeeded · %2 failed · %3 cancelled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancelled: </source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed: </source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hide item results</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show item results (%1)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Shows a scrollable list of per-item operation results</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Succeeded: </source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Previous</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Page %1 of %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Next</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Completed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Partially completed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancelling…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -160,6 +365,18 @@
         <source>Attachment unavailable</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>%1 attachments</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Attachment %1 of %2</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>AttachmentViewer</name>
@@ -172,8 +389,12 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Close</source>
-        <translation type="unfinished">Itxi</translation>
+        <source>Close attachment viewer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading %1</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -199,170 +420,6 @@
     <message>
         <source>The file &apos;%1&apos; cannot be used by Mumble. Please select a file with a compatible format and encoding.</source>
         <translation>Mumble-k ezin du %1 fitxategia erabili. Mesedez, aukeratu formatu eta kodeketa bateragarria duen fitxategi bat.</translation>
-    </message>
-</context>
-<context>
-    <name>ChanACL</name>
-    <message>
-        <source>None</source>
-        <translation>Bat ere ez</translation>
-    </message>
-    <message>
-        <source>Traverse</source>
-        <translation>Zeharkatu</translation>
-    </message>
-    <message>
-        <source>Enter</source>
-        <translation>Sartu</translation>
-    </message>
-    <message>
-        <source>Speak</source>
-        <translation>Hitz egin</translation>
-    </message>
-    <message>
-        <source>Mute/Deafen</source>
-        <translation>Isildu/Gortu</translation>
-    </message>
-    <message>
-        <source>Make channel</source>
-        <translation>Kanala sortu</translation>
-    </message>
-    <message>
-        <source>Make temporary</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Link channel</source>
-        <translation>Kanala lotu</translation>
-    </message>
-    <message>
-        <source>This represents no privileges.</source>
-        <translation>Baimen eza adierazten du</translation>
-    </message>
-    <message>
-        <source>This represents the permission to traverse the channel. If a user is denied this privilege, he will be unable to access this channel and any sub-channels in any way, regardless of other permissions in the sub-channels.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This represents the permission to join the channel. If you have a hierarchical channel structure, you might want to give everyone Traverse, but restrict Enter in the root of your hierarchy.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This represents the permission to speak in a channel. Users without this privilege will be suppressed by the server (seen as muted), and will be unable to speak until they are unmuted by someone with the appropriate privileges.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This represents the permission to whisper to this channel from the outside. This works exactly like the &lt;i&gt;speak&lt;/i&gt; privilege, but applies to packets spoken with the Whisper key held down. This may be used to broadcast to a hierarchy of channels without linking.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This represents the permission to mute and deafen other users. Once muted, a user will stay muted until he is unmuted by another privileged user or reconnects to the server.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This represents the permission to move a user to another channel or kick him from the server. To actually move the user, either the moving user must have Move privileges in the destination channel, or the user must normally be allowed to enter the channel. Users with this privilege can move users into channels the target user normally wouldn&apos;t have permission to enter.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This represents the permission to make sub-channels. The user making the sub-channel will be added to the admin group of the sub-channel.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This represents the permission to make a temporary subchannel. The user making the sub-channel will be added to the admin group of the sub-channel. Temporary channels are not stored and disappear when the last user leaves.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This represents the permission to link channels. Users in linked channels hear each other, as long as the speaking user has the &lt;i&gt;speak&lt;/i&gt; privilege in the channel of the listener. You need the link privilege in both channels to create a link, but just in either channel to remove it.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This represents the permission to write text messages to other users in this channel.</source>
-        <translation>Honek, erabiltzaileei testu mezuak bidaltzeko baimena adierazten du kanal honetan.</translation>
-    </message>
-    <message>
-        <source>This represents the permission to forcibly remove users from the server.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This represents the permission to permanently remove users from the server.</source>
-        <translation>Honek, zerbitzaritik erabiltzaileak ezabatzeko baimena
-adierazten du.</translation>
-    </message>
-    <message>
-        <source>This represents the permission to register and unregister users on the server.</source>
-        <translation>Honek zerbitzarian erabiltzaileak erregistratzeko baimena adierazten du.</translation>
-    </message>
-    <message>
-        <source>This represents the permission to register oneself on the server.</source>
-        <translation>Honek bere burua zerbitzarian erregistratzeko baimena adierazten du.</translation>
-    </message>
-    <message>
-        <source>Whisper</source>
-        <translation>Marmarra</translation>
-    </message>
-    <message>
-        <source>Move</source>
-        <translation>Mugitu</translation>
-    </message>
-    <message>
-        <source>Text message</source>
-        <translation>Testu Mezua</translation>
-    </message>
-    <message>
-        <source>Kick</source>
-        <translation>Ostikatu</translation>
-    </message>
-    <message>
-        <source>Ban</source>
-        <translation>Kanporatu</translation>
-    </message>
-    <message>
-        <source>Register User</source>
-        <translation>Erregistratu erabiltzailea</translation>
-    </message>
-    <message>
-        <source>Register Self</source>
-        <translation>Erregistratu zure burua</translation>
-    </message>
-    <message>
-        <source>Write ACL</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This represents the permission to use the listen-feature allowing to listen to a channel without being in it.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Listen</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This represents the permission to reset the comment or avatar of a user.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Reset User Content</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This represents total access to the channel, including the ability to change group and ACL information. This privilege implies most other privileges, but speaking, whispering, and persistent chat history access are controlled separately.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This represents the permission to delete persistent text messages from this channel&apos;s history.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This represents the permission to view persistent text message history in this channel.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Delete text messages</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>View chat history</source>
-        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -597,17 +654,6 @@ Please describe what you were doing before the crash.</source>
     </message>
 </context>
 <context>
-    <name>GlobalShortcutMac</name>
-    <message>
-        <source>Mouse</source>
-        <translation>Xagua</translation>
-    </message>
-    <message>
-        <source>Keyboard</source>
-        <translation>Teklatua</translation>
-    </message>
-</context>
-<context>
     <name>GlobalShortcutWin</name>
     <message>
         <source>Mouse</source>
@@ -657,6 +703,18 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Zoom in</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image zoom controls</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -883,82 +941,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Cancel</source>
-        <translation type="unfinished">Ezeztatu</translation>
-    </message>
-    <message>
-        <source>Cancel %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Dismiss</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Dismiss %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>%1 of %2</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>%1 succeeded · %2 failed · %3 cancelled</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Cancelled: </source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Failed: </source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Hide item results</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show item results (%1)</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Succeeded: </source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Previous</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Page %1 of %2</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Next</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Completed</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Partially completed</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Cancelled</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Cancelling…</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Failed</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Open rooms and participants</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1007,18 +989,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Connect to load rooms and messages</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>No messages in %1 yet.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Select a room to start chatting</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Attach image</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1044,6 +1014,94 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Message composer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 — Mumble</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mumble</source>
+        <translation type="unfinished">Mumble</translation>
+    </message>
+    <message>
+        <source>Presence</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Account and app</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Search users and rooms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connected to %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 · %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a server to get started</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Jump to latest</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Scroll to the newest message</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading conversation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect to Mumble</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This conversation is quiet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a conversation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Messages will appear here when history is ready.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the server browser to load rooms and messages.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Be the first to write in %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select a text room, voice room, or direct message to get started.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Send</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -6245,10 +6303,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Place your positional-audio identity and inspect linked speaker positions.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Position and orientation</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6285,10 +6339,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Linked speakers: %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Context</source>
         <translation type="unfinished">Testuinguru</translation>
     </message>
@@ -6297,19 +6347,7 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished">Identitatea</translation>
     </message>
     <message>
-        <source>Stale user time</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Stale user display time in seconds</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Active</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Linked</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -6322,6 +6360,70 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Apply</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Place your positional-audio identity and inspect linked speaker positions in real time.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Coordinates use the plugin&apos;s world units. Azimuth rotates clockwise on the preview.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Azimuth in degrees</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Elevation in degrees</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Top-down position preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Your position is X %1, Z %2, facing %3 degrees. %4 linked speakers are visible.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 linked speakers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Identity and link state</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Context links users from the same game session. Identity describes the current player.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Game or world context</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Player identity</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stale user display time</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Publish position</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Make the manual positional data active</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Link to context</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Link positional audio to users with the same context</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -6365,6 +6467,161 @@ Please describe what you were doing before the crash.</source>
     </message>
 </context>
 <context>
+    <name>MediaSessionControls</name>
+    <message>
+        <source>Loading · %1%</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Playback unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hosting for %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Synchronized with host</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Playing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Paused</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Media playback controls</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Playback position</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 of %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pause</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Control synchronized playback for everyone in the session</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open externally</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the provider in your default browser</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unmute media</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mute media</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Media volume</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 percent</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1%</source>
+        <translation type="unfinished">%1%</translation>
+    </message>
+    <message>
+        <source>Adjust media volume</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current volume: %1 percent</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Exit full screen</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enter full screen</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>End session</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Leave</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation type="unfinished">Itxi</translation>
+    </message>
+    <message>
+        <source>Choose whether to close only this player or end playback for everyone</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose whether to close only this player or leave synchronized playback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Media volume · %1%</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>End this shared session?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Leave shared playback?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Closing only the player pauses playback and keeps the session available. Ending it stops the session for every participant.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Closing only the player keeps you in the session so you can reopen it from the room banner.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">Ezeztatu</translation>
+    </message>
+    <message>
+        <source>Close player only</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>End for everyone</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Leave session</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>MediaSessionWindow</name>
     <message>
         <source>Media session</source>
@@ -6403,40 +6660,32 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Pause</source>
+        <source>Loading media</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Play</source>
+        <source>%1 percent loaded</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Playback position</source>
+        <source>Contacting provider</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Seek within the current media</source>
+        <source>Loading %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Hosting</source>
+        <source>media</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Synchronized</source>
+        <source>%1% loaded</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>End</source>
+        <source>The isolated provider player is starting…</source>
         <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Leave</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Close</source>
-        <translation type="unfinished">Itxi</translation>
     </message>
 </context>
 <context>
@@ -6740,6 +6989,22 @@ Please describe what you were doing before the crash.</source>
         <source>The Qt Quick root does not expose the menu automation probe.</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>The Manual Plugin is not available in this build.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rich preview probe &apos;%1&apos; has no message &apos;%2&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The Qt Quick rich preview fixture host is unavailable.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Message &apos;%1&apos; is not part of the active rich preview probe.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>MotdPanel</name>
@@ -6767,23 +7032,19 @@ Please describe what you were doing before the crash.</source>
         <source>Server message</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Welcome hidden</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Welcome</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>NavigationRail</name>
     <message>
-        <source>ROOMS</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>PARTICIPANTS</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unmute</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mute</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -6792,6 +7053,78 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Rooms and participants</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>NAVIGATION</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>VOICE ROOMS</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>DIRECT MESSAGES</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>TEXT &amp; ACTIVITY</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Joined</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Activity</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Join</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Live</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Screen share</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Room actions for %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Room actions</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Local volume %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Participant actions for %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unmute microphone</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mute microphone</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Undeafen</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Deafen</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -6829,15 +7162,7 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Install…</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Rescan</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Check updates</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -6846,10 +7171,6 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Loaded</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unloaded</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -6874,6 +7195,94 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Unload</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Refreshing plugin information…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>1 plugin available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 plugins available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Install plugin…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Check for updates</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin operation in progress</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1%</source>
+        <translation type="unfinished">%1%</translation>
+    </message>
+    <message>
+        <source>Progress is not yet available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 percent complete</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin information could not be loaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Try again</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading installed plugins</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading installed plugins…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No plugins installed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No plugins found</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Install a Mumble plugin or rescan the configured plugin folders.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loaded plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin is not loaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Not loaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No description supplied by this plugin.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin path: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Allow this plugin to observe keyboard input</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -7191,17 +7600,468 @@ Please describe what you were doing before the crash.</source>
     </message>
 </context>
 <context>
+    <name>ProviderDetails</name>
+    <message>
+        <source>Provider details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Market snapshot</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Product details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Store details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Listing details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Vehicle details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Property details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Article details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Discussion details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Post activity</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Repository details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stream details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Weather</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Place</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Traffic</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Link digest</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Search</source>
+        <translation type="unfinished">Bilatu</translation>
+    </message>
+    <message>
+        <source>Content notice</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Checking for the latest release</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No published release found</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Exchange</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Instrument</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Range</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Updated</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Availability</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delivery</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rating</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Brand</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>SKU</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Volume</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Alcohol</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Platform</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Developer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Released</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reviews</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Recommendations</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Score</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Condition</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Location</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sale</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ends</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Listing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Year</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mileage</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fuel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Transmission</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Dealer</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Excl. VAT</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Area</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rooms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fee</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Section</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Author</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Published</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Access</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Publisher</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Forum</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Category</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Page</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Posted</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Posts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Quoted</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Thread</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Provider</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Program</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Replies</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reposts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Quotes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Likes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Views</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Bookmarks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Comments</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Media</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stars</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Forks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open issues</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Language</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>License</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Branch</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Channel</source>
+        <translation type="unfinished">Kanala</translation>
+    </message>
+    <message>
+        <source>Game</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Viewers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Playback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Verified</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Private</source>
+        <translation type="unfinished">Pribatua</translation>
+    </message>
+    <message>
+        <source>Archived</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Fork</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Premium</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Conversation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Quoted post</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Linked post</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Price trend with %1 points</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Latest release</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Checking for a release…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Prerelease · %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 assets</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 downloads</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open release</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open asset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the release asset in the default browser</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Post context</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Conversation context</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>PttToolWindow</name>
     <message>
         <source>Push to talk</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Hold to transmit</source>
+        <source>Transmitting</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Hold with the pointer or Space key to transmit</source>
+        <source>Release to stop transmitting</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hold the button or Space key while you speak</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Transmitting, release push to talk</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hold to push to talk</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hold with the pointer or Space key to transmit. Transmission stops if this window loses focus or closes.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>LIVE</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>HOLD TO TALK</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Space</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PTT is released automatically on focus loss, close, or cancel.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -7220,10 +8080,6 @@ Please describe what you were doing before the crash.</source>
     <name>QApplication</name>
     <message>
         <source>Mumble failed to restart itself. Please restart it manually.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mumble is currently connected to a server</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -7247,14 +8103,6 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Local Volume Adjustment...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Default Device</source>
-        <translation type="unfinished">Gailu Lehenetsia</translation>
-    </message>
-    <message>
-        <source>Access to the microphone was denied. Please allow Mumble to use the microphone by changing the settings in System Preferences -&gt; Security &amp; Privacy -&gt; Privacy -&gt; Microphone.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -7296,14 +8144,6 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>The support for this option is experimental only! This option works best when using built-in microphone and speaker.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Access to the microphone was denied due to system restrictions. You will not be able to use the microphone in this session.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unknown Version</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -13352,6 +14192,168 @@ Server feedback: fallback</source>
         <source>Open</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Basic</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Advanced</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hide advanced settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show advanced settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Settings pages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>content</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retrieving room permissions and user groups</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retrieving server records</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preparing content</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Saved servers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No saved servers yet</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message numerus="yes">
+        <source>%n saved server(s)</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Add server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Saved server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Connect</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add a server to get started.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Primary action</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice input</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current microphone</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Transmitting</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Waiting for input</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Listening</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Voice input level</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 percent</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Quiet %1%</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 dB · %2%</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1%</source>
+        <translation type="unfinished">%1%</translation>
+    </message>
+    <message>
+        <source>Voice %1%</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio setup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stop replay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Replay</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to load results.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Results</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message numerus="yes">
+        <source>%n result(s)</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Loading results…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No results.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>QmlShellHost</name>
@@ -13377,6 +14379,22 @@ Server feedback: fallback</source>
     </message>
     <message>
         <source>The Qt Quick window could not be captured.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown Qt Quick window &apos;%1&apos;.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The requested Qt Quick tool window is not visible.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The requested Qt Quick window is not visible.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The requested Qt Quick window has not presented its first frame yet; retry capture.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -13483,6 +14501,73 @@ Server feedback: fallback</source>
     </message>
     <message>
         <source>Expand preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reveal</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reveal sensitive preview media</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This preview is hidden by default</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview unavailable: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Media unavailable: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Media unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reveal media</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show this preview until the card is reused</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ScreenShareControls</name>
+    <message>
+        <source>Screen share controls</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resume live</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Pause view</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unmute audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Mute audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stream volume</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 percent</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stop</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -13654,30 +14739,6 @@ Server feedback: fallback</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Resume live</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Pause view</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unmute audio</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Mute audio</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Stream volume</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Stop</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Paused locally
 
 Resume returns to the live edge.</source>
@@ -13746,14 +14807,6 @@ Resume returns to the live edge.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Suppress</source>
-        <translation type="unfinished">Zigortu</translation>
-    </message>
-    <message>
-        <source>Cancel</source>
-        <translation type="unfinished">Ezeztatu</translation>
-    </message>
-    <message>
         <source>Capture</source>
         <translation type="unfinished"></translation>
     </message>
@@ -13764,6 +14817,126 @@ Resume returns to the live edge.</source>
     <message>
         <source>Remove</source>
         <translation type="unfinished">Ezabatu</translation>
+    </message>
+    <message>
+        <source>%1 assigned · %2 total</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No shortcuts configured</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add one to bind an action to a keyboard or device input.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Configured shortcuts</source>
+        <translation type="unfinished">Konfiguratutako laster-teklak</translation>
+    </message>
+    <message>
+        <source>%1 shortcut</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unassigned</source>
+        <translation type="unfinished">Esleitu gabea</translation>
+    </message>
+    <message>
+        <source>Function</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Data</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Shortcut data</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Shortcut channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No data</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current</source>
+        <translation type="unfinished">Uneko</translation>
+    </message>
+    <message>
+        <source>Shortcut</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Target</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Target type</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Channel</source>
+        <translation type="unfinished">Kanala</translation>
+    </message>
+    <message>
+        <source>Target channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Restrict to group</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Optional group</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Target group</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No users selected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown</source>
+        <translation type="unfinished">Ezezaguna</translation>
+    </message>
+    <message>
+        <source>Remove %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>User to add</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Linked channels</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Subchannels</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ignore positional audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Suppress other applications</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel capture</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -13805,10 +14978,6 @@ Resume returns to the live edge.</source>
 <context>
     <name>StonksEditor</name>
     <message>
-        <source>Portfolio overview</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Register</source>
         <translation type="unfinished"></translation>
     </message>
@@ -13821,20 +14990,8 @@ Resume returns to the live edge.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>%1. %2   %3%</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>User</source>
         <translation type="unfinished">Erabiltzailea</translation>
-    </message>
-    <message>
-        <source>No leaderboard data yet</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Tickers</source>
-        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>%1 holders</source>
@@ -13842,14 +14999,6 @@ Resume returns to the live edge.</source>
     </message>
     <message>
         <source>Pin %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>ticker</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Feed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -13862,6 +15011,310 @@ Resume returns to the live edge.</source>
     </message>
     <message>
         <source>Pinned</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Overview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Portfolio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Following</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Admin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Never</source>
+        <translation type="unfinished">Inoiz ez</translation>
+    </message>
+    <message>
+        <source>You cannot edit this portfolio.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add at least one position.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Row %1 needs a ticker symbol.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ticker %1 is listed more than once.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Row %1 needs a positive quantity and price.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Row %1 currency must match %2.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Confirm action</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Total value</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Last update</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Owner</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Snapshots</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>User %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Auto #stonks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading Stonks data</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stonks is unavailable on this server.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">Ezeztatu</translation>
+    </message>
+    <message>
+        <source>Confirm</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Portfolio history</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 saves</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save a portfolio to start the history chart.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Portfolio allocation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Portfolio positions are private.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No open positions to map.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ticker feed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unpin %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Current save %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No portfolio saves</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Currency</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Note</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Optional portfolio note</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Symbol</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Quantity</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Price</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Value</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Remove position %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ready to save</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add position</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clear portfolio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Portfolio cleared</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clear the portfolio for %1?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save portfolio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Leaderboard ranks portfolio return for the selected period.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Insufficient history</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PnL %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Need PnL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>View</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unfollow</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Follow</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No ranked PnL for this period yet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose whose portfolio updates appear in your feed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No other registered users yet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Portfolio updates for %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete portfolio update</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Delete this update for %1?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Positions are private.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No open positions.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No portfolio updates yet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manage portfolio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>View portfolio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>View updates</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Portfolio cleared by admin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Clear the selected user&apos;s portfolio?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stonks enabled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Social announcements</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Announcement text channel</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Save server settings</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
