@@ -43,11 +43,11 @@
     </message>
     <message>
         <source>Inherit</source>
-        <translation type="unfinished">Наследовать</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Inheritable</source>
-        <translation type="unfinished">Наследуемый</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Added user IDs</source>
@@ -71,7 +71,7 @@
     </message>
     <message>
         <source>Group</source>
-        <translation type="unfinished">Группа</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>User</source>
@@ -91,11 +91,11 @@
     </message>
     <message>
         <source>Allow</source>
-        <translation type="unfinished">Разрешить</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Deny</source>
-        <translation type="unfinished">Запретить</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Add rule</source>
@@ -107,6 +107,76 @@
     <message>
         <source>Operation cancelled</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message numerus="yes">
+        <source>%n item(s) completed</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>%1 succeeded, %2 failed, %3 cancelled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 succeeded, %2 failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message numerus="yes">
+        <source>%n item(s) cancelled</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <source>%n item(s) failed</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Operation failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancelling…</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>AttachmentGallery</name>
+    <message>
+        <source>Message attachments</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Image attachment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Attachment unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>AttachmentViewer</name>
+    <message>
+        <source>Image attachment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Attachment unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation type="unfinished">Закрыть</translation>
     </message>
 </context>
 <context>
@@ -508,6 +578,18 @@ Please describe what you were doing before the crash.</source>
         <source>The database &apos;%1&apos; is read-only. Mumble cannot store server settings or certificates.</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>The configured SQLite database does not exist</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to open the SQLite database: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to open or create the SQLite database</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>GlobalShortcutEngine</name>
@@ -771,7 +853,35 @@ Please describe what you were doing before the crash.</source>
 <context>
     <name>Main</name>
     <message>
+        <source>Image attachment</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>The chat timeline is not scrollable.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rooms and participants</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No room actions available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No text-room actions available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No participant actions available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load older messages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No conversation actions available</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -791,7 +901,59 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>%1 of %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 succeeded · %2 failed · %3 cancelled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancelled: </source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed: </source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hide item results</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show item results (%1)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Succeeded: </source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Previous</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Page %1 of %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Next</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Completed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Partially completed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancelled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancelling…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -799,7 +961,19 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Open rooms and participants</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Application menu</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading older messages…</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Load messages sent before the currently visible history</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -831,15 +1005,19 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Link preview</source>
+        <source>%1 reaction, %2</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Open</source>
+        <source>Connect to load rooms and messages</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Play</source>
+        <source>No messages in %1 yet.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select a room to start chatting</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -867,55 +1045,7 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Loading older messages…</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Load older messages</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Load messages sent before the currently visible history</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Connect to load rooms and messages</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>No messages in %1 yet.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Select a room to start chatting</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Message composer</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Rooms and participants</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Open rooms and participants</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>No room actions available</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>No text-room actions available</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>No participant actions available</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>No conversation actions available</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -959,11 +1089,6 @@ Please describe what you were doing before the crash.</source>
         <source>Join Channel</source>
         <comment>Global Shortcut</comment>
         <translation>Присоединиться к каналу</translation>
-    </message>
-    <message>
-        <source>Toggle Minimal</source>
-        <comment>Global Shortcut</comment>
-        <translation>Включить Минимальный вид</translation>
     </message>
     <message>
         <source>Volume Up (+10%)</source>
@@ -1563,10 +1688,6 @@ Please describe what you were doing before the crash.</source>
         <translation>Пропускать проверку версии в режиме отладки.</translation>
     </message>
     <message>
-        <source>Hide Frame</source>
-        <translation>Скрыть рамку</translation>
-    </message>
-    <message>
         <source>Server sync protocol violation. No user profile received.</source>
         <translation>Нарушение протокола синхронизации сервера. Профиль пользователя не получен.</translation>
     </message>
@@ -2097,18 +2218,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished">Плагины</translation>
     </message>
     <message>
-        <source>Plugin folders rescanned.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Plugin rescan failed.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Downloading plugin update</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Quit</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2257,10 +2366,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Minimal View</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Certificate...</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2393,40 +2498,12 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Position preview</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Manual placement</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Place your positional-audio identity manually.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Position</source>
-        <translation type="unfinished">Позиция</translation>
-    </message>
-    <message>
         <source>X</source>
         <translation type="unfinished">X</translation>
-    </message>
-    <message>
-        <source>Y</source>
-        <translation type="unfinished">Y</translation>
-    </message>
-    <message>
-        <source>Z</source>
-        <translation type="unfinished">Z</translation>
-    </message>
-    <message>
-        <source>Azimuth</source>
-        <translation type="unfinished">Азимут</translation>
-    </message>
-    <message>
-        <source>Elevation</source>
-        <translation type="unfinished">Угол места</translation>
     </message>
     <message>
         <source>Identity</source>
@@ -2435,18 +2512,6 @@ Please describe what you were doing before the crash.</source>
     <message>
         <source>Context</source>
         <translation type="unfinished">Контекст</translation>
-    </message>
-    <message>
-        <source>Stale user display time</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Active</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Linked</source>
-        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Reset</source>
@@ -4307,26 +4372,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Selected updates are downloading and will be installed in the background.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>You can close this window while the update continues. Results are written to the client log.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Cancel updates</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Plugin updates were cancelled.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Position updated.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Choose notification sound</source>
         <translation type="unfinished"></translation>
     </message>
@@ -5619,66 +5664,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Loading conversation</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Loading %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Fetching recent messages and read state</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Nothing here yet</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Combined activity only shows conversations you can currently read.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Unread state stays with each room</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>No accessible messages yet.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>No messages in %1 yet.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Start the first message below</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Loading older messages...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Load older messages</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>New since last read</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>System event</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Open room</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Reply</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>History is not available for this conversation</source>
         <translation type="unfinished"></translation>
     </message>
@@ -6066,19 +6051,319 @@ Please describe what you were doing before the crash.</source>
         <source>Automation-only state; no message will be sent.</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Scanning plugins</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Discovering and validating installed plugins</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Checking plugin updates</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Contacting the plugin update service</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Downloading and applying selected updates</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Starting the selected plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unloading plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stopping the selected plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin operation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Working in the background</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Media playback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Join a voice room before using Watch Together.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This server does not support Watch Together.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Watch Together</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Compact interface</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Toggle Compact Interface</source>
+        <comment>Global Shortcut</comment>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loaded %1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Another plugin installation is already in progress.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin failed while its package was being inspected</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The selected plugin is already installed at that location</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A plugin appeared at the destination after inspection; review the replacement again</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The installed plugin changed after confirmation; review the replacement again</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin installation cancelled, but the previous plugin could not be reloaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The previous plugin file was restored but could not be reloaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin installation cancellation could not restore the previous plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin installation cancelled; the previous plugin was restored</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin installation cancelled; the previous file was restored but could not be reloaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin failed to load and rollback failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin was installed and is running, but its backup could not be removed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin failed during installation; the previous plugin was restored (%1)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin failed during installation and rollback could not be confirmed (%1)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin failed during installation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin worker is unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Selected updates are running in the background.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Another plugin operation is still finishing. Try again in a moment.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin configuration dialog failed to open.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin About dialog failed to open.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The preview cache is already being cleared.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Settings saved. Plugin changes continue in the background.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Settings applied. Plugin changes continue in the background.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The image exceeds the display limits.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Finding shareable app windows...</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>ManualPluginWindow</name>
+    <message>
+        <source>Manual placement</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Position updated</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Position reset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manual positional audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Place your positional-audio identity and inspect linked speaker positions.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Position and orientation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>X</source>
+        <translation type="unfinished">X</translation>
+    </message>
+    <message>
+        <source>X position</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Y</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Y position</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Z</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Z position</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Azimuth</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Elevation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Linked speakers: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Context</source>
+        <translation type="unfinished">Контекст</translation>
+    </message>
+    <message>
+        <source>Identity</source>
+        <translation type="unfinished">Идентификатор</translation>
+    </message>
+    <message>
+        <source>Stale user time</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stale user display time in seconds</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Active</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Linked</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation type="unfinished">Закрыть</translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>MediaSessionBackend</name>
-    <message>
-        <source>This media provider is not supported.</source>
-        <translation type="unfinished"></translation>
-    </message>
     <message>
         <source>The media embed URL is not allowed for this provider.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Media playback failed.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Media playback requires a valid HTTPS URL.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Direct audio requires a bounded HTTPS or base64 media URL with a supported MIME type.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Direct video requires a bounded HTTPS or base64 media URL with a supported MIME type.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Leave or end the current watch-together session before opening other media.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A direct audio source cannot have a secondary audio track.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Leave or end the current watch-together session first.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This provider does not expose synchronized playback controls. Open it in your browser instead.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -6089,7 +6374,35 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Media provider playback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>The media renderer stopped unexpectedly.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This provider did not expose playback controls. Open it externally instead.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The direct-media audio renderer stopped unexpectedly.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Media playback failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This provider cannot be synchronized in-app. Open it in your browser instead.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Retry</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open externally</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -6098,6 +6411,30 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Play</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Playback position</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Seek within the current media</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hosting</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Synchronized</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>End</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Leave</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -6113,7 +6450,7 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Log</source>
-        <translation type="unfinished">Лог</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Notify</source>
@@ -6121,7 +6458,7 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Highlight</source>
-        <translation type="unfinished">Выделение</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>TTS</source>
@@ -6462,6 +6799,33 @@ Please describe what you were doing before the crash.</source>
     </message>
 </context>
 <context>
+    <name>PinnedPreviewNetworkReply</name>
+    <message>
+        <source>Preview request cancelled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unsafe preview target</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unsafe preview address</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview host lookup failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview exceeded size limit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unsafe preview redirect</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>PluginEditor</name>
     <message>
         <source>Installed plugins</source>
@@ -6513,7 +6877,7 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Unload</source>
-        <translation type="unfinished">Выгрузить</translation>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -6531,40 +6895,184 @@ Please describe what you were doing before the crash.</source>
         <translation>Плагин &quot;%1&quot; обнаружил постоянную ошибку при сборе позиционных данных</translation>
     </message>
     <message>
-        <source>Failed at loading manual plugin: %1</source>
-        <translation>Ошибка при загрузке плагина вручную: %1</translation>
-    </message>
-    <message>
-        <source>Non-plugin found in plugin directory: &quot;%1&quot; (%2)</source>
-        <translation>В каталоге плагинов обнаружен неплагин: «%1» (%2)</translation>
-    </message>
-    <message>
-        <source>Unable to load plugin candidate %1 (%2)</source>
+        <source>Unable to reload plugin %1 (%2)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Unable to reload plugin %1 (%2)</source>
+        <source>Plugin shutdown failed: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin shutdown failed with an unknown exception</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unknown</source>
+        <translation type="unfinished">Неизвестная</translation>
+    </message>
+    <message>
+        <source>Unknown plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin metadata could not be read completely for %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Positional plugin initialization failed: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Positional plugin initialization failed with an unknown exception</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin rescan cancelled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A previous plugin could not be restored after rescan rollback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A plugin failed during rescan lifecycle processing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin transaction recovery failed: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin discovered</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin failed during validation: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin failed during validation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Manual plugin discovered</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The manual plugin could not be initialized: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The manual plugin could not be initialized</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin shutdown during rescan failed: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin shutdown during rescan failed with an unknown exception</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin was discovered but failed to load</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin failed during initialization: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin failed during initialization</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to reload plugin %1 because its ID is already active</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to reload plugin %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The positional plugin failed while releasing a lost link</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin is no longer installed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin failed to load</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin loaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin unloaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin failed during the lifecycle operation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin worker is unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin settings applied</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin failed to load with the new settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin failed while applying settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>unknown exception</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin shutdown failed while removing %1: %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin failed while disabling a capability</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin capability disabled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin did not disable every requested capability</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin configuration dialog failed: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin configuration dialog failed with an unknown exception</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin About dialog failed: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin About dialog failed with an unknown exception</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
     <name>PluginUpdater</name>
-    <message>
-        <source>Unable to download plugin update for &quot;%1&quot; from &quot;%2&quot; (%3)</source>
-        <translation>Не удалось загрузить обновление плагина для &quot;%1&quot; из &quot;%2&quot; (%3)</translation>
-    </message>
-    <message>
-        <source>Update for plugin &quot;%1&quot; failed due to too many redirects</source>
-        <translation>Обновление для плагина &quot;%1&quot; не удалось из-за слишком большого количества переадресаций</translation>
-    </message>
-    <message>
-        <source>Unable to download plugin update for &quot;%1&quot; from &quot;%2&quot; (HTTP status code %3)</source>
-        <translation>Не удалось загрузить обновление плагина для &quot;%1&quot; из &quot;%2&quot; (код статуса HTTP %3)</translation>
-    </message>
-    <message>
-        <source>Successfully updated plugin &quot;%1&quot;</source>
-        <translation>Плагин &quot;%1&quot; успешно обновлён</translation>
-    </message>
     <message>
         <source>Update cancelled</source>
         <translation type="unfinished"></translation>
@@ -6597,6 +7105,86 @@ Please describe what you were doing before the crash.</source>
         <source>The updated plugin failed to load; the previous file was restored</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Unable to start the download</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No update available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin set changed; run the update check again</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin returned an update URL without a file name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update available</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin failed while checking for updates</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update check cancelled</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin worker is unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No checked update is available for this plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The update package does not replace the plugin that was checked</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin failed during update lifecycle processing</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The installed plugin changed after the update check; check for updates again</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update cancelled, but the previous plugin could not be reloaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The previous plugin file was restored but could not be reloaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update cancellation could not restore the previous plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update cancelled; the previous plugin was restored</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update cancelled; the previous file was restored but could not be reloaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The updated plugin failed to load and rollback failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin was updated and is running, but its backup could not be removed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Successfully updated plugin</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>PortAudioSystem</name>
@@ -6606,13 +7194,17 @@ Please describe what you were doing before the crash.</source>
     </message>
 </context>
 <context>
-    <name>PttTool</name>
+    <name>PttToolWindow</name>
     <message>
         <source>Push to talk</source>
-        <translation type="unfinished">Активация по кнопке</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Hold to transmit</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hold with the pointer or Space key to transmit</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -8655,14 +9247,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Expose context-menu actions through the app menu for keyboard and accessibility workflows.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show the transmit-mode selector in the main window controls.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Hide empty rooms when a room-list filter is active.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9197,26 +9781,6 @@ Please describe what you were doing before the crash.</source>
     <message>
         <source>Always</source>
         <translation type="unfinished">Всегда</translation>
-    </message>
-    <message>
-        <source>Keep Mumble above other windows in every layout.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>In minimal view</source>
-        <translation type="unfinished">В минимальном виде</translation>
-    </message>
-    <message>
-        <source>Keep Mumble on top only while the minimal layout is active.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>In normal view</source>
-        <translation type="unfinished">В нормальном виде</translation>
-    </message>
-    <message>
-        <source>Keep Mumble on top only outside the minimal layout.</source>
-        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Always ask</source>
@@ -9755,10 +10319,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Show transmit mode control</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Room browser and presence</source>
         <translation type="unfinished"></translation>
     </message>
@@ -9769,10 +10329,6 @@ Please describe what you were doing before the crash.</source>
     <message>
         <source>Show nicknames only</source>
         <translation type="unfinished">Показывать только ники</translation>
-    </message>
-    <message>
-        <source>Expose context menus in the app menu</source>
-        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Filter hides empty rooms</source>
@@ -12615,10 +13171,6 @@ Server feedback: fallback</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Unable to replace unverified plugin while restoring %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Unable to restore abandoned backup %1</source>
         <translation type="unfinished"></translation>
     </message>
@@ -12702,11 +13254,79 @@ Server feedback: fallback</source>
         <source>Unable to start Modern UI automation server on 127.0.0.1:%1: %2</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Plugin ABI step exceeded the UI budget: %1/%2 plugin %3 took %4 ms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin install ABI step exceeded the UI budget: %1/%2 took %3 ms</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Keep Mumble above other windows.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The checked plugin update destination is invalid.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to inspect plugin metadata: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to inspect plugin metadata.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to fingerprint the installed plugin before replacement.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin update URL is invalid</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin updates may only use HTTPS</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin update URLs may not contain embedded credentials</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin update refused a redirect to an insecure URL</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Plugin updates require HTTPS</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The plugin update refused an insecure redirect chain</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Installation was cancelled, but the previous plugin could not be restored</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Installation was cancelled, but rollback failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ambiguous plugin transaction for %1 was left untouched to protect the installed file</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>QmlDialog</name>
     <message>
         <source>Close dialog</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Settings page</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -12735,10 +13355,6 @@ Server feedback: fallback</source>
     </message>
     <message>
         <source>Open</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Settings page</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -12770,6 +13386,112 @@ Server feedback: fallback</source>
     </message>
 </context>
 <context>
+    <name>RichMessageBody</name>
+    <message>
+        <source>Press Enter to open the selected link. Use Left and Right to choose a link.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Press Enter to open the link.</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
+    <name>RichPreviewCard</name>
+    <message>
+        <source>Link preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview loading</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open preview image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play direct media</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview unavailable. You can still open the original link.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open image</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open media</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play video</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Previous media</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Next media</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 of %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Watch together</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Session active</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Start a synchronized media session</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>End or leave the active media session first</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Less</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>More</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Collapse preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Expand preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>ScreenShareEditor</name>
     <message>
         <source>Choose what to share</source>
@@ -12777,6 +13499,10 @@ Server feedback: fallback</source>
     </message>
     <message>
         <source>Share source</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Finding sources…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -12993,6 +13719,18 @@ Resume returns to the live edge.</source>
         <source>Connection timed out</source>
         <translation>Время соединения вышло</translation>
     </message>
+    <message>
+        <source>TLS support is unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The configured TLS cipher list is invalid or contains no available ciphers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unable to initialize the connection database: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>ShortcutEditor</name>
@@ -13026,7 +13764,7 @@ Resume returns to the live edge.</source>
     </message>
     <message>
         <source>Clear</source>
-        <translation type="unfinished">Очистить</translation>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Remove</source>
@@ -13188,137 +13926,12 @@ Resume returns to the live edge.</source>
 <context>
     <name>UserModel</name>
     <message>
-        <source>This is a user connected to the server. The icon to the left of the user indicates whether or not they are talking:</source>
-        <translation>Пользователь, подключённый к серверу. Иконка слева от пользователя показывает говорит он или нет:</translation>
-    </message>
-    <message>
-        <source>Talking to your channel.</source>
-        <translation>Говорит в ваш канал.</translation>
-    </message>
-    <message>
-        <source>Shouting directly to your channel.</source>
-        <oldsource>Whispering directly to your channel.</oldsource>
-        <translation>Кричит напрямую в ваш канал.</translation>
-    </message>
-    <message>
-        <source>Whispering directly to you.</source>
-        <translation>Шепчет лично вам.</translation>
-    </message>
-    <message>
-        <source>Not talking.</source>
-        <translation>Молчит.</translation>
-    </message>
-    <message>
-        <source>This is a channel on the server. The icon indicates the state of the channel:</source>
-        <translation>Канал на сервере. Иконка показывает состояние канала:</translation>
-    </message>
-    <message>
-        <source>Your current channel.</source>
-        <translation>Ваш текущий канал.</translation>
-    </message>
-    <message>
-        <source>A channel that is linked with your channel. Linked channels can talk to each other.</source>
-        <translation>Канал, который связан с вашим каналом. Связанные каналы могут говорить друг с другом.</translation>
-    </message>
-    <message>
-        <source>A channel on the server that you are not linked to.</source>
-        <translation>Канал на сервере, с которым не связан ваш канал.</translation>
-    </message>
-    <message>
-        <source>This shows the flags the user has on the server, if any:</source>
-        <translation>Флаги пользователя на сервере, если есть:</translation>
-    </message>
-    <message>
-        <source>On your friend list</source>
-        <translation>В вашем списке друзей</translation>
-    </message>
-    <message>
-        <source>Authenticated user</source>
-        <translation>Зарегистрированный пользователь</translation>
-    </message>
-    <message>
-        <source>Muted (manually muted by self)</source>
-        <translation>Микрофон выключен (пользователем)</translation>
-    </message>
-    <message>
-        <source>Muted (manually muted by admin)</source>
-        <translation>Микрофон выключен (администратором)</translation>
-    </message>
-    <message>
-        <source>Muted (not allowed to speak in current channel)</source>
-        <translation>Микрофон выключен (не имеет права говорить в текущем канале)</translation>
-    </message>
-    <message>
-        <source>Muted (muted by you, only on your machine)</source>
-        <translation>Микрофон выключен (вами, только для вашего компьютера)</translation>
-    </message>
-    <message>
-        <source>Muted (push-to-mute)</source>
-        <translation>Микрофон выключен (удержанием кнопки)</translation>
-    </message>
-    <message>
-        <source>Deafened (by self)</source>
-        <translation>Звук выключен (пользователем)</translation>
-    </message>
-    <message>
-        <source>Deafened (by admin)</source>
-        <translation>Звук выключен (администратором)</translation>
-    </message>
-    <message>
-        <source>User has a new comment set (click to show)</source>
-        <translation>У пользователя новый комментарий (нажмите для просмотра)</translation>
-    </message>
-    <message>
-        <source>User has a comment set, which you&apos;ve already seen. (click to show)</source>
-        <translation>У пользователя комментарий, который вы уже читали (нажмите для просмотра)</translation>
-    </message>
-    <message>
-        <source>Ignoring Text Messages</source>
-        <translation>Игнорируются текстовые сообщения</translation>
-    </message>
-    <message>
-        <source>This shows the flags the channel has, if any:</source>
-        <translation>Флаги канала, если есть:</translation>
-    </message>
-    <message>
-        <source>Channel has a new comment set (click to show)</source>
-        <translation>У канала новый комментарий (нажмите для просмотра)</translation>
-    </message>
-    <message>
-        <source>Channel has a comment set, which you&apos;ve already seen. (click to show)</source>
-        <translation>У канала комментарий, который вы уже читали (нажмите для просмотра)</translation>
-    </message>
-    <message>
-        <source>Channel will be hidden when filtering is enabled</source>
-        <translation>Канал будет скрыт при включённом фильтре</translation>
-    </message>
-    <message>
         <source>Name</source>
         <translation>Имя</translation>
     </message>
     <message>
         <source>Flags</source>
         <translation>Флаги</translation>
-    </message>
-    <message>
-        <source>Talking while being muted on your end</source>
-        <translation>Говорить, когда на вашем конце отключен звук</translation>
-    </message>
-    <message>
-        <source>This is a channel listener. The corresponding user hears everything you say in this channel.</source>
-        <translation>Это слушатель канала. Соответствующий пользователь слышит все, что вы говорите на этом канале.</translation>
-    </message>
-    <message>
-        <source>Channel has access restrictions so that you can&apos;t enter it</source>
-        <translation>Канал имеет ограничения доступа, так что вы не можете войти в него</translation>
-    </message>
-    <message>
-        <source>Channel has access restrictions but you can enter nonetheless</source>
-        <translation>Канал имеет ограничения доступа, но вы все равно можете войти</translation>
-    </message>
-    <message>
-        <source>Channel will be pinned when filtering is enabled</source>
-        <translation>Канал будет закреплен, если фильтрация включена</translation>
     </message>
     <message>
         <source>Channel Listener</source>
@@ -13487,6 +14100,65 @@ Resume returns to the live edge.</source>
     <message>
         <source>Default Device</source>
         <translation>Устройство по умолчанию</translation>
+    </message>
+</context>
+<context>
+    <name>WatchTogetherBanner</name>
+    <message>
+        <source>Watch Together: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>shared media</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Session %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Shared media session</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You are hosting · %1 participant(s)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Watching together · %1 participant(s)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Available in this voice room · %1 participant(s)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Join</source>
+        <translation type="unfinished">Присоединиться</translation>
+    </message>
+    <message>
+        <source>Open the isolated media player and join synchronized playback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open player</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Transfer host</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Transfer to %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Leave</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>End</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 </TS>
