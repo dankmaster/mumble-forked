@@ -11368,11 +11368,25 @@ void MainWindow::applyShellLayout() {
 					[this](const QString &scopeToken, const QString &actionID) {
 						handleModernShellScopeAction(scopeToken, actionID);
 					});
+			connect(commands, &UiCommandController::scopeActionValueRequested, this,
+					[this](const QString &scopeToken, const QString &actionID, const int value,
+						   const bool finalValue) {
+						handleModernShellScopeActionValueChanged(scopeToken, actionID, value, finalValue);
+					});
 			connect(commands, &UiCommandController::participantActionRequested, this,
 					[this](const QString &sessionID, const QString &actionID) {
 						bool validSession = false;
 						const qulonglong session = sessionID.toULongLong(&validSession);
 						if (validSession) handleModernShellParticipantAction(session, actionID);
+					});
+			connect(commands, &UiCommandController::participantActionValueRequested, this,
+					[this](const QString &sessionID, const QString &actionID, const int value,
+						   const bool finalValue) {
+						bool validSession = false;
+						const qulonglong session = sessionID.toULongLong(&validSession);
+						if (validSession) {
+							handleModernShellParticipantActionValueChanged(session, actionID, value, finalValue);
+						}
 					});
 			connect(commands, &UiCommandController::messageSendRequested, this,
 					[this](const QString &message) { sendModernShellMessage(message); });
@@ -11482,6 +11496,17 @@ void MainWindow::applyShellLayout() {
 					action->trigger();
 				}
 			});
+			connect(commands, &UiCommandController::appActionRequested, this,
+					[this](const QString &actionID, const QVariantMap &payload) {
+						if (handleModernShellAppActionPayload(actionID, payload)
+							|| handleModernShellAppAction(actionID)) {
+							return;
+						}
+						if (QAction *action = m_clientActionRegistry->action(actionID);
+							action && action->isEnabled()) {
+							action->trigger();
+						}
+					});
 			connect(commands, &UiCommandController::selfMuteToggleRequested, qaAudioMute, &QAction::trigger);
 			connect(commands, &UiCommandController::selfDeafToggleRequested, qaAudioDeaf, &QAction::trigger);
 			connect(commands, &UiCommandController::pttStateRequested, this,
@@ -20609,6 +20634,12 @@ void MainWindow::publishQmlChatMessage(const MumbleProto::ChatMessage &message) 
 void MainWindow::publishQmlActiveScopeState() {
 	const bool qmlActive = m_qmlShellHost && m_qmlShellHost->window();
 	if (!qmlActive) return;
+	if (!m_modernMessageDeliveryProbeMessages.isEmpty()) {
+		// Controller-only automation scopes are intentionally not present in RoomModel. Rebuild the complete
+		// typed state instead of replacing them with the current live room from an incidental publish.
+		scheduleQmlShellStateSyncImmediate();
+		return;
+	}
 
 	m_qmlShellHost->activeScopeController()->applyState(
 		buildQmlActiveScopeState(currentPersistentChatTarget()));
@@ -20741,7 +20772,7 @@ QVariantMap MainWindow::buildModernShellDirectMessageConversationState(
 						 && canSendToPersistentChatTarget(target, false);
 
 	state.insert(QStringLiteral("token"),
-				 QStringLiteral("dm:%1").arg(static_cast< qulonglong >(conversation.peerSession)));
+				 modernShellScopeToken(LocalDirectMessageScope, conversation.peerSession));
 	state.insert(QStringLiteral("session"), static_cast< qulonglong >(conversation.peerSession));
 	state.insert(QStringLiteral("peerSession"), static_cast< qulonglong >(conversation.peerSession));
 	state.insert(QStringLiteral("label"), conversationLabel);
@@ -22199,6 +22230,15 @@ bool MainWindow::handleModernShellAppAction(const QString &actionId) {
 	} else if (actionId == QLatin1String("server.connect")) {
 		openModernConnectDialog();
 		return true;
+	} else if (actionId == QLatin1String("server.disconnect")) {
+		const bool connected = Global::get().uiSession != 0 && Global::get().sh
+			&& Global::get().sh->isConnected();
+		if (connected) {
+			openModernDisconnectDialog();
+		} else {
+			disconnectFromServer();
+		}
+		return true;
 	} else if (actionId == QLatin1String("configure.settings")) {
 		openModernSettingsDialog();
 		return true;
@@ -22674,6 +22714,17 @@ bool MainWindow::handleModernShellAppActionPayload(const QString &actionId, cons
 		}
 		scheduleQmlRoomStateUpdate();
 		return true;
+	}
+
+	// Expanding a changed welcome message also acknowledges the exact content
+	// version while the non-payload handler below persists the expanded state.
+	if (normalizedActionID == QLatin1String("motd.show")) {
+		const QString signature = motdSignatureFromPayload();
+		if (!signature.isEmpty() && Global::get().s.qsModernShellMotdLastSeenSignature != signature) {
+			Global::get().s.qsModernShellMotdLastSeenSignature = signature;
+			Global::get().s.save();
+		}
+		return false;
 	}
 
 	if (normalizedActionID == QLatin1String("self.setComment")) {
@@ -23455,6 +23506,11 @@ void MainWindow::setPersistentChatWelcomeText(const QString &message) {
 }
 
 void MainWindow::updatePersistentChatWelcome() {
+	if (m_qmlShellHost) {
+		ClientSessionController *session = m_qmlShellHost->sessionController();
+		session->setMotdHtml(persistentChatContentHtml(m_persistentChatWelcomeText));
+		session->setMotdSummary(persistentChatPlainTextSummary(m_persistentChatWelcomeText));
+	}
 	publishQmlActiveScopeState();
 }
 
@@ -23737,6 +23793,7 @@ void MainWindow::applyQmlRoomState(const QVariantMap &state) {
 	if (app.isEmpty()) return;
 	applyQmlDirectMessagesState(app.value(QStringLiteral("directMessages")).toMap());
 	ClientSessionController *session = m_qmlShellHost->sessionController();
+	session->applyState(app);
 	const bool connected = Global::get().uiSession != 0 && Global::get().sh && Global::get().sh->isRunning();
 	session->setConnected(connected);
 	if (connected) {
@@ -23749,14 +23806,6 @@ void MainWindow::applyQmlRoomState(const QVariantMap &state) {
 		}
 		if (serverName.isEmpty()) serverName = Global::get().s.qsLastServer.trimmed();
 		if (!serverName.isEmpty()) session->setServerName(serverName);
-	}
-	session->setSelfName(app.value(QStringLiteral("selfName"), session->selfName()).toString());
-	session->setConnectionLabel(
-		app.value(QStringLiteral("selfStatusLabel"), session->connectionLabel()).toString());
-	session->setSelfMuted(app.value(QStringLiteral("selfMuted"), session->selfMuted()).toBool());
-	session->setSelfDeafened(app.value(QStringLiteral("selfDeafened"), session->selfDeafened()).toBool());
-	if (app.contains(QStringLiteral("updateBanner"))) {
-		session->setUpdateBanner(app.value(QStringLiteral("updateBanner")).toMap());
 	}
 }
 
@@ -23804,9 +23853,9 @@ void MainWindow::syncQmlShellState() {
 	ClientUser *selfUser = ClientUser::get(Global::get().uiSession);
 	ClientSessionController *session = m_qmlShellHost->sessionController();
 	session->setServerName(connected ? serverName : tr("Mumble"));
-	session->setConnectionLabel(!connected ? tr("Offline")
-											: (Global::get().s.bDeaf ? tr("Deafened")
-																		 : (Global::get().s.bMute ? tr("Muted") : tr("Online"))));
+		session->setSelfStatusLabel(!connected ? tr("Offline")
+											  : (Global::get().s.bDeaf ? tr("Deafened")
+																	: (Global::get().s.bMute ? tr("Muted") : tr("Online"))));
 	session->setSelfName(selfUser ? selfUser->qsName : (!username.trimmed().isEmpty() ? username : tr("You")));
 	session->setConnected(connected);
 	session->setSelfMuted(Global::get().s.bMute);
@@ -23817,8 +23866,31 @@ void MainWindow::syncQmlShellState() {
 
 	const PersistentChatTarget target = currentPersistentChatTarget();
 	const QVariantMap roomState = buildQmlRoomState();
-	const QVariantMap activeScopeState = buildQmlActiveScopeState(target);
-	m_qmlShellHost->activeScopeController()->applyState(activeScopeState);
+	QVariantMap activeScopeState = buildQmlActiveScopeState(target);
+	if (!m_modernMessageDeliveryProbeMessages.isEmpty()) {
+		activeScopeState = {
+			{ QStringLiteral("kindLabel"), tr("Delivery probe") },
+			{ QStringLiteral("label"), QStringLiteral("#delivery") },
+			{ QStringLiteral("description"), tr("Seeded message delivery state for mockup review.") },
+			{ QStringLiteral("scopeToken"), QStringLiteral("automation:message-delivery") },
+			{ QStringLiteral("canSend"), false },
+			{ QStringLiteral("canLoadOlder"), false },
+			{ QStringLiteral("canMarkRead"), false },
+			{ QStringLiteral("canReply"), false },
+			{ QStringLiteral("canReact"), false },
+			{ QStringLiteral("canDeleteMessages"), false },
+			{ QStringLiteral("composerPlaceholder"), tr("Delivery probe") },
+			{ QStringLiteral("composerHint"), tr("Automation-only state; no message will be sent.") },
+			{ QStringLiteral("canAttachImages"), false },
+			{ QStringLiteral("loading"), false },
+			{ QStringLiteral("loadingState"), QString() },
+			{ QStringLiteral("screenShare"),
+			  QVariantMap { { QStringLiteral("visible"), false },
+							{ QStringLiteral("available"), false },
+							{ QStringLiteral("mode"), QStringLiteral("idle") },
+							{ QStringLiteral("overflowActions"), QVariantList() } } }
+		};
+	}
 
 	QmlSelectionState *selection = qmlSelectionState();
 	const QString scopeToken = activeScopeState.value(QStringLiteral("scopeToken"),
@@ -23831,11 +23903,14 @@ void MainWindow::syncQmlShellState() {
 	applyQmlRoomState(roomState);
 	// The typed selection validates IDs against the room/participant models. Populate those models before
 	// publishing a newly connected scope so a valid bootstrap selection is not rejected as unknown.
-	if (selection) {
+	if (selection && m_modernMessageDeliveryProbeMessages.isEmpty()) {
 		selection->applySelection(scopeToken, hasScope ? scopeValue : -1,
 			hasScope ? QVariant::fromValue(scopeID) : QVariant(),
 			selectedUser, selectedVoiceChannel);
 	}
+	// Both applyQmlRoomState and selection validation can refresh the live scope. Re-apply the authoritative
+	// typed state afterwards so controller-only timelines retain their stable header and scope token.
+	m_qmlShellHost->activeScopeController()->applyState(activeScopeState);
 
 	QVariantList messages;
 	if (!m_modernRichPreviewProbeMessages.isEmpty()) {

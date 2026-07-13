@@ -16,6 +16,30 @@ namespace {
 		return !object->property(QmlVisualFixtureMutation::OverrideProperty).toBool()
 			|| object->property(QmlVisualFixtureMutation::WriteProperty).toBool();
 	}
+
+	QString motdContentSignature(const QString &value) {
+		const QString text = value.trimmed();
+		if (text.isEmpty()) return {};
+
+		quint32 hash = 2166136261u;
+		for (const QChar character : text) {
+			hash ^= static_cast< quint32 >(character.unicode());
+			hash *= 16777619u;
+		}
+		return QStringLiteral("v1:%1:%2").arg(text.length()).arg(QString::number(hash, 16));
+	}
+
+	QVariantMap motdAction(const QString &id, const QString &label, const QString &signature,
+						 const QString &tone = QString()) {
+		QVariantMap action { { QStringLiteral("id"), id }, { QStringLiteral("label"), label },
+						 { QStringLiteral("enabled"), true } };
+		if (!tone.isEmpty()) action.insert(QStringLiteral("tone"), tone);
+		if (!signature.isEmpty()) {
+			action.insert(QStringLiteral("payload"),
+						  QVariantMap { { QStringLiteral("signature"), signature } });
+		}
+		return action;
+	}
 }
 
 ClientSessionController::ClientSessionController(QObject *parent) : QObject(parent) {
@@ -23,6 +47,13 @@ ClientSessionController::ClientSessionController(QObject *parent) : QObject(pare
 
 QString ClientSessionController::serverName() const { return m_serverName; }
 QString ClientSessionController::connectionLabel() const { return m_connectionLabel; }
+QString ClientSessionController::selfStatusLabel() const { return m_selfStatusLabel; }
+QString ClientSessionController::connectionState() const { return m_connectionState; }
+QString ClientSessionController::connectionTone() const { return m_connectionTone; }
+QString ClientSessionController::connectionDetail() const { return m_connectionDetail; }
+int ClientSessionController::connectionRetryRemainingMs() const { return m_connectionRetryRemainingMs; }
+bool ClientSessionController::canConnect() const { return m_canConnect; }
+bool ClientSessionController::canCancel() const { return m_canCancel; }
 QString ClientSessionController::selfName() const { return m_selfName; }
 bool ClientSessionController::connected() const { return m_connected; }
 bool ClientSessionController::selfMuted() const { return m_selfMuted; }
@@ -30,6 +61,14 @@ bool ClientSessionController::selfDeafened() const { return m_selfDeafened; }
 QVariantMap ClientSessionController::updateBanner() const { return m_updateBanner; }
 QString ClientSessionController::motdHtml() const { return m_motdHtml; }
 QString ClientSessionController::motdSummary() const { return m_motdSummary; }
+bool ClientSessionController::hasMotd() const { return m_hasMotd; }
+bool ClientSessionController::motdExpanded() const { return m_motdExpanded; }
+bool ClientSessionController::motdDismissed() const { return m_motdDismissed; }
+QString ClientSessionController::motdSignature() const { return m_motdSignature; }
+QString ClientSessionController::motdDismissedSignature() const { return m_motdDismissedSignature; }
+QString ClientSessionController::motdLastSeenSignature() const { return m_motdLastSeenSignature; }
+bool ClientSessionController::motdChanged() const { return m_motdChanged; }
+QVariantList ClientSessionController::motdActions() const { return m_motdActions; }
 
 #define SET_VALUE(member, signalName) \
 	if (!acceptsFrontendStateMutation(this)) { \
@@ -45,13 +84,147 @@ void ClientSessionController::setServerName(const QString &value) { SET_VALUE(m_
 void ClientSessionController::setConnectionLabel(const QString &value) {
 	SET_VALUE(m_connectionLabel, connectionLabelChanged);
 }
+void ClientSessionController::setSelfStatusLabel(const QString &value) {
+	SET_VALUE(m_selfStatusLabel, selfStatusLabelChanged);
+}
+void ClientSessionController::setConnectionState(const QString &value) {
+	const QString normalized = value.trimmed().toLower();
+	const QString accepted = normalized.isEmpty() ? QStringLiteral("disconnected") : normalized;
+	if (!acceptsFrontendStateMutation(this) || m_connectionState == accepted) return;
+	m_connectionState = accepted;
+	emit connectionStateChanged();
+}
+void ClientSessionController::setConnectionTone(const QString &value) {
+	const QString normalized = value.trimmed().toLower();
+	if (!acceptsFrontendStateMutation(this) || m_connectionTone == normalized) return;
+	m_connectionTone = normalized;
+	emit connectionToneChanged();
+}
+void ClientSessionController::setConnectionDetail(const QString &value) {
+	SET_VALUE(m_connectionDetail, connectionDetailChanged);
+}
+void ClientSessionController::setConnectionRetryRemainingMs(const int value) {
+	const int accepted = qMax(0, value);
+	if (!acceptsFrontendStateMutation(this) || m_connectionRetryRemainingMs == accepted) return;
+	m_connectionRetryRemainingMs = accepted;
+	emit connectionRetryRemainingMsChanged();
+}
+void ClientSessionController::setCanConnect(const bool value) { SET_VALUE(m_canConnect, canConnectChanged); }
+void ClientSessionController::setCanCancel(const bool value) { SET_VALUE(m_canCancel, canCancelChanged); }
 void ClientSessionController::setSelfName(const QString &value) { SET_VALUE(m_selfName, selfNameChanged); }
 void ClientSessionController::setConnected(bool value) { SET_VALUE(m_connected, connectedChanged); }
 void ClientSessionController::setSelfMuted(bool value) { SET_VALUE(m_selfMuted, selfMutedChanged); }
 void ClientSessionController::setSelfDeafened(bool value) { SET_VALUE(m_selfDeafened, selfDeafenedChanged); }
 void ClientSessionController::setUpdateBanner(const QVariantMap &value) { SET_VALUE(m_updateBanner, updateBannerChanged); }
-void ClientSessionController::setMotdHtml(const QString &value) { SET_VALUE(m_motdHtml, motdHtmlChanged); }
+void ClientSessionController::setMotdHtml(const QString &value) {
+	if (!acceptsFrontendStateMutation(this) || m_motdHtml == value) return;
+	m_motdHtml = value;
+	emit motdHtmlChanged();
+	recomputeMotdDerivedState();
+}
 void ClientSessionController::setMotdSummary(const QString &value) { SET_VALUE(m_motdSummary, motdSummaryChanged); }
+void ClientSessionController::setMotdExpanded(const bool value) {
+	if (!acceptsFrontendStateMutation(this) || m_motdExpanded == value) return;
+	m_motdExpanded = value;
+	emit motdExpandedChanged();
+	recomputeMotdDerivedState();
+}
+void ClientSessionController::setMotdDismissedSignature(const QString &value) {
+	const QString normalized = value.trimmed().left(256);
+	if (!acceptsFrontendStateMutation(this) || m_motdDismissedSignature == normalized) return;
+	m_motdDismissedSignature = normalized;
+	emit motdDismissedSignatureChanged();
+	recomputeMotdDerivedState();
+}
+void ClientSessionController::setMotdLastSeenSignature(const QString &value) {
+	const QString normalized = value.trimmed().left(256);
+	if (!acceptsFrontendStateMutation(this) || m_motdLastSeenSignature == normalized) return;
+	m_motdLastSeenSignature = normalized;
+	emit motdLastSeenSignatureChanged();
+	recomputeMotdDerivedState();
+}
+
+void ClientSessionController::applyState(const QVariantMap &state) {
+	if (state.contains(QStringLiteral("serverName"))) setServerName(state.value(QStringLiteral("serverName")).toString());
+	if (state.contains(QStringLiteral("connectionLabel")))
+		setConnectionLabel(state.value(QStringLiteral("connectionLabel")).toString());
+	if (state.contains(QStringLiteral("selfStatusLabel")))
+		setSelfStatusLabel(state.value(QStringLiteral("selfStatusLabel")).toString());
+	if (state.contains(QStringLiteral("connectionState")))
+		setConnectionState(state.value(QStringLiteral("connectionState")).toString());
+	if (state.contains(QStringLiteral("connectionTone")))
+		setConnectionTone(state.value(QStringLiteral("connectionTone")).toString());
+	if (state.contains(QStringLiteral("connectionTooltip")))
+		setConnectionDetail(state.value(QStringLiteral("connectionTooltip")).toString());
+	if (state.contains(QStringLiteral("connectionRetryRemainingMs")))
+		setConnectionRetryRemainingMs(state.value(QStringLiteral("connectionRetryRemainingMs")).toInt());
+	else if (connectionState() != QLatin1String("retrying"))
+		setConnectionRetryRemainingMs(0);
+	if (state.contains(QStringLiteral("canConnect"))) setCanConnect(state.value(QStringLiteral("canConnect")).toBool());
+	if (state.contains(QStringLiteral("canCancelConnection")))
+		setCanCancel(state.value(QStringLiteral("canCancelConnection")).toBool());
+	else if (state.contains(QStringLiteral("canDisconnect")))
+		setCanCancel(state.value(QStringLiteral("canDisconnect")).toBool());
+	if (state.contains(QStringLiteral("selfName"))) setSelfName(state.value(QStringLiteral("selfName")).toString());
+	if (state.contains(QStringLiteral("selfMuted"))) setSelfMuted(state.value(QStringLiteral("selfMuted")).toBool());
+	if (state.contains(QStringLiteral("selfDeafened")))
+		setSelfDeafened(state.value(QStringLiteral("selfDeafened")).toBool());
+	if (state.contains(QStringLiteral("updateBanner")))
+		setUpdateBanner(state.value(QStringLiteral("updateBanner")).toMap());
+	if (state.contains(QStringLiteral("motdHtml"))) setMotdHtml(state.value(QStringLiteral("motdHtml")).toString());
+	if (state.contains(QStringLiteral("motdSummary")))
+		setMotdSummary(state.value(QStringLiteral("motdSummary")).toString());
+	if (state.contains(QStringLiteral("motdExpanded")))
+		setMotdExpanded(state.value(QStringLiteral("motdExpanded")).toBool());
+	if (state.contains(QStringLiteral("motdDismissedSignature")))
+		setMotdDismissedSignature(state.value(QStringLiteral("motdDismissedSignature")).toString());
+	if (state.contains(QStringLiteral("motdLastSeenSignature")))
+		setMotdLastSeenSignature(state.value(QStringLiteral("motdLastSeenSignature")).toString());
+}
+
+void ClientSessionController::recomputeMotdDerivedState() {
+	const bool hasContent = !m_motdHtml.trimmed().isEmpty();
+	const QString signature = motdContentSignature(m_motdHtml);
+	const bool dismissed = hasContent && !m_motdDismissedSignature.isEmpty()
+		&& (m_motdDismissedSignature == signature || m_motdDismissedSignature == m_motdHtml.trimmed());
+	const QString comparisonSignature = !m_motdLastSeenSignature.isEmpty()
+		? m_motdLastSeenSignature : m_motdDismissedSignature;
+	const bool changed = hasContent && !comparisonSignature.isEmpty()
+		&& comparisonSignature != signature && comparisonSignature != m_motdHtml.trimmed();
+
+	QVariantList actions;
+	if (hasContent) {
+		if (dismissed) {
+			actions.push_back(motdAction(QStringLiteral("motd.restore"), tr("Show welcome message"), {}));
+		} else {
+			actions.push_back(motdAction(m_motdExpanded ? QStringLiteral("motd.hide") : QStringLiteral("motd.show"),
+				m_motdExpanded ? tr("Collapse") : tr("Expand"), signature));
+			actions.push_back(motdAction(QStringLiteral("motd.dismiss"), tr("Dismiss"), signature,
+				QStringLiteral("muted")));
+		}
+	}
+
+	if (m_hasMotd != hasContent) {
+		m_hasMotd = hasContent;
+		emit hasMotdChanged();
+	}
+	if (m_motdSignature != signature) {
+		m_motdSignature = signature;
+		emit motdSignatureChanged();
+	}
+	if (m_motdDismissed != dismissed) {
+		m_motdDismissed = dismissed;
+		emit motdDismissedChanged();
+	}
+	if (m_motdChanged != changed) {
+		m_motdChanged = changed;
+		emit motdChangedChanged();
+	}
+	if (m_motdActions != actions) {
+		m_motdActions = actions;
+		emit motdActionsChanged();
+	}
+}
 
 #undef SET_VALUE
 
@@ -72,6 +245,7 @@ bool ActiveScopeController::canAttachImages() const { return m_canAttachImages; 
 bool ActiveScopeController::canLoadOlder() const { return m_canLoadOlder; }
 bool ActiveScopeController::loading() const { return m_loading; }
 QString ActiveScopeController::loadingState() const { return m_loadingState; }
+QVariantMap ActiveScopeController::screenShare() const { return m_screenShare; }
 
 #define SET_SCOPE_VALUE(member, signalName) \
 	if (!acceptsFrontendStateMutation(this)) return; \
@@ -103,6 +277,9 @@ void ActiveScopeController::setLoading(bool value) { SET_SCOPE_VALUE(m_loading, 
 void ActiveScopeController::setLoadingState(const QString &value) {
 	SET_SCOPE_VALUE(m_loadingState, loadingStateChanged);
 }
+void ActiveScopeController::setScreenShare(const QVariantMap &value) {
+	SET_SCOPE_VALUE(m_screenShare, screenShareChanged);
+}
 
 #undef SET_SCOPE_VALUE
 
@@ -121,6 +298,7 @@ void ActiveScopeController::applyState(const QVariantMap &state) {
 	setCanLoadOlder(state.value(QStringLiteral("canLoadOlder")).toBool());
 	setLoading(state.value(QStringLiteral("loading")).toBool());
 	setLoadingState(state.value(QStringLiteral("loadingState")).toString());
+	setScreenShare(state.value(QStringLiteral("screenShare")).toMap());
 }
 
 StableListModel::StableListModel(QObject *parent) : QAbstractListModel(parent) {
@@ -443,9 +621,15 @@ void RoomModel::synchronizeAllRows() {
 QVariantMap ParticipantModel::participantRow(const QVariantMap &participant) {
 	const QString sessionId = participant.value(QStringLiteral("session")).toString().trimmed();
 	if (sessionId.isEmpty()) return {};
+	const QVariant title = participant.contains(QStringLiteral("label"))
+		? participant.value(QStringLiteral("label"))
+		: participant.value(QStringLiteral("name"));
+	const QVariant subtitle = participant.contains(QStringLiteral("subtitle"))
+		? participant.value(QStringLiteral("subtitle"))
+		: participant.value(QStringLiteral("statusLabel"));
 	return { { QStringLiteral("id"), sessionId },
-			 { QStringLiteral("title"), participant.value(QStringLiteral("name")) },
-			 { QStringLiteral("subtitle"), participant.value(QStringLiteral("statusLabel")) },
+			 { QStringLiteral("title"), title },
+			 { QStringLiteral("subtitle"), subtitle },
 			 { QStringLiteral("kind"), QStringLiteral("participant") },
 			 { QStringLiteral("status"), participant.value(QStringLiteral("talkState")) },
 			 { QStringLiteral("avatarUrl"), participant.value(QStringLiteral("avatarUrl")) },
@@ -708,15 +892,33 @@ void UiCommandController::toggleMessageReaction(const QString &messageId, const 
 void UiCommandController::invokeAction(const QString &actionId) {
 	if (!actionId.trimmed().isEmpty()) emit actionRequested(actionId.trimmed());
 }
+void UiCommandController::invokeAppAction(const QString &actionId, const QVariantMap &payload) {
+	const QString action = actionId.trimmed();
+	if (!action.isEmpty()) emit appActionRequested(action, payload);
+}
 void UiCommandController::invokeScopeAction(const QString &scopeToken, const QString &actionId) {
 	const QString scope = scopeToken.trimmed();
 	const QString action = actionId.trimmed();
 	if (!scope.isEmpty() && !action.isEmpty()) emit scopeActionRequested(scope, action);
 }
+void UiCommandController::invokeScopeActionValue(const QString &scopeToken, const QString &actionId,
+												 const int value, const bool finalValue) {
+	const QString scope = scopeToken.trimmed();
+	const QString action = actionId.trimmed();
+	if (!scope.isEmpty() && !action.isEmpty()) emit scopeActionValueRequested(scope, action, value, finalValue);
+}
 void UiCommandController::invokeParticipantAction(const QString &sessionId, const QString &actionId) {
 	const QString session = sessionId.trimmed();
 	const QString action = actionId.trimmed();
 	if (!session.isEmpty() && !action.isEmpty()) emit participantActionRequested(session, action);
+}
+void UiCommandController::invokeParticipantActionValue(const QString &sessionId, const QString &actionId,
+													   const int value, const bool finalValue) {
+	const QString session = sessionId.trimmed();
+	const QString action = actionId.trimmed();
+	if (!session.isEmpty() && !action.isEmpty()) {
+		emit participantActionValueRequested(session, action, value, finalValue);
+	}
 }
 void UiCommandController::toggleSelfMute() { emit selfMuteToggleRequested(); }
 void UiCommandController::toggleSelfDeaf() { emit selfDeafToggleRequested(); }

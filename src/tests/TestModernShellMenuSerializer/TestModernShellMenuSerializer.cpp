@@ -20,6 +20,8 @@ private slots:
 void TestModernShellMenuSerializer::serializesActionsAndDynamicContextActionWithoutWidgets() {
 	QObject owner;
 	QAction regularAction(QObject::tr("Plain Action"), &owner);
+	QAction checkableAction(QObject::tr("Checkable Action"), &owner);
+	checkableAction.setCheckable(true);
 	QAction separator(&owner);
 	separator.setSeparator(true);
 	QAction dynamicAction(QObject::tr("Dynamic Action"), &owner);
@@ -27,11 +29,13 @@ void TestModernShellMenuSerializer::serializesActionsAndDynamicContextActionWith
 
 	ModernShellMenuSerializer::ActionRegistry registry;
 	const QVariantList items = ModernShellMenuSerializer::serializeActions(
-		{ &regularAction, &separator, &dynamicAction },
-		[&regularAction, &dynamicAction](const QAction *action) {
+		{ &regularAction, &checkableAction, &separator, &dynamicAction },
+		[&regularAction, &checkableAction, &dynamicAction](const QAction *action) {
 			ModernShellMenuSerializer::ActionDefinition definition;
 			if (action == &regularAction) {
 				definition.id = QStringLiteral("plainAction");
+			} else if (action == &checkableAction) {
+				definition.id = QStringLiteral("checkableAction");
 			} else if (action == &dynamicAction) {
 				definition.id = ModernShellMenuSerializer::contextActionId(QStringLiteral("channel"), action->data());
 				definition.contextActionData = action->data().toString();
@@ -40,10 +44,13 @@ void TestModernShellMenuSerializer::serializesActionsAndDynamicContextActionWith
 		},
 		&registry);
 
-	QCOMPARE(items.size(), 3);
+	QCOMPARE(items.size(), 4);
 	QCOMPARE(items.at(0).toMap().value(QStringLiteral("kind")).toString(), QStringLiteral("action"));
-	QCOMPARE(items.at(1).toMap().value(QStringLiteral("kind")).toString(), QStringLiteral("separator"));
-	QCOMPARE(items.at(2).toMap().value(QStringLiteral("id")).toString(),
+	QVERIFY(!items.at(0).toMap().value(QStringLiteral("checkable")).toBool());
+	QVERIFY(items.at(1).toMap().value(QStringLiteral("checkable")).toBool());
+	QVERIFY(!items.at(1).toMap().value(QStringLiteral("checked")).toBool());
+	QCOMPARE(items.at(2).toMap().value(QStringLiteral("kind")).toString(), QStringLiteral("separator"));
+	QCOMPARE(items.at(3).toMap().value(QStringLiteral("id")).toString(),
 			 QStringLiteral("context:channel:dynamic-token"));
 
 	const auto dynamicRegistryEntry = registry.value(QStringLiteral("context:channel:dynamic-token"));

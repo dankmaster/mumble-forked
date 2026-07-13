@@ -40,6 +40,7 @@ private:
 	void handleReadyRead(QTcpSocket *socket);
 	QVariantMap handleRequest(const QVariantMap &request);
 	QVariantMap buildStateResponse() const;
+	QVariantMap buildAutomationDialogFieldState(const QString &fieldId) const;
 	void writeResponse(QTcpSocket *socket, const QVariantMap &response) const;
 	bool authorizeRequest(const QVariantMap &request, QVariantMap &response) const;
 	QmlVisualFixtureController *visualFixtureController();
@@ -54,6 +55,10 @@ private:
 	QString m_token;
 	std::unique_ptr< QmlVisualFixtureController > m_visualFixtureController;
 	bool m_offscreenFilterInstalled = false;
+	QString m_automationDialogDraftDialogId;
+	QString m_automationDialogDraftFieldId;
+	QVariant m_automationDialogDraftValue;
+	bool m_automationDialogDraftActive = false;
 	struct ChatPerformanceWorkloadState {
 		bool active = false;
 		bool previousFixtureOverride = false;

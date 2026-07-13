@@ -21,4 +21,9 @@ QtObject {
     readonly property int shellRadius: uiTheme ? uiTheme.shellRadius : 16
     readonly property int innerRadius: uiTheme ? uiTheme.innerRadius : 11
     readonly property int spacing: uiTheme ? uiTheme.spacing : 12
+	readonly property string themeId: uiTheme ? uiTheme.themeId : "dark"
+	readonly property string densityId: uiTheme ? uiTheme.densityId : "comfortable"
+	readonly property string accentId: uiTheme ? uiTheme.accentId : "auto"
+	readonly property string railSide: uiTheme ? uiTheme.railSide : "right"
+	readonly property bool compact: uiTheme ? uiTheme.compact : false
 }

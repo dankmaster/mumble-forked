@@ -12,6 +12,7 @@ private slots:
 	void appliesBuiltInTokenMappingIdempotently();
 	void appliesCustomManifestMetrics();
 	void appliesVisualGateAppearance();
+	void appliesProductDensityAccentAndTypedState();
 };
 
 namespace {
@@ -83,6 +84,31 @@ void TestQmlThemeController::appliesVisualGateAppearance() {
 	QVERIFY(!controller.compact());
 	QCOMPARE(controller.spacing(), 12);
 	QVERIFY(!controller.applyVisualGateAppearance(QStringLiteral("unknown"), QStringLiteral("regular")));
+}
+
+void TestQmlThemeController::appliesProductDensityAccentAndTypedState() {
+	QmlThemeController controller;
+	QSignalSpy densityChanged(&controller, &QmlThemeController::densityChanged);
+	QVERIFY(controller.applyProductAppearance(QStringLiteral("nord"), QStringLiteral("spacious"),
+		QStringLiteral("rose")));
+	QCOMPARE(controller.themeId(), QStringLiteral("nord"));
+	QCOMPARE(controller.themeSource(), QStringLiteral("modernShell"));
+	QCOMPARE(controller.densityId(), QStringLiteral("spacious"));
+	QCOMPARE(controller.accentId(), QStringLiteral("rose"));
+	QCOMPARE(controller.spacing(), 16);
+	QCOMPARE(controller.accent(), QColor(QStringLiteral("#ff8aa0")));
+	QCOMPARE(densityChanged.count(), 1);
+	const QVariantMap state = controller.state();
+	QCOMPARE(state.value(QStringLiteral("themeId")).toString(), QStringLiteral("nord"));
+	QCOMPARE(state.value(QStringLiteral("density")).toString(), QStringLiteral("spacious"));
+	QCOMPARE(state.value(QStringLiteral("accent")).toString(), QStringLiteral("rose"));
+	QCOMPARE(state.value(QStringLiteral("effectiveTokens")).toMap().value(QStringLiteral("spacing")).toInt(), 16);
+
+	QVERIFY(controller.applyProductAppearance(QStringLiteral("dark"), QStringLiteral("compact"),
+		QStringLiteral("custom"), QStringLiteral("#3366cc"), 75));
+	QVERIFY(controller.compact());
+	QCOMPARE(controller.spacing(), 8);
+	QCOMPARE(controller.accent(), QColor(QStringLiteral("#3366cc")));
 }
 
 QTEST_APPLESS_MAIN(TestQmlThemeController)

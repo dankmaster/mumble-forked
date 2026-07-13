@@ -12,7 +12,7 @@ class FakeDialogState final : public QObject {
 	Q_PROPERTY(QString title READ title CONSTANT)
 	Q_PROPERTY(QString subtitle READ subtitle CONSTANT)
 	Q_PROPERTY(QString kind READ kind CONSTANT)
-	Q_PROPERTY(QString activePage READ activePage CONSTANT)
+	Q_PROPERTY(QString activePage READ activePage NOTIFY stateChanged)
 	Q_PROPERTY(QVariantList pages READ pages CONSTANT)
 	Q_PROPERTY(QVariantList sections READ sections NOTIFY stateChanged)
 	Q_PROPERTY(QVariantList actions READ actions CONSTANT)
@@ -25,11 +25,15 @@ public:
 	explicit FakeDialogState(QObject *parent = nullptr) : QObject(parent) {
 		m_sections = { QVariantMap {
 			{ QStringLiteral("title"), QStringLiteral("Validation") },
-			{ QStringLiteral("fields"), QVariantList { QVariantMap {
-				{ QStringLiteral("id"), QStringLiteral("name") },
-				{ QStringLiteral("type"), QStringLiteral("text") },
-				{ QStringLiteral("label"), QStringLiteral("Name") },
-				{ QStringLiteral("value"), QStringLiteral("Alice") } } } } } };
+			{ QStringLiteral("fields"), QVariantList {
+				QVariantMap { { QStringLiteral("id"), QStringLiteral("name") },
+							  { QStringLiteral("type"), QStringLiteral("text") },
+							  { QStringLiteral("label"), QStringLiteral("Name") },
+							  { QStringLiteral("value"), QStringLiteral("Alice") } },
+				QVariantMap { { QStringLiteral("id"), QStringLiteral("accent") },
+							  { QStringLiteral("type"), QStringLiteral("color") },
+							  { QStringLiteral("label"), QStringLiteral("Accent") },
+							  { QStringLiteral("value"), QStringLiteral("#5ec8b0") } } } } } };
 	}
 
 	bool open() const { return m_open; }
@@ -41,13 +45,27 @@ public:
 	QString title() const { return QStringLiteral("Test dialog"); }
 	QString subtitle() const { return QStringLiteral("Qt Quick component test"); }
 	QString kind() const { return QStringLiteral("generic"); }
-	QString activePage() const { return {}; }
-	QVariantList pages() const { return {}; }
+	QString activePage() const { return m_activePage; }
+	QVariantList pages() const {
+		return { QVariantMap { { QStringLiteral("id"), QStringLiteral("general") },
+								   { QStringLiteral("label"), QStringLiteral("General") } },
+				 QVariantMap { { QStringLiteral("id"), QStringLiteral("advanced") },
+								   { QStringLiteral("label"), QStringLiteral("Advanced") } } };
+	}
 	QVariantList sections() const { return m_sections; }
 	QVariantList actions() const {
 		return { QVariantMap { { QStringLiteral("id"), QStringLiteral("save") },
-							 { QStringLiteral("label"), QStringLiteral("Save") },
-							 { QStringLiteral("enabled"), true } } };
+								 { QStringLiteral("label"), QStringLiteral("Save") },
+								 { QStringLiteral("enabled"), true } },
+				 QVariantMap { { QStringLiteral("id"), QStringLiteral("apply") },
+								 { QStringLiteral("label"), QStringLiteral("Apply changes") },
+								 { QStringLiteral("enabled"), true } },
+				 QVariantMap { { QStringLiteral("id"), QStringLiteral("reset") },
+								 { QStringLiteral("label"), QStringLiteral("Reset defaults") },
+								 { QStringLiteral("enabled"), true } },
+				 QVariantMap { { QStringLiteral("id"), QStringLiteral("cancel") },
+								 { QStringLiteral("label"), QStringLiteral("Cancel") },
+								 { QStringLiteral("enabled"), true } } };
 	}
 	QVariantMap state() const { return {}; }
 	qulonglong revision() const { return m_revision; }
@@ -62,7 +80,12 @@ public:
 		++m_revision;
 		emit stateChanged();
 	}
-	Q_INVOKABLE void invokeAction(const QString &id, const QVariantMap & = {}) {
+	Q_INVOKABLE void invokeAction(const QString &id, const QVariantMap &payload = {}) {
+		if (id == QLatin1String("selectPage")) {
+			m_activePage = payload.value(QStringLiteral("pageId")).toString();
+			++m_revision;
+			emit stateChanged();
+		}
 		m_lastAction = id;
 		emit lastActionChanged();
 	}
@@ -89,6 +112,7 @@ private:
 	int m_closeRequests = 0;
 	QString m_lastAction;
 	qulonglong m_revision = 0;
+	QString m_activePage = QStringLiteral("general");
 	QVariantList m_sections;
 	QVariantMap m_values { { QStringLiteral("name"), QStringLiteral("Alice") } };
 	QVariantMap m_errors;

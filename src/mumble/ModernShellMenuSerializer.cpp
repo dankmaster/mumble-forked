@@ -37,6 +37,7 @@ QVariantMap ModernShellMenuSerializer::actionItem(const QString &id, const QStri
 	item.insert(QStringLiteral("label"), label);
 	item.insert(QStringLiteral("enabled"), enabled);
 	item.insert(QStringLiteral("checked"), checked);
+	item.insert(QStringLiteral("checkable"), checked);
 	if (!tone.isEmpty()) {
 		item.insert(QStringLiteral("tone"), tone);
 	}
@@ -53,6 +54,7 @@ QVariantMap ModernShellMenuSerializer::labelItem(const QString &label, const QSt
 	item.insert(QStringLiteral("label"), label);
 	item.insert(QStringLiteral("enabled"), false);
 	item.insert(QStringLiteral("checked"), false);
+	item.insert(QStringLiteral("checkable"), false);
 	item.insert(QStringLiteral("tone"), QString());
 	if (!hint.isEmpty()) {
 		item.insert(QStringLiteral("hint"), hint);
@@ -70,6 +72,7 @@ QVariantMap ModernShellMenuSerializer::sliderItem(const QString &id, const QStri
 	item.insert(QStringLiteral("label"), label);
 	item.insert(QStringLiteral("enabled"), enabled);
 	item.insert(QStringLiteral("checked"), false);
+	item.insert(QStringLiteral("checkable"), false);
 	item.insert(QStringLiteral("tone"), tone);
 	item.insert(QStringLiteral("value"), value);
 	item.insert(QStringLiteral("min"), minimum);
@@ -147,8 +150,10 @@ QVariantList ModernShellMenuSerializer::serializeActions(const QList< QAction * 
 								 ? definition.hint
 								 : normalizedActionLabel(
 									   action->toolTip().trimmed().isEmpty() ? action->statusTip() : action->toolTip());
-		items.push_back(actionItem(definition.id, label, action->isEnabled(),
-								   action->isCheckable() && action->isChecked(), definition.tone, hint));
+		QVariantMap item = actionItem(definition.id, label, action->isEnabled(),
+								  action->isCheckable() && action->isChecked(), definition.tone, hint);
+		item.insert(QStringLiteral("checkable"), action->isCheckable());
+		items.push_back(item);
 	}
 
 	return normalize(items);

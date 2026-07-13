@@ -17,6 +17,8 @@ TestCase {
 
     function init() {
         verify(loader.item !== null);
+		loader.item.width = Math.min(testCase.width - 48, 1040);
+		loader.item.height = Math.min(testCase.height - 48, 760);
         dialogState.setValidationError("name", "");
         dialogState.open = true;
         tryCompare(loader.item, "visible", true);
@@ -28,6 +30,9 @@ TestCase {
     }
 
     function test_open_focus_and_close_action() {
+		compare(loader.item.title, "Test dialog");
+		compare(loader.item.contentItem.Accessible.role, Accessible.Dialog);
+		compare(loader.item.contentItem.Accessible.name, "Test dialog");
         tryVerify(function () {
             return loader.item.activeFocus;
         });
@@ -59,4 +64,25 @@ TestCase {
         keyClick(Qt.Key_Space);
         compare(dialogState.lastAction, "save");
     }
+
+	function test_compact_layout_replaces_page_rail_and_wraps_actions() {
+		loader.item.width = 372;
+		tryVerify(function() { return loader.item.compactDialogLayout; });
+		const rail = findChild(loader.item.contentItem, "dialogPageRail");
+		const selector = findChild(loader.item.contentItem, "dialogCompactPageSelector");
+		const footer = findChild(loader.item.contentItem, "dialogFooter");
+		verify(rail !== null && !rail.visible);
+		verify(selector !== null && selector.visible);
+		verify(selector.width >= 300);
+		tryVerify(function() { return footer !== null && footer.height > 64; });
+	}
+
+	function test_color_control_is_named_and_keyboard_focusable() {
+		const colorButton = findChild(loader.item.contentItem, "dialogColorButton_accent");
+		verify(colorButton !== null);
+		compare(colorButton.Accessible.role, Accessible.Button);
+		compare(colorButton.Accessible.name, "Choose Accent");
+		colorButton.forceActiveFocus();
+		tryCompare(colorButton, "activeFocus", true);
+	}
 }

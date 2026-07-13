@@ -17,6 +17,7 @@
 #include "QmlAccessibilitySnapshot.h"
 #include "QmlPerformanceMonitor.h"
 #include "QmlShellHost.h"
+#include "QmlThemeController.h"
 #include "QmlVisualFixtureController.h"
 #include "MumbleConstants.h"
 #include "Net.h"
@@ -35,6 +36,7 @@
 #include <QtCore/QJsonObject>
 #include <QtCore/QPointer>
 #include <QtCore/QReadLocker>
+#include <QtCore/QSet>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
@@ -3714,6 +3716,33 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		return response;
 	}
 
+	if (command == QLatin1String("setHostViewport")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->window()) return errorResponse(tr("The Qt Quick frontend is not active."));
+
+		const int width  = request.value(QStringLiteral("width")).toInt();
+		const int height = request.value(QStringLiteral("height")).toInt();
+		if (width < 420 || width > 7680 || height < 520 || height > 4320) {
+			return errorResponse(tr("The requested viewport size is outside the supported range."));
+		}
+
+		QQuickWindow *window = host->window();
+		window->resize(width, height);
+		if (request.contains(QStringLiteral("railOpen"))) {
+			const QVariant open = request.value(QStringLiteral("railOpen"));
+			if (!QMetaObject::invokeMethod(window, "setAutomationNavigationOpen", Q_ARG(QVariant, open))) {
+				return errorResponse(tr("The Qt Quick navigation drawer is unavailable."));
+			}
+		}
+		window->update();
+
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("width"), window->width());
+		response.insert(QStringLiteral("height"), window->height());
+		response.insert(QStringLiteral("railOpen"), window->property("automationNavigationOpen").toBool());
+		return response;
+	}
+
 	if (command == QLatin1String("captureQml")) {
 		if (!m_mainWindow->m_qmlShellHost || !m_mainWindow->m_qmlShellHost->window()) {
 			return errorResponse(tr("The Qt Quick frontend is not active."));
@@ -3986,6 +4015,98 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		return response;
 	}
 
+	if (command == QLatin1String("runMotdUiProbe")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->window()) {
+			return errorResponse(tr("The Qt Quick frontend is not active."));
+		}
+
+		const QString action = request.value(QStringLiteral("action")).toString().trimmed().toLower();
+		const QString signature = request.value(QStringLiteral("signature")).toString().trimmed();
+		if (action.isEmpty()) {
+			return errorResponse(tr("Missing MOTD action."));
+		}
+
+		const auto invokeProbe = [action, signature](MainWindow *window) {
+			QmlShellHost *qmlHost = window ? window->qmlShellHost() : nullptr;
+			if (!qmlHost || !qmlHost->window()) return QVariantMap();
+			QVariant result;
+			const bool invoked = QMetaObject::invokeMethod(
+				qmlHost->window(), "runMotdUiProbe", Q_RETURN_ARG(QVariant, result),
+				Q_ARG(QVariant, QVariant::fromValue(action)),
+				Q_ARG(QVariant, QVariant::fromValue(signature)));
+			return invoked ? result.toMap() : QVariantMap();
+		};
+
+		if (async) {
+			scheduleAction([invokeProbe](MainWindow *window) { invokeProbe(window); });
+			return asyncResponse();
+		}
+
+		const QVariantMap result = invokeProbe(m_mainWindow);
+		if (result.isEmpty()) {
+			return errorResponse(tr("The Qt Quick root does not expose the MOTD automation probe."));
+		}
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("result"), result);
+		response.insert(QStringLiteral("handled"), result.value(QStringLiteral("handled")).toBool());
+		response.insert(QStringLiteral("action"), result.value(QStringLiteral("action"), action));
+		response.insert(QStringLiteral("visible"), result.value(QStringLiteral("visible")).toBool());
+		return response;
+	}
+
+	if (command == QLatin1String("openMenuProbe")) {
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->window()) {
+			return errorResponse(tr("The Qt Quick frontend is not active."));
+		}
+
+		const QString requestedVariant = request.value(QStringLiteral("variant")).toString().trimmed();
+		const QString normalizedVariant = requestedVariant.toLower();
+		static const QSet< QString > knownVariants {
+			QStringLiteral("app"), QStringLiteral("self"), QStringLiteral("profile"),
+			QStringLiteral("room"), QStringLiteral("member"), QStringLiteral("participant"),
+			QStringLiteral("message"), QStringLiteral("textroom"),
+			QStringLiteral("textroomreal"), QStringLiteral("chat"), QStringLiteral("background"),
+			QStringLiteral("chatbackground")
+		};
+		if (!knownVariants.contains(normalizedVariant)) {
+			return errorResponse(tr("Unknown menu probe '%1'.").arg(requestedVariant));
+		}
+		QString variant = normalizedVariant;
+		if (variant == QLatin1String("textroom")) variant = QStringLiteral("textRoom");
+		else if (variant == QLatin1String("textroomreal")) variant = QStringLiteral("textRoomReal");
+
+		const auto invokeProbe = [variant](MainWindow *window) {
+			QmlShellHost *qmlHost = window ? window->qmlShellHost() : nullptr;
+			if (!qmlHost || !qmlHost->window()) return QVariantMap();
+			QVariant result;
+			const bool invoked = QMetaObject::invokeMethod(
+				qmlHost->window(), "openAutomationMenuProbe", Q_RETURN_ARG(QVariant, result),
+				Q_ARG(QVariant, QVariant::fromValue(variant)));
+			return invoked ? result.toMap() : QVariantMap();
+		};
+
+		if (async) {
+			scheduleAction([invokeProbe](MainWindow *window) { invokeProbe(window); });
+			QVariantMap response = asyncResponse();
+			response.insert(QStringLiteral("variant"), variant);
+			return response;
+		}
+
+		const QVariantMap result = invokeProbe(m_mainWindow);
+		if (result.isEmpty()) {
+			return errorResponse(tr("The Qt Quick root does not expose the menu automation probe."));
+		}
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("result"), result);
+		response.insert(QStringLiteral("handled"), result.value(QStringLiteral("handled")).toBool());
+		response.insert(QStringLiteral("variant"), result.value(QStringLiteral("variant"), variant));
+		response.insert(QStringLiteral("open"), result.value(QStringLiteral("open")).toBool());
+		response.insert(QStringLiteral("visible"), result.value(QStringLiteral("visible")).toBool());
+		return response;
+	}
+
 
 	if (command == QLatin1String("invokeScopeAction")) {
 		const QString scopeToken = request.value(QStringLiteral("scopeToken")).toString().trimmed();
@@ -4034,6 +4155,10 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			return errorResponse(tr("Missing dialogId."));
 		}
 
+		m_automationDialogDraftDialogId.clear();
+		m_automationDialogDraftFieldId.clear();
+		m_automationDialogDraftValue.clear();
+		m_automationDialogDraftActive = false;
 		if (async) {
 			scheduleAction([dialogID, context](MainWindow *window) { window->handleModernDialogOpen(dialogID, context); });
 			return asyncResponse();
@@ -4045,6 +4170,10 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 
 	if (command == QLatin1String("closeDialog")) {
 		const QString dialogID = request.value(QStringLiteral("dialogId")).toString();
+		m_automationDialogDraftDialogId.clear();
+		m_automationDialogDraftFieldId.clear();
+		m_automationDialogDraftValue.clear();
+		m_automationDialogDraftActive = false;
 		if (async) {
 			scheduleAction([dialogID](MainWindow *window) { window->handleModernDialogClose(dialogID); });
 			return asyncResponse();
@@ -4077,16 +4206,9 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 
 	if (command == QLatin1String("modernDialogFieldState")) {
 		const QString fieldID = request.value(QStringLiteral("fieldId")).toString().trimmed();
-		const QVariantMap state = m_mainWindow->m_modernDialogController ? m_mainWindow->m_modernDialogController->state() : QVariantMap();
-		QVariantMap fieldState;
-		for (const QVariant &sectionValue : state.value(QStringLiteral("sections")).toList()) {
-			for (const QVariant &fieldValue : sectionValue.toMap().value(QStringLiteral("fields")).toList()) {
-				const QVariantMap field = fieldValue.toMap();
-				if (field.value(QStringLiteral("id")).toString() == fieldID) { fieldState = field; break; }
-			}
-		}
-		fieldState.insert(QStringLiteral("exists"), !fieldState.isEmpty());
-		QVariantMap response = okResponse(); response.insert(QStringLiteral("field"), fieldState); return response;
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("field"), buildAutomationDialogFieldState(fieldID));
+		return response;
 	}
 
 	if (command == QLatin1String("modernDialogDomState")) {
@@ -4104,8 +4226,24 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		const QString fieldID = request.value(QStringLiteral("fieldId")).toString().trimmed();
 		if (fieldID.isEmpty() || !m_mainWindow->m_modernDialogController) return errorResponse(tr("Dialog field is not available."));
 		const QVariantMap state = m_mainWindow->m_modernDialogController->state();
-		m_mainWindow->handleModernDialogFieldUpdate(state.value(QStringLiteral("id")).toString(), fieldID, request.value(QStringLiteral("value")));
-		QVariantMap response = okResponse(); response.insert(QStringLiteral("fieldId"), fieldID); return response;
+		QVariantMap fieldState = buildAutomationDialogFieldState(fieldID);
+		if (fieldState.value(QStringLiteral("exists")).toBool()) {
+			m_automationDialogDraftDialogId = state.value(QStringLiteral("id")).toString();
+			m_automationDialogDraftFieldId = fieldID;
+			m_automationDialogDraftValue = request.value(QStringLiteral("value"));
+			const QString fieldType = fieldState.value(QStringLiteral("type")).toString();
+			m_automationDialogDraftActive = request.value(QStringLiteral("focus"), true).toBool()
+				&& fieldState.value(QStringLiteral("enabled"), true).toBool()
+				&& fieldType != QLatin1String("hidden") && fieldType != QLatin1String("readonly")
+				&& fieldType != QLatin1String("note");
+			m_mainWindow->handleModernDialogFieldUpdate(
+				m_automationDialogDraftDialogId, fieldID, m_automationDialogDraftValue);
+			fieldState = buildAutomationDialogFieldState(fieldID);
+		}
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("fieldId"), fieldID);
+		response.insert(QStringLiteral("field"), fieldState);
+		return response;
 	}
 
 	if (command == QLatin1String("setClipboardText")) {
@@ -4634,8 +4772,11 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 			it->lastActivityAtMs    = it->messages.empty() ? 0 : it->messages.back().createdAtMs;
 			window->m_modernDirectMessageTrayOpenProbe = variant == QLatin1String("tray");
 			const QString scopeToken = variant == QLatin1String("tray")
-										   ? QStringLiteral("-1:0")
-										   : QStringLiteral("-2:%1").arg(static_cast< qulonglong >(session));
+									   ? QStringLiteral("-1:0")
+									   : QStringLiteral("-2:%1").arg(static_cast< qulonglong >(session));
+			// QmlSelectionState validates tokens against RoomModel. Materialize the synthetic/direct row
+			// before selecting it so the typed scope is accepted on the first attempt.
+			window->publishQmlDirectMessagesState();
 			const bool selected = window->handleModernShellScopeSelection(scopeToken);
 			window->publishQmlDirectMessagesState();
 			window->publishQmlActiveScopeState();
@@ -5000,6 +5141,41 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 	return errorResponse(tr("Unknown automation command '%1'.").arg(command));
 }
 
+QVariantMap ModernUiAutomationServer::buildAutomationDialogFieldState(const QString &fieldId) const {
+	QVariantMap result;
+	const QString requestedFieldId = fieldId.trimmed();
+	const QVariantMap dialog = m_mainWindow && m_mainWindow->m_modernDialogController
+		? m_mainWindow->m_modernDialogController->state()
+		: QVariantMap();
+	const QString dialogId = dialog.value(QStringLiteral("id")).toString();
+	QVariantMap field;
+	QVariantList availableFieldIds;
+	for (const QVariant &sectionValue : dialog.value(QStringLiteral("sections")).toList()) {
+		for (const QVariant &fieldValue : sectionValue.toMap().value(QStringLiteral("fields")).toList()) {
+			const QVariantMap candidate = fieldValue.toMap();
+			const QString candidateId = candidate.value(QStringLiteral("id")).toString().trimmed();
+			if (candidateId.isEmpty()) continue;
+			availableFieldIds.push_back(candidateId);
+			if (candidateId == requestedFieldId) field = candidate;
+		}
+	}
+
+	const bool exists = dialog.value(QStringLiteral("open")).toBool() && !field.isEmpty();
+	const bool hasDraft = exists && dialogId == m_automationDialogDraftDialogId
+		&& requestedFieldId == m_automationDialogDraftFieldId;
+	result.insert(QStringLiteral("dialogId"), dialogId);
+	result.insert(QStringLiteral("fieldId"), requestedFieldId);
+	result.insert(QStringLiteral("exists"), exists);
+	result.insert(QStringLiteral("active"), hasDraft && m_automationDialogDraftActive);
+	result.insert(QStringLiteral("type"), field.value(QStringLiteral("type")).toString());
+	result.insert(QStringLiteral("enabled"), field.value(QStringLiteral("enabled"), true).toBool());
+	result.insert(QStringLiteral("value"), hasDraft ? m_automationDialogDraftValue
+												 : field.value(QStringLiteral("value")));
+	result.insert(QStringLiteral("availableFieldIds"), availableFieldIds);
+	result.insert(QStringLiteral("stateValue"), field.value(QStringLiteral("value")));
+	return result;
+}
+
 QVariantMap ModernUiAutomationServer::buildStateResponse() const {
 	QVariantMap response = okResponse();
 	QmlShellHost *host = m_mainWindow ? m_mainWindow->m_qmlShellHost.get() : nullptr;
@@ -5012,11 +5188,31 @@ QVariantMap ModernUiAutomationServer::buildStateResponse() const {
 		state.insert(QStringLiteral("app"),
 					 QVariantMap { { QStringLiteral("serverTitle"), session->serverName() },
 								   { QStringLiteral("selfName"), session->selfName() },
-								   { QStringLiteral("selfStatusLabel"), session->connectionLabel() },
+								   { QStringLiteral("selfStatusLabel"), session->selfStatusLabel() },
 								   { QStringLiteral("selfMuted"), session->selfMuted() },
 								   { QStringLiteral("selfDeafened"), session->selfDeafened() },
 								   { QStringLiteral("connected"), session->connected() },
+								   { QStringLiteral("connectionState"), session->connectionState() },
+								   { QStringLiteral("connectionLabel"), session->connectionLabel() },
+								   { QStringLiteral("connectionTone"), session->connectionTone() },
+								   { QStringLiteral("connectionTooltip"), session->connectionDetail() },
+								   { QStringLiteral("connectionRetryRemainingMs"),
+									 session->connectionRetryRemainingMs() },
+								   { QStringLiteral("canConnect"), session->canConnect() },
+								   { QStringLiteral("canCancelConnection"), session->canCancel() },
 								   { QStringLiteral("updateBanner"), session->updateBanner() },
+								   { QStringLiteral("motdHtml"), session->motdHtml() },
+								   { QStringLiteral("motdSummary"), session->motdSummary() },
+								   { QStringLiteral("hasMotd"), session->hasMotd() },
+								   { QStringLiteral("motdExpanded"), session->motdExpanded() },
+								   { QStringLiteral("motdDismissed"), session->motdDismissed() },
+								   { QStringLiteral("motdSignature"), session->motdSignature() },
+								   { QStringLiteral("motdDismissedSignature"),
+									 session->motdDismissedSignature() },
+								   { QStringLiteral("motdLastSeenSignature"),
+									 session->motdLastSeenSignature() },
+								   { QStringLiteral("motdChanged"), session->motdChanged() },
+								   { QStringLiteral("motdActions"), session->motdActions() },
 								   { QStringLiteral("pttPressed"), commands->pttPressed() } });
 		QVariantMap activeScopeState { { QStringLiteral("scopeToken"), scope->scopeToken() },
 									{ QStringLiteral("label"), scope->label() },
@@ -5027,7 +5223,8 @@ QVariantMap ModernUiAutomationServer::buildStateResponse() const {
 									{ QStringLiteral("canSend"), scope->canSend() },
 									{ QStringLiteral("canLoadOlder"), scope->canLoadOlder() },
 									{ QStringLiteral("loading"), scope->loading() },
-									{ QStringLiteral("loadingState"), scope->loadingState() } };
+									{ QStringLiteral("loadingState"), scope->loadingState() },
+									{ QStringLiteral("screenShare"), scope->screenShare() } };
 		if (m_mainWindow && m_mainWindow->m_persistentChatController) {
 			const PersistentChatScopeKey controllerScope = m_mainWindow->m_persistentChatController->activeScope();
 			const PersistentChatScopeStateSnapshot controllerSnapshot =
@@ -5042,7 +5239,6 @@ QVariantMap ModernUiAutomationServer::buildStateResponse() const {
 			activeScopeState.insert(QStringLiteral("canViewHistory"),
 				m_mainWindow->canViewPersistentChatHistory(target, false));
 		}
-		state.insert(QStringLiteral("activeScope"), activeScopeState);
 		state.insert(QStringLiteral("selection"),
 					 QVariantMap { { QStringLiteral("scopeToken"), selection->scopeToken() },
 								   { QStringLiteral("selectedUserSession"), selection->selectedUserSession() },
@@ -5058,7 +5254,15 @@ QVariantMap ModernUiAutomationServer::buildStateResponse() const {
 			if (!item.contains(QStringLiteral("token"))) item.insert(QStringLiteral("token"), modelRow.value(QStringLiteral("id")));
 			(modelRow.value(QStringLiteral("kind")).toString() == QLatin1String("voice") ? voiceRooms : textRooms)
 				.push_back(item);
+			// The active-scope controller is the authoritative typed state. Only fall back to the room row
+			// when an older producer did not publish a screen-share payload on the active scope itself.
+			if (activeScopeState.value(QStringLiteral("screenShare")).toMap().isEmpty()
+				&& item.value(QStringLiteral("token")).toString() == scope->scopeToken()
+				&& item.contains(QStringLiteral("screenShare"))) {
+				activeScopeState.insert(QStringLiteral("screenShare"), item.value(QStringLiteral("screenShare")));
+			}
 		}
+		state.insert(QStringLiteral("activeScope"), activeScopeState);
 		state.insert(QStringLiteral("voiceRooms"), voiceRooms);
 		state.insert(QStringLiteral("textRooms"), textRooms);
 
@@ -5075,6 +5279,10 @@ QVariantMap ModernUiAutomationServer::buildStateResponse() const {
 		state.insert(QStringLiteral("messages"), modelRows(host->chatModel(), true));
 		state.insert(QStringLiteral("actions"), modelRows(host->actionModel(), false));
 		state.insert(QStringLiteral("dialog"), host->dialogController()->state());
+		const QVariantMap themeState = host->themeController() ? host->themeController()->state() : QVariantMap();
+		state.insert(QStringLiteral("themeState"), themeState);
+		// Preserve the established automation wire key while sourcing it from the typed theme controller.
+		state.insert(QStringLiteral("uiTweaks"), themeState);
 	}
 	// Keep the wire key and command ID stable for existing automation clients;
 	// the payload is now composed directly from typed QML controllers and models.

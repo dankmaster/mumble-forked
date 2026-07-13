@@ -5,6 +5,7 @@
 #include "UiTheme.h"
 
 #include <QtCore/QObject>
+#include <QtCore/QVariantMap>
 #include <QtGui/QColor>
 
 class QmlThemeController final : public QObject {
@@ -27,6 +28,12 @@ class QmlThemeController final : public QObject {
 	Q_PROPERTY(int innerRadius READ innerRadius NOTIFY themeChanged)
 	Q_PROPERTY(int spacing READ spacing NOTIFY themeChanged)
 	Q_PROPERTY(bool compact READ compact NOTIFY densityChanged)
+	Q_PROPERTY(QString themeId READ themeId NOTIFY themeStateChanged)
+	Q_PROPERTY(QString themeSource READ themeSource NOTIFY themeStateChanged)
+	Q_PROPERTY(QString densityId READ densityId NOTIFY densityChanged)
+	Q_PROPERTY(QString accentId READ accentId NOTIFY themeStateChanged)
+	Q_PROPERTY(QString railSide READ railSide NOTIFY themeStateChanged)
+	Q_PROPERTY(QVariantMap state READ state NOTIFY themeStateChanged)
 
 public:
 	explicit QmlThemeController(QObject *parent = nullptr);
@@ -49,8 +56,16 @@ public:
 	int innerRadius() const { return m_innerRadius; }
 	int spacing() const { return m_spacing; }
 	bool compact() const { return m_compact; }
+	QString themeId() const { return m_themeId; }
+	QString themeSource() const { return m_themeSource; }
+	QString densityId() const { return m_densityId; }
+	QString accentId() const { return m_accentId; }
+	QString railSide() const { return m_railSide; }
+	QVariantMap state() const;
 
 	Q_INVOKABLE void refresh();
+	bool applyProductAppearance(const QString &theme, const QString &density, const QString &accent,
+							const QString &customAccent = QStringLiteral("#5ec8b0"), int customAccentStrength = 50);
 	void applyTokens(const UiThemeTokens &tokens, const Mumble::ModernTheme::ThemeMetrics &metrics = {},
 					 const QColor &shellBackground = {});
 	bool applyVisualGateAppearance(const QString &theme, const QString &layout);
@@ -58,11 +73,16 @@ public:
 signals:
 	void themeChanged();
 	void densityChanged();
+	void themeStateChanged();
 
 protected:
 	bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
+	void applyProductTokens(UiThemeTokens tokens, Mumble::ModernTheme::ThemeMetrics metrics,
+						const QColor &shellBackground, const QString &themeId, const QString &themeSource,
+						const QString &densityId, const QString &accentId, const QString &customAccent,
+						int customAccentStrength);
 	QColor m_shellBackground = QColor(QStringLiteral("#20262f"));
 	QColor m_panel = QColor(QStringLiteral("#262d38"));
 	QColor m_rail = QColor(QStringLiteral("#1b2027"));
@@ -81,6 +101,11 @@ private:
 	int m_innerRadius = 11;
 	int m_spacing = 12;
 	bool m_compact = false;
+	QString m_themeId = QStringLiteral("dark");
+	QString m_themeSource = QStringLiteral("modernShell");
+	QString m_densityId = QStringLiteral("comfortable");
+	QString m_accentId = QStringLiteral("auto");
+	QString m_railSide = QStringLiteral("right");
 };
 
 #endif

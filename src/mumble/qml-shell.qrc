@@ -3,6 +3,11 @@
     <file alias="Main.qml">qml-shell/Main.qml</file>
     <file alias="Theme.qml">qml-shell/Theme.qml</file>
     <file alias="ModernButton.qml">qml-shell/ModernButton.qml</file>
+	<file alias="ModernMenu.qml">qml-shell/ModernMenu.qml</file>
+	<file alias="NavigationRail.qml">qml-shell/NavigationRail.qml</file>
+	<file alias="PayloadMenuItem.qml">qml-shell/PayloadMenuItem.qml</file>
+	<file alias="ConnectionBanner.qml">qml-shell/ConnectionBanner.qml</file>
+	<file alias="MotdPanel.qml">qml-shell/MotdPanel.qml</file>
 	<file alias="UpdateBanner.qml">qml-shell/UpdateBanner.qml</file>
 	<file alias="ScreenShareEditor.qml">qml-shell/ScreenShareEditor.qml</file>
 	<file alias="ImageViewer.qml">qml-shell/ImageViewer.qml</file>

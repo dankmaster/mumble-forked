@@ -22,6 +22,13 @@ class ClientSessionController final : public QObject {
 	Q_OBJECT
 	Q_PROPERTY(QString serverName READ serverName WRITE setServerName NOTIFY serverNameChanged)
 	Q_PROPERTY(QString connectionLabel READ connectionLabel WRITE setConnectionLabel NOTIFY connectionLabelChanged)
+	Q_PROPERTY(QString selfStatusLabel READ selfStatusLabel WRITE setSelfStatusLabel NOTIFY selfStatusLabelChanged)
+	Q_PROPERTY(QString connectionState READ connectionState WRITE setConnectionState NOTIFY connectionStateChanged)
+	Q_PROPERTY(QString connectionTone READ connectionTone WRITE setConnectionTone NOTIFY connectionToneChanged)
+	Q_PROPERTY(QString connectionDetail READ connectionDetail WRITE setConnectionDetail NOTIFY connectionDetailChanged)
+	Q_PROPERTY(int connectionRetryRemainingMs READ connectionRetryRemainingMs WRITE setConnectionRetryRemainingMs NOTIFY connectionRetryRemainingMsChanged)
+	Q_PROPERTY(bool canConnect READ canConnect WRITE setCanConnect NOTIFY canConnectChanged)
+	Q_PROPERTY(bool canCancel READ canCancel WRITE setCanCancel NOTIFY canCancelChanged)
 	Q_PROPERTY(QString selfName READ selfName WRITE setSelfName NOTIFY selfNameChanged)
 	Q_PROPERTY(bool connected READ connected WRITE setConnected NOTIFY connectedChanged)
 	Q_PROPERTY(bool selfMuted READ selfMuted WRITE setSelfMuted NOTIFY selfMutedChanged)
@@ -29,12 +36,27 @@ class ClientSessionController final : public QObject {
 	Q_PROPERTY(QVariantMap updateBanner READ updateBanner WRITE setUpdateBanner NOTIFY updateBannerChanged)
 	Q_PROPERTY(QString motdHtml READ motdHtml WRITE setMotdHtml NOTIFY motdHtmlChanged)
 	Q_PROPERTY(QString motdSummary READ motdSummary WRITE setMotdSummary NOTIFY motdSummaryChanged)
+	Q_PROPERTY(bool hasMotd READ hasMotd NOTIFY hasMotdChanged)
+	Q_PROPERTY(bool motdExpanded READ motdExpanded WRITE setMotdExpanded NOTIFY motdExpandedChanged)
+	Q_PROPERTY(bool motdDismissed READ motdDismissed NOTIFY motdDismissedChanged)
+	Q_PROPERTY(QString motdSignature READ motdSignature NOTIFY motdSignatureChanged)
+	Q_PROPERTY(QString motdDismissedSignature READ motdDismissedSignature WRITE setMotdDismissedSignature NOTIFY motdDismissedSignatureChanged)
+	Q_PROPERTY(QString motdLastSeenSignature READ motdLastSeenSignature WRITE setMotdLastSeenSignature NOTIFY motdLastSeenSignatureChanged)
+	Q_PROPERTY(bool motdChanged READ motdChanged NOTIFY motdChangedChanged)
+	Q_PROPERTY(QVariantList motdActions READ motdActions NOTIFY motdActionsChanged)
 
 public:
 	explicit ClientSessionController(QObject *parent = nullptr);
 
 	QString serverName() const;
 	QString connectionLabel() const;
+	QString selfStatusLabel() const;
+	QString connectionState() const;
+	QString connectionTone() const;
+	QString connectionDetail() const;
+	int connectionRetryRemainingMs() const;
+	bool canConnect() const;
+	bool canCancel() const;
 	QString selfName() const;
 	bool connected() const;
 	bool selfMuted() const;
@@ -42,9 +64,24 @@ public:
 	QVariantMap updateBanner() const;
 	QString motdHtml() const;
 	QString motdSummary() const;
+	bool hasMotd() const;
+	bool motdExpanded() const;
+	bool motdDismissed() const;
+	QString motdSignature() const;
+	QString motdDismissedSignature() const;
+	QString motdLastSeenSignature() const;
+	bool motdChanged() const;
+	QVariantList motdActions() const;
 
 	void setServerName(const QString &value);
 	void setConnectionLabel(const QString &value);
+	void setSelfStatusLabel(const QString &value);
+	void setConnectionState(const QString &value);
+	void setConnectionTone(const QString &value);
+	void setConnectionDetail(const QString &value);
+	void setConnectionRetryRemainingMs(int value);
+	void setCanConnect(bool value);
+	void setCanCancel(bool value);
 	void setSelfName(const QString &value);
 	void setConnected(bool value);
 	void setSelfMuted(bool value);
@@ -52,10 +89,21 @@ public:
 	void setUpdateBanner(const QVariantMap &value);
 	void setMotdHtml(const QString &value);
 	void setMotdSummary(const QString &value);
+	void setMotdExpanded(bool value);
+	void setMotdDismissedSignature(const QString &value);
+	void setMotdLastSeenSignature(const QString &value);
+	void applyState(const QVariantMap &state);
 
 signals:
 	void serverNameChanged();
 	void connectionLabelChanged();
+	void selfStatusLabelChanged();
+	void connectionStateChanged();
+	void connectionToneChanged();
+	void connectionDetailChanged();
+	void connectionRetryRemainingMsChanged();
+	void canConnectChanged();
+	void canCancelChanged();
 	void selfNameChanged();
 	void connectedChanged();
 	void selfMutedChanged();
@@ -63,10 +111,26 @@ signals:
 	void updateBannerChanged();
 	void motdHtmlChanged();
 	void motdSummaryChanged();
+	void hasMotdChanged();
+	void motdExpandedChanged();
+	void motdDismissedChanged();
+	void motdSignatureChanged();
+	void motdDismissedSignatureChanged();
+	void motdLastSeenSignatureChanged();
+	void motdChangedChanged();
+	void motdActionsChanged();
 
 private:
+	void recomputeMotdDerivedState();
 	QString m_serverName = QStringLiteral("Mumble");
 	QString m_connectionLabel = QStringLiteral("Disconnected");
+	QString m_selfStatusLabel = QStringLiteral("Offline");
+	QString m_connectionState = QStringLiteral("disconnected");
+	QString m_connectionTone = QStringLiteral("muted");
+	QString m_connectionDetail;
+	int m_connectionRetryRemainingMs = 0;
+	bool m_canConnect = true;
+	bool m_canCancel = false;
 	QString m_selfName = QStringLiteral("You");
 	bool m_connected = false;
 	bool m_selfMuted = false;
@@ -74,6 +138,14 @@ private:
 	QVariantMap m_updateBanner;
 	QString m_motdHtml;
 	QString m_motdSummary;
+	bool m_hasMotd = false;
+	bool m_motdExpanded = true;
+	bool m_motdDismissed = false;
+	QString m_motdSignature;
+	QString m_motdDismissedSignature;
+	QString m_motdLastSeenSignature;
+	bool m_motdChanged = false;
+	QVariantList m_motdActions;
 };
 
 class ActiveScopeController final : public QObject {
@@ -92,6 +164,7 @@ class ActiveScopeController final : public QObject {
 	Q_PROPERTY(bool canLoadOlder READ canLoadOlder WRITE setCanLoadOlder NOTIFY canLoadOlderChanged)
 	Q_PROPERTY(bool loading READ loading WRITE setLoading NOTIFY loadingChanged)
 	Q_PROPERTY(QString loadingState READ loadingState WRITE setLoadingState NOTIFY loadingStateChanged)
+	Q_PROPERTY(QVariantMap screenShare READ screenShare WRITE setScreenShare NOTIFY screenShareChanged)
 
 public:
 	explicit ActiveScopeController(QObject *parent = nullptr);
@@ -109,6 +182,7 @@ public:
 	bool canLoadOlder() const;
 	bool loading() const;
 	QString loadingState() const;
+	QVariantMap screenShare() const;
 	void setScopeToken(const QString &value);
 	void setLabel(const QString &value);
 	void setDescription(const QString &value);
@@ -123,6 +197,7 @@ public:
 	void setCanLoadOlder(bool value);
 	void setLoading(bool value);
 	void setLoadingState(const QString &value);
+	void setScreenShare(const QVariantMap &value);
 	void applyState(const QVariantMap &state);
 
 signals:
@@ -140,6 +215,7 @@ signals:
 	void canLoadOlderChanged();
 	void loadingChanged();
 	void loadingStateChanged();
+	void screenShareChanged();
 
 private:
 	QString m_scopeToken;
@@ -156,6 +232,7 @@ private:
 	bool m_canLoadOlder = false;
 	bool m_loading = false;
 	QString m_loadingState;
+	QVariantMap m_screenShare;
 };
 
 class StableListModel : public QAbstractListModel {
@@ -460,8 +537,13 @@ public:
 	Q_INVOKABLE void deleteMessage(const QString &messageId);
 	Q_INVOKABLE void toggleMessageReaction(const QString &messageId, const QString &emoji);
 	Q_INVOKABLE void invokeAction(const QString &actionId);
+	Q_INVOKABLE void invokeAppAction(const QString &actionId, const QVariantMap &payload = {});
 	Q_INVOKABLE void invokeScopeAction(const QString &scopeToken, const QString &actionId);
+	Q_INVOKABLE void invokeScopeActionValue(const QString &scopeToken, const QString &actionId, int value,
+										bool finalValue);
 	Q_INVOKABLE void invokeParticipantAction(const QString &sessionId, const QString &actionId);
+	Q_INVOKABLE void invokeParticipantActionValue(const QString &sessionId, const QString &actionId, int value,
+											  bool finalValue);
 	Q_INVOKABLE void toggleSelfMute();
 	Q_INVOKABLE void toggleSelfDeaf();
 	Q_INVOKABLE void setPttPressed(bool pressed);
@@ -482,8 +564,12 @@ signals:
 	void messageDeleteRequested(const QString &messageId);
 	void messageReactionToggleRequested(const QString &messageId, const QString &emoji);
 	void actionRequested(const QString &actionId);
+	void appActionRequested(const QString &actionId, const QVariantMap &payload);
 	void scopeActionRequested(const QString &scopeToken, const QString &actionId);
+	void scopeActionValueRequested(const QString &scopeToken, const QString &actionId, int value, bool finalValue);
 	void participantActionRequested(const QString &sessionId, const QString &actionId);
+	void participantActionValueRequested(const QString &sessionId, const QString &actionId, int value,
+										 bool finalValue);
 	void selfMuteToggleRequested();
 	void selfDeafToggleRequested();
 	void pttPressedChanged();

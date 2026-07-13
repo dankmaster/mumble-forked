@@ -6,10 +6,14 @@ import Mumble.Theme 1.0
 
 Dialog {
     id: dialog
+	readonly property int densityInset: Theme.spacing + 6
+	readonly property int sectionPadding: Theme.spacing + 2
+	readonly property bool compactDialogLayout: width < 640
     parent: Overlay.overlay
     visible: dialogState.open
-    modal: true
-    focus: true
+	modal: true
+	focus: true
+	title: dialogState.title
     width: Math.min(parent ? parent.width - 48 : 920, 1040)
     height: Math.min(parent ? parent.height - 48 : 700, 760)
     x: parent ? Math.round((parent.width - width) / 2) : 0
@@ -23,18 +27,22 @@ Dialog {
         radius: Theme.shellRadius
     }
 
-    contentItem: ColumnLayout {
-        spacing: 0
+	contentItem: ColumnLayout {
+		Accessible.role: Accessible.Dialog
+		Accessible.name: dialogState.title
+		Accessible.description: dialogState.subtitle
+		spacing: 0
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 76
+            Layout.preferredHeight: Theme.densityId === "compact" ? 68
+                                    : Theme.densityId === "spacious" ? 84 : 76
             color: Theme.panel
             border.color: Theme.divider
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 20
-                anchors.rightMargin: 12
+                anchors.leftMargin: dialog.densityInset + 2
+                anchors.rightMargin: Theme.spacing
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 3
@@ -64,21 +72,23 @@ Dialog {
             spacing: 0
 
             Rectangle {
+				objectName: "dialogPageRail"
                 Layout.preferredWidth: visible ? 190 : 0
                 Layout.fillHeight: true
-                visible: dialogState.pages.length > 0
+				visible: dialogState.pages.length > 0 && !dialog.compactDialogLayout
                 color: Theme.rail
                 border.color: Theme.divider
                 ListView {
                     anchors.fill: parent
-                    anchors.margins: 10
+                    anchors.margins: Math.max(8, Theme.spacing - 2)
                     model: dialogState.pages
                     clip: true
-                    spacing: 3
+                    spacing: Math.max(2, Math.round(Theme.spacing / 4))
                     delegate: ItemDelegate {
                         required property var modelData
                         width: ListView.view.width
-                        height: 40
+                        height: Theme.densityId === "compact" ? 36
+                                : Theme.densityId === "spacious" ? 46 : 40
                         text: modelData.label || modelData.title || modelData.id
                         highlighted: modelData.selected || modelData.id === dialogState.activePage
                         onClicked: dialogState.invokeAction("selectPage", { "pageId": modelData.id })
@@ -93,19 +103,56 @@ Dialog {
                 contentWidth: availableWidth
                 Column {
                     width: parent.width
-                    spacing: 16
+                    spacing: Theme.spacing + 4
+					ComboBox {
+						id: compactPageSelector
+						objectName: "dialogCompactPageSelector"
+						width: parent.width - (dialog.densityInset * 2)
+						x: dialog.densityInset
+						visible: dialog.compactDialogLayout && dialogState.pages.length > 0
+						height: visible ? implicitHeight : 0
+						model: dialogState.pages
+						textRole: "label"
+						displayText: {
+							dialogState.revision
+							const page = currentIndex >= 0 && currentIndex < dialogState.pages.length
+								? dialogState.pages[currentIndex] : null
+							return page ? (page.label || page.title || page.id || "") : ""
+						}
+						currentIndex: {
+							dialogState.revision
+							for (let index = 0; index < dialogState.pages.length; ++index) {
+								if (String(dialogState.pages[index].id || "") === String(dialogState.activePage || ""))
+									return index
+							}
+							return dialogState.pages.length > 0 ? 0 : -1
+						}
+						delegate: ItemDelegate {
+							required property var modelData
+							required property int index
+							width: compactPageSelector.popup ? compactPageSelector.popup.width : compactPageSelector.width
+							text: modelData.label || modelData.title || modelData.id || ""
+							highlighted: compactPageSelector.highlightedIndex === index
+						}
+						onActivated: index => {
+							const page = index >= 0 && index < dialogState.pages.length ? dialogState.pages[index] : null
+							if (page)
+								dialogState.invokeAction("selectPage", { "pageId": page.id })
+						}
+						Accessible.name: qsTr("Settings page")
+					}
                     Loader {
                         id: screenShareLoader
-                        width: parent.width - 36
-                        x: 18
+                        width: parent.width - (dialog.densityInset * 2)
+                        x: dialog.densityInset
                         active: dialogState.kind === "screenShare"
                         visible: active
                         sourceComponent: screenShareEditorComponent
                         onLoaded: item.shareState = dialogState.state.screenShare || ({})
                     }
                     Loader {
-                        width: parent.width - 36
-                        x: 18
+                        width: parent.width - (dialog.densityInset * 2)
+                        x: dialog.densityInset
                         active: dialogState.kind === "stonks"
                         visible: active
                         sourceComponent: stonksEditorComponent
@@ -116,9 +163,9 @@ Dialog {
                         model: dialogState.sections
                         delegate: Rectangle {
                             required property var modelData
-                            width: parent.width - 36
-                            x: 18
-                            height: sectionColumn.implicitHeight + 28
+                            width: parent.width - (dialog.densityInset * 2)
+                            x: dialog.densityInset
+                            height: sectionColumn.implicitHeight + (dialog.sectionPadding * 2)
                             color: Theme.panel
                             border.color: Theme.divider
                             radius: Theme.innerRadius
@@ -127,8 +174,8 @@ Dialog {
                                 anchors.left: parent.left
                                 anchors.right: parent.right
                                 anchors.top: parent.top
-                                anchors.margins: 14
-                                spacing: 10
+                                anchors.margins: dialog.sectionPadding
+                                spacing: Math.max(6, Theme.spacing - 2)
                                 Label {
                                     width: parent.width
                                     text: modelData.title || ""
@@ -204,14 +251,20 @@ Dialog {
         }
 
         Rectangle {
+			objectName: "dialogFooter"
             Layout.fillWidth: true
-            Layout.preferredHeight: 64
+			Layout.preferredHeight: Math.max(Theme.densityId === "compact" ? 56
+									 : Theme.densityId === "spacious" ? 72 : 64,
+				footerActions.childrenRect.height + (Theme.spacing * 2))
             color: Theme.strip
             border.color: Theme.divider
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: 12
-                Item { Layout.fillWidth: true }
+			Flow {
+				id: footerActions
+				x: Theme.spacing
+				y: Theme.spacing
+				width: parent.width - (Theme.spacing * 2)
+				spacing: Math.max(6, Math.round(Theme.spacing / 2))
+				layoutDirection: Qt.RightToLeft
                 Repeater {
                     model: dialogState.actions
                     delegate: ModernButton {
@@ -359,8 +412,9 @@ Dialog {
             implicitHeight: 170
             color: Theme.strip
             radius: Theme.innerRadius
-            Canvas {
-                anchors.fill: parent
+			Canvas {
+				id: manualPositionCanvas
+				anchors.fill: parent
                 anchors.margins: 12
                 onPaint: {
                     const ctx = getContext("2d"); ctx.reset();
@@ -373,8 +427,11 @@ Dialog {
                     ctx.fillStyle = Theme.accent; ctx.beginPath()
                     ctx.arc(width / 2 + x * scale, height / 2 - z * scale, 7, 0, Math.PI * 2); ctx.fill()
                 }
-                Connections { target: dialogState; function onStateChanged() { parent.requestPaint() } }
-            }
+				Connections {
+					target: dialogState
+					function onStateChanged() { manualPositionCanvas.requestPaint() }
+				}
+			}
             Label { anchors.left: parent.left; anchors.top: parent.top; anchors.margins: 8; text: qsTr("Top view · X / Z"); color: Theme.textMuted; font.pixelSize: 9 }
         }
     }
@@ -402,18 +459,25 @@ Dialog {
     }
     Component {
         id: colorField
-        RowLayout {
-            id: colorRoot
-            property var field
+		RowLayout {
+			id: colorRoot
+			property var field: ({})
             width: parent ? parent.width : 0
             Label { Layout.fillWidth: true; text: colorRoot.field.label || ""; color: Theme.textMain }
-            Rectangle {
-                Layout.preferredWidth: 38; Layout.preferredHeight: 28; radius: 6
-                color: String(colorRoot.field.value || "#000000")
-                border.color: Theme.divider
+			Button {
+				objectName: "dialogColorButton_" + String(colorRoot.field.id || "")
+				Layout.preferredWidth: 38; Layout.preferredHeight: 28
+				text: ""
                 Accessible.role: Accessible.Button
                 Accessible.name: qsTr("Choose %1").arg(colorRoot.field.label || qsTr("color"))
-                MouseArea { anchors.fill: parent; onClicked: colorDialog.open() }
+				Accessible.description: String(colorRoot.field.value || "")
+				background: Rectangle {
+					radius: 6
+					color: String(colorRoot.field.value || "#000000")
+					border.color: parent.activeFocus ? Theme.focus : Theme.divider
+					border.width: parent.activeFocus ? 2 : 1
+				}
+				onClicked: colorDialog.open()
             }
             Label { text: String(colorRoot.field.value || ""); color: Theme.textMuted; font.pixelSize: 10 }
             ColorDialog {
