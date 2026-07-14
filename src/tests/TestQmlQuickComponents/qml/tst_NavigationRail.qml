@@ -87,6 +87,8 @@ TestCase {
         id: session
         property string serverName: "Test server"
         property string connectionLabel: "Connected"
+		property string connectionTone: "success"
+		property string connectionDetail: "Current ping: 12 ms"
         property string selfStatusLabel: "Online"
         property bool connected: true
         property string selfName: "Tester"
@@ -248,6 +250,28 @@ TestCase {
 			profile.forceActiveFocus()
     }
 
+	function test_header_restores_server_identity_and_connection_pill() {
+		const header = findChild(loader.item, "navigationServerHeader")
+		const badge = findChild(loader.item, "navigationServerBadge")
+		const monogram = findChild(loader.item, "navigationServerMonogram")
+		const serverName = findChild(loader.item, "navigationServerName")
+		const pill = findChild(loader.item, "navigationConnectionPill")
+		const dot = findChild(loader.item, "navigationConnectionDot")
+		const connectionLabel = findChild(loader.item, "navigationConnectionLabel")
+		verify(header !== null && badge !== null && monogram !== null && serverName !== null)
+		verify(pill !== null && dot !== null && connectionLabel !== null)
+		verify(header.height >= 98)
+		compare(monogram.text, "TS")
+		compare(String(monogram.color), String(Theme.onAccent))
+		compare(serverName.text, "Test server")
+		compare(connectionLabel.text, "Connected")
+		compare(String(dot.color), String(Theme.success))
+		compare(header.Accessible.role, Accessible.Grouping)
+		compare(header.Accessible.name, "Test server")
+		verify(header.Accessible.description.indexOf("Current ping: 12 ms") >= 0)
+		compare(pill.Accessible.name, "Connected")
+	}
+
 	function test_voice_room_return_selects_and_commits_navigation() {
         const room = findChild(loader.item, "navigationRoom_room-lobby")
         verify(room !== null)
@@ -347,13 +371,16 @@ TestCase {
 
 	function test_navigation_rows_use_one_roving_tab_stop() {
 		const navigationList = findChild(loader.item, "navigationRooms")
+		const scrollBar = findChild(loader.item, "navigationScrollBar")
 		const lobby = findChild(loader.item, "navigationRoom_room-lobby")
 		const participant = findChild(loader.item, "navigationParticipantSemantic_42")
 		const games = findChild(loader.item, "navigationRoom_room-games")
 		const activity = findChild(loader.item, "navigationRoom_room-activity")
 		const direct = findChild(loader.item, "navigationRoom_room-direct")
-		verify(navigationList !== null && lobby !== null && participant !== null)
+		verify(navigationList !== null && scrollBar !== null && lobby !== null && participant !== null)
 		verify(games !== null && activity !== null && direct !== null)
+		verify(scrollBar.interactive)
+		compare(scrollBar.orientation, Qt.Vertical)
 
 		navigationList.currentIndex = 0
 		wait(0)
@@ -481,7 +508,7 @@ TestCase {
 			> games.mapToItem(navigationList.contentItem, 0, 0).y)
 		compare(alice.parentScopeToken, "channel:1")
 		compare(listener.parentScopeToken, "channel:2")
-		compare(alice.height, 31)
+		compare(alice.height, 36)
 		compare(alice.mapToItem(navigationList, 0, 0).x,
 			listener.mapToItem(navigationList, 0, 0).x)
 		compare(details.text, "You are here")
@@ -491,13 +518,17 @@ TestCase {
 
 	function test_only_open_conversation_uses_selected_purple() {
 		const activity = findChild(loader.item, "navigationRoom_room-activity")
+		const accent = findChild(loader.item, "navigationRoomSelectionAccent_room-activity")
 		const gamesDetails = findChild(loader.item, "navigationRoomDetails_room-games")
-		verify(activity !== null && gamesDetails !== null)
+		verify(activity !== null && accent !== null && gamesDetails !== null)
 		verify(!gamesDetails.visible)
 		navigationRows.setProperty(4, "selected", true)
 		tryCompare(activity, "color", Theme.selected)
-		compare(activity.border.color, Theme.accent)
+		compare(activity.border.width, 0)
+		verify(accent.visible)
+		compare(accent.color, Theme.accent)
 		navigationRows.setProperty(4, "selected", false)
+		tryCompare(accent, "visible", false)
 	}
 
 	function test_selected_participant_uses_selection_tokens() {
@@ -510,8 +541,10 @@ TestCase {
 		})
 		selection.selectedUserSession = "42"
 		tryCompare(participant, "color", Theme.selected)
-		compare(participant.border.color, Theme.accent)
-		compare(participant.border.width, 1)
+		compare(participant.border.width, 0)
+		const accent = findChild(loader.item, "navigationParticipantSelectionAccent_42")
+		verify(accent !== null && accent.visible)
+		compare(accent.color, Theme.accent)
 		verify(semanticParticipant.Accessible.selected)
 		compare(semanticParticipant.Accessible.role, Accessible.ListItem)
 		verify(participant.Accessible.ignored)
@@ -546,6 +579,51 @@ TestCase {
 		selection.selectedUserSession = undefined
 	}
 
+	function test_scrollbar_supports_wheel_and_pointer_drag() {
+		const navigationList = findChild(loader.item, "navigationRooms")
+		const scrollBar = findChild(loader.item, "navigationScrollBar")
+		const lobbyMouse = findChild(loader.item, "navigationRoomMouse_room-lobby")
+		verify(navigationList !== null && scrollBar !== null && lobbyMouse !== null)
+		const originalCount = navigationRows.count
+		try {
+			for (let index = 0; index < 24; ++index) {
+				navigationRows.append({
+					"stableId": "scroll-test-" + index,
+					"scopeToken": "scroll:" + index,
+					"title": "Scrollable room " + index,
+					"subtitle": "Wheel and drag fixture",
+					"kind": "text", "sectionKind": "text", "selected": false,
+					"depth": 0, "unreadCount": 0, "status": "",
+					"payload": { "rowKind": "room", "source": { "actions": [] } }
+				})
+			}
+			navigationList.forceLayout()
+			tryVerify(function() {
+				return navigationList.contentHeight > navigationList.height && scrollBar.size < 1
+			})
+
+			navigationList.positionViewAtBeginning()
+			wait(0)
+			const wheelStart = navigationList.contentY
+			mouseWheel(lobbyMouse, lobbyMouse.width / 2, lobbyMouse.height / 2,
+				0, -120, Qt.NoButton, Qt.NoModifier, 20)
+			tryVerify(function() { return navigationList.contentY > wheelStart })
+
+			navigationList.positionViewAtBeginning()
+			wait(0)
+			const dragStart = navigationList.contentY
+			const thumbCenter = Math.max(6, scrollBar.height * scrollBar.size / 2)
+			mousePress(scrollBar, scrollBar.width / 2, thumbCenter, Qt.LeftButton)
+			mouseMove(scrollBar, scrollBar.width / 2, scrollBar.height * 0.72, 40)
+			mouseRelease(scrollBar, scrollBar.width / 2, scrollBar.height * 0.72, Qt.LeftButton)
+			tryVerify(function() { return navigationList.contentY > dragStart + 8 })
+		} finally {
+			navigationRows.remove(originalCount, navigationRows.count - originalCount)
+			navigationList.positionViewAtBeginning()
+			navigationList.forceLayout()
+		}
+	}
+
 	function test_sections_and_keyboard_focus_are_visually_explicit() {
 		compare(loader.item.activeFocusOnTab, false)
 		const voiceSection = findChild(loader.item, "navigationSection_voice")
@@ -555,13 +633,17 @@ TestCase {
 		verify(textSection !== null)
 		verify(directSection !== null)
 		compare(voiceSection.Accessible.name, "VOICE ROOMS · 2")
-		compare(textSection.Accessible.name, "TEXT & ACTIVITY · 1")
+		compare(textSection.Accessible.name, "TEXT ROOMS · 1")
 		compare(directSection.Accessible.name, "DIRECT MESSAGES · 1")
 		for (const kind of [ "voice", "text", "direct" ]) {
 			const visualLabel = findChild(loader.item, "navigationSectionLabel_" + kind)
 			verify(visualLabel !== null)
 			verify(visualLabel.Accessible.ignored)
+			verify(String(visualLabel.text).indexOf(" · ") < 0)
+			compare(String(visualLabel.color), String(Theme.withAlpha(Theme.accent, 0.76)))
 		}
+		compare(findChild(loader.item, "navigationSectionLabel_voice").text, "VOICE ROOMS")
+		compare(findChild(loader.item, "navigationSectionLabel_text").text, "TEXT ROOMS")
 
 		const room = findChild(loader.item, "navigationRoom_room-lobby")
 		const participant = findChild(loader.item, "navigationParticipant_42")
@@ -640,11 +722,12 @@ TestCase {
 		compare(commands.selectScopeCount, 0)
 	}
 
-	function test_room_join_share_live_badge_and_actions_are_visible() {
+	function test_room_join_share_and_overflow_take_priority_over_badge_noise() {
 		const room = findChild(loader.item, "navigationRoom_room-lobby")
 		const games = findChild(loader.item, "navigationRoom_room-games")
 		const joined = findChild(loader.item, "navigationRoomJoined_room-lobby")
 		const liveBadge = findChild(loader.item, "navigationRoomShareBadge_room-lobby")
+		const roomBadge = findChild(loader.item, "navigationRoomBadge_room-lobby")
 		const share = findChild(loader.item, "navigationRoomShare_room-lobby")
 		const actions = findChild(loader.item, "navigationRoomActions_room-lobby")
 		const join = findChild(loader.item, "navigationRoomJoin_room-games")
@@ -654,8 +737,9 @@ TestCase {
 		tryCompare(profile, "activeFocus", true)
 		mouseMove(loader.item, loader.item.width - 2, 2)
 		wait(0)
-		verify(joined !== null && joined.visible)
-		verify(liveBadge !== null && liveBadge.visible)
+		verify(joined !== null && !joined.visible)
+		verify(liveBadge !== null && !liveBadge.visible)
+		verify(roomBadge !== null && !roomBadge.visible)
 		verify(share !== null && share.visible && share.enabled)
 		verify(room !== null && games !== null && actions !== null && join !== null)
 		verify(actions.visible)
@@ -664,8 +748,9 @@ TestCase {
 		compare(join.Accessible.name, "Join")
 		verify(share.contentItem.Accessible.ignored)
 		compare(share.Accessible.name, "Live")
-		tryCompare(actions, "opacity", 0.72)
-		tryCompare(join, "opacity", 0.52)
+		verify(actions.opacity >= 0.62 && actions.opacity <= 1)
+		verify(join.opacity >= 0.68 && join.opacity <= 1)
+		verify(share.opacity >= 0.82 && share.opacity <= 1)
 		room.forceActiveFocus()
 		tryCompare(room, "activeFocus", true)
 		tryCompare(actions, "opacity", 1)
@@ -707,8 +792,8 @@ TestCase {
 		wait(0)
 		verify(roomActions.visible)
 		verify(participantActions.visible)
-		compare(roomActions.opacity, 0.72)
-		compare(participantActions.opacity, 0.72)
+		verify(roomActions.opacity >= 0.62 && roomActions.opacity <= 1)
+		verify(participantActions.opacity >= 0.72 && participantActions.opacity <= 1)
 
 		loader.item.activeScopeMenuToken = "channel:1"
 		loader.item.activeParticipantMenuKey = "user:42"
@@ -726,8 +811,10 @@ TestCase {
 		const avatar = findChild(loader.item, "navigationParticipantAvatar_42")
 		const avatarImage = findChild(loader.item, "navigationParticipantAvatarImage_42")
 		const talk = findChild(loader.item, "navigationParticipantTalk_42")
+		const talkChip = findChild(loader.item, "navigationParticipantStatus_42_talking")
 		const muted = findChild(loader.item, "navigationParticipantStatus_42_selfMuted")
 		const deafened = findChild(loader.item, "navigationParticipantStatus_42_selfDeafened")
+		const guide = findChild(loader.item, "navigationParticipantGuide_42")
 		const volume = findChild(loader.item, "navigationParticipantVolume_42")
 		const details = findChild(loader.item, "navigationParticipantDetails_42")
 		const actions = findChild(loader.item, "navigationParticipantActions_42")
@@ -741,8 +828,11 @@ TestCase {
 		compare(avatarImage.sourceSize.width, 52)
 		compare(avatarImage.sourceSize.height, 52)
 		verify(talk !== null && talk.visible)
+		compare(talkChip, null)
 		verify(muted !== null && muted.visible)
 		verify(deafened !== null && deafened.visible)
+		verify(guide !== null && guide.visible)
+		compare(guide.color, Theme.selfCardBorder)
 		verify(volume !== null && volume.visible)
 		verify(details !== null && details.visible)
 		verify(String(details.text).indexOf("Talking") >= 0)
@@ -842,6 +932,42 @@ TestCase {
 		compare(commands.selfMuteToggleCount, 1)
 		compare(commands.selfDeafToggleCount, 1)
 		compare(profileMenuSpy.count, 0)
+	}
+
+	function test_self_dock_uses_semantic_tokens_presence_and_explicit_focus_order() {
+		const dock = findChild(loader.item, "navigationSelfDock")
+		const avatar = findChild(loader.item, "selfAvatar")
+		const presence = findChild(loader.item, "selfPresenceDot")
+		const nameLabel = findChild(loader.item, "selfNameLabel")
+		const statusLabel = findChild(loader.item, "selfStatusLabel")
+		const muteButton = findChild(loader.item, "selfMuteButton")
+		const deafenButton = findChild(loader.item, "selfDeafenButton")
+		const profileButton = findChild(loader.item, "profileMenuButton")
+		verify(dock !== null && avatar !== null && presence !== null)
+		verify(nameLabel !== null && statusLabel !== null)
+		verify(muteButton !== null && deafenButton !== null && profileButton !== null)
+		compare(dock.Accessible.role, Accessible.Grouping)
+		verify(dock.Accessible.name.indexOf("Tester") >= 0)
+		verify(dock.Accessible.description.indexOf("Online") >= 0)
+		verify(nameLabel.Accessible.ignored)
+		verify(statusLabel.Accessible.ignored)
+		compare(String(statusLabel.color), String(Theme.textFaint))
+		compare(String(presence.color), String(Theme.success))
+		compare(String(dock.color), String(Theme.selfCardHover))
+
+		muteButton.forceActiveFocus()
+		tryCompare(muteButton, "activeFocus", true)
+		keyClick(Qt.Key_Tab)
+		tryCompare(deafenButton, "activeFocus", true)
+		keyClick(Qt.Key_Tab)
+		tryCompare(profileButton, "activeFocus", true)
+		keyClick(Qt.Key_Backtab)
+		tryCompare(deafenButton, "activeFocus", true)
+
+		session.selfMuted = true
+		tryCompare(presence, "color", Theme.danger)
+		verify(dock.Accessible.description.indexOf("Microphone muted") >= 0)
+		session.selfMuted = false
 	}
 
 	function test_pointer_clicks_remain_clicks_with_drag_handlers() {

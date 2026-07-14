@@ -72,6 +72,17 @@ Rectangle {
 		return /^(image:\/\/mumble\/|data:image\/)/i.test(source) ? source : ""
 	}
 
+	function serverMonogram(value) {
+		const label = String(value || "").trim()
+		const parts = label.split(/[\s._-]+/).filter(function(part) { return part.length > 0 })
+		if (parts.length > 1)
+			return (parts[0].slice(0, 1) + parts[parts.length - 1].slice(0, 1)).toUpperCase()
+		const compact = label.replace(/[^\p{L}\p{N}]/gu, "")
+		if (compact.length === 0)
+			return "M"
+		return (compact.slice(0, 1) + compact.slice(-1)).toUpperCase()
+	}
+
 	function statusGlyph(kind) {
 		switch (String(kind || "").toLowerCase()) {
 		case "serverdeafened":
@@ -284,10 +295,16 @@ Rectangle {
         anchors.fill: parent
         spacing: 0
         Rectangle {
+			id: serverHeader
+			objectName: "navigationServerHeader"
             Layout.fillWidth: true
-			Layout.preferredHeight: 72
+			Layout.preferredHeight: Theme.compact ? 98 : 112
             color: Theme.panel
 			border.width: 0
+			Accessible.role: Accessible.Grouping
+			Accessible.name: clientSession.serverName
+			Accessible.description: [clientSession.connectionLabel, clientSession.connectionDetail]
+				.filter(function(value) { return String(value || "").trim().length > 0 }).join(". ")
 			DragHandler {
 				enabled: !navigationRail.commitOnSelection
 				target: null
@@ -301,30 +318,91 @@ Rectangle {
 				height: 1
 				color: Theme.divider
 			}
-            Column {
-                anchors.left: parent.left
+			ColumnLayout {
+				anchors.left: parent.left
 				anchors.right: parent.right
-                anchors.leftMargin: 18
+				anchors.top: parent.top
+				anchors.leftMargin: 18
 				anchors.rightMargin: 18
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 3
+				anchors.topMargin: Theme.compact ? 8 : 10
+				spacing: Theme.compact ? 3 : 4
+				Rectangle {
+					id: serverBadge
+					objectName: "navigationServerBadge"
+					Layout.alignment: Qt.AlignHCenter
+					Layout.preferredWidth: Theme.compact ? 34 : 40
+					Layout.preferredHeight: Layout.preferredWidth
+					radius: Theme.compact ? 10 : 12
+					color: Theme.accent
+					border.width: 1
+					border.color: Theme.elevationHighlight
+					Label {
+						objectName: "navigationServerMonogram"
+						anchors.centerIn: parent
+						textFormat: Text.PlainText
+						text: navigationRail.serverMonogram(clientSession.serverName)
+						color: Theme.onAccent
+						font.bold: true
+						font.pixelSize: Theme.fontBody
+						Accessible.ignored: true
+					}
+				}
 				Label {
+					objectName: "navigationServerName"
+					Layout.fillWidth: true
 					textFormat: Text.PlainText
-					width: parent.width
 					text: clientSession.serverName
 					color: Theme.textStrong
 					font.bold: true
 					font.pixelSize: 14
 					elide: Text.ElideRight
+					horizontalAlignment: Text.AlignHCenter
+					Accessible.ignored: true
 				}
-				Label {
-					textFormat: Text.PlainText
-					width: parent.width
-					text: clientSession.connectionLabel
-					color: navigationRail.toneColor(clientSession.connectionTone,
-						clientSession.connected ? Theme.success : Theme.textMuted)
-					font.pixelSize: 11
-					elide: Text.ElideRight
+				Rectangle {
+					id: connectionPill
+					objectName: "navigationConnectionPill"
+					readonly property color statusColor: navigationRail.toneColor(
+						clientSession.connectionTone,
+						clientSession.connected ? Theme.success : Theme.textFaint)
+					Layout.alignment: Qt.AlignHCenter
+					Layout.preferredWidth: Math.min(parent.width,
+						connectionPillContent.implicitWidth + 16)
+					Layout.preferredHeight: 22
+					radius: 11
+					color: Theme.withAlpha(statusColor, 0.08)
+					border.width: 1
+					border.color: Theme.withAlpha(statusColor, 0.24)
+					Accessible.role: Accessible.StaticText
+					Accessible.name: clientSession.connectionLabel
+					Accessible.description: clientSession.connectionDetail
+					RowLayout {
+						id: connectionPillContent
+						anchors.centerIn: parent
+						spacing: 6
+						Rectangle {
+							objectName: "navigationConnectionDot"
+							Layout.preferredWidth: 7
+							Layout.preferredHeight: 7
+							radius: 4
+							color: connectionPill.statusColor
+							Accessible.ignored: true
+						}
+						Label {
+							objectName: "navigationConnectionLabel"
+							textFormat: Text.PlainText
+							text: clientSession.connectionLabel
+							color: Theme.textMuted
+							font.pixelSize: Theme.fontCaption
+							font.bold: true
+							elide: Text.ElideRight
+							Accessible.ignored: true
+						}
+					}
+					HoverHandler { id: connectionPillHover }
+					ToolTip.visible: connectionPillHover.hovered
+						&& String(clientSession.connectionDetail || "").length > 0
+					ToolTip.text: clientSession.connectionDetail
 				}
             }
         }
@@ -340,6 +418,7 @@ Rectangle {
 			// keyboard users move the current row with arrows without tabbing through
 			// every delegate on a large server.
 			activeFocusOnTab: count > 0
+			KeyNavigation.tab: selfMuteButton
 			Accessible.role: Accessible.List
 			Accessible.name: qsTr("Rooms and participants")
 			reuseItems: true
@@ -350,6 +429,10 @@ Rectangle {
             spacing: 2
             leftMargin: 10
             rightMargin: 10
+			boundsBehavior: Flickable.StopAtBounds
+			ScrollBar.vertical: ModernScrollBar {
+				objectName: "navigationScrollBar"
+			}
 			section.property: "sectionKind"
 			section.criteria: ViewSection.FullString
 			Keys.onPressed: event => {
@@ -388,11 +471,13 @@ Rectangle {
 			}
 			section.delegate: Item {
 				required property string section
+				readonly property string visualLabel: section === "voice" ? qsTr("VOICE ROOMS")
+					: section === "direct" ? qsTr("DIRECT MESSAGES") : qsTr("TEXT ROOMS")
 				objectName: "navigationSection_" + section
 				width: ListView.view ? ListView.view.width : 0
-				height: 30
+				height: 34
 				Accessible.role: Accessible.Heading
-				Accessible.name: sectionLabel.text
+				Accessible.name: visualLabel + " · " + navigationRail.roomCountForKind(section)
 
 				Label {
 					id: sectionLabel
@@ -404,11 +489,8 @@ Rectangle {
 					anchors.bottom: parent.bottom
 					anchors.bottomMargin: Theme.space1
 					textFormat: Text.PlainText
-					text: (parent.section === "voice" ? qsTr("VOICE ROOMS")
-						: parent.section === "direct" ? qsTr("DIRECT MESSAGES")
-						: qsTr("TEXT & ACTIVITY")) + " · "
-						+ navigationRail.roomCountForKind(parent.section)
-					color: Theme.textMuted
+					text: parent.visualLabel
+					color: Theme.withAlpha(Theme.accent, 0.76)
 					font.pixelSize: Theme.fontCaption
 					font.bold: true
 					elide: Text.ElideRight
@@ -515,8 +597,9 @@ Rectangle {
 				readonly property bool hasRoomActions: roomActions.some(function(action) {
 					return action && String(action.kind || "action") !== "separator"
 				})
-				readonly property bool detailsVisible: !isParticipant && (joined || unreadCount > 0 || selected)
-				readonly property int roomRowHeight: detailsVisible ? 46 : 38
+				readonly property bool detailsVisible: !isParticipant && (unreadCount > 0
+					|| (selected && kind !== "voice" && subtitle.length > 0))
+				readonly property int roomRowHeight: detailsVisible ? 48 : 40
 				readonly property bool rowFocusVisible: activeFocus
 					|| (rooms.activeFocus && ListView.isCurrentItem)
 				readonly property bool revealActions: roomMouse.containsMouse || rowFocusVisible
@@ -527,19 +610,18 @@ Rectangle {
 					? "navigationParticipantSemantic_" + participantDelegate.participantObjectKey
 					: "navigationRoom_" + stableId
                 width: rooms.width - 20
-				height: sectionHeaderHeight + (isParticipant ? 31 : roomRowHeight)
+				height: sectionHeaderHeight + (isParticipant ? (Theme.compact ? 31 : 36) : roomRowHeight)
                 radius: 8
 				color: isParticipant ? "transparent"
 					: roomDropArea.containsDrag ? Theme.selected
 					: roomMouse.pressed ? Theme.accentSubtle
 					: selected ? Theme.selected
-					: joined ? Qt.rgba(Theme.success.r, Theme.success.g, Theme.success.b, 0.07)
+					: joined ? Theme.withAlpha(Theme.success, 0.045)
 					: roomMouse.containsMouse ? Theme.surfaceHover : "transparent"
 				border.width: isParticipant ? 0 : rowFocusVisible ? Theme.focusRingWidth
-					: roomDropArea.containsDrag ? 2 : selected || joined ? 1 : 0
+					: roomDropArea.containsDrag ? 2 : 0
 				border.color: rowFocusVisible ? Theme.focus
-					: roomDropArea.containsDrag || selected ? Theme.accent
-					: joined ? Qt.rgba(Theme.success.r, Theme.success.g, Theme.success.b, 0.40) : "transparent"
+					: roomDropArea.containsDrag ? Theme.accent : "transparent"
 				opacity: roomMouse.drag.active ? 0.72 : 1.0
 				activeFocusOnTab: false
 				onActiveFocusChanged: if (activeFocus) makeCurrent()
@@ -548,8 +630,20 @@ Rectangle {
                 Accessible.name: title
 				Accessible.description: isParticipant ? participantDelegate.accessibleDetails()
 					: accessibleRoomDetails()
-                Accessible.selected: isParticipant ? participantDelegate.selectedParticipant : selected
+				Accessible.selected: isParticipant ? participantDelegate.selectedParticipant : selected
 				Accessible.onPressAction: activateSelection()
+				Rectangle {
+					objectName: "navigationRoomSelectionAccent_" + stableId
+					anchors.left: parent.left
+					anchors.verticalCenter: parent.verticalCenter
+					width: 2
+					height: Math.max(16, parent.height - 10)
+					radius: 1
+					color: Theme.accent
+					visible: !roomDelegate.isParticipant && roomDelegate.selected
+					z: 4
+					Accessible.ignored: true
+				}
 				RowLayout {
 					id: roomContent
 					z: 3
@@ -610,7 +704,10 @@ Rectangle {
 						spacing: 4
 						Label {
 							objectName: "navigationRoomBadge_" + stableId
-							visible: roomBadges.length > 0
+							// Room badges remain available in the row's accessible description.
+							// Keeping them out of the compact action lane gives join/share/menu
+							// stable priority at every supported rail width.
+							visible: false
 							textFormat: Text.PlainText
 							text: roomBadges.length > 0 ? String(roomBadges[0]) : ""
 							color: Theme.textMuted
@@ -638,7 +735,7 @@ Rectangle {
 						}
 						Rectangle {
 							objectName: "navigationRoomShareBadge_" + stableId
-							visible: screenShareVisible && String(screenShare.badgeLabel || "").length > 0
+							visible: false
 							Layout.preferredWidth: shareBadgeLabel.implicitWidth + 10
 							Layout.preferredHeight: 18
 							radius: 9
@@ -658,7 +755,7 @@ Rectangle {
 						}
 						Rectangle {
 							objectName: "navigationRoomJoined_" + stableId
-							visible: joined
+							visible: false
 							Layout.preferredWidth: 18
 							Layout.preferredHeight: 18
 							radius: 9
@@ -671,7 +768,7 @@ Rectangle {
 							objectName: "navigationRoomJoin_" + stableId
 							visible: kind === "voice" && !joined
 							enabled: canJoin
-							opacity: revealActions ? 1 : selected ? 0.72 : 0.52
+							opacity: revealActions ? 1 : selected ? 0.84 : 0.68
 							Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
 							activeFocusOnTab: false
 							focusPolicy: Qt.ClickFocus
@@ -712,7 +809,7 @@ Rectangle {
 							visible: kind === "voice" && joined && screenShareVisible
 								&& String(screenShare.primaryActionId || "").length > 0
 							enabled: screenShare.primaryEnabled !== false
-							opacity: revealActions ? 1 : 0.72
+							opacity: revealActions ? 1 : 0.82
 							Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
 							activeFocusOnTab: false
 							focusPolicy: Qt.ClickFocus
@@ -751,7 +848,7 @@ Rectangle {
 							id: roomActionsButton
 							objectName: "navigationRoomActions_" + stableId
 							visible: hasRoomActions || kind === "voice" || kind === "text"
-							opacity: revealActions ? 1 : (selected || joined ? 0.72 : 0.52)
+							opacity: revealActions ? 1 : (selected || joined ? 0.62 : 0.48)
 							Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
 							Layout.preferredWidth: 24
 							Layout.preferredHeight: 24
@@ -983,7 +1080,12 @@ Rectangle {
 					|| ["talking", "whispering", "shouting", "mutedtalking"].indexOf(talkState) >= 0
 				readonly property string talkTone: String(payload.talkTone || sourceState.talkTone || "")
 				readonly property var statuses: payload.statuses || sourceState.statuses || []
-				readonly property var visibleStatuses: statuses.slice(0, 3)
+				// Talk activity already has a high-salience avatar ring. Do not repeat it
+				// as a status chip; reserve the compact lane for mute/deafen/listener state.
+				readonly property var visibleStatuses: statuses.filter(function(item) {
+					return ["talking", "whispering", "shouting", "mutedtalking"]
+						.indexOf(String((item && item.kind) || "").toLowerCase()) < 0
+				}).slice(0, 2)
 				readonly property var badges: payload.badges || sourceState.badges || []
 				readonly property var localVolume: payload.localVolume || sourceState.localVolume || ({})
 				readonly property bool localVolumeVisible: localVolume.visible !== false
@@ -1011,17 +1113,38 @@ Rectangle {
 					roomDelegate.focusRow()
 				}
 				objectName: "navigationParticipant_" + participantObjectKey
-				height: 31
+				height: Theme.compact ? 31 : 36
                 radius: 8
 				color: participantMouse.pressed ? Theme.accentSubtle
 					   : selectedParticipant ? Theme.selected
 					   : participantMouse.containsMouse ? Theme.surfaceHover : "transparent"
-				border.width: roomDelegate.rowFocusVisible ? Theme.focusRingWidth : selectedParticipant ? 1 : 0
-				border.color: roomDelegate.rowFocusVisible ? Theme.focus
-					: selectedParticipant ? Theme.accent : "transparent"
+				border.width: roomDelegate.rowFocusVisible ? Theme.focusRingWidth : 0
+				border.color: roomDelegate.rowFocusVisible ? Theme.focus : "transparent"
 				opacity: participantMouse.drag.active ? 0.72 : 1.0
 				activeFocusOnTab: false
 				Accessible.ignored: true
+				Rectangle {
+					objectName: "navigationParticipantSelectionAccent_"
+						+ participantDelegate.participantObjectKey
+					anchors.left: parent.left
+					anchors.verticalCenter: parent.verticalCenter
+					width: 2
+					height: Math.max(14, parent.height - 8)
+					radius: 1
+					color: Theme.accent
+					visible: participantDelegate.selectedParticipant
+					z: 4
+					Accessible.ignored: true
+				}
+				Rectangle {
+					objectName: "navigationParticipantGuide_" + participantDelegate.participantObjectKey
+					x: 9 + Math.min(Number(payload.parentDepth || 0), 5) * 11
+					anchors.top: parent.top
+					anchors.bottom: parent.bottom
+					width: 1
+					color: Theme.selfCardBorder
+					Accessible.ignored: true
+				}
 				RowLayout {
 					id: participantContent
 					z: 3
@@ -1181,16 +1304,6 @@ Rectangle {
 								MouseArea { id: statusHover; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
 							}
 						}
-						Label {
-							visible: participantDelegate.statuses.length
-								> participantDelegate.visibleStatuses.length
-							textFormat: Text.PlainText
-							text: "+" + (participantDelegate.statuses.length
-								- participantDelegate.visibleStatuses.length)
-							color: Theme.textMuted
-							font.pixelSize: 8
-							Accessible.ignored: true
-						}
 						Button {
 							id: participantJoinButton
 							objectName: "navigationParticipantJoin_" + participantDelegate.participantObjectKey
@@ -1335,16 +1448,26 @@ Rectangle {
 			}
 		}
         Rectangle {
+			id: selfDock
+			objectName: "navigationSelfDock"
             Layout.fillWidth: true
-            Layout.preferredHeight: 72
-            color: Theme.strip
+			Layout.preferredHeight: Theme.compact ? 68 : 76
+			color: selfMuteButton.activeFocus || selfDeafenButton.activeFocus
+				|| profileMenuButton.activeFocus ? Theme.selfCardHover : Theme.selfCardBackground
 			border.width: 0
+			Behavior on color { ColorAnimation { duration: Theme.motionFast } }
+			Accessible.role: Accessible.Grouping
+			Accessible.name: qsTr("%1 profile and audio controls").arg(clientSession.selfName)
+			Accessible.description: [clientSession.selfStatusLabel,
+				clientSession.selfMuted ? qsTr("Microphone muted") : "",
+				clientSession.selfDeafened ? qsTr("Deafened") : ""]
+				.filter(function(value) { return String(value || "").length > 0 }).join(". ")
 			Rectangle {
 				anchors.left: parent.left
 				anchors.right: parent.right
 				anchors.top: parent.top
 				height: 1
-				color: Theme.divider
+				color: Theme.selfCardBorder
 			}
             RowLayout {
                 anchors.fill: parent
@@ -1360,9 +1483,10 @@ Rectangle {
 					Layout.preferredHeight: 34
 					radius: 17
 					clip: true
-					color: Theme.surfaceRaised
+					color: Theme.selfCardHover
 					border.width: 1
-					border.color: clientSession.connected ? Theme.accent : Theme.divider
+					border.color: clientSession.connected ? Theme.withAlpha(Theme.accent, 0.68)
+						: Theme.selfCardBorder
 					readonly property string avatarSource: navigationRail.safeAvatarSource(
 						((clientSession.selfMenu || ({})).avatarUrl) || "")
 					Image {
@@ -1389,16 +1513,53 @@ Rectangle {
 						font.bold: true
 						Accessible.ignored: true
 					}
+					Rectangle {
+						objectName: "selfPresenceDot"
+						anchors.right: parent.right
+						anchors.bottom: parent.bottom
+						anchors.rightMargin: 1
+						anchors.bottomMargin: 1
+						width: 10
+						height: 10
+						radius: 5
+						color: clientSession.selfDeafened || clientSession.selfMuted ? Theme.danger
+							: clientSession.connected ? Theme.success : Theme.textFaint
+						border.width: 2
+						border.color: selfDock.color
+						Accessible.ignored: true
+					}
 				}
                 ColumnLayout {
                     Layout.fillWidth: true
 					spacing: 1
-                    Label { textFormat: Text.PlainText; text: clientSession.selfName; color: Theme.textStrong; font.bold: true }
-                    Label { textFormat: Text.PlainText; text: clientSession.selfStatusLabel; color: Theme.textMuted; font.pixelSize: Theme.fontCaption }
+					Label {
+						objectName: "selfNameLabel"
+						Layout.fillWidth: true
+						textFormat: Text.PlainText
+						text: clientSession.selfName
+						color: Theme.textStrong
+						font.bold: true
+						elide: Text.ElideRight
+						Accessible.ignored: true
+					}
+					Label {
+						objectName: "selfStatusLabel"
+						Layout.fillWidth: true
+						textFormat: Text.PlainText
+						text: clientSession.selfStatusLabel
+						color: Theme.textFaint
+						font.pixelSize: Theme.fontCaption
+						elide: Text.ElideRight
+						Accessible.ignored: true
+					}
                 }
 				ModernIconButton {
 					id: selfMuteButton
 					objectName: "selfMuteButton"
+					activeFocusOnTab: true
+					focusPolicy: Qt.StrongFocus
+					KeyNavigation.tab: selfDeafenButton
+					KeyNavigation.backtab: rooms
 					iconName: clientSession.selfMuted ? "mute" : "microphone"
 					selected: !!clientSession.selfMuted
 					tone: clientSession.selfMuted ? "danger" : "neutral"
@@ -1408,7 +1569,12 @@ Rectangle {
 					onClicked: uiCommands.toggleSelfMute()
 				}
 				ModernIconButton {
+					id: selfDeafenButton
 					objectName: "selfDeafenButton"
+					activeFocusOnTab: true
+					focusPolicy: Qt.StrongFocus
+					KeyNavigation.tab: profileMenuButton
+					KeyNavigation.backtab: selfMuteButton
 					iconName: "deafen"
 					selected: !!clientSession.selfDeafened
 					tone: clientSession.selfDeafened ? "danger" : "neutral"
@@ -1420,6 +1586,9 @@ Rectangle {
 				ModernIconButton {
 					id: profileMenuButton
 					objectName: "profileMenuButton"
+					activeFocusOnTab: true
+					focusPolicy: Qt.StrongFocus
+					KeyNavigation.backtab: selfDeafenButton
 					iconName: "more"
 					Accessible.name: qsTr("Profile menu")
 					onClicked: navigationRail.profileMenuRequested(
