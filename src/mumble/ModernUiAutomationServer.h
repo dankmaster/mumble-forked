@@ -22,8 +22,6 @@ class QTcpSocket;
 class QWidget;
 
 class ModernUiAutomationServer : public QObject {
-	Q_OBJECT
-
 public:
 	explicit ModernUiAutomationServer(MainWindow *mainWindow, QObject *parent = nullptr);
 	~ModernUiAutomationServer() override;
