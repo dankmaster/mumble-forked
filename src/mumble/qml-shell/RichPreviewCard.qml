@@ -328,13 +328,12 @@ Rectangle {
                     onStatusChanged: if (status === Image.Error && root.imageSource.length > 0)
                                          root.requestImageRefresh()
                 }
-                BusyIndicator {
+				ModernBusyIndicator {
 					objectName: "previewCompactBusyIndicator"
                     anchors.centerIn: parent
                     running: root.previewState === "loading" || previewImage.status === Image.Loading
                     visible: running
-					palette.dark: Theme.accent
-					palette.highlight: Theme.accent
+					Accessible.name: qsTr("Loading link preview")
                 }
                 ModernIcon {
                     anchors.centerIn: parent
@@ -556,15 +555,14 @@ Rectangle {
 					Component.onCompleted: expandedAnimationLoader.mediaStatus = status
 				}
 			}
-            BusyIndicator {
+			ModernBusyIndicator {
 				objectName: "previewExpandedBusyIndicator"
                 anchors.centerIn: parent
 				running: !root.mediaRequiresReveal && (root.currentMediaManagedAnimated
 					? expandedAnimationLoader.mediaStatus === Image.Loading
 					: expandedStaticImage.status === Image.Loading)
                 visible: running
-				palette.dark: Theme.accent
-				palette.highlight: Theme.accent
+				Accessible.name: qsTr("Loading preview media")
             }
 			Rectangle {
 				objectName: "previewExpandedMediaScrim"

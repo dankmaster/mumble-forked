@@ -7,8 +7,9 @@ TestCase {
 	id: testCase
 	name: "ModernControls"
 	when: windowShown
+	visible: true
 	width: 420
-	height: 220
+	height: 260
 
 	Column {
 		anchors.centerIn: parent
@@ -20,13 +21,14 @@ TestCase {
 		Loader { id: sliderLoader; source: "qrc:/qml-shell/ModernSlider.qml" }
 		Loader { id: areaLoader; source: "qrc:/qml-shell/ModernTextArea.qml" }
 		Loader { id: spinLoader; source: "qrc:/qml-shell/ModernSpinBox.qml" }
+		Loader { id: progressLoader; width: 240; source: "qrc:/qml-shell/ModernProgressBar.qml" }
 	}
 
 	function initTestCase() {
 		tryVerify(function() {
 			return iconLoader.item !== null && fieldLoader.item !== null && checkLoader.item !== null
 				&& comboLoader.item !== null && sliderLoader.item !== null && areaLoader.item !== null
-				&& spinLoader.item !== null
+				&& spinLoader.item !== null && progressLoader.item !== null
 		})
 	}
 
@@ -66,5 +68,28 @@ TestCase {
 		spinLoader.item.value = 4
 		compare(spinLoader.item.value, 4)
 		compare(spinLoader.item.background.color, Theme.surfaceRaised)
+	}
+
+	function test_progress_uses_bounded_tokenized_indicators() {
+		const progress = progressLoader.item
+		progress.from = 0
+		progress.to = 100
+		progress.value = 40
+		progress.indeterminate = false
+		const fill = findChild(progress, "modernProgressDeterminateFill")
+		const pill = findChild(progress, "modernProgressIndeterminatePill")
+		verify(fill !== null && pill !== null)
+		tryVerify(function() { return fill.width > 90 && fill.width < 102 })
+		compare(fill.color, Theme.accent)
+		verify(!pill.visible)
+
+		progress.tone = "warning"
+		progress.indeterminate = true
+		tryCompare(progress, "indeterminate", true)
+		tryCompare(pill, "visible", true)
+		verify(pill.width >= 28, "The indeterminate indicator must keep a usable minimum width")
+		verify(pill.width <= 72, "The indeterminate indicator must stay bounded")
+		compare(pill.color, Theme.warning)
+		compare(progress.Accessible.role, Accessible.ProgressBar)
 	}
 }

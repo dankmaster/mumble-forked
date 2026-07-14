@@ -110,6 +110,18 @@ TestCase {
 		compare(editor.activeTab, "overview")
 	}
 
+	function test_loading_state_uses_shared_progress_component() {
+		const state = populatedState()
+		state.loading = true
+		state.status = "Loading Stonks leaderboard and ticker quotes..."
+		loader.item.stonks = state
+		const progress = findChild(loader.item, "stonksLoadingProgress")
+		tryVerify(function() { return progress !== null && progress.visible })
+		verify(progress.indeterminate)
+		compare(progress.Accessible.role, Accessible.ProgressBar)
+		compare(progress.Accessible.name, "Loading Stonks data")
+	}
+
 	function test_portfolio_payload_preserves_quote_metadata_and_routes_save() {
 		const editor = loader.item
 		editor.selectTab("portfolio")

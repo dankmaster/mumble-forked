@@ -155,11 +155,11 @@ Window {
                 onStatusChanged: if (status === Image.Ready) viewer.resetZoom()
             }
 
-			BusyIndicator {
+			ModernBusyIndicator {
+				objectName: "imageViewerBusyIndicator"
 				anchors.centerIn: parent
 				running: picture.status === Image.Loading
 				visible: running
-				palette.highlight: Theme.accent
 				Accessible.name: qsTr("Loading %1").arg(viewer.displayTitle)
 			}
 

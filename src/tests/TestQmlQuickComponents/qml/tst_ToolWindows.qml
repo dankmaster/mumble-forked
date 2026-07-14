@@ -176,9 +176,12 @@ TestCase {
 		tryCompare(tool, "compactLayout", true)
 		const scroll = findChild(tool.contentItem, "manualPluginScrollView")
 		const content = findChild(tool.contentItem, "manualPluginContent")
+		const footer = findChild(tool.contentItem, "manualPluginFooter")
+		const endPadding = findChild(tool.contentItem, "manualPluginContentEndPadding")
 		const preview = findChild(tool.contentItem, "manualPositionPreview")
 		const grid = findChild(tool.contentItem, "manualPositionGrid")
-		verify(scroll !== null && content !== null && preview !== null && grid !== null)
+		verify(scroll !== null && content !== null && footer !== null && endPadding !== null
+			&& preview !== null && grid !== null)
 		compare(grid.columns, 2)
 		tryVerify(function() { return scroll.width > 0 && content.width > 0 && preview.width > 0 })
 		verify(content.width <= scroll.width + 0.5,
@@ -192,6 +195,22 @@ TestCase {
 		const contextField = findChild(tool.contentItem, "manualContextField")
 		const status = findChild(tool.contentItem, "manualPluginStatus")
 		verify(resetButton !== null && applyButton !== null && contextField !== null && status !== null)
+		tryVerify(function() { return scroll.contentHeight > scroll.height })
+		const scrollBottom = scroll.mapToItem(tool.contentItem, 0, scroll.height).y
+		verify(scrollBottom <= footer.y + 1,
+			"Manual Plugin body must stop before its persistent action footer")
+		for (const button of [resetButton, applyButton]) {
+			const buttonTop = button.mapToItem(tool.contentItem, 0, 0).y
+			const buttonBottom = button.mapToItem(tool.contentItem, 0, button.height).y
+			verify(buttonTop >= footer.y - 1 && buttonBottom <= footer.y + footer.height + 1,
+				"Manual Plugin actions must stay visible inside the persistent footer")
+		}
+		const flickable = scroll.contentItem
+		flickable.contentY = Math.max(0, flickable.contentHeight - flickable.height)
+		wait(0)
+		const endBottom = endPadding.mapToItem(tool.contentItem, 0, endPadding.height).y
+		verify(endBottom <= footer.y,
+			"Manual Plugin's final body content must remain reachable above the footer")
 		resetButton.clicked()
 		compare(manualPlugin.resetCount, 1)
 		tryCompare(status, "visible", true)

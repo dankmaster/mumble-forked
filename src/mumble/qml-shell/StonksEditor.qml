@@ -368,7 +368,8 @@ ColumnLayout {
 				color: root.stonks.error ? Theme.danger : Theme.textMuted
 				wrapMode: Text.Wrap
 			}
-			ProgressBar {
+			ModernProgressBar {
+				objectName: "stonksLoadingProgress"
 				Layout.fillWidth: true
 				visible: root.loading
 				indeterminate: true

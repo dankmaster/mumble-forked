@@ -271,10 +271,11 @@ ApplicationWindow {
 			width: Math.min(parent.width - Theme.space6 - Theme.space4, 420)
 			spacing: Theme.space3
 
-			BusyIndicator {
+			ModernBusyIndicator {
+				objectName: "mediaSessionBusyIndicator"
 				Layout.alignment: Qt.AlignHCenter
 				running: parent.parent.visible
-				palette.highlight: Theme.accent
+				Accessible.name: qsTr("Loading media player")
 			}
 			Label {
 				Layout.fillWidth: true

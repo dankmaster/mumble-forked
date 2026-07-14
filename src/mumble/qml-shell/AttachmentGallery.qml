@@ -89,11 +89,11 @@ Item {
                                          root.attachmentRefreshRequested()
                 }
 
-                BusyIndicator {
+				ModernBusyIndicator {
+					objectName: "attachmentBusyIndicator_" + attachmentTile.stableId
                     anchors.centerIn: parent
                     running: attachmentImage.status === Image.Loading
                     visible: running
-					palette.highlight: Theme.accent
 					Accessible.name: qsTr("Loading %1").arg(attachmentTile.label)
                 }
 

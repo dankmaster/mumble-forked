@@ -41,6 +41,7 @@ class ClientSessionController final : public QObject {
 	Q_PROPERTY(QVariantList appMenus READ appMenus WRITE setAppMenus NOTIFY appMenusChanged)
 	Q_PROPERTY(QVariantMap selfMenu READ selfMenu WRITE setSelfMenu NOTIFY selfMenuChanged)
 	Q_PROPERTY(QVariantMap updateBanner READ updateBanner WRITE setUpdateBanner NOTIFY updateBannerChanged)
+	Q_PROPERTY(QVariantMap stonks READ stonks WRITE setStonks NOTIFY stonksChanged)
 	Q_PROPERTY(QVariantList motdSegments READ motdSegments NOTIFY motdSegmentsChanged)
 	Q_PROPERTY(QString motdSummary READ motdSummary WRITE setMotdSummary NOTIFY motdSummaryChanged)
 	Q_PROPERTY(bool hasMotd READ hasMotd NOTIFY hasMotdChanged)
@@ -71,6 +72,7 @@ public:
 	QVariantList appMenus() const;
 	QVariantMap selfMenu() const;
 	QVariantMap updateBanner() const;
+	QVariantMap stonks() const;
 	QString motdHtml() const;
 	QVariantList motdSegments() const;
 	QString motdSummary() const;
@@ -99,6 +101,7 @@ public:
 	void setAppMenus(const QVariantList &value);
 	void setSelfMenu(const QVariantMap &value);
 	void setUpdateBanner(const QVariantMap &value);
+	void setStonks(const QVariantMap &value);
 	void setMotdHtml(const QString &value);
 	void setMotdSummary(const QString &value);
 	void setMotdExpanded(bool value);
@@ -123,6 +126,7 @@ signals:
 	void appMenusChanged();
 	void selfMenuChanged();
 	void updateBannerChanged();
+	void stonksChanged();
 	void motdHtmlChanged();
 	void motdSegmentsChanged();
 	void motdSummaryChanged();
@@ -153,6 +157,7 @@ private:
 	QVariantList m_appMenus;
 	QVariantMap m_selfMenu;
 	QVariantMap m_updateBanner;
+	QVariantMap m_stonks;
 	QString m_motdHtml;
 	QVariantList m_motdSegments;
 	quint64 m_motdParseGeneration = 0;

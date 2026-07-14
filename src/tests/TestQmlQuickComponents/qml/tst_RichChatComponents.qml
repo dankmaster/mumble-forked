@@ -188,8 +188,10 @@ TestCase {
 		const indicator = findChild(previewLoader.item, "previewCompactBusyIndicator")
 		verify(indicator !== null)
 		compare(indicator.running, true)
-		compare(indicator.palette.dark, Theme.accent)
-		compare(indicator.palette.highlight, Theme.accent)
+		compare(indicator.indicatorColor, Theme.accent)
+		compare(indicator.Accessible.role, Accessible.ProgressBar)
+		compare(indicator.Accessible.name, "Loading link preview")
+		verify(indicator.segmentCount >= 6)
 	}
 
 	function test_more_is_hidden_for_sparse_or_unknown_metadata_and_shown_for_hidden_content() {

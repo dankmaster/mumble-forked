@@ -237,7 +237,7 @@ Rectangle {
 					}
 				}
 
-				ProgressBar {
+				ModernProgressBar {
 					Layout.fillWidth: true
 					visible: !root.notification && (root.status === "running"
 						|| root.status === "cancelling" || Number(root.payload.progress) >= 0)

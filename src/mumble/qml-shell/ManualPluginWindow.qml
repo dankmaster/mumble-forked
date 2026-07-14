@@ -114,9 +114,16 @@ Window {
 	ScrollView {
 		id: scrollView
 		objectName: "manualPluginScrollView"
-		anchors.fill: parent
-		anchors.margins: tool.compactLayout ? Theme.space3 : Theme.space5
+		anchors.left: parent.left
+		anchors.right: parent.right
+		anchors.top: parent.top
+		anchors.bottom: manualPluginFooter.top
+		anchors.leftMargin: tool.compactLayout ? Theme.space3 : Theme.space5
+		anchors.rightMargin: tool.compactLayout ? Theme.space3 : Theme.space5
+		anchors.topMargin: tool.compactLayout ? Theme.space3 : Theme.space5
+		anchors.bottomMargin: Theme.space3
 		contentWidth: availableWidth
+		contentHeight: contentColumn.implicitHeight
 		clip: true
 		ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 		ScrollBar.vertical.policy: ScrollBar.AsNeeded
@@ -496,6 +503,31 @@ Window {
 					}
 				}
 			}
+
+			Item {
+				objectName: "manualPluginContentEndPadding"
+				Layout.fillWidth: true
+				Layout.preferredHeight: Theme.space2
+			}
+		}
+	}
+
+	Rectangle {
+		id: manualPluginFooter
+		objectName: "manualPluginFooter"
+		anchors.left: parent.left
+		anchors.right: parent.right
+		anchors.bottom: parent.bottom
+		height: Math.max(Theme.controlHeight + (Theme.space3 * 2),
+			footerColumn.implicitHeight + (Theme.space3 * 2))
+		color: Theme.strip
+		border.color: Theme.divider
+
+		ColumnLayout {
+			id: footerColumn
+			anchors.fill: parent
+			anchors.margins: Theme.space3
+			spacing: Theme.space2
 
 			Label {
 				id: statusLabel

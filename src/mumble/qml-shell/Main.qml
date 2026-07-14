@@ -488,6 +488,10 @@ ApplicationWindow {
     }
 
 	QmlDialog { id: productDialog }
+	Connections {
+		target: productDialog
+		function onOpened() { root.closeProductMenus() }
+	}
     Component {
         id: imageViewerComponent
         ImageViewer { controller: dialogState }
@@ -767,7 +771,7 @@ ApplicationWindow {
                     Column {
                         anchors.left: parent.left
 						anchors.leftMargin: root.narrowShell ? Theme.space3 : Theme.space5
-						anchors.right: headerActions.left
+						anchors.right: stonksHeader.visible ? stonksHeader.left : headerActions.left
 						anchors.rightMargin: Theme.space2
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 4
@@ -789,6 +793,20 @@ ApplicationWindow {
 							width: parent.width
                         }
                     }
+					StonksHeader {
+						id: stonksHeader
+						objectName: "stonksConversationHeader"
+						anchors.right: headerActions.left
+						anchors.rightMargin: Theme.space2
+						anchors.verticalCenter: parent.verticalCenter
+						width: Math.max(140, Math.min(root.narrowShell ? 190 : 480,
+							parent.width - headerActions.width - (root.narrowShell ? 170 : 300)))
+						stonks: clientSession.stonks || ({})
+						scopeToken: activeScope.scopeToken
+						scopeLabel: activeScope.label
+						narrowLayout: root.narrowShell || width < 300
+						onOpenRequested: uiCommands.invokeAppAction("server.stonks", {})
+					}
 					Row {
 						id: headerActions
 						anchors.right: parent.right
@@ -1469,11 +1487,12 @@ ApplicationWindow {
 							anchors.leftMargin: Theme.space5
 							anchors.rightMargin: Theme.space5
 							spacing: Theme.space2
-							BusyIndicator {
+							ModernBusyIndicator {
+								objectName: "emptyConversationBusyIndicator"
 								anchors.horizontalCenter: parent.horizontalCenter
 								visible: activeScope.loading
 								running: visible
-								palette.highlight: Theme.accent
+								Accessible.name: qsTr("Loading conversation")
 							}
 							Label {
 								id: emptyConversationTitle

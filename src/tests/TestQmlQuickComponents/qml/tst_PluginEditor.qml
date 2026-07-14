@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtTest
 import "../../../mumble/qml-shell" as Shell
+import Mumble.Theme 1.0
 
 TestCase {
 	id: testCase
@@ -146,6 +147,12 @@ TestCase {
 		compare(editor.errorText, "")
 		compare(editor.showLoadingState, true)
 		compare(editor.showEmptyState, false)
+		const loadingIndicator = findChild(editor, "pluginLoadingBusyIndicator")
+		verify(loadingIndicator !== null)
+		tryCompare(loadingIndicator, "running", true)
+		compare(loadingIndicator.indicatorColor, Theme.accent)
+		compare(loadingIndicator.Accessible.role, Accessible.ProgressBar)
+		compare(loadingIndicator.Accessible.name, "Loading installed plugins")
 
 		populatedField = { "label": "Installed plugins", "rows": [] }
 		compare(editor.showEmptyState, true)
@@ -172,9 +179,13 @@ TestCase {
 			}
 		}
 		const operationCard = findChild(editor, "pluginOperationCard")
+		const operationIndicator = findChild(editor, "pluginOperationBusyIndicator")
 		const progress = findChild(editor, "pluginOperationProgress")
-		verify(operationCard !== null)
+		verify(operationCard !== null && operationIndicator !== null)
 		compare(editor.operationVisible, true)
+		tryCompare(operationIndicator, "running", true)
+		compare(operationIndicator.indicatorColor, Theme.accent)
+		compare(operationIndicator.Accessible.name, "Plugin operation in progress")
 		compare(editor.operationProgress, 0.42)
 		compare(progress.indeterminate, false)
 		compare(progress.value, 0.42)

@@ -9,6 +9,31 @@ Dialog {
 	readonly property int densityInset: Theme.spacing + 6
 	readonly property int sectionPadding: Theme.spacing + 2
 	readonly property bool compactDialogLayout: width < 760
+	readonly property int headerHeight: Theme.densityId === "compact" ? 68
+		: Theme.densityId === "spacious" ? 84 : 76
+	readonly property int footerHeight: Math.max(Theme.densityId === "compact" ? 56
+		: Theme.densityId === "spacious" ? 72 : 64,
+		footerActions.childrenRect.height + (Theme.spacing * 2))
+	readonly property int statusHeight: String(dialogState.statusMessage || "").length > 0
+		? statusLabel.implicitHeight + (Theme.spacing * 2) : 0
+	readonly property int compactPageBarHeight: compactDialogLayout && dialogState.pages.length > 0
+		? compactPageSelector.implicitHeight + (Theme.spacing * 2) : 0
+	readonly property int requestedHeight: Math.max(240,
+		Math.min(dialogState.preferredHeight || 700, 860))
+	readonly property int maximumHeightForParent: parent
+		? Math.max(220, parent.height - (Theme.space5 * 2)) : 760
+	// Multi-page surfaces keep a stable viewport as the user changes pages. A
+	// single-surface dialog instead follows its actual content: sparse states no
+	// longer inherit an oversized DTO canvas, while long forms can grow before
+	// they need to scroll.
+	readonly property bool stablePageViewport: dialogState.pages.length > 0
+	readonly property int minimumContentSizedHeight: headerHeight + footerHeight
+		+ (Theme.rowHeight * 2)
+	property int measuredContentHeight: 0
+	readonly property int naturalContentSizedHeight: headerHeight + statusHeight
+		+ compactPageBarHeight + measuredContentHeight + footerHeight
+	readonly property int responsiveHeight: stablePageViewport ? requestedHeight
+		: Math.max(minimumContentSizedHeight, naturalContentSizedHeight)
 	readonly property string dialogTone: String(dialogState.tone || "").toLowerCase()
 	readonly property color dialogToneColor: toneColor(dialogTone)
 	property bool showAdvanced: !!dialogState.state.showAdvanced
@@ -105,6 +130,15 @@ Dialog {
 		if (dialogContentScroll && dialogContentScroll.contentItem)
 			dialogContentScroll.contentItem.contentY = 0
 	}
+	function measureContentHeight() {
+		if (!dialogContentColumn) return
+		const nextHeight = Math.max(0, Math.ceil(dialogContentColumn.implicitHeight))
+		if (measuredContentHeight !== nextHeight)
+			measuredContentHeight = nextHeight
+	}
+	function scheduleContentMeasurement() {
+		Qt.callLater(measureContentHeight)
+	}
 	function safeRenderImageSource(value) {
 		const source = String(value === undefined || value === null ? "" : value).trim()
 		return /^(image:\/\/mumble\/|qrc:\/)/i.test(source) ? source : ""
@@ -125,16 +159,16 @@ Dialog {
 	// Control scaffolding out of the visual and accessibility trees.
 	header: null
 	footer: null
-    width: Math.min(parent ? Math.max(240, parent.width - 48) : 1040,
+	width: Math.min(parent ? Math.max(240, parent.width - (Theme.space5 * 2)) : 1040,
 					Math.max(320, Math.min(dialogState.preferredWidth || 920, 1180)))
-    height: Math.min(parent ? Math.max(220, parent.height - 48) : 760,
-					 Math.max(240, Math.min(dialogState.preferredHeight || 700, 860)))
+	height: Math.min(maximumHeightForParent, responsiveHeight)
     x: parent ? Math.round((parent.width - width) / 2) : 0
     y: parent ? Math.round((parent.height - height) / 2) : 0
     padding: 0
     closePolicy: Popup.NoAutoClose
 	onOpened: {
 		resetContentPosition()
+		scheduleContentMeasurement()
 		Qt.callLater(applyInitialFocus)
 	}
 	onVisibleChanged: if (visible) Qt.callLater(applyInitialFocus)
@@ -148,6 +182,7 @@ Dialog {
 				dialog.focusedDialogId = nextId
 				dialog.showAdvanced = !!dialogState.state.showAdvanced
 			}
+			dialog.scheduleContentMeasurement()
 			Qt.callLater(dialog.applyInitialFocus)
 		}
 	}
@@ -172,8 +207,7 @@ Dialog {
         Rectangle {
 			id: dialogHeader
             Layout.fillWidth: true
-            Layout.preferredHeight: Theme.densityId === "compact" ? 68
-                                    : Theme.densityId === "spacious" ? 84 : 76
+			Layout.preferredHeight: dialog.headerHeight
             color: Theme.panel
 			border.color: dialog.dialogTone.length > 0 ? dialog.dialogToneColor : Theme.divider
             RowLayout {
@@ -213,13 +247,13 @@ Dialog {
 					Accessible.name: dialog.showAdvanced ? qsTr("Hide advanced settings") : qsTr("Show advanced settings")
 					onClicked: dialog.showAdvanced = !dialog.showAdvanced
 				}
-                ModernIconButton {
-                    objectName: "dialogCloseButton"
-                    text: "×"
-                    font.pixelSize: 20
-                    Accessible.name: qsTr("Close dialog")
-                    onClicked: dialogState.requestClose()
-                }
+				ModernIconButton {
+					objectName: "dialogCloseButton"
+					iconName: "close"
+					text: qsTr("Close")
+					Accessible.name: qsTr("Close dialog")
+					onClicked: dialogState.requestClose()
+				}
             }
         }
 
@@ -370,12 +404,14 @@ Dialog {
 					Layout.fillHeight: true
 					clip: true
 					contentWidth: availableWidth
+					contentHeight: dialogContentColumn.implicitHeight
 					ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 					ScrollBar.vertical.policy: ScrollBar.AsNeeded
 					Column {
 						id: dialogContentColumn
 						width: parent.width
 						spacing: Theme.spacing + 4
+						onImplicitHeightChanged: dialog.scheduleContentMeasurement()
 					Rectangle {
 						id: loadingScaffold
 						objectName: "dialogLoadingScaffold"
@@ -396,7 +432,13 @@ Dialog {
 							anchors.margins: dialog.sectionPadding
 							spacing: Theme.spacing
 							RowLayout {
-								BusyIndicator { running: loadingScaffold.visible; Layout.preferredWidth: 28; Layout.preferredHeight: 28 }
+								ModernBusyIndicator {
+									objectName: "dialogLoadingIndicator"
+									running: loadingScaffold.visible
+									Layout.preferredWidth: 28
+									Layout.preferredHeight: 28
+									Accessible.name: qsTr("Loading dialog content")
+								}
 								ColumnLayout {
 									Layout.fillWidth: true
 									Label { textFormat: Text.PlainText; text: qsTr("Loading…"); color: Theme.textStrong; font.bold: true }
@@ -429,12 +471,13 @@ Dialog {
 						objectName: "connectFavoriteSurface"
 						width: parent.width - (dialog.densityInset * 2)
 						x: dialog.densityInset
-						height: visible ? 290 : 0
+						height: visible ? connectSurfaceLayout.implicitHeight + (dialog.sectionPadding * 2) : 0
 						visible: dialogState.kind === "connect" && !dialogState.loading
 						color: Theme.panel
 						border.color: Theme.divider
 						radius: Theme.innerRadius
 						ColumnLayout {
+							id: connectSurfaceLayout
 							anchors.fill: parent
 							anchors.margins: dialog.sectionPadding
 							spacing: Math.max(6, Theme.spacing - 2)
@@ -462,8 +505,11 @@ Dialog {
 							ListView {
 								id: connectFavoriteList
 								objectName: "connectFavoriteList"
+								readonly property int favoriteRowHeight: Theme.rowHeight + Theme.space4 + 2
+								readonly property int visibleRowCount: Math.max(1, Math.min(count, 3))
 								Layout.fillWidth: true
-								Layout.fillHeight: true
+								Layout.preferredHeight: count === 0 ? Theme.rowHeight * 2
+									: visibleRowCount * favoriteRowHeight + Math.max(0, visibleRowCount - 1) * spacing
 								clip: true
 								spacing: 5
 								model: dialogState.favorites
@@ -476,7 +522,7 @@ Dialog {
 									required property int index
 									objectName: "connectFavorite_" + index
 									width: ListView.view.width
-									height: 62
+									height: connectFavoriteList.favoriteRowHeight
 									highlighted: !!modelData.selected || index === dialogState.selectedFavoriteIndex
 									Accessible.name: String(modelData.label || modelData.host || qsTr("Saved server"))
 									Accessible.description: String(modelData.subtitle || modelData.tooltip || "")
@@ -685,9 +731,7 @@ Dialog {
 		Rectangle {
 			objectName: "dialogFooter"
             Layout.fillWidth: true
-			Layout.preferredHeight: Math.max(Theme.densityId === "compact" ? 56
-									 : Theme.densityId === "spacious" ? 72 : 64,
-				footerActions.childrenRect.height + (Theme.spacing * 2))
+			Layout.preferredHeight: dialog.footerHeight
             color: Theme.strip
             border.color: Theme.divider
 			border.width: 1
@@ -1296,11 +1340,13 @@ Dialog {
 					anchors.fill: parent
 					anchors.margins: Theme.spacing
 					spacing: Theme.spacing
-					BusyIndicator {
+					ModernBusyIndicator {
+						objectName: "dialogResultBusy_" + String(resultRoot.field.id || "results")
 						visible: resultRoot.resultsLoading
 						running: visible
 						Layout.preferredWidth: 28
 						Layout.preferredHeight: 28
+						Accessible.name: String(resultRoot.field.loadingText || qsTr("Loading results"))
 					}
 					Label {
 						id: resultStateLabel

@@ -5,6 +5,8 @@
     <file alias="ModernButton.qml">qml-shell/ModernButton.qml</file>
 	<file alias="ModernIconButton.qml">qml-shell/ModernIconButton.qml</file>
 	<file alias="ModernIcon.qml">qml-shell/ModernIcon.qml</file>
+	<file alias="ModernBusyIndicator.qml">qml-shell/ModernBusyIndicator.qml</file>
+	<file alias="ModernProgressBar.qml">qml-shell/ModernProgressBar.qml</file>
 	<file alias="ModernTextField.qml">qml-shell/ModernTextField.qml</file>
 	<file alias="ModernCheckBox.qml">qml-shell/ModernCheckBox.qml</file>
 	<file alias="ModernComboBox.qml">qml-shell/ModernComboBox.qml</file>
@@ -22,6 +24,7 @@
 	<file alias="ScreenShareEditor.qml">qml-shell/ScreenShareEditor.qml</file>
 	<file alias="ImageViewer.qml">qml-shell/ImageViewer.qml</file>
 	<file alias="StonksEditor.qml">qml-shell/StonksEditor.qml</file>
+	<file alias="StonksHeader.qml">qml-shell/StonksHeader.qml</file>
 	<file alias="ScreenShareViewWindow.qml">qml-shell/ScreenShareViewWindow.qml</file>
 	<file alias="ScreenShareControls.qml">qml-shell/ScreenShareControls.qml</file>
     <file alias="PttToolWindow.qml">qml-shell/PttToolWindow.qml</file>

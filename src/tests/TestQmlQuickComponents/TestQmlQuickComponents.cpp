@@ -59,7 +59,7 @@ class FakeDialogState final : public QObject {
 	Q_PROPERTY(QString dialogId READ dialogId NOTIFY stateChanged)
 	Q_PROPERTY(QString kind READ kind NOTIFY stateChanged)
 	Q_PROPERTY(QString activePage READ activePage NOTIFY stateChanged)
-	Q_PROPERTY(QVariantList pages READ pages CONSTANT)
+	Q_PROPERTY(QVariantList pages READ pages NOTIFY stateChanged)
 	Q_PROPERTY(QVariantList sections READ sections NOTIFY stateChanged)
 	Q_PROPERTY(QVariantList actions READ actions CONSTANT)
 	Q_PROPERTY(QVariantList favorites READ favorites NOTIFY stateChanged)
@@ -114,6 +114,9 @@ public:
 	QString kind() const { return m_kind; }
 	QString activePage() const { return m_activePage; }
 	QVariantList pages() const {
+		if (m_state.contains(QStringLiteral("pages"))) {
+			return m_state.value(QStringLiteral("pages")).toList();
+		}
 		return { QVariantMap { { QStringLiteral("id"), QStringLiteral("general") },
 								   { QStringLiteral("label"), QStringLiteral("General") } },
 				 QVariantMap { { QStringLiteral("id"), QStringLiteral("advanced") },

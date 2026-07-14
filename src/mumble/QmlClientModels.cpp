@@ -1011,6 +1011,7 @@ bool ClientSessionController::selfDeafened() const { return m_selfDeafened; }
 QVariantList ClientSessionController::appMenus() const { return m_appMenus; }
 QVariantMap ClientSessionController::selfMenu() const { return m_selfMenu; }
 QVariantMap ClientSessionController::updateBanner() const { return m_updateBanner; }
+QVariantMap ClientSessionController::stonks() const { return m_stonks; }
 QString ClientSessionController::motdHtml() const { return m_motdHtml; }
 QVariantList ClientSessionController::motdSegments() const { return m_motdSegments; }
 QString ClientSessionController::motdSummary() const { return m_motdSummary; }
@@ -1071,6 +1072,7 @@ void ClientSessionController::setSelfDeafened(bool value) { SET_VALUE(m_selfDeaf
 void ClientSessionController::setAppMenus(const QVariantList &value) { SET_VALUE(m_appMenus, appMenusChanged); }
 void ClientSessionController::setSelfMenu(const QVariantMap &value) { SET_VALUE(m_selfMenu, selfMenuChanged); }
 void ClientSessionController::setUpdateBanner(const QVariantMap &value) { SET_VALUE(m_updateBanner, updateBannerChanged); }
+void ClientSessionController::setStonks(const QVariantMap &value) { SET_VALUE(m_stonks, stonksChanged); }
 void ClientSessionController::setMotdHtml(const QString &value) {
 	const QString bounded = value.left(MaxRichBodyCharacters);
 	if (!acceptsFrontendStateMutation(this) || m_motdHtml == bounded) return;
@@ -1154,6 +1156,7 @@ void ClientSessionController::applyState(const QVariantMap &state) {
 	if (state.contains(QStringLiteral("selfMenu"))) setSelfMenu(state.value(QStringLiteral("selfMenu")).toMap());
 	if (state.contains(QStringLiteral("updateBanner")))
 		setUpdateBanner(state.value(QStringLiteral("updateBanner")).toMap());
+	if (state.contains(QStringLiteral("stonks"))) setStonks(state.value(QStringLiteral("stonks")).toMap());
 	if (state.contains(QStringLiteral("motdHtml"))) setMotdHtml(state.value(QStringLiteral("motdHtml")).toString());
 	if (state.contains(QStringLiteral("motdSummary")))
 		setMotdSummary(state.value(QStringLiteral("motdSummary")).toString());

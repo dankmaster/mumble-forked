@@ -1046,14 +1046,13 @@ FocusScope {
 							font.pixelSize: Theme.fontLabel
 						}
 					}
-					BusyIndicator {
+					ModernBusyIndicator {
 						objectName: "providerReleaseBusyIndicator"
 						visible: root.releaseInfo.loading
 						running: visible
-						palette.dark: Theme.accent
-						palette.highlight: Theme.accent
 						Layout.preferredWidth: Theme.controlHeight
 						Layout.preferredHeight: Theme.controlHeight
+						Accessible.name: qsTr("Checking for the latest release")
 					}
 				}
 

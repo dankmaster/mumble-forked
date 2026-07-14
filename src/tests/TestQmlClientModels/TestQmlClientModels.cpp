@@ -43,6 +43,7 @@ private slots:
 	void sessionAppliesTypedConnectionState();
 	void sessionDerivesTypedMotdState();
 	void sessionPublishesTypedUpdateBanner();
+	void sessionPublishesTypedStonksState();
 	void sessionPublishesSemanticMenus();
 	void commandsRouteTypedAppActions();
 	void commandsRejectEmptyStableIds();
@@ -1625,6 +1626,34 @@ void TestQmlClientModels::sessionPublishesTypedUpdateBanner() {
 	session.setUpdateBanner({});
 	QCOMPARE(spy.count(), 2);
 	QVERIFY(session.updateBanner().isEmpty());
+}
+
+void TestQmlClientModels::sessionPublishesTypedStonksState() {
+	ClientSessionController session;
+	QSignalSpy spy(&session, &ClientSessionController::stonksChanged);
+	const QVariantMap populated {
+		{ QStringLiteral("supported"), true },
+		{ QStringLiteral("enabled"), true },
+		{ QStringLiteral("automationHeaderVisible"), true },
+		{ QStringLiteral("pinnedTickers"), QVariantList {
+			QVariantMap { { QStringLiteral("symbol"), QStringLiteral("RKLB") } } } },
+		{ QStringLiteral("tickerQuotes"), QVariantMap {
+			{ QStringLiteral("RKLB"), QVariantMap {
+				{ QStringLiteral("ok"), true }, { QStringLiteral("price"), 18.42 },
+				{ QStringLiteral("changePercent"), 4.7 } } } } }
+	};
+	session.applyState({ { QStringLiteral("stonks"), populated } });
+	QCOMPARE(spy.count(), 1);
+	QCOMPARE(session.stonks(), populated);
+	session.applyState({ { QStringLiteral("stonks"), populated } });
+	QCOMPARE(spy.count(), 1);
+
+	QVariantMap loading = populated;
+	loading.insert(QStringLiteral("loading"), true);
+	loading.insert(QStringLiteral("status"), QStringLiteral("Loading Stonks ticker quotes"));
+	session.applyState({ { QStringLiteral("stonks"), loading } });
+	QCOMPARE(spy.count(), 2);
+	QVERIFY(session.stonks().value(QStringLiteral("loading")).toBool());
 }
 
 void TestQmlClientModels::sessionPublishesSemanticMenus() {

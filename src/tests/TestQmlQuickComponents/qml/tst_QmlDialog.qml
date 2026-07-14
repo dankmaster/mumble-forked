@@ -43,9 +43,11 @@ TestCase {
         tryVerify(function () {
             return loader.item.activeFocus;
         });
-        const closeButton = findChild(loader.item.contentItem, "dialogCloseButton");
-        verify(closeButton !== null);
-        const before = dialogState.closeRequests;
+		const closeButton = findChild(loader.item.contentItem, "dialogCloseButton");
+		verify(closeButton !== null);
+		compare(closeButton.iconName, "close");
+		compare(closeButton.text, "Close");
+		const before = dialogState.closeRequests;
         mouseClick(closeButton);
         compare(dialogState.closeRequests, before + 1);
     }
@@ -136,6 +138,46 @@ TestCase {
 			"Focused settings fields must be scrolled above the persistent action footer");
 	}
 
+	function test_single_surface_dialog_fits_sparse_content_and_grows_for_long_content() {
+		dialogState.setSections([{ "title": "Status", "fields": [{
+			"id": "status", "type": "note", "label": "Nothing to show yet"
+		}] }]);
+		dialogState.setSpecialState("generic", {
+			"id": "sparse-content", "pages": [], "width": 720, "height": 700,
+			"primaryActionId": "save"
+		});
+		tryVerify(function() { return !loader.item.stablePageViewport; });
+		tryVerify(function() { return loader.item.height < 500; });
+		verify(loader.item.height < dialogState.preferredHeight,
+			"A sparse single-surface dialog must not reserve its full DTO height");
+
+		const fields = [];
+		for (let index = 0; index < 18; ++index) {
+			fields.push({ "id": "long" + index, "type": "text",
+				"label": "Field " + index, "value": "A value that keeps the row visible" });
+		}
+		dialogState.setSections([{ "title": "Long result", "fields": fields }]);
+		dialogState.setSpecialState("generic", {
+			"id": "long-single-surface", "pages": [], "width": 720, "height": 360,
+			"primaryActionId": "save"
+		});
+		const scroll = findChild(loader.item.contentItem, "dialogContentScroll");
+		const footer = findChild(loader.item.contentItem, "dialogFooter");
+		const endPadding = findChild(loader.item.contentItem, "dialogContentEndPadding");
+		tryVerify(function() {
+			return scroll !== null && footer !== null && endPadding !== null
+				&& loader.item.height > dialogState.preferredHeight
+				&& scroll.contentHeight > scroll.height;
+		});
+		compare(Math.round(scroll.contentHeight), Math.round(endPadding.parent.implicitHeight));
+		const flickable = scroll.contentItem;
+		flickable.contentY = Math.max(0, flickable.contentHeight - flickable.height);
+		wait(0);
+		const endBottom = endPadding.mapToItem(loader.item.contentItem, 0, endPadding.height).y;
+		verify(endBottom <= footer.y + 1,
+			"The complete body content must remain reachable above the sticky footer");
+	}
+
 	function test_color_control_is_named_and_keyboard_focusable() {
 		const colorButton = findChild(loader.item.contentItem, "dialogColorButton_accent");
 		verify(colorButton !== null);
@@ -160,6 +202,7 @@ TestCase {
 	function test_connect_favorites_selection_and_editor_rendering() {
 		dialogState.setSpecialState("connect", {
 			"id": "connect",
+			"pages": [],
 			"width": 860,
 			"height": 640,
 			"primaryActionId": "save",
@@ -173,12 +216,21 @@ TestCase {
 			]
 		});
 		const list = findChild(loader.item.contentItem, "connectFavoriteList");
+		const surface = findChild(loader.item.contentItem, "connectFavoriteSurface");
 		verify(list !== null);
+		verify(surface !== null);
 		tryCompare(list, "count", 2);
+		tryVerify(function() { return surface.height < 260 && loader.item.height < 500; });
 		tryCompare(list, "activeFocus", true);
 
 		tryVerify(function() { return list.itemAtIndex(1) !== null; });
 		const secondFavorite = list.itemAtIndex(1);
+		tryVerify(function() {
+			return secondFavorite.visible
+				&& secondFavorite.y >= list.contentY - 1
+				&& secondFavorite.y + secondFavorite.height <= list.contentY + list.height + 1;
+		});
+		wait(0);
 		mouseClick(secondFavorite, 8, Math.round(secondFavorite.height / 2));
 		compare(dialogState.lastAction, "selectFavorite");
 		compare(dialogState.lastPayload.index, 1);
@@ -191,7 +243,8 @@ TestCase {
 		compare(dialogState.lastPayload.index, 0);
 
 		dialogState.setSpecialState("connect", {
-			"id": "connect", "selectedFavoriteIndex": 0, "editorOpen": true,
+			"id": "connect", "pages": [], "width": 860, "height": 640,
+			"selectedFavoriteIndex": 0, "editorOpen": true,
 			"editorTitle": "Edit server", "favorites": [{ "index": 0, "label": "Production", "selected": true }]
 		});
 		const editorTitle = findChild(loader.item.contentItem, "connectEditorTitle");
@@ -246,9 +299,12 @@ TestCase {
 		tryCompare(loader.item, "width", 520);
 		tryCompare(loader.item, "height", 430);
 		const scaffold = findChild(loader.item.contentItem, "dialogLoadingScaffold");
+		const loadingIndicator = findChild(loader.item.contentItem, "dialogLoadingIndicator");
 		const status = findChild(loader.item.contentItem, "dialogStatusMessage");
 		const primary = findChild(loader.item.contentItem, "dialogAction_save");
 		verify(scaffold !== null && scaffold.visible);
+		verify(loadingIndicator !== null && loadingIndicator.running);
+		compare(loadingIndicator.Accessible.role, Accessible.ProgressBar);
 		verify(status !== null && status.visible && status.text === "Fetching permissions");
 		verify(primary !== null && primary.highlighted && primary.tone === "accent" && !primary.enabled);
 
@@ -365,8 +421,11 @@ TestCase {
 		let list = findChild(loader.item.contentItem, "dialogResultList_records");
 		let status = findChild(loader.item.contentItem, "dialogResultLoading_records");
 		let statusText = findChild(loader.item.contentItem, "dialogResultStatusText_records");
+		const loadingIndicator = findChild(loader.item.contentItem, "dialogResultBusy_records");
 		verify(list !== null && !list.visible);
 		verify(status !== null && status.visible);
+		verify(loadingIndicator !== null && loadingIndicator.running);
+		compare(loadingIndicator.Accessible.role, Accessible.ProgressBar);
 		compare(statusText.text, "Loading records");
 
 		dialogState.setSections([{ "fields": [{

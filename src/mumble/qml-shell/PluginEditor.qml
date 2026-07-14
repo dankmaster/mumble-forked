@@ -134,11 +134,13 @@ ColumnLayout {
 				Layout.fillWidth: true
 				spacing: Theme.space2
 
-				BusyIndicator {
+				ModernBusyIndicator {
+					objectName: "pluginOperationBusyIndicator"
 					running: root.operationVisible
 					visible: running
 					implicitWidth: 22
 					implicitHeight: 22
+					Accessible.name: qsTr("Plugin operation in progress")
 				}
 
 				Label {
@@ -161,7 +163,7 @@ ColumnLayout {
 				}
 			}
 
-			ProgressBar {
+			ModernProgressBar {
 				id: operationProgress
 				objectName: "pluginOperationProgress"
 				Layout.fillWidth: true
@@ -173,21 +175,6 @@ ColumnLayout {
 				Accessible.description: root.operationProgress < 0
 					? qsTr("Progress is not yet available")
 					: qsTr("%1 percent complete").arg(Math.round(root.operationProgress * 100))
-				background: Rectangle {
-					implicitHeight: 5
-					radius: height / 2
-					color: Theme.panel
-				}
-				contentItem: Item {
-					implicitHeight: 5
-					clip: true
-					Rectangle {
-						width: parent.width * operationProgress.visualPosition
-						height: parent.height
-						radius: height / 2
-						color: Theme.accent
-					}
-				}
 			}
 		}
 	}
@@ -251,9 +238,12 @@ ColumnLayout {
 		Column {
 			anchors.centerIn: parent
 			spacing: Theme.space2
-			BusyIndicator {
+			ModernBusyIndicator {
+				objectName: "pluginLoadingBusyIndicator"
 				anchors.horizontalCenter: parent.horizontalCenter
-				running: loadingState.visible
+				running: root.showLoadingState
+				visible: running
+				Accessible.name: qsTr("Loading installed plugins")
 			}
 			Label {
 				textFormat: Text.PlainText

@@ -66,7 +66,7 @@ Rectangle {
                 font.pixelSize: Theme.fontCaption
                 wrapMode: Text.Wrap
             }
-            ProgressBar {
+            ModernProgressBar {
                 Layout.fillWidth: true
                 visible: !!root.state.progressVisible
                 indeterminate: !!root.state.progressIndeterminate

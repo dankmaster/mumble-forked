@@ -367,7 +367,9 @@ TestCase {
 		const releaseIndicator = findChild(item, "providerReleaseBusyIndicator")
 		verify(releaseIndicator !== null)
 		compare(releaseIndicator.running, true)
-		compare(releaseIndicator.palette.dark, Theme.accent)
+		compare(releaseIndicator.indicatorColor, Theme.accent)
+		compare(releaseIndicator.Accessible.role, Accessible.ProgressBar)
+		compare(releaseIndicator.Accessible.name, "Checking for the latest release")
 
 		item = setFixture({
 			"provider": "github", "previewKind": "github", "githubRepo": "mumble",

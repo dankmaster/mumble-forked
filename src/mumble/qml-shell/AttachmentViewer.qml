@@ -114,11 +114,11 @@ Window {
 				Accessible.name: viewer.displayTitle
 			}
 
-			BusyIndicator {
+			ModernBusyIndicator {
+				objectName: "attachmentViewerBusyIndicator"
 				anchors.centerIn: parent
 				running: viewer.loadStatus === Image.Loading
 				visible: running
-				palette.highlight: Theme.accent
 				Accessible.name: qsTr("Loading %1").arg(viewer.displayTitle)
 			}
 
