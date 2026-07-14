@@ -588,10 +588,6 @@
 <context>
     <name>ClientSessionController</name>
     <message>
-        <source>Show welcome message</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Collapse</source>
         <translation type="unfinished"></translation>
     </message>
@@ -683,6 +679,18 @@
     <message>
         <source>Cancel</source>
         <translation type="unfinished">Cancel</translation>
+    </message>
+    <message>
+        <source>Connection failed</source>
+        <translation type="unfinished">Connection failed</translation>
+    </message>
+    <message>
+        <source>Automatic reconnect is scheduled.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Try again</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -948,6 +956,18 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Open externally</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The inline media player could not communicate with its renderer.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The media provider could not be loaded.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reload the current provider player</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -1334,6 +1354,46 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Send</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>MOTD</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show welcome message</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hide welcome message</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A new server welcome message is available. Activate to show the welcome message.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>A new server welcome message is available. Activate to hide the welcome message.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Activate to show the server welcome message.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Activate to hide the server welcome message.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>New</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Choose a server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the server browser</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -6850,6 +6910,10 @@ Please describe what you were doing before the crash.</source>
         <source>Leave session</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Provider controls</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>MediaSessionWindow</name>
@@ -6875,10 +6939,6 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Media playback failed</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>This provider cannot be synchronized in-app. Open it in your browser instead.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -7246,6 +7306,10 @@ Please describe what you were doing before the crash.</source>
         <source>Message &apos;%1&apos; is not part of the active rich preview probe.</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Missing rich-preview message id.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>MotdPanel</name>
@@ -7258,23 +7322,7 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>New</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>The welcome message has changed</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Open</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Server message</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Welcome hidden</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -7285,19 +7333,11 @@ Please describe what you were doing before the crash.</source>
 <context>
     <name>NavigationRail</name>
     <message>
-        <source>PARTICIPANTS</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Profile menu</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Rooms and participants</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>NAVIGATION</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -7310,10 +7350,6 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>TEXT &amp; ACTIVITY</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Joined</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -7366,6 +7402,26 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Deafen</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>1 unread message</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 unread messages</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You are here</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>You</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>YOU</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -8256,6 +8312,118 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Conversation context</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>All</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Images</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>News</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Videos</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Shopping</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Rerun</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Offline · Latest VOD</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Offline · Clip</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Offline</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Audio</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Links</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source> positive</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%1 reviews</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Books</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ends %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Steam store details</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>STEAM STORE</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Steam app</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>USER REVIEWS</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Metacritic</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Steam</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Flashback thread</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Forum · Aktuellt · Populärt</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Replying to %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open in thread</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open on Flashback</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Trend</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -11112,14 +11280,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Audio setup</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Open guided audio setup for microphone level, voice activation, replay, and cleanup tuning.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Ready to tune voice input.</source>
         <translation type="unfinished"></translation>
     </message>
@@ -12031,10 +12191,6 @@ Please describe what you were doing before the crash.</source>
     </message>
     <message>
         <source>Catppuccin, standard light/dark, and more</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Custom themes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -14413,6 +14569,34 @@ Server feedback: fallback</source>
         <source>Access to the microphone was denied due to system restrictions. You will not be able to use the microphone in this session.</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Reload custom theme manifests after adding or editing files in the theme folder.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use recommended settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stage recommended voice detection, input gate, amplification, and cleanup settings. Apply or save to activate them.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Uses the accent supplied by the selected theme.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom theme folder</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Theme library</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reload themes</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>QmlDialog</name>
@@ -14626,6 +14810,61 @@ Server feedback: fallback</source>
         <source>Loading results</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Select a preset or enter a hexadecimal color value</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Hex color</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Use color %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation type="unfinished">Cancel</translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Theme</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message numerus="yes">
+        <source>%n theme(s)</source>
+        <translation type="unfinished">
+            <numerusform></numerusform>
+            <numerusform></numerusform>
+        </translation>
+    </message>
+    <message>
+        <source>Current appearance preview: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Selected theme</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom theme</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Built-in theme</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom</source>
+        <translation type="unfinished">Custom</translation>
+    </message>
+    <message>
+        <source>Accent</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>QmlShellHost</name>
@@ -14828,15 +15067,59 @@ Server feedback: fallback</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Playing here</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Play here</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Open player</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Play %1 here</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Game store</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loading provider preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Loads the provider player in this preview</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show this provider preview until the card is reused</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Steam media gallery</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>PLAY</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Steam trailer %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Steam screenshot %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Preview actions</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open secondary playback and preview actions</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Open the provider player in a separate window</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
