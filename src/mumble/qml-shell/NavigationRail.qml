@@ -195,15 +195,46 @@ Rectangle {
 	// always enters through a room, participant, or footer action.
 	activeFocusOnTab: false
     color: Theme.rail
-    border.color: Theme.divider
+	border.width: 0
+	Rectangle {
+		anchors.left: parent.left
+		anchors.top: parent.top
+		anchors.bottom: parent.bottom
+		width: 1
+		visible: Theme.railSide === "right"
+		color: Theme.divider
+		z: 20
+	}
+	Rectangle {
+		anchors.right: parent.right
+		anchors.top: parent.top
+		anchors.bottom: parent.bottom
+		width: 1
+		visible: Theme.railSide === "left"
+		color: Theme.divider
+		z: 20
+	}
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 76
+			Layout.preferredHeight: 72
             color: Theme.panel
-            border.color: Theme.divider
+			border.width: 0
+			DragHandler {
+				enabled: !navigationRail.commitOnSelection
+				target: null
+				onActiveChanged: if (active && navigationRail.Window.window)
+					navigationRail.Window.window.startSystemMove()
+			}
+			Rectangle {
+				anchors.left: parent.left
+				anchors.right: parent.right
+				anchors.bottom: parent.bottom
+				height: 1
+				color: Theme.divider
+			}
             Column {
                 anchors.left: parent.left
 				anchors.right: parent.right
@@ -1058,7 +1089,14 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 72
             color: Theme.strip
-            border.color: Theme.divider
+			border.width: 0
+			Rectangle {
+				anchors.left: parent.left
+				anchors.right: parent.right
+				anchors.top: parent.top
+				height: 1
+				color: Theme.divider
+			}
             RowLayout {
                 anchors.fill: parent
 				anchors.leftMargin: 12

@@ -29,12 +29,13 @@
 	<file alias="ScreenShareControls.qml">qml-shell/ScreenShareControls.qml</file>
     <file alias="PttToolWindow.qml">qml-shell/PttToolWindow.qml</file>
     <file alias="ManualPluginWindow.qml">qml-shell/ManualPluginWindow.qml</file>
-    <file alias="QmlDialog.qml">qml-shell/QmlDialog.qml</file>
+	<file alias="QmlDialog.qml">qml-shell/QmlDialog.qml</file>
     <file alias="PluginEditor.qml">qml-shell/PluginEditor.qml</file>
     <file alias="MessageEventEditor.qml">qml-shell/MessageEventEditor.qml</file>
     <file alias="ShortcutEditor.qml">qml-shell/ShortcutEditor.qml</file>
     <file alias="AclEditor.qml">qml-shell/AclEditor.qml</file>
     <file alias="MediaSessionWindow.qml">qml-shell/MediaSessionWindow.qml</file>
+	<file alias="InlineMediaPlayer.qml">qml-shell/InlineMediaPlayer.qml</file>
 	<file alias="MediaSessionControls.qml">qml-shell/MediaSessionControls.qml</file>
 	<file alias="WatchTogetherBanner.qml">qml-shell/WatchTogetherBanner.qml</file>
 	<file alias="ChatMessageFrame.qml">qml-shell/ChatMessageFrame.qml</file>

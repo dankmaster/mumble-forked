@@ -40,6 +40,7 @@ private slots:
 	void duplicateStableIdsAreCoalesced();
 	void activeScopeAppliesTypedState();
 	void sessionPropertiesOnlyNotifyOnChanges();
+	void sessionParsesManagedMotdImagesAndTracksSourceIdentity();
 	void sessionAppliesTypedConnectionState();
 	void sessionDerivesTypedMotdState();
 	void sessionPublishesTypedUpdateBanner();
@@ -62,6 +63,7 @@ private slots:
 	void asyncOperationsExposeStructuredPluginResults();
 	void asyncOperationItemResultsAreLosslessAndPaginated();
 	void mediaSessionLocalPlaybackControlsRemainTyped();
+	void mediaSessionSwitchesBetweenInlineAndDetachedPresentation();
 	void mediaSessionValidatesAndPublishesTypedState();
 	void mediaSessionValidatesDirectMedia();
 	void mediaSessionProviderAllowlist_data();
@@ -1524,6 +1526,46 @@ void TestQmlClientModels::sessionPropertiesOnlyNotifyOnChanges() {
 	QCOMPARE(session.motdSummary(), QStringLiteral("Welcome"));
 }
 
+void TestQmlClientModels::sessionParsesManagedMotdImagesAndTracksSourceIdentity() {
+	ClientSessionController session;
+	QSignalSpy htmlSpy(&session, &ClientSessionController::motdHtmlChanged);
+	QSignalSpy segmentsSpy(&session, &ClientSessionController::motdSegmentsChanged);
+	const QString renderedHtml = QStringLiteral(
+		"<p>Above</p><img src=\"image://mumble/motd-inline?g=1\" width=\"640\" height=\"360\" "
+		"alt=\"Server welcome art\"/><p>Below</p>");
+	session.setMotdContent(renderedHtml, QStringLiteral("server supplied motd v1 with base64 image"));
+	QCOMPARE(htmlSpy.count(), 1);
+	QTRY_VERIFY_WITH_TIMEOUT(segmentsSpy.count() >= 1, 5000);
+
+	const auto imageSegment = [&session]() {
+		for (const QVariant &value : session.motdSegments()) {
+			const QVariantMap segment = value.toMap();
+			if (segment.value(QStringLiteral("kind")).toString() == QLatin1String("image")) return segment;
+		}
+		return QVariantMap {};
+	};
+	QTRY_VERIFY_WITH_TIMEOUT(!imageSegment().isEmpty(), 5000);
+	QCOMPARE(imageSegment().value(QStringLiteral("source")).toString(),
+			 QStringLiteral("image://mumble/motd-inline?g=1"));
+	QCOMPARE(imageSegment().value(QStringLiteral("width")).toInt(), 640);
+	QCOMPARE(imageSegment().value(QStringLiteral("height")).toInt(), 360);
+	QCOMPARE(imageSegment().value(QStringLiteral("alt")).toString(), QStringLiteral("Server welcome art"));
+
+	const QString firstSignature = session.motdSignature();
+	session.setMotdDismissedSignature(firstSignature);
+	QVERIFY(session.motdDismissed());
+	session.setMotdContent(renderedHtml, QStringLiteral("server supplied motd v2 with changed base64 image"));
+	QCOMPARE(htmlSpy.count(), 1);
+	QVERIFY(session.motdSignature() != firstSignature);
+	QVERIFY(!session.motdDismissed());
+	QVERIFY(session.motdChanged());
+
+	session.setMotdContent(QStringLiteral("<p>Fallback identity</p>"), {});
+	QVERIFY(!session.motdSignature().isEmpty());
+	QCOMPARE(session.motdActions().constLast().toMap().value(QStringLiteral("payload")).toMap()
+		.value(QStringLiteral("signature")).toString(), session.motdSignature());
+}
+
 void TestQmlClientModels::sessionAppliesTypedConnectionState() {
 	ClientSessionController session;
 	QSignalSpy stateSpy(&session, &ClientSessionController::connectionStateChanged);
@@ -2589,6 +2631,26 @@ void TestQmlClientModels::mediaSessionLocalPlaybackControlsRemainTyped() {
 	shared.seek(12.0);
 	QCOMPARE(sharedPlaySpy.count(), 0);
 	QCOMPARE(sharedSeekSpy.count(), 0);
+}
+
+void TestQmlClientModels::mediaSessionSwitchesBetweenInlineAndDetachedPresentation() {
+	MediaSessionBackend media;
+	const QUrl url(QStringLiteral("https://www.youtube.com/embed/inline-test"));
+	QVERIFY(media.detached());
+	QVERIFY(media.openInline(url, QStringLiteral("youtube"), QStringLiteral("message:42")));
+	QVERIFY(media.active());
+	QVERIFY(!media.detached());
+	QCOMPARE(media.sessionId(), QStringLiteral("message:42"));
+
+	media.detach();
+	QVERIFY(media.detached());
+	QVERIFY(media.active());
+	media.closePlayer();
+	QVERIFY(!media.active());
+	QVERIFY(media.detached());
+
+	QVERIFY(media.open(url, QStringLiteral("youtube"), QStringLiteral("message:43")));
+	QVERIFY(media.detached());
 }
 
 void TestQmlClientModels::mediaSessionValidatesAndPublishesTypedState() {

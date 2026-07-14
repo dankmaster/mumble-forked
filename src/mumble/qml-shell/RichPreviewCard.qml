@@ -13,6 +13,8 @@ Rectangle {
         ? [preview.url || "", preview.embedUrl || "", preview.mediaUrl || "",
            preview.mediaExternalUrl || "", preview.title || ""].join("|") : ""
     property bool watchTogetherAvailable: true
+	property var mediaSessionController: null
+	property string mediaSessionId: ""
 	property bool renderActive: true
     property bool userExpanded: false
     property int selectedMediaIndex: 0
@@ -80,12 +82,16 @@ Rectangle {
 		&& (providerDetails.canExpand || hasExpandedDescription || hasRevealableMedia
 			|| mediaItems.length > 1)
 	readonly property bool hasDetails: canExpand
+	readonly property bool inlinePlaybackActive: !!mediaSessionController
+		&& mediaSessionController.active && !mediaSessionController.detached
+		&& String(mediaSessionController.sessionId || "") === mediaSessionId
 
     signal externalOpenRequested(string url)
     signal imageOpenRequested(string source, string title)
     signal imageRefreshRequested()
     signal directMediaRequested(string url, string mime, string audioUrl, string audioMime, string title)
-    signal playRequested(string url, string provider)
+	signal inlinePlayRequested(string url, string provider)
+	signal popoutPlayRequested(string url, string provider)
     signal watchTogetherRequested(string url, string provider, string title)
 
 	implicitHeight: content.implicitHeight + Theme.space4 * 2
@@ -124,7 +130,7 @@ Rectangle {
 		sensitiveMediaRevealed = false
     }
 
-    function requestImageRefresh() {
+	function requestImageRefresh() {
         if (imageRefreshQueued)
             return
         imageRefreshQueued = true
@@ -140,6 +146,30 @@ Rectangle {
 		const url = String(value === undefined || value === null ? "" : value).trim().slice(0, 2048)
 		return /^https:\/\//i.test(url) ? url : ""
 	}
+
+	function requestInlinePlayback() {
+		userExpanded = true
+		inlinePlayRequested(safeEmbedUrl, safeEmbedProvider)
+	}
+
+	function preserveInlinePlayback() {
+		if (!mediaSessionController || !mediaSessionController.active
+				|| mediaSessionController.detached
+				|| String(mediaSessionController.sessionId || "") !== mediaSessionId)
+			return false
+		mediaSessionController.detach()
+		return true
+	}
+
+	onRenderActiveChanged: {
+		if (!renderActive)
+			preserveInlinePlayback()
+	}
+	onVisibleChanged: {
+		if (!visible)
+			preserveInlinePlayback()
+	}
+	Component.onDestruction: preserveInlinePlayback()
 
 	function safeDirectMediaUrl(value, kind) {
 		const url = String(value === undefined || value === null ? "" : value).trim()
@@ -505,8 +535,10 @@ Rectangle {
         Rectangle {
 			id: expandedMediaPanel
 			objectName: "previewExpandedMediaPanel"
-            Layout.fillWidth: true
-            Layout.preferredHeight: root.expanded && (root.imageSource.length > 0
+			Layout.fillWidth: true
+			Layout.preferredHeight: root.inlinePlaybackActive
+				? Math.max(420, Math.min(520, root.actionAvailableWidth * 9 / 16 + 132))
+				: root.expanded && (root.imageSource.length > 0
                                     || root.hasDirectMedia || root.hasExternalMedia || root.hasExternalImage)
 									? Math.min(Theme.rowHeight * 6, root.actionAvailableWidth * 9 / 16) : 0
             visible: Layout.preferredHeight > 0
@@ -514,18 +546,18 @@ Rectangle {
 			radius: Theme.innerRadius
             clip: true
 
-            Image {
+			Image {
 				id: expandedStaticImage
 				objectName: "previewExpandedStaticImage"
                 anchors.fill: parent
 				anchors.margins: Theme.space1
-				source: root.renderActive && root.expanded && !root.mediaRequiresReveal
+				source: !root.inlinePlaybackActive && root.renderActive && root.expanded && !root.mediaRequiresReveal
 					&& !root.currentMediaManagedAnimated
 					? root.imageSource : ""
                 asynchronous: true
                 cache: false
                 fillMode: Image.PreserveAspectFit
-				visible: source.toString().length > 0 && status === Image.Ready
+				visible: !root.inlinePlaybackActive && source.toString().length > 0 && status === Image.Ready
                 onStatusChanged: if (status === Image.Error && root.imageSource.length > 0)
                                      root.requestImageRefresh()
             }
@@ -535,7 +567,7 @@ Rectangle {
 				property int mediaStatus: Image.Null
 				anchors.fill: parent
 				anchors.margins: Theme.space1
-				active: root.renderActive && root.expanded && !root.mediaRequiresReveal
+				active: !root.inlinePlaybackActive && root.renderActive && root.expanded && !root.mediaRequiresReveal
 					&& root.currentMediaManagedAnimated
 				onActiveChanged: mediaStatus = active ? Image.Loading : Image.Null
 				sourceComponent: AnimatedImage {
@@ -558,7 +590,7 @@ Rectangle {
 			ModernBusyIndicator {
 				objectName: "previewExpandedBusyIndicator"
                 anchors.centerIn: parent
-				running: !root.mediaRequiresReveal && (root.currentMediaManagedAnimated
+				running: !root.inlinePlaybackActive && !root.mediaRequiresReveal && (root.currentMediaManagedAnimated
 					? expandedAnimationLoader.mediaStatus === Image.Loading
 					: expandedStaticImage.status === Image.Loading)
                 visible: running
@@ -567,7 +599,7 @@ Rectangle {
 			Rectangle {
 				objectName: "previewExpandedMediaScrim"
 				anchors.fill: parent
-				visible: !root.mediaRequiresReveal && (root.hasDirectMedia || root.hasExternalMedia
+				visible: !root.inlinePlaybackActive && !root.mediaRequiresReveal && (root.hasDirectMedia || root.hasExternalMedia
 					|| root.hasExternalImage || root.mediaItems.length > 1)
 				color: root.withAlpha(Theme.strip, 0.38)
 			}
@@ -575,7 +607,7 @@ Rectangle {
 				objectName: "previewExpandedError"
 				anchors.centerIn: parent
 				width: Math.max(1, parent.width - Theme.space5 * 2)
-				visible: !root.mediaRequiresReveal && (root.previewState === "error"
+				visible: !root.inlinePlaybackActive && !root.mediaRequiresReveal && (root.previewState === "error"
 					|| (root.imageSource.length > 0 && (root.currentMediaManagedAnimated
 						? expandedAnimationLoader.mediaStatus === Image.Error
 						: expandedStaticImage.status === Image.Error)))
@@ -594,7 +626,7 @@ Rectangle {
 			}
             ModernButton {
                 anchors.centerIn: parent
-				visible: root.previewState !== "error" && !root.mediaRequiresReveal
+				visible: !root.inlinePlaybackActive && root.previewState !== "error" && !root.mediaRequiresReveal
 					&& (root.hasDirectMedia || root.hasExternalMedia || root.hasExternalImage)
                 text: root.hasExternalImage ? qsTr("Open image") : root.hasExternalMedia ? qsTr("Open media")
                     : root.currentMediaKind === "audio" ? qsTr("Play audio") : qsTr("Play video")
@@ -604,7 +636,7 @@ Rectangle {
 				id: expandedMediaAction
 				objectName: "previewExpandedMediaButton"
                 anchors.fill: parent
-				visible: root.currentMediaKind === "image"
+				visible: !root.inlinePlaybackActive && root.currentMediaKind === "image"
 					&& (root.currentMediaManagedAnimated
 						? expandedAnimationLoader.mediaStatus === Image.Ready
 						: expandedStaticImage.status === Image.Ready)
@@ -628,7 +660,7 @@ Rectangle {
                 objectName: "previewPreviousMediaButton"
                 anchors.left: parent.left
                 anchors.verticalCenter: parent.verticalCenter
-                visible: root.mediaItems.length > 1
+				visible: !root.inlinePlaybackActive && root.mediaItems.length > 1
                 enabled: root.selectedMediaIndex > 0
 				iconName: "previous"
                 Accessible.name: qsTr("Previous media")
@@ -638,7 +670,7 @@ Rectangle {
                 objectName: "previewNextMediaButton"
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                visible: root.mediaItems.length > 1
+				visible: !root.inlinePlaybackActive && root.mediaItems.length > 1
                 enabled: root.selectedMediaIndex + 1 < root.mediaItems.length
 				iconName: "next"
                 Accessible.name: qsTr("Next media")
@@ -649,14 +681,14 @@ Rectangle {
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
 				anchors.margins: Theme.space2
-                visible: root.mediaItems.length > 1
+				visible: !root.inlinePlaybackActive && root.mediaItems.length > 1
                 text: qsTr("%1 of %2").arg(root.selectedMediaIndex + 1).arg(root.mediaItems.length)
                 color: Theme.textMuted
 				font.pixelSize: Theme.fontCaption
             }
 			Rectangle {
 				anchors.fill: parent
-				visible: root.mediaRequiresReveal
+				visible: !root.inlinePlaybackActive && root.mediaRequiresReveal
 				color: Theme.strip
 				radius: parent.radius
 				border.color: Theme.surfaceBorder
@@ -687,6 +719,24 @@ Rectangle {
 						onClicked: root.sensitiveMediaRevealed = true
 					}
 				}
+			}
+			Loader {
+				id: inlineMediaLoader
+				objectName: "previewInlineMediaLoader"
+				anchors.fill: parent
+				active: root.inlinePlaybackActive && root.renderActive
+				asynchronous: true
+				function updateSource() {
+					if (active) {
+						setSource(Qt.resolvedUrl("InlineMediaPlayer.qml"), {
+							"session": root.mediaSessionController
+						})
+					} else {
+						source = ""
+					}
+				}
+				onActiveChanged: updateSource()
+				Component.onCompleted: updateSource()
 			}
         }
 
@@ -736,11 +786,19 @@ Rectangle {
             ModernButton {
                 objectName: "previewPlayButton"
 				visible: root.safeEmbedUrl.length > 0 && root.safeEmbedProvider.length > 0
-                text: qsTr("Play")
+				text: root.inlinePlaybackActive ? qsTr("Playing here") : qsTr("Play here")
 				dense: true
 				tone: "accent"
 				width: root.actionButtonWidth(implicitWidth)
-				onClicked: root.playRequested(root.safeEmbedUrl, root.safeEmbedProvider)
+				onClicked: root.requestInlinePlayback()
+			}
+			ModernButton {
+				objectName: "previewPopoutButton"
+				visible: root.safeEmbedUrl.length > 0 && root.safeEmbedProvider.length > 0
+				text: qsTr("Open player")
+				dense: true
+				width: root.actionButtonWidth(implicitWidth)
+				onClicked: root.popoutPlayRequested(root.safeEmbedUrl, root.safeEmbedProvider)
             }
             ModernButton {
                 objectName: "previewWatchTogetherButton"

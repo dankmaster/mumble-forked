@@ -494,7 +494,10 @@ ApplicationWindow {
 	}
     Component {
         id: imageViewerComponent
-        ImageViewer { controller: dialogState }
+        ImageViewer {
+			controller: dialogState
+			transientParent: root
+		}
     }
     Loader {
         active: dialogState.open && dialogState.kind === "imageViewer"
@@ -504,6 +507,7 @@ ApplicationWindow {
         id: attachmentViewerComponent
         AttachmentViewer {
             attachment: root.attachmentViewerPayload || ({})
+			transientParent: root
             onClosing: root.attachmentViewerPayload = null
         }
     }
@@ -517,9 +521,10 @@ ApplicationWindow {
     // when that session closes.
     Loader {
         id: mediaSessionWindowLoader
-        active: mediaSession.active
+        active: mediaSession.active && mediaSession.detached
         asynchronous: true
         source: active ? Qt.resolvedUrl("MediaSessionWindow.qml") : ""
+		onLoaded: item.transientParent = root
     }
 
 	Drawer {
@@ -767,7 +772,23 @@ ApplicationWindow {
                     Layout.fillWidth: true
 					Layout.preferredHeight: root.narrowShell ? 64 : 72
                     color: Theme.panel
-                    border.color: Theme.divider
+					border.width: 0
+					DragHandler {
+						target: null
+						onActiveChanged: if (active) root.startSystemMove()
+					}
+					TapHandler {
+						acceptedButtons: Qt.LeftButton
+						onDoubleTapped: root.visibility === Window.Maximized
+							? root.showNormal() : root.showMaximized()
+					}
+					Rectangle {
+						anchors.left: parent.left
+						anchors.right: parent.right
+						anchors.bottom: parent.bottom
+						height: 1
+						color: Theme.divider
+					}
                     Column {
                         anchors.left: parent.left
 						anchors.leftMargin: root.narrowShell ? Theme.space3 : Theme.space5
@@ -880,7 +901,7 @@ ApplicationWindow {
 					Layout.rightMargin: Theme.spacing
 					Layout.topMargin: visible ? Theme.spacing : 0
                     state: clientSession.updateBanner
-                    onActionRequested: actionId => uiCommands.invokeAction(actionId)
+                    onActionRequested: actionId => uiCommands.invokeAppAction(actionId, {})
                 }
 
 				ConnectionBanner {
@@ -1405,7 +1426,9 @@ ApplicationWindow {
 									id: messagePreviewCard
                                     Layout.fillWidth: true
                                     visible: !!messageDelegate.preview && Object.keys(messageDelegate.preview).length > 0
-                                    preview: messageDelegate.preview || ({})
+									preview: messageDelegate.preview || ({})
+									mediaSessionController: mediaSession
+									mediaSessionId: messageDelegate.stableId
 									previewIdentity: messageDelegate.stableId + "|" + String(messageDelegate.preview
 										? (messageDelegate.preview.url || messageDelegate.preview.embedUrl
 											|| messageDelegate.preview.mediaUrl || messageDelegate.preview.title || "") : "")
@@ -1419,8 +1442,10 @@ ApplicationWindow {
 									onDirectMediaRequested: (url, mime, audioUrl, audioMime, title) =>
 										mediaSession.openDirect(url, mime, audioUrl, audioMime,
 																messageDelegate.stableId)
-                                    onPlayRequested: (url, provider) => mediaSession.open(url, provider,
-                                                                                         messageDelegate.stableId)
+									onInlinePlayRequested: (url, provider) => mediaSession.openInline(url, provider,
+										messageDelegate.stableId)
+									onPopoutPlayRequested: (url, provider) => mediaSession.open(url, provider,
+										messageDelegate.stableId)
                                     onWatchTogetherRequested: (url, provider, title) => {
                                         if (!mediaSession.sharedAvailable)
                                             mediaSession.startShared(url, provider, title)
@@ -1525,15 +1550,22 @@ ApplicationWindow {
 					}
                 }
 
-                Rectangle {
+				Rectangle {
 					id: composerSurface
                     Layout.fillWidth: true
-					Layout.preferredHeight: (activeScope.hasPendingReply ? 98 : 62)
+					Layout.preferredHeight: (activeScope.hasPendingReply ? 108 : 72)
 						+ Math.min(3, Math.max(0, composerInput.lineCount - 1)) * 18
 						+ (composer.attachments.count > 0 ? 58 : 0)
 						+ (composer.autocompleteItems.length > 0 ? 34 : 0)
                     color: Theme.strip
-                    border.color: Theme.divider
+					border.width: 0
+					Rectangle {
+						anchors.left: parent.left
+						anchors.right: parent.right
+						anchors.top: parent.top
+						height: 1
+						color: Theme.divider
+					}
                     RowLayout {
 						anchors.top: parent.top
 						anchors.bottom: parent.bottom

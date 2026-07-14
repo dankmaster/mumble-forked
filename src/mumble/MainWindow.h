@@ -409,6 +409,7 @@ public:
 	void refreshPersistentChatView(bool forceReload = false);
 	void requestOlderPersistentChatHistory();
 	void setPersistentChatWelcomeText(const QString &message);
+	QString modernPersistentChatWelcomeHtml();
 	void updatePersistentChatWelcome();
 	void clearPersistentChatView(const QString &message, const QString &title = QString(),
 								 const QStringList &hints = QStringList());
@@ -790,6 +791,9 @@ protected:
 	PersistentChatGateway *m_persistentChatGateway                 = nullptr;
 	PersistentChatController *m_persistentChatController           = nullptr;
 	QString m_persistentChatWelcomeText;
+	QString m_modernPersistentChatWelcomeHtml;
+	QStringList m_modernPersistentChatWelcomeImageUrls;
+	bool m_modernPersistentChatWelcomeHtmlValid = false;
 	bool m_persistentChatMotdExpanded        = false;
 	bool m_hasPersistentChatSupport          = false;
 	bool m_persistentChatTargetUsesVoiceTree = false;

@@ -14,6 +14,8 @@
 #include <QtWebEngineCore/QWebEngineUrlRequestInterceptor>
 
 namespace {
+const QByteArray YouTubeClientReferer("https://info.mumble.Mumble/");
+
 const QHash< QString, QSet< QString > > &providerResourceDomains() {
 	static const QHash< QString, QSet< QString > > domains {
 		{ QStringLiteral("youtube"),
@@ -142,9 +144,18 @@ public:
 		const QByteArray method = info.requestMethod().toUpper();
 		const bool methodAllowed = method == "GET" || method == "HEAD" || method == "POST"
 			|| method == "OPTIONS";
+		const bool resourceAllowed = QmlMediaProfileFactory::isResourceRequestAllowed(
+			provider, primaryUrl, audioUrl, info.requestUrl(), info.firstPartyUrl());
 		const bool blocked = info.isDownload() || info.resourceType() == QWebEngineUrlRequestInfo::ResourceTypeWebSocket
-			|| !methodAllowed || !QmlMediaProfileFactory::isResourceRequestAllowed(
-				provider, primaryUrl, audioUrl, info.requestUrl(), info.firstPartyUrl());
+			|| !methodAllowed || !resourceAllowed;
+		// Desktop WebViews do not synthesize a Referer for a top-level embed
+		// navigation. YouTube uses that header as the API-client identity and
+		// rejects otherwise valid embeds with player error 153. Only attach the
+		// installed application's stable OS identifier to requests that already
+		// passed the provider allowlist; never leak it to sender-controlled hosts.
+		if (!blocked && provider == QLatin1String("youtube")) {
+			info.setHttpHeader(QByteArrayLiteral("Referer"), YouTubeClientReferer);
+		}
 		info.block(blocked);
 	}
 

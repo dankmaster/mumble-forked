@@ -24,6 +24,7 @@
 #include <QtGui/QTextDocument>
 #include <QtGui/QTextDocumentFragment>
 #include <QtGui/QTextFragment>
+#include <QtGui/QTextImageFormat>
 
 #include <algorithm>
 #include <cmath>
@@ -189,6 +190,33 @@ namespace {
 		return segment;
 	}
 
+	QVariantMap richImageSegment(const QTextCharFormat &format) {
+		if (!format.isImageFormat()) return {};
+		const QTextImageFormat imageFormat = format.toImageFormat();
+		const QString source = safeImageSource(imageFormat.name());
+		if (source.isEmpty()) return {};
+
+		QVariantMap segment { { QStringLiteral("kind"), QStringLiteral("image") },
+						 { QStringLiteral("source"), source } };
+		const QString altText = imageFormat.property(QTextFormat::ImageAltText).toString().trimmed().left(512);
+		if (!altText.isEmpty()) {
+			segment.insert(QStringLiteral("alt"), altText);
+		}
+		const qreal width = imageFormat.width();
+		if (qIsFinite(width) && width > 0) {
+			segment.insert(QStringLiteral("width"), qBound(1, qRound(qMin(width, qreal(8192))), 8192));
+		}
+		const qreal height = imageFormat.height();
+		if (qIsFinite(height) && height > 0) {
+			segment.insert(QStringLiteral("height"), qBound(1, qRound(qMin(height, qreal(8192))), 8192));
+		}
+		if (format.isAnchor()) {
+			const QString href = safeExternalUrl(format.anchorHref(), true);
+			if (!href.isEmpty()) segment.insert(QStringLiteral("href"), href);
+		}
+		return segment;
+	}
+
 	constexpr qsizetype MaxRichBodyCharacters = 100000;
 	constexpr qsizetype MaxRichBodySegments = 512;
 	constexpr int RichBodyCacheBytes = 4 * 1024 * 1024;
@@ -225,7 +253,7 @@ namespace {
 		// The overwhelmingly common chat path is plain text that has merely been
 		// HTML-escaped or wrapped in structural line-break tags.
 		static const QRegularExpression richTagExpression(
-			QStringLiteral(R"(<\s*/?\s*(?:a|b|strong|i|em|s|strike|del|code)\b)"),
+			QStringLiteral(R"(<\s*/?\s*(?:a|b|strong|i|em|s|strike|del|code|img)\b)"),
 			QRegularExpression::CaseInsensitiveOption);
 		return richTagExpression.match(bodyHtml.left(MaxRichBodyCharacters)).hasMatch();
 	}
@@ -271,6 +299,11 @@ namespace {
 			for (QTextBlock::iterator it = block.begin(); !it.atEnd() && segments.size() < MaxRichBodySegments; ++it) {
 				const QTextFragment fragment = it.fragment();
 				if (!fragment.isValid()) continue;
+				const QVariantMap imageSegment = richImageSegment(fragment.charFormat());
+				if (!imageSegment.isEmpty()) {
+					segments.push_back(imageSegment);
+					continue;
+				}
 				QString text = fragment.text();
 				if (emittedCharacters + text.size() > MaxRichBodyCharacters) {
 					text.truncate(MaxRichBodyCharacters - emittedCharacters);
@@ -1075,8 +1108,23 @@ void ClientSessionController::setUpdateBanner(const QVariantMap &value) { SET_VA
 void ClientSessionController::setStonks(const QVariantMap &value) { SET_VALUE(m_stonks, stonksChanged); }
 void ClientSessionController::setMotdHtml(const QString &value) {
 	const QString bounded = value.left(MaxRichBodyCharacters);
-	if (!acceptsFrontendStateMutation(this) || m_motdHtml == bounded) return;
+	setMotdContent(bounded, bounded);
+}
+void ClientSessionController::setMotdContent(const QString &html, const QString &signatureIdentity) {
+	const QString bounded = html.left(MaxRichBodyCharacters);
+	const QString signature = motdContentSignature(
+		signatureIdentity.trimmed().isEmpty() ? bounded : signatureIdentity);
+	if (!acceptsFrontendStateMutation(this)
+		|| (m_motdHtml == bounded && m_motdContentSignature == signature)) {
+		return;
+	}
+	const bool htmlChanged = m_motdHtml != bounded;
 	m_motdHtml = bounded;
+	m_motdContentSignature = signature;
+	if (!htmlChanged) {
+		recomputeMotdDerivedState();
+		return;
+	}
 	++m_motdParseGeneration;
 	emit motdHtmlChanged();
 	if (!m_motdSegments.isEmpty()) {
@@ -1170,7 +1218,7 @@ void ClientSessionController::applyState(const QVariantMap &state) {
 
 void ClientSessionController::recomputeMotdDerivedState() {
 	const bool hasContent = !m_motdHtml.trimmed().isEmpty();
-	const QString signature = motdContentSignature(m_motdHtml);
+	const QString signature = hasContent ? m_motdContentSignature : QString();
 	const bool dismissed = hasContent && !m_motdDismissedSignature.isEmpty()
 		&& (m_motdDismissedSignature == signature || m_motdDismissedSignature == m_motdHtml.trimmed());
 	const QString comparisonSignature = !m_motdLastSeenSignature.isEmpty()
@@ -2836,6 +2884,7 @@ QVariantList MediaSessionBackend::sharedParticipantSessions() const { return m_s
 QUrl MediaSessionBackend::url() const { return m_url; }
 QUrl MediaSessionBackend::audioUrl() const { return m_audioUrl; }
 QString MediaSessionBackend::provider() const { return m_provider; }
+bool MediaSessionBackend::detached() const { return m_detached; }
 bool MediaSessionBackend::playbackControllable() const {
 	return mediaProviderSupportsSynchronizedPlayback(m_provider);
 }
@@ -2888,6 +2937,15 @@ bool MediaSessionBackend::validateDirectSource(const QUrl &url, const QString &m
 }
 
 bool MediaSessionBackend::open(const QUrl &url, const QString &provider, const QString &sessionId) {
+	return openWithPresentation(url, provider, sessionId, true);
+}
+
+bool MediaSessionBackend::openInline(const QUrl &url, const QString &provider, const QString &sessionId) {
+	return openWithPresentation(url, provider, sessionId, false);
+}
+
+bool MediaSessionBackend::openWithPresentation(const QUrl &url, const QString &provider,
+												 const QString &sessionId, const bool detached) {
 	const QString requestedSessionId = sessionId.trimmed();
 	if (m_sharedAvailable && (!m_sharedJoined || requestedSessionId != m_sharedSessionId)) {
 		emit playbackRejected(tr("Leave or end the current watch-together session before opening other media."));
@@ -2905,6 +2963,7 @@ bool MediaSessionBackend::open(const QUrl &url, const QString &provider, const Q
 	m_url = normalized;
 	m_audioUrl = {};
 	m_provider = normalizedProvider;
+	m_detached = detached;
 	m_mediaMime.clear();
 	m_audioMime.clear();
 	m_sessionId = requestedSessionId;
@@ -2953,6 +3012,7 @@ bool MediaSessionBackend::openDirect(const QUrl &url, const QString &mediaMime, 
 	m_provider = QStringLiteral("direct");
 	m_mediaMime = normalizedMediaMime;
 	m_audioMime = normalizedAudioMime;
+	m_detached = true;
 	m_sessionId = sessionId.trimmed();
 	m_navigationHost.clear();
 	m_navigationPort = -1;
@@ -3075,6 +3135,12 @@ bool MediaSessionBackend::supportsSynchronizedPlayback(const QString &provider) 
 	return mediaProviderSupportsSynchronizedPlayback(provider);
 }
 
+void MediaSessionBackend::detach() {
+	if (!m_active || m_detached) return;
+	m_detached = true;
+	emit stateChanged();
+}
+
 void MediaSessionBackend::closePlayer() {
 	if (!m_active) {
 		if (m_sharedAvailable && m_state != QLatin1String("available")) {
@@ -3093,6 +3159,7 @@ void MediaSessionBackend::closePlayer() {
 	m_url = {};
 	m_audioUrl = {};
 	m_provider.clear();
+	m_detached = true;
 	m_mediaMime.clear();
 	m_audioMime.clear();
 	m_sessionId.clear();

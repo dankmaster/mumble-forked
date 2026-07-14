@@ -2720,7 +2720,8 @@ QUrl youtubeEmbedUrl(const YouTubePreviewTarget &target) {
 	query.addQueryItem(QStringLiteral("enablejsapi"), QStringLiteral("1"));
 	query.addQueryItem(QStringLiteral("fs"), QStringLiteral("0"));
 	query.addQueryItem(QStringLiteral("iv_load_policy"), QStringLiteral("3"));
-	query.addQueryItem(QStringLiteral("widget_referrer"), QStringLiteral("https://www.mumble.info/"));
+	query.addQueryItem(QStringLiteral("origin"), QStringLiteral("https://info.mumble.Mumble"));
+	query.addQueryItem(QStringLiteral("widget_referrer"), QStringLiteral("https://info.mumble.Mumble/"));
 
 	const int startSeconds = youtubeStartSecondsFromUrl(target.canonicalUrl);
 	if (startSeconds > 0) {
@@ -25159,15 +25160,52 @@ void MainWindow::warmupPersistentChatHistory() {
 void MainWindow::setPersistentChatWelcomeText(const QString &message) {
 	if (m_persistentChatWelcomeText != message) {
 		m_persistentChatMotdExpanded = false;
+		m_modernPersistentChatWelcomeHtmlValid = false;
+		m_modernPersistentChatWelcomeImageUrls.clear();
 	}
 	m_persistentChatWelcomeText = message;
 	updatePersistentChatWelcome();
 }
 
+QString MainWindow::modernPersistentChatWelcomeHtml() {
+	if (m_modernPersistentChatWelcomeHtmlValid) {
+		const std::shared_ptr< QmlImagePipeline > pipeline = m_qmlShellHost ? m_qmlShellHost->imagePipeline() : nullptr;
+		const bool imageSourcesAvailable = pipeline
+			&& std::all_of(m_modernPersistentChatWelcomeImageUrls.cbegin(),
+				m_modernPersistentChatWelcomeImageUrls.cend(),
+				[&pipeline](const QString &url) { return pipeline->containsSource(url); });
+		if (m_modernPersistentChatWelcomeImageUrls.isEmpty() || imageSourcesAvailable) {
+			return m_modernPersistentChatWelcomeHtml;
+		}
+		m_modernPersistentChatWelcomeHtmlValid = false;
+		m_modernPersistentChatWelcomeImageUrls.clear();
+	}
+
+	const std::shared_ptr< QmlImagePipeline > pipeline = m_qmlShellHost ? m_qmlShellHost->imagePipeline() : nullptr;
+	if (!pipeline) {
+		return persistentChatContentHtml(m_persistentChatWelcomeText);
+	}
+
+	const auto replaceInlineDataImage = [this, pipeline](const QString &source, const QString &altText,
+											 const PersistentChatInlineDataImageInfo &) {
+		const QString token = persistentChatInlineDataImageToken(source);
+		const QString providerUrl = pipeline->registerDataUrl(
+			source, QStringLiteral("motd-inline-data:%1").arg(token));
+		if (providerUrl.isEmpty()) return QString();
+		m_modernPersistentChatWelcomeImageUrls.push_back(providerUrl);
+		return QString::fromLatin1("<img src=\"%1\" alt=\"%2\" />")
+			.arg(providerUrl.toHtmlEscaped(), altText.toHtmlEscaped());
+	};
+	m_modernPersistentChatWelcomeHtml =
+		persistentChatContentHtml(m_persistentChatWelcomeText, replaceInlineDataImage);
+	m_modernPersistentChatWelcomeHtmlValid = true;
+	return m_modernPersistentChatWelcomeHtml;
+}
+
 void MainWindow::updatePersistentChatWelcome() {
 	if (m_qmlShellHost) {
 		ClientSessionController *session = m_qmlShellHost->sessionController();
-		session->setMotdHtml(persistentChatContentHtml(m_persistentChatWelcomeText));
+		session->setMotdContent(modernPersistentChatWelcomeHtml(), m_persistentChatWelcomeText);
 		session->setMotdSummary(persistentChatPlainTextSummary(m_persistentChatWelcomeText));
 	}
 	publishQmlActiveScopeState();
@@ -25520,7 +25558,7 @@ void MainWindow::syncQmlShellState() {
 	session->setSelfMuted(Global::get().s.bMute);
 	session->setSelfDeafened(Global::get().s.bDeaf);
 	session->setUpdateBanner(m_modernUpdateBannerState);
-	session->setMotdHtml(persistentChatContentHtml(m_persistentChatWelcomeText));
+	session->setMotdContent(modernPersistentChatWelcomeHtml(), m_persistentChatWelcomeText);
 	session->setMotdSummary(persistentChatPlainTextSummary(m_persistentChatWelcomeText));
 
 	const PersistentChatTarget target = currentPersistentChatTarget();

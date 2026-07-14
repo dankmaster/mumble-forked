@@ -8,6 +8,7 @@ Rectangle {
 
 	required property var session
 	property bool fullscreen: false
+	property bool fullscreenAvailable: true
 	property bool externalAvailable: false
 	readonly property bool sharedPlayback: Boolean(session.sharedAvailable && session.sharedJoined)
 	readonly property bool canControl: session.playbackControlAllowed !== undefined
@@ -212,6 +213,7 @@ Rectangle {
 			ModernIconButton {
 				id: fullscreenButton
 				objectName: "mediaFullscreenButton"
+				visible: root.fullscreenAvailable
 				text: root.fullscreen ? "↙" : "⛶"
 				selected: root.fullscreen
 				Accessible.name: root.fullscreen ? qsTr("Exit full screen") : qsTr("Enter full screen")

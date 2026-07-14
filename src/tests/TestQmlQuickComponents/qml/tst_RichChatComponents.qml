@@ -89,15 +89,33 @@ TestCase {
     }
 
 	SignalSpy {
-		id: playSpy
+		id: inlinePlaySpy
 		target: previewLoader.item
-		signalName: "playRequested"
+		signalName: "inlinePlayRequested"
+	}
+
+	SignalSpy {
+		id: popoutPlaySpy
+		target: previewLoader.item
+		signalName: "popoutPlayRequested"
 	}
 
 	SignalSpy {
 		id: watchTogetherSpy
 		target: previewLoader.item
 		signalName: "watchTogetherRequested"
+	}
+
+	QtObject {
+		id: inlineSession
+		property bool active: false
+		property bool detached: true
+		property string sessionId: ""
+		property int detachCalls: 0
+		function detach() {
+			detachCalls += 1
+			detached = true
+		}
 	}
 
     function init() {
@@ -108,9 +126,15 @@ TestCase {
         directMediaSpy.clear()
         externalOpenSpy.clear()
         imageOpenSpy.clear()
-		playSpy.clear()
+		inlinePlaySpy.clear()
+		popoutPlaySpy.clear()
 		watchTogetherSpy.clear()
 		linkSpy.clear()
+		bodyLoader.item.segments = [
+			{ "text": "<img src=x onerror=alert(1)>" },
+			{ "text": " bad", "href": "javascript:alert(2)" },
+			{ "text": " safe", "href": "https://example.com/path?q=1", "bold": true }
+		]
 		previewLoader.width = testCase.width
 		previewLoader.height = 180
 		attachmentLoader.width = testCase.width
@@ -121,9 +145,15 @@ TestCase {
             "url": "https://example.com/card"
         }
         previewLoader.item.previewIdentity = "fixture:loading"
-        previewLoader.item.watchTogetherAvailable = true
+		previewLoader.item.watchTogetherAvailable = true
 		previewLoader.item.renderActive = true
-        previewLoader.item.resetForReuse()
+		previewLoader.item.mediaSessionController = null
+		previewLoader.item.mediaSessionId = ""
+		previewLoader.item.resetForReuse()
+		inlineSession.active = false
+		inlineSession.detached = true
+		inlineSession.sessionId = ""
+		inlineSession.detachCalls = 0
 		attachmentLoader.item.attachments = [{
 			"id": "asset:1",
 			"kind": "image",
@@ -363,6 +393,73 @@ TestCase {
         verify(watchButton.enabled)
     }
 
+	function test_provider_embed_offers_inline_and_detached_playback() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"title": "Video",
+			"embedUrl": "https://www.youtube.com/embed/test",
+			"embedKind": "youtube"
+		}
+		card.previewIdentity = "message:embed-actions|youtube"
+		const inlineButton = findChild(card, "previewPlayButton")
+		const popoutButton = findChild(card, "previewPopoutButton")
+		verify(inlineButton !== null && inlineButton.visible)
+		verify(popoutButton !== null && popoutButton.visible)
+		compare(inlineButton.text, "Play here")
+		compare(popoutButton.text, "Open player")
+		inlineButton.clicked()
+		compare(inlinePlaySpy.count, 1)
+		compare(inlinePlaySpy.signalArguments[0][0], "https://www.youtube.com/embed/test")
+		popoutButton.clicked()
+		compare(popoutPlaySpy.count, 1)
+	}
+
+	function test_inline_playback_detaches_before_delegate_becomes_inactive() {
+		const card = previewLoader.item
+		card.renderActive = false
+		card.mediaSessionId = "message:inline"
+		card.mediaSessionController = inlineSession
+		inlineSession.sessionId = "message:inline"
+		inlineSession.detached = false
+		inlineSession.active = true
+		verify(card.inlinePlaybackActive)
+		// Entering the render window may schedule the lazy WebEngine component,
+		// but leaving it must synchronously preserve playback in the pop-out before
+		// a pooled delegate can destroy its inline renderer.
+		card.renderActive = true
+		card.renderActive = false
+		tryCompare(inlineSession, "detachCalls", 1)
+		verify(inlineSession.detached)
+		compare(card.inlinePlaybackActive, false)
+	}
+
+	function test_structured_image_link_has_mouse_keyboard_and_accessible_activation() {
+		const body = bodyLoader.item
+		body.segments = [{
+			"kind": "image",
+			"source": "image://mumble/missing-inline-image?g=1",
+			"alt": "Embedded release diagram",
+			"width": 320,
+			"height": 180,
+			"href": "https://example.com/release-diagram"
+		}]
+		tryVerify(function() { return findChild(body, "richMessageImageCard_0") !== null })
+		const imageCard = findChild(body, "richMessageImageCard_0")
+		compare(imageCard.Accessible.role, Accessible.Link)
+		compare(imageCard.Accessible.name, "Embedded release diagram")
+		verify(body.plainText.indexOf("Embedded release diagram") >= 0)
+
+		mouseClick(imageCard, imageCard.width / 2, imageCard.height / 2, Qt.LeftButton)
+		compare(linkSpy.count, 1)
+		compare(linkSpy.signalArguments[0][0], "https://example.com/release-diagram")
+
+		imageCard.forceActiveFocus()
+		tryCompare(imageCard, "activeFocus", true)
+		keyClick(Qt.Key_Return)
+		compare(linkSpy.count, 2)
+	}
+
 	function test_provider_actions_reject_unsafe_embed_and_media_urls() {
 		const card = previewLoader.item
 		compare(card.safeProviderEmbedUrl("javascript:alert(1)"), "")
@@ -388,11 +485,13 @@ TestCase {
 		compare(card.safeEmbedUrl, "")
 		compare(card.mediaItems.length, 0)
 		compare(findChild(card, "previewPlayButton").visible, false)
+		compare(findChild(card, "previewPopoutButton").visible, false)
 		compare(findChild(card, "previewWatchTogetherButton").visible, false)
 		card.requestCurrentMedia()
 		compare(directMediaSpy.count, 0)
 		compare(externalOpenSpy.count, 0)
-		compare(playSpy.count, 0)
+		compare(inlinePlaySpy.count, 0)
+		compare(popoutPlaySpy.count, 0)
 		compare(watchTogetherSpy.count, 0)
 
 		card.preview = {
@@ -432,7 +531,7 @@ TestCase {
 			verify(flow !== null)
 			tryCompare(flow, "width", card.actionAvailableWidth)
 			let previousBottom = -1
-			for (const name of [ "previewOpenButton", "previewPlayButton",
+			for (const name of [ "previewOpenButton", "previewPlayButton", "previewPopoutButton",
 					"previewWatchTogetherButton", "previewExpandButton" ]) {
 				const button = findChild(card, name)
 				verify(button !== null && button.visible)

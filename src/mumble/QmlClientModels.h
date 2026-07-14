@@ -103,6 +103,7 @@ public:
 	void setUpdateBanner(const QVariantMap &value);
 	void setStonks(const QVariantMap &value);
 	void setMotdHtml(const QString &value);
+	void setMotdContent(const QString &html, const QString &signatureIdentity);
 	void setMotdSummary(const QString &value);
 	void setMotdExpanded(bool value);
 	void setMotdDismissedSignature(const QString &value);
@@ -159,6 +160,7 @@ private:
 	QVariantMap m_updateBanner;
 	QVariantMap m_stonks;
 	QString m_motdHtml;
+	QString m_motdContentSignature;
 	QVariantList m_motdSegments;
 	quint64 m_motdParseGeneration = 0;
 	QString m_motdSummary;
@@ -553,6 +555,7 @@ class MediaSessionBackend final : public QObject {
 	Q_PROPERTY(QUrl url READ url NOTIFY stateChanged)
 	Q_PROPERTY(QUrl audioUrl READ audioUrl NOTIFY stateChanged)
 	Q_PROPERTY(QString provider READ provider NOTIFY stateChanged)
+	Q_PROPERTY(bool detached READ detached NOTIFY stateChanged)
 	Q_PROPERTY(bool playbackControllable READ playbackControllable NOTIFY stateChanged)
 	Q_PROPERTY(bool playbackControlAllowed READ playbackControlAllowed NOTIFY stateChanged)
 	Q_PROPERTY(QString mediaMime READ mediaMime NOTIFY stateChanged)
@@ -582,6 +585,7 @@ public:
 	QUrl url() const;
 	QUrl audioUrl() const;
 	QString provider() const;
+	bool detached() const;
 	bool playbackControllable() const;
 	bool playbackControlAllowed() const;
 	QString mediaMime() const;
@@ -596,6 +600,7 @@ public:
 	int volume() const;
 	bool muted() const;
 	Q_INVOKABLE bool open(const QUrl &url, const QString &provider, const QString &sessionId);
+	Q_INVOKABLE bool openInline(const QUrl &url, const QString &provider, const QString &sessionId);
 	Q_INVOKABLE bool openDirect(const QUrl &url, const QString &mediaMime, const QUrl &audioUrl,
 								 const QString &audioMime, const QString &sessionId);
 	Q_INVOKABLE bool startShared(const QUrl &url, const QString &provider, const QString &title);
@@ -607,6 +612,7 @@ public:
 	Q_INVOKABLE void retry();
 	Q_INVOKABLE bool isNavigationAllowed(const QUrl &url) const;
 	Q_INVOKABLE bool supportsSynchronizedPlayback(const QString &provider) const;
+	Q_INVOKABLE void detach();
 	Q_INVOKABLE void close();
 	Q_INVOKABLE void closePlayer();
 	Q_INVOKABLE void play();
@@ -647,6 +653,8 @@ private:
 	bool validateSource(const QUrl &url, const QString &provider, QUrl *normalized, QString *error) const;
 	bool validateDirectSource(const QUrl &url, const QString &mime, bool audio, QUrl *normalized,
 							  QString *error) const;
+	bool openWithPresentation(const QUrl &url, const QString &provider, const QString &sessionId,
+							  bool detached);
 	void updateLoadProgress(int progress);
 	void publishSharedPlaybackState(double position, bool paused, bool force);
 	bool m_active = false;
@@ -670,6 +678,7 @@ private:
 	QUrl m_url;
 	QUrl m_audioUrl;
 	QString m_provider;
+	bool m_detached = true;
 	QString m_mediaMime;
 	QString m_audioMime;
 	QString m_sessionId;

@@ -133,6 +133,11 @@ TestCase {
         session.motdExpanded = false
         session.motdDismissed = false
         session.motdChanged = true
+		session.motdSegments = [
+			{ "text": "Welcome", "bold": true },
+			{ "text": " to the test server. " },
+			{ "text": "Open", "href": "https://example.com/welcome" }
+		]
 		session.motdSummary = "Welcome to the test server."
         session.motdActions = [
             { "id": "motd.show", "label": "Expand", "enabled": true,
@@ -263,6 +268,30 @@ TestCase {
 		verify(text.text.indexOf("Welcome") >= 0)
 		verify(text.text.indexOf("<img") < 0)
 		verify(text.text.indexOf("https://example.com/welcome") >= 0)
+	}
+
+	function test_motd_expanded_body_renders_managed_inline_images() {
+		session.motdSegments = [
+			{ "text": "Welcome above the image." },
+			{ "kind": "image", "source": "image://mumble/motd-inline?g=1",
+			  "width": 640, "height": 360, "alt": "Server welcome art" },
+			{ "text": "Details below the image." }
+		]
+		session.motdExpanded = true
+		const panel = motdLoader.item
+		const richBody = findChild(panel, "motdStructuredBody")
+		verify(richBody !== null, "MOTD rich body was not created")
+		tryCompare(richBody, "hasImages", true)
+		const structured = findChild(panel, "richMessageStructuredBody")
+		verify(structured !== null)
+		const image = findChild(panel, "richMessageInlineImage_1")
+		const card = findChild(panel, "richMessageImageCard_1")
+		verify(image !== null, "managed MOTD image was not created")
+		verify(card !== null, "managed MOTD image card was not created")
+		compare(image.source.toString(), "image://mumble/motd-inline?g=1")
+		compare(image.Accessible.name, "Server welcome art")
+		verify(card.width <= structured.width + 0.5)
+		verify(card.implicitHeight <= 320 + Theme.space2 * 2 + 0.5)
 	}
 
 	function test_watch_together_uses_the_supplied_participant_model() {
