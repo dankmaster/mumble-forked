@@ -1,0 +1,937 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Mumble Visual Fixture",
+          "rect": {
+            "height": 19,
+            "width": 274,
+            "x": 980,
+            "y": 25
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Connected",
+          "rect": {
+            "height": 15,
+            "width": 274,
+            "x": 980,
+            "y": 47
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "VOICE ROOMS · 2",
+              "rect": {
+                "height": 30,
+                "width": 310,
+                "x": 972,
+                "y": 80
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Room actions for Lobby",
+                  "rect": {
+                    "height": 24,
+                    "width": 24,
+                    "x": 1232,
+                    "y": 121
+                  },
+                  "role": "Button",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "You are here",
+              "name": "Lobby",
+              "rect": {
+                "height": 46,
+                "width": 290,
+                "x": 972,
+                "y": 110
+              },
+              "role": "ListItem",
+              "states": [
+                "selected"
+              ]
+            },
+            {
+              "children": [],
+              "description": "Listening",
+              "name": "Demo User",
+              "rect": {
+                "height": 31,
+                "width": 290,
+                "x": 972,
+                "y": 158
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "Talking",
+              "name": "Alex",
+              "rect": {
+                "height": 31,
+                "width": 290,
+                "x": 972,
+                "y": 191
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Join",
+                  "rect": {
+                    "height": 24,
+                    "width": 40,
+                    "x": 1188,
+                    "y": 231
+                  },
+                  "role": "Button",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Room actions for Studio",
+                  "rect": {
+                    "height": 24,
+                    "width": 24,
+                    "x": 1232,
+                    "y": 231
+                  },
+                  "role": "Button",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "Studio",
+              "rect": {
+                "height": 38,
+                "width": 290,
+                "x": 972,
+                "y": 224
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "TEXT & ACTIVITY · 1",
+              "rect": {
+                "height": 30,
+                "width": 310,
+                "x": 972,
+                "y": 264
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Room actions for #general",
+                  "rect": {
+                    "height": 24,
+                    "width": 24,
+                    "x": 1232,
+                    "y": 301
+                  },
+                  "role": "Button",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "Text room",
+              "name": "#general",
+              "rect": {
+                "height": 38,
+                "width": 290,
+                "x": 972,
+                "y": 294
+              },
+              "role": "ListItem",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Rooms and participants",
+          "rect": {
+            "height": 740,
+            "width": 310,
+            "x": 962,
+            "y": 80
+          },
+          "role": "List",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Mute microphone",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 1110,
+            "y": 838
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Deafen",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 1163,
+            "y": 838
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Profile menu",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 1217,
+            "y": 838
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Demo User",
+          "rect": {
+            "height": 16,
+            "width": 61,
+            "x": 1025,
+            "y": 840
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Online",
+          "rect": {
+            "height": 15,
+            "width": 32,
+            "x": 1025,
+            "y": 857
+          },
+          "role": "StaticText",
+          "states": []
+        }
+      ],
+      "description": "",
+      "name": "Rooms and participants",
+      "rect": {
+        "height": 884,
+        "width": 310,
+        "x": 962,
+        "y": 8
+      },
+      "role": "Pane",
+      "states": []
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Message actions",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 869,
+            "y": 23
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Alex",
+          "rect": {
+            "height": 15,
+            "width": 718,
+            "x": 109,
+            "y": 34
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "10:24",
+          "rect": {
+            "height": 15,
+            "width": 26,
+            "x": 835,
+            "y": 34
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Welcome to the deterministic visual fixture.",
+          "rect": {
+            "height": 17,
+            "width": 796,
+            "x": 109,
+            "y": 63
+          },
+          "role": "StaticText",
+          "states": [
+            "readOnly"
+          ]
+        }
+      ],
+      "description": "",
+      "name": "",
+      "rect": {
+        "height": 69,
+        "width": 898,
+        "x": 36,
+        "y": 11
+      },
+      "role": "Client",
+      "states": []
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Lobby",
+      "rect": {
+        "height": 27,
+        "width": 828,
+        "x": 32,
+        "y": 20
+      },
+      "role": "StaticText",
+      "states": []
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Search users and rooms",
+      "rect": {
+        "height": 36,
+        "width": 36,
+        "x": 868,
+        "y": 26
+      },
+      "role": "Button",
+      "states": [
+        "focusable"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Application menu",
+      "rect": {
+        "height": 36,
+        "width": 36,
+        "x": 910,
+        "y": 26
+      },
+      "role": "Button",
+      "states": [
+        "focusable",
+        "focused"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Voice room",
+      "rect": {
+        "height": 16,
+        "width": 828,
+        "x": 32,
+        "y": 51
+      },
+      "role": "StaticText",
+      "states": []
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Demo User",
+          "rect": {
+            "height": 15,
+            "width": 546,
+            "x": 317,
+            "y": 100
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "10:25",
+          "rect": {
+            "height": 15,
+            "width": 26,
+            "x": 871,
+            "y": 100
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Qt Quick is ready for review.",
+          "rect": {
+            "height": 17,
+            "width": 580,
+            "x": 317,
+            "y": 119
+          },
+          "role": "StaticText",
+          "states": [
+            "readOnly"
+          ]
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Twitch",
+              "rect": {
+                "height": 24,
+                "width": 34,
+                "x": 423,
+                "y": 164
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Live",
+              "rect": {
+                "height": 24,
+                "width": 21,
+                "x": 770,
+                "y": 164
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "Loads the provider player in this preview",
+              "name": "Play Mumble Dev is live here",
+              "rect": {
+                "height": 36,
+                "width": 72,
+                "x": 571,
+                "y": 288
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Mumble Dev is live",
+              "rect": {
+                "height": 20,
+                "width": 288,
+                "x": 419,
+                "y": 405
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Provider playback starts only after explicit interaction.",
+              "rect": {
+                "height": 15,
+                "width": 288,
+                "x": 419,
+                "y": 429
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "TWITCH",
+              "rect": {
+                "height": 24,
+                "width": 46,
+                "x": 341,
+                "y": 468
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Mumble Dev is live",
+              "rect": {
+                "height": 20,
+                "width": 548,
+                "x": 333,
+                "y": 496
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Twitch · mumbledev",
+              "rect": {
+                "height": 15,
+                "width": 548,
+                "x": 333,
+                "y": 520
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Stream details",
+                      "rect": {
+                        "height": 15,
+                        "width": 470,
+                        "x": 399,
+                        "y": 559
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "TV",
+                      "rect": {
+                        "height": 34,
+                        "width": 34,
+                        "x": 349,
+                        "y": 563
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Mumble Dev",
+                      "rect": {
+                        "height": 20,
+                        "width": 448,
+                        "x": 399,
+                        "y": 578
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "✓",
+                      "rect": {
+                        "height": 15,
+                        "width": 11,
+                        "x": 854,
+                        "y": 580
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "mumbledev · Software and Game Development",
+                      "rect": {
+                        "height": 15,
+                        "width": 470,
+                        "x": 399,
+                        "y": 602
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Provider playback starts only after explicit interaction.",
+                      "rect": {
+                        "height": 20,
+                        "width": 470,
+                        "x": 399,
+                        "y": 621
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    }
+                  ],
+                  "description": "mumbledev · Software and Game Development. Provider playback starts only after explicit interaction.",
+                  "name": "Mumble Dev",
+                  "rect": {
+                    "height": 106,
+                    "width": 548,
+                    "x": 333,
+                    "y": 547
+                  },
+                  "role": "StaticText",
+                  "states": [
+                    "readOnly"
+                  ]
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Game",
+                      "rect": {
+                        "height": 15,
+                        "width": 170,
+                        "x": 522,
+                        "y": 665
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Software and Game Development",
+                      "rect": {
+                        "height": 32,
+                        "width": 170,
+                        "x": 522,
+                        "y": 684
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    }
+                  ],
+                  "description": "Software and Game Development",
+                  "name": "Game",
+                  "rect": {
+                    "height": 59,
+                    "width": 178,
+                    "x": 518,
+                    "y": 661
+                  },
+                  "role": "StaticText",
+                  "states": [
+                    "readOnly"
+                  ]
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Channel",
+                      "rect": {
+                        "height": 15,
+                        "width": 169,
+                        "x": 337,
+                        "y": 673
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "mumbledev",
+                      "rect": {
+                        "height": 16,
+                        "width": 169,
+                        "x": 337,
+                        "y": 692
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    }
+                  ],
+                  "description": "mumbledev",
+                  "name": "Channel",
+                  "rect": {
+                    "height": 43,
+                    "width": 177,
+                    "x": 333,
+                    "y": 669
+                  },
+                  "role": "StaticText",
+                  "states": [
+                    "readOnly"
+                  ]
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Viewers",
+                      "rect": {
+                        "height": 15,
+                        "width": 169,
+                        "x": 708,
+                        "y": 673
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "13K",
+                      "rect": {
+                        "height": 16,
+                        "width": 169,
+                        "x": 708,
+                        "y": 692
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    }
+                  ],
+                  "description": "13K",
+                  "name": "Viewers",
+                  "rect": {
+                    "height": 43,
+                    "width": 177,
+                    "x": 704,
+                    "y": 669
+                  },
+                  "role": "StaticText",
+                  "states": [
+                    "readOnly"
+                  ]
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Live",
+                      "rect": {
+                        "height": 24,
+                        "width": 21,
+                        "x": 341,
+                        "y": 728
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    }
+                  ],
+                  "description": "",
+                  "name": "Live",
+                  "rect": {
+                    "height": 24,
+                    "width": 37,
+                    "x": 333,
+                    "y": 728
+                  },
+                  "role": "StaticText",
+                  "states": [
+                    "readOnly"
+                  ]
+                }
+              ],
+              "description": "Mumble Dev. mumbledev · Software and Game Development. Provider playback starts only after explicit interaction. Channel: mumbledev. Game: Software and Game Development. Viewers: 13K",
+              "name": "Stream details",
+              "rect": {
+                "height": 205,
+                "width": 548,
+                "x": 333,
+                "y": 547
+              },
+              "role": "Grouping",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "A live provider card with native identity and playback affordances.",
+              "name": "Open on Twitch: Mumble Dev is live",
+              "rect": {
+                "height": 32,
+                "width": 100,
+                "x": 333,
+                "y": 764
+              },
+              "role": "Link",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "Open secondary playback and preview actions",
+              "name": "Preview actions",
+              "rect": {
+                "height": 30,
+                "width": 30,
+                "x": 851,
+                "y": 765
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            }
+          ],
+          "description": "A live provider card with native identity and playback affordances.",
+          "name": "Mumble Dev is live: Twitch · mumbledev",
+          "rect": {
+            "height": 672,
+            "width": 580,
+            "x": 317,
+            "y": 140
+          },
+          "role": "Grouping",
+          "states": []
+        }
+      ],
+      "description": "",
+      "name": "",
+      "rect": {
+        "height": 740,
+        "width": 898,
+        "x": 36,
+        "y": 80
+      },
+      "role": "Client",
+      "states": []
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Attach image",
+      "rect": {
+        "height": 36,
+        "width": 36,
+        "x": 65,
+        "y": 838
+      },
+      "role": "Button",
+      "states": [
+        "focusable"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Send",
+      "rect": {
+        "height": 36,
+        "width": 51,
+        "x": 854,
+        "y": 838
+      },
+      "role": "Button",
+      "states": [
+        "disabled"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Message Lobby",
+      "rect": {
+        "height": 34,
+        "width": 719,
+        "x": 118,
+        "y": 839
+      },
+      "role": "EditableText",
+      "states": [
+        "focusable"
+      ]
+    }
+  ],
+  "description": "",
+  "name": "Mumble Visual Fixture — Mumble",
+  "rect": {
+    "height": 900,
+    "width": 1280,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

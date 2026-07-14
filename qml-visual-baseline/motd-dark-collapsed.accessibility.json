@@ -1,0 +1,584 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Mumble Visual Fixture",
+          "rect": {
+            "height": 19,
+            "width": 274,
+            "x": 980,
+            "y": 25
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Connected",
+          "rect": {
+            "height": 15,
+            "width": 274,
+            "x": 980,
+            "y": 47
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "VOICE ROOMS · 2",
+              "rect": {
+                "height": 30,
+                "width": 310,
+                "x": 972,
+                "y": 80
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Room actions for Lobby",
+                  "rect": {
+                    "height": 24,
+                    "width": 24,
+                    "x": 1232,
+                    "y": 121
+                  },
+                  "role": "Button",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "You are here",
+              "name": "Lobby",
+              "rect": {
+                "height": 46,
+                "width": 290,
+                "x": 972,
+                "y": 110
+              },
+              "role": "ListItem",
+              "states": [
+                "selected"
+              ]
+            },
+            {
+              "children": [],
+              "description": "Listening",
+              "name": "Demo User",
+              "rect": {
+                "height": 31,
+                "width": 290,
+                "x": 972,
+                "y": 158
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "Talking",
+              "name": "Alex",
+              "rect": {
+                "height": 31,
+                "width": 290,
+                "x": 972,
+                "y": 191
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Join",
+                  "rect": {
+                    "height": 24,
+                    "width": 40,
+                    "x": 1188,
+                    "y": 231
+                  },
+                  "role": "Button",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Room actions for Studio",
+                  "rect": {
+                    "height": 24,
+                    "width": 24,
+                    "x": 1232,
+                    "y": 231
+                  },
+                  "role": "Button",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "Studio",
+              "rect": {
+                "height": 38,
+                "width": 290,
+                "x": 972,
+                "y": 224
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "TEXT & ACTIVITY · 1",
+              "rect": {
+                "height": 30,
+                "width": 310,
+                "x": 972,
+                "y": 264
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Room actions for #general",
+                  "rect": {
+                    "height": 24,
+                    "width": 24,
+                    "x": 1232,
+                    "y": 301
+                  },
+                  "role": "Button",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "Text room",
+              "name": "#general",
+              "rect": {
+                "height": 38,
+                "width": 290,
+                "x": 972,
+                "y": 294
+              },
+              "role": "ListItem",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Rooms and participants",
+          "rect": {
+            "height": 640,
+            "width": 310,
+            "x": 962,
+            "y": 80
+          },
+          "role": "List",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Mute microphone",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 1110,
+            "y": 738
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Deafen",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 1163,
+            "y": 738
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Profile menu",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 1217,
+            "y": 738
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Demo User",
+          "rect": {
+            "height": 16,
+            "width": 61,
+            "x": 1025,
+            "y": 740
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Online",
+          "rect": {
+            "height": 15,
+            "width": 32,
+            "x": 1025,
+            "y": 757
+          },
+          "role": "StaticText",
+          "states": []
+        }
+      ],
+      "description": "",
+      "name": "Rooms and participants",
+      "rect": {
+        "height": 784,
+        "width": 310,
+        "x": 962,
+        "y": 8
+      },
+      "role": "Pane",
+      "states": []
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Lobby",
+      "rect": {
+        "height": 27,
+        "width": 770,
+        "x": 32,
+        "y": 20
+      },
+      "role": "StaticText",
+      "states": []
+    },
+    {
+      "children": [],
+      "description": "Activate to hide the server welcome message.",
+      "name": "Hide welcome message",
+      "rect": {
+        "height": 32,
+        "width": 52,
+        "x": 810,
+        "y": 26
+      },
+      "role": "Button",
+      "states": [
+        "checked",
+        "focusable"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Search users and rooms",
+      "rect": {
+        "height": 36,
+        "width": 36,
+        "x": 868,
+        "y": 26
+      },
+      "role": "Button",
+      "states": [
+        "focusable"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Application menu",
+      "rect": {
+        "height": 36,
+        "width": 36,
+        "x": 910,
+        "y": 26
+      },
+      "role": "Button",
+      "states": [
+        "focusable",
+        "focused"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Voice room",
+      "rect": {
+        "height": 16,
+        "width": 770,
+        "x": 32,
+        "y": 51
+      },
+      "role": "StaticText",
+      "states": []
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Expand",
+          "rect": {
+            "height": 26,
+            "width": 26,
+            "x": 888,
+            "y": 92
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Dismiss",
+          "rect": {
+            "height": 26,
+            "width": 26,
+            "x": 918,
+            "y": 92
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        }
+      ],
+      "description": "Welcome to Mumble. Choose a room, then say hello.",
+      "name": "Server message of the day",
+      "rect": {
+        "height": 38,
+        "width": 930,
+        "x": 20,
+        "y": 86
+      },
+      "role": "Pane",
+      "states": []
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Message actions",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 777,
+            "y": 168
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Alex",
+          "rect": {
+            "height": 15,
+            "width": 578,
+            "x": 157,
+            "y": 179
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "10:24",
+          "rect": {
+            "height": 15,
+            "width": 26,
+            "x": 743,
+            "y": 179
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Welcome to the deterministic visual fixture.",
+          "rect": {
+            "height": 17,
+            "width": 656,
+            "x": 157,
+            "y": 208
+          },
+          "role": "StaticText",
+          "states": [
+            "readOnly"
+          ]
+        }
+      ],
+      "description": "",
+      "name": "",
+      "rect": {
+        "height": 85,
+        "width": 898,
+        "x": 36,
+        "y": 148
+      },
+      "role": "Client",
+      "states": []
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Demo User",
+          "rect": {
+            "height": 15,
+            "width": 622,
+            "x": 237,
+            "y": 253
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "10:25",
+          "rect": {
+            "height": 15,
+            "width": 26,
+            "x": 867,
+            "y": 253
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Qt Quick is ready for review.",
+          "rect": {
+            "height": 17,
+            "width": 656,
+            "x": 237,
+            "y": 272
+          },
+          "role": "StaticText",
+          "states": [
+            "readOnly"
+          ]
+        }
+      ],
+      "description": "",
+      "name": "",
+      "rect": {
+        "height": 64,
+        "width": 898,
+        "x": 36,
+        "y": 233
+      },
+      "role": "Client",
+      "states": []
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Attach image",
+      "rect": {
+        "height": 36,
+        "width": 36,
+        "x": 65,
+        "y": 738
+      },
+      "role": "Button",
+      "states": [
+        "focusable"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Send",
+      "rect": {
+        "height": 36,
+        "width": 51,
+        "x": 854,
+        "y": 738
+      },
+      "role": "Button",
+      "states": [
+        "disabled"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Message Lobby",
+      "rect": {
+        "height": 34,
+        "width": 719,
+        "x": 118,
+        "y": 739
+      },
+      "role": "EditableText",
+      "states": [
+        "focusable"
+      ]
+    }
+  ],
+  "description": "",
+  "name": "Mumble Visual Fixture — Mumble",
+  "rect": {
+    "height": 800,
+    "width": 1280,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

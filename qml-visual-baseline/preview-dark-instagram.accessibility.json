@@ -1,0 +1,856 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Mumble Visual Fixture",
+          "rect": {
+            "height": 19,
+            "width": 274,
+            "x": 980,
+            "y": 25
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Connected",
+          "rect": {
+            "height": 15,
+            "width": 274,
+            "x": 980,
+            "y": 47
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "VOICE ROOMS · 2",
+              "rect": {
+                "height": 30,
+                "width": 310,
+                "x": 972,
+                "y": 80
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Room actions for Lobby",
+                  "rect": {
+                    "height": 24,
+                    "width": 24,
+                    "x": 1232,
+                    "y": 121
+                  },
+                  "role": "Button",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "You are here",
+              "name": "Lobby",
+              "rect": {
+                "height": 46,
+                "width": 290,
+                "x": 972,
+                "y": 110
+              },
+              "role": "ListItem",
+              "states": [
+                "selected"
+              ]
+            },
+            {
+              "children": [],
+              "description": "Listening",
+              "name": "Demo User",
+              "rect": {
+                "height": 31,
+                "width": 290,
+                "x": 972,
+                "y": 158
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "Talking",
+              "name": "Alex",
+              "rect": {
+                "height": 31,
+                "width": 290,
+                "x": 972,
+                "y": 191
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Join",
+                  "rect": {
+                    "height": 24,
+                    "width": 40,
+                    "x": 1188,
+                    "y": 231
+                  },
+                  "role": "Button",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Room actions for Studio",
+                  "rect": {
+                    "height": 24,
+                    "width": 24,
+                    "x": 1232,
+                    "y": 231
+                  },
+                  "role": "Button",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "Studio",
+              "rect": {
+                "height": 38,
+                "width": 290,
+                "x": 972,
+                "y": 224
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "TEXT & ACTIVITY · 1",
+              "rect": {
+                "height": 30,
+                "width": 310,
+                "x": 972,
+                "y": 264
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Room actions for #general",
+                  "rect": {
+                    "height": 24,
+                    "width": 24,
+                    "x": 1232,
+                    "y": 301
+                  },
+                  "role": "Button",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "Text room",
+              "name": "#general",
+              "rect": {
+                "height": 38,
+                "width": 290,
+                "x": 972,
+                "y": 294
+              },
+              "role": "ListItem",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Rooms and participants",
+          "rect": {
+            "height": 740,
+            "width": 310,
+            "x": 962,
+            "y": 80
+          },
+          "role": "List",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Mute microphone",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 1110,
+            "y": 838
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Deafen",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 1163,
+            "y": 838
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Profile menu",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 1217,
+            "y": 838
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Demo User",
+          "rect": {
+            "height": 16,
+            "width": 61,
+            "x": 1025,
+            "y": 840
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Online",
+          "rect": {
+            "height": 15,
+            "width": 32,
+            "x": 1025,
+            "y": 857
+          },
+          "role": "StaticText",
+          "states": []
+        }
+      ],
+      "description": "",
+      "name": "Rooms and participants",
+      "rect": {
+        "height": 884,
+        "width": 310,
+        "x": 962,
+        "y": 8
+      },
+      "role": "Pane",
+      "states": []
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Lobby",
+      "rect": {
+        "height": 27,
+        "width": 828,
+        "x": 32,
+        "y": 20
+      },
+      "role": "StaticText",
+      "states": []
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Search users and rooms",
+      "rect": {
+        "height": 36,
+        "width": 36,
+        "x": 868,
+        "y": 26
+      },
+      "role": "Button",
+      "states": [
+        "focusable"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Application menu",
+      "rect": {
+        "height": 36,
+        "width": 36,
+        "x": 910,
+        "y": 26
+      },
+      "role": "Button",
+      "states": [
+        "focusable",
+        "focused"
+      ]
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Message actions",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 869,
+            "y": 51
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Alex",
+          "rect": {
+            "height": 15,
+            "width": 718,
+            "x": 109,
+            "y": 62
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "10:24",
+          "rect": {
+            "height": 15,
+            "width": 26,
+            "x": 835,
+            "y": 62
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Welcome to the deterministic visual fixture.",
+          "rect": {
+            "height": 17,
+            "width": 796,
+            "x": 109,
+            "y": 91
+          },
+          "role": "StaticText",
+          "states": [
+            "readOnly"
+          ]
+        }
+      ],
+      "description": "",
+      "name": "",
+      "rect": {
+        "height": 69,
+        "width": 898,
+        "x": 36,
+        "y": 39
+      },
+      "role": "Client",
+      "states": []
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Voice room",
+      "rect": {
+        "height": 16,
+        "width": 828,
+        "x": 32,
+        "y": 51
+      },
+      "role": "StaticText",
+      "states": []
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Demo User",
+          "rect": {
+            "height": 15,
+            "width": 546,
+            "x": 317,
+            "y": 128
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "10:25",
+          "rect": {
+            "height": 15,
+            "width": 26,
+            "x": 871,
+            "y": 128
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Qt Quick is ready for review.",
+          "rect": {
+            "height": 17,
+            "width": 580,
+            "x": 317,
+            "y": 147
+          },
+          "role": "StaticText",
+          "states": [
+            "readOnly"
+          ]
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Instagram",
+              "rect": {
+                "height": 24,
+                "width": 52,
+                "x": 463,
+                "y": 192
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "Loads the provider player in this preview",
+              "name": "Play Post by @mumblequick here",
+              "rect": {
+                "height": 36,
+                "width": 72,
+                "x": 571,
+                "y": 326
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "INSTAGRAM",
+              "rect": {
+                "height": 24,
+                "width": 71,
+                "x": 341,
+                "y": 516
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Post by @mumblequick",
+              "rect": {
+                "height": 20,
+                "width": 548,
+                "x": 333,
+                "y": 544
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Instagram",
+              "rect": {
+                "height": 15,
+                "width": 548,
+                "x": 333,
+                "y": 568
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Post activity",
+                      "rect": {
+                        "height": 15,
+                        "width": 470,
+                        "x": 399,
+                        "y": 607
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "IG",
+                      "rect": {
+                        "height": 34,
+                        "width": 34,
+                        "x": 349,
+                        "y": 611
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Mumble Quick",
+                      "rect": {
+                        "height": 20,
+                        "width": 470,
+                        "x": 399,
+                        "y": 626
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "mumblequick",
+                      "rect": {
+                        "height": 15,
+                        "width": 470,
+                        "x": 399,
+                        "y": 650
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Native previews, consistent in every theme.",
+                      "rect": {
+                        "height": 20,
+                        "width": 470,
+                        "x": 399,
+                        "y": 669
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    }
+                  ],
+                  "description": "mumblequick. Native previews, consistent in every theme.",
+                  "name": "Mumble Quick",
+                  "rect": {
+                    "height": 106,
+                    "width": 548,
+                    "x": 333,
+                    "y": 595
+                  },
+                  "role": "StaticText",
+                  "states": [
+                    "readOnly"
+                  ]
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Likes",
+                      "rect": {
+                        "height": 15,
+                        "width": 169,
+                        "x": 337,
+                        "y": 713
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "2.5K",
+                      "rect": {
+                        "height": 16,
+                        "width": 169,
+                        "x": 337,
+                        "y": 732
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    }
+                  ],
+                  "description": "2.5K",
+                  "name": "Likes",
+                  "rect": {
+                    "height": 43,
+                    "width": 177,
+                    "x": 333,
+                    "y": 709
+                  },
+                  "role": "StaticText",
+                  "states": [
+                    "readOnly"
+                  ]
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Comments",
+                      "rect": {
+                        "height": 15,
+                        "width": 170,
+                        "x": 522,
+                        "y": 713
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "86",
+                      "rect": {
+                        "height": 16,
+                        "width": 170,
+                        "x": 522,
+                        "y": 732
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    }
+                  ],
+                  "description": "86",
+                  "name": "Comments",
+                  "rect": {
+                    "height": 43,
+                    "width": 178,
+                    "x": 518,
+                    "y": 709
+                  },
+                  "role": "StaticText",
+                  "states": [
+                    "readOnly"
+                  ]
+                },
+                {
+                  "children": [
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "Media",
+                      "rect": {
+                        "height": 15,
+                        "width": 169,
+                        "x": 708,
+                        "y": 713
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    },
+                    {
+                      "children": [],
+                      "description": "",
+                      "name": "post",
+                      "rect": {
+                        "height": 16,
+                        "width": 169,
+                        "x": 708,
+                        "y": 732
+                      },
+                      "role": "StaticText",
+                      "states": []
+                    }
+                  ],
+                  "description": "post",
+                  "name": "Media",
+                  "rect": {
+                    "height": 43,
+                    "width": 177,
+                    "x": 704,
+                    "y": 709
+                  },
+                  "role": "StaticText",
+                  "states": [
+                    "readOnly"
+                  ]
+                }
+              ],
+              "description": "Mumble Quick. mumblequick. Native previews, consistent in every theme. Likes: 2.5K. Comments: 86. Media: post",
+              "name": "Post activity",
+              "rect": {
+                "height": 157,
+                "width": 548,
+                "x": 333,
+                "y": 595
+              },
+              "role": "Grouping",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "Identity, caption, media, and actions share one hierarchy.",
+              "name": "Open on Instagram: Post by @mumblequick",
+              "rect": {
+                "height": 32,
+                "width": 117,
+                "x": 333,
+                "y": 764
+              },
+              "role": "Link",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "Open secondary playback and preview actions",
+              "name": "Preview actions",
+              "rect": {
+                "height": 30,
+                "width": 30,
+                "x": 851,
+                "y": 765
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            }
+          ],
+          "description": "Identity, caption, media, and actions share one hierarchy.",
+          "name": "Post by @mumblequick: Instagram",
+          "rect": {
+            "height": 644,
+            "width": 580,
+            "x": 317,
+            "y": 168
+          },
+          "role": "Grouping",
+          "states": []
+        }
+      ],
+      "description": "",
+      "name": "",
+      "rect": {
+        "height": 712,
+        "width": 898,
+        "x": 36,
+        "y": 108
+      },
+      "role": "Client",
+      "states": []
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Attach image",
+      "rect": {
+        "height": 36,
+        "width": 36,
+        "x": 65,
+        "y": 838
+      },
+      "role": "Button",
+      "states": [
+        "focusable"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Send",
+      "rect": {
+        "height": 36,
+        "width": 51,
+        "x": 854,
+        "y": 838
+      },
+      "role": "Button",
+      "states": [
+        "disabled"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Message Lobby",
+      "rect": {
+        "height": 34,
+        "width": 719,
+        "x": 118,
+        "y": 839
+      },
+      "role": "EditableText",
+      "states": [
+        "focusable"
+      ]
+    }
+  ],
+  "description": "",
+  "name": "Mumble Visual Fixture — Mumble",
+  "rect": {
+    "height": 900,
+    "width": 1280,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

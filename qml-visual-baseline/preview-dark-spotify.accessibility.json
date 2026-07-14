@@ -1,0 +1,648 @@
+{
+  "children": [
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Mumble Visual Fixture",
+          "rect": {
+            "height": 19,
+            "width": 274,
+            "x": 980,
+            "y": 25
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Connected",
+          "rect": {
+            "height": 15,
+            "width": 274,
+            "x": 980,
+            "y": 47
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "VOICE ROOMS · 2",
+              "rect": {
+                "height": 30,
+                "width": 310,
+                "x": 972,
+                "y": 80
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Room actions for Lobby",
+                  "rect": {
+                    "height": 24,
+                    "width": 24,
+                    "x": 1232,
+                    "y": 121
+                  },
+                  "role": "Button",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "You are here",
+              "name": "Lobby",
+              "rect": {
+                "height": 46,
+                "width": 290,
+                "x": 972,
+                "y": 110
+              },
+              "role": "ListItem",
+              "states": [
+                "selected"
+              ]
+            },
+            {
+              "children": [],
+              "description": "Listening",
+              "name": "Demo User",
+              "rect": {
+                "height": 31,
+                "width": 290,
+                "x": 972,
+                "y": 158
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "Talking",
+              "name": "Alex",
+              "rect": {
+                "height": 31,
+                "width": 290,
+                "x": 972,
+                "y": 191
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Join",
+                  "rect": {
+                    "height": 24,
+                    "width": 40,
+                    "x": 1188,
+                    "y": 231
+                  },
+                  "role": "Button",
+                  "states": []
+                },
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Room actions for Studio",
+                  "rect": {
+                    "height": 24,
+                    "width": 24,
+                    "x": 1232,
+                    "y": 231
+                  },
+                  "role": "Button",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "",
+              "name": "Studio",
+              "rect": {
+                "height": 38,
+                "width": 290,
+                "x": 972,
+                "y": 224
+              },
+              "role": "ListItem",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "TEXT & ACTIVITY · 1",
+              "rect": {
+                "height": 30,
+                "width": 310,
+                "x": 972,
+                "y": 264
+              },
+              "role": "Heading",
+              "states": []
+            },
+            {
+              "children": [
+                {
+                  "children": [],
+                  "description": "",
+                  "name": "Room actions for #general",
+                  "rect": {
+                    "height": 24,
+                    "width": 24,
+                    "x": 1232,
+                    "y": 301
+                  },
+                  "role": "Button",
+                  "states": [
+                    "focusable"
+                  ]
+                }
+              ],
+              "description": "Text room",
+              "name": "#general",
+              "rect": {
+                "height": 38,
+                "width": 290,
+                "x": 972,
+                "y": 294
+              },
+              "role": "ListItem",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "Rooms and participants",
+          "rect": {
+            "height": 640,
+            "width": 310,
+            "x": 962,
+            "y": 80
+          },
+          "role": "List",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Mute microphone",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 1110,
+            "y": 738
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Deafen",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 1163,
+            "y": 738
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Profile menu",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 1217,
+            "y": 738
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Demo User",
+          "rect": {
+            "height": 16,
+            "width": 61,
+            "x": 1025,
+            "y": 740
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Online",
+          "rect": {
+            "height": 15,
+            "width": 32,
+            "x": 1025,
+            "y": 757
+          },
+          "role": "StaticText",
+          "states": []
+        }
+      ],
+      "description": "",
+      "name": "Rooms and participants",
+      "rect": {
+        "height": 784,
+        "width": 310,
+        "x": 962,
+        "y": 8
+      },
+      "role": "Pane",
+      "states": []
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Lobby",
+      "rect": {
+        "height": 27,
+        "width": 828,
+        "x": 32,
+        "y": 20
+      },
+      "role": "StaticText",
+      "states": []
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Search users and rooms",
+      "rect": {
+        "height": 36,
+        "width": 36,
+        "x": 868,
+        "y": 26
+      },
+      "role": "Button",
+      "states": [
+        "focusable"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Application menu",
+      "rect": {
+        "height": 36,
+        "width": 36,
+        "x": 910,
+        "y": 26
+      },
+      "role": "Button",
+      "states": [
+        "focusable",
+        "focused"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Voice room",
+      "rect": {
+        "height": 16,
+        "width": 828,
+        "x": 32,
+        "y": 51
+      },
+      "role": "StaticText",
+      "states": []
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Message actions",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 869,
+            "y": 116
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Alex",
+          "rect": {
+            "height": 15,
+            "width": 718,
+            "x": 109,
+            "y": 127
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "10:24",
+          "rect": {
+            "height": 15,
+            "width": 26,
+            "x": 835,
+            "y": 127
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Welcome to the deterministic visual fixture.",
+          "rect": {
+            "height": 17,
+            "width": 796,
+            "x": 109,
+            "y": 156
+          },
+          "role": "StaticText",
+          "states": [
+            "readOnly"
+          ]
+        }
+      ],
+      "description": "",
+      "name": "",
+      "rect": {
+        "height": 69,
+        "width": 898,
+        "x": 36,
+        "y": 104
+      },
+      "role": "Client",
+      "states": []
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "",
+          "name": "Demo User",
+          "rect": {
+            "height": 15,
+            "width": 546,
+            "x": 317,
+            "y": 193
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "10:25",
+          "rect": {
+            "height": 15,
+            "width": 26,
+            "x": 871,
+            "y": 193
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Qt Quick is ready for review.",
+          "rect": {
+            "height": 17,
+            "width": 580,
+            "x": 317,
+            "y": 212
+          },
+          "role": "StaticText",
+          "states": [
+            "readOnly"
+          ]
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Spotify",
+              "rect": {
+                "height": 24,
+                "width": 37,
+                "x": 349,
+                "y": 257
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "Loads the provider player in this preview",
+              "name": "Play Native client mix here",
+              "rect": {
+                "height": 36,
+                "width": 72,
+                "x": 571,
+                "y": 314
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "SPOTIFY",
+              "rect": {
+                "height": 24,
+                "width": 47,
+                "x": 341,
+                "y": 427
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Native client mix",
+              "rect": {
+                "height": 20,
+                "width": 548,
+                "x": 333,
+                "y": 455
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Spotify · Mumble Sessions",
+              "rect": {
+                "height": 15,
+                "width": 548,
+                "x": 333,
+                "y": 479
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Provider-owned audio controls stay inside the embed.",
+              "rect": {
+                "height": 15,
+                "width": 548,
+                "x": 333,
+                "y": 498
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "Provider-owned audio controls stay inside the embed.",
+              "name": "Open on Spotify: Native client mix",
+              "rect": {
+                "height": 32,
+                "width": 102,
+                "x": 333,
+                "y": 525
+              },
+              "role": "Link",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "Open secondary playback and preview actions",
+              "name": "Preview actions",
+              "rect": {
+                "height": 30,
+                "width": 30,
+                "x": 851,
+                "y": 526
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            }
+          ],
+          "description": "Provider-owned audio controls stay inside the embed.",
+          "name": "Native client mix: Spotify · Mumble Sessions",
+          "rect": {
+            "height": 340,
+            "width": 580,
+            "x": 317,
+            "y": 233
+          },
+          "role": "Grouping",
+          "states": []
+        }
+      ],
+      "description": "",
+      "name": "",
+      "rect": {
+        "height": 408,
+        "width": 898,
+        "x": 36,
+        "y": 173
+      },
+      "role": "Client",
+      "states": []
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Attach image",
+      "rect": {
+        "height": 36,
+        "width": 36,
+        "x": 65,
+        "y": 738
+      },
+      "role": "Button",
+      "states": [
+        "focusable"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Send",
+      "rect": {
+        "height": 36,
+        "width": 51,
+        "x": 854,
+        "y": 738
+      },
+      "role": "Button",
+      "states": [
+        "disabled"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Message Lobby",
+      "rect": {
+        "height": 34,
+        "width": 719,
+        "x": 118,
+        "y": 739
+      },
+      "role": "EditableText",
+      "states": [
+        "focusable"
+      ]
+    }
+  ],
+  "description": "",
+  "name": "Mumble Visual Fixture — Mumble",
+  "rect": {
+    "height": 800,
+    "width": 1280,
+    "x": 0,
+    "y": 0
+  },
+  "role": "Window",
+  "states": [
+    "active"
+  ]
+}

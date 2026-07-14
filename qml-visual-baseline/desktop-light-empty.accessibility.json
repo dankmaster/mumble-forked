@@ -3,165 +3,53 @@
     {
       "children": [
         {
-          "children": [
-            {
-              "children": [],
-              "description": "",
-              "name": "Mumble",
-              "rect": {
-                "height": 19,
-                "width": 274,
-                "x": 980,
-                "y": 27
-              },
-              "role": "StaticText",
-              "states": []
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "Disconnected",
-              "rect": {
-                "height": 15,
-                "width": 274,
-                "x": 980,
-                "y": 49
-              },
-              "role": "StaticText",
-              "states": []
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "NAVIGATION",
-              "rect": {
-                "height": 15,
-                "width": 67,
-                "x": 980,
-                "y": 96
-              },
-              "role": "StaticText",
-              "states": []
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "Mute microphone",
-              "rect": {
-                "height": 36,
-                "width": 36,
-                "x": 1087,
-                "y": 738
-              },
-              "role": "Button",
-              "states": [
-                "focusable"
-              ]
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "Deafen",
-              "rect": {
-                "height": 36,
-                "width": 36,
-                "x": 1148,
-                "y": 738
-              },
-              "role": "Button",
-              "states": [
-                "focusable"
-              ]
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "Profile menu",
-              "rect": {
-                "height": 36,
-                "width": 36,
-                "x": 1209,
-                "y": 738
-              },
-              "role": "Button",
-              "states": [
-                "focusable",
-                "focused"
-              ]
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "You",
-              "rect": {
-                "height": 16,
-                "width": 20,
-                "x": 1032,
-                "y": 740
-              },
-              "role": "StaticText",
-              "states": []
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "Y",
-              "rect": {
-                "height": 16,
-                "width": 7,
-                "x": 987,
-                "y": 748
-              },
-              "role": "StaticText",
-              "states": []
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "Offline",
-              "rect": {
-                "height": 15,
-                "width": 32,
-                "x": 1032,
-                "y": 757
-              },
-              "role": "StaticText",
-              "states": []
-            }
-          ],
+          "children": [],
+          "description": "",
+          "name": "Mumble",
+          "rect": {
+            "height": 19,
+            "width": 274,
+            "x": 980,
+            "y": 25
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Disconnected",
+          "rect": {
+            "height": 15,
+            "width": 274,
+            "x": 980,
+            "y": 47
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
           "description": "",
           "name": "Rooms and participants",
           "rect": {
-            "height": 784,
+            "height": 640,
             "width": 310,
             "x": 962,
-            "y": 8
+            "y": 80
           },
-          "role": "Pane",
+          "role": "List",
           "states": []
         },
         {
           "children": [],
           "description": "",
-          "name": "No conversation selected",
-          "rect": {
-            "height": 27,
-            "width": 870,
-            "x": 32,
-            "y": 20
-          },
-          "role": "StaticText",
-          "states": []
-        },
-        {
-          "children": [],
-          "description": "",
-          "name": "Application menu",
+          "name": "Mute microphone",
           "rect": {
             "height": 36,
             "width": 36,
-            "x": 910,
-            "y": 26
+            "x": 1087,
+            "y": 738
           },
           "role": "Button",
           "states": [
@@ -171,154 +59,226 @@
         {
           "children": [],
           "description": "",
-          "name": "Choose a server to begin",
+          "name": "Deafen",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 1148,
+            "y": 738
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Profile menu",
+          "rect": {
+            "height": 36,
+            "width": 36,
+            "x": 1209,
+            "y": 738
+          },
+          "role": "Button",
+          "states": [
+            "focusable",
+            "focused"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "You",
           "rect": {
             "height": 16,
-            "width": 870,
-            "x": 32,
-            "y": 51
+            "width": 20,
+            "x": 1032,
+            "y": 740
           },
           "role": "StaticText",
           "states": []
         },
         {
-          "children": [
-            {
-              "children": [],
-              "description": "Disconnected",
-              "name": "Connect",
-              "rect": {
-                "height": 36,
-                "width": 68,
-                "x": 870,
-                "y": 104
-              },
-              "role": "Button",
-              "states": [
-                "focusable"
-              ]
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "You're disconnected",
-              "rect": {
-                "height": 16,
-                "width": 810,
-                "x": 48,
-                "y": 105
-              },
-              "role": "StaticText",
-              "states": []
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "Disconnected",
-              "rect": {
-                "height": 16,
-                "width": 810,
-                "x": 48,
-                "y": 124
-              },
-              "role": "StaticText",
-              "states": []
-            }
-          ],
-          "description": "Disconnected",
-          "name": "You're disconnected",
+          "children": [],
+          "description": "",
+          "name": "Offline",
           "rect": {
-            "height": 60,
-            "width": 930,
-            "x": 20,
-            "y": 92
+            "height": 15,
+            "width": 32,
+            "x": 1032,
+            "y": 757
           },
-          "role": "AlertMessage",
+          "role": "StaticText",
+          "states": []
+        }
+      ],
+      "description": "",
+      "name": "Rooms and participants",
+      "rect": {
+        "height": 784,
+        "width": 310,
+        "x": 962,
+        "y": 8
+      },
+      "role": "Pane",
+      "states": []
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "No conversation selected",
+      "rect": {
+        "height": 27,
+        "width": 870,
+        "x": 32,
+        "y": 20
+      },
+      "role": "StaticText",
+      "states": []
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Application menu",
+      "rect": {
+        "height": 36,
+        "width": 36,
+        "x": 910,
+        "y": 26
+      },
+      "role": "Button",
+      "states": [
+        "focusable"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Choose a server to begin",
+      "rect": {
+        "height": 16,
+        "width": 870,
+        "x": 32,
+        "y": 51
+      },
+      "role": "StaticText",
+      "states": []
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "description": "Disconnected",
+          "name": "Connect",
+          "rect": {
+            "height": 36,
+            "width": 68,
+            "x": 870,
+            "y": 104
+          },
+          "role": "Button",
           "states": [
             "focusable"
           ]
-        },
+        }
+      ],
+      "description": "Disconnected",
+      "name": "You're disconnected",
+      "rect": {
+        "height": 60,
+        "width": 930,
+        "x": 20,
+        "y": 92
+      },
+      "role": "AlertMessage",
+      "states": []
+    },
+    {
+      "children": [
         {
-          "children": [
-            {
-              "children": [],
-              "description": "",
-              "name": "Connect to Mumble",
-              "rect": {
-                "height": 20,
-                "width": 332,
-                "x": 319,
-                "y": 418
-              },
-              "role": "StaticText",
-              "states": []
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "Open the server browser to load rooms and messages.",
-              "rect": {
-                "height": 17,
-                "width": 332,
-                "x": 319,
-                "y": 446
-              },
-              "role": "StaticText",
-              "states": []
-            }
-          ],
-          "description": "Open the server browser to load rooms and messages.",
+          "children": [],
+          "description": "",
           "name": "Connect to Mumble",
           "rect": {
-            "height": 93,
-            "width": 380,
-            "x": 295,
-            "y": 394
+            "height": 20,
+            "width": 332,
+            "x": 319,
+            "y": 391
           },
-          "role": "Pane",
+          "role": "StaticText",
           "states": []
         },
         {
           "children": [],
           "description": "",
-          "name": "Send",
+          "name": "Open the server browser to load rooms and messages.",
           "rect": {
-            "height": 36,
-            "width": 51,
-            "x": 854,
-            "y": 744
+            "height": 17,
+            "width": 332,
+            "x": 319,
+            "y": 419
           },
-          "role": "Button",
-          "states": [
-            "disabled"
-          ]
+          "role": "StaticText",
+          "states": []
         },
         {
           "children": [],
-          "description": "",
-          "name": "Message composer",
+          "description": "Open the server browser",
+          "name": "Choose a server",
           "rect": {
-            "height": 26,
-            "width": 767,
-            "x": 70,
-            "y": 749
+            "height": 36,
+            "width": 107,
+            "x": 431,
+            "y": 444
           },
-          "role": "EditableText",
+          "role": "Button",
           "states": [
-            "disabled"
+            "focusable"
           ]
         }
       ],
-      "description": "",
-      "name": "",
+      "description": "Open the server browser to load rooms and messages.",
+      "name": "Connect to Mumble",
       "rect": {
-        "height": 784,
-        "width": 1264,
-        "x": 8,
-        "y": 8
+        "height": 137,
+        "width": 380,
+        "x": 295,
+        "y": 367
       },
-      "role": "Client",
+      "role": "Pane",
       "states": []
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Send",
+      "rect": {
+        "height": 36,
+        "width": 51,
+        "x": 854,
+        "y": 738
+      },
+      "role": "Button",
+      "states": [
+        "disabled"
+      ]
+    },
+    {
+      "children": [],
+      "description": "",
+      "name": "Message composer",
+      "rect": {
+        "height": 34,
+        "width": 767,
+        "x": 70,
+        "y": 739
+      },
+      "role": "EditableText",
+      "states": [
+        "disabled"
+      ]
     }
   ],
   "description": "",
