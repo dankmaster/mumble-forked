@@ -92,6 +92,8 @@ Item {
 			return "M3 4 H21 V16 H3 Z M8 21 H16 M12 16 V21 M9 10 L12 7 L15 10 M12 7 V14"
 		case "search":
 			return "M18 11 A7 7 0 1 1 4 11 A7 7 0 0 1 18 11 Z M16 16 L20 20"
+		case "send":
+			return "M3 4 L22 12 L3 20 L7 12 Z M7 12 H16"
 		case "settings":
 			return "M4 7 H10 M14 7 H20 M4 12 H15 M19 12 H20 M4 17 H7 M11 17 H20 M10 5 V9 M15 10 V14 M7 15 V19"
 		case "shield":

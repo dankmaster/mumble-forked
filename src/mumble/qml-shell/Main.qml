@@ -203,6 +203,38 @@ ApplicationWindow {
 		return createdAt > 0 && previousCreatedAt > 0 && createdAt - previousCreatedAt > 300000
 	}
 
+	function messageDateSeparator(row, source) {
+		const createdAt = Number(source && source.createdAtMs ? source.createdAtMs : 0)
+		if (createdAt <= 0)
+			return ""
+		const current = new Date(createdAt)
+		if (isNaN(current.getTime()))
+			return ""
+		if (row > 0) {
+			const previous = chatModel.get(row - 1)
+			const previousSource = previous && previous.source ? previous.source : ({})
+			const previousAt = Number(previousSource.createdAtMs || 0)
+			if (previousAt > 0) {
+				const previousDate = new Date(previousAt)
+				if (current.getFullYear() === previousDate.getFullYear()
+						&& current.getMonth() === previousDate.getMonth()
+						&& current.getDate() === previousDate.getDate())
+					return ""
+			}
+		}
+		const today = new Date()
+		if (current.getFullYear() === today.getFullYear()
+				&& current.getMonth() === today.getMonth()
+				&& current.getDate() === today.getDate())
+			return qsTr("TODAY")
+		const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1)
+		if (current.getFullYear() === yesterday.getFullYear()
+				&& current.getMonth() === yesterday.getMonth()
+				&& current.getDate() === yesterday.getDate())
+			return qsTr("YESTERDAY")
+		return Qt.formatDate(current, Locale.LongFormat).toUpperCase()
+	}
+
 	function preferredOutgoingMessageWidth(segments, startsGroup) {
 		let longestLine = 0
 		for (const segment of (segments || [])) {
@@ -213,8 +245,22 @@ ApplicationWindow {
 		// This only chooses a comfortable bubble width. RichMessageBody remains
 		// responsible for exact text measurement and wrapping.
 		const textEstimate = longestLine * Theme.fontBody * 0.58 + Theme.space4 * 2
-		const headerFloor = startsGroup ? 260 : 176
-		return Math.max(headerFloor, Math.min(520, textEstimate))
+		return Math.max(176, Math.min(520, textEstimate))
+	}
+
+	function preferredIncomingMessageWidth(segments, startsGroup) {
+		let longestLine = 0
+		for (const segment of (segments || [])) {
+			const text = String(segment && segment.text !== undefined ? segment.text : "")
+			for (const line of text.split(/\r\n|\r|\n/))
+				longestLine = Math.max(longestLine, line.length)
+		}
+		// Include the avatar lane and inner bubble padding. Author metadata has a
+		// slightly wider floor only on the first row of a group.
+		const textEstimate = longestLine * Theme.fontBody * 0.58
+			+ Theme.avatarMedium + Theme.space2 + Theme.space3 * 2
+		const metadataFloor = startsGroup ? 260 : 220
+		return Math.max(metadataFloor, Math.min(520, textEstimate))
 	}
 
 	function safeRenderImageSource(value) {
@@ -1517,6 +1563,7 @@ ApplicationWindow {
 						systemMessage: !!source.system
 							|| (!source.actorKey && avatarUrl.length === 0 && !canReply && !canReact && !own)
 						startsGroup: root.messageStartsGroup(index, source, title)
+						dateSeparatorLabel: root.messageDateSeparator(index, source)
 						bodyImplicitHeight: messageRow.implicitHeight
 						laneAvailableWidth: Math.max(1, timeline.width
 							- timeline.leftMargin - timeline.rightMargin)
@@ -1525,6 +1572,8 @@ ApplicationWindow {
 						readonly property bool hasAttachmentContent: !!attachments && attachments.length > 0
 						readonly property bool hasReplyContent: replyActor.length > 0 || replySnippet.length > 0
 						readonly property bool hasReactionContent: !!reactions && reactions.length > 0
+						readonly property bool hasMessageActions: canReply || canReact || canDelete
+							|| !!source.deliveryCanRetry
 						readonly property real previewTargetWidth: preview && preview.previewSize === "compact"
 							? 460 : preview && preview.previewSize === "large" ? 720 : 580
 						wideContent: hasPreviewContent || hasAttachmentContent || hasReplyContent
@@ -1532,6 +1581,7 @@ ApplicationWindow {
 						preferredWideContentWidth: hasPreviewContent && !hasAttachmentContent
 							? previewTargetWidth + horizontalPadding * 2 : laneWidth
 						preferredOwnWidth: root.preferredOutgoingMessageWidth(bodySegments, startsGroup)
+						preferredIncomingWidth: root.preferredIncomingMessageWidth(bodySegments, startsGroup)
 						readonly property string deliveryState: String(source.deliveryState || status || "").trim().toLowerCase()
 						readonly property string deliveryLabel: String(source.deliveryLabel || status || "").trim()
 						readonly property bool hasDeliveryStatus: deliveryState === "sending"
@@ -1580,7 +1630,8 @@ ApplicationWindow {
                                 RowLayout {
                                     Layout.fillWidth: true
                                     spacing: Theme.space2
-									visible: messageDelegate.startsGroup || messageDelegate.systemMessage
+									visible: (messageDelegate.startsGroup && !messageDelegate.own)
+										|| messageDelegate.systemMessage
 									Label {
 										Layout.fillWidth: true
 										textFormat: Text.PlainText
@@ -1600,50 +1651,34 @@ ApplicationWindow {
 										visible: status.length > 0
 										elide: Text.ElideRight
 									}
-									ModernIconButton {
-                                        visible: messageDelegate.canReply || messageDelegate.canReact
-                                                 || messageDelegate.canDelete || !!messageDelegate.source.deliveryCanRetry
-										iconName: "more"
-                                        Accessible.name: qsTr("Message actions")
-										onClicked: messageDelegate.openMessageActions()
-										ModernMenu {
-											id: messageActions
-											property string targetId: ""
-											property bool targetCanReply: false
-											property bool targetCanReact: false
-											property bool targetCanDelete: false
-											property bool targetCanRetry: false
-											onClosed: targetId = ""
-											MenuItem {
-												text: qsTr("Reply")
-												visible: messageActions.targetCanReply
-												onTriggered: uiCommands.replyToMessage(messageActions.targetId)
-											}
-											MenuItem {
-												text: qsTr("Add reaction")
-												visible: messageActions.targetCanReact
-												onTriggered: uiCommands.toggleMessageReaction(messageActions.targetId, "👍")
-											}
-											MenuItem {
-												text: qsTr("Retry")
-												visible: messageActions.targetCanRetry
-												onTriggered: uiCommands.retryMessage(messageActions.targetId)
-											}
-											MenuItem {
-												text: qsTr("Delete")
-												visible: messageActions.targetCanDelete
-												onTriggered: uiCommands.deleteMessage(messageActions.targetId)
-                                            }
-                                        }
-                                    }
                                 }
+								Rectangle {
+									id: messageBubble
+									objectName: "chatMessageBubble"
+									readonly property real bubbleInset: messageDelegate.own
+										|| messageDelegate.systemMessage ? 0 : Theme.space3
+									Layout.fillWidth: true
+									Layout.preferredHeight: bubbleContent.implicitHeight + bubbleInset * 2
+									radius: Theme.innerRadius
+									color: messageDelegate.own || messageDelegate.systemMessage
+										? "transparent" : messageDelegate.bubbleColor
+									border.color: messageDelegate.own || messageDelegate.systemMessage
+										? "transparent" : messageDelegate.bubbleBorderColor
+									border.width: messageDelegate.own || messageDelegate.systemMessage
+										? 0 : messageDelegate.bubbleBorderWidth
+
+									ColumnLayout {
+										id: bubbleContent
+										anchors.fill: parent
+										anchors.margins: messageBubble.bubbleInset
+										spacing: Theme.space1
                                 Rectangle {
                                     id: previewCard
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: replyColumn.implicitHeight + Theme.space3
                                     visible: replyActor.length > 0 || replySnippet.length > 0
                                     radius: Theme.innerRadius
-                                    color: Theme.strip
+									color: Theme.chatReplySurface
                                     Column {
                                         id: replyColumn
                                         anchors.fill: parent
@@ -1773,9 +1808,108 @@ ApplicationWindow {
                                         }
                                     }
                                 }
+										RowLayout {
+											id: messageActionRow
+											objectName: "chatMessageActionRow"
+											Layout.fillWidth: true
+											visible: messageDelegate.hasMessageActions
+												|| (messageDelegate.own && timestamp.length > 0)
+											spacing: Theme.space1
+
+											Item { Layout.fillWidth: true }
+											Label {
+												textFormat: Text.PlainText
+												text: [timestamp, status].filter(value => String(value).length > 0).join(" · ")
+												visible: text.length > 0 && (messageDelegate.own
+													|| (!messageDelegate.startsGroup && messageDelegate.hovered))
+												color: Theme.chatMetadata
+												font.pixelSize: Theme.fontCaption
+												Accessible.name: text
+											}
+											ModernIconButton {
+												objectName: "messageReplyButton"
+												visible: messageDelegate.canReply && messageDelegate.hovered
+												dense: true
+												iconName: "reply"
+												text: qsTr("Reply")
+												Accessible.name: text
+												onClicked: uiCommands.replyToMessage(messageDelegate.stableId)
+											}
+											ModernIconButton {
+												objectName: "messageReactButton"
+												visible: messageDelegate.canReact && messageDelegate.hovered
+												dense: true
+												iconName: "add"
+												text: qsTr("Add reaction")
+												Accessible.name: text
+												onClicked: uiCommands.toggleMessageReaction(messageDelegate.stableId, "👍")
+											}
+											ModernIconButton {
+												objectName: "messageRetryButton"
+												visible: !!messageDelegate.source.deliveryCanRetry && messageDelegate.hovered
+												dense: true
+												iconName: "retry"
+												text: qsTr("Retry")
+												Accessible.name: text
+												onClicked: uiCommands.retryMessage(messageDelegate.stableId)
+											}
+											ModernIconButton {
+												objectName: "messageDeleteButton"
+												visible: messageDelegate.canDelete && messageDelegate.hovered
+												dense: true
+												iconName: "delete"
+												text: qsTr("Delete")
+												tone: "danger"
+												Accessible.name: text
+												onClicked: uiCommands.deleteMessage(messageDelegate.stableId)
+											}
+											ModernIconButton {
+												id: messageActionsButton
+												objectName: "messageActionsButton"
+												visible: messageDelegate.hasMessageActions
+												dense: true
+												iconName: "more"
+												text: qsTr("Message actions")
+												opacity: messageDelegate.hovered || activeFocus ? 1 : 0.62
+												Accessible.name: text
+												Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
+												onClicked: messageDelegate.openMessageActions()
+												ModernMenu {
+													id: messageActions
+													property string targetId: ""
+													property bool targetCanReply: false
+													property bool targetCanReact: false
+													property bool targetCanDelete: false
+													property bool targetCanRetry: false
+													onClosed: targetId = ""
+													MenuItem {
+														text: qsTr("Reply")
+														visible: messageActions.targetCanReply
+														onTriggered: uiCommands.replyToMessage(messageActions.targetId)
+													}
+													MenuItem {
+														text: qsTr("Add reaction")
+														visible: messageActions.targetCanReact
+														onTriggered: uiCommands.toggleMessageReaction(messageActions.targetId, "👍")
+													}
+													MenuItem {
+														text: qsTr("Retry")
+														visible: messageActions.targetCanRetry
+														onTriggered: uiCommands.retryMessage(messageActions.targetId)
+													}
+													MenuItem {
+														text: qsTr("Delete")
+														visible: messageActions.targetCanDelete
+														onTriggered: uiCommands.deleteMessage(messageActions.targetId)
+													}
+												}
+											}
+										}
+									}
                             }
                         }
                     }
+					}
 					Rectangle {
 						id: emptyConversationState
 						objectName: "emptyConversationState"
@@ -1854,7 +1988,7 @@ ApplicationWindow {
 						+ Math.min(3, Math.max(0, composerInput.lineCount - 1)) * 18
 						+ (composer.attachments.count > 0 ? 58 : 0)
 						+ (composer.autocompleteItems.length > 0 ? 34 : 0)
-                    color: Theme.strip
+					color: Theme.chatCanvas
 					border.width: 0
 					Rectangle {
 						anchors.left: parent.left
@@ -1871,50 +2005,97 @@ ApplicationWindow {
 						anchors.bottomMargin: anchors.topMargin
 						width: Math.max(1, Math.min(root.conversationLaneMaximumWidth,
 							parent.width - (root.narrowShell ? Theme.space2 : 14) * 2))
-						spacing: root.narrowShell ? Theme.space2 : Theme.space3
-                        ModernIconButton {
-							objectName: "composerAttachButton"
-                            visible: activeScope.canAttachImages
-                            enabled: activeScope.canSend
-							dense: root.narrowShell
-							iconName: "attach"
-                            Accessible.name: qsTr("Attach image")
-                            onClicked: uiCommands.chooseAttachment()
-                        }
+						spacing: 0
                         Rectangle {
+							id: composerInputSurface
+							objectName: "composerInputSurface"
+							readonly property bool focusWithin: composerInput.activeFocus
+								|| composerAttachButton.activeFocus || composerSendButton.activeFocus
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             radius: Theme.innerRadius
-							color: Theme.panel
-							border.color: composerInput.activeFocus ? Theme.focus : Theme.divider
-							border.width: composerInput.activeFocus ? Theme.focusRingWidth : 1
-							Behavior on border.color { ColorAnimation { duration: Theme.motionFast } }
-                            DropArea {
-                                anchors.fill: parent
-                                onDropped: drop => { if (drop.hasUrls) composer.addUrls(drop.urls) }
-                            }
+							color: "transparent"
+							border.width: 0
+							Rectangle {
+								x: 0
+								y: Theme.elevationLowOffset
+								width: parent.width
+								height: parent.height
+								radius: parent.radius
+								color: Theme.composerShadow
+								Accessible.ignored: true
+							}
+							Rectangle {
+								anchors.fill: parent
+								radius: parent.radius
+								color: Theme.composerBackground
+								border.color: composerInputSurface.focusWithin
+									? Theme.composerFocusBorder : Theme.composerBorder
+								border.width: composerInputSurface.focusWithin ? Theme.focusRingWidth : 1
+								Accessible.ignored: true
+								Behavior on border.color { ColorAnimation { duration: Theme.motionFast } }
+							}
                             ColumnLayout {
                                 anchors.fill: parent
-                                anchors.margins: 5
-                                spacing: 2
-                                RowLayout {
+								anchors.margins: Theme.space2
+								spacing: Theme.space1
+								Rectangle {
+									id: composerReplySurface
+									objectName: "composerReplySurface"
                                     Layout.fillWidth: true
+									Layout.preferredHeight: 42
                                     visible: activeScope.hasPendingReply
-                                    Label {
-										textFormat: Text.PlainText
-                                        Layout.fillWidth: true
-                                        text: qsTr("Replying to %1: %2").arg(activeScope.replyActor)
-                                                .arg(activeScope.replySnippet)
-                                        color: Theme.textMuted
-                                        font.pixelSize: 10
-                                        elide: Text.ElideRight
-                                    }
-									ModernIconButton {
-										dense: true
-										iconName: "close"
-                                        Accessible.name: qsTr("Cancel reply")
-                                        onClicked: uiCommands.cancelPendingReply()
-                                    }
+									radius: Theme.innerRadius
+									color: Theme.chatReplySurface
+									Rectangle {
+										anchors.left: parent.left
+										anchors.top: parent.top
+										anchors.bottom: parent.bottom
+										width: 3
+										radius: 2
+										color: Theme.accent
+									}
+									RowLayout {
+										anchors.fill: parent
+										anchors.leftMargin: Theme.space2
+										spacing: Theme.space2
+										ModernIcon {
+											Layout.alignment: Qt.AlignVCenter
+											name: "reply"
+											size: 16
+											color: Theme.accent
+										}
+										ColumnLayout {
+											Layout.fillWidth: true
+											spacing: 0
+											Label {
+												Layout.fillWidth: true
+												textFormat: Text.PlainText
+												text: qsTr("Replying to %1").arg(activeScope.replyActor)
+												color: Theme.accent
+												font.pixelSize: Theme.fontCaption
+												font.weight: Font.DemiBold
+												elide: Text.ElideRight
+											}
+											Label {
+												Layout.fillWidth: true
+												textFormat: Text.PlainText
+												text: activeScope.replySnippet
+												color: Theme.chatMetadata
+												font.pixelSize: Theme.fontLabel
+												elide: Text.ElideRight
+											}
+										}
+										ModernIconButton {
+											id: composerReplyCloseButton
+											objectName: "composerReplyCloseButton"
+											dense: true
+											iconName: "close"
+											text: qsTr("Cancel reply")
+											Accessible.name: text
+											onClicked: uiCommands.cancelPendingReply()
+										}
+									}
                                 }
                                 ListView {
 									id: attachmentStrip
@@ -1959,6 +2140,25 @@ ApplicationWindow {
                                         onClicked: composer.complete(modelData.value || "")
                                     }
                                 }
+								RowLayout {
+									id: composerInputRow
+									Layout.fillWidth: true
+									Layout.fillHeight: true
+									spacing: Theme.space1
+									ModernIconButton {
+										id: composerAttachButton
+										objectName: "composerAttachButton"
+										Layout.alignment: Qt.AlignBottom
+										visible: activeScope.canAttachImages
+										enabled: activeScope.canSend
+										dense: true
+										iconName: "attach"
+										text: activeScope.canAttachFiles ? qsTr("Attach files") : qsTr("Attach images")
+										Accessible.name: text
+										ToolTip.visible: hovered
+										ToolTip.text: text
+										onClicked: uiCommands.chooseAttachment()
+									}
 							TextArea {
 								id: composerInput
 								objectName: "visualFixtureComposer"
@@ -1987,15 +2187,24 @@ ApplicationWindow {
                                     }
                                 }
                             }
+									ModernIconButton {
+										id: composerSendButton
+										objectName: "composerSendButton"
+										Layout.alignment: Qt.AlignBottom
+										dense: true
+										iconName: "send"
+										text: qsTr("Send")
+										tone: "success"
+										selected: enabled
+										enabled: composer.canSend && !composer.sending
+											&& (composer.text.trim().length > 0 || composer.attachments.count > 0)
+										Accessible.name: text
+										ToolTip.visible: hovered
+										ToolTip.text: text
+										onClicked: composer.send()
+									}
+								}
                             }
-                        }
-                        ModernButton {
-							objectName: "composerSendButton"
-							tone: "primary"
-							dense: root.narrowShell
-							text: qsTr("Send")
-                            enabled: composer.canSend && !composer.sending && (composer.text.trim().length > 0 || composer.attachments.count > 0)
-                            onClicked: composer.send()
                         }
                     }
                 }

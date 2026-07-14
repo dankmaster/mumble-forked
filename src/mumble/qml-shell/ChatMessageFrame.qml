@@ -11,6 +11,7 @@ Item {
 	required property bool startsGroup
 	required property bool own
 	required property bool systemMessage
+	property string dateSeparatorLabel: ""
 	property real bodyImplicitHeight: 0
 	// Keep the accessibility hierarchy stable for the lifetime of a reused
 	// delegate. Toggling Accessible.ignored on this technical frame causes Qt
@@ -19,6 +20,7 @@ Item {
 	property bool accessibilityPooled: false
 	readonly property bool accessibilityFrameIgnored: true
 	readonly property bool accessibilitySubtreeActive: !accessibilityPooled
+	readonly property bool hovered: messageHover.hovered
 
 	// The conversation lane is centered independently of the message surface.
 	// Regular incoming messages occupy the lane without looking like bubbles,
@@ -27,8 +29,13 @@ Item {
 	property real laneMaximumWidth: 840
 	property real systemMaximumWidth: 680
 	property real preferredOwnWidth: 260
+	// Plain incoming messages should stay visually connected to their author,
+	// timestamp and actions. Rich content can still opt into the complete lane
+	// through wideContent/preferredWideContentWidth.
+	property real preferredIncomingWidth: 520
 	property real preferredWideContentWidth: laneMaximumWidth
 	property real minimumOwnWidth: 176
+	property real minimumIncomingWidth: 220
 	property bool wideContent: false
 	readonly property real laneWidth: Math.max(1, Math.min(root.laneMaximumWidth,
 		root.laneAvailableWidth > 0 ? root.laneAvailableWidth : root.laneMaximumWidth))
@@ -40,7 +47,10 @@ Item {
 				? root.preferredWideContentWidth : root.preferredOwnWidth
 			return Math.min(root.laneWidth, Math.max(root.minimumOwnWidth, preferredWidth))
 		}
-		return root.laneWidth
+		const preferredWidth = root.wideContent
+			? root.preferredWideContentWidth : root.preferredIncomingWidth
+		return Math.min(root.laneWidth,
+			Math.max(root.minimumIncomingWidth, preferredWidth))
 	}
 	readonly property real messageX: {
 		const laneStart = Math.max(0, (root.laneAvailableWidth - root.laneWidth) / 2)
@@ -54,6 +64,9 @@ Item {
 	property real groupGap: Theme.space3
 	property real continuationGap: Theme.space1
 	readonly property real topGap: root.startsGroup ? root.groupGap : root.continuationGap
+	readonly property bool hasDateSeparator: root.dateSeparatorLabel.length > 0
+	readonly property real dateSeparatorHeight: root.hasDateSeparator
+		? Theme.space5 + Theme.fontCaption : 0
 	property real horizontalPadding: root.systemMessage ? Theme.space3
 		: root.own ? Theme.space2 : 0
 	property real verticalPadding: root.systemMessage ? Theme.space2
@@ -63,17 +76,26 @@ Item {
 	readonly property real surfaceHeight: Math.max(
 		root.startsGroup ? root.groupMinimumHeight : root.compactMinimumHeight,
 		Math.ceil(root.bodyImplicitHeight) + root.verticalPadding * 2)
-	readonly property color surfaceColor: root.systemMessage ? Theme.surfaceRaised
-		: root.own ? Theme.accentSubtle : "transparent"
-	readonly property color surfaceBorderColor: root.systemMessage ? Theme.surfaceBorder : "transparent"
-	readonly property int surfaceBorderWidth: root.systemMessage ? 1 : 0
+	readonly property color bubbleColor: root.systemMessage ? Theme.surfaceRaised
+		: root.own ? Theme.chatOwnSurface : Theme.chatIncomingSurface
+	readonly property color bubbleBorderColor: root.systemMessage ? Theme.surfaceBorder
+		: root.own ? Theme.chatOwnBorder : Theme.chatIncomingBorder
+	readonly property int bubbleBorderWidth: 1
+	// The incoming avatar sits outside its bubble in Main.qml, so this technical
+	// frame stays transparent for incoming rows while exposing the semantic
+	// bubble roles to its content. Own/system rows can paint the complete frame.
+	readonly property color surfaceColor: root.own || root.systemMessage ? root.bubbleColor : "transparent"
+	readonly property color surfaceBorderColor: root.own || root.systemMessage
+		? root.bubbleBorderColor : "transparent"
+	readonly property int surfaceBorderWidth: root.own || root.systemMessage ? root.bubbleBorderWidth : 0
+	readonly property alias dateSeparatorItem: dateSeparator
 	readonly property alias surfaceX: messageSurface.x
 	readonly property alias surfaceWidth: messageSurface.width
 	default property alias contentData: contentHost.data
 	readonly property alias contentItem: contentHost
 
 	implicitWidth: laneAvailableWidth > 0 ? laneAvailableWidth : messageWidth
-	implicitHeight: topGap + surfaceHeight
+	implicitHeight: dateSeparatorHeight + topGap + surfaceHeight
 	height: implicitHeight
 	Accessible.ignored: accessibilityFrameIgnored
 	// Qt Quick can make a pooled delegate visible again without emitting
@@ -84,6 +106,56 @@ Item {
 			accessibilityPooled = false
 	}
 	ListView.onAdd: accessibilityPooled = false
+
+	HoverHandler {
+		id: messageHover
+	}
+
+	Item {
+		id: dateSeparator
+		objectName: "chatDateSeparator"
+		visible: root.hasDateSeparator
+		x: Math.max(0, (root.laneAvailableWidth - root.laneWidth) / 2)
+		y: 0
+		width: root.laneWidth
+		height: root.dateSeparatorHeight
+		Accessible.ignored: true
+
+		Row {
+			anchors.left: parent.left
+			anchors.right: parent.right
+			anchors.verticalCenter: parent.verticalCenter
+			spacing: Theme.space3
+
+			Rectangle {
+				anchors.verticalCenter: parent.verticalCenter
+				width: Math.max(1, (parent.width - separatorText.implicitWidth
+					- parent.spacing * 2) / 2)
+				height: 1
+				color: Theme.divider
+			}
+
+			Text {
+				id: separatorText
+				text: root.dateSeparatorLabel
+				textFormat: Text.PlainText
+				color: Theme.textFaint
+				font.pixelSize: Theme.fontCaption
+				font.weight: Font.DemiBold
+				font.letterSpacing: 0.7
+				Accessible.role: Accessible.StaticText
+				Accessible.name: text
+			}
+
+			Rectangle {
+				anchors.verticalCenter: parent.verticalCenter
+				width: Math.max(1, (parent.width - separatorText.implicitWidth
+					- parent.spacing * 2) / 2)
+				height: 1
+				color: Theme.divider
+			}
+		}
+	}
 
 	Rectangle {
 		id: messageSurface
@@ -97,7 +169,7 @@ Item {
 		// visibility leaves stale QAccessible children active after a model reset.
 		visible: root.accessibilitySubtreeActive
 		x: root.messageX
-		y: root.topGap
+		y: root.dateSeparatorHeight + root.topGap
 		width: root.messageWidth
 		height: root.surfaceHeight
 		radius: root.systemMessage || root.own ? Theme.innerRadius : 0

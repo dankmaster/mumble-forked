@@ -91,7 +91,7 @@ TestCase {
 		const names = [
 			"action", "add", "certificate", "connect", "copy", "delete", "disconnect", "edit",
 			"eye", "eye-off", "info", "join", "key", "link", "message", "move", "pin",
-			"plugin", "quit", "record", "refresh", "reply", "screen-share", "settings", "shield",
+			"plugin", "quit", "record", "refresh", "reply", "screen-share", "send", "settings", "shield",
 			"terminal", "unlink", "user", "user-add", "user-remove", "volume"
 		]
 		for (let index = 0; index < names.length; ++index) {

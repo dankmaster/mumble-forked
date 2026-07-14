@@ -13,18 +13,18 @@ TestCase {
 	ListModel {
 		id: directRows
 		Component.onCompleted: append([
-			{ "stableId": "dm:1", "startsGroup": true, "own": false, "bodyHeight": 32 },
-			{ "stableId": "dm:2", "startsGroup": true, "own": true, "bodyHeight": 32 },
-			{ "stableId": "dm:3", "startsGroup": true, "own": false, "bodyHeight": 32 }
+			{ "stableId": "dm:1", "startsGroup": true, "own": false, "bodyHeight": 32, "separatorLabel": "" },
+			{ "stableId": "dm:2", "startsGroup": true, "own": true, "bodyHeight": 32, "separatorLabel": "" },
+			{ "stableId": "dm:3", "startsGroup": true, "own": false, "bodyHeight": 32, "separatorLabel": "" }
 		])
 	}
 
 	ListModel {
 		id: deliveryRows
 		Component.onCompleted: append([
-			{ "stableId": "delivery:1", "startsGroup": true, "own": true, "bodyHeight": 30 },
-			{ "stableId": "delivery:2", "startsGroup": false, "own": true, "bodyHeight": 20 },
-			{ "stableId": "delivery:3", "startsGroup": false, "own": true, "bodyHeight": 38 }
+			{ "stableId": "delivery:1", "startsGroup": true, "own": true, "bodyHeight": 30, "separatorLabel": "" },
+			{ "stableId": "delivery:2", "startsGroup": false, "own": true, "bodyHeight": 20, "separatorLabel": "" },
+			{ "stableId": "delivery:3", "startsGroup": false, "own": true, "bodyHeight": 38, "separatorLabel": "" }
 		])
 	}
 
@@ -36,12 +36,14 @@ TestCase {
 		reuseItems: true
 		delegate: Shell.ChatMessageFrame {
 			required property real bodyHeight
+			required property string separatorLabel
 			ListView.onPooled: accessibilityPooled = true
 			ListView.onReused: accessibilityPooled = false
 			Accessible.ignored: accessibilityFrameIgnored
 			laneAvailableWidth: timeline.width
 			width: laneAvailableWidth
 			bodyImplicitHeight: bodyHeight
+			dateSeparatorLabel: separatorLabel
 			systemMessage: false
 			objectName: "chat-frame:" + stableId
 			Text {
@@ -53,6 +55,7 @@ TestCase {
 
 	function init() {
 		testCase.width = 420
+		directRows.setProperty(0, "separatorLabel", "")
 		timeline.model = directRows
 		timeline.forceLayout()
 		wait(20)
@@ -123,6 +126,58 @@ TestCase {
 		compare(timeline.itemAtIndex(0).topGap, Theme.space3)
 	}
 
+	function test_date_separator_reserves_space_without_changing_message_geometry() {
+		const incoming = timeline.itemAtIndex(0)
+		const following = timeline.itemAtIndex(1)
+		verify(incoming !== null)
+		verify(following !== null)
+		const originalHeight = incoming.height
+		const originalSurfaceX = incoming.surfaceX
+		const originalFollowingY = following.y
+		directRows.setProperty(0, "separatorLabel", "TODAY")
+		tryCompare(incoming, "dateSeparatorLabel", "TODAY")
+		compare(incoming.hasDateSeparator, true)
+		verify(incoming.dateSeparatorHeight > 0)
+		tryCompare(incoming, "height", originalHeight + incoming.dateSeparatorHeight)
+		timeline.forceLayout()
+		tryCompare(following, "y", originalFollowingY + incoming.dateSeparatorHeight)
+		compare(incoming.surfaceX, originalSurfaceX)
+		const separator = incoming.dateSeparatorItem
+		verify(separator !== null)
+		compare(separator.height, incoming.dateSeparatorHeight)
+		compare(separator.width, incoming.laneWidth)
+		directRows.setProperty(0, "separatorLabel", "")
+		tryCompare(incoming, "hasDateSeparator", false)
+		tryCompare(incoming, "dateSeparatorHeight", 0)
+		tryCompare(incoming, "height", originalHeight)
+		timeline.forceLayout()
+		tryCompare(following, "y", originalFollowingY)
+	}
+
+	function test_semantic_bubble_roles_keep_incoming_frame_transparent() {
+		const incoming = timeline.itemAtIndex(0)
+		const outgoing = timeline.itemAtIndex(1)
+		verify(incoming !== null)
+		verify(outgoing !== null)
+
+		compare(incoming.bubbleColor, Theme.chatIncomingSurface)
+		compare(incoming.bubbleBorderColor, Theme.chatIncomingBorder)
+		compare(incoming.bubbleBorderWidth, 1)
+		compare(incoming.surfaceColor.a, 0)
+		compare(incoming.surfaceBorderWidth, 0)
+		compare(outgoing.bubbleColor, Theme.chatOwnSurface)
+		compare(outgoing.bubbleBorderColor, Theme.chatOwnBorder)
+		compare(outgoing.surfaceColor, Theme.chatOwnSurface)
+		compare(outgoing.surfaceBorderWidth, 1)
+
+		incoming.preferredIncomingWidth = 300
+		compare(incoming.messageWidth, 300)
+		outgoing.preferredOwnWidth = 190
+		compare(outgoing.messageWidth, 190)
+		incoming.preferredIncomingWidth = 520
+		outgoing.preferredOwnWidth = 260
+	}
+
 	function test_narrow_lane_is_bounded_and_outgoing_message_is_adaptive() {
 		const incoming = timeline.itemAtIndex(0)
 		const outgoing = timeline.itemAtIndex(1)
@@ -139,7 +194,7 @@ TestCase {
 		verify(outgoing.surfaceColor.a > 0)
 	}
 
-	function test_wide_lane_is_centered_and_rich_outgoing_content_keeps_width() {
+	function test_wide_lane_keeps_plain_messages_compact_and_rich_content_adapts() {
 		testCase.width = 1080
 		timeline.forceLayout()
 		wait(20)
@@ -148,10 +203,18 @@ TestCase {
 		verify(incoming !== null)
 		verify(outgoing !== null)
 		compare(incoming.laneWidth, 840)
-		compare(incoming.messageWidth, 840)
+		compare(incoming.messageWidth, 520)
 		compare(incoming.surfaceX, 120)
 		compare(outgoing.messageWidth, 260)
 		compare(outgoing.surfaceX, 700)
+
+		incoming.wideContent = true
+		compare(incoming.messageWidth, 840)
+		compare(incoming.surfaceX, 120)
+		incoming.preferredWideContentWidth = 596
+		compare(incoming.messageWidth, 596)
+		compare(incoming.surfaceX, 120)
+		incoming.wideContent = false
 
 		outgoing.wideContent = true
 		compare(outgoing.messageWidth, 840)
