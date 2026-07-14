@@ -6921,22 +6921,6 @@ Please describe what you were doing before the crash.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Minimize media player</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Restore media player</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Maximize media player</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Close media player</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Loading media player</source>
         <translation type="unfinished"></translation>
     </message>
@@ -14651,13 +14635,6 @@ Server feedback: fallback</source>
     </message>
 </context>
 <context>
-    <name>QmlDialogWindow</name>
-    <message>
-        <source>Mumble</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
     <name>QmlShellHost</name>
     <message>
         <source>The Qt Quick shell could not load its root window.</source>
@@ -14720,6 +14697,10 @@ Server feedback: fallback</source>
     </message>
     <message>
         <source>Image unavailable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Press Enter to open this image link.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
