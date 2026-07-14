@@ -264,6 +264,7 @@ void ScreenShareViewBackend::setAudioVolume(const int percent) {
 	if (!applyAudioControls() && m_processId > 0) m_audioRetryTimer->start();
 }
 
+void ScreenShareViewBackend::requestRetry() { emit retryRequested(streamId()); }
 void ScreenShareViewBackend::requestStop() { emit stopRequested(streamId()); }
 void ScreenShareViewBackend::requestClose() { emit closeRequested(streamId()); }
 

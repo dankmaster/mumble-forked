@@ -49,14 +49,18 @@ TestCase {
 		property int sharedParticipantCount: 2
 		property var sharedParticipantSessions: ["7", "42"]
 		property int sharedHostSession: 7
+		property string sharedOperationStatus: "ready"
+		property string sharedOperationError: ""
 		property int joinCalls: 0
 		property int reopenCalls: 0
+		property int retryCalls: 0
 		property int transferCalls: 0
 		property int leaveCalls: 0
 		property int endCalls: 0
 
 		function joinShared() { joinCalls += 1 }
 		function reopenSharedPlayer() { reopenCalls += 1 }
+		function retry() { retryCalls += 1 }
 		function transferSharedHost(sessionId) { transferCalls += 1 }
 		function leaveShared() { leaveCalls += 1 }
 		function endShared() { endCalls += 1 }
@@ -153,6 +157,13 @@ TestCase {
 		session.active = true
 		session.sharedTitle = "Release watch session"
 		session.sharedParticipantCount = 2
+		session.sharedOperationStatus = "ready"
+		session.sharedOperationError = ""
+		session.joinCalls = 0
+		session.reopenCalls = 0
+		session.retryCalls = 0
+		session.transferCalls = 0
+		session.leaveCalls = 0
 		session.endCalls = 0
 		const endButton = findChild(watchTogether, "watchTogetherEndButton")
 		if (endButton)
@@ -398,6 +409,49 @@ TestCase {
 		compare(endButton.tone, "danger")
 		const stateBadge = findChild(banner, "watchTogetherStateBadge")
 		verify(stateBadge !== null && stateBadge.visible)
+	}
+
+	function test_watch_together_exposes_typed_operation_states_and_recovery() {
+		const banner = watchTogether
+		const stateLabel = findChild(banner, "watchTogetherStateLabel")
+		const detail = findChild(banner, "watchTogetherOperationDetail")
+		const transferButton = findChild(banner, "watchTogetherTransferButton")
+		const retryButton = findChild(banner, "watchTogetherRetryButton")
+		const endButton = findChild(banner, "watchTogetherEndButton")
+		verify(stateLabel !== null)
+		verify(detail !== null)
+		verify(retryButton !== null)
+
+		session.sharedOperationStatus = "starting"
+		tryCompare(banner, "operationStatus", "starting")
+		compare(stateLabel.text, "STARTING")
+		compare(banner.operationTone, Theme.warning)
+		verify(banner.operationBusy)
+		verify(!transferButton.enabled)
+		verify(endButton.enabled)
+
+		session.sharedOperationStatus = "reconnecting"
+		tryCompare(stateLabel, "text", "RECONNECTING")
+		compare(banner.operationTone, Theme.warning)
+
+		session.sharedOperationStatus = "error"
+		session.sharedOperationError = "The synchronized renderer stopped."
+		tryCompare(stateLabel, "text", "FAILED")
+		tryCompare(detail, "text", "The synchronized renderer stopped.")
+		compare(banner.operationTone, Theme.danger)
+		compare(banner.Accessible.role, Accessible.AlertMessage)
+		compare(banner.Accessible.description, session.sharedOperationError)
+		verify(retryButton.visible)
+		verify(banner.focusInitialControl())
+		tryCompare(retryButton, "activeFocus", true)
+		keyClick(Qt.Key_Space)
+		compare(session.retryCalls, 1)
+
+		session.active = false
+		compare(retryButton.text, "Reconnect")
+		retryButton.forceActiveFocus()
+		keyClick(Qt.Key_Space)
+		compare(session.reopenCalls, 1)
 	}
 
 	function test_connection_and_compact_motd_actions_stay_bounded_at_420() {

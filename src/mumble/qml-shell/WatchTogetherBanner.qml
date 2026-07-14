@@ -10,15 +10,30 @@ Rectangle {
     required property var participantModel
 	readonly property string surfaceId: "watchTogether.banner"
 	readonly property var captureRect: ({ "x": 0, "y": 0, "width": width, "height": height })
+	readonly property string operationStatus: String(session.sharedOperationStatus ||
+		(session.sharedJoined ? "ready" : "available")).trim().toLowerCase()
+	readonly property string operationError: String(session.sharedOperationError || "").trim()
+	readonly property bool operationBusy: operationStatus === "starting" || operationStatus === "reconnecting"
+	readonly property bool operationFailed: operationStatus === "error"
+	readonly property string operationLabel: operationStatus === "starting" ? qsTr("STARTING")
+		: operationStatus === "reconnecting" ? qsTr("RECONNECTING")
+		: operationFailed ? qsTr("FAILED")
+		: session.sharedHost ? qsTr("HOSTING")
+		: session.sharedJoined ? qsTr("SYNCED") : qsTr("AVAILABLE")
+	readonly property color operationTone: operationFailed ? Theme.danger
+		: operationBusy ? Theme.warning
+		: (session.sharedHost || session.sharedJoined ? Theme.success : Theme.accent)
 
     readonly property real naturalActionWidth: {
         const widths = []
-        if (!session.sharedJoined && joinButton)
+        if (!session.sharedJoined && !operationFailed && joinButton)
             widths.push(joinButton.implicitWidth)
-        if (session.sharedJoined && !session.active && openButton)
+        if (session.sharedJoined && !session.active && !operationFailed && openButton)
             widths.push(openButton.implicitWidth)
         if (session.sharedHost && session.sharedParticipantCount > 1 && transferButton)
             widths.push(transferButton.implicitWidth)
+		if (operationFailed && retryButton)
+			widths.push(retryButton.implicitWidth)
         if (session.sharedJoined && !session.sharedHost && leaveButton)
             widths.push(leaveButton.implicitWidth)
         if (session.sharedHost && endButton)
@@ -34,17 +49,21 @@ Rectangle {
     implicitHeight: visible ? content.implicitHeight + Theme.space4 : 0
     radius: Theme.innerRadius
 	color: Theme.chatSurface
-	border.color: session.sharedHost ? Theme.withAlpha(Theme.accent, 0.52) : Theme.chatIncomingBorder
+	border.color: operationFailed ? Theme.withAlpha(Theme.danger, 0.58)
+		: operationBusy ? Theme.withAlpha(Theme.warning, 0.52)
+		: session.sharedHost ? Theme.withAlpha(Theme.accent, 0.52) : Theme.chatIncomingBorder
 	border.width: 1
-    Accessible.role: Accessible.Pane
+	Accessible.role: operationFailed ? Accessible.AlertMessage : Accessible.Pane
     Accessible.name: qsTr("Watch Together: %1").arg(session.sharedTitle || qsTr("shared media"))
-	Accessible.description: session.sharedHost
+	Accessible.description: operationFailed ? (operationError || qsTr("Synchronized playback failed"))
+		: operationBusy ? operationLabel
+		: session.sharedHost
 		? qsTr("You are hosting synchronized playback for %1 participant(s)").arg(session.sharedParticipantCount)
 		: (session.sharedJoined ? qsTr("Synchronized with the room host")
 			: qsTr("A synchronized media session is available in this voice room"))
 
 	function focusInitialControl() {
-		const candidates = [ joinButton, openButton, transferButton, leaveButton, endButton ]
+		const candidates = [ retryButton, joinButton, openButton, transferButton, leaveButton, endButton ]
 		for (let index = 0; index < candidates.length; ++index) {
 			const control = candidates[index]
 			if (!control || !control.visible || !control.enabled)
@@ -117,28 +136,43 @@ Rectangle {
 					Rectangle {
 						objectName: "watchTogetherStateBadge"
 						Layout.preferredWidth: watchStateLabel.implicitWidth + Theme.space2
+							+ (root.operationBusy ? 16 : 0)
 						Layout.preferredHeight: 20
 						radius: height / 2
-						color: Theme.withAlpha(session.sharedHost || session.sharedJoined
-							? Theme.success : Theme.accent, 0.12)
+						color: Theme.withAlpha(root.operationTone, 0.12)
+						ModernBusyIndicator {
+							anchors.left: parent.left
+							anchors.leftMargin: Theme.space1
+							anchors.verticalCenter: parent.verticalCenter
+							width: 12
+							height: 12
+							visible: root.operationBusy
+							running: visible
+							Accessible.ignored: true
+						}
 						Label {
 							id: watchStateLabel
+							objectName: "watchTogetherStateLabel"
 							anchors.centerIn: parent
+							anchors.horizontalCenterOffset: root.operationBusy ? Theme.space1 : 0
 							textFormat: Text.PlainText
-							text: session.sharedHost ? qsTr("HOSTING")
-								: (session.sharedJoined ? qsTr("SYNCED") : qsTr("AVAILABLE"))
-							color: session.sharedHost || session.sharedJoined ? Theme.success : Theme.accent
+							text: root.operationLabel
+							color: root.operationTone
 							font.pixelSize: Theme.fontCaption
 							font.weight: Font.DemiBold
 						}
 					}
 					Label {
+						objectName: "watchTogetherOperationDetail"
 						Layout.fillWidth: true
 						textFormat: Text.PlainText
-						text: qsTr("%1 participant(s)").arg(session.sharedParticipantCount)
-						color: Theme.textMuted
+						text: root.operationFailed
+							? (root.operationError || qsTr("Synchronized playback failed."))
+							: qsTr("%1 participant(s)").arg(session.sharedParticipantCount)
+						color: root.operationFailed ? Theme.danger : Theme.textMuted
 						font.pixelSize: Theme.fontCaption
 						elide: Text.ElideRight
+						Accessible.name: text
 					}
 				}
             }
@@ -158,7 +192,8 @@ Rectangle {
         ModernButton {
             id: joinButton
             objectName: "watchTogetherJoinButton"
-            visible: !session.sharedJoined
+            visible: !session.sharedJoined && !root.operationFailed
+			enabled: !root.operationBusy && !root.operationFailed
             width: Math.min(implicitWidth, Math.max(Theme.controlHeight, actionFlow.width))
             text: qsTr("Join")
 			tone: "accent"
@@ -169,7 +204,8 @@ Rectangle {
         ModernButton {
             id: openButton
             objectName: "watchTogetherOpenButton"
-            visible: session.sharedJoined && !session.active
+            visible: session.sharedJoined && !session.active && !root.operationFailed
+			enabled: !root.operationBusy && !root.operationFailed
             width: Math.min(implicitWidth, Math.max(Theme.controlHeight, actionFlow.width))
             text: qsTr("Open player")
 			tone: "accent"
@@ -181,6 +217,7 @@ Rectangle {
             id: transferButton
             objectName: "watchTogetherTransferButton"
             visible: session.sharedHost && session.sharedParticipantCount > 1
+			enabled: !root.operationBusy && !root.operationFailed
             dense: true
 			width: Theme.controlHeight
 			height: Theme.controlHeight
@@ -203,6 +240,24 @@ Rectangle {
                 }
             }
         }
+		ModernButton {
+			id: retryButton
+			objectName: "watchTogetherRetryButton"
+			visible: root.operationFailed
+			width: Math.min(implicitWidth, Math.max(Theme.controlHeight, actionFlow.width))
+			text: session.active ? qsTr("Retry player") : qsTr("Reconnect")
+			tone: "accent"
+			highlighted: true
+			Accessible.description: qsTr("Retry synchronized playback without leaving the room session")
+			onClicked: {
+				if (session.active)
+					session.retry()
+				else if (session.sharedJoined)
+					session.reopenSharedPlayer()
+				else
+					session.joinShared()
+			}
+		}
         ModernButton {
             id: leaveButton
             objectName: "watchTogetherLeaveButton"

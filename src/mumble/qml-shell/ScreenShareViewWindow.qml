@@ -98,8 +98,8 @@ ApplicationWindow {
 	Component.onCompleted: Qt.callLater(screenShareControls.focusInitialControl)
 	onPlaybackSurfaceReadyChanged: if (playbackSurfaceReady) hasShownLiveFrame = true
 	onOperationFailedChanged: if (operationFailed) Qt.callLater(function() {
-		if (screenShareFailureClose.visible)
-			screenShareFailureClose.forceActiveFocus()
+		if (screenShareFailureRetry.visible)
+			screenShareFailureRetry.forceActiveFocus()
 	})
 	function closeFromHost() {
 		hostClosing = true
@@ -255,15 +255,27 @@ ApplicationWindow {
 						horizontalAlignment: Text.AlignHCenter
 						wrapMode: Text.Wrap
 					}
-					ModernButton {
-						id: screenShareFailureClose
-						objectName: "screenShareFailureCloseButton"
+					RowLayout {
 						Layout.alignment: Qt.AlignHCenter
 						visible: root.displayState === "error"
-						text: qsTr("Close viewer")
-						tone: "danger"
-						Accessible.description: qsTr("Stop receiving this unavailable screen share")
-						onClicked: root.backend.requestStop()
+						spacing: Theme.space2
+						ModernButton {
+							id: screenShareFailureRetry
+							objectName: "screenShareFailureRetryButton"
+							text: qsTr("Retry viewer")
+							tone: "accent"
+							highlighted: true
+							Accessible.description: qsTr("Clean up the failed helper and start a fresh screen-share viewer")
+							onClicked: root.backend.requestRetry()
+						}
+						ModernButton {
+							id: screenShareFailureClose
+							objectName: "screenShareFailureCloseButton"
+							text: qsTr("Close viewer")
+							tone: "danger"
+							Accessible.description: qsTr("Stop receiving this unavailable screen share")
+							onClicked: root.backend.requestStop()
+						}
 					}
 				}
 			}

@@ -68,6 +68,7 @@ void TestScreenShare::qmlViewBackendPublishesLifecycleState() {
 	ScreenShareViewBackend backend(session);
 	QSignalSpy pauseSpy(&backend, &ScreenShareViewBackend::pauseToggled);
 	QSignalSpy muteSpy(&backend, &ScreenShareViewBackend::audioMuteToggled);
+	QSignalSpy retrySpy(&backend, &ScreenShareViewBackend::retryRequested);
 	QSignalSpy stopSpy(&backend, &ScreenShareViewBackend::stopRequested);
 	QSignalSpy operationSpy(&backend, &ScreenShareViewBackend::operationStateChanged);
 
@@ -76,6 +77,7 @@ void TestScreenShare::qmlViewBackendPublishesLifecycleState() {
 	backend.setPaused(true);
 	backend.setAudioMuted(true);
 	backend.setAudioVolume(125);
+	backend.requestRetry();
 	backend.requestStop();
 	backend.setOperationState(QStringLiteral("loading"), {}, true);
 	QVERIFY(backend.paused());
@@ -83,6 +85,8 @@ void TestScreenShare::qmlViewBackendPublishesLifecycleState() {
 	QCOMPARE(backend.audioVolume(), 100);
 	QCOMPARE(pauseSpy.count(), 1);
 	QCOMPARE(muteSpy.count(), 1);
+	QCOMPARE(retrySpy.count(), 1);
+	QCOMPARE(retrySpy.constFirst().constFirst().toString(), QStringLiteral("stream:7"));
 	QCOMPARE(stopSpy.count(), 1);
 	QCOMPARE(operationSpy.count(), 1);
 	QCOMPARE(backend.operationStatus(), QStringLiteral("loading"));

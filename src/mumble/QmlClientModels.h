@@ -698,6 +698,8 @@ class MediaSessionBackend final : public QObject {
 	Q_PROPERTY(qulonglong sharedHostSession READ sharedHostSession NOTIFY stateChanged)
 	Q_PROPERTY(int sharedParticipantCount READ sharedParticipantCount NOTIFY stateChanged)
 	Q_PROPERTY(QVariantList sharedParticipantSessions READ sharedParticipantSessions NOTIFY stateChanged)
+	Q_PROPERTY(QString sharedOperationStatus READ sharedOperationStatus NOTIFY stateChanged)
+	Q_PROPERTY(QString sharedOperationError READ sharedOperationError NOTIFY stateChanged)
 	Q_PROPERTY(QUrl url READ url NOTIFY stateChanged)
 	Q_PROPERTY(QUrl audioUrl READ audioUrl NOTIFY stateChanged)
 	Q_PROPERTY(QString provider READ provider NOTIFY stateChanged)
@@ -728,6 +730,8 @@ public:
 	qulonglong sharedHostSession() const;
 	int sharedParticipantCount() const;
 	QVariantList sharedParticipantSessions() const;
+	QString sharedOperationStatus() const;
+	QString sharedOperationError() const;
 	QUrl url() const;
 	QUrl audioUrl() const;
 	QString provider() const;
@@ -801,6 +805,7 @@ private:
 							  QString *error) const;
 	bool openWithPresentation(const QUrl &url, const QString &provider, const QString &sessionId,
 							  bool detached);
+	void rejectPlayback(const QString &message);
 	void updateLoadProgress(int progress);
 	void publishSharedPlaybackState(double position, bool paused, bool force);
 	bool m_active = false;
@@ -814,6 +819,8 @@ private:
 	qulonglong m_sharedScopeId = 0;
 	qulonglong m_sharedHostSession = 0;
 	QVariantList m_sharedParticipantSessions;
+	QString m_sharedOperationStatus = QStringLiteral("idle");
+	QString m_sharedOperationError;
 	bool m_sharedPlayerSuppressed = false;
 	double m_sharedPosition = 0.0;
 	bool m_sharedPaused = true;

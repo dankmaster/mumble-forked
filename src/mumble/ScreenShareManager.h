@@ -122,6 +122,7 @@ private:
 	bool canPublishSession(const ScreenShareSession &session) const;
 	bool shouldAutoViewSession(const ScreenShareSession &session) const;
 	bool restartExternalViewSession(const ScreenShareSession &session);
+	void retryExternalViewSession(const QString &streamID);
 	void showExternalViewWindow(const ScreenShareSession &session, qint64 processID);
 	void startLocalPublishSession(const ScreenShareSession &session);
 	void startLocalViewSession(const ScreenShareSession &session);
@@ -155,6 +156,7 @@ private:
 	QHash< QString, QPointer< QObject > > m_qmlViewWindows;
 	QSet< QString > m_externalViewAudioMuted;
 	QSet< QString > m_pausedExternalViewSessions;
+	QSet< QString > m_manualViewRetryRequired;
 	QSet< QString > m_announcedViewableSessions;
 	QTimer m_externalRuntimeWatchdogTimer;
 	mutable QString m_lastLoggedAvailabilityContext;

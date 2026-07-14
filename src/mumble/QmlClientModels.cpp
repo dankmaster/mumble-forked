@@ -3452,6 +3452,8 @@ qulonglong MediaSessionBackend::sharedScopeId() const { return m_sharedScopeId; 
 qulonglong MediaSessionBackend::sharedHostSession() const { return m_sharedHostSession; }
 int MediaSessionBackend::sharedParticipantCount() const { return m_sharedParticipantSessions.size(); }
 QVariantList MediaSessionBackend::sharedParticipantSessions() const { return m_sharedParticipantSessions; }
+QString MediaSessionBackend::sharedOperationStatus() const { return m_sharedOperationStatus; }
+QString MediaSessionBackend::sharedOperationError() const { return m_sharedOperationError; }
 QUrl MediaSessionBackend::url() const { return m_url; }
 QUrl MediaSessionBackend::audioUrl() const { return m_audioUrl; }
 QString MediaSessionBackend::provider() const { return m_provider; }
@@ -3526,7 +3528,7 @@ bool MediaSessionBackend::openWithPresentation(const QUrl &url, const QString &p
 	QUrl normalized;
 	QString validationError;
 	if (!validateSource(url, provider, &normalized, &validationError)) {
-		reportError(validationError);
+		rejectPlayback(validationError);
 		return false;
 	}
 	const QString normalizedProvider = canonicalMediaProvider(normalized, provider);
@@ -3562,7 +3564,7 @@ bool MediaSessionBackend::openDirect(const QUrl &url, const QString &mediaMime, 
 	QUrl normalizedMediaUrl;
 	QString validationError;
 	if (!validateDirectSource(url, normalizedMediaMime, primaryIsAudio, &normalizedMediaUrl, &validationError)) {
-		reportError(validationError);
+		rejectPlayback(validationError);
 		return false;
 	}
 
@@ -3571,8 +3573,8 @@ bool MediaSessionBackend::openDirect(const QUrl &url, const QString &mediaMime, 
 	if (!audioUrl.isEmpty()) {
 		if (primaryIsAudio
 			|| !validateDirectSource(audioUrl, normalizedAudioMime, true, &normalizedAudioUrl, &validationError)) {
-			reportError(primaryIsAudio ? tr("A direct audio source cannot have a secondary audio track.")
-									   : validationError);
+			rejectPlayback(primaryIsAudio ? tr("A direct audio source cannot have a secondary audio track.")
+										: validationError);
 			return false;
 		}
 	}
@@ -3601,7 +3603,7 @@ bool MediaSessionBackend::startShared(const QUrl &url, const QString &provider, 
 	QUrl normalized;
 	QString validationError;
 	if (!validateSource(url, provider, &normalized, &validationError)) {
-		reportError(validationError);
+		rejectPlayback(validationError);
 		return false;
 	}
 	if (m_sharedAvailable) {
@@ -3610,7 +3612,7 @@ bool MediaSessionBackend::startShared(const QUrl &url, const QString &provider, 
 	}
 	const QString normalizedProvider = canonicalMediaProvider(normalized, provider);
 	if (!mediaProviderSupportsSynchronizedPlayback(normalizedProvider)) {
-		reportError(tr("This provider does not expose synchronized playback controls. Open it in your browser instead."));
+		rejectPlayback(tr("This provider does not expose synchronized playback controls. Open it in your browser instead."));
 		return false;
 	}
 
@@ -3624,6 +3626,8 @@ bool MediaSessionBackend::startShared(const QUrl &url, const QString &provider, 
 	m_sharedUrl = normalized;
 	m_sharedProvider = normalizedProvider;
 	m_sharedParticipantSessions.clear();
+	m_sharedOperationStatus = QStringLiteral("starting");
+	m_sharedOperationError.clear();
 	m_sharedPlayerSuppressed = false;
 	m_sharedPosition = 0.0;
 	m_sharedPaused = true;
@@ -3638,6 +3642,9 @@ bool MediaSessionBackend::startShared(const QUrl &url, const QString &provider, 
 void MediaSessionBackend::joinShared() {
 	if (!m_sharedAvailable || m_sharedSessionId.isEmpty() || m_sharedJoined) return;
 	m_pendingExplicitSessionId = m_sharedSessionId;
+	m_sharedOperationStatus = QStringLiteral("starting");
+	m_sharedOperationError.clear();
+	emit stateChanged();
 	emit sharedEventRequested(m_sharedSessionId, QStringLiteral("join"), 0);
 }
 
@@ -3650,6 +3657,8 @@ void MediaSessionBackend::leaveShared() {
 	if (m_sharedJoined) emit sharedEventRequested(m_sharedSessionId, QStringLiteral("leave"), 0);
 	m_pendingExplicitSessionId.clear();
 	m_sharedJoined = false;
+	m_sharedOperationStatus = QStringLiteral("available");
+	m_sharedOperationError.clear();
 	m_sharedPlayerSuppressed = false;
 	closePlayer();
 	emit stateChanged();
@@ -3672,6 +3681,9 @@ void MediaSessionBackend::transferSharedHost(const QString &sessionId) {
 bool MediaSessionBackend::reopenSharedPlayer() {
 	if (!m_sharedAvailable || !m_sharedJoined || m_sharedUrl.isEmpty()) return false;
 	m_sharedPlayerSuppressed = false;
+	m_sharedOperationStatus = QStringLiteral("reconnecting");
+	m_sharedOperationError.clear();
+	emit stateChanged();
 	if (!open(m_sharedUrl, m_sharedProvider, m_sharedSessionId)) return false;
 	m_position = m_sharedPosition;
 	m_state = m_sharedPaused ? QStringLiteral("paused") : QStringLiteral("playing");
@@ -3684,6 +3696,10 @@ void MediaSessionBackend::retry() {
 	if (!m_active || m_url.isEmpty()) return;
 	m_state = QStringLiteral("loading");
 	m_error.clear();
+	if (m_sharedAvailable) {
+		m_sharedOperationStatus = QStringLiteral("reconnecting");
+		m_sharedOperationError.clear();
+	}
 	updateLoadProgress(0);
 	emit stateChanged();
 	emit retryRequested();
@@ -3716,6 +3732,8 @@ void MediaSessionBackend::closePlayer() {
 	if (!m_active) {
 		if (m_sharedAvailable && m_state != QLatin1String("available")) {
 			m_state = QStringLiteral("available");
+			m_sharedOperationStatus = m_sharedJoined ? QStringLiteral("ready") : QStringLiteral("available");
+			m_sharedOperationError.clear();
 			emit stateChanged();
 		}
 		return;
@@ -3737,6 +3755,10 @@ void MediaSessionBackend::closePlayer() {
 	m_navigationHost.clear();
 	m_navigationPort = -1;
 	m_state = m_sharedAvailable ? QStringLiteral("available") : QStringLiteral("idle");
+	if (m_sharedAvailable) {
+		m_sharedOperationStatus = m_sharedJoined ? QStringLiteral("ready") : QStringLiteral("available");
+		m_sharedOperationError.clear();
+	}
 	m_position = 0.0;
 	m_duration = 0.0;
 	m_error.clear();
@@ -3819,6 +3841,13 @@ void MediaSessionBackend::reportLoadProgress(const int progress) {
 	if (!m_active) return;
 	const int normalized = qBound(0, progress, 100);
 	updateLoadProgress(normalized);
+	bool sharedOperationChanged = false;
+	if (normalized == 100 && m_sharedAvailable && m_sharedJoined
+		&& m_sharedOperationStatus != QLatin1String("ready")) {
+		m_sharedOperationStatus = QStringLiteral("ready");
+		m_sharedOperationError.clear();
+		sharedOperationChanged = true;
+	}
 	// Some allowlisted providers expose their own controls inside the isolated
 	// embed instead of a scriptable transport API. A successful document load is
 	// therefore their ready signal; leaving them in "loading" would permanently
@@ -3826,6 +3855,8 @@ void MediaSessionBackend::reportLoadProgress(const int progress) {
 	if (normalized == 100 && !playbackControllable() && m_state == QLatin1String("loading")) {
 		m_state = QStringLiteral("ready");
 		m_error.clear();
+		emit stateChanged();
+	} else if (sharedOperationChanged) {
 		emit stateChanged();
 	}
 }
@@ -3837,6 +3868,8 @@ void MediaSessionBackend::reportPlaybackState(const double position, const doubl
 	m_state = paused ? QStringLiteral("paused") : QStringLiteral("playing");
 	m_error.clear();
 	if (m_sharedAvailable && m_sharedJoined) {
+		m_sharedOperationStatus = QStringLiteral("ready");
+		m_sharedOperationError.clear();
 		m_sharedPosition = m_position;
 		m_sharedPaused = paused;
 		m_sharedGeneration = qMax(m_sharedGeneration, m_syncGeneration);
@@ -3849,7 +3882,19 @@ void MediaSessionBackend::reportPlaybackState(const double position, const doubl
 void MediaSessionBackend::reportError(const QString &message) {
 	m_state = QStringLiteral("error");
 	m_error = message.trimmed().isEmpty() ? tr("Media playback failed.") : message.trimmed();
+	if (m_sharedAvailable) {
+		m_sharedOperationStatus = QStringLiteral("error");
+		m_sharedOperationError = m_error;
+	}
 	emit stateChanged();
+}
+
+void MediaSessionBackend::rejectPlayback(const QString &message) {
+	// Validation happens before a player window becomes active, so an error-only
+	// state would otherwise remain invisible. Reuse the shell's typed rejection
+	// channel to publish a native toast while preserving the inspectable state.
+	reportError(message);
+	emit playbackRejected(m_error);
 }
 
 void MediaSessionBackend::applyRemoteState(const QUrl &url, const QString &provider, const QString &sessionId,
@@ -3870,6 +3915,8 @@ void MediaSessionBackend::applyRemoteState(const QUrl &url, const QString &provi
 	m_state = paused ? QStringLiteral("paused") : QStringLiteral("playing");
 	m_error.clear();
 	if (m_sharedAvailable && m_sharedJoined && sessionId == m_sharedSessionId) {
+		m_sharedOperationStatus = QStringLiteral("ready");
+		m_sharedOperationError.clear();
 		m_sharedPosition = targetPosition;
 		m_sharedPaused = paused;
 		m_sharedGeneration = qMax(m_sharedGeneration, generation);
@@ -3962,6 +4009,8 @@ void MediaSessionBackend::applySharedState(const QString &sessionId, const QUrl 
 		if (wasJoined) closePlayer();
 		m_state = QStringLiteral("available");
 		m_error.clear();
+		m_sharedOperationStatus = QStringLiteral("available");
+		m_sharedOperationError.clear();
 		emit stateChanged();
 		return;
 	}
@@ -3976,6 +4025,8 @@ void MediaSessionBackend::applySharedState(const QString &sessionId, const QUrl 
 	if (m_sharedPlayerSuppressed) {
 		m_state = QStringLiteral("available");
 		m_error.clear();
+		m_sharedOperationStatus = QStringLiteral("ready");
+		m_sharedOperationError.clear();
 		emit stateChanged();
 		return;
 	}
@@ -3983,6 +4034,8 @@ void MediaSessionBackend::applySharedState(const QString &sessionId, const QUrl 
 		applyRemoteState(normalizedUrl, m_sharedProvider, id, m_sharedPosition, paused, generation);
 	} else {
 		m_state = QStringLiteral("available");
+		m_sharedOperationStatus = QStringLiteral("available");
+		m_sharedOperationError.clear();
 		emit stateChanged();
 	}
 }
@@ -3999,6 +4052,8 @@ void MediaSessionBackend::clearSharedState() {
 	m_sharedScopeId = 0;
 	m_sharedHostSession = 0;
 	m_sharedParticipantSessions.clear();
+	m_sharedOperationStatus = QStringLiteral("idle");
+	m_sharedOperationError.clear();
 	m_sharedPlayerSuppressed = false;
 	m_sharedPosition = 0.0;
 	m_sharedPaused = true;

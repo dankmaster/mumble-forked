@@ -3006,9 +3006,12 @@ void TestQmlClientModels::mediaSessionValidatesAndPublishesTypedState() {
 	QSignalSpy playSpy(&media, &MediaSessionBackend::playRequested);
 	QSignalSpy pauseSpy(&media, &MediaSessionBackend::pauseRequested);
 	QSignalSpy seekSpy(&media, &MediaSessionBackend::seekRequested);
+	QSignalSpy rejectionSpy(&media, &MediaSessionBackend::playbackRejected);
 	QVERIFY(!media.open(QUrl(QStringLiteral("http://www.youtube.com/embed/abc")), QStringLiteral("youtube"),
 						QStringLiteral("room:1")));
 	QCOMPARE(media.state(), QStringLiteral("error"));
+	QCOMPARE(rejectionSpy.count(), 1);
+	QCOMPARE(rejectionSpy.constFirst().constFirst().toString(), media.error());
 	QVERIFY(media.open(QUrl(QStringLiteral("https://www.youtube.com/embed/abc")), QStringLiteral("youtube"),
 					   QStringLiteral("room:1")));
 	QVERIFY(media.active());
@@ -3164,6 +3167,8 @@ void TestQmlClientModels::mediaSessionSharedHostLifecycle() {
 	QVERIFY(media.startShared(url, QStringLiteral("youtube"), QStringLiteral("Shared clip")));
 	QVERIFY(media.sharedAvailable());
 	QVERIFY(!media.active());
+	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("starting"));
+	QVERIFY(media.sharedOperationError().isEmpty());
 	QCOMPARE(startSpy.count(), 1);
 	const QString sessionId = media.sharedSessionId();
 	QVERIFY(!sessionId.isEmpty());
@@ -3173,9 +3178,21 @@ void TestQmlClientModels::mediaSessionSharedHostLifecycle() {
 	QVERIFY(media.active());
 	QVERIFY(media.sharedJoined());
 	QVERIFY(media.sharedHost());
+	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("ready"));
 	QCOMPARE(media.sharedParticipantCount(), 1);
 	media.reportPlaybackState(1.25, 90.0, false);
 	QCOMPARE(stateSpy.count(), 1);
+	media.closePlayer();
+	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("ready"));
+	QVERIFY(media.reopenSharedPlayer());
+	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("reconnecting"));
+	media.reportError(QStringLiteral("sync renderer failed"));
+	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("error"));
+	QCOMPARE(media.sharedOperationError(), QStringLiteral("sync renderer failed"));
+	media.retry();
+	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("reconnecting"));
+	media.reportLoadProgress(100);
+	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("ready"));
 	media.transferSharedHost(QStringLiteral("4294967295"));
 	QCOMPARE(eventSpy.count(), 1);
 	QCOMPARE(eventSpy.constFirst().at(1).toString(), QStringLiteral("host-transfer"));
@@ -3187,6 +3204,8 @@ void TestQmlClientModels::mediaSessionSharedHostLifecycle() {
 	QCOMPARE(eventSpy.constLast().at(1).toString(), QStringLiteral("end"));
 	QVERIFY(!media.sharedAvailable());
 	QVERIFY(!media.active());
+	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("idle"));
+	QVERIFY(media.sharedOperationError().isEmpty());
 }
 
 void TestQmlClientModels::mediaSessionRequiresExplicitJoinForRemoteSessions() {
@@ -3206,8 +3225,10 @@ void TestQmlClientModels::mediaSessionRequiresExplicitJoinForRemoteSessions() {
 	QVERIFY(media.sharedAvailable());
 	QVERIFY(!media.sharedJoined());
 	QVERIFY(!media.active());
+	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("available"));
 
 	media.joinShared();
+	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("starting"));
 	QCOMPARE(eventSpy.count(), 1);
 	QCOMPARE(eventSpy.at(0).at(1).toString(), QStringLiteral("join"));
 	media.applySharedState(sessionId, url, QStringLiteral("direct"), QStringLiteral("Remote clip"), 8, 17, 9,
@@ -3215,6 +3236,7 @@ void TestQmlClientModels::mediaSessionRequiresExplicitJoinForRemoteSessions() {
 	QVERIFY(media.sharedJoined());
 	QVERIFY(!media.sharedHost());
 	QVERIFY(media.active());
+	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("ready"));
 	QCOMPARE(media.provider(), QStringLiteral("vimeo"));
 	QVERIFY(!media.isNavigationAllowed(QUrl(QStringLiteral("https://cdn.example.com/media/next.mp4"))));
 	QVERIFY(media.isNavigationAllowed(url));
@@ -3226,6 +3248,7 @@ void TestQmlClientModels::mediaSessionRequiresExplicitJoinForRemoteSessions() {
 	QCOMPARE(eventSpy.at(1).at(1).toString(), QStringLiteral("leave"));
 	QVERIFY(!media.sharedJoined());
 	QVERIFY(!media.active());
+	QCOMPARE(media.sharedOperationStatus(), QStringLiteral("available"));
 }
 
 void TestQmlClientModels::mediaSessionRejectsConflictingPlaybackDuringSharedSession() {

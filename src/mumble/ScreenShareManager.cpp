@@ -585,6 +585,7 @@ void ScreenShareManager::requestStartViewing(const QString &streamID) {
 		return;
 	}
 
+	m_manualViewRetryRequired.remove(streamID);
 	startLocalViewSession(it.value());
 	emit sessionUpdated(streamID);
 }
@@ -662,6 +663,7 @@ void ScreenShareManager::resetState() {
 	m_viewBackends.clear();
 	m_externalViewAudioMuted.clear();
 	m_pausedExternalViewSessions.clear();
+	m_manualViewRetryRequired.clear();
 
 	m_activePublishSessions.clear();
 	m_pendingPublishSessions.clear();
@@ -987,6 +989,7 @@ void ScreenShareManager::applyHelperOperationResult(const HelperOperationResult 
 		updateExternalRuntimeWatchdog();
 
 		if (abandonedViewRestart) {
+			m_manualViewRetryRequired.insert(result.streamID);
 			if (ScreenShareViewBackend *backend = m_viewBackends.value(result.streamID)) {
 				backend->setProcessId(0);
 				backend->setNativeFrameTransport({}, 0);
@@ -1035,12 +1038,19 @@ void ScreenShareManager::applyHelperOperationResult(const HelperOperationResult 
 	m_pendingViewSessions.remove(result.streamID);
 	ScreenShareViewBackend *backend = m_viewBackends.value(result.streamID);
 	if (!result.success) {
-		if (backend) backend->setOperationState(QStringLiteral("error"), result.error, false);
+		m_manualViewRetryRequired.insert(result.streamID);
+		if (backend) {
+			const QString error = result.error.trimmed().isEmpty()
+				? tr("The screen-share helper could not start the viewer.")
+				: result.error;
+			backend->setOperationState(QStringLiteral("error"), error, false);
+		}
 		tracker.finishIfCurrent(result.streamID, result.generation);
 		emit sessionUpdated(result.streamID);
 		return;
 	}
 	const ScreenShareSession currentSession = m_sessions.value(result.streamID);
+	m_manualViewRetryRequired.remove(result.streamID);
 	m_activeViewSessions.insert(result.streamID);
 	m_pausedExternalViewSessions.remove(result.streamID);
 	m_externalViewProcessIDs.insert(result.streamID, result.processID);
@@ -1074,6 +1084,41 @@ bool ScreenShareManager::restartExternalViewSession(const ScreenShareSession &se
 	return true;
 }
 
+void ScreenShareManager::retryExternalViewSession(const QString &streamID) {
+	const auto sessionIt = m_sessions.constFind(streamID);
+	ScreenShareViewBackend *backend = m_viewBackends.value(streamID, nullptr);
+	if (sessionIt == m_sessions.cend() || !canViewSession(sessionIt.value())) {
+		if (backend) {
+			backend->setOperationState(
+				QStringLiteral("error"),
+				tr("This screen share is no longer available in the current voice channel."), false);
+		}
+		return;
+	}
+	if (m_pendingViewSessions.contains(streamID) || m_pendingViewRestarts.contains(streamID)) return;
+
+	// A manual retry always performs an ordered cleanup first. That keeps a
+	// late helper process from racing the replacement viewer after a failed
+	// automatic restart or an unconfirmed stop operation.
+	m_manualViewRetryRequired.remove(streamID);
+	m_externalViewRestartAttempts.remove(streamID);
+	m_activeViewSessions.remove(streamID);
+	m_externalViewProcessIDs.remove(streamID);
+	m_pausedExternalViewSessions.remove(streamID);
+	m_pendingViewRestarts.insert(streamID);
+	if (backend) {
+		backend->setProcessId(0);
+		backend->setNativeFrameTransport({}, 0);
+		backend->setOperationState(QStringLiteral("loading"), {}, true);
+	}
+	ScreenShareSession stopSession;
+	stopSession.streamID = streamID;
+	scheduleHelperOperation(HelperOperationKind::StopView, stopSession,
+							nextHelperOperationGeneration(HelperOperationKind::StopView, streamID));
+	updateExternalRuntimeWatchdog();
+	emit sessionUpdated(streamID);
+}
+
 void ScreenShareManager::showExternalViewWindow(const ScreenShareSession &session, const qint64 processID) {
 	ScreenShareViewBackend *backend = m_viewBackends.value(session.streamID, nullptr);
 	if (!backend) {
@@ -1082,6 +1127,8 @@ void ScreenShareManager::showExternalViewWindow(const ScreenShareSession &sessio
 
 		connect(backend, &ScreenShareViewBackend::stopRequested, this, &ScreenShareManager::requestStopViewing);
 		connect(backend, &ScreenShareViewBackend::closeRequested, this, &ScreenShareManager::requestStopViewing);
+		connect(backend, &ScreenShareViewBackend::retryRequested, this,
+				&ScreenShareManager::retryExternalViewSession);
 		connect(backend, &ScreenShareViewBackend::pauseToggled, this,
 				&ScreenShareManager::setExternalViewPaused);
 		connect(backend, &ScreenShareViewBackend::audioMuteToggled, this,
@@ -1113,6 +1160,7 @@ void ScreenShareManager::startLocalPublishSession(const ScreenShareSession &sess
 }
 
 void ScreenShareManager::startLocalViewSession(const ScreenShareSession &session) {
+	if (m_manualViewRetryRequired.contains(session.streamID)) return;
 	if (m_activeViewSessions.contains(session.streamID)) {
 		focusOrReopenDetachedWindow(session.streamID);
 		return;
@@ -1151,6 +1199,7 @@ void ScreenShareManager::stopLocalViewSession(const QString &streamID) {
 	if (ScreenShareViewBackend *backend = m_viewBackends.take(streamID)) backend->deleteLater();
 	m_externalViewAudioMuted.remove(streamID);
 	m_pausedExternalViewSessions.remove(streamID);
+	m_manualViewRetryRequired.remove(streamID);
 
 	ScreenShareSession operationSession;
 	operationSession.streamID = streamID;
@@ -1243,8 +1292,8 @@ void ScreenShareManager::checkExternalRuntimeLiveness() {
 											  QString::number(kExternalRuntimeRestartLimit)));
 			} else {
 				Global::get().l->log(Log::Warning,
-									 tr("Screen-share viewer runtime for %1 exited unexpectedly; closing the "
-										"viewer.")
+									 tr("Screen-share viewer runtime for %1 exited unexpectedly after all "
+										"automatic restarts; waiting for a manual retry.")
 										 .arg(streamID.toHtmlEscaped()));
 			}
 		}
@@ -1259,7 +1308,19 @@ void ScreenShareManager::checkExternalRuntimeLiveness() {
 			scheduleHelperOperation(HelperOperationKind::StopView, stopSession,
 				nextHelperOperationGeneration(HelperOperationKind::StopView, streamID));
 		} else {
-			stopLocalViewSession(streamID);
+			m_manualViewRetryRequired.insert(streamID);
+			if (ScreenShareViewBackend *backend = m_viewBackends.value(streamID)) {
+				backend->setProcessId(0);
+				backend->setNativeFrameTransport({}, 0);
+				backend->setOperationState(
+					QStringLiteral("error"),
+					tr("The screen-share viewer stopped after all automatic restart attempts. Retry to start a fresh viewer."),
+					false);
+			}
+			ScreenShareSession stopSession;
+			stopSession.streamID = streamID;
+			scheduleHelperOperation(HelperOperationKind::StopView, stopSession,
+				nextHelperOperationGeneration(HelperOperationKind::StopView, streamID));
 		}
 
 		emit sessionUpdated(streamID);

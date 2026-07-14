@@ -66,6 +66,7 @@ public:
 	Q_INVOKABLE void setPaused(bool paused);
 	Q_INVOKABLE void setAudioMuted(bool muted);
 	Q_INVOKABLE void setAudioVolume(int percent);
+	Q_INVOKABLE void requestRetry();
 	Q_INVOKABLE void requestStop();
 	Q_INVOKABLE void requestClose();
 
@@ -82,6 +83,7 @@ signals:
 	void operationStateChanged();
 	void pauseToggled(const QString &streamId, bool paused);
 	void audioMuteToggled(const QString &streamId, bool muted);
+	void retryRequested(const QString &streamId);
 	void stopRequested(const QString &streamId);
 	void closeRequested(const QString &streamId);
 
