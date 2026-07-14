@@ -70,6 +70,9 @@ Rectangle {
 		const value = preview && preview.metadata ? preview.metadata.thumbnailBlur : false
 		return value === true || value === 1 || String(value).toLowerCase() === "true"
 	}
+	// Content-warning state belongs to the media reveal surface. Do not also
+	// expose it as an ordinary provider detail after the user has revealed it.
+	readonly property var providerMetadata: metadataForProviderDetails()
     readonly property var mediaItems: normalizedMediaItems()
     readonly property var currentMedia: mediaItems.length > 0
         ? mediaItems[Math.max(0, Math.min(selectedMediaIndex, mediaItems.length - 1))] : ({})
@@ -359,6 +362,18 @@ Rectangle {
 		return ""
 	}
 
+	function metadataForProviderDetails() {
+		const source = preview && preview.metadata ? preview.metadata : ({})
+		const result = ({})
+		const keys = Object.keys(source)
+		for (let index = 0; index < keys.length; ++index) {
+			const key = keys[index]
+			if (key !== "contentWarning" && key !== "thumbnailBlur")
+				result[key] = source[key]
+		}
+		return result
+	}
+
 	function withAlpha(color, alpha) {
 		return Qt.rgba(color.r, color.g, color.b, alpha)
 	}
@@ -431,9 +446,32 @@ Rectangle {
 				}
             }
         }
-        if (result.length === 0 && (String(preview.mediaUrl || "").length > 0
-                                   || safeExternalUrl(preview.mediaExternalUrl || "").length > 0)) {
-			const fallbackKind = mediaKind({ "kind": preview.mediaKind, "mime": preview.mediaMime })
+		if (result.length === 0 && (String(preview.mediaUrl || "").length > 0
+								   || safeExternalUrl(preview.mediaExternalUrl || "").length > 0)) {
+			const fallbackKind = mediaKind({ "kind": preview.mediaKind || preview.kind,
+				"mime": preview.mediaMime })
+			if (fallbackKind === "image") {
+				// The C++ image pipeline rewrites inline/data images to image://mumble.
+				// Keep that managed source on the image path instead of passing it
+				// through the audio/video URL validator.
+				const renderSource = safeRenderImageSource(preview.mediaUrl || "", !!preview.mediaAnimated)
+				const externalUrl = safeExternalUrl(preview.mediaExternalUrl
+					|| (renderSource.length === 0 ? preview.mediaUrl : ""))
+				if (renderSource.length > 0 || externalUrl.length > 0) {
+					result.push({
+						"url": renderSource,
+						"externalUrl": externalUrl,
+						"mime": safeText(preview.mediaMime, 128),
+						"kind": "image",
+						"thumbnail": safeRenderImageSource(preview.thumbnailUrl || ""),
+						"poster": safeRenderImageSource(preview.thumbnailUrl || ""),
+						"title": root.displayTitle,
+						"directPlayable": renderSource.length > 0,
+						"managedAnimated": !!preview.mediaAnimated && /^file:\/\//i.test(renderSource)
+					})
+				}
+				return result
+			}
 			const playbackUrl = safeDirectMediaUrl(preview.mediaUrl || "", fallbackKind)
 			const externalUrl = safeExternalUrl(preview.mediaExternalUrl
 				|| (playbackUrl.length === 0 ? preview.mediaUrl : ""))
@@ -499,6 +537,16 @@ Rectangle {
 			visible: root.hasEmbedPreview
 			radius: Theme.innerRadius
 			color: Theme.panel
+			gradient: Gradient {
+				GradientStop {
+					position: 0.0
+					color: root.withAlpha(providerDetails.providerAccent, 0.34)
+				}
+				GradientStop {
+					position: 1.0
+					color: root.withAlpha(Theme.panel, 0.98)
+				}
+			}
 			border.color: root.withAlpha(providerDetails.providerAccent, 0.46)
 			border.width: 1
 			clip: true
@@ -525,7 +573,7 @@ Rectangle {
 			Rectangle {
 				anchors.fill: parent
 				visible: !root.inlinePlaybackActive
-				color: root.withAlpha(Theme.strip, embedPoster.status === Image.Ready ? 0.34 : 0.58)
+				color: root.withAlpha(Theme.strip, embedPoster.status === Image.Ready ? 0.30 : 0.18)
 			}
 
 			Button {
@@ -673,19 +721,58 @@ Rectangle {
 			ModernButton {
 				id: previewPlayButton
 				objectName: "previewPlayButton"
+				readonly property bool posterBacked: embedPoster.status === Image.Ready
 				anchors.centerIn: parent
 				z: 3
 				visible: !root.inlinePlaybackActive && !root.mediaRequiresReveal
 					&& root.previewState !== "loading" && embedPoster.status !== Image.Loading
 				enabled: root.renderActive
 				text: qsTr("Play here")
-				tone: "accent"
+				implicitWidth: posterBacked ? Math.max(54, Theme.controlHeight + Theme.space5)
+					: Math.max(132, playButtonContent.implicitWidth + Theme.space4 * 2)
+				implicitHeight: posterBacked ? implicitWidth : Theme.controlHeight
+				contentItem: Item {
+					Row {
+						id: playButtonContent
+						objectName: "previewPlayButtonContent"
+						anchors.centerIn: parent
+						spacing: Theme.space2
+						ModernIcon {
+							objectName: "previewPlayIcon"
+							name: "play"
+							size: previewPlayButton.posterBacked ? Theme.avatarMedium : Theme.avatarSmall
+							color: Theme.contrastText(providerDetails.providerAccent)
+						}
+						Label {
+							objectName: "previewPlayText"
+							visible: !previewPlayButton.posterBacked
+							text: previewPlayButton.text
+							textFormat: Text.PlainText
+							color: Theme.contrastText(providerDetails.providerAccent)
+							font: previewPlayButton.font
+							verticalAlignment: Text.AlignVCenter
+						}
+					}
+				}
+				background: Rectangle {
+					objectName: "previewPlayButtonSurface"
+					radius: previewPlayButton.posterBacked ? width / 2 : Theme.innerRadius
+					color: previewPlayButton.down
+						? Qt.darker(providerDetails.providerAccent, 1.08)
+						: previewPlayButton.hovered ? Qt.lighter(providerDetails.providerAccent, 1.08)
+						: root.withAlpha(providerDetails.providerAccent, 0.94)
+					border.color: previewPlayButton.activeFocus ? Theme.focus
+						: root.withAlpha(Theme.textStrong, 0.46)
+					border.width: previewPlayButton.activeFocus ? Theme.focusRingWidth : 1
+					Behavior on color { ColorAnimation { duration: root.animationDuration } }
+				}
 				Accessible.name: root.playAccessibilityName
 				Accessible.description: qsTr("Loads the provider player in this preview")
 				onClicked: root.requestInlinePlaybackWithFocus()
 			}
 
 			Rectangle {
+				objectName: "previewEmbedRevealSurface"
 				anchors.fill: parent
 				z: 2
 				visible: !root.inlinePlaybackActive && root.mediaRequiresReveal
@@ -833,6 +920,7 @@ Rectangle {
 					border.width: Theme.focusRingWidth
 				}
 				Rectangle {
+					objectName: "previewCompactRevealSurface"
 					anchors.fill: parent
 					visible: root.mediaRequiresReveal && !root.expanded
 					color: Theme.strip
@@ -891,7 +979,7 @@ Rectangle {
 						Math.max(1, parent.width))
 					Layout.maximumWidth: Math.max(1, parent.width)
 					Layout.preferredHeight: Theme.space5
-					visible: root.providerLabel.length > 0
+					visible: root.providerLabel.length > 0 && !root.hasEmbedPreview
 					radius: height / 2
 					color: providerDetails.providerAccentSubtle
 					border.color: providerDetails.providerAccentBorder
@@ -975,26 +1063,31 @@ Rectangle {
         Rectangle {
 			id: expandedMediaPanel
 			objectName: "previewExpandedMediaPanel"
-			Layout.fillWidth: true
+			Layout.alignment: Qt.AlignHCenter
+			Layout.preferredWidth: root.width
+			Layout.minimumWidth: root.width
+			Layout.maximumWidth: root.width
+			transform: Translate { x: -Theme.space4 }
 			Layout.preferredHeight: !root.hasEmbedPreview && root.expanded && (root.imageSource.length > 0
                                     || root.hasDirectMedia || root.hasExternalMedia || root.hasExternalImage)
-									? Math.min(Theme.rowHeight * 6, root.actionAvailableWidth * 9 / 16) : 0
+									? Math.min(420, Math.max(180, root.width * 9 / 16)) : 0
             visible: Layout.preferredHeight > 0
             color: Theme.panel
-			radius: Theme.innerRadius
+			radius: 0
+			border.color: Theme.surfaceBorder
+			border.width: 1
             clip: true
 
 			Image {
 				id: expandedStaticImage
 				objectName: "previewExpandedStaticImage"
                 anchors.fill: parent
-				anchors.margins: Theme.space1
 				source: !root.inlinePlaybackActive && root.renderActive && root.expanded && !root.mediaRequiresReveal
 					&& !root.currentMediaManagedAnimated
 					? root.imageSource : ""
                 asynchronous: true
-                cache: false
-                fillMode: Image.PreserveAspectFit
+				cache: false
+				fillMode: Image.PreserveAspectCrop
 				visible: !root.inlinePlaybackActive && source.toString().length > 0 && status === Image.Ready
                 onStatusChanged: if (status === Image.Error && root.imageSource.length > 0)
                                      root.requestImageRefresh()
@@ -1004,7 +1097,6 @@ Rectangle {
 				objectName: "previewExpandedAnimatedLoader"
 				property int mediaStatus: Image.Null
 				anchors.fill: parent
-				anchors.margins: Theme.space1
 				active: !root.inlinePlaybackActive && root.renderActive && root.expanded && !root.mediaRequiresReveal
 					&& root.currentMediaManagedAnimated
 				onActiveChanged: mediaStatus = active ? Image.Loading : Image.Null
@@ -1015,7 +1107,7 @@ Rectangle {
 					asynchronous: true
 					cache: false
 					playing: root.animationsEnabled && visible && status === Image.Ready
-					fillMode: Image.PreserveAspectFit
+					fillMode: Image.PreserveAspectCrop
 					visible: status === Image.Ready
 					onStatusChanged: {
 						expandedAnimationLoader.mediaStatus = status
@@ -1138,6 +1230,7 @@ Rectangle {
 				font.pixelSize: Theme.fontCaption
             }
 			Rectangle {
+				objectName: "previewExpandedRevealSurface"
 				anchors.fill: parent
 				visible: !root.inlinePlaybackActive && root.mediaRequiresReveal
 				color: Theme.strip
@@ -1259,7 +1352,7 @@ Rectangle {
 		ProviderDetails {
 			id: providerDetails
 			Layout.fillWidth: true
-			metadata: root.preview && root.preview.metadata ? root.preview.metadata : ({})
+			metadata: root.providerMetadata
 			previewKind: root.preview ? String(root.preview.kind || "") : ""
 			providerHint: root.preview ? String(root.preview.embedKind || root.providerLabel || "") : ""
 			previewTitle: root.displayTitle

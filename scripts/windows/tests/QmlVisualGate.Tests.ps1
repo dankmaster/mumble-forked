@@ -299,6 +299,22 @@ Describe "Qt Quick connected fixture contract" {
 		($worker -match 'returned a truncated accessibility tree') | Should Be $true
 	}
 
+	It "keeps managed inline-image fixtures on a visible, readiness-gated media path" {
+		$automation = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\ModernUiAutomationServer.cpp"
+		$component = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\qml-shell\RichPreviewCard.qml"
+		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
+
+		($automation -match 'automationRegisterPreviewImageValue') | Should Be $true
+		($automation -match 'dataImageSourceCount\s*==\s*0') | Should Be $true
+		($automation -match 'cardImageSources\s*>\s*0\s*&&\s*cardImageReady\s*==\s*0') | Should Be $true
+		($component -match 'fallbackKind\s*===\s*"image"[\s\S]*safeRenderImageSource\(preview\.mediaUrl') |
+			Should Be $true
+		($worker -match 'visibleImageCount') | Should Be $true
+		($worker -match 'imageReadyCount') | Should Be $true
+		($worker -match 'imageLoadingCount\s*-eq\s*0') | Should Be $true
+		($worker -match 'imageErrorCount\s*-eq\s*0') | Should Be $true
+	}
+
 	It "requires embed posters to own playback while ordinary cards retain their open surface" {
 		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
 		($worker -match '\$openSurfaceReady') | Should Be $true

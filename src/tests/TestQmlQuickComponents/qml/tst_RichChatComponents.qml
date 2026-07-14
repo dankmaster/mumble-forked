@@ -381,6 +381,64 @@ TestCase {
         compare(imageOpenSpy.signalArguments[0][0], "image://mumble/image?g=2")
     }
 
+	function test_top_level_managed_inline_image_reaches_a_visible_media_surface() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"kind": "image",
+			"title": "Inline image attachment",
+			"mediaUrl": "image://mumble/inline-image-fixture?g=1",
+			"openLabel": "Open image"
+		}
+		card.previewIdentity = "message:inline-image-fixture"
+
+		compare(card.mediaItems.length, 1)
+		compare(card.currentMediaKind, "image")
+		compare(card.currentMediaUrl, "image://mumble/inline-image-fixture?g=1")
+		compare(card.imageSource, "image://mumble/inline-image-fixture?g=1")
+		const compactImage = findChild(card, "previewCompactImage")
+		verify(compactImage !== null)
+		tryCompare(compactImage, "status", Image.Ready)
+		verify(compactImage.visible)
+		compare(compactImage.source.toString(), "image://mumble/inline-image-fixture?g=1")
+		compare(findChild(card, "previewExpandedMediaPanel").visible, false)
+	}
+
+	function test_expanded_media_is_full_bleed_and_adds_a_distinct_media_stage() {
+		const card = previewLoader.item
+		card.preview = {
+			"state": "ready",
+			"kind": "image",
+			"title": "Responsive image preview",
+			"previewSize": "compact",
+			"mediaUrl": "image://mumble/full-bleed-fixture?g=1",
+			"mediaMime": "image/png"
+		}
+		card.previewIdentity = "message:full-bleed-fixture"
+		const compactImage = findChild(card, "previewCompactImage")
+		const expandedPanel = findChild(card, "previewExpandedMediaPanel")
+		const expandedImage = findChild(card, "previewExpandedStaticImage")
+		verify(compactImage !== null && expandedPanel !== null && expandedImage !== null)
+		tryCompare(compactImage, "status", Image.Ready)
+		verify(card.compact)
+		verify(!card.expanded)
+		verify(!expandedPanel.visible)
+
+		card.userExpanded = true
+		tryVerify(function() { return card.expanded && !card.compact && card.implicitHeight > 180 })
+		previewLoader.height = Math.ceil(card.implicitHeight)
+		wait(0)
+		tryCompare(expandedPanel, "visible", true)
+		tryCompare(expandedImage, "status", Image.Ready)
+		const panelOrigin = expandedPanel.mapToItem(card, 0, 0)
+		verify(Math.abs(panelOrigin.x) <= 1,
+			"expanded media begins at x=" + panelOrigin.x + " instead of the card edge")
+		verify(Math.abs(expandedPanel.width - card.width) <= 1,
+			"expanded media width " + expandedPanel.width + " did not fill card width " + card.width)
+		compare(expandedImage.fillMode, Image.PreserveAspectCrop)
+		verify(expandedPanel.height > compactImage.height * 3)
+	}
+
     function test_direct_media_gallery_is_bounded_and_typed() {
         const card = previewLoader.item
         const items = []
@@ -456,6 +514,9 @@ TestCase {
 		verify(cardOpenSurface !== null && !cardOpenSurface.enabled)
 		verify(popoutButton !== null && overflowButton !== null)
 		compare(inlineButton.text, "Play here")
+		compare(inlineButton.posterBacked, false)
+		verify(inlineButton.implicitWidth > inlineButton.implicitHeight)
+		compare(findChild(card, "previewPlayText").visible, true)
 		compare(card.playAccessibilityName, "Play Video here")
 		compare(inlineButton.Accessible.name, card.playAccessibilityName)
 		overflowButton.clicked()
@@ -503,6 +564,11 @@ TestCase {
 			tryCompare(poster, "status", Image.Ready)
 			compare(poster.fillMode, Image.PreserveAspectCrop)
 			verify(playButton.visible)
+			tryCompare(playButton, "posterBacked", true)
+			compare(playButton.implicitWidth, playButton.implicitHeight)
+			verify(findChild(card, "previewPlayIcon").visible)
+			compare(findChild(card, "previewPlayText").visible, false)
+			compare(findChild(card, "previewProviderChip").visible, false)
 			verify(!loader.active)
 			compare(loader.item, null)
 			compare(findChild(card, "previewCompactImage").visible, false)
@@ -572,6 +638,7 @@ TestCase {
 		verify(Math.abs(stateBadge.color.g - details.providerStateColor.g) < 0.01)
 		verify(Math.abs(stateBadge.color.b - details.providerStateColor.b) < 0.01)
 		verify(Math.abs(stateBadge.color.a - 0.92) < 0.01)
+		compare(findChild(card, "previewProviderChip").visible, false)
 	}
 
 	function test_sensitive_embed_keeps_poster_and_web_surface_private_until_reveal() {
@@ -1034,8 +1101,16 @@ TestCase {
 		compare(findChild(card, "previewCompactImage").source.toString(), "")
 		const reveal = findChild(card, "previewCompactRevealButton")
 		const revealState = findChild(card, "previewCompactRevealState")
+		const compactRevealSurface = findChild(card, "previewCompactRevealSurface")
+		const expandedRevealSurface = findChild(card, "previewExpandedRevealSurface")
+		const embedRevealSurface = findChild(card, "previewEmbedRevealSurface")
+		const providerWarning = findChild(card, "providerDetailsWarning")
 		verify(reveal !== null && reveal.visible)
 		verify(revealState !== null)
+		verify(compactRevealSurface !== null && compactRevealSurface.visible)
+		verify(expandedRevealSurface !== null && !expandedRevealSurface.visible)
+		verify(embedRevealSurface !== null && !embedRevealSurface.visible)
+		verify(providerWarning !== null && !providerWarning.visible)
 		verify(reveal.Accessible.description.indexOf("Sensitive imagery") >= 0)
 		compare(findChild(card, "previewExpandedRevealButton").visible, false)
 		mouseMove(reveal, reveal.width / 2, reveal.height / 2)
@@ -1044,6 +1119,8 @@ TestCase {
 		tryCompare(revealState, "color", Theme.accentSubtle)
 		mouseRelease(reveal, reveal.width / 2, reveal.height / 2, Qt.LeftButton)
 		verify(!card.mediaRequiresReveal)
+		verify(!compactRevealSurface.visible && !expandedRevealSurface.visible
+			&& !embedRevealSurface.visible && !providerWarning.visible)
 		card.sensitiveMediaRevealed = false
 		reveal.forceActiveFocus()
 		tryCompare(reveal, "activeFocus", true)
@@ -1054,6 +1131,16 @@ TestCase {
 			"image://mumble/sensitive?g=1")
 		card.previewIdentity = "message:sensitive|two"
 		verify(card.mediaRequiresReveal)
+		card.userExpanded = true
+		tryCompare(expandedRevealSurface, "visible", true)
+		compare(compactRevealSurface.visible, false)
+		compare(providerWarning.visible, false)
+		const expandedReveal = findChild(card, "previewExpandedRevealButton")
+		verify(expandedReveal !== null && expandedReveal.visible)
+		expandedReveal.clicked()
+		verify(!card.mediaRequiresReveal)
+		verify(!compactRevealSurface.visible && !expandedRevealSurface.visible
+			&& !embedRevealSurface.visible && !providerWarning.visible)
 		card.sensitiveMediaRevealed = true
 		card.resetForReuse()
 		verify(card.mediaRequiresReveal)
