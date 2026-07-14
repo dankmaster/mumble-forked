@@ -481,9 +481,9 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 	}
 	window->requestActivate();
 	// Resizing from a compact saved geometry to a regular fixture can start the
-	// Drawer's real close transition. The product surface is intentionally
-	// disabled while any part of that modal remains on screen, so wait for the
-	// transition to finish before establishing the case's deterministic focus.
+	// Drawer's real close transition. The live product surface stays hidden while
+	// any part of that modal remains on screen, so wait for the transition to
+	// finish before establishing the case's deterministic focus.
 	QElapsedTimer navigationCloseTimer;
 	navigationCloseTimer.start();
 	while (window->property("navigationModalActive").toBool() && navigationCloseTimer.elapsed() < 2000) {

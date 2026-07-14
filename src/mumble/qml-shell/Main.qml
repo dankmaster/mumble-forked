@@ -913,7 +913,9 @@ ApplicationWindow {
 		visible: root.modalUiActive
 		enabled: false
 		sourceItem: productSurface
-		live: false
+		// Keep the modal context current until theme and control-state animations
+		// settle instead of freezing an arbitrary intermediate frame.
+		live: root.modalUiActive
 		smooth: false
 		textureSize: Qt.size(Math.max(1, Math.ceil(width * root.modalTextureScale)),
 			Math.max(1, Math.ceil(height * root.modalTextureScale)))
@@ -925,10 +927,10 @@ ApplicationWindow {
         anchors.fill: parent
         anchors.margins: 8
 		// ShaderEffectSource can render an invisible source item directly into a
-		// scene-graph texture. The visual context remains while the live product
-		// tree is pruned from input and accessibility during a modal.
+		// scene-graph texture. Keep the source enabled so controls retain their
+		// normal visual state while the texture is captured; visibility alone
+		// prunes the live tree from input and accessibility during a modal.
 		visible: !root.modalUiActive
-		enabled: !root.modalUiActive
         radius: Theme.shellRadius
         color: Theme.shellBackground
         border.color: Theme.divider
