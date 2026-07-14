@@ -283,6 +283,102 @@ ApplicationWindow {
 		return true
 	}
 
+	function isImageAttachment(attachment) {
+		if (!attachment)
+			return false
+		const kind = String(attachment.kind || "").trim().toLowerCase()
+		const mime = String(attachment.mime || "").trim().toLowerCase()
+		if (kind === "image" || mime.indexOf("image/") === 0)
+			return true
+		if (kind.length > 0 || mime.length > 0)
+			return false
+		// Older message rows only carried a sanitized image-provider URL.
+		return safeRenderImageSource(attachment.url || attachment.thumbnailUrl || "").length > 0
+	}
+
+	function requestAttachment(attachment) {
+		if (!attachment)
+			return false
+		const imageAttachment = isImageAttachment(attachment)
+		if (imageAttachment && openAttachment(attachment))
+			return true
+		return downloadAttachment(attachment, !imageAttachment)
+	}
+
+	function downloadAttachment(attachment, allowLegacyId) {
+		if (!attachment)
+			return false
+		let rawAssetId = attachment.assetId
+		if (rawAssetId === undefined || rawAssetId === null || String(rawAssetId).length === 0)
+			rawAssetId = attachment.assetID
+		if (allowLegacyId && (rawAssetId === undefined || rawAssetId === null
+				|| String(rawAssetId).length === 0))
+			rawAssetId = attachment.id
+		const assetId = String(rawAssetId === undefined || rawAssetId === null ? "" : rawAssetId).trim()
+		if (assetId.length === 0)
+			return false
+		uiCommands.downloadChatAttachment(assetId,
+			String(attachment.fileName || attachment.name || ""))
+		return true
+	}
+
+	function attachmentKindLabel(kind, mime) {
+		const normalizedKind = String(kind || "").trim().toLowerCase()
+		const normalizedMime = String(mime || "").trim().toLowerCase()
+		if (normalizedKind === "image" || normalizedMime.indexOf("image/") === 0)
+			return qsTr("Image")
+		if (normalizedKind === "video" || normalizedMime.indexOf("video/") === 0)
+			return qsTr("Video")
+		if (normalizedKind === "audio" || normalizedMime.indexOf("audio/") === 0)
+			return qsTr("Audio")
+		if (normalizedKind === "document")
+			return qsTr("Document")
+		return qsTr("File")
+	}
+
+	function formatAttachmentByteSize(value) {
+		let bytes = Number(value)
+		if (!isFinite(bytes) || bytes <= 0)
+			return ""
+		const units = [qsTr("B"), qsTr("KB"), qsTr("MB"), qsTr("GB")]
+		let unit = 0
+		while (bytes >= 1024 && unit < units.length - 1) {
+			bytes /= 1024
+			++unit
+		}
+		const precision = unit === 0 || bytes >= 10 ? 0 : 1
+		return bytes.toFixed(precision) + " " + units[unit]
+	}
+
+	function attachmentMetadata(kind, mime, byteSize) {
+		const parts = [attachmentKindLabel(kind, mime)]
+		const normalizedMime = String(mime || "").trim()
+		if (normalizedMime.length > 0 && normalizedMime.toLowerCase() !== "application/octet-stream")
+			parts.push(normalizedMime)
+		const size = formatAttachmentByteSize(byteSize)
+		if (size.length > 0)
+			parts.push(size)
+		return parts.join(" · ")
+	}
+
+	function localFileUrls(urls) {
+		const result = []
+		const source = urls || []
+		for (let index = 0; index < source.length; ++index) {
+			const candidate = source[index]
+			if (/^file:/i.test(String(candidate || "").trim()))
+				result.push(candidate)
+		}
+		return result
+	}
+
+	function localAttachmentUrls(urls, allowFiles) {
+		const localUrls = localFileUrls(urls)
+		if (allowFiles)
+			return localUrls
+		return localUrls.filter(url => /\.(png|jpe?g|gif|webp|bmp)$/i.test(String(url)))
+	}
+
     function clearPreviewHydrationQueue() {
         pendingPreviewHydrationIds = ({})
         pendingPreviewHydrationHighPriority = false
@@ -1881,7 +1977,8 @@ ApplicationWindow {
                                 AttachmentGallery {
                                     Layout.fillWidth: true
                                     attachments: messageDelegate.attachments || []
-                                    onAttachmentRequested: attachment => root.openAttachment(attachment)
+                                    onAttachmentRequested: attachment => root.requestAttachment(attachment)
+									onAttachmentDownloadRequested: attachment => root.downloadAttachment(attachment, false)
                                     onAttachmentRefreshRequested: root.queuePreviewHydration(messageDelegate.stableId, true)
                                 }
 								RichPreviewCard {
@@ -2146,6 +2243,60 @@ ApplicationWindow {
 						height: 1
 						color: Theme.divider
 					}
+					DropArea {
+						id: composerFileDropArea
+						objectName: "composerFileDropArea"
+						anchors.fill: parent
+						z: 100
+						enabled: activeScope.canAttachImages && composer.canSend && !composer.sending
+						onEntered: drag => {
+							if (drag.hasUrls
+								&& root.localAttachmentUrls(drag.urls, !!activeScope.canAttachFiles).length > 0)
+								drag.accept(Qt.CopyAction)
+							else
+								drag.accepted = false
+						}
+						onDropped: drop => {
+							const localUrls = drop.hasUrls
+								? root.localAttachmentUrls(drop.urls, !!activeScope.canAttachFiles) : []
+							if (localUrls.length === 0) {
+								drop.accepted = false
+								return
+							}
+							composer.addUrls(localUrls)
+							drop.accept(Qt.CopyAction)
+						}
+						Rectangle {
+							objectName: "composerFileDropOverlay"
+							anchors.fill: parent
+							anchors.margins: Theme.space2
+							visible: composerFileDropArea.containsDrag
+							radius: Theme.innerRadius
+							color: Theme.panel
+							border.color: Theme.accent
+							border.width: 2
+							Accessible.ignored: true
+							Row {
+								anchors.centerIn: parent
+								spacing: Theme.space2
+								ModernIcon {
+									anchors.verticalCenter: parent.verticalCenter
+									name: "attach"
+									size: 20
+									color: Theme.accent
+								}
+								Label {
+									anchors.verticalCenter: parent.verticalCenter
+									textFormat: Text.PlainText
+									text: activeScope.canAttachFiles
+										? qsTr("Drop files to attach") : qsTr("Drop images to attach")
+									color: Theme.textStrong
+									font.pixelSize: Theme.fontBody
+									font.weight: Font.DemiBold
+								}
+							}
+						}
+					}
                     RowLayout {
 						anchors.top: parent.top
 						anchors.bottom: parent.bottom
@@ -2255,20 +2406,59 @@ ApplicationWindow {
                                     spacing: 6
                                     model: composer.attachments
                                     delegate: Rectangle {
+										id: draftAttachment
                                         required property string stableId
                                         required property string thumbnailUrl
                                         required property string fileName
+										required property string kind
+										required property string mime
+										required property var byteSize
                                         required property string status
 										required property real progress
 										required property string error
-										width: Math.min(150, Math.max(112, attachmentStrip.width - 4))
+										readonly property bool imageDraft: String(kind).toLowerCase() === "image"
+											|| String(mime).toLowerCase().indexOf("image/") === 0
+										readonly property bool mediaDraft: String(kind).toLowerCase() === "video"
+											|| String(kind).toLowerCase() === "audio"
+											|| /^(video|audio)\//i.test(String(mime))
+										readonly property string metadataText: root.attachmentMetadata(kind, mime, byteSize)
+										width: Math.min(210, Math.max(156, attachmentStrip.width - 4))
 										height: 48; radius: 7; color: Theme.strip; border.color: Theme.divider
                                         RowLayout { anchors.fill: parent; anchors.margins: 4
-                                            Image { Layout.preferredWidth: 38; Layout.preferredHeight: 38; source: root.safeRenderImageSource(thumbnailUrl); asynchronous: true; cache: false; fillMode: Image.PreserveAspectCrop }
+											Rectangle {
+												Layout.preferredWidth: 38
+												Layout.preferredHeight: 38
+												radius: 5
+												color: Theme.panel
+												clip: true
+												ModernIcon {
+													anchors.centerIn: parent
+													name: draftAttachment.mediaDraft ? "play" : "attach"
+													size: 18
+													color: Theme.textMuted
+												}
+												Image {
+													anchors.fill: parent
+													source: draftAttachment.imageDraft
+														? root.safeRenderImageSource(draftAttachment.thumbnailUrl) : ""
+													asynchronous: true
+													cache: false
+													fillMode: Image.PreserveAspectCrop
+												}
+											}
 											ColumnLayout {
 												Layout.fillWidth: true
 												Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: fileName; color: Theme.textMain; elide: Text.ElideMiddle; font.pixelSize: 9 }
-												Label { Layout.fillWidth: true; textFormat: Text.PlainText; visible: status !== "ready"; text: error || status; color: status === "failed" ? Theme.danger : Theme.textMuted; elide: Text.ElideRight; font.pixelSize: 8 }
+												Label {
+													id: draftAttachmentMetadata
+													Layout.fillWidth: true
+													textFormat: Text.PlainText
+													visible: text.length > 0
+													text: status !== "ready" ? (error || status) : draftAttachment.metadataText
+													color: status === "failed" ? Theme.danger : Theme.textMuted
+													elide: Text.ElideRight
+													font.pixelSize: 8
+												}
 											}
 											ModernIconButton { dense: true; visible: status === "failed"; iconName: "retry"; onClicked: composer.retryAttachment(stableId); Accessible.name: qsTr("Retry %1").arg(fileName) }
 											ModernIconButton { dense: true; iconName: "close"; onClicked: composer.removeAttachment(stableId); Accessible.name: qsTr("Remove %1").arg(fileName) }
@@ -2329,6 +2519,19 @@ ApplicationWindow {
 								Accessible.focused: activeFocus
                                 background: null
                                 wrapMode: TextEdit.Wrap
+								Keys.priority: Keys.BeforeItem
+								Keys.onShortcutOverride: event => {
+									if (event.matches(StandardKey.Paste))
+										event.accepted = true
+								}
+								Keys.onPressed: event => {
+									if (!event.matches(StandardKey.Paste))
+										return
+									const attached = activeScope.canAttachImages && composer.pasteFromClipboard()
+									if (!attached)
+										composerInput.paste()
+									event.accepted = true
+								}
                                 Keys.onReturnPressed: event => {
                                     if (!(event.modifiers & Qt.ShiftModifier) && (text.trim().length > 0 || composer.attachments.count > 0)) {
                                         composer.send()

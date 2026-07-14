@@ -56,12 +56,15 @@ void PersistentChatGateway::requestOlder(MumbleProto::ChatScope scope, unsigned 
 
 void PersistentChatGateway::send(MumbleProto::ChatScope scope, unsigned int scopeID, const QString &body,
 								 MumbleProto::ChatBodyFormat bodyFormat,
-								 std::optional< unsigned int > replyToMessageID) {
+								 std::optional< unsigned int > replyToMessageID,
+								 const QList< unsigned int > &attachmentAssetIDs,
+								 const QStringList &attachmentFileNames) {
 	if (!isReady()) {
 		return;
 	}
 
-	m_serverHandler->sendChatMessage(scope, scopeID, body, bodyFormat, replyToMessageID);
+	m_serverHandler->sendChatMessage(scope, scopeID, body, bodyFormat, replyToMessageID, attachmentAssetIDs,
+								 attachmentFileNames);
 }
 
 void PersistentChatGateway::toggleReaction(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int threadID,

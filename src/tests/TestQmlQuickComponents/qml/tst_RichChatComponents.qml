@@ -66,6 +66,12 @@ TestCase {
     }
 
 	SignalSpy {
+		id: attachmentDownloadSpy
+		target: attachmentLoader.item
+		signalName: "attachmentDownloadRequested"
+	}
+
+	SignalSpy {
 		id: linkSpy
 		target: bodyLoader.item
 		signalName: "linkRequested"
@@ -124,6 +130,7 @@ TestCase {
             return bodyLoader.item !== null && previewLoader.item !== null && attachmentLoader.item !== null
         })
         attachmentSpy.clear()
+		attachmentDownloadSpy.clear()
         directMediaSpy.clear()
         externalOpenSpy.clear()
         imageOpenSpy.clear()
@@ -1050,6 +1057,45 @@ TestCase {
 		action.forceActiveFocus()
 		tryCompare(action, "activeFocus", true)
 		verify(tile.border.width > 1)
+	}
+
+	function test_attachment_loading_state_and_original_download_action() {
+		const gallery = attachmentLoader.item
+		gallery.attachments = [{
+			"id": "asset:42",
+			"assetId": "42",
+			"kind": "image",
+			"mime": "image/png",
+			"fileName": "photo.png",
+			"state": "loading"
+		}]
+		const busy = findChild(gallery, "attachmentBusyIndicator_asset:42")
+		const error = findChild(gallery, "attachmentError_asset:42")
+		const action = findChild(gallery, "attachmentAction_asset:42")
+		const download = findChild(gallery, "attachmentDownload_asset:42")
+		verify(busy !== null && error !== null && action !== null && download !== null)
+		tryCompare(busy, "visible", true)
+		compare(error.visible, false)
+		compare(action.enabled, false)
+		compare(download.visible, true)
+
+		gallery.attachments = [{
+			"id": "asset:42",
+			"assetId": "42",
+			"kind": "image",
+			"mime": "image/png",
+			"fileName": "photo.png",
+			"state": "error"
+		}]
+		const failedError = findChild(gallery, "attachmentError_asset:42")
+		const failedAction = findChild(gallery, "attachmentAction_asset:42")
+		const failedDownload = findChild(gallery, "attachmentDownload_asset:42")
+		verify(failedError !== null && failedAction !== null && failedDownload !== null)
+		tryCompare(failedError, "visible", true)
+		tryCompare(failedAction, "enabled", true)
+		mouseClick(failedDownload)
+		compare(attachmentDownloadSpy.count, 1)
+		compare(attachmentDownloadSpy.signalArguments[0][0].assetId, "42")
 	}
 
 	function test_managed_animation_unloads_when_preview_is_inactive() {

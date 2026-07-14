@@ -276,7 +276,9 @@ public:
 	void sendChannelTextMessage(unsigned int channel, const QString &message_, bool tree);
 	void sendChatMessage(MumbleProto::ChatScope scope, unsigned int scopeID, const QString &message_,
 						 MumbleProto::ChatBodyFormat bodyFormat = MumbleProto::ChatBodyFormatPlainText,
-						 std::optional< unsigned int > replyToMessageID = std::nullopt);
+						 std::optional< unsigned int > replyToMessageID = std::nullopt,
+						 const QList< unsigned int > &attachmentAssetIDs = {},
+						 const QStringList &attachmentFileNames = {});
 	void sendChatReactionToggle(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int threadID,
 								unsigned int messageID, const QString &emoji, bool active);
 	void sendChatMessageDelete(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int threadID,

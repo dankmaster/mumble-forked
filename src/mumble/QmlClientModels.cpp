@@ -9,6 +9,7 @@
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
+#include <QtCore/QFileInfo>
 #include <QtCore/QFutureWatcher>
 #include <QtCore/QMutex>
 #include <QtCore/QMutexLocker>
@@ -998,17 +999,40 @@ namespace {
 			if (attachment.isEmpty()) continue;
 			const QString source = safeImageSource(attachment.value(QStringLiteral("url")));
 			const QString thumbnail = safeImageSource(attachment.value(QStringLiteral("thumbnailUrl")));
-			if (source.isEmpty() && thumbnail.isEmpty()) continue;
+			const QVariant rawAssetID = attachment.contains(QStringLiteral("assetId"))
+				? attachment.value(QStringLiteral("assetId")) : attachment.value(QStringLiteral("assetID"));
+			bool validAssetID = false;
+			const qulonglong assetID = rawAssetID.toString().trimmed().toULongLong(&validAssetID);
+			validAssetID = validAssetID && assetID > 0
+				&& assetID <= std::numeric_limits< unsigned int >::max();
+			if (source.isEmpty() && thumbnail.isEmpty() && !validAssetID) continue;
+			QString kind = attachment.value(QStringLiteral("kind")).toString().trimmed().toLower().left(64);
+			const QString mime = attachment.value(QStringLiteral("mime")).toString().trimmed().toLower().left(128);
+			if (kind.isEmpty()) {
+				kind = mime.startsWith(QLatin1String("image/")) ? QStringLiteral("image")
+					 : mime.startsWith(QLatin1String("video/")) ? QStringLiteral("video")
+					 : mime.startsWith(QLatin1String("audio/")) ? QStringLiteral("audio")
+					 : QStringLiteral("file");
+			}
+			const QString fileName = attachment.value(
+				QStringLiteral("fileName"), attachment.value(QStringLiteral("name"))).toString().left(1024);
 			QVariantMap item {
-				{ QStringLiteral("id"), attachment.value(QStringLiteral("id")).toString().left(512) },
-				{ QStringLiteral("kind"), attachment.value(QStringLiteral("kind"), QStringLiteral("image")).toString().left(64) },
-				{ QStringLiteral("name"), attachment.value(QStringLiteral("name")).toString().left(1024) },
-				{ QStringLiteral("mime"), attachment.value(QStringLiteral("mime")).toString().left(128) },
+				{ QStringLiteral("id"), attachment.value(QStringLiteral("id"), rawAssetID).toString().left(512) },
+				{ QStringLiteral("kind"), kind },
+				{ QStringLiteral("name"), fileName },
+				{ QStringLiteral("fileName"), fileName },
+				{ QStringLiteral("mime"), mime },
 				{ QStringLiteral("alt"), attachment.value(QStringLiteral("alt")).toString().left(4096) },
 				{ QStringLiteral("url"), source },
 				{ QStringLiteral("thumbnailUrl"), thumbnail.isEmpty() ? source : thumbnail },
 				{ QStringLiteral("state"), attachment.value(QStringLiteral("state"), QStringLiteral("ready")).toString().left(64) }
 			};
+			if (validAssetID) item.insert(QStringLiteral("assetId"), QVariant::fromValue(assetID));
+			if (attachment.contains(QStringLiteral("byteSize"))) {
+				item.insert(QStringLiteral("byteSize"), attachment.value(QStringLiteral("byteSize")).toULongLong());
+			} else if (attachment.contains(QStringLiteral("size"))) {
+				item.insert(QStringLiteral("byteSize"), attachment.value(QStringLiteral("size")).toULongLong());
+			}
 			if (attachment.contains(QStringLiteral("width"))) item.insert(QStringLiteral("width"), attachment.value(QStringLiteral("width")).toInt());
 			if (attachment.contains(QStringLiteral("height"))) item.insert(QStringLiteral("height"), attachment.value(QStringLiteral("height")).toInt());
 			normalized.push_back(item);
@@ -3117,6 +3141,12 @@ void UiCommandController::requestPreviewHydration(const QString &scopeToken, con
 }
 void UiCommandController::cancelPendingReply() { emit pendingReplyCancelRequested(); }
 void UiCommandController::chooseAttachment() { emit attachmentChooseRequested(); }
+void UiCommandController::downloadChatAttachment(const QString &assetId, const QString &fileName) {
+	bool valid = false;
+	const qulonglong parsed = assetId.trimmed().toULongLong(&valid);
+	if (!valid || parsed == 0 || parsed > std::numeric_limits< unsigned int >::max()) return;
+	emit chatAttachmentDownloadRequested(static_cast< unsigned int >(parsed), QFileInfo(fileName).fileName().left(255));
+}
 void UiCommandController::replyToMessage(const QString &messageId) {
 	const QString id = messageId.trimmed();
 	if (!id.isEmpty()) emit messageReplyRequested(id);

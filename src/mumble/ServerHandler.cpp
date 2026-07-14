@@ -1534,7 +1534,9 @@ void ServerHandler::sendChannelTextMessage(unsigned int channel, const QString &
 
 void ServerHandler::sendChatMessage(MumbleProto::ChatScope scope, unsigned int scopeID, const QString &message_,
 									MumbleProto::ChatBodyFormat bodyFormat,
-									std::optional< unsigned int > replyToMessageID) {
+									std::optional< unsigned int > replyToMessageID,
+									const QList< unsigned int > &attachmentAssetIDs,
+									const QStringList &attachmentFileNames) {
 	if (!serverAllowsAdvertisedChatFeature(MumbleProto::ChatFeaturePersistentHistory)) {
 		return;
 	}
@@ -1551,6 +1553,13 @@ void ServerHandler::sendChatMessage(MumbleProto::ChatScope scope, unsigned int s
 	message.set_body_format(bodyFormat);
 	if (replyToMessageID) {
 		message.set_reply_to_message_id(replyToMessageID.value());
+	}
+	for (qsizetype index = 0; index < attachmentAssetIDs.size(); ++index) {
+		const unsigned int assetID = attachmentAssetIDs.at(index);
+		if (assetID == 0) continue;
+		message.add_attachment_asset_ids(assetID);
+		message.add_attachment_filenames(
+			index < attachmentFileNames.size() ? u8(attachmentFileNames.at(index)) : std::string());
 	}
 	sendMessage(message);
 }

@@ -35,7 +35,9 @@ public:
 	void requestOlder(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int beforeMessageID);
 	void send(MumbleProto::ChatScope scope, unsigned int scopeID, const QString &body,
 			  MumbleProto::ChatBodyFormat bodyFormat = MumbleProto::ChatBodyFormatPlainText,
-			  std::optional< unsigned int > replyToMessageID = std::nullopt);
+			  std::optional< unsigned int > replyToMessageID = std::nullopt,
+			  const QList< unsigned int > &attachmentAssetIDs = {},
+			  const QStringList &attachmentFileNames = {});
 	void toggleReaction(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int threadID,
 						unsigned int messageID, const QString &emoji, bool active);
 	void deleteMessage(MumbleProto::ChatScope scope, unsigned int scopeID, unsigned int threadID,

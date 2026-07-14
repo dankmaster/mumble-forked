@@ -115,6 +115,8 @@ public:
 	QString qsServerDisplayName;
 	QString qsServerMonogram;
 	QByteArray qbaServerImage;
+	quint64 uiChatAssetMaxBytes;
+	unsigned int uiChatAttachmentLimit;
 	unsigned int uiMessageLength;
 	unsigned int uiImageLength;
 	unsigned int uiMaxUsers;

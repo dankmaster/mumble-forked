@@ -156,6 +156,8 @@ Global::Global(const QString &qsConfigPath) {
 	qsServerDisplayName.clear();
 	qsServerMonogram.clear();
 	qbaServerImage.clear();
+	uiChatAssetMaxBytes          = 25ULL * 1024ULL * 1024ULL;
+	uiChatAttachmentLimit       = 4;
 	uiMessageLength             = 5000;
 	uiImageLength               = 131072;
 	uiMaxUsers                  = 0;

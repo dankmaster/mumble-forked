@@ -912,6 +912,7 @@ public:
 									  bool highPriority = false);
 	Q_INVOKABLE void cancelPendingReply();
 	Q_INVOKABLE void chooseAttachment();
+	Q_INVOKABLE void downloadChatAttachment(const QString &assetId, const QString &fileName);
 	Q_INVOKABLE void replyToMessage(const QString &messageId);
 	Q_INVOKABLE void retryMessage(const QString &messageId);
 	Q_INVOKABLE void deleteMessage(const QString &messageId);
@@ -950,6 +951,7 @@ signals:
 	void previewHydrationRequested(const QString &scopeToken, const QVariantList &messageIds, bool highPriority);
 	void pendingReplyCancelRequested();
 	void attachmentChooseRequested();
+	void chatAttachmentDownloadRequested(unsigned int assetId, const QString &fileName);
 	void messageReplyRequested(const QString &messageId);
 	void messageRetryRequested(const QString &messageId);
 	void messageDeleteRequested(const QString &messageId);

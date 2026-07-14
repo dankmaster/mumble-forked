@@ -10,8 +10,10 @@
 #include "AudioInput.h"
 #include "Channel.h"
 #include "ChatFeature.h"
+#include "ChatAttachmentUploader.h"
 #include "ChatPerfTrace.h"
 #include "Connection.h"
+#include "ComposerController.h"
 #include "Database.h"
 #include "FeedbackReport.h"
 #include "ForkFeature.h"
@@ -22,6 +24,7 @@
 #include "ChannelListenerManager.h"
 #include "PluginManager.h"
 #include "QmlClientModels.h"
+#include "QmlImageProvider.h"
 #include "QmlShellHost.h"
 #include "ProtoUtils.h"
 #include "ScreenShare.h"
@@ -36,8 +39,13 @@
 #include "Global.h"
 
 #include <algorithm>
+#include <utility>
+#include <QBuffer>
 #include <QDateTime>
+#include <QCryptographicHash>
 #include <QFile>
+#include <QSaveFile>
+#include <QImageReader>
 #include <QTextDocumentFragment>
 #include <QTextStream>
 #include <QUrl>
@@ -330,6 +338,14 @@ void MainWindow::msgServerConfig(const MumbleProto::ServerConfig &msg) {
 		Global::get().uiMessageLength = msg.message_length();
 	if (msg.has_image_message_length())
 		Global::get().uiImageLength = msg.image_message_length();
+	if (msg.has_chat_asset_max_bytes())
+		Global::get().uiChatAssetMaxBytes = msg.chat_asset_max_bytes();
+	if (msg.has_chat_attachment_limit())
+		Global::get().uiChatAttachmentLimit = msg.chat_attachment_limit();
+	if (m_qmlShellHost && (msg.has_chat_asset_max_bytes() || msg.has_chat_attachment_limit())) {
+		m_qmlShellHost->composerController()->setAttachmentLimits(
+			static_cast< int >(Global::get().uiChatAttachmentLimit), Global::get().uiChatAssetMaxBytes);
+	}
 	if (msg.has_max_users())
 		Global::get().uiMaxUsers = msg.max_users();
 	if (msg.has_recording_allowed()) {
@@ -1456,7 +1472,8 @@ void MainWindow::msgVersion(const MumbleProto::Version &msg) {
 		Global::get().qlSupportedChatFeatures = Mumble::ChatFeatures::featuresFromVersion(msg);
 		if (Mumble::ChatFeatures::contains(Global::get().qlSupportedChatFeatures,
 										   MumbleProto::ChatFeaturePersistentHistory)) {
-			Global::get().uiPersistentChatProtocolVersion = Mumble::ChatFeatures::CURRENT_PROTOCOL_VERSION;
+			Global::get().uiPersistentChatProtocolVersion = msg.has_persistent_chat_protocol_version()
+				? msg.persistent_chat_protocol_version() : 1U;
 			markPersistentChatAvailable(false);
 			m_modernLayoutCompatibleServer = true;
 		}
@@ -1671,7 +1688,10 @@ void MainWindow::msgChatAssetUploadChunk(const MumbleProto::ChatAssetUploadChunk
 void MainWindow::msgChatAssetUploadCommit(const MumbleProto::ChatAssetUploadCommit &) {
 }
 
-void MainWindow::msgChatAssetState(const MumbleProto::ChatAssetState &) {
+void MainWindow::msgChatAssetState(const MumbleProto::ChatAssetState &msg) {
+	if (m_chatAttachmentUploader) {
+		m_chatAttachmentUploader->handleState(msg);
+	}
 }
 
 void MainWindow::msgChatAssetRequest(const MumbleProto::ChatAssetRequest &) {
@@ -1685,16 +1705,37 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 
 	auto it = m_persistentChatAssetDownloads.find(msg.asset_id());
 	if (it == m_persistentChatAssetDownloads.end()) {
-		PersistentChatAssetDownload download;
-		download.assetID = msg.asset_id();
-		it = m_persistentChatAssetDownloads.insert(msg.asset_id(), download);
+		// Asset chunks are accepted only for transfers initiated by this client.
+		return;
 	}
+	it->requestPending = false;
+	const quint64 configuredLimit = Global::get().uiChatAssetMaxBytes > 0
+		? Global::get().uiChatAssetMaxBytes : 25ULL * 1024ULL * 1024ULL;
+	const quint64 transferLimit = it->maximumBytes > 0 ? it->maximumBytes : configuredLimit;
+	const quint64 memoryLimit = std::min< quint64 >(transferLimit, 64ULL * 1024ULL * 1024ULL);
+	const auto rejectDownload = [this, &it](const QString &reason) {
+		const bool userRequested = !it->savePaths.isEmpty();
+		const QSet< unsigned int > attachmentAssetIDs = it->attachmentAssetIDs;
+		const QSet< QString > attachmentMessageKeys = it->attachmentMessageKeys;
+		m_persistentChatAssetDownloads.erase(it);
+		m_persistentChatAttachmentPreviewFailures.unite(attachmentAssetIDs);
+		publishPersistentChatAttachmentImageUpdate(attachmentMessageKeys);
+		if (userRequested) {
+			publishModernToast(QStringLiteral("error"), tr("Attachment download failed"), reason);
+		}
+	};
 
 	if (msg.has_offset() && msg.offset() != static_cast< quint64 >(it->bytes.size())) {
+		rejectDownload(tr("The server returned attachment data out of order."));
 		return;
 	}
 
 	if (msg.has_total_size()) {
+		if (msg.total_size() == 0 || msg.total_size() > memoryLimit
+			|| (it->totalSize > 0 && it->totalSize != msg.total_size())) {
+			rejectDownload(tr("The attachment size is invalid or exceeds the download limit."));
+			return;
+		}
 		it->totalSize = msg.total_size();
 	}
 	if (msg.has_mime()) {
@@ -1704,6 +1745,19 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 		it->kind = msg.kind();
 	}
 	if (msg.has_data() && !msg.data().empty()) {
+		const quint64 incomingBytes = static_cast< quint64 >(msg.data().size());
+		const quint64 accumulatedBytes = static_cast< quint64 >(it->bytes.size());
+		quint64 globallyBufferedBytes = 0;
+		for (auto downloadIt = m_persistentChatAssetDownloads.cbegin();
+			 downloadIt != m_persistentChatAssetDownloads.cend(); ++downloadIt) {
+			globallyBufferedBytes += static_cast< quint64 >(downloadIt->bytes.size());
+		}
+		if (incomingBytes > memoryLimit || accumulatedBytes > memoryLimit - incomingBytes
+			|| globallyBufferedBytes > 64ULL * 1024ULL * 1024ULL - incomingBytes
+			|| (it->totalSize > 0 && accumulatedBytes + incomingBytes > it->totalSize)) {
+			rejectDownload(tr("The server returned more attachment data than expected."));
+			return;
+		}
 		it->bytes.append(msg.data().data(), static_cast< int >(msg.data().size()));
 	}
 	it->nextOffset = static_cast< quint64 >(it->bytes.size());
@@ -1711,26 +1765,77 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 	const bool complete = (msg.has_eof() && msg.eof())
 						  || (it->totalSize > 0 && static_cast< quint64 >(it->bytes.size()) >= it->totalSize);
 	if (!complete) {
+		if (!msg.has_data() || msg.data().empty()) {
+			rejectDownload(tr("The attachment server returned no data for the requested range."));
+			return;
+		}
 		if (Global::get().sh && Global::get().sh->isRunning()) {
 			MumbleProto::ChatAssetRequest request;
 			request.set_asset_id(msg.asset_id());
 			request.set_offset(it->nextOffset);
 			request.set_max_bytes(262144);
+			it->requestPending = true;
 			Global::get().sh->sendMessage(request);
+			armPersistentChatAssetDownloadTimeout(msg.asset_id());
 		}
+		return;
+	}
+	if (it->totalSize > 0 && static_cast< quint64 >(it->bytes.size()) != it->totalSize) {
+		rejectDownload(tr("The attachment download ended before all bytes were received."));
 		return;
 	}
 
 	mumble::chatperf::recordValue("chat.asset_chunk.bytes", it->bytes.size());
 	mumble::chatperf::recordValue("chat.asset_chunk.preview_keys", it->previewKeys.size());
 	QImage image;
-	{
+	const bool imageConsumer = !it->attachmentAssetIDs.isEmpty() || !it->previewKeys.isEmpty();
+	if (imageConsumer && it->mime.startsWith(QLatin1String("image/"))) {
 		mumble::chatperf::ScopedDuration decodeTrace("chat.asset_chunk.decode");
-		image.loadFromData(it->bytes);
+		QBuffer buffer(&it->bytes);
+		buffer.open(QIODevice::ReadOnly);
+		QImageReader reader(&buffer);
+		const QSize sourceSize = reader.size();
+		constexpr qint64 maximumPixels = 40LL * 1024LL * 1024LL;
+		if (sourceSize.isValid() && sourceSize.width() > 0 && sourceSize.height() > 0
+			&& sourceSize.width() <= 16384 && sourceSize.height() <= 16384
+			&& static_cast< qint64 >(sourceSize.width()) * static_cast< qint64 >(sourceSize.height())
+				   <= maximumPixels) {
+			image = reader.read();
+		}
 	}
 	const bool playableMedia = isPersistentChatPlayableMediaMime(it->mime);
 	const QString mediaDataUrl =
 		playableMedia ? persistentChatPlayableMediaDataUrl(it->mime, it->bytes) : QString();
+	if (!it->attachmentAssetIDs.isEmpty() && !image.isNull() && m_qmlShellHost
+		&& m_qmlShellHost->imagePipeline()) {
+		const QString stableKey = QStringLiteral("chat-attachment:%1:%2")
+			.arg(msg.asset_id())
+			.arg(QString::fromLatin1(QCryptographicHash::hash(it->bytes, QCryptographicHash::Sha256).toHex()));
+		const QString providerUrl = m_qmlShellHost->imagePipeline()->registerImage(image, stableKey);
+		if (!providerUrl.isEmpty()) {
+			for (const unsigned int attachmentAssetID : std::as_const(it->attachmentAssetIDs)) {
+				m_persistentChatAttachmentProviderUrls.insert(attachmentAssetID, providerUrl);
+				m_persistentChatAttachmentPreviewFailures.remove(attachmentAssetID);
+			}
+		}
+	}
+	if (!it->attachmentAssetIDs.isEmpty()) {
+		for (const unsigned int attachmentAssetID : std::as_const(it->attachmentAssetIDs)) {
+			if (!m_persistentChatAttachmentProviderUrls.contains(attachmentAssetID)) {
+				m_persistentChatAttachmentPreviewFailures.insert(attachmentAssetID);
+			}
+		}
+	}
+	int savedCount = 0;
+	for (const QString &savePath : std::as_const(it->savePaths)) {
+		QSaveFile destination(savePath);
+		if (!destination.open(QIODevice::WriteOnly)
+			|| destination.write(it->bytes) != it->bytes.size() || !destination.commit()) {
+			destination.cancelWriting();
+			continue;
+		}
+		++savedCount;
+	}
 	for (const QString &previewKey : it->previewKeys) {
 		auto previewIt = m_persistentChatPreviews.find(previewKey);
 		if (previewIt == m_persistentChatPreviews.end()) {
@@ -1766,7 +1871,21 @@ void MainWindow::msgChatAssetChunk(const MumbleProto::ChatAssetChunk &msg) {
 		storePersistentChatPreviewDiskCache(previewKey);
 	}
 
+	const int requestedSaveCount = it->savePaths.size();
+	const QSet< QString > attachmentMessageKeys = it->attachmentMessageKeys;
 	m_persistentChatAssetDownloads.erase(it);
+	if (!attachmentMessageKeys.isEmpty()) {
+		publishPersistentChatAttachmentImageUpdate(attachmentMessageKeys);
+	}
+	if (requestedSaveCount > 0) {
+		if (savedCount == requestedSaveCount) {
+			publishModernToast(QStringLiteral("success"), tr("Attachment saved"),
+				tr("The chat attachment was saved successfully."));
+		} else {
+			publishModernToast(QStringLiteral("error"), tr("Attachment download failed"),
+				tr("The attachment could not be written to the selected location."));
+		}
+	}
 }
 
 void MainWindow::msgChatEmbedState(const MumbleProto::ChatEmbedState &msg) {

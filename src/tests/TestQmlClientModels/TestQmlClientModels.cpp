@@ -1185,22 +1185,36 @@ void TestQmlClientModels::chatTimelineNormalizesPreviewAndAttachments() {
 		{ QStringLiteral("url"), QStringLiteral("https://cdn.example.com/private-image.png") },
 		{ QStringLiteral("thumbnailUrl"), QStringLiteral("data:image/png;base64,AAAA") }
 	};
+	const QVariantMap fileAttachment {
+		{ QStringLiteral("assetId"), 77 },
+		{ QStringLiteral("kind"), QStringLiteral("document") },
+		{ QStringLiteral("mime"), QStringLiteral("application/pdf") },
+		{ QStringLiteral("fileName"), QStringLiteral("notes.pdf") },
+		{ QStringLiteral("byteSize"), 4096 }
+	};
 	QVERIFY(model.upsertMessage(
 		{ { QStringLiteral("messageKey"), QStringLiteral("preview:1") },
 		  { QStringLiteral("previewStub"),
 			QVariantMap { { QStringLiteral("url"), QStringLiteral("https://example.com/card") },
 						  { QStringLiteral("host"), QStringLiteral("example.com") },
 						  { QStringLiteral("loadingLabel"), QStringLiteral("Load preview") } } },
-		  { QStringLiteral("attachments"), QVariantList { validAttachment, invalidAttachment } } }));
+		  { QStringLiteral("attachments"),
+			QVariantList { validAttachment, invalidAttachment, fileAttachment } } }));
 
 	QVariantMap row = model.get(0);
 	QVariantMap preview = row.value(QStringLiteral("preview")).toMap();
 	QCOMPARE(preview.value(QStringLiteral("state")).toString(), QStringLiteral("loading"));
 	QVERIFY(preview.value(QStringLiteral("loading")).toBool());
 	const QVariantList attachments = row.value(QStringLiteral("attachments")).toList();
-	QCOMPARE(attachments.size(), 1);
+	QCOMPARE(attachments.size(), 2);
 	QCOMPARE(attachments.first().toMap().value(QStringLiteral("url")).toString(),
 			 QStringLiteral("image://mumble/asset:1?g=1"));
+	const QVariantMap normalizedFile = attachments.at(1).toMap();
+	QCOMPARE(normalizedFile.value(QStringLiteral("assetId")).toULongLong(), 77ULL);
+	QCOMPARE(normalizedFile.value(QStringLiteral("kind")).toString(), QStringLiteral("document"));
+	QCOMPARE(normalizedFile.value(QStringLiteral("fileName")).toString(), QStringLiteral("notes.pdf"));
+	QCOMPARE(normalizedFile.value(QStringLiteral("byteSize")).toULongLong(), 4096ULL);
+	QVERIFY(normalizedFile.value(QStringLiteral("url")).toString().isEmpty());
 
 	QVERIFY(model.upsertMessage(
 		{ { QStringLiteral("messageKey"), QStringLiteral("preview:1") },
@@ -2077,6 +2091,7 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	QSignalSpy reactionSpy(&commands, &UiCommandController::messageReactionToggleRequested);
 	QSignalSpy cancelReplySpy(&commands, &UiCommandController::pendingReplyCancelRequested);
 	QSignalSpy attachmentSpy(&commands, &UiCommandController::attachmentChooseRequested);
+	QSignalSpy attachmentDownloadSpy(&commands, &UiCommandController::chatAttachmentDownloadRequested);
 	QSignalSpy olderSpy(&commands, &UiCommandController::olderMessagesRequested);
 	commands.selectScope(QStringLiteral("   "));
 	commands.selectScopeFromRail(QStringLiteral("   "), QStringLiteral("voice"));
@@ -2089,6 +2104,8 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	commands.retryMessage(QStringLiteral("  "));
 	commands.deleteMessage(QString());
 	commands.toggleMessageReaction(QStringLiteral("message:1"), QString());
+	commands.downloadChatAttachment(QStringLiteral("0"), QStringLiteral("ignored.bin"));
+	commands.downloadChatAttachment(QStringLiteral("4294967296"), QStringLiteral("ignored.bin"));
 	QCOMPARE(scopeSpy.count(), 0);
 	QCOMPARE(railScopeSpy.count(), 0);
 	QCOMPARE(actionSpy.count(), 0);
@@ -2098,6 +2115,7 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	QCOMPARE(retrySpy.count(), 0);
 	QCOMPARE(deleteSpy.count(), 0);
 	QCOMPARE(reactionSpy.count(), 0);
+	QCOMPARE(attachmentDownloadSpy.count(), 0);
 	commands.selectScope(QStringLiteral(" channel:42 "));
 	commands.selectScopeFromRail(QStringLiteral(" channel:42 "), QStringLiteral(" Voice "));
 	commands.invokeAction(QStringLiteral(" qaAudioMute "));
@@ -2109,6 +2127,7 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	commands.toggleMessageReaction(QStringLiteral(" message:4 "), QStringLiteral(" 👍 "));
 	commands.cancelPendingReply();
 	commands.chooseAttachment();
+	commands.downloadChatAttachment(QStringLiteral(" 77 "), QStringLiteral("folder/notes.pdf"));
 	commands.requestOlderMessages();
 	QCOMPARE(scopeSpy.takeFirst().at(0).toString(), QStringLiteral("channel:42"));
 	const QList< QVariant > railSelection = railScopeSpy.takeFirst();
@@ -2125,6 +2144,9 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	QCOMPARE(reaction.at(1).toString(), QStringLiteral("👍"));
 	QCOMPARE(cancelReplySpy.count(), 1);
 	QCOMPARE(attachmentSpy.count(), 1);
+	QCOMPARE(attachmentDownloadSpy.count(), 1);
+	QCOMPARE(attachmentDownloadSpy.first().at(0).toUInt(), 77U);
+	QCOMPARE(attachmentDownloadSpy.first().at(1).toString(), QStringLiteral("notes.pdf"));
 	QCOMPARE(olderSpy.count(), 1);
 }
 

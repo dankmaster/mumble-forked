@@ -25,6 +25,7 @@
 #include "../SignalCurry.h"
 #include "ChannelListenerManager.h"
 #include "ClientActionRegistry.h"
+#include "ChatAttachmentUploader.h"
 #include "ComposerController.h"
 #include "ChatFeature.h"
 #include "ChatPerfTrace.h"
@@ -12426,16 +12427,110 @@ void MainWindow::applyShellLayout() {
 						}
 					});
 			ComposerController *composer = m_qmlShellHost->composerController();
+			composer->setAttachmentLimits(static_cast< int >(Global::get().uiChatAttachmentLimit),
+									 Global::get().uiChatAssetMaxBytes);
 			connect(composer, &ComposerController::sendFailed, this,
 					[this](const QString &message) { publishModernToast(QStringLiteral("error"), tr("Send failed"), message); });
+			connect(composer, &ComposerController::attachmentRejected, this,
+					[this](const QString &message) {
+						publishModernToast(QStringLiteral("warning"), tr("Attachment not added"), message);
+					});
 			connect(composer, &ComposerController::sendRequested, this,
-					[this, composer](const QString &text, const QStringList &localPaths) {
-						if (localPaths.isEmpty()) {
+					[this, composer](const QString &text,
+									 const QList< Mumble::ChatAttachments::Source > &attachments) {
+						if (attachments.isEmpty()) {
 							composer->finishSend(sendModernShellMessage(text));
 							return;
 						}
 
 						const PersistentChatTarget target = currentPersistentChatTarget();
+						const bool nativeAttachments = target.valid && !target.readOnly && !target.directMessage
+							&& !target.ephemeralTextPath && m_persistentChatGateway && m_persistentChatGateway->isReady()
+							&& Global::get().sh
+							&& Mumble::ChatFeatures::contains(Global::get().qlSupportedChatFeatures,
+													 MumbleProto::ChatFeatureAttachments);
+						if (nativeAttachments) {
+							if (m_chatAttachmentUploader) {
+								composer->finishSend(false, tr("Another attachment upload is still in progress."));
+								return;
+							}
+
+							ChatAttachmentUploader::Transport transport;
+							transport.sendInit = [](const MumbleProto::ChatAssetUploadInit &message) {
+								if (Global::get().sh) Global::get().sh->sendMessage(message);
+							};
+							transport.sendChunk = [](const MumbleProto::ChatAssetUploadChunk &message) {
+								if (Global::get().sh) Global::get().sh->sendMessage(message);
+							};
+							transport.sendCommit = [](const MumbleProto::ChatAssetUploadCommit &message) {
+								if (Global::get().sh) Global::get().sh->sendMessage(message);
+							};
+
+							auto *uploader = new ChatAttachmentUploader(std::move(transport), this);
+							m_chatAttachmentUploader = uploader;
+							const std::optional< unsigned int > replyMessageID = m_pendingPersistentChatReply
+								? std::make_optional(m_pendingPersistentChatReply->message_id()) : std::nullopt;
+							QPointer< ComposerController > guardedComposer(composer);
+							connect(uploader, &ChatAttachmentUploader::progressChanged, this,
+									[guardedComposer](const QString &draftID, const qreal progress) {
+										if (guardedComposer) guardedComposer->setAttachmentUploadProgress(draftID, progress);
+									});
+							connect(uploader, &ChatAttachmentUploader::failed, this,
+									[this, uploader, guardedComposer](const QString &reason) {
+										if (m_chatAttachmentUploader == uploader) m_chatAttachmentUploader.clear();
+										if (guardedComposer) {
+											guardedComposer->resetAttachmentUploadProgress();
+											guardedComposer->finishSend(false, reason);
+										}
+										uploader->deleteLater();
+									});
+							connect(uploader, &ChatAttachmentUploader::completed, this,
+									[this, uploader, guardedComposer, target, text, replyMessageID](
+										const QList< unsigned int > &assetIDs, const QStringList &fileNames) {
+										const PersistentChatTarget current = currentPersistentChatTarget();
+										const bool sameTarget = current.valid == target.valid
+											&& current.directMessage == target.directMessage
+											&& current.ephemeralTextPath == target.ephemeralTextPath
+											&& current.serverLog == target.serverLog && current.scope == target.scope
+											&& current.scopeID == target.scopeID;
+										const bool canSend = sameTarget && m_persistentChatGateway
+											&& m_persistentChatGateway->isReady() && !assetIDs.isEmpty()
+											&& assetIDs.size() == fileNames.size();
+										if (canSend) {
+											QString normalizedText = text;
+											normalizedText.replace(QLatin1String("\r\n"), QLatin1String("\n"))
+												.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+											syncPersistentChatGatewayHandler();
+											m_persistentChatGateway->send(target.scope, target.scopeID, normalizedText,
+												MumbleProto::ChatBodyFormatMarkdownLite, replyMessageID, assetIDs, fileNames);
+											setPersistentChatReplyTarget(std::nullopt);
+											publishQmlActiveScopeState();
+										}
+						if (m_chatAttachmentUploader == uploader) m_chatAttachmentUploader.clear();
+						if (guardedComposer) {
+							if (!canSend) guardedComposer->resetAttachmentUploadProgress();
+							guardedComposer->finishSend(
+												canSend, canSend ? QString() : tr("The chat target changed during upload."));
+										}
+										uploader->deleteLater();
+									});
+							if (!uploader->start(attachments)) {
+								m_chatAttachmentUploader.clear();
+								uploader->deleteLater();
+								composer->finishSend(false, tr("The attachment upload could not be started."));
+							}
+							return;
+						}
+
+						QStringList localPaths;
+						for (const Mumble::ChatAttachments::Source &attachment : attachments) {
+							if (attachment.kind != Mumble::ChatAttachments::Kind::Image) {
+								composer->finishSend(false,
+									tr("This server does not support file attachments in the selected chat."));
+								return;
+							}
+							localPaths.push_back(attachment.path);
+						}
 						const std::shared_ptr< QmlImagePipeline > pipeline = m_qmlShellHost->imagePipeline();
 						const int maximumLength = static_cast< int >(Global::get().uiImageLength);
 						QPointer< MainWindow > guardedThis(this);
@@ -12479,6 +12574,8 @@ void MainWindow::applyShellLayout() {
 					&MainWindow::handleModernShellReplyCancel);
 			connect(commands, &UiCommandController::attachmentChooseRequested, this,
 					&MainWindow::openPersistentChatImagePicker);
+			connect(commands, &UiCommandController::chatAttachmentDownloadRequested, this,
+					&MainWindow::downloadPersistentChatAttachment);
 			connect(commands, &UiCommandController::messageReplyRequested, this,
 					[this](const QString &messageID) {
 						bool validID = false;
@@ -20823,12 +20920,12 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 	QString bodyText = systemMessage ? *systemText : (deletedMessage ? QString() : persistentChatMessageSourceText(message));
 	QString bodyHtml;
 	QVariantList structuredAttachments;
+	const QString messageKey = persistentChatMessageIdentityKey(message);
 	if (systemMessage) {
 		bodyHtml = systemText->toHtmlEscaped();
 	} else if (deletedMessage) {
 		bodyHtml = QString::fromLatin1("<em>%1</em>").arg(tr("[message deleted]").toHtmlEscaped());
 	} else {
-		const QString messageKey = persistentChatMessageIdentityKey(message);
 		const auto buildModernInlineDataImageReplacement =
 			[this, messageKey, &structuredAttachments](const QString &source, const QString &altText,
 											   const PersistentChatInlineDataImageInfo &info) {
@@ -20895,6 +20992,67 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 					   : persistentChatContentHtml(persistentChatMessageRawBody(message),
 												   buildModernInlineDataImageReplacement);
 		bodyHtml = persistentChatCondensedBodyHtml(bodyHtml, bodyText);
+	}
+	if (!systemMessage && !deletedMessage) {
+		for (const MumbleProto::ChatAssetRef &attachment : message.attachments()) {
+			if (!attachment.has_asset_id() || attachment.asset_id() == 0) continue;
+			QString kind;
+			switch (attachment.has_kind() ? attachment.kind() : MumbleProto::ChatAssetKindUnknown) {
+				case MumbleProto::ChatAssetKindImage: kind = QStringLiteral("image"); break;
+				case MumbleProto::ChatAssetKindVideo: kind = QStringLiteral("video"); break;
+				case MumbleProto::ChatAssetKindAudio: kind = QStringLiteral("audio"); break;
+				case MumbleProto::ChatAssetKindDocument: kind = QStringLiteral("document"); break;
+				case MumbleProto::ChatAssetKindBinary: kind = QStringLiteral("binary"); break;
+				case MumbleProto::ChatAssetKindUnknown:
+				default: kind = QStringLiteral("file"); break;
+			}
+			const QString mime = attachment.has_mime()
+				? QString::fromStdString(attachment.mime()).section(QLatin1Char(';'), 0, 0).trimmed().toLower()
+				: QStringLiteral("application/octet-stream");
+			if (kind == QLatin1String("file")) {
+				if (mime.startsWith(QLatin1String("image/"))) kind = QStringLiteral("image");
+				else if (mime.startsWith(QLatin1String("video/"))) kind = QStringLiteral("video");
+				else if (mime.startsWith(QLatin1String("audio/"))) kind = QStringLiteral("audio");
+			}
+			const QString fileName = attachment.has_filename() && !QString::fromStdString(attachment.filename()).isEmpty()
+				? QString::fromStdString(attachment.filename())
+				: tr("Attachment %1").arg(attachment.asset_id());
+			QVariantMap item {
+				{ QStringLiteral("id"), QStringLiteral("asset:%1").arg(attachment.asset_id()) },
+				{ QStringLiteral("assetId"), static_cast< qulonglong >(attachment.asset_id()) },
+				{ QStringLiteral("kind"), kind },
+				{ QStringLiteral("mime"), mime },
+				{ QStringLiteral("name"), fileName },
+				{ QStringLiteral("fileName"), fileName },
+				{ QStringLiteral("alt"), fileName },
+				{ QStringLiteral("byteSize"), static_cast< qulonglong >(attachment.byte_size()) },
+				{ QStringLiteral("state"), QStringLiteral("ready") }
+			};
+			if (attachment.has_width()) item.insert(QStringLiteral("width"), attachment.width());
+			if (attachment.has_height()) item.insert(QStringLiteral("height"), attachment.height());
+			if (kind == QLatin1String("image")) {
+				QString providerUrl = m_persistentChatAttachmentProviderUrls.value(attachment.asset_id());
+				if (!providerUrl.isEmpty() && m_qmlShellHost && m_qmlShellHost->imagePipeline()
+					&& !m_qmlShellHost->imagePipeline()->containsSource(providerUrl)) {
+					m_persistentChatAttachmentProviderUrls.remove(attachment.asset_id());
+					providerUrl.clear();
+				}
+				if (!providerUrl.isEmpty()) {
+					item.insert(QStringLiteral("url"), providerUrl);
+					item.insert(QStringLiteral("thumbnailUrl"), providerUrl);
+				} else {
+					const bool canLoadPreview = attachment.has_preview_asset_id() && attachment.preview_asset_id() > 0;
+					const bool previewFailed = m_persistentChatAttachmentPreviewFailures.contains(attachment.asset_id());
+					item.insert(QStringLiteral("state"), canLoadPreview && !previewFailed ? QStringLiteral("loading")
+																 : QStringLiteral("error"));
+					if (!fastFirstPaint && canLoadPreview && !previewFailed) {
+						ensurePersistentChatAttachmentImageDownload(
+							attachment.asset_id(), attachment.preview_asset_id(), messageKey);
+					}
+				}
+			}
+			structuredAttachments.push_back(item);
+		}
 	}
 	const std::optional< PersistentChatReplyReference > replyReference =
 		(systemMessage || deletedMessage)
@@ -21745,7 +21903,12 @@ QVariantMap MainWindow::buildQmlActiveScopeState(const PersistentChatTarget &tar
 	activeScope.insert(QStringLiteral("canDeleteMessages"), canDeletePersistentChatMessages(target, true));
 	activeScope.insert(QStringLiteral("composerPlaceholder"), composerPlaceholder);
 	activeScope.insert(QStringLiteral("composerHint"), composerHint);
-	activeScope.insert(QStringLiteral("canAttachImages"), canSendToTarget && Global::get().bAllowHTML);
+	const bool supportsNativeAttachments = !target.directMessage && !target.ephemeralTextPath
+		&& Mumble::ChatFeatures::contains(Global::get().qlSupportedChatFeatures,
+									 MumbleProto::ChatFeatureAttachments);
+	activeScope.insert(QStringLiteral("canAttachImages"),
+					   canSendToTarget && (supportsNativeAttachments || Global::get().bAllowHTML));
+	activeScope.insert(QStringLiteral("canAttachFiles"), canSendToTarget && supportsNativeAttachments);
 	activeScope.insert(QStringLiteral("emptyCopy"),
 					   target.readOnly ? tr("This conversation is read-only.")
 									   : tr("Messages will appear here once the selected room has activity."));
@@ -30960,12 +31123,120 @@ void MainWindow::ensurePersistentChatPreviewAssetDownload(unsigned int assetID, 
 			return;
 		}
 	}
+	if (it->requestPending) return;
 
 	MumbleProto::ChatAssetRequest request;
 	request.set_asset_id(assetID);
 	request.set_offset(it->nextOffset);
 	request.set_max_bytes(262144);
+	it->requestPending = true;
 	Global::get().sh->sendMessage(request);
+	armPersistentChatAssetDownloadTimeout(assetID);
+}
+
+void MainWindow::ensurePersistentChatAttachmentImageDownload(const unsigned int assetID,
+											  const unsigned int transferAssetID, const QString &messageKey) {
+	if (assetID == 0 || transferAssetID == 0 || messageKey.isEmpty()
+		|| m_persistentChatAttachmentProviderUrls.contains(assetID) || !Global::get().sh
+		|| !Global::get().sh->isRunning()) {
+		return;
+	}
+
+	auto it = m_persistentChatAssetDownloads.find(transferAssetID);
+	if (it == m_persistentChatAssetDownloads.end()) {
+		int activeAutomaticPreviews = 0;
+		for (auto downloadIt = m_persistentChatAssetDownloads.cbegin();
+			 downloadIt != m_persistentChatAssetDownloads.cend(); ++downloadIt) {
+			if (!downloadIt->attachmentAssetIDs.isEmpty() && downloadIt->savePaths.isEmpty()) {
+				++activeAutomaticPreviews;
+			}
+		}
+		if (activeAutomaticPreviews >= 4) return;
+		PersistentChatAssetDownload download;
+		download.assetID = transferAssetID;
+		download.maximumBytes = 2ULL * 1024ULL * 1024ULL;
+		download.attachmentAssetIDs.insert(assetID);
+		download.attachmentMessageKeys.insert(messageKey);
+		it = m_persistentChatAssetDownloads.insert(transferAssetID, download);
+	} else {
+		it->attachmentAssetIDs.insert(assetID);
+		it->attachmentMessageKeys.insert(messageKey);
+	}
+	if (it->requestPending) return;
+
+	MumbleProto::ChatAssetRequest request;
+	request.set_asset_id(transferAssetID);
+	request.set_offset(it->nextOffset);
+	request.set_max_bytes(262144);
+	it->requestPending = true;
+	Global::get().sh->sendMessage(request);
+	armPersistentChatAssetDownloadTimeout(transferAssetID);
+}
+
+void MainWindow::downloadPersistentChatAttachment(const unsigned int assetID, const QString &fileName) {
+	if (assetID == 0 || !Global::get().sh || !Global::get().sh->isRunning()) return;
+
+	QString safeName = QFileInfo(fileName).fileName().trimmed();
+	safeName.replace(QRegularExpression(QStringLiteral("[\\x00-\\x1f<>:\"/\\\\|?*]+")), QStringLiteral("_"));
+	if (safeName.isEmpty() || safeName == QLatin1String(".") || safeName == QLatin1String("..")) {
+		safeName = tr("attachment-%1").arg(assetID);
+	}
+	const QString downloads = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+	const QString initialPath = downloads.isEmpty() ? safeName : QDir(downloads).filePath(safeName);
+	const QString destination = QFileDialog::getSaveFileName(nullptr, tr("Save chat attachment"), initialPath,
+													   tr("All files (*)"));
+	if (destination.isEmpty()) return;
+
+	auto it = m_persistentChatAssetDownloads.find(assetID);
+	if (it == m_persistentChatAssetDownloads.end()) {
+		PersistentChatAssetDownload download;
+		download.assetID = assetID;
+		download.maximumBytes = Global::get().uiChatAssetMaxBytes;
+		download.savePaths.push_back(destination);
+		it = m_persistentChatAssetDownloads.insert(assetID, download);
+	} else if (!it->savePaths.contains(destination)) {
+		it->savePaths.push_back(destination);
+	}
+	if (it->requestPending) return;
+
+	MumbleProto::ChatAssetRequest request;
+	request.set_asset_id(assetID);
+	request.set_offset(it->nextOffset);
+	request.set_max_bytes(262144);
+	it->requestPending = true;
+	Global::get().sh->sendMessage(request);
+	armPersistentChatAssetDownloadTimeout(assetID);
+}
+
+void MainWindow::publishPersistentChatAttachmentImageUpdate(const QSet< QString > &messageKeys) {
+	if (messageKeys.isEmpty()) return;
+	for (const MumbleProto::ChatMessage &message : m_persistentChatMessages) {
+		if (!messageKeys.contains(persistentChatMessageIdentityKey(message))) continue;
+		evictModernShellMessageDtoCacheForMessage(message);
+		publishQmlChatMessage(message);
+	}
+}
+
+void MainWindow::armPersistentChatAssetDownloadTimeout(const unsigned int assetID) {
+	auto it = m_persistentChatAssetDownloads.find(assetID);
+	if (it == m_persistentChatAssetDownloads.end()) return;
+	quint64 token = ++m_persistentChatAssetDownloadTimeoutSerial;
+	if (token == 0) token = ++m_persistentChatAssetDownloadTimeoutSerial;
+	it->timeoutToken = token;
+	QTimer::singleShot(60000, this, [this, assetID, token]() {
+		auto timedOut = m_persistentChatAssetDownloads.find(assetID);
+		if (timedOut == m_persistentChatAssetDownloads.end() || timedOut->timeoutToken != token) return;
+		const bool userRequested = !timedOut->savePaths.isEmpty();
+		const QSet< unsigned int > attachmentAssetIDs = timedOut->attachmentAssetIDs;
+		const QSet< QString > attachmentMessageKeys = timedOut->attachmentMessageKeys;
+		m_persistentChatAssetDownloads.erase(timedOut);
+		m_persistentChatAttachmentPreviewFailures.unite(attachmentAssetIDs);
+		publishPersistentChatAttachmentImageUpdate(attachmentMessageKeys);
+		if (userRequested) {
+			publishModernToast(QStringLiteral("error"), tr("Attachment download failed"),
+				tr("The attachment server did not respond in time."));
+		}
+	});
 }
 
 void MainWindow::ensurePersistentChatPreviewSiteSnapshot(const QString &previewKey) {
@@ -31439,16 +31710,26 @@ bool MainWindow::attachPersistentChatImageData(const QString &dataUrl) {
 
 void MainWindow::openPersistentChatImagePicker() {
 	const PersistentChatTarget target = currentPersistentChatTarget();
-	if (!Global::get().bAllowHTML || !canSendToPersistentChatTarget(target, true)) {
+	if (!canSendToPersistentChatTarget(target, true)) {
 		return;
 	}
+	const bool supportsNativeAttachments = !target.directMessage && !target.ephemeralTextPath
+		&& Mumble::ChatFeatures::contains(Global::get().qlSupportedChatFeatures,
+									 MumbleProto::ChatFeatureAttachments);
+	if (!supportsNativeAttachments && !Global::get().bAllowHTML) return;
 
-	QFileDialog dialog(nullptr, tr("Attach image"));
+	QFileDialog dialog(nullptr, supportsNativeAttachments ? tr("Attach files") : tr("Attach images"));
 	dialog.setFileMode(QFileDialog::ExistingFiles);
-	dialog.setNameFilter(tr("Images (*.png *.jpg *.jpeg *.gif *.webp)"));
-	const QString picturesLocation = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
-	if (!picturesLocation.isEmpty()) {
-		dialog.setDirectory(picturesLocation);
+	if (supportsNativeAttachments) {
+		dialog.setNameFilters({ tr("Supported files (*.png *.jpg *.jpeg *.gif *.webp *.bmp *.mp4 *.webm *.mov *.mp3 *.wav *.ogg *.flac *.aac *.pdf *.txt *.md *.zip)"),
+							tr("All files (*)") });
+	} else {
+		dialog.setNameFilter(tr("Images (*.png *.jpg *.jpeg *.gif *.webp)"));
+	}
+	const QString initialLocation = QStandardPaths::writableLocation(
+		supportsNativeAttachments ? QStandardPaths::DocumentsLocation : QStandardPaths::PicturesLocation);
+	if (!initialLocation.isEmpty()) {
+		dialog.setDirectory(initialLocation);
 	}
 
 	if (dialog.exec() != QFileDialog::Accepted) {
@@ -35630,7 +35911,13 @@ void MainWindow::serverConnected() {
 	Global::get().qbaServerImage.clear();
 	Global::get().uiMessageLength                  = 5000;
 	Global::get().uiImageLength                    = 131072;
+	Global::get().uiChatAssetMaxBytes              = 25ULL * 1024ULL * 1024ULL;
+	Global::get().uiChatAttachmentLimit            = 4;
 	Global::get().uiMaxUsers                       = 0;
+	if (m_qmlShellHost) {
+		m_qmlShellHost->composerController()->setAttachmentLimits(
+			static_cast< int >(Global::get().uiChatAttachmentLimit), Global::get().uiChatAssetMaxBytes);
+	}
 	m_modernLayoutCompatibleServer                 = false;
 	m_hasPersistentChatSupport                     = false;
 	m_defaultPersistentTextChannelID               = 0;
@@ -35673,7 +35960,12 @@ void MainWindow::serverConnected() {
 	if (m_persistentChatInlineDataImageWarmupTimer) {
 		m_persistentChatInlineDataImageWarmupTimer->stop();
 	}
+	if (m_chatAttachmentUploader) {
+		m_chatAttachmentUploader->cancel(tr("The connection changed during attachment upload."));
+	}
 	m_persistentChatAssetDownloads.clear();
+	m_persistentChatAttachmentProviderUrls.clear();
+	m_persistentChatAttachmentPreviewFailures.clear();
 	m_pendingFeedbackSubmissions.clear();
 	m_persistentChatLiveMessageKeys.clear();
 	clearModernShellMessageDtoCache("connect");
@@ -35750,6 +36042,12 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	Global::get().qsServerDisplayName.clear();
 	Global::get().qsServerMonogram.clear();
 	Global::get().qbaServerImage.clear();
+	Global::get().uiChatAssetMaxBytes     = 25ULL * 1024ULL * 1024ULL;
+	Global::get().uiChatAttachmentLimit  = 4;
+	if (m_qmlShellHost) {
+		m_qmlShellHost->composerController()->setAttachmentLimits(
+			static_cast< int >(Global::get().uiChatAttachmentLimit), Global::get().uiChatAssetMaxBytes);
+	}
 	m_modernLayoutCompatibleServer                 = false;
 	m_hasPersistentChatSupport                     = false;
 	qaServerDisconnect->setEnabled(false);
@@ -35799,7 +36097,12 @@ void MainWindow::serverDisconnected(QAbstractSocket::SocketError err, QString re
 	if (m_persistentChatInlineDataImageWarmupTimer) {
 		m_persistentChatInlineDataImageWarmupTimer->stop();
 	}
+	if (m_chatAttachmentUploader) {
+		m_chatAttachmentUploader->cancel(tr("The connection closed during attachment upload."));
+	}
 	m_persistentChatAssetDownloads.clear();
+	m_persistentChatAttachmentProviderUrls.clear();
+	m_persistentChatAttachmentPreviewFailures.clear();
 	m_pendingFeedbackSubmissions.clear();
 	m_persistentChatLiveMessageKeys.clear();
 	m_persistentChatLastReadByScope.clear();

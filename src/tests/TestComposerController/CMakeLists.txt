@@ -1,4 +1,10 @@
-add_executable(TestComposerController TestComposerController.cpp ../../mumble/ComposerController.cpp ../../mumble/QmlImageProvider.cpp)
+add_executable(
+	TestComposerController
+	TestComposerController.cpp
+	../../mumble/ChatAttachment.cpp
+	../../mumble/ComposerController.cpp
+	../../mumble/QmlImageProvider.cpp
+)
 set_target_properties(TestComposerController PROPERTIES AUTOMOC ON)
 find_pkg(Qt6 COMPONENTS Concurrent Gui Quick REQUIRED)
 target_include_directories(TestComposerController PRIVATE ../../mumble)

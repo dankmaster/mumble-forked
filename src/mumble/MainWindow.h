@@ -58,6 +58,7 @@ struct ScreenShareStartOptions;
 struct PersistentChatPreviewSpec;
 class PersistentChatGateway;
 class PersistentChatController;
+class ChatAttachmentUploader;
 class ModernDialogController;
 class QmlShellHost;
 class QmlSelectionState;
@@ -353,6 +354,12 @@ public:
 		MumbleProto::ChatAssetKind kind = MumbleProto::ChatAssetKindUnknown;
 		QByteArray bytes;
 		QSet< QString > previewKeys;
+		QSet< unsigned int > attachmentAssetIDs;
+		QSet< QString > attachmentMessageKeys;
+		QStringList savePaths;
+		quint64 maximumBytes = 0;
+		quint64 timeoutToken = 0;
+		bool requestPending = false;
 	};
 
 	struct PendingChatEmbedAssist {
@@ -429,6 +436,11 @@ public:
 	void flushPersistentChatPreviewRequests();
 	void ensurePersistentChatPreview(const QString &previewKey);
 	void ensurePersistentChatPreviewAssetDownload(unsigned int assetID, const QString &previewKey);
+	void ensurePersistentChatAttachmentImageDownload(unsigned int assetID, unsigned int transferAssetID,
+											 const QString &messageKey);
+	void downloadPersistentChatAttachment(unsigned int assetID, const QString &fileName);
+	void publishPersistentChatAttachmentImageUpdate(const QSet< QString > &messageKeys);
+	void armPersistentChatAssetDownloadTimeout(unsigned int assetID);
 	void ensurePersistentChatPreviewSiteSnapshot(const QString &previewKey);
 	void restorePersistentChatPreviewDiskCache(const QString &previewKey);
 	bool refreshRestoredPersistentChatPreview(const QString &previewKey);
@@ -815,6 +827,10 @@ protected:
 	bool m_persistentChatPreviewCacheClearInFlight = false;
 	QHash< QString, MumbleProto::ChatEmbedRef > m_persistentChatEmbedPreviewRefs;
 	QHash< unsigned int, PersistentChatAssetDownload > m_persistentChatAssetDownloads;
+	QHash< unsigned int, QString > m_persistentChatAttachmentProviderUrls;
+	QSet< unsigned int > m_persistentChatAttachmentPreviewFailures;
+	quint64 m_persistentChatAssetDownloadTimeoutSerial = 0;
+	QPointer< ChatAttachmentUploader > m_chatAttachmentUploader;
 	QHash< quint64, PendingChatEmbedAssist > m_pendingChatEmbedAssists;
 	QHash< QString, quint64 > m_pendingChatEmbedAssistByKey;
 	QHash< QNetworkReply *, quint64 > m_chatEmbedAssistNetworkReplies;

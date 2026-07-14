@@ -4,8 +4,11 @@
 #include <QtCore/QBuffer>
 #include <QtCore/QDir>
 #include <QtCore/QFile>
+#include <QtCore/QFileInfo>
+#include <QtCore/QMimeData>
 #include <QtCore/QTemporaryDir>
 #include <QtCore/QThread>
+#include <QtGui/QColor>
 #include <QtGui/QImage>
 #include <QtTest/QSignalSpy>
 #include <QtTest/QtTest>
@@ -29,6 +32,7 @@ namespace {
 class TestComposerController : public QObject {
 	Q_OBJECT
 private slots:
+	void initTestCase();
 	void preservesDraftUntilSuccessfulSend();
 	void removesReordersAndCompletes();
 	void retriesFailedAttachment();
@@ -39,7 +43,14 @@ private slots:
 	void deduplicatesLocalPaths();
 	void freezesSubmittedDraftUntilCompletion();
 	void resolvesAttachmentsOnTheModelThread();
+	void ingestsClipboardImageAndSendsWithoutText();
+	void ingestsGenericFileMetadataAndSendsWithoutText();
+	void rechecksChangedServerLimitsBeforeSend();
 };
+
+void TestComposerController::initTestCase() {
+	qRegisterMetaType< QList< Mumble::ChatAttachments::Source > >();
+}
 
 void TestComposerController::preservesDraftUntilSuccessfulSend() {
 	QTemporaryDir dir;
@@ -81,9 +92,9 @@ void TestComposerController::removesReordersAndCompletes() {
 void TestComposerController::retriesFailedAttachment() {
 	QTemporaryDir dir;
 	QVERIFY(dir.isValid());
-	QFile file(dir.filePath(QStringLiteral("unsupported.bmp")));
+	QFile file(dir.filePath(QStringLiteral("corrupt.png")));
 	QVERIFY(file.open(QFile::WriteOnly));
-	QVERIFY(file.write("BMunsupported") > 0);
+	QVERIFY(file.write(QByteArray::fromHex("89504e470d0a1a0a")) > 0);
 	file.close();
 
 	auto pipeline = std::make_shared< QmlImagePipeline >();
@@ -101,7 +112,15 @@ void TestComposerController::retriesFailedAttachment() {
 	QCOMPARE(statusAt(controller.attachments(), 0), QStringLiteral("loading"));
 	QTRY_COMPARE_WITH_TIMEOUT(statusAt(controller.attachments(), 0), QStringLiteral("failed"), 5000);
 	controller.addUrls({ QUrl::fromLocalFile(dir.filePath(QStringLiteral("missing.png"))) });
-	QTRY_COMPARE_WITH_TIMEOUT(controller.attachments()->rowCount(), 1, 5000);
+	QTRY_COMPARE_WITH_TIMEOUT(statusAt(controller.attachments(), 1), QStringLiteral("failed"), 5000);
+	QCOMPARE(controller.attachments()->rowCount(), 2);
+
+	controller.setCanSend(true);
+	QSignalSpy sent(&controller, &ComposerController::sendRequested);
+	QSignalSpy failed(&controller, &ComposerController::sendFailed);
+	controller.send();
+	QCOMPARE(sent.count(), 0);
+	QCOMPARE(failed.count(), 1);
 }
 
 void TestComposerController::capsAndCancelsValidationQueue() {
@@ -120,6 +139,7 @@ void TestComposerController::capsAndCancelsValidationQueue() {
 
 	auto pipeline = std::make_shared< QmlImagePipeline >();
 	ComposerController controller(pipeline);
+	controller.setAttachmentLimits(16, 25ULL * 1024ULL * 1024ULL);
 	controller.addUrls(urls);
 	QCOMPARE(controller.attachments()->rowCount(), 16);
 	const QString cancelledId = controller.attachments()
@@ -288,6 +308,139 @@ void TestComposerController::resolvesAttachmentsOnTheModelThread() {
 	controller.addUrls({ QUrl::fromLocalFile(file.fileName()) });
 	QTRY_COMPARE_WITH_TIMEOUT(statusAt(controller.attachments(), 0), QStringLiteral("ready"), 5000);
 	QVERIFY(!wrongThread);
+}
+
+void TestComposerController::ingestsClipboardImageAndSendsWithoutText() {
+	auto pipeline = std::make_shared< QmlImagePipeline >();
+	ComposerController controller(pipeline);
+	controller.setCanSend(true);
+
+	QImage image(7, 5, QImage::Format_ARGB32_Premultiplied);
+	image.fill(QColor(12, 34, 56, 200));
+	QMimeData clipboardData;
+	clipboardData.setImageData(image);
+	QVERIFY(controller.ingestMimeData(clipboardData));
+	QCOMPARE(controller.attachments()->rowCount(), 1);
+	QTRY_COMPARE_WITH_TIMEOUT(statusAt(controller.attachments(), 0), QStringLiteral("ready"), 5000);
+
+	const QModelIndex index = controller.attachments()->index(0);
+	QCOMPARE(controller.attachments()->data(index, DraftAttachmentModel::MimeRole).toString(),
+			 QStringLiteral("image/png"));
+	QCOMPARE(controller.attachments()->data(index, DraftAttachmentModel::KindRole).toString(),
+			 QStringLiteral("image"));
+	QVERIFY(controller.attachments()->data(index, DraftAttachmentModel::ByteSizeRole).toULongLong() > 0);
+	const QString temporaryPath = controller.attachments()
+							  ->data(index, DraftAttachmentModel::LocalUrlRole)
+							  .toUrl()
+							  .toLocalFile();
+	QVERIFY(!temporaryPath.isEmpty());
+	QVERIFY(QFileInfo::exists(temporaryPath));
+
+	int requestCount = 0;
+	QString submittedText;
+	QList< Mumble::ChatAttachments::Source > submittedAttachments;
+	connect(&controller, &ComposerController::sendRequested, &controller,
+			[&](const QString &text, const QList< Mumble::ChatAttachments::Source > &attachments) {
+				++requestCount;
+				submittedText        = text;
+				submittedAttachments = attachments;
+			});
+	controller.send();
+	QCOMPARE(requestCount, 1);
+	QVERIFY(submittedText.isEmpty());
+	QCOMPARE(submittedAttachments.size(), 1);
+	QCOMPARE(submittedAttachments.constFirst().kind, Mumble::ChatAttachments::Kind::Image);
+	QCOMPARE(submittedAttachments.constFirst().mime, QStringLiteral("image/png"));
+	QCOMPARE(submittedAttachments.constFirst().sha256.size(), 64);
+	QCOMPARE(submittedAttachments.constFirst().path, temporaryPath);
+
+	controller.finishSend(true);
+	QCOMPARE(controller.attachments()->rowCount(), 0);
+	QVERIFY(!QFileInfo::exists(temporaryPath));
+}
+
+void TestComposerController::ingestsGenericFileMetadataAndSendsWithoutText() {
+	QTemporaryDir dir;
+	QVERIFY(dir.isValid());
+	const QString path = dir.filePath(QStringLiteral("bundle.zip"));
+	QFile file(path);
+	QVERIFY(file.open(QIODevice::WriteOnly));
+	QByteArray bytes = QByteArray::fromHex("0001");
+	bytes.append("opaque archive payload");
+	bytes.append('\0');
+	QCOMPARE(file.write(bytes), bytes.size());
+	file.close();
+
+	auto pipeline = std::make_shared< QmlImagePipeline >();
+	ComposerController controller(pipeline);
+	controller.setCanSend(true);
+	QMimeData droppedData;
+	droppedData.setUrls({ QUrl::fromLocalFile(path) });
+	QVERIFY(controller.ingestMimeData(droppedData));
+	QTRY_COMPARE_WITH_TIMEOUT(statusAt(controller.attachments(), 0), QStringLiteral("ready"), 5000);
+
+	const QModelIndex index = controller.attachments()->index(0);
+	QCOMPARE(controller.attachments()->data(index, DraftAttachmentModel::FileNameRole).toString(),
+			 QStringLiteral("bundle.zip"));
+	QCOMPARE(controller.attachments()->data(index, DraftAttachmentModel::MimeRole).toString(),
+			 QStringLiteral("application/zip"));
+	QCOMPARE(controller.attachments()->data(index, DraftAttachmentModel::KindRole).toString(),
+			 QStringLiteral("binary"));
+	QCOMPARE(controller.attachments()->data(index, DraftAttachmentModel::ByteSizeRole).toULongLong(),
+			 static_cast< qulonglong >(bytes.size()));
+	QVERIFY(controller.attachments()->data(index, DraftAttachmentModel::ThumbnailUrlRole).toString().isEmpty());
+
+	QList< Mumble::ChatAttachments::Source > submittedAttachments;
+	connect(&controller, &ComposerController::sendRequested, &controller,
+			[&](const QString &, const QList< Mumble::ChatAttachments::Source > &attachments) {
+				submittedAttachments = attachments;
+			});
+	controller.send();
+	QCOMPARE(submittedAttachments.size(), 1);
+	QCOMPARE(submittedAttachments.constFirst().fileName, QStringLiteral("bundle.zip"));
+	QCOMPARE(submittedAttachments.constFirst().mime, QStringLiteral("application/zip"));
+	QCOMPARE(submittedAttachments.constFirst().kind, Mumble::ChatAttachments::Kind::Binary);
+	QCOMPARE(submittedAttachments.constFirst().byteSize, static_cast< quint64 >(bytes.size()));
+}
+
+void TestComposerController::rechecksChangedServerLimitsBeforeSend() {
+	QTemporaryDir dir;
+	QVERIFY(dir.isValid());
+	QVariantList urls;
+	for (int index = 0; index < 2; ++index) {
+		const QString path = dir.filePath(QStringLiteral("limit-%1.png").arg(index));
+		QFile file(path);
+		QVERIFY(file.open(QIODevice::WriteOnly));
+		QVERIFY(file.write(pngBytes()) > 1);
+		urls.push_back(QUrl::fromLocalFile(path));
+	}
+
+	auto pipeline = std::make_shared< QmlImagePipeline >();
+	ComposerController controller(pipeline);
+	controller.setCanSend(true);
+	controller.setAttachmentLimits(4, 1024 * 1024);
+	controller.addUrls(urls);
+	QTRY_VERIFY_WITH_TIMEOUT([&controller]() {
+		for (int row = 0; row < controller.attachments()->rowCount(); ++row) {
+			if (statusAt(controller.attachments(), row) != QLatin1String("ready")) return false;
+		}
+		return controller.attachments()->rowCount() == 2;
+	}(), 5000);
+
+	QSignalSpy sent(&controller, &ComposerController::sendRequested);
+	QSignalSpy failed(&controller, &ComposerController::sendFailed);
+	controller.setAttachmentLimits(1, 1024 * 1024);
+	controller.send();
+	QCOMPARE(sent.count(), 0);
+	QCOMPARE(failed.count(), 1);
+
+	const QString secondID = controller.attachments()
+		->data(controller.attachments()->index(1), DraftAttachmentModel::IdRole).toString();
+	controller.removeAttachment(secondID);
+	controller.setAttachmentLimits(4, 1);
+	controller.send();
+	QCOMPARE(sent.count(), 0);
+	QCOMPARE(failed.count(), 2);
 }
 
 QTEST_GUILESS_MAIN(TestComposerController)
