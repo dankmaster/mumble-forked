@@ -1,4 +1,5 @@
 #include "ComposerController.h"
+#include "QmlImageProvider.h"
 
 #include <QtCore/QBuffer>
 #include <QtCore/QDir>

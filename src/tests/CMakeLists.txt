@@ -35,7 +35,10 @@ function(configure_client_test_runtime TEST_NAME TARGET_NAME)
 			WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
 			ENVIRONMENT
 				"QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/.."
-			ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+			# Client tests can directly import in-tree runtime libraries such as
+			# rnnoise and speexdsp, which are emitted next to the client executable.
+			ENVIRONMENT_MODIFICATION
+				"PATH=path_list_prepend:${CMAKE_BINARY_DIR};PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 	)
 endfunction()
 
