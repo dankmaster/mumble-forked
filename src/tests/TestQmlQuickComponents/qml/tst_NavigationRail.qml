@@ -791,7 +791,9 @@ TestCase {
 
 		const selfAvatar = findChild(loader.item, "selfAvatar")
 		const selfAvatarImage = findChild(loader.item, "selfAvatarImage")
-		verify(selfAvatar !== null && selfAvatarImage !== null)
+		const selfAvatarFallback = findChild(loader.item, "selfAvatarFallback")
+		verify(selfAvatar !== null && selfAvatarImage !== null && selfAvatarFallback !== null)
+		compare(selfAvatarFallback.Accessible.ignored, true)
 		compare(selfAvatar.avatarSource,
 			"image://mumble/abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789?g=8")
 		compare(String(selfAvatarImage.source), selfAvatar.avatarSource)

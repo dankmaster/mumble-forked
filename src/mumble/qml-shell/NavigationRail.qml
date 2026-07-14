@@ -1378,6 +1378,7 @@ Rectangle {
 						visible: status === Image.Ready
 					}
 					Label {
+						objectName: "selfAvatarFallback"
 						anchors.centerIn: parent
 						visible: selfAvatarImage.status !== Image.Ready
 						textFormat: Text.PlainText
@@ -1386,6 +1387,7 @@ Rectangle {
 						color: Theme.textStrong
 						font.pixelSize: Theme.fontLabel
 						font.bold: true
+						Accessible.ignored: true
 					}
 				}
                 ColumnLayout {

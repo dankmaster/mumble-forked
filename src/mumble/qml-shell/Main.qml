@@ -1569,6 +1569,7 @@ ApplicationWindow {
                                     text: (title || "S").slice(0, 1).toUpperCase()
                                     color: Theme.textStrong
                                     font.bold: true
+									Accessible.ignored: true
                                 }
                             }
                             ColumnLayout {
