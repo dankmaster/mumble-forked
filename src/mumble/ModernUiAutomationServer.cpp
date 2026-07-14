@@ -4360,6 +4360,18 @@ namespace {
 		return nullptr;
 	}
 
+	bool automationQuickItemHasVisibleAncestry(QQuickItem *item) {
+		if (!item || !item->window()) {
+			return false;
+		}
+		for (QQuickItem *current = item; current; current = current->parentItem()) {
+			if (!current->isVisible() || current->opacity() <= 0.0) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	QObject *automationFindRichPreviewCard(QQuickWindow *window, const QString &messageId) {
 		if (!window || messageId.trimmed().isEmpty()) {
 			return nullptr;
@@ -4370,7 +4382,9 @@ namespace {
 		// misses live, rendered cards after ListView delegate reuse.
 		for (QQuickItem *candidate : automationQuickItemSubtree(window->contentItem())) {
 			const QVariant identityValue = candidate->property("previewIdentity");
-			if (identityValue.isValid() && identityValue.toString().startsWith(prefix)) {
+			if (identityValue.isValid() && identityValue.toString().startsWith(prefix)
+				&& candidate->property("renderActive").toBool()
+				&& automationQuickItemHasVisibleAncestry(candidate)) {
 				return candidate;
 			}
 		}
@@ -6058,17 +6072,8 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 
 		const QVariantList expectedMessages = m_mainWindow->m_modernRichPreviewProbeMessages;
 		const QStringList expectedIds = automationRichPreviewMessageIds(expectedMessages);
-		QSet< QString > liveIds;
-		for (const QVariant &value : host->chatModel()->messages()) {
-			const QString id = value.toMap().value(QStringLiteral("messageId")).toString().trimmed();
-			if (!id.isEmpty()) {
-				liveIds.insert(id);
-			}
-		}
-		bool modelReady = !expectedIds.isEmpty();
-		for (const QString &id : expectedIds) {
-			modelReady = modelReady && liveIds.contains(id);
-		}
+		const bool modelReady = !expectedIds.isEmpty()
+			&& host->chatModel()->messages() == expectedMessages;
 
 		QStringList imageSources;
 		int dataImageSourceCount = 0;

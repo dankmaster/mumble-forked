@@ -336,6 +336,13 @@ Describe "Qt Quick connected fixture contract" {
 		}
 	}
 
+	It "waits for exact rich-preview model and live delegate parity" {
+		$automation = Get-Content -Raw "$PSScriptRoot\..\..\..\src\mumble\ModernUiAutomationServer.cpp"
+		($automation -match 'chatModel\(\)->messages\(\)\s*==\s*expectedMessages') | Should Be $true
+		($automation -match 'candidate->property\("renderActive"\)\.toBool\(\)') | Should Be $true
+		($automation -match 'automationQuickItemHasVisibleAncestry\(candidate\)') | Should Be $true
+	}
+
 	It "rejects a rich-preview grouping whose semantic name does not match the title" {
 		$workerPath = "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
 		$tokens = $null
