@@ -37,12 +37,32 @@ namespace {
 	constexpr unsigned int DTLN_BLOCK_LENGTH         = 512;
 	constexpr unsigned int DTLN_BLOCK_SHIFT          = 128;
 	constexpr unsigned int DTLN_FFT_BIN_COUNT        = (DTLN_BLOCK_LENGTH / 2) + 1;
-	constexpr unsigned int DTLN_STARTUP_LATENCY      = (DTLN_RUNTIME_SAMPLE_RATE / DTLN_MODEL_SAMPLE_RATE) * DTLN_BLOCK_SHIFT;
+	static_assert(DTLN_RUNTIME_SAMPLE_RATE % DTLN_MODEL_SAMPLE_RATE == 0);
+	constexpr unsigned int DTLN_RUNTIME_SAMPLE_RATIO = DTLN_RUNTIME_SAMPLE_RATE / DTLN_MODEL_SAMPLE_RATE;
+	// The overlap/add model output represents a signal (block length - shift)
+	// samples behind its input. The streaming adapter must first collect one
+	// shift before an inference can run, so together they form one complete model
+	// block of causal delay. This explicit preroll accounts for the collection
+	// part; the model output itself carries the remaining overlap/add delay.
+	constexpr unsigned int DTLN_OUTPUT_PREROLL       = DTLN_RUNTIME_SAMPLE_RATIO * DTLN_BLOCK_SHIFT;
+	constexpr unsigned int DTLN_MODEL_PIPELINE_DELAY = DTLN_RUNTIME_SAMPLE_RATIO * DTLN_BLOCK_LENGTH;
 	constexpr unsigned int DTLN_MAX_MONO_SAMPLES     = (DTLN_RUNTIME_SAMPLE_RATE * 120) / 1000;
 	constexpr unsigned int DTLN_MAX_DOWNSAMPLED      = 4096;
 	constexpr unsigned int DTLN_MAX_UPSAMPLED_BLOCK  = 768;
 	constexpr unsigned int DTLN_OUTPUT_QUEUE_CAP     = 8192;
 	constexpr float DTLN_TIME_DOMAIN_CLAMP           = 1.0f;
+
+	float finiteNormalizedSample(float sample) {
+		return std::isfinite(sample) ? std::clamp(sample, -DTLN_TIME_DOMAIN_CLAMP, DTLN_TIME_DOMAIN_CLAMP) : 0.0f;
+	}
+
+	template< typename Range > void replaceNonFiniteWithZero(Range &range) {
+		for (float &value : range) {
+			if (!std::isfinite(value)) {
+				value = 0.0f;
+			}
+		}
+	}
 
 	QString defaultDtlnModelDirectory() {
 		const QString baseDirectory = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("dtln"));
@@ -101,7 +121,7 @@ namespace {
 		}
 
 		bool runModel1(std::span< float, DTLN_FFT_BIN_COUNT > magnitude, std::span< float > state,
-					   std::span< float, DTLN_FFT_BIN_COUNT > mask) const {
+					   std::span< float, DTLN_FFT_BIN_COUNT > mask) {
 			if (!m_ready || state.size() != m_model1StateElementCount) {
 				return false;
 			}
@@ -114,11 +134,10 @@ namespace {
 			};
 
 			std::array< float, DTLN_FFT_BIN_COUNT > maskBuffer = {};
-			std::vector< float > nextState(m_model1StateElementCount);
 			std::array< Ort::Value, 2 > outputs = {
 				Ort::Value::CreateTensor< float >(m_memoryInfo, maskBuffer.data(), maskBuffer.size(), m_model1MaskShape.data(),
 												  m_model1MaskShape.size()),
-				Ort::Value::CreateTensor< float >(m_memoryInfo, nextState.data(), nextState.size(), m_model1StateShape.data(),
+				Ort::Value::CreateTensor< float >(m_memoryInfo, m_model1NextState.data(), m_model1NextState.size(), m_model1StateShape.data(),
 												  m_model1StateShape.size())
 			};
 
@@ -130,13 +149,15 @@ namespace {
 				return false;
 			}
 
+			replaceNonFiniteWithZero(maskBuffer);
+			replaceNonFiniteWithZero(m_model1NextState);
 			std::copy(maskBuffer.begin(), maskBuffer.end(), mask.begin());
-			std::copy(nextState.begin(), nextState.end(), state.begin());
+			std::copy(m_model1NextState.begin(), m_model1NextState.end(), state.begin());
 			return true;
 		}
 
 		bool runModel2(std::span< float, DTLN_BLOCK_LENGTH > block, std::span< float > state,
-					   std::span< float, DTLN_BLOCK_LENGTH > outBlock) const {
+					   std::span< float, DTLN_BLOCK_LENGTH > outBlock) {
 			if (!m_ready || state.size() != m_model2StateElementCount) {
 				return false;
 			}
@@ -149,11 +170,10 @@ namespace {
 			};
 
 			std::array< float, DTLN_BLOCK_LENGTH > outputBuffer = {};
-			std::vector< float > nextState(m_model2StateElementCount);
 			std::array< Ort::Value, 2 > outputs = {
 				Ort::Value::CreateTensor< float >(m_memoryInfo, outputBuffer.data(), outputBuffer.size(),
 												  m_model2OutputShape.data(), m_model2OutputShape.size()),
-				Ort::Value::CreateTensor< float >(m_memoryInfo, nextState.data(), nextState.size(), m_model2StateShape.data(),
+				Ort::Value::CreateTensor< float >(m_memoryInfo, m_model2NextState.data(), m_model2NextState.size(), m_model2StateShape.data(),
 												  m_model2StateShape.size())
 			};
 
@@ -165,8 +185,10 @@ namespace {
 				return false;
 			}
 
+			replaceNonFiniteWithZero(outputBuffer);
+			replaceNonFiniteWithZero(m_model2NextState);
 			std::copy(outputBuffer.begin(), outputBuffer.end(), outBlock.begin());
-			std::copy(nextState.begin(), nextState.end(), state.begin());
+			std::copy(m_model2NextState.begin(), m_model2NextState.end(), state.begin());
 			return true;
 		}
 
@@ -201,8 +223,10 @@ namespace {
 										 m_model1OutputNames, m_model1InputNamePtrs, m_model1OutputNamePtrs,
 										 m_model1MagnitudeShape, m_model1MaskShape, m_model1StateShape, m_model1StateElementCount);
 				initializeModelMetadata(*m_model2Session, DTLN_BLOCK_LENGTH, DTLN_BLOCK_LENGTH, m_model2InputNames,
-										 m_model2OutputNames, m_model2InputNamePtrs, m_model2OutputNamePtrs,
-										 m_model2BlockShape, m_model2OutputShape, m_model2StateShape, m_model2StateElementCount);
+									 m_model2OutputNames, m_model2InputNamePtrs, m_model2OutputNamePtrs,
+									 m_model2BlockShape, m_model2OutputShape, m_model2StateShape, m_model2StateElementCount);
+				m_model1NextState.resize(m_model1StateElementCount);
+				m_model2NextState.resize(m_model2StateElementCount);
 
 				m_ready = true;
 			} catch (const Ort::Exception &e) {
@@ -259,6 +283,7 @@ namespace {
 		std::vector< int64_t > m_model1MaskShape;
 		std::vector< int64_t > m_model1StateShape;
 		std::size_t m_model1StateElementCount = 0;
+		std::vector< float > m_model1NextState;
 
 		std::array< std::string, 2 > m_model2InputNames  = {};
 		std::array< std::string, 2 > m_model2OutputNames = {};
@@ -268,6 +293,7 @@ namespace {
 		std::vector< int64_t > m_model2OutputShape;
 		std::vector< int64_t > m_model2StateShape;
 		std::size_t m_model2StateElementCount = 0;
+		std::vector< float > m_model2NextState;
 	};
 } // namespace
 
@@ -295,6 +321,16 @@ public:
 		m_model1State.resize(m_runtime->model1StateElementCount(), 0.0f);
 		m_model2State.resize(m_runtime->model2StateElementCount(), 0.0f);
 
+		const int downsamplerLatency = speex_resampler_get_input_latency(m_downsampler);
+		const int upsamplerLatency   = speex_resampler_get_output_latency(m_upsampler);
+		if (downsamplerLatency < 0 || upsamplerLatency < 0) {
+			qWarning("Failed to query DTLN resampler latency");
+			return;
+		}
+		m_latencySamples = DTLN_MODEL_PIPELINE_DELAY + static_cast< unsigned int >(downsamplerLatency)
+						   + static_cast< unsigned int >(upsamplerLatency);
+		m_dryDelayBuffer.resize(m_latencySamples);
+
 		mumble_drft_init(&m_fft, DTLN_BLOCK_LENGTH);
 		reset();
 		m_ready = true;
@@ -315,6 +351,10 @@ public:
 		return m_ready;
 	}
 
+	unsigned int latencySamples() const {
+		return m_latencySamples;
+	}
+
 	void reset() {
 		if (m_downsampler) {
 			speex_resampler_reset_mem(m_downsampler);
@@ -330,8 +370,10 @@ public:
 		m_pendingInputCount = 0;
 		m_outputQueueHead   = 0;
 		m_outputQueueSize   = 0;
+		std::fill(m_dryDelayBuffer.begin(), m_dryDelayBuffer.end(), 0.0f);
+		m_dryDelayPosition = 0;
 
-		for (unsigned int i = 0; i < DTLN_STARTUP_LATENCY; ++i) {
+		for (unsigned int i = 0; i < DTLN_OUTPUT_PREROLL; ++i) {
 			pushOutputSample(0.0f);
 		}
 	}
@@ -341,12 +383,10 @@ public:
 			return;
 		}
 
-		mixFactor = std::clamp(mixFactor, 0.0f, 1.0f);
-		if (mixFactor <= 0.0f) {
-			return;
+		mixFactor = std::isfinite(mixFactor) ? std::clamp(mixFactor, 0.0f, 1.0f) : 1.0f;
+		for (unsigned int i = 0; i < sampleCount; ++i) {
+			m_originalBuffer[i] = finiteNormalizedSample(samples[i]);
 		}
-
-		std::copy(samples, samples + sampleCount, m_originalBuffer.begin());
 
 		spx_uint32_t inputCount       = sampleCount;
 		spx_uint32_t downsampledCount = DTLN_MAX_DOWNSAMPLED;
@@ -371,10 +411,14 @@ public:
 		}
 
 		for (unsigned int i = 0; i < sampleCount; ++i) {
-			const float cleaned = popOutputSample();
-			const float blended = std::clamp(cleaned * mixFactor + m_originalBuffer[i] * (1.0f - mixFactor),
-											 -DTLN_TIME_DOMAIN_CLAMP, DTLN_TIME_DOMAIN_CLAMP);
-			samples[i] = blended;
+			const float rawCleaned = popOutputSample();
+			const float cleaned    = std::isfinite(rawCleaned) ? rawCleaned : 0.0f;
+			const float rawDelayedDry = m_dryDelayBuffer[m_dryDelayPosition];
+			const float delayedDry    = std::isfinite(rawDelayedDry) ? rawDelayedDry : 0.0f;
+			m_dryDelayBuffer[m_dryDelayPosition] = m_originalBuffer[i];
+			m_dryDelayPosition = (m_dryDelayPosition + 1) % m_dryDelayBuffer.size();
+			const float blended = cleaned * mixFactor + delayedDry * (1.0f - mixFactor);
+			samples[i]          = finiteNormalizedSample(blended);
 		}
 	}
 
@@ -460,7 +504,7 @@ private:
 		}
 
 		const unsigned int tail = (m_outputQueueHead + m_outputQueueSize) % DTLN_OUTPUT_QUEUE_CAP;
-		m_outputQueue[tail]     = sample;
+		m_outputQueue[tail]     = std::isfinite(sample) ? sample : 0.0f;
 		++m_outputQueueSize;
 	}
 
@@ -502,6 +546,9 @@ private:
 	std::array< float, DTLN_OUTPUT_QUEUE_CAP > m_outputQueue = {};
 	unsigned int m_outputQueueHead = 0;
 	unsigned int m_outputQueueSize = 0;
+	std::vector< float > m_dryDelayBuffer;
+	unsigned int m_dryDelayPosition = 0;
+	unsigned int m_latencySamples = 0;
 };
 
 DTLNSpeechCleanup::DTLNSpeechCleanup(const QString &modelDirectory)
@@ -518,6 +565,10 @@ void DTLNSpeechCleanup::reset() {
 	if (m_impl) {
 		m_impl->reset();
 	}
+}
+
+unsigned int DTLNSpeechCleanup::latencySamples() const {
+	return m_impl ? m_impl->latencySamples() : 0;
 }
 
 void DTLNSpeechCleanup::processNormalizedMonoInPlace(float *samples, unsigned int sampleCount, float mixFactor) {
@@ -542,6 +593,10 @@ bool DTLNSpeechCleanup::isReady() const {
 }
 
 void DTLNSpeechCleanup::reset() {
+}
+
+unsigned int DTLNSpeechCleanup::latencySamples() const {
+	return 0;
 }
 
 void DTLNSpeechCleanup::processNormalizedMonoInPlace(float *samples, unsigned int sampleCount, float mixFactor) {

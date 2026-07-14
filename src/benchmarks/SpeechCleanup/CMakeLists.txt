@@ -19,3 +19,10 @@ set_target_properties(speech_cleanup_benchmark
 	PROPERTIES
 		RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
+
+if(tests)
+	add_test(
+		NAME SpeechCleanupBenchmarkSelfTest
+		COMMAND $<TARGET_FILE:speech_cleanup_benchmark> --self-test
+	)
+endif()

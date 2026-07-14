@@ -9,9 +9,7 @@
 #include "SpeechCleanupProcessor.h"
 
 #include <cstddef>
-#include <deque>
 #include <memory>
-#include <vector>
 
 class DeepFilterNetSpeechCleanup final : public SpeechCleanupProcessor {
 public:
@@ -20,6 +18,7 @@ public:
 
 	bool isReady() const override;
 	void reset() override;
+	unsigned int latencySamples() const override;
 	void processInPlace(float *samples, unsigned int sampleCount, float mixFactor = 1.0f) override;
 	QString activeModelId() const override;
 	QString activeModelPath() const override;

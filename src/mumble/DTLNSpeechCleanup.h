@@ -17,6 +17,8 @@ public:
 
 	bool isReady() const;
 	void reset();
+	/// Fixed causal delay of the streaming adapter in 48 kHz mono samples.
+	unsigned int latencySamples() const;
 
 	/// Process normalized mono PCM samples in-place.
 	///

@@ -28,6 +28,7 @@
 #include "EchoCancelOption.h"
 #include "MumbleProtocol.h"
 #include "SpeechCleanup.h"
+#include "SpeechCleanupTransmitDrain.h"
 #include "Settings.h"
 #include "Timer.h"
 
@@ -192,6 +193,7 @@ private:
 	OpusEncoder *opusState;
 	std::unique_ptr< SpeechCleanupProcessor > m_speechCleanupProcessor;
 	Mumble::SpeechCleanup::Selection m_speechCleanupSelection = {};
+	Mumble::SpeechCleanup::TransmitDrain m_speechCleanupTransmitDrain;
 	std::unique_ptr< WebRTCAudioEchoCanceller > m_webrtcEchoCanceller;
 	bool selectCodec();
 	void selectNoiseCancel();
@@ -207,6 +209,15 @@ private:
 protected:
 	Mumble::Protocol::AudioCodec m_codec;
 	SampleFormat eMicFormat, eEchoFormat;
+	/// Audio-thread-only diagnostics used by the opt-in deterministic E2E backend.
+	const SpeechCleanupProcessor *speechCleanupProcessorForDiagnostics() const noexcept;
+	const Mumble::SpeechCleanup::Selection &speechCleanupSelectionForDiagnostics() const noexcept;
+#ifdef MUMBLE_HAS_SPEECH_CLEANUP_E2E
+	/// Releases the current deterministic transmission, drains any causal
+	/// sender cleanup latency, and emits a real encoded Opus terminator without
+	/// mutating the process-wide transmit-mode setting.
+	unsigned int finishSpeechCleanupE2ETransmission();
+#endif
 
 	unsigned int iMicChannels, iEchoChannels;
 	unsigned int iMicFreq, iEchoFreq;
@@ -263,6 +274,9 @@ protected:
 	bool m_inputGateOpen;
 	int m_inputGateAttackFrames;
 	int m_inputGateReleaseFrames;
+#ifdef MUMBLE_HAS_SPEECH_CLEANUP_E2E
+	bool m_forceSpeechCleanupE2ERelease = false;
+#endif
 	int iBufferedFrames;
 
 	QList< QByteArray > qlFrames;
