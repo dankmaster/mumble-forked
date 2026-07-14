@@ -358,6 +358,10 @@ list(APPEND MUMBLE_SOURCES "${CMAKE_BINARY_DIR}/mumble_flags.qrc")
 add_library(mumble_client_object_lib OBJECT ${MUMBLE_SOURCES})
 target_link_libraries(mumble_client_object_lib PUBLIC smallft)
 
+if(speech-cleanup-e2e)
+	target_compile_definitions(mumble_client_object_lib PUBLIC MUMBLE_HAS_SPEECH_CLEANUP_E2E)
+endif()
+
 if(WIN32)
 	# The Windows client pulls in a large, macro-heavy source set (WinSDK).
 	# Building it outside of unity mode avoids batch-sensitive MSVC failures on the preview runner image.

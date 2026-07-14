@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "verified_at": "2026-07-14",
+  "description": "Pinned seed corpus metadata for input-enhancement evaluation. Audio remains outside Git and is never packaged with Mumble.",
+  "policy": {
+    "allowed_roles": [
+      "fullband_quality",
+      "local_eval",
+      "local_mixture_generation",
+      "multilingual_regression",
+      "narrowband_regression",
+      "training_candidate"
+    ],
+    "derived_audio_tracked_in_git": false,
+    "downloaded_audio_tracked_in_git": false,
+    "personal_audio_default": "local_only_delete_after_calibration",
+    "unknown_or_ambiguous_license": "blocked"
+  },
+  "sources": [
+    {
+      "id": "demand-ooffice-48k",
+      "kind": "environmental_noise",
+      "version": "1.0",
+      "source_url": "https://zenodo.org/api/records/1227121/files/OOFFICE_48k.zip/content",
+      "landing_page": "https://zenodo.org/records/1227121",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/demand/OOFFICE_48k.zip",
+        "digest": "5e0e50f3ab7750c795b71eaf3b001a9fe1d6e5e15a95c6b036d3eefaa5ec6eaf",
+        "size_bytes": 277643831
+      },
+      "license": {
+        "spdx": "LicenseRef-DEMAND-Ambiguous",
+        "status": "ambiguous",
+        "evidence_url": "https://zenodo.org/records/1227121",
+        "notes": "The dataset description names CC-BY-SA-3.0 while the Zenodo record metadata displays CC-BY-4.0. Treat as blocked until clarified."
+      },
+      "audio": {
+        "channels": 16,
+        "file_count": 16,
+        "sample_rate_hz": 48000
+      },
+      "roles": [
+        "local_eval",
+        "local_mixture_generation"
+      ],
+      "training_status": "blocked_ambiguous_license",
+      "redistribution_status": "blocked_ambiguous_license"
+    },
+    {
+      "id": "dpdfnet-eval-starter",
+      "kind": "paired_clean_noisy_speech",
+      "version": "24866d8ae065f0518aef0f5f0c6200f31166af98",
+      "source_url": "https://huggingface.co/datasets/Ceva-IP/DPDFNet_EvalSet",
+      "landing_page": "https://huggingface.co/datasets/Ceva-IP/DPDFNet_EvalSet/tree/24866d8ae065f0518aef0f5f0c6200f31166af98",
+      "integrity": {
+        "algorithm": "git-sha1",
+        "digest": "24866d8ae065f0518aef0f5f0c6200f31166af98"
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "status": "verified",
+        "evidence_url": "https://huggingface.co/datasets/Ceva-IP/DPDFNet_EvalSet/blob/24866d8ae065f0518aef0f5f0c6200f31166af98/README.md"
+      },
+      "audio": {
+        "channels": 1,
+        "pair_count": 6,
+        "sample_rate_hz": 16000
+      },
+      "roles": [
+        "local_eval",
+        "multilingual_regression",
+        "narrowband_regression"
+      ],
+      "training_status": "blocked_evaluation_only",
+      "redistribution_status": "blocked_evaluation_only"
+    },
+    {
+      "id": "mcgill-tsp-speech-v2-48k",
+      "kind": "clean_speech",
+      "version": "2 (2018-11)",
+      "source_url": "https://www.mmsp.ece.mcgill.ca/Documents/Data/TSP-Speech-Database/48k.zip",
+      "landing_page": "https://www.mmsp.ece.mcgill.ca/Documents/Data/",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/mcgill-tsp/48k.zip",
+        "digest": "9cfb3a3a13014c8ff90770a5d1923f376da73ac927b9100f09826f60cf06cf43",
+        "size_bytes": 253816919
+      },
+      "license": {
+        "spdx": "BSD-2-Clause",
+        "status": "verified",
+        "evidence_url": "https://www.mmsp.ece.mcgill.ca/Documents/Data/"
+      },
+      "audio": {
+        "channels": 1,
+        "file_count": 1444,
+        "sample_rate_hz": 48000
+      },
+      "roles": [
+        "fullband_quality",
+        "local_eval",
+        "training_candidate"
+      ],
+      "training_status": "allowed_with_attribution",
+      "redistribution_status": "source_license_review_required"
+    },
+    {
+      "id": "openslr31-mini-librispeech-dev-clean-2",
+      "kind": "clean_speech",
+      "version": "SLR31",
+      "source_url": "https://openslr.trmal.net/resources/31/dev-clean-2.tar.gz",
+      "landing_page": "https://www.openslr.org/31/",
+      "integrity": {
+        "algorithm": "sha256",
+        "artifact_path": "downloads/openslr31/dev-clean-2.tar.gz",
+        "digest": "176ec501490eced2d6c1f89f4f0ddc7dfe799e649e5322f8ba49fe3ff50c8012",
+        "size_bytes": 126046265
+      },
+      "license": {
+        "spdx": "CC-BY-4.0",
+        "status": "verified",
+        "evidence_url": "https://www.openslr.org/31/"
+      },
+      "audio": {
+        "channels": 1,
+        "file_count": 1089,
+        "sample_rate_hz": 16000
+      },
+      "roles": [
+        "local_eval",
+        "narrowband_regression"
+      ],
+      "training_status": "blocked_evaluation_only",
+      "redistribution_status": "blocked_evaluation_only"
+    }
+  ],
+  "excluded_sources": [
+    {
+      "id": "deepfilternet-clean-freesound-33711",
+      "kind": "clean_speech",
+      "source_url": "https://github.com/Rikorose/DeepFilterNet/blob/d375b2d8309e0935d165700c91da9de862a99c31/assets/clean_freesound_33711.wav",
+      "integrity": {
+        "algorithm": "sha256",
+        "digest": "2d885e9f45c0f9381aee09a397ecd160aff1875ffb75ebe2217d21c3511b0d5d",
+        "size_bytes": 1017226
+      },
+      "license": {
+        "spdx": "CC-BY-NC-3.0",
+        "status": "restricted",
+        "evidence_url": "https://github.com/Rikorose/DeepFilterNet/blob/d375b2d8309e0935d165700c91da9de862a99c31/assets/README.md"
+      },
+      "roles": [
+        "local_eval"
+      ],
+      "training_status": "blocked_noncommercial",
+      "redistribution_status": "blocked_noncommercial",
+      "reason": "Non-commercial material is excluded from product training and redistributable fixtures."
+    }
+  ]
+}

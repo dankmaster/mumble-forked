@@ -45,27 +45,6 @@ public:
 	void run() override;
 
 private:
-	struct RemoteCleanupDiagnostics {
-		bool captured         = false;
-		bool requestedEnabled = false;
-		QString requestedBackend;
-		QString requestedModelId;
-		QString effectiveBackend;
-		QString effectiveModelId;
-		bool processorReady = false;
-		QString activeModelId;
-		QString activeModelPath;
-		bool usedFallback = false;
-		int reportedLatencySamples = 0;
-		bool active     = false;
-		bool wasApplied = false;
-		int drainedSamples = 0;
-		bool drainCompleted = false;
-		QString preset;
-		double mixFactor = 0.0;
-	};
-
-	void observeSpeechCleanupSourceForE2E(const AudioOutputSpeech *speech) override;
 	bool openCapture(QString *errorMessage);
 	void closeCapture();
 	void captureSource(float *outputPCM, unsigned int sampleCount, unsigned int channelCount,
@@ -80,7 +59,6 @@ private:
 	std::uint64_t m_captureCallbacks = 0;
 	std::uint64_t m_captureFramesToSkip = 0;
 	std::uint64_t m_discardedPreRollFrames = 0;
-	RemoteCleanupDiagnostics m_remoteCleanupDiagnostics;
 };
 
 #endif // MUMBLE_MUMBLE_SPEECHCLEANUPTESTAUDIO_H_

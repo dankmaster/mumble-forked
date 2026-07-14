@@ -37,6 +37,20 @@ jobs:
           # Don't create a merge commit.
           ref: ${{ github.event.pull_request.head.sha }}
 
+      - name: Validate input-enhancement corpus lock
+        shell: bash
+        run: python3 "$GITHUB_WORKSPACE/scripts/audio-quality/validate-corpus-lock.py" --self-test
+
+      - name: Check input-enhancement transport boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --no-tags --depth=200 origin "${{ github.base_ref }}"
+          python3 "$GITHUB_WORKSPACE/scripts/audio-quality/check-input-enhancement-boundary.py" \
+            --self-test \
+            --base FETCH_HEAD
+
       - name: Initialize submodules with retry
         shell: bash
         run: bash "$GITHUB_WORKSPACE/.github/workflows/update_submodules_with_retry.sh"
