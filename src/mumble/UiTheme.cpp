@@ -34,6 +34,12 @@ namespace {
 		tokens.overlay       = tokens.surface0;
 		tokens.highlight     = tokens.surface1;
 		tokens.border        = tokens.surface1;
+		const QColor mediaCanvasFallback(QStringLiteral("#05070a"));
+		const QColor mediaCanvasSource = tokens.preset == UiThemePreset::MumbleLight ? tokens.text : tokens.crust;
+		tokens.mediaCanvas = mediaCanvasSource.isValid()
+			? mixUiThemeColors(mediaCanvasSource, mediaCanvasFallback,
+				tokens.preset == UiThemePreset::MumbleLight ? 0.70 : 0.35)
+			: mediaCanvasFallback;
 		tokens.textPrimary   = tokens.text;
 		tokens.textSecondary = tokens.subtext0;
 		tokens.textMuted     = tokens.overlay0;
@@ -53,33 +59,16 @@ namespace {
 		return adjusted;
 	}
 
-	void applyCustomAccentOverlay(UiThemeTokens &tokens) {
-		if (!Global::g_global_struct
-			|| Mumble::ModernTheme::normalizedAccentId(Global::get().s.qsModernShellAccent)
-				   != Mumble::ModernTheme::customAccentId()) {
+	void applyAccentOverlay(UiThemeTokens &tokens) {
+		if (!Global::g_global_struct) {
 			return;
 		}
 
-		const QColor accent(Mumble::ModernTheme::normalizedCustomAccentColor(Global::get().s.qsModernShellCustomAccent));
-		if (!accent.isValid()) {
-			return;
-		}
-
-		const qreal strength =
-			static_cast< qreal >(
-				Mumble::ModernTheme::normalizedCustomAccentStrength(Global::get().s.iModernShellCustomAccentStrength))
-			/ 100.0;
-		tokens.accent       = accent;
-		tokens.accentHover  = mixUiThemeColors(accent, tokens.text.isValid() ? tokens.text : QColor(Qt::white),
-											   0.14 + (strength * 0.12));
-		tokens.accentSubtle = colorWithAlpha(accent, 0.06 + (strength * 0.22));
-		tokens.focusAccent  = accent;
-		tokens.lavender     = accent;
-		tokens.teal         = accent;
+		applyUiThemeAccentOverride(tokens, Global::get().s.qsModernShellAccent,
+			Global::get().s.qsModernShellCustomAccent, Global::get().s.iModernShellCustomAccentStrength);
 	}
 
 	void finalizeUiThemeTokens(UiThemeTokens &tokens) {
-		applyCustomAccentOverlay(tokens);
 		applyRuntimeAliases(tokens);
 	}
 
@@ -88,52 +77,39 @@ namespace {
 		return color.isValid() ? color : fallback;
 	}
 
-	std::optional< UiThemeTokens > activeModernCustomThemeTokens() {
-		if (!Global::g_global_struct) {
-			return std::nullopt;
-		}
-
-		const QVariantMap themeTokens = Mumble::ModernTheme::customThemeTokens(Global::get().s.qsModernShellTheme);
-		if (themeTokens.isEmpty()) {
-			return std::nullopt;
-		}
-
-		const QPalette palette = qApp ? qApp->palette() : QPalette();
-		UiThemeTokens tokens;
-		tokens.preset   = UiThemePreset::MumbleDark;
-		tokens.crust    = tokenColor(themeTokens, QStringLiteral("--shell-strip"), palette.color(QPalette::Window));
-		tokens.mantle   = tokenColor(themeTokens, QStringLiteral("--shell-rail"), tokens.crust);
-		tokens.base     = tokenColor(themeTokens, QStringLiteral("--shell-panel"), palette.color(QPalette::Base));
-		tokens.surface0 = tokenColor(themeTokens, QStringLiteral("--shell-panel-soft"), palette.color(QPalette::Button));
-		tokens.surface1 = tokenColor(themeTokens, QStringLiteral("--shell-highlight"), palette.color(QPalette::Mid));
-		tokens.surface2 = tokenColor(themeTokens, QStringLiteral("--surface-border"), palette.color(QPalette::Light));
-		tokens.text     = tokenColor(themeTokens, QStringLiteral("--text-strong"), palette.color(QPalette::WindowText));
-		tokens.subtext0 = tokenColor(themeTokens, QStringLiteral("--text-main"), palette.color(QPalette::Text));
-		tokens.overlay0 = tokenColor(themeTokens, QStringLiteral("--text-muted"), palette.color(QPalette::Disabled, QPalette::Text));
-		tokens.accent   = tokenColor(themeTokens, QStringLiteral("--accent"), palette.color(QPalette::Highlight));
-		tokens.accentHover =
-			tokenColor(themeTokens, QStringLiteral("--accent-strong"), mixUiThemeColors(tokens.accent, tokens.text, 0.18));
-		tokens.accentSubtle =
-			tokenColor(themeTokens, QStringLiteral("--accent-soft"), colorWithAlpha(tokens.accent, 0.15));
-		tokens.red       = tokenColor(themeTokens, QStringLiteral("--danger"), QColor(QStringLiteral("#e6736f")));
-		tokens.green     = tokenColor(themeTokens, QStringLiteral("--success"), QColor(QStringLiteral("#5fd0a3")));
-		tokens.yellow    = tokenColor(themeTokens, QStringLiteral("--warning"), QColor(QStringLiteral("#e0c574")));
-		tokens.peach     = tokenColor(themeTokens, QStringLiteral("--latency-orange"), tokens.yellow);
-		tokens.mauve     = tokens.red;
-		tokens.lavender  = tokens.accent;
-		tokens.teal      = tokens.green;
-		tokens.pink      = tokens.red;
-		tokens.rosewater = tokens.text;
-		tokens.focusAccent = tokens.accent;
-		finalizeUiThemeTokens(tokens);
-		return tokens;
-	}
-
 	UiThemeTokens modernBuiltInUiThemeTokens(const QString &themeID) {
 		const QString theme = Mumble::ModernTheme::normalizedThemeId(themeID);
 		UiThemeTokens tokens;
 
-		if (theme == QStringLiteral("light") || theme == QStringLiteral("latte")) {
+		if (theme == QStringLiteral("latte")) {
+			tokens.preset       = UiThemePreset::MumbleLight;
+			tokens.crust        = QColor(QStringLiteral("#dce0e8"));
+			tokens.mantle       = QColor(QStringLiteral("#e6e9ef"));
+			tokens.base         = QColor(QStringLiteral("#eff1f5"));
+			tokens.surface0     = QColor(QStringLiteral("#ccd0da"));
+			tokens.surface1     = QColor(QStringLiteral("#bcc0cc"));
+			tokens.surface2     = QColor(QStringLiteral("#acb0be"));
+			tokens.text         = QColor(QStringLiteral("#4c4f69"));
+			tokens.subtext0     = QColor(QStringLiteral("#6c6f85"));
+			tokens.overlay0     = QColor(QStringLiteral("#9ca0b0"));
+			tokens.accent       = QColor(QStringLiteral("#179299"));
+			tokens.accentHover  = mixUiThemeColors(tokens.accent, tokens.text, 0.18);
+			tokens.accentSubtle = uiThemeColorWithAlpha(tokens.accent, 0.13);
+			tokens.red          = QColor(QStringLiteral("#d20f39"));
+			tokens.green        = QColor(QStringLiteral("#40a02b"));
+			tokens.yellow       = QColor(QStringLiteral("#df8e1d"));
+			tokens.peach        = QColor(QStringLiteral("#fe640b"));
+			tokens.mauve        = QColor(QStringLiteral("#8839ef"));
+			tokens.lavender     = QColor(QStringLiteral("#7287fd"));
+			tokens.teal         = tokens.accent;
+			tokens.pink         = QColor(QStringLiteral("#ea76cb"));
+			tokens.rosewater    = QColor(QStringLiteral("#dc8a78"));
+			tokens.focusAccent  = tokens.lavender;
+			finalizeUiThemeTokens(tokens);
+			return tokens;
+		}
+
+		if (theme == QStringLiteral("light")) {
 			tokens.preset       = UiThemePreset::MumbleLight;
 			tokens.crust        = QColor(QStringLiteral("#d8e0eb"));
 			tokens.mantle       = QColor(QStringLiteral("#e6ebf3"));
@@ -274,6 +250,54 @@ namespace {
 		return tokens;
 	}
 
+	UiThemeTokens modernCustomUiThemeTokens(const Mumble::ModernTheme::ThemeDefinition &theme) {
+		const bool lightAppearance = theme.appearance.compare(QLatin1String("light"), Qt::CaseInsensitive) == 0;
+		UiThemeTokens tokens = modernBuiltInUiThemeTokens(
+			lightAppearance ? QStringLiteral("light") : QStringLiteral("dark"));
+		const QVariantMap &themeTokens = theme.tokens;
+
+		// Legacy CSS themes may only define a subset of the canonical roles. Start
+		// from a complete product palette so missing values never leak in from the
+		// host OS or the QWidget application palette.
+		tokens.crust = tokenColor(themeTokens, QStringLiteral("--shell-strip"), tokens.crust);
+		tokens.mantle = tokenColor(themeTokens, QStringLiteral("--shell-rail"), tokens.mantle);
+		tokens.base = tokenColor(themeTokens, QStringLiteral("--shell-panel"), tokens.base);
+		tokens.surface0 = tokenColor(themeTokens, QStringLiteral("--shell-panel-soft"), tokens.surface0);
+		tokens.surface1 = tokenColor(themeTokens, QStringLiteral("--shell-highlight"), tokens.surface1);
+		tokens.surface2 = tokenColor(themeTokens, QStringLiteral("--surface-border"), tokens.surface2);
+		tokens.text = tokenColor(themeTokens, QStringLiteral("--text-strong"), tokens.text);
+		tokens.subtext0 = tokenColor(themeTokens, QStringLiteral("--text-main"), tokens.subtext0);
+		tokens.overlay0 = tokenColor(themeTokens, QStringLiteral("--text-muted"), tokens.overlay0);
+		tokens.accent = tokenColor(themeTokens, QStringLiteral("--accent"), tokens.accent);
+		tokens.accentHover = tokenColor(themeTokens, QStringLiteral("--accent-strong"),
+			mixUiThemeColors(tokens.accent, tokens.text, 0.18));
+		tokens.accentSubtle = tokenColor(themeTokens, QStringLiteral("--accent-soft"),
+			colorWithAlpha(tokens.accent, 0.15));
+		tokens.red = tokenColor(themeTokens, QStringLiteral("--danger"), tokens.red);
+		tokens.green = tokenColor(themeTokens, QStringLiteral("--success"), tokens.green);
+		tokens.yellow = tokenColor(themeTokens, QStringLiteral("--warning"), tokens.yellow);
+		tokens.peach = tokenColor(themeTokens, QStringLiteral("--latency-orange"), tokens.peach);
+		tokens.focusAccent = tokenColor(themeTokens, QStringLiteral("--focus-accent"), tokens.accent);
+
+		tokens.mauve = tokens.red;
+		tokens.lavender = tokens.accent;
+		tokens.teal = tokens.green;
+		tokens.pink = tokens.red;
+		tokens.rosewater = tokens.text;
+		finalizeUiThemeTokens(tokens);
+		return tokens;
+	}
+
+	std::optional< UiThemeTokens > activeModernCustomThemeTokens() {
+		if (!Global::g_global_struct) {
+			return std::nullopt;
+		}
+
+		const std::optional< Mumble::ModernTheme::ThemeDefinition > theme =
+			Mumble::ModernTheme::customTheme(Global::get().s.qsModernShellTheme);
+		return theme ? std::optional< UiThemeTokens >(modernCustomUiThemeTokens(*theme)) : std::nullopt;
+	}
+
 #ifdef Q_OS_WIN
 	using DwmSetWindowAttributeFn = HRESULT(WINAPI *)(HWND, DWORD, LPCVOID, DWORD);
 
@@ -337,6 +361,29 @@ namespace {
 		setWindowAttribute(hwnd, DwmBorderColorAttribute, &borderColorRef, sizeof(borderColorRef));
 	}
 #endif
+}
+
+bool applyUiThemeAccentOverride(UiThemeTokens &tokens, const QString &accentId, const QString &customAccent,
+								const int customAccentStrength) {
+	const QString normalizedAccent = Mumble::ModernTheme::normalizedAccentId(accentId);
+	const QColor accent = Mumble::ModernTheme::accentColorOverride(normalizedAccent, customAccent);
+	if (!accent.isValid()) {
+		return false;
+	}
+
+	const qreal strength = normalizedAccent == Mumble::ModernTheme::customAccentId()
+		? static_cast< qreal >(
+			  Mumble::ModernTheme::normalizedCustomAccentStrength(customAccentStrength))
+			  / 100.0
+		: 0.5;
+	tokens.accent       = accent;
+	tokens.accentHover  = mixUiThemeColors(accent, tokens.text.isValid() ? tokens.text : QColor(Qt::white),
+		0.14 + (strength * 0.12));
+	tokens.accentSubtle = colorWithAlpha(accent, 0.06 + (strength * 0.22));
+	tokens.focusAccent  = accent;
+	tokens.lavender     = accent;
+	tokens.teal         = accent;
+	return true;
 }
 
 QColor uiThemeColorWithAlpha(const QColor &color, qreal alpha) {
@@ -464,13 +511,22 @@ std::optional< UiThemeTokens > activeUiThemeTokens() {
 		return std::nullopt;
 	}
 
+	UiThemeTokens tokens;
 	if (const std::optional< UiThemeTokens > modernCustomTokens = activeModernCustomThemeTokens(); modernCustomTokens) {
-		return modernCustomTokens;
+		tokens = *modernCustomTokens;
+	} else {
+		tokens = modernBuiltInUiThemeTokens(Global::get().s.qsModernShellTheme);
 	}
 
-	return modernBuiltInUiThemeTokens(Global::get().s.qsModernShellTheme);
+	applyAccentOverlay(tokens);
+	applyRuntimeAliases(tokens);
+	return tokens;
 }
 
 UiThemeTokens uiThemeTokensForThemeId(const QString &themeId) {
 	return modernBuiltInUiThemeTokens(themeId);
+}
+
+UiThemeTokens uiThemeTokensForThemeDefinition(const Mumble::ModernTheme::ThemeDefinition &theme) {
+	return modernCustomUiThemeTokens(theme);
 }

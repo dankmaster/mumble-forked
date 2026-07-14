@@ -18,14 +18,42 @@ FocusScope {
 	readonly property bool compactLayout: width < 440
 	readonly property string stableKind: normalizedStableKind()
 	readonly property string stableProvider: normalizedStableProvider()
+	readonly property string providerToken: normalizedVisualProvider()
+	readonly property string providerDisplayName: buildProviderDisplayName()
+	readonly property color providerAccent: buildProviderAccent()
+	readonly property color providerAccentSubtle: withAlpha(providerAccent, 0.14)
+	readonly property color providerAccentBorder: withAlpha(providerAccent, 0.46)
+	readonly property string providerStateLabel: buildProviderStateLabel()
+	readonly property color providerStateColor: buildProviderStateColor()
 	readonly property string family: detectFamily()
 	readonly property string variant: detectVariant()
+	readonly property bool financeLayout: family === "finance"
+	readonly property bool commerceLayout: family === "commerce"
+	readonly property bool steamPresentation: variant === "game" && providerToken === "steam"
+	readonly property bool googlePresentation: variant === "googleSearch"
+	readonly property bool flashbackPresentation: variant === "forum" && providerToken === "flashback"
+	readonly property bool bespokeSemanticOwner: steamPresentation || googlePresentation
+		|| flashbackPresentation
+	readonly property string flashbackAuthorAvatarSource: safeManagedImageSource(firstValue([
+		"forumPostAuthorAvatarUrl"
+	]))
+	readonly property bool identityPresentation: ["audio", "x", "instagram", "github", "twitch"]
+		.indexOf(variant) >= 0
+	readonly property string presentation: financeLayout ? "market"
+		: commerceLayout ? "commerce" : identityPresentation ? "identity" : "details"
 	readonly property string heading: familyHeading()
 	readonly property string primaryValue: buildPrimaryValue()
 	readonly property string secondaryValue: buildSecondaryValue()
 	readonly property string identityTitle: buildIdentityTitle()
 	readonly property string identitySubtitle: buildIdentitySubtitle()
 	readonly property string bodyText: buildBodyText()
+	readonly property string providerMark: buildProviderMark()
+	readonly property string summaryTitle: buildSummaryTitle()
+	readonly property string summarySubtitle: buildSummarySubtitle()
+	readonly property string commerceStatus: buildCommerceStatus()
+	readonly property string financeRangeSummary: joinedValue([
+		"financeRangeChange", "financeRangeChangePercent"
+	])
 	readonly property string providerErrorText: variant === "twitch"
 		? safeText(firstValue(["twitchStateFailure", "twitchMetadataFailure"]), 1024) : ""
 	readonly property string trend: safeText(firstValue([
@@ -57,6 +85,22 @@ FocusScope {
 		|| allChips.length > collapsedChipCount || contextPosts.length > 0
 		|| releaseCanExpand
 	readonly property bool ownsDescription: bodyText.length > 0
+	readonly property string steamReviewSummary: safeText(firstValue([
+		"steamReviewSummary", "gameStoreRating"
+	]), 128)
+	readonly property string steamReviewDetail: buildSteamReviewDetail()
+	readonly property string steamDiscountLabel: normalizedDiscount(firstValue([
+		"steamDiscountPercent", "gameStoreDiscount"
+	]))
+	readonly property string googleMode: normalizedGoogleMode()
+	readonly property string googleModeLabel: safeText(firstValue([
+		"googleSearchModeLabel"
+	]), 128) || googleMode
+	readonly property string googleQuery: safeText(firstValue([
+		"googleSearchQuery"
+	]), 1024) || safeText(previewDescription, 1024) || qsTr("Search")
+	readonly property var googleTabs: [qsTr("All"), qsTr("Images"), qsTr("News"),
+		qsTr("Videos"), qsTr("Shopping")]
 
 	signal externalOpenRequested(string url)
 
@@ -67,6 +111,7 @@ FocusScope {
 	Accessible.role: Accessible.Grouping
 	Accessible.name: heading.length > 0 ? heading : qsTr("Provider details")
 	Accessible.description: accessibleSummary()
+	Accessible.ignored: bespokeSemanticOwner
 
 	function hasValue(key) {
 		if (!metadata || metadata[key] === undefined || metadata[key] === null)
@@ -96,6 +141,11 @@ FocusScope {
 		if (value === undefined || value === null || typeof value === "object")
 			return ""
 		return String(value).trim().slice(0, maximum || 512)
+	}
+
+	function safeManagedImageSource(value) {
+		const source = safeText(value, 2048)
+		return source.indexOf("image://mumble/") === 0 ? source : ""
 	}
 
 	function withAlpha(color, alpha) {
@@ -129,6 +179,95 @@ FocusScope {
 				return token === "twitter" ? "x" : token
 		}
 		return ""
+	}
+
+	function normalizedVisualProvider() {
+		const primary = normalizedToken(firstValue(["previewProvider", "provider"]))
+		const gameStore = normalizedToken(firstValue(["gameStoreProvider", "gameStoreName"]))
+		if (primary === "gamestore" && gameStore.length > 0)
+			return gameStore
+		const candidates = [primary, normalizedToken(firstValue(["marketplaceProvider"])),
+			gameStore, normalizedToken(firstValue(["productProvider", "vehicleProvider"])),
+			normalizedToken(firstValue(["articlePublisher", "audioProvider"])),
+			normalizedToken(firstValue(["providerName"])), normalizedToken(providerHint)]
+		for (let index = 0; index < candidates.length; ++index) {
+			const token = candidates[index]
+			if (token.length === 0)
+				continue
+			if (token === "twitter")
+				return "x"
+			if (token === "googlesearch" || token === "googleimages" || token === "googlevideos")
+				return "google"
+			return token
+		}
+		return ""
+	}
+
+	function buildProviderDisplayName() {
+		const explicitName = safeText(firstValue(["gameStoreName", "providerName", "productProvider",
+			"vehicleProvider", "articlePublisher", "audioProvider", "marketplaceProvider"]), 128)
+		const names = {
+			"youtube": "YouTube", "spotify": "Spotify", "tiktok": "TikTok",
+			"instagram": "Instagram", "twitch": "Twitch", "google": "Google",
+			"steam": "Steam", "yahoofinance": "Yahoo Finance", "blocket": "Blocket",
+			"tradera": "Tradera", "bytbil": "Bytbil", "bilweb": "Bilweb",
+			"booli": "Booli", "hemnet": "Hemnet", "flashback": "Flashback",
+			"existenz": "Existenz", "sverigesradio": "Sveriges Radio",
+			"systembolaget": "Systembolaget", "sweclockers": "SweClockers",
+			"webhallen": "Webhallen", "elgiganten": "Elgiganten", "komplett": "Komplett",
+			"prisjakt": "Prisjakt", "pricerunner": "PriceRunner", "amazon": "Amazon",
+			"power": "POWER", "svt": "SVT", "gp": "GP", "omni": "Omni",
+			"aftonbladet": "Aftonbladet", "expressen": "Expressen", "dn": "DN"
+		}
+		return names[providerToken]
+			|| (normalizedToken(explicitName) !== "gamestore" ? explicitName : "")
+			|| safeText(providerHint, 128)
+	}
+
+	function buildProviderAccent() {
+		const colors = {
+			"youtube": "#ff5a5f", "spotify": "#1ed760", "tiktok": "#25f4ee",
+			"instagram": "#e45aa5", "twitch": "#a970ff", "google": "#4285f4",
+			"steam": "#66c0f4", "yahoofinance": "#78d6a3", "blocket": "#ff6b61",
+			"tradera": "#ffd64c", "bytbil": "#f4c95d", "bilweb": "#f4c95d",
+			"booli": "#72d7a3", "hemnet": "#72d7a3", "flashback": "#f2c36e",
+			"existenz": "#ff9a54", "sverigesradio": "#f4a3c1",
+			"systembolaget": "#85c34a", "sweclockers": "#f08b2c",
+			"webhallen": "#ef7a32", "power": "#ffd84d", "amazon": "#ffb454",
+			"gp": "#62b3ff", "svt": "#ff5a5f", "aftonbladet": "#ff5a5f",
+			"omni": "#ffd447", "expressen": "#71b8ff", "dn": "#e7edf3"
+		}
+		return colors[providerToken] || Theme.accent
+	}
+
+	function buildProviderStateLabel() {
+		if (providerToken !== "twitch" && variant !== "twitch")
+			return ""
+		const state = safeText(firstValue(["twitchLiveState"]), 32).toLowerCase()
+		const mode = safeText(firstValue(["twitchEmbedMode"]), 32).toLowerCase()
+		if (state === "rerun" || mode === "rerun")
+			return qsTr("Rerun")
+		if (state === "offline" && mode === "latest-vod")
+			return qsTr("Offline · Latest VOD")
+		if (state === "offline" && mode === "clip")
+			return qsTr("Offline · Clip")
+		if (state === "offline")
+			return qsTr("Offline")
+		if (state === "unavailable")
+			return qsTr("Unavailable")
+		const value = safeText(firstValue(["twitchBadge", "twitchLiveState"]), 32)
+		return value.length > 0 ? value.charAt(0).toUpperCase() + value.slice(1) : ""
+	}
+
+	function buildProviderStateColor() {
+		const state = safeText(firstValue(["twitchLiveState"]), 32).toLowerCase()
+		if (state === "live")
+			return Theme.success
+		if (state === "rerun")
+			return Theme.warning
+		if (state === "unavailable")
+			return Theme.danger
+		return Theme.textMuted
 	}
 
 	function detectFamily() {
@@ -288,6 +427,8 @@ FocusScope {
 	}
 
 	function buildIdentityTitle() {
+		if (variant === "x")
+			return safeText(firstValue(["xDisplayName", "xHandle"]), 256)
 		if (variant === "twitch")
 			return safeText(firstValue(["twitchDisplayName", "twitchChannel"]), 256)
 		if (variant === "instagram") {
@@ -297,6 +438,8 @@ FocusScope {
 		}
 		if (variant === "github")
 			return safeText(firstValue(["githubFullName", "githubRepo"]), 256)
+		if (variant === "audio")
+			return safeText(firstValue(["audioProgram", "audioProvider"]), 256)
 		if (variant === "forum")
 			return safeText(firstValue(["forumThreadTitle"]), 512)
 		if (variant === "linkDigest")
@@ -307,14 +450,28 @@ FocusScope {
 	}
 
 	function buildIdentitySubtitle() {
+		if (variant === "x") {
+			const handle = safeText(firstValue(["xHandle"]), 128)
+			const createdAt = safeText(firstValue(["xCreatedAt"]), 128)
+			return [handle !== identityTitle ? handle : "", createdAt]
+				.filter(function(value) { return value.length > 0 }).join(" · ")
+		}
 		if (variant === "twitch")
-			return joinedValue(["twitchBadge", "twitchGame"], " · ")
+			return joinedValue(["twitchChannel", "twitchGame"], " · ")
 		if (variant === "instagram") {
 			const handle = safeText(firstValue(["instagramHandle"]), 128)
-			return handle !== identityTitle ? handle : ""
+			const createdAt = safeText(firstValue(["instagramCreatedAt"]), 128)
+			return [handle !== identityTitle ? handle : "", createdAt]
+				.filter(function(value) { return value.length > 0 }).join(" · ")
 		}
 		if (variant === "github")
 			return joinedValue(["githubOwnerLogin", "githubLanguage"], " · ")
+		if (variant === "audio") {
+			const provider = safeText(firstValue(["audioProvider", "providerName"]), 256)
+			const published = safeText(firstValue(["articlePublishedAt"]), 128)
+			return [provider !== identityTitle ? provider : "", published]
+				.filter(function(value) { return value.length > 0 }).join(" · ")
+		}
 		if (variant === "forum")
 			return joinedValue(["forumCategory", "forumName", "forumPage"], " · ")
 		if (variant === "linkDigest")
@@ -326,6 +483,8 @@ FocusScope {
 	}
 
 	function buildBodyText() {
+		if (variant === "x")
+			return safeText(previewDescription, 1024)
 		if (variant === "twitch")
 			return safeText(firstValue(["twitchStateFailure", "twitchMetadataFailure",
 				"twitchPlaybackNote", "twitchDisclaimer"]), 1024)
@@ -334,6 +493,11 @@ FocusScope {
 		if (variant === "github")
 			return safeText(firstValue(["githubDescription"]), 1024)
 				|| safeText(previewDescription, 1024)
+		if (variant === "audio")
+			return safeText(previewDescription, 1024)
+		if (commerceLayout)
+			return safeText(firstValue(["vehicleDescription", "listingDescription",
+				"productDescription", "gameStoreDescription"]), 1024)
 		if (variant === "linkDigest")
 			return safeText(firstValue(["linkDigestCaption"]), 1024)
 				|| safeText(previewDescription, 1024)
@@ -341,6 +505,111 @@ FocusScope {
 			return safeText(firstValue(["googleSearchQuery"]), 1024)
 				|| safeText(previewDescription, 1024)
 		return ""
+	}
+
+	function buildProviderMark() {
+		const marks = {
+			"youtube": "YT", "spotify": "SP", "tiktok": "TT", "instagram": "IG",
+			"twitch": "TV", "google": "G", "steam": "S", "yahoofinance": "YF",
+			"blocket": "B", "tradera": "T", "bytbil": "BB", "bilweb": "BW",
+			"booli": "B", "hemnet": "H", "flashback": "FB", "existenz": "E",
+			"sverigesradio": "SR", "systembolaget": "SB", "sweclockers": "SC",
+			"webhallen": "W", "elgiganten": "E", "komplett": "K", "prisjakt": "PJ",
+			"pricerunner": "PR", "amazon": "A", "power": "P", "svt": "SVT"
+		}
+		if (marks[providerToken])
+			return marks[providerToken]
+		switch (variant) {
+		case "audio": return qsTr("Audio")
+		case "x": return "X"
+		case "instagram": return "IG"
+		case "github": return "GH"
+		case "twitch": return safeText(firstValue(["twitchLiveState"]), 5) || "TV"
+		case "forum": return qsTr("Forum")
+		case "linkDigest": return qsTr("Links")
+		case "googleSearch": return qsTr("Search")
+		default: return ""
+		}
+	}
+
+	function normalizedDiscount(value) {
+		const text = safeText(value, 64)
+		if (text.length === 0)
+			return ""
+		const number = Number(text.replace(/[^0-9.+-]/g, ""))
+		if (isFinite(number) && number !== 0)
+			return "-" + Math.abs(number) + "%"
+		return text.charAt(0) === "-" ? text : "-" + text
+	}
+
+	function percentageLabel(value, suffix) {
+		const text = safeText(value, 64)
+		if (text.length === 0)
+			return ""
+		return text.indexOf("%") >= 0 ? text + (suffix || "") : text + "%" + (suffix || "")
+	}
+
+	function steamReviewTone() {
+		const summary = safeText(firstValue(["steamReviewSummary", "gameStoreRating"]), 128).toLowerCase()
+		const percent = Number(firstValue(["steamReviewPercent"]))
+		const score = Number(firstValue(["steamReviewScore"]))
+		const hasPercent = hasValue("steamReviewPercent")
+		const hasScore = hasValue("steamReviewScore")
+		if ((hasPercent && isFinite(percent) && percent >= 70) || (hasScore && isFinite(score) && score >= 7)
+				|| summary.indexOf("positive") >= 0)
+			return "success"
+		if ((hasPercent && isFinite(percent) && percent >= 40) || (hasScore && isFinite(score) && score >= 5)
+				|| summary.indexOf("mixed") >= 0)
+			return "warning"
+		if ((hasPercent && isFinite(percent) && percent >= 0) || (hasScore && isFinite(score) && score > 0)
+				|| summary.indexOf("negative") >= 0)
+			return "danger"
+		return "normal"
+	}
+
+	function buildSteamReviewDetail() {
+		const details = []
+		const percent = percentageLabel(firstValue(["steamReviewPercent"]), qsTr(" positive"))
+		if (percent.length > 0)
+			details.push(percent)
+		const total = countLabel(firstValue(["steamReviewTotal", "gameStoreReviewCount"]))
+		if (total.length > 0)
+			details.push(qsTr("%1 reviews").arg(total))
+		return details.join(" · ")
+	}
+
+	function normalizedGoogleMode() {
+		const token = normalizedToken(firstValue(["googleSearchMode", "googleSearchModeLabel"]))
+		if (token === "image" || token === "images")
+			return qsTr("Images")
+		if (token === "video" || token === "videos")
+			return qsTr("Videos")
+		if (token === "news")
+			return qsTr("News")
+		if (token === "shopping" || token === "shop")
+			return qsTr("Shopping")
+		if (token === "books")
+			return qsTr("Books")
+		return qsTr("All")
+	}
+
+	function buildSummaryTitle() {
+		if (financeLayout)
+			return safeText(firstValue(["tickerSymbol"]), 32)
+		return ""
+	}
+
+	function buildSummarySubtitle() {
+		if (financeLayout)
+			return joinedValue(["financeName", "financeExchange", "financeInstrument"], " · ")
+		return ""
+	}
+
+	function buildCommerceStatus() {
+		if (!commerceLayout)
+			return ""
+		return joinedValue(["productAvailability", "gameStoreAvailability", "steamPlatforms",
+			"listingCondition", "vehicleKind", "realEstateArea", "realEstateRooms"], " · ")
 	}
 
 	function buildReleaseInfo() {
@@ -400,8 +669,10 @@ FocusScope {
 			return [change, percent].filter(function(value) { return value.length > 0 }).join("  ")
 		}
 		if (family === "commerce")
-			return joinedValue(["productOriginalPrice", "gameStoreOriginalPrice", "steamOriginalPrice",
-				"listingOriginalPrice", "productDiscount", "gameStoreDiscount", "steamDiscountPercent"], "  ")
+			return [safeText(firstValue(["productOriginalPrice", "gameStoreOriginalPrice",
+				"steamOriginalPrice", "listingOriginalPrice"]), 128),
+				normalizedDiscount(firstValue(["productDiscount", "gameStoreDiscount",
+					"steamDiscountPercent"]))].filter(function(value) { return value.length > 0 }).join("  ")
 		if (family === "geo")
 			return safeText(firstValue(["statusLabel"]), 512)
 		return ""
@@ -454,12 +725,20 @@ FocusScope {
 		} else if (variant === "game") {
 			addStat(result, qsTr("Platform"), firstValue(["gameStorePlatform", "steamPlatforms"]))
 			addStat(result, qsTr("Availability"), firstValue(["gameStoreAvailability"]))
-			addStat(result, qsTr("Rating"), joinedValue(["gameStoreRating", "gameStoreReviewCount"]))
+			const reviewSummary = safeText(firstValue(["steamReviewSummary", "gameStoreRating"]), 128)
+			const reviewPercent = percentageLabel(firstValue(["steamReviewPercent"]), qsTr(" positive"))
+			const reviewCount = countLabel(firstValue(["steamReviewTotal", "gameStoreReviewCount"]))
+			const reviewValue = [reviewSummary, reviewPercent,
+				reviewCount.length > 0 ? qsTr("%1 reviews").arg(reviewCount) : ""]
+				.filter(function(value) { return value.length > 0 }).join(" · ")
+			addStat(result, qsTr("Reviews"), reviewValue, steamReviewTone())
 			addStat(result, qsTr("Developer"), firstValue(["steamDeveloper", "gameStoreBrand"]))
 			addStat(result, qsTr("Released"), firstValue(["steamReleaseDate"]))
-			addStat(result, qsTr("Reviews"), firstValue(["steamReviewSummary", "steamReviewPercent"]))
 			addStat(result, qsTr("Recommendations"), countLabel(firstValue(["steamRecommendationsTotal"])))
-			addStat(result, qsTr("Score"), firstValue(["steamMetacriticScore"]))
+			const score = Number(firstValue(["steamMetacriticScore"]))
+			addStat(result, qsTr("Score"), firstValue(["steamMetacriticScore"]),
+				isFinite(score) && score >= 75 ? "success" : isFinite(score) && score >= 50
+					? "warning" : isFinite(score) && score > 0 ? "danger" : "normal")
 		} else if (variant === "marketplace") {
 			addStat(result, qsTr("Condition"), firstValue(["listingCondition"]))
 			addStat(result, qsTr("Location"), firstValue(["listingLocation"]))
@@ -561,6 +840,12 @@ FocusScope {
 		} else if (variant === "vehicle") {
 			addChipList(result, "vehicleHighlights")
 			addChip(result, firstValue(["vehicleKind"]))
+		} else if (variant === "marketplace") {
+			addChip(result, firstValue(["listingSaleType"]), "accent")
+			const endsAt = safeText(firstValue(["listingEndsAt"]), 96)
+			addChip(result, endsAt.length > 0 ? qsTr("Ends %1").arg(endsAt) : "")
+			const listingId = safeText(firstValue(["listingId"]), 96)
+			addChip(result, listingId.length > 0 ? "#" + listingId.replace(/^#+/, "") : "")
 		} else if (variant === "x") {
 			addChip(result, firstValue(["xHandle"]), "accent")
 			if (metadata && metadata.xVerified === true)
@@ -645,12 +930,20 @@ FocusScope {
 		return result
 	}
 
-	function statWidth(availableWidth) {
+	function statColumnCount(availableWidth) {
+		if (financeLayout || identityPresentation) {
+			if (availableWidth < 400)
+				return 2
+			return availableWidth < 620 ? 3 : 4
+		}
 		if (compactLayout || availableWidth < 400)
-			return availableWidth
-		if (availableWidth < 620)
-			return Math.max(1, (availableWidth - Theme.space2) / 2)
-		return Math.max(1, (availableWidth - Theme.space2 * 2) / 3)
+			return 1
+		return availableWidth < 620 ? 2 : 3
+	}
+
+	function statWidth(availableWidth) {
+		const columns = statColumnCount(availableWidth)
+		return Math.max(1, (availableWidth - Theme.space2 * (columns - 1)) / columns)
 	}
 
 	function accessibleSummary() {
@@ -672,7 +965,32 @@ FocusScope {
 		if (releaseInfo.hasSummary)
 			parts.push([releaseInfo.name, releaseInfo.tag, releaseInfo.publishedAt]
 				.filter(function(value) { return value.length > 0 }).join(" "))
-		return parts.join(". ").slice(0, 1024)
+		return joinAccessibleSentences(parts)
+	}
+
+	function joinAccessibleSentences(values) {
+		let result = ""
+		for (let index = 0; index < values.length; ++index) {
+			const text = safeText(values[index], 1024)
+			if (text.length === 0)
+				continue
+			if (result.length > 0)
+				result += /[.!?]$/.test(result) ? " " : ". "
+			result += text
+		}
+		return result.slice(0, 1024)
+	}
+
+	function flashbackAccessibleSummary() {
+		const author = joinedValue(["forumPostAuthor", "forumPostAuthorTitle",
+			"forumPostTime", "forumPostNumber"], " · ")
+		const quote = [safeText(firstValue(["forumQuotePostNumber"]), 64),
+			safeText(firstValue(["forumQuoteAuthor"]), 256),
+			safeText(firstValue(["forumQuoteExcerpt"]), 1024)]
+			.filter(function(value) { return value.length > 0 }).join(" · ")
+		const reply = safeText(firstValue(["forumPostExcerpt", "forumFirstPostExcerpt"]), 1024)
+			|| bodyText
+		return joinAccessibleSentences([identitySubtitle, author, quote, reply])
 	}
 
 	ColumnLayout {
@@ -719,11 +1037,841 @@ FocusScope {
 			}
 		}
 
-		RowLayout {
+		Rectangle {
+			id: steamCard
+			objectName: "providerSteamCard"
+			Layout.fillWidth: true
+			Layout.preferredHeight: visible ? steamLayout.implicitHeight + Theme.space3 * 2 : 0
+			visible: root.steamPresentation
+			radius: Theme.innerRadius
+			color: root.withAlpha(root.providerAccent, 0.08)
+			border.color: root.providerAccentBorder
+			Accessible.role: Accessible.Grouping
+			Accessible.name: root.heading
+			Accessible.description: root.accessibleSummary()
+
+			ColumnLayout {
+				id: steamLayout
+				anchors.fill: parent
+				anchors.margins: Theme.space3
+				spacing: Theme.space3
+
+				RowLayout {
+					Layout.fillWidth: true
+					spacing: Theme.space2
+					Rectangle {
+						Layout.preferredWidth: 34
+						Layout.preferredHeight: 34
+						radius: Theme.innerRadius
+						color: root.providerAccent
+						Label {
+							anchors.centerIn: parent
+							text: "S"
+							textFormat: Text.PlainText
+							color: Theme.contrastText(parent.color)
+							font.pixelSize: Theme.fontTitle
+							font.bold: true
+							Accessible.ignored: true
+						}
+					}
+					ColumnLayout {
+						Layout.fillWidth: true
+						Layout.minimumWidth: 0
+						spacing: 0
+						Label {
+							Layout.fillWidth: true
+							text: qsTr("STEAM STORE")
+							textFormat: Text.PlainText
+							color: root.providerAccent
+							font.pixelSize: Theme.fontCaption
+							font.bold: true
+							font.letterSpacing: 0.8
+							Accessible.ignored: true
+						}
+						Label {
+							objectName: "providerSteamProductName"
+							Layout.fillWidth: true
+							text: root.safeText(root.firstValue(["steamAppName"]), 256)
+								|| root.previewTitle || qsTr("Steam app")
+							textFormat: Text.PlainText
+							color: Theme.textStrong
+							font.pixelSize: Theme.fontTitle
+							font.bold: true
+							elide: Text.ElideRight
+							Accessible.ignored: true
+						}
+					}
+				}
+
+				Label {
+					Layout.fillWidth: true
+					visible: root.bodyText.length > 0
+					text: root.bodyText
+					textFormat: Text.PlainText
+					color: Theme.textMain
+					font.pixelSize: Theme.fontLabel
+					lineHeight: 1.25
+					wrapMode: Text.Wrap
+					maximumLineCount: root.expanded ? 5 : 2
+					elide: Text.ElideRight
+					Accessible.ignored: true
+				}
+
+				GridLayout {
+					objectName: "providerSteamReviews"
+					Layout.fillWidth: true
+					visible: root.steamReviewSummary.length > 0
+						|| root.hasValue("steamMetacriticScore")
+					columns: root.compactLayout ? 1 : 2
+					columnSpacing: Theme.space2
+					rowSpacing: Theme.space2
+
+					Rectangle {
+						objectName: "providerSteamUserReviews"
+						Layout.fillWidth: true
+						Layout.preferredHeight: steamReviewCopy.implicitHeight + Theme.space2 * 2
+						visible: root.steamReviewSummary.length > 0
+						radius: Theme.innerRadius
+						color: Theme.panel
+						border.color: root.steamReviewTone() === "success"
+							? root.withAlpha(Theme.success, 0.55)
+							: root.steamReviewTone() === "danger" ? root.withAlpha(Theme.danger, 0.55)
+							: root.withAlpha(Theme.warning, 0.55)
+						ColumnLayout {
+							id: steamReviewCopy
+							anchors.fill: parent
+							anchors.margins: Theme.space2
+							spacing: 0
+							Label {
+								text: qsTr("USER REVIEWS")
+								textFormat: Text.PlainText
+								color: Theme.textMuted
+								font.pixelSize: Theme.fontCaption
+								font.bold: true
+								Accessible.ignored: true
+							}
+							Label {
+								objectName: "providerSteamReviewSummary"
+								Layout.fillWidth: true
+								text: root.steamReviewSummary
+								textFormat: Text.PlainText
+								color: root.steamReviewTone() === "success" ? Theme.success
+									: root.steamReviewTone() === "danger" ? Theme.danger : Theme.warning
+								font.pixelSize: Theme.fontLabel
+								font.bold: true
+								elide: Text.ElideRight
+								Accessible.ignored: true
+							}
+							Label {
+								objectName: "providerSteamReviewDetail"
+								Layout.fillWidth: true
+								visible: root.steamReviewDetail.length > 0
+								text: root.steamReviewDetail
+								textFormat: Text.PlainText
+								color: Theme.textMuted
+								font.pixelSize: Theme.fontCaption
+								elide: Text.ElideRight
+								Accessible.ignored: true
+							}
+						}
+					}
+
+					Rectangle {
+						objectName: "providerSteamMetacritic"
+						Layout.fillWidth: true
+						Layout.preferredHeight: steamMetacriticCopy.implicitHeight + Theme.space2 * 2
+						visible: root.hasValue("steamMetacriticScore")
+						radius: Theme.innerRadius
+						color: Theme.panel
+						border.color: Theme.surfaceBorder
+						RowLayout {
+							id: steamMetacriticCopy
+							anchors.fill: parent
+							anchors.margins: Theme.space2
+							spacing: Theme.space2
+							Rectangle {
+								Layout.preferredWidth: 32
+								Layout.preferredHeight: 32
+								radius: Theme.space1
+								color: Number(root.firstValue(["steamMetacriticScore"])) >= 75
+									? Theme.success : Theme.warning
+								Label {
+									objectName: "providerSteamMetacriticScore"
+									anchors.centerIn: parent
+									text: root.safeText(root.firstValue(["steamMetacriticScore"]), 8)
+									textFormat: Text.PlainText
+									color: Theme.contrastText(parent.color)
+									font.pixelSize: Theme.fontLabel
+									font.bold: true
+									Accessible.ignored: true
+								}
+							}
+							Label {
+								Layout.fillWidth: true
+								text: qsTr("Metacritic")
+								textFormat: Text.PlainText
+								color: Theme.textMain
+								font.pixelSize: Theme.fontLabel
+								font.bold: true
+								Accessible.ignored: true
+							}
+						}
+					}
+				}
+
+				Rectangle {
+					objectName: "providerSteamPurchase"
+					Layout.fillWidth: true
+					Layout.preferredHeight: steamPurchaseRow.implicitHeight + Theme.space2 * 2
+					visible: root.primaryValue.length > 0 || root.steamDiscountLabel.length > 0
+					radius: Theme.innerRadius
+					color: Theme.panel
+					border.color: root.providerAccentBorder
+					RowLayout {
+						id: steamPurchaseRow
+						anchors.fill: parent
+						anchors.margins: Theme.space2
+						spacing: Theme.space2
+						Rectangle {
+							objectName: "providerSteamDiscount"
+							Layout.preferredWidth: steamDiscountText.implicitWidth + Theme.space2 * 2
+							Layout.preferredHeight: 30
+							visible: root.steamDiscountLabel.length > 0
+							radius: Theme.space1
+							color: Theme.success
+							Label {
+								id: steamDiscountText
+								anchors.centerIn: parent
+								text: root.steamDiscountLabel
+								textFormat: Text.PlainText
+								color: Theme.contrastText(parent.color)
+								font.pixelSize: Theme.fontLabel
+								font.bold: true
+								Accessible.ignored: true
+							}
+						}
+						ColumnLayout {
+							Layout.fillWidth: true
+							Layout.minimumWidth: 0
+							spacing: 0
+							Label {
+								objectName: "providerSteamOriginalPrice"
+								Layout.fillWidth: true
+								visible: root.safeText(root.firstValue([
+									"steamOriginalPrice", "gameStoreOriginalPrice"
+								]), 128).length > 0
+								text: root.safeText(root.firstValue([
+									"steamOriginalPrice", "gameStoreOriginalPrice"
+								]), 128)
+								textFormat: Text.PlainText
+								color: Theme.textMuted
+								font.pixelSize: Theme.fontCaption
+								font.strikeout: true
+								elide: Text.ElideRight
+								Accessible.ignored: true
+							}
+							Label {
+								objectName: "providerSteamFinalPrice"
+								Layout.fillWidth: true
+								text: root.primaryValue.length > 0 ? root.primaryValue : qsTr("Open on Steam")
+								textFormat: Text.PlainText
+								color: Theme.textStrong
+								font.pixelSize: Theme.fontTitle
+								font.bold: true
+								elide: Text.ElideRight
+								Accessible.ignored: true
+							}
+						}
+						ModernIcon {
+							name: "external"
+							size: Theme.avatarSmall
+							color: root.providerAccent
+							Accessible.ignored: true
+						}
+					}
+				}
+
+				Label {
+					objectName: "providerSteamProductMeta"
+					Layout.fillWidth: true
+					visible: text.length > 0
+					text: [root.safeText(root.firstValue(["steamDeveloper"]), 256),
+						root.safeText(root.firstValue(["steamReleaseDate"]), 128),
+						root.safeText(root.firstValue(["steamPlatforms", "steamGenres"]), 256)]
+						.filter(function(value) { return value.length > 0 }).join(" · ")
+					textFormat: Text.PlainText
+					color: Theme.textMuted
+					font.pixelSize: Theme.fontCaption
+					wrapMode: Text.Wrap
+					Accessible.ignored: true
+				}
+			}
+		}
+
+		Rectangle {
+			id: googleCard
+			objectName: "providerGoogleSearch"
+			Layout.fillWidth: true
+			Layout.preferredHeight: visible ? googleLayout.implicitHeight + Theme.space3 * 2 : 0
+			visible: root.googlePresentation
+			radius: Theme.innerRadius
+			color: Theme.panel
+			border.color: root.providerAccentBorder
+			Accessible.role: Accessible.Grouping
+			Accessible.name: root.googleModeLabel
+			Accessible.description: root.googleQuery
+
+			ColumnLayout {
+				id: googleLayout
+				anchors.fill: parent
+				anchors.margins: Theme.space3
+				spacing: Theme.space3
+
+				RowLayout {
+					Layout.fillWidth: true
+					spacing: Theme.space2
+					Row {
+						Layout.fillWidth: true
+						spacing: 0
+						Repeater {
+							model: [
+								{ "letter": "G", "color": "#4285f4" },
+								{ "letter": "o", "color": "#ea4335" },
+								{ "letter": "o", "color": "#fbbc05" },
+								{ "letter": "g", "color": "#4285f4" },
+								{ "letter": "l", "color": "#34a853" },
+								{ "letter": "e", "color": "#ea4335" }
+							]
+							delegate: Label {
+								required property var modelData
+								text: modelData.letter
+								textFormat: Text.PlainText
+								color: modelData.color
+								font.pixelSize: Theme.fontHeading
+								font.bold: true
+								Accessible.ignored: true
+							}
+						}
+					}
+					Rectangle {
+						Layout.preferredWidth: googleModeText.implicitWidth + Theme.space2 * 2
+						Layout.preferredHeight: Theme.space5
+						radius: height / 2
+						color: root.providerAccentSubtle
+						Label {
+							id: googleModeText
+							objectName: "providerGoogleModeLabel"
+							anchors.centerIn: parent
+							text: root.googleModeLabel
+							textFormat: Text.PlainText
+							color: root.providerAccent
+							font.pixelSize: Theme.fontCaption
+							font.bold: true
+							Accessible.ignored: true
+						}
+					}
+				}
+
+				Rectangle {
+					objectName: "providerGoogleQuery"
+					Layout.fillWidth: true
+					Layout.preferredHeight: Theme.controlHeight + Theme.space1
+					radius: height / 2
+					color: Theme.surfaceRaised
+					border.color: Theme.surfaceBorder
+					RowLayout {
+						anchors.fill: parent
+						anchors.leftMargin: Theme.space3
+						anchors.rightMargin: Theme.space3
+						spacing: Theme.space2
+						Label {
+							objectName: "providerGoogleQueryText"
+							Layout.fillWidth: true
+							text: root.googleQuery
+							textFormat: Text.PlainText
+							color: Theme.textStrong
+							font.pixelSize: Theme.fontLabel
+							font.bold: true
+							elide: Text.ElideRight
+							Accessible.ignored: true
+						}
+						ModernIcon {
+							name: "search"
+							size: Theme.avatarSmall
+							color: root.providerAccent
+							Accessible.ignored: true
+						}
+					}
+				}
+
+				Flow {
+					objectName: "providerGoogleTabs"
+					Layout.fillWidth: true
+					Layout.preferredHeight: implicitHeight
+					spacing: Theme.space3
+					Repeater {
+						model: root.googleTabs
+						delegate: Column {
+							required property string modelData
+							required property int index
+							objectName: "providerGoogleTab_" + index
+							property bool active: root.normalizedToken(modelData)
+								=== root.normalizedToken(root.googleMode)
+							spacing: Theme.space1
+							Label {
+								text: parent.modelData
+								textFormat: Text.PlainText
+								color: parent.active ? root.providerAccent : Theme.textMuted
+								font.pixelSize: Theme.fontCaption
+								font.bold: parent.active
+								Accessible.ignored: true
+							}
+							Rectangle {
+								width: parent.width
+								height: 2
+								radius: 1
+								color: parent.active ? root.providerAccent : "transparent"
+							}
+						}
+					}
+				}
+			}
+		}
+
+		Rectangle {
+			id: flashbackCard
+			objectName: "providerFlashbackThread"
+			Layout.fillWidth: true
+			Layout.preferredHeight: visible ? flashbackLayout.implicitHeight : 0
+			visible: root.flashbackPresentation
+			radius: Theme.innerRadius
+			color: "#101010"
+			border.color: "#2c2c2c"
+			clip: true
+			Accessible.role: Accessible.Grouping
+			Accessible.name: root.heading
+			Accessible.description: root.flashbackAccessibleSummary()
+
+			ColumnLayout {
+				id: flashbackLayout
+				anchors.left: parent.left
+				anchors.right: parent.right
+				spacing: 0
+
+				Rectangle {
+					objectName: "providerFlashbackMasthead"
+					Layout.fillWidth: true
+					Layout.preferredHeight: 52
+					color: "#1f1f1f"
+					RowLayout {
+						anchors.fill: parent
+						anchors.leftMargin: Theme.space3
+						anchors.rightMargin: Theme.space3
+						spacing: Theme.space3
+						Label {
+							objectName: "providerFlashbackLogo"
+							text: "FLASHBACK"
+							textFormat: Text.PlainText
+							color: "#f1f4fa"
+							font.pixelSize: Theme.fontHeading
+							font.bold: true
+							font.letterSpacing: -0.6
+							Accessible.ignored: true
+						}
+						Rectangle {
+							Layout.preferredWidth: 1
+							Layout.preferredHeight: 24
+							color: "#3a3a3a"
+						}
+						Label {
+							Layout.fillWidth: true
+							text: qsTr("Forum · Aktuellt · Populärt")
+							textFormat: Text.PlainText
+							color: "#9ca8b6"
+							font.pixelSize: Theme.fontCaption
+							font.bold: true
+							elide: Text.ElideRight
+							Accessible.ignored: true
+						}
+					}
+				}
+
+				ColumnLayout {
+					Layout.fillWidth: true
+					Layout.margins: Theme.space3
+					spacing: Theme.space2
+					Label {
+						objectName: "providerFlashbackTitle"
+						Layout.fillWidth: true
+						text: root.identityTitle.length > 0 ? root.identityTitle : root.previewTitle
+						textFormat: Text.PlainText
+						color: "#f1f4fa"
+						font.pixelSize: Theme.fontTitle
+						font.bold: true
+						wrapMode: Text.Wrap
+						maximumLineCount: 2
+						elide: Text.ElideRight
+						Accessible.ignored: true
+					}
+					Label {
+						objectName: "providerFlashbackContext"
+						Layout.fillWidth: true
+						visible: root.identitySubtitle.length > 0
+						text: root.identitySubtitle
+						textFormat: Text.PlainText
+						color: "#aeb8c5"
+						font.pixelSize: Theme.fontCaption
+						font.bold: true
+						elide: Text.ElideRight
+						Accessible.ignored: true
+					}
+
+					RowLayout {
+						Layout.fillWidth: true
+						visible: root.hasAny(["forumPostAuthor", "forumPostAuthorAvatarUrl"])
+						spacing: Theme.space2
+						Rectangle {
+							Layout.preferredWidth: 30
+							Layout.preferredHeight: 30
+							radius: width / 2
+							color: "#4a3327"
+							clip: true
+							Label {
+								anchors.centerIn: parent
+								text: root.safeText(root.firstValue(["forumPostAuthor"]), 2).toUpperCase()
+								textFormat: Text.PlainText
+								color: "#f1f4fa"
+								font.pixelSize: Theme.fontCaption
+								font.bold: true
+								Accessible.ignored: true
+							}
+							Image {
+								objectName: "providerFlashbackAuthorAvatar"
+								anchors.fill: parent
+								source: root.flashbackAuthorAvatarSource
+								asynchronous: true
+								cache: false
+								fillMode: Image.PreserveAspectCrop
+								visible: status === Image.Ready
+								Accessible.ignored: true
+							}
+						}
+						ColumnLayout {
+							Layout.fillWidth: true
+							Layout.minimumWidth: 0
+							spacing: 0
+							Label {
+								objectName: "providerFlashbackAuthor"
+								Layout.fillWidth: true
+								text: root.safeText(root.firstValue(["forumPostAuthor"]), 256)
+								textFormat: Text.PlainText
+								color: "#f1f4fa"
+								font.pixelSize: Theme.fontLabel
+								font.bold: true
+								elide: Text.ElideRight
+								Accessible.ignored: true
+							}
+							Label {
+								Layout.fillWidth: true
+								text: root.joinedValue(["forumPostAuthorTitle", "forumPostTime",
+									"forumPostNumber"], " · ")
+								textFormat: Text.PlainText
+								color: "#8f9aa7"
+								font.pixelSize: Theme.fontCaption
+								elide: Text.ElideRight
+								Accessible.ignored: true
+							}
+						}
+					}
+
+					Rectangle {
+						objectName: "providerFlashbackQuote"
+						Layout.fillWidth: true
+						Layout.preferredHeight: visible ? flashbackQuoteLayout.implicitHeight + Theme.space2 * 2 : 0
+						visible: root.hasAny(["forumQuoteAuthor", "forumQuoteExcerpt", "forumQuotePostNumber"])
+						radius: Theme.space1
+						color: "#171717"
+						border.color: "#2c2c2c"
+						Rectangle {
+							anchors.left: parent.left
+							anchors.top: parent.top
+							anchors.bottom: parent.bottom
+							width: 3
+							color: "#c58a36"
+						}
+						ColumnLayout {
+							id: flashbackQuoteLayout
+							anchors.fill: parent
+							anchors.margins: Theme.space2
+							anchors.leftMargin: Theme.space3
+							spacing: Theme.space1
+							Label {
+								Layout.fillWidth: true
+								text: qsTr("Replying to %1").arg([
+									root.safeText(root.firstValue(["forumQuotePostNumber"]), 64),
+									root.safeText(root.firstValue(["forumQuoteAuthor"]), 256)
+								].filter(function(value) { return value.length > 0 }).join(" · "))
+								textFormat: Text.PlainText
+								color: "#f0c783"
+								font.pixelSize: Theme.fontCaption
+								font.bold: true
+								elide: Text.ElideRight
+								Accessible.ignored: true
+							}
+							Label {
+								objectName: "providerFlashbackQuoteText"
+								Layout.fillWidth: true
+								visible: text.length > 0
+								text: root.safeText(root.firstValue(["forumQuoteExcerpt"]), 1024)
+								textFormat: Text.PlainText
+								color: "#bfc9d5"
+								font.pixelSize: Theme.fontCaption
+								wrapMode: Text.Wrap
+								maximumLineCount: root.expanded ? 4 : 2
+								elide: Text.ElideRight
+								Accessible.ignored: true
+							}
+						}
+					}
+
+					Label {
+						objectName: "providerFlashbackReply"
+						Layout.fillWidth: true
+						visible: text.length > 0
+						text: root.safeText(root.firstValue([
+							"forumPostExcerpt", "forumFirstPostExcerpt"
+						]), 1024) || root.bodyText
+						textFormat: Text.PlainText
+						color: "#dce4ee"
+						font.pixelSize: Theme.fontLabel
+						lineHeight: 1.35
+						wrapMode: Text.Wrap
+						maximumLineCount: root.expanded ? 7 : 3
+						elide: Text.ElideRight
+						Accessible.ignored: true
+					}
+				}
+
+				Rectangle {
+					Layout.fillWidth: true
+					Layout.preferredHeight: 38
+					color: "#111111"
+					border.color: "#202020"
+					RowLayout {
+						anchors.fill: parent
+						anchors.leftMargin: Theme.space3
+						anchors.rightMargin: Theme.space3
+						spacing: Theme.space2
+						Label {
+							objectName: "providerFlashbackMeta"
+							Layout.fillWidth: true
+							text: [root.safeText(root.firstValue(["forumPage"]), 64),
+								root.safeText(root.firstValue(["forumPageCount"]), 64),
+								root.safeText(root.firstValue(["forumPostCount"]), 64)]
+								.filter(function(value) { return value.length > 0 }).join(" · ")
+							textFormat: Text.PlainText
+							color: "#8c97a5"
+							font.pixelSize: Theme.fontCaption
+							font.bold: true
+							elide: Text.ElideRight
+							Accessible.ignored: true
+						}
+						Label {
+							objectName: "providerFlashbackLinkContext"
+							text: root.hasValue("postId") ? qsTr("Linked post") : qsTr("Thread")
+							textFormat: Text.PlainText
+							color: "#ffc069"
+							font.pixelSize: Theme.fontCaption
+							font.bold: true
+							Accessible.ignored: true
+						}
+					}
+				}
+			}
+		}
+
+		ColumnLayout {
+			id: summaryBlock
+			objectName: "providerSummary"
 			Layout.fillWidth: true
 			Layout.preferredHeight: visible ? implicitHeight : 0
-			visible: root.heading.length > 0 || root.primaryValue.length > 0
-			spacing: Theme.space3
+			visible: !root.steamPresentation && !root.googlePresentation
+				&& !root.flashbackPresentation && (root.financeLayout || root.commerceLayout
+				|| (root.identityTitle.length === 0 && root.identitySubtitle.length === 0
+					&& root.bodyText.length === 0))
+				&& (root.heading.length > 0 || root.primaryValue.length > 0
+					|| root.summaryTitle.length > 0 || root.summarySubtitle.length > 0)
+			spacing: Theme.space2
+
+			Label {
+				Layout.fillWidth: true
+				visible: root.heading.length > 0
+				text: root.heading
+				textFormat: Text.PlainText
+				color: Theme.textMuted
+				font.pixelSize: Theme.fontCaption
+				font.bold: true
+				font.capitalization: Font.AllUppercase
+				font.letterSpacing: 0.7
+				elide: Text.ElideRight
+			}
+
+			GridLayout {
+				Layout.fillWidth: true
+				columns: root.financeLayout && !root.compactLayout ? 2 : 1
+				columnSpacing: Theme.space4
+				rowSpacing: Theme.space2
+
+				ColumnLayout {
+					Layout.fillWidth: true
+					Layout.minimumWidth: 0
+					visible: root.financeLayout
+					spacing: Theme.space1
+
+					Label {
+						objectName: "providerSummaryTitle"
+						Layout.fillWidth: true
+						text: root.summaryTitle
+						textFormat: Text.PlainText
+						color: Theme.textStrong
+						font.pixelSize: Theme.fontHeading
+						font.bold: true
+						elide: Text.ElideRight
+					}
+					Label {
+						objectName: "providerSummarySubtitle"
+						Layout.fillWidth: true
+						visible: root.summarySubtitle.length > 0
+						text: root.summarySubtitle
+						textFormat: Text.PlainText
+						color: Theme.textMuted
+						font.pixelSize: Theme.fontCaption
+						font.bold: true
+						elide: Text.ElideRight
+					}
+				}
+
+				ColumnLayout {
+					Layout.fillWidth: true
+					Layout.minimumWidth: 0
+					Layout.alignment: root.financeLayout && !root.compactLayout
+						? Qt.AlignRight | Qt.AlignTop : Qt.AlignLeft | Qt.AlignTop
+					spacing: Theme.space1
+
+					Label {
+						objectName: "providerDetailsPrimary"
+						Layout.fillWidth: true
+						visible: root.primaryValue.length > 0
+						text: root.primaryValue
+						textFormat: Text.PlainText
+					color: root.commerceLayout ? root.providerAccent : Theme.textStrong
+						font.pixelSize: root.compactLayout ? Theme.fontTitle
+							: (root.financeLayout || root.commerceLayout ? Theme.fontHeading + 2 : Theme.fontHeading)
+						font.bold: true
+						wrapMode: root.compactLayout ? Text.Wrap : Text.NoWrap
+						maximumLineCount: 2
+						elide: Text.ElideRight
+						horizontalAlignment: root.financeLayout && !root.compactLayout
+							? Text.AlignRight : Text.AlignLeft
+					}
+					Label {
+						objectName: "providerDetailsSecondary"
+						Layout.fillWidth: true
+						Layout.preferredHeight: visible ? implicitHeight : 0
+						visible: root.secondaryValue.length > 0
+						text: root.secondaryValue
+						textFormat: Text.PlainText
+						color: root.financeLayout ? root.trendColor : Theme.textMuted
+						font.pixelSize: Theme.fontLabel
+						font.bold: root.financeLayout
+						wrapMode: Text.Wrap
+						horizontalAlignment: root.financeLayout && !root.compactLayout
+							? Text.AlignRight : Text.AlignLeft
+					}
+					Label {
+						objectName: "providerCommerceStatus"
+						Layout.fillWidth: true
+						visible: root.commerceStatus.length > 0
+						text: root.commerceStatus
+						textFormat: Text.PlainText
+						color: Theme.textMain
+						font.pixelSize: Theme.fontCaption
+						font.bold: true
+						wrapMode: Text.Wrap
+					}
+				}
+			}
+
+			Label {
+				objectName: "providerSummaryBody"
+				Layout.fillWidth: true
+				Layout.preferredHeight: visible ? implicitHeight : 0
+				visible: root.commerceLayout && root.bodyText.length > 0
+				text: root.bodyText
+				textFormat: Text.PlainText
+				color: Theme.textMain
+				font.pixelSize: Theme.fontLabel
+				lineHeight: 1.25
+				wrapMode: Text.Wrap
+				maximumLineCount: root.expanded ? 5 : 2
+				elide: Text.ElideRight
+			}
+		}
+
+		Rectangle {
+			id: identityCard
+			objectName: "providerIdentity"
+			Layout.fillWidth: true
+			Layout.preferredHeight: visible ? identityLayout.implicitHeight + Theme.space3 * 2 : 0
+			visible: !root.financeLayout && !root.commerceLayout
+				&& !root.googlePresentation && !root.flashbackPresentation
+				&& (root.identityTitle.length > 0
+				|| root.identitySubtitle.length > 0 || root.bodyText.length > 0)
+			radius: Theme.innerRadius
+			color: root.providerErrorText.length > 0
+				? root.withAlpha(Theme.danger, 0.08) : "transparent"
+			border.color: root.providerErrorText.length > 0 ? root.withAlpha(Theme.danger, 0.65)
+				: "transparent"
+			Accessible.role: root.providerErrorText.length > 0
+				? Accessible.AlertMessage : Accessible.StaticText
+			Accessible.name: root.identityTitle.length > 0 ? root.identityTitle : root.heading
+			Accessible.description: root.joinAccessibleSentences([root.identitySubtitle, root.bodyText])
+
+			RowLayout {
+				id: identityLayout
+				anchors.fill: parent
+				anchors.margins: Theme.space3
+				spacing: Theme.space3
+
+				Rectangle {
+					objectName: "providerIdentityMark"
+					Layout.preferredWidth: root.variant === "audio" ? 48 : 42
+					Layout.preferredHeight: Layout.preferredWidth
+					Layout.alignment: Qt.AlignTop
+					visible: root.providerMark.length > 0
+					radius: root.variant === "x" || root.variant === "instagram"
+						? width / 2 : Theme.innerRadius
+					color: root.providerErrorText.length > 0
+						? root.withAlpha(Theme.danger, 0.12) : root.providerAccentSubtle
+					border.color: root.providerErrorText.length > 0
+						? root.withAlpha(Theme.danger, 0.5) : root.providerAccentBorder
+
+					Label {
+						id: identityMarkLabel
+						objectName: "providerIdentityMarkLabel"
+						anchors.fill: parent
+						anchors.margins: Theme.space1
+						text: root.providerMark
+						textFormat: Text.PlainText
+						color: root.providerErrorText.length > 0 ? Theme.danger : root.providerAccent
+						font.pixelSize: Theme.fontCaption
+						font.bold: true
+						font.capitalization: Font.AllUppercase
+						horizontalAlignment: Text.AlignHCenter
+						verticalAlignment: Text.AlignVCenter
+						elide: Text.ElideRight
+					}
+				}
 
 				ColumnLayout {
 					Layout.fillWidth: true
@@ -739,144 +1887,168 @@ FocusScope {
 						font.pixelSize: Theme.fontCaption
 						font.bold: true
 						font.capitalization: Font.AllUppercase
-						font.letterSpacing: 0.5
+						font.letterSpacing: 0.7
 						elide: Text.ElideRight
+					}
+					RowLayout {
+						Layout.fillWidth: true
+						spacing: Theme.space1
+						Label {
+							objectName: "providerIdentityTitle"
+							Layout.fillWidth: true
+							visible: root.identityTitle.length > 0
+							text: root.identityTitle
+							textFormat: Text.PlainText
+							color: Theme.textStrong
+							font.pixelSize: Theme.fontTitle
+							font.bold: true
+							wrapMode: Text.Wrap
+						}
+						Rectangle {
+							objectName: "providerVerifiedBadge"
+							Layout.preferredWidth: 18
+							Layout.preferredHeight: 18
+							visible: (root.variant === "x" && root.metadata && root.metadata.xVerified === true)
+								|| (root.variant === "twitch" && root.metadata
+									&& root.metadata.twitchLiveState === "live")
+							radius: width / 2
+							color: root.variant === "twitch" ? Theme.success : root.providerAccent
+							Label {
+								anchors.centerIn: parent
+								text: "✓"
+								textFormat: Text.PlainText
+								color: Theme.contrastText(parent.color)
+								font.pixelSize: 11
+								font.bold: true
+							}
+						}
 					}
 					Label {
-						objectName: "providerDetailsPrimary"
+						objectName: "providerIdentitySubtitle"
 						Layout.fillWidth: true
-						visible: root.primaryValue.length > 0
-						text: root.primaryValue
+						visible: root.identitySubtitle.length > 0
+						text: root.identitySubtitle
 						textFormat: Text.PlainText
-						color: Theme.textStrong
-						font.pixelSize: root.compactLayout ? Theme.fontTitle : Theme.fontHeading
-						font.bold: true
-						wrapMode: root.compactLayout ? Text.Wrap : Text.NoWrap
-						maximumLineCount: 2
+						color: Theme.textMuted
+						font.pixelSize: Theme.fontCaption
+						wrapMode: Text.Wrap
+					}
+					Label {
+						objectName: "providerIdentityBody"
+						Layout.fillWidth: true
+						visible: root.bodyText.length > 0
+						text: root.bodyText
+						textFormat: Text.PlainText
+						color: root.providerErrorText.length > 0 ? Theme.danger : Theme.textMain
+						font.pixelSize: Theme.fontLabel
+						lineHeight: 1.25
+						wrapMode: Text.Wrap
+						maximumLineCount: root.expanded ? 6 : 3
 						elide: Text.ElideRight
 					}
-				}
-			}
-
-		Label {
-				objectName: "providerDetailsSecondary"
-				Layout.fillWidth: true
-				Layout.preferredHeight: visible ? implicitHeight : 0
-				visible: root.secondaryValue.length > 0
-				text: root.secondaryValue
-				textFormat: Text.PlainText
-				color: root.family === "finance" ? root.trendColor : Theme.textMuted
-				font.pixelSize: Theme.fontLabel
-				font.bold: root.family === "finance"
-				wrapMode: Text.Wrap
-				horizontalAlignment: root.compactLayout ? Text.AlignLeft : Text.AlignRight
-			}
-
-		Rectangle {
-			id: identityCard
-			objectName: "providerIdentity"
-			Layout.fillWidth: true
-			Layout.preferredHeight: visible ? identityLayout.implicitHeight + Theme.space3 * 2 : 0
-			visible: root.identityTitle.length > 0 || root.identitySubtitle.length > 0
-				|| root.bodyText.length > 0
-			radius: Theme.innerRadius
-			color: Theme.panel
-			border.color: root.providerErrorText.length > 0 ? root.withAlpha(Theme.danger, 0.65)
-				: Theme.surfaceBorder
-			Accessible.role: root.providerErrorText.length > 0
-				? Accessible.AlertMessage : Accessible.StaticText
-			Accessible.name: root.identityTitle.length > 0 ? root.identityTitle : root.heading
-			Accessible.description: [root.identitySubtitle, root.bodyText]
-				.filter(function(value) { return value.length > 0 }).join(". ")
-
-			ColumnLayout {
-				id: identityLayout
-				anchors.fill: parent
-				anchors.margins: Theme.space3
-				spacing: Theme.space1
-
-				Label {
-					objectName: "providerIdentityTitle"
-					Layout.fillWidth: true
-					visible: root.identityTitle.length > 0
-					text: root.identityTitle
-					textFormat: Text.PlainText
-					color: Theme.textStrong
-					font.pixelSize: Theme.fontTitle
-					font.bold: true
-					wrapMode: Text.Wrap
-				}
-				Label {
-					objectName: "providerIdentitySubtitle"
-					Layout.fillWidth: true
-					visible: root.identitySubtitle.length > 0
-					text: root.identitySubtitle
-					textFormat: Text.PlainText
-					color: Theme.textMuted
-					font.pixelSize: Theme.fontCaption
-					wrapMode: Text.Wrap
-				}
-				Label {
-					objectName: "providerIdentityBody"
-					Layout.fillWidth: true
-					visible: root.bodyText.length > 0
-					text: root.bodyText
-					textFormat: Text.PlainText
-					color: root.providerErrorText.length > 0 ? Theme.danger : Theme.textMain
-					font.pixelSize: Theme.fontLabel
-					wrapMode: Text.Wrap
 				}
 			}
 		}
 
-		Canvas {
-			id: sparkline
-			objectName: "providerDetailsSparkline"
-			readonly property int pointCount: root.sparklinePoints.length
+		Rectangle {
+			id: financeChart
+			objectName: "providerFinanceChart"
 			Layout.fillWidth: true
-			Layout.preferredHeight: sparkline.pointCount > 1 ? 64 : 0
+			Layout.preferredHeight: visible ? 102 : 0
 			visible: sparkline.pointCount > 1
-			renderTarget: Canvas.FramebufferObject
-			onPointCountChanged: requestPaint()
-			onWidthChanged: requestPaint()
-			onHeightChanged: requestPaint()
-			Connections {
-				target: root
-				function onTrendColorChanged() { sparkline.requestPaint() }
-				function onSparklinePointsChanged() { sparkline.requestPaint() }
+			radius: Theme.innerRadius
+			color: Theme.panel
+			border.color: Theme.surfaceBorder
+
+			Label {
+				anchors.left: parent.left
+				anchors.top: parent.top
+				anchors.margins: Theme.space2
+				text: root.safeText(root.firstValue(["financeRangeLabel"]), 32) || qsTr("Trend")
+				textFormat: Text.PlainText
+				color: Theme.textMuted
+				font.pixelSize: Theme.fontCaption
+				font.bold: true
 			}
-			onPaint: {
-				const context = sparkline.getContext("2d")
-				context.clearRect(0, 0, sparkline.width, sparkline.height)
-				if (root.sparklinePoints.length < 2 || sparkline.width <= 2 || sparkline.height <= 2)
-					return
-				let minimum = root.sparklinePoints[0]
-				let maximum = root.sparklinePoints[0]
-				for (let index = 1; index < root.sparklinePoints.length; ++index) {
-					minimum = Math.min(minimum, root.sparklinePoints[index])
-					maximum = Math.max(maximum, root.sparklinePoints[index])
-				}
-				const range = Math.max(0.000001, maximum - minimum)
-				const inset = 3
-				context.beginPath()
-				for (let index = 0; index < root.sparklinePoints.length; ++index) {
-					const x = inset + index * (sparkline.width - inset * 2)
-						/ (root.sparklinePoints.length - 1)
-					const y = inset + (maximum - root.sparklinePoints[index])
-						* (sparkline.height - inset * 2) / range
-					if (index === 0)
-						context.moveTo(x, y)
-					else
-						context.lineTo(x, y)
-				}
-				context.strokeStyle = root.trendColor
-				context.lineWidth = 2
-				context.lineJoin = "round"
-				context.lineCap = "round"
-				context.stroke()
+			Label {
+				anchors.right: parent.right
+				anchors.top: parent.top
+				anchors.margins: Theme.space2
+				visible: root.financeRangeSummary.length > 0
+				text: root.financeRangeSummary
+				textFormat: Text.PlainText
+				color: root.trendColor
+				font.pixelSize: Theme.fontCaption
+				font.bold: true
 			}
-			Accessible.role: Accessible.Chart
-			Accessible.name: qsTr("Price trend with %1 points").arg(sparkline.pointCount)
+
+			Canvas {
+				id: sparkline
+				objectName: "providerDetailsSparkline"
+				readonly property int pointCount: root.sparklinePoints.length
+				anchors.left: parent.left
+				anchors.right: parent.right
+				anchors.top: parent.top
+				anchors.bottom: parent.bottom
+				anchors.leftMargin: Theme.space2
+				anchors.rightMargin: Theme.space2
+				anchors.topMargin: Theme.space4
+				anchors.bottomMargin: Theme.space2
+				renderTarget: Canvas.FramebufferObject
+				onPointCountChanged: requestPaint()
+				onWidthChanged: requestPaint()
+				onHeightChanged: requestPaint()
+				Connections {
+					target: root
+					function onTrendColorChanged() { sparkline.requestPaint() }
+					function onSparklinePointsChanged() { sparkline.requestPaint() }
+				}
+				onPaint: {
+					const context = sparkline.getContext("2d")
+					context.clearRect(0, 0, sparkline.width, sparkline.height)
+					if (root.sparklinePoints.length < 2 || sparkline.width <= 2 || sparkline.height <= 2)
+						return
+					let minimum = root.sparklinePoints[0]
+					let maximum = root.sparklinePoints[0]
+					for (let index = 1; index < root.sparklinePoints.length; ++index) {
+						minimum = Math.min(minimum, root.sparklinePoints[index])
+						maximum = Math.max(maximum, root.sparklinePoints[index])
+					}
+					const range = Math.max(0.000001, maximum - minimum)
+					const inset = 3
+					const points = []
+					for (let index = 0; index < root.sparklinePoints.length; ++index) {
+						points.push({
+							"x": inset + index * (sparkline.width - inset * 2)
+								/ (root.sparklinePoints.length - 1),
+							"y": inset + (maximum - root.sparklinePoints[index])
+								* (sparkline.height - inset * 2) / range
+						})
+					}
+					context.beginPath()
+					context.moveTo(points[0].x, sparkline.height - inset)
+					for (let index = 0; index < points.length; ++index)
+						context.lineTo(points[index].x, points[index].y)
+					context.lineTo(points[points.length - 1].x, sparkline.height - inset)
+					context.closePath()
+					context.fillStyle = root.withAlpha(root.trendColor, 0.10)
+					context.fill()
+					context.beginPath()
+					for (let index = 0; index < points.length; ++index) {
+						if (index === 0)
+							context.moveTo(points[index].x, points[index].y)
+						else
+							context.lineTo(points[index].x, points[index].y)
+					}
+					context.strokeStyle = root.trendColor
+					context.lineWidth = 2.5
+					context.lineJoin = "round"
+					context.lineCap = "round"
+					context.stroke()
+				}
+				Accessible.role: Accessible.Chart
+				Accessible.name: qsTr("Price trend with %1 points").arg(sparkline.pointCount)
+			}
 		}
 
 		GridLayout {
@@ -884,8 +2056,9 @@ FocusScope {
 			objectName: "providerDetailsStats"
 			Layout.fillWidth: true
 			Layout.preferredHeight: statsFlow.visible ? statsFlow.implicitHeight : 0
-			visible: root.visibleStats.length > 0
-			columns: root.compactLayout || width < 400 ? 1 : (width < 620 ? 2 : 3)
+			visible: root.visibleStats.length > 0 && !root.steamPresentation
+				&& !root.googlePresentation && !root.flashbackPresentation
+			columns: root.statColumnCount(width)
 			columnSpacing: Theme.space2
 			rowSpacing: Theme.space2
 
@@ -895,13 +2068,17 @@ FocusScope {
 					id: statTile
 					required property var modelData
 					required property int index
+					readonly property string presentation: root.financeLayout ? "market"
+						: root.identityPresentation ? "metric"
+						: root.commerceLayout ? "spec" : "detail"
 					objectName: "providerStat_" + statTile.index
 					Layout.fillWidth: true
 					Layout.preferredWidth: root.statWidth(statsFlow.width)
-					Layout.preferredHeight: statColumn.implicitHeight + Theme.space2 * 2
+					Layout.preferredHeight: statColumn.implicitHeight
+						+ (statTile.presentation === "detail" ? Theme.space2 * 2 : Theme.space1 * 2)
 					radius: Theme.innerRadius
-					color: Theme.panel
-					border.color: Theme.surfaceBorder
+					color: statTile.presentation === "detail" ? Theme.panel : "transparent"
+					border.color: statTile.presentation === "detail" ? Theme.surfaceBorder : "transparent"
 					Accessible.role: Accessible.StaticText
 					Accessible.name: statTile.modelData.label
 					Accessible.description: statTile.modelData.value
@@ -911,7 +2088,8 @@ FocusScope {
 						anchors.left: parent.left
 						anchors.right: parent.right
 						anchors.verticalCenter: parent.verticalCenter
-						anchors.margins: Theme.space2
+						anchors.margins: statTile.presentation === "detail"
+							? Theme.space2 : Theme.space1
 						spacing: Theme.space1
 
 						Label {
@@ -921,20 +2099,39 @@ FocusScope {
 							textFormat: Text.PlainText
 							color: Theme.textMuted
 							font.pixelSize: Theme.fontCaption
+							font.bold: statTile.presentation !== "detail"
+							font.capitalization: statTile.presentation !== "detail"
+								? Font.AllUppercase : Font.MixedCase
+							font.letterSpacing: statTile.presentation !== "detail" ? 0.35 : 0
 							elide: Text.ElideRight
+							horizontalAlignment: statTile.presentation === "metric"
+								? Text.AlignHCenter : Text.AlignLeft
 						}
 						Label {
 							objectName: "providerStatValue_" + statTile.index
 							Layout.fillWidth: true
 							text: statTile.modelData.value
 							textFormat: Text.PlainText
-							color: Theme.textStrong
+							color: statTile.modelData.tone === "success" ? Theme.success
+								: statTile.modelData.tone === "danger" ? Theme.danger
+								: statTile.modelData.tone === "warning" ? Theme.warning : Theme.textStrong
 							font.pixelSize: Theme.fontLabel
 							font.bold: true
 							wrapMode: Text.Wrap
 							maximumLineCount: 2
 							elide: Text.ElideRight
+							horizontalAlignment: statTile.presentation === "metric"
+								? Text.AlignHCenter : Text.AlignLeft
 						}
+					}
+
+					Rectangle {
+						anchors.left: parent.left
+						anchors.right: parent.right
+						anchors.bottom: parent.bottom
+						height: 1
+						visible: statTile.presentation !== "detail"
+						color: root.withAlpha(Theme.surfaceBorder, 0.72)
 					}
 				}
 			}
@@ -945,7 +2142,8 @@ FocusScope {
 			objectName: "providerDetailsChips"
 			Layout.fillWidth: true
 			Layout.preferredHeight: chipFlow.visible ? chipFlow.implicitHeight : 0
-			visible: root.visibleChips.length > 0
+			visible: root.visibleChips.length > 0 && !root.steamPresentation
+				&& !root.googlePresentation && !root.flashbackPresentation
 			spacing: Theme.space1
 
 			Repeater {
@@ -958,7 +2156,7 @@ FocusScope {
 					width: Math.min(chipFlow.width, chipLabel.implicitWidth + Theme.space2 * 2)
 					height: 24
 					radius: height / 2
-					color: chip.modelData.tone === "accent" ? Theme.accentSubtle
+					color: chip.modelData.tone === "accent" ? root.providerAccentSubtle
 						: chip.modelData.tone === "warning" ? root.withAlpha(Theme.warning, 0.13)
 						: chip.modelData.tone === "success" ? root.withAlpha(Theme.success, 0.13)
 						: chip.modelData.tone === "danger" ? root.withAlpha(Theme.danger, 0.13)
@@ -966,7 +2164,7 @@ FocusScope {
 					border.color: chip.modelData.tone === "warning" ? root.withAlpha(Theme.warning, 0.5)
 						: chip.modelData.tone === "success" ? root.withAlpha(Theme.success, 0.5)
 						: chip.modelData.tone === "danger" ? root.withAlpha(Theme.danger, 0.5)
-						: chip.modelData.tone === "accent" ? root.withAlpha(Theme.accent, 0.5)
+						: chip.modelData.tone === "accent" ? root.providerAccentBorder
 						: Theme.surfaceBorder
 					Accessible.role: Accessible.StaticText
 					Accessible.name: chip.modelData.text
@@ -979,7 +2177,7 @@ FocusScope {
 						anchors.rightMargin: Theme.space2
 						text: chip.modelData.text
 						textFormat: Text.PlainText
-						color: chip.modelData.tone === "accent" ? Theme.accent
+						color: chip.modelData.tone === "accent" ? root.providerAccent
 							: chip.modelData.tone === "danger" ? Theme.danger : Theme.textMain
 						font.pixelSize: Theme.fontCaption
 						font.bold: chip.modelData.tone !== "normal"
@@ -1129,6 +2327,7 @@ FocusScope {
 			Layout.fillWidth: true
 			Layout.preferredHeight: contextColumn.visible ? contextColumn.implicitHeight : 0
 			visible: root.expanded && root.contextPosts.length > 0
+				&& !root.flashbackPresentation
 			spacing: Theme.space2
 
 			Label {

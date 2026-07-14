@@ -72,7 +72,10 @@ Item {
                     Math.round(width * aspectRatio)))
 				radius: Theme.innerRadius
                 color: Theme.strip
-                border.color: attachmentAction.activeFocus ? Theme.focus : Theme.divider
+				border.color: !attachmentAction.enabled ? Theme.divider
+					: attachmentAction.activeFocus ? Theme.focus
+					: attachmentAction.down ? Theme.accent
+					: attachmentAction.hovered ? Theme.surfaceBorder : Theme.divider
 				border.width: attachmentAction.activeFocus ? Theme.focusRingWidth : 1
                 clip: true
                 Image {
@@ -114,11 +117,27 @@ Item {
 					Accessible.description: attachmentTile.label
                 }
 
+				Rectangle {
+					objectName: "attachmentStateOverlay_" + attachmentTile.stableId
+					anchors.fill: parent
+					anchors.margins: attachmentTile.border.width
+					radius: Math.max(0, attachmentTile.radius - attachmentTile.border.width)
+					color: !attachmentAction.enabled
+						? Qt.rgba(Theme.panel.r, Theme.panel.g, Theme.panel.b, 0.68)
+						: attachmentAction.down ? Theme.accentSubtle
+						: attachmentAction.hovered
+							? Qt.rgba(Theme.surfaceHover.r, Theme.surfaceHover.g, Theme.surfaceHover.b, 0.32)
+							: "transparent"
+					Behavior on color { ColorAnimation { duration: Theme.motionFast } }
+				}
+
                 Button {
                     id: attachmentAction
 					objectName: "attachmentAction_" + attachmentTile.stableId
                     anchors.fill: parent
                     hoverEnabled: true
+					enabled: attachmentTile.modelData.enabled === undefined
+						|| !!attachmentTile.modelData.enabled
                     background: null
                     contentItem: Item {}
                     Accessible.name: attachmentTile.label

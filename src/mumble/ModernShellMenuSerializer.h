@@ -27,6 +27,14 @@ public:
 		QString tone;
 		QString hint;
 		QString contextActionData;
+		/// Whether this action is a valid alternative for the current context.
+		/// This is separate from QAction::isEnabled() so callers can withhold an
+		/// ACL-gated action while its effective permissions are still unknown.
+		bool available = true;
+		/// Omit the action entirely when its QAction is disabled. Context menus use
+		/// this for ACL- and role-gated alternatives that are not available to the
+		/// current user, while explanatory disabled actions may remain visible.
+		bool omitWhenDisabled = false;
 	};
 
 	using ActionRegistry = QHash< QString, RegistryEntry >;

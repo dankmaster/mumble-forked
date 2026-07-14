@@ -13,6 +13,12 @@ Button {
 		if (normalized === "success") return Theme.success
 		return Theme.accent
 	}
+	readonly property color hoverToneColor: {
+		const normalized = String(tone || "").toLowerCase()
+		if (normalized === "primary" || normalized === "accent" || normalized === "neutral" || normalized === "")
+			return Theme.accentHover
+		return Qt.lighter(toneColor, 1.08)
+	}
 	readonly property bool emphasized: highlighted || checked
 		|| ["primary", "accent", "danger", "error", "warning", "retry", "success"]
 			.indexOf(String(tone || "").toLowerCase()) >= 0
@@ -43,13 +49,13 @@ Button {
 		radius: Math.min(Theme.innerRadius, Math.round(control.implicitHeight / 3))
 		color: !control.enabled ? Theme.panel
 			: control.down ? Qt.darker(control.emphasized ? control.toneColor : Theme.surfaceHover, 1.08)
-			: control.emphasized ? (control.hovered ? Qt.lighter(control.toneColor, 1.08) : control.toneColor)
+			: control.emphasized ? (control.hovered ? control.hoverToneColor : control.toneColor)
 			: control.hovered ? Theme.surfaceHover : Theme.surfaceRaised
-		border.color: control.activeFocus ? Theme.focus
+		border.color: !control.enabled ? Theme.divider
+			: control.activeFocus ? Theme.focus
 			: control.emphasized ? Qt.rgba(control.toneColor.r, control.toneColor.g, control.toneColor.b, 0.72)
 			: Theme.surfaceBorder
 		border.width: control.activeFocus ? Theme.focusRingWidth : 1
 		Behavior on color { ColorAnimation { duration: Theme.motionFast } }
-		Behavior on border.color { ColorAnimation { duration: Theme.motionFast } }
     }
 }

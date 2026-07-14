@@ -297,7 +297,8 @@ public:
 		ToolTipRole,
 		VisibleRole,
 		AttachmentsRole,
-		SourceRole
+		SourceRole,
+		SectionKindRole
 	};
 
 	explicit StableListModel(QObject *parent = nullptr);
@@ -335,9 +336,10 @@ public:
 	void replaceRoomStates(const QVariantList &voiceRooms, const QVariantList &textRooms);
 	void replaceDirectMessageStates(const QVariantList &conversations);
 	void selectScope(const QString &scopeToken);
+	void selectScopeFromRail(const QString &scopeToken, const QString &railKind);
+	static QVariantMap roomRow(const QVariantMap &room, const QString &kind);
 
 private:
-	static QVariantMap roomRow(const QVariantMap &room, const QString &kind);
 	void synchronizeAllRows();
 	QVariantList m_voiceRoomStates;
 	QVariantList m_textRoomStates;
@@ -355,13 +357,34 @@ public:
 	void removeParticipant(const QString &sessionId);
 	void replaceParticipantStates(const QVariantList &participants);
 	QVariantList participantStates() const;
+	static QVariantMap participantRow(const QVariantMap &participant);
 
 private:
-	static QVariantMap participantRow(const QVariantMap &participant);
+};
+
+class NavigationRailModel final : public StableListModel {
+	Q_OBJECT
+public:
+	using StableListModel::StableListModel;
+	void replaceRoomStates(const QVariantList &voiceRooms, const QVariantList &textRooms);
+	void replaceDirectMessageStates(const QVariantList &conversations);
+	void selectScope(const QString &scopeToken);
+	void selectScopeFromRail(const QString &scopeToken, const QString &railKind);
+	void updatePresence(const QString &sessionId, const QString &talkState, const QString &talkLabel,
+						const QString &talkTone, bool talking, bool isSelf, const QVariantList &badges,
+						const QVariantList &statuses);
+	void removeParticipant(const QString &sessionId);
+
+private:
+	void synchronizeAllRows();
+	QVariantList m_voiceRoomStates;
+	QVariantList m_textRoomStates;
+	QVariantList m_directMessageStates;
 };
 
 class ChatTimelineModel final : public StableListModel {
 	Q_OBJECT
+	Q_PROPERTY(bool hasUserHistory READ hasUserHistory NOTIFY hasUserHistoryChanged)
 public:
 	enum class MessageMutation { Ignored, Inserted, Updated, Unchanged };
 	explicit ChatTimelineModel(QObject *parent = nullptr);
@@ -373,6 +396,10 @@ public:
 	void replaceMessages(const QVariantList &messages);
 	QVariantList messages() const;
 	void clear();
+	bool hasUserHistory() const;
+
+signals:
+	void hasUserHistoryChanged();
 
 private:
 	struct RichBodyParseRequest {
@@ -392,6 +419,8 @@ private:
 	};
 
 	QVariantMap messageRow(const QVariantMap &message, QList< RichBodyParseRequest > *requests = nullptr);
+	static bool isUserHistoryRow(const QVariantMap &row);
+	void updateUserHistoryRow(const QString &messageId, const QVariantMap &row);
 	void forgetRichBodyMessage(const QString &messageId);
 	void scheduleRichBodyParses(const QList< RichBodyParseRequest > &requests);
 	void refillDeferredRichBodyParses();
@@ -407,6 +436,7 @@ private:
 	QList< QByteArray > m_pendingRichBodyOrder;
 	QList< QByteArray > m_deferredRichBodyOrder;
 	QSet< QByteArray > m_deferredRichBodyKeys;
+	QSet< QString > m_userHistoryMessageIds;
 	std::deque< ReadyRichBody > m_readyRichBodies;
 	bool m_richBodyWorkerActive = false;
 	bool m_richBodyDrainScheduled = false;
@@ -746,10 +776,13 @@ class UiCommandController final : public QObject {
 
 public:
 	using ScopeActionsProvider = std::function< QVariantList(const QString &, const QString &) >;
+	using ParticipantActionsProvider =
+		std::function< QVariantList(const QString &, const QString &, const QString &) >;
 
 	explicit UiCommandController(QObject *parent = nullptr);
 
 	Q_INVOKABLE void selectScope(const QString &scopeToken);
+	Q_INVOKABLE void selectScopeFromRail(const QString &scopeToken, const QString &railKind);
 	Q_INVOKABLE void joinVoiceChannel(const QString &scopeToken);
 	Q_INVOKABLE void selectParticipant(const QString &sessionId);
 	Q_INVOKABLE void openDirectMessage(const QString &sessionId);
@@ -772,6 +805,8 @@ public:
 	Q_INVOKABLE void invokeScopeActionValue(const QString &scopeToken, const QString &actionId, int value,
 										bool finalValue);
 	Q_INVOKABLE QVariantList requestScopeActions(const QString &scopeToken, const QString &kind) const;
+	Q_INVOKABLE QVariantList requestParticipantActions(const QString &sessionId, const QString &entryKind,
+																	 const QString &scopeToken) const;
 	Q_INVOKABLE void invokeParticipantAction(const QString &sessionId, const QString &actionId);
 	Q_INVOKABLE void invokeParticipantActionValue(const QString &sessionId, const QString &actionId, int value,
 											  bool finalValue);
@@ -781,9 +816,11 @@ public:
 	Q_INVOKABLE void releasePtt();
 	bool pttPressed() const;
 	void setScopeActionsProvider(ScopeActionsProvider provider);
+	void setParticipantActionsProvider(ParticipantActionsProvider provider);
 
 signals:
 	void scopeSelectionRequested(const QString &scopeToken);
+	void scopeRailSelectionRequested(const QString &scopeToken, const QString &railKind);
 	void voiceJoinRequested(const QString &scopeToken);
 	void participantSelectionRequested(const QString &sessionId);
 	void directMessageOpenRequested(const QString &sessionId);
@@ -814,6 +851,7 @@ signals:
 private:
 	bool m_pttPressed = false;
 	ScopeActionsProvider m_scopeActionsProvider;
+	ParticipantActionsProvider m_participantActionsProvider;
 };
 
 enum class PttSafetyReason {

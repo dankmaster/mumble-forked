@@ -15,6 +15,12 @@ class QPalette;
 class QWindow;
 class QWidget;
 
+namespace Mumble {
+namespace ModernTheme {
+struct ThemeDefinition;
+}
+}
+
 enum class UiThemePreset {
 	MumbleDark,
 	MumbleLight,
@@ -47,6 +53,7 @@ struct UiThemeTokens {
 	QColor overlay;
 	QColor highlight;
 	QColor border;
+	QColor mediaCanvas;
 	QColor textPrimary;
 	QColor textSecondary;
 	QColor textMuted;
@@ -70,6 +77,9 @@ struct UiThemeWindowChrome {
 
 std::optional< UiThemeTokens > activeUiThemeTokens();
 UiThemeTokens uiThemeTokensForThemeId(const QString &themeId);
+UiThemeTokens uiThemeTokensForThemeDefinition(const Mumble::ModernTheme::ThemeDefinition &theme);
+bool applyUiThemeAccentOverride(UiThemeTokens &tokens, const QString &accentId, const QString &customAccent,
+								int customAccentStrength);
 QColor uiThemeColorWithAlpha(const QColor &color, qreal alpha);
 QString uiThemeQssColor(const QColor &color);
 bool uiThemePaletteIsDark(const QPalette &palette);

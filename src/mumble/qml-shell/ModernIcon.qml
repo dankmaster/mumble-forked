@@ -1,10 +1,11 @@
 import QtQuick
 import QtQuick.Shapes
+import Mumble.Theme 1.0
 
 Item {
 	id: root
 	property string name: ""
-	property color color: "white"
+	property color color: Theme.textStrong
 	property int size: 18
 
 	function pathForName(iconName) {
@@ -68,7 +69,7 @@ Item {
 		width: 24
 		height: 24
 		scale: Math.max(0, root.size) / 24
-		visible: root.pathData.length > 0 && root.size > 0
+		visible: root.pathData.length > 0 && root.name !== "more" && root.size > 0
 		antialiasing: true
 		Accessible.ignored: true
 
@@ -81,6 +82,25 @@ Item {
 
 			PathSvg {
 				path: root.pathData
+			}
+		}
+	}
+
+	Row {
+		id: moreIcon
+		objectName: "modernMoreIcon"
+		anchors.centerIn: parent
+		visible: root.name === "more" && root.size > 0
+		spacing: Math.max(2, Math.round(root.size / 6))
+		Accessible.ignored: true
+
+		Repeater {
+			model: 3
+			delegate: Rectangle {
+				width: Math.max(2, Math.round(root.size / 8))
+				height: width
+				radius: width / 2
+				color: root.color
 			}
 		}
 	}

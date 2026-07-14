@@ -1,10 +1,12 @@
 import QtQuick
 import QtTest
+import Mumble.Theme 1.0
 
 TestCase {
 	id: testCase
 	name: "MediaSessionControls"
 	when: windowShown
+	visible: true
 	width: 820
 	height: 300
 
@@ -95,6 +97,8 @@ TestCase {
 		session.muteCalls = 0
 		controlsLoader.item.externalAvailable = false
 		controlsLoader.item.fullscreen = false
+		findChild(controlsLoader.item, "mediaExternalButton").text = "Open externally"
+		findChild(controlsLoader.item, "mediaCloseButton").text = "End session"
 	}
 
 	function test_time_formatting_and_accessible_toolbar() {
@@ -104,6 +108,20 @@ TestCase {
 		compare(controls.formatTime(3665), "1:01:05")
 		compare(controls.Accessible.role, Accessible.ToolBar)
 		verify(controls.focusInitialControl())
+	}
+
+	function test_nested_popups_keep_the_product_palette_and_custom_chrome() {
+		const volumePopup = findChild(controlsLoader.item, "mediaVolumePopup")
+		const closeDialog = findChild(controlsLoader.item, "mediaCloseConfirmation")
+		verify(volumePopup !== null && closeDialog !== null)
+		compare(volumePopup.palette.highlight, Theme.selected)
+		compare(volumePopup.palette.toolTipBase, Theme.surfaceRaised)
+		compare(volumePopup.palette.disabled.highlight, Theme.surfaceBorder)
+		compare(closeDialog.header, null)
+		compare(closeDialog.footer, null)
+		compare(closeDialog.palette.highlight, Theme.selected)
+		compare(closeDialog.palette.toolTipText, Theme.textStrong)
+		compare(closeDialog.palette.disabled.link, Theme.textMuted)
 	}
 
 	function test_shared_window_close_requires_an_explicit_choice() {
@@ -218,11 +236,44 @@ TestCase {
 		session.state = "error"
 		controlsLoader.item.externalAvailable = true
 		tryCompare(controlsLoader.item, "externalActionAvailable", true)
+		verify(controlsLoader.item.focusInitialControl())
+		compare(externalButton.activeFocus, true)
 		externalButton.clicked()
 		compare(externalSpy.count, 1)
 
 		fullscreenButton.clicked()
 		compare(fullscreenSpy.count, 1)
 		compare(fullscreenSpy.signalArguments[0][0], true)
+	}
+
+	function test_provider_controlled_embeds_expose_their_surface_without_fake_transport() {
+		const controls = controlsLoader.item
+		const seekSlider = findChild(controls, "mediaSeekSlider")
+		const playButton = findChild(controls, "mediaPlayButton")
+		const stateLabel = findChild(controls, "mediaStateLabel")
+		const externalButton = findChild(controls, "mediaExternalButton")
+		const muteButton = findChild(controls, "mediaMuteButton")
+		const volumeSlider = findChild(controls, "mediaVolumeSlider")
+
+		session.sharedAvailable = false
+		session.sharedJoined = false
+		session.playbackControllable = false
+		session.playbackControlAllowed = false
+		session.state = "ready"
+		controls.externalAvailable = true
+
+		tryCompare(controls, "providerControlled", true)
+		compare(stateLabel.text, "Provider controls")
+		verify(!seekSlider.visible)
+		verify(!playButton.visible)
+		verify(!muteButton.visible)
+		verify(!volumeSlider.visible)
+		tryCompare(controls, "externalActionAvailable", true)
+		compare(externalButton.visible, controls.visible && controls.externalActionAvailable)
+		verify(externalButton.enabled)
+		verify(controls.focusInitialControl())
+		compare(externalButton.activeFocus, true)
+		externalButton.clicked()
+		compare(externalSpy.count, 1)
 	}
 }

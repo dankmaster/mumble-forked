@@ -578,15 +578,17 @@ public:
 	QVariantMap buildQmlActiveScopeState(const PersistentChatTarget &target);
 	QVariantMap buildModernShellServerLogActiveScopeState(const PersistentChatTarget &target);
 	QVariantMap buildQmlParticipantState(const ClientUser *user, const Channel *contextChannel,
-													  const ClientUser *directMessagePeer, int avatarSize,
-													  bool includeAvatar);
+												  const ClientUser *directMessagePeer, int avatarSize,
+												  bool includeAvatar, bool includeActions = true);
 	QVariantMap buildQmlListenerState(const ClientUser *user, const Channel *channel, int avatarSize,
-											   bool includeAvatar);
+											   bool includeAvatar, bool includeActions = true);
 	std::optional< QVariantMap > buildCurrentQmlParticipantState(const ClientUser *user);
 	QVariantList buildQmlChannelParticipantStates(const Channel *channel, int avatarSize,
-														   bool includeAvatar);
+														   bool includeAvatar, bool includeActions = true);
 	QVariantMap buildQmlRoomState();
 	QVariantList buildQmlScopeActions(const QString &scopeToken, const QString &kind);
+	QVariantList buildQmlParticipantActions(const QString &sessionId, const QString &entryKind,
+														 const QString &scopeToken);
 	void flushQmlRoomStateUpdates();
 	void publishQmlChatMessage(const MumbleProto::ChatMessage &message);
 	void publishPersistentChatInlineDataImageUpdate(const QString &token);
@@ -1060,7 +1062,7 @@ protected:
 	void handleModernDialogAction(const QString &dialogID, const QString &actionID, const QVariantMap &payload);
 	void connectFromModernDialog(const QString &host, unsigned short port, const QString &username,
 								 const QString &password);
-	void applyModernSettings(const Settings &settings, bool accepted);
+	void applyModernSettings(const Settings &settings, bool accepted, bool announce = true);
 	void openNextModernStartupDialog();
 	bool beginModernShortcutCapture(int rowIndex);
 	void cancelModernShortcutCapture();

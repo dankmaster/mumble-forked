@@ -21,7 +21,8 @@ public:
 
 private:
 	bool waitForPresentedFrame(QString *error);
-	void applyState(const QString &state);
+	void applyState(const QString &state, const QString &motdVariant, const QString &richPreviewVariant,
+					const QString &richPreviewSize);
 
 	QmlShellHost *m_host = nullptr;
 	qulonglong m_generation = 0;

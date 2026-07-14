@@ -1,10 +1,12 @@
 import QtQuick
 import QtTest
+import Mumble.Theme 1.0
 
 TestCase {
     id: testCase
     name: "ScreenShareEditor"
     when: windowShown
+	visible: true
     width: 640
     height: 480
 
@@ -70,6 +72,10 @@ TestCase {
 		tryVerify(function() { return editor.controlsInitialized })
 		const source = findChild(editor, "screenShareSource_monitor:0")
 		verify(source !== null)
+		source.forceActiveFocus()
+		tryCompare(source, "activeFocus", true)
+		compare(source.border.color, Theme.focus)
+		compare(source.border.width, Theme.focusRingWidth)
 		source.requestThumbnailIfNeeded()
 		compare(requested.length, 1)
 		editor.selectedResolutionValue = "2560x1440"
@@ -109,6 +115,25 @@ TestCase {
 			return selected.thumbnailRequestAttempts > attemptsBeforeRetry
 		}, 1200)
 		verify(selected.thumbnailRequestAttempts <= 4)
+		editor.destroy()
+	}
+
+	function test_source_card_uses_theme_pressed_state() {
+		const editor = createEditor()
+		editor.width = testCase.width
+		editor.shareState = screenShareState("")
+		tryVerify(function() { return editor.controlsInitialized })
+		editor.height = editor.implicitHeight
+		const source = findChild(editor, "screenShareSource_monitor:1")
+		const hitArea = findChild(editor, "screenShareSourceHitArea_monitor:1")
+		verify(source !== null)
+		verify(hitArea !== null)
+
+		mousePress(hitArea, hitArea.width / 2, hitArea.height / 2, Qt.LeftButton)
+		tryCompare(hitArea, "pressed", true)
+		compare(source.color, Theme.accentSubtle)
+		mouseRelease(hitArea, hitArea.width / 2, hitArea.height / 2, Qt.LeftButton)
+		compare(editor.selectedSourceId, "monitor:1")
 		editor.destroy()
 	}
 }

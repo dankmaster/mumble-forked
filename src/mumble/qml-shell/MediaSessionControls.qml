@@ -14,9 +14,11 @@ Rectangle {
 	readonly property bool canControl: session.playbackControlAllowed !== undefined
 		? Boolean(session.playbackControlAllowed)
 		: Boolean(session.playbackControllable && (!session.sharedAvailable || session.sharedHost))
+	readonly property bool providerControlled: !Boolean(session.playbackControllable)
 	readonly property bool compactControls: width < 720
 	readonly property bool controlsWrapped: transportActions.childrenRect.height > Theme.controlHeight
-	readonly property bool externalActionAvailable: externalAvailable && session.state === "error"
+	readonly property bool externalActionAvailable: externalAvailable
+		&& (session.state === "error" || providerControlled)
 	readonly property bool confirmationVisible: closeDialog.opened
 	readonly property bool compactVolumeVisible: compactControls
 	readonly property bool volumePopupVisible: volumePopup.opened
@@ -42,6 +44,7 @@ Rectangle {
 				? qsTr("Loading · %1%").arg(session.loadProgress)
 				: qsTr("Loading")
 		if (session.state === "error") return qsTr("Playback unavailable")
+		if (root.providerControlled) return qsTr("Provider controls")
 		if (session.sharedHost) return qsTr("Hosting for %1").arg(session.sharedParticipantCount)
 		if (session.sharedJoined) return qsTr("Synchronized with host")
 		return session.state === "playing" ? qsTr("Playing") : qsTr("Paused")
@@ -73,8 +76,17 @@ Rectangle {
 	}
 
 	function focusInitialControl() {
-		playButton.forceActiveFocus()
-		return playButton.activeFocus
+		const candidates = [ playButton, externalButton, muteButton, compactVolumeButton,
+			volumeSlider, fullscreenButton, closeButton ]
+		for (let index = 0; index < candidates.length; ++index) {
+			const candidate = candidates[index]
+			if (!candidate || !candidate.enabled)
+				continue
+			candidate.forceActiveFocus()
+			if (candidate.activeFocus)
+				return true
+		}
+		return false
 	}
 
 	implicitHeight: controlsLayout.implicitHeight + Theme.space4
@@ -116,6 +128,7 @@ Rectangle {
 				to: Math.max(1, Number(session.duration || 0))
 				value: Number(session.position || 0)
 				enabled: root.canControl && session.state !== "loading" && session.state !== "error"
+				visible: !root.providerControlled
 				onMoved: session.seek(value)
 				Accessible.name: qsTr("Playback position")
 				Accessible.description: qsTr("%1 of %2").arg(root.formatTime(value)).arg(root.formatTime(session.duration))
@@ -128,6 +141,7 @@ Rectangle {
 				color: Theme.textMuted
 				font.pixelSize: Theme.fontCaption
 				horizontalAlignment: Text.AlignRight
+				visible: !root.providerControlled
 			}
 		}
 
@@ -144,6 +158,7 @@ Rectangle {
 				objectName: "mediaPlayButton"
 				text: session.state === "playing" ? "Ⅱ" : "▶"
 				enabled: root.canControl && session.state !== "loading" && session.state !== "error"
+				visible: !root.providerControlled
 				Accessible.name: session.state === "playing" ? qsTr("Pause") : qsTr("Play")
 				Accessible.description: session.sharedJoined
 					? qsTr("Control synchronized playback for everyone in the session") : ""
@@ -166,6 +181,7 @@ Rectangle {
 			}
 
 			ModernButton {
+				id: externalButton
 				objectName: "mediaExternalButton"
 				visible: root.externalActionAvailable
 				width: Math.min(implicitWidth, Math.max(Theme.controlHeight, transportActions.width))
@@ -180,6 +196,7 @@ Rectangle {
 				objectName: "mediaMuteButton"
 				text: session.muted || session.volume === 0 ? "M" : "A"
 				selected: session.muted
+				visible: !root.providerControlled
 				Accessible.name: session.muted ? qsTr("Unmute media") : qsTr("Mute media")
 				onClicked: session.toggleMuted()
 			}
@@ -188,7 +205,7 @@ Rectangle {
 				id: volumeSlider
 				objectName: "mediaVolumeSlider"
 				width: 104
-				visible: !root.compactControls
+				visible: !root.compactControls && !root.providerControlled
 				from: 0
 				to: 100
 				stepSize: 1
@@ -201,7 +218,7 @@ Rectangle {
 			ModernButton {
 				id: compactVolumeButton
 				objectName: "mediaCompactVolumeButton"
-				visible: root.compactControls
+				visible: root.compactControls && !root.providerControlled
 				dense: true
 				highlighted: volumePopup.opened
 				text: qsTr("%1%").arg(Math.round(session.volume))
@@ -246,6 +263,61 @@ Rectangle {
 		closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 		padding: Theme.space3
 		width: Math.min(280, root.width - Theme.space4)
+		palette.window: Theme.surfaceRaised
+		palette.active.base: Theme.surfaceRaised
+		palette.inactive.base: Theme.surfaceRaised
+		palette.alternateBase: Theme.panel
+		palette.active.button: Theme.surfaceRaised
+		palette.inactive.button: Theme.surfaceRaised
+		palette.active.text: Theme.textMain
+		palette.inactive.text: Theme.textMain
+		palette.active.windowText: Theme.textMain
+		palette.inactive.windowText: Theme.textMain
+		palette.active.buttonText: Theme.textStrong
+		palette.inactive.buttonText: Theme.textStrong
+		palette.active.brightText: Theme.textStrong
+		palette.inactive.brightText: Theme.textStrong
+		palette.active.highlight: Theme.selected
+		palette.inactive.highlight: Theme.selected
+		palette.active.highlightedText: Theme.textStrong
+		palette.inactive.highlightedText: Theme.textStrong
+		palette.placeholderText: Theme.textMuted
+		palette.active.link: Theme.accent
+		palette.inactive.link: Theme.accent
+		palette.active.linkVisited: Theme.accentHover
+		palette.inactive.linkVisited: Theme.accentHover
+		palette.active.toolTipBase: Theme.surfaceRaised
+		palette.inactive.toolTipBase: Theme.surfaceRaised
+		palette.active.toolTipText: Theme.textStrong
+		palette.inactive.toolTipText: Theme.textStrong
+		palette.active.light: Theme.surfaceHover
+		palette.inactive.light: Theme.surfaceHover
+		palette.active.midlight: Theme.surfaceRaised
+		palette.inactive.midlight: Theme.surfaceRaised
+		palette.active.mid: Theme.surfaceBorder
+		palette.inactive.mid: Theme.surfaceBorder
+		palette.dark: Theme.rail
+		palette.shadow: Theme.strip
+		palette.disabled.window: Theme.surfaceRaised
+		palette.disabled.base: Theme.panel
+		palette.disabled.alternateBase: Theme.panel
+		palette.disabled.button: Theme.panel
+		palette.disabled.text: Theme.textMuted
+		palette.disabled.windowText: Theme.textMuted
+		palette.disabled.buttonText: Theme.textMuted
+		palette.disabled.brightText: Theme.textMuted
+		palette.disabled.highlight: Theme.surfaceBorder
+		palette.disabled.highlightedText: Theme.textMuted
+		palette.disabled.placeholderText: Theme.textMuted
+		palette.disabled.light: Theme.surfaceBorder
+		palette.disabled.midlight: Theme.panel
+		palette.disabled.mid: Theme.divider
+		palette.disabled.dark: Theme.rail
+		palette.disabled.shadow: Theme.strip
+		palette.disabled.link: Theme.textMuted
+		palette.disabled.linkVisited: Theme.textMuted
+		palette.disabled.toolTipBase: Theme.panel
+		palette.disabled.toolTipText: Theme.textMuted
 		x: {
 			const point = compactVolumeButton.mapToItem(root, 0, 0)
 			return Math.max(Theme.space2, Math.min(root.width - width - Theme.space2, point.x + compactVolumeButton.width - width))
@@ -296,6 +368,63 @@ Rectangle {
 		padding: Theme.space5
 		width: Math.min(460, parent ? parent.width - Theme.space5 * 2 : 460)
 		title: session.sharedHost ? qsTr("End this shared session?") : qsTr("Leave shared playback?")
+		header: null
+		footer: null
+		palette.window: Theme.panel
+		palette.active.base: Theme.panel
+		palette.inactive.base: Theme.panel
+		palette.alternateBase: Theme.surfaceRaised
+		palette.active.button: Theme.surfaceRaised
+		palette.inactive.button: Theme.surfaceRaised
+		palette.active.text: Theme.textMain
+		palette.inactive.text: Theme.textMain
+		palette.active.windowText: Theme.textMain
+		palette.inactive.windowText: Theme.textMain
+		palette.active.buttonText: Theme.textStrong
+		palette.inactive.buttonText: Theme.textStrong
+		palette.active.brightText: Theme.textStrong
+		palette.inactive.brightText: Theme.textStrong
+		palette.active.highlight: Theme.selected
+		palette.inactive.highlight: Theme.selected
+		palette.active.highlightedText: Theme.textStrong
+		palette.inactive.highlightedText: Theme.textStrong
+		palette.placeholderText: Theme.textMuted
+		palette.active.link: Theme.accent
+		palette.inactive.link: Theme.accent
+		palette.active.linkVisited: Theme.accentHover
+		palette.inactive.linkVisited: Theme.accentHover
+		palette.active.toolTipBase: Theme.surfaceRaised
+		palette.inactive.toolTipBase: Theme.surfaceRaised
+		palette.active.toolTipText: Theme.textStrong
+		palette.inactive.toolTipText: Theme.textStrong
+		palette.active.light: Theme.surfaceHover
+		palette.inactive.light: Theme.surfaceHover
+		palette.active.midlight: Theme.surfaceRaised
+		palette.inactive.midlight: Theme.surfaceRaised
+		palette.active.mid: Theme.surfaceBorder
+		palette.inactive.mid: Theme.surfaceBorder
+		palette.dark: Theme.rail
+		palette.shadow: Theme.strip
+		palette.disabled.window: Theme.panel
+		palette.disabled.base: Theme.panel
+		palette.disabled.alternateBase: Theme.panel
+		palette.disabled.button: Theme.panel
+		palette.disabled.text: Theme.textMuted
+		palette.disabled.windowText: Theme.textMuted
+		palette.disabled.buttonText: Theme.textMuted
+		palette.disabled.brightText: Theme.textMuted
+		palette.disabled.highlight: Theme.surfaceBorder
+		palette.disabled.highlightedText: Theme.textMuted
+		palette.disabled.placeholderText: Theme.textMuted
+		palette.disabled.light: Theme.surfaceBorder
+		palette.disabled.midlight: Theme.panel
+		palette.disabled.mid: Theme.divider
+		palette.disabled.dark: Theme.rail
+		palette.disabled.shadow: Theme.strip
+		palette.disabled.link: Theme.textMuted
+		palette.disabled.linkVisited: Theme.textMuted
+		palette.disabled.toolTipBase: Theme.panel
+		palette.disabled.toolTipText: Theme.textMuted
 
 		background: Rectangle {
 			radius: Theme.shellRadius

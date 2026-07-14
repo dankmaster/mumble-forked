@@ -1,5 +1,6 @@
 import QtQuick
 import QtTest
+import Mumble.Theme 1.0
 
 TestCase {
 	id: testCase
@@ -18,6 +19,13 @@ TestCase {
 			item.color = "#5ec8b0"
 			item.size = 24
 		}
+	}
+
+	Loader {
+		id: defaultToneLoader
+		visible: false
+		source: "qrc:/qml-shell/ModernIcon.qml"
+		onLoaded: item.name = "search"
 	}
 
 	function iconShape() {
@@ -49,10 +57,24 @@ TestCase {
 		compare(shape.scale, 0.75)
 	}
 
+	function test_default_tone_uses_theme_text_token() {
+		verify(defaultToneLoader.item !== null)
+		compare(defaultToneLoader.item.color, Theme.textStrong)
+	}
+
 	function test_unknown_icon_is_safely_hidden() {
 		loader.item.name = "not-an-icon"
 		compare(loader.item.pathData, "")
 		verify(!iconShape().visible)
+	}
+
+	function test_more_icon_uses_stable_primitive_dots() {
+		loader.item.name = "more"
+		verify(loader.item.pathData.length > 0)
+		verify(!iconShape().visible)
+		const dots = findChild(loader.item, "modernMoreIcon")
+		verify(dots !== null)
+		verify(dots.visible)
 	}
 
 	function test_semantic_navigation_and_media_icons_have_vector_paths() {

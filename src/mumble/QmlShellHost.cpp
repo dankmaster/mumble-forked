@@ -38,6 +38,7 @@ QmlShellHost::QmlShellHost(ClientActionRegistry *actionRegistry, QObject *parent
 	  m_commandController(std::make_unique< UiCommandController >(this)),
 	  m_pttSafetyController(std::make_unique< PttSafetyController >(m_commandController.get())),
 	  m_roomModel(std::make_unique< RoomModel >(this)),
+	  m_navigationModel(std::make_unique< NavigationRailModel >(this)),
 	  m_participantModel(std::make_unique< ParticipantModel >(this)),
 	  m_chatModel(std::make_unique< ChatTimelineModel >(this)),
 	  m_operationModel(std::make_unique< AsyncOperationModel >(this)),
@@ -91,6 +92,7 @@ bool QmlShellHost::start(QString *error) {
 						  static_cast< QObject * >(m_activeScopeController.get()),
 						  static_cast< QObject * >(m_commandController.get()),
 						  static_cast< QObject * >(m_roomModel.get()),
+						  static_cast< QObject * >(m_navigationModel.get()),
 						  static_cast< QObject * >(m_participantModel.get()),
 						  static_cast< QObject * >(m_chatModel.get()),
 						  static_cast< QObject * >(m_composerController.get()),
@@ -109,6 +111,7 @@ bool QmlShellHost::start(QString *error) {
 	context->setContextProperty(QStringLiteral("activeScope"), m_activeScopeController.get());
 	context->setContextProperty(QStringLiteral("uiCommands"), m_commandController.get());
 	context->setContextProperty(QStringLiteral("roomModel"), m_roomModel.get());
+	context->setContextProperty(QStringLiteral("navigationModel"), m_navigationModel.get());
 	context->setContextProperty(QStringLiteral("participantModel"), m_participantModel.get());
 	context->setContextProperty(QStringLiteral("chatModel"), m_chatModel.get());
 	context->setContextProperty(QStringLiteral("composer"), m_composerController.get());
@@ -150,11 +153,11 @@ bool QmlShellHost::start(QString *error) {
 		const QColor text = m_themeController->textStrong();
 		const UiThemeWindowChrome chrome { caption, text, m_themeController->surfaceBorder(),
 			text.lightness() > caption.lightness() };
-		applyUiThemeNativeTitleBar(m_window, chrome);
-		applyUiThemeNativeTitleBar(m_pttToolWindow, chrome);
-#ifdef USE_MANUAL_PLUGIN
-		applyUiThemeNativeTitleBar(m_manualPluginWindow, chrome);
-#endif
+		for (QWindow *window : QGuiApplication::topLevelWindows()) {
+			if (qobject_cast< QQuickWindow * >(window)) {
+				applyUiThemeNativeTitleBar(window, chrome);
+			}
+		}
 	});
 	m_windowStateController->attach(m_window, Global::get().s.qbaModernMainWindowGeometry,
 		m_window->minimumSize());
@@ -182,6 +185,15 @@ bool QmlShellHost::start(QString *error) {
 	});
 	connect(qGuiApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState state) {
 		if (state != Qt::ApplicationActive) releasePttForSafety(PttSafetyReason::ApplicationDeactivated);
+	});
+	connect(qGuiApp, &QGuiApplication::focusWindowChanged, this, [this](QWindow *window) {
+		if (!window || !qobject_cast< QQuickWindow * >(window)) {
+			return;
+		}
+		const QColor caption = m_themeController->shellBackground();
+		const QColor text = m_themeController->textStrong();
+		applyUiThemeNativeTitleBar(window, { caption, text, m_themeController->surfaceBorder(),
+			text.lightness() > caption.lightness() });
 	});
 	return true;
 }
@@ -219,6 +231,7 @@ ClientSessionController *QmlShellHost::sessionController() const { return m_sess
 ActiveScopeController *QmlShellHost::activeScopeController() const { return m_activeScopeController.get(); }
 UiCommandController *QmlShellHost::commandController() const { return m_commandController.get(); }
 RoomModel *QmlShellHost::roomModel() const { return m_roomModel.get(); }
+NavigationRailModel *QmlShellHost::navigationModel() const { return m_navigationModel.get(); }
 ParticipantModel *QmlShellHost::participantModel() const { return m_participantModel.get(); }
 ChatTimelineModel *QmlShellHost::chatModel() const { return m_chatModel.get(); }
 ComposerController *QmlShellHost::composerController() const { return m_composerController.get(); }
@@ -233,9 +246,11 @@ QmlThemeController *QmlShellHost::themeController() const { return m_themeContro
 
 void QmlShellHost::setVisualFixtureOverrideActive(const bool active) {
 	m_visualFixtureOverrideActive = active;
+	if (m_window) m_window->setProperty("visualFixtureOverrideActive", active);
 	for (QObject *object : { static_cast< QObject * >(m_sessionController.get()),
 						  static_cast< QObject * >(m_activeScopeController.get()),
 						  static_cast< QObject * >(m_roomModel.get()),
+						  static_cast< QObject * >(m_navigationModel.get()),
 						  static_cast< QObject * >(m_participantModel.get()),
 						  static_cast< QObject * >(m_chatModel.get()),
 						  static_cast< QObject * >(m_operationModel.get()),
@@ -251,6 +266,7 @@ void QmlShellHost::setVisualFixtureMutationActive(const bool active) {
 	for (QObject *object : { static_cast< QObject * >(m_sessionController.get()),
 						  static_cast< QObject * >(m_activeScopeController.get()),
 						  static_cast< QObject * >(m_roomModel.get()),
+						  static_cast< QObject * >(m_navigationModel.get()),
 						  static_cast< QObject * >(m_participantModel.get()),
 						  static_cast< QObject * >(m_chatModel.get()),
 						  static_cast< QObject * >(m_operationModel.get()),

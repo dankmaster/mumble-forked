@@ -54,6 +54,17 @@ namespace {
 		return QStringLiteral("custom:") + normalizeThemeIdPart(idPart);
 	}
 
+	const QMap< QString, QColor > &fixedAccentColors() {
+		static const QMap< QString, QColor > accents {
+			{ QStringLiteral("teal"), QColor(QStringLiteral("#5ec8b0")) },
+			{ QStringLiteral("blue"), QColor(QStringLiteral("#73b7ff")) },
+			{ QStringLiteral("violet"), QColor(QStringLiteral("#b59cff")) },
+			{ QStringLiteral("amber"), QColor(QStringLiteral("#f2c76f")) },
+			{ QStringLiteral("rose"), QColor(QStringLiteral("#ff8aa0")) },
+		};
+		return accents;
+	}
+
 	QString metadataValue(const QString &css, const QString &key) {
 		const QRegularExpression expression(
 			QStringLiteral("(?:/\\*|//)?\\s*mumble-theme-%1\\s*:\\s*([^\\r\\n*;]+)").arg(key),
@@ -120,6 +131,9 @@ namespace {
 		const QString name         = metadataValue(css, QStringLiteral("name"));
 		theme.id                  = customThemeId(configuredID.isEmpty() ? fileInfo.completeBaseName() : configuredID);
 		theme.name                = name.isEmpty() ? fileInfo.completeBaseName() : name;
+		const QString appearance  = metadataValue(css, QStringLiteral("appearance")).trimmed().toLower();
+		theme.appearance          = appearance == QLatin1String("light") ? QStringLiteral("light")
+																		 : QStringLiteral("dark");
 		theme.sourcePath          = fileInfo.absoluteFilePath();
 		theme.legacyCss           = true;
 		theme.tokens              = tokens;
@@ -215,6 +229,7 @@ namespace {
 		theme.tokens.insert(QStringLiteral("--accent"), cssColor(theme.palette.accent));
 		theme.tokens.insert(QStringLiteral("--accent-strong"), cssColor(theme.palette.accentHover));
 		theme.tokens.insert(QStringLiteral("--accent-soft"), cssColor(theme.palette.accentSubtle));
+		theme.tokens.insert(QStringLiteral("--focus-accent"), cssColor(theme.palette.focusAccent));
 		theme.tokens.insert(QStringLiteral("--danger"), cssColor(theme.palette.red));
 		theme.tokens.insert(QStringLiteral("--success"), cssColor(theme.palette.green));
 		theme.tokens.insert(QStringLiteral("--warning"), cssColor(theme.palette.yellow));
@@ -283,10 +298,18 @@ QString customAccentId() {
 
 QString normalizedAccentId(const QString &accentID) {
 	const QString normalized = accentID.trimmed().toLower();
-	static const QSet< QString > builtIns { QStringLiteral("auto"), QStringLiteral("teal"),  QStringLiteral("blue"),
-											QStringLiteral("violet"), QStringLiteral("amber"),
-											QStringLiteral("rose"), QStringLiteral("custom") };
-	return builtIns.contains(normalized) ? normalized : QStringLiteral("auto");
+	return normalized == QLatin1String("auto") || normalized == customAccentId()
+			   || fixedAccentColors().contains(normalized)
+			   ? normalized
+			   : QStringLiteral("auto");
+}
+
+QColor accentColorOverride(const QString &accentID, const QString &customColor) {
+	const QString normalized = normalizedAccentId(accentID);
+	if (normalized == customAccentId()) {
+		return QColor(normalizedCustomAccentColor(customColor));
+	}
+	return fixedAccentColors().value(normalized);
 }
 
 QString normalizedCustomAccentColor(const QString &color) {

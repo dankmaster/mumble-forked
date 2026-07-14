@@ -15,12 +15,12 @@ Slider {
 		width: control.availableWidth
 		height: implicitHeight
 		radius: height / 2
-		color: Theme.surfaceRaised
+		color: control.enabled ? Theme.surfaceRaised : Theme.panel
 		Rectangle {
 			width: control.visualPosition * parent.width
 			height: parent.height
 			radius: parent.radius
-			color: Theme.accent
+			color: control.enabled ? Theme.accent : Theme.textMuted
 		}
 	}
 
@@ -30,8 +30,9 @@ Slider {
 		implicitWidth: control.pressed ? 18 : 16
 		implicitHeight: implicitWidth
 		radius: width / 2
-		color: Theme.accent
-		border.color: control.activeFocus ? Theme.focus : Theme.accentHover
+		color: control.enabled ? Theme.accent : Theme.textMuted
+		border.color: !control.enabled ? Theme.divider
+			: control.activeFocus ? Theme.focus : Theme.accentHover
 		border.width: control.activeFocus ? Theme.focusRingWidth : 1
 		Behavior on implicitWidth { NumberAnimation { duration: Theme.motionFast } }
 	}

@@ -40,6 +40,19 @@ TestCase {
 		return item
 	}
 
+	function exposedProviderGroupingCount(item) {
+		let count = item.visible && !item.Accessible.ignored
+			&& item.Accessible.role === Accessible.Grouping ? 1 : 0
+		const cardNames = ["providerSteamCard", "providerGoogleSearch", "providerFlashbackThread"]
+		for (let index = 0; index < cardNames.length; ++index) {
+			const card = findChild(item, cardNames[index])
+			if (card && card.visible && !card.Accessible.ignored
+					&& card.Accessible.role === Accessible.Grouping)
+				++count
+		}
+		return count
+	}
+
 	function test_family_matrix_data() {
 		return [
 			{ "tag": "finance", "family": "finance", "variant": "finance", "kind": "finance",
@@ -107,9 +120,103 @@ TestCase {
 		const item = setFixture(data.metadata, data.kind, true, data.provider || "")
 		compare(item.family, data.family)
 		compare(item.variant, data.variant)
+		const expectedPresentation = data.family === "finance" ? "market"
+			: data.family === "commerce" ? "commerce"
+			: ["audio", "x", "instagram", "github", "twitch"].indexOf(data.variant) >= 0
+				? "identity" : "details"
+		compare(item.presentation, expectedPresentation)
 		verify(item.hasDetails)
 		verify(item.Accessible.name.length > 0)
 		tryVerify(function() { return item.implicitHeight > 0 })
+	}
+
+	function test_family_presentations_prioritize_quote_price_and_identity() {
+		detailsLoader.width = 680
+		let item = setFixture({
+			"financePrice": "448.37", "financeCurrency": "USD",
+			"financeDayChange": "+5.21", "financeDayChangePercent": "+1.18%",
+			"financeDayTrend": "up", "financeRangeLabel": "1M",
+			"financeRangeChangePercent": "+2.85%", "tickerSymbol": "MSFT",
+			"financeName": "Microsoft Corporation", "financeExchange": "NasdaqGS",
+			"financeInstrument": "EQUITY", "financeSparkline": [435, 438, 436, 442, 448]
+		}, "finance", true)
+		compare(item.presentation, "market")
+		compare(findChild(item, "providerSummaryTitle").text, "MSFT")
+		compare(findChild(item, "providerDetailsPrimary").text, "448.37 USD")
+		verify(findChild(item, "providerFinanceChart").visible)
+		compare(findChild(item, "providerDetailsSparkline").pointCount, 5)
+		compare(findChild(item, "providerStat_0").presentation, "market")
+
+		item = setFixture({
+			"previewKind": "product", "productPrice": "1 499 kr",
+			"productAvailability": "In stock", "productBrand": "Example",
+			"productDescription": "A bounded plain-text product description.",
+			"productSpecs": [{ "label": "Memory", "value": "32 GB" }]
+		}, "product", true, "", "Product")
+		compare(item.presentation, "commerce")
+		compare(findChild(item, "providerDetailsPrimary").text, "1 499 kr")
+		compare(findChild(item, "providerCommerceStatus").text, "In stock")
+		compare(findChild(item, "providerSummaryBody").text,
+			"A bounded plain-text product description.")
+		compare(findChild(item, "providerSummaryBody").textFormat, Text.PlainText)
+		compare(findChild(item, "providerStat_0").presentation, "spec")
+		compare(findChild(item, "providerStat_0").color.a, 0)
+	}
+
+	function test_identity_first_families_keep_provider_accent_small_and_metrics_flat() {
+		detailsLoader.width = 680
+		let item = setFixture({
+			"previewKind": "audio", "audioProvider": "Sveriges Radio",
+			"audioProgram": "Vetenskapsradion", "articlePublishedAt": "08:30"
+		}, "audio", true, "", "Episode", "Sveriges Radio",
+			"A conversation about measurable performance.")
+		compare(item.presentation, "identity")
+		compare(item.identityTitle, "Vetenskapsradion")
+		verify(item.identitySubtitle.indexOf("Sveriges Radio") >= 0)
+		compare(findChild(item, "providerIdentityMarkLabel").text, "SR")
+		compare(findChild(item, "providerIdentityBody").text,
+			"A conversation about measurable performance.")
+		compare(findChild(item, "providerIdentity").color.a, 0)
+		verify(findChild(item, "providerIdentityMark").color.a > 0)
+		verify(findChild(item, "providerIdentityMark").width <= 48)
+		compare(findChild(item, "providerStat_0").presentation, "metric")
+
+		item = setFixture({
+			"previewKind": "x", "xDisplayName": "Mumble Design", "xHandle": "@mumbledesign",
+			"xVerified": true, "xCreatedAt": "18:30", "xReplyCount": 757,
+			"xRepostCount": 12000, "xLikeCount": 362000
+		}, "x", true, "", "Post", "X", "Frame pacing is a feature.")
+		compare(item.presentation, "identity")
+		compare(item.identityTitle, "Mumble Design")
+		verify(item.identitySubtitle.indexOf("@mumbledesign") >= 0)
+		compare(findChild(item, "providerIdentityMarkLabel").text, "X")
+		verify(findChild(item, "providerVerifiedBadge").visible)
+		compare(findChild(item, "providerIdentityBody").text, "Frame pacing is a feature.")
+		compare(findChild(item, "providerStat_0").presentation, "metric")
+
+		item = setFixture({
+			"provider": "instagram", "previewKind": "instagram",
+			"instagramDisplayName": "Mumble Quick", "instagramHandle": "@mumblequick",
+			"instagramCaption": "Stable scrolling with bounded delegates.",
+			"instagramLikeCount": 18420, "instagramCommentCount": 318
+		}, "instagram", true)
+		compare(item.presentation, "identity")
+		compare(item.identityTitle, "Mumble Quick")
+		compare(findChild(item, "providerIdentityMarkLabel").text, "IG")
+		compare(findChild(item, "providerIdentityBody").text,
+			"Stable scrolling with bounded delegates.")
+		compare(findChild(item, "providerStat_0").presentation, "metric")
+
+		item = setFixture({
+			"provider": "twitch", "twitchDisplayName": "Mumble Dev",
+			"twitchChannel": "mumbledev", "twitchLiveState": "live",
+			"twitchBadge": "Live", "twitchGame": "Software Development",
+			"twitchViewerCount": 1842
+		}, "video", true, "twitch")
+		compare(item.presentation, "identity")
+		compare(findChild(item, "providerIdentityMarkLabel").text, "TV")
+		verify(findChild(item, "providerVerifiedBadge").visible)
+		compare(findChild(item, "providerStat_0").presentation, "metric")
 	}
 
 	function test_stable_kind_and_provider_routing_precedes_field_heuristics() {
@@ -129,6 +236,176 @@ TestCase {
 			"link", true, "", "Google search", "Google", "native qml")
 		compare(item.family, "search")
 		compare(item.variant, "googleSearch")
+	}
+
+	function test_visual_provider_identity_matrix_data() {
+		return [
+			{ "tag": "youtube", "provider": "youtube", "token": "youtube", "name": "YouTube",
+			  "mark": "YT", "accent": "#ff5a5f" },
+			{ "tag": "spotify", "provider": "spotify", "token": "spotify", "name": "Spotify",
+			  "mark": "SP", "accent": "#1ed760" },
+			{ "tag": "tiktok", "provider": "tiktok", "token": "tiktok", "name": "TikTok",
+			  "mark": "TT", "accent": "#25f4ee" },
+			{ "tag": "instagram", "provider": "instagram", "token": "instagram", "name": "Instagram",
+			  "mark": "IG", "accent": "#e45aa5" },
+			{ "tag": "twitch", "provider": "twitch", "token": "twitch", "name": "Twitch",
+			  "mark": "TV", "accent": "#a970ff" },
+			{ "tag": "google", "provider": "google-search", "token": "google", "name": "Google",
+			  "mark": "G", "accent": "#4285f4" },
+			{ "tag": "finance", "provider": "yahoo-finance", "token": "yahoofinance",
+			  "name": "Yahoo Finance", "mark": "YF", "accent": "#78d6a3" },
+			{ "tag": "blocket", "provider": "blocket", "token": "blocket", "name": "Blocket",
+			  "mark": "B", "accent": "#ff6b61" },
+			{ "tag": "tradera", "provider": "tradera", "token": "tradera", "name": "Tradera",
+			  "mark": "T", "accent": "#ffd64c" },
+			{ "tag": "bytbil", "provider": "bytbil", "token": "bytbil", "name": "Bytbil",
+			  "mark": "BB", "accent": "#f4c95d" },
+			{ "tag": "bilweb", "provider": "bilweb", "token": "bilweb", "name": "Bilweb",
+			  "mark": "BW", "accent": "#f4c95d" },
+			{ "tag": "booli", "provider": "booli", "token": "booli", "name": "Booli",
+			  "mark": "B", "accent": "#72d7a3" },
+			{ "tag": "hemnet", "provider": "hemnet", "token": "hemnet", "name": "Hemnet",
+			  "mark": "H", "accent": "#72d7a3" },
+			{ "tag": "flashback", "provider": "flashback", "token": "flashback", "name": "Flashback",
+			  "mark": "FB", "accent": "#f2c36e" }
+		]
+	}
+
+	function test_visual_provider_identity_matrix(data) {
+		const metadata = { "previewProvider": data.provider }
+		if (data.provider === "yahoo-finance") {
+			metadata.financePrice = "100"
+			metadata.tickerSymbol = "MUM"
+		}
+		const item = setFixture(metadata, "", true, data.provider)
+		compare(item.providerToken, data.token)
+		compare(item.providerDisplayName, data.name)
+		compare(item.providerMark, data.mark)
+		compare(String(item.providerAccent).toLowerCase(), data.accent)
+	}
+
+	function test_game_store_uses_actual_store_identity_and_formats_steam_commerce() {
+		const item = setFixture({
+			"previewProvider": "game-store", "previewKind": "gameStoreProduct",
+			"gameStoreProvider": "steam", "gameStoreName": "Steam",
+			"steamPrice": "29,99 €", "steamOriginalPrice": "39,99 €",
+			"steamDiscountPercent": 25, "steamPlatforms": "Windows / Linux",
+			"steamReviewSummary": "Very Positive", "steamReviewPercent": 92,
+			"steamReviewTotal": 58420, "steamReviewScore": 8,
+			"steamMetacriticScore": 86
+		}, "gameStoreProduct", true)
+		compare(item.family, "commerce")
+		compare(item.variant, "game")
+		compare(item.providerToken, "steam")
+		compare(item.providerDisplayName, "Steam")
+		compare(item.providerMark, "S")
+		compare(item.secondaryValue, "39,99 €  -25%")
+		const reviews = item.allStats.filter(function(entry) { return entry.label === "Reviews" })[0]
+		verify(reviews !== undefined)
+		compare(reviews.value, "Very Positive · 92% positive · 58K reviews")
+		compare(reviews.tone, "success")
+		const score = item.allStats.filter(function(entry) { return entry.label === "Score" })[0]
+		verify(score !== undefined)
+		compare(score.tone, "success")
+		compare(item.steamPresentation, true)
+		verify(findChild(item, "providerSteamCard").visible)
+		compare(findChild(item, "providerSteamProductName").text, "Steam app")
+		compare(findChild(item, "providerSteamReviewSummary").text, "Very Positive")
+		compare(findChild(item, "providerSteamReviewDetail").text,
+			"92% positive · 58K reviews")
+		compare(findChild(item, "providerSteamMetacriticScore").text, "86")
+		compare(findChild(item, "providerSteamDiscount").visible, true)
+		compare(findChild(item, "providerSteamOriginalPrice").font.strikeout, true)
+		compare(findChild(item, "providerSteamFinalPrice").text, "29,99 €")
+		compare(findChild(item, "providerSummary").visible, false)
+	}
+
+	function test_bespoke_provider_cards_expose_one_semantic_owner() {
+		let item = setFixture({
+			"previewProvider": "game-store", "previewKind": "gameStoreProduct",
+			"gameStoreProvider": "steam", "steamAppName": "Factorio",
+			"steamPrice": "29,99 €", "steamReviewSummary": "Very Positive"
+		}, "gameStoreProduct", true, "", "Factorio")
+		let card = findChild(item, "providerSteamCard")
+		compare(item.Accessible.ignored, true)
+		compare(card.Accessible.ignored, false)
+		compare(card.Accessible.role, Accessible.Grouping)
+		compare(card.Accessible.name, "Store details")
+		compare(exposedProviderGroupingCount(item), 1)
+		compare(findChild(item, "providerSteamProductName").Accessible.ignored, true)
+		compare(findChild(item, "providerSteamReviewSummary").Accessible.ignored, true)
+
+		item = setFixture({
+			"provider": "google-search", "previewKind": "search",
+			"googleSearchModeLabel": "Google Images", "googleSearchQuery": "Qt Quick"
+		}, "search", true, "google-search", "Google Images")
+		card = findChild(item, "providerGoogleSearch")
+		compare(item.Accessible.ignored, true)
+		compare(card.Accessible.ignored, false)
+		compare(card.Accessible.role, Accessible.Grouping)
+		compare(card.Accessible.name, "Google Images")
+		compare(exposedProviderGroupingCount(item), 1)
+		compare(findChild(item, "providerGoogleModeLabel").Accessible.ignored, true)
+		compare(findChild(item, "providerGoogleQueryText").Accessible.ignored, true)
+
+		item = setFixture({
+			"provider": "flashback", "previewKind": "forum",
+			"forumThreadTitle": "Renderloopar", "forumPostAuthor": "rendernisse",
+			"forumPostExcerpt": "The linked post body."
+		}, "forum", true, "flashback")
+		card = findChild(item, "providerFlashbackThread")
+		compare(item.Accessible.ignored, true)
+		compare(card.Accessible.ignored, false)
+		compare(card.Accessible.role, Accessible.Grouping)
+		compare(card.Accessible.name, "Discussion details")
+		compare(exposedProviderGroupingCount(item), 1)
+		compare(findChild(item, "providerFlashbackLogo").Accessible.ignored, true)
+		compare(findChild(item, "providerFlashbackTitle").Accessible.ignored, true)
+		compare(findChild(item, "providerFlashbackAuthor").Accessible.ignored, true)
+		compare(findChild(item, "providerFlashbackLinkContext").text, "Thread")
+		verify(card.Accessible.description.indexOf("..") < 0)
+
+		item = setFixture({
+			"provider": "twitch", "twitchDisplayName": "Mumble Dev",
+			"twitchChannel": "mumbledev", "twitchPlaybackNote": "Starts after interaction."
+		}, "twitch", true, "twitch", "Mumble Dev", "mumbledev.", "Starts after interaction.")
+		verify(item.Accessible.description.indexOf("..") < 0)
+
+		item = setFixture({
+			"previewKind": "product", "productPrice": "1 499 kr"
+		}, "product", true, "", "Generic product")
+		compare(item.Accessible.ignored, false)
+		compare(exposedProviderGroupingCount(item), 1)
+	}
+
+	function test_google_search_preserves_result_identity_and_active_tab() {
+		const item = setFixture({
+			"provider": "google-search", "previewKind": "search",
+			"googleSearchQuery": "Qt Quick model performance",
+			"googleSearchMode": "images", "googleSearchModeLabel": "Images"
+		}, "search", true, "google-search", "Google Images")
+		compare(item.googlePresentation, true)
+		verify(findChild(item, "providerGoogleSearch").visible)
+		compare(findChild(item, "providerGoogleQueryText").text,
+			"Qt Quick model performance")
+		compare(findChild(item, "providerGoogleTab_0").active, false)
+		compare(findChild(item, "providerGoogleTab_1").active, true)
+		compare(findChild(item, "providerSummary").visible, false)
+		compare(findChild(item, "providerIdentity").visible, false)
+	}
+
+	function test_marketplace_identity_keeps_sale_end_and_listing_chips() {
+		const item = setFixture({
+			"previewProvider": "tradera", "previewKind": "marketplaceListing",
+			"listingPrice": "450 kr", "listingSaleType": "Auction",
+			"listingEndsAt": "18:30", "listingId": "123456789"
+		}, "marketplaceListing", true)
+		compare(item.providerToken, "tradera")
+		compare(item.allChips.length, 3)
+		compare(item.allChips[0].text, "Auction")
+		compare(item.allChips[0].tone, "accent")
+		compare(item.allChips[1].text, "Ends 18:30")
+		compare(item.allChips[2].text, "#123456789")
 	}
 
 	function test_structured_surfaces_are_bounded_and_unknown_metadata_is_ignored() {
@@ -222,11 +499,13 @@ TestCase {
 			"product", false)
 		verify(item.hasDetails)
 		compare(item.allStats.length, 1)
+		compare(item.commerceStatus, "In stock")
 		compare(item.canExpand, false)
 
 		item = setFixture({
 			"productPrice": "10 kr", "productAvailability": "In stock", "productDelivery": "Tomorrow",
-			"productRating": "4.8", "productBrand": "Example"
+			"productRating": "4.8", "productBrand": "Example", "productSku": "SKU-1",
+			"productVolume": "1 l"
 		}, "product", false)
 		verify(item.allStats.length > item.collapsedStatCount)
 		compare(item.canExpand, true)
@@ -289,6 +568,14 @@ TestCase {
 		}
 		wait(0)
 		compare(item.allChips[0].tone, "danger")
+		compare(item.providerStateLabel, "Unavailable")
+
+		item.metadata = {
+			"provider": "twitch", "twitchChannel": "mumbledev", "twitchLiveState": "offline",
+			"twitchEmbedMode": "latest-vod"
+		}
+		wait(0)
+		compare(item.providerStateLabel, "Offline · Latest VOD")
 	}
 
 	function test_provider_identity_does_not_repeat_google_instagram_or_twitch_metadata_as_chips() {
@@ -353,7 +640,50 @@ TestCase {
 		compare(item.contextPosts.length, 2)
 		compare(item.contextPosts[0].label, "Linked post")
 		compare(item.contextPosts[1].label, "Quoted post")
-		verify(findChild(item, "providerContext_1").visible)
+		compare(item.flashbackPresentation, true)
+		verify(findChild(item, "providerFlashbackThread").visible)
+		compare(findChild(item, "providerFlashbackLogo").text, "FLASHBACK")
+		compare(findChild(item, "providerFlashbackTitle").text, "Renderloopar")
+		compare(findChild(item, "providerFlashbackAuthor").text, "rendernisse")
+		compare(findChild(item, "providerFlashbackQuoteText").text, "The quoted context.")
+		compare(findChild(item, "providerFlashbackReply").text, "The linked post body.")
+		compare(findChild(item, "providerDetailsContext").visible, false)
+	}
+
+	function test_flashback_avatar_accepts_only_managed_image_pipeline_sources() {
+		const managed = "image://mumble/flashback-avatar?g=17"
+		let item = setFixture({
+			"provider": "flashback", "previewKind": "forum",
+			"forumThreadTitle": "Managed avatar", "forumPostAuthor": "rendernisse",
+			"forumPostAuthorAvatarUrl": managed
+		}, "forum", true, "flashback")
+		const avatar = findChild(item, "providerFlashbackAuthorAvatar")
+		verify(avatar !== null)
+		compare(item.flashbackAuthorAvatarSource, managed)
+		compare(avatar.source.toString(), managed)
+		compare(avatar.asynchronous, true)
+		compare(avatar.cache, false)
+
+		const rejected = [
+			"https://cdn.example.test/avatar.png",
+			"http://cdn.example.test/avatar.png",
+			"file:///C:/private/avatar.png",
+			"data:image/png;base64,AAAA",
+			"qrc:/avatar.png",
+			"image://other/avatar",
+			"image://mumble.example/avatar"
+		]
+		for (let index = 0; index < rejected.length; ++index) {
+			compare(item.safeManagedImageSource(rejected[index]), "")
+			item.metadata = {
+				"provider": "flashback", "previewKind": "forum",
+				"forumThreadTitle": "Rejected avatar", "forumPostAuthor": "rendernisse",
+				"forumPostAuthorAvatarUrl": rejected[index]
+			}
+			wait(0)
+			compare(item.flashbackAuthorAvatarSource, "")
+			compare(avatar.source.toString(), "")
+		}
 	}
 
 	function test_release_actions_require_https_and_loading_states_are_accessible() {

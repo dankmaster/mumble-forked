@@ -45,7 +45,13 @@ TestCase {
     function init() {
         createdDelegates = 0;
         destroyedDelegates = 0;
+        // Each test repopulates the same ListView. Reset the viewport before
+        // clearing the model so a pooled delegate from the previous test does
+        // not become Qt's transient layout anchor.
+        list.positionViewAtBeginning();
+        list.contentY = list.originY;
         populate(10000);
+        list.forceLayout();
         wait(0);
     }
 
@@ -92,10 +98,13 @@ TestCase {
         const oldY = nextItem.mapToItem(list, 0, 0).y;
         const oldHeight = rows.get(anchorIndex).rowHeight;
         rows.setProperty(anchorIndex, "rowHeight", oldHeight + 72);
-        wait(10);
-        const shiftedItem = list.itemAtIndex(nextIndex);
-        verify(shiftedItem !== null);
-        const shiftedY = shiftedItem.mapToItem(list, 0, 0).y;
-        fuzzyCompare(shiftedY - oldY, 72, 1.0);
+        list.forceLayout();
+        tryVerify(function() {
+            const shiftedItem = list.itemAtIndex(nextIndex);
+            if (shiftedItem === null)
+                return false;
+            const shiftedY = shiftedItem.mapToItem(list, 0, 0).y;
+            return Math.abs((shiftedY - oldY) - 72) <= 1.0;
+        });
     }
 }

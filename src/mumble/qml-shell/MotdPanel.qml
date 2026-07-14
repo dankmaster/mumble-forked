@@ -8,34 +8,38 @@ Rectangle {
 
     property var session: null
     property real maximumBodyHeight: 260
+	property real maximumImageHeight: compactLayout ? 72 : 82
+	property bool hiddenForHistory: false
     signal actionRequested(string actionId, var payload)
     signal linkRequested(url link)
 
     readonly property bool hasContent: !!session && !!session.hasMotd
-    readonly property bool surfaceVisible: hasContent
     readonly property bool dismissed: !!session && !!session.motdDismissed
+	readonly property bool surfaceVisible: hasContent && !dismissed && !hiddenForHistory
     readonly property bool expanded: !!session && !!session.motdExpanded
-    readonly property bool contentVisible: hasContent && !dismissed
+	readonly property bool contentVisible: surfaceVisible
     readonly property string signature: session ? String(session.motdSignature || "") : ""
     readonly property var actions: session && session.motdActions ? session.motdActions : []
     readonly property bool compactLayout: width < 560
-    readonly property bool actionsWrapped: actionFlow.implicitHeight > Theme.controlHeight + 1
+	readonly property bool actionsWrapped: false
+	readonly property int headerHeight: 38
 	readonly property string summary: cleanSummary(session ? session.motdSummary : "")
 
     objectName: "motdPanel"
     visible: surfaceVisible
-    implicitHeight: visible ? panelLayout.implicitHeight + Theme.space3 * 2 : 0
+    implicitHeight: surfaceVisible ? headerHeight
+		+ (expanded ? Math.min(structuredBody.implicitHeight, maximumBodyHeight) + Theme.space3 : 0) : 0
     color: Theme.panel
-    radius: Theme.innerRadius
+    radius: Theme.space2
     border.width: 1
-    border.color: session && session.motdChanged ? Theme.accent : Theme.divider
+	border.color: session && session.motdChanged ? Theme.warning : Theme.divider
 	// This is an informational container. Its real actions participate in the
 	// tab chain; the panel itself must never become an inert stop.
     activeFocusOnTab: false
 
     Accessible.role: Accessible.Pane
     Accessible.name: dismissed ? qsTr("Welcome message hidden") : qsTr("Server message of the day")
-    Accessible.description: summary
+    Accessible.description: expanded ? "" : summary
 
 	function cleanSummary(value) {
 		// QTextDocument uses U+FFFC as a placeholder for embedded objects. It is
@@ -64,6 +68,8 @@ Rectangle {
     }
 
     function focusPrimaryAction() {
+		if (!surfaceVisible)
+			return false
         if (actionRepeater.count > 0) {
             const button = actionRepeater.itemAt(0)
             if (button) {
@@ -118,75 +124,129 @@ Rectangle {
                  "dismissedSignature": targetDismissedSignature }
     }
 
-    GridLayout {
-        id: panelLayout
-        anchors.fill: parent
-        anchors.margins: Theme.space3
-		columns: root.compactLayout || root.expanded ? 1 : 2
-		columnSpacing: Theme.space2
-		rowSpacing: Theme.space2
+	Item {
+			id: headerBar
+			objectName: "motdHeaderBar"
+			anchors.top: parent.top
+			anchors.left: parent.left
+			anchors.right: parent.right
+			height: root.headerHeight
 
-        RowLayout {
-			Layout.row: 0
-			Layout.column: 0
-			Layout.columnSpan: root.expanded ? panelLayout.columns : 1
-            Layout.fillWidth: true
-			Layout.minimumWidth: 0
-            spacing: Theme.space2
+			RowLayout {
+				anchors.fill: parent
+				anchors.leftMargin: 10
+				anchors.rightMargin: 6
+				spacing: Theme.space2
 
-            Label {
-				textFormat: Text.PlainText
-				text: root.dismissed ? qsTr("Welcome hidden")
-					: root.expanded ? qsTr("Server message of the day") : qsTr("Welcome")
-                color: Theme.textStrong
-                font.bold: true
-				font.pixelSize: Theme.fontLabel
-                elide: Text.ElideRight
-            }
+				Rectangle {
+					id: infoBadge
+					objectName: "motdInfoBadge"
+					Layout.preferredWidth: 24
+					Layout.preferredHeight: 24
+					radius: Theme.space2
+					color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.12)
+					Accessible.ignored: true
 
-			Label {
-				objectName: "motdSummaryBody"
-				Layout.fillWidth: true
-				Layout.minimumWidth: 0
-				visible: root.contentVisible && !root.expanded
-				textFormat: Text.PlainText
-				text: root.summary
-				color: Theme.textMain
-				font.pixelSize: Theme.fontBody
-				maximumLineCount: 1
-				elide: Text.ElideRight
-				Accessible.role: Accessible.StaticText
-				Accessible.name: text.length > 0 ? text : qsTr("Server message")
+					ModernIcon {
+						anchors.centerIn: parent
+						name: "direct"
+						size: 15
+						color: Theme.accent
+					}
+				}
+
+				Label {
+					id: heading
+					objectName: "motdHeading"
+					Layout.fillWidth: true
+					Layout.minimumWidth: 0
+					textFormat: Text.PlainText
+					text: qsTr("Welcome")
+					color: Theme.textMuted
+					font.pixelSize: Theme.fontCaption
+					font.weight: Font.Bold
+					font.capitalization: Font.AllUppercase
+					font.letterSpacing: 0.8
+					elide: Text.ElideRight
+					Accessible.ignored: true
+				}
+
+				RowLayout {
+					id: actionFlow
+					objectName: "motdActionFlow"
+					Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+					spacing: Theme.space1
+					visible: root.actions.length > 0
+
+					Repeater {
+						id: actionRepeater
+						model: root.actions
+
+						delegate: ModernIconButton {
+							required property var modelData
+							readonly property string actionId: String(modelData.id || "")
+							readonly property string fullLabel: String(modelData.label
+								|| modelData.title || qsTr("Open"))
+							objectName: "motdAction_" + actionId
+							Layout.minimumWidth: 26
+							Layout.preferredWidth: 26
+							Layout.maximumWidth: 26
+							Layout.minimumHeight: 26
+							Layout.preferredHeight: 26
+							Layout.maximumHeight: 26
+							implicitWidth: 26
+							implicitHeight: 26
+							dense: true
+							iconName: actionId === "motd.dismiss" ? "close"
+								: root.expanded ? "chevron-down" : "next"
+							text: fullLabel
+							enabled: modelData.enabled === undefined || !!modelData.enabled
+							Accessible.name: fullLabel
+							ToolTip.visible: hovered
+							ToolTip.text: fullLabel
+							onClicked: root.dispatch(actionId, root.payloadFor(modelData))
+						}
+					}
+				}
+
+				// Preserve the semantic summary node for automation and accessibility
+				// without rendering summary copy in the collapsed production surface.
+				Label {
+					objectName: "motdSummaryBody"
+					visible: false
+					textFormat: Text.PlainText
+					text: root.summary
+					Accessible.ignored: true
+				}
 			}
+	}
 
-            Label {
-				textFormat: Text.PlainText
-                visible: !!root.session && !!root.session.motdChanged
-                text: qsTr("New")
-                color: Theme.accent
-                font.bold: true
-                Accessible.name: qsTr("The welcome message has changed")
-            }
-        }
-
-        ScrollView {
-            id: motdScroll
-			Layout.row: 1
-			Layout.column: 0
-			Layout.columnSpan: panelLayout.columns
-            Layout.fillWidth: true
-			Layout.preferredHeight: visible
+	ScrollView {
+			id: motdScroll
+			objectName: "motdBodyScroll"
+			anchors.top: headerBar.bottom
+			anchors.left: parent.left
+			anchors.right: parent.right
+			anchors.leftMargin: root.compactLayout ? Theme.space3 : 42
+			anchors.rightMargin: Theme.space3
+			height: root.contentVisible && root.expanded
 				? Math.min(structuredBody.implicitHeight, root.maximumBodyHeight) : 0
 			visible: root.contentVisible && root.expanded
-            clip: true
-            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+			clip: true
+			ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 			ScrollBar.vertical.policy: structuredBody.implicitHeight > root.maximumBodyHeight
-                                         ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+				? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
 
 			RichMessageBody {
 				id: structuredBody
 				objectName: "motdStructuredBody"
 				width: Math.max(1, motdScroll.availableWidth)
+				maximumImageWidth: 560
+				maximumImageHeight: root.maximumImageHeight
+				imagePadding: Theme.space1
+				imageSurfaceColor: root.color
+				imageBorderColor: "transparent"
+				imageBorderWidth: 0
 				segments: root.session && root.session.motdSegments
 					? root.session.motdSegments : []
 				textColor: Theme.textMain
@@ -196,44 +256,5 @@ Rectangle {
 						root.linkRequested(safeLink)
 				}
 			}
-        }
-
-		// Keep actions after the summary/body in both visual and accessibility
-		// order. On a normal desktop width the collapsed surface remains a single
-		// compact row; narrow layouts wrap the actions below the summary.
-        Flow {
-            id: actionFlow
-            objectName: "motdActionFlow"
-			Layout.row: root.expanded ? 2 : root.compactLayout ? 1 : 0
-			Layout.column: root.expanded || root.compactLayout ? 0 : 1
-			Layout.columnSpan: root.expanded || root.compactLayout ? panelLayout.columns : 1
-			Layout.fillWidth: root.expanded || root.compactLayout
-            Layout.minimumWidth: 0
-			Layout.preferredWidth: root.expanded || root.compactLayout
-				? panelLayout.width : Math.floor(panelLayout.width * 0.42)
-			Layout.maximumWidth: panelLayout.width
-            Layout.preferredHeight: visible ? implicitHeight : 0
-			Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
-            visible: root.actions.length > 0
-            spacing: Theme.space2
-
-            Repeater {
-                id: actionRepeater
-                model: root.actions
-
-                delegate: ModernButton {
-                    required property var modelData
-                    readonly property string fullLabel: String(modelData.label
-                        || modelData.title || qsTr("Open"))
-                    objectName: "motdAction_" + String(modelData.id || "")
-                    width: Math.max(1, Math.min(implicitWidth, actionFlow.width))
-                    dense: !root.expanded || root.compactLayout
-                    text: fullLabel
-                    enabled: modelData.enabled === undefined || !!modelData.enabled
-                    Accessible.name: fullLabel
-                    onClicked: root.dispatch(String(modelData.id || ""), root.payloadFor(modelData))
-                }
-            }
-        }
-    }
+	}
 }

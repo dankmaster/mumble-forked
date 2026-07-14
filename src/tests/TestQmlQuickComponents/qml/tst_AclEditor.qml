@@ -1,11 +1,13 @@
 import QtQuick
 import QtQuick.Controls
 import QtTest
+import Mumble.Theme 1.0
 
 TestCase {
 	id: testCase
 	name: "AclEditor"
 	when: windowShown
+	visible: true
 	width: 1100
 	height: 1100
 	property int editorWidth: 920
@@ -84,6 +86,9 @@ TestCase {
 		compare(groups.currentIndex, 999)
 		tryVerify(function() { return groups.itemAtIndex(999) !== null })
 		compare(groups.itemAtIndex(999).Accessible.name, "Group 999")
+		compare(groups.itemAtIndex(999).Accessible.selected, true)
+		verify(String(groups.itemAtIndex(999).background.color).toLowerCase() !== "#ffffff")
+		verify(groups.itemAtIndex(999).background.border.width > 1)
 	}
 
 	function test_narrow_layout_stacks_fields_without_horizontal_overflow() {
@@ -102,6 +107,27 @@ TestCase {
 		const password = findChild(loader.item, "aclRoomPassword")
 		verify(password !== null)
 		tryVerify(function() { return password.width <= testCase.editorWidth })
+	}
+
+	function test_group_and_rule_cards_use_theme_pressed_state() {
+		const groups = findChild(loader.item, "aclGroupList")
+		const rules = findChild(loader.item, "aclRuleList")
+		verify(groups !== null && rules !== null)
+		tryVerify(function() {
+			return groups.itemAtIndex(0) !== null && rules.itemAtIndex(0) !== null
+		})
+		const group = groups.itemAtIndex(0)
+		const rule = rules.itemAtIndex(0)
+
+		mousePress(group, 4, 4, Qt.LeftButton)
+		tryCompare(group, "down", true)
+		compare(group.background.color, Theme.accentSubtle)
+		mouseRelease(group, 4, 4, Qt.LeftButton)
+
+		mousePress(rule, 4, 4, Qt.LeftButton)
+		tryCompare(rule, "down", true)
+		compare(rule.background.color, Theme.accentSubtle)
+		mouseRelease(rule, 4, 4, Qt.LeftButton)
 	}
 
 	function test_empty_acl_exposes_clear_add_actions() {

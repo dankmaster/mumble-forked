@@ -52,6 +52,32 @@ namespace {
 		return false;
 	}
 
+	void preserveListenerPresentation(const QVariantMap &row, QVariantList &badges, QVariantList &statuses) {
+		if (!row.value(QStringLiteral("listener")).toBool()
+			&& row.value(QStringLiteral("entryKind")).toString() != QLatin1String("listener"))
+			return;
+
+		QVariantMap listenerStatus;
+		for (const QVariant &entry : row.value(QStringLiteral("statuses")).toList()) {
+			const QVariantMap status = entry.toMap();
+			if (status.value(QStringLiteral("kind")).toString() == QLatin1String("listener")) {
+				listenerStatus = status;
+				break;
+			}
+		}
+		if (!listenerStatus.isEmpty()) {
+			QVariantList mergedStatuses { listenerStatus };
+			for (const QVariant &entry : std::as_const(statuses)) {
+				if (entry.toMap().value(QStringLiteral("kind")).toString() != QLatin1String("listener"))
+					mergedStatuses.push_back(entry);
+			}
+			statuses = std::move(mergedStatuses);
+
+			const QString listenerLabel = listenerStatus.value(QStringLiteral("label")).toString();
+			if (!listenerLabel.isEmpty() && !badges.contains(listenerLabel)) badges.prepend(listenerLabel);
+		}
+	}
+
 	bool acceptsFrontendStateMutation(const QObject *object) {
 		return !object->property(QmlVisualFixtureMutation::OverrideProperty).toBool()
 			|| object->property(QmlVisualFixtureMutation::WriteProperty).toBool();
@@ -1227,15 +1253,11 @@ void ClientSessionController::recomputeMotdDerivedState() {
 		&& comparisonSignature != signature && comparisonSignature != m_motdHtml.trimmed();
 
 	QVariantList actions;
-	if (hasContent) {
-		if (dismissed) {
-			actions.push_back(motdAction(QStringLiteral("motd.restore"), tr("Show welcome message"), {}));
-		} else {
-			actions.push_back(motdAction(m_motdExpanded ? QStringLiteral("motd.hide") : QStringLiteral("motd.show"),
-				m_motdExpanded ? tr("Collapse") : tr("Expand"), signature));
-			actions.push_back(motdAction(QStringLiteral("motd.dismiss"), tr("Dismiss"), signature,
-				QStringLiteral("muted")));
-		}
+	if (hasContent && !dismissed) {
+		actions.push_back(motdAction(m_motdExpanded ? QStringLiteral("motd.hide") : QStringLiteral("motd.show"),
+			m_motdExpanded ? tr("Collapse") : tr("Expand"), signature));
+		actions.push_back(motdAction(QStringLiteral("motd.dismiss"), tr("Dismiss"), signature,
+			QStringLiteral("muted")));
 	}
 
 	if (m_hasMotd != hasContent) {
@@ -1382,6 +1404,7 @@ QVariant StableListModel::valueForRole(const QVariantMap &row, const int role) {
 		case VisibleRole: return row.value(QStringLiteral("visible"), true);
 		case AttachmentsRole: return row.value(QStringLiteral("attachments"));
 		case SourceRole: return row.value(QStringLiteral("source"));
+		case SectionKindRole: return row.value(QStringLiteral("sectionKind"));
 		default: return {};
 	}
 }
@@ -1398,7 +1421,7 @@ QHash< int, QByteArray > StableListModel::roleNames() const {
 			 { CanReactRole, "canReact" }, { CanDeleteRole, "canDelete" }, { ScopeTokenRole, "scopeToken" },
 			 { ShortcutRole, "shortcut" }, { CheckableRole, "checkable" }, { MenuRoleRole, "menuRole" },
 			 { ToolTipRole, "toolTip" }, { VisibleRole, "visible" }, { AttachmentsRole, "attachments" },
-			 { SourceRole, "source" } };
+			 { SourceRole, "source" }, { SectionKindRole, "sectionKind" } };
 }
 
 QVariantMap StableListModel::get(int row) const {
@@ -1416,7 +1439,7 @@ int StableListModel::indexOf(const QString &stableId) const {
 QList< int > StableListModel::changedRoles(const QVariantMap &before, const QVariantMap &after) {
 	if (before == after) return {};
 	QList< int > roles { PayloadRole };
-	for (int role = StableIdRole; role <= SourceRole; ++role) {
+	for (int role = StableIdRole; role <= SectionKindRole; ++role) {
 		if (role != PayloadRole && valueForRole(before, role) != valueForRole(after, role)) roles.push_back(role);
 	}
 	return roles;
@@ -1689,6 +1712,8 @@ QVariantMap RoomModel::roomRow(const QVariantMap &room, const QString &kind) {
 			 { QStringLiteral("screenShare"), screenShare },
 			 { QStringLiteral("badges"), badges },
 			 { QStringLiteral("actions"), actions },
+			 { QStringLiteral("participantsCurrent"), room.value(QStringLiteral("participantsCurrent")) },
+			 { QStringLiteral("participantCount"), room.value(QStringLiteral("participantCount")) },
 			 { QStringLiteral("depth"), room.value(QStringLiteral("depth")) },
 			 { QStringLiteral("unreadCount"), room.value(QStringLiteral("unreadCount")) },
 			 { QStringLiteral("source"), source } };
@@ -1726,6 +1751,31 @@ void RoomModel::selectScope(const QString &scopeToken) {
 	updateStates(m_voiceRoomStates);
 	updateStates(m_textRoomStates);
 	updateStates(m_directMessageStates);
+	if (changed) synchronizeAllRows();
+}
+
+void RoomModel::selectScopeFromRail(const QString &scopeToken, const QString &railKind) {
+	if (!acceptsFrontendStateMutation(this)) return;
+	const QString selectedToken = scopeToken.trimmed();
+	const QString selectedKind  = railKind.trimmed().toLower();
+	bool changed                = false;
+	const auto updateStates     = [&selectedToken, &selectedKind, &changed](QVariantList &states,
+																	 const QString &kind) {
+		for (QVariant &entry : states) {
+			QVariantMap room = entry.toMap();
+			const bool selected = !selectedToken.isEmpty() && selectedKind == kind
+				&& room.value(QStringLiteral("token")).toString() == selectedToken;
+			const bool wasSelected =
+				room.value(QStringLiteral("selected"), room.value(QStringLiteral("open"))).toBool();
+			if (selected == wasSelected && room.contains(QStringLiteral("selected"))) continue;
+			room.insert(QStringLiteral("selected"), selected);
+			entry = room;
+			changed = true;
+		}
+	};
+	updateStates(m_voiceRoomStates, QStringLiteral("voice"));
+	updateStates(m_textRoomStates, QStringLiteral("text"));
+	updateStates(m_directMessageStates, QStringLiteral("direct"));
 	if (changed) synchronizeAllRows();
 }
 
@@ -1840,18 +1890,21 @@ void ParticipantModel::updatePresence(const QString &sessionId, const QString &t
 			&& row.value(QStringLiteral("id")).toString() != id)
 			continue;
 		const QVariantMap previousRow = row;
+		QVariantList rowBadges = badges;
+		QVariantList rowStatuses = statuses;
+		preserveListenerPresentation(row, rowBadges, rowStatuses);
 
 		row.insert(QStringLiteral("status"), talkState);
 		row.insert(QStringLiteral("talkLabel"), talkLabel);
 		row.insert(QStringLiteral("talkTone"), talkTone);
 		row.insert(QStringLiteral("talking"), talking);
 		row.insert(QStringLiteral("isSelf"), isSelf);
-		row.insert(QStringLiteral("badges"), badges);
-		row.insert(QStringLiteral("statuses"), statuses);
+		row.insert(QStringLiteral("badges"), rowBadges);
+		row.insert(QStringLiteral("statuses"), rowStatuses);
 		row.insert(QStringLiteral("deafened"), participantHasStatus(
-			statuses, { QStringLiteral("serverDeafened"), QStringLiteral("selfDeafened") }));
+			rowStatuses, { QStringLiteral("serverDeafened"), QStringLiteral("selfDeafened") }));
 		row.insert(QStringLiteral("muted"), participantHasStatus(
-			statuses, { QStringLiteral("serverMuted"), QStringLiteral("selfMuted"),
+			rowStatuses, { QStringLiteral("serverMuted"), QStringLiteral("selfMuted"),
 						QStringLiteral("localMuted"), QStringLiteral("suppressed") }));
 		QVariantMap source = row.value(QStringLiteral("source")).toMap();
 		source.insert(QStringLiteral("talkState"), talkState);
@@ -1859,14 +1912,223 @@ void ParticipantModel::updatePresence(const QString &sessionId, const QString &t
 		source.insert(QStringLiteral("talkTone"), talkTone);
 		source.insert(QStringLiteral("talking"), talking);
 		source.insert(QStringLiteral("isSelf"), isSelf);
-		source.insert(QStringLiteral("badges"), badges);
-		source.insert(QStringLiteral("statuses"), statuses);
+		source.insert(QStringLiteral("badges"), rowBadges);
+		source.insert(QStringLiteral("statuses"), rowStatuses);
 		row.insert(QStringLiteral("source"), source);
 		if (row != previousRow) upsertRow(row);
 	}
 }
 
+void NavigationRailModel::replaceRoomStates(const QVariantList &voiceRooms, const QVariantList &textRooms) {
+	if (!acceptsFrontendStateMutation(this)) return;
+	m_voiceRoomStates = voiceRooms;
+	m_textRoomStates = textRooms;
+	synchronizeAllRows();
+}
+
+void NavigationRailModel::replaceDirectMessageStates(const QVariantList &conversations) {
+	if (!acceptsFrontendStateMutation(this)) return;
+	m_directMessageStates = conversations;
+	synchronizeAllRows();
+}
+
+void NavigationRailModel::selectScope(const QString &scopeToken) {
+	if (!acceptsFrontendStateMutation(this)) return;
+	const QString selectedToken = scopeToken.trimmed();
+	bool changed = false;
+	const auto updateStates = [&selectedToken, &changed](QVariantList &states) {
+		for (QVariant &entry : states) {
+			QVariantMap room = entry.toMap();
+			const bool selected = !selectedToken.isEmpty()
+				&& room.value(QStringLiteral("token")).toString() == selectedToken;
+			const bool wasSelected = room.value(QStringLiteral("selected"), room.value(QStringLiteral("open"))).toBool();
+			if (selected == wasSelected && room.contains(QStringLiteral("selected"))) continue;
+			room.insert(QStringLiteral("selected"), selected);
+			entry = room;
+			changed = true;
+		}
+	};
+	updateStates(m_voiceRoomStates);
+	updateStates(m_textRoomStates);
+	updateStates(m_directMessageStates);
+	if (changed) synchronizeAllRows();
+}
+
+void NavigationRailModel::selectScopeFromRail(const QString &scopeToken, const QString &railKind) {
+	if (!acceptsFrontendStateMutation(this)) return;
+	const QString selectedToken = scopeToken.trimmed();
+	const QString selectedKind = railKind.trimmed().toLower();
+	bool changed = false;
+	const auto updateStates = [&selectedToken, &selectedKind, &changed](QVariantList &states,
+																	 const QString &kind) {
+		for (QVariant &entry : states) {
+			QVariantMap room = entry.toMap();
+			const bool selected = !selectedToken.isEmpty() && selectedKind == kind
+				&& room.value(QStringLiteral("token")).toString() == selectedToken;
+			const bool wasSelected = room.value(QStringLiteral("selected"), room.value(QStringLiteral("open"))).toBool();
+			if (selected == wasSelected && room.contains(QStringLiteral("selected"))) continue;
+			room.insert(QStringLiteral("selected"), selected);
+			entry = room;
+			changed = true;
+		}
+	};
+	updateStates(m_voiceRoomStates, QStringLiteral("voice"));
+	updateStates(m_textRoomStates, QStringLiteral("text"));
+	updateStates(m_directMessageStates, QStringLiteral("direct"));
+	if (changed) synchronizeAllRows();
+}
+
+void NavigationRailModel::updatePresence(const QString &sessionId, const QString &talkState,
+										 const QString &talkLabel, const QString &talkTone, const bool talking,
+										 const bool isSelf, const QVariantList &badges,
+										 const QVariantList &statuses) {
+	if (!acceptsFrontendStateMutation(this)) return;
+	const QString id = sessionId.trimmed();
+	if (id.isEmpty()) return;
+
+	// Keep the retained room payload in sync with the flattened rows. Scope
+	// selection rebuilds the rail from this payload and must not roll a fresh
+	// talk-state update back to its bootstrap value.
+	for (QVariant &roomEntry : m_voiceRoomStates) {
+		QVariantMap room = roomEntry.toMap();
+		QVariantList participants = room.value(QStringLiteral("participants")).toList();
+		bool roomChanged = false;
+		for (QVariant &participantEntry : participants) {
+			QVariantMap participant = participantEntry.toMap();
+			if (participant.value(QStringLiteral("session")).toString().trimmed() != id) continue;
+
+			QVariantList participantBadges = badges;
+			QVariantList participantStatuses = statuses;
+			preserveListenerPresentation(participant, participantBadges, participantStatuses);
+			participant.insert(QStringLiteral("talkState"), talkState);
+			participant.insert(QStringLiteral("talkLabel"), talkLabel);
+			participant.insert(QStringLiteral("talkTone"), talkTone);
+			participant.insert(QStringLiteral("talking"), talking);
+			participant.insert(QStringLiteral("isSelf"), isSelf);
+			participant.insert(QStringLiteral("badges"), participantBadges);
+			participant.insert(QStringLiteral("statuses"), participantStatuses);
+			participantEntry = participant;
+			roomChanged = true;
+		}
+		if (roomChanged) {
+			room.insert(QStringLiteral("participants"), participants);
+			roomEntry = room;
+		}
+	}
+
+	for (int rowIndex = 0; rowIndex < rowCount(); ++rowIndex) {
+		QVariantMap row = get(rowIndex);
+		if (row.value(QStringLiteral("rowKind")).toString() != QLatin1String("participant")
+			|| row.value(QStringLiteral("participantSession")).toString() != id)
+			continue;
+		const QVariantMap previousRow = row;
+		QVariantList rowBadges = badges;
+		QVariantList rowStatuses = statuses;
+		preserveListenerPresentation(row, rowBadges, rowStatuses);
+
+		row.insert(QStringLiteral("status"), talkState);
+		row.insert(QStringLiteral("talkLabel"), talkLabel);
+		row.insert(QStringLiteral("talkTone"), talkTone);
+		row.insert(QStringLiteral("talking"), talking);
+		row.insert(QStringLiteral("isSelf"), isSelf);
+		row.insert(QStringLiteral("badges"), rowBadges);
+		row.insert(QStringLiteral("statuses"), rowStatuses);
+		row.insert(QStringLiteral("deafened"), participantHasStatus(
+			rowStatuses, { QStringLiteral("serverDeafened"), QStringLiteral("selfDeafened") }));
+		row.insert(QStringLiteral("muted"), participantHasStatus(
+			rowStatuses, { QStringLiteral("serverMuted"), QStringLiteral("selfMuted"),
+							   QStringLiteral("localMuted"), QStringLiteral("suppressed") }));
+		QVariantMap source = row.value(QStringLiteral("source")).toMap();
+		source.insert(QStringLiteral("talkState"), talkState);
+		source.insert(QStringLiteral("talkLabel"), talkLabel);
+		source.insert(QStringLiteral("talkTone"), talkTone);
+		source.insert(QStringLiteral("talking"), talking);
+		source.insert(QStringLiteral("isSelf"), isSelf);
+		source.insert(QStringLiteral("badges"), rowBadges);
+		source.insert(QStringLiteral("statuses"), rowStatuses);
+		row.insert(QStringLiteral("source"), source);
+		if (row != previousRow) upsertRow(row);
+	}
+}
+
+void NavigationRailModel::removeParticipant(const QString &sessionId) {
+	if (!acceptsFrontendStateMutation(this)) return;
+	const QString id = sessionId.trimmed();
+	if (id.isEmpty()) return;
+	for (QVariant &roomEntry : m_voiceRoomStates) {
+		QVariantMap room = roomEntry.toMap();
+		QVariantList participants = room.value(QStringLiteral("participants")).toList();
+		const qsizetype previousSize = participants.size();
+		for (qsizetype index = participants.size(); index > 0; --index) {
+			if (participants.at(index - 1).toMap().value(QStringLiteral("session")).toString().trimmed() == id)
+				participants.removeAt(index - 1);
+		}
+		if (participants.size() != previousSize) {
+			room.insert(QStringLiteral("participants"), participants);
+			room.insert(QStringLiteral("participantCount"), participants.size());
+			roomEntry = room;
+		}
+	}
+	for (int rowIndex = rowCount() - 1; rowIndex >= 0; --rowIndex) {
+		const QVariantMap row = get(rowIndex);
+		if (row.value(QStringLiteral("rowKind")).toString() == QLatin1String("participant")
+			&& row.value(QStringLiteral("participantSession")).toString() == id)
+			removeRow(row.value(QStringLiteral("id")).toString());
+	}
+}
+
+void NavigationRailModel::synchronizeAllRows() {
+	QVariantList rows;
+	const auto appendRoom = [&rows](const QVariantMap &room, const QString &kind) {
+		QVariantMap roomRow = RoomModel::roomRow(room, kind);
+		if (roomRow.isEmpty()) return;
+		roomRow.insert(QStringLiteral("rowKind"), QStringLiteral("room"));
+		roomRow.insert(QStringLiteral("sectionKind"), kind);
+		rows.push_back(roomRow);
+
+		if (kind != QLatin1String("voice")) return;
+		const QString parentScopeToken = roomRow.value(QStringLiteral("scopeToken")).toString();
+		const int participantDepth = roomRow.value(QStringLiteral("depth")).toInt() + 1;
+		for (const QVariant &entry : room.value(QStringLiteral("participants")).toList()) {
+			QVariantMap participantRow = ParticipantModel::participantRow(entry.toMap());
+			if (participantRow.isEmpty()) continue;
+			participantRow.insert(QStringLiteral("rowKind"), QStringLiteral("participant"));
+			participantRow.insert(QStringLiteral("sectionKind"), kind);
+			participantRow.insert(QStringLiteral("parentScopeToken"), parentScopeToken);
+			participantRow.insert(QStringLiteral("depth"), participantDepth);
+			if (participantRow.value(QStringLiteral("scopeToken")).toString().isEmpty())
+				participantRow.insert(QStringLiteral("scopeToken"), parentScopeToken);
+			rows.push_back(participantRow);
+		}
+	};
+
+	rows.reserve(m_voiceRoomStates.size() + m_textRoomStates.size() + m_directMessageStates.size());
+	for (const QVariant &entry : std::as_const(m_voiceRoomStates))
+		appendRoom(entry.toMap(), QStringLiteral("voice"));
+	for (const QVariant &entry : std::as_const(m_textRoomStates))
+		appendRoom(entry.toMap(), QStringLiteral("text"));
+	for (const QVariant &entry : std::as_const(m_directMessageStates))
+		appendRoom(entry.toMap(), QStringLiteral("direct"));
+	synchronizeRows(rows);
+}
+
 ChatTimelineModel::ChatTimelineModel(QObject *parent) : StableListModel(parent) {}
+
+bool ChatTimelineModel::isUserHistoryRow(const QVariantMap &row) {
+	const QVariantMap source = row.value(QStringLiteral("source")).toMap();
+	return !source.value(QStringLiteral("system")).toBool()
+		&& !row.value(QStringLiteral("deleted")).toBool();
+}
+
+void ChatTimelineModel::updateUserHistoryRow(const QString &messageId, const QVariantMap &row) {
+	const bool hadUserHistory = !m_userHistoryMessageIds.isEmpty();
+	if (isUserHistoryRow(row)) {
+		m_userHistoryMessageIds.insert(messageId);
+	} else {
+		m_userHistoryMessageIds.remove(messageId);
+	}
+	if (hadUserHistory != !m_userHistoryMessageIds.isEmpty()) emit hasUserHistoryChanged();
+}
 
 QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message,
 										  QList< RichBodyParseRequest > *requests) {
@@ -1917,11 +2179,13 @@ QVariantMap ChatTimelineModel::messageRow(const QVariantMap &message,
 			 { QStringLiteral("reactions"), normalizedReactions(message.value(QStringLiteral("reactions"))) },
 			 { QStringLiteral("preview"), normalizedPreview(previewValue) },
 			 { QStringLiteral("attachments"), normalizedAttachments(message.value(QStringLiteral("attachments"))) },
-			 { QStringLiteral("own"), message.value(QStringLiteral("own")) },
-			 { QStringLiteral("deleted"), message.value(QStringLiteral("deleted")) },
-			 { QStringLiteral("canReply"), message.value(QStringLiteral("canReply")) },
-			 { QStringLiteral("canReact"), message.value(QStringLiteral("canReact")) },
-			 { QStringLiteral("canDelete"), message.value(QStringLiteral("canDelete")) },
+			 // Required QML bool roles must never be invalid. ListView can otherwise
+			 // retain the previous delegate value when a sparse row is rebound.
+			 { QStringLiteral("own"), message.value(QStringLiteral("own")).toBool() },
+			 { QStringLiteral("deleted"), message.value(QStringLiteral("deleted")).toBool() },
+			 { QStringLiteral("canReply"), message.value(QStringLiteral("canReply")).toBool() },
+			 { QStringLiteral("canReact"), message.value(QStringLiteral("canReact")).toBool() },
+			 { QStringLiteral("canDelete"), message.value(QStringLiteral("canDelete")).toBool() },
 			 { QStringLiteral("source"), message } };
 }
 
@@ -1939,10 +2203,12 @@ ChatTimelineModel::MessageMutation ChatTimelineModel::applyMessage(const QVarian
 			return MessageMutation::Unchanged;
 		}
 		upsertRow(row);
+		updateUserHistoryRow(id, row);
 		scheduleRichBodyParses(requests);
 		return MessageMutation::Updated;
 	}
 	upsertRow(row);
+	updateUserHistoryRow(id, row);
 	scheduleRichBodyParses(requests);
 	return MessageMutation::Inserted;
 }
@@ -1952,11 +2218,15 @@ bool ChatTimelineModel::upsertMessage(const QVariantMap &message) {
 }
 
 bool ChatTimelineModel::removeMessage(const QString &messageId) {
+	if (!acceptsFrontendStateMutation(this)) return false;
 	const QString id = messageId.trimmed();
 	if (id.isEmpty()) return false;
 	if (indexOf(id) < 0) return false;
 	forgetRichBodyMessage(id);
+	const bool hadUserHistory = !m_userHistoryMessageIds.isEmpty();
+	m_userHistoryMessageIds.remove(id);
 	removeRow(id);
+	if (hadUserHistory != !m_userHistoryMessageIds.isEmpty()) emit hasUserHistoryChanged();
 	return true;
 }
 
@@ -1972,6 +2242,7 @@ int ChatTimelineModel::appendMessages(const QVariantList &messages) {
 		const int rowIndex = indexOf(id);
 		if (rowIndex >= 0 && get(rowIndex) == row) continue;
 		upsertRow(row);
+		updateUserHistoryRow(id, row);
 	}
 	scheduleRichBodyParses(requests);
 	return applied;
@@ -1982,12 +2253,18 @@ void ChatTimelineModel::replaceMessages(const QVariantList &messages) {
 	QVariantList rows;
 	QList< RichBodyParseRequest > requests;
 	QSet< QString > retainedMessageIds;
+	QSet< QString > userHistoryMessageIds;
 	rows.reserve(messages.size());
 	for (const QVariant &entry : messages) {
 		const QVariantMap row = messageRow(entry.toMap(), &requests);
 		if (!row.isEmpty()) {
 			rows.push_back(row);
-			retainedMessageIds.insert(row.value(QStringLiteral("id")).toString());
+			const QString id = row.value(QStringLiteral("id")).toString();
+			retainedMessageIds.insert(id);
+			if (isUserHistoryRow(row))
+				userHistoryMessageIds.insert(id);
+			else
+				userHistoryMessageIds.remove(id);
 		}
 	}
 	const QStringList expectedIds = m_expectedRichBodyKeyByMessage.keys();
@@ -2012,7 +2289,10 @@ void ChatTimelineModel::replaceMessages(const QVariantList &messages) {
 		m_inFlightRichBodyKeys.remove(*it);
 		it = m_deferredRichBodyOrder.erase(it);
 	}
+	const bool hadUserHistory = !m_userHistoryMessageIds.isEmpty();
 	synchronizeRows(rows);
+	m_userHistoryMessageIds = std::move(userHistoryMessageIds);
+	if (hadUserHistory != !m_userHistoryMessageIds.isEmpty()) emit hasUserHistoryChanged();
 	scheduleRichBodyParses(requests);
 }
 
@@ -2021,6 +2301,10 @@ QVariantList ChatTimelineModel::messages() const {
 	states.reserve(rowCount());
 	for (int row = 0; row < rowCount(); ++row) states.push_back(get(row).value(QStringLiteral("source")));
 	return states;
+}
+
+bool ChatTimelineModel::hasUserHistory() const {
+	return !m_userHistoryMessageIds.isEmpty();
 }
 
 void ChatTimelineModel::clear() {
@@ -2035,7 +2319,10 @@ void ChatTimelineModel::clear() {
 	m_inFlightRichBodyKeys = m_activeRichBodyKeys;
 	m_readyRichBodies.clear();
 	m_richBodyDrainScheduled = false;
+	const bool hadUserHistory = !m_userHistoryMessageIds.isEmpty();
+	m_userHistoryMessageIds.clear();
 	StableListModel::clear();
+	if (hadUserHistory) emit hasUserHistoryChanged();
 }
 
 void ChatTimelineModel::forgetRichBodyMessage(const QString &messageId) {
@@ -2532,6 +2819,11 @@ UiCommandController::UiCommandController(QObject *parent) : QObject(parent) {
 void UiCommandController::selectScope(const QString &scopeToken) {
 	if (!scopeToken.trimmed().isEmpty()) emit scopeSelectionRequested(scopeToken.trimmed());
 }
+void UiCommandController::selectScopeFromRail(const QString &scopeToken, const QString &railKind) {
+	const QString normalizedScope = scopeToken.trimmed();
+	if (!normalizedScope.isEmpty())
+		emit scopeRailSelectionRequested(normalizedScope, railKind.trimmed().toLower());
+}
 void UiCommandController::joinVoiceChannel(const QString &scopeToken) {
 	if (!scopeToken.trimmed().isEmpty()) emit voiceJoinRequested(scopeToken.trimmed());
 }
@@ -2627,6 +2919,15 @@ QVariantList UiCommandController::requestScopeActions(const QString &scopeToken,
 }
 void UiCommandController::setScopeActionsProvider(ScopeActionsProvider provider) {
 	m_scopeActionsProvider = std::move(provider);
+}
+QVariantList UiCommandController::requestParticipantActions(const QString &sessionId, const QString &entryKind,
+																		 const QString &scopeToken) const {
+	const QString session = sessionId.trimmed();
+	if (session.isEmpty() || !m_participantActionsProvider) return {};
+	return m_participantActionsProvider(session, entryKind.trimmed().toLower(), scopeToken.trimmed());
+}
+void UiCommandController::setParticipantActionsProvider(ParticipantActionsProvider provider) {
+	m_participantActionsProvider = std::move(provider);
 }
 void UiCommandController::invokeParticipantAction(const QString &sessionId, const QString &actionId) {
 	qulonglong session = 0;
@@ -3246,7 +3547,17 @@ void MediaSessionBackend::updateLoadProgress(const int progress) {
 
 void MediaSessionBackend::reportLoadProgress(const int progress) {
 	if (!m_active) return;
-	updateLoadProgress(progress);
+	const int normalized = qBound(0, progress, 100);
+	updateLoadProgress(normalized);
+	// Some allowlisted providers expose their own controls inside the isolated
+	// embed instead of a scriptable transport API. A successful document load is
+	// therefore their ready signal; leaving them in "loading" would permanently
+	// cover the usable provider UI with our loading scrim.
+	if (normalized == 100 && !playbackControllable() && m_state == QLatin1String("loading")) {
+		m_state = QStringLiteral("ready");
+		m_error.clear();
+		emit stateChanged();
+	}
 }
 
 void MediaSessionBackend::reportPlaybackState(const double position, const double duration, const bool paused) {

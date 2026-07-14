@@ -19,6 +19,7 @@
 #include "Plugin.h"
 #include "PluginManager.h"
 #include "SpeechCleanup.h"
+#include "UiTheme.h"
 #include "Version.h"
 
 #include <QtCore/QDebug>
@@ -172,6 +173,8 @@ namespace {
 			  QObject::tr("Choose the color theme used by the native Qt Quick client.") },
 			{ QStringLiteral("look.modernThemesDirectory"),
 			  QObject::tr("Open the folder where custom Modern theme manifests are stored.") },
+			{ QStringLiteral("look.modernThemesReload"),
+			  QObject::tr("Reload custom theme manifests after adding or editing files in the theme folder.") },
 			{ QStringLiteral("look.modernDensity"),
 			  QObject::tr("Adjust spacing density for Qt Quick lists, controls, and panels.") },
 			{ QStringLiteral("look.modernClassicUserIcons"),
@@ -830,9 +833,9 @@ namespace {
 		field.insert(QStringLiteral("active"), settings.atTransmit == Settings::VAD);
 		field.insert(QStringLiteral("calibrationState"), QStringLiteral("idle"));
 		field.insert(QStringLiteral("calibrationActionId"), QStringLiteral("finishAudioSetupWizard"));
-		field.insert(QStringLiteral("calibrationLabel"), QObject::tr("Audio setup"));
+		field.insert(QStringLiteral("calibrationLabel"), QObject::tr("Use recommended settings"));
 		field.insert(QStringLiteral("calibrationTooltip"),
-					 QObject::tr("Open guided audio setup for microphone level, voice activation, replay, and cleanup tuning."));
+					 QObject::tr("Stage recommended voice detection, input gate, amplification, and cleanup settings. Apply or save to activate them."));
 		field.insert(QStringLiteral("calibrationStatusText"), QObject::tr("Ready to tune voice input."));
 		field.insert(QStringLiteral("replayStartActionId"), QStringLiteral("startVoiceReplay"));
 		field.insert(QStringLiteral("replayStopActionId"), QStringLiteral("stopVoiceReplay"));
@@ -882,8 +885,25 @@ namespace {
 		return Mumble::SpeechCleanup::isBackendAvailable(backend) ? backend : Mumble::SpeechCleanup::fallbackBackend();
 	}
 
-	QString normalizedModernShellTheme(const QVariant &value) {
-		return Mumble::ModernTheme::normalizedThemeId(value.toString());
+	const Mumble::ModernTheme::ThemeDefinition *modernShellCustomTheme(
+		const QList< Mumble::ModernTheme::ThemeDefinition > &catalog, const QString &themeID) {
+		const QString normalized = themeID.trimmed().toLower();
+		for (const Mumble::ModernTheme::ThemeDefinition &theme : catalog) {
+			if (theme.id == normalized) {
+				return &theme;
+			}
+		}
+		return nullptr;
+	}
+
+	QString normalizedModernShellTheme(
+		const QVariant &value, const QList< Mumble::ModernTheme::ThemeDefinition > &catalog) {
+		const QString normalized = value.toString().trimmed().toLower();
+		if (Mumble::ModernTheme::isBuiltInThemeId(normalized)
+			|| modernShellCustomTheme(catalog, normalized)) {
+			return normalized;
+		}
+		return QStringLiteral("dark");
 	}
 
 	QString normalizedModernShellDensity(const QVariant &value) {
@@ -912,19 +932,115 @@ namespace {
 		return Mumble::ModernTheme::normalizedCustomAccentStrength(value);
 	}
 
-	QVariantList modernShellThemeOptions() {
-		QVariantList options { optionItem(QStringLiteral("dark"), QObject::tr("Dark")),
-							   optionItem(QStringLiteral("light"), QObject::tr("Light")),
-							   optionItem(QStringLiteral("mocha"), QObject::tr("Mocha")),
-							   optionItem(QStringLiteral("macchiato"), QObject::tr("Macchiato")),
-							   optionItem(QStringLiteral("frappe"), QObject::tr("Frappe")),
-							   optionItem(QStringLiteral("latte"), QObject::tr("Latte")),
-							   optionItem(QStringLiteral("nord"), QObject::tr("Nord")),
-							   optionItem(QStringLiteral("gruvbox"), QObject::tr("Gruvbox")) };
+	QString previewColor(const QColor &color) {
+		return color.alpha() < 255 ? color.name(QColor::HexArgb) : color.name(QColor::HexRgb);
+	}
 
-		for (const Mumble::ModernTheme::ThemeDefinition &theme : Mumble::ModernTheme::customThemes()) {
+	QVariantMap modernShellThemePreview(const UiThemeTokens &tokens, const QColor &shellBackground = {}) {
+		return QVariantMap {
+			{ QStringLiteral("shell"), previewColor(shellBackground.isValid() ? shellBackground : tokens.base) },
+			{ QStringLiteral("rail"), previewColor(tokens.mantle) },
+			{ QStringLiteral("strip"), previewColor(tokens.crust) },
+			{ QStringLiteral("panel"), previewColor(tokens.base) },
+			{ QStringLiteral("surface"), previewColor(tokens.surface0) },
+			{ QStringLiteral("surfaceHover"), previewColor(tokens.surface1) },
+			{ QStringLiteral("border"), previewColor(tokens.surface2) },
+			{ QStringLiteral("text"), previewColor(tokens.text) },
+			{ QStringLiteral("textMuted"), previewColor(tokens.overlay0) },
+			{ QStringLiteral("accent"), previewColor(tokens.accent) },
+			{ QStringLiteral("accentHover"), previewColor(tokens.accentHover) },
+			{ QStringLiteral("accentSubtle"), previewColor(tokens.accentSubtle) },
+			{ QStringLiteral("danger"), previewColor(tokens.red) },
+			{ QStringLiteral("success"), previewColor(tokens.green) },
+			{ QStringLiteral("warning"), previewColor(tokens.yellow) }
+		};
+	}
+
+	QVariantMap modernShellThemePreview(const Mumble::ModernTheme::ThemeDefinition &theme) {
+		const Mumble::ModernTheme::ThemePalette &palette = theme.palette;
+		if (!palette.base.isValid() || !palette.text.isValid() || !palette.accent.isValid()) {
+			// Legacy CSS themes only carry parsed custom-property tokens. Build the
+			// most faithful preview available from those colors and leave missing
+			// roles unset so QML can use its safe product-token fallback.
+			QVariantMap preview;
+			const auto insertToken = [&preview, &theme](const QString &role, const QStringList &tokenNames) {
+				for (const QString &tokenName : tokenNames) {
+					const QColor color(theme.tokens.value(tokenName).toString());
+					if (color.isValid()) {
+						preview.insert(role, previewColor(color));
+						return;
+					}
+				}
+			};
+			insertToken(QStringLiteral("shell"),
+						{ QStringLiteral("--shell-bg"), QStringLiteral("--shell-panel"),
+						  QStringLiteral("--shell-rail") });
+			insertToken(QStringLiteral("rail"), { QStringLiteral("--shell-rail") });
+			insertToken(QStringLiteral("strip"), { QStringLiteral("--shell-strip") });
+			insertToken(QStringLiteral("panel"), { QStringLiteral("--shell-panel") });
+			insertToken(QStringLiteral("surface"), { QStringLiteral("--shell-panel-soft") });
+			insertToken(QStringLiteral("surfaceHover"), { QStringLiteral("--shell-highlight") });
+			insertToken(QStringLiteral("border"), { QStringLiteral("--surface-border") });
+			insertToken(QStringLiteral("text"),
+						{ QStringLiteral("--text-strong"), QStringLiteral("--text-main") });
+			insertToken(QStringLiteral("textMuted"), { QStringLiteral("--text-muted") });
+			insertToken(QStringLiteral("accent"), { QStringLiteral("--accent") });
+			insertToken(QStringLiteral("accentHover"), { QStringLiteral("--accent-strong") });
+			insertToken(QStringLiteral("accentSubtle"), { QStringLiteral("--accent-soft") });
+			insertToken(QStringLiteral("danger"), { QStringLiteral("--danger") });
+			insertToken(QStringLiteral("success"), { QStringLiteral("--success") });
+			insertToken(QStringLiteral("warning"), { QStringLiteral("--warning") });
+			return preview;
+		}
+		return QVariantMap {
+			{ QStringLiteral("shell"), previewColor(palette.shellBackground) },
+			{ QStringLiteral("rail"), previewColor(palette.mantle) },
+			{ QStringLiteral("strip"), previewColor(palette.crust) },
+			{ QStringLiteral("panel"), previewColor(palette.base) },
+			{ QStringLiteral("surface"), previewColor(palette.surface0) },
+			{ QStringLiteral("surfaceHover"), previewColor(palette.surface1) },
+			{ QStringLiteral("border"), previewColor(palette.surface2) },
+			{ QStringLiteral("text"), previewColor(palette.text) },
+			{ QStringLiteral("textMuted"), previewColor(palette.overlay0) },
+			{ QStringLiteral("accent"), previewColor(palette.accent) },
+			{ QStringLiteral("accentHover"), previewColor(palette.accentHover) },
+			{ QStringLiteral("accentSubtle"), previewColor(palette.accentSubtle) },
+			{ QStringLiteral("danger"), previewColor(palette.red) },
+			{ QStringLiteral("success"), previewColor(palette.green) },
+			{ QStringLiteral("warning"), previewColor(palette.yellow) }
+		};
+	}
+
+	QString modernShellBuiltInThemeLabel(const QString &themeID) {
+		if (themeID == QLatin1String("dark")) return QObject::tr("Dark");
+		if (themeID == QLatin1String("light")) return QObject::tr("Light");
+		if (themeID == QLatin1String("mocha")) return QObject::tr("Mocha");
+		if (themeID == QLatin1String("macchiato")) return QObject::tr("Macchiato");
+		if (themeID == QLatin1String("frappe")) return QObject::tr("Frappe");
+		if (themeID == QLatin1String("latte")) return QObject::tr("Latte");
+		if (themeID == QLatin1String("nord")) return QObject::tr("Nord");
+		if (themeID == QLatin1String("gruvbox")) return QObject::tr("Gruvbox");
+		return themeID;
+	}
+
+	QVariantList modernShellThemeOptions(
+		const QList< Mumble::ModernTheme::ThemeDefinition > &customThemes) {
+		QVariantList options;
+		for (const QString &themeID : Mumble::ModernTheme::builtInThemeIds()) {
+			QVariantMap option = optionItem(themeID, modernShellBuiltInThemeLabel(themeID));
+			option.insert(QStringLiteral("source"), QStringLiteral("builtIn"));
+			option.insert(QStringLiteral("preview"), modernShellThemePreview(uiThemeTokensForThemeId(themeID)));
+			options.push_back(option);
+		}
+
+		for (const Mumble::ModernTheme::ThemeDefinition &theme : customThemes) {
 			QVariantMap option = optionItem(theme.id, theme.name, true, theme.sourcePath);
 			option.insert(QStringLiteral("source"), QStringLiteral("custom"));
+			option.insert(QStringLiteral("appearance"), theme.appearance);
+			const QVariantMap preview = modernShellThemePreview(theme);
+			if (!preview.isEmpty()) {
+				option.insert(QStringLiteral("preview"), preview);
+			}
 			const QVariantMap swatch = Mumble::ModernTheme::themeSwatch(theme.tokens);
 			if (!swatch.isEmpty()) {
 				option.insert(QStringLiteral("swatch"), swatch);
@@ -954,15 +1070,50 @@ namespace {
 		return swatch;
 	}
 
-	QVariantList modernShellAccentOptions(const Settings &settings) {
-		QVariantMap customOption = optionItem(Mumble::ModernTheme::customAccentId(), QObject::tr("Custom"));
+	QVariantMap modernShellAccentOption(const QString &id, const QString &label, const QColor &color,
+									  const QString &hint = {}) {
+		QVariantMap option = optionItem(id, label, true, hint);
+		QVariantMap swatch;
+		swatch.insert(QStringLiteral("accent"), previewColor(color));
+		option.insert(QStringLiteral("swatch"), swatch);
+		return option;
+	}
+
+	QVariantList modernShellAccentOptions(
+		const Settings &settings, const QList< Mumble::ModernTheme::ThemeDefinition > &customThemes) {
+		const QString themeID = normalizedModernShellTheme(settings.qsModernShellTheme, customThemes);
+		QColor automaticAccent = uiThemeTokensForThemeId(themeID).accent;
+		if (const Mumble::ModernTheme::ThemeDefinition *customTheme =
+				modernShellCustomTheme(customThemes, themeID)) {
+			QColor customThemeAccent = customTheme->palette.accent;
+			if (!customThemeAccent.isValid()) {
+				customThemeAccent = QColor(
+					Mumble::ModernTheme::themeSwatch(customTheme->tokens).value(QStringLiteral("accent")).toString());
+			}
+			if (customThemeAccent.isValid()) {
+				automaticAccent = customThemeAccent;
+			}
+		}
+		QVariantMap automaticOption = modernShellAccentOption(
+			QStringLiteral("auto"), QObject::tr("Auto"), automaticAccent,
+			QObject::tr("Uses the accent supplied by the selected theme."));
+		automaticOption.insert(QStringLiteral("automatic"), true);
+
+		QVariantMap customOption = modernShellAccentOption(
+			Mumble::ModernTheme::customAccentId(), QObject::tr("Custom"),
+			QColor(normalizedModernShellCustomAccent(settings.qsModernShellCustomAccent)));
 		customOption.insert(QStringLiteral("swatch"), modernShellCustomAccentSwatch(settings));
-		return QVariantList { optionItem(QStringLiteral("auto"), QObject::tr("Auto")),
-							  optionItem(QStringLiteral("teal"), QObject::tr("Teal")),
-							  optionItem(QStringLiteral("blue"), QObject::tr("Blue")),
-							  optionItem(QStringLiteral("violet"), QObject::tr("Violet")),
-							  optionItem(QStringLiteral("amber"), QObject::tr("Amber")),
-							  optionItem(QStringLiteral("rose"), QObject::tr("Rose")),
+		return QVariantList { automaticOption,
+							  modernShellAccentOption(QStringLiteral("teal"), QObject::tr("Teal"),
+								  Mumble::ModernTheme::accentColorOverride(QStringLiteral("teal"))),
+							  modernShellAccentOption(QStringLiteral("blue"), QObject::tr("Blue"),
+								  Mumble::ModernTheme::accentColorOverride(QStringLiteral("blue"))),
+							  modernShellAccentOption(QStringLiteral("violet"), QObject::tr("Violet"),
+								  Mumble::ModernTheme::accentColorOverride(QStringLiteral("violet"))),
+							  modernShellAccentOption(QStringLiteral("amber"), QObject::tr("Amber"),
+								  Mumble::ModernTheme::accentColorOverride(QStringLiteral("amber"))),
+							  modernShellAccentOption(QStringLiteral("rose"), QObject::tr("Rose"),
+								  Mumble::ModernTheme::accentColorOverride(QStringLiteral("rose"))),
 							  customOption };
 	}
 
@@ -986,10 +1137,12 @@ namespace {
 		return merged;
 	}
 
-	QVariantMap modernShellUiTweaksDto(const Settings &settings) {
+	QVariantMap modernShellUiTweaksDto(
+		const Settings &settings, const QList< Mumble::ModernTheme::ThemeDefinition > &customThemes) {
 		const QString accent = normalizedModernShellAccent(settings.qsModernShellAccent);
-		const QString theme  = normalizedModernShellTheme(settings.qsModernShellTheme);
-		const QVariantMap customThemeTokens = Mumble::ModernTheme::customThemeTokens(theme);
+		const QString theme  = normalizedModernShellTheme(settings.qsModernShellTheme, customThemes);
+		const Mumble::ModernTheme::ThemeDefinition *customTheme = modernShellCustomTheme(customThemes, theme);
+		const QVariantMap customThemeTokens = customTheme ? customTheme->tokens : QVariantMap();
 		const QVariantMap customAccentTokens =
 			accent == Mumble::ModernTheme::customAccentId()
 				? Mumble::ModernTheme::customAccentTokens(
@@ -1707,12 +1860,44 @@ namespace {
 	}
 } // namespace
 
+void ModernSettingsController::restoreVoiceReplayDraft() {
+	if (m_voiceReplayPreviousTransmitMode) {
+		m_draft.atTransmit = *m_voiceReplayPreviousTransmitMode;
+	}
+	if (m_voiceReplayPreviousLoopMode) {
+		m_draft.lmLoopMode = *m_voiceReplayPreviousLoopMode;
+	}
+	if (m_voiceReplayPreviousPacketLoss) {
+		m_draft.dPacketLoss = *m_voiceReplayPreviousPacketLoss;
+	}
+	if (m_voiceReplayPreviousMaxPacketDelay) {
+		m_draft.dMaxPacketDelay = *m_voiceReplayPreviousMaxPacketDelay;
+	}
+	m_voiceReplayPreviousTransmitMode.reset();
+	m_voiceReplayPreviousLoopMode.reset();
+	m_voiceReplayPreviousPacketLoss.reset();
+	m_voiceReplayPreviousMaxPacketDelay.reset();
+}
+
 void ModernSettingsController::open(const Settings &settings, const QString &pageName) {
 	m_original = settings;
 	m_draft    = settings;
 	m_shortcutCaptureIndex = -1;
+	m_voiceReplayPreviousTransmitMode.reset();
+	m_voiceReplayPreviousLoopMode.reset();
+	m_voiceReplayPreviousPacketLoss.reset();
+	m_voiceReplayPreviousMaxPacketDelay.reset();
+	m_runtimePreviewDiffersFromOriginal = false;
+	refreshModernThemeCatalog();
 	forceModernLayout();
 	setActivePage(pageName);
+}
+
+void ModernSettingsController::refreshModernThemeCatalog() {
+	// Theme manifests are small but live on disk. Snapshot them once per dialog
+	// session so ordinary field edits never synchronously rescan and reparse the
+	// theme directory on the UI thread. The explicit reload action refreshes it.
+	m_modernThemeCatalog = Mumble::ModernTheme::customThemes();
 }
 
 QVariantMap ModernSettingsController::state() const {
@@ -1724,7 +1909,7 @@ QVariantMap ModernSettingsController::state() const {
 	dialog.insert(QStringLiteral("subtitle"), QString());
 	dialog.insert(QStringLiteral("primaryActionId"), QStringLiteral("ok"));
 	dialog.insert(QStringLiteral("preventBackdropClose"), true);
-	dialog.insert(QStringLiteral("uiTweaks"), modernShellUiTweaksDto(m_draft));
+	dialog.insert(QStringLiteral("uiTweaks"), modernShellUiTweaksDto(m_draft, m_modernThemeCatalog));
 	dialog.insert(QStringLiteral("pages"), pages());
 	dialog.insert(QStringLiteral("activePage"), m_activePage);
 	dialog.insert(QStringLiteral("sections"), sectionsForActivePage());
@@ -1749,7 +1934,7 @@ void ModernSettingsController::updateField(const QString &fieldID, const QVarian
 		m_draft.aotbAlwaysOnTop = value.toInt() == Settings::OnTopAlways ? Settings::OnTopAlways
 																			  : Settings::OnTopNever;
 	} else if (id == QLatin1String("look.modernTheme")) {
-		m_draft.qsModernShellTheme = normalizedModernShellTheme(value);
+		m_draft.qsModernShellTheme = normalizedModernShellTheme(value, m_modernThemeCatalog);
 	} else if (id == QLatin1String("look.modernDensity")) {
 		m_draft.qsModernShellDensity = normalizedModernShellDensity(value);
 	} else if (id == QLatin1String("look.modernClassicUserIcons")) {
@@ -2079,6 +2264,12 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 
 	if (action == QLatin1String("cancel")) {
 		m_shortcutCaptureIndex = -1;
+		restoreVoiceReplayDraft();
+		if (m_runtimePreviewDiffersFromOriginal) {
+			result.settingsToApply = m_original;
+			result.announceApply   = false;
+			m_runtimePreviewDiffersFromOriginal = false;
+		}
 		result.closeDialog = true;
 		return result;
 	}
@@ -2086,6 +2277,15 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 	if (action == QLatin1String("reset")) {
 		m_draft = m_original;
 		m_shortcutCaptureIndex = -1;
+		m_voiceReplayPreviousTransmitMode.reset();
+		m_voiceReplayPreviousLoopMode.reset();
+		m_voiceReplayPreviousPacketLoss.reset();
+		m_voiceReplayPreviousMaxPacketDelay.reset();
+		if (m_runtimePreviewDiffersFromOriginal) {
+			result.settingsToApply = m_original;
+			result.announceApply   = false;
+			m_runtimePreviewDiffersFromOriginal = false;
+		}
 		forceModernLayout();
 		return result;
 	}
@@ -2119,6 +2319,13 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 		} else if (!errorMessage.trimmed().isEmpty()) {
 			qWarning() << "Unable to open Modern themes directory:" << errorMessage;
 		}
+		return result;
+	}
+
+	if (action == QLatin1String("look.reloadModernThemes")) {
+		refreshModernThemeCatalog();
+		m_draft.qsModernShellTheme =
+			normalizedModernShellTheme(m_draft.qsModernShellTheme, m_modernThemeCatalog);
 		return result;
 	}
 
@@ -2277,7 +2484,13 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 			silenceThreshold = qMax(0, speechThreshold - 1);
 		}
 
-		m_draft.atTransmit = Settings::VAD;
+		// Applying recommendations must never silently turn PTT or continuous
+		// transmission into voice activation. The legacy action keeps its
+		// explicit VAD semantics, while the settings action only updates the
+		// draft and still requires Apply/OK.
+		if (action == QLatin1String("autoSetVoiceActivation")) {
+			m_draft.atTransmit = Settings::VAD;
+		}
 		if (vadSource == Settings::SignalToNoise || vadSource == Settings::Hybrid || vadSource == Settings::Amplitude) {
 			m_draft.vsVAD = vadSource;
 		}
@@ -2309,11 +2522,16 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 					   static_cast< int >(Settings::InputGateStrict)));
 		}
 		forceModernLayout();
-		result.settingsToApply = m_draft;
 		return result;
 	}
 
 	if (action == QLatin1String("startVoiceReplay")) {
+		if (!m_voiceReplayPreviousTransmitMode) {
+			m_voiceReplayPreviousTransmitMode = m_draft.atTransmit;
+			m_voiceReplayPreviousLoopMode      = m_draft.lmLoopMode;
+			m_voiceReplayPreviousPacketLoss    = m_draft.dPacketLoss;
+			m_voiceReplayPreviousMaxPacketDelay = m_draft.dMaxPacketDelay;
+		}
 		const QString mode = payload.value(QStringLiteral("mode")).toString();
 		m_draft.lmLoopMode = mode == QLatin1String("server") ? Settings::Server : Settings::Local;
 		m_draft.dPacketLoss = 0.0f;
@@ -2321,24 +2539,30 @@ ModernSettingsController::ActionResult ModernSettingsController::invokeAction(co
 		m_draft.atTransmit = Settings::VAD;
 		forceModernLayout();
 		result.settingsToApply = m_draft;
+		result.announceApply   = false;
+		m_runtimePreviewDiffersFromOriginal = true;
 		return result;
 	}
 
 	if (action == QLatin1String("stopVoiceReplay")) {
-		m_draft.lmLoopMode = Settings::None;
+		restoreVoiceReplayDraft();
 		forceModernLayout();
 		result.settingsToApply = m_draft;
+		result.announceApply   = false;
+		m_runtimePreviewDiffersFromOriginal = true;
 		return result;
 	}
 
 	if (action == QLatin1String("apply") || action == QLatin1String("ok")) {
 		m_shortcutCaptureIndex = -1;
+		restoreVoiceReplayDraft();
 		refreshShortcutRestartFlag();
 		forceModernLayout();
 		result.settingsToApply = m_draft;
 		result.accepted        = action == QLatin1String("ok");
 		result.closeDialog     = result.accepted;
 		m_original             = m_draft;
+		m_runtimePreviewDiffersFromOriginal = false;
 		return result;
 	}
 
@@ -2950,20 +3174,25 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 
 	return QVariantList {
 		sectionItem(QObject::tr("Modern layout"), QVariantList {
-												 noteField(QObject::tr("This fork now uses the Modern layout as the visible client shell. Classic layout switching is disabled.")) }),
+											 noteField(QObject::tr("This fork now uses the Modern layout as the visible client shell. Classic layout switching is disabled.")) }),
 		sectionItem(QObject::tr("Tweaks"), QVariantList {
-											hintedField(presentationField(
-															selectField(QStringLiteral("look.modernTheme"),
-																		QObject::tr("Theme"),
-																		normalizedModernShellTheme(m_draft.qsModernShellTheme),
-																		modernShellThemeOptions(),
-																		QStringLiteral("string")),
+										hintedField(presentationField(
+																selectField(
+																	QStringLiteral("look.modernTheme"), QObject::tr("Theme"),
+																	normalizedModernShellTheme(
+																		m_draft.qsModernShellTheme, m_modernThemeCatalog),
+																	modernShellThemeOptions(m_modernThemeCatalog),
+																	QStringLiteral("string")),
 															QStringLiteral("themeGrid")),
 														QObject::tr("Catppuccin, standard light/dark, and more")),
-											actionField(QStringLiteral("look.modernThemesDirectory"),
-														QObject::tr("Custom themes"),
-														QObject::tr("Open folder"),
-														QStringLiteral("look.openModernThemesDirectory")),
+										actionField(QStringLiteral("look.modernThemesDirectory"),
+													QObject::tr("Custom theme folder"),
+													QObject::tr("Open folder"),
+													QStringLiteral("look.openModernThemesDirectory")),
+										actionField(QStringLiteral("look.modernThemesReload"),
+													QObject::tr("Theme library"),
+													QObject::tr("Reload themes"),
+													QStringLiteral("look.reloadModernThemes")),
 											presentationField(
 												selectField(QStringLiteral("look.modernDensity"), QObject::tr("Density"),
 															normalizedModernShellDensity(m_draft.qsModernShellDensity),
@@ -2981,7 +3210,8 @@ QVariantList ModernSettingsController::sectionsForActivePage() const {
 											presentationField(
 												selectField(QStringLiteral("look.modernAccent"), QObject::tr("Accent"),
 															normalizedModernShellAccent(m_draft.qsModernShellAccent),
-															modernShellAccentOptions(m_draft), QStringLiteral("string")),
+															modernShellAccentOptions(m_draft, m_modernThemeCatalog),
+															QStringLiteral("string")),
 												QStringLiteral("accentGrid")),
 											hiddenField(colorField(QStringLiteral("look.modernCustomAccent"),
 																   QObject::tr("Custom accent"),

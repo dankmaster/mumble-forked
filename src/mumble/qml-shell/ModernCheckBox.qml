@@ -20,8 +20,10 @@ CheckBox {
 		x: control.leftPadding
 		y: Math.round((control.height - height) / 2)
 		radius: 5
-		color: control.checked ? Theme.accent : Theme.surfaceRaised
-		border.color: control.activeFocus ? Theme.focus
+		color: !control.enabled ? (control.checked ? Theme.surfaceBorder : Theme.panel)
+			: control.checked ? Theme.accent : Theme.surfaceRaised
+		border.color: !control.enabled ? Theme.divider
+			: control.activeFocus ? Theme.focus
 			: control.checked ? Theme.accentHover
 			: control.hovered ? Theme.surfaceBorder : Theme.divider
 		border.width: control.activeFocus ? Theme.focusRingWidth : 1
@@ -30,7 +32,7 @@ CheckBox {
 			anchors.centerIn: parent
 			visible: control.checked
 			text: "✓"
-			color: Theme.contrastText(Theme.accent)
+			color: control.enabled ? Theme.contrastText(Theme.accent) : Theme.textMuted
 			font.pixelSize: 13
 			font.bold: true
 		}

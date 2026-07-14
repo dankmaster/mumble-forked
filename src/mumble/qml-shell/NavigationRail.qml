@@ -6,27 +6,41 @@ import Mumble.Theme 1.0
 Rectangle {
 	id: navigationRail
 	objectName: "navigationRail"
-    required property var roomModel
-    required property var participantModel
-    required property var selectionState
-    required property var uiCommands
-    required property var clientSession
+	// Flat, ordered navigation rows. Voice-room rows are followed immediately by
+	// their participant rows. This keeps one scroll position and one virtualized
+	// delegate pool for the complete navigator.
+	required property var navigationModel
+	required property var selectionState
+	required property var uiCommands
+	required property var clientSession
 	property bool commitOnSelection: false
+	property string activeScopeMenuToken: ""
+	// Stable row key, rather than session alone: the same user may have a normal
+	// row and one or more listener rows in different scopes.
+	property string activeParticipantMenuKey: ""
     signal selectionCommitted()
 	signal scopeMenuRequested(string scopeToken, string kind, var actions, var anchorPoint)
 	signal participantMenuRequested(string sessionId, var actions, var anchorPoint,
-		string entryKind, string scopeToken)
+		string entryKind, string scopeToken, string rowKey)
 	signal profileMenuRequested(var anchorPoint)
 
 	function requestScopeMenu(scopeToken, kind, payload, anchorPoint) {
 		scopeMenuRequested(scopeToken, kind, (payload.source && payload.source.actions) || [], anchorPoint)
 	}
 
-	function requestParticipantMenu(sessionId, payload, anchorPoint) {
+	function requestParticipantMenu(sessionId, rowKey, payload, anchorPoint) {
 		const source = payload.source || ({})
-		participantMenuRequested(sessionId, payload.actions || source.actions || [], anchorPoint,
-			String(payload.entryKind || source.entryKind || "user").toLowerCase(),
-			String(payload.scopeToken || source.scopeToken || ""))
+		const entryKind = String(payload.entryKind || source.entryKind || "user").toLowerCase()
+		const scopeToken = String(payload.scopeToken || payload.parentScopeToken || source.scopeToken || "")
+		let actions = payload.actions || source.actions || []
+		if (sessionId.length > 0 && uiCommands.requestParticipantActions) {
+			const requested = uiCommands.requestParticipantActions(sessionId, entryKind, scopeToken)
+			if (requested && requested.length > 0)
+				actions = requested
+		}
+		participantMenuRequested(sessionId, actions, anchorPoint,
+			entryKind, scopeToken,
+			String(rowKey || ""))
 	}
 
 	function toneColor(tone, fallback) {
@@ -42,10 +56,20 @@ Rectangle {
 		}
 	}
 
+	function roomCountForKind(kind) {
+		const count = Number(navigationModel.count) || 0
+		let matches = 0
+		for (let index = 0; index < count; ++index) {
+			const room = navigationModel.get(index)
+			if (room && String(room.kind) === kind)
+				++matches
+		}
+		return matches
+	}
+
 	function safeAvatarSource(value) {
 		const source = String(value || "").trim()
-		return source.substring(0, 22) === "image://mumble/avatar/"
-			|| source.substring(0, 11) === "data:image/" ? source : ""
+		return /^(image:\/\/mumble\/|data:image\/)/i.test(source) ? source : ""
 	}
 
 	function statusGlyph(kind) {
@@ -145,54 +169,96 @@ Rectangle {
 		const delegates = rooms.contentItem ? rooms.contentItem.children : []
 		for (let index = 0; index < delegates.length; ++index) {
 			const candidate = delegates[index]
-			if (!candidate || !candidate.visible || candidate.scopeToken === undefined)
+			if (!candidate || !candidate.visible || candidate.kind === "participant"
+				|| candidate.scopeToken === undefined)
 				continue
+			const targetHeight = candidate.roomRowHeight === undefined
+				? candidate.height : candidate.roomRowHeight
+			const targetTop = candidate.sectionHeaderHeight === undefined
+				? 0 : candidate.sectionHeaderHeight
 			const local = candidate.mapFromItem(null, scenePoint.x, scenePoint.y)
-			if (local.x < 0 || local.y < 0 || local.x > candidate.width || local.y > candidate.height)
+			if (local.x < 0 || local.y < targetTop || local.x > candidate.width
+				|| local.y > targetTop + targetHeight)
 				continue
-			return dispatchStableDrop(kind, stableId, candidate.scopeToken, local.y, candidate.height)
+			return dispatchStableDrop(kind, stableId, candidate.scopeToken,
+				local.y - targetTop, targetHeight)
 		}
 		return false
 	}
 
+	function navigationRowIsSelected(row) {
+		if (!row)
+			return false
+		if (!!row.selected)
+			return true
+		if (String(row.kind || "") !== "participant"
+				|| selectionState.selectedUserSession === undefined
+				|| selectionState.selectedUserSession === null)
+			return false
+		const payload = row.payload || ({})
+		const source = payload.source || ({})
+		const entryKind = String(payload.entryKind || source.entryKind || "user").toLowerCase()
+		if (entryKind !== "user")
+			return false
+		const stableId = String(row.stableId || "")
+		const session = String(payload.participantSession || source.session
+			|| (stableId.substring(0, 5) === "user:" ? stableId.substring(5) : stableId))
+		return session.length > 0 && session === String(selectionState.selectedUserSession)
+	}
+
+	function setCurrentNavigationIndex(index) {
+		if (rooms.count <= 0)
+			return false
+		const targetIndex = Math.max(0, Math.min(rooms.count - 1, Number(index)))
+		if (!Number.isFinite(targetIndex))
+			return false
+		if (rooms.currentIndex !== targetIndex)
+			rooms.currentIndex = targetIndex
+		rooms.positionViewAtIndex(targetIndex, ListView.Contain)
+		return true
+	}
+
+	function focusNavigationIndex(index, focusReason) {
+		if (!setCurrentNavigationIndex(index))
+			return false
+		const targetIndex = rooms.currentIndex
+		const reason = focusReason === undefined ? Qt.OtherFocusReason : focusReason
+		Qt.callLater(function() {
+			if (rooms.currentIndex !== targetIndex)
+				return
+			if (rooms.currentItem)
+				rooms.currentItem.forceActiveFocus(reason)
+			else
+				rooms.forceActiveFocus(reason)
+		})
+		return true
+	}
+
 	function focusInitialItem() {
 		if (rooms.count <= 0) {
-			if (participants.count > 0) {
-				participants.currentIndex = Math.max(0, participants.currentIndex)
-				participants.positionViewAtIndex(participants.currentIndex, ListView.Contain)
-				Qt.callLater(function() {
-					if (participants.currentItem)
-						participants.currentItem.forceActiveFocus()
-					else
-						profileMenuButton.forceActiveFocus()
-				})
-			} else {
-				Qt.callLater(function() { profileMenuButton.forceActiveFocus() })
-			}
+			Qt.callLater(function() { profileMenuButton.forceActiveFocus() })
 			return
 		}
 		let selectedIndex = -1
+		let firstActionableIndex = -1
 		for (let index = 0; index < rooms.count; ++index) {
-			const row = roomModel.get(index)
-			if (row && row.selected) {
+			const row = navigationModel.get(index)
+			if (row && firstActionableIndex < 0)
+				firstActionableIndex = index
+			if (navigationRowIsSelected(row)) {
 				selectedIndex = index
 				break
 			}
 		}
-		rooms.currentIndex = selectedIndex >= 0 ? selectedIndex : Math.max(0, rooms.currentIndex)
-		rooms.positionViewAtIndex(rooms.currentIndex, ListView.Contain)
-		Qt.callLater(function() {
-			if (rooms.currentItem)
-				rooms.currentItem.forceActiveFocus()
-			else
-				rooms.forceActiveFocus()
-		})
+		focusNavigationIndex(selectedIndex >= 0 ? selectedIndex : Math.max(0, firstActionableIndex),
+			Qt.TabFocusReason)
 	}
 
 	implicitWidth: 310
 	implicitHeight: 600
-	// The rail is an accessibility container, not an actionable tab stop. Focus
-	// always enters through a room, participant, or footer action.
+	// The rail is an accessibility container, not an actionable tab stop. Its
+	// virtualized ListView contributes one navigation stop, followed by the fixed
+	// footer actions.
 	activeFocusOnTab: false
     color: Theme.rail
 	border.width: 0
@@ -255,31 +321,28 @@ Rectangle {
 					textFormat: Text.PlainText
 					width: parent.width
 					text: clientSession.connectionLabel
-					color: clientSession.connected ? Theme.accent : Theme.textMuted
+					color: navigationRail.toneColor(clientSession.connectionTone,
+						clientSession.connected ? Theme.success : Theme.textMuted)
 					font.pixelSize: 11
 					elide: Text.ElideRight
 				}
             }
         }
-        Label {
-			Layout.leftMargin: 18
-			Layout.rightMargin: 18
-			Layout.topMargin: Theme.space3
-			Layout.bottomMargin: Theme.space1
-			textFormat: Text.PlainText
-			text: qsTr("NAVIGATION")
-			color: Theme.textMuted
-			font.pixelSize: Theme.fontCaption
-			font.bold: true
-		}
-        ListView {
-            id: rooms
+		ListView {
+			id: rooms
 			objectName: "navigationRooms"
             Layout.fillWidth: true
             Layout.fillHeight: true
-            model: roomModel
-            clip: true
-            reuseItems: true
+			model: navigationModel
+			clip: true
+			// The virtualized list is the navigator's single tab stop. Rows remain
+			// directly focusable by pointer, automation and focusInitialItem(), while
+			// keyboard users move the current row with arrows without tabbing through
+			// every delegate on a large server.
+			activeFocusOnTab: count > 0
+			Accessible.role: Accessible.List
+			Accessible.name: qsTr("Rooms and participants")
+			reuseItems: true
 			// Incubate a bounded number of nearby delegates so keyboard and
 			// accessibility traversal remain deterministic without realizing the
 			// complete room tree.
@@ -287,8 +350,42 @@ Rectangle {
             spacing: 2
             leftMargin: 10
             rightMargin: 10
-			section.property: "kind"
+			section.property: "sectionKind"
 			section.criteria: ViewSection.FullString
+			Keys.onPressed: event => {
+				if (event.key === Qt.Key_Up) {
+					event.accepted = navigationRail.setCurrentNavigationIndex(currentIndex - 1)
+				} else if (event.key === Qt.Key_Down) {
+					event.accepted = navigationRail.setCurrentNavigationIndex(currentIndex + 1)
+				} else if (event.key === Qt.Key_Home) {
+					event.accepted = navigationRail.setCurrentNavigationIndex(0)
+				} else if (event.key === Qt.Key_End) {
+					event.accepted = navigationRail.setCurrentNavigationIndex(count - 1)
+				} else if ((event.key === Qt.Key_Menu
+						|| (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier)))
+						&& currentItem) {
+					currentItem.requestContextMenuAtCenter()
+					event.accepted = true
+				}
+			}
+			Keys.onReturnPressed: event => {
+				if (currentItem) {
+					currentItem.activateSelection()
+					event.accepted = true
+				}
+			}
+			Keys.onEnterPressed: event => {
+				if (currentItem) {
+					currentItem.activateSelection()
+					event.accepted = true
+				}
+			}
+			Keys.onSpacePressed: event => {
+				if (currentItem) {
+					currentItem.activateSpaceAction()
+					event.accepted = true
+				}
+			}
 			section.delegate: Item {
 				required property string section
 				objectName: "navigationSection_" + section
@@ -299,6 +396,7 @@ Rectangle {
 
 				Label {
 					id: sectionLabel
+					objectName: "navigationSectionLabel_" + parent.section
 					anchors.left: parent.left
 					anchors.leftMargin: 8
 					anchors.right: parent.right
@@ -306,13 +404,15 @@ Rectangle {
 					anchors.bottom: parent.bottom
 					anchors.bottomMargin: Theme.space1
 					textFormat: Text.PlainText
-					text: parent.section === "voice" ? qsTr("VOICE ROOMS")
+					text: (parent.section === "voice" ? qsTr("VOICE ROOMS")
 						: parent.section === "direct" ? qsTr("DIRECT MESSAGES")
-						: qsTr("TEXT & ACTIVITY")
+						: qsTr("TEXT & ACTIVITY")) + " · "
+						+ navigationRail.roomCountForKind(parent.section)
 					color: Theme.textMuted
 					font.pixelSize: Theme.fontCaption
 					font.bold: true
 					elide: Text.ElideRight
+					Accessible.ignored: true
 				}
 			}
 			delegate: Rectangle {
@@ -320,14 +420,28 @@ Rectangle {
 				property bool accessibilityPooled: false
 				ListView.onPooled: {
 					roomMouse.clearDragSnapshot()
+					participantMouse.clearDragSnapshot()
 					accessibilityPooled = true
 				}
 				ListView.onReused: {
 					roomMouse.clearDragSnapshot()
+					participantMouse.clearDragSnapshot()
 					accessibilityPooled = false
 				}
+				function makeCurrent() {
+					if (!accessibilityPooled)
+						navigationRail.setCurrentNavigationIndex(index)
+				}
+				function focusRow(focusReason) {
+					makeCurrent()
+					forceActiveFocus(focusReason === undefined ? Qt.OtherFocusReason : focusReason)
+				}
 				function activateSelection() {
-					uiCommands.selectScope(scopeToken)
+					if (isParticipant) {
+						participantDelegate.activateSelection()
+						return
+					}
+					uiCommands.selectScopeFromRail(scopeToken, kind)
 					if (navigationRail.commitOnSelection)
 						navigationRail.selectionCommitted()
 				}
@@ -339,15 +453,57 @@ Rectangle {
 					if (kind === "voice" && navigationRail.commitOnSelection)
 						navigationRail.selectionCommitted()
 				}
-                required property string stableId
-                required property string scopeToken
-                required property string title
-                required property string subtitle
-                required property string kind
-                required property bool selected
-                required property int depth
-                required property int unreadCount
-                required property var payload
+				function activateSpaceAction() {
+					if (isParticipant)
+						participantDelegate.openConversation()
+					else
+						joinVoiceRoom()
+				}
+				function requestContextMenuAtCenter() {
+					if (isParticipant)
+						navigationRail.requestParticipantMenu(participantDelegate.participantSession,
+							participantDelegate.stableId, payload,
+							mapToItem(null, width / 2, height / 2))
+					else
+						navigationRail.requestScopeMenu(scopeToken, kind, payload,
+							mapToItem(null, width / 2, height / 2))
+				}
+				function accessibleRoomDetails() {
+					const details = []
+					function appendUnique(value) {
+						const label = String(value || "").trim()
+						if (label.length > 0 && details.indexOf(label) < 0)
+							details.push(label)
+					}
+					appendUnique(subtitle)
+					for (let index = 0; index < roomBadges.length; ++index)
+						appendUnique(roomBadges[index])
+					if (unreadCount === 1)
+						appendUnique(qsTr("1 unread message"))
+					else if (unreadCount > 1)
+						appendUnique(qsTr("%1 unread messages").arg(unreadCount))
+					if (joined)
+						appendUnique(qsTr("You are here"))
+					if (screenShareVisible)
+						appendUnique(String(screenShare.statusLabel || screenShare.badgeLabel || ""))
+					return details.join(". ")
+				}
+				required property int index
+				required property string stableId
+				required property string scopeToken
+				required property string title
+				required property string subtitle
+				required property string kind
+				required property string sectionKind
+				required property bool selected
+				required property int depth
+				required property int unreadCount
+				required property string status
+				required property var payload
+				readonly property bool isParticipant: kind === "participant"
+				// Kept as a stable delegate API for pointer/automation helpers. Section
+				// headers are owned by the same outer ListView, not by a row.
+				readonly property int sectionHeaderHeight: 0
 				readonly property bool joined: !!payload.joined || payload.status === "joined"
 				readonly property bool canJoin: kind === "voice" && !joined
 					&& (payload.canJoin === undefined || !!payload.canJoin)
@@ -359,33 +515,50 @@ Rectangle {
 				readonly property bool hasRoomActions: roomActions.some(function(action) {
 					return action && String(action.kind || "action") !== "separator"
 				})
-				objectName: "navigationRoom_" + stableId
+				readonly property bool detailsVisible: !isParticipant && (joined || unreadCount > 0 || selected)
+				readonly property int roomRowHeight: detailsVisible ? 46 : 38
+				readonly property bool rowFocusVisible: activeFocus
+					|| (rooms.activeFocus && ListView.isCurrentItem)
+				readonly property bool revealActions: roomMouse.containsMouse || rowFocusVisible
+					|| (navigationRail.activeScopeMenuToken.length > 0
+						&& navigationRail.activeScopeMenuToken === scopeToken)
+					|| joinButton.activeFocus || shareButton.activeFocus || roomActionsButton.activeFocus
+				objectName: isParticipant
+					? "navigationParticipantSemantic_" + participantDelegate.participantObjectKey
+					: "navigationRoom_" + stableId
                 width: rooms.width - 20
-				height: subtitle.length > 0 ? 56 : 46
+				height: sectionHeaderHeight + (isParticipant ? 31 : roomRowHeight)
                 radius: 8
-				color: roomDropArea.containsDrag ? Theme.selected
+				color: isParticipant ? "transparent"
+					: roomDropArea.containsDrag ? Theme.selected
+					: roomMouse.pressed ? Theme.accentSubtle
 					: selected ? Theme.selected
-					: joined ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.08)
-					: roomMouse.containsMouse ? Theme.panel : "transparent"
-				border.width: activeFocus ? Theme.focusRingWidth
+					: joined ? Qt.rgba(Theme.success.r, Theme.success.g, Theme.success.b, 0.07)
+					: roomMouse.containsMouse ? Theme.surfaceHover : "transparent"
+				border.width: isParticipant ? 0 : rowFocusVisible ? Theme.focusRingWidth
 					: roomDropArea.containsDrag ? 2 : selected || joined ? 1 : 0
-				border.color: activeFocus ? Theme.focus
+				border.color: rowFocusVisible ? Theme.focus
 					: roomDropArea.containsDrag || selected ? Theme.accent
-					: joined ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.48) : "transparent"
+					: joined ? Qt.rgba(Theme.success.r, Theme.success.g, Theme.success.b, 0.40) : "transparent"
 				opacity: roomMouse.drag.active ? 0.72 : 1.0
-				activeFocusOnTab: !accessibilityPooled
+				activeFocusOnTab: false
+				onActiveFocusChanged: if (activeFocus) makeCurrent()
 				Accessible.ignored: accessibilityPooled
-                Accessible.role: Accessible.ListItem
+				Accessible.role: Accessible.ListItem
                 Accessible.name: title
-				Accessible.description: [subtitle, joined ? qsTr("Joined") : "",
-					screenShareVisible ? String(screenShare.statusLabel || screenShare.badgeLabel || "") : ""]
-					.filter(function(value) { return value.length > 0 }).join(". ")
-                Accessible.selected: selected
+				Accessible.description: isParticipant ? participantDelegate.accessibleDetails()
+					: accessibleRoomDetails()
+                Accessible.selected: isParticipant ? participantDelegate.selectedParticipant : selected
 				Accessible.onPressAction: activateSelection()
 				RowLayout {
 					id: roomContent
 					z: 3
-					anchors.fill: parent
+					anchors.left: parent.left
+					anchors.right: parent.right
+					anchors.top: parent.top
+					anchors.topMargin: roomDelegate.sectionHeaderHeight
+					height: roomDelegate.roomRowHeight
+					visible: !roomDelegate.isParticipant
 					anchors.leftMargin: 8 + Math.min(depth, 5) * 11
 					anchors.rightMargin: 6
 					spacing: 7
@@ -393,14 +566,15 @@ Rectangle {
 						Layout.preferredWidth: 24
 						Layout.preferredHeight: 24
 						radius: 6
-						color: selected || joined ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.16)
+						color: selected ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.16)
+							: joined ? Qt.rgba(Theme.success.r, Theme.success.g, Theme.success.b, 0.14)
 							: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.09)
 						ModernIcon {
 							anchors.centerIn: parent
 							name: kind === "voice" ? "voice-room"
 								: kind === "direct" ? "direct"
 								: title === qsTr("Activity") ? "activity" : "text-room"
-							color: selected || joined ? Theme.accent : Theme.textMuted
+							color: selected ? Theme.accent : joined ? Theme.success : Theme.textMuted
 							size: 14
 						}
 					}
@@ -408,22 +582,26 @@ Rectangle {
 						Layout.fillWidth: true
 						spacing: 1
 						Label {
+							objectName: "navigationRoomTitle_" + stableId
 							Layout.fillWidth: true
 							textFormat: Text.PlainText
 							text: title
 							color: selected ? Theme.textStrong : Theme.textMain
-							font.bold: selected || joined
+							font.bold: selected || unreadCount > 0
 							font.pixelSize: Theme.fontLabel
 							elide: Text.ElideRight
+							Accessible.ignored: true
 						}
 						Label {
+							objectName: "navigationRoomDetails_" + stableId
 							Layout.fillWidth: true
 							textFormat: Text.PlainText
-							visible: subtitle.length > 0
-							text: subtitle
-							color: Theme.textMuted
+							visible: detailsVisible
+							text: joined ? qsTr("You are here") : subtitle
+							color: joined ? Theme.success : Theme.textMuted
 							font.pixelSize: Theme.fontCaption
 							elide: Text.ElideRight
+							Accessible.ignored: true
 						}
 					}
 					RowLayout {
@@ -438,6 +616,7 @@ Rectangle {
 							color: Theme.textMuted
 							font.pixelSize: 8
 							font.bold: true
+							Accessible.ignored: true
 						}
 						Rectangle {
 							objectName: "navigationRoomUnread_" + stableId
@@ -454,6 +633,7 @@ Rectangle {
 								color: Theme.strip
 								font.pixelSize: 8
 								font.bold: true
+								Accessible.ignored: true
 							}
 						}
 						Rectangle {
@@ -473,6 +653,7 @@ Rectangle {
 								color: navigationRail.toneColor(screenShare.badgeTone, Theme.accent)
 								font.pixelSize: 8
 								font.bold: true
+								Accessible.ignored: true
 							}
 						}
 						Rectangle {
@@ -481,23 +662,29 @@ Rectangle {
 							Layout.preferredWidth: 18
 							Layout.preferredHeight: 18
 							radius: 9
-							color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.16)
-							ModernIcon { anchors.centerIn: parent; name: "check"; color: Theme.accent; size: 11 }
-							Accessible.role: Accessible.StaticText
-							Accessible.name: qsTr("Joined")
+							color: Qt.rgba(Theme.success.r, Theme.success.g, Theme.success.b, 0.16)
+							ModernIcon { anchors.centerIn: parent; name: "check"; color: Theme.success; size: 11 }
+							Accessible.ignored: true
 						}
 						Button {
 							id: joinButton
 							objectName: "navigationRoomJoin_" + stableId
 							visible: kind === "voice" && !joined
 							enabled: canJoin
+							opacity: revealActions ? 1 : selected ? 0.72 : 0.52
+							Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
+							activeFocusOnTab: false
+							focusPolicy: Qt.ClickFocus
 							Layout.preferredWidth: 40
 							Layout.preferredHeight: 24
 							padding: 0
 							z: 4
+							text: qsTr("Join")
+							Accessible.name: text
 							contentItem: Label {
 								textFormat: Text.PlainText
-								text: qsTr("Join")
+								text: joinButton.text
+								Accessible.ignored: true
 								color: joinButton.enabled ? Theme.accent : Theme.textMuted
 								font.pixelSize: 9
 								font.bold: true
@@ -506,14 +693,18 @@ Rectangle {
 							}
 							background: Rectangle {
 								radius: 7
-								color: joinButton.hovered
+								color: !joinButton.enabled ? Theme.panel
+									: joinButton.down ? Theme.accentSubtle
+									: joinButton.hovered
 									? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
 									: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.10)
-								border.width: 1
-								border.color: joinButton.enabled ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.36)
+								border.width: joinButton.activeFocus ? Theme.focusRingWidth : 1
+								border.color: joinButton.activeFocus ? Theme.focus
+									: joinButton.enabled ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.36)
 									: Theme.divider
 							}
 							onClicked: roomDelegate.joinVoiceRoom()
+							onActiveFocusChanged: if (activeFocus) roomDelegate.makeCurrent()
 						}
 						Button {
 							id: shareButton
@@ -521,45 +712,60 @@ Rectangle {
 							visible: kind === "voice" && joined && screenShareVisible
 								&& String(screenShare.primaryActionId || "").length > 0
 							enabled: screenShare.primaryEnabled !== false
+							opacity: revealActions ? 1 : 0.72
+							Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
+							activeFocusOnTab: false
+							focusPolicy: Qt.ClickFocus
 							Layout.preferredWidth: 44
 							Layout.preferredHeight: 24
 							padding: 0
 							z: 4
+							text: String(screenShare.mode || "") === "idle" ? qsTr("Share") : qsTr("Live")
+							Accessible.name: text
 							contentItem: Label {
 								textFormat: Text.PlainText
-								text: String(screenShare.mode || "") === "idle" ? qsTr("Share") : qsTr("Live")
+								text: shareButton.text
 								color: shareButton.enabled
 									? navigationRail.toneColor(screenShare.primaryTone, Theme.accent) : Theme.textMuted
 								font.pixelSize: 9
 								font.bold: true
 								horizontalAlignment: Text.AlignHCenter
 								verticalAlignment: Text.AlignVCenter
+								Accessible.ignored: true
 							}
 							background: Rectangle {
 								radius: 7
-								color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b,
-									shareButton.hovered ? 0.18 : 0.10)
-								border.width: 1
-								border.color: Theme.divider
+								color: !shareButton.enabled ? Theme.panel
+									: shareButton.down ? Theme.accentSubtle
+									: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b,
+										shareButton.hovered ? 0.18 : 0.10)
+								border.width: shareButton.activeFocus ? Theme.focusRingWidth : 1
+								border.color: shareButton.activeFocus ? Theme.focus : Theme.divider
 							}
 							ToolTip.visible: hovered && String(screenShare.primaryHint || screenShare.primaryLabel || "").length > 0
 							ToolTip.text: String(screenShare.primaryHint || screenShare.primaryLabel || qsTr("Screen share"))
 							onClicked: uiCommands.invokeScopeAction(scopeToken, String(screenShare.primaryActionId || ""))
+							onActiveFocusChanged: if (activeFocus) roomDelegate.makeCurrent()
 						}
 						ModernIconButton {
 							id: roomActionsButton
 							objectName: "navigationRoomActions_" + stableId
 							visible: hasRoomActions || kind === "voice" || kind === "text"
+							opacity: revealActions ? 1 : (selected || joined ? 0.72 : 0.52)
+							Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
 							Layout.preferredWidth: 24
 							Layout.preferredHeight: 24
 							iconName: "more"
 							dense: true
+							activeFocusOnTab: false
+							focusPolicy: Qt.ClickFocus
 							z: 4
 							Accessible.name: qsTr("Room actions for %1").arg(title)
 							ToolTip.visible: hovered
 							ToolTip.text: qsTr("Room actions")
 							onClicked: navigationRail.requestScopeMenu(scopeToken, kind, payload,
 								roomActionsButton.mapToItem(null, 0, height))
+							onActiveFocusChanged: if (activeFocus) roomDelegate.makeCurrent()
 						}
 					}
 				}
@@ -575,8 +781,12 @@ Rectangle {
 				}
 				DropArea {
 					id: roomDropArea
-					anchors.fill: parent
-					enabled: kind === "voice"
+					anchors.left: parent.left
+					anchors.right: parent.right
+					anchors.top: parent.top
+					anchors.topMargin: roomDelegate.sectionHeaderHeight
+					height: roomDelegate.roomRowHeight
+					enabled: !roomDelegate.isParticipant && kind === "voice"
 					keys: ["mumble/participant", "mumble/voice-room"]
 					onDropped: drop => {
 						const sourcePayload = navigationRail.internalDragPayload(drop.source)
@@ -605,7 +815,12 @@ Rectangle {
 				MouseArea {
 					id: roomMouse
 					objectName: "navigationRoomMouse_" + stableId
-					anchors.fill: parent
+					anchors.left: parent.left
+					anchors.right: parent.right
+					anchors.top: parent.top
+					anchors.topMargin: roomDelegate.sectionHeaderHeight
+					height: roomDelegate.roomRowHeight
+					enabled: !roomDelegate.isParticipant
 					z: 2
 					hoverEnabled: true
 					acceptedButtons: Qt.LeftButton | Qt.RightButton
@@ -627,7 +842,8 @@ Rectangle {
 							suppressClick = false
 					}
 					onPressed: mouse => {
-						pressScene = roomDelegate.mapToItem(null, mouse.x, mouse.y)
+						roomDelegate.focusRow(Qt.MouseFocusReason)
+						pressScene = roomMouse.mapToItem(null, mouse.x, mouse.y)
 						dragStarted = false
 						suppressClick = false
 						dragSourceScopeToken = mouse.button === Qt.LeftButton && kind === "voice"
@@ -637,7 +853,7 @@ Rectangle {
 					onPositionChanged: mouse => {
 						if (!pressed || dragSourceScopeToken.length === 0)
 							return
-						const current = roomDelegate.mapToItem(null, mouse.x, mouse.y)
+						const current = roomMouse.mapToItem(null, mouse.x, mouse.y)
 						const dx = current.x - pressScene.x
 						const dy = current.y - pressScene.y
 						if (dx * dx + dy * dy >= 64)
@@ -648,7 +864,7 @@ Rectangle {
 						suppressClick = dragStarted
 						if (dragStarted && sourceScopeToken.length > 0 && !roomDragSource.dropHandled)
 							navigationRail.dispatchStableDropAtScene("voice-room", sourceScopeToken,
-								roomDelegate.mapToItem(null, mouse.x, mouse.y))
+								roomMouse.mapToItem(null, mouse.x, mouse.y))
 						clearDragSnapshot(true)
 					}
 					onCanceled: {
@@ -675,10 +891,21 @@ Rectangle {
 					}
 				}
 				Keys.onPressed: event => {
-					if (event.key === Qt.Key_Menu
+					if (event.key === Qt.Key_Up) {
+						event.accepted = navigationRail.focusNavigationIndex(index - 1,
+							Qt.OtherFocusReason)
+					} else if (event.key === Qt.Key_Down) {
+						event.accepted = navigationRail.focusNavigationIndex(index + 1,
+							Qt.OtherFocusReason)
+					} else if (event.key === Qt.Key_Home) {
+						event.accepted = navigationRail.focusNavigationIndex(0,
+							Qt.OtherFocusReason)
+					} else if (event.key === Qt.Key_End) {
+						event.accepted = navigationRail.focusNavigationIndex(rooms.count - 1,
+							Qt.OtherFocusReason)
+					} else if (event.key === Qt.Key_Menu
 						|| (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
-						navigationRail.requestScopeMenu(scopeToken, kind, payload,
-							mapToItem(null, width / 2, height / 2))
+						requestContextMenuAtCenter()
 						event.accepted = true
 					}
 				}
@@ -690,44 +917,17 @@ Rectangle {
 					roomDelegate.activateSelection()
                     event.accepted = true
                 }
-                Keys.onSpacePressed: event => {
-					roomDelegate.joinVoiceRoom()
+				Keys.onSpacePressed: event => {
+					roomDelegate.activateSpaceAction()
                     event.accepted = true
                 }
-            }
-        }
-        Label {
-			textFormat: Text.PlainText
-            Layout.leftMargin: 18
-            Layout.topMargin: 10
-            Layout.bottomMargin: 6
-            text: qsTr("PARTICIPANTS")
-            color: Theme.textMuted
-            font.pixelSize: 10
-            font.bold: true
-			visible: participants.count > 0
-        }
-        ListView {
-            id: participants
-			objectName: "navigationParticipants"
-            Layout.fillWidth: true
-			Layout.preferredHeight: Math.min(count * 58, Math.max(174, navigationRail.height * 0.34))
-            model: participantModel
-            clip: true
-            reuseItems: true
-            leftMargin: 10
-            rightMargin: 10
-			delegate: Rectangle {
+				Rectangle {
 				id: participantDelegate
-				property bool accessibilityPooled: false
-				ListView.onPooled: {
-					participantMouse.clearDragSnapshot()
-					accessibilityPooled = true
-				}
-				ListView.onReused: {
-					participantMouse.clearDragSnapshot()
-					accessibilityPooled = false
-				}
+				anchors.left: parent.left
+				anchors.right: parent.right
+				anchors.top: parent.top
+				anchors.topMargin: roomDelegate.sectionHeaderHeight
+				visible: roomDelegate.isParticipant
 				function activateSelection() {
 					if (isListener || participantSession.length === 0)
 						return
@@ -748,6 +948,8 @@ Rectangle {
 				}
 				function accessibleDetails() {
 					const details = []
+					if (isSelf)
+						details.push(qsTr("You"))
 					if (subtitle.length > 0)
 						details.push(subtitle)
 					for (let index = 0; index < statuses.length; ++index) {
@@ -764,21 +966,24 @@ Rectangle {
 						details.push(qsTr("Local volume %1").arg(localVolumeLabel))
 					return details.join(". ")
 				}
-                required property string stableId
-                required property string title
-                required property string subtitle
-                required property string status
-                required property var payload
 				readonly property var sourceState: payload.source || ({})
+				readonly property string stableId: roomDelegate.stableId
 				readonly property string participantSession: String(payload.participantSession
-					|| sourceState.session || (/^[0-9]+$/.test(stableId) ? stableId : ""))
+					|| sourceState.session || (stableId.substring(0, 5) === "user:"
+						? stableId.substring(5) : (/^[0-9]+$/.test(stableId) ? stableId : "")))
+				readonly property string participantObjectKey: entryKind === "user"
+					? participantSession : stableId
+				readonly property string parentScopeToken: String(payload.parentScopeToken || "")
 				readonly property string entryKind: String(payload.entryKind || sourceState.entryKind || "user").toLowerCase()
 				readonly property bool isListener: entryKind === "listener" || !!payload.listener
 				readonly property bool isSelf: !!payload.isSelf || !!sourceState.isSelf
-				readonly property bool talking: !!payload.talking || !!sourceState.talking || status !== "passive"
+				readonly property string talkState: String(status || payload.talkState
+					|| sourceState.talkState || "").toLowerCase()
+				readonly property bool talking: !!payload.talking || !!sourceState.talking
+					|| ["talking", "whispering", "shouting", "mutedtalking"].indexOf(talkState) >= 0
 				readonly property string talkTone: String(payload.talkTone || sourceState.talkTone || "")
 				readonly property var statuses: payload.statuses || sourceState.statuses || []
-				readonly property var visibleStatuses: statuses.slice(0, 4)
+				readonly property var visibleStatuses: statuses.slice(0, 3)
 				readonly property var badges: payload.badges || sourceState.badges || []
 				readonly property var localVolume: payload.localVolume || sourceState.localVolume || ({})
 				readonly property bool localVolumeVisible: localVolume.visible !== false
@@ -788,68 +993,83 @@ Rectangle {
 				readonly property bool canJoin: !isListener && !!(payload.canJoin || sourceState.canJoin)
 				readonly property bool canMessage: !isListener && !!(payload.canMessage || sourceState.canMessage)
 				readonly property var participantActions: payload.actions || sourceState.actions || []
-				readonly property bool hasParticipantActions: participantActions.some(function(action) {
+				readonly property bool hasParticipantActions: !!payload.actionsAvailable
+					|| !!sourceState.actionsAvailable
+					|| participantActions.some(function(action) {
 					return action && String(action.kind || "action") !== "separator"
 				})
+				readonly property bool revealParticipantActions: participantMouse.containsMouse
+					|| roomDelegate.rowFocusVisible
+					|| (stableId.length > 0
+						&& navigationRail.activeParticipantMenuKey === stableId)
+					|| participantJoinButton.activeFocus || participantActionsButton.activeFocus
 				readonly property string avatarSource: navigationRail.safeAvatarSource(
 					payload.avatarUrl || sourceState.avatarUrl || "")
 				readonly property bool selectedParticipant: selectionState.selectedUserSession !== undefined
 					&& String(selectionState.selectedUserSession) === participantSession
-				objectName: "navigationParticipant_" + stableId
-                width: participants.width - 20
-				height: 56
+				function focusRow() {
+					roomDelegate.focusRow()
+				}
+				objectName: "navigationParticipant_" + participantObjectKey
+				height: 31
                 radius: 8
-				color: selectedParticipant ? Theme.selected
-					   : participantMouse.containsMouse ? Theme.panel : "transparent"
-				border.width: activeFocus ? Theme.focusRingWidth : selectedParticipant ? 1 : 0
-				border.color: activeFocus ? Theme.focus
+				color: participantMouse.pressed ? Theme.accentSubtle
+					   : selectedParticipant ? Theme.selected
+					   : participantMouse.containsMouse ? Theme.surfaceHover : "transparent"
+				border.width: roomDelegate.rowFocusVisible ? Theme.focusRingWidth : selectedParticipant ? 1 : 0
+				border.color: roomDelegate.rowFocusVisible ? Theme.focus
 					: selectedParticipant ? Theme.accent : "transparent"
 				opacity: participantMouse.drag.active ? 0.72 : 1.0
-				activeFocusOnTab: !accessibilityPooled
-				Accessible.ignored: accessibilityPooled
-                Accessible.role: Accessible.ListItem
-                Accessible.name: title
-				Accessible.description: accessibleDetails()
-				Accessible.selected: selectedParticipant
-				Accessible.onPressAction: activateSelection()
+				activeFocusOnTab: false
+				Accessible.ignored: true
 				RowLayout {
+					id: participantContent
 					z: 3
 					anchors.fill: parent
-					anchors.leftMargin: 4
+					anchors.leftMargin: 22 + Math.min(Number(payload.parentDepth || 0), 5) * 11
 					anchors.rightMargin: 4
-					spacing: 7
+					spacing: 5
 					Rectangle {
 						id: participantAvatar
-						objectName: "navigationParticipantAvatar_" + stableId
-						Layout.preferredWidth: 32
-						Layout.preferredHeight: 32
-						radius: 16
+						objectName: "navigationParticipantAvatar_" + participantDelegate.participantObjectKey
+						Layout.preferredWidth: 26
+						Layout.preferredHeight: 26
+						radius: 13
 						clip: true
-						color: isListener
+						color: participantDelegate.isListener
 							? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.12) : Theme.strip
-						border.width: talking || isListener ? 2 : isSelf ? 1 : 0
-						border.color: isListener ? Theme.accent
-							: talking ? navigationRail.toneColor(talkTone, Theme.success) : Theme.divider
+						border.width: participantDelegate.talking || participantDelegate.isListener
+							? 2 : participantDelegate.isSelf ? 1 : 0
+						border.color: participantDelegate.isListener ? Theme.accent
+							: participantDelegate.talking
+							? navigationRail.toneColor(participantDelegate.talkTone, Theme.success) : Theme.divider
 						Image {
 							id: participantAvatarImage
+							objectName: "navigationParticipantAvatarImage_" + participantDelegate.participantObjectKey
 							anchors.fill: parent
-							source: avatarSource
+							source: participantDelegate.avatarSource
+							sourceSize: Qt.size(Math.max(1, Math.ceil(width * 2)),
+								Math.max(1, Math.ceil(height * 2)))
 							asynchronous: true
 							cache: false
 							fillMode: Image.PreserveAspectCrop
 							visible: status === Image.Ready
 						}
 						Label {
+							objectName: "navigationParticipantAvatarFallback_"
+								+ participantDelegate.participantObjectKey
 							anchors.centerIn: parent
 							visible: participantAvatarImage.status !== Image.Ready
 							textFormat: Text.PlainText
-							text: title.length > 0 ? title.slice(0, 1).toUpperCase() : "?"
-							color: isListener ? Theme.accent : Theme.textStrong
+							text: roomDelegate.title.length > 0
+								? roomDelegate.title.slice(0, 1).toUpperCase() : "?"
+							color: participantDelegate.isListener ? Theme.accent : Theme.textStrong
 							font.pixelSize: 11
 							font.bold: true
+							Accessible.ignored: true
 						}
 						Rectangle {
-							objectName: "navigationParticipantTalk_" + stableId
+							objectName: "navigationParticipantTalk_" + participantDelegate.participantObjectKey
 							anchors.right: parent.right
 							anchors.bottom: parent.bottom
 							width: 9
@@ -857,8 +1077,9 @@ Rectangle {
 							radius: 5
 							border.width: 2
 							border.color: participantDelegate.color
-							color: isListener ? Theme.accent
-								: talking ? navigationRail.toneColor(talkTone, Theme.success) : Theme.textMuted
+							color: participantDelegate.isListener ? Theme.accent
+								: participantDelegate.talking
+								? navigationRail.toneColor(participantDelegate.talkTone, Theme.success) : Theme.textMuted
 						}
 					}
 					ColumnLayout {
@@ -868,18 +1089,33 @@ Rectangle {
 							Layout.fillWidth: true
 							spacing: 5
 							Label {
+								objectName: "navigationParticipantTitle_"
+									+ participantDelegate.participantObjectKey
 								Layout.fillWidth: true
 								textFormat: Text.PlainText
-								text: title
-								color: talking ? Theme.textStrong : isListener ? Theme.accent : Theme.textMain
+								text: roomDelegate.title
+								color: participantDelegate.talking ? Theme.textStrong
+									: participantDelegate.isListener ? Theme.accent : Theme.textMain
 								font.pixelSize: Theme.fontLabel
-								font.bold: talking || isSelf
-								font.italic: isListener
+								font.bold: participantDelegate.talking || participantDelegate.isSelf
+								font.italic: participantDelegate.isListener
 								elide: Text.ElideRight
+								Accessible.ignored: true
+							}
+							Label {
+								objectName: "navigationParticipantSelf_"
+									+ participantDelegate.participantObjectKey
+								visible: participantDelegate.isSelf
+								textFormat: Text.PlainText
+								text: qsTr("YOU")
+								color: Theme.success
+								font.pixelSize: 8
+								font.bold: true
+								Accessible.ignored: true
 							}
 							Rectangle {
-								objectName: "navigationParticipantVolume_" + stableId
-								visible: localVolumeVisible
+								objectName: "navigationParticipantVolume_" + participantDelegate.participantObjectKey
+								visible: participantDelegate.localVolumeVisible
 								Layout.preferredWidth: volumeLabel.implicitWidth + 8
 								Layout.preferredHeight: 16
 								radius: 8
@@ -890,39 +1126,44 @@ Rectangle {
 									id: volumeLabel
 									anchors.centerIn: parent
 									textFormat: Text.PlainText
-									text: localVolumeLabel
+									text: participantDelegate.localVolumeLabel
 									color: Theme.accent
 									font.pixelSize: 8
 									font.bold: true
+									Accessible.ignored: true
 								}
 								ToolTip.visible: volumeHover.containsMouse
-								ToolTip.text: qsTr("Local volume %1").arg(String(localVolume.label || localVolumeLabel))
+								ToolTip.text: qsTr("Local volume %1").arg(String(
+									participantDelegate.localVolume.label || participantDelegate.localVolumeLabel))
 								MouseArea { id: volumeHover; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
 							}
 						}
 						Label {
-							objectName: "navigationParticipantDetails_" + stableId
+							objectName: "navigationParticipantDetails_" + participantDelegate.participantObjectKey
 							Layout.fillWidth: true
 							textFormat: Text.PlainText
-							text: [subtitle, badges.slice(0, 2).join(" · ")]
+							text: [roomDelegate.subtitle, participantDelegate.badges.slice(0, 2).join(" · ")]
 								.filter(function(value) { return value.length > 0 }).join(" · ")
 							color: Theme.textMuted
 							font.pixelSize: Theme.fontCaption
 							elide: Text.ElideRight
 							visible: text.length > 0
+							Accessible.ignored: true
 						}
 					}
 					RowLayout {
 						spacing: 3
 						Repeater {
-							model: visibleStatuses
+						model: participantDelegate.visibleStatuses
 							delegate: Rectangle {
 								required property var modelData
 								readonly property color statusColor: navigationRail.toneColor(modelData.tone, Theme.textMuted)
-								objectName: "navigationParticipantStatus_" + stableId + "_" + String(modelData.kind || "status")
-								Layout.preferredWidth: 18
-								Layout.preferredHeight: 18
-								radius: 9
+								objectName: "navigationParticipantStatus_"
+									+ participantDelegate.participantObjectKey + "_"
+									+ String(modelData.kind || "status")
+								Layout.preferredWidth: 16
+								Layout.preferredHeight: 16
+								radius: 8
 								color: Qt.rgba(statusColor.r, statusColor.g, statusColor.b, 0.14)
 								border.width: 1
 								border.color: Qt.rgba(statusColor.r, statusColor.g, statusColor.b, 0.28)
@@ -933,6 +1174,7 @@ Rectangle {
 									color: parent.statusColor
 									font.pixelSize: 8
 									font.bold: true
+									Accessible.ignored: true
 								}
 								ToolTip.visible: statusHover.containsMouse
 								ToolTip.text: String(modelData.label || modelData.kind || "")
@@ -940,23 +1182,34 @@ Rectangle {
 							}
 						}
 						Label {
-							visible: statuses.length > visibleStatuses.length
+							visible: participantDelegate.statuses.length
+								> participantDelegate.visibleStatuses.length
 							textFormat: Text.PlainText
-							text: "+" + (statuses.length - visibleStatuses.length)
+							text: "+" + (participantDelegate.statuses.length
+								- participantDelegate.visibleStatuses.length)
 							color: Theme.textMuted
 							font.pixelSize: 8
+							Accessible.ignored: true
 						}
 						Button {
 							id: participantJoinButton
-							objectName: "navigationParticipantJoin_" + stableId
-							visible: canJoin
+							objectName: "navigationParticipantJoin_" + participantDelegate.participantObjectKey
+							visible: participantDelegate.canJoin
+							opacity: participantDelegate.revealParticipantActions
+								? 1 : (participantDelegate.talking ? 0.72 : 0.52)
+							Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
+							activeFocusOnTab: false
+							focusPolicy: Qt.ClickFocus
 							Layout.preferredWidth: 36
 							Layout.preferredHeight: 22
 							padding: 0
 							z: 4
+							text: qsTr("Join")
+							Accessible.name: text
 							contentItem: Label {
 								textFormat: Text.PlainText
-								text: qsTr("Join")
+								text: participantJoinButton.text
+								Accessible.ignored: true
 								color: Theme.accent
 								font.pixelSize: 8
 								font.bold: true
@@ -965,25 +1218,36 @@ Rectangle {
 							}
 							background: Rectangle {
 								radius: 7
-								color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b,
-									participantJoinButton.hovered ? 0.18 : 0.10)
-								border.width: 1
-								border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.30)
+								color: participantJoinButton.down ? Theme.accentSubtle
+									: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b,
+										participantJoinButton.hovered ? 0.18 : 0.10)
+								border.width: participantJoinButton.activeFocus ? Theme.focusRingWidth : 1
+								border.color: participantJoinButton.activeFocus ? Theme.focus
+									: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.30)
 							}
 							onClicked: participantDelegate.joinParticipantRoom()
+							onActiveFocusChanged: if (activeFocus) roomDelegate.makeCurrent()
 						}
 						ModernIconButton {
 							id: participantActionsButton
-							objectName: "navigationParticipantActions_" + stableId
-							visible: hasParticipantActions
+							objectName: "navigationParticipantActions_" + participantDelegate.participantObjectKey
+							visible: participantDelegate.hasParticipantActions
+							opacity: participantDelegate.revealParticipantActions
+								? 1 : (participantDelegate.talking ? 0.72 : 0.52)
+							Behavior on opacity { NumberAnimation { duration: Theme.motionFast } }
 							Layout.preferredWidth: 24
 							Layout.preferredHeight: 24
 							iconName: "more"
 							dense: true
+							activeFocusOnTab: false
+							focusPolicy: Qt.ClickFocus
 							z: 4
-							Accessible.name: qsTr("Participant actions for %1").arg(title)
-							onClicked: navigationRail.requestParticipantMenu(participantSession, payload,
+							Accessible.name: qsTr("Participant actions for %1").arg(roomDelegate.title)
+							onClicked: navigationRail.requestParticipantMenu(
+								participantDelegate.participantSession, participantDelegate.stableId,
+								roomDelegate.payload,
 								participantActionsButton.mapToItem(null, 0, height))
+							onActiveFocusChanged: if (activeFocus) roomDelegate.makeCurrent()
 						}
 					}
 				}
@@ -996,8 +1260,9 @@ Rectangle {
 				}
 				MouseArea {
 					id: participantMouse
-					objectName: "navigationParticipantMouse_" + stableId
+					objectName: "navigationParticipantMouse_" + participantDelegate.participantObjectKey
 					anchors.fill: parent
+					enabled: participantDelegate.visible
 					z: 2
 					hoverEnabled: true
 					acceptedButtons: Qt.LeftButton | Qt.RightButton
@@ -1019,11 +1284,12 @@ Rectangle {
 							suppressClick = false
 					}
 					onPressed: mouse => {
+						roomDelegate.focusRow(Qt.MouseFocusReason)
 						pressScene = participantDelegate.mapToItem(null, mouse.x, mouse.y)
 						dragStarted = false
 						suppressClick = false
-					dragSourceStableId = mouse.button === Qt.LeftButton && !isListener
-						? participantSession : ""
+						dragSourceStableId = mouse.button === Qt.LeftButton && !participantDelegate.isListener
+							? participantDelegate.participantSession : ""
 						participantDragSource.dropHandled = false
 					}
 					onPositionChanged: mouse => {
@@ -1053,38 +1319,21 @@ Rectangle {
 							return
 						}
 						if (mouse.button === Qt.RightButton)
-							navigationRail.requestParticipantMenu(participantSession, payload,
+							navigationRail.requestParticipantMenu(participantDelegate.participantSession,
+								participantDelegate.stableId, roomDelegate.payload,
 								participantDelegate.mapToItem(null, mouse.x, mouse.y))
 						else {
 							participantDelegate.activateSelection()
 						}
 					}
-					onPressAndHold: mouse => navigationRail.requestParticipantMenu(participantSession, payload,
+					onPressAndHold: mouse => navigationRail.requestParticipantMenu(
+					participantDelegate.participantSession, participantDelegate.stableId, roomDelegate.payload,
 						participantDelegate.mapToItem(null, mouse.x, mouse.y))
 					onDoubleClicked: participantDelegate.openConversation()
 				}
-				Keys.onPressed: event => {
-					if (event.key === Qt.Key_Menu
-						|| (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
-						navigationRail.requestParticipantMenu(participantSession, payload,
-							mapToItem(null, width / 2, height / 2))
-						event.accepted = true
-					}
 				}
-                Keys.onReturnPressed: event => {
-					participantDelegate.activateSelection()
-                    event.accepted = true
-                }
-                Keys.onEnterPressed: event => {
-					participantDelegate.activateSelection()
-                    event.accepted = true
-                }
-                Keys.onSpacePressed: event => {
-					participantDelegate.openConversation()
-                    event.accepted = true
-                }
-            }
-        }
+			}
+		}
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 72
@@ -1105,14 +1354,32 @@ Rectangle {
 				anchors.bottomMargin: 10
 				spacing: 8
 				Rectangle {
+					id: selfAvatar
+					objectName: "selfAvatar"
 					Layout.preferredWidth: 34
 					Layout.preferredHeight: 34
 					radius: 17
+					clip: true
 					color: Theme.surfaceRaised
 					border.width: 1
 					border.color: clientSession.connected ? Theme.accent : Theme.divider
+					readonly property string avatarSource: navigationRail.safeAvatarSource(
+						((clientSession.selfMenu || ({})).avatarUrl) || "")
+					Image {
+						id: selfAvatarImage
+						objectName: "selfAvatarImage"
+						anchors.fill: parent
+						source: selfAvatar.avatarSource
+						sourceSize: Qt.size(Math.max(1, Math.ceil(width * 2)),
+							Math.max(1, Math.ceil(height * 2)))
+						asynchronous: true
+						cache: false
+						fillMode: Image.PreserveAspectCrop
+						visible: status === Image.Ready
+					}
 					Label {
 						anchors.centerIn: parent
+						visible: selfAvatarImage.status !== Image.Ready
 						textFormat: Text.PlainText
 						text: clientSession.selfName.length > 0
 							? clientSession.selfName.slice(0, 1).toUpperCase() : "?"

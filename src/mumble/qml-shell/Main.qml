@@ -15,36 +15,91 @@ ApplicationWindow {
     minimumWidth: 420
     minimumHeight: 520
 	palette.window: Theme.shellBackground
-	palette.base: Theme.surfaceRaised
+	palette.active.base: Theme.surfaceRaised
+	palette.inactive.base: Theme.surfaceRaised
 	palette.alternateBase: Theme.panel
-	palette.button: Theme.surfaceRaised
-	palette.text: Theme.textMain
-	palette.windowText: Theme.textMain
-	palette.buttonText: Theme.textStrong
-	palette.brightText: Theme.textStrong
-	palette.highlight: Theme.accent
-	palette.highlightedText: Theme.strip
+	palette.active.button: Theme.surfaceRaised
+	palette.inactive.button: Theme.surfaceRaised
+	palette.active.text: Theme.textMain
+	palette.inactive.text: Theme.textMain
+	palette.active.windowText: Theme.textMain
+	palette.inactive.windowText: Theme.textMain
+	palette.active.buttonText: Theme.textStrong
+	palette.inactive.buttonText: Theme.textStrong
+	palette.active.brightText: Theme.textStrong
+	palette.inactive.brightText: Theme.textStrong
+	palette.active.highlight: Theme.accent
+	palette.inactive.highlight: Theme.accent
+	palette.active.highlightedText: Theme.contrastText(Theme.accent)
+	palette.inactive.highlightedText: Theme.contrastText(Theme.accent)
 	palette.placeholderText: Theme.textMuted
+	palette.active.link: Theme.accent
+	palette.inactive.link: Theme.accent
+	palette.active.linkVisited: Theme.accentHover
+	palette.inactive.linkVisited: Theme.accentHover
+	palette.active.toolTipBase: Theme.surfaceRaised
+	palette.inactive.toolTipBase: Theme.surfaceRaised
+	palette.active.toolTipText: Theme.textStrong
+	palette.inactive.toolTipText: Theme.textStrong
+	palette.active.light: Theme.surfaceHover
+	palette.inactive.light: Theme.surfaceHover
+	palette.active.midlight: Theme.surfaceRaised
+	palette.inactive.midlight: Theme.surfaceRaised
+	palette.active.mid: Theme.surfaceBorder
+	palette.inactive.mid: Theme.surfaceBorder
+	palette.dark: Theme.rail
+	palette.shadow: Theme.strip
+	palette.disabled.window: Theme.shellBackground
+	palette.disabled.base: Theme.panel
+	palette.disabled.alternateBase: Theme.panel
+	palette.disabled.button: Theme.panel
 	palette.disabled.text: Theme.textMuted
+	palette.disabled.windowText: Theme.textMuted
 	palette.disabled.buttonText: Theme.textMuted
-    // Keep native automation and assistive technology aware of the active
-    // modal even though Qt Quick dialogs live inside the main window.
-	title: dialogState.open && dialogState.title ? dialogState.title
-		: clientSession.connected && clientSession.serverName.length > 0
-			? qsTr("%1 — Mumble").arg(clientSession.serverName) : qsTr("Mumble")
+	palette.disabled.brightText: Theme.textMuted
+	palette.disabled.highlight: Theme.surfaceBorder
+	palette.disabled.highlightedText: Theme.textMuted
+	palette.disabled.placeholderText: Theme.textMuted
+	palette.disabled.light: Theme.surfaceBorder
+	palette.disabled.midlight: Theme.panel
+	palette.disabled.mid: Theme.divider
+	palette.disabled.dark: Theme.rail
+	palette.disabled.shadow: Theme.strip
+	palette.disabled.link: Theme.textMuted
+	palette.disabled.linkVisited: Theme.textMuted
+	palette.disabled.toolTipBase: Theme.panel
+	palette.disabled.toolTipText: Theme.textMuted
+	// Product dialogs expose their own accessible heading inside the scene. Keep
+	// the native title tied to the server so an in-shell modal is not repeated in
+	// the Windows title bar.
+	title: clientSession.connected && clientSession.serverName.length > 0
+		? qsTr("%1 — Mumble").arg(clientSession.serverName) : qsTr("Mumble")
     color: Theme.strip
 	property real performanceChatScrollStartY: 0
 	property real performanceChatScrollTargetY: 0
 	readonly property bool compactNavigation: width < 900
 	readonly property bool narrowShell: width < 600
+	readonly property string normalizedConnectionState: String(clientSession.connectionState || "").toLowerCase()
+	readonly property string normalizedConnectionTone: String(clientSession.connectionTone || "").toLowerCase()
+	readonly property bool connectionTransitionActive: normalizedConnectionState === "connecting"
+		|| normalizedConnectionState === "retrying"
+	readonly property bool connectionFailureActive: !clientSession.connected
+		&& (normalizedConnectionTone === "danger" || normalizedConnectionTone === "error")
 	readonly property int timelineHorizontalMargin: narrowShell ? Theme.space3
 		: compactNavigation ? Theme.space5 : 28
 	readonly property int timelineVerticalMargin: narrowShell ? Theme.space3 : Theme.space5
 	readonly property int conversationLaneMaximumWidth: 840
-	readonly property bool automationNavigationOpen: navigationDrawer.visible
+	// Drawer.visible can stay true while the popup item is resident. Position is
+	// the reliable modal-state signal: zero is fully closed, one fully open.
+	readonly property bool navigationModalActive: navigationDrawer.position > 0.001
+	readonly property bool modalUiActive: dialogState.open || navigationModalActive
+	readonly property bool automationNavigationOpen: navigationModalActive
 	readonly property real automationNavigationPosition: navigationDrawer.position
+	readonly property real modalTextureScale: root.screen
+		? Math.max(1, Number(root.screen.devicePixelRatio || 1)) : 1
 	readonly property var navigationRoomModel: roomModel
 	readonly property var navigationParticipantModel: participantModel
+	readonly property var navigationRailModel: navigationModel
 	readonly property var navigationSelectionState: selectionState
 	readonly property var navigationCommands: uiCommands
 	readonly property var navigationSession: clientSession
@@ -52,10 +107,85 @@ ApplicationWindow {
 	property string contextScopeKind: ""
 	property var contextScopeActions: []
 	property string contextParticipantId: ""
+	property string contextParticipantRowKey: ""
 	property var contextParticipantActions: []
 	property string contextParticipantEntryKind: "user"
 	property string contextParticipantScopeToken: ""
 	property string automationMenuVariant: ""
+	property bool visualFixtureOverrideActive: false
+	property bool motdHistoryOverride: false
+	property string motdSeenRequestSignature: ""
+	readonly property bool motdHiddenForHistory: !!clientSession.hasMotd
+		&& !clientSession.motdDismissed && !!chatModel.hasUserHistory && !motdHistoryOverride
+	readonly property bool activeScopeHasScreenShare:
+		String((activeScope.screenShare || {}).streamId || "").length > 0
+
+	function maybeMarkMotdSeen() {
+		const signature = String(clientSession.motdSignature || "").trim()
+		if (root.visualFixtureOverrideActive || !clientSession.hasMotd
+				|| clientSession.motdDismissed || root.motdHiddenForHistory
+				|| clientSession.motdChanged || signature.length === 0
+				|| String(clientSession.motdLastSeenSignature || "").length > 0
+				|| String(clientSession.motdDismissedSignature || "").length > 0
+				|| root.motdSeenRequestSignature === signature)
+			return
+
+		root.motdSeenRequestSignature = signature
+		Qt.callLater(function() {
+			if (root.motdSeenRequestSignature !== signature
+					|| String(clientSession.motdSignature || "").trim() !== signature
+					|| !clientSession.hasMotd || clientSession.motdDismissed
+					|| root.motdHiddenForHistory || clientSession.motdChanged)
+				return
+			uiCommands.invokeAppAction("motd.markSeen", { "signature": signature })
+		})
+	}
+
+	function refreshModalBackground() {
+		if (root.modalUiActive)
+			Qt.callLater(function() { modalBackgroundSource.scheduleUpdate() })
+	}
+
+	onModalUiActiveChanged: refreshModalBackground()
+	onWidthChanged: refreshModalBackground()
+	onHeightChanged: refreshModalBackground()
+	onScreenChanged: refreshModalBackground()
+	Screen.onDevicePixelRatioChanged: refreshModalBackground()
+
+	function handleMotdAction(actionId, payload) {
+		const normalized = String(actionId || "").trim()
+		if (normalized === "motd.show" || normalized === "motd.hide"
+				|| normalized === "motd.restore")
+			root.motdHistoryOverride = true
+		uiCommands.invokeAppAction(normalized, payload || {})
+	}
+
+	Connections {
+		target: clientSession
+		function onMotdSignatureChanged() {
+			// A manual reveal only applies to the MOTD revision the user chose to
+			// open. New server content returns to the history-aware default.
+			root.motdHistoryOverride = false
+			if (root.motdSeenRequestSignature !== String(clientSession.motdSignature || ""))
+				root.motdSeenRequestSignature = ""
+			Qt.callLater(function() { root.maybeMarkMotdSeen() })
+		}
+		function onHasMotdChanged() { Qt.callLater(function() { root.maybeMarkMotdSeen() }) }
+		function onMotdDismissedChanged() { Qt.callLater(function() { root.maybeMarkMotdSeen() }) }
+		function onMotdChangedChanged() { Qt.callLater(function() { root.maybeMarkMotdSeen() }) }
+		function onMotdLastSeenSignatureChanged() {
+			if (String(clientSession.motdLastSeenSignature || "") === root.motdSeenRequestSignature)
+				root.motdSeenRequestSignature = ""
+		}
+	}
+
+	Connections {
+		target: chatModel
+		function onHasUserHistoryChanged() { Qt.callLater(function() { root.maybeMarkMotdSeen() }) }
+	}
+
+	onMotdHiddenForHistoryChanged: Qt.callLater(function() { root.maybeMarkMotdSeen() })
+	Component.onCompleted: Qt.callLater(function() { root.maybeMarkMotdSeen() })
 
 	function messageStartsGroup(row, source, title) {
 		if (row <= 0 || !source || source.system)
@@ -113,8 +243,10 @@ ApplicationWindow {
         previewHydrationTimer.stop()
     }
 
-    function queuePreviewHydration(messageId, highPriority) {
-        const normalized = String(messageId === undefined || messageId === null ? "" : messageId).trim()
+	function queuePreviewHydration(messageId, highPriority) {
+		if (root.visualFixtureOverrideActive)
+			return false
+		const normalized = String(messageId === undefined || messageId === null ? "" : messageId).trim()
         if (!/^[1-9][0-9]*$/.test(normalized) || String(activeScope.scopeToken || "").length === 0)
             return false
         // Keep protocol uint64 IDs as decimal strings. JavaScript numbers lose
@@ -219,9 +351,10 @@ ApplicationWindow {
 		return openMenuAt(menu, anchorPoint)
 	}
 
-	function openParticipantMenu(sessionId, actions, anchorPoint, entryKind, scopeToken) {
+	function openParticipantMenu(sessionId, actions, anchorPoint, entryKind, scopeToken, rowKey) {
 		closeProductMenus()
 		contextParticipantId = String(sessionId || "")
+		contextParticipantRowKey = String(rowKey || "")
 		contextParticipantActions = actions || []
 		contextParticipantEntryKind = String(entryKind || "user").toLowerCase()
 		contextParticipantScopeToken = String(scopeToken || "")
@@ -305,7 +438,8 @@ ApplicationWindow {
 					row.source ? (row.source.actions || []) : [],
 					Qt.point(root.width - menu.width - 24, 250),
 					row.entryKind || (row.source && row.source.entryKind) || "user",
-					row.scopeToken || (row.source && row.source.scopeToken) || "")
+					row.scopeToken || (row.source && row.source.scopeToken) || "",
+					row.stableId || row.id || "")
 			}
 		} else if (normalized === "chatBackground") {
 			menu = chatBackgroundMenuPopup
@@ -366,6 +500,15 @@ ApplicationWindow {
 	}
 
 	onCompactNavigationChanged: {
+		// Visual-gate state injection changes the viewport before it establishes
+		// its explicit focus target. Do not queue a responsive-layout focus
+		// handoff that can race and steal that deterministic target one frame
+		// later; the fixture controller owns focus for the duration of the case.
+		if (visualFixtureOverrideActive) {
+			if (!compactNavigation)
+				navigationDrawer.close()
+			return
+		}
 		const focusedItem = root.activeFocusItem
 		const focusWasInDesktopRail = root.itemIsWithin(focusedItem, desktopNavigationRail)
 		const focusWasInDrawer = root.itemIsWithin(focusedItem, navigationDrawerRail)
@@ -383,23 +526,20 @@ ApplicationWindow {
 	function focusVisualFixture(state) {
 		if (dialogState.open && productDialog.visible) {
 			productDialog.applyInitialFocus()
-			return root.activeFocusItem
+			return root.activeFocusItem ? String(root.activeFocusItem.objectName || "") : ""
 		}
 		if (state === "connected") {
 			// The deterministic fixture intentionally has no writable live scope,
 			// so its composer is disabled and cannot own accessibility focus.
 			appMenuButton.forceActiveFocus(Qt.OtherFocusReason)
-			return appMenuButton
+			return appMenuButton.objectName
 		}
-		if (state === "error") {
-			const operationTarget = operationOverlay.visualFixtureFocusTarget
-			if (operationTarget) {
-				operationTarget.forceActiveFocus(Qt.OtherFocusReason)
-				return operationTarget
-			}
+		if (state === "error" || state === "loading") {
+			if (connectionBanner.focusPrimaryAction())
+				return "connectionBannerPrimaryAction"
 		}
 		appMenuButton.forceActiveFocus(Qt.OtherFocusReason)
-		return appMenuButton
+		return appMenuButton.objectName
 	}
 
 	Instantiator {
@@ -436,6 +576,7 @@ ApplicationWindow {
 				"count": timeline.count, "contentHeight": timeline.contentHeight, "viewportHeight": timeline.height }
 		performanceChatScrollStartY = timeline.contentY
 		performanceChatScrollTargetY = Math.abs(performanceChatScrollStartY - minimumY) > 8 ? minimumY : maximumY
+		bottomFollowTimer.stop()
 		timelineScrollWorkload.stop()
 		timelineScrollWorkload.from = performanceChatScrollStartY
 		timelineScrollWorkload.to = performanceChatScrollTargetY
@@ -487,10 +628,25 @@ ApplicationWindow {
         ScreenShareViewWindow { }
     }
 
-	QmlDialog { id: productDialog }
+	QmlDialog {
+		id: productDialog
+		beforeOpen: function() {
+			root.closeProductMenus()
+			if (root.navigationModalActive) {
+				navigationDrawer.close()
+				return false
+			}
+			return true
+		}
+	}
 	Connections {
 		target: productDialog
 		function onOpened() { root.closeProductMenus() }
+	}
+
+	onVisualFixtureOverrideActiveChanged: {
+		if (visualFixtureOverrideActive)
+			clearPreviewHydrationQueue()
 	}
     Component {
         id: imageViewerComponent
@@ -538,6 +694,7 @@ ApplicationWindow {
 		closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 		onOpened: navigationDrawerRail.focusInitialItem()
 		onClosed: {
+			productDialog.syncVisibility()
 			if (navigationToggle.visible)
 				navigationToggle.forceActiveFocus()
 			else
@@ -549,17 +706,20 @@ ApplicationWindow {
 			anchors.fill: parent
 			Accessible.role: Accessible.Dialog
 			Accessible.name: qsTr("Rooms and participants")
-			roomModel: root.navigationRoomModel
-			participantModel: root.navigationParticipantModel
+			navigationModel: root.navigationRailModel
 			selectionState: root.navigationSelectionState
 			uiCommands: root.navigationCommands
 			clientSession: root.navigationSession
 			commitOnSelection: true
+			activeScopeMenuToken: (roomMenuPopup.visible || textRoomMenuPopup.visible)
+				? root.contextScopeToken : ""
+			activeParticipantMenuKey: participantMenuPopup.visible
+				? root.contextParticipantRowKey : ""
 			onSelectionCommitted: navigationDrawer.close()
 			onScopeMenuRequested: (scopeToken, kind, actions, anchorPoint) =>
 				root.openScopeMenu(scopeToken, kind, actions, anchorPoint)
-			onParticipantMenuRequested: (sessionId, actions, anchorPoint, entryKind, scopeToken) =>
-				root.openParticipantMenu(sessionId, actions, anchorPoint, entryKind, scopeToken)
+			onParticipantMenuRequested: (sessionId, actions, anchorPoint, entryKind, scopeToken, rowKey) =>
+				root.openParticipantMenu(sessionId, actions, anchorPoint, entryKind, scopeToken, rowKey)
 			onProfileMenuRequested: anchorPoint => root.openProfileMenu(anchorPoint)
 		}
 	}
@@ -746,12 +906,29 @@ ApplicationWindow {
 		}
 	}
 
-    Rectangle {
+	ShaderEffectSource {
+		id: modalBackgroundSource
+		anchors.fill: parent
+		anchors.margins: 8
+		visible: root.modalUiActive
+		enabled: false
+		sourceItem: productSurface
+		live: false
+		smooth: false
+		textureSize: Qt.size(Math.max(1, Math.ceil(width * root.modalTextureScale)),
+			Math.max(1, Math.ceil(height * root.modalTextureScale)))
+		Accessible.ignored: true
+	}
+
+	Rectangle {
 		id: productSurface
         anchors.fill: parent
         anchors.margins: 8
-		enabled: !dialogState.open
-		Accessible.ignored: dialogState.open
+		// ShaderEffectSource can render an invisible source item directly into a
+		// scene-graph texture. The visual context remains while the live product
+		// tree is pruned from input and accessibility during a modal.
+		visible: !root.modalUiActive
+		enabled: !root.modalUiActive
         radius: Theme.shellRadius
         color: Theme.shellBackground
         border.color: Theme.divider
@@ -855,6 +1032,75 @@ ApplicationWindow {
 							onClicked: uiCommands.invokeScopeAction(activeScope.scopeToken,
 								String(share.primaryActionId || ""))
 						}
+						ModernButton {
+							id: motdToggleButton
+							objectName: "motdToggleButton"
+							visible: !!clientSession.hasMotd
+							dense: true
+							checked: visible && !clientSession.motdDismissed && !root.motdHiddenForHistory
+							readonly property bool revealsWelcome: clientSession.motdDismissed
+								|| root.motdHiddenForHistory
+							text: qsTr("MOTD")
+							Accessible.name: revealsWelcome
+								? qsTr("Show welcome message") : qsTr("Hide welcome message")
+							Accessible.description: clientSession.motdChanged
+								? (revealsWelcome
+									? qsTr("A new server welcome message is available. Activate to show the welcome message.")
+									: qsTr("A new server welcome message is available. Activate to hide the welcome message."))
+								: (revealsWelcome
+									? qsTr("Activate to show the server welcome message.")
+									: qsTr("Activate to hide the server welcome message."))
+							Accessible.checked: checked
+							contentItem: RowLayout {
+								spacing: 6
+								Label {
+									textFormat: Text.PlainText
+									text: motdToggleButton.text
+									color: motdToggleButton.enabled ? Theme.textStrong : Theme.textMuted
+									font.pixelSize: Theme.fontLabel
+									font.weight: motdToggleButton.checked ? Font.DemiBold : Font.Medium
+									Accessible.ignored: true
+								}
+								Rectangle {
+									visible: clientSession.motdChanged && !root.narrowShell
+									Layout.preferredWidth: motdNewLabel.implicitWidth + 10
+									Layout.preferredHeight: 18
+									radius: 9
+									color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.14)
+									border.color: Qt.rgba(Theme.warning.r, Theme.warning.g, Theme.warning.b, 0.72)
+									border.width: 1
+									Label {
+										id: motdNewLabel
+										anchors.centerIn: parent
+										textFormat: Text.PlainText
+										text: qsTr("New")
+										color: Theme.warning
+										font.pixelSize: 9
+										font.bold: true
+										Accessible.ignored: true
+									}
+								}
+							}
+							background: Rectangle {
+								radius: Math.min(Theme.innerRadius,
+									Math.round(motdToggleButton.implicitHeight / 3))
+								color: !motdToggleButton.enabled ? Theme.panel
+									: motdToggleButton.down ? Theme.surfaceHover
+									: motdToggleButton.checked ? Theme.selected
+									: motdToggleButton.hovered ? Theme.surfaceHover : Theme.surfaceRaised
+								border.color: motdToggleButton.activeFocus ? Theme.focus
+									: clientSession.motdChanged ? Theme.warning
+									: motdToggleButton.checked ? Theme.accent : Theme.surfaceBorder
+								border.width: motdToggleButton.activeFocus ? Theme.focusRingWidth : 1
+								Behavior on color { ColorAnimation { duration: Theme.motionFast } }
+								Behavior on border.color { ColorAnimation { duration: Theme.motionFast } }
+							}
+							onClicked: {
+								const reveal = clientSession.motdDismissed || root.motdHiddenForHistory
+								root.handleMotdAction(reveal ? "motd.restore" : "motd.dismiss",
+									{ "signature": String(clientSession.motdSignature || "") })
+							}
+						}
 						ModernIconButton {
 							visible: clientSession.connected
 							iconName: "search"
@@ -905,6 +1151,7 @@ ApplicationWindow {
                 }
 
 				ConnectionBanner {
+					id: connectionBanner
 					Layout.fillWidth: true
 					Layout.leftMargin: Theme.spacing
 					Layout.rightMargin: Theme.spacing
@@ -919,9 +1166,16 @@ ApplicationWindow {
 					Layout.leftMargin: Theme.spacing
 					Layout.rightMargin: Theme.spacing
 					Layout.topMargin: visible ? Math.max(4, Math.round(Theme.spacing / 2)) : 0
-					maximumBodyHeight: Math.max(120, Math.min(260, root.height * 0.28))
+					maximumBodyHeight: root.height <= 560
+						? (root.activeScopeHasScreenShare ? 68 : root.compactNavigation ? 72 : 96)
+						: root.compactNavigation ? Math.max(132, Math.min(184, root.height * 0.22))
+						: Math.max(166, Math.min(288, root.height * 0.36))
+					maximumImageHeight: root.height <= 560
+						? (root.activeScopeHasScreenShare ? 38 : root.compactNavigation ? 36 : 48)
+						: root.compactNavigation ? 72 : 82
+					hiddenForHistory: root.motdHiddenForHistory
 					session: clientSession
-					onActionRequested: (actionId, payload) => uiCommands.invokeAppAction(actionId, payload)
+					onActionRequested: (actionId, payload) => root.handleMotdAction(actionId, payload)
 					onLinkRequested: link => Qt.openUrlExternally(link)
 				}
 
@@ -936,6 +1190,7 @@ ApplicationWindow {
 
                 ListView {
                     id: timeline
+					objectName: "chatTimeline"
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     model: chatModel
@@ -945,7 +1200,11 @@ ApplicationWindow {
 					rightMargin: root.timelineHorizontalMargin
 					topMargin: root.timelineVerticalMargin
 					bottomMargin: root.timelineVerticalMargin
-                    reuseItems: true
+					reuseItems: true
+					// Build a small amount of chat content outside the viewport while
+					// the chat surface is otherwise idle. Complex rich-message delegates
+					// should not have to be constructed on the first frame they scroll in.
+					cacheBuffer: 256
 					property string prependAnchorId: ""
 					property real prependAnchorOffset: 0
 					property bool prependAnchorActive: false
@@ -965,8 +1224,9 @@ ApplicationWindow {
 					}
 
 					function requestBottomFollow() {
-						if (stickToBottom && !prependAnchorActive)
-							bottomFollowTimer.restart()
+						if (stickToBottom && !prependAnchorActive && !restoringBottom
+								&& !bottomFollowTimer.running && !timelineScrollWorkload.running)
+							bottomFollowTimer.start()
 					}
 
 					function beginScopeChange() {
@@ -1041,7 +1301,7 @@ ApplicationWindow {
 					onContentHeightChanged: {
 						if (prependAnchorActive && !restoringPrependAnchor)
 							Qt.callLater(function() { timeline.restorePrependAnchor() })
-						else
+						else if (!restoringBottom)
 							requestBottomFollow()
 					}
 					onMovementStarted: {
@@ -1066,16 +1326,24 @@ ApplicationWindow {
 
 					Timer {
 						id: bottomFollowTimer
-						interval: 0
+						// Coalesce the height churn produced by delegate creation, rich-text
+						// layout and asynchronous media into at most one correction per frame.
+						interval: 16
 						repeat: false
 						onTriggered: {
 							if (!timeline.stickToBottom || timeline.prependAnchorActive)
+								return
+							const maximumY = Math.max(timeline.originY,
+								timeline.originY + timeline.contentHeight - timeline.height)
+							if (!timeline.scopeResetPending && Math.abs(maximumY - timeline.contentY) <= 0.5)
 								return
 							timeline.restoringBottom = true
 							timeline.positionViewAtEnd()
 							Qt.callLater(function() {
 								timeline.restoringBottom = false
 								timeline.scopeResetPending = false
+								if (timeline.stickToBottom && !timeline.isNearBottom())
+									timeline.requestBottomFollow()
 							})
 						}
 					}
@@ -1193,7 +1461,6 @@ ApplicationWindow {
 								messageActions.close()
 							messageActions.targetId = ""
 						}
-						property bool accessibilityPooled: false
 						readonly property bool previewNeedsHydration: !!preview
 							&& Object.keys(preview).length > 0
 							&& (preview.state === "loading" || preview.loading === true)
@@ -1224,7 +1491,11 @@ ApplicationWindow {
 							requestPreviewHydrationIfNeeded()
 						}
 						Component.onCompleted: requestPreviewHydrationIfNeeded()
-						Accessible.ignored: accessibilityPooled
+						// This technical delegate frame must remain ignored for its entire
+						// lifetime. Switching it between ignored and exposed while ListView
+						// reuses it leaves both promoted and nested children in the Windows
+						// accessibility tree.
+						Accessible.ignored: accessibilityFrameIgnored
 						required property string title
                         required property string subtitle
                         required property string status
@@ -1252,8 +1523,12 @@ ApplicationWindow {
 						readonly property bool hasAttachmentContent: !!attachments && attachments.length > 0
 						readonly property bool hasReplyContent: replyActor.length > 0 || replySnippet.length > 0
 						readonly property bool hasReactionContent: !!reactions && reactions.length > 0
+						readonly property real previewTargetWidth: preview && preview.previewSize === "compact"
+							? 460 : preview && preview.previewSize === "large" ? 720 : 580
 						wideContent: hasPreviewContent || hasAttachmentContent || hasReplyContent
 							|| hasReactionContent || hasDeliveryStatus
+						preferredWideContentWidth: hasPreviewContent && !hasAttachmentContent
+							? previewTargetWidth + horizontalPadding * 2 : laneWidth
 						preferredOwnWidth: root.preferredOutgoingMessageWidth(bodySegments, startsGroup)
 						readonly property string deliveryState: String(source.deliveryState || status || "").trim().toLowerCase()
 						readonly property string deliveryLabel: String(source.deliveryLabel || status || "").trim()
@@ -1424,11 +1699,15 @@ ApplicationWindow {
                                 }
 								RichPreviewCard {
 									id: messagePreviewCard
-                                    Layout.fillWidth: true
+									Layout.fillWidth: false
+									Layout.alignment: Qt.AlignLeft
+									Layout.preferredWidth: Math.min(targetCardWidth, Math.max(1, parent.width))
+									Layout.maximumWidth: Math.min(targetCardWidth, Math.max(1, parent.width))
                                     visible: !!messageDelegate.preview && Object.keys(messageDelegate.preview).length > 0
 									preview: messageDelegate.preview || ({})
 									mediaSessionController: mediaSession
 									mediaSessionId: messageDelegate.stableId
+									animationsEnabled: !root.visualFixtureOverrideActive
 									previewIdentity: messageDelegate.stableId + "|" + String(messageDelegate.preview
 										? (messageDelegate.preview.url || messageDelegate.preview.embedUrl
 											|| messageDelegate.preview.mediaUrl || messageDelegate.preview.title || "") : "")
@@ -1463,20 +1742,25 @@ ApplicationWindow {
 											implicitWidth: contentItem.implicitWidth + Theme.space3
 											implicitHeight: Math.max(24, Theme.avatarSmall)
 											enabled: messageDelegate.canReact && (modelData.emoji || "").length > 0
+											hoverEnabled: true
 											activeFocusOnTab: true
 											focusPolicy: Qt.StrongFocus
 											Accessible.name: qsTr("%1 reaction, %2").arg(modelData.emoji || "")
 												.arg(modelData.count || 0)
 											background: Rectangle {
 												radius: reactionButton.implicitHeight / 2
-												color: reactionButton.modelData.selfReacted ? Theme.selected : Theme.strip
+												color: !reactionButton.enabled ? Theme.panel
+													: reactionButton.modelData.selfReacted ? Theme.selected
+													: reactionButton.down ? Theme.accentSubtle
+													: reactionButton.hovered ? Theme.surfaceHover : Theme.strip
 												border.color: reactionButton.activeFocus ? Theme.focus : Theme.divider
+												border.width: reactionButton.activeFocus ? Theme.focusRingWidth : 1
 											}
 											contentItem: Label {
 												textFormat: Text.PlainText
 												text: (reactionButton.modelData.emoji || "") + " "
 													+ (reactionButton.modelData.count || 0)
-												color: Theme.textMain
+												color: reactionButton.enabled ? Theme.textMain : Theme.textMuted
 												font.pixelSize: Theme.fontCaption
 												horizontalAlignment: Text.AlignHCenter
 												verticalAlignment: Text.AlignVCenter
@@ -1496,7 +1780,8 @@ ApplicationWindow {
 						width: Math.max(1, Math.min(380, timeline.width
 							- root.timelineHorizontalMargin * 2 - Theme.space4 * 2))
 						height: emptyConversationContent.implicitHeight + Theme.space5 * 2
-						visible: chatModel.count === 0
+						visible: chatModel.count === 0 && !root.connectionTransitionActive
+							&& !root.connectionFailureActive
 						radius: Theme.innerRadius
 						color: Theme.surfaceRaised
 						border.color: Theme.surfaceBorder
@@ -1517,6 +1802,7 @@ ApplicationWindow {
 								anchors.horizontalCenter: parent.horizontalCenter
 								visible: activeScope.loading
 								running: visible
+								animated: !root.visualFixtureOverrideActive
 								Accessible.name: qsTr("Loading conversation")
 							}
 							Label {
@@ -1545,6 +1831,14 @@ ApplicationWindow {
 								font.pixelSize: Theme.fontBody
 								horizontalAlignment: Text.AlignHCenter
 								wrapMode: Text.Wrap
+							}
+							ModernButton {
+								anchors.horizontalCenter: parent.horizontalCenter
+								visible: !clientSession.connected && clientSession.canConnect
+								text: qsTr("Choose a server")
+								tone: "accent"
+								Accessible.description: qsTr("Open the server browser")
+								onClicked: uiCommands.invokeAppAction("server.connect", {})
 							}
 						}
 					}
@@ -1673,7 +1967,7 @@ ApplicationWindow {
                                                  ? activeScope.composerPlaceholder
                                                  : qsTr("Connect to send messages")
                                 enabled: composer.canSend && !composer.sending
-                                color: Theme.textMain
+								color: composerInput.enabled ? Theme.textMain : Theme.textMuted
 								placeholderTextColor: Theme.textMuted
 								Accessible.name: activeScope.composerPlaceholder.length > 0
 												 ? activeScope.composerPlaceholder
@@ -1709,16 +2003,19 @@ ApplicationWindow {
                 Layout.preferredWidth: 310
                 Layout.fillHeight: true
                 visible: !root.compactNavigation
-                roomModel: root.navigationRoomModel
-                participantModel: root.navigationParticipantModel
+				navigationModel: root.navigationRailModel
                 selectionState: root.navigationSelectionState
                 uiCommands: root.navigationCommands
                 clientSession: root.navigationSession
+				activeScopeMenuToken: (roomMenuPopup.visible || textRoomMenuPopup.visible)
+					? root.contextScopeToken : ""
+				activeParticipantMenuKey: participantMenuPopup.visible
+					? root.contextParticipantRowKey : ""
 				onSelectionCommitted: navigationDrawer.close()
 				onScopeMenuRequested: (scopeToken, kind, actions, anchorPoint) =>
 					root.openScopeMenu(scopeToken, kind, actions, anchorPoint)
-				onParticipantMenuRequested: (sessionId, actions, anchorPoint, entryKind, scopeToken) =>
-					root.openParticipantMenu(sessionId, actions, anchorPoint, entryKind, scopeToken)
+				onParticipantMenuRequested: (sessionId, actions, anchorPoint, entryKind, scopeToken, rowKey) =>
+					root.openParticipantMenu(sessionId, actions, anchorPoint, entryKind, scopeToken, rowKey)
 				onProfileMenuRequested: anchorPoint => root.openProfileMenu(anchorPoint)
             }
         }

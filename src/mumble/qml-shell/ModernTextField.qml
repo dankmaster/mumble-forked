@@ -15,7 +15,7 @@ TextField {
 	topPadding: Theme.space2
 	bottomPadding: Theme.space2
 	font.pixelSize: Theme.fontBody
-	color: Theme.textStrong
+	color: control.enabled ? Theme.textStrong : Theme.textMuted
 	placeholderTextColor: Theme.textMuted
 	selectionColor: Theme.accentSubtle
 	selectedTextColor: Theme.textStrong

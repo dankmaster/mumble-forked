@@ -41,6 +41,16 @@ TestCase {
 		compare(iconLoader.item.background.border.width, Theme.focusRingWidth)
 	}
 
+	function test_disabled_icon_button_overrides_selected_accent() {
+		iconLoader.item.selected = true
+		iconLoader.item.enabled = false
+		tryCompare(iconLoader.item.background, "color", Theme.panel, 500)
+		compare(iconLoader.item.background.border.color, Theme.divider)
+		compare(iconLoader.item.contentItem.foreground, Theme.textMuted)
+		iconLoader.item.enabled = true
+		iconLoader.item.selected = false
+	}
+
 	function test_text_field_validation_state() {
 		fieldLoader.item.invalid = true
 		tryCompare(fieldLoader.item.background.border, "color", Theme.danger, 500)
@@ -68,6 +78,45 @@ TestCase {
 		spinLoader.item.value = 4
 		compare(spinLoader.item.value, 4)
 		compare(spinLoader.item.background.color, Theme.surfaceRaised)
+	}
+
+	function test_combo_popup_delegate_enables_explicit_hover_state() {
+		comboLoader.item.enabled = true
+		comboLoader.item.model = ["One", "Two"]
+		comboLoader.item.popup.open()
+		tryVerify(function() {
+			return comboLoader.item.popup.contentItem.itemAtIndex(0) !== null
+		})
+		const delegate = comboLoader.item.popup.contentItem.itemAtIndex(0)
+		verify(delegate.hoverEnabled)
+		comboLoader.item.popup.close()
+	}
+
+	function test_disabled_controls_use_muted_theme_tokens() {
+		fieldLoader.item.enabled = false
+		areaLoader.item.enabled = false
+		checkLoader.item.checked = true
+		checkLoader.item.enabled = false
+		sliderLoader.item.enabled = false
+		comboLoader.item.enabled = false
+		spinLoader.item.enabled = false
+
+		compare(fieldLoader.item.color, Theme.textMuted)
+		compare(areaLoader.item.color, Theme.textMuted)
+		tryCompare(checkLoader.item.indicator, "color", Theme.surfaceBorder, 500)
+		compare(sliderLoader.item.handle.color, Theme.textMuted)
+		compare(comboLoader.item.contentItem.color, Theme.textMuted)
+		compare(spinLoader.item.contentItem.color, Theme.textMuted)
+		compare(spinLoader.item.background.border.color, Theme.divider)
+		compare(spinLoader.item.up.indicator.color.a, 0)
+		compare(spinLoader.item.down.indicator.color.a, 0)
+
+		fieldLoader.item.enabled = true
+		areaLoader.item.enabled = true
+		checkLoader.item.enabled = true
+		sliderLoader.item.enabled = true
+		comboLoader.item.enabled = true
+		spinLoader.item.enabled = true
 	}
 
 	function test_progress_uses_bounded_tokenized_indicators() {

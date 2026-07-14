@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtTest
+import Mumble.Theme 1.0
 
 TestCase {
     id: testCase
@@ -23,11 +24,28 @@ TestCase {
     }
 
     function cleanup() {
+		loader.item.beforeOpen = null;
         dialogState.open = false;
         tryCompare(loader.item, "visible", false);
 		dialogState.resetSections();
 		dialogState.setSpecialState("generic", {});
     }
+
+	function test_before_open_can_defer_modal_until_host_is_ready() {
+		dialogState.open = false;
+		tryCompare(loader.item, "visible", false);
+		let attempts = 0;
+		loader.item.beforeOpen = function() {
+			attempts += 1;
+			return false;
+		};
+		dialogState.open = true;
+		tryCompare(loader.item, "visible", false);
+		compare(attempts, 1);
+		loader.item.beforeOpen = function() { return true; };
+		loader.item.syncVisibility();
+		tryCompare(loader.item, "visible", true);
+	}
 
     function test_open_focus_and_close_action() {
 		compare(loader.item.title, "Test dialog");
@@ -40,6 +58,11 @@ TestCase {
 		compare(titleLabel.Accessible.name, "Test dialog");
 		compare(loader.item.contentItem.Accessible.role, Accessible.Dialog);
 		compare(loader.item.contentItem.Accessible.name, "Test dialog");
+		compare(loader.item.palette.highlight, Theme.selected);
+		compare(loader.item.palette.highlightedText, Theme.textStrong);
+		compare(loader.item.palette.link, Theme.accent);
+		compare(loader.item.palette.toolTipBase, Theme.surfaceRaised);
+		compare(loader.item.palette.toolTipText, Theme.textStrong);
         tryVerify(function () {
             return loader.item.activeFocus;
         });
@@ -58,6 +81,9 @@ TestCase {
             const errorLabel = findChild(loader.item.contentItem, "dialogFieldError_name");
             return errorLabel !== null && errorLabel.visible && errorLabel.text === "Name is required";
         });
+		const errorLabel = findChild(loader.item.contentItem, "dialogFieldError_name");
+		compare(errorLabel.Accessible.role, Accessible.AlertMessage);
+		compare(errorLabel.Accessible.name, "Name is required");
         dialogState.updateField("name", "Bob");
         tryVerify(function () {
             const errorLabel = findChild(loader.item.contentItem, "dialogFieldError_name");
@@ -107,6 +133,7 @@ TestCase {
 		const firstPage = pages.itemAtIndex(0);
 		compare(firstPage.Accessible.role, Accessible.ListItem);
 		compare(firstPage.Accessible.selected, true);
+		compare(firstPage.background.color, Theme.selected);
 		firstPage.forceActiveFocus();
 		tryCompare(firstPage, "activeFocus", true);
 		keyClick(Qt.Key_Return);
@@ -183,8 +210,95 @@ TestCase {
 		verify(colorButton !== null);
 		compare(colorButton.Accessible.role, Accessible.Button);
 		compare(colorButton.Accessible.name, "Choose Accent");
+		// Let the dialog's deferred initial-focus pass finish before taking focus
+		// explicitly for the color control state check.
+		wait(0);
 		colorButton.forceActiveFocus();
 		tryCompare(colorButton, "activeFocus", true);
+		tryCompare(colorButton.background.border, "color", Theme.focus, 500);
+
+		const picker = colorButton.picker;
+		verify(picker !== null);
+		colorButton.clicked();
+		tryCompare(picker, "visible", true);
+		compare(loader.item.contentItem.enabled, false);
+		compare(picker.palette.highlight, Theme.selected);
+		compare(picker.palette.toolTipBase, Theme.surfaceRaised);
+		compare(picker.palette.disabled.link, Theme.textMuted);
+		const pickerDialog = findChild(picker, "dialogColorPickerDialog_accent");
+		const hexInput = findChild(picker, "dialogColorHex_accent");
+		const applyButton = findChild(picker, "dialogColorApply_accent");
+		verify(pickerDialog !== null && hexInput !== null && applyButton !== null);
+		compare(pickerDialog.Accessible.role, Accessible.Dialog);
+		compare(pickerDialog.Accessible.name, "Choose Accent");
+		tryCompare(hexInput, "activeFocus", true);
+
+		picker.draftColor = "#12";
+		tryCompare(applyButton, "enabled", false);
+		picker.setDraft("#A1B2C3");
+		compare(hexInput.text, "#A1B2C3");
+		tryCompare(applyButton, "enabled", true);
+		applyButton.clicked();
+		tryCompare(picker, "visible", false);
+		compare(loader.item.contentItem.enabled, true);
+		tryCompare(colorButton, "activeFocus", true);
+		compare(String(dialogState.fieldValue("accent")), "#A1B2C3");
+	}
+
+	function test_appearance_grids_render_overview_and_route_fast_selection() {
+		dialogState.updateField("look.modernTheme", "dark")
+		dialogState.updateField("look.modernAccent", "auto")
+		dialogState.setSections([{ "title": "Appearance", "fields": [
+			{
+				"id": "look.modernTheme", "type": "select", "presentation": "themeGrid",
+				"label": "Theme", "value": "dark", "options": [
+					{ "value": "dark", "label": "Dark", "source": "builtIn", "preview": {
+						"shell": "#20262f", "rail": "#1b2027", "strip": "#14181f",
+						"panel": "#262d38", "surface": "#2e3742", "border": "#384453",
+						"text": "#e7ecf3", "textMuted": "#8b94a3", "accent": "#5ec8b0",
+						"success": "#5fd0a3", "warning": "#e0c574", "danger": "#e6736f"
+					} },
+					{ "value": "light", "label": "Light", "source": "builtIn", "preview": {
+						"shell": "#f7f9fc", "rail": "#e6ebf3", "strip": "#d8e0eb",
+						"panel": "#ffffff", "surface": "#e9eef6", "border": "#cfd7e0",
+						"text": "#1f2937", "textMuted": "#647184", "accent": "#268f7f",
+						"success": "#2f9d79", "warning": "#b96b2d", "danger": "#c75f5f"
+					} }
+				]
+			},
+			{
+				"id": "look.modernAccent", "type": "select", "presentation": "accentGrid",
+				"label": "Accent", "value": "auto", "options": [
+					{ "value": "auto", "label": "Auto", "automatic": true,
+						"swatch": { "accent": "#5ec8b0" } },
+					{ "value": "blue", "label": "Blue", "swatch": { "accent": "#73b7ff" } }
+				]
+			}
+		] }])
+
+		const overview = findChild(loader.item.contentItem, "appearanceThemeOverview")
+		const darkCard = findChild(loader.item.contentItem, "dialogThemeOption_dark")
+		const lightCard = findChild(loader.item.contentItem, "dialogThemeOption_light")
+		const autoAccent = findChild(loader.item.contentItem, "dialogAccentOption_auto")
+		const blueAccent = findChild(loader.item.contentItem, "dialogAccentOption_blue")
+		tryVerify(function() {
+			return overview !== null && overview.visible && overview.height >= 120
+				&& darkCard !== null && lightCard !== null && autoAccent !== null && blueAccent !== null
+		})
+		compare(darkCard.Accessible.role, Accessible.RadioButton)
+		compare(darkCard.Accessible.checked, true)
+		verify(lightCard.enabled)
+		lightCard.forceActiveFocus()
+		tryCompare(lightCard, "activeFocus", true)
+		compare(lightCard.background.border.width, 2)
+		lightCard.clicked()
+		compare(String(dialogState.fieldValue("look.modernTheme")), "light")
+		verify(blueAccent.enabled)
+		blueAccent.forceActiveFocus()
+		tryCompare(blueAccent, "activeFocus", true)
+		compare(blueAccent.background.border.width, 2)
+		blueAccent.clicked()
+		compare(String(dialogState.fieldValue("look.modernAccent")), "blue")
 	}
 
 	function test_special_editor_state_stays_live() {
@@ -223,8 +337,20 @@ TestCase {
 		tryVerify(function() { return surface.height < 260 && loader.item.height < 500; });
 		tryCompare(list, "activeFocus", true);
 
-		tryVerify(function() { return list.itemAtIndex(1) !== null; });
+		tryVerify(function() { return list.itemAtIndex(0) !== null && list.itemAtIndex(1) !== null; });
+		const firstFavorite = list.itemAtIndex(0);
 		const secondFavorite = list.itemAtIndex(1);
+		const firstBackground = firstFavorite.background;
+		const secondBackground = secondFavorite.background;
+		verify(firstBackground !== null && secondBackground !== null);
+		compare(firstFavorite.highlighted, true);
+		compare(firstFavorite.Accessible.selected, true);
+		verify(firstBackground.border.width > 1,
+			"The current server must expose keyboard focus on its themed border");
+		verify(String(firstBackground.color).toLowerCase() !== "#ffffff",
+			"The selected server must never fall back to Qt's white highlight");
+		verify(String(firstBackground.color) !== String(secondBackground.color),
+			"Selected and idle server rows must use distinct theme surfaces");
 		tryVerify(function() {
 			return secondFavorite.visible
 				&& secondFavorite.y >= list.contentY - 1
@@ -257,6 +383,8 @@ TestCase {
 			"value": { "available": true, "connected": true, "amplitude": 72, "signalToNoise": 48,
 				"hybrid": 63, "transmitting": true, "peakCleanMicDb": -17 },
 			"vadSource": 2, "silenceThreshold": 18, "speechThreshold": 62, "active": true,
+			"recommendedVadSource": 1, "recommendedInputGateMode": 1,
+			"recommendedNoiseCancelMode": 3, "recommendedMaxAmplification": 6400,
 			"staticMeter": false, "calibrationActionId": "finishAudioSetupWizard",
 			"calibrationLabel": "Audio setup", "replayStartActionId": "startVoiceReplay",
 			"replayStopActionId": "stopVoiceReplay", "replayLabel": "Replay"
@@ -282,7 +410,10 @@ TestCase {
 		compare(dialogState.lastAction, "finishAudioSetupWizard");
 		compare(dialogState.lastPayload.silenceThreshold, 18);
 		compare(dialogState.lastPayload.speechThreshold, 62);
-		compare(dialogState.lastPayload.vadSource, 2);
+		compare(dialogState.lastPayload.vadSource, 1);
+		compare(dialogState.lastPayload.inputGateMode, 1);
+		compare(dialogState.lastPayload.noiseCancelMode, 3);
+		compare(dialogState.lastPayload.maxAmplification, 6400);
 
 		const replay = findChild(loader.item.contentItem, "voiceMeterReplay_audio.inputMeter");
 		verify(replay !== null && replay.visible);
@@ -301,11 +432,16 @@ TestCase {
 		const scaffold = findChild(loader.item.contentItem, "dialogLoadingScaffold");
 		const loadingIndicator = findChild(loader.item.contentItem, "dialogLoadingIndicator");
 		const status = findChild(loader.item.contentItem, "dialogStatusMessage");
+		const statusBanner = findChild(loader.item.contentItem, "dialogStatusBanner");
 		const primary = findChild(loader.item.contentItem, "dialogAction_save");
 		verify(scaffold !== null && scaffold.visible);
 		verify(loadingIndicator !== null && loadingIndicator.running);
 		compare(loadingIndicator.Accessible.role, Accessible.ProgressBar);
 		verify(status !== null && status.visible && status.text === "Fetching permissions");
+		verify(statusBanner !== null && statusBanner.visible);
+		compare(statusBanner.Accessible.role, Accessible.AlertMessage);
+		compare(statusBanner.Accessible.name, "Fetching permissions");
+		compare(status.Accessible.ignored, true);
 		verify(primary !== null && primary.highlighted && primary.tone === "accent" && !primary.enabled);
 
 		dialogState.setSpecialState("generic", {

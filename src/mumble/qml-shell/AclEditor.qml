@@ -170,13 +170,20 @@ ColumnLayout {
 			padding: 10
 			hoverEnabled: true
 			highlighted: ListView.isCurrentItem || hovered
+			readonly property bool current: ListView.isCurrentItem
+			readonly property bool keyboardFocused: activeFocus
+				|| (ListView.view.activeFocus && current)
 			Accessible.role: Accessible.ListItem
 			Accessible.name: modelData.name || qsTr("New group")
 			Accessible.description: modelData.inherited ? qsTr("Inherited group") : qsTr("Editable group")
+			Accessible.selected: current
 			background: Rectangle {
-				color: groupDelegate.highlighted ? Theme.surfaceHover : Theme.strip
-				border.color: groupDelegate.activeFocus ? Theme.focus : Theme.divider
-				border.width: groupDelegate.activeFocus ? Theme.focusRingWidth : 1
+				color: groupDelegate.down ? Theme.accentSubtle
+					: groupDelegate.current ? Theme.selected
+					: groupDelegate.hovered ? Theme.surfaceHover : Theme.strip
+				border.color: groupDelegate.keyboardFocused ? Theme.focus
+					: groupDelegate.current ? Theme.accent : Theme.divider
+				border.width: groupDelegate.keyboardFocused ? Theme.focusRingWidth : 1
 				radius: Theme.innerRadius
 			}
 			contentItem: ColumnLayout {
@@ -379,14 +386,21 @@ ColumnLayout {
 			padding: 10
 			hoverEnabled: true
 			highlighted: ListView.isCurrentItem || hovered
+			readonly property bool current: ListView.isCurrentItem
+			readonly property bool keyboardFocused: activeFocus
+				|| (ListView.view.activeFocus && current)
 			Accessible.role: Accessible.ListItem
 			Accessible.name: qsTr("Rule for %1").arg(modelData.target || qsTr("all users"))
 			Accessible.description: modelData.inherited ? qsTr("Inherited rule") : qsTr("Editable rule")
+			Accessible.selected: current
 			background: Rectangle {
-				color: ruleDelegate.highlighted ? Theme.surfaceHover : Theme.strip
-				border.color: ruleDelegate.activeFocus ? Theme.focus
+				color: ruleDelegate.down ? Theme.accentSubtle
+					: ruleDelegate.current ? Theme.selected
+					: ruleDelegate.hovered ? Theme.surfaceHover : Theme.strip
+				border.color: ruleDelegate.keyboardFocused ? Theme.focus
+					: ruleDelegate.current ? Theme.accent
 					: ruleDelegate.modelData.inherited ? Theme.divider : Theme.accent
-				border.width: ruleDelegate.activeFocus ? Theme.focusRingWidth : 1
+				border.width: ruleDelegate.keyboardFocused ? Theme.focusRingWidth : 1
 				radius: Theme.innerRadius
 			}
 			contentItem: ColumnLayout {

@@ -12,6 +12,13 @@ Item {
 	required property bool own
 	required property bool systemMessage
 	property real bodyImplicitHeight: 0
+	// Keep the accessibility hierarchy stable for the lifetime of a reused
+	// delegate. Toggling Accessible.ignored on this technical frame causes Qt
+	// Quick to first promote its children and then expose them below the frame as
+	// well, leaving duplicate active nodes in the platform tree after reuse.
+	property bool accessibilityPooled: false
+	readonly property bool accessibilityFrameIgnored: true
+	readonly property bool accessibilitySubtreeActive: !accessibilityPooled
 
 	// The conversation lane is centered independently of the message surface.
 	// Regular incoming messages occupy the lane without looking like bubbles,
@@ -20,6 +27,7 @@ Item {
 	property real laneMaximumWidth: 840
 	property real systemMaximumWidth: 680
 	property real preferredOwnWidth: 260
+	property real preferredWideContentWidth: laneMaximumWidth
 	property real minimumOwnWidth: 176
 	property bool wideContent: false
 	readonly property real laneWidth: Math.max(1, Math.min(root.laneMaximumWidth,
@@ -27,8 +35,11 @@ Item {
 	readonly property real messageWidth: {
 		if (root.systemMessage)
 			return Math.min(root.laneWidth, root.systemMaximumWidth)
-		if (root.own && !root.wideContent)
-			return Math.min(root.laneWidth, Math.max(root.minimumOwnWidth, root.preferredOwnWidth))
+		if (root.own) {
+			const preferredWidth = root.wideContent
+				? root.preferredWideContentWidth : root.preferredOwnWidth
+			return Math.min(root.laneWidth, Math.max(root.minimumOwnWidth, preferredWidth))
+		}
 		return root.laneWidth
 	}
 	readonly property real messageX: {
@@ -64,10 +75,27 @@ Item {
 	implicitWidth: laneAvailableWidth > 0 ? laneAvailableWidth : messageWidth
 	implicitHeight: topGap + surfaceHeight
 	height: implicitHeight
+	Accessible.ignored: accessibilityFrameIgnored
+	// Qt Quick can make a pooled delegate visible again without emitting
+	// ListView.onReused on every model replacement path. Visibility is the final
+	// authority: an active delegate must always restore its semantic subtree.
+	onVisibleChanged: {
+		if (visible)
+			accessibilityPooled = false
+	}
+	ListView.onAdd: accessibilityPooled = false
 
 	Rectangle {
 		id: messageSurface
 		objectName: "chatMessageSurface"
+		// This rectangle is visual layout only. Leaving it in the accessible tree
+		// makes Qt expose both a Client subtree and the same promoted children as
+		// siblings, so screen readers announce every message action twice.
+		Accessible.ignored: true
+		// ListView retains released delegates in its reuse pool. Explicitly hide the
+		// complete semantic subtree while pooled; relying on the delegate's effective
+		// visibility leaves stale QAccessible children active after a model reset.
+		visible: root.accessibilitySubtreeActive
 		x: root.messageX
 		y: root.topGap
 		width: root.messageWidth

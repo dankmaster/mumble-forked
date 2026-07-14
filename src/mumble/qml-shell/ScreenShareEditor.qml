@@ -114,8 +114,12 @@ ColumnLayout {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 132
                         radius: Theme.innerRadius
-                        color: root.selectedSourceId === String(modelData.id) ? Theme.selected : Theme.strip
-                        border.color: root.selectedSourceId === String(modelData.id) ? Theme.accent : Theme.divider
+						color: sourceHover.pressed ? Theme.accentSubtle
+							: root.selectedSourceId === sourceId ? Theme.selected
+							: sourceHover.containsMouse ? Theme.surfaceHover : Theme.strip
+						border.color: activeFocus ? Theme.focus
+							: root.selectedSourceId === sourceId ? Theme.accent : Theme.divider
+						border.width: activeFocus ? Theme.focusRingWidth : 1
                         activeFocusOnTab: true
                         Accessible.role: Accessible.RadioButton
                         Accessible.name: String(modelData.title || qsTr("Share source"))
@@ -174,6 +178,8 @@ ColumnLayout {
                             Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: modelData.detail || ""; color: Theme.textMuted; font.pixelSize: 9; elide: Text.ElideRight; visible: text.length > 0 }
                         }
 						MouseArea {
+							id: sourceHover
+							objectName: "screenShareSourceHitArea_" + sourceTile.sourceId
 							anchors.fill: parent
 							hoverEnabled: true
 							onEntered: parent.requestThumbnailIfNeeded()

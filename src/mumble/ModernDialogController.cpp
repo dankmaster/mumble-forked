@@ -380,6 +380,7 @@ ModernDialogController::ActionResult ModernDialogController::invokeAction(const 
 		result.closeDialog                                          = settingsResult.closeDialog;
 		result.settingsToApply                                      = settingsResult.settingsToApply;
 		result.settingsAccepted                                     = settingsResult.accepted;
+		result.announceSettingsApply                                = settingsResult.announceApply;
 		if (!settingsResult.externalActionID.isEmpty()) {
 			ActionResult::GenericAction action;
 			action.dialogID = QStringLiteral("settings");

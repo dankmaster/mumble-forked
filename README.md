@@ -145,15 +145,15 @@ Windows-specific notes for the tracked build flow are in
 ## Modding And Themes
 
 The supported end-user modding surface today is the Modern shell theme system.
-Custom themes are CSS-token files, not arbitrary JavaScript or unrestricted CSS.
+Custom themes are versioned JSON token manifests, not arbitrary JavaScript or unrestricted CSS.
 That keeps theme preview fast, makes native-window color bridging predictable,
 and avoids turning themes into a plugin permission model.
 
 Quick theme flow:
 
-1. Open **Settings > Appearance > Custom themes > Open folder**.
-2. Copy a `.css` token theme into the opened `ModernThemes` folder.
-3. Reopen Settings or switch away/back to refresh the theme grid.
+1. Open **Settings > Appearance > Custom theme folder > Open folder**.
+2. Copy a `*.mumble-theme.json` manifest into the opened `ModernThemes` folder.
+3. Click **Reload themes** in Appearance.
 4. Pick the custom theme and optionally combine it with a built-in or custom
    accent.
 

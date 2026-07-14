@@ -2,7 +2,8 @@
 param(
 	[Parameter(Mandatory = $true)][string]$CandidateDirectory,
 	[Parameter(Mandatory = $true)][string]$BaselineDirectory,
-	[Parameter(Mandatory = $true)][switch]$AcceptReviewedCandidates
+	[Parameter(Mandatory = $true)][switch]$AcceptReviewedCandidates,
+	[string]$MatrixPath = "$PSScriptRoot\qml-visual-gate-matrix.json"
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,7 +13,7 @@ if (-not $AcceptReviewedCandidates) { throw "Baseline update requires -AcceptRev
 $candidate = (Resolve-Path -LiteralPath $CandidateDirectory).Path
 $manifestPath = Join-Path $candidate "manifest.json"
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
-Assert-QmlVisualManifest $manifest | Out-Null
+Assert-QmlVisualManifestMatchesMatrix -Manifest $manifest -MatrixPath $MatrixPath -RequireCombinedCandidate | Out-Null
 foreach ($case in @($manifest.cases)) {
 	$imagePath = Join-Path $candidate "$($case.id).png"
 	$accessibilityPath = Join-Path $candidate "$($case.id).accessibility.json"
@@ -27,11 +28,28 @@ foreach ($case in @($manifest.cases)) {
 		throw "Candidate artifacts for '$($case.id)' do not match their manifest."
 	}
 }
-if ($PSCmdlet.ShouldProcess([IO.Path]::GetFullPath($BaselineDirectory), "Replace reviewed Qt Quick visual baseline")) {
-	New-Item -ItemType Directory -Force -Path $BaselineDirectory | Out-Null
-	Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $BaselineDirectory "manifest.json") -Force
+
+$baseline = [IO.Path]::GetFullPath($BaselineDirectory)
+if ($PSCmdlet.ShouldProcess($baseline, "Replace reviewed Qt Quick visual baseline")) {
+	New-Item -ItemType Directory -Force -Path $baseline | Out-Null
+	$expectedArtifacts = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 	foreach ($case in @($manifest.cases)) {
-		Copy-Item -LiteralPath (Join-Path $candidate "$($case.id).png") -Destination $BaselineDirectory -Force
-		Copy-Item -LiteralPath (Join-Path $candidate "$($case.id).accessibility.json") -Destination $BaselineDirectory -Force
+		$imageName = "$($case.id).png"
+		$accessibilityName = "$($case.id).accessibility.json"
+		$null = $expectedArtifacts.Add($imageName)
+		$null = $expectedArtifacts.Add($accessibilityName)
+		Copy-Item -LiteralPath (Join-Path $candidate $imageName) -Destination $baseline -Force
+		Copy-Item -LiteralPath (Join-Path $candidate $accessibilityName) -Destination $baseline -Force
 	}
+	foreach ($artifact in @(Get-ChildItem -LiteralPath $baseline -File | Where-Object {
+		$_.Name.EndsWith('.png', [StringComparison]::OrdinalIgnoreCase) -or
+		$_.Name.EndsWith('.accessibility.json', [StringComparison]::OrdinalIgnoreCase)
+	})) {
+		if (-not $expectedArtifacts.Contains($artifact.Name)) {
+			Remove-Item -LiteralPath $artifact.FullName -Force
+		}
+	}
+	# Publish the manifest last so an interrupted copy cannot claim that a partial
+	# artifact set is the reviewed baseline.
+	Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $baseline "manifest.json") -Force
 }

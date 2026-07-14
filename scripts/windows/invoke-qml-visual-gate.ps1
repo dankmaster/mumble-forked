@@ -66,20 +66,67 @@ function Get-QmlAccessibilityNodes {
 	return @($nodes)
 }
 
+function Get-QmlAccessibilityFocusSummary {
+	param([Parameter(Mandatory = $true)]$Root)
+	$focusedEntries = [Collections.Generic.List[object]]::new()
+	function Add-QmlAccessibilityFocusEntry {
+		param(
+			[Parameter(Mandatory = $true)]$Node,
+			[Parameter(Mandatory = $true)][string]$Path
+		)
+		if (@($Node.states) -contains "focused") {
+			$focusedEntries.Add([pscustomobject]@{ node = $Node; path = $Path })
+		}
+		$childIndex = 0
+		foreach ($child in @($Node.children)) {
+			if ($null -ne $child) {
+				Add-QmlAccessibilityFocusEntry $child "$Path/$childIndex"
+			}
+			++$childIndex
+		}
+	}
+	Add-QmlAccessibilityFocusEntry $Root "0"
+	$entries = @($focusedEntries)
+	if ($entries.Count -eq 0) {
+		return [pscustomobject]@{ valid = $false; nodes = @(); leaf = $null }
+	}
+	$leafEntry = @($entries | Sort-Object { ([string]$_.path).Length } -Descending)[0]
+	$singleBranch = $true
+	foreach ($entry in $entries) {
+		if ([string]$leafEntry.path -ne [string]$entry.path -and
+			-not ([string]$leafEntry.path).StartsWith("$($entry.path)/", [StringComparison]::Ordinal)) {
+			$singleBranch = $false
+			break
+		}
+	}
+	return [pscustomobject]@{
+		valid = $singleBranch
+		nodes = @($entries | ForEach-Object { $_.node })
+		leaf = $leafEntry.node
+	}
+}
+
 function Assert-QmlAccessibilityEvidence {
 	param(
 		[Parameter(Mandatory = $true)]$Snapshot,
 		[Parameter(Mandatory = $true)][string]$CaseId,
 		[Parameter(Mandatory = $true)][string]$State,
+		[string]$MotdVariant = "none",
+		[string]$RichPreviewVariant = "none",
+		[string]$RichPreviewTitle = "",
+		[string]$RichPreviewOpenLabel = "",
+		[string]$RichPreviewEmbedProvider = "",
+		[string]$RichPreviewPlayName = "",
 		[bool]$NavigationOpen = $false
 	)
 	$nodes = @(Get-QmlAccessibilityNodes $Snapshot)
-	$focused = @($nodes | Where-Object { @($_.states) -contains "focused" })
-	if ($focused.Count -ne 1) {
-		throw "Case '$CaseId' accessibility tree contains $($focused.Count) focused nodes; expected exactly one."
+	$names = @($nodes | ForEach-Object { [string]$_.name })
+	$focus = Get-QmlAccessibilityFocusSummary $Snapshot
+	if (-not $focus.valid) {
+		throw "Case '$CaseId' accessibility tree contains no focus owner or multiple independent focus branches."
 	}
-	if ([string]::IsNullOrWhiteSpace([string]$focused[0].name)) {
-		throw "Case '$CaseId' focused accessibility node has no semantic name."
+	if ([string]::IsNullOrWhiteSpace([string]$focus.leaf.name)) {
+		throw "Case '$CaseId' leaf focus owner has no semantic name."
 	}
 	$hidden = @($nodes | Where-Object {
 		$states = @($_.states)
@@ -98,26 +145,110 @@ function Assert-QmlAccessibilityEvidence {
 	if (-not $NavigationOpen -and $navigationDialogs.Count -ne 0) {
 		throw "Case '$CaseId' exposes the navigation drawer while it should be closed."
 	}
-	if ($State -eq "connected") {
+	$duplicateListItems = @($nodes | Where-Object {
+		([string]$_.role).Equals("ListItem", [StringComparison]::OrdinalIgnoreCase) -and
+		-not [string]::IsNullOrWhiteSpace([string]$_.name)
+	} | Group-Object {
+		$rect = $_.rect
+		"$([string]$_.name)|$([int]$rect.x)|$([int]$rect.y)|$([int]$rect.width)|$([int]$rect.height)"
+	} | Where-Object { $_.Count -gt 1 })
+	if ($duplicateListItems.Count -ne 0) {
+		$duplicates = @($duplicateListItems | ForEach-Object { "$($_.Name) x$($_.Count)" }) -join "; "
+		throw "Case '$CaseId' exposes duplicate semantic list items: $duplicates."
+	}
+	$connectedFixtureMessages = @(
+		"Welcome to the deterministic visual fixture.",
+		"Qt Quick is ready for review."
+	)
+	if ($NavigationOpen) {
+		$backgroundNames = @(
+			"Open rooms and participants",
+			"Search users and rooms",
+			"Application menu",
+			"Message Lobby"
+		) + $connectedFixtureMessages
+		foreach ($name in $backgroundNames) {
+			if ($name -in $names) {
+				throw "Compact drawer case '$CaseId' exposes background product control '$name' to accessibility."
+			}
+		}
+	} elseif ($State -eq "connected") {
 		$expectedMessages = @(
 			"Welcome to the deterministic visual fixture.",
 			"Qt Quick is ready for review."
 		)
-		$names = @($nodes | ForEach-Object { [string]$_.name })
 		foreach ($message in $expectedMessages) {
 			if ($message -notin $names) {
 				throw "Connected case '$CaseId' accessibility tree lacks expected fixture message '$message'."
 			}
 		}
 	} else {
-		$connectedFixtureMessages = @(
-			"Welcome to the deterministic visual fixture.",
-			"Qt Quick is ready for review."
-		)
-		$names = @($nodes | ForEach-Object { [string]$_.name })
 		foreach ($message in $connectedFixtureMessages) {
 			if ($message -in $names) {
 				throw "Non-connected case '$CaseId' exposes stale connected fixture message '$message'."
+			}
+		}
+	}
+	$motdPanes = @($nodes | Where-Object {
+		[string]$_.name -eq "Server message of the day" -and
+		([string]$_.role).Equals("Pane", [StringComparison]::OrdinalIgnoreCase)
+	})
+	$motdShouldBeVisible = $MotdVariant -in @("expanded", "collapsed", "changed")
+	if ($motdShouldBeVisible -and $motdPanes.Count -ne 1) {
+		throw "MOTD case '$CaseId' does not expose exactly one welcome pane to accessibility."
+	}
+	if ($motdShouldBeVisible -and "Hide welcome message" -notin $names) {
+		throw "MOTD case '$CaseId' does not expose its hide-message affordance to accessibility."
+	}
+	if (-not $motdShouldBeVisible -and $motdPanes.Count -ne 0) {
+		throw "Case '$CaseId' exposes a welcome pane for MOTD variant '$MotdVariant' while it should be hidden."
+	}
+	if ($MotdVariant -eq "history-hidden" -and "Show welcome message" -notin $names) {
+		throw "History-hidden MOTD case '$CaseId' does not expose its restore affordance to accessibility."
+	}
+	if ($RichPreviewVariant -ne "none") {
+		$matchingPreviewCards = @($nodes | Where-Object {
+			([string]$_.role).Equals("Grouping", [StringComparison]::OrdinalIgnoreCase) -and
+			([string]$_.name -eq $RichPreviewTitle -or
+				([string]$_.name).StartsWith($RichPreviewTitle + ":", [StringComparison]::Ordinal))
+		})
+		if ([string]::IsNullOrWhiteSpace($RichPreviewTitle) -or $matchingPreviewCards.Count -ne 1) {
+			throw "Rich-preview case '$CaseId' does not expose exactly one '$RichPreviewTitle' grouping."
+		}
+		$matchingPreviewLinks = @($nodes | Where-Object {
+			([string]$_.role).Equals("Link", [StringComparison]::OrdinalIgnoreCase) -and
+			[string]$_.name -eq ($RichPreviewOpenLabel + ": " + $RichPreviewTitle)
+		})
+		if ($RichPreviewVariant -eq "loading" -and $matchingPreviewLinks.Count -ne 0) {
+			throw "Loading rich-preview case '$CaseId' exposes an open link before hydration completes."
+		}
+		if ($RichPreviewVariant -ne "loading" -and
+			([string]::IsNullOrWhiteSpace($RichPreviewOpenLabel) -or $matchingPreviewLinks.Count -ne 1)) {
+			throw "Rich-preview case '$CaseId' does not expose exactly one explicit open link."
+		}
+		if (-not [string]::IsNullOrWhiteSpace($RichPreviewEmbedProvider)) {
+			$matchingPlayActions = @($nodes | Where-Object {
+				([string]$_.role).Equals("Button", [StringComparison]::OrdinalIgnoreCase) -and
+				[string]$_.name -eq $RichPreviewPlayName
+			})
+			if ([string]::IsNullOrWhiteSpace($RichPreviewPlayName) -or $matchingPlayActions.Count -ne 1) {
+				throw "Rich-preview case '$CaseId' does not expose exactly one provider play action."
+			}
+		}
+		$expectedProviderHeading = switch ($RichPreviewVariant) {
+			"steam" { "Store details"; break }
+			"google" { "Google Search"; break }
+			"twitch" { "Stream details"; break }
+			"flashback" { "Discussion details"; break }
+			default { "" }
+		}
+		if (-not [string]::IsNullOrWhiteSpace($expectedProviderHeading)) {
+			$matchingProviderGroups = @($nodes | Where-Object {
+				([string]$_.role).Equals("Grouping", [StringComparison]::OrdinalIgnoreCase) -and
+				[string]$_.name -eq $expectedProviderHeading
+			})
+			if ($matchingProviderGroups.Count -ne 1) {
+				throw "Rich-preview case '$CaseId' does not expose exactly one '$expectedProviderHeading' provider-details grouping."
 			}
 		}
 	}
@@ -125,6 +256,11 @@ function Assert-QmlAccessibilityEvidence {
 
 $matrix = Get-Content -Raw -LiteralPath (Resolve-Path -LiteralPath $MatrixPath).Path | ConvertFrom-Json
 if ([int]$matrix.schema_version -ne 1 -or @($matrix.cases).Count -eq 0) { throw "Invalid or empty visual gate matrix." }
+$baseline = $null
+if (-not $CandidateOnly) {
+	$baseline = Get-Content -Raw -LiteralPath (Resolve-Path -LiteralPath $BaselineManifestPath).Path | ConvertFrom-Json
+	Assert-QmlVisualManifestMatchesMatrix -Manifest $baseline -MatrixPath $MatrixPath | Out-Null
+}
 
 $capabilityResponse = Invoke-Automation @{ command = "qmlVisualGateCapabilities" }
 $capabilities = $capabilityResponse.capabilities
@@ -140,28 +276,67 @@ $selectedCases = @($matrix.cases | Where-Object {
 })
 if ($selectedCases.Count -eq 0) { throw "The matrix contains no cases for actual DPR $actualDevicePixelRatio." }
 $supportedStates = @($capabilities.supported_states)
+if (-not ($capabilities.PSObject.Properties.Name -contains "supported_motd_variants")) {
+	throw "Qt Quick visual gate does not advertise MOTD fixture variants. The gate fails closed."
+}
+$supportedMotdVariants = @($capabilities.supported_motd_variants)
+$requiredMotdVariants = @($selectedCases | ForEach-Object {
+	if ($_.PSObject.Properties.Name -contains "motd_variant") { [string]$_.motd_variant } else { "none" }
+} | Sort-Object -Unique)
+foreach ($variant in $requiredMotdVariants) {
+	if ($variant -notin $supportedMotdVariants) {
+		throw "Required MOTD visual variant '$variant' is not supported. The gate fails closed."
+	}
+}
+if (-not ($capabilities.PSObject.Properties.Name -contains "supported_rich_preview_variants")) {
+	throw "Qt Quick visual gate does not advertise rich-preview fixture variants. The gate fails closed."
+}
+$supportedRichPreviewVariants = @($capabilities.supported_rich_preview_variants)
+$requiredRichPreviewVariants = @($selectedCases | ForEach-Object {
+	if ($_.PSObject.Properties.Name -contains "rich_preview_variant") { [string]$_.rich_preview_variant } else { "none" }
+} | Sort-Object -Unique)
+foreach ($variant in $requiredRichPreviewVariants) {
+	if ($variant -notin $supportedRichPreviewVariants) {
+		throw "Required rich-preview visual variant '$variant' is not supported. The gate fails closed."
+	}
+}
 $requiredStates = @($selectedCases | ForEach-Object { [string]$_.state } | Sort-Object -Unique)
 foreach ($state in $requiredStates) {
 	if ($state -notin $supportedStates) { throw "Required visual state '$state' is not supported. The gate fails closed." }
 }
-$baseline = $null
-if (-not $CandidateOnly) {
-	$baseline = Get-Content -Raw -LiteralPath (Resolve-Path -LiteralPath $BaselineManifestPath).Path | ConvertFrom-Json
-	Assert-QmlVisualManifest $baseline | Out-Null
-}
-
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 $results = [Collections.Generic.List[object]]::new()
 foreach ($case in $selectedCases) {
 	$navigationOpen = ($case.PSObject.Properties.Name -contains "navigation_open") -and [bool]$case.navigation_open
+	$motdVariant = if ($case.PSObject.Properties.Name -contains "motd_variant") {
+		[string]$case.motd_variant
+	} else { "none" }
+	$richPreviewVariant = if ($case.PSObject.Properties.Name -contains "rich_preview_variant") {
+		[string]$case.rich_preview_variant
+	} else { "none" }
+	$richPreviewSize = if ($case.PSObject.Properties.Name -contains "rich_preview_size") {
+		[string]$case.rich_preview_size
+	} else { "default" }
+	if ($motdVariant -ne "none" -and [string]$case.state -ne "connected") {
+		throw "Case '$($case.id)' requests MOTD variant '$motdVariant' outside connected state."
+	}
+	if ($richPreviewVariant -ne "none" -and [string]$case.state -ne "connected") {
+		throw "Case '$($case.id)' requests rich-preview variant '$richPreviewVariant' outside connected state."
+	}
 	$apply = Invoke-Automation @{
 		command = "setQmlVisualGateState"; case_id = [string]$case.id; state = [string]$case.state
 		theme = [string]$case.theme; layout = [string]$case.layout; width = [int]$case.width
-		height = [int]$case.height
+		height = [int]$case.height; motd_variant = $motdVariant; rich_preview_variant = $richPreviewVariant
+		rich_preview_size = $richPreviewSize
 	}
 	$applied = $apply.applied
-	foreach ($property in @("case_id", "state", "theme", "layout", "width", "height", "message_count", "focus_target", "actual_device_pixel_ratio", "generation")) {
+	foreach ($property in @("case_id", "state", "theme", "layout", "motd_variant", "rich_preview_variant",
+		"rich_preview_size", "rich_preview_present", "rich_preview_message_id", "rich_preview_title",
+		"rich_preview_open_label", "rich_preview_embed_provider", "rich_preview_embed_aspect",
+		"rich_preview_media_count", "rich_preview_has_thumbnail", "width", "height", "message_count",
+		"motd_present", "motd_expanded", "motd_changed", "motd_has_user_history", "motd_visible",
+		"focus_target", "actual_device_pixel_ratio", "generation")) {
 		if (-not ($applied.PSObject.Properties.Name -contains $property)) { throw "Case '$($case.id)' lacks applied '$property'." }
 	}
 	if ([string]::IsNullOrWhiteSpace([string]$applied.focus_target)) {
@@ -169,6 +344,9 @@ foreach ($case in $selectedCases) {
 	}
 	if ([string]$applied.case_id -ne [string]$case.id -or [string]$applied.state -ne [string]$case.state -or
 		[string]$applied.theme -ne [string]$case.theme -or [string]$applied.layout -ne [string]$case.layout -or
+		[string]$applied.motd_variant -ne $motdVariant -or
+		[string]$applied.rich_preview_variant -ne $richPreviewVariant -or
+		[string]$applied.rich_preview_size -ne $richPreviewSize -or
 		[int]$applied.width -ne [int]$case.width -or [int]$applied.height -ne [int]$case.height -or
 		[Math]::Abs([double]$applied.actual_device_pixel_ratio - $actualDevicePixelRatio) -gt 0.001) {
 		$appliedJson = $applied | ConvertTo-Json -Compress -Depth 10
@@ -177,6 +355,43 @@ foreach ($case in $selectedCases) {
 	$expectedMessageCount = if ([string]$case.state -eq "connected") { 2 } else { 0 }
 	if ([int]$applied.message_count -ne $expectedMessageCount) {
 		throw "Visual case '$($case.id)' exposed $($applied.message_count) timeline messages; expected $expectedMessageCount."
+	}
+	$expectMotd = $motdVariant -ne "none"
+	$expectMotdExpanded = $expectMotd -and $motdVariant -ne "collapsed"
+	$expectMotdChanged = $motdVariant -eq "changed"
+	$expectUserHistory = [string]$case.state -eq "connected" -and $motdVariant -in @("none", "history-hidden")
+	$expectMotdVisible = $expectMotd -and $motdVariant -ne "history-hidden"
+	if ([bool]$applied.motd_present -ne $expectMotd -or
+		[bool]$applied.motd_expanded -ne $expectMotdExpanded -or
+		[bool]$applied.motd_changed -ne $expectMotdChanged -or
+		[bool]$applied.motd_has_user_history -ne $expectUserHistory -or
+		[bool]$applied.motd_visible -ne $expectMotdVisible) {
+		$appliedJson = $applied | ConvertTo-Json -Compress -Depth 10
+		throw "Automation did not establish MOTD variant '$motdVariant' for '$($case.id)': $appliedJson"
+	}
+	$expectRichPreview = $richPreviewVariant -ne "none"
+	$expectedRichPreviewAspect = switch ($richPreviewVariant) {
+		"youtube" { "wide" }
+		"spotify" { "compact-audio" }
+		"tiktok" { "short" }
+		"instagram" { "square" }
+		"twitch" { "wide" }
+		default { "" }
+	}
+	$expectRichPreviewImage = $richPreviewVariant -in @(
+		"youtube", "spotify", "tiktok", "instagram", "audio", "product", "steam", "twitch"
+	)
+	if ([bool]$applied.rich_preview_present -ne $expectRichPreview -or
+		($expectRichPreview -and [string]::IsNullOrWhiteSpace([string]$applied.rich_preview_title)) -or
+		($expectRichPreview -and [string]::IsNullOrWhiteSpace([string]$applied.rich_preview_message_id)) -or
+		(-not $expectRichPreview -and -not [string]::IsNullOrEmpty([string]$applied.rich_preview_title)) -or
+		($expectedRichPreviewAspect.Length -gt 0 -and
+			([string]$applied.rich_preview_embed_provider -ne $richPreviewVariant -or
+			 [string]$applied.rich_preview_embed_aspect -ne $expectedRichPreviewAspect)) -or
+		($expectRichPreviewImage -and
+			(-not [bool]$applied.rich_preview_has_thumbnail -or [int]$applied.rich_preview_media_count -lt 1))) {
+		$appliedJson = $applied | ConvertTo-Json -Compress -Depth 10
+		throw "Automation did not establish rich-preview variant '$richPreviewVariant' for '$($case.id)': $appliedJson"
 	}
 	$viewportRequest = @{
 		command = "setHostViewport"; width = [int]$case.width; height = [int]$case.height
@@ -207,6 +422,103 @@ foreach ($case in $selectedCases) {
 		throw "Case '$($case.id)' did not reach the requested compact navigation endpoint " +
 			"(open=$navigationOpen, position=$expectedRailPosition); observed open=$([bool]$viewport.railOpen), " +
 			"position=$position."
+	}
+
+	$richPreviewCardState = $null
+	if ($expectRichPreview) {
+		$expectedProviderDetails = switch ($richPreviewVariant) {
+			"steam" {
+				[pscustomobject]@{ variant = "game"; token = "steam"; family = "commerce"; presentation = "commerce" }
+				break
+			}
+			"google" {
+				[pscustomobject]@{ variant = "googleSearch"; token = "google"; family = "search"; presentation = "details" }
+				break
+			}
+			"twitch" {
+				[pscustomobject]@{ variant = "twitch"; token = "twitch"; family = "social"; presentation = "identity" }
+				break
+			}
+			"flashback" {
+				[pscustomobject]@{ variant = "forum"; token = "flashback"; family = "editorial"; presentation = "details" }
+				break
+			}
+			default { $null }
+		}
+		$previewDeadline = [DateTime]::UtcNow.AddSeconds(8)
+		$previewReady = $false
+		do {
+			$previewResponse = Invoke-Automation @{
+				command = "qmlVisualGateRichPreviewState"
+				generation = $applied.generation
+				messageId = [string]$applied.rich_preview_message_id
+			}
+			$richPreviewCardState = $previewResponse.card
+			$cardInsideTimeline = [bool]$richPreviewCardState.cardVisible -and
+				[double]$richPreviewCardState.cardWidth -gt 0 -and [double]$richPreviewCardState.cardHeight -gt 0 -and
+				[bool]$richPreviewCardState.timelineVisible -and [double]$richPreviewCardState.timelineHeight -gt 0 -and
+				[double]$richPreviewCardState.timelineWidth -gt 0 -and
+				[double]$richPreviewCardState.cardX -ge [double]$richPreviewCardState.timelineX - 1 -and
+				([double]$richPreviewCardState.cardX + [double]$richPreviewCardState.cardWidth) -le
+					([double]$richPreviewCardState.timelineX + [double]$richPreviewCardState.timelineWidth + 1) -and
+				[double]$richPreviewCardState.cardY -ge [double]$richPreviewCardState.timelineY - 1 -and
+				([double]$richPreviewCardState.cardY + [double]$richPreviewCardState.cardHeight) -le
+					([double]$richPreviewCardState.timelineY + [double]$richPreviewCardState.timelineHeight + 1)
+			$expectedPreviewState = if ($richPreviewVariant -eq "loading") { "loading" }
+				elseif ($richPreviewVariant -eq "error") { "error" } else { "ready" }
+			$expectedCompact = $richPreviewSize -eq "compact"
+			$expectedExpanded = $richPreviewSize -eq "large"
+			$stateReady = [string]$richPreviewCardState.previewState -eq $expectedPreviewState -and
+				[bool]$richPreviewCardState.compact -eq $expectedCompact -and
+				[bool]$richPreviewCardState.expanded -eq $expectedExpanded -and
+				-not [bool]$richPreviewCardState.userExpanded
+			$visibleImages = @($richPreviewCardState.visibleImages)
+			$expectedImageObjectName = if (-not [string]::IsNullOrWhiteSpace(
+				[string]$applied.rich_preview_embed_provider)) { "previewEmbedPoster" } else { "previewCompactImage" }
+			$matchingVisibleImages = @($visibleImages | Where-Object {
+				[string]$_.objectName -eq $expectedImageObjectName -and [string]$_.statusName -eq "ready" -and
+				[bool]$_.effectiveVisible -and [bool]$_.intersectsCard -and
+				[double]$_.visibleSceneRect.width -gt 0 -and [double]$_.visibleSceneRect.height -gt 0
+			})
+			$imageReady = -not $expectRichPreviewImage -or
+				([int]$richPreviewCardState.visibleImageCount -eq $visibleImages.Count -and
+				 [int]$richPreviewCardState.imageReadyCount -eq $visibleImages.Count -and
+				 [int]$richPreviewCardState.imageLoadingCount -eq 0 -and
+				 [int]$richPreviewCardState.imageErrorCount -eq 0 -and
+				 $matchingVisibleImages.Count -ge 1)
+			$mediaInsideCard = [string]::IsNullOrWhiteSpace([string]$applied.rich_preview_embed_provider) -or
+				([bool]$richPreviewCardState.mediaVisible -and
+				 [double]$richPreviewCardState.mediaWidth -gt 0 -and [double]$richPreviewCardState.mediaHeight -gt 0 -and
+				 [double]$richPreviewCardState.mediaX -ge [double]$richPreviewCardState.cardX - 1 -and
+				 ([double]$richPreviewCardState.mediaX + [double]$richPreviewCardState.mediaWidth) -le
+					([double]$richPreviewCardState.cardX + [double]$richPreviewCardState.cardWidth + 1) -and
+				 [double]$richPreviewCardState.mediaY -ge [double]$richPreviewCardState.cardY - 1 -and
+				 ([double]$richPreviewCardState.mediaY + [double]$richPreviewCardState.mediaHeight) -le
+					([double]$richPreviewCardState.cardY + [double]$richPreviewCardState.cardHeight + 1))
+			$embedReady = [string]::IsNullOrWhiteSpace([string]$applied.rich_preview_embed_provider) -or
+				($mediaInsideCard -and
+				 [bool]$richPreviewCardState.playVisible)
+			$openSurfaceReady = if ([string]::IsNullOrWhiteSpace(
+				[string]$applied.rich_preview_embed_provider)) {
+				[bool]$richPreviewCardState.openSurfaceVisible
+			} else {
+				-not [bool]$richPreviewCardState.openSurfaceVisible
+			}
+			$providerDetailsReady = $null -eq $expectedProviderDetails -or
+				([bool]$richPreviewCardState.providerDetailsVisible -and
+				 [string]$richPreviewCardState.providerVariant -eq [string]$expectedProviderDetails.variant -and
+				 [string]$richPreviewCardState.providerToken -eq [string]$expectedProviderDetails.token -and
+				 [string]$richPreviewCardState.providerFamily -eq [string]$expectedProviderDetails.family -and
+				 [string]$richPreviewCardState.providerPresentation -eq [string]$expectedProviderDetails.presentation)
+			$previewReady = [bool]$richPreviewCardState.rendered -and $cardInsideTimeline -and
+				$openSurfaceReady -and $stateReady -and $imageReady -and
+				$embedReady -and $providerDetailsReady
+			if (-not $previewReady) { Start-Sleep -Milliseconds 25 }
+		} while (-not $previewReady -and [DateTime]::UtcNow -lt $previewDeadline)
+		if (-not $previewReady) {
+			$cardJson = $richPreviewCardState | ConvertTo-Json -Compress -Depth 10
+			throw "Rich-preview case '$($case.id)' did not render a complete in-viewport card: $cardJson"
+		}
 	}
 
 	$imagePath = Join-Path $output "$($case.id).png"
@@ -261,14 +573,24 @@ foreach ($case in $selectedCases) {
 	$accessibilityDeadline = [DateTime]::UtcNow.AddSeconds(2)
 	$previousAccessibilityJson = ""
 	$stableAccessibilitySamples = 0
+	$accessibilityChanges = [Collections.Generic.List[string]]::new()
+	$lastFocusedNodeCount = -1
 	do {
 		$accessibility = Invoke-Automation @{ command = "qmlAccessibilitySnapshot"; generation = $applied.generation }
 		if (($accessibility.PSObject.Properties.Name -contains "generation") -and
 			[long]$accessibility.generation -eq [long]$applied.generation -and $accessibility.snapshot -and
 			-not [string]::IsNullOrWhiteSpace([string]$accessibility.snapshot.role)) {
-			$focusedNodes = @(Get-QmlAccessibilityNodes $accessibility.snapshot | Where-Object { @($_.states) -contains "focused" })
-			if ($focusedNodes.Count -eq 1) {
-				$currentAccessibilityJson = $accessibility.snapshot | ConvertTo-Json -Depth 50 -Compress
+			$focus = Get-QmlAccessibilityFocusSummary $accessibility.snapshot
+			$lastFocusedNodeCount = @($focus.nodes).Count
+			$currentAccessibilityJson = $accessibility.snapshot | ConvertTo-Json -Depth 50 -Compress
+			if ($accessibilityChanges.Count -eq 0 -or
+				$currentAccessibilityJson -cne $accessibilityChanges[$accessibilityChanges.Count - 1]) {
+				$accessibilityChanges.Add($currentAccessibilityJson)
+				if ($accessibilityChanges.Count -gt 12) {
+					$accessibilityChanges.RemoveAt(0)
+				}
+			}
+			if ($focus.valid) {
 				if ($currentAccessibilityJson -ceq $previousAccessibilityJson) {
 					++$stableAccessibilitySamples
 				} else {
@@ -290,12 +612,31 @@ foreach ($case in $selectedCases) {
 		[string]::IsNullOrWhiteSpace([string]$accessibility.snapshot.role)) {
 		throw "Case '$($case.id)' returned no accessibility tree."
 	}
+	if (-not ($accessibility.PSObject.Properties.Name -contains "truncated") -or [bool]$accessibility.truncated) {
+		throw "Case '$($case.id)' returned a truncated accessibility tree."
+	}
 	if ($stableAccessibilitySamples -lt 4) {
-		throw "Case '$($case.id)' accessibility tree did not stabilize across five scene observations."
+		$diagnosticsDirectory = Join-Path $output "diagnostics"
+		New-Item -ItemType Directory -Force -Path $diagnosticsDirectory | Out-Null
+		for ($observationIndex = 0; $observationIndex -lt $accessibilityChanges.Count; ++$observationIndex) {
+			$observationPath = Join-Path $diagnosticsDirectory (
+				"$($case.id).accessibility-observation-{0:D2}.json" -f ($observationIndex + 1))
+			$accessibilityChanges[$observationIndex] | Set-Content -LiteralPath $observationPath -Encoding utf8NoBOM
+		}
+		throw "Case '$($case.id)' accessibility tree did not stabilize across five scene observations " +
+			"(last focused-node count $lastFocusedNodeCount, retained changes $($accessibilityChanges.Count))."
 	}
 	$accessibilityPath = Join-Path $output "$($case.id).accessibility.json"
 	$accessibility.snapshot | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $accessibilityPath -Encoding utf8NoBOM
-	Assert-QmlAccessibilityEvidence -Snapshot $accessibility.snapshot -CaseId ([string]$case.id) -State ([string]$case.state) -NavigationOpen $navigationOpen
+	$richPreviewPlayName = if ($expectRichPreview -and $null -ne $richPreviewCardState) {
+		[string]$richPreviewCardState.playAccessibilityName
+	} else { "" }
+	Assert-QmlAccessibilityEvidence -Snapshot $accessibility.snapshot -CaseId ([string]$case.id) `
+		-State ([string]$case.state) -MotdVariant $motdVariant -RichPreviewVariant $richPreviewVariant `
+		-RichPreviewTitle ([string]$applied.rich_preview_title) `
+		-RichPreviewOpenLabel ([string]$applied.rich_preview_open_label) `
+		-RichPreviewEmbedProvider ([string]$applied.rich_preview_embed_provider) `
+		-RichPreviewPlayName $richPreviewPlayName -NavigationOpen $navigationOpen
 
 	$finalCapture = Invoke-Automation @{ command = "captureQml"; path = $imagePath; generation = $applied.generation }
 	if ([string]$finalCapture.frontend -ne "qml" -or
@@ -311,7 +652,8 @@ foreach ($case in $selectedCases) {
 	}
 	$results.Add([ordered]@{
 		id = [string]$case.id; state = [string]$case.state; theme = [string]$case.theme; layout = [string]$case.layout
-		navigation_open = $navigationOpen
+		navigation_open = $navigationOpen; motd_variant = $motdVariant
+		rich_preview_variant = $richPreviewVariant; rich_preview_size = $richPreviewSize
 		logical_width = [int]$case.width; logical_height = [int]$case.height; device_pixel_ratio = [double]$case.device_pixel_ratio
 		image_width = $dimensions.width; image_height = $dimensions.height
 		image_sha256 = Get-QmlVisualFileSha256 $imagePath

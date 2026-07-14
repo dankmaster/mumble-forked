@@ -15,6 +15,7 @@ class QmlThemeController final : public QObject {
 	Q_PROPERTY(QColor surfaceRaised READ surfaceRaised NOTIFY themeChanged)
 	Q_PROPERTY(QColor surfaceHover READ surfaceHover NOTIFY themeChanged)
 	Q_PROPERTY(QColor surfaceBorder READ surfaceBorder NOTIFY themeChanged)
+	Q_PROPERTY(QColor mediaCanvas READ mediaCanvas NOTIFY themeChanged)
 	Q_PROPERTY(QColor rail READ rail NOTIFY themeChanged)
 	Q_PROPERTY(QColor strip READ strip NOTIFY themeChanged)
 	Q_PROPERTY(QColor divider READ divider NOTIFY themeChanged)
@@ -48,6 +49,7 @@ public:
 	QColor surfaceRaised() const { return m_surfaceRaised; }
 	QColor surfaceHover() const { return m_surfaceHover; }
 	QColor surfaceBorder() const { return m_surfaceBorder; }
+	QColor mediaCanvas() const { return m_mediaCanvas; }
 	QColor rail() const { return m_rail; }
 	QColor strip() const { return m_strip; }
 	QColor divider() const { return m_divider; }
@@ -98,6 +100,7 @@ private:
 	QColor m_surfaceRaised = QColor(QStringLiteral("#2e3742"));
 	QColor m_surfaceHover = QColor(QStringLiteral("#384453"));
 	QColor m_surfaceBorder = QColor(QStringLiteral("#384453"));
+	QColor m_mediaCanvas = QColor(QStringLiteral("#05070a"));
 	QColor m_rail = QColor(QStringLiteral("#1b2027"));
 	QColor m_strip = QColor(QStringLiteral("#14181f"));
 	QColor m_divider = QColor(QStringLiteral("#1fffffff"));

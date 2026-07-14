@@ -14,6 +14,7 @@ private slots:
 	void rejectsInvalidColorsAndOversizedFiles();
 	void clampsMetricsAndPreservesAlpha();
 	void legacyCssRequiresExplicitCompatibilityMode();
+	void resolvesSharedAccentOverrides();
 
 private:
 	void writeFile(const QString &name, const QByteArray &contents);
@@ -41,13 +42,16 @@ void TestModernTheme::loadsTypedManifestWithStableID() {
 	QTemporaryDir directory;
 	QVERIFY(directory.isValid());
 	const QString path = directory.filePath(QStringLiteral("catppuccin-nord.mumble-theme.json"));
-	writeFile(path, manifest());
+	QByteArray document = manifest();
+	document.replace("\"focusAccent\":\"#94e2d5\"", "\"focusAccent\":\"#cba6f7\"");
+	writeFile(path, document);
 	const auto theme = Mumble::ModernTheme::loadThemeDefinitionFile(path);
 	QVERIFY(theme.has_value());
 	QCOMPARE(theme->id, QStringLiteral("custom:catppuccin-nord"));
 	QCOMPARE(theme->formatVersion, 1);
 	QVERIFY(!theme->legacyCss);
 	QCOMPARE(theme->tokens.value(QStringLiteral("--accent")).toString(), QStringLiteral("#94e2d5"));
+	QCOMPARE(theme->tokens.value(QStringLiteral("--focus-accent")).toString(), QStringLiteral("#cba6f7"));
 }
 
 void TestModernTheme::rejectsInvalidManifest() {
@@ -96,6 +100,19 @@ void TestModernTheme::legacyCssRequiresExplicitCompatibilityMode() {
 	QVERIFY(theme.has_value());
 	QVERIFY(theme->legacyCss);
 	QCOMPARE(theme->tokens.value(QStringLiteral("--accent")).toString(), QStringLiteral("#ff0000"));
+}
+
+void TestModernTheme::resolvesSharedAccentOverrides() {
+	using namespace Mumble::ModernTheme;
+	QVERIFY(!accentColorOverride(QStringLiteral("auto")).isValid());
+	QCOMPARE(accentColorOverride(QStringLiteral("teal")), QColor(QStringLiteral("#5ec8b0")));
+	QCOMPARE(accentColorOverride(QStringLiteral("blue")), QColor(QStringLiteral("#73b7ff")));
+	QCOMPARE(accentColorOverride(QStringLiteral("violet")), QColor(QStringLiteral("#b59cff")));
+	QCOMPARE(accentColorOverride(QStringLiteral("amber")), QColor(QStringLiteral("#f2c76f")));
+	QCOMPARE(accentColorOverride(QStringLiteral("rose")), QColor(QStringLiteral("#ff8aa0")));
+	QCOMPARE(accentColorOverride(QStringLiteral("custom"), QStringLiteral("#123456")),
+		QColor(QStringLiteral("#123456")));
+	QVERIFY(!accentColorOverride(QStringLiteral("not-an-accent")).isValid());
 }
 
 QTEST_APPLESS_MAIN(TestModernTheme)

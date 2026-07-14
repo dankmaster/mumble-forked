@@ -34,7 +34,8 @@ SpinBox {
 		y: 1
 		implicitWidth: 32
 		height: Math.floor((control.height - 2) / 2)
-		color: control.up.pressed ? Theme.accentSubtle : control.up.hovered ? Theme.surfaceHover : "transparent"
+		color: !control.enabled ? "transparent"
+			: control.up.pressed ? Theme.accentSubtle : control.up.hovered ? Theme.surfaceHover : "transparent"
 		Text { anchors.centerIn: parent; text: "+"; color: control.enabled ? Theme.textMain : Theme.textMuted; font.pixelSize: 12 }
 	}
 
@@ -43,14 +44,16 @@ SpinBox {
 		y: Math.ceil(control.height / 2)
 		implicitWidth: 32
 		height: Math.floor((control.height - 2) / 2)
-		color: control.down.pressed ? Theme.accentSubtle : control.down.hovered ? Theme.surfaceHover : "transparent"
+		color: !control.enabled ? "transparent"
+			: control.down.pressed ? Theme.accentSubtle : control.down.hovered ? Theme.surfaceHover : "transparent"
 		Text { anchors.centerIn: parent; text: "−"; color: control.enabled ? Theme.textMain : Theme.textMuted; font.pixelSize: 12 }
 	}
 
 	background: Rectangle {
 		radius: Theme.innerRadius
 		color: control.enabled ? Theme.surfaceRaised : Theme.panel
-		border.color: control.invalid ? Theme.danger
+		border.color: !control.enabled ? Theme.divider
+			: control.invalid ? Theme.danger
 			: control.activeFocus ? Theme.focus : Theme.divider
 		border.width: control.invalid || control.activeFocus ? Theme.focusRingWidth : 1
 		Rectangle { anchors.top: parent.top; anchors.bottom: parent.bottom; anchors.right: parent.right; anchors.rightMargin: 32; width: 1; color: Theme.divider }

@@ -2,6 +2,7 @@
 #include "QmlThemeController.h"
 
 #include <QtCore/QFile>
+#include <QtCore/QSet>
 #include <QtCore/QTemporaryDir>
 #include <QtTest>
 
@@ -12,7 +13,11 @@ private slots:
 	void appliesBuiltInTokenMappingIdempotently();
 	void appliesCustomManifestMetrics();
 	void appliesVisualGateAppearance();
+	void exposesCompleteDistinctBuiltInThemes();
 	void appliesProductDensityAccentAndTypedState();
+	void mapsCustomFocusAppearanceAndLegacyFallback();
+	void exposesDarkMediaCanvasForBuiltInAndCustomThemes();
+	void fallsBackToNeutralMediaCanvas();
 };
 
 namespace {
@@ -49,6 +54,7 @@ void TestQmlThemeController::appliesBuiltInTokenMappingIdempotently() {
 	QCOMPARE(controller.surfaceRaised(), tokens.surface0);
 	QCOMPARE(controller.surfaceHover(), tokens.surface1);
 	QCOMPARE(controller.surfaceBorder(), tokens.surface2);
+	QCOMPARE(controller.mediaCanvas(), QColor(QStringLiteral("#05070a")));
 	QCOMPARE(controller.rail(), tokens.mantle);
 	QCOMPARE(controller.accent(), tokens.accent);
 	QCOMPARE(controller.accentHover(), tokens.accentHover);
@@ -92,6 +98,10 @@ void TestQmlThemeController::appliesVisualGateAppearance() {
 	QVERIFY(controller.applyVisualGateAppearance(QStringLiteral("dark"), QStringLiteral("regular")));
 	QVERIFY(!controller.compact());
 	QCOMPARE(controller.spacing(), 12);
+	QVERIFY(controller.applyVisualGateAppearance(QStringLiteral("custom"), QStringLiteral("regular")));
+	QCOMPARE(controller.themeId(), QStringLiteral("visual-custom"));
+	QCOMPARE(controller.mediaCanvas(), QColor(QStringLiteral("#050b12")));
+	QCOMPARE(controller.accent(), QColor(QStringLiteral("#ff8aa0")));
 	QVERIFY(!controller.applyVisualGateAppearance(QStringLiteral("unknown"), QStringLiteral("regular")));
 }
 
@@ -124,6 +134,159 @@ void TestQmlThemeController::appliesProductDensityAccentAndTypedState() {
 	QVERIFY(controller.compact());
 	QCOMPARE(controller.spacing(), 8);
 	QCOMPARE(controller.accent(), QColor(QStringLiteral("#3366cc")));
+}
+
+void TestQmlThemeController::exposesCompleteDistinctBuiltInThemes() {
+	QSet< QString > signatures;
+	const QStringList themeIDs = Mumble::ModernTheme::builtInThemeIds();
+	QCOMPARE(themeIDs.size(), 8);
+
+	for (const QString &themeID : themeIDs) {
+		const UiThemeTokens tokens = uiThemeTokensForThemeId(themeID);
+		QVERIFY2(tokens.crust.isValid(), qPrintable(themeID));
+		QVERIFY2(tokens.mantle.isValid(), qPrintable(themeID));
+		QVERIFY2(tokens.base.isValid(), qPrintable(themeID));
+		QVERIFY2(tokens.surface0.isValid(), qPrintable(themeID));
+		QVERIFY2(tokens.surface1.isValid(), qPrintable(themeID));
+		QVERIFY2(tokens.surface2.isValid(), qPrintable(themeID));
+		QVERIFY2(tokens.text.isValid(), qPrintable(themeID));
+		QVERIFY2(tokens.subtext0.isValid(), qPrintable(themeID));
+		QVERIFY2(tokens.overlay0.isValid(), qPrintable(themeID));
+		QVERIFY2(tokens.accent.isValid(), qPrintable(themeID));
+		QVERIFY2(tokens.accentHover.isValid(), qPrintable(themeID));
+		QVERIFY2(tokens.accentSubtle.isValid(), qPrintable(themeID));
+		QVERIFY2(tokens.focusAccent.isValid(), qPrintable(themeID));
+		QVERIFY2(tokens.red.isValid(), qPrintable(themeID));
+		QVERIFY2(tokens.green.isValid(), qPrintable(themeID));
+		QVERIFY2(tokens.yellow.isValid(), qPrintable(themeID));
+		QVERIFY2(tokens.peach.isValid(), qPrintable(themeID));
+		QVERIFY2(tokens.mediaCanvas.isValid(), qPrintable(themeID));
+		QVERIFY2(tokens.mediaCanvas.lightnessF() < 0.25, qPrintable(themeID));
+
+		signatures.insert(tokens.base.name(QColor::HexArgb) + QLatin1Char('|')
+			+ tokens.mantle.name(QColor::HexArgb) + QLatin1Char('|')
+			+ tokens.accent.name(QColor::HexArgb));
+	}
+
+	QCOMPARE(signatures.size(), themeIDs.size());
+	QCOMPARE(uiThemeTokensForThemeId(QStringLiteral("latte")).preset, UiThemePreset::MumbleLight);
+}
+
+void TestQmlThemeController::mapsCustomFocusAppearanceAndLegacyFallback() {
+	QTemporaryDir directory;
+	QVERIFY(directory.isValid());
+
+	const QString typedPath = directory.filePath(QStringLiteral("light-test.mumble-theme.json"));
+	QFile typedFile(typedPath);
+	QVERIFY(typedFile.open(QFile::WriteOnly));
+	typedFile.write(R"json({"formatVersion":1,"id":"light-test","name":"Light Test","appearance":"light","palette":{
+"shellBackground":"#fafafa","crust":"#eeeeee","mantle":"#ededed","base":"#ffffff",
+"surface0":"#f5f5f5","surface1":"#e5e5e5","surface2":"#d5d5d5","text":"#111111",
+"subtext0":"#333333","overlay0":"#666666","accent":"#2468aa","accentHover":"#3579bb",
+"accentSubtle":"#292468aa","focusAccent":"#9a32cd","red":"#aa2222","green":"#228844",
+"yellow":"#997711","peach":"#bb6633"}})json");
+	typedFile.close();
+	const auto typedTheme = Mumble::ModernTheme::loadThemeDefinitionFile(typedPath);
+	QVERIFY(typedTheme.has_value());
+	const UiThemeTokens typedTokens = uiThemeTokensForThemeDefinition(*typedTheme);
+	QCOMPARE(typedTokens.preset, UiThemePreset::MumbleLight);
+	QCOMPARE(typedTokens.base, QColor(QStringLiteral("#ffffff")));
+	QCOMPARE(typedTokens.surface2, QColor(QStringLiteral("#d5d5d5")));
+	QCOMPARE(typedTokens.accent, QColor(QStringLiteral("#2468aa")));
+	QCOMPARE(typedTokens.focusAccent, QColor(QStringLiteral("#9a32cd")));
+	UiThemeTokens autoTokens = typedTokens;
+	QVERIFY(!applyUiThemeAccentOverride(autoTokens, QStringLiteral("auto"), QString(), 50));
+	QCOMPARE(autoTokens.accent, typedTokens.accent);
+	QCOMPARE(autoTokens.focusAccent, typedTokens.focusAccent);
+	QCOMPARE(autoTokens.accentSubtle, typedTokens.accentSubtle);
+
+	QmlThemeController controller;
+	controller.applyTokens(autoTokens);
+	QCOMPARE(controller.accent(), typedTokens.accent);
+	QCOMPARE(controller.focus(), typedTokens.focusAccent);
+	QCOMPARE(controller.selected(), typedTokens.accentSubtle);
+
+	for (const QString &accentID : { QStringLiteral("teal"), QStringLiteral("blue"),
+			 QStringLiteral("violet"), QStringLiteral("amber"), QStringLiteral("rose") }) {
+		UiThemeTokens fixedTokens = typedTokens;
+		QVERIFY(applyUiThemeAccentOverride(fixedTokens, accentID, QString(), 50));
+		const QColor expectedAccent = Mumble::ModernTheme::accentColorOverride(accentID);
+		QCOMPARE(fixedTokens.accent, expectedAccent);
+		QCOMPARE(fixedTokens.focusAccent, expectedAccent);
+		controller.applyTokens(fixedTokens);
+		QCOMPARE(controller.accent(), expectedAccent);
+		QCOMPARE(controller.focus(), expectedAccent);
+		QCOMPARE(controller.selected(), fixedTokens.accentSubtle);
+	}
+
+	const QString legacyPath = directory.filePath(QStringLiteral("partial.css"));
+	QFile legacyFile(legacyPath);
+	QVERIFY(legacyFile.open(QFile::WriteOnly));
+	legacyFile.write("/* mumble-theme-id: partial */\n:root { --accent: #ff0000; }");
+	legacyFile.close();
+	const auto legacyTheme = Mumble::ModernTheme::loadThemeDefinitionFile(legacyPath, true);
+	QVERIFY(legacyTheme.has_value());
+	const UiThemeTokens darkBase = uiThemeTokensForThemeId(QStringLiteral("dark"));
+	const UiThemeTokens legacyTokens = uiThemeTokensForThemeDefinition(*legacyTheme);
+	QCOMPARE(legacyTokens.preset, UiThemePreset::MumbleDark);
+	QCOMPARE(legacyTokens.base, darkBase.base);
+	QCOMPARE(legacyTokens.surface0, darkBase.surface0);
+	QCOMPARE(legacyTokens.surface2, darkBase.surface2);
+	QCOMPARE(legacyTokens.text, darkBase.text);
+	QCOMPARE(legacyTokens.accent, QColor(QStringLiteral("#ff0000")));
+	QCOMPARE(legacyTokens.focusAccent, QColor(QStringLiteral("#ff0000")));
+	UiThemeTokens customTokens = legacyTokens;
+	QVERIFY(applyUiThemeAccentOverride(
+		customTokens, QStringLiteral("custom"), QStringLiteral("#3366cc"), 75));
+	controller.applyTokens(customTokens);
+	QCOMPARE(controller.accent(), QColor(QStringLiteral("#3366cc")));
+	QCOMPARE(controller.focus(), QColor(QStringLiteral("#3366cc")));
+	QCOMPARE(controller.selected(), customTokens.accentSubtle);
+}
+
+void TestQmlThemeController::exposesDarkMediaCanvasForBuiltInAndCustomThemes() {
+	const UiThemeTokens darkTokens = uiThemeTokensForThemeId(QStringLiteral("dark"));
+	const UiThemeTokens lightTokens = uiThemeTokensForThemeId(QStringLiteral("light"));
+	QVERIFY(darkTokens.mediaCanvas.isValid());
+	QVERIFY(lightTokens.mediaCanvas.isValid());
+	QVERIFY(darkTokens.mediaCanvas.lightnessF() < 0.25);
+	QVERIFY(lightTokens.mediaCanvas.lightnessF() < 0.25);
+	QVERIFY(darkTokens.mediaCanvas != lightTokens.mediaCanvas);
+
+	QTemporaryDir directory;
+	QVERIFY(directory.isValid());
+	const QString path = directory.filePath(QStringLiteral("media-light.mumble-theme.json"));
+	QFile file(path);
+	QVERIFY(file.open(QFile::WriteOnly));
+	file.write(R"json({"formatVersion":1,"id":"media-light","name":"Media Light","appearance":"light","palette":{
+"shellBackground":"#fafafa","crust":"#eeeeee","mantle":"#ededed","base":"#ffffff",
+"surface0":"#f5f5f5","surface1":"#e5e5e5","surface2":"#d5d5d5","text":"#334455",
+"subtext0":"#445566","overlay0":"#667788","accent":"#2468aa","accentHover":"#3579bb",
+"accentSubtle":"#292468aa","focusAccent":"#9a32cd","red":"#aa2222","green":"#228844",
+"yellow":"#997711","peach":"#bb6633"}})json");
+	file.close();
+	const auto customTheme = Mumble::ModernTheme::loadThemeDefinitionFile(path);
+	QVERIFY(customTheme.has_value());
+	const UiThemeTokens customTokens = uiThemeTokensForThemeDefinition(*customTheme);
+	QVERIFY(customTokens.mediaCanvas.isValid());
+	QVERIFY(customTokens.mediaCanvas.lightnessF() < 0.25);
+	QVERIFY(customTokens.mediaCanvas != lightTokens.mediaCanvas);
+
+	QmlThemeController controller;
+	controller.applyTokens(customTokens);
+	QCOMPARE(controller.mediaCanvas(), customTokens.mediaCanvas);
+	const QVariantMap effectiveTokens = controller.state().value(QStringLiteral("effectiveTokens")).toMap();
+	QCOMPARE(effectiveTokens.value(QStringLiteral("mediaCanvas")).toString(),
+		customTokens.mediaCanvas.name(QColor::HexRgb));
+}
+
+void TestQmlThemeController::fallsBackToNeutralMediaCanvas() {
+	UiThemeTokens tokens = testTokens();
+	QVERIFY(!tokens.mediaCanvas.isValid());
+	QmlThemeController controller;
+	controller.applyTokens(tokens);
+	QCOMPARE(controller.mediaCanvas(), QColor(QStringLiteral("#05070a")));
+	QCOMPARE(controller.property("mediaCanvas").value< QColor >(), controller.mediaCanvas());
 }
 
 QTEST_APPLESS_MAIN(TestQmlThemeController)

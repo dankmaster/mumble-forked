@@ -39,6 +39,7 @@
 #include <QtCore/QJsonObject>
 #include <QtCore/QMetaType>
 #include <QtCore/QPointer>
+#include <QtCore/QRectF>
 #include <QtCore/QReadLocker>
 #include <QtCore/QSet>
 #include <QtCore/QTemporaryDir>
@@ -4376,12 +4377,88 @@ namespace {
 		return nullptr;
 	}
 
+	QRectF automationQuickItemSceneRect(QQuickItem *item) {
+		if (!item || item->width() <= 0.0 || item->height() <= 0.0) {
+			return {};
+		}
+		return item->mapRectToScene(QRectF(0.0, 0.0, item->width(), item->height())).normalized();
+	}
+
+	QVariantMap automationSceneRectState(const QRectF &rect) {
+		return QVariantMap { { QStringLiteral("x"), rect.x() }, { QStringLiteral("y"), rect.y() },
+			{ QStringLiteral("width"), rect.width() }, { QStringLiteral("height"), rect.height() } };
+	}
+
+	QString automationImageStatusName(int status) {
+		switch (status) {
+			case 1:
+				return QStringLiteral("ready");
+			case 2:
+				return QStringLiteral("loading");
+			case 3:
+				return QStringLiteral("error");
+			default:
+				return QStringLiteral("null");
+		}
+	}
+
+	bool automationEffectiveImageRects(QQuickItem *item, QQuickItem *card, QRectF *sceneRect,
+									   QRectF *visibleSceneRect) {
+		if (!item || !card || item->window() != card->window()) {
+			return false;
+		}
+
+		const QRectF itemSceneRect = automationQuickItemSceneRect(item);
+		const QRectF cardSceneRect = automationQuickItemSceneRect(card);
+		if (itemSceneRect.isEmpty() || cardSceneRect.isEmpty()) {
+			return false;
+		}
+
+		QRectF effectiveRect = itemSceneRect.intersected(cardSceneRect);
+		bool descendsFromCard = false;
+		for (QQuickItem *current = item; current; current = current->parentItem()) {
+			if (!current->isVisible() || current->opacity() <= 0.0) {
+				return false;
+			}
+			if (current == card) {
+				descendsFromCard = true;
+			}
+			if (current->clip()) {
+				effectiveRect = effectiveRect.intersected(automationQuickItemSceneRect(current));
+				if (effectiveRect.isEmpty()) {
+					return false;
+				}
+			}
+		}
+
+		if (!descendsFromCard || effectiveRect.isEmpty()) {
+			return false;
+		}
+		if (sceneRect) {
+			*sceneRect = itemSceneRect;
+		}
+		if (visibleSceneRect) {
+			*visibleSceneRect = effectiveRect;
+		}
+		return true;
+	}
+
 	QVariantMap automationRichPreviewCardState(QQuickWindow *window, const QString &messageId) {
 		QVariantMap state;
 		state.insert(QStringLiteral("messageId"), messageId);
 		QObject *card = automationFindRichPreviewCard(window, messageId);
 		state.insert(QStringLiteral("rendered"), card != nullptr);
 		if (!card) {
+			state.insert(QStringLiteral("compact"), false);
+			state.insert(QStringLiteral("playAccessibilityName"), QString());
+			state.insert(QStringLiteral("providerDetailsVisible"), false);
+			state.insert(QStringLiteral("providerVariant"), QString());
+			state.insert(QStringLiteral("providerToken"), QString());
+			state.insert(QStringLiteral("providerFamily"), QString());
+			state.insert(QStringLiteral("providerPresentation"), QString());
+			state.insert(QStringLiteral("visibleImages"), QVariantList());
+			state.insert(QStringLiteral("visibleImageCount"), 0);
+			state.insert(QStringLiteral("imageSources"), QStringList());
 			state.insert(QStringLiteral("imageSourceCount"), 0);
 			state.insert(QStringLiteral("imageReadyCount"), 0);
 			state.insert(QStringLiteral("imageLoadingCount"), 0);
@@ -4389,16 +4466,62 @@ namespace {
 			return state;
 		}
 
+		state.insert(QStringLiteral("compact"), card->property("compact").toBool());
 		state.insert(QStringLiteral("expanded"), card->property("expanded").toBool());
 		state.insert(QStringLiteral("userExpanded"), card->property("userExpanded").toBool());
 		state.insert(QStringLiteral("sensitiveMediaRevealed"),
 			card->property("sensitiveMediaRevealed").toBool());
 		state.insert(QStringLiteral("mediaRequiresReveal"), card->property("mediaRequiresReveal").toBool());
 		state.insert(QStringLiteral("previewState"), card->property("previewState").toString());
+		state.insert(QStringLiteral("playAccessibilityName"),
+			card->property("playAccessibilityName").toString());
+		QQuickItem *cardItem = qobject_cast< QQuickItem * >(card);
+		const auto appendSceneRect = [&state](const QString &prefix, QQuickItem *item) {
+			state.insert(prefix + QStringLiteral("Visible"), item && item->isVisible());
+			if (!item) {
+				state.insert(prefix + QStringLiteral("X"), 0.0);
+				state.insert(prefix + QStringLiteral("Y"), 0.0);
+				state.insert(prefix + QStringLiteral("Width"), 0.0);
+				state.insert(prefix + QStringLiteral("Height"), 0.0);
+				return;
+			}
+			const QPointF scenePosition = item->mapToScene(QPointF(0, 0));
+			state.insert(prefix + QStringLiteral("X"), scenePosition.x());
+			state.insert(prefix + QStringLiteral("Y"), scenePosition.y());
+			state.insert(prefix + QStringLiteral("Width"), item->width());
+			state.insert(prefix + QStringLiteral("Height"), item->height());
+		};
+		appendSceneRect(QStringLiteral("card"), cardItem);
+		QQuickItem *timelineItem = window && window->contentItem()
+			? qobject_cast< QQuickItem * >(automationFindQuickItemByObjectName(
+				window->contentItem(), QStringLiteral("chatTimeline"))) : nullptr;
+		appendSceneRect(QStringLiteral("timeline"), timelineItem);
+		QQuickItem *mediaPanel = cardItem
+			? qobject_cast< QQuickItem * >(automationFindQuickItemByObjectName(
+				cardItem, QStringLiteral("previewEmbedMediaPanel"))) : nullptr;
+		appendSceneRect(QStringLiteral("media"), mediaPanel);
+		QObject *playButton = cardItem
+			? automationFindQuickItemByObjectName(cardItem, QStringLiteral("previewPlayButton")) : nullptr;
+		QObject *openSurface = cardItem
+			? automationFindQuickItemByObjectName(cardItem, QStringLiteral("previewCardOpenSurface")) : nullptr;
+		QObject *providerDetails = cardItem
+			? automationFindQuickItemByObjectName(cardItem, QStringLiteral("providerDetails")) : nullptr;
+		state.insert(QStringLiteral("playVisible"), playButton && playButton->property("visible").toBool());
+		state.insert(QStringLiteral("openSurfaceVisible"),
+			openSurface && openSurface->property("visible").toBool());
+		state.insert(QStringLiteral("providerDetailsVisible"),
+			providerDetails && providerDetails->property("visible").toBool());
+		state.insert(QStringLiteral("providerVariant"),
+			providerDetails ? providerDetails->property("variant").toString() : QString());
+		state.insert(QStringLiteral("providerToken"),
+			providerDetails ? providerDetails->property("providerToken").toString() : QString());
+		state.insert(QStringLiteral("providerFamily"),
+			providerDetails ? providerDetails->property("family").toString() : QString());
+		state.insert(QStringLiteral("providerPresentation"),
+			providerDetails ? providerDetails->property("presentation").toString() : QString());
 
 		bool focused = false;
 		if (window) {
-			QQuickItem *cardItem = qobject_cast< QQuickItem * >(card);
 			for (QQuickItem *item = window->activeFocusItem(); item; item = item->parentItem()) {
 				if (item == cardItem) {
 					focused = true;
@@ -4413,15 +4536,12 @@ namespace {
 		int imageLoadingCount = 0;
 		int imageErrorCount   = 0;
 		QStringList renderedImageSources;
-		QList< QObject * > imageCandidates;
-		if (QQuickItem *cardItem = qobject_cast< QQuickItem * >(card)) {
-			for (QQuickItem *candidate : automationQuickItemSubtree(cardItem)) {
-				imageCandidates.push_back(candidate);
-			}
-		} else {
-			imageCandidates = card->findChildren< QObject * >();
+		QVariantList visibleImages;
+		QList< QQuickItem * > imageCandidates;
+		if (cardItem) {
+			imageCandidates = automationQuickItemSubtree(cardItem);
 		}
-		for (QObject *candidate : imageCandidates) {
+		for (QQuickItem *candidate : imageCandidates) {
 			const QVariant sourceValue = candidate->property("source");
 			if (!sourceValue.isValid()) {
 				continue;
@@ -4430,11 +4550,26 @@ namespace {
 			if (!source.startsWith(QLatin1String("image://mumble/"), Qt::CaseInsensitive)) {
 				continue;
 			}
+			QRectF sceneRect;
+			QRectF visibleSceneRect;
+			if (!automationEffectiveImageRects(candidate, cardItem, &sceneRect, &visibleSceneRect)) {
+				continue;
+			}
 			++imageSourceCount;
 			if (!renderedImageSources.contains(source)) {
 				renderedImageSources.push_back(source);
 			}
 			const int status = candidate->property("status").toInt();
+			visibleImages.push_back(QVariantMap {
+				{ QStringLiteral("source"), source },
+				{ QStringLiteral("objectName"), candidate->objectName() },
+				{ QStringLiteral("status"), status },
+				{ QStringLiteral("statusName"), automationImageStatusName(status) },
+				{ QStringLiteral("effectiveVisible"), true },
+				{ QStringLiteral("intersectsCard"), true },
+				{ QStringLiteral("sceneRect"), automationSceneRectState(sceneRect) },
+				{ QStringLiteral("visibleSceneRect"), automationSceneRectState(visibleSceneRect) }
+			});
 			if (status == 1) {
 				++imageReadyCount;
 			} else if (status == 2) {
@@ -4443,6 +4578,8 @@ namespace {
 				++imageErrorCount;
 			}
 		}
+		state.insert(QStringLiteral("visibleImages"), visibleImages);
+		state.insert(QStringLiteral("visibleImageCount"), visibleImages.size());
 		state.insert(QStringLiteral("imageSources"), renderedImageSources);
 		state.insert(QStringLiteral("imageSourceCount"), imageSourceCount);
 		state.insert(QStringLiteral("imageReadyCount"), imageReadyCount);
@@ -4887,6 +5024,25 @@ QVariantMap ModernUiAutomationServer::handleRequest(const QVariantMap &request) 
 		response.insert(QStringLiteral("snapshot"), snapshot.value(QStringLiteral("tree")));
 		response.insert(QStringLiteral("nodeCount"), snapshot.value(QStringLiteral("nodeCount")));
 		response.insert(QStringLiteral("truncated"), snapshot.value(QStringLiteral("truncated")));
+		return response;
+	}
+
+	if (command == QLatin1String("qmlVisualGateRichPreviewState")) {
+		QmlVisualFixtureController *fixture = visualFixtureController();
+		bool parsedGeneration = false;
+		const qulonglong requestedGeneration =
+			unsignedLongLongValue(request.value(QStringLiteral("generation")), &parsedGeneration);
+		if (!parsedGeneration || requestedGeneration == 0 || requestedGeneration != fixture->generation()) {
+			return errorResponse(tr("The requested visual fixture generation is stale or invalid."));
+		}
+		const QString messageId = request.value(QStringLiteral("messageId")).toString().trimmed();
+		if (messageId.isEmpty()) return errorResponse(tr("Missing rich-preview message id."));
+		QmlShellHost *host = m_mainWindow->qmlShellHost();
+		if (!host || !host->window()) return errorResponse(tr("The Qt Quick frontend is not active."));
+		QVariantMap response = okResponse();
+		response.insert(QStringLiteral("generation"), requestedGeneration);
+		response.insert(QStringLiteral("frontend"), QStringLiteral("qml"));
+		response.insert(QStringLiteral("card"), automationRichPreviewCardState(host->window(), messageId));
 		return response;
 	}
 

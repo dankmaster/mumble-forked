@@ -32,6 +32,7 @@ TestCase {
 		loader.item.tone = "neutral";
 		loader.item.highlighted = false;
 		loader.item.checked = false;
+		loader.item.enabled = true;
         loader.item.forceActiveFocus();
         tryCompare(loader.item, "activeFocus", true);
     }
@@ -54,5 +55,15 @@ TestCase {
 		verify(loader.item.emphasized)
 		tryCompare(loader.item.background, "color", Theme.accent, 500)
 		compare(loader.item.contentItem.color, Theme.contrastText(Theme.accent))
+	}
+
+	function test_primary_hover_token_and_disabled_state_are_complete() {
+		loader.item.tone = "primary"
+		compare(loader.item.hoverToneColor, Theme.accentHover)
+		loader.item.enabled = false
+		tryCompare(loader.item.background, "color", Theme.panel, 500)
+		tryCompare(loader.item.background.border, "color", Theme.divider, 500)
+		compare(loader.item.contentItem.color, Theme.textMuted)
+		loader.item.enabled = true
 	}
 }

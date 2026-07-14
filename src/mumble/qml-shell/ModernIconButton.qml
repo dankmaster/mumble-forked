@@ -46,9 +46,11 @@ ToolButton {
 
 	background: Rectangle {
 		radius: Theme.innerRadius
-		color: control.selected ? Theme.accentSubtle
+		color: !control.enabled ? Theme.panel
+			: control.selected ? Theme.accentSubtle
 			: control.hovered || control.down ? Theme.surfaceHover : "transparent"
-		border.color: control.activeFocus ? Theme.focus
+		border.color: !control.enabled ? Theme.divider
+			: control.activeFocus ? Theme.focus
 			: control.selected ? control.toneColor : "transparent"
 		border.width: control.activeFocus ? Theme.focusRingWidth : 1
 		Behavior on color { ColorAnimation { duration: Theme.motionFast } }

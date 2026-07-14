@@ -7,12 +7,22 @@ Item {
     required property var segments
     property color textColor: Theme.textMain
     property int pixelSize: 12
+	property int textHorizontalAlignment: Text.AlignLeft
 	property real maximumImageHeight: 320
+	property real maximumImageWidth: 1000000
+	property real imagePadding: Theme.space2
+	property color imageSurfaceColor: Theme.strip
+	property color imageBorderColor: Theme.divider
+	property real imageBorderWidth: 1
     readonly property string plainText: root.plainTextForSegments(root.segments)
     readonly property string renderedHtml: root.htmlForSegments(root.segments)
 	readonly property var renderBlocks: root.blocksForSegments(root.segments)
 	readonly property bool hasImages: root.renderBlocks.some(function(block) {
 		return block.kind === "image"
+	})
+	readonly property bool plainTextOnly: !root.hasImages && !(root.segments || []).some(function(segment) {
+		return !!segment && (!!segment.bold || !!segment.italic || !!segment.strike
+			|| !!segment.code || root.safeExternalUrl(segment.href).length > 0)
 	})
 	readonly property var keyboardLinks: root.linksForSegments(root.segments)
 	property int keyboardLinkIndex: 0
@@ -156,9 +166,12 @@ Item {
         id: body
         objectName: "richMessageBodyText"
         width: root.width
-        text: root.renderedHtml
-        textFormat: Text.RichText
+		// Most chat lines are unformatted. Keeping them on the plain-text path
+		// avoids reparsing generated HTML whenever a pooled delegate is reused.
+		text: root.hasImages ? "" : (root.plainTextOnly ? root.plainText : root.renderedHtml)
+		textFormat: root.plainTextOnly ? Text.PlainText : Text.RichText
         wrapMode: Text.Wrap
+		horizontalAlignment: root.textHorizontalAlignment
         color: root.textColor
         font.pixelSize: root.pixelSize
         linkColor: Theme.accent
@@ -195,6 +208,7 @@ Item {
 					text: parent.imageBlock ? "" : String(parent.modelData.html || "")
 					textFormat: Text.RichText
 					wrapMode: Text.Wrap
+					horizontalAlignment: root.textHorizontalAlignment
 					color: root.textColor
 					font.pixelSize: root.pixelSize
 					linkColor: Theme.accent
@@ -211,25 +225,31 @@ Item {
 					readonly property string safeHref: root.safeExternalUrl(parent.modelData.href)
 					readonly property string accessibleLabel: String(
 						parent.modelData.alt || qsTr("Server image")).trim().slice(0, 512)
-					readonly property real imageMargin: Theme.space2
-					readonly property real availableImageWidth: Math.max(1, width - imageMargin * 2)
+					readonly property real imageMargin: Math.max(0, root.imagePadding)
+					readonly property real availableImageWidth: Math.max(1,
+						Math.min(parent.width - imageMargin * 2, root.maximumImageWidth))
 					readonly property real naturalWidth: inlineImage.sourceSize.width > 0
 						? inlineImage.sourceSize.width : Number(parent.modelData.width || availableImageWidth)
 					readonly property real naturalHeight: inlineImage.sourceSize.height > 0
 						? inlineImage.sourceSize.height : Number(parent.modelData.height || naturalWidth * 9 / 16)
-					readonly property real displayWidth: Math.max(1, Math.min(availableImageWidth, naturalWidth))
-					readonly property real displayHeight: Math.max(1, Math.min(root.maximumImageHeight,
-						naturalHeight * displayWidth / Math.max(1, naturalWidth)))
-					width: parent.width
+					readonly property real fitScale: Math.max(0.001, Math.min(1,
+						availableImageWidth / Math.max(1, naturalWidth),
+						root.maximumImageHeight / Math.max(1, naturalHeight)))
+					readonly property real displayWidth: Math.max(1, naturalWidth * fitScale)
+					readonly property real displayHeight: Math.max(1, naturalHeight * fitScale)
+					width: Math.min(parent.width, displayWidth + imageMargin * 2)
+					anchors.horizontalCenter: parent.horizontalCenter
 					implicitHeight: parent.imageBlock ? displayHeight + imageMargin * 2 : 0
 					visible: parent.imageBlock
-					color: Theme.strip
+					color: root.imageSurfaceColor
 					radius: Theme.innerRadius
-					border.color: Theme.divider
+					border.color: root.imageBorderColor
+					border.width: root.imageBorderWidth
 					clip: true
 					activeFocusOnTab: safeHref.length > 0
 					Accessible.role: safeHref.length > 0 ? Accessible.Link : Accessible.Graphic
 					Accessible.name: accessibleLabel
+					Accessible.focused: activeFocus
 					Accessible.description: safeHref.length > 0
 						? qsTr("Press Enter to open this image link.") : ""
 					Accessible.onPressAction: {
@@ -243,16 +263,6 @@ Item {
 							event.accepted = true
 						}
 					}
-					TapHandler {
-						enabled: imageCard.safeHref.length > 0
-						acceptedButtons: Qt.LeftButton
-						onTapped: root.linkRequested(imageCard.safeHref)
-					}
-					HoverHandler {
-						enabled: imageCard.safeHref.length > 0
-						cursorShape: Qt.PointingHandCursor
-					}
-
 					Image {
 						id: inlineImage
 						objectName: "richMessageInlineImage_" + index
@@ -280,6 +290,30 @@ Item {
 						text: qsTr("Image unavailable")
 						color: Theme.textMuted
 						font.pixelSize: Theme.fontCaption
+					}
+
+					Rectangle {
+						objectName: "richMessageImageState_" + index
+						anchors.fill: parent
+						anchors.margins: root.imageBorderWidth
+						radius: Math.max(0, imageCard.radius - root.imageBorderWidth)
+						color: imagePointer.pressed ? Theme.accentSubtle
+							: imagePointer.containsMouse
+								? Qt.rgba(Theme.surfaceHover.r, Theme.surfaceHover.g, Theme.surfaceHover.b, 0.32)
+								: "transparent"
+						border.color: imageCard.activeFocus ? Theme.focus : "transparent"
+						border.width: imageCard.activeFocus ? Theme.focusRingWidth : 0
+						Behavior on color { ColorAnimation { duration: Theme.motionFast } }
+					}
+
+					MouseArea {
+						id: imagePointer
+						anchors.fill: parent
+						enabled: imageCard.safeHref.length > 0
+						hoverEnabled: true
+						acceptedButtons: Qt.LeftButton
+						cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+						onClicked: root.linkRequested(imageCard.safeHref)
 					}
 				}
 			}

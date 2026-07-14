@@ -6,6 +6,16 @@ ComboBox {
 	id: control
 	property bool invalid: false
 	property bool dense: false
+	function optionAt(index) {
+		if (index < 0 || !control.model)
+			return ({})
+		const option = control.model[index]
+		return option && typeof option === "object" ? option : ({})
+	}
+	function optionEnabled(index) {
+		const option = optionAt(index)
+		return option.enabled === undefined || Boolean(option.enabled)
+	}
 
 	Accessible.role: Accessible.ComboBox
 	hoverEnabled: true
@@ -16,12 +26,21 @@ ComboBox {
 
 	delegate: ItemDelegate {
 		required property int index
+		readonly property var option: control.optionAt(index)
+		readonly property string optionDescription: String(option.hint || option.unavailableReason || "")
+		hoverEnabled: true
 		width: ListView.view ? ListView.view.width : control.width
 		height: Theme.rowHeight
+		enabled: control.optionEnabled(index)
 		highlighted: control.highlightedIndex === index
+		Accessible.name: String(option.label || control.textAt(index))
+		Accessible.description: optionDescription
+		ToolTip.visible: hovered && optionDescription.length > 0
+		ToolTip.text: optionDescription
 		contentItem: Text {
 			text: control.textAt(index)
-			color: parent.highlighted ? Theme.textStrong : Theme.textMain
+			color: !parent.enabled ? Theme.textMuted
+				: parent.highlighted ? Theme.textStrong : Theme.textMain
 			font.pixelSize: Theme.fontBody
 			verticalAlignment: Text.AlignVCenter
 			elide: Text.ElideRight

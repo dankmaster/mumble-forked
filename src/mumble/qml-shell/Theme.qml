@@ -9,6 +9,7 @@ QtObject {
 	readonly property color surfaceRaised: uiTheme ? uiTheme.surfaceRaised : "#2e3742"
 	readonly property color surfaceHover: uiTheme ? uiTheme.surfaceHover : "#384453"
 	readonly property color surfaceBorder: uiTheme ? uiTheme.surfaceBorder : "#384453"
+	readonly property color mediaCanvas: uiTheme ? uiTheme.mediaCanvas : "#05070a"
     readonly property color rail: uiTheme ? uiTheme.rail : "#1b2027"
     readonly property color strip: uiTheme ? uiTheme.strip : "#14181f"
     readonly property color divider: uiTheme ? uiTheme.divider : "#12ffffff"

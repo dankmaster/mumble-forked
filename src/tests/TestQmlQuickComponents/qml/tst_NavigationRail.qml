@@ -11,14 +11,14 @@ TestCase {
 	visible: true
 
     ListModel {
-        id: rooms
+        id: navigationRows
 		dynamicRoles: true
 		Component.onCompleted: {
 			append({
 				"stableId": "room-lobby", "scopeToken": "channel:1", "title": "Lobby",
-				"subtitle": "Welcome", "kind": "voice", "selected": false,
-				"depth": 0, "unreadCount": 0,
-				"payload": { "joined": true, "canJoin": false, "badges": ["Pinned"],
+				"subtitle": "Welcome", "kind": "voice", "sectionKind": "voice", "selected": false,
+				"depth": 0, "unreadCount": 0, "status": "",
+				"payload": { "rowKind": "room", "joined": true, "canJoin": false, "badges": ["Pinned"],
 					"screenShare": { "visible": true, "mode": "publishing", "badgeLabel": "Live",
 						"badgeTone": "success", "primaryActionId": "screenShareOpenWindow",
 						"primaryLabel": "Manage share", "primaryEnabled": true, "primaryTone": "success" },
@@ -27,33 +27,12 @@ TestCase {
 				] } }
 			})
 			append({
-				"stableId": "room-games", "scopeToken": "channel:2", "title": "Games",
-				"subtitle": "Playing", "kind": "voice", "selected": false,
-				"depth": 0, "unreadCount": 0,
-				"payload": { "joined": false, "canJoin": true, "screenShare": { "visible": true,
-					"mode": "idle", "primaryActionId": "screenShareStart", "primaryEnabled": false },
-					"source": { "actions": [] } }
-			})
-			append({
-				"stableId": "room-activity", "scopeToken": "-2:0", "title": "Activity",
-				"subtitle": "Server notices", "kind": "text", "selected": false,
-				"depth": 0, "unreadCount": 0, "payload": { "source": { "actions": [] } }
-			})
-			append({
-				"stableId": "room-direct", "scopeToken": "-1:42", "title": "Alice",
-				"subtitle": "Direct message", "kind": "direct", "selected": false,
-				"depth": 0, "unreadCount": 1, "payload": { "source": { "actions": [] } }
-			})
-		}
-    }
-
-    ListModel {
-        id: participants
-		dynamicRoles: true
-		Component.onCompleted: {
-			append({
-				"stableId": "42", "title": "Alice", "subtitle": "Listening",
-				"status": "talking", "payload": { "participantSession": "42", "entryKind": "user",
+				"stableId": "user:42", "scopeToken": "channel:1", "title": "Alice", "subtitle": "Listening",
+				"kind": "participant", "sectionKind": "voice", "selected": false, "depth": 0, "unreadCount": 0,
+				"status": "talking", "payload": { "rowKind": "participant", "parentScopeToken": "channel:1",
+					"parentKind": "voice", "parentDepth": 0, "participantSession": "42", "entryKind": "user",
+					"actionsAvailable": true,
+					"avatarUrl": "image://mumble/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?g=7",
 					"talking": true, "talkTone": "speaking", "badges": ["Talking", "Priority"],
 					"localVolume": { "db": -6, "compactLabel": "-6", "label": "-6 dB", "visible": true },
 					"canJoin": true, "statuses": [
@@ -65,12 +44,36 @@ TestCase {
 				] } }
 			})
 			append({
-				"stableId": "listener:2:42", "title": "Alice", "subtitle": "Listening to Games",
-				"status": "passive", "payload": { "participantSession": "42", "entryKind": "listener",
-					"scopeToken": "channel:2", "badges": ["Listener"], "statuses": [
+				"stableId": "room-games", "scopeToken": "channel:2", "title": "Games",
+				"subtitle": "Playing", "kind": "voice", "sectionKind": "voice", "selected": false,
+				"depth": 0, "unreadCount": 0, "status": "",
+				"payload": { "rowKind": "room", "joined": false, "canJoin": true, "screenShare": { "visible": true,
+					"mode": "idle", "primaryActionId": "screenShareStart", "primaryEnabled": false },
+					"source": { "actions": [] } }
+			})
+			append({
+				"stableId": "listener:2:42", "scopeToken": "", "title": "Alice",
+				"subtitle": "Listening to Games", "kind": "participant", "sectionKind": "voice", "selected": false,
+				"depth": 0, "unreadCount": 0, "status": "passive",
+				"payload": { "rowKind": "participant", "parentScopeToken": "channel:2", "parentKind": "voice", "parentDepth": 0,
+					"participantSession": "42", "entryKind": "listener", "scopeToken": "channel:2",
+					"actionsAvailable": true,
+					"badges": ["Listener"], "statuses": [
 						{ "kind": "listener", "label": "Listener", "tone": "accent" }
 					], "source": { "session": "42", "entryKind": "listener", "scopeToken": "channel:2",
 						"actions": [{ "kind": "action", "id": "listener.remove", "label": "Remove listener" }] } }
+			})
+			append({
+				"stableId": "room-activity", "scopeToken": "-2:0", "title": "Activity",
+				"subtitle": "Server notices", "kind": "text", "sectionKind": "text", "selected": false,
+				"depth": 0, "unreadCount": 0, "status": "",
+				"payload": { "rowKind": "room", "source": { "actions": [] } }
+			})
+			append({
+				"stableId": "room-direct", "scopeToken": "-1:42", "title": "Alice",
+				"subtitle": "Direct message", "kind": "direct", "sectionKind": "direct", "selected": false,
+				"depth": 0, "unreadCount": 1, "status": "",
+				"payload": { "rowKind": "room", "source": { "actions": [] } }
 			})
 		}
     }
@@ -87,15 +90,20 @@ TestCase {
         property string selfStatusLabel: "Online"
         property bool connected: true
         property string selfName: "Tester"
-        property bool selfMuted: false
+		property bool selfMuted: false
 		property bool selfDeafened: false
+		property var selfMenu: ({
+			"avatarUrl": "image://mumble/abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789?g=8"
+		})
     }
 
     QtObject {
         id: commands
-        property string selectedScope: ""
+		property string selectedScope: ""
+		property string selectedRailKind: ""
         property string selectedParticipant: ""
 		property int selectScopeCount: 0
+		property int selectScopeFromRailCount: 0
 		property int joinVoiceCount: 0
 		property int selectParticipantCount: 0
 		property int directMessageCount: 0
@@ -110,9 +118,16 @@ TestCase {
 		property string scopeActionId: ""
 		property int participantActionCount: 0
 		property string participantActionId: ""
+		property int participantActionsRequestCount: 0
+		property string participantActionsRequestKey: ""
 		property int selfMuteToggleCount: 0
 		property int selfDeafToggleCount: 0
 		function selectScope(token) { selectedScope = token; ++selectScopeCount }
+		function selectScopeFromRail(token, kind) {
+			selectedScope = token
+			selectedRailKind = kind
+			++selectScopeFromRailCount
+		}
 		function joinVoiceChannel(token) { selectedScope = token; ++joinVoiceCount }
 		function invokeScopeActionValue(token, action, value, finalValue) {}
 		function selectParticipant(stableId) { selectedParticipant = stableId; ++selectParticipantCount }
@@ -139,6 +154,11 @@ TestCase {
 			++participantActionCount
 		}
 		function invokeParticipantActionValue(stableId, action, value, finalValue) {}
+		function requestParticipantActions(sessionId, entryKind, scopeToken) {
+			participantActionsRequestKey = sessionId + ":" + entryKind + ":" + scopeToken
+			++participantActionsRequestCount
+			return []
+		}
 		function toggleSelfMute() { ++selfMuteToggleCount }
 		function toggleSelfDeaf() { ++selfDeafToggleCount }
     }
@@ -148,8 +168,7 @@ TestCase {
         anchors.fill: parent
 		Component.onCompleted: {
 			setSource("qrc:/qml-shell/NavigationRail.qml", {
-				"roomModel": rooms,
-				"participantModel": participants,
+				"navigationModel": navigationRows,
 				"selectionState": selection,
 				"uiCommands": commands,
 				"clientSession": session,
@@ -189,18 +208,11 @@ TestCase {
 		// make the following pointer-drag assertion observe stale target state.
 		wait(0)
 		const roomList = findChild(loader.item, "navigationRooms")
-		const participantList = findChild(loader.item, "navigationParticipants")
 		if (roomList !== null) {
 			roomList.currentIndex = 0
 			roomList.positionViewAtBeginning()
 			roomList.positionViewAtIndex(0, ListView.Beginning)
 			roomList.forceLayout()
-		}
-		if (participantList !== null) {
-			participantList.currentIndex = 0
-			participantList.positionViewAtBeginning()
-			participantList.positionViewAtIndex(0, ListView.Beginning)
-			participantList.forceLayout()
 		}
 		wait(0)
         committedSpy.clear()
@@ -208,8 +220,10 @@ TestCase {
 		participantMenuSpy.clear()
 		profileMenuSpy.clear()
         commands.selectedScope = ""
+		commands.selectedRailKind = ""
         commands.selectedParticipant = ""
 		commands.selectScopeCount = 0
+		commands.selectScopeFromRailCount = 0
 		commands.joinVoiceCount = 0
 		commands.selectParticipantCount = 0
 		commands.directMessageCount = 0
@@ -224,6 +238,14 @@ TestCase {
 		commands.scopeActionId = ""
 		commands.participantActionCount = 0
 		commands.participantActionId = ""
+		commands.participantActionsRequestCount = 0
+		commands.participantActionsRequestKey = ""
+		selection.selectedUserSession = undefined
+		loader.item.activeScopeMenuToken = ""
+		loader.item.activeParticipantMenuKey = ""
+		const profile = findChild(loader.item, "profileMenuButton")
+		if (profile !== null)
+			profile.forceActiveFocus()
     }
 
 	function test_voice_room_return_selects_and_commits_navigation() {
@@ -232,7 +254,9 @@ TestCase {
 		room.forceActiveFocus()
 		keyClick(Qt.Key_Return)
         compare(commands.selectedScope, "channel:1")
-		compare(commands.selectScopeCount, 1)
+		compare(commands.selectedRailKind, "voice")
+		compare(commands.selectScopeFromRailCount, 1)
+		compare(commands.selectScopeCount, 0)
 		compare(commands.joinVoiceCount, 0)
         compare(committedSpy.count, 1)
     }
@@ -248,17 +272,28 @@ TestCase {
 		compare(committedSpy.count, 1)
 	}
 
+	function test_text_row_propagates_its_rail_kind() {
+		const room = findChild(loader.item, "navigationRoom_room-activity")
+		verify(room !== null)
+		room.forceActiveFocus()
+		keyClick(Qt.Key_Return)
+		compare(commands.selectedScope, "-2:0")
+		compare(commands.selectedRailKind, "text")
+		compare(commands.selectScopeFromRailCount, 1)
+		compare(commands.selectScopeCount, 0)
+		compare(committedSpy.count, 1)
+	}
+
 	function test_participant_return_selects_and_commits_navigation() {
-		const participantList = findChild(loader.item, "navigationParticipants")
-		verify(participantList !== null)
-		compare(participantList.count, 2)
-		tryVerify(function() { return participantList.height > 0 })
+		const navigationList = findChild(loader.item, "navigationRooms")
+		verify(navigationList !== null)
+		compare(navigationList.count, 6)
 		var participant = null
 		tryVerify(function() {
 			participant = findChild(loader.item, "navigationParticipant_42")
 			return participant !== null
 		})
-		participant.forceActiveFocus()
+		participant.focusRow()
 		keyClick(Qt.Key_Return)
         compare(commands.selectedParticipant, "42")
 		compare(commands.selectParticipantCount, 1)
@@ -272,7 +307,7 @@ TestCase {
 			participant = findChild(loader.item, "navigationParticipant_42")
 			return participant !== null
 		})
-		participant.forceActiveFocus()
+		participant.focusRow()
 		keyClick(Qt.Key_Space)
 		compare(commands.selectedParticipant, "42")
 		compare(commands.directMessageCount, 1)
@@ -289,13 +324,226 @@ TestCase {
 	}
 
 	function test_initial_focus_prefers_selected_room() {
-		rooms.setProperty(0, "selected", true)
+		navigationRows.setProperty(0, "selected", true)
 		loader.item.focusInitialItem()
 		tryVerify(function() {
 			const room = findChild(loader.item, "navigationRoom_room-lobby")
 			return room !== null && room.activeFocus
 		})
-		rooms.setProperty(0, "selected", false)
+		navigationRows.setProperty(0, "selected", false)
+	}
+
+	function test_initial_focus_prefers_selected_participant() {
+		selection.selectedUserSession = "42"
+		loader.item.focusInitialItem()
+		tryVerify(function() {
+			const participant = findChild(loader.item, "navigationParticipantSemantic_42")
+			return participant !== null && participant.activeFocus
+		})
+		const navigationList = findChild(loader.item, "navigationRooms")
+		compare(navigationList.currentIndex, 1)
+		selection.selectedUserSession = undefined
+	}
+
+	function test_navigation_rows_use_one_roving_tab_stop() {
+		const navigationList = findChild(loader.item, "navigationRooms")
+		const lobby = findChild(loader.item, "navigationRoom_room-lobby")
+		const participant = findChild(loader.item, "navigationParticipantSemantic_42")
+		const games = findChild(loader.item, "navigationRoom_room-games")
+		const activity = findChild(loader.item, "navigationRoom_room-activity")
+		const direct = findChild(loader.item, "navigationRoom_room-direct")
+		verify(navigationList !== null && lobby !== null && participant !== null)
+		verify(games !== null && activity !== null && direct !== null)
+
+		navigationList.currentIndex = 0
+		wait(0)
+		verify(navigationList.activeFocusOnTab)
+		verify(!lobby.activeFocusOnTab)
+		verify(!participant.activeFocusOnTab)
+		verify(!games.activeFocusOnTab)
+		verify(!activity.activeFocusOnTab)
+		verify(!direct.activeFocusOnTab)
+
+		for (const objectName of [
+			"navigationRoomShare_room-lobby", "navigationRoomActions_room-lobby",
+			"navigationParticipantJoin_42", "navigationParticipantActions_42",
+			"navigationRoomJoin_room-games", "navigationRoomActions_room-games"
+		]) {
+			const action = findChild(loader.item, objectName)
+			verify(action !== null, objectName)
+			verify(!action.activeFocusOnTab, objectName)
+		}
+
+		navigationList.currentIndex = 2
+		wait(0)
+		verify(!lobby.activeFocusOnTab)
+		verify(!participant.activeFocusOnTab)
+		verify(!games.activeFocusOnTab)
+		verify(!activity.activeFocusOnTab)
+		verify(!direct.activeFocusOnTab)
+	}
+
+	function test_arrow_keys_move_roving_focus_without_activating_rows() {
+		const navigationList = findChild(loader.item, "navigationRooms")
+		const lobby = findChild(loader.item, "navigationRoom_room-lobby")
+		const participant = findChild(loader.item, "navigationParticipantSemantic_42")
+		const games = findChild(loader.item, "navigationRoom_room-games")
+		verify(navigationList !== null && lobby !== null && participant !== null && games !== null)
+
+		lobby.focusRow()
+		compare(navigationList.currentIndex, 0)
+		keyClick(Qt.Key_Down)
+		tryCompare(navigationList, "currentIndex", 1)
+		tryCompare(participant, "activeFocus", true)
+		verify(navigationList.activeFocusOnTab)
+		verify(!participant.activeFocusOnTab)
+		verify(!lobby.activeFocusOnTab)
+
+		keyClick(Qt.Key_Down)
+		tryCompare(navigationList, "currentIndex", 2)
+		tryCompare(games, "activeFocus", true)
+		keyClick(Qt.Key_Up)
+		tryCompare(navigationList, "currentIndex", 1)
+		tryCompare(participant, "activeFocus", true)
+		compare(commands.selectScopeFromRailCount, 0)
+		compare(commands.selectParticipantCount, 0)
+		compare(commands.joinVoiceCount, 0)
+		compare(commands.directMessageCount, 0)
+		compare(committedSpy.count, 0)
+	}
+
+	function test_pointer_and_action_focus_synchronize_roving_index() {
+		const navigationList = findChild(loader.item, "navigationRooms")
+		const gamesMouse = findChild(loader.item, "navigationRoomMouse_room-games")
+		const activity = findChild(loader.item, "navigationRoom_room-activity")
+		const participantJoin = findChild(loader.item, "navigationParticipantJoin_42")
+		verify(navigationList !== null && gamesMouse !== null)
+		verify(activity !== null && participantJoin !== null)
+
+		mousePress(gamesMouse, gamesMouse.width / 2, gamesMouse.height / 2, Qt.LeftButton)
+		tryCompare(navigationList, "currentIndex", 2)
+		mouseRelease(gamesMouse, gamesMouse.width / 2, gamesMouse.height / 2, Qt.LeftButton)
+
+		activity.forceActiveFocus()
+		tryCompare(activity, "activeFocus", true)
+		tryCompare(navigationList, "currentIndex", 4)
+
+		const participant = findChild(loader.item, "navigationParticipantSemantic_42")
+		participant.forceActiveFocus()
+		tryCompare(participant, "activeFocus", true)
+		tryCompare(navigationList, "currentIndex", 1)
+		verify(navigationList.activeFocusOnTab)
+		verify(!participantJoin.activeFocusOnTab)
+	}
+
+	function test_list_tab_stop_routes_arrows_return_space_and_context() {
+		const navigationList = findChild(loader.item, "navigationRooms")
+		verify(navigationList !== null)
+		navigationList.currentIndex = 0
+		navigationList.forceActiveFocus(Qt.TabFocusReason)
+		tryCompare(navigationList, "activeFocus", true)
+		keyClick(Qt.Key_Down)
+		compare(navigationList.currentIndex, 1)
+		keyClick(Qt.Key_Return)
+		compare(commands.selectedParticipant, "42")
+		compare(commands.selectParticipantCount, 1)
+		compare(committedSpy.count, 1)
+
+		commands.selectedParticipant = ""
+		commands.directMessageCount = 0
+		committedSpy.clear()
+		keyClick(Qt.Key_Space)
+		compare(commands.selectedParticipant, "42")
+		compare(commands.directMessageCount, 1)
+		compare(committedSpy.count, 1)
+
+		participantMenuSpy.clear()
+		keyClick(Qt.Key_Menu)
+		compare(participantMenuSpy.count, 1)
+		compare(participantMenuSpy.signalArguments[0][0], "42")
+	}
+
+	function test_participants_are_flat_rows_under_multiple_voice_rooms() {
+		const navigationList = findChild(loader.item, "navigationRooms")
+		const room = findChild(loader.item, "navigationRoom_room-lobby")
+		const games = findChild(loader.item, "navigationRoom_room-games")
+		const alice = findChild(loader.item, "navigationParticipant_42")
+		const listener = findChild(loader.item, "navigationParticipant_listener:2:42")
+		const details = findChild(loader.item, "navigationRoomDetails_room-lobby")
+		verify(navigationList !== null && room !== null && games !== null)
+		verify(alice !== null && listener !== null && details !== null)
+		compare(navigationList.count, 6)
+		verify(alice.mapToItem(navigationList.contentItem, 0, 0).y
+			> room.mapToItem(navigationList.contentItem, 0, 0).y)
+		verify(alice.mapToItem(navigationList.contentItem, 0, 0).y
+			< games.mapToItem(navigationList.contentItem, 0, 0).y)
+		verify(listener.mapToItem(navigationList.contentItem, 0, 0).y
+			> games.mapToItem(navigationList.contentItem, 0, 0).y)
+		compare(alice.parentScopeToken, "channel:1")
+		compare(listener.parentScopeToken, "channel:2")
+		compare(alice.height, 31)
+		compare(alice.mapToItem(navigationList, 0, 0).x,
+			listener.mapToItem(navigationList, 0, 0).x)
+		compare(details.text, "You are here")
+		verify(String(room.color) !== String(Theme.selected))
+		verify(String(room.border.color) !== String(Theme.accent))
+	}
+
+	function test_only_open_conversation_uses_selected_purple() {
+		const activity = findChild(loader.item, "navigationRoom_room-activity")
+		const gamesDetails = findChild(loader.item, "navigationRoomDetails_room-games")
+		verify(activity !== null && gamesDetails !== null)
+		verify(!gamesDetails.visible)
+		navigationRows.setProperty(4, "selected", true)
+		tryCompare(activity, "color", Theme.selected)
+		compare(activity.border.color, Theme.accent)
+		navigationRows.setProperty(4, "selected", false)
+	}
+
+	function test_selected_participant_uses_selection_tokens() {
+		var participant = null
+		var semanticParticipant = null
+		tryVerify(function() {
+			participant = findChild(loader.item, "navigationParticipant_42")
+			semanticParticipant = findChild(loader.item, "navigationParticipantSemantic_42")
+			return participant !== null && semanticParticipant !== null
+		})
+		selection.selectedUserSession = "42"
+		tryCompare(participant, "color", Theme.selected)
+		compare(participant.border.color, Theme.accent)
+		compare(participant.border.width, 1)
+		verify(semanticParticipant.Accessible.selected)
+		compare(semanticParticipant.Accessible.role, Accessible.ListItem)
+		verify(participant.Accessible.ignored)
+		selection.selectedUserSession = undefined
+	}
+
+	function test_room_and_participant_press_override_selection_with_theme_token() {
+		const room = findChild(loader.item, "navigationRoom_room-lobby")
+		const roomMouse = findChild(loader.item, "navigationRoomMouse_room-lobby")
+		var participant = null
+		tryVerify(function() {
+			participant = findChild(loader.item, "navigationParticipant_42")
+			return participant !== null
+		})
+		const participantMouse = findChild(loader.item, "navigationParticipantMouse_42")
+		verify(room !== null && roomMouse !== null && participantMouse !== null)
+
+		navigationRows.setProperty(0, "selected", true)
+		tryCompare(room, "color", Theme.selected)
+		mousePress(roomMouse, roomMouse.width / 2, roomMouse.height / 2, Qt.LeftButton)
+		tryCompare(room, "color", Theme.accentSubtle)
+		mouseRelease(roomMouse, roomMouse.width / 2, roomMouse.height / 2, Qt.LeftButton)
+		navigationRows.setProperty(0, "selected", false)
+
+		selection.selectedUserSession = "42"
+		tryCompare(participant, "color", Theme.selected)
+		mousePress(participantMouse, participantMouse.width / 2,
+			participantMouse.height / 2, Qt.LeftButton)
+		tryCompare(participant, "color", Theme.accentSubtle)
+		mouseRelease(participantMouse, participantMouse.width / 2,
+			participantMouse.height / 2, Qt.LeftButton)
+		selection.selectedUserSession = undefined
 	}
 
 	function test_sections_and_keyboard_focus_are_visually_explicit() {
@@ -306,19 +554,41 @@ TestCase {
 		verify(voiceSection !== null)
 		verify(textSection !== null)
 		verify(directSection !== null)
-		compare(voiceSection.Accessible.name, "VOICE ROOMS")
-		compare(textSection.Accessible.name, "TEXT & ACTIVITY")
-		compare(directSection.Accessible.name, "DIRECT MESSAGES")
+		compare(voiceSection.Accessible.name, "VOICE ROOMS · 2")
+		compare(textSection.Accessible.name, "TEXT & ACTIVITY · 1")
+		compare(directSection.Accessible.name, "DIRECT MESSAGES · 1")
+		for (const kind of [ "voice", "text", "direct" ]) {
+			const visualLabel = findChild(loader.item, "navigationSectionLabel_" + kind)
+			verify(visualLabel !== null)
+			verify(visualLabel.Accessible.ignored)
+		}
 
 		const room = findChild(loader.item, "navigationRoom_room-lobby")
 		const participant = findChild(loader.item, "navigationParticipant_42")
-		verify(room !== null && participant !== null)
+		const semanticParticipant = findChild(loader.item, "navigationParticipantSemantic_42")
+		verify(room !== null && participant !== null && semanticParticipant !== null)
+		const roomTitle = findChild(loader.item, "navigationRoomTitle_room-lobby")
+		const roomDetails = findChild(loader.item, "navigationRoomDetails_room-lobby")
+		const participantTitle = findChild(loader.item, "navigationParticipantTitle_42")
+		const participantDetails = findChild(loader.item, "navigationParticipantDetails_42")
+		verify(roomTitle !== null && roomDetails !== null)
+		verify(participantTitle !== null && participantDetails !== null)
+		verify(roomTitle.Accessible.ignored)
+		verify(roomDetails.Accessible.ignored)
+		verify(participantTitle.Accessible.ignored)
+		verify(participantDetails.Accessible.ignored)
+		verify(room.Accessible.description.indexOf("You are here") >= 0)
+		verify(room.Accessible.description.indexOf("Pinned") >= 0)
+		verify(room.Accessible.description.indexOf("Live") >= 0)
+		verify(semanticParticipant.Accessible.description.indexOf("Talking") >= 0)
+		verify(semanticParticipant.Accessible.description.indexOf("Muted") >= 0)
+		verify(semanticParticipant.Accessible.description.indexOf("Local volume -6 dB") >= 0)
 		room.forceActiveFocus()
 		tryCompare(room, "activeFocus", true)
 		compare(room.border.width, Theme.focusRingWidth)
 		compare(room.border.color, Theme.focus)
-		participant.forceActiveFocus()
-		tryCompare(participant, "activeFocus", true)
+		semanticParticipant.forceActiveFocus()
+		tryCompare(semanticParticipant, "activeFocus", true)
 		compare(participant.border.width, Theme.focusRingWidth)
 		compare(participant.border.color, Theme.focus)
 	}
@@ -343,12 +613,16 @@ TestCase {
 			participant = findChild(loader.item, "navigationParticipant_42")
 			return participant !== null
 		})
-		participant.forceActiveFocus()
+		participant.focusRow()
 		keyClick(Qt.Key_Menu)
 		compare(participantMenuSpy.count, 1)
 		compare(participantMenuSpy.signalArguments[0][0], "42")
 		compare(participantMenuSpy.signalArguments[0][1][0].id, "message")
 		compare(participantMenuSpy.signalArguments[0][3], "user")
+		compare(participantMenuSpy.signalArguments[0][4], "channel:1")
+		compare(participantMenuSpy.signalArguments[0][5], "user:42")
+		compare(commands.participantActionsRequestCount, 1)
+		compare(commands.participantActionsRequestKey, "42:user:channel:1")
 		compare(commands.selectedParticipant, "")
 		compare(commands.selectParticipantCount, 0)
 		compare(committedSpy.count, 0)
@@ -358,7 +632,8 @@ TestCase {
 		const room = findChild(loader.item, "navigationRoom_room-lobby")
 		verify(room !== null)
 		commands.selectedScope = "channel:2"
-		mouseClick(room, room.width / 2, room.height / 2, Qt.RightButton)
+		mouseClick(room, room.width / 2,
+			room.sectionHeaderHeight + room.roomRowHeight / 2, Qt.RightButton)
 		compare(scopeMenuSpy.count, 1)
 		compare(scopeMenuSpy.signalArguments[0][0], "channel:1")
 		compare(commands.selectedScope, "channel:2")
@@ -366,30 +641,90 @@ TestCase {
 	}
 
 	function test_room_join_share_live_badge_and_actions_are_visible() {
+		const room = findChild(loader.item, "navigationRoom_room-lobby")
+		const games = findChild(loader.item, "navigationRoom_room-games")
 		const joined = findChild(loader.item, "navigationRoomJoined_room-lobby")
 		const liveBadge = findChild(loader.item, "navigationRoomShareBadge_room-lobby")
 		const share = findChild(loader.item, "navigationRoomShare_room-lobby")
 		const actions = findChild(loader.item, "navigationRoomActions_room-lobby")
 		const join = findChild(loader.item, "navigationRoomJoin_room-games")
+		const profile = findChild(loader.item, "profileMenuButton")
+		verify(profile !== null)
+		profile.forceActiveFocus()
+		tryCompare(profile, "activeFocus", true)
+		mouseMove(loader.item, loader.item.width - 2, 2)
+		wait(0)
 		verify(joined !== null && joined.visible)
 		verify(liveBadge !== null && liveBadge.visible)
 		verify(share !== null && share.visible && share.enabled)
-		verify(actions !== null && actions.visible)
-		verify(join !== null && join.visible && join.enabled)
-
-		mouseClick(share, share.width / 2, share.height / 2, Qt.LeftButton)
-		compare(commands.scopeActionCount, 1)
-		compare(commands.scopeActionId, "screenShareOpenWindow")
-		compare(commands.selectedScope, "channel:1")
+		verify(room !== null && games !== null && actions !== null && join !== null)
+		verify(actions.visible)
+		verify(join.visible)
+		verify(join.contentItem.Accessible.ignored)
+		compare(join.Accessible.name, "Join")
+		verify(share.contentItem.Accessible.ignored)
+		compare(share.Accessible.name, "Live")
+		tryCompare(actions, "opacity", 0.72)
+		tryCompare(join, "opacity", 0.52)
+		room.forceActiveFocus()
+		tryCompare(room, "activeFocus", true)
+		tryCompare(actions, "opacity", 1)
+		share.forceActiveFocus()
+		tryCompare(share, "activeFocus", true)
+		compare(share.background.border.color, Theme.focus)
+		compare(share.background.border.width, Theme.focusRingWidth)
+		games.forceActiveFocus()
+		tryCompare(games, "activeFocus", true)
+		verify(join.visible && join.enabled)
+		tryCompare(join, "opacity", 1)
+		join.forceActiveFocus()
+		tryCompare(join, "activeFocus", true)
+		compare(join.background.border.color, Theme.focus)
 
 		commands.selectedScope = ""
 		mouseClick(join, join.width / 2, join.height / 2, Qt.LeftButton)
 		compare(commands.joinVoiceCount, 1)
 		compare(commands.selectedScope, "channel:2")
+
+		room.forceActiveFocus()
+		tryCompare(room, "activeFocus", true)
+		share.forceActiveFocus()
+		tryCompare(share, "activeFocus", true)
+		mouseClick(share, share.width / 2, share.height / 2, Qt.LeftButton)
+		compare(commands.scopeActionCount, 1)
+		compare(commands.scopeActionId, "screenShareOpenWindow")
+		compare(commands.selectedScope, "channel:1")
+	}
+
+	function test_open_context_menu_keeps_its_anchor_actions_visible() {
+		const profile = findChild(loader.item, "profileMenuButton")
+		const roomActions = findChild(loader.item, "navigationRoomActions_room-lobby")
+		const participantActions = findChild(loader.item, "navigationParticipantActions_42")
+		verify(profile !== null && roomActions !== null && participantActions !== null)
+		profile.forceActiveFocus()
+		tryCompare(profile, "activeFocus", true)
+		mouseMove(loader.item, loader.item.width - 2, 2)
+		wait(0)
+		verify(roomActions.visible)
+		verify(participantActions.visible)
+		compare(roomActions.opacity, 0.72)
+		compare(participantActions.opacity, 0.72)
+
+		loader.item.activeScopeMenuToken = "channel:1"
+		loader.item.activeParticipantMenuKey = "user:42"
+		tryCompare(roomActions, "opacity", 1)
+		tryCompare(participantActions, "opacity", 1)
+
+		loader.item.activeScopeMenuToken = ""
+		loader.item.activeParticipantMenuKey = ""
+		verify(roomActions.visible)
+		verify(participantActions.visible)
 	}
 
 	function test_participant_renders_avatar_talk_mute_deafen_badges_volume_and_actions() {
+		const participant = findChild(loader.item, "navigationParticipant_42")
 		const avatar = findChild(loader.item, "navigationParticipantAvatar_42")
+		const avatarImage = findChild(loader.item, "navigationParticipantAvatarImage_42")
 		const talk = findChild(loader.item, "navigationParticipantTalk_42")
 		const muted = findChild(loader.item, "navigationParticipantStatus_42_selfMuted")
 		const deafened = findChild(loader.item, "navigationParticipantStatus_42_selfDeafened")
@@ -397,7 +732,14 @@ TestCase {
 		const details = findChild(loader.item, "navigationParticipantDetails_42")
 		const actions = findChild(loader.item, "navigationParticipantActions_42")
 		const join = findChild(loader.item, "navigationParticipantJoin_42")
+		verify(participant !== null)
+		participant.focusRow()
 		verify(avatar !== null && avatar.visible)
+		verify(avatarImage !== null)
+		compare(String(avatarImage.source),
+			"image://mumble/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?g=7")
+		compare(avatarImage.sourceSize.width, 52)
+		compare(avatarImage.sourceSize.height, 52)
 		verify(talk !== null && talk.visible)
 		verify(muted !== null && muted.visible)
 		verify(deafened !== null && deafened.visible)
@@ -406,10 +748,55 @@ TestCase {
 		verify(String(details.text).indexOf("Talking") >= 0)
 		verify(actions !== null && actions.visible)
 		verify(join !== null && join.visible)
+		verify(join.contentItem.Accessible.ignored)
+		compare(join.Accessible.name, "Join")
+		join.forceActiveFocus()
+		tryCompare(join, "activeFocus", true)
+		compare(join.background.border.color, Theme.focus)
 		mouseClick(join, join.width / 2, join.height / 2, Qt.LeftButton)
 		compare(commands.participantActionCount, 1)
 		compare(commands.participantActionId, "join")
 		compare(commands.selectedParticipant, "42")
+	}
+
+	function test_source_only_action_capability_and_missing_talk_state_stay_correct() {
+		const previousPayload = navigationRows.get(1).payload
+		const previousStatus = navigationRows.get(1).status
+		navigationRows.setProperty(1, "status", "")
+		navigationRows.setProperty(1, "payload", {
+			"rowKind": "participant", "parentScopeToken": "channel:1",
+			"participantSession": "42", "entryKind": "user", "talking": false,
+			"canJoin": false, "actions": [],
+			"source": { "session": "42", "entryKind": "user",
+				"actionsAvailable": true, "actions": [] }
+		})
+		wait(0)
+		const participant = findChild(loader.item, "navigationParticipant_42")
+		const actions = findChild(loader.item, "navigationParticipantActions_42")
+		verify(participant !== null && actions !== null)
+		compare(participant.talking, false)
+		verify(actions.visible)
+
+		navigationRows.setProperty(1, "payload", previousPayload)
+		navigationRows.setProperty(1, "status", previousStatus)
+		wait(0)
+	}
+
+	function test_avatar_sources_accept_only_managed_or_inline_images() {
+		const managed = "image://mumble/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef?g=9"
+		compare(loader.item.safeAvatarSource(managed), managed)
+		compare(loader.item.safeAvatarSource("data:image/png;base64,AAAA"), "data:image/png;base64,AAAA")
+		compare(loader.item.safeAvatarSource("image://other/avatar"), "")
+		compare(loader.item.safeAvatarSource("https://example.com/avatar.png"), "")
+
+		const selfAvatar = findChild(loader.item, "selfAvatar")
+		const selfAvatarImage = findChild(loader.item, "selfAvatarImage")
+		verify(selfAvatar !== null && selfAvatarImage !== null)
+		compare(selfAvatar.avatarSource,
+			"image://mumble/abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789?g=8")
+		compare(String(selfAvatarImage.source), selfAvatar.avatarSource)
+		compare(selfAvatarImage.sourceSize.width, 68)
+		compare(selfAvatarImage.sourceSize.height, 68)
 	}
 
 	function test_listener_row_keeps_stable_identity_and_scope_actions_without_selection() {
@@ -419,7 +806,7 @@ TestCase {
 		const listener = findChild(loader.item, "navigationParticipant_listener:2:42")
 		const status = findChild(loader.item, "navigationParticipantStatus_listener:2:42_listener")
 		verify(status !== null && status.visible)
-		listener.forceActiveFocus()
+		listener.focusRow()
 		keyClick(Qt.Key_Return)
 		compare(commands.selectParticipantCount, 0)
 		keyClick(Qt.Key_Menu)
@@ -427,6 +814,9 @@ TestCase {
 		compare(participantMenuSpy.signalArguments[0][0], "42")
 		compare(participantMenuSpy.signalArguments[0][3], "listener")
 		compare(participantMenuSpy.signalArguments[0][4], "channel:2")
+		compare(participantMenuSpy.signalArguments[0][5], "listener:2:42")
+		compare(commands.participantActionsRequestCount, 1)
+		compare(commands.participantActionsRequestKey, "42:listener:channel:2")
 	}
 
 	function test_profile_button_requests_accessible_profile_menu() {
@@ -460,9 +850,12 @@ TestCase {
 			participantItem = findChild(loader.item, "navigationParticipant_42")
 			return participantItem !== null
 		})
-		mouseClick(roomItem, roomItem.width / 2, roomItem.height / 2, Qt.LeftButton)
+		mouseClick(roomItem, roomItem.width / 2,
+			roomItem.sectionHeaderHeight + roomItem.roomRowHeight / 2, Qt.LeftButton)
 		compare(commands.selectedScope, "channel:1")
-		compare(commands.selectScopeCount, 1)
+		compare(commands.selectedRailKind, "voice")
+		compare(commands.selectScopeFromRailCount, 1)
+		compare(commands.selectScopeCount, 0)
 		mouseClick(participantItem, participantItem.width / 2, participantItem.height / 2, Qt.LeftButton)
 		compare(commands.selectedParticipant, "42")
 		compare(commands.selectParticipantCount, 1)
@@ -476,11 +869,12 @@ TestCase {
 			participant = findChild(loader.item, "navigationParticipant_42")
 			return participant !== null
 		})
-		participant.forceActiveFocus()
+		participant.focusRow()
 		wait(0)
 		const startX = participant.width / 2
 		const startY = participant.height / 2
-		const target = participant.mapFromItem(room, room.width / 2, room.height / 2)
+		const target = participant.mapFromItem(room, room.width / 2,
+			room.sectionHeaderHeight + room.roomRowHeight / 2)
 		mouseDrag(participant, startX, startY, target.x - startX, target.y - startY,
 			Qt.LeftButton, Qt.NoModifier, 20)
 		tryCompare(commands, "movedParticipant", "42")
@@ -496,18 +890,16 @@ TestCase {
 		})
 		const mouse = findChild(participant, "navigationParticipantMouse_42")
 		verify(mouse !== null)
-		const startX = participant.width / 2
-		const startY = participant.height / 2
-		mousePress(participant, startX, startY, Qt.LeftButton)
+		mousePress(mouse, mouse.width / 2, mouse.height / 2, Qt.LeftButton)
 		compare(mouse.dragSourceStableId, "42")
-		participants.setProperty(0, "stableId", "84")
+		navigationRows.setProperty(1, "stableId", "user:84")
 		wait(0)
-		compare(participant.stableId, "84")
+		compare(participant.stableId, "user:84")
 		compare(mouse.dragSourceStableId, "42")
 		mouse.clearDragSnapshot()
-		mouseRelease(participant, startX, startY, Qt.LeftButton)
-		participants.setProperty(0, "stableId", "42")
-		tryCompare(participant, "stableId", "42")
+		mouseRelease(mouse, mouse.width / 2, mouse.height / 2, Qt.LeftButton)
+		navigationRows.setProperty(1, "stableId", "user:42")
+		tryCompare(participant, "stableId", "user:42")
 		wait(0)
 		compare(commands.movedParticipant, "")
 		compare(commands.participantMoveTarget, "")
@@ -523,12 +915,13 @@ TestCase {
 		const mouse = findChild(source, "navigationRoomMouse_room-lobby")
 		verify(mouse !== null)
 		const startX = source.width / 2
-		const startY = source.height / 2
-		const target = source.mapFromItem(targetRoom, targetRoom.width / 2, targetRoom.height / 2)
+		const startY = source.sectionHeaderHeight + source.roomRowHeight / 2
+		const target = source.mapFromItem(targetRoom, targetRoom.width / 2,
+			targetRoom.sectionHeaderHeight + targetRoom.roomRowHeight / 2)
 
 		mousePress(source, startX, startY, Qt.LeftButton)
 		compare(mouse.dragSourceScopeToken, "channel:1")
-		rooms.setProperty(0, "scopeToken", "channel:99")
+		navigationRows.setProperty(0, "scopeToken", "channel:99")
 		wait(0)
 		compare(source.scopeToken, "channel:99")
 		compare(mouse.dragSourceScopeToken, "channel:1")
@@ -538,7 +931,7 @@ TestCase {
 		compare(commands.scopeMoveTarget, "channel:2")
 		compare(commands.scopeMoveCount, 1)
 		compare(mouse.dragSourceScopeToken, "")
-		rooms.setProperty(0, "scopeToken", "channel:1")
+		navigationRows.setProperty(0, "scopeToken", "channel:1")
 	}
 
 	function test_drag_snapshot_clears_when_delegate_is_reused_or_cancelled() {
@@ -553,17 +946,17 @@ TestCase {
 		verify(roomMouse !== null)
 		verify(participantMouse !== null)
 
-		mousePress(room, room.width / 2, room.height / 2, Qt.LeftButton)
+		mousePress(roomMouse, roomMouse.width / 2, roomMouse.height / 2, Qt.LeftButton)
 		compare(roomMouse.dragSourceScopeToken, "channel:1")
 		roomMouse.clearDragSnapshot()
 		compare(roomMouse.dragSourceScopeToken, "")
-		mouseRelease(room, room.width / 2, room.height / 2, Qt.LeftButton)
+		mouseRelease(roomMouse, roomMouse.width / 2, roomMouse.height / 2, Qt.LeftButton)
 
-		mousePress(participant, participant.width / 2, participant.height / 2, Qt.LeftButton)
+		mousePress(participantMouse, participantMouse.width / 2, participantMouse.height / 2, Qt.LeftButton)
 		compare(participantMouse.dragSourceStableId, "42")
 		participantMouse.clearDragSnapshot()
 		compare(participantMouse.dragSourceStableId, "")
-		mouseRelease(participant, participant.width / 2, participant.height / 2, Qt.LeftButton)
+		mouseRelease(participantMouse, participantMouse.width / 2, participantMouse.height / 2, Qt.LeftButton)
 	}
 
 	function test_stable_participant_drop_routes_without_model_index() {

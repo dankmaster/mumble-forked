@@ -4,11 +4,13 @@ Modern custom themes are versioned JSON token manifests. They contain data only:
 
 Themes are loaded from the bundled and profile `ModernThemes` directories. The app ships `catppuccin-nord.mumble-theme.json` as an example and copies it to a new profile theme directory without overwriting user files.
 
+The built-in catalog contains Dark, Light, Mocha, Macchiato, Frappe, Latte, Nord, and Gruvbox. Accent choices are Auto, Teal, Blue, Violet, Amber, Rose, and Custom. Auto keeps the accent from the selected theme; every other choice replaces the accent, hover, subtle-selection, and focus roles as one consistent family.
+
 ## Install a theme
 
-1. Open **Settings > Appearance > Custom themes > Open folder**.
+1. Open **Settings > Appearance > Custom theme folder > Open folder**.
 2. Copy a `*.mumble-theme.json` file into the folder.
-3. Reopen Settings and select the theme.
+3. Click **Reload themes**, then select the theme from its preview card.
 
 The selected ID remains local to the profile. Existing IDs use the `custom:<id>` form and do not change during the JSON migration.
 
@@ -45,6 +47,8 @@ The selected ID remains local to the profile. Existing IDs use the `custom:<id>`
 ```
 
 `formatVersion`, `id`, `name`, and all palette entries are required. `appearance` is `dark` or `light`. Colors use formats accepted by `QColor`; `#AARRGGBB` preserves alpha. Radii are clamped to 0–64 and spacing to 0–48.
+
+These roles feed the whole Modern UI contract: window and panel surfaces, native and QML title bars, dialogs, menus, tooltips, form controls, selection/focus/disabled states, text, links, and semantic success/warning/error colors. A complete manifest therefore never needs component-specific selectors.
 
 Bundled manifests live under `src/mumble/themes/`.
 

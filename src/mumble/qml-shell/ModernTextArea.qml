@@ -13,7 +13,7 @@ TextArea {
 	topPadding: Theme.space3
 	bottomPadding: Theme.space3
 	font.pixelSize: Theme.fontBody
-	color: Theme.textStrong
+	color: control.enabled ? Theme.textStrong : Theme.textMuted
 	placeholderTextColor: Theme.textMuted
 	selectionColor: Theme.accentSubtle
 	selectedTextColor: Theme.textStrong

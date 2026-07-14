@@ -6,6 +6,7 @@
 #ifndef MUMBLE_MUMBLE_MODERNSETTINGSCONTROLLER_H_
 #define MUMBLE_MUMBLE_MODERNSETTINGSCONTROLLER_H_
 
+#include "ModernTheme.h"
 #include "Settings.h"
 
 #include <QtCore/QString>
@@ -20,6 +21,7 @@ public:
 		bool closeDialog  = false;
 		std::optional< Settings > settingsToApply;
 		bool accepted = false;
+		bool announceApply = true;
 		QString externalActionID;
 		QVariantMap externalActionPayload;
 	};
@@ -39,14 +41,22 @@ public:
 private:
 	Settings m_original;
 	Settings m_draft;
+	QList< Mumble::ModernTheme::ThemeDefinition > m_modernThemeCatalog;
 	QString m_activePage = QStringLiteral("look");
 	int m_shortcutCaptureIndex = -1;
+	std::optional< Settings::AudioTransmit > m_voiceReplayPreviousTransmitMode;
+	std::optional< Settings::LoopMode > m_voiceReplayPreviousLoopMode;
+	std::optional< float > m_voiceReplayPreviousPacketLoss;
+	std::optional< float > m_voiceReplayPreviousMaxPacketDelay;
+	bool m_runtimePreviewDiffersFromOriginal = false;
 
 	QVariantList pages() const;
 	QVariantList sectionsForActivePage() const;
 	void setActivePage(const QString &pageID);
+	void refreshModernThemeCatalog();
 	void forceModernLayout();
 	void refreshShortcutRestartFlag();
+	void restoreVoiceReplayDraft();
 };
 
 #endif // MUMBLE_MUMBLE_MODERNSETTINGSCONTROLLER_H_

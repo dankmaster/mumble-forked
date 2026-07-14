@@ -21,6 +21,7 @@ class ClientSessionController;
 class DialogStateController;
 class MediaSessionBackend;
 class ManualPluginController;
+class NavigationRailModel;
 class ParticipantModel;
 enum class PttSafetyReason;
 class PttSafetyController;
@@ -50,6 +51,7 @@ public:
 	ActiveScopeController *activeScopeController() const;
 	UiCommandController *commandController() const;
 	RoomModel *roomModel() const;
+	NavigationRailModel *navigationModel() const;
 	ParticipantModel *participantModel() const;
 	ChatTimelineModel *chatModel() const;
 	ComposerController *composerController() const;
@@ -101,6 +103,7 @@ private:
 	std::unique_ptr< UiCommandController > m_commandController;
 	std::unique_ptr< PttSafetyController > m_pttSafetyController;
 	std::unique_ptr< RoomModel > m_roomModel;
+	std::unique_ptr< NavigationRailModel > m_navigationModel;
 	std::unique_ptr< ParticipantModel > m_participantModel;
 	std::unique_ptr< ChatTimelineModel > m_chatModel;
 	std::unique_ptr< AsyncOperationModel > m_operationModel;

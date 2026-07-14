@@ -19,12 +19,14 @@ private slots:
 	void synchronizeRowsUsesIncrementalSignals();
 	void largeSynchronizationsStayResetFree();
 	void roomAndParticipantStatesStayIncremental();
+	void navigationRailFlattensRoomsAndParticipantsIncrementally();
 	void roomRowsExposeActionsOnlySource();
 	void participantRowsPreserveTypedVoiceStateAndListenerIdentity();
 	void directMessageHistoryMergePublishesOnce();
 	void stableIdsRemainIndependentFromSourceMaps();
 	void messageRolesExposeStructuredState();
 	void chatTimelineAppliesDirectIncrementalMessages();
+	void chatTimelineTracksUserHistory();
 	void chatTimelineReplacesDisjointScopesWithoutMixedRows();
 	void chatTimelinePreservesTypedAttachments();
 	void chatTimelineBoundsReactionDelegates();
@@ -117,16 +119,20 @@ void TestQmlClientModels::visualFixtureOverrideRejectsLiveMutations() {
 	ClientSessionController session;
 	ActiveScopeController scope;
 	RoomModel rooms;
+	NavigationRailModel navigation;
 	ParticipantModel participants;
 	ChatTimelineModel chat;
 	AsyncOperationModel operations;
 	DialogStateController dialog;
-	const QList< QObject * > guarded { &session, &scope, &rooms, &participants, &chat, &operations, &dialog };
+	const QList< QObject * > guarded {
+		&session, &scope, &rooms, &navigation, &participants, &chat, &operations, &dialog
+	};
 	for (QObject *object : guarded) object->setProperty(QmlVisualFixtureMutation::OverrideProperty, true);
 
 	session.setServerName(QStringLiteral("live"));
 	scope.setLabel(QStringLiteral("live"));
 	rooms.replaceRoomStates({ QVariantMap { { QStringLiteral("token"), QStringLiteral("live") } } }, {});
+	navigation.replaceRoomStates({ QVariantMap { { QStringLiteral("token"), QStringLiteral("live") } } }, {});
 	participants.replaceParticipantStates({ QVariantMap { { QStringLiteral("session"), QStringLiteral("1") } } });
 	chat.replaceMessages({ QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("live") } } });
 	operations.startOperation(QStringLiteral("live"), QStringLiteral("live"), {}, false);
@@ -134,6 +140,7 @@ void TestQmlClientModels::visualFixtureOverrideRejectsLiveMutations() {
 	QCOMPARE(session.serverName(), QStringLiteral("Mumble"));
 	QVERIFY(scope.label().isEmpty());
 	QCOMPARE(rooms.rowCount(), 0);
+	QCOMPARE(navigation.rowCount(), 0);
 	QCOMPARE(participants.rowCount(), 0);
 	QCOMPARE(chat.rowCount(), 0);
 	QCOMPARE(operations.rowCount(), 0);
@@ -144,6 +151,13 @@ void TestQmlClientModels::visualFixtureOverrideRejectsLiveMutations() {
 	scope.setLabel(QStringLiteral("fixture"));
 	rooms.replaceRoomStates({ QVariantMap { { QStringLiteral("token"), QStringLiteral("fixture") },
 												{ QStringLiteral("label"), QStringLiteral("Fixture") } } }, {});
+	navigation.replaceRoomStates({ QVariantMap { { QStringLiteral("token"), QStringLiteral("fixture") },
+											 { QStringLiteral("label"), QStringLiteral("Fixture") },
+											 { QStringLiteral("participants"),
+											   QVariantList { QVariantMap {
+												   { QStringLiteral("session"), QStringLiteral("2") },
+												   { QStringLiteral("name"), QStringLiteral("Fixture") },
+												   { QStringLiteral("talkState"), QStringLiteral("passive") } } } } } }, {});
 	participants.replaceParticipantStates({ QVariantMap { { QStringLiteral("session"), QStringLiteral("2") },
 														 { QStringLiteral("name"), QStringLiteral("Fixture") } } });
 	chat.replaceMessages({ QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("fixture") },
@@ -155,8 +169,10 @@ void TestQmlClientModels::visualFixtureOverrideRejectsLiveMutations() {
 	QCOMPARE(session.serverName(), QStringLiteral("fixture"));
 	QCOMPARE(scope.label(), QStringLiteral("fixture"));
 	QCOMPARE(rooms.rowCount(), 1);
+	QCOMPARE(navigation.rowCount(), 2);
 	QCOMPARE(participants.rowCount(), 1);
 	QCOMPARE(chat.rowCount(), 2);
+	QVERIFY(chat.hasUserHistory());
 	QCOMPARE(operations.rowCount(), 1);
 	QVERIFY(dialog.open());
 	QCOMPARE(dialog.dialogId(), QStringLiteral("fixture"));
@@ -164,8 +180,17 @@ void TestQmlClientModels::visualFixtureOverrideRejectsLiveMutations() {
 	for (QObject *object : guarded) object->setProperty(QmlVisualFixtureMutation::WriteProperty, false);
 	session.setServerName(QStringLiteral("clobber"));
 	rooms.clear();
+	navigation.clear();
+	navigation.updatePresence(QStringLiteral("2"), QStringLiteral("talking"), QStringLiteral("Talking"),
+							  QStringLiteral("success"), true, false, {}, {});
+	navigation.removeParticipant(QStringLiteral("2"));
+	QVERIFY(!chat.removeMessage(QStringLiteral("fixture")));
 	QCOMPARE(session.serverName(), QStringLiteral("fixture"));
 	QCOMPARE(rooms.rowCount(), 1);
+	QCOMPARE(navigation.rowCount(), 2);
+	QCOMPARE(navigation.get(1).value(QStringLiteral("status")).toString(), QStringLiteral("passive"));
+	QCOMPARE(chat.rowCount(), 2);
+	QVERIFY(chat.hasUserHistory());
 }
 
 void TestQmlClientModels::stableRowsUpdateWithoutReset() {
@@ -400,6 +425,20 @@ void TestQmlClientModels::roomAndParticipantStatesStayIncremental() {
 	QVERIFY(rooms.get(2).value(QStringLiteral("selected")).toBool());
 	QCOMPARE(roomResetSpy.count(), 0);
 
+	RoomModel railRooms;
+	railRooms.replaceRoomStates(
+		{ QVariantMap { { QStringLiteral("token"), QStringLiteral("channel:1") },
+						{ QStringLiteral("label"), QStringLiteral("Lobby") } } },
+		{ QVariantMap { { QStringLiteral("token"), QStringLiteral("channel:1") },
+						{ QStringLiteral("label"), QStringLiteral("Lobby chat") },
+						{ QStringLiteral("selected"), true } } });
+	railRooms.selectScopeFromRail(QStringLiteral(" channel:1 "), QStringLiteral(" Voice "));
+	QVERIFY(railRooms.get(0).value(QStringLiteral("selected")).toBool());
+	QVERIFY(!railRooms.get(1).value(QStringLiteral("selected")).toBool());
+	railRooms.selectScopeFromRail(QStringLiteral("channel:1"), QStringLiteral("text"));
+	QVERIFY(!railRooms.get(0).value(QStringLiteral("selected")).toBool());
+	QVERIFY(railRooms.get(1).value(QStringLiteral("selected")).toBool());
+
 	ParticipantModel participants;
 	QSignalSpy participantResetSpy(&participants, &QAbstractItemModel::modelReset);
 	QSignalSpy participantChangedSpy(&participants, &QAbstractItemModel::dataChanged);
@@ -464,6 +503,75 @@ void TestQmlClientModels::roomRowsExposeActionsOnlySource() {
 						{ QStringLiteral("windows"), QVariantList { QStringLiteral("hidden") } } } });
 	const QVariantMap directSource = rooms.get(1).value(QStringLiteral("source")).toMap();
 	QVERIFY(directSource.isEmpty());
+}
+
+void TestQmlClientModels::navigationRailFlattensRoomsAndParticipantsIncrementally() {
+	NavigationRailModel navigation;
+	QSignalSpy resetSpy(&navigation, &QAbstractItemModel::modelReset);
+	QSignalSpy changedSpy(&navigation, &QAbstractItemModel::dataChanged);
+	const QVariantMap listenerStatus { { QStringLiteral("kind"), QStringLiteral("listener") },
+		{ QStringLiteral("label"), QStringLiteral("Listener") },
+		{ QStringLiteral("tone"), QStringLiteral("accent") } };
+	navigation.replaceRoomStates(
+		{ QVariantMap { { QStringLiteral("token"), QStringLiteral("channel:1") },
+						{ QStringLiteral("label"), QStringLiteral("Lobby") },
+						{ QStringLiteral("participants"), QVariantList {
+							QVariantMap { { QStringLiteral("session"), 42 },
+								{ QStringLiteral("participantKey"), QStringLiteral("user:42") },
+								{ QStringLiteral("label"), QStringLiteral("Alice") },
+								{ QStringLiteral("talkState"), QStringLiteral("passive") } },
+							QVariantMap { { QStringLiteral("session"), 77 },
+								{ QStringLiteral("participantKey"), QStringLiteral("listener:1:77") },
+								{ QStringLiteral("entryKind"), QStringLiteral("listener") },
+								{ QStringLiteral("label"), QStringLiteral("Bob") },
+								{ QStringLiteral("badges"), QVariantList { QStringLiteral("Listener") } },
+								{ QStringLiteral("statuses"), QVariantList { listenerStatus } } }
+						} } },
+		  QVariantMap { { QStringLiteral("token"), QStringLiteral("channel:2") },
+						{ QStringLiteral("label"), QStringLiteral("Games") },
+						{ QStringLiteral("participants"), QVariantList { QVariantMap {
+							{ QStringLiteral("session"), 7 },
+							{ QStringLiteral("participantKey"), QStringLiteral("user:7") },
+							{ QStringLiteral("label"), QStringLiteral("Carol") } } } } } },
+		{ QVariantMap { { QStringLiteral("token"), QStringLiteral("-2:0") },
+						{ QStringLiteral("label"), QStringLiteral("Activity") } } });
+
+	QCOMPARE(navigation.rowCount(), 6);
+	QCOMPARE(navigation.get(0).value(QStringLiteral("id")).toString(), QStringLiteral("voice:channel:1"));
+	QCOMPARE(navigation.get(1).value(QStringLiteral("id")).toString(), QStringLiteral("user:42"));
+	QCOMPARE(navigation.get(1).value(QStringLiteral("parentScopeToken")).toString(),
+			 QStringLiteral("channel:1"));
+	QCOMPARE(navigation.get(2).value(QStringLiteral("id")).toString(), QStringLiteral("listener:1:77"));
+	QCOMPARE(navigation.get(3).value(QStringLiteral("id")).toString(), QStringLiteral("voice:channel:2"));
+	QCOMPARE(navigation.get(4).value(QStringLiteral("id")).toString(), QStringLiteral("user:7"));
+	QCOMPARE(navigation.get(5).value(QStringLiteral("sectionKind")).toString(), QStringLiteral("text"));
+	QCOMPARE(resetSpy.count(), 0);
+
+	changedSpy.clear();
+	navigation.updatePresence(QStringLiteral("77"), QStringLiteral("talking"), QStringLiteral("Talking"),
+		QStringLiteral("speaking"), true, false, { QStringLiteral("Talking") },
+		{ QVariantMap { { QStringLiteral("kind"), QStringLiteral("talking") },
+						{ QStringLiteral("label"), QStringLiteral("Talking") } } });
+	const QVariantMap listener = navigation.get(2);
+	QVERIFY(listener.value(QStringLiteral("talking")).toBool());
+	QVERIFY(listener.value(QStringLiteral("badges")).toList().contains(QStringLiteral("Listener")));
+	QCOMPARE(listener.value(QStringLiteral("statuses")).toList().constFirst().toMap()
+			 .value(QStringLiteral("kind")).toString(), QStringLiteral("listener"));
+	QVERIFY(changedSpy.count() > 0);
+	QCOMPARE(resetSpy.count(), 0);
+
+	navigation.selectScopeFromRail(QStringLiteral("channel:2"), QStringLiteral("voice"));
+	QVERIFY(!navigation.get(0).value(QStringLiteral("selected")).toBool());
+	QVERIFY(navigation.get(2).value(QStringLiteral("talking")).toBool());
+	QCOMPARE(navigation.get(2).value(QStringLiteral("talkLabel")).toString(), QStringLiteral("Talking"));
+	QVERIFY(navigation.get(3).value(QStringLiteral("selected")).toBool());
+	navigation.removeParticipant(QStringLiteral("42"));
+	QCOMPARE(navigation.rowForStableId(QStringLiteral("user:42")), -1);
+	QCOMPARE(navigation.rowCount(), 5);
+	navigation.selectScopeFromRail(QStringLiteral("channel:1"), QStringLiteral("voice"));
+	QCOMPARE(navigation.rowForStableId(QStringLiteral("user:42")), -1);
+	QCOMPARE(navigation.rowCount(), 5);
+	QCOMPARE(resetSpy.count(), 0);
 }
 
 void TestQmlClientModels::participantRowsPreserveTypedVoiceStateAndListenerIdentity() {
@@ -694,6 +802,56 @@ void TestQmlClientModels::chatTimelineAppliesDirectIncrementalMessages() {
 	QCOMPARE(resetSpy.count(), 0);
 }
 
+void TestQmlClientModels::chatTimelineTracksUserHistory() {
+	ChatTimelineModel model;
+	QSignalSpy historySpy(&model, &ChatTimelineModel::hasUserHistoryChanged);
+	QVERIFY(!model.hasUserHistory());
+
+	model.upsertMessage({ { QStringLiteral("messageId"), QStringLiteral("100") },
+						  { QStringLiteral("bodyText"), QStringLiteral("Connected") },
+						  { QStringLiteral("system"), true } });
+	QVERIFY(!model.hasUserHistory());
+	QCOMPARE(historySpy.count(), 0);
+
+	model.upsertMessage({ { QStringLiteral("messageId"), QStringLiteral("101") },
+						  { QStringLiteral("bodyText"), QStringLiteral("Hello") } });
+	QVERIFY(model.hasUserHistory());
+	QCOMPARE(historySpy.count(), 1);
+
+	model.upsertMessage({ { QStringLiteral("messageId"), QStringLiteral("101") },
+						  { QStringLiteral("deleted"), true } });
+	QVERIFY(!model.hasUserHistory());
+	QCOMPARE(historySpy.count(), 2);
+
+	model.replaceMessages({
+		QVariantMap { { QStringLiteral("messageId"), QStringLiteral("102") },
+					  { QStringLiteral("system"), true } },
+		QVariantMap { { QStringLiteral("messageId"), QStringLiteral("103") },
+					  { QStringLiteral("bodyText"), QStringLiteral("History") } }
+	});
+	QVERIFY(model.hasUserHistory());
+	QCOMPARE(historySpy.count(), 3);
+
+	model.appendMessages({ QVariantMap { { QStringLiteral("messageId"), QStringLiteral("104") },
+										 { QStringLiteral("bodyText"), QStringLiteral("More") } } });
+	QVERIFY(model.removeMessage(QStringLiteral("103")));
+	QVERIFY(model.hasUserHistory());
+	QCOMPARE(historySpy.count(), 3);
+	QVERIFY(model.removeMessage(QStringLiteral("104")));
+	QVERIFY(!model.hasUserHistory());
+	QCOMPARE(historySpy.count(), 4);
+
+	model.replaceMessages({
+		QVariantMap { { QStringLiteral("messageId"), QStringLiteral("105") },
+					  { QStringLiteral("bodyText"), QStringLiteral("Superseded") } },
+		QVariantMap { { QStringLiteral("messageId"), QStringLiteral("105") },
+					  { QStringLiteral("system"), true } }
+	});
+	QCOMPARE(model.rowCount(), 1);
+	QVERIFY(!model.hasUserHistory());
+	QCOMPARE(historySpy.count(), 4);
+}
+
 void TestQmlClientModels::chatTimelineReplacesDisjointScopesWithoutMixedRows() {
 	ChatTimelineModel model;
 	model.replaceMessages({
@@ -709,6 +867,9 @@ void TestQmlClientModels::chatTimelineReplacesDisjointScopesWithoutMixedRows() {
 					  { QStringLiteral("bodyText"), QStringLiteral("Last direct message") } }
 	});
 	QCOMPARE(model.rowCount(), 3);
+	QVERIFY(!model.get(0).value(QStringLiteral("own")).toBool());
+	QVERIFY(model.get(1).value(QStringLiteral("own")).toBool());
+	QVERIFY(!model.get(2).value(QStringLiteral("own")).toBool());
 
 	QSignalSpy resetSpy(&model, &QAbstractItemModel::modelReset);
 	QSignalSpy removeSpy(&model, &QAbstractItemModel::rowsRemoved);
@@ -1636,9 +1797,7 @@ void TestQmlClientModels::sessionDerivesTypedMotdState() {
 	session.setMotdDismissedSignature(signature);
 	QVERIFY(session.motdDismissed());
 	QCOMPARE(dismissedSpy.count(), 1);
-	QCOMPARE(session.motdActions().size(), 1);
-	QCOMPARE(session.motdActions().at(0).toMap().value(QStringLiteral("id")).toString(),
-			 QStringLiteral("motd.restore"));
+	QVERIFY(session.motdActions().isEmpty());
 	session.setMotdLastSeenSignature(signature);
 	QVERIFY(!session.motdChanged());
 
@@ -1777,6 +1936,7 @@ void TestQmlClientModels::commandsRouteTypedAppActions() {
 void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	UiCommandController commands;
 	QSignalSpy scopeSpy(&commands, &UiCommandController::scopeSelectionRequested);
+	QSignalSpy railScopeSpy(&commands, &UiCommandController::scopeRailSelectionRequested);
 	QSignalSpy actionSpy(&commands, &UiCommandController::actionRequested);
 	QSignalSpy participantSpy(&commands, &UiCommandController::participantSelectionRequested);
 	QSignalSpy directMessageSpy(&commands, &UiCommandController::directMessageOpenRequested);
@@ -1788,6 +1948,7 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	QSignalSpy attachmentSpy(&commands, &UiCommandController::attachmentChooseRequested);
 	QSignalSpy olderSpy(&commands, &UiCommandController::olderMessagesRequested);
 	commands.selectScope(QStringLiteral("   "));
+	commands.selectScopeFromRail(QStringLiteral("   "), QStringLiteral("voice"));
 	commands.invokeAction(QString());
 	commands.selectParticipant(QStringLiteral("  "));
 	commands.openDirectMessage(QString());
@@ -1798,6 +1959,7 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	commands.deleteMessage(QString());
 	commands.toggleMessageReaction(QStringLiteral("message:1"), QString());
 	QCOMPARE(scopeSpy.count(), 0);
+	QCOMPARE(railScopeSpy.count(), 0);
 	QCOMPARE(actionSpy.count(), 0);
 	QCOMPARE(participantSpy.count(), 0);
 	QCOMPARE(directMessageSpy.count(), 0);
@@ -1806,6 +1968,7 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	QCOMPARE(deleteSpy.count(), 0);
 	QCOMPARE(reactionSpy.count(), 0);
 	commands.selectScope(QStringLiteral(" channel:42 "));
+	commands.selectScopeFromRail(QStringLiteral(" channel:42 "), QStringLiteral(" Voice "));
 	commands.invokeAction(QStringLiteral(" qaAudioMute "));
 	commands.selectParticipant(QStringLiteral(" 42 "));
 	commands.openDirectMessage(QStringLiteral(" 7 "));
@@ -1817,6 +1980,9 @@ void TestQmlClientModels::commandsRejectEmptyStableIds() {
 	commands.chooseAttachment();
 	commands.requestOlderMessages();
 	QCOMPARE(scopeSpy.takeFirst().at(0).toString(), QStringLiteral("channel:42"));
+	const QList< QVariant > railSelection = railScopeSpy.takeFirst();
+	QCOMPARE(railSelection.at(0).toString(), QStringLiteral("channel:42"));
+	QCOMPARE(railSelection.at(1).toString(), QStringLiteral("voice"));
 	QCOMPARE(actionSpy.takeFirst().at(0).toString(), QStringLiteral("qaAudioMute"));
 	QCOMPARE(participantSpy.takeFirst().at(0).toString(), QStringLiteral("42"));
 	QCOMPARE(directMessageSpy.takeFirst().at(0).toString(), QStringLiteral("7"));
@@ -1879,6 +2045,28 @@ void TestQmlClientModels::commandsRequestScopeActionsLazily() {
 	QCOMPARE(requestedKind, QStringLiteral("voice"));
 	QCOMPARE(actions.size(), 1);
 	QCOMPARE(actions.constFirst().toMap().value(QStringLiteral("id")).toString(), QStringLiteral("join"));
+
+	int participantProviderCalls = 0;
+	QString requestedParticipant;
+	QString requestedEntryKind;
+	commands.setParticipantActionsProvider(
+		[&](const QString &sessionId, const QString &entryKind, const QString &scopeToken) {
+			++participantProviderCalls;
+			requestedParticipant = sessionId;
+			requestedEntryKind = entryKind;
+			requestedScope = scopeToken;
+			return QVariantList { QVariantMap { { QStringLiteral("id"), QStringLiteral("message") } } };
+		});
+	QVERIFY(commands.requestParticipantActions(QString(), QStringLiteral("user"),
+		QStringLiteral("channel:42")).isEmpty());
+	QCOMPARE(participantProviderCalls, 0);
+	const QVariantList participantActions = commands.requestParticipantActions(
+		QStringLiteral(" 7 "), QStringLiteral(" Listener "), QStringLiteral(" channel:42 "));
+	QCOMPARE(participantProviderCalls, 1);
+	QCOMPARE(requestedParticipant, QStringLiteral("7"));
+	QCOMPARE(requestedEntryKind, QStringLiteral("listener"));
+	QCOMPARE(requestedScope, QStringLiteral("channel:42"));
+	QCOMPARE(participantActions.size(), 1);
 }
 
 void TestQmlClientModels::commandsValidateStableMoveIds() {
@@ -2769,6 +2957,9 @@ void TestQmlClientModels::mediaSessionProviderAllowlist() {
 			QStringLiteral("dailymotion") }.contains(canonicalProvider);
 		QCOMPARE(media.playbackControllable(), controllable);
 		QCOMPARE(media.supportsSynchronizedPlayback(canonicalProvider), controllable);
+		media.reportLoadProgress(100);
+		QCOMPARE(media.loadProgress(), 100);
+		QCOMPARE(media.state(), controllable ? QStringLiteral("loading") : QStringLiteral("ready"));
 	}
 	if (!allowed) {
 		QCOMPARE(media.state(), QStringLiteral("error"));

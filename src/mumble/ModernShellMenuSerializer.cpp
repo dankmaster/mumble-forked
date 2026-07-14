@@ -136,6 +136,12 @@ QVariantList ModernShellMenuSerializer::serializeActions(const QList< QAction * 
 		if (definition.id.trimmed().isEmpty()) {
 			continue;
 		}
+		if (!definition.available) {
+			continue;
+		}
+		if (definition.omitWhenDisabled && !action->isEnabled()) {
+			continue;
+		}
 
 		if (registry) {
 			RegistryEntry entry;

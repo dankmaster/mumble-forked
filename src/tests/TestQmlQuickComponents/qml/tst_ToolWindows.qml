@@ -1,5 +1,6 @@
 import QtQuick
 import QtTest
+import Mumble.Theme 1.0
 
 TestCase {
     id: testCase
@@ -15,6 +16,77 @@ TestCase {
         verify(tool !== null, component.errorString())
         return tool
     }
+
+	function verifyThemePalette(target) {
+		verify(target !== null)
+		compare(target.palette.window, Theme.shellBackground)
+		compare(target.palette.base, Theme.surfaceRaised)
+		compare(target.palette.alternateBase, Theme.panel)
+		compare(target.palette.button, Theme.surfaceRaised)
+		compare(target.palette.text, Theme.textMain)
+		compare(target.palette.windowText, Theme.textMain)
+		compare(target.palette.buttonText, Theme.textStrong)
+		compare(target.palette.brightText, Theme.textStrong)
+		compare(target.palette.highlight, Theme.accent)
+		compare(target.palette.highlightedText, Theme.contrastText(Theme.accent))
+		compare(target.palette.placeholderText, Theme.textMuted)
+		compare(target.palette.light, Theme.surfaceHover)
+		compare(target.palette.midlight, Theme.surfaceRaised)
+		compare(target.palette.mid, Theme.surfaceBorder)
+		compare(target.palette.dark, Theme.rail)
+		compare(target.palette.shadow, Theme.strip)
+		compare(target.palette.link, Theme.accent)
+		compare(target.palette.linkVisited, Theme.accentHover)
+		compare(target.palette.toolTipBase, Theme.surfaceRaised)
+		compare(target.palette.toolTipText, Theme.textStrong)
+		const disabledProbe = Qt.createQmlObject(
+			'import QtQuick.Controls; Control { enabled: false }', target.contentItem)
+		verify(disabledProbe !== null)
+		compare(disabledProbe.palette.window, Theme.shellBackground)
+		compare(disabledProbe.palette.base, Theme.panel)
+		compare(disabledProbe.palette.alternateBase, Theme.panel)
+		compare(disabledProbe.palette.button, Theme.panel)
+		compare(disabledProbe.palette.text, Theme.textMuted)
+		compare(disabledProbe.palette.windowText, Theme.textMuted)
+		compare(disabledProbe.palette.buttonText, Theme.textMuted)
+		compare(disabledProbe.palette.brightText, Theme.textMuted)
+		compare(disabledProbe.palette.highlight, Theme.surfaceBorder)
+		compare(disabledProbe.palette.highlightedText, Theme.textMuted)
+		compare(disabledProbe.palette.placeholderText, Theme.textMuted)
+		compare(disabledProbe.palette.light, Theme.surfaceBorder)
+		compare(disabledProbe.palette.midlight, Theme.panel)
+		compare(disabledProbe.palette.mid, Theme.divider)
+		compare(disabledProbe.palette.dark, Theme.rail)
+		compare(disabledProbe.palette.shadow, Theme.strip)
+		compare(disabledProbe.palette.link, Theme.textMuted)
+		compare(disabledProbe.palette.linkVisited, Theme.textMuted)
+		compare(disabledProbe.palette.toolTipBase, Theme.panel)
+		compare(disabledProbe.palette.toolTipText, Theme.textMuted)
+		disabledProbe.destroy()
+	}
+
+	function test_standaloneWindowsExposeCompleteThemePalette() {
+		dialogState.setSpecialState("imageViewer", {
+			"imageViewer": { "src": "", "width": 1, "height": 1 }
+		})
+		const tools = [
+			createTool("qrc:/qml-shell/PttToolWindow.qml"),
+			createTool("qrc:/qml-shell/ManualPluginWindow.qml"),
+			createTool("qrc:/qml-shell/AttachmentViewer.qml", {
+				"attachment": { "url": "", "alt": "Palette fixture" }
+			}),
+			createTool("qrc:/qml-shell/ImageViewer.qml", {
+				"controller": dialogState
+			})
+		]
+		try {
+			for (const tool of tools)
+				verifyThemePalette(tool)
+		} finally {
+			for (const tool of tools)
+				tool.destroy()
+		}
+	}
 
     function test_pttToolReleasesWhenHidden() {
         uiCommands.clearCounts()
@@ -206,11 +278,15 @@ TestCase {
 				"Manual Plugin actions must stay visible inside the persistent footer")
 		}
 		const flickable = scroll.contentItem
-		flickable.contentY = Math.max(0, flickable.contentHeight - flickable.height)
-		wait(0)
+		tryVerify(function() {
+			flickable.contentY = Math.max(0, flickable.contentHeight - flickable.height)
+			return endPadding.mapToItem(tool.contentItem, 0, endPadding.height).y <= footer.y
+		})
 		const endBottom = endPadding.mapToItem(tool.contentItem, 0, endPadding.height).y
 		verify(endBottom <= footer.y,
-			"Manual Plugin's final body content must remain reachable above the footer")
+			"Manual Plugin's final body content must remain reachable above the footer: end="
+				+ endBottom + ", footer=" + footer.y + ", contentY=" + flickable.contentY
+				+ ", contentHeight=" + flickable.contentHeight + ", height=" + flickable.height)
 		resetButton.clicked()
 		compare(manualPlugin.resetCount, 1)
 		tryCompare(status, "visible", true)

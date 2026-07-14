@@ -6,6 +6,63 @@ import Mumble.Theme 1.0
 
 ApplicationWindow {
     id: mediaWindow
+	readonly property string mediaAspect: inferMediaAspect()
+
+	palette.window: Theme.shellBackground
+	palette.active.base: Theme.surfaceRaised
+	palette.inactive.base: Theme.surfaceRaised
+	palette.alternateBase: Theme.panel
+	palette.active.button: Theme.surfaceRaised
+	palette.inactive.button: Theme.surfaceRaised
+	palette.active.text: Theme.textMain
+	palette.inactive.text: Theme.textMain
+	palette.active.windowText: Theme.textMain
+	palette.inactive.windowText: Theme.textMain
+	palette.active.buttonText: Theme.textStrong
+	palette.inactive.buttonText: Theme.textStrong
+	palette.active.brightText: Theme.textStrong
+	palette.inactive.brightText: Theme.textStrong
+	palette.active.highlight: Theme.accent
+	palette.inactive.highlight: Theme.accent
+	palette.active.highlightedText: Theme.contrastText(Theme.accent)
+	palette.inactive.highlightedText: Theme.contrastText(Theme.accent)
+	palette.placeholderText: Theme.textMuted
+	palette.active.light: Theme.surfaceHover
+	palette.inactive.light: Theme.surfaceHover
+	palette.active.midlight: Theme.surfaceRaised
+	palette.inactive.midlight: Theme.surfaceRaised
+	palette.active.mid: Theme.surfaceBorder
+	palette.inactive.mid: Theme.surfaceBorder
+	palette.dark: Theme.rail
+	palette.shadow: Theme.strip
+	palette.active.link: Theme.accent
+	palette.inactive.link: Theme.accent
+	palette.active.linkVisited: Theme.accentHover
+	palette.inactive.linkVisited: Theme.accentHover
+	palette.active.toolTipBase: Theme.surfaceRaised
+	palette.inactive.toolTipBase: Theme.surfaceRaised
+	palette.active.toolTipText: Theme.textStrong
+	palette.inactive.toolTipText: Theme.textStrong
+	palette.disabled.window: Theme.shellBackground
+	palette.disabled.base: Theme.panel
+	palette.disabled.alternateBase: Theme.panel
+	palette.disabled.button: Theme.panel
+	palette.disabled.text: Theme.textMuted
+	palette.disabled.windowText: Theme.textMuted
+	palette.disabled.buttonText: Theme.textMuted
+	palette.disabled.brightText: Theme.textMuted
+	palette.disabled.highlight: Theme.surfaceBorder
+	palette.disabled.highlightedText: Theme.textMuted
+	palette.disabled.placeholderText: Theme.textMuted
+	palette.disabled.light: Theme.surfaceBorder
+	palette.disabled.midlight: Theme.panel
+	palette.disabled.mid: Theme.divider
+	palette.disabled.dark: Theme.rail
+	palette.disabled.shadow: Theme.strip
+	palette.disabled.link: Theme.textMuted
+	palette.disabled.linkVisited: Theme.textMuted
+	palette.disabled.toolTipBase: Theme.panel
+	palette.disabled.toolTipText: Theme.textMuted
     visible: mediaSession.active
     width: 1040
     height: 700
@@ -15,7 +72,10 @@ ApplicationWindow {
            ? mediaSession.sharedTitle
            : qsTr("Media session")
     color: Theme.shellBackground
-	Component.onCompleted: Qt.callLater(controls.focusInitialControl)
+	Component.onCompleted: {
+		applyInitialWindowSize()
+		Qt.callLater(controls.focusInitialControl)
+	}
     onClosing: function(close) {
 		// Closing a shared player must never implicitly leave or end the session.
 		// Keep the window alive while the user chooses the intended disposition;
@@ -77,6 +137,63 @@ ApplicationWindow {
 		return /^https:\/\//i.test(value) ? value : ""
 	}
 
+	function inferMediaAspect() {
+		const provider = String(mediaSession.provider || "").trim().toLowerCase()
+		const url = String(mediaSession.url || "").trim().toLowerCase()
+		if (provider.indexOf("tiktok") >= 0 || url.indexOf("tiktok.com/") >= 0)
+			return "short"
+		if (provider.indexOf("instagram") >= 0 || url.indexOf("instagram.com/") >= 0)
+			return /\/reels?(?:\/|$)/.test(url) ? "short" : "square"
+		if (provider.indexOf("spotify") >= 0 || url.indexOf("spotify.com/") >= 0)
+			return /\/(?:track|episode)(?:\/|\?|$)/.test(url) ? "compact-audio" : "audio"
+		if (provider.indexOf("soundcloud") >= 0 || url.indexOf("soundcloud.com/") >= 0)
+			return "compact-audio"
+		if (provider.indexOf("twitch") >= 0 || url.indexOf("twitch.tv/") >= 0)
+			return "twitch"
+		return "wide"
+	}
+
+	function applyInitialWindowSize() {
+		if (mediaAspect === "short") {
+			width = 640
+			height = 820
+		} else if (mediaAspect === "square") {
+			width = 760
+			height = 760
+		} else if (mediaAspect === "audio") {
+			width = 820
+			height = 520
+		} else if (mediaAspect === "compact-audio") {
+			width = 820
+			height = 420
+		} else {
+			width = 1040
+			height = 700
+		}
+	}
+
+	function fittedMediaWidth(availableWidth, availableHeight) {
+		if (availableWidth <= 0 || availableHeight <= 0)
+			return 0
+		if (mediaAspect === "audio" || mediaAspect === "compact-audio")
+			return availableWidth
+		const ratio = mediaAspect === "short" ? 9 / 16
+			: mediaAspect === "square" ? 1 : 16 / 9
+		return Math.min(availableWidth, availableHeight * ratio)
+	}
+
+	function fittedMediaHeight(availableWidth, availableHeight) {
+		if (availableWidth <= 0 || availableHeight <= 0)
+			return 0
+		if (mediaAspect === "audio")
+			return Math.min(availableHeight, Math.min(352, Math.max(220, availableWidth * 0.61)))
+		if (mediaAspect === "compact-audio")
+			return Math.min(availableHeight, Math.min(166, Math.max(128, availableWidth * 0.29)))
+		const ratio = mediaAspect === "short" ? 9 / 16
+			: mediaAspect === "square" ? 1 : 16 / 9
+		return fittedMediaWidth(availableWidth, availableHeight) / ratio
+	}
+
 	function withAlpha(color, alpha) {
 		return Qt.rgba(color.r, color.g, color.b, alpha)
 	}
@@ -106,11 +223,26 @@ ApplicationWindow {
 		onActivated: mediaWindow.setFullscreen(false)
 	}
 
+	Rectangle {
+		id: playerCanvas
+		objectName: "mediaSessionCanvas"
+		anchors.left: parent.left
+		anchors.right: parent.right
+		anchors.top: parent.top
+		anchors.bottom: controls.top
+		color: Theme.mediaCanvas
+		clip: true
+	}
+
     Loader {
         id: playerLoader
-        anchors.fill: parent
-        anchors.bottomMargin: controls.height
-        active: mediaSession.active && mediaSession.playbackControllable
+		objectName: "mediaSessionWebSurface"
+		parent: playerCanvas
+		width: mediaWindow.fittedMediaWidth(playerCanvas.width, playerCanvas.height)
+		height: mediaWindow.fittedMediaHeight(playerCanvas.width, playerCanvas.height)
+		x: Math.round((playerCanvas.width - width) / 2)
+		y: Math.round((playerCanvas.height - height) / 2)
+        active: mediaSession.active
         sourceComponent: WebEngineView {
             id: player
 			property int missingStatePolls: 0
@@ -256,10 +388,11 @@ ApplicationWindow {
     }
 
 	Rectangle {
+		parent: playerCanvas
 		anchors.fill: playerLoader
-		visible: mediaSession.active && mediaSession.playbackControllable
-			&& mediaSession.state === "loading" && mediaSession.error.length === 0
-		color: mediaWindow.withAlpha(Theme.strip, 0.9)
+		visible: mediaSession.active && mediaSession.state === "loading"
+			&& mediaSession.error.length === 0
+		color: mediaWindow.withAlpha(Theme.mediaCanvas, 0.94)
 		z: 4
 		Accessible.role: Accessible.AlertMessage
 		Accessible.name: qsTr("Loading media")
@@ -299,14 +432,14 @@ ApplicationWindow {
 	}
 
     Rectangle {
+		parent: playerCanvas
         anchors.fill: playerLoader
-        visible: mediaSession.error.length > 0 || (mediaSession.active && !mediaSession.playbackControllable)
-		color: mediaWindow.withAlpha(Theme.shellBackground, 0.85)
+		visible: mediaSession.error.length > 0
+		color: mediaWindow.withAlpha(Theme.mediaCanvas, 0.9)
         z: 5
 		Accessible.role: Accessible.AlertMessage
 		Accessible.name: qsTr("Media playback failed")
-		Accessible.description: mediaSession.error.length > 0 ? mediaSession.error
-			: qsTr("This provider cannot be synchronized in-app. Open it in your browser instead.")
+		Accessible.description: mediaSession.error
 
         ColumnLayout {
             anchors.centerIn: parent
@@ -325,8 +458,7 @@ ApplicationWindow {
             Label {
 				textFormat: Text.PlainText
                 Layout.fillWidth: true
-				text: mediaSession.error.length > 0 ? mediaSession.error
-					: qsTr("This provider cannot be synchronized in-app. Open it in your browser instead.")
+				text: mediaSession.error
                 color: Theme.textMuted
                 wrapMode: Text.Wrap
                 horizontalAlignment: Text.AlignHCenter
@@ -334,7 +466,7 @@ ApplicationWindow {
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
 				spacing: Theme.space2
-				ModernButton { visible: mediaSession.playbackControllable; text: qsTr("Retry"); onClicked: mediaSession.retry() }
+				ModernButton { text: qsTr("Retry"); onClicked: mediaSession.retry() }
 				ModernButton {
 					visible: mediaWindow.externalMediaUrl().length > 0
 					text: qsTr("Open externally")

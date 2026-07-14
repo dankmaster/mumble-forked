@@ -4,12 +4,68 @@ import QtQuick.Layouts
 import QtQuick.Window
 import Mumble.Theme 1.0
 
-Window {
+ApplicationWindow {
 	id: tool
 
 	readonly property bool compactLayout: width < 640
 	readonly property var speakerRows: manualPlugin.speakers || []
 	property string statusMessage: ""
+
+	palette.window: Theme.shellBackground
+	palette.active.base: Theme.surfaceRaised
+	palette.inactive.base: Theme.surfaceRaised
+	palette.alternateBase: Theme.panel
+	palette.active.button: Theme.surfaceRaised
+	palette.inactive.button: Theme.surfaceRaised
+	palette.active.text: Theme.textMain
+	palette.inactive.text: Theme.textMain
+	palette.active.windowText: Theme.textMain
+	palette.inactive.windowText: Theme.textMain
+	palette.active.buttonText: Theme.textStrong
+	palette.inactive.buttonText: Theme.textStrong
+	palette.active.brightText: Theme.textStrong
+	palette.inactive.brightText: Theme.textStrong
+	palette.active.highlight: Theme.accent
+	palette.inactive.highlight: Theme.accent
+	palette.active.highlightedText: Theme.contrastText(Theme.accent)
+	palette.inactive.highlightedText: Theme.contrastText(Theme.accent)
+	palette.placeholderText: Theme.textMuted
+	palette.active.light: Theme.surfaceHover
+	palette.inactive.light: Theme.surfaceHover
+	palette.active.midlight: Theme.surfaceRaised
+	palette.inactive.midlight: Theme.surfaceRaised
+	palette.active.mid: Theme.surfaceBorder
+	palette.inactive.mid: Theme.surfaceBorder
+	palette.dark: Theme.rail
+	palette.shadow: Theme.strip
+	palette.active.link: Theme.accent
+	palette.inactive.link: Theme.accent
+	palette.active.linkVisited: Theme.accentHover
+	palette.inactive.linkVisited: Theme.accentHover
+	palette.active.toolTipBase: Theme.surfaceRaised
+	palette.inactive.toolTipBase: Theme.surfaceRaised
+	palette.active.toolTipText: Theme.textStrong
+	palette.inactive.toolTipText: Theme.textStrong
+	palette.disabled.window: Theme.shellBackground
+	palette.disabled.base: Theme.panel
+	palette.disabled.alternateBase: Theme.panel
+	palette.disabled.button: Theme.panel
+	palette.disabled.text: Theme.textMuted
+	palette.disabled.windowText: Theme.textMuted
+	palette.disabled.buttonText: Theme.textMuted
+	palette.disabled.brightText: Theme.textMuted
+	palette.disabled.highlight: Theme.surfaceBorder
+	palette.disabled.highlightedText: Theme.textMuted
+	palette.disabled.placeholderText: Theme.textMuted
+	palette.disabled.light: Theme.surfaceBorder
+	palette.disabled.midlight: Theme.panel
+	palette.disabled.mid: Theme.divider
+	palette.disabled.dark: Theme.rail
+	palette.disabled.shadow: Theme.strip
+	palette.disabled.link: Theme.textMuted
+	palette.disabled.linkVisited: Theme.textMuted
+	palette.disabled.toolTipBase: Theme.panel
+	palette.disabled.toolTipText: Theme.textMuted
 
 	width: 760
 	height: 720
@@ -126,7 +182,19 @@ Window {
 		contentHeight: contentColumn.implicitHeight
 		clip: true
 		ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-		ScrollBar.vertical.policy: ScrollBar.AsNeeded
+		ScrollBar.vertical: ScrollBar {
+			id: manualPluginScrollBar
+			policy: ScrollBar.AsNeeded
+			contentItem: Rectangle {
+				implicitWidth: 8
+				radius: width / 2
+				color: manualPluginScrollBar.pressed ? Theme.accent
+					: manualPluginScrollBar.hovered ? Theme.surfaceHover : Theme.surfaceBorder
+				opacity: manualPluginScrollBar.size < 1 ? 1 : 0
+				Behavior on color { ColorAnimation { duration: Theme.motionFast } }
+			}
+			background: Rectangle { color: "transparent" }
+		}
 
 		ColumnLayout {
 			id: contentColumn

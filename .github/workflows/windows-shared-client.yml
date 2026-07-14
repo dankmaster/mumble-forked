@@ -57,6 +57,29 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Run Qt Quick visual gate script tests
+        shell: pwsh
+        run: |
+          $testFiles = @(
+            '.\scripts\windows\tests\QmlVisualGate.Tests.ps1',
+            '.\scripts\windows\tests\QmlVisualBaselineIntegrity.Tests.ps1'
+          )
+          $pester = Get-Module -ListAvailable Pester |
+            Sort-Object Version -Descending |
+            Select-Object -First 1
+          if ($null -eq $pester) {
+            throw 'Pester is required for the Qt Quick visual gate script tests.'
+          }
+          Import-Module $pester.Path -Force
+          if ($pester.Version.Major -ge 5) {
+            $result = Invoke-Pester -Path $testFiles -PassThru
+          } else {
+            $result = Invoke-Pester -Script $testFiles -PassThru
+          }
+          if ($result.FailedCount -ne 0) {
+            throw "$($result.FailedCount) Qt Quick visual gate script test(s) failed."
+          }
+
       - name: Initialize submodules with retry
         shell: bash
         run: bash "$GITHUB_WORKSPACE/.github/workflows/update_submodules_with_retry.sh"
@@ -245,7 +268,7 @@ jobs:
             build-shared-webengine/**/mumble*.exe
 
       - name: Validate Qt Quick visual and accessibility matrix
-        shell: powershell
+        shell: pwsh
         run: |
           $additionalCMakeOptions = @(
             '-Dserver=OFF',

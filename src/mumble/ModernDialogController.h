@@ -23,6 +23,7 @@ public:
 		std::optional< QList< FavoriteServer > > favoritesToSave;
 		std::optional< Settings > settingsToApply;
 		bool settingsAccepted = false;
+		bool announceSettingsApply = true;
 		bool openCertificateWizard = false;
 		struct GenericAction {
 			QString dialogID;

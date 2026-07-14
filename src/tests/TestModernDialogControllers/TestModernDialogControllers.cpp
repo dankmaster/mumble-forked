@@ -6,10 +6,13 @@
 #include <QtCore/QFile>
 #include <QtTest>
 
+#include <algorithm>
+
 #include "AudioInput.h"
 #include "ModernConnectController.h"
 #include "ModernDialogController.h"
 #include "ModernSettingsController.h"
+#include "ModernTheme.h"
 #include "GlobalShortcut.h"
 
 namespace {
@@ -38,6 +41,7 @@ private slots:
 	void settingsControllerForcesModernAndAppliesDraft();
 	void settingsControllerEditsShortcutDataAndTargets();
 	void settingsControllerClampsAudioSetupPayload();
+	void settingsControllerRollsBackVoiceReplayPreview();
 	void settingsControllerReconcilesPluginRuntimeState();
 	void audioInputVoiceActivityLevelUsesExpectedSignals();
 	void audioInputVoiceActivitySnapshotIsBounded();
@@ -267,6 +271,51 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 
 	ModernSettingsController tweakController;
 	tweakController.open(settings, QStringLiteral("look"));
+	const QVariantList initialLookSections = tweakController.state().value(QStringLiteral("sections")).toList();
+	const QVariantMap themeField =
+		findSettingsFieldById(initialLookSections, QStringLiteral("look.modernTheme"));
+	QCOMPARE(themeField.value(QStringLiteral("presentation")).toString(), QStringLiteral("themeGrid"));
+	const QVariantList themeOptions = themeField.value(QStringLiteral("options")).toList();
+	QVERIFY(themeOptions.size() >= Mumble::ModernTheme::builtInThemeIds().size());
+	for (const QString &themeID : Mumble::ModernTheme::builtInThemeIds()) {
+		const auto optionIt = std::find_if(themeOptions.cbegin(), themeOptions.cend(), [&themeID](const QVariant &value) {
+			return value.toMap().value(QStringLiteral("value")).toString() == themeID;
+		});
+		QVERIFY2(optionIt != themeOptions.cend(), qPrintable(QStringLiteral("Missing theme preview for %1").arg(themeID)));
+		const QVariantMap preview = optionIt->toMap().value(QStringLiteral("preview")).toMap();
+		for (const QString &token : { QStringLiteral("shell"), QStringLiteral("rail"), QStringLiteral("panel"),
+									 QStringLiteral("surface"), QStringLiteral("border"), QStringLiteral("text"),
+									 QStringLiteral("textMuted"), QStringLiteral("accent"), QStringLiteral("danger"),
+									 QStringLiteral("success"), QStringLiteral("warning") }) {
+			QVERIFY2(!preview.value(token).toString().isEmpty(),
+					 qPrintable(QStringLiteral("Theme %1 is missing preview token %2").arg(themeID, token)));
+		}
+	}
+	const QVariantMap accentField =
+		findSettingsFieldById(initialLookSections, QStringLiteral("look.modernAccent"));
+	QCOMPARE(accentField.value(QStringLiteral("presentation")).toString(), QStringLiteral("accentGrid"));
+	const QVariantList accentOptions = accentField.value(QStringLiteral("options")).toList();
+	QCOMPARE(accentOptions.size(), 7);
+	for (const QVariant &accentOptionValue : accentOptions) {
+		const QVariantMap accentOption = accentOptionValue.toMap();
+		QVERIFY(!accentOption.value(QStringLiteral("swatch")).toMap()
+					 .value(QStringLiteral("accent"))
+					 .toString()
+					 .isEmpty());
+		const QString accentID = accentOption.value(QStringLiteral("value")).toString();
+		if (accentID != QLatin1String("auto") && accentID != Mumble::ModernTheme::customAccentId()) {
+			QCOMPARE(QColor(accentOption.value(QStringLiteral("swatch")).toMap()
+							.value(QStringLiteral("accent"))
+							.toString()),
+					 Mumble::ModernTheme::accentColorOverride(accentID));
+		}
+	}
+	QVERIFY(accentOptions.constFirst().toMap().value(QStringLiteral("automatic")).toBool());
+	const QVariantMap reloadThemesField =
+		findSettingsFieldById(initialLookSections, QStringLiteral("look.modernThemesReload"));
+	QCOMPARE(reloadThemesField.value(QStringLiteral("actionId")).toString(),
+			 QStringLiteral("look.reloadModernThemes"));
+	QVERIFY(tweakController.invokeAction(QStringLiteral("look.reloadModernThemes"), QVariantMap()).stateChanged);
 	tweakController.updateField(QStringLiteral("look.modernTheme"), QStringLiteral("latte"));
 	tweakController.updateField(QStringLiteral("look.modernDensity"), QStringLiteral("compact"));
 	tweakController.updateField(QStringLiteral("look.modernClassicUserIcons"), true);
@@ -358,7 +407,8 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 					field.value(QStringLiteral("type")).toString() == QLatin1String("voiceMeter")
 					&& field.value(QStringLiteral("calibrationActionId")).toString()
 						   == QLatin1String("finishAudioSetupWizard")
-					&& field.value(QStringLiteral("calibrationLabel")).toString() == QLatin1String("Audio setup")
+					&& field.value(QStringLiteral("calibrationLabel")).toString()
+						   == QLatin1String("Use recommended settings")
 					&& field.value(QStringLiteral("calibrationState")).toString() == QLatin1String("idle")
 					&& field.contains(QStringLiteral("maxAmplification"))
 					&& field.contains(QStringLiteral("noiseCancelMode"))
@@ -450,7 +500,7 @@ void TestModernDialogControllers::settingsControllerForcesModernAndAppliesDraft(
 											  { QStringLiteral("inputGateMode"), Settings::InputGateBalanced },
 											  { QStringLiteral("speexNoiseStrength"), 34 } });
 	QCOMPARE(autoSetResult.closeDialog, false);
-	QVERIFY(autoSetResult.settingsToApply.has_value());
+	QVERIFY(!autoSetResult.settingsToApply.has_value());
 	QCOMPARE(controller.draft().atTransmit, Settings::VAD);
 	QCOMPARE(controller.draft().vsVAD, Settings::SignalToNoise);
 	QCOMPARE(controller.draft().iVoiceHold, 35);
@@ -674,7 +724,7 @@ void TestModernDialogControllers::settingsControllerClampsAudioSetupPayload() {
 											  { QStringLiteral("noiseCancelMode"), 999 },
 											  { QStringLiteral("inputGateMode"), 999 },
 											  { QStringLiteral("speexNoiseStrength"), 999 } });
-	QVERIFY(clampedResult.settingsToApply.has_value());
+	QVERIFY(!clampedResult.settingsToApply.has_value());
 	QCOMPARE(controller.draft().vsVAD, Settings::Amplitude);
 	QCOMPARE(controller.draft().iVoiceHold, 80);
 	QCOMPARE(controller.draft().iMinLoudness, 20000);
@@ -692,7 +742,7 @@ void TestModernDialogControllers::settingsControllerClampsAudioSetupPayload() {
 								QVariantMap { { QStringLiteral("silenceThreshold"), 20 },
 											  { QStringLiteral("speechThreshold"), 55 },
 											  { QStringLiteral("maxAmplification"), 20000 } });
-	QVERIFY(maxAmplificationResult.settingsToApply.has_value());
+	QVERIFY(!maxAmplificationResult.settingsToApply.has_value());
 	QCOMPARE(controller.draft().iMinLoudness, 500);
 
 	ModernSettingsController fallbackController;
@@ -713,7 +763,7 @@ void TestModernDialogControllers::settingsControllerClampsAudioSetupPayload() {
 										QVariantMap { { QStringLiteral("silenceThreshold"), 20 },
 													  { QStringLiteral("speechThreshold"), 55 },
 													  { QStringLiteral("noiseCancelMode"), Settings::NoiseCancelRNN } });
-	QVERIFY(neuralResult.settingsToApply.has_value());
+	QVERIFY(!neuralResult.settingsToApply.has_value());
 	QCOMPARE(fallbackController.draft().noiseCancelMode,
 			 neuralCleanupAvailable ? Settings::NoiseCancelRNN : Settings::NoiseCancelSpeex);
 }
@@ -751,6 +801,54 @@ void TestModernDialogControllers::audioInputVoiceActivityLevelUsesExpectedSignal
 												  release));
 	QVERIFY(AudioInput::inputGateAllowsSpeechFor(Settings::InputGateStrict, true, 0.30f, 0.60f, gateOpen, attack,
 												 release));
+}
+
+void TestModernDialogControllers::settingsControllerRollsBackVoiceReplayPreview() {
+	Settings settings;
+	settings.atTransmit = Settings::PushToTalk;
+	settings.lmLoopMode = Settings::None;
+	settings.noiseCancelMode = Settings::NoiseCancelOff;
+	settings.dPacketLoss = 0.17f;
+	settings.dMaxPacketDelay = 0.42f;
+
+	ModernSettingsController controller;
+	controller.open(settings, QStringLiteral("audioInput"));
+
+	const ModernSettingsController::ActionResult recommendations =
+		controller.invokeAction(QStringLiteral("finishAudioSetupWizard"),
+			QVariantMap { { QStringLiteral("silenceThreshold"), 20 },
+				{ QStringLiteral("speechThreshold"), 55 },
+				{ QStringLiteral("vadSource"), Settings::Hybrid },
+				{ QStringLiteral("noiseCancelMode"), Settings::NoiseCancelSpeex } });
+	QVERIFY(!recommendations.settingsToApply.has_value());
+	QCOMPARE(controller.draft().atTransmit, Settings::PushToTalk);
+	QCOMPARE(controller.draft().noiseCancelMode, Settings::NoiseCancelSpeex);
+
+	const ModernSettingsController::ActionResult replay =
+		controller.invokeAction(QStringLiteral("startVoiceReplay"),
+			QVariantMap { { QStringLiteral("mode"), QStringLiteral("server") } });
+	QVERIFY(replay.settingsToApply.has_value());
+	QVERIFY(!replay.announceApply);
+	QCOMPARE(controller.draft().atTransmit, Settings::VAD);
+	QCOMPARE(controller.draft().lmLoopMode, Settings::Server);
+
+	const ModernSettingsController::ActionResult stop =
+		controller.invokeAction(QStringLiteral("stopVoiceReplay"), {});
+	QVERIFY(stop.settingsToApply.has_value());
+	QVERIFY(!stop.announceApply);
+	QCOMPARE(controller.draft().atTransmit, Settings::PushToTalk);
+	QCOMPARE(controller.draft().lmLoopMode, Settings::None);
+	QCOMPARE(controller.draft().dPacketLoss, 0.17f);
+	QCOMPARE(controller.draft().dMaxPacketDelay, 0.42f);
+
+	const ModernSettingsController::ActionResult cancel =
+		controller.invokeAction(QStringLiteral("cancel"), {});
+	QVERIFY(cancel.closeDialog);
+	QVERIFY(cancel.settingsToApply.has_value());
+	QVERIFY(!cancel.announceApply);
+	QCOMPARE(cancel.settingsToApply->atTransmit, Settings::PushToTalk);
+	QCOMPARE(cancel.settingsToApply->lmLoopMode, Settings::None);
+	QCOMPARE(cancel.settingsToApply->noiseCancelMode, Settings::NoiseCancelOff);
 }
 
 void TestModernDialogControllers::audioInputVoiceActivitySnapshotIsBounded() {

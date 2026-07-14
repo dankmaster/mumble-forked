@@ -24,6 +24,6 @@ set_tests_properties(
 	TestQmlQuickComponents
 	PROPERTIES
 		ENVIRONMENT
-			"QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..;QML2_IMPORT_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/../../qml;QML_IMPORT_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/../../qml;QSG_RENDER_LOOP=basic;QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Basic"
+			"QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORM_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>;QT_PLUGIN_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/..;QML2_IMPORT_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/../../qml;QML_IMPORT_PATH=$<TARGET_FILE_DIR:Qt6::QOffscreenIntegrationPlugin>/../../qml;QSG_RENDER_LOOP=basic;QT_QUICK_BACKEND=software;QT_QUICK_CONTROLS_STYLE=Basic;QT_FORCE_STDERR_LOGGING=1"
 		ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
 )

@@ -73,6 +73,16 @@ TestCase {
 		tryVerify(function() { return findChild(loader.item, "shortcutRow_0") !== null })
 	}
 
+	function revealBottomControl(control) {
+		const list = findChild(loader.item, "shortcutList")
+		verify(list !== null && control !== null)
+		list.positionViewAtEnd()
+		tryVerify(function() {
+			const position = control.mapToItem(list, 0, 0)
+			return position.y >= -0.5 && position.y + control.height <= list.height + 0.5
+		})
+	}
+
 	function test_target_mode_channel_group_and_flags_route_typed_payloads() {
 		const mode = findChild(loader.item, "shortcutTargetMode_0")
 		verify(mode !== null && mode.enabled)
@@ -101,19 +111,28 @@ TestCase {
 
 		const links = findChild(loader.item, "shortcutTargetLinks_0")
 		verify(links !== null && !links.checked)
-		mouseClick(links)
+		revealBottomControl(links)
+		links.forceActiveFocus()
+		tryCompare(links, "activeFocus", true)
+		keyClick(Qt.Key_Space)
 		compare(dialogState.lastPayload.targetAction, "links")
 		compare(dialogState.lastPayload.enabled, true)
 
 		const children = findChild(loader.item, "shortcutTargetChildren_0")
 		verify(children !== null && children.checked)
-		mouseClick(children)
+		revealBottomControl(children)
+		children.forceActiveFocus()
+		tryCompare(children, "activeFocus", true)
+		keyClick(Qt.Key_Space)
 		compare(dialogState.lastPayload.targetAction, "children")
 		compare(dialogState.lastPayload.enabled, false)
 
 		const forceCenter = findChild(loader.item, "shortcutTargetForceCenter_0")
 		verify(forceCenter !== null && !forceCenter.checked)
-		mouseClick(forceCenter)
+		revealBottomControl(forceCenter)
+		forceCenter.forceActiveFocus()
+		tryCompare(forceCenter, "activeFocus", true)
+		keyClick(Qt.Key_Space)
 		compare(dialogState.lastPayload.targetAction, "forceCenter")
 		compare(dialogState.lastPayload.enabled, true)
 	}
@@ -170,7 +189,10 @@ TestCase {
 
 		const suppress = findChild(loader.item, "shortcutSuppress_0")
 		verify(suppress !== null && !suppress.checked)
-		mouseClick(suppress)
+		revealBottomControl(suppress)
+		suppress.forceActiveFocus()
+		tryCompare(suppress, "activeFocus", true)
+		keyClick(Qt.Key_Space)
 		compare(dialogState.lastAction, "keys.shortcutSuppress")
 		compare(dialogState.lastPayload.index, 0)
 		compare(dialogState.lastPayload.suppress, true)

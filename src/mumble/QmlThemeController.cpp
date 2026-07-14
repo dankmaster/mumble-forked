@@ -22,18 +22,6 @@ namespace {
 								base.blueF() * (1.0 - ratio) + overlay.blueF() * ratio, 1.0);
 	}
 
-	QColor namedAccentColor(const QString &accentId, const QString &customAccent) {
-		if (accentId == QLatin1String("teal")) return QColor(QStringLiteral("#5ec8b0"));
-		if (accentId == QLatin1String("blue")) return QColor(QStringLiteral("#73b7ff"));
-		if (accentId == QLatin1String("violet")) return QColor(QStringLiteral("#b59cff"));
-		if (accentId == QLatin1String("amber")) return QColor(QStringLiteral("#f2c76f"));
-		if (accentId == QLatin1String("rose")) return QColor(QStringLiteral("#ff8aa0"));
-		if (accentId == Mumble::ModernTheme::customAccentId()) {
-			return QColor(Mumble::ModernTheme::normalizedCustomAccentColor(customAccent));
-		}
-		return {};
-	}
-
 	QString colorStateValue(const QColor &color) {
 		return color.alpha() < 255 ? color.name(QColor::HexArgb) : color.name(QColor::HexRgb);
 	}
@@ -85,9 +73,8 @@ bool QmlThemeController::applyProductAppearance(const QString &theme, const QStr
 	Mumble::ModernTheme::ThemeMetrics metrics;
 	QColor shellBackground;
 	QString themeSource = QStringLiteral("modernShell");
-	if (customTheme && Global::g_global_struct
-		&& Mumble::ModernTheme::normalizedThemeId(Global::get().s.qsModernShellTheme) == themeId) {
-		if (const auto activeTokens = activeUiThemeTokens()) tokens = *activeTokens;
+	if (customTheme) {
+		tokens = uiThemeTokensForThemeDefinition(*customTheme);
 		metrics = customTheme->metrics;
 		shellBackground = customTheme->palette.shellBackground;
 		themeSource = QStringLiteral("customTheme");
@@ -102,18 +89,7 @@ void QmlThemeController::applyProductTokens(UiThemeTokens tokens, Mumble::Modern
 											 const QString &themeSource, const QString &densityId,
 											 const QString &accentId, const QString &customAccent,
 											 const int customAccentStrength) {
-	const QColor accentColor = namedAccentColor(accentId, customAccent);
-	if (accentColor.isValid()) {
-		const qreal strength = accentId == Mumble::ModernTheme::customAccentId()
-			? static_cast< qreal >(
-				  Mumble::ModernTheme::normalizedCustomAccentStrength(customAccentStrength)) / 100.0
-			: 0.5;
-		tokens.accent = accentColor;
-		tokens.accentHover = mixColors(accentColor, tokens.text.isValid() ? tokens.text : QColor(Qt::white),
-			0.14 + (strength * 0.12));
-		tokens.accentSubtle = uiThemeColorWithAlpha(accentColor, 0.06 + (strength * 0.22));
-		tokens.focusAccent = accentColor;
-	}
+	applyUiThemeAccentOverride(tokens, accentId, customAccent, customAccentStrength);
 
 	if (densityId == QLatin1String("compact")) {
 		metrics.shellRadius = qMax(4, metrics.shellRadius - 4);
@@ -144,6 +120,7 @@ QVariantMap QmlThemeController::state() const {
 		{ QStringLiteral("surfaceRaised"), colorStateValue(m_surfaceRaised) },
 		{ QStringLiteral("surfaceHover"), colorStateValue(m_surfaceHover) },
 		{ QStringLiteral("surfaceBorder"), colorStateValue(m_surfaceBorder) },
+		{ QStringLiteral("mediaCanvas"), colorStateValue(m_mediaCanvas) },
 		{ QStringLiteral("rail"), colorStateValue(m_rail) },
 		{ QStringLiteral("strip"), colorStateValue(m_strip) },
 		{ QStringLiteral("divider"), colorStateValue(m_divider) },
@@ -196,13 +173,15 @@ void QmlThemeController::applyTokens(const UiThemeTokens &tokens,
 	const QColor nextSurfaceHover = tokens.surface1.isValid() ? tokens.surface1
 		: mixColors(tokens.base, tokens.text, 0.10);
 	const QColor nextSurfaceBorder = tokens.surface2.isValid() ? tokens.surface2 : tokens.border;
+	const QColor nextMediaCanvas = tokens.mediaCanvas.isValid()
+		? tokens.mediaCanvas : QColor(QStringLiteral("#05070a"));
 	const QColor nextAccentHover = tokens.accentHover.isValid() ? tokens.accentHover
 		: mixColors(tokens.accent, tokens.text, 0.18);
 	const QColor nextSelected = tokens.accentSubtle.isValid() ? tokens.accentSubtle
 													 : uiThemeColorWithAlpha(tokens.accent, 0.16);
 	const bool changed = m_shellBackground != nextShell || m_panel != tokens.base
 		|| m_surfaceRaised != nextSurfaceRaised || m_surfaceHover != nextSurfaceHover
-		|| m_surfaceBorder != nextSurfaceBorder || m_rail != tokens.mantle
+		|| m_surfaceBorder != nextSurfaceBorder || m_mediaCanvas != nextMediaCanvas || m_rail != tokens.mantle
 		|| m_strip != tokens.crust || m_divider != tokens.border || m_textStrong != tokens.text
 		|| m_textMain != tokens.subtext0 || m_textMuted != tokens.overlay0 || m_accent != tokens.accent
 		|| m_accentHover != nextAccentHover || m_accentSubtle != nextSelected
@@ -218,6 +197,7 @@ void QmlThemeController::applyTokens(const UiThemeTokens &tokens,
 	m_surfaceRaised = nextSurfaceRaised;
 	m_surfaceHover = nextSurfaceHover;
 	m_surfaceBorder = nextSurfaceBorder;
+	m_mediaCanvas = nextMediaCanvas;
 	m_rail = tokens.mantle;
 	m_strip = tokens.crust;
 	m_divider = tokens.border;
@@ -242,13 +222,35 @@ void QmlThemeController::applyTokens(const UiThemeTokens &tokens,
 bool QmlThemeController::applyVisualGateAppearance(const QString &theme, const QString &layout) {
 	const QString normalizedTheme = theme.trimmed().toLower();
 	const QString normalizedLayout = layout.trimmed().toLower();
-	if ((normalizedTheme != QLatin1String("light") && normalizedTheme != QLatin1String("dark"))
+	if ((normalizedTheme != QLatin1String("light") && normalizedTheme != QLatin1String("dark")
+		 && normalizedTheme != QLatin1String("custom"))
 		|| (normalizedLayout != QLatin1String("regular") && normalizedLayout != QLatin1String("compact"))) {
 		return false;
 	}
 	const QString densityId = normalizedLayout == QLatin1String("compact")
 		? QStringLiteral("compact") : QStringLiteral("comfortable");
-	applyProductTokens(uiThemeTokensForThemeId(normalizedTheme), {}, {}, normalizedTheme,
+	UiThemeTokens tokens = uiThemeTokensForThemeId(
+		normalizedTheme == QLatin1String("custom") ? QStringLiteral("frappe") : normalizedTheme);
+	QString themeId = normalizedTheme;
+	if (normalizedTheme == QLatin1String("custom")) {
+		// Deterministic synthetic custom appearance for screenshot gates. It uses
+		// the same typed runtime path as loaded manifests while avoiding machine-
+		// local theme files in CI.
+		tokens.crust = QColor(QStringLiteral("#111827"));
+		tokens.mantle = QColor(QStringLiteral("#172033"));
+		tokens.base = QColor(QStringLiteral("#1f2937"));
+		tokens.surface0 = QColor(QStringLiteral("#293548"));
+		tokens.surface1 = QColor(QStringLiteral("#35445a"));
+		tokens.surface2 = QColor(QStringLiteral("#47576e"));
+		tokens.text = QColor(QStringLiteral("#f3f4f6"));
+		tokens.subtext0 = QColor(QStringLiteral("#d1d5db"));
+		tokens.overlay0 = QColor(QStringLiteral("#9ca3af"));
+		tokens.border = tokens.surface2;
+		tokens.mediaCanvas = QColor(QStringLiteral("#050b12"));
+		applyUiThemeAccentOverride(tokens, QStringLiteral("rose"), {}, 60);
+		themeId = QStringLiteral("visual-custom");
+	}
+	applyProductTokens(tokens, {}, {}, themeId,
 		QStringLiteral("visualFixture"), densityId, QStringLiteral("auto"), QStringLiteral("#5ec8b0"), 50);
 	return true;
 }

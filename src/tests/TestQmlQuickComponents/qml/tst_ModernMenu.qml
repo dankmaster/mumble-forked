@@ -31,5 +31,12 @@ TestCase {
 		compare(menuLoader.item.dim, false)
 		compare(menuLoader.item.background.color, Theme.surfaceRaised)
 		compare(menuLoader.item.background.border.color, Theme.surfaceBorder)
+		compare(menuLoader.item.palette.highlight, Theme.selected)
+		compare(menuLoader.item.palette.link, Theme.accent)
+		compare(menuLoader.item.palette.toolTipBase, Theme.surfaceRaised)
+		compare(menuLoader.item.palette.toolTipText, Theme.textStrong)
+		compare(menuLoader.item.palette.disabled.highlight, Theme.surfaceBorder)
+		compare(menuLoader.item.palette.disabled.link, Theme.textMuted)
+		compare(menuLoader.item.palette.disabled.toolTipBase, Theme.panel)
 	}
 }

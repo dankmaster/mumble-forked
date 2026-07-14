@@ -188,6 +188,20 @@ function Get-QmlVisualPngCoverage {
 function Assert-QmlVisualManifest {
 	param([Parameter(Mandatory = $true)]$Manifest)
 	if ([int]$Manifest.schema_version -ne 1) { throw "Unsupported visual manifest schema." }
+	$manifestProperties = if ($Manifest -is [Collections.IDictionary]) {
+		@($Manifest.Keys | ForEach-Object { [string]$_ })
+	} else {
+		@($Manifest.PSObject.Properties.Name)
+	}
+	if ($manifestProperties -contains "executable_sha256" -and
+		[string]$Manifest.executable_sha256 -notmatch '^[0-9a-fA-F]{64}$') {
+		throw "Visual manifest contains an invalid executable SHA256."
+	}
+	if ($manifestProperties -contains "source_git_sha" -and
+		[string]$Manifest.source_git_sha -ne 'unknown' -and
+		[string]$Manifest.source_git_sha -notmatch '^[0-9a-fA-F]{40}$') {
+		throw "Visual manifest contains an invalid source Git SHA."
+	}
 	$cases = @($Manifest.cases)
 	if ($cases.Count -eq 0) { throw "Visual manifest contains no cases." }
 	$ids = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -206,4 +220,60 @@ function Assert-QmlVisualManifest {
 	return $true
 }
 
-Export-ModuleMember -Function Get-QmlVisualFileSha256, Get-QmlVisualPngDimensions, Compare-QmlVisualPng, Get-QmlVisualPngCoverage, Assert-QmlVisualManifest
+function Assert-QmlVisualManifestMatchesMatrix {
+	param(
+		[Parameter(Mandatory = $true)]$Manifest,
+		[Parameter(Mandatory = $true)][string]$MatrixPath,
+		[switch]$RequireCombinedCandidate
+	)
+
+	Assert-QmlVisualManifest $Manifest | Out-Null
+	$resolvedMatrixPath = (Resolve-Path -LiteralPath $MatrixPath).Path
+	$matrix = Get-Content -Raw -LiteralPath $resolvedMatrixPath | ConvertFrom-Json
+	if ([int]$matrix.schema_version -ne 1) { throw "Unsupported visual matrix schema." }
+	$matrixCases = @($matrix.cases)
+	if ($matrixCases.Count -eq 0) { throw "Visual matrix contains no cases." }
+
+	$matrixIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+	foreach ($case in $matrixCases) {
+		$caseId = [string]$case.id
+		if ([string]::IsNullOrWhiteSpace($caseId) -or -not $matrixIds.Add($caseId)) {
+			throw "Visual matrix contains an empty or duplicate case ID."
+		}
+	}
+
+	$manifestProperties = if ($Manifest -is [Collections.IDictionary]) {
+		@($Manifest.Keys | ForEach-Object { [string]$_ })
+	} else {
+		@($Manifest.PSObject.Properties.Name)
+	}
+	$expectedMatrixHash = Get-QmlVisualFileSha256 $resolvedMatrixPath
+	if ($manifestProperties -notcontains "matrix_sha256" -or
+		-not [string]::Equals([string]$Manifest.matrix_sha256, $expectedMatrixHash,
+			[StringComparison]::OrdinalIgnoreCase)) {
+		throw "Visual manifest matrix hash does not match the current visual matrix."
+	}
+
+	$manifestIds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+	foreach ($case in @($Manifest.cases)) { $null = $manifestIds.Add([string]$case.id) }
+	if (-not $manifestIds.SetEquals($matrixIds)) {
+		$missing = @($matrixIds | Where-Object { -not $manifestIds.Contains($_) } | Sort-Object)
+		$unexpected = @($manifestIds | Where-Object { -not $matrixIds.Contains($_) } | Sort-Object)
+		$missingText = if ($missing.Count -eq 0) { "<none>" } else { $missing -join ", " }
+		$unexpectedText = if ($unexpected.Count -eq 0) { "<none>" } else { $unexpected -join ", " }
+		throw "Visual manifest case set does not match the current matrix. Missing: $missingText. Unexpected: $unexpectedText."
+	}
+
+	if ($RequireCombinedCandidate) {
+		if ($manifestProperties -notcontains "mode" -or
+			[string]$Manifest.mode -cne "candidate-only" -or
+			$manifestProperties -notcontains "process_isolation" -or
+			[string]$Manifest.process_isolation -cne "per-dpr") {
+			throw "Baseline updates require a complete candidate-only manifest produced by the per-DPR matrix runner."
+		}
+	}
+
+	return $true
+}
+
+Export-ModuleMember -Function Get-QmlVisualFileSha256, Get-QmlVisualPngDimensions, Compare-QmlVisualPng, Get-QmlVisualPngCoverage, Assert-QmlVisualManifest, Assert-QmlVisualManifestMatchesMatrix

@@ -133,6 +133,8 @@ TestCase {
         session.motdExpanded = false
         session.motdDismissed = false
         session.motdChanged = true
+		motdLoader.item.hiddenForHistory = false
+		motdLoader.item.maximumImageHeight = 82
 		session.motdSegments = [
 			{ "text": "Welcome", "bold": true },
 			{ "text": " to the test server. " },
@@ -163,7 +165,16 @@ TestCase {
         verify(banner.bannerVisible)
         compare(banner.Accessible.role, Accessible.AlertMessage)
         compare(banner.primaryActionId, "server.connect")
-        verify(banner.focusPrimaryAction())
+		compare(banner.activeFocusOnTab, false)
+		banner.forceActiveFocus()
+		tryCompare(banner, "activeFocus", true)
+		keyClick(Qt.Key_Space)
+		compare(connectionActionSpy.count, 0)
+		const primary = findChild(banner, "connectionBannerPrimaryAction")
+		verify(primary !== null)
+		verify(primary.activeFocusOnTab)
+		verify(banner.focusPrimaryAction())
+		tryCompare(primary, "activeFocus", true)
         keyClick(Qt.Key_Space)
         compare(connectionActionSpy.count, 1)
         compare(connectionActionSpy.signalArguments[0][0], "server.connect")
@@ -176,7 +187,9 @@ TestCase {
         compare(banner.retryRemainingSeconds, 3)
         compare(banner.primaryActionId, "server.disconnect")
         verify(banner.detail.indexOf("3s") >= 0)
+		compare(banner.Accessible.description, session.connectionDetail)
 		tryVerify(function() { return banner.retryRemainingSeconds <= 2 }, 1500)
+		compare(banner.Accessible.description, session.connectionDetail)
 
         session.connectionState = "connected"
         verify(!banner.bannerVisible)
@@ -206,7 +219,7 @@ TestCase {
         compare(motdActionSpy.signalArguments[0][0], "motd.dismiss")
     }
 
-	function test_motd_collapsed_summary_is_compact_clean_and_precedes_actions() {
+	function test_motd_collapsed_surface_matches_the_compact_production_bar() {
 		const panel = motdLoader.item
 		compare(panel.activeFocusOnTab, false)
 		session.motdSummary = "Welcome\uFFFC   friends"
@@ -214,34 +227,73 @@ TestCase {
 		compare(panel.Accessible.description, "Welcome friends")
 
 		const summary = findChild(panel, "motdSummaryBody")
+		const header = findChild(panel, "motdHeaderBar")
+		const badge = findChild(panel, "motdInfoBadge")
+		const heading = findChild(panel, "motdHeading")
+		const bodyScroll = findChild(panel, "motdBodyScroll")
 		const flow = findChild(panel, "motdActionFlow")
-		verify(summary !== null, "collapsed MOTD summary was not created")
+		verify(summary !== null, "MOTD summary semantic node was not created")
+		verify(header !== null)
+		verify(badge !== null)
+		verify(heading !== null)
+		verify(bodyScroll !== null)
 		verify(panel.contentVisible && !panel.expanded)
 		verify(flow !== null)
 		compare(summary.text, "Welcome friends")
-		const summaryOrigin = summary.mapToItem(panel, 0, 0)
-		const flowOrigin = flow.mapToItem(panel, 0, 0)
-		verify(summaryOrigin.x < flowOrigin.x,
-			"summary must appear before collapsed secondary actions")
-		verify(panel.implicitHeight <= Theme.controlHeight + Theme.space3 * 2 + Theme.space2,
-			"collapsed MOTD height " + panel.implicitHeight + " should stay near one control row")
+		verify(!summary.visible, "collapsed MOTD must not render summary copy")
+		compare(bodyScroll.height, 0)
+		compare(panel.headerHeight, 38)
+		compare(panel.implicitHeight, 38)
+		compare(header.height, 38)
+		compare(badge.width, 24)
+		compare(badge.height, 24)
+		compare(heading.text, "Welcome")
+		compare(heading.font.pixelSize, 11)
+		compare(heading.font.capitalization, Font.AllUppercase)
+		verify(heading.Accessible.ignored)
+
+		const expand = findChild(panel, "motdAction_motd.show")
+		const dismiss = findChild(panel, "motdAction_motd.dismiss")
+		verify(expand !== null)
+		verify(dismiss !== null)
+		for (const control of [ expand, dismiss ]) {
+			compare(control.width, 26)
+			compare(control.height, 26)
+			verify(control.Accessible.name.length > 0)
+			const origin = control.mapToItem(panel, 0, 0)
+			verify(origin.x >= 0 && origin.x + control.width <= panel.width)
+			verify(origin.y >= 0 && origin.y + control.height <= panel.headerHeight)
+		}
+		compare(expand.iconName, "next")
+		compare(dismiss.iconName, "close")
 	}
 
-    function test_motd_dismissed_restore_surface() {
+    function test_motd_dismissed_hides_the_entire_surface() {
         session.motdDismissed = true
-        session.motdActions = [
-            { "id": "motd.restore", "label": "Show welcome message", "enabled": true }
-        ]
+		session.motdActions = []
         const panel = motdLoader.item
         compare(panel.hasContent, true)
-        verify(panel.surfaceVisible)
-        verify(!panel.contentVisible)
-        tryVerify(function() { return findChild(panel, "motdAction_motd.restore") !== null })
-        findChild(panel, "motdAction_motd.restore").forceActiveFocus()
-        keyClick(Qt.Key_Space)
-        compare(motdActionSpy.count, 1)
-        compare(motdActionSpy.signalArguments[0][0], "motd.restore")
+		verify(panel.dismissed)
+		verify(!panel.surfaceVisible)
+		verify(!panel.contentVisible)
+		compare(panel.implicitHeight, 0)
+		verify(!panel.focusPrimaryAction())
+		compare(motdActionSpy.count, 0)
     }
+
+	function test_motd_history_policy_hides_without_dismissing() {
+		const panel = motdLoader.item
+		panel.hiddenForHistory = true
+		verify(panel.hasContent)
+		verify(!panel.dismissed)
+		verify(!panel.surfaceVisible)
+		verify(!panel.contentVisible)
+		compare(panel.implicitHeight, 0)
+
+		panel.hiddenForHistory = false
+		verify(panel.surfaceVisible)
+		verify(panel.contentVisible)
+	}
 
     function test_motd_probe_rejects_unknown_action() {
         const result = motdLoader.item.runProbe("unknown", "")
@@ -262,7 +314,20 @@ TestCase {
 
 	function test_motd_expanded_body_uses_structured_segments() {
 		session.motdExpanded = true
+		session.motdActions = [
+			{ "id": "motd.hide", "label": "Collapse", "enabled": true,
+			  "payload": { "signature": session.motdSignature } },
+			{ "id": "motd.dismiss", "label": "Dismiss", "enabled": true,
+			  "payload": { "signature": session.motdSignature } }
+		]
 		tryVerify(function() { return findChild(motdLoader.item, "motdStructuredBody") !== null })
+		compare(motdLoader.item.Accessible.description, "")
+		const bodyScroll = findChild(motdLoader.item, "motdBodyScroll")
+		verify(bodyScroll !== null)
+		tryVerify(function() { return bodyScroll.height > 0 })
+		const collapse = findChild(motdLoader.item, "motdAction_motd.hide")
+		verify(collapse !== null)
+		compare(collapse.iconName, "chevron-down")
 		const text = findChild(motdLoader.item, "richMessageBodyText")
 		verify(text !== null)
 		verify(text.text.indexOf("Welcome") >= 0)
@@ -290,8 +355,31 @@ TestCase {
 		verify(card !== null, "managed MOTD image card was not created")
 		compare(image.source.toString(), "image://mumble/motd-inline?g=1")
 		compare(image.Accessible.name, "Server welcome art")
-		verify(card.width <= structured.width + 0.5)
-		verify(card.implicitHeight <= 320 + Theme.space2 * 2 + 0.5)
+		compare(richBody.maximumImageWidth, 560)
+		compare(richBody.maximumImageHeight, 82)
+		compare(richBody.imageBorderWidth, 0)
+		compare(richBody.imageSurfaceColor, panel.color)
+		compare(richBody.textHorizontalAlignment, Text.AlignLeft)
+		tryVerify(function() {
+			return structured.width > 600 && card.width < structured.width - Theme.space4
+		})
+		verify(card.width < structured.width - Theme.space4)
+		verify(card.implicitHeight <= 82 + Theme.space1 * 2 + 0.5)
+		const heading = findChild(panel, "motdHeading")
+		verify(heading !== null)
+		const headingOrigin = heading.mapToItem(panel, 0, 0)
+		verify(headingOrigin.x >= 10 + 24,
+			"expanded MOTD heading should follow the information badge")
+		verify(headingOrigin.x <= 10 + 24 + Theme.space2 + 1,
+			"expanded MOTD heading should stay aligned to the production header grid")
+		const textBelowImage = findChild(panel, "richMessageTextBlock_2")
+		verify(textBelowImage !== null)
+		compare(textBelowImage.horizontalAlignment, Text.AlignLeft)
+		const actions = findChild(panel, "motdActionFlow")
+		verify(actions !== null)
+		const actionOrigin = actions.mapToItem(panel, 0, 0)
+		verify(actionOrigin.x + actions.width <= panel.width - Theme.space1)
+		verify(actionOrigin.y + actions.height <= panel.headerHeight)
 	}
 
 	function test_watch_together_uses_the_supplied_participant_model() {
@@ -301,7 +389,7 @@ TestCase {
 		compare(banner.participantLabel("999"), "Session 999")
 	}
 
-	function test_connection_and_motd_actions_stay_bounded_at_420() {
+	function test_connection_and_compact_motd_actions_stay_bounded_at_420() {
 		testCase.width = 420
 		session.connectionDetail = "A deliberately long connection explanation that must wrap without pushing the primary action beyond the banner edge."
 		session.motdActions = [
@@ -320,15 +408,19 @@ TestCase {
 		const panel = motdLoader.item
 		const flow = findChild(panel, "motdActionFlow")
 		tryCompare(panel, "compactLayout", true)
-		tryVerify(function() { return panel.actionsWrapped })
+		compare(panel.actionsWrapped, false)
 		verify(flow !== null && flow.width <= panel.width)
 		for (const id of [ "motd.show", "motd.dismiss" ]) {
 			const button = findChild(panel, "motdAction_" + id)
 			verify(button !== null)
-			verify(button.x >= -0.5 && button.x + button.width <= flow.width + 0.5,
-				id + " bounds " + button.x + "+" + button.width + " within " + flow.width)
+			compare(button.width, 26)
+			compare(button.height, 26)
+			const origin = button.mapToItem(panel, 0, 0)
+			verify(origin.x >= -0.5 && origin.x + button.width <= panel.width + 0.5,
+				id + " bounds " + origin.x + "+" + button.width + " within " + panel.width)
 			verify(button.Accessible.name.length > 0)
 		}
+		compare(panel.implicitHeight, 38)
 	}
 
 	function test_update_actions_wrap_at_420_and_relax_at_760() {

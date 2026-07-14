@@ -5,6 +5,7 @@ Item {
 	id: control
 
 	property bool running: true
+	property bool animated: true
 	property string tone: "accent"
 	property int segmentCount: 10
 	readonly property color indicatorColor: tone === "danger" ? Theme.danger
@@ -50,6 +51,6 @@ Item {
 		to: 360
 		duration: Math.max(720, Theme.motionSlow * 4)
 		loops: Animation.Infinite
-		running: control.running && control.visible
+		running: control.animated && control.running && control.visible
 	}
 }

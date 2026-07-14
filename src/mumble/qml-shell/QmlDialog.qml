@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
 import Mumble.Theme 1.0
 
@@ -38,6 +37,66 @@ Dialog {
 	readonly property color dialogToneColor: toneColor(dialogTone)
 	property bool showAdvanced: !!dialogState.state.showAdvanced
 	property string focusedDialogId: ""
+	property bool nestedModalOpen: false
+	property var beforeOpen: null
+	// Controls inherit this palette when a specialized product component does
+	// not provide its own background. Keep Qt's Basic/native fallback colors
+	// from leaking into themed dialogs as bright selection rectangles.
+	palette.window: Theme.panel
+	palette.active.base: Theme.panel
+	palette.inactive.base: Theme.panel
+	palette.alternateBase: Theme.surfaceRaised
+	palette.active.button: Theme.surfaceRaised
+	palette.inactive.button: Theme.surfaceRaised
+	palette.active.text: Theme.textMain
+	palette.inactive.text: Theme.textMain
+	palette.active.windowText: Theme.textMain
+	palette.inactive.windowText: Theme.textMain
+	palette.active.buttonText: Theme.textMain
+	palette.inactive.buttonText: Theme.textMain
+	palette.active.brightText: Theme.textStrong
+	palette.inactive.brightText: Theme.textStrong
+	palette.active.highlight: Theme.selected
+	palette.inactive.highlight: Theme.selected
+	palette.active.highlightedText: Theme.textStrong
+	palette.inactive.highlightedText: Theme.textStrong
+	palette.placeholderText: Theme.textMuted
+	palette.active.link: Theme.accent
+	palette.inactive.link: Theme.accent
+	palette.active.linkVisited: Theme.accentHover
+	palette.inactive.linkVisited: Theme.accentHover
+	palette.active.toolTipBase: Theme.surfaceRaised
+	palette.inactive.toolTipBase: Theme.surfaceRaised
+	palette.active.toolTipText: Theme.textStrong
+	palette.inactive.toolTipText: Theme.textStrong
+	palette.active.light: Theme.surfaceHover
+	palette.inactive.light: Theme.surfaceHover
+	palette.active.midlight: Theme.surfaceRaised
+	palette.inactive.midlight: Theme.surfaceRaised
+	palette.active.mid: Theme.surfaceBorder
+	palette.inactive.mid: Theme.surfaceBorder
+	palette.dark: Theme.rail
+	palette.shadow: Theme.strip
+	palette.disabled.window: Theme.panel
+	palette.disabled.base: Theme.panel
+	palette.disabled.alternateBase: Theme.panel
+	palette.disabled.button: Theme.panel
+	palette.disabled.text: Theme.textMuted
+	palette.disabled.windowText: Theme.textMuted
+	palette.disabled.buttonText: Theme.textMuted
+	palette.disabled.brightText: Theme.textMuted
+	palette.disabled.highlight: Theme.surfaceBorder
+	palette.disabled.highlightedText: Theme.textMuted
+	palette.disabled.placeholderText: Theme.textMuted
+	palette.disabled.light: Theme.surfaceBorder
+	palette.disabled.midlight: Theme.panel
+	palette.disabled.mid: Theme.divider
+	palette.disabled.dark: Theme.rail
+	palette.disabled.shadow: Theme.strip
+	palette.disabled.link: Theme.textMuted
+	palette.disabled.linkVisited: Theme.textMuted
+	palette.disabled.toolTipBase: Theme.panel
+	palette.disabled.toolTipText: Theme.textMuted
 	readonly property bool hasAdvancedContent: {
 		dialogState.revision
 		const sections = dialogState.sections || []
@@ -143,11 +202,29 @@ Dialog {
 		const source = String(value === undefined || value === null ? "" : value).trim()
 		return /^(image:\/\/mumble\/|qrc:\/)/i.test(source) ? source : ""
 	}
+	function optionForFieldValue(fieldId, value) {
+		const sections = dialogState.sections || []
+		for (let sectionIndex = 0; sectionIndex < sections.length; ++sectionIndex) {
+			const fields = (sections[sectionIndex] || {}).fields || []
+			for (let fieldIndex = 0; fieldIndex < fields.length; ++fieldIndex) {
+				const field = fields[fieldIndex] || {}
+				if (String(field.id || "") !== String(fieldId || "")) continue
+				const options = field.options || []
+				for (let optionIndex = 0; optionIndex < options.length; ++optionIndex) {
+					if (String((options[optionIndex] || {}).value) === String(value))
+						return options[optionIndex]
+				}
+			}
+		}
+		return ({})
+	}
 	function syncVisibility() {
 		const shouldBeVisible = dialogState.open && dialogState.kind !== "imageViewer"
-		if (shouldBeVisible && !visible)
+		if (shouldBeVisible && !visible) {
+			if (dialog.beforeOpen && dialog.beforeOpen() === false)
+				return
 			dialog.open()
-		else if (!shouldBeVisible && visible)
+		} else if (!shouldBeVisible && visible)
 			dialog.close()
 	}
     parent: Overlay.overlay
@@ -160,13 +237,14 @@ Dialog {
 	header: null
 	footer: null
 	width: Math.min(parent ? Math.max(240, parent.width - (Theme.space5 * 2)) : 1040,
-					Math.max(320, Math.min(dialogState.preferredWidth || 920, 1180)))
+		Math.max(320, Math.min(dialogState.preferredWidth || 920, 1180)))
 	height: Math.min(maximumHeightForParent, responsiveHeight)
     x: parent ? Math.round((parent.width - width) / 2) : 0
     y: parent ? Math.round((parent.height - height) / 2) : 0
     padding: 0
-    closePolicy: Popup.NoAutoClose
+	closePolicy: Popup.NoAutoClose
 	onOpened: {
+		nestedModalOpen = false
 		resetContentPosition()
 		scheduleContentMeasurement()
 		Qt.callLater(applyInitialFocus)
@@ -199,6 +277,7 @@ Dialog {
     }
 
 	contentItem: ColumnLayout {
+		enabled: !dialog.nestedModalOpen
 		Accessible.role: Accessible.Dialog
 		Accessible.name: dialogState.title
 		Accessible.description: dialogState.subtitle
@@ -265,6 +344,10 @@ Dialog {
 			visible: String(dialogState.statusMessage || "").length > 0
 			color: Qt.rgba(dialog.dialogToneColor.r, dialog.dialogToneColor.g, dialog.dialogToneColor.b, 0.12)
 			border.color: dialog.dialogToneColor
+			Accessible.role: dialog.dialogTone === "danger" || dialog.dialogTone === "error"
+				|| dialog.dialogTone === "warning" || dialog.dialogTone === "retry"
+				? Accessible.AlertMessage : Accessible.StatusBar
+			Accessible.name: String(dialogState.statusMessage || "")
 			Label {
 				id: statusLabel
 				objectName: "dialogStatusMessage"
@@ -274,6 +357,7 @@ Dialog {
 				text: dialogState.statusMessage
 				color: Theme.textMain
 				wrapMode: Text.Wrap
+				Accessible.ignored: true
 			}
 		}
 
@@ -314,6 +398,9 @@ Dialog {
                         required property var modelData
 						required property int index
 						objectName: "dialogPage_" + String(modelData.id || index)
+						readonly property bool current: ListView.isCurrentItem
+						readonly property bool keyboardFocused: activeFocus
+							|| (ListView.view.activeFocus && current)
                         width: ListView.view.width
                         height: Theme.densityId === "compact" ? 36
                                 : Theme.densityId === "spacious" ? 46 : 40
@@ -333,11 +420,11 @@ Dialog {
 							elide: Text.ElideRight
 						}
 						background: Rectangle {
-							color: pageDelegate.highlighted ? Theme.surfaceRaised
+							color: pageDelegate.highlighted ? Theme.selected
 								: pageDelegate.hovered ? Theme.surfaceHover : "transparent"
-							border.color: pageDelegate.activeFocus ? Theme.focus
+							border.color: pageDelegate.keyboardFocused ? Theme.focus
 								: pageDelegate.highlighted ? Theme.accent : "transparent"
-							border.width: pageDelegate.activeFocus ? Theme.focusRingWidth : 1
+							border.width: pageDelegate.keyboardFocused ? Theme.focusRingWidth : 1
 							radius: 6
 						}
                         onClicked: dialogState.invokeAction("selectPage", { "pageId": modelData.id })
@@ -381,13 +468,6 @@ Dialog {
 									return index
 							}
 							return dialogState.pages.length > 0 ? 0 : -1
-						}
-						delegate: ItemDelegate {
-							required property var modelData
-							required property int index
-							width: compactPageSelector.popup ? compactPageSelector.popup.width : compactPageSelector.width
-							text: modelData.label || modelData.title || modelData.id || ""
-							highlighted: compactPageSelector.highlightedIndex === index
 						}
 						onActivated: index => {
 							const page = index >= 0 && index < dialogState.pages.length ? dialogState.pages[index] : null
@@ -518,14 +598,31 @@ Dialog {
 								Accessible.role: Accessible.List
 								Accessible.name: qsTr("Saved servers")
 								delegate: ItemDelegate {
+									id: favoriteDelegate
 									required property var modelData
 									required property int index
 									objectName: "connectFavorite_" + index
+									readonly property bool current: ListView.isCurrentItem
+									readonly property bool keyboardFocused: activeFocus
+										|| (ListView.view.activeFocus && current)
 									width: ListView.view.width
 									height: connectFavoriteList.favoriteRowHeight
 									highlighted: !!modelData.selected || index === dialogState.selectedFavoriteIndex
+									hoverEnabled: true
+									Accessible.role: Accessible.ListItem
 									Accessible.name: String(modelData.label || modelData.host || qsTr("Saved server"))
 									Accessible.description: String(modelData.subtitle || modelData.tooltip || "")
+									Accessible.selected: highlighted
+									background: Rectangle {
+										objectName: "connectFavoriteBackground_" + favoriteDelegate.index
+										radius: 8
+										color: favoriteDelegate.highlighted ? Theme.selected
+											: favoriteDelegate.hovered ? Theme.surfaceHover : "transparent"
+										border.color: favoriteDelegate.keyboardFocused ? Theme.focus
+											: favoriteDelegate.highlighted ? Theme.accent : "transparent"
+										border.width: favoriteDelegate.keyboardFocused ? Theme.focusRingWidth : 1
+										Behavior on color { ColorAnimation { duration: Theme.motionFast } }
+									}
 									contentItem: RowLayout {
 										spacing: Theme.spacing
 										ColumnLayout {
@@ -668,7 +765,6 @@ Dialog {
 											id: fieldLoader
 											width: parent.width
 											active: fieldContainer.visible
-											height: active && item ? item.implicitHeight : 0
 											onLoaded: item.field = fieldContainer.field
 											onItemChanged: if (item) item.field = fieldContainer.field
 											sourceComponent: {
@@ -679,7 +775,11 @@ Dialog {
 											if (type === "voiceMeter") return voiceMeterField
 											if (type === "readonly" || type === "status") return readonlyField
                                             if (type === "checkbox" || type === "toggle") return checkboxField
-                                            if (type === "select" || type === "combo" || type === "dropdown") return selectField
+											if (type === "select" || type === "combo" || type === "dropdown") {
+												if (field.presentation === "themeGrid") return themeGridField
+												if (field.presentation === "accentGrid") return accentGridField
+												return selectField
+											}
                                             if (type === "slider" || type === "range" || type === "number" || type === "integer") return numberField
                                             if (type === "action" || type === "button") return actionField
                                             if (type === "pluginEditor") return pluginEditorField
@@ -712,6 +812,8 @@ Dialog {
                                             color: Theme.danger
                                             font.pixelSize: Theme.fontCaption
                                             wrapMode: Text.Wrap
+											Accessible.role: Accessible.AlertMessage
+											Accessible.name: text
                                         }
                                     }
                                 }
@@ -829,11 +931,15 @@ Dialog {
 				return {
 					"silenceThreshold": silenceThreshold,
 					"speechThreshold": speechThreshold,
-					"vadSource": vadSource,
+					"vadSource": Number(field.recommendedVadSource === undefined
+						? vadSource : field.recommendedVadSource),
 					"voiceHold": Number(field.voiceHold || 20),
-					"maxAmplification": Number(field.maxAmplification || 0),
-					"noiseCancelMode": Number(field.noiseCancelMode || 0),
-					"inputGateMode": Number(field.inputGateMode || 0),
+					"maxAmplification": Number(field.recommendedMaxAmplification === undefined
+						? (field.maxAmplification || 0) : field.recommendedMaxAmplification),
+					"noiseCancelMode": Number(field.recommendedNoiseCancelMode === undefined
+						? (field.noiseCancelMode || 0) : field.recommendedNoiseCancelMode),
+					"inputGateMode": Number(field.recommendedInputGateMode === undefined
+						? (field.inputGateMode || 0) : field.recommendedInputGateMode),
 					"speexNoiseStrength": Number(field.speexNoiseStrength || 14)
 				}
 			}
@@ -986,13 +1092,28 @@ Dialog {
                 id: selectControl
 				objectName: "dialogField_" + String((selectRoot.field || {}).id || "")
                 Layout.fillWidth: true
+				enabled: selectRoot.field.enabled === undefined || Boolean(selectRoot.field.enabled)
                 model: selectRoot.field.options || []
                 textRole: "label"
                 valueRole: "value"
+				Accessible.name: String(selectRoot.field.label || "")
+				Accessible.description: String(selectRoot.field.hint || selectRoot.field.unavailableReason || "")
                 Component.onCompleted: selectRoot.syncCurrentIndex()
                 onModelChanged: selectRoot.syncCurrentIndex()
-                onActivated: if (currentIndex >= 0) dialogState.updateField(selectRoot.field.id, currentValue)
+				onActivated: {
+					if (currentIndex >= 0 && optionEnabled(currentIndex))
+						dialogState.updateField(selectRoot.field.id, currentValue)
+				}
             }
+			Label {
+				Layout.fillWidth: true
+				visible: String(selectRoot.field.hint || selectRoot.field.unavailableReason || "").length > 0
+				textFormat: Text.PlainText
+				text: String(selectRoot.field.hint || selectRoot.field.unavailableReason || "")
+				color: Theme.textMuted
+				font.pixelSize: 10
+				wrapMode: Text.Wrap
+			}
         }
     }
     Component {
@@ -1123,30 +1244,233 @@ Dialog {
 		RowLayout {
 			id: colorRoot
 			property var field: ({})
+			readonly property bool fieldEnabled: field.enabled === undefined || !!field.enabled
             width: parent ? parent.width : 0
             Label { Layout.fillWidth: true; textFormat: Text.PlainText; text: colorRoot.field.label || ""; color: Theme.textMain }
 			Button {
+				id: colorButton
 				objectName: "dialogColorButton_" + String(colorRoot.field.id || "")
-				Layout.preferredWidth: 38; Layout.preferredHeight: 28
+				Layout.preferredWidth: 42
+				Layout.preferredHeight: 30
 				text: ""
+				enabled: colorRoot.fieldEnabled
+				hoverEnabled: true
+				activeFocusOnTab: true
+				padding: 0
+				readonly property var picker: colorPicker
                 Accessible.role: Accessible.Button
                 Accessible.name: qsTr("Choose %1").arg(colorRoot.field.label || qsTr("color"))
 				Accessible.description: String(colorRoot.field.value || "")
 				background: Rectangle {
-					radius: 6
+					radius: Theme.innerRadius
 					color: String(colorRoot.field.value || "#000000")
-					border.color: parent.activeFocus ? Theme.focus : Theme.divider
-					border.width: parent.activeFocus ? 2 : 1
+					opacity: colorButton.enabled ? 1.0 : 0.55
+					border.color: !colorButton.enabled ? Theme.divider
+						: colorButton.activeFocus ? Theme.focus
+						: colorButton.down ? Theme.accent
+						: colorButton.hovered ? Theme.surfaceBorder : Theme.divider
+					border.width: colorButton.activeFocus ? Theme.focusRingWidth : 1
 				}
-				onClicked: colorDialog.open()
+				onClicked: colorPicker.open()
             }
-			Label { textFormat: Text.PlainText; text: String(colorRoot.field.value || ""); color: Theme.textMuted; font.pixelSize: 11 }
-            ColorDialog {
-                id: colorDialog
-                title: colorRoot.field.label || qsTr("Choose color")
-                selectedColor: String(colorRoot.field.value || "#000000")
-                onAccepted: dialogState.updateField(colorRoot.field.id, selectedColor.toString())
-            }
+			Label {
+				textFormat: Text.PlainText
+				text: String(colorRoot.field.value || "")
+				color: Theme.textMuted
+				opacity: colorRoot.fieldEnabled ? 1.0 : 0.65
+				font.pixelSize: 11
+
+			Popup {
+				id: colorPicker
+				objectName: "dialogColorPicker_" + String(colorRoot.field.id || "")
+				parent: Overlay.overlay
+				modal: true
+				dim: false
+				focus: true
+				padding: Theme.space4
+				width: parent ? Math.max(248, Math.min(360, parent.width - (Theme.space4 * 2))) : 340
+				x: parent ? Math.round((parent.width - width) / 2) : 0
+				y: parent ? Math.round((parent.height - height) / 2) : 0
+				closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+				palette.window: Theme.surfaceRaised
+				palette.active.base: Theme.surfaceRaised
+				palette.inactive.base: Theme.surfaceRaised
+				palette.alternateBase: Theme.panel
+				palette.active.button: Theme.surfaceRaised
+				palette.inactive.button: Theme.surfaceRaised
+				palette.active.text: Theme.textMain
+				palette.inactive.text: Theme.textMain
+				palette.active.windowText: Theme.textMain
+				palette.inactive.windowText: Theme.textMain
+				palette.active.buttonText: Theme.textStrong
+				palette.inactive.buttonText: Theme.textStrong
+				palette.active.brightText: Theme.textStrong
+				palette.inactive.brightText: Theme.textStrong
+				palette.active.highlight: Theme.selected
+				palette.inactive.highlight: Theme.selected
+				palette.active.highlightedText: Theme.textStrong
+				palette.inactive.highlightedText: Theme.textStrong
+				palette.placeholderText: Theme.textMuted
+				palette.active.link: Theme.accent
+				palette.inactive.link: Theme.accent
+				palette.active.linkVisited: Theme.accentHover
+				palette.inactive.linkVisited: Theme.accentHover
+				palette.active.toolTipBase: Theme.surfaceRaised
+				palette.inactive.toolTipBase: Theme.surfaceRaised
+				palette.active.toolTipText: Theme.textStrong
+				palette.inactive.toolTipText: Theme.textStrong
+				palette.active.light: Theme.surfaceHover
+				palette.inactive.light: Theme.surfaceHover
+				palette.active.midlight: Theme.surfaceRaised
+				palette.inactive.midlight: Theme.surfaceRaised
+				palette.active.mid: Theme.surfaceBorder
+				palette.inactive.mid: Theme.surfaceBorder
+				palette.dark: Theme.rail
+				palette.shadow: Theme.strip
+				palette.disabled.window: Theme.surfaceRaised
+				palette.disabled.base: Theme.panel
+				palette.disabled.alternateBase: Theme.panel
+				palette.disabled.button: Theme.panel
+				palette.disabled.text: Theme.textMuted
+				palette.disabled.windowText: Theme.textMuted
+				palette.disabled.buttonText: Theme.textMuted
+				palette.disabled.brightText: Theme.textMuted
+				palette.disabled.highlight: Theme.surfaceBorder
+				palette.disabled.highlightedText: Theme.textMuted
+				palette.disabled.placeholderText: Theme.textMuted
+				palette.disabled.light: Theme.surfaceBorder
+				palette.disabled.midlight: Theme.panel
+				palette.disabled.mid: Theme.divider
+				palette.disabled.dark: Theme.rail
+				palette.disabled.shadow: Theme.strip
+				palette.disabled.link: Theme.textMuted
+				palette.disabled.linkVisited: Theme.textMuted
+				palette.disabled.toolTipBase: Theme.panel
+				palette.disabled.toolTipText: Theme.textMuted
+				property string draftColor: "#000000"
+				function isValidHex(value) {
+					return /^#[0-9a-fA-F]{6}$/.test(String(value || "").trim())
+				}
+				function normalizedHex(value) {
+					const candidate = String(value || "").trim()
+					return isValidHex(candidate) ? candidate.toUpperCase() : "#000000"
+				}
+				function setDraft(value) {
+					draftColor = normalizedHex(value)
+					hexInput.text = draftColor
+				}
+				function applyDraft() {
+					if (!isValidHex(draftColor)) return
+					dialogState.updateField(colorRoot.field.id, normalizedHex(draftColor))
+					close()
+				}
+				onOpened: {
+					dialog.nestedModalOpen = true
+					setDraft(colorRoot.field.value || "#000000")
+					Qt.callLater(function() {
+						hexInput.forceActiveFocus(Qt.PopupFocusReason)
+						hexInput.selectAll()
+					})
+				}
+				onClosed: {
+					dialog.nestedModalOpen = false
+					if (colorButton.visible && colorButton.enabled)
+						Qt.callLater(function() { colorButton.forceActiveFocus(Qt.PopupFocusReason) })
+				}
+				background: Rectangle {
+					radius: Theme.shellRadius
+					color: Theme.surfaceRaised
+					border.color: Theme.surfaceBorder
+					border.width: 1
+				}
+				contentItem: ColumnLayout {
+					objectName: "dialogColorPickerDialog_" + String(colorRoot.field.id || "")
+					Accessible.role: Accessible.Dialog
+					Accessible.name: qsTr("Choose %1").arg(colorRoot.field.label || qsTr("color"))
+					Accessible.description: qsTr("Select a preset or enter a hexadecimal color value")
+					spacing: Theme.space3
+					Label {
+						Layout.fillWidth: true
+						textFormat: Text.PlainText
+						text: colorRoot.field.label || qsTr("Choose color")
+						Accessible.ignored: true
+						color: Theme.textStrong
+						font.pixelSize: Theme.fontTitle
+						font.weight: Font.DemiBold
+					}
+					RowLayout {
+						Layout.fillWidth: true
+						spacing: Theme.space2
+						Rectangle {
+							Layout.preferredWidth: Theme.controlHeight
+							Layout.preferredHeight: Theme.controlHeight
+							radius: Theme.innerRadius
+							color: colorPicker.isValidHex(colorPicker.draftColor)
+								? colorPicker.draftColor : Theme.panel
+							border.color: colorPicker.isValidHex(colorPicker.draftColor)
+								? Theme.surfaceBorder : Theme.danger
+						}
+						ModernTextField {
+							id: hexInput
+							objectName: "dialogColorHex_" + String(colorRoot.field.id || "")
+							Layout.fillWidth: true
+							placeholderText: "#RRGGBB"
+							maximumLength: 7
+							invalid: text.length > 0 && !colorPicker.isValidHex(text)
+							inputMethodHints: Qt.ImhNoPredictiveText | Qt.ImhPreferUppercase
+							Accessible.name: qsTr("Hex color")
+							onTextEdited: colorPicker.draftColor = text.trim()
+							onAccepted: colorPicker.applyDraft()
+						}
+					}
+					Flow {
+						Layout.fillWidth: true
+						spacing: Theme.space2
+						Repeater {
+							model: [Theme.accent, Theme.accentHover, Theme.success, Theme.warning,
+								Theme.danger, Theme.textStrong, Theme.textMuted]
+							delegate: Button {
+								id: presetButton
+								objectName: "dialogColorPreset_" + index
+								width: 32
+								height: 32
+								padding: 0
+								text: ""
+								hoverEnabled: true
+								activeFocusOnTab: true
+								Accessible.role: Accessible.Button
+								Accessible.name: qsTr("Use color %1").arg(String(modelData))
+								background: Rectangle {
+									radius: Theme.innerRadius
+									color: modelData
+									border.color: presetButton.activeFocus ? Theme.focus
+										: presetButton.down ? Theme.accent
+										: presetButton.hovered ? Theme.textMuted : Theme.surfaceBorder
+									border.width: presetButton.activeFocus ? Theme.focusRingWidth : 1
+								}
+								onClicked: colorPicker.setDraft(modelData)
+							}
+						}
+					}
+					RowLayout {
+						Layout.fillWidth: true
+						Item { Layout.fillWidth: true }
+						ModernButton {
+							objectName: "dialogColorCancel_" + String(colorRoot.field.id || "")
+							text: qsTr("Cancel")
+							onClicked: colorPicker.close()
+						}
+						ModernButton {
+							objectName: "dialogColorApply_" + String(colorRoot.field.id || "")
+							text: qsTr("Apply")
+							tone: "primary"
+							enabled: colorPicker.isValidHex(colorPicker.draftColor)
+							onClicked: colorPicker.applyDraft()
+						}
+					}
+				}
+			}
+			}
         }
     }
     Component {
@@ -1263,15 +1587,20 @@ Dialog {
 					height: resultRoot.resultRowHeight
 					hoverEnabled: true
 					highlighted: ListView.isCurrentItem || hovered
+					readonly property bool current: ListView.isCurrentItem
+					readonly property bool keyboardFocused: activeFocus
+						|| (ListView.view.activeFocus && current)
 					Accessible.role: Accessible.ListItem
 					Accessible.name: String(modelData.label || modelData.title || modelData.name || stableId)
 					Accessible.description: String(modelData.subtitle || modelData.description || "")
-					Accessible.selected: ListView.isCurrentItem
+					Accessible.selected: current
 					background: Rectangle {
 						radius: 6
-						color: resultDelegate.highlighted ? Theme.surfaceHover : Theme.strip
-						border.color: resultDelegate.highlighted ? Theme.focus : Theme.divider
-						border.width: resultDelegate.highlighted ? Theme.focusRingWidth : 1
+						color: resultDelegate.current ? Theme.selected
+							: resultDelegate.hovered ? Theme.surfaceHover : Theme.strip
+						border.color: resultDelegate.keyboardFocused ? Theme.focus
+							: resultDelegate.current ? Theme.accent : Theme.divider
+						border.width: resultDelegate.keyboardFocused ? Theme.focusRingWidth : 1
 					}
 					contentItem: RowLayout {
 						spacing: Math.max(6, Theme.spacing - 2)
@@ -1372,6 +1701,283 @@ Dialog {
 			}
         }
     }
+	Component {
+		id: themeGridField
+		ColumnLayout {
+			id: themeGridRoot
+			property var field: ({})
+			readonly property var selectedOption: dialog.optionForFieldValue(field.id, field.value)
+			readonly property var selectedPreview: selectedOption.preview || selectedOption.swatch || ({})
+			readonly property string accentId: String(dialogState.fieldValue("look.modernAccent") || "auto")
+			readonly property var accentOption: dialog.optionForFieldValue("look.modernAccent", accentId)
+			readonly property color selectedAccent: (accentOption.swatch || {}).accent
+				|| selectedPreview.accent || Theme.accent
+			width: parent ? parent.width : 0
+			spacing: Theme.space3
+
+			RowLayout {
+				Layout.fillWidth: true
+				Label {
+					textFormat: Text.PlainText
+					text: themeGridRoot.field.label || qsTr("Theme")
+					color: Theme.textStrong
+					font.bold: true
+				}
+				Item { Layout.fillWidth: true }
+				Label {
+					textFormat: Text.PlainText
+					text: qsTr("%n theme(s)", "", (themeGridRoot.field.options || []).length)
+					color: Theme.textMuted
+					font.pixelSize: Theme.fontCaption
+				}
+			}
+
+			Rectangle {
+				id: appearanceOverview
+				objectName: "appearanceThemeOverview"
+				Layout.fillWidth: true
+				Layout.preferredHeight: 132
+				radius: Theme.innerRadius
+				color: themeGridRoot.selectedPreview.shell || themeGridRoot.selectedPreview.bg
+					|| Theme.shellBackground
+				border.color: themeGridRoot.selectedAccent
+				border.width: 1
+				clip: true
+				Accessible.role: Accessible.Pane
+				Accessible.name: qsTr("Current appearance preview: %1").arg(themeGridRoot.selectedOption.label || "")
+
+				Rectangle {
+					anchors.left: parent.left
+					anchors.top: parent.top
+					anchors.bottom: parent.bottom
+					width: 54
+					color: themeGridRoot.selectedPreview.rail || Theme.rail
+					Column {
+						anchors.centerIn: parent
+						spacing: 10
+						Repeater {
+							model: 4
+							Rectangle {
+								width: 22; height: 22; radius: 7
+								color: index === 0 ? themeGridRoot.selectedAccent
+									: themeGridRoot.selectedPreview.surface || Theme.surfaceRaised
+								opacity: index === 0 ? 1 : 0.78
+							}
+						}
+					}
+				}
+				Rectangle {
+					anchors.left: parent.left
+					anchors.leftMargin: 54
+					anchors.right: parent.right
+					anchors.top: parent.top
+					height: 28
+					color: themeGridRoot.selectedPreview.strip || Theme.strip
+				}
+				Rectangle {
+					anchors.left: parent.left
+					anchors.leftMargin: 66
+					anchors.right: parent.right
+					anchors.rightMargin: 12
+					anchors.top: parent.top
+					anchors.topMargin: 40
+					anchors.bottom: parent.bottom
+					anchors.bottomMargin: 12
+					radius: 8
+					color: themeGridRoot.selectedPreview.panel || Theme.panel
+					border.color: themeGridRoot.selectedPreview.border || Theme.surfaceBorder
+					RowLayout {
+						anchors.fill: parent
+						anchors.margins: 12
+						spacing: 12
+						ColumnLayout {
+							Layout.fillWidth: true
+							spacing: 7
+							Label {
+								Layout.fillWidth: true
+								textFormat: Text.PlainText
+								text: themeGridRoot.selectedOption.label || qsTr("Selected theme")
+								color: themeGridRoot.selectedPreview.text || Theme.textStrong
+								font.bold: true
+							}
+							Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 6; radius: 3; color: themeGridRoot.selectedAccent }
+							Rectangle { Layout.preferredWidth: parent.width * 0.68; Layout.preferredHeight: 5; radius: 3; color: themeGridRoot.selectedPreview.textMuted || Theme.textMuted }
+						}
+						Row {
+							spacing: 6
+							Repeater {
+								model: [themeGridRoot.selectedPreview.success || Theme.success,
+									themeGridRoot.selectedPreview.warning || Theme.warning,
+									themeGridRoot.selectedPreview.danger || Theme.danger]
+								Rectangle { required property color modelData; width: 10; height: 10; radius: 5; color: modelData }
+							}
+						}
+					}
+				}
+			}
+
+			Flow {
+				id: themeFlow
+				Layout.fillWidth: true
+				Layout.preferredHeight: childrenRect.height
+				spacing: Theme.space2
+				readonly property int columnCount: width >= 680 ? 4 : width >= 500 ? 3 : width >= 320 ? 2 : 1
+				readonly property real cardWidth: Math.floor((width - ((columnCount - 1) * spacing)) / columnCount)
+				Repeater {
+					model: themeGridRoot.field.options || []
+					delegate: ItemDelegate {
+						id: themeCard
+						required property var modelData
+						required property int index
+						hoverEnabled: true
+						readonly property var palette: modelData.preview || modelData.swatch || ({})
+						readonly property bool selected: String(modelData.value) === String(themeGridRoot.field.value)
+						readonly property color cardAccent: themeGridRoot.accentId === "auto"
+							? (palette.accent || Theme.accent) : themeGridRoot.selectedAccent
+						objectName: "dialogThemeOption_" + String(modelData.value || index)
+						width: themeFlow.cardWidth
+						height: 112
+						enabled: modelData.enabled === undefined || modelData.enabled
+						opacity: enabled ? 1 : 0.5
+						padding: 0
+						Accessible.role: Accessible.RadioButton
+						Accessible.name: modelData.label || String(modelData.value)
+						Accessible.description: modelData.source === "custom" ? qsTr("Custom theme") : qsTr("Built-in theme")
+						Accessible.checked: selected
+						onClicked: dialogState.updateField(themeGridRoot.field.id, modelData.value)
+						background: Rectangle {
+							radius: 9
+							color: themeCard.palette.shell || themeCard.palette.bg || Theme.shellBackground
+							border.color: themeCard.activeFocus ? Theme.focus
+								: themeCard.selected ? themeCard.cardAccent
+								: themeCard.hovered ? (themeCard.palette.textMuted || Theme.textMuted)
+								: (themeCard.palette.border || Theme.surfaceBorder)
+							border.width: themeCard.activeFocus || themeCard.selected ? 2 : 1
+						}
+						contentItem: Item {
+							Rectangle {
+								x: 8; y: 8; width: 24; height: 66; radius: 6
+								color: themeCard.palette.rail || Theme.rail
+								Rectangle { anchors.centerIn: parent; width: 12; height: 12; radius: 4; color: themeCard.cardAccent }
+							}
+							Rectangle {
+								x: 38; y: 8; width: parent.width - 46; height: 66; radius: 6
+								color: themeCard.palette.panel || Theme.panel
+								border.color: themeCard.palette.border || Theme.surfaceBorder
+								Column {
+									anchors.fill: parent; anchors.margins: 8; spacing: 6
+									Rectangle { width: parent.width * 0.72; height: 5; radius: 3; color: themeCard.palette.text || Theme.textStrong }
+									Rectangle { width: parent.width; height: 13; radius: 4; color: themeCard.cardAccent; opacity: 0.72 }
+									Rectangle { width: parent.width * 0.58; height: 5; radius: 3; color: themeCard.palette.textMuted || Theme.textMuted }
+								}
+							}
+							RowLayout {
+								x: 9; y: 81; width: parent.width - 18
+								Label {
+									Layout.fillWidth: true
+									textFormat: Text.PlainText
+									text: themeCard.modelData.label || String(themeCard.modelData.value)
+									color: themeCard.palette.text || Theme.textStrong
+									font.pixelSize: Theme.fontCaption
+									font.bold: themeCard.selected
+									elide: Text.ElideRight
+								}
+								Label {
+									visible: themeCard.modelData.source === "custom"
+									textFormat: Text.PlainText
+									text: qsTr("Custom")
+									color: themeCard.cardAccent
+									font.pixelSize: 9
+								}
+							}
+						}
+					}
+				}
+			}
+			Label {
+				Layout.fillWidth: true
+				visible: String(themeGridRoot.field.hint || "").length > 0
+				textFormat: Text.PlainText
+				text: themeGridRoot.field.hint || ""
+				color: Theme.textMuted
+				font.pixelSize: Theme.fontCaption
+				wrapMode: Text.Wrap
+			}
+		}
+	}
+	Component {
+		id: accentGridField
+		ColumnLayout {
+			id: accentGridRoot
+			property var field: ({})
+			width: parent ? parent.width : 0
+			spacing: Theme.space2
+			Label {
+				Layout.fillWidth: true
+				textFormat: Text.PlainText
+				text: accentGridRoot.field.label || qsTr("Accent")
+				color: Theme.textStrong
+				font.bold: true
+			}
+			Flow {
+				id: accentFlow
+				Layout.fillWidth: true
+				Layout.preferredHeight: childrenRect.height
+				spacing: Theme.space2
+				Repeater {
+					model: accentGridRoot.field.options || []
+					delegate: ItemDelegate {
+						id: accentCard
+						required property var modelData
+						required property int index
+						hoverEnabled: true
+						readonly property bool selected: String(modelData.value) === String(accentGridRoot.field.value)
+						readonly property color swatchColor: (modelData.swatch || {}).accent || Theme.accent
+						objectName: "dialogAccentOption_" + String(modelData.value || index)
+						width: Math.max(98, Math.min(126, Math.floor((accentFlow.width - (Theme.space2 * 3)) / 4)))
+						height: 58
+						padding: 0
+						enabled: modelData.enabled === undefined || modelData.enabled
+						opacity: enabled ? 1 : 0.5
+						Accessible.role: Accessible.RadioButton
+						Accessible.name: modelData.label || String(modelData.value)
+						Accessible.description: modelData.hint || ""
+						Accessible.checked: selected
+						onClicked: dialogState.updateField(accentGridRoot.field.id, modelData.value)
+						background: Rectangle {
+							radius: 9
+							color: accentCard.selected ? Theme.selected
+								: accentCard.hovered ? Theme.surfaceHover : Theme.surfaceRaised
+							border.color: accentCard.activeFocus ? Theme.focus
+								: accentCard.selected ? accentCard.swatchColor : Theme.surfaceBorder
+							border.width: accentCard.activeFocus || accentCard.selected ? 2 : 1
+						}
+						contentItem: RowLayout {
+							anchors.fill: parent
+							anchors.margins: 9
+							spacing: 8
+							Rectangle {
+								Layout.preferredWidth: 20; Layout.preferredHeight: 20
+								radius: 10
+								color: accentCard.swatchColor
+								border.color: Theme.textStrong
+								border.width: accentCard.modelData.automatic ? 1 : 0
+							}
+							Label {
+								Layout.fillWidth: true
+								textFormat: Text.PlainText
+								text: accentCard.modelData.label || String(accentCard.modelData.value)
+								color: Theme.textStrong
+								font.pixelSize: Theme.fontCaption
+								font.bold: accentCard.selected
+								elide: Text.ElideRight
+							}
+						}
+					}
+				}
+			}
+		}
+	}
     Component {
         id: textareaField
         ColumnLayout {

@@ -11,6 +11,8 @@ Rectangle {
 
     readonly property string connectionState: session ? String(session.connectionState || "").toLowerCase() : ""
     readonly property string tone: session ? String(session.connectionTone || "muted").toLowerCase() : "muted"
+	readonly property bool failed: connectionState === "disconnected"
+		&& (tone === "danger" || tone === "error")
 	readonly property int reportedRetryRemainingMs: session
 		? Math.max(0, Number(session.connectionRetryRemainingMs || 0)) : 0
 	property double retryDeadlineEpochMs: 0
@@ -20,18 +22,24 @@ Rectangle {
     readonly property int retryRemainingSeconds: retryRemainingMs > 0 ? Math.max(1, Math.ceil(retryRemainingMs / 1000)) : 0
     readonly property string title: connectionState === "retrying" ? qsTr("Connection lost — reconnecting…")
                                             : connectionState === "connecting" ? qsTr("Connecting to server…")
-                                            : connectionState === "disconnected" ? qsTr("You're disconnected")
+                                            : connectionState === "disconnected"
+											? (failed ? qsTr("Connection failed") : qsTr("You're disconnected"))
                                             : ""
     readonly property string detail: connectionState === "retrying" && retryRemainingSeconds > 0
                                              ? qsTr("Automatic reconnect will retry in %1s.").arg(retryRemainingSeconds)
                                              : session && String(session.connectionDetail || "").length > 0
                                                  ? String(session.connectionDetail)
                                                  : session ? String(session.connectionLabel || "") : ""
+	readonly property string accessibleDetail: connectionState === "retrying"
+		? (session && String(session.connectionDetail || "").length > 0
+			? String(session.connectionDetail) : qsTr("Automatic reconnect is scheduled."))
+		: detail
     readonly property string primaryActionId: connectionState === "disconnected"
                                                        ? (session && session.canConnect ? "server.connect" : "")
                                                        : (connectionState === "connecting" || connectionState === "retrying")
                                                            && session && session.canCancel ? "server.disconnect" : ""
-    readonly property string primaryActionLabel: connectionState === "disconnected" ? qsTr("Connect") : qsTr("Cancel")
+    readonly property string primaryActionLabel: connectionState === "disconnected"
+		? (failed ? qsTr("Try again") : qsTr("Connect")) : qsTr("Cancel")
     readonly property bool bannerVisible: connectionState.length > 0 && connectionState !== "connected"
     readonly property bool compactLayout: width < 520
     readonly property color toneColor: tone === "danger" || tone === "error" ? Theme.danger
@@ -45,11 +53,15 @@ Rectangle {
     radius: Theme.innerRadius
     border.width: 1
     border.color: toneColor
-    activeFocusOnTab: visible && primaryActionId.length > 0
+    Behavior on border.color { ColorAnimation { duration: Theme.motionFast } }
+    // The alert describes the connection state, but only its real action is a
+    // keyboard stop. Keeping the container out of the tab chain avoids two
+    // consecutive controls that perform the same operation.
+    activeFocusOnTab: false
 
     Accessible.role: Accessible.AlertMessage
     Accessible.name: title
-    Accessible.description: detail
+    Accessible.description: accessibleDetail
 
 	function resetRetryDeadline() {
 		retryClockEpochMs = Date.now()
@@ -76,18 +88,9 @@ Rectangle {
     function focusPrimaryAction() {
         if (primaryActionId.length > 0) {
             primaryButton.forceActiveFocus()
-            return true
+			return true
         }
-        forceActiveFocus()
-        return false
-    }
-
-    Keys.onPressed: function(event) {
-        if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space)
-                && primaryActionId.length > 0) {
-            requestPrimaryAction()
-            event.accepted = true
-        }
+		return false
     }
 
     RowLayout {
@@ -118,6 +121,7 @@ Rectangle {
                 color: Theme.textStrong
                 font.bold: true
                 elide: Text.ElideRight
+				Accessible.ignored: true
             }
 
             Label {
@@ -129,6 +133,7 @@ Rectangle {
                 text: root.detail
                 color: Theme.textMuted
                 wrapMode: Text.Wrap
+				Accessible.ignored: true
             }
 
             ModernButton {
@@ -141,7 +146,7 @@ Rectangle {
                 visible: root.primaryActionId.length > 0
                 text: root.primaryActionLabel
                 Accessible.name: text
-                Accessible.description: root.detail
+                Accessible.description: root.accessibleDetail
                 onClicked: root.requestPrimaryAction()
             }
         }

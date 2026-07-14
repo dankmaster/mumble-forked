@@ -36,6 +36,9 @@ TestCase {
 		reuseItems: true
 		delegate: Shell.ChatMessageFrame {
 			required property real bodyHeight
+			ListView.onPooled: accessibilityPooled = true
+			ListView.onReused: accessibilityPooled = false
+			Accessible.ignored: accessibilityFrameIgnored
 			laneAvailableWidth: timeline.width
 			width: laneAvailableWidth
 			bodyImplicitHeight: bodyHeight
@@ -83,6 +86,23 @@ TestCase {
 			if (oldItem)
 				verify(!oldItem.visible, "Pooled delegate remained visible without a model")
 		}
+	}
+
+	function test_accessibility_parentage_stays_stable_across_pooling() {
+		const item = timeline.itemAtIndex(0)
+		verify(item !== null)
+		const surface = findChild(item, "chatMessageSurface")
+		verify(surface !== null)
+		verify(item.accessibilityFrameIgnored)
+		verify(item.accessibilitySubtreeActive)
+
+		item.accessibilityPooled = true
+		verify(item.accessibilityFrameIgnored)
+		verify(!item.accessibilitySubtreeActive)
+
+		item.accessibilityPooled = false
+		verify(item.accessibilityFrameIgnored)
+		verify(item.accessibilitySubtreeActive)
 	}
 
 	function test_compact_rows_reserve_padding_and_minimum_height() {
@@ -136,6 +156,10 @@ TestCase {
 		outgoing.wideContent = true
 		compare(outgoing.messageWidth, 840)
 		compare(outgoing.surfaceX, 120)
+		outgoing.preferredWideContentWidth = 596
+		compare(outgoing.messageWidth, 596)
+		compare(outgoing.surfaceX, 364)
+		verify(outgoing.surfaceX + outgoing.surfaceWidth <= 960)
 		outgoing.wideContent = false
 	}
 }

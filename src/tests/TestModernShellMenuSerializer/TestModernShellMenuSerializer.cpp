@@ -14,6 +14,7 @@ class TestModernShellMenuSerializer : public QObject {
 
 private slots:
 	void serializesActionsAndDynamicContextActionWithoutWidgets();
+	void omitsUnavailableContextActionsAndRegistryEntries();
 	void buildsTypedLabelAndSliderItems();
 };
 
@@ -56,6 +57,46 @@ void TestModernShellMenuSerializer::serializesActionsAndDynamicContextActionWith
 	const auto dynamicRegistryEntry = registry.value(QStringLiteral("context:channel:dynamic-token"));
 	QVERIFY(dynamicRegistryEntry.action == &dynamicAction);
 	QCOMPARE(dynamicRegistryEntry.contextActionData, QStringLiteral("dynamic-token"));
+}
+
+void TestModernShellMenuSerializer::omitsUnavailableContextActionsAndRegistryEntries() {
+	QObject owner;
+	QAction allowedAction(QObject::tr("Allowed Action"), &owner);
+	QAction deniedAction(QObject::tr("Denied Action"), &owner);
+	QAction pendingPermissionAction(QObject::tr("Pending Permission Action"), &owner);
+	QAction explanatoryAction(QObject::tr("Temporarily Unavailable"), &owner);
+	deniedAction.setEnabled(false);
+	explanatoryAction.setEnabled(false);
+
+	ModernShellMenuSerializer::ActionRegistry registry;
+	const QVariantList items = ModernShellMenuSerializer::serializeActions(
+		{ &allowedAction, &deniedAction, &pendingPermissionAction, &explanatoryAction },
+		[&allowedAction, &deniedAction, &pendingPermissionAction](const QAction *action) {
+			ModernShellMenuSerializer::ActionDefinition definition;
+			if (action == &allowedAction) {
+				definition.id = QStringLiteral("allowed");
+				definition.omitWhenDisabled = true;
+			} else if (action == &deniedAction) {
+				definition.id = QStringLiteral("denied");
+				definition.omitWhenDisabled = true;
+			} else if (action == &pendingPermissionAction) {
+				definition.id = QStringLiteral("pendingPermission");
+				definition.available = false;
+			} else {
+				definition.id = QStringLiteral("explanatory");
+			}
+			return definition;
+		},
+		&registry);
+
+	QCOMPARE(items.size(), 2);
+	QCOMPARE(items.at(0).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("allowed"));
+	QCOMPARE(items.at(1).toMap().value(QStringLiteral("id")).toString(), QStringLiteral("explanatory"));
+	QVERIFY(items.at(1).toMap().value(QStringLiteral("enabled")).toBool() == false);
+	QVERIFY(registry.contains(QStringLiteral("allowed")));
+	QVERIFY(!registry.contains(QStringLiteral("denied")));
+	QVERIFY(!registry.contains(QStringLiteral("pendingPermission")));
+	QVERIFY(registry.contains(QStringLiteral("explanatory")));
 }
 
 void TestModernShellMenuSerializer::buildsTypedLabelAndSliderItems() {

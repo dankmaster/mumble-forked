@@ -63,6 +63,7 @@ bool isBuiltInThemeId(const QString &themeID);
 QString normalizedThemeId(const QString &themeID);
 QString customAccentId();
 QString normalizedAccentId(const QString &accentID);
+QColor accentColorOverride(const QString &accentID, const QString &customColor = QString());
 QString normalizedCustomAccentColor(const QString &color);
 int normalizedCustomAccentStrength(int strength);
 
