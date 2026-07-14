@@ -209,9 +209,54 @@ foreach ($case in $selectedCases) {
 			"position=$position."
 	}
 
-	# Focus propagation in Qt Quick is queued behind the fixture update and can
-	# land one or two scene turns later under the software renderer. Poll the
-	# semantic tree, rather than sleeping for a machine-dependent duration.
+	$imagePath = Join-Path $output "$($case.id).png"
+	$expectedWidth = [int][Math]::Round([int]$case.width * [double]$case.device_pixel_ratio)
+	$expectedHeight = [int][Math]::Round([int]$case.height * [double]$case.device_pixel_ratio)
+	$minimumNonBlackFraction = 0.25
+	$captureDeadline = [DateTime]::UtcNow.AddSeconds(5)
+	$previousImageHash = ""
+	$stableFrameSamples = 0
+	$dimensions = $null
+	$lastCoverage = 0.0
+	do {
+		$capture = Invoke-Automation @{ command = "captureQml"; path = $imagePath; generation = $applied.generation }
+		if ([string]$capture.frontend -ne "qml" -or -not ($capture.PSObject.Properties.Name -contains "generation") -or
+			[long]$capture.generation -ne [long]$applied.generation) {
+			throw "Case '$($case.id)' returned a stale or non-QML capture."
+		}
+		if (-not (Test-Path -LiteralPath $imagePath -PathType Leaf)) {
+			throw "Case '$($case.id)' produced no capture."
+		}
+		$dimensions = Get-QmlVisualPngDimensions $imagePath
+		if ($dimensions.width -ne $expectedWidth -or $dimensions.height -ne $expectedHeight) {
+			throw "Case '$($case.id)' captured $($dimensions.width)x$($dimensions.height), expected ${expectedWidth}x${expectedHeight}."
+		}
+		$coverage = Get-QmlVisualPngCoverage $imagePath
+		$lastCoverage = [double]$coverage.non_black_fraction
+		if ($lastCoverage -ge $minimumNonBlackFraction) {
+			$currentImageHash = Get-QmlVisualFileSha256 $imagePath
+			if ($currentImageHash -ceq $previousImageHash) {
+				++$stableFrameSamples
+			} else {
+				$stableFrameSamples = 0
+				$previousImageHash = $currentImageHash
+			}
+			if ($stableFrameSamples -ge 1) { break }
+		} else {
+			$stableFrameSamples = 0
+			$previousImageHash = ""
+		}
+		Start-Sleep -Milliseconds 25
+	} while ([DateTime]::UtcNow -lt $captureDeadline)
+	if ($stableFrameSamples -lt 1) {
+		throw "Case '$($case.id)' did not produce two identical non-black frames within five seconds " +
+			"(last non-black coverage $([Math]::Round($lastCoverage * 100, 2))%, required $($minimumNonBlackFraction * 100)%)."
+	}
+	$acceptedImageHash = $previousImageHash
+
+	# Capture stabilization advances queued layout and scenegraph work. Sample
+	# accessibility afterwards so its geometry describes the accepted frame,
+	# rather than a pre-animation layout that happened to be stable briefly.
 	$accessibility = $null
 	$accessibilityDeadline = [DateTime]::UtcNow.AddSeconds(2)
 	$previousAccessibilityJson = ""
@@ -252,18 +297,17 @@ foreach ($case in $selectedCases) {
 	$accessibility.snapshot | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $accessibilityPath -Encoding utf8NoBOM
 	Assert-QmlAccessibilityEvidence -Snapshot $accessibility.snapshot -CaseId ([string]$case.id) -State ([string]$case.state) -NavigationOpen $navigationOpen
 
-	$imagePath = Join-Path $output "$($case.id).png"
-	$capture = Invoke-Automation @{ command = "captureQml"; path = $imagePath; generation = $applied.generation }
-	if ([string]$capture.frontend -ne "qml" -or -not ($capture.PSObject.Properties.Name -contains "generation") -or
-		[long]$capture.generation -ne [long]$applied.generation) {
-		throw "Case '$($case.id)' returned a stale or non-QML capture."
+	$finalCapture = Invoke-Automation @{ command = "captureQml"; path = $imagePath; generation = $applied.generation }
+	if ([string]$finalCapture.frontend -ne "qml" -or
+		-not ($finalCapture.PSObject.Properties.Name -contains "generation") -or
+		[long]$finalCapture.generation -ne [long]$applied.generation) {
+		throw "Case '$($case.id)' returned a stale or non-QML final capture."
 	}
-	if (-not (Test-Path -LiteralPath $imagePath -PathType Leaf)) { throw "Case '$($case.id)' produced no capture." }
-	$dimensions = Get-QmlVisualPngDimensions $imagePath
-	$expectedWidth = [int][Math]::Round([int]$case.width * [double]$case.device_pixel_ratio)
-	$expectedHeight = [int][Math]::Round([int]$case.height * [double]$case.device_pixel_ratio)
-	if ($dimensions.width -ne $expectedWidth -or $dimensions.height -ne $expectedHeight) {
-		throw "Case '$($case.id)' captured $($dimensions.width)x$($dimensions.height), expected ${expectedWidth}x${expectedHeight}."
+	$finalCoverage = Get-QmlVisualPngCoverage $imagePath
+	$finalImageHash = Get-QmlVisualFileSha256 $imagePath
+	if ([double]$finalCoverage.non_black_fraction -lt $minimumNonBlackFraction -or
+		$finalImageHash -cne $acceptedImageHash) {
+		throw "Case '$($case.id)' scene changed after accessibility stabilization or produced a partial frame."
 	}
 	$results.Add([ordered]@{
 		id = [string]$case.id; state = [string]$case.state; theme = [string]$case.theme; layout = [string]$case.layout

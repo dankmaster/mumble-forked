@@ -83,26 +83,30 @@ QVariantMap QmlVisualFixtureController::apply(const QVariantMap &request, QStrin
 			return {};
 		}
 	}
-	QVariant focusTarget;
 	window->requestActivate();
-	if (!QMetaObject::invokeMethod(window, "focusVisualFixture", Q_RETURN_ARG(QVariant, focusTarget),
-								  Q_ARG(QVariant, QVariant(state)))) {
-		if (error) *error = QStringLiteral("The visual fixture could not establish a deterministic focus target.");
-		return {};
-	}
-	QQuickItem *requestedFocusItem = qobject_cast< QQuickItem * >(focusTarget.value< QObject * >());
-	const QString requestedFocusName = requestedFocusItem ? requestedFocusItem->objectName().trimmed() : QString();
-	if (!requestedFocusItem || requestedFocusName.isEmpty()) {
-		if (error) *error = QStringLiteral("The visual fixture returned an invalid focus target.");
-		return {};
-	}
-	if (!waitForPresentedFrame(error)) return {};
-	QQuickItem *activeFocusItem = window->activeFocusItem();
+	QQuickItem *requestedFocusItem = nullptr;
+	QString requestedFocusName;
 	bool requestedTargetOwnsFocus = false;
-	for (QQuickItem *item = activeFocusItem; item; item = item->parentItem()) {
-		if (item == requestedFocusItem) {
-			requestedTargetOwnsFocus = true;
-			break;
+	constexpr int maximumFocusAttempts = 3;
+	for (int attempt = 0; attempt < maximumFocusAttempts && !requestedTargetOwnsFocus; ++attempt) {
+		QVariant focusTarget;
+		if (!QMetaObject::invokeMethod(window, "focusVisualFixture", Q_RETURN_ARG(QVariant, focusTarget),
+									  Q_ARG(QVariant, QVariant(state)))) {
+			if (error) *error = QStringLiteral("The visual fixture could not establish a deterministic focus target.");
+			return {};
+		}
+		requestedFocusItem = qobject_cast< QQuickItem * >(focusTarget.value< QObject * >());
+		requestedFocusName = requestedFocusItem ? requestedFocusItem->objectName().trimmed() : QString();
+		if (!requestedFocusItem || requestedFocusName.isEmpty()) {
+			if (error) *error = QStringLiteral("The visual fixture returned an invalid focus target.");
+			return {};
+		}
+		if (!waitForPresentedFrame(error)) return {};
+		for (QQuickItem *item = window->activeFocusItem(); item; item = item->parentItem()) {
+			if (item == requestedFocusItem) {
+				requestedTargetOwnsFocus = true;
+				break;
+			}
 		}
 	}
 	if (!requestedTargetOwnsFocus) {
@@ -164,9 +168,10 @@ void QmlVisualFixtureController::applyState(const QString &state) {
 		session->setSelfName(QStringLiteral("Demo User"));
 		const QVariantList voiceRooms {
 			QVariantMap { { QStringLiteral("token"), QStringLiteral("0:1") }, { QStringLiteral("label"), QStringLiteral("Lobby") },
-						  { QStringLiteral("selected"), true }, { QStringLiteral("joined"), true }, { QStringLiteral("depth"), 0 } },
+						  { QStringLiteral("selected"), true }, { QStringLiteral("joined"), true }, { QStringLiteral("depth"), 0 },
+						  { QStringLiteral("unreadCount"), 0 } },
 			QVariantMap { { QStringLiteral("token"), QStringLiteral("0:2") }, { QStringLiteral("label"), QStringLiteral("Studio") },
-						  { QStringLiteral("depth"), 0 } }
+						  { QStringLiteral("depth"), 0 }, { QStringLiteral("unreadCount"), 0 } }
 		};
 		const QVariantList textRoomActions {
 			QVariantMap { { QStringLiteral("kind"), QStringLiteral("action") },
@@ -180,22 +185,23 @@ void QmlVisualFixtureController::applyState(const QString &state) {
 						  { QStringLiteral("label"), QStringLiteral("#general") },
 						  { QStringLiteral("description"), QStringLiteral("Text room") },
 						  { QStringLiteral("selected"), false }, { QStringLiteral("depth"), 0 },
+						  { QStringLiteral("unreadCount"), 0 },
 						  { QStringLiteral("actions"), textRoomActions } }
 		};
-		rooms->replaceRoomStates(voiceRooms, textRooms);
+		// Scope changes can synchronously publish live room, participant, and
+		// conversation state. Apply every fixture model after the scope so those
+		// signal side-effects cannot clobber deterministic state while fixture
+		// writes are temporarily enabled.
+		scope->applyState({ { QStringLiteral("scopeToken"), QStringLiteral("0:1") }, { QStringLiteral("label"), QStringLiteral("Lobby") },
+							{ QStringLiteral("description"), QStringLiteral("Voice room") }, { QStringLiteral("kindLabel"), QStringLiteral("VOICE") },
+							{ QStringLiteral("composerPlaceholder"), QStringLiteral("Message Lobby") }, { QStringLiteral("canSend"), true },
+							{ QStringLiteral("canAttachImages"), true } });
 		participants->replaceParticipantStates({
 			QVariantMap { { QStringLiteral("session"), QStringLiteral("101") }, { QStringLiteral("name"), QStringLiteral("Demo User") },
 							{ QStringLiteral("statusLabel"), QStringLiteral("Listening") }, { QStringLiteral("talkState"), QStringLiteral("passive") } },
 			QVariantMap { { QStringLiteral("session"), QStringLiteral("102") }, { QStringLiteral("name"), QStringLiteral("Alex") },
 							{ QStringLiteral("statusLabel"), QStringLiteral("Talking") }, { QStringLiteral("talkState"), QStringLiteral("talking") } }
 		});
-		// Scope changes can synchronously publish the live conversation. Apply the
-		// fixture timeline last so those signal side-effects cannot clear it while
-		// the scoped fixture mutation is active.
-		scope->applyState({ { QStringLiteral("scopeToken"), QStringLiteral("0:1") }, { QStringLiteral("label"), QStringLiteral("Lobby") },
-							{ QStringLiteral("description"), QStringLiteral("Voice room") }, { QStringLiteral("kindLabel"), QStringLiteral("VOICE") },
-							{ QStringLiteral("composerPlaceholder"), QStringLiteral("Message Lobby") }, { QStringLiteral("canSend"), true },
-							{ QStringLiteral("canAttachImages"), true } });
 		const QVariantList fixtureMessages {
 			QVariantMap { { QStringLiteral("messageKey"), QStringLiteral("fixture:1") }, { QStringLiteral("actor"), QStringLiteral("Alex") },
 							{ QStringLiteral("bodyText"), QStringLiteral("Welcome to the deterministic visual fixture.") },
@@ -209,6 +215,9 @@ void QmlVisualFixtureController::applyState(const QString &state) {
 							{ QStringLiteral("reactions"), QVariantList() } }
 		};
 		chat->replaceMessages(fixtureMessages);
+		// Timeline publication can synchronously refresh persistent unread counts.
+		// Keep the synthetic room rows last so no live badge leaks into the fixture.
+		rooms->replaceRoomStates(voiceRooms, textRooms);
 		return;
 	}
 

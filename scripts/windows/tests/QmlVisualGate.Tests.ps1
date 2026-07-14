@@ -75,6 +75,21 @@ Describe "Qt Quick visual PNG tolerance" {
 		$result.passed | Should Be $false
 	}
 
+	It "measures non-black frame coverage independently of a baseline" {
+		$healthy = Get-QmlVisualPngCoverage $script:baselinePng
+		$healthy.non_black_fraction | Should Be 1.0
+
+		$black = Join-Path $script:pngRoot 'black-frame.png'
+		$changes = @{}
+		foreach ($y in 0..31) {
+			foreach ($x in 0..31) { $changes["$x,$y"] = [Drawing.Color]::Black }
+		}
+		New-TestPng $black $changes
+		$coverage = Get-QmlVisualPngCoverage $black
+		$coverage.non_black_pixels | Should Be 0
+		$coverage.non_black_fraction | Should Be 0.0
+	}
+
 	It "fails closed for a corrupt PNG" {
 		$candidate = Join-Path $script:pngRoot 'corrupt.png'
 		[IO.File]::WriteAllBytes($candidate, [byte[]](1, 2, 3, 4))
@@ -195,6 +210,17 @@ Describe "Qt Quick connected fixture contract" {
 		($worker -match 'stableAccessibilitySamples') | Should Be $true
 		($worker -match 'five identical observations') | Should Be $true
 		($worker -match 'did not stabilize across five scene observations') | Should Be $true
+	}
+
+	It "requires two identical non-black frames before accepting a capture" {
+		$worker = Get-Content -Raw "$PSScriptRoot\..\invoke-qml-visual-gate.ps1"
+		($worker -match 'Get-QmlVisualPngCoverage') | Should Be $true
+		($worker -match 'minimumNonBlackFraction') | Should Be $true
+		($worker -match 'stableFrameSamples') | Should Be $true
+		($worker -match 'two identical non-black frames') | Should Be $true
+		($worker -match 'acceptedImageHash') | Should Be $true
+		($worker -match 'finalImageHash') | Should Be $true
+		($worker -match 'scene changed after accessibility stabilization') | Should Be $true
 	}
 
 	It "rejects a focused accessibility node without a semantic name" {

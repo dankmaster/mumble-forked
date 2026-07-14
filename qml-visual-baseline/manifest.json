@@ -4,7 +4,7 @@
   "process_isolation": "per-dpr",
   "renderer": "software",
   "mode": "candidate-only",
-  "matrix_sha256": "80251fc9cc15e591f56222fa382db1207a6bf1c3d567bce5329526f7bbc41371",
+  "matrix_sha256": "ef601828f378297a169638242d540d9336d4799ce2cc130bb8c6a288a17c0617",
   "cases": [
     {
       "id": "desktop-light-connected",
@@ -17,8 +17,8 @@
       "device_pixel_ratio": 1.0,
       "image_width": 1440,
       "image_height": 900,
-      "image_sha256": "87f53bac363433c04c2b831b14bdae15e48a5412b331c716402361a5a2d05a92",
-      "accessibility_sha256": "184cdf8811566db2a0c2692475cceb0f62115b85f251c46c74c33a5a6ab9b908"
+      "image_sha256": "75a370f87b79976e52657d9e6c9deec5dc4d6116e18a7b385bb9ec132794a684",
+      "accessibility_sha256": "b9a5e39cfd71037de728ce18be0a3f9118cd70a8be170dba051bcaeccc81fb58"
     },
     {
       "id": "desktop-dark-connected",
@@ -31,8 +31,8 @@
       "device_pixel_ratio": 1.0,
       "image_width": 1440,
       "image_height": 900,
-      "image_sha256": "c13db77b687e7bb11d9ec405bbcf40c208b22533976ee7494032bff5ff01106b",
-      "accessibility_sha256": "760c3b6dd85bfcb064e6f939c9c44290f1ae2c08cac48040ed8f4a9138db9f22"
+      "image_sha256": "b5f358540375bf30af15969a9d252d8fb961d9035c2e58e591b9103c0ed4a32c",
+      "accessibility_sha256": "b24376f4b3c7cc6414b1bf2ad09161fb28a97a853ac74d49df48b62657b743a8"
     },
     {
       "id": "compact-light-connected",
@@ -45,8 +45,8 @@
       "device_pixel_ratio": 1.0,
       "image_width": 760,
       "image_height": 700,
-      "image_sha256": "8de13cce7e17711f3b7b591a4e92c3c2352dd9844f44e9dca3d77cac91fe5d4a",
-      "accessibility_sha256": "010e0cd331b982cda5a9f173f35d6e242f4a8e9a26f3c7bd28340e463d942e5a"
+      "image_sha256": "2f9dc281ec1e0e5320d3522fe93729100f1070d8f8a12220494e6bd530ffff08",
+      "accessibility_sha256": "2668177ddd4a9ecaf3c06c0acf98fa4eb113f96ed9beb34870b81f656dd62daf"
     },
     {
       "id": "compact-dark-connected",
@@ -59,8 +59,8 @@
       "device_pixel_ratio": 1.0,
       "image_width": 420,
       "image_height": 700,
-      "image_sha256": "a919bab8c13d2bd331246e489fa27fc6737d60fa9d79e8b9eb09051fcba15341",
-      "accessibility_sha256": "c44be1790f3b2c92c1fd3ab9ed41031bbb7141f87338c5871c5ef33158d13a46"
+      "image_sha256": "82daf167682d533f153a76194130262f16460a3b8541318f7f272e17ea199c66",
+      "accessibility_sha256": "e0317113948210145afb139cd425a025ca3ca0898a1179a948e77e99fde0c7fd"
     },
     {
       "id": "desktop-light-empty",
@@ -73,8 +73,8 @@
       "device_pixel_ratio": 1.0,
       "image_width": 1280,
       "image_height": 800,
-      "image_sha256": "225b5ea1c81e34d80ca4d5ef4b40c45914a75b8c83b13f878e3e9f3bb584b119",
-      "accessibility_sha256": "6fd25cbd723e92474a65b945ef20302c39dd31087e10c7fd7fb408d6db3117ac"
+      "image_sha256": "e8e96feef921980c0864c480165ad7f5b52fbeeed4c937526453b3ab9fe17c2b",
+      "accessibility_sha256": "ee0e651f1f13343ace3667c67b384259964bd948e7f5d54e97547a4404744be7"
     },
     {
       "id": "desktop-dark-empty",
@@ -87,8 +87,8 @@
       "device_pixel_ratio": 1.0,
       "image_width": 1280,
       "image_height": 800,
-      "image_sha256": "ed249f4e14d38d34bd47617e51152b3ce29ec7b1f31cc446ba745254b6fcaa8f",
-      "accessibility_sha256": "a668273ad5fe9d535334c49636f4febdc26feab5729631aa6554cfc9951841ae"
+      "image_sha256": "6b36009595cc3c1998e1cdf174677b179d2ef0be6f19c2213437722ccc75e229",
+      "accessibility_sha256": "cf8a442540ed95ae4c611fae458e8b6676ffc2919cd0a583483704ddd1c48cff"
     },
     {
       "id": "desktop-light-loading",
@@ -101,8 +101,8 @@
       "device_pixel_ratio": 1.0,
       "image_width": 1280,
       "image_height": 800,
-      "image_sha256": "e0a237b2d8ddd337edcfbd2626902f887ef41d1e25bcd0ac4a1458d7cfaecf91",
-      "accessibility_sha256": "7759506c6b712959911dffde050b4601019e9ec1db0ece3a114117288eb4208d"
+      "image_sha256": "9f4efdeaa09f6465e9776bc242b4840ac893848256e5922f8dcf7dfe20b492a3",
+      "accessibility_sha256": "7640dd7138bc22c631f790ce3b1fc35d759c541b73a22b0fa5775f482a620baf"
     },
     {
       "id": "desktop-dark-loading",
@@ -115,8 +115,8 @@
       "device_pixel_ratio": 1.0,
       "image_width": 1280,
       "image_height": 800,
-      "image_sha256": "41c1b0d02b44c51e13b363ea1422c9e510c7e1f68ec19f9501394a4566e799c1",
-      "accessibility_sha256": "7759506c6b712959911dffde050b4601019e9ec1db0ece3a114117288eb4208d"
+      "image_sha256": "ef231fdf5c6c006e825c6cc7d89df432f2433fa570db300ac4ffee05c365ce0c",
+      "accessibility_sha256": "7640dd7138bc22c631f790ce3b1fc35d759c541b73a22b0fa5775f482a620baf"
     },
     {
       "id": "desktop-light-error",
@@ -129,8 +129,8 @@
       "device_pixel_ratio": 1.0,
       "image_width": 1280,
       "image_height": 800,
-      "image_sha256": "e3087e0bed4b4d4cf066d48a3517be8bcdbab681d485a9ee1dadd17256194043",
-      "accessibility_sha256": "18e408dc17481502f0b9f218ae95b04cdf7090af08299f00e309f179f608c512"
+      "image_sha256": "4dffc1eca79a711d2ae4089a0b0f64aa948bdb5494a23897c908f01ca67edf56",
+      "accessibility_sha256": "24d2922b8de86d2437443a9165d9256f2a3351cbe71aa68a5494f35ddc79ffad"
     },
     {
       "id": "desktop-dark-error",
@@ -143,8 +143,8 @@
       "device_pixel_ratio": 1.0,
       "image_width": 1280,
       "image_height": 800,
-      "image_sha256": "b0f96b1aa1389effafe965f52d61caa3677bc4648a53437fea41d49cc191de55",
-      "accessibility_sha256": "18e408dc17481502f0b9f218ae95b04cdf7090af08299f00e309f179f608c512"
+      "image_sha256": "bfe3d2f958d53e8be4bb5f0003ce15a7a58a44fce66701f518473e074496f4f4",
+      "accessibility_sha256": "24d2922b8de86d2437443a9165d9256f2a3351cbe71aa68a5494f35ddc79ffad"
     },
     {
       "id": "hidpi-dark-connected",
@@ -157,8 +157,8 @@
       "device_pixel_ratio": 1.5,
       "image_width": 1440,
       "image_height": 900,
-      "image_sha256": "d7ef0c24e166e2a21d47cd4722467e25f6e656a6e2a97f9f5949732b9a04993f",
-      "accessibility_sha256": "a581027f9c849dbf133f4d72d4f30a6542ff7e38d8e752985eb74ae83ba8db89"
+      "image_sha256": "65add865466ff3850ee11e040980c218e965bbb5396eebb24b03753ee84563f6",
+      "accessibility_sha256": "435baa80aaa02cb33a297ffaa4586eab0c935b6a82183fc8fa2002ce3d3c2d0c"
     }
   ]
 }

@@ -31,12 +31,12 @@
         {
           "children": [],
           "description": "",
-          "name": "ROOMS",
+          "name": "NAVIGATION",
           "rect": {
-            "height": 14,
-            "width": 38,
+            "height": 15,
+            "width": 67,
             "x": 99,
-            "y": 94
+            "y": 84
           },
           "role": "StaticText",
           "states": []
@@ -46,24 +46,81 @@
             {
               "children": [],
               "description": "",
-              "name": "Lobby",
+              "name": "VOICE ROOMS",
               "rect": {
-                "height": 16,
-                "width": 299,
-                "x": 101,
-                "y": 137
+                "height": 15,
+                "width": 323,
+                "x": 99,
+                "y": 114
               },
               "role": "StaticText",
               "states": []
             }
           ],
           "description": "",
+          "name": "VOICE ROOMS",
+          "rect": {
+            "height": 30,
+            "width": 339,
+            "x": 91,
+            "y": 103
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
+              "name": "Room actions for Lobby",
+              "rect": {
+                "height": 24,
+                "width": 24,
+                "x": 380,
+                "y": 144
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Joined",
+              "rect": {
+                "height": 18,
+                "width": 18,
+                "x": 358,
+                "y": 147
+              },
+              "role": "StaticText",
+              "states": [
+                "readOnly"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Lobby",
+              "rect": {
+                "height": 16,
+                "width": 221,
+                "x": 130,
+                "y": 148
+              },
+              "role": "StaticText",
+              "states": []
+            }
+          ],
+          "description": "Joined",
           "name": "Lobby",
           "rect": {
-            "height": 38,
+            "height": 46,
             "width": 319,
             "x": 91,
-            "y": 126
+            "y": 133
           },
           "role": "ListItem",
           "states": [
@@ -77,12 +134,40 @@
             {
               "children": [],
               "description": "",
+              "name": "Join",
+              "rect": {
+                "height": 24,
+                "width": 36,
+                "x": 338,
+                "y": 192
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "Room actions for Studio",
+              "rect": {
+                "height": 24,
+                "width": 24,
+                "x": 380,
+                "y": 192
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
               "name": "Studio",
               "rect": {
                 "height": 16,
-                "width": 299,
-                "x": 101,
-                "y": 177
+                "width": 199,
+                "x": 130,
+                "y": 196
               },
               "role": "StaticText",
               "states": []
@@ -91,10 +176,10 @@
           "description": "",
           "name": "Studio",
           "rect": {
-            "height": 38,
+            "height": 46,
             "width": 319,
             "x": 91,
-            "y": 166
+            "y": 181
           },
           "role": "ListItem",
           "states": [
@@ -106,12 +191,39 @@
             {
               "children": [],
               "description": "",
+              "name": "TEXT & ACTIVITY",
+              "rect": {
+                "height": 15,
+                "width": 323,
+                "x": 99,
+                "y": 240
+              },
+              "role": "StaticText",
+              "states": []
+            }
+          ],
+          "description": "",
+          "name": "TEXT & ACTIVITY",
+          "rect": {
+            "height": 30,
+            "width": 339,
+            "x": 91,
+            "y": 229
+          },
+          "role": "Heading",
+          "states": []
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "description": "",
               "name": "#general",
               "rect": {
                 "height": 16,
-                "width": 299,
-                "x": 101,
-                "y": 214
+                "width": 243,
+                "x": 130,
+                "y": 271
               },
               "role": "StaticText",
               "states": []
@@ -119,12 +231,27 @@
             {
               "children": [],
               "description": "",
+              "name": "Room actions for #general",
+              "rect": {
+                "height": 24,
+                "width": 24,
+                "x": 380,
+                "y": 275
+              },
+              "role": "Button",
+              "states": [
+                "focusable"
+              ]
+            },
+            {
+              "children": [],
+              "description": "",
               "name": "Text room",
               "rect": {
-                "height": 14,
-                "width": 299,
-                "x": 101,
-                "y": 232
+                "height": 15,
+                "width": 243,
+                "x": 130,
+                "y": 288
               },
               "role": "StaticText",
               "states": []
@@ -133,10 +260,10 @@
           "description": "Text room",
           "name": "#general",
           "rect": {
-            "height": 48,
+            "height": 56,
             "width": 319,
             "x": 91,
-            "y": 206
+            "y": 259
           },
           "role": "ListItem",
           "states": [
@@ -151,7 +278,7 @@
             "height": 14,
             "width": 70,
             "x": 99,
-            "y": 520
+            "y": 492
           },
           "role": "StaticText",
           "states": []
@@ -163,10 +290,23 @@
               "description": "",
               "name": "Demo User",
               "rect": {
+                "height": 16,
+                "width": 261,
+                "x": 134,
+                "y": 524
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "D",
+              "rect": {
                 "height": 15,
-                "width": 301,
-                "x": 109,
-                "y": 547
+                "width": 8,
+                "x": 107,
+                "y": 532
               },
               "role": "StaticText",
               "states": []
@@ -176,10 +316,10 @@
               "description": "",
               "name": "Listening",
               "rect": {
-                "height": 12,
-                "width": 301,
-                "x": 109,
-                "y": 562
+                "height": 15,
+                "width": 261,
+                "x": 134,
+                "y": 541
               },
               "role": "StaticText",
               "states": []
@@ -188,10 +328,10 @@
           "description": "Listening",
           "name": "Demo User",
           "rect": {
-            "height": 42,
+            "height": 56,
             "width": 319,
             "x": 91,
-            "y": 540
+            "y": 512
           },
           "role": "ListItem",
           "states": [
@@ -205,10 +345,23 @@
               "description": "",
               "name": "Alex",
               "rect": {
+                "height": 16,
+                "width": 258,
+                "x": 134,
+                "y": 580
+              },
+              "role": "StaticText",
+              "states": []
+            },
+            {
+              "children": [],
+              "description": "",
+              "name": "A",
+              "rect": {
                 "height": 15,
-                "width": 301,
-                "x": 109,
-                "y": 589
+                "width": 8,
+                "x": 107,
+                "y": 588
               },
               "role": "StaticText",
               "states": []
@@ -218,10 +371,10 @@
               "description": "",
               "name": "Talking",
               "rect": {
-                "height": 12,
-                "width": 301,
-                "x": 109,
-                "y": 604
+                "height": 15,
+                "width": 258,
+                "x": 134,
+                "y": 597
               },
               "role": "StaticText",
               "states": []
@@ -230,27 +383,12 @@
           "description": "Talking",
           "name": "Alex",
           "rect": {
-            "height": 42,
+            "height": 56,
             "width": 319,
             "x": 91,
-            "y": 582
+            "y": 568
           },
           "role": "ListItem",
-          "states": [
-            "focusable"
-          ]
-        },
-        {
-          "children": [],
-          "description": "",
-          "name": "Profile menu",
-          "rect": {
-            "height": 40,
-            "width": 40,
-            "x": 330,
-            "y": 642
-          },
-          "role": "Button",
           "states": [
             "focusable"
           ]
@@ -262,8 +400,8 @@
           "rect": {
             "height": 16,
             "width": 61,
-            "x": 93,
-            "y": 645
+            "x": 152,
+            "y": 648
           },
           "role": "StaticText",
           "states": []
@@ -271,12 +409,12 @@
         {
           "children": [],
           "description": "",
-          "name": "Mute",
+          "name": "Mute microphone",
           "rect": {
-            "height": 34,
-            "width": 56,
-            "x": 217,
-            "y": 645
+            "height": 32,
+            "width": 32,
+            "x": 251,
+            "y": 648
           },
           "role": "Button",
           "states": [
@@ -286,12 +424,55 @@
         {
           "children": [],
           "description": "",
+          "name": "Deafen",
+          "rect": {
+            "height": 32,
+            "width": 32,
+            "x": 307,
+            "y": 648
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Profile menu",
+          "rect": {
+            "height": 32,
+            "width": 32,
+            "x": 362,
+            "y": 648
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "D",
+          "rect": {
+            "height": 16,
+            "width": 9,
+            "x": 105,
+            "y": 656
+          },
+          "role": "StaticText",
+          "states": []
+        },
+        {
+          "children": [],
+          "description": "",
           "name": "Online",
           "rect": {
-            "height": 14,
-            "width": 29,
-            "x": 93,
-            "y": 666
+            "height": 15,
+            "width": 32,
+            "x": 152,
+            "y": 665
           },
           "role": "StaticText",
           "states": []
@@ -306,9 +487,7 @@
         "y": 0
       },
       "role": "Dialog",
-      "states": [
-        "focusable"
-      ]
+      "states": []
     },
     {
       "children": [
@@ -318,9 +497,9 @@
           "name": "Lobby",
           "rect": {
             "height": 27,
-            "width": 272,
-            "x": 28,
-            "y": 22
+            "width": 276,
+            "x": 16,
+            "y": 16
           },
           "role": "StaticText",
           "states": []
@@ -330,10 +509,25 @@
           "description": "",
           "name": "Open rooms and participants",
           "rect": {
-            "height": 40,
-            "width": 40,
-            "x": 310,
-            "y": 25
+            "height": 32,
+            "width": 32,
+            "x": 298,
+            "y": 24
+          },
+          "role": "Button",
+          "states": [
+            "focusable"
+          ]
+        },
+        {
+          "children": [],
+          "description": "",
+          "name": "Search users and rooms",
+          "rect": {
+            "height": 32,
+            "width": 32,
+            "x": 336,
+            "y": 24
           },
           "role": "Button",
           "states": [
@@ -345,10 +539,10 @@
           "description": "",
           "name": "Application menu",
           "rect": {
-            "height": 42,
-            "width": 40,
-            "x": 356,
-            "y": 25
+            "height": 32,
+            "width": 32,
+            "x": 374,
+            "y": 24
           },
           "role": "Button",
           "states": [
@@ -361,9 +555,9 @@
           "name": "Voice room",
           "rect": {
             "height": 16,
-            "width": 272,
-            "x": 28,
-            "y": 53
+            "width": 276,
+            "x": 16,
+            "y": 47
           },
           "role": "StaticText",
           "states": []
@@ -375,10 +569,10 @@
               "description": "",
               "name": "Message actions",
               "rect": {
-                "height": 40,
-                "width": 40,
-                "x": 332,
-                "y": 116
+                "height": 32,
+                "width": 32,
+                "x": 392,
+                "y": 88
               },
               "role": "Button",
               "states": [
@@ -392,8 +586,8 @@
               "rect": {
                 "height": 16,
                 "width": 8,
-                "x": 62,
-                "y": 126
+                "x": 48,
+                "y": 96
               },
               "role": "StaticText",
               "states": []
@@ -404,9 +598,9 @@
               "name": "Alex",
               "rect": {
                 "height": 15,
-                "width": 23,
-                "x": 94,
-                "y": 129
+                "width": 280,
+                "x": 74,
+                "y": 97
               },
               "role": "StaticText",
               "states": []
@@ -416,10 +610,10 @@
               "description": "",
               "name": "10:24",
               "rect": {
-                "height": 12,
-                "width": 22,
-                "x": 125,
-                "y": 130
+                "height": 15,
+                "width": 26,
+                "x": 360,
+                "y": 97
               },
               "role": "StaticText",
               "states": []
@@ -429,10 +623,10 @@
               "description": "",
               "name": "Welcome to the deterministic visual fixture.",
               "rect": {
-                "height": 16,
-                "width": 278,
-                "x": 94,
-                "y": 161
+                "height": 17,
+                "width": 350,
+                "x": 74,
+                "y": 124
               },
               "role": "StaticText",
               "states": [
@@ -443,10 +637,10 @@
           "description": "",
           "name": "",
           "rect": {
-            "height": 85,
-            "width": 348,
+            "height": 61,
+            "width": 388,
             "x": 36,
-            "y": 104
+            "y": 80
           },
           "role": "Client",
           "states": []
@@ -459,9 +653,9 @@
               "name": "Demo User",
               "rect": {
                 "height": 15,
-                "width": 57,
-                "x": 94,
-                "y": 209
+                "width": 216,
+                "x": 170,
+                "y": 155
               },
               "role": "StaticText",
               "states": []
@@ -471,23 +665,10 @@
               "description": "",
               "name": "10:25",
               "rect": {
-                "height": 12,
-                "width": 22,
-                "x": 159,
-                "y": 211
-              },
-              "role": "StaticText",
-              "states": []
-            },
-            {
-              "children": [],
-              "description": "",
-              "name": "D",
-              "rect": {
-                "height": 16,
-                "width": 9,
-                "x": 61,
-                "y": 219
+                "height": 15,
+                "width": 26,
+                "x": 392,
+                "y": 155
               },
               "role": "StaticText",
               "states": []
@@ -497,10 +678,10 @@
               "description": "",
               "name": "Qt Quick is ready for review.",
               "rect": {
-                "height": 16,
-                "width": 278,
-                "x": 94,
-                "y": 229
+                "height": 17,
+                "width": 248,
+                "x": 170,
+                "y": 174
               },
               "role": "StaticText",
               "states": [
@@ -511,10 +692,10 @@
           "description": "",
           "name": "",
           "rect": {
-            "height": 60,
-            "width": 348,
+            "height": 56,
+            "width": 388,
             "x": 36,
-            "y": 197
+            "y": 141
           },
           "role": "Client",
           "states": []
@@ -524,10 +705,10 @@
           "description": "",
           "name": "Message Lobby",
           "rect": {
-            "height": 38,
-            "width": 266,
-            "x": 68,
-            "y": 635
+            "height": 40,
+            "width": 301,
+            "x": 55,
+            "y": 641
           },
           "role": "EditableText",
           "states": [
@@ -539,10 +720,10 @@
           "description": "",
           "name": "Attach image",
           "rect": {
-            "height": 34,
-            "width": 36,
-            "x": 22,
-            "y": 637
+            "height": 30,
+            "width": 30,
+            "x": 14,
+            "y": 646
           },
           "role": "Button",
           "states": [
@@ -554,10 +735,10 @@
           "description": "",
           "name": "Send",
           "rect": {
-            "height": 34,
-            "width": 54,
-            "x": 344,
-            "y": 637
+            "height": 28,
+            "width": 39,
+            "x": 367,
+            "y": 647
           },
           "role": "Button",
           "states": [
@@ -578,7 +759,7 @@
     }
   ],
   "description": "",
-  "name": "Mumble Visual Fixture",
+  "name": "Mumble Visual Fixture — Mumble",
   "rect": {
     "height": 700,
     "width": 420,

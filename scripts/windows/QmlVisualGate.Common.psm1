@@ -31,6 +31,14 @@ public sealed class QmlVisualPngComparisonResult {
     public bool Passed { get; set; }
 }
 
+public sealed class QmlVisualPngCoverageResult {
+    public int Width { get; set; }
+    public int Height { get; set; }
+    public long PixelCount { get; set; }
+    public long NonBlackPixels { get; set; }
+    public double NonBlackFraction { get; set; }
+}
+
 public static class QmlVisualPngComparer {
     private static Bitmap LoadCanonical(string path) {
         using (Image decoded = Image.FromFile(path, true)) {
@@ -90,6 +98,39 @@ public static class QmlVisualPngComparer {
             }
         }
     }
+
+    public static QmlVisualPngCoverageResult AnalyzeCoverage(string path, int blackThreshold) {
+        if (blackThreshold < 0 || blackThreshold > 255)
+            throw new ArgumentOutOfRangeException("blackThreshold");
+        using (Bitmap image = LoadCanonical(path)) {
+            var rect = new Rectangle(0, 0, image.Width, image.Height);
+            BitmapData imageData = null;
+            try {
+                imageData = image.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                int rowBytes = checked(image.Width * 4);
+                byte[] row = new byte[rowBytes];
+                long nonBlack = 0;
+                for (int y = 0; y < image.Height; ++y) {
+                    Marshal.Copy(IntPtr.Add(imageData.Scan0, y * imageData.Stride), row, 0, rowBytes);
+                    for (int x = 0; x < rowBytes; x += 4) {
+                        if (row[x + 3] != 0 && (row[x] > blackThreshold || row[x + 1] > blackThreshold
+                                               || row[x + 2] > blackThreshold))
+                            ++nonBlack;
+                    }
+                }
+                long pixelCount = checked((long)image.Width * image.Height);
+                return new QmlVisualPngCoverageResult {
+                    Width = image.Width,
+                    Height = image.Height,
+                    PixelCount = pixelCount,
+                    NonBlackPixels = nonBlack,
+                    NonBlackFraction = pixelCount == 0 ? 0.0d : (double)nonBlack / pixelCount
+                };
+            } finally {
+                if (imageData != null) image.UnlockBits(imageData);
+            }
+        }
+    }
 }
 '@ -ReferencedAssemblies $drawingReferences
 }
@@ -130,6 +171,20 @@ function Compare-QmlVisualPng {
 	}
 }
 
+function Get-QmlVisualPngCoverage {
+	param(
+		[Parameter(Mandatory = $true)][string]$Path,
+		[ValidateRange(0, 255)][int]$BlackThreshold = 8
+	)
+	$result = [QmlVisualPngComparer]::AnalyzeCoverage(
+		(Resolve-Path -LiteralPath $Path).Path, $BlackThreshold)
+	return [pscustomobject]@{
+		width = [int]$result.Width; height = [int]$result.Height
+		pixel_count = [long]$result.PixelCount; non_black_pixels = [long]$result.NonBlackPixels
+		non_black_fraction = [double]$result.NonBlackFraction
+	}
+}
+
 function Assert-QmlVisualManifest {
 	param([Parameter(Mandatory = $true)]$Manifest)
 	if ([int]$Manifest.schema_version -ne 1) { throw "Unsupported visual manifest schema." }
@@ -151,4 +206,4 @@ function Assert-QmlVisualManifest {
 	return $true
 }
 
-Export-ModuleMember -Function Get-QmlVisualFileSha256, Get-QmlVisualPngDimensions, Compare-QmlVisualPng, Assert-QmlVisualManifest
+Export-ModuleMember -Function Get-QmlVisualFileSha256, Get-QmlVisualPngDimensions, Compare-QmlVisualPng, Get-QmlVisualPngCoverage, Assert-QmlVisualManifest
