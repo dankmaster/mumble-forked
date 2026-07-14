@@ -1492,8 +1492,21 @@ ApplicationWindow {
 					leftMargin: root.timelineHorizontalMargin
 					rightMargin: root.timelineHorizontalMargin
 					topMargin: root.timelineVerticalMargin
-					bottomMargin: root.timelineVerticalMargin
 					reuseItems: true
+					boundsBehavior: Flickable.StopAtBounds
+					ScrollBar.vertical: ModernScrollBar {
+						objectName: "chatTimelineScrollBar"
+						onPressedChanged: {
+							if (pressed) {
+								bottomFollowTimer.stop()
+								timeline.stickToBottom = false
+								timeline.releasePrependAnchor()
+							} else {
+								timeline.stickToBottom = timeline.isNearBottom()
+								timeline.requestBottomFollow()
+							}
+						}
+					}
 					// Build a small amount of chat content outside the viewport while
 					// the chat surface is otherwise idle. Complex rich-message delegates
 					// should not have to be constructed on the first frame they scroll in.
@@ -1528,6 +1541,15 @@ ApplicationWindow {
 						followTailAfterInsert = false
 						stickToBottom = true
 						scopeResetPending = true
+					}
+
+					function positionTailImmediately() {
+						if (!stickToBottom || prependAnchorActive)
+							return
+						const maximumY = Math.max(originY, originY + contentHeight - height)
+						restoringBottom = true
+						contentY = maximumY
+						restoringBottom = false
 					}
 
 					function firstVisibleMessageDelegate() {
@@ -1594,7 +1616,10 @@ ApplicationWindow {
 					onContentHeightChanged: {
 						if (prependAnchorActive && !restoringPrependAnchor)
 							Qt.callLater(function() { timeline.restorePrependAnchor() })
-						else if (!restoringBottom)
+						else if (scopeResetPending && !restoringBottom) {
+							positionTailImmediately()
+							requestBottomFollow()
+						} else if (!restoringBottom)
 							requestBottomFollow()
 					}
 					onMovementStarted: {
@@ -1688,6 +1713,12 @@ ApplicationWindow {
 								Qt.callLater(function() { timeline.restorePrependAnchor() })
 							else if (timeline.followTailAfterInsert) {
 								timeline.stickToBottom = true
+								// Scope replacement happens before the next scene render. Position
+								// the newly inserted tail synchronously so an old scroll offset is
+								// never presented, then retain the coalesced follow-up for any later
+								// rich-text or preview height refinement.
+								if (timeline.scopeResetPending)
+									timeline.positionTailImmediately()
 								timeline.requestBottomFollow()
 							}
 							timeline.followTailAfterInsert = false
@@ -1732,6 +1763,15 @@ ApplicationWindow {
                             onClicked: uiCommands.requestOlderMessages()
                         }
                     }
+					// Flickable margins live outside contentHeight, and ListView's
+					// positionViewAtEnd() does not include bottomMargin. Keep the
+					// visual breathing room inside the list so tail-following exposes
+					// the complete final message above the composer.
+					footerPositioning: ListView.InlineFooter
+					footer: Item {
+						width: timeline.width
+						height: root.timelineVerticalMargin
+					}
 					delegate: ChatMessageFrame {
 						id: messageDelegate
 						required property int index

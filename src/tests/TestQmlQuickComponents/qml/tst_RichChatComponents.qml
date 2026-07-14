@@ -588,6 +588,34 @@ TestCase {
 		compare(loader.item, null)
 	}
 
+	function test_loading_embed_reserves_final_media_geometry() {
+		const card = previewLoader.item
+		const panel = findChild(card, "previewEmbedMediaPanel")
+		verify(panel !== null)
+
+		card.preview = {
+			"state": "loading", "loading": true,
+			"title": "Fetching YouTube preview",
+			"url": "https://www.youtube.com/watch?v=test",
+			"embedUrl": "https://www.youtube.com/embed/test",
+			"embedKind": "youtube", "embedAspect": "wide"
+		}
+		card.previewIdentity = "message:loading-embed"
+		tryCompare(panel, "visible", true)
+		tryVerify(function() { return Math.abs(panel.height - card.actionAvailableWidth * 9 / 16) < 1 })
+		const loadingMediaHeight = panel.height
+
+		card.preview = {
+			"state": "ready", "loading": false,
+			"title": "Ready YouTube preview",
+			"url": "https://www.youtube.com/watch?v=test",
+			"embedUrl": "https://www.youtube.com/embed/test",
+			"embedKind": "youtube", "embedAspect": "wide"
+		}
+		tryCompare(panel, "visible", true)
+		compare(panel.height, loadingMediaHeight)
+	}
+
 	function test_provider_embed_aspect_fallbacks_preserve_production_shapes() {
 		const card = previewLoader.item
 		const cases = [

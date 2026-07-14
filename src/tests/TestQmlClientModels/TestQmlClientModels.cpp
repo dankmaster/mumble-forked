@@ -1197,7 +1197,10 @@ void TestQmlClientModels::chatTimelineNormalizesPreviewAndAttachments() {
 		  { QStringLiteral("previewStub"),
 			QVariantMap { { QStringLiteral("url"), QStringLiteral("https://example.com/card") },
 						  { QStringLiteral("host"), QStringLiteral("example.com") },
-						  { QStringLiteral("loadingLabel"), QStringLiteral("Load preview") } } },
+						  { QStringLiteral("loadingLabel"), QStringLiteral("Load preview") },
+						  { QStringLiteral("embedKind"), QStringLiteral("youtube") },
+						  { QStringLiteral("embedUrl"), QStringLiteral("https://www.youtube.com/embed/test") },
+						  { QStringLiteral("embedAspect"), QStringLiteral("wide") } } },
 		  { QStringLiteral("attachments"),
 			QVariantList { validAttachment, invalidAttachment, fileAttachment } } }));
 
@@ -1205,6 +1208,10 @@ void TestQmlClientModels::chatTimelineNormalizesPreviewAndAttachments() {
 	QVariantMap preview = row.value(QStringLiteral("preview")).toMap();
 	QCOMPARE(preview.value(QStringLiteral("state")).toString(), QStringLiteral("loading"));
 	QVERIFY(preview.value(QStringLiteral("loading")).toBool());
+	QCOMPARE(preview.value(QStringLiteral("embedKind")).toString(), QStringLiteral("youtube"));
+	QCOMPARE(preview.value(QStringLiteral("embedUrl")).toString(),
+			 QStringLiteral("https://www.youtube.com/embed/test"));
+	QCOMPARE(preview.value(QStringLiteral("embedAspect")).toString(), QStringLiteral("wide"));
 	const QVariantList attachments = row.value(QStringLiteral("attachments")).toList();
 	QCOMPARE(attachments.size(), 2);
 	QCOMPARE(attachments.first().toMap().value(QStringLiteral("url")).toString(),

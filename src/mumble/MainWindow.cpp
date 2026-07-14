@@ -21169,6 +21169,20 @@ QVariantMap MainWindow::buildModernShellMessageState(const MumbleProto::ChatMess
 							   previewUrl.isValid() ? previewDisplayHost(previewUrl) : tr("Link preview"));
 			previewStub.insert(QStringLiteral("singleUrl"), persistentChatSourceTextIsSinglePreviewableUrl(bodyText));
 			previewStub.insert(QStringLiteral("loadingLabel"), tr("Load preview"));
+			// Reserve the provider's final media geometry during fast first paint.
+			// Without this hint an embed starts as a compact link row, then grows by
+			// hundreds of pixels when hydration adds its player metadata. A timeline
+			// pinned to the tail must then visibly jump to compensate.
+			if (const std::optional< PersistentChatPreviewEmbedTarget > embedTarget =
+					previewEmbedTargetForUrl(previewUrl);
+				embedTarget) {
+				previewStub.insert(QStringLiteral("embedKind"), embedTarget->kind);
+				previewStub.insert(QStringLiteral("embedUrl"), embedTarget->url.toString(QUrl::FullyEncoded));
+				previewStub.insert(QStringLiteral("embedAspect"), embedTarget->aspect);
+				if (embedTarget->kind == QLatin1String("twitch")) {
+					previewStub.insert(QStringLiteral("previewSize"), QStringLiteral("large"));
+				}
+			}
 			messageState.insert(QStringLiteral("previewStub"), previewStub);
 		}
 	}
