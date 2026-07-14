@@ -26,6 +26,7 @@ option(bundled-rnnoise "Build the included version of RNNoise instead of looking
 option(dtln "Use DTLN for machine learning speech cleanup." OFF)
 option(deepfilternet "Use DeepFilterNet for machine learning speech cleanup." OFF)
 option(webrtc-aec "Expose WebRTC AEC as an experimental echo cancellation option." OFF)
+option(speech-cleanup-e2e "Include the developer-only deterministic speech-cleanup E2E audio backend." OFF)
 option(modern-layout-webengine "Enable the Qt WebEngine-based relay runtime." OFF)
 set(MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT ON)
 if(packaging AND "$ENV{GITHUB_ACTIONS}" STREQUAL "true")
@@ -321,6 +322,7 @@ set(MUMBLE_SOURCES
 	"SharedMemory.h"
 	"SocketRPC.cpp"
 	"SocketRPC.h"
+	"SpeechCleanup.cpp"
 	"SpeechCleanupProcessor.cpp"
 	"SpeechCleanupProcessor.h"
 	"SvgIcon.cpp"
@@ -434,6 +436,13 @@ set(MUMBLE_SOURCES
 	"${CMAKE_SOURCE_DIR}/themes/DefaultTheme.qrc"
 	"${CMAKE_SOURCE_DIR}/themes/CatppuccinTheme.qrc"
 )
+
+if(speech-cleanup-e2e)
+	list(APPEND MUMBLE_SOURCES
+		"SpeechCleanupTestAudio.cpp"
+		"SpeechCleanupTestAudio.h"
+	)
+endif()
 
 if(modern-layout-webengine)
 	list(APPEND MUMBLE_SOURCES
@@ -552,6 +561,10 @@ list(APPEND MUMBLE_SOURCES "${CMAKE_BINARY_DIR}/mumble_flags.qrc")
 
 add_library(mumble_client_object_lib OBJECT ${MUMBLE_SOURCES})
 target_link_libraries(mumble_client_object_lib PUBLIC smallft)
+
+if(speech-cleanup-e2e)
+	target_compile_definitions(mumble_client_object_lib PUBLIC MUMBLE_HAS_SPEECH_CLEANUP_E2E)
+endif()
 
 if(WIN32)
 	# The Windows client pulls in a large, macro-heavy source set (WinSDK).

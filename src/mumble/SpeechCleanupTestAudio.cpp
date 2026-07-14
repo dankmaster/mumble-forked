@@ -6,7 +6,6 @@
 #include "SpeechCleanupTestAudio.h"
 
 #include "ClientUser.h"
-#include "AudioOutputSpeech.h"
 #include "Global.h"
 #include "ServerHandler.h"
 #include "SpeechCleanupProcessor.h"
@@ -142,18 +141,6 @@ QString noiseCancelModeName(Settings::NoiseCancel mode) {
 			return QStringLiteral("RNN");
 		case Settings::NoiseCancelBoth:
 			return QStringLiteral("Speex&RNN");
-	}
-	return QStringLiteral("Unknown");
-}
-
-QString remoteSpeechCleanupPresetName(Settings::RemoteSpeechCleanupPreset preset) {
-	switch (preset) {
-		case Settings::Light:
-			return QStringLiteral("Light");
-		case Settings::Normal:
-			return QStringLiteral("Normal");
-		case Settings::Aggressive:
-			return QStringLiteral("Aggressive");
 	}
 	return QStringLiteral("Unknown");
 }
@@ -406,6 +393,12 @@ bool SpeechCleanupTestAudioOutput::openCapture(QString *errorMessage) {
 		if (errorMessage) *errorMessage = QStringLiteral("Capture sender name is required");
 		return false;
 	}
+	if (Global::get().s.remoteSpeechCleanupEnabled) {
+		if (errorMessage) {
+			*errorMessage = QStringLiteral("Receiver cleanup must be disabled for input-enhancement E2E qualification");
+		}
+		return false;
+	}
 	if (environmentValue(ENV_STOP_GATE).isEmpty() || environmentValue(ENV_CAPTURE_DONE).isEmpty()) {
 		if (errorMessage) *errorMessage = QStringLiteral("Capture requires stop-gate and completion paths");
 		return false;
@@ -444,52 +437,6 @@ void SpeechCleanupTestAudioOutput::closeCapture() {
 		sf_close(m_captureFile);
 		m_captureFile = nullptr;
 	}
-}
-
-void SpeechCleanupTestAudioOutput::observeSpeechCleanupSourceForE2E(const AudioOutputSpeech *speech) {
-	if (!speech || !speech->p || speech->p->qsName != m_captureSender) {
-		return;
-	}
-
-	const bool wasApplied = speech->remoteSpeechCleanupWasAppliedForE2E();
-	m_remoteCleanupDiagnostics.drainedSamples =
-		static_cast< int >(speech->remoteSpeechCleanupDrainedSamplesForE2E());
-	m_remoteCleanupDiagnostics.drainCompleted = speech->remoteSpeechCleanupDrainCompletedForE2E();
-	// Capture the first matching source even when cleanup is unavailable or
-	// bypassed, then refresh exactly once if it later becomes active. This keeps
-	// allocations out of the steady-state mixer callback while preserving useful
-	// failure diagnostics.
-	if (m_remoteCleanupDiagnostics.captured
-		&& (!wasApplied || m_remoteCleanupDiagnostics.wasApplied)) {
-		return;
-	}
-
-	const Mumble::SpeechCleanup::Selection &selection = speech->remoteSpeechCleanupSelectionForE2E();
-	const SpeechCleanupProcessor *processor = speech->remoteSpeechCleanupProcessorForE2E();
-	const bool processorReady = processor && processor->isReady();
-	const bool active = speech->remoteSpeechCleanupActiveForE2E();
-
-	m_remoteCleanupDiagnostics.captured         = true;
-	m_remoteCleanupDiagnostics.requestedEnabled = speech->remoteSpeechCleanupRequestedForE2E();
-	m_remoteCleanupDiagnostics.requestedBackend =
-		QString::fromLatin1(Mumble::SpeechCleanup::backendDisplayName(selection.backend));
-	m_remoteCleanupDiagnostics.requestedModelId = selection.modelId;
-	m_remoteCleanupDiagnostics.effectiveBackend =
-		processorReady && active
-			? QString::fromLatin1(Mumble::SpeechCleanup::backendDisplayName(selection.backend))
-			: QString();
-	m_remoteCleanupDiagnostics.effectiveModelId = processorReady ? processor->activeModelId() : QString();
-	m_remoteCleanupDiagnostics.processorReady   = processorReady;
-	m_remoteCleanupDiagnostics.activeModelId    = processor ? processor->activeModelId() : QString();
-	m_remoteCleanupDiagnostics.activeModelPath  = processor ? processor->activeModelPath() : QString();
-	m_remoteCleanupDiagnostics.usedFallback     = processor && processor->usedFallback();
-	m_remoteCleanupDiagnostics.reportedLatencySamples =
-		processor ? static_cast< int >(processor->latencySamples()) : 0;
-	m_remoteCleanupDiagnostics.active     = active;
-	m_remoteCleanupDiagnostics.wasApplied = wasApplied;
-	m_remoteCleanupDiagnostics.preset =
-		remoteSpeechCleanupPresetName(speech->remoteSpeechCleanupPresetForE2E());
-	m_remoteCleanupDiagnostics.mixFactor = speech->remoteSpeechCleanupMixFactorForE2E();
 }
 
 void SpeechCleanupTestAudioOutput::captureSource(float *outputPCM, unsigned int sampleCount,
@@ -539,26 +486,17 @@ void SpeechCleanupTestAudioOutput::writeDone(bool ok, const QString &errorMessag
 	}
 
 	const QJsonObject remoteCleanup {
-		{ QStringLiteral("diagnostics_captured"), m_remoteCleanupDiagnostics.captured },
-		{ QStringLiteral("requested_enabled"), m_remoteCleanupDiagnostics.requestedEnabled },
-		{ QStringLiteral("requested_backend"), m_remoteCleanupDiagnostics.requestedBackend },
-		{ QStringLiteral("requested_model_id"), m_remoteCleanupDiagnostics.requestedModelId },
-		{ QStringLiteral("effective_backend"), m_remoteCleanupDiagnostics.effectiveBackend },
-		{ QStringLiteral("effective_model_id"), m_remoteCleanupDiagnostics.effectiveModelId },
-		{ QStringLiteral("processor_ready"), m_remoteCleanupDiagnostics.processorReady },
-		{ QStringLiteral("active_model_id"), m_remoteCleanupDiagnostics.activeModelId },
-		{ QStringLiteral("active_model_path"), m_remoteCleanupDiagnostics.activeModelPath },
-		{ QStringLiteral("used_fallback"), m_remoteCleanupDiagnostics.usedFallback },
-		{ QStringLiteral("reported_latency_samples"), m_remoteCleanupDiagnostics.reportedLatencySamples },
-		{ QStringLiteral("reported_latency_ms"),
-		  static_cast< double >(m_remoteCleanupDiagnostics.reportedLatencySamples) * 1000.0
-			  / static_cast< double >(TEST_SAMPLE_RATE) },
-		{ QStringLiteral("active"), m_remoteCleanupDiagnostics.active },
-		{ QStringLiteral("was_applied"), m_remoteCleanupDiagnostics.wasApplied },
-		{ QStringLiteral("drained_samples"), m_remoteCleanupDiagnostics.drainedSamples },
-		{ QStringLiteral("drain_completed"), m_remoteCleanupDiagnostics.drainCompleted },
-		{ QStringLiteral("preset"), m_remoteCleanupDiagnostics.preset },
-		{ QStringLiteral("mix_factor"), m_remoteCleanupDiagnostics.mixFactor },
+		{ QStringLiteral("diagnostics_captured"), true },
+		{ QStringLiteral("requested_enabled"), false },
+		{ QStringLiteral("processor_ready"), false },
+		{ QStringLiteral("used_fallback"), false },
+		{ QStringLiteral("reported_latency_samples"), 0 },
+		{ QStringLiteral("reported_latency_ms"), 0.0 },
+		{ QStringLiteral("active"), false },
+		{ QStringLiteral("was_applied"), false },
+		{ QStringLiteral("drained_samples"), 0 },
+		{ QStringLiteral("drain_completed"), true },
+		{ QStringLiteral("forced_off"), true },
 	};
 
 	QJsonObject result {

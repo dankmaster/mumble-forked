@@ -12,10 +12,6 @@
 #include "Settings.h"
 #include "User.h"
 
-#include <atomic>
-#include <cstdint>
-#include <optional>
-
 class ClientUser : public QObject, public User {
 private:
 	Q_OBJECT
@@ -24,9 +20,7 @@ private:
 protected:
 	float m_localVolume = 1.0f;
 	QString m_localNickname;
-	// -1 inherits the global setting, 0 forces disabled and 1 forces enabled.
-	// This is read on the audio thread and written from the UI/network thread.
-	std::atomic< std::int8_t > m_remoteSpeechCleanupOverride { -1 };
+	std::optional< bool > m_remoteSpeechCleanupOverride;
 
 public:
 	Settings::TalkState tsState;
