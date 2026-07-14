@@ -1716,6 +1716,37 @@ void DBWrapper::updateChatAssetPreviewAssetID(unsigned int serverID, unsigned in
 	WRAPPER_END
 }
 
+std::vector< std::string > DBWrapper::getChatAssetStorageKeys(unsigned int serverID) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+
+	return m_serverDB.getChatAssetTable().getStorageKeys(serverID);
+
+	WRAPPER_END
+}
+
+std::vector< unsigned int > DBWrapper::getChatAssetIDs(unsigned int serverID) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+
+	return m_serverDB.getChatAssetTable().getAssetIDs(serverID);
+
+	WRAPPER_END
+}
+
+std::vector< std::string > DBWrapper::removeUnreferencedChatAssetsOlderThan(
+	unsigned int serverID, const std::chrono::system_clock::time_point &cutoff) {
+	WRAPPER_BEGIN
+
+	assertValidID(serverID);
+
+	return m_serverDB.getChatAssetTable().removeUnreferencedAssetsOlderThan(serverID, cutoff);
+
+	WRAPPER_END
+}
+
 std::vector< ::msdb::DBChatMessageEmbed > DBWrapper::getChatMessageEmbeds(unsigned int serverID, unsigned int messageID) {
 	WRAPPER_BEGIN
 

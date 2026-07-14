@@ -31,6 +31,7 @@
 #include <QtCore/QByteArray>
 #include <QtCore/QEvent>
 #include <QtCore/QMutex>
+#include <QtCore/QPointer>
 #include <QtCore/QQueue>
 #include <QtCore/QReadWriteLock>
 #include <QtCore/QRegularExpression>
@@ -404,6 +405,7 @@ public:
 
 	struct PendingChatAssetUpload {
 		quint64 uploadID = 0;
+		QPointer< ServerUser > owner;
 		unsigned int ownerSession = 0;
 		std::optional< unsigned int > ownerUserID = std::nullopt;
 		QString filename;
@@ -419,6 +421,9 @@ public:
 	};
 
 	QHash< quint64, PendingChatAssetUpload > qhPendingChatAssetUploads;
+	// Unregistered users have no durable identity. Keep ownership of their newly committed,
+	// unattached assets tied to the exact live connection object so recycled session IDs cannot claim them.
+	QHash< unsigned int, QPointer< ServerUser > > qhEphemeralChatAssetOwners;
 	QHash< QString, unsigned int > qhChatPreviewFetchesByHost;
 	struct PendingChatEmbedAssist {
 		quint64 leaseID = 0;

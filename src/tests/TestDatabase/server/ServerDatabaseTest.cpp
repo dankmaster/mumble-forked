@@ -25,6 +25,9 @@
 #include "database/DBChannelLink.h"
 #include "database/DBChannelListener.h"
 #include "database/DBChatMessage.h"
+#include "database/DBChatAsset.h"
+#include "database/DBChatMessageAttachment.h"
+#include "database/DBChatMessageEmbed.h"
 #include "database/DBChatThread.h"
 #include "database/DBGroup.h"
 #include "database/DBGroupMember.h"
@@ -38,6 +41,9 @@
 #include "database/GroupMemberTable.h"
 #include "database/GroupTable.h"
 #include "database/ChatMessageReactionTable.h"
+#include "database/ChatAssetTable.h"
+#include "database/ChatMessageAttachmentTable.h"
+#include "database/ChatMessageEmbedTable.h"
 #include "database/ChatMessageTable.h"
 #include "database/ChatThreadTable.h"
 #include "database/LogTable.h"
@@ -270,6 +276,8 @@ private slots:
 	void ipAddress_conversions();
 	void banTable_general();
 	void channelListenerTable_general();
+	void chatMessageTable_attachmentOnly();
+	void chatAssetTable_orphanRetention();
 	void chatMessageReactionTable_general();
 	void stonksScoreTable_general();
 	void stonksFollowTable_general();
@@ -1649,6 +1657,163 @@ void ServerDatabaseTest::channelListenerTable_general() {
 	invalid.userID    = nonExistingUserID;
 	QVERIFY_THROWS_EXCEPTION(::mdb::AccessException, table.addListener(invalid));
 
+
+	MUMBLE_END_TEST_CASE
+}
+
+void ServerDatabaseTest::chatMessageTable_attachmentOnly() {
+	MUMBLE_BEGIN_TEST_CASE
+
+	const unsigned int existingServerID = 0;
+	::msdb::DBUser author(existingServerID, 1);
+
+	::msdb::DBChannel rootChannel;
+	rootChannel.channelID = Mumble::ROOT_CHANNEL_ID;
+	rootChannel.parentID  = rootChannel.channelID;
+	rootChannel.serverID  = existingServerID;
+	rootChannel.name      = "Root";
+
+	db.getServerTable().addServer(existingServerID);
+	db.getChannelTable().addChannel(rootChannel);
+	db.getUserTable().addUser(author, "Author");
+
+	::msdb::DBChatThread thread(existingServerID, 1);
+	thread.scope           = ::msdb::ChatThreadScope::TextChannel;
+	thread.scopeKey        = "text:1";
+	thread.createdByUserID = author.registeredUserID;
+	thread.createdAt       = std::chrono::system_clock::time_point(std::chrono::seconds(100));
+	thread.updatedAt       = thread.createdAt;
+	db.getChatThreadTable().addThread(thread);
+
+	::msdb::DBChatMessage attachmentOnly(existingServerID, 1, thread.threadID);
+	attachmentOnly.authorUserID = author.registeredUserID;
+	attachmentOnly.authorName   = "Author";
+	attachmentOnly.createdAt    = std::chrono::system_clock::time_point(std::chrono::seconds(100));
+	attachmentOnly.attachments.emplace_back(existingServerID, attachmentOnly.messageID, 1);
+	db.getChatMessageTable().addMessage(attachmentOnly);
+
+	const std::optional< ::msdb::DBChatMessage > stored =
+		db.getChatMessageTable().getMessage(existingServerID, attachmentOnly.messageID);
+	QVERIFY(stored);
+	QVERIFY(stored->bodyText.empty());
+
+	::msdb::DBChatMessage emptyMessage(existingServerID, 2, thread.threadID);
+	emptyMessage.createdAt = attachmentOnly.createdAt;
+	QVERIFY_THROWS_EXCEPTION(::mdb::FormatException, db.getChatMessageTable().addMessage(emptyMessage));
+
+	MUMBLE_END_TEST_CASE
+}
+
+void ServerDatabaseTest::chatAssetTable_orphanRetention() {
+	MUMBLE_BEGIN_TEST_CASE
+
+	const unsigned int serverID = 0;
+	::msdb::DBUser author(serverID, 1);
+
+	::msdb::DBChannel rootChannel;
+	rootChannel.channelID = Mumble::ROOT_CHANNEL_ID;
+	rootChannel.parentID  = rootChannel.channelID;
+	rootChannel.serverID  = serverID;
+	rootChannel.name      = "Root";
+
+	db.getServerTable().addServer(serverID);
+	db.getChannelTable().addChannel(rootChannel);
+	db.getUserTable().addUser(author, "Author");
+
+	::msdb::DBChatThread thread(serverID, 1);
+	thread.scope           = ::msdb::ChatThreadScope::TextChannel;
+	thread.scopeKey        = "text:1";
+	thread.createdByUserID = author.registeredUserID;
+	thread.createdAt       = std::chrono::system_clock::time_point(std::chrono::seconds(100));
+	thread.updatedAt       = thread.createdAt;
+	db.getChatThreadTable().addThread(thread);
+
+	const auto oldTime   = std::chrono::system_clock::time_point(std::chrono::seconds(100));
+	const auto freshTime = std::chrono::system_clock::time_point(std::chrono::seconds(1000));
+	auto addAsset = [&](unsigned int assetID, const std::string &storageKey,
+						const std::chrono::system_clock::time_point &createdAt) {
+		::msdb::DBChatAsset asset(serverID, assetID);
+		asset.sha256        = "hash-" + std::to_string(assetID);
+		asset.storageKey    = storageKey;
+		asset.mime          = "application/octet-stream";
+		asset.byteSize      = 1;
+		asset.kind          = ::msdb::ChatAssetKind::Binary;
+		asset.createdAt     = createdAt;
+		asset.lastAccessedAt = createdAt;
+		db.getChatAssetTable().addAsset(asset);
+	};
+
+	addAsset(1, "orphan-key", oldTime);
+	addAsset(2, "shared-key", oldTime);
+	addAsset(3, "shared-key", oldTime);
+	addAsset(4, "deleted-key", oldTime);
+	addAsset(6, "preview-key", oldTime);
+	addAsset(5, "parent-key", oldTime);
+	db.getChatAssetTable().updatePreviewAssetID(serverID, 5, 6);
+	addAsset(7, "embed-key", oldTime);
+	addAsset(8, "fresh-key", freshTime);
+
+	auto addMessage = [&](unsigned int messageID, const std::string &body) {
+		::msdb::DBChatMessage message(serverID, messageID, thread.threadID);
+		message.authorUserID = author.registeredUserID;
+		message.authorName   = "Author";
+		message.bodyText     = body;
+		message.createdAt    = oldTime;
+		db.getChatMessageTable().addMessage(message);
+	};
+	addMessage(1, "live attachments");
+	addMessage(2, "deleted attachment");
+	addMessage(3, "live embed");
+
+	::msdb::DBChatMessageAttachment liveAttachment(serverID, 1, 2);
+	liveAttachment.filename = "live.bin";
+	::msdb::DBChatMessageAttachment parentAttachment(serverID, 1, 5);
+	parentAttachment.displayOrder = 1;
+	parentAttachment.filename     = "image.png";
+	db.getChatMessageAttachmentTable().addAttachments(serverID, 1, { liveAttachment, parentAttachment });
+
+	::msdb::DBChatMessageAttachment deletedAttachment(serverID, 2, 4);
+	deletedAttachment.filename = "deleted.bin";
+	db.getChatMessageAttachmentTable().addAttachments(serverID, 2, { deletedAttachment });
+	db.getChatMessageTable().markMessageDeleted(serverID, 2, oldTime);
+
+	::msdb::DBChatMessageEmbed embed(serverID, 3);
+	embed.urlHash        = "url-hash";
+	embed.canonicalUrl   = "https://example.com";
+	embed.previewAssetID = 7;
+	embed.status         = ::msdb::ChatEmbedStatus::Ready;
+	embed.fetchedAt      = oldTime;
+	embed.expiresAt      = freshTime;
+	db.getChatMessageEmbedTable().setEmbeds(serverID, 3, { embed });
+
+	const auto cutoff = std::chrono::system_clock::time_point(std::chrono::seconds(500));
+	std::vector< std::string > deletableKeys =
+		db.getChatAssetTable().removeUnreferencedAssetsOlderThan(serverID, cutoff);
+	QCOMPARE(deletableKeys, (std::vector< std::string > { "deleted-key", "orphan-key" }));
+	QVERIFY(!db.getChatAssetTable().assetExists(serverID, 1));
+	QVERIFY(db.getChatAssetTable().assetExists(serverID, 2));
+	QVERIFY(!db.getChatAssetTable().assetExists(serverID, 3));
+	QVERIFY(!db.getChatAssetTable().assetExists(serverID, 4));
+	QVERIFY(db.getChatAssetTable().assetExists(serverID, 5));
+	QVERIFY(db.getChatAssetTable().assetExists(serverID, 6));
+	QVERIFY(db.getChatAssetTable().assetExists(serverID, 7));
+	QVERIFY(db.getChatAssetTable().assetExists(serverID, 8));
+
+	// Once the live references disappear, the parent is removed before its preview child. The shared key only becomes
+	// deletable after its final DB row is gone.
+	db.getChatMessageTable().markMessageDeleted(serverID, 1, oldTime);
+	db.getChatMessageTable().markMessageDeleted(serverID, 3, oldTime);
+	deletableKeys = db.getChatAssetTable().removeUnreferencedAssetsOlderThan(serverID, cutoff);
+	QCOMPARE(deletableKeys, (std::vector< std::string > { "embed-key", "parent-key", "shared-key" }));
+	QVERIFY(!db.getChatAssetTable().assetExists(serverID, 2));
+	QVERIFY(!db.getChatAssetTable().assetExists(serverID, 5));
+	QVERIFY(db.getChatAssetTable().assetExists(serverID, 6));
+	QVERIFY(!db.getChatAssetTable().assetExists(serverID, 7));
+
+	deletableKeys = db.getChatAssetTable().removeUnreferencedAssetsOlderThan(serverID, cutoff);
+	QCOMPARE(deletableKeys, (std::vector< std::string > { "preview-key" }));
+	QVERIFY(!db.getChatAssetTable().assetExists(serverID, 6));
+	QCOMPARE(db.getChatAssetTable().getStorageKeys(serverID), (std::vector< std::string > { "fresh-key" }));
 
 	MUMBLE_END_TEST_CASE
 }

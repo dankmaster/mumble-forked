@@ -36,6 +36,8 @@ Current capabilities:
 - direct-message tray with private in-memory mode and persistent-history mode
   when the server and registered users support it
 - room-aware composer state and send controls
+- file-picker, drag-and-drop, clipboard-file, and pasted-bitmap attachment input
+- typed attachment drafts with validation, upload progress, retry, and removal
 - dedicated voice-room and text-room navigation
 - server MOTD/sidebar presentation
 - direct server-log rendering for the Modern timeline path
@@ -112,14 +114,18 @@ authenticated Mumble control connection.
 Current capabilities:
 
 - upload initialization, chunk upload, commit, and ranged download
+- text-plus-attachment and attachment-only persistent messages
+- image previews with explicit original-file saving, plus safe download cards for other media and files
 - per-message attachment count limits
 - per-asset and total-storage quota controls
-- local filesystem object storage under a per-server root
+- atomically committed, SHA-256-addressed local object storage under a per-server root
 - temporary upload cleanup for abandoned incoming files
+- grace-period cleanup for committed objects that are no longer referenced by a live message or embed
 - image normalization for raster formats, including EXIF orientation handling and metadata stripping by re-encoding
 - server-generated preview derivatives for uploaded images
 - preview-cache assets for selected remote URL media
-- MIME allowlisting for images, videos, documents, and binary downloads
+- MIME allowlisting for images, video, audio, documents, archives, and opaque binary downloads
+- persistent-chat protocol-version gating so incompatible peers cannot negotiate native attachments; older clients receive readable attachment placeholders
 
 Important server keys:
 

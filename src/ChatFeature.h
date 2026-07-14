@@ -12,12 +12,14 @@
 
 namespace Mumble {
 namespace ChatFeatures {
-	constexpr unsigned int CURRENT_PROTOCOL_VERSION = 4;
+	constexpr unsigned int CURRENT_PROTOCOL_VERSION = 5;
+	constexpr unsigned int ATTACHMENT_TRANSFER_PROTOCOL_VERSION = 5;
 
 	bool isKnownFeature(MumbleProto::ChatFeature feature);
 	QList< int > supportedFeatureList();
 	QList< int > sanitizeFeatureList(const QList< int > &features);
 	bool contains(const QList< int > &features, MumbleProto::ChatFeature feature);
+	bool availableAtProtocolVersion(MumbleProto::ChatFeature feature, unsigned int protocolVersion);
 	bool serverAllowsClientFeature(const QList< int > &features, MumbleProto::ChatFeature feature);
 
 	void addSupportedFeatures(MumbleProto::Version &version);

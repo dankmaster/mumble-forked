@@ -142,6 +142,9 @@ public:
 
 	LeakyBucket leakyBucket;
 	LeakyBucket m_pluginMessageBucket;
+	/// Separate from chat messages so a valid attachment upload cannot consume
+	/// the token needed for the ChatSend that references it.
+	LeakyBucket m_chatAttachmentUploadBucket;
 	QElapsedTimer m_feedbackReportTimer;
 
 	int iLastPermissionCheck;

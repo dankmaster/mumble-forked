@@ -60,6 +60,15 @@ namespace ChatFeatures {
 		return isKnownFeature(feature) && features.contains(static_cast< int >(feature));
 	}
 
+	bool availableAtProtocolVersion(const MumbleProto::ChatFeature feature, const unsigned int protocolVersion) {
+		if (!isKnownFeature(feature) || protocolVersion == 0) {
+			return false;
+		}
+
+		return feature != MumbleProto::ChatFeatureAttachments
+			   || protocolVersion >= ATTACHMENT_TRANSFER_PROTOCOL_VERSION;
+	}
+
 	bool serverAllowsClientFeature(const QList< int > &features, const MumbleProto::ChatFeature feature) {
 		if (!isKnownFeature(feature)) {
 			return false;
@@ -67,6 +76,11 @@ namespace ChatFeatures {
 
 		if (!features.isEmpty()) {
 			return contains(features, feature);
+		}
+		// The enum value predates the actual upload/download protocol, so an
+		// absent feature list must never be interpreted as attachment support.
+		if (feature == MumbleProto::ChatFeatureAttachments) {
+			return false;
 		}
 
 		return feature != MumbleProto::ChatFeatureHistoryGrants
@@ -76,6 +90,7 @@ namespace ChatFeatures {
 	}
 
 	void addSupportedFeatures(MumbleProto::Version &version) {
+		version.set_persistent_chat_protocol_version(CURRENT_PROTOCOL_VERSION);
 		for (const int feature : supportedFeatureList()) {
 			version.add_supported_chat_features(static_cast< MumbleProto::ChatFeature >(feature));
 		}
@@ -89,6 +104,8 @@ namespace ChatFeatures {
 	}
 
 	QList< int > featuresFromVersion(const MumbleProto::Version &version) {
+		const unsigned int protocolVersion = version.has_persistent_chat_protocol_version()
+			? version.persistent_chat_protocol_version() : 1U;
 		QList< int > features;
 		features.reserve(version.supported_chat_features_size());
 		for (int i = 0; i < version.supported_chat_features_size(); ++i) {
@@ -96,12 +113,20 @@ namespace ChatFeatures {
 		}
 
 		features = sanitizeFeatureList(features);
+		for (auto it = features.begin(); it != features.end();) {
+			if (!availableAtProtocolVersion(static_cast< MumbleProto::ChatFeature >(*it), protocolVersion)) {
+				it = features.erase(it);
+			} else {
+				++it;
+			}
+		}
 		if (features.isEmpty() && version.has_supports_persistent_chat() && version.supports_persistent_chat()) {
 			QList< int > legacyFeatures = supportedFeatureList();
 			legacyFeatures.removeAll(static_cast< int >(MumbleProto::ChatFeatureHistoryGrants));
 			legacyFeatures.removeAll(static_cast< int >(MumbleProto::ChatFeatureDirectMessages));
 			legacyFeatures.removeAll(static_cast< int >(MumbleProto::ChatFeatureHistoryWarmup));
 			legacyFeatures.removeAll(static_cast< int >(MumbleProto::ChatFeatureActorAvatars));
+			legacyFeatures.removeAll(static_cast< int >(MumbleProto::ChatFeatureAttachments));
 			return legacyFeatures;
 		}
 
@@ -109,13 +134,23 @@ namespace ChatFeatures {
 	}
 
 	QList< int > featuresFromServerConfig(const MumbleProto::ServerConfig &config) {
+		const unsigned int protocolVersion = config.has_persistent_chat_protocol_version()
+			? config.persistent_chat_protocol_version() : 1U;
 		QList< int > features;
 		features.reserve(config.supported_chat_features_size());
 		for (int i = 0; i < config.supported_chat_features_size(); ++i) {
 			features.append(static_cast< int >(config.supported_chat_features(i)));
 		}
 
-		return sanitizeFeatureList(features);
+		features = sanitizeFeatureList(features);
+		for (auto it = features.begin(); it != features.end();) {
+			if (!availableAtProtocolVersion(static_cast< MumbleProto::ChatFeature >(*it), protocolVersion)) {
+				it = features.erase(it);
+			} else {
+				++it;
+			}
+		}
+		return features;
 	}
 } // namespace ChatFeatures
 } // namespace Mumble

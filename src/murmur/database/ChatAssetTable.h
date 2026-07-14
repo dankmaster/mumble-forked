@@ -12,6 +12,8 @@
 
 #include <chrono>
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace soci {
 class session;
@@ -61,6 +63,17 @@ namespace server {
 									 std::optional< unsigned int > previewAssetID);
 			void touchAsset(unsigned int serverID, unsigned int assetID,
 						   const std::chrono::system_clock::time_point &timepoint = std::chrono::system_clock::now());
+			std::vector< std::string > getStorageKeys(unsigned int serverID);
+			std::vector< unsigned int > getAssetIDs(unsigned int serverID);
+			/**
+			 * Removes assets created before cutoff that are not referenced by a live message or another asset.
+			 *
+			 * The returned storage keys no longer have any database row referring to them and may therefore be
+			 * removed from the object store. A key shared with any remaining asset is deliberately omitted.
+			 */
+			std::vector< std::string >
+				removeUnreferencedAssetsOlderThan(unsigned int serverID,
+										 const std::chrono::system_clock::time_point &cutoff);
 			unsigned int getFreeAssetID(unsigned int serverID);
 
 			void migrate(unsigned int fromSchemaVersion, unsigned int toSchemaVersion) override;

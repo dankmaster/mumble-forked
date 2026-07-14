@@ -20,6 +20,7 @@ namespace server {
 			Video    = 2,
 			Document = 3,
 			Binary   = 4,
+			Audio    = 5,
 		};
 
 		enum class ChatAssetRetentionClass : unsigned int {

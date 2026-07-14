@@ -903,7 +903,7 @@ bool Server::canAccessChatAsset(ServerUser *user, unsigned int assetID) {
 	for (unsigned int messageID : m_dbWrapper.getChatAssetMessageIDs(iServerNum, assetID)) {
 		const std::optional<::mumble::server::db::DBChatMessage > message =
 			m_dbWrapper.getChatMessage(iServerNum, messageID);
-		if (!message) {
+		if (!message || message->deletedAt != std::chrono::system_clock::time_point()) {
 			continue;
 		}
 
@@ -949,9 +949,15 @@ bool Server::canAccessChatAsset(ServerUser *user, unsigned int assetID) {
 }
 
 void Server::runChatAssetRetentionSweep() {
-	const auto staleUploadCutoff = std::chrono::system_clock::now() - std::chrono::hours(1);
+	for (auto it = qhEphemeralChatAssetOwners.begin(); it != qhEphemeralChatAssetOwners.end();) {
+		if (it.value()) ++it;
+		else it = qhEphemeralChatAssetOwners.erase(it);
+	}
+
+	const auto now               = std::chrono::system_clock::now();
+	const auto staleUploadCutoff = now - std::chrono::hours(1);
 	for (auto it = qhPendingChatAssetUploads.begin(); it != qhPendingChatAssetUploads.end();) {
-		if (it->createdAt >= staleUploadCutoff) {
+		if (it->owner && it->createdAt >= staleUploadCutoff) {
 			++it;
 			continue;
 		}
@@ -963,20 +969,91 @@ void Server::runChatAssetRetentionSweep() {
 	}
 
 	const QDir incomingDir(chatAssetIncomingRootPath());
-	if (!incomingDir.exists()) {
+	if (incomingDir.exists()) {
+		const QDateTime staleFileCutoff = QDateTime::currentDateTimeUtc().addDays(-1);
+		QDirIterator it(incomingDir.absolutePath(), QDir::Files, QDirIterator::Subdirectories);
+		while (it.hasNext()) {
+			it.next();
+			const QFileInfo info = it.fileInfo();
+			if (!info.exists() || info.lastModified().toUTC() >= staleFileCutoff) {
+				continue;
+			}
+
+			QFile::remove(info.absoluteFilePath());
+		}
+	}
+
+	const QString objectRootPath  = QDir::cleanPath(QFileInfo(chatAssetObjectRootPath()).absoluteFilePath());
+	const QDir objectRootDir(objectRootPath);
+	const QDir storageRootDir(chatAssetStorageRootPath());
+	auto absoluteObjectPath = [&](const std::string &rawStorageKey) -> std::optional< QString > {
+		const QString storageKey = QDir::fromNativeSeparators(QString::fromStdString(rawStorageKey));
+		const QString path       = QDir::cleanPath(QFileInfo(chatAssetAbsolutePath(storageKey)).absoluteFilePath());
+		const QString relative   = QDir::fromNativeSeparators(objectRootDir.relativeFilePath(path));
+		if (relative.isEmpty() || relative == QStringLiteral("..") || relative.startsWith(QStringLiteral("../"))
+			|| QDir::isAbsolutePath(relative)) {
+			return std::nullopt;
+		}
+		return path;
+	};
+
+	// Database rows are removed before their blobs. If the file operation fails, a later object-store pass retries it;
+	// the inverse ordering could leave a durable row pointing at missing data after a database rollback.
+	for (const std::string &storageKey :
+		 m_dbWrapper.removeUnreferencedChatAssetsOlderThan(iServerNum, now - std::chrono::hours(1))) {
+		const std::optional< QString > objectPath = absoluteObjectPath(storageKey);
+		if (!objectPath) {
+			log(QStringLiteral("Refusing to remove chat asset outside the server object store: %1")
+					.arg(QString::fromStdString(storageKey)));
+			continue;
+		}
+		if (QFileInfo::exists(*objectPath) && !QFile::remove(*objectPath)) {
+			log(QStringLiteral("Failed to remove unreferenced chat asset object: %1").arg(*objectPath));
+		}
+	}
+	QSet< unsigned int > durableAssetIDs;
+	for (const unsigned int assetID : m_dbWrapper.getChatAssetIDs(iServerNum)) {
+		durableAssetIDs.insert(assetID);
+	}
+	for (auto it = qhEphemeralChatAssetOwners.begin(); it != qhEphemeralChatAssetOwners.end();) {
+		if (!it.value() || !durableAssetIDs.contains(it.key())) {
+			it = qhEphemeralChatAssetOwners.erase(it);
+		} else {
+			++it;
+		}
+	}
+
+	// A process may crash after moving a blob into the content-addressed object store but before inserting its DB row.
+	// Enumerate durable DB keys after the row sweep so such files are eventually reclaimed across restarts. The grace
+	// period prevents racing a currently committing upload.
+	QSet< QString > referencedStorageKeys;
+	for (const std::string &storageKey : m_dbWrapper.getChatAssetStorageKeys(iServerNum)) {
+		referencedStorageKeys.insert(QDir::fromNativeSeparators(QDir::cleanPath(QString::fromStdString(storageKey))));
+	}
+
+	if (!objectRootDir.exists()) {
 		return;
 	}
 
-	const QDateTime staleFileCutoff = QDateTime::currentDateTimeUtc().addDays(-1);
-	QDirIterator it(incomingDir.absolutePath(), QDir::Files, QDirIterator::Subdirectories);
-	while (it.hasNext()) {
-		it.next();
-		const QFileInfo info = it.fileInfo();
-		if (!info.exists() || info.lastModified().toUTC() >= staleFileCutoff) {
+	const QDateTime orphanObjectCutoff = QDateTime::currentDateTimeUtc().addSecs(-60 * 60);
+	QDirIterator objectIt(objectRootPath, QDir::Files, QDirIterator::Subdirectories);
+	while (objectIt.hasNext()) {
+		objectIt.next();
+		const QFileInfo info = objectIt.fileInfo();
+		if (!info.exists() || info.lastModified().toUTC() >= orphanObjectCutoff) {
 			continue;
 		}
 
-		QFile::remove(info.absoluteFilePath());
+		const QString storageKey = QDir::fromNativeSeparators(
+			QDir::cleanPath(storageRootDir.relativeFilePath(info.absoluteFilePath())));
+		if (QDir::isAbsolutePath(storageKey) || storageKey == QStringLiteral("..")
+			|| storageKey.startsWith(QStringLiteral("../")) || referencedStorageKeys.contains(storageKey)) {
+			continue;
+		}
+
+		if (!QFile::remove(info.absoluteFilePath())) {
+			log(QStringLiteral("Failed to remove orphaned chat asset object: %1").arg(info.absoluteFilePath()));
+		}
 	}
 }
 
@@ -1048,11 +1125,25 @@ void Server::setLiveConf(const QString &key, const QString &value) {
 	} else if (key == "chat_asset_storage_path") {
 		qsChatAssetStoragePath = !v.isNull() ? v.trimmed() : Meta::mp->qsChatAssetStoragePath;
 	} else if (key == "chat_asset_max_bytes") {
-		uiChatAssetMaxBytes = (ulongLongOk && ulongLongValue > 0) ? ulongLongValue : Meta::mp->uiChatAssetMaxBytes;
+		const quint64 maximumBytes =
+			(ulongLongOk && ulongLongValue > 0) ? ulongLongValue : Meta::mp->uiChatAssetMaxBytes;
+		if (uiChatAssetMaxBytes != maximumBytes) {
+			uiChatAssetMaxBytes = maximumBytes;
+			MumbleProto::ServerConfig mpsc;
+			mpsc.set_chat_asset_max_bytes(uiChatAssetMaxBytes);
+			sendAll(mpsc);
+		}
 	} else if (key == "chat_asset_total_quota_bytes") {
 		uiChatAssetTotalQuotaBytes = ulongLongOk ? ulongLongValue : Meta::mp->uiChatAssetTotalQuotaBytes;
 	} else if (key == "chat_attachment_limit") {
-		uiChatAttachmentLimit = i > 0 ? static_cast< unsigned int >(i) : Meta::mp->uiChatAttachmentLimit;
+		const unsigned int attachmentLimit =
+			i > 0 ? static_cast< unsigned int >(i) : Meta::mp->uiChatAttachmentLimit;
+		if (uiChatAttachmentLimit != attachmentLimit) {
+			uiChatAttachmentLimit = attachmentLimit;
+			MumbleProto::ServerConfig mpsc;
+			mpsc.set_chat_attachment_limit(uiChatAttachmentLimit);
+			sendAll(mpsc);
+		}
 	} else if (key == "chat_preview_fetch_enabled") {
 		bChatPreviewFetchEnabled = !v.isNull() ? QVariant(v).toBool() : Meta::mp->bChatPreviewFetchEnabled;
 	} else if (key == "chat_preview_client_assist_enabled") {

@@ -186,6 +186,10 @@ public:
 	void updateChatAssetPreviewAssetID(unsigned int serverID, unsigned int assetID,
 									   std::optional< unsigned int > previewAssetID);
 	void touchChatAsset(unsigned int serverID, unsigned int assetID);
+	std::vector< std::string > getChatAssetStorageKeys(unsigned int serverID);
+	std::vector< unsigned int > getChatAssetIDs(unsigned int serverID);
+	std::vector< std::string > removeUnreferencedChatAssetsOlderThan(
+		unsigned int serverID, const std::chrono::system_clock::time_point &cutoff);
 	std::vector< ::mumble::server::db::DBChatMessageEmbed > getChatMessageEmbeds(unsigned int serverID,
 																				   unsigned int messageID);
 	void setChatMessageEmbeds(unsigned int serverID, unsigned int messageID,

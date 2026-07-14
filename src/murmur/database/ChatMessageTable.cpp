@@ -114,8 +114,8 @@ namespace server {
 		}
 
 		void ChatMessageTable::addMessage(const DBChatMessage &message) {
-			if (message.bodyText.empty()) {
-				throw ::mdb::FormatException("A chat message requires a non-empty body");
+			if (message.bodyText.empty() && message.attachments.empty()) {
+				throw ::mdb::FormatException("A chat message requires a body or at least one attachment");
 			}
 
 			try {

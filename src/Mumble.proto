@@ -85,6 +85,10 @@ message Version {
 	optional uint32 fork_extension_protocol_version = 15 [default = 3];
 	// Fork-specific extension features this endpoint supports.
 	repeated ForkFeature supported_fork_features = 16 [packed = true];
+	// Persistent chat protocol revision implemented by this endpoint. This is
+	// required for features whose original enum value predates their transfer
+	// protocol, such as native attachment uploads.
+	optional uint32 persistent_chat_protocol_version = 17 [default = 1];
 }
 
 // Not used. Not even for tunneling UDP through TCP.
@@ -745,6 +749,10 @@ message ServerConfig {
 	optional string server_monogram = 28;
 	// Fork-specific server image shown by Modern clients. Empty bytes clears the image.
 	optional bytes server_image = 29;
+	// Maximum size of one native persistent-chat attachment.
+	optional uint64 chat_asset_max_bytes = 30;
+	// Maximum number of native attachments accepted on one message.
+	optional uint32 chat_attachment_limit = 31;
 }
 
 // Sent by the server to inform the clients of suggested client configuration
@@ -795,6 +803,7 @@ enum ChatAssetKind {
 	ChatAssetKindVideo = 2;
 	ChatAssetKindDocument = 3;
 	ChatAssetKindBinary = 4;
+	ChatAssetKindAudio = 5;
 }
 
 enum ChatAssetTransferState {
@@ -851,6 +860,9 @@ message ChatSend {
 	optional string body_text = 5;
 	optional ChatBodyFormat body_format = 6 [default = ChatBodyFormatPlainText];
 	repeated uint32 attachment_asset_ids = 7 [packed = true];
+	// Display names aligned by index with attachment_asset_ids. Servers sanitize
+	// these as leaf filenames and never interpret them as paths.
+	repeated string attachment_filenames = 8;
 }
 
 // Sent by the server to deliver a persistent chat message to clients.

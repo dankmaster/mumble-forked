@@ -4,6 +4,9 @@
 
 #include "ChatAssetTable.h"
 #include "ChronoUtils.h"
+#include "ChatMessageAttachmentTable.h"
+#include "ChatMessageEmbedTable.h"
+#include "ChatMessageTable.h"
 #include "ServerTable.h"
 #include "UserTable.h"
 
@@ -21,6 +24,9 @@
 
 #include <cassert>
 #include <exception>
+#include <set>
+#include <utility>
+#include <vector>
 
 namespace mdb = ::mumble::db;
 
@@ -261,6 +267,136 @@ namespace server {
 				std::throw_with_nested(::mdb::AccessException("Failed at touching chat asset with ID "
 															  + std::to_string(assetID) + " on server with ID "
 															  + std::to_string(serverID)));
+			}
+		}
+
+		std::vector< std::string > ChatAssetTable::getStorageKeys(unsigned int serverID) {
+			try {
+				std::vector< std::string > storageKeys;
+				soci::row row;
+				::mdb::TransactionHolder transaction = ensureTransaction();
+				soci::statement stmt =
+					(m_sql.prepare << "SELECT DISTINCT \"" << column::storage_key << "\" FROM \"" << NAME
+								   << "\" WHERE \"" << column::server_id << "\" = :serverID",
+					 soci::use(serverID), soci::into(row));
+
+				stmt.execute(false);
+				while (stmt.fetch()) {
+					storageKeys.push_back(row.get< std::string >(0));
+				}
+
+				transaction.commit();
+				return storageKeys;
+			} catch (const soci::soci_error &) {
+				std::throw_with_nested(::mdb::AccessException("Failed at getting chat asset storage keys on server with ID "
+															  + std::to_string(serverID)));
+			}
+		}
+
+		std::vector< unsigned int > ChatAssetTable::getAssetIDs(unsigned int serverID) {
+			try {
+				std::vector< unsigned int > assetIDs;
+				soci::row row;
+				::mdb::TransactionHolder transaction = ensureTransaction();
+				soci::statement stmt =
+					(m_sql.prepare << "SELECT \"" << column::asset_id << "\" FROM \"" << NAME
+								   << "\" WHERE \"" << column::server_id << "\" = :serverID",
+					 soci::use(serverID), soci::into(row));
+
+				stmt.execute(false);
+				while (stmt.fetch()) {
+					assetIDs.push_back(static_cast< unsigned int >(row.get< int >(0)));
+				}
+
+				transaction.commit();
+				return assetIDs;
+			} catch (const soci::soci_error &) {
+				std::throw_with_nested(::mdb::AccessException("Failed at getting chat asset IDs on server with ID "
+														  + std::to_string(serverID)));
+			}
+		}
+
+		std::vector< std::string > ChatAssetTable::removeUnreferencedAssetsOlderThan(
+			unsigned int serverID, const std::chrono::system_clock::time_point &cutoff) {
+			try {
+				const std::size_t cutoffEpoch = toEpochSeconds(cutoff);
+				std::vector< std::pair< unsigned int, std::string > > candidates;
+				soci::row row;
+				::mdb::TransactionHolder transaction = ensureTransaction();
+
+				// A preview asset remains reachable through its parent even before that parent has been attached to a
+				// message. Keeping that dependency intact also gives parent and child deterministic deletion ordering:
+				// the parent is removed first and the now-orphaned child is eligible on the next sweep.
+				{
+					soci::statement stmt =
+						(m_sql.prepare
+						 << "SELECT ca.\"" << column::asset_id << "\", ca.\"" << column::storage_key << "\" FROM \""
+						 << NAME << "\" ca WHERE ca.\"" << column::server_id << "\" = :serverID AND ca.\""
+						 << column::created_at << "\" < :cutoff AND NOT EXISTS (SELECT 1 FROM \""
+						 << ChatMessageAttachmentTable::NAME << "\" cma JOIN \"" << ChatMessageTable::NAME
+						 << "\" cm ON cm.\"" << ChatMessageTable::column::server_id << "\" = cma.\""
+						 << ChatMessageAttachmentTable::column::server_id << "\" AND cm.\""
+						 << ChatMessageTable::column::message_id << "\" = cma.\""
+						 << ChatMessageAttachmentTable::column::message_id << "\" WHERE cma.\""
+						 << ChatMessageAttachmentTable::column::server_id << "\" = ca.\"" << column::server_id
+						 << "\" AND cma.\"" << ChatMessageAttachmentTable::column::asset_id << "\" = ca.\""
+						 << column::asset_id << "\" AND cm.\"" << ChatMessageTable::column::deleted_at
+						 << "\" = 0) AND NOT EXISTS (SELECT 1 FROM \"" << ChatMessageEmbedTable::NAME
+						 << "\" cme JOIN \"" << ChatMessageTable::NAME << "\" cm ON cm.\""
+						 << ChatMessageTable::column::server_id << "\" = cme.\""
+						 << ChatMessageEmbedTable::column::server_id << "\" AND cm.\""
+						 << ChatMessageTable::column::message_id << "\" = cme.\""
+						 << ChatMessageEmbedTable::column::message_id << "\" WHERE cme.\""
+						 << ChatMessageEmbedTable::column::server_id << "\" = ca.\"" << column::server_id
+						 << "\" AND cme.\"" << ChatMessageEmbedTable::column::preview_asset_id << "\" = ca.\""
+						 << column::asset_id << "\" AND cm.\"" << ChatMessageTable::column::deleted_at
+						 << "\" = 0) AND NOT EXISTS (SELECT 1 FROM \"" << NAME << "\" parent WHERE parent.\""
+						 << column::server_id << "\" = ca.\"" << column::server_id << "\" AND parent.\""
+						 << column::preview_asset_id << "\" = ca.\"" << column::asset_id << "\")",
+						 soci::use(serverID), soci::use(cutoffEpoch), soci::into(row));
+
+					stmt.execute(false);
+					while (stmt.fetch()) {
+						candidates.emplace_back(static_cast< unsigned int >(row.get< int >(0)),
+												row.get< std::string >(1));
+					}
+				}
+
+				std::set< std::string > removedStorageKeys;
+				for (const auto &candidate : candidates) {
+					m_sql << "DELETE FROM \"" << NAME << "\" WHERE \"" << column::server_id
+						  << "\" = :serverID AND \"" << column::asset_id << "\" = :assetID",
+						soci::use(serverID), soci::use(candidate.first);
+					removedStorageKeys.insert(candidate.second);
+				}
+
+				std::set< std::string > remainingStorageKeys;
+				if (!removedStorageKeys.empty()) {
+					soci::row remainingRow;
+					{
+						soci::statement remainingStmt =
+							(m_sql.prepare << "SELECT DISTINCT \"" << column::storage_key << "\" FROM \"" << NAME
+										   << "\" WHERE \"" << column::server_id << "\" = :serverID",
+							 soci::use(serverID), soci::into(remainingRow));
+						remainingStmt.execute(false);
+						while (remainingStmt.fetch()) {
+							remainingStorageKeys.insert(remainingRow.get< std::string >(0));
+						}
+					}
+				}
+
+				transaction.commit();
+
+				std::vector< std::string > deletableStorageKeys;
+				for (const std::string &storageKey : removedStorageKeys) {
+					if (remainingStorageKeys.find(storageKey) == remainingStorageKeys.end()) {
+						deletableStorageKeys.push_back(storageKey);
+					}
+				}
+				return deletableStorageKeys;
+			} catch (const soci::soci_error &) {
+				std::throw_with_nested(::mdb::AccessException(
+					"Failed at removing unreferenced chat assets on server with ID " + std::to_string(serverID)));
 			}
 		}
 

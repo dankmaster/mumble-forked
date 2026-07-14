@@ -10,7 +10,7 @@ This build supports:
   server-global, and private/direct-message scopes
 - authenticated asset upload initialization, chunked upload, commit, and ranged download over the existing Mumble control channel
 - server-side asset metadata persistence in the database
-- server-side object storage on local disk
+- atomically committed, SHA-256-addressed object storage on local disk
 - image upload normalization for raster formats, including EXIF-orientation application and metadata stripping by re-encoding
 - server-generated bitmap preview derivatives for uploaded images
 - server-authoritative URL preview metadata and bitmap thumbnails, with one
@@ -22,6 +22,7 @@ This build supports:
 - per-message attachment count limits
 - MIME allowlisting and asset-size / storage-quota enforcement
 - background cleanup of abandoned temporary upload files
+- grace-period cleanup of committed assets and crash-orphaned objects that no live message or embed references
 
 This build does not yet support:
 
@@ -112,6 +113,7 @@ chat-assets/
 - `incoming/` contains temporary upload files while a client is still sending chunks.
 - `objects/` contains committed assets addressed by SHA-256-derived paths.
 - preview thumbnails are stored in the same object tree as normal assets and are marked as `PreviewCache` in the database.
+- commits verify content hashes and existing deduplicated objects before the database is allowed to reference them.
 
 ## Network / Firewall Notes
 
@@ -125,10 +127,11 @@ chat-assets/
 
 ## Operational Notes
 
-- If you prune database rows, prune the asset object store in the same maintenance window.
+- Message/embed references are the retention authority. Unreferenced committed assets and crash-orphaned object files are reclaimed after a one-hour grace period.
+- Deduplicated files are retained until no asset row uses their shared storage key; preview children are reclaimed after their parent reference is removed on a subsequent sweep.
 - If you restore from backup, restore both the database and the `chat-assets` directory from the same point in time.
 - If the asset root lives on a separate volume, keep it on fast local storage; chat attachments are read directly from disk during client download.
-- The current cleanup timer only removes abandoned files from `incoming/`; it does not yet reclaim long-lived preview-cache assets automatically.
+- Cleanup also removes abandoned files from `incoming/`. It is a reference-safety sweep, not a long-horizon preview-cache retention or quota-pruning policy.
 
 ## MIME Policy In This Phase
 
@@ -140,6 +143,7 @@ Accepted upload MIME classes are intentionally narrow:
   UI renders GIFs inline and WebM with video controls; WebM does not autoplay by
   default.
 - Videos: `video/mp4`, `video/webm`, `video/quicktime`
+- Audio: AAC, FLAC, MP4 audio, MP3, Ogg, WAV, and WebM audio
 - Documents: `application/pdf`, `text/plain`, `text/markdown`
 - Binary downloads: `application/octet-stream`, `application/zip`
 
@@ -174,4 +178,4 @@ The next server-side milestones after this phase are:
 1. video/document derivative generation
 2. stricter fetch-worker isolation and richer SSRF hardening
 3. quota-aware cleanup and retention policies for preview-cache assets
-4. richer client presentation for attachments, inline media, and transfer progress
+4. inline playback and richer derivatives for uploaded audio/video media
