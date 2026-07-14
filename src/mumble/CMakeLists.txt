@@ -26,6 +26,7 @@ option(bundled-rnnoise "Build the included version of RNNoise instead of looking
 option(dtln "Use DTLN for machine learning speech cleanup." OFF)
 option(deepfilternet "Use DeepFilterNet for machine learning speech cleanup." OFF)
 option(webrtc-aec "Expose WebRTC AEC as an experimental echo cancellation option." OFF)
+option(speech-cleanup-e2e "Include the developer-only deterministic speech-cleanup E2E audio backend." OFF)
 set(MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT ON)
 if(packaging AND "$ENV{GITHUB_ACTIONS}" STREQUAL "true")
 	set(MUMBLE_MODERN_LAYOUT_TOOLING_DEFAULT OFF)
@@ -256,6 +257,7 @@ set(MUMBLE_SOURCES
 	"SharedMemory.h"
 	"SocketRPC.cpp"
 	"SocketRPC.h"
+	"SpeechCleanup.cpp"
 	"SpeechCleanupProcessor.cpp"
 	"SpeechCleanupProcessor.h"
 	"SvgIcon.cpp"
@@ -331,6 +333,13 @@ if(modern-layout-automation)
 	list(APPEND MUMBLE_SOURCES
 		"ModernUiAutomationServer.cpp"
 		"ModernUiAutomationServer.h"
+	)
+endif()
+
+if(speech-cleanup-e2e)
+	list(APPEND MUMBLE_SOURCES
+		"SpeechCleanupTestAudio.cpp"
+		"SpeechCleanupTestAudio.h"
 	)
 endif()
 
@@ -591,6 +600,9 @@ target_compile_definitions(mumble_client_object_lib
 )
 if(modern-layout-automation)
 	target_compile_definitions(mumble_client_object_lib PUBLIC MUMBLE_HAS_MODERN_UI_AUTOMATION)
+endif()
+if(speech-cleanup-e2e)
+	target_compile_definitions(mumble_client_object_lib PUBLIC MUMBLE_HAS_SPEECH_CLEANUP_E2E)
 endif()
 if(modern-layout-mockups)
 	target_compile_definitions(mumble_client_object_lib PUBLIC MUMBLE_HAS_MODERN_UI_MOCKUPS)

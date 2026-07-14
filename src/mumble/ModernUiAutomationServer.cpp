@@ -6745,6 +6745,22 @@ QVariantMap ModernUiAutomationServer::buildStateResponse() const {
 	QVariantMap response = okResponse();
 	QmlShellHost *host = m_mainWindow ? m_mainWindow->m_qmlShellHost.get() : nullptr;
 	QVariantMap state;
+#if defined(MUMBLE_HAS_SPEECH_CLEANUP_E2E)
+	const bool speechCleanupE2eHeadless =
+		qEnvironmentVariable("MUMBLE_SPEECH_CLEANUP_E2E_ENABLE") == QLatin1String("1")
+		&& qEnvironmentVariable("MUMBLE_SPEECH_CLEANUP_E2E_HEADLESS") == QLatin1String("1")
+		&& !qEnvironmentVariable("MUMBLE_SPEECH_CLEANUP_E2E_TOKEN").isEmpty();
+	if (speechCleanupE2eHeadless && host && !host->window()) {
+		// The headless E2E path deliberately does not materialize QML models. Build
+		// the same app/room/participant DTOs directly from live protocol state so
+		// connection and peer synchronization remain strictly observable.
+		state = m_mainWindow->buildQmlRoomState();
+		QVariantMap appState = state.value(QStringLiteral("app")).toMap();
+		appState.insert(QStringLiteral("connected"),
+						appState.value(QStringLiteral("connectionState")) == QLatin1String("connected"));
+		state.insert(QStringLiteral("app"), appState);
+	} else
+#endif
 	if (host) {
 		ClientSessionController *session = host->sessionController();
 		UiCommandController *commands = host->commandController();

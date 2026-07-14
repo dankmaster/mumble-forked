@@ -12795,6 +12795,24 @@ void MainWindow::applyShellLayout() {
 			connect(m_qmlShellHost.get(), &QmlShellHost::closeRequested, this, &MainWindow::close);
 		}
 
+#if defined(MUMBLE_HAS_MODERN_UI_AUTOMATION) && defined(MUMBLE_HAS_SPEECH_CLEANUP_E2E)
+		// The deterministic speech-cleanup harness only needs the loopback connection,
+		// certificate dialog and live session snapshot. Keep those controls available
+		// without loading the Qt Quick scene so unrelated QML work cannot block audio
+		// transport verification. This path exists only in opt-in developer builds and
+		// requires both runtime gates; normal shell and automation startup is unchanged.
+		const bool speechCleanupE2eHeadless =
+			qEnvironmentVariable("MUMBLE_SPEECH_CLEANUP_E2E_ENABLE") == QLatin1String("1")
+			&& qEnvironmentVariable("MUMBLE_SPEECH_CLEANUP_E2E_HEADLESS") == QLatin1String("1")
+			&& !qEnvironmentVariable("MUMBLE_SPEECH_CLEANUP_E2E_TOKEN").isEmpty();
+		if (speechCleanupE2eHeadless) {
+			ensureModernUiAutomationServer();
+			m_activeShellLayout      = targetLayout;
+			m_shellLayoutInitialized = true;
+			return;
+		}
+#endif
+
 		QString qmlError;
 		if (m_qmlShellHost->start(&qmlError)) {
 			connect(m_qmlShellHost->window(), &QObject::destroyed, this, [this]() {
@@ -33459,7 +33477,7 @@ void MainWindow::qmUser_aboutToShow() {
 	if (Global::get().sh && Global::get().sh->protocolVersion() >= Version::fromComponents(1, 2, 3))
 		qmUser->addAction(qaUserPrioritySpeaker);
 	qmUser->addAction(qaUserLocalMute);
-#ifdef USE_RNNOISE
+#if defined(USE_RNNOISE) || defined(USE_DTLN) || defined(USE_DEEPFILTERNET)
 	qmUser->addAction(qaUserRemoteSpeechCleanup);
 #endif
 	qmUser->addAction(qaUserLocalIgnore);
